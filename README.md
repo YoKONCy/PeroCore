@@ -28,6 +28,10 @@
 <a href="#-quick-start">
   <img src="https://img.shields.io/badge/Platform-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Platform">
 </a>
+&nbsp;
+<a href="https://github.com/YoKONCy/Peroperochat">
+  <img src="https://img.shields.io/badge/Mobile-Peroperochat-FF69B4?style=for-the-badge&logo=android&logoColor=white" alt="Mobile">
+</a>
 
 <br/><br/>
 
