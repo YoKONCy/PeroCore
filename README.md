@@ -269,6 +269,12 @@ npm start
 
 <br/>
 
+## 📜 License
+
+本项目采用 [MIT License](LICENSE) 开源协议。你可以自由地使用、修改和分发本项目，但请保留原始的版权声明。
+
+<br/>
+
 ## ⚠️ Disclaimer
 
 本项目仅供学习与研究使用。
