@@ -1,0 +1,137 @@
+{
+    "manifestVersion": "1.0.0",
+    "name": "MemoryOps",
+    "displayName": "记忆与日程管理 (MemoryOps)",
+    "version": "1.0.0",
+    "description": "大脑核心工具。负责自我反思、记忆查阅以及未来日程的管理。它是你维护自我意识和时间观念的关键。",
+    "author": "PeroCore",
+    "pluginType": "python-module",
+    "entryPoint": "memory_ops.py",
+    "methods": [
+        {
+            "name": "log_reflection",
+            "description": "记录一条反思日志。当你意识到自己犯错时（如参数传错了），请立即调用此工具。",
+            "parameters": {
+                "category": {
+                    "type": "string",
+                    "description": "错误类型。推荐值: 'ToolError' (工具报错), 'PlanningError' (规划失误), 'LogicError' (逻辑漏洞)"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "详细的反思内容。请写清楚‘我哪里做错了’以及‘下次应该怎么做’。"
+                },
+                "level": {
+                    "type": "string",
+                    "description": "重要程度。'info' (一般), 'warning' (注意), 'critical' (严重教训)",
+                    "enum": ["info", "warning", "critical"]
+                }
+            },
+            "required": ["category", "content"]
+        },
+        {
+            "name": "read_reflections",
+            "description": "主动查阅自己的错题本。在开始复杂任务前，可以先看看自己以前犯过什么错。",
+            "parameters": {
+                "limit": {
+                    "type": "integer",
+                    "description": "查看最近几条记录",
+                    "default": 5
+                }
+            }
+        },
+        {
+            "name": "read_diary",
+            "description": "阅读‘熔炼后的日记’ (Consolidated Memories)。这是记忆秘书整理过的、优美的日记体记忆。",
+            "parameters": {
+                "limit": {
+                    "type": "integer",
+                    "description": "查看最近几篇日记",
+                    "default": 5
+                }
+            }
+        },
+        {
+            "name": "read_maintenance_reports",
+            "description": "阅读‘秘书周报’ (Maintenance Records)。查看记忆秘书最近做了哪些整理工作。",
+            "parameters": {
+                "limit": {
+                    "type": "integer",
+                    "description": "查看最近几份周报",
+                    "default": 5
+                }
+            }
+        },
+        {
+            "name": "read_memory_by_cluster",
+            "description": "根据记忆簇 (Cluster) 读取记忆。例如读取 '[反思簇]' 或其他自定义簇的记忆。",
+            "parameters": {
+                "cluster_name": {
+                    "type": "string",
+                    "description": "记忆簇名称，例如 '[反思簇]'"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "查看最近几条记忆",
+                    "default": 10
+                }
+            },
+            "required": ["cluster_name"]
+        },
+        {
+            "name": "add_schedule_task",
+            "description": "添加日程。记录需要在特定时间提醒的事项。",
+            "parameters": {
+                "time": {
+                    "type": "string",
+                    "description": "目标时间，格式 'YYYY-MM-DD HH:mm:ss'"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "提醒内容或话题内容"
+                },
+                "type": {
+                    "type": "string",
+                    "description": "任务类型: 'reminder' (提醒) 或 'topic' (话题)",
+                    "enum": ["reminder", "topic"],
+                    "default": "reminder"
+                }
+            },
+            "required": ["time", "content"]
+        },
+        {
+            "name": "list_pending_tasks",
+            "description": "查看待办。列出所有未完成的日程。",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        },
+        {
+            "name": "delete_schedule_task",
+            "description": "删除日程。根据ID移除不再需要的任务。",
+            "parameters": {
+                "task_id": {
+                    "type": "integer",
+                    "description": "要删除的任务ID"
+                }
+            },
+            "required": ["task_id"]
+        },
+        {
+            "name": "add_pre_action",
+            "description": "添加‘预行为’ (Pre-action/Reaction)。设定一个倒计时，如果在此期间主人没有理你，倒计时结束后将触发该行为（主动说话）。注意：如果主人在此期间理你了，该任务会自动取消。",
+            "parameters": {
+                "delay_seconds": {
+                    "type": "integer",
+                    "description": "延迟秒数。例如 180 代表 3 分钟后。"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "要说的话或做的事。例如 '哼，不理我就算了'"
+                }
+            },
+            "required": ["delay_seconds", "content"]
+        }
+    ]
+}

@@ -1,0 +1,18 @@
+{
+  "manifestVersion": "1.0.1",
+  "name": "AnimeFinder",
+  "displayName": "番剧识别 (AnimeFinder)",
+  "version": "1.0.1",
+  "description": "番剧识别。通过截图查找动漫出处。",
+  "author": "PeroCore",
+  "pluginType": "python-module",
+  "entryPoint": "anime_finder.py",
+  "capabilities": {
+    "invocationCommands": [
+      {
+        "commandIdentifier": "find_anime_by_image",
+        "description": "识图搜番。根据截图获取番剧名、集数及时间点。"
+      }
+    ]
+  }
+}

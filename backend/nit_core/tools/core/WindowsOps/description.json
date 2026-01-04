@@ -1,0 +1,18 @@
+{
+  "manifestVersion": "1.0.1",
+  "name": "WindowsOps",
+  "displayName": "系统操作 (WindowsOps)",
+  "version": "1.0.1",
+  "description": "系统控制。执行打开应用、按键模拟等Windows操作。",
+  "author": "PeroCore",
+  "pluginType": "python-module",
+  "entryPoint": "windows_ops.py",
+  "capabilities": {
+    "invocationCommands": [
+      {
+        "commandIdentifier": "windows_operation",
+        "description": "执行指令。如'打开vscode'、'按下Win+D'、'调大音量'。"
+      }
+    ]
+  }
+}

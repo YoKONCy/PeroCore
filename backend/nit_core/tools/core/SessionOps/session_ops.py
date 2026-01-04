@@ -1,0 +1,185 @@
+import uuid
+from datetime import datetime
+from sqlmodel import select, desc
+try:
+    from backend.models import Config, ConversationLog, Memory
+    from backend.services.llm_service import LLMService
+    from backend.services.memory_service import MemoryService
+except ImportError:
+    from models import Config, ConversationLog, Memory
+    from services.llm_service import LLMService
+    from services.memory_service import MemoryService
+import json
+
+# Global variable to hold session reference (injected by AgentService)
+# This is a bit hacky but works for tool-to-service communication
+_CURRENT_SESSION_CONTEXT = {}
+
+def set_current_session_context(session):
+    _CURRENT_SESSION_CONTEXT["db_session"] = session
+
+async def enter_work_mode(task_name: str = "Unknown Task") -> str:
+    """
+    Enter 'Work Mode' (Isolation Mode).
+    Creates a temporary, isolated session for coding or complex tasks.
+    History from this session will NOT pollute the main chat, but will be summarized later.
+    """
+    session = _CURRENT_SESSION_CONTEXT.get("db_session")
+    if not session:
+        return "Error: Database session not available."
+
+    # 1. Generate new Session ID
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    work_session_id = f"work_{timestamp}_{uuid.uuid4().hex[:4]}"
+    
+    # 2. Update Config
+    # current_session_id: The actual session ID to use for logs
+    # work_mode_task: The name of the task
+    
+    # Update current_session_id
+    config_id = (await session.exec(select(Config).where(Config.key == "current_session_id"))).first()
+    if not config_id:
+        config_id = Config(key="current_session_id", value=work_session_id)
+        session.add(config_id)
+    else:
+        config_id.value = work_session_id
+        
+    # Update work_mode_task
+    config_task = (await session.exec(select(Config).where(Config.key == "work_mode_task"))).first()
+    if not config_task:
+        config_task = Config(key="work_mode_task", value=task_name)
+        session.add(config_task)
+    else:
+        config_task.value = task_name
+        
+    await session.commit()
+    
+    return f"Entered Work Mode. New isolated session: {work_session_id}. Task: {task_name}"
+
+async def exit_work_mode() -> str:
+    """
+    Exit 'Work Mode'.
+    Summarizes the entire work session into a 'Handwritten Log' and saves it to long-term memory.
+    Restores the main chat session.
+    """
+    session = _CURRENT_SESSION_CONTEXT.get("db_session")
+    if not session:
+        return "Error: Database session not available."
+
+    # 1. Get current work info
+    config_id = (await session.exec(select(Config).where(Config.key == "current_session_id"))).first()
+    config_task = (await session.exec(select(Config).where(Config.key == "work_mode_task"))).first()
+    
+    if not config_id or not config_id.value.startswith("work_"):
+        return "Error: Not currently in Work Mode."
+        
+    work_session_id = config_id.value
+    task_name = config_task.value if config_task else "Unnamed Task"
+    
+    # 2. Fetch all logs for this session
+    logs = (await session.exec(
+        select(ConversationLog)
+        .where(ConversationLog.session_id == work_session_id)
+        .order_by(ConversationLog.timestamp)
+    )).all()
+    
+    if not logs:
+        # Just reset if empty
+        config_id.value = "default"
+        await session.commit()
+        return "Exited Work Mode (No logs to summarize)."
+
+    # 3. Summarize via LLM
+    # We use a temporary LLMService instance
+    # Get global config first
+    global_config = {c.key: c.value for c in (await session.exec(select(Config))).all()}
+    
+    api_key = global_config.get("global_llm_api_key")
+    api_base = global_config.get("global_llm_api_base")
+    model = global_config.get("current_model_id") # Use current model ID (might need resolution)
+    
+    # If model is ID, resolve it (simplified, assuming global fallback or using what's available)
+    # Actually, let's use a simpler approach: construct the prompt and return it? 
+    # No, tools must return the result. We need to call LLM here.
+    
+    # Let's try to init LLMService with available credentials
+    llm = LLMService(api_key, api_base, "gpt-4o") # Use a smart model for summary
+    
+    log_text = "\n".join([f"{log.role}: {log.content}" for log in logs])
+    
+    prompt = f"""
+    You are Pero. You have just finished a coding/work task: "{task_name}".
+    Here is the raw conversation log of the session:
+    
+    {log_text}
+    
+    Please write a "Handwritten Work Log" (Markdown format).
+    Requirements:
+    1. Title: 📝 Pero's Work Log - {task_name}
+    2. Tone: Professional yet personal (Pero's style).
+    3. Content:
+       - Goal: What was the task?
+       - Process: Key steps taken, tools used, errors encountered and fixed.
+       - Outcome: Final result.
+       - Reflection: What did you learn?
+    4. Keep it concise but information-dense.
+    """
+    
+    try:
+        summary = await llm.chat([{"role": "user", "content": prompt}])
+        summary_content = summary["choices"][0]["message"]["content"]
+        
+        # 4. Save to Memory (Long-term)
+        await MemoryService.save_memory(
+            session=session,
+            content=summary_content,
+            tags="work_log,summary,coding",
+            clusters="[工作记录]",
+            importance=8, # High importance
+            memory_type="work_log",
+            source="system"
+        )
+        
+        # 5. Reset Session
+        config_id.value = "default"
+        await session.commit()
+        
+        return f"Exited Work Mode. \n\n[Summary Generated]:\n{summary_content}\n\n(Saved to Long-term Memory)"
+        
+    except Exception as e:
+        # Force reset even if summary fails
+        config_id.value = "default"
+        await session.commit()
+        return f"Exited Work Mode, but failed to generate summary: {e}"
+
+# Tool Definitions
+enter_work_mode_definition = {
+    "type": "function",
+    "function": {
+        "name": "enter_work_mode",
+        "description": "Activate 'Work Mode' (Isolation Mode). Use this when starting a complex coding task or project. It isolates the conversation history to prevent polluting the daily chat context.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task_name": {
+                    "type": "string",
+                    "description": "The name or description of the task (e.g., 'Refactoring Memory Service')."
+                }
+            },
+            "required": ["task_name"]
+        }
+    }
+}
+
+exit_work_mode_definition = {
+    "type": "function",
+    "function": {
+        "name": "exit_work_mode",
+        "description": "Deactivate 'Work Mode'. Use this when the task is done. It will automatically summarize the session into a 'Work Log' and save it to memory.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    }
+}

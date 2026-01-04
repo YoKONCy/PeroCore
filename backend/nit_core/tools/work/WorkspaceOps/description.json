@@ -1,0 +1,26 @@
+{
+  "manifestVersion": "1.0.1",
+  "name": "WorkspaceOps",
+  "displayName": "工作台管理 (WorkspaceOps)",
+  "version": "1.0.1",
+  "description": "工作区管理。在专注模式下管理笔记与长期记忆。",
+  "author": "PeroCore",
+  "pluginType": "python-module",
+  "entryPoint": "workspace_ops.py",
+  "capabilities": {
+    "invocationCommands": [
+      {
+        "commandIdentifier": "write_workspace_file",
+        "description": "写入笔记。在工作区创建或更新文件以记录长期记忆。"
+      },
+      {
+        "commandIdentifier": "read_workspace_file",
+        "description": "读取笔记。回顾工作区内的文件内容。"
+      },
+      {
+        "commandIdentifier": "list_workspace_files",
+        "description": "列出笔记。查看工作区内的所有文件。"
+      }
+    ]
+  }
+}

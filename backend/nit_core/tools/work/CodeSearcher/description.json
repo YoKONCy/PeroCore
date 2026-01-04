@@ -1,0 +1,18 @@
+{
+  "manifestVersion": "1.0.1",
+  "name": "CodeSearcher",
+  "displayName": "代码雷达 (CodeSearcher)",
+  "version": "1.0.1",
+  "description": "代码雷达。大型项目的代码检索与分析引擎。",
+  "author": "PeroCore",
+  "pluginType": "python-module",
+  "entryPoint": "code_searcher_wrapper.py",
+  "capabilities": {
+    "invocationCommands": [
+      {
+        "commandIdentifier": "code_search",
+        "description": "代码搜索。快速定位函数定义、引用或相似逻辑。"
+      }
+    ]
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "manifestVersion": "1.0.0",
+  "name": "CharacterOps",
+  "displayName": "形象管理 (CharacterOps)",
+  "version": "1.0.1",
+  "description": "虚拟形象控制。管理表情、动作及触碰反馈。",
+  "author": "PeroCore",
+  "pluginType": "python-module",
+  "entryPoint": "character_ops.py",
+  "capabilities": {
+    "toolDefinitions": [
+      {
+        "type": "function",
+        "function": {
+          "name": "update_character_status",
+          "description": "状态同步。**必须**在情绪/动作变化时调用，保持人设一致。含表情(mood)、动作(vibe)及触碰反馈设置。",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "mood": {
+                "type": "string",
+                "description": "当前心情 (如 happy, sad, angry)。"
+              },
+              "vibe": {
+                "type": "string",
+                "description": "当前动作/氛围状态。"
+              },
+              "mind": {
+                "type": "string",
+                "description": "内心独白（用户不可见）。"
+              },
+              "click_head_msgs": {
+                "type": "string",
+                "description": "摸头反应（逗号分隔列表）。"
+              },
+              "click_chest_msgs": {
+                "type": "string",
+                "description": "摸胸口反应。"
+              },
+              "click_body_msgs": {
+                "type": "string",
+                "description": "摸身体反应。"
+              },
+              "idle_msgs": {
+                "type": "string",
+                "description": "待机自言自语。"
+              },
+              "back_msgs": {
+                "type": "string",
+                "description": "主人回归欢迎语。"
+              }
+            }
+          }
+        }
+      }
+    ],
+    "invocationCommands": [
+      {
+        "commandIdentifier": "update_character_status",
+        "description": "状态同步。**必须**在情绪/动作变化时调用，保持人设一致。"
+      },
+      {
+        "commandIdentifier": "update_status",
+        "description": "别名：update_character_status"
+      },
+      {
+        "commandIdentifier": "set_status",
+        "description": "别名：update_character_status"
+      }
+    ]
+  }
+}

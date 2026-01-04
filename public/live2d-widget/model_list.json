@@ -1,0 +1,11 @@
+{
+  "models": [
+    "potion-Maker-Pio"
+  ],
+  "model_textures": [
+    7
+  ],
+  "messages": [
+    "我是 Pio，很高兴见到你！"
+  ]
+}

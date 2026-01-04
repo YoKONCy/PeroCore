@@ -1,0 +1,57 @@
+{
+  "name": "perocore",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "electron:dev": "concurrently \"vite\" \"wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
+    "electron:build": "vite build && electron-builder"
+  },
+  "build": {
+    "appId": "com.pero.core",
+    "productName": "PeroCore",
+    "directories": {
+      "output": "dist_electron"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json",
+      "backend/**/*"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "asar": false
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "^2.3.2",
+    "dompurify": "^3.3.1",
+    "echarts": "^6.0.0",
+    "element-plus": "^2.13.0",
+    "express": "^5.2.1",
+    "marked": "^17.0.1",
+    "reflect-metadata": "^0.2.2",
+    "socket.io": "^4.8.3",
+    "sqlite3": "^5.1.7",
+    "typeorm": "^0.3.28",
+    "vue": "^3.5.24",
+    "vue-router": "^4.6.4"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.1",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "^39.2.7",
+    "electron-builder": "^26.0.12",
+    "vite": "npm:rolldown-vite@7.2.5",
+    "wait-on": "^9.0.3"
+  },
+  "overrides": {
+    "vite": "npm:rolldown-vite@7.2.5"
+  }
+}

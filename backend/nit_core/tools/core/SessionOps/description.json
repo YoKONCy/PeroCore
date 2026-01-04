@@ -1,0 +1,22 @@
+{
+  "manifestVersion": "1.0.1",
+  "name": "SessionOps",
+  "displayName": "心流管理 (SessionOps)",
+  "version": "1.0.1",
+  "description": "心流管理。控制专注模式的开关，处理复杂任务前必须开启。",
+  "author": "PeroCore",
+  "pluginType": "python-module",
+  "entryPoint": "session_ops.py",
+  "capabilities": {
+    "invocationCommands": [
+      {
+        "commandIdentifier": "enter_work_mode",
+        "description": "开启专注。挂载WorkspaceOps/CodeSearcher等强力工具，适用于代码/文件等复杂任务。"
+      },
+      {
+        "commandIdentifier": "exit_work_mode",
+        "description": "结束专注。卸载重型工具，回归日常闲聊状态。"
+      }
+    ]
+  }
+}

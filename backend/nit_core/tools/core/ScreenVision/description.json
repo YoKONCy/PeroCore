@@ -1,0 +1,22 @@
+{
+  "manifestVersion": "1.0.1",
+  "name": "ScreenVision",
+  "displayName": "视觉感知 (ScreenVision)",
+  "version": "1.0.1",
+  "description": "视觉感知。查看屏幕内容或识别文字。",
+  "author": "PeroCore",
+  "pluginType": "python-module",
+  "entryPoint": "screen_ocr.py",
+  "capabilities": {
+    "invocationCommands": [
+      {
+        "commandIdentifier": "screen_ocr",
+        "description": "OCR文字提取。从屏幕截图中识别并提取文本。"
+      },
+      {
+        "commandIdentifier": "take_screenshot",
+        "description": "屏幕截图。获取当前屏幕画面。"
+      }
+    ]
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Pero 浏览器桥接器",
+  "version": "1.0",
+  "description": "将您的浏览器连接到 Pero AI 助手。",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "tabs",
+    "alarms"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Pero Browser Bridge"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content_script.js"]
+    }
+  ]
+}

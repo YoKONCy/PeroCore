@@ -1,0 +1,22 @@
+{
+  "manifestVersion": "1.0.1",
+  "name": "BilibiliFetch",
+  "displayName": "B站助手 (BilibiliFetch)",
+  "version": "1.0.1",
+  "description": "B站助手。获取视频信息与字幕。",
+  "author": "PeroCore",
+  "pluginType": "python-module",
+  "entryPoint": "bilibili_fetch.py",
+  "capabilities": {
+    "invocationCommands": [
+      {
+        "commandIdentifier": "bilibili_get_info",
+        "description": "获取信息。解析链接/BV号，返回标题、简介及数据。"
+      },
+      {
+        "commandIdentifier": "bilibili_get_subtitles",
+        "description": "获取字幕。提取视频CC字幕以便总结内容。"
+      }
+    ]
+  }
+}

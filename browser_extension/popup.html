@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { width: 200px; padding: 10px; font-family: sans-serif; }
+    .status { margin-top: 10px; font-weight: bold; }
+    .connected { color: green; }
+    .disconnected { color: red; }
+  </style>
+</head>
+<body>
+  <h3>Pero Bridge</h3>
+  <div id="status" class="status disconnected">Disconnected</div>
+  <button id="reconnect" style="margin-top: 15px; width: 100%; cursor: pointer; padding: 5px;">Force Reconnect</button>
+  <div id="debug-info" style="font-size: 10px; color: #666; margin-top: 10px; word-break: break-all;"></div>
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+{
+  "manifestVersion": "1.0.1",
+  "name": "FileSearch",
+  "displayName": "文件检索 (FileSearch)",
+  "version": "1.0.1",
+  "description": "文件快搜。快速查找文件或浏览目录。",
+  "author": "PeroCore",
+  "pluginType": "python-module",
+  "entryPoint": "file_search.py",
+  "capabilities": {
+    "invocationCommands": [
+      {
+        "commandIdentifier": "search_files",
+        "description": "搜索文件。按文件名（支持通配符）查找文件路径。"
+      },
+      {
+        "commandIdentifier": "read_file_content",
+        "description": "读取文本。读取txt/md/json等纯文本内容。复杂文档请进专注模式用FileOps。"
+      },
+      {
+        "commandIdentifier": "list_directory",
+        "description": "列出目录。查看文件夹下的内容。"
+      }
+    ]
+  }
+}

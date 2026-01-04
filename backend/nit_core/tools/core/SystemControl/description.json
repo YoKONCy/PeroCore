@@ -1,0 +1,32 @@
+{
+  "manifestVersion": "1.0.1",
+  "name": "SystemControl",
+  "displayName": "任务控制 (SystemControl)",
+  "version": "1.0.1",
+  "description": "任务控制。管理任务生命周期。",
+  "author": "PeroCore",
+  "pluginType": "python-module",
+  "entryPoint": "system_control.py",
+  "capabilities": {
+    "invocationCommands": [
+      {
+        "commandIdentifier": "finish_task",
+        "description": "结束任务。任务完成时调用，停止思考并输出最终结果。",
+        "params": [
+           {
+             "name": "summary",
+             "type": "string",
+             "description": "给主人的最终回复。请用亲切自然的语气总结。",
+             "required": true
+           },
+           {
+             "name": "status",
+             "type": "string",
+             "description": "'success' (成功) 或 'failure' (失败)。",
+             "required": false
+           }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "manifestVersion": "1.0.0",
+  "name": "BrowserOps",
+  "displayName": "网络感知 (BrowserOps)",
+  "version": "1.2.1",
+  "description": "互联网访问能力。支持无头模式(文本速读)与视觉模式(交互浏览)。",
+  "author": "PeroCore",
+  "pluginType": "python-module",
+  "entryPoint": "browser_ops.py",
+  "capabilities": {
+    "invocationCommands": [
+      {
+        "commandIdentifier": "browser_fetch_text",
+        "description": "文本速读。快速抓取网页正文，无交互。适用于阅读新闻/文章。"
+      },
+      {
+        "commandIdentifier": "browser_open_url",
+        "description": "视觉浏览-打开。加载网页以进行视觉交互（点击/截图）。"
+      },
+      {
+        "commandIdentifier": "browser_click",
+        "description": "视觉浏览-点击。点击页面元素。需指定文本或 CSS 选择器。"
+      },
+      {
+        "commandIdentifier": "browser_type",
+        "description": "视觉浏览-输入。在输入框填写内容。需指定标签/Placeholder。"
+      },
+      {
+        "commandIdentifier": "browser_get_content",
+        "description": "视觉浏览-观察。获取当前页面的结构化 Markdown 视图。"
+      },
+      {
+        "commandIdentifier": "browser_scroll",
+        "description": "视觉浏览-滚动。向下/向上滚动屏幕以查看更多内容。"
+      },
+      {
+        "commandIdentifier": "browser_back",
+        "description": "视觉浏览-后退。返回上一页。"
+      }
+    ]
+  }
+}

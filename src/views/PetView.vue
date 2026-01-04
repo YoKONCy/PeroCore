@@ -1,0 +1,2283 @@
+<template>
+  <div class="pet-container">
+    <div 
+      class="character-wrapper" 
+      :class="{ shake: isShaking, dragging: isDragging }"
+      @mousedown="handleMouseDown"
+    >
+      <!-- 状态显示 (Mood/Mind/Vibe) -->
+      <transition name="fade">
+        <div class="status-tags" v-show="showInput">
+          <div class="status-tag mood" :title="'情绪: ' + moodText">❤️ {{ moodText }}</div>
+          <div class="status-tag vibe" :title="'氛围: ' + vibeText">✨ {{ vibeText }}</div>
+          <div class="status-tag mind" :title="'内心: ' + mindText">💭 {{ mindText }}</div>
+        </div>
+      </transition>
+
+      <!-- 气泡对话框 -->
+      <transition name="fade">
+        <div class="bubble" v-if="currentText || isThinking">
+          <!-- 复杂任务折叠显示 -->
+          <div v-if="isComplexTask" class="complex-task-summary" @click.stop="openTaskMonitor">
+            <div class="summary-icon">📝</div>
+            <div class="summary-content">
+              <div class="summary-title">Pero 整理了一份详细报告...</div>
+              <div class="summary-hint">点击查看详情</div>
+            </div>
+          </div>
+
+          <!-- 普通文本显示 -->
+          <div v-else class="text-content">
+            <template v-if="isThinking && !currentText">
+              <span class="thinking-text">{{ thinkingMessage }}</span>
+            </template>
+            <template v-else>
+              <!-- 渲染解析后的片段 -->
+              <div v-for="(segment, index) in parsedBubbleContent" :key="index" class="bubble-segment">
+                <!-- 普通文本 -->
+                <span v-if="segment.type === 'text'">{{ segment.content }}</span>
+                
+                <!-- 动作描述 -->
+                <span v-else-if="segment.type === 'action'" class="action-text">*{{ segment.content }}*</span>
+
+                <!-- 思考过程 (折叠) -->
+                <details v-else-if="segment.type === 'thinking'" class="thinking-details">
+                  <summary class="thinking-summary">🤔 思考过程...</summary>
+                  <div class="thinking-body">{{ segment.content }}</div>
+                </details>
+              </div>
+            </template>
+          </div>
+          <div class="bubble-tail"></div>
+        </div>
+      </transition>
+
+      <!-- 任务详情/监控窗口 (已移除，改为独立窗口) -->
+      <!-- <TaskMonitorModal v-model:visible="showTaskDetail" :segments="parsedBubbleContent" /> -->
+
+      <!-- 极简灵动触发器 -->
+      <div 
+        class="floating-trigger" 
+        :class="{ active: showInput }"
+        @click.stop="toggleUI"
+      >
+        <div class="trigger-core">
+          <div class="pulse-ring"></div>
+          <div class="core-dot"></div>
+        </div>
+      </div>
+      
+      <!-- Live2D 模型容器 -->
+      <div id="waifu-container" class="pet-avatar-container">
+        <!-- 加载状态占位 -->
+        <div v-if="isLoading" class="loading-placeholder">
+          <img src="/icon.png" class="loading-icon" />
+          <div class="loading-text">大脑加载中...</div>
+        </div>
+        <!-- Live2D 元素会被自动注入到 body，然后由脚本移动到这里 -->
+      </div>
+
+      <!-- 快速输入框 (鼠标移入显示) -->
+      <div class="input-overlay" v-show="showInput">
+        <input 
+          ref="inputRef"
+          v-model="userInput" 
+          @keyup.enter="sendMessage"
+          placeholder="跟 Pero 对话..."
+          class="chat-input"
+          :disabled="isThinking"
+        />
+      </div>
+
+      <!-- 悬浮工具栏 -->
+      <div class="pet-tools" v-show="showInput">
+        <button class="tool-btn" @click.stop="randTextures" title="换装">👕</button>
+        <button class="tool-btn" @click.stop="reloadPet" title="重载">🔄</button>
+        <button 
+          class="tool-btn voice-btn" 
+          @click.stop="cycleVoiceMode" 
+          :class="{ 
+            active: voiceMode !== 0,
+            'mode-vad': voiceMode === 1,
+            'mode-ptt': voiceMode === 2 
+          }" 
+          :title="voiceModeTitle"
+        >
+            {{ voiceModeIcon }}
+        </button>
+        <button class="tool-btn" @click.stop="openDashboard" title="面板">⚙️</button>
+      </div>
+      
+      <!-- PTT 悬浮按钮 (仅在按住说话模式显示) -->
+      <transition name="fade">
+        <div 
+          v-if="voiceMode === 2 && showInput" 
+          class="ptt-container"
+          @mousedown.stop="startPTT"
+          @mouseup.stop="stopPTT"
+          @mouseleave.stop="stopPTT"
+        >
+          <div class="ptt-button" :class="{ recording: isPTTRecording }">
+            <div class="ptt-icon">🎙️</div>
+            <div class="ptt-text">{{ isPTTRecording ? '正在录音...' : '按住说话' }}</div>
+          </div>
+        </div>
+      </transition>
+    </div>
+    
+    <!-- 文件搜索结果模态框 -->
+    <FileSearchModal v-model:visible="showFileModal" :files="foundFiles" />
+  </div>
+</template>
+
+<script setup>
+import { ref, computed, onMounted, onUnmounted, watch, toRaw } from 'vue'
+import FileSearchModal from '../components/FileSearchModal.vue'
+
+const voiceMode = ref(parseInt(localStorage.getItem('ppc.voice_mode') || '0')) // 0: off, 1: auto(vad), 2: ptt
+const isPTTRecording = ref(false)
+const isVoiceActive = computed(() => voiceMode.value !== 0)
+
+const voiceModeIcon = computed(() => {
+  if (voiceMode.value === 0) return '🔇'
+  if (voiceMode.value === 1) return '🎙️'
+  return '🖱️'
+})
+
+const voiceModeTitle = computed(() => {
+  if (voiceMode.value === 0) return '语音对话: 已关闭'
+  if (voiceMode.value === 1) return '语音对话: 自动感应 (VAD)'
+  return '语音对话: 按住说话 (PTT)'
+})
+
+const cycleVoiceMode = async () => {
+  const nextMode = (voiceMode.value + 1) % 3
+  voiceMode.value = nextMode
+  localStorage.setItem('ppc.voice_mode', nextMode.toString())
+  
+  if (nextMode === 0) {
+    stopVoiceMode()
+  } else {
+    // 如果还没开启麦克风/WS，则开启
+    if (!voiceWs.value) {
+      await startVoiceMode()
+    }
+  }
+}
+
+const startPTT = () => {
+  if (voiceMode.value !== 2 || isThinking.value || isSpeaking.value) return
+  isPTTRecording.value = true
+  isSpeakingState = true
+  audioBuffer = []
+  console.log('PTT Started')
+}
+
+const stopPTT = () => {
+  if (!isPTTRecording.value) return
+  isPTTRecording.value = false
+  isSpeakingState = false
+  console.log('PTT Ended, sending buffer...')
+  sendAudioBuffer()
+}
+
+const voiceWs = ref(null)
+const audioContext = ref(null)
+const mediaStream = ref(null)
+const scriptProcessor = ref(null)
+const currentAudioSource = ref(null)
+
+const currentText = ref('主人，我在桌面等你很久啦！')
+// const showTaskDetail = ref(false) // 弃用，改为独立窗口
+
+// 解析气泡文本，分离 Thinking 块和动作描述
+const parsedBubbleContent = computed(() => {
+  const text = currentText.value || ''
+  if (!text) return []
+
+  const segments = []
+  // 正则匹配:
+  // 1. 【Thinking: ...】 块 (兼容中英文冒号) -> Group 1
+  // 2. *动作描述* -> Group 2
+  const regex = /【Thinking[:：]?\s*([\s\S]*?)】|\*([^\*]+)\*/gi
+  
+  let lastIndex = 0
+  let match
+
+  while ((match = regex.exec(text)) !== null) {
+    // 1. 添加匹配前的普通文本
+    if (match.index > lastIndex) {
+      const normalText = text.substring(lastIndex, match.index)
+      if (normalText.trim()) {
+        segments.push({ type: 'text', content: normalText })
+      }
+    }
+    
+    // 2. 判断匹配类型
+    if (match[1] !== undefined) {
+        // Thinking 块
+        segments.push({ type: 'thinking', content: match[1].trim() })
+    } else if (match[2] !== undefined) {
+        // Action 块
+        segments.push({ type: 'action', content: match[2].trim() })
+    }
+    
+    lastIndex = regex.lastIndex
+  }
+  
+  // 3. 添加剩余的普通文本
+  if (lastIndex < text.length) {
+    const normalText = text.substring(lastIndex)
+    if (normalText.trim()) {
+      segments.push({ type: 'text', content: normalText })
+    }
+  }
+  
+  return segments
+})
+
+const isComplexTask = computed(() => {
+  return parsedBubbleContent.value.some(segment => segment.type === 'thinking')
+})
+
+const isSpeaking = ref(false)
+const isThinking = ref(false)
+const thinkingMessage = ref('努力思考中...')
+const userInput = ref('')
+const showInput = ref(false)
+const isLoading = ref(true)
+const inputRef = ref(null)
+const lastAiReplyTime = ref(0)
+let replyTimer = null
+
+const showFileModal = ref(false)
+const foundFiles = ref([])
+
+// 监听解析后的内容变化，实时同步给监控窗口
+watch(parsedBubbleContent, (newVal) => {
+  if (ipcRenderer && ipcRenderer.send) {
+    // 发送纯数据，避免 Vue 响应式对象的潜在问题
+    ipcRenderer.send('update-task-monitor-data', toRaw(newVal))
+  }
+}, { deep: true })
+
+const openTaskMonitor = () => {
+  if (ipcRenderer && ipcRenderer.send) {
+    ipcRenderer.send('open-task-monitor')
+    // 立即同步一次数据
+    ipcRenderer.send('update-task-monitor-data', toRaw(parsedBubbleContent.value))
+  }
+}
+
+// 监听模态框显示状态，动态调整 Electron 窗口鼠标穿透
+watch([showFileModal], ([fileVal]) => {
+  if (window.require) {
+    const { ipcRenderer } = window.require('electron')
+    // 当全屏模态框显示时，禁止穿透（即接收鼠标事件）；关闭时，恢复穿透（转发模式）
+    // TaskMonitorModal 是局部窗口，由 handleGlobalMouseMove 动态处理穿透
+    const isModalOpen = fileVal
+    ipcRenderer.send('set-ignore-mouse-events', !isModalOpen, { forward: true })
+  }
+})
+
+const moodText = ref(localStorage.getItem('ppc.mood') || '开心')
+const mindText = ref(localStorage.getItem('ppc.mind') || '正在想主人...')
+const vibeText = ref(localStorage.getItem('ppc.vibe') || '活泼')
+
+// 切换语音模式 (已弃用，使用 cycleVoiceMode 代替)
+const toggleVoiceMode = async () => {
+    await cycleVoiceMode()
+};
+
+const startVoiceMode = async () => {
+    try {
+        // 1. 获取麦克风权限
+        mediaStream.value = await navigator.mediaDevices.getUserMedia({ audio: true });
+        
+        // 2. 连接 WebSocket
+        voiceWs.value = new WebSocket('ws://localhost:3000/ws/voice');
+        
+        voiceWs.value.onopen = () => {
+            console.log('Voice WebSocket connected');
+            showToast(`语音对话已开启: ${voiceModeTitle.value}`);
+            
+            // 3. 开始录音处理
+            startRecording();
+        };
+        
+        voiceWs.value.onmessage = handleVoiceMessage;
+        
+        voiceWs.value.onclose = () => {
+            console.log('Voice WebSocket closed');
+            stopVoiceMode();
+        };
+        
+    } catch (err) {
+        console.error('Failed to start voice mode:', err);
+        showToast('无法开启麦克风: ' + err.message);
+    }
+};
+
+const stopVoiceMode = () => {
+    if (voiceWs.value) {
+        voiceWs.value.close()
+        voiceWs.value = null
+    }
+    
+    if (mediaStream.value) {
+        mediaStream.value.getTracks().forEach(track => track.stop())
+        mediaStream.value = null
+    }
+    
+    if (audioContext.value) {
+        audioContext.value.close()
+        audioContext.value = null
+    }
+    
+    showToast('语音对话已关闭')
+}
+
+// 简单的 VAD (语音活动检测) 阈值
+const VAD_THRESHOLD = 0.01 // 降低阈值，更灵敏
+let silenceStart = Date.now()
+let isSpeakingState = false
+let audioBuffer = []
+let lastRmsUpdate = 0 // 用于限制日志频率
+
+const startRecording = () => {
+    audioContext.value = new (window.AudioContext || window.webkitAudioContext)()
+    const source = audioContext.value.createMediaStreamSource(mediaStream.value)
+    
+    // 使用 ScriptProcessorNode 处理音频流 (deprecated but widely supported)
+    // 也可以用 AudioWorklet，但在 Vue 单文件中稍微麻烦点
+    scriptProcessor.value = audioContext.value.createScriptProcessor(4096, 1, 1)
+    
+    source.connect(scriptProcessor.value)
+    scriptProcessor.value.connect(audioContext.value.destination)
+    
+    scriptProcessor.value.onaudioprocess = (e) => {
+        if (!isVoiceActive.value) return
+
+        // 如果正在思考或正在说话，直接忽略新的语音输入，防止污染和堆积
+        if (isThinking.value || isSpeaking.value) {
+             return
+        }
+        
+        const inputData = e.inputBuffer.getChannelData(0)
+        
+        // --- 模式 2: 按住说话 (PTT) ---
+        if (voiceMode.value === 2) {
+            if (isPTTRecording.value) {
+                audioBuffer.push(new Float32Array(inputData))
+            }
+            return
+        }
+
+        // --- 模式 1: 自动感应 (VAD) ---
+        // 1. 计算音量 (RMS)
+        let sum = 0
+        for (let i = 0; i < inputData.length; i++) {
+            sum += inputData[i] * inputData[i]
+        }
+        const rms = Math.sqrt(sum / inputData.length)
+        
+        // 调试日志：每秒输出一次当前音量，方便排查麦克风问题
+        if (Date.now() - lastRmsUpdate > 1000) {
+            console.log('Current Mic Volume (RMS):', rms.toFixed(4), 'Threshold:', VAD_THRESHOLD)
+            lastRmsUpdate = Date.now()
+        }
+        
+        // 2. VAD 逻辑
+        if (rms > VAD_THRESHOLD) {
+            silenceStart = Date.now()
+            if (!isSpeakingState) {
+                console.log('Speech detected (Volume:', rms.toFixed(4), ')')
+                isSpeakingState = true
+                audioBuffer = [] // 清空 buffer
+            }
+            // 收集音频数据
+            audioBuffer.push(new Float32Array(inputData))
+        } else {
+            if (isSpeakingState) {
+                // 如果静音超过 1000ms (稍微增加静音等待时间)，认为一句话结束
+                if (Date.now() - silenceStart > 1000) {
+                    console.log('Speech ended, sending buffer...')
+                    isSpeakingState = false
+                    sendAudioBuffer()
+                } else {
+                    // 短暂静音，继续收集
+                     audioBuffer.push(new Float32Array(inputData))
+                }
+            }
+        }
+    }
+}
+
+const sendAudioBuffer = () => {
+    if (audioBuffer.length === 0) return
+    
+    // 1. 合并 buffer
+    const length = audioBuffer.length * 4096
+    const merged = new Float32Array(length)
+    let offset = 0
+    for (const chunk of audioBuffer) {
+        merged.set(chunk, offset)
+        offset += chunk.length
+    }
+    
+    // 2. 转换为 WAV (简单的 16bit PCM)
+    const wavBlob = encodeWAV(merged, audioContext.value.sampleRate)
+    
+    // 3. 转 Base64 发送
+    const reader = new FileReader()
+    reader.onloadend = () => {
+        const base64data = reader.result.split(',')[1]
+        if (voiceWs.value && voiceWs.value.readyState === WebSocket.OPEN) {
+            voiceWs.value.send(JSON.stringify({
+                type: 'speech_end',
+                data: base64data
+            }))
+        }
+    }
+    reader.readAsDataURL(wavBlob)
+    
+    audioBuffer = []
+}
+
+// 辅助函数：Float32Array 转 WAV Blob
+const encodeWAV = (samples, sampleRate) => {
+    const buffer = new ArrayBuffer(44 + samples.length * 2)
+    const view = new DataView(buffer)
+    
+    const writeString = (view, offset, string) => {
+        for (let i = 0; i < string.length; i++) {
+            view.setUint8(offset + i, string.charCodeAt(i))
+        }
+    }
+    
+    writeString(view, 0, 'RIFF')
+    view.setUint32(4, 36 + samples.length * 2, true)
+    writeString(view, 8, 'WAVE')
+    writeString(view, 12, 'fmt ')
+    view.setUint32(16, 16, true)
+    view.setUint16(20, 1, true)
+    view.setUint16(22, 1, true)
+    view.setUint32(24, sampleRate, true)
+    view.setUint32(28, sampleRate * 2, true)
+    view.setUint16(32, 2, true)
+    view.setUint16(34, 16, true)
+    writeString(view, 36, 'data')
+    view.setUint32(40, samples.length * 2, true)
+    
+    let offset = 44
+    for (let i = 0; i < samples.length; i++) {
+        let s = Math.max(-1, Math.min(1, samples[i]))
+        s = s < 0 ? s * 0x8000 : s * 0x7FFF
+        view.setInt16(offset, s, true)
+        offset += 2
+    }
+    
+    return new Blob([view], { type: 'audio/wav' })
+}
+
+const handleVoiceMessage = (event) => {
+    const msg = JSON.parse(event.data)
+    
+    if (msg.type === 'status') {
+        if (msg.content === 'listening') {
+             // 可以在 UI 上显示“正在听...”
+             isThinking.value = true
+             thinkingMessage.value = '正在听主人说话...'
+             currentText.value = ''
+        } else if (msg.content === 'thinking') {
+             isThinking.value = true
+             thinkingMessage.value = msg.message || '努力思考中...'
+             currentText.value = ''
+        } else if (msg.content === 'speaking') {
+             isThinking.value = false
+             thinkingMessage.value = '努力思考中...' // 重置默认值
+        } else if (msg.content === 'idle') {
+             isThinking.value = false
+             thinkingMessage.value = '努力思考中...'
+        }
+    } else if (msg.type === 'transcription') {
+        // 显示用户说的话 (可选)
+        console.log('User said:', msg.content)
+    } else if (msg.type === 'text_response') {
+        currentText.value = msg.content
+        // 收到文本回复时，强制结束思考状态，防止 UI 卡在"思考中"
+        isThinking.value = false
+        thinkingMessage.value = '努力思考中...'
+    } else if (msg.type === 'triggers') {
+        // 处理语音会话返回的触发器和状态
+        applyTriggers(msg.data)
+    } else if (msg.type === 'audio_response') {
+        playAudio(msg.data)
+    }
+}
+
+// 应用触发器和状态更新
+const applyTriggers = (data) => {
+  if (!data) return
+  
+  // 1. 处理状态 (Mood/Mind/Vibe)
+  if (data.state) {
+    const statusMap = data.state
+    if (statusMap.mood) {
+      moodText.value = statusMap.mood
+      localStorage.setItem('ppc.mood', statusMap.mood)
+      window.dispatchEvent(new CustomEvent('ppc:mood', { detail: statusMap.mood }))
+    }
+    if (statusMap.vibe) {
+      vibeText.value = statusMap.vibe
+      localStorage.setItem('ppc.vibe', statusMap.vibe)
+      window.dispatchEvent(new CustomEvent('ppc:vibe', { detail: statusMap.vibe }))
+    }
+    if (statusMap.mind) {
+      mindText.value = statusMap.mind
+      localStorage.setItem('ppc.mind', statusMap.mind)
+      window.dispatchEvent(new CustomEvent('ppc:mind', { detail: statusMap.mind }))
+    }
+  }
+
+  // 2. 处理交互消息 (Click/Idle/Back)
+  let curTexts = {}
+  try {
+    const saved = localStorage.getItem('ppc.waifu.texts')
+    if (saved) curTexts = JSON.parse(saved)
+  } catch (e) {}
+
+  let updated = false
+  
+  // 处理点击语
+  if (data.click_messages) {
+    const clickData = data.click_messages
+    if (!Array.isArray(clickData) && typeof clickData === 'object') {
+      if (clickData.head && Array.isArray(clickData.head)) {
+        curTexts['click_head_01'] = clickData.head[0]
+        curTexts['click_head_02'] = clickData.head[1]
+      }
+      if (clickData.chest && Array.isArray(clickData.chest)) {
+        curTexts['click_chest_01'] = clickData.chest[0]
+        curTexts['click_chest_02'] = clickData.chest[1]
+      }
+      if (clickData.body && Array.isArray(clickData.body)) {
+        curTexts['click_body_01'] = clickData.body[0]
+        curTexts['click_body_02'] = clickData.body[1]
+      }
+      updated = true
+    }
+  }
+
+  // 处理挂机语
+  if (data.idle_messages && Array.isArray(data.idle_messages)) {
+    data.idle_messages.forEach((msg, i) => {
+      curTexts[`idleMessages_0${i+1}`] = msg
+    })
+    updated = true
+  }
+
+  // 处理回归语
+  if (data.back_messages && Array.isArray(data.back_messages)) {
+    data.back_messages.forEach((msg, i) => {
+      curTexts[`visibilityBack_0${i+1}`] = msg
+    })
+    updated = true
+  }
+
+  if (updated) {
+    localStorage.setItem('ppc.waifu.texts', JSON.stringify(curTexts))
+    window.dispatchEvent(new CustomEvent('ppc:waifu-texts-updated', { detail: curTexts }))
+    window.WAIFU_TEXTS = curTexts
+    localTexts.value = curTexts
+  }
+}
+
+const lipSyncFrame = ref(null)
+
+const stopAudioPlayback = () => {
+    if (currentAudioSource.value) {
+        try {
+            currentAudioSource.value.stop()
+        } catch (e) {
+            // ignore
+        }
+        currentAudioSource.value = null
+    }
+    isSpeaking.value = false
+    stopLipSync()
+}
+
+const playAudio = async (base64Audio) => {
+    // 播放新语音前，先停止旧的
+    stopAudioPlayback()
+
+    isSpeaking.value = true
+    
+    // 1. 准备 AudioContext
+    let ctx = audioContext.value
+    let isTempCtx = false
+    
+    if (!ctx || ctx.state === 'closed') {
+        ctx = new (window.AudioContext || window.webkitAudioContext)()
+        isTempCtx = true
+        audioContext.value = ctx
+    }
+    
+    // 确保 AudioContext 已恢复 (解决浏览器自动播放策略限制)
+    if (ctx.state === 'suspended') {
+        try {
+            await ctx.resume()
+            console.log('[Pero] AudioContext resumed')
+        } catch (e) {
+            console.warn('[Pero] Failed to resume AudioContext:', e)
+        }
+    }
+    
+    // 2. 解码音频数据 (使用 decodeAudioData 比 MediaElementSource 更稳定)
+    try {
+        const binaryString = window.atob(base64Audio)
+        const len = binaryString.length
+        const bytes = new Uint8Array(len)
+        for (let i = 0; i < len; i++) {
+            bytes[i] = binaryString.charCodeAt(i)
+        }
+        
+        const audioBuffer = await ctx.decodeAudioData(bytes.buffer)
+        
+        const source = ctx.createBufferSource()
+        source.buffer = audioBuffer
+        currentAudioSource.value = source
+        
+        const analyser = ctx.createAnalyser()
+        analyser.fftSize = 256
+        
+        source.connect(analyser)
+        analyser.connect(ctx.destination)
+        
+        source.start(0)
+        
+        // 3. 启动口型同步
+        startLipSync(analyser)
+        
+        source.onended = () => {
+            isSpeaking.value = false
+            stopLipSync()
+            source.disconnect()
+            analyser.disconnect()
+        }
+        
+    } catch (e) {
+        console.error('[Pero] Audio decode error:', e)
+        isSpeaking.value = false
+        stopLipSync()
+    }
+}
+
+const startLipSync = (analyser) => {
+  if (lipSyncFrame.value) cancelAnimationFrame(lipSyncFrame.value)
+  
+  const update = () => {
+    if (!isSpeaking.value) {
+      window.__pero_lip_sync_value = 0
+      updateLive2DModelMouth(0)
+      return
+    }
+    
+    const dataArray = new Uint8Array(analyser.frequencyBinCount)
+    analyser.getByteFrequencyData(dataArray)
+    
+    let sum = 0
+    const startBin = 4
+    const endBin = Math.min(40, dataArray.length)
+    
+    for(let i = startBin; i < endBin; i++) {
+        sum += dataArray[i]
+    }
+    const average = sum / (endBin - startBin)
+    
+    // 映射到 0-1. Average 是 0-255.
+    // 再次增加增益系数，并增加基础值
+    let volume = (average / 60) * 2.0 
+    if (average > 10) volume = Math.max(volume, 0.2) // 只要有声音，嘴巴至少张开 20%
+    volume = Math.min(1.0, Math.max(0, volume))
+    
+    // 调试：如果音量大于 0.1，打印一下
+    if (volume > 0.1 && Math.random() > 0.9) {
+        console.log('[Pero] LipSync Volume:', volume.toFixed(2), 'Average:', average.toFixed(2))
+    }
+    
+    // 使用全局变量传递给 Hook
+    window.__pero_lip_sync_value = volume
+    
+    lipSyncFrame.value = requestAnimationFrame(update)
+  }
+  update()
+}
+
+const stopLipSync = () => {
+  if (lipSyncFrame.value) {
+    cancelAnimationFrame(lipSyncFrame.value)
+    lipSyncFrame.value = null
+  }
+  window.__pero_lip_sync_value = 0
+  updateLive2DModelMouth(0)
+}
+
+const ensureMouthOverride = () => {
+  // 1. 更加侵入式的模型查找逻辑
+  const models = []
+  
+  // 尝试从不同的常见位置获取模型实例
+  if (window.Live2D && window.Live2D.samples) {
+      window.Live2D.samples.forEach(m => { if(m) models.push(m) })
+  }
+  
+  // 检查全局变量
+  ["live2dDisplay", "L2DTarget", "waifuModel"].forEach(key => {
+      if (window[key] && !models.includes(window[key])) models.push(window[key])
+  })
+  
+  // 如果还是没找到，尝试在 window 中扫描具有 setParamFloat 方法的对象
+  if (models.length === 0) {
+      for (const key in window) {
+          try {
+              if (window[key] && typeof window[key].setParamFloat === 'function' && typeof window[key].update === 'function') {
+                  models.push(window[key])
+                  console.log(`[Pero] Found potential model in window.${key}`)
+              }
+          } catch(e) {}
+      }
+  }
+
+  if (models.length === 0) {
+      // 如果完全没找到模型，尝试 Hook 构造函数或 loadlive2d
+      if (window.loadlive2d && !window.loadlive2d._isHooked) {
+          console.log('[Pero] Hooking window.loadlive2d to catch future models...')
+          const origLoad = window.loadlive2d
+          window.loadlive2d = function() {
+              const res = origLoad.apply(this, arguments)
+              // 加载后延迟一会尝试再次 Hook
+              setTimeout(ensureMouthOverride, 1000)
+              setTimeout(ensureMouthOverride, 3000)
+              return res
+          }
+          window.loadlive2d._isHooked = true
+      }
+      
+      // 循环重试，直到找到模型
+      if (!window._pero_hook_retry_timer) {
+          window._pero_hook_retry_timer = setInterval(ensureMouthOverride, 2000)
+      }
+      return
+  }
+  
+  // 找到模型了，清除重试定时器
+  if (window._pero_hook_retry_timer) {
+      clearInterval(window._pero_hook_retry_timer)
+      window._pero_hook_retry_timer = null
+  }
+  
+  models.forEach(model => {
+    // 防止重复 Hook
+    if (model._mouthHooked) return
+    
+    console.log('[Pero] Lip-Sync: Installing hook for model', model)
+    
+    const core = model.live2DModel || model
+    const possibleParams = ["PARAM_MOUTH_OPEN_Y", "PARAM_MOUTH_OPEN", "ParamMouthOpenY", "MouthOpenY"]
+    let actualParam = "PARAM_MOUTH_OPEN_Y"
+    
+    // 识别可用参数
+    if (core && core.getModelContext) {
+        try {
+            const ctx = core.getModelContext()
+            if (ctx && ctx.getParamCount) {
+                const count = ctx.getParamCount()
+                const params = []
+                for(let i=0; i<count; i++) {
+                    params.push(ctx.getParamName(i))
+                }
+                const found = possibleParams.find(p => params.includes(p))
+                if (found) actualParam = found
+                console.log('[Pero] Lip-Sync: Detected params:', params, 'Using:', actualParam)
+            }
+        } catch (e) { console.warn('[Pero] Lip-Sync: Failed to inspect model params:', e) }
+    } else if (core && core._parameterIds) { // Cubism 2.1 SDK
+        const found = possibleParams.find(p => core._parameterIds.includes(p))
+        if (found) actualParam = found
+        console.log('[Pero] Lip-Sync: Detected Cubism 2.1 params, Using:', actualParam)
+    }
+
+    // 核心逻辑：覆盖所有可能的更新入口
+    const hookMethod = (obj, methodName, pre = false) => {
+        if (!obj || typeof obj[methodName] !== 'function') return
+        const original = obj[methodName]
+        obj[methodName] = function() {
+            if (pre) applyMouthValue(model, actualParam)
+            const result = original.apply(this, arguments)
+            if (!pre) applyMouthValue(model, actualParam)
+            return result
+        }
+    }
+
+    // 1. Hook update (在动作更新后覆盖)
+    hookMethod(model, 'update', false)
+    
+    // 2. Hook draw (在渲染前最后一刻覆盖)
+    hookMethod(model, 'draw', true)
+    if (model.live2DModel) {
+        hookMethod(model.live2DModel, 'update', false)
+        hookMethod(model.live2DModel, 'draw', true)
+    }
+    
+    // 3. 极其暴力的 Hook: setParamFloat 和 setParameterValueByUsage (Cubism 4+)
+    if (core) {
+        const methods = ['setParamFloat', 'setParameterValueById', 'setParameterValueByIndex']
+        methods.forEach(method => {
+            if (typeof core[method] === 'function' && !core['_' + method]) {
+                core['_' + method] = core[method]
+                core[method] = function(id, val, weight) {
+                    const currentLipSyncVal = window.__pero_lip_sync_value
+                    if (typeof currentLipSyncVal === 'number' && currentLipSyncVal > 0) {
+                        // 检查是否是嘴巴参数
+                        let isMouth = false
+                        if (typeof id === 'string') {
+                            isMouth = (id === actualParam || id === "PARAM_MOUTH_OPEN_Y" || id === "PARAM_MOUTH_OPEN")
+                        } else if (typeof id === 'number' && method === 'setParameterValueByIndex') {
+                            // 如果是索引，这里比较难判断，先跳过或者通过实际名称映射
+                        }
+                        
+                        if (isMouth) {
+                            return core['_' + method].call(this, id, currentLipSyncVal, weight || 1)
+                        }
+                    }
+                    return core['_' + method].call(this, id, val, weight)
+                }
+            }
+        })
+    }
+
+    model._mouthHooked = true
+  })
+
+  function applyMouthValue(m, paramName) {
+      const val = window.__pero_lip_sync_value
+      if (typeof val === 'number' && val >= 0) {
+          const c = m.live2DModel || m
+          if (c && typeof c.setParamFloat === 'function') {
+              c.setParamFloat(paramName, val, 1)
+              c.setParamFloat("PARAM_MOUTH_OPEN_Y", val, 1)
+              c.setParamFloat("PARAM_MOUTH_OPEN", val, 1)
+          }
+          if (c && typeof c.setParameterValueById === 'function') {
+              c.setParameterValueById(paramName, val, 1)
+          }
+          if ('lipSyncValue' in m) m.lipSyncValue = val
+      }
+  }
+}
+
+const updateLive2DModelMouth = (value) => {
+  window.__pero_lip_sync_value = value
+  ensureMouthOverride()
+}
+
+const showToast = (msg) => {
+    // 简单的提示，复用气泡
+    const originalText = currentText.value
+    currentText.value = msg
+    setTimeout(() => {
+        if (currentText.value === msg) {
+            currentText.value = originalText
+        }
+    }, 2000)
+}
+
+const localTexts = ref({})
+const loadLocalTexts = async () => {
+  try {
+    // 0. 尝试从后端同步最新配置 (新增)
+    try {
+        const syncRes = await fetch('http://localhost:3000/api/configs/waifu-texts')
+        if (syncRes.ok) {
+            const syncData = await syncRes.json()
+            if (syncData && Object.keys(syncData).length > 0) {
+                // 读取现有的 localStorage，避免覆盖非云端管理的字段
+                let existing = {}
+                try { existing = JSON.parse(localStorage.getItem('ppc.waifu.texts') || '{}') } catch(e) {}
+                
+                const merged = { ...existing, ...syncData }
+                localStorage.setItem('ppc.waifu.texts', JSON.stringify(merged))
+                console.log('[PetView] Synced waifu texts from backend')
+            }
+        }
+    } catch (e) {
+        console.warn('Failed to sync waifu texts from backend:', e)
+    }
+
+    // 1. 加载基础静态台词
+    const response = await fetch('/live2d-widget/waifu-texts.json')
+    const baseTexts = await response.json()
+    
+    // 2. 加载 localStorage 中的动态更新台词
+    let dynamicTexts = {}
+    try {
+      const saved = localStorage.getItem('ppc.waifu.texts')
+      if (saved) dynamicTexts = JSON.parse(saved)
+    } catch (e) {
+      console.warn('Failed to parse dynamic texts from localStorage:', e)
+    }
+    
+    // 3. 合并台词 (动态台词覆盖基础台词)
+    localTexts.value = { ...baseTexts, ...dynamicTexts }
+    window.WAIFU_TEXTS = localTexts.value // 同步给 waifu-tips.js
+    console.log('Local texts loaded (merged):', localTexts.value)
+  } catch (err) {
+    console.error('Failed to load local texts:', err)
+  }
+}
+
+// 获取随机本地台词
+const getRandomLocalText = (prefix) => {
+  const keys = Object.keys(localTexts.value).filter(k => k.startsWith(prefix))
+  if (keys.length === 0) return null
+  const randomKey = keys[Math.floor(Math.random() * keys.length)]
+  return localTexts.value[randomKey]
+}
+
+// --- 迁移自移动版的交互逻辑 ---
+
+// 模拟震动反馈 (Desktop 方案)
+const isShaking = ref(false)
+const handleHaptic = () => {
+  isShaking.value = true
+  setTimeout(() => {
+    isShaking.value = false
+  }, 500)
+}
+
+// 状态更新处理器
+const onMoodUpdate = (e) => { moodText.value = e.detail }
+const onMindUpdate = (e) => { mindText.value = e.detail }
+const onVibeUpdate = (e) => { vibeText.value = e.detail }
+const onChatUpdate = (e) => { 
+  if (e.detail === 'Pero正在思考中...') {
+    isThinking.value = true
+    currentText.value = ''
+  } else {
+    isThinking.value = false
+    currentText.value = e.detail 
+    lastAiReplyTime.value = Date.now()
+    
+    // 气泡至少显示 15 秒
+    if (replyTimer) clearTimeout(replyTimer)
+    replyTimer = setTimeout(() => {
+      if (currentText.value === e.detail) {
+        currentText.value = ''
+      }
+    }, 15000)
+  }
+}
+
+// 接收来自 waifu-tips.js 的本地消息
+const onWaifuMessage = (e) => {
+  const { text, timeout, priority } = e.detail
+  
+  // 逻辑：
+  // 1. 如果当前正在 AI 说话（isSpeaking），不显示本地消息
+  // 2. 如果当前处于 AI 回复后的 15 秒保护期内：
+  //    - 只有高优先级消息（触碰、点击，priority <= 8）可以覆盖
+  //    - 普通挂机、回归消息（priority > 8）会被忽略
+  
+  const isProtected = (Date.now() - lastAiReplyTime.value) < 15000
+  const isHighPriority = priority !== undefined && priority <= 8
+  
+  if (!isSpeaking.value) {
+    if (isProtected && !isHighPriority) {
+      console.log('[PetView] Ignoring low priority message during AI reply protection:', text)
+      return
+    }
+    
+    currentText.value = text
+    
+    // 如果是高优先级覆盖了 AI 回复，我们也重置保护期（或者不重置，取决于需求，这里选择重置以让位给触碰台词）
+    if (isHighPriority && isProtected) {
+      lastAiReplyTime.value = 0 
+      if (replyTimer) clearTimeout(replyTimer)
+    }
+
+    setTimeout(() => {
+      if (!isSpeaking.value && currentText.value === text) {
+        currentText.value = ''
+      }
+    }, timeout || 4000)
+  }
+}
+
+// 监听点击事件，改为本地反馈以节省 token
+const handlePpcClick = () => {
+  // 如果当前没有在说话，触发点击反馈
+  if (!isSpeaking.value) {
+    const localMsg = getRandomLocalText('click_messages')
+    if (localMsg) {
+      // 通过事件发送，统一处理逻辑
+      window.dispatchEvent(new CustomEvent('waifu-message', { 
+        detail: { text: localMsg, timeout: 4000, priority: 8 } 
+      }))
+    } else {
+      // 兜底逻辑
+      const clickPrompt = "【管理系统提醒：主人刚才摸了摸你/点击了你。请根据你现在的状态、情绪以及对主人的好感度，做出一个简短的、符合人设的即时反馈。可以是害羞、开心、撒娇或者调皮地吐槽。】"
+      sendSystemMessage(clickPrompt)
+    }
+  }
+}
+
+// 发送系统/隐藏消息
+const sendSystemMessage = (content) => {
+  if (isSpeaking.value) return
+  sendMessage(content, true)
+}
+
+// 解析 Pero 状态标签 (Mood/Mind/Vibe 等)
+const parsePeroStatus = (content) => {
+  if (!content) return
+  
+  const triggers = {}
+  
+  // 1. 解析 PEROCUE (状态机)
+  const perocueMatch = content.match(/<PEROCUE>([\s\S]*?)<\/PEROCUE>/)
+  if (perocueMatch) {
+    try {
+      triggers.state = JSON.parse(perocueMatch[1].trim())
+    } catch (e) {
+      console.error('Failed to parse PEROCUE JSON:', e)
+    }
+  }
+
+  // 2. 解析其他消息标签 (CLICK/IDLE/BACK/FILE_RESULTS)
+  const tags = [
+    { regex: /<CLICK_MESSAGES>([\s\S]*?)<\/CLICK_MESSAGES>/, key: 'click_messages' },
+    { regex: /<IDLE_MESSAGES>([\s\S]*?)<\/IDLE_MESSAGES>/, key: 'idle_messages' },
+    { regex: /<BACK_MESSAGES>([\s\S]*?)<\/BACK_MESSAGES>/, key: 'back_messages' },
+    { regex: /<FILE_RESULTS>([\s\S]*?)<\/FILE_RESULTS>/, key: 'file_results' }
+  ]
+
+  tags.forEach(tag => {
+    const match = content.match(tag.regex)
+    if (match) {
+      try {
+        const data = JSON.parse(match[1].trim())
+        if (tag.key === 'file_results') {
+           foundFiles.value = data
+           showFileModal.value = true
+        } else {
+           triggers[tag.key] = data
+        }
+      } catch (e) {
+        console.warn(`Failed to parse ${tag.key} JSON:`, e)
+      }
+    }
+  })
+
+  if (Object.keys(triggers).length > 0) {
+    applyTriggers(triggers)
+  }
+}
+
+// 清理消息内容，移除所有标签 (XML 和 NIT)
+const cleanMessageContent = (text) => {
+  if (!text) return ''
+  return text
+    .replace(/<([A-Z_]+)>[\s\S]*?<\/\1>/g, '')
+    .replace(/\[\[\[NIT_CALL\]\]\][\s\S]*?\[\[\[NIT_END\]\]\]/g, '')
+    .trim()
+}
+
+// --- 结束迁移逻辑 ---
+
+// 加载 Live2D 脚本
+const loadLive2D = () => {
+  return new Promise((resolve, reject) => {
+    // 如果已经有 initWidget，说明之前加载过
+    if (window.initWidget) {
+      resolve()
+      return
+    }
+
+    // 直接加载 autoload.js，由它负责后续资源的加载
+    const autoload = document.createElement('script')
+    autoload.src = '/live2d-widget/autoload.js'
+    autoload.id = 'live2d-autoload'
+    autoload.onload = () => {
+      console.log('Live2D autoload.js loaded')
+      resolve()
+    }
+    autoload.onerror = (e) => {
+      console.error('Live2D autoload.js failed to load', e)
+      reject(e)
+    }
+    document.body.appendChild(autoload)
+  })
+}
+
+
+// 同步前端配置到后端
+const syncConfigToBackend = async () => {
+  try {
+    const config = {
+      'ppc.apiKey': localStorage.getItem('ppc.apiKey') || '',
+      'ppc.apiBase': localStorage.getItem('ppc.apiBase') || 'https://api.openai.com',
+      'ppc.modelName': localStorage.getItem('ppc.modelName') || 'gpt-3.5-turbo',
+      'ppc.remoteEnabled': localStorage.getItem('ppc.remoteEnabled') || 'false',
+      'ppc.remoteUrl': localStorage.getItem('ppc.remoteUrl') || ''
+    }
+    
+    await fetch('http://localhost:3000/api/configs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config)
+    })
+    console.log('Config synced to backend')
+  } catch (err) {
+    console.warn('Failed to sync config to backend:', err)
+  }
+}
+
+// 欢迎语逻辑
+const showWelcomeMessage = () => {
+  const now = new Date().getHours()
+  let prefix = 'welcome_timeRanges_'
+  if (now > 5 && now <= 7) prefix += 'morningEarly'
+  else if (now > 7 && now <= 11) prefix += 'morning'
+  else if (now > 11 && now <= 13) prefix += 'noon'
+  else if (now > 13 && now <= 17) prefix += 'afternoon'
+  else if (now > 17 && now <= 19) prefix += 'eveningSunset'
+  else if (now > 19 && now <= 21) prefix += 'night'
+  else if (now > 21 && now <= 23) prefix += 'lateNight'
+  else prefix += 'midnight'
+  
+  const welcomeMsg = getRandomLocalText(prefix)
+  if (welcomeMsg) {
+    currentText.value = welcomeMsg
+    setTimeout(() => {
+      if (!isSpeaking.value && currentText.value === welcomeMsg) {
+        currentText.value = ''
+      }
+    }, 6000)
+  }
+}
+
+onMounted(async () => {
+   // 默认开启穿透
+   setIgnoreMouse(true)
+   window.addEventListener('mousemove', handleGlobalMouseMove)
+
+   // 监听 Electron 主进程发送的快捷键事件
+   if (ipcRenderer && ipcRenderer.on) {
+       ipcRenderer.on('toggle-voice-mode', () => {
+           if (voiceMode.value === 2) {
+               // PTT 模式下，快捷键作为开关触发
+               if (isPTTRecording.value) {
+                   stopPTT()
+               } else {
+                   startPTT()
+               }
+           } else {
+               // 其他模式下，快捷键用于循环切换模式
+               cycleVoiceMode()
+           }
+       })
+   }
+   
+   console.log('PetView mounted, starting Live2D load...')
+
+  // 加载本地台词
+  await loadLocalTexts()
+  
+  // 显示欢迎语
+   showWelcomeMessage()
+   
+   // 同步配置
+  await syncConfigToBackend()
+  
+  // 注册交互监听
+  window.addEventListener('ppc:mood', onMoodUpdate)
+  window.addEventListener('ppc:mind', onMindUpdate)
+  window.addEventListener('ppc:vibe', onVibeUpdate)
+  window.addEventListener('ppc:chat', onChatUpdate)
+  window.addEventListener('waifu-message', onWaifuMessage)
+  
+  try {
+    // 1. 清理可能存在的旧元素（处理 HMR 热更新）
+    const oldWaifu = document.getElementById('waifu')
+    if (oldWaifu) {
+      console.log('Cleaning up old waifu element')
+      oldWaifu.remove()
+    }
+
+    // 2. 检查是否已经加载过脚本，如果没有则加载
+    await loadLive2D()
+    
+    // 3. 如果脚本已经加载过（initWidget 已存在），手动触发一次初始化
+    // 因为单页应用切回来时，autoload.js 不会重新运行
+    if (window.initWidget && !document.getElementById('waifu')) {
+      console.log('initWidget exists, but waifu element missing. Re-initializing...')
+      window.initWidget({ 
+        waifuPath: "/live2d-widget/waifu-texts.json", 
+        cdnPath: "/live2d-widget/" 
+      })
+    }
+
+    // 4. 轮询检查 waifu 元素是否已生成并移动它
+    let attempts = 0
+    const timer = setInterval(() => {
+      attempts++
+      const waifu = document.getElementById('waifu')
+      const container = document.getElementById('waifu-container')
+      
+      if (waifu && container) {
+        console.log('Found waifu element, moving to container')
+        container.appendChild(waifu)
+        waifu.style.position = 'relative'
+        waifu.style.bottom = '0'
+        waifu.style.display = 'block'
+        waifu.style.zIndex = '10'
+        
+        // 隐藏自带的工具栏和提示框，我们用自己的
+        const tool = document.getElementById('waifu-tool')
+        if (tool) tool.style.display = 'none'
+        const tips = document.getElementById('waifu-tips')
+        if (tips) tips.style.display = 'none'
+        
+        const canvas = document.getElementById('live2d')
+        if (canvas) {
+          canvas.style.width = '300px'
+          canvas.style.height = '300px'
+          // 确保 canvas 能够响应点击
+          canvas.style.pointerEvents = 'auto'
+        }
+        
+        isLoading.value = false
+        clearInterval(timer)
+      }
+      
+      if (attempts > 100) { // 10秒超时
+        console.warn('Live2D initialization timeout')
+        isLoading.value = false
+        clearInterval(timer)
+      }
+    }, 100)
+    
+  } catch (err) {
+    console.error('Failed to load Live2D:', err)
+    isLoading.value = false
+  }
+})
+// 安全获取 ipcRenderer，兼容浏览器环境
+const ipcRenderer = (window.require && window.require('electron')) ? window.require('electron').ipcRenderer : {
+  send: (...args) => console.log('[Browser] ipcRenderer.send:', ...args),
+  on: (...args) => console.log('[Browser] ipcRenderer.on:', ...args),
+  removeListener: (...args) => console.log('[Browser] ipcRenderer.removeListener:', ...args),
+  removeAllListeners: (...args) => console.log('[Browser] ipcRenderer.removeAllListeners:', ...args)
+}
+
+// 设置鼠标穿透状态
+ const setIgnoreMouse = (ignore) => {
+   ipcRenderer.send('set-ignore-mouse-events', ignore, { forward: ignore })
+ }
+ 
+  // 全局鼠标移动监听，动态切换穿透状态
+  const handleGlobalMouseMove = (e) => {
+    // 如果文件搜索模态框正在显示，由 watch 统一处理穿透状态
+    if (showFileModal.value) return
+
+    // 使用 elementFromPoint 来更准确地探测当前鼠标下的元素
+    // 因为在 setIgnoreMouseEvents(true, { forward: true }) 模式下，e.target 可能不够准确
+    const element = document.elementFromPoint(e.clientX, e.clientY)
+    
+    // 检查是否在角色区域
+    const isOverCharacter = element && element.closest && element.closest('.character-wrapper')
+    // 检查是否在任务监控窗口 (即使 showTaskDetail 为 true，也只在鼠标悬停窗口时才拦截)
+    // const isOverTaskMonitor = showTaskDetail.value && element && element.closest && element.closest('.monitor-window')
+    
+    const isOverInteractive = isOverCharacter // || isOverTaskMonitor
+    
+    // 如果鼠标在交互区域，则取消穿透；否则开启穿透
+    setIgnoreMouse(!isOverInteractive)
+  }
+ 
+ // 区分点击和拖动
+let mouseDownTime = 0
+let lastX = 0
+let lastY = 0
+let startX = 0
+let startY = 0
+const isDragging = ref(false)
+
+const toggleUI = () => {
+  showInput.value = !showInput.value
+  if (showInput.value) {
+    setTimeout(() => inputRef.value?.focus(), 100)
+  }
+  handleHaptic()
+}
+
+const handleMouseDown = (e) => {
+  // 如果点击的是输入框、按钮、状态标签或浮动触发器，不处理
+  if (
+    e.target.closest('.chat-input') || 
+    e.target.closest('.tool-btn') || 
+    e.target.closest('.status-tags') ||
+    e.target.closest('.floating-trigger') ||
+    e.target.closest('.task-detail-modal') ||
+    e.target.closest('.modal-card') ||
+    e.target.closest('.monitor-window') || 
+    e.target.closest('.task-monitor-modal')
+  ) return
+  
+  // 记录按下时的位置和时间
+  mouseDownTime = Date.now()
+  startX = e.screenX
+  startY = e.screenY
+  lastX = e.screenX
+  lastY = e.screenY
+  isDragging.value = false
+
+  // 监听 mousemove 判定是否进入拖拽状态
+  const onMouseMove = (moveEvent) => {
+    const deltaX = moveEvent.screenX - lastX
+    const deltaY = moveEvent.screenY - lastY
+    const totalDeltaX = Math.abs(moveEvent.screenX - startX)
+    const totalDeltaY = Math.abs(moveEvent.screenY - startY)
+    
+    // 如果位移超过 3px，判定为开始拖拽
+    if (!isDragging.value && (totalDeltaX > 3 || totalDeltaY > 3)) {
+      isDragging.value = true
+    }
+
+    if (isDragging.value) {
+      // 发送位移给主进程移动窗口
+      ipcRenderer.send('move-window', { x: deltaX, y: deltaY })
+      lastX = moveEvent.screenX
+      lastY = moveEvent.screenY
+    }
+  }
+
+  // 监听全局 mouseup
+  const onMouseUp = (upEvent) => {
+    const duration = Date.now() - mouseDownTime
+    const totalDeltaX = Math.abs(upEvent.screenX - startX)
+    const totalDeltaY = Math.abs(upEvent.screenY - startY)
+    
+    // 只有在位移非常小且时间非常短的情况下，才判定为点击
+    if (!isDragging.value && duration < 200 && totalDeltaX < 5 && totalDeltaY < 5) {
+      // 执行点击身体的反馈逻辑 (仅台词反馈，不再切换 UI)
+      handleHaptic()
+      handlePpcClick()
+    }
+    
+    // 延迟一丢丢重置状态，防止某些点击穿透
+    setTimeout(() => {
+      isDragging.value = false
+    }, 50)
+    
+    window.removeEventListener('mousemove', onMouseMove)
+    window.removeEventListener('mouseup', onMouseUp)
+  }
+  
+  window.addEventListener('mousemove', onMouseMove)
+  window.addEventListener('mouseup', onMouseUp)
+}
+
+const randTextures = () => {
+   if (window.WaifuWidget && window.WaifuWidget.loadRandModel) {
+     window.WaifuWidget.loadRandModel()
+   } else if (window.loadRandModel) {
+     window.loadRandModel()
+   } else {
+     console.warn('loadRandModel not found')
+   }
+ }
+ 
+ const switchModel = () => {
+   if (window.WaifuWidget && window.WaifuWidget.loadOtherModel) {
+     window.WaifuWidget.loadOtherModel()
+   } else if (window.loadOtherModel) {
+     window.loadOtherModel()
+   } else {
+     console.warn('loadOtherModel not found')
+   }
+ }
+
+const reloadPet = () => {
+  window.location.reload()
+}
+
+const openDashboard = () => {
+  ipcRenderer.send('open-dashboard')
+}
+
+const sendMessage = async (systemMsg = null, isHidden = false) => {
+  const userMsg = typeof systemMsg === 'string' ? systemMsg : userInput.value
+  if (!userMsg.trim()) return
+  
+  if (!isHidden) {
+    userInput.value = ''
+    showInput.value = false
+  }
+  
+  isSpeaking.value = true
+  isThinking.value = true
+  currentText.value = ''
+  
+  // 发送“正在思考”状态
+  window.dispatchEvent(new CustomEvent('ppc:chat', { detail: 'Pero正在思考中...' }))
+  
+  // 优先使用 localStorage 中的 sessionId，如果没有则默认为 'default'
+  let desktopSessionId = localStorage.getItem('ppc.sessionId') || 'default'
+  
+  // 强制修正：如果 sessionId 不符合规范（例如是旧版本的 UUID 格式），则重置为 'default'
+  // 这里我们认为规范的 sessionId 应该是 'default' 或 'voice_session'，或者至少不是纯 UUID
+  const isLegacyId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(desktopSessionId)
+  if (isLegacyId || !['default', 'voice_session'].includes(desktopSessionId)) {
+    console.log('Resetting legacy or invalid sessionId:', desktopSessionId)
+    desktopSessionId = 'default'
+    localStorage.setItem('ppc.sessionId', 'default')
+  }
+  
+  if (!localStorage.getItem('ppc.sessionId')) {
+    localStorage.setItem('ppc.sessionId', desktopSessionId)
+  }
+
+  try {
+    const response = await fetch('http://localhost:3000/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages: [{ role: 'user', content: userMsg }],
+        source: 'desktop',
+        session_id: desktopSessionId
+      })
+    })
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let fullText = ''
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      // 保留最后一行（可能是不完整的）
+      buffer = lines.pop() || ''
+      
+      for (const line of lines) {
+        const trimmedLine = line.trim()
+        if (trimmedLine.startsWith('data: ')) {
+          const dataStr = trimmedLine.slice(6).trim()
+          if (dataStr === '[DONE]') continue
+          try {
+            const data = JSON.parse(dataStr)
+            
+            // 处理音频数据
+            if (data.audio) {
+              console.log('[Pero] Received audio data in SSE')
+              playAudio(data.audio)
+              continue
+            }
+
+            // [New] 实时处理状态触发器
+            if (data.triggers) {
+              console.log('[Pero] Received real-time triggers:', data.triggers)
+              applyTriggers(data.triggers)
+              continue
+            }
+
+            // 处理状态更新 (MCP/工具调用)
+            if (data.status) {
+              const { type, message } = data.status
+              console.log(`[Pero] Status update: [${type}] ${message}`)
+              // 如果还没有正式文本内容，就在气泡显示状态
+              if (!fullText) {
+                currentText.value = message
+                isThinking.value = true
+              }
+              continue
+            }
+
+            const content = data.choices[0]?.delta?.content || ''
+            if (content) {
+              isThinking.value = false
+              fullText += content
+              const filteredFullText = fullText.replace(/<[^>]+>[\s\S]*?<\/[^>]+>/g, '').replace(/<[^>]*>?/g, '')
+              currentText.value = filteredFullText
+            }
+          } catch (e) {
+            // 解析失败可能是因为行还不完整，但在 split('\n') 逻辑下通常不会发生
+            console.warn('Failed to parse SSE data:', trimmedLine, e)
+          }
+        }
+      }
+    }
+    
+    // 解析状态和记忆
+    parsePeroStatus(fullText)
+    
+    // 最终清理文本并显示
+    const cleanText = cleanMessageContent(fullText)
+    isThinking.value = false
+    currentText.value = cleanText || '主人，我刚才好像走神了...'
+    
+    // 触发气泡更新
+    window.dispatchEvent(new CustomEvent('ppc:chat', { detail: currentText.value }))
+
+  } catch (err) {
+    console.error('Failed to send message:', err)
+    isThinking.value = false
+    currentText.value = '哎呀，网络好像出了一点小状况...'
+  } finally {
+    // isSpeaking.value = false // Don't force stop speaking, as audio might be playing
+    isThinking.value = false
+  }
+}
+
+onUnmounted(() => {
+  // 1. 清理定时器
+  if (replyTimer) clearTimeout(replyTimer)
+  
+  // 2. 移除 IPC 监听
+  if (ipcRenderer && ipcRenderer.removeAllListeners) {
+    ipcRenderer.removeAllListeners('toggle-voice-mode')
+  }
+  
+  // 3. 移除交互监听
+  window.removeEventListener('mousemove', handleGlobalMouseMove)
+  window.removeEventListener('ppc:mood', onMoodUpdate)
+  window.removeEventListener('ppc:mind', onMindUpdate)
+  window.removeEventListener('ppc:vibe', onVibeUpdate)
+  window.removeEventListener('ppc:chat', onChatUpdate)
+  window.removeEventListener('waifu-message', onWaifuMessage)
+
+  // 4. 停止语音模式和清理资源
+  stopVoiceMode()
+  stopLipSync()
+  
+  console.log('PetView unmounted and cleaned up.')
+})
+</script>
+
+<style scoped>
+.pet-container {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  pointer-events: none; /* 允许点击穿透到桌面 */
+}
+
+.character-wrapper {
+  position: relative;
+  pointer-events: auto; /* 仅角色区域响应点击 */
+  cursor: grab;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transition: transform 0.2s;
+}
+
+.character-wrapper.dragging {
+  cursor: grabbing;
+}
+
+.character-wrapper.shake {
+  animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both;
+}
+
+/* 极简灵动触发器 */
+.floating-trigger {
+  position: absolute;
+  right: 15px;
+  top: 55%;
+  transform: translateY(-50%);
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 100;
+  -webkit-app-region: no-drag;
+}
+
+.trigger-core {
+  position: relative;
+  width: 14px;
+  height: 14px;
+  transition: all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.core-dot {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 50%;
+  transition: all 0.4s ease;
+  box-shadow: 
+    0 0 15px rgba(255, 255, 255, 0.6),
+    0 0 5px rgba(255, 136, 170, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+}
+
+.pulse-ring {
+  position: absolute;
+  top: -100%;
+  left: -100%;
+  width: 300%;
+  height: 300%;
+  border: 1px solid rgba(255, 136, 170, 0.3);
+  border-radius: 50%;
+  opacity: 0;
+  animation: pulse-ring 3s infinite cubic-bezier(0.215, 0.61, 0.355, 1);
+}
+
+@keyframes pulse-ring {
+  0% { transform: scale(0.1); opacity: 0; }
+  50% { opacity: 0.6; }
+  100% { transform: scale(1.2); opacity: 0; }
+}
+
+.floating-trigger:hover .core-dot {
+  background: #ffffff;
+  transform: scale(1.4);
+  box-shadow: 
+    0 0 20px rgba(255, 255, 255, 1),
+    0 0 10px rgba(255, 136, 170, 0.6);
+}
+
+.floating-trigger.active .trigger-core {
+  transform: scale(1.3) rotate(180deg);
+}
+
+.floating-trigger.active .core-dot {
+  background: #ffffff;
+  border-radius: 4px; 
+  box-shadow: 0 0 20px rgba(255, 136, 170, 0.5);
+  border-color: #ff88aa;
+}
+
+.floating-trigger.active .pulse-ring {
+  animation: pulse-ring-active 2s infinite ease-out;
+}
+
+@keyframes pulse-ring-active {
+  0% { transform: scale(0.5); opacity: 0.8; border-color: rgba(255, 136, 170, 0.5); }
+  100% { transform: scale(1.5); opacity: 0; border-color: rgba(255, 136, 170, 0); }
+}
+
+@keyframes shake {
+  10%, 90% { transform: translate3d(-0.5px, 0, 0); }
+  20%, 80% { transform: translate3d(1px, 0, 0); }
+  30%, 50%, 70% { transform: translate3d(-1px, 0, 0); }
+  40%, 60% { transform: translate3d(1px, 0, 0); }
+}
+
+/* 状态标签样式 */
+.status-tags {
+  position: absolute;
+  left: -160px;
+  top: 30px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  perspective: 1000px;
+  align-items: flex-end;
+}
+
+.status-tag {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #ff6699;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  white-space: nowrap;
+  box-shadow: 
+    0 4px 15px rgba(255, 136, 170, 0.15),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  cursor: default;
+  animation: float-tag 4s infinite ease-in-out;
+}
+
+.status-tag:hover {
+  transform: translateX(-5px) scale(1.05);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 8px 25px rgba(255, 136, 170, 0.25);
+  max-width: 240px;
+  white-space: normal;
+  z-index: 110;
+}
+
+.status-tag.mood {
+  animation-delay: 0s;
+  background: linear-gradient(135deg, rgba(255, 240, 245, 0.8), rgba(255, 220, 230, 0.8));
+}
+
+.status-tag.vibe {
+  animation-delay: -1.3s;
+  background: linear-gradient(135deg, rgba(240, 248, 255, 0.8), rgba(220, 235, 255, 0.8));
+  color: #6699ff;
+  border-color: rgba(200, 230, 255, 0.5);
+}
+
+.status-tag.mind {
+  animation-delay: -2.6s;
+  background: linear-gradient(135deg, rgba(245, 255, 240, 0.85), rgba(225, 250, 220, 0.85));
+  color: #449977;
+  border-color: rgba(200, 250, 220, 0.5);
+  white-space: normal;
+  max-width: 180px;
+  word-break: break-all;
+  line-height: 1.5;
+  padding: 10px 16px;
+  border-radius: 20px 20px 4px 20px;
+  align-items: flex-start;
+  text-overflow: clip;
+}
+
+.status-tag.mind:hover {
+  max-width: 220px;
+  transform: translateX(-10px) scale(1.02);
+}
+
+@keyframes float-tag {
+  0%, 100% { transform: translateY(0) rotate(0); }
+  33% { transform: translateY(-3px) rotate(1deg); }
+  66% { transform: translateY(2px) rotate(-1deg); }
+}
+
+.pet-avatar-container {
+  width: 300px;
+  height: 300px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
+  position: relative;
+}
+
+.loading-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #ffccdd;
+  animation: pulse 1.5s infinite;
+}
+
+.loading-icon {
+  width: 60px;
+  height: 60px;
+  margin-bottom: 10px;
+  opacity: 0.7;
+}
+
+.loading-text {
+  font-size: 12px;
+  font-weight: bold;
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); opacity: 0.8; }
+  50% { transform: scale(1.05); opacity: 1; }
+  100% { transform: scale(1); opacity: 0.8; }
+}
+
+#waifu {
+  width: 300px;
+  height: 300px;
+  display: none; /* 初始隐藏，直到被移动到容器 */
+}
+
+#live2d {
+  cursor: grab;
+}
+
+#live2d:active {
+  cursor: grabbing;
+}
+
+.bubble {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  padding: 14px 20px;
+  border-radius: 24px;
+  margin-bottom: -10px;
+  z-index: 100;
+  max-width: 240px;
+  box-shadow: 
+    0 10px 40px rgba(255, 136, 170, 0.2),
+    0 0 0 1px rgba(255, 255, 255, 0.4);
+  position: relative;
+  -webkit-app-region: no-drag;
+  border: none;
+  animation: bubble-float 3s infinite ease-in-out;
+}
+
+.text-content {
+  font-size: 14px;
+  line-height: 1.6;
+  color: #4a5568;
+  word-break: break-all;
+  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-weight: 500;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+.thinking-text {
+  color: #888;
+  font-style: italic;
+  display: flex;
+  align-items: center;
+}
+
+.thinking-text::after {
+  content: "...";
+  display: inline-block;
+  width: 12px;
+  animation: thinking-dots 1.5s infinite;
+}
+
+.thinking-details {
+  margin: 4px 0;
+  border: 1px dashed rgba(136, 136, 136, 0.3);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.4);
+  font-size: 12px;
+}
+
+.thinking-summary {
+  cursor: pointer;
+  padding: 4px 8px;
+  color: #888;
+  user-select: none;
+  font-size: 12px;
+  opacity: 0.8;
+  transition: opacity 0.2s;
+}
+
+.thinking-summary:hover {
+  opacity: 1;
+}
+
+.thinking-body {
+  padding: 4px 8px 8px 8px;
+  color: #666;
+  white-space: pre-wrap;
+  font-family: Consolas, Monaco, "Andale Mono", monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  border-top: 1px dashed rgba(136, 136, 136, 0.1);
+}
+
+.action-text {
+  color: #888;
+  font-style: italic;
+  font-size: 0.95em;
+  margin: 0 2px;
+}
+
+@keyframes thinking-dots {
+  0% { content: "."; }
+  33% { content: ".."; }
+  66% { content: "..."; }
+}
+
+.bubble-tail {
+  position: absolute;
+  bottom: -12px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 24px;
+  height: 12px;
+  overflow: hidden;
+}
+
+.bubble-tail::after {
+  content: '';
+  position: absolute;
+  top: -12px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 16px;
+  height: 16px;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
+  border-radius: 4px;
+  transform: rotate(45deg) translateX(-70%);
+  box-shadow: 2px 2px 5px rgba(255, 136, 170, 0.1);
+}
+
+@keyframes bubble-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+
+.input-overlay {
+  margin-top: 15px;
+  -webkit-app-region: no-drag;
+  perspective: 1000px;
+}
+
+.chat-input {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(15px);
+  -webkit-backdrop-filter: blur(15px);
+  border: 1.5px solid rgba(255, 136, 170, 0.4);
+  border-radius: 24px;
+  padding: 10px 22px;
+  width: 220px;
+  outline: none;
+  font-size: 14px;
+  font-weight: 500;
+  color: #d6336c; /* 更深一些的粉紫色，提升可读性 */
+  box-shadow: 
+    0 8px 25px rgba(255, 136, 170, 0.2),
+    inset 0 0 10px rgba(255, 255, 255, 0.5);
+  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.chat-input::placeholder {
+  color: rgba(214, 51, 108, 0.5); /* 对应加深的占位符颜色 */
+  font-weight: 400;
+}
+
+.chat-input:focus {
+  width: 260px;
+  background: rgba(255, 255, 255, 0.95);
+  border-color: #ff6699;
+  box-shadow: 
+    0 10px 30px rgba(255, 136, 170, 0.35),
+    0 0 0 4px rgba(255, 136, 170, 0.15);
+  transform: translateY(-2px);
+  color: #c2185b;
+}
+
+.pet-tools {
+  position: absolute;
+  right: -50px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.4);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  padding: 10px;
+  border-radius: 24px;
+  -webkit-app-region: no-drag;
+  box-shadow: 
+    0 8px 32px rgba(255, 136, 170, 0.15),
+    0 0 0 1px rgba(255, 255, 255, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+}
+
+.tool-btn {
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  width: 36px;
+  height: 36px;
+  border-radius: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+  color: #ff6699;
+}
+
+.tool-btn:hover {
+  transform: scale(1.15) rotate(5deg);
+  background: #ffffff;
+  box-shadow: 0 6px 15px rgba(255, 136, 170, 0.3);
+  color: #ff3366;
+}
+
+.tool-btn:active {
+  transform: scale(0.95);
+}
+
+.fade-enter-active, .fade-leave-active {
+  transition: opacity 0.5s;
+}
+.fade-enter-from, .fade-leave-to {
+  opacity: 0;
+}
+
+/* PTT 样式 */
+.ptt-container {
+  position: absolute;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  pointer-events: auto;
+}
+
+.ptt-button {
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  padding: 12px 24px;
+  border-radius: 30px;
+  color: white;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  white-space: nowrap;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+}
+
+.ptt-button:hover {
+  background: rgba(0, 0, 0, 0.8);
+  transform: translateY(-2px);
+  border-color: #ff99cc;
+}
+
+.ptt-button:active, .ptt-button.recording {
+  background: #ff99cc;
+  border-color: white;
+  transform: scale(0.95);
+  box-shadow: 0 0 20px rgba(255, 153, 204, 0.4);
+}
+
+.ptt-icon {
+  font-size: 20px;
+}
+
+.ptt-text {
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.voice-btn.active.mode-vad {
+  color: #ff99cc;
+}
+
+.voice-btn.active.mode-ptt {
+  color: #5fb878;
+}
+
+/* --- Complex Task & Modal Styles --- */
+
+.complex-task-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 16px;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  border: 1px solid rgba(255, 136, 170, 0.2);
+  box-shadow: 0 4px 15px rgba(255, 136, 170, 0.1);
+  min-width: 200px;
+}
+
+.complex-task-summary:hover {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 0 8px 20px rgba(255, 136, 170, 0.2);
+  border-color: rgba(255, 136, 170, 0.5);
+}
+
+.complex-task-summary:active {
+  transform: scale(0.98);
+}
+
+.summary-icon {
+  font-size: 22px;
+  background: linear-gradient(135deg, #fff0f5 0%, #ffe6ee 100%);
+  width: 42px;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  box-shadow: inset 0 0 10px rgba(255, 255, 255, 0.8);
+}
+
+.summary-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.summary-title {
+  font-size: 13px;
+  font-weight: bold;
+  color: #4a5568;
+  margin-bottom: 2px;
+}
+
+.summary-hint {
+  font-size: 11px;
+  color: #ff6699;
+  opacity: 0.8;
+}
+
+/* Modal Styles */
+.task-detail-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: transparent; /* 移除全屏半透明背景，避免显示巨大的矩形边框 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999; /* Ensure it's on top of everything */
+  pointer-events: auto;
+}
+
+.modal-card {
+  background: rgba(255, 255, 255, 0.98);
+  width: 90%;
+  max-width: 600px;
+  max-height: 80vh;
+  border-radius: 24px;
+  box-shadow: 
+    0 20px 50px rgba(0, 0, 0, 0.2),
+    0 0 0 1px rgba(255, 255, 255, 0.5);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: modal-pop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+@keyframes modal-pop {
+  0% { transform: scale(0.9) translateY(20px); opacity: 0; }
+  100% { transform: scale(1) translateY(0); opacity: 1; }
+}
+
+.modal-header {
+  padding: 16px 24px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: linear-gradient(to right, #fffafa, #fff);
+}
+
+.modal-title {
+  font-size: 16px;
+  font-weight: bold;
+  color: #333;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  font-size: 28px;
+  color: #ccc;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  transition: all 0.2s;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+}
+
+.close-btn:hover {
+  color: #ff6699;
+  background: rgba(255, 102, 153, 0.1);
+}
+
+.modal-body {
+  padding: 24px;
+  overflow-y: auto;
+  font-size: 15px;
+  line-height: 1.7;
+  color: #2d3748;
+}
+
+.modal-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.modal-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.modal-body::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 4px;
+}
+
+.modal-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+/* Thinking Block in Modal */
+.thinking-block {
+  margin: 16px 0;
+  background: #f8f9fa;
+  border-radius: 12px;
+  border: 1px solid #e9ecef;
+  overflow: hidden;
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.02);
+}
+
+.thinking-label {
+  padding: 8px 16px;
+  background: #eef1f5;
+  font-size: 12px;
+  font-weight: bold;
+  color: #6c757d;
+  border-bottom: 1px solid #e9ecef;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.thinking-content {
+  padding: 16px;
+  font-family: 'JetBrains Mono', Consolas, Monaco, monospace;
+  font-size: 13px;
+  color: #495057;
+  white-space: pre-wrap;
+  background: #fafbfc;
+}</style>

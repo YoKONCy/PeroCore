@@ -1,0 +1,17 @@
+[package]
+name = "pero_rust_core"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "pero_rust_core"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.20", features = ["extension-module"] }
+ahash = "0.8" # Faster HashMap
+rayon = "1.8" # Parallel processing
+serde = { version = "1.0", features = ["derive"] }
+usearch = "2.8" # HNSW Vector Index
+regex = "1.10" # Text processing

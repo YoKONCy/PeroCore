@@ -1,0 +1,22 @@
+{
+  "manifestVersion": "1.0.1",
+  "name": "FileOps",
+  "displayName": "深度文件操作 (FileOps)",
+  "version": "1.0.1",
+  "description": "深度阅读。支持PDF/Word等复杂文档的读取。",
+  "author": "PeroCore",
+  "pluginType": "python-module",
+  "entryPoint": "file_ops.py",
+  "capabilities": {
+    "invocationCommands": [
+      {
+        "commandIdentifier": "read_file_content",
+        "description": "解析文档。将PDF/Word/MD等转换为纯文本。"
+      },
+      {
+        "commandIdentifier": "list_directory",
+        "description": "列出文件。查看目录下的详细文件列表。"
+      }
+    ]
+  }
+}
