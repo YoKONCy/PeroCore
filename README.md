@@ -37,6 +37,10 @@
 
 > **"Technology should not be cold. We build memories, not just databases."**
 
+<br/>
+
+<img src="./github_src/cover.png" width="100%" alt="PeroCore Cover"/>
+
 </div>
 
 <!-- 动态分隔线 -->

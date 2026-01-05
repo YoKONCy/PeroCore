@@ -334,13 +334,19 @@ class SystemPromptPreprocessor(BasePreprocessor):
         variables = context.get("variables", {})
         full_context_messages = context.get("full_context_messages", [])
         is_voice_mode = context.get("is_voice_mode", False)
+        nit_id = context.get("nit_id")
 
-        
         final_messages = prompt_manager.compose_messages(
             full_context_messages, 
             variables, 
             is_voice_mode=is_voice_mode
         )
+        
+        # [NIT Security] Inject Dynamic Handshake ID into System Prompt
+        if nit_id and final_messages and final_messages[0]["role"] == "system":
+            from nit_core.security import NITSecurityManager
+            security_prompt = NITSecurityManager.get_injection_prompt(nit_id)
+            final_messages[0]["content"] += "\n" + security_prompt
         
         context["final_messages"] = final_messages
         return context

@@ -16,20 +16,29 @@ class ScreenshotManager:
     def capture(self) -> Dict:
         """捕获当前屏幕并存入池中"""
         try:
+            start_time = time.time()
             screenshot = pyautogui.screenshot()
-            # 缩放图片以节省流量和内存 (可选，但推荐)
-            # screenshot.thumbnail((1280, 720)) 
+            
+            # [Optimization] Resize if larger than 1080p to improve performance
+            if screenshot.width > 1920 or screenshot.height > 1080:
+                screenshot.thumbnail((1920, 1080))
+            
             buffered = io.BytesIO()
             screenshot.save(buffered, format="PNG")
             img_base64 = base64.b64encode(buffered.getvalue()).decode()
             
+            now = time.time()
+            time_str = time.strftime("%H:%M:%S", time.localtime(now))
+            
             data = {
-                "timestamp": time.time(),
-                "time_str": time.strftime("%H:%M:%S", time.localtime()),
+                "timestamp": now,
+                "time_str": time_str,
                 "base64": img_base64
             }
             self.pool.append(data)
-            # print(f"[ScreenshotManager] Captured screenshot at {data['time_str']}")
+            
+            duration = (now - start_time) * 1000
+            print(f"[ScreenshotManager] Captured screenshot at {time_str} (Took {duration:.2f}ms)")
             return data
         except Exception as e:
             print(f"[ScreenshotManager] Capture failed: {e}")

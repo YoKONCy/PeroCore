@@ -95,6 +95,7 @@ class NITBridge:
         """
         根据 inputSchema 将参数转换为正确的类型
         (当前 NIT Parser 提取的所有参数值都是字符串)
+        实现了"强力自愈"逻辑：尽可能将不规范的输入修正为符合 Schema 的类型。
         """
         if not schema or "properties" not in schema:
             return params
@@ -116,21 +117,114 @@ class NITBridge:
                     target_type = properties[schema_key].get("type", "string")
                     break
             
-            # 类型转换
+            # 类型转换 (强力自愈模式)
             try:
+                # 1. 整数 Integer
                 if target_type == "integer":
-                    converted[target_key] = int(v)
+                    try:
+                        # 优先尝试直接转换 "5" -> 5
+                        converted[target_key] = int(v)
+                    except ValueError:
+                        try:
+                            # 尝试浮点截断 "5.0" -> 5
+                            converted[target_key] = int(float(v))
+                        except ValueError:
+                            # 无法挽救，保留原值
+                            converted[target_key] = v
+
+                # 2. 浮点数 Number
                 elif target_type == "number":
-                    converted[target_key] = float(v)
+                    try:
+                        converted[target_key] = float(v)
+                    except ValueError:
+                        converted[target_key] = v
+
+                # 3. 布尔值 Boolean
                 elif target_type == "boolean":
-                    converted[target_key] = v.lower() in ("true", "1", "yes")
-                elif target_type == "array" or target_type == "object":
+                    if isinstance(v, str):
+                        lower_v = v.lower().strip()
+                        if lower_v in ("true", "1", "yes", "on", "y"):
+                            converted[target_key] = True
+                        elif lower_v in ("false", "0", "no", "off", "n"):
+                            converted[target_key] = False
+                        else:
+                            # 无法识别的布尔意图，保留原值
+                            converted[target_key] = v
+                    else:
+                        converted[target_key] = bool(v)
+
+                # 4. 数组 Array
+                elif target_type == "array":
                     import json
-                    converted[target_key] = json.loads(v)
+                    if isinstance(v, str):
+                        v = v.strip()
+                        try:
+                            # 尝试标准 JSON 解析
+                            parsed = json.loads(v)
+                            if isinstance(parsed, list):
+                                converted[target_key] = parsed
+                            else:
+                                # 解析出来不是列表（比如是数字或对象），强制包装
+                                converted[target_key] = [parsed]
+                        except json.JSONDecodeError:
+                            # JSON 解析失败，尝试其他策略
+                            if v.startswith('[') and v.endswith(']'):
+                                # 看起来像数组但格式不对（可能是单引号），尝试修复引号
+                                try:
+                                    fixed_json = v.replace("'", '"')
+                                    parsed = json.loads(fixed_json)
+                                    if isinstance(parsed, list):
+                                        converted[target_key] = parsed
+                                    else:
+                                        converted[target_key] = [v] # 放弃治疗
+                                except:
+                                    converted[target_key] = [v] # 放弃治疗
+                            elif "," in v:
+                                # 尝试逗号分隔 "item1, item2" -> ["item1", "item2"]
+                                converted[target_key] = [item.strip() for item in v.split(",") if item.strip()]
+                            else:
+                                # 既不是JSON也不是逗号分隔，视为单元素数组 "item1" -> ["item1"]
+                                converted[target_key] = [v]
+                    else:
+                        # 已经是其他类型（非字符串），如果不是列表则包装
+                        if not isinstance(v, list):
+                            converted[target_key] = [v]
+                        else:
+                            converted[target_key] = v
+
+                # 5. 对象 Object
+                elif target_type == "object":
+                    import json
+                    if isinstance(v, str):
+                        v = v.strip()
+                        try:
+                            converted[target_key] = json.loads(v)
+                        except json.JSONDecodeError:
+                            # 尝试修复单引号问题 "{'a': 1}" -> '{"a": 1}'
+                            try:
+                                fixed_json = v.replace("'", '"')
+                                converted[target_key] = json.loads(fixed_json)
+                            except:
+                                # 实在修不好，保留原值
+                                converted[target_key] = v
+                    else:
+                        converted[target_key] = v
+
+                # 6. 字符串 String
                 else:
-                    converted[target_key] = v
-            except:
-                # 转换失败则保留原值，让 MCP Server 处理报错
+                    # 即使是字符串，也可能需要简单的清洗（比如去除多余引号）
+                    if isinstance(v, str):
+                         # 如果 LLM 传入了带引号的字符串 '"hello"'，去掉外层引号
+                         if len(v) >= 2 and ((v.startswith('"') and v.endswith('"')) or (v.startswith("'") and v.endswith("'"))):
+                             converted[target_key] = v[1:-1]
+                         else:
+                             converted[target_key] = v
+                    else:
+                        converted[target_key] = str(v)
+
+            except Exception as e:
+                # 万一发生未捕获异常，为防止崩溃，保留原值
+                logger.warning(f"[NIT-Bridge] Param conversion error for key {k}: {e}")
                 converted[target_key] = v
                 
         return converted

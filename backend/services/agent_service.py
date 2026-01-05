@@ -27,6 +27,7 @@ from sqlmodel import select, desc
 from nit_core.tools import TOOLS_MAPPING, TOOLS_DEFINITIONS, plugin_manager
 from nit_core.tools.core.ScreenVision.screen_ocr import get_screenshot_base64, save_screenshot
 from nit_core.tools.core.SessionOps.session_ops import set_current_session_context
+from nit_core.security import NITSecurityManager
 
 from services.task_manager import task_manager
 
@@ -450,7 +451,7 @@ Tool List Length: {len(tools_list_str)}
 
         return clients
 
-    async def _save_parsed_metadata(self, text: str, source: str = "desktop", mcp_clients: List[McpClient] = None, execute_nit: bool = True) -> List[Dict[str, Any]]:
+    async def _save_parsed_metadata(self, text: str, source: str = "desktop", mcp_clients: List[McpClient] = None, execute_nit: bool = True, expected_nit_id: str = None) -> List[Dict[str, Any]]:
         """解析并保存 LLM 返回的元数据。现在主要负责 NIT 工具调用。"""
         try:
             # 1. 处理 NIT 工具调用 (核心逻辑)
@@ -469,7 +470,7 @@ Tool List Length: {len(tools_list_str)}
                     except Exception as e:
                         print(f"[Agent] Failed to bridge MCP tools to NIT: {e}")
 
-                nit_results = await nit_dispatcher.dispatch(text, extra_plugins=extra_plugins)
+                nit_results = await nit_dispatcher.dispatch(text, extra_plugins=extra_plugins, expected_nit_id=expected_nit_id)
                 
                 if nit_results:
                     print(f"[Agent] Executed {len(nit_results)} NIT tool calls")
@@ -666,6 +667,9 @@ Tool List Length: {len(tools_list_str)}
             print(f"[Agent] Background dream failed: {e}")
 
     async def chat(self, messages: List[Dict[str, Any]], source: str = "desktop", session_id: str = "default", on_status: Optional[Any] = None, is_voice_mode: bool = False, user_text_override: str = None, skip_save: bool = False, system_trigger_instruction: str = None) -> AsyncIterable[str]:
+        # [NIT Security] Generate ID for this request context
+        current_nit_id = NITSecurityManager.generate_random_id()
+        
         # Notify CompanionService of user activity to prevent interruption
         try:
             from services.companion_service import companion_service
@@ -714,6 +718,7 @@ Tool List Length: {len(tools_list_str)}
             "is_voice_mode": is_voice_mode,
             "agent_service": self,
             "variables": {},
+            "nit_id": current_nit_id,
         }
         
         # 2. Run Preprocessor Pipeline
@@ -913,7 +918,7 @@ Tool List Length: {len(tools_list_str)}
                     # 检查是否有 NIT 调用指令，如果有则执行并进入下一轮
                     if full_response_text and full_response_text.strip():
                         # 注意：这里我们尝试执行 NIT，如果有结果，说明模型试图调用工具
-                        nit_results = await self._save_parsed_metadata(full_response_text, source, mcp_clients, execute_nit=True)
+                        nit_results = await self._save_parsed_metadata(full_response_text, source, mcp_clients, execute_nit=True, expected_nit_id=current_nit_id)
                         
                         if nit_results:
                             print(f"[Agent] Detected {len(nit_results)} NIT calls. Continuing conversation loop.")
@@ -1182,24 +1187,35 @@ Tool List Length: {len(tools_list_str)}
                             if on_status: await on_status("thinking", "正在查看截图池...")
                             try:
                                 from services.screenshot_service import screenshot_manager
-                                # 1. 确保当前也有一个最新的截图
-                                screenshot_manager.capture()
                                 
-                                # 2. 获取请求的数量
+                                # 1. 获取请求的数量
                                 count = function_args.get("count", 1)
                                 if not isinstance(count, int): count = 1
                                 count = max(1, min(10, count))
+
+                                # 2. 捕获最新截图
+                                # 强制捕获一张最新的，确保“所见即所得”，避免读取缓存池中的旧图
+                                latest_shot = screenshot_manager.capture()
                                 
-                                # 使用较短的有效期（如 15 秒），确保获取到的是刚刚截取的，避免读取旧缓存
-                                recent_screenshots = screenshot_manager.get_recent(count, max_age=15)
+                                final_screenshots = []
                                 
-                                if not recent_screenshots:
-                                    function_response = "❌ 无法获取最新截图（可能截图失败或已过期）。"
+                                if count == 1:
+                                    # 如果只需要一张，直接使用刚刚捕获的这张，确保最新
+                                    if latest_shot:
+                                        final_screenshots = [latest_shot]
                                 else:
-                                    # 3. 将多张截图注入到下一轮的上下文中
-                                    content = [{"type": "text", "text": f"系统提示：以下是最近捕获的 {len(recent_screenshots)} 张屏幕截图（按时间顺序排列）："}]
+                                    # 如果需要多张（回溯），则从池子中取
+                                    # 使用较短的有效期（如 15 秒），确保获取到的是刚刚截取的
+                                    recent_screenshots = screenshot_manager.get_recent(count, max_age=15)
+                                    final_screenshots = recent_screenshots
+                                
+                                if not final_screenshots:
+                                    function_response = "❌ 无法获取最新截图（可能截图失败）。"
+                                else:
+                                    # 3. 将截图注入到下一轮的上下文中
+                                    content = [{"type": "text", "text": f"系统提示：以下是最近捕获的 {len(final_screenshots)} 张屏幕截图（按时间顺序排列）："}]
                                     
-                                    for i, shot in enumerate(recent_screenshots):
+                                    for i, shot in enumerate(final_screenshots):
                                         content.append({
                                             "type": "text", 
                                             "text": f"--- 截图 {i+1} (捕获时间: {shot['time_str']}) ---"
@@ -1216,9 +1232,9 @@ Tool List Length: {len(tools_list_str)}
                                         "content": content
                                     }
                                     final_messages.append(screenshot_msg)
-                                    print(f"[Agent] {len(recent_screenshots)} screenshots injected into context.")
+                                    print(f"[Agent] {len(final_screenshots)} screenshots injected into context. (Newest: {final_screenshots[-1]['time_str']})")
                                     
-                                    function_response = f"已成功获取并发送了最近的 {len(recent_screenshots)} 张截图。请查看最新的消息中的图片进行分析。"
+                                    function_response = f"已成功获取并发送了最近的 {len(final_screenshots)} 张截图。请查看最新的消息中的图片进行分析。"
                             except Exception as e:
                                  function_response = f"截图工具执行出错: {e}"
 

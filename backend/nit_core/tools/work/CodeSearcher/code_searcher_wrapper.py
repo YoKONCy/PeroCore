@@ -1,107 +1,106 @@
 import os
 import json
-import subprocess
 import asyncio
-from typing import Optional, List, Dict, Any
+from typing import Optional
 
-# Get the directory where this script is located
-TOOLS_DIR = os.path.dirname(os.path.abspath(__file__))
-CODE_SEARCHER_EXE = os.path.join(TOOLS_DIR, "CodeSearcher.exe")
+# 定位二进制执行文件路径
+CURRENT_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+SEARCH_ENGINE_BINARY = os.path.join(CURRENT_SCRIPT_DIR, "CodeSearcher.exe")
 
 async def code_search(
-    query: str,
-    search_path: Optional[str] = None,
-    case_sensitive: bool = False,
-    whole_word: bool = False,
-    context_lines: int = 2
+    query_pattern: str,
+    target_rel_path: Optional[str] = None,
+    is_case_sensitive: bool = False,
+    is_whole_word: bool = False,
+    context_lines_count: int = 2
 ) -> str:
     """
-    Search for code snippets or keywords in the project using the high-performance CodeSearcher tool.
+    使用高性能 Rust 搜索引擎在项目中检索代码片段或关键字。
     
-    Args:
-        query (str): The keyword, code snippet, or regex pattern to search for.
-        search_path (Optional[str]): Relative path to search within. Defaults to the entire project workspace if omitted.
-        case_sensitive (bool): Whether the search should be case-sensitive. Defaults to False.
-        whole_word (bool): Whether to match whole words only. Defaults to False.
-        context_lines (int): Number of context lines to show before and after the match. Defaults to 2.
+    参数:
+        query_pattern (str): 搜索关键词、代码片段或正则表达式。
+        target_rel_path (Optional[str]): 搜索的相对路径。默认为整个项目工作区。
+        is_case_sensitive (bool): 是否大小写敏感。
+        is_whole_word (bool): 是否仅匹配完整单词。
+        context_lines_count (int): 匹配行前后的上下文行数。
         
-    Returns:
-        str: A JSON-formatted string containing the search results, or an error message.
+    返回:
+        str: 包含搜索结果或错误信息的 JSON 格式字符串。
     """
     
-    # Check if the executable exists
-    if not os.path.exists(CODE_SEARCHER_EXE):
+    # 检查核心引擎是否存在
+    if not os.path.exists(SEARCH_ENGINE_BINARY):
         return json.dumps({
             "status": "error",
-            "error": "CodeSearcher.exe not found in tools directory."
+            "error": f"找不到搜索引擎核心组件: {SEARCH_ENGINE_BINARY}"
         })
 
-    # Prepare input arguments for CodeSearcher
-    input_args = {
-        "query": query,
-        "search_path": search_path,
-        "case_sensitive": str(case_sensitive).lower(), # CodeSearcher expects string "true"/"false"
-        "whole_word": str(whole_word).lower(),
-        "context_lines": str(context_lines)
+    # 构造传递给 Rust 引擎的 JSON 参数
+    engine_input_params = {
+        "query": query_pattern,
+        "search_path": target_rel_path,
+        "case_sensitive": str(is_case_sensitive).lower(),
+        "whole_word": str(is_whole_word).lower(),
+        "context_lines": str(context_lines_count)
     }
 
     try:
-        # Run CodeSearcher as a subprocess
-        # We use asyncio.create_subprocess_exec to run it asynchronously
-        process = await asyncio.create_subprocess_exec(
-            CODE_SEARCHER_EXE,
+        # 异步启动 Rust 引擎子进程
+        search_process = await asyncio.create_subprocess_exec(
+            SEARCH_ENGINE_BINARY,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
 
-        # Send input arguments as JSON to stdin
-        input_json = json.dumps(input_args)
+        # 将参数编码为 JSON 并发送到 stdin
+        encoded_input_json = json.dumps(engine_input_params).encode()
         
         try:
-            # [Fix] Add timeout to prevent hanging processes
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(input=input_json.encode()), 
+            # 运行引擎并设置超时，防止进程挂死
+            stdout_data, stderr_data = await asyncio.wait_for(
+                search_process.communicate(input=encoded_input_json), 
                 timeout=30.0
             )
         except asyncio.TimeoutError:
             try:
-                process.kill()
-            except:
+                search_process.kill()
+            except Exception:
                 pass
             return json.dumps({
                 "status": "error",
-                "error": "CodeSearcher execution timed out after 30s."
+                "error": "代码搜索任务执行超时（超过 30 秒）。"
             })
 
-        if process.returncode != 0:
+        if search_process.returncode != 0:
+            error_details = stderr_data.decode().strip()
             return json.dumps({
                 "status": "error",
-                "error": f"CodeSearcher process failed with code {process.returncode}: {stderr.decode()}"
+                "error": f"搜索引擎内部错误 (代码 {search_process.returncode}): {error_details}"
             })
 
-        # Return the stdout directly (it should be already JSON formatted by CodeSearcher)
-        output = stdout.decode().strip()
-        if not output:
+        # 直接返回引擎输出的 JSON 结果
+        engine_output_str = stdout_data.decode().strip()
+        if not engine_output_str:
              return json.dumps({
                 "status": "error",
-                "error": "CodeSearcher returned empty output."
+                "error": "搜索引擎返回了空结果。"
             })
             
-        return output
+        return engine_output_str
 
-    except Exception as e:
+    except Exception as exc:
         return json.dumps({
             "status": "error",
-            "error": f"Failed to execute CodeSearcher: {str(e)}"
+            "error": f"执行代码搜索时发生意外异常: {str(exc)}"
         })
 
 if __name__ == "__main__":
-    # Test block
-    async def test():
-        print("Testing CodeSearcher...")
-        # Search for "code_search" in the current directory (tools)
-        result = await code_search(query="code_search", search_path=".", context_lines=1)
-        print(f"Result: {result}")
+    # 调试测试块
+    async def run_debug_test():
+        print("正在初始化代码搜索测试...")
+        # 在当前目录下搜索 "code_search"
+        test_result = await code_search(query_pattern="code_search", target_rel_path=".", context_lines_count=1)
+        print(f"搜索测试完成。结果:\n{test_result}")
 
-    asyncio.run(test())
+    asyncio.run(run_debug_test())

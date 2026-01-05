@@ -6,7 +6,7 @@ from services.embedding_service import embedding_service
 
 # 尝试导入 Rust 核心
 try:
-    from pero_rust_core import VectorIndex
+    from pero_rust_core import SemanticVectorIndex
     RUST_AVAILABLE = True
 except ImportError:
     RUST_AVAILABLE = False
@@ -65,23 +65,23 @@ class VectorStoreService:
         # Load Memory Index
         if os.path.exists(self.memory_index_path):
             try:
-                self.memory_index = VectorIndex.load(self.memory_index_path, self.dimension)
+                self.memory_index = SemanticVectorIndex.load_index(self.memory_index_path, self.dimension)
                 # print(f"[VectorStore] Memory index loaded. Size: {self.memory_index.size()}")
             except Exception as e:
                 print(f"[VectorStore] Failed to load memory index: {e}. Creating new.")
-                self.memory_index = VectorIndex(self.dimension, 10000)
+                self.memory_index = SemanticVectorIndex(self.dimension, 10000)
         else:
-            self.memory_index = VectorIndex(self.dimension, 10000)
+            self.memory_index = SemanticVectorIndex(self.dimension, 10000)
 
         # Load Tag Index
         if os.path.exists(self.tag_index_path):
             try:
-                self.tag_index = VectorIndex.load(self.tag_index_path, self.dimension)
+                self.tag_index = SemanticVectorIndex.load_index(self.tag_index_path, self.dimension)
             except Exception as e:
                 print(f"[VectorStore] Failed to load tag index: {e}. Creating new.")
-                self.tag_index = VectorIndex(self.dimension, 1000)
+                self.tag_index = SemanticVectorIndex(self.dimension, 1000)
         else:
-            self.tag_index = VectorIndex(self.dimension, 1000)
+            self.tag_index = SemanticVectorIndex(self.dimension, 1000)
 
         # Load Tag Map
         if os.path.exists(self.tag_map_path):
@@ -99,8 +99,8 @@ class VectorStoreService:
     def save(self):
         if not RUST_AVAILABLE or not self._lazy_loaded: return
         try:
-            self.memory_index.save(self.memory_index_path)
-            self.tag_index.save(self.tag_index_path)
+            self.memory_index.persist_index(self.memory_index_path)
+            self.tag_index.persist_index(self.tag_index_path)
             
             with open(self.tag_map_path, 'w', encoding='utf-8') as f:
                 json.dump({
@@ -118,7 +118,7 @@ class VectorStoreService:
         if not self.memory_index: return
         
         try:
-            self.memory_index.add(memory_id, embedding)
+            self.memory_index.insert_vector(memory_id, embedding)
             # Auto-save is expensive if done every time, but safe. 
             # Given Rust save is atomic and fast for small files, we can do it.
             # Or rely on periodic save / application exit save.
@@ -134,7 +134,7 @@ class VectorStoreService:
         
         try:
             # Rust supports batch add
-            self.memory_index.add_batch(ids, embeddings)
+            self.memory_index.batch_insert_vectors(ids, embeddings)
             self.save()
         except Exception as e:
             print(f"[VectorStore] Batch add failed: {e}")
@@ -149,7 +149,7 @@ class VectorStoreService:
         
         try:
             # Rust returns [(id, dist), ...]
-            results = self.memory_index.search(query_vec, limit)
+            results = self.memory_index.search_similar_vectors(query_vec, limit)
             
             output = []
             for mid, dist in results:
@@ -195,7 +195,7 @@ class VectorStoreService:
             self.tag_map[tag_name] = tid
             self.tag_map_rev[tid] = tag_name
             try:
-                self.tag_index.add(tid, embedding)
+                self.tag_index.insert_vector(tid, embedding)
                 self.save()
             except Exception as e:
                 print(f"[VectorStore] Add tag failed: {e}")
@@ -205,7 +205,7 @@ class VectorStoreService:
         if not self.tag_index: return []
         
         try:
-            results = self.tag_index.search(query_vec, limit)
+            results = self.tag_index.search_similar_vectors(query_vec, limit)
             output = []
             for tid, dist in results:
                 tag_name = self.tag_map_rev.get(tid, f"Unknown_{tid}")

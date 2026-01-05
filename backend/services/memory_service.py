@@ -395,16 +395,16 @@ class MemoryService:
 
         # [Rust Integration]
         try:
-            from pero_rust_core import SpreadingActivationEngine
+            from pero_rust_core import CognitiveGraphEngine
             # print("[Memory] Using Rust engine for spreading activation...")
             
-            engine = SpreadingActivationEngine()
-            engine.add_relations(rust_relations)
+            engine = CognitiveGraphEngine()
+            engine.batch_add_connections(rust_relations)
             
             # 执行扩散
             # initial_scores 只包含 anchors，因为我们只关心从这些节点出发能到达哪里
-            # 注意：Rust 的 compute 返回的是所有受影响节点的得分
-            new_scores = engine.compute(activation_scores, steps=1, decay=1.0) # decay=1.0 因为我们在 relation weight 里已经处理了衰减
+            # 注意：Rust 的 propagate_activation 返回的是所有受影响节点的得分
+            new_scores = engine.propagate_activation(activation_scores, steps=1, decay=1.0) # decay=1.0 因为我们在 relation weight 里已经处理了衰减
             
             # 合并结果
             activation_scores = new_scores

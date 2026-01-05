@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Dict, Any, List, Callable
 from .parser import NITParser
 from .interpreter import execute_nit_script
+from .security import NITSecurityManager
 from core.plugin_manager import get_plugin_manager
 import re
 
@@ -224,26 +225,58 @@ async generate_report(data=$summary, callback="notify_user")
         msg = params.get('message', '') or params.get('msg', '')
         return f"[Echo Plugin] Received: {msg}"
 
-    async def dispatch(self, text: str, extra_plugins: Dict[str, Any] = None) -> List[Dict[str, Any]]:
+    async def dispatch(self, text: str, extra_plugins: Dict[str, Any] = None, expected_nit_id: str = None) -> List[Dict[str, Any]]:
         """
         处理 AI 输出的文本块
         返回执行结果列表
         
         :param text: 包含 NIT 指令的文本
         :param extra_plugins: 临时的额外插件注册表 (例如 MCP 动态加载的工具)
+        :param expected_nit_id: 本轮期望的 NIT-ID (用于安全握手)
         """
         results = []
 
         # 1. 优先处理 NIT 2.0 脚本 (<nit>...</nit>)
-        nit_blocks = re.findall(r'<nit>(.*?)</nit>', text, re.DOTALL)
-        if nit_blocks:
-            logger.info(f"Detected {len(nit_blocks)} NIT script blocks.")
+        # Regex to capture <nit> or <nit-XXXX>
+        # group(1): full tag name (e.g. "nit" or "nit-A9B2")
+        # group(2): ID part only (e.g. "A9B2") if present
+        # group(3): content
+        nit_pattern = r'<(nit(?:-([0-9a-fA-F]{4}))?)>(.*?)</\1>'
+        nit_matches = list(re.finditer(nit_pattern, text, re.DOTALL | re.IGNORECASE))
+
+        if nit_matches:
+            logger.info(f"Detected {len(nit_matches)} NIT script blocks.")
             
             # 定义 Runtime 的执行器回调
             async def runtime_tool_executor(name: str, params: Dict[str, Any]):
                 return await self._execute_plugin(name, params, extra_plugins)
 
-            for script in nit_blocks:
+            for match in nit_matches:
+                full_tag = match.group(0)
+                # tag_name = match.group(1)
+                extracted_id = match.group(2)
+                script = match.group(3)
+                
+                # --- Security Validation ---
+                if expected_nit_id:
+                    if extracted_id:
+                        # ID 存在，必须匹配
+                        is_valid, status = NITSecurityManager.validate_id(extracted_id, expected_nit_id)
+                        if not is_valid:
+                            msg = f"Security Block: NIT ID Mismatch (Expected {expected_nit_id}, Got {extracted_id})"
+                            logger.warning(msg)
+                            results.append({
+                                "plugin": "NIT_Script",
+                                "status": "blocked",
+                                "output": msg,
+                                "raw_block": full_tag
+                            })
+                            continue
+                    else:
+                        # ID 不存在 (<nit>) -> Fallback Mode
+                        logger.warning(f"NIT Fallback: Standard <nit> tag used instead of <nit-{expected_nit_id}>. Allowing execution.")
+                # ---------------------------
+
                 try:
                     # 去除 script 中的 HTML 实体转义 (如 &gt; -> >) 如果有的话
                     # 但通常 LLM 输出是纯文本。
@@ -252,7 +285,7 @@ async generate_report(data=$summary, callback="notify_user")
                         "plugin": "NIT_Script",
                         "status": "success",
                         "output": output,
-                        "raw_block": f"<nit>{script}</nit>"
+                        "raw_block": full_tag
                     })
                 except Exception as e:
                     logger.error(f"NIT Script Error: {e}", exc_info=True)
@@ -260,7 +293,7 @@ async generate_report(data=$summary, callback="notify_user")
                         "plugin": "NIT_Script",
                         "status": "error",
                         "output": f"Script Error: {str(e)}",
-                        "raw_block": f"<nit>{script}</nit>"
+                        "raw_block": full_tag
                     })
 
         # 2. 兼容处理旧版 NIT 指令
