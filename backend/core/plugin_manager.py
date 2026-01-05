@@ -4,6 +4,7 @@ import importlib
 import sys
 import logging
 from typing import Dict, Any, List, Optional, Callable
+from core.config_manager import get_config_manager
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -24,6 +25,7 @@ class PluginManager:
         self.plugins: Dict[str, Dict[str, Any]] = {}  # Map plugin name to manifest
         self.tools_map: Dict[str, Callable] = {}      # Map command identifier to function
         self.loaded_modules: Dict[str, Any] = {}      # Map plugin name to loaded module
+        self.config_manager = get_config_manager()
 
     def load_plugins(self):
         """
@@ -50,6 +52,16 @@ class PluginManager:
                 self._scan_directory(cat_path, category_prefix=category)
 
         logger.info(f"Plugin loading complete. Loaded {len(self.plugins)} plugins and {len(self.tools_map)} commands.")
+
+    def reload_plugins(self):
+        """
+        Clears existing plugins and tools, then reloads from directory.
+        """
+        logger.info("Reloading all plugins...")
+        self.plugins.clear()
+        self.tools_map.clear()
+        self.loaded_modules.clear()
+        self.load_plugins()
 
     def _scan_directory(self, directory: str, category_prefix: str = None):
         """Helper to scan a specific directory for plugins."""
@@ -79,6 +91,13 @@ class PluginManager:
             return
 
         plugin_name = manifest["name"]
+
+        # [Security] Check Social Mode Toggle
+        if plugin_name == "social_adapter":
+            if not self.config_manager.get("enable_social_mode", False):
+                logger.info(f"Skipping plugin '{plugin_name}' because enable_social_mode is False.")
+                return
+
         # Inject category info into manifest for Dispatcher filtering
         if category_prefix:
             # Handle ../plugins case -> plugins

@@ -6,7 +6,7 @@ import time
 import logging
 import json
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Callable
 from .parser import NITParser
 from .interpreter import execute_nit_script
 from core.plugin_manager import get_plugin_manager
@@ -73,7 +73,19 @@ class NITDispatcher:
         except Exception as e:
             logger.error(f"Error loading tools: {e}", exc_info=True)
 
-    def _register_tool(self, name: str, func):
+    def reload_tools(self):
+        """重新加载所有工具"""
+        logger.info("Reloading tools in Dispatcher...")
+        # Clear existing registry and map
+        global PLUGIN_REGISTRY
+        PLUGIN_REGISTRY.clear()
+        self.category_map.clear()
+        
+        # Reload from PM
+        self.pm.reload_plugins()
+        self._load_tools()
+
+    def _register_tool(self, name: str, func: Callable):
         """Helper to register a tool with normalization"""
         norm_name = self.parser.normalize_key(name)
         

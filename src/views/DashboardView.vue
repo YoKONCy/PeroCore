@@ -301,6 +301,30 @@
                   </el-card>
                 </el-col>
               </el-row>
+
+              <!-- 社交模式卡片 -->
+              <el-row :gutter="20" style="margin-top: 20px;">
+                <el-col :span="24">
+                  <el-card shadow="hover" class="glass-card" :body-style="{ padding: '15px 20px' }">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                      <div style="display: flex; align-items: center; gap: 15px;">
+                        <div style="font-size: 24px;">💬</div>
+                        <div>
+                           <div style="font-weight: bold; font-size: 16px;">社交模式 (Social Mode)</div>
+                           <div style="font-size: 13px; color: #666; margin-top: 4px;">开启后，Pero 将通过 OneBot 协议连接 QQ，并以独立身份进行社交回复。</div>
+                        </div>
+                      </div>
+                      <el-switch 
+                        v-model="isSocialEnabled" 
+                        active-text="ON" 
+                        inactive-text="OFF"
+                        @change="toggleSocial"
+                        :loading="isTogglingSocial"
+                      />
+                    </div>
+                  </el-card>
+                </el-col>
+              </el-row>
             </div>
 
             <!-- 2. 对话日志 -->
@@ -929,6 +953,8 @@ const isBackendOnline = ref(false)
 const isSaving = ref(false)
 const isCompanionEnabled = ref(false)
 const isTogglingCompanion = ref(false)
+const isSocialEnabled = ref(false)
+const isTogglingSocial = ref(false)
 
 // 编辑日志状态
 const editingLogId = ref(null)
@@ -1143,6 +1169,7 @@ const fetchAllData = async () => {
     fetchMcps(),
     initSessionAndFetchLogs(),
     fetchCompanionStatus(),
+    fetchSocialStatus(),
     fetchNitStatus(),
     fetchTagCloud(),
     fetchSystemStatus()
@@ -1322,6 +1349,43 @@ const toggleCompanion = async (val) => {
     ElMessage.error('网络错误')
   } finally {
     isTogglingCompanion.value = false
+  }
+}
+
+const fetchSocialStatus = async () => {
+  try {
+    const res = await fetch(`${API_BASE}/social/status`)
+    if (res.ok) {
+      const data = await res.json()
+      isSocialEnabled.value = data.enabled
+    }
+  } catch (e) {
+    console.error('Failed to fetch social status', e)
+  }
+}
+
+const toggleSocial = async (val) => {
+  try {
+    isTogglingSocial.value = true
+    const res = await fetch(`${API_BASE}/social/toggle`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: val })
+    })
+    
+    if (res.ok) {
+      const data = await res.json()
+      isSocialEnabled.value = data.enabled
+      ElMessage.success(data.enabled ? '已开启社交模式' : '已关闭社交模式')
+    } else {
+      isSocialEnabled.value = !val // revert
+      ElMessage.error('切换失败')
+    }
+  } catch (e) {
+    isSocialEnabled.value = !val // revert
+    ElMessage.error('网络错误')
+  } finally {
+    isTogglingSocial.value = false
   }
 }
 

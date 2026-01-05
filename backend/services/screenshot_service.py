@@ -35,9 +35,21 @@ class ScreenshotManager:
             print(f"[ScreenshotManager] Capture failed: {e}")
             return None
 
-    def get_recent(self, count: int = 1) -> List[Dict]:
-        """获取最近的 N 张截图"""
+    def get_recent(self, count: int = 1, max_age: int = None) -> List[Dict]:
+        """
+        获取最近的 N 张截图
+        :param count: 获取数量
+        :param max_age: 最大有效期（秒），如果指定，则只返回在此时间内的截图
+        """
         items = list(self.pool)
+        if not items:
+            return []
+            
+        if max_age is not None:
+            now = time.time()
+            # 过滤掉过期的图片
+            items = [item for item in items if now - item["timestamp"] <= max_age]
+            
         return items[-count:] if items else []
 
     def start_background_task(self):

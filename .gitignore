@@ -73,3 +73,6 @@ Desktop.ini
 # App specific
 pero_workspace/
 **/pero_workspace/
+
+# Plugins - NapCat
+backend/nit_core/plugins/social_adapter/NapCat/

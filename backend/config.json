@@ -1,0 +1,5 @@
+{
+    "enable_social_mode": true,
+    "napcat_ws_url": "ws://localhost:3001",
+    "napcat_http_url": "http://localhost:3000"
+}

@@ -261,6 +261,14 @@ watch(parsedBubbleContent, (newVal) => {
   }
 }, { deep: true })
 
+// 自动弹出思维监控室
+watch(isComplexTask, (newVal) => {
+  if (newVal) {
+    console.log('[PetView] Complex task detected, opening monitor automatically...')
+    openTaskMonitor()
+  }
+})
+
 const openTaskMonitor = () => {
   if (ipcRenderer && ipcRenderer.send) {
     ipcRenderer.send('open-task-monitor')
@@ -283,6 +291,29 @@ watch([showFileModal], ([fileVal]) => {
 const moodText = ref(localStorage.getItem('ppc.mood') || '开心')
 const mindText = ref(localStorage.getItem('ppc.mind') || '正在想主人...')
 const vibeText = ref(localStorage.getItem('ppc.vibe') || '活泼')
+
+const fetchPetState = async () => {
+    try {
+        const res = await fetch('http://localhost:3000/api/pet/state')
+        if (res.ok) {
+            const data = await res.json()
+            if (data.mood) {
+                moodText.value = data.mood
+                localStorage.setItem('ppc.mood', data.mood)
+            }
+            if (data.vibe) {
+                vibeText.value = data.vibe
+                localStorage.setItem('ppc.vibe', data.vibe)
+            }
+            if (data.mind) {
+                mindText.value = data.mind
+                localStorage.setItem('ppc.mind', data.mind)
+            }
+        }
+    } catch (e) {
+        // Silent fail
+    }
+}
 
 // 切换语音模式 (已弃用，使用 cycleVoiceMode 代替)
 const toggleVoiceMode = async () => {
@@ -1548,6 +1579,7 @@ const sendMessage = async (systemMsg = null, isHidden = false) => {
 onUnmounted(() => {
   // 1. 清理定时器
   if (replyTimer) clearTimeout(replyTimer)
+  if (stateSyncTimer) clearInterval(stateSyncTimer)
   
   // 2. 移除 IPC 监听
   if (ipcRenderer && ipcRenderer.removeAllListeners) {

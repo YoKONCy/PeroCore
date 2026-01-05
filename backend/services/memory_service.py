@@ -1,4 +1,5 @@
 from typing import List, Optional, Dict, Any
+from datetime import datetime
 from sqlmodel import select, delete, desc, and_
 from sqlmodel.ext.asyncio.session import AsyncSession
 from models import Memory, ConversationLog, MemoryRelation
@@ -180,6 +181,31 @@ class MemoryService:
             raise e
 
     @staticmethod
+    async def search_logs(
+        session: AsyncSession, 
+        query: str, 
+        source: Optional[str] = None, 
+        limit: int = 10
+    ) -> List[ConversationLog]:
+        """
+        Search conversation logs by keyword.
+        Supports filtering by source (e.g., 'qq_%' for all qq logs).
+        """
+        statement = select(ConversationLog).order_by(desc(ConversationLog.timestamp))
+        
+        if source:
+            if "%" in source:
+                statement = statement.where(ConversationLog.source.like(source))
+            else:
+                statement = statement.where(ConversationLog.source == source)
+                
+        if query:
+            statement = statement.where(ConversationLog.content.contains(query))
+            
+        statement = statement.limit(limit)
+        return (await session.exec(statement)).all()
+
+    @staticmethod
     async def get_recent_logs(session: AsyncSession, source: str, session_id: str, limit: int = 20, date_str: str = None, sort: str = "asc") -> List[ConversationLog]:
         """获取指定来源和会话的最近对话记录"""
         from sqlmodel import desc, asc
@@ -268,10 +294,11 @@ class MemoryService:
     @staticmethod
     async def get_relevant_memories(
         session: AsyncSession, 
-        text: str = None, 
-        limit: int = 10, 
-        exclude_after_time=None,
-        query_vec: List[float] = None
+        text: str, 
+        limit: int = 5,
+        query_vec: Optional[List[float]] = None,
+        exclude_after_time: Optional[datetime] = None,
+        update_access_stats: bool = True # New param to control side effects
     ) -> List[Memory]:
         """
         [Chain-Net Retrieval V3] (VectorDB Enabled)
@@ -447,18 +474,25 @@ class MemoryService:
         final_candidates.sort(key=lambda x: x[1], reverse=True)
         top_candidates = [item[0] for item in final_candidates[:limit*2]]
         
+        result_memories = []
         if top_candidates:
             docs = [m.content for m in top_candidates]
             rerank_results = embedding_service.rerank(text, docs, top_k=limit)
             
             # 根据 Rerank 结果重新组装
-            result_memories = []
             for res in rerank_results:
                 original_idx = res["index"]
                 result_memories.append(top_candidates[original_idx])
-            return result_memories
-        
-        return top_candidates[:limit]
+        else:
+            result_memories = top_candidates[:limit]
+
+        # [Fix] Update Access Stats (Reinforcement)
+        # 只要被检索到并最终返回，就视为被"激活"了一次
+        if update_access_stats and result_memories:
+            # 同步等待更新完成，防止 session 提前关闭
+            await MemoryService.mark_memories_accessed(session, result_memories)
+
+        return result_memories
 
     @staticmethod
     async def get_memories_by_filter(

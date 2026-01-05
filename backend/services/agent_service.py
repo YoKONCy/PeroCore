@@ -485,6 +485,129 @@ Tool List Length: {len(tools_list_str)}
             print(f"Error in _save_parsed_metadata: {e}")
             return []
 
+    async def social_chat(self, messages: List[Dict[str, Any]], session_id: str) -> str:
+        """
+        Specialized chat mode for Social Interactions (QQ/OneBot).
+        - Uses isolated session history.
+        - Restricted toolset (Safe tools only).
+        - Returns the final response text directly.
+        """
+        print(f"[SocialAgent] Processing social chat for session: {session_id}")
+        
+        # 1. Get Config (Use global config or specific social model)
+        config = await self._get_llm_config()
+        
+        # 2. Prepare Tools (Whitelist Strategy)
+        social_tools = []
+        try:
+            # We want to filter tools that are specifically for social mode.
+            # Assuming PluginManager has loaded them and they are available in plugin_manager.
+            all_tools = plugin_manager.get_all_definitions()
+            
+            # Whitelist of safe prefixes/names
+            safe_prefixes = ["qq_"]
+            safe_names = ["read_social_memory", "read_agent_memory", "notify_master"]
+            
+            for tool_def in all_tools:
+                t_name = ""
+                if "function" in tool_def:
+                    t_name = tool_def["function"].get("name", "")
+                elif "name" in tool_def:
+                    t_name = tool_def.get("name", "")
+                
+                if any(t_name.startswith(p) for p in safe_prefixes) or t_name in safe_names:
+                    social_tools.append(tool_def)
+                    
+            print(f"[SocialAgent] Loaded {len(social_tools)} social tools.")
+        except Exception as e:
+            print(f"[SocialAgent] Error loading tools: {e}")
+            social_tools = []
+
+        # 3. Call LLM
+        llm = LLMService(
+            api_key=config.get("api_key"),
+            api_base=config.get("api_base"),
+            model=config.get("model")
+        )
+        
+        # We use a simplified loop for social mode (no complex reflection/vision for now)
+        try:
+            # Non-streaming call for simplicity in Phase 2 MVP
+            response = await llm.chat(messages, temperature=0.7, tools=social_tools if social_tools else None)
+            
+            response_msg = response["choices"][0]["message"]
+            content = response_msg.get("content", "")
+            tool_calls = response_msg.get("tool_calls", [])
+            
+            # 4. Handle Tool Calls (Simple Loop)
+            # If tool calls exist, execute them and recurse (limit 3 turns)
+            # For MVP Phase 2, let's just execute and return the result or confirmation.
+            
+            if tool_calls:
+                print(f"[SocialAgent] LLM requested {len(tool_calls)} tool calls.")
+                # Append assistant message with tool calls
+                messages.append(response_msg)
+                
+                for tc in tool_calls:
+                    func_name = tc["function"]["name"]
+                    args_str = tc["function"]["arguments"]
+                    call_id = tc["id"]
+                    
+                    print(f"[SocialAgent] Executing tool: {func_name}")
+                    
+                    # Execute via NIT Dispatcher
+                    from nit_core.dispatcher import get_dispatcher
+                    dispatcher = get_dispatcher()
+                    
+                    # We need to construct the command string for dispatcher or call function directly
+                    # Since dispatcher parses text, we might need to find the function in plugin_manager map
+                    # Let's try to use plugin_manager directly or execute the python function if we can find it.
+                    # Actually, AgentService._save_parsed_metadata uses dispatcher.dispatch(text).
+                    # But here we have structured tool calls.
+                    
+                    # Quick fix: Use the tools_map in plugin_manager if available, or just use dispatcher's execute_tool if exposed.
+                    # Looking at AgentService, it seems standard tool execution is manual in the loop.
+                    
+                    # Let's verify if we can just invoke the function from the tools definitions?
+                    # No, definitions are JSON.
+                    
+                    # Let's use the PluginManager's tools_map which maps name -> callable
+                    func = plugin_manager.tools_map.get(func_name)
+                    tool_result = ""
+                    
+                    if func:
+                        try:
+                            import inspect
+                            args = json.loads(args_str)
+                            if inspect.iscoroutinefunction(func):
+                                tool_result = await func(**args)
+                            else:
+                                tool_result = func(**args)
+                        except Exception as e:
+                            tool_result = f"Error executing {func_name}: {e}"
+                    else:
+                        tool_result = f"Tool {func_name} not found."
+                        
+                    # Append Tool Result
+                    messages.append({
+                        "tool_call_id": call_id,
+                        "role": "tool",
+                        "name": func_name,
+                        "content": str(tool_result)
+                    })
+                    
+                # Recursive call (Second turn)
+                # For safety, just one recursion depth for now
+                print("[SocialAgent] Sending tool results back to LLM...")
+                response_2 = await llm.chat(messages, temperature=0.7, tools=social_tools)
+                content = response_2["choices"][0]["message"].get("content", "")
+                
+            return content
+
+        except Exception as e:
+            print(f"[SocialAgent] Error: {e}")
+            return f"[System Error] {str(e)}"
+
     async def _run_scorer_background(self, user_msg: str, assistant_msg: str, source: str, pair_id: str = None):
         """后台运行 Scorer 服务，使用独立 Session"""
         from database import engine
@@ -1067,10 +1190,11 @@ Tool List Length: {len(tools_list_str)}
                                 if not isinstance(count, int): count = 1
                                 count = max(1, min(10, count))
                                 
-                                recent_screenshots = screenshot_manager.get_recent(count)
+                                # 使用较短的有效期（如 15 秒），确保获取到的是刚刚截取的，避免读取旧缓存
+                                recent_screenshots = screenshot_manager.get_recent(count, max_age=15)
                                 
                                 if not recent_screenshots:
-                                    function_response = "❌ 截图池为空，无法获取截图。"
+                                    function_response = "❌ 无法获取最新截图（可能截图失败或已过期）。"
                                 else:
                                     # 3. 将多张截图注入到下一轮的上下文中
                                     content = [{"type": "text", "text": f"系统提示：以下是最近捕获的 {len(recent_screenshots)} 张屏幕截图（按时间顺序排列）："}]

@@ -41,6 +41,8 @@ from services.voice_manager import voice_manager
 from services.companion_service import companion_service
 from services.browser_bridge_service import browser_bridge_service
 from services.screenshot_service import screenshot_manager
+from services.social_service import get_social_service
+from core.config_manager import get_config_manager
 from nit_core.parser import XMLStreamFilter
 
 @asynccontextmanager
@@ -51,6 +53,10 @@ async def lifespan(app: FastAPI):
     await companion_service.start()
     screenshot_manager.start_background_task()
     
+    # Start Social Service (if enabled)
+    social_service = get_social_service()
+    await social_service.start()
+
     # Cleanup task
     async def periodic_cleanup():
         while True:
@@ -439,7 +445,33 @@ async def get_system_status():
         print(f"System status error: {e}")
         return {"error": str(e)}
 
+@app.post("/api/config/social_mode")
+async def set_social_mode(enabled: bool = Body(..., embed=True)):
+    """
+    Toggle Social Mode. Requires restart to fully apply plugin changes.
+    """
+    cm = get_config_manager()
+    cm.set("enable_social_mode", enabled)
+    
+    social_service = get_social_service()
+    if enabled:
+        # If enabling, try to start service (though plugin tools won't load until restart)
+        # However, the service itself can start receiving messages.
+        await social_service.start()
+    else:
+        await social_service.stop()
+        
+    return {"status": "success", "enabled": enabled, "message": "Please restart PeroCore for NIT tool changes to take effect."}
 
+@app.get("/api/config/social_mode")
+async def get_social_mode():
+    cm = get_config_manager()
+    return {"enabled": cm.get("enable_social_mode", False)}
+
+@app.websocket("/api/social/ws")
+async def social_websocket(websocket: WebSocket):
+    social_service = get_social_service()
+    await social_service.handle_websocket(websocket)
 
 @app.delete("/api/memories/by_timestamp/{msg_timestamp}")
 async def delete_memory_by_timestamp(msg_timestamp: str, session: AsyncSession = Depends(get_session)):
@@ -581,6 +613,56 @@ async def toggle_companion(enabled: bool = Body(..., embed=True), session: Async
     config.value = "true" if enabled else "false"
     config.updated_at = datetime.utcnow()
     await session.commit()
+    
+    if enabled:
+        await companion_service.start()
+    else:
+        await companion_service.stop()
+        
+    return {"status": "success", "enabled": enabled}
+
+# --- Social Mode APIs ---
+@app.get("/api/social/status")
+async def get_social_status(session: AsyncSession = Depends(get_session)):
+    config = await session.get(Config, "enable_social_mode")
+    enabled = config.value == "true" if config else False
+    return {"enabled": enabled}
+
+@app.post("/api/social/toggle")
+async def toggle_social(enabled: bool = Body(..., embed=True), session: AsyncSession = Depends(get_session)):
+    # 1. Update DB
+    config = await session.get(Config, "enable_social_mode")
+    if not config:
+        config = Config(key="enable_social_mode", value="false")
+        session.add(config)
+    
+    config.value = "true" if enabled else "false"
+    config.updated_at = datetime.utcnow()
+    await session.commit()
+    
+    # 2. Update Service
+    social_service = get_social_service()
+    # Force update config manager cache if needed, or service reads directly
+    # Ideally ConfigManager should be refreshed or we manually set the internal flag if possible.
+    # But SocialService reads from ConfigManager. 
+    # Let's ensure ConfigManager is updated.
+    cm = get_config_manager()
+    cm.set("enable_social_mode", config.value == "true")
+    
+    # 3. Refresh NIT Tools (ensure social tools are added/removed)
+    try:
+        from nit_core.dispatcher import get_dispatcher
+        dispatcher = get_dispatcher()
+        dispatcher.reload_tools()
+        print(f"[Main] NIT Tools reloaded after social mode toggle (Enabled: {enabled})")
+    except Exception as e:
+        print(f"[Main] Failed to reload NIT tools: {e}")
+    
+    if enabled:
+        await social_service.start()
+    else:
+        await social_service.stop()
+        
     return {"status": "success", "enabled": enabled}
 
 @app.get("/api/tasks", response_model=List[ScheduledTask])

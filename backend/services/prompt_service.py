@@ -20,11 +20,20 @@ class PromptManager:
         mdp_dir = os.path.join(os.path.dirname(__file__), "mdp", "prompts")
         self.mdp = MDPManager(mdp_dir)
 
-    def build_system_prompt(self, variables: Dict[str, Any]) -> str:
+    def build_system_prompt(self, variables: Dict[str, Any], is_social_mode: bool = False) -> str:
         # 1. Construct Abilities String
         enable_vision = variables.get("enable_vision", False)
         enable_voice = variables.get("enable_voice", False)
         enable_video = variables.get("enable_video", False)
+        
+        # [Social Mode Override]
+        if is_social_mode:
+            # Disable NIT Protocol and Thinking Constraints
+            variables["ability_nit"] = ""
+            variables["output_constraint"] = ""
+            variables["ability_workspace"] = "" # Also disable workspace tools
+            # We keep abilities for sensory (Vision/Voice) if enabled, as Pero might still "see" images sent in chat
+            # But we suppress complex tool descriptions
         
         abilities_parts = []
         
@@ -65,16 +74,19 @@ class PromptManager:
         
         # Inject NIT Tools Description
         try:
-            dispatcher = get_dispatcher()
-            # Default to Core tools
-            tools_desc = dispatcher.get_tools_description(category_filter='core')
-            
-            # Check for Work Mode
-            # Assume 'work_mode' boolean in variables or config
-            if variables.get("work_mode_enabled", False):
-                tools_desc += "\n\n" + dispatcher.get_tools_description(category_filter='work')
+            if not is_social_mode:
+                dispatcher = get_dispatcher()
+                # Default to Core tools
+                tools_desc = dispatcher.get_tools_description(category_filter='core')
                 
-            variables["nit_tools_description"] = tools_desc
+                # Check for Work Mode
+                # Assume 'work_mode' boolean in variables or config
+                if variables.get("work_mode_enabled", False):
+                    tools_desc += "\n\n" + dispatcher.get_tools_description(category_filter='work')
+                    
+                variables["nit_tools_description"] = tools_desc
+            else:
+                variables["nit_tools_description"] = ""
         except Exception as e:
             print(f"[PromptManager] Error injecting NIT tools description: {e}")
             variables["nit_tools_description"] = "Error loading tools."
@@ -149,7 +161,8 @@ class PromptManager:
     def compose_messages(self, 
                          history: List[Dict[str, str]], 
                          variables: Dict[str, Any],
-                         is_voice_mode: bool = False) -> List[Dict[str, str]]:
+                         is_voice_mode: bool = False,
+                         is_social_mode: bool = False) -> List[Dict[str, str]]:
         """
         组装完整的消息列表（System + History）
         """
@@ -161,9 +174,9 @@ class PromptManager:
                 voice_reminder = "\n\n【系统提醒: 当前主人正在使用原生语音进行交流。你已获得主人的原生音频输入（Multimodal Audio），这能让你感受到主人的语气、情感和环境背景。请优先基于你听到的音频内容进行回复。】"
             else:
                 voice_reminder = "\n\n【系统提醒: 当前主人正在使用语音输入，但你目前只能接收到 ASR (自动语音识别) 转录后的文本。由于 ASR 可能存在同音错别字，请你结合上下文进行合理推测，并以可爱的语气给予回应。】"
-            system_content = self.build_system_prompt(variables) + voice_reminder
+            system_content = self.build_system_prompt(variables, is_social_mode=is_social_mode) + voice_reminder
         else:
-            system_content = self.build_system_prompt(variables)
+            system_content = self.build_system_prompt(variables, is_social_mode=is_social_mode)
         
         # 对历史记录进行清洗
         cleaned_history = []

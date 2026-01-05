@@ -1,0 +1,59 @@
+{
+  "name": "social_adapter",
+  "version": "1.0.0",
+  "description": "Adapter for OneBot 11 (NapCatQQ) integration.",
+  "pluginType": "python-module",
+  "entryPoint": "qq_tools.py",
+  "capabilities": {
+    "invocationCommands": [
+      {
+        "commandIdentifier": "qq_send_group_msg",
+        "description": "Send a message to a QQ group.",
+        "parameters": {
+          "group_id": "string or int",
+          "message": "string"
+        }
+      },
+      {
+        "commandIdentifier": "qq_send_private_msg",
+        "description": "Send a private message to a QQ user.",
+        "parameters": {
+          "user_id": "string or int",
+          "message": "string"
+        }
+      },
+      {
+        "commandIdentifier": "qq_handle_friend_request",
+        "description": "Approve or reject a friend request.",
+        "parameters": {
+            "flag": "string",
+            "approve": "boolean",
+            "remark": "string (optional)"
+        }
+      },
+      {
+        "commandIdentifier": "qq_get_stranger_info",
+        "description": "Get public information of a stranger.",
+        "parameters": {
+            "user_id": "string or int"
+        }
+      },
+      {
+        "commandIdentifier": "read_social_memory",
+        "description": "Read Pero's social memory logs (QQ chats).",
+        "parameters": {
+            "query": "string",
+            "filter": "string (optional)"
+        }
+      },
+       {
+        "commandIdentifier": "notify_master",
+        "description": "Proactively report important social events to the master.",
+        "parameters": {
+            "content": "string",
+            "importance": "string (low/medium/high)"
+        }
+      }
+    ]
+  }
+}
