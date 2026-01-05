@@ -7,7 +7,6 @@ import logging
 import json
 from datetime import datetime
 from typing import Dict, Any, List, Callable
-from .parser import NITParser
 from .interpreter import execute_nit_script
 from .security import NITSecurityManager
 from core.plugin_manager import get_plugin_manager
@@ -18,6 +17,151 @@ PLUGIN_REGISTRY = {}
 
 logger = logging.getLogger("pero.nit")
 
+def normalize_nit_key(key: str) -> str:
+    """归一化插件名/参数名"""
+    return key.lower().replace('_', '').replace('-', '')
+
+def remove_nit_tags(text: str) -> str:
+    """移除文本中所有的 NIT 调用块 (1.0 和 2.0)"""
+    # 移除 NIT 1.0: [[[NIT_CALL]]] ... [[[NIT_END]]]
+    text = re.sub(r'\[\[\[NIT_CALL\]\]\].*?\[\[\[NIT_END\]\]\]', '', text, flags=re.DOTALL)
+    # 移除 NIT 2.0: <nit-XXXX> ... </nit-XXXX> 或 <nit> ... </nit>
+    text = re.sub(r'<(nit(?:-[0-9a-fA-F]{4})?)>.*?</\1>', '', text, flags=re.DOTALL | re.IGNORECASE)
+    return text.strip()
+
+class NITStreamFilter:
+    """
+    NIT 流式过滤器
+    用于在流式输出过程中拦截并隐藏 NIT 调用块 (1.0 和 2.0)
+    """
+    def __init__(self):
+        self.buffer = ""
+        self.in_nit_block = False
+        
+        # NIT 1.0 Markers
+        self.m1_start = "[[[NIT_CALL]]]"
+        self.m1_end = "[[[NIT_END]]]"
+        
+        # NIT 2.0 Regex (used for state detection)
+        # Since streaming is chunk-by-chunk, we use a simple state machine for the tags
+        self.tag_pattern = re.compile(r'<(nit(?:-[0-9a-fA-F]{4})?)>', re.IGNORECASE)
+        self.end_tag_pattern = re.compile(r'</(nit(?:-[0-9a-fA-F]{4})?)>', re.IGNORECASE)
+
+    def filter(self, chunk: str) -> str:
+        self.buffer += chunk
+        output = ""
+
+        while self.buffer:
+            if not self.in_nit_block:
+                # Look for NIT 1.0 or NIT 2.0 start
+                idx1 = self.buffer.find(self.m1_start)
+                
+                # Check for NIT 2.0 start tag
+                match2 = self.tag_pattern.search(self.buffer)
+                idx2 = match2.start() if match2 else -1
+                
+                # Find the earliest start
+                starts = [i for i in [idx1, idx2] if i != -1]
+                if not starts:
+                    # No start marker found, but we might have a partial marker at the end
+                    # We keep a small buffer to avoid splitting markers
+                    safe_len = len(self.buffer) - len(self.m1_start) - 10 
+                    if safe_len > 0:
+                        output += self.buffer[:safe_len]
+                        self.buffer = self.buffer[safe_len:]
+                    return output
+                
+                first_start = min(starts)
+                # Output everything before the marker
+                output += self.buffer[:first_start]
+                self.buffer = self.buffer[first_start:]
+                self.in_nit_block = True
+            else:
+                # Look for NIT 1.0 or NIT 2.0 end
+                idx1_end = self.buffer.find(self.m1_end)
+                
+                # Check for NIT 2.0 end tag
+                match2_end = self.end_tag_pattern.search(self.buffer)
+                idx2_end = match2_end.end() if match2_end else -1
+                
+                if idx1_end != -1 and (idx2_end == -1 or idx1_end < idx2_end):
+                    # NIT 1.0 end found
+                    self.buffer = self.buffer[idx1_end + len(self.m1_end):]
+                    self.in_nit_block = False
+                elif idx2_end != -1:
+                    # NIT 2.0 end found
+                    self.buffer = self.buffer[idx2_end:]
+                    self.in_nit_block = False
+                else:
+                    # No end marker found yet
+                    return output
+        
+        return output
+
+    def flush(self) -> str:
+        """Clear buffer at the end"""
+        res = ""
+        if not self.in_nit_block:
+            res = self.buffer
+        self.buffer = ""
+        return res
+
+class XMLStreamFilter:
+    """
+    通用 XML 标签流式过滤器
+    用于隐藏特定的 XML 标签及其内容 (如 <PEROCUE>)
+    """
+    def __init__(self, tag_names: List[str] = None):
+        if tag_names is None:
+            tag_names = ["PEROCUE", "CHARACTER_STATUS"]
+        self.tag_names = [t.upper() for t in tag_names]
+        self.buffer = ""
+        self.in_block = False
+        self.current_end_tag = ""
+
+    def filter(self, chunk: str) -> str:
+        self.buffer += chunk
+        output = ""
+
+        while self.buffer:
+            if not self.in_block:
+                # Look for any start tag
+                found_tag = None
+                found_idx = -1
+                for tag in self.tag_names:
+                    idx = self.buffer.upper().find(f"<{tag}>")
+                    if idx != -1 and (found_idx == -1 or idx < found_idx):
+                        found_idx = idx
+                        found_tag = tag
+                
+                if found_idx == -1:
+                    # No start tag, safe to output most of it
+                    safe_len = max(0, len(self.buffer) - 20)
+                    output += self.buffer[:safe_len]
+                    self.buffer = self.buffer[safe_len:]
+                    return output
+                
+                output += self.buffer[:found_idx]
+                self.buffer = self.buffer[found_idx:]
+                self.in_block = True
+                self.current_end_tag = f"</{found_tag}>".upper()
+            else:
+                idx = self.buffer.upper().find(self.current_end_tag)
+                if idx != -1:
+                    self.buffer = self.buffer[idx + len(self.current_end_tag):]
+                    self.in_block = False
+                    self.current_end_tag = ""
+                else:
+                    return output
+        return output
+
+    def flush(self) -> str:
+        res = ""
+        if not self.in_block:
+            res = self.buffer
+        self.buffer = ""
+        return res
+
 class NITDispatcher:
     """
     NIT 核心调度器
@@ -25,7 +169,6 @@ class NITDispatcher:
     """
     
     def __init__(self):
-        self.parser = NITParser()
         self.pm = get_plugin_manager()
         self.category_map = {} # Map[norm_plugin_name] -> List[tool_names]
         # 初始化时加载工具
@@ -49,7 +192,7 @@ class NITDispatcher:
                     continue
                 
                 # Register to category map
-                norm_plugin_name = self.parser.normalize_key(plugin_name)
+                norm_plugin_name = normalize_nit_key(plugin_name)
                 if norm_plugin_name not in self.category_map:
                     self.category_map[norm_plugin_name] = []
                 
@@ -88,7 +231,7 @@ class NITDispatcher:
 
     def _register_tool(self, name: str, func: Callable):
         """Helper to register a tool with normalization"""
-        norm_name = self.parser.normalize_key(name)
+        norm_name = normalize_nit_key(name)
         
         # 创建适配器
         def make_adapter(f=func):
@@ -134,29 +277,8 @@ class NITDispatcher:
         生成可用工具的描述信息，用于注入到 System Prompt 中。
         支持按类别过滤：'core', 'work', 'plugins' (or 'all')
         """
+        # NIT 2.0 协议说明已移至 ability_nit.md 统一管理
         descriptions = []
-        
-        # 添加 NIT 2.0 协议说明
-        protocol_intro = """
-## NIT Script Protocol (Pipeline & Async)
-When you need to execute complex workflows, chain multiple tools, or run tasks asynchronously, use the `<nit>` script block.
-
-**Syntax:**
-```nit
-<nit>
-# Synchronous call with variable assignment
-$config = read_file(path="config.json")
-
-# Use variable in next call
-$summary = process_text(input=$config, action="summarize")
-
-# Asynchronous call (returns immediately, result processed in background)
-# Use 'async' keyword before tool name
-async generate_report(data=$summary, callback="notify_user")
-</nit>
-```
-"""
-        descriptions.append(protocol_intro)
 
         manifests = self.pm.get_all_manifests()
         
@@ -189,7 +311,7 @@ async generate_report(data=$summary, callback="notify_user")
                         import inspect
                         # Try to find the function in the registry
                         # Note: Registry keys are normalized, so we need to be careful
-                        norm_key = self.parser.normalize_key(cmd_id)
+                        norm_key = normalize_nit_key(cmd_id)
                         handler = PLUGIN_REGISTRY.get(norm_key)
                         
                         # If handler is an adapter (wrapper), we might need to unwrap or just accept generic signature
@@ -296,36 +418,6 @@ async generate_report(data=$summary, callback="notify_user")
                         "raw_block": full_tag
                     })
 
-        # 2. 兼容处理旧版 NIT 指令
-        calls = self.parser.parse_text(text)
-        
-        if calls:
-            print(f"[NIT] Detected {len(calls)} legacy tool calls.")
-            
-            # 顺序执行 (Sequential Execution)
-            # 为了支持 AI 的“思考流”（如：先打开网页，再点击），我们必须按顺序执行
-            # 而不是并发执行 (asyncio.gather)。
-            for call in calls:
-                plugin_name = call['plugin']
-                params = call['params']
-                
-                try:
-                    # 执行单个工具并等待结果
-                    res = await self._execute_plugin(plugin_name, params, extra_plugins)
-                    output = str(res)
-                    status = "success"
-                except Exception as e:
-                    output = f"Error: {str(e)}"
-                    status = "error"
-                    print(f"[NIT] Error executing {plugin_name}: {e}")
-                
-                results.append({
-                    "plugin": plugin_name,
-                    "status": status,
-                    "output": output,
-                    "raw_block": call.get('raw_block', '')
-                })
-            
         return results
 
     async def _execute_plugin(self, plugin_name: str, params: Dict[str, Any], extra_plugins: Dict[str, Any] = None) -> str:
@@ -347,7 +439,7 @@ async generate_report(data=$summary, callback="notify_user")
         logger.info(f"▶ TOOL CALL: {plugin_name} | Params: {params_str}")
 
         # 归一化插件名以匹配注册表
-        norm_name = self.parser.normalize_key(plugin_name)
+        norm_name = normalize_nit_key(plugin_name)
         
         # 优先检查 extra_plugins
         handler = None
@@ -357,7 +449,7 @@ async generate_report(data=$summary, callback="notify_user")
             # 如果没找到，尝试在 extra_plugins 中查找归一化后的 key
             if not handler:
                 for k, v in extra_plugins.items():
-                    if self.parser.normalize_key(k) == norm_name:
+                    if normalize_nit_key(k) == norm_name:
                         handler = v
                         break
         
@@ -373,7 +465,7 @@ async generate_report(data=$summary, callback="notify_user")
             
             for key, cmd in potential_cmds:
                 # 尝试构造 PluginName.CommandName
-                namespaced_key = self.parser.normalize_key(f"{plugin_name}.{cmd}")
+                namespaced_key = normalize_nit_key(f"{plugin_name}.{cmd}")
                 handler = PLUGIN_REGISTRY.get(namespaced_key)
                 if handler:
                     logger.info(f"Auto-routed '{plugin_name}' + cmd='{cmd}' -> {namespaced_key}")
@@ -382,7 +474,7 @@ async generate_report(data=$summary, callback="notify_user")
                     break
                 
                 # 尝试直接查找 CommandName (如果 PluginName 只是误写)
-                cmd_key = self.parser.normalize_key(cmd)
+                cmd_key = normalize_nit_key(cmd)
                 handler = PLUGIN_REGISTRY.get(cmd_key)
                 if handler:
                     logger.info(f"Auto-routed '{plugin_name}' + cmd='{cmd}' -> {cmd_key}")

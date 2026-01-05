@@ -73,5 +73,5 @@ class NITSecurityManager:
 [NIT SECURITY PROTOCOL]
 Current Session ID: {nit_id}
 IMPORTANT: For this turn, you MUST wrap all NIT scripts in <nit-{nit_id}>...</nit-{nit_id}> tags.
-Standard <nit> tags will be treated as legacy fallback with lower priority.
+Legacy NIT 1.0 format ([[[NIT_CALL]]]) and standard <nit> tags are currently DISABLED.
 """

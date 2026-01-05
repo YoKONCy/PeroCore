@@ -6,6 +6,15 @@ import shutil
 import winreg
 import time
 import pyperclip
+try:
+    import win32gui
+    import win32process
+    import psutil
+except ImportError:
+    win32gui = None
+    win32process = None
+    psutil = None
+
 from utils.screen_adapter import screen_adapter, scaled_pyautogui
 
 def find_app_path(app_name: str):
@@ -65,6 +74,105 @@ def open_application(app_name: str):
             
     except Exception as e:
         return f"打开应用 '{app_name}' 失败: {str(e)}"
+
+def get_active_windows():
+    """
+    获取当前所有可见的顶层窗口及其对应的进程名。
+    返回格式：List[str] (e.g. ["chrome.exe - Google Chrome", ...])
+    """
+    if not win32gui or not psutil:
+        return "Error: win32gui or psutil not installed."
+
+    windows = []
+    
+    def enum_window_callback(hwnd, _):
+        if win32gui.IsWindowVisible(hwnd) and win32gui.GetWindowText(hwnd):
+            try:
+                # 获取窗口标题
+                title = win32gui.GetWindowText(hwnd)
+                if not title.strip():
+                    return
+
+                # 获取进程ID和名称
+                _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                try:
+                    proc = psutil.Process(pid)
+                    proc_name = proc.name()
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    proc_name = "Unknown"
+
+                # 过滤常见干扰项 (InputMethod, System, etc.)
+                if proc_name.lower() in ['textinputhost.exe', 'systemsettings.exe', 'applicationframehost.exe', 'searchapp.exe', 'startmenuexperiencehost.exe']:
+                    return
+                
+                # 过滤 Program Manager
+                if title == "Program Manager":
+                    return
+
+                windows.append(f"[{proc_name}] {title}")
+            except Exception:
+                pass
+    
+    try:
+        win32gui.EnumWindows(enum_window_callback, None)
+    except Exception as e:
+        return f"Error listing windows: {str(e)}"
+        
+    return windows
+
+def activate_window(target_name: str):
+    """
+    通过进程名或窗口标题切换/置顶窗口。
+    target_name: 可以是进程名 (e.g. 'chrome.exe') 或标题关键词 (e.g. 'Google Chrome')
+    """
+    if not win32gui:
+        return "Error: win32gui not installed."
+
+    target_name = target_name.lower()
+    found_hwnd = None
+    
+    def enum_callback(hwnd, _):
+        nonlocal found_hwnd
+        try:
+            if win32gui.IsWindowVisible(hwnd):
+                title = win32gui.GetWindowText(hwnd).lower()
+                _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                try:
+                    proc_name = psutil.Process(pid).name().lower()
+                except:
+                    proc_name = ""
+                
+                if target_name in title or target_name == proc_name:
+                    found_hwnd = hwnd
+                    return False # Stop enumeration
+        except Exception:
+            pass
+        return True
+
+    try:
+        win32gui.EnumWindows(enum_callback, None)
+    except Exception:
+        # 忽略 EnumWindows 的异常结束 (通常是因为 return False 提前终止)
+        pass
+    
+    if found_hwnd:
+        try:
+            # 如果窗口最小化了，先恢复
+            if win32gui.IsIconic(found_hwnd):
+                win32gui.ShowWindow(found_hwnd, 9) # SW_RESTORE
+            
+            # 置顶并获得焦点
+            # 有时直接 SetForegroundWindow 会失败 (Windows 限制)，需要先模拟按键或通过 AttachThreadInput
+            import win32com.client
+            shell = win32com.client.Dispatch("WScript.Shell")
+            shell.SendKeys('%') # 模拟 Alt 键唤醒窗口管理器
+            
+            win32gui.SetForegroundWindow(found_hwnd)
+            return f"已成功切换并置顶窗口: {win32gui.GetWindowText(found_hwnd)}"
+        except Exception as e:
+            return f"切换窗口失败: {str(e)}"
+    
+    return f"未找到匹配 '{target_name}' 的窗口。"
 
 def get_system_status():
     """
@@ -238,6 +346,10 @@ def windows_operation(action: str, target: str = None, x: int = None, y: int = N
         return open_application(target)
     elif action == "get_info":
         return get_system_status()
+    elif action == "get_active_windows":
+        return str(get_active_windows())
+    elif action == "activate":
+        return activate_window(target)
     elif action == "get_mouse_pos":
         return get_mouse_position()
     else:

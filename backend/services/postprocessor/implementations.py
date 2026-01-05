@@ -1,7 +1,7 @@
 import re
 from typing import Dict, Any, AsyncIterable
 from .base import BasePostprocessor
-from nit_core.parser import NITParser, NITStreamFilter
+from nit_core.dispatcher import remove_nit_tags, NITStreamFilter
 
 class ThinkingFilterPostprocessor(BasePostprocessor):
     """
@@ -46,7 +46,7 @@ class NITFilterPostprocessor(BasePostprocessor):
         if context.get('skip_nit_filter'):
             return content
             
-        return NITParser.remove_nit_blocks(content)
+        return remove_nit_tags(content)
 
     async def process_stream(self, stream: AsyncIterable[str], context: Dict[str, Any]) -> AsyncIterable[str]:
         """

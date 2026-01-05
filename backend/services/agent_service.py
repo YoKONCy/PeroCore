@@ -27,6 +27,7 @@ from sqlmodel import select, desc
 from nit_core.tools import TOOLS_MAPPING, TOOLS_DEFINITIONS, plugin_manager
 from nit_core.tools.core.ScreenVision.screen_ocr import get_screenshot_base64, save_screenshot
 from nit_core.tools.core.SessionOps.session_ops import set_current_session_context
+from nit_core.tools.core.WindowsOps.windows_ops import get_active_windows
 from nit_core.security import NITSecurityManager
 
 from services.task_manager import task_manager
@@ -731,17 +732,38 @@ Tool List Length: {len(tools_list_str)}
         config = context.get("llm_config", {})
         
         # [Feature] System Trigger Instruction
-        # If this is a system-triggered event (e.g. reminder, topic trigger),
-        # we append the instruction as a System message at the very end.
         if system_trigger_instruction:
             print(f"[Agent] Appending System Trigger Instruction: {system_trigger_instruction}")
             final_messages.append({
                 "role": "system",
                 "content": system_trigger_instruction
             })
-            # Also set user_message to something meaningful for logs if it's empty
             if not user_message:
                 user_message = f"【系统触发】{system_trigger_instruction}"
+
+        # [Feature] Active Window Injection
+        # 注入当前活跃窗口列表，防止 AI 幻觉（以为应用已打开）
+        try:
+            active_windows = get_active_windows()
+            if isinstance(active_windows, list) and active_windows:
+                # Limit to avoid token explosion
+                window_list_str = "\n".join(active_windows[:20]) 
+                if len(active_windows) > 20:
+                    window_list_str += f"\n... ({len(active_windows) - 20} more)"
+                
+                state_msg = f"""<system_state>
+Current Active Windows (Taskbar):
+{window_list_str}
+</system_state>
+Instruction: When opening an app, check this list first. If it's already running, use `windows_operation(action="activate", target="Name")` or just interact with it directly."""
+                
+                # Append to messages (System role)
+                final_messages.append({
+                    "role": "system",
+                    "content": state_msg
+                })
+        except Exception as e:
+            print(f"[Agent] Failed to inject active windows: {e}")
         
         # Fallback if config is missing (should not happen if ConfigPreprocessor runs)
         if not config:

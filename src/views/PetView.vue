@@ -19,10 +19,8 @@
         <div class="bubble" v-if="currentText || isThinking">
           <!-- 复杂任务折叠显示 -->
           <div v-if="isComplexTask" class="complex-task-summary" @click.stop="openTaskMonitor">
-            <div class="summary-icon">📝</div>
             <div class="summary-content">
-              <div class="summary-title">Pero 整理了一份详细报告...</div>
-              <div class="summary-hint">点击查看详情</div>
+              <div class="thinking-text-animated">🧠 拼命思考中...</div>
             </div>
           </div>
 
@@ -196,10 +194,8 @@ const parsedBubbleContent = computed(() => {
   if (!text) return []
 
   const segments = []
-  // 正则匹配:
-  // 1. 【Thinking: ...】 块 (兼容中英文冒号) -> Group 1
-  // 2. *动作描述* -> Group 2
-  const regex = /【Thinking[:：]?\s*([\s\S]*?)】|\*([^\*]+)\*/gi
+  // 只有在行首或换行符后的 *...* 才被视为 Action，避免误伤文本中的强调
+  const regex = /【(Thinking|Error|Reflection)[:：]?\s*([\s\S]*?)】|(?:\n|^)\s*\*([^\*\n]+)\*/gi
   
   let lastIndex = 0
   let match
@@ -215,11 +211,11 @@ const parsedBubbleContent = computed(() => {
     
     // 2. 判断匹配类型
     if (match[1] !== undefined) {
-        // Thinking 块
-        segments.push({ type: 'thinking', content: match[1].trim() })
-    } else if (match[2] !== undefined) {
+        // Tagged 块
+        segments.push({ type: match[1].toLowerCase(), content: match[2].trim() })
+    } else if (match[3] !== undefined) {
         // Action 块
-        segments.push({ type: 'action', content: match[2].trim() })
+        segments.push({ type: 'action', content: match[3].trim() })
     }
     
     lastIndex = regex.lastIndex
@@ -257,23 +253,23 @@ const foundFiles = ref([])
 watch(parsedBubbleContent, (newVal) => {
   if (ipcRenderer && ipcRenderer.send) {
     // 发送纯数据，避免 Vue 响应式对象的潜在问题
-    ipcRenderer.send('update-task-monitor-data', toRaw(newVal))
+    ipcRenderer.send('monitor-data-update', toRaw(newVal))
   }
 }, { deep: true })
 
-// 自动弹出思维监控室
-watch(isComplexTask, (newVal) => {
-  if (newVal) {
-    console.log('[PetView] Complex task detected, opening monitor automatically...')
-    openTaskMonitor()
-  }
-})
+// 自动弹出思维监控室 (已禁用)
+// watch(isComplexTask, (newVal) => {
+//   if (newVal) {
+//     console.log('[PetView] Complex task detected, opening monitor automatically...')
+//     openTaskMonitor()
+//   }
+// })
 
 const openTaskMonitor = () => {
   if (ipcRenderer && ipcRenderer.send) {
-    ipcRenderer.send('open-task-monitor')
+    ipcRenderer.send('open-dashboard-monitor')
     // 立即同步一次数据
-    ipcRenderer.send('update-task-monitor-data', toRaw(parsedBubbleContent.value))
+    ipcRenderer.send('monitor-data-update', toRaw(parsedBubbleContent.value))
   }
 }
 
@@ -1225,6 +1221,10 @@ onMounted(async () => {
 
   // 加载本地台词
   await loadLocalTexts()
+
+  // [Fix] 立即同步一次后端状态，并开启轮询
+  await fetchPetState()
+  setInterval(fetchPetState, 30000)
   
   // 显示欢迎语
    showWelcomeMessage()

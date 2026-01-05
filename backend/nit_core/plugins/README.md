@@ -1,5 +1,2 @@
 # NIT Core Plugins
-
-This directory is reserved for **future third-party plugins** or extensions that are not part of the core toolset.
-
-Core native tools are located in `../tools/`.
+用于存放外部的第三方插件扩展。这些插件或扩展不是核心工具集的一部分。

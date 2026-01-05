@@ -43,7 +43,7 @@ from services.browser_bridge_service import browser_bridge_service
 from services.screenshot_service import screenshot_manager
 from services.social_service import get_social_service
 from core.config_manager import get_config_manager
-from nit_core.parser import XMLStreamFilter
+from nit_core.dispatcher import XMLStreamFilter
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -1030,7 +1030,7 @@ async def chat(
                 # tts_delimiters = re.compile(r'[。！？\.\!\?\n]+')
                 
                 # 初始化过滤器，防止 TTS 读取 XML 标签和 NIT 工具调用块
-                from nit_core.parser import XMLStreamFilter, NITStreamFilter
+                from nit_core.dispatcher import XMLStreamFilter, NITStreamFilter
                 xml_filter = XMLStreamFilter()
                 nit_filter = NITStreamFilter()
                 # thinking_filter removed: we process thinking blocks on the full buffer in generate_tts_chunk

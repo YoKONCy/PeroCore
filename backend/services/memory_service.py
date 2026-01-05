@@ -134,8 +134,8 @@ class MemoryService:
     async def save_log(session: AsyncSession, source: str, session_id: str, role: str, content: str, metadata: dict = None, pair_id: str = None) -> ConversationLog:
         """保存原始对话记录到 ConversationLog"""
         # 1. 移除 NIT 协议标记 (Non-invasive Integration Tools)
-        from nit_core.parser import NITParser
-        cleaned_content = NITParser.remove_nit_blocks(content)
+        from nit_core.dispatcher import remove_nit_tags
+        cleaned_content = remove_nit_tags(content)
 
         # 2. 清洗真正意义上的大数据量技术标签
         big_data_tags = ['FILE_RESULTS', 'MEMORY_LIST', 'SEARCH_RESULTS']
@@ -281,6 +281,8 @@ class MemoryService:
             return
 
         for m in memories:
+            if m.access_count is None:
+                m.access_count = 0
             m.access_count += 1
             m.last_accessed = datetime.now()
             # 每次访问提升 0.1，上限 10.0
@@ -289,7 +291,10 @@ class MemoryService:
                 m.importance = int(m.base_importance) # 同步整数 importance
             session.add(m)
         
-        await session.commit()
+        try:
+            await session.commit()
+        except Exception as e:
+            print(f"[MemoryService] Failed to update access stats: {e}")
 
     @staticmethod
     async def get_relevant_memories(
@@ -301,15 +306,37 @@ class MemoryService:
         update_access_stats: bool = True # New param to control side effects
     ) -> List[Memory]:
         """
-        [Chain-Net Retrieval V3] (VectorDB Enabled)
+        [Chain-Net Retrieval V3] (VectorDB Enabled + Cluster Soft-Weighted)
         1. Embedding Search (VectorDB)
         2. Spreading Activation (Chain)
-        3. Reranking
+        3. Reranking with Cluster Soft-Weighted
         """
         from services.embedding_service import embedding_service
         from services.vector_service import vector_service
         import numpy as np
         import math
+
+        # --- 0. 意图识别与簇感知 (Intent Detection) ---
+        # 简单规则匹配：根据 Query 关键词预测当前意图簇
+        # 在未来可以替换为轻量级分类模型
+        target_cluster = None
+        cluster_keywords = {
+            "逻辑推理簇": ["怎么", "为什么", "如何", "代码", "bug", "逻辑", "分析", "原理", "解释", "define", "function"],
+            "情感偏好簇": ["喜欢", "讨厌", "爱", "恨", "感觉", "心情", "开心", "难过", "觉得", "want", "hate", "love"],
+            "计划意图簇": ["打算", "计划", "准备", "明天", "下周", "未来", "目标", "todo", "plan", "will"],
+            "创造灵感簇": ["想法", "点子", "故事", "如果", "假设", "脑洞", "idea", "imagine", "story"],
+            "反思簇": ["错了", "改进", "反省", "不好", "烂", "修正", "sorry", "mistake", "fix"]
+        }
+        
+        if text:
+            for cluster, keywords in cluster_keywords.items():
+                if any(k in text.lower() for k in keywords):
+                    target_cluster = cluster
+                    break
+        
+        if target_cluster:
+            # print(f"[Memory] Detected Intent Cluster: {target_cluster}")
+            pass
 
         # 1. 向量化 Query (如果没有传入预计算的向量)
         if query_vec is None:
@@ -325,19 +352,16 @@ class MemoryService:
 
         # 2. 向量检索 (VectorDB Search)
         try:
-            # [Feature] 标签云过滤 (Tag Cloud Filtering)
-            # 如果 query 中包含了某些明确的 tag 关键词，我们可以在这里构建 filter_criteria
-            # 但目前我们没有显式的 tag 提取器，所以暂时不做自动过滤。
-            # 不过我们已经预留了接口，未来可以通过 "filters={"tags": {"$contains": "keyword"}}" 来调用。
-            # 
-            # 这里的 get_relevant_memories 是通用检索，暂时只用向量。
-            
-            vector_results = vector_service.search(query_vec, limit=20) # 扩大召回范围
+            # [Optimization] 扩大召回范围至 60，以便在过滤掉近期记忆（上下文窗口）后仍有足够的候选
+            vector_results = vector_service.search(query_vec, limit=60) 
             
             if not vector_results:
                 # 尝试从 SQLite 回退 (如果是迁移过渡期)
                 print("[Memory] VectorDB returned no results, trying SQLite fallback...")
-                return await MemoryService._keyword_search_fallback(session, text, limit, exclude_after_time)
+                fallback_res = await MemoryService._keyword_search_fallback(session, text, limit, exclude_after_time)
+                if update_access_stats and fallback_res:
+                    await MemoryService.mark_memories_accessed(session, fallback_res)
+                return fallback_res
 
             # 获取 Memory 对象
             # 提取 ID 列表
@@ -352,14 +376,25 @@ class MemoryService:
             # 建立 ID -> Similarity 映射
             sim_map = {res["id"]: res["score"] for res in vector_results}
             
-            # 过滤掉 exclude_after_time
+            # [Context Awareness] 过滤掉 exclude_after_time (即上下文窗口内的记忆)
             if exclude_after_time:
                 exclude_ts = exclude_after_time.timestamp() * 1000
+                original_count = len(valid_memories)
                 valid_memories = [m for m in valid_memories if m.timestamp < exclude_ts]
+                filtered_count = len(valid_memories)
+                if original_count != filtered_count:
+                    print(f"[Memory] Context Filter: Excluded {original_count - filtered_count} memories overlapping with context window.")
+
+            # 如果过滤后为空，直接返回空（符合用户期望：若长记忆条目全在上下文窗口内，则跳过检索）
+            if not valid_memories:
+                return []
 
         except Exception as e:
             print(f"[Memory] VectorDB search failed: {e}. Falling back.")
-            return await MemoryService._keyword_search_fallback(session, text, limit, exclude_after_time)
+            fallback_res = await MemoryService._keyword_search_fallback(session, text, limit, exclude_after_time)
+            if update_access_stats and fallback_res:
+                await MemoryService.mark_memories_accessed(session, fallback_res)
+            return fallback_res
         
         # 3. 扩散激活 (Spreading Activation)
         # 初始激活值 = VectorDB Similarity
@@ -436,15 +471,21 @@ class MemoryService:
                     if target_id in activation_scores:
                         activation_scores[target_id] += base_score * rel.strength * 0.5
 
-        # 4. 综合排序 (Final Ranking) with Time Decay
-        # 根据设计文档：Score = (Sim * w1) + (Importance * w2) * Decay(t) + (Recency * w3)
-        # 这里的 Sim 已经包含了扩散激活后的 act_score
+        # 4. 综合排序 (Final Ranking) with Time Decay & Cluster Soft-Weighting
+        # Score = (Sim * w1) + (ClusterBonus) + (Importance * w2) * Decay(t) + (Recency * w3)
         final_candidates = []
         current_time = datetime.now().timestamp() * 1000
         
         for m in valid_memories:
             # 基础相关度分数 (Sim)
             act_score = activation_scores.get(m.id, 0.0)
+            
+            # [Feature] Cluster Soft-Weighting (簇感知软加权)
+            # 如果记忆的簇与当前意图簇匹配，给予额外加分
+            cluster_bonus = 0.0
+            if target_cluster and m.clusters and target_cluster in m.clusters:
+                cluster_bonus = 0.15 # +15% bonus for cluster match
+                # print(f"[Memory] Cluster Bonus Applied: +0.15 for {m.id} (Match: {target_cluster})")
             
             # 归一化重要性 (Importance)
             imp_score = min(m.base_importance, 10.0) / 10.0
@@ -459,12 +500,8 @@ class MemoryService:
             recency_bonus = max(0, 0.2 * (1 - time_diff_days / 1.0)) if time_diff_days < 1.0 else 0
             
             # 严格遵循设计公式:
-            # Score = (相关度 * 0.7) + (重要性 * 0.3 * 衰减) + 近期奖励
-            # 这样确保了：
-            # 1. 极其相关的旧记忆不会因为时间太久而被彻底遗忘 (Sim 不衰减)
-            # 2. 普通的旧记忆主要靠重要性支撑，但会随时间变模糊 (Importance 衰减)
-            # 3. 刚刚发生的事情有额外的召回权重
-            final_score = (act_score * 0.7) + (imp_score * 0.3 * decay_factor) + recency_bonus
+            # Score = (相关度 * 0.7) + ClusterBonus + (重要性 * 0.3 * 衰减) + 近期奖励
+            final_score = (act_score * 0.7) + cluster_bonus + (imp_score * 0.3 * decay_factor) + recency_bonus
             
             if final_score > 0.1: # 略微降低阈值，允许更多候选进入 Rerank
                 final_candidates.append((m, final_score))

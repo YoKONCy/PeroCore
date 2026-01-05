@@ -67,6 +67,7 @@ class HistoryPreprocessor(BasePreprocessor):
 
         if history_logs:
             earliest_timestamp = history_logs[0].timestamp
+            # print(f"[History] Context Window Start: {earliest_timestamp}")
             for log in history_logs:
                 # Clean tags
                 content = log.content
@@ -269,9 +270,9 @@ class RAGPreprocessor(BasePreprocessor):
                 else:
                     memory_context = "无相关记忆"
                 
-                # [Reinforcement] Mark retrieved memories as accessed
-                if memories:
-                    await memory_service.mark_memories_accessed(session, memories)
+                # [Reinforcement] 
+                # Note: mark_memories_accessed is now handled inside get_relevant_memories
+                # to ensure consistency across all access paths (including fallback).
 
         except Exception as e:
             print(f"[RAGPreprocessor] Failed to retrieve memories: {e}")

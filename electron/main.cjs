@@ -138,7 +138,6 @@ function startPythonBackend() {
 // ----------------------------------------------------------------------
 let petWindow // 桌宠窗口
 let dashboardWindow // 管理后台窗口
-let taskMonitorWindow // 任务监控窗口
 let tray
 
 function createPetWindow() {
@@ -200,39 +199,6 @@ function createDashboardWindow() {
   })
 }
 
-function createTaskMonitorWindow() {
-  if (taskMonitorWindow) {
-    taskMonitorWindow.show()
-    taskMonitorWindow.focus()
-    return
-  }
-
-  taskMonitorWindow = new BrowserWindow({
-    width: 400,
-    height: 600,
-    minWidth: 300,
-    minHeight: 400,
-    frame: false, // 无边框
-    transparent: false, // 实体背景
-    resizable: true,
-    alwaysOnTop: true, // 保持置顶
-    webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false
-    }
-  })
-
-  if (process.env.VITE_DEV_SERVER_URL) {
-    taskMonitorWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}#/monitor`)
-  } else {
-    taskMonitorWindow.loadURL(`file://${path.join(__dirname, '../dist/index.html')}#/monitor`)
-  }
-
-  taskMonitorWindow.on('closed', () => {
-    taskMonitorWindow = null
-  })
-}
-
 function createTray() {
   tray = new Tray(path.join(__dirname, '../public/icon.png'))
   const contextMenu = Menu.buildFromTemplate([
@@ -291,19 +257,40 @@ ipcMain.on('open-dashboard', () => {
   createDashboardWindow()
 })
 
-// 任务监控窗口控制
+// 打开管理面板并跳转到监控页 (New)
+ipcMain.on('open-dashboard-monitor', () => {
+  createDashboardWindow()
+  if (dashboardWindow) {
+    dashboardWindow.show()
+    dashboardWindow.focus()
+    // 通知 Dashboard 切换到 Monitor tab
+    dashboardWindow.webContents.send('open-dashboard-monitor')
+  }
+})
+
+// 任务监控窗口控制 (Deprecated)
 ipcMain.on('open-task-monitor', () => {
-  createTaskMonitorWindow()
+  // createTaskMonitorWindow() // Old behavior
+  // New behavior: Redirect to dashboard
+  createDashboardWindow()
+  if (dashboardWindow) {
+    dashboardWindow.show()
+    dashboardWindow.focus()
+    dashboardWindow.webContents.send('open-dashboard-monitor')
+  }
 })
 
-ipcMain.on('close-task-monitor', () => {
-  if (taskMonitorWindow) taskMonitorWindow.close()
+// 数据中转：从 PetWindow 接收数据，转发给 DashboardWindow
+ipcMain.on('monitor-data-update', (event, data) => {
+  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+    dashboardWindow.webContents.send('monitor-data-update', data)
+  }
 })
 
-// 数据中转：从 PetWindow 接收数据，转发给 TaskMonitorWindow
+// 旧的数据更新接口 (兼容)
 ipcMain.on('update-task-monitor-data', (event, data) => {
-  if (taskMonitorWindow && !taskMonitorWindow.isDestroyed()) {
-    taskMonitorWindow.webContents.send('update-monitor-data', data)
+  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+    dashboardWindow.webContents.send('monitor-data-update', data)
   }
 })
 

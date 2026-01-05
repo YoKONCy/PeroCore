@@ -107,6 +107,25 @@
             
             <!-- 1. 仪表盘概览 -->
             <div v-if="currentTab === 'overview'" key="overview" class="view-container">
+              <!-- Live Monitor Entry Button -->
+              <el-row :gutter="20" style="margin-bottom: 20px;">
+                <el-col :span="24">
+                   <el-alert
+                    title="思维监控室 (Thinking Monitor)"
+                    type="info"
+                    description="实时查看 Pero 的思考过程、错误修正与自我反思。"
+                    show-icon
+                    :closable="false"
+                  >
+                    <template #default>
+                       <div style="margin-top: 10px;">
+                         <el-button type="primary" size="small" @click="openLiveMonitor">进入监控室</el-button>
+                       </div>
+                    </template>
+                  </el-alert>
+                </el-col>
+              </el-row>
+
               <el-row :gutter="20">
                 <el-col :span="8">
                   <el-card shadow="hover" class="stat-card pink-gradient">
@@ -327,6 +346,20 @@
               </el-row>
             </div>
 
+            <!-- 1.5 思维监控室 -->
+            <div v-else-if="currentTab === 'task_monitor'" key="task_monitor" class="view-container" style="height: 100%; display: flex; flex-direction: column;">
+               <div class="toolbar" style="padding: 10px 0; display: flex; align-items: center; gap: 10px;">
+                  <el-button @click="goBackFromMonitor" :icon="ArrowLeft" circle></el-button>
+                  <h3 style="margin: 0;">{{ isViewingHistory ? '历史思维回溯' : '实时思维监控' }}</h3>
+               </div>
+               <div style="flex: 1; overflow: hidden; border: 1px solid #eee; border-radius: 8px;">
+                 <ReActProcessViewer 
+                   :segments="isViewingHistory ? historySegments : monitorSegments" 
+                   :isLive="!isViewingHistory"
+                 />
+               </div>
+            </div>
+
             <!-- 2. 对话日志 -->
             <div v-else-if="currentTab === 'logs'" key="logs" class="view-container logs-layout">
               <el-card shadow="never" class="glass-card filter-card">
@@ -435,6 +468,7 @@
                       >
                         重试 ({{ log.retry_count }})
                       </el-button>
+                      <el-button type="text" :icon="Monitor" @click="openHistoryMonitor(log)" size="small" style="color: #626aef;">思维链</el-button>
                       <el-button type="text" :icon="Edit" @click="startLogEdit(log)" size="small">编辑</el-button>
                       <el-button type="text" :icon="Delete" @click="deleteLog(log.id)" size="small" style="color: #f56c6c;">删除</el-button>
                     </div>
@@ -922,6 +956,7 @@
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import VoiceConfigPanel from './VoiceConfigPanel.vue'
 import TerminalPanel from '../components/TerminalPanel.vue'
+import ReActProcessViewer from '../components/ReActProcessViewer.vue'
 import { marked } from 'marked'
 import dompurify from 'dompurify'
 import * as echarts from 'echarts'
@@ -944,7 +979,8 @@ import {
   Monitor,
   SwitchButton,
   Microphone,
-  Warning
+  Warning,
+  ArrowLeft
 } from '@element-plus/icons-vue'
 
 // --- 状态管理 ---
@@ -975,6 +1011,66 @@ const selectedSource = ref('desktop')
 const selectedSessionId = ref('') 
 const selectedDate = ref('')
 const selectedSort = ref('desc')
+
+// --- ReAct Monitor State ---
+const monitorSegments = ref([])
+const historySegments = ref([])
+const isViewingHistory = ref(false)
+
+const parseReActSegments = (text) => {
+  if (!text) return []
+  const segments = []
+  // 只有在行首或换行符后的 *...* 才被视为 Action，避免误伤文本中的强调
+  const regex = /【(Thinking|Error|Reflection)[:：]?\s*([\s\S]*?)】|(?:\n|^)\s*\*([^\*\n]+)\*/gi
+  
+  let lastIndex = 0
+  let match
+
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      const normalText = text.substring(lastIndex, match.index)
+      if (normalText.trim()) segments.push({ type: 'text', content: normalText })
+    }
+    
+    if (match[1] !== undefined) {
+        // Tagged block
+        const type = match[1].toLowerCase() // thinking, error, reflection
+        segments.push({ type, content: match[2].trim() })
+    } else if (match[3] !== undefined) {
+        // Action block
+        segments.push({ type: 'action', content: match[3].trim() })
+    }
+    
+    lastIndex = regex.lastIndex
+  }
+  
+  if (lastIndex < text.length) {
+    const normalText = text.substring(lastIndex)
+    if (normalText.trim()) segments.push({ type: 'text', content: normalText })
+  }
+  
+  return segments
+}
+
+const openLiveMonitor = () => {
+  currentTab.value = 'task_monitor'
+  isViewingHistory.value = false
+}
+
+const openHistoryMonitor = (log) => {
+  currentTab.value = 'task_monitor'
+  isViewingHistory.value = true
+  historySegments.value = parseReActSegments(log.content)
+}
+
+const goBackFromMonitor = () => {
+  if (isViewingHistory.value) {
+    currentTab.value = 'logs'
+  } else {
+    currentTab.value = 'overview'
+  }
+}
+
 
 // --- System Monitor State ---
 const systemStatus = ref(null)
@@ -2057,8 +2153,24 @@ const deleteTask = async (taskId) => {
 
 onMounted(() => {
   waitForBackend()
-  // Add real-time polling for system status
-  systemStatusInterval.value = setInterval(fetchSystemStatus, 3000)
+  // Add real-time polling for system status and pet state
+  systemStatusInterval.value = setInterval(() => {
+    fetchSystemStatus()
+    if (isBackendOnline.value) {
+      fetchPetState()
+    }
+  }, 3000)
+
+  // Listen for monitor updates
+  if (window.require) {
+    const { ipcRenderer } = window.require('electron')
+    ipcRenderer.on('monitor-data-update', (event, data) => {
+      monitorSegments.value = data
+    })
+    ipcRenderer.on('open-dashboard-monitor', () => {
+      openLiveMonitor()
+    })
+  }
 })
 
 onUnmounted(() => {

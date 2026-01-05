@@ -40,8 +40,8 @@ class RealtimeVoiceManager:
         cleaned = re.sub(r'<[^>]+>.*?</[^>]+>', '', text, flags=re.DOTALL)
         
         # 2. 移除 NIT 调用块
-        from nit_core.parser import NITParser
-        cleaned = NITParser.remove_nit_blocks(cleaned)
+        from nit_core.dispatcher import remove_nit_tags
+        cleaned = remove_nit_tags(cleaned)
         
         # 3. 移除思考过程 【Thinking: ...】
         # 如果是用于 TTS，必须移除；如果是用于 UI展示，可以保留（由前端折叠）
@@ -79,14 +79,18 @@ class RealtimeVoiceManager:
         # 尝试提取心情关键词
         mood_text = ""
         
-        # 方案 A: 尝试从 NIT 协议块中提取 mood 参数 (新版)
-        from nit_core.parser import NITParser
-        nit_calls = NITParser.parse_text(full_response)
-        for call in nit_calls:
-            if call['plugin'] in ['update_character_status', 'update_status', 'set_status']:
-                mood_text = call['params'].get('mood', '')
-                if mood_text:
-                    break
+        # 方案 A: 从回复内容中寻找心情暗示 (简单的关键词匹配)
+        mood_keywords = {
+            "happy": ["开心", "高兴", "兴奋", "乐"],
+            "sad": ["伤心", "难过", "哭", "委屈"],
+            "angry": ["生气", "愤怒", "火大", "恼"],
+            "neutral": ["好吧", "知道", "哦", "嗯"]
+        }
+        
+        for mood, keywords in mood_keywords.items():
+            if any(k in full_response for k in keywords):
+                mood_text = mood
+                break
         
         # 方案 B: 尝试正则匹配 <PEROCUE> 标签 (旧版兼容)
         if not mood_text:
