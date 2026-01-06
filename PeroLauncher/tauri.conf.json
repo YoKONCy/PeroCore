@@ -22,7 +22,7 @@
         "decorations": true,
         "transparent": false,
         "alwaysOnTop": false,
-        "visible": false,
+        "visible": true,
         "center": true
       },
       {
@@ -52,15 +52,8 @@
     }
   },
   "plugins": {
-    "log": {},
     "shell": {
-      "sidecar": [
-        {
-          "cmd": "bin/pero-backend",
-          "args": [],
-          "description": "Python Backend Service"
-        }
-      ]
+      "open": true
     }
   },
   "bundle": {

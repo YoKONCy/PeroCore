@@ -10,13 +10,14 @@
   "permissions": [
     "core:default",
     "log:default",
+    "shell:default",
     {
       "identifier": "shell:allow-execute",
       "allow": [
         {
-          "args": [],
-          "cmd": "bin/pero-backend",
-          "sidecar": true
+          "args": true,
+          "cmd": "python",
+          "sidecar": false
         }
       ]
     }

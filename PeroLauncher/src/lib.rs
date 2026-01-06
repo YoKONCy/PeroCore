@@ -117,9 +117,14 @@ fn start_backend(app: tauri::AppHandle, state: tauri::State<BackendState>) -> Re
     
     // 2. 确定 Python 路径
     let python_path = {
-        let bundled_python = resource_dir.join("python/python.exe");
-        if bundled_python.exists() {
-            bundled_python
+        let mut p = resource_dir.join("python/python.exe");
+        if !p.exists() {
+            // 尝试 _up_ 路径 (Tauri 打包外部资源的默认行为)
+            p = resource_dir.join("_up_/src-tauri/python/python.exe");
+        }
+        
+        if p.exists() {
+            p
         } else {
             // 开发模式回退
             get_workspace_root().join("backend/venv/Scripts/python.exe")
@@ -128,9 +133,14 @@ fn start_backend(app: tauri::AppHandle, state: tauri::State<BackendState>) -> Re
 
     // 3. 确定脚本路径
     let script_path = {
-        let bundled_script = resource_dir.join("backend/main.py");
-        if bundled_script.exists() {
-            bundled_script
+        let mut p = resource_dir.join("backend/main.py");
+        if !p.exists() {
+            // 尝试 _up_ 路径
+            p = resource_dir.join("_up_/backend/main.py");
+        }
+        
+        if p.exists() {
+            p
         } else {
             // 开发模式回退
             get_workspace_root().join("backend/main.py")
@@ -141,15 +151,24 @@ fn start_backend(app: tauri::AppHandle, state: tauri::State<BackendState>) -> Re
     println!("Script path: {:?}", script_path);
 
     if !python_path.exists() {
-        return Err(format!("Python executable not found at {:?}", python_path));
+        let err_msg = format!("Python executable not found. \nResources dir: {:?}\nChecked paths: \n- {:?}/python/python.exe\n- {:?}/_up_/src-tauri/python/python.exe", resource_dir, resource_dir, resource_dir);
+        eprintln!("{}", err_msg);
+        return Err(err_msg);
     }
 
-    let cmd = app.shell().command(python_path)
+    println!("Attempting to spawn backend...");
+    let cmd = app.shell().command(python_path.clone())
         .args(&["-u", &script_path.to_string_lossy()]);
 
-    let (mut rx, child) = cmd
-        .spawn()
-        .map_err(|e| format!("Failed to spawn backend: {}", e))?;
+    let spawn_result = cmd.spawn();
+    
+    if let Err(e) = &spawn_result {
+        let err_msg = format!("Failed to spawn backend process: {}. \nPython path: {:?}", e, python_path);
+        eprintln!("{}", err_msg);
+        return Err(err_msg);
+    }
+
+    let (mut rx, child) = spawn_result.unwrap();
 
     // 日志处理
     let app_handle_log = app.clone();
@@ -189,9 +208,13 @@ fn get_config(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
     
     // 尝试在资源目录找，找不到就回退到源码目录
     let config_path = {
-        let bundled = resource_dir.join("backend/config.json");
-        if bundled.exists() {
-            bundled
+        let mut p = resource_dir.join("backend/config.json");
+        if !p.exists() {
+            p = resource_dir.join("_up_/backend/config.json");
+        }
+        
+        if p.exists() {
+            p
         } else {
             get_workspace_root().join("backend/config.json")
         }
@@ -212,9 +235,13 @@ fn save_config(app: tauri::AppHandle, config: serde_json::Value) -> Result<(), S
     let resource_dir = app.path().resource_dir().map_err(|e| e.to_string())?;
     
     let config_path = {
-        let bundled = resource_dir.join("backend/config.json");
-        if bundled.exists() {
-            bundled
+        let mut p = resource_dir.join("backend/config.json");
+        if !p.exists() {
+            p = resource_dir.join("_up_/backend/config.json");
+        }
+        
+        if p.exists() {
+            p
         } else {
             get_workspace_root().join("backend/config.json")
         }

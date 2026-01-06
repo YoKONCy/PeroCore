@@ -42,6 +42,23 @@
 - **MSI 安装包**: `target\release\bundle\msi\PeroLauncher_x.x.x_x64.msi`
 - **绿色版 EXE**: `target\release\pero_launcher.exe`
 
-## 5. 注意事项
+## 5. 故障排除 (如果朋友运行没反应)
+如果发给别人的安装包启动后没反应，通常是以下原因：
+
+### **1. 缺少 WebView2 运行时 (最常见)**
+- **症状**：双击图标后没有任何窗口弹出，任务管理器里也没有进程。
+- **解决**：强烈建议让朋友运行 **MSI 安装包** 而不是直接发 EXE。MSI 会检测并自动引导用户下载安装 WebView2。
+
+### **2. 路径包含中文/特殊字符**
+- **症状**：虽然我们做了路径适配，但 Python 嵌入版对某些非 ASCII 路径可能依然敏感。
+- **解决**：尝试安装在纯英文路径下（如 `C:\PeroCore`）。
+
+### **3. 缺少 VC++ 运行库**
+- **解决**：安装 [Visual C++ Redistributable 2015-2022](https://aka.ms/vs/17/release/vc_redist.x64.exe)。
+
+### **4. 查看错误日志**
+- 如果程序能启动但功能异常，可以在控制台运行 `pero_launcher.exe` 查看 Rust 输出的详细错误路径。
+
+## 6. 注意事项
 - **第一次构建**：由于需要下载 Python 环境并安装庞大的第三方库 (如 Torch)，第一次运行 `pack.ps1` 会比较慢。
 - **依赖更新**：如果你修改了 `backend/requirements.txt`，再次运行 `pack.ps1` 会自动更新内置环境。
