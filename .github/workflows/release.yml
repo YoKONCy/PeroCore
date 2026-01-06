@@ -27,53 +27,47 @@ jobs:
       - name: install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
-      - name: install dependencies (ubuntu only)
-        if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
 
-      - name: Setup Python Environment
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install -r backend/requirements.txt
+
+      - name: Build Python Sidecar (Windows)
         shell: pwsh
         run: |
-          $P_PYTHON_TARGET = "PeroLauncher/src-tauri/python"
-          New-Item -ItemType Directory -Force -Path $P_PYTHON_TARGET
+          $BIN_DIR = "PeroLauncher/bin"
+          if (!(Test-Path $BIN_DIR)) { New-Item -ItemType Directory -Path $BIN_DIR }
           
-          echo ">>> Downloading Embedded Python..."
-          $PYTHON_ZIP_URL = "https://www.python.org/ftp/python/3.10.11/python-3.10.11-embed-amd64.zip"
-          $PYTHON_ZIP_FILE = "python_embed.zip"
-          curl.exe -L -o $PYTHON_ZIP_FILE $PYTHON_ZIP_URL
+          # 打包后端
+          cd backend
+          pyinstaller --noconsole --onefile --name pero-backend main.py
           
-          echo ">>> Extracting Python..."
-          Expand-Archive -Path $PYTHON_ZIP_FILE -DestinationPath $P_PYTHON_TARGET -Force
-          Remove-Item $PYTHON_ZIP_FILE
-          
-          echo ">>> Configuring python310._pth..."
-          $PTH_FILE = Join-Path $P_PYTHON_TARGET "python310._pth"
-          Set-Content -Path $PTH_FILE -Value "python310.zip`n.`n#import site`nimport site"
-          
-          echo ">>> Installing pip..."
-          $GET_PIP_URL = "https://bootstrap.pypa.io/get-pip.py"
-          $GET_PIP_FILE = Join-Path $P_PYTHON_TARGET "get-pip.py"
-          curl.exe -L -o $GET_PIP_FILE $GET_PIP_URL
-          & (Join-Path $P_PYTHON_TARGET "python.exe") $GET_PIP_FILE
-          Remove-Item $GET_PIP_FILE
-          
-          echo ">>> Installing backend requirements..."
-          & (Join-Path $P_PYTHON_TARGET "python.exe") -m pip install -r backend/requirements.txt --index-url https://mirrors.cloud.tencent.com/pypi/simple
+          # 按照 Tauri Sidecar 规范重命名并移动
+          # x86_64-pc-windows-msvc 是 windows-latest 的默认目标
+          Move-Item "dist/pero-backend.exe" "../$BIN_DIR/pero-backend-x86_64-pc-windows-msvc.exe" -Force
+          cd ..
 
       - name: install frontend dependencies
         run: npm install
+
+      - name: build frontend
+        run: npm run build
 
       - name: build tauri app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: v__VERSION__ # tauri-action replaces this with app version from tauri.conf.json
+          tagName: v__VERSION__
           releaseName: "Pero Launcher v__VERSION__"
-          releaseBody: "Automated release from GitHub Actions."
+          releaseBody: "Automated release from GitHub Actions (Tauri v2 + Sidecar)."
           releaseDraft: true
           prerelease: false
-          # Point to the config file relative to the repo root (PeroCore)
           args: "--config PeroLauncher/tauri.conf.json"
