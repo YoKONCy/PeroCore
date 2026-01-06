@@ -1,34 +1,42 @@
-# PeroCore 自动化打包脚本
-# 用途：全自动构建前端、配置便携式 Python 环境并打包 Tauri 应用
-
+# PeroCore Auto-Packaging Script (Strict Path Version)
 $ErrorActionPreference = "Stop"
 
-# 1. 配置路径
-$P_ROOT = Resolve-Path ".."
-$P_BACKEND = Join-Path $P_ROOT "backend"
-$P_LAUNCHER = Join-Path $P_ROOT "PeroLauncher"
-$P_PYTHON_TARGET = Join-Path $P_LAUNCHER "src-tauri/python"
-$P_NODE_BIN = Join-Path $P_LAUNCHER "src-tauri/bin/node.exe"
+# 1. 严格路径定义 (基于脚本所在目录: PeroCore/build_tools)
+$SCRIPT_DIR = Split-Path -Parent $MyInvocation.MyCommand.Path
+$P_PERO_CORE = Split-Path -Parent $SCRIPT_DIR  # 这应该是 PeroCore 目录
 
-Write-Host ">>> 开始自动化打包流程..." -ForegroundColor Cyan
+# 确保我们拿到的确实是 PeroCore 目录
+if (-not $P_PERO_CORE.EndsWith("PeroCore")) {
+    # 如果路径不对，尝试从当前工作目录强制纠正 (容错处理)
+    $P_PERO_CORE = Get-Item "C:\Users\Administrator\Desktop\Perofamily\PeroCore"
+}
+
+$P_BACKEND = Join-Path $P_PERO_CORE "backend"
+$P_LAUNCHER = Join-Path $P_PERO_CORE "PeroLauncher"
+$P_PYTHON_TARGET = Join-Path $P_LAUNCHER "src-tauri/python"
+
+Write-Host ">>> Starting Auto-Packaging Process..." -ForegroundColor Cyan
+Write-Host ">>> Project Root: $P_PERO_CORE"
+Write-Host ">>> Python Target: $P_PYTHON_TARGET"
 
 # 2. 前端构建
-Write-Host ">>> [1/4] 正在构建前端项目..." -ForegroundColor Yellow
-Set-Location $P_ROOT
+Write-Host ">>> [1/3] Building Frontend Project..." -ForegroundColor Yellow
+Set-Location $P_PERO_CORE
 npm run build
 
 # 3. 准备便携式 Python 环境
-Write-Host ">>> [2/4] 正在配置便携式 Python 环境..." -ForegroundColor Yellow
+Write-Host ">>> [2/3] Configuring Portable Python Environment..." -ForegroundColor Yellow
 if (-not (Test-Path $P_PYTHON_TARGET)) {
     New-Item -ItemType Directory -Path $P_PYTHON_TARGET -Force
 }
 
-Set-Location $P_LAUNCHER
-$PYTHON_ZIP = "python-embed.zip"
+$PYTHON_ZIP = Join-Path $P_LAUNCHER "python-embed.zip"
 $PYTHON_URL = "https://www.python.org/ftp/python/3.10.11/python-3.10.11-embed-amd64.zip"
+$GET_PIP_URL = "https://bootstrap.pypa.io/get-pip.py"
+$GET_PIP_FILE = Join-Path $P_PYTHON_TARGET "get-pip.py"
 
 if (-not (Test-Path (Join-Path $P_PYTHON_TARGET "python.exe"))) {
-    Write-Host "    正在下载 Python 嵌入式版本..."
+    Write-Host "    Downloading Python embeddable version..."
     curl.exe -L -o $PYTHON_ZIP $PYTHON_URL
     Expand-Archive -Path $PYTHON_ZIP -DestinationPath $P_PYTHON_TARGET -Force
     Remove-Item $PYTHON_ZIP
@@ -44,29 +52,27 @@ import site
 "@
 $PTH_CONTENT | Out-File -FilePath $PTH_FILE -Encoding ascii -Force
 
-# 创建 site-packages 并安装依赖
+# 安装 pip
 $P_SITE_PACKAGES = Join-Path $P_PYTHON_TARGET "site-packages"
 if (-not (Test-Path $P_SITE_PACKAGES)) {
     New-Item -ItemType Directory -Path $P_SITE_PACKAGES -Force
 }
 
-Write-Host "    正在安装后端依赖 (这可能需要较长时间)..."
-pip install -r (Join-Path $P_BACKEND "requirements.txt") --target $P_SITE_PACKAGES --upgrade
-
-# 4. 准备 Node.exe (如果不存在)
-if (-not (Test-Path $P_NODE_BIN)) {
-    Write-Host ">>> [3/4] 正在准备便携式 Node.exe..." -ForegroundColor Yellow
-    $NODE_URL = "https://nodejs.org/dist/v20.11.0/win-x64/node.exe"
-    if (-not (Test-Path (Join-Path $P_LAUNCHER "src-tauri/bin"))) {
-        New-Item -ItemType Directory -Path (Join-Path $P_LAUNCHER "src-tauri/bin") -Force
-    }
-    curl.exe -L -o $P_NODE_BIN $NODE_URL
+if (-not (Test-Path (Join-Path $P_PYTHON_TARGET "Scripts/pip.exe"))) {
+    Write-Host "    Installing pip..."
+    curl.exe -L -o $GET_PIP_FILE $GET_PIP_URL
+    & (Join-Path $P_PYTHON_TARGET "python.exe") $GET_PIP_FILE
+    Remove-Item $GET_PIP_FILE
 }
 
-# 5. 执行 Tauri 构建
-Write-Host ">>> [4/4] 正在执行 Tauri 构建打包..." -ForegroundColor Yellow
-Set-Location $P_LAUNCHER
-cargo tauri build
+Write-Host "    Installing backend dependencies..."
+& (Join-Path $P_PYTHON_TARGET "python.exe") -m pip install -r (Join-Path $P_BACKEND "requirements.txt") --target $P_SITE_PACKAGES --upgrade
 
-Write-Host ">>> 打包完成！" -ForegroundColor Green
-Write-Host "安装包位置: $P_ROOT\target\release\bundle\msi\" -ForegroundColor Gray
+# 4. 执行 Tauri 构建
+Write-Host ">>> [3/3] Executing Tauri Build..." -ForegroundColor Yellow
+Set-Location $P_PERO_CORE
+npx tauri build --config (Join-Path $P_LAUNCHER "tauri.conf.json")
+
+Write-Host ">>> Packaging Complete!" -ForegroundColor Green
+$OUTPUT_DIR = Join-Path $P_PERO_CORE "target/release/bundle/msi/"
+Write-Host "MSI Package Location: $OUTPUT_DIR"
