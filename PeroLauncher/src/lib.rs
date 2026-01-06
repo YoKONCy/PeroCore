@@ -396,6 +396,12 @@ pub fn run() {
                     thread::sleep(std::time::Duration::from_millis(32));
                 }
             });
+            
+            // 强制在启动时显示启动器窗口
+            if let Some(window) = app.get_webview_window("launcher") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
 
             Ok(())
         })
