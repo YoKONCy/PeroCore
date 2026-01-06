@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Child, Stdio};
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::sync::{Arc, Mutex};
 use std::fs;
 use std::io::{self, BufRead, BufReader};
@@ -24,27 +26,27 @@ impl NapCatState {
     }
 }
 
+fn get_workspace_root() -> PathBuf {
+    let mut current_dir = std::env::current_dir().unwrap();
+    for _ in 0..5 {
+        if current_dir.join("backend").exists() {
+            return current_dir;
+        }
+        if let Some(parent) = current_dir.parent() {
+            current_dir = parent.to_path_buf();
+        } else {
+            break;
+        }
+    }
+    std::env::current_dir().unwrap()
+}
+
 pub fn get_napcat_dir() -> PathBuf {
-    let current_dir = std::env::current_dir().unwrap();
-    // ... (existing logic)
-    let root = if current_dir.ends_with("src-tauri") || current_dir.ends_with("PeroLauncher") {
-        current_dir.parent().unwrap().to_path_buf()
-    } else if current_dir.join("backend").exists() {
-        current_dir.clone()
-    } else {
-        current_dir.clone()
-    };
-    
-    root.join("backend/nit_core/plugins/social_adapter/NapCat")
+    get_workspace_root().join("backend/nit_core/plugins/social_adapter/NapCat")
 }
 
 fn is_social_enabled() -> bool {
-    let current_dir = std::env::current_dir().unwrap();
-    let root = if current_dir.ends_with("src-tauri") || current_dir.ends_with("PeroLauncher") {
-        current_dir.parent().unwrap().to_path_buf()
-    } else {
-        current_dir.clone()
-    };
+    let root = get_workspace_root();
     let config_path = root.join("backend/config.json");
     if !config_path.exists() {
         return true; // Default to enabled
@@ -297,6 +299,7 @@ pub fn start_napcat_process(app: AppHandle, state: tauri::State<NapCatState>) ->
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .stdin(Stdio::piped())
+        .creation_flags(0x08000000)
         .spawn()
         .map_err(|e| format!("Failed to start NapCat: {}", e))?;
 

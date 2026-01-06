@@ -2,6 +2,7 @@ import re
 from typing import List, Tuple, Any
 from enum import Enum, auto
 from dataclasses import dataclass
+from .errors import NITLexerError
 
 class TokenType(Enum):
     IDENTIFIER = auto()
@@ -31,7 +32,7 @@ class Lexer:
         self.tokens = []
 
     def error(self, msg: str):
-        raise ValueError(f"Lexer error at line {self.line}, col {self.column}: {msg}")
+        raise NITLexerError(msg, self.line, self.column, self.text)
 
     def peek(self) -> str:
         if self.pos >= len(self.text):
@@ -98,8 +99,8 @@ class Lexer:
                 continue
 
             self.error(f"Unexpected character: {char}")
-
-        self.tokens.append(Token(TokenType.EOF, '', self.line, self.column))
+        
+        self.tokens.append(Token(TokenType.EOF, None, self.line, self.column))
         return self.tokens
 
     def read_variable(self) -> Token:

@@ -34,9 +34,36 @@ else:
     # 都不存在，初始化新路径
     db_path = new_db_path
 
-DATABASE_URL = f"sqlite+aiosqlite:///{db_path}"
+# 转换为绝对路径，确保 aiosqlite 能正确识别 Windows 路径
+abs_db_path = db_path.resolve()
+# 在 Windows 上，aiosqlite 需要 sqlite:////C:/path/to/db (4个斜杠)
+# 或者使用 Path.as_uri() 的变体
+DATABASE_URL = f"sqlite+aiosqlite:///{abs_db_path.as_posix()}"
+if os.name == 'nt':
+    # Windows 特殊处理：确保路径以 / 开头，例如 /C:/Users/...
+    path_str = abs_db_path.as_posix()
+    if not path_str.startswith('/'):
+        path_str = '/' + path_str
+    DATABASE_URL = f"sqlite+aiosqlite://{path_str}"
 
-engine = create_async_engine(DATABASE_URL, echo=True, future=True)
+from sqlalchemy import event
+
+engine = create_async_engine(
+    DATABASE_URL, 
+    echo=False, # 生产环境建议关闭详细 log 以提升性能
+    future=True,
+    connect_args={"check_same_thread": False},
+    pool_pre_ping=True
+)
+
+@event.listens_for(engine.sync_engine, "connect")
+def set_sqlite_pragma(dbapi_connection, connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA synchronous=NORMAL")
+    cursor.execute("PRAGMA busy_timeout=5000") # 5秒忙碌等待
+    cursor.execute("PRAGMA cache_size=-20000") # 20MB 缓存
+    cursor.close()
 
 async def init_db():
     async with engine.begin() as conn:

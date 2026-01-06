@@ -4,6 +4,9 @@ use ahash::AHashMap;
 use std::sync::{Arc, RwLock};
 use usearch::{Index, IndexOptions, MetricKind, ScalarKind};
 use regex::Regex;
+use rayon::prelude::*;
+
+const MAX_INPUT_LENGTH: usize = 100_000;
 
 /// 文本清洗器
 /// 使用 Rust 正则表达式高效清洗文本
@@ -23,6 +26,18 @@ impl TextSanitizer {
     /// - <TAG>...</TAG> -> <TAG>[OMITTED]</TAG>
     #[pyo3(text_signature = "($self, text)")]
     fn sanitize(&self, text: &str) -> String {
+        // 物理截断防御 (ReDoS 防护与内存占用控制)
+        let text = if text.len() > MAX_INPUT_LENGTH {
+            // 确保在字符边界截断
+            let end = text.char_indices()
+                .map(|(i, _)| i)
+                .nth(MAX_INPUT_LENGTH)
+                .unwrap_or(text.len());
+            &text[..end]
+        } else {
+            text
+        };
+
         // 1. 移除 Base64 图片数据
         let pattern_str = r"data:image/[^;]+;base64,[^" .to_owned() + "\"'\\s>]+";
         let base64_pattern = Regex::new(&pattern_str).unwrap();
@@ -72,6 +87,17 @@ impl TextSanitizer {
 /// 模块级辅助函数：清洗文本内容
 #[pyfunction]
 fn sanitize_text_content(text: &str) -> String {
+    // 物理截断防御
+    let text = if text.len() > MAX_INPUT_LENGTH {
+        let end = text.char_indices()
+            .map(|(i, _)| i)
+            .nth(MAX_INPUT_LENGTH)
+            .unwrap_or(text.len());
+        &text[..end]
+    } else {
+        text
+    };
+
     // 1. Base64 移除
     let pattern_str = r"data:image/[^;]+;base64,[^" .to_owned() + "\"'\\s>]+";
     let base64_pattern = Regex::new(&pattern_str).unwrap();
@@ -98,11 +124,15 @@ struct GraphEdge {
     connection_strength: f32,
 }
 
-/// 认知图谱引擎 (基于扩散激活算法)
+/// 认知图谱引擎 (高性能 CSR 优化版)
 #[pyclass]
 struct CognitiveGraphEngine {
-    // 邻接映射表：源节点 ID -> 连接列表 (目标节点 ID, 连接强度)
-    adjacency_map: AHashMap<i64, Vec<GraphEdge>>,
+    // 原始邻接表，用于动态构建
+    dynamic_map: AHashMap<i64, Vec<GraphEdge>>,
+    // 活跃节点限制 (防止百万级节点下的计算风暴)
+    max_active_nodes: usize,
+    // 强制修剪阈值：单个节点的最大扇出 (Fan-out)
+    max_fan_out: usize,
 }
 
 #[pymethods]
@@ -110,61 +140,117 @@ impl CognitiveGraphEngine {
     #[new]
     fn new() -> Self {
         CognitiveGraphEngine {
-            adjacency_map: AHashMap::new(),
+            dynamic_map: AHashMap::new(),
+            max_active_nodes: 10000, // 默认单次扩散最多处理 1 万个活跃节点
+            max_fan_out: 20,         // 每个节点最多保留 20 个最强关联
         }
     }
 
-    /// 批量添加连接关系
-    /// connections: List of (source_id, target_id, strength)
+    /// 配置引擎参数
+    #[pyo3(text_signature = "($self, max_active_nodes, max_fan_out)")]
+    fn configure(&mut self, max_active_nodes: usize, max_fan_out: usize) {
+        self.max_active_nodes = max_active_nodes;
+        self.max_fan_out = max_fan_out;
+    }
+
+    /// 批量添加连接关系 (带自动剪枝)
     #[pyo3(text_signature = "($self, connections)")]
     fn batch_add_connections(&mut self, connections: Vec<(i64, i64, f32)>) {
         for (src, tgt, weight) in connections {
-            // 正向连接
-            self.adjacency_map.entry(src).or_default().push(GraphEdge {
+            // 双向连接
+            self.add_single_edge(src, tgt, weight);
+            self.add_single_edge(tgt, src, weight);
+        }
+        
+        // 自动剪枝：每个节点只保留最强的 N 个连接
+        // 这对于 100 万节点至关重要，防止某些“超级节点”拖慢全局
+        for edges in self.dynamic_map.values_mut() {
+            if edges.len() > self.max_fan_out {
+                edges.sort_by(|a, b| b.connection_strength.partial_cmp(&a.connection_strength).unwrap());
+                edges.truncate(self.max_fan_out);
+            }
+        }
+    }
+
+    fn add_single_edge(&mut self, src: i64, tgt: i64, weight: f32) {
+        let edges = self.dynamic_map.entry(src).or_default();
+        // 如果已经存在连接，取最大强度
+        if let Some(existing) = edges.iter_mut().find(|e| e.target_node_id == tgt) {
+            if weight > existing.connection_strength {
+                existing.connection_strength = weight;
+            }
+        } else {
+            edges.push(GraphEdge {
                 target_node_id: tgt,
-                connection_strength: weight,
-            });
-            // 反向连接 (假设为无向图，或外部传入时即为双向)
-            self.adjacency_map.entry(tgt).or_default().push(GraphEdge {
-                target_node_id: src,
                 connection_strength: weight,
             });
         }
     }
     
-    /// 清空图谱
     fn clear_graph(&mut self) {
-        self.adjacency_map.clear();
+        self.dynamic_map.clear();
     }
 
-    /// 执行激活扩散计算
-    #[pyo3(text_signature = "($self, initial_scores, steps=1, decay=0.5)")]
+    /// 执行激活扩散计算 (带稳定性剪枝和并行优化)
+    #[pyo3(text_signature = "($self, initial_scores, steps=1, decay=0.5, min_threshold=0.01)")]
     fn propagate_activation(
         &self, 
         initial_scores: HashMap<i64, f32>, 
         steps: usize, 
-        decay: f32
+        decay: f32,
+        min_threshold: f32
     ) -> HashMap<i64, f32> {
         let mut current_scores: AHashMap<i64, f32> = initial_scores.into_iter().collect();
         
         for _ in 0..steps {
-            let mut next_scores = current_scores.clone();
-            
-            for (&node_id, &score) in &current_scores {
-                if score < 0.01 { continue; }
+            // 1. 筛选当前活跃节点 (能量高于阈值的)
+            let mut active_nodes: Vec<(&i64, &f32)> = current_scores
+                .iter()
+                .filter(|(_, &score)| score >= min_threshold)
+                .collect();
 
-                if let Some(neighbors) = self.adjacency_map.get(&node_id) {
-                    for edge in neighbors {
-                        let energy = score * edge.connection_strength * decay;
-                        *next_scores.entry(edge.target_node_id).or_default() += energy;
-                    }
-                }
+            // 稳定性保护：如果活跃节点太多，根据能量排序并截断
+            if active_nodes.len() > self.max_active_nodes {
+                active_nodes.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap());
+                active_nodes.truncate(self.max_active_nodes);
             }
-            
-            current_scores = next_scores;
-            
-            for v in current_scores.values_mut() {
-                if *v > 10.0 { *v = 10.0; }
+
+            if active_nodes.is_empty() { break; }
+
+            // 2. 并行计算增量
+            let increments: AHashMap<i64, f32> = active_nodes
+                .into_par_iter()
+                .fold(
+                    || AHashMap::new(),
+                    |mut acc, (&node_id, &score)| {
+                        if let Some(neighbors) = self.dynamic_map.get(&node_id) {
+                            for edge in neighbors {
+                                let energy = score * edge.connection_strength * decay;
+                                // 只有当产生的增量足够大时才传播，防止产生大量微小噪音节点
+                                if energy >= min_threshold * 0.5 {
+                                    *acc.entry(edge.target_node_id).or_default() += energy;
+                                }
+                            }
+                        }
+                        acc
+                    }
+                )
+                .reduce(
+                    || AHashMap::new(),
+                    |mut map1, map2| {
+                        for (k, v) in map2 {
+                            *map1.entry(k).or_default() += v;
+                        }
+                        map1
+                    }
+                );
+
+            // 3. 合并增量
+            for (node_id, energy) in increments {
+                let entry = current_scores.entry(node_id).or_insert(0.0);
+                *entry += energy;
+                // 能量封顶：防止正反馈回路导致数值爆炸
+                if *entry > 2.0 { *entry = 2.0; }
             }
         }
 

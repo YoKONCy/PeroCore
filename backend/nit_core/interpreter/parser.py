@@ -1,18 +1,21 @@
 from typing import List, Optional
 from .lexer import Token, TokenType, Lexer
 from .ast_nodes import ASTNode, PipelineNode, AssignmentNode, CallNode, LiteralNode, VariableRefNode, ValueNode
+from .errors import NITParserError
 
 class Parser:
-    def __init__(self, tokens: List[Token]):
+    def __init__(self, tokens: List[Token], source: Optional[str] = None):
         self.tokens = tokens
         self.pos = 0
+        self.source = source
 
     def error(self, msg: str):
         token = self.peek()
-        raise ValueError(f"Parser error at line {token.line}, col {token.column}: {msg}")
+        raise NITParserError(msg, token.line, token.column, self.source)
 
     def peek(self) -> Token:
         if self.pos >= len(self.tokens):
+            # Fallback to the last token (usually EOF) if out of bounds
             return self.tokens[-1]
         return self.tokens[self.pos]
 
@@ -29,7 +32,7 @@ class Parser:
 
     def parse(self) -> PipelineNode:
         statements = []
-        while self.peek().type != TokenType.EOF:
+        while self.pos < len(self.tokens) and self.peek().type != TokenType.EOF:
             stmt = self.parse_statement()
             if stmt:
                 statements.append(stmt)

@@ -49,10 +49,11 @@ class EmbeddingService:
 
     def _load_reranker(self):
         if self._cross_encoder is None:
-            print("[Embedding] Loading reranker model (ms-marco-MiniLM-L-6-v2)...", flush=True)
+            print("[Embedding] Loading reranker model (BAAI/bge-reranker-v2-m3)...", flush=True)
             try:
                 from sentence_transformers import CrossEncoder
-                self._cross_encoder = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
+                # 使用 BGE-Reranker-v2-M3
+                self._cross_encoder = CrossEncoder('BAAI/bge-reranker-v2-m3')
                 print("[Embedding] Reranker loaded.", flush=True)
             except Exception as e:
                 print(f"[Embedding] Error loading reranker: {e}", flush=True)
@@ -110,6 +111,13 @@ class EmbeddingService:
         self._load_reranker()
         if not docs:
             return []
+            
+        # [Performance] BGE-Reranker-v2-M3 性能开销较大
+        # 限制输入文档数量，确保精排在 1 秒内完成
+        max_rerank_docs = 15
+        if len(docs) > max_rerank_docs:
+            print(f"[Embedding] Truncating rerank input from {len(docs)} to {max_rerank_docs} for performance.")
+            docs = docs[:max_rerank_docs]
             
         pairs = [[query, doc] for doc in docs]
         scores = self._cross_encoder.predict(pairs)

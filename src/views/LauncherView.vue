@@ -438,7 +438,8 @@ onMounted(async () => {
   await loadConfig()
 
   // Listeners
-  await listen('backend-log', (event) => addLog(event.payload))
+  // 移除这里的 backend-log 监听，因为它会通过 console.log 被 TerminalPanel 错误拦截为 frontend 日志
+  // 现在 TerminalPanel 已经直接监听 backend-log 了
   await listen('es-log', (event) => addLog(`[ES] ${event.payload}`))
   
   await listen('napcat-log', (event) => {

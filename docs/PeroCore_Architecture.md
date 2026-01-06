@@ -23,13 +23,12 @@ PeroCore 是 Perofamily 项目的核心后端服务，定位为一个**高性能
 
 ## 2. 系统分层架构 (Layered Architecture)
 
-系统采用 **Python (业务/调度) + Rust (计算/安全)** 的混合架构：
+系统采用 **Tauri v2 (Native UI) + Python (业务逻辑) + Rust (计算内核)** 的三层混合架构：
 
 ### 2.1 接口层 (Interface Layer)
-*   **REST API**: `FastAPI` 提供对话、记忆查询、状态管理的标准接口。
-*   **WebSocket**: 
-    *   `/ws/voice`: 音频流实时处理通道。
-    *   `/ws/browser`: 浏览器操作指令通道。
+*   **Tauri IPC**: 前端 Vue 3 通过 `invoke` 与 Rust 主进程通信，主进程通过 `Command` 管理 Python 后端生命周期。
+*   **REST API**: 后端 `FastAPI` 提供核心对话、记忆管理接口。
+*   **WebSocket**: 处理实时性极强的流式数据（如语音 VAD、浏览器实时控制）。
 
 ### 2.2 核心服务层 (Python Services Layer)
 负责业务流程编排与状态管理：
@@ -39,10 +38,13 @@ PeroCore 是 Perofamily 项目的核心后端服务，定位为一个**高性能
 *   **Vector Store Service**: Python 侧的向量服务封装，负责加载 `pero_rust_core`。
 
 ### 2.3 高性能计算层 (Rust Core Layer)
-位于 `backend/rust_core`，通过 `maturin` 编译为 Python 扩展模块 (`pero_rust_core`)：
-*   **VectorIndex**: 封装 `usearch`，提供线程安全的 HNSW 索引，支持原子写。
-*   **SpreadingActivationEngine**: 内存图计算引擎，处理记忆节点的能量扩散算法。
+位于 `backend/rust_core`，通过 `maturin` 编译：
+*   **VectorIndex**: 高并发向量索引。
 *   **TextCleaner**: 基于 Rust `regex` 的高性能文本清洗器。
+    *   **Defensive Security**: 针对 ReDoS 与性能抖动，在 Rust 层实施物理长度截断（100,000 字符），确保在极端输入下 CPU 负载可控。
+*   **CognitiveGraphEngine**: 核心图计算引擎。
+    *   **Sparse Matrix**: 采用 **CSR (Compressed Sparse Row)** 稀疏矩阵存储邻接表，极大降低大规模知识图谱的内存占用。
+    *   **Pruning Algorithm**: 引入动态剪枝阈值，能量扩散过程中自动忽略低权重路径，提升联想效率。
 
 ### 2.4 数据基础设施层 (Data Infrastructure)
 *   **SQLite**: 存储结构化数据 (Memory, ConversationLog, Relation)。
@@ -85,17 +87,25 @@ browse_click(selector="#login-btn")
     *   **无后缀**: (Legacy Mode) 记录警告但允许执行（兼容旧版 Prompt）。
 
 ### 3.3 参数宽容修复 (Forgiving Parameter Healing)
-针对 LLM 常犯的参数类型错误，`NITBridge` 实现了智能修复逻辑：
-
-*   **String -> Number**: 自动将 "5", "3.14" 转换为 `int` 或 `float`。
-*   **Fuzzy Boolean**: 将 "yes", "true", "on", "1" 统一转换为 `True`。
-*   **JSON Repair**: 尝试修复损坏的 JSON 字符串（如单引号替换）。
+...
+### 3.4 事务与状态可靠性 (Transactional Reliability)
+针对“工作模式”等涉及多步操作的状态切换，系统实施了严格的可靠性保障：
+*   **Atomic Session Switching**: 使用 `try...except...rollback()` 确保会话 ID 切换与配置更新的原子性。
+*   **Guaranteed State Recovery**: 在 `exit_work_mode` 中通过 `finally` 块实施“最终恢复策略”，无论业务逻辑（如 LLM 总结）是否报错，系统均能强制回退到默认会话，杜绝状态锁死风险。
 
 ---
 
 ## 4. 核心模块详解 (Core Modules)
 
 ### 4.1 Rust Core (高性能内核)
+
+#### 4.1.1 向量检索权衡 (Vector Search Trade-off)
+Rust 核心的向量引擎基于 `usearch` 构建，其设计理念是 **"极致性能优先，元数据解耦"**：
+
+*   **元数据盲区 (Metadata Blindness)**: Rust 索引层仅存储 `(ID: u64, Vector: f32[])`。它不感知记忆的时间戳、标签或内容，这保证了 HNSW 搜索的内存占用极低且速度极快。
+*   **后过滤机制 (Post-filtering)**: 目前采用“先向量召回 N 个 ID，再由 Python 结合 SQLite 进行元数据过滤”的策略。
+*   **潜在风险 (Precision Gap)**: 在严苛过滤场景下（例如：搜索 1000 条相似记录中唯一一条特定日期的记忆），如果该记录在向量距离上排在召回上限（Top-N）之外，会导致“召回空结果”的问题。
+*   **未来演进**: 计划引入 **Masked Search**（基于位图掩码的搜索），允许 Python 层先下发一个候选 ID 位图，由 Rust 在 HNSW 遍历时实时应用过滤规则。
 *   **VectorIndex**: 使用 `Arc<RwLock<Index>>` 保证并发安全，实现“写入临时文件 -> 原子重命名”落盘策略。
 *   **Spreading Activation**: 在内存中构建高频访问的记忆关联子图，模拟神经元能量扩散，挖掘隐性关联。
 

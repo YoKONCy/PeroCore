@@ -1,4 +1,6 @@
 use std::process::Command;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder, Emitter};
@@ -93,8 +95,25 @@ fn quit_app(app: tauri::AppHandle) {
 }
 
 fn get_workspace_root() -> std::path::PathBuf {
+    let mut current_dir = std::env::current_dir().unwrap();
+    
+    // 向上查找，直到找到包含 backend 的目录
+    for _ in 0..5 {
+        if current_dir.join("backend").exists() {
+            return current_dir;
+        }
+        if let Some(parent) = current_dir.parent() {
+            current_dir = parent.to_path_buf();
+        } else {
+            break;
+        }
+    }
+    
+    // 如果没找到，回退到原始逻辑
     let current_dir = std::env::current_dir().unwrap();
-    if current_dir.ends_with("src-tauri") || current_dir.ends_with("PeroLauncher") {
+    if current_dir.ends_with("src-tauri") {
+        current_dir.parent().unwrap().parent().unwrap().to_path_buf()
+    } else if current_dir.ends_with("PeroLauncher") {
         current_dir.parent().unwrap().to_path_buf()
     } else {
         current_dir
@@ -109,7 +128,6 @@ fn start_backend(app: tauri::AppHandle, state: tauri::State<BackendState>) -> Re
         return Ok(());
     }
 
-    use tauri_plugin_shell::ShellExt;
     use tauri::Manager;
 
     // 1. 获取资源目录
@@ -117,17 +135,19 @@ fn start_backend(app: tauri::AppHandle, state: tauri::State<BackendState>) -> Re
     
     // 2. 确定 Python 路径
     let python_path = {
-        let mut p = resource_dir.join("python/python.exe");
-        if !p.exists() {
-            // 尝试 _up_ 路径 (Tauri 打包外部资源的默认行为)
-            p = resource_dir.join("_up_/src-tauri/python/python.exe");
-        }
+        // 优先使用开发环境的虚拟环境
+        let dev_venv_python = get_workspace_root().join("backend/venv/Scripts/python.exe");
         
-        if p.exists() {
-            p
+        if dev_venv_python.exists() {
+            println!("Using Dev Venv Python: {:?}", dev_venv_python);
+            dev_venv_python
         } else {
-            // 开发模式回退
-            get_workspace_root().join("backend/venv/Scripts/python.exe")
+            let mut p = resource_dir.join("python/python.exe");
+            if !p.exists() {
+                p = resource_dir.join("_up_/src-tauri/python/python.exe");
+            }
+            println!("Using Resource Python: {:?}", p);
+            p
         }
     };
 
@@ -157,31 +177,63 @@ fn start_backend(app: tauri::AppHandle, state: tauri::State<BackendState>) -> Re
     }
 
     println!("Attempting to spawn backend...");
-    let cmd = app.shell().command(python_path.clone())
-        .args(&["-u", &script_path.to_string_lossy()]);
-
-    let spawn_result = cmd.spawn();
-    
-    if let Err(e) = &spawn_result {
-        let err_msg = format!("Failed to spawn backend process: {}. \nPython path: {:?}", e, python_path);
-        eprintln!("{}", err_msg);
-        return Err(err_msg);
+    // 强制转换为真实的物理路径，并去掉 Windows 的 \\?\ 长路径前缀（Python 兼容性极差）
+    fn fix_path(path: std::path::PathBuf) -> std::path::PathBuf {
+        let p = path.canonicalize().unwrap_or(path).to_string_lossy().to_string();
+        std::path::PathBuf::from(p.trim_start_matches(r"\\?\"))
     }
 
-    let (mut rx, child) = spawn_result.unwrap();
+    let python_path = fix_path(python_path);
+    let script_path = fix_path(script_path);
+    
+    let python_dir = python_path.parent().unwrap_or(&python_path);
+    let backend_root = fix_path(script_path.parent().unwrap_or(&script_path).to_path_buf());
+
+    println!("Fixed Physical Python: {:?}", python_path);
+    println!("Fixed Physical Script: {:?}", script_path);
+    println!("Fixed Physical Root: {:?}", backend_root);
+
+    let mut cmd = std::process::Command::new(&python_path);
+    cmd.args(&["-u", &script_path.to_string_lossy()])
+       .current_dir(&backend_root) 
+       .env("PYTHONPATH", backend_root.to_string_lossy().to_string())
+       .env("PATH", format!("{};{}", python_dir.to_string_lossy(), std::env::var("PATH").unwrap_or_default()))
+       .stdout(std::process::Stdio::piped())
+       .stderr(std::process::Stdio::piped())
+       .creation_flags(0x08000000); // CREATE_NO_WINDOW for Windows
+
+    let mut child = cmd.spawn().map_err(|e| {
+        let err_msg = format!("Failed to spawn backend process: {}. \nPython path: {:?}", e, python_path);
+        eprintln!("{}", err_msg);
+        err_msg
+    })?;
+
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
 
     // 日志处理
     let app_handle_log = app.clone();
+    
+    // Stdout reader
+    let app_stdout = app_handle_log.clone();
     tauri::async_runtime::spawn(async move {
-        while let Some(event) = rx.recv().await {
-            match event {
-                tauri_plugin_shell::process::CommandEvent::Stdout(line) => {
-                    let _ = app_handle_log.emit("backend-log", String::from_utf8_lossy(&line));
-                }
-                tauri_plugin_shell::process::CommandEvent::Stderr(line) => {
-                    let _ = app_handle_log.emit("backend-log", format!("[ERR] {}", String::from_utf8_lossy(&line)));
-                }
-                _ => {}
+        use std::io::{BufRead, BufReader};
+        let reader = BufReader::new(stdout);
+        for line in reader.lines() {
+            if let Ok(l) = line {
+                let _ = app_stdout.emit("backend-log", l);
+            }
+        }
+    });
+
+    // Stderr reader
+    let app_stderr = app_handle_log.clone();
+    tauri::async_runtime::spawn(async move {
+        use std::io::{BufRead, BufReader};
+        let reader = BufReader::new(stderr);
+        for line in reader.lines() {
+            if let Ok(l) = line {
+                let _ = app_stderr.emit("backend-log", format!("[ERR] {}", l));
             }
         }
     });
@@ -195,8 +247,11 @@ fn stop_backend(state: tauri::State<BackendState>) -> Result<(), String> {
     let mut backend_guard = state.0.lock().map_err(|e| e.to_string())?;
     
     if let Some(child) = backend_guard.take() {
-        let _ = child.kill();
-        println!("Backend killed.");
+        let pid = child.id();
+        let _ = Command::new("taskkill")
+            .args(&["/F", "/T", "/PID", &pid.to_string()])
+            .output();
+        println!("Backend killed via taskkill.");
     }
     Ok(())
 }
@@ -299,20 +354,30 @@ async fn install_es(app: tauri::AppHandle) -> Result<(), String> {
     }).await.map_err(|e| e.to_string())?
 }
 
-use tauri_plugin_shell::process::CommandChild;
-struct BackendState(Arc<Mutex<Option<CommandChild>>>);
+struct BackendState(Arc<Mutex<Option<std::process::Child>>>);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let backend = Arc::new(Mutex::new(None::<CommandChild>));
+    // 保留对解决 Windows 代理和安全检查延迟最有效的环境变量
+    std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", 
+        "--no-proxy-server --proxy-server='direct://' --proxy-bypass-list='*' --disable-features=msSmartScreenProtection");
+
+    let start_time = std::time::Instant::now();
+    println!("[Perf] run() started at {:?}", start_time);
+
+    let backend = Arc::new(Mutex::new(None::<std::process::Child>));
     let backend_run_clone = backend.clone();
 
     let napcat_state = NapCatState::new();
     let napcat_child_clone = napcat_state.child.clone();
     
-    tauri::Builder::default()
-        .plugin(tauri_plugin_log::Builder::default().level(log::LevelFilter::Info).build())
-        .plugin(tauri_plugin_shell::init())
+    println!("[Perf] Builder starting at {:?}", start_time.elapsed());
+    let mut builder = tauri::Builder::default();
+    
+    builder = builder.plugin(tauri_plugin_log::Builder::default().level(log::LevelFilter::Info).build());
+    builder = builder.plugin(tauri_plugin_shell::init());
+
+    builder
         .manage(BackendState(backend))
         .manage(napcat_state)
         .invoke_handler(tauri::generate_handler![
@@ -336,14 +401,17 @@ pub fn run() {
             save_config
         ])
         .setup(move |app| {
-            // --- System Tray ---
-            let quit_i = MenuItem::with_id(app, "quit", "退出 PeroCore", true, None::<&str>)?;
-            let open_dashboard_i = MenuItem::with_id(app, "open_dashboard", "打开控制台", true, None::<&str>)?;
-            let open_launcher_i = MenuItem::with_id(app, "open_launcher", "打开启动器", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&open_launcher_i, &open_dashboard_i, &quit_i])?;
+            println!("[Perf] setup() entered at {:?}", start_time.elapsed());
+            
+            // 托盘初始化
+            let handle = app.handle().clone();
+            let quit_i = MenuItem::with_id(&handle, "quit", "退出 PeroCore", true, None::<&str>).unwrap();
+            let open_dashboard_i = MenuItem::with_id(&handle, "open_dashboard", "打开控制台", true, None::<&str>).unwrap();
+            let open_launcher_i = MenuItem::with_id(&handle, "open_launcher", "打开启动器", true, None::<&str>).unwrap();
+            let menu = Menu::with_items(&handle, &[&open_launcher_i, &open_dashboard_i, &quit_i]).unwrap();
             
             let _tray = TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
+                .icon(handle.default_window_icon().unwrap().clone())
                 .menu(&menu)
                 .on_menu_event(|app, event| {
                     match event.id().as_ref() {
@@ -375,11 +443,12 @@ pub fn run() {
                         _ => {}
                     }
                 })
-                .build(app)?;
+                .build(&handle).unwrap();
 
             // --- Mouse Tracker (Windows) ---
-            let handle = app.handle().clone();
+            let handle_mouse = app.handle().clone();
             thread::spawn(move || {
+                thread::sleep(std::time::Duration::from_secs(2));
                 let mut last_x = 0;
                 let mut last_y = 0;
                 loop {
@@ -389,7 +458,7 @@ pub fn run() {
                             if point.x != last_x || point.y != last_y {
                                 last_x = point.x;
                                 last_y = point.y;
-                                let _ = handle.emit("mouse-pos", MousePos { x: point.x, y: point.y });
+                                let _ = handle_mouse.emit("mouse-pos", MousePos { x: point.x, y: point.y });
                             }
                         }
                     }
@@ -397,12 +466,7 @@ pub fn run() {
                 }
             });
             
-            // 强制在启动时显示启动器窗口
-            if let Some(window) = app.get_webview_window("launcher") {
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
-
+            println!("[Perf] setup() finished at {:?}", start_time.elapsed());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -420,7 +484,7 @@ pub fn run() {
                 // Kill Backend
                 let mut guard = backend_run_clone.lock().unwrap();
                 if let Some(child) = guard.take() {
-                    let pid = child.pid();
+                    let pid = child.id();
                     let _ = Command::new("taskkill")
                         .args(&["/F", "/T", "/PID", &pid.to_string()])
                         .output();

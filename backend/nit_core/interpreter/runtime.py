@@ -4,48 +4,7 @@ from datetime import datetime
 from typing import Dict, Any, List
 from .ast_nodes import PipelineNode, AssignmentNode, CallNode, LiteralNode, VariableRefNode
 
-class NITRuntime:
-    """
-    NIT 2.0 Script Interpreter Runtime.
-    Handles variable management and tool execution.
-    """
-    def __init__(self, tool_executor):
-        """
-        :param tool_executor: Async function(name, params) -> result
-        """
-        self.tool_executor = tool_executor
-        self.variables = {}
-
-    async def execute(self, pipeline: PipelineNode) -> Any:
-        last_result = None
-        for statement in pipeline.statements:
-            last_result = await self.execute_statement(statement)
-        return last_result
-
-    async def execute_statement(self, statement) -> Any:
-        if isinstance(statement, AssignmentNode):
-            value = await self.execute_call(statement.expression)
-            self.variables[statement.target_var] = value
-            return value
-        elif isinstance(statement, CallNode):
-            return await self.execute_call(statement)
-        return None
-
-    async def execute_call(self, call_node: CallNode) -> Any:
-        # Resolve arguments
-        resolved_args = {}
-        for name, node in call_node.args.items():
-            if isinstance(node, LiteralNode):
-                resolved_args[name] = node.value
-            elif isinstance(node, VariableRefNode):
-                # Variable names are stored with '$' in lexer, so we use the name directly
-                resolved_args[name] = self.variables.get(node.name)
-        
-        # Execute tool
-        # We pass is_async and callback to the executor if needed
-        # but usually the executor handles the dispatching logic.
-        result = await self.tool_executor(call_node.tool_name, resolved_args)
-        return result
+from .engine import NITRuntime
 
 # --- Original content of runtime.py (misplaced functions kept for compatibility) ---
 from sqlmodel import select, desc
@@ -76,33 +35,37 @@ async def enter_work_mode(task_name: str = "Unknown Task") -> str:
     if not session:
         return "Error: Database session not available."
 
-    # 1. Generate new Session ID
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    work_session_id = f"work_{timestamp}_{uuid.uuid4().hex[:4]}"
-    
-    # 2. Update Config
-    # current_session_id: The actual session ID to use for logs
-    # work_mode_task: The name of the task
-    
-    # Update current_session_id
-    config_id = (await session.exec(select(Config).where(Config.key == "current_session_id"))).first()
-    if not config_id:
-        config_id = Config(key="current_session_id", value=work_session_id)
-        session.add(config_id)
-    else:
-        config_id.value = work_session_id
+    try:
+        # 1. Generate new Session ID
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        work_session_id = f"work_{timestamp}_{uuid.uuid4().hex[:4]}"
         
-    # Update work_mode_task
-    config_task = (await session.exec(select(Config).where(Config.key == "work_mode_task"))).first()
-    if not config_task:
-        config_task = Config(key="work_mode_task", value=task_name)
-        session.add(config_task)
-    else:
-        config_task.value = task_name
+        # 2. Update Config
+        # current_session_id: The actual session ID to use for logs
+        # work_mode_task: The name of the task
         
-    await session.commit()
-    
-    return f"Entered Work Mode. New isolated session: {work_session_id}. Task: {task_name}"
+        # Update current_session_id
+        config_id = (await session.exec(select(Config).where(Config.key == "current_session_id"))).first()
+        if not config_id:
+            config_id = Config(key="current_session_id", value=work_session_id)
+            session.add(config_id)
+        else:
+            config_id.value = work_session_id
+            
+        # Update work_mode_task
+        config_task = (await session.exec(select(Config).where(Config.key == "work_mode_task"))).first()
+        if not config_task:
+            config_task = Config(key="work_mode_task", value=task_name)
+            session.add(config_task)
+        else:
+            config_task.value = task_name
+            
+        await session.commit()
+        return f"Entered Work Mode. New isolated session: {work_session_id}. Task: {task_name}"
+        
+    except Exception as e:
+        await session.rollback()
+        return f"Error entering Work Mode: {e}"
 
 async def exit_work_mode() -> str:
     """
@@ -114,66 +77,54 @@ async def exit_work_mode() -> str:
     if not session:
         return "Error: Database session not available."
 
-    # 1. Get current work info
-    config_id = (await session.exec(select(Config).where(Config.key == "current_session_id"))).first()
-    config_task = (await session.exec(select(Config).where(Config.key == "work_mode_task"))).first()
-    
-    if not config_id or not config_id.value.startswith("work_"):
-        return "Error: Not currently in Work Mode."
-        
-    work_session_id = config_id.value
-    task_name = config_task.value if config_task else "Unnamed Task"
-    
-    # 2. Fetch all logs for this session
-    logs = (await session.exec(
-        select(ConversationLog)
-        .where(ConversationLog.session_id == work_session_id)
-        .order_by(ConversationLog.timestamp)
-    )).all()
-    
-    if not logs:
-        # Just reset if empty
-        config_id.value = "default"
-        await session.commit()
-        return "Exited Work Mode (No logs to summarize)."
-
-    # 3. Summarize via LLM
-    # We use a temporary LLMService instance
-    # Get global config first
-    global_config = {c.key: c.value for c in (await session.exec(select(Config))).all()}
-    
-    api_key = global_config.get("global_llm_api_key")
-    api_base = global_config.get("global_llm_api_base")
-    model = global_config.get("current_model_id") # Use current model ID (might need resolution)
-    
-    # If model is ID, resolve it (simplified, assuming global fallback or using what's available)
-    # Actually, let's use a simpler approach: construct the prompt and return it? 
-    # No, tools must return the result. We need to call LLM here.
-    
-    # Let's try to init LLMService with available credentials
-    llm = LLMService(api_key, api_base, "gpt-4o") # Use a smart model for summary
-    
-    log_text = "\n".join([f"{log.role}: {log.content}" for log in logs])
-    
-    prompt = f"""
-    You are Pero. You have just finished a coding/work task: "{task_name}".
-    Here is the raw conversation log of the session:
-    
-    {log_text}
-    
-    Please write a "Handwritten Work Log" (Markdown format).
-    Requirements:
-    1. Title: 📝 Pero's Work Log - {task_name}
-    2. Tone: Professional yet personal (Pero's style).
-    3. Content:
-       - Goal: What was the task?
-       - Process: Key steps taken, tools used, errors encountered and fixed.
-       - Outcome: Final result.
-       - Reflection: What did you learn?
-    4. Keep it concise but information-dense.
-    """
-    
+    config_id = None
     try:
+        # 1. Get current work info
+        config_id = (await session.exec(select(Config).where(Config.key == "current_session_id"))).first()
+        config_task = (await session.exec(select(Config).where(Config.key == "work_mode_task"))).first()
+        
+        if not config_id or not config_id.value.startswith("work_"):
+            return "Error: Not currently in Work Mode."
+            
+        work_session_id = config_id.value
+        task_name = config_task.value if config_task else "Unnamed Task"
+        
+        # 2. Fetch all logs for this session
+        logs = (await session.exec(
+            select(ConversationLog)
+            .where(ConversationLog.session_id == work_session_id)
+            .order_by(ConversationLog.timestamp)
+        )).all()
+        
+        if not logs:
+            return "Exited Work Mode (No logs to summarize)."
+
+        # 3. Summarize via LLM
+        global_config = {c.key: c.value for c in (await session.exec(select(Config))).all()}
+        api_key = global_config.get("global_llm_api_key")
+        api_base = global_config.get("global_llm_api_base")
+        
+        llm = LLMService(api_key, api_base, "gpt-4o")
+        log_text = "\n".join([f"{log.role}: {log.content}" for log in logs])
+        
+        prompt = f"""
+        You are Pero. You have just finished a coding/work task: "{task_name}".
+        Here is the raw conversation log of the session:
+        
+        {log_text}
+        
+        Please write a "Handwritten Work Log" (Markdown format).
+        Requirements:
+        1. Title: 📝 Pero's Work Log - {task_name}
+        2. Tone: Professional yet personal (Pero's style).
+        3. Content:
+           - Goal: What was the task?
+           - Process: Key steps taken, tools used, errors encountered and fixed.
+           - Outcome: Final result.
+           - Reflection: What did you learn?
+        4. Keep it concise but information-dense.
+        """
+        
         summary = await llm.chat([{"role": "user", "content": prompt}])
         summary_content = summary["choices"][0]["message"]["content"]
         
@@ -183,22 +134,23 @@ async def exit_work_mode() -> str:
             content=summary_content,
             tags="work_log,summary,coding",
             clusters="[工作记录]",
-            importance=8, # High importance
+            importance=8,
             memory_type="work_log",
             source="system"
         )
-        
-        # 5. Reset Session
-        config_id.value = "default"
-        await session.commit()
-        
         return f"Exited Work Mode. \n\n[Summary Generated]:\n{summary_content}\n\n(Saved to Long-term Memory)"
         
     except Exception as e:
-        # Force reset even if summary fails
-        config_id.value = "default"
-        await session.commit()
-        return f"Exited Work Mode, but failed to generate summary: {e}"
+        await session.rollback()
+        return f"Error during Work Mode exit: {e}"
+    finally:
+        # ALWAYS try to restore session state to 'default'
+        if config_id and config_id.value.startswith("work_"):
+            try:
+                config_id.value = "default"
+                await session.commit()
+            except Exception as final_e:
+                print(f"[Runtime] Critical Error restoring session: {final_e}")
 
 class NITRuntime:
     def __init__(self, tool_executor):

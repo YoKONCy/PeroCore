@@ -5,16 +5,23 @@ use tauri::{AppHandle, Emitter};
 use zip::ZipArchive;
 use reqwest::blocking::Client;
 
+fn get_workspace_root() -> PathBuf {
+    let mut current_dir = std::env::current_dir().unwrap();
+    for _ in 0..5 {
+        if current_dir.join("backend").exists() {
+            return current_dir;
+        }
+        if let Some(parent) = current_dir.parent() {
+            current_dir = parent.to_path_buf();
+        } else {
+            break;
+        }
+    }
+    std::env::current_dir().unwrap()
+}
+
 pub fn get_es_dir() -> PathBuf {
-    let current_dir = std::env::current_dir().unwrap();
-    let workspace_root = if current_dir.ends_with("src-tauri") || current_dir.ends_with("PeroLauncher") {
-        current_dir.parent().unwrap().to_path_buf()
-    } else if current_dir.join("backend").exists() {
-        current_dir.clone()
-    } else {
-        current_dir.clone()
-    };
-    workspace_root.join("backend/nit_core/tools/core/FileSearch")
+    get_workspace_root().join("backend/nit_core/tools/core/FileSearch")
 }
 
 pub fn emit_log(app: &AppHandle, msg: String) {

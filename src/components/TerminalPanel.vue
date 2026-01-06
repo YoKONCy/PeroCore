@@ -139,11 +139,30 @@ onMounted(async () => {
   hookConsole()
   
   try {
-    // 监听后端日志
-    unlistenFn = await listen('terminal-log', (event) => {
+    // 监听来自 Rust 的后端原始日志
+    unlistenFn = await listen('backend-log', (event) => {
+      const msg = event.payload
+      let type = 'info'
+      if (msg.toLowerCase().includes('[err]') || msg.toLowerCase().includes('error')) {
+        type = 'error'
+      } else if (msg.toLowerCase().includes('warn')) {
+        type = 'warn'
+      }
+      addLog('backend', type, msg)
+    })
+    
+    // 监听其他系统级日志 (如果需要)
+    const unlistenTerminal = await listen('terminal-log', (event) => {
       const log = event.payload
       addLog('backend', log.type, log.message)
     })
+    
+    // 组合清理函数
+    const originalUnlisten = unlistenFn
+    unlistenFn = () => {
+      originalUnlisten()
+      unlistenTerminal()
+    }
   } catch (e) {
     console.error('Failed to setup Tauri listener', e)
     addLog('system', 'error', 'Failed to connect to backend logs.')

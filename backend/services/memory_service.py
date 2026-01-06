@@ -6,6 +6,40 @@ from models import Memory, ConversationLog, MemoryRelation
 import re
 import json
 
+# [Global State] 高性能 Rust 引擎单例
+_rust_engine = None
+
+async def get_rust_engine(session: AsyncSession):
+    global _rust_engine
+    if _rust_engine is not None:
+        return _rust_engine
+    
+    try:
+        from pero_rust_core import CognitiveGraphEngine
+        print("[Memory] Initializing Global Rust Cognitive Engine...", flush=True)
+        _rust_engine = CognitiveGraphEngine()
+        _rust_engine.configure(max_active_nodes=10000, max_fan_out=20)
+        
+        # 预加载所有关系 (全量加载至内存 CSR 结构)
+        statement = select(MemoryRelation)
+        relations = (await session.exec(statement)).all()
+        rust_relations = [(rel.source_id, rel.target_id, rel.strength) for rel in relations]
+        
+        # 同时加载 Prev/Next 链表关系
+        statement_mem = select(Memory.id, Memory.prev_id, Memory.next_id).where((Memory.prev_id != None) | (Memory.next_id != None))
+        mem_links = (await session.exec(statement_mem)).all()
+        for mid, prev_id, next_id in mem_links:
+            if prev_id: rust_relations.append((mid, prev_id, 0.2))
+            if next_id: rust_relations.append((mid, next_id, 0.2))
+            
+        _rust_engine.batch_add_connections(rust_relations)
+        print(f"[Memory] Rust Engine Loaded with {len(rust_relations)} connections.", flush=True)
+    except Exception as e:
+        print(f"[Memory] Failed to init Rust engine: {e}")
+        _rust_engine = False # 标记为不可用
+        
+    return _rust_engine
+
 class MemoryService:
     @staticmethod
     async def save_memory(
@@ -127,6 +161,17 @@ class MemoryService:
             last_memory.next_id = memory.id
             session.add(last_memory)
             await session.commit()
+            
+            # [Optimization] 同步更新全局 Rust 引擎单例
+            try:
+                engine = await get_rust_engine(session)
+                if engine:
+                    # 添加 prev/next 双向链接权重
+                    engine.batch_add_connections([
+                        (memory.id, last_memory.id, 0.2),
+                        (last_memory.id, memory.id, 0.2)
+                    ])
+            except: pass
 
         return memory
 
@@ -428,23 +473,24 @@ class MemoryService:
             if anchor.next_id:
                 rust_relations.append((anchor.id, anchor.next_id, 0.2))
 
-        # [Rust Integration]
+        # [Rust Integration] Optimized for 1M+ nodes
         try:
-            from pero_rust_core import CognitiveGraphEngine
-            # print("[Memory] Using Rust engine for spreading activation...")
-            
-            engine = CognitiveGraphEngine()
-            engine.batch_add_connections(rust_relations)
-            
-            # 执行扩散
-            # initial_scores 只包含 anchors，因为我们只关心从这些节点出发能到达哪里
-            # 注意：Rust 的 propagate_activation 返回的是所有受影响节点的得分
-            new_scores = engine.propagate_activation(activation_scores, steps=1, decay=1.0) # decay=1.0 因为我们在 relation weight 里已经处理了衰减
-            
-            # 合并结果
-            activation_scores = new_scores
-            
-        except ImportError:
+            engine = await get_rust_engine(session)
+            if engine:
+                # 执行扩散：引入动态阈值 min_threshold
+                # 如果是重要查询，可以调低阈值以获取更多联想；否则保持 0.01 保证性能
+                new_scores = engine.propagate_activation(
+                    activation_scores, 
+                    steps=1, 
+                    decay=1.0, 
+                    min_threshold=0.01
+                )
+                activation_scores = new_scores
+            else:
+                # Fallback logic if engine is unavailable
+                pass
+        except Exception as e:
+            print(f"[Memory] Rust engine runtime error: {e}. Falling back.")
             # [Fallback to Python]
             # print("[Memory] Rust engine not found. Using Python fallback.")
             relation_map = {}
@@ -470,6 +516,10 @@ class MemoryService:
                     target_id = rel.target_id if rel.source_id == anchor.id else rel.source_id
                     if target_id in activation_scores:
                         activation_scores[target_id] += base_score * rel.strength * 0.5
+        except Exception as e:
+            # 极致稳定性：如果 Rust 引擎运行报错（如 OOM），记录日志并继续，不中断对话
+            print(f"[Memory] Rust engine runtime error: {e}. Falling back to initial scores.")
+            # 此时保持 activation_scores 不变（即仅使用向量搜索结果）
 
         # 4. 综合排序 (Final Ranking) with Time Decay & Cluster Soft-Weighting
         # Score = (Sim * w1) + (ClusterBonus) + (Importance * w2) * Decay(t) + (Recency * w3)

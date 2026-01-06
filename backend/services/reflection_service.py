@@ -199,9 +199,11 @@ class ReflectionService:
             )
             self.session.add(record)
             
+            # 立即提交，释放写锁，防止长事务阻塞
+            await self.session.commit()
             print(f"[Reflection] Consolidated {len(group)} memories into ID {summary_mem.id}: {summary_text[:50]}...")
             
-        await self.session.commit()
+        print("[Reflection] Memory consolidation complete.")
 
     async def _generate_summary(self, llm: LLMService, memories: List[Memory], date_str: str) -> str:
         mem_text = "\n".join([f"- {m.realTime.split(' ')[1] if m.realTime else ''}: {m.content}" for m in memories])
@@ -300,9 +302,9 @@ class ReflectionService:
                         description=relation["description"]
                     )
                     self.session.add(new_relation)
+                    await self.session.commit() # 发现一个关联就提交一个，避免长事务
                     print(f"[Reflection] New association found: {relation['description']} (Strength: {relation['strength']})")
                 
-        await self.session.commit()
         print("[Reflection] Dream cycle complete.")
 
     async def scan_lonely_memories(self, limit: int = 5):
@@ -385,6 +387,7 @@ class ReflectionService:
                         description=relation["description"]
                     )
                     self.session.add(new_relation)
+                    await self.session.commit()
                     print(f"[Reflection] Connected lonely memory! {relation['description']}")
                     # 找到一个关联就跳出当前候选循环，继续下一个孤独记忆 (避免过度连接)
                     # 或者也可以继续找，看策略。这里选择继续找，织网越密越好。

@@ -11,14 +11,14 @@ if %errorlevel% neq 0 (echo Frontend build failed! && pause && exit /b)
 
 :: 2. Build Python Backend (Sidecar)
 echo [2/4] Building Python Backend Sidecar...
-cd /d %~dp0backend
+cd /d %~dp0build_tools
 python build_backend.py
 if %errorlevel% neq 0 (echo Backend build failed! && pause && exit /b)
 
 :: 3. Prepare Node.exe (Optional check)
 echo [3/4] Checking Portable Node...
-if not exist "%~dp0PeroLauncher\src-tauri\bin\node.exe" (
-    echo WARNING: node.exe not found in PeroLauncher/src-tauri/bin/
+if not exist "%~dp0PeroLauncher\bin\node.exe" (
+    echo WARNING: node.exe not found in PeroLauncher/bin/
     echo Please place a portable node.exe there for zero-env support.
 )
 
