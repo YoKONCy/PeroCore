@@ -79,7 +79,10 @@ class MemorySecretaryService:
         # 4. 新增：清理可疑/错误记忆
         report["cleaned_count"] = await self._clean_invalid_memories(llm)
 
-        # 5. 维护边界处理
+        # 5. 新增：自动清理重复的社交日报总结
+        report["social_summaries_cleaned"] = await self._clean_duplicate_social_summaries()
+
+        # 6. 维护边界处理
         report["retired_count"] = await self._handle_maintenance_boundary()
 
         # 6. 自动更新动态台词 (Welcome & System)
@@ -369,6 +372,50 @@ class MemorySecretaryService:
         except Exception as e:
             print(f"Error consolidating memories: {e}")
         return 0
+
+    async def _clean_duplicate_social_summaries(self) -> int:
+        """清理重复生成的社交日报记忆"""
+        import re
+        from collections import defaultdict
+        
+        try:
+            # 查找包含社交日报标题的所有记忆
+            statement = select(Memory).where(Memory.content.like("%【社交日报%"))
+            memories = (await self.session.exec(statement)).all()
+            
+            if len(memories) < 2:
+                return 0
+                
+            # 按日期分组
+            date_groups = defaultdict(list)
+            pattern = re.compile(r"【社交日报 (\d{4}-\d{2}-\d{2})】")
+            
+            for mem in memories:
+                match = pattern.search(mem.content)
+                if match:
+                    date_str = match.group(1)
+                    date_groups[date_str].append(mem)
+            
+            total_deleted = 0
+            for date_str, mem_list in date_groups.items():
+                if len(mem_list) > 1:
+                    # 按 ID 排序，保留最新的（ID 最大的）
+                    mem_list.sort(key=lambda x: x.id)
+                    to_delete = mem_list[:-1]
+                    
+                    for mem in to_delete:
+                        self.deleted_data.append(mem.dict())
+                        await self.session.delete(mem)
+                        total_deleted += 1
+            
+            if total_deleted > 0:
+                await self.session.commit()
+                print(f"[MemorySecretary] Cleaned {total_deleted} duplicate social summaries.")
+            return total_deleted
+            
+        except Exception as e:
+            print(f"Error cleaning duplicate social summaries: {e}")
+            return 0
 
     async def _update_waifu_texts(self, llm: LLMService) -> bool:
         """根据近期记忆更新欢迎语和系统台词"""

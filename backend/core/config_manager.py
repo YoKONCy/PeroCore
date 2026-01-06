@@ -15,9 +15,9 @@ class ConfigManager:
              
         self.config_path = config_path
         self.config = {
-            "enable_social_mode": False,
             "napcat_ws_url": "ws://localhost:3001",
-            "napcat_http_url": "http://localhost:3000"
+            "napcat_http_url": "http://localhost:3000",
+            "lightweight_mode": False
         }
         self.load_config()
 

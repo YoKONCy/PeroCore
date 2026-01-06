@@ -10,6 +10,8 @@ from typing import Dict, Any, List, Callable
 from .interpreter import execute_nit_script
 from .security import NITSecurityManager
 from core.plugin_manager import get_plugin_manager
+from core.nit_manager import get_nit_manager
+from core.config_manager import get_config_manager
 import re
 
 # 插件注册表：PluginName -> Handler Function
@@ -170,7 +172,9 @@ class NITDispatcher:
     
     def __init__(self):
         self.pm = get_plugin_manager()
+        self.nm = get_nit_manager()
         self.category_map = {} # Map[norm_plugin_name] -> List[tool_names]
+        self.tool_to_manifest = {} # Map[norm_tool_name] -> Manifest
         # 初始化时加载工具
         self._load_tools()
         self._register_browser_bridge()
@@ -180,9 +184,6 @@ class NITDispatcher:
         try:
             # 1. Register standard tool names
             tools = self.pm.get_all_tools_map()
-            
-            for name, func in tools.items():
-                self._register_tool(name, func)
             
             # 2. Register PluginName.ToolName aliases for namespaced calls
             manifests = self.pm.get_all_manifests()
@@ -205,12 +206,21 @@ class NITDispatcher:
                 for cmd in commands:
                     cmd_id = cmd.get("commandIdentifier")
                     if cmd_id and cmd_id in tools:
+                        # Map tool to manifest
+                        norm_tool_name = normalize_nit_key(cmd_id)
+                        self.tool_to_manifest[norm_tool_name] = manifest
+                        
                         # Add to category map
                         self.category_map[norm_plugin_name].append(cmd_id)
+                        
+                        # Register standard name
+                        self._register_tool(cmd_id, tools[cmd_id])
                         
                         # Register "PluginName.ToolName"
                         namespaced_name = f"{plugin_name}.{cmd_id}"
                         self._register_tool(namespaced_name, tools[cmd_id])
+                        # Also map namespaced name to manifest
+                        self.tool_to_manifest[normalize_nit_key(namespaced_name)] = manifest
                         
             logger.info(f"Loaded tools. Total keys: {len(PLUGIN_REGISTRY)}")
                 
@@ -224,6 +234,7 @@ class NITDispatcher:
         global PLUGIN_REGISTRY
         PLUGIN_REGISTRY.clear()
         self.category_map.clear()
+        self.tool_to_manifest.clear()
         
         # Reload from PM
         self.pm.reload_plugins()
@@ -276,19 +287,38 @@ class NITDispatcher:
         """
         生成可用工具的描述信息，用于注入到 System Prompt 中。
         支持按类别过滤：'core', 'work', 'plugins' (or 'all')
+        实时检查 NITManager 状态以决定是否显示。
         """
-        # NIT 2.0 协议说明已移至 ability_nit.md 统一管理
         descriptions = []
+        
+        # 检查轻量模式
+        config = get_config_manager()
+        is_lightweight = config.get("lightweight_mode", False)
 
         manifests = self.pm.get_all_manifests()
         
-        # Filter manifests based on category
+        # Filter manifests based on category and status
         filtered_manifests = []
         for m in manifests:
-            # Default to 'core' if _category is missing (legacy behavior)
+            plugin_name = m.get("name")
             cat = m.get('_category', 'core')
-            if category_filter == 'all' or cat == category_filter:
-                filtered_manifests.append(m)
+            
+            # Lightweight Mode Filter: Only ScreenVision, CharacterOps and MemoryOps are allowed
+            if is_lightweight:
+                if plugin_name not in ["ScreenVision", "CharacterOps", "MemoryOps"]:
+                    continue
+            
+            # Category Level Filter
+            if category_filter != 'all' and cat != category_filter:
+                continue
+            
+            # NITManager Status Filter (Level 1 & 2)
+            if not self.nm.is_category_enabled(cat):
+                continue
+            if not self.nm.is_plugin_enabled(plugin_name):
+                continue
+                
+            filtered_manifests.append(m)
 
         # 按名称排序
         for manifest in sorted(filtered_manifests, key=lambda x: x.get("name", "")):
@@ -441,6 +471,26 @@ class NITDispatcher:
         # 归一化插件名以匹配注册表
         norm_name = normalize_nit_key(plugin_name)
         
+        # 检查 NITManager 状态
+        manifest = self.tool_to_manifest.get(norm_name)
+        if manifest:
+            plugin_id = manifest.get("name")
+            category = manifest.get("_category", "core")
+            
+            # Lightweight Mode Execution Check
+            config = get_config_manager()
+            if config.get("lightweight_mode", False):
+                if plugin_id not in ["ScreenVision", "CharacterOps", "MemoryOps"]:
+                    logger.warning(f"Execution blocked: Lightweight Mode is active. Tool '{plugin_name}' (Plugin: {plugin_id}) is restricted.")
+                    return f"Error: Tool '{plugin_name}' is restricted in Lightweight Chat Mode. Only ScreenVision, CharacterOps and MemoryOps are available."
+
+            if not self.nm.is_category_enabled(category):
+                logger.warning(f"Execution blocked: Category '{category}' is disabled.")
+                return f"Error: Tool '{plugin_name}' belongs to category '{category}' which is currently disabled."
+            if not self.nm.is_plugin_enabled(plugin_id):
+                logger.warning(f"Execution blocked: Plugin '{plugin_id}' is disabled.")
+                return f"Error: Tool '{plugin_name}' (Plugin: {plugin_id}) is currently disabled."
+
         # 优先检查 extra_plugins
         handler = None
         if extra_plugins:

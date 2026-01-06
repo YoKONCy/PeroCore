@@ -7,6 +7,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from models import Config, PetState
 from services.mdp import MDPManager
 from nit_core.dispatcher import get_dispatcher
+from core.config_manager import get_config_manager
 
 class PromptManager:
     """
@@ -21,6 +22,10 @@ class PromptManager:
         self.mdp = MDPManager(mdp_dir)
 
     def build_system_prompt(self, variables: Dict[str, Any], is_social_mode: bool = False) -> str:
+        # 0. Check Lightweight Mode
+        config = get_config_manager()
+        is_lightweight = config.get("lightweight_mode", False)
+
         # 1. Construct Abilities String
         enable_vision = variables.get("enable_vision", False)
         enable_voice = variables.get("enable_voice", False)
@@ -34,6 +39,21 @@ class PromptManager:
             variables["ability_workspace"] = "" # Also disable workspace tools
             # We keep abilities for sensory (Vision/Voice) if enabled, as Pero might still "see" images sent in chat
             # But we suppress complex tool descriptions
+        
+        # [Lightweight Mode Override]
+        if is_lightweight and not is_social_mode:
+            # Disable COT (Thinking blocks)
+            variables["output_constraint"] = ""
+            
+            # Simplify NIT Ability (Remove ReAct process/logic)
+            nit_prompt = self.mdp.get_prompt("ability_nit")
+            if nit_prompt:
+                content = nit_prompt.content
+                # Remove "### 3. 执行逻辑与思考" section and its content
+                content = re.sub(r'### 3\. 执行逻辑与思考[\s\S]*?(?=### 4\.|$)', '', content)
+                # Remove mentions of "Thinking" or "Reasoning" in the text if any
+                content = content.replace("在执行任何外部操作时，必须遵循‘思考-行动-观察’的循环。", "")
+                variables["ability_nit"] = content
         
         abilities_parts = []
         
@@ -93,12 +113,20 @@ class PromptManager:
 
         # 3. Render
         final_prompt = self.mdp.render("system_template", variables)
+        
+        # [Lightweight Mode Reminder]
+        if is_lightweight:
+            lightweight_reminder = "\n\n【重要系统提醒：轻量聊天模式已开启。为了节省系统资源，目前除了“视觉感知(ScreenVision)”、“形象管理(CharacterOps)”和“核心记忆(MemoryOps)”之外的所有高级工具已被临时禁用。此外，为了保持极速响应，请你跳过复杂的思考过程（Thinking），直接输出回复内容。如果你需要调用工具，请直接在回复中编写 NIT 脚本，无需多余的解释或分析。】"
+            final_prompt += lightweight_reminder
             
         return final_prompt
 
-    async def get_rendered_system_prompt(self, session: AsyncSession) -> str:
+    async def get_rendered_system_prompt(self, session: AsyncSession, is_social_mode: bool = False) -> str:
         """
-        Helper method to get fully rendered system prompt with data from DB
+        获取渲染后的完整 System Prompt。
+        1. 加载所有组件
+        2. 合并变量
+        3. 渲染
         """
         # Get Configs
         configs = {c.key: c.value for c in (await session.exec(select(Config))).all()}
@@ -140,7 +168,7 @@ class PromptManager:
             "memory_context": "", # Companion mode doesn't need complex RAG for now
         }
         
-        return self.build_system_prompt(variables)
+        return self.build_system_prompt(variables, is_social_mode=is_social_mode)
 
     def clean_history_for_api(self, content: str) -> str:
         """

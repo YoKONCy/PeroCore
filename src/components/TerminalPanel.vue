@@ -28,39 +28,41 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { ref, shallowRef, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { Monitor, Delete } from '@element-plus/icons-vue'
+import { listen } from '@tauri-apps/api/event'
 
-const logs = ref([])
+const logs = shallowRef([])
 const logContainer = ref(null)
 const autoScroll = ref(true)
-let ipcRenderer = null
-
-// 尝试获取 electron ipcRenderer
-try {
-  if (window.require) {
-    const electron = window.require('electron')
-    ipcRenderer = electron.ipcRenderer
-  }
-} catch (e) {
-  console.warn('Electron IPC not available')
-}
+let unlistenFn = null
+let pendingLogs = []
+let updateTimer = null
 
 const addLog = (source, type, message) => {
   const timestamp = new Date().toLocaleTimeString()
-  logs.value.push({
+  pendingLogs.push({
     source, // 'backend' | 'frontend'
     type,   // 'stdout' | 'stderr' | 'info' | 'warn' | 'error' | 'system'
     message,
     timestamp
   })
   
-  if (logs.value.length > 2000) {
-    logs.value.shift()
-  }
-  
-  if (autoScroll.value) {
-    scrollToBottom()
+  if (!updateTimer) {
+    updateTimer = setTimeout(() => {
+      const newLogs = [...logs.value, ...pendingLogs]
+      if (newLogs.length > 2000) {
+        logs.value = newLogs.slice(newLogs.length - 2000)
+      } else {
+        logs.value = newLogs
+      }
+      pendingLogs = []
+      updateTimer = null
+      
+      if (autoScroll.value) {
+        scrollToBottom()
+      }
+    }, 100) // 100ms 批量更新一次，极大减轻渲染压力
   }
 }
 
@@ -133,40 +135,25 @@ const unhookConsole = () => {
   console.error = originalConsoleError
 }
 
-onMounted(() => {
+onMounted(async () => {
   hookConsole()
   
-  if (ipcRenderer) {
-    // 获取历史日志
-    ipcRenderer.send('get-terminal-logs')
-    
-    ipcRenderer.on('terminal-logs-history', (event, history) => {
-      // 转换格式
-      const formatted = history.map(h => ({
-        source: 'backend',
-        type: h.type,
-        message: h.message,
-        timestamp: h.timestamp
-      }))
-      logs.value = [...formatted, ...logs.value].sort((a, b) => {
-        return a.timestamp.localeCompare(b.timestamp)
-      })
-      scrollToBottom()
-    })
-    
-    ipcRenderer.on('terminal-log', (event, log) => {
+  try {
+    // 监听后端日志
+    unlistenFn = await listen('terminal-log', (event) => {
+      const log = event.payload
       addLog('backend', log.type, log.message)
     })
-  } else {
-    addLog('system', 'error', 'Electron environment not detected. IPC unavailable.')
+  } catch (e) {
+    console.error('Failed to setup Tauri listener', e)
+    addLog('system', 'error', 'Failed to connect to backend logs.')
   }
 })
 
 onUnmounted(() => {
   unhookConsole()
-  if (ipcRenderer) {
-    ipcRenderer.removeAllListeners('terminal-logs-history')
-    ipcRenderer.removeAllListeners('terminal-log')
+  if (unlistenFn) {
+    unlistenFn()
   }
 })
 </script>

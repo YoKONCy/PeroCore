@@ -8,7 +8,6 @@ from fastapi import WebSocket, WebSocketDisconnect
 from core.config_manager import get_config_manager
 from .social.session_manager import SocialSessionManager
 from .social.models import SocialSession
-from services.prompt_service import PromptManager
 
 # DB & Agent Imports
 from database import engine
@@ -16,6 +15,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlalchemy.orm import sessionmaker
 from services.memory_service import MemoryService
 # from services.agent_service import AgentService (Moved inside method)
+# from services.prompt_service import PromptManager (Moved inside method to avoid circular import)
 
 logger = logging.getLogger(__name__)
 
@@ -192,24 +192,7 @@ class SocialService:
             await self._generate_daily_summary(yesterday_str)
             
             # 3. Update Config
-            # We need to save this to DB. ConfigManager is read-heavy cache, need to use DB session to write.
-            # But ConfigManager might have a set method? Let's check.
-            # Assuming we need to write manually if ConfigManager doesn't support persist.
-            # Actually, let's look at ConfigManager later. For now, we write to DB directly.
-            
-            async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-            async with async_session() as session:
-                from models import Config
-                conf = await session.get(Config, "last_social_summary_date")
-                if not conf:
-                    conf = Config(key="last_social_summary_date", value=yesterday_str)
-                    session.add(conf)
-                else:
-                    conf.value = yesterday_str
-                    conf.updated_at = datetime.now()
-                    session.add(conf)
-                await session.commit()
-                
+            self.config_manager.set("last_social_summary_date", yesterday_str)
             logger.info(f"[Social] Daily summary for {yesterday_str} completed.")
             
         except Exception as e:
@@ -416,9 +399,11 @@ class SocialService:
             
             async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
             async with async_session() as db_session:
+                from services.agent_service import AgentService
                 agent = AgentService(db_session)
                 
                 # [Migrate] Use PromptManager for System Prompt
+                from services.prompt_service import PromptManager
                 prompt_manager = PromptManager()
                 # We need to construct a specific context for Social Mode
                 # For now, we fetch the core prompt and append Social instructions

@@ -23,7 +23,7 @@
         <el-menu
           :default-active="currentTab"
           class="sidebar-menu"
-          @select="(index) => currentTab = index"
+          @select="handleTabSelect"
           text-color="#5a5e66"
           active-text-color="#ff88aa"
         >
@@ -34,10 +34,6 @@
           <el-menu-item index="logs">
             <el-icon><ChatLineRound /></el-icon>
             <span>对话日志 (Logs)</span>
-          </el-menu-item>
-          <el-menu-item index="terminal">
-            <el-icon><Monitor /></el-icon>
-            <span>系统终端 (Terminal)</span>
           </el-menu-item>
           <el-menu-item index="memories">
             <el-icon><Cpu /></el-icon>
@@ -97,16 +93,15 @@
             </el-tag>
           </div>
           <div class="header-right">
-             <el-button circle :icon="Refresh" @click="fetchAllData" title="刷新所有数据"></el-button>
+             <el-button circle :icon="Refresh" @click="fetchAllData" :loading="isGlobalRefreshing" title="刷新所有数据"></el-button>
           </div>
         </el-header>
 
         <!-- 主内容区 -->
         <el-main class="content-area">
-          <transition name="fade-slide" mode="out-in">
-            
-            <!-- 1. 仪表盘概览 -->
-            <div v-if="currentTab === 'overview'" key="overview" class="view-container">
+          <div class="view-container-wrapper" style="height: 100%;">
+              <!-- 1. 仪表盘概览 -->
+                <div v-show="currentTab === 'overview'" key="overview" class="view-container">
               <!-- Live Monitor Entry Button -->
               <el-row :gutter="20" style="margin-bottom: 20px;">
                 <el-col :span="24">
@@ -297,49 +292,58 @@
                 </el-col>
               </el-row>
 
-              <!-- 陪伴模式卡片 -->
+              <!-- 轻量聊天模式卡片 -->
               <el-row :gutter="20" style="margin-top: 20px;">
                 <el-col :span="24">
                   <el-card shadow="hover" class="glass-card" :body-style="{ padding: '15px 20px' }">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                       <div style="display: flex; align-items: center; gap: 15px;">
-                        <div style="font-size: 24px;">👀</div>
+                        <div style="font-size: 24px;">🍃</div>
                         <div>
-                           <div style="font-weight: bold; font-size: 16px;">智能陪伴模式 (Companion Mode)</div>
-                           <div style="font-size: 13px; color: #666; margin-top: 4px;">开启后，Pero 将每 3 分钟自动读取你的屏幕内容，并主动发起语音对话。</div>
+                           <div style="font-weight: bold; font-size: 16px;">轻量聊天模式 (Lightweight Mode)</div>
+                           <div style="font-size: 13px; color: #666; margin-top: 4px;">开启后，将禁用大部分高级工具以节省资源。仅保留视觉感知、记忆管理和基础管理功能。</div>
                         </div>
                       </div>
                       <el-switch 
-                        v-model="isCompanionEnabled" 
+                        v-model="isLightweightEnabled" 
                         active-text="ON" 
                         inactive-text="OFF"
-                        @change="toggleCompanion"
-                        :loading="isTogglingCompanion"
+                        @change="toggleLightweight"
+                        :loading="isTogglingLightweight"
                       />
                     </div>
                   </el-card>
                 </el-col>
               </el-row>
 
-              <!-- 社交模式卡片 -->
+              <!-- 陪伴模式卡片 -->
               <el-row :gutter="20" style="margin-top: 20px;">
                 <el-col :span="24">
-                  <el-card shadow="hover" class="glass-card" :body-style="{ padding: '15px 20px' }">
+                  <el-card shadow="hover" class="glass-card" :class="{ 'disabled-card': !isLightweightEnabled }" :body-style="{ padding: '15px 20px' }">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                       <div style="display: flex; align-items: center; gap: 15px;">
-                        <div style="font-size: 24px;">💬</div>
+                        <div style="font-size: 24px;">👀</div>
                         <div>
-                           <div style="font-weight: bold; font-size: 16px;">社交模式 (Social Mode)</div>
-                           <div style="font-size: 13px; color: #666; margin-top: 4px;">开启后，Pero 将通过 OneBot 协议连接 QQ，并以独立身份进行社交回复。</div>
+                           <div style="font-weight: bold; font-size: 16px;">智能陪伴模式 (Companion Mode)</div>
+                           <div style="font-size: 13px; color: #666; margin-top: 4px;">
+                             Pero 将自动观察你的屏幕动态并进行互动。
+                             <span v-if="!isLightweightEnabled" style="color: #f56c6c; margin-left: 8px;">(需要先开启“轻量模式”)</span>
+                           </div>
                         </div>
                       </div>
-                      <el-switch 
-                        v-model="isSocialEnabled" 
-                        active-text="ON" 
-                        inactive-text="OFF"
-                        @change="toggleSocial"
-                        :loading="isTogglingSocial"
-                      />
+                      <el-tooltip
+                        :content="!isLightweightEnabled ? '请先开启轻量模式' : (isCompanionEnabled ? '关闭陪伴' : '开启陪伴')"
+                        placement="top"
+                      >
+                        <el-switch 
+                          v-model="isCompanionEnabled" 
+                          active-text="ON" 
+                          inactive-text="OFF"
+                          :disabled="!isLightweightEnabled"
+                          @change="toggleCompanion"
+                          :loading="isTogglingCompanion"
+                        />
+                      </el-tooltip>
                     </div>
                   </el-card>
                 </el-col>
@@ -347,7 +351,7 @@
             </div>
 
             <!-- 1.5 思维监控室 -->
-            <div v-else-if="currentTab === 'task_monitor'" key="task_monitor" class="view-container" style="height: 100%; display: flex; flex-direction: column;">
+            <div v-show="currentTab === 'task_monitor'" key="task_monitor" class="view-container" style="height: 100%; display: flex; flex-direction: column;">
                <div class="toolbar" style="padding: 10px 0; display: flex; align-items: center; gap: 10px;">
                   <el-button @click="goBackFromMonitor" :icon="ArrowLeft" circle></el-button>
                   <h3 style="margin: 0;">{{ isViewingHistory ? '历史思维回溯' : '实时思维监控' }}</h3>
@@ -361,7 +365,7 @@
             </div>
 
             <!-- 2. 对话日志 -->
-            <div v-else-if="currentTab === 'logs'" key="logs" class="view-container logs-layout">
+            <div v-show="currentTab === 'logs'" key="logs" class="view-container logs-layout">
               <el-card shadow="never" class="glass-card filter-card">
                 <el-form :inline="true" size="default">
                   <el-form-item label="来源">
@@ -395,7 +399,7 @@
                     </el-select>
                   </el-form-item>
                   <el-form-item>
-                    <el-button type="primary" :icon="Refresh" @click="fetchLogs" circle></el-button>
+                    <el-button type="primary" :icon="Refresh" @click="fetchLogs" :loading="isLogsFetching" circle></el-button>
                   </el-form-item>
                 </el-form>
               </el-card>
@@ -403,8 +407,8 @@
               <div class="chat-scroll-area">
                 <el-empty v-if="logs.length === 0" description="暂无对话记录" />
                 <div 
-                  v-for="(log, index) in logs" 
-                  :key="index" 
+                  v-for="log in logs" 
+                  :key="log.id" 
                   class="chat-bubble-wrapper"
                   :class="[
                     log.role === 'user' ? 'user' : 'assistant',
@@ -417,16 +421,16 @@
                   <div class="bubble-content-box">
                     <div class="bubble-meta">
                       <span class="role-name">{{ log.role === 'user' ? 'You' : 'Pero' }}</span>
-                      <span class="time">{{ new Date(log.timestamp).toLocaleString() }}</span>
+                      <span class="time">{{ log.displayTime }}</span>
                       
                       <!-- 消息元数据指示器 -->
-                      <span v-if="(log.sentiment || getLogMetadata(log).sentiment) && (log.sentiment || getLogMetadata(log).sentiment) !== 'neutral'" class="log-meta-tag" :title="`情感: ${log.sentiment || getLogMetadata(log).sentiment}`">
-                        {{ getSentimentEmoji(log.sentiment || getLogMetadata(log).sentiment) }}
+                      <span v-if="log.sentiment && log.sentiment !== 'neutral'" class="log-meta-tag" :title="`情感: ${log.sentiment}`">
+                        {{ getSentimentEmoji(log.sentiment) }}
                       </span>
-                      <span v-if="(log.importance || getLogMetadata(log).importance) > 1" class="log-meta-tag importance" :title="`重要度: ${log.importance || getLogMetadata(log).importance}`">
-                        ⭐{{ log.importance || getLogMetadata(log).importance }}
+                      <span v-if="log.importance > 1" class="log-meta-tag importance" :title="`重要度: ${log.importance}`">
+                        ⭐{{ log.importance }}
                       </span>
-                      <span v-if="getLogMetadata(log).memory_extracted || log.memory_id" class="log-meta-tag memory" title="此对话已提取为核心记忆">
+                      <span v-if="log.metadata.memory_extracted || log.memory_id" class="log-meta-tag memory" title="此对话已提取为核心记忆">
                         🧠
                       </span>
 
@@ -455,12 +459,14 @@
                       </div>
                     </div>
                     
-                    <div v-else class="message-markdown markdown-body" v-html="renderMessage(log.content)"></div>
+                    <div v-else class="message-content-wrapper">
+                      <AsyncMarkdown :content="log.content" />
+                    </div>
                     
                     <div class="bubble-actions">
                       <el-button 
                         v-if="log.analysis_status === 'failed'" 
-                        type="text" 
+                        link 
                         :icon="RefreshRight"
                         @click="retryLogAnalysis(log)" 
                         size="small" 
@@ -468,9 +474,9 @@
                       >
                         重试 ({{ log.retry_count }})
                       </el-button>
-                      <el-button type="text" :icon="Monitor" @click="openHistoryMonitor(log)" size="small" style="color: #626aef;">思维链</el-button>
-                      <el-button type="text" :icon="Edit" @click="startLogEdit(log)" size="small">编辑</el-button>
-                      <el-button type="text" :icon="Delete" @click="deleteLog(log.id)" size="small" style="color: #f56c6c;">删除</el-button>
+                      <el-button link :icon="Monitor" @click="openHistoryMonitor(log)" size="small" style="color: #626aef;">思维链</el-button>
+                      <el-button link :icon="Edit" @click="startLogEdit(log)" size="small">编辑</el-button>
+                      <el-button link :icon="Delete" @click="deleteLog(log.id)" size="small" style="color: #f56c6c;">删除</el-button>
                     </div>
                   </div>
                 </div>
@@ -478,7 +484,7 @@
             </div>
 
             <!-- 3. 核心记忆 (Refactored) -->
-            <div v-else-if="currentTab === 'memories'" key="memories" class="view-container">
+            <div v-show="currentTab === 'memories'" key="memories" class="view-container">
               <div class="toolbar memory-toolbar">
                  <h3 class="section-title">长期记忆库 (Long-term Memory)</h3>
                  <div class="filters">
@@ -498,11 +504,11 @@
               </div>
 
               <!-- Tag Cloud Area -->
-              <div class="tag-cloud-area" v-if="tagCloud && Object.keys(tagCloud).length">
+              <div class="tag-cloud-area" v-if="topTags.length">
                   <span class="tag-cloud-label">热门标签:</span>
                   <div class="tag-cloud-chips">
                       <el-check-tag 
-                        v-for="(count, tag) in Object.fromEntries(Object.entries(tagCloud).slice(0, 15))" 
+                        v-for="{ tag, count } in topTags" 
                         :key="tag"
                         :checked="memoryFilterTags.includes(tag)"
                         @change="checked => { 
@@ -518,53 +524,51 @@
               </div>
 
               <!-- List Mode -->
-              <div v-if="memoryViewMode === 'list'" class="memory-waterfall">
-                <transition-group name="list">
-                  <div v-for="m in memories" :key="m.id" class="memory-item">
-                    <el-card shadow="hover" class="memory-card" :class="m.type">
-                      <div class="memory-top">
-                        <div class="badges-left">
-                          <el-tag :type="getMemoryTagType(m.type)" effect="dark" size="small" round>
-                             {{ getMemoryTypeLabel(m.type) }}
-                          </el-tag>
-                          <el-tag v-if="m.sentiment && m.sentiment !== 'neutral'" type="info" effect="plain" size="small" round>
-                            {{ getSentimentEmoji(m.sentiment) }}
-                          </el-tag>
-                        </div>
-                        <div class="actions-right">
-                          <span class="importance-indicator" :title="`Base: ${m.base_importance}`">
-                            ⭐ {{ m.importance }}
-                          </span>
-                          <span class="access-indicator" title="被回忆次数">
-                            🔥 {{ m.access_count || 0 }}
-                          </span>
-                          <el-button type="danger" link :icon="Delete" @click="deleteMemory(m.id)" circle size="small"></el-button>
-                        </div>
+              <div v-show="memoryViewMode === 'list'" class="memory-waterfall">
+                <div v-for="m in memories" :key="m.id" class="memory-item">
+                  <el-card shadow="hover" class="memory-card" :class="m.type">
+                    <div class="memory-top">
+                      <div class="badges-left">
+                        <el-tag :type="getMemoryTagType(m.type)" effect="dark" size="small" round>
+                           {{ getMemoryTypeLabel(m.type) }}
+                        </el-tag>
+                        <el-tag v-if="m.sentiment && m.sentiment !== 'neutral'" type="info" effect="plain" size="small" round>
+                          {{ getSentimentEmoji(m.sentiment) }}
+                        </el-tag>
                       </div>
-                      
-                      <div class="memory-text">{{ m.content }}</div>
-                      
-                      <div class="memory-bottom">
-                        <div class="tags-row">
-                          <el-tag 
-                            v-for="t in (m.tags ? m.tags.split(',') : [])" 
-                            :key="t" 
-                            size="small" 
-                            effect="plain"
-                            class="mini-tag"
-                          >
-                            {{ t }}
-                          </el-tag>
-                        </div>
-                        <div class="time-hint">{{ m.realTime || new Date(m.timestamp).toLocaleDateString() }}</div>
+                      <div class="actions-right">
+                        <span class="importance-indicator" :title="`Base: ${m.base_importance}`">
+                          ⭐ {{ m.importance }}
+                        </span>
+                        <span class="access-indicator" title="被回忆次数">
+                          🔥 {{ m.access_count || 0 }}
+                        </span>
+                        <el-button type="danger" link :icon="Delete" @click="deleteMemory(m.id)" circle size="small"></el-button>
                       </div>
-                    </el-card>
-                  </div>
-                </transition-group>
+                    </div>
+                    
+                    <div class="memory-text">{{ m.content }}</div>
+                    
+                    <div class="memory-bottom">
+                      <div class="tags-row">
+                        <el-tag 
+                          v-for="t in (m.tags ? m.tags.split(',') : [])" 
+                          :key="t" 
+                          size="small" 
+                          effect="plain"
+                          class="mini-tag"
+                        >
+                          {{ t }}
+                        </el-tag>
+                      </div>
+                      <div class="time-hint">{{ m.realTime }}</div>
+                    </div>
+                  </el-card>
+                </div>
               </div>
 
               <!-- Graph Mode -->
-              <div v-else class="memory-graph-container" v-loading="isLoadingGraph">
+              <div v-show="memoryViewMode === 'graph'" class="memory-graph-container" v-loading="isLoadingGraph">
                  <div class="graph-placeholder" v-if="memoryGraphData.nodes.length === 0">
                     <el-empty description="暂无关联数据或数据量过少" />
                  </div>
@@ -612,45 +616,38 @@
               </div>
             </div>
 
-            <!-- 3. 系统终端 -->
-            <div v-else-if="currentTab === 'terminal'" key="terminal" class="view-container" style="padding: 0; height: 100%; overflow: hidden;">
-              <TerminalPanel />
-            </div>
-
             <!-- 4. 待办任务 -->
-            <div v-else-if="currentTab === 'tasks'" key="tasks" class="view-container">
+            <div v-show="currentTab === 'tasks'" key="tasks" class="view-container">
                <div class="toolbar">
                  <h3 class="section-title">待办与计划列表</h3>
                </div>
 
                <div class="task-waterfall">
-                 <transition-group name="list">
-                   <div v-for="task in tasks" :key="task.id" class="task-item">
-                     <el-card shadow="hover" class="task-card-modern" :class="task.type">
-                       <div class="task-top">
-                         <el-tag :type="task.type === 'reminder' ? 'danger' : 'primary'" effect="light" size="small" round>
-                            {{ task.type === 'reminder' ? '⏰ 提醒' : '💡 话题' }}
-                         </el-tag>
-                         <el-button type="danger" link :icon="Delete" @click="deleteTask(task.id)" circle size="small"></el-button>
+                 <div v-for="task in tasks" :key="task.id" class="task-item">
+                   <el-card shadow="hover" class="task-card-modern" :class="task.type">
+                     <div class="task-top">
+                       <el-tag :type="task.type === 'reminder' ? 'danger' : 'primary'" effect="light" size="small" round>
+                          {{ task.type === 'reminder' ? '⏰ 提醒' : '💡 话题' }}
+                       </el-tag>
+                       <el-button type="danger" link :icon="Delete" @click="deleteTask(task.id)" circle size="small"></el-button>
+                     </div>
+                     
+                     <div class="task-content">{{ task.content }}</div>
+                     
+                     <div class="task-bottom">
+                       <div class="task-time">
+                         <el-icon><Calendar /></el-icon>
+                         <span>{{ new Date(task.time).toLocaleString() }}</span>
                        </div>
-                       
-                       <div class="task-content">{{ task.content }}</div>
-                       
-                       <div class="task-bottom">
-                         <div class="task-time">
-                           <el-icon><Calendar /></el-icon>
-                           <span>{{ new Date(task.time).toLocaleString() }}</span>
-                         </div>
-                       </div>
-                     </el-card>
-                   </div>
-                 </transition-group>
+                     </div>
+                   </el-card>
+                 </div>
                </div>
                <el-empty v-if="tasks.length === 0" description="暂无待办任务" />
             </div>
 
             <!-- 5. 模型配置 -->
-            <div v-else-if="currentTab === 'model_config'" key="model_config" class="view-container">
+            <div v-show="currentTab === 'model_config'" key="model_config" class="view-container">
               <div class="toolbar">
                 <el-button @click="openGlobalSettings">🌍 全局服务商配置</el-button>
                 <el-button type="primary" :icon="Edit" @click="openModelEditor(null)">添加模型</el-button>
@@ -728,12 +725,12 @@
             </div>
 
             <!-- 6. 语音功能 -->
-            <div v-else-if="currentTab === 'voice_config'" key="voice_config" class="view-container">
+            <div v-show="currentTab === 'voice_config'" key="voice_config" class="view-container">
               <VoiceConfigPanel />
             </div>
 
             <!-- 7. MCP 配置 -->
-            <div v-else-if="currentTab === 'mcp_config'" key="mcp_config" class="view-container">
+            <div v-show="currentTab === 'mcp_config'" key="mcp_config" class="view-container">
                <div class="toolbar">
                 <el-button type="primary" :icon="Connection" @click="openMcpEditor(null)">添加 MCP 服务器</el-button>
               </div>
@@ -766,7 +763,7 @@
             </div>
 
             <!-- 8. 用户设定 -->
-            <div v-else-if="currentTab === 'user_settings'" key="user_settings" class="view-container">
+            <div v-show="currentTab === 'user_settings'" key="user_settings" class="view-container">
               <el-card shadow="never" class="glass-card">
                 <template #header>
                   <div class="card-header">
@@ -793,7 +790,7 @@
             </div>
 
             <!-- 9. 恢复出厂设置 -->
-            <div v-else-if="currentTab === 'system_reset'" key="system_reset" class="view-container">
+            <div v-show="currentTab === 'system_reset'" key="system_reset" class="view-container">
               <el-card shadow="never" class="glass-card danger-card">
                 <template #header>
                   <div class="card-header">
@@ -820,10 +817,10 @@
               </el-card>
             </div>
 
-          </transition>
+          </div>
         </el-main>
-      </el-container>
     </el-container>
+  </el-container>
 
     <!-- Dialogs -->
     <el-dialog v-model="showGlobalSettings" title="全局服务商配置" width="500px" center>
@@ -953,10 +950,11 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { ref, shallowRef, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { listen } from '@tauri-apps/api/event'
 import VoiceConfigPanel from './VoiceConfigPanel.vue'
-import TerminalPanel from '../components/TerminalPanel.vue'
 import ReActProcessViewer from '../components/ReActProcessViewer.vue'
+import AsyncMarkdown from '../components/AsyncMarkdown.vue'
 import { marked } from 'marked'
 import dompurify from 'dompurify'
 import * as echarts from 'echarts'
@@ -976,30 +974,45 @@ import {
   Close,
   MoreFilled,
   User,
-  Monitor,
   SwitchButton,
   Microphone,
   Warning,
   ArrowLeft
 } from '@element-plus/icons-vue'
 
+// 为了防止在非 Tauri 环境下报错，定义一个 fallback 的 listen
+const listenSafe = (event, callback) => {
+  if (window.__TAURI__) {
+    return listen(event, callback)
+  }
+  return Promise.resolve(() => {})
+}
+
 // --- 状态管理 ---
 const currentTab = ref('overview')
+const handleTabSelect = (index) => {
+  if (currentTab.value === index) return
+  currentTab.value = index
+}
 const isBackendOnline = ref(false)
 const isSaving = ref(false)
+const isGlobalRefreshing = ref(false)
 const isCompanionEnabled = ref(false)
 const isTogglingCompanion = ref(false)
 const isSocialEnabled = ref(false)
 const isTogglingSocial = ref(false)
+const isLightweightEnabled = ref(false)
+const isTogglingLightweight = ref(false)
+const isLogsFetching = ref(false)
 
 // 编辑日志状态
 const editingLogId = ref(null)
 const editingContent = ref('')
 
 // 数据源
-const memories = ref([])
-const logs = ref([])
-const tasks = ref([])
+const memories = shallowRef([])
+const logs = shallowRef([])
+const tasks = shallowRef([])
 const petState = ref({})
 const userSettings = ref({
   owner_name: '主人',
@@ -1093,13 +1106,14 @@ const diskColor = [
 // --- Refactored Memory Dashboard State ---
 const nitStatus = ref(null)
 const memoryViewMode = ref('list') // 'list' or 'graph'
-const memoryGraphData = ref({ nodes: [], edges: [] })
+const memoryGraphData = shallowRef({ nodes: [], edges: [] })
 const tagCloud = ref({})
 const memoryFilterTags = ref([])
 const memoryFilterDate = ref(null)
 const isLoadingGraph = ref(false)
 const graphRef = ref(null)
 let chartInstance = null
+let resizeHandler = null
 
 watch(memoryViewMode, (val) => {
     if (val === 'graph') {
@@ -1110,7 +1124,44 @@ watch(memoryViewMode, (val) => {
                 fetchMemoryGraph()
             }
         })
+    } else {
+        // Dispose chart when switching back to list mode to save memory
+        if (chartInstance) {
+            chartInstance.dispose()
+            chartInstance = null
+        }
     }
+})
+
+// 监听标签页切换，动态加载数据
+watch(currentTab, (newTab) => {
+  if (newTab === 'logs') {
+    if (logs.value.length === 0) {
+      initSessionAndFetchLogs()
+    }
+  } else if (newTab === 'memories') {
+    if (memories.value.length === 0) {
+      fetchMemories()
+    }
+  } else if (newTab === 'tasks') {
+    if (tasks.value.length === 0) {
+      fetchTasks()
+    }
+  }
+
+  // Dispose graph when leaving memories tab
+  if (newTab !== 'memories' && chartInstance) {
+    chartInstance.dispose()
+    chartInstance = null
+  }
+})
+
+const topTags = computed(() => {
+  if (!tagCloud.value) return []
+  return Object.entries(tagCloud.value)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 15)
+    .map(([tag, count]) => ({ tag, count }))
 })
 
 const currentTabName = computed(() => {
@@ -1172,6 +1223,28 @@ const getLogMetadata = (log) => {
 // --- API 交互 ---
 const API_BASE = 'http://localhost:3000/api'
 
+// 带超时的 fetch 包装函数
+const fetchWithTimeout = async (url, options = {}, timeout = 5000) => {
+  const controller = new AbortController()
+  const id = setTimeout(() => controller.abort(), timeout)
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    })
+    clearTimeout(id)
+    return response
+  } catch (error) {
+    clearTimeout(id)
+    // 只有当错误不是 AbortError 时才打印到 console.error
+    // 这可以减少终端中因正常超时或取消导致的 Failed to fetch 报错
+    if (error.name !== 'AbortError') {
+      console.warn(`[Fetch] Request failed for ${url}:`, error.message)
+    }
+    throw error
+  }
+}
+
 // 模型配置相关
 const models = ref([])
 const showGlobalSettings = ref(false)
@@ -1195,7 +1268,7 @@ const auxModelId = ref(null)
 const checkBackendStatus = async () => {
   // 简单的单次检查，用于UI状态指示
   try {
-    await fetch(`${API_BASE}/pet/state`)
+    await fetchWithTimeout(`${API_BASE}/pet/state`, {}, 2000)
     isBackendOnline.value = true
   } catch (e) {
     isBackendOnline.value = false
@@ -1209,7 +1282,7 @@ const waitForBackend = async () => {
   
   const check = async () => {
     try {
-      const res = await fetch(`${API_BASE}/pet/state`)
+      const res = await fetchWithTimeout(`${API_BASE}/pet/state`, {}, 2000)
       if (res.ok) {
         isBackendOnline.value = true
         await fetchAllData() // 后端上线后，拉取所有数据
@@ -1241,61 +1314,118 @@ const formatBytes = (bytes, decimals = 1) => {
 }
 
 const fetchSystemStatus = async () => {
+    if (fetchSystemStatus.isPolling) return
     try {
         if (!isBackendOnline.value) return;
-        const res = await fetch(`${API_BASE}/system/status`)
+        fetchSystemStatus.isPolling = true
+        const res = await fetchWithTimeout(`${API_BASE}/system/status`, {}, 2000)
         if (res.ok) {
             systemStatus.value = await res.json()
         }
     } catch(e) {
         // Silent fail for polling
+    } finally {
+        fetchSystemStatus.isPolling = false
     }
 }
 
 const fetchAllData = async () => {
-  // 如果后端不在线，就不尝试拉取数据了，避免大量报错
-  if (!isBackendOnline.value) return
+  if (!isBackendOnline.value || isGlobalRefreshing.value) return
+  
+  isGlobalRefreshing.value = true
+  // 1. 先加载核心状态，确保 UI 基础信息立即可用
+  try {
+    await Promise.all([
+      fetchPetState(),
+      fetchSystemStatus(),
+      fetchConfig()
+    ])
+  } catch (e) { console.error('Core fetch error:', e) }
 
-  await Promise.all([
-    fetchPetState(),
-    fetchMemories(),
-    fetchTasks(),
-    fetchConfig(),
-    fetchModels(),
-    fetchMcps(),
-    initSessionAndFetchLogs(),
-    fetchCompanionStatus(),
-    fetchSocialStatus(),
-    fetchNitStatus(),
-    fetchTagCloud(),
-    fetchSystemStatus()
-  ])
-  ElMessage.success('数据已刷新')
+  // 2. 稍微延迟后加载次要配置，避免一次性涌入过多数据更新
+  setTimeout(async () => {
+    try {
+      await Promise.all([
+        fetchModels(),
+        fetchMcps(),
+        fetchCompanionStatus(),
+        fetchSocialStatus(),
+        fetchLightweightStatus(),
+        fetchNitStatus()
+      ])
+    } catch (e) { console.error('Secondary fetch error:', e) }
+  }, 100)
+
+  // 3. 顺序加载所有标签页数据，确保 v-show 切换时内容已就绪
+  setTimeout(async () => {
+    try {
+      // 1. 优先加载当前标签页数据
+      if (currentTab.value === 'logs') await initSessionAndFetchLogs()
+      if (currentTab.value === 'memories') await fetchMemories()
+      if (currentTab.value === 'tasks') await fetchTasks()
+      
+      // 2. 异步加载其他标签页数据 (不使用 await 阻塞)
+      if (currentTab.value !== 'logs') initSessionAndFetchLogs()
+      if (currentTab.value !== 'memories') fetchMemories()
+      if (currentTab.value !== 'tasks') fetchTasks()
+      
+      fetchTagCloud()
+      ElMessage.success('所有数据已同步')
+    } catch (e) { 
+      console.error('Tab data fetch error:', e) 
+      ElMessage.error('部分数据刷新失败')
+    } finally {
+      isGlobalRefreshing.value = false
+    }
+  }, 200)
 }
 
 const fetchNitStatus = async () => {
+  if (fetchNitStatus.isLoading) return
+  fetchNitStatus.isLoading = true
   try {
-    const res = await fetch(`${API_BASE}/nit/status`)
+    const res = await fetchWithTimeout(`${API_BASE}/nit/status`, {}, 2000)
     nitStatus.value = await res.json()
-  } catch (e) { console.error(e) }
+  } catch (e) { 
+    console.error(e) 
+  } finally {
+    fetchNitStatus.isLoading = false
+  }
 }
 
 const fetchTagCloud = async () => {
+    if (fetchTagCloud.isLoading) return
+    fetchTagCloud.isLoading = true
     try {
-        const res = await fetch(`${API_BASE}/memories/tags`)
+        const res = await fetchWithTimeout(`${API_BASE}/memories/tags`, {}, 3000)
         tagCloud.value = await res.json()
-    } catch(e) { console.error(e) }
+    } catch(e) { 
+        console.error(e) 
+    } finally {
+        fetchTagCloud.isLoading = false
+    }
 }
 
 const fetchMemoryGraph = async () => {
+    if (isLoadingGraph.value) return
     try {
         isLoadingGraph.value = true
-        // Remove limit to use backend default (200) or specify larger
-        const res = await fetch(`${API_BASE}/memories/graph?limit=200`)
-        memoryGraphData.value = await res.json()
-        nextTick(() => initGraph())
-    } catch(e) { console.error(e) }
-    finally { isLoadingGraph.value = false }
+        // 降低限制到 100 以提升性能，防止大规模节点渲染导致主线程阻塞
+        const res = await fetchWithTimeout(`${API_BASE}/memories/graph?limit=100`, {}, 8000)
+        const data = await res.json()
+        
+        // 确保在数据拉取后，且仍然在 memory 标签页时才初始化图表
+        if (currentTab.value === 'memories') {
+            memoryGraphData.value = Object.freeze(data) // Freeze data to avoid Vue reactivity overhead
+            nextTick(() => {
+                requestAnimationFrame(() => initGraph())
+            })
+        }
+    } catch(e) { 
+        console.error(e) 
+    } finally { 
+        isLoadingGraph.value = false 
+    }
 }
 
 const initGraph = () => {
@@ -1385,16 +1515,34 @@ const initGraph = () => {
                     repulsion: 150,
                     gravity: 0.1,
                     edgeLength: [50, 200],
-                    layoutAnimation: true
+                    layoutAnimation: nodes.length < 100, // 节点过多时禁用初始动画以提升性能
+                    friction: 0.6, // 增加摩擦力，让图形更快稳定
+                    initLayout: 'circular' // 初始布局改为环形，减少力导向计算初期的剧烈抖动
                 }
             }
-        ]
+        ],
+        // 性能优化：渐进式渲染
+        progressive: 500,
+        progressiveThreshold: 1000
     }
     
     chartInstance.setOption(option)
     
+    // 性能优化：在力导向布局稳定后停止计算
+    if (nodes.length > 50) {
+        setTimeout(() => {
+            if (chartInstance) {
+                chartInstance.setOption({
+                    series: [{ force: { layoutAnimation: false } }]
+                })
+            }
+        }, 3000)
+    }
+    
     // Resize handler
-    window.addEventListener('resize', () => chartInstance && chartInstance.resize())
+    if (resizeHandler) window.removeEventListener('resize', resizeHandler)
+    resizeHandler = () => chartInstance && chartInstance.resize()
+    window.addEventListener('resize', resizeHandler)
 }
 
 // Helper for colors
@@ -1413,7 +1561,7 @@ const getSentimentColor = (sentiment) => {
 
 const fetchCompanionStatus = async () => {
   try {
-    const res = await fetch(`${API_BASE}/companion/status`)
+    const res = await fetchWithTimeout(`${API_BASE}/companion/status`, {}, 2000)
     if (res.ok) {
       const data = await res.json()
       isCompanionEnabled.value = data.enabled
@@ -1426,19 +1574,20 @@ const fetchCompanionStatus = async () => {
 const toggleCompanion = async (val) => {
   try {
     isTogglingCompanion.value = true
-    const res = await fetch(`${API_BASE}/companion/toggle`, {
+    const res = await fetchWithTimeout(`${API_BASE}/companion/toggle`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled: val })
-    })
+    }, 5000)
     
     if (res.ok) {
       const data = await res.json()
       isCompanionEnabled.value = data.enabled
       ElMessage.success(data.enabled ? '已开启陪伴模式' : '已关闭陪伴模式')
     } else {
+      const errorData = await res.json()
       isCompanionEnabled.value = !val // revert
-      ElMessage.error('切换失败')
+      ElMessage.warning(errorData.detail || '切换失败')
     }
   } catch (e) {
     isCompanionEnabled.value = !val // revert
@@ -1450,7 +1599,7 @@ const toggleCompanion = async (val) => {
 
 const fetchSocialStatus = async () => {
   try {
-    const res = await fetch(`${API_BASE}/social/status`)
+    const res = await fetchWithTimeout(`${API_BASE}/social/status`, {}, 2000)
     if (res.ok) {
       const data = await res.json()
       isSocialEnabled.value = data.enabled
@@ -1463,11 +1612,11 @@ const fetchSocialStatus = async () => {
 const toggleSocial = async (val) => {
   try {
     isTogglingSocial.value = true
-    const res = await fetch(`${API_BASE}/social/toggle`, {
+    const res = await fetchWithTimeout(`${API_BASE}/social/toggle`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled: val })
-    })
+    }, 5000)
     
     if (res.ok) {
       const data = await res.json()
@@ -1485,6 +1634,43 @@ const toggleSocial = async (val) => {
   }
 }
 
+const fetchLightweightStatus = async () => {
+  try {
+    const res = await fetchWithTimeout(`${API_BASE}/config/lightweight_mode`, {}, 2000)
+    if (res.ok) {
+      const data = await res.json()
+      isLightweightEnabled.value = data.enabled
+    }
+  } catch (e) {
+    console.error('Failed to fetch lightweight status', e)
+  }
+}
+
+const toggleLightweight = async (val) => {
+  try {
+    isTogglingLightweight.value = true
+    const res = await fetchWithTimeout(`${API_BASE}/config/lightweight_mode`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: val })
+    }, 5000)
+    
+    if (res.ok) {
+      const data = await res.json()
+      isLightweightEnabled.value = data.enabled
+      ElMessage.success(data.enabled ? '已开启轻量聊天模式' : '已关闭轻量聊天模式')
+    } else {
+      isLightweightEnabled.value = !val // revert
+      ElMessage.error('切换失败')
+    }
+  } catch (e) {
+    isLightweightEnabled.value = !val // revert
+    ElMessage.error('网络错误')
+  } finally {
+    isTogglingLightweight.value = false
+  }
+}
+
 // 退出程序
 const handleQuitApp = () => {
   ElMessageBox.confirm(
@@ -1495,58 +1681,154 @@ const handleQuitApp = () => {
       cancelButtonText: '取消',
       type: 'warning',
     }
-  ).then(() => {
+  ).then(async () => {
     try {
-      if (window.require) {
-        const electron = window.require('electron')
-        electron.ipcRenderer.send('quit-app')
+      if (window.__TAURI__) {
+        const invoke = window.__TAURI__.core?.invoke || window.__TAURI__.invoke
+        await invoke('quit_app')
       } else {
-        ElMessage.error('非 Electron 环境，无法执行退出')
+        ElMessage.error('非 Tauri 环境，无法执行退出')
       }
     } catch (e) {
-      console.error('Failed to send quit-app', e)
+      console.error('Failed to quit app', e)
     }
   }).catch(() => {})
 }
 
 const fetchMcps = async () => {
+  if (fetchMcps.isLoading) return
+  fetchMcps.isLoading = true
   try {
-    const res = await fetch(`${API_BASE}/mcp`)
+    const res = await fetchWithTimeout(`${API_BASE}/mcp`, {}, 5000)
     mcps.value = await res.json()
-  } catch (e) { console.error(e) }
+  } catch (e) { 
+    console.error(e) 
+  } finally {
+    fetchMcps.isLoading = false
+  }
 }
 
 const fetchPetState = async () => {
+  if (fetchPetState.isPolling) return
   try {
-    const res = await fetch(`${API_BASE}/pet/state`)
-    petState.value = await res.json()
-  } catch (e) { console.error(e) }
+    if (!isBackendOnline.value) return;
+    fetchPetState.isPolling = true
+    const res = await fetchWithTimeout(`${API_BASE}/pet/state`, {}, 2000)
+    if (res.ok) {
+        petState.value = await res.json()
+    }
+  } catch (e) { 
+    // Silent fail for polling, no need to log Failed to fetch
+  } finally {
+    fetchPetState.isPolling = false
+  }
 }
 
 const fetchMemories = async () => {
+  if (fetchMemories.isLoading) return
+  fetchMemories.isLoading = true
+
+  const currentRequestId = Symbol('fetchMemories')
+  fetchMemories.lastRequestId = currentRequestId
+
   try {
-    let url = `${API_BASE}/memories/list?limit=50`
+    let url = `${API_BASE}/memories/list?limit=100`
     if (memoryFilterDate.value) {
         url += `&date_start=${memoryFilterDate.value}`
     }
     if (memoryFilterTags.value.length > 0) {
         url += `&tags=${memoryFilterTags.value.join(',')}`
     }
-    const res = await fetch(url)
-    memories.value = await res.json()
-  } catch (e) { console.error(e) }
+    const res = await fetchWithTimeout(url, {}, 5000)
+    const rawMemories = await res.json()
+    
+    // Process in larger batches to reduce Vue churn
+    const processedMemories = []
+    const batchSize = 50
+    
+    const processBatch = (startIndex) => {
+      if (fetchMemories.lastRequestId !== currentRequestId || currentTab.value !== 'memories') {
+        fetchMemories.isLoading = false
+        return
+      }
+
+      const endIndex = Math.min(startIndex + batchSize, rawMemories.length)
+      for (let i = startIndex; i < endIndex; i++) {
+        const m = rawMemories[i]
+        processedMemories.push(Object.freeze({
+          ...m,
+          realTime: new Date(m.timestamp).toLocaleDateString()
+        }))
+      }
+      
+      memories.value = [...processedMemories]
+      
+      if (endIndex < rawMemories.length) {
+        setTimeout(() => processBatch(endIndex), 16) // Use 16ms to allow one frame of UI response
+      } else {
+        fetchMemories.isLoading = false
+      }
+    }
+    
+    processBatch(0)
+    fetchTagCloud()
+  } catch (e) { 
+    console.error(e)
+    fetchMemories.isLoading = false
+  }
 }
 
 const fetchTasks = async () => {
+  if (fetchTasks.isLoading) return
+  fetchTasks.isLoading = true
+
+  const currentRequestId = Symbol('fetchTasks')
+  fetchTasks.lastRequestId = currentRequestId
+
   try {
-    const res = await fetch(`${API_BASE}/tasks`)
-    tasks.value = await res.json()
-  } catch (e) { console.error(e) }
+    const res = await fetchWithTimeout(`${API_BASE}/tasks`, {}, 5000)
+    const rawTasks = await res.json()
+    
+    // Process all at once if count is small (< 100), otherwise batch
+    if (rawTasks.length < 100) {
+        tasks.value = rawTasks.map(t => Object.freeze(t))
+        fetchTasks.isLoading = false
+        return
+    }
+
+    const processedTasks = []
+    const batchSize = 20
+    
+    const processBatch = (startIndex) => {
+      if (fetchTasks.lastRequestId !== currentRequestId) {
+        fetchTasks.isLoading = false
+        return
+      }
+
+      const endIndex = Math.min(startIndex + batchSize, rawTasks.length)
+      for (let i = startIndex; i < endIndex; i++) {
+        processedTasks.push(Object.freeze(rawTasks[i]))
+      }
+      
+      tasks.value = [...processedTasks]
+      
+      if (endIndex < rawTasks.length) {
+        setTimeout(() => processBatch(endIndex), 16)
+      } else {
+        fetchTasks.isLoading = false
+      }
+    }
+    
+    processBatch(0)
+  } catch (e) { 
+    console.error(e)
+    fetchTasks.isLoading = false
+  }
 }
 
 const fetchConfig = async () => {
   try {
-    const res = await fetch(`${API_BASE}/configs`)
+    const res = await fetchWithTimeout(`${API_BASE}/configs`, {}, 5000)
     const data = await res.json()
     globalConfig.value.global_llm_api_key = data.global_llm_api_key || ''
     globalConfig.value.global_llm_api_base = data.global_llm_api_base || 'https://api.openai.com'
@@ -1562,22 +1844,29 @@ const fetchConfig = async () => {
 }
 
 const fetchModels = async () => {
+  if (fetchModels.isLoading) return
+  fetchModels.isLoading = true
   try {
-    const res = await fetch(`${API_BASE}/models`)
+    const res = await fetchWithTimeout(`${API_BASE}/models`, {}, 5000)
     models.value = await res.json()
-  } catch (e) { console.error(e) }
+  } catch (e) { 
+    console.error(e) 
+  } finally {
+    fetchModels.isLoading = false
+  }
 }
 
 // Global Settings
 const openGlobalSettings = () => { showGlobalSettings.value = true }
 const saveGlobalSettings = async () => {
+  if (isSaving.value) return
   try {
     isSaving.value = true
-    await fetch(`${API_BASE}/configs`, {
+    await fetchWithTimeout(`${API_BASE}/configs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(globalConfig.value)
-    })
+    }, 5000)
     showGlobalSettings.value = false
     ElMessage.success('全局配置已保存')
     await fetchConfig()
@@ -1590,16 +1879,17 @@ const saveGlobalSettings = async () => {
 
 // User Settings Logic
 const saveUserSettings = async () => {
+  if (isSaving.value) return
   try {
     isSaving.value = true
-    await fetch(`${API_BASE}/configs`, {
+    await fetchWithTimeout(`${API_BASE}/configs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         owner_name: userSettings.value.owner_name,
         user_persona: userSettings.value.user_persona
       })
-    })
+    }, 5000)
     ElMessage.success('用户设定已保存')
     await fetchConfig()
   } catch (e) {
@@ -1611,6 +1901,7 @@ const saveUserSettings = async () => {
 
 // System Reset Logic
 const handleSystemReset = async () => {
+  if (isSaving.value) return
   try {
     const { value, action } = await ElMessageBox.prompt(
       '<div class="danger-main-text">主人，真的要让 Pero 忘掉你吗？o(╥﹏╥)o</div>' +
@@ -1635,7 +1926,7 @@ const handleSystemReset = async () => {
       }
 
       isSaving.value = true
-      const res = await fetch(`${API_BASE}/system/reset`, { method: 'POST' })
+      const res = await fetchWithTimeout(`${API_BASE}/system/reset`, { method: 'POST' }, 10000)
       
       if (res.ok) {
         ElMessage.success('系统已恢复出厂设置')
@@ -1669,6 +1960,7 @@ const openMcpEditor = (mcp) => {
 }
 
 const saveMcp = async () => {
+  if (isSaving.value) return
   try {
     isSaving.value = true
     const mcp = currentEditingMcp.value
@@ -1681,11 +1973,11 @@ const saveMcp = async () => {
       JSON.parse(mcp.env || '{}')
     }
 
-    const res = await fetch(url, {
+    const res = await fetchWithTimeout(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(mcp)
-    })
+    }, 5000)
     
     if (!res.ok) throw new Error('保存失败')
     
@@ -1700,9 +1992,8 @@ const saveMcp = async () => {
 }
 
 const deleteMcp = async (id) => {
-  console.log('--- deleteMcp called ---', { id })
-  if (!id) {
-    ElMessage.error('无效的MCP ID')
+  if (!id || deleteMcp.isLoading) {
+    if (!id) ElMessage.error('无效的MCP ID')
     return
   }
 
@@ -1713,14 +2004,10 @@ const deleteMcp = async (id) => {
       type: 'warning' 
     }).then(() => true).catch(() => false)
 
-    if (!confirmed) {
-      console.log('MCP delete cancelled by user')
-      return
-    }
+    if (!confirmed) return
 
-    console.log('Sending DELETE request for MCP:', id)
-    const res = await fetch(`${API_BASE}/mcp/${id}`, { method: 'DELETE' })
-    console.log('Response received:', res.status, res.statusText)
+    deleteMcp.isLoading = true
+    const res = await fetchWithTimeout(`${API_BASE}/mcp/${id}`, { method: 'DELETE' }, 5000)
 
     if (!res.ok) {
       const err = await res.json()
@@ -1731,16 +2018,18 @@ const deleteMcp = async (id) => {
   } catch (e) {
     console.error('Unexpected error in deleteMcp:', e)
     ElMessage.error('系统错误: ' + (e.message || '未知错误'))
+  } finally {
+    deleteMcp.isLoading = false
   }
 }
 
 const toggleMcpEnabled = async (mcp) => {
   try {
-    const res = await fetch(`${API_BASE}/mcp/${mcp.id}`, {
+    const res = await fetchWithTimeout(`${API_BASE}/mcp/${mcp.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...mcp, enabled: mcp.enabled }) // Element Plus switch updates v-model directly
-    })
+    }, 5000)
     if (!res.ok) throw new Error('更新失败')
     await fetchMcps()
   } catch (e) {
@@ -1769,6 +2058,7 @@ const openModelEditor = (model) => {
 }
 
 const fetchRemoteModels = async () => {
+  if (isFetchingRemote.value) return
   try {
     isFetchingRemote.value = true
     let apiKey = '', apiBase = ''
@@ -1785,7 +2075,7 @@ const fetchRemoteModels = async () => {
       return
     }
 
-    const res = await fetch(`${API_BASE}/models/remote`, {
+    const res = await fetchWithTimeout(`${API_BASE}/models/remote`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
@@ -1793,7 +2083,7 @@ const fetchRemoteModels = async () => {
         api_base: apiBase,
         provider: currentEditingModel.value.provider || 'openai'
       })
-    })
+    }, 10000)
     
     const data = await res.json()
     if (data.models?.length) {
@@ -1810,17 +2100,18 @@ const fetchRemoteModels = async () => {
 }
 
 const saveModel = async () => {
+  if (isSaving.value) return
   try {
     isSaving.value = true
     const model = currentEditingModel.value
     const url = model.id ? `${API_BASE}/models/${model.id}` : `${API_BASE}/models`
     const method = model.id ? 'PUT' : 'POST'
     
-    const res = await fetch(url, {
+    const res = await fetchWithTimeout(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(model)
-    })
+    }, 5000)
     
     if (!res.ok) throw new Error('保存失败')
     
@@ -1835,9 +2126,8 @@ const saveModel = async () => {
 }
 
 const deleteModel = async (id) => {
-  console.log('--- deleteModel called ---', { id })
-  if (!id) {
-    ElMessage.error('无效的模型ID')
+  if (!id || deleteModel.isLoading) {
+    if (!id) ElMessage.error('无效的模型ID')
     return
   }
 
@@ -1848,14 +2138,10 @@ const deleteModel = async (id) => {
       type: 'warning' 
     }).then(() => true).catch(() => false)
 
-    if (!confirmed) {
-      console.log('Model delete cancelled by user')
-      return
-    }
+    if (!confirmed) return
 
-    console.log('Sending DELETE request for model:', id)
-    const res = await fetch(`${API_BASE}/models/${id}`, { method: 'DELETE' })
-    console.log('Response received:', res.status, res.statusText)
+    deleteModel.isLoading = true
+    const res = await fetchWithTimeout(`${API_BASE}/models/${id}`, { method: 'DELETE' }, 5000)
 
     if (!res.ok) {
       const err = await res.json()
@@ -1866,6 +2152,8 @@ const deleteModel = async (id) => {
   } catch (e) {
     console.error('Unexpected error in deleteModel:', e)
     ElMessage.error('系统错误: ' + (e.message || '未知错误'))
+  } finally {
+    deleteModel.isLoading = false
   }
 }
 
@@ -1880,11 +2168,11 @@ const activateModel = async (id, configKey) => {
       payload['aux_model_enabled'] = id ? 'true' : 'false'
     }
 
-    await fetch(`${API_BASE}/configs`, {
+    await fetchWithTimeout(`${API_BASE}/configs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
-    })
+    }, 5000)
     
     if (configKey === 'current_model_id') currentActiveModelId.value = id
     else if (configKey === 'scorer_model_id') secretaryModelId.value = id
@@ -1899,40 +2187,76 @@ const activateModel = async (id, configKey) => {
 
 // Logs Logic
 const initSessionAndFetchLogs = async () => {
-  const storedSessionId = localStorage.getItem('ppc.sessionId')
-  if (storedSessionId && !selectedSessionId.value) {
-    selectedSessionId.value = storedSessionId
-  } else if (!selectedSessionId.value) {
-    selectedSessionId.value = 'default'
+  if (isLogsFetching.value) return
+  isLogsFetching.value = true
+  try {
+    const storedSessionId = localStorage.getItem('ppc.sessionId')
+    if (storedSessionId && !selectedSessionId.value) {
+      selectedSessionId.value = storedSessionId
+    } else if (!selectedSessionId.value) {
+      selectedSessionId.value = 'default'
+    }
+    await fetchLogs()
+  } finally {
+    isLogsFetching.value = false
   }
-  await fetchLogs()
 }
 
 const fetchLogs = async () => {
-  if (!selectedSessionId.value) return
+  if (!selectedSessionId.value || isLogsFetching.value) return
+  isLogsFetching.value = true
+  
+  // Create a unique symbol for this fetch request
+  const currentRequestId = Symbol('fetchLogs')
+  fetchLogs.lastRequestId = currentRequestId
+
   try {
     let url = `${API_BASE}/history/${selectedSource.value}/${selectedSessionId.value}?limit=50&sort=${selectedSort.value}`
     if (selectedDate.value) {
       url += `&date=${selectedDate.value}`
     }
     
-    const res = await fetch(url)
-    logs.value = await res.json()
+    const res = await fetchWithTimeout(url, {}, 5000)
+    const rawLogs = await res.json()
     
-    // 自动定位到最近消息
+    // Only skip update if the request is stale
+    if (fetchLogs.lastRequestId !== currentRequestId) {
+      return
+    }
+
+    const processedLogs = rawLogs.map(log => {
+        const metadata = getLogMetadata(log)
+        return Object.freeze({
+          ...log,
+          // content is passed raw to AsyncMarkdown
+          displayTime: new Date(log.timestamp).toLocaleString(),
+          metadata: metadata,
+          sentiment: log.sentiment || metadata.sentiment,
+          importance: log.importance || metadata.importance
+        })
+    })
+      
+    logs.value = processedLogs
+    
+    // Auto scroll
     setTimeout(() => {
-      const container = document.querySelector('.chat-scroll-area')
-      if (container) {
-        if (selectedSort.value === 'desc') {
-          // 倒序排列时，最新消息在顶部
-          container.scrollTop = 0
-        } else {
-          // 正序排列时，最新消息在底部
-          container.scrollTop = container.scrollHeight
+        if (currentTab.value !== 'logs') return
+        const container = document.querySelector('.chat-scroll-area')
+        if (container) {
+            if (selectedSort.value === 'desc') {
+                container.scrollTop = 0
+            } else {
+                container.scrollTop = container.scrollHeight
+            }
         }
-      }
-    }, 100)
-  } catch (e) { console.error(e) }
+    }, 50)
+    
+  } catch (e) { 
+    console.error(e) 
+    ElMessage.error('获取日志失败')
+  } finally {
+    isLogsFetching.value = false
+  }
 }
 
 const renderMessage = (content) => {
@@ -2017,11 +2341,11 @@ const cancelLogEdit = () => {
 const saveLogEdit = async (logId) => {
   if (!editingContent.value.trim()) return
   try {
-    const res = await fetch(`${API_BASE}/history/${logId}`, {
+    const res = await fetchWithTimeout(`${API_BASE}/history/${logId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content: editingContent.value })
-    })
+    }, 5000)
     if (res.ok) {
       editingLogId.value = null
       await fetchLogs()
@@ -2045,9 +2369,9 @@ const deleteLog = async (logId) => {
     
     if (!confirmed) return
 
-    const res = await fetch(`${API_BASE}/history/${logId}`, { 
+    const res = await fetchWithTimeout(`${API_BASE}/history/${logId}`, { 
       method: 'DELETE' 
-    })
+    }, 5000)
     
     if (res.ok) {
       ElMessage.success('已删除')
@@ -2070,9 +2394,9 @@ const retryLogAnalysis = async (log) => {
     const originalStatus = log.analysis_status
     log.analysis_status = 'processing'
     
-    const res = await fetch(`${API_BASE}/history/${log.id}/retry_analysis`, {
+    const res = await fetchWithTimeout(`${API_BASE}/history/${log.id}/retry_analysis`, {
       method: 'POST'
-    })
+    }, 5000)
     
     if (res.ok) {
       ElMessage.success('已提交重试请求')
@@ -2092,8 +2416,8 @@ const retryLogAnalysis = async (log) => {
 }
 
 const deleteMemory = async (memoryId) => {
-  if (!memoryId) {
-    ElMessage.error('无效的记忆ID')
+  if (!memoryId || deleteMemory.isLoading) {
+    if (!memoryId) ElMessage.error('无效的记忆ID')
     return
   }
 
@@ -2106,7 +2430,8 @@ const deleteMemory = async (memoryId) => {
     
     if (!confirmed) return
 
-    const res = await fetch(`${API_BASE}/memories/${memoryId}`, { method: 'DELETE' })
+    deleteMemory.isLoading = true
+    const res = await fetchWithTimeout(`${API_BASE}/memories/${memoryId}`, { method: 'DELETE' }, 5000)
 
     if (res.ok) {
       await fetchMemories()
@@ -2118,12 +2443,14 @@ const deleteMemory = async (memoryId) => {
   } catch (e) {
     console.error('Error in deleteMemory:', e)
     ElMessage.error('系统错误: ' + (e.message || '未知错误'))
+  } finally {
+    deleteMemory.isLoading = false
   }
 }
 
 const deleteTask = async (taskId) => {
-  if (!taskId) {
-    ElMessage.error('无效的任务ID')
+  if (!taskId || deleteTask.isLoading) {
+    if (!taskId) ElMessage.error('无效的任务ID')
     return
   }
 
@@ -2136,7 +2463,8 @@ const deleteTask = async (taskId) => {
 
     if (!confirmed) return
 
-    const res = await fetch(`${API_BASE}/tasks/${taskId}`, { method: 'DELETE' })
+    deleteTask.isLoading = true
+    const res = await fetchWithTimeout(`${API_BASE}/tasks/${taskId}`, { method: 'DELETE' }, 5000)
 
     if (res.ok) {
       await fetchTasks()
@@ -2148,34 +2476,77 @@ const deleteTask = async (taskId) => {
   } catch (e) {
     console.error('Error in deleteTask:', e)
     ElMessage.error('系统错误: ' + (e.message || '未知错误'))
+  } finally {
+    deleteTask.isLoading = false
   }
 }
 
 onMounted(() => {
   waitForBackend()
   // Add real-time polling for system status and pet state
-  systemStatusInterval.value = setInterval(() => {
-    fetchSystemStatus()
-    if (isBackendOnline.value) {
-      fetchPetState()
+  // Polling for system status using recursive setTimeout
+  const pollSystemStatus = async () => {
+    if (!isBackendOnline.value) {
+      setTimeout(pollSystemStatus, 3000)
+      return
     }
-  }, 3000)
+    
+    // Only poll expensive status data when on Overview tab and not already polling
+    if (currentTab.value === 'overview') {
+      try {
+        await Promise.all([
+          fetchSystemStatus(),
+          fetchPetState()
+        ])
+      } catch (e) {
+        // Ignore polling errors
+      }
+    }
+    
+    // Schedule next poll only after current one finishes
+    systemStatusInterval.value = setTimeout(pollSystemStatus, 3000)
+  }
+  
+  // Start polling loop
+  pollSystemStatus()
 
   // Listen for monitor updates
-  if (window.require) {
-    const { ipcRenderer } = window.require('electron')
-    ipcRenderer.on('monitor-data-update', (event, data) => {
-      monitorSegments.value = data
-    })
-    ipcRenderer.on('open-dashboard-monitor', () => {
-      openLiveMonitor()
-    })
+  try {
+    if (window.__TAURI__) {
+      listen('monitor-data-update', (event) => {
+        const data = event.payload
+        if (data) monitorSegments.value = data
+      })
+      listen('open-dashboard-monitor', () => {
+        openLiveMonitor()
+      })
+
+      // Add debounced history update listener
+      let logFetchTimeout = null
+      listen('history-update', () => {
+        if (logFetchTimeout) clearTimeout(logFetchTimeout)
+        logFetchTimeout = setTimeout(() => {
+          fetchLogs()
+          logFetchTimeout = null
+        }, 800)
+      })
+
+      // Add pet state update listener
+      listen('pet-state-update', (event) => {
+         petState.value = event.payload
+      })
+    }
+  } catch (e) {
+    console.error('Failed to listen to Tauri updates', e)
   }
 })
 
 onUnmounted(() => {
   if (systemStatusInterval.value) {
-    clearInterval(systemStatusInterval.value)
+    clearTimeout(systemStatusInterval.value)
+  }
+  if (resizeHandler) {
+    window.removeEventListener('resize', resizeHandler)
   }
   if (chartInstance) {
     chartInstance.dispose()
@@ -2210,12 +2581,15 @@ onUnmounted(() => {
   filter: blur(120px);
   pointer-events: none;
   background: #fdfdfd; /* 确保背景不透明 */
+  overflow: hidden; /* 防止 blob 溢出导致滚动条 */
 }
 
 .blob {
   position: absolute;
   border-radius: 50%;
   animation: float 10s infinite ease-in-out;
+  will-change: transform;
+  transform: translateZ(0);
 }
 
 .blob-1 {
@@ -2244,6 +2618,21 @@ onUnmounted(() => {
   animation-delay: -5s;
 }
 
+.disabled-card {
+  opacity: 0.65;
+  filter: grayscale(0.4);
+  cursor: not-allowed;
+  transition: all 0.3s ease;
+}
+
+.disabled-card :deep(*) {
+  pointer-events: none;
+}
+
+.disabled-card :deep(.el-switch) {
+  pointer-events: auto;
+}
+
 @keyframes float {
   0%, 100% { transform: translate(0, 0) scale(1); }
   33% { transform: translate(30px, -50px) scale(1.1); }
@@ -2253,19 +2642,35 @@ onUnmounted(() => {
 /* 布局 */
 .main-layout {
   position: relative;
-  z-index: 1;
+  z-index: 10; /* 提升主布局层级，高于背景 */
   height: 100%;
   width: 100%;
 }
 
 /* Glass Sidebar */
 .glass-sidebar {
+  position: relative;
+  z-index: 100; /* 确保侧边栏始终在最上层，防止被内容区的 stacking context 覆盖 */
+  width: 260px !important;
+  min-width: 260px;
   background: #ffffff;
   border-right: 1px solid rgba(0, 0, 0, 0.05);
   display: flex;
   flex-direction: column;
   box-shadow: 4px 0 15px rgba(0, 0, 0, 0.02);
   transition: all 0.3s;
+  pointer-events: auto !important; /* 强制开启点击事件 */
+}
+
+/* 按钮点击强化 */
+.sidebar-menu :deep(.el-menu-item),
+.quit-button,
+.header-right .el-button,
+.view-container .el-button,
+.action-group .el-button,
+.utils-group .el-button {
+  pointer-events: auto !important;
+  cursor: pointer !important;
 }
 
 .brand-area {
@@ -2273,6 +2678,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
+  user-select: none;
 }
 
 .logo-box {
@@ -2306,6 +2712,27 @@ onUnmounted(() => {
   border-right: none !important;
   flex: 1;
   background-color: #ffffff !important;
+}
+
+.sidebar-menu :deep(.el-menu-item) {
+  height: 50px;
+  line-height: 50px;
+  margin: 4px 12px;
+  border-radius: 8px;
+  color: #606266;
+  transition: all 0.2s;
+  cursor: pointer !important;
+}
+
+.sidebar-menu :deep(.el-menu-item:hover) {
+  background-color: #fff0f5 !important;
+  color: #ff88aa !important;
+}
+
+.sidebar-menu :deep(.el-menu-item.is-active) {
+  background: linear-gradient(135deg, #fff0f5 0%, #ffe4ed 100%) !important;
+  color: #ff88aa !important;
+  font-weight: 600;
 }
 
 .sidebar-footer {
@@ -2360,6 +2787,8 @@ onUnmounted(() => {
 
 /* Glass Header */
 .glass-header {
+  position: relative;
+  z-index: 50; /* 低于侧边栏，但高于内容区 */
   height: 64px;
   background: rgba(255, 255, 255, 0.5);
   backdrop-filter: blur(12px);
@@ -2384,10 +2813,15 @@ onUnmounted(() => {
 
 /* Content Area */
 .content-area {
+  position: relative;
+  z-index: 10; /* 提高层级，确保在背景层之上 */
   padding: 24px;
   overflow-y: auto;
   scroll-behavior: smooth;
+  pointer-events: auto !important; /* 确保内容区始终响应点击 */
 }
+
+
 
 .view-container {
   width: 100%;
@@ -2514,10 +2948,13 @@ onUnmounted(() => {
 
 .chat-bubble-wrapper.user .bubble-content-box {
   background: #ecf5ff;
+  color: #303133;
   border-bottom-right-radius: 4px;
 }
 
 .chat-bubble-wrapper.assistant .bubble-content-box {
+  background: white;
+  color: #303133;
   border-bottom-left-radius: 4px;
 }
 
@@ -2743,14 +3180,24 @@ onUnmounted(() => {
   margin-bottom: 20px;
 }
 
+.section-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: #303133;
+  margin: 0;
+  letter-spacing: 0.5px;
+}
+
 .memory-waterfall {
-  column-count: 3;
-  column-gap: 20px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 20px;
+  align-items: start;
 }
 
 .memory-item {
-  break-inside: avoid;
-  margin-bottom: 20px;
+  /* break-inside: avoid; - removed for grid */
+  margin-bottom: 0;
 }
 
 .memory-card {
@@ -2767,13 +3214,15 @@ onUnmounted(() => {
 
 /* Tasks Waterfall */
 .task-waterfall {
-  column-count: 3;
-  column-gap: 20px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 20px;
+  align-items: start;
 }
 
 .task-item {
-  break-inside: avoid;
-  margin-bottom: 20px;
+  /* break-inside: avoid; - removed for grid */
+  margin-bottom: 0;
 }
 
 .task-card-modern {

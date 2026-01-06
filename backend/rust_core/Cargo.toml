@@ -9,7 +9,7 @@ name = "pero_rust_core"
 crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = { version = "0.20", features = ["extension-module"] }
+pyo3 = { version = "0.21", features = ["extension-module"] }
 ahash = "0.8" # Faster HashMap
 rayon = "1.8" # Parallel processing
 serde = { version = "1.0", features = ["derive"] }

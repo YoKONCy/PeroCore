@@ -43,6 +43,7 @@ from services.browser_bridge_service import browser_bridge_service
 from services.screenshot_service import screenshot_manager
 from services.social_service import get_social_service
 from core.config_manager import get_config_manager
+from core.nit_manager import get_nit_manager
 from nit_core.dispatcher import XMLStreamFilter
 
 @asynccontextmanager
@@ -221,6 +222,60 @@ async def lifespan(app: FastAPI):
 
     dream_task = asyncio.create_task(periodic_dream_check())
 
+    # [Feature] Memory Maintenance: Daily trigger at 04:00 AM
+    async def periodic_memory_maintenance_check():
+        from database import engine
+        from sqlalchemy.orm import sessionmaker
+        from datetime import timedelta
+        
+        await asyncio.sleep(120) # Initial delay
+        
+        while True:
+            try:
+                async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+                async with async_session() as session:
+                    now = datetime.now()
+                    
+                    # Calculate the latest scheduled trigger time (04:00 AM)
+                    if now.hour < 4:
+                        latest_scheduled = now.replace(hour=4, minute=0, second=0, microsecond=0) - timedelta(days=1)
+                    else:
+                        latest_scheduled = now.replace(hour=4, minute=0, second=0, microsecond=0)
+                    
+                    # Check last maintenance time
+                    config_key = "last_memory_maintenance_time"
+                    config = await session.get(Config, config_key)
+                    
+                    last_time = datetime.min
+                    if config:
+                        try:
+                            last_time = datetime.fromisoformat(config.value)
+                        except:
+                            pass
+                    
+                    if last_time < latest_scheduled:
+                        print(f"[Main] Triggering scheduled Memory Maintenance (Last: {last_time}, Scheduled: {latest_scheduled})")
+                        from services.memory_secretary_service import MemorySecretaryService
+                        service = MemorySecretaryService(session)
+                        await service.run_maintenance()
+                        
+                        # Update config
+                        if not config:
+                            config = Config(key=config_key, value=now.isoformat())
+                            session.add(config)
+                        else:
+                            config.value = now.isoformat()
+                            config.updated_at = now
+                        await session.commit()
+                        
+            except Exception as e:
+                print(f"[Main] Memory maintenance check task error: {e}")
+            
+            # Check every 1 hour
+            await asyncio.sleep(3600)
+
+    maintenance_task = asyncio.create_task(periodic_memory_maintenance_check())
+
     # [Feature] Periodic Trigger Check (Reminders & Topics)
     # Replaces frontend polling with backend scheduling
     async def execute_and_broadcast_chat(instruction: str, session: AsyncSession):
@@ -346,11 +401,13 @@ async def lifespan(app: FastAPI):
     cleanup_task.cancel()
     weekly_report_task.cancel()
     dream_task.cancel()
+    maintenance_task.cancel()
     trigger_task.cancel()
     try:
         await cleanup_task
         await weekly_report_task
         await dream_task
+        await maintenance_task
         await trigger_task
     except asyncio.CancelledError:
         pass
@@ -445,33 +502,55 @@ async def get_system_status():
         print(f"System status error: {e}")
         return {"error": str(e)}
 
+@app.get("/api/nit/settings")
+async def get_nit_settings():
+    """获取所有 NIT 调度设置"""
+    return get_nit_manager().get_all_settings()
+
+@app.post("/api/nit/settings/category")
+async def set_nit_category(category: str = Body(..., embed=True), enabled: bool = Body(..., embed=True)):
+    """设置分类开关 (Level 1)"""
+    get_nit_manager().set_category_status(category, enabled)
+    return {"status": "success", "message": f"Category {category} set to {enabled}. Restart required for some changes."}
+
+@app.post("/api/nit/settings/plugin")
+async def set_nit_plugin(plugin_name: str = Body(..., embed=True), enabled: bool = Body(..., embed=True)):
+    """设置插件开关 (Level 2)"""
+    get_nit_manager().set_plugin_status(plugin_name, enabled)
+    return {"status": "success", "message": f"Plugin {plugin_name} set to {enabled}. Restart required for some changes."}
+
 @app.post("/api/config/social_mode")
 async def set_social_mode(enabled: bool = Body(..., embed=True)):
     """
-    Toggle Social Mode. Requires restart to fully apply plugin changes.
+    (Deprecated) Toggle Social Mode. Now handled by NITManager Level 2.
     """
-    cm = get_config_manager()
-    cm.set("enable_social_mode", enabled)
+    get_nit_manager().set_plugin_status("social_adapter", enabled)
     
     social_service = get_social_service()
     if enabled:
-        # If enabling, try to start service (though plugin tools won't load until restart)
-        # However, the service itself can start receiving messages.
         await social_service.start()
     else:
         await social_service.stop()
         
-    return {"status": "success", "enabled": enabled, "message": "Please restart PeroCore for NIT tool changes to take effect."}
+    return {"status": "success", "enabled": enabled, "message": "Plugin status updated. Restart required for full effect."}
 
 @app.get("/api/config/social_mode")
 async def get_social_mode():
-    cm = get_config_manager()
-    return {"enabled": cm.get("enable_social_mode", False)}
+    return {"enabled": get_nit_manager().is_plugin_enabled("social_adapter")}
 
 @app.websocket("/api/social/ws")
 async def social_websocket(websocket: WebSocket):
     social_service = get_social_service()
     await social_service.handle_websocket(websocket)
+
+@app.get("/api/config/lightweight_mode")
+async def get_lightweight_mode():
+    return {"enabled": get_config_manager().get("lightweight_mode", False)}
+
+@app.post("/api/config/lightweight_mode")
+async def set_lightweight_mode(enabled: bool = Body(..., embed=True)):
+    get_config_manager().set("lightweight_mode", enabled)
+    return {"status": "success", "enabled": enabled}
 
 @app.delete("/api/memories/by_timestamp/{msg_timestamp}")
 async def delete_memory_by_timestamp(msg_timestamp: str, session: AsyncSession = Depends(get_session)):
@@ -605,6 +684,11 @@ async def get_task_status(session_id: str):
 
 @app.post("/api/companion/toggle")
 async def toggle_companion(enabled: bool = Body(..., embed=True), session: AsyncSession = Depends(get_session)):
+    # [Requirement] Companion mode depends on Lightweight mode
+    config_mgr = get_config_manager()
+    if enabled and not config_mgr.get("lightweight_mode", False):
+        raise HTTPException(status_code=400, detail="请先开启“轻量模式”后再启动陪伴模式。")
+
     config = await session.get(Config, "companion_mode_enabled")
     if not config:
         config = Config(key="companion_mode_enabled", value="false")
@@ -1408,5 +1492,5 @@ if __name__ == "__main__":
     # 强制禁用 reload 模式，因为 Uvicorn 的 reloader 在 Windows 下会强制使用 SelectorEventLoop
     # 这会导致 subprocess (MCP Stdio) 报错 NotImplementedError
     print(f"Backend starting with loop: {asyncio.get_event_loop().__class__.__name__}")
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
+    uvicorn.run("main:app", host="127.0.0.1", port=port, reload=False)
 

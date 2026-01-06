@@ -4,6 +4,8 @@
       class="character-wrapper" 
       :class="{ shake: isShaking, dragging: isDragging }"
       @mousedown="handleMouseDown"
+      @dblclick.prevent.stop="handleDblClick"
+      data-tauri-drag-region
     >
       <!-- 状态显示 (Mood/Mind/Vibe) -->
       <transition name="fade">
@@ -58,6 +60,7 @@
         class="floating-trigger" 
         :class="{ active: showInput }"
         @click.stop="toggleUI"
+        style="-webkit-app-region: no-drag;"
       >
         <div class="trigger-core">
           <div class="pulse-ring"></div>
@@ -66,7 +69,7 @@
       </div>
       
       <!-- Live2D 模型容器 -->
-      <div id="waifu-container" class="pet-avatar-container">
+      <div id="waifu-container" class="pet-avatar-container" data-tauri-drag-region>
         <!-- 加载状态占位 -->
         <div v-if="isLoading" class="loading-placeholder">
           <img src="/icon.png" class="loading-icon" />
@@ -84,11 +87,12 @@
           placeholder="跟 Pero 对话..."
           class="chat-input"
           :disabled="isThinking"
+          style="-webkit-app-region: no-drag;"
         />
       </div>
 
       <!-- 悬浮工具栏 -->
-      <div class="pet-tools" v-show="showInput">
+      <div class="pet-tools" v-show="showInput" style="-webkit-app-region: no-drag;">
         <button class="tool-btn" @click.stop="randTextures" title="换装">👕</button>
         <button class="tool-btn" @click.stop="reloadPet" title="重载">🔄</button>
         <button 
@@ -131,6 +135,12 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, toRaw } from 'vue'
 import FileSearchModal from '../components/FileSearchModal.vue'
+import { invoke } from '@tauri-apps/api/core'
+import { listen, emit } from '@tauri-apps/api/event'
+import { getCurrentWindow } from '@tauri-apps/api/window'
+import { PhysicalPosition } from '@tauri-apps/api/dpi'
+
+const appWindow = getCurrentWindow();
 
 const voiceMode = ref(parseInt(localStorage.getItem('ppc.voice_mode') || '0')) // 0: off, 1: auto(vad), 2: ptt
 const isPTTRecording = ref(false)
@@ -251,10 +261,8 @@ const foundFiles = ref([])
 
 // 监听解析后的内容变化，实时同步给监控窗口
 watch(parsedBubbleContent, (newVal) => {
-  if (ipcRenderer && ipcRenderer.send) {
-    // 发送纯数据，避免 Vue 响应式对象的潜在问题
-    ipcRenderer.send('monitor-data-update', toRaw(newVal))
-  }
+  // 发送纯数据
+  emit('monitor-data-update', toRaw(newVal)).catch(e => console.error(e))
 }, { deep: true })
 
 // 自动弹出思维监控室 (已禁用)
@@ -266,22 +274,53 @@ watch(parsedBubbleContent, (newVal) => {
 // })
 
 const openTaskMonitor = () => {
-  if (ipcRenderer && ipcRenderer.send) {
-    ipcRenderer.send('open-dashboard-monitor')
-    // 立即同步一次数据
-    ipcRenderer.send('monitor-data-update', toRaw(parsedBubbleContent.value))
-  }
+  invoke('open_dashboard').catch(e => console.error(e))
+  emit('open-dashboard-monitor').catch(e => console.error(e))
+  // 立即同步一次数据
+  emit('monitor-data-update', toRaw(parsedBubbleContent.value)).catch(e => console.error(e))
 }
 
-// 监听模态框显示状态，动态调整 Electron 窗口鼠标穿透
-watch([showFileModal], ([fileVal]) => {
-  if (window.require) {
-    const { ipcRenderer } = window.require('electron')
-    // 当全屏模态框显示时，禁止穿透（即接收鼠标事件）；关闭时，恢复穿透（转发模式）
-    // TaskMonitorModal 是局部窗口，由 handleGlobalMouseMove 动态处理穿透
-    const isModalOpen = fileVal
-    ipcRenderer.send('set-ignore-mouse-events', !isModalOpen, { forward: true })
-  }
+onMounted(async () => {
+  // 初始开启穿透
+  setIgnoreMouse(true)
+  
+  // 监听后端日志
+  const unlistenLog = await listen('backend-log', (event) => {
+    console.log('[Backend]', event.payload)
+  })
+
+  // 监听状态更新 (从 Dashboard 发来的)
+  const unlistenMood = await listen('update-mood', (event) => {
+    moodText.value = event.payload
+    localStorage.setItem('ppc.mood', event.payload)
+  })
+  const unlistenVibe = await listen('update-vibe', (event) => {
+    vibeText.value = event.payload
+    localStorage.setItem('ppc.vibe', event.payload)
+  })
+  const unlistenMind = await listen('update-mind', (event) => {
+    mindText.value = event.payload
+    localStorage.setItem('ppc.mind', event.payload)
+  })
+
+  // 监听文件搜索结果
+  const unlistenSearch = await listen('file-search-result', (event) => {
+    foundFiles.value = event.payload
+    showFileModal.value = true
+  })
+
+  window.addEventListener('beforeunload', () => {
+    unlistenLog()
+    unlistenMood()
+    unlistenVibe()
+    unlistenMind()
+    unlistenSearch()
+  })
+})
+
+// 监听 UI 显示状态，动态切换穿透
+watch(showInput, (val) => {
+  setIgnoreMouse(!val)
 })
 
 const moodText = ref(localStorage.getItem('ppc.mood') || '开心')
@@ -1196,28 +1235,115 @@ const showWelcomeMessage = () => {
 }
 
 onMounted(async () => {
-   // 默认开启穿透
-   setIgnoreMouse(true)
-   window.addEventListener('mousemove', handleGlobalMouseMove)
+   // Tauri Global Mouse Listener
+   if (window.__TAURI__) {
+       const invoke = window.__TAURI__.core?.invoke || window.__TAURI__.invoke;
+       invoke('set_fix_window_topmost').catch(e => console.error('Failed to set topmost:', e));
 
-   // 监听 Electron 主进程发送的快捷键事件
-   if (ipcRenderer && ipcRenderer.on) {
-       ipcRenderer.on('toggle-voice-mode', () => {
-           if (voiceMode.value === 2) {
-               // PTT 模式下，快捷键作为开关触发
-               if (isPTTRecording.value) {
-                   stopPTT()
+       listen('mouse-pos', async (event) => {
+           if (isDragging.value) return;
+           
+           const { x, y } = event.payload;
+           try {
+               const outerPos = await appWindow.outerPosition();
+               const scaleFactor = window.devicePixelRatio || 1;
+               
+               // Convert physical pixels (Rust/OS) to logical CSS pixels (Browser)
+               const localX = (x - outerPos.x) / scaleFactor;
+               const localY = (y - outerPos.y) / scaleFactor;
+
+               // Synthetic Event for Live2D Eyes (Live2D typically expects coordinates relative to the canvas/window)
+               // Note: If Live2D widget handles DPI internally, we might need to adjust. 
+               // Usually standard MouseEvent clientX/Y are in CSS pixels.
+               window.dispatchEvent(new MouseEvent('mousemove', {
+                   clientX: localX,
+                   clientY: localY,
+                   bubbles: true
+               }));
+
+               // Hit Test
+               if (showFileModal.value) { setIgnoreMouse(false); return; }
+
+               let el = document.elementFromPoint(localX, localY);
+                
+                // [Fix] 增加兜底逻辑：如果 elementFromPoint 没拿到元素（可能因为透明度或层级问题），
+                // 但坐标在角色区域内，则尝试手动判定
+                if (!el) {
+                    const wrapper = document.querySelector('.character-wrapper');
+                    if (wrapper) {
+                        const rect = wrapper.getBoundingClientRect();
+                        if (localX >= rect.left && localX <= rect.right && 
+                            localY >= rect.top && localY <= rect.bottom) {
+                            el = wrapper;
+                        }
+                    }
+                }
+
+                if (el) {
+                   // 1. Check UI elements first (High Priority)
+                   const isUI = el.closest('.input-overlay') || 
+                                el.closest('.floating-trigger') ||
+                                el.closest('.bubble') ||
+                                el.closest('.status-tags') ||
+                                el.closest('.pet-tools') ||
+                                el.closest('.ptt-container') ||
+                                el.closest('.task-monitor-modal') ||
+                                el.closest('.file-search-modal');
+                   
+                   if (isUI) {
+                       setIgnoreMouse(false);
+                       return;
+                   }
+
+                   // 2. Check character area with pixel transparency
+                   const isCharacter = el.tagName === 'CANVAS' || 
+                                       el.id === 'live2d' ||
+                                       el.classList.contains('character-wrapper') || 
+                                       el.closest('.character-wrapper') ||
+                                       el.closest('.pet-avatar-container');
+                   
+                   if (isCharacter) {
+                       const canvas = document.querySelector('#live2d');
+                       if (canvas) {
+                           const rect = canvas.getBoundingClientRect();
+                           const canvasX = localX - rect.left;
+                           const canvasY = localY - rect.top;
+
+                           if (canvasX >= 0 && canvasX <= rect.width && canvasY >= 0 && canvasY <= rect.height) {
+                               const ctx = canvas.getContext('2d', { willReadFrequently: true });
+                               if (ctx) {
+                                   try {
+                                        const pixel = ctx.getImageData(Math.floor(canvasX), Math.floor(canvasY), 1, 1).data;
+                                        // [Fix] 更加宽松的透明度判定，Alpha > 5 就认为点到了角色
+                                        const isTransparent = pixel[3] < 5; 
+                                        setIgnoreMouse(isTransparent);
+                                        return;
+                                    } catch (e) {
+                                       // ImageData 可能失败，回退到非穿透
+                                       setIgnoreMouse(false);
+                                       return;
+                                   }
+                               }
+                           }
+                       }
+                       // 如果没找到 canvas 或者 canvas 检查没通过，但确实在角色区域，则不穿透
+                       setIgnoreMouse(false);
+                   } else {
+                       // 既不是 UI 也不是角色，穿透
+                       setIgnoreMouse(true);
+                   }
                } else {
-                   startPTT()
+                   // 没点到任何东西，穿透
+                   setIgnoreMouse(true);
                }
-           } else {
-               // 其他模式下，快捷键用于循环切换模式
-               cycleVoiceMode()
-           }
-       })
+           } catch(e) { console.error(e); }
+       });
    }
-   
-   console.log('PetView mounted, starting Live2D load...')
+
+   // 默认开启穿透
+    // setIgnoreMouse(true) // Removed to avoid duplication
+    
+    console.log('PetView mounted, starting Live2D load...')
 
   // 加载本地台词
   await loadLocalTexts()
@@ -1287,6 +1413,8 @@ onMounted(async () => {
           canvas.style.height = '300px'
           // 确保 canvas 能够响应点击
           canvas.style.pointerEvents = 'auto'
+          // [Fix] 增加拖拽属性，确保点击角色本体可以拖动窗口
+          canvas.setAttribute('data-tauri-drag-region', '')
         }
         
         isLoading.value = false
@@ -1305,38 +1433,17 @@ onMounted(async () => {
     isLoading.value = false
   }
 })
-// 安全获取 ipcRenderer，兼容浏览器环境
-const ipcRenderer = (window.require && window.require('electron')) ? window.require('electron').ipcRenderer : {
-  send: (...args) => console.log('[Browser] ipcRenderer.send:', ...args),
-  on: (...args) => console.log('[Browser] ipcRenderer.on:', ...args),
-  removeListener: (...args) => console.log('[Browser] ipcRenderer.removeListener:', ...args),
-  removeAllListeners: (...args) => console.log('[Browser] ipcRenderer.removeAllListeners:', ...args)
-}
-
 // 设置鼠标穿透状态
  const setIgnoreMouse = (ignore) => {
-   ipcRenderer.send('set-ignore-mouse-events', ignore, { forward: ignore })
+   // Tauri Implementation
+   if (window.__TAURI__) {
+       if (window._lastIgnoreState === ignore) return;
+       console.log('Setting ignore mouse to:', ignore);
+       window._lastIgnoreState = ignore;
+       invoke('set_ignore_mouse', { ignore }).catch(e => console.error("set_ignore_mouse failed", e));
+       return;
+   }
  }
- 
-  // 全局鼠标移动监听，动态切换穿透状态
-  const handleGlobalMouseMove = (e) => {
-    // 如果文件搜索模态框正在显示，由 watch 统一处理穿透状态
-    if (showFileModal.value) return
-
-    // 使用 elementFromPoint 来更准确地探测当前鼠标下的元素
-    // 因为在 setIgnoreMouseEvents(true, { forward: true }) 模式下，e.target 可能不够准确
-    const element = document.elementFromPoint(e.clientX, e.clientY)
-    
-    // 检查是否在角色区域
-    const isOverCharacter = element && element.closest && element.closest('.character-wrapper')
-    // 检查是否在任务监控窗口 (即使 showTaskDetail 为 true，也只在鼠标悬停窗口时才拦截)
-    // const isOverTaskMonitor = showTaskDetail.value && element && element.closest && element.closest('.monitor-window')
-    
-    const isOverInteractive = isOverCharacter // || isOverTaskMonitor
-    
-    // 如果鼠标在交互区域，则取消穿透；否则开启穿透
-    setIgnoreMouse(!isOverInteractive)
-  }
  
  // 区分点击和拖动
 let mouseDownTime = 0
@@ -1354,7 +1461,15 @@ const toggleUI = () => {
   handleHaptic()
 }
 
-const handleMouseDown = (e) => {
+const handleDblClick = (e) => {
+  // 彻底拦截双击事件，防止触发原生窗口的最大化
+  e.preventDefault();
+  e.stopPropagation();
+  console.log('Intercepted double click to prevent fullscreen');
+}
+
+const handleMouseDown = async (e) => {
+  console.log('MouseDown triggered on character-wrapper', e.target.className);
   // 如果点击的是输入框、按钮、状态标签或浮动触发器，不处理
   if (
     e.target.closest('.chat-input') || 
@@ -1364,60 +1479,46 @@ const handleMouseDown = (e) => {
     e.target.closest('.task-detail-modal') ||
     e.target.closest('.modal-card') ||
     e.target.closest('.monitor-window') || 
-    e.target.closest('.task-monitor-modal')
+    e.target.closest('.task-monitor-modal') ||
+    e.target.closest('.ptt-container')
   ) return
   
-  // 记录按下时的位置和时间
+  // 强制调用一次 setIgnoreMouse(false)，确保窗口现在可以接收后续事件
+  setIgnoreMouse(false);
+
+  // 立即尝试启动原生拖拽
+  try {
+    console.log('Attempting to start dragging...');
+    await appWindow.startDragging();
+  } catch (err) {
+    console.error('startDragging failed:', err);
+  }
+
+  // 记录按下时的位置和时间，用于判定点击
   mouseDownTime = Date.now()
   startX = e.screenX
   startY = e.screenY
-  lastX = e.screenX
-  lastY = e.screenY
-  isDragging.value = false
+  
+  // 标记可能进入拖拽状态
+  isDragging.value = true
 
-  // 监听 mousemove 判定是否进入拖拽状态
-  const onMouseMove = (moveEvent) => {
-    const deltaX = moveEvent.screenX - lastX
-    const deltaY = moveEvent.screenY - lastY
-    const totalDeltaX = Math.abs(moveEvent.screenX - startX)
-    const totalDeltaY = Math.abs(moveEvent.screenY - startY)
-    
-    // 如果位移超过 3px，判定为开始拖拽
-    if (!isDragging.value && (totalDeltaX > 3 || totalDeltaY > 3)) {
-      isDragging.value = true
-    }
-
-    if (isDragging.value) {
-      // 发送位移给主进程移动窗口
-      ipcRenderer.send('move-window', { x: deltaX, y: deltaY })
-      lastX = moveEvent.screenX
-      lastY = moveEvent.screenY
-    }
-  }
-
-  // 监听全局 mouseup
+  // 监听全局 mouseup 处理点击事件
   const onMouseUp = (upEvent) => {
+    window.removeEventListener('mouseup', onMouseUp)
+    isDragging.value = false
+    console.log('MouseUp triggered');
+
     const duration = Date.now() - mouseDownTime
     const totalDeltaX = Math.abs(upEvent.screenX - startX)
     const totalDeltaY = Math.abs(upEvent.screenY - startY)
     
     // 只有在位移非常小且时间非常短的情况下，才判定为点击
-    if (!isDragging.value && duration < 200 && totalDeltaX < 5 && totalDeltaY < 5) {
-      // 执行点击身体的反馈逻辑 (仅台词反馈，不再切换 UI)
+    if (duration < 200 && totalDeltaX < 5 && totalDeltaY < 5) {
       handleHaptic()
       handlePpcClick()
     }
-    
-    // 延迟一丢丢重置状态，防止某些点击穿透
-    setTimeout(() => {
-      isDragging.value = false
-    }, 50)
-    
-    window.removeEventListener('mousemove', onMouseMove)
-    window.removeEventListener('mouseup', onMouseUp)
   }
   
-  window.addEventListener('mousemove', onMouseMove)
   window.addEventListener('mouseup', onMouseUp)
 }
 
@@ -1446,7 +1547,7 @@ const reloadPet = () => {
 }
 
 const openDashboard = () => {
-  ipcRenderer.send('open-dashboard')
+  invoke('open_dashboard').catch(e => console.error(e))
 }
 
 const sendMessage = async (systemMsg = null, isHidden = false) => {
@@ -1581,20 +1682,14 @@ onUnmounted(() => {
   if (replyTimer) clearTimeout(replyTimer)
   if (stateSyncTimer) clearInterval(stateSyncTimer)
   
-  // 2. 移除 IPC 监听
-  if (ipcRenderer && ipcRenderer.removeAllListeners) {
-    ipcRenderer.removeAllListeners('toggle-voice-mode')
-  }
-  
-  // 3. 移除交互监听
-  window.removeEventListener('mousemove', handleGlobalMouseMove)
+  // 2. 移除交互监听
   window.removeEventListener('ppc:mood', onMoodUpdate)
   window.removeEventListener('ppc:mind', onMindUpdate)
   window.removeEventListener('ppc:vibe', onVibeUpdate)
   window.removeEventListener('ppc:chat', onChatUpdate)
   window.removeEventListener('waifu-message', onWaifuMessage)
 
-  // 4. 停止语音模式和清理资源
+  // 3. 停止语音模式和清理资源
   stopVoiceMode()
   stopLipSync()
   
@@ -1621,6 +1716,8 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: center;
   transition: transform 0.2s;
+  user-select: none;
+  -webkit-app-region: drag;
 }
 
 .character-wrapper.dragging {
@@ -1634,11 +1731,11 @@ onUnmounted(() => {
 /* 极简灵动触发器 */
 .floating-trigger {
   position: absolute;
-  right: 15px;
+  right: 5px;
   top: 55%;
   transform: translateY(-50%);
-  width: 32px;
-  height: 32px;
+  width: 48px;
+  height: 48px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1723,7 +1820,7 @@ onUnmounted(() => {
 /* 状态标签样式 */
 .status-tags {
   position: absolute;
-  left: -160px;
+  left: -140px;
   top: 30px;
   display: flex;
   flex-direction: column;
@@ -1805,8 +1902,8 @@ onUnmounted(() => {
 }
 
 .pet-avatar-container {
-  width: 300px;
-  height: 300px;
+  width: 400px;
+  height: 400px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1842,8 +1939,8 @@ onUnmounted(() => {
 }
 
 #waifu {
-  width: 300px;
-  height: 300px;
+  width: 400px;
+  height: 400px;
   display: none; /* 初始隐藏，直到被移动到容器 */
 }
 

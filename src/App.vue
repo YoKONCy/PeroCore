@@ -12,7 +12,7 @@ body, html {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: transparent !important;
+  background-color: transparent; /* Changed to transparent for Tauri window transparency */
 }
 
 #app {

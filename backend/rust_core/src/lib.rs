@@ -318,7 +318,7 @@ impl SemanticVectorIndex {
 
 /// Pero Rust Core Python 模块入口
 #[pymodule]
-fn pero_rust_core(_py: Python, m: &PyModule) -> PyResult<()> {
+fn pero_rust_core(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<CognitiveGraphEngine>()?;
     m.add_class::<SemanticVectorIndex>()?;
     m.add_function(wrap_pyfunction!(sanitize_text_content, m)?)?;

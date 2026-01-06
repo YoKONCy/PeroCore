@@ -4,8 +4,8 @@ import asyncio
 import base64
 import os
 from typing import AsyncIterable, List, Dict, Any, Optional
-import google.generativeai as genai
-from google.generativeai.types import HarmCategory, HarmBlockThreshold
+from google import genai
+from google.genai import types
 
 class LLMService:
     def __init__(self, api_key: str, api_base: str, model: str, provider: str = "openai"):
@@ -75,78 +75,77 @@ class LLMService:
             return response.json()
 
     async def _chat_gemini(self, messages: List[Dict[str, Any]], temperature: float = 0.7, tools: List[Dict] = None) -> Dict[str, Any]:
-        """Gemini 原生 API 调用"""
+        """Gemini 原生 API 调用 (使用 google-genai SDK)"""
         try:
-            genai.configure(api_key=self.api_key)
+            client = genai.Client(api_key=self.api_key)
             
             # 转换消息格式
-            gemini_messages = self._convert_to_gemini_format(messages)
+            contents = self._convert_to_genai_contents(messages)
             
-            # 分离系统提示词和历史记录
+            # 提取系统指令
             system_instruction = None
             history = []
-            
-            for msg in gemini_messages:
-                if msg["role"] == "system":
-                    system_instruction = msg["parts"][0]
+            for content in contents:
+                if content.role == "system":
+                    # 系统指令通常放在 GenerateContentConfig 中
+                    system_instruction = content.parts[0].text
                 else:
-                    history.append(msg)
+                    history.append(content)
             
-            gemini_tools = self._convert_tools_to_gemini(tools)
-            model = genai.GenerativeModel(self.model, system_instruction=system_instruction, tools=gemini_tools)
+            # 转换工具
+            genai_tools = self._convert_tools_to_genai(tools)
             
-            # 最后一条是用户消息
-            user_msg = history.pop()
-            chat = model.start_chat(history=history)
-            
-            response = await asyncio.to_thread(
-                chat.send_message,
-                user_msg["parts"],
-                generation_config=genai.GenerationConfig(temperature=temperature),
-                safety_settings={
-                    HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-                    HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-                    HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-                    HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-                }
+            # 配置
+            config = types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                temperature=temperature,
+                tools=genai_tools,
+                safety_settings=[
+                    types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="BLOCK_NONE"),
+                    types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="BLOCK_NONE"),
+                    types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="BLOCK_NONE"),
+                    types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_NONE"),
+                ]
+            )
+
+            # 异步调用
+            response = await client.aio.models.generate_content(
+                model=self.model,
+                contents=history,
+                config=config
             )
             
             # 处理响应
-            content = ""
+            content_text = ""
             try:
-                content = response.text
-            except ValueError:
-                pass # 可能只有 function call
-            
-            # 构造 message 对象
+                content_text = response.text
+            except:
+                pass
+                
             message = {
                 "role": "assistant",
-                "content": content
+                "content": content_text
             }
             
             # 检查 function call
             if response.candidates and response.candidates[0].content.parts:
+                tool_calls = []
                 for part in response.candidates[0].content.parts:
                     if part.function_call:
                         import uuid
                         call_id = f"call_{uuid.uuid4().hex[:8]}"
-                        fc = part.function_call
-                        args = {}
-                        for k, v in fc.args.items():
-                            args[k] = v
-                        
-                        message["tool_calls"] = [{
+                        tool_calls.append({
                             "id": call_id,
                             "type": "function",
                             "function": {
-                                "name": fc.name,
-                                "arguments": json.dumps(args)
+                                "name": part.function_call.name,
+                                "arguments": json.dumps(part.function_call.args)
                             }
-                        }]
-                        # 如果有 tool_calls，content 可能是空的或者 None
-                        if not message["content"]:
-                            message["content"] = None
-                        break
+                        })
+                if tool_calls:
+                    message["tool_calls"] = tool_calls
+                    if not message["content"]:
+                        message["content"] = None
 
             return {
                 "choices": [{
@@ -157,20 +156,19 @@ class LLMService:
             print(f"[Gemini] Error: {e}")
             raise
 
-    def _convert_to_gemini_format(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """将 OpenAI 消息格式转换为 Gemini 格式"""
-        gemini_msgs = []
+    def _convert_to_genai_contents(self, messages: List[Dict[str, Any]]) -> List[types.Content]:
+        """将 OpenAI 消息格式转换为 Gemini GenAI Content 格式"""
+        contents = []
         for msg in messages:
             role = msg["role"]
+            # GenAI roles: user, model, system
             if role == "assistant":
                 role = "model"
             elif role == "tool":
-                role = "function" # 这里需要特殊处理，Gemini 的 role 只有 model 和 user/function? 
-                # 其实 Gemini 在 history 中，function_response 的 role 也是 'function' 或者作为 user 的一部分？
-                # Google GenAI SDK 中，function_response 的 role 通常是 'function'。
-                pass
+                # Tool 响应在 GenAI 中比较特殊，通常作为 model 发起调用后的后续 user 消息中的 function_response
+                # 或者有专门的 role。但在 SDK 中通常映射为 'user' 角色下的 function_response
+                role = "user" 
 
-            content = msg.get("content")
             parts = []
             
             # 1. 处理 tool_calls (Assistant 发起的调用)
@@ -182,80 +180,64 @@ class LLMService:
                             args = json.loads(func.get("arguments", "{}"))
                         except:
                             args = {}
-                        parts.append({
-                            "function_call": {
-                                "name": func.get("name"),
-                                "args": args
-                            }
-                        })
+                        parts.append(types.Part(
+                            function_call=types.FunctionCall(
+                                name=func.get("name"),
+                                args=args
+                            )
+                        ))
             
             # 2. 处理 content (文本/多模态)
+            content = msg.get("content")
             if content:
                 if isinstance(content, str):
-                    parts.append({"text": content})
+                    parts.append(types.Part(text=content))
                 elif isinstance(content, list):
                     for item in content:
                         if item["type"] == "text":
-                            parts.append({"text": item["text"]})
+                            parts.append(types.Part(text=item["text"]))
                         elif item["type"] == "input_audio":
-                            # 处理音频
                             try:
                                 audio_data = item["input_audio"]["data"]
-                                audio_bytes = base64.b64decode(audio_data)
-                                parts.append({
-                                    "inline_data": {
-                                        "mime_type": f"audio/{item['input_audio']['format']}",
-                                        "data": audio_bytes
-                                    }
-                                })
+                                parts.append(types.Part(
+                                    inline_data=types.Blob(
+                                        mime_type=f"audio/{item['input_audio']['format']}",
+                                        data=base64.b64decode(audio_data)
+                                    )
+                                ))
                             except Exception as e:
                                 print(f"[Gemini] Audio decode error: {e}")
                         elif item["type"] == "image_url":
-                            # 处理图片
                             try:
                                 url = item["image_url"]["url"]
                                 if url.startswith("data:"):
                                     header, data = url.split(",", 1)
                                     mime_type = header.split(";")[0].split(":")[1]
-                                    image_bytes = base64.b64decode(data)
-                                    parts.append({
-                                        "inline_data": {
-                                            "mime_type": mime_type,
-                                            "data": image_bytes
-                                        }
-                                    })
+                                    parts.append(types.Part(
+                                        inline_data=types.Blob(
+                                            mime_type=mime_type,
+                                            data=base64.b64decode(data)
+                                        )
+                                    ))
                             except Exception as e:
                                 print(f"[Gemini] Image decode error: {e}")
 
             # 3. 处理 tool 响应 (Tool 输出)
-            if role == "tool":
-                # OpenAI 格式: role="tool", tool_call_id="...", content="..."
-                # Gemini 格式: role="function", parts=[{ "function_response": { "name": "...", "response": { "content": ... } } }]
-                # 问题：我们丢失了 function name，OpenAI 的 tool message 只有 tool_call_id
-                # 我们需要从上下文推断 name，或者假设 message 中包含 name 字段（如果我们修改了 agent 逻辑）
-                # 暂时只能尽力而为。如果找不到 name，Gemini 可能会报错。
-                # 临时方案：在 AgentService 中，我们应该把 name 塞进 tool message。
-                # 如果没有 name，我们可以尝试用 "unknown_tool" 或跳过。
-                
-                tool_name = msg.get("name", "unknown_tool") # 依赖调用方传入 name
-                
-                # content 必须是 dict 结构给 response
-                response_content = {"content": content}
-                
-                parts.append({
-                    "function_response": {
-                        "name": tool_name,
-                        "response": response_content
-                    }
-                })
-                role = "function"
+            if msg["role"] == "tool":
+                tool_name = msg.get("name", "unknown_tool")
+                parts.append(types.Part(
+                    function_response=types.FunctionResponse(
+                        name=tool_name,
+                        response={"result": content}
+                    )
+                ))
 
             if parts:
-                gemini_msgs.append({"role": role, "parts": parts})
-        return gemini_msgs
+                contents.append(types.Content(role=role, parts=parts))
+        return contents
 
-    def _convert_tools_to_gemini(self, openai_tools: List[Dict]) -> List[Dict]:
-        """将 OpenAI 工具定义转换为 Gemini 格式"""
+    def _convert_tools_to_genai(self, openai_tools: List[Dict]) -> List[types.Tool]:
+        """将 OpenAI 工具定义转换为 Gemini GenAI Tool 格式"""
         if not openai_tools:
             return None
         
@@ -263,100 +245,72 @@ class LLMService:
         for tool in openai_tools:
             if tool.get("type") == "function":
                 func = tool["function"]
-                declarations.append({
-                    "name": func.get("name"),
-                    "description": func.get("description"),
-                    "parameters": func.get("parameters")
-                })
+                # 转换 parameters 结构，GenAI 也是 JSON Schema，但可能需要稍微调整
+                declarations.append(types.FunctionDeclaration(
+                    name=func.get("name"),
+                    description=func.get("description"),
+                    parameters=func.get("parameters")
+                ))
         
         if not declarations:
             return None
 
-        # 封装为 Gemini Tool 对象结构
-        return [{"function_declarations": declarations}]
+        return [types.Tool(function_declarations=declarations)]
 
     async def _chat_gemini_stream(self, messages: List[Dict[str, Any]], temperature: float, model_id: str, api_key: str, tools: List[Dict] = None) -> AsyncIterable[Dict[str, Any]]:
-        """Gemini 原生 API 流式调用"""
+        """Gemini 原生 API 流式调用 (使用 google-genai SDK)"""
         try:
-            genai.configure(api_key=api_key)
+            client = genai.Client(api_key=api_key)
+            contents = self._convert_to_genai_contents(messages)
             
-            # 转换消息格式
-            gemini_messages = self._convert_to_gemini_format(messages)
-            
-            # 分离系统提示词和历史记录
             system_instruction = None
             history = []
-            
-            for msg in gemini_messages:
-                if msg["role"] == "system":
-                    system_instruction = msg["parts"][0]
+            for content in contents:
+                if content.role == "system":
+                    system_instruction = content.parts[0].text
                 else:
-                    history.append(msg)
+                    history.append(content)
             
-            gemini_tools = self._convert_tools_to_gemini(tools)
-            model = genai.GenerativeModel(model_id, system_instruction=system_instruction, tools=gemini_tools)
-            
-            # 最后一条是用户消息
-            user_msg = history.pop()
-            chat = model.start_chat(history=history)
-            
-            # 这里的 send_message 是同步阻塞的，在 stream=True 时返回一个迭代器
-            # 我们使用 to_thread 可能会有问题，因为它是迭代器
-            # 实际上 google-generativeai 支持 async
-            # model_async = genai.GenerativeModel(model_id, system_instruction=system_instruction)
-            # chat_async = model_async.start_chat(history=history)
-            # response = await chat_async.send_message_async(user_msg["parts"], stream=True, ...)
-            
-            # 简化起见，我们直接使用同步迭代器但在线程中运行
-            def get_stream():
-                return chat.send_message(
-                    user_msg["parts"],
-                    stream=True,
-                    generation_config=genai.GenerationConfig(temperature=temperature),
-                    safety_settings={
-                        HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-                        HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-                        HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-                        HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-                    }
-                )
+            genai_tools = self._convert_tools_to_genai(tools)
+            config = types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                temperature=temperature,
+                tools=genai_tools,
+                safety_settings=[
+                    types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="BLOCK_NONE"),
+                    types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="BLOCK_NONE"),
+                    types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="BLOCK_NONE"),
+                    types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_NONE"),
+                ]
+            )
 
-            response_stream = await asyncio.to_thread(get_stream)
-            
-            for chunk in response_stream:
+            async for chunk in client.aio.models.generate_content_stream(
+                model=model_id,
+                contents=history,
+                config=config
+            ):
                 # 处理 Function Call
-                # Gemini 的 chunk.parts 可能包含 function_call
-                try:
-                    if chunk.candidates and chunk.candidates[0].content.parts:
-                        for part in chunk.candidates[0].content.parts:
-                            if part.function_call:
-                                import uuid
-                                call_id = f"call_{uuid.uuid4().hex[:8]}"
-                                fc = part.function_call
-                                args = {}
-                                # fc.args 是一个 Map，需要转 dict
-                                for k, v in fc.args.items():
-                                    args[k] = v
-                                    
-                                yield {
-                                    "tool_calls": [{
-                                        "index": 0,
-                                        "id": call_id,
-                                        "function": {
-                                            "name": fc.name,
-                                            "arguments": json.dumps(args)
-                                        }
-                                    }]
-                                }
-                except Exception as e:
-                    print(f"[Gemini Stream] Function call extraction error: {e}")
+                if chunk.candidates and chunk.candidates[0].content.parts:
+                    for part in chunk.candidates[0].content.parts:
+                        if part.function_call:
+                            import uuid
+                            call_id = f"call_{uuid.uuid4().hex[:8]}"
+                            yield {
+                                "tool_calls": [{
+                                    "index": 0,
+                                    "id": call_id,
+                                    "function": {
+                                        "name": part.function_call.name,
+                                        "arguments": json.dumps(part.function_call.args)
+                                    }
+                                }]
+                            }
 
                 # 处理文本
                 try:
                     if chunk.text:
                         yield {"content": chunk.text}
-                except ValueError:
-                    # 如果 chunk 里只有 function_call 而没有 text，访问 chunk.text 会抛出 ValueError
+                except:
                     pass
                 
         except Exception as e:

@@ -1,0 +1,24 @@
+{
+  "identifier": "default",
+  "description": "enables the default permissions",
+  "windows": [
+    "launcher",
+    "pet",
+    "main",
+    "dashboard"
+  ],
+  "permissions": [
+    "core:default",
+    "log:default",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "args": [],
+          "cmd": "bin/pero-backend",
+          "sidecar": true
+        }
+      ]
+    }
+  ]
+}

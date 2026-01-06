@@ -1,0 +1,12 @@
+{
+    "categories": {
+        "core": true,
+        "work": true,
+        "plugins": true
+    },
+    "plugins": {
+        "social_adapter": true,
+        "AnimeFinder": true,
+        "BilibiliFetch": true
+    }
+}

@@ -74,5 +74,17 @@ Desktop.ini
 pero_workspace/
 **/pero_workspace/
 
+# Packaging & Runtimes (Tauri zero-env)
+PeroLauncher/src-tauri/python/
+PeroLauncher/src-tauri/bin/*.exe
+PeroLauncher/src-tauri/bin/*.dll
+PeroLauncher/target/
+**/target/
+*.msi
+*.exe
+
+# Local Config
+backend/config.json
+
 # Plugins - NapCat
 backend/nit_core/plugins/social_adapter/NapCat/

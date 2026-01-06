@@ -5,6 +5,7 @@ import sys
 import logging
 from typing import Dict, Any, List, Optional, Callable
 from core.config_manager import get_config_manager
+from core.nit_manager import get_nit_manager
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -26,6 +27,7 @@ class PluginManager:
         self.tools_map: Dict[str, Callable] = {}      # Map command identifier to function
         self.loaded_modules: Dict[str, Any] = {}      # Map plugin name to loaded module
         self.config_manager = get_config_manager()
+        self.nit_manager = get_nit_manager()
 
     def load_plugins(self):
         """
@@ -91,12 +93,6 @@ class PluginManager:
             return
 
         plugin_name = manifest["name"]
-
-        # [Security] Check Social Mode Toggle
-        if plugin_name == "social_adapter":
-            if not self.config_manager.get("enable_social_mode", False):
-                logger.info(f"Skipping plugin '{plugin_name}' because enable_social_mode is False.")
-                return
 
         # Inject category info into manifest for Dispatcher filtering
         if category_prefix:
