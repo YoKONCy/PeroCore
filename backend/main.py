@@ -7,6 +7,7 @@ import re
 import uuid
 import psutil
 import time
+import secrets
 from datetime import datetime
 from typing import List, Dict, Any
 import io
@@ -24,12 +25,13 @@ configure_logging()
 
 import uvicorn
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, HTTPException, Body, BackgroundTasks, UploadFile, File, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Depends, HTTPException, Body, BackgroundTasks, UploadFile, File, WebSocket, WebSocketDisconnect, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlmodel import Session, select, delete, desc
 from sqlmodel.ext.asyncio.session import AsyncSession
+from pydantic import BaseModel, Field
 import subprocess
 
 from models import Memory, Config, PetState, ScheduledTask, AIModelConfig, MCPConfig, VoiceConfig, ConversationLog, MaintenanceRecord
@@ -429,8 +431,47 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# --- Models for Validation ---
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+class ChatRequest(BaseModel):
+    messages: List[ChatMessage]
+    source: str = "desktop"
+    session_id: str = Field(default="default", alias="sessionId")
+    
+    # 允许前端传入建议值，但后端会根据策略决定是否使用
+    model: Optional[str] = None
+    temperature: Optional[float] = None
+
+async def verify_token(authorization: Optional[str] = Header(None), session: AsyncSession = Depends(get_session)):
+    """
+    验证前端传来的 Token。实现“前端不可信”原则的第一步。
+    """
+    # 获取后端预设的 Access Token
+    config_stmt = select(Config).where(Config.key == "frontend_access_token")
+    config_result = await session.exec(config_stmt)
+    db_config = config_result.first()
+    
+    expected_token = db_config.value if db_config else "pero_default_token"
+    
+    # 如果是本地开发环境且没有设置 token，可以放行 (可选)
+    # if not db_config and os.environ.get("ENV") == "dev": return
+    
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="未授权访问：缺少令牌")
+    
+    token = authorization.split(" ")[1]
+    if token != expected_token:
+        raise HTTPException(status_code=403, detail="未授权访问：令牌无效")
+    
+    return token
+
 async def seed_voice_configs():
     async for session in get_session():
+        # Seed Voice Configs
         result = await session.exec(select(VoiceConfig).where(VoiceConfig.type == "stt"))
         if not result.first():
             stt = VoiceConfig(type="stt", name="Local Whisper (Default)", provider="local_whisper", is_active=True, model="whisper-tiny", config_json='{"device": "cpu", "compute_type": "int8"}')
@@ -439,6 +480,30 @@ async def seed_voice_configs():
         if not result.first():
             tts = VoiceConfig(type="tts", name="Edge TTS (Default)", provider="edge_tts", is_active=True, config_json='{"voice": "zh-CN-XiaoyiNeural", "rate": "+15%", "pitch": "+5Hz"}')
             session.add(tts)
+            
+        # Seed Frontend Access Token (Dynamic Handshake Security)
+        # 每次启动都生成一个新的强加密随机令牌
+        new_dynamic_token = secrets.token_urlsafe(32)
+        
+        token_stmt = select(Config).where(Config.key == "frontend_access_token")
+        token_result = await session.exec(token_stmt)
+        existing_token = token_result.first()
+        
+        if not existing_token:
+            token_config = Config(key="frontend_access_token", value=new_dynamic_token)
+            session.add(token_config)
+        else:
+            existing_token.value = new_dynamic_token
+            existing_token.updated_at = datetime.utcnow()
+            session.add(existing_token)
+            
+        print(f"\n" + "="*60)
+        print(f"🛡️  PERO-CORE 安全模式已启动")
+        print(f"🔑 动态访问令牌 (Handshake Token):")
+        print(f"    {new_dynamic_token}")
+        print(f"⚠️  请注意：此令牌仅本次启动有效，重启后端后需重新配置。")
+        print(f"="*60 + "\n")
+            
         await session.commit()
         break
 
@@ -1034,12 +1099,20 @@ async def delete_voice_config(config_id: int, session: AsyncSession = Depends(ge
 
 @app.post("/api/chat")
 async def chat(
-    payload: Dict[str, Any] = Body(...),
+    request: ChatRequest,
+    token: str = Depends(verify_token),
     session: AsyncSession = Depends(get_session)
 ):
-    messages = payload.get("messages", [])
-    source = payload.get("source", "desktop")
-    session_id = payload.get("sessionId", "default")
+    # 将 Pydantic 模型转换为 Dict，但仅提取后端信任的字段
+    messages = [m.model_dump() for m in request.messages]
+    source = request.source
+    session_id = request.session_id
+    
+    # 严格校验 source
+    valid_sources = ["desktop", "mobile", "system_trigger", "ide", "qq"]
+    if source not in valid_sources:
+        print(f"[Security] Invalid source detected: {source}. Resetting to desktop.")
+        source = "desktop"
     
     agent = AgentService(session)
     tts_service = get_tts_service()

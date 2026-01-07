@@ -50,7 +50,7 @@ impl ActivationGraph {
 
             // 自动剪枝: 保留权重最高的 max_fan_out 个邻居
             if neighbors.len() > self.max_fan_out {
-                neighbors.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+                neighbors.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
                 neighbors.truncate(self.max_fan_out);
             }
         }

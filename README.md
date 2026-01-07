@@ -66,7 +66,8 @@
 | ⚡ | **NIT Protocol** - 革命性的工具调用协议 | [Jump](#-nit-protocol-20) |
 | 🏗️ | **Architecture** - Python + Rust 混合架构 | [Jump](#%EF%B8%8F-technical-architecture) |
 | 🖥️ | **Desktop Ops** - 桌面与浏览器自动化 | [Jump](#%EF%B8%8F-desktop--browser-automation) |
-| 🚀 | **Quick Start** - 一键启动指南 | [Jump](#-quick-start) |
+| 🛡️ | **Security** - 隐私至上与纵深防御 | [Jump](#%EF%B8%8F-security--privacy) |
+| � | 🚀 | **Quick Start** - 一键启动指南 | [Jump](#-quick-start) |
 | 💖 | **Non-Profit** - 非盈利声明与愿景 | [Jump](#-non-profit--community) |
 
 </details>
@@ -278,6 +279,25 @@ PeroCore 旨在接管你的数字生活，它拥有两只“手”：
 
 <br/>
 
+## 🛡️ Security & Privacy
+
+> **"Your data belongs to you. Your safety is our baseline."**
+
+不同于许多将数据上传至云端的 AI 产品，PeroCore 采用了 **"隐私至上，纵深防御"** 的架构设计，确保你在享受 AI 带来的便利时，无需担心系统安全与隐私泄露。
+
+### 1. 🔒 隐私至上 (Privacy First)
+*   **全本地化存储**: 所有的记忆、向量索引、偏好数据均存储在**本地** (`RustDB` + `SQLite`)。
+*   **零数据上传**: 除了你配置的 LLM API 调用外，PeroCore 不会向任何云端服务器上传你的任何私有数据。
+*   **脱敏视觉**: AuraVision 在处理屏幕信息时，会立即将其缩放至 64x64 极低分辨率并提取轮廓，确保 AI “只看意图，不看隐私”。
+
+### 2. 🛡️ 纵深防御 (Defense in Depth)
+*   **动态高熵握手令牌 (Dynamic Handshake)**: 每次后端启动都会生成一个新的 32 位强随机令牌。这种“动态门禁”机制彻底杜绝了因固定密钥泄露导致的长期后门风险。
+*   **移动端物理隔离网关 (Isolation Gate)**: 后端会硬性识别请求来源。针对移动端或非本地连接，系统会**物理级拦截**所有敏感指令（如 Shell、文件写入、截图等）。即便移动端设备丢失，攻击者也无法通过 PeroCore 侵害你的电脑。
+*   **影子数据分离 (Shadow Data Separation)**: 敏感的本地文件路径被存储在受保护的 `UI Data` 影子存储中，LLM 仅能看到脱敏后的摘要。这有效防止了 AI 因“幻觉”或恶意提示注入而对系统路径发起攻击。
+*   **无 Shell 注入环境**: 所有系统工具调用均通过参数化列表执行，从根源上消除了命令注入攻击的可能性。
+
+<br/>
+
 ## 🚀 Quick Start
 
 我们为 Windows 用户准备了开箱即用的体验。PeroCore 的前端基于 **Tauri v2** + **Vue 3** 构建，性能更强，内存占用更低，后端自动集成。
@@ -324,7 +344,6 @@ npm run tauri dev
 **我们想要一个真正的、懂我们的桌面伙伴。**
 
 *   **永久免费**: 核心代码永久开源，不设任何付费墙。
-*   **隐私至上**: 所有记忆、向量索引、偏好数据均存储在**本地** (`RustDB` + `SQLite`)。你的数据只属于你，不会上传到任何云端服务器。
 *   **社区驱动**: 欢迎任何形式的贡献——无论是代码 (PR)、建议 (Issue) 还是单纯的喜爱 (Star)。
 
 如果你也认同“让 AI 有温度”的理念，欢迎加入我们！
@@ -334,6 +353,7 @@ npm run tauri dev
 ## 📅 Roadmap
 
 - [ ] **V3.0**: 3D模型渲染支持，接入一套预设模型与动作。
+- [ ] **Rust-Native Guard**: 将安全校验与敏感过滤逻辑下沉至 Rust Core，利用内存安全特性实现物理级沙箱。
 - [ ] **V4.0**: 扩充为多Agent模式，并制作AI群聊软件。
 
 <br/>

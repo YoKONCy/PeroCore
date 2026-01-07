@@ -176,7 +176,7 @@ impl CognitiveGraphEngine {
                 .collect();
 
             if active_nodes.len() > self.max_active_nodes {
-                active_nodes.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap());
+                active_nodes.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
                 active_nodes.truncate(self.max_active_nodes);
             }
 

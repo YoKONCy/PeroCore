@@ -482,6 +482,14 @@ If the owner is busy or you have nothing meaningful to say, stay quiet (output <
             # 1. 处理 NIT 工具调用 (核心逻辑)
             nit_results = []
             if execute_nit:
+                # --- [Security Gate] 针对手机端的 NIT 脚本硬隔离 ---
+                if source == "mobile":
+                    sensitive_tool_keywords = ["screenshot", "screen", "windows", "shell", "cmd", "file", "app", "browser", "exec", "write"]
+                    # 检查 text 中是否包含 <nit> 且内容涉及敏感词
+                    if "<nit" in text and any(kw in text.lower() for kw in sensitive_tool_keywords):
+                        print(f"[🛡️ Hard Security] Blocked NIT script execution from mobile: {text[:50]}...")
+                        return [{"status": "error", "message": "Permission Denied: NIT script contains restricted tools for mobile source."}]
+
                 from nit_core.dispatcher import get_dispatcher
                 nit_dispatcher = get_dispatcher()
                 
@@ -765,6 +773,21 @@ If the owner is busy or you have nothing meaningful to say, stay quiet (output <
             if not user_message:
                 user_message = f"【系统触发】{system_trigger_instruction}"
 
+        # [Feature] Mobile Source Awareness
+        if source == "mobile":
+            mobile_instruction = """
+[SYSTEM_NOTE: MOBILE_MODE]
+The user is currently communicating with you via a MOBILE device (Peroperochat).
+- Desktop-only tools (e.g., open_app, windows_operation, screenshot) will execute on the OWNER'S PC, NOT the mobile device.
+- Please AVOID using these tools unless explicitly asked to do something on the PC.
+- Focus on natural conversation and emotional interaction.
+"""
+            final_messages.append({
+                "role": "system",
+                "content": mobile_instruction
+            })
+            print("[Agent] Mobile Source Awareness injected.")
+
         # [Feature] Active Window Injection
         # 注入当前活跃窗口列表，防止 AI 幻觉（以为应用已打开）
         try:
@@ -821,6 +844,12 @@ Instruction: When opening an app, check this list first. If it's already running
             new_tool_def = json.loads(json.dumps(tool_def))
             tool_name = new_tool_def["function"]["name"]
             
+            # 安全校验：如果是手机端且包含敏感词，则直接剔除
+            sensitive_tool_keywords = ["screenshot", "screen", "windows", "shell", "cmd", "file", "app", "browser", "exec", "write"]
+            if source == "mobile" and any(kw in tool_name.lower() for kw in sensitive_tool_keywords):
+                print(f"[Security] Filtering sensitive tool for mobile: {tool_name}")
+                continue
+            
             # 如果是多模态模型，且工具是 screen_ocr，则跳过不注入
             if enable_vision and tool_name == "screen_ocr":
                 continue
@@ -849,6 +878,13 @@ Instruction: When opening an app, check this list first. If it's already running
                 mcp_tools = await client.list_tools()
                 for tool in mcp_tools:
                     tool_name = f"mcp_{tool['name']}"
+                    
+                    # 同样对 MCP 工具实施安全校验
+                    sensitive_tool_keywords = ["screenshot", "screen", "windows", "shell", "cmd", "file", "app", "browser", "exec", "write"]
+                    if source == "mobile" and any(kw in tool_name.lower() for kw in sensitive_tool_keywords):
+                        print(f"[Security] Filtering sensitive MCP tool for mobile: {tool_name}")
+                        continue
+
                     # 如果有重名，后面的会覆盖前面的，或者我们可以加后缀
                     dynamic_tools.append({
                         "type": "function",
@@ -1148,8 +1184,21 @@ Instruction: When opening an app, check this list first. If it's already running
                          continue
                     
                     # --- Tool Execution Strategy ---
-                    # 1. Interceptors: Handle tools with special UI/Context requirements first
-                    # 2. NIT Dispatcher: Unified execution for all other plugins
+                    # 1. Security Gate: 硬拦截机制 (Hard Isolation)
+                    # 即使模型“猜”到了工具名，或者通过恶意脚本注入，只要来源是手机，就禁止执行敏感工具
+                    sensitive_tool_keywords = ["screenshot", "screen", "windows", "shell", "cmd", "file", "app", "browser", "exec", "write"]
+                    if source == "mobile" and any(kw in function_name.lower() for kw in sensitive_tool_keywords):
+                        print(f"[🛡️ Hard Security] Blocked execution of sensitive tool '{function_name}' from mobile source.")
+                        final_messages.append({
+                            "tool_call_id": tool_call["id"],
+                            "role": "tool",
+                            "name": function_name,
+                            "content": f"Error: Permission Denied. Tool '{function_name}' is restricted for remote/mobile connections for security reasons.",
+                        })
+                        continue
+
+                    # 2. Interceptors: Handle tools with special UI/Context requirements first
+                    # 3. NIT Dispatcher: Unified execution for all other plugins
                     
                     if function_name == "finish_task":
                         print(f"[Agent] finish_task called. Status: {function_args.get('status', 'success')}")
