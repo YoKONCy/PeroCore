@@ -17,12 +17,14 @@ mcp
 edge-tts
 faster-whisper
 torch
+safetensors
 numpy
 sentence-transformers
 sounddevice
 soundfile
 # Image/Vision
 pillow
+opencv-python
 # Others
 pytz
 pyyaml

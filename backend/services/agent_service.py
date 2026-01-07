@@ -368,6 +368,28 @@ Tool List Length: {len(tools_list_str)}
             await self.session.refresh(state)
         return state
 
+    async def handle_proactive_observation(self, intent_description: str, score: float):
+        """
+        Handle a proactive visual observation from AuraVision.
+        """
+        # 1. Check if we should talk now
+        # TODO: Implement more complex gating (e.g. check last talk time)
+        print(f"[Agent] Proactive observation received: {intent_description} (Score: {score:.4f})")
+        
+        # 2. Construct an internal sensing prompt
+        internal_prompt = f"""
+[PERO_INTERNAL_SENSE]
+Visual Intent: "{intent_description}"
+Confidence: {score:.4f}
+
+Observe the current environment and your memories. If you feel it's a good moment to say something to the owner, do it now. 
+If the owner is busy or you have nothing meaningful to say, stay quiet (output <NOTHING>).
+"""
+        # 3. Trigger a special session
+        # This would involve calling self.process_request with a pseudo-user message
+        # but marked as an internal trigger.
+        pass
+
     async def _get_mcp_clients(self) -> List[McpClient]:
         """获取所有已启用的 MCP 客户端"""
         clients = []

@@ -13,6 +13,7 @@ PeroCore 是 Perofamily 项目的核心后端服务，定位为一个**高性能
 **核心技术亮点**：
 *   **Rust-Native Vector Engine**: 自研基于 `usearch` + `RwLock` 的轻量级、原子性 HNSW 向量索引，支持百万级记忆毫秒级召回。
 *   **Spreading Activation Graph**: 基于 Rust 实现的扩散激活引擎，模拟人脑的“联想发散”过程。
+*   **AuraVision Intent System**: 独创的隐私优先视觉感知方案。通过 64x64 脱敏边缘特征提取与 CNN-Transformer 混合模型，实现“视觉到意图”的毫秒级映射，驱动主动式对话。
 *   **Secure NIT 2.0 Protocol**: 
     *   **动态握手**: 每次请求生成唯一的 4 位 Hex ID (`<nit-A1B2>`)，防止历史 Prompt 注入攻击。
     *   **宽容修复**: 智能参数类型转换引擎，自动修正 Agent 的“手滑”错误（如将数字传为字符串）。
@@ -45,6 +46,9 @@ PeroCore 是 Perofamily 项目的核心后端服务，定位为一个**高性能
 *   **CognitiveGraphEngine**: 核心图计算引擎。
     *   **Sparse Matrix**: 采用 **CSR (Compressed Sparse Row)** 稀疏矩阵存储邻接表，极大降低大规模知识图谱的内存占用。
     *   **Pruning Algorithm**: 引入动态剪枝阈值，能量扩散过程中自动忽略低权重路径，提升联想效率。
+*   **AuraVision Engine**: 纯 Rust 视觉推理内核。
+    *   **Tract-ONNX Inference**: 使用 `tract-onnx` 实现无 C++ 依赖的纯 Rust 推理，针对 CPU SIMD (AVX2/FMA) 进行深度优化。
+    - **IntentEngine**: 实现 384D 向量的实时余弦相似度搜索，支持 EMA (Exponential Moving Average) 时序平滑，过滤视觉抖动。
 
 ### 2.4 数据基础设施层 (Data Infrastructure)
 *   **SQLite**: 存储结构化数据 (Memory, ConversationLog, Relation)。
@@ -108,6 +112,22 @@ Rust 核心的向量引擎基于 `usearch` 构建，其设计理念是 **"极致
 *   **未来演进**: 计划引入 **Masked Search**（基于位图掩码的搜索），允许 Python 层先下发一个候选 ID 位图，由 Rust 在 HNSW 遍历时实时应用过滤规则。
 *   **VectorIndex**: 使用 `Arc<RwLock<Index>>` 保证并发安全，实现“写入临时文件 -> 原子重命名”落盘策略。
 *   **Spreading Activation**: 在内存中构建高频访问的记忆关联子图，模拟神经元能量扩散，挖掘隐性关联。
+
+### 4.3 AuraVision 视觉意图系统 (Vision-to-Intent)
+
+AuraVision 是 Pero 的“眼睛”，其核心设计哲学是 **“感知意图，而非监视隐私”**。
+
+#### 4.3.1 隐私优先的模型架构
+*   **脱敏输入**: 系统仅采集 64x64 像素的极低分辨率图像，并立即进行灰度化与 **Sobel/Canny 边缘检测**。最终输入模型的是纯粹的几何轮廓，无法还原任何文字或人脸信息。
+*   **CNN-Transformer 混合模型**:
+    *   **Spatial Stem (CNN)**: 提取局部纹理特征（如：代码块的密集横线、视频播放器的矩形框）。
+    *   **Semantic Blocks (Transformer)**: 捕捉全局布局关系，理解当前桌面是在“深度工作”还是“休闲娱乐”。
+*   **Intent Embedding**: 模型输出一个 L2 归一化的 384D 向量，代表当前的“视觉意图”。
+
+#### 4.3.2 意图锚点 (Intent Anchors)
+视觉向量并不直接映射到标签，而是与存储在 Rust 侧的 **Intent Anchors** 进行匹配。
+*   **动态匹配**: 通过余弦相似度计算当前视觉状态与已知场景（如“密集代码”、“社交聊天”、“视频流”）的距离。
+*   **时序平滑**: 引入 EMA 算法对连续帧进行平滑，确保只有稳定的视觉状态（持续 2-3 秒）才会触发后续逻辑。
 
 ### 4.2 Memory System (双模态记忆)
 | 组件 | 技术栈 | 职责 |
@@ -175,3 +195,22 @@ PeroCore 通过 WebSocket 与前端（Electron/Web）保持实时双向通信：
     *   每日自动回顾前一天的对话记录，生成摘要并存入长期记忆，用于增强跨日连续性体验。
 *   **统一消息适配 (OneBot 11)**:
     *   通过 WebSocket (`/api/social/ws`) 连接 NapCat/OneBot 适配器，实现对 QQ/Telegram 等平台的统一收发支持。
+
+### 6.4 多模态主动触发 (Multimodal Proactive Interaction)
+
+在 V3.0 中，Pero 进化出了基于“感知三角”的主动触发机制，由 `MultimodalTriggerCoordinator` 统一调度。
+
+#### 6.4.1 感知三角 (The Perception Triangle)
+系统综合三个维度的信号进行协同决策：
+1.  **视觉意图 (Visual Intent)**: 当前屏幕呈现的状态（权重 40%）。
+2.  **语义扩散 (Semantic Spreading)**: 视觉意图唤醒的关联记忆强度（权重 35%）。
+3.  **时间感知 (Time Awareness)**: 当前时间节点与用户作息规律（权重 25%）。
+
+#### 6.4.2 扩散激活过程 (Spreading Activation Process)
+这是 Pero 产生“生命感”的核心链路：
+1.  **能量注入**: 视觉系统匹配到“代码”锚点，向图谱中的对应节点注入初始能量。
+2.  **联想扩散**: 能量顺着 `MemoryRelation` 边缘向外扩散。例如：从“代码”扩散到“昨晚的 Bug 笔记”，再扩散到“挫败感”标签。
+3.  **饱和度检测 (Saturation Gating)**: 
+    *   计算唤醒记忆与最近 5 分钟对话内容的重合度。
+    *   若重合度过高（饱和度 > 0.7），则判定为“废话”，自动抑制触发。
+4.  **自适应采样**: 协调器根据决策得分动态调整采样频率（10s ~ 300s）。当感知到用户处于高频交互或环境剧变时，自动进入高频观察模式。

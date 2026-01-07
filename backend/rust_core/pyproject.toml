@@ -3,9 +3,9 @@ requires = ["maturin>=1.5,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "pero-memory-core"
-version = "0.1.0"
-description = "一个基于 Rust 的超高性能认知图谱记忆引擎，支持毫秒级激活扩散与大规模联想检索。"
+name = "pero-rust-core"
+version = "0.2.0"
+description = "High-performance vision-intent-memory engine for Pero"
 authors = [
     { name = "PeroCore Developer" }
 ]

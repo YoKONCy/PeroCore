@@ -1,0 +1,4 @@
+[build]
+# 针对当前 CPU 架构进行优化
+# 这会启用 AVX2、FMA、SSE4.2 等 SIMD 指令集
+rustflags = ["-C", "target-cpu=native"]

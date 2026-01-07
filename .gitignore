@@ -33,6 +33,8 @@ __pycache__/
 .Python
 env/
 venv/
+backend/venv_fix/
+backend/scripts/
 .env
 .venv
 pip-log.txt
