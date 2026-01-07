@@ -47,6 +47,7 @@ jobs:
           
           # 打包后端，包含 assets 目录和提示词 md 文件
           cd backend
+          if (!(Test-Path "assets")) { New-Item -ItemType Directory -Path "assets" }
           pyinstaller --noconsole --onefile --name pero-backend --add-data "assets;assets" --add-data "services/mdp/prompts;services/mdp/prompts" --add-data "prompts;prompts" main.py
           
           # 按照 Tauri Sidecar 规范重命名并移动
