@@ -36,24 +36,34 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyinstaller
           pip install -r backend/requirements.txt
 
-      - name: Build Python Sidecar (Windows)
+      - name: Prepare Embedded Python Sidecar (Windows)
         shell: pwsh
         run: |
-          $BIN_DIR = "PeroLauncher/bin"
-          if (!(Test-Path $BIN_DIR)) { New-Item -ItemType Directory -Path $BIN_DIR }
+          $PYTHON_VERSION = "3.10.11"
+          $PYTHON_URL = "https://www.python.org/ftp/python/$PYTHON_VERSION/python-$PYTHON_VERSION-embed-amd64.zip"
+          $TARGET_DIR = "PeroLauncher/python"
           
-          # 打包后端，包含 assets 目录和提示词 md 文件
-          cd backend
-          if (!(Test-Path "assets")) { New-Item -ItemType Directory -Path "assets" }
-          pyinstaller --noconsole --onefile --name pero-backend --add-data "assets;assets" --add-data "services/mdp/prompts;services/mdp/prompts" --add-data "prompts;prompts" main.py
+          if (!(Test-Path $TARGET_DIR)) { New-Item -ItemType Directory -Path $TARGET_DIR }
           
-          # 按照 Tauri Sidecar 规范重命名并移动
-          # x86_64-pc-windows-msvc 是 windows-latest 的默认目标
-          Move-Item "dist/pero-backend.exe" "../$BIN_DIR/pero-backend-x86_64-pc-windows-msvc.exe" -Force
-          cd ..
+          # 1. 下载并解压嵌入式 Python
+          Invoke-WebRequest -Uri $PYTHON_URL -OutFile "python_embed.zip"
+          Expand-Archive -Path "python_embed.zip" -DestinationPath $TARGET_DIR -Force
+          Remove-Item "python_embed.zip"
+          
+          # 2. 解除 python310._pth 的限制（让它能加载 site-packages）
+          $PTH_FILE = "$TARGET_DIR/python310._pth"
+          if (Test-Path $PTH_FILE) {
+              $content = Get-Content $PTH_FILE
+              $content = $content -replace "#import site", "import site"
+              Set-Content -Path $PTH_FILE -Value $content
+          }
+          
+          # 3. 安装依赖到该目录下的 site-packages
+          $LIB_DIR = "$TARGET_DIR/Lib/site-packages"
+          if (!(Test-Path $LIB_DIR)) { New-Item -ItemType Directory -Path $LIB_DIR }
+          pip install -r backend/requirements.txt --target $LIB_DIR
 
       - name: install frontend dependencies
         run: npm install
