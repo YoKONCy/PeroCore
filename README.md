@@ -144,7 +144,29 @@ PeroCore 摒弃了传统的简单 RAG（检索增强生成）方案，构建了�
 
 > **"Speed is not about hardware, it's about the shortest path to empathy."**
 
-在 PeroCore 中，一个视觉信号从产生到变为“直觉”，只需经历 15 毫秒的惊人演化：
+在 PeroCore 中，一个视觉信号从产生到变为“直觉”，只需经历 15 毫秒的惊人演化。这套流程不仅是性能的竞赛，更是隐私与逻辑的精密博弈：
+
+```mermaid
+gantt
+    title PeroCore 15ms 神经反射弧 (Neural Reflex Arc)
+    dateFormat  X
+    axisFormat %s ms
+    
+    section 隐私感知 (Privacy)
+    视网膜脱敏 (T+0)           :active, a1, 0, 1ms
+    
+    section 意图编码 (Encoding)
+    Aura 意图映射 (T+5)        :a2, 5, 1ms
+    
+    section 下意识闪回 (Subconscious)
+    0.52ms 能量扩散 (T+6)      :crit, a3, 6, 1ms
+    
+    section 逻辑校准 (Calibration)
+    拓扑结构纠错 (T+10)        :a4, 10, 1ms
+    
+    section 预感应 (Ready)
+    工具/上下文就绪 (T+15)     :active, a5, 15, 1ms
+```
 
 *   **T + 0ms | 视网膜脱敏 (Desensitization)**：
     系统捕捉屏幕，瞬间进行 64x64 降采样并提取边缘特征。**隐私在此刻被物理级锁定**，AI 看到的是几何轮廓，而非你的隐私。
@@ -153,9 +175,9 @@ PeroCore 摒弃了传统的简单 RAG（检索增强生成）方案，构建了�
 *   **T + 6ms | 下意识闪回 (Subconscious Flashback)**：
     **震撼的一刻**：意图向量撞击 Rust 认知图谱。通过 CSR 优化算法，能量在 **0.52ms** 内顺着逻辑链条完成亿级扩散。
 *   **T + 10ms | 拓扑纠错 (Topological Correction)**：
-    系统利用图谱的邻近节点进行加权。即便视觉信号有 30% 的噪点，拓扑结构也会强行将偏移的意图校准回正确的“逻辑锚点”。
+    系统利用图谱的邻近节点进行加权。即便视觉信号有噪点，拓扑结构也会强行将偏移的意图校准回正确的“逻辑锚点”。
 *   **T + 15ms | 预感应就绪 (Pre-monition Ready)**：
-    在你意识到自己需要帮助之前，相关记忆已完成预取（Pre-fetch），NIT 工具链已进入热启动状态。**AI 已经准备好在你敲下第一个字符时精准回应。**
+    在你敲下第一个字符前，相关记忆已完成预取，NIT 工具链已进入热启动。**AI 已经准备好精准回应。**
 
 ---
 
