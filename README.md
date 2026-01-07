@@ -62,12 +62,12 @@
 |:-------:|:------------|:----:|
 | 🌟 | **Philosophy** - 核心理念：有温度的伙伴 | [Jump](#-philosophy) |
 | 🧠 | **Deep Memory** - 仿生记忆与 Rust 核心 | [Jump](#-deep-memory-system) |
-| 👁️ | **AuraVision** - 隐私优先的视觉意图系统 | [Jump](#%EF%B8%8F-auravision-the-bionic-eyes) |
+| 👁️ | **AuraVision** - 隐私优先的视觉意图系统 | [Jump](#-auravision-the-bionic-eyes) |
 | ⚡ | **NIT Protocol** - 革命性的工具调用协议 | [Jump](#-nit-protocol-20) |
-| 🏗️ | **Architecture** - Python + Rust 混合架构 | [Jump](#%EF%B8%8F-technical-architecture) |
-| 🖥️ | **Desktop Ops** - 桌面与浏览器自动化 | [Jump](#%EF%B8%8F-desktop--browser-automation) |
-| 🛡️ | **Security** - 隐私至上与纵深防御 | [Jump](#%EF%B8%8F-security--privacy) |
-| � | 🚀 | **Quick Start** - 一键启动指南 | [Jump](#-quick-start) |
+| 🏗️ | **Architecture** - Python + Rust 混合架构 | [Jump](#-technical-architecture) |
+| 🖥️ | **Desktop Ops** - 桌面与浏览器自动化 | [Jump](#-desktop--browser-automation) |
+| 🛡️ | **Security** - 隐私至上与纵深防御 | [Jump](#-security--privacy) |
+| 🚀 | **Quick Start** - 一键启动指南 | [Jump](#-quick-start) |
 | 💖 | **Non-Profit** - 非盈利声明与愿景 | [Jump](#-non-profit--community) |
 
 </details>
