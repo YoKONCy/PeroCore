@@ -17,6 +17,7 @@ from services.preprocessor.implementations import (
     UserInputPreprocessor,
     HistoryPreprocessor,
     RAGPreprocessor,
+    GraphFlashbackPreprocessor,
     ConfigPreprocessor,
     SystemPromptPreprocessor
 )
@@ -45,6 +46,7 @@ class AgentService:
         self.preprocessor_manager.register(UserInputPreprocessor())
         self.preprocessor_manager.register(HistoryPreprocessor())
         self.preprocessor_manager.register(RAGPreprocessor())
+        self.preprocessor_manager.register(GraphFlashbackPreprocessor())
         self.preprocessor_manager.register(ConfigPreprocessor())
         self.preprocessor_manager.register(SystemPromptPreprocessor())
 

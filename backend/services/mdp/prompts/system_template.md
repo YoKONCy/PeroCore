@@ -19,6 +19,9 @@ version: "1.1"
 
 [相关记忆片段 (RAG)]
 {{memory_context}}
+
+[关联思绪 (Graph)]
+{{graph_context}}
 </User_Context>
 
 {{ability_workspace}}

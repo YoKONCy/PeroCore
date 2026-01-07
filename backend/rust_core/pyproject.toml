@@ -1,13 +1,24 @@
 [build-system]
-requires = ["maturin>=1.10,<2.0"]
+requires = ["maturin>=1.5,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "rust_core"
+name = "pero-memory-core"
+version = "0.1.0"
+description = "一个基于 Rust 的超高性能认知图谱记忆引擎，支持毫秒级激活扩散与大规模联想检索。"
+authors = [
+    { name = "PeroCore Developer" }
+]
 requires-python = ">=3.8"
+dependencies = []
+readme = "README_LIB.md"
+keywords = ["AI", "Memory", "Rust", "SpreadingActivation", "RAG"]
 classifiers = [
     "Programming Language :: Rust",
-    "Programming Language :: Python :: Implementation :: CPython",
-    "Programming Language :: Python :: Implementation :: PyPy",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
-dynamic = ["version"]
+
+[tool.maturin]
+module-name = "pero_rust_core"
+features = ["pyo3/extension-module"]

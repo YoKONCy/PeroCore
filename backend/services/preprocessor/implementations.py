@@ -293,6 +293,43 @@ class RAGPreprocessor(BasePreprocessor):
         
         return context
 
+class GraphFlashbackPreprocessor(BasePreprocessor):
+    """
+    Performs logical flashback on the memory graph to find associated fragments.
+    """
+    @property
+    def name(self) -> str:
+        return "GraphFlashback"
+
+    async def process(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        session = context["session"]
+        memory_service = context["memory_service"]
+        user_message = context.get("user_message", "")
+        
+        if not user_message:
+            return context
+
+        # Perform logical flashback
+        try:
+            flashback = await memory_service.logical_flashback(session, user_message, limit=5)
+            
+            graph_context = ""
+            if flashback:
+                # Format the flashback fragments
+                fragments = [item["name"] for item in flashback]
+                graph_context = "关联思绪: " + ", ".join(fragments)
+                print(f"[GraphFlashback] Found {len(fragments)} fragments: {fragments}")
+            
+            # Populate variables
+            variables = context.get("variables", {})
+            variables["graph_context"] = graph_context
+            context["variables"] = variables
+            
+        except Exception as e:
+            print(f"[GraphFlashback] Failed: {e}")
+            
+        return context
+
 class ConfigPreprocessor(BasePreprocessor):
     """
     Loads LLM configuration and determines capabilities (Vision, Voice).

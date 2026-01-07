@@ -342,6 +342,88 @@ class MemoryService:
             print(f"[MemoryService] Failed to update access stats: {e}")
 
     @staticmethod
+    async def logical_flashback(session: AsyncSession, text: str, limit: int = 5) -> List[Dict[str, Any]]:
+        """
+        [Brain-Net Flashback] 
+        基于当前对话关键词，在记忆图谱中进行联想闪回，找回关联的碎片信息。
+        """
+        if not text or len(text.strip()) < 2:
+            return []
+
+        from services.embedding_service import embedding_service
+        from services.vector_service import vector_service
+        import numpy as np
+
+        try:
+            # 1. 向量搜索找到初始锚点 (Anchors)
+            query_vec = embedding_service.encode_one(text)
+            if not query_vec:
+                return []
+            
+            # 召回稍微多一点，作为扩散起点
+            vector_results = vector_service.search(query_vec, limit=10)
+            if not vector_results:
+                return []
+
+            anchor_ids = [res["id"] for res in vector_results]
+            sim_map = {res["id"]: res["score"] for res in vector_results}
+
+            # 2. 扩散激活 (Spreading Activation)
+            activation_scores = {aid: sim_map.get(aid, 0.5) for aid in anchor_ids}
+            
+            engine = await get_rust_engine(session)
+            if engine:
+                # 扩散 2 步，扩大联想范围
+                flashback_scores = engine.propagate_activation(
+                    activation_scores,
+                    steps=2,
+                    decay=0.7,
+                    min_threshold=0.05
+                )
+            else:
+                flashback_scores = activation_scores
+
+            # 3. 提取 Top 关联记忆并转换为碎片标签
+            # 排除掉初始锚点，寻找被“联想”出来的东西
+            associated_ids = [mid for mid in flashback_scores.keys() if mid not in anchor_ids]
+            if not associated_ids:
+                # 如果没有联想出新东西，就用初始锚点中分数最高的
+                associated_ids = anchor_ids
+
+            # 按分数排序
+            sorted_ids = sorted(associated_ids, key=lambda x: flashback_scores.get(x, 0), reverse=True)[:limit]
+            
+            if not sorted_ids:
+                return []
+
+            # 获取记忆详情
+            statement = select(Memory).where(Memory.id.in_(sorted_ids))
+            memories = (await session.exec(statement)).all()
+            
+            # 转换为碎片格式 (主要是标签或短句)
+            results = []
+            seen_tags = set()
+            for m in memories:
+                # 优先使用标签
+                if m.tags:
+                    tags = [t.strip() for t in m.tags.split(",") if t.strip()]
+                    for tag in tags:
+                        if tag not in seen_tags:
+                            results.append({"id": m.id, "name": tag, "type": "tag"})
+                            seen_tags.add(tag)
+                
+                # 如果标签不够，或者为了丰富度，加入内容摘要
+                if len(results) < limit:
+                    summary = m.content[:20] + "..." if len(m.content) > 20 else m.content
+                    results.append({"id": m.id, "name": summary, "type": "memory"})
+            
+            return results[:limit]
+
+        except Exception as e:
+            print(f"[Memory] Logical flashback failed: {e}")
+            return []
+
+    @staticmethod
     async def get_relevant_memories(
         session: AsyncSession, 
         text: str, 

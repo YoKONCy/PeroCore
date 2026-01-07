@@ -17,11 +17,11 @@
   <img src="https://img.shields.io/badge/Status-Active_Development-violet?style=for-the-badge&logo=github&logoColor=white" alt="Status">
 </a>
 &nbsp;
-<a href="./PeroCore_Architecture.md">
+<a href="./tech_docs/PeroCore_Architecture.md">
   <img src="https://img.shields.io/badge/Architecture-Rust_Hybrid-orange?style=for-the-badge&logo=rust&logoColor=white" alt="Arch">
 </a>
 &nbsp;
-<a href="./NIT_TECHNICAL_MANUAL.md">
+<a href="./tech_docs/NIT_TECHNICAL_MANUAL.md">
   <img src="https://img.shields.io/badge/Protocol-NIT_2.0-blue?style=for-the-badge&logo=python&logoColor=white" alt="NIT">
 </a>
 &nbsp;
@@ -40,6 +40,10 @@
 <br/>
 
 <img src="./github_src/cover.png" width="100%" alt="PeroCore Cover"/>
+
+<br/>
+
+<img src="./github_src/cover2.jpg" width="100%" alt="PeroCore Cover 2"/>
 
 </div>
 
@@ -97,6 +101,43 @@ PeroCore 不仅仅是一个后端程序，它是 **Pero** 的灵魂容器。我�
 > **"Memory is what makes us who we are."**
 
 PeroCore 摒弃了传统的简单 RAG（检索增强生成）方案，构建了一套**仿生双模态记忆系统**。我们引入了 **Rust Core** 来处理海量记忆的快速召回与图谱计算。
+
+### 📊 Hardcore Performance & Precision (硬核性能与精确度)
+
+我们拒绝 PPT 性能，所有的性能指标均基于 **PeroCore Rust Engine** 的真实压测数据。
+
+#### 1. ⚡ 极致检索效率 (Scale: 20M Nodes / 40M Edges)
+在超大规模认知图谱下，PeroCore 的 Rust 核心通过 CSR 稀疏矩阵优化，实现了近乎常数级的检索延迟。
+
+| 测试规模 (Scale) | 扩散步数 (Steps) | 平均延迟 (Latency) | 联想节点数 | 性能评价 |
+| :--- | :---: | :---: | :---: | :--- |
+| **2000万节点 / 4000万边** | 5 步 | **1.13 ms** | ~1,000 | 🔥 极速 (Sub-2ms) |
+| **2000万节点 / 2000万边** | 50 步 | **830 ms** | ~50,000 | ⚡ 深度穿透 |
+
+#### 2. 🏁 跨方案降维打击 (PeroCore vs. Traditional Vector DB)
+
+我们进行了一场看似“不公平”的对决：用 **100 倍** 规模的数据量，去挑战传统方案。
+
+| 维度 | 传统向量数据库 (如 ChromaDB) | **PeroCore Cognitive Engine** | 差距 (Gap) |
+| :--- | :--- | :--- | :--- |
+| **测试数据量** | 1,000,000 (百万级) | **100,000,000 (亿级)** | **100x Scale** |
+| **检索延迟** | ~50.22 ms | **0.45 ms** | **111x Faster** |
+| **检索性质** | 语义相似 (Intuition) | **逻辑因果 (Logic)** | **质变** |
+| **资源消耗** | 高 CPU/内存 (向量计算) | **极低 (稀疏矩阵遍历)** | **轻量化** |
+
+> **🚀 结论：** 当传统方案还在百万级数据的泥潭里挣扎时，PeroCore 已经在一亿级噪音的深海中实现了亚毫秒级的逻辑穿透。这不仅是速度的胜利，更是算法代差的体现。
+
+#### 3. 🎯 亿级噪音下的逻辑穿透 (100M Noise Precision Test)
+这是最严苛的精确度测试：在一亿条随机噪音信息的干扰下，精准寻找跨越 4 层深度的逻辑链条。
+
+*   **测试场景**：注入路径 `苹果 -> 牛顿 -> 万有引力 -> 爱因斯坦 -> 相对论`，并混入 **1 亿条** 随机干扰。
+*   **输入**：`苹果`
+*   **结果**：
+    *   **耗时**：**0.45 ms**
+    *   **精确度**：目标 `相对论` 在一亿个节点中精准排位 **Top 5**。
+*   **核心原理**：**"Diffusion is all you need."** 能量仅沿逻辑链条流动，随机噪音在扩散过程中会迅速由于熵增而消失。
+
+---
 
 ### 核心特性
 

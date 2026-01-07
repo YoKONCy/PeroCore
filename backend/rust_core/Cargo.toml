@@ -2,6 +2,9 @@
 name = "pero_rust_core"
 version = "0.1.0"
 edition = "2021"
+description = "High-performance cognitive graph engine for AI long-term memory"
+license = "MIT"
+repository = "https://github.com/perofamily/perocore"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
