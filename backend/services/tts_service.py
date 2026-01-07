@@ -75,7 +75,7 @@ class TTSService:
         
         overrides = overrides or {}
         voice = overrides.get("voice") or config_json.get("voice", "zh-CN-XiaoyiNeural")
-        rate = overrides.get("rate") or config_json.get("rate", "+15%")
+        rate = overrides.get("rate") or config_json.get("rate", "+25%")
         pitch = overrides.get("pitch") or config_json.get("pitch", "+5Hz")
         
         try:

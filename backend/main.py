@@ -1109,19 +1109,61 @@ async def chat(
             tts_queue = asyncio.Queue()
 
             async def run_tts():
+                import re
+                import asyncio
+                import os
                 tts_buffer = ""
-                # 移除分段机制，改为整段合成
-                # tts_delimiters = re.compile(r'[。！？\.\!\?\n]+')
+                # 恢复分段机制，实现流式播放 (。！？.!?)
+                tts_delimiters = re.compile(r'([。！？\.\!\?\n]+)')
                 
+                # 垫话机制状态
+                filler_played = False
+                filler_phrase = "唔...让我想想..."
+                filler_cache_path = os.path.join("backend", "assets", "filler_thinking.mp3")
+
                 # 初始化过滤器，防止 TTS 读取 XML 标签和 NIT 工具调用块
                 from nit_core.dispatcher import XMLStreamFilter, NITStreamFilter
-                xml_filter = XMLStreamFilter()
+                # 显式过滤 thought 标签和 PEROCUE 等标签
+                xml_filter = XMLStreamFilter(tag_names=["THOUGHT", "PEROCUE", "CHARACTER_STATUS", "METADATA"])
                 nit_filter = NITStreamFilter()
-                # thinking_filter removed: we process thinking blocks on the full buffer in generate_tts_chunk
                 
                 try:
                     while True:
-                        raw_chunk = await tts_queue.get()
+                        try:
+                            # 监控队列，如果 3 秒没反应且没播过垫话，则触发
+                            if not filler_played:
+                                raw_chunk = await asyncio.wait_for(tts_queue.get(), timeout=3.0)
+                            else:
+                                raw_chunk = await tts_queue.get()
+                        except asyncio.TimeoutError:
+                            if not filler_played:
+                                logger.info(f"TTS Timeout detected, playing local filler for Pero...")
+                                audio_data = None
+                                
+                                # 优先尝试读取本地缓存
+                                if os.path.exists(filler_cache_path):
+                                    try:
+                                        with open(filler_cache_path, "rb") as f:
+                                            audio_data = f.read()
+                                    except Exception as e:
+                                        logger.error(f"Failed to read local filler: {e}")
+                                
+                                # 如果没有缓存，则生成并保存
+                                if not audio_data:
+                                    audio_data = await generate_tts_chunk(filler_phrase)
+                                    if audio_data:
+                                        try:
+                                            with open(filler_cache_path, "wb") as f:
+                                                f.write(audio_data)
+                                            logger.info(f"Saved filler to cache: {filler_cache_path}")
+                                        except Exception as e:
+                                            logger.error(f"Failed to save filler cache: {e}")
+                                
+                                if audio_data:
+                                    await queue.put({"type": "audio", "payload": audio_data})
+                                filler_played = True
+                            # 继续等待
+                            raw_chunk = await tts_queue.get()
                         
                         if raw_chunk is None: # Sentinel
                             # Flush filters buffer
@@ -1131,22 +1173,38 @@ async def chat(
                             if remaining_nit:
                                 tts_buffer += remaining_nit
                                 
-                            # Process ENTIRE buffer at once
+                            # 处理最后剩余的文本
                             if tts_buffer.strip():
                                 audio_data = await generate_tts_chunk(tts_buffer)
                                 if audio_data:
                                     await queue.put({"type": "audio", "payload": audio_data})
                             break
                         
+                        # 一旦有了实际输出，也将 filler_played 设为 True，防止中途再蹦出一句垫话
+                        if not filler_played and len(raw_chunk.strip()) > 0:
+                            filler_played = True
+
                         # Apply Filters: First XML, then NIT
                         filtered_xml = xml_filter.filter(raw_chunk)
                         filtered_nit = nit_filter.filter(filtered_xml)
                         tts_buffer += filtered_nit
                         
-                        # REMOVED: Streaming TTS Logic
-                        # 我们不再根据标点符号分段，而是等待所有文本生成完毕后一次性合成
-                        # 这会增加首字延迟，但能保证语音的连贯性和语调正确性
-                        # 且避免了 XML 标签被截断导致过滤器失效的风险（虽然过滤器已经处理了流式）
+                        # 流式分句逻辑：查找分隔符
+                        # 只有当 buffer 长度达到一定程度或出现标点符号时才切分，保证语调
+                        if len(tts_buffer) > 10: 
+                            parts = tts_delimiters.split(tts_buffer)
+                            # 如果有至少一个完整句子（parts 长度 > 1）
+                            if len(parts) > 1:
+                                # 拼接已完成的句子 (i 是文本, i+1 是标点)
+                                for i in range(0, len(parts) - 1, 2):
+                                    sentence = parts[i] + parts[i+1]
+                                    if sentence.strip():
+                                        audio_data = await generate_tts_chunk(sentence)
+                                        if audio_data:
+                                            await queue.put({"type": "audio", "payload": audio_data})
+                                
+                                # 将剩余不完整的文本留到下一次处理
+                                tts_buffer = parts[-1]
                 except Exception as e:
                     print(f"TTS Worker Error: {e}")
                 finally:

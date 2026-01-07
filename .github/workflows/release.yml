@@ -45,9 +45,9 @@ jobs:
           $BIN_DIR = "PeroLauncher/bin"
           if (!(Test-Path $BIN_DIR)) { New-Item -ItemType Directory -Path $BIN_DIR }
           
-          # 打包后端
+          # 打包后端，包含 assets 目录和提示词 md 文件
           cd backend
-          pyinstaller --noconsole --onefile --name pero-backend main.py
+          pyinstaller --noconsole --onefile --name pero-backend --add-data "assets;assets" --add-data "services/mdp/prompts;services/mdp/prompts" --add-data "prompts;prompts" main.py
           
           # 按照 Tauri Sidecar 规范重命名并移动
           # x86_64-pc-windows-msvc 是 windows-latest 的默认目标
