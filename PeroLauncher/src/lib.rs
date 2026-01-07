@@ -358,6 +358,15 @@ struct BackendState(Arc<Mutex<Option<std::process::Child>>>);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 检测是否在 GitHub Actions 环境中运行，防止构建时挂起
+    if std::env::var("GITHUB_ACTIONS").is_ok() {
+        let args: Vec<String> = std::env::args().collect();
+        if args.iter().any(|arg| arg == "build" || arg == "--version") {
+            println!("CI environment detected with build/version arg, exiting to prevent hang.");
+            return;
+        }
+    }
+
     // 保留对解决 Windows 代理和安全检查延迟最有效的环境变量
     std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", 
         "--no-proxy-server --proxy-server='direct://' --proxy-bypass-list='*' --disable-features=msSmartScreenProtection");

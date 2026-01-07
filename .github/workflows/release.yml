@@ -70,4 +70,5 @@ jobs:
           releaseBody: "Automated release from GitHub Actions (Tauri v2 + Sidecar)."
           releaseDraft: true
           prerelease: false
-          args: "--config PeroLauncher/tauri.conf.json"
+          projectPath: PeroLauncher
+          args: "--config tauri.conf.json"
