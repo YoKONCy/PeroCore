@@ -120,8 +120,13 @@ fn get_workspace_root() -> std::path::PathBuf {
     }
 }
 
+fn fix_path(path: std::path::PathBuf) -> std::path::PathBuf {
+    let p = path.canonicalize().unwrap_or(path).to_string_lossy().to_string();
+    std::path::PathBuf::from(p.trim_start_matches(r"\\?\"))
+}
+
 #[tauri::command]
-fn start_backend(app: tauri::AppHandle, state: tauri::State<BackendState>) -> Result<(), String> {
+async fn start_backend(app: tauri::AppHandle, state: tauri::State<'_, BackendState>) -> Result<(), String> {
     let mut backend_guard = state.0.lock().map_err(|e| e.to_string())?;
     
     if backend_guard.is_some() {
@@ -135,18 +140,14 @@ fn start_backend(app: tauri::AppHandle, state: tauri::State<BackendState>) -> Re
     
     // 2. 确定 Python 路径
     let python_path = {
-        // 优先使用开发环境的虚拟环境
         let dev_venv_python = get_workspace_root().join("backend/venv/Scripts/python.exe");
-        
         if dev_venv_python.exists() {
-            println!("Using Dev Venv Python: {:?}", dev_venv_python);
             dev_venv_python
         } else {
             let mut p = resource_dir.join("python/python.exe");
             if !p.exists() {
                 p = resource_dir.join("_up_/src-tauri/python/python.exe");
             }
-            println!("Using Resource Python: {:?}", p);
             p
         }
     };
@@ -155,86 +156,51 @@ fn start_backend(app: tauri::AppHandle, state: tauri::State<BackendState>) -> Re
     let script_path = {
         let mut p = resource_dir.join("backend/main.py");
         if !p.exists() {
-            // 尝试 _up_ 路径
             p = resource_dir.join("_up_/backend/main.py");
         }
-        
         if p.exists() {
             p
         } else {
-            // 开发模式回退
             get_workspace_root().join("backend/main.py")
         }
     };
 
-    println!("Starting backend with Python: {:?}", python_path);
-    println!("Script path: {:?}", script_path);
-
     if !python_path.exists() {
-        let err_msg = format!("Python executable not found. \nResources dir: {:?}\nChecked paths: \n- {:?}/python/python.exe\n- {:?}/_up_/src-tauri/python/python.exe", resource_dir, resource_dir, resource_dir);
-        eprintln!("{}", err_msg);
-        return Err(err_msg);
-    }
-
-    println!("Attempting to spawn backend...");
-    // 强制转换为真实的物理路径，并去掉 Windows 的 \\?\ 长路径前缀（Python 兼容性极差）
-    fn fix_path(path: std::path::PathBuf) -> std::path::PathBuf {
-        let p = path.canonicalize().unwrap_or(path).to_string_lossy().to_string();
-        std::path::PathBuf::from(p.trim_start_matches(r"\\?\"))
+        return Err("Python executable not found".into());
     }
 
     let python_path = fix_path(python_path);
     let script_path = fix_path(script_path);
-    
-    let python_dir = python_path.parent().unwrap_or(&python_path);
     let backend_root = fix_path(script_path.parent().unwrap_or(&script_path).to_path_buf());
-
-    println!("Fixed Physical Python: {:?}", python_path);
-    println!("Fixed Physical Script: {:?}", script_path);
-    println!("Fixed Physical Root: {:?}", backend_root);
 
     let mut cmd = std::process::Command::new(&python_path);
     cmd.args(&["-u", &script_path.to_string_lossy()])
        .current_dir(&backend_root) 
-       .env("PYTHONPATH", backend_root.to_string_lossy().to_string())
-       .env("PATH", format!("{};{}", python_dir.to_string_lossy(), std::env::var("PATH").unwrap_or_default()))
+       .env("PYTHONPATH", &backend_root)
        .stdout(std::process::Stdio::piped())
        .stderr(std::process::Stdio::piped())
-       .creation_flags(0x08000000); // CREATE_NO_WINDOW for Windows
+       .creation_flags(0x08000000); 
 
-    let mut child = cmd.spawn().map_err(|e| {
-        let err_msg = format!("Failed to spawn backend process: {}. \nPython path: {:?}", e, python_path);
-        eprintln!("{}", err_msg);
-        err_msg
-    })?;
+    let mut child = cmd.spawn().map_err(|e| format!("Spawn error: {}", e))?;
 
     let stdout = child.stdout.take().unwrap();
     let stderr = child.stderr.take().unwrap();
 
-    // 日志处理
-    let app_handle_log = app.clone();
-    
-    // Stdout reader
-    let app_stdout = app_handle_log.clone();
+    let app_stdout = app.clone();
     tauri::async_runtime::spawn(async move {
         use std::io::{BufRead, BufReader};
         let reader = BufReader::new(stdout);
         for line in reader.lines() {
-            if let Ok(l) = line {
-                let _ = app_stdout.emit("backend-log", l);
-            }
+            if let Ok(l) = line { let _ = app_stdout.emit("backend-log", l); }
         }
     });
 
-    // Stderr reader
-    let app_stderr = app_handle_log.clone();
+    let app_stderr = app.clone();
     tauri::async_runtime::spawn(async move {
         use std::io::{BufRead, BufReader};
         let reader = BufReader::new(stderr);
         for line in reader.lines() {
-            if let Ok(l) = line {
-                let _ = app_stderr.emit("backend-log", format!("[ERR] {}", l));
-            }
+            if let Ok(l) = line { let _ = app_stderr.emit("backend-log", format!("[ERR] {}", l)); }
         }
     });
 

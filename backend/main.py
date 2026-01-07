@@ -1,6 +1,12 @@
 import asyncio
 import os
 import sys
+
+# 路径防御：确保打包后或不同目录下启动都能正确找到模块
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+
 import json
 import base64
 import re
