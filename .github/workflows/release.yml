@@ -65,10 +65,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: v__VERSION__
-          releaseName: "Pero Launcher v__VERSION__"
+          tagName: v${{ github.ref_name }}-${{ github.run_number }}
+          releaseName: "Pero Launcher ${{ github.ref_name }} (Build ${{ github.run_number }})"
           releaseBody: "Automated release from GitHub Actions (Tauri v2 + Sidecar)."
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           projectPath: PeroLauncher
           args: "--config tauri.conf.json"
