@@ -147,25 +147,17 @@ PeroCore 摒弃了传统的简单 RAG（检索增强生成）方案，构建了�
 在 PeroCore 中，一个视觉信号从产生到变为“直觉”，只需经历 15 毫秒的惊人演化。这套流程不仅是性能的竞赛，更是隐私与逻辑的精密博弈：
 
 ```mermaid
-gantt
-    title PeroCore 15ms 神经反射弧 (Neural Reflex Arc)
-    dateFormat  X
-    axisFormat %s ms
-    
-    section 隐私感知 (Privacy)
-    视网膜脱敏 (T+0)           :active, a1, 0, 1ms
-    
-    section 意图编码 (Encoding)
-    Aura 意图映射 (T+5)        :a2, 5, 1ms
-    
-    section 下意识闪回 (Subconscious)
-    0.52ms 能量扩散 (T+6)      :crit, a3, 6, 1ms
-    
-    section 逻辑校准 (Calibration)
-    拓扑结构纠错 (T+10)        :a4, 10, 1ms
-    
-    section 预感应 (Ready)
-    工具/上下文就绪 (T+15)     :active, a5, 15, 1ms
+flowchart LR
+    Start((行为发生)) -- T+0ms --> Retina[视网膜脱敏]
+    Retina -- "隐私锁定" --> Aura[Aura 意图映射]
+    Aura -- T+5ms --> Flashback{下意识闪回}
+    Flashback -- "0.52ms 扩散" --> Topology[拓扑纠错]
+    Topology -- T+10ms --> Ready([预感应就绪])
+    Ready -- T+15ms --> User((精准响应))
+
+    style Flashback fill:#f96,stroke:#333,stroke-width:4px
+    style Ready fill:#00ff00,stroke:#333,stroke-width:2px
+    style Start fill:#fff,stroke:#333
 ```
 
 *   **T + 0ms | 视网膜脱敏 (Desensitization)**：
