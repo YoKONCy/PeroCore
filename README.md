@@ -391,7 +391,9 @@ npm run tauri dev
 
 ## 📜 License
 
-本项目采用 [MIT License](LICENSE) 开源协议。你可以自由地使用、修改和分发本项目，但请保留原始的版权声明。
+本项目采用 [PolyForm Noncommercial License 1.0.0](LICENSE) 开源协议。你可以自由地使用、修改和分发本项目，但**仅限于非商业用途**，且必须保留原始的版权声明。
+
+详情请参阅 [LICENSE](LICENSE) 文件。
 
 <br/>
 

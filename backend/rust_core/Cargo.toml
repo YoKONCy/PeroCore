@@ -3,7 +3,7 @@ name = "pero_rust_core"
 version = "0.2.0"
 edition = "2021"
 description = "High-performance vision-intent-memory engine for Pero"
-license = "MIT"
+license = "PolyForm-Noncommercial-1.0.0"
 repository = "https://github.com/perofamily/perocore"
 
 [lib]

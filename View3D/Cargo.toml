@@ -2,6 +2,7 @@
 name = "view3d"
 version = "0.1.0"
 edition = "2021"
+license = "PolyForm-Noncommercial-1.0.0"
 
 [dependencies]
 bevy = "0.14"
