@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        target: [x86_64]
+        target: [x86_64, aarch64]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -26,7 +26,7 @@ jobs:
           target: ${{ matrix.target }}
           # 关键修改：直接指定工作目录
           working-directory: backend/rust_core
-          args: --release --out ../../dist --sdist
+          args: --release --out ../../dist --sdist --no-default-features
           manylinux: auto
       - name: Upload wheels
         uses: actions/upload-artifact@v4
@@ -50,7 +50,7 @@ jobs:
           target: ${{ matrix.target }}
           # 关键修改：直接指定工作目录
           working-directory: backend/rust_core
-          args: --release --out ../../dist
+          args: --release --out ../../dist --no-default-features
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:

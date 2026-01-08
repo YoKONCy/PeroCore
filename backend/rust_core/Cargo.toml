@@ -15,11 +15,11 @@ crate-type = ["cdylib"]
 pyo3 = { version = "0.21", features = ["extension-module"] }
 
 # Tract ONNX 推理 (纯 Rust, 无需系统库)
-tract-onnx = "0.21"
+tract-onnx = { version = "0.21", optional = true }
 
 
 # 图像处理 (用于 Rust 侧预处理, 可选)
-image = "0.25"
+image = { version = "0.25", optional = true }
 
 # 高性能工具
 ahash = "0.8"
@@ -33,8 +33,9 @@ regex = "1.10"
 usearch = { version = "2.8", optional = true }
 
 [features]
-default = []
+default = ["vision"]
 hnsw = ["usearch"]
+vision = ["tract-onnx", "image"]
 
 [profile.release]
 opt-level = 3

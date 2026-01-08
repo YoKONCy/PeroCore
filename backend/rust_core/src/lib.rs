@@ -17,13 +17,17 @@ use regex::Regex;
 use std::collections::HashMap;
 
 // 模块声明
+#[cfg(feature = "vision")]
 pub mod aura_vision;
 pub mod intent_engine;
+#[cfg(feature = "vision")]
 pub mod vision_intent_memory;
 
 // 重导出核心类型
+#[cfg(feature = "vision")]
 pub use aura_vision::AuraVisionEncoder;
 pub use intent_engine::{IntentAnchor, IntentEngine};
+#[cfg(feature = "vision")]
 pub use vision_intent_memory::{VisionIntentMemoryManager, VisionProcessResult};
 
 // === 常量 ===
@@ -343,11 +347,14 @@ impl SemanticVectorIndex {
 /// Pero Rust Core Python 模块入口
 #[pymodule]
 fn pero_memory_core(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
-    // 核心类
-    m.add_class::<VisionIntentMemoryManager>()?;
-    m.add_class::<VisionProcessResult>()?;
+    // 核心类 (视觉部分 - 可选)
+    #[cfg(feature = "vision")]
+    {
+        m.add_class::<VisionIntentMemoryManager>()?;
+        m.add_class::<VisionProcessResult>()?;
+    }
 
-    // 兼容旧接口
+    // 核心类 (记忆/搜索部分 - 始终包含)
     m.add_class::<CognitiveGraphEngine>()?;
     m.add_class::<SemanticVectorIndex>()?;
     m.add_class::<TextSanitizer>()?;
