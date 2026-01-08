@@ -396,12 +396,13 @@ pub fn run() {
     println!("[Perf] run() started at {:?}", start_time);
 
     let backend = Arc::new(Mutex::new(None::<std::process::Child>));
-    let backend_run_clone_for_setup = backend.clone();
-    let backend_run_clone_for_run = backend.clone();
-
     let napcat_state = NapCatState::new();
-    let napcat_child_clone_for_setup = napcat_state.child.clone();
-    let napcat_child_clone_for_run = napcat_state.child.clone();
+
+    // 为不同的闭包准备专属克隆，避免所有权冲突
+    let backend_for_setup = backend.clone();
+    let napcat_for_setup = napcat_state.child.clone();
+    let backend_for_run = backend.clone();
+    let napcat_for_run = napcat_state.child.clone();
 
     println!("[Perf] Builder starting at {:?}", start_time.elapsed());
     let mut builder = tauri::Builder::default();
@@ -443,9 +444,9 @@ pub fn run() {
             }
         })
         .setup(move |app| {
-            let app_handle = app.handle().clone();
-            let backend_clone = backend_run_clone_for_setup.clone();
-            let napcat_child_clone = napcat_child_clone_for_setup.clone();
+            // 在 setup 中捕获但故意不使用，确保这些克隆被 move 到这里而不是被 run 闭包捕获
+            let _backend_setup = backend_for_setup;
+            let _napcat_setup = napcat_for_setup;
 
             println!("[Perf] setup() entered at {:?}", start_time.elapsed());
 
@@ -541,7 +542,7 @@ pub fn run() {
                 println!("App exiting, cleaning up backends...");
                 
                 // 1. Kill Python Backend
-                if let Ok(mut guard) = backend_run_clone_for_run.lock() {
+                if let Ok(mut guard) = backend_for_run.lock() {
                     if let Some(child) = guard.take() {
                         let pid = child.id();
                         println!("Killing backend PID: {}", pid);
@@ -553,7 +554,7 @@ pub fn run() {
                 }
 
                 // 2. Kill NapCat Backend
-                if let Ok(mut guard) = napcat_child_clone_for_run.lock() {
+                if let Ok(mut guard) = napcat_for_run.lock() {
                     if let Some(child) = guard.take() {
                         let pid = child.id();
                         println!("Killing NapCat PID: {}", pid);
