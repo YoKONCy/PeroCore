@@ -433,7 +433,49 @@ pub fn run() {
             get_config,
             save_config
         ])
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::Destroyed = event {
+                // 如果是主窗口被销毁，尝试清理资源
+                let label = window.label();
+                println!("Window {} destroyed", label);
+            }
+        })
         .setup(move |app| {
+            let app_handle = app.handle().clone();
+            let backend_clone = backend_run_clone.clone();
+            let napcat_child_clone = napcat_child_clone.clone();
+
+            // 核心：在应用退出时强制清理所有后端进程
+            app.handle().on_event(move |app_handle, event| {
+                if let tauri::RunEvent::Exit = event {
+                    println!("App exiting, cleaning up backends...");
+                    
+                    // 1. 清理 Python 后端
+                    if let Ok(mut guard) = backend_clone.lock() {
+                        if let Some(child) = guard.take() {
+                            let pid = child.id();
+                            println!("Killing backend PID: {}", pid);
+                            let _ = Command::new("taskkill")
+                                .args(&["/F", "/T", "/PID", &pid.to_string()])
+                                .creation_flags(0x08000000)
+                                .output();
+                        }
+                    }
+
+                    // 2. 清理 NapCat 后端
+                    if let Ok(mut guard) = napcat_child_clone.lock() {
+                        if let Some(child) = guard.take() {
+                            let pid = child.id();
+                            println!("Killing NapCat PID: {}", pid);
+                            let _ = Command::new("taskkill")
+                                .args(&["/F", "/T", "/PID", &pid.to_string()])
+                                .creation_flags(0x08000000)
+                                .output();
+                        }
+                    }
+                }
+            });
+
             println!("[Perf] setup() entered at {:?}", start_time.elapsed());
 
             // 托盘初始化

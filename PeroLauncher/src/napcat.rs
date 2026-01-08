@@ -354,8 +354,21 @@ pub fn send_napcat_command(state: tauri::State<NapCatState>, command: String) ->
 #[tauri::command]
 pub fn stop_napcat_process(state: tauri::State<NapCatState>) -> Result<(), String> {
     let mut child_guard = state.child.lock().map_err(|e| e.to_string())?;
-    if let Some(mut child) = child_guard.take() {
-        let _ = child.kill();
+    if let Some(child) = child_guard.take() {
+        let pid = child.id();
+        #[cfg(windows)]
+        {
+            let _ = Command::new("taskkill")
+                .args(&["/F", "/T", "/PID", &pid.to_string()])
+                .creation_flags(0x08000000)
+                .output();
+            println!("NapCat killed via taskkill.");
+        }
+        #[cfg(not(windows))]
+        {
+            let mut c = child;
+            let _ = c.kill();
+        }
     }
     let mut stdin_guard = state.stdin.lock().map_err(|e| e.to_string())?;
     *stdin_guard = None;
