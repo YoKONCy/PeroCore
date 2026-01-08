@@ -567,21 +567,30 @@ pub fn run() {
         .expect("error while running tauri application")
         .run(move |_app_handle, event| {
             if let tauri::RunEvent::Exit = event {
-                // Kill Backend
-                let mut guard = backend_run_clone.lock().unwrap();
-                if let Some(child) = guard.take() {
-                    let pid = child.id();
-                    let _ = Command::new("taskkill")
-                        .args(&["/F", "/T", "/PID", &pid.to_string()])
-                        .output();
-                    println!("Python backend killed via taskkill.");
+                println!("App exiting, cleaning up backends...");
+                
+                // 1. Kill Python Backend
+                if let Ok(mut guard) = backend_run_clone.lock() {
+                    if let Some(child) = guard.take() {
+                        let pid = child.id();
+                        println!("Killing backend PID: {}", pid);
+                        let _ = Command::new("taskkill")
+                            .args(&["/F", "/T", "/PID", &pid.to_string()])
+                            .creation_flags(0x08000000)
+                            .output();
+                    }
                 }
 
-                // Kill NapCat
-                let mut guard_napcat = napcat_child_clone.lock().unwrap();
-                if let Some(mut child) = guard_napcat.take() {
-                    let _ = child.kill();
-                    println!("NapCat killed.");
+                // 2. Kill NapCat Backend
+                if let Ok(mut guard) = napcat_child_clone.lock() {
+                    if let Some(child) = guard.take() {
+                        let pid = child.id();
+                        println!("Killing NapCat PID: {}", pid);
+                        let _ = Command::new("taskkill")
+                            .args(&["/F", "/T", "/PID", &pid.to_string()])
+                            .creation_flags(0x08000000)
+                            .output();
+                    }
                 }
             }
         });
