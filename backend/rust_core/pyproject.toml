@@ -4,8 +4,9 @@ build-backend = "maturin"
 
 [project]
 name = "pero-rust-core"
-version = "0.2.0"
+version = "0.2.1"
 description = "High-performance vision-intent-memory engine for Pero"
+license = { text = "GPL-3.0" }
 authors = [
     { name = "PeroCore Developer" }
 ]
@@ -17,6 +18,7 @@ classifiers = [
     "Programming Language :: Rust",
     "Programming Language :: Python :: 3",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
 ]
 
 [tool.maturin]

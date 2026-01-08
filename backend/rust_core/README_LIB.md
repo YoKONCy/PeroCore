@@ -47,4 +47,4 @@ print(f"联想到的相关记忆点: {results}")
 
 ## 📜 许可证
 
-MIT License
+GNU General Public License v3.0 (GPL-3.0)
