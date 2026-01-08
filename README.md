@@ -13,6 +13,10 @@
 <br/><br/>
 
 <!-- 徽章导航 -->
+<a href="./LICENSE">
+  <img src="https://img.shields.io/badge/License-GPL--3.0-blue.svg?style=for-the-badge&logo=gnu&logoColor=white" alt="License">
+</a>
+&nbsp;
 <a href="./README.md">
   <img src="https://img.shields.io/badge/Status-Active_Development-violet?style=for-the-badge&logo=github&logoColor=white" alt="Status">
 </a>
@@ -391,7 +395,7 @@ npm run tauri dev
 
 ## 📜 License
 
-本项目采用 [PolyForm Noncommercial License 1.0.0](LICENSE) 开源协议。你可以自由地使用、修改和分发本项目，但**仅限于非商业用途**，且必须保留原始的版权声明。
+本项目采用 [GNU General Public License v3.0](LICENSE) 开源协议。你可以自由地使用、修改和分发本项目，只要你遵守 GPL-3.0 的相关条款。
 
 详情请参阅 [LICENSE](LICENSE) 文件。
 
