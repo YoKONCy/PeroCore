@@ -1,26 +1,36 @@
 [package]
-name = "pero-rust-core"
+name = "pero_rust_core"
 version = "0.2.1"
 edition = "2021"
-description = "High-performance memory and cognitive graph engine for Pero"
+description = "High-performance vision-intent-memory engine for Pero"
 license = "GPL-3.0"
-authors = ["YoKONCy <yokoncy@gmail.com>"]
+repository = "https://github.com/perofamily/perocore"
 
 [lib]
 name = "pero_rust_core"
 crate-type = ["cdylib"]
 
 [dependencies]
-# 核心算法依赖 (保持轻量)
+# Python 绑定
+pyo3 = { version = "0.21", features = ["extension-module"] }
+
+# ONNX Runtime 推理 (高性能, 有预编译库)
+# download-binaries: 自动下载预编译的 ONNX Runtime 库
+ort = { version = "2.0", default-features = false, features = ["download-binaries", "ndarray"] }
+ndarray = "0.16"
+
+# 图像处理 (用于 Rust 侧预处理, 可选)
+image = "0.25"
+
+# 高性能工具
 ahash = "0.8"
 rayon = "1.8"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 anyhow = "1.0"
 regex = "1.10"
-pyo3 = { version = "0.23", features = ["extension-module", "abi3-py310"] }
 
-# 向量索引 (可选 HNSW)
+# 向量索引 (可选 HNSW, 默认使用 SIMD 暴力搜索)
 usearch = { version = "2.8", optional = true }
 
 [features]
@@ -29,6 +39,10 @@ hnsw = ["usearch"]
 
 [profile.release]
 opt-level = 3
-lto = true
-codegen-units = 1
-strip = true
+lto = "fat"           # 使用完整 LTO 以获得最大优化
+codegen-units = 1     # 单代码单元，允许更好的跨函数优化
+panic = "abort"       # 减少代码体积，略微提升性能
+strip = true          # 移除调试符号
+
+# 针对当前 CPU 的优化 (需要在 .cargo/config.toml 中配置 target-cpu=native)
+# 这会启用 AVX2/FMA 等 SIMD 指令集
