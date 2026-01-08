@@ -1,9 +1,11 @@
 fastapi
 uvicorn
 sqlmodel
+pydantic>=2.0.0
 aiosqlite
 sqlalchemy
 psutil
+pyautogui
 python-multipart
 requests
 aiohttp

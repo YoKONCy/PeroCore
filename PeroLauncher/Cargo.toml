@@ -24,7 +24,7 @@ log = "0.4"
 tauri = { version = "2.9.5", features = ["tray-icon"] }
 tauri-plugin-log = "2"
 tauri-plugin-shell = "2"
-windows = { version = "0.52", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation"] }
+windows = { version = "0.52", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation", "Win32_Graphics_Dwm", "Win32_UI_Controls"] }
 reqwest = { version = "0.11", features = ["blocking", "json", "stream"] }
 zip = "0.6"
 winreg = "0.52"

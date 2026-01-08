@@ -15,7 +15,7 @@ import psutil
 import time
 import secrets
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import io
 
 if os.name == 'nt':

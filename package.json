@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "tauri": "npx tauri dev --config PeroLauncher/tauri.conf.json"
+    "tauri": "npx tauri dev --config PeroLauncher/tauri.conf.json",
+    "pkg:tauri": "npx tauri build --config PeroLauncher/tauri.conf.pkg.json"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",

@@ -85,3 +85,4 @@ jobs:
           releaseDraft: false
           prerelease: false
           projectPath: PeroLauncher
+          args: --config PeroLauncher/tauri.conf.pkg.json

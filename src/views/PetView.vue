@@ -848,6 +848,10 @@ const ensureMouthOverride = () => {
     // 防止重复 Hook
     if (model._mouthHooked) return
     
+    // 将找到的模型存入全局，方便鼠标追踪逻辑调用
+    if (!window._pero_models) window._pero_models = [];
+    if (!window._pero_models.includes(model)) window._pero_models.push(model);
+    
     console.log('[Pero] Lip-Sync: Installing hook for model', model)
     
     const core = model.live2DModel || model
@@ -1236,8 +1240,9 @@ const showWelcomeMessage = () => {
 
 onMounted(async () => {
    // Tauri Global Mouse Listener
-   if (window.__TAURI__) {
-       const invoke = window.__TAURI__.core?.invoke || window.__TAURI__.invoke;
+   // Tauri Global Mouse Listener
+   // if (window.__TAURI__) { // Removed obsolete check
+       // const invoke = window.__TAURI__.core?.invoke || window.__TAURI__.invoke; // Use imported invoke
        invoke('set_fix_window_topmost').catch(e => console.error('Failed to set topmost:', e));
 
        listen('mouse-pos', async (event) => {
@@ -1255,11 +1260,51 @@ onMounted(async () => {
                // Synthetic Event for Live2D Eyes (Live2D typically expects coordinates relative to the canvas/window)
                // Note: If Live2D widget handles DPI internally, we might need to adjust. 
                // Usually standard MouseEvent clientX/Y are in CSS pixels.
-               window.dispatchEvent(new MouseEvent('mousemove', {
+               const mouseEventInit = {
                    clientX: localX,
                    clientY: localY,
-                   bubbles: true
-               }));
+                   screenX: x,
+                   screenY: y,
+                   pageX: localX,
+                   pageY: localY,
+                   bubbles: true,
+                   cancelable: true
+               };
+               const mouseEvent = new MouseEvent('mousemove', mouseEventInit);
+               window.dispatchEvent(mouseEvent);
+               
+               // 尝试直接派发给 canvas 以确保一些库能正确接收
+               const canvas = document.querySelector('#live2d');
+               if (canvas) {
+                   canvas.dispatchEvent(new MouseEvent('mousemove', mouseEventInit));
+                   
+                   // 手动更新模型参数作为兜底
+                   if (window._pero_models && window._pero_models.length > 0) {
+                       const rect = canvas.getBoundingClientRect();
+                       const canvasX = localX - rect.left;
+                       const canvasY = localY - rect.top;
+                       
+                       // 归一化坐标 (-1 到 1)
+                       const normX = (canvasX / rect.width) * 2 - 1;
+                       const normY = 1 - (canvasY / rect.height) * 2;
+                       
+                       window._pero_models.forEach(model => {
+                           // 针对不同版本的 Live2D SDK 尝试设置不同的目标变量
+                           const target = model.live2DModel || model;
+                           
+                           // Cubism 2.1 风格
+                           if ('dragX' in target) target.dragX = normX;
+                           if ('dragY' in target) target.dragY = normY;
+                           if ('faceTargetX' in target) target.faceTargetX = normX;
+                           if ('faceTargetY' in target) target.faceTargetY = normY;
+                           
+                           // Cubism 4+ 风格 (如果使用了某些特定的 wrapper)
+                           if (target.focus && typeof target.focus === 'function') {
+                               target.focus(localX, localY);
+                           }
+                       });
+                   }
+               }
 
                // Hit Test
                if (showFileModal.value) { setIgnoreMouse(false); return; }
@@ -1338,7 +1383,7 @@ onMounted(async () => {
                }
            } catch(e) { console.error(e); }
        });
-   }
+   // }
 
    // 默认开启穿透
     // setIgnoreMouse(true) // Removed to avoid duplication
@@ -1436,13 +1481,14 @@ onMounted(async () => {
 // 设置鼠标穿透状态
  const setIgnoreMouse = (ignore) => {
    // Tauri Implementation
-   if (window.__TAURI__) {
+   // Tauri Implementation
+   // if (window.__TAURI__) {
        if (window._lastIgnoreState === ignore) return;
        console.log('Setting ignore mouse to:', ignore);
        window._lastIgnoreState = ignore;
        invoke('set_ignore_mouse', { ignore }).catch(e => console.error("set_ignore_mouse failed", e));
        return;
-   }
+   // }
  }
  
  // 区分点击和拖动
@@ -1704,8 +1750,13 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: transparent;
+  background: transparent !important;
   pointer-events: none; /* 允许点击穿透到桌面 */
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
 }
 
 .character-wrapper {

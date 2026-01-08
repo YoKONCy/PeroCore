@@ -1,7 +1,7 @@
 {
     "productName": "PeroCore",
     "version": "0.1.0",
-    "identifier": "com.perofamily.perocore",
+    "identifier": "com.perocore.dev",
     "build": {
         "beforeDevCommand": "npm run dev",
         "beforeBuildCommand": "npm run build",
@@ -9,15 +9,41 @@
         "frontendDist": "../dist"
     },
     "app": {
+        "withGlobalTauri": true,
         "windows": [
             {
-                "title": "Pero Launcher",
                 "label": "launcher",
-                "width": 800,
+                "url": "/#/launcher",
+                "title": "Pero Launcher",
+                "width": 900,
                 "height": 600,
-                "resizable": false,
+                "resizable": true,
+                "decorations": true,
+                "transparent": false,
+                "alwaysOnTop": false,
+                "visible": true,
+                "center": true
+            },
+            {
+                "label": "pet",
+                "url": "/#/pet",
+                "title": "PeroCore",
+                "width": 700,
+                "height": 700,
+                "resizable": true,
+                "minWidth": 700,
+                "maxWidth": 700,
+                "minHeight": 700,
+                "maxHeight": 700,
                 "fullscreen": false,
-                "visible": false
+                "decorations": false,
+                "transparent": true,
+                "alwaysOnTop": true,
+                "skipTaskbar": true,
+                "visible": false,
+                "shadow": false,
+                "contentProtected": false,
+                "maximizable": false
             }
         ],
         "security": {
@@ -35,8 +61,18 @@
             "icons/icon.ico"
         ],
         "resources": [
-            "src-tauri/python/**/*",
-            "../backend/**/*"
+            "../backend/nit_core/tools/**/*.py",
+            "../backend/nit_core/tools/**/*.json",
+            "../backend/nit_core/plugins/**/*.py",
+            "../backend/nit_core/plugins/**/*.json",
+            "../backend/models/**/*.json",
+            "../backend/models/**/*.bin",
+            "../backend/models/**/*.onnx",
+            "../backend/assets/**/*",
+            "../backend/prompts/**/*",
+            "../backend/services/mdp/prompts/**/*",
+            "../backend/*.py",
+            "../backend/requirements.txt"
         ]
     }
 }

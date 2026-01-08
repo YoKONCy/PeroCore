@@ -7,8 +7,12 @@ logger = logging.getLogger(__name__)
 class ConfigManager:
     _instance = None
     
-    def __init__(self, config_path="config.json"):
-        # If path is relative, make it relative to backend root (where main.py is)
+    def __init__(self, config_path=None):
+        # 优先级：环境变量 > 传入参数 > 默认路径
+        if not config_path:
+            config_path = os.environ.get("PERO_CONFIG_PATH", "config.json")
+
+        # If path is relative, make it relative to backend root
         if not os.path.isabs(config_path):
              base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
              config_path = os.path.join(base_dir, config_path)

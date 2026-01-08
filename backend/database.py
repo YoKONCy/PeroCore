@@ -7,34 +7,34 @@ from pathlib import Path
 import shutil
 
 # 定义数据库路径
-# 旧路径: 用户主目录
-old_db_path = Path.home() / ".perocore" / "perocore.db"
-
-# 新路径: 项目内部 backend/data
-BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = BASE_DIR / "data"
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-new_db_path = DATA_DIR / "perocore.db"
-
-# 自动迁移逻辑
-if old_db_path.exists() and not new_db_path.exists():
-    print(f"[Database] Migrating from {old_db_path} to {new_db_path}...")
-    try:
-        shutil.move(str(old_db_path), str(new_db_path))
-        print("[Database] Migration successful.")
-    except Exception as e:
-        print(f"[Database] Migration failed: {e}. Using old path as fallback.")
-        db_path = old_db_path
+# 优先级：环境变量 > 项目内部 backend/data > 用户主目录
+env_db_path = os.environ.get("PERO_DATABASE_PATH")
+if env_db_path:
+    db_path = Path(env_db_path)
+else:
+    # 自动定位逻辑
+    BASE_DIR = Path(__file__).resolve().parent
+    DATA_DIR = BASE_DIR / "data"
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    new_db_path = DATA_DIR / "perocore.db"
+    
+    # 旧路径: 用户主目录 (用于向后兼容)
+    old_db_path = Path.home() / ".perocore" / "perocore.db"
+    
+    if old_db_path.exists() and not new_db_path.exists():
+        print(f"[Database] Migrating from {old_db_path} to {new_db_path}...")
+        try:
+            import shutil
+            shutil.move(str(old_db_path), str(new_db_path))
+            print("[Database] Migration successful.")
+            db_path = new_db_path
+        except Exception as e:
+            print(f"[Database] Migration failed: {e}. Using old path as fallback.")
+            db_path = old_db_path
     else:
         db_path = new_db_path
-elif new_db_path.exists():
-    # 如果新路径已经存在，直接使用
-    db_path = new_db_path
-else:
-    # 都不存在，初始化新路径
-    db_path = new_db_path
 
-# 转换为绝对路径，确保 aiosqlite 能正确识别 Windows 路径
+# 转换为绝对路径
 abs_db_path = db_path.resolve()
 # 在 Windows 上，aiosqlite 需要 sqlite:////C:/path/to/db (4个斜杠)
 # 或者使用 Path.as_uri() 的变体
