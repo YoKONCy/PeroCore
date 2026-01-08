@@ -3,8 +3,8 @@ name: Publish to PyPI
 on:
   push:
     tags:
-      - 'v*' # 当你推送以 v 开头的标签（如 v0.2.1）时触发
-  workflow_dispatch: # 也可以手动触发
+      - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -24,7 +24,9 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: --release --out dist --sdist -m backend/rust_core/Cargo.toml
+          # 关键修改：直接指定工作目录
+          working-directory: backend/rust_core
+          args: --release --out ../../dist --sdist
           manylinux: auto
       - name: Upload wheels
         uses: actions/upload-artifact@v4
@@ -46,7 +48,9 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: --release --out dist -m backend/rust_core/Cargo.toml
+          # 关键修改：直接指定工作目录
+          working-directory: backend/rust_core
+          args: --release --out ../../dist
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
