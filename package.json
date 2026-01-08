@@ -2,7 +2,7 @@
   "name": "perocore",
   "private": true,
   "version": "0.0.0",
-  "license": "MIT",
+  "license": "GPL-3.0",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {

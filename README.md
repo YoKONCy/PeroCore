@@ -13,6 +13,10 @@
 <br/><br/>
 
 <!-- 徽章导航 -->
+<a href="./LICENSE">
+  <img src="https://img.shields.io/badge/License-GPL--3.0-blue.svg?style=for-the-badge&logo=gnu&logoColor=white" alt="License">
+</a>
+&nbsp;
 <a href="./README.md">
   <img src="https://img.shields.io/badge/Status-Active_Development-violet?style=for-the-badge&logo=github&logoColor=white" alt="Status">
 </a>
