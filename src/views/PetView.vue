@@ -118,6 +118,7 @@
           @mousedown.stop="startPTT"
           @mouseup.stop="stopPTT"
           @mouseleave.stop="stopPTT"
+          style="-webkit-app-region: no-drag;"
         >
           <div class="ptt-button" :class="{ recording: isPTTRecording }">
             <div class="ptt-icon">🎙️</div>
@@ -158,6 +159,33 @@ const voiceModeTitle = computed(() => {
   return '语音对话: 按住说话 (PTT)'
 })
 
+const handleGlobalKeyDown = (e) => {
+  // 1. Alt + V 切换语音模式
+  if (e.altKey && e.code === 'KeyV') {
+    e.preventDefault()
+    cycleVoiceMode()
+    return
+  }
+
+  // 2. 空格键 PTT (仅在非输入状态且模式为 2 时)
+  if (e.code === 'Space' && voiceMode.value === 2 && !isPTTRecording.value) {
+    // 检查是否正在输入
+    const activeEl = document.activeElement
+    const isInput = activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.isContentEditable
+    
+    if (!isInput) {
+      e.preventDefault()
+      startPTT()
+    }
+  }
+}
+
+const handleGlobalKeyUp = (e) => {
+  if (e.code === 'Space' && voiceMode.value === 2 && isPTTRecording.value) {
+    stopPTT()
+  }
+}
+
 const cycleVoiceMode = async () => {
   const nextMode = (voiceMode.value + 1) % 3
   voiceMode.value = nextMode
@@ -173,8 +201,19 @@ const cycleVoiceMode = async () => {
   }
 }
 
-const startPTT = () => {
-  if (voiceMode.value !== 2 || isThinking.value || isSpeaking.value) return
+const startPTT = async () => {
+    if (voiceMode.value !== 2) return
+    
+    if (isThinking.value || isSpeaking.value) {
+      console.log('PTT Ignored: Pero is busy', { isThinking: isThinking.value, isSpeaking: isSpeaking.value })
+      return
+    }
+    
+    // 确保 AudioContext 已激活
+  if (audioContext.value && audioContext.value.state === 'suspended') {
+    await audioContext.value.resume()
+  }
+
   isPTTRecording.value = true
   isSpeakingState = true
   audioBuffer = []
@@ -194,6 +233,8 @@ const audioContext = ref(null)
 const mediaStream = ref(null)
 const scriptProcessor = ref(null)
 const currentAudioSource = ref(null)
+const audioQueue = ref([])
+const isAudioPlaying = ref(false)
 
 const currentText = ref('主人，我在桌面等你很久啦！')
 // const showTaskDetail = ref(false) // 弃用，改为独立窗口
@@ -204,8 +245,8 @@ const parsedBubbleContent = computed(() => {
   if (!text) return []
 
   const segments = []
-  // 只有在行首或换行符后的 *...* 才被视为 Action，避免误伤文本中的强调
-  const regex = /【(Thinking|Error|Reflection)[:：]?\s*([\s\S]*?)】|(?:\n|^)\s*\*([^\*\n]+)\*/gi
+  // 增加对标准 Thought: 和 Action: 格式的支持
+  const regex = /(?:【(Thinking|Error|Reflection)[:：]?\s*([\s\S]*?)】)|(?:\n|^)\s*\*([^\*\n]+)\*|(?:\n|^)\s*(Thought|Action)[:：]\s*([^\n]+)/gi
   
   let lastIndex = 0
   let match
@@ -221,11 +262,15 @@ const parsedBubbleContent = computed(() => {
     
     // 2. 判断匹配类型
     if (match[1] !== undefined) {
-        // Tagged 块
+        // Tagged 块 (Thinking/Error/Reflection)
         segments.push({ type: match[1].toLowerCase(), content: match[2].trim() })
     } else if (match[3] !== undefined) {
-        // Action 块
+        // Action 块 (*Action*)
         segments.push({ type: 'action', content: match[3].trim() })
+    } else if (match[4] !== undefined) {
+        // 标准 ReAct 块 (Thought:/Action:)
+        const type = match[4].toLowerCase() === 'thought' ? 'thinking' : 'action'
+        segments.push({ type, content: match[5].trim() })
     }
     
     lastIndex = regex.lastIndex
@@ -284,6 +329,10 @@ onMounted(async () => {
   // 初始开启穿透
   setIgnoreMouse(true)
   
+  // 监听键盘快捷键
+  window.addEventListener('keydown', handleGlobalKeyDown)
+  window.addEventListener('keyup', handleGlobalKeyUp)
+
   // 监听后端日志
   const unlistenLog = await listen('backend-log', (event) => {
     console.log('[Backend]', event.payload)
@@ -327,7 +376,27 @@ const moodText = ref(localStorage.getItem('ppc.mood') || '开心')
 const mindText = ref(localStorage.getItem('ppc.mind') || '正在想主人...')
 const vibeText = ref(localStorage.getItem('ppc.vibe') || '活泼')
 
+const authToken = ref('')
+
+const fetchAuthToken = async () => {
+    try {
+        const res = await fetch('http://localhost:3000/api/configs')
+        if (res.ok) {
+            const data = await res.json()
+            if (data.frontend_access_token) {
+                authToken.value = data.frontend_access_token
+                // console.log('Auth token fetched:', authToken.value)
+            }
+        }
+    } catch (e) {
+        console.error('Failed to fetch auth token:', e)
+    }
+}
+
 const fetchPetState = async () => {
+    // 顺便更新 Token，防止后端重启后 Token 失效
+    await fetchAuthToken()
+
     try {
         const res = await fetch('http://localhost:3000/api/pet/state')
         if (res.ok) {
@@ -356,9 +425,25 @@ const toggleVoiceMode = async () => {
 };
 
 const startVoiceMode = async () => {
+    console.log('[Voice] Starting voice mode...');
     try {
+        // 0. 确保 AudioContext 存在并激活
+        if (!audioContext.value || audioContext.value.state === 'closed') {
+            audioContext.value = new (window.AudioContext || window.webkitAudioContext)()
+        }
+        if (audioContext.value.state === 'suspended') {
+            await audioContext.value.resume()
+        }
+
         // 1. 获取麦克风权限
         mediaStream.value = await navigator.mediaDevices.getUserMedia({ audio: true });
+        
+        // 检查音频轨道
+        const audioTracks = mediaStream.value.getAudioTracks();
+        if (audioTracks.length === 0) {
+            throw new Error('No audio tracks found in media stream');
+        }
+        console.log('[Voice] Microphone access granted:', audioTracks[0].label);
         
         // 2. 连接 WebSocket
         voiceWs.value = new WebSocket('ws://localhost:3000/ws/voice');
@@ -552,6 +637,7 @@ const handleVoiceMessage = (event) => {
     if (msg.type === 'status') {
         if (msg.content === 'listening') {
              // 可以在 UI 上显示“正在听...”
+             stopAudioPlayback(true)
              isThinking.value = true
              thinkingMessage.value = '正在听主人说话...'
              currentText.value = ''
@@ -661,7 +747,12 @@ const applyTriggers = (data) => {
 
 const lipSyncFrame = ref(null)
 
-const stopAudioPlayback = () => {
+const stopAudioPlayback = (clearQueue = false) => {
+    if (clearQueue) {
+        audioQueue.value = []
+        isAudioPlaying.value = false
+    }
+    
     if (currentAudioSource.value) {
         try {
             currentAudioSource.value.stop()
@@ -675,18 +766,34 @@ const stopAudioPlayback = () => {
 }
 
 const playAudio = async (base64Audio) => {
-    // 播放新语音前，先停止旧的
-    stopAudioPlayback()
+    if (!base64Audio) return
+    
+    // 将新音频加入队列
+    audioQueue.value.push(base64Audio)
+    
+    // 如果当前没有在播放，则开始处理队列
+    if (!isAudioPlaying.value) {
+        processAudioQueue()
+    }
+}
+
+const processAudioQueue = async () => {
+    if (audioQueue.value.length === 0) {
+        isAudioPlaying.value = false
+        isSpeaking.value = false
+        return
+    }
+
+    isAudioPlaying.value = true
+    const base64Audio = audioQueue.value.shift()
 
     isSpeaking.value = true
     
     // 1. 准备 AudioContext
     let ctx = audioContext.value
-    let isTempCtx = false
     
     if (!ctx || ctx.state === 'closed') {
         ctx = new (window.AudioContext || window.webkitAudioContext)()
-        isTempCtx = true
         audioContext.value = ctx
     }
     
@@ -694,13 +801,12 @@ const playAudio = async (base64Audio) => {
     if (ctx.state === 'suspended') {
         try {
             await ctx.resume()
-            console.log('[Pero] AudioContext resumed')
         } catch (e) {
             console.warn('[Pero] Failed to resume AudioContext:', e)
         }
     }
     
-    // 2. 解码音频数据 (使用 decodeAudioData 比 MediaElementSource 更稳定)
+    // 2. 解码音频数据
     try {
         const binaryString = window.atob(base64Audio)
         const len = binaryString.length
@@ -727,16 +833,19 @@ const playAudio = async (base64Audio) => {
         startLipSync(analyser)
         
         source.onended = () => {
-            isSpeaking.value = false
+            currentAudioSource.value = null
             stopLipSync()
             source.disconnect()
             analyser.disconnect()
+            
+            // 播放完当前音频后，继续处理队列
+            processAudioQueue()
         }
         
     } catch (e) {
         console.error('[Pero] Audio decode error:', e)
-        isSpeaking.value = false
-        stopLipSync()
+        // 发生错误时，也尝试播放下一条
+        processAudioQueue()
     }
 }
 
@@ -1312,7 +1421,7 @@ onMounted(async () => {
                let el = document.elementFromPoint(localX, localY);
                 
                 // [Fix] 增加兜底逻辑：如果 elementFromPoint 没拿到元素（可能因为透明度或层级问题），
-                // 但坐标在角色区域内，则尝试手动判定
+                // 但坐标在角色区域或 PTT 区域内，则尝试手动判定
                 if (!el) {
                     const wrapper = document.querySelector('.character-wrapper');
                     if (wrapper) {
@@ -1320,6 +1429,18 @@ onMounted(async () => {
                         if (localX >= rect.left && localX <= rect.right && 
                             localY >= rect.top && localY <= rect.bottom) {
                             el = wrapper;
+                        }
+                    }
+                    
+                    // 额外检查 PTT 按钮区域
+                    if (voiceMode.value === 2 && showInput.value) {
+                        const ptt = document.querySelector('.ptt-container');
+                        if (ptt) {
+                            const rect = ptt.getBoundingClientRect();
+                            if (localX >= rect.left && localX <= rect.right && 
+                                localY >= rect.top && localY <= rect.bottom) {
+                                el = ptt;
+                            }
                         }
                     }
                 }
@@ -1605,6 +1726,9 @@ const sendMessage = async (systemMsg = null, isHidden = false) => {
     showInput.value = false
   }
   
+  // 发送新消息时，停止当前播放并清空队列
+  stopAudioPlayback(true)
+  
   isSpeaking.value = true
   isThinking.value = true
   currentText.value = ''
@@ -1629,15 +1753,24 @@ const sendMessage = async (systemMsg = null, isHidden = false) => {
   }
 
   try {
+    const headers = { 'Content-Type': 'application/json' }
+    if (authToken.value) {
+        headers['Authorization'] = `Bearer ${authToken.value}`
+    }
+
     const response = await fetch('http://localhost:3000/api/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: headers,
       body: JSON.stringify({
         messages: [{ role: 'user', content: userMsg }],
         source: 'desktop',
         session_id: desktopSessionId
       })
     })
+
+    if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+    }
 
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
@@ -1726,9 +1859,10 @@ const sendMessage = async (systemMsg = null, isHidden = false) => {
 onUnmounted(() => {
   // 1. 清理定时器
   if (replyTimer) clearTimeout(replyTimer)
-  if (stateSyncTimer) clearInterval(stateSyncTimer)
   
   // 2. 移除交互监听
+  window.removeEventListener('keydown', handleGlobalKeyDown)
+  window.removeEventListener('keyup', handleGlobalKeyUp)
   window.removeEventListener('ppc:mood', onMoodUpdate)
   window.removeEventListener('ppc:mind', onMindUpdate)
   window.removeEventListener('ppc:vibe', onVibeUpdate)
@@ -1737,6 +1871,7 @@ onUnmounted(() => {
 
   // 3. 停止语音模式和清理资源
   stopVoiceMode()
+  stopAudioPlayback(true)
   stopLipSync()
   
   console.log('PetView unmounted and cleaned up.')

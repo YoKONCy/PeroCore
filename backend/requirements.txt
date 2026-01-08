@@ -8,6 +8,7 @@ psutil
 pyautogui
 python-multipart
 requests
+httpx
 aiohttp
 loguru
 pydantic-settings
@@ -20,18 +21,21 @@ edge-tts
 faster-whisper
 torch
 safetensors
-numpy
+numpy<2.0.0
 sentence-transformers
 sounddevice
 soundfile
 # Image/Vision
 pillow
 opencv-python
+easyocr
 # Others
 pytz
 pyyaml
 beautifulsoup4
 pymupdf
+python-docx
+pyperclip
 praat-parselmouth
 websockets
 tenacity

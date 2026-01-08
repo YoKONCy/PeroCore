@@ -645,13 +645,17 @@ class MemoryService:
         
         result_memories = []
         if top_candidates:
-            docs = [m.content for m in top_candidates]
-            rerank_results = embedding_service.rerank(text, docs, top_k=limit)
-            
-            # 根据 Rerank 结果重新组装
-            for res in rerank_results:
-                original_idx = res["index"]
-                result_memories.append(top_candidates[original_idx])
+            try:
+                docs = [m.content for m in top_candidates]
+                rerank_results = embedding_service.rerank(text, docs, top_k=limit)
+                
+                # 根据 Rerank 结果重新组装
+                for res in rerank_results:
+                    original_idx = res["index"]
+                    result_memories.append(top_candidates[original_idx])
+            except Exception as e:
+                print(f"[Memory] Reranking failed: {e}. Falling back to initial scores.")
+                result_memories = top_candidates[:limit]
         else:
             result_memories = top_candidates[:limit]
 

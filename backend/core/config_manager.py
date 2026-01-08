@@ -21,7 +21,8 @@ class ConfigManager:
         self.config = {
             "napcat_ws_url": "ws://localhost:3001",
             "napcat_http_url": "http://localhost:3000",
-            "lightweight_mode": False
+            "lightweight_mode": False,
+            "aura_vision_enabled": False
         }
         self.load_config()
 

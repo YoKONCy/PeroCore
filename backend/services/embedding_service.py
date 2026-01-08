@@ -59,22 +59,46 @@ class EmbeddingService:
                 print(f"[Embedding] Error loading reranker: {e}", flush=True)
                 raise e
 
+    def warm_up(self):
+        """
+        预热模型，防止首次请求超时
+        """
+        print("[Embedding] Warming up models...", flush=True)
+        try:
+            self._load_model()
+            self._load_reranker()
+            # 进行一次简单的推理以确保 GPU/CPU 内存完全加载
+            if self._model:
+                self._model.encode(["warm up"])
+            if self._cross_encoder:
+                self._cross_encoder.predict([["warm up", "test"]])
+            print("[Embedding] Warm up complete.", flush=True)
+        except Exception as e:
+            print(f"[Embedding] Warm up failed: {e}", flush=True)
+
     def encode(self, texts: List[str]) -> List[List[float]]:
         """
         生成文本向量
         """
-        self._load_model()
-        if not texts:
+        try:
+            self._load_model()
+            if not texts or self._model is None:
+                return []
+            
+            embeddings = self._model.encode(texts)
+            # 转换为 list
+            return embeddings.tolist()
+        except Exception as e:
+            print(f"[Embedding] Encode failed: {e}", flush=True)
             return []
-        
-        embeddings = self._model.encode(texts)
-        # 转换为 list
-        return embeddings.tolist()
 
     def encode_one(self, text: str) -> List[float]:
         """生成单条文本向量"""
-        result = self.encode([text])
-        return result[0] if result else []
+        try:
+            result = self.encode([text])
+            return result[0] if result else []
+        except Exception:
+            return []
 
     def compute_similarity(self, query_embedding: List[float], doc_embeddings: List[List[float]]) -> List[float]:
         """
@@ -108,34 +132,39 @@ class EmbeddingService:
         使用 Cross-Encoder 对文档进行重排序
         返回: [{"index": original_index, "score": float, "doc": str}, ...]
         """
-        self._load_reranker()
-        if not docs:
-            return []
+        try:
+            self._load_reranker()
+            if not docs or self._cross_encoder is None:
+                return []
+                
+            # [Performance] BGE-Reranker-v2-M3 性能开销较大
+            # 限制输入文档数量，确保精排在 1 秒内完成
+            max_rerank_docs = 15
+            if len(docs) > max_rerank_docs:
+                print(f"[Embedding] Truncating rerank input from {len(docs)} to {max_rerank_docs} for performance.")
+                docs = docs[:max_rerank_docs]
+                
+            pairs = [[query, doc] for doc in docs]
+            scores = self._cross_encoder.predict(pairs)
             
-        # [Performance] BGE-Reranker-v2-M3 性能开销较大
-        # 限制输入文档数量，确保精排在 1 秒内完成
-        max_rerank_docs = 15
-        if len(docs) > max_rerank_docs:
-            print(f"[Embedding] Truncating rerank input from {len(docs)} to {max_rerank_docs} for performance.")
-            docs = docs[:max_rerank_docs]
+            results = []
+            for i, score in enumerate(scores):
+                results.append({
+                    "index": i,
+                    "score": float(score),
+                    "doc": docs[i]
+                })
+                
+            # 按分数降序
+            results.sort(key=lambda x: x["score"], reverse=True)
             
-        pairs = [[query, doc] for doc in docs]
-        scores = self._cross_encoder.predict(pairs)
-        
-        results = []
-        for i, score in enumerate(scores):
-            results.append({
-                "index": i,
-                "score": float(score),
-                "doc": docs[i]
-            })
-            
-        # 按分数降序
-        results.sort(key=lambda x: x["score"], reverse=True)
-        
-        if top_k:
-            return results[:top_k]
-        return results
+            if top_k:
+                return results[:top_k]
+            return results
+        except Exception as e:
+            print(f"[Embedding] Rerank failed: {e}", flush=True)
+            # 返回原始顺序的分数（降级）
+            return [{"index": i, "score": 1.0, "doc": doc} for i, doc in enumerate(docs[:top_k] if top_k else docs)]
 
 # 全局单例
 embedding_service = EmbeddingService()

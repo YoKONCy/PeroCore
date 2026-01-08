@@ -60,19 +60,6 @@
             "icons/icon.icns",
             "icons/icon.ico"
         ],
-        "resources": [
-            "../backend/nit_core/tools/**/*.py",
-            "../backend/nit_core/tools/**/*.json",
-            "../backend/nit_core/plugins/**/*.py",
-            "../backend/nit_core/plugins/**/*.json",
-            "../backend/models/**/*.json",
-            "../backend/models/**/*.bin",
-            "../backend/models/**/*.onnx",
-            "../backend/assets/**/*",
-            "../backend/prompts/**/*",
-            "../backend/services/mdp/prompts/**/*",
-            "../backend/*.py",
-            "../backend/requirements.txt"
-        ]
+        "resources": []
     }
 }

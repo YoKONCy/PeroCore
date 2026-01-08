@@ -316,6 +316,30 @@
                 </el-col>
               </el-row>
 
+              <!-- 主动视觉感应卡片 -->
+              <el-row :gutter="20" style="margin-top: 20px;">
+                <el-col :span="24">
+                  <el-card shadow="hover" class="glass-card" :body-style="{ padding: '15px 20px' }">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                      <div style="display: flex; align-items: center; gap: 15px;">
+                        <div style="font-size: 24px;">🔮</div>
+                        <div>
+                           <div style="font-weight: bold; font-size: 16px;">主动视觉感应 (AuraVision)</div>
+                           <div style="font-size: 13px; color: #666; margin-top: 4px;">开启后，Pero 将通过摄像头主动感知你的存在并触发互动。采用隐私保护设计，仅提取特征。</div>
+                        </div>
+                      </div>
+                      <el-switch 
+                        v-model="isAuraVisionEnabled" 
+                        active-text="ON" 
+                        inactive-text="OFF"
+                        @change="toggleAuraVision"
+                        :loading="isTogglingAuraVision"
+                      />
+                    </div>
+                  </el-card>
+                </el-col>
+              </el-row>
+
               <!-- 陪伴模式卡片 -->
               <el-row :gutter="20" style="margin-top: 20px;">
                 <el-col :span="24">
@@ -1003,6 +1027,8 @@ const isSocialEnabled = ref(false)
 const isTogglingSocial = ref(false)
 const isLightweightEnabled = ref(false)
 const isTogglingLightweight = ref(false)
+const isAuraVisionEnabled = ref(false)
+const isTogglingAuraVision = ref(false)
 const isLogsFetching = ref(false)
 
 // 编辑日志状态
@@ -1033,8 +1059,8 @@ const isViewingHistory = ref(false)
 const parseReActSegments = (text) => {
   if (!text) return []
   const segments = []
-  // 只有在行首或换行符后的 *...* 才被视为 Action，避免误伤文本中的强调
-  const regex = /【(Thinking|Error|Reflection)[:：]?\s*([\s\S]*?)】|(?:\n|^)\s*\*([^\*\n]+)\*/gi
+  // 增加对标准 Thought: 和 Action: 格式的支持
+  const regex = /(?:【(Thinking|Error|Reflection)[:：]?\s*([\s\S]*?)】)|(?:\n|^)\s*\*([^\*\n]+)\*|(?:\n|^)\s*(Thought|Action)[:：]\s*([^\n]+)/gi
   
   let lastIndex = 0
   let match
@@ -1046,12 +1072,16 @@ const parseReActSegments = (text) => {
     }
     
     if (match[1] !== undefined) {
-        // Tagged block
-        const type = match[1].toLowerCase() // thinking, error, reflection
+        // Tagged block (Thinking/Error/Reflection)
+        const type = match[1].toLowerCase()
         segments.push({ type, content: match[2].trim() })
     } else if (match[3] !== undefined) {
-        // Action block
+        // Action block (*Action*)
         segments.push({ type: 'action', content: match[3].trim() })
+    } else if (match[4] !== undefined) {
+        // Standard ReAct block (Thought:/Action:)
+        const type = match[4].toLowerCase() === 'thought' ? 'thinking' : 'action'
+        segments.push({ type, content: match[5].trim() })
     }
     
     lastIndex = regex.lastIndex
@@ -1351,6 +1381,7 @@ const fetchAllData = async () => {
         fetchCompanionStatus(),
         fetchSocialStatus(),
         fetchLightweightStatus(),
+        fetchAuraVisionStatus(),
         fetchNitStatus()
       ])
     } catch (e) { console.error('Secondary fetch error:', e) }
@@ -1668,6 +1699,43 @@ const toggleLightweight = async (val) => {
     ElMessage.error('网络错误')
   } finally {
     isTogglingLightweight.value = false
+  }
+}
+
+const fetchAuraVisionStatus = async () => {
+  try {
+    const res = await fetchWithTimeout(`${API_BASE}/config/aura_vision`, {}, 3000)
+    if (res.ok) {
+      const data = await res.json()
+      isAuraVisionEnabled.value = data.enabled
+    }
+  } catch (e) {
+    console.error('Failed to fetch AuraVision status', e)
+  }
+}
+
+const toggleAuraVision = async (val) => {
+  try {
+    isTogglingAuraVision.value = true
+    const res = await fetchWithTimeout(`${API_BASE}/config/aura_vision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: val })
+    }, 5000)
+    
+    if (res.ok) {
+      const data = await res.json()
+      isAuraVisionEnabled.value = data.enabled
+      ElMessage.success(data.enabled ? '已开启主动视觉感应 (AuraVision)' : '已关闭主动视觉感应 (AuraVision)')
+    } else {
+      isAuraVisionEnabled.value = !val // revert
+      ElMessage.error('切换失败')
+    }
+  } catch (e) {
+    isAuraVisionEnabled.value = !val // revert
+    ElMessage.error('网络错误')
+  } finally {
+    isTogglingAuraVision.value = false
   }
 }
 

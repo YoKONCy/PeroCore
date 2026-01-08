@@ -907,6 +907,7 @@ Instruction: When opening an app, check this list first. If it's already running
             print("[Agent] Native Tools (Function Calling) are DISABLED via config.")
 
         full_response_text = ""
+        accumulated_full_response = "" # 用于保存完整的对话记录（包含所有 ReAct 轮次的思考过程）
         pair_id = str(uuid.uuid4()) # 生成原子性绑定ID
         
         # --- ReAct Loop Configuration ---
@@ -1115,6 +1116,7 @@ Instruction: When opening an app, check this list first. If it's already running
                                     })
 
                             # 5. 重置状态，准备下一轮
+                            accumulated_full_response += full_response_text + "\n"
                             full_response_text = ""
                             current_turn_text = "" 
                             collected_tool_calls = []
@@ -1497,6 +1499,9 @@ Instruction: When opening an app, check this list first. If it's already running
                 # Loop continues to next turn...
 
             try:
+                # 5. 最终合并所有轮次的内容用于持久化
+                full_response_text = accumulated_full_response + full_response_text
+
                 # Post-process full response text (Batch mode) before saving
                 # This ensures memory and downstream services get clean text without protocol markers
                 if full_response_text:

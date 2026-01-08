@@ -49,6 +49,7 @@ from services.asr_service import get_asr_service
 from services.tts_service import get_tts_service
 from services.voice_manager import voice_manager
 from services.companion_service import companion_service
+from services.embedding_service import embedding_service
 from services.browser_bridge_service import browser_bridge_service
 from services.screenshot_service import screenshot_manager
 from services.social_service import get_social_service
@@ -64,9 +65,21 @@ async def lifespan(app: FastAPI):
     await companion_service.start()
     screenshot_manager.start_background_task()
     
+    # 异步预热 Embedding 模型
+    asyncio.create_task(asyncio.to_thread(embedding_service.warm_up))
+    
     # Start Social Service (if enabled)
     social_service = get_social_service()
     await social_service.start()
+
+    # Start AuraVision (if enabled)
+    config_mgr = get_config_manager()
+    if config_mgr.get("aura_vision_enabled", False):
+        from services.aura_vision_service import aura_vision_service
+        if aura_vision_service.initialize():
+            asyncio.create_task(aura_vision_service.start_vision_loop())
+        else:
+            print("[Main] Failed to initialize AuraVision Service.")
 
     # Cleanup task
     async def periodic_cleanup():
@@ -623,6 +636,26 @@ async def get_lightweight_mode():
 @app.post("/api/config/lightweight_mode")
 async def set_lightweight_mode(enabled: bool = Body(..., embed=True)):
     get_config_manager().set("lightweight_mode", enabled)
+    return {"status": "success", "enabled": enabled}
+
+@app.get("/api/config/aura_vision")
+async def get_aura_vision_mode():
+    return {"enabled": get_config_manager().get("aura_vision_enabled", False)}
+
+@app.post("/api/config/aura_vision")
+async def set_aura_vision_mode(enabled: bool = Body(..., embed=True)):
+    get_config_manager().set("aura_vision_enabled", enabled)
+    
+    from services.aura_vision_service import aura_vision_service
+    if enabled:
+        if not aura_vision_service.is_running:
+            if aura_vision_service.initialize():
+                asyncio.create_task(aura_vision_service.start_vision_loop())
+            else:
+                return {"status": "error", "message": "Failed to initialize AuraVision Service"}
+    else:
+        aura_vision_service.stop()
+        
     return {"status": "success", "enabled": enabled}
 
 @app.delete("/api/memories/by_timestamp/{msg_timestamp}")

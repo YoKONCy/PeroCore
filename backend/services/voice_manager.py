@@ -43,29 +43,44 @@ class RealtimeVoiceManager:
         from nit_core.dispatcher import remove_nit_tags
         cleaned = remove_nit_tags(cleaned)
         
-        # 3. 移除思考过程 【Thinking: ...】
+        # 3. 移除思考过程 【Thinking: ...】 或 ReAct 风格的 Thought/Action/Observation
         # 如果是用于 TTS，必须移除；如果是用于 UI展示，可以保留（由前端折叠）
         if for_tts:
             cleaned = re.sub(r'【Thinking.*?】', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
+            # 移除 ReAct 关键词行
+            cleaned = re.sub(r'^(Thought|Action|Action Input|Observation|Result|Prompt):.*$', '', cleaned, flags=re.MULTILINE | re.IGNORECASE)
+            
+            # 提取 "Final Answer" 之后的内容 (如果存在)
+            final_answer_match = re.search(r'(Final Answer|最终回答|回复):?\s*(.*)', cleaned, flags=re.DOTALL | re.IGNORECASE)
+            if final_answer_match:
+                cleaned = final_answer_match.group(2)
         
-        # 4. 移除动作描述 *...*
-        # TTS 通常不读动作，UI 可以选择保留或移除。这里为了保持一致性，TTS 模式下移除。
-        # 如果是为了 UI 展示，保留动作描述可能更好，增加表现力。
+        # 4. 移除动作描述 *...* 或 (动作)
         if for_tts:
             cleaned = re.sub(r'\*.*?\*', '', cleaned)
+            cleaned = re.sub(r'\(.*?\)', '', cleaned) # 移除括号内的动作或备注
         
-        # 5. 移除括号内的备注 (可选，视情况而定)
-        # cleaned = re.sub(r'\(.*?\)', '', cleaned)
+        # 5. 移除 Markdown 标记
+        if for_tts:
+            cleaned = re.sub(r'#+\s+', '', cleaned) # 移除标题符号
+            cleaned = re.sub(r'\[(.*?)\]\(.*?\)', r'\1', cleaned) # 移除链接，只保留文字
+            cleaned = re.sub(r'[*_`]', '', cleaned) # 移除粗体、斜体、代码块标记
         
         # 6. 移除多余空白
         cleaned = re.sub(r'\n+', '\n', cleaned)
         
-        # 7. [Feature] Chatter Removal: Only read the last paragraph if for_tts is True
-        # This helps avoid reading "Thinking" chatter or prefix text that is not the main response
+        # 7. [Feature] Chatter Removal: Only read the response parts
+        # If the text is still very long and contains "Thought" style chatter that wasn't caught,
+        # we take the last non-empty segment.
         if for_tts:
              segments = [s.strip() for s in cleaned.split('\n') if s.strip()]
              if segments:
-                 cleaned = segments[-1]
+                 # 如果有多个段落，通常最后一段是总结或回复
+                 # 但如果最后一段很短（比如“谢谢”），可能需要合并
+                 if len(segments) > 1 and len(segments[-1]) < 5:
+                     cleaned = segments[-2] + " " + segments[-1]
+                 else:
+                     cleaned = segments[-1]
                  
         return cleaned.strip()
 
