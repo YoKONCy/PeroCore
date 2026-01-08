@@ -50,7 +50,8 @@ impl ActivationGraph {
 
             // 自动剪枝: 保留权重最高的 max_fan_out 个邻居
             if neighbors.len() > self.max_fan_out {
-                neighbors.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                neighbors
+                    .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
                 neighbors.truncate(self.max_fan_out);
             }
         }
@@ -439,6 +440,21 @@ impl VisionIntentMemoryManager {
             .into_iter()
             .map(|(sim, anchor)| (anchor.id, sim, anchor.description.clone()))
             .collect())
+    }
+
+    /// 仅进行视觉编码 (用于调试或生成锚点)
+    #[pyo3(signature = (pixels))]
+    fn encode_pixels(&self, pixels: Vec<f32>) -> PyResult<Vec<f32>> {
+        let encoder = self
+            .encoder
+            .as_ref()
+            .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("模型未加载"))?;
+
+        let vector = encoder.forward_from_pixels(&pixels).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("视觉编码失败: {:?}", e))
+        })?;
+
+        Ok(vector)
     }
 
     /// 配置参数

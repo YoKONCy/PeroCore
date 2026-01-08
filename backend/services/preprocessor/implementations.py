@@ -181,7 +181,7 @@ class RAGPreprocessor(BasePreprocessor):
                         if not isinstance(text, str): return ""
                         # 使用 Rust Core 进行高性能清洗
                         try:
-                            from pero_rust_core import clean_text
+                            from pero_memory_core import clean_text
                             return clean_text(text)
                         except ImportError:
                             # Fallback to Python implementation

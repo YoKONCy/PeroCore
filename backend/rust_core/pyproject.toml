@@ -3,7 +3,7 @@ requires = ["maturin>=1.5,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "pero-rust-core"
+name = "pero-memory-core"
 version = "0.2.1"
 description = "High-performance vision-intent-memory engine for Pero"
 license = { text = "GPL-3.0" }
@@ -22,5 +22,5 @@ classifiers = [
 ]
 
 [tool.maturin]
-module-name = "pero_rust_core"
+module-name = "pero_memory_core"
 features = ["pyo3/extension-module"]

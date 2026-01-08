@@ -88,8 +88,7 @@ PeroLauncher/target/
 # Local Config
 backend/config.json
 
-# Benchmarks
-benchmarks/
+
 
 # Plugins - NapCat
 backend/nit_core/plugins/social_adapter/NapCat/

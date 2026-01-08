@@ -1,5 +1,5 @@
 [package]
-name = "pero_rust_core"
+name = "pero_memory_core"
 version = "0.2.1"
 edition = "2021"
 description = "High-performance vision-intent-memory engine for Pero"
@@ -7,7 +7,7 @@ license = "GPL-3.0"
 repository = "https://github.com/perofamily/perocore"
 
 [lib]
-name = "pero_rust_core"
+name = "pero_memory_core"
 crate-type = ["cdylib"]
 
 [dependencies]

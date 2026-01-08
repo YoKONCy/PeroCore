@@ -176,7 +176,8 @@ impl CognitiveGraphEngine {
                 .collect();
 
             if active_nodes.len() > self.max_active_nodes {
-                active_nodes.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
+                active_nodes
+                    .sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
                 active_nodes.truncate(self.max_active_nodes);
             }
 
@@ -341,7 +342,7 @@ impl SemanticVectorIndex {
 
 /// Pero Rust Core Python 模块入口
 #[pymodule]
-fn pero_rust_core(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn pero_memory_core(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // 核心类
     m.add_class::<VisionIntentMemoryManager>()?;
     m.add_class::<VisionProcessResult>()?;

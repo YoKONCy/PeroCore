@@ -6,11 +6,11 @@ from services.embedding_service import embedding_service
 
 # 尝试导入 Rust 核心
 try:
-    from pero_rust_core import SemanticVectorIndex
+    from pero_memory_core import SemanticVectorIndex
     RUST_AVAILABLE = True
 except ImportError:
     RUST_AVAILABLE = False
-    print("[VectorStore] ❌ Critical: pero_rust_core not found! Vector search will be disabled.")
+    print("[VectorStore] ❌ Critical: pero_memory_core not found! Vector search will be disabled.")
 
 class VectorStoreService:
     _instance = None

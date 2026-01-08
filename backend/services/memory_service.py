@@ -15,7 +15,7 @@ async def get_rust_engine(session: AsyncSession):
         return _rust_engine
     
     try:
-        from pero_rust_core import CognitiveGraphEngine
+        from pero_memory_core import CognitiveGraphEngine
         print("[Memory] Initializing Global Rust Cognitive Engine...", flush=True)
         _rust_engine = CognitiveGraphEngine()
         _rust_engine.configure(max_active_nodes=10000, max_fan_out=20)
