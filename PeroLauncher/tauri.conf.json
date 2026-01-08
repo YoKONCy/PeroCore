@@ -1,81 +1,42 @@
 {
-  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "PeroLauncher",
-  "version": "0.1.0",
-  "identifier": "com.perofamily.peroapp",
-  "build": {
-    "frontendDist": "../dist",
-    "devUrl": "http://127.0.0.1:5173",
-    "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": ""
-  },
-  "app": {
-    "withGlobalTauri": true,
-    "windows": [
-      {
-        "label": "launcher",
-        "url": "/#/launcher",
-        "title": "Pero Launcher",
-        "width": 900,
-        "height": 600,
-        "resizable": true,
-        "decorations": true,
-        "transparent": false,
-        "alwaysOnTop": false,
-        "visible": true,
-        "center": true
-      },
-      {
-        "label": "pet",
-        "url": "/#/pet",
-        "title": "PeroCore",
-        "width": 700,
-        "height": 700,
-        "resizable": true,
-        "minWidth": 700,
-        "maxWidth": 700,
-        "minHeight": 700,
-        "maxHeight": 700,
-        "fullscreen": false,
-        "decorations": false,
-        "transparent": true,
-        "alwaysOnTop": true,
-        "skipTaskbar": true,
-        "visible": false,
-        "shadow": false,
-        "contentProtected": false,
-        "maximizable": false
-      }
-    ],
-    "security": {
-      "csp": null
+    "productName": "PeroCore",
+    "version": "0.1.0",
+    "identifier": "com.perofamily.perocore",
+    "build": {
+        "beforeDevCommand": "npm run dev",
+        "beforeBuildCommand": "npm run build",
+        "devUrl": "http://localhost:5173",
+        "frontendDist": "../dist"
+    },
+    "app": {
+        "windows": [
+            {
+                "title": "Pero Launcher",
+                "label": "launcher",
+                "width": 800,
+                "height": 600,
+                "resizable": false,
+                "fullscreen": false,
+                "visible": false
+            }
+        ],
+        "security": {
+            "csp": null
+        }
+    },
+    "bundle": {
+        "active": true,
+        "targets": "all",
+        "icon": [
+            "icons/32x32.png",
+            "icons/128x128.png",
+            "icons/128x128@2x.png",
+            "icons/icon.icns",
+            "icons/icon.ico"
+        ],
+        "resources": [
+            "src-tauri/python/**/*",
+            "../backend/**/*"
+        ]
     }
-  },
-  "plugins": {
-    "shell": {
-      "open": true
-    }
-  },
-  "bundle": {
-    "active": true,
-    "targets": "all",
-    "externalBin": [],
-    "icon": [
-      "icons/32x32.png",
-      "icons/128x128.png",
-      "icons/128x128@2x.png",
-      "icons/icon.icns",
-      "icons/icon.ico"
-    ],
-    "resources": [
-      "../backend/nit_core/**/*",
-      "../backend/models/**/*",
-      "../backend/assets/**/*",
-      "../backend/prompts/**/*",
-      "../backend/services/mdp/prompts/**/*",
-      "../backend/*.py",
-      "../backend/requirements.txt",
-      "python/**/*"
-    ]
-  }
 }

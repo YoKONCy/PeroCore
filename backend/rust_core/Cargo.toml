@@ -14,10 +14,9 @@ crate-type = ["cdylib"]
 # Python 绑定
 pyo3 = { version = "0.21", features = ["extension-module"] }
 
-# ONNX Runtime 推理 (高性能, 有预编译库)
-# download-binaries: 自动下载预编译的 ONNX Runtime 库
-ort = { version = "2.0", default-features = false, features = ["download-binaries", "ndarray"] }
-ndarray = "0.16"
+# Tract ONNX 推理 (纯 Rust, 无需系统库)
+tract-onnx = "0.21"
+
 
 # 图像处理 (用于 Rust 侧预处理, 可选)
 image = "0.25"
