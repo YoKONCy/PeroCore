@@ -1,3 +1,15 @@
+Metadata-Version: 2.4
+Name: pero-memory-core
+Version: 0.1.0
+Classifier: Programming Language :: Rust
+Classifier: Programming Language :: Python :: 3
+Classifier: Topic :: Scientific/Engineering :: Artificial Intelligence
+Summary: 一个基于 Rust 的超高性能认知图谱记忆引擎，支持毫秒级激活扩散与大规模联想检索。
+Keywords: AI,Memory,Rust,SpreadingActivation,RAG
+Author: PeroCore Developer
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown; charset=UTF-8; variant=GFM
+
 # Pero-Memory-Core (pero-rust-core)
 
 🚀 **一个为 AI 记忆而生的极致性能引擎。**
@@ -48,3 +60,4 @@ print(f"联想到的相关记忆点: {results}")
 ## 📜 许可证
 
 MIT License
+
