@@ -112,6 +112,8 @@ PeroCore 摒弃了传统的简单 RAG（检索增强生成）方案，构建了�
 
 我们拒绝 PPT 性能，所有的性能指标均基于 **PeroCore Rust Engine** 的真实压测数据。
 
+> 📂 **测试资源**：详细的测试脚本、自动化压测工具及完整实验报告请参阅 [benchmarks](./benchmarks) 目录。
+
 #### 1. ⚡ 极致检索效率 (Scale: 20M Nodes / 40M Edges)
 在超大规模认知图谱下，PeroCore 的 Rust 核心通过 CSR 稀疏矩阵优化，实现了近乎常数级的检索延迟。
 
