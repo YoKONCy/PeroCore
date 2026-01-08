@@ -35,15 +35,18 @@
             "icons/icon.ico"
         ],
         "resources": [
-            "src-tauri/python/**/*",
-            "../backend/**/*",
-            "!../backend/nit_core/plugins/social_adapter/NapCat/**/*",
-            "!../backend/nit_core/plugins/social_adapter/NapCat*",
-            "!../backend/data/**/*",
-            "!../backend/venv/**/*",
-            "!../backend/__pycache__/**/*",
-            "!../backend/**/*.exe",
-            "!../backend/**/*.db*"
+            "src-tauri/python/*",
+            "src-tauri/python/Lib/**",
+            "src-tauri/python/Scripts/*",
+            "../backend/*.py",
+            "../backend/core/**",
+            "../backend/models/**",
+            "../backend/services/**",
+            "../backend/utils/**",
+            "../backend/nit_core/*",
+            "../backend/nit_core/plugins/*",
+            "../backend/nit_core/plugins/social_adapter/*",
+            "../backend/nit_core/tools/**"
         ]
     }
 }
