@@ -396,10 +396,12 @@ pub fn run() {
     println!("[Perf] run() started at {:?}", start_time);
 
     let backend = Arc::new(Mutex::new(None::<std::process::Child>));
-    let backend_run_clone = backend.clone();
+    let backend_run_clone_for_setup = backend.clone();
+    let backend_run_clone_for_run = backend.clone();
 
     let napcat_state = NapCatState::new();
-    let napcat_child_clone = napcat_state.child.clone();
+    let napcat_child_clone_for_setup = napcat_state.child.clone();
+    let napcat_child_clone_for_run = napcat_state.child.clone();
 
     println!("[Perf] Builder starting at {:?}", start_time.elapsed());
     let mut builder = tauri::Builder::default();
@@ -442,39 +444,8 @@ pub fn run() {
         })
         .setup(move |app| {
             let app_handle = app.handle().clone();
-            let backend_clone = backend_run_clone.clone();
-            let napcat_child_clone = napcat_child_clone.clone();
-
-            // 核心：在应用退出时强制清理所有后端进程
-            app.handle().on_event(move |app_handle, event| {
-                if let tauri::RunEvent::Exit = event {
-                    println!("App exiting, cleaning up backends...");
-                    
-                    // 1. 清理 Python 后端
-                    if let Ok(mut guard) = backend_clone.lock() {
-                        if let Some(child) = guard.take() {
-                            let pid = child.id();
-                            println!("Killing backend PID: {}", pid);
-                            let _ = Command::new("taskkill")
-                                .args(&["/F", "/T", "/PID", &pid.to_string()])
-                                .creation_flags(0x08000000)
-                                .output();
-                        }
-                    }
-
-                    // 2. 清理 NapCat 后端
-                    if let Ok(mut guard) = napcat_child_clone.lock() {
-                        if let Some(child) = guard.take() {
-                            let pid = child.id();
-                            println!("Killing NapCat PID: {}", pid);
-                            let _ = Command::new("taskkill")
-                                .args(&["/F", "/T", "/PID", &pid.to_string()])
-                                .creation_flags(0x08000000)
-                                .output();
-                        }
-                    }
-                }
-            });
+            let backend_clone = backend_run_clone_for_setup.clone();
+            let napcat_child_clone = napcat_child_clone_for_setup.clone();
 
             println!("[Perf] setup() entered at {:?}", start_time.elapsed());
 
@@ -570,7 +541,7 @@ pub fn run() {
                 println!("App exiting, cleaning up backends...");
                 
                 // 1. Kill Python Backend
-                if let Ok(mut guard) = backend_run_clone.lock() {
+                if let Ok(mut guard) = backend_run_clone_for_run.lock() {
                     if let Some(child) = guard.take() {
                         let pid = child.id();
                         println!("Killing backend PID: {}", pid);
@@ -582,7 +553,7 @@ pub fn run() {
                 }
 
                 // 2. Kill NapCat Backend
-                if let Ok(mut guard) = napcat_child_clone.lock() {
+                if let Ok(mut guard) = napcat_child_clone_for_run.lock() {
                     if let Some(child) = guard.take() {
                         let pid = child.id();
                         println!("Killing NapCat PID: {}", pid);
