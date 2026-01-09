@@ -1,3 +1,8 @@
+# Copyright (c) 2026 YoKONCy. All rights reserved.
+# This component (Memory Service) is protected under GNU GPL-3.0.
+# Any use in proprietary/closed-source software is strictly prohibited.
+# Fingerprint: PERO_CORE_MEM_SYS_v0.1_YK
+
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from sqlmodel import select, delete, desc, and_
