@@ -1,3 +1,8 @@
+# Copyright (c) 2026 YoKONCy. All rights reserved.
+# This software is licensed under the GNU General Public License v3.0.
+# Any unauthorized commercial use or closed-source redistribution is a direct violation of the GPL-3.0 license.
+# Original Repository: https://github.com/YoKONCy/PeroCore
+
 import json
 import re
 import os

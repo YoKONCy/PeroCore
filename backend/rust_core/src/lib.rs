@@ -11,6 +11,13 @@
 //! 重构: 从 PyO3+Python 方案迁移到纯 Rust 原生推理
 
 use ahash::AHashMap;
+/*
+ * Copyright (c) 2026 YoKONCy. All rights reserved.
+ * This software is licensed under the GNU General Public License v3.0.
+ * Any unauthorized commercial use or closed-source redistribution is a direct violation of the GPL-3.0 license.
+ * Original Repository: https://github.com/YoKONCy/PeroCore
+ */
+
 use pyo3::prelude::*;
 use rayon::prelude::*;
 use regex::Regex;
