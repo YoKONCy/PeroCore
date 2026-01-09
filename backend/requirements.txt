@@ -14,8 +14,8 @@ loguru
 pydantic-settings
 python-dotenv
 openai
-google-genai
-mcp
+google-genai>=0.3.0
+mcp>=1.0.0
 # STT/TTS
 edge-tts
 faster-whisper

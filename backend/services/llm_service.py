@@ -563,9 +563,9 @@ class LLMService:
         """获取模型列表"""
         if self.provider == "gemini":
             try:
-                genai.configure(api_key=self.api_key)
-                models = await asyncio.to_thread(genai.list_models)
-                return [m.name.replace("models/", "") for m in models if "generateContent" in m.supported_generation_methods]
+                client = genai.Client(api_key=self.api_key)
+                models = await asyncio.to_thread(client.models.list)
+                return [m.name for m in models if "generateContent" in m.supported_generation_methods]
             except Exception as e:
                 print(f"[Gemini] Failed to list models: {e}")
                 return ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-exp"]
