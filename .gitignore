@@ -88,6 +88,9 @@ PeroLauncher/target/
 # Local Config
 backend/config.json
 
+# Private Docs
+绝密文档/
+
 
 
 # Plugins - NapCat
