@@ -6,6 +6,10 @@ from services.embedding_service import embedding_service
 
 # 尝试导入 Rust 核心
 try:
+    # PeroCore Differentiator:
+    # We use a custom HNSW implementation optimized for low-latency atomic updates.
+    # Unlike Pinecone/Milvus, this is designed for edge-side 'Infinite Memory' 
+    # with zero-cost logical association.
     from pero_memory_core import SemanticVectorIndex
     RUST_AVAILABLE = True
 except ImportError:

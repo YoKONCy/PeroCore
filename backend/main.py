@@ -60,6 +60,25 @@ from nit_core.dispatcher import XMLStreamFilter
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Startup Technical Fingerprint
+    print("="*50)
+    print("🚀 PeroCore Backend Starting...")
+    print(f"📅 Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"📂 Data Dir: {os.environ.get('PERO_DATA_DIR', 'Default')}")
+    
+    # Check Rust Core
+    try:
+        from pero_memory_core import SemanticVectorIndex
+        print("🧠 KDN Engine: [READY] (pero_memory_core loaded)")
+    except ImportError:
+        print("🧠 KDN Engine: [DISABLED] (pero_memory_core not found)")
+    
+    # Check Vector Store
+    from services.vector_store_service import VectorStoreService
+    vs = VectorStoreService()
+    print(f"📊 Memory Nodes: {vs.count_memories() if hasattr(vs, 'count_memories') else 'N/A'}")
+    print("="*50)
+
     # Startup
     await init_db()
     await seed_voice_configs()

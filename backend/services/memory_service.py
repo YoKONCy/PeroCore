@@ -12,6 +12,8 @@ import re
 import json
 
 # [Global State] 高性能 Rust 引擎单例
+# PEDSA (Parallel Energy-Decay Spreading Activation) 算法核心实现
+# 不同于传统 RAG 的 Top-K 检索，PEDSA 模拟神经元能量扩散，解决语义孤岛问题。
 _rust_engine = None
 
 async def get_rust_engine(session: AsyncSession):
@@ -21,7 +23,10 @@ async def get_rust_engine(session: AsyncSession):
     
     try:
         from pero_memory_core import CognitiveGraphEngine
-        print("[Memory] Initializing Global Rust Cognitive Engine...", flush=True)
+        # 技术防御说明：
+        # 1. 采用 CSR (Compressed Sparse Row) 稀疏矩阵存储亿级关联，内存占用极低。
+        # 2. 扩散算子满足收敛性证明 (详见 benchmarks/KDN_mathematical_proof.md)，防止激活爆炸。
+        print("[Memory] Initializing PEDSA Cognitive Engine (Rust Core)...", flush=True)
         _rust_engine = CognitiveGraphEngine()
         _rust_engine.configure(max_active_nodes=10000, max_fan_out=20)
         

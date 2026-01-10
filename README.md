@@ -102,6 +102,20 @@ PeroCore 不仅仅是一个后端程序，它是 **Pero** 的灵魂容器。我�
 
 <br/>
 
+<!-- 核心差异化板块 -->
+## 🚀 Why PeroCore is Unique?
+
+> **"Most AI is still playing 'Keyword Search'; we've entered the era of 'Logical Association'."**
+
+大多数 AI 还在玩“关键词检索”，我们已经进入了“逻辑联想”时代。PeroCore 并非简单的向量数据库套壳，而是对大模型长记忆难题的底层重构：
+
+- **🛡️ 解决 RAG 的“逻辑死穴”**：传统向量检索无法处理**逻辑跳跃**（例如：从“苹果”联想到“牛顿”再到“相对论”）。PeroCore 的 **KDN (Knowledge Diffusion Network)** 算子通过能量扩散算法模拟人脑联想，实现了从“语义相似”到“逻辑因果”的质变。
+- **⚡ 毫秒级的“记忆闪回”**：得益于 Rust 核心对 CSR 稀疏矩阵的极致优化，我们在 **1 亿条** 随机噪音的干扰下，依然能实现 **0.45ms** 的检索延迟。这意味着 Pero 的记忆不是在“搜索”，而是在“闪回”。
+- **👁️ 隐私优先的“意图感官”**：自研 **AuraVision** 视觉引擎，在 64x64 的极低分辨率脱敏数据下，依然能精准感知你的工作状态。我们保护你的屏幕隐私，但读懂你的每一个意图。
+- **📜 自动进化的“工具主权”**：**NIT 2.0** 协议赋予了 AI 编写微型脚本的能力。它不再是机械地调用 API，而是像人类一样编排逻辑、捕获错误并自我修正。
+
+<br/>
+
 ## 🧠 Deep Memory System
 
 > **"Memory is what makes us who we are."**
@@ -113,6 +127,8 @@ PeroCore 摒弃了传统的简单 RAG（检索增强生成）方案，构建了�
 我们拒绝 PPT 性能，所有的性能指标均基于 **PeroCore Rust Engine** 的真实压测数据。
 
 > 📂 **测试资源**：详细的测试脚本、自动化压测工具及完整实验报告请参阅 [benchmarks](./benchmarks) 目录。
+> 
+> 📄 **核心报告**：[PeroCore 综合性能与逻辑验证报告 (Comprehensive Benchmark Report)](./benchmarks/reports/PEROCORE_FULL_BENCHMARK_REPORT.md)
 
 #### 1. ⚡ 极致检索效率 (Scale: 20M Nodes / 40M Edges)
 在超大规模认知图谱下，PeroCore 的 Rust 核心通过 CSR 稀疏矩阵优化，实现了近乎常数级的检索延迟。
@@ -146,7 +162,11 @@ PeroCore 摒弃了传统的简单 RAG（检索增强生成）方案，构建了�
     *   **精确度**：目标 `相对论` 在一亿个节点中精准排位 **Top 5**。
 *   **核心原理**：**"Diffusion is all you need."** 能量仅沿逻辑链条流动，随机噪音在扩散过程中会迅速由于熵增而消失。
 
-#### 4. 🌌 Digital Subconscious: The 15ms Lifecycle (数字下意识：一个视觉信号的 15ms 进化史)
+#### 4. 📚 严谨的数学保障 (Mathematical Foundation)
+我们不相信玄学调优。PeroCore 的核心扩散算子拥有严谨的收敛性证明，确保了系统在无限联想过程中依然能保持逻辑的稳定性。
+- [KDN 扩散算子收敛性证明 (Mathematical Proof of KDN Convergence)](./benchmarks/reports/KDN_mathematical_proof.md)
+
+#### 5. 🌌 Digital Subconscious: The 15ms Lifecycle (数字下意识：一个视觉信号的 15ms 进化史)
 
 > **"Speed is not about hardware, it's about the shortest path to empathy."**
 

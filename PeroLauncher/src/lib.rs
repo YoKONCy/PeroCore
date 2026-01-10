@@ -37,11 +37,13 @@ struct MousePos {
 struct DiagnosticReport {
     python_exists: bool,
     python_path: String,
+    python_version: String,
     script_exists: bool,
     script_path: String,
     port_9120_free: bool,
     data_dir_writable: bool,
     data_dir: String,
+    core_available: bool,
     errors: Vec<String>,
 }
 
@@ -69,7 +71,39 @@ async fn get_diagnostics(app: tauri::AppHandle) -> Result<DiagnosticReport, Stri
     };
     let python_path = fix_path(python_path);
     let python_exists = python_path.exists();
-    if !python_exists {
+    
+    let mut python_version = String::from("Unknown");
+    let mut core_available = false;
+
+    if python_exists {
+        // 尝试运行 python --version
+        let output = std::process::Command::new(&python_path)
+            .arg("--version")
+            .creation_flags(0x08000000) // 隐藏窗口
+            .output();
+        
+        if let Ok(out) = output {
+            python_version = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if python_version.is_empty() {
+                python_version = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            }
+        } else {
+            errors.push("Python 解释器无法运行，可能缺少系统组件 (如 VCRUNTIME140.dll)".to_string());
+        }
+
+        // 尝试检查 pero_memory_core
+        let core_check = std::process::Command::new(&python_path)
+            .args(&["-c", "import pero_memory_core; print('OK')"])
+            .creation_flags(0x08000000)
+            .output();
+        if let Ok(out) = core_check {
+            if String::from_utf8_lossy(&out.stdout).trim() == "OK" {
+                core_available = true;
+            } else {
+                errors.push("关键核心组件 pero_memory_core 未找到，记忆功能将受限".to_string());
+            }
+        }
+    } else {
         errors.push(format!("Python 解释器未找到: {:?}", python_path));
     }
 
@@ -123,11 +157,13 @@ async fn get_diagnostics(app: tauri::AppHandle) -> Result<DiagnosticReport, Stri
     Ok(DiagnosticReport {
         python_exists,
         python_path: python_path.to_string_lossy().to_string(),
+        python_version,
         script_exists,
         script_path: script_path.to_string_lossy().to_string(),
         port_9120_free,
         data_dir_writable,
         data_dir: data_dir.to_string_lossy().to_string(),
+        core_available,
         errors,
     })
 }
