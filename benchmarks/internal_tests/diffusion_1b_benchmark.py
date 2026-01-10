@@ -1,7 +1,7 @@
 
 # Copyright (c) 2026 YoKONCy. All rights reserved.
-# Scientific Benchmark for Diffusion Layer (1000B Nodes)
-# This script simulates multi-step recursive activation in a Trillion-scale index.
+# Theoretical Scientific Benchmark for Diffusion Layer (1000B Nodes)
+# This script simulates multi-step recursive activation in a theoretical Trillion-scale index.
 
 import time
 import numpy as np
@@ -71,8 +71,9 @@ def run_test():
     print("="*65)
     
     if avg_latency < 5:
-        print("结论: 神迹！在 1000B (万亿) 量级下，递归扩散延迟依然控制在 1ms 左右。")
-        print("这证明了 PeroCore 架构在处理全人类知识量级时的理论巅峰性能。")
+        print("结论: 神迹！在理论上的 1000B (万亿) 量级下，递归扩散延迟依然控制在 1ms 左右。")
+        print("注意: 该量级测试仅为基于算法复杂度的数学模拟，目前尚未在物理硬件上进行 1TB+ 级别的实机验证。")
+        print("但千万级 (10M) 与亿级 (100M) 规模已通过实机验证，性能表现稳定。")
     else:
         print("结论: 延迟依然在实时响应范围内，但万亿级规模的索引开销已开始显现。")
 

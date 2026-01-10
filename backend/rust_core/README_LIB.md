@@ -2,7 +2,7 @@
 
 > **"Stop Vector Search, Start Knowledge Diffusion."**
 
-🚀 **Pero-Memory-Core** 是一个基于认知神经科学原理构建的万亿级语义记忆引擎。它摒弃了传统向量数据库（Vector DB）死板的 Top-K 检索模式，采用原创的 **KDN (Knowledge Diffusion Network)** 架构，实现了类脑化的关联联想与逻辑回溯。
+🚀 **Pero-Memory-Core** 是一个基于认知神经科学原理构建的、理论上可支撑万亿级的语义记忆引擎。它摒弃了传统向量数据库（Vector DB）死板的 Top-K 检索模式，采用原创的 **KDN (Knowledge Diffusion Network)** 架构，实现了类脑化的关联联想与逻辑回溯。
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Language: Rust](https://img.shields.io/badge/Language-Rust-orange.svg)](https://www.rust-lang.org/)
@@ -16,7 +16,7 @@
 2. **多跳性能崩塌**：执行 3 步以上的逻辑推理（Multi-hop）时，向量检索的延迟会呈指数级增长。
 3. **超级节点困境**：无法有效处理高权重核心知识点带来的能量塌缩。
 
-**PeroCore 采用 PEDSA (Parallel Energy-Decay Spreading Activation) 算法**，通过模拟神经元电信号扩散，在 1ms 内穿透万亿级逻辑迷宫。
+**PeroCore 采用 PEDSA (Parallel Energy-Decay Spreading Activation) 算法**，通过模拟神经元电信号扩散，在 1ms 内穿透理论上的万亿级逻辑迷宫（实机已验证千万级至亿级规模）。
 
 ---
 
