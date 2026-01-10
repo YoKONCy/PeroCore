@@ -63,12 +63,7 @@ jobs:
           $PTH_FILE = "$TARGET_DIR/python310._pth"
           if (Test-Path $PTH_FILE) {
               Write-Host "Patching $PTH_FILE to enable site-packages and Lib..."
-              $pth_content = @"
-python310.zip
-.
-Lib/site-packages
-import site
-"@
+              $pth_content = "python310.zip`n.`nLib/site-packages`nimport site"
               Set-Content -Path $PTH_FILE -Value $pth_content
           }
           
