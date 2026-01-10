@@ -6,7 +6,8 @@ import numpy as np
 
 # 为了避免在导入时就下载模型，我们使用延迟加载
 # 并且设置本地缓存目录
-os.environ["SENTENCE_TRANSFORMERS_HOME"] = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models_cache")
+data_dir = os.environ.get("PERO_DATA_DIR", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+os.environ["SENTENCE_TRANSFORMERS_HOME"] = os.path.join(data_dir, "models_cache")
 # 设置 HuggingFace 镜像，解决国内连接问题
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 

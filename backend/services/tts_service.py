@@ -15,7 +15,8 @@ logger = logging.getLogger(__name__)
 class TTSService:
     def __init__(self):
         # 临时音频文件存储目录
-        self.output_dir = os.path.join(os.getcwd(), "temp_audio")
+        data_dir = os.environ.get("PERO_DATA_DIR", os.getcwd())
+        self.output_dir = os.path.join(data_dir, "temp_audio")
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir, exist_ok=True)
 

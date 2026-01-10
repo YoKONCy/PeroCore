@@ -183,9 +183,11 @@ async fn start_backend(
     let resource_dir = app.path().resource_dir().map_err(|e| e.to_string())?;
 
     // 2. 确定 Python 路径
+    let mut dev_venv_python_exists = false;
     let python_path = {
         let dev_venv_python = get_workspace_root().join("backend/venv/Scripts/python.exe");
         if dev_venv_python.exists() {
+            dev_venv_python_exists = true;
             dev_venv_python
         } else {
             let mut p = resource_dir.join("python/python.exe");
@@ -211,7 +213,7 @@ async fn start_backend(
 
     let python_path = fix_path(python_path);
     if !python_path.exists() {
-        return Err("Python executable not found".into());
+        return Err(format!("Python executable not found at {:?}", python_path));
     }
     let script_path = fix_path(script_path);
     let backend_root = fix_path(script_path.parent().unwrap_or(&script_path).to_path_buf());
@@ -221,15 +223,50 @@ async fn start_backend(
     println!("Rust: Backend root: {:?}", backend_root);
     
     // 强制指定数据库和配置文件路径，确保“记忆”不丢失
-    let db_path = fix_path(get_workspace_root().join("backend/data/perocore.db"));
-    let config_path = fix_path(get_workspace_root().join("backend/config.json"));
+    // 对于打包后的版本，应该使用 AppData 目录，避免权限问题
+    let data_dir = if !dev_venv_python_exists {
+        let p = app.path().app_data_dir().map_err(|e| e.to_string())?.join("data");
+        if !p.exists() {
+            std::fs::create_dir_all(&p).map_err(|e| e.to_string())?;
+        }
+        p
+    } else {
+        get_workspace_root().join("backend/data")
+    };
+
+    let db_path = fix_path(data_dir.join("perocore.db"));
+    let config_path = fix_path(data_dir.join("config.json"));
+
+    // 如果 AppData 中没有配置文件，尝试从资源目录拷贝一个初始化的
+    if !config_path.exists() {
+        let initial_config = {
+            let mut p = resource_dir.join("backend/config.json");
+            if !p.exists() {
+                p = resource_dir.join("_up_/backend/config.json");
+            }
+            p
+        };
+        if initial_config.exists() {
+            let _ = std::fs::copy(initial_config, &config_path);
+        }
+    }
+
     println!("Rust: Force DB path: {:?}", db_path);
     println!("Rust: Force Config path: {:?}", config_path);
 
     let mut cmd = std::process::Command::new(&python_path);
+    
+    // 构造 PYTHONPATH，包含 backend 根目录和 site-packages
+    let mut python_path_env = backend_root.to_string_lossy().to_string();
+    let site_packages = python_path.parent().unwrap_or(&python_path).join("Lib/site-packages");
+    if site_packages.exists() {
+        python_path_env = format!("{};{}", python_path_env, site_packages.to_string_lossy());
+    }
+
     cmd.args(&["-u", &script_path.to_string_lossy()])
         .current_dir(&backend_root)
-        .env("PYTHONPATH", &backend_root)
+        .env("PYTHONPATH", python_path_env)
+        .env("PERO_DATA_DIR", data_dir.to_string_lossy().to_string())
         .env("PERO_DATABASE_PATH", db_path.to_string_lossy().to_string())
         .env("PERO_CONFIG_PATH", config_path.to_string_lossy().to_string())
         .stdout(std::process::Stdio::piped())
@@ -284,23 +321,32 @@ fn stop_backend(state: tauri::State<BackendState>) -> Result<(), String> {
 #[tauri::command]
 fn get_config(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
     use tauri::Manager;
-    let resource_dir = app.path().resource_dir().map_err(|e| e.to_string())?;
-
-    // 尝试在资源目录找，找不到就回退到源码目录
-    let config_path = {
+    
+    // 优先从 AppData 目录读取
+    let config_path = app.path().app_data_dir().map_err(|e| e.to_string())?.join("data/config.json");
+    
+    if !config_path.exists() {
+        // 回退到资源目录
+        let resource_dir = app.path().resource_dir().map_err(|e| e.to_string())?;
         let mut p = resource_dir.join("backend/config.json");
         if !p.exists() {
             p = resource_dir.join("_up_/backend/config.json");
         }
-
+        
         if p.exists() {
-            p
-        } else {
-            get_workspace_root().join("backend/config.json")
+            let content = std::fs::read_to_string(p).map_err(|e| e.to_string())?;
+            let config: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+            return Ok(config);
         }
-    };
+        
+        // 最后回退到源码目录
+        let dev_config = get_workspace_root().join("backend/config.json");
+        if dev_config.exists() {
+            let content = std::fs::read_to_string(dev_config).map_err(|e| e.to_string())?;
+            let config: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+            return Ok(config);
+        }
 
-    if !config_path.exists() {
         return Ok(serde_json::json!({}));
     }
 
@@ -312,20 +358,13 @@ fn get_config(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
 #[tauri::command]
 fn save_config(app: tauri::AppHandle, config: serde_json::Value) -> Result<(), String> {
     use tauri::Manager;
-    let resource_dir = app.path().resource_dir().map_err(|e| e.to_string())?;
-
-    let config_path = {
-        let mut p = resource_dir.join("backend/config.json");
-        if !p.exists() {
-            p = resource_dir.join("_up_/backend/config.json");
-        }
-
-        if p.exists() {
-            p
-        } else {
-            get_workspace_root().join("backend/config.json")
-        }
-    };
+    
+    // 始终保存到 AppData 目录
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("data");
+    if !data_dir.exists() {
+        std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
+    }
+    let config_path = data_dir.join("config.json");
 
     let content = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
     std::fs::write(config_path, content).map_err(|e| e.to_string())?;

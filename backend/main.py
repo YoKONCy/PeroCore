@@ -89,7 +89,8 @@ async def lifespan(app: FastAPI):
                 tts.cleanup_old_files(max_age_seconds=3600)
                 
                 # Cleanup temp_vision
-                temp_vision = os.path.join(os.getcwd(), "temp_vision")
+                data_dir = os.environ.get("PERO_DATA_DIR", os.getcwd())
+                temp_vision = os.path.join(data_dir, "temp_vision")
                 if os.path.exists(temp_vision):
                     now = time.time()
                     for f in os.listdir(temp_vision):

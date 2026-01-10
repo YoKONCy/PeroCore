@@ -63,7 +63,8 @@ class AgentService:
     def _log_to_file(self, msg: str):
         try:
             # Use absolute path to ensure log file is created in backend directory
-            log_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "debug_vision.log")
+            data_dir = os.environ.get("PERO_DATA_DIR", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            log_path = os.path.join(data_dir, "debug_vision.log")
             with open(log_path, "a", encoding="utf-8") as f:
                 f.write(f"{datetime.now()} {msg}\n")
         except Exception as e:
