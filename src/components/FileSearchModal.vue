@@ -163,7 +163,7 @@ const openFile = async (path) => {
     const sanitizedPath = path.replace(/\\/g, '/')
     console.log('[FileSearchModal] Attempting to open path:', sanitizedPath)
     
-    const response = await fetch('http://localhost:3000/api/open-path', {
+    const response = await fetch('http://localhost:9120/api/open-path', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'

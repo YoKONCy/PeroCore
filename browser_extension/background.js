@@ -1,7 +1,7 @@
 let socket = null;
 let isConnected = false;
 let reconnectAttempts = 0;
-const WS_URL = "ws://localhost:3000/ws/browser";
+const WS_URL = "ws://localhost:9120/ws/browser";
 const RECONNECT_ALARM_NAME = "reconnect-alarm";
 const CHECK_CONNECTION_ALARM_NAME = "check-connection-alarm";
 

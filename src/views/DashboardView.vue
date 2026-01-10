@@ -1251,7 +1251,7 @@ const getLogMetadata = (log) => {
 }
 
 // --- API 交互 ---
-const API_BASE = 'http://localhost:3000/api'
+const API_BASE = 'http://localhost:9120/api'
 
 // 带超时的 fetch 包装函数
 const fetchWithTimeout = async (url, options = {}, timeout = 5000) => {

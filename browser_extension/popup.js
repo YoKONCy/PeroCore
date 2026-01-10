@@ -13,7 +13,7 @@ function updateStatus() {
 
     if (response) {
       debugDiv.innerHTML = `
-        URL: ${response.url || 'ws://localhost:3000/ws/browser'}<br>
+        URL: ${response.url || 'ws://localhost:9120/ws/browser'}<br>
         Attempts: ${response.attempts || 0}<br>
         Last Error: ${response.lastError || 'None'}
       `;

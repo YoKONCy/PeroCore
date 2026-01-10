@@ -380,7 +380,7 @@ const authToken = ref('')
 
 const fetchAuthToken = async () => {
     try {
-        const res = await fetch('http://localhost:3000/api/configs')
+        const res = await fetch('http://localhost:9120/api/configs')
         if (res.ok) {
             const data = await res.json()
             if (data.frontend_access_token) {
@@ -398,7 +398,7 @@ const fetchPetState = async () => {
     await fetchAuthToken()
 
     try {
-        const res = await fetch('http://localhost:3000/api/pet/state')
+        const res = await fetch('http://localhost:9120/api/pet/state')
         if (res.ok) {
             const data = await res.json()
             if (data.mood) {
@@ -446,7 +446,7 @@ const startVoiceMode = async () => {
         console.log('[Voice] Microphone access granted:', audioTracks[0].label);
         
         // 2. 连接 WebSocket
-        voiceWs.value = new WebSocket('ws://localhost:3000/ws/voice');
+        voiceWs.value = new WebSocket('ws://localhost:9120/ws/voice');
         
         voiceWs.value.onopen = () => {
             console.log('Voice WebSocket connected');
@@ -1078,7 +1078,7 @@ const loadLocalTexts = async () => {
   try {
     // 0. 尝试从后端同步最新配置 (新增)
     try {
-        const syncRes = await fetch('http://localhost:3000/api/configs/waifu-texts')
+        const syncRes = await fetch('http://localhost:9120/api/configs/waifu-texts')
         if (syncRes.ok) {
             const syncData = await syncRes.json()
             if (syncData && Object.keys(syncData).length > 0) {
@@ -1312,7 +1312,7 @@ const syncConfigToBackend = async () => {
       'ppc.remoteUrl': localStorage.getItem('ppc.remoteUrl') || ''
     }
     
-    await fetch('http://localhost:3000/api/configs', {
+    await fetch('http://localhost:9120/api/configs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(config)
@@ -1758,7 +1758,7 @@ const sendMessage = async (systemMsg = null, isHidden = false) => {
         headers['Authorization'] = `Bearer ${authToken.value}`
     }
 
-    const response = await fetch('http://localhost:3000/api/chat', {
+    const response = await fetch('http://localhost:9120/api/chat', {
       method: 'POST',
       headers: headers,
       body: JSON.stringify({

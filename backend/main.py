@@ -1661,7 +1661,7 @@ async def get_maintenance_records(session: AsyncSession = Depends(get_session)):
 
 if __name__ == "__main__":
     # 优先从环境变量读取端口
-    port = int(os.environ.get("PORT", 3000))
+    port = int(os.environ.get("PORT", 9120))
     # 强制禁用 reload 模式，因为 Uvicorn 的 reloader 在 Windows 下会强制使用 SelectorEventLoop
     # 这会导致 subprocess (MCP Stdio) 报错 NotImplementedError
     print(f"Backend starting with loop: {asyncio.get_event_loop().__class__.__name__}")

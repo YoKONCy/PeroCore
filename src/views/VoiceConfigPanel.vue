@@ -120,7 +120,7 @@ import { ref, computed, onMounted } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
-const API_BASE = 'http://localhost:3000/api' // Adjust if needed
+const API_BASE = 'http://localhost:9120/api' // Adjust if needed
 const activeTab = ref('stt')
 const configs = ref([])
 const showEditor = ref(false)
