@@ -27,7 +27,8 @@ if os.name == 'nt':
 
 # Initialize Logging
 from utils.logging_config import configure_logging
-configure_logging()
+log_file = os.environ.get("PERO_LOG_FILE")
+configure_logging(log_file=log_file)
 
 import uvicorn
 from contextlib import asynccontextmanager
@@ -1195,6 +1196,10 @@ async def chat(
                     # Use strict pattern but case insensitive
                     clean_text = re.sub(r'【Thinking.*?】', '', clean_text, flags=re.S | re.IGNORECASE)
                     
+                    # Filter out Emoji and special symbols that edge-tts might read
+                    clean_text = re.sub(r'[\U00010000-\U0010ffff]', '', clean_text)
+                    clean_text = re.sub(r'[^\w\s\u4e00-\u9fa5，。！？；：“”（）\n\.,!\?\-]', '', clean_text)
+                    
                     # [Feature] Chatter Removal: Only read the last paragraph
                     # Split by newline and take the last non-empty segment to avoid reading "Thinking" chatter
                     segments = [s.strip() for s in clean_text.split('\n') if s.strip()]
@@ -1326,12 +1331,37 @@ async def chat(
                     # Signal done to the main queue
                     await queue.put({"type": "done"})
 
+            # 状态回调包装器，用于追踪 ReAct 轮次
+            react_turn = [0] # 使用 list 以便在闭包中修改
+            turn_buffer = [""] # 缓存非首轮的内容
+
+            def wrapped_status_callback(status, msg):
+                if status == "thinking":
+                    react_turn[0] += 1
+                    # 如果进入了新的一轮（轮次 > 2），说明上一轮不是最后一轮，清空缓存
+                    if react_turn[0] > 2:
+                        turn_buffer[0] = ""
+                return status_callback(status, msg)
+
             async def run_chat():
                 try:
-                    async for chunk in agent.chat(messages, source=source, session_id=session_id, on_status=status_callback):
+                    async for chunk in agent.chat(messages, source=source, session_id=session_id, on_status=wrapped_status_callback):
                         if chunk:
+                            # 文本流始终发送给 UI
                             await queue.put({"type": "text", "payload": chunk})
-                            await tts_queue.put(chunk)
+                            
+                            # TTS 逻辑：
+                            # 1. 第一轮直接发送给 TTS 队列（流式念出）
+                            # 2. 后续轮次先进入 turn_buffer 缓存
+                            if react_turn[0] <= 1:
+                                await tts_queue.put(chunk)
+                            else:
+                                turn_buffer[0] += chunk
+                    
+                    # 当 chat 结束时，最后的 turn_buffer 就是“最后一段话”
+                    if react_turn[0] > 1 and turn_buffer[0].strip():
+                        await tts_queue.put(turn_buffer[0])
+
                 except Exception as e:
                     import traceback
                     traceback.print_exc()
@@ -1340,9 +1370,6 @@ async def chat(
                     await tts_queue.put(None)
                 finally:
                     # Signal TTS to finish
-                    # Only send None if not already sent (e.g. in error case)
-                    # Actually safe to send multiple Nones if queue is consumed, but let's be clean.
-                    # Simple way: just send it. The worker breaks on first None.
                     await tts_queue.put(None)
 
             # 启动任务

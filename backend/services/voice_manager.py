@@ -66,10 +66,18 @@ class RealtimeVoiceManager:
             cleaned = re.sub(r'\[(.*?)\]\(.*?\)', r'\1', cleaned) # 移除链接，只保留文字
             cleaned = re.sub(r'[*_`]', '', cleaned) # 移除粗体、斜体、代码块标记
         
-        # 6. 移除多余空白
+        # 6. 移除 Emoji 和特殊符号 (仅针对 TTS)
+        if for_tts:
+            # 移除常见的 Emoji
+            cleaned = re.sub(r'[\U00010000-\U0010ffff]', '', cleaned)
+            # 移除容易被朗读的特殊技术符号，但保留基础标点
+            # 这里的正则去掉了大部分数学符号、箭头、方块等，但保留了中文逗号、句号、感叹号、问号
+            cleaned = re.sub(r'[^\w\s\u4e00-\u9fa5，。！？；：“”（）\n\.,!\?\-]', '', cleaned)
+        
+        # 7. 移除多余空白
         cleaned = re.sub(r'\n+', '\n', cleaned)
         
-        # 7. [Feature] Chatter Removal: Only read the response parts
+        # 8. [Feature] Chatter Removal: Only read the response parts
         # If the text is still very long and contains "Thought" style chatter that wasn't caught,
         # we take the last non-empty segment.
         if for_tts:
@@ -352,6 +360,16 @@ class RealtimeVoiceManager:
 
                 agent = AgentService(session)
                 full_response = ""
+                tts_text_parts = ["", ""] # [first_turn_text, last_turn_text]
+                react_turn = [0]
+                
+                def report_status_wrapped(status, msg):
+                    if status == "thinking":
+                        react_turn[0] += 1
+                        # 如果进入了新的一轮（轮次 > 2），说明上一轮不是最后一轮，重置“末轮”内容
+                        if react_turn[0] > 2:
+                            tts_text_parts[1] = ""
+                    return report_status(status, msg)
                 
                 # 流式获取回复文本
                 try:
@@ -359,12 +377,19 @@ class RealtimeVoiceManager:
                         messages_payload, 
                         source="desktop",
                         session_id="voice_session",
-                        on_status=report_status,
+                        on_status=report_status_wrapped,
                         is_voice_mode=True,
                         user_text_override=user_text # Pass text here for memory/logging
                     ):
                         if chunk:
                             full_response += chunk
+                            # TTS 逻辑：
+                            # 1. 第一轮的内容存入 tts_text_parts[0]
+                            # 2. 后续轮次的内容存入 tts_text_parts[1]（随轮次更新而重置）
+                            if react_turn[0] <= 1:
+                                tts_text_parts[0] += chunk
+                            else:
+                                tts_text_parts[1] += chunk
                 except WebSocketDisconnect:
                     print("[VOICE] User disconnected during generation.")
                     return
@@ -382,10 +407,12 @@ class RealtimeVoiceManager:
                 # 为了安全，AgentService.chat 已经处理了 _save_parsed_metadata
                 
                 # 4.2 提取纯文本
-                # UI 展示用：保留思考过程和动作描述，由前端处理展示
+                # UI 展示用：保留完整思考过程和动作描述
                 ui_response = self._clean_text(full_response, for_tts=False)
-                # TTS 合成用：移除思考过程和动作描述，确保语音干净
-                tts_response = self._clean_text(full_response, for_tts=True)
+                
+                # TTS 合成用：仅合成首轮和末轮的内容，并移除思考过程和动作描述
+                combined_tts_raw = tts_text_parts[0] + "\n" + tts_text_parts[1]
+                tts_response = self._clean_text(combined_tts_raw, for_tts=True)
                 
                 if not ui_response:
                     ui_response = "唔...Pero好像走神了..." # Fallback

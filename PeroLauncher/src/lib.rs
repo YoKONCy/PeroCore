@@ -33,6 +33,105 @@ struct MousePos {
     y: i32,
 }
 
+#[derive(Serialize)]
+struct DiagnosticReport {
+    python_exists: bool,
+    python_path: String,
+    script_exists: bool,
+    script_path: String,
+    port_9120_free: bool,
+    data_dir_writable: bool,
+    data_dir: String,
+    errors: Vec<String>,
+}
+
+#[tauri::command]
+async fn get_diagnostics(app: tauri::AppHandle) -> Result<DiagnosticReport, String> {
+    let mut errors = Vec::new();
+    
+    // 1. 获取资源目录
+    let resource_dir = app.path().resource_dir().map_err(|e| e.to_string())?;
+
+    // 2. 确定 Python 路径
+    let mut dev_venv_python_exists = false;
+    let python_path = {
+        let dev_venv_python = get_workspace_root().join("backend/venv/Scripts/python.exe");
+        if dev_venv_python.exists() {
+            dev_venv_python_exists = true;
+            dev_venv_python
+        } else {
+            let mut p = resource_dir.join("python/python.exe");
+            if !p.exists() {
+                p = resource_dir.join("_up_/src-tauri/python/python.exe");
+            }
+            p
+        }
+    };
+    let python_path = fix_path(python_path);
+    let python_exists = python_path.exists();
+    if !python_exists {
+        errors.push(format!("Python 解释器未找到: {:?}", python_path));
+    }
+
+    // 3. 确定脚本路径
+    let script_path = {
+        let mut p = resource_dir.join("backend/main.py");
+        if !p.exists() {
+            p = resource_dir.join("main.py");
+        }
+        if !p.exists() {
+            p = resource_dir.join("_up_/backend/main.py");
+        }
+        if !p.exists() {
+            p = resource_dir.join("_up_/main.py");
+        }
+        if p.exists() {
+            p
+        } else {
+            get_workspace_root().join("backend/main.py")
+        }
+    };
+    let script_path = fix_path(script_path);
+    let script_exists = script_path.exists();
+    if !script_exists {
+        errors.push(format!("后端主脚本未找到: {:?}", script_path));
+    }
+
+    // 4. 检查端口 9120
+    let port_9120_free = std::net::TcpListener::bind("127.0.0.1:9120").is_ok();
+    if !port_9120_free {
+        errors.push("端口 9120 已被占用，请检查是否有其他 PeroCore 实例在运行".to_string());
+    }
+
+    // 5. 数据目录检查
+    let data_dir = if !dev_venv_python_exists {
+        app.path().app_data_dir().map_err(|e| e.to_string())?.join("data")
+    } else {
+        get_workspace_root().join("backend/data")
+    };
+    let data_dir = fix_path(data_dir);
+    if !data_dir.exists() {
+        let _ = std::fs::create_dir_all(&data_dir);
+    }
+    let data_dir_writable = std::fs::write(data_dir.join(".write_test"), "").is_ok();
+    if data_dir_writable {
+        let _ = std::fs::remove_file(data_dir.join(".write_test"));
+    } else {
+        errors.push(format!("数据目录不可写: {:?}", data_dir));
+    }
+
+    Ok(DiagnosticReport {
+        python_exists,
+        python_path: python_path.to_string_lossy().to_string(),
+        script_exists,
+        script_path: script_path.to_string_lossy().to_string(),
+        port_9120_free,
+        data_dir_writable,
+        data_dir: data_dir.to_string_lossy().to_string(),
+        errors,
+    })
+}
+
 #[tauri::command]
 fn set_ignore_mouse(window: tauri::Window, ignore: bool) {
     // 1. Tauri standard call
@@ -171,75 +270,32 @@ async fn start_backend(
     app: tauri::AppHandle,
     state: tauri::State<'_, BackendState>,
 ) -> Result<(), String> {
+    // 1. 先运行诊断（无需锁，且包含异步操作）
+    let diag = get_diagnostics(app.clone()).await?;
+    if !diag.errors.is_empty() {
+        return Err(format!("启动失败！诊断错误：\n{}", diag.errors.join("\n")));
+    }
+
+    // 2. 获取锁（同步操作）
     let mut backend_guard = state.0.lock().map_err(|e| e.to_string())?;
 
+    // 3. 检查是否已启动
     if backend_guard.is_some() {
         return Ok(());
     }
 
     use tauri::Manager;
 
-    // 1. 获取资源目录
-    let resource_dir = app.path().resource_dir().map_err(|e| e.to_string())?;
-
-    // 2. 确定 Python 路径
-    let mut dev_venv_python_exists = false;
-    let python_path = {
-        let dev_venv_python = get_workspace_root().join("backend/venv/Scripts/python.exe");
-        if dev_venv_python.exists() {
-            dev_venv_python_exists = true;
-            dev_venv_python
-        } else {
-            let mut p = resource_dir.join("python/python.exe");
-            if !p.exists() {
-                p = resource_dir.join("_up_/src-tauri/python/python.exe");
-            }
-            p
-        }
-    };
-
-    // 3. 确定脚本路径
-    let script_path = {
-        let mut p = resource_dir.join("backend/main.py");
-        if !p.exists() {
-            p = resource_dir.join("main.py"); // 尝试根目录
-        }
-        if !p.exists() {
-            p = resource_dir.join("_up_/backend/main.py");
-        }
-        if !p.exists() {
-            p = resource_dir.join("_up_/main.py");
-        }
-        if p.exists() {
-            p
-        } else {
-            get_workspace_root().join("backend/main.py")
-        }
-    };
-
-    let python_path = fix_path(python_path);
-    if !python_path.exists() {
-        return Err(format!("Python executable not found at {:?}", python_path));
-    }
-    let script_path = fix_path(script_path);
+    let python_path = std::path::PathBuf::from(&diag.python_path);
+    let script_path = std::path::PathBuf::from(&diag.script_path);
+    let data_dir = std::path::PathBuf::from(&diag.data_dir);
     let backend_root = fix_path(script_path.parent().unwrap_or(&script_path).to_path_buf());
+    let resource_dir = app.path().resource_dir().map_err(|e| e.to_string())?;
 
     println!("Rust: Python path: {:?}", python_path);
     println!("Rust: Script path: {:?}", script_path);
     println!("Rust: Backend root: {:?}", backend_root);
     
-    // 强制指定数据库和配置文件路径，确保“记忆”不丢失
-    // 对于打包后的版本，应该使用 AppData 目录，避免权限问题
-    let data_dir = if !dev_venv_python_exists {
-        let p = app.path().app_data_dir().map_err(|e| e.to_string())?.join("data");
-        if !p.exists() {
-            std::fs::create_dir_all(&p).map_err(|e| e.to_string())?;
-        }
-        p
-    } else {
-        get_workspace_root().join("backend/data")
-    };
-
     let db_path = fix_path(data_dir.join("perocore.db"));
     let config_path = fix_path(data_dir.join("config.json"));
 
@@ -262,12 +318,19 @@ async fn start_backend(
 
     let mut cmd = std::process::Command::new(&python_path);
     
-    // 构造 PYTHONPATH，包含 backend 根目录和 site-packages
+    // 构造 PYTHONPATH
     let mut python_path_env = backend_root.to_string_lossy().to_string();
     let site_packages = python_path.parent().unwrap_or(&python_path).join("Lib/site-packages");
     if site_packages.exists() {
         python_path_env = format!("{};{}", python_path_env, site_packages.to_string_lossy());
     }
+
+    // 设置日志文件路径
+    let logs_dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("logs");
+    if !logs_dir.exists() {
+        let _ = std::fs::create_dir_all(&logs_dir);
+    }
+    let backend_log_path = logs_dir.join("backend.log");
 
     cmd.args(&["-u", &script_path.to_string_lossy()])
         .current_dir(&backend_root)
@@ -276,9 +339,10 @@ async fn start_backend(
         .env("PERO_DATA_DIR", data_dir.to_string_lossy().to_string())
         .env("PERO_DATABASE_PATH", db_path.to_string_lossy().to_string())
         .env("PERO_CONFIG_PATH", config_path.to_string_lossy().to_string())
+        .env("PERO_LOG_FILE", backend_log_path.to_string_lossy().to_string())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
-        .creation_flags(0x08000000); // 恢复隐藏窗口，减少干扰
+        .creation_flags(0x08000000); // 隐藏窗口
 
     let mut child = cmd.spawn().map_err(|e| format!("Spawn error: {}", e))?;
 
@@ -291,6 +355,7 @@ async fn start_backend(
         let reader = BufReader::new(stdout);
         for line in reader.lines() {
             if let Ok(l) = line {
+                log::info!("[Backend] {}", l); // 同时记录到 Rust 日志系统
                 let _ = app_stdout.emit("backend-log", l);
             }
         }
@@ -302,6 +367,7 @@ async fn start_backend(
         let reader = BufReader::new(stderr);
         for line in reader.lines() {
             if let Ok(l) = line {
+                log::error!("[Backend] {}", l); // 同时记录到 Rust 日志系统
                 let _ = app_stderr.emit("backend-log", format!("[ERR] {}", l));
             }
         }
@@ -463,6 +529,13 @@ pub fn run() {
     builder = builder.plugin(
         tauri_plugin_log::Builder::default()
             .level(log::LevelFilter::Info)
+            .targets([
+                tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                    file_name: Some("launcher".to_string()),
+                }),
+                tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview),
+            ])
             .build(),
     );
     builder = builder.plugin(tauri_plugin_shell::init());
@@ -487,7 +560,8 @@ pub fn run() {
             install_es,
             plugins::get_plugins,
             get_config,
-            save_config
+            save_config,
+            get_diagnostics
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
