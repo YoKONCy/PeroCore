@@ -17,8 +17,12 @@
   <img src="https://img.shields.io/badge/License-GPL--3.0-blue.svg?style=for-the-badge&logo=gnu&logoColor=white" alt="License">
 </a>
 &nbsp;
+<a href="./README_EN.md">
+  <img src="https://img.shields.io/badge/Language-English-green?style=for-the-badge" alt="Lang_EN">
+</a>
+&nbsp;
 <a href="./README.md">
-  <img src="https://img.shields.io/badge/Status-Active_Development-violet?style=for-the-badge&logo=github&logoColor=white" alt="Status">
+  <img src="https://img.shields.io/badge/语言-中文-red?style=for-the-badge" alt="Lang_ZH">
 </a>
 &nbsp;
 <a href="./tech_docs/PeroCore_Architecture.md">
@@ -196,6 +200,18 @@ flowchart LR
     系统利用图谱的邻近节点进行加权。即便视觉信号有噪点，拓扑结构也会强行将偏移的意图校准回正确的“逻辑锚点”。
 *   **T + 15ms | 预感应就绪 (Pre-monition Ready)**：
     在你敲下第一个字符前，相关记忆已完成预取，NIT 工具链已进入热启动。**AI 已经准备好精准回应。**
+
+<br/>
+
+## 🛠️ 自证清白：致质疑者 (Engineering Integrity)
+
+如果你觉得这些文档看起来“太像 AI 写的”，或者怀疑性能数据是“民科吹牛”，我们非常欢迎你通过以下方式进行**硬核验证**：
+
+1.  **阅读架构演进记录**：查看 [ENGINEERING_THOUGHTS.md](./tech_docs/ENGINEERING_THOUGHTS.md)，那里记录了我们为了解决内存泄漏、死锁和 IO 瓶颈所经历的真实失败和权衡。
+2.  **亲自跑一遍 Benchmark**：所有的测试脚本都在 [benchmarks](./benchmarks) 目录下。你可以克隆代码，并在你自己的机器上生成 [1 亿条随机数据](./benchmarks/02_massive_scale_performance.py) 进行实测。
+3.  **阅读 Rust 源码**：如果你懂 Rust，请查看我们对 CSR 稀疏矩阵和扩散算子的底层实现。你会发现，性能不是靠玄学，而是靠对 SIMD 指令和缓存行对齐的极致压榨。
+
+---
 
 ---
 

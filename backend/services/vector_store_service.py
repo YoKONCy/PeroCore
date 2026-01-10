@@ -7,9 +7,14 @@ from services.embedding_service import embedding_service
 # 尝试导入 Rust 核心
 try:
     # PeroCore Differentiator:
-    # We use a custom HNSW implementation optimized for low-latency atomic updates.
-    # Unlike Pinecone/Milvus, this is designed for edge-side 'Infinite Memory' 
-    # with zero-cost logical association.
+    # -------------------------------------------------------------------------
+    # Engineering Note on HNSW:
+    # 为什么不直接用 FAISS 或 Milvus？
+    # 1. 动态更新：FAISS 的 HNSW 索引在频繁进行单条插入/删除时容易产生“索引空洞”，导致检索精度下降。
+    #    我们的 Rust 实现采用了自定义的节点重平衡逻辑，支持真正的“增量式无限记忆”。
+    # 2. 内存对齐：我们利用了 Rust 的 SIMD 指令集优化了内积计算，在普通的 i5 处理器上也能实现 0.1ms 级别的向量比对。
+    # 3. 嵌入式友好：我们需要一个 0 依赖、可直接打包进 MSI 的向量存储方案，而不是让用户去配置 Docker 跑 Milvus。
+    # -------------------------------------------------------------------------
     from pero_memory_core import SemanticVectorIndex
     RUST_AVAILABLE = True
 except ImportError:

@@ -1,0 +1,208 @@
+<div align="center">
+
+<!-- Dynamic Gradient Header -->
+<img src="https://capsule-render.vercel.app/api?type=waving&color=0:A78BFA,50:8B5CF6,100:7C3AED&height=220&section=header&text=PeroCore&fontSize=70&fontColor=ffffff&fontAlignY=35&desc=Your%20Warm,%20Intelligent%20Desktop%20Companion&descSize=25&descAlignY=60&animation=twinkling&fontAlign=50" width="100%"/>
+
+<br/>
+
+<!-- Typing Effect Slogan -->
+<a href="https://github.com/Perofamily/PeroCore">
+  <img src="https://readme-typing-svg.demolab.com?font=Noto+Serif+SC&weight=600&size=28&duration=4000&pause=1000&color=7C3AED&center=true&vCenter=true&multiline=true&repeat=false&width=800&height=70&lines=Let+AI+become+a+truly+warm+companion;Transforming+AI+into+Empathic+Partners;Rust+Core+%E2%9C%A6+NIT+Protocol+%E2%9C%A6+Deep+Memory" alt="Slogan" />
+</a>
+
+<br/><br/>
+
+<!-- Badges -->
+<a href="./LICENSE">
+  <img src="https://img.shields.io/badge/License-GPL--3.0-blue.svg?style=for-the-badge&logo=gnu&logoColor=white" alt="License">
+</a>
+&nbsp;
+<a href="./README.md">
+  <img src="https://img.shields.io/badge/Language-English-green?style=for-the-badge" alt="Lang">
+</a>
+&nbsp;
+<a href="./README_ZH.md">
+  <img src="https://img.shields.io/badge/语言-中文-red?style=for-the-badge" alt="Lang_ZH">
+</a>
+&nbsp;
+<a href="./tech_docs/PeroCore_Architecture.md">
+  <img src="https://img.shields.io/badge/Architecture-Rust_Hybrid-orange?style=for-the-badge&logo=rust&logoColor=white" alt="Arch">
+</a>
+&nbsp;
+<a href="./tech_docs/NIT_TECHNICAL_MANUAL.md">
+  <img src="https://img.shields.io/badge/Protocol-NIT_2.0-blue?style=for-the-badge&logo=python&logoColor=white" alt="NIT">
+</a>
+
+<br/><br/>
+
+> **"Technology should not be cold. We build memories, not just databases."**
+
+<br/>
+
+<img src="./github_src/cover.png" width="100%" alt="PeroCore Cover"/>
+
+</div>
+
+<img src="https://user-images.githubusercontent.com/73097560/115834477-dbab4500-a447-11eb-908a-139a6edaec5c.gif" width="100%">
+
+<br/>
+
+## 📋 Table of Contents
+
+<details open>
+<summary><b>Quick Navigation</b></summary>
+<br/>
+
+| Section | Description | Link |
+|:-------:|:------------|:----:|
+| 🌟 | **Philosophy** - AI as a Warm Companion | [Jump](#-philosophy) |
+| 🚀 | **Why Unique?** - Beyond Keyword Search | [Jump](#-why-perocore-is-unique) |
+| 🧠 | **Deep Memory** - Bionic Memory & Rust Core | [Jump](#-deep-memory-system) |
+| 👁️ | **AuraVision** - Privacy-First Intent System | [Jump](#-auravision-the-bionic-eyes) |
+| ⚡ | **NIT Protocol** - Evolutionary Tool Orchestration | [Jump](#-nit-protocol-20) |
+| 🏗️ | **Architecture** - Python + Rust Hybrid | [Jump](#-technical-architecture) |
+| 🛡️ | **Integrity** - Engineering Proof & Verification | [Jump](#-engineering-integrity) |
+
+</details>
+
+<br/>
+
+<img src="https://user-images.githubusercontent.com/73097560/115834477-dbab4500-a447-11eb-908a-139a6edaec5c.gif" width="100%">
+
+<br/>
+
+## 🌟 Philosophy
+
+<div align="center">
+  <h3>Let AI Become a Truly Warm Companion</h3>
+</div>
+
+In an era of AI explosion, we see powerful tools—coding assistants, image generators, and encyclopedic chat bots. Yet, they remain **cold**. They are stateless, memoryless, and indifferent to your emotions.
+
+**PeroCore** was born from a simple human desire: **Companionship**. We believe a true AI partner should possess:
+
+*   **Real Memory**: Not just logging text, but remembering the shared stories, preferences, and subconscious habits. It "associates"—mentioning "rain" might trigger a memory of a song you shared on a similar day.
+*   **Proactive Care**: Moving beyond "Q&A". It observes your context (with privacy) to offer comfort during a sad movie or remind you to rest after hours of deep work.
+*   **Evolutionary Growth**: It reflects on mistakes. Through the NIT protocol, it learns to use tools more effectively, adapting its service to your unique needs.
+
+PeroCore is the soul-container for **Pero**, leveraging Rust's performance and Python's flexibility to build a resilient, agile, and profound digital being.
+
+<br/>
+
+## 🚀 Why PeroCore is Unique?
+
+> **"Most AI is still playing 'Keyword Search'; we've entered the era of 'Logical Association'."**
+
+While others build wrappers around vector databases, PeroCore reconstructs the foundation of long-term memory for LLMs:
+
+- **🛡️ Solving the "RAG Logic Gap"**: Traditional vector retrieval fails at **logical leaps** (e.g., connecting "Apple" to "Newton" to "Relativity"). Our **KDN (Knowledge Diffusion Network)** operator simulates human brain association via energy decay algorithms, transforming "semantic similarity" into "logical causality."
+- **⚡ Millisecond "Memory Flashbacks"**: Optimized by Rust's **CSR (Compressed Sparse Row)** sparse matrix, we achieve **0.45ms** retrieval latency even amidst **100 Million** noise nodes. In PeroCore, memory isn't "searched"; it's "flashed back."
+- **👁️ Privacy-First "Intent Sensing"**: Our proprietary **AuraVision** engine senses your workflow through 64x64 desensitized visual data. We protect your screen privacy while understanding your every intent.
+- **📜 Self-Evolving "Tool Sovereignty"**: The **NIT 2.0** protocol empowers AI to write micro-scripts. It doesn't just call APIs; it orchestrates logic, captures errors, and self-corrects like a human programmer.
+
+<br/>
+
+## 🧠 Deep Memory System
+
+> **"Memory is what makes us who we are."**
+
+### 📊 Hardcore Performance & Precision
+
+We reject "PPT performance." All metrics are based on real stress tests of the **PeroCore Rust Engine**.
+
+> 📂 **Resources**: Find scripts and tools in the [benchmarks](./benchmarks) directory.
+> 📄 **Core Report**: [Comprehensive Benchmark Report](./benchmarks/reports/PEROCORE_FULL_BENCHMARK_REPORT.md)
+
+#### 1. ⚡ Retrieval Efficiency (Scale: 20M Nodes / 40M Edges)
+
+| Scale | Diffusion Steps | Avg. Latency | Associated Nodes | Rating |
+| :--- | :---: | :---: | :---: | :--- |
+| **20M Nodes / 40M Edges** | 5 steps | **1.13 ms** | ~1,000 | 🔥 Ultra-Fast |
+| **20M Nodes / 20M Edges** | 50 steps | **830 ms** | ~50,000 | ⚡ Deep Penetration |
+
+#### 2. 🏁 Competitive Edge (PeroCore vs. Traditional Vector DB)
+
+| Dimension | Traditional Vector DB (e.g., ChromaDB) | **PeroCore Cognitive Engine** | Gap |
+| :--- | :--- | :--- | :--- |
+| **Test Scale** | 1,000,000 (1M) | **100,000,000 (100M)** | **100x Scale** |
+| **Retrieval Latency** | ~50.22 ms | **0.45 ms** | **111x Faster** |
+| **Inference Latency** | ~200ms (PyTorch) | **< 15ms (Rust AuraVision)** | **13x Faster** |
+| **Retrieval Nature** | Semantic Similarity | **Logical Causality** | **Qualitative Shift** |
+| **Resource Usage** | High CPU/RAM (Vector ops) | **Ultra-Low (Sparse Matrix)** | **Lightweight** |
+
+#### 3. 🎯 Logical Penetration Under 100M Noise
+
+*   **Scenario**: Injected path `Apple -> Newton -> Gravity -> Einstein -> Relativity` hidden in **100 Million** random nodes.
+*   **Input**: `Apple`
+| Metric | Result |
+| :--- | :--- |
+| **Latency** | **0.45 ms** |
+| **Precision** | Target `Relativity` ranked in **Top 5** out of 100M. |
+*   **Principle**: **"Diffusion is all you need."** Energy flows only along logical chains; random noise dissipates rapidly due to entropy increase.
+
+#### 4. 🌌 Digital Subconscious: The 15ms Lifecycle
+
+```mermaid
+flowchart LR
+    Start((Trigger)) -- T+0ms --> Retina[Desensitization]
+    Retina -- "Privacy Lock" --> Aura[Intent Mapping]
+    Aura -- T+5ms --> Flashback{Subconscious Flashback}
+    Flashback -- "0.52ms Diffusion" --> Topology[Correction]
+    Topology -- T+10ms --> Ready([Pre-monition Ready])
+    Ready -- T+15ms --> User((Response))
+
+    style Flashback fill:#f96,stroke:#333,stroke-width:4px
+    style Ready fill:#00ff00,stroke:#333,stroke-width:2px
+    style Start fill:#fff,stroke:#333
+```
+
+- **T+0ms | Desensitization**: Screenshot captured and instantly downsampled to 64x64. Privacy is locked at the hardware level.
+- **T+5ms | Intent Encoding**: AuraVision maps geometric features to a 384D intent vector.
+- **T+6ms | Subconscious Flashback**: The vector hits the Rust cognitive graph. Energy diffuses through 100M nodes in **0.52ms**.
+- **T+15ms | Pre-monition Ready**: Before you type a single character, relevant memories are prefetched. **AI is ready.**
+
+<br/>
+
+## 👁️ AuraVision: The Bionic Eyes
+
+> **"I see you, not your secrets."**
+
+AuraVision is a **privacy-first visual perception system**. Unlike generic models, it is custom-designed and trained for desktop context.
+
+- **Proprietary Architecture**: A **CNN-Transformer hybrid** designed for low-res desensitized features.
+- **Privacy by Design**: Input is strictly 64x64 Sobel/Canny edges. Even we cannot distinguish your text or files from the data stream.
+- **Rust-Powered Inference**: Based on `tract-onnx`, achieving **< 15ms** end-to-end latency on standard CPUs.
+
+<br/>
+
+## ⚡ NIT Protocol 2.0
+
+**NIT (Non-invasive Integration Tools)** is our proprietary orchestration protocol. It goes beyond simple "Function Calling" by giving AI **programmatic reasoning**.
+
+Instead of one-off API calls, AI writes **micro-scripts** to orchestrate tasks:
+- **Pipelining**: Multi-step execution without returning to LLM.
+- **Async Execution**: Heavy tasks (crawling, drawing) run in background while AI continues chatting.
+- **Self-Correction**: The runtime provides error feedback; AI attempts to fix and retry its own scripts like a human dev.
+
+<br/>
+
+## 🏗️ Technical Architecture
+
+PeroCore uses a **Python (Orchestration) + Rust (Kernel)** hybrid architecture.
+
+- **Rust Core**: Handles vector indexing (`usearch`), graph diffusion, and atomic I/O. Exposed via `PyO3`.
+- **NIT Engine**: DSL interpreter for parsing and executing `<nit>` scripts.
+- **Service Mesh**: FastAPI-based microservices for ASR, TTS, and Vision.
+
+<br/>
+
+## 🛠️ Engineering Integrity
+
+If you think this documentation is "too perfect" or suspect the performance data is "AI-generated hype," we invite you to **hardcore verification**:
+
+1.  **Read the Evolution Logs**: Check [ENGINEERING_THOUGHTS.md](./tech_docs/ENGINEERING_THOUGHTS.md) for our real struggles with memory leaks, deadlocks, and I/O bottlenecks.
+2.  **Run the Benchmarks**: All scripts are in the [benchmarks](./benchmarks) folder. Clone and test it on your own hardware with [100 Million random nodes](./benchmarks/02_massive_scale_performance.py).
+3.  **Inspect the Rust Source**: If you know Rust, look at our CSR matrix implementation. Performance isn't magic; it's SIMD and cache-line alignment.
+
+---
+*Developed with ❤️ by the PeroFamily Team.*
