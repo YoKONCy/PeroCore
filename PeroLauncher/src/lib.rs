@@ -202,7 +202,13 @@ async fn start_backend(
     let script_path = {
         let mut p = resource_dir.join("backend/main.py");
         if !p.exists() {
+            p = resource_dir.join("main.py"); // 尝试根目录
+        }
+        if !p.exists() {
             p = resource_dir.join("_up_/backend/main.py");
+        }
+        if !p.exists() {
+            p = resource_dir.join("_up_/main.py");
         }
         if p.exists() {
             p
@@ -266,6 +272,7 @@ async fn start_backend(
     cmd.args(&["-u", &script_path.to_string_lossy()])
         .current_dir(&backend_root)
         .env("PYTHONPATH", python_path_env)
+        .env("PORT", "9120")
         .env("PERO_DATA_DIR", data_dir.to_string_lossy().to_string())
         .env("PERO_DATABASE_PATH", db_path.to_string_lossy().to_string())
         .env("PERO_CONFIG_PATH", config_path.to_string_lossy().to_string())
