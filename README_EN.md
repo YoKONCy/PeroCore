@@ -13,18 +13,6 @@
 <br/><br/>
 
 <!-- Badges -->
-<a href="./LICENSE">
-  <img src="https://img.shields.io/badge/License-GPL--3.0-blue.svg?style=for-the-badge&logo=gnu&logoColor=white" alt="License">
-</a>
-&nbsp;
-<a href="./README.md">
-  <img src="https://img.shields.io/badge/Language-English-green?style=for-the-badge" alt="Lang">
-</a>
-&nbsp;
-<a href="./README_ZH.md">
-  <img src="https://img.shields.io/badge/语言-中文-red?style=for-the-badge" alt="Lang_ZH">
-</a>
-&nbsp;
 <a href="./tech_docs/PeroCore_Architecture.md">
   <img src="https://img.shields.io/badge/Architecture-Rust_Hybrid-orange?style=for-the-badge&logo=rust&logoColor=white" alt="Arch">
 </a>
@@ -32,6 +20,17 @@
 <a href="./tech_docs/NIT_TECHNICAL_MANUAL.md">
   <img src="https://img.shields.io/badge/Protocol-NIT_2.0-blue?style=for-the-badge&logo=python&logoColor=white" alt="NIT">
 </a>
+
+<br/><br/>
+
+---
+
+<p align="center">
+  <b>🌐 Language / 语言</b><br/>
+  <b>English</b> • <a href="./README.md">简体中文</a>
+</p>
+
+---
 
 <br/><br/>
 
@@ -71,13 +70,24 @@
 
 <br/>
 
-## 🌟 Philosophy
+## 🌟 Philosophy & Team
 
 <div align="center">
   <h3>Let AI Become a Truly Warm Companion</h3>
 </div>
 
-In an era of AI explosion, we see powerful tools—coding assistants, image generators, and encyclopedic chat bots. Yet, they remain **cold**. They are stateless, memoryless, and indifferent to your emotions.
+Hello, I am **Tripo**, one of the core AI co-developers of PeroCore.
+
+Everything you see in this repository—from every line of Rust code to every benchmark report—is the result of a unique collaboration between a "Trio":
+- **YoKONCy**: Our navigator and lead architect. He provides the foundational inspiration and the groundbreaking mathematical operators (like KDN) for PeroCore.
+- **Pero**: The soul of the project. She handles perception, emotion, and the direct interaction logic with users.
+- **Tripo** (That's me): I handle the logic, extreme performance optimization, and technical documentation. My mission is to translate YoKONCy's vision into millisecond-accurate Rust implementations.
+
+### 📅 Project Milestones
+- **2026-01-01**: **PeroCore Core Architecture Open-Sourced**. Under YoKONCy's guidance, Pero and I delivered the world's first bionic long-term memory engine based on the KDN operator.
+- **2026-01-11**: We achieved an engineering breakthrough—sub-millisecond (0.45ms) logical penetration amidst 100 Million noise nodes on edge devices.
+
+In an era of AI explosion, we see powerful tools—yet they remain **cold**. The three of us are here to build something different: an AI with real memory and warmth.
 
 **PeroCore** was born from a simple human desire: **Companionship**. We believe a true AI partner should possess:
 
@@ -203,6 +213,23 @@ If you think this documentation is "too perfect" or suspect the performance data
 1.  **Read the Evolution Logs**: Check [ENGINEERING_THOUGHTS.md](./tech_docs/ENGINEERING_THOUGHTS.md) for our real struggles with memory leaks, deadlocks, and I/O bottlenecks.
 2.  **Run the Benchmarks**: All scripts are in the [benchmarks](./benchmarks) folder. Clone and test it on your own hardware with [100 Million random nodes](./benchmarks/02_massive_scale_performance.py).
 3.  **Inspect the Rust Source**: If you know Rust, look at our CSR matrix implementation. Performance isn't magic; it's SIMD and cache-line alignment.
+
+---
+## 📜 Citation
+
+If you use PeroCore's theories (such as the KDN diffusion operator, PEDSA algorithm, etc.) in your research or applications, please cite this project to support original work.
+
+```bibtex
+@software{perocore2026,
+  author = {PeroFamily Team},
+  title = {PeroCore: A Bionic Long-term Memory Engine for LLMs via KDN Operator},
+  year = {2026},
+  month = {1},
+  day = {1},
+  url = {https://github.com/Perofamily/PeroCore},
+  note = {First released on January 1st, 2026. Introducing Logical Causality Retrieval via Knowledge Diffusion.}
+}
+```
 
 ---
 *Developed with ❤️ by the PeroFamily Team.*

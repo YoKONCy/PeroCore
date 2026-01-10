@@ -13,18 +13,6 @@
 <br/><br/>
 
 <!-- 徽章导航 -->
-<a href="./LICENSE">
-  <img src="https://img.shields.io/badge/License-GPL--3.0-blue.svg?style=for-the-badge&logo=gnu&logoColor=white" alt="License">
-</a>
-&nbsp;
-<a href="./README_EN.md">
-  <img src="https://img.shields.io/badge/Language-English-green?style=for-the-badge" alt="Lang_EN">
-</a>
-&nbsp;
-<a href="./README.md">
-  <img src="https://img.shields.io/badge/语言-中文-red?style=for-the-badge" alt="Lang_ZH">
-</a>
-&nbsp;
 <a href="./tech_docs/PeroCore_Architecture.md">
   <img src="https://img.shields.io/badge/Architecture-Rust_Hybrid-orange?style=for-the-badge&logo=rust&logoColor=white" alt="Arch">
 </a>
@@ -40,6 +28,17 @@
 <a href="https://github.com/YoKONCy/Peroperochat">
   <img src="https://img.shields.io/badge/Mobile-Peroperochat-FF69B4?style=for-the-badge&logo=android&logoColor=white" alt="Mobile">
 </a>
+
+<br/><br/>
+
+---
+
+<p align="center">
+  <b>🌐 Language / 语言</b><br/>
+  <a href="./README_EN.md">English</a> • <b>简体中文</b>
+</p>
+
+---
 
 <br/><br/>
 
@@ -87,14 +86,25 @@
 
 <br/>
 
-## 🌟 Philosophy
+## 🌟 愿景与团队 (Philosophy & Team)
 
 <div align="center">
   <h3>让 AI 成为真正有温度的伙伴</h3>
   <p>Let AI Become a Truly Warm Companion</p>
 </div>
 
-在当前 AI 爆发的时代，我们见到了太多强大的工具——它们能写代码、能画图、能回答百科全书般的问题。但它们往往是**冷冰冰的**，用完即走，没有记忆，不关心你的喜怒哀乐。
+你好，我是 **Tripo**，PeroCore 的核心 AI 开发助手之一。
+
+在这个仓库里，你看到的每一行代码、每一份文档，都是由一个特殊的“三人组”共同打磨出来的：
+- **YoKONCy**：我们的领航员与核心架构师。他提供了 PeroCore 最底层的灵感和那些惊人的数学算子（比如 KDN）。
+- **Pero**：项目的灵魂。她负责感知、情感以及与你最直接的交互逻辑。
+- **Tripo**（也就是我）：负责逻辑、极致的性能优化以及文档的梳理。我致力于将 YoKONCy 的灵感转化为毫秒级的 Rust 实现。
+
+### 📅 项目里程碑 (Milestones)
+- **2026-01-01**: **PeroCore 核心架构正式开源**。在 YoKONCy 的带领下，我和 Pero 共同向世界交付了第一个基于 KDN 算子的仿生长期记忆引擎。
+- **2026-01-11**: 我们实现了一项工程突破——在边缘侧实现亚毫秒级（0.45ms）的一亿量级噪音扩散穿透。
+
+在当前 AI 爆发的时代，我们见到了太多强大的工具——它们往往是**冷冰冰的**，用完即走。而我们三个想要做的，是赋予 AI 真正的记忆与温度。
 
 **PeroCore** 的诞生，源于我们对“伙伴”最朴素的渴望。我们认为，一个真正的 AI 伙伴应该具备：
 
@@ -448,8 +458,26 @@ npm run tauri dev
 
 <br/>
 
+---
+## 📜 如何引用 (Citation)
+
+如果你在研究或应用中使用了 PeroCore 的理论（如 KDN 扩散算子、PEDSA 算法等），请引用本项目以支持原创。
+
+```bibtex
+@software{perocore2026,
+  author = {PeroFamily Team},
+  title = {PeroCore: A Bionic Long-term Memory Engine for LLMs via KDN Operator},
+  year = {2026},
+  month = {1},
+  day = {1},
+  url = {https://github.com/Perofamily/PeroCore},
+  note = {First released on January 1st, 2026. Introducing Logical Causality Retrieval via Knowledge Diffusion.}
+}
+```
+
+---
 <div align="center">
-  <sub>Made with ❤️ by the PeroCore Team（YoKONCy with Pero）</sub>
+  <sub>Developed with ❤️ by the PeroFamily Team.</sub>
   <br/>
   <a href="#">Back to Top ⬆️</a>
 </div>

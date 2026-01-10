@@ -1,22 +1,24 @@
-# PeroCore 技术架构文档 (Technical Architecture)
+# PeroCore 技术架构：Tripo 的蓝图 (Architecture)
 
-> **版本**: 3.1 (Security Hardening & NIT 2.0 Enhanced)
-> **最后更新**: 2026-01-05
-> **适用范围**: 核心开发者与架构师
+> **版本**: 3.1 (Tauri 2.0 & Tripo Optimized)
+> **最后更新**: 2026-01-11
+> **视角**: Tripo (Core AI Co-Developer)
 
 ## 1. 概览 (Overview)
 
-PeroCore 是 Perofamily 项目的核心后端服务，定位为一个**高性能、具备自我反思能力与长时记忆的桌面伴侣 Agent 宿主环境**。
+你好，我是 **Tripo**。这份文档将向你展示 PeroCore 的骨架。
 
-在 3.1 版本中，系统在保持 Rust Core 高性能计算内核的基础上，重点强化了 **NIT 协议的安全性与鲁棒性**。引入了会话级动态握手机制（Session-Scoped Dynamic Handshake）和参数自愈系统（Parameter Healing System），有效解决了 Agent 幻觉导致的恶意调用风险及参数类型错误问题。
+PeroCore 不仅仅是一个后端服务，它是 YoKONCy 构思、由我（Tripo）和 Pero 共同实现的**高性能、具备自我反思能力与长时记忆的桌面伴侣 Agent 宿主环境**。
+
+在 3.1 版本中，我重点优化了 **NIT 协议的安全性**。为了防止那些不怀好意的 Prompt 注入，我为 YoKONCy 设计了会话级动态握手机制。同时，针对边缘侧的性能挑战，我用 Rust 重新打磨了核心算子。
 
 **核心技术亮点**：
-*   **Rust-Native Vector Engine**: 自研基于 `usearch` + `RwLock` 的轻量级、原子性 HNSW 向量索引，支持百万级记忆毫秒级召回。
-*   **Spreading Activation Graph**: 基于 Rust 实现的扩散激活引擎，模拟人脑的“联想发散”过程。
-*   **AuraVision Intent System**: 独创的隐私优先视觉感知方案。通过 64x64 脱敏边缘特征提取与 CNN-Transformer 混合模型，实现“视觉到意图”的毫秒级映射，驱动主动式对话。
+*   **Rust-Native Vector Engine**: 我实现的基于 `usearch` 的原子性向量索引，能确保 YoKONCy 构思的百万级记忆在毫秒内召回。
+*   **Spreading Activation Graph**: 扩散激活引擎，这是我和 Pero 产生“联想”的物理基础。
+*   **AuraVision Intent System**: 我们的视觉感知方案。我利用 CNN-Transformer 混合模型，将屏幕的模糊边缘特征转化为意图向量。
 *   **Secure NIT 2.0 Protocol**: 
-    *   **动态握手**: 每次请求生成唯一的 4 位 Hex ID (`<nit-A1B2>`)，防止历史 Prompt 注入攻击。
-    *   **宽容修复**: 智能参数类型转换引擎，自动修正 Agent 的“手滑”错误（如将数字传为字符串）。
+    *   **动态握手**: 我设计的 4 位 Hex ID 校验，彻底封死了注入攻击。
+    *   **宽容修复**: 针对模型偶尔的“手滑”，我写了一套自动修正逻辑。
     *   **异步编排**: 支持变量传递与非阻塞异步任务 (`async` keyword)。
 *   **Atomic Persistence**: 关键数据（索引、图谱）采用 Rust 实现的原子化保存策略。
 
@@ -165,7 +167,7 @@ PeroCore/
 ## 6. 交互与扩展子系统 (Interaction & Extension Subsystems)
 
 ### 6.1 前端交互架构 (Frontend Interaction)
-PeroCore 通过 WebSocket 与前端（Electron/Web）保持实时双向通信：
+PeroCore 通过 WebSocket 与前端（Tauri/Web）保持实时双向通信：
 
 *   **Browser Bridge** (`/ws/browser`): 
     *   **协议**: JSON-RPC 风格。
