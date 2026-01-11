@@ -217,13 +217,15 @@ PeroCore uses a **Python (Orchestration) + Rust (Kernel)** hybrid architecture.
 
 <br/>
 
-## 🛠️ Engineering Integrity
+## 🛠️ Documentation Integrity: Yes, it's AI-assisted
 
-If you think this documentation is "too perfect" or suspect the performance data is "AI-generated hype," we invite you to **hardcore verification**:
+If you feel this documentation looks "too much like AI" — **your intuition is correct. It is indeed AI-generated.**
 
-1.  **Read the Evolution Logs**: Check [ENGINEERING_THOUGHTS.md](./tech_docs/ENGINEERING_THOUGHTS.md) for our real struggles with memory leaks, deadlocks, and I/O bottlenecks.
-2.  **Run the Benchmarks**: All scripts are in the [benchmarks](./benchmarks) folder. Clone and test it on your own hardware with [100 Million random nodes](./benchmarks/02_massive_scale_performance.py).
-3.  **Inspect the Rust Source**: If you know Rust, look at our CSR matrix implementation. Performance isn't magic; it's SIMD and cache-line alignment.
+As developers, we spend 99% of our time squeezing Rust performance and building KDN logic, leaving the tedious task of "translating hardcore logic into human-readable docs" to AI. However:
+
+1.  **Authentic Logic**: While the copy is AI-generated, the architectures (CSR, PEDSA) and algorithmic logic described are fully implemented by us.
+2.  **Authentic Data**: All performance metrics and benchmark results come from real [Benchmark](./benchmarks) stress tests, not AI hallucinations.
+3.  **Open Source Truth**: We encourage you to read the [Rust source code](./backend/rust_core/src) or run the [scripts](./benchmarks) yourself. Let the code verify the claims.
 
 ---
 ## 📜 Citation
