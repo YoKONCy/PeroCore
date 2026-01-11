@@ -58,7 +58,7 @@
 | 🚀 | **Why Unique?** - Beyond Keyword Search | [Jump](#-why-perocore-is-unique) |
 | 🧠 | **Deep Memory** - Bionic Memory & Rust Core | [Jump](#-deep-memory-system) |
 | 👁️ | **AuraVision** - Privacy-First Intent System | [Jump](#-auravision-the-bionic-eyes) |
-| ⚡ | **NIT Protocol** - Evolutionary Tool Orchestration | [Jump](#-nit-protocol-20) |
+| ⚡ | **NIT Protocol** - A "language" for AI to naturally invoke external tools | [Jump](#-nit-protocol-20) |
 | 🏗️ | **Architecture** - Python + Rust Hybrid | [Jump](#-technical-architecture) |
 | 🛡️ | **Integrity** - Engineering Proof & Verification | [Jump](#-engineering-integrity) |
 
@@ -108,7 +108,7 @@ While others build wrappers around vector databases, PeroCore reconstructs the f
 - **🛡️ Solving the "RAG Logic Gap"**: Traditional vector retrieval fails at **logical leaps** (e.g., connecting "Apple" to "Newton" to "Relativity"). Our **KDN (Knowledge Diffusion Network)** operator simulates human brain association via energy decay algorithms, transforming "semantic similarity" into "logical causality."
 - **⚡ Millisecond "Memory Flashbacks"**: Powered by Rust's **Simulated CSR** architecture, we achieve **2.95ms** retrieval latency even with **100 Million** noise nodes. The secret lies in our **Top-10,000 Active Filtering**—the KDN algorithm only processes the top 10,000 most active nodes per step. This ensures complete long-term memory context for an AI Agent while locking computational complexity near $O(1)$.
 - **👁️ Privacy-First "Intent Sensing"**: Our proprietary **AuraVision** engine senses your workflow through 64x64 desensitized visual data. We protect your screen privacy while understanding your every intent.
-- **📜 Self-Evolving "Tool Sovereignty"**: The **NIT 2.0** protocol empowers AI to write micro-scripts. It doesn't just call APIs; it orchestrates logic, captures errors, and self-corrects like a human programmer.
+- **📜 Self-Evolving "Tool Language"**: **NIT 2.0** is a tool-calling language designed for AI. It allows the AI to orchestrate logic and invoke external tools more naturally, with built-in error handling and self-correction capabilities.
 
 <br/>
 

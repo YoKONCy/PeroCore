@@ -9,7 +9,7 @@
 ## 1. 概览 (Overview)
 
 ### 1.1 什么是 NIT？
-NIT (Non-invasive Integration Tools) 是一套**基于脚本解释器的 AI 工具调用协议**。它不依赖 LLM 厂商原生的 Function Calling API，而是允许模型在回复中嵌入一段 `<nit>` 脚本代码。
+NIT (Non-invasive Integration Tools) 是一套**便于 AI 调用外部工具的“语言”**。它以脚本协议的形式存在，不依赖 LLM 厂商原生的 Function Calling API，而是允许模型在回复中以更自然的代码形式嵌入指令。
 
 在 NIT 2.0 中，我们引入了一个微型解释器（Interpreter），使得 Agent 能够编写包含**变量赋值**、**依赖传递**和**异步任务**的复杂逻辑，从而实现真正的“思考与执行”流水线。
 
@@ -144,7 +144,7 @@ $result = mcp_bridge(
 *(本节内容核心理念未变，适用于所有版本的 NIT)*
 
 ### 6.1 与记忆系统的深度集成
-NIT协议的核心创新之一是与PeroCore记忆系统的完美协同，实现AI工具使用能力的持续进化：
+NIT 协议通过与 PeroCore 记忆系统的配合，让 AI 能在实践中优化其工具调用逻辑：
 
 #### 6.1.1 经验记录与反思学习
 ```python

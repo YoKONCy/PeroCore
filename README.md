@@ -77,7 +77,7 @@
 | 🌟 | **Philosophy** - 核心理念：有温度的伙伴 | [Jump](#-philosophy) |
 | 🧠 | **Deep Memory** - 仿生记忆与 Rust 核心 | [Jump](#-deep-memory-system) |
 | 👁️ | **AuraVision** - 隐私优先的视觉意图系统 | [Jump](#-auravision-the-bionic-eyes) |
-| ⚡ | **NIT Protocol** - 革命性的工具调用协议 | [Jump](#-nit-protocol-20) |
+| ⚡ | **NIT Protocol** - 便于 AI 调用外部工具的“语言” | [Jump](#-nit-protocol-20) |
 | 🏗️ | **Architecture** - Python + Rust 混合架构 | [Jump](#-technical-architecture) |
 | 🖥️ | **Desktop Ops** - 桌面与浏览器自动化 | [Jump](#-desktop--browser-automation) |
 | 🛡️ | **Security** - 隐私至上与纵深防御 | [Jump](#-security--privacy) |
@@ -133,7 +133,7 @@ PeroCore 不仅仅是一个后端程序，它是 **Pero** 的灵魂容器。我�
 - **🛡️ 解决 RAG 的“逻辑死穴”**：传统向量检索无法处理**逻辑跳跃**（例如：从“苹果”联想到“牛顿”再到“相对论”）。PeroCore 的 **KDN (Knowledge Diffusion Network)** 算子通过能量扩散算法模拟人脑联想，实现了从“语义相似”到“逻辑因果”的质变。
 - **⚡ 毫秒级的“记忆闪回”**：得益于 Rust 核心对 **类 CSR (Simulated CSR)** 结构的动态联想优化，我们在 **1 亿** 条随机噪音的干扰下，依然能实现 **2.95ms** 的检索延迟。其背后的关键在于 KDN 算法采用了 **Top-10,000 活跃过滤** 策略——每步仅处理激活能量最高的前一万个节点，这在保证 Agent 长记忆上下文完整性的同时，将计算复杂度从 $O(N)$ 降至接近常数级。
 - **👁️ 隐私优先的“意图感官”**：自研 **AuraVision** 视觉引擎，在 64x64 的极低分辨率脱敏数据下，依然能精准感知你的工作状态。我们保护你的屏幕隐私，但读懂你的每一个意图。
-- **📜 自动进化的“工具主权”**：**NIT 2.0** 协议赋予了 AI 编写微型脚本的能力。它不再是机械地调用 API，而是像人类一样编排逻辑、捕获错误并自我修正。
+- **📜 自动进化的“工具语言”**：**NIT 2.0** 是一种专为 AI 设计的工具调用语言。它让 AI 能以更自然的方式编排逻辑、调用外部工具，并具备基本的错误捕获与自我修正能力。
 
 <br/>
 

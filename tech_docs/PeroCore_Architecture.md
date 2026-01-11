@@ -61,10 +61,10 @@ PeroCore 不仅仅是一个后端服务，它是 YoKONCy 构思、由我（Tripo
 
 ---
 
-## 3. NIT 2.0 协议与安全机制 (NIT Protocol & Security)
+## 3. NIT 2.0：一种工具调用语言 (Tool Language)
 
-### 3.1 协议格式 (Script Format)
-NIT 2.0 是一种专为 Agent 设计的嵌入式 DSL，支持变量、函数调用与异步任务。
+### 3.1 协议定义 (Definition)
+NIT 2.0 是一种专为 AI 设计的嵌入式脚本语言，旨在简化 AI 对外部工具（如浏览器、文件系统）的调用。
 
 ```nit
 <nit-A1B2>  <!-- 动态生成的安全标签 -->
