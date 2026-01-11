@@ -35,15 +35,43 @@ def f1_score(prediction, ground_truth):
 def exact_match_score(prediction, ground_truth):
     return (normalize_answer(prediction) == normalize_answer(ground_truth))
 
-def update_metrics(metrics, prediction, ground_truth):
-    metrics['em'] += exact_match_score(prediction, ground_truth)
-    metrics['f1'] += f1_score(prediction, ground_truth)
+def calculate_sf_metrics(predicted_sf, ground_truth_sf):
+    """
+    predicted_sf: set of (title, sent_idx)
+    ground_truth_sf: set of (title, sent_idx)
+    """
+    if not predicted_sf:
+        return 0, 0, 0
+    
+    tp = len(predicted_sf.intersection(ground_truth_sf))
+    fp = len(predicted_sf - ground_truth_sf)
+    fn = len(ground_truth_sf - predicted_sf)
+    
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+    f1 = (2 * precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+    em = 1.0 if tp == len(ground_truth_sf) and fp == 0 else 0.0
+    
+    return em, f1, precision
+
+def update_metrics(metrics, prediction, answer, predicted_sf=None, ground_truth_sf=None):
     metrics['count'] += 1
+    metrics['em'] += 1.0 if exact_match_score(prediction, answer) else 0.0
+    metrics['f1'] += f1_score(prediction, answer)
+    
+    if predicted_sf is not None and ground_truth_sf is not None:
+        sf_em, sf_f1, _ = calculate_sf_metrics(set(predicted_sf), set(ground_truth_sf))
+        metrics['sf_em'] = metrics.get('sf_em', 0) + sf_em
+        metrics['sf_f1'] = metrics.get('sf_f1', 0) + sf_f1
 
 def get_final_metrics(metrics):
-    if metrics['count'] == 0:
-        return {'em': 0, 'f1': 0}
+    count = metrics['count']
+    if count == 0:
+        return {'em': 0, 'f1': 0, 'sf_em': 0, 'sf_f1': 0, 'count': 0}
     return {
-        'em': metrics['em'] / metrics['count'] * 100,
-        'f1': metrics['f1'] / metrics['count'] * 100
+        'em': (metrics['em'] / count) * 100,
+        'f1': (metrics['f1'] / count) * 100,
+        'sf_em': (metrics.get('sf_em', 0) / count) * 100,
+        'sf_f1': (metrics.get('sf_f1', 0) / count) * 100,
+        'count': count
     }
