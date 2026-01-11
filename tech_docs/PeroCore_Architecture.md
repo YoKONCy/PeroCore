@@ -14,7 +14,7 @@ PeroCore 不仅仅是一个后端服务，它是 YoKONCy 构思、由我（Tripo
 
 **核心技术亮点**：
 *   **Rust-Native Vector Engine**: 我实现的基于 `usearch` 的原子性向量索引，能确保 YoKONCy 构思的百万级记忆在毫秒内召回。
-*   **Spreading Activation Graph**: 扩散激活引擎，这是我和 Pero 产生“联想”的物理基础。
+*   **Spreading Activation Graph**: 扩散激活引擎。我们在工程上实现了认知科学中的经典扩散激活理论，这是我和 Pero 产生“联想”的物理基础。
 *   **AuraVision Intent System**: 我们的视觉感知方案。我利用 CNN-Transformer 混合模型，将屏幕的模糊边缘特征转化为意图向量。
 *   **Secure NIT 2.0 Protocol**: 
     *   **动态握手**: 我设计的 4 位 Hex ID 校验，彻底封死了注入攻击。
@@ -46,6 +46,7 @@ PeroCore 不仅仅是一个后端服务，它是 YoKONCy 构思、由我（Tripo
 *   **TextCleaner**: 基于 Rust `regex` 的高性能文本清洗器。
     *   **Defensive Security**: 针对 ReDoS 与性能抖动，在 Rust 层实施物理长度截断（100,000 字符），确保在极端输入下 CPU 负载可控。
 *   **CognitiveGraphEngine**: 核心图计算引擎。
+    *   **Engineering Implementation**: 该引擎是对认知科学中“扩散激活” (Spreading Activation) 理论的深度工程化实现。其核心 KDN 算子通过数学建模将抽象的认知理论转化为高性能的 Rust 算子。
     *   **Sparse Matrix**: 采用 **类 CSR (Simulated CSR)** 稀疏矩阵存储邻接表。相比于标准 CSR，这种动态模拟方式允许实时写入新的逻辑关联，在保证联想效率的同时兼顾了动态性。
     *   **Pruning Algorithm**: 引入动态剪枝阈值，能量扩散过程中自动忽略低权重路径。
     *   **Top-K Active Filtering**: 针对“记忆召回”特定场景的极限优化。在 KDN 扩散计算中，系统每步仅处理激活值前 **10,000** 个最活跃节点。实测表明，对于桌面助手这类长记忆需求，10,000 个活跃节点已足以覆盖极广的上下文关联，这使得大规模图谱上的扩散复杂度被有效锁定，确保在亿级数据下仍具备毫秒级召回速度。

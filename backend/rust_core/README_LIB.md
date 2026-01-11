@@ -2,7 +2,7 @@
 
 > **"Stop Vector Search, Start Knowledge Diffusion."**
 
-🚀 **Pero-Memory-Core** 是一个基于认知神经科学原理构建的、理论上可支撑万亿级的语义记忆引擎。它摒弃了传统向量数据库（Vector DB）死板的 Top-K 检索模式，采用原创的 **KDN (Knowledge Diffusion Network)** 架构，实现了类脑化的关联联想与逻辑回溯。
+🚀 **Pero-Memory-Core** 是一个基于认知神经科学原理构建的、理论上可支撑万亿级的语义记忆引擎。该引擎在理论上源自认知科学中经典的**扩散激活 (Spreading Activation)** 模型，它摒弃了传统向量数据库（Vector DB）死板的 Top-K 检索模式，通过高性能的 Rust 工程实现，完成了类脑化的关联联想与逻辑回溯。
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Language: Rust](https://img.shields.io/badge/Language-Rust-orange.svg)](https://www.rust-lang.org/)
