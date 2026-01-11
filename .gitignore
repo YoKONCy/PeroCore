@@ -62,7 +62,10 @@ backend/rust_db/*.index
 backend/rust_db/*.json
 *.sqlite3
 Backups/
-benchmarks/*.json
+
+# Benchmarks & Post Drafts
+benchmarks/
+POST_TENCENT_CLOUD.md
 
 # Models & Cache (Large files)
 backend/models/whisper-tiny/
