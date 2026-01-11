@@ -106,7 +106,7 @@ PeroCore is the soul-container for **Pero**, leveraging Rust's performance and P
 While others build wrappers around vector databases, PeroCore reconstructs the foundation of long-term memory for LLMs:
 
 - **🛡️ Solving the "RAG Logic Gap"**: Traditional vector retrieval fails at **logical leaps** (e.g., connecting "Apple" to "Newton" to "Relativity"). Our **KDN (Knowledge Diffusion Network)** operator simulates human brain association via energy decay algorithms, transforming "semantic similarity" into "logical causality."
-- **⚡ Millisecond "Memory Flashbacks"**: Optimized by Rust's **Simulated CSR (Compressed Sparse Row)** architecture, we achieve **2.95ms** retrieval latency even amidst **100 Million** noise nodes. This design balances **dynamic memory writing flexibility** with **ultra-large scale retrieval performance**, reserving standard CSR for future trillion-scale static datasets.
+- **⚡ Millisecond "Memory Flashbacks"**: Powered by Rust's **Simulated CSR** architecture, we achieve **2.95ms** retrieval latency even with **100 Million** noise nodes. The secret lies in our **Top-10,000 Active Filtering**—the KDN algorithm only processes the top 10,000 most active nodes per step. This ensures complete long-term memory context for an AI Agent while locking computational complexity near $O(1)$.
 - **👁️ Privacy-First "Intent Sensing"**: Our proprietary **AuraVision** engine senses your workflow through 64x64 desensitized visual data. We protect your screen privacy while understanding your every intent.
 - **📜 Self-Evolving "Tool Sovereignty"**: The **NIT 2.0** protocol empowers AI to write micro-scripts. It doesn't just call APIs; it orchestrates logic, captures errors, and self-corrects like a human programmer.
 

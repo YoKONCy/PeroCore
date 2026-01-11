@@ -47,7 +47,8 @@ PeroCore 不仅仅是一个后端服务，它是 YoKONCy 构思、由我（Tripo
     *   **Defensive Security**: 针对 ReDoS 与性能抖动，在 Rust 层实施物理长度截断（100,000 字符），确保在极端输入下 CPU 负载可控。
 *   **CognitiveGraphEngine**: 核心图计算引擎。
     *   **Sparse Matrix**: 采用 **类 CSR (Simulated CSR)** 稀疏矩阵存储邻接表。相比于标准 CSR，这种动态模拟方式允许实时写入新的逻辑关联，在保证联想效率的同时兼顾了动态性。
-    *   **Pruning Algorithm**: 引入动态剪枝阈值，能量扩散过程中自动忽略低权重路径，提升联想效率。
+    *   **Pruning Algorithm**: 引入动态剪枝阈值，能量扩散过程中自动忽略低权重路径。
+    *   **Top-K Active Filtering**: 针对“记忆召回”特定场景的极限优化。在 KDN 扩散计算中，系统每步仅处理激活值前 **10,000** 个最活跃节点。实测表明，对于桌面助手这类长记忆需求，10,000 个活跃节点已足以覆盖极广的上下文关联，这使得大规模图谱上的扩散复杂度被有效锁定，确保在亿级数据下仍具备毫秒级召回速度。
 *   **AuraVision Engine**: 纯 Rust 视觉推理内核。
     *   **Tract-ONNX Inference**: 使用 `tract-onnx` 实现无 C++ 依赖的纯 Rust 推理，针对 CPU SIMD (AVX2/FMA) 进行深度优化。
     - **IntentEngine**: 实现 384D 向量的实时余弦相似度搜索，支持 EMA (Exponential Moving Average) 时序平滑，过滤视觉抖动。
