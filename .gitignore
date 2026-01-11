@@ -63,8 +63,7 @@ backend/rust_db/*.json
 *.sqlite3
 Backups/
 
-# Benchmarks & Post Drafts
-benchmarks/
+# Post Drafts
 POST_TENCENT_CLOUD.md
 
 # Models & Cache (Large files)
