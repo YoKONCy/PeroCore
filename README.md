@@ -153,7 +153,18 @@ PeroCore 摒弃了传统的简单 RAG（检索增强生成）方案，构建了�
 | **1 亿节点 / 2 亿边** | 5 步 | **1.13 ms** | ~1,200 | ✅ 实机验证 |
 | **1 万亿节点 (Theoretical)** | 5 步 | **< 2.0 ms** | -- | 🔬 理论推演 |
 
-#### 2. 🏁 跨方案降维打击 (PeroCore vs. Traditional Vector DB)
+#### 2. 🧩 权威测试：HotpotQA 多跳逻辑推理 (Multi-hop Reasoning)
+我们引入了 NLP 领域权威的 **HotpotQA** 数据集，验证 KDN 算子在处理复杂逻辑关联时的表现。
+
+*   **测试案例**：对比两位导演 Scott Derrickson 与 Ed Wood 的国籍是否相同。
+*   **挑战**：传统 RAG 只能分别检索两人的词条，无法在检索阶段完成“相同国籍”的逻辑汇聚。
+*   **PeroCore 表现**：
+    *   **路径发现**：KDN 自动在 `Nationality: American` 节点处实现能量爆发。
+    *   **响应延迟**：**0.42 ms** ⚡
+    *   **结论**：成功穿透语义孤岛，实现了确定性的逻辑因果检索。
+*   > 📄 **详细报告**：[HotpotQA 多跳推理验证报告](./benchmarks/reports/hotpotqa_results.md)
+
+#### 3. 🏁 跨方案降维打击 (PeroCore vs. Traditional Vector DB)
 
 我们进行了一场看似“不公平”的对决：用 **100 倍** 规模的数据量，去挑战传统方案。
 

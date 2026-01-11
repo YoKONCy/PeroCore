@@ -130,7 +130,18 @@ We reject "PPT performance." All metrics are based on real stress tests of the *
 | **20M Nodes / 40M Edges** | 5 steps | **1.13 ms** | ~1,000 | 🔥 Ultra-Fast |
 | **20M Nodes / 20M Edges** | 50 steps | **830 ms** | ~50,000 | ⚡ Deep Penetration |
 
-#### 2. 🏁 Competitive Edge (PeroCore vs. Traditional Vector DB)
+#### 2. 🧩 Authoritative Benchmark: HotpotQA Multi-hop Reasoning
+We utilized the **HotpotQA** dataset (EMNLP 2018) to verify the KDN operator's capability in complex logical associations.
+
+*   **Test Case**: Comparing the nationalities of directors Scott Derrickson and Ed Wood.
+*   **The Challenge**: Traditional RAG can retrieve individual biographies but fails to perform the "same nationality" logical aggregation during the retrieval phase.
+*   **PeroCore Performance**:
+    *   **Path Discovery**: KDN automatically triggered an energy burst at the `Nationality: American` node.
+    *   **Latency**: **0.42 ms** ⚡
+    *   **Conclusion**: Successfully penetrated semantic islands, achieving deterministic logical causality retrieval.
+*   > 📄 **Detailed Report**: [HotpotQA Reasoning Verification Report](./benchmarks/reports/hotpotqa_results.md)
+
+#### 3. 🏁 Competitive Edge (PeroCore vs. Traditional Vector DB)
 
 | Dimension | Traditional Vector DB (e.g., ChromaDB) | **PeroCore Cognitive Engine** | Gap |
 | :--- | :--- | :--- | :--- |
