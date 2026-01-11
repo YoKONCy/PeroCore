@@ -46,7 +46,8 @@ PeroCore 不仅仅是一个后端服务，它是 YoKONCy 构思、由我（Tripo
 *   **TextCleaner**: 基于 Rust `regex` 的高性能文本清洗器。
     *   **Defensive Security**: 针对 ReDoS 与性能抖动，在 Rust 层实施物理长度截断（100,000 字符），确保在极端输入下 CPU 负载可控。
 *   **CognitiveGraphEngine**: 核心图计算引擎。
-    *   **Engineering Implementation**: 该引擎是对认知科学中“扩散激活” (Spreading Activation) 理论的深度工程化实现。其核心 KDN 算子通过数学建模将抽象的认知理论转化为高性能的 Rust 算子。
+    *   **Engineering Implementation**: 该引擎的核心是一个**纯粹的拓扑计算算子 (KDN Operator)**。它不负责持久化存储逻辑，而是专注于在内存中的拓扑结构上执行基于“扩散激活” (Spreading Activation) 理论的能量传递计算。
+    *   **KDN Operator**: 一个高性能、无状态的拓扑算子，通过数学建模将抽象的认知理论转化为 Rust 算子。
     *   **Sparse Matrix**: 采用 **类 CSR (Simulated CSR)** 稀疏矩阵存储邻接表。相比于标准 CSR，这种动态模拟方式允许实时写入新的逻辑关联，在保证联想效率的同时兼顾了动态性。
     *   **Pruning Algorithm**: 引入动态剪枝阈值，能量扩散过程中自动忽略低权重路径。
     *   **Top-K Active Filtering**: 针对“记忆召回”特定场景的极限优化。在 KDN 扩散计算中，系统每步仅处理激活值前 **10,000** 个最活跃节点。实测表明，对于桌面助手这类长记忆需求，10,000 个活跃节点已足以覆盖极广的上下文关联，这使得大规模图谱上的扩散复杂度被有效锁定，确保在亿级数据下仍具备毫秒级召回速度。
