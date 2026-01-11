@@ -46,7 +46,7 @@ PeroCore 不仅仅是一个后端服务，它是 YoKONCy 构思、由我（Tripo
 *   **TextCleaner**: 基于 Rust `regex` 的高性能文本清洗器。
     *   **Defensive Security**: 针对 ReDoS 与性能抖动，在 Rust 层实施物理长度截断（100,000 字符），确保在极端输入下 CPU 负载可控。
 *   **CognitiveGraphEngine**: 核心图计算引擎。
-    *   **Sparse Matrix**: 采用 **CSR (Compressed Sparse Row)** 稀疏矩阵存储邻接表，极大降低大规模知识图谱的内存占用。
+    *   **Sparse Matrix**: 采用 **类 CSR (Simulated CSR)** 稀疏矩阵存储邻接表。相比于标准 CSR，这种动态模拟方式允许实时写入新的逻辑关联，在保证联想效率的同时兼顾了动态性。
     *   **Pruning Algorithm**: 引入动态剪枝阈值，能量扩散过程中自动忽略低权重路径，提升联想效率。
 *   **AuraVision Engine**: 纯 Rust 视觉推理内核。
     *   **Tract-ONNX Inference**: 使用 `tract-onnx` 实现无 C++ 依赖的纯 Rust 推理，针对 CPU SIMD (AVX2/FMA) 进行深度优化。

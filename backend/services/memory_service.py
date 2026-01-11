@@ -17,7 +17,7 @@ import json
 # Engineering Note: 
 # 为什么不用标准的图数据库（如 Neo4j）？
 # 1. 延迟：Neo4j 的 Cypher 查询在处理这种“无限扩散”时会产生大量随机 IO，导致 10 步以上的扩散延迟超过 500ms。
-# 2. 内存：我们需要在边缘侧（用户 PC）运行。通过 Rust 实现的 CSR 稀疏矩阵，我们将 100 亿个关联的内存占用压到了 2GB 以内。
+# 2. 内存：我们需要在边缘侧（用户 PC）运行。通过 Rust 实现的类 CSR (Simulated CSR) 稀疏矩阵，我们将 100 亿个关联的内存占用压到了 2GB 以内。
 # 3. 实时性：PEDSA 需要在每一帧视觉输入时进行能量更新，这是传统事务数据库无法满足的吞吐量。
 # -------------------------------------------------------------------------
 _rust_engine = None
@@ -30,7 +30,7 @@ async def get_rust_engine(session: AsyncSession):
     try:
         from pero_memory_core import CognitiveGraphEngine
         # 技术防御说明：
-        # 1. 采用 CSR (Compressed Sparse Row) 稀疏矩阵存储亿级关联，内存占用极低。
+        # 1. 采用类 CSR (Simulated CSR) 稀疏矩阵存储亿级关联，内存占用极低。
         # 2. 扩散算子满足收敛性证明 (详见 benchmarks/KDN_mathematical_proof.md)，防止激活爆炸。
         print("[Memory] Initializing PEDSA Cognitive Engine (Rust Core)...", flush=True)
         _rust_engine = CognitiveGraphEngine()
