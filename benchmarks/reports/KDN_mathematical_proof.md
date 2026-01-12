@@ -1,6 +1,11 @@
-# KDN 扩散算子收敛性证明 (Mathematical Proof of KDN Convergence)
+# KDN 扩散算子收敛性建模与推导 (Mathematical Modeling of KDN Convergence)
 
-## 1. 算子定义与基本假设 (Operator Definition & Hypotheses)
+> **⚠️ 重要声明 (Important Note)**：
+> 本文档并非严格意义上的“通用数学证明”，而是一个**基于强假设的收敛性推导**。其核心目的在于通过**数学建模**的方式，论证 KDN 算子在 PeroCore 预设的工程边界（如饱和常数、归一化权重等）内，能够产生稳定的逻辑收敛。
+> 
+> 在实际工程应用中，拓扑结构的复杂性与参数动态性可能超出本模型的简化假设。因此，本文应被视为对算法设计直觉的数学形式化阐述。
+
+## 1. 模型定义与基本假设 (Model Definition & Hypotheses)
 
 设 $V = \{v_1, v_2, \dots, v_n\}$ 为知识图谱中的节点集合。
 设 $\mathbf{s}_t \in [0, C]^{n}$ 为 $t$ 时刻的激活状态向量，其中 $C = 2.0$ 为饱和常数。
@@ -20,9 +25,9 @@ $$s_{t+1, j} = \min\left( C, s_{t, j} + \gamma \sum_{i \in \mathcal{A}_t} s_{t, 
 
 ---
 
-## 2. 收敛性证明 (Proof of Convergence)
+## 2. 收敛性推导 (Convergence Derivation)
 
-**定理 1 (收敛性)**：对于任意初始状态 $\mathbf{s}_0 \geq 0$，由 KDN 算子生成的序列 $\{\mathbf{s}_t\}_{t=0}^\infty$ 必收敛。
+**定理 1 (收敛性推论)**：在上述强假设下，对于任意初始状态 $\mathbf{s}_0 \geq 0$，由 KDN 算子生成的序列 $\{\mathbf{s}_t\}_{t=0}^\infty$ 必收敛。
 
 **证明**：
 1. **单调性**：增量项 $\Delta s_{t, j} \geq 0$，故 $s_{t+1, j} \geq s_{t, j}$，序列 $\{\mathbf{s}_t\}$ 单调不减。
@@ -44,9 +49,9 @@ $$s_{t+1, j} = \min\left( C, s_{t, j} + \gamma \sum_{i \in \mathcal{A}_t} s_{t, 
 
 ---
 
-## 3. 结构稳定性证明 (Proof of Structural Stability)
+## 3. 结构稳定性分析 (Structural Stability Analysis)
 
-**定理 3 (分段连续依赖性)**：定义参数空间 $\Theta = \{(W, \gamma) \mid W \text{ 满足归一化}, \gamma \in (0, 1)\}$。稳定点映射 $F: \Theta \to [0, C]^n$ 是分段连续的。
+**定理 3 (分段连续依赖性推导)**：定义参数空间 $\Theta = \{(W, \gamma) \mid W \text{ 满足归一化}, \gamma \in (0, 1)\}$。在激活集序列稳定的开集内，稳定点映射 $F: \Theta \to [0, C]^n$ 是分段连续的。
 
 **证明**：
 1. **分段线性区域**：在参数空间 $\Theta$ 的子集内，如果参数微扰不改变演化过程中任何节点的激活逻辑判定（即激活模式序列 $\{\mathcal{A}_t\}$ 保持不变），则最终的稳定点 $\mathbf{s}^*$ 是参数 $(W, \gamma)$ 的有限次连续复合函数（在不饱和区域为线性，在饱和区域为常数 $C$）。
@@ -59,4 +64,4 @@ $$s_{t+1, j} = \min\left( C, s_{t, j} + \gamma \sum_{i \in \mathcal{A}_t} s_{t, 
 
 - **关于不动点唯一性的补充**：虽然给定 $\mathbf{s}_0$ 极限唯一，但系统可能存在多个不动点。根据算子的单调性（若 $W \geq 0$），若 $\mathbf{s}_0 \leq \mathbf{s}'_0$，则对应的极限点满足 $\mathbf{s}^* \leq \mathbf{s}'^*$。
 - **启发式类比**：不同于 Transformer 架构中可能出现的梯度爆炸（乘法累积），KDN 的加性扩散结构（Additive Structure）在本质上更具鲁棒性，扰动在迭代中呈线性或衰减性演化。
-- **结论**：KDN 的数学结构确保了认知扩散过程在有限资源约束下（饱和常数 $C$）能够稳定地塌缩至确定的语义表示，这为 PeroCore 的工业级应用提供了严谨的理论保障。
+- **结论**：KDN 的数学建模确保了在满足上述强假设的情况下，认知扩散过程能够稳定地塌缩至确定的语义表示。这为 PeroCore 的工程实现提供了一种形式化的逻辑支撑，帮助开发者理解算法在极端边界下的行为。

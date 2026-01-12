@@ -99,7 +99,18 @@ PeroCore is the soul-container for **Pero**, leveraging Rust's performance and P
 
 <br/>
 
-## 🚀 Why PeroCore is Unique?
+### 🎯 Positioning: When to use PeroCore?
+
+We are very frank about the positioning of KDN:
+
+-   ❌ **If your business is "Document Retrieval, Customer Service QA"**:
+    PeroCore's KDN operator is **Over-engineering** for you. In these scenarios, traditional **Top-K Vector Search** combined with **ElasticSearch** keyword matching is the king of efficiency and cost.
+-   ✅ **If your goal is "AI Companion, Personal Assistant, Complex Task Agent"**:
+    PeroCore is your **core competitiveness**. These scenarios require **"Logical Continuity"** rather than fragmented "Fact Retrieval." The KDN operator can automatically recall logical threads from days ago, just like a human brain, achieving true "mind-reading" resonance.
+
+---
+
+## 🚀 Key Advantages
 
 > **"Most AI is still playing 'Keyword Search'; we've entered the era of 'Logical Association'."**
 
