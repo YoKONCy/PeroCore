@@ -38,14 +38,17 @@ pub fn get_napcat_dir(app: &AppHandle) -> PathBuf {
 
     // 2. 释放环境 (Release)
     if let Ok(resource_dir) = app.path().resource_dir() {
-        let pkg_path = resource_dir.join("backend/nit_core/plugins/social_adapter/NapCat");
-        if pkg_path.exists() {
-            return pkg_path;
-        }
-        
-        let flat_path = resource_dir.join("nit_core/plugins/social_adapter/NapCat");
-        if flat_path.exists() {
-            return flat_path;
+        let trials = [
+            resource_dir.join("backend/nit_core/plugins/social_adapter/NapCat"),
+            resource_dir.join("nit_core/plugins/social_adapter/NapCat"),
+            resource_dir.join("_up_/backend/nit_core/plugins/social_adapter/NapCat"),
+            resource_dir.join("_up_/nit_core/plugins/social_adapter/NapCat"),
+        ];
+
+        for trial in trials {
+            if trial.exists() {
+                return trial;
+            }
         }
     }
 

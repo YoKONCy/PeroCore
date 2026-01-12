@@ -62,9 +62,23 @@ async fn get_diagnostics(app: tauri::AppHandle) -> Result<DiagnosticReport, Stri
             dev_venv_python_exists = true;
             dev_venv_python
         } else {
+            // 优先检查标准资源目录
             let mut p = resource_dir.join("python/python.exe");
             if !p.exists() {
-                p = resource_dir.join("_up_/src-tauri/python/python.exe");
+                // 尝试各种可能的 Release 组织结构
+                let trials = [
+                    resource_dir.join("_up_/src-tauri/python/python.exe"),
+                    resource_dir.join("_up_/python/python.exe"),
+                    // 适配 ./ces/PeroCore/src-tauri/python 这种结构
+                    app.path().resource_dir().unwrap_or(resource_dir.clone()).join("src-tauri/python/python.exe"),
+                ];
+                
+                for trial in trials {
+                    if trial.exists() {
+                        p = trial;
+                        break;
+                    }
+                }
             }
             p
         }
@@ -104,26 +118,27 @@ async fn get_diagnostics(app: tauri::AppHandle) -> Result<DiagnosticReport, Stri
             }
         }
     } else {
-        errors.push(format!("Python 解释器未找到: {:?}", python_path));
+        errors.push(format!("Python 解释器未找到。探测路径: {:?}", python_path));
     }
 
     // 3. 确定脚本路径
     let script_path = {
-        let mut p = resource_dir.join("backend/main.py");
-        if !p.exists() {
-            p = resource_dir.join("main.py");
+        let trials = [
+            resource_dir.join("backend/main.py"),
+            resource_dir.join("main.py"),
+            resource_dir.join("_up_/backend/main.py"),
+            resource_dir.join("_up_/main.py"),
+            get_workspace_root().join("backend/main.py"),
+        ];
+        
+        let mut p = trials[0].clone();
+        for trial in trials {
+            if trial.exists() {
+                p = trial;
+                break;
+            }
         }
-        if !p.exists() {
-            p = resource_dir.join("_up_/backend/main.py");
-        }
-        if !p.exists() {
-            p = resource_dir.join("_up_/main.py");
-        }
-        if p.exists() {
-            p
-        } else {
-            get_workspace_root().join("backend/main.py")
-        }
+        p
     };
     let script_path = fix_path(script_path);
     let script_exists = script_path.exists();
@@ -431,37 +446,41 @@ fn stop_backend(state: tauri::State<BackendState>) -> Result<(), String> {
 fn get_config(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
     use tauri::Manager;
     
-    // 优先从 AppData 目录读取
+    // 1. 优先从 AppData 目录读取（用户持久化配置）
     let config_path = app.path().app_data_dir().map_err(|e| e.to_string())?.join("data/config.json");
-    
-    if !config_path.exists() {
-        // 回退到资源目录
-        let resource_dir = app.path().resource_dir().map_err(|e| e.to_string())?;
-        let mut p = resource_dir.join("backend/config.json");
-        if !p.exists() {
-            p = resource_dir.join("_up_/backend/config.json");
-        }
-        
-        if p.exists() {
-            let content = std::fs::read_to_string(p).map_err(|e| e.to_string())?;
-            let config: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
-            return Ok(config);
-        }
-        
-        // 最后回退到源码目录
-        let dev_config = get_workspace_root().join("backend/config.json");
-        if dev_config.exists() {
-            let content = std::fs::read_to_string(dev_config).map_err(|e| e.to_string())?;
-            let config: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
-            return Ok(config);
-        }
-
-        return Ok(serde_json::json!({}));
+    if config_path.exists() {
+        let content = std::fs::read_to_string(config_path).map_err(|e| e.to_string())?;
+        let config: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+        return Ok(config);
     }
 
-    let content = std::fs::read_to_string(config_path).map_err(|e| e.to_string())?;
-    let config: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
-    Ok(config)
+    // 2. 回退到资源目录（默认配置）
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let trials = [
+            resource_dir.join("backend/config.json"),
+            resource_dir.join("config.json"),
+            resource_dir.join("_up_/backend/config.json"),
+            resource_dir.join("_up_/config.json"),
+        ];
+        
+        for trial in trials {
+            if trial.exists() {
+                let content = std::fs::read_to_string(trial).map_err(|e| e.to_string())?;
+                let config: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+                return Ok(config);
+            }
+        }
+    }
+        
+    // 3. 最后回退到源码目录（开发环境）
+    let dev_config = get_workspace_root().join("backend/config.json");
+    if dev_config.exists() {
+        let content = std::fs::read_to_string(dev_config).map_err(|e| e.to_string())?;
+        let config: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+        return Ok(config);
+    }
+
+    Ok(serde_json::json!({}))
 }
 
 #[tauri::command]

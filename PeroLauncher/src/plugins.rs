@@ -49,16 +49,17 @@ pub fn get_plugins_dir(app: &AppHandle) -> PathBuf {
 
     // 2. 释放环境 (Release)：从 Tauri 资源目录寻址
     if let Ok(resource_dir) = app.path().resource_dir() {
-        // 打包后的资源结构通常为：resources/backend/nit_core/plugins
-        let pkg_plugins_path = resource_dir.join("backend/nit_core/plugins");
-        if pkg_plugins_path.exists() {
-            return pkg_plugins_path;
-        }
-        
-        // 兼容扁平化资源结构：resources/nit_core/plugins
-        let flat_plugins_path = resource_dir.join("nit_core/plugins");
-        if flat_plugins_path.exists() {
-            return flat_plugins_path;
+        let trials = [
+            resource_dir.join("backend/nit_core/plugins"),
+            resource_dir.join("nit_core/plugins"),
+            resource_dir.join("_up_/backend/nit_core/plugins"),
+            resource_dir.join("_up_/nit_core/plugins"),
+        ];
+
+        for trial in trials {
+            if trial.exists() {
+                return trial;
+            }
         }
     }
 
