@@ -12,6 +12,8 @@ use winreg::RegKey;
 use zip::ZipArchive;
 use reqwest::blocking::Client; // Using blocking for simplicity in spawned threads
 
+use tauri::Manager;
+
 pub struct NapCatState {
     pub child: Arc<Mutex<Option<Child>>>,
     pub stdin: Arc<Mutex<Option<std::process::ChildStdin>>>,
@@ -26,31 +28,52 @@ impl NapCatState {
     }
 }
 
-fn get_workspace_root() -> PathBuf {
-    let mut current_dir = std::env::current_dir().unwrap();
-    for _ in 0..5 {
-        if current_dir.join("backend").exists() {
-            return current_dir;
+pub fn get_napcat_dir(app: &AppHandle) -> PathBuf {
+    // 1. 优先探测开发环境
+    let dev_root = crate::get_workspace_root();
+    let dev_path = dev_root.join("backend/nit_core/plugins/social_adapter/NapCat");
+    if dev_path.exists() {
+        return dev_path;
+    }
+
+    // 2. 释放环境 (Release)
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let pkg_path = resource_dir.join("backend/nit_core/plugins/social_adapter/NapCat");
+        if pkg_path.exists() {
+            return pkg_path;
         }
-        if let Some(parent) = current_dir.parent() {
-            current_dir = parent.to_path_buf();
-        } else {
-            break;
+        
+        let flat_path = resource_dir.join("nit_core/plugins/social_adapter/NapCat");
+        if flat_path.exists() {
+            return flat_path;
         }
     }
-    std::env::current_dir().unwrap()
+
+    dev_path
 }
 
-pub fn get_napcat_dir() -> PathBuf {
-    get_workspace_root().join("backend/nit_core/plugins/social_adapter/NapCat")
-}
+fn is_social_enabled(app: &AppHandle) -> bool {
+    // 优先从配置目录读取 (打包后的配置通常在 app_data_dir)
+    let config_path = if let Ok(data_dir) = app.path().app_data_dir() {
+        data_dir.join("data/config.json")
+    } else {
+        crate::get_workspace_root().join("backend/config.json")
+    };
 
-fn is_social_enabled() -> bool {
-    let root = get_workspace_root();
-    let config_path = root.join("backend/config.json");
     if !config_path.exists() {
-        return true; // Default to enabled
+        // 回退到源码目录
+        let dev_config = crate::get_workspace_root().join("backend/config.json");
+        if !dev_config.exists() {
+             return true; 
+        }
+        if let Ok(content) = fs::read_to_string(dev_config) {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&content) {
+                return v["enable_social_mode"].as_bool().unwrap_or(true);
+            }
+        }
+        return true;
     }
+
     if let Ok(content) = fs::read_to_string(config_path) {
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&content) {
             return v["enable_social_mode"].as_bool().unwrap_or(true);
@@ -63,21 +86,21 @@ pub fn emit_log(app: &AppHandle, msg: String) {
     let _ = app.emit("napcat-log", msg);
 }
 
-pub fn check_napcat_installed() -> bool {
-    let dir = get_napcat_dir();
+pub fn check_napcat_installed(app: &AppHandle) -> bool {
+    let dir = get_napcat_dir(app);
     let exe = dir.join("NapCat.Shell.exe");
     let mjs = dir.join("napcat.mjs");
     exe.exists() || mjs.exists()
 }
 
 pub fn install_napcat(app: AppHandle) -> Result<(), String> {
-    if !is_social_enabled() {
+    if !is_social_enabled(&app) {
         return Ok(());
     }
-    let dir = get_napcat_dir();
+    let dir = get_napcat_dir(&app);
     emit_log(&app, format!("Checking NapCat in: {:?}", dir));
 
-    if check_napcat_installed() {
+    if check_napcat_installed(&app) {
         emit_log(&app, "NapCat already installed.".to_string());
         return Ok(());
     }
@@ -230,7 +253,7 @@ pub fn detect_qq_path() -> Option<String> {
 }
 
 pub fn start_napcat_process(app: AppHandle, state: tauri::State<NapCatState>) -> Result<(), String> {
-    if !is_social_enabled() {
+    if !is_social_enabled(&app) {
         return Err("Social mode is disabled in settings.".to_string());
     }
     let mut child_guard = state.child.lock().map_err(|e| e.to_string())?;
@@ -238,7 +261,7 @@ pub fn start_napcat_process(app: AppHandle, state: tauri::State<NapCatState>) ->
         return Ok(());
     }
 
-    let dir = get_napcat_dir();
+    let dir = get_napcat_dir(&app);
     let shell_exe = dir.join("NapCat.Shell.exe");
     let napcat_bat = dir.join("napcat.bat"); // User reported
     let index_js = dir.join("index.js");

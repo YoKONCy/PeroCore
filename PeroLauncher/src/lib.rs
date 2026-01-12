@@ -249,9 +249,9 @@ fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
 
-fn get_workspace_root() -> std::path::PathBuf {
+pub fn get_workspace_root() -> std::path::PathBuf {
     let current_dir = std::env::current_dir().unwrap();
-    println!("Rust: Current working directory: {:?}", current_dir);
+    // println!("Rust: Current working directory: {:?}", current_dir);
 
     // 1. 检查当前目录是否就是 PeroCore
     if current_dir.join("backend").exists() && current_dir.join("PeroLauncher").exists() {
@@ -292,7 +292,7 @@ fn get_workspace_root() -> std::path::PathBuf {
     }
 }
 
-fn fix_path(path: std::path::PathBuf) -> std::path::PathBuf {
+pub fn fix_path(path: std::path::PathBuf) -> std::path::PathBuf {
     let p = path
         .canonicalize()
         .unwrap_or(path)
@@ -486,8 +486,8 @@ fn open_root_folder() {
 }
 
 #[tauri::command]
-fn check_napcat() -> bool {
-    napcat::check_napcat_installed()
+fn check_napcat(app: tauri::AppHandle) -> bool {
+    napcat::check_napcat_installed(&app)
 }
 
 #[tauri::command]
@@ -518,8 +518,8 @@ fn send_napcat_command_wrapper(
 }
 
 #[tauri::command]
-fn check_es() -> bool {
-    everything::check_es_installed()
+fn check_es(app: tauri::AppHandle) -> bool {
+    everything::check_es_installed(&app)
 }
 
 #[tauri::command]

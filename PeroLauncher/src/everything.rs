@@ -5,40 +5,47 @@ use tauri::{AppHandle, Emitter};
 use zip::ZipArchive;
 use reqwest::blocking::Client;
 
-fn get_workspace_root() -> PathBuf {
-    let mut current_dir = std::env::current_dir().unwrap();
-    for _ in 0..5 {
-        if current_dir.join("backend").exists() {
-            return current_dir;
+use tauri::Manager;
+
+pub fn get_es_dir(app: &AppHandle) -> PathBuf {
+    // 1. 优先探测开发环境
+    let dev_root = crate::get_workspace_root();
+    let dev_path = dev_root.join("backend/nit_core/tools/core/FileSearch");
+    if dev_path.exists() {
+        return dev_path;
+    }
+
+    // 2. 释放环境 (Release)
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let pkg_path = resource_dir.join("backend/nit_core/tools/core/FileSearch");
+        if pkg_path.exists() {
+            return pkg_path;
         }
-        if let Some(parent) = current_dir.parent() {
-            current_dir = parent.to_path_buf();
-        } else {
-            break;
+        
+        let flat_path = resource_dir.join("nit_core/tools/core/FileSearch");
+        if flat_path.exists() {
+            return flat_path;
         }
     }
-    std::env::current_dir().unwrap()
-}
 
-pub fn get_es_dir() -> PathBuf {
-    get_workspace_root().join("backend/nit_core/tools/core/FileSearch")
+    dev_path
 }
 
 pub fn emit_log(app: &AppHandle, msg: String) {
     let _ = app.emit("es-log", msg);
 }
 
-pub fn check_es_installed() -> bool {
-    let dir = get_es_dir();
+pub fn check_es_installed(app: &AppHandle) -> bool {
+    let dir = get_es_dir(app);
     let exe = dir.join("es.exe");
     exe.exists()
 }
 
 pub fn install_es(app: AppHandle) -> Result<(), String> {
-    let dir = get_es_dir();
+    let dir = get_es_dir(&app);
     emit_log(&app, format!("Checking ES tool in: {:?}", dir));
 
-    if check_es_installed() {
+    if check_es_installed(&app) {
         emit_log(&app, "ES tool already installed.".to_string());
         return Ok(());
     }

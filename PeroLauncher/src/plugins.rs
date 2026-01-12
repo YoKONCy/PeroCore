@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+use tauri::{AppHandle, Manager};
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PluginCommand {
     #[serde(alias = "commandIdentifier")]
@@ -37,22 +39,36 @@ pub struct Plugin {
     pub valid: bool,
 }
 
-pub fn get_plugins_dir() -> PathBuf {
-    let current_dir = std::env::current_dir().unwrap();
-    // Logic adapted from napcat.rs
-    let root = if current_dir.ends_with("src-tauri") || current_dir.ends_with("PeroLauncher") {
-        current_dir.parent().unwrap().to_path_buf()
-    } else if current_dir.join("backend").exists() {
-        current_dir.clone()
-    } else {
-        current_dir.clone()
-    };
-    root.join("backend/nit_core/plugins")
+pub fn get_plugins_dir(app: &AppHandle) -> PathBuf {
+    // 1. 优先探测开发环境：检查源码目录下的 backend/nit_core/plugins
+    let dev_root = crate::get_workspace_root();
+    let dev_plugins_path = dev_root.join("backend/nit_core/plugins");
+    if dev_plugins_path.exists() {
+        return dev_plugins_path;
+    }
+
+    // 2. 释放环境 (Release)：从 Tauri 资源目录寻址
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        // 打包后的资源结构通常为：resources/backend/nit_core/plugins
+        let pkg_plugins_path = resource_dir.join("backend/nit_core/plugins");
+        if pkg_plugins_path.exists() {
+            return pkg_plugins_path;
+        }
+        
+        // 兼容扁平化资源结构：resources/nit_core/plugins
+        let flat_plugins_path = resource_dir.join("nit_core/plugins");
+        if flat_plugins_path.exists() {
+            return flat_plugins_path;
+        }
+    }
+
+    // 3. 最后的保底逻辑
+    dev_plugins_path
 }
 
 #[tauri::command]
-pub fn get_plugins() -> Vec<Plugin> {
-    let plugins_dir = get_plugins_dir();
+pub fn get_plugins(app: AppHandle) -> Vec<Plugin> {
+    let plugins_dir = get_plugins_dir(&app);
     let mut plugins = Vec::new();
 
     if let Ok(entries) = fs::read_dir(plugins_dir) {
