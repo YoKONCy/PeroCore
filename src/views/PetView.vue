@@ -245,8 +245,11 @@ const parsedBubbleContent = computed(() => {
   if (!text) return []
 
   const segments = []
-  // 增加对标准 Thought: 和 Action: 格式的支持
-  const regex = /(?:【(Thinking|Error|Reflection)[:：]?\s*([\s\S]*?)】)|(?:\n|^)\s*\*([^\*\n]+)\*|(?:\n|^)\s*(Thought|Action)[:：]\s*([^\n]+)/gi
+  // 改进正则表达式，支持多行 Thought/Action 和更灵活的匹配
+  // 1. 【Type: Content】 - 块格式
+  // 2. *Action* - 星号动作格式
+  // 3. Thought/Action: Content - 标准 ReAct 格式（支持多行，直到下一个标识符或结束）
+  const regex = /(?:【(Thinking|Error|Reflection)[:：]?\s*([\s\S]*?)】)|(?:\n|^)\s*\*([\s\S]+?)\*|(?:\n|^)\s*(Thought|Action)[:：]\s*([\s\S]+?)(?=\n\s*(?:Thought|Action)[:：]|\n\s*\*|【(?:Thinking|Error|Reflection)|$)/gi
   
   let lastIndex = 0
   let match
@@ -262,15 +265,16 @@ const parsedBubbleContent = computed(() => {
     
     // 2. 判断匹配类型
     if (match[1] !== undefined) {
-        // Tagged 块 (Thinking/Error/Reflection)
-        segments.push({ type: match[1].toLowerCase(), content: match[2].trim() })
+      // Tagged 块 (Thinking/Error/Reflection)
+      const type = match[1].toLowerCase()
+      segments.push({ type: type === 'thinking' ? 'thinking' : type, content: match[2].trim() })
     } else if (match[3] !== undefined) {
-        // Action 块 (*Action*)
-        segments.push({ type: 'action', content: match[3].trim() })
+      // Action 块 (*Action*)
+      segments.push({ type: 'action', content: match[3].trim() })
     } else if (match[4] !== undefined) {
-        // 标准 ReAct 块 (Thought:/Action:)
-        const type = match[4].toLowerCase() === 'thought' ? 'thinking' : 'action'
-        segments.push({ type, content: match[5].trim() })
+      // 标准 ReAct 块 (Thought:/Action:)
+      const type = match[4].toLowerCase() === 'thought' ? 'thinking' : 'action'
+      segments.push({ type, content: match[5].trim() })
     }
     
     lastIndex = regex.lastIndex

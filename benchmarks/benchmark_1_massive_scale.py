@@ -64,7 +64,7 @@ def run_massive_scale_test(scale=1000000):
     for _ in range(100):
         start_node = random.randint(1, scale)
         p_start = time.perf_counter()
-        engine.propagate_activation({start_node: 1.0}, steps=5, decay=0.8)
+        engine.propagate_activation({start_node: 1.0}, 5, 0.8, 0.01)
         latencies.append((time.perf_counter() - p_start) * 1000)
     
     avg_lat = sum(latencies) / len(latencies)

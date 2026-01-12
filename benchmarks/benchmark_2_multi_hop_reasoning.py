@@ -48,7 +48,7 @@ def run_logical_chain_test(hops=5, noise_count=100000):
     print(f"[*] Propagating activation from Start Node ({start_node})...")
     start_time = time.perf_counter()
     # Steps = hops + 2 to allow for some buffer
-    activated = engine.propagate_activation({start_node: 1.0}, steps=hops + 2, decay=0.8)
+    activated = engine.propagate_activation({start_node: 1.0}, hops + 2, 0.8, 0.01)
     end_time = time.perf_counter()
     
     latency = (end_time - start_time) * 1000

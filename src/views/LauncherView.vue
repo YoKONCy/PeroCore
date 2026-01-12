@@ -598,10 +598,14 @@ const toggleLaunch = async () => {
       addLog('[SYSTEM] 核心服务已启动。')
       
       // 2. Start NapCat
-      napcatStatus.value = 'STARTING'
-      await invoke('start_napcat')
-      napcatStatus.value = 'RUNNING'
-      addLog('[SYSTEM] NapCat 容器已初始化。')
+      if (isSocialEnabled.value) {
+        napcatStatus.value = 'STARTING'
+        await invoke('start_napcat')
+        napcatStatus.value = 'RUNNING'
+        addLog('[SYSTEM] NapCat 容器已初始化。')
+      } else {
+        addLog('[SYSTEM] 社交模式已禁用，跳过 NapCat 启动。')
+      }
 
       // 3. Open Pet Window
       await invoke('open_pet_window')
