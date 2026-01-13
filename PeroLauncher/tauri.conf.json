@@ -44,6 +44,18 @@
                 "shadow": false,
                 "contentProtected": false,
                 "maximizable": false
+            },
+            {
+                "label": "ide",
+                "url": "/#/ide",
+                "title": "Pero IDE",
+                "width": 1280,
+                "height": 800,
+                "resizable": true,
+                "decorations": true,
+                "transparent": false,
+                "visible": false,
+                "center": true
             }
         ],
         "security": {

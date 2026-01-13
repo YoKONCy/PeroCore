@@ -11,6 +11,7 @@ use std::process::Command;
 
 use std::sync::{Arc, Mutex};
 use std::thread;
+use sysinfo::System;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
@@ -26,6 +27,35 @@ use napcat::NapCatState;
 
 mod everything;
 mod plugins;
+
+struct SystemMonitorState(Arc<Mutex<System>>);
+
+#[derive(Serialize)]
+struct SystemStats {
+    cpu_usage: f32,
+    memory_used: u64,
+    memory_total: u64,
+}
+
+#[tauri::command]
+fn get_system_stats(state: tauri::State<SystemMonitorState>) -> SystemStats {
+    let mut sys = state.0.lock().unwrap();
+    
+    // Refreshing CPU usage requires two measurements, but since we persist the state,
+    // calling this periodically works fine after the first call.
+    sys.refresh_cpu();
+    sys.refresh_memory();
+    
+    let cpu_usage = sys.global_cpu_info().cpu_usage();
+    let memory_used = sys.used_memory();
+    let memory_total = sys.total_memory();
+    
+    SystemStats {
+        cpu_usage,
+        memory_used,
+        memory_total,
+    }
+}
 
 #[derive(Clone, Serialize)]
 struct MousePos {
@@ -124,11 +154,11 @@ async fn get_diagnostics(app: tauri::AppHandle) -> Result<DiagnosticReport, Stri
     // 3. 确定脚本路径
     let script_path = {
         let trials = [
+            get_workspace_root().join("backend/main.py"), // 优先源码路径，实现开发环境热更新
             resource_dir.join("backend/main.py"),
             resource_dir.join("main.py"),
             resource_dir.join("_up_/backend/main.py"),
             resource_dir.join("_up_/main.py"),
-            get_workspace_root().join("backend/main.py"),
         ];
         
         let mut p = trials[0].clone();
@@ -256,6 +286,14 @@ async fn open_pet_window(app: tauri::AppHandle) {
         .skip_taskbar(true)
         .visible(true)
         .build();
+    }
+}
+
+#[tauri::command]
+async fn hide_pet_window(app: tauri::AppHandle) {
+    println!("Rust: Hiding pet window...");
+    if let Some(window) = app.get_webview_window("pet") {
+        let _ = window.hide();
     }
 }
 
@@ -571,6 +609,7 @@ pub fn run() {
 
     let backend = Arc::new(Mutex::new(None::<std::process::Child>));
     let napcat_state = NapCatState::new();
+    let sys_state = SystemMonitorState(Arc::new(Mutex::new(System::new_all())));
 
     // 为不同的闭包准备专属克隆，避免所有权冲突
     let backend_for_setup = backend.clone();
@@ -598,9 +637,11 @@ pub fn run() {
     builder
         .manage(BackendState(backend))
         .manage(napcat_state)
+        .manage(sys_state)
         .invoke_handler(tauri::generate_handler![
             open_dashboard,
             open_pet_window,
+            hide_pet_window,
             set_ignore_mouse,
             quit_app,
             start_backend,
@@ -616,7 +657,8 @@ pub fn run() {
             plugins::get_plugins,
             get_config,
             save_config,
-            get_diagnostics
+            get_diagnostics,
+            get_system_stats
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {

@@ -2,5 +2,7 @@
     "napcat_ws_url": "ws://localhost:3001",
     "napcat_http_url": "http://localhost:3000",
     "lightweight_mode": false,
-    "enable_social_mode": true
+    "aura_vision_enabled": false,
+    "enable_social_mode": true,
+    "last_social_summary_date": "2026-01-13"
 }

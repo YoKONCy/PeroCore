@@ -12,6 +12,8 @@ class TokenType(Enum):
     EQUALS = auto() # =
     LPAREN = auto() # (
     RPAREN = auto() # )
+    LBRACKET = auto() # [
+    RBRACKET = auto() # ]
     COMMA = auto()  # ,
     KEYWORD_ASYNC = auto()
     EOF = auto()
@@ -84,6 +86,16 @@ class Lexer:
                 
             if char == ')':
                 self.tokens.append(Token(TokenType.RPAREN, ')', self.line, self.column))
+                self.advance()
+                continue
+
+            if char == '[':
+                self.tokens.append(Token(TokenType.LBRACKET, '[', self.line, self.column))
+                self.advance()
+                continue
+            
+            if char == ']':
+                self.tokens.append(Token(TokenType.RBRACKET, ']', self.line, self.column))
                 self.advance()
                 continue
 

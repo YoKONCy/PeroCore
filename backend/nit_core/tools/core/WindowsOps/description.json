@@ -12,6 +12,18 @@
       {
         "commandIdentifier": "windows_operation",
         "description": "执行指令。如'打开vscode'、'按下Win+D'、'调大音量'。"
+      },
+      {
+        "commandIdentifier": "open_application",
+        "description": "打开指定的应用程序。",
+        "params": [
+          {
+            "name": "app_name",
+            "type": "string",
+            "description": "应用程序名称 (e.g. 'notepad', 'calc').",
+            "required": true
+          }
+        ]
       }
     ]
   }

@@ -1,5 +1,5 @@
 from typing import Any, Dict, List
-from .ast_nodes import PipelineNode, AssignmentNode, CallNode, LiteralNode, VariableRefNode
+from .ast_nodes import PipelineNode, AssignmentNode, CallNode, LiteralNode, VariableRefNode, ListNode
 
 class NITRuntime:
     """
@@ -43,15 +43,20 @@ class NITRuntime:
             return await self.execute_call(statement)
         return None
 
+    def evaluate_value(self, node) -> Any:
+        if isinstance(node, LiteralNode):
+            return node.value
+        elif isinstance(node, VariableRefNode):
+            return self.variables.get(node.name)
+        elif isinstance(node, ListNode):
+            return [self.evaluate_value(elem) for elem in node.elements]
+        return None
+
     async def execute_call(self, call_node: CallNode) -> Any:
         # Resolve arguments
         resolved_args = {}
         for name, node in call_node.args.items():
-            if isinstance(node, LiteralNode):
-                resolved_args[name] = node.value
-            elif isinstance(node, VariableRefNode):
-                # Variable names are stored with '$' in lexer, so we use the name directly
-                resolved_args[name] = self.variables.get(node.name)
+            resolved_args[name] = self.evaluate_value(node)
         
         # Execute tool
         result = await self.tool_executor(call_node.tool_name, resolved_args)

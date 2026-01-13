@@ -1,6 +1,6 @@
 from typing import List, Optional
 from .lexer import Token, TokenType, Lexer
-from .ast_nodes import ASTNode, PipelineNode, AssignmentNode, CallNode, LiteralNode, VariableRefNode, ValueNode
+from .ast_nodes import ASTNode, PipelineNode, AssignmentNode, CallNode, LiteralNode, VariableRefNode, ValueNode, ListNode
 from .errors import NITParserError
 
 class Parser:
@@ -93,5 +93,21 @@ class Parser:
         elif token.type == TokenType.VARIABLE:
             self.advance()
             return VariableRefNode(name=token.value)
+        elif token.type == TokenType.LBRACKET:
+            return self.parse_list()
         else:
             self.error(f"Expected value, got {token.type}")
+
+    def parse_list(self) -> ListNode:
+        self.match(TokenType.LBRACKET)
+        elements = []
+        if self.peek().type != TokenType.RBRACKET:
+            while True:
+                elements.append(self.parse_value())
+                if self.peek().type == TokenType.COMMA:
+                    self.advance()
+                    continue
+                else:
+                    break
+        self.match(TokenType.RBRACKET)
+        return ListNode(elements=elements)

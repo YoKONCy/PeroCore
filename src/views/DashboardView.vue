@@ -102,22 +102,20 @@
           <div class="view-container-wrapper" style="height: 100%;">
               <!-- 1. 仪表盘概览 -->
                 <div v-show="currentTab === 'overview'" key="overview" class="view-container">
-              <!-- Live Monitor Entry Button -->
+              <!-- IDE Workspace Entry Button -->
               <el-row :gutter="20" style="margin-bottom: 20px;">
                 <el-col :span="24">
-                   <el-alert
-                    title="思维监控室 (Thinking Monitor)"
-                    type="info"
-                    description="实时查看 Pero 的思考过程、错误修正与自我反思。"
-                    show-icon
-                    :closable="false"
-                  >
-                    <template #default>
-                       <div style="margin-top: 10px;">
-                         <el-button type="primary" size="small" @click="openLiveMonitor">进入监控室</el-button>
+                  <el-card shadow="hover" class="glass-card">
+                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                       <div>
+                         <h3 style="margin: 0; font-size: 18px;">开发工具 (Dev Tools)</h3>
+                         <p style="margin: 5px 0 0; color: #666; font-size: 14px;">访问 IDE 工作台进行代码编辑与调试。</p>
                        </div>
-                    </template>
-                  </el-alert>
+                       <el-button type="primary" size="large" :icon="Edit" @click="openIdeWorkspace">
+                         IDE 工作台
+                       </el-button>
+                    </div>
+                  </el-card>
                 </el-col>
               </el-row>
 
@@ -374,19 +372,7 @@
               </el-row>
             </div>
 
-            <!-- 1.5 思维监控室 -->
-            <div v-show="currentTab === 'task_monitor'" key="task_monitor" class="view-container" style="height: 100%; display: flex; flex-direction: column;">
-               <div class="toolbar" style="padding: 10px 0; display: flex; align-items: center; gap: 10px;">
-                  <el-button @click="goBackFromMonitor" :icon="ArrowLeft" circle></el-button>
-                  <h3 style="margin: 0;">{{ isViewingHistory ? '历史思维回溯' : '实时思维监控' }}</h3>
-               </div>
-               <div style="flex: 1; overflow: hidden; border: 1px solid #eee; border-radius: 8px;">
-                 <ReActProcessViewer 
-                   :segments="isViewingHistory ? historySegments : monitorSegments" 
-                   :isLive="!isViewingHistory"
-                 />
-               </div>
-            </div>
+
 
             <!-- 2. 对话日志 -->
             <div v-show="currentTab === 'logs'" key="logs" class="view-container logs-layout">
@@ -498,7 +484,7 @@
                       >
                         重试 ({{ log.retry_count }})
                       </el-button>
-                      <el-button link :icon="Monitor" @click="openHistoryMonitor(log)" size="small" style="color: #626aef;">思维链</el-button>
+
                       <el-button link :icon="Edit" @click="startLogEdit(log)" size="small">编辑</el-button>
                       <el-button link :icon="Delete" @click="deleteLog(log.id)" size="small" style="color: #f56c6c;">删除</el-button>
                     </div>
@@ -976,8 +962,8 @@
 <script setup>
 import { ref, shallowRef, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { listen } from '@tauri-apps/api/event'
+import { WebviewWindow, getAllWebviewWindows } from '@tauri-apps/api/webviewWindow'
 import VoiceConfigPanel from './VoiceConfigPanel.vue'
-import ReActProcessViewer from '../components/ReActProcessViewer.vue'
 import AsyncMarkdown from '../components/AsyncMarkdown.vue'
 import { marked } from 'marked'
 import dompurify from 'dompurify'
@@ -1051,72 +1037,65 @@ const selectedSessionId = ref('')
 const selectedDate = ref('')
 const selectedSort = ref('desc')
 
-// --- ReAct Monitor State ---
-const monitorSegments = ref([])
-const historySegments = ref([])
-const isViewingHistory = ref(false)
+const openIdeWorkspace = async () => {
+  console.log('Trying to open IDE workspace...')
+  try {
+    if (window.__TAURI__) {
+      console.log('Tauri environment detected')
+      
+      // Try to find existing window
+      let existingWin = null;
+      
+      // Method 1: getAllWebviewWindows
+      try {
+        const windows = await getAllWebviewWindows()
+        existingWin = windows.find(w => w.label === 'ide')
+      } catch (err) {
+        console.warn('getAllWebviewWindows failed:', err)
+      }
 
-const parseReActSegments = (text) => {
-  if (!text) return []
-  const segments = []
-  // 改进正则表达式，支持多行 Thought/Action 和更灵活的匹配
-  // 1. 【Type: Content】 - 块格式
-  // 2. *Action* - 星号动作格式
-  // 3. Thought/Action: Content - 标准 ReAct 格式（支持多行，直到下一个标识符或结束）
-  const regex = /(?:【(Thinking|Error|Reflection)[:：]?\s*([\s\S]*?)】)|(?:\n|^)\s*\*([\s\S]+?)\*|(?:\n|^)\s*(Thought|Action)[:：]\s*([\s\S]+?)(?=\n\s*(?:Thought|Action)[:：]|\n\s*\*|【(?:Thinking|Error|Reflection)|$)/gi
-  
-  let lastIndex = 0
-  let match
+      // Method 2: WebviewWindow.getByLabel (if available)
+      if (!existingWin && WebviewWindow.getByLabel) {
+         existingWin = WebviewWindow.getByLabel('ide')
+      }
 
-  while ((match = regex.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      const normalText = text.substring(lastIndex, match.index)
-      if (normalText.trim()) segments.push({ type: 'text', content: normalText })
+      if (existingWin) {
+        console.log('Found existing IDE window, showing...')
+        await existingWin.show()
+        await existingWin.setFocus()
+        return
+      }
+      
+      console.log('Creating new IDE window...')
+      const newWin = new WebviewWindow('ide', {
+        url: '/#/ide',
+        title: 'Pero IDE',
+        width: 1280,
+        height: 800,
+        resizable: true,
+        decorations: true,
+        center: true
+      })
+      
+      newWin.once('tauri://created', function () {
+          console.log('IDE window created successfully')
+      })
+      newWin.once('tauri://error', function (e) {
+          console.error('IDE window creation error:', e)
+          ElMessage.error('IDE窗口创建失败: ' + JSON.stringify(e))
+      })
+    } else {
+      console.log('Not in Tauri, using window.open')
+      window.open('/#/ide', '_blank', 'width=1280,height=800,menubar=no,toolbar=no,location=no,status=no')
     }
-    
-    if (match[1] !== undefined) {
-      // Tagged block (Thinking/Error/Reflection)
-      const type = match[1].toLowerCase()
-      segments.push({ type: type === 'thinking' ? 'thinking' : type, content: match[2].trim() })
-    } else if (match[3] !== undefined) {
-      // Action block (*Action*)
-      segments.push({ type: 'action', content: match[3].trim() })
-    } else if (match[4] !== undefined) {
-      // Standard ReAct block (Thought:/Action:)
-      const type = match[4].toLowerCase() === 'thought' ? 'thinking' : 'action'
-      segments.push({ type, content: match[5].trim() })
-    }
-    
-    lastIndex = regex.lastIndex
-  }
-  
-  if (lastIndex < text.length) {
-    const normalText = text.substring(lastIndex)
-    if (normalText.trim()) segments.push({ type: 'text', content: normalText })
-  }
-  
-  return segments
-}
-
-const openLiveMonitor = () => {
-  currentTab.value = 'task_monitor'
-  isViewingHistory.value = false
-}
-
-const openHistoryMonitor = (log) => {
-  currentTab.value = 'task_monitor'
-  isViewingHistory.value = true
-  historySegments.value = parseReActSegments(log.content)
-}
-
-const goBackFromMonitor = () => {
-  if (isViewingHistory.value) {
-    currentTab.value = 'logs'
-  } else {
-    currentTab.value = 'overview'
+  } catch (e) {
+    console.error('Failed to open IDE window:', e)
+    const errorMsg = e instanceof Error ? e.message : JSON.stringify(e)
+    ElMessage.error('无法打开 IDE 窗口: ' + errorMsg)
+    // Fallback
+    window.open('/#/ide', '_blank', 'width=1280,height=800,menubar=no,toolbar=no,location=no,status=no')
   }
 }
-
 
 // --- System Monitor State ---
 const systemStatus = ref(null)
@@ -2584,14 +2563,6 @@ onMounted(() => {
   // Listen for monitor updates
   try {
     if (window.__TAURI__) {
-      listen('monitor-data-update', (event) => {
-        const data = event.payload
-        if (data) monitorSegments.value = data
-      })
-      listen('open-dashboard-monitor', () => {
-        openLiveMonitor()
-      })
-
       // Add debounced history update listener
       let logFetchTimeout = null
       listen('history-update', () => {

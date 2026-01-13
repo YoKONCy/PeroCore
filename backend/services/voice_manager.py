@@ -415,7 +415,11 @@ class RealtimeVoiceManager:
                 tts_response = self._clean_text(combined_tts_raw, for_tts=True)
                 
                 if not ui_response:
-                    ui_response = "唔...Pero好像走神了..." # Fallback
+                    # 如果原始内容不为空（说明执行了动作但没有说话），则显示操作提示
+                    if full_response and full_response.strip():
+                        ui_response = "（Pero默默执行了操作...）"
+                    else:
+                        ui_response = "唔...Pero好像走神了..." # Fallback for completely empty response
                 if not tts_response:
                     tts_response = "唔...Pero好像走神了..." # Fallback
 

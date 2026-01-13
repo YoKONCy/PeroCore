@@ -54,28 +54,43 @@ class EmbeddingService:
             try:
                 from sentence_transformers import CrossEncoder
                 # 使用 BGE-Reranker-v2-M3
-                self._cross_encoder = CrossEncoder('BAAI/bge-reranker-v2-m3')
+                self._cross_encoder = CrossEncoder('BAAI/bge-reranker-v2-m3', local_files_only=False)
                 print("[Embedding] Reranker loaded.", flush=True)
             except Exception as e:
-                print(f"[Embedding] Error loading reranker: {e}", flush=True)
-                raise e
+                print(f"[Embedding] Error loading reranker from internet: {e}", flush=True)
+                print("[Embedding] Attempting to load reranker with local_files_only=True...", flush=True)
+                try:
+                    from sentence_transformers import CrossEncoder
+                    self._cross_encoder = CrossEncoder('BAAI/bge-reranker-v2-m3', local_files_only=True)
+                    print("[Embedding] Reranker loaded from local cache (offline mode).", flush=True)
+                except Exception as local_e:
+                    print(f"[Embedding] Fatal: Could not load reranker even from local cache: {local_e}", flush=True)
+                    raise e
 
     def warm_up(self):
         """
         预热模型，防止首次请求超时
         """
         print("[Embedding] Warming up models...", flush=True)
+        
+        # 1. Warm up Embedding Model
         try:
             self._load_model()
-            self._load_reranker()
             # 进行一次简单的推理以确保 GPU/CPU 内存完全加载
             if self._model:
                 self._model.encode(["warm up"])
+        except Exception as e:
+            print(f"[Embedding] Embedding model warm up failed: {e}", flush=True)
+
+        # 2. Warm up Reranker Model
+        try:
+            self._load_reranker()
             if self._cross_encoder:
                 self._cross_encoder.predict([["warm up", "test"]])
-            print("[Embedding] Warm up complete.", flush=True)
         except Exception as e:
-            print(f"[Embedding] Warm up failed: {e}", flush=True)
+            print(f"[Embedding] Reranker model warm up failed: {e}", flush=True)
+
+        print("[Embedding] Warm up process finished.", flush=True)
 
     def encode(self, texts: List[str]) -> List[List[float]]:
         """

@@ -26,9 +26,12 @@ if os.name == 'nt':
         sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 # Initialize Logging
+import logging
 from utils.logging_config import configure_logging
 log_file = os.environ.get("PERO_LOG_FILE")
 configure_logging(log_file=log_file)
+
+logger = logging.getLogger(__name__)
 
 import uvicorn
 from contextlib import asynccontextmanager
@@ -57,6 +60,7 @@ from services.social_service import get_social_service
 from core.config_manager import get_config_manager
 from core.nit_manager import get_nit_manager
 from nit_core.dispatcher import XMLStreamFilter
+from routers.ide_router import router as ide_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -458,6 +462,7 @@ async def lifespan(app: FastAPI):
     await companion_service.stop()
 
 app = FastAPI(title="PeroCore Backend", description="AI Agent powered backend for Pero", lifespan=lifespan)
+app.include_router(ide_router)
 
 dist_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "dist")
 if os.path.exists(dist_path):

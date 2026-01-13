@@ -18,6 +18,10 @@ class VariableRefNode(ValueNode):
     name: str
 
 @dataclass
+class ListNode(ValueNode):
+    elements: List[ValueNode]
+
+@dataclass
 class CallNode(ASTNode):
     tool_name: str
     args: Dict[str, ValueNode]

@@ -4,10 +4,10 @@
   <div class="fixed -top-24 -right-24 w-96 h-96 bg-emerald-500/5 blur-[120px] rounded-full pointer-events-none"></div>
   <div class="fixed -bottom-24 -left-24 w-96 h-96 bg-blue-500/5 blur-[120px] rounded-full pointer-events-none"></div>
 
-  <div class="flex h-screen w-screen overflow-hidden bg-slate-950 text-slate-200 font-sans select-none">
+  <div class="flex h-screen w-screen overflow-hidden bg-slate-950 text-slate-200 font-sans select-text">
     <!-- Sidebar Navigation -->
     <aside :class="[
-      'glass-effect border-r border-slate-800/50 flex flex-col transition-all duration-300 relative z-20',
+      'glass-effect border-r border-slate-800/50 flex flex-col transition-all duration-300 relative z-20 select-none',
       isSidebarCollapsed ? 'w-20' : 'w-64'
     ]">
       <div class="p-6 mb-6 flex items-center justify-between">
@@ -68,7 +68,7 @@
       <div class="absolute top-[-10%] right-[-10%] w-[40%] h-[40%] bg-emerald-500/10 blur-[120px] rounded-full pointer-events-none"></div>
       
       <!-- Top Header -->
-      <header class="h-20 flex items-center justify-between px-10 border-b border-slate-800/30 backdrop-blur-md z-10">
+      <header class="h-20 flex items-center justify-between px-10 border-b border-slate-800/30 backdrop-blur-md z-10 select-none">
         <div>
           <h1 class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">
             Pero Launcher
@@ -103,9 +103,9 @@
                 </div>
                 <span class="text-xs font-mono text-slate-500 group-hover:text-blue-400 transition-colors">CPU 负载</span>
               </div>
-              <div class="text-2xl font-bold">12.4%</div>
+              <div class="text-2xl font-bold">{{ cpuUsage.toFixed(1) }}%</div>
               <div class="w-full bg-slate-800/50 h-1.5 rounded-full mt-4 overflow-hidden">
-                <div class="bg-blue-500 h-full rounded-full w-[12.4%]"></div>
+                <div class="bg-blue-500 h-full rounded-full transition-all duration-500" :style="{ width: `${Math.min(cpuUsage, 100)}%` }"></div>
               </div>
             </div>
 
@@ -116,9 +116,9 @@
                 </div>
                 <span class="text-xs font-mono text-slate-500 group-hover:text-purple-400 transition-colors">内存占用</span>
               </div>
-              <div class="text-2xl font-bold">842MB</div>
+              <div class="text-2xl font-bold">{{ (memoryUsed / 1024 / 1024).toFixed(0) }}MB</div>
               <div class="w-full bg-slate-800/50 h-1.5 rounded-full mt-4 overflow-hidden">
-                <div class="bg-purple-500 h-full rounded-full w-[35%]"></div>
+                <div class="bg-purple-500 h-full rounded-full transition-all duration-500" :style="{ width: `${memoryTotal > 0 ? (memoryUsed / memoryTotal * 100) : 0}%` }"></div>
               </div>
             </div>
 
@@ -188,8 +188,8 @@
               <button @click="napcatLogs = []" class="text-xs text-slate-500 hover:text-slate-300 transition-colors">重置</button>
             </div>
           </div>
-          <div class="flex-1 overflow-y-auto p-6 font-mono text-[13px] leading-relaxed custom-scrollbar" ref="napcatViewer">
-            <div v-for="log in napcatLogs" :key="log.id" class="mb-1">
+          <div class="flex-1 overflow-y-auto p-6 font-mono text-[13px] leading-none custom-scrollbar" ref="napcatViewer">
+            <div v-for="log in napcatLogs" :key="log.id" class="">
               <span class="text-slate-600 mr-3 select-none">[{{ log.time }}]</span>
               <span class="text-slate-300 whitespace-pre-wrap" v-html="ansiToHtml(log.content)"></span>
             </div>
@@ -350,7 +350,7 @@
       </main>
 
       <!-- Footer / Mini Status -->
-      <footer class="h-10 px-10 flex items-center justify-between border-t border-slate-800/30 text-[10px] font-mono text-slate-600">
+      <footer class="h-10 px-10 flex items-center justify-between border-t border-slate-800/30 text-[10px] font-mono text-slate-600 select-none">
         <div class="flex items-center gap-6">
           <div class="flex items-center gap-2">
             <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
@@ -373,7 +373,8 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick, shallowRef, watch, defineAsyncComponent } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick, shallowRef, watch, defineAsyncComponent } from 'vue'
+import { useRouter } from 'vue-router'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getAllWebviewWindows, getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
@@ -382,10 +383,18 @@ import {
   Sparkles, Home, Terminal, Settings, FolderOpen,
   Cpu, Database, Activity, Power, ShieldCheck,
   LayoutGrid, MessageSquare, ScrollText, Monitor, HardDrive, ChevronRight, Play, Shield,
-  Menu, Zap, X, Plug, Search, Plus
+  Menu, Zap, X, Plug, Search, Plus, Code
 } from 'lucide-vue-next'
 
+const router = useRouter()
 const activeTab = ref('home')
+
+watch(activeTab, (val) => {
+  if (val === 'ide') {
+    router.push('/ide')
+  }
+})
+
 const isSidebarCollapsed = ref(false)
 const backendStatus = ref('STOPPED')
 const napcatStatus = ref('STOPPED')
@@ -398,6 +407,22 @@ const plugins = ref([])
 const isInstallingES = ref(false)
 const appConfig = ref({})
 const isSocialEnabled = ref(true)
+
+const cpuUsage = ref(0)
+const memoryUsed = ref(0)
+const memoryTotal = ref(0)
+let statsInterval = null
+
+const updateStats = async () => {
+  try {
+    const stats = await invoke('get_system_stats')
+    cpuUsage.value = stats.cpu_usage
+    memoryUsed.value = stats.memory_used
+    memoryTotal.value = stats.memory_total
+  } catch (e) {
+    // console.debug("Stats update failed", e)
+  }
+}
 
 const loadConfig = async () => {
   try {
@@ -471,6 +496,14 @@ onMounted(async () => {
   } catch (e) {
     esStatus.value = 'ERROR'
   }
+
+  // Start stats polling
+  updateStats()
+  statsInterval = setInterval(updateStats, 2000)
+})
+
+onUnmounted(() => {
+  if (statsInterval) clearInterval(statsInterval)
 })
 
 const sendTerminalCommand = async () => {
@@ -572,8 +605,9 @@ const stopServices = async () => {
     napcatStatus.value = 'STOPPED'
     
     const windows = await getAllWebviewWindows()
-    const petWin = windows.find(w => w.label === 'pet')
-    if (petWin) await petWin.hide()
+    
+    // Use Rust command to hide pet window reliably
+    await invoke('hide_pet_window')
 
     const dashboardWin = windows.find(w => w.label === 'dashboard')
     if (dashboardWin) await dashboardWin.close()

@@ -322,11 +322,44 @@ watch(parsedBubbleContent, (newVal) => {
 //   }
 // })
 
-const openTaskMonitor = () => {
-  invoke('open_dashboard').catch(e => console.error(e))
-  emit('open-dashboard-monitor').catch(e => console.error(e))
+const openTaskMonitor = async () => {
   // 立即同步一次数据
   emit('monitor-data-update', toRaw(parsedBubbleContent.value)).catch(e => console.error(e))
+  
+  try {
+     // Try to find existing window
+     let existingWin = null;
+     
+     try {
+       const windows = await getAllWebviewWindows()
+       existingWin = windows.find(w => w.label === 'ide')
+     } catch (err) {
+       console.warn('getAllWebviewWindows failed:', err)
+     }
+
+     if (!existingWin && WebviewWindow.getByLabel) {
+        existingWin = WebviewWindow.getByLabel('ide')
+     }
+
+     if (existingWin) {
+       await existingWin.show()
+       await existingWin.setFocus()
+       return
+     }
+     
+     // Create new window
+     new WebviewWindow('ide', {
+       url: '/#/ide',
+       title: 'Pero IDE',
+       width: 1280,
+       height: 800,
+       resizable: true,
+       decorations: true,
+       center: true
+     })
+  } catch (e) {
+    console.error('Failed to open IDE window from Pet:', e)
+  }
 }
 
 onMounted(async () => {

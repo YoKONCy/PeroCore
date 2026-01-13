@@ -2,7 +2,7 @@ import uuid
 import json
 from datetime import datetime
 from typing import Dict, Any, List
-from .ast_nodes import PipelineNode, AssignmentNode, CallNode, LiteralNode, VariableRefNode
+from .ast_nodes import PipelineNode, AssignmentNode, CallNode, LiteralNode, VariableRefNode, ListNode
 
 from .engine import NITRuntime
 
@@ -172,14 +172,20 @@ class NITRuntime:
         elif isinstance(statement, CallNode):
             return await self.execute_call(statement)
 
+    def evaluate_value(self, node):
+        from .ast_nodes import LiteralNode, VariableRefNode, ListNode
+        if isinstance(node, LiteralNode):
+            return node.value
+        elif isinstance(node, VariableRefNode):
+            return self.variables.get(node.name)
+        elif isinstance(node, ListNode):
+            return [self.evaluate_value(elem) for elem in node.elements]
+        return None
+
     async def execute_call(self, call_node):
-        from .ast_nodes import LiteralNode, VariableRefNode
         args = {}
         for name, node in call_node.args.items():
-            if isinstance(node, LiteralNode):
-                args[name] = node.value
-            elif isinstance(node, VariableRefNode):
-                args[name] = self.variables.get(node.name)
+            args[name] = self.evaluate_value(node)
         
         # Tool execution logic
         result = await self.tool_executor(call_node.tool_name, args)

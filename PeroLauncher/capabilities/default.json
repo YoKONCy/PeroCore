@@ -5,12 +5,16 @@
     "launcher",
     "pet",
     "main",
-    "dashboard"
+    "dashboard",
+    "ide"
   ],
   "permissions": [
     "core:default",
     "log:default",
     "shell:default",
+    "core:window:allow-create",
+    "core:window:allow-show",
+    "core:window:allow-set-focus",
     {
       "identifier": "shell:allow-execute",
       "allow": [

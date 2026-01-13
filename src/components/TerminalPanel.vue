@@ -186,6 +186,7 @@ onUnmounted(() => {
   border-radius: 8px;
   overflow: hidden;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  user-select: text;
 }
 
 .terminal-header {
@@ -196,6 +197,7 @@ onUnmounted(() => {
   background-color: #2d2d2d;
   border-bottom: 1px solid #3d3d3d;
   color: #ccc;
+  user-select: none;
 }
 
 .terminal-header .title {

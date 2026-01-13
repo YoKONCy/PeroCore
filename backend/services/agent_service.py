@@ -28,6 +28,7 @@ from services.preprocessor.implementations import (
 )
 from services.postprocessor.manager import PostprocessorManager
 from services.postprocessor.implementations import NITFilterPostprocessor, ThinkingFilterPostprocessor
+from core.nit_manager import get_nit_manager
 from models import Config, Memory, PetState, ScheduledTask, AIModelConfig, MCPConfig
 from sqlmodel import select, desc
 from nit_core.tools import TOOLS_MAPPING, TOOLS_DEFINITIONS, plugin_manager
@@ -259,7 +260,27 @@ class AgentService:
         # 生成工具列表字符串
         tools_list_str = ""
         # 动态获取最新工具定义
-        current_tools_defs = plugin_manager.get_all_definitions()
+        # current_tools_defs = plugin_manager.get_all_definitions() 
+        
+        # 改用符合 NIT 协议的筛选逻辑：必须经过 NIT Manager 的启用检查
+        nit_manager = get_nit_manager()
+        current_tools_defs = []
+        
+        for plugin_name, manifest in plugin_manager.plugins.items():
+            # 1. 检查分类开关 (Level 1)
+            category = manifest.get("_category", "plugins") # 默认为 plugins
+            if not nit_manager.is_category_enabled(category):
+                continue
+                
+            # 2. 检查插件开关 (Level 2)
+            if not nit_manager.is_plugin_enabled(plugin_name):
+                continue
+            
+            # 3. 提取工具定义
+            if "capabilities" in manifest and "invocationCommands" in manifest["capabilities"]:
+                current_tools_defs.extend(manifest["capabilities"]["invocationCommands"])
+            elif "capabilities" in manifest and "toolDefinitions" in manifest["capabilities"]:
+                current_tools_defs.extend(manifest["capabilities"]["toolDefinitions"])
         
         for tool_def in current_tools_defs:
             if "function" in tool_def:
@@ -1524,22 +1545,28 @@ Instruction: When opening an app, check this list first. If it's already running
                 
                 # [Robustness] Fallback extraction for user_message if missing
                 if not user_message:
-                    print(f"[Agent] User message missing. Searching in {len(messages)} input messages...")
-                    for m in reversed(messages):
-                        if m.get("role") == "user":
-                            content = m.get("content", "")
-                            if isinstance(content, str):
-                                user_message = content
-                            elif isinstance(content, list):
-                                texts = [item["text"] for item in content if item.get("type") == "text"]
-                                user_message = " ".join(texts)
-                            break
-                    if user_message:
-                        print(f"[Agent] Fallback extracted user message: '{user_message[:20]}...'")
+                    # Priority 1: Check override (Voice Mode)
+                    if user_text_override:
+                        user_message = user_text_override
+                        print(f"[Agent] User message restored from override: '{user_message[:20]}...'")
                     else:
-                        print(f"[Agent] CRITICAL: Failed to extract user message from input. Logs will NOT be saved.")
+                        # Priority 2: Search in messages
+                        print(f"[Agent] User message missing. Searching in {len(messages)} input messages...")
+                        for m in reversed(messages):
+                            if m.get("role") == "user":
+                                content = m.get("content", "")
+                                if isinstance(content, str):
+                                    user_message = content
+                                elif isinstance(content, list):
+                                    texts = [item["text"] for item in content if item.get("type") == "text"]
+                                    user_message = " ".join(texts)
+                                break
+                        if user_message:
+                            print(f"[Agent] Fallback extracted user message: '{user_message[:20]}...'")
+                        else:
+                            print(f"[Agent] CRITICAL: Failed to extract user message from input. Logs will NOT be saved.")
 
-                should_save = not skip_save and user_message and full_response_text and not full_response_text.startswith("Error:")
+                should_save = not skip_save and user_message and full_response_text
                 print(f"[Agent] Log Save Check: save={should_save} (skip_save={skip_save}, has_user_msg={bool(user_message)}, resp_len={len(full_response_text) if full_response_text else 0})")
                 
                 if should_save:
@@ -1586,7 +1613,29 @@ Instruction: When opening an app, check this list first. If it's already running
             import traceback
             error_msg = f"Error: {str(e)}"
             print(f"Agent Chat Error (Inner): {traceback.format_exc()}")
-            # 注意：按照用户要求，报错消息不写入数据库，仅直接 yield 给前端显示
+            # [Troubleshooting] Attempt to save log even on error (User request: logs missing)
+            try:
+                # Ensure user_message is available
+                final_u_msg = user_message
+                if not final_u_msg and user_text_override:
+                    final_u_msg = user_text_override
+                
+                # Append error to response so it's recorded
+                final_response = full_response_text + f"\n\n[System Error]: {error_msg}"
+                
+                if final_u_msg:
+                     await self.memory_service.save_log_pair(
+                        self.session, 
+                        source, 
+                        session_id, 
+                        final_u_msg, 
+                        final_response, 
+                        pair_id
+                    )
+                     print(f"[Agent] Error log saved (pair_id: {pair_id})")
+            except Exception as save_err:
+                print(f"[Agent] Failed to save error log: {save_err}")
+
             yield error_msg
         finally:
             if session_id:
