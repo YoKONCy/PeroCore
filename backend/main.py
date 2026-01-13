@@ -522,8 +522,9 @@ async def seed_voice_configs():
             session.add(tts)
             
         # Seed Frontend Access Token (Dynamic Handshake Security)
-        # 每次启动都生成一个新的强加密随机令牌
-        new_dynamic_token = secrets.token_urlsafe(32)
+        # 优先从环境变量获取令牌（由 Launcher 统一分配），否则生成新的
+        env_token = os.environ.get("PERO_ACCESS_TOKEN")
+        new_dynamic_token = env_token if env_token else secrets.token_urlsafe(32)
         
         token_stmt = select(Config).where(Config.key == "frontend_access_token")
         token_result = await session.exec(token_stmt)
@@ -646,7 +647,28 @@ async def get_social_mode():
     return {"enabled": get_nit_manager().is_plugin_enabled("social_adapter")}
 
 @app.websocket("/api/social/ws")
-async def social_websocket(websocket: WebSocket):
+async def social_websocket(websocket: WebSocket, session: AsyncSession = Depends(get_session)):
+    # 鉴权：NapCat 连接时会携带 token
+    # 优先检查 Authorization Header，其次检查 query 参数 access_token
+    auth = websocket.headers.get("authorization")
+    token = None
+    if auth and auth.startswith("Bearer "):
+        token = auth.split(" ")[1]
+    elif not auth:
+        token = websocket.query_params.get("access_token")
+    
+    # 获取期望的令牌
+    config_stmt = select(Config).where(Config.key == "frontend_access_token")
+    config_result = await session.exec(config_stmt)
+    db_config = config_result.first()
+    expected_token = db_config.value if db_config else "pero_default_token"
+    
+    if not token or token != expected_token:
+        print(f"🚫 [SocialWS] 鉴权失败: 收到={token}, 期望={expected_token}")
+        await websocket.accept() # 必须先 accept 才能 close 并发送消息
+        await websocket.close(code=1008) # Policy Violation
+        return
+
     social_service = get_social_service()
     await social_service.handle_websocket(websocket)
 
