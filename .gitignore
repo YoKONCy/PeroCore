@@ -58,8 +58,8 @@ Cargo.lock
 # Data & Databases (Ignore local data)
 backend/data/*.db*
 !backend/data/.gitkeep
-backend/rust_db/*.index
-backend/rust_db/*.json
+backend/data/rust_db/
+backend/rust_db/
 *.sqlite3
 Backups/
 
@@ -68,6 +68,7 @@ POST_TENCENT_CLOUD.md
 
 # Models & Cache (Large files)
 backend/models/whisper-tiny/
+backend/data/models_cache/
 backend/models_cache/
 
 # OS files
