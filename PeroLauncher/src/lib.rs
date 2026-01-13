@@ -336,20 +336,6 @@ async fn start_backend(
     }
 
     use tauri::Manager;
-    use rand::{distributions::Alphanumeric, Rng};
-
-    // 1. 生成并保存动态令牌
-    let token: String = rand::thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(32)
-        .map(char::from)
-        .collect();
-
-    // 更新 config.json 中的 token
-    if let Ok(mut config) = get_config(app.clone()) {
-        config["frontend_access_token"] = serde_json::Value::String(token.clone());
-        let _ = save_config(app.clone(), config);
-    }
 
     let python_path = std::path::PathBuf::from(&diag.python_path);
     let script_path = std::path::PathBuf::from(&diag.script_path);
@@ -401,7 +387,6 @@ async fn start_backend(
         .current_dir(&backend_root)
         .env("PYTHONPATH", python_path_env)
         .env("PORT", "9120")
-        .env("PERO_ACCESS_TOKEN", token)
         .env("PERO_DATA_DIR", data_dir.to_string_lossy().to_string())
         .env("PERO_DATABASE_PATH", db_path.to_string_lossy().to_string())
         .env("PERO_CONFIG_PATH", config_path.to_string_lossy().to_string())

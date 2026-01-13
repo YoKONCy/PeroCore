@@ -278,39 +278,6 @@ pub fn start_napcat_process(app: AppHandle, state: tauri::State<NapCatState>) ->
     let qq_path = detect_qq_path().ok_or("QQ not found in registry. Please install QQ or config manually.".to_string())?;
     emit_log(&app, format!("Found QQ at: {}", qq_path));
 
-    // --- 自动同步 Token 逻辑 ---
-    if let Ok(config_val) = crate::get_config(app.clone()) {
-        if let Some(token) = config_val["frontend_access_token"].as_str() {
-            let config_dir = dir.join("config");
-            if config_dir.exists() {
-                if let Ok(entries) = fs::read_dir(config_dir) {
-                    for entry in entries.flatten() {
-                        let path = entry.path();
-                        if let Some(filename) = path.file_name().and_then(|f| f.to_str()) {
-                            if filename.starts_with("onebot11_") && filename.ends_with(".json") {
-                                emit_log(&app, format!("Updating token in NapCat config: {}", filename));
-                                if let Ok(content) = fs::read_to_string(&path) {
-                                    if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&content) {
-                                        // 更新所有 websocketClients 的 token
-                                        if let Some(clients) = json["websocketClients"].as_array_mut() {
-                                            for client in clients {
-                                                client["token"] = serde_json::Value::String(token.to_string());
-                                            }
-                                        }
-                                        if let Ok(new_content) = serde_json::to_string_pretty(&json) {
-                                            let _ = fs::write(&path, new_content);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    // --- 结束同步逻辑 ---
-
     let mut cmd;
 
     if napcat_bat.exists() {

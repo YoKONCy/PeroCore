@@ -490,10 +490,6 @@ async def verify_token(authorization: Optional[str] = Header(None), session: Asy
     """
     验证前端传来的 Token。实现“前端不可信”原则的第一步。
     """
-    # 宽容处理：如果是本地连接，且处于开发/调试模式，可以放行
-    is_local = False
-    # 这里可以根据需要添加更复杂的本地判断逻辑
-    
     # 获取后端预设的 Access Token
     config_stmt = select(Config).where(Config.key == "frontend_access_token")
     config_result = await session.exec(config_stmt)
@@ -501,19 +497,15 @@ async def verify_token(authorization: Optional[str] = Header(None), session: Asy
     
     expected_token = db_config.value if db_config else "pero_default_token"
     
-    # 检查环境变量是否允许跳过鉴权 (仅用于紧急调试)
-    if os.environ.get("PERO_SKIP_AUTH") == "true":
-        return "skip_auth_token"
-
+    # 如果是本地开发环境且没有设置 token，可以放行 (可选)
+    # if not db_config and os.environ.get("ENV") == "dev": return
+    
     if not authorization or not authorization.startswith("Bearer "):
-        # 如果是本地开发环境且没有设置 token，放行默认 token
-        return expected_token
+        raise HTTPException(status_code=401, detail="未授权访问：缺少令牌")
     
     token = authorization.split(" ")[1]
     if token != expected_token:
-        # 即使不匹配，如果是本地且处于宽容模式，记录警告但不阻塞
-        print(f"⚠️ [Auth] Token 不匹配: 收到={token}, 期望={expected_token}。由于是本地连接，暂时放行。")
-        return token
+        raise HTTPException(status_code=403, detail="未授权访问：令牌无效")
     
     return token
 
@@ -530,9 +522,8 @@ async def seed_voice_configs():
             session.add(tts)
             
         # Seed Frontend Access Token (Dynamic Handshake Security)
-        # 优先从环境变量获取令牌（由 Launcher 统一分配），否则生成新的
-        env_token = os.environ.get("PERO_ACCESS_TOKEN")
-        new_dynamic_token = env_token if env_token else secrets.token_urlsafe(32)
+        # 每次启动都生成一个新的强加密随机令牌
+        new_dynamic_token = secrets.token_urlsafe(32)
         
         token_stmt = select(Config).where(Config.key == "frontend_access_token")
         token_result = await session.exec(token_stmt)
@@ -656,9 +647,6 @@ async def get_social_mode():
 
 @app.websocket("/api/social/ws")
 async def social_websocket(websocket: WebSocket):
-    """
-    极简模式：彻底放行 NapCat WebSocket 连接，不进行任何鉴权，解决 403 问题。
-    """
     social_service = get_social_service()
     await social_service.handle_websocket(websocket)
 
