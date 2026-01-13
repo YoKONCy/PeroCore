@@ -655,26 +655,10 @@ async def get_social_mode():
     return {"enabled": get_nit_manager().is_plugin_enabled("social_adapter")}
 
 @app.websocket("/api/social/ws")
-async def social_websocket(websocket: WebSocket, session: AsyncSession = Depends(get_session)):
-    # 鉴权：NapCat 连接时会携带 token
-    # 为了解决 403 问题，这里改为“宽容模式”：记录日志但不再主动 close 连接
-    auth = websocket.headers.get("authorization")
-    token = None
-    if auth and auth.startswith("Bearer "):
-        token = auth.split(" ")[1]
-    elif not auth:
-        token = websocket.query_params.get("access_token")
-    
-    # 获取期望的令牌
-    config_stmt = select(Config).where(Config.key == "frontend_access_token")
-    config_result = await session.exec(config_stmt)
-    db_config = config_result.first()
-    expected_token = db_config.value if db_config else "pero_default_token"
-    
-    if not token or token != expected_token:
-        # 仅打印警告，不中断连接
-        print(f"⚠️ [SocialWS] 鉴权宽容放行: 收到={token}, 期望={expected_token}")
-
+async def social_websocket(websocket: WebSocket):
+    """
+    极简模式：彻底放行 NapCat WebSocket 连接，不进行任何鉴权，解决 403 问题。
+    """
     social_service = get_social_service()
     await social_service.handle_websocket(websocket)
 
