@@ -526,6 +526,11 @@ async def seed_voice_configs():
         env_token = os.environ.get("PERO_ACCESS_TOKEN")
         new_dynamic_token = env_token if env_token else secrets.token_urlsafe(32)
         
+        if env_token:
+            logger.info(f"🔑 [Auth] 使用来自环境变量的令牌: {env_token[:4]}****")
+        else:
+            logger.info(f"🎲 [Auth] 生成新的随机令牌: {new_dynamic_token[:4]}****")
+        
         token_stmt = select(Config).where(Config.key == "frontend_access_token")
         token_result = await session.exec(token_stmt)
         existing_token = token_result.first()
@@ -649,12 +654,21 @@ async def get_social_mode():
 @app.websocket("/api/social/ws")
 async def social_websocket(websocket: WebSocket, session: AsyncSession = Depends(get_session)):
     # 鉴权：NapCat 连接时会携带 token
-    # 优先检查 Authorization Header，其次检查 query 参数 access_token
+    
+    # 打印详细日志以便调试
+    logger.info(f"🔌 [SocialWS] 收到新的连接请求. Headers: {dict(websocket.headers)}, Params: {dict(websocket.query_params)}")
+    
+    # 1. 检查 Authorization Header
     auth = websocket.headers.get("authorization")
     token = None
-    if auth and auth.startswith("Bearer "):
-        token = auth.split(" ")[1]
-    elif not auth:
+    if auth:
+        if auth.startswith("Bearer "):
+            token = auth.split(" ")[1]
+        else:
+            token = auth # 兼容直接传 token 的情况
+    
+    # 2. 如果 Header 没有，检查 query 参数 access_token
+    if not token:
         token = websocket.query_params.get("access_token")
     
     # 获取期望的令牌
@@ -664,11 +678,17 @@ async def social_websocket(websocket: WebSocket, session: AsyncSession = Depends
     expected_token = db_config.value if db_config else "pero_default_token"
     
     if not token or token != expected_token:
-        print(f"🚫 [SocialWS] 鉴权失败: 收到={token}, 期望={expected_token}")
-        await websocket.accept() # 必须先 accept 才能 close 并发送消息
-        await websocket.close(code=1008) # Policy Violation
+        logger.warning(f"🚫 [SocialWS] 鉴权失败! 收到令牌: '{token}', 期望令牌: '{expected_token}'")
+        # 增加一点安全保护，防止暴力破解
+        await asyncio.sleep(1)
+        try:
+            await websocket.accept() 
+            await websocket.close(code=1008) 
+        except Exception:
+            pass
         return
 
+    logger.info("✅ [SocialWS] NapCat 鉴权通过，正在建立连接...")
     social_service = get_social_service()
     await social_service.handle_websocket(websocket)
 

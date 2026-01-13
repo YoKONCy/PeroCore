@@ -281,24 +281,40 @@ pub fn start_napcat_process(app: AppHandle, state: tauri::State<NapCatState>) ->
     // --- 自动同步 Token 逻辑 ---
     if let Ok(config_val) = crate::get_config(app.clone()) {
         if let Some(token) = config_val["frontend_access_token"].as_str() {
-            let config_dir = dir.join("config");
-            if config_dir.exists() {
-                if let Ok(entries) = fs::read_dir(config_dir) {
-                    for entry in entries.flatten() {
-                        let path = entry.path();
-                        if let Some(filename) = path.file_name().and_then(|f| f.to_str()) {
-                            if filename.starts_with("onebot11_") && filename.ends_with(".json") {
-                                emit_log(&app, format!("Updating token in NapCat config: {}", filename));
-                                if let Ok(content) = fs::read_to_string(&path) {
-                                    if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&content) {
-                                        // 更新所有 websocketClients 的 token
-                                        if let Some(clients) = json["websocketClients"].as_array_mut() {
-                                            for client in clients {
-                                                client["token"] = serde_json::Value::String(token.to_string());
+            let config_paths = [
+                dir.join("config"),
+                dir.join("napcat/config"),
+            ];
+
+            for config_dir in config_paths {
+                if config_dir.exists() {
+                    if let Ok(entries) = fs::read_dir(config_dir) {
+                        for entry in entries.flatten() {
+                            let path = entry.path();
+                            if let Some(filename) = path.file_name().and_then(|f| f.to_str()) {
+                                if (filename.starts_with("onebot11") && filename.ends_with(".json")) || filename == "config.json" {
+                                    emit_log(&app, format!("Updating token in NapCat config: {:?}", path));
+                                    if let Ok(content) = fs::read_to_string(&path) {
+                                        if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&content) {
+                                            let mut updated = false;
+                                            // 1. 更新 onebot11 的 websocketClients
+                                            if let Some(clients) = json["websocketClients"].as_array_mut() {
+                                                for client in clients {
+                                                    client["token"] = serde_json::Value::String(token.to_string());
+                                                    updated = true;
+                                                }
                                             }
-                                        }
-                                        if let Ok(new_content) = serde_json::to_string_pretty(&json) {
-                                            let _ = fs::write(&path, new_content);
+                                            // 2. 更新通用 config.json 中的 token (如果存在)
+                                            if json.get("token").is_some() {
+                                                json["token"] = serde_json::Value::String(token.to_string());
+                                                updated = true;
+                                            }
+
+                                            if updated {
+                                                if let Ok(new_content) = serde_json::to_string_pretty(&json) {
+                                                    let _ = fs::write(&path, new_content);
+                                                }
+                                            }
                                         }
                                     }
                                 }
