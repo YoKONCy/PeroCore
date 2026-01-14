@@ -1056,10 +1056,21 @@ Instruction: When opening an app, check this list first. If it's already running
 
                                 # 宽松匹配截图请求 (处理大小写和别名)
                                 plugin_name_lower = res['plugin'].lower()
+                                executed_tools = res.get('executed_tools', [])
+                                
+                                # 检查 plugin 字段或 executed_tools 列表
+                                is_screenshot = ('screenshot' in plugin_name_lower or 'see_screen' in plugin_name_lower)
+                                if not is_screenshot and executed_tools:
+                                    for t in executed_tools:
+                                        t_lower = t.lower()
+                                        if 'screenshot' in t_lower or 'see_screen' in t_lower:
+                                            is_screenshot = True
+                                            break
+                                
                                 # 支持 'screenshot', 'see_screen' 等关键词
-                                if ('screenshot' in plugin_name_lower or 'see_screen' in plugin_name_lower) and res['status'] == 'success':
+                                if is_screenshot and res['status'] == 'success':
                                     has_screenshot_request = True
-                                    print(f"[Agent] Detected screenshot request in NIT: {res['plugin']}")
+                                    print(f"[Agent] Detected screenshot request in NIT: {res['plugin']} (Tools: {executed_tools})")
                             
                             # 3. 根据是否有多模态需求构造消息内容
                             enable_vision = config.get("enable_vision", False)

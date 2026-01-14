@@ -399,8 +399,12 @@ class NITDispatcher:
         if nit_matches:
             logger.info(f"Detected {len(nit_matches)} NIT script blocks.")
             
+            # 用于在闭包中捕获当前 block 执行过的工具
+            current_block_tools = []
+
             # 定义 Runtime 的执行器回调
             async def runtime_tool_executor(name: str, params: Dict[str, Any]):
+                current_block_tools.append(name)
                 return await self._execute_plugin(name, params, extra_plugins)
 
             for match in nit_matches:
@@ -408,6 +412,9 @@ class NITDispatcher:
                 # tag_name = match.group(1)
                 extracted_id = match.group(2)
                 script = match.group(3)
+                
+                # 重置当前 block 的工具列表
+                current_block_tools = []
                 
                 # --- Security Validation ---
                 if expected_nit_id:
@@ -437,7 +444,8 @@ class NITDispatcher:
                         "plugin": "NIT_Script",
                         "status": "success",
                         "output": output,
-                        "raw_block": full_tag
+                        "raw_block": full_tag,
+                        "executed_tools": list(current_block_tools) # Copy list
                     })
                 except Exception as e:
                     logger.error(f"NIT Script Error: {e}", exc_info=True)
@@ -445,7 +453,8 @@ class NITDispatcher:
                         "plugin": "NIT_Script",
                         "status": "error",
                         "output": f"Script Error: {str(e)}",
-                        "raw_block": full_tag
+                        "raw_block": full_tag,
+                        "executed_tools": list(current_block_tools) # Copy partial list
                     })
 
         return results
