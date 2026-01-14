@@ -686,6 +686,15 @@ async def set_aura_vision_mode(enabled: bool = Body(..., embed=True)):
         
     return {"status": "success", "enabled": enabled}
 
+@app.get("/api/config/tts")
+async def get_tts_mode():
+    return {"enabled": get_config_manager().get("tts_enabled", True)}
+
+@app.post("/api/config/tts")
+async def set_tts_mode(enabled: bool = Body(..., embed=True)):
+    get_config_manager().set("tts_enabled", enabled)
+    return {"status": "success", "enabled": enabled}
+
 @app.delete("/api/memories/by_timestamp/{msg_timestamp}")
 async def delete_memory_by_timestamp(msg_timestamp: str, session: AsyncSession = Depends(get_session)):
     service = MemoryService()
@@ -715,6 +724,7 @@ async def get_chat_history(
         "id": log.id, 
         "role": log.role, 
         "content": log.content, 
+        "raw_content": getattr(log, "raw_content", None), # Return raw content
         "timestamp": log.timestamp,
         "sentiment": getattr(log, "sentiment", None),
         "importance": getattr(log, "importance", None),

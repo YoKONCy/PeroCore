@@ -2,13 +2,13 @@ import uuid
 from datetime import datetime
 from sqlmodel import select, desc
 try:
-    from backend.models import Config, ConversationLog, Memory
-    from backend.services.llm_service import LLMService
-    from backend.services.memory_service import MemoryService
-except ImportError:
     from models import Config, ConversationLog, Memory
     from services.llm_service import LLMService
     from services.memory_service import MemoryService
+except ImportError:
+    from backend.models import Config, ConversationLog, Memory
+    from backend.services.llm_service import LLMService
+    from backend.services.memory_service import MemoryService
 import json
 
 # Global variable to hold session reference (injected by AgentService)

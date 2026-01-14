@@ -192,7 +192,7 @@ class MemoryService:
         return memory
 
     @staticmethod
-    async def save_log(session: AsyncSession, source: str, session_id: str, role: str, content: str, metadata: dict = None, pair_id: str = None) -> ConversationLog:
+    async def save_log(session: AsyncSession, source: str, session_id: str, role: str, content: str, metadata: dict = None, pair_id: str = None, raw_content: str = None) -> ConversationLog:
         """保存原始对话记录到 ConversationLog"""
         # 1. 移除 NIT 协议标记 (Non-invasive Integration Tools)
         from nit_core.dispatcher import remove_nit_tags
@@ -210,6 +210,7 @@ class MemoryService:
             session_id=session_id,
             role=role,
             content=cleaned_content,
+            raw_content=raw_content, # Save raw content
             metadata_json=json.dumps(metadata or {}),
             pair_id=pair_id
         )
@@ -218,7 +219,7 @@ class MemoryService:
         return log
 
     @staticmethod
-    async def save_log_pair(session: AsyncSession, source: str, session_id: str, user_content: str, assistant_content: str, pair_id: str, metadata: dict = None):
+    async def save_log_pair(session: AsyncSession, source: str, session_id: str, user_content: str, assistant_content: str, pair_id: str, metadata: dict = None, assistant_raw_content: str = None):
         """原子性保存用户消息与助手回复成对记录"""
         try:
             # [Feature] System Trigger Role Correction
@@ -230,7 +231,8 @@ class MemoryService:
             # 创建用户消息记录
             user_log = await MemoryService.save_log(session, source, session_id, user_role, user_content, metadata, pair_id)
             # 创建助手消息记录
-            assistant_log = await MemoryService.save_log(session, source, session_id, "assistant", assistant_content, metadata, pair_id)
+            # Pass raw content for assistant
+            assistant_log = await MemoryService.save_log(session, source, session_id, "assistant", assistant_content, metadata, pair_id, raw_content=assistant_raw_content)
             
             await session.commit()
             await session.refresh(user_log)

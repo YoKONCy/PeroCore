@@ -9,6 +9,7 @@ from sqlmodel import select
 from database import get_session
 from models import VoiceConfig
 from .audio_processor import audio_processor
+from core.config_manager import get_config_manager
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,9 @@ class TTSService:
         """
         将文字合成语音并保存为 mp3
         """
+        if not get_config_manager().get("tts_enabled", True):
+            return None
+
         if not text.strip():
             return None
             

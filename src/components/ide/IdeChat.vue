@@ -264,9 +264,7 @@ onMounted(async () => {
   fetchHistory();
 
   // Setup Tauri Event Listeners for Chat Sync
-  if (window.__TAURI__) {
-    const { listen } = window.__TAURI__.event;
-    
+  try {
     // 监听来自后端/PetView的同步消息
     unlistenSync = await listen('sync-chat-to-ide', (event) => {
       const { role, content } = event.payload;
@@ -280,6 +278,8 @@ onMounted(async () => {
       messages.value.push({ role, content });
       scrollToBottom();
     });
+  } catch (e) {
+    console.warn('Failed to setup Tauri listener:', e);
   }
 });
 

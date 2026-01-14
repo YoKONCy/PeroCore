@@ -21,6 +21,8 @@ use windows::Win32::Foundation::POINT;
 use windows::Win32::UI::WindowsAndMessaging::{
     GetCursorPos, GetWindowLongA, SetWindowLongA, GWL_EXSTYLE, WS_EX_LAYERED, WS_EX_TRANSPARENT,
 };
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_MENU, VK_SHIFT, VK_V};
+
 
 mod napcat;
 use napcat::NapCatState;
@@ -248,6 +250,7 @@ async fn open_dashboard(app: tauri::AppHandle) {
     println!("Rust: open_dashboard command received");
     if let Some(window) = app.get_webview_window("dashboard") {
         let _ = window.show();
+        let _ = window.maximize();
         let _ = window.set_focus();
     } else {
         let _ = WebviewWindowBuilder::new(
@@ -257,6 +260,7 @@ async fn open_dashboard(app: tauri::AppHandle) {
         )
         .title("Pero Dashboard")
         .inner_size(1200.0, 800.0)
+        .maximized(true)
         .resizable(true)
         .fullscreen(false)
         .visible(true)
@@ -720,6 +724,38 @@ pub fn run() {
                 })
                 .build(&handle)
                 .unwrap();
+
+            // --- PTT Tracker (Windows Global Shortcut) ---
+            let handle_ptt = app.handle().clone();
+            thread::spawn(move || {
+                thread::sleep(std::time::Duration::from_secs(2));
+                let mut is_pressed = false;
+                loop {
+                    unsafe {
+                        // Check Alt (VK_MENU) + Shift (VK_SHIFT) + V (VK_V)
+                        // GetAsyncKeyState returns < 0 if the key is down
+                        // windows crate 0.52: VIRTUAL_KEY(u16).0 is u16, GetAsyncKeyState takes i32
+                        let alt_down = (GetAsyncKeyState(VK_MENU.0 as i32) as i16) < 0;
+                        let shift_down = (GetAsyncKeyState(VK_SHIFT.0 as i32) as i16) < 0;
+                        let v_down = (GetAsyncKeyState(VK_V.0 as i32) as i16) < 0;
+
+                        if alt_down && shift_down && v_down {
+                            if !is_pressed {
+                                is_pressed = true;
+                                let _ = handle_ptt.emit("ptt-start", ());
+                                // println!("Rust: PTT Start (Alt+Shift+V)");
+                            }
+                        } else {
+                            if is_pressed {
+                                is_pressed = false;
+                                let _ = handle_ptt.emit("ptt-stop", ());
+                                // println!("Rust: PTT Stop");
+                            }
+                        }
+                    }
+                    thread::sleep(std::time::Duration::from_millis(50));
+                }
+            });
 
             // --- Mouse Tracker (Windows) ---
             let handle_mouse = app.handle().clone();

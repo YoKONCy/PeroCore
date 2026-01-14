@@ -1523,6 +1523,9 @@ Instruction: When opening an app, check this list first. If it's already running
             try:
                 # 5. 最终合并所有轮次的内容用于持久化
                 full_response_text = accumulated_full_response + full_response_text
+                
+                # Capture raw text before post-processing
+                raw_full_text = full_response_text
 
                 # Post-process full response text (Batch mode) before saving
                 # This ensures memory and downstream services get clean text without protocol markers
@@ -1574,7 +1577,8 @@ Instruction: When opening an app, check this list first. If it's already running
                             session_id, 
                             final_user_msg, 
                             full_response_text, 
-                            pair_id
+                            pair_id,
+                            assistant_raw_content=raw_full_text
                         )
                         print(f"[Agent] Conversation log pair saved (pair_id: {pair_id})")
                     except Exception as e:
@@ -1587,7 +1591,14 @@ Instruction: When opening an app, check this list first. If it's already running
                     await self._save_parsed_metadata(full_response_text, source, mcp_clients if 'mcp_clients' in locals() else None, execute_nit=False)
                 
                 # 触发 Scorer 服务进行记忆提取 (职责分离 - 后台异步执行)
-                if not skip_save and user_message and full_response_text and not full_response_text.startswith("Error:"):
+                # [Optimization] Do not run scorer if the response is an error
+                is_error_response = (
+                    full_response_text.startswith("Error:") or 
+                    full_response_text.startswith("Network Error") or
+                    full_response_text.startswith("⚠️")
+                )
+
+                if not skip_save and user_message and full_response_text and not is_error_response:
                     final_user_msg = user_text_override if user_text_override else user_message
                     if len(full_response_text) > 5:
                         # 使用 background_task 包装以确保独立 Session

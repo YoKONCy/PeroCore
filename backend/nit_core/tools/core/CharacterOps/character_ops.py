@@ -3,12 +3,12 @@ from typing import Dict, Any, Optional, List, Union
 from datetime import datetime
 
 try:
-    from backend.nit_core.tools.core.SessionOps.session_ops import _CURRENT_SESSION_CONTEXT
-    from backend.models import PetState
-    from sqlmodel import select
-except ImportError:
     from nit_core.tools.core.SessionOps.session_ops import _CURRENT_SESSION_CONTEXT
     from models import PetState
+    from sqlmodel import select
+except ImportError:
+    from backend.nit_core.tools.core.SessionOps.session_ops import _CURRENT_SESSION_CONTEXT
+    from backend.models import PetState
     from sqlmodel import select
 
 async def update_character_status(

@@ -28,6 +28,13 @@
         </div>
       </el-tab-pane>
       <el-tab-pane label="文本转语音 (TTS)" name="tts">
+        <div class="tts-header" style="margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; background: var(--el-fill-color-light); padding: 15px; border-radius: 8px;">
+            <div style="display: flex; flex-direction: column;">
+                <span style="font-weight: bold; font-size: 14px;">全局 TTS 开关</span>
+                <span style="font-size: 12px; color: #909399;">关闭后 Pero 将不会朗读任何文本</span>
+            </div>
+            <el-switch v-model="ttsEnabled" @change="toggleTTSMode" active-text="开启" inactive-text="关闭" inline-prompt />
+        </div>
         <div class="config-grid">
            <el-card v-for="config in ttsConfigs" :key="config.id" class="config-card" shadow="hover">
               <template #header>
@@ -128,9 +135,36 @@ const isSaving = ref(false)
 const editingConfig = ref({})
 const remoteModels = ref([])
 const isFetchingRemote = ref(false)
+const ttsEnabled = ref(true)
 
 const sttConfigs = computed(() => configs.value.filter(c => c.type === 'stt'))
 const ttsConfigs = computed(() => configs.value.filter(c => c.type === 'tts'))
+
+const fetchTTSMode = async () => {
+  try {
+    const res = await fetch(`${API_BASE}/config/tts`)
+    if (res.ok) {
+       const data = await res.json()
+       ttsEnabled.value = data.enabled
+    }
+  } catch (e) {
+    console.error(e)
+  }
+}
+
+const toggleTTSMode = async (val) => {
+  try {
+    await fetch(`${API_BASE}/config/tts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: val })
+    })
+    ElMessage.success(val ? 'TTS 已开启' : 'TTS 已关闭')
+  } catch (e) {
+    ElMessage.error('设置失败')
+    ttsEnabled.value = !val // revert
+  }
+}
 
 const fetchConfigs = async () => {
   try {
@@ -253,7 +287,10 @@ const deleteConfig = async (config) => {
    }
 }
 
-onMounted(fetchConfigs)
+onMounted(() => {
+   fetchConfigs()
+   fetchTTSMode()
+})
 </script>
 
 <style scoped>

@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Optional
 from sqlmodel import Field, SQLModel
+from sqlalchemy import Text, Column
 
 def get_local_now():
     """获取当前本地时间"""
@@ -64,6 +65,7 @@ class ConversationLog(SQLModel, table=True):
     source: str = Field(index=True) # 来源环境 (desktop, ide, qq, etc.)
     role: str # user, assistant, system, tool
     content: str
+    raw_content: Optional[str] = Field(default=None, sa_column=Column(Text)) # 存储未过滤的原始内容 (包含 Thinking/NIT)
     timestamp: datetime = Field(default_factory=get_local_now)
     metadata_json: str = "{}" # 存储额外元数据
     pair_id: Optional[str] = Field(default=None, index=True) # 成对绑定ID

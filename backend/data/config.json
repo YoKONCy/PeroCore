@@ -4,5 +4,6 @@
     "lightweight_mode": false,
     "aura_vision_enabled": false,
     "enable_social_mode": true,
-    "last_social_summary_date": "2026-01-14"
+    "last_social_summary_date": "2026-01-14",
+    "tts_enabled": false
 }

@@ -196,23 +196,30 @@ const cycleVoiceMode = async () => {
   }
 }
 
+let isStartingPTT = false
 const startPTT = async () => {
     if (voiceMode.value !== 2) return
+    if (isPTTRecording.value || isStartingPTT) return
     
-    if (isThinking.value || isSpeaking.value) {
-      console.log('PTT Ignored: Pero is busy', { isThinking: isThinking.value, isSpeaking: isSpeaking.value })
-      return
-    }
-    
-    // 确保 AudioContext 已激活
-  if (audioContext.value && audioContext.value.state === 'suspended') {
-    await audioContext.value.resume()
-  }
+    isStartingPTT = true
+    try {
+      if (isThinking.value || isSpeaking.value) {
+        console.log('PTT Ignored: Pero is busy', { isThinking: isThinking.value, isSpeaking: isSpeaking.value })
+        return
+      }
+      
+      // 确保 AudioContext 已激活
+      if (audioContext.value && audioContext.value.state === 'suspended') {
+        await audioContext.value.resume()
+      }
 
-  isPTTRecording.value = true
-  isSpeakingState = true
-  audioBuffer = []
-  console.log('PTT Started')
+      isPTTRecording.value = true
+      isSpeakingState = true
+      audioBuffer = []
+      console.log('PTT Started')
+    } finally {
+      isStartingPTT = false
+    }
 }
 
 const stopPTT = () => {
@@ -386,6 +393,21 @@ onMounted(async () => {
       }
   })
 
+  // 监听后端 PTT 全局快捷键
+  const unlistenPTTStart = await listen('ptt-start', () => {
+    if (voiceMode.value === 2 && !isPTTRecording.value) {
+      console.log('Backend PTT Start')
+      startPTT()
+    }
+  })
+
+  const unlistenPTTStop = await listen('ptt-stop', () => {
+    if (voiceMode.value === 2 && isPTTRecording.value) {
+      console.log('Backend PTT Stop')
+      stopPTT()
+    }
+  })
+
   // 监听文件搜索结果
   const unlistenSearch = await listen('file-search-result', (event) => {
     foundFiles.value = event.payload
@@ -398,12 +420,19 @@ onMounted(async () => {
     unlistenVibe()
     unlistenMind()
     unlistenSearch()
+    unlistenPTTStart()
+    unlistenPTTStop()
   })
 })
 
 // 监听 UI 显示状态，动态切换穿透
-watch(showInput, (val) => {
-  setIgnoreMouse(!val)
+watch([showInput, parsedBubbleContent, isThinking], ([inputVisible, bubbleContent, thinking]) => {
+  // 如果输入框显示，或者有气泡内容，或者正在思考（显示气泡），则不穿透
+  const hasContent = bubbleContent && bubbleContent.length > 0
+  const shouldInteract = inputVisible || hasContent || thinking
+  
+  // console.log('Update IgnoreMouse:', !shouldInteract, { inputVisible, hasContent, thinking })
+  setIgnoreMouse(!shouldInteract)
 })
 
 const moodText = ref(localStorage.getItem('ppc.mood') || '开心')
@@ -1886,6 +1915,9 @@ const sendMessage = async (systemMsg = null, isHidden = false) => {
     
     // 触发气泡更新
     window.dispatchEvent(new CustomEvent('ppc:chat', { detail: currentText.value }))
+
+    // 同步助手回复到 IDE
+    emit('sync-chat-to-ide', { role: 'assistant', content: currentText.value }).catch(e => console.error(e))
 
   } catch (err) {
     console.error('Failed to send message:', err)

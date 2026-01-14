@@ -7,20 +7,20 @@ from sqlmodel import select, desc, and_
 
 # Try imports for Database access
 try:
-    from backend.models import Memory, MaintenanceRecord, ScheduledTask
-    from backend.services.memory_service import MemoryService
-    # Try to import session context from SessionOps
+    from models import Memory, MaintenanceRecord, ScheduledTask
+    from services.memory_service import MemoryService
     try:
-        from backend.nit_core.tools.core.SessionOps.session_ops import _CURRENT_SESSION_CONTEXT
+        from nit_core.tools.core.SessionOps.session_ops import _CURRENT_SESSION_CONTEXT
     except ImportError:
         try:
-            from nit_core.tools.core.SessionOps.session_ops import _CURRENT_SESSION_CONTEXT
+            from backend.nit_core.tools.core.SessionOps.session_ops import _CURRENT_SESSION_CONTEXT
         except ImportError:
             from tools.core.SessionOps.session_ops import _CURRENT_SESSION_CONTEXT
 except ImportError:
     try:
-        from models import Memory, MaintenanceRecord, ScheduledTask
-        from services.memory_service import MemoryService
+        from backend.models import Memory, MaintenanceRecord, ScheduledTask
+        from backend.services.memory_service import MemoryService
+        # Try to import session context from SessionOps
         try:
             from backend.nit_core.tools.core.SessionOps.session_ops import _CURRENT_SESSION_CONTEXT
         except ImportError:

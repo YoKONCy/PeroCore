@@ -486,6 +486,7 @@
                       </el-button>
 
                       <el-button link :icon="Edit" @click="startLogEdit(log)" size="small">编辑</el-button>
+                      <el-button link :icon="View" @click="openDebugDialog(log)" size="small" style="color: #909399;">调试</el-button>
                       <el-button link :icon="Delete" @click="deleteLog(log.id)" size="small" style="color: #f56c6c;">删除</el-button>
                     </div>
                   </div>
@@ -959,8 +960,95 @@
       </template>
     </el-dialog>
 
+    <!-- Debug Log Dialog -->
+    <el-dialog v-model="showDebugDialog" title="对话调试详情 (Debug View)" width="900px" custom-class="debug-dialog" destroy-on-close>
+      <div v-if="currentDebugLog" class="debug-content-container">
+        <div class="debug-meta-info" style="margin-bottom: 15px; padding: 10px; background: #f5f7fa; border-radius: 4px; font-size: 12px; color: #606266;">
+           <p><strong>Log ID:</strong> {{ currentDebugLog.id }}</p>
+           <p><strong>Role:</strong> {{ currentDebugLog.role }}</p>
+           <p><strong>Raw Content Length:</strong> {{ (currentDebugLog.raw_content || currentDebugLog.content || '').length }} chars</p>
+        </div>
+
+        <div class="debug-segments-viewer">
+           <div v-for="(segment, index) in debugSegments" :key="index" :class="['debug-segment', segment.type]">
+              <div v-if="segment.type === 'thinking'" class="segment-label">Thinking Chain (思维链)</div>
+              <div v-if="segment.type === 'nit'" class="segment-label">NIT Script (工具调用)</div>
+              
+              <div v-if="segment.type === 'thinking'" class="segment-content thinking-content">
+                {{ segment.content }}
+              </div>
+              <div v-else-if="segment.type === 'nit'" class="segment-content nit-content">
+                 <pre>{{ segment.content }}</pre>
+              </div>
+              <div v-else class="segment-content text-content">
+                 <AsyncMarkdown :content="segment.content" />
+              </div>
+           </div>
+        </div>
+      </div>
+    </el-dialog>
+
   </div>
 </template>
+
+<style scoped>
+/* Debug Dialog Styles */
+.debug-segments-viewer {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 10px;
+}
+
+.debug-segment {
+  border: 1px solid #e4e7ed;
+  border-radius: 6px;
+  padding: 10px;
+  position: relative;
+}
+
+.debug-segment.thinking {
+  background-color: #f0f9eb;
+  border-color: #e1f3d8;
+}
+
+.debug-segment.nit {
+  background-color: #f4f4f5;
+  border-color: #e9e9eb;
+}
+
+.debug-segment.text {
+  background-color: #fff;
+  border-color: #fff; /* Invisible border for text */
+}
+
+.segment-label {
+  font-size: 11px;
+  font-weight: bold;
+  margin-bottom: 5px;
+  text-transform: uppercase;
+  color: #909399;
+}
+
+.thinking-content {
+  color: #67c23a;
+  font-style: italic;
+  font-family: monospace;
+  white-space: pre-wrap;
+  font-size: 0.9em;
+}
+
+.nit-content pre {
+  margin: 0;
+  color: #909399;
+  font-family: 'Consolas', monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: 0.85em;
+}
+</style>
 
 <script setup>
 import { ref, shallowRef, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
@@ -990,7 +1078,8 @@ import {
   SwitchButton,
   Microphone,
   Warning,
-  ArrowLeft
+  ArrowLeft,
+  View
 } from '@element-plus/icons-vue'
 
 // 为了防止在非 Tauri 环境下报错，定义一个 fallback 的 listen
@@ -1019,6 +1108,87 @@ const isTogglingLightweight = ref(false)
 const isAuraVisionEnabled = ref(false)
 const isTogglingAuraVision = ref(false)
 const isLogsFetching = ref(false)
+const showDebugDialog = ref(false)
+const currentDebugLog = ref(null)
+const debugSegments = ref([])
+
+const openDebugDialog = (log) => {
+  currentDebugLog.value = log
+  showDebugDialog.value = true
+  parseDebugContent(log.raw_content || log.content || "")
+}
+
+const parseDebugContent = (content) => {
+  if (!content) {
+    debugSegments.value = []
+    return
+  }
+  
+  // Regex patterns
+  const patterns = [
+    { type: 'nit', regex: /\[\[\[NIT_CALL\]\]\][\s\S]*?\[\[\[NIT_END\]\]\]/gi },
+    { type: 'nit', regex: /<(nit(?:-[0-9a-fA-F]{4})?)>[\s\S]*?<\/\1>/gi },
+    { type: 'thinking', regex: /【Thinking[\s\S]*?】/gi },
+    { type: 'thinking', regex: /<think>[\s\S]*?<\/think>/gi }
+  ]
+
+  let matches = []
+  
+  patterns.forEach(p => {
+    let match
+    const regex = new RegExp(p.regex) 
+    while ((match = regex.exec(content)) !== null) {
+      matches.push({
+        type: p.type,
+        start: match.index,
+        end: match.index + match[0].length,
+        content: match[0]
+      })
+    }
+  })
+
+  matches.sort((a, b) => a.start - b.start)
+
+  const uniqueMatches = []
+  if (matches.length > 0) {
+    let current = matches[0]
+    uniqueMatches.push(current)
+    
+    for (let i = 1; i < matches.length; i++) {
+      const next = matches[i]
+      if (next.start >= current.end) {
+        uniqueMatches.push(next)
+        current = next
+      }
+    }
+  }
+
+  const segments = []
+  let lastIndex = 0
+
+  uniqueMatches.forEach(match => {
+    if (match.start > lastIndex) {
+      segments.push({
+        type: 'text',
+        content: content.substring(lastIndex, match.start)
+      })
+    }
+    segments.push({
+      type: match.type,
+      content: match.content
+    })
+    lastIndex = match.end
+  })
+
+  if (lastIndex < content.length) {
+    segments.push({
+      type: 'text',
+      content: content.substring(lastIndex)
+    })
+  }
+
+  debugSegments.value = segments
+}
 
 // 编辑日志状态
 const editingLogId = ref(null)
@@ -2493,17 +2663,37 @@ const deleteLog = async (logId) => {
   }
 }
 
+const updateLogStatus = (logId, status) => {
+  const index = logs.value.findIndex(l => l.id === logId)
+  if (index !== -1) {
+    const newLog = { ...logs.value[index], analysis_status: status }
+    // Update array immutably to support shallowRef and Object.freeze
+    const newLogs = [...logs.value]
+    newLogs[index] = Object.freeze(newLog)
+    logs.value = newLogs
+  }
+}
+
 const retryLogAnalysis = async (log) => {
-  if (!log || !log.id) return
+  if (!log || !log.id) {
+     ElMessage.error('无效的日志 ID')
+     return
+  }
   
   try {
+    if (log.analysis_status === 'processing') return
+
     // 乐观更新 UI
     const originalStatus = log.analysis_status
-    log.analysis_status = 'processing'
+    updateLogStatus(log.id, 'processing')
     
-    const res = await fetchWithTimeout(`${API_BASE}/history/${log.id}/retry_analysis`, {
-      method: 'POST'
-    }, 5000)
+    const url = `${API_BASE}/history/${log.id}/retry_analysis`
+    console.log('[Dashboard] Retrying analysis for log:', log.id, 'URL:', url)
+    
+    const res = await fetchWithTimeout(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    }, 10000) // Increase timeout to 10s
     
     if (res.ok) {
       ElMessage.success('已提交重试请求')
@@ -2513,12 +2703,14 @@ const retryLogAnalysis = async (log) => {
     } else {
       const err = await res.json()
       ElMessage.error(err.detail || '重试请求失败')
-      log.analysis_status = originalStatus // Revert
+      updateLogStatus(log.id, originalStatus) // Revert
     }
   } catch (e) {
     console.error('Retry failed:', e)
-    ElMessage.error('网络错误')
-    log.analysis_status = 'failed'
+    // 详细输出错误信息以便排查
+    const errorMsg = e instanceof Error ? `${e.name}: ${e.message}` : JSON.stringify(e)
+    ElMessage.error(`重试失败: ${errorMsg}`)
+    updateLogStatus(log.id, 'failed')
   }
 }
 

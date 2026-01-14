@@ -238,6 +238,7 @@ class RAGPreprocessor(BasePreprocessor):
                 memories = await memory_service.get_relevant_memories(
                     session, 
                     user_message, 
+                    limit=10,
                     exclude_after_time=earliest_timestamp,
                     query_vec=query_vec
                 )

@@ -171,7 +171,7 @@ async def api_abort_work_mode(session: AsyncSession = Depends(get_session)):
     """
     Exit work mode WITHOUT summarization (Quiet Exit).
     """
-    from backend.models import Config
+    from models import Config
     from sqlmodel import select
     
     try:

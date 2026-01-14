@@ -70,8 +70,18 @@ class LLMService:
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(url, headers=headers, json=payload)
             if response.status_code != 200:
-                print(f"[LLM] Error Response: {response.text}")
-                raise Exception(f"LLM Error: {response.status_code} - {response.text}")
+                error_text = response.text
+                # Sanitize HTML errors
+                if "<html" in error_text.lower() or "<!doctype" in error_text.lower():
+                    import re
+                    title_match = re.search(r'<title>(.*?)</title>', error_text, re.IGNORECASE)
+                    if title_match:
+                        error_text = f"Network Error ({response.status_code}): {title_match.group(1)}"
+                    else:
+                        error_text = f"Network Error ({response.status_code}): HTML Response"
+                
+                print(f"[LLM] Error Response: {error_text}")
+                raise Exception(f"LLM Error: {response.status_code} - {error_text}")
             return response.json()
 
     async def _chat_gemini(self, messages: List[Dict[str, Any]], temperature: float = 0.7, tools: List[Dict] = None) -> Dict[str, Any]:
