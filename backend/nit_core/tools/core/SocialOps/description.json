@@ -1,0 +1,26 @@
+{
+  "name": "SocialOps",
+  "version": "1.0.0",
+  "entryPoint": "social_ops.py",
+  "description": "Tools for managing social interactions (QQ).",
+  "tools": [
+    {
+      "name": "qq_delete_friend",
+      "description": "从好友列表中删除当前对话的那个好友。仅在对方非常讨厌、粗鲁或持续骚扰时使用。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "user_id": {
+            "type": "integer",
+            "description": "Target QQ ID to delete. Usually extracted from context or session ID."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Reason for deletion (for logging)."
+          }
+        },
+        "required": ["user_id"]
+      }
+    }
+  ]
+}

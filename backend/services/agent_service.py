@@ -17,6 +17,7 @@ from services.llm_service import LLMService
 from services.prompt_service import PromptManager
 from services.scorer_service import ScorerService
 from services.mcp_service import McpClient
+from services.mdp.manager import MDPManager
 from services.preprocessor.manager import PreprocessorManager
 from services.preprocessor.implementations import (
     UserInputPreprocessor,
@@ -46,6 +47,14 @@ class AgentService:
         self.memory_service = MemoryService()
         self.scorer_service = ScorerService(session)
         self.prompt_manager = PromptManager()
+        
+        # Initialize Reflection MDP
+        reflection_mdp_dir = os.path.join(os.path.dirname(__file__), "mdp", "reflection")
+        self.reflection_mdp = MDPManager(reflection_mdp_dir)
+        
+        # Initialize Helper MDP
+        helper_mdp_dir = os.path.join(os.path.dirname(__file__), "mdp", "helper")
+        self.helper_mdp = MDPManager(helper_mdp_dir)
         
         # Initialize Preprocessor Pipeline
         self.preprocessor_manager = PreprocessorManager()
@@ -125,13 +134,7 @@ class AgentService:
             preview_files = file_results[:50] 
             files_text = "\n".join(preview_files)
             
-            system_prompt = (
-                "你是一个智能文件分析助手。用户的目标是寻找特定的文件。\n"
-                "你将收到用户的搜索请求和系统搜索到的文件路径列表。\n"
-                "请分析这些路径，找出最符合用户需求的文件。\n"
-                "请直接输出分析结果，指出哪些文件最相关，并简要说明理由。\n"
-                "如果列表中的文件都不相关，请直说。"
-            )
+            system_prompt = self.helper_mdp.render("file_analysis")
             
             user_prompt = (
                 f"用户请求: {user_query}\n\n"
@@ -244,18 +247,8 @@ class AgentService:
         )
         
         # 根据视觉能力状态动态调整 Prompt
-        vision_instruction = """
-2. **视觉分析**: 
-   - 如果你有视觉能力（多模态），请结合截图进行分析。
-   - 如果当前没有视觉信息，请提示 Agent 使用 `take_screenshot` 工具来观察屏幕。
-"""
-        if is_blind:
-             vision_instruction = """
-2. **视觉分析 (不可用)**: 
-   - 当前系统完全没有视觉能力（无多模态且无视觉插件）。
-   - **请不要建议使用 `take_screenshot` 或其他视觉工具**，因为它们也会失败。
-   - 请专注于分析文字日志、参数错误、死循环和逻辑问题。
-"""
+        vision_prompt_name = "vision_enabled" if not is_blind else "vision_disabled"
+        vision_instruction_block = "{{" + vision_prompt_name + "}}"
 
         # 生成工具列表字符串
         tools_list_str = ""
@@ -406,11 +399,11 @@ Tool List Length: {len(tools_list_str)}
         # 2. Construct an internal sensing prompt
         internal_prompt = f"""
 [PERO_INTERNAL_SENSE]
-Visual Intent: "{intent_description}"
-Confidence: {score:.4f}
+视觉意图: "{intent_description}"
+置信度: {score:.4f}
 
-Observe the current environment and your memories. If you feel it's a good moment to say something to the owner, do it now. 
-If the owner is busy or you have nothing meaningful to say, stay quiet (output <NOTHING>).
+请观察当前环境和你的记忆。如果你觉得现在是与主人说话的好时机，请立即行动。
+如果主人正忙或你没有什么有意义的话要说，请保持安静（输出 <NOTHING>）。
 """
         # 3. Trigger a special session
         # This would involve calling self.process_request with a pseudo-user message

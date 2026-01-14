@@ -1,4 +1,7 @@
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 import re
 from typing import List, Dict, Any
 from datetime import datetime
@@ -36,7 +39,7 @@ class PromptManager:
             # Disable NIT Protocol and Thinking Constraints
             variables["ability_nit"] = ""
             variables["output_constraint"] = ""
-            variables["ability_workspace"] = "" # Also disable workspace tools
+            variables["ability"] = "" # Also disable workspace tools
             # We keep abilities for sensory (Vision/Voice) if enabled, as Pero might still "see" images sent in chat
             # But we suppress complex tool descriptions
         
@@ -57,28 +60,30 @@ class PromptManager:
         
         abilities_parts = []
         
-        # Vision
-        if enable_vision:
-            # Check if prompt exists to avoid errors, fallback if needed
-            prompt = self.mdp.get_prompt("ability_vision")
-            if prompt:
-                abilities_parts.append(prompt.content)
-        else:
-            prompt = self.mdp.get_prompt("ability_vision_placeholder")
-            if prompt:
-                abilities_parts.append(prompt.content)
+        # [Modified] Only inject sensory abilities if NOT in social mode
+        if not is_social_mode:
+            # Vision
+            if enable_vision:
+                # Check if prompt exists to avoid errors, fallback if needed
+                prompt = self.mdp.get_prompt("ability_vision")
+                if prompt:
+                    abilities_parts.append(prompt.content)
+            else:
+                prompt = self.mdp.get_prompt("ability_vision_placeholder")
+                if prompt:
+                    abilities_parts.append(prompt.content)
 
-        # Voice
-        if enable_voice:
-            prompt = self.mdp.get_prompt("ability_voice")
-            if prompt:
-                abilities_parts.append(prompt.content)
-        
-        # Video
-        if enable_video:
-            prompt = self.mdp.get_prompt("ability_video")
-            if prompt:
-                abilities_parts.append(prompt.content)
+            # Voice
+            if enable_voice:
+                prompt = self.mdp.get_prompt("ability_voice")
+                if prompt:
+                    abilities_parts.append(prompt.content)
+            
+            # Video
+            if enable_video:
+                prompt = self.mdp.get_prompt("ability_video")
+                if prompt:
+                    abilities_parts.append(prompt.content)
 
         variables["abilities"] = "\n".join(abilities_parts)
         
@@ -110,6 +115,21 @@ class PromptManager:
         except Exception as e:
             print(f"[PromptManager] Error injecting NIT tools description: {e}")
             variables["nit_tools_description"] = "Error loading tools."
+
+        # Inject Chain Logic (Thinking Chain)
+        chain_name = variables.get("chain_name", "default")
+        chain_content = ""
+        try:
+            chain_path = os.path.join(os.path.dirname(__file__), "mdp", "chains", f"{chain_name}.md")
+            if os.path.exists(chain_path):
+                with open(chain_path, "r", encoding="utf-8") as f:
+                    chain_content = f.read()
+            else:
+                logger.warning(f"Chain prompt not found: {chain_path}")
+        except Exception as e:
+            logger.error(f"Error loading chain prompt: {e}")
+            
+        variables["chain_logic"] = chain_content
 
         # 3. Render
         final_prompt = self.mdp.render("system_template", variables)
@@ -166,6 +186,7 @@ class PromptManager:
             "vibe": clean_state_field(state.vibe, "vibe") or "活泼",
             "mind": clean_state_field(state.mind, "mind") or "正在想主人...",
             "memory_context": "", # Companion mode doesn't need complex RAG for now
+            "graph_context": "", # Placeholder for Knowledge Graph context
         }
         
         return self.build_system_prompt(variables, is_social_mode=is_social_mode)

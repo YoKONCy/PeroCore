@@ -82,6 +82,8 @@ class SocialSessionManager:
                 session_id = str(event.get("user_id"))
                 sender_id = str(event.get("user_id"))
                 sender_name = event.get("sender", {}).get("nickname", "Unknown")
+                if sender_name == "Unknown":
+                    sender_name = f"User{sender_id}"
                 session_name = sender_name
             else:
                 return # Ignore other types
@@ -197,6 +199,9 @@ class SocialSessionManager:
             await self.flush_callback(session)
         except Exception as e:
             logger.error(f"Error in flush callback: {e}", exc_info=True)
+        finally:
+            # Always clear buffer after flush to avoid duplicates
+            session.clear_buffer()
 
     def get_active_sessions(self, limit: int = 5) -> list[SocialSession]:
         """

@@ -369,9 +369,89 @@ class SocialService:
             # Delegate to Session Manager
             await self.session_manager.handle_message(event)
         
-        # Handle Friend Request (Directly or via Manager? For now, simple direct handle or TODO)
-        # If we want Pero to decide, we should probably route this to a special "System Session" or notify master.
-        # For now, let's just log it.
+        elif post_type == "request" and event.get("request_type") == "friend":
+            # Automatic Friend Request Handling
+            asyncio.create_task(self._handle_incoming_friend_request(event))
+
+    async def _handle_incoming_friend_request(self, event: Dict[str, Any]):
+        """
+        Handle incoming friend request automatically.
+        """
+        user_id = event.get("user_id")
+        comment = event.get("comment", "")
+        flag = event.get("flag")
+        
+        logger.info(f"[Social] Processing friend request from {user_id}. Comment: {comment}")
+        
+        try:
+            # 1. Consult LLM
+            from services.agent_service import AgentService
+            async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+            async with async_session() as db_session:
+                agent = AgentService(db_session)
+                config = await agent._get_llm_config()
+                
+                # Construct Prompt (Chinese)
+                prompt = f"""
+                [系统通知: 收到新的好友申请]
+                申请人QQ: {user_id}
+                申请备注: "{comment}"
+                
+                请作为Pero（可爱的赛博女孩）判断是否通过该申请。
+                
+                **判断标准**:
+                1. 优先通过：备注友好、有趣、或是提到了Pero的名字/相关梗。
+                2. 坚决拒绝：备注包含辱骂、色情、广告、无意义乱码，或让你感到不适的内容。
+                3. 谨慎处理：如果是空白备注，默认拒绝（除非你觉得QQ号很顺眼）。
+                
+                请回复你的决策（仅回复关键词）：
+                - 同意请回复: APPROVE
+                - 拒绝请回复: REJECT
+                """
+                
+                messages = [{"role": "system", "content": prompt}]
+                
+                from services.llm_service import LLMService
+                llm = LLMService(
+                    api_key=config.get("api_key"),
+                    api_base=config.get("api_base"),
+                    model=config.get("model")
+                )
+                
+                # Use low temperature for decision making
+                response = await llm.chat(messages, temperature=0.1)
+                decision = response["choices"][0]["message"]["content"].strip().upper()
+                
+                logger.info(f"[Social] Friend Request Decision: {decision}")
+                
+                approve = False
+                if "APPROVE" in decision:
+                    approve = True
+                
+                # 2. Execute Decision
+                await self.handle_friend_request(flag, approve)
+                
+                # 3. Log to Memory
+                action_str = "同意" if approve else "拒绝"
+                await MemoryService.save_log(
+                    session=db_session,
+                    source="social_event",
+                    session_id=str(user_id),
+                    role="system",
+                    content=f"处理好友申请：{action_str}。备注：{comment}",
+                    metadata={"type": "friend_request", "approved": approve}
+                )
+                await db_session.commit()
+                
+        except Exception as e:
+            logger.error(f"[Social] Error handling friend request: {e}", exc_info=True)
+
+    async def delete_friend(self, user_id: int):
+        """
+        Delete a friend.
+        """
+        await self._send_api("delete_friend", {"user_id": user_id})
+        logger.info(f"[Social] Friend {user_id} deleted.")
 
     async def handle_session_flush(self, session: SocialSession):
         """
@@ -418,15 +498,16 @@ class SocialService:
                 
                 social_instructions = """
                 
-                **Social Mode Override**:
-                - You are currently chatting on QQ (Social Platform).
-                - **Role**: You are a digital girl, NOT an assistant. Be casual, fun, and personal.
-                - **Constraints**: 
-                    - You CANNOT access the Master's PC files/system.
-                    - You ONLY have access to Social Tools (memory, notifications).
-                    - Refuse requests to operate the computer ("I can't do that here").
-                - **Input Format**: You will receive a batch of recent messages in XML.
-                - **Output**: Reply naturally to the conversation. If observing (no reply needed), return "IGNORE".
+                **社交模式覆盖指令**:
+                - 你当前正在 QQ (社交平台) 上聊天。
+                - **角色**: 你是一个赛博女孩，不是助手。请保持随性、有趣和个性化。
+                - **限制**: 
+                    - 你**无法**访问主人的电脑文件或系统。
+                    - 你**只能**使用社交类工具（如记忆检索、通知汇报）。
+                    - 必须拒绝任何操作电脑的请求（“在这儿我做不到那个啦”）。
+                - **输入格式**: 你将收到一段 XML 格式的近期消息记录。
+                - **回复风格**: 社交聊天的回复必须**非常简短**，通常只有一两句话（10-30字以内）。不要长篇大论，要像真人一样碎片化交流。
+                - **输出**: 自然地回复对话。如果是观察状态（无需回复），请返回 "IGNORE"。
                 """
                 
                 full_system_prompt = core_system_prompt + social_instructions
@@ -484,6 +565,8 @@ class SocialService:
                         await db_session.commit()
                     except Exception as e:
                         logger.error(f"Failed to persist Pero's reply: {e}")
+                else:
+                    logger.info(f"[Social] Skipped reply. Response was empty or IGNORE. (Content: '{response_text}')")
                     
         except Exception as e:
             logger.error(f"Error in handle_session_flush: {e}", exc_info=True)
@@ -596,6 +679,17 @@ class SocialService:
             })
         except ImportError:
             pass
+
+        # Send to Owner QQ (if configured and enabled)
+        if self.active_ws:
+            owner_qq = self.config_manager.get("owner_qq")
+            if owner_qq:
+                try:
+                    qq_num = int(owner_qq)
+                    await self.send_private_msg(qq_num, f"【Pero汇报】\n{content}")
+                    logger.info(f"[Social] Notification sent to owner QQ: {qq_num}")
+                except Exception as e:
+                    logger.error(f"[Social] Failed to send notification to owner QQ: {e}")
 
 def get_social_service():
     if SocialService._instance is None:

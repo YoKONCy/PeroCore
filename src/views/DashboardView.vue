@@ -784,6 +784,9 @@
                   <el-form-item label="主人的名字 (Owner Name)">
                     <el-input v-model="userSettings.owner_name" placeholder="Pero 对你的称呼" />
                   </el-form-item>
+                  <el-form-item label="主人的 QQ 号 (Owner QQ)">
+                    <el-input v-model="userSettings.owner_qq" placeholder="用于 Pero 主动联系你" />
+                  </el-form-item>
                   <el-form-item label="主人的人设信息 (Owner Persona)">
                     <el-input 
                       v-model="userSettings.user_persona" 
@@ -1028,12 +1031,14 @@ const tasks = shallowRef([])
 const petState = ref({})
 const userSettings = ref({
   owner_name: '主人',
-  user_persona: '未设定'
+  user_persona: '未设定',
+  owner_qq: ''
 })
 
 // 筛选条件
 const selectedSource = ref('desktop')
 const selectedSessionId = ref('') 
+const lastSyncedSessionId = ref(null) // Track last synced session from backend to prevent UI fighting
 const selectedDate = ref('')
 const selectedSort = ref('desc')
 
@@ -1927,12 +1932,19 @@ const fetchConfig = async () => {
     // 加载用户设定
     userSettings.value.owner_name = data.owner_name || '主人'
     userSettings.value.user_persona = data.user_persona || '未设定'
+    userSettings.value.owner_qq = data.owner_qq || ''
 
     // [Fix] Sync current session ID if in Work Mode
+    // Only sync if the backend value is different from what we last synced,
+    // to avoid overwriting user's manual selection in the dropdown.
     if (data.current_session_id && data.current_session_id !== 'default') {
-       if (selectedSessionId.value !== data.current_session_id) {
+       if (data.current_session_id !== lastSyncedSessionId.value) {
            selectedSessionId.value = data.current_session_id
+           lastSyncedSessionId.value = data.current_session_id
        }
+    } else {
+        // If backend is default, we can clear our tracking so if it switches to work again, we sync
+        lastSyncedSessionId.value = null
     }
   } catch (e) { console.error(e) }
 }
@@ -1981,7 +1993,8 @@ const saveUserSettings = async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         owner_name: userSettings.value.owner_name,
-        user_persona: userSettings.value.user_persona
+        user_persona: userSettings.value.user_persona,
+        owner_qq: userSettings.value.owner_qq
       })
     }, 5000)
     ElMessage.success('用户设定已保存')

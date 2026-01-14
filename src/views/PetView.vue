@@ -18,7 +18,7 @@
 
       <!-- 气泡对话框 -->
       <transition name="fade">
-        <div class="bubble" v-if="currentText || isThinking">
+        <div class="bubble" v-if="currentText || isThinking" :class="{ 'expanded': isBubbleExpanded }">
           <!-- 普通文本显示 -->
           <div class="text-content" :class="{ 'cursor-pointer': isThinking }">
             <template v-if="isThinking">
@@ -26,18 +26,24 @@
             </template>
             <template v-else>
               <!-- 渲染解析后的片段 -->
-              <div v-for="(segment, index) in parsedBubbleContent" :key="index" class="bubble-segment">
-                <!-- 普通文本 -->
-                <span v-if="segment.type === 'text'">{{ segment.content }}</span>
-                
-                <!-- 动作描述 -->
-                <span v-else-if="segment.type === 'action'" class="action-text">*{{ segment.content }}*</span>
+              <div class="bubble-scroll-area" ref="bubbleScrollArea">
+                <div v-for="(segment, index) in parsedBubbleContent" :key="index" class="bubble-segment">
+                  <!-- 普通文本 -->
+                  <span v-if="segment.type === 'text'">{{ segment.content }}</span>
+                  
+                  <!-- 动作描述 -->
+                  <span v-else-if="segment.type === 'action'" class="action-text">*{{ segment.content }}*</span>
 
-                <!-- 思考过程 (折叠) -->
-                <details v-else-if="segment.type === 'thinking'" class="thinking-details">
-                  <summary class="thinking-summary">🤔 思考过程...</summary>
-                  <div class="thinking-body">{{ segment.content }}</div>
-                </details>
+                  <!-- 思考过程 (折叠) -->
+                  <details v-else-if="segment.type === 'thinking'" class="thinking-details">
+                    <summary class="thinking-summary">🤔 思考过程...</summary>
+                    <div class="thinking-body">{{ segment.content }}</div>
+                  </details>
+                </div>
+              </div>
+              <!-- 展开/收起按钮 -->
+              <div v-if="isContentOverflowing" class="bubble-expand-btn" @click.stop="toggleBubbleExpand">
+                {{ isBubbleExpanded ? '收起' : '展开' }}
               </div>
             </template>
           </div>
@@ -69,6 +75,22 @@
           <div class="loading-text">大脑加载中...</div>
         </div>
         <!-- Live2D 元素会被自动注入到 body，然后由脚本移动到这里 -->
+        
+        <!-- PTT 悬浮按钮 (仅在按住说话模式显示) -->
+        <transition name="fade">
+          <div 
+            v-if="voiceMode === 2" 
+            class="ptt-container"
+            @mousedown.stop="startPTT"
+            @mouseup.stop="stopPTT"
+            @mouseleave.stop="stopPTT"
+            style="-webkit-app-region: no-drag;"
+          >
+            <div class="ptt-button" :class="{ recording: isPTTRecording }" title="按住 Alt+Shift+V 说话">
+            <div class="ptt-icon">🎙️</div>
+          </div>
+          </div>
+        </transition>
       </div>
 
       <!-- 快速输入框 (鼠标移入显示) -->
@@ -103,22 +125,7 @@
         <button class="tool-btn" @click.stop="openDashboard" title="面板">⚙️</button>
       </div>
       
-      <!-- PTT 悬浮按钮 (仅在按住说话模式显示) -->
-      <transition name="fade">
-        <div 
-          v-if="voiceMode === 2 && showInput" 
-          class="ptt-container"
-          @mousedown.stop="startPTT"
-          @mouseup.stop="stopPTT"
-          @mouseleave.stop="stopPTT"
-          style="-webkit-app-region: no-drag;"
-        >
-          <div class="ptt-button" :class="{ recording: isPTTRecording }">
-            <div class="ptt-icon">🎙️</div>
-            <div class="ptt-text">{{ isPTTRecording ? '正在录音...' : '按住说话' }}</div>
-          </div>
-        </div>
-      </transition>
+
     </div>
     
     <!-- 文件搜索结果模态框 -->
@@ -127,7 +134,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch, toRaw } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, toRaw, nextTick } from 'vue'
 import FileSearchModal from '../components/FileSearchModal.vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, emit } from '@tauri-apps/api/event'
@@ -155,27 +162,21 @@ const voiceModeTitle = computed(() => {
 
 const handleGlobalKeyDown = (e) => {
   // 1. Alt + V 切换语音模式
-  if (e.altKey && e.code === 'KeyV') {
+  if (e.altKey && !e.shiftKey && e.code === 'KeyV') {
     e.preventDefault()
     cycleVoiceMode()
     return
   }
 
-  // 2. 空格键 PTT (仅在非输入状态且模式为 2 时)
-  if (e.code === 'Space' && voiceMode.value === 2 && !isPTTRecording.value) {
-    // 检查是否正在输入
-    const activeEl = document.activeElement
-    const isInput = activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.isContentEditable
-    
-    if (!isInput) {
-      e.preventDefault()
-      startPTT()
-    }
+  // 2. Alt + Shift + V PTT (仅在模式为 2 时)
+  if (e.altKey && e.shiftKey && e.code === 'KeyV' && voiceMode.value === 2 && !isPTTRecording.value) {
+    e.preventDefault()
+    startPTT()
   }
 }
 
 const handleGlobalKeyUp = (e) => {
-  if (e.code === 'Space' && voiceMode.value === 2 && isPTTRecording.value) {
+  if (e.code === 'KeyV' && voiceMode.value === 2 && isPTTRecording.value) {
     stopPTT()
   }
 }
@@ -262,11 +263,12 @@ const parsedBubbleContent = computed(() => {
       // Tagged 块 (Thinking/Error/Reflection)
       const type = match[1].toLowerCase()
       segments.push({ type: type === 'thinking' ? 'thinking' : type, content: match[2].trim() })
+    // 3. *Action* - 星号动作格式
     } else if (match[3] !== undefined) {
       // Action 块 (*Action*)
       segments.push({ type: 'action', content: match[3].trim() })
+    // 4. 标准 ReAct 块 (Thought:/Action:)
     } else if (match[4] !== undefined) {
-      // 标准 ReAct 块 (Thought:/Action:)
       const type = match[4].toLowerCase() === 'thought' ? 'thinking' : 'action'
       segments.push({ type, content: match[5].trim() })
     }
@@ -298,6 +300,40 @@ let replyTimer = null
 const showFileModal = ref(false)
 const foundFiles = ref([])
 
+// 气泡折叠相关
+const isBubbleExpanded = ref(false)
+const isContentOverflowing = ref(false)
+const bubbleScrollArea = ref(null)
+
+const toggleBubbleExpand = () => {
+  isBubbleExpanded.value = !isBubbleExpanded.value
+  // 强制重新检查溢出状态，防止状态不一致
+  nextTick(() => {
+     checkOverflow()
+  })
+}
+
+// 监听内容变化，判断是否溢出
+watch(parsedBubbleContent, async () => {
+  await nextTick()
+  checkOverflow()
+}, { deep: true })
+
+const checkOverflow = () => {
+  if (bubbleScrollArea.value) {
+    const el = bubbleScrollArea.value
+    // 如果没有展开，clientHeight 应该是受限的 (例如 200px)
+    // 如果 scrollHeight > 200，说明溢出
+    // 我们这里放宽一点判定，避免临界值闪烁
+    isContentOverflowing.value = el.scrollHeight > 210 
+    
+    // 如果内容变短了，自动收起
+    if (!isContentOverflowing.value) {
+      isBubbleExpanded.value = false
+    }
+  }
+}
+
 onMounted(async () => {
   // 初始开启穿透
   setIgnoreMouse(true)
@@ -323,6 +359,31 @@ onMounted(async () => {
   const unlistenMind = await listen('update-mind', (event) => {
     mindText.value = event.payload
     localStorage.setItem('ppc.mind', event.payload)
+  })
+
+  // 同步后端消息到 IDE 聊天窗口
+  const unlistenSyncChat = await listen('sync-chat-to-ide', (event) => {
+      // 检查当前窗口是否是 PetView（通常是，但为了保险）
+      // 我们需要通过 emit 发送给 IDE 窗口
+      // 但这里是 PetView，它本身就是渲染进程
+      // 实际上，IDE 窗口是另一个 WebView (DashboardView 或 独立的 ChatView)
+      // 如果 IDE 聊天是在 Dashboard 中，我们需要确保 Dashboard 也能收到。
+      // 或者，如果是通过 Tauri 的 emit，所有窗口都能收到。
+      // 这里只需要确保 PetView 收到消息后，不做额外处理，因为 IDE 那边会有自己的监听器。
+      // 但用户反馈 IDE 没有同步，说明 IDE 那边的监听可能没挂载，或者事件没发过去。
+      
+      // 这里我们尝试再次广播一下，或者直接调用 invoke 让 Rust 转发？
+      // 不，后端 Python 通过 HTTP 发给 Rust，Rust 再 emit 给所有窗口。
+      // 所以 IDE 窗口应该能直接收到 'sync-chat-to-ide'。
+      // 让我们检查一下 IDE 侧的代码。
+  })
+
+  // 监听来自 IDE 的消息同步 (如果 IDE 发消息，Pet 也要显示)
+  const unlistenIdeMsg = await listen('ide-message-sync', (event) => {
+      const { role, content } = event.payload
+      if (role === 'assistant') {
+          currentText.value = content
+      }
   })
 
   // 监听文件搜索结果
@@ -638,6 +699,12 @@ const handleVoiceMessage = (event) => {
         applyTriggers(msg.data)
     } else if (msg.type === 'audio_response') {
         playAudio(msg.data)
+    } else if (msg.type === 'error') {
+        // Handle backend errors
+        console.error('Voice Error:', msg.content)
+        currentText.value = `(错误: ${msg.content})`
+        isThinking.value = false
+        thinkingMessage.value = '努力思考中...'
     }
 }
 
@@ -2128,6 +2195,68 @@ onUnmounted(() => {
   -webkit-app-region: no-drag;
   border: none;
   animation: bubble-float 3s infinite ease-in-out;
+  display: flex;
+  flex-direction: column;
+  transition: max-height 0.3s ease;
+}
+
+.bubble.expanded {
+  /* 展开时允许更高的高度，或者不限制 */
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+/* 隐藏滚动条但保留功能 */
+.bubble.expanded::-webkit-scrollbar {
+  width: 4px;
+}
+.bubble.expanded::-webkit-scrollbar-thumb {
+  background: rgba(255, 136, 170, 0.3);
+  border-radius: 2px;
+}
+
+.bubble-scroll-area {
+  max-height: 200px; /* 默认最大高度 */
+  overflow: hidden;
+  transition: max-height 0.3s ease;
+  position: relative;
+}
+
+.bubble.expanded .bubble-scroll-area {
+  max-height: 500px; /* 展开后的最大高度 */
+  overflow-y: auto;
+}
+
+/* 遮罩效果，提示还有内容 (可选，配合 CSS mask 使用更佳) */
+/* .bubble-scroll-area::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 40px;
+  background: linear-gradient(to bottom, transparent, rgba(255,255,255,0.9));
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s;
+} */
+/* 只有在溢出且未展开时显示遮罩，这需要 JS 控制 class，暂时省略 */
+
+.bubble-expand-btn {
+  font-size: 12px;
+  color: #ff6699;
+  text-align: center;
+  margin-top: 8px;
+  cursor: pointer;
+  padding-top: 4px;
+  border-top: 1px dashed rgba(255, 136, 170, 0.3);
+  user-select: none;
+  transition: all 0.2s;
+}
+
+.bubble-expand-btn:hover {
+  color: #ff3366;
+  font-weight: bold;
 }
 
 .text-content {
@@ -2326,7 +2455,7 @@ onUnmounted(() => {
 /* PTT 样式 */
 .ptt-container {
   position: absolute;
-  bottom: 80px;
+  bottom: 10px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 1000;
@@ -2334,43 +2463,39 @@ onUnmounted(() => {
 }
 
 .ptt-button {
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  padding: 12px 24px;
-  border-radius: 30px;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
   color: white;
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: center;
   cursor: pointer;
   user-select: none;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  white-space: nowrap;
-  box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  box-shadow: 0 4px 10px rgba(0,0,0,0.2);
 }
 
 .ptt-button:hover {
-  background: rgba(0, 0, 0, 0.8);
-  transform: translateY(-2px);
+  background: rgba(0, 0, 0, 0.7);
+  transform: scale(1.1);
   border-color: #ff99cc;
+  box-shadow: 0 6px 15px rgba(255, 136, 170, 0.4);
 }
 
 .ptt-button:active, .ptt-button.recording {
-  background: #ff99cc;
+  background: #ff6699;
   border-color: white;
   transform: scale(0.95);
-  box-shadow: 0 0 20px rgba(255, 153, 204, 0.4);
+  box-shadow: 0 0 20px rgba(255, 102, 153, 0.6);
 }
 
 .ptt-icon {
-  font-size: 20px;
-}
-
-.ptt-text {
-  font-size: 14px;
-  font-weight: bold;
+  font-size: 24px;
 }
 
 .voice-btn.active.mode-vad {

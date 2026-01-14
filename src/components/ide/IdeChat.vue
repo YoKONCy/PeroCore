@@ -257,9 +257,30 @@ const injectInstruction = async (action) => {
   }
 };
 
-onMounted(() => {
+let unlistenSync = null;
+
+onMounted(async () => {
   connectWS();
   fetchHistory();
+
+  // Setup Tauri Event Listeners for Chat Sync
+  if (window.__TAURI__) {
+    const { listen } = window.__TAURI__.event;
+    
+    // 监听来自后端/PetView的同步消息
+    unlistenSync = await listen('sync-chat-to-ide', (event) => {
+      const { role, content } = event.payload;
+      
+      // 避免重复添加 (简单去重: 如果最后一条消息内容相同且角色相同)
+      const lastMsg = messages.value[messages.value.length - 1];
+      if (lastMsg && lastMsg.role === role && lastMsg.content === content) {
+        return;
+      }
+      
+      messages.value.push({ role, content });
+      scrollToBottom();
+    });
+  }
 });
 
 watch(() => props.workMode, () => {
@@ -291,6 +312,7 @@ const fetchHistory = async () => {
 onUnmounted(() => {
   if (ws) ws.close();
   if (reconnectTimer) clearTimeout(reconnectTimer);
+  if (unlistenSync) unlistenSync();
 });
 
 // --- Chat Logic ---

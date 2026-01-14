@@ -24,7 +24,7 @@ version: "1.1"
 {{graph_context}}
 </User_Context>
 
-{{ability_workspace}}
+{{ability}}
 {{ability_nit}}
 
 {{output_constraint}}

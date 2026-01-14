@@ -388,6 +388,7 @@ class RealtimeVoiceManager:
                     return report_status(status, msg)
                 
                 # 流式获取回复文本
+                generation_error = None
                 try:
                     async for chunk in agent.chat(
                         messages_payload, 
@@ -404,6 +405,7 @@ class RealtimeVoiceManager:
                     return
                 except Exception as e:
                     print(f"[VOICE] Error during generation: {e}")
+                    generation_error = str(e)
                 
                 agent_duration = time.time() - agent_start
                 print(f"[AGENT] Response generated (Length: {len(full_response)}, {agent_duration:.2f}s)")
@@ -426,7 +428,10 @@ class RealtimeVoiceManager:
                 
                 if not ui_response:
                     # 如果原始内容不为空（说明执行了动作但没有说话），则显示操作提示
-                    if full_response and full_response.strip():
+                    if generation_error:
+                        ui_response = f"(发生错误: {generation_error})"
+                        tts_response = "哎呀，我好像出错了。"
+                    elif full_response and full_response.strip():
                         ui_response = "（Pero默默执行了操作...）"
                     else:
                         ui_response = "唔...Pero好像走神了..." # Fallback for completely empty response

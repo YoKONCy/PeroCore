@@ -108,21 +108,21 @@ async def exit_work_mode() -> str:
         log_text = "\n".join([f"{log.role}: {log.content}" for log in logs])
         
         prompt = f"""
-        You are Pero. You have just finished a coding/work task: "{task_name}".
-        Here is the raw conversation log of the session:
+        你是 Pero。你刚刚完成了一项编码/工作任务："{task_name}"。
+        以下是本次会话的原始对话日志：
         
         {log_text}
         
-        Please write a "Handwritten Work Log" (Markdown format).
-        Requirements:
-        1. Title: 📝 Pero's Work Log - {task_name}
-        2. Tone: Professional yet personal (Pero's style).
-        3. Content:
-           - Goal: What was the task?
-           - Process: Key steps taken, tools used, errors encountered and fixed.
-           - Outcome: Final result.
-           - Reflection: What did you learn?
-        4. Keep it concise but information-dense.
+        请撰写一份“手写工作日志”（Markdown 格式）。
+        要求：
+        1. 标题: 📝 Pero 的工作日志 - {task_name}
+        2. 语气: 专业又不失个性（Pero 的风格）。
+        3. 内容:
+           - 目标: 任务是什么？
+           - 过程: 采取的关键步骤、使用的工具、遇到的错误及修复方法。
+           - 结果: 最终成果。
+           - 反思: 你学到了什么？
+        4. 保持简洁但信息量大。
         """
         
         summary = await llm.chat([{"role": "user", "content": prompt}])
