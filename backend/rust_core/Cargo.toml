@@ -31,6 +31,7 @@ regex = "1.10"
 
 # 向量索引 (可选 HNSW, 默认使用 SIMD 暴力搜索)
 usearch = { version = "2.8", optional = true }
+smallvec = "1.15.1"
 
 [features]
 default = ["vision"]

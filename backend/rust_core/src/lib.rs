@@ -21,6 +21,7 @@ use ahash::AHashMap;
 use pyo3::prelude::*;
 use rayon::prelude::*;
 use regex::Regex;
+use smallvec::SmallVec;
 use std::collections::HashMap;
 
 // 模块声明
@@ -96,8 +97,16 @@ fn sanitize_text_content(text: &str) -> String {
 
 #[derive(Clone, Debug)]
 struct GraphEdge {
-    target_node_id: i64,
-    connection_strength: f32,
+    /// 目标节点 ID (优化为 i32 以减少内存占用)
+    /// 注意：这限制了单机图谱节点 ID 不能超过 21 亿 (i32::MAX)，
+    /// 但换取了 i32(4B) + f32(4B) = 8B 的完美内存对齐和翻倍的缓存效率。
+    /// 如果未来需要支持万亿级节点，此处需回退为 i64。
+    target_node_id: i32,
+    /// 连接强度 (量化压缩: f32 -> u16)
+    /// 映射: 0.0-1.0 -> 0-65535
+    /// 注意：虽然目前由于 i32 对齐导致 struct 仍占用 8 字节 (4+2+2pad)，
+    /// 但这减少了有效数据载荷，为未来的 SoA 布局或磁盘存储压缩做好了准备。
+    connection_strength: u16,
 }
 
 // ============================================================================
@@ -112,7 +121,10 @@ struct GraphEdge {
 /// 仅当数据量达到万亿级且趋于静态时，系统才会考虑塌缩为标准 CSR。
 #[pyclass]
 pub struct CognitiveGraphEngine {
-    dynamic_map: AHashMap<i64, Vec<GraphEdge>>,
+    // 使用 SmallVec 优化内存: 
+    // 大多数节点连接数较少，直接内联存储在结构体中，避免堆分配
+    // [GraphEdge; 4] 意味着如果边数 <= 4，则不使用堆内存
+    dynamic_map: AHashMap<i64, SmallVec<[GraphEdge; 4]>>,
     max_active_nodes: usize,
     max_fan_out: usize,
 }
@@ -146,11 +158,7 @@ impl CognitiveGraphEngine {
         // 自动剪枝
         for edges in self.dynamic_map.values_mut() {
             if edges.len() > self.max_fan_out {
-                edges.sort_by(|a, b| {
-                    b.connection_strength
-                        .partial_cmp(&a.connection_strength)
-                        .unwrap()
-                });
+                edges.sort_by(|a, b| b.connection_strength.cmp(&a.connection_strength));
                 edges.truncate(self.max_fan_out);
             }
         }
@@ -158,14 +166,18 @@ impl CognitiveGraphEngine {
 
     fn add_single_edge(&mut self, src: i64, tgt: i64, weight: f32) {
         let edges = self.dynamic_map.entry(src).or_default();
-        if let Some(existing) = edges.iter_mut().find(|e| e.target_node_id == tgt) {
-            if weight > existing.connection_strength {
-                existing.connection_strength = weight;
+        // 量化权重: f32 [0.0, 1.0] -> u16 [0, 65535]
+        let quantized_weight = (weight.clamp(0.0, 1.0) * 65535.0) as u16;
+
+        // tgt as i32: 假设节点 ID 在 i32 范围内
+        if let Some(existing) = edges.iter_mut().find(|e| e.target_node_id == tgt as i32) {
+            if quantized_weight > existing.connection_strength {
+                existing.connection_strength = quantized_weight;
             }
         } else {
             edges.push(GraphEdge {
-                target_node_id: tgt,
-                connection_strength: weight,
+                target_node_id: tgt as i32,
+                connection_strength: quantized_weight,
             });
         }
     }
@@ -175,15 +187,23 @@ impl CognitiveGraphEngine {
     }
 
     /// 执行激活扩散计算 (带稳定性剪枝和并行优化)
-    #[pyo3(text_signature = "($self, initial_scores, steps=1, decay=0.5, min_threshold=0.01)")]
+    /// 
+    /// 优化策略：
+    /// 1. 动态阈值截断 (Dynamic Pruning): 每轮扩散仅保留能量最高的 Top-N 节点
+    /// 2. 能量衰减 (Decay): 防止能量无限发散
+    /// 3. 并行计算: 利用 Rayon 进行并行规约
+    #[pyo3(text_signature = "($self, initial_scores, steps=1, decay=0.5, min_threshold=0.01, max_active_nodes_per_layer=10000)")]
     fn propagate_activation(
         &self,
         initial_scores: HashMap<i64, f32>,
         steps: usize,
         decay: f32,
         min_threshold: f32,
+        max_active_nodes_per_layer: Option<usize>,
     ) -> HashMap<i64, f32> {
         let mut current_scores: AHashMap<i64, f32> = initial_scores.into_iter().collect();
+        // 默认每层最大激活节点数 10000
+        let layer_limit = max_active_nodes_per_layer.unwrap_or(10000);
 
         for _ in 0..steps {
             let mut active_nodes: Vec<(&i64, &f32)> = current_scores
@@ -191,10 +211,13 @@ impl CognitiveGraphEngine {
                 .filter(|(_, &score)| score >= min_threshold)
                 .collect();
 
-            if active_nodes.len() > self.max_active_nodes {
-                active_nodes
-                    .sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
-                active_nodes.truncate(self.max_active_nodes);
+            // 动态截断：如果激活节点过多，只保留能量最高的 Top-K
+            // 这能显著减少长尾计算量，同时保留最重要的信号
+            if active_nodes.len() > layer_limit {
+                active_nodes.select_nth_unstable_by(layer_limit, |a, b| {
+                    b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal)
+                });
+                active_nodes.truncate(layer_limit);
             }
 
             if active_nodes.is_empty() {
@@ -208,9 +231,11 @@ impl CognitiveGraphEngine {
                     |mut acc, (&node_id, &score)| {
                         if let Some(neighbors) = self.dynamic_map.get(&node_id) {
                             for edge in neighbors {
-                                let energy = score * edge.connection_strength * decay;
+                                // 反量化: u16 [0, 65535] -> f32 [0.0, 1.0]
+                                let weight = edge.connection_strength as f32 / 65535.0;
+                                let energy = score * weight * decay;
                                 if energy >= min_threshold * 0.5 {
-                                    *acc.entry(edge.target_node_id).or_default() += energy;
+                                    *acc.entry(edge.target_node_id as i64).or_default() += energy;
                                 }
                             }
                         }

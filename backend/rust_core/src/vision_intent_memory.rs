@@ -10,14 +10,29 @@ use crate::aura_vision::AuraVisionEncoder;
 use crate::intent_engine::{IntentAnchor, IntentEngine};
 use ahash::AHashMap;
 use pyo3::prelude::*;
+use smallvec::SmallVec;
 use std::collections::HashMap;
+
+/// 视觉图谱边缘连接 (内存优化版)
+///
+/// 采用与核心引擎相同的压缩策略：
+/// 1. ID 压缩: i64 -> i32 (假设锚点 ID < 21亿)
+/// 2. 权重压缩: f32 -> u16 (0-65535 映射 0.0-1.0)
+/// 3. 内存对齐: 4 + 2 + 2(padding) = 8 bytes
+#[derive(Clone, Debug)]
+struct VisionGraphEdge {
+    target_node_id: i32,
+    weight: u16,
+}
 
 /// 扩散激活计算用的图结构
 ///
 /// 简化版的 CognitiveGraphEngine，专门用于视觉触发的记忆唤醒
 struct ActivationGraph {
-    /// 邻接表: node_id -> [(neighbor_id, weight)]
-    adjacency: AHashMap<i64, Vec<(i64, f32)>>,
+    /// 邻接表: node_id -> [Edges]
+    /// 使用 SmallVec<[VisionGraphEdge; 4]> 优化:
+    /// 绝大多数视觉锚点的关联数较少，内联存储避免堆分配
+    adjacency: AHashMap<i64, SmallVec<[VisionGraphEdge; 4]>>,
 
     /// 最大扇出 (每个节点最多连接数)
     max_fan_out: usize,
@@ -39,20 +54,25 @@ impl ActivationGraph {
 
     fn add_directed_edge(&mut self, src: i64, dst: i64, weight: f32) {
         let neighbors = self.adjacency.entry(src).or_default();
+        // 量化权重: f32 [0.0, 1.0] -> u16 [0, 65535]
+        let quantized_weight = (weight.clamp(0.0, 1.0) * 65535.0) as u16;
 
         // 检查是否已存在
-        if let Some(existing) = neighbors.iter_mut().find(|(id, _)| *id == dst) {
+        if let Some(existing) = neighbors.iter_mut().find(|e| e.target_node_id == dst as i32) {
             // 取较大权重
-            if weight > existing.1 {
-                existing.1 = weight;
+            if quantized_weight > existing.weight {
+                existing.weight = quantized_weight;
             }
         } else {
-            neighbors.push((dst, weight));
+            neighbors.push(VisionGraphEdge {
+                target_node_id: dst as i32,
+                weight: quantized_weight,
+            });
 
             // 自动剪枝: 保留权重最高的 max_fan_out 个邻居
             if neighbors.len() > self.max_fan_out {
                 neighbors
-                    .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                    .sort_by(|a, b| b.weight.cmp(&a.weight));
                 neighbors.truncate(self.max_fan_out);
             }
         }
@@ -101,7 +121,11 @@ impl ActivationGraph {
 
             for (node_id, score) in active {
                 if let Some(neighbors) = self.adjacency.get(&node_id) {
-                    for &(neighbor_id, weight) in neighbors {
+                    for edge in neighbors {
+                        let neighbor_id = edge.target_node_id as i64;
+                        // 反量化权重
+                        let weight = edge.weight as f32 / 65535.0;
+
                         let energy = score * weight * decay;
                         if energy >= min_threshold * 0.5 {
                             *increments.entry(neighbor_id).or_default() += energy;
