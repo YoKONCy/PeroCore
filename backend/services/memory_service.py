@@ -456,8 +456,11 @@ class MemoryService:
         """
         from services.embedding_service import embedding_service
         from services.vector_service import vector_service
+        from utils.memory_file_manager import MemoryFileManager
         import numpy as np
         import math
+        import os
+        import re
 
         # --- 0. 意图识别与簇感知 (Intent Detection) ---
         # 简单规则匹配：根据 Query 关键词预测当前意图簇
@@ -672,8 +675,30 @@ class MemoryService:
             except Exception as e:
                 print(f"[Memory] Reranking failed: {e}. Falling back to initial scores.")
                 result_memories = top_candidates[:limit]
+            final_memories = result_memories
         else:
             result_memories = top_candidates[:limit]
+            final_memories = result_memories
+
+        # [Hydrate] 如果是归档记忆，实时读取文件内容
+        # Pattern match for "> 📁 File Archived: path"
+        # Note: We do this synchronously for now as file IO is fast enough for small number of memories,
+        # or we can use aiofiles if needed. But MemoryFileManager uses blocking open in _write_file (wrapped in to_thread).
+        # Reading is safer to do here.
+        for m in result_memories:
+            if "> 📁 File Archived:" in m.content:
+                try:
+                    match = re.search(r"> 📁 File Archived: (.+)", m.content)
+                    if match:
+                        file_path = match.group(1).strip()
+                        if os.path.exists(file_path):
+                            with open(file_path, 'r', encoding='utf-8') as f:
+                                file_content = f.read()
+                                # 保留一点 DB 中的元数据提示，但用文件内容覆盖主体
+                                # 或者直接替换
+                                m.content = file_content 
+                except Exception as e:
+                    print(f"[MemoryService] Failed to hydrate archived memory {m.id}: {e}")
 
         # [Fix] Update Access Stats (Reinforcement)
         # 只要被检索到并最终返回，就视为被"激活"了一次

@@ -17,17 +17,6 @@
         <!-- File Explorer Component -->
         <FileExplorer @file-selected="onFileSelected" />
       </div>
-
-      <!-- User Profile / Bottom Actions -->
-      <div class="p-4 border-t border-slate-800/50 bg-[#0f172a]">
-        <div class="flex items-center gap-3 p-2 rounded-xl hover:bg-slate-800/50 transition-colors cursor-pointer">
-          <div class="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-xs">用户</div>
-          <div class="flex-1 min-w-0">
-            <div class="text-sm font-medium text-slate-200 truncate">Administrator</div>
-            <div class="text-xs text-slate-500 truncate">在线</div>
-          </div>
-        </div>
-      </div>
     </div>
 
     <!-- Main Content Area -->
@@ -47,10 +36,12 @@
              <button 
                v-if="!isWorkMode"
                @click="enterWorkMode"
-               class="flex items-center gap-2 px-4 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-md transition-all shadow-lg shadow-amber-500/20"
+               :disabled="isLightweightMode"
+               class="flex items-center gap-2 px-4 py-1.5 bg-amber-500 hover:bg-amber-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-md transition-all shadow-lg shadow-amber-500/20"
+               :title="isLightweightMode ? '轻量模式下无法使用工作模式' : 'Enter Work Mode'"
              >
                <PlayIcon class="w-4 h-4" />
-               <span class="text-sm font-medium">Start Work</span>
+               <span class="text-sm font-medium">{{ isLightweightMode ? 'Disabled (Lightweight)' : 'Start Work' }}</span>
              </button>
              
              <template v-else>
@@ -141,6 +132,7 @@ import IdeChat from '../components/ide/IdeChat.vue';
 
 // State
 const isWorkMode = ref(false);
+const isLightweightMode = ref(false);
 const openFiles = ref([]);
 const currentFile = ref(null);
 const monitorSegments = ref([]); // Kept for logic compatibility, though IdeChat handles display now
@@ -154,9 +146,30 @@ onMounted(async () => {
     });
     onUnmounted(() => unlisten());
   }
+
+  // Restore Work Mode status from backend
+  try {
+    const res = await fetch('http://localhost:8000/api/configs');
+    if (res.ok) {
+      const configs = await res.json();
+      if (configs.current_session_id && configs.current_session_id !== 'default' && configs.current_session_id.startsWith('work_')) {
+        isWorkMode.value = true;
+      }
+      // Check lightweight mode
+      if (configs.lightweight_mode === 'true' || configs.lightweight_mode === true) {
+        isLightweightMode.value = true;
+      }
+    }
+  } catch (e) {
+    console.error('Failed to restore work mode status:', e);
+  }
 });
 
 // File Handling
+const handleModeChange = (isActive) => {
+  isWorkMode.value = isActive;
+};
+
 const onFileSelected = async (fileNode) => {
   const existing = openFiles.value.find(f => f.path === fileNode.path);
   if (existing) {
@@ -207,8 +220,9 @@ const saveFile = (content) => {
 
 // Work Mode
 const enterWorkMode = async () => {
-  const taskName = prompt("我们今天要完成什么任务？");
-  if (!taskName) return;
+  // 移除弹窗，直接进入工作模式
+  // 任务名称将由后续对话内容自然定义，此处使用默认占位符
+  const taskName = "Work Session"; 
   
   try {
     const res = await fetch('http://localhost:8000/api/ide/work_mode/enter', {

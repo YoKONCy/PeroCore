@@ -755,14 +755,16 @@ If the owner is busy or you have nothing meaningful to say, stay quiet (output <
 
         # [Work Mode] Session Override
         # Check if we are in an active work session. If so, override the session_id to isolate history.
-        try:
-            config_session = (await self.session.exec(select(Config).where(Config.key == "current_session_id"))).first()
-            if config_session and config_session.value and config_session.value != "default":
-                original_session_id = session_id
-                session_id = config_session.value
-                print(f"[Agent] Work Mode Active: Overriding session_id '{original_session_id}' -> '{session_id}'")
-        except Exception as e:
-            print(f"[Agent] Failed to check session override: {e}")
+        # [Fix] Disabled global override to prevent hijacking of 'default' (Pet) session. 
+        # IdeChat handles session resolution via ide_router.
+        # try:
+        #     config_session = (await self.session.exec(select(Config).where(Config.key == "current_session_id"))).first()
+        #     if config_session and config_session.value and config_session.value != "default":
+        #         original_session_id = session_id
+        #         session_id = config_session.value
+        #         print(f"[Agent] Work Mode Active: Overriding session_id '{original_session_id}' -> '{session_id}'")
+        # except Exception as e:
+        #     print(f"[Agent] Failed to check session override: {e}")
 
         print(f"[Agent] Chat request received. Source: {source}, Msg count: {len(messages)}, Voice: {is_voice_mode}")
         

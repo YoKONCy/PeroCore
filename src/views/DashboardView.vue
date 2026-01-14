@@ -1038,35 +1038,65 @@ const selectedDate = ref('')
 const selectedSort = ref('desc')
 
 const openIdeWorkspace = async () => {
-  console.log('Trying to open IDE workspace...')
+  console.log('[Dashboard] User clicked openIdeWorkspace')
   try {
     if (window.__TAURI__) {
-      console.log('Tauri environment detected')
+      console.log('[Dashboard] Tauri environment detected')
       
       // Try to find existing window
       let existingWin = null;
       
-      // Method 1: getAllWebviewWindows
-      try {
-        const windows = await getAllWebviewWindows()
-        existingWin = windows.find(w => w.label === 'ide')
-      } catch (err) {
-        console.warn('getAllWebviewWindows failed:', err)
+      // Optimization: Try getByLabel first as it might be cached locally
+      if (WebviewWindow.getByLabel) {
+         console.log('[Dashboard] Trying WebviewWindow.getByLabel("ide")...')
+         try {
+             existingWin = WebviewWindow.getByLabel('ide')
+             if (existingWin) console.log('[Dashboard] Found existing IDE window via getByLabel')
+         } catch (e) {
+             console.warn('[Dashboard] getByLabel failed:', e)
+         }
       }
-
-      // Method 2: WebviewWindow.getByLabel (if available)
-      if (!existingWin && WebviewWindow.getByLabel) {
-         existingWin = WebviewWindow.getByLabel('ide')
+      
+      // Method 2: getAllWebviewWindows with timeout (to avoid hanging during ReAct/IPC flood)
+      if (!existingWin) {
+          console.log('[Dashboard] calling getAllWebviewWindows()...')
+          try {
+            const timeoutPromise = new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('getAllWebviewWindows timed out')), 2000)
+            );
+            const windows = await Promise.race([
+                getAllWebviewWindows(),
+                timeoutPromise
+            ]);
+            existingWin = windows.find(w => w.label === 'ide')
+            if (existingWin) console.log('[Dashboard] Found existing IDE window via getAllWebviewWindows')
+          } catch (err) {
+            console.warn('[Dashboard] getAllWebviewWindows failed or timed out:', err)
+          }
       }
 
       if (existingWin) {
-        console.log('Found existing IDE window, showing...')
-        await existingWin.show()
-        await existingWin.setFocus()
+        console.log('[Dashboard] Found existing IDE window, showing...')
+        if (typeof existingWin.show === 'function') {
+            await existingWin.show()
+            await existingWin.setFocus()
+        } else {
+            console.warn('Existing window found but .show() is not a function', existingWin)
+            // Fallback: try to re-create or ignore
+             const newWin = new WebviewWindow('ide', {
+                url: '/#/ide',
+                title: 'Pero IDE',
+                width: 1280,
+                height: 800,
+                resizable: true,
+                decorations: true,
+                center: true
+              })
+        }
         return
       }
       
-      console.log('Creating new IDE window...')
+      console.log('[Dashboard] Creating new IDE window...')
       const newWin = new WebviewWindow('ide', {
         url: '/#/ide',
         title: 'Pero IDE',
@@ -1165,6 +1195,13 @@ watch(currentTab, (newTab) => {
   if (newTab !== 'memories' && chartInstance) {
     chartInstance.dispose()
     chartInstance = null
+  }
+})
+
+// 监听日志筛选条件变化
+watch([selectedSessionId, selectedSource, selectedSort, selectedDate], () => {
+  if (currentTab.value === 'logs') {
+    fetchLogs()
   }
 })
 
@@ -1890,6 +1927,13 @@ const fetchConfig = async () => {
     // 加载用户设定
     userSettings.value.owner_name = data.owner_name || '主人'
     userSettings.value.user_persona = data.user_persona || '未设定'
+
+    // [Fix] Sync current session ID if in Work Mode
+    if (data.current_session_id && data.current_session_id !== 'default') {
+       if (selectedSessionId.value !== data.current_session_id) {
+           selectedSessionId.value = data.current_session_id
+       }
+    }
   } catch (e) { console.error(e) }
 }
 

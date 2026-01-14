@@ -189,19 +189,25 @@ class ScorerService:
 
 请输出一个 JSON 对象，包含以下字段：
 1. content (string): 对话的核心事实摘要。请以第三人称描述用户发生了什么或说了什么。例如 "用户提到他今天去吃了拉面，觉得很咸"。
-2. tags (list[string]): 至少 4 个描述性关键语义标签（如：约会、天气、心情、礼物）。
-3. importance (int): 记忆重要性评分 (1-10)。
-4. sentiment (string): 用户的情感极性 (positive, negative, neutral, happy, sad, angry, etc.)。
+            2. type (string): 记忆类型。可选值：
+               - event (事件): 一般性的经历、发生的事情。
+               - fact (事实): 客观事实、知识点、信息。
+               - preference (偏好): 用户的喜好、厌恶、习惯、性格特征。
+               - promise (承诺): 约定、计划、待办事项、承诺要做的事。
+               - inspiration (灵感): 用户的想法、创意、脑洞。
+            3. tags (list[string]): 至少 4 个描述性关键语义标签（如：约会、天气、心情、礼物）。
+            4. importance (int): 记忆重要性评分 (1-10)。
+            5. sentiment (string): 用户的情感极性 (positive, negative, neutral, happy, sad, angry, etc.)。
 
-# 重要性评分 (importance) 指南:
-- 1-3分: 日常闲聊、无特殊意义的问候、琐碎对话。
-- 4-6分: 包含有效信息、主人的小偏好、有一定参考价值的对话。
-- 7-8分: 重要约定、主人深刻的情感表达、关键的个人信息、需要长期记住的事件。
-- 9-10分: 极少数情况！如重大承诺、人生转折点、极其珍贵的瞬间。
-*请严格评分，不要过度给高分*
+            # 重要性评分 (importance) 指南:
+            - 1-3分: 日常闲聊、无特殊意义的问候、琐碎对话。
+            - 4-6分: 包含有效信息、主人的小偏好、有一定参考价值的对话。
+            - 7-8分: 重要约定、主人深刻的情感表达、关键的个人信息、需要长期记住的事件。
+            - 9-10分: 极少数情况！如重大承诺、人生转折点、极其珍贵的瞬间。
+            *请严格评分，不要过度给高分*
 
-如果对话纯粹是无意义的闲聊，且不包含任何值得记忆的事实，请返回 null 或空 JSON。
-"""
+            如果对话纯粹是无意义的闲聊，且不包含任何值得记忆的事实，请返回 null 或空 JSON。
+            """
         
         # Determine the role label and process user content if it's a system trigger
         user_label = "用户 (主人)"
@@ -283,7 +289,7 @@ AI (Pero): {assistant_content}
                 base_importance=data.get("importance", 5),
                 sentiment=data.get("sentiment", "neutral"),
                 source=source,
-                memory_type="interaction_summary"
+                memory_type=data.get("type", "event")
             )
             
             # 3. 如果有 pair_id，更新对话日志的元数据

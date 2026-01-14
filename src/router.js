@@ -17,4 +17,9 @@ const router = createRouter({
   routes
 })
 
+router.beforeEach((to, from, next) => {
+  console.log(`[Router] Navigating from ${from.path} to ${to.path}`);
+  next();
+});
+
 export default router

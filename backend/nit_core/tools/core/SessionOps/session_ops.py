@@ -108,23 +108,31 @@ async def exit_work_mode() -> str:
         
         Please write a "Handwritten Work Log" (Markdown format).
         Requirements:
-        1. Title: 📝 Pero's Work Log - {task_name}
+        1. Title: # 📝 Pero's Work Log - {task_name}
         2. Tone: Professional yet personal (Pero's style).
-        3. Content:
-           - Goal: What was the task?
-           - Process: Key steps taken, tools used, errors encountered and fixed.
-           - Outcome: Final result.
-           - Reflection: What did you learn?
+        3. Content Structure (Use Markdown Headers):
+           - ## Goal
+           - ## Process (Key steps, tools used)
+           - ## Outcome
+           - ## Reflection
         4. Keep it concise but information-dense.
         """
         
         summary = await llm.chat([{"role": "user", "content": prompt}])
         summary_content = summary["choices"][0]["message"]["content"]
         
-        # 4. Save to Memory (Long-term)
+        # 4. Save to File (MD)
+        from backend.utils.memory_file_manager import MemoryFileManager
+        timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_task_name = "".join(c for c in task_name if c.isalnum() or c in (' ', '-', '_')).strip()[:30]
+        file_path = await MemoryFileManager.save_log("work_logs", f"{timestamp_str}_{safe_task_name}", summary_content)
+        
+        # 5. Save to Memory (DB)
+        db_content = f"{summary_content}\n\n> 📁 File Archived: {file_path}"
+        
         await MemoryService.save_memory(
             session=session,
-            content=summary_content,
+            content=db_content,
             tags="work_log,summary,coding",
             clusters="[工作记录]",
             importance=8,
@@ -142,6 +150,18 @@ async def exit_work_mode() -> str:
             try:
                 config_id.value = "default"
                 await session.commit()
+
+                # [Broadcast] Notify frontend to switch UI
+                try:
+                    from services.voice_manager import voice_manager
+                    await voice_manager.broadcast({
+                        "type": "mode_update",
+                        "mode": "work",
+                        "is_active": False
+                    })
+                except Exception as e:
+                    print(f"[SessionOps] Failed to broadcast mode update: {e}")
+
             except Exception as final_e:
                 print(f"[SessionOps] Critical Error restoring session: {final_e}")
 

@@ -19,16 +19,9 @@
       <!-- 气泡对话框 -->
       <transition name="fade">
         <div class="bubble" v-if="currentText || isThinking">
-          <!-- 复杂任务折叠显示 -->
-          <div v-if="isComplexTask" class="complex-task-summary" @click.stop="openTaskMonitor">
-            <div class="summary-content">
-              <div class="thinking-text-animated">🧠 拼命思考中...</div>
-            </div>
-          </div>
-
           <!-- 普通文本显示 -->
-          <div v-else class="text-content">
-            <template v-if="isThinking && !currentText">
+          <div class="text-content" :class="{ 'cursor-pointer': isThinking }">
+            <template v-if="isThinking">
               <span class="thinking-text">{{ thinkingMessage }}</span>
             </template>
             <template v-else>
@@ -139,6 +132,7 @@ import FileSearchModal from '../components/FileSearchModal.vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, emit } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { getAllWebviewWindows, WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { PhysicalPosition } from '@tauri-apps/api/dpi'
 
 const appWindow = getCurrentWindow();
@@ -291,10 +285,6 @@ const parsedBubbleContent = computed(() => {
   return segments
 })
 
-const isComplexTask = computed(() => {
-  return parsedBubbleContent.value.some(segment => segment.type === 'thinking')
-})
-
 const isSpeaking = ref(false)
 const isThinking = ref(false)
 const thinkingMessage = ref('努力思考中...')
@@ -307,60 +297,6 @@ let replyTimer = null
 
 const showFileModal = ref(false)
 const foundFiles = ref([])
-
-// 监听解析后的内容变化，实时同步给监控窗口
-watch(parsedBubbleContent, (newVal) => {
-  // 发送纯数据
-  emit('monitor-data-update', toRaw(newVal)).catch(e => console.error(e))
-}, { deep: true })
-
-// 自动弹出思维监控室 (已禁用)
-// watch(isComplexTask, (newVal) => {
-//   if (newVal) {
-//     console.log('[PetView] Complex task detected, opening monitor automatically...')
-//     openTaskMonitor()
-//   }
-// })
-
-const openTaskMonitor = async () => {
-  // 立即同步一次数据
-  emit('monitor-data-update', toRaw(parsedBubbleContent.value)).catch(e => console.error(e))
-  
-  try {
-     // Try to find existing window
-     let existingWin = null;
-     
-     try {
-       const windows = await getAllWebviewWindows()
-       existingWin = windows.find(w => w.label === 'ide')
-     } catch (err) {
-       console.warn('getAllWebviewWindows failed:', err)
-     }
-
-     if (!existingWin && WebviewWindow.getByLabel) {
-        existingWin = WebviewWindow.getByLabel('ide')
-     }
-
-     if (existingWin) {
-       await existingWin.show()
-       await existingWin.setFocus()
-       return
-     }
-     
-     // Create new window
-     new WebviewWindow('ide', {
-       url: '/#/ide',
-       title: 'Pero IDE',
-       width: 1280,
-       height: 800,
-       resizable: true,
-       decorations: true,
-       center: true
-     })
-  } catch (e) {
-    console.error('Failed to open IDE window from Pet:', e)
-  }
-}
 
 onMounted(async () => {
   // 初始开启穿透
@@ -1178,8 +1114,9 @@ const onMoodUpdate = (e) => { moodText.value = e.detail }
 const onMindUpdate = (e) => { mindText.value = e.detail }
 const onVibeUpdate = (e) => { vibeText.value = e.detail }
 const onChatUpdate = (e) => { 
-  if (e.detail === 'Pero正在思考中...') {
+  if (e.detail && (e.detail === 'Pero正在思考中...' || e.detail.includes('思考中'))) {
     isThinking.value = true
+    thinkingMessage.value = 'Pero正在努力思考...'
     currentText.value = ''
   } else {
     isThinking.value = false

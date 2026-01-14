@@ -140,9 +140,7 @@ const props = defineProps({
   workMode: Boolean
 });
 
-const messages = ref([
-  { role: 'assistant', content: '你好！我是 Pero，你的编程助手。今天有什么可以帮你的吗？' }
-]);
+const messages = ref([]);
 const input = ref('');
 const msgContainer = ref(null);
 const isSending = ref(false);
@@ -200,6 +198,11 @@ const handleWSMessage = (data) => {
     if (!isSending.value) {
       messages.value.push({ role: 'assistant', content: data.content });
       scrollToBottom();
+    }
+  }
+  else if (data.type === 'mode_update') {
+    if (data.mode === 'work') {
+      emit('mode-change', data.is_active);
     }
   }
 };

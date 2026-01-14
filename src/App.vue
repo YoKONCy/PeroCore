@@ -3,6 +3,7 @@
 </template>
 
 <script setup>
+console.log('[App] App.vue initialized');
 </script>
 
 <style>

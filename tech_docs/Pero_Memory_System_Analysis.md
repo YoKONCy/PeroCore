@@ -69,7 +69,7 @@ graph TD
 | :--- | :--- | :--- | :--- |
 | `id` | Integer (PK) | 唯一标识 | 主键 |
 | `content` | Text | 记忆内容 | 具体的事件描述或事实 |
-| `type` | String | 记忆类型 | `event`, `fact`, `preference`, `interaction_summary`, `tool_experience` |
+| `type` | String | 记忆类型 | `event` (事件), `fact` (事实), `preference` (偏好), `promise` (承诺), `inspiration` (灵感), `work_log` (工作日志), `summary` (总结) |
 | `tags` | String | 标签 | 逗号分隔的语义标签 (e.g., "日常, 编程") |
 | `clusters` | String | 思维簇 | 所属的高层思维簇 (e.g., "[逻辑推理簇]") |
 | `importance` / `base_importance` | Float/Int | 重要性 | 初始评分 (1-10) 及当前权重 |
@@ -88,12 +88,12 @@ graph TD
 | `id` | Integer (PK) | 唯一标识 |
 | `source_id` | Integer (FK) | 源记忆 ID |
 | `target_id` | Integer (FK) | 目标记忆 ID |
-| `relation_type` | String | `associative` (联想), `causal` (因果), `thematic` (主题) |
+| `relation_type` | String | `associative` (联想), `causal` (因果), `thematic` (主题), `temporal` (时序), `contradictory` (矛盾) |
 | `strength` | Float | 关联强度 (0.0 - 1.0) |
 | `description` | String | 关联描述 (例如 "都提到了喜欢吃拉面") |
 
 #### C. 原始对话流 (`ConversationLog`)
-存储原始对话记录 (Raw History Logs)。
+存储原始对话记录 (Raw History Logs)。**注意：这是系统中唯一存储用户和 AI 原始对话文本的地方。** `Memory` 表中的内容是经过 AI 提炼、压缩后的语义节点，而非原始对话。
 
 | 字段 | 说明 |
 | :--- | :--- |
@@ -122,7 +122,7 @@ graph TD
 1.  **记录 (Logging)**: 用户和 Pero 的对话被实时存入 `ConversationLog`。
 2.  **异步分析 (Scoring)**: 
     *   后台 `ScorerService` (秘书) 读取未分析的 Log。
-    *   调用 LLM 提取 **Fact**, **Sentiment**, **Importance**，并生成 3-5 个 **Tags**。
+    *   调用 LLM 提取 **Memory Node** (类型包含 `event`, `fact`, `preference`, `promise`, `inspiration`)，并计算 **Sentiment**, **Importance** 及 **Tags**。
 3.  **存储与链接 (Storage)**:
     *   存入 SQLite `Memory` 表。
     *   **链入主轴**: 自动找到上一条记忆，建立 `prev_id` -> `id` 连接。

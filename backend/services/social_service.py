@@ -275,7 +275,7 @@ class SocialService:
                 1. Identify key events, interesting topics, and new friends.
                 2. Analyze Pero's overall mood and social performance.
                 3. Extract any important information that Pero should remember for the long term (e.g., someone's birthday, a promise).
-                4. Output in a concise, narrative format (as if writing a diary entry).
+                4. Output in standard **Markdown** format. Use headers (##), bullet points, and bold text for clear structure.
                 5. Language: Chinese.
                 
                 **Logs**:
@@ -286,10 +286,17 @@ class SocialService:
                 response = await llm.chat(messages, temperature=0.3)
                 summary_content = response["choices"][0]["message"]["content"]
                 
-                # 4. Save to Memory
+                # 4. Save to File (MD)
+                from utils.memory_file_manager import MemoryFileManager
+                file_path = await MemoryFileManager.save_log("social_daily", f"{date_str}_Social_Summary", summary_content)
+                
+                # 5. Save to Memory (DB)
+                # We store the content + file reference
+                db_content = f"【社交日报 {date_str}】\n{summary_content}\n\n> 📁 File Archived: {file_path}"
+                
                 await MemoryService.save_memory(
                     session=session,
-                    content=f"【社交日报 {date_str}】\n{summary_content}",
+                    content=db_content,
                     tags="social_summary,daily_log",
                     importance=5, # Medium importance
                     source="social_summary",

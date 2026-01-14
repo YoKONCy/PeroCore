@@ -26,7 +26,10 @@ def save_screenshot():
     """获取当前屏幕截图并保存到临时文件，返回文件路径"""
     try:
         # 创建临时文件
-        temp_dir = os.path.join(os.getcwd(), "temp_vision")
+        # [Refactor] 统一移动到 backend/data/temp_vision
+        backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+        data_dir = os.environ.get("PERO_DATA_DIR", os.path.join(backend_dir, "data"))
+        temp_dir = os.path.join(data_dir, "temp_vision")
         os.makedirs(temp_dir, exist_ok=True)
         
         temp_file = tempfile.NamedTemporaryFile(suffix=".png", dir=temp_dir, delete=False)

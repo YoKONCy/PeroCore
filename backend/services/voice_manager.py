@@ -34,27 +34,65 @@ class RealtimeVoiceManager:
 
     def _clean_text(self, text: str, for_tts: bool = True) -> str:
         """清洗文本，移除标签、动作描述等不应朗读的内容"""
+        if not text:
+            return ""
+
         # 1. 移除 XML 标签 (包括内容)
-        # 注意：这里我们只移除特定的标签，或者所有标签？
-        # 目前主要移除 <PEROCUE> 等控制标签
         cleaned = re.sub(r'<[^>]+>.*?</[^>]+>', '', text, flags=re.DOTALL)
         
         # 2. 移除 NIT 调用块
         from nit_core.dispatcher import remove_nit_tags
         cleaned = remove_nit_tags(cleaned)
         
-        # 3. 移除思考过程 【Thinking: ...】 或 ReAct 风格的 Thought/Action/Observation
-        # 如果是用于 TTS，必须移除；如果是用于 UI展示，可以保留（由前端折叠）
         if for_tts:
-            cleaned = re.sub(r'【Thinking.*?】', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
-            # 移除 ReAct 关键词行
-            cleaned = re.sub(r'^(Thought|Action|Action Input|Observation|Result|Prompt):.*$', '', cleaned, flags=re.MULTILINE | re.IGNORECASE)
+            # [Feature] Smart ReAct Filter
+            # Goal: Only read the final response, ignoring Thinking/Plan/Action/Observation history.
             
-            # 提取 "Final Answer" 之后的内容 (如果存在)
-            final_answer_match = re.search(r'(Final Answer|最终回答|回复):?\s*(.*)', cleaned, flags=re.DOTALL | re.IGNORECASE)
-            if final_answer_match:
-                cleaned = final_answer_match.group(2)
-        
+            # Strategy 1: If "Final Answer" marker exists, take everything after it.
+            final_marker = re.search(r'(?:Final Answer|最终回答|回复)[:：]?\s*(.*)', cleaned, flags=re.DOTALL | re.IGNORECASE)
+            if final_marker:
+                cleaned = final_marker.group(1)
+            else:
+                # Strategy 2: Split by known ReAct block headers and take the last chunk.
+                # This assumes the response is always at the end.
+                
+                # Normalize newlines
+                cleaned = cleaned.replace('\r\n', '\n')
+                
+                # Remove specific blocks first
+                # Remove Thinking blocks (support both [] and 【】)
+                cleaned = re.sub(r'【Thinking.*?】', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
+                cleaned = re.sub(r'\[Thinking.*?\]', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
+                
+                # Identify the last "Technical Header" and take content after it
+                # Headers: Plan:, Action:, Observation:, Result:, Thought:
+                # We look for the LAST occurrence of these headers at the start of a line
+                headers_pattern = r'(?m)^(?:Plan|计划|Action|Action Input|Observation|Result|Thought|Prompt)[:：]'
+                
+                matches = list(re.finditer(headers_pattern, cleaned))
+                if matches:
+                    last_match = matches[-1]
+                    # Start from the line AFTER the last header
+                    # But wait, if the last header is "Plan:", we want to skip the plan content too.
+                    # Plan content usually ends at the next header or double newline.
+                    # Since we found the LAST header, everything after it is either the content of that header OR the final response.
+                    
+                    remaining = cleaned[last_match.start():]
+                    
+                    # Heuristic: If it's an Observation/Result/Action, we probably don't want to read it.
+                    # But if it's the ONLY thing left, maybe we shouldn't read anything?
+                    # However, usually there is text AFTER the technical blocks.
+                    
+                    # Let's try to remove the *lines* associated with the last block if they look technical.
+                    # But simpler: The final response usually doesn't start with a keyword.
+                    # So if we have `Observation: ... \n Hello`, we want `Hello`.
+                    
+                    # Let's use a "Block Stripper" that removes all known technical blocks.
+                    # Regex to match a technical block: Header -> Content -> Next Header/End
+                    
+                    block_pattern = r'(?m)^(?:Plan|计划|Action|Action Input|Observation|Result|Thought|Prompt)[:：][\s\S]*?(?=(?:^(?:Plan|计划|Action|Action Input|Observation|Result|Thought|Prompt|Final Answer|最终回答|回复)[:：])|\Z)'
+                    cleaned = re.sub(block_pattern, '', cleaned)
+
         # 4. 移除动作描述 *...* 或 (动作)
         if for_tts:
             cleaned = re.sub(r'\*.*?\*', '', cleaned)
@@ -68,29 +106,13 @@ class RealtimeVoiceManager:
         
         # 6. 移除 Emoji 和特殊符号 (仅针对 TTS)
         if for_tts:
-            # 移除常见的 Emoji
             cleaned = re.sub(r'[\U00010000-\U0010ffff]', '', cleaned)
-            # 移除容易被朗读的特殊技术符号，但保留基础标点
-            # 这里的正则去掉了大部分数学符号、箭头、方块等，但保留了中文逗号、句号、感叹号、问号
             cleaned = re.sub(r'[^\w\s\u4e00-\u9fa5，。！？；：“”（）\n\.,!\?\-]', '', cleaned)
         
         # 7. 移除多余空白
-        cleaned = re.sub(r'\n+', '\n', cleaned)
+        cleaned = re.sub(r'\n+', '\n', cleaned).strip()
         
-        # 8. [Feature] Chatter Removal: Only read the response parts
-        # If the text is still very long and contains "Thought" style chatter that wasn't caught,
-        # we take the last non-empty segment.
-        if for_tts:
-             segments = [s.strip() for s in cleaned.split('\n') if s.strip()]
-             if segments:
-                 # 如果有多个段落，通常最后一段是总结或回复
-                 # 但如果最后一段很短（比如“谢谢”），可能需要合并
-                 if len(segments) > 1 and len(segments[-1]) < 5:
-                     cleaned = segments[-2] + " " + segments[-1]
-                 else:
-                     cleaned = segments[-1]
-                 
-        return cleaned.strip()
+        return cleaned
 
     def _get_voice_params(self, full_response: str):
         """鲁棒地根据回复中的心情标签 (XML 或 NIT) 或内容，动态调整语音参数"""
@@ -360,15 +382,9 @@ class RealtimeVoiceManager:
 
                 agent = AgentService(session)
                 full_response = ""
-                tts_text_parts = ["", ""] # [first_turn_text, last_turn_text]
-                react_turn = [0]
+                # tts_text_parts = ["", ""] # [first_turn_text, last_turn_text] (Deprecated)
                 
                 def report_status_wrapped(status, msg):
-                    if status == "thinking":
-                        react_turn[0] += 1
-                        # 如果进入了新的一轮（轮次 > 2），说明上一轮不是最后一轮，重置“末轮”内容
-                        if react_turn[0] > 2:
-                            tts_text_parts[1] = ""
                     return report_status(status, msg)
                 
                 # 流式获取回复文本
@@ -383,13 +399,6 @@ class RealtimeVoiceManager:
                     ):
                         if chunk:
                             full_response += chunk
-                            # TTS 逻辑：
-                            # 1. 第一轮的内容存入 tts_text_parts[0]
-                            # 2. 后续轮次的内容存入 tts_text_parts[1]（随轮次更新而重置）
-                            if react_turn[0] <= 1:
-                                tts_text_parts[0] += chunk
-                            else:
-                                tts_text_parts[1] += chunk
                 except WebSocketDisconnect:
                     print("[VOICE] User disconnected during generation.")
                     return
@@ -411,8 +420,9 @@ class RealtimeVoiceManager:
                 ui_response = self._clean_text(full_response, for_tts=False)
                 
                 # TTS 合成用：仅合成首轮和末轮的内容，并移除思考过程和动作描述
-                combined_tts_raw = tts_text_parts[0] + "\n" + tts_text_parts[1]
-                tts_response = self._clean_text(combined_tts_raw, for_tts=True)
+                # [Optimization] 直接使用 full_response 进行清洗，依赖 _clean_text 的 Smart Filter 策略
+                # 这样可以更准确地提取“最终回答”，而不是机械地拼接首尾轮次
+                tts_response = self._clean_text(full_response, for_tts=True)
                 
                 if not ui_response:
                     # 如果原始内容不为空（说明执行了动作但没有说话），则显示操作提示

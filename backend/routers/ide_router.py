@@ -77,11 +77,11 @@ async def chat(request: ChatRequest, session: AsyncSession = Depends(get_session
 def get_workspace_root():
     """
     Get the absolute path to the workspace root.
+    Defaults to the parent directory of the backend (project root).
     """
     base_dir = os.getcwd()
-    workspace_root = os.path.abspath(os.path.join(base_dir, "pero_workspace"))
-    if not os.path.exists(workspace_root):
-        os.makedirs(workspace_root, exist_ok=True)
+    # Go up one level to reach PeroCore root
+    workspace_root = os.path.abspath(os.path.join(base_dir, ".."))
     return workspace_root
 
 @router.get("/files", response_model=List[FileNode])

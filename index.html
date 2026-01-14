@@ -5,12 +5,51 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!-- 注释掉 Google Fonts，这是潜在的 30 秒超时源 -->
-    <!-- <link rel="preconnect" href="https://fonts.googleapis.com">
+    <!-- 
+    <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"> -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"> 
+    -->
     <script>
       window.startTime = Date.now();
       console.log("[Perf] index.html parsing at " + window.startTime);
+      
+      // Global Error Handler for Black Screen Debugging
+      window.onerror = function(message, source, lineno, colno, error) {
+        var div = document.createElement('div');
+        div.style.position = 'fixed';
+        div.style.top = '0';
+        div.style.left = '0';
+        div.style.width = '100%';
+        div.style.height = '100%';
+        div.style.backgroundColor = 'rgba(0,0,0,0.85)';
+        div.style.color = '#ff5555';
+        div.style.zIndex = '999999';
+        div.style.padding = '20px';
+        div.style.fontFamily = 'monospace';
+        div.style.whiteSpace = 'pre-wrap';
+        div.style.overflow = 'auto';
+        div.innerText = 'CRITICAL ERROR:\n' + message + '\n\nSource: ' + source + ':' + lineno + ':' + colno + '\n\nStack:\n' + (error ? error.stack : 'N/A');
+        document.body.appendChild(div);
+      };
+      
+      window.addEventListener('unhandledrejection', function(event) {
+        var div = document.createElement('div');
+        div.style.position = 'fixed';
+        div.style.top = '50%';
+        div.style.left = '0';
+        div.style.width = '100%';
+        div.style.height = '50%';
+        div.style.backgroundColor = 'rgba(0,0,0,0.85)';
+        div.style.color = '#ffaa55';
+        div.style.zIndex = '999999';
+        div.style.padding = '20px';
+        div.style.fontFamily = 'monospace';
+        div.style.whiteSpace = 'pre-wrap';
+        div.style.overflow = 'auto';
+        div.innerText = 'UNHANDLED PROMISE REJECTION:\n' + event.reason;
+        document.body.appendChild(div);
+      });
     </script>
     <title>perocore</title>
   </head>

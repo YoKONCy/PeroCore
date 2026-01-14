@@ -8,6 +8,12 @@ import './style.css'
 
 const app = createApp(App)
 
+// Global error handler
+app.config.errorHandler = (err, instance, info) => {
+  console.error('[Vue Error]', err);
+  console.error('[Vue Error Info]', info);
+};
+
 for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
   app.component(key, component)
 }

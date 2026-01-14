@@ -113,7 +113,9 @@ async def lifespan(app: FastAPI):
                 tts.cleanup_old_files(max_age_seconds=3600)
                 
                 # Cleanup temp_vision
-                data_dir = os.environ.get("PERO_DATA_DIR", os.getcwd())
+                # [Refactor] 统一指向 backend/data/temp_vision
+                default_data_dir = os.path.join(current_dir, "data")
+                data_dir = os.environ.get("PERO_DATA_DIR", default_data_dir)
                 temp_vision = os.path.join(data_dir, "temp_vision")
                 if os.path.exists(temp_vision):
                     now = time.time()
@@ -1263,7 +1265,7 @@ async def chat(
                 # 垫话机制状态
                 filler_played = False
                 filler_phrase = "唔...让我想想..."
-                filler_cache_path = os.path.join("backend", "assets", "filler_thinking.mp3")
+                filler_cache_path = os.path.join(current_dir, "assets", "filler_thinking.mp3")
 
                 # 初始化过滤器，防止 TTS 读取 XML 标签和 NIT 工具调用块
                 from nit_core.dispatcher import XMLStreamFilter, NITStreamFilter
@@ -1540,7 +1542,11 @@ async def voice_asr(file: UploadFile = File(...)):
     """语音转文字接口"""
     try:
         # Save temp file
-        temp_dir = os.path.join(os.getcwd(), "temp_audio")
+        # [Refactor] 统一指向 backend/data/temp_audio
+        default_data_dir = os.path.join(current_dir, "data")
+        data_dir = os.environ.get("PERO_DATA_DIR", default_data_dir)
+        temp_dir = os.path.join(data_dir, "temp_audio")
+        
         if not os.path.exists(temp_dir):
             os.makedirs(temp_dir)
             
@@ -1583,7 +1589,11 @@ async def voice_tts(payload: Dict[str, str] = Body(...)):
 @app.get("/api/voice/audio/{filename}")
 async def get_audio_file(filename: str):
     """获取语音文件"""
-    file_path = os.path.join(os.getcwd(), "temp_audio", filename)
+    # [Refactor] 统一指向 backend/data/temp_audio
+    default_data_dir = os.path.join(current_dir, "data")
+    data_dir = os.environ.get("PERO_DATA_DIR", default_data_dir)
+    file_path = os.path.join(data_dir, "temp_audio", filename)
+    
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Audio file not found")
     return FileResponse(file_path, media_type="audio/mpeg")
@@ -1593,8 +1603,12 @@ async def delete_audio(filename: str):
     """手动删除音频文件 (由前端播放完毕后触发)"""
     tts = get_tts_service()
     # Check both temp_audio and tts output dir just in case
+    # [Refactor] 统一指向 backend/data/temp_audio
+    default_data_dir = os.path.join(current_dir, "data")
+    data_dir = os.environ.get("PERO_DATA_DIR", default_data_dir)
+    
     paths_to_check = [
-        os.path.join(os.getcwd(), "temp_audio", filename),
+        os.path.join(data_dir, "temp_audio", filename),
         os.path.join(tts.output_dir, filename)
     ]
     

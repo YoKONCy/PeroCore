@@ -128,6 +128,10 @@ class ReflectionService:
             if not summary_text:
                 continue
                 
+            # Save to File (MD)
+            from utils.memory_file_manager import MemoryFileManager
+            file_path = await MemoryFileManager.save_log("periodic_summaries", f"{date_key}_Consolidated", summary_text)
+            
             # 创建总结性记忆
             # 我们将其插入到该组第一条记忆的位置
             first_mem = group[0]
@@ -144,9 +148,11 @@ class ReflectionService:
                 vec = embedding_service.encode_one(summary_text)
                 embedding_json = json.dumps(vec)
             except: pass
+            
+            db_content = f"{summary_text}\n\n> 📁 File Archived: {file_path}"
 
             summary_mem = Memory(
-                content=summary_text,
+                content=db_content,
                 tags="summary,consolidated",
                 importance=new_importance,
                 base_importance=float(new_importance),
@@ -216,7 +222,9 @@ class ReflectionService:
 {mem_text}
 
 输出要求：
-直接输出总结后的文本，不要包含任何前缀或解释。
+1. 使用标准 **Markdown** 格式。
+2. 使用列表总结关键点。
+3. 直接输出总结后的文本，不要包含任何前缀或解释。
 """
         try:
             res = await llm.chat([{"role": "user", "content": prompt}], temperature=0.3)
@@ -406,10 +414,17 @@ class ReflectionService:
 如果存在关联，请输出 JSON：
 {{
     "has_relation": true,
-    "type": "associative" | "causal" | "thematic" | "contradictory",
+    "type": "associative" | "causal" | "thematic" | "contradictory" | "temporal",
     "strength": 0.1-1.0,
     "description": "简短描述关联内容"
 }}
+
+关联类型定义：
+- associative (联想): 内容相关，提及相同的人、事、物或话题。
+- causal (因果): 事件A导致了事件B，或存在逻辑上的推导关系。
+- thematic (主题): 属于同一个大的主题或思维簇（如都在讨论“哲学”）。
+- contradictory (矛盾): 信息存在冲突、观点对立、或者后续修正了之前的错误认知。
+- temporal (时序): 存在明显的时间先后或顺序依赖（非简单的发生时间先后，而是逻辑上的先后）。
 
 如果没有明显关联，仅输出: {{"has_relation": false}}
 """
