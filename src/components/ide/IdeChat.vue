@@ -135,6 +135,7 @@
 
 <script setup>
 import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue';
+import AsyncMarkdown from '../AsyncMarkdown.vue';
 
 const props = defineProps({
   workMode: Boolean
@@ -258,7 +259,34 @@ const injectInstruction = async (action) => {
 
 onMounted(() => {
   connectWS();
+  fetchHistory();
 });
+
+watch(() => props.workMode, () => {
+  fetchHistory();
+});
+
+const fetchHistory = async () => {
+  // If in work mode, use 'ide' source.
+  // If in chat mode (workMode false), use 'desktop' source to sync with PetView.
+  const source = props.workMode ? 'ide' : 'desktop';
+  const sessionId = props.workMode ? 'current_work_session' : 'default';
+  
+  try {
+    const res = await fetch(`http://localhost:9120/api/history/${source}/${sessionId}?limit=50&sort=asc`);
+    if (res.ok) {
+      const logs = await res.json();
+      messages.value = logs.map(log => ({
+        role: log.role,
+        content: log.content
+      }));
+      await nextTick();
+      scrollToBottom();
+    }
+  } catch (e) {
+    console.error('Failed to fetch history', e);
+  }
+};
 
 onUnmounted(() => {
   if (ws) ws.close();
@@ -283,12 +311,12 @@ const sendMessage = async () => {
   scrollToBottom();
 
   try {
-    const res = await fetch('http://localhost:8000/api/ide/chat', {
+    const res = await fetch('http://localhost:9120/api/ide/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
         messages: messages.value.filter(m => m.role === 'user' || m.role === 'assistant').slice(-10), 
-        source: 'ide',
+        source: props.workMode ? 'ide' : 'desktop',
         session_id: props.workMode ? 'current_work_session' : 'default'
       })
     });

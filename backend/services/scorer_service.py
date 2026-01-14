@@ -14,7 +14,7 @@ class ScorerService:
     def __init__(self, session: AsyncSession):
         self.session = session
         self.memory_service = MemoryService()
-        self.prompt_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "prompts", "scorer_prompt.md")
+        self.prompt_path = os.path.join(os.path.dirname(__file__), "mdp", "scorer", "scorer_prompt.md")
 
     def _smart_clean_text(self, text: str) -> str:
         """
@@ -210,7 +210,17 @@ class ScorerService:
             """
         
         # Determine the role label and process user content if it's a system trigger
-        user_label = "用户 (主人)"
+        owner_name = "用户"
+        try:
+            # Query Config table for owner_name
+            result = await self.session.exec(select(Config).where(Config.key == "owner_name"))
+            config_entry = result.first()
+            if config_entry and config_entry.value:
+                owner_name = config_entry.value
+        except Exception as e:
+            print(f"[秘书] Failed to fetch owner_name: {e}")
+
+        user_label = f"{owner_name} (主人)"
         
         # Check for System Reminders (e.g. from Companion Service or Scheduled Tasks)
         if user_content.strip().startswith("【管理系统提醒"):

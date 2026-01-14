@@ -1050,7 +1050,7 @@ const openIdeWorkspace = async () => {
       if (WebviewWindow.getByLabel) {
          console.log('[Dashboard] Trying WebviewWindow.getByLabel("ide")...')
          try {
-             existingWin = WebviewWindow.getByLabel('ide')
+             existingWin = await WebviewWindow.getByLabel('ide')
              if (existingWin) console.log('[Dashboard] Found existing IDE window via getByLabel')
          } catch (e) {
              console.warn('[Dashboard] getByLabel failed:', e)

@@ -15,6 +15,7 @@
     "core:window:allow-create",
     "core:window:allow-show",
     "core:window:allow-set-focus",
+    "core:window:allow-start-dragging",
     {
       "identifier": "shell:allow-execute",
       "allow": [
