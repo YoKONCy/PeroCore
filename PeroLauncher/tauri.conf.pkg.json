@@ -11,13 +11,50 @@
     "app": {
         "windows": [
             {
-                "title": "Pero Launcher",
                 "label": "launcher",
-                "width": 800,
+                "url": "/#/launcher",
+                "title": "Pero Launcher",
+                "width": 900,
                 "height": 600,
-                "resizable": false,
+                "resizable": true,
+                "decorations": true,
+                "transparent": false,
+                "alwaysOnTop": false,
+                "visible": true,
+                "center": true
+            },
+            {
+                "label": "pet",
+                "url": "/#/pet",
+                "title": "PeroCore",
+                "width": 700,
+                "height": 700,
+                "resizable": true,
+                "minWidth": 700,
+                "maxWidth": 700,
+                "minHeight": 700,
+                "maxHeight": 700,
                 "fullscreen": false,
-                "visible": false
+                "decorations": false,
+                "transparent": true,
+                "alwaysOnTop": true,
+                "skipTaskbar": true,
+                "visible": false,
+                "shadow": false,
+                "contentProtected": false,
+                "maximizable": false
+            },
+            {
+                "label": "ide",
+                "url": "/#/ide",
+                "title": "Pero IDE",
+                "width": 1280,
+                "height": 800,
+                "resizable": true,
+                "decorations": true,
+                "transparent": false,
+                "visible": false,
+                "center": true
             }
         ],
         "security": {
