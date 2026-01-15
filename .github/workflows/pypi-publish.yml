@@ -77,4 +77,5 @@ jobs:
           path: dist
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
-        # 移除显式的 token 认证，改用 Trusted Publishing (OIDC)
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
