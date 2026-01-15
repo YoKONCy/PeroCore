@@ -1,4 +1,3 @@
-#![cfg(feature = "vision")]
 //! AuraVision Rust Native Inference Engine
 //!
 //! 基于 tract-onnx 的纯 Rust ONNX 推理实现，符合技术文档设计：

@@ -1,3 +1,9 @@
+"""
+[LEGACY] Python-based Lexer Implementation.
+NOTE: This module is used as a fallback when the Rust extension (nit_rust_runtime) is not available.
+Main implementation: rust_binding/src/lexer.rs
+"""
+
 import re
 from typing import List, Tuple, Any
 from enum import Enum, auto

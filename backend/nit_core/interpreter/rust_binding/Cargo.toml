@@ -1,0 +1,13 @@
+[package]
+name = "nit_rust_runtime"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "nit_rust_runtime"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.21", features = ["extension-module"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

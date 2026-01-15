@@ -36,20 +36,54 @@ async def get_rust_engine(session: AsyncSession):
         _rust_engine = CognitiveGraphEngine()
         _rust_engine.configure(max_active_nodes=10000, max_fan_out=20)
         
-        # 预加载所有关系 (全量加载至内存 CSR 结构)
-        statement = select(MemoryRelation)
-        relations = (await session.exec(statement)).all()
-        rust_relations = [(rel.source_id, rel.target_id, rel.strength) for rel in relations]
+        # 预加载所有关系 (采用分批加载策略，防止内存溢出或进程卡死)
+        # Preload all relations (Batch loading to prevent OOM or freezing)
+        # 优化说明：
+        # 1. 使用 offset/limit 分页读取数据库，避免一次性将百万级数据加载到 Python 内存。
+        # 2. 分批次调用 Rust 引擎的 batch_add_connections，降低 FFI 调用的瞬时负载。
+        BATCH_SIZE = 5000  # 每批次处理 5000 条
+        total_loaded = 0
         
-        # 同时加载 Prev/Next 链表关系
-        statement_mem = select(Memory.id, Memory.prev_id, Memory.next_id).where((Memory.prev_id != None) | (Memory.next_id != None))
-        mem_links = (await session.exec(statement_mem)).all()
-        for mid, prev_id, next_id in mem_links:
-            if prev_id: rust_relations.append((mid, prev_id, 0.2))
-            if next_id: rust_relations.append((mid, next_id, 0.2))
+        # 1. 分批加载 MemoryRelation (语义关联)
+        mr_offset = 0
+        while True:
+            statement = select(MemoryRelation).offset(mr_offset).limit(BATCH_SIZE)
+            relations = (await session.exec(statement)).all()
             
-        _rust_engine.batch_add_connections(rust_relations)
-        print(f"[Memory] Rust Engine Loaded with {len(rust_relations)} connections.", flush=True)
+            if not relations:
+                break
+            
+            # 转换为 Rust 引擎需要的元组格式 (source, target, strength)
+            chunk_relations = [(rel.source_id, rel.target_id, rel.strength) for rel in relations]
+            _rust_engine.batch_add_connections(chunk_relations)
+            
+            total_loaded += len(relations)
+            mr_offset += BATCH_SIZE
+        
+        # 2. 分批加载 Prev/Next 链表关系 (时间序关联)
+        mem_offset = 0
+        while True:
+            statement_mem = select(Memory.id, Memory.prev_id, Memory.next_id).where(
+                (Memory.prev_id != None) | (Memory.next_id != None)
+            ).offset(mem_offset).limit(BATCH_SIZE)
+            
+            mem_links = (await session.exec(statement_mem)).all()
+            
+            if not mem_links:
+                break
+            
+            chunk_links = []
+            for mid, prev_id, next_id in mem_links:
+                if prev_id: chunk_links.append((mid, prev_id, 0.2))
+                if next_id: chunk_links.append((mid, next_id, 0.2))
+            
+            if chunk_links:
+                _rust_engine.batch_add_connections(chunk_links)
+                total_loaded += len(chunk_links)
+            
+            mem_offset += BATCH_SIZE
+            
+        print(f"[Memory] Rust Engine Loaded with {total_loaded} connections (Batched).", flush=True)
     except Exception as e:
         print(f"[Memory] Failed to init Rust engine: {e}")
         _rust_engine = False # 标记为不可用

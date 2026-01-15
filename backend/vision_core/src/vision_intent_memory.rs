@@ -1,4 +1,3 @@
-#![cfg(feature = "vision")]
 //! 视觉意图记忆集成模块
 //!
 //! 实现技术文档中的核心链路：
@@ -7,7 +6,7 @@
 //! 这是 Pero 视觉感知系统的核心模块，将视觉信号与记忆系统深度耦合
 
 use crate::aura_vision::AuraVisionEncoder;
-use crate::intent_engine::{IntentAnchor, IntentEngine};
+use pero_memory_core::intent_engine::{IntentAnchor, IntentEngine};
 use ahash::AHashMap;
 use pyo3::prelude::*;
 use smallvec::SmallVec;

@@ -3,17 +3,16 @@ requires = ["maturin>=1.5,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "pero-memory-core"
-version = "0.2.2"
-description = "High-performance spreading activation engine for Pero"
+name = "pero-vision-core"
+version = "0.1.0"
+description = "High-performance vision engine for Pero"
 license = { text = "GPL-3.0" }
 authors = [
     { name = "PeroCore Developer" }
 ]
 requires-python = ">=3.8"
 dependencies = []
-readme = "README_LIB.md"
-keywords = ["AI", "Memory", "Rust", "SpreadingActivation", "RAG"]
+keywords = ["AI", "Vision", "Rust", "ONNX"]
 classifiers = [
     "Programming Language :: Rust",
     "Programming Language :: Python :: 3",
@@ -22,5 +21,5 @@ classifiers = [
 ]
 
 [tool.maturin]
-module-name = "pero_memory_core"
+module-name = "pero_vision_core"
 features = ["pyo3/extension-module"]

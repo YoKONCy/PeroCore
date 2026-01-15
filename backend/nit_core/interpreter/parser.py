@@ -1,3 +1,9 @@
+"""
+[LEGACY] Python-based Parser Implementation.
+NOTE: This module is used as a fallback when the Rust extension (nit_rust_runtime) is not available.
+Main implementation: rust_binding/src/parser.rs
+"""
+
 from typing import List, Optional
 from .lexer import Token, TokenType, Lexer
 from .ast_nodes import ASTNode, PipelineNode, AssignmentNode, CallNode, LiteralNode, VariableRefNode, ValueNode, ListNode

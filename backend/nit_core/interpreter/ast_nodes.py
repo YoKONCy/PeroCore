@@ -1,3 +1,9 @@
+"""
+[LEGACY/FALLBACK] Python AST Node Definitions.
+NOTE: These definitions are used when the Rust extension is unavailable OR for type hinting in the Python fallback path.
+The Rust implementation (rust_binding/src/ast.rs) mirrors this structure.
+"""
+
 from dataclasses import dataclass, field
 from typing import List, Dict, Union, Optional
 
