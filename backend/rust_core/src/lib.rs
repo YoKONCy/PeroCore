@@ -1,14 +1,13 @@
 //! Pero Rust Core
 //!
-//! 高性能视觉-意图-记忆引擎
+//! 高性能意图-记忆扩散引擎
 //!
 //! 主要模块:
-//! - `aura_vision`: 纯 Rust ONNX 视觉推理
-//! - `intent_engine`: SIMD 加速的意图锚点搜索
-//! - `vision_intent_memory`: 视觉-意图-记忆集成核心
+//! - `intent_engine`: SIMD 加速的意图锚点搜索 (向量数据库)
+//! - `cognitive_graph`: 基于 PEDSA 算法的认知图谱扩散激活
 //!
-//! 版本: 0.2.0
-//! 重构: 从 PyO3+Python 方案迁移到纯 Rust 原生推理
+//! 版本: 0.2.1
+//! 架构: 专注于记忆存储与激活，视觉推理已分离至 `vision_core`
 
 use ahash::AHashMap;
 /*

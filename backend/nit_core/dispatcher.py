@@ -1,3 +1,17 @@
+"""
+[关于为什么不使用标准 Function Calling 的架构决策说明]
+
+1. 异步并发支持的稀缺性：
+   "Function Calling 调个 API 就行了，谁不会写？" —— 但问题在于，目前市面上（尤其是国内大模型生态中）
+   能够原生且稳定支持异步 Function Calling 的模型屈指可数。
+   对于 PeroCore 这样追求高并发、低延迟响应的系统而言，依赖同步阻塞的 API 并不是可行的方案。
+
+2. NIT 协议的工程价值：
+   NIT (Non-invasive Integration Tools) 协议并非为了“重复造轮子”，而是在深入权衡了兼容性、安全性与可维护性后的最优工程解之一。
+   它天然支持基于事件驱动的异步并发执行，解耦了具体的模型实现与业务逻辑。
+   这不仅是一种协议，更是针对具体应用场景（高频交互、复杂意图编排）量身定制的解决方案。
+"""
+
 import asyncio
 import importlib
 import sys

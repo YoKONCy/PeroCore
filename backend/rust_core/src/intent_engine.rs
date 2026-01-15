@@ -18,7 +18,7 @@ use std::arch::x86_64::*;
 
 /// 意图锚点
 ///
-/// 代表一种视觉场景的语义表示
+/// 代表一种通用的语义表示 (可来自视觉、文本或音频)
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct IntentAnchor {
     /// 唯一标识符 (与 SQLite Memory 表的 ID 对应)
@@ -27,8 +27,8 @@ pub struct IntentAnchor {
     /// 384 维语义向量 (L2 归一化)
     pub vector: Vec<f32>,
 
-    /// 场景描述 (用于 LLM 提示词注入)
-    /// 例如: "主人正在深夜高强度编码"
+    /// 场景/内容描述 (用于 LLM 提示词注入)
+    /// 例如: "主人正在深夜高强度编码" 或 "用户提到了Rust编程"
     pub description: String,
 
     /// 重要性权重 (0.0 - 1.0)

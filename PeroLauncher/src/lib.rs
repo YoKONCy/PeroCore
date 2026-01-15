@@ -41,7 +41,14 @@ struct SystemStats {
 
 #[tauri::command]
 fn get_system_stats(state: tauri::State<SystemMonitorState>) -> SystemStats {
-    let mut sys = state.0.lock().unwrap();
+    // Safety: Handle potential mutex poisoning gracefully
+    let mut sys = match state.0.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            eprintln!("System stats mutex poisoned, recovering...");
+            poisoned.into_inner()
+        }
+    };
     
     // Refreshing CPU usage requires two measurements, but since we persist the state,
     // calling this periodically works fine after the first call.
@@ -201,7 +208,7 @@ async fn get_diagnostics(app: tauri::AppHandle) -> Result<DiagnosticReport, Stri
         errors.push(format!("数据目录不可写: {:?}", data_dir));
     }
 
-    Ok(DiagnosticReport {
+    let report = DiagnosticReport {
         python_exists,
         python_path: python_path.to_string_lossy().to_string(),
         python_version,
@@ -211,8 +218,17 @@ async fn get_diagnostics(app: tauri::AppHandle) -> Result<DiagnosticReport, Stri
         data_dir_writable,
         data_dir: data_dir.to_string_lossy().to_string(),
         core_available,
-        errors,
-    })
+        errors: errors.clone(),
+    };
+
+    // Log diagnostics for debugging Release builds
+    log::info!("Diagnostic Report: python_path={:?}, script_path={:?}, core={}", 
+        report.python_path, report.script_path, report.core_available);
+    if !errors.is_empty() {
+        log::error!("Diagnostic Errors: {:?}", errors);
+    }
+    
+    Ok(report)
 }
 
 #[tauri::command]
@@ -307,7 +323,7 @@ fn quit_app(app: tauri::AppHandle) {
 }
 
 pub fn get_workspace_root() -> std::path::PathBuf {
-    let current_dir = std::env::current_dir().unwrap();
+    let current_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     // println!("Rust: Current working directory: {:?}", current_dir);
 
     // 1. 检查当前目录是否就是 PeroCore
@@ -334,16 +350,18 @@ pub fn get_workspace_root() -> std::path::PathBuf {
         }
     }
 
-    // 4. 回退到原始逻辑
+    // 4. 回退到原始逻辑 (Safety: use unwrap_or for parent checks)
     if current_dir.ends_with("src-tauri") {
         current_dir
             .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .to_path_buf()
+            .and_then(|p| p.parent())
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| current_dir.clone())
     } else if current_dir.ends_with("PeroLauncher") {
-        current_dir.parent().unwrap().to_path_buf()
+        current_dir
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| current_dir.clone())
     } else {
         current_dir
     }
@@ -439,22 +457,33 @@ async fn start_backend(
 
     let mut child = cmd.spawn().map_err(|e| format!("Spawn error: {}", e))?;
 
-    let stdout = child.stdout.take().unwrap();
-    let stderr = child.stderr.take().unwrap();
+    let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
+    let stderr = child.stderr.take().ok_or("Failed to capture stderr")?;
+
+    // Log buffer for startup failure diagnosis
+    let startup_logs = Arc::new(Mutex::new(Vec::new()));
 
     let app_stdout = app.clone();
+    let logs_stdout = startup_logs.clone();
     tauri::async_runtime::spawn(async move {
         use std::io::{BufRead, BufReader};
         let reader = BufReader::new(stdout);
         for line in reader.lines() {
             if let Ok(l) = line {
                 log::info!("[Backend] {}", l); // 同时记录到 Rust 日志系统
-                let _ = app_stdout.emit("backend-log", l);
+                let _ = app_stdout.emit("backend-log", &l);
+                
+                if let Ok(mut logs) = logs_stdout.lock() {
+                    if logs.len() < 50 {
+                        logs.push(format!("[STDOUT] {}", l));
+                    }
+                }
             }
         }
     });
 
     let app_stderr = app.clone();
+    let logs_stderr = startup_logs.clone();
     tauri::async_runtime::spawn(async move {
         use std::io::{BufRead, BufReader};
         let reader = BufReader::new(stderr);
@@ -462,9 +491,23 @@ async fn start_backend(
             if let Ok(l) = line {
                 log::error!("[Backend] {}", l); // 同时记录到 Rust 日志系统
                 let _ = app_stderr.emit("backend-log", format!("[ERR] {}", l));
+                
+                if let Ok(mut logs) = logs_stderr.lock() {
+                    if logs.len() < 50 {
+                        logs.push(format!("[STDERR] {}", l));
+                    }
+                }
             }
         }
     });
+
+    // Wait 1s to check if process survives startup
+    std::thread::sleep(std::time::Duration::from_millis(1000));
+
+    if let Ok(Some(status)) = child.try_wait() {
+        let logs = startup_logs.lock().map(|l| l.join("\n")).unwrap_or_default();
+        return Err(format!("后端启动失败！进程立即退出 (Code: {:?})。\n详细日志：\n{}", status.code(), logs));
+    }
 
     *backend_guard = Some(child);
     Ok(())

@@ -183,7 +183,10 @@ fn extract_zip(archive_path: &Path, dest: &Path) -> io::Result<()> {
                     for sub_entry in fs::read_dir(&path)? {
                         let sub_entry = sub_entry?;
                         let sub_path = sub_entry.path();
-                        let file_name = sub_path.file_name().unwrap();
+                        let file_name = match sub_path.file_name() {
+                            Some(n) => n,
+                            None => continue,
+                        };
                         let target_path = dest.join(file_name);
                         
                         if target_path.exists() {
@@ -329,9 +332,9 @@ pub fn start_napcat_process(app: AppHandle, state: tauri::State<NapCatState>) ->
         .spawn()
         .map_err(|e| format!("Failed to start NapCat: {}", e))?;
 
-    let stdout = child.stdout.take().unwrap();
-    let stderr = child.stderr.take().unwrap();
-    let stdin = child.stdin.take().unwrap();
+    let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
+    let stderr = child.stderr.take().ok_or("Failed to capture stderr")?;
+    let stdin = child.stdin.take().ok_or("Failed to capture stdin")?;
 
     // Store stdin for interaction
     let mut stdin_guard = state.stdin.lock().map_err(|e| e.to_string())?;

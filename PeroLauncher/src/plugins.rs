@@ -95,9 +95,13 @@ pub fn get_plugins(app: AppHandle) -> Vec<Plugin> {
                                 Err(e) => {
                                     println!("Failed to parse plugin at {:?}: {}", path, e);
                                     // Optionally return an invalid plugin entry so UI knows it failed
+                                    let safe_name = path.file_name()
+                                        .unwrap_or_else(|| std::ffi::OsStr::new("unknown"))
+                                        .to_string_lossy();
+                                        
                                     let invalid_plugin = Plugin {
-                                        name: path.file_name().unwrap().to_string_lossy().to_string(),
-                                        display_name: Some(format!("Invalid: {}", path.file_name().unwrap().to_string_lossy())),
+                                        name: safe_name.to_string(),
+                                        display_name: Some(format!("Invalid: {}", safe_name)),
                                         version: "0.0.0".to_string(),
                                         description: format!("Parse error: {}", e),
                                         author: None,
