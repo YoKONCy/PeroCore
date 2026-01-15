@@ -8,11 +8,8 @@ import sys
 try:
     from pero_memory_core import CognitiveGraphEngine
 except ImportError:
-    try:
-        from pero_rust_core import CognitiveGraphEngine
-    except ImportError:
-        print("Error: PeroCore Rust module not found. Please install it first.")
-        sys.exit(1)
+    print("Error: PeroCore Rust module (pero_memory_core) not found. Please install it first.")
+    sys.exit(1)
 
 def get_mem_mb():
     process = psutil.Process(os.getpid())

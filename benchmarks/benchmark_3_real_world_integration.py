@@ -7,11 +7,8 @@ import numpy as np
 try:
     from pero_memory_core import CognitiveGraphEngine
 except ImportError:
-    try:
-        from pero_rust_core import CognitiveGraphEngine
-    except ImportError:
-        print("Error: PeroCore Rust module not found.")
-        sys.exit(1)
+    print("Error: PeroCore Rust module (pero_memory_core) not found.")
+    sys.exit(1)
 
 def run_synthetic_knowledge_web_test(node_count=50000, relation_density=5):
     print("="*80)

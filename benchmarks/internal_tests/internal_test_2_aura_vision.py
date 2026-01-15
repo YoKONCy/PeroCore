@@ -22,7 +22,7 @@ import numpy as np
 
 # 尝试加载 Rust 模块
 try:
-    from pero_rust_core import VisionIntentMemoryManager
+    from pero_vision_core import VisionIntentMemoryManager
     RUST_AVAILABLE = True
     print("✅ Rust 模块加载成功")
 except ImportError as e:

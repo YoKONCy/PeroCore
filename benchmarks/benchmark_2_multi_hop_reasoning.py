@@ -6,11 +6,8 @@ import sys
 try:
     from pero_memory_core import CognitiveGraphEngine
 except ImportError:
-    try:
-        from pero_rust_core import CognitiveGraphEngine
-    except ImportError:
-        print("Error: PeroCore Rust module not found.")
-        sys.exit(1)
+    print("Error: PeroCore Rust module (pero_memory_core) not found.")
+    sys.exit(1)
 
 def run_logical_chain_test(hops=5, noise_count=100000):
     print("="*80)
