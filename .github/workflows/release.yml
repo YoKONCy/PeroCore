@@ -73,6 +73,76 @@ jobs:
           Write-Host "Installing Python dependencies to $LIB_DIR..."
           pip install -r backend/requirements.txt --target $LIB_DIR --no-warn-script-location
 
+      - name: Build and Install Rust Core Extensions
+        shell: pwsh
+        run: |
+          pip install maturin
+          
+          $TARGET_LIB = "PeroLauncher/src-tauri/python/Lib/site-packages"
+          
+          # 1. Build and Install pero_memory_core
+          Write-Host "Building pero_memory_core..."
+          maturin build --release --manifest-path backend/rust_core/Cargo.toml --out dist
+          $MEMORY_WHEEL = Get-ChildItem dist/pero_memory_core*.whl | Select-Object -First 1
+          if ($MEMORY_WHEEL) {
+              Write-Host "Installing $($MEMORY_WHEEL.Name)..."
+              pip install $MEMORY_WHEEL.FullName --target $TARGET_LIB --no-deps --force-reinstall
+          } else {
+              Write-Error "Failed to build pero_memory_core wheel"
+              exit 1
+          }
+
+          # 2. Build and Install pero_vision_core
+           Write-Host "Building pero_vision_core..."
+           maturin build --release --manifest-path backend/vision_core/Cargo.toml --out dist
+           $VISION_WHEEL = Get-ChildItem dist/pero_vision_core*.whl | Select-Object -First 1
+           if ($VISION_WHEEL) {
+               Write-Host "Installing $($VISION_WHEEL.Name)..."
+               pip install $VISION_WHEEL.FullName --target $TARGET_LIB --no-deps --force-reinstall
+           } else {
+               Write-Error "Failed to build pero_vision_core wheel"
+               exit 1
+           }
+
+           # 3. Build and Install nit_rust_runtime
+           Write-Host "Building nit_rust_runtime..."
+           maturin build --release --manifest-path backend/nit_core/interpreter/rust_binding/Cargo.toml --out dist
+           $NIT_WHEEL = Get-ChildItem dist/nit_rust_runtime*.whl | Select-Object -First 1
+           if ($NIT_WHEEL) {
+               Write-Host "Installing $($NIT_WHEEL.Name)..."
+               pip install $NIT_WHEEL.FullName --target $TARGET_LIB --no-deps --force-reinstall
+           } else {
+               Write-Error "Failed to build nit_rust_runtime wheel"
+               exit 1
+           }
+
+           # 4. Build CodeSearcher Tool
+           Write-Host "Building CodeSearcher Tool..."
+           cargo build --release --manifest-path backend/nit_core/tools/work/CodeSearcher/src/Cargo.toml
+           
+           # Locate and move binary
+           # Cargo output structure might vary, so we search for the exe
+           $SEARCHER_SRC_DIR = "backend/nit_core/tools/work/CodeSearcher/src"
+           $SEARCHER_TARGET_DIR = "backend/nit_core/tools/work/CodeSearcher"
+           
+           # Try to find the built binary. It's likely in src/target/release or just target/release depending on workspace context
+           $SEARCHER_BIN = Get-ChildItem -Path "$SEARCHER_SRC_DIR/target/release/CodeSearcher.exe" -ErrorAction SilentlyContinue
+           if (-not $SEARCHER_BIN) {
+                # Fallback search
+                $SEARCHER_BIN = Get-ChildItem -Path "$SEARCHER_SRC_DIR/../target/release/CodeSearcher.exe" -ErrorAction SilentlyContinue
+           }
+           
+           if ($SEARCHER_BIN) {
+               Write-Host "Found CodeSearcher binary at $($SEARCHER_BIN.FullName)"
+               Copy-Item -Path $SEARCHER_BIN.FullName -Destination "$SEARCHER_TARGET_DIR/CodeSearcher.exe" -Force
+               Write-Host "CodeSearcher.exe deployed to $SEARCHER_TARGET_DIR"
+           } else {
+               # If strictly required, fail here. Or just warn.
+               Write-Warning "CodeSearcher binary not found after build!"
+               # Try to list directories to help debug if it fails
+               Get-ChildItem -Path "$SEARCHER_SRC_DIR" -Recurse -Filter "CodeSearcher.exe"
+           }
+
       - name: install frontend dependencies
         run: npm install
 

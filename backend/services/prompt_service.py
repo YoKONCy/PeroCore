@@ -19,52 +19,52 @@ class PromptManager:
     """
     
     def __init__(self):
-        # Initialize MDP
-        # Assumes prompts are located in ./mdp/prompts relative to this file
+        # 初始化 MDP
+        # 假设提示位于相对于此文件的 ./mdp/prompts 中
         mdp_dir = os.path.join(os.path.dirname(__file__), "mdp", "prompts")
         self.mdp = MDPManager(mdp_dir)
 
     def build_system_prompt(self, variables: Dict[str, Any], is_social_mode: bool = False) -> str:
-        # 0. Check Lightweight Mode
+        # 0. 检查轻量级模式
         config = get_config_manager()
         is_lightweight = config.get("lightweight_mode", False)
 
-        # 1. Construct Abilities String
+        # 1. 构建能力字符串
         enable_vision = variables.get("enable_vision", False)
         enable_voice = variables.get("enable_voice", False)
         enable_video = variables.get("enable_video", False)
         
-        # [Social Mode Override]
+        # [社交模式覆盖]
         if is_social_mode:
-            # Disable NIT Protocol and Thinking Constraints
+            # 禁用 NIT 协议和思考约束
             variables["ability_nit"] = ""
             variables["output_constraint"] = ""
-            variables["ability"] = "" # Also disable workspace tools
-            # We keep abilities for sensory (Vision/Voice) if enabled, as Pero might still "see" images sent in chat
-            # But we suppress complex tool descriptions
+            variables["ability"] = "" # 同时禁用工作区工具
+            # 如果启用了感官（视觉/语音），我们保留这些能力，因为 Pero 仍然可能“看到”聊天中发送的图像
+            # 但我们抑制复杂的工具描述
         
-        # [Lightweight Mode Override]
+        # [轻量级模式覆盖]
         if is_lightweight and not is_social_mode:
-            # Disable COT (Thinking blocks)
+            # 禁用 COT（思考块）
             variables["output_constraint"] = ""
             
-            # Simplify NIT Ability (Remove ReAct process/logic)
+            # 简化 NIT 能力（移除 ReAct 流程/逻辑）
             nit_prompt = self.mdp.get_prompt("ability_nit")
             if nit_prompt:
                 content = nit_prompt.content
-                # Remove "### 3. 执行逻辑与思考" section and its content
+                # 移除 "### 3. 执行逻辑与思考" 部分及其内容
                 content = re.sub(r'### 3\. 执行逻辑与思考[\s\S]*?(?=### 4\.|$)', '', content)
-                # Remove mentions of "Thinking" or "Reasoning" in the text if any
+                # 如果文本中有提及，则移除“Thinking”或“Reasoning”
                 content = content.replace("在执行任何外部操作时，必须遵循‘思考-行动-观察’的循环。", "")
                 variables["ability_nit"] = content
         
         abilities_parts = []
         
-        # [Modified] Only inject sensory abilities if NOT in social mode
+        # [修改] 仅在非社交模式下注入感官能力
         if not is_social_mode:
-            # Vision
+            # 视觉
             if enable_vision:
-                # Check if prompt exists to avoid errors, fallback if needed
+                # 检查提示是否存在以避免错误，如果需要则回退
                 prompt = self.mdp.get_prompt("ability_vision")
                 if prompt:
                     abilities_parts.append(prompt.content)
@@ -73,13 +73,13 @@ class PromptManager:
                 if prompt:
                     abilities_parts.append(prompt.content)
 
-            # Voice
+            # 语音
             if enable_voice:
                 prompt = self.mdp.get_prompt("ability_voice")
                 if prompt:
                     abilities_parts.append(prompt.content)
             
-            # Video
+            # 视频
             if enable_video:
                 prompt = self.mdp.get_prompt("ability_video")
                 if prompt:
@@ -87,7 +87,7 @@ class PromptManager:
 
         variables["abilities"] = "\n".join(abilities_parts)
         
-        # 2. Defaults
+        # 2. 默认值
         variables.setdefault("owner_name", "主人")
         variables.setdefault("user_persona", "未设定")
         variables.setdefault("mood", "开心")
@@ -95,17 +95,17 @@ class PromptManager:
         variables.setdefault("mind", "正在想主人...")
         variables.setdefault("vision_status", "")
         variables.setdefault("memory_context", "")
-        # output_constraint is handled by {{output_constraint}} inside system_template
+        # output_constraint 由 system_template 内的 {{output_constraint}} 处理
         
-        # Inject NIT Tools Description
+        # 注入 NIT 工具描述
         try:
             if not is_social_mode:
                 dispatcher = get_dispatcher()
-                # Default to Core tools
+                # 默认为核心工具
                 tools_desc = dispatcher.get_tools_description(category_filter='core')
                 
-                # Check for Work Mode
-                # Assume 'work_mode' boolean in variables or config
+                # 检查工作模式
+                # 假设变量或配置中有 'work_mode' 布尔值
                 if variables.get("work_mode_enabled", False):
                     tools_desc += "\n\n" + dispatcher.get_tools_description(category_filter='work')
                     
@@ -116,7 +116,7 @@ class PromptManager:
             print(f"[PromptManager] Error injecting NIT tools description: {e}")
             variables["nit_tools_description"] = "Error loading tools."
 
-        # Inject Chain Logic (Thinking Chain)
+        # 注入链逻辑（思维链）
         chain_name = variables.get("chain_name", "default")
         chain_content = ""
         try:
@@ -131,10 +131,10 @@ class PromptManager:
             
         variables["chain_logic"] = chain_content
 
-        # 3. Render
+        # 3. 渲染
         final_prompt = self.mdp.render("system_template", variables)
         
-        # [Lightweight Mode Reminder]
+        # [轻量级模式提醒]
         if is_lightweight:
             lightweight_reminder = "\n\n【重要系统提醒：轻量聊天模式已开启。为了节省系统资源，目前除了“视觉感知(ScreenVision)”、“形象管理(CharacterOps)”和“核心记忆(MemoryOps)”之外的所有高级工具已被临时禁用。此外，为了保持极速响应，请你跳过复杂的思考过程（Thinking），直接输出回复内容。如果你需要调用工具，请直接在回复中编写 NIT 脚本，无需多余的解释或分析。】"
             final_prompt += lightweight_reminder
@@ -148,13 +148,13 @@ class PromptManager:
         2. 合并变量
         3. 渲染
         """
-        # Get Configs
+        # 获取配置
         configs = {c.key: c.value for c in (await session.exec(select(Config))).all()}
         
         owner_name = configs.get("owner_name", "主人")
         user_persona = configs.get("user_persona", "未设定")
         
-        # Get Pet State
+        # 获取宠物状态
         from sqlmodel import desc
         import json
         state = (await session.exec(select(PetState).order_by(desc(PetState.updated_at)).limit(1))).first()

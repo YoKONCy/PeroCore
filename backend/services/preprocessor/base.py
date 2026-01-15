@@ -3,29 +3,29 @@ from typing import Dict, Any, List
 
 class BasePreprocessor(ABC):
     """
-    Abstract base class for all message preprocessors.
-    A preprocessor takes the current processing context, modifies it, and returns it.
+    所有消息预处理器的抽象基类。
+    预处理器接收当前处理上下文，对其进行修改，然后返回。
     """
 
     @property
     @abstractmethod
     def name(self) -> str:
-        """Return the unique name of the preprocessor."""
+        """返回预处理器的唯一名称。"""
         pass
 
     @abstractmethod
     async def process(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Process the context.
-        
+        处理上下文。
+
         Args:
-            context: A dictionary containing at least:
-                     - 'messages': List[Dict[str, str]] (The conversation history so far)
-                     - 'variables': Dict[str, Any] (Variables for prompt rendering)
-                     - 'session': AsyncSession (Database session)
-                     - 'user_input': str (The current user input, if any)
-                     
+            context: 一个字典，至少包含：
+                     - 'messages': List[Dict[str, str]] (目前的对话历史)
+                     - 'variables': Dict[str, Any] (用于提示词渲染的变量)
+                     - 'session': AsyncSession (数据库会话)
+                     - 'user_input': str (当前用户输入，如果有)
+
         Returns:
-            The modified context.
+            修改后的上下文。
         """
         pass

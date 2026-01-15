@@ -2,9 +2,9 @@ import os
 import asyncio
 from datetime import datetime
 
-# Define workspace root relative to this file
-# This file is in backend/utils/memory_file_manager.py
-# Workspace is in PeroCore/pero_workspace
+# 定义相对于此文件的工作区根目录
+# 此文件位于 backend/utils/memory_file_manager.py
+# 工作区位于 PeroCore/pero_workspace
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 WORKSPACE_ROOT = os.path.join(BASE_DIR, "pero_workspace")
 LOG_ROOT = os.path.join(WORKSPACE_ROOT, "log")
@@ -12,7 +12,7 @@ LOG_ROOT = os.path.join(WORKSPACE_ROOT, "log")
 class MemoryFileManager:
     @staticmethod
     def ensure_log_dirs():
-        """Ensure all log directories exist."""
+        """确保所有日志目录存在。"""
         categories = ["social_daily", "work_logs", "periodic_summaries"]
         for cat in categories:
             path = os.path.join(LOG_ROOT, cat)
@@ -21,10 +21,10 @@ class MemoryFileManager:
     @staticmethod
     async def save_log(category: str, filename: str, content: str) -> str:
         """
-        Save content to a markdown file.
-        Returns the absolute path of the saved file.
+        将内容保存到 markdown 文件。
+        返回已保存文件的绝对路径。
         """
-        # Ensure directories exist (lazy init)
+        # 确保目录存在（延迟初始化）
         MemoryFileManager.ensure_log_dirs()
         
         target_dir = os.path.join(LOG_ROOT, category)
@@ -34,12 +34,12 @@ class MemoryFileManager:
         if not filename.endswith(".md"):
             filename += ".md"
             
-        # Sanitize filename
+        # 净化文件名
         filename = "".join(c for c in filename if c.isalnum() or c in (' ', '-', '_', '.')).strip()
         
         filepath = os.path.join(target_dir, filename)
         
-        # Write file (in thread to avoid blocking loop)
+        # 写入文件（在线程中以避免阻塞循环）
         await asyncio.to_thread(MemoryFileManager._write_file, filepath, content)
         return filepath
 

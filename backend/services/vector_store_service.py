@@ -6,9 +6,9 @@ from services.embedding_service import embedding_service
 
 # 尝试导入 Rust 核心
 try:
-    # PeroCore Differentiator:
+    # PeroCore 差异化特性:
     # -------------------------------------------------------------------------
-    # Engineering Note on HNSW:
+    # 关于 HNSW 的工程说明:
     # 为什么不直接用 FAISS 或 Milvus？
     # 1. 动态更新：FAISS 的 HNSW 索引在频繁进行单条插入/删除时容易产生“索引空洞”，导致检索精度下降。
     #    我们的 Rust 实现采用了自定义的节点重平衡逻辑，支持真正的“增量式无限记忆”。
@@ -42,15 +42,15 @@ class VectorStoreService:
         self.tag_index_path = os.path.join(self.data_dir, "tags.index")
         self.tag_map_path = os.path.join(self.data_dir, "tags.json")
         
-        self.dimension = 384 # Default for text-embedding-ada-002 is 1536, but local models usually 384/768. 
-                             # TODO: Should detect from embedding service.
-                             # For now, assume 384 (MiniLM) or 1024 (BGE). 
-                             # Let's try to detect or lazy init.
+        self.dimension = 384 # text-embedding-ada-002 默认为 1536，但本地模型通常为 384/768。
+                             # TODO: 应该从 embedding service 检测。
+                             # 目前，假设为 384 (MiniLM) 或 1024 (BGE)。
+                             # 让我们尝试检测或延迟初始化。
         
         self.memory_index = None
         self.tag_index = None
         
-        # Tag Mapping
+        # 标签映射
         self.tag_map: Dict[str, int] = {} 
         self.tag_map_rev: Dict[int, str] = {}
         self.next_tag_id = 1
@@ -62,8 +62,8 @@ class VectorStoreService:
         if not RUST_AVAILABLE: return
         if self._lazy_loaded: return
         
-        # Detect dimension from embedding service if possible
-        # We'll do a dummy encode to check dimension
+        # 如果可能，从 embedding service 检测维度
+        # 我们将执行一个虚拟编码来检查维度
         try:
             dummy_vec = embedding_service.encode_one("test")
             self.dimension = len(dummy_vec)
@@ -72,7 +72,7 @@ class VectorStoreService:
             print(f"[VectorStore] Failed to detect dimension: {e}. Using default 384.")
             self.dimension = 384
 
-        # Load Memory Index
+        # 加载记忆索引
         if os.path.exists(self.memory_index_path):
             try:
                 self.memory_index = SemanticVectorIndex.load_index(self.memory_index_path, self.dimension)
@@ -83,7 +83,7 @@ class VectorStoreService:
         else:
             self.memory_index = SemanticVectorIndex(self.dimension, 10000)
 
-        # Load Tag Index
+        # 加载标签索引
         if os.path.exists(self.tag_index_path):
             try:
                 self.tag_index = SemanticVectorIndex.load_index(self.tag_index_path, self.dimension)
@@ -93,7 +93,7 @@ class VectorStoreService:
         else:
             self.tag_index = SemanticVectorIndex(self.dimension, 1000)
 
-        # Load Tag Map
+        # 加载标签映射
         if os.path.exists(self.tag_map_path):
             try:
                 with open(self.tag_map_path, 'r', encoding='utf-8') as f:
@@ -129,10 +129,10 @@ class VectorStoreService:
         
         try:
             self.memory_index.insert_vector(memory_id, embedding)
-            # Auto-save is expensive if done every time, but safe. 
-            # Given Rust save is atomic and fast for small files, we can do it.
-            # Or rely on periodic save / application exit save.
-            # For now, let's just save.
+            # 每次都自动保存开销很大，但很安全。
+            # 鉴于 Rust 保存是原子的，并且对于小文件很快，我们可以这样做。
+            # 或者依赖定期保存/程序退出保存。
+            # 目前，我们直接保存。
             self.save()
         except Exception as e:
             print(f"[VectorStore] Add memory failed: {e}")
@@ -143,7 +143,7 @@ class VectorStoreService:
         if not self.memory_index: return
         
         try:
-            # Rust supports batch add
+            # Rust 支持批量添加
             self.memory_index.batch_insert_vectors(ids, embeddings)
             self.save()
         except Exception as e:
@@ -151,26 +151,27 @@ class VectorStoreService:
 
     def search_memory(self, query_vec: List[float], limit: int = 10) -> List[Dict]:
         """
-        Search memory
-        Returns: [{"id": int, "score": float}, ...]
+        搜索记忆
+        返回: [{"id": int, "score": float}, ...]
         """
         self._ensure_loaded()
         if not self.memory_index: return []
         
         try:
-            # Rust returns [(id, dist), ...]
+            # Rust 返回 [(id, dist), ...]
             results = self.memory_index.search_similar_vectors(query_vec, limit)
             
             output = []
             for mid, dist in results:
-                # Convert L2 distance to similarity score (approx)
-                # Since we use Cosine/L2sq. If vectors are normalized, L2 = 2(1-cos).
-                # Sim = 1 - dist/2 ? Or just use 1/(1+dist).
-                # Assuming standard usearch metric.
-                # Let's just return score = 1.0 - dist (clamped to 0) if it's cosine distance
-                # But L2sq can be > 1.
-                # Let's assume normalized vectors.
-                sim = 1.0 - (dist / 2.0) # Approx for normalized L2
+                # 将 L2 距离转换为相似度分数 (近似值)
+                # 因为我们使用 Cosine/L2sq。如果向量已归一化，L2 = 2(1-cos)。
+                # Sim = 1 - dist/2 ? 或者直接使用 1/(1+dist)。
+                # 假设使用标准的 usearch 度量。
+                # 如果是余弦距离，我们直接返回 score = 1.0 - dist (截断到 0)
+                # 但 L2sq 可能 > 1。
+                # 让我们假设向量已归一化。
+                # 归一化 L2 的近似值
+                sim = 1.0 - (dist / 2.0) 
                 output.append({
                     "id": mid,
                     "score": max(0.0, sim),
@@ -196,9 +197,9 @@ class VectorStoreService:
         if not tag_name: return
         
         if tag_name in self.tag_map:
-            # Already exists, maybe update vector?
+            # 已存在，也许更新向量？
             tid = self.tag_map[tag_name]
-            # self.tag_index.add(tid, embedding) # Update
+            # self.tag_index.add(tid, embedding) # 更新
         else:
             tid = self.next_tag_id
             self.next_tag_id += 1

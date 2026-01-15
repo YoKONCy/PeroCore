@@ -9,8 +9,8 @@ logger = logging.getLogger(__name__)
 
 class McpClient:
     """
-    MCP Client for Pero.
-    Supports connecting to MCP servers via HTTP (SSE) or Stdio (Subprocess).
+    Pero 的 MCP 客户端。
+    支持通过 HTTP (SSE) 或 Stdio (子进程) 连接到 MCP 服务器。
     """
     def __init__(
         self, 
@@ -18,9 +18,9 @@ class McpClient:
         timeout: float = 30.0
     ):
         """
-        :param config: Configuration dict.
-               For HTTP: {"type": "sse", "url": "...", "api_key": "..."}
-               For Stdio: {"type": "stdio", "command": "...", "args": [...], "env": {...}}
+        :param config: 配置字典。
+               HTTP 模式: {"type": "sse", "url": "...", "api_key": "..."}
+               Stdio 模式: {"type": "stdio", "command": "...", "args": [...], "env": {...}}
         """
         self.config = config
         self.name = config.get("name", "Unknown-MCP")
@@ -28,13 +28,13 @@ class McpClient:
         self._initialized = False
         self._request_id = 0
         
-        # Transport specific
+        # 传输方式特定配置
         self.transport_type = config.get("type", "sse")
         
-        # HTTP/SSE state
+        # HTTP/SSE 状态
         self.http_client = None
         
-        # Stdio state
+        # Stdio 状态
         self.process = None
         self.pending_requests: Dict[int, asyncio.Future] = {}
         self.read_task = None
@@ -61,29 +61,29 @@ class McpClient:
         if self.process: return
         
         loop = asyncio.get_running_loop()
-        logger.info(f"[MCP] Starting stdio process with loop: {loop.__class__.__name__}")
+        logger.info(f"[MCP] 正在使用 loop 启动 stdio 进程: {loop.__class__.__name__}")
         
         command = self.config.get("command")
         args = self.config.get("args", [])
         env_vars = self.config.get("env", {})
         
-        # Merge with current environment but allow override
+        # 合并当前环境变量，但允许覆盖
         current_env = os.environ.copy()
         current_env.update(env_vars)
         
-        # Debug: Check specific keys (masked)
+        # 调试：检查特定密钥（已脱敏）
         debug_env = {}
         for k, v in env_vars.items():
             if "KEY" in k.upper() or "TOKEN" in k.upper() or "SECRET" in k.upper():
                 debug_env[k] = f"{v[:4]}...{v[-4:]}" if v and len(v) > 8 else "***"
             else:
                 debug_env[k] = v
-        logger.info(f"[MCP] Starting process with extra env: {debug_env}")
+        logger.info(f"[MCP] 正在使用额外环境变量启动进程: {debug_env}")
 
         try:
             cmd_lower = command.lower().strip()
             if os.name == 'nt' and (cmd_lower == 'npx' or cmd_lower == 'npm'):
-                # On Windows, npx/npm are batch files, better to use shell
+                # 在 Windows 上，npx/npm 是批处理文件，最好使用 shell
                 full_command = f"{cmd_lower} {' '.join(args)}"
                 self.process = await asyncio.create_subprocess_shell(
                     full_command,
@@ -101,18 +101,18 @@ class McpClient:
                     env=current_env
                 )
             
-            # Start reader tasks
+            # 启动读取任务
             self.read_task = asyncio.create_task(self._stdio_reader())
             self.stderr_task = asyncio.create_task(self._stderr_reader())
             
-            logger.info(f"[MCP] Started stdio process: {command} {args} (shell={os.name == 'nt' and (command == 'npx' or command == 'npm')})")
+            logger.info(f"[MCP] 已启动 stdio 进程: {command} {args} (shell={os.name == 'nt' and (command == 'npx' or command == 'npm')})")
             
         except Exception as e:
-            logger.error(f"[MCP] Failed to start stdio process: {e}")
+            logger.error(f"[MCP] 启动 stdio 进程失败: {e}")
             raise
 
     async def _stderr_reader(self):
-        """Read stderr for logging"""
+        """读取 stderr 用于日志记录"""
         while True:
             try:
                 line = await self.process.stderr.readline()
@@ -123,8 +123,8 @@ class McpClient:
                     logger.warning(f"[MCP-STDERR] {line_str}")
                     print(f"[MCP-STDERR] {line_str}")
             except Exception as e:
-                logger.error(f"[MCP] Stderr reader error: {e}")
-                print(f"[MCP] Stderr reader error: {e}")
+                logger.error(f"[MCP] Stderr 读取错误: {e}")
+                print(f"[MCP] Stderr 读取错误: {e}")
                 break
 
     async def _stdio_reader(self):
@@ -158,13 +158,13 @@ class McpClient:
                         logger.debug(f"[MCP] Notification: {data}")
                         
                 except json.JSONDecodeError:
-                    logger.warning(f"[MCP] Invalid JSON from stdio: {line_str}")
+                    logger.warning(f"[MCP] 来自 stdio 的无效 JSON: {line_str}")
                     
             except Exception as e:
-                logger.error(f"[MCP] Reader error: {e}")
+                logger.error(f"[MCP] 读取器错误: {e}")
                 break
         
-        logger.info("[MCP] Stdio reader terminated")
+        logger.info("[MCP] Stdio 读取器已终止")
 
     async def _mcp_request(self, method: str, params: Dict[str, Any] = None) -> Any:
         req_id = self._next_request_id()
@@ -192,7 +192,7 @@ class McpClient:
             except asyncio.TimeoutError:
                 if req_id in self.pending_requests:
                     del self.pending_requests[req_id]
-                raise TimeoutError(f"MCP Request {method} timed out")
+                raise TimeoutError(f"MCP 请求 {method} 超时")
                 
         else: # SSE / HTTP
             try:
@@ -202,7 +202,7 @@ class McpClient:
                 content_type = resp.headers.get('content-type', '')
                 
                 if 'text/event-stream' in content_type:
-                    # SSE parsing (Simulated for single response)
+                    # SSE 解析（模拟单个响应）
                     response_text = resp.text
                     lines = response_text.split('\n')
                     for line in lines:
@@ -241,7 +241,7 @@ class McpClient:
             
             if result:
                 self._initialized = True
-                # Send initialized notification
+                # 发送初始化通知
                 if self.transport_type == "stdio":
                     notify_payload = {
                         "jsonrpc": "2.0",
@@ -252,7 +252,7 @@ class McpClient:
                 return True
             return False
         except Exception as e:
-            logger.error(f"[MCP] Initialization failed: {e}")
+            logger.error(f"[MCP] 初始化失败: {e}")
             return False
 
     async def list_tools(self) -> List[Dict[str, Any]]:

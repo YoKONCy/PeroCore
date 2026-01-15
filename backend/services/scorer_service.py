@@ -64,7 +64,7 @@ class ScorerService:
                 "temperature": 0.3 # Scorer 需要相对客观
             }
         else:
-            # Fallback to a default low-cost model or the user's main model if no scorer specific config
+            # 如果没有特定于评分者的配置，则回退到默认的低成本模型或用户的主模型
             return {
                 "api_key": global_api_key,
                 "api_base": global_api_base,
@@ -78,7 +78,7 @@ class ScorerService:
             return
         
         try:
-            # Construct the update statement
+            # 构建更新语句
             # 兼容性修复：SQLModel/SQLAlchemy update 语句在不同版本中的行为差异
             # 使用 session.execute + update() 对象是比较稳妥的方式
             
@@ -118,7 +118,7 @@ class ScorerService:
 
     async def retry_interaction(self, log_id: int):
         """重试指定日志的分析任务"""
-        # Find the log
+        # 查找日志
         log = await self.session.get(ConversationLog, log_id)
         if not log:
             print(f"[秘书] Log {log_id} not found")
@@ -128,7 +128,7 @@ class ScorerService:
             print(f"[秘书] Log {log_id} has no pair_id, cannot retry")
             return False
             
-        # Find the pair
+        # 查找配对
         statement = select(ConversationLog).where(ConversationLog.pair_id == log.pair_id)
         results = (await self.session.exec(statement)).all()
         
@@ -137,8 +137,8 @@ class ScorerService:
         
         if not user_msg or not assistant_msg:
              print(f"[秘书] Incomplete pair for {log.pair_id}")
-             # If we have at least one, we might try? But user_content and assistant_content are required.
-             # If only one exists, we can't really do "interaction analysis".
+             # 如果我们至少有一个，我们可能会尝试？但是 user_content 和 assistant_content 是必需的。
+             # 如果只有一个存在，我们实际上无法进行“交互分析”。
              return False
              
         await self.process_interaction(
@@ -155,7 +155,7 @@ class ScorerService:
         """
         print(f"[秘书] Starting interaction analysis... (pair_id: {pair_id})", flush=True)
         
-        # Smart Clean Assistant Content to remove data dumps
+        # 智能清理助手内容以删除数据转储
         assistant_content = self._smart_clean_text(assistant_content)
         
         if pair_id:
@@ -175,7 +175,7 @@ class ScorerService:
             model=config["model"]
         )
         
-        # Load system prompt from file or fallback to default
+        # 从文件加载系统提示或回退到默认值
         try:
             if os.path.exists(self.prompt_path):
                 with open(self.prompt_path, "r", encoding="utf-8") as f:
@@ -285,7 +285,7 @@ AI (Pero): {assistant_content}
                 print("[秘书] No meaningful memory content extracted (ignored).")
                 return
 
-            # Save to Memory using Service (handles VectorDB and Cluster Indexing)
+            # 使用服务保存到内存（处理 VectorDB 和聚类索引）
             clusters_list = data.get("clusters", [])
             clusters_str = ",".join(clusters_list) if isinstance(clusters_list, list) else str(clusters_list)
             tags_str = ",".join(data.get("tags", [])) if isinstance(data.get("tags"), list) else str(data.get("tags", ""))
@@ -319,7 +319,7 @@ AI (Pero): {assistant_content}
                 except Exception as meta_err:
                     print(f"[秘书] Failed to update log metadata: {meta_err}")
 
-            # Note: save_memory already commits, but update_log needs commit if not included
+            # 注意：save_memory 已经提交，但如果未包含，update_log 需要提交
             await self.session.commit()
             print(f"[秘书] Memory saved successfully: {data['content']}")
             

@@ -14,7 +14,7 @@ import json
 # [Global State] 高性能 Rust 引擎单例
 # PEDSA (Parallel Energy-Decay Spreading Activation) 算法核心实现
 # -------------------------------------------------------------------------
-# Engineering Note: 
+# 工程说明：
 # 为什么不用标准的图数据库（如 Neo4j）？
 # 1. 延迟：Neo4j 的 Cypher 查询在处理这种“无限扩散”时会产生大量随机 IO，导致 10 步以上的扩散延迟超过 500ms。
 # 2. 内存：我们需要在边缘侧（用户 PC）运行。通过 Rust 实现的类 CSR (Simulated CSR) 稀疏矩阵，我们将 100 亿个关联的内存占用压到了 2GB 以内。
@@ -37,7 +37,7 @@ async def get_rust_engine(session: AsyncSession):
         _rust_engine.configure(max_active_nodes=10000, max_fan_out=20)
         
         # 预加载所有关系 (采用分批加载策略，防止内存溢出或进程卡死)
-        # Preload all relations (Batch loading to prevent OOM or freezing)
+        # 预加载所有关系 (分批加载以防止内存溢出或冻结)
         # 优化说明：
         # 1. 使用 offset/limit 分页读取数据库，避免一次性将百万级数据加载到 Python 内存。
         # 2. 分批次调用 Rust 引擎的 batch_add_connections，降低 FFI 调用的瞬时负载。
@@ -127,7 +127,7 @@ class MemoryService:
         memory = Memory(
             content=content,
             tags=tags,
-            clusters=clusters, # Save clusters
+            clusters=clusters, # 保存簇
             importance=importance,
             base_importance=base_importance,
             sentiment=sentiment,
@@ -178,7 +178,7 @@ class MemoryService:
                         except Exception as tag_e:
                             print(f"[MemoryService] Failed to index tags: {tag_e}")
                 
-                # Construct metadata
+                # 构建元数据
                 metadata_dict = {
                     "type": memory_type,
                     "timestamp": memory.timestamp,
@@ -187,12 +187,12 @@ class MemoryService:
                     "clusters": clusters
                 }
                 
-                # [Feature] Thinking Pipeline: Explode clusters for precise filtering
+                # [特性] 思考管道：展开簇以进行精确过滤
                 # clusters="[逻辑推理簇],[反思簇]" -> metadata={"cluster_逻辑推理簇": True, "cluster_反思簇": True}
                 if clusters:
                     cluster_list = [c.strip() for c in clusters.split(',') if c.strip()]
                     for c in cluster_list:
-                        # Remove brackets if present
+                        # 如果存在括号则移除
                         clean_c = c.replace('[', '').replace(']', '')
                         if clean_c:
                             metadata_dict[f"cluster_{clean_c}"] = True
@@ -244,7 +244,7 @@ class MemoryService:
             session_id=session_id,
             role=role,
             content=cleaned_content,
-            raw_content=raw_content, # Save raw content
+            raw_content=raw_content, # 保存原始内容
             metadata_json=json.dumps(metadata or {}),
             pair_id=pair_id
         )
@@ -256,7 +256,7 @@ class MemoryService:
     async def save_log_pair(session: AsyncSession, source: str, session_id: str, user_content: str, assistant_content: str, pair_id: str, metadata: dict = None, assistant_raw_content: str = None):
         """原子性保存用户消息与助手回复成对记录"""
         try:
-            # [Feature] System Trigger Role Correction
+            # [特性] 系统触发角色修正
             # 如果内容以【系统触发】开头，则将角色修正为 system
             user_role = "user"
             if user_content and user_content.startswith("【系统触发】"):
@@ -265,7 +265,7 @@ class MemoryService:
             # 创建用户消息记录
             user_log = await MemoryService.save_log(session, source, session_id, user_role, user_content, metadata, pair_id)
             # 创建助手消息记录
-            # Pass raw content for assistant
+            # 为助手传递原始内容
             assistant_log = await MemoryService.save_log(session, source, session_id, "assistant", assistant_content, metadata, pair_id, raw_content=assistant_raw_content)
             
             await session.commit()
@@ -285,8 +285,8 @@ class MemoryService:
         limit: int = 10
     ) -> List[ConversationLog]:
         """
-        Search conversation logs by keyword.
-        Supports filtering by source (e.g., 'qq_%' for all qq logs).
+        按关键字搜索对话记录。
+        支持按来源过滤（例如，'qq_%' 表示所有 qq 记录）。
         """
         statement = select(ConversationLog).order_by(desc(ConversationLog.timestamp))
         
@@ -482,13 +482,13 @@ class MemoryService:
         limit: int = 5,
         query_vec: Optional[List[float]] = None,
         exclude_after_time: Optional[datetime] = None,
-        update_access_stats: bool = True # New param to control side effects
+        update_access_stats: bool = True # 新增参数以控制副作用
     ) -> List[Memory]:
         """
-        [Chain-Net Retrieval V3] (VectorDB Enabled + Cluster Soft-Weighted)
-        1. Embedding Search (VectorDB)
-        2. Spreading Activation (Chain)
-        3. Reranking with Cluster Soft-Weighted
+        [链网检索 V3] (启用 VectorDB + 簇软加权)
+        1. 嵌入搜索 (VectorDB)
+        2. 扩散激活 (链)
+        3. 簇软加权重排序
         """
         from services.embedding_service import embedding_service
         from services.vector_service import vector_service
@@ -610,7 +610,7 @@ class MemoryService:
             if anchor.next_id:
                 rust_relations.append((anchor.id, anchor.next_id, 0.2))
 
-        # [Rust Integration] Optimized for 1M+ nodes
+        # [Rust 集成] 针对百万级节点优化
         try:
             engine = await get_rust_engine(session)
             if engine:
@@ -624,14 +624,14 @@ class MemoryService:
                 )
                 activation_scores = new_scores
             else:
-                # Fallback logic if engine is unavailable
+                # 引擎不可用时的回退逻辑
                 pass
         except Exception as e:
             print(f"[Memory] Rust engine runtime error: {e}. Falling back.")
-            # [Fallback to Python]
+            # [回退到 Python]
             # print("[Memory] Rust engine not found. Using Python fallback.")
             relation_map = {}
-            for rel in all_relations: # Re-use DB results
+            for rel in all_relations: # 重用数据库结果
                 if rel.source_id in activation_scores:
                     relation_map.setdefault(rel.source_id, []).append(rel)
                 if rel.target_id in activation_scores:
@@ -658,7 +658,7 @@ class MemoryService:
             print(f"[Memory] Rust engine runtime error: {e}. Falling back to initial scores.")
             # 此时保持 activation_scores 不变（即仅使用向量搜索结果）
 
-        # 4. 综合排序 (Final Ranking) with Time Decay & Cluster Soft-Weighting
+        # 4. 综合排序 (最终排名) 带时间衰减和簇软加权
         # Score = (Sim * w1) + (ClusterBonus) + (Importance * w2) * Decay(t) + (Recency * w3)
         final_candidates = []
         current_time = datetime.now().timestamp() * 1000
@@ -671,13 +671,13 @@ class MemoryService:
             # 如果记忆的簇与当前意图簇匹配，给予额外加分
             cluster_bonus = 0.0
             if target_cluster and m.clusters and target_cluster in m.clusters:
-                cluster_bonus = 0.15 # +15% bonus for cluster match
+                cluster_bonus = 0.15 # 簇匹配增加 15% 奖励
                 # print(f"[Memory] Cluster Bonus Applied: +0.15 for {m.id} (Match: {target_cluster})")
             
             # 归一化重要性 (Importance)
             imp_score = min(m.base_importance, 10.0) / 10.0
             
-            # Ebbinghaus Decay: exp(-lambda * delta_t)
+            # 艾宾浩斯衰减: exp(-lambda * delta_t)
             time_diff_ms = max(0, current_time - m.timestamp)
             time_diff_days = time_diff_ms / (1000 * 3600 * 24)
             decay_factor = math.exp(-0.023 * time_diff_days) # 30天约衰减至 0.5
@@ -717,10 +717,10 @@ class MemoryService:
             final_memories = result_memories
 
         # [Hydrate] 如果是归档记忆，实时读取文件内容
-        # Pattern match for "> 📁 File Archived: path"
-        # Note: We do this synchronously for now as file IO is fast enough for small number of memories,
-        # or we can use aiofiles if needed. But MemoryFileManager uses blocking open in _write_file (wrapped in to_thread).
-        # Reading is safer to do here.
+        # 模式匹配 "> 📁 File Archived: path"
+        # 注意：目前我们同步执行此操作，因为对于少量记忆，文件 IO 足够快，
+        # 或者如果需要，我们可以使用 aiofiles。但 MemoryFileManager 在 _write_file (封装在 to_thread 中) 中使用阻塞打开。
+        # 在这里读取更安全。
         for m in result_memories:
             if "> 📁 File Archived:" in m.content:
                 try:
@@ -736,7 +736,7 @@ class MemoryService:
                 except Exception as e:
                     print(f"[MemoryService] Failed to hydrate archived memory {m.id}: {e}")
 
-        # [Fix] Update Access Stats (Reinforcement)
+        # [修复] 更新访问统计 (强化)
         # 只要被检索到并最终返回，就视为被"激活"了一次
         if update_access_stats and result_memories:
             # 同步等待更新完成，防止 session 提前关闭
@@ -757,7 +757,7 @@ class MemoryService:
         statement = select(Memory)
         
         if filter_criteria:
-            # Simple implementation for timestamp range
+            # 时间戳范围的简单实现
             # {"timestamp": {"$lt": ...}}
             ts_filter = filter_criteria.get("timestamp")
             if ts_filter and isinstance(ts_filter, dict):
@@ -768,13 +768,13 @@ class MemoryService:
                 if gt_val:
                     statement = statement.where(Memory.timestamp > gt_val)
                     
-            # TODO: Handle other filters like tags/clusters if needed
+            # TODO: 如果需要，处理其他过滤器，如标签/簇
         
         statement = statement.order_by(desc(Memory.timestamp)).limit(limit)
         results = await session.exec(statement)
         memories = results.all()
         
-        # Convert to dict format expected by ChainService
+        # 转换为 ChainService 期望的字典格式
         output = []
         for m in memories:
             output.append({
@@ -801,15 +801,15 @@ class MemoryService:
         """
         from services.vector_service import vector_service
         
-        # 1. Search VectorDB (Get more candidates to allow filtering)
-        # HACK: Rust index doesn't support pre-filter, so we fetch more and post-filter.
+        # 1. 搜索 VectorDB (获取更多候选以允许过滤)
+        # HACK: Rust 索引不支持预过滤，所以我们获取更多并进行后过滤。
         candidates = vector_service.search(query_vec, limit=limit * 5)
         if not candidates: return []
         
         ids = [c["id"] for c in candidates]
         score_map = {c["id"]: c["score"] for c in candidates}
         
-        # 2. Fetch from DB with Filter
+        # 2. 从带过滤器的 DB 中获取
         statement = select(Memory).where(Memory.id.in_(ids))
         
         if filter_criteria:
@@ -822,7 +822,7 @@ class MemoryService:
         results = await session.exec(statement)
         memories = results.all()
         
-        # 3. Format
+        # 3. 格式化
         output = []
         for m in memories:
             output.append({
@@ -835,7 +835,7 @@ class MemoryService:
                 }
             })
             
-        # Sort by score
+        # 按分数排序
         output.sort(key=lambda x: x["score"], reverse=True)
         return output[:limit]
 
@@ -894,7 +894,7 @@ class MemoryService:
         
         statement = select(Memory)
         
-        # Date Filter (using timestamp ms)
+        # 日期过滤器 (使用时间戳 ms)
         if date_start:
             try:
                 start_dt = datetime.strptime(date_start, "%Y-%m-%d")
@@ -906,13 +906,13 @@ class MemoryService:
         if date_end:
             try:
                 end_dt = datetime.strptime(date_end, "%Y-%m-%d")
-                # Add one day to include the end date fully
+                # 增加一天以完全包含结束日期
                 end_ms = (end_dt.timestamp() + 86400) * 1000
                 statement = statement.where(Memory.timestamp < end_ms)
             except Exception as e:
                 print(f"[MemoryService] Invalid end date: {e}")
         
-        # Tags Filter (simple string containment)
+        # 标签过滤器 (简单的字符串包含)
         if tags:
             tag_list = [t.strip() for t in tags.split(',') if t.strip()]
             for tag in tag_list:
@@ -923,65 +923,65 @@ class MemoryService:
 
     @staticmethod
     async def get_tag_cloud(session: AsyncSession) -> Dict[str, int]:
-        """Fetch high frequency tags"""
-        # Optimized: Fetch only tags column
+        """获取高频标签"""
+        # 优化：仅获取 tags 列
         statement = select(Memory.tags)
         results = (await session.exec(statement)).all()
         
         tag_counts = {}
         for tags_str in results:
             if not tags_str: continue
-            # Handle both English and Chinese commas
+            # 处理中英文逗号
             normalized_tags = tags_str.replace('，', ',')
             for tag in normalized_tags.split(','):
                 t = tag.strip()
                 if t:
                     tag_counts[t] = tag_counts.get(t, 0) + 1
         
-        # Sort by frequency desc
+        # 按频率降序排序
         return dict(sorted(tag_counts.items(), key=lambda item: item[1], reverse=True))
 
     @staticmethod
     async def get_memory_graph(session: AsyncSession, limit: int = 200) -> Dict[str, Any]:
-        """Return nodes and edges for graph visualization (Enhanced for Cool UI)"""
-        # Fetch recent N memories
+        """返回用于图形可视化的节点和边 (针对酷炫 UI 增强)"""
+        # 获取最近 N 条记忆
         memories = (await session.exec(select(Memory).order_by(desc(Memory.timestamp)).limit(limit))).all()
         if not memories:
             return {"nodes": [], "edges": []}
             
         memory_ids = [m.id for m in memories]
         
-        # Fetch relations connecting these memories
+        # 获取连接这些记忆的关系
         relations = (await session.exec(select(MemoryRelation).where(
             (MemoryRelation.source_id.in_(memory_ids)) | (MemoryRelation.target_id.in_(memory_ids))
         ))).all()
         
-        # Format for frontend (ECharts Force Graph)
+        # 格式化为前端格式 (ECharts 力导向图)
         nodes = []
         for m in memories:
-            # Calculate symbol size based on importance and access_count
-            # Base size 10, max importance 10 -> +20, max access log scale -> +10
+            # 根据重要性和访问计数计算符号大小
+            # 基础大小 10，最大重要性 10 -> +20，最大访问对数刻度 -> +10
             import math
             size = 10 + (m.importance * 2) + (math.log(m.access_count + 1) * 5)
-            size = min(size, 60) # Cap size
+            size = min(size, 60) # 限制大小
 
             nodes.append({
                 "id": m.id,
-                "name": str(m.id), # Unique name for ECharts
+                "name": str(m.id), # ECharts 的唯一名称
                 "label": {
-                    "show": size > 15, # Only show label for important nodes
+                    "show": size > 15, # 仅显示重要节点的标签
                     "formatter": m.content[:10] + "..." if len(m.content) > 10 else m.content
                 },
                 "full_content": m.content,
-                "category": m.type, # event, fact, etc.
+                "category": m.type, # 事件、事实等
                 "value": m.importance,
                 "symbolSize": size,
                 "sentiment": m.sentiment,
                 "tags": m.tags,
                 "realTime": m.realTime,
                 "access_count": m.access_count,
-                # ECharts specific styles per node can be added here if needed, 
-                # but better handled in frontend with categories/visualMap
+                # 如果需要，可以在此处添加每个节点的 ECharts 特定样式，
+                # 但最好在前端使用 categories/visualMap 处理
             })
             
         edges = []
@@ -997,7 +997,7 @@ class MemoryService:
                         "value": r.strength,
                         "relation_type": r.relation_type,
                         "lineStyle": {
-                            "width": 1 + (r.strength * 4), # 1px to 5px
+                            "width": 1 + (r.strength * 4), # 1px 到 5px
                             "curveness": 0.2
                         },
                         "tooltip": {
@@ -1006,7 +1006,7 @@ class MemoryService:
                     })
                     added_edges.add(edge_key)
                 
-        # Chronological edges (Next/Prev) - Make them subtle
+        # 时间顺序边 (Next/Prev) - 使它们变得微妙
         for m in memories:
             if m.prev_id and m.prev_id in memory_ids:
                  edge_key = f"{m.prev_id}-{m.id}"

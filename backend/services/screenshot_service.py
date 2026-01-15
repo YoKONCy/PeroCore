@@ -19,7 +19,7 @@ class ScreenshotManager:
             start_time = time.time()
             screenshot = pyautogui.screenshot()
             
-            # [Optimization] Resize if larger than 1080p to improve performance
+            # [优化] 如果大于 1080p 则调整大小以提高性能
             if screenshot.width > 1920 or screenshot.height > 1080:
                 screenshot.thumbnail((1920, 1080))
             

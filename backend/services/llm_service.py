@@ -52,7 +52,7 @@ class LLMService:
         if response_format:
             payload["response_format"] = response_format
         
-        # Debug: Print payload structure (without large base64 data)
+        # 调试：打印 payload 结构（不包含大型 base64 数据）
         debug_payload = json.loads(json.dumps(payload))
         for msg in debug_payload.get("messages", []):
             content = msg.get("content")
@@ -62,7 +62,7 @@ class LLMService:
                         item["input_audio"]["data"] = f"<{len(item['input_audio']['data'])} bytes base64>"
                     elif item.get("type") == "image_url":
                         item["image_url"]["url"] = f"<{len(item['image_url']['url'])} bytes data_url>"
-        print(f"[LLM] Request Payload: {json.dumps(debug_payload, indent=2, ensure_ascii=False)}")
+        print(f"[LLM] 请求 Payload: {json.dumps(debug_payload, indent=2, ensure_ascii=False)}")
 
         if tools:
             payload["tools"] = tools
@@ -71,7 +71,7 @@ class LLMService:
             response = await client.post(url, headers=headers, json=payload)
             if response.status_code != 200:
                 error_text = response.text
-                # Sanitize HTML errors
+                # 清洗 HTML 错误
                 if "<html" in error_text.lower() or "<!doctype" in error_text.lower():
                     import re
                     title_match = re.search(r'<title>(.*?)</title>', error_text, re.IGNORECASE)
@@ -80,8 +80,8 @@ class LLMService:
                     else:
                         error_text = f"Network Error ({response.status_code}): HTML Response"
                 
-                print(f"[LLM] Error Response: {error_text}")
-                raise Exception(f"LLM Error: {response.status_code} - {error_text}")
+                print(f"[LLM] 错误响应: {error_text}")
+                raise Exception(f"LLM 错误: {response.status_code} - {error_text}")
             return response.json()
 
     async def _chat_gemini(self, messages: List[Dict[str, Any]], temperature: float = 0.7, tools: List[Dict] = None) -> Dict[str, Any]:
@@ -163,7 +163,7 @@ class LLMService:
                 }]
             }
         except Exception as e:
-            print(f"[Gemini] Error: {e}")
+            print(f"[Gemini] 错误: {e}")
             raise
 
     def _convert_to_genai_contents(self, messages: List[Dict[str, Any]]) -> List[types.Content]:
@@ -171,7 +171,7 @@ class LLMService:
         contents = []
         for msg in messages:
             role = msg["role"]
-            # GenAI roles: user, model, system
+            # GenAI 角色：user, model, system
             if role == "assistant":
                 role = "model"
             elif role == "tool":
@@ -216,7 +216,7 @@ class LLMService:
                                     )
                                 ))
                             except Exception as e:
-                                print(f"[Gemini] Audio decode error: {e}")
+                                print(f"[Gemini] 音频解码错误: {e}")
                         elif item["type"] == "image_url":
                             try:
                                 url = item["image_url"]["url"]
@@ -230,7 +230,7 @@ class LLMService:
                                         )
                                     ))
                             except Exception as e:
-                                print(f"[Gemini] Image decode error: {e}")
+                                print(f"[Gemini] 图片解码错误: {e}")
 
             # 3. 处理 tool 响应 (Tool 输出)
             if msg["role"] == "tool":
@@ -327,7 +327,7 @@ class LLMService:
             print(f"[Gemini Stream] Error: {e}")
             yield {"content": f"Error: {str(e)}"}
 
-    # --- Anthropic (Claude) Support ---
+    # --- Anthropic (Claude) 支持 ---
 
     async def _chat_anthropic(self, messages: List[Dict[str, Any]], temperature: float = 0.7, tools: List[Dict] = None) -> Dict[str, Any]:
         """Anthropic 原生 API 调用"""
@@ -359,13 +359,13 @@ class LLMService:
         if anthropic_tools:
             payload["tools"] = anthropic_tools
 
-        print(f"[Anthropic] Request Payload: {json.dumps({k:v for k,v in payload.items() if k!='messages'}, indent=2)}")
+        print(f"[Anthropic] 请求 Payload: {json.dumps({k:v for k,v in payload.items() if k!='messages'}, indent=2)}")
 
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(url, headers=headers, json=payload)
             if response.status_code != 200:
-                print(f"[Anthropic] Error Response: {response.text}")
-                raise Exception(f"Anthropic Error: {response.status_code} - {response.text}")
+                print(f"[Anthropic] 错误响应: {response.text}")
+                raise Exception(f"Anthropic 错误: {response.status_code} - {response.text}")
             
             data = response.json()
             
@@ -408,20 +408,20 @@ class LLMService:
         anthropic_tools = self._convert_tools_to_anthropic(tools)
 
         url = "https://api.anthropic.com/v1/messages"
-        # Check if api_base is custom
-        # Note: self.api_base might be the instance one, but we should use the passed one if we were inside the method, 
-        # but here we use 'api_base' arg passed to this function.
-        # But wait, self.api_base is available. Let's check logic.
-        # The args passed are overrides.
+        # 检查 api_base 是否为自定义
+        # 注意：self.api_base 可能是实例的，但如果在方法内部，我们应该使用传入的，
+        # 但这里我们使用传递给此函数的 'api_base' 参数。
+        # 等等，self.api_base 是可用的。让我们检查一下逻辑。
+        # 传入的参数是覆盖项。
         
         base_url = self.api_base
-        # logic from chat_stream_deltas:
+        # 来自 chat_stream_deltas 的逻辑：
         # api_base = model_config.api_base ...
-        # But here we don't have model_config passed, we have api_key.
-        # We should probably use self.api_base if api_key matches self.api_key, or just assume standard if not provided.
-        # Actually, let's just use hardcoded standard unless self.api_base is set to something else.
+        # 但这里我们没有传递 model_config，我们有 api_key。
+        # 如果 api_key 匹配 self.api_key，我们可能应该使用 self.api_base，或者如果没有提供则假设为标准。
+        # 实际上，除非 self.api_base 设置为其他内容，否则我们只使用硬编码的标准。
         if hasattr(self, 'api_base') and self.api_base and "api.openai.com" not in self.api_base:
-             # If user set a custom base for this provider
+             # 如果用户为此提供商设置了自定义 base
              base_url = self.api_base
         else:
              base_url = "https://api.anthropic.com"
@@ -454,7 +454,7 @@ class LLMService:
         async with httpx.AsyncClient(timeout=60.0) as client:
             async with client.stream("POST", url, headers=headers, json=payload) as response:
                 if response.status_code != 200:
-                    yield {"content": f"Error: {response.status_code} - {await response.aread()}"}
+                    yield {"content": f"错误: {response.status_code} - {await response.aread()}"}
                     return
 
                 async for line in response.aiter_lines():
@@ -473,17 +473,17 @@ class LLMService:
                             delta = event_data.get("delta", {})
                             if delta.get("type") == "text_delta":
                                 yield {"content": delta.get("text", "")}
-                            # Tool use delta handling is complex in Anthropic (json patching)
-                            # For now, simplistic support or ignore partial tool args if complex
+                            # Anthropic 中的工具使用增量处理很复杂 (json patching)
+                            # 目前仅支持简单处理，如果复杂则忽略部分工具参数
                             
                         elif type_ == "message_delta":
-                            # stop_reason, usage, etc.
+                            # stop_reason, usage 等
                             pass
                             
-                        # Note: Anthropic streams tool calls differently.
-                        # Supporting streaming tool calls requires state machine to reconstruct JSON.
-                        # For simplicity in this iteration, we might not support streaming tool calls fully 
-                        # or we just rely on the text content if thinking process is text.
+                        # 注意：Anthropic 流式工具调用方式不同。
+                        # 支持流式工具调用需要状态机来重构 JSON。
+                        # 为了简化，本次迭代可能不会完全支持流式工具调用
+                        # 或者如果思考过程是文本，我们仅依赖文本内容。
                         
                     except Exception as e:
                         # print(f"Stream decode error: {e}")
@@ -506,8 +506,8 @@ class LLMService:
                 continue
                 
             if role == "tool":
-                # Anthropic uses 'user' role for tool results
-                # Content should be blocks
+                # Anthropic 使用 'user' 角色作为工具结果
+                # 内容应该是块
                 # [
                 #   {
                 #     "type": "tool_result",
@@ -515,8 +515,8 @@ class LLMService:
                 #     "content": "..."
                 #   }
                 # ]
-                # But we need tool_call_id from somewhere. 
-                # OpenAI messages have 'tool_call_id'.
+                # 但我们需要从某处获取 tool_call_id。
+                # OpenAI 消息包含 'tool_call_id'。
                 tool_call_id = msg.get("tool_call_id")
                 anthropic_msgs.append({
                     "role": "user",
@@ -528,7 +528,7 @@ class LLMService:
                 })
                 continue
 
-            # Assistant tool calls
+            # Assistant 工具调用
             if role == "assistant" and msg.get("tool_calls"):
                 blocks = []
                 if content:
@@ -545,8 +545,8 @@ class LLMService:
                 anthropic_msgs.append({"role": "assistant", "content": blocks})
                 continue
             
-            # Normal text messages
-            # Anthropic expects content to be string or list of blocks
+            # 普通文本消息
+            # Anthropic 期望内容为字符串或块列表
             anthropic_msgs.append({
                 "role": role,
                 "content": content
@@ -609,7 +609,7 @@ class LLMService:
                     
                     data = response.json()
                     model_list = []
-                    # Anthropic returns {"data": [...]}
+                    # Anthropic 返回 {"data": [...]}
                     if "data" in data and isinstance(data["data"], list):
                         model_list = data["data"]
                     
@@ -625,7 +625,7 @@ class LLMService:
                         "claude-3-haiku-20240307"
                     ]
             except Exception as e:
-                print(f"[Anthropic] Error listing models: {e}")
+                print(f"[Anthropic] 获取模型列表错误: {e}")
                 return [
                     "claude-3-5-sonnet-20240620",
                     "claude-3-opus-20240229",
@@ -642,15 +642,15 @@ class LLMService:
             headers["Authorization"] = f"Bearer {self.api_key}"
 
         try:
-            print(f"Fetching models from: {url}")
+            print(f"正在获取模型列表: {url}")
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.get(url, headers=headers)
-                print(f"Raw Response Status: {response.status_code}")
+                print(f"原始响应状态: {response.status_code}")
                 # 打印原始响应内容的前 500 个字符用于调试
-                print(f"Raw Response Body: {response.text[:500]}")
+                print(f"原始响应体: {response.text[:500]}")
                 
                 if response.status_code != 200:
-                    print(f"Remote API Error: {response.status_code} - {response.text}")
+                    print(f"远程 API 错误: {response.status_code} - {response.text}")
                     return []
                 
                 data = response.json()
@@ -674,11 +674,11 @@ class LLMService:
                     elif isinstance(m, dict) and "name" in m:
                         ids.append(m["name"])
                 
-                print(f"Found {len(ids)} models")
+                print(f"找到 {len(ids)} 个模型")
                 return sorted(list(set(ids))) # 去重并排序
         except Exception as e:
             import traceback
-            print(f"Error listing models: {traceback.format_exc()}")
+            print(f"获取模型列表错误: {traceback.format_exc()}")
             return []
 
     async def chat_stream(self, messages: List[Dict[str, Any]], temperature: float = 0.7, tools: List[Dict] = None, model_config: Any = None, stream: bool = True) -> AsyncIterable[str]:
@@ -730,7 +730,7 @@ class LLMService:
             "stream": stream
         }
         
-        # Debug: Print payload structure
+        # 调试：打印 payload 结构
         debug_payload = json.loads(json.dumps(payload))
         for msg in debug_payload.get("messages", []):
             content = msg.get("content")
@@ -740,7 +740,7 @@ class LLMService:
                         item["input_audio"]["data"] = f"<{len(item['input_audio']['data'])} bytes base64>"
                     elif item.get("type") == "image_url":
                         item["image_url"]["url"] = f"<{len(item['image_url']['url'])} bytes data_url>"
-        print(f"[LLM] Stream Request Payload: {json.dumps(debug_payload, indent=2, ensure_ascii=False)}")
+        print(f"[LLM] 流式请求 Payload: {json.dumps(debug_payload, indent=2, ensure_ascii=False)}")
 
         if tools:
             payload["tools"] = tools

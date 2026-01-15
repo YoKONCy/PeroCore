@@ -4,7 +4,7 @@ from typing import Dict, Optional, Callable, Awaitable
 from datetime import datetime
 from .models import SocialSession, SocialMessage
 
-# DB Imports for persistence
+# 用于持久化的数据库导入
 from database import engine
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlalchemy.orm import sessionmaker
@@ -15,16 +15,16 @@ logger = logging.getLogger(__name__)
 class SocialSessionManager:
     def __init__(self, flush_callback: Callable[[SocialSession], Awaitable[None]]):
         """
-        Args:
-            flush_callback: Async function to call when buffer is flushed.
+        参数：
+            flush_callback: 缓冲区刷新时调用的异步函数。
         """
         self.sessions: Dict[str, SocialSession] = {}
         self.flush_callback = flush_callback
         
-        # Configuration
-        self.BUFFER_TIMEOUT = 20  # seconds
-        self.BUFFER_MAX_SIZE = 10 # messages
-        self.ACTIVE_DURATION = 120 # seconds (Time to stay 'active' after speaking)
+        # 配置
+        self.BUFFER_TIMEOUT = 20  # 秒
+        self.BUFFER_MAX_SIZE = 10 # 条消息
+        self.ACTIVE_DURATION = 120 # 秒（发言后保持“活跃”的时间）
 
     def get_or_create_session(self, session_id: str, session_type: str, session_name: str = "") -> SocialSession:
         if session_id not in self.sessions:
@@ -37,46 +37,106 @@ class SocialSessionManager:
 
     async def _persist_message(self, session: SocialSession, msg: SocialMessage, role: str):
         """
-        Persist message to ConversationLog for RAG.
+        将消息持久化到独立社交数据库 (QQMessage)。
         """
         try:
-            async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-            async with async_session() as db_session:
-                source = f"qq_{session.session_type}" # qq_group or qq_private
-                
-                # Metadata
-                meta = {
-                    "msg_id": msg.msg_id,
-                    "sender_name": msg.sender_name,
-                    "session_name": session.session_name,
-                    "platform": msg.platform
-                }
-                
-                await MemoryService.save_log(
-                    session=db_session,
-                    source=source,
+            # 局部导入以避免循环导入
+            from .database import get_social_db_session
+            from .models_db import QQMessage
+            import json
+
+            async for db_session in get_social_db_session():
+                new_msg = QQMessage(
+                    msg_id=msg.msg_id,
                     session_id=session.session_id,
-                    role=role,
+                    session_type=session.session_type,
+                    sender_id=msg.sender_id,
+                    sender_name=msg.sender_name,
                     content=msg.content,
-                    metadata=meta
+                    timestamp=msg.timestamp,
+                    raw_event_json=json.dumps(msg.raw_event, default=str)
                 )
+                db_session.add(new_msg)
+                await db_session.commit()
+                
+        except Exception as e:
+            logger.error(f"Failed to persist social message to independent DB: {e}")
+
+    async def persist_outgoing_message(self, session_id: str, session_type: str, content: str, sender_name: str = "Pero"):
+        """
+        将发出的消息（Pero 的回复）持久化到独立社交数据库。
+        """
+        try:
+            from .database import get_social_db_session
+            from .models_db import QQMessage
+            import uuid
+            
+            async for db_session in get_social_db_session():
+                new_msg = QQMessage(
+                    msg_id=str(uuid.uuid4()), # 为内部消息生成 ID
+                    session_id=session_id,
+                    session_type=session_type,
+                    sender_id="self", # 如果已知，则为 Pero 的 ID
+                    sender_name=sender_name,
+                    content=content,
+                    timestamp=datetime.now(),
+                    raw_event_json="{}"
+                )
+                db_session.add(new_msg)
                 await db_session.commit()
         except Exception as e:
-            logger.error(f"Failed to persist social message: {e}")
+            logger.error(f"Failed to persist outgoing message: {e}")
+
+    async def get_recent_messages(self, session_id: str, session_type: str, limit: int = 20) -> list[SocialMessage]:
+        """
+        从独立数据库获取最近的消息作为上下文。
+        """
+        try:
+            from .database import get_social_db_session
+            from .models_db import QQMessage
+            from sqlmodel import select
+            
+            messages = []
+            async for db_session in get_social_db_session():
+                statement = select(QQMessage).where(
+                    QQMessage.session_id == session_id,
+                    QQMessage.session_type == session_type
+                ).order_by(QQMessage.timestamp.desc()).limit(limit)
+                
+                results = (await db_session.exec(statement)).all()
+                
+                # 转换回 SocialMessage（或类似的字典）并反转顺序
+                for row in reversed(results):
+                     # 如果可能的话处理图像？目前数据库存储 raw_event_json，但我们可能不会在这里解析它。
+                     # 对于上下文，文本是最重要的。
+                     msg = SocialMessage(
+                         msg_id=row.msg_id,
+                         sender_id=row.sender_id,
+                         sender_name=row.sender_name,
+                         content=row.content,
+                         timestamp=row.timestamp,
+                         raw_event={} # 上下文重建不需要
+                     )
+                     messages.append(msg)
+            return messages
+            
+        except Exception as e:
+            logger.error(f"Failed to get recent messages from DB: {e}")
+            return []
 
     async def handle_message(self, event: dict):
         """
-        Main entry point for handling incoming message events.
+        处理传入消息事件的主要入口点。
         """
-        # 1. Parse Event
+        # 1. 解析事件
         try:
-            msg_type = event.get("message_type") # group or private
+            msg_type = event.get("message_type") # group 或 private
             if msg_type == "group":
                 session_id = str(event.get("group_id"))
                 sender_id = str(event.get("user_id"))
-                # Ideally get group name / sender name from event or API
+                # 理想情况下从事件或 API 获取群名/发送者名称
                 sender_name = event.get("sender", {}).get("nickname", "Unknown")
-                # Group name is not always in message event, might need API or cache
+                # 群名并不总是在消息事件中，可能需要 API 或缓存
                 session_name = f"Group {session_id}" 
             elif msg_type == "private":
                 session_id = str(event.get("user_id"))
@@ -86,12 +146,12 @@ class SocialSessionManager:
                     sender_name = f"User{sender_id}"
                 session_name = sender_name
             else:
-                return # Ignore other types
+                return # 忽略其他类型
 
             content = event.get("raw_message", "")
             msg_id = str(event.get("message_id"))
             
-            # Extract Images
+            # 提取图像
             images = []
             message_chain = event.get("message", [])
             for segment in message_chain:
@@ -205,19 +265,19 @@ class SocialSessionManager:
 
     def get_active_sessions(self, limit: int = 5) -> list[SocialSession]:
         """
-        Get list of active sessions (most recently used).
-        For now, returns all known sessions since memory start.
+        获取活跃会话列表（最近使用的）。
+        目前，返回自内存启动以来的所有已知会话。
         """
-        # Sort by last message timestamp (descending) if we had it, 
-        # but currently sessions dict is just unordered.
-        # We can look at the latest message in buffer if any, 
-        # or we might need to track 'last_active_at' in SocialSession.
+        # 如果有的话，按最后一条消息的时间戳（降序）排序，
+        # 但目前 sessions 字典只是无序的。
+        # 我们可以查看缓冲区中的最新消息（如果有），
+        # 或者我们可能需要在 SocialSession 中跟踪 'last_active_at'。
         
-        # Let's assume sessions are relevant enough if they are in memory.
-        # Ideally, we should add 'last_active_at' to SocialSession.
+        # 让我们假设如果会话在内存中，它们就足够相关。
+        # 理想情况下，我们应该向 SocialSession 添加 'last_active_at'。
         return list(self.sessions.values())[:limit]
             
-        # Clear buffer after flush logic (or should callback handle it? usually manager handles buffer)
-        # But if callback fails, we might lose messages.
-        # Design choice: Clear immediately to prevent double processing.
+        # 刷新逻辑后清除缓冲区（还是应该由回调处理？通常管理器处理缓冲区）
+        # 但是如果回调失败，我们可能会丢失消息。
+        # 设计选择：立即清除以防止双重处理。
         session.clear_buffer()

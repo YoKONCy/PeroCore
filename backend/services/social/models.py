@@ -5,7 +5,7 @@ from datetime import datetime
 @dataclass
 class SocialMessage:
     """
-    Represents a single message in the social context.
+    表示社交上下文中的单条消息。
     """
     msg_id: str
     sender_id: str
@@ -14,25 +14,25 @@ class SocialMessage:
     timestamp: datetime
     platform: str = "qq"
     raw_event: dict = field(default_factory=dict)
-    images: List[str] = field(default_factory=list) # List of image URLs
+    images: List[str] = field(default_factory=list) # 图片 URL 列表
 
 @dataclass
 class SocialSession:
     """
-    Represents a social session (Group or Private chat).
+    表示一个社交会话（群聊或私聊）。
     """
     session_id: str  # group_id or user_id
     session_type: Literal["group", "private"]
     session_name: str = ""
     
-    # Message Buffer
+    # 消息缓冲区
     buffer: List[SocialMessage] = field(default_factory=list)
     
-    # State Machine
+    # 状态机
     state: Literal["observing", "summoned", "active"] = "observing"
     last_active_time: datetime = field(default_factory=datetime.now)
     
-    # Timer handle (to cancel if new message arrives)
+    # 定时器句柄（如果新消息到达则取消）
     flush_timer_task: Optional[object] = None # asyncio.Task
 
     def add_message(self, msg: SocialMessage):

@@ -9,8 +9,8 @@ from services.embedding_service import embedding_service
 
 class UserInputPreprocessor(BasePreprocessor):
     """
-    Extracts the user's text message from the input messages list.
-    Handles multimodal content.
+    从输入消息列表中提取用户的文本消息。
+    处理多模态内容。
     """
     @property
     def name(self) -> str:
@@ -31,7 +31,7 @@ class UserInputPreprocessor(BasePreprocessor):
                         user_message = content
                     elif isinstance(content, list):
                         is_multimodal = True
-                        # Attempt to extract text from multimodal content
+                        # 尝试从多模态内容中提取文本
                         texts = [item["text"] for item in content if item.get("type") == "text"]
                         user_message = " ".join(texts)
                     break
@@ -42,7 +42,7 @@ class UserInputPreprocessor(BasePreprocessor):
 
 class HistoryPreprocessor(BasePreprocessor):
     """
-    Fetches and cleans conversation history from the database.
+    从数据库获取并清理对话历史。
     """
     @property
     def name(self) -> str:
@@ -110,15 +110,15 @@ class HistoryPreprocessor(BasePreprocessor):
         context["history_messages"] = history_messages
         context["earliest_timestamp"] = earliest_timestamp
         
-        # We don't merge them into "messages" yet, we keep them separate to allow flexibility
-        # But commonly we might want to have a "full_context_messages" list
+        # 我们暂时不将它们合并到 "messages" 中，而是保持分离以提供灵活性
+        # 但通常我们可能希望有一个 "full_context_messages" 列表
         context["full_context_messages"] = history_messages + current_messages
         
         return context
 
 class RAGPreprocessor(BasePreprocessor):
     """
-    Retrieves relevant memories and PetState.
+    检索相关记忆和 PetState。
     """
     @property
     def name(self) -> str:
@@ -141,42 +141,42 @@ class RAGPreprocessor(BasePreprocessor):
         full_context_messages = context.get("full_context_messages", [])
         earliest_timestamp = context.get("earliest_timestamp")
         
-        # Get PetState
+        # 获取 PetState
         pet_state = await self._get_pet_state(session)
         
-        # Get User Configs
+        # 获取用户配置
         configs = {c.key: c.value for c in (await session.exec(select(Config))).all()}
         owner_name = configs.get("owner_name", "主人")
         user_persona = configs.get("user_persona", "未设定")
 
-        # Get Relevant Memories
+        # 获取相关记忆
         try:
-            # [Feature] Thinking Pipeline: Automatic Chain Triggering
+            # [特性] 思考管道：自动链触发
             from services.chain_service import chain_service
             
-            # 1. Attempt to route to a thinking chain
+            # 1. 尝试路由到思考链
             chain_name = chain_service.route_chain(user_message)
             memory_context = ""
             
             if chain_name:
-                print(f"[RAGPreprocessor] Triggering Thinking Chain: {chain_name}")
+                print(f"[RAGPreprocessor] 触发思考链: {chain_name}")
                 chain_result = await chain_service.execute_chain(session, chain_name, user_message)
                 formatted_chain = chain_service.format_chain_result(chain_result)
                 
                 if formatted_chain:
                     memory_context = formatted_chain
-                    # Note: We skip standard RAG if chain is successful to maintain "Inertia Channel" focus.
+                    # 注意：如果链成功，我们跳过标准 RAG 以保持“惯性通道”的焦点。
                 else:
-                    print(f"[RAGPreprocessor] Chain {chain_name} returned no results, falling back to standard RAG.")
-                    chain_name = None # Fallback
+                    print(f"[RAGPreprocessor] 链 {chain_name} 未返回结果，回退到标准 RAG。")
+                    chain_name = None # 回退
             
-            # 2. Standard RAG (Fallback or Default)
+            # 2. 标准 RAG（回退或默认）
             if not chain_name:
-                # Weighted Vector: User (0.5), Assistant (0.35), Tool (0.15)
+                # 加权向量：用户 (0.5)，助手 (0.35)，工具 (0.15)
                 
                 query_vec = None
                 if full_context_messages:
-                    # Helper for content purification
+                    # 内容清洗助手
                     def purify(text):
                         if not isinstance(text, str): return ""
                         # 使用 Rust Core 进行高性能清洗
@@ -184,14 +184,14 @@ class RAGPreprocessor(BasePreprocessor):
                             from pero_memory_core import clean_text
                             return clean_text(text)
                         except ImportError:
-                            # Fallback to Python implementation
-                            # Remove base64 images and large tech tags
+                            # 回退到 Python 实现
+                            # 移除 base64 图片和大型技术标签
                             import re
                             text = re.sub(r'data:image/[^;]+;base64,[^"\'\s>]+', '[IMAGE_DATA]', text)
                             text = re.sub(r'<([A-Z_]+)>.*?</\1>', r'<\1>[OMITTED]</\1>', text, flags=re.S)
                             return text[:2000].strip()
 
-                    # Find candidates
+                    # 查找候选
                     last_user = ""
                     last_assistant = ""
                     last_tool = ""
@@ -209,7 +209,7 @@ class RAGPreprocessor(BasePreprocessor):
                         if last_user and last_assistant and last_tool:
                             break
                     
-                    # Encode and Merge
+                    # 编码并合并
                     embeddings = []
                     weights = []
                     
@@ -243,14 +243,14 @@ class RAGPreprocessor(BasePreprocessor):
                     query_vec=query_vec
                 )
                 
-                # [Feature] RAG Refresh Block Construction
-                # Create a metadata-rich comment block for dynamic refreshing
+                # [特性] RAG 刷新块构建
+                # 创建富含元数据的注释块以进行动态刷新
                 if memories:
-                    # Construct metadata for refresh
-                    # We store the query vector (or its origin components) and other context
-                    # to allow the frontend or future processors to re-fetch if needed.
-                    # Since we don't have a JS frontend to parse comments yet, 
-                    # we implement this as a server-side "Refreshable Block" concept.
+                    # 构建刷新元数据
+                    # 我们存储查询向量（或其原始组件）和其他上下文
+                    # 以允许前端或未来的处理器在需要时重新获取。
+                    # 由于我们还没有 JS 前端来解析注释，
+                    # 我们将其实现为服务器端“可刷新块”概念。
                     
                     refresh_metadata = {
                         "type": "rag_block",
@@ -362,7 +362,7 @@ class ConfigPreprocessor(BasePreprocessor):
 
 class SystemPromptPreprocessor(BasePreprocessor):
     """
-    Constructs the final system prompt using PromptManager.
+    使用 PromptManager 构建最终的系统提示词。
     """
     @property
     def name(self) -> str:
@@ -381,7 +381,7 @@ class SystemPromptPreprocessor(BasePreprocessor):
             is_voice_mode=is_voice_mode
         )
         
-        # [NIT Security] Inject Dynamic Handshake ID into System Prompt
+        # [NIT Security] 将动态握手 ID 注入系统提示词
         if nit_id and final_messages and final_messages[0]["role"] == "system":
             from nit_core.security import NITSecurityManager
             security_prompt = NITSecurityManager.get_injection_prompt(nit_id)

@@ -45,50 +45,50 @@ class RealtimeVoiceManager:
         cleaned = remove_nit_tags(cleaned)
         
         if for_tts:
-            # [Feature] Smart ReAct Filter
-            # Goal: Only read the final response, ignoring Thinking/Plan/Action/Observation history.
+            # [特性] 智能 ReAct 过滤器
+            # 目标：只朗读最终回复，忽略 思考/计划/行动/观察 (Thinking/Plan/Action/Observation) 的历史记录。
             
-            # Strategy 1: If "Final Answer" marker exists, take everything after it.
+            # 策略 1：如果存在 "Final Answer" (最终回答) 标记，则提取其后的所有内容。
             final_marker = re.search(r'(?:Final Answer|最终回答|回复)[:：]?\s*(.*)', cleaned, flags=re.DOTALL | re.IGNORECASE)
             if final_marker:
                 cleaned = final_marker.group(1)
             else:
-                # Strategy 2: Split by known ReAct block headers and take the last chunk.
-                # This assumes the response is always at the end.
+                # 策略 2：通过已知的 ReAct 块标题进行分割，并提取最后一块。
+                # 这假设回复总是在最后。
                 
-                # Normalize newlines
+                # 标准化换行符
                 cleaned = cleaned.replace('\r\n', '\n')
                 
-                # Remove specific blocks first
-                # Remove Thinking blocks (support both [] and 【】)
+                # 先移除特定块
+                # 移除思考 (Thinking) 块 (支持 [] 和 【】)
                 cleaned = re.sub(r'【Thinking.*?】', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
                 cleaned = re.sub(r'\[Thinking.*?\]', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
                 
-                # Identify the last "Technical Header" and take content after it
-                # Headers: Plan:, Action:, Observation:, Result:, Thought:
-                # We look for the LAST occurrence of these headers at the start of a line
+                # 识别最后一个 "技术标题" 并提取其后的内容
+                # 标题包括：Plan:, Action:, Observation:, Result:, Thought:
+                # 我们查找这些标题在行首的最后一次出现
                 headers_pattern = r'(?m)^(?:Plan|计划|Action|Action Input|Observation|Result|Thought|Prompt)[:：]'
                 
                 matches = list(re.finditer(headers_pattern, cleaned))
                 if matches:
                     last_match = matches[-1]
-                    # Start from the line AFTER the last header
-                    # But wait, if the last header is "Plan:", we want to skip the plan content too.
-                    # Plan content usually ends at the next header or double newline.
-                    # Since we found the LAST header, everything after it is either the content of that header OR the final response.
+                    # 从最后一个标题之后的行开始
+                    # 等等，如果最后一个标题是 "Plan:"，我们也想跳过计划内容。
+                    # 计划内容通常在下一个标题或双换行符处结束。
+                    # 既然我们找到了最后一个标题，那么它之后的内容要么是该标题的内容，要么是最终回复。
                     
                     remaining = cleaned[last_match.start():]
                     
-                    # Heuristic: If it's an Observation/Result/Action, we probably don't want to read it.
-                    # But if it's the ONLY thing left, maybe we shouldn't read anything?
-                    # However, usually there is text AFTER the technical blocks.
+                    # 启发式规则：如果是 Observation/Result/Action，我们要么不读它。
+                    # 但如果它是剩下的唯一内容，也许我们什么都不应该读？
+                    # 然而，通常在技术块之后会有文本。
                     
-                    # Let's try to remove the *lines* associated with the last block if they look technical.
-                    # But simpler: The final response usually doesn't start with a keyword.
-                    # So if we have `Observation: ... \n Hello`, we want `Hello`.
+                    # 让我们尝试移除与最后一个块关联的 *行*，如果它们看起来像技术内容。
+                    # 但更简单的方法：最终回复通常不以关键字开头。
+                    # 所以如果我们有 `Observation: ... \n Hello`，我们要的是 `Hello`。
                     
-                    # Let's use a "Block Stripper" that removes all known technical blocks.
-                    # Regex to match a technical block: Header -> Content -> Next Header/End
+                    # 让我们使用一个 "块剥离器" (Block Stripper) 来移除所有已知的技术块。
+                    # 正则表达式匹配技术块：标题 -> 内容 -> 下一个标题/结尾
                     
                     block_pattern = r'(?m)^(?:Plan|计划|Action|Action Input|Observation|Result|Thought|Prompt)[:：][\s\S]*?(?=(?:^(?:Plan|计划|Action|Action Input|Observation|Result|Thought|Prompt|Final Answer|最终回答|回复)[:：])|\Z)'
                     cleaned = re.sub(block_pattern, '', cleaned)
@@ -317,14 +317,14 @@ class RealtimeVoiceManager:
             agent_start = time.time()
             # 获取数据库 session
             async for session in get_session():
-                # --- Check for Native Audio Input ---
+                # --- 检查原生音频输入 ---
                 enable_voice_input = False
                 try:
-                    # 1. Get current model ID
+                    # 1. 获取当前模型 ID
                     config_obj = (await session.exec(select(Config).where(Config.key == "current_model_id"))).first()
                     if config_obj and config_obj.value:
                         model_id_db = int(config_obj.value)
-                        # 2. Get model config
+                        # 2. 获取模型配置
                         model_config = await session.get(AIModelConfig, model_id_db)
                         if model_config and model_config.enable_voice:
                             enable_voice_input = True
@@ -343,9 +343,9 @@ class RealtimeVoiceManager:
                             
                             print(f"[VOICE] Audio loaded. Size: {len(audio_bytes)} bytes. Preparing payload...")
                             
-                            # --- EXPERIMENT: Multi-modal Compatibility Payload ---
-                            # We provide BOTH the new OpenAI 'input_audio' 
-                            # AND a 'data_url' style content which many Gemini proxies use.
+                            # --- 实验性功能：多模态兼容性 Payload ---
+                            # 我们同时提供新的 OpenAI 'input_audio'
+                            # 以及许多 Gemini 代理使用的 'data_url' 风格的内容。
                             messages_payload = [{
                                 "role": "user",
                                 "content": [
@@ -360,7 +360,7 @@ class RealtimeVoiceManager:
                                             "format": "wav" 
                                         }
                                     },
-                                    # Hack: Some Gemini proxies use image_url with audio data
+                                    # Hack: 一些 Gemini 代理使用 image_url 来传输音频数据
                                     {
                                         "type": "image_url",
                                         "image_url": {
@@ -377,12 +377,12 @@ class RealtimeVoiceManager:
                         print(f"[VOICE] Failed to prepare audio payload: {e}")
                         import traceback
                         traceback.print_exc()
-                        # Fallback to text-only
+                        # 回退到纯文本模式
                         messages_payload = [{"role": "user", "content": user_text}]
 
                 agent = AgentService(session)
                 full_response = ""
-                # tts_text_parts = ["", ""] # [first_turn_text, last_turn_text] (Deprecated)
+                # tts_text_parts = ["", ""] # [first_turn_text, last_turn_text] (已弃用)
                 
                 def report_status_wrapped(status, msg):
                     return report_status(status, msg)
@@ -396,7 +396,7 @@ class RealtimeVoiceManager:
                         session_id="voice_session",
                         on_status=report_status_wrapped,
                         is_voice_mode=True,
-                        user_text_override=user_text # Pass text here for memory/logging
+                        user_text_override=user_text # 在此处传递文本用于记忆/日志记录
                     ):
                         if chunk:
                             full_response += chunk
@@ -422,7 +422,7 @@ class RealtimeVoiceManager:
                 ui_response = self._clean_text(full_response, for_tts=False)
                 
                 # TTS 合成用：仅合成首轮和末轮的内容，并移除思考过程和动作描述
-                # [Optimization] 直接使用 full_response 进行清洗，依赖 _clean_text 的 Smart Filter 策略
+                # [优化] 直接使用 full_response 进行清洗，依赖 _clean_text 的 Smart Filter 策略
                 # 这样可以更准确地提取“最终回答”，而不是机械地拼接首尾轮次
                 tts_response = self._clean_text(full_response, for_tts=True)
                 
@@ -434,9 +434,9 @@ class RealtimeVoiceManager:
                     elif full_response and full_response.strip():
                         ui_response = "（Pero默默执行了操作...）"
                     else:
-                        ui_response = "唔...Pero好像走神了..." # Fallback for completely empty response
+                        ui_response = "唔...Pero好像走神了..." # 针对完全空回复的回退
                 if not tts_response:
-                    tts_response = "唔...Pero好像走神了..." # Fallback
+                    tts_response = "唔...Pero好像走神了..." # 回退
 
                 # 4.3 发送纯文本给前端展示
                 try:

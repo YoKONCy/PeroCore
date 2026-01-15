@@ -10,48 +10,120 @@
         "commandIdentifier": "qq_send_group_msg",
         "description": "Send a message to a QQ group.",
         "parameters": {
-          "group_id": "string or int",
-          "message": "string"
+          "type": "object",
+          "properties": {
+            "group_id": { "type": "string", "description": "Target Group ID" },
+            "message": { "type": "string", "description": "Message content" }
+          },
+          "required": ["group_id", "message"]
         }
       },
       {
         "commandIdentifier": "qq_send_private_msg",
         "description": "Send a private message to a QQ user.",
         "parameters": {
-          "user_id": "string or int",
-          "message": "string"
+          "type": "object",
+          "properties": {
+            "user_id": { "type": "integer", "description": "Target QQ ID" },
+            "content": { "type": "string", "description": "Message content" }
+          },
+          "required": ["user_id", "content"]
         }
       },
       {
         "commandIdentifier": "qq_handle_friend_request",
-        "description": "Approve or reject a friend request.",
+        "description": "Approve or reject a friend request. Use this to finalize a pending request after Master's instruction.",
         "parameters": {
-            "flag": "string",
-            "approve": "boolean",
-            "remark": "string (optional)"
+          "type": "object",
+          "properties": {
+            "flag": { "type": "string", "description": "The request flag" },
+            "approve": { "type": "boolean", "description": "True to approve, False to reject" },
+            "remark": { "type": "string", "description": "Optional remark for the new friend" }
+          },
+          "required": ["flag", "approve"]
+        }
+      },
+      {
+        "commandIdentifier": "qq_delete_friend",
+        "description": "从好友列表中删除当前对话的那个好友。仅在对方非常讨厌、粗鲁或持续骚扰时使用。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "user_id": {
+              "type": "integer",
+              "description": "Target QQ ID to delete. Usually extracted from context or session ID."
+            },
+            "reason": {
+              "type": "string",
+              "description": "Reason for deletion (for logging)."
+            }
+          },
+          "required": ["user_id"]
+        }
+      },
+      {
+        "commandIdentifier": "qq_get_friend_list",
+        "description": "获取 Pero 的所有好友列表。当你需要知道自己有哪些好友，或者需要查找特定好友的 QQ 号时使用。",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      },
+      {
+        "commandIdentifier": "qq_get_group_list",
+        "description": "获取 Pero 加入的所有群聊列表。当你需要知道自己在哪些群，或者查找特定群的群号时使用。",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
         }
       },
       {
         "commandIdentifier": "qq_get_stranger_info",
         "description": "Get public information of a stranger.",
         "parameters": {
-            "user_id": "string or int"
+          "type": "object",
+          "properties": {
+            "user_id": { "type": "integer", "description": "Target QQ ID" }
+          },
+          "required": ["user_id"]
+        }
+      },
+      {
+        "commandIdentifier": "qq_get_group_history",
+        "description": "Get historical messages from a QQ group. Use this to fetch previous context (up to 20 messages).",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "group_id": { "type": "integer", "description": "Target Group ID" },
+            "count": { "type": "integer", "description": "Number of messages to fetch (default 20)" }
+          },
+          "required": ["group_id"]
         }
       },
       {
         "commandIdentifier": "read_social_memory",
         "description": "Read Pero's social memory logs (QQ chats).",
         "parameters": {
-            "query": "string",
-            "filter": "string (optional)"
+          "type": "object",
+          "properties": {
+            "query": { "type": "string", "description": "Search query" },
+            "filter": { "type": "string", "description": "Optional filter" }
+          },
+          "required": ["query"]
         }
       },
-       {
+      {
         "commandIdentifier": "notify_master",
         "description": "Proactively report important social events to the master.",
         "parameters": {
-            "content": "string",
-            "importance": "string (low/medium/high)"
+          "type": "object",
+          "properties": {
+            "content": { "type": "string", "description": "Report content" },
+            "importance": { "type": "string", "enum": ["low", "medium", "high"], "description": "Importance level" }
+          },
+          "required": ["content"]
         }
       }
     ]

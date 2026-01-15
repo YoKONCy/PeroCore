@@ -33,14 +33,14 @@ class PostprocessorManager:
 
     async def process_stream(self, stream: AsyncIterable[str], context: Dict[str, Any]) -> AsyncIterable[str]:
         """
-        Run the stream through all registered postprocessors in order (Streaming).
+        按顺序通过所有注册的后处理器运行流（流式）。
         """
         current_stream = stream
         for processor in self.postprocessors:
             try:
-                # Each processor wraps the previous stream.
-                # Assuming process_stream is an async generator function (async def ... yield)
-                # Calling it returns an AsyncGenerator immediately.
+                # 每个处理器包装前一个流。
+                # 假设 process_stream 是一个异步生成器函数 (async def ... yield)
+                # 调用它会立即返回一个 AsyncGenerator。
                 current_stream = processor.process_stream(current_stream, context)
             except Exception as e:
                 logger.error(f"Error chaining postprocessor {processor.name}: {e}")

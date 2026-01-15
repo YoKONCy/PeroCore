@@ -15,17 +15,17 @@ class VectorService:
     def add_memory(self, memory_id: int, content: str, embedding: List[float], metadata: Dict[str, Any] = None):
         """
         添加或更新记忆向量
-        Note: Metadata and Content are NO LONGER stored in VectorDB (Rust).
-        They are stored in SQLite managed by MemoryService.
+        注意：元数据和内容不再存储在 VectorDB (Rust) 中。
+        它们存储在由 MemoryService 管理的 SQLite 中。
         """
         if not embedding: return
         vector_store.add_memory(memory_id, embedding)
 
     def delete_memory(self, memory_id: int):
         """删除记忆向量"""
-        # Rust index currently doesn't support delete easily (HNSW append-only optimized).
-        # We can implement a tombstone list or rebuild index.
-        # For now, we ignore delete or TODO: implement delete in Rust core.
+        # Rust 索引目前不容易支持删除 (HNSW 针对仅追加进行了优化)。
+        # 我们可以实现一个墓碑列表或重建索引。
+        # 目前，我们忽略删除或 TODO: 在 Rust 核心中实现删除。
         print(f"[VectorService] Warning: delete_memory not fully implemented for Rust index yet.")
         pass
 
@@ -51,7 +51,7 @@ class VectorService:
         return vector_store.count_memories()
 
     def get_all_ids(self) -> List[int]:
-        # Not easily supported by HNSW without iteration
+        # HNSW 不容易支持（如果不进行遍历）
         return []
 
     # --- Tag Operations ---

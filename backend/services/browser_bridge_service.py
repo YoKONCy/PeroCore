@@ -89,7 +89,7 @@ class BrowserBridgeService:
 
             if msg_type == "pageInfoUpdate":
                 self.latest_page_info = data
-                # If waiting for page update, resolve it
+                # 如果正在等待页面更新，则解决它
                 if self.page_update_future and not self.page_update_future.done():
                     self.page_update_future.set_result(data)
 
@@ -125,15 +125,15 @@ class BrowserBridgeService:
             }
         }
 
-        # Create a future to wait for the result
+        # 创建一个 Future 以等待结果
         loop = asyncio.get_event_loop()
         future = loop.create_future()
         self.pending_commands[request_id] = future
         
-        # Prepare for page update wait if needed
+        # 如果需要，准备等待页面更新
         if wait_for_page_info:
-            # Cancel old future if exists to avoid leaks? 
-            # Actually just create a new one.
+            # 如果存在旧的 Future，则取消它以避免泄漏？ 
+            # 实际上只需创建一个新的。
             if self.page_update_future and not self.page_update_future.done():
                 self.page_update_future.cancel()
             self.page_update_future = loop.create_future()
@@ -142,13 +142,13 @@ class BrowserBridgeService:
             await client.send_text(json.dumps(payload))
             logger.info(f"[BrowserBridge] Sent command: {command} (ID: {request_id})")
             
-            # Wait for the command result (timeout after 30s)
+            # 等待命令结果（30 秒后超时）
             result = await asyncio.wait_for(future, timeout=30.0)
             
-            # If command succeeded and we want to wait for page update
+            # 如果命令成功且我们想要等待页面更新
             if result.get("status") == "success" and wait_for_page_info and self.page_update_future:
                 try:
-                    # Wait up to 5 seconds for page update
+                    # 最多等待 5 秒以获取页面更新
                     await asyncio.wait_for(self.page_update_future, timeout=5.0)
                 except asyncio.TimeoutError:
                     logger.warning("[BrowserBridge] Timed out waiting for pageInfoUpdate.")
@@ -163,7 +163,7 @@ class BrowserBridgeService:
         finally:
             if request_id in self.pending_commands:
                 del self.pending_commands[request_id]
-            # Reset page update future
+            # 重置页面更新 Future
             self.page_update_future = None
 
     def get_status(self) -> Dict[str, Any]:
@@ -182,5 +182,5 @@ class BrowserBridgeService:
             return "Error: Connected to browser, but no page content received yet. Please try refreshing the page or navigating to a URL."
         return self.latest_page_info.get("markdown", "")
 
-# Global instance
+# 全局实例
 browser_bridge_service = BrowserBridgeService()

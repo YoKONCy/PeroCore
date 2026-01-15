@@ -40,19 +40,19 @@ class CompanionService:
             cls._instance.prompt_manager = PromptManager()
             cls._instance.tts_service = TTSService()
             cls._instance.last_activity_time = datetime.now()
-            cls._instance.vision_buffer = [] # Store last 10 screenshots (base64)
-            cls._instance.chat_cache = [] # Store logs during session for summary
+            cls._instance.vision_buffer = [] # 存储最近 10 张截图 (base64)
+            cls._instance.chat_cache = [] # 存储会话期间的日志用于总结
             cls._instance.cache_file = os.path.join(os.getcwd(), "data", "companion_chat_cache.json")
             
-            # Ensure data dir exists
+            # 确保数据目录存在
             os.makedirs(os.path.dirname(cls._instance.cache_file), exist_ok=True)
-            # Load crash recovery cache if exists
+            # 加载崩溃恢复缓存（如果存在）
             cls._instance._load_cache()
             
         return cls._instance
 
     def _load_cache(self):
-        """Load chat cache from file for crash recovery"""
+        """从文件加载聊天缓存以进行崩溃恢复"""
         if os.path.exists(self.cache_file):
             try:
                 with open(self.cache_file, 'r', encoding='utf-8') as f:
@@ -62,7 +62,7 @@ class CompanionService:
                 logger.error(f"[Companion] Failed to load cache: {e}")
 
     def _save_cache_to_disk(self):
-        """Save chat cache to disk for crash recovery"""
+        """将聊天缓存保存到磁盘以进行崩溃恢复"""
         try:
             with open(self.cache_file, 'w', encoding='utf-8') as f:
                 json.dump(self.chat_cache, f, ensure_ascii=False, indent=2)
@@ -70,7 +70,7 @@ class CompanionService:
             logger.error(f"[Companion] Failed to save cache: {e}")
 
     def update_activity(self):
-        """Update last activity time to reset the companion timer"""
+        """更新最后活动时间以重置陪伴定时器"""
         self.last_activity_time = datetime.now()
         logger.info("[Companion] Timer reset due to user activity.")
 
@@ -78,7 +78,7 @@ class CompanionService:
         if self.is_running:
             return
         
-        # Check Lightweight Mode first
+        # 首先检查轻量模式
         config = get_config_manager()
         if not config.get("lightweight_mode", False):
             logger.warning("[Companion] Cannot start: Lightweight mode is disabled.")
@@ -93,7 +93,7 @@ class CompanionService:
     async def stop(self):
         self.is_running = False
         
-        # 1. Cancel loops
+        # 1. 取消循环
         if self.task:
             self.task.cancel()
         if self.vision_task:
@@ -105,13 +105,13 @@ class CompanionService:
         except asyncio.CancelledError:
             pass
         
-        # 2. Summarize Memory
+        # 2. 总结记忆
         await self._summarize_and_save_memory()
         
-        # 3. Clear vision buffer
+        # 3. 清除视觉缓冲区
         self.vision_buffer = []
         
-        # 4. Reset UI state
+        # 4. 重置 UI 状态
         try:
             from services.voice_manager import voice_manager
             await voice_manager.broadcast({"type": "status", "content": "idle"})
@@ -121,13 +121,13 @@ class CompanionService:
         logger.info("Companion Service stopped.")
 
     async def _vision_loop(self):
-        """Background task to capture screen every 2 seconds"""
+        """每 2 秒截取屏幕的后台任务"""
         while self.is_running:
             try:
                 img = self._capture_screen()
                 if img:
                     self.vision_buffer.append(img)
-                    # Keep only last 10
+                    # 仅保留最后 10 张
                     if len(self.vision_buffer) > 10:
                         self.vision_buffer.pop(0)
                 await asyncio.sleep(2)
@@ -138,22 +138,22 @@ class CompanionService:
                 await asyncio.sleep(5)
 
     async def _summarize_and_save_memory(self):
-        """Summarize chat cache and save to database as a single memory entry"""
+        """总结聊天缓存并作为单个记忆条目保存到数据库"""
         if not self.chat_cache:
             return
 
         logger.info(f"[Companion] Summarizing {len(self.chat_cache)} messages...")
         
         try:
-            # Construct conversation text
+            # 构建对话文本
             conv_text = ""
             for msg in self.chat_cache:
                 role = "Pero" if msg['role'] == 'assistant' else "主人"
                 conv_text += f"{role}: {msg['content']}\n"
 
-            # Use LLM to summarize
+            # 使用 LLM 进行总结
             async for session in get_session():
-                # Get model config (reusing logic from _generate_response)
+                # 获取模型配置（重用 _generate_response 中的逻辑）
                 config_entry = await session.get(Config, "current_model_id")
                 if not config_entry: return
                 model_config = await session.get(AIModelConfig, int(config_entry.value))
@@ -171,7 +171,7 @@ class CompanionService:
                 summary = await llm.chat([{"role": "user", "content": summary_prompt}])
                 
                 if summary and not summary.startswith("Error:"):
-                    # Save to Memory table
+                    # 保存到 Memory 表
                     from services.memory_service import MemoryService
                     await MemoryService.save_memory(
                         session=session,
@@ -182,7 +182,7 @@ class CompanionService:
                     )
                     logger.info("[Companion] Memory summary saved successfully.")
                     
-                    # Clear cache and file
+                    # 清除缓存和文件
                     self.chat_cache = []
                     if os.path.exists(self.cache_file):
                         os.remove(self.cache_file)
@@ -190,15 +190,15 @@ class CompanionService:
             logger.error(f"[Companion] Failed to summarize memory: {e}")
 
     async def _loop(self):
-        """Main loop for companion mode"""
-        from services.voice_manager import voice_manager # Import here to avoid circular dependency or initialization order issues
+        """陪伴模式的主循环"""
+        from services.voice_manager import voice_manager # 在此处导入以避免循环依赖或初始化顺序问题
         
         logger.info("[Companion] Loop started.")
         print("[Companion] Loop started.", flush=True)
         
-        # Broadcast initial companion state
+        # 广播初始陪伴状态
         try:
-            # Wait a bit for websocket to connect if service just started
+            # 如果服务刚启动，稍作等待以让 WebSocket 连接
             await asyncio.sleep(2) 
             await voice_manager.broadcast({"type": "status", "content": "idle"})
             await voice_manager.broadcast({"type": "text_response", "content": "陪伴中..."})
@@ -206,36 +206,36 @@ class CompanionService:
         except Exception as e:
             logger.warning(f"Failed to broadcast companion start state: {e}")
 
-        # Force run once immediately on startup
+        # 启动时立即强制运行一次
         first_run = True
 
         while self.is_running:
             try:
-                # Calculate time since last activity
+                # 计算自上次活动以来的时间
                 now = datetime.now()
                 elapsed = (now - self.last_activity_time).total_seconds()
 
-                # 0. Re-broadcast "陪伴中..." periodically to ensure it persists on frontend reload
-                # Only do this if we are not currently processing a response
-                # AND if user has been idle for > 15s (to avoid overwriting active chat)
+                # 0. 定期重新广播 "陪伴中..." 以确保其在前端重新加载时保持显示
+                # 仅在当前未处理响应时执行此操作
+                # 并且如果用户空闲超过 15 秒（以避免覆盖活动聊天）
                 if not first_run and elapsed > 15:
                      try:
-                         # We don't send status:idle here to avoid interrupting animations, just text
+                         # 我们在此处不发送 status:idle 以避免中断动画，仅发送文本
                          await voice_manager.broadcast({"type": "text_response", "content": "陪伴中..."})
                      except:
                          pass
 
-                # 1. Check if enabled
+                # 1. 检查是否已启用
                 enabled = await self._is_enabled()
                 if not enabled:
-                    await asyncio.sleep(10) # Check every 10s if disabled
+                    await asyncio.sleep(10) # 如果已禁用，每 10 秒检查一次
                     continue
 
-                # 2. Check interval (default 3 minutes)
+                # 2. 检查间隔（默认 3 分钟）
                 check_interval = 180
                 
                 if not first_run and elapsed < check_interval: 
-                    # Sleep for the remaining time or at least 5s
+                    # 休眠剩余时间或至少 5 秒
                     sleep_time = min(check_interval - elapsed, 5)
                     await asyncio.sleep(sleep_time)
                     continue
@@ -246,53 +246,53 @@ class CompanionService:
                 logger.info("[Companion] Triggering active dialogue...")
                 print("[Companion] Triggering active dialogue...", flush=True)
 
-                # 3. Double check if still enabled and no new activity after sleep
+                # 3. 休眠后再次检查是否仍已启用且无新活动
                 if not self.is_running or not await self._is_enabled():
                     continue
 
-                # 4. Use Vision Buffer (Last 2 images)
+                # 4. 使用视觉缓冲区（最后 2 张图像）
                 if not self.vision_buffer:
                     logger.warning("[Companion] Vision buffer empty. Waiting...")
                     await asyncio.sleep(2)
                     continue
                 
-                # Take the last 2 images
+                # 取最后 2 张图像
                 current_images = self.vision_buffer[-2:]
                 logger.info(f"[Companion] Using {len(current_images)} images from buffer.")
 
-                # 5. Generate Response
+                # 5. 生成响应
                 logger.info("[Companion] Analyzing screen with LLM...")
                 
-                # Notify UI: Thinking (override "陪伴中...")
+                # 通知 UI：思考中（覆盖 "陪伴中..."）
                 await voice_manager.broadcast({"type": "status", "content": "thinking"})
-                # Explicitly set bubble text to "思考中..." 
+                # 显式将气泡文本设置为 "思考中..."
                 await voice_manager.broadcast({"type": "text_response", "content": "思考中..."})
 
                 response_text = await self._generate_response(current_images)
                 
-                # 6. Speak
+                # 6. 说话
                 if response_text:
                     logger.info(f"[Companion] Pero says: {response_text}")
                     print(f"[Companion] Pero says: {response_text}", flush=True)
                     await self._speak(response_text)
                 else:
-                    # If no response, revert to companion state
+                    # 如果没有响应，恢复到陪伴状态
                     print("[Companion] No response generated.", flush=True)
                     await voice_manager.broadcast({"type": "status", "content": "idle"})
-                    await asyncio.sleep(0.5) # Wait for frontend to clear
+                    await asyncio.sleep(0.5) # 等待前端清除
                     await voice_manager.broadcast({"type": "text_response", "content": "陪伴中..."})
                 
-                # 7. Reset timer after successful run (or attempt)
+                # 7. 成功运行（或尝试）后重置定时器
                 self.update_activity()
                     
             except Exception as e:
                 logger.error(f"[Companion] Error in loop: {e}")
                 print(f"[Companion] Error in loop: {e}", flush=True)
-                await asyncio.sleep(10) # Error backoff
+                await asyncio.sleep(10) # 错误退避
 
     async def _is_enabled(self) -> bool:
         config_mgr = get_config_manager()
-        # Companion mode must be enabled AND Lightweight mode must be enabled
+        # 必须启用陪伴模式且必须启用轻量模式
         if not config_mgr.get("lightweight_mode", False):
             return False
             
@@ -305,9 +305,9 @@ class CompanionService:
         if not ImageGrab:
             return None
         try:
-            # Capture full screen
+            # 截取全屏
             screenshot = ImageGrab.grab()
-            # Resize if too big to save tokens/bandwidth
+            # 如果太大则调整大小以节省 token/带宽
             screenshot.thumbnail((1024, 1024))
             
             buffered = io.BytesIO()
@@ -320,7 +320,7 @@ class CompanionService:
 
     async def _generate_response(self, base64_imgs: list) -> Optional[str]:
         async for session in get_session():
-            # Get active model
+            # 获取活动模型
             config_entry = await session.get(Config, "current_model_id")
             if not config_entry:
                 logger.warning("[Companion] No current model configured.")
@@ -331,7 +331,7 @@ class CompanionService:
             if not model_config:
                 return None
 
-            # Get API config
+            # 获取 API 配置
             global_api_key = (await session.get(Config, "global_llm_api_key"))
             global_api_base = (await session.get(Config, "global_llm_api_base"))
             
@@ -340,17 +340,17 @@ class CompanionService:
 
             llm = LLMService(api_key, api_base, model_config.model_id)
 
-            # Construct Prompt (Optimized for short response and low latency)
+            # 构建 Prompt（针对短响应和低延迟进行了优化）
             system_prompt = (await self.prompt_manager.get_rendered_system_prompt(session)).replace("{current_time}", datetime.now().strftime("%Y-%m-%d %H:%M"))
             
-            # Optimized Companion Instruction
+            # 优化的陪伴指令
             system_prompt += "\n\n[陪伴模式核心指令]\n1. 你正通过屏幕观察主人。请基于看到的【连续多张截图】了解主人的最新动态。\n2. 以你的角色身份，发起一段极简、自然且有趣的对话。不要复读屏幕内容，要像真正的陪伴者一样进行闲聊。\n3. 【严格限制】：一次只能回复 1 句话，严禁超过 2 句话。字数控制在 20 字以内。\n4. 禁止调用任何 NIT 工具，直接输出回复内容。"
 
             content_list = [{"type": "text", "text": "【管理系统提醒：Pero，这是你观察到的主人最近两秒内的连续屏幕内容（按时间顺序排列，最后一张为最新）。请根据看到的内容，结合你的人格设定，主动开启一段极简对话。】"}]
             for i, img in enumerate(base64_imgs):
-                # Calculate approximate time offset (assuming ~2s total for 2 images, or using buffer timing)
-                # Since we take latest 2 from buffer, and buffer is populated every 2s
-                # Let's label them clearly
+                # 计算大致的时间偏移（假设 2 张图像总共约 2 秒，或使用缓冲区计时）
+                # 因为我们从缓冲区取最新的 2 张，而缓冲区每 2 秒填充一次
+                # 让我们清晰地标记它们
                 label = "较早前" if i == 0 and len(base64_imgs) > 1 else "当前"
                 content_list.append({"type": "text", "text": f"--- 屏幕截图 ({label}) ---"})
                 content_list.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img}"}})
@@ -375,30 +375,30 @@ class CompanionService:
                         await voice_manager.broadcast({"type": "status", "content": "thinking"})
                     except: pass
 
-                # Companion mode in refined version inherits lightweight logic (direct output, no NIT)
-                # We skip save here because we handle caching and summarization ourselves
+                # 精简版陪伴模式继承了轻量级逻辑（直接输出，无 NIT）
+                # 我们在此处跳过保存，因为我们自己处理缓存和总结
                 async for chunk in agent.chat(
                     messages=messages,
                     source="desktop",
                     session_id="companion_mode",
                     on_status=on_status_update,
                     skip_save=True,
-                    skip_nit_filter=True # Since we told it not to use NIT, we don't need to filter it, but safer to skip if it hallucinates
+                    skip_nit_filter=True # 既然我们告诉它不要使用 NIT，我们不需要过滤它，但如果它产生幻觉，跳过会更安全
                 ):
                     if chunk:
                         full_content += chunk
             
                 if full_content and not full_content.startswith("Error:"):
-                    # Add to chat cache
+                    # 添加到聊天缓存
                     self.chat_cache.append({"role": "user", "content": "（观察屏幕）", "time": datetime.now().isoformat()})
                     self.chat_cache.append({"role": "assistant", "content": full_content, "time": datetime.now().isoformat()})
-                    # Limit cache size to prevent explosion, though we summarize on exit
+                    # 限制缓存大小以防止爆炸，尽管我们在退出时会进行总结
                     if len(self.chat_cache) > 100:
                         self.chat_cache = self.chat_cache[-100:]
                     
                     self._save_cache_to_disk()
                     
-                    # Manual Log (Simplified for UI display in history if needed, though session is isolated)
+                    # 手动日志（如果需要，简化用于 UI 历史记录显示，尽管会话是隔离的）
                     try:
                         import uuid
                         pair_id = str(uuid.uuid4())
@@ -415,33 +415,33 @@ class CompanionService:
                 return None
 
     async def _speak(self, text: str):
-        # Use VoiceManager's cleaning logic for consistency
+        # 使用 VoiceManager 的清理逻辑以保持一致性
         from services.voice_manager import voice_manager
         
-        # 1. Clean for UI (Keep Thinking/Actions for display)
+        # 1. 清理用于 UI（保留思考/动作以供显示）
         ui_text = voice_manager._clean_text(text, for_tts=False)
         
-        # 2. Clean for TTS (Smart filtering for complex tasks)
-        # Strategy: If the text contains thinking blocks, we assume it's a complex task.
-        # We only want to speak the *final* result, i.e., the text AFTER the last thinking block.
+        # 2. 清理用于 TTS（针对复杂任务的智能过滤）
+        # 策略：如果文本包含思考块，我们假设它是一个复杂任务。
+        # 我们只想说出*最终*结果，即最后一个思考块之后的文本。
         tts_text = voice_manager._clean_text(text, for_tts=True)
         
-        # Check if original text had thinking blocks
+        # 检查原始文本是否有思考块
         if "【Thinking" in text:
-            # Find the last closing bracket of a thinking block
-            # We look for the standard closing bracket or the regex equivalent used in parsing
+            # 找到思考块的最后一个右括号
+            # 我们查找标准右括号或解析中使用的等效正则
             last_thinking_end = text.rfind('】')
             if last_thinking_end != -1:
-                # Extract everything after the last thinking block
+                # 提取最后一个思考块之后的所有内容
                 final_segment = text[last_thinking_end + 1:]
-                # Clean this segment for TTS (remove actions, etc.)
+                # 清理此段落用于 TTS（移除动作等）
                 tts_text = voice_manager._clean_text(final_segment, for_tts=True)
         
-        # Additional Filter: Only read the last paragraph (to avoid chatter)
-        # The user specifically requested to ignore "chatter" before the final response.
-        # This applies to ALL companion messages, ensuring we only speak the final "punchline" or response.
+        # 附加过滤：只朗读最后一段（以避免唠叨）
+        # 用户特别要求在最终响应之前忽略 "唠叨"。
+        # 这适用于所有陪伴消息，确保我们只说出最后的 "点睛之笔" 或响应。
         if tts_text:
-            # Split by newline and take the last non-empty segment
+            # 按换行符分割并取最后一个非空段落
             segments = [s.strip() for s in tts_text.split('\n') if s.strip()]
             if segments:
                 tts_text = segments[-1]
@@ -450,22 +450,22 @@ class CompanionService:
         if not ui_text and not tts_text:
             return
 
-        # 2. Notify UI & Send Bubble
+        # 2. 通知 UI 并发送气泡
         try:
-            # Notify Speaking
+            # 通知正在说话
             await voice_manager.broadcast({"type": "status", "content": "speaking"})
             
-            # Send Triggers
+            # 发送触发器
             triggers = voice_manager._extract_triggers(text)
             if triggers:
                 await voice_manager.broadcast({"type": "triggers", "data": triggers})
                 
-            # Send Text Bubble (with Thinking/Actions for UI to render)
+            # 发送文本气泡（带有供 UI 渲染的思考/动作）
             await voice_manager.broadcast({"type": "text_response", "content": ui_text})
         except Exception as e:
             logger.error(f"[Companion] Failed to broadcast UI events: {e}")
 
-        # 3. Dynamic Voice Params & TTS
+        # 3. 动态语音参数与 TTS
         if tts_text and tts_text.strip():
             try:
                 audio_path = await self.tts_service.synthesize(tts_text)
@@ -482,7 +482,7 @@ class CompanionService:
                             await asyncio.sleep(0.1)
                         pygame.mixer.quit()
                         
-                        # Cleanup
+                        # 清理
                         try:
                             os.remove(audio_path)
                         except:
@@ -492,11 +492,11 @@ class CompanionService:
             except Exception as e:
                 logger.error(f"[Companion] TTS error: {e}")
         
-        # Finally block to reset status
+        # Finally 块以重置状态
         try:
-             # Reset UI status to companion mode
+             # 重置 UI 状态为陪伴模式
              await voice_manager.broadcast({"type": "status", "content": "idle"})
-             # Wait a bit to ensure 'idle' doesn't clear the text immediately if we send it too fast
+             # 稍作等待以确保如果我们发送得太快，'idle' 不会立即清除文本
              await asyncio.sleep(0.5) 
              await voice_manager.broadcast({"type": "text_response", "content": "陪伴中..."})
         except:

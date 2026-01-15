@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class TTSService:
     def __init__(self):
         # 临时音频文件存储目录
-        # [Refactor] 统一将临时文件移至 backend/data 目录
+        # [重构] 统一将临时文件移至 backend/data 目录
         backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) # services -> backend
         default_data_dir = os.path.join(backend_dir, "data")
         data_dir = os.environ.get("PERO_DATA_DIR", default_data_dir)
@@ -48,7 +48,7 @@ class TTSService:
 
         filepath = None
         if not config:
-             # Fallback to default edge-tts if no config found
+             # 如果未找到配置，回退到默认的 edge-tts
              filepath = await self._synthesize_edge(text, {}, None, overrides)
         else:
             try:
@@ -61,12 +61,12 @@ class TTSService:
             elif config.provider == "openai_compatible":
                 filepath = await self._synthesize_openai(text, config_json, config, overrides)
             else:
-                # Unknown provider, fallback to edge
+                # 未知提供商，回退到 edge
                 filepath = await self._synthesize_edge(text, config_json, config, overrides)
 
         # 如果开启了可爱化后处理
         if filepath and cute:
-            processed_filepath = filepath.replace(".mp3", "_cute.wav") # Parselmouth saves as wav
+            processed_filepath = filepath.replace(".mp3", "_cute.wav") # Parselmouth 保存为 wav
             success = await audio_processor.process_voice_cute(filepath, processed_filepath)
             if success:
                 # 删除原文件，使用处理后的文件
@@ -100,17 +100,17 @@ class TTSService:
         filepath = os.path.join(self.output_dir, filename)
         
         overrides = overrides or {}
-        # OpenAI doesn't support pitch directly in API standard usually, but supports speed
+        # OpenAI API 标准通常不支持直接调整音调，但支持调整语速
         voice = overrides.get("voice") or config_json.get("voice", "alloy")
         
-        # Rate handling: Edge uses "+15%", OpenAI uses 1.15. 
-        # VoiceManager passes "+15%". We need to convert if necessary, or just ignore rate override for OpenAI for now to be safe
-        # Or simplistic conversion:
+        # 语速处理：Edge 使用 "+15%"，OpenAI 使用 1.15。
+        # VoiceManager 传递 "+15%"。如果需要，我们需要进行转换，或者为了安全起见，暂时忽略 OpenAI 的语速覆盖
+        # 或者简单的转换：
         speed = 1.0
         try:
             rate_str = overrides.get("rate") or config_json.get("speed", "1.0")
             if isinstance(rate_str, str) and "%" in rate_str:
-                # Convert +15% to 1.15
+                # 将 +15% 转换为 1.15
                 val = int(rate_str.replace('%', '').replace('+', ''))
                 speed = 1.0 + (val / 100.0)
             else:
@@ -120,9 +120,9 @@ class TTSService:
         
         try:
             url = f"{config.api_base}/audio/speech" if config.api_base else "https://api.openai.com/v1/audio/speech"
-            # Handle potential double /v1 or missing /v1 issues roughly or just trust the user input
-            # Usually api_base for openai compatible is "https://api.siliconflow.cn/v1"
-            # So appending /audio/speech is standard.
+            # 粗略处理可能的双重 /v1 或缺失 /v1 问题，或者直接信任用户输入
+            # 通常 openai 兼容的 api_base 是 "https://api.siliconflow.cn/v1"
+            # 所以追加 /audio/speech 是标准的。
             
             headers = {
                 "Authorization": f"Bearer {config.api_key}",

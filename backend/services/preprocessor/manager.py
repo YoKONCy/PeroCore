@@ -6,19 +6,19 @@ logger = logging.getLogger(__name__)
 
 class PreprocessorManager:
     """
-    Manages and executes a pipeline of preprocessors.
+    管理并执行预处理器管道。
     """
     def __init__(self):
         self.preprocessors: List[BasePreprocessor] = []
 
     def register(self, preprocessor: BasePreprocessor):
-        """Register a new preprocessor to the end of the pipeline."""
+        """将新的预处理器注册到管道末尾。"""
         self.preprocessors.append(preprocessor)
         # logger.info(f"Registered preprocessor: {preprocessor.name}")
 
     async def process(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Run the context through all registered preprocessors in order.
+        按顺序通过所有注册的预处理器运行上下文。
         """
         current_context = context
         for processor in self.preprocessors:
