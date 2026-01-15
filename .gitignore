@@ -91,6 +91,7 @@ PeroLauncher/target/
 
 # Local Config
 backend/config.json
+backend/data/config.json
 
 # Private Docs
 绝密文档/
