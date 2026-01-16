@@ -147,13 +147,14 @@ function loadWidget(config) {
          let hitPart = null;
          
          // 优先检测头部
-         if (modelX >= hitAreas.head.x[0] && modelX <= hitAreas.head.x[1] &&
-             modelY <= hitAreas.head.y[0] && modelY >= hitAreas.head.y[1]) {
+         // [Fix] 增加空值检查，防止 hitAreas.head undefined 导致报错
+         if (hitAreas.head && hitAreas.head.x && modelX >= hitAreas.head.x[0] && modelX <= hitAreas.head.x[1] &&
+             hitAreas.head.y && modelY <= hitAreas.head.y[0] && modelY >= hitAreas.head.y[1]) {
             hitPart = 'head';
          } 
          // 检测身体 (头部以外)
-         else if (modelX >= hitAreas.body.x[0] && modelX <= hitAreas.body.x[1] &&
-                  modelY <= hitAreas.body.y[0] && modelY >= hitAreas.body.y[1]) {
+         else if (hitAreas.body && hitAreas.body.x && modelX >= hitAreas.body.x[0] && modelX <= hitAreas.body.x[1] &&
+                  hitAreas.body.y && modelY <= hitAreas.body.y[0] && modelY >= hitAreas.body.y[1]) {
             // 将身体细分为胸部和下身
             // 头部底部约 -0.2, 身体顶部 0.3.
             // 设定 -0.4 为胸部与下身的分界线
