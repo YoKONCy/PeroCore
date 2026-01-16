@@ -21,6 +21,7 @@
                 "transparent": false,
                 "alwaysOnTop": false,
                 "visible": true,
+                "maximized": true,
                 "center": true
             },
             {

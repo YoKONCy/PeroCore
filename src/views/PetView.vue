@@ -1364,6 +1364,18 @@ const loadLive2D = () => {
     }
     autoload.onerror = (e) => {
       console.error('Live2D autoload.js failed to load', e)
+      // 显示可视化的错误提示
+      const errDiv = document.createElement('div');
+      errDiv.style.position = 'fixed';
+      errDiv.style.bottom = '10px';
+      errDiv.style.left = '10px';
+      errDiv.style.color = 'red';
+      errDiv.style.backgroundColor = 'rgba(0,0,0,0.7)';
+      errDiv.style.padding = '5px';
+      errDiv.style.zIndex = '10000';
+      errDiv.style.fontSize = '12px';
+      errDiv.innerText = 'Error: Live2D autoload.js failed to load. Check console.';
+      document.body.appendChild(errDiv);
       reject(e)
     }
     document.body.appendChild(autoload)

@@ -192,7 +192,16 @@ function loadWidget(config) {
     })
   })()
 
-  async function loadModelList() { const response = await fetch(`${cdnPath}model_list.json`); modelList = await response.json() }
+  async function loadModelList() { 
+    try {
+      const response = await fetch(`${cdnPath}model_list.json`); 
+      if (!response.ok) throw new Error("Network response was not ok: " + response.statusText);
+      modelList = await response.json() 
+    } catch (e) {
+      console.error("[Live2D] Failed to load model list:", e);
+      if (typeof showLive2DError === 'function') showLive2DError("Failed to load model list: " + e.message);
+    }
+  }
 
   async function ensureLoadFn() {
     if (typeof window.loadlive2d === "function") return true
@@ -210,15 +219,25 @@ function loadWidget(config) {
     localStorage.setItem("modelTexturesId", modelTexturesId)
     showMessage(message, 4000, 10)
     const ok = await ensureLoadFn()
-    if (!ok || typeof window.loadlive2d !== "function") { try { console.warn("loadlive2d unavailable") } catch (_) {}; return }
-    if (useCDN) {
-      if (!modelList) await loadModelList();
-      const target = modelList.models[modelId];
-      const indexName = modelTexturesId > 0 ? `index_${modelTexturesId}.json` : "index.json";
-      window.loadlive2d("live2d", `${cdnPath}model/${target}/${indexName}`);
-      console.log(`Live2D 模型 ${modelId} 纹理 ${modelTexturesId} 加载完成`);
+    if (!ok || typeof window.loadlive2d !== "function") { 
+      try { console.warn("loadlive2d unavailable") } catch (_) {}; 
+      if (typeof showLive2DError === 'function') showLive2DError("Live2D core library failed to load (timeout).");
+      return 
     }
-    else { window.loadlive2d("live2d", `${apiPath}get/?id=${modelId}-${modelTexturesId}`); console.log(`Live2D 模型 ${modelId}-${modelTexturesId} 加载完成`) }
+    try {
+      if (useCDN) {
+        if (!modelList) await loadModelList();
+        if (!modelList) return; // Error already handled in loadModelList
+        const target = modelList.models[modelId];
+        const indexName = modelTexturesId > 0 ? `index_${modelTexturesId}.json` : "index.json";
+        window.loadlive2d("live2d", `${cdnPath}model/${target}/${indexName}`);
+        console.log(`Live2D 模型 ${modelId} 纹理 ${modelTexturesId} 加载完成`);
+      }
+      else { window.loadlive2d("live2d", `${apiPath}get/?id=${modelId}-${modelTexturesId}`); console.log(`Live2D 模型 ${modelId}-${modelTexturesId} 加载完成`) }
+    } catch (e) {
+      console.error("[Live2D] loadModel error:", e);
+      if (typeof showLive2DError === 'function') showLive2DError("Error during model loading: " + e.message);
+    }
   }
 
   async function loadRandModel() {

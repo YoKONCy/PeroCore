@@ -219,6 +219,17 @@ async fn get_diagnostics(app: tauri::AppHandle) -> Result<DiagnosticReport, Stri
         errors.push(format!("数据目录不可写: {:?}", data_dir));
     }
 
+    // 6. 系统组件检查 (VC++ Redistributable)
+    let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
+    let vc_runtime = std::path::PathBuf::from(system_root).join("System32/vcruntime140.dll");
+    if !vc_runtime.exists() {
+        // 尝试检查 SysWOW64 (如果是 64位系统跑 32位程序，或者反之，虽然 Python 通常匹配系统架构)
+        let sys_wow64 = std::path::PathBuf::from(std::env::var("SystemRoot").unwrap()).join("SysWOW64/vcruntime140.dll");
+        if !sys_wow64.exists() {
+             errors.push("关键系统组件缺失: VCRUNTIME140.dll (Visual C++ Redistributable)。这会导致 Python 无法启动。".to_string());
+        }
+    }
+
     let report = DiagnosticReport {
         python_exists,
         python_path: python_path.to_string_lossy().to_string(),
@@ -458,6 +469,12 @@ async fn start_backend(
     cmd.args(&["-u", &script_path.to_string_lossy()])
         .current_dir(&backend_root)
         .env("PYTHONPATH", python_path_env)
+        // 隔离用户环境，防止冲突
+        .env_remove("PYTHONHOME")
+        .env_remove("PYTHONSTARTUP")
+        .env_remove("PIP_CONFIG_FILE")
+        .env("PYTHONNOUSERSITE", "1") // 禁止加载用户目录下的包
+        .env("PYTHONUNBUFFERED", "1") // 强制无缓冲输出
         .env("PORT", "9120")
         .env("PERO_DATA_DIR", data_dir.to_string_lossy().to_string())
         .env("PERO_DATABASE_PATH", db_path.to_string_lossy().to_string())
@@ -680,9 +697,29 @@ pub fn run() {
         }
     }
 
+    // 1. 读取配置以确定是否禁用 GPU (解决 Live2D 在部分设备黑屏/不显示的问题)
+    let mut disable_gpu = false;
+    // 尝试读取 AppData 下的配置 (Windows specific)
+    if let Ok(app_data) = std::env::var("APPDATA") {
+        let app_data_dir = std::path::PathBuf::from(app_data);
+        let config_path = app_data_dir.join("com.perofamily.perocore/data/config.json");
+        if config_path.exists() {
+             if let Ok(content) = std::fs::read_to_string(&config_path) {
+                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                     if let Some(val) = json.get("disable_gpu") {
+                         disable_gpu = val.as_bool().unwrap_or(false);
+                     }
+                 }
+             }
+        }
+    }
+
     // 保留对解决 Windows 代理和安全检查延迟最有效的环境变量
-    std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", 
-        "--no-proxy-server --proxy-server='direct://' --proxy-bypass-list='*' --disable-features=msSmartScreenProtection");
+    let mut args = String::from("--no-proxy-server --proxy-server='direct://' --proxy-bypass-list='*' --disable-features=msSmartScreenProtection");
+    if disable_gpu {
+        args.push_str(" --disable-gpu --disable-d3d11");
+    }
+    std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", args);
 
     let start_time = std::time::Instant::now();
     println!("[Perf] run() started at {:?}", start_time);
