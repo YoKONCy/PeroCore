@@ -307,7 +307,12 @@ async def lifespan(app: FastAPI):
                         print(f"[Main] Triggering scheduled Memory Maintenance (Last: {last_time}, Scheduled: {latest_scheduled})")
                         from services.memory_secretary_service import MemorySecretaryService
                         service = MemorySecretaryService(session)
-                        await service.run_maintenance()
+                        try:
+                            await service.run_maintenance()
+                        except Exception as inner_e:
+                            print(f"[Main] Error inside run_maintenance: {inner_e}")
+                            # Don't re-raise, try to update time to avoid infinite loop?
+                            # No, let's keep retrying next hour or fix the bug.
                         
                         # Update config
                         if not config:
@@ -321,7 +326,8 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 import traceback
                 traceback.print_exc()
-                print(f"[Main] Memory maintenance check task error: {e}")
+                # [Fix] Use simple string formatting to avoid 'Invalid format specifier' if 'e' contains braces
+                print(f"[Main] Memory maintenance check task error: {e!s}")
             
             # Check every 1 hour
             await asyncio.sleep(3600)

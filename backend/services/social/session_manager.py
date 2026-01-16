@@ -131,9 +131,16 @@ class SocialSessionManager:
         # 1. 解析事件
         try:
             msg_type = event.get("message_type") # group 或 private
+            self_id = str(event.get("self_id", ""))
+            
             if msg_type == "group":
                 session_id = str(event.get("group_id"))
                 sender_id = str(event.get("user_id"))
+                
+                # [Fix] 忽略自己发送的消息，防止活跃状态自递归
+                if sender_id == self_id:
+                    return
+
                 # 理想情况下从事件或 API 获取群名/发送者名称
                 sender_name = event.get("sender", {}).get("nickname", "Unknown")
                 # 群名并不总是在消息事件中，可能需要 API 或缓存
@@ -141,6 +148,11 @@ class SocialSessionManager:
             elif msg_type == "private":
                 session_id = str(event.get("user_id"))
                 sender_id = str(event.get("user_id"))
+                
+                # [Fix] 忽略自己发送的消息
+                if sender_id == self_id:
+                    return
+
                 sender_name = event.get("sender", {}).get("nickname", "Unknown")
                 if sender_name == "Unknown":
                     sender_name = f"User{sender_id}"

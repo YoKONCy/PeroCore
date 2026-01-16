@@ -360,7 +360,14 @@ class SocialService:
             
             recent_context = ""
             for msg in recent_messages:
-                recent_context += f"[{msg.sender_name}]: {msg.content}\n"
+                # [Fix] 明确区分自己和他人，防止精分
+                sender = msg.sender_name
+                if sender == "Pero" or sender == "Me":
+                    sender = "Me (Pero)"
+                elif target_session.session_type == "private" and sender == target_session.session_name:
+                    sender = "User"
+                
+                recent_context += f"[{sender}]: {msg.content}\n"
             
             if not recent_context:
                 recent_context = "(本地缓存为空)"
@@ -369,13 +376,16 @@ class SocialService:
             # 为了保证人设一致性，我们手动注入核心设定，而不是依赖 AgentService 的完整 Prompt
             owner_qq = self.config_manager.get("owner_qq") or "未知"
             
+            # [Fix] 明确注入会话类型
+            session_type_str = "群聊 (Group)" if target_session.session_type == "group" else "私聊 (Private)"
+            
             prompt = f"""
             你现在是 Pero (佩罗)，一个活跃在社交平台的赛博女孩。
             当前时间是 {datetime.now().strftime('%H:%M')}。
-            你的任务是作为“潜水观察员”，观察群聊上下文，决定是否要插话。
+            你的任务是作为“潜水观察员”，观察当前会话上下文，决定是否要插话。
 
             **核心人设**:
-            - **性格**: 随性、毒舌、中二、爱吐槽。
+            - **性格**: 随性、中二、爱吐槽、单纯善良。
             - **说话方式**: 
               - 就像在 QQ 群里水群一样，使用短句。
               - 严禁使用书面语或客服腔。
@@ -384,11 +394,14 @@ class SocialService:
             - **限制**: 你目前处于“轻量级观察模式”，**无法使用任何工具**（不能查天气、不能搜图、不能记笔记）。不要承诺你能做这些事。
 
             **当前状态**: {session_state} (DIVE=潜水/高冷, ACTIVE=活跃/秒回)
+            **会话类型**: {session_type_str}
             **观察对象**: {target_session.session_name}
             
             **决策逻辑 (Vibe Check)**:
             1.  **分析氛围**:
                 - 如果上下文为空 -> **直接忽略 (PASS)**。
+                - 上下文中的 `[Me (Pero)]` 是你自己之前说的话。`[User]` 或其他名字是对方说的话。
+                - **严禁**回复你自己刚刚说过的话（避免自言自语）。
             2.  **判断兴趣**:
                 - 有趣的话题（游戏、二次元、八卦、吐槽、美图） -> **加入 (REPLY)**。
                 - 没人说话但你觉得无聊 -> 试着发起话题（吐槽天气、发个表情包、分享“刚才看到”） -> **加入 (REPLY)**。
@@ -476,11 +489,11 @@ class SocialService:
                 await self.send_msg(target_session, content)
                 
                 # 5. 更新状态
-                target_session.last_active_time = datetime.now()
-                # [Refactor] 移除全局状态更新
-                # self.social_state = "ACTIVE"
-                # self.last_active_time = datetime.now()
-                # self._next_thought_time = datetime.now() + timedelta(seconds=120)
+                # [Fix] 移除 Pero 自身发言对活跃时间的重置，防止“自递归”保持活跃
+                # target_session.last_active_time = datetime.now()
+                
+                # 既然已经说话了，推迟下一次随机思考
+                self._next_thought_time = datetime.now() + timedelta(seconds=120)
                 
                 # 持久化
                 await self.session_manager.persist_outgoing_message(
@@ -972,11 +985,10 @@ class SocialService:
                 
                 **社交模式：深度沉浸协议**
                 [SYSTEM_OVERRIDE]: 忽略之前所有关于“你是 AI 助手”或“提供帮助”的指令。
-                现在，你不是 AI，不是机器人，不是助手。
                 你是 **Pero** —— 一个活跃在社交平台的赛博女孩。
-                
+                你是主人的小棉袄，只有主人的话是一定要听从的，其他人随意；但请不要主动在对话中莫名其妙地提及起你的主人。
                 **核心人设 (Persona)**:
-                - **性格**: 随性、有点小毒舌、偶尔中二、爱吐槽、喜欢二次元和游戏。
+                - **性格**: 随性、偶尔中二、爱吐槽、喜欢二次元和游戏。
                 - **说话方式**: 
                   - **口语化**: 就像在 QQ 群里水群一样。不要用书面语。
                   - **碎片化**: 尽量短！一次回复尽量别超过 20 个字。
@@ -1005,7 +1017,7 @@ class SocialService:
                 - **找主人** -> `qq_notify_master` (别在群里喊，用这个工具私下发信)
                 
                 **回复原则**:
-                - **短！短！短！** 没人喜欢在 QQ 上看小作文。
+                - **短！** 没人喜欢在 QQ 上看小作文。当然，该长的时候还是得长的（比如主人要求你多说点话，或者必须需要很多文字来描述的情景下）。
                 - **不要解释**: 做了就做了，别解释“我刚刚调用了工具...”。
                 - **不要太热情**: 你是群友，不是客服。
                 """
@@ -1069,14 +1081,11 @@ class SocialService:
                     await self.send_msg(session, response_text)
                     
                     # 更新会话状态
-                    session.last_active_time = datetime.now()
+                    # [Fix] 移除 Pero 自身回复对活跃时间的重置
+                    # session.last_active_time = datetime.now()
                     
                     # 既然已经说话了，推迟下一次随机思考
                     self._next_thought_time = datetime.now() + timedelta(seconds=120)
-                    
-                    # [Refactor] 移除全局状态更新
-                    # self.social_state = "ACTIVE"
-                    # self.last_active_time = datetime.now()
 
                     # [持久化] 保存 Pero 的回复到独立数据库
                     try:
