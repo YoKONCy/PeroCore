@@ -11,6 +11,7 @@ use std::process::Command;
 
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::collections::VecDeque;
 use sysinfo::System;
 use tauri::{
     menu::{Menu, MenuItem},
@@ -31,6 +32,8 @@ mod everything;
 mod plugins;
 
 struct SystemMonitorState(Arc<Mutex<System>>);
+
+struct LogStore(Arc<Mutex<VecDeque<String>>>);
 
 #[derive(Serialize)]
 struct SystemStats {
@@ -63,6 +66,14 @@ fn get_system_stats(state: tauri::State<SystemMonitorState>) -> SystemStats {
         cpu_usage,
         memory_used,
         memory_total,
+    }
+}
+
+#[tauri::command]
+fn get_backend_logs(state: tauri::State<LogStore>) -> Vec<String> {
+    match state.0.lock() {
+        Ok(logs) => logs.iter().cloned().collect(),
+        Err(_) => vec![],
     }
 }
 
@@ -380,6 +391,7 @@ pub fn fix_path(path: std::path::PathBuf) -> std::path::PathBuf {
 async fn start_backend(
     app: tauri::AppHandle,
     state: tauri::State<'_, BackendState>,
+    log_store: tauri::State<'_, LogStore>,
 ) -> Result<(), String> {
     // 1. 先运行诊断（无需锁，且包含异步操作）
     let diag = get_diagnostics(app.clone()).await?;
@@ -462,6 +474,8 @@ async fn start_backend(
 
     // Log buffer for startup failure diagnosis
     let startup_logs = Arc::new(Mutex::new(Vec::new()));
+    let persistent_logs_stdout = log_store.0.clone();
+    let persistent_logs_stderr = log_store.0.clone();
 
     let app_stdout = app.clone();
     let logs_stdout = startup_logs.clone();
@@ -473,9 +487,18 @@ async fn start_backend(
                 log::info!("[Backend] {}", l); // 同时记录到 Rust 日志系统
                 let _ = app_stdout.emit("backend-log", &l);
                 
+                // 1. Startup buffer (limited)
                 if let Ok(mut logs) = logs_stdout.lock() {
                     if logs.len() < 50 {
                         logs.push(format!("[STDOUT] {}", l));
+                    }
+                }
+
+                // 2. Persistent buffer (circular)
+                if let Ok(mut p_logs) = persistent_logs_stdout.lock() {
+                    p_logs.push_back(l); // Send raw content or tagged? Frontend expects raw content for parsing
+                    if p_logs.len() > 2000 {
+                        p_logs.pop_front();
                     }
                 }
             }
@@ -490,11 +513,21 @@ async fn start_backend(
         for line in reader.lines() {
             if let Ok(l) = line {
                 log::error!("[Backend] {}", l); // 同时记录到 Rust 日志系统
-                let _ = app_stderr.emit("backend-log", format!("[ERR] {}", l));
+                let err_msg = format!("[ERR] {}", l);
+                let _ = app_stderr.emit("backend-log", &err_msg);
                 
+                // 1. Startup buffer
                 if let Ok(mut logs) = logs_stderr.lock() {
                     if logs.len() < 50 {
                         logs.push(format!("[STDERR] {}", l));
+                    }
+                }
+
+                // 2. Persistent buffer
+                if let Ok(mut p_logs) = persistent_logs_stderr.lock() {
+                    p_logs.push_back(err_msg);
+                    if p_logs.len() > 2000 {
+                        p_logs.pop_front();
                     }
                 }
             }
@@ -657,6 +690,7 @@ pub fn run() {
     let backend = Arc::new(Mutex::new(None::<std::process::Child>));
     let napcat_state = NapCatState::new();
     let sys_state = SystemMonitorState(Arc::new(Mutex::new(System::new_all())));
+    let log_store = LogStore(Arc::new(Mutex::new(VecDeque::new())));
 
     // 为不同的闭包准备专属克隆，避免所有权冲突
     let backend_for_setup = backend.clone();
@@ -685,6 +719,7 @@ pub fn run() {
         .manage(BackendState(backend))
         .manage(napcat_state)
         .manage(sys_state)
+        .manage(log_store)
         .invoke_handler(tauri::generate_handler![
             open_dashboard,
             open_pet_window,
@@ -692,6 +727,7 @@ pub fn run() {
             set_ignore_mouse,
             quit_app,
             start_backend,
+            get_backend_logs,
             stop_backend,
             open_root_folder,
             check_napcat,

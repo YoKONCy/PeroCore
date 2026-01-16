@@ -31,6 +31,7 @@
 import { ref, shallowRef, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { Monitor, Delete } from '@element-plus/icons-vue'
 import { listen } from '@tauri-apps/api/event'
+import { invoke } from '@tauri-apps/api/core'
 
 const logs = shallowRef([])
 const logContainer = ref(null)
@@ -139,7 +140,32 @@ onMounted(async () => {
   hookConsole()
   
   try {
-    // 监听来自 Rust 的后端原始日志
+    // 1. 先拉取历史日志
+    try {
+      const historyLogs = await invoke('get_backend_logs')
+      if (Array.isArray(historyLogs)) {
+        historyLogs.forEach(logLine => {
+          let type = 'info'
+          if (logLine.toLowerCase().includes('[err]') || logLine.toLowerCase().includes('error')) {
+            type = 'error'
+          } else if (logLine.toLowerCase().includes('warn')) {
+            type = 'warn'
+          }
+          // 直接添加，不走 pending 以确保立即显示
+          logs.value = [...logs.value, {
+            source: 'backend',
+            type,
+            message: logLine,
+            timestamp: new Date().toLocaleTimeString() // 这里时间可能不准，但后端没传时间戳
+          }]
+        })
+        scrollToBottom()
+      }
+    } catch (err) {
+      console.error('Failed to fetch log history:', err)
+    }
+
+    // 2. 监听来自 Rust 的后端原始日志
     unlistenFn = await listen('backend-log', (event) => {
       const msg = event.payload
       let type = 'info'

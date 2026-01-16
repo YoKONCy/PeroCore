@@ -100,3 +100,6 @@ backend/data/config.json
 
 # Plugins - NapCat
 backend/nit_core/plugins/social_adapter/NapCat/
+
+# Ignore View3D test directory
+View3D/

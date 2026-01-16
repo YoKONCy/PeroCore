@@ -151,11 +151,31 @@ class SocialService:
             # 标准 OneBot v11 具有 'get_system_msg' 或 'get_friend_system_msg'，它返回请求列表。
             # 让我们先尝试 'get_system_msg'。
             
-            resp = await self._send_api_and_wait("get_system_msg", {})
-            # 结构通常为：{ "requester": [...], "invited": [...] }
-            # 或者 NapCat 可能使用特定格式。
-            # 假设标准 OneBot 11 结构。
+            # [Fixed] 尝试多种 API 变体以兼容不同的 OneBot 实现 (NapCat, LLOneBot, Go-CQHTTP)
+            resp = None
+            api_candidates = ["get_system_msg", "get_friend_system_msg"]
             
+            for api_name in api_candidates:
+                try:
+                    # logger.info(f"[Social] Startup check: Trying API '{api_name}'...")
+                    candidate_resp = await self._send_api_and_wait(api_name, {}, timeout=5)
+                    
+                    # 检查响应状态
+                    if candidate_resp and candidate_resp.get("status") == "ok" and candidate_resp.get("retcode") == 0:
+                        resp = candidate_resp
+                        logger.info(f"[Social] Successfully used API '{api_name}'")
+                        break
+                    else:
+                        # 仅在调试时记录，避免刷屏
+                        # logger.debug(f"[Social] API '{api_name}' returned error: {candidate_resp}")
+                        pass
+                except Exception as e:
+                    logger.warning(f"[Social] API '{api_name}' call failed or timed out: {e}")
+
+            if not resp:
+                logger.warning("[Social] Startup check skipped: Could not retrieve system messages (unsupported APIs).")
+                return
+
             data = resp.get("data", {})
             # 我们只关心好友请求
             requests = []

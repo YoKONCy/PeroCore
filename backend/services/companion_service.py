@@ -382,8 +382,8 @@ class CompanionService:
                     source="desktop",
                     session_id="companion_mode",
                     on_status=on_status_update,
-                    skip_save=True,
-                    skip_nit_filter=True # 既然我们告诉它不要使用 NIT，我们不需要过滤它，但如果它产生幻觉，跳过会更安全
+                    skip_save=True
+                    # skip_nit_filter=True  <-- Removed: AgentService.chat does not support this arg
                 ):
                     if chunk:
                         full_content += chunk
@@ -411,7 +411,11 @@ class CompanionService:
                 return full_content
             except Exception as e:
                 logger.error(f"[Companion] LLM error: {e}")
-                await voice_manager.broadcast({"type": "status", "content": "idle"})
+                try:
+                    from services.voice_manager import voice_manager
+                    await voice_manager.broadcast({"type": "status", "content": "idle"})
+                except:
+                    pass
                 return None
 
     async def _speak(self, text: str):
