@@ -9,7 +9,7 @@ pub struct PluginCommand {
     #[serde(alias = "commandIdentifier")]
     pub command_identifier: String,
     pub description: String,
-    pub parameters: Option<std::collections::HashMap<String, String>>,
+    pub parameters: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

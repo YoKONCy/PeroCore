@@ -95,8 +95,8 @@ class MemorySecretaryService:
             consolidated=report["consolidated"],
             cleaned_count=report["cleaned_count"],
             created_ids=json.dumps(self.created_ids),
-            deleted_data=json.dumps(self.deleted_data, ensure_ascii=False),
-            modified_data=json.dumps(self.modified_data, ensure_ascii=False)
+            deleted_data=json.dumps(self.deleted_data, ensure_ascii=False, default=str),
+            modified_data=json.dumps(self.modified_data, ensure_ascii=False, default=str)
         )
         self.session.add(record)
         await self.session.commit()

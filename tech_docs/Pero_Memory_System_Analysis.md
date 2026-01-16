@@ -172,15 +172,27 @@ $$ Score = (Sim \times w_1) + (Importance \times w_2) \times \text{Decay}(t) + (
 ### 3.4 记忆维护机制 (Self-Maintenance / Dreaming)
 `MemorySecretaryService` 模拟大脑的“睡眠整理”机制：
 
-1.  **记忆审计 (Auditor)**:
+1.  **孤独记忆扫描 (Hourly)**:
+    *   **触发**: 每小时一次，作为低优先级后台任务运行。
+    *   **动作**: 每次扫描 **2个** 孤立节点（没有任何关联的记忆），尝试通过向量检索和 LLM 分析将其织入关系网。
+    *   **策略**: 细水长流，避免一次性大规模调用导致系统阻塞或 Token 消耗过大。
+
+2.  **梦境联想 (Daily Dream)**:
+    *   **触发**: 每晚 22:00。
+    *   **动作**: 选取最近 10 条记忆作为“锚点”，通过扩散激活机制挖掘深层关联。
+
+3.  **记忆审计 (Auditor)**:
     *   清洗脏数据（逻辑矛盾、幻觉、过度重复）。
     *   检查时效性（如更新过时的偏好）。
-2.  **灵魂映射 (Soul Mapper)**:
+
+4.  **灵魂映射 (Soul Mapper)**:
     *   从碎片对话中提炼 User 的长期特质 (`preference`)。
-3.  **记忆固化 (Consolidation)**:
+
+5.  **记忆固化 (Consolidation)**:
     *   将时间相近、主题相同的多条碎片记忆 (`event`) 合并为一条叙事性总结 (`interaction_summary`)。
     *   **去冗余**: 合并后删除原始碎片，释放空间。
-4.  **维护记录**: 每次维护生成 `MaintenanceRecord`，支持全量撤回。
+
+6.  **维护记录**: 每次维护生成 `MaintenanceRecord`，支持全量撤回。
 
 ---
 

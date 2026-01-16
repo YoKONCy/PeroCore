@@ -227,19 +227,21 @@ class SocialSessionManager:
             
         return False
 
-    def _reset_flush_timer(self, session: SocialSession):
+    def _reset_flush_timer(self, session: SocialSession, timeout: int = 20):
         # Cancel existing timer
         if session.flush_timer_task:
             session.flush_timer_task.cancel()
         
         # Create new timer
-        session.flush_timer_task = asyncio.create_task(self._timer_callback(session))
+        session.flush_timer_task = asyncio.create_task(self._timer_callback(session, timeout))
 
-    async def _timer_callback(self, session: SocialSession):
+    async def _timer_callback(self, session: SocialSession, timeout: int):
         try:
-            await asyncio.sleep(self.BUFFER_TIMEOUT)
+            await asyncio.sleep(timeout)
             # Timer expired
-            await self._trigger_flush(session, reason="timeout")
+            # Check reason based on state
+            reason = "summon_timeout" if session.state == "summoned" else "buffer_timeout"
+            await self._trigger_flush(session, reason=reason)
         except asyncio.CancelledError:
             pass # Timer reset or flushed
 
@@ -265,17 +267,15 @@ class SocialSessionManager:
 
     def get_active_sessions(self, limit: int = 5) -> list[SocialSession]:
         """
-        获取活跃会话列表（最近使用的）。
-        目前，返回自内存启动以来的所有已知会话。
+        获取活跃会话列表（按活跃时间倒序）。
         """
-        # 如果有的话，按最后一条消息的时间戳（降序）排序，
-        # 但目前 sessions 字典只是无序的。
-        # 我们可以查看缓冲区中的最新消息（如果有），
-        # 或者我们可能需要在 SocialSession 中跟踪 'last_active_at'。
-        
-        # 让我们假设如果会话在内存中，它们就足够相关。
-        # 理想情况下，我们应该向 SocialSession 添加 'last_active_at'。
-        return list(self.sessions.values())[:limit]
+        # 按 last_active_time 倒序排序
+        sorted_sessions = sorted(
+            self.sessions.values(), 
+            key=lambda s: s.last_active_time, 
+            reverse=True
+        )
+        return sorted_sessions[:limit]
             
         # 刷新逻辑后清除缓冲区（还是应该由回调处理？通常管理器处理缓冲区）
         # 但是如果回调失败，我们可能会丢失消息。

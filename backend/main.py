@@ -319,12 +319,42 @@ async def lifespan(app: FastAPI):
                         await session.commit()
                         
             except Exception as e:
+                import traceback
+                traceback.print_exc()
                 print(f"[Main] Memory maintenance check task error: {e}")
             
             # Check every 1 hour
             await asyncio.sleep(3600)
 
     maintenance_task = asyncio.create_task(periodic_memory_maintenance_check())
+
+    # [Feature] Lonely Memory Scanner: Hourly trigger
+    async def periodic_lonely_scan_check():
+        from database import engine
+        from sqlalchemy.orm import sessionmaker
+        from services.reflection_service import ReflectionService
+        
+        # Initial delay to stagger with other tasks
+        await asyncio.sleep(300) 
+        
+        while True:
+            try:
+                # [Optimization] Check if system is under heavy load or user is chatting?
+                # For now, rely on async concurrency. 
+                # scan_lonely_memories yields frequently (DB, LLM).
+                
+                # print("[Main] Starting hourly lonely memory scan...", flush=True)
+                async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+                async with async_session() as session:
+                    service = ReflectionService(session)
+                    await service.scan_lonely_memories(limit=2)
+            except Exception as e:
+                print(f"[Main] Lonely scan task error: {e}")
+            
+            # Check every 1 hour
+            await asyncio.sleep(3600)
+
+    lonely_scan_task = asyncio.create_task(periodic_lonely_scan_check())
 
     # [Feature] Periodic Trigger Check (Reminders & Topics)
     # Replaces frontend polling with backend scheduling

@@ -586,8 +586,20 @@ Tool List Length: {len(tools_list_str)}
         
         # We use a simplified loop for social mode (no complex reflection/vision for now)
         try:
+            import asyncio
+            async def _chat_with_retry(msgs, tools_list=None):
+                retry_count = 1
+                for i in range(retry_count + 1):
+                    try:
+                        return await llm.chat(msgs, temperature=0.7, tools=tools_list)
+                    except Exception as err:
+                        if i == retry_count:
+                            raise err
+                        print(f"[SocialAgent] LLM connection failed (Attempt {i+1}/{retry_count+1}): {err}. Retrying in 1s...")
+                        await asyncio.sleep(1)
+
             # Non-streaming call for simplicity in Phase 2 MVP
-            response = await llm.chat(messages, temperature=0.7, tools=social_tools if social_tools else None)
+            response = await _chat_with_retry(messages, social_tools if social_tools else None)
             
             response_msg = response["choices"][0]["message"]
             content = response_msg.get("content", "")
@@ -653,14 +665,15 @@ Tool List Length: {len(tools_list_str)}
                 # Recursive call (Second turn)
                 # For safety, just one recursion depth for now
                 print("[SocialAgent] Sending tool results back to LLM...")
-                response_2 = await llm.chat(messages, temperature=0.7, tools=social_tools)
+                response_2 = await _chat_with_retry(messages, social_tools)
                 content = response_2["choices"][0]["message"].get("content", "")
                 
             return content
 
         except Exception as e:
             print(f"[SocialAgent] Error: {e}")
-            return f"[System Error] {str(e)}"
+            # Suppress error message to avoid sending system errors to chat
+            return None
 
     async def _run_scorer_background(self, user_msg: str, assistant_msg: str, source: str, pair_id: str = None):
         """后台运行 Scorer 服务，使用独立 Session"""
