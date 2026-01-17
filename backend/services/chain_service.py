@@ -353,9 +353,14 @@ class ThinkingChainService:
             return ""
 
         # 获取活跃的 LLM 配置
-        # 我们更喜欢标记为 'chat' 的配置，或者只是第一个活动的配置
-        result = await session.exec(select(AIModelConfig).where(AIModelConfig.is_active == True))
+        # 优先查找名为 "对话模型" 的配置，如果找不到则使用任意一个
+        result = await session.exec(select(AIModelConfig).where(AIModelConfig.name == "对话模型"))
         model_config = result.first()
+        
+        if not model_config:
+            # Fallback: get first available model
+            result = await session.exec(select(AIModelConfig))
+            model_config = result.first()
         
         if not model_config:
             print("[ThinkingChain] No active model config found for weekly report.")
@@ -368,24 +373,31 @@ class ThinkingChainService:
             provider=model_config.provider
         )
 
-        prompt = f"""
-You are Pero, an intelligent AI assistant.
-Please generate a "Weekly Knowledge Report" based on the user's activities and thinking clusters from the past week.
+        from datetime import datetime
+        now_str = datetime.now().strftime('%Y-%m-%d %H:%M')
 
-Context Data:
+        prompt = f"""
+你是 Pero，一个智能 AI 助手。
+请基于用户过去一周的活动和思维簇（Thinking Clusters），生成一份“Thinking Pipeline 周报”（Weekly Knowledge Report）。
+
+当前时间: {now_str}
+上下文数据 (Context Data):
 {context}
 
-Requirements:
-1. **Tone**: Professional yet encouraging, like a thoughtful secretary or partner.
-2. **Structure**:
-   - **Summary**: Brief overview of the week's focus.
-   - **Key Insights**: Highlight 2-3 important technical or logical points from the "Logic/Reasoning" clusters.
-   - **Historical Echoes**: If there are "[历史回响]" items, analyze the connection between this week's events and past memories. (Does it show progress? Or a recurring issue?)
-   - **Reflections**: Summarize any "Reflection" items and suggest improvements.
-   - **Next Steps**: Based on "Planning" items, suggest what to focus on next week.
-3. **Format**: Use Markdown.
-
-Output the report directly.
+要求 (Requirements):
+1. **语气**: 专业且带有鼓励性，像一位体贴的秘书或合作伙伴。
+2. **精确性与真实性 (Precision & Accuracy)**:
+   - 你**必须**明确引用具体事件的日期或时间范围。
+   - **严禁**捏造（幻觉）上下文数据中不存在的事件。
+   - 如果上下文为空或稀疏，请诚实地说明，而不是编造细节。
+3. **结构 (Structure)**:
+   - **标题**: 包含日期范围的周报标题。
+   - **本周摘要 (Summary)**: 简要概述本周的核心关注点。
+   - **关键洞察 (Key Insights)**: 从“逻辑推理簇 (Logic/Reasoning)”中提炼 2-3 个重要的技术或逻辑知识点。
+   - **历史回响 (Historical Echoes)**: 如果存在“[历史回响]”项，分析本周事件与过去长记忆的联系（是进步了？还是在重复旧错误？）。
+   - **反思 (Reflections)**: 总结任何“[反思]”项并提出改进建议。
+   - **下周计划 (Next Steps)**: 基于“[计划]”项，建议下周的关注重点。
+4. **格式**: 使用 Markdown。请直接输出报告内容，不要包含其他无关的对话。
 """
         try:
             messages = [{"role": "user", "content": prompt}]

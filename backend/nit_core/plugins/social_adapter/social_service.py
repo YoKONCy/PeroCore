@@ -11,8 +11,8 @@ from core.config_manager import get_config_manager
 
 # ContextVar for deduplication
 injected_msg_ids_var: ContextVar[Set[str]] = ContextVar("injected_msg_ids", default=set())
-from .social.session_manager import SocialSessionManager
-from .social.models import SocialSession
+from .session_manager import SocialSessionManager
+from .models import SocialSession
 
 # 数据库和 Agent 导入
 from database import engine
@@ -36,6 +36,9 @@ class SocialService:
         self._enabled = self.config_manager.get("enable_social_mode", False)
         self._thought_task: Optional[asyncio.Task] = None
         
+        # [Social Identity] Bot 信息缓存
+        self.bot_info: Dict[str, Any] = {}
+        
         # 初始化会话管理器
         self.session_manager = SocialSessionManager(flush_callback=self.handle_session_flush)
         
@@ -58,7 +61,7 @@ class SocialService:
 
         # 初始化社交专用数据库
         try:
-            from .social.database import init_social_db
+            from .database import init_social_db
             await init_social_db()
             logger.info("[Social] Independent social database initialized.")
         except Exception as e:
@@ -157,6 +160,19 @@ class SocialService:
         await asyncio.sleep(5) # 等待系统稳定
         
         try:
+            # [Optimization] 检测 OneBot 实现类型
+            # NapCat 等现代实现通常不支持拉取历史系统消息，而是完全依赖事件推送。
+            # 为了避免超时和报错，我们可以检测实现并跳过不必要的检查。
+            version_resp = await self._send_api_and_wait("get_version_info", {}, timeout=5)
+            if version_resp and version_resp.get("status") == "ok":
+                data = version_resp.get("data", {})
+                app_name = data.get("app_name", "").lower()
+                logger.info(f"[Social] Bot Implementation: {data.get('app_name')} {data.get('app_version')}")
+                
+                if "napcat" in app_name:
+                    logger.info("[Social] NapCat detected. Skipping polling for pending system messages (Event-driven mode).")
+                    return
+
             # NapCat/OneBot 并不总是具有用于*待处理*请求的 'get_system_msg_new' 或类似的标准化 API
             # 标准 OneBot v11 具有 'get_system_msg' 或 'get_friend_system_msg'，它返回请求列表。
             # 让我们先尝试 'get_system_msg'。
@@ -175,15 +191,21 @@ class SocialService:
                         resp = candidate_resp
                         logger.info(f"[Social] Successfully used API '{api_name}'")
                         break
+                    elif candidate_resp and candidate_resp.get("retcode") == 1404:
+                        # API 不存在 (NapCat 等)
+                        # logger.debug(f"[Social] API '{api_name}' not supported (1404).")
+                        pass
                     else:
                         # 仅在调试时记录，避免刷屏
                         # logger.debug(f"[Social] API '{api_name}' returned error: {candidate_resp}")
                         pass
                 except Exception as e:
-                    logger.warning(f"[Social] API '{api_name}' call failed or timed out: {e}")
-
+                    # 超时或其他错误
+                    # logger.warning(f"[Social] API '{api_name}' call failed or timed out: {e}")
+                    pass
+            
             if not resp:
-                logger.warning("[Social] Startup check skipped: Could not retrieve system messages (unsupported APIs).")
+                logger.info("[Social] Startup check skipped: Could not retrieve system messages (API unsupported or timed out).")
                 return
 
             data = resp.get("data", {})
@@ -1289,9 +1311,9 @@ class SocialService:
         检查会话是否满足总结条件 (每 30 条未总结消息触发一次)
         """
         try:
-            from .social.database import get_social_db_session
-            from .social.models_db import QQMessage
-            from .social.social_memory_service import get_social_memory_service
+            from .database import get_social_db_session
+            from .models_db import QQMessage
+            from .social_memory_service import SocialMemoryService
             from sqlmodel import select, col, func
             
             async for db_session in get_social_db_session():
@@ -1315,7 +1337,7 @@ class SocialService:
         执行记忆总结逻辑
         """
         try:
-            from .social.models_db import QQMessage
+            from .models_db import QQMessage
             from sqlmodel import select, col
             
             # 1. 获取未总结的 30 条消息 (按时间正序)
@@ -1374,8 +1396,8 @@ class SocialService:
                 
                 if summary:
                     # 5. 存入 SocialMemoryService
-                    from .social.social_memory_service import get_social_memory_service
-                    mem_service = get_social_memory_service()
+                    from .social_memory_service import SocialMemoryService
+                    mem_service = SocialMemoryService()
                     
                     # 确保初始化
                     if not mem_service._initialized:

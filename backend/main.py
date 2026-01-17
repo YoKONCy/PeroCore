@@ -56,7 +56,7 @@ from services.companion_service import companion_service
 from services.embedding_service import embedding_service
 from services.browser_bridge_service import browser_bridge_service
 from services.screenshot_service import screenshot_manager
-from services.social_service import get_social_service
+from nit_core.plugins.social_adapter.social_service import get_social_service
 from core.config_manager import get_config_manager
 from core.nit_manager import get_nit_manager
 from nit_core.dispatcher import XMLStreamFilter
@@ -168,31 +168,54 @@ async def lifespan(app: FastAPI):
                         report = await chain_service.generate_weekly_report(session)
                         
                         if report:
-                            # Save to ConversationLog
-                            log = ConversationLog(
-                                role="assistant",
-                                content=f"【Thinking Pipeline 周报】\n{report}",
-                                source="system",
-                                session_id="default",
-                                metadata_json=json.dumps({"type": "weekly_report"})
-                            )
-                            session.add(log)
+                            # [Modified] No longer saving to ConversationLog (Chat Window)
+                            # log = ConversationLog(...)
+                            # session.add(log)
 
-                            # [Feature] Persist Weekly Report to Memory (VectorDB) for long-term recall
-                            # This ensures the report is retrievable via RAG in the future (e.g., "What did I do 2 months ago?")
+                            # [Feature] Save Weekly Report to File (pero_workspace/log)
                             try:
+                                import os
+                                # Get backend dir (assuming main.py is in backend/)
+                                backend_dir = os.path.dirname(os.path.abspath(__file__))
+                                # Path: PeroCore/pero_workspace/log
+                                # We need to go up from backend? No, structure is PeroCore/backend.
+                                # User said "PeroCore\pero_workspace\log". 
+                                # Assuming workspace is at project root (PeroCore/).
+                                project_root = os.path.dirname(backend_dir)
+                                # [Update] Change path to pero_workspace/log/weeklyport
+                                log_dir = os.path.join(project_root, "pero_workspace", "log", "weeklyport")
+                                os.makedirs(log_dir, exist_ok=True)
+                                
+                                filename = f"{now.strftime('%Y-%m-%d')}_Weekly_Report.md"
+                                file_path = os.path.join(log_dir, filename)
+                                
+                                with open(file_path, "w", encoding="utf-8") as f:
+                                    f.write(report)
+                                    
+                                print(f"[Main] Weekly Report saved to file: {file_path}")
+                                
+                                # [Feature] Persist Weekly Report Index to Memory (VectorDB)
+                                # We store a summary/pointer instead of full content to keep context clean?
+                                # User said "store index for retrieval in database".
+                                # We will store the full content but mark it with specific type for "Independent Retrieval".
+                                # Actually, storing full content is better for search unless it's huge.
+                                # But we'll add the file path reference.
+                                
+                                # [Update] Update file path in DB content
+                                db_content = f"【周报归档】{now.strftime('%Y-%m-%d')}\n(See file: weeklyport/{filename})\n\n{report}"
+                                
                                 await MemoryService.save_memory(
                                     session=session,
-                                    content=f"【周报存档】{now.strftime('%Y-%m-%d')}\n{report}",
+                                    content=db_content,
                                     tags="weekly_report,summary",
                                     clusters="[周报归档]",
-                                    importance=3, # High importance to ensure retrieval
-                                    memory_type="weekly_report",
+                                    importance=3, # High importance
+                                    memory_type="weekly_report", # Special type for independent retrieval
                                     source="system"
                                 )
-                                print("[Main] Weekly Report saved to Memory (VectorDB).")
+                                print("[Main] Weekly Report Index saved to Memory (VectorDB).")
                             except Exception as e:
-                                print(f"[Main] Failed to save Weekly Report to Memory: {e}")
+                                print(f"[Main] Failed to save Weekly Report: {e}")
                             
                             # Update Config
                             if not config:
@@ -203,19 +226,12 @@ async def lifespan(app: FastAPI):
                                 config.updated_at = now
                             
                             await session.commit()
-                            print("[Main] Weekly Report Generated and Saved.")
+                            print("[Main] Weekly Report Generated and Saved (Silent Mode).")
 
-                            # [Feature] Push to Frontend
-                            try:
-                                from services.voice_manager import get_voice_manager
-                                voice_manager = get_voice_manager()
-                                await voice_manager.broadcast({
-                                    "type": "text_response",
-                                    "content": f"【Thinking Pipeline 周报】\n{report}",
-                                    "status": "report"
-                                })
-                            except Exception as push_err:
-                                print(f"[Main] Failed to push weekly report: {push_err}")
+                            # [Modified] No longer broadcasting to Frontend
+                            # try:
+                            #     ...
+                            # except ...
                         else:
                             print("[Main] Weekly Report Generation skipped (no content/error).")
                             

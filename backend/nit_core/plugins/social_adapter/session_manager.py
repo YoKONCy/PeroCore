@@ -263,8 +263,8 @@ class SocialSessionManager:
                     return True
         
         # Fallback: Check keywords (nickname)
-        if "pero" in content.lower() or "Pero" in content:
-            return True
+        # if "pero" in content.lower() or "Pero" in content:
+        #    return True
             
         return False
 

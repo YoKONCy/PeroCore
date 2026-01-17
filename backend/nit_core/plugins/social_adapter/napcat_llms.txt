@@ -1,0 +1,220 @@
+# NapCat
+
+## Docs
+- [NapCat 接口文档](https://napcat.apifox.cn/5430207m0.md): 
+- [账号相关](https://napcat.apifox.cn/54405734f0.md): 
+- [消息相关](https://napcat.apifox.cn/54406081f0.md): 
+- 消息相关 [发送群聊消息](https://napcat.apifox.cn/43942125f0.md): 
+- 消息相关 [发送私聊消息](https://napcat.apifox.cn/43942137f0.md): 
+- [群聊相关](https://napcat.apifox.cn/54406088f0.md): 
+- [文件相关](https://napcat.apifox.cn/54405744f0.md): 
+- [密钥相关](https://napcat.apifox.cn/54407705f0.md): 
+- [系统操作](https://napcat.apifox.cn/54407785f0.md): 
+
+## API Docs
+- 账号相关 [设置消息已读](https://napcat.apifox.cn/226657389e0.md): 
+- 账号相关 [设置私聊已读](https://napcat.apifox.cn/226659165e0.md): 
+- 账号相关 [设置群聊已读](https://napcat.apifox.cn/226659167e0.md): 
+- 账号相关 [最近消息列表](https://napcat.apifox.cn/226659190e0.md): 获取的最新消息是每个会话最新的消息
+- 账号相关 [_设置所有消息已读](https://napcat.apifox.cn/226659194e0.md): 
+- 账号相关 [点赞](https://napcat.apifox.cn/226656717e0.md): 
+- 账号相关 [处理好友请求](https://napcat.apifox.cn/226656932e0.md): 
+- 账号相关 [获取账号信息](https://napcat.apifox.cn/226656970e0.md): 
+- 账号相关 [获取好友列表](https://napcat.apifox.cn/226656976e0.md): 
+- 账号相关 [获取好友分组列表](https://napcat.apifox.cn/226658978e0.md): 
+- 账号相关 [设置账号信息](https://napcat.apifox.cn/226657374e0.md): 
+- 账号相关 [删除好友](https://napcat.apifox.cn/227237873e0.md): 
+- 账号相关 [获取推荐好友/群聊卡片](https://napcat.apifox.cn/226658965e0.md): 
+- 账号相关 [获取推荐群聊卡片](https://napcat.apifox.cn/226658971e0.md): 
+- 账号相关 [设置在线状态](https://napcat.apifox.cn/226658977e0.md): ## 状态列表
+- 账号相关 [设置自定义在线状态](https://napcat.apifox.cn/266151905e0.md): 
+- 账号相关 [设置头像](https://napcat.apifox.cn/226658980e0.md): 
+- 账号相关 [创建收藏](https://napcat.apifox.cn/226659178e0.md): 
+- 账号相关 [设置个性签名](https://napcat.apifox.cn/226659186e0.md): 
+- 账号相关 [获取收藏表情](https://napcat.apifox.cn/226659210e0.md): 
+- 账号相关 [获取点赞列表](https://napcat.apifox.cn/226659197e0.md): 
+- 账号相关 [获取用户状态](https://napcat.apifox.cn/226659292e0.md): 
+- 账号相关 [获取小程序卡片](https://napcat.apifox.cn/227738594e0.md): 
+- 账号相关 [获取单向好友列表](https://napcat.apifox.cn/266151878e0.md): 
+- 账号相关 [获取登录号信息](https://napcat.apifox.cn/226656952e0.md): 
+- 账号相关 [获取状态](https://napcat.apifox.cn/226657083e0.md): 
+- 账号相关 [获取当前账号在线客户端列表](https://napcat.apifox.cn/226657379e0.md): 
+- 账号相关 [_获取在线机型](https://napcat.apifox.cn/227233981e0.md): 
+- 账号相关 [_设置在线机型](https://napcat.apifox.cn/227233993e0.md): 
+- 账号相关 [获取被过滤好友请求](https://napcat.apifox.cn/289565516e0.md): 
+- 账号相关 [处理被过滤好友请求](https://napcat.apifox.cn/289565525e0.md):  在 4.7.43 版本中 
+- 账号相关 [设置好友备注](https://napcat.apifox.cn/298305173e0.md): 
+- 消息相关 > 发送群聊消息 [发送群文本](https://napcat.apifox.cn/226799128e0.md): 发送群消息
+- 消息相关 > 发送群聊消息 [发送群艾特](https://napcat.apifox.cn/226832594e0.md): 发送群消息
+- 消息相关 > 发送群聊消息 [发送群回复](https://napcat.apifox.cn/226857476e0.md): 发送群消息
+- 消息相关 > 发送群聊消息 [发送群图片](https://napcat.apifox.cn/226855594e0.md): 发送群消息
+- 消息相关 > 发送群聊消息 [发送群系统表情](https://napcat.apifox.cn/226867165e0.md): 发送群消息
+- 消息相关 > 发送群聊消息 [发送群骰子](https://napcat.apifox.cn/226868634e0.md): 发送群消息
+- 消息相关 > 发送群聊消息 [发送群猜拳](https://napcat.apifox.cn/226872680e0.md): 发送群消息
+- 消息相关 > 发送群聊消息 [发送群文件](https://napcat.apifox.cn/226858810e0.md): 发送群消息
+- 消息相关 > 发送群聊消息 [发送群视频](https://napcat.apifox.cn/228099094e0.md): 发送群消息
+- 消息相关 > 发送群聊消息 [发送群JSON](https://napcat.apifox.cn/228097721e0.md): 发送群消息
+- 消息相关 > 发送群聊消息 [发送群语音](https://napcat.apifox.cn/228097933e0.md): 发送群消息
+- 消息相关 > 发送群聊消息 [发送群合并转发消息](https://napcat.apifox.cn/226657396e0.md): 
+- 消息相关 > 发送群聊消息 [消息转发到群](https://napcat.apifox.cn/226659074e0.md): 
+- 消息相关 > 发送群聊消息 [发送群聊戳一戳](https://napcat.apifox.cn/226659265e0.md): 
+- 消息相关 > 发送群聊消息 [发送群聊音乐卡片](https://napcat.apifox.cn/244510830e0.md): 
+- 消息相关 > 发送私聊消息 [发送私聊文本](https://napcat.apifox.cn/226888843e0.md): 发送群消息
+- 消息相关 > 发送私聊消息 [发送私聊图片](https://napcat.apifox.cn/226889234e0.md): 发送群消息
+- 消息相关 > 发送私聊消息 [发送私聊系统表情](https://napcat.apifox.cn/226889538e0.md): 发送群消息
+- 消息相关 > 发送私聊消息 [发送私聊骰子](https://napcat.apifox.cn/226889555e0.md): 发送群消息
+- 消息相关 > 发送私聊消息 [发送私聊猜拳](https://napcat.apifox.cn/226889604e0.md): 发送群消息
+- 消息相关 > 发送私聊消息 [发送私聊JSON](https://napcat.apifox.cn/226889623e0.md): 发送群消息
+- 消息相关 > 发送私聊消息 [发送私聊回复](https://napcat.apifox.cn/226889308e0.md): 发送群消息
+- 消息相关 > 发送私聊消息 [发送私聊文件](https://napcat.apifox.cn/228097912e0.md): 发送群消息
+- 消息相关 > 发送私聊消息 [发送私聊语音](https://napcat.apifox.cn/228098500e0.md): 发送群消息
+- 消息相关 > 发送私聊消息 [发送私聊视频](https://napcat.apifox.cn/228099194e0.md): 发送群消息
+- 消息相关 > 发送私聊消息 [发送私聊合并转发消息](https://napcat.apifox.cn/226657399e0.md): 
+- 消息相关 > 发送私聊消息 [消息转发到私聊](https://napcat.apifox.cn/226659051e0.md): 
+- 消息相关 > 发送私聊消息 [发送私聊戳一戳](https://napcat.apifox.cn/226659255e0.md): 
+- 消息相关 > 发送私聊消息 [发送私聊音乐卡片](https://napcat.apifox.cn/244510838e0.md): 发送群消息
+- 消息相关 [发送戳一戳](https://napcat.apifox.cn/250286923e0.md): 
+- 消息相关 [撤回消息](https://napcat.apifox.cn/226919954e0.md): 
+- 消息相关 [获取群历史消息](https://napcat.apifox.cn/226657401e0.md): 
+- 消息相关 [获取消息详情](https://napcat.apifox.cn/226656707e0.md): 
+- 消息相关 [获取合并转发消息](https://napcat.apifox.cn/226656712e0.md): 
+- 消息相关 [贴表情](https://napcat.apifox.cn/226659104e0.md): 
+- 消息相关 [获取好友历史消息](https://napcat.apifox.cn/226659174e0.md): 
+- 消息相关 [获取贴表情详情](https://napcat.apifox.cn/226659219e0.md): 
+- 消息相关 [发送合并转发消息](https://napcat.apifox.cn/226659136e0.md): 
+- 消息相关 [获取语音消息详情](https://napcat.apifox.cn/226657058e0.md): 
+- 消息相关 [获取图片消息详情](https://napcat.apifox.cn/226657066e0.md): 
+- 消息相关 [发送群AI语音](https://napcat.apifox.cn/229486774e0.md): 
+- 群聊相关 [设置群添加选项](https://napcat.apifox.cn/301542178e0.md): 
+- 群聊相关 [设置群机器人添加选项](https://napcat.apifox.cn/301542198e0.md): 
+- 群聊相关 [批量踢出群成员](https://napcat.apifox.cn/301542209e0.md): 
+- 群聊相关 [设置群备注](https://napcat.apifox.cn/283136268e0.md): 
+- 群聊相关 [设置群头衔](https://napcat.apifox.cn/226656931e0.md): 
+- 群聊相关 [获取群详细信息](https://napcat.apifox.cn/307180859e0.md): 
+- 群聊相关 [群踢人](https://napcat.apifox.cn/226656748e0.md): 
+- 群聊相关 [获取群系统消息](https://napcat.apifox.cn/226658660e0.md): 
+- 群聊相关 [群禁言](https://napcat.apifox.cn/226656791e0.md): 
+- 群聊相关 [获取群精华消息](https://napcat.apifox.cn/226658664e0.md): 
+- 群聊相关 [全体禁言](https://napcat.apifox.cn/226656802e0.md): 
+- 群聊相关 [设置群头像](https://napcat.apifox.cn/226658669e0.md): 
+- 群聊相关 [设置群管理](https://napcat.apifox.cn/226656815e0.md): 
+- 群聊相关 [设置群成员名片](https://napcat.apifox.cn/226656913e0.md): 
+- 群聊相关 [设置群精华消息](https://napcat.apifox.cn/226658674e0.md): 
+- 群聊相关 [设置群名](https://napcat.apifox.cn/226656919e0.md): 
+- 群聊相关 [删除群精华消息](https://napcat.apifox.cn/226658678e0.md): 
+- 群聊相关 [_删除群公告](https://napcat.apifox.cn/226659240e0.md): 
+- 群聊相关 [退群](https://napcat.apifox.cn/226656926e0.md): 
+- 群聊相关 [_发送群公告](https://napcat.apifox.cn/226658740e0.md): 
+- 群聊相关 [设置群搜索](https://napcat.apifox.cn/301542170e0.md): 
+- 群聊相关 [_获取群公告](https://napcat.apifox.cn/226658742e0.md): 
+- 群聊相关 [处理加群请求](https://napcat.apifox.cn/226656947e0.md): 
+- 群聊相关 [获取群信息](https://napcat.apifox.cn/226656979e0.md): 
+- 群聊相关 [获取群列表](https://napcat.apifox.cn/226656992e0.md): 
+- 群聊相关 [获取群成员信息](https://napcat.apifox.cn/226657019e0.md): 
+- 群聊相关 [获取群成员列表](https://napcat.apifox.cn/226657034e0.md): 
+- 群聊相关 [获取群荣誉](https://napcat.apifox.cn/226657036e0.md): |  type                   |         类型                    |
+- 群聊相关 [获取群信息ex](https://napcat.apifox.cn/226659229e0.md): 
+- 群聊相关 [获取群 @全体成员 剩余次数](https://napcat.apifox.cn/227245941e0.md): 
+- 群聊相关 [获取群禁言列表](https://napcat.apifox.cn/226659300e0.md): 
+- 群聊相关 [获取群过滤系统消息](https://napcat.apifox.cn/226659323e0.md): 
+- 群聊相关 [群打卡](https://napcat.apifox.cn/226659329e0.md): 
+- 群聊相关 [群打卡](https://napcat.apifox.cn/230897177e0.md): 
+- 群聊相关 [设置群代办](https://napcat.apifox.cn/395460568e0.md): 
+- 文件相关 [上传群文件](https://napcat.apifox.cn/226658753e0.md): 
+- 文件相关 [上传私聊文件](https://napcat.apifox.cn/226658883e0.md): 
+- 文件相关 [获取群根目录文件列表](https://napcat.apifox.cn/226658823e0.md): 
+- 文件相关 [获取群子目录文件列表](https://napcat.apifox.cn/226658865e0.md): 
+- 文件相关 [获取群文件系统信息](https://napcat.apifox.cn/226658789e0.md): 
+- 文件相关 [获取文件信息](https://napcat.apifox.cn/226658985e0.md): 
+- 文件相关 [获取群文件链接](https://napcat.apifox.cn/226658867e0.md): 
+- 文件相关 [获取私聊文件链接](https://napcat.apifox.cn/266151849e0.md): 
+- 文件相关 [创建群文件文件夹](https://napcat.apifox.cn/226658773e0.md): 
+- 文件相关 [删除群文件](https://napcat.apifox.cn/226658755e0.md): 
+- 文件相关 [删除群文件夹](https://napcat.apifox.cn/226658779e0.md): 
+- 文件相关 [移动群文件](https://napcat.apifox.cn/283136359e0.md): 
+- 文件相关 [重命名群文件](https://napcat.apifox.cn/283136375e0.md): 
+- 文件相关 [转存为永久文件](https://napcat.apifox.cn/283136366e0.md): 
+- 文件相关 [下载文件到缓存目录](https://napcat.apifox.cn/226658887e0.md): 
+- 文件相关 [清空缓存](https://napcat.apifox.cn/298305106e0.md): 
+- 文件相关 [删除群相册文件](https://napcat.apifox.cn/395455119e0.md): 
+- 文件相关 [点赞群相册](https://napcat.apifox.cn/395457331e0.md): 
+- 文件相关 [查看群相册评论](https://napcat.apifox.cn/395458911e0.md): 
+- 文件相关 [获取群相册列表](https://napcat.apifox.cn/395459066e0.md): 
+- 文件相关 [上传图片到群相册](https://napcat.apifox.cn/395459739e0.md): 
+- 文件相关 [获取群相册总列表](https://napcat.apifox.cn/395460287e0.md): 
+- 密钥相关 [获取cookies](https://napcat.apifox.cn/226657041e0.md): 
+- 密钥相关 [获取 CSRF Token](https://napcat.apifox.cn/226657044e0.md): 
+- 密钥相关 [获取 QQ 相关接口凭证](https://napcat.apifox.cn/226657054e0.md): 
+- 密钥相关 [nc获取rkey](https://napcat.apifox.cn/226659297e0.md): 
+- 密钥相关 [获取rkey](https://napcat.apifox.cn/283136230e0.md): 
+- 密钥相关 [获取clientkey](https://napcat.apifox.cn/250286915e0.md): 
+- 密钥相关 [获取rkey服务](https://napcat.apifox.cn/283136236e0.md): 
+- 个人操作 [检查是否可以发送图片](https://napcat.apifox.cn/226657071e0.md): 
+- 个人操作 [检查是否可以发送语音](https://napcat.apifox.cn/226657080e0.md): 
+- 个人操作 [OCR 图片识别](https://napcat.apifox.cn/226658231e0.md): 仅 Windows 可用
+- 个人操作 [.OCR 图片识别](https://napcat.apifox.cn/226658234e0.md): 仅 Windows 可用
+- 个人操作 [英译中](https://napcat.apifox.cn/226659102e0.md): 
+- 个人操作 [设置输入状态](https://napcat.apifox.cn/226659225e0.md): ## 状态列表
+- 个人操作 [.对事件执行快速操作](https://napcat.apifox.cn/226658889e0.md): 相当于http的快速操作
+- 个人操作 [获取AI语音人物](https://napcat.apifox.cn/229485683e0.md): 
+- 个人操作 [获取AI语音](https://napcat.apifox.cn/229486818e0.md): 
+- 个人操作 [点击按钮](https://napcat.apifox.cn/266151864e0.md): 
+- 系统操作 [获取版本信息](https://napcat.apifox.cn/226657087e0.md): 
+- 系统操作 [获取packet状态](https://napcat.apifox.cn/226659280e0.md): 
+- 系统操作 [发送自定义组包](https://napcat.apifox.cn/250286903e0.md): 
+- 系统操作 [获取机器人账号范围](https://napcat.apifox.cn/226658975e0.md): 
+- 系统操作 [账号退出](https://napcat.apifox.cn/283136399e0.md): 
+- 流式操作 [清理流临时文件](https://napcat.apifox.cn/395354124e0.md): 
+- 流式操作 [流式下载测试](https://napcat.apifox.cn/395355338e0.md): 
+- 流式操作 [流式上传文件](https://napcat.apifox.cn/395363988e0.md): 
+- 流式操作 [流式下载文件](https://napcat.apifox.cn/395413859e0.md): 
+- 流式操作 [流式下载语音文件](https://napcat.apifox.cn/395417040e0.md): 
+- 流式操作 [流式下载图片](https://napcat.apifox.cn/395419462e0.md): 
+- 其他 > 保留 [send_msg](https://napcat.apifox.cn/226656652e0.md): 
+- 其他 > 保留 [send_private_msg](https://napcat.apifox.cn/226656553e0.md): 
+- 其他 > 保留 [send_group_msg](https://napcat.apifox.cn/226656598e0.md): 发送群消息
+- 其他 > 接口 [unknown](https://napcat.apifox.cn/226658925e0.md): 
+- 其他 > 接口 [get_guild_list](https://napcat.apifox.cn/226659311e0.md): 
+- 其他 > 接口 [get_guild_service_profile](https://napcat.apifox.cn/226659317e0.md): 
+- 其他 > 接口 [检查链接安全性](https://napcat.apifox.cn/228534361e0.md): 
+- 其他 > bug [获取收藏列表](https://napcat.apifox.cn/226659182e0.md): 
+- 其他 > bug [获取被过滤的加群请求](https://napcat.apifox.cn/226659234e0.md): 
+
+## Schemas
+- 接口定义 [Sender](https://napcat.apifox.cn/127037768d0.md): 
+- 接口定义 [result](https://napcat.apifox.cn/127110874d0.md): 
+- 接口定义 [GroupFile](https://napcat.apifox.cn/163738644d0.md): 
+- 接口定义 [GroupFileFolder](https://napcat.apifox.cn/163738698d0.md): 
+- 接口定义 [Group](https://napcat.apifox.cn/127195745d0.md): 
+- 接口定义 [GroupMember](https://napcat.apifox.cn/127196018d0.md): 
+- 接口定义 [User](https://napcat.apifox.cn/127194249d0.md): 
+- 接口定义 [Message](https://napcat.apifox.cn/231542157d0.md): 
+- 接口定义 [UserSex](https://napcat.apifox.cn/231667706d0.md): 
+- 接口定义 [GroupMemberRole](https://napcat.apifox.cn/231669489d0.md): 
+- 数据类型 [群荣誉信息](https://napcat.apifox.cn/127196326d0.md): 
+- 数据类型 [消息详情](https://napcat.apifox.cn/127200472d0.md): 
+- 数据类型 [number | string](https://napcat.apifox.cn/149685658d0.md): 
+- 数据类型 [点赞信息](https://napcat.apifox.cn/163747336d0.md): 
+- 数据类型 [系统信息](https://napcat.apifox.cn/163812891d0.md): 
+- 消息类型 [MessageMixType](https://napcat.apifox.cn/231557570d0.md): 
+- 消息类型 [face](https://napcat.apifox.cn/231517707d0.md): 
+- 消息类型 [reply](https://napcat.apifox.cn/231516950d0.md): 
+- 消息类型 [poke](https://napcat.apifox.cn/231490595d0.md): 
+- 消息类型 [dice](https://napcat.apifox.cn/231530021d0.md): 
+- 消息类型 [image](https://napcat.apifox.cn/231512370d0.md): 
+- 消息类型 [text](https://napcat.apifox.cn/231490363d0.md): 
+- 消息类型 [forward](https://napcat.apifox.cn/231532625d0.md): 
+- 消息类型 [at](https://napcat.apifox.cn/231516754d0.md): 
+- 消息类型 [mface](https://napcat.apifox.cn/231489888d0.md): 
+- 消息类型 [music](https://napcat.apifox.cn/231522929d0.md): 
+- 消息类型 [contact](https://napcat.apifox.cn/231491189d0.md): 
+- 消息类型 [json](https://napcat.apifox.cn/231528338d0.md): 
+- 消息类型 [FileBase](https://napcat.apifox.cn/231493013d0.md): 
+- 消息类型 [video](https://napcat.apifox.cn/231516567d0.md): 
+- 消息类型 [record](https://napcat.apifox.cn/231514786d0.md): 
+- 消息类型 [file](https://napcat.apifox.cn/231516356d0.md): 
+- 消息类型 [rps](https://napcat.apifox.cn/231531217d0.md): 
+- 消息类型 [messageData](https://napcat.apifox.cn/231550703d0.md): 
+- 消息类型 [markdown](https://napcat.apifox.cn/231532271d0.md): 
+- 消息类型 [node](https://napcat.apifox.cn/231517901d0.md): 
+- 消息类型 [MessageData[]](https://napcat.apifox.cn/231548906d0.md): 

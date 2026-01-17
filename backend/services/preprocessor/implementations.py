@@ -294,6 +294,58 @@ class RAGPreprocessor(BasePreprocessor):
         
         return context
 
+class WeeklyReportPreprocessor(BasePreprocessor):
+    """
+    独立检索周报：每次对话最多只注入 1 条最相关的周报。
+    """
+    @property
+    def name(self) -> str:
+        return "WeeklyReportInjector"
+
+    async def process(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        session = context["session"]
+        memory_service = context["memory_service"]
+        user_message = context.get("user_message", "")
+        
+        weekly_report_context = ""
+        
+        try:
+            # 使用 get_relevant_memories 但限制类型为 weekly_report
+            # 注意：我们需要确保 query_vec 是基于 user_message 的
+            # 如果 user_message 为空，则取最新的
+            
+            reports = []
+            
+            if user_message:
+                # 语义检索最相关的一条
+                reports = await memory_service.get_relevant_memories(
+                    session,
+                    user_message,
+                    limit=1,
+                    filter_tags=["weekly_report"],
+                    memory_type="weekly_report" # 确保只检索此类型
+                )
+            else:
+                # 如果没有用户输入（可能是系统触发），则取最新的一条
+                from models import Memory
+                from sqlmodel import desc, col
+                stmt = select(Memory).where(Memory.memory_type == "weekly_report").order_by(desc(Memory.timestamp)).limit(1)
+                reports = (await session.exec(stmt)).all()
+                
+            if reports:
+                report = reports[0]
+                weekly_report_context = f"【相关周报】({report.realTime})\n{report.content}"
+                print(f"[WeeklyReport] Injected report from {report.realTime}")
+            
+        except Exception as e:
+            print(f"[WeeklyReport] Failed to retrieve report: {e}")
+            
+        variables = context.get("variables", {})
+        variables["weekly_report_context"] = weekly_report_context
+        context["variables"] = variables
+        
+        return context
+
 class GraphFlashbackPreprocessor(BasePreprocessor):
     """
     Performs logical flashback on the memory graph to find associated fragments.

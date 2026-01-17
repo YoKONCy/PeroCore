@@ -25,7 +25,8 @@ from services.preprocessor.implementations import (
     RAGPreprocessor,
     GraphFlashbackPreprocessor,
     ConfigPreprocessor,
-    SystemPromptPreprocessor
+    SystemPromptPreprocessor,
+    WeeklyReportPreprocessor # Added
 )
 from services.postprocessor.manager import PostprocessorManager
 from services.postprocessor.implementations import NITFilterPostprocessor, ThinkingFilterPostprocessor
@@ -60,6 +61,7 @@ class AgentService:
         self.preprocessor_manager = PreprocessorManager()
         self.preprocessor_manager.register(UserInputPreprocessor())
         self.preprocessor_manager.register(HistoryPreprocessor())
+        self.preprocessor_manager.register(WeeklyReportPreprocessor()) # Add independent retrieval
         self.preprocessor_manager.register(RAGPreprocessor())
         self.preprocessor_manager.register(GraphFlashbackPreprocessor())
         self.preprocessor_manager.register(ConfigPreprocessor())

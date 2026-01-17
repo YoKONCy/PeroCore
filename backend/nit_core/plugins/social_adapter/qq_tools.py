@@ -1,5 +1,5 @@
 import logging
-from services.social_service import get_social_service
+from .social_service import get_social_service
 
 logger = logging.getLogger(__name__)
 

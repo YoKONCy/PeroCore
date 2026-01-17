@@ -100,7 +100,7 @@ class PromptManager:
         # [Social Identity Injection]
         # 尝试从 SocialService 获取当前 Bot 的昵称 (QQ昵称)
         try:
-            from services.social_service import get_social_service
+            from nit_core.plugins.social_adapter.social_service import get_social_service
             social_service = get_social_service()
             if social_service and social_service.bot_info:
                 variables["bot_name"] = social_service.bot_info.get("nickname", "Pero")

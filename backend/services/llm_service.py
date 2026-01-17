@@ -29,7 +29,13 @@ class LLMService:
         return f"{self.api_base}/v1{suffix}"
 
     async def chat(self, messages: List[Dict[str, Any]], temperature: float = 0.7, tools: List[Dict] = None, response_format: Optional[Dict] = None) -> Dict[str, Any]:
-        if self.provider == "gemini":
+        # [Fix] 智能纠错：如果模型名称明显属于 Gemini 但 Provider 被误设为 Anthropic，
+        # 或者用户正在使用 OneAPI/NewAPI 转发 Gemini 模型（通常通过 OpenAI 协议），
+        # 则强制回退到默认的 OpenAI 兼容模式。
+        if self.provider in ["claude", "anthropic"] and "gemini" in self.model.lower():
+             print(f"[LLMService] Detected Gemini model '{self.model}' with Anthropic provider. Falling back to OpenAI-compatible protocol for OneAPI/Aggregator compatibility.")
+             # 不执行 return，直接向下流转到默认的 OpenAI 逻辑
+        elif self.provider == "gemini":
             return await self._chat_gemini(messages, temperature, tools)
         elif self.provider in ["claude", "anthropic"]:
             return await self._chat_anthropic(messages, temperature, tools)
@@ -337,7 +343,13 @@ class LLMService:
         # 默认 URL
         url = "https://api.anthropic.com/v1/messages"
         if self.api_base and self.api_base != "https://api.openai.com":
-             url = f"{self.api_base}/v1/messages" if not self.api_base.endswith("/messages") else self.api_base
+             # 自动处理 /v1 后缀
+             if self.api_base.endswith("/v1/messages"):
+                 url = self.api_base
+             elif self.api_base.endswith("/v1"):
+                 url = f"{self.api_base}/messages"
+             else:
+                 url = f"{self.api_base}/v1/messages"
 
         headers = {
             "x-api-key": self.api_key,
@@ -426,7 +438,9 @@ class LLMService:
         else:
              base_url = "https://api.anthropic.com"
 
-        if base_url.endswith("/v1"):
+        if base_url.endswith("/v1/messages"):
+            url = base_url
+        elif base_url.endswith("/v1"):
             url = f"{base_url}/messages"
         else:
             url = f"{base_url}/v1/messages"

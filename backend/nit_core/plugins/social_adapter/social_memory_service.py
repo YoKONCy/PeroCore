@@ -30,7 +30,7 @@ class SocialMemoryService:
         if self._initialized:
             return
         self._initialized = True
-        self.vector_store_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "social_vector_store")
+        self.vector_store_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "data", "social_vector_store")
         # 确保目录存在
         os.makedirs(self.vector_store_path, exist_ok=True)
         
@@ -85,8 +85,14 @@ class SocialMemoryService:
         # 1. 保存到数据库
         async for session in get_social_db_session():
             # Embedding (调用 Core 的 EmbeddingService)
-            from services.embedding_service import embedding_service
-            vec = embedding_service.encode_one(content)
+            vec = []
+            try:
+                from services.embedding_service import embedding_service
+                vec = embedding_service.encode_one(content)
+            except Exception as e:
+                # 允许 Embedding 失败，不阻断流程
+                print(f"[SocialMemory] Warning: Embedding generation failed: {e}")
+                vec = []
             
             memory = SocialMemory(
                 content=content,
@@ -187,11 +193,15 @@ class SocialMemoryService:
             # 假设 Rust 接口支持 list input
             # 注意：Rust 接口可能需要 list[int]
             try:
-                # Mock: 假设 Rust 引擎返回 dict {id: energy}
-                # spread_result = self._rust_engine.spread(entry_points, 2, 0.5)
-                # activated_ids = set(spread_result.keys())
-                pass 
-            except:
+                # Rust 引擎返回 dict {id: energy}
+                # 参数: entry_points(List[int]), steps(int), decay(float)
+                # 注意：entry_points 必须是 int 列表
+                entry_point_ids = [int(mid) for mid in entry_points]
+                spread_result = self._rust_engine.spread(entry_point_ids, 2, 0.5)
+                activated_ids = set(spread_result.keys())
+            except Exception as e:
+                print(f"[SocialMemory] Rust engine spread failed: {e}")
+                # Fallback: 仅使用直接命中的节点
                 pass
         
         # 3. 读取内容
