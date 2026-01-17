@@ -20,6 +20,7 @@ class ScorerService:
         """
         智能清洗文本：
         - 移除大数据量的系统注入标签 (如 FILE_RESULTS)
+        - 移除 Thinking 和 Monologue 块，只保留最有价值的回复用于总结
         - 保留有助于判断语气的 NIT 协议块和关键性格标签
         """
         if not text:
@@ -37,12 +38,17 @@ class ScorerService:
         for tag in remove_tags:
             pattern = f"<{tag}>[\\s\\S]*?</{tag}>"
             cleaned = re.sub(pattern, f"[{tag} Data Omitted]", cleaned)
+
+        # 2. 移除 Thinking 和 Monologue 块
+        # 这些内心戏对于长期记忆来说通常是噪音，Scorer 只需要关注最终的交互结果
+        cleaned = re.sub(r'【(?:Thinking|Monologue)[:：]?\s*[\s\S]*?】', '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'\[(?:Thinking|Monologue)[:：]?\s*[\s\S]*?\]', '', cleaned, flags=re.IGNORECASE)
             
-        # 2. 保留逻辑：
+        # 3. 保留逻辑：
         # 我们默认保留所有 NIT 协议块 [[[NIT_CALL]]]...[[[NIT_END]]] 
         # 以及可能残留的性格相关标签 (PEROCUE, TOPIC 等)，因为它们包含关键的语气和状态信息。
             
-        return cleaned
+        return cleaned.strip()
 
     async def _get_scorer_config(self) -> Dict[str, Any]:
         """获取秘书专用模型配置，如果未配置则回退到全局配置"""

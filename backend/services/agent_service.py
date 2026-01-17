@@ -61,7 +61,7 @@ class AgentService:
         self.preprocessor_manager = PreprocessorManager()
         self.preprocessor_manager.register(UserInputPreprocessor())
         self.preprocessor_manager.register(HistoryPreprocessor())
-        self.preprocessor_manager.register(WeeklyReportPreprocessor()) # Add independent retrieval
+        # self.preprocessor_manager.register(WeeklyReportPreprocessor()) # Disabled as per user request (Documents are static files now)
         self.preprocessor_manager.register(RAGPreprocessor())
         self.preprocessor_manager.register(GraphFlashbackPreprocessor())
         self.preprocessor_manager.register(ConfigPreprocessor())

@@ -782,19 +782,23 @@ class LLMService:
                     return
 
                 buffer = ""
-                async for chunk in response.aiter_text():
-                    buffer += chunk
-                    while "\n" in buffer:
-                        line, buffer = buffer.split("\n", 1)
-                        line = line.strip()
-                        if line.startswith("data: "):
-                            data_str = line[6:].strip()
-                            if data_str == "[DONE]":
-                                return
-                            try:
-                                data = json.loads(data_str)
-                                if data.get("choices") and len(data["choices"]) > 0:
-                                    delta = data["choices"][0].get("delta", {})
-                                    yield delta
-                            except Exception:
-                                continue
+                try:
+                    async for chunk in response.aiter_text():
+                        buffer += chunk
+                        while "\n" in buffer:
+                            line, buffer = buffer.split("\n", 1)
+                            line = line.strip()
+                            if line.startswith("data: "):
+                                data_str = line[6:].strip()
+                                if data_str == "[DONE]":
+                                    return
+                                try:
+                                    data = json.loads(data_str)
+                                    if data.get("choices") and len(data["choices"]) > 0:
+                                        delta = data["choices"][0].get("delta", {})
+                                        yield delta
+                                except Exception:
+                                    continue
+                except (httpx.RemoteProtocolError, httpx.ReadError, httpx.ReadTimeout) as e:
+                    print(f"[LLM] Stream Interrupted: {e}")
+                    yield {"content": f"\n\n[System Warning: Network stream interrupted ({str(e)})]"}

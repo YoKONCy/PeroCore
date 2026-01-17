@@ -128,18 +128,19 @@ async def exit_work_mode() -> str:
         file_path = await MemoryFileManager.save_log("work_logs", f"{timestamp_str}_{safe_task_name}", summary_content)
         
         # 5. Save to Memory (DB)
-        db_content = f"{summary_content}\n\n> 📁 File Archived: {file_path}"
+        # [Modified] User requested NOT to store document types in DB.
+        # db_content = f"{summary_content}\n\n> 📁 File Archived: {file_path}"
         
-        await MemoryService.save_memory(
-            session=session,
-            content=db_content,
-            tags="work_log,summary,coding",
-            clusters="[工作记录]",
-            importance=8,
-            memory_type="work_log",
-            source="system"
-        )
-        return f"Exited Work Mode. \n\n[Summary Generated]:\n{summary_content}\n\n(Saved to Long-term Memory)"
+        # await MemoryService.save_memory(
+        #     session=session,
+        #     content=db_content,
+        #     tags="work_log,summary,coding",
+        #     clusters="[工作记录]",
+        #     importance=8,
+        #     memory_type="work_log",
+        #     source="system"
+        # )
+        return f"Exited Work Mode. \n\n[Summary Generated]:\n{summary_content}\n\n(Saved to File: {file_path})"
         
     except Exception as e:
         await session.rollback()

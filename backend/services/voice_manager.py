@@ -60,9 +60,9 @@ class RealtimeVoiceManager:
                 cleaned = cleaned.replace('\r\n', '\n')
                 
                 # 先移除特定块
-                # 移除思考 (Thinking) 块 (支持 [] 和 【】)
-                cleaned = re.sub(r'【Thinking.*?】', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
-                cleaned = re.sub(r'\[Thinking.*?\]', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
+                # 移除思考 (Thinking) 块 (支持 [] 和 【】) 以及 碎碎念 (Monologue)
+                cleaned = re.sub(r'【(?:Thinking|Monologue).*?】', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
+                cleaned = re.sub(r'\[(?:Thinking|Monologue).*?\]', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
                 
                 # 识别最后一个 "技术标题" 并提取其后的内容
                 # 标题包括：Plan:, Action:, Observation:, Result:, Thought:

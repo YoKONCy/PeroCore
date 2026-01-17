@@ -662,19 +662,19 @@ class SocialService:
                 file_path = await MemoryFileManager.save_log("social_daily", f"{date_str}_Social_Summary", summary_content)
                 
                 # 5. 保存到记忆 (DB)
-                # 我们存储内容 + 文件引用
-                db_content = f"【社交日报 {date_str}】\n{summary_content}\n\n> 📁 File Archived: {file_path}"
+                # [Modified] User requested NOT to store document types in DB at all.
+                # db_content = f"【社交日报 {date_str}】\n{summary_content}\n\n> 📁 File Archived: {file_path}"
                 
-                await MemoryService.save_memory(
-                    session=session,
-                    content=db_content,
-                    tags="social_summary,daily_log",
-                    importance=5, # 中等重要性
-                    source="social_summary",
-                    memory_type="summary"
-                )
+                # await MemoryService.save_memory(
+                #     session=session,
+                #     content=db_content,
+                #     tags="social_summary,daily_log",
+                #     importance=5, # 中等重要性
+                #     source="social_summary",
+                #     memory_type="summary"
+                # )
                 
-                logger.info(f"[Social] Summary generated and saved.")
+                logger.info(f"[Social] Summary generated and saved to FILE only (DB disabled).")
 
         except Exception as e:
             logger.error(f"[Social] Error generating summary: {e}", exc_info=True)

@@ -127,6 +127,21 @@ async def update_character_status(
         if not triggers:
             return "No status updates provided."
 
+        # Broadcast to frontend (Tauri/Web)
+        try:
+            # Lazy import to avoid circular dependency
+            try:
+                from services.voice_manager import voice_manager
+            except ImportError:
+                from backend.services.voice_manager import voice_manager
+                
+            await voice_manager.broadcast({
+                "type": "triggers",
+                "data": triggers
+            })
+        except Exception as e:
+            print(f"[CharacterOps] Failed to broadcast triggers: {e}")
+
         return json.dumps(triggers, ensure_ascii=False)
 
     except Exception as e:

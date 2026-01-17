@@ -20,7 +20,7 @@
       <transition name="fade">
         <div class="bubble" v-if="currentText || isThinking" :class="{ 'expanded': isBubbleExpanded }">
           <!-- 普通文本显示 -->
-          <div class="text-content" :class="{ 'cursor-pointer': isThinking }">
+          <div class="text-content" :class="{ 'cursor-pointer': isThinking }" style="-webkit-app-region: no-drag;" @mousedown.stop>
             <template v-if="isThinking">
               <span class="thinking-text">{{ thinkingMessage }}</span>
             </template>
@@ -33,16 +33,10 @@
                   
                   <!-- 动作描述 -->
                   <span v-else-if="segment.type === 'action'" class="action-text">*{{ segment.content }}*</span>
-
-                  <!-- 思考过程 (折叠) -->
-                  <details v-else-if="segment.type === 'thinking'" class="thinking-details">
-                    <summary class="thinking-summary">🤔 思考过程...</summary>
-                    <div class="thinking-body">{{ segment.content }}</div>
-                  </details>
                 </div>
               </div>
               <!-- 展开/收起按钮 -->
-              <div v-if="isContentOverflowing" class="bubble-expand-btn" @click.stop="toggleBubbleExpand">
+              <div v-if="isContentOverflowing" class="bubble-expand-btn" @click.stop="toggleBubbleExpand" @mousedown.stop>
                 {{ isBubbleExpanded ? '收起' : '展开' }}
               </div>
             </template>
@@ -251,7 +245,7 @@ const parsedBubbleContent = computed(() => {
   // 1. 【Type: Content】 - 块格式
   // 2. *Action* - 星号动作格式
   // 3. Thought/Action: Content - 标准 ReAct 格式（支持多行，直到下一个标识符或结束）
-  const regex = /(?:【(Thinking|Error|Reflection)[:：]?\s*([\s\S]*?)】)|(?:\n|^)\s*\*([\s\S]+?)\*|(?:\n|^)\s*(Thought|Action)[:：]\s*([\s\S]+?)(?=\n\s*(?:Thought|Action)[:：]|\n\s*\*|【(?:Thinking|Error|Reflection)|$)/gi
+  const regex = /(?:【(Thinking|Error|Reflection|Monologue)[:：]?\s*([\s\S]*?)】)|(?:\n|^)\s*\*([\s\S]+?)\*|(?:\n|^)\s*(Thought|Action)[:：]\s*([\s\S]+?)(?=\n\s*(?:Thought|Action)[:：]|\n\s*\*|【(?:Thinking|Error|Reflection|Monologue)|$)/gi
   
   let lastIndex = 0
   let match
@@ -291,7 +285,8 @@ const parsedBubbleContent = computed(() => {
     }
   }
   
-  return segments
+  // 过滤掉 Thinking 和 Monologue，只保留文本和动作
+  return segments.filter(s => s.type === 'text' || s.type === 'action')
 })
 
 const isSpeaking = ref(false)
@@ -464,17 +459,41 @@ const fetchPetState = async () => {
         const res = await fetch('http://localhost:9120/api/pet/state')
         if (res.ok) {
             const data = await res.json()
-            if (data.mood) {
-                moodText.value = data.mood
-                localStorage.setItem('ppc.mood', data.mood)
+            
+            // 构建 applyTriggers 需要的数据结构
+            const triggerData = {}
+            
+            // 1. 状态
+            const stateData = {}
+            if (data.mood) stateData.mood = data.mood
+            if (data.vibe) stateData.vibe = data.vibe
+            if (data.mind) stateData.mind = data.mind
+            if (Object.keys(stateData).length > 0) {
+                triggerData.state = stateData
             }
-            if (data.vibe) {
-                vibeText.value = data.vibe
-                localStorage.setItem('ppc.vibe', data.vibe)
+
+            // 2. 交互台词 (需要解析 JSON 字符串)
+            if (data.click_messages_json) {
+                try {
+                    triggerData.click_messages = JSON.parse(data.click_messages_json)
+                } catch (e) { console.warn('Failed to parse click_messages_json', e) }
             }
-            if (data.mind) {
-                mindText.value = data.mind
-                localStorage.setItem('ppc.mind', data.mind)
+            
+            if (data.idle_messages_json) {
+                try {
+                    triggerData.idle_messages = JSON.parse(data.idle_messages_json)
+                } catch (e) { console.warn('Failed to parse idle_messages_json', e) }
+            }
+            
+            if (data.back_messages_json) {
+                try {
+                    triggerData.back_messages = JSON.parse(data.back_messages_json)
+                } catch (e) { console.warn('Failed to parse back_messages_json', e) }
+            }
+
+            // 应用更新
+            if (Object.keys(triggerData).length > 0) {
+                applyTriggers(triggerData)
             }
         }
     } catch (e) {
@@ -2357,6 +2376,38 @@ onUnmounted(() => {
   font-size: 11px;
   line-height: 1.4;
   border-top: 1px dashed rgba(136, 136, 136, 0.1);
+}
+
+.monologue-details {
+  margin: 4px 0;
+  border: 1px dashed rgba(153, 102, 255, 0.3);
+  border-radius: 8px;
+  background: rgba(245, 240, 255, 0.4);
+  font-size: 12px;
+}
+
+.monologue-summary {
+  cursor: pointer;
+  padding: 4px 8px;
+  color: #9966ff;
+  user-select: none;
+  font-size: 12px;
+  opacity: 0.8;
+  transition: opacity 0.2s;
+}
+
+.monologue-summary:hover {
+  opacity: 1;
+}
+
+.monologue-body {
+  padding: 4px 8px 8px 8px;
+  color: #663399;
+  white-space: pre-wrap;
+  font-family: "Segoe UI", sans-serif;
+  font-size: 11px;
+  line-height: 1.4;
+  border-top: 1px dashed rgba(153, 102, 255, 0.1);
 }
 
 .action-text {
