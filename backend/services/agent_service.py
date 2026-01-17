@@ -1022,9 +1022,14 @@ Instruction: When opening an app, check this list first. If it's already running
                     print(f"[Agent] No tool calls detected in Turn {turn_count}")
 
                 # Apply Postprocessor Pipeline
+                # 如果 source 是 'ide'，则跳过 NIT 过滤，以便前端显示工具调用
                 processed_stream = self.postprocessor_manager.process_stream(
                     raw_stream_source(),
-                    context={"source": source, "session_id": session_id}
+                    context={
+                        "source": source, 
+                        "session_id": session_id,
+                        "skip_nit_filter": (source == "ide")
+                    }
                 )
 
                 async for content in processed_stream:

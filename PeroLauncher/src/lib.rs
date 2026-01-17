@@ -18,6 +18,7 @@ use tauri::{
     tray::TrayIconBuilder,
 };
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use window_vibrancy::{apply_blur, apply_acrylic, apply_mica};
 use windows::Win32::Foundation::POINT;
 use windows::Win32::UI::WindowsAndMessaging::{
     GetCursorPos, GetWindowLongA, SetWindowLongA, GWL_EXSTYLE, WS_EX_LAYERED, WS_EX_TRANSPARENT,
@@ -282,6 +283,47 @@ fn set_ignore_mouse(window: tauri::Window, ignore: bool) {
 }
 
 
+
+#[tauri::command]
+async fn open_ide_window(app: tauri::AppHandle) {
+    println!("Rust: open_ide_window command received");
+    if let Some(window) = app.get_webview_window("ide") {
+        let _ = window.show();
+        let _ = window.maximize();
+        let _ = window.set_focus();
+        
+        // Apply vibrancy again just in case (though setup is better)
+        #[cfg(target_os = "windows")]
+        {
+            let _ = apply_acrylic(&window, Some((18, 18, 18, 125))); // Dark acrylic for testing, or transparent?
+            // Or mica for newer windows
+            // let _ = apply_mica(&window, None);
+        }
+    } else {
+        // Since "ide" is in tauri.conf.json, it should be created by Tauri (just hidden).
+        // If it was closed/destroyed, we recreate it.
+        let window = WebviewWindowBuilder::new(
+            &app,
+            "ide",
+            WebviewUrl::App("/#/ide".into()),
+        )
+        .title("Pero Chat")
+        .inner_size(1280.0, 800.0)
+        .maximized(true)
+        .resizable(true)
+        .decorations(false)
+        .transparent(true)
+        .visible(true)
+        .build();
+
+        if let Ok(win) = window {
+             #[cfg(target_os = "windows")]
+             {
+                 let _ = apply_acrylic(&win, Some((0, 0, 0, 10))); // Very transparent acrylic
+             }
+        }
+    }
+}
 
 #[tauri::command]
 async fn open_dashboard(app: tauri::AppHandle) {
@@ -759,6 +801,7 @@ pub fn run() {
         .manage(log_store)
         .invoke_handler(tauri::generate_handler![
             open_dashboard,
+            open_ide_window,
             open_pet_window,
             hide_pet_window,
             set_ignore_mouse,
@@ -793,6 +836,18 @@ pub fn run() {
             let _napcat_setup = napcat_for_setup;
 
             println!("[Perf] setup() entered at {:?}", start_time.elapsed());
+
+            // Apply vibrancy to windows created at startup (if any, e.g. if we set visible: true for ide later)
+            // But since "ide" is visible: false, we might not need to do it here unless we fetch it.
+            if let Some(ide_win) = app.get_webview_window("ide") {
+                 #[cfg(target_os = "windows")]
+                 {
+                     // Use Acrylic or Mica. Acrylic works on Windows 10/11. Mica is 11 only.
+                     // Blur is for older Windows 10.
+                     // Let's try Acrylic with very low opacity to let CSS handle the color/blur.
+                     let _ = apply_acrylic(&ide_win, Some((0, 0, 0, 0))); 
+                 }
+            }
 
             // 托盘初始化
             let handle = app.handle().clone();

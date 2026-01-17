@@ -49,14 +49,15 @@
             {
                 "label": "ide",
                 "url": "/#/ide",
-                "title": "Pero IDE",
+                "title": "Pero Chat",
                 "width": 1280,
                 "height": 800,
                 "resizable": true,
-                "decorations": true,
-                "transparent": false,
+                "decorations": false,
+                "transparent": true,
                 "visible": false,
-                "center": true
+                "center": true,
+                "shadow": true
             }
         ],
         "security": {
