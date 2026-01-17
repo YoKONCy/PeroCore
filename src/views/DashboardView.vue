@@ -499,6 +499,22 @@
               <div class="toolbar memory-toolbar">
                  <h3 class="section-title">长期记忆库 (Long-term Memory)</h3>
                  <div class="filters">
+                    <el-select 
+                        v-model="memoryFilterType" 
+                        placeholder="类型筛选" 
+                        size="small" 
+                        style="width: 120px"
+                        clearable
+                        @change="fetchMemories"
+                    >
+                        <el-option label="全部类型" value="" />
+                        <el-option label="🧩 记忆块 (Event)" value="event" />
+                        <el-option label="🧠 事实 (Fact)" value="fact" />
+                        <el-option label="🤝 誓言 (Promise)" value="promise" />
+                        <el-option label="💖 偏好 (Preference)" value="preference" />
+                        <el-option label="📝 工作日志 (Log)" value="work_log" />
+                        <el-option label="🗄️ 归档 (Archived)" value="archived_event" />
+                    </el-select>
                     <el-date-picker
                         v-model="memoryFilterDate"
                         type="date"
@@ -1327,6 +1343,7 @@ const memoryGraphData = shallowRef({ nodes: [], edges: [] })
 const tagCloud = ref({})
 const memoryFilterTags = ref([])
 const memoryFilterDate = ref(null)
+const memoryFilterType = ref('') // New type filter
 const isLoadingGraph = ref(false)
 const graphRef = ref(null)
 let chartInstance = null
@@ -1407,6 +1424,9 @@ const getMemoryTagType = (type) => {
   if (type === 'preference') return 'danger'
   if (type === 'event' || type === 'summary' || type === 'interaction_summary') return 'primary'
   if (type === 'archived_event') return 'info'
+  if (type === 'fact') return 'success' // Green for facts
+  if (type === 'promise') return 'warning' // Orange for promises
+  if (type === 'work_log') return 'warning'
   return 'info'
 }
 
@@ -1417,7 +1437,9 @@ const getMemoryTypeLabel = (type) => {
     'summary': '🧩 记忆块',
     'interaction_summary': '🧩 记忆块',
     'archived_event': '🗄️ 归档',
-    'fact': '🧠 事实'
+    'fact': '🧠 事实',
+    'promise': '🤝 誓言',
+    'work_log': '📝 工作日志'
   }
   return map[type] || type
 }
@@ -1997,6 +2019,9 @@ const fetchMemories = async () => {
     let url = `${API_BASE}/memories/list?limit=100`
     if (memoryFilterDate.value) {
         url += `&date_start=${memoryFilterDate.value}`
+    }
+    if (memoryFilterType.value) {
+        url += `&type=${memoryFilterType.value}`
     }
     if (memoryFilterTags.value.length > 0) {
         url += `&tags=${memoryFilterTags.value.join(',')}`

@@ -887,12 +887,17 @@ class MemoryService:
         offset: int = 0, 
         date_start: str = None, 
         date_end: str = None, 
-        tags: str = None
+        tags: str = None,
+        memory_type: str = None
     ) -> List[Memory]:
         from datetime import datetime
         import time
         
         statement = select(Memory)
+        
+        # 类型过滤器
+        if memory_type:
+            statement = statement.where(Memory.type == memory_type)
         
         # 日期过滤器 (使用时间戳 ms)
         if date_start:

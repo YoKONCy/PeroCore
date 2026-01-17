@@ -202,18 +202,19 @@ async def lifespan(app: FastAPI):
                                 # But we'll add the file path reference.
                                 
                                 # [Update] Update file path in DB content
-                                db_content = f"【周报归档】{now.strftime('%Y-%m-%d')}\n(See file: weeklyport/{filename})\n\n{report}"
+                                # [Modified] User requested NOT to store document types in DB at all.
+                                # db_content = f"【周报归档】{now.strftime('%Y-%m-%d')}\n> 📁 File Archived: weeklyport/{filename}\n\n{report}"
                                 
-                                await MemoryService.save_memory(
-                                    session=session,
-                                    content=db_content,
-                                    tags="weekly_report,summary",
-                                    clusters="[周报归档]",
-                                    importance=3, # High importance
-                                    memory_type="weekly_report", # Special type for independent retrieval
-                                    source="system"
-                                )
-                                print("[Main] Weekly Report Index saved to Memory (VectorDB).")
+                                # await MemoryService.save_memory(
+                                #     session=session,
+                                #     content=db_content,
+                                #     tags="weekly_report,summary",
+                                #     clusters="[周报归档]",
+                                #     importance=3, # High importance
+                                #     memory_type="weekly_report", # Special type for independent retrieval
+                                #     source="system"
+                                # )
+                                print("[Main] Weekly Report saved to File ONLY (DB Storage Disabled by User Request).")
                             except Exception as e:
                                 print(f"[Main] Failed to save Weekly Report: {e}")
                             
@@ -1104,10 +1105,11 @@ async def list_memories(
     date_start: str = None, 
     date_end: str = None, 
     tags: str = None,
+    type: str = None, # Allow filtering by memory type
     session: AsyncSession = Depends(get_session)
 ):
     service = MemoryService()
-    return await service.get_all_memories(session, limit, offset, date_start, date_end, tags)
+    return await service.get_all_memories(session, limit, offset, date_start, date_end, tags, memory_type=type)
 
 @app.get("/api/memories/graph")
 async def get_memory_graph(limit: int = 100, session: AsyncSession = Depends(get_session)):
