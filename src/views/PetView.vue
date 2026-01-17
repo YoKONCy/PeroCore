@@ -139,6 +139,7 @@ import { PhysicalPosition } from '@tauri-apps/api/dpi'
 const appWindow = getCurrentWindow();
 
 const voiceMode = ref(parseInt(localStorage.getItem('ppc.voice_mode') || '0')) // 0: off, 1: auto(vad), 2: ptt
+const isWorkMode = ref(false) // 新增工作模式状态
 const isPTTRecording = ref(false)
 const isVoiceActive = computed(() => voiceMode.value !== 0)
 
@@ -381,10 +382,30 @@ onMounted(async () => {
   })
 
   // 监听来自 IDE 的消息同步 (如果 IDE 发消息，Pet 也要显示)
-  const unlistenIdeMsg = await listen('ide-message-sync', (event) => {
+  const unlistenIdeMsg = await listen('sync-chat-to-pet', (event) => {
+      // 检查是否在工作模式 (如果需要严格隔离，可以加判断)
+      // 但实际上后端通常已经做过隔离，或者 IDE 侧发过来就意味着应该显示
+      // 不过设计文档说 "Work Mode Isolation ... cut off synchronization"
+      // 所以这里加上判断
+      if (isWorkMode.value) return;
+
       const { role, content } = event.payload
       if (role === 'assistant') {
           currentText.value = content
+      } else if (role === 'user') {
+          // 可选：是否显示用户发送的内容？通常 Pet 气泡只显示 AI 回复。
+          // 或者显示 "用户说了: ..."
+          // 暂时忽略用户消息，只同步 AI 回复
+      }
+  })
+
+  // 监听工作模式切换
+  const unlistenWorkMode = await listen('work-mode-changed', (event) => {
+      isWorkMode.value = event.payload.is_work_mode
+      if (isWorkMode.value) {
+          // 进入工作模式，隐藏气泡或显示提示
+          currentText.value = ''
+          isThinking.value = false
       }
   })
 
@@ -414,6 +435,9 @@ onMounted(async () => {
     unlistenMood()
     unlistenVibe()
     unlistenMind()
+    unlistenSyncChat()
+    unlistenIdeMsg()
+    unlistenWorkMode()
     unlistenSearch()
     unlistenPTTStart()
     unlistenPTTStop()

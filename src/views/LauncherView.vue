@@ -389,9 +389,17 @@ import {
 const router = useRouter()
 const activeTab = ref('home')
 
-watch(activeTab, (val) => {
+watch(activeTab, async (val) => {
   if (val === 'ide') {
-    router.push('/ide')
+    // Open the separate transparent window instead of routing in-place
+    try {
+      await invoke('open_ide_window')
+      // Reset tab to home after opening, or keep it highlighted?
+      // Maybe keep it to show it's active.
+    } catch (e) {
+      console.error("Failed to open IDE window:", e)
+      addLog(`[ERROR] Failed to open Chat Window: ${e}`)
+    }
   }
 })
 
@@ -536,6 +544,7 @@ watch(napcatLogs, () => scrollToBottom(napcatViewer.value), { deep: true })
 
 const navItems = [
   { id: 'home', name: '控制面板', icon: Home },
+  { id: 'ide', name: '伴侣模式 (Chat)', icon: Sparkles },
   { id: 'napcat', name: 'NapCat 终端', icon: MessageSquare },
   { id: 'terminal', name: '系统终端', icon: Terminal },
   { id: 'plugins', name: '插件管理', icon: Plug },
