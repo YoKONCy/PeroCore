@@ -9,7 +9,8 @@ from .models_db import QQMessage, QQUser, QQGroup
 # 使用绝对路径确保数据库文件位置正确
 # 默认存储在 backend/data 目录下，名为 social_storage.db
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DATABASE_FILE = os.path.join(BASE_DIR, "data", "social_storage.db")
+# 使用新的数据库文件名以避免锁定问题
+DATABASE_FILE = os.path.join(BASE_DIR, "data", "social_storage_v2.db")
 DATABASE_URL = f"sqlite+aiosqlite:///{DATABASE_FILE}"
 
 social_engine = create_async_engine(DATABASE_URL, echo=False)

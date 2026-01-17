@@ -123,6 +123,31 @@ async def qq_get_stranger_info(user_id: str):
     except Exception as e:
         return f"Failed to get stranger info: {e}"
 
+async def qq_get_group_info(group_id: str):
+    """
+    Get info of a group.
+    """
+    service = get_social_service()
+    try:
+        gid = int(group_id)
+        info = await service.get_group_info(gid)
+        return str(info)
+    except Exception as e:
+        return f"Failed to get group info: {e}"
+
+async def qq_get_group_member_info(group_id: str, user_id: str):
+    """
+    Get info of a group member.
+    """
+    service = get_social_service()
+    try:
+        gid = int(group_id)
+        uid = int(user_id)
+        info = await service.get_group_member_info(gid, uid)
+        return str(info)
+    except Exception as e:
+        return f"Failed to get group member info: {e}"
+
 async def qq_get_group_history(group_id: str, count: int = 20):
     """
     Get historical messages from a QQ group.

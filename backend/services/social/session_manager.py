@@ -87,6 +87,35 @@ class SocialSessionManager:
         except Exception as e:
             logger.error(f"Failed to persist outgoing message: {e}")
 
+    async def persist_system_notification(self, session_id: str, session_type: str, content: str, raw_event: dict = None):
+        """
+        将系统通知（如撤回、禁言）持久化到独立社交数据库。
+        """
+        try:
+            from .database import get_social_db_session
+            from .models_db import QQMessage
+            import uuid
+            import json
+            
+            if raw_event is None:
+                raw_event = {}
+
+            async for db_session in get_social_db_session():
+                new_msg = QQMessage(
+                    msg_id=str(uuid.uuid4()),
+                    session_id=session_id,
+                    session_type=session_type,
+                    sender_id="system",
+                    sender_name="System",
+                    content=content,
+                    timestamp=datetime.now(),
+                    raw_event_json=json.dumps(raw_event, default=str)
+                )
+                db_session.add(new_msg)
+                await db_session.commit()
+        except Exception as e:
+            logger.error(f"Failed to persist system notification: {e}")
+
     async def get_recent_messages(self, session_id: str, session_type: str, limit: int = 20) -> list[SocialMessage]:
         """
         从独立数据库获取最近的消息作为上下文。

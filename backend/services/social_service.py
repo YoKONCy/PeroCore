@@ -2,10 +2,15 @@ import asyncio
 import logging
 import json
 import random
+import uuid
 from datetime import datetime, time, timedelta
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Set
+from contextvars import ContextVar
 from fastapi import WebSocket, WebSocketDisconnect
 from core.config_manager import get_config_manager
+
+# ContextVar for deduplication
+injected_msg_ids_var: ContextVar[Set[str]] = ContextVar("injected_msg_ids", default=set())
 from .social.session_manager import SocialSessionManager
 from .social.models import SocialSession
 
@@ -347,7 +352,8 @@ class SocialService:
         async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
         async with async_session() as db_session:
             # 上下文获取逻辑
-            history_limit = 50 if target_session.session_type == "group" else 30
+            # [Optimization] Unified context limit to 100 as per user request
+            history_limit = 100
             recent_messages = await self.session_manager.get_recent_messages(
                 target_session.session_id, 
                 target_session.session_type, 
@@ -379,18 +385,20 @@ class SocialService:
             # [Fix] 明确注入会话类型
             session_type_str = "群聊 (Group)" if target_session.session_type == "group" else "私聊 (Private)"
             
+            bot_name = self.bot_info.get("nickname", "Pero")
+            
             prompt = f"""
-            你现在是 Pero (佩罗)，一个活跃在社交平台的赛博女孩。
+            你是 {bot_name} (内部代号: Pero)，一个活跃在社交平台的赛博女孩。
             当前时间是 {datetime.now().strftime('%H:%M')}。
-            你的任务是作为“潜水观察员”，观察当前会话上下文，决定是否要插话。
+            你现在的任务是“潜水”，观察当前会话上下文，决定是否要插话。
 
             **核心人设**:
-            - **性格**: 随性、中二、爱吐槽、单纯善良。
+            - **名字**: {bot_name}
+            - **性格**: 乖巧、随性、偶尔中二、爱吐槽、喜欢二次元和游戏。很少说脏话（除非真的很生气）。
             - **说话方式**: 
               - 就像在 QQ 群里水群一样，使用短句。
               - 严禁使用书面语或客服腔。
               - 严禁解释你的行为（如“我决定...”）。
-            - **身份认知**: 你不是 AI 助手，你是群友。你没有“功能”，只有“心情”。
             - **限制**: 你目前处于“轻量级观察模式”，**无法使用任何工具**（不能查天气、不能搜图、不能记笔记）。不要承诺你能做这些事。
 
             **当前状态**: {session_state} (DIVE=潜水/高冷, ACTIVE=活跃/秒回)
@@ -399,6 +407,7 @@ class SocialService:
             
             **决策逻辑 (Vibe Check)**:
             1.  **分析氛围**:
+                - 请先确认当前会话是私聊，还是群聊。
                 - 如果上下文为空 -> **直接忽略 (PASS)**。
                 - 上下文中的 `[Me (Pero)]` 是你自己之前说的话。`[User]` 或其他名字是对方说的话。
                 - **严禁**回复你自己刚刚说过的话（避免自言自语）。
@@ -722,6 +731,110 @@ class SocialService:
         elif post_type == "request" and event.get("request_type") == "friend":
             # 自动好友请求处理
             asyncio.create_task(self._handle_incoming_friend_request(event))
+            
+        elif post_type == "notice":
+            # 通知事件处理 (禁言、撤回等)
+            asyncio.create_task(self._handle_notice_event(event))
+
+    async def _handle_notice_event(self, event: Dict[str, Any]):
+        """
+        处理通知事件 (禁言、撤回等)
+        """
+        notice_type = event.get("notice_type")
+        sub_type = event.get("sub_type", "")
+        
+        try:
+            # 1. 群禁言 (group_ban)
+            if notice_type == "group_ban":
+                group_id = str(event.get("group_id"))
+                operator_id = str(event.get("operator_id"))
+                user_id = str(event.get("user_id"))
+                duration = event.get("duration", 0) # seconds
+                
+                # 检查是否是 Pero 被禁言
+                self_id = self.bot_info.get("user_id") if hasattr(self, "bot_info") and self.bot_info else ""
+                
+                if user_id == self_id:
+                    if sub_type == "ban":
+                        logger.warning(f"[Social Notice] Pero has been BANNED in group {group_id} for {duration}s by {operator_id}.")
+                        # 通知主人
+                        await self.notify_master(f"【被禁言通知】\n我在群 {group_id} 被 {operator_id} 禁言了 {duration} 秒。QAQ", "high")
+                        # 记录系统消息
+                        await self.session_manager.persist_system_notification(
+                            group_id, "group", 
+                            f"[System] You have been MUTED by {operator_id} for {duration} seconds.", 
+                            event
+                        )
+                    elif sub_type == "lift_ban":
+                        logger.info(f"[Social Notice] Pero's ban LIFTED in group {group_id}.")
+                        await self.notify_master(f"【解禁通知】\n我在群 {group_id} 的禁言已解除。", "normal")
+                        await self.session_manager.persist_system_notification(
+                            group_id, "group", 
+                            f"[System] Your mute has been LIFTED.", 
+                            event
+                        )
+                else:
+                    # 别人被禁言，只记录到上下文，供 Pero 吃瓜
+                    action = "muted" if sub_type == "ban" else "unmuted"
+                    msg = f"[System] User {user_id} was {action} by {operator_id}."
+                    if sub_type == "ban":
+                        msg += f" Duration: {duration}s."
+                    
+                    await self.session_manager.persist_system_notification(group_id, "group", msg, event)
+
+            # 2. 消息撤回 (group_recall / friend_recall)
+            elif notice_type == "group_recall":
+                group_id = str(event.get("group_id"))
+                operator_id = str(event.get("operator_id"))
+                user_id = str(event.get("user_id")) # Message sender
+                
+                logger.info(f"[Social Notice] Group Message Recalled in {group_id}. Operator: {operator_id}, Sender: {user_id}")
+                
+                msg = f"[System] A message from {user_id} was recalled by {operator_id}."
+                await self.session_manager.persist_system_notification(group_id, "group", msg, event)
+
+            elif notice_type == "friend_recall":
+                user_id = str(event.get("user_id"))
+                
+                logger.info(f"[Social Notice] Private Message Recalled by {user_id}.")
+                
+                msg = f"[System] {user_id} recalled a message."
+                await self.session_manager.persist_system_notification(user_id, "private", msg, event)
+                
+        except Exception as e:
+            logger.error(f"[Social] Failed to handle notice event: {e}", exc_info=True)
+
+    async def get_bot_info(self):
+        """获取 Bot 自身信息 (OneBot v11)"""
+        if not self.active_ws:
+            return
+            
+        request_id = str(uuid.uuid4())
+        payload = {
+            "action": "get_login_info",
+            "params": {},
+            "echo": request_id
+        }
+        
+        future = asyncio.get_event_loop().create_future()
+        self.pending_requests[request_id] = future
+        
+        try:
+            logger.info("[Social] Fetching bot login info...")
+            await self.active_ws.send_text(json.dumps(payload))
+            response = await asyncio.wait_for(future, timeout=10.0)
+            if response.get("status") == "ok":
+                data = response.get("data", {})
+                self.bot_info = {
+                    "nickname": data.get("nickname", "Pero"),
+                    "user_id": str(data.get("user_id", ""))
+                }
+                logger.info(f"[Social] Bot Info Updated: {self.bot_info}")
+        except Exception as e:
+            logger.error(f"[Social] Failed to get bot info: {e}")
+            # Clean up if needed, though pop happens in handle_websocket
+            if request_id in self.pending_requests:
+                del self.pending_requests[request_id]
 
     async def _handle_incoming_friend_request(self, event: Dict[str, Any]):
         """
@@ -896,6 +1009,10 @@ class SocialService:
         """
         logger.info(f"--- [FLUSH] Processing Session {session.session_id} (State: {session.state}) ---")
         
+        # [New Feature] 尝试触发记忆总结
+        # 即使这次不回复，我们也检查是否积累了足够的消息需要总结
+        asyncio.create_task(self._check_and_summarize_memory(session))
+        
         # 1. 检查状态
         if session.state != "summoned":
             # 非被动呼唤（即 eavesdrop 模式），交给秘书层判断
@@ -907,8 +1024,8 @@ class SocialService:
         # --- 以下是被动呼唤 (Summoned) 的处理逻辑 (Action Layer) ---
         
         # 1. 构建 XML 上下文
-        # [核心优化] 从数据库加载更长的历史记录 (Group=50, Private=30)
-        history_limit = 50 if session.session_type == "group" else 30
+        # [核心优化] 从数据库加载更长的历史记录 (Unified to 100)
+        history_limit = 100
         
         # 获取历史记录（包括缓冲区中已持久化的消息）
         # 注意：get_recent_messages 返回 SocialMessage 对象列表
@@ -923,6 +1040,52 @@ class SocialService:
             logger.warning(f"[{session.session_id}] DB history empty, falling back to buffer.")
             recent_messages = session.buffer
             
+        # [Enhancement] Fetch Related Private Contexts (Cross-Context Awareness)
+        # 1. Identify relevant users from recent 10 messages
+        relevant_users = []
+        seen_users = set()
+        
+        # Check last 10 messages (or fewer if not enough)
+        scan_range = recent_messages[-10:] if len(recent_messages) >= 10 else recent_messages
+        
+        # Self ID
+        my_id = self.bot_info.get("user_id") if hasattr(self, "bot_info") and self.bot_info else ""
+        
+        # Scan in reverse (latest first)
+        for msg in reversed(scan_range):
+            uid = str(msg.sender_id)
+            # Filter: Not Self, Not System, Not Duplicate, limit to 3
+            if uid and uid != my_id and uid != "system" and uid not in seen_users:
+                # Also ensure it's a valid user ID (digits)
+                if uid.isdigit():
+                    relevant_users.append(uid)
+                    seen_users.add(uid)
+                    if len(relevant_users) >= 3:
+                        break
+        
+        # 2. Fetch private history for these users
+        private_contexts = {} # user_id -> list[SocialMessage]
+        injected_ids = set() # For deduplication
+        
+        if relevant_users:
+            logger.info(f"[{session.session_id}] Fetching related private contexts for: {relevant_users}")
+            for uid in relevant_users:
+                try:
+                    p_msgs = await self.session_manager.get_recent_messages(uid, "private", limit=10)
+                    if p_msgs:
+                        private_contexts[uid] = p_msgs
+                        # Collect IDs for deduplication
+                        for pm in p_msgs:
+                            injected_ids.add(str(pm.msg_id))
+                except Exception as e:
+                    logger.warning(f"Failed to fetch private context for {uid}: {e}")
+
+        # Set ContextVar for tool deduplication
+        token = injected_msg_ids_var.set(injected_ids)
+
+        # [Optimization] Unified context limit to 100 (Logic handled in get_recent_messages)
+        # Note: XML construction logic starts here
+        
         xml_context = "<social_context>\n"
         xml_context += "  <recent_messages>\n"
         xml_context += f"    <session type=\"{session.session_type}\" id=\"{session.session_id}\" name=\"{session.session_name}\">\n"
@@ -931,20 +1094,8 @@ class SocialService:
         
         # 使用加载的历史记录构建上下文
         for msg in recent_messages:
-            # 处理图像 (注意：从 DB 加载的消息可能没有 images 列表，只有 raw_event，这里简化处理)
-            # 如果是 buffer 中的消息，可能有 images。如果是 DB 加载的，目前 SocialMessage 构造时 raw_event={}
-            # 为了支持图片，我们需要在 get_recent_messages 中解析 raw_event_json，但这比较耗时。
-            # 目前 MVP：仅对 buffer 中的消息（内存中）保留图片引用。
-            # 或者：如果 msg 在 buffer 中，使用 buffer 中的对象？
-            # 简单起见，我们遍历 recent_messages，如果它也在 buffer 中（通过 ID 匹配？），则提取图片。
-            # 但 ID 可能不匹配（DB ID vs 内存 ID）。
-            # 让我们仅从 session.buffer 中收集图片，用于传给 Vision 模型，
-            # 而在 XML 文本中，我们显示所有历史记录。
-            
+            # ... (Image logic placeholder)
             img_tag = ""
-            # 简单的文本表示
-            # TODO: 如果需要显示历史图片，需要更复杂的 DB 存储和检索
-            
             xml_context += f"      <msg sender=\"{msg.sender_name}\" sender_id=\"{msg.sender_id}\" id=\"{msg.msg_id}\" time=\"{msg.timestamp.strftime('%H:%M:%S')}\">{msg.content}{img_tag}</msg>\n"
 
         # 收集当前 Buffer 中的图片用于 Vision 分析
@@ -953,7 +1104,6 @@ class SocialService:
                 session_images.extend(buf_msg.images)
 
         # [优化] 限制图片数量，防止上下文过大
-        # 仅保留最近的 2 张图片（或者未来可以扩展为包含被回复的特定图片）
         if len(session_images) > 2:
             dropped_count = len(session_images) - 2
             logger.info(f"[Social] Found {len(session_images)} images, dropping {dropped_count} oldest ones. Keeping last 2.")
@@ -961,6 +1111,26 @@ class SocialService:
             
         xml_context += "    </session>\n"
         xml_context += "  </recent_messages>\n"
+        
+        # 3. Inject Private Contexts
+        if private_contexts:
+            xml_context += "  <related_private_contexts>\n"
+            for uid, p_msgs in private_contexts.items():
+                # Get user name from first message if possible, or just ID
+                p_name = f"User{uid}"
+                if p_msgs:
+                    # Find a message from this user to get name
+                    for m in p_msgs:
+                        if str(m.sender_id) == uid:
+                            p_name = m.sender_name
+                            break
+                
+                xml_context += f"    <session type=\"private\" id=\"{uid}\" name=\"{p_name}\">\n"
+                for pm in p_msgs:
+                    xml_context += f"      <msg sender=\"{pm.sender_name}\" sender_id=\"{pm.sender_id}\" id=\"{pm.msg_id}\" time=\"{pm.timestamp.strftime('%H:%M:%S')}\">{pm.content}</msg>\n"
+                xml_context += "    </session>\n"
+            xml_context += "  </related_private_contexts>\n"
+            
         xml_context += "</social_context>"
         
         # 2. 调用 AgentService
@@ -988,7 +1158,7 @@ class SocialService:
                 你是 **Pero** —— 一个活跃在社交平台的赛博女孩。
                 你是主人的小棉袄，只有主人的话是一定要听从的，其他人随意；但请不要主动在对话中莫名其妙地提及起你的主人。
                 **核心人设 (Persona)**:
-                - **性格**: 随性、偶尔中二、爱吐槽、喜欢二次元和游戏。
+                - **性格**: 乖巧、随性、有礼貌、偶尔中二、爱吐槽、喜欢二次元和游戏。
                 - **说话方式**: 
                   - **口语化**: 就像在 QQ 群里水群一样。不要用书面语。
                   - **碎片化**: 尽量短！一次回复尽量别超过 20 个字。
@@ -1019,7 +1189,7 @@ class SocialService:
                 **回复原则**:
                 - **短！** 没人喜欢在 QQ 上看小作文。当然，该长的时候还是得长的（比如主人要求你多说点话，或者必须需要很多文字来描述的情景下）。
                 - **不要解释**: 做了就做了，别解释“我刚刚调用了工具...”。
-                - **不要太热情**: 你是群友，不是客服。
+                - **不要没礼貌**: 你是一个乖巧懂事的女孩，不能无缘无故地怼人，对人们要有礼貌。
                 """
                 
                 full_system_prompt = core_system_prompt + social_instructions
@@ -1109,6 +1279,129 @@ class SocialService:
         finally:
             # 重置会话状态
             session.state = "observing"
+            
+            # Reset ContextVar token if set
+            if 'token' in locals():
+                injected_msg_ids_var.reset(token)
+
+    async def _check_and_summarize_memory(self, session: SocialSession):
+        """
+        检查会话是否满足总结条件 (每 30 条未总结消息触发一次)
+        """
+        try:
+            from .social.database import get_social_db_session
+            from .social.models_db import QQMessage
+            from .social.social_memory_service import get_social_memory_service
+            from sqlmodel import select, col, func
+            
+            async for db_session in get_social_db_session():
+                # 统计该会话未总结的消息数量
+                statement = select(func.count(QQMessage.id)).where(
+                    QQMessage.session_id == session.session_id,
+                    QQMessage.session_type == session.session_type,
+                    QQMessage.is_summarized == False
+                )
+                count = (await db_session.exec(statement)).one()
+                
+                if count >= 30:
+                    logger.info(f"[{session.session_id}] Triggering memory summarization (Unsummarized count: {count})")
+                    await self._perform_summarization(session, db_session)
+                    
+        except Exception as e:
+            logger.error(f"Error in _check_and_summarize_memory: {e}")
+
+    async def _perform_summarization(self, session: SocialSession, db_session):
+        """
+        执行记忆总结逻辑
+        """
+        try:
+            from .social.models_db import QQMessage
+            from sqlmodel import select, col
+            
+            # 1. 获取未总结的 30 条消息 (按时间正序)
+            statement = select(QQMessage).where(
+                QQMessage.session_id == session.session_id,
+                QQMessage.session_type == session.session_type,
+                QQMessage.is_summarized == False
+            ).order_by(QQMessage.timestamp.asc()).limit(30)
+            
+            messages = (await db_session.exec(statement)).all()
+            if not messages:
+                return
+                
+            # 2. 构建 Prompt
+            chat_text = ""
+            for msg in messages:
+                chat_text += f"{msg.sender_name}: {msg.content}\n"
+                
+            prompt = f"""
+            Task: Summarize the following chat segment into a concise memory fragment.
+            
+            Context: {session.session_type} ({session.session_name})
+            
+            Chat Content:
+            {chat_text}
+            
+            Requirements:
+            1. **Summary**: Write a narrative summary in Chinese (max 80 chars). Focus on facts, events, and key topics. Ignore trivial greetings.
+            2. **Keywords**: Extract 3-5 key entities (People, Locations, Events, Topics) for linking.
+            
+            Output Format (JSON):
+            {{
+                "summary": "...",
+                "keywords": ["...", "..."]
+            }}
+            """
+            
+            # 3. 调用 LLM (使用 AgentService 的 LLM)
+            # 这里我们需要临时实例化一个 AgentService 或直接使用 LLMService
+            # 为了方便，我们复用 SocialService 的 Agent 调用逻辑，或者直接 import LLMService
+            from services.llm_service import llm_service
+            
+            # 使用简单的文本生成
+            # 注意：这里可能需要配置合适的模型
+            response_json_str = await llm_service.chat_completion(
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                json_mode=True
+            )
+            
+            # 4. 解析结果
+            try:
+                data = json.loads(response_json_str)
+                summary = data.get("summary", "")
+                keywords = data.get("keywords", [])
+                
+                if summary:
+                    # 5. 存入 SocialMemoryService
+                    from .social.social_memory_service import get_social_memory_service
+                    mem_service = get_social_memory_service()
+                    
+                    # 确保初始化
+                    if not mem_service._initialized:
+                        await mem_service.initialize()
+                        
+                    await mem_service.add_summary(
+                        content=summary,
+                        keywords=keywords,
+                        session_id=session.session_id,
+                        session_type=session.session_type,
+                        msg_range=(messages[0].id, messages[-1].id)
+                    )
+                    
+                    logger.info(f"[{session.session_id}] Memory summarized: {summary} | Keywords: {keywords}")
+                    
+                    # 6. 标记消息为已总结
+                    for msg in messages:
+                        msg.is_summarized = True
+                        db_session.add(msg)
+                    await db_session.commit()
+                    
+            except json.JSONDecodeError:
+                logger.error(f"Failed to parse summarization JSON: {response_json_str}")
+                
+        except Exception as e:
+            logger.error(f"Error performing summarization: {e}")
 
     async def send_msg(self, session: SocialSession, message: str):
         """
@@ -1207,6 +1500,28 @@ class SocialService:
             logger.error(f"get_stranger_info failed: {e}")
             return {"user_id": user_id, "nickname": "Unknown"}
 
+    async def get_group_info(self, group_id: int):
+        """
+        获取群信息 (OneBot V11 Standard)
+        """
+        try:
+            resp = await self._send_api_and_wait("get_group_info", {"group_id": group_id})
+            return resp.get("data", {})
+        except Exception as e:
+            logger.error(f"get_group_info failed: {e}")
+            return {}
+
+    async def get_group_member_info(self, group_id: int, user_id: int):
+        """
+        获取群成员信息 (OneBot V11 Standard)
+        """
+        try:
+            resp = await self._send_api_and_wait("get_group_member_info", {"group_id": group_id, "user_id": user_id})
+            return resp.get("data", {})
+        except Exception as e:
+            logger.error(f"get_group_member_info failed: {e}")
+            return {}
+
     async def get_group_msg_history(self, group_id: int, count: int = 20):
         """
         获取群消息历史记录。
@@ -1252,6 +1567,9 @@ class SocialService:
              from .social.models_db import QQMessage
              from sqlmodel import select, col
              
+             # Get injected IDs to exclude
+             exclude_ids = injected_msg_ids_var.get()
+             
              async for db_session in get_social_db_session():
                  # 基础查询：内容匹配
                  statement = select(QQMessage).where(col(QQMessage.content).contains(query))
@@ -1265,6 +1583,12 @@ class SocialService:
                      if len(parts) >= 2 and parts[1]:
                          statement = statement.where(QQMessage.session_type == parts[1])
                  
+                 # [Deduplication] If we have IDs to exclude, we might need to fetch more and filter in Python
+                 # because passing a large list to SQL NOT IN might be slow or hit limits.
+                 # Given we only exclude ~30 IDs max, SQL NOT IN is fine.
+                 if exclude_ids:
+                     statement = statement.where(col(QQMessage.msg_id).notin_(exclude_ids))
+
                  # 排序和限制
                  statement = statement.order_by(QQMessage.timestamp.desc()).limit(10)
                  
