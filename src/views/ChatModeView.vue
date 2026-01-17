@@ -69,14 +69,14 @@
       </header>
 
       <!-- Chat Component -->
-      <IdeChat :work-mode="false" class="flex-1" />
+      <ChatInterface :work-mode="false" class="flex-1" />
     </div>
   </div>
 </template>
 
 <script setup>
 import { Search, User, Bell, Settings } from 'lucide-vue-next';
-import IdeChat from '../components/ide/IdeChat.vue';
+import ChatInterface from '../components/chat/ChatInterface.vue';
 </script>
 
 <style scoped>

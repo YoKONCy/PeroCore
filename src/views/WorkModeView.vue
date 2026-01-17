@@ -97,7 +97,7 @@ import {
 } from 'lucide-vue-next';
 import FileExplorer from '../components/ide/FileExplorer.vue';
 import CodeEditor from '../components/ide/CodeEditor.vue';
-import IdeChat from '../components/ide/IdeChat.vue';
+import ChatInterface from '../components/chat/ChatInterface.vue';
 
 const emit = defineEmits(['exit']);
 

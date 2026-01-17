@@ -45,7 +45,7 @@ async def chat(request: ChatRequest, session: AsyncSession = Depends(get_session
             request.session_id = "default"
 
     # [Feature] Real-time ReAct Broadcasting
-    # We use voice_manager's broadcast capability to send "thinking" statuses to the frontend (IdeChat/PetView)
+    # We use voice_manager's broadcast capability to send "thinking" statuses to the frontend (ChatInterface/PetView)
     # This ensures that even for IDE chats, we get real-time visualization via WebSocket.
     from services.voice_manager import voice_manager
     
