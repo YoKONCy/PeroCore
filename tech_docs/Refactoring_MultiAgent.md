@@ -167,14 +167,32 @@ class AgentProfile(SQLModel, table=True):
 ## 4. 实施路线图 (Execution Roadmap)
 
 ### Phase 1: 原子化与去硬编码 (The Great Decoupling)
-**目标**: 不引入新数据库表，仅将代码中的硬编码提取为 MDP 模板变量。
-1.  **提取 Inline Prompts**:
+**目标**: 不引入新数据库表，仅将代码中的硬编码提取为 MDP 模板变量，并执行**去人格化**。
+
+1.  **功能性 Prompt 去人格化 (Depersonalize Functional Prompts)**:
+    *   **原则**: 后台任务（如日志分析、屏幕识别）不应包含任何具体人设，应作为中立的“系统观察者”。
+    *   **ScorerService**: 重写 `scorer_service.py` 中的 Fallback Prompt。
+        *   *Before*: "你是一个专业的记忆记录员(秘书)... AI (Pero): ..."
+        *   *After*: "Role: Conversation Analyst... Assistant: ..." (移除 "Pero" 及所有性格描述)
+    *   **MemorySecretary**: 重写每日问候生成逻辑，使其只关注时间/天气/节日事实，而非“看板娘语气”。
+    *   **AgentService**: 重写反思 (Reflection) 和视觉感知 (Internal Sense) Prompt，移除所有 "Pero" 相关自我认知。
+
+2.  **交互性 Prompt 模块化 (Modularize Interactive Prompts)**:
+    *   **原则**: 人设仅在“交互层”生效，且必须是可插拔的模块。
+    *   **目录结构**:
+        *   新建 `mdp/personas/` 目录。
+        *   将 `mdp/prompts/identity.md` 移动并重命名为 `mdp/personas/pero.md` (作为默认人设)。
+    *   **模板更新**:
+        *   修改 `mdp/prompts/system_template.md`: 将 `{{identity}}` 替换为 `{{persona_definition}}`。
+        *   修改 `PromptManager`: 增加逻辑，默认加载 `personas/pero.md`，但预留接口加载其他文件。
+
+3.  **提取 Inline Prompts**:
     *   将 `scorer`, `companion`, `runtime` 等处的硬编码 Prompt 移入 `mdp/prompts/tasks/`。
-    *   **[New]** 提取 `AgentService` 中的 `_run_reflection`, `handle_proactive_observation`, `_analyze_file_results_with_aux` 相关 Prompt 到 `mdp/` 对应目录。
     *   **[New]** 提取 `AgentService` 中的 Context Injections (`mobile_instruction`, `active_windows`) 到 `mdp/prompts/context/`。
-2.  **变量替换**: 在后端代码中，统一使用 `bot_name` 变量替换字符串 "Pero"。
-3.  **前端清理**: 将前端写死的 "Pero" 替换为从后端配置获取的 `{{ bot_name }}`。
-4.  **配置提取**: 将 `memory_service.py` 中的意图关键词提取到 `config/intent_keywords.json` 或数据库配置。
+
+4.  **变量替换**: 在后端代码中，统一使用 `bot_name` 变量替换字符串 "Pero"。
+
+5.  **前端清理**: 将前端写死的 "Pero" 替换为从后端配置获取的 `{{ bot_name }}`。
 
 ### Phase 2: 数据模型落地 (Model Implementation)
 **目标**: 数据库支持多 Agent 存储。
