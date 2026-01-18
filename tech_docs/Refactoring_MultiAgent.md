@@ -34,6 +34,19 @@
     *   头像 Emoji 写死 `🎀`。
 3.  **Launcher UI (`LauncherView.vue`)**:
     *   Line 18: Sidebar 标题 `<span ...>PERO</span>`。
+    *   Line 43: 硬编码版本号 `v0.1.0`。
+
+*   **Hidden Prompts Audit (Backend)**:
+    *   **AgentService**:
+        *   `_run_reflection`: 硬编码的 UI 自动化反思 System Prompt。
+        *   `handle_proactive_observation`: `[PERO_INTERNAL_SENSE]` 视觉感知 Prompt。
+        *   `_analyze_file_results_with_aux`: 辅助模型分析文件的 User Prompt 拼装逻辑。
+        *   `mobile_instruction`: 针对手机端的 Context 注入。
+        *   `active_windows`: 活跃窗口列表的 Context 注入。
+    *   **MemoryService**:
+        *   `get_relevant_memories`: 硬编码的意图识别关键词字典 (`cluster_keywords`)。
+    *   **Vision Tool Description**:
+        *   `AgentService`: 动态修改 `see_screen` 工具描述的逻辑。
     *   Line 58: Header 标题 `Pero Launcher`。
 
 #### C. Live2D 与交互 (Live2D & Interaction)
@@ -155,9 +168,13 @@ class AgentProfile(SQLModel, table=True):
 
 ### Phase 1: 原子化与去硬编码 (The Great Decoupling)
 **目标**: 不引入新数据库表，仅将代码中的硬编码提取为 MDP 模板变量。
-1.  **提取 Inline Prompts**: 将 `scorer`, `companion`, `runtime` 等处的硬编码 Prompt 移入 `mdp/prompts/tasks/`。
+1.  **提取 Inline Prompts**:
+    *   将 `scorer`, `companion`, `runtime` 等处的硬编码 Prompt 移入 `mdp/prompts/tasks/`。
+    *   **[New]** 提取 `AgentService` 中的 `_run_reflection`, `handle_proactive_observation`, `_analyze_file_results_with_aux` 相关 Prompt 到 `mdp/` 对应目录。
+    *   **[New]** 提取 `AgentService` 中的 Context Injections (`mobile_instruction`, `active_windows`) 到 `mdp/prompts/context/`。
 2.  **变量替换**: 在后端代码中，统一使用 `bot_name` 变量替换字符串 "Pero"。
 3.  **前端清理**: 将前端写死的 "Pero" 替换为从后端配置获取的 `{{ bot_name }}`。
+4.  **配置提取**: 将 `memory_service.py` 中的意图关键词提取到 `config/intent_keywords.json` 或数据库配置。
 
 ### Phase 2: 数据模型落地 (Model Implementation)
 **目标**: 数据库支持多 Agent 存储。
