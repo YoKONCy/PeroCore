@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional
 from sqlmodel import select, desc, col, delete
 from sqlmodel.ext.asyncio.session import AsyncSession
-from models import Memory, Config, AIModelConfig, MaintenanceRecord
+from models import Memory, MemoryRelation, Config, AIModelConfig, MaintenanceRecord
 from services.llm_service import LLMService
 
 class MemorySecretaryService:
@@ -74,10 +74,9 @@ class MemorySecretaryService:
             # 2. 标记重要性
             report["important_tagged"] = await self._tag_importance(llm)
 
-            # 3. 记忆合并 (不同深度)
-            # 修改：同时合并 'event' 和 'interaction_summary' 类型的记忆
-            for offset in [0, 80, 160]:
-                merged_count = await self._consolidate_memories(llm, offset=offset)
+            # 3. 记忆合并 (循环扫描3次，每次处理最顶层的碎片，相当于不断通过消除碎片来"下钻"时间轴)
+            for _ in range(3):
+                merged_count = await self._consolidate_memories(llm, offset=0)
                 report["consolidated"] += merged_count
                 if merged_count == 0: break
 
@@ -309,7 +308,12 @@ class MemorySecretaryService:
     async def _consolidate_memories(self, llm: LLMService, offset: int = 0) -> int:
         """合并相似记忆 (优化提示词)"""
         # 修改：同时拉取 'event' 和 'interaction_summary' 类型的记忆进行熔炼
-        statement = select(Memory).where(Memory.type.in_(["event", "interaction_summary"])).order_by(desc(Memory.timestamp)).offset(offset).limit(100)
+        # 排除 source='secretary_merge' 的记忆，避免递归合并已生成的总结
+        statement = select(Memory).where(
+            Memory.type.in_(["event", "interaction_summary"]),
+            Memory.source != "secretary_merge"
+        ).order_by(desc(Memory.timestamp)).offset(offset).limit(100)
+        
         memories = (await self.session.exec(statement)).all()
         if len(memories) < 5: return 0
 
@@ -317,17 +321,20 @@ class MemorySecretaryService:
         mem_data = [{"id": m.id, "content": m.content, "time": m.realTime} for m in batch_memories]
         
         prompt = f"""
-        # Role: 记忆炼金术士
-        将以下碎片记忆熔炼成一段优美、连贯的日记体叙述。
+        # Role: 记忆整理员
+        将以下记忆片段合并为一段客观、简洁的陈述性文本（白描风格）。
         
-        ## 熔炼法则：
-        1. **去粗取精**：删除重复的、无意义的语气词。
-        2. **时空编织**：将这些对话合并。**必须在叙述中明确提及每个关键事件发生的具体日期或时间点**，以便回顾。
-        3. **Pero 视角**：使用 Pero 的第一人称，加入她当时可能的心情。
-        4. **准确归因**：
-           - 遇到“系统提醒”或“自动触发”的事件，**严禁**描述为“主人说”。
-           - 应写为“收到系统提醒...”或“我注意到...”。
-        5. **格式**：合并后的内容应以“那时...”或“在[具体日期]...”开头。
+        ## 目标：
+        1. **智能聚类**：仔细审视所有片段，将属于**同一事件、同一话题或连续对话**的碎片归为一组。
+           - 你可以生成**多组**合并结果（返回的 JSON 列表可以包含多个对象）。
+           - **宁缺毋滥**：如果某些记忆是独立的、无关的或本身已经很精炼，**请不要**将它们包含在任何 `ids_to_merge` 中（让它们保持原样）。
+        2. **去除冗余**：合并重复的事件，删除无意义的语气词。
+        3. **事实陈述**：只记录发生了什么，不要使用日记体，不要加入过多的修辞或情感渲染（除非情感本身是记忆的核心）。
+        4. **时间标记**：必须保留关键的时间节点信息。
+        5. **准确归因**：
+           - 遇到“系统提醒”或“自动触发”的事件，应写为“收到系统提醒...”或“注意到...”。
+           - **严禁**将系统行为描述为“主人说”。
+        5. **格式**：直接陈述事实，例如 "2023-10-27 10:00，用户询问了..."。
 
         待熔炼记忆: {json.dumps(mem_data, ensure_ascii=False)}
         
@@ -335,7 +342,7 @@ class MemorySecretaryService:
         [
           {
             "ids_to_merge": [id1, id2...],
-            "new_content": "熔炼后的优美文字（包含时间信息）...",
+            "new_content": "202X-XX-XX XX:XX，发生的客观事实描述...",
             "tags": ["标签1", "标签2", "标签3", "标签4"],
             "importance": 1-10
           }
@@ -345,7 +352,7 @@ class MemorySecretaryService:
         """
 
         try:
-            response = await llm.chat([{"role": "user", "content": prompt}], temperature=0.4)
+            response = await llm.chat([{"role": "user", "content": prompt}], temperature=0.2)
             content = response.get("choices", [{}])[0].get("message", {}).get("content", "")
             import re
             json_match = re.search(r'\[.*\]', content, re.S)
@@ -373,6 +380,51 @@ class MemorySecretaryService:
                     self.session.add(new_mem)
                     await self.session.flush()
                     self.created_ids.append(new_mem.id)
+
+                    # [Enhancement] 关系迁移：将旧节点的连接继承给新节点
+                    try:
+                        # 1. 查找所有涉及 valid_ids 的关系
+                        stmt_rel = select(MemoryRelation).where(
+                            (col(MemoryRelation.source_id).in_(valid_ids)) | 
+                            (col(MemoryRelation.target_id).in_(valid_ids))
+                        )
+                        existing_relations = (await self.session.exec(stmt_rel)).all()
+                        
+                        processed_pairs = set() # (source, target) 用于去重
+
+                        for rel in existing_relations:
+                            # Case 1: 内部关系 (Source 和 Target 都在合并范围内) -> 丢弃 (已内化)
+                            if rel.source_id in valid_ids and rel.target_id in valid_ids:
+                                continue
+                            
+                            # Case 2: 对外关系 (Source 在范围内 -> 变为 New -> Target)
+                            if rel.source_id in valid_ids:
+                                new_source = new_mem.id
+                                new_target = rel.target_id
+                            # Case 3: 被引用关系 (Target 在范围内 -> 变为 Source -> New)
+                            else: # rel.target_id in valid_ids
+                                new_source = rel.source_id
+                                new_target = new_mem.id
+                            
+                            # 去重检查
+                            if (new_source, new_target) not in processed_pairs:
+                                processed_pairs.add((new_source, new_target))
+                                self.session.add(MemoryRelation(
+                                    source_id=new_source,
+                                    target_id=new_target,
+                                    relation_type=rel.relation_type,
+                                    strength=rel.strength,
+                                    description=rel.description
+                                ))
+                        
+                        # 显式删除旧关系 (防止僵尸数据)
+                        if existing_relations:
+                             rel_ids = [r.id for r in existing_relations]
+                             if rel_ids:
+                                 await self.session.exec(delete(MemoryRelation).where(col(MemoryRelation.id).in_(rel_ids)))
+
+                    except Exception as e:
+                        print(f"[MemorySecretary] Failed to migrate relations: {e}")
 
                     for mid in valid_ids:
                         m_obj = next(m for m in batch_memories if m.id == mid)

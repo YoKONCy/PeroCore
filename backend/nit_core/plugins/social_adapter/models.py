@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List, Optional, Literal
+from typing import List, Optional, Literal, Any
 from datetime import datetime
 
 @dataclass
@@ -15,6 +15,9 @@ class SocialMessage:
     platform: str = "qq"
     raw_event: dict = field(default_factory=dict)
     images: List[str] = field(default_factory=list) # 图片 URL 列表
+    
+    # [Internal] Pending download tasks for images (not persisted)
+    image_tasks: List[Any] = field(default_factory=list) 
 
 @dataclass
 class SocialSession:

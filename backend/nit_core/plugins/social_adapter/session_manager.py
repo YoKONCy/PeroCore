@@ -1,5 +1,9 @@
 import asyncio
 import logging
+import hashlib
+import os
+import aiofiles
+import httpx
 from typing import Dict, Optional, Callable, Awaitable
 from datetime import datetime
 from .models import SocialSession, SocialMessage
@@ -11,6 +15,80 @@ from sqlalchemy.orm import sessionmaker
 from services.memory_service import MemoryService
 
 logger = logging.getLogger(__name__)
+
+class ImageCacheManager:
+    """
+    简单的本地图片缓存管理器。
+    用于下载 OneBot 图片到本地，以便转换为 Base64 发送给 LLM。
+    """
+    def __init__(self, cache_dir: str = "temp/social_images", max_files: int = 50):
+        self.cache_dir = cache_dir
+        self.max_files = max_files
+        self._ensure_dir()
+    
+    def _ensure_dir(self):
+        if not os.path.exists(self.cache_dir):
+            os.makedirs(self.cache_dir)
+            
+    async def download_image(self, url: str) -> Optional[str]:
+        """
+        下载图片并返回本地绝对路径。
+        如果下载失败，返回 None。
+        """
+        try:
+            # 使用 URL 的 MD5 作为文件名
+            url_hash = hashlib.md5(url.encode()).hexdigest()
+            # 尝试推断扩展名，默认 jpg
+            ext = "jpg"
+            if ".png" in url: ext = "png"
+            elif ".gif" in url: ext = "gif"
+            
+            filename = f"{url_hash}.{ext}"
+            filepath = os.path.join(self.cache_dir, filename)
+            abs_path = os.path.abspath(filepath)
+            
+            # 如果文件已存在，直接返回
+            if os.path.exists(filepath):
+                return abs_path
+                
+            # 下载
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(url)
+                if resp.status_code == 200:
+                    async with aiofiles.open(filepath, "wb") as f:
+                        await f.write(resp.content)
+                    
+                    # 简单的清理策略：如果文件过多，删除最旧的
+                    self._cleanup()
+                    return abs_path
+                else:
+                    logger.warning(f"[ImageCache] Failed to download image {url}: {resp.status_code}")
+                    return None
+        except Exception as e:
+            logger.error(f"[ImageCache] Error downloading image: {e}")
+            return None
+            
+    def _cleanup(self):
+        """
+        清理旧文件，保持缓存大小在 max_files 以内。
+        """
+        try:
+            files = [os.path.join(self.cache_dir, f) for f in os.listdir(self.cache_dir)]
+            if len(files) <= self.max_files:
+                return
+                
+            # 按修改时间排序 (最旧的在前)
+            files.sort(key=os.path.getmtime)
+            
+            # 删除多余的
+            num_to_delete = len(files) - self.max_files
+            for i in range(num_to_delete):
+                try:
+                    os.remove(files[i])
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.warning(f"[ImageCache] Cleanup failed: {e}")
 
 class SocialSessionManager:
     def __init__(self, flush_callback: Callable[[SocialSession], Awaitable[None]]):
@@ -25,6 +103,9 @@ class SocialSessionManager:
         self.BUFFER_TIMEOUT = 20  # 秒
         self.BUFFER_MAX_SIZE = 10 # 条消息
         self.ACTIVE_DURATION = 120 # 秒（发言后保持“活跃”的时间）
+        
+        # 图片缓存管理器
+        self.image_manager = ImageCacheManager()
 
     def get_or_create_session(self, session_id: str, session_type: str, session_name: str = "") -> SocialSession:
         if session_id not in self.sessions:
@@ -194,12 +275,24 @@ class SocialSessionManager:
             
             # 提取图像
             images = []
+            image_tasks = []
+            
             message_chain = event.get("message", [])
             for segment in message_chain:
                 if segment["type"] == "image":
                     url = segment["data"].get("url")
                     if url:
-                        images.append(url)
+                        # [Multimodal] Start async download
+                        # We don't await here to avoid blocking WS loop.
+                        # The flush logic will wait for these tasks.
+                        task = asyncio.create_task(self.image_manager.download_image(url))
+                        image_tasks.append(task)
+                        
+                        # We can store the URL in images temporarily, 
+                        # but it will be replaced by local path when task completes and is processed.
+                        # However, SocialMessage.images expects a list of strings.
+                        # Let's append the URL for now as a fallback/placeholder.
+                        images.append(url) 
             
             # Create Message Object
             msg = SocialMessage(
@@ -209,7 +302,8 @@ class SocialSessionManager:
                 content=content,
                 timestamp=datetime.now(),
                 raw_event=event,
-                images=images
+                images=images,
+                image_tasks=image_tasks
             )
             
             # Get Session

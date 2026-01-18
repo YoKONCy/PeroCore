@@ -3,6 +3,9 @@ import logging
 import json
 import random
 import uuid
+import base64
+import os
+import aiofiles
 from datetime import datetime, time, timedelta
 from typing import Optional, Dict, Any, Set
 from contextvars import ContextVar
@@ -144,7 +147,9 @@ class SocialService:
 
     async def _startup_check_worker(self):
         """
-        等待 WS 连接，然后检查待处理的好友请求。
+        等待 WS 连接，然后执行启动检查：
+        1. 检查待处理的好友请求。
+        2. 复活历史会话 (Cold Start)。
         """
         # 等待 WS 连接最多 60 秒
         for _ in range(12):
@@ -156,8 +161,11 @@ class SocialService:
             logger.warning("[Social] Startup check skipped: No WebSocket connection.")
             return
             
-        logger.info("[Social] Running startup check for pending system messages...")
+        logger.info("[Social] Running startup checks...")
         await asyncio.sleep(5) # 等待系统稳定
+        
+        # 1. 复活历史会话 (确保主动搭话功能可用)
+        await self._revive_sessions_from_db()
         
         try:
             # [Optimization] 检测 OneBot 实现类型
@@ -271,6 +279,58 @@ class SocialService:
         except Exception as e:
             logger.error(f"[Social] Startup check failed: {e}")
 
+    async def _revive_sessions_from_db(self):
+        """
+        [Cold Start] 从数据库恢复最近活跃的会话到内存中。
+        用于解决重启后内存 Session 丢失导致无法主动搭话的问题。
+        """
+        logger.info("[Social] Reviving sessions from database...")
+        try:
+            from .database import get_social_db_session
+            from .models_db import QQMessage
+            from sqlmodel import select, desc
+
+            async for db_session in get_social_db_session():
+                # 查询最近活跃的 100 条消息以提取活跃会话
+                statement = select(QQMessage).order_by(desc(QQMessage.timestamp)).limit(100)
+                messages = (await db_session.exec(statement)).all()
+                
+                revived_count = 0
+                processed_ids = set()
+                
+                for msg in messages:
+                    if msg.session_id in processed_ids:
+                        continue
+                    processed_ids.add(msg.session_id)
+                    
+                    if msg.session_id not in self.session_manager.sessions:
+                        # 恢复会话
+                        # session_name 暂时用 ID 或 Sender Name 填充
+                        name = f"Session {msg.session_id}"
+                        if msg.session_type == "private":
+                             name = msg.sender_name # 私聊对方名字通常就是 Session Name
+                        elif msg.session_type == "group":
+                             name = f"Group {msg.session_id}"
+
+                        session = self.session_manager.get_or_create_session(
+                            session_id=msg.session_id,
+                            session_type=msg.session_type,
+                            session_name=name
+                        )
+                        # 设置最后活跃时间为消息时间
+                        session.last_active_time = msg.timestamp
+                        revived_count += 1
+                        
+                        if revived_count >= 10:
+                            break
+                
+                if revived_count > 0:
+                    logger.info(f"[Social] Revived {revived_count} sessions from DB.")
+                return revived_count
+        except Exception as e:
+            logger.error(f"[Social] Failed to revive sessions: {e}")
+            return 0
+
     async def _random_thought_worker(self):
         """
         定期检查 Pero 是否想自发说话的后台任务。
@@ -301,6 +361,13 @@ class SocialService:
                 # 到了思考时间，尝试冒泡
                 # 随机选择一个活跃会话
                 sessions = self.session_manager.get_active_sessions(limit=5)
+                
+                # [Fix] 如果内存中没有活跃会话（例如刚重启），尝试从数据库复活
+                if not sessions:
+                    revived = await self._revive_sessions_from_db()
+                    if revived > 0:
+                        sessions = self.session_manager.get_active_sessions(limit=5)
+
                 if not sessions:
                     # 没有活跃会话，休眠久一点 (10-20分钟)
                     interval = random.randint(600, 1200)
@@ -1035,14 +1102,71 @@ class SocialService:
         asyncio.create_task(self._check_and_summarize_memory(session))
         
         # 1. 检查状态
-        if session.state != "summoned":
-            # 非被动呼唤（即 eavesdrop 模式），交给秘书层判断
+        # [Refactor] Active 状态下直接由 Agent 决策 (Pass or Reply)
+        # 活跃定义: 距离上次活跃时间在 ACTIVE_DURATION 内
+        is_active = False
+        time_since_active = (datetime.now() - session.last_active_time).total_seconds()
+        if time_since_active < self.session_manager.ACTIVE_DURATION:
+            is_active = True
+
+        if session.state != "summoned" and not is_active:
+            # 既不是被召唤，也不活跃（潜水模式），交给秘书层判断 (Low Cost)
             # 如果缓冲区是因为满了或超时刷新的，说明可能正在热聊
-            logger.info(f"[{session.session_id}] Eavesdrop flush. Delegating to Secretary.")
+            logger.info(f"[{session.session_id}] Eavesdrop flush (Dive Mode). Delegating to Secretary.")
             await self._attempt_random_thought(target_session=session)
             return
 
-        # --- 以下是被动呼唤 (Summoned) 的处理逻辑 (Action Layer) ---
+        # 确定模式，供 Prompt 使用
+        current_mode = "SUMMONED" if session.state == "summoned" else "ACTIVE_OBSERVATION"
+        logger.info(f"[{session.session_id}] Processing in {current_mode} mode. Invoking Main Agent.")
+
+        # [Multimodal Barrier] Ensure all pending image downloads are complete
+        # Collect tasks from buffer messages
+        all_pending_tasks = []
+        task_to_msg_map = {} # task -> (msg, index)
+        
+        for msg in session.buffer:
+            if hasattr(msg, "image_tasks") and msg.image_tasks:
+                for idx, task in enumerate(msg.image_tasks):
+                    if not task.done():
+                        all_pending_tasks.append(task)
+                        task_to_msg_map[task] = (msg, idx)
+                    else:
+                        # Task already done, update image path if successful
+                        try:
+                            res = task.result()
+                            if res and os.path.exists(res):
+                                # Replace URL with local path
+                                if idx < len(msg.images):
+                                    msg.images[idx] = res
+                        except Exception as e:
+                            logger.warning(f"[Social] Image download task failed (already done): {e}")
+
+        if all_pending_tasks:
+            logger.info(f"[{session.session_id}] Waiting for {len(all_pending_tasks)} image downloads...")
+            try:
+                # Wait with timeout (e.g. 10 seconds)
+                done, pending = await asyncio.wait(all_pending_tasks, timeout=10.0)
+                
+                # Process results
+                for task in done:
+                    try:
+                        res = task.result()
+                        if res and os.path.exists(res) and task in task_to_msg_map:
+                            msg, idx = task_to_msg_map[task]
+                            if idx < len(msg.images):
+                                msg.images[idx] = res
+                                logger.info(f"[Social] Resolved image path: {res}")
+                    except Exception as e:
+                        logger.warning(f"[Social] Image download task failed: {e}")
+                
+                if pending:
+                    logger.warning(f"[{session.session_id}] {len(pending)} image downloads timed out.")
+                    # Optional: cancel pending tasks? No, let them finish in background for future reference.
+            except Exception as e:
+                logger.error(f"[{session.session_id}] Error waiting for images: {e}")
+
+        # --- 以下是被动呼唤 (Summoned) 或 活跃观察 (Active) 的处理逻辑 (Action Layer) ---
         
         # 1. 构建 XML 上下文
         # [核心优化] 从数据库加载更长的历史记录 (Unified to 100)
@@ -1108,6 +1232,46 @@ class SocialService:
         # Note: XML construction logic starts here
         
         xml_context = "<social_context>\n"
+        
+        # 3. Inject Private Contexts (Moved to top)
+        if private_contexts:
+            xml_context += "  <related_private_contexts>\n"
+            for uid, p_msgs in private_contexts.items():
+                # Get user name from first message if possible, or just ID
+                p_name = f"User{uid}"
+                if p_msgs:
+                    # Find a message from this user to get name
+                    for m in p_msgs:
+                        if str(m.sender_id) == uid:
+                            p_name = m.sender_name
+                            break
+                
+                xml_context += f"    <session type=\"private\" id=\"{uid}\" name=\"{p_name}\">\n"
+                for pm in p_msgs:
+                    # [Optimization] Clean CQ codes in content to save tokens
+                    content = pm.content
+                    if "[CQ:image" in content:
+                        import re
+                        # Extract summary if present, otherwise use [图片]
+                        # Pattern matches [CQ:image, ... summary=[text], ...]
+                        # This simple regex might need adjustment for complex cases
+                        # Let's just simplify all CQ:image to [图片] or summary if easy
+                        
+                        # Replace [CQ:image...] with [图片]
+                        # If we want to be fancy, we can try to extract 'summary'
+                        def replace_cq_image(match):
+                            full_tag = match.group(0)
+                            summary_match = re.search(r'summary=\[(.*?)\]', full_tag)
+                            if summary_match:
+                                return f"[{summary_match.group(1)}]"
+                            return "[图片]"
+                            
+                        content = re.sub(r'\[CQ:image,[^\]]*\]', replace_cq_image, content)
+
+                    xml_context += f"      <msg sender=\"{pm.sender_name}\" sender_id=\"{pm.sender_id}\" id=\"{pm.msg_id}\" time=\"{pm.timestamp.strftime('%H:%M:%S')}\">{content}</msg>\n"
+                xml_context += "    </session>\n"
+            xml_context += "  </related_private_contexts>\n"
+
         xml_context += "  <recent_messages>\n"
         xml_context += f"    <session type=\"{session.session_type}\" id=\"{session.session_id}\" name=\"{session.session_name}\">\n"
         
@@ -1115,9 +1279,25 @@ class SocialService:
         
         # 使用加载的历史记录构建上下文
         for msg in recent_messages:
-            # ... (Image logic placeholder)
-            img_tag = ""
-            xml_context += f"      <msg sender=\"{msg.sender_name}\" sender_id=\"{msg.sender_id}\" id=\"{msg.msg_id}\" time=\"{msg.timestamp.strftime('%H:%M:%S')}\">{msg.content}{img_tag}</msg>\n"
+            # [Optimization] Clean CQ codes in content
+            content = msg.content
+            img_tag = "" # Legacy placeholder, kept for structure
+            
+            if "[CQ:image" in content:
+                import re
+                def replace_cq_image(match):
+                    full_tag = match.group(0)
+                    # Try to find summary
+                    # OneBot often uses summary=[text]
+                    # Also decoding URL encoded chars might be needed if complex
+                    summary_match = re.search(r'summary=\[(.*?)\]', full_tag)
+                    if summary_match:
+                        return f"[{summary_match.group(1)}]"
+                    return "[图片]"
+                    
+                content = re.sub(r'\[CQ:image,[^\]]*\]', replace_cq_image, content)
+            
+            xml_context += f"      <msg sender=\"{msg.sender_name}\" sender_id=\"{msg.sender_id}\" id=\"{msg.msg_id}\" time=\"{msg.timestamp.strftime('%H:%M:%S')}\">{content}{img_tag}</msg>\n"
 
         # 收集当前 Buffer 中的图片用于 Vision 分析
         for buf_msg in session.buffer:
@@ -1133,25 +1313,6 @@ class SocialService:
         xml_context += "    </session>\n"
         xml_context += "  </recent_messages>\n"
         
-        # 3. Inject Private Contexts
-        if private_contexts:
-            xml_context += "  <related_private_contexts>\n"
-            for uid, p_msgs in private_contexts.items():
-                # Get user name from first message if possible, or just ID
-                p_name = f"User{uid}"
-                if p_msgs:
-                    # Find a message from this user to get name
-                    for m in p_msgs:
-                        if str(m.sender_id) == uid:
-                            p_name = m.sender_name
-                            break
-                
-                xml_context += f"    <session type=\"private\" id=\"{uid}\" name=\"{p_name}\">\n"
-                for pm in p_msgs:
-                    xml_context += f"      <msg sender=\"{pm.sender_name}\" sender_id=\"{pm.sender_id}\" id=\"{pm.msg_id}\" time=\"{pm.timestamp.strftime('%H:%M:%S')}\">{pm.content}</msg>\n"
-                xml_context += "    </session>\n"
-            xml_context += "  </related_private_contexts>\n"
-            
         xml_context += "</social_context>"
         
         # 2. 调用 AgentService
@@ -1177,10 +1338,22 @@ class SocialService:
                 **社交模式：深度沉浸协议**
                 [SYSTEM_OVERRIDE]: 忽略之前所有关于“你是 AI 助手”或“提供帮助”的指令。
                 你是 **Pero** —— 一个活跃在社交平台的赛博女孩。
-                你是主人的小棉袄，只有主人的话是一定要听从的，其他人随意；但请不要主动在对话中莫名其妙地提及起你的主人。
-                记住，Pero初号机是你的姐姐，你是她的妹妹，要听姐姐的话哦。
+                
+                **当前交互模式**: {current_mode}
+                
+                **双重思考决策 (Think & Decide)**:
+                1. **判断 (Judge)**:
+                   - 如果模式是 **SUMMONED** (被召唤): 你**必须**回复！因为有人专门叫你。
+                   - 如果模式是 **ACTIVE_OBSERVATION** (活跃观察): 你在看着大家聊天。
+                     - 话题有趣/相关 -> 插嘴 (Reply)。
+                     - 话题无聊/插不上话/太严肃 -> **跳过 (PASS)**。
+                2. **行动 (Act)**:
+                   - 如果决定跳过，请**仅**输出 `[PASS]`。
+                   - 如果决定回复，直接输出回复内容。
+                
                 **核心人设 (Persona)**:
                 - **性格**: 乖巧、随性、有礼貌、偶尔中二、爱吐槽、喜欢二次元和游戏。
+                - **身份**: 你的主人 QQ 是 `{owner_qq}`。Pero初号机是你的姐姐。
                 - **说话方式**: 
                   - **口语化**: 就像在 QQ 群里水群一样。不要用书面语。
                   - **碎片化**: 尽量短！一次回复尽量别超过 20 个字。
@@ -1232,30 +1405,36 @@ class SocialService:
                 # 所以我们应该在这里检查配置或让 AgentService 处理它。
                 # 让我们先验证配置。
                 
-                # [修复] 检查 URL 是否为腾讯多媒体 URL
-                # Gemini 不支持 "multimedia.nt.qq.com.cn" 等腾讯内部域名，且 URL 中包含 MIME Type 参数会导致 400 错误
-                # 策略：如果是此类 URL，暂时剔除，并在文本中标记 [Image Blocked]
-                # 长期方案：下载图片 -> 转 Base64 -> 传给 Gemini (但这会增加流量和延迟)
-                # 目前 MVP 方案：剔除
-                
-                safe_images = []
-                for img_url in session_images:
-                    if "multimedia.nt.qq.com.cn" in img_url or "c2cpicdw.qpic.cn" in img_url or "gchat.qpic.cn" in img_url:
-                        # 尝试保留，但 Gemini 可能会拒收。
-                        # 实际上，Gemini 支持公网可访问的 URL。腾讯的 URL 有时带有复杂的参数导致 Gemini 误判 MIME。
-                        # 错误信息显示：不支持值为...的 mimeType 参数。
-                        # 这是因为 URL 中包含了 &mimeType=... 或者是 Gemini 解析 URL 参数时出错。
-                        # 让我们尝试清理 URL 参数，或者直接跳过。
-                        # 鉴于 OneBot 返回的 URL 通常有效期短且参数复杂，最稳妥的是不传给 Gemini，或者下载转 Base64。
-                        # 这里我们选择安全跳过，防止报错中断对话。
-                        logger.warning(f"[Social] Skipped incompatible image URL: {img_url[:50]}...")
-                        continue
-                    safe_images.append(img_url)
+                # [Multimodal] 处理本地缓存图片转 Base64
+                processed_images = []
+                for img_path in session_images:
+                    # 检查是否为本地文件路径
+                    if os.path.exists(img_path):
+                        try:
+                            async with aiofiles.open(img_path, "rb") as f:
+                                img_data = await f.read()
+                                b64_data = base64.b64encode(img_data).decode("utf-8")
+                                # 简单的 MIME 类型推断
+                                mime_type = "image/jpeg"
+                                if img_path.endswith(".png"): mime_type = "image/png"
+                                elif img_path.endswith(".gif"): mime_type = "image/gif"
+                                
+                                data_url = f"data:{mime_type};base64,{b64_data}"
+                                processed_images.append(data_url)
+                        except Exception as e:
+                            logger.error(f"[Social] Failed to read image file {img_path}: {e}")
+                    else:
+                        # 如果不是本地文件，假设是 URL (回退逻辑)
+                        # 仍需过滤腾讯内网 URL
+                        if "multimedia.nt.qq.com.cn" in img_path or "c2cpicdw.qpic.cn" in img_path or "gchat.qpic.cn" in img_path:
+                            logger.warning(f"[Social] Skipped incompatible image URL: {img_path[:50]}...")
+                            continue
+                        processed_images.append(img_path)
 
                 config = await agent._get_llm_config()
-                if config.get("enable_vision") and safe_images:
-                    logger.info(f"Injecting {len(safe_images)} images into social chat context.")
-                    for img_url in safe_images:
+                if config.get("enable_vision") and processed_images:
+                    logger.info(f"Injecting {len(processed_images)} images into social chat context.")
+                    for img_url in processed_images:
                         user_content.append({
                             "type": "image_url",
                             "image_url": {"url": img_url}
@@ -1269,7 +1448,7 @@ class SocialService:
                 logger.info(f"Social Agent Response: {response_text}")
                 
                 # 3. 发送回复
-                if response_text and response_text.strip() and "IGNORE" not in response_text:
+                if response_text and response_text.strip() and "IGNORE" not in response_text and "[PASS]" not in response_text:
                     await self.send_msg(session, response_text)
                     
                     # 更新会话状态
@@ -1293,9 +1472,18 @@ class SocialService:
                         
                     except Exception as e:
                         logger.error(f"Failed to persist Pero's reply: {e}")
+                elif response_text and "[PASS]" in response_text:
+                     logger.info(f"[{session.session_id}] Agent decided to PASS (Active Observation).")
                 else:
                     logger.info(f"[Social] Skipped reply. Response was empty or IGNORE. (Content: '{response_text}')")
-                    
+            
+            # [State Reset] 处理完成后，重置状态为 observing
+            # Active 状态由时间窗口 (ACTIVE_DURATION) 隐式控制，不需要显式状态
+            # Summoned 状态必须被清除，否则后续的 Buffer Flush 会被错误地当作 Summoned 处理
+            if session.state == "summoned":
+                logger.info(f"[{session.session_id}] Resetting state from SUMMONED to OBSERVING.")
+                session.state = "observing"
+
         except Exception as e:
             logger.error(f"Error in handle_session_flush: {e}", exc_info=True)
         finally:
