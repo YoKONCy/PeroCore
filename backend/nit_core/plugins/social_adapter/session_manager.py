@@ -21,7 +21,7 @@ class ImageCacheManager:
     简单的本地图片缓存管理器。
     用于下载 OneBot 图片到本地，以便转换为 Base64 发送给 LLM。
     """
-    def __init__(self, cache_dir: str = "temp/social_images", max_files: int = 50):
+    def __init__(self, cache_dir: str = "backend/data/social_images", max_files: int = 50):
         self.cache_dir = cache_dir
         self.max_files = max_files
         self._ensure_dir()

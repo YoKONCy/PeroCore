@@ -56,9 +56,8 @@ target/
 Cargo.lock
 
 # Data & Databases (Ignore local data)
-backend/data/*.db*
+backend/data/
 !backend/data/.gitkeep
-backend/data/rust_db/
 backend/rust_db/
 *.sqlite3
 Backups/
@@ -96,5 +95,10 @@ backend/data/config.json
 # Private Docs
 绝密文档/
 
-# Temp files (Image cache etc.)
-temp/
+
+
+# Plugins - NapCat
+backend/nit_core/plugins/social_adapter/NapCat/
+
+# Ignore View3D test directory
+View3D/
