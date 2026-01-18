@@ -198,7 +198,7 @@ onUnmounted(() => {
   padding: 12px;
   font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
   font-size: 13px;
-  line-height: 1.4;
+  line-height: 1;
   color: #d4d4d4;
   white-space: pre-wrap;
   word-break: break-all;

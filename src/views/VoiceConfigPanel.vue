@@ -62,8 +62,8 @@
        <el-form label-width="120px">
           <el-form-item label="类型">
              <el-radio-group v-model="editingConfig.type" :disabled="!!editingConfig.id">
-                <el-radio label="stt">语音转文本 (STT)</el-radio>
-                <el-radio label="tts">文本转语音 (TTS)</el-radio>
+                <el-radio value="stt">语音转文本 (STT)</el-radio>
+                <el-radio value="tts">文本转语音 (TTS)</el-radio>
              </el-radio-group>
           </el-form-item>
           <el-form-item label="名称">
