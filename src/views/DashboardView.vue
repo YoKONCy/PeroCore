@@ -43,6 +43,10 @@
             <el-icon><Bell /></el-icon>
             <span>待办任务 (Tasks)</span>
           </el-menu-item>
+          <el-menu-item index="user_settings">
+            <el-icon><User /></el-icon>
+            <span>用户设定 (User)</span>
+          </el-menu-item>
           <el-menu-item index="model_config">
             <el-icon><SetUp /></el-icon>
             <span>模型配置 (Models)</span>
@@ -55,9 +59,13 @@
             <el-icon><Connection /></el-icon>
             <span>MCP 配置 (Connect)</span>
           </el-menu-item>
-          <el-menu-item index="user_settings">
-            <el-icon><User /></el-icon>
-            <span>用户设定 (User)</span>
+          <el-menu-item index="napcat">
+            <el-icon><ChatDotSquare /></el-icon>
+            <span>NapCat 终端</span>
+          </el-menu-item>
+          <el-menu-item index="terminal">
+            <el-icon><Monitor /></el-icon>
+            <span>系统终端</span>
           </el-menu-item>
           <el-menu-item index="system_reset" style="color: #f56c6c;">
             <el-icon><Warning /></el-icon>
@@ -102,22 +110,7 @@
           <div class="view-container-wrapper" style="height: 100%;">
               <!-- 1. 仪表盘概览 -->
                 <div v-show="currentTab === 'overview'" key="overview" class="view-container">
-              <!-- IDE Workspace Entry Button -->
-              <el-row :gutter="20" style="margin-bottom: 20px;">
-                <el-col :span="24">
-                  <el-card shadow="hover" class="glass-card">
-                    <div style="display: flex; align-items: center; justify-content: space-between;">
-                       <div>
-                         <h3 style="margin: 0; font-size: 18px;">开发工具 (Dev Tools)</h3>
-                         <p style="margin: 5px 0 0; color: #666; font-size: 14px;">访问 IDE 工作台进行代码编辑与调试。</p>
-                       </div>
-                       <el-button type="primary" size="large" :icon="Edit" @click="openIdeWorkspace">
-                         IDE 工作台
-                       </el-button>
-                    </div>
-                  </el-card>
-                </el-col>
-              </el-row>
+
 
               <el-row :gutter="20">
                 <el-col :span="8">
@@ -190,66 +183,7 @@
                 </el-col>
               </el-row>
 
-              <!-- System Monitor Card -->
-              <el-row :gutter="20" style="margin-top: 20px;" v-if="systemStatus && systemStatus.cpu">
-                <el-col :span="24">
-                  <el-card shadow="hover" class="glass-card" :body-style="{ padding: '15px 20px' }">
-                    <template #header>
-                      <div class="card-header">
-                        <div style="display: flex; align-items: center; gap: 10px;">
-                            <el-icon><Monitor /></el-icon>
-                            <span>系统性能 (System Monitor)</span>
-                        </div>
-                        <el-tag size="small" effect="plain" type="info">Real-time</el-tag>
-                      </div>
-                    </template>
-                    <el-row :gutter="40" justify="space-around" align="middle">
-                      <!-- CPU -->
-                      <el-col :span="8" class="monitor-col">
-                        <div class="monitor-item">
-                          <el-progress type="dashboard" :percentage="systemStatus.cpu.percent" :color="cpuColor" :width="120" :stroke-width="10">
-                            <template #default="{ percentage }">
-                              <span class="percentage-value">{{ percentage }}%</span>
-                              <span class="percentage-label">CPU</span>
-                            </template>
-                          </el-progress>
-                          <div class="monitor-detail">
-                             <span>{{ systemStatus.cpu.count }} Cores</span>
-                          </div>
-                        </div>
-                      </el-col>
-                      <!-- Memory -->
-                      <el-col :span="8" class="monitor-col">
-                         <div class="monitor-item">
-                          <el-progress type="dashboard" :percentage="systemStatus.memory.percent" :color="memColor" :width="120" :stroke-width="10">
-                            <template #default="{ percentage }">
-                              <span class="percentage-value">{{ percentage }}%</span>
-                              <span class="percentage-label">RAM</span>
-                            </template>
-                          </el-progress>
-                          <div class="monitor-detail">
-                             <span>{{ formatBytes(systemStatus.memory.used) }} / {{ formatBytes(systemStatus.memory.total) }}</span>
-                          </div>
-                        </div>
-                      </el-col>
-                      <!-- Disk -->
-                      <el-col :span="8" class="monitor-col">
-                         <div class="monitor-item">
-                          <el-progress type="dashboard" :percentage="systemStatus.disk.percent" :color="diskColor" :width="120" :stroke-width="10">
-                            <template #default="{ percentage }">
-                              <span class="percentage-value">{{ percentage }}%</span>
-                              <span class="percentage-label">Disk</span>
-                            </template>
-                          </el-progress>
-                          <div class="monitor-detail">
-                             <span>{{ formatBytes(systemStatus.disk.used) }} / {{ formatBytes(systemStatus.disk.total) }}</span>
-                          </div>
-                        </div>
-                      </el-col>
-                    </el-row>
-                  </el-card>
-                </el-col>
-              </el-row>
+
 
               <!-- NIT Status Card -->
               <el-row :gutter="20" style="margin-top: 20px;" v-if="nitStatus">
@@ -847,6 +781,20 @@
               </el-card>
             </div>
 
+                <!-- 10. NapCat Terminal -->
+                <div v-show="currentTab === 'napcat'" key="napcat" class="view-container" style="height:100%; display: flex; flex-direction: column;">
+                   <el-card shadow="never" class="glass-card" :body-style="{ padding: '0', display: 'flex', flexDirection: 'column', height: '100%' }" style="flex: 1; display: flex; flex-direction: column;">
+                      <NapCatTerminal style="height: 100%;" />
+                   </el-card>
+                </div>
+
+                <!-- 11. System Terminal -->
+                <div v-show="currentTab === 'terminal'" key="terminal" class="view-container" style="height:100%;">
+                    <el-card shadow="never" class="glass-card" :body-style="{ padding: '0', height: '100%' }" style="height: 100%; display: flex; flex-direction: column;">
+                       <TerminalPanel style="height: 100%;" />
+                    </el-card>
+                </div>
+
           </div>
         </el-main>
     </el-container>
@@ -1068,7 +1016,7 @@
 
 <script setup>
 import { ref, shallowRef, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { listen } from '@tauri-apps/api/event'
+import { listen, emit } from '@tauri-apps/api/event'
 import { WebviewWindow, getAllWebviewWindows } from '@tauri-apps/api/webviewWindow'
 import VoiceConfigPanel from './VoiceConfigPanel.vue'
 import AsyncMarkdown from '../components/AsyncMarkdown.vue'
@@ -1095,8 +1043,12 @@ import {
   Microphone,
   Warning,
   ArrowLeft,
-  View
+  View,
+  ChatDotSquare,
+  Monitor
 } from '@element-plus/icons-vue'
+import TerminalPanel from '../components/TerminalPanel.vue'
+import NapCatTerminal from '../components/NapCatTerminal.vue'
 
 // 为了防止在非 Tauri 环境下报错，定义一个 fallback 的 listen
 const listenSafe = (event, callback) => {
@@ -1318,23 +1270,10 @@ const openIdeWorkspace = async () => {
   }
 }
 
-// --- System Monitor State ---
-const systemStatus = ref(null)
-const systemStatusInterval = ref(null)
-const cpuColor = [
-  { color: '#a0c4ff', percentage: 40 },
-  { color: '#ffcc99', percentage: 80 },
-  { color: '#ff88aa', percentage: 100 },
-]
-const memColor = [
-  { color: '#a8e6cf', percentage: 40 },
-  { color: '#ffcc99', percentage: 80 },
-  { color: '#ff88aa', percentage: 100 },
-]
-const diskColor = [
-  { color: '#b8c6db', percentage: 60 },
-  { color: '#ff88aa', percentage: 90 },
-]
+
+
+// --- Polling State ---
+const pollingInterval = ref(null)
 
 // --- Refactored Memory Dashboard State ---
 const nitStatus = ref(null)
@@ -1370,9 +1309,8 @@ watch(memoryViewMode, (val) => {
 // 监听标签页切换，动态加载数据
 watch(currentTab, (newTab) => {
   if (newTab === 'logs') {
-    if (logs.value.length === 0) {
-      initSessionAndFetchLogs()
-    }
+    // 每次切换到日志页都重新拉取，确保看到最新消息
+    initSessionAndFetchLogs()
   } else if (newTab === 'memories') {
     if (memories.value.length === 0) {
       fetchMemories()
@@ -1559,21 +1497,7 @@ const formatBytes = (bytes, decimals = 1) => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }
 
-const fetchSystemStatus = async () => {
-    if (fetchSystemStatus.isPolling) return
-    try {
-        if (!isBackendOnline.value) return;
-        fetchSystemStatus.isPolling = true
-        const res = await fetchWithTimeout(`${API_BASE}/system/status`, {}, 2000)
-        if (res.ok) {
-            systemStatus.value = await res.json()
-        }
-    } catch(e) {
-        // Silent fail for polling
-    } finally {
-        fetchSystemStatus.isPolling = false
-    }
-}
+
 
 const fetchAllData = async () => {
   if (!isBackendOnline.value || isGlobalRefreshing.value) return
@@ -1583,7 +1507,6 @@ const fetchAllData = async () => {
   try {
     await Promise.all([
       fetchPetState(),
-      fetchSystemStatus(),
       fetchConfig()
     ])
   } catch (e) { console.error('Core fetch error:', e) }
@@ -2489,19 +2412,15 @@ const activateModel = async (id, configKey) => {
 
 // Logs Logic
 const initSessionAndFetchLogs = async () => {
-  if (isLogsFetching.value) return
-  isLogsFetching.value = true
-  try {
-    const storedSessionId = localStorage.getItem('ppc.sessionId')
-    if (storedSessionId && !selectedSessionId.value) {
-      selectedSessionId.value = storedSessionId
-    } else if (!selectedSessionId.value) {
-      selectedSessionId.value = 'default'
-    }
-    await fetchLogs()
-  } finally {
-    isLogsFetching.value = false
+  // 不在这里设置 isLogsFetching，而是交给 fetchLogs 统一管理
+  // 仅负责初始化 session ID
+  const storedSessionId = localStorage.getItem('ppc.sessionId')
+  if (storedSessionId && !selectedSessionId.value) {
+    selectedSessionId.value = storedSessionId
+  } else if (!selectedSessionId.value) {
+    selectedSessionId.value = 'default'
   }
+  await fetchLogs()
 }
 
 const fetchLogs = async () => {
@@ -2678,6 +2597,7 @@ const deleteLog = async (logId) => {
     if (res.ok) {
       ElMessage.success('已删除')
       await fetchLogs()
+      emit('log-deleted', logId)
     } else {
       const err = await res.json()
       ElMessage.error(err.message || '删除失败')
@@ -2807,32 +2727,28 @@ const deleteTask = async (taskId) => {
 
 onMounted(() => {
   waitForBackend()
-  // Add real-time polling for system status and pet state
-  // Polling for system status using recursive setTimeout
-  const pollSystemStatus = async () => {
+  // Add real-time polling for pet state
+  const pollPetState = async () => {
     if (!isBackendOnline.value) {
-      setTimeout(pollSystemStatus, 3000)
+      setTimeout(pollPetState, 3000)
       return
     }
     
-    // Only poll expensive status data when on Overview tab and not already polling
+    // Only poll when on Overview tab and not already polling
     if (currentTab.value === 'overview') {
       try {
-        await Promise.all([
-          fetchSystemStatus(),
-          fetchPetState()
-        ])
+        await fetchPetState()
       } catch (e) {
         // Ignore polling errors
       }
     }
     
     // Schedule next poll only after current one finishes
-    systemStatusInterval.value = setTimeout(pollSystemStatus, 3000)
+    pollingInterval.value = setTimeout(pollPetState, 3000)
   }
   
   // Start polling loop
-  pollSystemStatus()
+  pollPetState()
 
   // Listen for monitor updates
   try {
@@ -2858,8 +2774,8 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  if (systemStatusInterval.value) {
-    clearTimeout(systemStatusInterval.value)
+  if (pollingInterval.value) {
+    clearTimeout(pollingInterval.value)
   }
   if (resizeHandler) {
     window.removeEventListener('resize', resizeHandler)

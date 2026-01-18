@@ -767,12 +767,13 @@ async def get_chat_history(
     source: str, 
     session_id: str, 
     limit: int = 50, 
+    offset: int = 0,
     date: str = None,
     sort: str = "asc",
     session: AsyncSession = Depends(get_session)
 ):
     service = MemoryService()
-    logs = await service.get_recent_logs(session, source, session_id, limit, date_str=date, sort=sort)
+    logs = await service.get_recent_logs(session, source, session_id, limit, offset=offset, date_str=date, sort=sort)
     return [{
         "id": log.id, 
         "role": log.role, 
@@ -1051,6 +1052,8 @@ async def get_mcps(session: AsyncSession = Depends(get_session)):
 @app.post("/api/mcp", response_model=MCPConfig)
 async def create_mcp(mcp_data: Dict[str, Any] = Body(...), session: AsyncSession = Depends(get_session)):
     mcp_data.pop('id', None)
+    mcp_data.pop('created_at', None)
+    mcp_data.pop('updated_at', None)
     new_mcp = MCPConfig(**mcp_data)
     session.add(new_mcp)
     await session.commit()
@@ -1062,8 +1065,9 @@ async def update_mcp(mcp_id: int, mcp_data: Dict[str, Any] = Body(...), session:
     db_mcp = await session.get(MCPConfig, mcp_id)
     if not db_mcp: raise HTTPException(status_code=404, detail="MCP not found")
     for key, value in mcp_data.items():
-        if hasattr(db_mcp, key) and key not in ['id']:
+        if hasattr(db_mcp, key) and key not in ['id', 'created_at', 'updated_at']:
             setattr(db_mcp, key, value)
+    db_mcp.updated_at = datetime.utcnow()
     session.add(db_mcp)
     await session.commit()
     await session.refresh(db_mcp)

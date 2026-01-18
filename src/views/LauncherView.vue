@@ -43,23 +43,7 @@
         </button>
       </nav>
 
-      <div class="p-4 mt-auto">
-        <div v-if="!isSidebarCollapsed" class="glass-effect rounded-xl p-4 border border-slate-800/50 bg-slate-900/40">
-          <p class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3">系统资源</p>
-          <div class="space-y-3">
-            <div class="flex items-center justify-between text-[11px]">
-              <span class="text-slate-400">网络延迟</span>
-              <span class="text-emerald-400 font-mono">24ms</span>
-            </div>
-            <div class="w-full bg-slate-800 h-1 rounded-full overflow-hidden">
-              <div class="bg-emerald-500 h-full w-1/4"></div>
-            </div>
-          </div>
-        </div>
-        <div v-else class="flex justify-center text-slate-700">
-          <Activity :size="20" />
-        </div>
-      </div>
+
     </aside>
 
     <!-- Main Content -->
@@ -176,45 +160,7 @@
           </div>
         </div>
 
-        <!-- NapCat Terminal Tab -->
-        <div v-if="activeTab === 'napcat'" class="h-full flex flex-col glass-effect rounded-2xl border border-slate-800/50 overflow-hidden bg-black/40">
-          <div class="flex items-center justify-between px-6 py-4 border-b border-slate-800/50 bg-slate-900/30">
-            <div class="flex items-center gap-3">
-              <div class="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse"></div>
-              <span class="text-sm font-semibold tracking-wide">NapCat 交互终端</span>
-            </div>
-            <div class="flex items-center gap-4">
-              <span class="text-[10px] font-mono text-slate-500 uppercase">交互会话</span>
-              <button @click="napcatLogs = []" class="text-xs text-slate-500 hover:text-slate-300 transition-colors">重置</button>
-            </div>
-          </div>
-          <div class="flex-1 overflow-y-auto p-6 font-mono text-[13px] leading-none custom-scrollbar" ref="napcatViewer">
-            <div v-for="log in napcatLogs" :key="log.id" class="">
-              <span class="text-slate-600 mr-3 select-none">[{{ log.time }}]</span>
-              <span class="text-slate-300 whitespace-pre-wrap" v-html="ansiToHtml(log.content)"></span>
-            </div>
-            <div v-if="napcatLogs.length === 0" class="h-full flex flex-col items-center justify-center text-slate-600 opacity-50">
-              <Monitor :size="48" class="mb-4" />
-              <p>等待 NapCat 进程输出...</p>
-            </div>
-          </div>
-          <!-- Terminal Input Area -->
-          <div class="p-4 border-t border-slate-800/50 bg-slate-900/20 flex items-center gap-3">
-            <ChevronRight :size="16" class="text-emerald-500" />
-            <input 
-              v-model="terminalInput"
-              @keyup.enter="sendTerminalCommand"
-              type="text" 
-              placeholder="输入指令并回车..." 
-              class="bg-transparent border-none outline-none flex-1 text-sm font-mono text-slate-300 placeholder:text-slate-700"
-            />
-          </div>
-        </div>
 
-        <!-- System Terminal Tab -->
-        <div v-if="activeTab === 'terminal'" class="h-full flex flex-col glass-effect rounded-2xl border border-slate-800/50 overflow-hidden bg-black/40">
-           <TerminalPanel />
-        </div>
 
         <!-- Plugins Tab -->
         <div v-if="activeTab === 'plugins'" class="h-full flex flex-col gap-6">
@@ -378,11 +324,10 @@ import { useRouter } from 'vue-router'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getAllWebviewWindows, getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
-import TerminalPanel from '../components/TerminalPanel.vue'
 import {
-  Sparkles, Home, Terminal, Settings, FolderOpen,
+  Sparkles, Home, Settings, FolderOpen,
   Cpu, Database, Activity, Power, ShieldCheck,
-  LayoutGrid, MessageSquare, ScrollText, Monitor, HardDrive, ChevronRight, Play, Shield,
+  LayoutGrid, ScrollText, Play, Shield,
   Menu, Zap, X, Plug, Search, Plus, Code
 } from 'lucide-vue-next'
 
@@ -390,27 +335,15 @@ const router = useRouter()
 const activeTab = ref('home')
 
 watch(activeTab, async (val) => {
-  if (val === 'ide') {
-    // Open the separate transparent window instead of routing in-place
-    try {
-      await invoke('open_ide_window')
-      // Reset tab to home after opening, or keep it highlighted?
-      // Maybe keep it to show it's active.
-    } catch (e) {
-      console.error("Failed to open IDE window:", e)
-      addLog(`[ERROR] Failed to open Chat Window: ${e}`)
-    }
-  }
+  // Logic for other tabs if needed
 })
 
 const isSidebarCollapsed = ref(false)
 const backendStatus = ref('STOPPED')
 const napcatStatus = ref('STOPPED')
 const esStatus = ref('CHECKING')
-const napcatLogs = ref([])
 const isRunning = ref(false)
 const isStarting = ref(false)
-const terminalInput = ref('')
 const plugins = ref([])
 const isInstallingES = ref(false)
 const appConfig = ref({})
@@ -514,75 +447,11 @@ onUnmounted(() => {
   if (statsInterval) clearInterval(statsInterval)
 })
 
-const sendTerminalCommand = async () => {
-  if (!terminalInput.value.trim()) return
-  
-  try {
-    await invoke('send_napcat_command_wrapper', { command: terminalInput.value })
-    // Mirror the input to the terminal
-    napcatLogs.value.push({
-      time: new Date().toLocaleTimeString(),
-      content: `> ${terminalInput.value}`,
-      id: Date.now() + Math.random()
-    })
-    terminalInput.value = ''
-  } catch (e) {
-    addLog(`[Error] Failed to send command: ${e}`)
-  }
-}
-const napcatViewer = ref(null)
-
-const scrollToBottom = (el) => {
-  if (el) {
-    nextTick(() => {
-      el.scrollTop = el.scrollHeight
-    })
-  }
-}
-
-watch(napcatLogs, () => scrollToBottom(napcatViewer.value), { deep: true })
-
 const navItems = [
   { id: 'home', name: '控制面板', icon: Home },
-  { id: 'ide', name: '伴侣模式 (Chat)', icon: Sparkles },
-  { id: 'napcat', name: 'NapCat 终端', icon: MessageSquare },
-  { id: 'terminal', name: '系统终端', icon: Terminal },
   { id: 'plugins', name: '插件管理', icon: Plug },
   { id: 'tools', name: '工具箱', icon: LayoutGrid },
 ]
-
-// ANSI to HTML helper
-const ansiToHtml = (text) => {
-  if (!text) return ''
-  let result = text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-  
-  // Basic ANSI colors
-  const colors = {
-    '0': 'reset',
-    '30': 'text-slate-500', // black
-    '31': 'text-red-400',   // red
-    '32': 'text-emerald-400', // green
-    '33': 'text-amber-400',  // yellow
-    '34': 'text-blue-400',   // blue
-    '35': 'text-purple-400', // magenta
-    '36': 'text-cyan-400',   // cyan
-    '37': 'text-slate-200',  // white
-    '90': 'text-slate-600',  // bright black
-  }
-
-  // Very basic implementation: just strip or replace common ones
-  result = result.replace(/\x1b\[(\d+)m/g, (match, code) => {
-    const className = colors[code]
-    if (className === 'reset') return '</span>'
-    if (className) return `<span class="${className}">`
-    return ''
-  })
-  
-  return result
-}
 
 const getStatusColor = (status) => {
   switch (status) {

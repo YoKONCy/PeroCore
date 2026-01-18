@@ -24,13 +24,23 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, defineAsyncComponent } from 'vue'
+import { ref, computed, watch, defineAsyncComponent, onMounted } from 'vue'
 import { emit } from '@tauri-apps/api/event'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import CustomTitleBar from '../components/layout/CustomTitleBar.vue'
 import ChatModeView from './ChatModeView.vue'
 import WorkModeView from './WorkModeView.vue'
 
 const isWorkMode = ref(false)
+const appWindow = getCurrentWindow()
+
+// Intercept close request to hide window instead of destroying it
+onMounted(async () => {
+  await appWindow.onCloseRequested(async (event) => {
+    event.preventDefault()
+    await appWindow.hide()
+  })
+})
 
 const currentView = computed(() => isWorkMode.value ? WorkModeView : ChatModeView)
 

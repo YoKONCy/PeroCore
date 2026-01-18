@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::fs;
 use std::io::{self, BufRead, BufReader};
 use std::thread;
+use std::collections::VecDeque;
 use tauri::{AppHandle, Emitter};
 use winreg::enums::*;
 use winreg::RegKey;
@@ -17,6 +18,7 @@ use tauri::Manager;
 pub struct NapCatState {
     pub child: Arc<Mutex<Option<Child>>>,
     pub stdin: Arc<Mutex<Option<std::process::ChildStdin>>>,
+    pub log_history: Arc<Mutex<VecDeque<String>>>,
 }
 
 impl NapCatState {
@@ -24,6 +26,7 @@ impl NapCatState {
         Self {
             child: Arc::new(Mutex::new(None)),
             stdin: Arc::new(Mutex::new(None)),
+            log_history: Arc::new(Mutex::new(VecDeque::with_capacity(2000))),
         }
     }
 }
@@ -86,7 +89,23 @@ fn is_social_enabled(app: &AppHandle) -> bool {
 }
 
 pub fn emit_log(app: &AppHandle, msg: String) {
+    if let Some(state) = app.try_state::<NapCatState>() {
+        if let Ok(mut history) = state.log_history.lock() {
+            history.push_back(msg.clone());
+            if history.len() > 2000 {
+                history.pop_front();
+            }
+        }
+    }
     let _ = app.emit("napcat-log", msg);
+}
+
+#[tauri::command]
+pub fn get_napcat_log_history(state: tauri::State<NapCatState>) -> Vec<String> {
+    match state.log_history.lock() {
+        Ok(logs) => logs.iter().cloned().collect(),
+        Err(_) => vec![],
+    }
 }
 
 pub fn check_napcat_installed(app: &AppHandle) -> bool {

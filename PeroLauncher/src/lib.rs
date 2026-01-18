@@ -18,7 +18,7 @@ use tauri::{
     tray::TrayIconBuilder,
 };
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
-use window_vibrancy::{apply_blur, apply_acrylic, apply_mica};
+use window_vibrancy::apply_acrylic;
 use windows::Win32::Foundation::POINT;
 use windows::Win32::UI::WindowsAndMessaging::{
     GetCursorPos, GetWindowLongA, SetWindowLongA, GWL_EXSTYLE, WS_EX_LAYERED, WS_EX_TRANSPARENT,
@@ -706,6 +706,11 @@ fn stop_napcat_wrapper(state: tauri::State<NapCatState>) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn get_napcat_logs(state: tauri::State<NapCatState>) -> Vec<String> {
+    napcat::get_napcat_log_history(state)
+}
+
+#[tauri::command]
 fn send_napcat_command_wrapper(
     state: tauri::State<NapCatState>,
     command: String,
@@ -815,6 +820,7 @@ pub fn run() {
             start_napcat,
             stop_napcat_wrapper,
             send_napcat_command_wrapper,
+            get_napcat_logs,
             check_es,
             install_es,
             plugins::get_plugins,

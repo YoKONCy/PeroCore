@@ -303,7 +303,7 @@ class MemoryService:
         return (await session.exec(statement)).all()
 
     @staticmethod
-    async def get_recent_logs(session: AsyncSession, source: str, session_id: str, limit: int = 20, date_str: str = None, sort: str = "asc") -> List[ConversationLog]:
+    async def get_recent_logs(session: AsyncSession, source: str, session_id: str, limit: int = 20, offset: int = 0, date_str: str = None, sort: str = "asc") -> List[ConversationLog]:
         """获取指定来源和会话的最近对话记录"""
         from sqlmodel import desc, asc
         from datetime import datetime, time
@@ -325,7 +325,7 @@ class MemoryService:
         else:
             statement = statement.order_by(desc(ConversationLog.timestamp), desc(ConversationLog.id))
             
-        statement = statement.limit(limit)
+        statement = statement.offset(offset).limit(limit)
         logs = (await session.exec(statement)).all()
         
         # 如果是正序排列，我们需要反转结果，因为 limit 是取最新的

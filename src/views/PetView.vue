@@ -116,6 +116,7 @@
         >
             {{ voiceModeIcon }}
         </button>
+        <button class="tool-btn" @click.stop="openChatWindow" title="聊天">💬</button>
         <button class="tool-btn" @click.stop="openDashboard" title="面板">⚙️</button>
       </div>
       
@@ -1840,6 +1841,14 @@ const reloadPet = () => {
 
 const openDashboard = () => {
   invoke('open_dashboard').catch(e => console.error(e))
+}
+
+const openChatWindow = async () => {
+    try {
+        await invoke('open_ide_window')
+    } catch (e) {
+        console.error("Failed to open Chat Window:", e)
+    }
 }
 
 const sendMessage = async (systemMsg = null, isHidden = false) => {

@@ -1,19 +1,42 @@
 <template>
   <div class="flex flex-col h-full transition-colors duration-300" :class="workMode ? 'bg-[#1e293b] text-slate-200' : 'bg-transparent text-slate-700'">
     <!-- Messages Area -->
-    <div class="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar" ref="msgContainer">
+    <div class="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar flex flex-col" ref="msgContainer">
+      <!-- Load More Button -->
+      <div v-if="hasMore" class="flex justify-center py-4">
+         <button @click="loadMore" class="text-xs text-slate-400 hover:text-sky-500 transition-colors flex items-center gap-1">
+           <Clock class="w-3 h-3" />
+           <span>查看更多历史记录</span>
+         </button>
+      </div>
+
       <div v-for="(msg, idx) in messages" :key="idx" class="flex flex-col">
         
         <!-- User Message -->
-        <div v-if="msg.role === 'user'" class="flex justify-end mb-4 animate-fade-in-up">
-          <div class="max-w-[85%] animate-float">
+        <div v-if="msg.role === 'user'" class="flex justify-end mb-4 animate-fade-in-up group">
+          <div class="max-w-[85%] animate-float flex flex-col items-end">
             <div 
-              class="px-5 py-3 rounded-2xl rounded-tr-sm shadow-md text-sm leading-relaxed whitespace-pre-wrap font-sans transition-all backdrop-blur-sm"
-              :class="workMode ? 'bg-amber-600/90 text-white' : 'bg-sky-500/80 text-white shadow-sky-500/20'"
+              class="px-5 py-3 rounded-2xl rounded-tr-sm shadow-md text-sm leading-relaxed whitespace-pre-wrap font-sans transition-all backdrop-blur-xl border border-white/10 hover:scale-[1.02] hover:-translate-y-[2px] hover:shadow-lg hover:shadow-sky-500/30 relative hover:z-10 duration-300 ease-out"
+              :class="workMode ? 'bg-amber-600/90 text-white' : 'bg-gradient-to-br from-sky-500/60 to-blue-600/60 text-white shadow-sky-500/20'"
             >
-              {{ msg.content }}
+              <template v-if="editingMsgId === msg.id">
+                 <textarea v-model="editingContent" class="w-full bg-transparent border-none outline-none resize-none text-white custom-scrollbar" rows="3" style="min-width: 200px;"></textarea>
+                 <div class="flex gap-2 justify-end mt-2 pt-2 border-t border-white/20">
+                    <button @click="saveEdit(msg)" class="p-1 hover:bg-white/20 rounded text-white" title="Save"><Check class="w-4 h-4" /></button>
+                    <button @click="cancelEdit" class="p-1 hover:bg-white/20 rounded text-white" title="Cancel"><X class="w-4 h-4" /></button>
+                 </div>
+              </template>
+              <template v-else>
+                  {{ msg.content }}
+               </template>
             </div>
-            <div class="text-[10px] mt-1 text-right mr-1" :class="workMode ? 'text-slate-500' : 'text-slate-400'">{{ new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) }}</div>
+            <div class="flex items-center gap-2 mt-1 mr-1">
+               <div class="opacity-0 group-hover:opacity-100 transition-opacity flex gap-2" v-if="!editingMsgId">
+                  <button @click="startEdit(msg)" class="text-slate-400 hover:text-sky-500 transition-colors"><Edit2 class="w-3 h-3" /></button>
+                  <button @click="deleteMessage(msg.id)" class="text-slate-400 hover:text-red-500 transition-colors"><Trash2 class="w-3 h-3" /></button>
+               </div>
+               <div class="text-[10px] text-right" :class="workMode ? 'text-slate-500' : 'text-slate-400'">{{ formatTime(msg.timestamp) }}</div>
+            </div>
           </div>
         </div>
 
@@ -32,15 +55,29 @@
              <!-- Name & Time -->
              <div class="flex items-center gap-2 mb-1.5 ml-1 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
                <span class="text-xs font-bold" :class="workMode ? 'text-indigo-300' : 'text-slate-500'">Pero</span>
-               <span class="text-[10px] text-slate-400">{{ new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) }}</span>
+               <span class="text-[10px] text-slate-400">{{ formatTime(msg.timestamp) }}</span>
+               
+               <!-- Actions -->
+               <div class="flex gap-2 ml-2" v-if="!editingMsgId">
+                  <button @click="startEdit(msg)" class="text-slate-400 hover:text-sky-500 transition-colors"><Edit2 class="w-3 h-3" /></button>
+                  <button @click="deleteMessage(msg.id)" class="text-slate-400 hover:text-red-500 transition-colors"><Trash2 class="w-3 h-3" /></button>
+               </div>
              </div>
 
             <div 
-              class="p-4 rounded-2xl rounded-tl-sm shadow-sm text-sm leading-relaxed font-sans border transition-all flex flex-col gap-3"
+              class="p-4 rounded-2xl rounded-tl-sm shadow-sm text-sm leading-relaxed font-sans border transition-all flex flex-col gap-3 backdrop-blur-xl hover:scale-[1.02] hover:-translate-y-[2px] hover:shadow-xl relative hover:z-10 duration-300 ease-out"
               :class="workMode 
                 ? 'bg-[#1e293b]/90 text-slate-200 border-slate-700/50' 
-                : 'bg-white/60 backdrop-blur-md text-slate-700 border-white/40 shadow-xl shadow-sky-100/50'"
+                : 'bg-white/30 text-slate-700 border-white/20 shadow-lg shadow-sky-100/30'"
             >
+              <template v-if="editingMsgId === msg.id">
+                 <textarea v-model="editingContent" class="w-full bg-transparent border-none outline-none resize-none custom-scrollbar" :class="workMode ? 'text-slate-200' : 'text-slate-700'" rows="10"></textarea>
+                 <div class="flex gap-2 justify-end mt-2 pt-2 border-t" :class="workMode ? 'border-slate-700' : 'border-slate-200'">
+                    <button @click="saveEdit(msg)" class="p-1 hover:bg-black/10 rounded" :class="workMode ? 'text-slate-300' : 'text-slate-600'" title="Save"><Check class="w-4 h-4" /></button>
+                    <button @click="cancelEdit" class="p-1 hover:bg-black/10 rounded" :class="workMode ? 'text-slate-300' : 'text-slate-600'" title="Cancel"><X class="w-4 h-4" /></button>
+                 </div>
+              </template>
+              <template v-else>
               <template v-if="!msg.content && msg.role === 'assistant' && idx === messages.length - 1 && isSending">
                  <div class="flex items-center gap-2 h-6 px-1">
                     <span class="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce"></span>
@@ -101,7 +138,7 @@
                    >
                       <div class="flex items-center gap-2">
                         <Terminal class="w-3.5 h-3.5" />
-                        <span>VCP-ToolUse: {{ segment.name }}</span>
+                        <span>NIT: {{ segment.name }}</span>
                       </div>
                       <div class="flex items-center gap-2">
                          <span class="font-mono opacity-70 text-[10px]">{{ segment.id }}</span>
@@ -121,6 +158,7 @@
                 </div>
                 
               </template>
+              </template>
             </div>
           </div>
         </div>
@@ -130,7 +168,7 @@
            <div class="w-10 h-10 flex-shrink-0"></div> <!-- Spacer -->
            <div class="w-full max-w-2xl">
               <div 
-                class="rounded-2xl overflow-hidden shadow-lg transition-all duration-300 border"
+                class="rounded-2xl overflow-hidden shadow-lg transition-all duration-300 border hover:shadow-xl hover:scale-[1.01] hover:-translate-y-[2px]"
                 :class="workMode 
                   ? 'bg-[#0f172a] border-slate-700/50' 
                   : 'bg-white/40 backdrop-blur-md border-white/30 shadow-sky-200/30'"
@@ -264,7 +302,7 @@
 <script setup>
 import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { emit, listen } from '@tauri-apps/api/event';
-import { Brain, MessageSquareQuote, Terminal, Play, Pause, Square } from 'lucide-vue-next';
+import { Brain, MessageSquareQuote, Terminal, Play, Pause, Square, Clock, Edit2, Trash2, Check, X } from 'lucide-vue-next';
 import AsyncMarkdown from '../AsyncMarkdown.vue';
 
 const props = defineProps({
@@ -274,6 +312,8 @@ const props = defineProps({
 const emitEvent = defineEmits(['mode-change']);
 
 const messages = ref([]);
+const offset = ref(0);
+const hasMore = ref(true);
 const input = ref('');
 const msgContainer = ref(null);
 const isSending = ref(false);
@@ -281,13 +321,22 @@ const isConnected = ref(false);
 let ws = null;
 let reconnectTimer = null;
 
+// Configuration
+const API_BASE = 'http://localhost:9120';
+const WS_BASE = 'ws://localhost:9120';
+const HISTORY_LIMIT = 30;
+
 const parseMessage = (content) => {
   if (!content) return [{ type: 'text', content: '' }];
   
   const segments = [];
-  // Match 【Thinking: ...】, 【Monologue: ...】, and <nit-id>...</nit-id>
-  // Also handle cases where there might be spaces inside brackets
-  const regex = /【(Thinking|Monologue)\s*:\s*([\s\S]*?)】|<nit-([a-zA-Z0-9-]+)>([\s\S]*?)<\/nit-\3>/g;
+  
+  // Robust Regex Pattern
+  // 1. Thinking/Monologue: 【Thinking: ...】 or 【Monologue: ...】
+  // 2. NIT Tool: <nit>...</nit> or <nit-ID>...</nit-ID> or [[[NIT_CALL]]]...[[[NIT_END]]]
+  // 3. DeepSeek Thinking: <think>...</think>
+  
+  const regex = /【(Thinking|Monologue)\s*:\s*([\s\S]*?)】|<(nit(?:-[a-zA-Z0-9-]+)?)>([\s\S]*?)<\/\3>|\[\[\[NIT_CALL\]\]\]([\s\S]*?)\[\[\[NIT_END\]\]\]|<think>([\s\S]*?)<\/think>/g;
   
   let lastIndex = 0;
   let match;
@@ -301,18 +350,30 @@ const parseMessage = (content) => {
       }
     }
     
-    if (match[1]) { // Thinking or Monologue
+    if (match[1]) { // Thinking or Monologue (Standard)
       segments.push({ 
         type: match[1].toLowerCase(), 
         content: match[2].trim() 
       });
-    } else if (match[3]) { // NIT Tool
-       // match[3] is the ID, match[4] is the content (code)
-       // Try to extract tool name from code if possible, otherwise generic
-       const code = match[4].trim();
+    } else if (match[6]) { // DeepSeek <think>
+      segments.push({ 
+        type: 'thinking', 
+        content: match[6].trim() 
+      });
+    } else if (match[3] || match[5]) { // NIT Tool (XML or Bracket)
+       const nitTag = match[3];
+       const code = match[4] || match[5]; // Group 4 for XML, Group 5 for Bracket
+       
+       // Extract ID from tag if present (e.g. nit-123 -> 123)
+       let toolId = 'unknown';
+       if (nitTag && nitTag.startsWith('nit-')) {
+         toolId = nitTag.substring(4);
+       }
+       
+       const trimmedCode = code.trim();
+       
        let toolName = 'Script Execution';
-       // Simple heuristic: grab first function call name
-       const funcMatch = /([a-zA-Z_][a-zA-Z0-9_]*)\./.exec(code);
+       const funcMatch = /([a-zA-Z_][a-zA-Z0-9_]*)\./.exec(trimmedCode);
        if (funcMatch) {
          toolName = funcMatch[1];
        }
@@ -320,8 +381,8 @@ const parseMessage = (content) => {
        segments.push({
          type: 'tool',
          name: toolName,
-         id: match[3],
-         content: code
+         id: toolId,
+         content: trimmedCode
        });
     }
     
@@ -355,10 +416,55 @@ const isCollapsed = (msgIdx, segIdx) => {
   return collapsedStates.value.has(`${msgIdx}-${segIdx}`);
 };
 
+// --- Editing Logic ---
+const editingMsgId = ref(null);
+const editingContent = ref('');
+
+const startEdit = (msg) => {
+  editingMsgId.value = msg.id;
+  editingContent.value = msg.content;
+};
+
+const cancelEdit = () => {
+  editingMsgId.value = null;
+  editingContent.value = '';
+};
+
+const saveEdit = async (msg) => {
+  if (!editingContent.value.trim() || !msg.id) return;
+  
+  try {
+    const res = await fetch(`${API_BASE}/api/history/${msg.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: editingContent.value })
+    });
+    
+    if (res.ok) {
+      msg.content = editingContent.value;
+      editingMsgId.value = null;
+    }
+  } catch (e) {
+    console.error('Failed to edit message', e);
+  }
+};
+
+const deleteMessage = async (msgId) => {
+  if (!confirm('确定删除这条消息吗？')) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/history/${msgId}`, { method: 'DELETE' });
+    if (res.ok) {
+      messages.value = messages.value.filter(m => m.id !== msgId);
+    }
+  } catch (e) {
+    console.error('Failed to delete message', e);
+  }
+};
+
 // --- WebSocket Logic for Real-time Thoughts ---
 const connectWS = () => {
   if (ws) ws.close();
-  ws = new WebSocket('ws://localhost:8000/ws/voice');
+  ws = new WebSocket(`${WS_BASE}/ws/voice`);
   
   ws.onopen = () => {
     isConnected.value = true;
@@ -432,7 +538,8 @@ const ensureActiveThoughtChain = () => {
     isThinking: true,
     isCollapsed: false,
     isPaused: false,
-    steps: []
+    steps: [],
+    timestamp: new Date().toISOString()
   };
   messages.value.push(newChain);
   activeThoughtChain.value = newChain;
@@ -452,11 +559,11 @@ const injectInstruction = async (action) => {
   const sessionId = props.workMode ? 'current_work_session' : 'default'; 
   try {
     if (action === 'pause') {
-      await fetch(`http://localhost:8000/api/task/${sessionId}/pause`, { method: 'POST' });
+      await fetch(`${API_BASE}/api/task/${sessionId}/pause`, { method: 'POST' });
     } else if (action === 'resume') {
-       await fetch(`http://localhost:8000/api/task/${sessionId}/resume`, { method: 'POST' });
+       await fetch(`${API_BASE}/api/task/${sessionId}/resume`, { method: 'POST' });
     } else if (action === 'stop') {
-       await fetch(`http://localhost:8000/api/task/${sessionId}/inject`, {
+       await fetch(`${API_BASE}/api/task/${sessionId}/inject`, {
          method: 'POST',
          headers: { 'Content-Type': 'application/json' },
          body: JSON.stringify({ instruction: '停止任务' })
@@ -467,7 +574,90 @@ const injectInstruction = async (action) => {
   }
 };
 
+const formatTime = (ts) => {
+  if (!ts) return '';
+  const date = new Date(ts);
+  const now = new Date();
+  
+  const isToday = date.getDate() === now.getDate() && 
+                  date.getMonth() === now.getMonth() && 
+                  date.getFullYear() === now.getFullYear();
+                  
+  if (isToday) {
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  } else {
+    return date.toLocaleDateString([], { month: '2-digit', day: '2-digit' }) + ' ' + 
+           date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+};
+
+const fetchHistory = async (append = false) => {
+  // If in work mode, use 'ide' source.
+  // If in chat mode (workMode false), use 'desktop' source to sync with PetView.
+  const source = props.workMode ? 'ide' : 'desktop';
+  const sessionId = props.workMode ? 'current_work_session' : 'default';
+  
+  try {
+    // Fetch desc (Newest first)
+    const res = await fetch(`${API_BASE}/api/history/${source}/${sessionId}?limit=${HISTORY_LIMIT}&offset=${offset.value}&sort=desc`);
+    if (res.ok) {
+      const logs = await res.json();
+      if (logs.length < HISTORY_LIMIT) {
+        hasMore.value = false;
+      }
+      
+      const newMsgs = logs.map(log => ({
+        id: log.id,
+        role: log.role,
+        content: log.raw_content || log.content, // Prioritize raw_content for NIT tool display
+        timestamp: log.timestamp
+      }));
+      
+      // Reverse to get [Oldest, ..., Newest] order for display
+      newMsgs.reverse();
+
+      if (append) {
+        // Prepend older messages (history) to the top
+        // Save scroll position
+        if (msgContainer.value) {
+            const oldHeight = msgContainer.value.scrollHeight;
+            const oldTop = msgContainer.value.scrollTop;
+            
+            messages.value.unshift(...newMsgs);
+            
+            await nextTick();
+            // Restore scroll position relative to the new content
+            const newHeight = msgContainer.value.scrollHeight;
+            msgContainer.value.scrollTop = newHeight - oldHeight + oldTop;
+        } else {
+            messages.value.unshift(...newMsgs);
+        }
+      } else {
+        // Initial load
+        messages.value = newMsgs;
+        await nextTick();
+        scrollToBottom();
+      }
+    } else {
+       console.error("Fetch history failed with status:", res.status);
+    }
+  } catch (e) {
+    console.error('Failed to fetch history', e);
+  }
+};
+
+const loadMore = async () => {
+  // Fix: If messages are empty (initial load failed), do NOT increment offset
+  if (messages.value.length === 0) {
+      offset.value = 0;
+  } else {
+      offset.value += HISTORY_LIMIT;
+  }
+  await fetchHistory(true);
+};
+
 let unlistenSync = null;
+let unlistenDelete = null;
 
 onMounted(async () => {
   connectWS();
@@ -475,17 +665,26 @@ onMounted(async () => {
 
   // Setup Tauri Event Listeners for Chat Sync
   try {
+    // Listen for log deletion
+    unlistenDelete = await listen('log-deleted', (event) => {
+      const deletedLogId = event.payload;
+      if (deletedLogId) {
+        messages.value = messages.value.filter(msg => msg.id !== deletedLogId);
+      }
+    });
+
     // 监听来自后端/PetView的同步消息
     unlistenSync = await listen('sync-chat-to-ide', (event) => {
-      const { role, content } = event.payload;
+      const { role, content, timestamp } = event.payload;
       
-      // 避免重复添加 (简单去重: 如果最后一条消息内容相同且角色相同)
+      // 避免重复添加
+      // Since Newest is at Bottom (Index N)
       const lastMsg = messages.value[messages.value.length - 1];
       if (lastMsg && lastMsg.role === role && lastMsg.content === content) {
         return;
       }
       
-      messages.value.push({ role, content });
+      messages.value.push({ role, content, timestamp: timestamp || new Date().toISOString() });
       scrollToBottom();
     });
   } catch (e) {
@@ -494,35 +693,16 @@ onMounted(async () => {
 });
 
 watch(() => props.workMode, () => {
+  offset.value = 0;
+  hasMore.value = true;
   fetchHistory();
 });
-
-const fetchHistory = async () => {
-  // If in work mode, use 'ide' source.
-  // If in chat mode (workMode false), use 'desktop' source to sync with PetView.
-  const source = props.workMode ? 'ide' : 'desktop';
-  const sessionId = props.workMode ? 'current_work_session' : 'default';
-  
-  try {
-    const res = await fetch(`http://localhost:9120/api/history/${source}/${sessionId}?limit=50&sort=asc`);
-    if (res.ok) {
-      const logs = await res.json();
-      messages.value = logs.map(log => ({
-        role: log.role,
-        content: log.content
-      }));
-      await nextTick();
-      scrollToBottom();
-    }
-  } catch (e) {
-    console.error('Failed to fetch history', e);
-  }
-};
 
 onUnmounted(() => {
   if (ws) ws.close();
   if (reconnectTimer) clearTimeout(reconnectTimer);
   if (unlistenSync) unlistenSync();
+  if (unlistenDelete) unlistenDelete();
 });
 
 // --- Chat Logic ---
@@ -535,11 +715,11 @@ const sendMessage = async () => {
   if (!input.value.trim() || isSending.value) return;
   
   const content = input.value;
-  messages.value.push({ role: 'user', content });
+  messages.value.push({ role: 'user', content, timestamp: new Date().toISOString() });
   
   // Emit sync event for PetView if not in Work Mode
   if (!props.workMode) {
-    emit('sync-chat-to-pet', { role: 'user', content });
+    emit('sync-chat-to-pet', { role: 'user', content, timestamp: new Date().toISOString() });
   }
 
   input.value = '';
@@ -549,13 +729,13 @@ const sendMessage = async () => {
   scrollToBottom();
 
   // Pre-add assistant message for immediate feedback
-  const assistantMsg = { role: 'assistant', content: '' };
+  const assistantMsg = { role: 'assistant', content: '', timestamp: new Date().toISOString() };
   messages.value.push(assistantMsg);
   await nextTick();
   scrollToBottom();
 
   try {
-    const res = await fetch('http://localhost:9120/api/ide/chat', {
+    const res = await fetch(`${API_BASE}/api/ide/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
@@ -600,8 +780,8 @@ const scrollToBottom = () => {
 
 <style scoped>
 @keyframes float {
-  0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-3px); }
+  0%, 100% { transform: translateY(0px) scale(1); }
+  50% { transform: translateY(-6px) scale(1.01); }
 }
 
 .animate-float {
