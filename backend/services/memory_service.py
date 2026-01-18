@@ -410,11 +410,13 @@ class MemoryService:
             # 1. 向量搜索找到初始锚点 (Anchors)
             query_vec = embedding_service.encode_one(text)
             if not query_vec:
+                print("[Memory] Logical flashback: Empty query vector")
                 return []
             
             # 召回稍微多一点，作为扩散起点
             vector_results = vector_service.search(query_vec, limit=10)
             if not vector_results:
+                print("[Memory] Logical flashback: No vector results found")
                 return []
 
             anchor_ids = [res["id"] for res in vector_results]
@@ -426,13 +428,16 @@ class MemoryService:
             engine = await get_rust_engine(session)
             if engine:
                 # 扩散 2 步，扩大联想范围
+                print(f"[Memory] Spreading activation from anchors: {anchor_ids}")
                 flashback_scores = engine.propagate_activation(
                     activation_scores,
                     steps=2,
                     decay=0.7,
                     min_threshold=0.05
                 )
+                print(f"[Memory] Spread result count: {len(flashback_scores)}")
             else:
+                print("[Memory] Rust engine unavailable, using anchors only")
                 flashback_scores = activation_scores
 
             # 3. 提取 Top 关联记忆并转换为碎片标签

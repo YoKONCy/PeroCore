@@ -401,7 +401,7 @@
                     </div>
                     
                     <div v-else class="message-content-wrapper">
-                      <AsyncMarkdown :content="log.content" />
+                      <AsyncMarkdown :content="formatLogContent(log.content)" />
                     </div>
                     
                     <div class="bubble-actions">
@@ -1211,6 +1211,12 @@ const parseDebugContent = (content) => {
   debugSegments.value = segments
 }
 
+const formatLogContent = (content) => {
+  if (!content) return ''
+  // Hide Thinking and Monologue blocks (but keep them in raw data)
+  return content.replace(/【(Thinking|Monologue)[\s\S]*?】/gi, '')
+}
+
 // 编辑日志状态
 const editingLogId = ref(null)
 const editingContent = ref('')
@@ -1832,6 +1838,8 @@ const initGraph = () => {
         },
         tooltip: {
             trigger: 'item',
+            confine: true,
+            enterable: true,
             formatter: (params) => {
                 if (params.dataType === 'node') {
                     const d = params.data
@@ -1844,7 +1852,11 @@ const initGraph = () => {
                         <div style="font-size:10px; color:#aaa; margin-top:5px;">${d.realTime}</div>
                     `
                 } else {
-                    return `${params.data.relation_type} (强度: ${params.data.value})`
+                    return `<div style="max-width: 240px; white-space: normal; word-break: break-word; line-height: 1.5;">
+                        <div style="font-weight:bold; margin-bottom:4px; color:#a0c4ff;">🔗 关联</div>
+                        <div>${params.data.relation_type}</div>
+                        <div style="margin-top:4px; opacity: 0.7; font-size: 12px;">强度: ${params.data.value}</div>
+                    </div>`
                 }
             }
         },

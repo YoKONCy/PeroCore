@@ -760,45 +760,52 @@ class LLMService:
             payload["tools"] = tools
 
         async with httpx.AsyncClient(timeout=60.0) as client:
-            # 1. 非流式模式 (Stream=False)
-            if not stream:
-                response = await client.post(url, headers=headers, json=payload)
-                if response.status_code != 200:
-                    yield {"content": f"Error: {response.status_code} - {response.text}"}
-                    return
-                
-                data = response.json()
-                if data.get("choices") and len(data["choices"]) > 0:
-                    # 模拟一个 delta 对象返回完整内容
-                    message = data["choices"][0].get("message", {})
-                    yield {"content": message.get("content", "")}
-                return
-
-            # 2. 流式模式 (Stream=True)
-            async with client.stream("POST", url, headers=headers, json=payload) as response:
-                if response.status_code != 200:
-                    error_detail = await response.aread()
-                    yield {"content": f"Error: {response.status_code} - {error_detail.decode()}"}
+            try:
+                # 1. 非流式模式 (Stream=False)
+                if not stream:
+                    response = await client.post(url, headers=headers, json=payload)
+                    if response.status_code != 200:
+                        yield {"content": f"Error: {response.status_code} - {response.text}"}
+                        return
+                    
+                    data = response.json()
+                    if data.get("choices") and len(data["choices"]) > 0:
+                        # 模拟一个 delta 对象返回完整内容
+                        message = data["choices"][0].get("message", {})
+                        yield {"content": message.get("content", "")}
                     return
 
-                buffer = ""
-                try:
-                    async for chunk in response.aiter_text():
-                        buffer += chunk
-                        while "\n" in buffer:
-                            line, buffer = buffer.split("\n", 1)
-                            line = line.strip()
-                            if line.startswith("data: "):
-                                data_str = line[6:].strip()
-                                if data_str == "[DONE]":
-                                    return
-                                try:
-                                    data = json.loads(data_str)
-                                    if data.get("choices") and len(data["choices"]) > 0:
-                                        delta = data["choices"][0].get("delta", {})
-                                        yield delta
-                                except Exception:
-                                    continue
-                except (httpx.RemoteProtocolError, httpx.ReadError, httpx.ReadTimeout) as e:
-                    print(f"[LLM] Stream Interrupted: {e}")
-                    yield {"content": f"\n\n[System Warning: Network stream interrupted ({str(e)})]"}
+                # 2. 流式模式 (Stream=True)
+                async with client.stream("POST", url, headers=headers, json=payload) as response:
+                    if response.status_code != 200:
+                        error_detail = await response.aread()
+                        yield {"content": f"Error: {response.status_code} - {error_detail.decode()}"}
+                        return
+
+                    buffer = ""
+                    try:
+                        async for chunk in response.aiter_text():
+                            buffer += chunk
+                            while "\n" in buffer:
+                                line, buffer = buffer.split("\n", 1)
+                                line = line.strip()
+                                if line.startswith("data: "):
+                                    data_str = line[6:].strip()
+                                    if data_str == "[DONE]":
+                                        return
+                                    try:
+                                        data = json.loads(data_str)
+                                        if data.get("choices") and len(data["choices"]) > 0:
+                                            delta = data["choices"][0].get("delta", {})
+                                            yield delta
+                                    except Exception:
+                                        continue
+                    except (httpx.RemoteProtocolError, httpx.ReadError, httpx.ReadTimeout) as e:
+                        print(f"[LLM] Stream Interrupted: {e}")
+                        yield {"content": f"\n\n[System Warning: Network stream interrupted ({str(e)})]"}
+            except httpx.RequestError as e:
+                print(f"[LLM] Connection Error: {e}")
+                yield {"content": f"\n\n[System Error: Network Connection Failed ({str(e)})]"}
+            except Exception as e:
+                print(f"[LLM] Unexpected Error: {e}")
+                yield {"content": f"\n\n[System Error: Unexpected LLM Error ({str(e)})]"}

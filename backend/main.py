@@ -1322,7 +1322,7 @@ async def chat(
                     clean_text = re.sub(r'<[^>]+>', '', clean_text)
                     # Filter out Thinking blocks (Safety net)
                     # Use strict pattern but case insensitive
-                    clean_text = re.sub(r'【Thinking.*?】', '', clean_text, flags=re.S | re.IGNORECASE)
+                    clean_text = re.sub(r'【(Thinking|Monologue).*?】', '', clean_text, flags=re.S | re.IGNORECASE)
                     
                     # Filter out Emoji and special symbols that edge-tts might read
                     clean_text = re.sub(r'[\U00010000-\U0010ffff]', '', clean_text)
@@ -1392,7 +1392,8 @@ async def chat(
                                 if os.path.exists(filler_cache_path):
                                     try:
                                         with open(filler_cache_path, "rb") as f:
-                                            audio_data = f.read()
+                                            # 读取二进制并转为 base64 字符串，与 generate_tts_chunk 输出保持一致
+                                            audio_data = base64.b64encode(f.read()).decode('utf-8')
                                     except Exception as e:
                                         logger.error(f"Failed to read local filler: {e}")
                                 
@@ -1401,8 +1402,9 @@ async def chat(
                                     audio_data = await generate_tts_chunk(filler_phrase)
                                     if audio_data:
                                         try:
+                                            # audio_data 是 base64 字符串，保存为二进制音频文件
                                             with open(filler_cache_path, "wb") as f:
-                                                f.write(audio_data)
+                                                f.write(base64.b64decode(audio_data))
                                             logger.info(f"Saved filler to cache: {filler_cache_path}")
                                         except Exception as e:
                                             logger.error(f"Failed to save filler cache: {e}")

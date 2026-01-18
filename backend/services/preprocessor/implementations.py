@@ -36,6 +36,7 @@ class UserInputPreprocessor(BasePreprocessor):
                         user_message = " ".join(texts)
                     break
         
+        print(f"[UserInputPreprocessor] Extracted user_message: {user_message[:50]}...")
         context["user_message"] = user_message
         context["is_multimodal"] = is_multimodal
         return context
@@ -235,6 +236,7 @@ class RAGPreprocessor(BasePreprocessor):
                         query_vec = merged_vec.tolist()
 
                 # Perform Search
+                print(f"[RAGPreprocessor] Searching relevant memories for: {user_message[:30]}...")
                 memories = await memory_service.get_relevant_memories(
                     session, 
                     user_message, 
@@ -242,6 +244,7 @@ class RAGPreprocessor(BasePreprocessor):
                     exclude_after_time=earliest_timestamp,
                     query_vec=query_vec
                 )
+                print(f"[RAGPreprocessor] Found {len(memories) if memories else 0} memories.")
                 
                 # [特性] RAG 刷新块构建
                 # 创建富含元数据的注释块以进行动态刷新
@@ -360,10 +363,12 @@ class GraphFlashbackPreprocessor(BasePreprocessor):
         user_message = context.get("user_message", "")
         
         if not user_message:
+            print("[GraphFlashback] Skipping: No user_message")
             return context
 
         # Perform logical flashback
         try:
+            print(f"[GraphFlashback] Starting logical_flashback for: {user_message[:30]}...")
             flashback = await memory_service.logical_flashback(session, user_message, limit=5)
             
             graph_context = ""
@@ -372,6 +377,8 @@ class GraphFlashbackPreprocessor(BasePreprocessor):
                 fragments = [item["name"] for item in flashback]
                 graph_context = "关联思绪: " + ", ".join(fragments)
                 print(f"[GraphFlashback] Found {len(fragments)} fragments: {fragments}")
+            else:
+                print("[GraphFlashback] No fragments found.")
             
             # Populate variables
             variables = context.get("variables", {})
