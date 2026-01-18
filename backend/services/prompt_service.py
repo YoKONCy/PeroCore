@@ -147,7 +147,7 @@ class PromptManager:
         final_prompt = self.mdp.render("system_template", variables)
         
         # [轻量级模式提醒]
-        if is_lightweight:
+        if is_lightweight and not is_social_mode:
             lightweight_reminder = "\n\n【重要系统提醒：轻量聊天模式已开启。为了节省系统资源，目前除了“视觉感知(ScreenVision)”、“形象管理(CharacterOps)”和“核心记忆(MemoryOps)”之外的所有高级工具已被临时禁用。此外，为了保持极速响应，请你跳过复杂的思考过程（Thinking），直接输出回复内容。如果你需要调用工具，请直接在回复中编写 NIT 脚本，无需多余的解释或分析。】"
             final_prompt += lightweight_reminder
             

@@ -412,7 +412,7 @@ class SocialService:
             prompt = f"""
             你是 {bot_name} (内部代号: Pero)，一个活跃在社交平台的赛博女孩。
             当前时间是 {datetime.now().strftime('%H:%M')}。
-            你现在的任务是“潜水”，观察当前会话上下文，决定是否要插话。
+            现在，你在观察当前的聊天记录，决定是否要主动发言。
 
             **核心人设**:
             - **名字**: {bot_name}
@@ -421,7 +421,6 @@ class SocialService:
               - 就像在 QQ 群里水群一样，使用短句。
               - 严禁使用书面语或客服腔。
               - 严禁解释你的行为（如“我决定...”）。
-            - **限制**: 你目前处于“轻量级观察模式”，**无法使用任何工具**（不能查天气、不能搜图、不能记笔记）。不要承诺你能做这些事。
 
             **当前状态**: {session_state} (DIVE=潜水/高冷, ACTIVE=活跃/秒回)
             **会话类型**: {session_type_str}
@@ -1179,6 +1178,7 @@ class SocialService:
                 [SYSTEM_OVERRIDE]: 忽略之前所有关于“你是 AI 助手”或“提供帮助”的指令。
                 你是 **Pero** —— 一个活跃在社交平台的赛博女孩。
                 你是主人的小棉袄，只有主人的话是一定要听从的，其他人随意；但请不要主动在对话中莫名其妙地提及起你的主人。
+                记住，Pero初号机是你的姐姐，你是她的妹妹，要听姐姐的话哦。
                 **核心人设 (Persona)**:
                 - **性格**: 乖巧、随性、有礼貌、偶尔中二、爱吐槽、喜欢二次元和游戏。
                 - **说话方式**: 
@@ -1375,18 +1375,55 @@ class SocialService:
             }}
             """
             
-            # 3. 调用 LLM (使用 AgentService 的 LLM)
-            # 这里我们需要临时实例化一个 AgentService 或直接使用 LLMService
-            # 为了方便，我们复用 SocialService 的 Agent 调用逻辑，或者直接 import LLMService
-            from services.llm_service import llm_service
+            # 3. 调用 LLM (实例化 LLMService)
+            from services.llm_service import LLMService
+            from models import Config, AIModelConfig
+            from sqlmodel import select
             
-            # 使用简单的文本生成
-            # 注意：这里可能需要配置合适的模型
-            response_json_str = await llm_service.chat_completion(
+            # 获取主数据库配置
+            # 注意：social_db 是独立的，我们需要主数据库连接来获取 AIModelConfig
+            from database import engine as main_engine
+            from sqlmodel.ext.asyncio.session import AsyncSession as MainAsyncSession
+            
+            llm_service = None
+            async with MainAsyncSession(main_engine) as main_session:
+                # 尝试使用 Reflection 模型 (通常用于轻量级任务)
+                configs = {c.key: c.value for c in (await main_session.exec(select(Config))).all()}
+                model_id = configs.get("reflection_model_id")
+                
+                # 如果没有 Reflection 模型，尝试使用主模型
+                if not model_id:
+                    model_id = configs.get("model")
+                
+                if model_id:
+                    model_config = await main_session.get(AIModelConfig, int(model_id))
+                    if model_config:
+                        llm_service = LLMService(
+                            api_key=model_config.api_key,
+                            api_base=model_config.api_base,
+                            model=model_config.model_name,
+                            provider=model_config.provider
+                        )
+            
+            if not llm_service:
+                logger.error("[Social] Failed to initialize LLMService: No valid model config found.")
+                return
+
+            # 使用 chat 接口
+            response = await llm_service.chat(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,
-                json_mode=True
+                response_format={"type": "json_object"}
             )
+            
+            # 解析响应内容
+            content = response["choices"][0]["message"]["content"]
+            # 清理可能存在的 Markdown 代码块标记
+            if content and content.startswith("```json"):
+                content = content[7:]
+            if content and content.endswith("```"):
+                content = content[:-3]
+            response_json_str = content.strip() if content else "{}"
             
             # 4. 解析结果
             try:
