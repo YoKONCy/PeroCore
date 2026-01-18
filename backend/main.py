@@ -40,6 +40,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlmodel import Session, select, delete, desc
+from sqlalchemy import func
 from sqlmodel.ext.asyncio.session import AsyncSession
 from pydantic import BaseModel, Field
 import subprocess
