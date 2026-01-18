@@ -233,7 +233,7 @@ class ReflectionService:
             print(f"Summary generation failed: {e}")
             return None
 
-    async def dream_and_associate(self, limit: int = 10):
+    async def dream_and_associate(self, limit: int = 10) -> dict:
         """
         [梦境机制]
         扫描最近的无关联记忆，尝试发现它们之间的联系。
@@ -249,12 +249,12 @@ class ReflectionService:
         
         if len(anchors) < 1:
             print("[Reflection] Not enough memories to associate.")
-            return
+            return {"status": "skipped", "reason": "Not enough memories to associate"}
 
         config = await self._get_reflection_config()
         if not config["api_key"]:
             print("[Reflection] No API Key, skipping.")
-            return
+            return {"status": "skipped", "reason": "No API Key configured"}
 
         llm = LLMService(
             api_key=config["api_key"],
@@ -265,6 +265,7 @@ class ReflectionService:
         # 2. 针对每个锚点，使用记忆检索算法寻找相关记忆
         # 这比简单的滑动窗口更智能，能发现跨度很大的深层联系
         processed_pairs = set()
+        new_relations_count = 0
 
         for target_memory in anchors:
             print(f"[Reflection] Dreaming about: {target_memory.content[:30]}...")
@@ -312,10 +313,12 @@ class ReflectionService:
                     self.session.add(new_relation)
                     await self.session.commit() # 发现一个关联就提交一个，避免长事务
                     print(f"[Reflection] New association found: {relation['description']} (Strength: {relation['strength']})")
-                
+                    new_relations_count += 1
+            
         print("[Reflection] Dream cycle complete.")
+        return {"status": "success", "new_relations": new_relations_count, "anchors_processed": len(anchors)}
 
-    async def scan_lonely_memories(self, limit: int = 5):
+    async def scan_lonely_memories(self, limit: int = 5) -> dict:
         """
         [孤独记忆扫描器]
         寻找那些没有关联 (MemoryRelation) 的孤立记忆，并尝试将它们织入关系网。
@@ -345,18 +348,20 @@ class ReflectionService:
         
         if not lonely_memories:
             print("[Reflection] No lonely memories found.")
-            return
+            return {"status": "skipped", "reason": "No lonely memories found"}
 
         config = await self._get_reflection_config()
         if not config["api_key"]:
             print("[Reflection] No API Key, skipping.")
-            return
+            return {"status": "skipped", "reason": "No API Key configured"}
 
         llm = LLMService(
             api_key=config["api_key"],
             api_base=config["api_base"],
             model=config["model"]
         )
+
+        connections_found = 0
 
         # 2. 为每个孤独记忆寻找归宿
         for lonely_mem in lonely_memories:
@@ -397,11 +402,13 @@ class ReflectionService:
                     self.session.add(new_relation)
                     await self.session.commit()
                     print(f"[Reflection] Connected lonely memory! {relation['description']}")
+                    connections_found += 1
                     # 找到一个关联就跳出当前候选循环，继续下一个孤独记忆 (避免过度连接)
                     # 或者也可以继续找，看策略。这里选择继续找，织网越密越好。
         
         await self.session.commit()
         print(f"[Reflection] Lonely memory scan complete. Processed {len(lonely_memories)} items.")
+        return {"status": "success", "processed_count": len(lonely_memories), "connections_found": connections_found}
 
     async def _analyze_relation(self, llm: LLMService, m1: Memory, m2: Memory) -> Optional[dict]:
         """让 LLM 分析两条记忆的关系"""

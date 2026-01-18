@@ -60,46 +60,58 @@ class MemorySecretaryService:
             "important_tagged": 0,
             "consolidated": 0,
             "cleaned_count": 0,
-            "retired_count": 0
+            "retired_count": 0,
+            "status": "success"
         }
 
-        # 1. 提取偏好 (已按需关闭)
-        report["preferences_extracted"] = 0 # await self._extract_preferences(llm)
+        # Check API Key validity implicitly (if no key, fallback model might be used, but let's assume it works or fails)
+        # Actually, LLMService logs error if no key.
+        
+        try:
+            # 1. 提取偏好 (已按需关闭)
+            report["preferences_extracted"] = 0 # await self._extract_preferences(llm)
 
-        # 2. 标记重要性
-        report["important_tagged"] = await self._tag_importance(llm)
+            # 2. 标记重要性
+            report["important_tagged"] = await self._tag_importance(llm)
 
-        # 3. 记忆合并 (不同深度)
-        # 修改：同时合并 'event' 和 'interaction_summary' 类型的记忆
-        for offset in [0, 80, 160]:
-            merged_count = await self._consolidate_memories(llm, offset=offset)
-            report["consolidated"] += merged_count
-            if merged_count == 0: break
+            # 3. 记忆合并 (不同深度)
+            # 修改：同时合并 'event' 和 'interaction_summary' 类型的记忆
+            for offset in [0, 80, 160]:
+                merged_count = await self._consolidate_memories(llm, offset=offset)
+                report["consolidated"] += merged_count
+                if merged_count == 0: break
 
-        # 4. 新增：清理可疑/错误记忆
-        report["cleaned_count"] = await self._clean_invalid_memories(llm)
+            # 4. 新增：清理可疑/错误记忆
+            report["cleaned_count"] = await self._clean_invalid_memories(llm)
 
-        # 5. 新增：自动清理重复的社交日报总结
-        report["social_summaries_cleaned"] = await self._clean_duplicate_social_summaries()
+            # 5. 新增：自动清理重复的社交日报总结
+            report["social_summaries_cleaned"] = await self._clean_duplicate_social_summaries()
 
-        # 6. 维护边界处理
-        report["retired_count"] = await self._handle_maintenance_boundary()
+            # 6. 维护边界处理
+            report["retired_count"] = await self._handle_maintenance_boundary()
 
-        # 6. 自动更新动态台词 (Welcome & System)
-        report["waifu_texts_updated"] = await self._update_waifu_texts(llm)
+            # 6. 自动更新动态台词 (Welcome & System)
+            report["waifu_texts_updated"] = await self._update_waifu_texts(llm)
 
-        # 7. 保存维护记录用于撤回
-        record = MaintenanceRecord(
-            preferences_extracted=report["preferences_extracted"],
-            important_tagged=report["important_tagged"],
-            consolidated=report["consolidated"],
-            cleaned_count=report["cleaned_count"],
-            created_ids=json.dumps(self.created_ids),
-            deleted_data=json.dumps(self.deleted_data, ensure_ascii=False, default=str),
-            modified_data=json.dumps(self.modified_data, ensure_ascii=False, default=str)
-        )
-        self.session.add(record)
-        await self.session.commit()
+            # 7. 保存维护记录用于撤回
+            record = MaintenanceRecord(
+                preferences_extracted=report["preferences_extracted"],
+                important_tagged=report["important_tagged"],
+                consolidated=report["consolidated"],
+                cleaned_count=report["cleaned_count"],
+                created_ids=json.dumps(self.created_ids),
+                deleted_data=json.dumps(self.deleted_data, ensure_ascii=False, default=str),
+                modified_data=json.dumps(self.modified_data, ensure_ascii=False, default=str)
+            )
+            self.session.add(record)
+            await self.session.commit()
+            
+            return report
+            
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return {"status": "error", "error": str(e)}
         await self.session.refresh(record)
         
         report["record_id"] = record.id

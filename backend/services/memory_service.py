@@ -927,24 +927,52 @@ class MemoryService:
         return (await session.exec(statement)).all()
 
     @staticmethod
-    async def get_tag_cloud(session: AsyncSession) -> Dict[str, int]:
-        """获取高频标签"""
-        # 优化：仅获取 tags 列
-        statement = select(Memory.tags)
-        results = (await session.exec(statement)).all()
-        
+    async def get_tag_cloud(session: AsyncSession) -> List[Dict[str, Any]]:
+        """
+        获取标签云数据 (Top 20 tags)
+        """
+        # 简单实现：取出所有 Memory 的 tags 字段，在内存中统计
+        # TODO: 后期可以使用 SQL group by 优化
+        memories = (await session.exec(select(Memory))).all()
         tag_counts = {}
-        for tags_str in results:
-            if not tags_str: continue
-            # 处理中英文逗号
-            normalized_tags = tags_str.replace('，', ',')
-            for tag in normalized_tags.split(','):
-                t = tag.strip()
-                if t:
-                    tag_counts[t] = tag_counts.get(t, 0) + 1
         
-        # 按频率降序排序
-        return dict(sorted(tag_counts.items(), key=lambda item: item[1], reverse=True))
+        for m in memories:
+            if not m.tags: continue
+            tags = [t.strip() for t in m.tags.split(',') if t.strip()]
+            for t in tags:
+                tag_counts[t] = tag_counts.get(t, 0) + 1
+                
+        # 排序并取前 20
+        sorted_tags = sorted(tag_counts.items(), key=lambda x: x[1], reverse=True)[:20]
+        return [{"tag": t, "count": c} for t, c in sorted_tags]
+
+    @staticmethod
+    async def delete_orphaned_edges(session: AsyncSession) -> int:
+        """
+        清除孤立的边（即源节点或目标节点不存在的边）
+        """
+        # 使用子查询查找不存在的节点引用
+        # DELETE FROM memoryrelation WHERE source_id NOT IN (SELECT id FROM memory) OR target_id NOT IN (SELECT id FROM memory)
+        
+        # SQLModel 的 delete 支持 where 子句，但对 subquery 支持视方言而定
+        # 这里使用标准 SQLAlchemy 风格
+        
+        subquery = select(Memory.id)
+        
+        statement = delete(MemoryRelation).where(
+            (MemoryRelation.source_id.not_in(subquery)) | 
+            (MemoryRelation.target_id.not_in(subquery))
+        )
+        
+        result = await session.exec(statement)
+        await session.commit()
+        
+        # 如果有 Rust Engine 且已加载，可能需要重新加载或同步删除
+        # 简单起见，这里假设 Rust Engine 会在下次启动或定期刷新时同步
+        # 或者我们可以尝试从 Rust Engine 中移除（如果支持）
+        # 目前 Rust Engine 是只读/追加为主，暂时忽略实时同步
+        
+        return result.rowcount
 
     @staticmethod
     async def get_memory_graph(session: AsyncSession, limit: int = 200) -> Dict[str, Any]:

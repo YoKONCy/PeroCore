@@ -12,7 +12,7 @@
       <el-aside width="260px" class="glass-sidebar">
         <div class="brand-area">
           <div class="logo-box">
-            <span class="logo-emoji">🎀</span>
+            <img :src="logoImg" class="logo-img" alt="Logo" />
           </div>
           <div class="brand-text">
             <h1>PeroCore</h1>
@@ -24,40 +24,38 @@
           :default-active="currentTab"
           class="sidebar-menu"
           @select="handleTabSelect"
-          text-color="#5a5e66"
-          active-text-color="#ff88aa"
         >
           <el-menu-item index="overview">
             <el-icon><IconMenu /></el-icon>
-            <span>总览 (Overview)</span>
+            <span>总览</span>
           </el-menu-item>
           <el-menu-item index="logs">
             <el-icon><ChatLineRound /></el-icon>
-            <span>对话日志 (Logs)</span>
+            <span>对话日志</span>
           </el-menu-item>
           <el-menu-item index="memories">
             <el-icon><Cpu /></el-icon>
-            <span>核心记忆 (Memories)</span>
+            <span>核心记忆</span>
           </el-menu-item>
           <el-menu-item index="tasks">
             <el-icon><Bell /></el-icon>
-            <span>待办任务 (Tasks)</span>
+            <span>待办任务</span>
           </el-menu-item>
           <el-menu-item index="user_settings">
             <el-icon><User /></el-icon>
-            <span>用户设定 (User)</span>
+            <span>用户设定</span>
           </el-menu-item>
           <el-menu-item index="model_config">
             <el-icon><SetUp /></el-icon>
-            <span>模型配置 (Models)</span>
+            <span>模型配置</span>
           </el-menu-item>
           <el-menu-item index="voice_config">
             <el-icon><Microphone /></el-icon>
-            <span>语音功能 (Voice)</span>
+            <span>语音功能</span>
           </el-menu-item>
           <el-menu-item index="mcp_config">
             <el-icon><Connection /></el-icon>
-            <span>MCP 配置 (Connect)</span>
+            <span>MCP 配置</span>
           </el-menu-item>
           <el-menu-item index="napcat">
             <el-icon><ChatDotSquare /></el-icon>
@@ -69,7 +67,7 @@
           </el-menu-item>
           <el-menu-item index="system_reset" style="color: #f56c6c;">
             <el-icon><Warning /></el-icon>
-            <span>危险区域 (Danger)</span>
+            <span>危险区域</span>
           </el-menu-item>
         </el-menu>
 
@@ -81,35 +79,34 @@
             @click="handleQuitApp"
           >
             <el-icon><SwitchButton /></el-icon>
-            <span>退出系统 (Quit)</span>
+            <span>退出系统</span>
           </el-button>
           
-          <div class="status-indicator" :class="{ online: isBackendOnline }">
-            <span class="dot"></span>
-            {{ isBackendOnline ? 'System Online' : 'System Offline' }}
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+            <div class="status-indicator" :class="{ online: isBackendOnline }">
+              <span class="dot"></span>
+              {{ isBackendOnline ? '系统在线' : '系统离线' }}
+            </div>
+            <el-button 
+              circle 
+              size="small" 
+              :icon="Refresh" 
+              @click="fetchAllData" 
+              :loading="isGlobalRefreshing" 
+              title="刷新数据"
+              style="border: none; background: transparent; color: var(--healing-text-light);"
+            />
           </div>
         </div>
       </el-aside>
 
       <el-container>
-        <!-- 顶部栏 -->
-        <el-header class="glass-header">
-          <div class="header-left">
-            <h2 class="page-title">{{ currentTabName }}</h2>
-            <el-tag v-if="isSaving" type="warning" effect="dark" round size="small">
-              <el-icon class="is-loading"><Refresh /></el-icon> 保存中...
-            </el-tag>
-          </div>
-          <div class="header-right">
-             <el-button circle :icon="Refresh" @click="fetchAllData" :loading="isGlobalRefreshing" title="刷新所有数据"></el-button>
-          </div>
-        </el-header>
-
         <!-- 主内容区 -->
         <el-main class="content-area">
-          <div class="view-container-wrapper" style="height: 100%;">
+          <div class="view-container-wrapper" :style="['logs', 'terminal', 'napcat'].includes(currentTab) ? 'height: 100%; overflow: hidden;' : 'min-height: 100%;'">
+            <Transition name="fade-slide" mode="out-in">
               <!-- 1. 仪表盘概览 -->
-                <div v-show="currentTab === 'overview'" key="overview" class="view-container">
+                <div v-if="currentTab === 'overview'" key="overview" class="view-container">
 
 
               <el-row :gutter="20">
@@ -119,7 +116,7 @@
                       <div class="stat-icon">🧠</div>
                       <div class="stat-info">
                         <h3>核心记忆</h3>
-                        <div class="number">{{ memories.length }}</div>
+                        <div class="number">{{ stats.total_memories || memories.length }}</div>
                       </div>
                     </div>
                   </el-card>
@@ -130,7 +127,7 @@
                       <div class="stat-icon">💬</div>
                       <div class="stat-info">
                         <h3>近期对话</h3>
-                        <div class="number">{{ logs.length }}</div>
+                        <div class="number">{{ stats.total_logs || logs.length }}</div>
                       </div>
                     </div>
                   </el-card>
@@ -141,7 +138,7 @@
                       <div class="stat-icon">⚡</div>
                       <div class="stat-info">
                         <h3>待办任务</h3>
-                        <div class="number">{{ tasks.length }}</div>
+                        <div class="number">{{ stats.total_tasks || tasks.length }}</div>
                       </div>
                     </div>
                   </el-card>
@@ -153,28 +150,28 @@
                   <el-card shadow="never" class="glass-card">
                     <template #header>
                       <div class="card-header">
-                        <span>当前状态 (PetState)</span>
+                        <span>当前状态</span>
                       </div>
                     </template>
                     <el-row :gutter="20">
                       <el-col :span="8">
                         <div class="state-box">
-                          <span class="label">Mood (心情)</span>
-                          <span class="value">{{ petState.mood || 'Unknown' }}</span>
+                          <span class="label">心情</span>
+                          <span class="value">{{ petState.mood || '未知' }}</span>
                           <el-progress :percentage="80" :show-text="false" color="#ff88aa" />
                         </div>
                       </el-col>
                       <el-col :span="8">
                         <div class="state-box">
-                          <span class="label">Vibe (氛围)</span>
-                          <span class="value">{{ petState.vibe || 'Unknown' }}</span>
+                          <span class="label">氛围</span>
+                          <span class="value">{{ petState.vibe || '未知' }}</span>
                           <el-progress :percentage="60" :show-text="false" color="#a0c4ff" />
                         </div>
                       </el-col>
                       <el-col :span="8">
                         <div class="state-box">
-                          <span class="label">Mind (想法)</span>
-                          <span class="value">{{ petState.mind || 'Unknown' }}</span>
+                          <span class="label">想法</span>
+                          <span class="value">{{ petState.mind || '未知' }}</span>
                           <el-progress :percentage="90" :show-text="false" color="#a8e6cf" />
                         </div>
                       </el-col>
@@ -232,7 +229,7 @@
                       <div style="display: flex; align-items: center; gap: 15px;">
                         <div style="font-size: 24px;">🍃</div>
                         <div>
-                           <div style="font-weight: bold; font-size: 16px;">轻量聊天模式 (Lightweight Mode)</div>
+                           <div style="font-weight: bold; font-size: 16px;">轻量聊天模式</div>
                            <div style="font-size: 13px; color: #666; margin-top: 4px;">开启后，将禁用大部分高级工具以节省资源。仅保留视觉感知、记忆管理和基础管理功能。</div>
                         </div>
                       </div>
@@ -257,7 +254,7 @@
                         <div style="font-size: 24px;">🔮</div>
                         <div>
                            <div style="font-weight: bold; font-size: 16px;">主动视觉感应 (AuraVision)</div>
-                           <div style="font-size: 13px; color: #666; margin-top: 4px;">开启后，Pero 将通过摄像头主动感知你的存在并触发互动。采用隐私保护设计，仅提取特征。</div>
+                           <div style="font-size: 13px; color: #666; margin-top: 4px;">开启后，Pero 将通过屏幕主动感知你的存在并触发互动。采用隐私保护设计，仅提取特征。</div>
                         </div>
                       </div>
                       <el-switch 
@@ -309,7 +306,7 @@
 
 
             <!-- 2. 对话日志 -->
-            <div v-show="currentTab === 'logs'" key="logs" class="view-container logs-layout">
+            <div v-else-if="currentTab === 'logs'" key="logs" class="view-container logs-layout">
               <el-card shadow="never" class="glass-card filter-card">
                 <el-form :inline="true" size="default">
                   <el-form-item label="来源">
@@ -429,9 +426,9 @@
             </div>
 
             <!-- 3. 核心记忆 (Refactored) -->
-            <div v-show="currentTab === 'memories'" key="memories" class="view-container">
+            <div v-else-if="currentTab === 'memories'" key="memories" class="view-container">
               <div class="toolbar memory-toolbar">
-                 <h3 class="section-title">长期记忆库 (Long-term Memory)</h3>
+                 <h3 class="section-title">长期记忆库</h3>
                  <div class="filters">
                     <el-select 
                         v-model="memoryFilterType" 
@@ -457,9 +454,57 @@
                         size="small"
                         @change="fetchMemories"
                     />
+                    <el-button 
+                        type="danger" 
+                        plain 
+                        size="small" 
+                        :icon="Delete" 
+                        @click="clearOrphanedEdges" 
+                        :loading="isClearingEdges"
+                        title="清除无效的连线数据"
+                        style="margin-right: 10px;"
+                    >
+                        清理孤立连线
+                    </el-button>
+                    <el-button 
+                        type="primary" 
+                        plain 
+                        size="small" 
+                        :icon="Search" 
+                        @click="triggerScanLonely" 
+                        :loading="isScanningLonely"
+                        title="扫描并处理孤立记忆"
+                        style="margin-right: 10px;"
+                    >
+                        孤立扫描
+                    </el-button>
+                    <el-button 
+                        type="warning" 
+                        plain 
+                        size="small" 
+                        :icon="Tools" 
+                        @click="triggerMaintenance" 
+                        :loading="isRunningMaintenance"
+                        title="执行每日深度维护"
+                        style="margin-right: 10px;"
+                    >
+                        深度维护
+                    </el-button>
+                    <el-button 
+                        type="success" 
+                        plain 
+                        size="small" 
+                        :icon="Connection" 
+                        @click="triggerDream" 
+                        :loading="isDreaming"
+                        title="触发梦境联想机制"
+                        style="margin-right: 10px;"
+                    >
+                        梦境联想
+                    </el-button>
                     <el-radio-group v-model="memoryViewMode" size="small" @change="val => { if(val==='graph') fetchMemoryGraph() }">
-                        <el-radio-button label="list">列表</el-radio-button>
-                        <el-radio-button label="graph">图谱</el-radio-button>
+                        <el-radio-button value="list">列表</el-radio-button>
+                        <el-radio-button value="graph">图谱</el-radio-button>
                     </el-radio-group>
                  </div>
               </div>
@@ -578,7 +623,7 @@
             </div>
 
             <!-- 4. 待办任务 -->
-            <div v-show="currentTab === 'tasks'" key="tasks" class="view-container">
+            <div v-else-if="currentTab === 'tasks'" key="tasks" class="view-container">
                <div class="toolbar">
                  <h3 class="section-title">待办与计划列表</h3>
                </div>
@@ -608,7 +653,7 @@
             </div>
 
             <!-- 5. 模型配置 -->
-            <div v-show="currentTab === 'model_config'" key="model_config" class="view-container">
+            <div v-else-if="currentTab === 'model_config'" key="model_config" class="view-container">
               <div class="toolbar">
                 <el-button @click="openGlobalSettings">🌍 全局服务商配置</el-button>
                 <el-button type="primary" :icon="Edit" @click="openModelEditor(null)">添加模型</el-button>
@@ -686,12 +731,12 @@
             </div>
 
             <!-- 6. 语音功能 -->
-            <div v-show="currentTab === 'voice_config'" key="voice_config" class="view-container">
+            <div v-else-if="currentTab === 'voice_config'" key="voice_config" class="view-container">
               <VoiceConfigPanel />
             </div>
 
             <!-- 7. MCP 配置 -->
-            <div v-show="currentTab === 'mcp_config'" key="mcp_config" class="view-container">
+            <div v-else-if="currentTab === 'mcp_config'" key="mcp_config" class="view-container">
                <div class="toolbar">
                 <el-button type="primary" :icon="Connection" @click="openMcpEditor(null)">添加 MCP 服务器</el-button>
               </div>
@@ -724,7 +769,7 @@
             </div>
 
             <!-- 8. 用户设定 -->
-            <div v-show="currentTab === 'user_settings'" key="user_settings" class="view-container">
+            <div v-else-if="currentTab === 'user_settings'" key="user_settings" class="view-container">
               <el-card shadow="never" class="glass-card">
                 <template #header>
                   <div class="card-header">
@@ -754,11 +799,11 @@
             </div>
 
             <!-- 9. 恢复出厂设置 -->
-            <div v-show="currentTab === 'system_reset'" key="system_reset" class="view-container">
+            <div v-else-if="currentTab === 'system_reset'" key="system_reset" class="view-container">
               <el-card shadow="never" class="glass-card danger-card">
                 <template #header>
                   <div class="card-header">
-                    <span style="color: #f56c6c; font-weight: bold;">⚠️ 恢复出厂设置 (Factory Reset)</span>
+                    <span style="color: #f56c6c; font-weight: bold;">⚠️ 恢复出厂设置</span>
                   </div>
                 </template>
                 <div class="danger-content">
@@ -781,19 +826,20 @@
               </el-card>
             </div>
 
-                <!-- 10. NapCat Terminal -->
-                <div v-show="currentTab === 'napcat'" key="napcat" class="view-container" style="height:100%; display: flex; flex-direction: column;">
-                   <el-card shadow="never" class="glass-card" :body-style="{ padding: '0', display: 'flex', flexDirection: 'column', height: '100%' }" style="flex: 1; display: flex; flex-direction: column;">
-                      <NapCatTerminal style="height: 100%;" />
-                   </el-card>
-                </div>
+            <!-- 10. NapCat Terminal -->
+            <div v-else-if="currentTab === 'napcat'" key="napcat" class="view-container" style="height:100%; display: flex; flex-direction: column;">
+               <el-card shadow="never" class="glass-card" :body-style="{ padding: '0', display: 'flex', flexDirection: 'column', height: '100%' }" style="flex: 1; display: flex; flex-direction: column;">
+                  <NapCatTerminal style="height: 100%;" />
+               </el-card>
+            </div>
 
-                <!-- 11. System Terminal -->
-                <div v-show="currentTab === 'terminal'" key="terminal" class="view-container" style="height:100%;">
-                    <el-card shadow="never" class="glass-card" :body-style="{ padding: '0', height: '100%' }" style="height: 100%; display: flex; flex-direction: column;">
-                       <TerminalPanel style="height: 100%;" />
-                    </el-card>
-                </div>
+            <!-- 11. System Terminal -->
+            <div v-else-if="currentTab === 'terminal'" key="terminal" class="view-container" style="height:100%;">
+                <el-card shadow="never" class="glass-card" :body-style="{ padding: '0', height: '100%' }" style="height: 100%; display: flex; flex-direction: column;">
+                   <TerminalPanel style="height: 100%;" />
+                </el-card>
+            </div>
+            </Transition>
 
           </div>
         </el-main>
@@ -839,8 +885,8 @@
         </el-form-item>
         <el-form-item label="配置来源">
           <el-radio-group v-model="currentEditingModel.provider_type">
-            <el-radio label="global">全局继承</el-radio>
-            <el-radio label="custom">独立配置</el-radio>
+            <el-radio value="global">全局继承</el-radio>
+            <el-radio value="custom">独立配置</el-radio>
           </el-radio-group>
         </el-form-item>
         
@@ -1045,10 +1091,13 @@ import {
   ArrowLeft,
   View,
   ChatDotSquare,
-  Monitor
+  Monitor,
+  Tools,
+  Aim
 } from '@element-plus/icons-vue'
 import TerminalPanel from '../components/TerminalPanel.vue'
 import NapCatTerminal from '../components/NapCatTerminal.vue'
+import logoImg from '../assets/logo1.png'
 
 // 为了防止在非 Tauri 环境下报错，定义一个 fallback 的 listen
 const listenSafe = (event, callback) => {
@@ -1076,6 +1125,10 @@ const isTogglingLightweight = ref(false)
 const isAuraVisionEnabled = ref(false)
 const isTogglingAuraVision = ref(false)
 const isLogsFetching = ref(false)
+const isClearingEdges = ref(false)
+const isScanningLonely = ref(false)
+const isRunningMaintenance = ref(false)
+const isDreaming = ref(false)
 const showDebugDialog = ref(false)
 const currentDebugLog = ref(null)
 const debugSegments = ref([])
@@ -1166,6 +1219,7 @@ const editingContent = ref('')
 const memories = shallowRef([])
 const logs = shallowRef([])
 const tasks = shallowRef([])
+const stats = ref({ total_memories: 0, total_logs: 0, total_tasks: 0 })
 const petState = ref({})
 const userSettings = ref({
   owner_name: '主人',
@@ -1337,6 +1391,9 @@ watch([selectedSessionId, selectedSource, selectedSort, selectedDate], () => {
 
 const topTags = computed(() => {
   if (!tagCloud.value) return []
+  if (Array.isArray(tagCloud.value)) {
+      return tagCloud.value
+  }
   return Object.entries(tagCloud.value)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 15)
@@ -1345,15 +1402,17 @@ const topTags = computed(() => {
 
 const currentTabName = computed(() => {
   const map = {
-    overview: '总览 (Overview)',
-    logs: '对话日志 (Logs)',
-    terminal: '系统终端 (Terminal)',
-    memories: '核心记忆 (Memories)',
-    tasks: '待办任务 (Tasks)',
-    model_config: '模型配置 (Model Config)',
-    voice_config: '语音配置 (Voice Config)',
-    mcp_config: 'MCP 连接 (MCP Config)',
-    user_settings: '用户设定 (User Settings)'
+    overview: '总览',
+    logs: '对话日志',
+    terminal: '系统终端',
+    memories: '核心记忆',
+    tasks: '待办任务',
+    model_config: '模型配置',
+    voice_config: '语音配置',
+    mcp_config: 'MCP 连接',
+    user_settings: '用户设定',
+    napcat: 'NapCat 终端',
+    system_reset: '危险区域'
   }
   return map[currentTab.value] || 'Dashboard'
 })
@@ -1420,9 +1479,8 @@ const fetchWithTimeout = async (url, options = {}, timeout = 5000) => {
     return response
   } catch (error) {
     clearTimeout(id)
-    // 只有当错误不是 AbortError 时才打印到 console.error
-    // 这可以减少终端中因正常超时或取消导致的 Failed to fetch 报错
-    if (error.name !== 'AbortError') {
+    // 只有当错误不是 AbortError 且未开启 silent 模式时才打印
+    if (error.name !== 'AbortError' && !options.silent) {
       console.warn(`[Fetch] Request failed for ${url}:`, error.message)
     }
     throw error
@@ -1466,7 +1524,8 @@ const waitForBackend = async () => {
   
   const check = async () => {
     try {
-      const res = await fetchWithTimeout(`${API_BASE}/pet/state`, {}, 2000)
+      // 启动检测静默处理，避免控制台刷屏报错
+      const res = await fetchWithTimeout(`${API_BASE}/pet/state`, { silent: true }, 2000)
       if (res.ok) {
         isBackendOnline.value = true
         await fetchAllData() // 后端上线后，拉取所有数据
@@ -1499,6 +1558,16 @@ const formatBytes = (bytes, decimals = 1) => {
 
 
 
+const fetchStats = async () => {
+  try {
+    const res = await fetchWithTimeout(`${API_BASE}/stats/overview`, {}, 2000)
+    const data = await res.json()
+    stats.value = data
+  } catch (e) {
+    console.error('Failed to fetch stats:', e)
+  }
+}
+
 const fetchAllData = async () => {
   if (!isBackendOnline.value || isGlobalRefreshing.value) return
   
@@ -1507,7 +1576,8 @@ const fetchAllData = async () => {
   try {
     await Promise.all([
       fetchPetState(),
-      fetchConfig()
+      fetchConfig(),
+      fetchStats()
     ])
   } catch (e) { console.error('Core fetch error:', e) }
 
@@ -1595,6 +1665,135 @@ const fetchMemoryGraph = async () => {
         console.error(e) 
     } finally { 
         isLoadingGraph.value = false 
+    }
+}
+
+const clearOrphanedEdges = async () => {
+    if (isClearingEdges.value) return
+    try {
+        await ElMessageBox.confirm(
+            '确定要清理数据库中所有无效的连线吗？这不会删除任何记忆节点。',
+            '清理确认',
+            {
+                confirmButtonText: '确定清理',
+                cancelButtonText: '取消',
+                type: 'warning'
+            }
+        )
+        
+        isClearingEdges.value = true
+        const res = await fetchWithTimeout(`${API_BASE}/memories/orphaned_edges`, {
+            method: 'DELETE'
+        }, 10000)
+        const data = await res.json()
+        
+        ElMessage.success(`清理完成，共移除 ${data.deleted_count} 条无效连线`)
+        
+        // Refresh graph if in graph mode
+        if (memoryViewMode.value === 'graph') {
+            fetchMemoryGraph()
+        }
+    } catch (e) {
+        if (e !== 'cancel') {
+            console.error(e)
+            ElMessage.error('清理失败: ' + e.message)
+        }
+    } finally {
+        isClearingEdges.value = false
+    }
+}
+
+const triggerScanLonely = async () => {
+    if (isScanningLonely.value) return
+    isScanningLonely.value = true
+    try {
+        const res = await fetchWithTimeout(`${API_BASE}/memories/scan_lonely?limit=5`, {
+            method: 'POST'
+        })
+        const data = await res.json()
+        if (data.status === 'success') {
+             ElMessage.success(`扫描完成: 处理了 ${data.processed_count} 条记忆，发现了 ${data.connections_found} 个新关联`)
+             fetchMemories() // Refresh list
+        } else if (data.status === 'skipped') {
+             ElMessage.warning(`扫描跳过: ${data.reason}`)
+        } else {
+             ElMessage.error('扫描失败')
+        }
+    } catch (e) {
+        console.error(e)
+        ElMessage.error('请求出错: ' + e.message)
+    } finally {
+        isScanningLonely.value = false
+    }
+}
+
+const triggerMaintenance = async () => {
+    if (isRunningMaintenance.value) return
+    try {
+        await ElMessageBox.confirm(
+            '深度维护可能需要较长时间，且会消耗一定的 Tokens。确定要立即执行吗？',
+            '执行确认',
+            {
+                confirmButtonText: '立即执行',
+                cancelButtonText: '取消',
+                type: 'info'
+            }
+        )
+
+        isRunningMaintenance.value = true
+        const res = await fetchWithTimeout(`${API_BASE}/memories/maintenance`, {
+            method: 'POST'
+        }, 120000) // Longer timeout for deep maintenance
+        const data = await res.json()
+        if (data.status === 'success') {
+             ElMessage.success(`维护完成: 标记重要性 ${data.important_tagged}, 记忆合并 ${data.consolidated}, 清理 ${data.cleaned_count}`)
+             fetchMemories()
+        } else {
+             ElMessage.error(data.error || '维护失败')
+        }
+    } catch (e) {
+        if (e !== 'cancel') {
+             console.error(e)
+             ElMessage.error('请求出错: ' + e.message)
+        }
+    } finally {
+        isRunningMaintenance.value = false
+    }
+}
+
+const triggerDream = async () => {
+    if (isDreaming.value) return
+    try {
+        await ElMessageBox.confirm(
+            '梦境联想将扫描近期记忆并尝试建立新的关联。确定要执行吗？',
+            '执行确认',
+            {
+                confirmButtonText: '进入梦境',
+                cancelButtonText: '取消',
+                type: 'info'
+            }
+        )
+
+        isDreaming.value = true
+        const res = await fetchWithTimeout(`${API_BASE}/memories/dream?limit=10`, {
+            method: 'POST'
+        }, 60000)
+        const data = await res.json()
+        if (data.status === 'success') {
+             ElMessage.success(`梦境完成: 扫描 ${data.anchors_processed} 个锚点，发现 ${data.new_relations} 个新关联`)
+             if (memoryViewMode.value === 'graph') fetchMemoryGraph()
+        } else if (data.status === 'skipped') {
+             ElMessage.warning(`梦境跳过: ${data.reason}`)
+        } else {
+             ElMessage.error('联想失败')
+        }
+    } catch (e) {
+        if (e !== 'cancel') {
+            console.error(e)
+            ElMessage.error('请求出错: ' + e.message)
+        }
+    } finally {
+        isDreaming.value = false
     }
 }
 
@@ -1939,7 +2138,7 @@ const fetchMemories = async () => {
   fetchMemories.lastRequestId = currentRequestId
 
   try {
-    let url = `${API_BASE}/memories/list?limit=100`
+    let url = `${API_BASE}/memories/list?limit=1000`
     if (memoryFilterDate.value) {
         url += `&date_start=${memoryFilterDate.value}`
     }
@@ -1957,7 +2156,7 @@ const fetchMemories = async () => {
     const batchSize = 50
     
     const processBatch = (startIndex) => {
-      if (fetchMemories.lastRequestId !== currentRequestId || currentTab.value !== 'memories') {
+      if (fetchMemories.lastRequestId !== currentRequestId) {
         fetchMemories.isLoading = false
         return
       }
@@ -2432,7 +2631,7 @@ const fetchLogs = async () => {
   fetchLogs.lastRequestId = currentRequestId
 
   try {
-    let url = `${API_BASE}/history/${selectedSource.value}/${selectedSessionId.value}?limit=50&sort=${selectedSort.value}`
+    let url = `${API_BASE}/history/${selectedSource.value}/${selectedSessionId.value}?limit=200&sort=${selectedSort.value}`
     if (selectedDate.value) {
       url += `&date=${selectedDate.value}`
     }
@@ -2787,21 +2986,51 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* --- 1. Design Tokens (Healing Theme) --- */
 .dashboard-wrapper {
+  /* Palette */
+  --healing-primary: #6CB4EE; /* Glacial Blue */
+  --healing-secondary: #A2D2FF; /* Baby Blue */
+  --healing-bg: rgba(240, 248, 255, 0.6);
+  --healing-surface: rgba(255, 255, 255, 0.65);
+  --healing-text: #475569;
+  --healing-text-light: #94a3b8;
+  
+  /* Dimensions */
+  --radius-lg: 24px;
+  --radius-md: 16px;
+  --radius-sm: 8px;
+  
+  /* Element Plus Overrides (Scoped) */
+  --el-color-primary: var(--healing-primary);
+  --el-color-primary-light-3: #92cbf6;
+  --el-color-primary-light-5: #b9dff9;
+  --el-color-primary-light-7: #dff1ff;
+  --el-color-primary-light-9: #f0f9ff;
+  --el-text-color-primary: var(--healing-text);
+  --el-border-radius-base: var(--radius-md);
+  --el-bg-color: transparent; /* Important for glass effect */
+  
+  /* Fonts */
+  font-family: 'Inter', 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', system-ui, sans-serif;
+  color: var(--healing-text);
+  font-size: 15px;
+  line-height: 1.6;
+  letter-spacing: 0.01em;
+  -webkit-font-smoothing: antialiased;
+  
+  /* Layout */
   position: fixed;
   top: 0;
   left: 0;
-  right: 0;
-  bottom: 0;
   width: 100vw;
   height: 100vh;
-  background: #fdfdfd; /* 仅在 Dashboard 页面强制实色背景 */
   overflow: hidden;
-  font-family: 'Segoe UI', system-ui, sans-serif;
+  background-color: #f0f9ff; /* Fallback */
   z-index: 10;
 }
 
-/* 动态背景 Blob 动画 */
+/* --- 2. Dynamic Background (Blobs) --- */
 .background-blobs {
   position: absolute;
   top: 0;
@@ -2809,45 +3038,44 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
   z-index: 0;
-  opacity: 0.8; /* 增加不透明度 */
-  filter: blur(120px);
-  pointer-events: none;
-  background: #fdfdfd; /* 确保背景不透明 */
-  overflow: hidden; /* 防止 blob 溢出导致滚动条 */
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 50%, #fdfbfb 0%, #ebedee 100%); /* Subtle base */
 }
 
 .blob {
   position: absolute;
   border-radius: 50%;
-  animation: float 10s infinite ease-in-out;
+  filter: blur(80px);
+  opacity: 0.6;
+  animation: floatBlob 20s infinite alternate;
   will-change: transform;
-  transform: translateZ(0);
 }
 
 .blob-1 {
-  top: -10%;
-  left: -10%;
   width: 600px;
   height: 600px;
-  background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%);
+  background: #A2D2FF;
+  top: -100px;
+  left: -100px;
+  animation-delay: 0s;
 }
 
 .blob-2 {
-  bottom: -10%;
-  right: -10%;
   width: 500px;
   height: 500px;
-  background: linear-gradient(135deg, #a1c4fd 0%, #c2e9fb 100%);
-  animation-delay: -2s;
+  background: #ffb7b2; /* Soft pink for contrast */
+  bottom: -50px;
+  right: -50px;
+  animation-delay: -5s;
 }
 
 .blob-3 {
-  top: 40%;
-  left: 40%;
-  width: 300px;
-  height: 300px;
-  background: linear-gradient(135deg, #84fab0 0%, #8fd3f4 100%);
-  animation-delay: -5s;
+  width: 400px;
+  height: 400px;
+  background: #e2f0cb; /* Soft green */
+  bottom: 20%;
+  left: 30%;
+  animation-delay: -10s;
 }
 
 .disabled-card {
@@ -2865,33 +3093,41 @@ onUnmounted(() => {
   pointer-events: auto;
 }
 
-@keyframes float {
-  0%, 100% { transform: translate(0, 0) scale(1); }
+@keyframes floatBlob {
+  0% { transform: translate(0, 0) scale(1); }
   33% { transform: translate(30px, -50px) scale(1.1); }
   66% { transform: translate(-20px, 20px) scale(0.9); }
+  100% { transform: translate(0, 0) scale(1); }
 }
 
-/* 布局 */
+/* --- 3. Main Glass Layout --- */
 .main-layout {
   position: relative;
-  z-index: 10; /* 提升主布局层级，高于背景 */
-  height: 100%;
-  width: 100%;
+  width: 95%; /* Floating card style */
+  height: 92vh;
+  margin: 4vh auto; /* Center vertically */
+  background: rgba(255, 255, 255, 0.4);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  overflow: hidden; /* Round corners for children */
+  z-index: 10;
 }
 
 /* Glass Sidebar */
 .glass-sidebar {
   position: relative;
-  z-index: 100; /* 确保侧边栏始终在最上层，防止被内容区的 stacking context 覆盖 */
+  z-index: 100;
   width: 260px !important;
   min-width: 260px;
-  background: #ffffff;
-  border-right: 1px solid rgba(0, 0, 0, 0.05);
+  background: rgba(255, 255, 255, 0.3); /* Transparent for glass */
+  border-right: 1px solid rgba(255, 255, 255, 0.2);
   display: flex;
   flex-direction: column;
-  box-shadow: 4px 0 15px rgba(0, 0, 0, 0.02);
   transition: all 0.3s;
-  pointer-events: auto !important; /* 强制开启点击事件 */
+  pointer-events: auto !important;
 }
 
 /* 按钮点击强化 */
@@ -2916,26 +3152,36 @@ onUnmounted(() => {
 .logo-box {
   width: 42px;
   height: 42px;
-  background: linear-gradient(135deg, #ff9a9e, #ff6b6b);
+  background: #ffffff;
   border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 24px;
-  box-shadow: 0 4px 12px rgba(255, 107, 107, 0.3);
+  box-shadow: 0 4px 12px rgba(108, 180, 238, 0.3);
+  overflow: hidden; /* 防止图片溢出圆角 */
+}
+
+.logo-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover; /* 让图片填满容器 */
 }
 
 .brand-text h1 {
   font-size: 18px;
   font-weight: 700;
   margin: 0;
-  color: #2c3e50;
+  background: linear-gradient(90deg, #2c3e50, var(--healing-primary));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .version-tag {
   font-size: 10px;
-  color: #909399;
-  background: rgba(0,0,0,0.05);
+  color: var(--healing-text-light);
+  background: rgba(255, 255, 255, 0.5);
   padding: 1px 6px;
   border-radius: 4px;
 }
@@ -2943,45 +3189,62 @@ onUnmounted(() => {
 .sidebar-menu {
   border-right: none !important;
   flex: 1;
-  background-color: #ffffff !important;
+  background-color: transparent !important;
+  padding-top: 10px;
 }
 
 .sidebar-menu :deep(.el-menu-item) {
-  height: 50px;
-  line-height: 50px;
-  margin: 4px 12px;
-  border-radius: 8px;
-  color: #606266;
-  transition: all 0.2s;
+  height: 48px;
+  line-height: 48px;
+  margin: 4px 16px;
+  border-radius: 12px; /* Rounder */
+  color: var(--healing-text);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   cursor: pointer !important;
+  border: 1px solid transparent; /* Prevent layout shift */
 }
 
 .sidebar-menu :deep(.el-menu-item:hover) {
-  background-color: #fff0f5 !important;
-  color: #ff88aa !important;
+  background-color: rgba(255, 255, 255, 0.4) !important;
+  color: var(--healing-primary) !important;
+  transform: translateX(4px);
 }
 
 .sidebar-menu :deep(.el-menu-item.is-active) {
-  background: linear-gradient(135deg, #fff0f5 0%, #ffe4ed 100%) !important;
-  color: #ff88aa !important;
+  background: #ffffff !important;
+  color: var(--healing-primary) !important;
   font-weight: 600;
+  box-shadow: 0 4px 12px rgba(108, 180, 238, 0.15);
+  transform: scale(1.02);
+}
+
+.sidebar-menu :deep(.el-icon) {
+  font-size: 18px;
+  margin-right: 12px;
+  transition: all 0.3s;
+}
+
+.sidebar-menu :deep(.el-menu-item.is-active .el-icon) {
+  color: var(--healing-primary);
+  transform: scale(1.1);
 }
 
 .sidebar-footer {
-  padding: 20px;
-  border-top: 1px solid rgba(0,0,0,0.05);
+  padding: 24px;
+  border-top: 1px solid rgba(255, 255, 255, 0.3);
   display: flex;
   flex-direction: column;
-  gap: 15px;
+  gap: 16px;
+  background: rgba(255, 255, 255, 0.1); /* Subtle footer separation */
 }
 
 .quit-button {
   width: 100%;
-  height: 40px;
-  border-radius: 10px;
+  height: 42px;
+  border-radius: 12px;
   font-weight: 600;
   border: 1px solid rgba(245, 108, 108, 0.2);
-  background: rgba(245, 108, 108, 0.05) !important;
+  background: rgba(255, 255, 255, 0.5) !important;
   color: #f56c6c !important;
   transition: all 0.3s;
   display: flex;
@@ -2993,16 +3256,21 @@ onUnmounted(() => {
 .quit-button:hover {
   background: #f56c6c !important;
   color: #ffffff !important;
-  box-shadow: 0 4px 12px rgba(245, 108, 108, 0.3);
+  box-shadow: 0 6px 16px rgba(245, 108, 108, 0.25);
   transform: translateY(-2px);
+  border-color: #f56c6c;
 }
 
 .status-indicator {
   font-size: 12px;
   display: flex;
   align-items: center;
-  gap: 6px;
-  color: #909399;
+  justify-content: center;
+  gap: 8px;
+  color: var(--healing-text-light);
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 8px;
 }
 
 .status-indicator.online {
@@ -3020,21 +3288,22 @@ onUnmounted(() => {
 /* Glass Header */
 .glass-header {
   position: relative;
-  z-index: 50; /* 低于侧边栏，但高于内容区 */
+  z-index: 50;
   height: 64px;
-  background: rgba(255, 255, 255, 0.5);
-  backdrop-filter: blur(12px);
+  background: transparent; /* Full transparent */
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 0 30px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.4);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2); /* Subtle divider */
 }
 
 .page-title {
   margin: 0;
-  font-size: 18px;
-  color: #303133;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--healing-text);
+  letter-spacing: 0.5px;
 }
 
 .header-left {
@@ -3046,14 +3315,12 @@ onUnmounted(() => {
 /* Content Area */
 .content-area {
   position: relative;
-  z-index: 10; /* 提高层级，确保在背景层之上 */
+  z-index: 10;
   padding: 24px;
   overflow-y: auto;
   scroll-behavior: smooth;
-  pointer-events: auto !important; /* 确保内容区始终响应点击 */
+  pointer-events: auto !important;
 }
-
-
 
 .view-container {
   width: 100%;
@@ -3063,15 +3330,17 @@ onUnmounted(() => {
 
 /* Stats Cards */
 .stat-card {
-  border: none;
-  border-radius: 16px;
+  border: none !important;
+  border-radius: var(--radius-lg);
   color: white;
-  transition: transform 0.3s;
+  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
   overflow: hidden;
+  box-shadow: 0 10px 20px -5px rgba(0, 0, 0, 0.1);
 }
 
 .stat-card:hover {
-  transform: translateY(-4px);
+  transform: translateY(-6px);
+  box-shadow: 0 15px 30px -5px rgba(0, 0, 0, 0.15);
 }
 
 .stat-content {
@@ -3082,54 +3351,84 @@ onUnmounted(() => {
 
 .stat-icon {
   font-size: 32px;
-  background: rgba(255,255,255,0.2);
+  background: rgba(255,255,255,0.25);
   width: 60px;
   height: 60px;
   border-radius: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
+  backdrop-filter: blur(4px);
 }
 
 .stat-info h3 {
   margin: 0;
   font-size: 14px;
-  opacity: 0.9;
-  font-weight: normal;
+  opacity: 0.95;
+  font-weight: 500;
 }
 
 .stat-info .number {
-  font-size: 28px;
-  font-weight: bold;
+  font-size: 32px; /* Bigger number */
+  font-weight: 800;
+  letter-spacing: -1px;
 }
 
-.pink-gradient { background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%); }
-.blue-gradient { background: linear-gradient(135deg, #a18cd1 0%, #fbc2eb 100%); }
-.purple-gradient { background: linear-gradient(135deg, #84fab0 0%, #8fd3f4 100%); }
+/* Refined Gradients */
+.pink-gradient { background: linear-gradient(135deg, #ff9a9e 0%, #ffc3a0 100%); }
+.blue-gradient { background: linear-gradient(135deg, #89f7fe 0%, #66a6ff 100%); }
+.purple-gradient { background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%); }
 
-/* Glass Cards Generic */
+/* Glass Cards Generic - The "Healing Card" */
 .glass-card {
-  background: rgba(255, 255, 255, 0.8) !important;
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.6) !important;
-  border-radius: 16px !important;
+  background: rgba(255, 255, 255, 0.5) !important;
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.4) !important;
+  border-radius: var(--radius-lg) !important;
+  box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.05) !important;
+  transition: transform 0.3s ease;
+}
+
+.glass-card:hover {
+  transform: translateY(-2px);
+  background: rgba(255, 255, 255, 0.65) !important;
+  box-shadow: 0 12px 40px 0 rgba(31, 38, 135, 0.08) !important;
+}
+
+/* Remove default card header border */
+.glass-card :deep(.el-card__header) {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+  padding: 18px 24px;
+}
+
+.card-header span {
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--healing-text);
 }
 
 /* State Box */
 .state-box {
   text-align: center;
-  padding: 16px;
-  background: rgba(255,255,255,0.5);
-  border-radius: 12px;
+  padding: 20px;
+  background: rgba(255,255,255,0.4);
+  border-radius: var(--radius-md);
+  transition: all 0.3s;
 }
-.state-box .label { font-size: 12px; color: #909399; display: block; margin-bottom: 4px; }
-.state-box .value { font-size: 18px; font-weight: bold; color: #303133; margin-bottom: 8px; display: block; }
+
+.state-box:hover {
+  background: rgba(255,255,255,0.7);
+  transform: scale(1.02);
+}
+
+.state-box .label { font-size: 13px; color: var(--healing-text-light); display: block; margin-bottom: 6px; }
+.state-box .value { font-size: 20px; font-weight: 800; color: var(--healing-text); margin-bottom: 12px; display: block; }
 
 /* Logs View */
 .logs-layout {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 120px);
+  height: 100%;
 }
 
 .filter-card {
@@ -3140,54 +3439,67 @@ onUnmounted(() => {
   flex: 1;
   overflow-y: auto;
   padding: 20px;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.4);
-  border: 1px solid rgba(0, 0, 0, 0.05);
-  margin-right: -10px; /* 负边距让滚动条贴边 */
-  padding-right: 20px; /* 补偿负边距，保持内容间距 */
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.2); /* Lighter glass */
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  margin-right: -10px;
+  padding-right: 20px;
 }
 
 .chat-bubble-wrapper {
   display: flex;
-  gap: 12px;
-  margin-bottom: 20px;
+  gap: 16px;
+  margin-bottom: 24px;
 }
 
 .chat-bubble-wrapper.assistant { flex-direction: row; }
 .chat-bubble-wrapper.user { flex-direction: row-reverse; }
 
 .avatar {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   background: white;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 20px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+  font-size: 22px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
   flex-shrink: 0;
+  border: 2px solid white;
 }
 
 .bubble-content-box {
   max-width: 70%;
-  background: white;
-  padding: 12px 16px;
-  border-radius: 16px;
-  box-shadow: 0 2px 12px rgba(0,0,0,0.03);
+  padding: 16px 20px;
+  border-radius: 20px; /* More rounded */
+  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
   position: relative;
+  transition: all 0.3s;
 }
 
 .chat-bubble-wrapper.user .bubble-content-box {
-  background: #ecf5ff;
-  color: #303133;
-  border-bottom-right-radius: 4px;
+  background: var(--healing-primary); /* Sky Blue */
+  color: white;
+  border-bottom-right-radius: 4px; /* Squircle effect */
+  box-shadow: 0 4px 12px rgba(108, 180, 238, 0.3);
 }
 
 .chat-bubble-wrapper.assistant .bubble-content-box {
   background: white;
-  color: #303133;
-  border-bottom-left-radius: 4px;
+  color: var(--healing-text);
+  border-bottom-left-radius: 4px; /* Squircle effect */
+}
+
+/* Edit/Delete icons inside bubble */
+.edit-tools .el-button {
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: inherit;
+}
+.edit-tools .el-button:hover {
+  background: rgba(255, 255, 255, 0.4);
 }
 
 .bubble-meta {
@@ -3195,15 +3507,16 @@ onUnmounted(() => {
   align-items: center;
   gap: 8px;
   font-size: 11px;
-  color: #909399;
-  margin-bottom: 6px;
+  color: var(--healing-text-light);
+  margin-bottom: 8px;
 }
 
 .log-meta-tag {
   background: rgba(0,0,0,0.05);
-  padding: 1px 4px;
-  border-radius: 4px;
+  padding: 2px 8px; /* Larger capsule */
+  border-radius: 12px;
   cursor: help;
+  font-weight: 600;
 }
 
 .log-meta-tag.importance {
@@ -3213,22 +3526,58 @@ onUnmounted(() => {
 
 .log-meta-tag.memory {
   background: #f0f9eb;
+  color: #67c23a;
 }
 
 .message-markdown {
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.6;
-  color: #303133;
+}
+
+/* User text color fix for Markdown */
+.chat-bubble-wrapper.user .message-content-wrapper :deep(.markdown-body),
+.chat-bubble-wrapper.user .message-content-wrapper :deep(.markdown-body p),
+.chat-bubble-wrapper.user .message-content-wrapper :deep(.markdown-body span),
+.chat-bubble-wrapper.user .message-content-wrapper :deep(.markdown-body li),
+.chat-bubble-wrapper.user .message-content-wrapper :deep(.markdown-body strong) {
+  color: white !important;
+}
+
+/* User Bubble Meta Color Fix */
+.chat-bubble-wrapper.user .bubble-meta {
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+.chat-bubble-wrapper.user .bubble-meta .role-name,
+.chat-bubble-wrapper.user .bubble-meta .time {
+  color: inherit !important;
+}
+
+/* Exclude code blocks from being white if they have their own styling */
+.chat-bubble-wrapper.user .message-content-wrapper :deep(.markdown-body code) {
+  color: #c7254e; /* Default code color or whatever fits */
+  background-color: #f9f2f4;
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+
+.chat-bubble-wrapper.user .message-content-wrapper :deep(.markdown-body pre) {
+  background-color: #f6f8fa;
+  color: #333;
+}
+
+.chat-bubble-wrapper.user .message-content-wrapper :deep(.markdown-body pre code) {
+  color: inherit;
+  background-color: transparent;
 }
 
 /* Trigger Blocks inside Markdown */
 :deep(.trigger-block) {
   margin: 12px 0;
-  border-radius: 12px;
+  border-radius: 16px; /* Rounded block */
   overflow: hidden;
   font-size: 13px;
-  border: 1px solid rgba(0,0,0,0.08);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+  border: 1px solid rgba(0,0,0,0.05);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.03);
   background: white;
 }
 
@@ -3414,8 +3763,8 @@ onUnmounted(() => {
 
 .section-title {
   font-size: 20px;
-  font-weight: 600;
-  color: #303133;
+  font-weight: 700;
+  color: var(--healing-text);
   margin: 0;
   letter-spacing: 0.5px;
 }
@@ -3428,21 +3777,29 @@ onUnmounted(() => {
 }
 
 .memory-item {
-  /* break-inside: avoid; - removed for grid */
   margin-bottom: 0;
 }
 
 .memory-card {
-  border-radius: 12px;
-  transition: all 0.3s;
+  border-radius: var(--radius-md) !important;
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
   cursor: default;
+  border: none !important;
+  background: rgba(255, 255, 255, 0.6) !important;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05) !important;
 }
 
-.memory-card:hover { transform: translateY(-3px); }
+.memory-card:hover {
+  transform: translateY(-4px);
+  background: rgba(255, 255, 255, 0.8) !important;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.08) !important;
+}
 
-.memory-card.preference { border-top: 3px solid #f56c6c; }
-.memory-card.event { border-top: 3px solid #409eff; }
-.memory-card.fact { border-top: 3px solid #909399; }
+.memory-card.preference { border-top: 3px solid #f56c6c !important; }
+.memory-card.event { border-top: 3px solid #409eff !important; }
+.memory-card.fact { border-top: 3px solid #67c23a !important; } /* Green */
+.memory-card.summary { border-top: 3px solid #e6a23c !important; }
 
 /* Tasks Waterfall */
 .task-waterfall {
@@ -3453,25 +3810,26 @@ onUnmounted(() => {
 }
 
 .task-item {
-  /* break-inside: avoid; - removed for grid */
   margin-bottom: 0;
 }
 
 .task-card-modern {
-  border-radius: 12px;
+  border-radius: var(--radius-md) !important;
   transition: all 0.3s;
   border: none !important;
   background: rgba(255, 255, 255, 0.7) !important;
   backdrop-filter: blur(10px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05) !important;
 }
 
 .task-card-modern:hover {
   transform: translateY(-3px);
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08) !important;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.08) !important;
 }
 
 .task-card-modern.reminder { border-left: 4px solid #f56c6c !important; }
 .task-card-modern.topic { border-left: 4px solid #409eff !important; }
+.task-card-modern.todo { border-left: 4px solid #67c23a !important; }
 
 .task-top {
   display: flex;
@@ -3482,7 +3840,7 @@ onUnmounted(() => {
 
 .task-content {
   font-size: 14px;
-  color: #303133;
+  color: var(--healing-text);
   line-height: 1.6;
   margin-bottom: 14px;
   font-weight: 500;
@@ -3498,8 +3856,75 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   font-size: 11px;
-  color: #909399;
+  color: var(--healing-text-light);
 }
+
+  /* Global Input Styling */
+  :deep(.el-input__wrapper), :deep(.el-textarea__inner) {
+    box-shadow: none !important;
+    background-color: rgba(255, 255, 255, 0.6) !important;
+    border: 1px solid rgba(255, 255, 255, 0.5) !important;
+    border-radius: var(--radius-sm) !important;
+    transition: all 0.3s;
+  }
+  
+  :deep(.el-input__wrapper:hover), :deep(.el-textarea__inner:hover) {
+    background-color: rgba(255, 255, 255, 0.9) !important;
+    border-color: var(--healing-secondary) !important;
+  }
+  
+  :deep(.el-input__wrapper.is-focus), :deep(.el-textarea__inner:focus) {
+    background-color: #ffffff !important;
+    box-shadow: 0 0 0 2px var(--healing-secondary) !important;
+  }
+  
+  /* Fix Dialog Transparency Issue */
+  :deep(.el-dialog) {
+    background: rgba(255, 255, 255, 0.95) !important;
+    backdrop-filter: blur(20px);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+  }
+
+  :deep(.el-dialog__title) {
+    color: var(--healing-text);
+    font-weight: 700;
+  }
+
+  :deep(.el-dialog__body) {
+    color: var(--healing-text);
+    padding-top: 20px;
+    padding-bottom: 20px;
+  }
+  
+  /* Ensure form labels inside dialogs are visible */
+  :deep(.el-form-item__label) {
+    color: var(--healing-text);
+    font-weight: 500;
+  }
+  
+  /* Ensure input text is visible */
+  :deep(.el-input__inner) {
+    color: #333 !important;
+  }
+
+  /* Select dropdown menu styling */
+  :deep(.el-select__popper.el-popper) {
+    background: rgba(255, 255, 255, 0.95) !important;
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+  }
+  
+  :deep(.el-select-dropdown__item) {
+    color: var(--healing-text);
+  }
+  
+  :deep(.el-select-dropdown__item.hover), 
+  :deep(.el-select-dropdown__item:hover) {
+    background-color: var(--healing-secondary);
+    color: white;
+  }
 
 .memory-top { display: flex; justify-content: space-between; margin-bottom: 8px; }
 .memory-text { font-size: 14px; color: #606266; line-height: 1.5; margin-bottom: 12px; }
@@ -3843,5 +4268,21 @@ onUnmounted(() => {
   padding: 8px;
   border-radius: 4px;
   pointer-events: none;
+}
+
+/* --- Transition Animations --- */
+.fade-slide-enter-active,
+.fade-slide-leave-active {
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.fade-slide-enter-from {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+.fade-slide-leave-to {
+  opacity: 0;
+  transform: translateY(-10px);
 }
 </style>

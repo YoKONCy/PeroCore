@@ -287,9 +287,7 @@ async def lifespan(app: FastAPI):
             # Check every 15 minutes
             await asyncio.sleep(900)
 
-    dream_task = asyncio.create_task(periodic_dream_check())
-
-    # [Feature] Memory Maintenance: Daily trigger at 04:00 AM
+    # [Feature] Memory Maintenance & Dream: Daily trigger at 22:00 PM
     async def periodic_memory_maintenance_check():
         from database import engine
         from sqlalchemy.orm import sessionmaker
@@ -303,11 +301,11 @@ async def lifespan(app: FastAPI):
                 async with async_session() as session:
                     now = datetime.now()
                     
-                    # Calculate the latest scheduled trigger time (04:00 AM)
-                    if now.hour < 4:
-                        latest_scheduled = now.replace(hour=4, minute=0, second=0, microsecond=0) - timedelta(days=1)
+                    # Calculate the latest scheduled trigger time (22:00 PM)
+                    if now.hour < 22:
+                        latest_scheduled = now.replace(hour=22, minute=0, second=0, microsecond=0) - timedelta(days=1)
                     else:
-                        latest_scheduled = now.replace(hour=4, minute=0, second=0, microsecond=0)
+                        latest_scheduled = now.replace(hour=22, minute=0, second=0, microsecond=0)
                     
                     # Check last maintenance time
                     config_key = "last_memory_maintenance_time"
@@ -321,15 +319,24 @@ async def lifespan(app: FastAPI):
                             pass
                     
                     if last_time < latest_scheduled:
-                        print(f"[Main] Triggering scheduled Memory Maintenance (Last: {last_time}, Scheduled: {latest_scheduled})")
+                        print(f"[Main] Triggering scheduled Memory Maintenance & Dream (Last: {last_time}, Scheduled: {latest_scheduled})")
+                        
+                        # 1. Trigger Memory Secretary (Maintenance)
                         from services.memory_secretary_service import MemorySecretaryService
-                        service = MemorySecretaryService(session)
+                        maintenance_service = MemorySecretaryService(session)
+                        
+                        # 2. Trigger Agent Service (Dream)
+                        from services.agent_service import AgentService
+                        agent_service = AgentService(session)
+
+                        # Run both in parallel
                         try:
-                            await service.run_maintenance()
+                            await asyncio.gather(
+                                maintenance_service.run_maintenance(),
+                                agent_service._trigger_dream()
+                            )
                         except Exception as inner_e:
-                            print(f"[Main] Error inside run_maintenance: {inner_e}")
-                            # Don't re-raise, try to update time to avoid infinite loop?
-                            # No, let's keep retrying next hour or fix the bug.
+                            print(f"[Main] Error inside maintenance/dream tasks: {inner_e}")
                         
                         # Update config
                         if not config:
@@ -343,7 +350,6 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 import traceback
                 traceback.print_exc()
-                # [Fix] Use simple string formatting to avoid 'Invalid format specifier' if 'e' contains braces
                 print(f"[Main] Memory maintenance check task error: {e!s}")
             
             # Check every 1 hour
@@ -1120,6 +1126,33 @@ async def get_memory_graph(limit: int = 100, session: AsyncSession = Depends(get
     service = MemoryService()
     return await service.get_memory_graph(session, limit)
 
+@app.delete("/api/memories/orphaned_edges")
+async def delete_orphaned_edges(session: AsyncSession = Depends(get_session)):
+    service = MemoryService()
+    count = await service.delete_orphaned_edges(session)
+    return {"status": "success", "deleted_count": count}
+
+@app.post("/api/memories/scan_lonely")
+async def scan_lonely_memories(limit: int = 5, session: AsyncSession = Depends(get_session)):
+    from services.reflection_service import ReflectionService
+    service = ReflectionService(session)
+    result = await service.scan_lonely_memories(limit=limit)
+    return result
+
+@app.post("/api/memories/maintenance")
+async def run_maintenance(session: AsyncSession = Depends(get_session)):
+    from services.memory_secretary_service import MemorySecretaryService
+    service = MemorySecretaryService(session)
+    result = await service.run_maintenance()
+    return result
+
+@app.post("/api/memories/dream")
+async def trigger_dream(limit: int = 10, session: AsyncSession = Depends(get_session)):
+    from services.reflection_service import ReflectionService
+    service = ReflectionService(session)
+    result = await service.dream_and_associate(limit=limit)
+    return result
+
 @app.get("/api/memories/tags")
 async def get_tag_cloud(session: AsyncSession = Depends(get_session)):
     service = MemoryService()
@@ -1791,6 +1824,38 @@ async def get_maintenance_records(session: AsyncSession = Depends(get_session)):
     from models import MaintenanceRecord
     statement = select(MaintenanceRecord).order_by(desc(MaintenanceRecord.timestamp)).limit(10)
     return (await session.exec(statement)).all()
+
+@app.get("/api/stats/overview")
+async def get_overview_stats(session: AsyncSession = Depends(get_session)):
+    """
+    获取概览页面的统计数据（总数），解耦渲染数量和显示数量。
+    """
+    try:
+        # Count memories
+        mem_statement = select(func.count()).select_from(Memory)
+        mem_count = (await session.exec(mem_statement)).one()
+        
+        # Count logs
+        log_statement = select(func.count()).select_from(ConversationLog)
+        log_count = (await session.exec(log_statement)).one()
+        
+        # Count tasks (ScheduledTask)
+        task_statement = select(func.count()).select_from(ScheduledTask)
+        task_count = (await session.exec(task_statement)).one()
+
+        return {
+            "total_memories": mem_count,
+            "total_logs": log_count,
+            "total_tasks": task_count
+        }
+    except Exception as e:
+        logger.error(f"Failed to get overview stats: {e}")
+        # Fallback to 0 if error, frontend should handle or use length
+        return {
+            "total_memories": 0,
+            "total_logs": 0,
+            "total_tasks": 0
+        }
 
 if __name__ == "__main__":
     # 优先从环境变量读取端口
