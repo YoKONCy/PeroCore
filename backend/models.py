@@ -82,11 +82,14 @@ class ConversationLog(SQLModel, table=True):
     retry_count: int = Field(default=0)
     last_error: Optional[str] = None
     
+    agent_id: str = Field(default="pero", index=True) # 所属 Agent ID (多 Agent 隔离)
+    
 
 
 class PetState(SQLModel, table=True):
     """存储 Agent 的状态（情绪、心理活动等），即长记忆的一部分"""
     id: Optional[int] = Field(default=None, primary_key=True)
+    agent_id: str = Field(default="pero", index=True)
     mood: str = "开心"
     vibe: str = "活泼"
     mind: str = "正在想主人..."

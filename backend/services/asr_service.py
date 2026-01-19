@@ -27,9 +27,9 @@ class ASRService:
     def _load_model(self, model_path: str, device: str, compute_type: str):
         """延迟加载模型"""
         if self._model is None:
-            print(f"Loading Whisper model: {model_path} on {device}...")
+            print(f"正在 {device} 上加载 Whisper 模型: {model_path}...")
             self._model = WhisperModel(model_path, device=device, compute_type=compute_type)
-            print("Whisper model loaded successfully.")
+            print("Whisper 模型加载成功。")
 
     async def transcribe(self, audio_path: str) -> Optional[str]:
         """
@@ -104,13 +104,13 @@ class ASRService:
                     response = await client.post(url, headers=headers, data=data, files=files)
                     
                 if response.status_code != 200:
-                    print(f"OpenAI ASR API Error: {response.text}")
+                    print(f"OpenAI ASR API 错误: {response.text}")
                     return None
                     
                 result = response.json()
                 return result.get("text", "")
         except Exception as e:
-            print(f"OpenAI ASR Error: {e}")
+            print(f"OpenAI ASR 错误: {e}")
             return None
 
 _asr_service = None

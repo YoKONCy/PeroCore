@@ -236,14 +236,14 @@ class NITDispatcher:
                         # Also map namespaced name to manifest
                         self.tool_to_manifest[normalize_nit_key(namespaced_name)] = manifest
                         
-            logger.info(f"Loaded tools. Total keys: {len(PLUGIN_REGISTRY)}")
+            logger.info(f"已加载工具。总数: {len(PLUGIN_REGISTRY)}")
                 
         except Exception as e:
-            logger.error(f"Error loading tools: {e}", exc_info=True)
+            logger.error(f"加载工具出错: {e}", exc_info=True)
 
     def reload_tools(self):
         """重新加载所有工具"""
-        logger.info("Reloading tools in Dispatcher...")
+        logger.info("正在 Dispatcher 中重新加载工具...")
         # Clear existing registry and map
         global PLUGIN_REGISTRY
         PLUGIN_REGISTRY.clear()
@@ -284,14 +284,14 @@ class NITDispatcher:
             async def browser_bridge_adapter(**kwargs):
                 if bridge.latest_page_info:
                     return str(bridge.latest_page_info)
-                return "No active browser page info available."
+                return "当前没有可用的浏览器页面信息。"
 
             PLUGIN_REGISTRY['get_browser_page_info'] = browser_bridge_adapter
             
         except ImportError:
-            logger.warning("Could not import BrowserBridgeService.")
+            logger.warning("无法导入 BrowserBridgeService。")
         except Exception as e:
-             logger.warning(f"BrowserBridgeService init failed: {e}")
+             logger.warning(f"BrowserBridgeService 初始化失败: {e}")
 
     def list_plugins(self) -> List[str]:
         """获取所有已注册的插件名称"""
@@ -411,7 +411,7 @@ class NITDispatcher:
         nit_matches = list(re.finditer(nit_pattern, text, re.DOTALL | re.IGNORECASE))
 
         if nit_matches:
-            logger.info(f"Detected {len(nit_matches)} NIT script blocks.")
+            logger.info(f"检测到 {len(nit_matches)} 个 NIT 脚本块。")
             
             # 用于在闭包中捕获当前 block 执行过的工具
             current_block_tools = []
@@ -436,7 +436,7 @@ class NITDispatcher:
                         # ID 存在，必须匹配
                         is_valid, status = NITSecurityManager.validate_id(extracted_id, expected_nit_id)
                         if not is_valid:
-                            msg = f"Security Block: NIT ID Mismatch (Expected {expected_nit_id}, Got {extracted_id})"
+                            msg = f"安全拦截: NIT ID 不匹配 (预期 {expected_nit_id}, 实际 {extracted_id})"
                             logger.warning(msg)
                             results.append({
                                 "plugin": "NIT_Script",
@@ -447,7 +447,7 @@ class NITDispatcher:
                             continue
                     else:
                         # ID 不存在 (<nit>) -> Fallback Mode
-                        logger.warning(f"NIT Fallback: Standard <nit> tag used instead of <nit-{expected_nit_id}>. Allowing execution.")
+                        logger.warning(f"NIT 回退: 使用了标准 <nit> 标签而非 <nit-{expected_nit_id}>。允许执行。")
                 # ---------------------------
 
                 try:
@@ -462,7 +462,7 @@ class NITDispatcher:
                         "executed_tools": list(current_block_tools) # Copy list
                     })
                 except Exception as e:
-                    logger.error(f"NIT Script Error: {e}", exc_info=True)
+                    logger.error(f"NIT 脚本错误: {e}", exc_info=True)
                     results.append({
                         "plugin": "NIT_Script",
                         "status": "error",
@@ -482,14 +482,14 @@ class NITDispatcher:
         if '\\' in plugin_name or '/' in plugin_name:
             original_path = plugin_name
             plugin_name = os.path.basename(plugin_name.replace('\\', '/').rstrip('/'))
-            logger.warning(f"Stripped path from tool name: '{original_path}' -> '{plugin_name}'")
+            logger.warning(f"已从工具名中移除路径: '{original_path}' -> '{plugin_name}'")
 
         # Log Start
         # Truncate params for display
         params_str = json.dumps(params, ensure_ascii=False)
         if len(params_str) > 200:
             params_str = params_str[:200] + "..."
-        logger.info(f"▶ TOOL CALL: {plugin_name} | Params: {params_str}")
+        logger.info(f"▶ 工具调用: {plugin_name} | 参数: {params_str}")
 
         # 归一化插件名以匹配注册表
         norm_name = normalize_nit_key(plugin_name)
@@ -504,15 +504,15 @@ class NITDispatcher:
             config = get_config_manager()
             if config.get("lightweight_mode", False):
                 if plugin_id not in ["ScreenVision", "CharacterOps", "MemoryOps"]:
-                    logger.warning(f"Execution blocked: Lightweight Mode is active. Tool '{plugin_name}' (Plugin: {plugin_id}) is restricted.")
-                    return f"Error: Tool '{plugin_name}' is restricted in Lightweight Chat Mode. Only ScreenVision, CharacterOps and MemoryOps are available."
+                    logger.warning(f"执行被拦截: 轻量模式已激活。工具 '{plugin_name}' (插件: {plugin_id}) 受限。")
+                    return f"错误: 工具 '{plugin_name}' 在轻量聊天模式下受限。仅 ScreenVision, CharacterOps 和 MemoryOps 可用。"
 
             if not self.nm.is_category_enabled(category):
-                logger.warning(f"Execution blocked: Category '{category}' is disabled.")
-                return f"Error: Tool '{plugin_name}' belongs to category '{category}' which is currently disabled."
+                logger.warning(f"执行被拦截: 类别 '{category}' 已禁用。")
+                return f"错误: 工具 '{plugin_name}' 属于类别 '{category}'，该类别当前已禁用。"
             if not self.nm.is_plugin_enabled(plugin_id):
-                logger.warning(f"Execution blocked: Plugin '{plugin_id}' is disabled.")
-                return f"Error: Tool '{plugin_name}' (Plugin: {plugin_id}) is currently disabled."
+                logger.warning(f"执行被拦截: 插件 '{plugin_id}' 已禁用。")
+                return f"错误: 工具 '{plugin_name}' (插件: {plugin_id}) 当前已禁用。"
 
         # 优先检查 extra_plugins
         handler = None
@@ -541,7 +541,7 @@ class NITDispatcher:
                 namespaced_key = normalize_nit_key(f"{plugin_name}.{cmd}")
                 handler = PLUGIN_REGISTRY.get(namespaced_key)
                 if handler:
-                    logger.info(f"Auto-routed '{plugin_name}' + cmd='{cmd}' -> {namespaced_key}")
+                    logger.info(f"自动路由 '{plugin_name}' + cmd='{cmd}' -> {namespaced_key}")
                     # Remove the routing key from params to avoid TypeError
                     params.pop(key, None)
                     break
@@ -550,7 +550,7 @@ class NITDispatcher:
                 cmd_key = normalize_nit_key(cmd)
                 handler = PLUGIN_REGISTRY.get(cmd_key)
                 if handler:
-                    logger.info(f"Auto-routed '{plugin_name}' + cmd='{cmd}' -> {cmd_key}")
+                    logger.info(f"自动路由 '{plugin_name}' + cmd='{cmd}' -> {cmd_key}")
                     # Remove the routing key from params to avoid TypeError
                     params.pop(key, None)
                     break
@@ -559,10 +559,10 @@ class NITDispatcher:
             # Check if it's a category and provide helpful hint
             if norm_name in self.category_map:
                 tools = self.category_map[norm_name]
-                return f"Error: '{plugin_name}' is a Plugin Category, not a Tool. Did you mean to use one of these tools? {', '.join(tools)}"
+                return f"错误: '{plugin_name}' 是一个插件类别，不是工具。你是想使用这些工具之一吗? {', '.join(tools)}"
             
-            logger.error(f"Plugin '{plugin_name}' not found.")
-            return f"Error: Plugin '{plugin_name}' (normalized: {norm_name}) not found."
+            logger.error(f"未找到插件 '{plugin_name}'。")
+            return f"错误: 未找到插件 '{plugin_name}' (归一化名: {norm_name})。"
             
         try:
             result = None
@@ -582,13 +582,13 @@ class NITDispatcher:
             else:
                 result_preview = result_str
                 
-            logger.info(f"✔ TOOL DONE: {plugin_name} | Time: {duration:.2f}ms | Result: {result_preview}")
+            logger.info(f"✔ 工具完成: {plugin_name} | 耗时: {duration:.2f}ms | 结果: {result_preview}")
             return result
             
         except Exception as e:
             # Log Failure
             duration = (time.perf_counter() - start_time) * 1000
-            logger.error(f"✘ TOOL FAILED: {plugin_name} | Time: {duration:.2f}ms | Error: {e}", exc_info=True)
+            logger.error(f"✘ 工具失败: {plugin_name} | 耗时: {duration:.2f}ms | 错误: {e}", exc_info=True)
             raise e
 
 # 全局单例

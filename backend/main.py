@@ -67,21 +67,21 @@ from routers.ide_router import router as ide_router
 async def lifespan(app: FastAPI):
     # Startup Technical Fingerprint
     print("="*50)
-    print("🚀 PeroCore Backend Starting...")
-    print(f"📅 Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"📂 Data Dir: {os.environ.get('PERO_DATA_DIR', 'Default')}")
+    print("🚀 PeroCore 后端启动中...")
+    print(f"📅 时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"📂 数据目录: {os.environ.get('PERO_DATA_DIR', 'Default')}")
     
     # Check Rust Core
     try:
         from pero_memory_core import SemanticVectorIndex
-        print("🧠 KDN Engine: [READY] (pero_memory_core loaded)")
+        print("🧠 KDN 引擎: [就绪] (pero_memory_core 已加载)")
     except ImportError:
-        print("🧠 KDN Engine: [DISABLED] (pero_memory_core not found)")
+        print("🧠 KDN 引擎: [禁用] (未找到 pero_memory_core)")
     
     # Check Vector Store
     from services.vector_store_service import VectorStoreService
     vs = VectorStoreService()
-    print(f"📊 Memory Nodes: {vs.count_memories() if hasattr(vs, 'count_memories') else 'N/A'}")
+    print(f"📊 记忆节点数: {vs.count_memories() if hasattr(vs, 'count_memories') else 'N/A'}")
     print("="*50)
 
     # Startup
@@ -104,7 +104,7 @@ async def lifespan(app: FastAPI):
         if aura_vision_service.initialize():
             asyncio.create_task(aura_vision_service.start_vision_loop())
         else:
-            print("[Main] Failed to initialize AuraVision Service.")
+            print("[Main] 初始化 AuraVision 服务失败。")
 
     # Cleanup task
     async def periodic_cleanup():
@@ -128,7 +128,7 @@ async def lifespan(app: FastAPI):
                                     os.remove(f_path)
                                 except: pass
             except Exception as e:
-                print(f"[Main] Cleanup task error: {e}")
+                print(f"[Main] 清理任务错误: {e}")
             await asyncio.sleep(3600)
     
     cleanup_task = asyncio.create_task(periodic_cleanup())
@@ -165,7 +165,7 @@ async def lifespan(app: FastAPI):
                             should_run = True # corrupted date
                             
                     if should_run:
-                        print("[Main] Triggering Weekly Report Generation...")
+                        print("[Main] 正在触发周报生成...")
                         report = await chain_service.generate_weekly_report(session)
                         
                         if report:
@@ -193,7 +193,7 @@ async def lifespan(app: FastAPI):
                                 with open(file_path, "w", encoding="utf-8") as f:
                                     f.write(report)
                                     
-                                print(f"[Main] Weekly Report saved to file: {file_path}")
+                                print(f"[Main] 周报已保存到文件: {file_path}")
                                 
                                 # [Feature] Persist Weekly Report Index to Memory (VectorDB)
                                 # We store a summary/pointer instead of full content to keep context clean?
@@ -215,9 +215,9 @@ async def lifespan(app: FastAPI):
                                 #     memory_type="weekly_report", # Special type for independent retrieval
                                 #     source="system"
                                 # )
-                                print("[Main] Weekly Report saved to File ONLY (DB Storage Disabled by User Request).")
+                                print("[Main] 周报仅保存到文件 (DB 存储已按用户请求禁用)。")
                             except Exception as e:
-                                print(f"[Main] Failed to save Weekly Report: {e}")
+                                print(f"[Main] 保存周报失败: {e}")
                             
                             # Update Config
                             if not config:
@@ -228,17 +228,17 @@ async def lifespan(app: FastAPI):
                                 config.updated_at = now
                             
                             await session.commit()
-                            print("[Main] Weekly Report Generated and Saved (Silent Mode).")
+                            print("[Main] 周报已生成并保存 (静默模式)。")
 
                             # [Modified] No longer broadcasting to Frontend
                             # try:
                             #     ...
                             # except ...
                         else:
-                            print("[Main] Weekly Report Generation skipped (no content/error).")
+                            print("[Main] 周报生成已跳过 (无内容/错误)。")
                             
             except Exception as e:
-                print(f"[Main] Weekly Report task error: {e}")
+                print(f"[Main] 周报任务错误: {e}")
             
             # Check every hour
             await asyncio.sleep(3600)
@@ -277,13 +277,13 @@ async def lifespan(app: FastAPI):
                             pass
                     
                     if last_trigger_time < latest_scheduled:
-                        print(f"[Main] Triggering scheduled Dream Mode (Last: {last_trigger_time}, Scheduled: {latest_scheduled})")
+                        print(f"[Main] 触发定时梦境模式 (上次: {last_trigger_time}, 计划: {latest_scheduled})")
                         # Instantiate AgentService to use its _trigger_dream method
                         from services.agent_service import AgentService
                         agent_service = AgentService(session)
                         await agent_service._trigger_dream()
             except Exception as e:
-                print(f"[Main] Dream check task error: {e}")
+                print(f"[Main] 梦境检查任务错误: {e}")
             
             # Check every 15 minutes
             await asyncio.sleep(900)
@@ -320,7 +320,7 @@ async def lifespan(app: FastAPI):
                             pass
                     
                     if last_time < latest_scheduled:
-                        print(f"[Main] Triggering scheduled Memory Maintenance & Dream (Last: {last_time}, Scheduled: {latest_scheduled})")
+                        print(f"[Main] 触发定时记忆维护与梦境 (上次: {last_time}, 计划: {latest_scheduled})")
                         
                         # 1. Trigger Memory Secretary (Maintenance)
                         from services.memory_secretary_service import MemorySecretaryService
@@ -337,7 +337,7 @@ async def lifespan(app: FastAPI):
                                 agent_service._trigger_dream()
                             )
                         except Exception as inner_e:
-                            print(f"[Main] Error inside maintenance/dream tasks: {inner_e}")
+                            print(f"[Main] 维护/梦境任务内部错误: {inner_e}")
                         
                         # Update config
                         if not config:
@@ -351,7 +351,7 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 import traceback
                 traceback.print_exc()
-                print(f"[Main] Memory maintenance check task error: {e!s}")
+                print(f"[Main] 记忆维护检查任务错误: {e!s}")
             
             # Check every 1 hour
             await asyncio.sleep(3600)
@@ -379,7 +379,7 @@ async def lifespan(app: FastAPI):
                     service = ReflectionService(session)
                     await service.scan_lonely_memories(limit=2)
             except Exception as e:
-                print(f"[Main] Lonely scan task error: {e}")
+                print(f"[Main] 孤独记忆扫描任务错误: {e}")
             
             # Check every 1 hour
             await asyncio.sleep(3600)
@@ -1809,7 +1809,7 @@ async def fetch_remote_models(payload: Dict[str, Any] = Body(...)):
     from services.llm_service import LLMService
     llm = LLMService(api_key, api_base, "", provider=provider)
     models = await llm.list_models()
-    print(f"Backend Returning Models: {models} for provider: {provider}") # 打印返回给前端的内容
+    print(f"后端返回模型列表: {models} (服务商: {provider})") # 打印返回给前端的内容
     return {"models": models}
 
 @app.post("/api/maintenance/undo/{record_id}")
@@ -1865,6 +1865,6 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 9120))
     # 强制禁用 reload 模式，因为 Uvicorn 的 reloader 在 Windows 下会强制使用 SelectorEventLoop
     # 这会导致 subprocess (MCP Stdio) 报错 NotImplementedError
-    print(f"Backend starting with loop: {asyncio.get_event_loop().__class__.__name__}")
+    print(f"后端启动，事件循环: {asyncio.get_event_loop().__class__.__name__}")
     uvicorn.run("main:app", host="127.0.0.1", port=port, reload=False)
 

@@ -175,7 +175,7 @@ class MemorySecretaryService:
             await self.session.commit()
             return True
         except Exception as e:
-            print(f"Error undoing maintenance: {e}")
+            print(f"撤销维护时出错: {e}")
             await self.session.rollback()
             return False
 
@@ -222,7 +222,7 @@ class MemorySecretaryService:
                 await self.session.commit()
                 return count
         except Exception as e:
-            print(f"Error cleaning memories: {e}")
+            print(f"清理记忆时出错: {e}")
         return 0
 
     async def _extract_preferences(self, llm: LLMService, agent_id: str) -> int:
@@ -260,7 +260,7 @@ class MemorySecretaryService:
                 await self.session.commit()
                 return count
         except Exception as e:
-            print(f"Error extracting preferences: {e}")
+            print(f"提取偏好时出错: {e}")
         return 0
 
     async def _tag_importance(self, llm: LLMService) -> int:
@@ -304,7 +304,7 @@ class MemorySecretaryService:
                 await self.session.commit()
                 return count
         except Exception as e:
-            print(f"Error tagging importance: {e}")
+            print(f"标记重要性时出错: {e}")
         return 0
 
     async def _consolidate_memories(self, llm: LLMService, offset: int = 0, agent_id: str = "pero") -> int:
@@ -400,7 +400,7 @@ class MemorySecretaryService:
                                  await self.session.exec(delete(MemoryRelation).where(col(MemoryRelation.id).in_(rel_ids)))
 
                     except Exception as e:
-                        print(f"[MemorySecretary] Failed to migrate relations: {e}")
+                        print(f"[MemorySecretary] 关系迁移失败: {e}")
 
                     for mid in valid_ids:
                         m_obj = next(m for m in batch_memories if m.id == mid)
@@ -410,7 +410,7 @@ class MemorySecretaryService:
                 await self.session.commit()
                 return count
         except Exception as e:
-            print(f"Error consolidating memories: {e}")
+            print(f"整合记忆时出错: {e}")
         return 0
 
     async def _clean_duplicate_social_summaries(self, agent_id: str) -> int:
@@ -450,11 +450,11 @@ class MemorySecretaryService:
             
             if total_deleted > 0:
                 await self.session.commit()
-                print(f"[MemorySecretary] Cleaned {total_deleted} duplicate social summaries.")
+                print(f"[MemorySecretary] 清理了 {total_deleted} 条重复的社交摘要。")
             return total_deleted
             
         except Exception as e:
-            print(f"Error cleaning duplicate social summaries: {e}")
+            print(f"清理重复社交摘要时出错: {e}")
             return 0
 
     async def _update_waifu_texts(self, llm: LLMService) -> bool:
@@ -480,7 +480,7 @@ class MemorySecretaryService:
                         with open(static_path, "r", encoding="utf-8") as f:
                             current_texts = json.load(f)
                 except Exception as e:
-                    print(f"Failed to load static waifu texts: {e}")
+                    print(f"加载静态 Waifu 文本失败: {e}")
 
             # 2. 获取近期记忆摘要作为上下文
             statement = select(Memory).where(Memory.type == "event").order_by(desc(Memory.timestamp)).limit(20)
@@ -541,11 +541,11 @@ class MemorySecretaryService:
                     self.session.add(current_config) # Ensure it's marked for update
                 
                 await self.session.commit()
-                print(f"[MemorySecretary] Updated dynamic waifu texts.")
+                print(f"[MemorySecretary] 已更新动态 Waifu 文本。")
                 return True
 
         except Exception as e:
-            print(f"Error updating waifu texts: {e}")
+            print(f"更新 Waifu 文本时出错: {e}")
             return False
 
     async def _handle_maintenance_boundary(self) -> int:
@@ -566,5 +566,5 @@ class MemorySecretaryService:
             await self.session.commit()
             return count
         except Exception as e:
-            print(f"Error boundary: {e}")
+            print(f"维护边界处理错误: {e}")
             return 0

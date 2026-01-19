@@ -26,7 +26,7 @@ class AudioProcessor:
         """
         try:
             if not os.path.exists(input_path):
-                logger.error(f"Input file not found: {input_path}")
+                logger.error(f"未找到输入文件: {input_path}")
                 return False
                 
             # 加载声音
@@ -57,7 +57,7 @@ class AudioProcessor:
                     if os.path.exists(temp_wav):
                         os.remove(temp_wav)
                 except ImportError:
-                    logger.warning("pydub not installed, keeping wav format as fallback")
+                    logger.warning("未安装 pydub，保留 wav 格式作为后备")
                     # 如果没有 pydub，只能改名存为 wav 或报错
                     new_sound.save(output_path, "WAV")
             else:
@@ -66,7 +66,7 @@ class AudioProcessor:
             return True
             
         except Exception as e:
-            logger.error(f"Error processing audio: {e}")
+            logger.error(f"处理音频出错: {e}")
             return False
 
 # 单例实例

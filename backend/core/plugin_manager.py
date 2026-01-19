@@ -34,10 +34,10 @@ class PluginManager:
         Scans the plugin directory and loads all valid plugins.
         Supports nested structure: core, work, plugins (extensions).
         """
-        logger.info(f"Scanning for plugins in {self.plugin_dir}...")
+        logger.info(f"正在 {self.plugin_dir} 中扫描插件...")
         
         if not os.path.exists(self.plugin_dir):
-            logger.error(f"Plugin directory {self.plugin_dir} does not exist.")
+            logger.error(f"插件目录 {self.plugin_dir} 不存在。")
             return
 
         # Define sub-categories to scan
@@ -50,16 +50,16 @@ class PluginManager:
         for category in categories:
             cat_path = os.path.normpath(os.path.join(self.plugin_dir, category))
             if os.path.exists(cat_path) and os.path.isdir(cat_path):
-                logger.info(f"Scanning category: {category}")
+                logger.info(f"正在扫描类别: {category}")
                 self._scan_directory(cat_path, category_prefix=category)
 
-        logger.info(f"Plugin loading complete. Loaded {len(self.plugins)} plugins and {len(self.tools_map)} commands.")
+        logger.info(f"插件加载完成。已加载 {len(self.plugins)} 个插件和 {len(self.tools_map)} 个命令。")
 
     def reload_plugins(self):
         """
         Clears existing plugins and tools, then reloads from directory.
         """
-        logger.info("Reloading all plugins...")
+        logger.info("正在重新加载所有插件...")
         self.plugins.clear()
         self.tools_map.clear()
         self.loaded_modules.clear()
@@ -84,12 +84,12 @@ class PluginManager:
             with open(manifest_path, 'r', encoding='utf-8') as f:
                 manifest = json.load(f)
         except Exception as e:
-            logger.error(f"Failed to parse manifest for {plugin_folder_name}: {e}")
+            logger.error(f"解析 {plugin_folder_name} 的清单失败: {e}")
             return
 
         # Basic Validation
         if "name" not in manifest or "entryPoint" not in manifest:
-            logger.error(f"Invalid manifest for {plugin_folder_name}: Missing name or entryPoint.")
+            logger.error(f" {plugin_folder_name} 的清单无效: 缺少 name 或 entryPoint。")
             return
 
         plugin_name = manifest["name"]
@@ -105,9 +105,9 @@ class PluginManager:
         if plugin_type == "python-module":
             self._load_python_module_plugin(plugin_path, plugin_folder_name, manifest, category_prefix)
         elif plugin_type == "static":
-            logger.warning(f"Static plugin type not yet fully supported for {plugin_name}, skipping execution logic.")
+            logger.warning(f"尚不完全支持 {plugin_name} 的静态插件类型，跳过执行逻辑。")
         else:
-            logger.warning(f"Unknown plugin type '{plugin_type}' for {plugin_name}.")
+            logger.warning(f"{plugin_name} 的插件类型 '{plugin_type}' 未知。")
 
         self.plugins[plugin_name] = manifest
 
@@ -158,7 +158,7 @@ class PluginManager:
                      module = importlib.util.module_from_spec(spec)
                      spec.loader.exec_module(module)
              except Exception as e:
-                 logger.error(f"Failed to load module {module_name} from {plugin_path}: {e}")
+                 logger.error(f"从 {plugin_path} 加载模块 {module_name} 失败: {e}")
                  return
 
         # Register functions
@@ -172,7 +172,7 @@ class PluginManager:
                 else:
                     # Fallback: maybe the module has a main entry point?
                     # For now, just warn
-                    logger.warning(f"Function '{cmd_id}' not found in module '{module_name}' for plugin '{manifest['name']}'.")
+                    logger.warning(f"在插件 '{manifest['name']}' 的模块 '{module_name}' 中未找到函数 '{cmd_id}'。")
 
         self.loaded_modules[manifest['name']] = module
 

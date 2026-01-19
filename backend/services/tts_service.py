@@ -92,7 +92,7 @@ class TTSService:
             await communicate.save(filepath)
             return filepath
         except Exception as e:
-            print(f"Edge TTS Error: {e}")
+            print(f"Edge TTS 错误: {e}")
             return None
 
     async def _synthesize_openai(self, text: str, config_json: dict, config: VoiceConfig, overrides: dict = None) -> Optional[str]:
@@ -139,7 +139,7 @@ class TTSService:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(url, headers=headers, json=payload)
                 if response.status_code != 200:
-                    print(f"OpenAI TTS API Error: {response.text}")
+                    print(f"OpenAI TTS API 错误: {response.text}")
                     return None
                 
                 with open(filepath, "wb") as f:
@@ -147,7 +147,7 @@ class TTSService:
                     
             return filepath
         except Exception as e:
-             print(f"OpenAI TTS Error: {e}")
+             print(f"OpenAI TTS 错误: {e}")
              return None
 
     def cleanup_old_files(self, max_age_seconds: int = 3600):
@@ -167,9 +167,9 @@ class TTSService:
                         os.remove(filepath)
                         count += 1
             if count > 0:
-                print(f"[TTS] Cleaned up {count} old audio files.")
+                print(f"[TTS] 清理了 {count} 个旧音频文件。")
         except Exception as e:
-            print(f"[TTS] Periodic Cleanup Error: {e}")
+            print(f"[TTS] 定期清理错误: {e}")
 
     def cleanup(self, filepath: str):
         """清理特定的音频文件"""
@@ -177,7 +177,7 @@ class TTSService:
             if os.path.exists(filepath):
                 os.remove(filepath)
         except Exception as e:
-            print(f"Cleanup Error: {e}")
+            print(f"清理错误: {e}")
 
 # 单例模式
 _tts_service = None

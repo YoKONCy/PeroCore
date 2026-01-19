@@ -33,7 +33,7 @@ class ConfigManager:
                     data = json.load(f)
                     self.config.update(data)
             except Exception as e:
-                logger.error(f"Failed to load config from {self.config_path}: {e}")
+                logger.error(f"加载配置文件失败 {self.config_path}: {e}")
         else:
             self.save_config()
 
@@ -42,7 +42,7 @@ class ConfigManager:
             with open(self.config_path, 'w', encoding='utf-8') as f:
                 json.dump(self.config, f, indent=4)
         except Exception as e:
-            logger.error(f"Failed to save config to {self.config_path}: {e}")
+            logger.error(f"保存配置文件失败 {self.config_path}: {e}")
 
     def get(self, key, default=None):
         return self.config.get(key, default)

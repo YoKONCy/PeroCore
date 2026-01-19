@@ -61,9 +61,9 @@ class CompanionService:
             try:
                 with open(self.cache_file, 'r', encoding='utf-8') as f:
                     self.chat_cache = json.load(f)
-                logger.info(f"[Companion] Recovered {len(self.chat_cache)} log entries from cache.")
+                logger.info(f"[Companion] 从缓存中恢复了 {len(self.chat_cache)} 条日志。")
             except Exception as e:
-                logger.error(f"[Companion] Failed to load cache: {e}")
+                logger.error(f"[Companion] 加载缓存失败: {e}")
 
     def _save_cache_to_disk(self):
         """将聊天缓存保存到磁盘以进行崩溃恢复"""
@@ -71,12 +71,12 @@ class CompanionService:
             with open(self.cache_file, 'w', encoding='utf-8') as f:
                 json.dump(self.chat_cache, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            logger.error(f"[Companion] Failed to save cache: {e}")
+            logger.error(f"[Companion] 保存缓存失败: {e}")
 
     def update_activity(self):
         """更新最后活动时间以重置陪伴定时器"""
         self.last_activity_time = datetime.now()
-        logger.info("[Companion] Timer reset due to user activity.")
+        logger.info("[Companion] 由于用户活动重置了计时器。")
 
     async def start(self):
         if self.is_running:
@@ -85,14 +85,14 @@ class CompanionService:
         # 首先检查轻量模式
         config = get_config_manager()
         if not config.get("lightweight_mode", False):
-            logger.warning("[Companion] Cannot start: Lightweight mode is disabled.")
+            logger.warning("[Companion] 无法启动：轻量模式已禁用。")
             return
 
         self.is_running = True
         self.last_activity_time = datetime.now()
         self.task = asyncio.create_task(self._loop())
         self.vision_task = asyncio.create_task(self._vision_loop())
-        logger.info("Companion Service started.")
+        logger.info("陪伴服务已启动。")
 
     async def stop(self):
         self.is_running = False
@@ -122,7 +122,7 @@ class CompanionService:
         except:
             pass
             
-        logger.info("Companion Service stopped.")
+        logger.info("陪伴服务已停止。")
 
     async def _vision_loop(self):
         """每 2 秒截取屏幕的后台任务"""
@@ -138,7 +138,7 @@ class CompanionService:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"[Companion] Vision loop error: {e}")
+                logger.error(f"[Companion] 视觉循环错误: {e}")
                 await asyncio.sleep(5)
 
     async def _summarize_and_save_memory(self):
@@ -146,7 +146,7 @@ class CompanionService:
         if not self.chat_cache:
             return
 
-        logger.info(f"[Companion] Summarizing {len(self.chat_cache)} messages...")
+        logger.info(f"[Companion] 正在总结 {len(self.chat_cache)} 条消息...")
         
         try:
             # 构建对话文本
@@ -184,21 +184,21 @@ class CompanionService:
                         importance=2,
                         source="companion"
                     )
-                    logger.info("[Companion] Memory summary saved successfully.")
+                    logger.info("[Companion] 记忆总结已保存。")
                     
                     # 清除缓存和文件
                     self.chat_cache = []
                     if os.path.exists(self.cache_file):
                         os.remove(self.cache_file)
         except Exception as e:
-            logger.error(f"[Companion] Failed to summarize memory: {e}")
+            logger.error(f"[Companion] 记忆总结失败: {e}")
 
     async def _loop(self):
         """陪伴模式的主循环"""
         from services.voice_manager import voice_manager # 在此处导入以避免循环依赖或初始化顺序问题
         
-        logger.info("[Companion] Loop started.")
-        print("[Companion] Loop started.", flush=True)
+        logger.info("[Companion] 循环已启动。")
+        print("[Companion] 循环已启动。", flush=True)
         
         # 广播初始陪伴状态
         try:
@@ -206,9 +206,9 @@ class CompanionService:
             await asyncio.sleep(2) 
             await voice_manager.broadcast({"type": "status", "content": "idle"})
             await voice_manager.broadcast({"type": "text_response", "content": "陪伴中..."})
-            print("[Companion] Initial state broadcasted.", flush=True)
+            print("[Companion] 初始状态已广播。", flush=True)
         except Exception as e:
-            logger.warning(f"Failed to broadcast companion start state: {e}")
+            logger.warning(f"广播陪伴启动状态失败: {e}")
 
         # 启动时立即强制运行一次
         first_run = True
@@ -247,8 +247,8 @@ class CompanionService:
                 # Reset first run flag
                 first_run = False
                 
-                logger.info("[Companion] Triggering active dialogue...")
-                print("[Companion] Triggering active dialogue...", flush=True)
+                logger.info("[Companion] 触发主动对话...")
+                print("[Companion] 触发主动对话...", flush=True)
 
                 # 3. 休眠后再次检查是否仍已启用且无新活动
                 if not self.is_running or not await self._is_enabled():
@@ -256,16 +256,16 @@ class CompanionService:
 
                 # 4. 使用视觉缓冲区（最后 2 张图像）
                 if not self.vision_buffer:
-                    logger.warning("[Companion] Vision buffer empty. Waiting...")
+                    logger.warning("[Companion] 视觉缓冲区为空，等待中...")
                     await asyncio.sleep(2)
                     continue
                 
                 # 取最后 2 张图像
                 current_images = self.vision_buffer[-2:]
-                logger.info(f"[Companion] Using {len(current_images)} images from buffer.")
+                logger.info(f"[Companion] 使用缓冲区中的 {len(current_images)} 张图像。")
 
                 # 5. 生成响应
-                logger.info("[Companion] Analyzing screen with LLM...")
+                logger.info("[Companion] 正在使用 LLM 分析屏幕...")
                 
                 # 通知 UI：思考中（覆盖 "陪伴中..."）
                 await voice_manager.broadcast({"type": "status", "content": "thinking"})
@@ -276,12 +276,12 @@ class CompanionService:
                 
                 # 6. 说话
                 if response_text:
-                    logger.info(f"[Companion] Pero says: {response_text}")
-                    print(f"[Companion] Pero says: {response_text}", flush=True)
+                    logger.info(f"[Companion] Pero 说: {response_text}")
+                    print(f"[Companion] Pero 说: {response_text}", flush=True)
                     await self._speak(response_text)
                 else:
                     # 如果没有响应，恢复到陪伴状态
-                    print("[Companion] No response generated.", flush=True)
+                    print("[Companion] 未生成响应。", flush=True)
                     await voice_manager.broadcast({"type": "status", "content": "idle"})
                     await asyncio.sleep(0.5) # 等待前端清除
                     await voice_manager.broadcast({"type": "text_response", "content": "陪伴中..."})
@@ -290,8 +290,8 @@ class CompanionService:
                 self.update_activity()
                     
             except Exception as e:
-                logger.error(f"[Companion] Error in loop: {e}")
-                print(f"[Companion] Error in loop: {e}", flush=True)
+                logger.error(f"[Companion] 循环错误: {e}")
+                print(f"[Companion] 循环错误: {e}", flush=True)
                 await asyncio.sleep(10) # 错误退避
 
     async def _is_enabled(self) -> bool:
@@ -319,7 +319,7 @@ class CompanionService:
             img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
             return img_str
         except Exception as e:
-            logger.error(f"[Companion] Screen capture error: {e}")
+            logger.error(f"[Companion] 屏幕截取错误: {e}")
             return None
 
     async def _generate_response(self, base64_imgs: list) -> Optional[str]:
@@ -327,7 +327,7 @@ class CompanionService:
             # 获取活动模型
             config_entry = await session.get(Config, "current_model_id")
             if not config_entry:
-                logger.warning("[Companion] No current model configured.")
+                logger.warning("[Companion] 未配置当前模型。")
                 return None
             
             model_id = int(config_entry.value)
@@ -423,11 +423,11 @@ class CompanionService:
                             session, "desktop", "companion_mode", "（观察屏幕）", full_content, pair_id
                         )
                     except Exception as e:
-                        logger.error(f"[Companion] Log save error: {e}")
+                        logger.error(f"[Companion] 日志保存错误: {e}")
 
                 return full_content
             except Exception as e:
-                logger.error(f"[Companion] LLM error: {e}")
+                logger.error(f"[Companion] LLM 错误: {e}")
                 try:
                     from services.voice_manager import voice_manager
                     await voice_manager.broadcast({"type": "status", "content": "idle"})
@@ -466,7 +466,7 @@ class CompanionService:
             segments = [s.strip() for s in tts_text.split('\n') if s.strip()]
             if segments:
                 tts_text = segments[-1]
-                logger.info(f"[Companion] TTS refined to last paragraph: {tts_text[:50]}...")
+                logger.info(f"[Companion] TTS 优化为最后一段: {tts_text[:50]}...")
 
         if not ui_text and not tts_text:
             return
@@ -484,7 +484,7 @@ class CompanionService:
             # 发送文本气泡（带有供 UI 渲染的思考/动作）
             await voice_manager.broadcast({"type": "text_response", "content": ui_text})
         except Exception as e:
-            logger.error(f"[Companion] Failed to broadcast UI events: {e}")
+            logger.error(f"[Companion] 广播 UI 事件失败: {e}")
 
         # 3. 动态语音参数与 TTS
         if tts_text and tts_text.strip():
@@ -492,7 +492,7 @@ class CompanionService:
                 audio_path = await self.tts_service.synthesize(tts_text)
                 if audio_path and os.path.exists(audio_path):
                     if not pygame:
-                            logger.error("Pygame not installed, cannot play audio.")
+                            logger.error("未安装 Pygame，无法播放音频。")
                             return
 
                     try:
@@ -509,9 +509,9 @@ class CompanionService:
                         except:
                             pass
                     except Exception as e:
-                        logger.error(f"[Companion] Audio playback error: {e}")
+                        logger.error(f"[Companion] 音频播放错误: {e}")
             except Exception as e:
-                logger.error(f"[Companion] TTS error: {e}")
+                logger.error(f"[Companion] TTS 错误: {e}")
         
         # Finally 块以重置状态
         try:

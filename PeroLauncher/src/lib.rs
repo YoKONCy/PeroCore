@@ -309,10 +309,11 @@ async fn open_ide_window(app: tauri::AppHandle) {
         )
         .title("Pero Chat")
         .inner_size(1280.0, 800.0)
-        .maximized(true)
+        .maximized(false)
         .resizable(true)
         .decorations(false)
         .transparent(true)
+        .shadow(true)
         .visible(true)
         .build();
 
@@ -340,9 +341,12 @@ async fn open_dashboard(app: tauri::AppHandle) {
         )
         .title("Pero Dashboard")
         .inner_size(1200.0, 800.0)
-        .maximized(true)
+        .maximized(false)
         .resizable(true)
         .fullscreen(false)
+        .decorations(false)
+        .transparent(true)
+        .shadow(true)
         .visible(true)
         .build();
     }

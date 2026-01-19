@@ -48,6 +48,11 @@ class RealtimeVoiceManager:
             # [特性] 智能 ReAct 过滤器
             # 目标：只朗读最终回复，忽略 思考/计划/行动/观察 (Thinking/Plan/Action/Observation) 的历史记录。
             
+            # 0. 全局移除思考 (Thinking) 和 碎碎念 (Monologue)
+            # 无论是否检测到 Final Answer，这些内容都绝对不应该朗读
+            cleaned = re.sub(r'【(?:Thinking|Monologue).*?】', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
+            cleaned = re.sub(r'\[(?:Thinking|Monologue).*?\]', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
+
             # 策略 1：如果存在 "Final Answer" (最终回答) 标记，则提取其后的所有内容。
             final_marker = re.search(r'(?:Final Answer|最终回答|回复)[:：]?\s*(.*)', cleaned, flags=re.DOTALL | re.IGNORECASE)
             if final_marker:
@@ -58,11 +63,6 @@ class RealtimeVoiceManager:
                 
                 # 标准化换行符
                 cleaned = cleaned.replace('\r\n', '\n')
-                
-                # 先移除特定块
-                # 移除思考 (Thinking) 块 (支持 [] 和 【】) 以及 碎碎念 (Monologue)
-                cleaned = re.sub(r'【(?:Thinking|Monologue).*?】', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
-                cleaned = re.sub(r'\[(?:Thinking|Monologue).*?\]', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
                 
                 # 识别最后一个 "技术标题" 并提取其后的内容
                 # 标题包括：Plan:, Action:, Observation:, Result:, Thought:
@@ -188,7 +188,7 @@ class RealtimeVoiceManager:
             try:
                 await connection.send_json(message)
             except Exception as e:
-                logger.warning(f"Broadcast failed for client: {e}")
+                logger.warning(f"向客户端广播失败: {e}")
                 disconnected.append(connection)
         
         for connection in disconnected:
@@ -198,12 +198,12 @@ class RealtimeVoiceManager:
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
-        logger.info("Realtime voice client connected")
+        logger.info("实时语音客户端已连接")
 
     def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
-        logger.info("Realtime voice client disconnected")
+        logger.info("实时语音客户端已断开")
 
     async def handle_websocket(self, websocket: WebSocket):
         await self.connect(websocket)
@@ -224,14 +224,14 @@ class RealtimeVoiceManager:
                     if audio_data_base64:
                         # 1. 检查是否有正在进行的任务 (打断机制)
                         if self.current_task and not self.current_task.done():
-                            print("[VOICE] Interruption detected! Cancelling current thinking task...")
+                            print("[语音] 检测到打断！正在取消当前思考任务...")
                             self.current_task.cancel()
                             try:
                                 await self.current_task
                             except asyncio.CancelledError:
-                                print("[VOICE] Previous task cancelled successfully.")
+                                print("[语音] 上一个任务已成功取消。")
                             except Exception as e:
-                                print(f"[VOICE] Error cancelling previous task: {e}")
+                                print(f"[语音] 取消上一个任务时出错: {e}")
                         
                         # 2. 启动新任务
                         self.current_task = asyncio.create_task(self._process_voice_turn(websocket, audio_data_base64))
@@ -241,7 +241,7 @@ class RealtimeVoiceManager:
             if self.current_task and not self.current_task.done():
                 self.current_task.cancel()
         except Exception as e:
-            logger.error(f"WebSocket error: {e}")
+            logger.error(f"WebSocket 错误: {e}")
             self.disconnect(websocket)
             if self.current_task and not self.current_task.done():
                 self.current_task.cancel()
@@ -255,14 +255,14 @@ class RealtimeVoiceManager:
         temp_audio_path = f"temp_voice_{id(websocket)}.wav"
         try:
             print("\n" + "="*60)
-            print(f"[VOICE] Start New Turn at {time.strftime('%H:%M:%S')}")
+            print(f"[语音] 开始新一轮对话 {time.strftime('%H:%M:%S')}")
             print("="*60)
             
             with open(temp_audio_path, "wb") as f:
                 f.write(base64.b64decode(audio_base64))
             
             # 2. ASR: 语音转文字 (无论是否原生多模态，都需要 ASR 文本用于长记忆搜索和对话历史)
-            print("[ASR] Transcribing audio...")
+            print("[ASR] 正在转录音频...")
             await websocket.send_json({"type": "status", "content": "listening"})
             
             asr_start = time.time()
@@ -278,12 +278,12 @@ class RealtimeVoiceManager:
             asr_duration = time.time() - asr_start
             
             if not user_text or not user_text.strip():
-                print(f"[ASR] No speech detected ({asr_duration:.2f}s).")
+                print(f"[ASR] 未检测到语音 ({asr_duration:.2f}s)。")
                 await websocket.send_json({"type": "status", "content": "idle"})
                 return
 
 
-            print(f"[ASR] User said: \"{user_text}\" ({asr_duration:.2f}s)")
+            print(f"[ASR] 用户说: \"{user_text}\" ({asr_duration:.2f}s)")
             await websocket.send_json({"type": "transcription", "content": user_text})
 
             # 重置陪伴模式定时器
@@ -291,10 +291,10 @@ class RealtimeVoiceManager:
                 from services.companion_service import companion_service
                 companion_service.update_activity()
             except Exception as e:
-                logger.warning(f"[VoiceManager] Failed to reset companion timer: {e}")
+                logger.warning(f"[VoiceManager] 重置陪伴定时器失败: {e}")
 
             # 3. Agent: 获取回复
-            print("[AGENT] Generating response...")
+            print("[Agent] 正在生成响应...")
             
             async def report_status(status_type: str, content: str):
                 """内部回调，用于将 Agent 的进度推送到前端"""
@@ -302,7 +302,7 @@ class RealtimeVoiceManager:
                 try:
                     await websocket.send_json({"type": "status", "content": status_type, "message": content})
                 except Exception as e:
-                    logger.warning(f"Failed to send status (connection likely closed): {e}")
+                    logger.warning(f"发送状态失败 (连接可能已关闭): {e}")
                     # 如果连接断开，这里抛出异常会中断 Agent 的执行
                     # 为了不让 AgentService 记为 Error，我们可以选择吞掉异常，
                     # 或者让 AgentService 识别这种中断。
@@ -329,19 +329,19 @@ class RealtimeVoiceManager:
                         if model_config and model_config.enable_voice:
                             enable_voice_input = True
                 except Exception as e:
-                    logger.warning(f"Failed to check voice input config: {e}")
+                    logger.warning(f"检查语音输入配置失败: {e}")
 
                 messages_payload = [{"role": "user", "content": user_text}]
                 
                 if enable_voice_input:
-                    print(f"[VOICE] Native Audio Input Enabled. Path: {temp_audio_path}")
+                    print(f"[语音] 原生音频输入已启用。路径: {temp_audio_path}")
                     try:
                         if os.path.exists(temp_audio_path):
                             with open(temp_audio_path, "rb") as f:
                                 audio_bytes = f.read()
                                 audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
                             
-                            print(f"[VOICE] Audio loaded. Size: {len(audio_bytes)} bytes. Preparing payload...")
+                            print(f"[语音] 音频已加载。大小: {len(audio_bytes)} 字节。正在准备负载...")
                             
                             # --- 实验性功能：多模态兼容性 Payload ---
                             # 我们同时提供新的 OpenAI 'input_audio'
@@ -369,12 +369,12 @@ class RealtimeVoiceManager:
                                     }
                                 ]
                             }]
-                            print("[VOICE] Sent Robust Multimodal (Text + Audio + Compatibility) payload to LLM.")
+                            print("[语音] 已发送鲁棒的多模态 (文本 + 音频 + 兼容性) 负载给 LLM。")
                         else:
-                            print(f"[VOICE] Audio file not found: {temp_audio_path}")
+                            print(f"[语音] 未找到音频文件: {temp_audio_path}")
                             messages_payload = [{"role": "user", "content": user_text}]
                     except Exception as e:
-                        print(f"[VOICE] Failed to prepare audio payload: {e}")
+                        print(f"[语音] 准备音频负载失败: {e}")
                         import traceback
                         traceback.print_exc()
                         # 回退到纯文本模式
@@ -401,17 +401,17 @@ class RealtimeVoiceManager:
                         if chunk:
                             full_response += chunk
                 except WebSocketDisconnect:
-                    print("[VOICE] User disconnected during generation.")
+                    print("[语音] 用户在生成过程中断开连接。")
                     return
                 except Exception as e:
-                    print(f"[VOICE] Error during generation: {e}")
+                    print(f"[语音] 生成过程中出错: {e}")
                     generation_error = str(e)
                 
                 agent_duration = time.time() - agent_start
-                print(f"[AGENT] Response generated (Length: {len(full_response)}, {agent_duration:.2f}s)")
+                print(f"[Agent] 响应已生成 (长度: {len(full_response)}, {agent_duration:.2f}s)")
                 
                 # 4. 处理回复：解析标签、保存日志 (AgentService 已处理)、TTS
-                print("[PROCESS] Parsing tags and preparing TTS...")
+                print("[Process] 正在解析标签并准备 TTS...")
                 
                 # 4.1 解析并执行元数据 (AgentService.chat 内部已调用 _save_parsed_metadata)
                 # 但由于 _save_parsed_metadata 是在 chat 结束时调用的，这里我们可以保留或删除
@@ -444,14 +444,14 @@ class RealtimeVoiceManager:
                     
                     await websocket.send_json({"type": "text_response", "content": ui_response})
                 except Exception as e:
-                    logger.warning(f"Failed to send text response: {e}")
+                    logger.warning(f"发送文本响应失败: {e}")
                     return
 
                 # 4.4 动态选择音色和语速
                 target_voice, target_rate, target_pitch = self._get_voice_params(full_response)
                 
                 # 4.6 TTS 合成并播放
-                print(f"[TTS] Synthesizing with {target_voice} (Rate: {target_rate})...")
+                print(f"[TTS] 正在合成 {target_voice} (语速: {target_rate})...")
                 tts_start = time.time()
                 audio_path = await self.tts_service.synthesize(
                     tts_response, 
@@ -462,7 +462,7 @@ class RealtimeVoiceManager:
                 tts_duration = time.time() - tts_start
                 
                 if audio_path:
-                    print(f"[TTS] Audio ready ({tts_duration:.2f}s), sending to client.")
+                    print(f"[TTS] 音频就绪 ({tts_duration:.2f}s)，正在发送给客户端。")
                     # 读取音频文件并转为 base64 发送
                     try:
                         ext = os.path.splitext(audio_path)[1].replace('.', '') or "mp3"
@@ -475,14 +475,14 @@ class RealtimeVoiceManager:
                                 "format": ext
                             })
                     except Exception as e:
-                        logger.warning(f"Failed to send audio response: {e}")
+                        logger.warning(f"发送音频响应失败: {e}")
                         return
                 else:
-                    print(f"❌ [4/4] TTS: Failed to synthesize audio ({tts_duration:.2f}s).")
+                    print(f"❌ [4/4] TTS: 合成音频失败 ({tts_duration:.2f}s)。")
                 
                 total_duration = time.time() - start_turn_time
                 print("="*60)
-                print(f"🏁 [Voice Pipeline] Turn Completed in {total_duration:.2f}s")
+                print(f"🏁 [语音流程] 本轮结束，耗时 {total_duration:.2f}s")
                 print("="*60 + "\n")
                 
                 try:
@@ -492,9 +492,9 @@ class RealtimeVoiceManager:
                 break # 只处理一次 session
 
         except WebSocketDisconnect:
-            logger.info("Client disconnected during voice turn")
+            logger.info("客户端在语音对话期间断开连接")
         except Exception as e:
-            logger.error(f"Error processing voice turn: {e}")
+            logger.error(f"处理语音对话出错: {e}")
             try:
                 await websocket.send_json({"type": "error", "content": str(e)})
             except:

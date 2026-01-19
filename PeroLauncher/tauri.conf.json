@@ -18,12 +18,17 @@
                 "width": 900,
                 "height": 600,
                 "resizable": true,
-                "decorations": true,
-                "transparent": false,
+                "decorations": false,
+                "transparent": true,
                 "alwaysOnTop": false,
                 "visible": true,
-                "maximized": true,
-                "center": true
+                "maximized": false,
+                "center": true,
+                "shadow": true,
+                "windowEffects": {
+                    "effects": ["mica"],
+                    "state": "active"
+                }
             },
             {
                 "label": "pet",
@@ -57,7 +62,11 @@
                 "transparent": true,
                 "visible": false,
                 "center": true,
-                "shadow": true
+                "shadow": true,
+                "windowEffects": {
+                    "effects": ["mica"],
+                    "state": "active"
+                }
             }
         ],
         "security": {

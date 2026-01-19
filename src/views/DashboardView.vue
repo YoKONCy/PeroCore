@@ -1,5 +1,7 @@
 <template>
   <div class="dashboard-wrapper">
+    <CustomTitleBar :transparent="true" title="Pero Dashboard" />
+
     <!-- 动态背景 -->
     <div class="background-blobs">
       <div class="blob blob-1"></div>
@@ -7,7 +9,7 @@
       <div class="blob blob-3"></div>
     </div>
 
-    <el-container class="main-layout">
+    <el-container class="main-layout pt-8">
       <!-- 侧边导航栏 -->
       <el-aside width="260px" class="glass-sidebar">
         <div class="brand-area">
@@ -1062,6 +1064,7 @@
 
 <script setup>
 import { ref, shallowRef, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import CustomTitleBar from '../components/layout/CustomTitleBar.vue'
 import { listen, emit } from '@tauri-apps/api/event'
 import { WebviewWindow, getAllWebviewWindows } from '@tauri-apps/api/webviewWindow'
 import VoiceConfigPanel from './VoiceConfigPanel.vue'

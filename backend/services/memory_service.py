@@ -32,7 +32,7 @@ async def get_rust_engine(session: AsyncSession):
         # 技术防御说明：
         # 1. 采用类 CSR (Simulated CSR) 稀疏矩阵存储亿级关联，内存占用极低。
         # 2. 扩散算子满足收敛性证明 (详见 benchmarks/KDN_mathematical_proof.md)，防止激活爆炸。
-        print("[Memory] Initializing PEDSA Cognitive Engine (Rust Core)...", flush=True)
+        print("[Memory] 正在初始化 PEDSA 认知引擎 (Rust Core)...", flush=True)
         _rust_engine = CognitiveGraphEngine()
         _rust_engine.configure(max_active_nodes=10000, max_fan_out=20)
         
@@ -83,9 +83,9 @@ async def get_rust_engine(session: AsyncSession):
             
             mem_offset += BATCH_SIZE
             
-        print(f"[Memory] Rust Engine Loaded with {total_loaded} connections (Batched).", flush=True)
+        print(f"[Memory] Rust 引擎已加载 {total_loaded} 个连接 (分批加载)。", flush=True)
     except Exception as e:
-        print(f"[Memory] Failed to init Rust engine: {e}")
+        print(f"[Memory] 初始化 Rust 引擎失败: {e}")
         _rust_engine = False # 标记为不可用
         
     return _rust_engine
@@ -127,7 +127,7 @@ class MemoryService:
         # 即使这里是 []，下面同步写入 VectorDB 时也会被跳过，导致数据不一致。
         # 因此，如果 embedding 为空，我们应该考虑重试或记录严重错误。
         if not embedding_vec:
-             print(f"[MemoryService] Warning: Embedding generation failed for memory content: {content[:30]}...")
+             print(f"[MemoryService] 警告: 记忆内容嵌入生成失败: {content[:30]}...")
 
         embedding_json = json.dumps(embedding_vec)
 
@@ -184,7 +184,7 @@ class MemoryService:
                             for i, tag_name in enumerate(tag_list):
                                 vector_service.add_tag(tag_name, tag_embeddings[i])
                         except Exception as tag_e:
-                            print(f"[MemoryService] Failed to index tags: {tag_e}")
+                            print(f"[MemoryService] 索引标签失败: {tag_e}")
                 
                 # 构建元数据
                 metadata_dict = {
@@ -213,11 +213,11 @@ class MemoryService:
                     metadata=metadata_dict
                 )
             except Exception as e:
-                print(f"[MemoryService] Failed to sync to VectorDB: {e}")
+                print(f"[MemoryService] 同步到 VectorDB 失败: {e}")
         else:
             # [Fix] 如果 embedding 为空，强制进行一次同步重试，或加入后台重试队列
             # 这里简单地做一次同步重试（阻塞式），确保关键数据不丢失
-            print(f"[MemoryService] Embedding was empty, attempting synchronous retry for Memory ID {memory.id}...")
+            print(f"[MemoryService] Embedding 为空，正在对 Memory ID {memory.id} 进行同步重试...")
             try:
                 # 强制重新加载模型并编码
                 retry_vec = embedding_service.encode_one(content)
@@ -241,11 +241,11 @@ class MemoryService:
                             "agent_id": agent_id
                         }
                     )
-                    print(f"[MemoryService] Retry successful for Memory ID {memory.id}.")
+                    print(f"[MemoryService] Memory ID {memory.id} 重试成功。")
                 else:
-                    print(f"[MemoryService] Critical: Retry failed. Memory {memory.id} is stored without vector index.")
+                    print(f"[MemoryService] 严重错误: 重试失败。Memory {memory.id} 已存储但无向量索引。")
             except Exception as retry_e:
-                print(f"[MemoryService] Retry exception: {retry_e}")
+                print(f"[MemoryService] 重试异常: {retry_e}")
 
         # 4. 更新上一条记忆的 next_id (双向链表维护)
         if last_memory:
@@ -316,7 +316,7 @@ class MemoryService:
             return user_log, assistant_log
         except Exception as e:
             await session.rollback()
-            print(f"[MemoryService] Failed to save log pair: {e}")
+            print(f"[MemoryService] 保存日志对失败: {e}")
             raise e
 
     @staticmethod
@@ -364,7 +364,7 @@ class MemoryService:
                 end_dt = datetime.combine(target_date, time.max)
                 statement = statement.where(ConversationLog.timestamp >= start_dt).where(ConversationLog.timestamp <= end_dt)
             except ValueError:
-                print(f"[MemoryService] Invalid date format: {date_str}")
+                print(f"[MemoryService] 无效的日期格式: {date_str}")
 
         if sort == "desc":
             statement = statement.order_by(desc(ConversationLog.timestamp), desc(ConversationLog.id))
@@ -437,7 +437,7 @@ class MemoryService:
         try:
             await session.commit()
         except Exception as e:
-            print(f"[MemoryService] Failed to update access stats: {e}")
+            print(f"[MemoryService] 更新访问统计失败: {e}")
 
     @staticmethod
     async def logical_flashback(session: AsyncSession, text: str, limit: int = 5, agent_id: str = "pero") -> List[Dict[str, Any]]:

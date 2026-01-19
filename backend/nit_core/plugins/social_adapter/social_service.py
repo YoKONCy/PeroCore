@@ -60,16 +60,16 @@ class SocialService:
 
     async def start(self):
         if not self.enabled:
-            logger.info("Social Mode is disabled.")
+            logger.info("社交模式已禁用。")
             return
 
         # 初始化社交专用数据库
         try:
             from .database import init_social_db
             await init_social_db()
-            logger.info("[Social] Independent social database initialized.")
+            logger.info("[Social] 独立社交数据库已初始化。")
         except Exception as e:
-            logger.error(f"[Social] Failed to initialize social database: {e}")
+            logger.error(f"[Social] 初始化社交数据库失败: {e}")
         
         # [动态注册工具] 注册 notify_master 为 Agent 可用的工具
         try:
@@ -127,13 +127,13 @@ class SocialService:
                     }
                 })
                 
-            logger.info("[Social] Registered dynamic tool: qq_notify_master")
+            logger.info("[Social] 已注册动态工具: qq_notify_master")
             
         except Exception as e:
-            logger.error(f"[Social] Failed to register dynamic tools: {e}")
+            logger.error(f"[Social] 注册动态工具失败: {e}")
 
         self.running = True
-        logger.info("SocialService started. Waiting for WebSocket connection at /api/social/ws")
+        logger.info("社交服务已启动。等待 WebSocket 连接于 /api/social/ws")
         
         # 启动随机想法循环
         if not self._thought_task:
@@ -159,10 +159,10 @@ class SocialService:
             await asyncio.sleep(5)
             
         if not self.active_ws:
-            logger.warning("[Social] Startup check skipped: No WebSocket connection.")
+            logger.warning("[Social] 启动检查跳过: 无 WebSocket 连接。")
             return
             
-        logger.info("[Social] Running startup checks...")
+        logger.info("[Social] 正在执行启动检查...")
         await asyncio.sleep(5) # 等待系统稳定
         
         # 1. 复活历史会话 (确保主动搭话功能可用)
@@ -176,10 +176,10 @@ class SocialService:
             if version_resp and version_resp.get("status") == "ok":
                 data = version_resp.get("data", {})
                 app_name = data.get("app_name", "").lower()
-                logger.info(f"[Social] Bot Implementation: {data.get('app_name')} {data.get('app_version')}")
+                logger.info(f"[Social] Bot 实现: {data.get('app_name')} {data.get('app_version')}")
                 
                 if "napcat" in app_name:
-                    logger.info("[Social] NapCat detected. Skipping polling for pending system messages (Event-driven mode).")
+                    logger.info("[Social] 检测到 NapCat。跳过轮询待处理系统消息（事件驱动模式）。")
                     return
 
             # NapCat/OneBot 并不总是具有用于*待处理*请求的 'get_system_msg_new' 或类似的标准化 API
@@ -198,7 +198,7 @@ class SocialService:
                     # 检查响应状态
                     if candidate_resp and candidate_resp.get("status") == "ok" and candidate_resp.get("retcode") == 0:
                         resp = candidate_resp
-                        logger.info(f"[Social] Successfully used API '{api_name}'")
+                        logger.info(f"[Social] 成功使用 API '{api_name}'")
                         break
                     elif candidate_resp and candidate_resp.get("retcode") == 1404:
                         # API 不存在 (NapCat 等)
@@ -214,7 +214,7 @@ class SocialService:
                     pass
             
             if not resp:
-                logger.info("[Social] Startup check skipped: Could not retrieve system messages (API unsupported or timed out).")
+                logger.info("[Social] 启动检查跳过: 无法获取系统消息（API 不支持或超时）。")
                 return
 
             data = resp.get("data", {})
@@ -229,7 +229,7 @@ class SocialService:
                 # 其他实现返回带有键的字典
                 requests = data.get("request", []) + data.get("requester", [])
             
-            logger.info(f"[Social] Found {len(requests)} system messages on startup.")
+            logger.info(f"[Social] 启动时发现 {len(requests)} 条系统消息。")
             
             for req in requests:
                 # 仅处理未处理的消息？
@@ -278,14 +278,14 @@ class SocialService:
                 await asyncio.sleep(5)
                 
         except Exception as e:
-            logger.error(f"[Social] Startup check failed: {e}")
+            logger.error(f"[Social] 启动检查失败: {e}")
 
     async def _revive_sessions_from_db(self):
         """
         [Cold Start] 从数据库恢复最近活跃的会话到内存中。
         用于解决重启后内存 Session 丢失导致无法主动搭话的问题。
         """
-        logger.info("[Social] Reviving sessions from database...")
+        logger.info("[Social] 正在从数据库恢复会话...")
         try:
             from .database import get_social_db_session
             from .models_db import QQMessage
@@ -326,10 +326,10 @@ class SocialService:
                             break
                 
                 if revived_count > 0:
-                    logger.info(f"[Social] Revived {revived_count} sessions from DB.")
+                    logger.info(f"[Social] 从数据库恢复了 {revived_count} 个会话。")
                 return revived_count
         except Exception as e:
-            logger.error(f"[Social] Failed to revive sessions: {e}")
+            logger.error(f"[Social] 恢复会话失败: {e}")
             return 0
 
     async def _random_thought_worker(self):
@@ -337,7 +337,7 @@ class SocialService:
         定期检查 Pero 是否想自发说话的后台任务。
         实现了基于会话活跃度的状态机逻辑。
         """
-        logger.info("[Social] Random Thought Stream initialized (Session-based State).")
+        logger.info("[Social] 随机想法流已初始化（基于会话状态）。")
         
         while self.running:
             try:
@@ -384,7 +384,7 @@ class SocialService:
                 is_active = time_since_active < 120
                 
                 session_state = "ACTIVE" if is_active else "DIVE"
-                logger.info(f"[Social] Triggering bubble check for {target_session.session_name} (State: {session_state}, Last Active: {time_since_active:.0f}s ago)...")
+                logger.info(f"[Social] 触发冒泡检查: {target_session.session_name} (状态: {session_state}, 上次活跃: {time_since_active:.0f}秒前)...")
                 
                 # 尝试说话
                 # 注意：_attempt_random_thought 需要修改为返回是否说话了
@@ -403,12 +403,12 @@ class SocialService:
                     interval = random.randint(600, 1200)
                     
                 self._next_thought_time = now + timedelta(seconds=interval)
-                logger.info(f"[Social] Next bubble check in {interval} seconds.")
+                logger.info(f"[Social] 下次冒泡检查将在 {interval} 秒后。")
 
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"[Social] Random thought worker error: {e}", exc_info=True)
+                logger.error(f"[Social] 随机想法工作线程错误: {e}", exc_info=True)
 
     async def _attempt_random_thought(self, target_session: Optional[SocialSession] = None) -> bool:
         """
@@ -429,7 +429,7 @@ class SocialService:
                 return False
             target_session = random.choice(sessions)
         
-        logger.info(f"[Social] Secretary is observing {target_session.session_name} ({target_session.session_id})...")
+        logger.info(f"[Social] 秘书正在观察 {target_session.session_name} ({target_session.session_id})...")
 
         # 计算会话状态
         now = datetime.now()
@@ -521,7 +521,7 @@ class SocialService:
                         break
                     except Exception as err:
                         if i == retry_count:
-                            logger.error(f"[Social] Secretary LLM failed: {err}")
+                            logger.error(f"[Social] 秘书 LLM 失败: {err}")
                             return False # 静默失败
                         await asyncio.sleep(1)
 
@@ -555,11 +555,11 @@ class SocialService:
 
                 # 3. 再次检查是否包含工具调用代码（幻觉防护）
                 if "```" in content or "<tool_code>" in content or "def " in content:
-                    logger.warning(f"[Social] Secretary hallucinated code/tools, suppressed. Content: {content}")
+                    logger.warning(f"[Social] 秘书产生幻觉代码/工具，已抑制。内容: {content}")
                     return False
                 
                 # 4. 说话！
-                logger.info(f"[Social] Secretary decided to speak: {content}")
+                logger.info(f"[Social] 秘书决定发言: {content}")
                 await self.send_msg(target_session, content)
                 
                 # 5. 更新状态
@@ -578,7 +578,7 @@ class SocialService:
                 )
                 return True
             except Exception as e:
-                logger.error(f"[Social] Secretary Error: {e}")
+                logger.error(f"[Social] 秘书错误: {e}")
                 return False
 
     # 移除旧的 _attempt_random_thought (已被上面覆盖)
@@ -598,19 +598,19 @@ class SocialService:
             yesterday_str = yesterday.strftime("%Y-%m-%d")
             
             if last_date_str == yesterday_str:
-                logger.info(f"[Social] Daily summary for {yesterday_str} already exists.")
+                logger.info(f"[Social] {yesterday_str} 的每日摘要已存在。")
                 return
 
             # 2. 生成摘要
-            logger.info(f"[Social] Generating daily summary for {yesterday_str}...")
+            logger.info(f"[Social] 正在生成 {yesterday_str} 的每日摘要...")
             await self._generate_daily_summary(yesterday_str)
             
             # 3. 更新配置
             self.config_manager.set("last_social_summary_date", yesterday_str)
-            logger.info(f"[Social] Daily summary for {yesterday_str} completed.")
+            logger.info(f"[Social] {yesterday_str} 的每日摘要已完成。")
             
         except Exception as e:
-            logger.error(f"[Social] Daily summary failed: {e}", exc_info=True)
+            logger.error(f"[Social] 每日摘要失败: {e}", exc_info=True)
 
     async def _generate_daily_summary(self, date_str: str):
         """
@@ -645,7 +645,7 @@ class SocialService:
                 logs = (await session.exec(statement)).all()
                 
                 if not logs:
-                    logger.info(f"[Social] No logs found for {date_str}.")
+                    logger.info(f"[Social] 未找到 {date_str} 的日志。")
                     return
 
                 # 2. 准备上下文
@@ -706,10 +706,10 @@ class SocialService:
                 #     memory_type="summary"
                 # )
                 
-                logger.info(f"[Social] Summary generated and saved to FILE only (DB disabled).")
+                logger.info(f"[Social] 摘要已生成并仅保存到文件（数据库已禁用）。")
 
         except Exception as e:
-            logger.error(f"[Social] Error generating summary: {e}", exc_info=True)
+            logger.error(f"[Social] 生成摘要错误: {e}", exc_info=True)
 
     async def stop(self):
         self.running = False
@@ -724,7 +724,7 @@ class SocialService:
         if self.active_ws:
             await self.active_ws.close()
             self.active_ws = None
-        logger.info("SocialService stopped.")
+        logger.info("社交服务已停止。")
 
     async def handle_websocket(self, websocket: WebSocket):
         if not self.enabled:
@@ -733,13 +733,13 @@ class SocialService:
 
         await websocket.accept()
         self.active_ws = websocket
-        logger.info("Social Adapter Connected via WebSocket.")
+        logger.info("社交适配器已通过 WebSocket 连接。")
         
         try:
             while True:
                 # [隔离检查] 在每次循环迭代中重新检查启用状态
                 if not self.enabled:
-                    logger.warning("Social Mode disabled during runtime. Closing connection.")
+                    logger.warning("运行时社交模式已禁用。正在关闭连接。")
                     await websocket.close(code=1000, reason="Social Mode Disabled")
                     self.active_ws = None
                     break
@@ -758,10 +758,10 @@ class SocialService:
                 
                 await self.process_event(event)
         except WebSocketDisconnect:
-            logger.warning("Social Adapter Disconnected.")
+            logger.warning("社交适配器已断开连接。")
             self.active_ws = None
         except Exception as e:
-            logger.error(f"WebSocket error: {e}")
+            logger.error(f"WebSocket 错误: {e}")
             self.active_ws = None
 
     async def process_event(self, event: Dict[str, Any]):
@@ -810,7 +810,7 @@ class SocialService:
                 
                 if user_id == self_id:
                     if sub_type == "ban":
-                        logger.warning(f"[Social Notice] Pero has been BANNED in group {group_id} for {duration}s by {operator_id}.")
+                        logger.warning(f"[社交通知] Pero 在群 {group_id} 被 {operator_id} 禁言了 {duration} 秒。")
                         # 通知主人
                         await self.notify_master(f"【被禁言通知】\n我在群 {group_id} 被 {operator_id} 禁言了 {duration} 秒。QAQ", "high")
                         # 记录系统消息
@@ -820,7 +820,7 @@ class SocialService:
                             event
                         )
                     elif sub_type == "lift_ban":
-                        logger.info(f"[Social Notice] Pero's ban LIFTED in group {group_id}.")
+                        logger.info(f"[社交通知] Pero 在群 {group_id} 的禁言已解除。")
                         await self.notify_master(f"【解禁通知】\n我在群 {group_id} 的禁言已解除。", "normal")
                         await self.session_manager.persist_system_notification(
                             group_id, "group", 
@@ -842,7 +842,7 @@ class SocialService:
                 operator_id = str(event.get("operator_id"))
                 user_id = str(event.get("user_id")) # Message sender
                 
-                logger.info(f"[Social Notice] Group Message Recalled in {group_id}. Operator: {operator_id}, Sender: {user_id}")
+                logger.info(f"[社交通知] 群 {group_id} 消息已撤回。操作者: {operator_id}, 发送者: {user_id}")
                 
                 msg = f"[System] A message from {user_id} was recalled by {operator_id}."
                 await self.session_manager.persist_system_notification(group_id, "group", msg, event)
@@ -850,13 +850,13 @@ class SocialService:
             elif notice_type == "friend_recall":
                 user_id = str(event.get("user_id"))
                 
-                logger.info(f"[Social Notice] Private Message Recalled by {user_id}.")
+                logger.info(f"[社交通知] 私聊消息已由 {user_id} 撤回。")
                 
                 msg = f"[System] {user_id} recalled a message."
                 await self.session_manager.persist_system_notification(user_id, "private", msg, event)
                 
         except Exception as e:
-            logger.error(f"[Social] Failed to handle notice event: {e}", exc_info=True)
+            logger.error(f"[社交] 处理通知事件失败: {e}", exc_info=True)
 
     async def get_bot_info(self):
         """获取 Bot 自身信息 (OneBot v11)"""
@@ -874,7 +874,7 @@ class SocialService:
         self.pending_requests[request_id] = future
         
         try:
-            logger.info("[Social] Fetching bot login info...")
+            logger.info("[Social] 正在获取 Bot 登录信息...")
             await self.active_ws.send_text(json.dumps(payload))
             response = await asyncio.wait_for(future, timeout=10.0)
             if response.get("status") == "ok":
@@ -883,9 +883,9 @@ class SocialService:
                     "nickname": data.get("nickname", "Pero"),
                     "user_id": str(data.get("user_id", ""))
                 }
-                logger.info(f"[Social] Bot Info Updated: {self.bot_info}")
+                logger.info(f"[Social] Bot 信息已更新: {self.bot_info}")
         except Exception as e:
-            logger.error(f"[Social] Failed to get bot info: {e}")
+            logger.error(f"[Social] 获取 Bot 信息失败: {e}")
             # Clean up if needed, though pop happens in handle_websocket
             if request_id in self.pending_requests:
                 del self.pending_requests[request_id]
@@ -898,7 +898,7 @@ class SocialService:
         comment = event.get("comment", "")
         flag = event.get("flag")
         
-        logger.info(f"[Social] Processing friend request from {user_id}. Comment: {comment}")
+        logger.info(f"[Social] 正在处理来自 {user_id} 的好友请求。备注: {comment}")
         
         # 模拟“思考”延迟（5-15 秒）以显得更像人类
         await asyncio.sleep(random.randint(5, 15))
@@ -939,7 +939,7 @@ class SocialService:
                 try:
                     result = json.loads(content_str)
                 except json.JSONDecodeError:
-                    logger.warning(f"[Social] Failed to parse friend request JSON: {content_str}")
+                    logger.warning(f"[Social] 解析好友请求 JSON 失败: {content_str}")
                     # 回退逻辑
                     result = {
                         "decision": "HOLD",
@@ -950,7 +950,7 @@ class SocialService:
                 notify_msg = result.get("notify_master", "")
                 greeting = result.get("greeting_message", "")
                 
-                logger.info(f"[Social] Friend Request Decision: {decision}, Notify: {notify_msg}, Greeting: {greeting}")
+                logger.info(f"[Social] 好友请求决定: {decision}, 通知: {notify_msg}, 问候: {greeting}")
                 
                 if decision == "HOLD":
                     # 延迟处理
@@ -998,7 +998,7 @@ class SocialService:
                             # 确保 user_id 是 int
                             target_id = int(user_id)
                             await self.send_private_msg(target_id, greeting)
-                            logger.info(f"[Social] Sent greeting to new friend {user_id}: {greeting}")
+                            logger.info(f"[Social] 向新朋友 {user_id} 发送问候: {greeting}")
                             
                             # 记录 Pero 的打招呼内容
                             await MemoryService.save_log(
@@ -1010,7 +1010,7 @@ class SocialService:
                                 metadata={"sender_name": "Pero", "platform": "qq", "type": "greeting"}
                             )
                         except Exception as e:
-                            logger.error(f"[Social] Failed to send greeting: {e}")
+                            logger.error(f"[Social] 发送问候失败: {e}")
 
                     # 5. 记录到记忆
                     action_str = "同意" if approve else "拒绝"
@@ -1025,14 +1025,14 @@ class SocialService:
                     await db_session.commit()
                 
         except Exception as e:
-            logger.error(f"[Social] Error handling friend request: {e}", exc_info=True)
+            logger.error(f"[Social] 处理好友请求错误: {e}", exc_info=True)
 
     async def delete_friend(self, user_id: int):
         """
         删除好友。
         """
         await self._send_api("delete_friend", {"user_id": user_id})
-        logger.info(f"[Social] Friend {user_id} deleted.")
+        logger.info(f"[Social] 好友 {user_id} 已删除。")
 
     async def handle_session_flush(self, session: SocialSession):
         """
@@ -1041,7 +1041,7 @@ class SocialService:
         - SUMMONED: 直接调用 AgentService 进行回复 (Action Layer)。
         - OBSERVING: 调用 Secretary (Think Layer) 决定是否插嘴。
         """
-        logger.info(f"--- [FLUSH] Processing Session {session.session_id} (State: {session.state}) ---")
+        logger.info(f"--- [FLUSH] 处理会话 {session.session_id} (状态: {session.state}) ---")
         
         # [New Feature] 尝试触发记忆总结
         # 即使这次不回复，我们也检查是否积累了足够的消息需要总结
@@ -1058,13 +1058,13 @@ class SocialService:
         if session.state != "summoned" and not is_active:
             # 既不是被召唤，也不活跃（潜水模式），交给秘书层判断 (Low Cost)
             # 如果缓冲区是因为满了或超时刷新的，说明可能正在热聊
-            logger.info(f"[{session.session_id}] Eavesdrop flush (Dive Mode). Delegating to Secretary.")
+            logger.info(f"[{session.session_id}] 偷听刷新 (潜水模式)。委派给秘书。")
             await self._attempt_random_thought(target_session=session)
             return
 
         # 确定模式，供 Prompt 使用
         current_mode = "SUMMONED" if session.state == "summoned" else "ACTIVE_OBSERVATION"
-        logger.info(f"[{session.session_id}] Processing in {current_mode} mode. Invoking Main Agent.")
+        logger.info(f"[{session.session_id}] 正在以 {current_mode} 模式处理。调用主 Agent。")
 
         # [Multimodal Barrier] Ensure all pending image downloads are complete
         # Collect tasks from buffer messages
@@ -1086,10 +1086,10 @@ class SocialService:
                                 if idx < len(msg.images):
                                     msg.images[idx] = res
                         except Exception as e:
-                            logger.warning(f"[Social] Image download task failed (already done): {e}")
+                            logger.warning(f"[Social] 图片下载任务失败（已完成）: {e}")
 
         if all_pending_tasks:
-            logger.info(f"[{session.session_id}] Waiting for {len(all_pending_tasks)} image downloads...")
+            logger.info(f"[{session.session_id}] 等待 {len(all_pending_tasks)} 个图片下载...")
             try:
                 # Wait with timeout (e.g. 10 seconds)
                 done, pending = await asyncio.wait(all_pending_tasks, timeout=10.0)
@@ -1102,15 +1102,15 @@ class SocialService:
                             msg, idx = task_to_msg_map[task]
                             if idx < len(msg.images):
                                 msg.images[idx] = res
-                                logger.info(f"[Social] Resolved image path: {res}")
+                                logger.info(f"[Social] 解析图片路径: {res}")
                     except Exception as e:
-                        logger.warning(f"[Social] Image download task failed: {e}")
+                        logger.warning(f"[Social] 图片下载任务失败: {e}")
                 
                 if pending:
-                    logger.warning(f"[{session.session_id}] {len(pending)} image downloads timed out.")
+                    logger.warning(f"[{session.session_id}] {len(pending)} 个图片下载超时。")
                     # Optional: cancel pending tasks? No, let them finish in background for future reference.
             except Exception as e:
-                logger.error(f"[{session.session_id}] Error waiting for images: {e}")
+                logger.error(f"[{session.session_id}] 等待图片时出错: {e}")
 
         # --- 以下是被动呼唤 (Summoned) 或 活跃观察 (Active) 的处理逻辑 (Action Layer) ---
         
@@ -1128,7 +1128,7 @@ class SocialService:
         
         # 如果数据库为空（极少见，因为刚存入了 buffer），则回退到 buffer
         if not recent_messages:
-            logger.warning(f"[{session.session_id}] DB history empty, falling back to buffer.")
+            logger.warning(f"[{session.session_id}] 数据库历史记录为空，回退到缓冲区。")
             recent_messages = session.buffer
             
         # [Enhancement] Fetch Related Private Contexts (Cross-Context Awareness)
@@ -1159,7 +1159,7 @@ class SocialService:
         injected_ids = set() # For deduplication
         
         if relevant_users:
-            logger.info(f"[{session.session_id}] Fetching related private contexts for: {relevant_users}")
+            logger.info(f"[{session.session_id}] 正在获取相关私聊上下文: {relevant_users}")
             for uid in relevant_users:
                 try:
                     p_msgs = await self.session_manager.get_recent_messages(uid, "private", limit=10)
@@ -1169,7 +1169,7 @@ class SocialService:
                         for pm in p_msgs:
                             injected_ids.add(str(pm.msg_id))
                 except Exception as e:
-                    logger.warning(f"Failed to fetch private context for {uid}: {e}")
+                    logger.warning(f"获取 {uid} 的私聊上下文失败: {e}")
 
         # Set ContextVar for tool deduplication
         token = injected_msg_ids_var.set(injected_ids)
@@ -1253,7 +1253,7 @@ class SocialService:
         # [优化] 限制图片数量，防止上下文过大
         if len(session_images) > 2:
             dropped_count = len(session_images) - 2
-            logger.info(f"[Social] Found {len(session_images)} images, dropping {dropped_count} oldest ones. Keeping last 2.")
+            logger.info(f"[Social] 发现 {len(session_images)} 张图片，丢弃最旧的 {dropped_count} 张。保留最后 2 张。")
             session_images = session_images[-2:]
             
         xml_context += "    </session>\n"
@@ -1320,18 +1320,18 @@ class SocialService:
                                 data_url = f"data:{mime_type};base64,{b64_data}"
                                 processed_images.append(data_url)
                         except Exception as e:
-                            logger.error(f"[Social] Failed to read image file {img_path}: {e}")
+                            logger.error(f"[Social] 读取图片文件 {img_path} 失败: {e}")
                     else:
                         # 如果不是本地文件，假设是 URL (回退逻辑)
                         # 仍需过滤腾讯内网 URL
                         if "multimedia.nt.qq.com.cn" in img_path or "c2cpicdw.qpic.cn" in img_path or "gchat.qpic.cn" in img_path:
-                            logger.warning(f"[Social] Skipped incompatible image URL: {img_path[:50]}...")
+                            logger.warning(f"[Social] 跳过不兼容的图片 URL: {img_path[:50]}...")
                             continue
                         processed_images.append(img_path)
 
                 config = await agent._get_llm_config()
                 if config.get("enable_vision") and processed_images:
-                    logger.info(f"Injecting {len(processed_images)} images into social chat context.")
+                    logger.info(f"注入 {len(processed_images)} 张图片到社交聊天上下文。")
                     for img_url in processed_images:
                         user_content.append({
                             "type": "image_url",
@@ -1340,10 +1340,10 @@ class SocialService:
                 
                 messages.append({"role": "user", "content": user_content})
                 
-                logger.info(f"Calling Social Agent for session {session.session_id}...")
+                logger.info(f"正在呼叫会话 {session.session_id} 的社交 Agent...")
                 response_text = await agent.social_chat(messages, session_id=f"social_{session.session_id}")
                 
-                logger.info(f"Social Agent Response: {response_text}")
+                logger.info(f"社交 Agent 响应: {response_text}")
                 
                 # 3. 发送回复
                 if response_text and response_text.strip() and "IGNORE" not in response_text and "[PASS]" not in response_text:
@@ -1369,21 +1369,21 @@ class SocialService:
                         # await MemoryService.save_log(...)
                         
                     except Exception as e:
-                        logger.error(f"Failed to persist Pero's reply: {e}")
+                        logger.error(f"持久化 Pero 回复失败: {e}")
                 elif response_text and "[PASS]" in response_text:
-                     logger.info(f"[{session.session_id}] Agent decided to PASS (Active Observation).")
+                     logger.info(f"[{session.session_id}] Agent 决定 PASS (活跃观察)。")
                 else:
-                    logger.info(f"[Social] Skipped reply. Response was empty or IGNORE. (Content: '{response_text}')")
+                    logger.info(f"[Social] 跳过回复。响应为空或 IGNORE。（内容: '{response_text}'）")
             
             # [State Reset] 处理完成后，重置状态为 observing
             # Active 状态由时间窗口 (ACTIVE_DURATION) 隐式控制，不需要显式状态
             # Summoned 状态必须被清除，否则后续的 Buffer Flush 会被错误地当作 Summoned 处理
             if session.state == "summoned":
-                logger.info(f"[{session.session_id}] Resetting state from SUMMONED to OBSERVING.")
+                logger.info(f"[{session.session_id}] 正在将状态从 SUMMONED 重置为 OBSERVING。")
                 session.state = "observing"
 
         except Exception as e:
-            logger.error(f"Error in handle_session_flush: {e}", exc_info=True)
+            logger.error(f"handle_session_flush 错误: {e}", exc_info=True)
         finally:
             # 重置会话状态
             session.state = "observing"
@@ -1412,11 +1412,11 @@ class SocialService:
                 count = (await db_session.exec(statement)).one()
                 
                 if count >= 30:
-                    logger.info(f"[{session.session_id}] Triggering memory summarization (Unsummarized count: {count})")
+                    logger.info(f"[{session.session_id}] 触发记忆总结 (未总结数量: {count})")
                     await self._perform_summarization(session, db_session)
                     
         except Exception as e:
-            logger.error(f"Error in _check_and_summarize_memory: {e}")
+            logger.error(f"_check_and_summarize_memory 错误: {e}")
 
     async def _perform_summarization(self, session: SocialSession, db_session):
         """
@@ -1479,7 +1479,7 @@ class SocialService:
                         )
             
             if not llm_service:
-                logger.error("[Social] Failed to initialize LLMService: No valid model config found.")
+                logger.error("[Social] 初始化 LLMService 失败: 未找到有效的模型配置。")
                 return
 
             # 使用 chat 接口
@@ -1525,7 +1525,7 @@ class SocialService:
                         agent_id=agent_id
                     )
                     
-                    logger.info(f"[{session.session_id}] Memory summarized: {summary} | Keywords: {keywords}")
+                    logger.info(f"[{session.session_id}] 记忆已总结: {summary} | 关键词: {keywords}")
                     
                     # 6. 标记消息为已总结
                     for msg in messages:
@@ -1534,10 +1534,10 @@ class SocialService:
                     await db_session.commit()
                     
             except json.JSONDecodeError:
-                logger.error(f"Failed to parse summarization JSON: {response_json_str}")
+                logger.error(f"解析总结 JSON 失败: {response_json_str}")
                 
         except Exception as e:
-            logger.error(f"Error performing summarization: {e}")
+            logger.error(f"执行总结时出错: {e}")
 
     async def send_msg(self, session: SocialSession, message: str):
         """
@@ -1549,7 +1549,7 @@ class SocialService:
             elif session.session_type == "private":
                 await self.send_private_msg(int(session.session_id), message)
         except Exception as e:
-            logger.error(f"Failed to send message to {session.session_id}: {e}")
+            logger.error(f"发送消息到 {session.session_id} 失败: {e}")
 
     async def _send_api(self, action: str, params: Dict[str, Any]):
         if not self.active_ws:
@@ -1614,7 +1614,7 @@ class SocialService:
             resp = await self._send_api_and_wait("get_friend_list", {})
             return resp.get("data", [])
         except Exception as e:
-            logger.error(f"get_friend_list failed: {e}")
+            logger.error(f"获取好友列表失败: {e}")
             return []
 
     async def get_group_list(self):
@@ -1625,7 +1625,7 @@ class SocialService:
             resp = await self._send_api_and_wait("get_group_list", {})
             return resp.get("data", [])
         except Exception as e:
-            logger.error(f"get_group_list failed: {e}")
+            logger.error(f"获取群列表失败: {e}")
             return []
 
     async def get_stranger_info(self, user_id: int):
@@ -1633,7 +1633,7 @@ class SocialService:
             resp = await self._send_api_and_wait("get_stranger_info", {"user_id": user_id})
             return resp.get("data", {})
         except Exception as e:
-            logger.error(f"get_stranger_info failed: {e}")
+            logger.error(f"获取陌生人信息失败: {e}")
             return {"user_id": user_id, "nickname": "Unknown"}
 
     async def get_group_info(self, group_id: int):
@@ -1644,7 +1644,7 @@ class SocialService:
             resp = await self._send_api_and_wait("get_group_info", {"group_id": group_id})
             return resp.get("data", {})
         except Exception as e:
-            logger.error(f"get_group_info failed: {e}")
+            logger.error(f"获取群信息失败: {e}")
             return {}
 
     async def get_group_member_info(self, group_id: int, user_id: int):
@@ -1655,7 +1655,7 @@ class SocialService:
             resp = await self._send_api_and_wait("get_group_member_info", {"group_id": group_id, "user_id": user_id})
             return resp.get("data", {})
         except Exception as e:
-            logger.error(f"get_group_member_info failed: {e}")
+            logger.error(f"获取群成员信息失败: {e}")
             return {}
 
     async def get_group_msg_history(self, group_id: int, count: int = 20):
@@ -1688,7 +1688,7 @@ class SocialService:
                 
             return result_text
         except Exception as e:
-            logger.error(f"get_group_msg_history failed: {e}")
+            logger.error(f"获取群消息历史失败: {e}")
             return f"获取历史记录失败: {e}"
 
     async def read_memory(self, query: str, filter_str: str = ""):
@@ -1742,7 +1742,7 @@ class SocialService:
                  return result_text
                  
          except Exception as e:
-             logger.error(f"Error reading social memory from independent DB: {e}")
+             logger.error(f"从独立数据库读取社交记忆错误: {e}")
              return f"Error: {e}"
 
     async def read_agent_memory(self, query: str):
@@ -1764,11 +1764,11 @@ class SocialService:
                      
                  return result_text
         except Exception as e:
-            logger.error(f"Error reading agent memory: {e}")
+            logger.error(f"读取 Agent 记忆错误: {e}")
             return f"Error: {e}"
          
     async def notify_master(self, content: str, importance: str):
-        logger.info(f"[Social] NOTIFY MASTER [{importance}]: {content}")
+        logger.info(f"[Social] 通知主人 [{importance}]: {content}")
         # 广播到前端
         try:
             # 如果可能，我们需要在方法内部导入 voice_manager 以避免循环导入
@@ -1791,9 +1791,9 @@ class SocialService:
                     qq_num = int(owner_qq)
                     bot_name = self.config_manager.get("bot_name", "Pero")
                     await self.send_private_msg(qq_num, f"【{bot_name}汇报】\n{content}")
-                    logger.info(f"[Social] Notification sent to owner QQ: {qq_num}")
+                    logger.info(f"[Social] 通知已发送给主人 QQ: {qq_num}")
                 except Exception as e:
-                    logger.error(f"[Social] Failed to send notification to owner QQ: {e}")
+                    logger.error(f"[Social] 发送通知给主人 QQ 失败: {e}")
 
 def get_social_service():
     if SocialService._instance is None:

@@ -4,22 +4,24 @@
   <div class="fixed -top-24 -right-24 w-96 h-96 bg-emerald-500/5 blur-[120px] rounded-full pointer-events-none"></div>
   <div class="fixed -bottom-24 -left-24 w-96 h-96 bg-blue-500/5 blur-[120px] rounded-full pointer-events-none"></div>
 
-  <div class="flex h-screen w-screen overflow-hidden bg-slate-950 text-slate-200 font-sans select-text">
+  <CustomTitleBar :transparent="true" />
+  
+  <div class="flex h-screen w-screen overflow-hidden bg-slate-950/70 text-slate-200 font-sans select-text pt-8">
     <!-- Sidebar Navigation -->
     <aside :class="[
-      'glass-effect border-r border-slate-800/50 flex flex-col transition-all duration-300 relative z-20 select-none',
+      'glass-effect border-r border-slate-800/30 flex flex-col transition-all duration-300 relative z-20 select-none backdrop-blur-md',
       isSidebarCollapsed ? 'w-20' : 'w-64'
     ]">
       <div class="p-6 mb-6 flex items-center justify-between">
         <div v-if="!isSidebarCollapsed" class="flex items-center gap-3">
-          <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center text-white shadow-lg shadow-emerald-500/20">
+          <div class="w-8 h-8 rounded-xl bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center text-white shadow-lg shadow-emerald-500/20 ring-1 ring-white/20">
             <Zap :size="18" fill="currentColor" />
           </div>
-          <span class="font-bold tracking-tight text-lg">{{ AGENT_NAME.toUpperCase() }}</span>
+          <span class="font-bold tracking-tight text-lg bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">{{ AGENT_NAME.toUpperCase() }}</span>
         </div>
         <button 
           @click="isSidebarCollapsed = !isSidebarCollapsed"
-          class="p-2 hover:bg-slate-800/50 rounded-lg text-slate-500 transition-colors mx-auto"
+          class="p-2 hover:bg-white/5 rounded-lg text-slate-500 hover:text-emerald-400 transition-all duration-200 mx-auto active:scale-95"
         >
           <Menu :size="20" />
         </button>
@@ -31,15 +33,16 @@
           :key="item.id"
           @click="activeTab = item.id"
           :class="[
-            'w-full flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all duration-300 group',
+            'w-full flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all duration-300 group relative overflow-hidden',
             activeTab === item.id 
-              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
-              : 'text-slate-500 hover:bg-slate-800/50 hover:text-slate-300'
+              ? 'bg-emerald-500/10 text-emerald-400 ring-1 ring-emerald-500/20 shadow-[0_0_15px_rgba(16,185,129,0.1)]' 
+              : 'text-slate-500 hover:bg-white/5 hover:text-slate-200'
           ]"
         >
-          <component :is="item.icon" :size="20" :class="activeTab === item.id ? 'text-emerald-400' : 'group-hover:scale-110 transition-transform'" />
-          <span v-if="!isSidebarCollapsed" class="font-medium text-sm">{{ item.name }}</span>
-          <div v-if="activeTab === item.id && !isSidebarCollapsed" class="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]"></div>
+          <div v-if="activeTab === item.id" class="absolute inset-0 bg-emerald-400/5 blur-sm"></div>
+          <component :is="item.icon" :size="20" :class="activeTab === item.id ? 'text-emerald-400' : 'group-hover:scale-110 transition-transform duration-300'" />
+          <span v-if="!isSidebarCollapsed" class="font-medium text-sm z-10">{{ item.name }}</span>
+          <div v-if="activeTab === item.id && !isSidebarCollapsed" class="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)] z-10"></div>
         </button>
       </nav>
 
@@ -47,29 +50,32 @@
     </aside>
 
     <!-- Main Content -->
-    <div class="flex-1 flex flex-col relative overflow-hidden bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-stops))] from-emerald-900/20 via-slate-950 to-slate-950">
-      <!-- Background Glow -->
-      <div class="absolute top-[-10%] right-[-10%] w-[40%] h-[40%] bg-emerald-500/10 blur-[120px] rounded-full pointer-events-none"></div>
+    <div class="flex-1 flex flex-col relative overflow-hidden bg-transparent">
+      <!-- Background Glow (Subtler) -->
+      <div class="absolute top-[-10%] right-[-10%] w-[40%] h-[40%] bg-emerald-500/5 blur-[150px] rounded-full pointer-events-none"></div>
       
       <!-- Top Header -->
-      <header class="h-20 flex items-center justify-between px-10 border-b border-slate-800/30 backdrop-blur-md z-10 select-none">
+      <header class="h-20 flex items-center justify-between px-10 border-b border-slate-800/30 backdrop-blur-sm z-10 select-none">
         <div>
-          <h1 class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">
+          <h1 class="text-2xl font-bold text-white tracking-tight drop-shadow-sm">
             Pero Launcher
           </h1>
-          <p class="text-xs text-slate-500 mt-1 font-mono tracking-wider">版本 0.1.0 • 系统就绪</p>
+          <p class="text-xs text-slate-500 mt-1 font-mono tracking-wider flex items-center gap-2">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+            版本 0.1.0 • 系统就绪
+          </p>
         </div>
 
         <div class="flex items-center gap-6">
-          <div class="flex items-center gap-4 bg-slate-900/80 px-4 py-2 rounded-full border border-slate-800/50">
+          <div class="flex items-center gap-4 bg-slate-900/40 px-5 py-2.5 rounded-full border border-slate-700/30 backdrop-blur-md shadow-sm">
             <div class="flex items-center gap-2">
-              <div :class="['w-2 h-2 rounded-full shadow-[0_0_8px]', getStatusColor(backendStatus)]"></div>
-              <span class="text-xs font-medium text-slate-400 uppercase tracking-tight">核心服务</span>
+              <div :class="['w-2 h-2 rounded-full shadow-[0_0_8px] transition-colors duration-500', getStatusColor(backendStatus)]"></div>
+              <span class="text-xs font-medium text-slate-300 uppercase tracking-tight">核心服务</span>
             </div>
-            <div class="w-px h-3 bg-slate-800"></div>
+            <div class="w-px h-3 bg-slate-700/50"></div>
             <div class="flex items-center gap-2">
-              <div :class="['w-2 h-2 rounded-full shadow-[0_0_8px]', getStatusColor(napcatStatus)]"></div>
-              <span class="text-xs font-medium text-slate-400 uppercase tracking-tight">NapCat</span>
+              <div :class="['w-2 h-2 rounded-full shadow-[0_0_8px] transition-colors duration-500', getStatusColor(napcatStatus)]"></div>
+              <span class="text-xs font-medium text-slate-300 uppercase tracking-tight">NapCat</span>
             </div>
           </div>
         </div>
@@ -322,6 +328,7 @@
 import { ref, onMounted, onUnmounted, nextTick, shallowRef, watch, defineAsyncComponent } from 'vue'
 import { useRouter } from 'vue-router'
 import { AGENT_NAME, APP_TITLE } from '../config'
+import CustomTitleBar from '../components/layout/CustomTitleBar.vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getAllWebviewWindows, getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
