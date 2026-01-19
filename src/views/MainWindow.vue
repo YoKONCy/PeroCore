@@ -3,7 +3,7 @@
     <!-- Custom Title Bar (Always visible, handles drag & window controls) -->
     <CustomTitleBar 
       :is-work-mode="isWorkMode" 
-      title="Pero"
+      :title="APP_TITLE"
       @toggle-mode="toggleMode" 
     />
 
@@ -27,6 +27,7 @@
 import { ref, computed, watch, defineAsyncComponent, onMounted } from 'vue'
 import { emit } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { APP_TITLE } from '../config'
 import CustomTitleBar from '../components/layout/CustomTitleBar.vue'
 import ChatModeView from './ChatModeView.vue'
 import WorkModeView from './WorkModeView.vue'

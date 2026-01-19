@@ -24,12 +24,12 @@
         <!-- Active Agent (Pero) -->
         <div class="flex items-center gap-3 p-2 rounded-xl bg-sky-500/10 border border-sky-500/20 cursor-pointer">
           <div class="relative">
-            <div class="w-10 h-10 rounded-full bg-gradient-to-br from-sky-400 to-blue-500 shadow-md flex items-center justify-center text-white font-bold text-sm">P</div>
+            <div class="w-10 h-10 rounded-full bg-gradient-to-br from-sky-400 to-blue-500 shadow-md flex items-center justify-center text-white font-bold text-sm">{{ AGENT_AVATAR_TEXT }}</div>
             <div class="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-500 border-2 border-white rounded-full"></div>
           </div>
           <div class="flex-1 min-w-0">
             <div class="flex items-center justify-between">
-              <span class="text-sm font-bold text-slate-800 truncate">Pero</span>
+              <span class="text-sm font-bold text-slate-800 truncate">{{ AGENT_NAME }}</span>
               <span class="text-[10px] text-slate-400">刚刚</span>
             </div>
             <div class="text-xs text-sky-600 truncate">主人，我在听呢~</div>
@@ -59,7 +59,7 @@
       <!-- Header (Mock VCPChat) -->
       <header class="h-14 px-6 flex items-center justify-between border-b border-white/20 bg-white/20 backdrop-blur-sm">
         <div class="flex items-center gap-3">
-          <span class="text-lg font-bold text-slate-800">与 Pero 聊天中</span>
+          <span class="text-lg font-bold text-slate-800">与 {{ AGENT_NAME }} 聊天中</span>
           <span class="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 text-[10px] font-bold border border-emerald-500/20">ONLINE</span>
         </div>
         <div class="flex items-center gap-4 text-slate-500">
@@ -76,6 +76,7 @@
 
 <script setup>
 import { Search, User, Bell, Settings } from 'lucide-vue-next';
+import { AGENT_NAME, AGENT_AVATAR_TEXT } from '../config';
 import ChatInterface from '../components/chat/ChatInterface.vue';
 </script>
 

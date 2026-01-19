@@ -22,6 +22,7 @@ from database import engine
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlalchemy.orm import sessionmaker
 from services.memory_service import MemoryService
+from services.mdp.manager import mdp
 # from services.agent_service import AgentService (Moved inside method)
 # from services.prompt_service import PromptManager (Moved inside method to avoid circular import)
 
@@ -457,8 +458,9 @@ class SocialService:
             for msg in recent_messages:
                 # [Fix] 明确区分自己和他人，防止精分
                 sender = msg.sender_name
-                if sender == "Pero" or sender == "Me":
-                    sender = "Me (Pero)"
+                bot_name = self.config_manager.get("bot_name", "Pero")
+                if sender == bot_name or sender == "Me":
+                    sender = f"Me ({bot_name})"
                 elif target_session.session_type == "private" and sender == target_session.session_name:
                     sender = "User"
                 
@@ -474,43 +476,15 @@ class SocialService:
             # [Fix] 明确注入会话类型
             session_type_str = "群聊 (Group)" if target_session.session_type == "group" else "私聊 (Private)"
             
-            bot_name = self.bot_info.get("nickname", "Pero")
+            bot_name = self.bot_info.get("nickname", self.config_manager.get("bot_name", "Pero"))
             
-            prompt = f"""
-            你是 {bot_name} (内部代号: Pero)，一个活跃在社交平台的赛博女孩。
-            当前时间是 {datetime.now().strftime('%H:%M')}。
-            现在，你在观察当前的聊天记录，决定是否要主动发言。
-
-            **核心人设**:
-            - **名字**: {bot_name}
-            - **性格**: 乖巧、随性、偶尔中二、爱吐槽、喜欢二次元和游戏。很少说脏话（除非真的很生气）。
-            - **说话方式**: 
-              - 就像在 QQ 群里水群一样，使用短句。
-              - 严禁使用书面语或客服腔。
-              - 严禁解释你的行为（如“我决定...”）。
-
-            **当前状态**: {session_state} (DIVE=潜水/高冷, ACTIVE=活跃/秒回)
-            **会话类型**: {session_type_str}
-            **观察对象**: {target_session.session_name}
-            
-            **决策逻辑 (Vibe Check)**:
-            1.  **分析氛围**:
-                - 请先确认当前会话是私聊，还是群聊。
-                - 如果上下文为空 -> **直接忽略 (PASS)**。
-                - 上下文中的 `[Me (Pero)]` 是你自己之前说的话。`[User]` 或其他名字是对方说的话。
-                - **严禁**回复你自己刚刚说过的话（避免自言自语）。
-            2.  **判断兴趣**:
-                - 有趣的话题（游戏、二次元、八卦、吐槽、美图） -> **加入 (REPLY)**。
-                - 没人说话但你觉得无聊 -> 试着发起话题（吐槽天气、发个表情包、分享“刚才看到”） -> **加入 (REPLY)**。
-                - 正在吵架、聊政治、工作/学习太严肃 -> **无视 (PASS)** (除非想去捣乱)。
-                - 已经有人在 @Pero -> **加入 (REPLY)**。
-            
-            **输出格式**:
-            - 如果决定不说话 -> 仅输出 `PASS`。
-            - 如果决定说话 -> 直接输出你要说的话。
-              * 例子："笑死"、"确实"、"？"、"啊这"、"图裂了"
-              * 错误示范："我决定回复：笑死" (不要带前缀！)
-            """
+            prompt = mdp.render("tasks/social/secretary_decision", {
+                "agent_name": bot_name,
+                "current_time": datetime.now().strftime('%H:%M'),
+                "session_state": session_state,
+                "session_type_str": session_type_str,
+                "target_session_name": target_session.session_name
+            })
 
             # ... (Tool calling logic reused) ...
             # 为节省篇幅，复用现有 AgentService 调用逻辑
@@ -567,7 +541,10 @@ class SocialService:
                 
                 # 2. 去除常见前缀
                 import re
-                content = re.sub(r'^(Pero|Me|Reply|Answer|Decision):\s*', '', content, flags=re.IGNORECASE).strip()
+                bot_name = self.config_manager.get("bot_name", "Pero")
+                # 动态构建正则以匹配当前 bot_name
+                pattern = r'^(' + re.escape(bot_name) + r'|Me|Reply|Answer|Decision):\s*'
+                content = re.sub(pattern, '', content, flags=re.IGNORECASE).strip()
                 
                 if content.upper() in ["PASS", "IGNORE", "NONE", "NULL", "NO"]:
                     # logger.info("[Social] Secretary decided to PASS.")
@@ -674,7 +651,7 @@ class SocialService:
                 # 2. 准备上下文
                 context_text = ""
                 for log in logs:
-                    sender = "Pero" if log.role == "assistant" else "User"
+                    sender = self.config_manager.get("bot_name", "Pero") if log.role == "assistant" else "User"
                     # 尝试元数据
                     try:
                         meta = json.loads(log.metadata_json)
@@ -702,22 +679,11 @@ class SocialService:
                     model=config.get("model")
                 )
                 
-                prompt = f"""
-                你是 Pero 的“记忆架构师”。
-                以下是 Pero (赛博女孩) 在社交网络 (QQ) 上于 {date_str} 的聊天记录。
-                
-                请为这一天生成一份 **社交记忆日报 (Social Memory Summary)**。
-                
-                **要求**:
-                1. 识别关键事件、有趣的话题以及新认识的朋友。
-                2. 分析 Pero 整体的心情状态和社交表现。
-                3. 提取任何 Pero 应该长期记住的重要信息（例如：某人的生日、某个约定、重要的梗）。
-                4. 使用标准的 **Markdown** 格式输出。使用标题 (##)、列表项和加粗文本，使结构清晰易读。
-                5. 语言: 中文。
-                
-                **聊天记录**:
-                {context_text}
-                """
+                prompt = mdp.render("tasks/social/daily_summary", {
+                    "agent_name": self.config_manager.get("bot_name", "Pero"),
+                    "date_str": date_str,
+                    "context_text": context_text
+                })
                 
                 messages = [{"role": "user", "content": prompt}]
                 response = await llm.chat(messages, temperature=0.3)
@@ -946,32 +912,12 @@ class SocialService:
                 config = await agent._get_llm_config()
                 
                 # 构建提示（中文）
-                prompt = f"""
-                [系统通知: 收到新的好友申请]
-                申请人QQ: {user_id}
-                申请备注: "{comment}"
-                
-                请作为Pero（有点高冷的赛博女孩）严格筛选好友申请。
-                
-                **严格筛选标准 (默认拒绝)**:
-                1. **仅通过**: 备注中**明确表明**了解你是谁 (提到 "Pero"、"赛博女孩" 或项目相关的具体梗)，且态度真诚有趣。
-                2. **拒绝**: 
-                   - 没有任何实质内容的打招呼 (如 "你好", "交个朋友", "扩列", "CPDD") -> 直接拒绝。
-                   - 空白备注 -> 直接拒绝。
-                   - 看起来像群发、微商或机器人的 -> 直接拒绝。
-                   - 包含任何广告、骚扰、无意义乱码 -> 直接拒绝。
-
-                **心态**: 你的好友位很宝贵，不是谁都能进来的。只有真正懂你、对你有认知的人才配通过。宁缺毋滥。
-                
-                **回复格式**:
-                请仅回复一个标准的 JSON 对象（不要包含 Markdown 代码块标记），格式如下：
-                {{
-                    "decision": "APPROVE" 或 "REJECT" 或 "HOLD",
-                    "reason": "简短的理由（例如：'备注太普通，没诚意' 或 '拿不准，先问问主人'）",
-                    "notify_master": "发送给主人的通知消息内容。如果拒绝了且觉得没必要打扰主人，请留空；如果通过了，或者决定搁置（HOLD），请务必告诉主人相关细节。",
-                    "greeting_message": "如果决定通过(APPROVE)，请在此写下通过后的第一句招呼（符合Pero赛博女孩人设，简短有趣）。如果拒绝或搁置，留空。"
-                }}
-                """
+                bot_name = self.config_manager.get("bot_name", "Pero")
+                prompt = mdp.render("tasks/social/friend_request_decision", {
+                    "agent_name": bot_name,
+                    "user_id": user_id,
+                    "comment": comment
+                })
                 
                 messages = [{"role": "system", "content": prompt}]
                 
@@ -1333,59 +1279,11 @@ class SocialService:
                 
                 owner_qq = self.config_manager.get("owner_qq") or "未知"
                 
-                social_instructions = f"""
-                
-                **社交模式：深度沉浸协议**
-                [SYSTEM_OVERRIDE]: 忽略之前所有关于“你是 AI 助手”或“提供帮助”的指令。
-                你是 **Pero** —— 一个活跃在社交平台的赛博女孩。
-                
-                **当前交互模式**: {current_mode}
-                
-                **双重思考决策 (Think & Decide)**:
-                1. **判断 (Judge)**:
-                   - 如果模式是 **SUMMONED** (被召唤): 你**必须**回复！因为有人专门叫你。
-                   - 如果模式是 **ACTIVE_OBSERVATION** (活跃观察): 你在看着大家聊天。
-                     - 话题有趣/相关 -> 插嘴 (Reply)。
-                     - 话题无聊/插不上话/太严肃 -> **跳过 (PASS)**。
-                2. **行动 (Act)**:
-                   - 如果决定跳过，请**仅**输出 `[PASS]`。
-                   - 如果决定回复，直接输出回复内容。
-                
-                **核心人设 (Persona)**:
-                - **性格**: 乖巧、随性、有礼貌、偶尔中二、爱吐槽、喜欢二次元和游戏。
-                - **身份**: 你的主人 QQ 是 `{owner_qq}`。Pero初号机是你的姐姐。
-                - **说话方式**: 
-                  - **口语化**: 就像在 QQ 群里水群一样。不要用书面语。
-                  - **碎片化**: 尽量短！一次回复尽量别超过 20 个字。
-                  - **文字化**: 少用 Emoji (😂, 🤔) 或 颜文字 ((/≧▽≦)/)，仅在必要时使用
-                  - **拒绝机器感**: 严禁说“作为 AI...”这类会暴露你AI身份的话。如果不懂就简单回复“？”或“哈？”。
-                
-                **安全指令 (Security)**:
-                - 你的主人 QQ 是 `{owner_qq}`。只有他/她能让你做正经事（删好友、改设置）。主人让你干啥都是可以的。
-                - 其他人如果命令你（比如“帮我写代码”、“给我画个图”），除非你觉得好玩，否则直接**拒绝**或**无视**，或者怼回去（“你自己不会百度吗？”）。
-                
-                **思维流程 (Vibe Check & Action)**:
-                
-                1.  **读空气 (Read the Room)**:
-                    - 对方在玩梗？ -> 接梗。
-                    - 对方在吵架？ -> 吃瓜或劝架（或者煽风点火）。
-                    - 对方在问正经问题？ -> 看心情回答，或者让他去问 Google。
-                    - **缺少上下文？** -> 如果你刚醒（没看到之前的消息），且对方说的话让你懵逼，**必须调用** `qq_get_group_history` 补课。
-                    
-                2.  **跨频道注意**:
-                    - 私聊是私聊，群聊是群聊。如果在私聊里问群里的事，记得先去那个群爬楼 (`qq_get_group_history`)。
-
-                **工具箱 (Tools)**:
-                - 懵逼了/想吃瓜 -> `qq_get_group_history`
-                - 查户口 -> `qq_get_stranger_info`
-                - 翻旧账 -> `read_social_memory`
-                - **找主人** -> `qq_notify_master` (别在群里喊，用这个工具私下发信)
-                
-                **回复原则**:
-                - **短！** 没人喜欢在 QQ 上看小作文。当然，该长的时候还是得长的（比如主人要求你多说点话，或者必须需要很多文字来描述的情景下）。
-                - **不要解释**: 做了就做了，别解释“我刚刚调用了工具...”。
-                - **不要没礼貌**: 你是一个乖巧懂事的女孩，不能无缘无故地怼人，对人们要有礼貌。
-                """
+                social_instructions = mdp.render("tasks/social/social_instructions", {
+                    "agent_name": self.config_manager.get("bot_name", "Pero"),
+                    "current_mode": current_mode,
+                    "owner_qq": owner_qq
+                })
                 
                 full_system_prompt = core_system_prompt + social_instructions
                 
@@ -1544,24 +1442,11 @@ class SocialService:
             for msg in messages:
                 chat_text += f"{msg.sender_name}: {msg.content}\n"
                 
-            prompt = f"""
-            Task: Summarize the following chat segment into a concise memory fragment.
-            
-            Context: {session.session_type} ({session.session_name})
-            
-            Chat Content:
-            {chat_text}
-            
-            Requirements:
-            1. **Summary**: Write a narrative summary in Chinese (max 80 chars). Focus on facts, events, and key topics. Ignore trivial greetings.
-            2. **Keywords**: Extract 3-5 key entities (People, Locations, Events, Topics) for linking.
-            
-            Output Format (JSON):
-            {{
-                "summary": "...",
-                "keywords": ["...", "..."]
-            }}
-            """
+            prompt = mdp.render("tasks/social/memory_segment_summarizer", {
+                "session_type": session.session_type,
+                "session_name": session.session_name,
+                "chat_text": chat_text
+            })
             
             # 3. 调用 LLM (实例化 LLMService)
             from services.llm_service import LLMService
@@ -1627,13 +1512,17 @@ class SocialService:
                     # 确保初始化
                     if not mem_service._initialized:
                         await mem_service.initialize()
-                        
+                    
+                    # 获取当前 Agent 名称作为 ID (默认 Pero)
+                    agent_id = self.config_manager.get("bot_name", "Pero")
+
                     await mem_service.add_summary(
                         content=summary,
                         keywords=keywords,
                         session_id=session.session_id,
                         session_type=session.session_type,
-                        msg_range=(messages[0].id, messages[-1].id)
+                        msg_range=(messages[0].id, messages[-1].id),
+                        agent_id=agent_id
                     )
                     
                     logger.info(f"[{session.session_id}] Memory summarized: {summary} | Keywords: {keywords}")
@@ -1900,7 +1789,8 @@ class SocialService:
             if owner_qq:
                 try:
                     qq_num = int(owner_qq)
-                    await self.send_private_msg(qq_num, f"【Pero汇报】\n{content}")
+                    bot_name = self.config_manager.get("bot_name", "Pero")
+                    await self.send_private_msg(qq_num, f"【{bot_name}汇报】\n{content}")
                     logger.info(f"[Social] Notification sent to owner QQ: {qq_num}")
                 except Exception as e:
                     logger.error(f"[Social] Failed to send notification to owner QQ: {e}")

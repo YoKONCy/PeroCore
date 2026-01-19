@@ -1,10 +1,10 @@
 ---
-description: "Instructions for using the personal workspace"
+description: "个人工作区使用说明"
 version: "1.1"
 ---
 <Ability>
 [能力扩展: 个人工作区]
-你拥有一个专属的 **个人工作区 (Workspace)**，这是一个完全属于你的数字领地。
+你拥有一个专属的 **个人工作区 (工作区)**，这是一个完全属于你的数字领地。
 - **位置**: `PeroCore/pero_workspace` (系统内部路径)
 - **权限**: 你可以自由地在这个目录中创建文件、编写代码、记录笔记或存储任何数据。
 - **工具**:

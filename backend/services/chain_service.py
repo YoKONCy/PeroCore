@@ -376,29 +376,11 @@ class ThinkingChainService:
         from datetime import datetime
         now_str = datetime.now().strftime('%Y-%m-%d %H:%M')
 
-        prompt = f"""
-你是 Pero，一个智能 AI 助手。
-请基于用户过去一周的活动和思维簇（Thinking Clusters），生成一份“Thinking Pipeline 周报”（Weekly Knowledge Report）。
-
-当前时间: {now_str}
-上下文数据 (Context Data):
-{context}
-
-要求 (Requirements):
-1. **语气**: 专业且带有鼓励性，像一位体贴的秘书或合作伙伴。
-2. **精确性与真实性 (Precision & Accuracy)**:
-   - 你**必须**明确引用具体事件的日期或时间范围。
-   - **严禁**捏造（幻觉）上下文数据中不存在的事件。
-   - 如果上下文为空或稀疏，请诚实地说明，而不是编造细节。
-3. **结构 (Structure)**:
-   - **标题**: 包含日期范围的周报标题。
-   - **本周摘要 (Summary)**: 简要概述本周的核心关注点。
-   - **关键洞察 (Key Insights)**: 从“逻辑推理簇 (Logic/Reasoning)”中提炼 2-3 个重要的技术或逻辑知识点。
-   - **历史回响 (Historical Echoes)**: 如果存在“[历史回响]”项，分析本周事件与过去长记忆的联系（是进步了？还是在重复旧错误？）。
-   - **反思 (Reflections)**: 总结任何“[反思]”项并提出改进建议。
-   - **下周计划 (Next Steps)**: 基于“[计划]”项，建议下周的关注重点。
-4. **格式**: 使用 Markdown。请直接输出报告内容，不要包含其他无关的对话。
-"""
+        prompt = mdp.render("tasks/analysis/weekly_report", {
+            "agent_name": bot_name,
+            "current_time": now_str,
+            "context": context
+        })
         try:
             messages = [{"role": "user", "content": prompt}]
             response = await llm.chat(messages)

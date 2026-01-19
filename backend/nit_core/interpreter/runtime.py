@@ -12,10 +12,12 @@ try:
     from models import Config, ConversationLog, Memory
     from services.llm_service import LLMService
     from services.memory_service import MemoryService
+    from services.mdp.manager import MDPManager
 except ImportError:
     from backend.models import Config, ConversationLog, Memory
     from backend.services.llm_service import LLMService
     from backend.services.memory_service import MemoryService
+    from backend.services.mdp.manager import MDPManager
 import json
 
 # Global variable to hold session reference (injected by AgentService)
@@ -104,26 +106,35 @@ async def exit_work_mode() -> str:
         api_key = global_config.get("global_llm_api_key")
         api_base = global_config.get("global_llm_api_base")
         
+        # 获取当前 Agent 名称
+        bot_name = global_config.get("bot_name", "Pero")
+
+        # 初始化 MDPManager (hacky way since runtime isn't a service)
+        import os
+        # 假设 runtime.py 位于 backend/nit_core/interpreter/
+        # 我们需要指向 backend/services/mdp/prompts
+        backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        # 修正路径计算：当前在 backend/nit_core/interpreter/runtime.py
+        # __file__ -> runtime.py
+        # dirname -> interpreter
+        # dirname -> nit_core
+        # dirname -> backend
+        # join -> backend/services/mdp/prompts
+        mdp_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "backend", "services", "mdp", "prompts")
+        # 如果路径不对，尝试相对路径
+        if not os.path.exists(mdp_dir):
+             mdp_dir = os.path.join(os.getcwd(), "backend", "services", "mdp", "prompts")
+
+        mdp = MDPManager(mdp_dir)
+
         llm = LLMService(api_key, api_base, "gpt-4o")
         log_text = "\n".join([f"{log.role}: {log.content}" for log in logs])
         
-        prompt = f"""
-        你是 Pero。你刚刚完成了一项编码/工作任务："{task_name}"。
-        以下是本次会话的原始对话日志：
-        
-        {log_text}
-        
-        请撰写一份“手写工作日志”（Markdown 格式）。
-        要求：
-        1. 标题: 📝 Pero 的工作日志 - {task_name}
-        2. 语气: 专业又不失个性（Pero 的风格）。
-        3. 内容:
-           - 目标: 任务是什么？
-           - 过程: 采取的关键步骤、使用的工具、遇到的错误及修复方法。
-           - 结果: 最终成果。
-           - 反思: 你学到了什么？
-        4. 保持简洁但信息量大。
-        """
+        prompt = mdp.render("tasks/nit/work_log", {
+            "agent_name": bot_name,
+            "task_name": task_name,
+            "log_text": log_text
+        })
         
         summary = await llm.chat([{"role": "user", "content": prompt}])
         summary_content = summary["choices"][0]["message"]["content"]

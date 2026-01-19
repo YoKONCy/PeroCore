@@ -1,0 +1,26 @@
+{
+  "enableLocalFile2Url": false,
+  "musicSignUrl": "",
+  "network": {
+    "httpClients": [],
+    "httpServers": [],
+    "httpSseServers": [],
+    "plugins": [],
+    "websocketClients": [
+      {
+        "debug": false,
+        "enable": true,
+        "heartInterval": 30000,
+        "messagePostFormat": "array",
+        "name": "Perocore",
+        "reconnectInterval": 30000,
+        "reportSelfMessage": false,
+        "token": "|*_95%BXs77Bow^x",
+                "url": "ws://127.0.0.1:9120/api/social/ws"
+              }
+    ],
+    "websocketServers": []
+  },
+  "parseMultMsg": false,
+  "websocketClients": null
+}

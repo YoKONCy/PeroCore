@@ -63,7 +63,7 @@
       },
       {
         "commandIdentifier": "qq_get_friend_list",
-        "description": "获取 Pero 的所有好友列表。当你需要知道自己有哪些好友，或者需要查找特定好友的 QQ 号时使用。",
+        "description": "获取当前 Agent 的所有好友列表。当你需要知道自己有哪些好友，或者需要查找特定好友的 QQ 号时使用。",
         "parameters": {
           "type": "object",
           "properties": {},
@@ -72,7 +72,7 @@
       },
       {
         "commandIdentifier": "qq_get_group_list",
-        "description": "获取 Pero 加入的所有群聊列表。当你需要知道自己在哪些群，或者查找特定群的群号时使用。",
+        "description": "获取当前 Agent 加入的所有群聊列表。当你需要知道自己在哪些群，或者查找特定群的群号时使用。",
         "parameters": {
           "type": "object",
           "properties": {},

@@ -2,8 +2,9 @@ import os
 import json
 
 # Define the workspace root relative to this file
-# .../PeroCore/backend/tools/workspace_ops.py -> .../PeroCore/pero_workspace
-WORKSPACE_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "pero_workspace"))
+# backend/nit_core/tools/work/WorkspaceOps/workspace_ops.py -> PeroCore/pero_workspace
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+WORKSPACE_ROOT = os.path.join(BASE_DIR, "pero_workspace")
 
 def _ensure_workspace():
     if not os.path.exists(WORKSPACE_ROOT):
@@ -25,7 +26,7 @@ def _is_safe_path(file_path):
 
 def write_workspace_file(filename: str, content: str) -> str:
     """
-    Write content to a file in the Pero workspace.
+    Write content to a file in the workspace.
     """
     _ensure_workspace()
     if not _is_safe_path(filename):
@@ -45,7 +46,7 @@ def write_workspace_file(filename: str, content: str) -> str:
 
 def read_workspace_file(filename: str) -> str:
     """
-    Read content from a file in the Pero workspace.
+    Read content from a file in the workspace.
     """
     _ensure_workspace()
     if not _is_safe_path(filename):
@@ -64,7 +65,7 @@ def read_workspace_file(filename: str) -> str:
 
 def list_workspace_files(subdir: str = "") -> str:
     """
-    List files in the Pero workspace.
+    List files in the workspace.
     """
     _ensure_workspace()
     

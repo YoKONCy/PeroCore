@@ -1,0 +1,69 @@
+{
+  "spec": 2,
+  "metadata": {
+    "name": "doro",
+    "tips": "doro?doro!doroooo",
+    "license": {
+      "type": "All Rights Reserved"
+    },
+    "authors": [
+      {
+        "name": "雒仁",
+        "role": "模型",
+        "avatar": "avatar/lr.png",
+        "contact": {
+          "Afdian": "https://afdian.com/a/luoren",
+          "Bilibili": "https://b23.tv/WiayS9E"
+        },
+        "comment": "谁知道呢"
+      },
+      {
+        "name": "每天都睡不醒的秋风",
+        "role": "吉祥物",
+        "avatar": "avatar/qf.png",
+        "contact": {
+          "Afdian": "https://afdian.com/a/qf0224",
+          "Bilibili": "https://b23.tv/pOwibHf"
+        },
+        "comment": "晚上死不睡，早上睡不死"
+      }
+    ],
+    "link": {
+      "home": "https://modrinth.com/mod/yes-steve-model",
+      "donate": "https://afdian.net/a/ysmmod"
+    }
+  },
+  "properties": {
+    "height_scale": 0.7,
+    "width_scale": 0.7,
+    "extra_animation": {
+      "extra0": "dance",
+      "extra1": "舔一舔",
+      "extra2": "憔悴doro",
+      "extra3": "doro不知道哦",
+      "extra4": "飞起来",
+      "extra5": "DJdoro",
+      "extra6": "皮娜 siki",
+      "extra7": "功德+1",
+      "extra8": "doro喷泉"
+    },
+    "preview_animation": "gui",
+    "default_texture": "default",
+    "free": true
+  },
+  "files": {
+    "player": {
+      "model": {
+        "main": "models/main.json",
+        "arm": "models/arm.json"
+      },
+      "animation": {
+        "main": "animations/main.animation.json",
+        "extra": "animations/extra.animation.json"
+      },
+      "texture": [
+        "textures/doro.png"
+      ]
+    }
+  }
+}

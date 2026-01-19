@@ -2,6 +2,7 @@ from typing import Optional, List, Dict, Any
 from sqlmodel.ext.asyncio.session import AsyncSession
 from services.llm_service import LLMService
 from services.memory_service import MemoryService
+from services.mdp.manager import MDPManager
 from models import Config, AIModelConfig, ConversationLog, Memory
 from sqlmodel import select
 from sqlalchemy import update
@@ -14,7 +15,10 @@ class ScorerService:
     def __init__(self, session: AsyncSession):
         self.session = session
         self.memory_service = MemoryService()
-        self.prompt_path = os.path.join(os.path.dirname(__file__), "mdp", "scorer", "scorer_prompt.md")
+        
+        # Initialize MDPManager
+        mdp_dir = os.path.join(os.path.dirname(__file__), "mdp", "prompts")
+        self.mdp = MDPManager(mdp_dir)
 
     def _smart_clean_text(self, text: str) -> str:
         """
@@ -181,39 +185,21 @@ class ScorerService:
             model=config["model"]
         )
         
-        # 从文件加载系统提示或回退到默认值
+        # 获取当前 Agent 名称 (用于 Prompt 注入)
+        bot_name = "Pero"
         try:
-            if os.path.exists(self.prompt_path):
-                with open(self.prompt_path, "r", encoding="utf-8") as f:
-                    system_prompt = f.read()
-            else:
-                raise FileNotFoundError("Prompt file not found")
-        except Exception as e:
-            print(f"[秘书] Warning: Failed to load prompt from file ({e}), using fallback.")
-            system_prompt = """你是一个专业的记忆记录员 (秘书)。
-你的任务是分析用户与 AI 助手之间的对话，提取核心记忆信息。
+            config_entry = await self.session.get(Config, "bot_name")
+            if config_entry and config_entry.value:
+                bot_name = config_entry.value
+        except Exception:
+            pass
 
-请输出一个 JSON 对象，包含以下字段：
-1. content (string): 对话的核心事实摘要。请以第三人称描述用户发生了什么或说了什么。例如 "用户提到他今天去吃了拉面，觉得很咸"。
-            2. type (string): 记忆类型。可选值：
-               - event (事件): 一般性的经历、发生的事情。
-               - fact (事实): 客观事实、知识点、信息。
-               - preference (偏好): 用户的喜好、厌恶、习惯、性格特征。
-               - promise (承诺): 约定、计划、待办事项、承诺要做的事。
-               - inspiration (灵感): 用户的想法、创意、脑洞。
-            3. tags (list[string]): 至少 4 个描述性关键语义标签（如：约会、天气、心情、礼物）。
-            4. importance (int): 记忆重要性评分 (1-10)。
-            5. sentiment (string): 用户的情感极性 (positive, negative, neutral, happy, sad, angry, etc.)。
-
-            # 重要性评分 (importance) 指南:
-            - 1-3分: 日常闲聊、无特殊意义的问候、琐碎对话。
-            - 4-6分: 包含有效信息、主人的小偏好、有一定参考价值的对话。
-            - 7-8分: 重要约定、主人深刻的情感表达、关键的个人信息、需要长期记住的事件。
-            - 9-10分: 极少数情况！如重大承诺、人生转折点、极其珍贵的瞬间。
-            *请严格评分，不要过度给高分*
-
-            如果对话纯粹是无意义的闲聊，且不包含任何值得记忆的事实，请返回 null 或空 JSON。
-            """
+        # 使用 MDPManager 加载 System Prompt
+        system_prompt = self.mdp.render("tasks/analysis/scorer_summary", {"agent_name": bot_name})
+        
+        # 验证是否加载成功，如果包含 Error 则记录警告 (虽然 render 会返回错误信息，但不会抛出异常)
+        if "Missing Prompt" in system_prompt:
+             print(f"[秘书] Warning: MDP Prompt 'tasks/analysis/scorer_summary' missing. Check mdp/prompts directory.")
         
         # Determine the role label and process user content if it's a system trigger
         owner_name = "用户"
@@ -235,15 +221,13 @@ class ScorerService:
             # but keeping it might be better so LLM knows context.
             # Let's keep it but emphasize the label.
         
-        user_prompt = f"""
-{user_label}: {user_content}
-AI (Pero): {assistant_content}
-
-请分析上述对话并生成记忆摘要。
-注意：
-1. 如果是【系统事件】触发的对话，请在摘要中明确指出是“系统提醒”或“Pero主动观察到”，而不是“用户说”。
-2. 即使是系统触发，重点关注用户的后续反应（如果有）或 Pero 的行为逻辑。
-"""
+        # 使用 MDPManager 渲染 User Prompt
+        user_prompt = self.mdp.render("tasks/analysis/scorer_user_input", {
+            "user_label": user_label,
+            "user_content": user_content,
+            "agent_name": bot_name,
+            "assistant_content": assistant_content
+        })
 
         messages = [
             {"role": "system", "content": system_prompt},

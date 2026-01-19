@@ -5,7 +5,9 @@ import json
 from pathlib import Path
 
 # 定义工作空间根目录，强制隔离所有文件操作
-WORKSPACE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "pero_workspace"))
+# backend/nit_core/tools/work/FileOps/file_ops.py -> PeroCore/pero_workspace
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+WORKSPACE_ROOT = os.path.join(BASE_DIR, "pero_workspace")
 
 def _get_safe_path(input_path: str) -> str:
     """

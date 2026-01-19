@@ -150,9 +150,9 @@ class SocialSessionManager:
         except Exception as e:
             logger.error(f"Failed to persist social message to independent DB: {e}")
 
-    async def persist_outgoing_message(self, session_id: str, session_type: str, content: str, sender_name: str = "Pero"):
+    async def persist_outgoing_message(self, session_id: str, session_type: str, content: str, sender_name: str = "Assistant"):
         """
-        将发出的消息（Pero 的回复）持久化到独立社交数据库。
+        将发出的消息（Agent 的回复）持久化到独立社交数据库。
         """
         try:
             from .database import get_social_db_session

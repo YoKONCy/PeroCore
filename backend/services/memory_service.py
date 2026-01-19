@@ -102,7 +102,8 @@ class MemoryService:
         sentiment: str = "neutral",
         msg_timestamp: Optional[str] = None, 
         source: str = "desktop", 
-        memory_type: str = "event"
+        memory_type: str = "event",
+        agent_id: str = "pero" # Multi-Agent Isolation
     ) -> Memory:
         from datetime import datetime
         from sqlmodel import desc
@@ -110,9 +111,8 @@ class MemoryService:
         from services.embedding_service import embedding_service
         
         # 1. 查找上一条记忆 (The Tail of the Time-Axis)
-        # 我们需要找到当前最新的记忆，将其作为 prev
-        # 注意：这里假设时间轴是单线的。如果未来支持多时间线（如平行世界），需要加过滤条件。
-        statement = select(Memory).order_by(desc(Memory.timestamp)).limit(1)
+        # 增加 agent_id 过滤，确保只链接到同一个 Agent 的记忆链
+        statement = select(Memory).where(Memory.agent_id == agent_id).order_by(desc(Memory.timestamp)).limit(1)
         last_memory_result = await session.exec(statement)
         last_memory = last_memory_result.first()
 
@@ -122,6 +122,13 @@ class MemoryService:
         # 生成 Embedding (用于写入 VectorDB)
         # 注意：embedding_json 字段在 SQLite 中保留作为备份或兼容，但主要查询走 VectorDB
         embedding_vec = embedding_service.encode_one(content)
+        
+        # [Fix] 确保在写入 DB 之前尝试获取 embedding，如果失败则记录警告
+        # 即使这里是 []，下面同步写入 VectorDB 时也会被跳过，导致数据不一致。
+        # 因此，如果 embedding 为空，我们应该考虑重试或记录严重错误。
+        if not embedding_vec:
+             print(f"[MemoryService] Warning: Embedding generation failed for memory content: {content[:30]}...")
+
         embedding_json = json.dumps(embedding_vec)
 
         memory = Memory(
@@ -137,7 +144,8 @@ class MemoryService:
             type=memory_type,
             prev_id=prev_id,
             next_id=None,
-            embedding_json=embedding_json # 仍保留一份在 SQLite
+            embedding_json=embedding_json, # 仍保留一份在 SQLite
+            agent_id=agent_id
         )
         session.add(memory)
         await session.commit()
@@ -184,7 +192,8 @@ class MemoryService:
                     "timestamp": memory.timestamp,
                     "importance": float(importance),
                     "tags": tags, 
-                    "clusters": clusters
+                    "clusters": clusters,
+                    "agent_id": agent_id
                 }
                 
                 # [特性] 思考管道：展开簇以进行精确过滤
@@ -205,6 +214,38 @@ class MemoryService:
                 )
             except Exception as e:
                 print(f"[MemoryService] Failed to sync to VectorDB: {e}")
+        else:
+            # [Fix] 如果 embedding 为空，强制进行一次同步重试，或加入后台重试队列
+            # 这里简单地做一次同步重试（阻塞式），确保关键数据不丢失
+            print(f"[MemoryService] Embedding was empty, attempting synchronous retry for Memory ID {memory.id}...")
+            try:
+                # 强制重新加载模型并编码
+                retry_vec = embedding_service.encode_one(content)
+                if retry_vec:
+                    # 更新 SQL
+                    memory.embedding_json = json.dumps(retry_vec)
+                    session.add(memory)
+                    await session.commit()
+                    
+                    # 写入 VectorDB
+                    vector_service.add_memory(
+                        memory_id=memory.id,
+                        content=content,
+                        embedding=retry_vec,
+                        metadata={
+                            "type": memory_type,
+                            "timestamp": memory.timestamp,
+                            "importance": float(importance),
+                            "tags": tags,
+                            "clusters": clusters,
+                            "agent_id": agent_id
+                        }
+                    )
+                    print(f"[MemoryService] Retry successful for Memory ID {memory.id}.")
+                else:
+                    print(f"[MemoryService] Critical: Retry failed. Memory {memory.id} is stored without vector index.")
+            except Exception as retry_e:
+                print(f"[MemoryService] Retry exception: {retry_e}")
 
         # 4. 更新上一条记忆的 next_id (双向链表维护)
         if last_memory:
@@ -226,7 +267,7 @@ class MemoryService:
         return memory
 
     @staticmethod
-    async def save_log(session: AsyncSession, source: str, session_id: str, role: str, content: str, metadata: dict = None, pair_id: str = None, raw_content: str = None) -> ConversationLog:
+    async def save_log(session: AsyncSession, source: str, session_id: str, role: str, content: str, metadata: dict = None, pair_id: str = None, raw_content: str = None, agent_id: str = "pero") -> ConversationLog:
         """保存原始对话记录到 ConversationLog"""
         # 1. 移除 NIT 协议标记 (Non-invasive Integration Tools)
         from nit_core.dispatcher import remove_nit_tags
@@ -246,14 +287,15 @@ class MemoryService:
             content=cleaned_content,
             raw_content=raw_content, # 保存原始内容
             metadata_json=json.dumps(metadata or {}),
-            pair_id=pair_id
+            pair_id=pair_id,
+            agent_id=agent_id
         )
         session.add(log)
         # 注意：这里去掉了 commit()，改为由外部或 save_log_pair 统一控制
         return log
 
     @staticmethod
-    async def save_log_pair(session: AsyncSession, source: str, session_id: str, user_content: str, assistant_content: str, pair_id: str, metadata: dict = None, assistant_raw_content: str = None):
+    async def save_log_pair(session: AsyncSession, source: str, session_id: str, user_content: str, assistant_content: str, pair_id: str, metadata: dict = None, assistant_raw_content: str = None, agent_id: str = "pero"):
         """原子性保存用户消息与助手回复成对记录"""
         try:
             # [特性] 系统触发角色修正
@@ -263,10 +305,10 @@ class MemoryService:
                 user_role = "system"
 
             # 创建用户消息记录
-            user_log = await MemoryService.save_log(session, source, session_id, user_role, user_content, metadata, pair_id)
+            user_log = await MemoryService.save_log(session, source, session_id, user_role, user_content, metadata, pair_id, agent_id=agent_id)
             # 创建助手消息记录
             # 为助手传递原始内容
-            assistant_log = await MemoryService.save_log(session, source, session_id, "assistant", assistant_content, metadata, pair_id, raw_content=assistant_raw_content)
+            assistant_log = await MemoryService.save_log(session, source, session_id, "assistant", assistant_content, metadata, pair_id, raw_content=assistant_raw_content, agent_id=agent_id)
             
             await session.commit()
             await session.refresh(user_log)
@@ -282,7 +324,8 @@ class MemoryService:
         session: AsyncSession, 
         query: str, 
         source: Optional[str] = None, 
-        limit: int = 10
+        limit: int = 10,
+        agent_id: Optional[str] = None
     ) -> List[ConversationLog]:
         """
         按关键字搜索对话记录。
@@ -290,6 +333,9 @@ class MemoryService:
         """
         statement = select(ConversationLog).order_by(desc(ConversationLog.timestamp))
         
+        if agent_id:
+            statement = statement.where(ConversationLog.agent_id == agent_id)
+
         if source:
             if "%" in source:
                 statement = statement.where(ConversationLog.source.like(source))
@@ -303,12 +349,12 @@ class MemoryService:
         return (await session.exec(statement)).all()
 
     @staticmethod
-    async def get_recent_logs(session: AsyncSession, source: str, session_id: str, limit: int = 20, offset: int = 0, date_str: str = None, sort: str = "asc") -> List[ConversationLog]:
+    async def get_recent_logs(session: AsyncSession, source: str, session_id: str, limit: int = 20, offset: int = 0, date_str: str = None, sort: str = "asc", agent_id: str = "pero") -> List[ConversationLog]:
         """获取指定来源和会话的最近对话记录"""
         from sqlmodel import desc, asc
         from datetime import datetime, time
         
-        statement = select(ConversationLog).where(ConversationLog.source == source).where(ConversationLog.session_id == session_id)
+        statement = select(ConversationLog).where(ConversationLog.source == source).where(ConversationLog.session_id == session_id).where(ConversationLog.agent_id == agent_id)
         
         if date_str:
             try:
@@ -394,7 +440,7 @@ class MemoryService:
             print(f"[MemoryService] Failed to update access stats: {e}")
 
     @staticmethod
-    async def logical_flashback(session: AsyncSession, text: str, limit: int = 5) -> List[Dict[str, Any]]:
+    async def logical_flashback(session: AsyncSession, text: str, limit: int = 5, agent_id: str = "pero") -> List[Dict[str, Any]]:
         """
         [Brain-Net Flashback] 
         基于当前对话关键词，在记忆图谱中进行联想闪回，找回关联的碎片信息。
@@ -454,7 +500,7 @@ class MemoryService:
                 return []
 
             # 获取记忆详情
-            statement = select(Memory).where(Memory.id.in_(sorted_ids))
+            statement = select(Memory).where(Memory.id.in_(sorted_ids)).where(Memory.agent_id == agent_id)
             memories = (await session.exec(statement)).all()
             
             # 转换为碎片格式 (主要是标签或短句)
@@ -487,7 +533,8 @@ class MemoryService:
         limit: int = 5,
         query_vec: Optional[List[float]] = None,
         exclude_after_time: Optional[datetime] = None,
-        update_access_stats: bool = True # 新增参数以控制副作用
+        update_access_stats: bool = True, # 新增参数以控制副作用
+        agent_id: str = "pero"
     ) -> List[Memory]:
         """
         [链网检索 V3] (启用 VectorDB + 簇软加权)
@@ -534,7 +581,7 @@ class MemoryService:
         if not query_vec:
             print("[Memory] Embedding failed, falling back to keyword search.")
             if text:
-                return await MemoryService._keyword_search_fallback(session, text, limit, exclude_after_time)
+                return await MemoryService._keyword_search_fallback(session, text, limit, exclude_after_time, agent_id=agent_id)
             return []
 
         # 2. 向量检索 (VectorDB Search)
@@ -545,7 +592,7 @@ class MemoryService:
             if not vector_results:
                 # 尝试从 SQLite 回退 (如果是迁移过渡期)
                 print("[Memory] VectorDB returned no results, trying SQLite fallback...")
-                fallback_res = await MemoryService._keyword_search_fallback(session, text, limit, exclude_after_time)
+                fallback_res = await MemoryService._keyword_search_fallback(session, text, limit, exclude_after_time, agent_id=agent_id)
                 if update_access_stats and fallback_res:
                     await MemoryService.mark_memories_accessed(session, fallback_res)
                 return fallback_res
@@ -557,7 +604,7 @@ class MemoryService:
             if not memory_ids:
                  return []
                  
-            statement = select(Memory).where(Memory.id.in_(memory_ids))
+            statement = select(Memory).where(Memory.id.in_(memory_ids)).where(Memory.agent_id == agent_id)
             valid_memories = (await session.exec(statement)).all()
             
             # 建立 ID -> Similarity 映射
@@ -578,7 +625,7 @@ class MemoryService:
 
         except Exception as e:
             print(f"[Memory] VectorDB search failed: {e}. Falling back.")
-            fallback_res = await MemoryService._keyword_search_fallback(session, text, limit, exclude_after_time)
+            fallback_res = await MemoryService._keyword_search_fallback(session, text, limit, exclude_after_time, agent_id=agent_id)
             if update_access_stats and fallback_res:
                 await MemoryService.mark_memories_accessed(session, fallback_res)
             return fallback_res
@@ -848,17 +895,17 @@ class MemoryService:
         return top_candidates[:limit]
 
     @staticmethod
-    async def _keyword_search_fallback(session: AsyncSession, text: str, limit: int = 10, exclude_after_time=None) -> List[Memory]:
+    async def _keyword_search_fallback(session: AsyncSession, text: str, limit: int = 10, exclude_after_time=None, agent_id: str = "pero") -> List[Memory]:
         """原有的关键词搜索逻辑，作为兜底"""
         # ... (保留原有逻辑)
         # 提取关键词 (简单正则分词)
         keywords = [k.lower() for k in re.split(r'[\s,，.。!！?？;；:：、]+', text) if len(k) >= 2]
         
         if not keywords:
-            statement = select(Memory).order_by(Memory.importance.desc()).limit(limit)
+            statement = select(Memory).where(Memory.agent_id == agent_id).order_by(Memory.importance.desc()).limit(limit)
             memories = (await session.exec(statement)).all()
         else:
-            statement = select(Memory)
+            statement = select(Memory).where(Memory.agent_id == agent_id)
             all_memories = (await session.exec(statement)).all()
 
             scored_memories = []

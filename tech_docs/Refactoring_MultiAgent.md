@@ -16,13 +16,24 @@
     *   `mdp/prompts/identity.md`: 直接定义了 "Identity: Pero" 和性格。
     *   `prompt_service.py`: 默认变量 `bot_name="Pero"`, `mind="正在想主人..."`。
 2.  **Inline Prompts (隐式硬编码)**:
-    *   `scorer_service.py`: 记忆摘要提示词中写死 `AI (Pero):`。
-    *   `memory_secretary_service.py`: 每日台词生成提示词写死 `# Role: Pero (Live2D 看板娘)`。
-    *   `companion_service.py`: 屏幕观察提示词写死 `【管理系统提醒：Pero，这是你观察到的...】`。
-    *   `runtime.py (NIT)`: 工作日志总结提示词写死 `你是 Pero。你刚刚完成了一项编码/工作任务...`。
-3.  **插件系统**:
-    *   `CharacterOps/description.json`: 描述中写死 `Pero 的状态`。
-    *   `CodeSearcher/description.json`: 作者写死 `PeroCore`。
+    *   **`scorer_service.py`**:
+        *   `Fallback Prompt` (Line 145): 记忆摘要提示词中写死 `AI (Pero):`。
+    *   **`memory_secretary_service.py`**:
+        *   `Daily Lines Prompt`: 每日台词生成提示词写死 `# Role: Pero (Live2D 看板娘)`。
+        *   `Memory Auditor Prompt` (Line 171): 记忆清洗提示词写死 `你是 Pero 的记忆秘书...`。
+    *   **`companion_service.py`**:
+        *   `System Prompt Injection` (Line 347): `[陪伴模式核心指令] ... 以你的角色身份...` (逻辑与人设混合)。
+        *   `User Message Injection` (Line 349): `【管理系统提醒：Pero，这是你观察到的...】` (直接称呼 Pero)。
+        *   `Memory Summary Prompt` (Line 169): `role = "Pero" ...`。
+    *   **`runtime.py (NIT)`**:
+        *   工作日志总结提示词写死 `你是 Pero。你刚刚完成了一项编码/工作任务...`。
+3.  **Hidden/Functional Prompts (功能性提示词污染)**:
+    *   **`AgentService`**:
+        *   `_run_reflection` (Line 295): 硬编码的 UI 自动化反思 System Prompt (需去人格化)。
+        *   `_analyze_file_results_with_aux`: 辅助模型分析 User Prompt (需去人格化)。
+        *   `handle_proactive_observation`: `[PERO_INTERNAL_SENSE]` 视觉感知 Prompt。
+    *   **`MemoryService`**:
+        *   `get_relevant_memories`: 意图识别关键词字典 (`cluster_keywords`) 可能包含特定人设倾向。
 
 #### B. 前端界面 (Frontend & UI)
 1.  **Chat UI (`ChatInterface.vue`)**:
@@ -65,25 +76,40 @@
 
 ## 3. 重构架构设计 (Architecture Redesign)
 
-### 3.1 提示词原子化策略 (Prompt Atomization Strategy)
+### 3.1 提示词原子化与统一管理策略 (Prompt Atomization & Centralization)
 
-为了实现彻底的自定义，我们需要将 **"功能定义 (Function)"** 与 **"人设定义 (Persona)"** 完全解耦。
-
-**原则**: 功能提示词只描述“做什么”，人设提示词只描述“你是谁”。两者在运行时动态拼接。
+**核心原则**: 
+1.  **彻底解耦**: 将 "功能定义 (Function)" 与 "人设定义 (Persona)" 完全分离。
+2.  **统一托管**: 代码库中**严禁出现任何 Inline Prompts (硬编码提示词)**。所有的提示词（无论是系统指令、功能性任务、还是对话引导）必须统一存放于 `backend/services/mdp/prompts/` 目录下，通过 `PromptManager` 或 `MDPManager` 加载。
 
 #### 3.1.1 目录结构规划 (Directory Structure)
 
 ```text
 backend/services/mdp/prompts/
-├── core/               # 系统核心 (Output constraints, Security)
-├── capabilities/       # 能力相关 (Vision, Voice, NIT)
-├── tasks/              # [NEW] 纯任务逻辑 (Function Definition)
-│   ├── scorer_summary.md      # "分析以下对话..." (不含人设)
-│   ├── daily_lines.md         # "生成一组问候语..." (不含人设)
-│   ├── screen_observation.md  # "这是屏幕截图..." (不含人设)
-│   └── work_log.md            # "总结工作内容..." (不含人设)
-└── personas/           # [NEW] 人设模板 (Persona Definition)
-    └── default.md             # "{{agent_name}} 是一个..."
+├── core/                   # 系统核心 (Output constraints, Security)
+│   ├── system_template.md  # 主系统提示词模板
+│   └── safety.md           # 安全/拒绝回复策略
+├── capabilities/           # 能力相关 (Vision, Voice, NIT)
+│   ├── vision_analyze.md   # 视觉分析指令
+│   └── reflection.md       # 自动化反思指令
+├── tasks/                  # [NEW] 功能性任务 (原 Inline Prompts 迁移区)
+│   ├── analysis/           # 分析类任务
+│   │   ├── scorer_summary.md   # 对话评分/记忆摘要
+│   │   └── file_analysis.md    # 辅助模型文件分析
+│   ├── maintenance/        # 维护类任务
+│   │   ├── daily_lines.md      # 每日问候语生成
+│   │   └── memory_auditor.md   # 记忆清洗/审计
+│   ├── companion/          # 陪伴模式任务
+│   │   ├── screen_observe.md   # 屏幕观察引导
+│   │   └── proactive_chat.md   # 主动搭话生成
+│   └── nit/                # NIT 运行时任务
+│       └── work_log.md         # 工作日志总结
+├── context/                # [NEW] 上下文注入片段
+│   ├── mobile.md           # 移动端指令注入
+│   ├── active_windows.md   # 活跃窗口列表注入
+│   └── social_history.md   # 社交历史摘要注入
+└── personas/               # [NEW] 人设模板 (Persona Definition)
+    └── default.md          # "{{agent_name}} 是一个..." (默认人设)
 ```
 
 #### 3.1.2 组合逻辑 (Composition Logic)
@@ -114,6 +140,45 @@ system_prompt = render(task_template) + "\n\n" + render(persona_template)
     {{agent_name}} 是一个冷酷的杀手...
     语气风格: {{agent_style}}
     ```
+
+#### 3.1.3 文档溯源规范 (Traceability Standards)
+
+为了防止提示词与代码逻辑脱节，**所有 MDP 文档必须包含溯源注释**。
+
+*   **Header Requirement**: 每个 Markdown 文件顶部必须包含 YAML Front Matter 或注释，指明该提示词被哪个 Service 的哪个方法调用。
+
+**Example (`mdp/prompts/tasks/maintenance/daily_lines.md`)**:
+```markdown
+<!-- 
+Target Service: backend/services/memory_secretary_service.py
+Target Function: _generate_daily_lines
+Injected Via: MDPManager.render("maintenance/daily_lines")
+-->
+
+# Task: Generate Daily Greetings
+...
+```
+
+#### 3.1.4 递归占位符与嵌套支持 (Recursive Placeholder Resolution)
+
+**核心要求**:
+1.  **全量占位符化**: 代码中禁止硬编码拼接字符串。所有动态内容（包括子 Prompt 模块）必须通过 `{{ variable_name }}` 占位符注入。
+2.  **嵌套支持**: MDP 渲染引擎必须支持**递归解析 (Recursive Resolution)**。
+    *   即：模板 A 包含 `{{ template_b }}`，而模板 B 中又包含 `{{ user_name }}`。
+    *   渲染时，系统应自动展开所有层级的占位符，直到没有未解析的 `{{ ... }}` 为止。
+
+**Example**:
+*   `system_template.md`:
+    ```markdown
+    # System
+    {{ persona_definition }}
+    {{ task_instruction }}
+    ```
+*   `personas/pero.md` (injected as `persona_definition`):
+    ```markdown
+    我是 {{ agent_name }}，你的 {{ agent_role }}。
+    ```
+*   **Result**: 渲染引擎需自动将 `{{ agent_name }}` 解析为具体值，而非保留原样。
 
 ### 3.2 数据模型层 (Data Model)
 
@@ -166,50 +231,54 @@ class AgentProfile(SQLModel, table=True):
 
 ## 4. 实施路线图 (Execution Roadmap)
 
-### Phase 1: 原子化与去硬编码 (The Great Decoupling)
-**目标**: 不引入新数据库表，仅将代码中的硬编码提取为 MDP 模板变量，并执行**去人格化**。
+### Phase 1: MDP 引擎升级与目录重构 (Infrastructure First)
+**目标**: 建立强大的 Prompt 管理基座，确保所有提示词都能被模块化管理和递归解析。
 
-1.  **功能性 Prompt 去人格化 (Depersonalize Functional Prompts)**:
-    *   **原则**: 后台任务（如日志分析、屏幕识别）不应包含任何具体人设，应作为中立的“系统观察者”。
-    *   **ScorerService**: 重写 `scorer_service.py` 中的 Fallback Prompt。
-        *   *Before*: "你是一个专业的记忆记录员(秘书)... AI (Pero): ..."
-        *   *After*: "Role: Conversation Analyst... Assistant: ..." (移除 "Pero" 及所有性格描述)
-    *   **MemorySecretary**: 重写每日问候生成逻辑，使其只关注时间/天气/节日事实，而非“看板娘语气”。
-    *   **AgentService**: 重写反思 (Reflection) 和视觉感知 (Internal Sense) Prompt，移除所有 "Pero" 相关自我认知。
+1.  **升级 MDPManager**:
+    *   实现 Jinja2 递归渲染 (Recursive Rendering) 逻辑，支持 `{{ nested_template }}` 的自动展开。
+    *   支持从 `mdp/prompts/` 下的任意子目录加载模板。
+2.  **重构目录结构**:
+    *   按照 3.1.1 规划，建立 `core`, `capabilities`, `tasks`, `context`, `personas` 等子目录。
+    *   确保所有新文件都包含 Traceability Header。
 
-2.  **交互性 Prompt 模块化 (Modularize Interactive Prompts)**:
-    *   **原则**: 人设仅在“交互层”生效，且必须是可插拔的模块。
-    *   **目录结构**:
-        *   新建 `mdp/personas/` 目录。
-        *   将 `mdp/prompts/identity.md` 移动并重命名为 `mdp/personas/pero.md` (作为默认人设)。
-    *   **模板更新**:
-        *   修改 `mdp/prompts/system_template.md`: 将 `{{identity}}` 替换为 `{{persona_definition}}`。
-        *   修改 `PromptManager`: 增加逻辑，默认加载 `personas/pero.md`，但预留接口加载其他文件。
+### Phase 2: 提示词迁移与人设解耦 (The Great Migration)
+**目标**: 消灭代码中的 Inline Prompts，实现 Function (功能) 与 Persona (人设) 的彻底分离。
 
-3.  **提取 Inline Prompts**:
-    *   将 `scorer`, `companion`, `runtime` 等处的硬编码 Prompt 移入 `mdp/prompts/tasks/`。
-    *   **[New]** 提取 `AgentService` 中的 Context Injections (`mobile_instruction`, `active_windows`) 到 `mdp/prompts/context/`。
+1.  **迁移 Inline Prompts (硬编码大清洗)**:
+    *   **ScorerService**: 提取 Fallback Prompt 到 `tasks/analysis/scorer_summary.md`。
+    *   **CompanionService**: 提取屏幕观察 Prompt 到 `tasks/companion/screen_observe.md`。
+    *   **MemorySecretary**: 提取 Auditor Prompt 到 `tasks/maintenance/memory_auditor.md`。
+    *   **AgentService**: 提取 Reflection/Vision/Aux Prompts 到 `capabilities/` 和 `tasks/`。
+    *   **NIT Runtime**: 提取 Work Log Prompt 到 `tasks/nit/work_log.md`。
+2.  **人设与功能分离**:
+    *   **去人格化**: 确保上述功能性 Prompt 中不包含 "Pero"、"看板娘" 等具体人设描述，改为 "Assistant"、"Observer" 等中立称呼。
+    *   **模块化人设**: 将 `identity.md` 拆分为 `personas/default.md` (或 `pero.md`)。
+    *   **动态拼接**: 修改 `PromptManager`，在生成 System Prompt 时动态拼接 `Function Template` + `Persona Template`。
 
-4.  **变量替换**: 在后端代码中，统一使用 `bot_name` 变量替换字符串 "Pero"。
+### Phase 3: 全局硬编码清理 (The Cleanup)
+**目标**: 消除前端、日志、Live2D 等非 Prompt 区域的 "Pero" 硬编码。
 
-5.  **前端清理**: 将前端写死的 "Pero" 替换为从后端配置获取的 `{{ bot_name }}`。
+1.  **前端清理 (Frontend)**:
+    *   修改 `ChatInterface.vue`, `DashboardView.vue`, `LauncherView.vue`。
+    *   将硬编码的 "Pero" 文本/头像替换为从后端配置接口获取的动态变量 (`{{ bot_name }}`, `{{ bot_avatar }}`)。
+2.  **日志与工具清理**:
+    *   规范化后端日志输出，移除 "Pero says..." 等硬编码，改为 "Agent says..."。
+    *   更新插件描述 (`description.json`) 中的硬编码名称。
+3.  **Live2D 配置化**:
+    *   将 `waifu-texts.json` 中的台词模板化，或建立多份台词库以支持不同 Agent。
 
-### Phase 2: 数据模型落地 (Model Implementation)
-**目标**: 数据库支持多 Agent 存储。
-1.  创建 `AgentProfile` 表及迁移脚本。
-2.  初始化脚本：系统启动时，将现有的 `identity.md` 内容迁移到数据库，创建一个名为 "Pero" 的默认 Agent。
-3.  修改 `PromptManager` 从数据库读取人设。
+### Phase 4: 多 Agent 架构落地 (Multi-Agent Implementation)
+**目标**: 引入数据库模型，支持真正的多角色切换与并发。
 
-### Phase 3: 多 Agent 业务逻辑 (Multi-Agent Logic)
-**目标**: 后端支持多 Agent 运行。
-1.  改造 `AgentService` 的 `chat` 接口，支持 `agent_id`。
-2.  改造 `MemoryService`，记忆需要关联 `agent_id` (或共享记忆？需讨论策略)。
-3.  实现简单的 Agent 切换逻辑。
-
-### Phase 4: 前端完整支持 (UI/UX)
-**目标**: 用户可见的多 Agent 管理。
-1.  开发 Agent 管理页面。
-2.  升级聊天窗口支持多头像显示。
+1.  **数据模型建设**:
+    *   创建 `AgentProfile` 表。
+    *   编写迁移脚本，将现有配置迁移入库。
+2.  **服务层改造**:
+    *   实现 `AgentManager` 服务。
+    *   改造 `AgentService.chat` 接口支持 `agent_id`。
+3.  **UI 完整支持**:
+    *   开发 Agent 管理面板。
+    *   实现多角色切换与群聊 UI。
 
 ---
 

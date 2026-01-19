@@ -78,7 +78,17 @@ class VectorStoreService:
                 self.memory_index = SemanticVectorIndex.load_index(self.memory_index_path, self.dimension)
                 # print(f"[VectorStore] Memory index loaded. Size: {self.memory_index.size()}")
             except Exception as e:
-                print(f"[VectorStore] Failed to load memory index: {e}. Creating new.")
+                print(f"[VectorStore] Failed to load memory index: {e}.")
+                # 备份损坏/不匹配的索引文件
+                try:
+                    import shutil
+                    backup_path = self.memory_index_path + f".bak.{int(time.time())}"
+                    shutil.copy2(self.memory_index_path, backup_path)
+                    print(f"[VectorStore] ⚠️ Existing index backed up to {backup_path}")
+                except Exception as backup_e:
+                    print(f"[VectorStore] Failed to backup index: {backup_e}")
+                
+                print("[VectorStore] Creating new empty index.")
                 self.memory_index = SemanticVectorIndex(self.dimension, 10000)
         else:
             self.memory_index = SemanticVectorIndex(self.dimension, 10000)
@@ -88,7 +98,15 @@ class VectorStoreService:
             try:
                 self.tag_index = SemanticVectorIndex.load_index(self.tag_index_path, self.dimension)
             except Exception as e:
-                print(f"[VectorStore] Failed to load tag index: {e}. Creating new.")
+                print(f"[VectorStore] Failed to load tag index: {e}.")
+                # 同样备份标签索引
+                try:
+                    import shutil
+                    backup_path = self.tag_index_path + f".bak.{int(time.time())}"
+                    shutil.copy2(self.tag_index_path, backup_path)
+                except Exception: pass
+                
+                print("[VectorStore] Creating new empty tag index.")
                 self.tag_index = SemanticVectorIndex(self.dimension, 1000)
         else:
             self.tag_index = SemanticVectorIndex(self.dimension, 1000)
@@ -109,14 +127,33 @@ class VectorStoreService:
     def save(self):
         if not RUST_AVAILABLE or not self._lazy_loaded: return
         try:
-            self.memory_index.persist_index(self.memory_index_path)
-            self.tag_index.persist_index(self.tag_index_path)
+            # Atomic save for memory index
+            temp_memory_path = self.memory_index_path + ".tmp"
+            self.memory_index.persist_index(temp_memory_path)
+            if os.path.exists(self.memory_index_path):
+                os.replace(temp_memory_path, self.memory_index_path)
+            else:
+                os.rename(temp_memory_path, self.memory_index_path)
+
+            # Atomic save for tag index
+            temp_tag_path = self.tag_index_path + ".tmp"
+            self.tag_index.persist_index(temp_tag_path)
+            if os.path.exists(self.tag_index_path):
+                os.replace(temp_tag_path, self.tag_index_path)
+            else:
+                os.rename(temp_tag_path, self.tag_index_path)
             
-            with open(self.tag_map_path, 'w', encoding='utf-8') as f:
+            # Atomic save for tag map
+            temp_map_path = self.tag_map_path + ".tmp"
+            with open(temp_map_path, 'w', encoding='utf-8') as f:
                 json.dump({
                     "map": self.tag_map,
                     "next_id": self.next_tag_id
                 }, f, ensure_ascii=False, indent=2)
+            if os.path.exists(self.tag_map_path):
+                os.replace(temp_map_path, self.tag_map_path)
+            else:
+                os.rename(temp_map_path, self.tag_map_path)
         except Exception as e:
             print(f"[VectorStore] Save failed: {e}")
 

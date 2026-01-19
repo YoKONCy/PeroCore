@@ -58,7 +58,7 @@ class HistoryPreprocessor(BasePreprocessor):
 
         # Fetch recent logs
         try:
-            history_logs = await memory_service.get_recent_logs(session, source, session_id, limit=80)
+            history_logs = await memory_service.get_recent_logs(session, source, session_id, limit=40)
         except Exception as e:
             print(f"[HistoryPreprocessor] Failed to fetch history logs: {e}")
             history_logs = []
@@ -125,11 +125,11 @@ class RAGPreprocessor(BasePreprocessor):
     def name(self) -> str:
         return "RAGInjector"
 
-    async def _get_pet_state(self, session) -> PetState:
+    async def _get_pet_state(self, session, agent_id="pero") -> PetState:
         from sqlmodel import desc
-        state = (await session.exec(select(PetState).order_by(desc(PetState.updated_at)).limit(1))).first()
+        state = (await session.exec(select(PetState).where(PetState.agent_id == agent_id).order_by(desc(PetState.updated_at)).limit(1))).first()
         if not state:
-            state = PetState()
+            state = PetState(agent_id=agent_id)
             session.add(state)
             await session.commit()
             await session.refresh(state)
@@ -141,9 +141,10 @@ class RAGPreprocessor(BasePreprocessor):
         user_message = context.get("user_message", "")
         full_context_messages = context.get("full_context_messages", [])
         earliest_timestamp = context.get("earliest_timestamp")
+        agent_id = context.get("agent_id", "pero")
         
         # 获取 PetState
-        pet_state = await self._get_pet_state(session)
+        pet_state = await self._get_pet_state(session, agent_id)
         
         # 获取用户配置
         configs = {c.key: c.value for c in (await session.exec(select(Config))).all()}
@@ -242,7 +243,8 @@ class RAGPreprocessor(BasePreprocessor):
                     user_message, 
                     limit=10,
                     exclude_after_time=earliest_timestamp,
-                    query_vec=query_vec
+                    query_vec=query_vec,
+                    agent_id=agent_id
                 )
                 print(f"[RAGPreprocessor] Found {len(memories) if memories else 0} memories.")
                 
@@ -361,6 +363,7 @@ class GraphFlashbackPreprocessor(BasePreprocessor):
         session = context["session"]
         memory_service = context["memory_service"]
         user_message = context.get("user_message", "")
+        agent_id = context.get("agent_id", "pero")
         
         if not user_message:
             print("[GraphFlashback] Skipping: No user_message")
@@ -369,7 +372,7 @@ class GraphFlashbackPreprocessor(BasePreprocessor):
         # Perform logical flashback
         try:
             print(f"[GraphFlashback] Starting logical_flashback for: {user_message[:30]}...")
-            flashback = await memory_service.logical_flashback(session, user_message, limit=5)
+            flashback = await memory_service.logical_flashback(session, user_message, limit=5, agent_id=agent_id)
             
             graph_context = ""
             if flashback:

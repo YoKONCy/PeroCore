@@ -31,7 +31,7 @@
         <div class="tts-header" style="margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; background: var(--el-fill-color-light); padding: 15px; border-radius: 8px;">
             <div style="display: flex; flex-direction: column;">
                 <span style="font-weight: bold; font-size: 14px;">全局 TTS 开关</span>
-                <span style="font-size: 12px; color: #909399;">关闭后 Pero 将不会朗读任何文本</span>
+                <span style="font-size: 12px; color: #909399;">关闭后 {{ AGENT_NAME }} 将不会朗读任何文本</span>
             </div>
             <el-switch v-model="ttsEnabled" @change="toggleTTSMode" active-text="开启" inactive-text="关闭" inline-prompt />
         </div>
@@ -124,6 +124,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { AGENT_NAME } from '../config'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 

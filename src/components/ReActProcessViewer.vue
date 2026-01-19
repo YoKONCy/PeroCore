@@ -53,7 +53,7 @@
       <input 
         v-model="injectionInput" 
         @keyup.enter="sendInjection"
-        placeholder="发送指令干预 Pero 的思考 (例如: 停下，换个方向)..."
+        :placeholder="`发送指令干预 ${AGENT_NAME} 的思考 (例如: 停下，换个方向)...`"
         :disabled="isSendingInjection"
         class="injection-input"
       />
@@ -70,6 +70,7 @@
 
 <script setup>
 import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { AGENT_NAME } from '../config'
 
 const props = defineProps({
   segments: {

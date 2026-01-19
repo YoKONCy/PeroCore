@@ -8,7 +8,7 @@ from datetime import datetime
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 from models import Config, PetState
-from services.mdp import MDPManager
+from services.mdp.manager import mdp
 from nit_core.dispatcher import get_dispatcher
 from core.config_manager import get_config_manager
 
@@ -19,10 +19,8 @@ class PromptManager:
     """
     
     def __init__(self):
-        # 初始化 MDP
-        # 假设提示位于相对于此文件的 ./mdp/prompts 中
-        mdp_dir = os.path.join(os.path.dirname(__file__), "mdp", "prompts")
-        self.mdp = MDPManager(mdp_dir)
+        # Use singleton MDP manager
+        self.mdp = mdp
 
     def build_system_prompt(self, variables: Dict[str, Any], is_social_mode: bool = False) -> str:
         # 0. 检查轻量级模式
@@ -45,9 +43,6 @@ class PromptManager:
         
         # [轻量级模式覆盖]
         if is_lightweight and not is_social_mode:
-            # 禁用 COT（思考块）
-            variables["output_constraint"] = ""
-            
             # 简化 NIT 能力（移除 ReAct 流程/逻辑）
             nit_prompt = self.mdp.get_prompt("ability_nit")
             if nit_prompt:
@@ -99,15 +94,24 @@ class PromptManager:
         
         # [Social Identity Injection]
         # 尝试从 SocialService 获取当前 Bot 的昵称 (QQ昵称)
+        bot_name = "Pero"
         try:
             from nit_core.plugins.social_adapter.social_service import get_social_service
             social_service = get_social_service()
             if social_service and social_service.bot_info:
-                variables["bot_name"] = social_service.bot_info.get("nickname", "Pero")
-            else:
-                variables["bot_name"] = "Pero"
+                bot_name = social_service.bot_info.get("nickname", "Pero")
         except ImportError:
-            variables["bot_name"] = "Pero"
+            pass
+        
+        variables["agent_name"] = bot_name
+        variables["bot_name"] = bot_name # 保留 bot_name 以兼容旧的 Prompt (如果还有的话)
+
+        # [Persona Loading]
+        # 动态加载人设文件
+        # 默认使用 personas/default.md，未来可以从 AgentProfile 中读取
+        # 例如: persona_template = "personas/alter" if bot_name == "Alter" else "personas/default"
+        persona_template = "personas/default"
+        variables["persona_definition"] = self.mdp.render(persona_template, {"agent_name": bot_name})
         
         # 注入 NIT 工具描述
         try:
@@ -132,7 +136,7 @@ class PromptManager:
         chain_name = variables.get("chain_name", "default")
         chain_content = ""
         try:
-            chain_path = os.path.join(os.path.dirname(__file__), "mdp", "chains", f"{chain_name}.md")
+            chain_path = os.path.join(os.path.dirname(__file__), "mdp", "prompts", "chains", f"{chain_name}.md")
             if os.path.exists(chain_path):
                 with open(chain_path, "r", encoding="utf-8") as f:
                     chain_content = f.read()

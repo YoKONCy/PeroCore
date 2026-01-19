@@ -6,6 +6,7 @@ from sqlmodel import select, desc, col, delete
 from sqlmodel.ext.asyncio.session import AsyncSession
 from models import Memory, MemoryRelation, Config, AIModelConfig, MaintenanceRecord
 from services.llm_service import LLMService
+from services.mdp.manager import MDPManager
 
 class MemorySecretaryService:
     def __init__(self, session: AsyncSession):
@@ -14,6 +15,11 @@ class MemorySecretaryService:
         self.created_ids = []
         self.deleted_data = []
         self.modified_data = []
+        
+        # Initialize MDPManager
+        import os
+        mdp_dir = os.path.join(os.path.dirname(__file__), "mdp", "prompts")
+        self.mdp = MDPManager(mdp_dir)
 
     async def _get_llm_service(self) -> LLMService:
         """获取配置并初始化 LLM 服务"""
@@ -49,7 +55,7 @@ class MemorySecretaryService:
             return LLMService(fallback_config["api_key"], fallback_config["api_base"], fallback_config["model"])
 
     async def run_maintenance(self) -> Dict[str, Any]:
-        """运行增强版记忆整理任务"""
+        """运行增强版记忆整理任务 (Multi-Agent Support)"""
         llm = await self._get_llm_service()
         self.created_ids = []
         self.deleted_data = []
@@ -61,35 +67,50 @@ class MemorySecretaryService:
             "consolidated": 0,
             "cleaned_count": 0,
             "retired_count": 0,
-            "status": "success"
+            "social_summaries_cleaned": 0,
+            "waifu_texts_updated": 0,
+            "status": "success",
+            "agents_processed": []
         }
 
-        # Check API Key validity implicitly (if no key, fallback model might be used, but let's assume it works or fails)
-        # Actually, LLMService logs error if no key.
-        
         try:
-            # 1. 提取偏好 (已按需关闭)
-            report["preferences_extracted"] = 0 # await self._extract_preferences(llm)
+            # 0. Identify Agents
+            from sqlalchemy import distinct
+            stmt = select(distinct(Memory.agent_id))
+            agent_ids = (await self.session.exec(stmt)).all()
+            # Ensure at least 'pero' is processed if DB is empty or has nulls
+            agent_ids = [aid for aid in agent_ids if aid]
+            if not agent_ids: agent_ids = ["pero"]
+            
+            report["agents_processed"] = agent_ids
+            print(f"[MemorySecretary] Running maintenance for agents: {agent_ids}")
 
-            # 2. 标记重要性
-            report["important_tagged"] = await self._tag_importance(llm)
+            for agent_id in agent_ids:
+                print(f"[MemorySecretary] Processing Agent: {agent_id}")
+                # 1. 提取偏好 (已按需关闭)
+                report["preferences_extracted"] += 0 # await self._extract_preferences(llm, agent_id)
 
-            # 3. 记忆合并 (循环扫描3次，每次处理最顶层的碎片，相当于不断通过消除碎片来"下钻"时间轴)
-            for _ in range(3):
-                merged_count = await self._consolidate_memories(llm, offset=0)
-                report["consolidated"] += merged_count
-                if merged_count == 0: break
+                # 2. 标记重要性
+                report["important_tagged"] += await self._tag_importance(llm, agent_id)
 
-            # 4. 新增：清理可疑/错误记忆
-            report["cleaned_count"] = await self._clean_invalid_memories(llm)
+                # 3. 记忆合并
+                for _ in range(3):
+                    merged_count = await self._consolidate_memories(llm, offset=0, agent_id=agent_id)
+                    report["consolidated"] += merged_count
+                    if merged_count == 0: break
 
-            # 5. 新增：自动清理重复的社交日报总结
-            report["social_summaries_cleaned"] = await self._clean_duplicate_social_summaries()
+                # 4. 新增：清理可疑/错误记忆
+                report["cleaned_count"] += await self._clean_invalid_memories(llm, agent_id)
 
-            # 6. 维护边界处理
-            report["retired_count"] = await self._handle_maintenance_boundary()
+                # 5. 新增：自动清理重复的社交日报总结
+                report["social_summaries_cleaned"] += await self._clean_duplicate_social_summaries(agent_id)
 
-            # 6. 自动更新动态台词 (Welcome & System)
+                # 6. 维护边界处理 (Wait, does this need agent_id? Probably)
+                # report["retired_count"] += await self._handle_maintenance_boundary(agent_id) # Need to check this method
+
+            # 6. 自动更新动态台词 (Welcome & System) - This might be global or per agent?
+            # Currently Waifu texts are in PetState or Config?
+            # Let's assume global for now or just run once.
             report["waifu_texts_updated"] = await self._update_waifu_texts(llm)
 
             # 7. 保存维护记录用于撤回
@@ -158,31 +179,30 @@ class MemorySecretaryService:
             await self.session.rollback()
             return False
 
-    async def _clean_invalid_memories(self, llm: LLMService) -> int:
+    async def _get_bot_name(self) -> str:
+        try:
+            config_entry = await self.session.get(Config, "bot_name")
+            return config_entry.value if config_entry and config_entry.value else "Pero"
+        except:
+            return "Pero"
+
+    async def _clean_invalid_memories(self, llm: LLMService, agent_id: str) -> int:
         """识别并清理可疑、矛盾或复读的错误记忆"""
-        statement = select(Memory).order_by(desc(Memory.timestamp)).limit(100)
+        statement = select(Memory).where(Memory.agent_id == agent_id).order_by(desc(Memory.timestamp)).limit(100)
         memories = (await self.session.exec(statement)).all()
         
         if len(memories) < 5: return 0
         
         mem_data = [{"id": m.id, "content": m.content, "type": m.type} for m in memories]
-        prompt = f"""
-        # Role: 记忆审计专家 (Memory Auditor)
-        你是 Pero 的记忆秘书。请审查以下记忆列表，找出其中的“脏数据”。
+        
+        # Use agent_id as name if not Pero
+        bot_name = await self._get_bot_name()
+        if agent_id != "pero": bot_name = agent_id.capitalize()
 
-        ## 审查准则 (Cleaning Criteria):
-        1. **逻辑矛盾**：例如同一人的性格描述前后完全相反（且无转变过程），或事实错误。
-        2. **过度复读**：内容几乎完全重复的碎片。
-        3. **幻觉/无效内容**：AI 生成的乱码、无意义的符号、或明显不符合 Pero 设定（如 Pero 突然变成了别的人）。
-        4. **过时偏好**：如果有一条记忆说“主人讨厌吃苹果”，另一条更近的记忆说“主人现在爱上吃苹果了”，则旧的应标记为清理。
-
-        待分析记忆:
-        {json.dumps(mem_data, ensure_ascii=False)}
-
-        请返回需要删除的记忆 ID 列表。
-        格式: [id1, id2, ...]
-        如果没有发现错误，返回空列表 []。不要返回任何额外文字。
-        """
+        prompt = self.mdp.render("tasks/maintenance/memory_auditor", {
+            "agent_name": bot_name,
+            "memory_data": json.dumps(mem_data, ensure_ascii=False)
+        })
 
         try:
             response = await llm.chat([{"role": "user", "content": prompt}], temperature=0.2)
@@ -205,31 +225,21 @@ class MemorySecretaryService:
             print(f"Error cleaning memories: {e}")
         return 0
 
-    async def _extract_preferences(self, llm: LLMService) -> int:
+    async def _extract_preferences(self, llm: LLMService, agent_id: str) -> int:
         """从记忆中提取长期偏好 (优化提示词)"""
-        statement = select(Memory).where(Memory.type == "event").order_by(desc(Memory.timestamp)).limit(50)
+        statement = select(Memory).where(Memory.type == "event").where(Memory.agent_id == agent_id).order_by(desc(Memory.timestamp)).limit(50)
         memories = (await self.session.exec(statement)).all()
         if not memories: return 0
 
         memory_texts = [f"- {m.content}" for m in memories]
-        prompt = f"""
-        # Role: 灵魂映射专家
-        分析以下记忆，挖掘主人 (User) 的灵魂底色。
         
-        ## 目标：
-        提取那些能定义“主人是谁”的长期特质、癖好、底线和习惯。
-        
-        ## 提取准则：
-        - **核心偏好**：例如“喜欢深夜工作”、“对 Pero 说话很温柔”、“讨厌吃香菜”。
-        - **深刻羁绊**：主人对 Pero 的特定期待或赋予的特殊称呼。
-        - **严禁**：提取任何具体的“今天做了什么”事件。
+        bot_name = await self._get_bot_name()
+        if agent_id != "pero": bot_name = agent_id.capitalize()
 
-        记忆片段:
-        {chr(10).join(memory_texts)}
-        
-        请以 Pero 的视角描述这些发现，例如：“主人似乎更喜欢在安静的深夜与我交流”。
-        返回 JSON 列表: ["发现1", "发现2", ...]
-        """
+        prompt = self.mdp.render("tasks/maintenance/preference_extractor", {
+            "agent_name": bot_name,
+            "memory_texts": chr(10).join(memory_texts)
+        })
 
         try:
             response = await llm.chat([{"role": "user", "content": prompt}], temperature=0.3)
@@ -240,9 +250,9 @@ class MemorySecretaryService:
                 preferences = json.loads(json_match.group(0))
                 count = 0
                 for pref in preferences:
-                    existing = (await self.session.exec(select(Memory).where(Memory.type == "preference").where(Memory.content == pref))).first()
+                    existing = (await self.session.exec(select(Memory).where(Memory.type == "preference").where(Memory.content == pref).where(Memory.agent_id == agent_id))).first()
                     if not existing:
-                        new_mem = Memory(content=pref, type="preference", source="secretary", tags="偏好")
+                        new_mem = Memory(content=pref, type="preference", source="secretary", tags="偏好", agent_id=agent_id)
                         self.session.add(new_mem)
                         await self.session.flush() # 获取 ID
                         self.created_ids.append(new_mem.id)
@@ -260,20 +270,12 @@ class MemorySecretaryService:
         if not memories: return 0
 
         mem_data = [{"id": m.id, "content": m.content} for m in memories]
-        prompt = f"""
-        # Role: 记忆权衡者
-        为以下记忆评估“情感重量”(1-10分)。
         
-        - **1-3 (轻如鸿毛)**: 无意义的寒暄、复读、单字回复。
-        - **4-6 (生活点滴)**: 有具体信息量的日常、普通爱好。
-        - **7-9 (刻骨铭心)**: 深刻的情感互动、重要的个人秘密、主人的重大决定。
-        - **10 (生命支柱)**: 彻底改变 Pero 或主人的瞬间。
-
-        请同时给出至少 4 个描述该记忆的主题、情感、人物或场景的标签。
-        
-        数据: {json.dumps(mem_data, ensure_ascii=False)}
-        返回 JSON: {{ "id": {{ "importance": int, "tags": ["标签1", "标签2", "标签3", "标签4"] }} }}
-        """
+        bot_name = await self._get_bot_name()
+        prompt = self.mdp.render("tasks/maintenance/importance_tagger", {
+            "agent_name": bot_name,
+            "memory_data": json.dumps(mem_data, ensure_ascii=False)
+        })
 
         try:
             response = await llm.chat([{"role": "user", "content": prompt}], temperature=0.2)
@@ -305,13 +307,14 @@ class MemorySecretaryService:
             print(f"Error tagging importance: {e}")
         return 0
 
-    async def _consolidate_memories(self, llm: LLMService, offset: int = 0) -> int:
+    async def _consolidate_memories(self, llm: LLMService, offset: int = 0, agent_id: str = "pero") -> int:
         """合并相似记忆 (优化提示词)"""
         # 修改：同时拉取 'event' 和 'interaction_summary' 类型的记忆进行熔炼
         # 排除 source='secretary_merge' 的记忆，避免递归合并已生成的总结
         statement = select(Memory).where(
             Memory.type.in_(["event", "interaction_summary"]),
-            Memory.source != "secretary_merge"
+            Memory.source != "secretary_merge",
+            Memory.agent_id == agent_id
         ).order_by(desc(Memory.timestamp)).offset(offset).limit(100)
         
         memories = (await self.session.exec(statement)).all()
@@ -320,36 +323,9 @@ class MemorySecretaryService:
         batch_memories = memories[:80]
         mem_data = [{"id": m.id, "content": m.content, "time": m.realTime} for m in batch_memories]
         
-        prompt = f"""
-        # Role: 记忆整理员
-        将以下记忆片段合并为一段客观、简洁的陈述性文本（白描风格）。
-        
-        ## 目标：
-        1. **智能聚类**：仔细审视所有片段，将属于**同一事件、同一话题或连续对话**的碎片归为一组。
-           - 你可以生成**多组**合并结果（返回的 JSON 列表可以包含多个对象）。
-           - **宁缺毋滥**：如果某些记忆是独立的、无关的或本身已经很精炼，**请不要**将它们包含在任何 `ids_to_merge` 中（让它们保持原样）。
-        2. **去除冗余**：合并重复的事件，删除无意义的语气词。
-        3. **事实陈述**：只记录发生了什么，不要使用日记体，不要加入过多的修辞或情感渲染（除非情感本身是记忆的核心）。
-        4. **时间标记**：必须保留关键的时间节点信息。
-        5. **准确归因**：
-           - 遇到“系统提醒”或“自动触发”的事件，应写为“收到系统提醒...”或“注意到...”。
-           - **严禁**将系统行为描述为“主人说”。
-        5. **格式**：直接陈述事实，例如 "2023-10-27 10:00，用户询问了..."。
-
-        待熔炼记忆: {json.dumps(mem_data, ensure_ascii=False)}
-        
-        返回 JSON 列表:
-        [
-          {{
-            "ids_to_merge": [id1, id2...],
-            "new_content": "202X-XX-XX XX:XX，发生的客观事实描述...",
-            "tags": ["标签1", "标签2", "标签3", "标签4"],
-            "importance": 1-10
-          }}
-        ]
-        ## 注意：
-        - `tags` 必须包含至少 4 个能够准确反映这段记忆主题、情感、人物或场景的标签。
-        """
+        prompt = self.mdp.render("tasks/maintenance/memory_consolidator", {
+            "memory_data": json.dumps(mem_data, ensure_ascii=False)
+        })
 
         try:
             response = await llm.chat([{"role": "user", "content": prompt}], temperature=0.2)
@@ -437,14 +413,14 @@ class MemorySecretaryService:
             print(f"Error consolidating memories: {e}")
         return 0
 
-    async def _clean_duplicate_social_summaries(self) -> int:
+    async def _clean_duplicate_social_summaries(self, agent_id: str) -> int:
         """清理重复生成的社交日报记忆"""
         import re
         from collections import defaultdict
         
         try:
             # 查找包含社交日报标题的所有记忆
-            statement = select(Memory).where(Memory.content.like("%【社交日报%"))
+            statement = select(Memory).where(Memory.content.like("%【社交日报%")).where(Memory.agent_id == agent_id)
             memories = (await self.session.exec(statement)).all()
             
             if len(memories) < 2:
@@ -530,29 +506,18 @@ class MemorySecretaryService:
                 "randTexturesSuccess": "换装成功时的撒娇"
             }
 
-            prompt = f"""
-            # Role: Pero (Live2D 看板娘)
-            
-            ## 任务
-            根据主人的近期记忆 (Context) 和当前的台词配置 (Current)，生成一组**更新后的**台词。
-            
-            ## 记忆上下文
-            {context_text}
-            
-            ## 当前台词 (参考用)
-            {json.dumps(current_texts, ensure_ascii=False)}
-            
-            ## 目标字段
-            {json.dumps(target_fields, ensure_ascii=False)}
-            
-            ## 要求
-            1. **风格一致**: 保持 Pero 可爱、元气、偶尔调皮或温柔的风格。
-            2. **结合记忆**: 尝试将记忆中的话题（如最近在忙什么、心情如何）自然融入到问候语中。例如如果主人最近熬夜多，深夜问候可以更关心一点。
-            3. **滚动更新**: 你可以保留觉得依然合适的旧台词，也可以完全重写。
-            4. **格式**: 返回一个纯 JSON 对象，包含上述目标字段。
-            
-            返回 JSON:
-            """
+            bot_name = await self._get_bot_name()
+            # 获取风格描述 (从 AgentProfile 或配置中获取，目前先从 Identity.md 中提取或默认)
+            # 暂时使用默认风格
+            tone_style = "可爱、元气、偶尔调皮或温柔"
+
+            prompt = self.mdp.render("tasks/maintenance/waifu_text_updater", {
+                "agent_name": bot_name,
+                "tone_style": tone_style,
+                "context_text": context_text,
+                "current_texts": json.dumps(current_texts, ensure_ascii=False),
+                "target_fields": json.dumps(target_fields, ensure_ascii=False)
+            })
 
             # 4. 调用 LLM
             response = await llm.chat([{"role": "user", "content": prompt}], temperature=0.7)

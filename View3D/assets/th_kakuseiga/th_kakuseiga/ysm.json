@@ -1,0 +1,57 @@
+{
+  "spec": 2,
+  "metadata": {
+    "name": "霍青娥（Kaku_Seiga）",
+    "tips": "霍青娥ysm模型",
+    "license": {
+      "type": "CC BY-SA"
+    },
+    "authors": [
+      {
+        "name": "碎de帆",
+        "role": "模型+动画",
+        "avatar": "avatar/sdf.png",
+        "contact": {
+          "Bilibili": "https://space.bilibili.com/381524342"
+        },
+        "comment": "一般通过车车人"
+      }
+    ],
+    "link": {
+      "home": "https://space.bilibili.com/381524342"
+    }
+  },
+  "properties": {
+    "height_scale": 0.7,
+    "width_scale": 0.7,
+    "extra_animation": {
+      "extra0": "打招呼",
+      "extra1": "鼓掌",
+      "extra2": "点头",
+      "extra3": "摇头",
+      "extra4": "邪笑",
+      "extra5": "dokidoki wakuwaku",
+      "extra6": "空",
+      "extra7": "舞蹈2"
+    },
+    "preview_animation": "idle",
+    "default_texture": "default",
+    "free": true
+  },
+  "files": {
+    "player": {
+      "model": {
+        "main": "models/main.json",
+        "arm": "models/arm.json"
+      },
+      "animation": {
+        "main": "animations/main.animation.json",
+        "arm": "animations/arm.animation.json",
+        "extra": "animations/extra.animation.json"
+      },
+      "texture": [
+        "textures/default.png"
+      ]
+    }
+  }
+}

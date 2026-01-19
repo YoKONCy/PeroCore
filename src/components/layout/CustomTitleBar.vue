@@ -54,12 +54,13 @@
 import { ref, onMounted } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { Minus, Square, Copy, X, Coffee, Briefcase } from 'lucide-vue-next'
+import { APP_TITLE } from '../../config'
 
 const props = defineProps({
   isWorkMode: Boolean,
   title: {
     type: String,
-    default: 'Pero Chat'
+    default: APP_TITLE
   }
 })
 

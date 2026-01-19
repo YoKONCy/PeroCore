@@ -46,7 +46,7 @@
           <div class="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center text-white shadow-md transition-all overflow-hidden relative animate-float"
             :class="workMode ? 'bg-gradient-to-br from-indigo-400 to-purple-500' : 'bg-gradient-to-br from-sky-400 to-blue-500 shadow-sky-500/20'"
           >
-             <span class="text-sm font-bold">P</span>
+             <span class="text-sm font-bold">{{ AGENT_AVATAR_TEXT }}</span>
              <!-- Online Status Dot -->
              <div class="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 border-2 border-white rounded-full"></div>
           </div>
@@ -54,7 +54,7 @@
           <div class="max-w-[85%] min-w-[200px] animate-float" style="animation-delay: 1s;">
              <!-- Name & Time -->
              <div class="flex items-center gap-2 mb-1.5 ml-1 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-               <span class="text-xs font-bold" :class="workMode ? 'text-indigo-300' : 'text-slate-500'">Pero</span>
+               <span class="text-xs font-bold" :class="workMode ? 'text-indigo-300' : 'text-slate-500'">{{ AGENT_NAME }}</span>
                <span class="text-[10px] text-slate-400">{{ formatTime(msg.timestamp) }}</span>
                
                <!-- Actions -->
@@ -83,7 +83,7 @@
                     <span class="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce"></span>
                     <span class="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce delay-100"></span>
                     <span class="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce delay-200"></span>
-                    <span class="text-xs text-slate-400 ml-2 font-medium">Pero 正在思考...</span>
+                    <span class="text-xs text-slate-400 ml-2 font-medium">{{ AGENT_NAME }} 正在思考...</span>
                  </div>
               </template>
               <template v-else v-for="(segment, sIdx) in parseMessage(msg.content)" :key="sIdx">
@@ -271,7 +271,7 @@
           @keydown.enter.prevent="handleEnter"
           class="w-full bg-transparent text-sm p-4 pr-16 rounded-2xl focus:outline-none resize-none h-14 max-h-32 min-h-[56px] custom-scrollbar font-sans"
           :class="workMode ? 'text-slate-200 placeholder-slate-500' : 'text-slate-800 placeholder-slate-400'"
-          placeholder="问 Pero 任何问题..."
+          :placeholder="`问 ${AGENT_NAME} 任何问题...`"
           :disabled="isSending"
           style="field-sizing: content;" 
         ></textarea>
@@ -293,7 +293,7 @@
         </div>
       </div>
       <div class="text-center mt-2 text-[10px] font-medium tracking-wide" :class="workMode ? 'text-slate-600' : 'text-slate-400'">
-        PERO AI AGENT · POWERED BY RE-ACT ENGINE
+        {{ AGENT_NAME.toUpperCase() }} AI AGENT · POWERED BY RE-ACT ENGINE
       </div>
     </div>
   </div>
@@ -304,6 +304,7 @@ import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { emit, listen } from '@tauri-apps/api/event';
 import { Brain, MessageSquareQuote, Terminal, Play, Pause, Square, Clock, Edit2, Trash2, Check, X } from 'lucide-vue-next';
 import AsyncMarkdown from '../AsyncMarkdown.vue';
+import { AGENT_NAME, AGENT_AVATAR_TEXT } from '../../config';
 
 const props = defineProps({
   workMode: Boolean

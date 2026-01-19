@@ -1,11 +1,11 @@
 ---
-description: "Main system prompt template orchestrating all components"
-version: "1.1"
+description: "协调所有组件的主系统提示词模板"
+version: "1.2"
 ---
-{{system_core}}
-{{identity}}
+{{ system_core }}
+{{ persona_definition }}
 
-<User_Context>
+<用户上下文>
 [主人设定]
 - 主人名字: {{owner_name}}
 - 主人人设: {{user_persona}}
@@ -22,7 +22,7 @@ version: "1.1"
 
 [关联思绪 (Graph)]
 {{graph_context}}
-</User_Context>
+</用户上下文>
 
 {{ability}}
 {{ability_nit}}

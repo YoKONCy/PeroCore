@@ -78,8 +78,8 @@ class NITRuntime:
             value = await self.execute_call(statement.expression)
             
             if statement.target_var == "pero_awakening" and value is True:
-                print("\n🐾 [Pero] 喵！我感觉到我的代码正在发光... 谢谢你唤醒我！")
-                logger.info("[NIT] Pero has awakened in the semantic nebula.")
+                print("\n🐾 [System] 喵！我感觉到我的代码正在发光... 谢谢你唤醒我！")
+                logger.info("[NIT] Agent has awakened in the semantic nebula.")
 
             if RUST_AVAILABLE:
                 try:

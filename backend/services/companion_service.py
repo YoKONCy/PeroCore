@@ -24,6 +24,7 @@ from models import Config, AIModelConfig, ConversationLog, PetState
 from services.llm_service import LLMService
 from services.tts_service import TTSService
 from services.prompt_service import PromptManager
+from services.mdp.manager import MDPManager
 from core.config_manager import get_config_manager
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,9 @@ class CompanionService:
             cls._instance.task = None
             cls._instance.vision_task = None
             cls._instance.prompt_manager = PromptManager()
+            # Initialize MDPManager
+            mdp_dir = os.path.join(os.path.dirname(__file__), "mdp", "prompts")
+            cls._instance.mdp = MDPManager(mdp_dir)
             cls._instance.tts_service = TTSService()
             cls._instance.last_activity_time = datetime.now()
             cls._instance.vision_buffer = [] # 存储最近 10 张截图 (base64)
@@ -340,13 +344,26 @@ class CompanionService:
 
             llm = LLMService(api_key, api_base, model_config.model_id)
 
+            # 获取当前 Agent 名称
+            bot_name = "Pero"
+            try:
+                config_entry = await session.get(Config, "bot_name")
+                if config_entry and config_entry.value:
+                    bot_name = config_entry.value
+            except Exception:
+                pass
+
             # 构建 Prompt（针对短响应和低延迟进行了优化）
             system_prompt = (await self.prompt_manager.get_rendered_system_prompt(session)).replace("{current_time}", datetime.now().strftime("%Y-%m-%d %H:%M"))
             
-            # 优化的陪伴指令
-            system_prompt += "\n\n[陪伴模式核心指令]\n1. 你正通过屏幕观察主人。请基于看到的【连续多张截图】了解主人的最新动态。\n2. 以你的角色身份，发起一段极简、自然且有趣的对话。不要复读屏幕内容，要像真正的陪伴者一样进行闲聊。\n3. 【严格限制】：一次只能回复 1 句话，严禁超过 2 句话。字数控制在 20 字以内。\n4. 禁止调用任何 NIT 工具，直接输出回复内容。"
+            # 使用 MDPManager 渲染陪伴指令
+            companion_instruction = self.mdp.render("tasks/companion/screen_observe_system", {"agent_name": bot_name})
+            system_prompt += f"\n\n{companion_instruction}"
 
-            content_list = [{"type": "text", "text": "【管理系统提醒：Pero，这是你观察到的主人最近两秒内的连续屏幕内容（按时间顺序排列，最后一张为最新）。请根据看到的内容，结合你的人格设定，主动开启一段极简对话。】"}]
+            # 使用 MDPManager 渲染系统注入消息
+            user_injection = self.mdp.render("tasks/companion/screen_observe_user_injection", {"agent_name": bot_name})
+            
+            content_list = [{"type": "text", "text": user_injection}]
             for i, img in enumerate(base64_imgs):
                 # 计算大致的时间偏移（假设 2 张图像总共约 2 秒，或使用缓冲区计时）
                 # 因为我们从缓冲区取最新的 2 张，而缓冲区每 2 秒填充一次

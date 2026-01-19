@@ -96,27 +96,34 @@ async def exit_work_mode() -> str:
         global_config = {c.key: c.value for c in (await session.exec(select(Config))).all()}
         api_key = global_config.get("global_llm_api_key")
         api_base = global_config.get("global_llm_api_base")
+        bot_name = global_config.get("bot_name", "Pero")
+
+        # Initialize MDPManager
+        import os
+        # 修正路径：backend/nit_core/tools/core/SessionOps/session_ops.py -> backend/services/mdp/prompts
+        # __file__ -> session_ops.py
+        # dirname -> SessionOps
+        # dirname -> core
+        # dirname -> tools
+        # dirname -> nit_core
+        # dirname -> backend
+        # join -> backend/services/mdp/prompts
+        mdp_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))), "services", "mdp", "prompts")
+        if not os.path.exists(mdp_dir):
+             # Fallback
+             mdp_dir = os.path.join(os.getcwd(), "backend", "services", "mdp", "prompts")
+        
+        from services.mdp.manager import MDPManager
+        mdp = MDPManager(mdp_dir)
         
         llm = LLMService(api_key, api_base, "gpt-4o")
         log_text = "\n".join([f"{log.role}: {log.content}" for log in logs])
         
-        prompt = f"""
-        You are Pero. You have just finished a coding/work task: "{task_name}".
-        Here is the raw conversation log of the session:
-        
-        {log_text}
-        
-        Please write a "Handwritten Work Log" (Markdown format).
-        Requirements:
-        1. Title: # 📝 Pero's Work Log - {task_name}
-        2. Tone: Professional yet personal (Pero's style).
-        3. Content Structure (Use Markdown Headers):
-           - ## Goal
-           - ## Process (Key steps, tools used)
-           - ## Outcome
-           - ## Reflection
-        4. Keep it concise but information-dense.
-        """
+        prompt = mdp.render("tasks/nit/work_log", {
+            "agent_name": bot_name,
+            "task_name": task_name,
+            "log_text": log_text
+        })
         
         summary = await llm.chat([{"role": "user", "content": prompt}])
         summary_content = summary["choices"][0]["message"]["content"]

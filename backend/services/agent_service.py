@@ -49,13 +49,8 @@ class AgentService:
         self.scorer_service = ScorerService(session)
         self.prompt_manager = PromptManager()
         
-        # Initialize Reflection MDP
-        reflection_mdp_dir = os.path.join(os.path.dirname(__file__), "mdp", "reflection")
-        self.reflection_mdp = MDPManager(reflection_mdp_dir)
-        
-        # Initialize Helper MDP
-        helper_mdp_dir = os.path.join(os.path.dirname(__file__), "mdp", "helper")
-        self.helper_mdp = MDPManager(helper_mdp_dir)
+        # Initialize Helper MDP (using centralized MDP)
+        self.mdp = self.prompt_manager.mdp
         
         # Initialize Preprocessor Pipeline
         self.preprocessor_manager = PreprocessorManager()
@@ -136,13 +131,13 @@ class AgentService:
             preview_files = file_results[:50] 
             files_text = "\n".join(preview_files)
             
-            system_prompt = self.helper_mdp.render("file_analysis")
+            system_prompt = self.mdp.render("tasks/analysis/file_analysis")
             
-            user_prompt = (
-                f"用户请求: {user_query}\n\n"
-                f"搜索到的文件列表 (前 {len(preview_files)} 个):\n{files_text}\n\n"
-                "请分析哪些文件最可能是用户想要的？"
-            )
+            user_prompt = self.mdp.render("tasks/analysis/file_analysis_user_input", {
+                "user_query": user_query,
+                "preview_count": len(preview_files),
+                "files_text": files_text
+            })
             
             messages = [
                 {"role": "system", "content": system_prompt},
@@ -292,22 +287,11 @@ class AgentService:
                 desc = tool_def.get("description", "No description")
                 tools_list_str += f"- {name}: {desc}\n"
 
-        system_prompt = f"""你是一个专业的 UI 自动化操作反思助手。你的任务是分析当前的操作结果是否符合预期，以及是否陷入了死循环。
-
-**可用工具列表**:
-{tools_list_str}
-
-**Prompt Debug Info**:
-Tool List Length: {len(tools_list_str)}
-
-请仔细对比用户的任务目标和当前的近期操作历史。
-1. **工具参数校验**: 检查上一步工具调用是否因为参数错误（如 browser_click 误传了 url 参数）而失败。请务必根据【可用工具列表】检查工具名称是否存在。
-{vision_instruction}
-3. **决策建议**: 如果发现问题，请明确指出原因并给出修正建议。
-   - **严禁臆造不存在的工具**（如 `browser_search`），只能从【可用工具列表】中选择。
-   - 如果用户想搜索，应建议使用 `browser_open_url` 打开搜索引擎，然后使用 `browser_input` 和 `browser_click`。
-   - 如果一切正常，只需回答"NORMAL"。
-"""
+        system_prompt = self.mdp.render("capabilities/reflection_ui", {
+            "tools_list_str": tools_list_str,
+            "tools_count": len(tools_list_str),
+            "vision_instruction": vision_instruction_block
+        })
         user_content = f"任务目标: {task}\n\n近期操作历史:\n{history}"
         
         if vision_analysis:
@@ -399,14 +383,11 @@ Tool List Length: {len(tools_list_str)}
         print(f"[Agent] Proactive observation received: {intent_description} (Score: {score:.4f})")
         
         # 2. Construct an internal sensing prompt
-        internal_prompt = f"""
-[PERO_INTERNAL_SENSE]
-视觉意图: "{intent_description}"
-置信度: {score:.4f}
+        internal_prompt = self.mdp.render("tasks/companion/proactive_internal_sense", {
+            "intent_description": intent_description,
+            "score": f"{score:.4f}"
+        })
 
-请观察当前环境和你的记忆。如果你觉得现在是与主人说话的好时机，请立即行动。
-如果主人正忙或你没有什么有意义的话要说，请保持安静（输出 <NOTHING>）。
-"""
         # 3. Trigger a special session
         # This would involve calling self.process_request with a pseudo-user message
         # but marked as an internal trigger.
@@ -677,7 +658,7 @@ Tool List Length: {len(tools_list_str)}
             # Suppress error message to avoid sending system errors to chat
             return None
 
-    async def _run_scorer_background(self, user_msg: str, assistant_msg: str, source: str, pair_id: str = None):
+    async def _run_scorer_background(self, user_msg: str, assistant_msg: str, source: str, pair_id: str = None, agent_id: str = "pero"):
         """后台运行 Scorer 服务，使用独立 Session"""
         from database import engine
         from sqlmodel.ext.asyncio.session import AsyncSession
@@ -687,7 +668,7 @@ Tool List Length: {len(tools_list_str)}
             async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
             async with async_session() as session:
                 scorer = ScorerService(session)
-                await scorer.process_interaction(user_msg, assistant_msg, source, pair_id=pair_id)
+                await scorer.process_interaction(user_msg, assistant_msg, source, pair_id=pair_id, agent_id=agent_id)
         except Exception as e:
             print(f"[Agent] 后台秘书服务失败: {e}")
 
@@ -776,6 +757,11 @@ Tool List Length: {len(tools_list_str)}
 
         print(f"[Agent] Chat request received. Source: {source}, Msg count: {len(messages)}, Voice: {is_voice_mode}")
         
+        # [Feature] Multi-Agent Support
+        # Extract agent_id from config (default to "pero" if not set)
+        agent_id_config = (await self.session.exec(select(Config).where(Config.key == "bot_name"))).first()
+        current_agent_id = agent_id_config.value if agent_id_config and agent_id_config.value else "pero"
+
         # 1. Initialize Context
         context = {
             "messages": messages,
@@ -789,6 +775,7 @@ Tool List Length: {len(tools_list_str)}
             "agent_service": self,
             "variables": {},
             "nit_id": current_nit_id,
+            "agent_id": current_agent_id, # Inject Agent ID
         }
         
         # 2. Run Preprocessor Pipeline
@@ -812,13 +799,7 @@ Tool List Length: {len(tools_list_str)}
 
         # [Feature] Mobile Source Awareness
         if source == "mobile":
-            mobile_instruction = """
-[SYSTEM_NOTE: MOBILE_MODE]
-The user is currently communicating with you via a MOBILE device (Peroperochat).
-- Desktop-only tools (e.g., open_app, windows_operation, screenshot) will execute on the OWNER'S PC, NOT the mobile device.
-- Please AVOID using these tools unless explicitly asked to do something on the PC.
-- Focus on natural conversation and emotional interaction.
-"""
+            mobile_instruction = self.mdp.render("context/mobile_mode")
             final_messages.append({
                 "role": "system",
                 "content": mobile_instruction
@@ -835,11 +816,9 @@ The user is currently communicating with you via a MOBILE device (Peroperochat).
                 if len(active_windows) > 20:
                     window_list_str += f"\n... ({len(active_windows) - 20} more)"
                 
-                state_msg = f"""<system_state>
-Current Active Windows (Taskbar):
-{window_list_str}
-</system_state>
-Instruction: When opening an app, check this list first. If it's already running, use `windows_operation(action="activate", target="Name")` or just interact with it directly."""
+                state_msg = self.mdp.render("context/active_windows", {
+                    "window_list_str": window_list_str
+                })
                 
                 # Append to messages (System role)
                 final_messages.append({

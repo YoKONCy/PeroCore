@@ -446,24 +446,15 @@ class AuraVisionService:
             from services.agent_service import AgentService
             from database import get_session
             
-            # 构建内部感知提示词 (符合技术文档中的 [PERO_INTERNAL_SENSE] 格式)
+            # 构建内部感知提示词
             memory_ids_str = ", ".join(str(id) for id in result.activated_memory_ids[:5])
             
-            internal_prompt = f"""[PERO_INTERNAL_SENSE]
-Visual Intent: "{result.top_description}"
-Confidence: {result.top_similarity:.4f}
-Context Saturation: {result.saturation:.4f}
-Activated Memory IDs: [{memory_ids_str}]
-
-Based on your visual observation and awakened memories, decide if you should say something to the owner.
-Consider:
-1. Is the owner doing something you can relate to from your memories?
-2. Would your words be welcome right now, or would they be intrusive?
-3. Is there genuine emotional value in reaching out?
-
-If you have nothing meaningful to say, or if the owner seems focused, output <NOTHING>.
-Otherwise, speak naturally as you would to a close friend.
-"""
+            internal_prompt = self.mdp.render("capabilities/aura_internal_sense", {
+                "visual_intent": result.top_description,
+                "confidence": f"{result.top_similarity:.4f}",
+                "saturation": f"{result.saturation:.4f}",
+                "memory_ids": memory_ids_str
+            })
             
             async for session in get_session():
                 agent = AgentService(session)

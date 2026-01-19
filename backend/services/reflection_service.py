@@ -4,6 +4,7 @@ from sqlmodel import select, desc
 from sqlmodel.ext.asyncio.session import AsyncSession
 from models import Memory, MemoryRelation, Config, AIModelConfig, MaintenanceRecord, ConversationLog
 from services.llm_service import LLMService
+from services.mdp.manager import mdp
 import json
 import random
 from datetime import datetime, timedelta
@@ -213,19 +214,12 @@ class ReflectionService:
 
     async def _generate_summary(self, llm: LLMService, memories: List[Memory], date_str: str) -> str:
         mem_text = "\n".join([f"- {m.realTime.split(' ')[1] if m.realTime else ''}: {m.content}" for m in memories])
-        prompt = f"""
-请将以下发生在 {date_str} 的一系列琐碎记忆片段，合并为一条连贯的、陈述性的关键记忆。
-忽略无关紧要的细节（如"吃了苹果"），重点保留具有长期价值的信息（如"开始注重健康饮食"）。
-如果都是无意义的废话，请总结为"度过了平淡的一天"。
-
-记忆片段：
-{mem_text}
-
-输出要求：
-1. 使用标准 **Markdown** 格式。
-2. 使用列表总结关键点。
-3. 直接输出总结后的文本，不要包含任何前缀或解释。
-"""
+        
+        prompt = mdp.render("capabilities/reflection_summary", {
+            "date_str": date_str,
+            "mem_text": mem_text
+        })
+        
         try:
             res = await llm.chat([{"role": "user", "content": prompt}], temperature=0.3)
             return res["choices"][0]["message"]["content"].strip()
@@ -412,29 +406,15 @@ class ReflectionService:
 
     async def _analyze_relation(self, llm: LLMService, m1: Memory, m2: Memory) -> Optional[dict]:
         """让 LLM 分析两条记忆的关系"""
-        prompt = f"""
-请分析以下两条记忆之间是否存在深层关联（如因果、主题相似、矛盾、递进等）。
-
-记忆 A ({m1.realTime}): {m1.content} (Tags: {m1.tags})
-记忆 B ({m2.realTime}): {m2.content} (Tags: {m2.tags})
-
-如果存在关联，请输出 JSON：
-{{
-    "has_relation": true,
-    "type": "associative" | "causal" | "thematic" | "contradictory" | "temporal",
-    "strength": 0.1-1.0,
-    "description": "简短描述关联内容"
-}}
-
-关联类型定义：
-- associative (联想): 内容相关，提及相同的人、事、物或话题。
-- causal (因果): 事件A导致了事件B，或存在逻辑上的推导关系。
-- thematic (主题): 属于同一个大的主题或思维簇（如都在讨论“哲学”）。
-- contradictory (矛盾): 信息存在冲突、观点对立、或者后续修正了之前的错误认知。
-- temporal (时序): 存在明显的时间先后或顺序依赖（非简单的发生时间先后，而是逻辑上的先后）。
-
-如果没有明显关联，仅输出: {{"has_relation": false}}
-"""
+        prompt = mdp.render("capabilities/reflection_relation", {
+            "m1_time": m1.realTime,
+            "m1_content": m1.content,
+            "m1_tags": m1.tags,
+            "m2_time": m2.realTime,
+            "m2_content": m2.content,
+            "m2_tags": m2.tags
+        })
+        
         try:
             response = await llm.chat([{"role": "user", "content": prompt}], temperature=0.1, response_format={"type": "json_object"})
             content = response["choices"][0]["message"]["content"]

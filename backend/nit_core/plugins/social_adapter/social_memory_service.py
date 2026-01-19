@@ -78,7 +78,7 @@ class SocialMemoryService:
                                 self.keyword_index[kw] = set()
                             self.keyword_index[kw].add(mid)
 
-    async def add_summary(self, content: str, keywords: List[str], session_id: str, session_type: str, msg_range: Tuple[int, int] = None) -> SocialMemory:
+    async def add_summary(self, content: str, keywords: List[str], session_id: str, session_type: str, msg_range: Tuple[int, int] = None, agent_id: str = "pero") -> SocialMemory:
         """
         添加一条新的会话总结，并自动建立关联
         """
@@ -101,7 +101,8 @@ class SocialMemoryService:
                 source_session_type=session_type,
                 embedding_json=json.dumps(vec),
                 msg_start_id=msg_range[0] if msg_range else None,
-                msg_end_id=msg_range[1] if msg_range else None
+                msg_end_id=msg_range[1] if msg_range else None,
+                agent_id=agent_id
             )
             session.add(memory)
             await session.commit()
@@ -164,7 +165,7 @@ class SocialMemoryService:
             
             return memory
 
-    async def retrieve_context(self, query: str, current_session_id: str) -> str:
+    async def retrieve_context(self, query: str, current_session_id: str, agent_id: str = "pero") -> str:
         """
         检索上下文：
         1. 关键词/向量检索找到入口节点
@@ -209,7 +210,7 @@ class SocialMemoryService:
             return ""
             
         async for session in get_social_db_session():
-            statement = select(SocialMemory).where(col(SocialMemory.id).in_(activated_ids)).limit(5)
+            statement = select(SocialMemory).where(col(SocialMemory.id).in_(activated_ids)).where(SocialMemory.agent_id == agent_id).limit(5)
             memories = (await session.exec(statement)).all()
             
             if not memories:
@@ -274,21 +275,24 @@ class SocialMemoryService:
                 summary_content = "\n".join([f"- {m.content}" for m in daily_memories])
             
             # 4. 生成日报内容 (LLM)
-            report_prompt = f"""
-            Task: Generate a "Social Daily Report" for Pero based on today's activities.
+            # 这里的 agent_name 暂时硬编码为 Pero，或者应该引入 ConfigManager 获取？
+            # 简单起见，这里先默认 Pero，如果需要动态，需要在 SocialMemoryService 初始化时注入 ConfigManager
+            # 鉴于这是一个 Singleton，我们可以尝试 lazy import get_config_manager
             
-            Date: {date_str}
-            Total Messages: {total_messages}
-            Active Groups: {len(active_groups)}
-            
-            Key Memories (Summarized Events):
-            {summary_content}
-            
-            Requirements:
-            1. Style: Playful, diary-like, Pero's persona (Cyber-girl).
-            2. Content: Summarize what happened today based on the key memories.
-            3. Length: ~200 words.
-            """
+            try:
+                from core.config_manager import get_config_manager
+                config = get_config_manager()
+                bot_name = config.get("bot_name", "Pero")
+            except:
+                bot_name = "Pero"
+
+            report_prompt = mdp.render("tasks/social/daily_report_generator", {
+                "agent_name": bot_name,
+                "date_str": date_str,
+                "total_messages": total_messages,
+                "active_groups_count": len(active_groups),
+                "summary_content": summary_content
+            })
             
             from services.llm_service import llm_service
             report_text = await llm_service.chat_completion(
@@ -296,13 +300,14 @@ class SocialMemoryService:
                 temperature=0.7
             )
             
-            # 5. 保存
+            # Save report
             report = SocialDailyReport(
                 date_str=date_str,
                 content=report_text,
                 total_messages=total_messages,
                 active_groups=",".join([str(g) for g in active_groups]),
-                new_friends=new_friends
+                new_friends=new_friends,
+                agent_id=agent_id
             )
             session.add(report)
             await session.commit()

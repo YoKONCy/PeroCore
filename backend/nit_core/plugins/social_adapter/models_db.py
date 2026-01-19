@@ -75,4 +75,6 @@ class SocialDailyReport(SQLModel, table=True):
     active_groups: str = "" # 活跃群组列表
     new_friends: int = 0
     
+    agent_id: str = Field(default="pero", index=True) # 所属 Agent ID
+    
     created_at: datetime = Field(default_factory=datetime.now)

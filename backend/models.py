@@ -34,6 +34,7 @@ class Memory(SQLModel, table=True):
     msgTimestamp: Optional[str] = None # 绑定消息时间戳
     source: str = "desktop" # 记忆来源 (desktop, ide, mobile, qq, etc.)
     type: str = "event" # 记忆类型 (event, fact, preference, promise, etc.)
+    agent_id: str = Field(default="pero", index=True) # 所属 Agent ID (多 Agent 隔离)
 
     # --- 向量数据 ---
     # 存储向量 JSON (例如: "[0.123, -0.456, ...]")
@@ -51,6 +52,7 @@ class MemoryRelation(SQLModel, table=True):
     relation_type: str = "associative" # associative(联想), causal(因果), thematic(主题), temporal(时序), contradictory(矛盾)
     strength: float = 0.5 # 关联强度 (0.0 - 1.0)
     description: Optional[str] = None # 关联描述 (例如 "都提到了喜欢吃拉面")
+    agent_id: str = Field(default="pero", index=True) # 所属 Agent ID
     
     created_at: datetime = Field(default_factory=get_local_now)
 
@@ -79,9 +81,11 @@ class ConversationLog(SQLModel, table=True):
     analysis_status: str = Field(default="pending") # pending, processing, completed, failed
     retry_count: int = Field(default=0)
     last_error: Optional[str] = None
+    
+
 
 class PetState(SQLModel, table=True):
-    """存储 Pero 的状态（情绪、心理活动等），即长记忆的一部分"""
+    """存储 Agent 的状态（情绪、心理活动等），即长记忆的一部分"""
     id: Optional[int] = Field(default=None, primary_key=True)
     mood: str = "开心"
     vibe: str = "活泼"
@@ -102,6 +106,7 @@ class ScheduledTask(SQLModel, table=True):
     content: str
     is_triggered: bool = False
     created_at: datetime = Field(default_factory=get_local_now)
+    agent_id: str = Field(default="pero", index=True) # 所属 Agent ID
 
 class Config(SQLModel, table=True):
     key: str = Field(primary_key=True)
@@ -200,5 +205,23 @@ class MCPConfig(SQLModel, table=True):
     url: Optional[str] = None
     
     enabled: bool = True
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+class AgentProfile(SQLModel, table=True):
+    """
+    Agent 角色配置 (Multi-Agent Support)
+    """
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(unique=True, index=True) # 角色名，如 "Pero"
+    avatar: Optional[str] = None # 头像 URL 或路径
+    description: Optional[str] = None # 角色描述
+    
+    # 个性化配置
+    system_prompt: Optional[str] = None # 专属 System Prompt
+    voice_config_id: Optional[int] = Field(default=None, foreign_key="voiceconfig.id")
+    
+    is_active: bool = False # 是否为当前激活角色
+    
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)

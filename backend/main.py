@@ -45,7 +45,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from pydantic import BaseModel, Field
 import subprocess
 
-from models import Memory, Config, PetState, ScheduledTask, AIModelConfig, MCPConfig, VoiceConfig, ConversationLog, MaintenanceRecord
+from models import Memory, Config, PetState, ScheduledTask, AIModelConfig, MCPConfig, VoiceConfig, ConversationLog, MaintenanceRecord, AgentProfile
 from database import init_db, get_session
 from services.agent_service import AgentService
 from services.memory_service import MemoryService

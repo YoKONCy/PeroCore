@@ -15,7 +15,7 @@
           <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center text-white shadow-lg shadow-emerald-500/20">
             <Zap :size="18" fill="currentColor" />
           </div>
-          <span class="font-bold tracking-tight text-lg">PERO</span>
+          <span class="font-bold tracking-tight text-lg">{{ AGENT_NAME.toUpperCase() }}</span>
         </div>
         <button 
           @click="isSidebarCollapsed = !isSidebarCollapsed"
@@ -152,7 +152,7 @@
              </div>
 
              <div class="flex flex-col items-center gap-2 px-6">
-               <h3 class="text-lg md:text-xl font-medium text-center">{{ isRunning ? 'PeroCore 正在运行' : '准备就绪' }}</h3>
+               <h3 class="text-lg md:text-xl font-medium text-center">{{ isRunning ? AGENT_NAME + ' Core 正在运行' : '准备就绪' }}</h3>
                <p class="text-slate-500 text-xs md:text-sm max-w-md text-center">
                  {{ isRunning ? '所有系统在线。角色窗口已激活。' : '点击上方按钮初始化所有后端服务及角色窗口。' }}
                </p>
@@ -232,7 +232,7 @@
                 </div>
                 <h3 class="text-lg font-bold mb-2">Everything 搜索</h3>
                 <p class="text-sm text-slate-500 mb-6 leading-relaxed">
-                  高性能本地文件索引工具。PeroCore 使用此工具快速定位相关资源文件。
+                  高性能本地文件索引工具。{{ APP_TITLE }} 使用此工具快速定位相关资源文件。
                 </p>
                 <div class="flex items-center justify-between">
                   <span class="text-[10px] font-mono uppercase tracking-widest" :class="esStatus === 'INSTALLED' ? 'text-emerald-500' : 'text-slate-600'">
@@ -260,7 +260,7 @@
                 </div>
                 <h3 class="text-lg font-bold mb-2">NapCat 社交集成</h3>
                 <p class="text-sm text-slate-500 mb-6 leading-relaxed">
-                  通过 NapCat 框架连接 QQ 协议。开启后 Pero 将具备社交互动、自动回复及消息处理能力。
+                  通过 NapCat 框架连接 QQ 协议。开启后 {{ AGENT_NAME }} 将具备社交互动、自动回复及消息处理能力。
                 </p>
                 <div class="flex items-center justify-between">
                   <div class="flex items-center gap-3">
@@ -321,6 +321,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, nextTick, shallowRef, watch, defineAsyncComponent } from 'vue'
 import { useRouter } from 'vue-router'
+import { AGENT_NAME, APP_TITLE } from '../config'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getAllWebviewWindows, getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'

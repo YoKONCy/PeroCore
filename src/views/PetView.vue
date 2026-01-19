@@ -93,7 +93,7 @@
           ref="inputRef"
           v-model="userInput" 
           @keyup.enter="sendMessage"
-          placeholder="跟 Pero 对话..."
+          :placeholder="`跟 ${AGENT_NAME} 对话...`"
           class="chat-input"
           :disabled="isThinking"
           style="-webkit-app-region: no-drag;"
@@ -130,6 +130,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, toRaw, nextTick } from 'vue'
+import { AGENT_NAME } from '../config'
 import FileSearchModal from '../components/FileSearchModal.vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, emit } from '@tauri-apps/api/event'
