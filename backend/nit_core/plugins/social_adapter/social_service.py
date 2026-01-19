@@ -1589,7 +1589,7 @@ class SocialService:
                         llm_service = LLMService(
                             api_key=model_config.api_key,
                             api_base=model_config.api_base,
-                            model=model_config.model_name,
+                            model=model_config.model_id, # [Fix] model_name -> model_id
                             provider=model_config.provider
                         )
             

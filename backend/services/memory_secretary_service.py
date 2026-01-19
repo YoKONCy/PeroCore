@@ -272,7 +272,7 @@ class MemorySecretaryService:
         请同时给出至少 4 个描述该记忆的主题、情感、人物或场景的标签。
         
         数据: {json.dumps(mem_data, ensure_ascii=False)}
-        返回 JSON: { "id": { "importance": int, "tags": ["标签1", "标签2", "标签3", "标签4"] } }
+        返回 JSON: {{ "id": {{ "importance": int, "tags": ["标签1", "标签2", "标签3", "标签4"] }} }}
         """
 
         try:
@@ -340,12 +340,12 @@ class MemorySecretaryService:
         
         返回 JSON 列表:
         [
-          {
+          {{
             "ids_to_merge": [id1, id2...],
             "new_content": "202X-XX-XX XX:XX，发生的客观事实描述...",
             "tags": ["标签1", "标签2", "标签3", "标签4"],
             "importance": 1-10
-          }
+          }}
         ]
         ## 注意：
         - `tags` 必须包含至少 4 个能够准确反映这段记忆主题、情感、人物或场景的标签。
