@@ -10,6 +10,7 @@ python-multipart
 requests
 httpx
 aiohttp
+aiofiles
 loguru
 pydantic-settings
 python-dotenv

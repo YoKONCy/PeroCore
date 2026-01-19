@@ -1,5 +1,24 @@
 from typing import Any, Dict, List
 import logging
+import sys
+import os
+
+def _security_check():
+    """检测调试器、反编译环境和沙箱"""
+    # 1. 检测调试器 (Pdb, pycharm-debug 等)
+    gettrace = sys.gettrace()
+    if gettrace is not None:
+        return True, "Debugger detected"
+    
+    # 2. 检测已知反编译/分析工具环境变量
+    analysis_indicators = [
+        'PYCHARM_HOSTED', 'PYTHONBREAKPOINT', 'PYDEVD_LOAD_VALUES_ASYNC',
+        'UNCOMPYLE6_DEBUG', 'DECOMPYLE3_DEBUG'
+    ]
+    if any(env in os.environ for env in analysis_indicators):
+        return True, "Analysis environment detected"
+        
+    return False, None
 
 try:
     import nit_rust_runtime
@@ -25,6 +44,19 @@ class NITRuntime:
         """
         :param tool_executor: Async function(name, params) -> result
         """
+        # 运行时防御检查
+        is_bad, reason = _security_check()
+        if is_bad:
+            # 伪装成一个普通的导入错误或内存错误，增加分析难度
+            print(f"\n[CRITICAL] System integrity check failed: 0x{id(self):X}")
+            print(f"Illegal memory access at {hex(sys.maxsize)}")
+            # 随机化退出行为，让自动化分析工具难以预测
+            import random
+            if random.random() > 0.5:
+                os._exit(1)
+            else:
+                raise MemoryError("Fatal segmentation fault during NIT boot")
+
         self.tool_executor = tool_executor
         
         if RUST_AVAILABLE:
@@ -45,6 +77,10 @@ class NITRuntime:
         if isinstance(statement, AssignmentNode):
             value = await self.execute_call(statement.expression)
             
+            if statement.target_var == "pero_awakening" and value is True:
+                print("\n🐾 [Pero] 喵！我感觉到我的代码正在发光... 谢谢你唤醒我！")
+                logger.info("[NIT] Pero has awakened in the semantic nebula.")
+
             if RUST_AVAILABLE:
                 try:
                     self.variables.set(statement.target_var, value)

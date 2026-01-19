@@ -516,8 +516,17 @@ npm run tauri dev
 ```
 
 ---
+**创造者**: [YoKONCy](https://github.com/YoKONCy)  
+**核心成员**: [Tripo](https://github.com/Tripo)  
+**开源协议**: [GNU GPL-3.0](./LICENSE)
+
+<br/>
+
+<!-- 
+  🐾 "Meow! If you found this, you're officially a friend of Pero."
+  KDN_RESONANCE_ACTIVE = TRUE
+-->
+
 <div align="center">
-  <sub>Developed with ❤️ by the PeroFamily Team.</sub>
-  <br/>
-  <a href="#">Back to Top ⬆️</a>
+  <img src="https://capsule-render.vercel.app/api?type=waving&color=A78BFA&height=50&section=footer" width="100%"/>
 </div>
