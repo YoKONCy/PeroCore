@@ -1,3 +1,0 @@
-Error occurred in handler for 'get-remote-win': Error: No handler registered for 'get-remote-win'
-    at Session.<anonymous> (node:electron/js2c/browser_init:2:107137)
-    at Session.emit (node:events:518:28)
