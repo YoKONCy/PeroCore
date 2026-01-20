@@ -117,8 +117,8 @@ class CompanionService:
         
         # 4. 重置 UI 状态
         try:
-            from services.voice_manager import voice_manager
-            await voice_manager.broadcast({"type": "status", "content": "idle"})
+            from services.realtime_session_manager import realtime_session_manager
+            await realtime_session_manager.broadcast({"type": "status", "content": "idle", "target": "pet_view_only"})
         except:
             pass
             
@@ -195,7 +195,7 @@ class CompanionService:
 
     async def _loop(self):
         """陪伴模式的主循环"""
-        from services.voice_manager import voice_manager # 在此处导入以避免循环依赖或初始化顺序问题
+        from services.realtime_session_manager import realtime_session_manager # 在此处导入以避免循环依赖或初始化顺序问题
         
         logger.info("[Companion] 循环已启动。")
         print("[Companion] 循环已启动。", flush=True)
@@ -204,8 +204,8 @@ class CompanionService:
         try:
             # 如果服务刚启动，稍作等待以让 WebSocket 连接
             await asyncio.sleep(2) 
-            await voice_manager.broadcast({"type": "status", "content": "idle"})
-            await voice_manager.broadcast({"type": "text_response", "content": "陪伴中..."})
+            await realtime_session_manager.broadcast({"type": "status", "content": "idle", "target": "pet_view_only"})
+            await realtime_session_manager.broadcast({"type": "text_response", "content": "陪伴中...", "target": "pet_view_only"})
             print("[Companion] 初始状态已广播。", flush=True)
         except Exception as e:
             logger.warning(f"广播陪伴启动状态失败: {e}")
@@ -225,7 +225,7 @@ class CompanionService:
                 if not first_run and elapsed > 15:
                      try:
                          # 我们在此处不发送 status:idle 以避免中断动画，仅发送文本
-                         await voice_manager.broadcast({"type": "text_response", "content": "陪伴中..."})
+                         await realtime_session_manager.broadcast({"type": "text_response", "content": "陪伴中...", "target": "pet_view_only"})
                      except:
                          pass
 
@@ -268,9 +268,9 @@ class CompanionService:
                 logger.info("[Companion] 正在使用 LLM 分析屏幕...")
                 
                 # 通知 UI：思考中（覆盖 "陪伴中..."）
-                await voice_manager.broadcast({"type": "status", "content": "thinking"})
+                await realtime_session_manager.broadcast({"type": "status", "content": "thinking", "target": "pet_view_only"})
                 # 显式将气泡文本设置为 "思考中..."
-                await voice_manager.broadcast({"type": "text_response", "content": "思考中..."})
+                await realtime_session_manager.broadcast({"type": "text_response", "content": "思考中...", "target": "pet_view_only"})
 
                 response_text = await self._generate_response(current_images)
                 
@@ -282,9 +282,9 @@ class CompanionService:
                 else:
                     # 如果没有响应，恢复到陪伴状态
                     print("[Companion] 未生成响应。", flush=True)
-                    await voice_manager.broadcast({"type": "status", "content": "idle"})
+                    await realtime_session_manager.broadcast({"type": "status", "content": "idle", "target": "pet_view_only"})
                     await asyncio.sleep(0.5) # 等待前端清除
-                    await voice_manager.broadcast({"type": "text_response", "content": "陪伴中..."})
+                    await realtime_session_manager.broadcast({"type": "text_response", "content": "陪伴中...", "target": "pet_view_only"})
                 
                 # 7. 成功运行（或尝试）后重置定时器
                 self.update_activity()
@@ -388,8 +388,8 @@ class CompanionService:
                 
                 async def on_status_update(status_type, status_content):
                     try:
-                        from services.voice_manager import voice_manager
-                        await voice_manager.broadcast({"type": "status", "content": "thinking"})
+                        from services.realtime_session_manager import realtime_session_manager
+                        await realtime_session_manager.broadcast({"type": "status", "content": "thinking", "target": "pet_view_only"})
                     except: pass
 
                 # 精简版陪伴模式继承了轻量级逻辑（直接输出，无 NIT）
@@ -429,23 +429,23 @@ class CompanionService:
             except Exception as e:
                 logger.error(f"[Companion] LLM 错误: {e}")
                 try:
-                    from services.voice_manager import voice_manager
-                    await voice_manager.broadcast({"type": "status", "content": "idle"})
+                    from services.realtime_session_manager import realtime_session_manager
+                    await realtime_session_manager.broadcast({"type": "status", "content": "idle", "target": "pet_view_only"})
                 except:
                     pass
                 return None
 
     async def _speak(self, text: str):
-        # 使用 VoiceManager 的清理逻辑以保持一致性
-        from services.voice_manager import voice_manager
+        # 使用 RealtimeSessionManager 的清理逻辑以保持一致性
+        from services.realtime_session_manager import realtime_session_manager
         
         # 1. 清理用于 UI（保留思考/动作以供显示）
-        ui_text = voice_manager._clean_text(text, for_tts=False)
+        ui_text = realtime_session_manager._clean_text(text, for_tts=False)
         
         # 2. 清理用于 TTS（针对复杂任务的智能过滤）
         # 策略：如果文本包含思考块，我们假设它是一个复杂任务。
         # 我们只想说出*最终*结果，即最后一个思考块之后的文本。
-        tts_text = voice_manager._clean_text(text, for_tts=True)
+        tts_text = realtime_session_manager._clean_text(text, for_tts=True)
         
         # 检查原始文本是否有思考块
         if "【Thinking" in text:
@@ -456,7 +456,7 @@ class CompanionService:
                 # 提取最后一个思考块之后的所有内容
                 final_segment = text[last_thinking_end + 1:]
                 # 清理此段落用于 TTS（移除动作等）
-                tts_text = voice_manager._clean_text(final_segment, for_tts=True)
+                tts_text = realtime_session_manager._clean_text(final_segment, for_tts=True)
         
         # 附加过滤：只朗读最后一段（以避免唠叨）
         # 用户特别要求在最终响应之前忽略 "唠叨"。
@@ -474,15 +474,15 @@ class CompanionService:
         # 2. 通知 UI 并发送气泡
         try:
             # 通知正在说话
-            await voice_manager.broadcast({"type": "status", "content": "speaking"})
+            await realtime_session_manager.broadcast({"type": "status", "content": "speaking"})
             
             # 发送触发器
-            triggers = voice_manager._extract_triggers(text)
+            triggers = realtime_session_manager._extract_triggers(text)
             if triggers:
-                await voice_manager.broadcast({"type": "triggers", "data": triggers})
+                await realtime_session_manager.broadcast({"type": "triggers", "data": triggers})
                 
             # 发送文本气泡（带有供 UI 渲染的思考/动作）
-            await voice_manager.broadcast({"type": "text_response", "content": ui_text})
+            await realtime_session_manager.broadcast({"type": "text_response", "content": ui_text})
         except Exception as e:
             logger.error(f"[Companion] 广播 UI 事件失败: {e}")
 
@@ -516,10 +516,10 @@ class CompanionService:
         # Finally 块以重置状态
         try:
              # 重置 UI 状态为陪伴模式
-             await voice_manager.broadcast({"type": "status", "content": "idle"})
+             await realtime_session_manager.broadcast({"type": "status", "content": "idle", "target": "pet_view_only"})
              # 稍作等待以确保如果我们发送得太快，'idle' 不会立即清除文本
              await asyncio.sleep(0.5) 
-             await voice_manager.broadcast({"type": "text_response", "content": "陪伴中..."})
+             await realtime_session_manager.broadcast({"type": "text_response", "content": "陪伴中...", "target": "pet_view_only"})
         except:
              pass
 

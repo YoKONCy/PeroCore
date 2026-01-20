@@ -58,7 +58,7 @@ class ASRService:
                 loop = asyncio.get_event_loop()
                 return await loop.run_in_executor(None, self._transcribe_sync, audio_path, config_json)
             except Exception as e:
-                print(f"ASR Error: {e}")
+                print(f"ASR 错误: {e}")
                 # 重新抛出异常，以便上层捕获并通知前端
                 raise e
 

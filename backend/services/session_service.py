@@ -5,10 +5,12 @@ try:
     from models import Config, ConversationLog, Memory
     from services.llm_service import LLMService
     from services.memory_service import MemoryService
+    from core.config_manager import get_config_manager
 except ImportError:
     from backend.models import Config, ConversationLog, Memory
     from backend.services.llm_service import LLMService
     from backend.services.memory_service import MemoryService
+    from backend.core.config_manager import get_config_manager
 import json
 
 # Global variable to hold session reference (injected by AgentService)
@@ -26,7 +28,45 @@ async def enter_work_mode(task_name: str = "Unknown Task") -> str:
     """
     session = _CURRENT_SESSION_CONTEXT.get("db_session")
     if not session:
-        return "Error: Database session not available."
+        return "Error: 数据库会话不可用。"
+
+    # [Check] Block Work Mode if incompatible modes are active
+    try:
+        active_blockers = []
+        
+        # 1. Check Config via ConfigManager (memory cache)
+        from core.config_manager import get_config_manager
+        config_mgr = get_config_manager()
+        
+        # Log current state for debugging
+        print(f"[SessionOps] 正在检查模式冲突。当前配置: lightweight_mode={config_mgr.get('lightweight_mode')}, aura_vision={config_mgr.get('aura_vision_enabled')}")
+        
+        if config_mgr.get("lightweight_mode", False):
+            active_blockers.append("lightweight_mode")
+            
+        if config_mgr.get("aura_vision_enabled", False):
+            active_blockers.append("aura_vision_enabled")
+            
+        # 2. Check DB Config (Companion Mode)
+        companion_config = (await session.exec(select(Config).where(Config.key == "companion_mode_enabled"))).first()
+        if companion_config and str(companion_config.value).lower() == 'true':
+            active_blockers.append("companion_mode")
+                
+        if active_blockers:
+            # Map keys to Chinese names for better user experience
+            name_map = {
+                "lightweight_mode": "轻量模式",
+                "companion_mode": "陪伴模式",
+                "aura_vision_enabled": "主动视觉模式"
+            }
+            modes_str = "、".join([name_map.get(m, m) for m in active_blockers])
+            return f"Error: 无法进入工作模式。检测到以下模式正在运行：{modes_str}。请先关闭它们。"
+            
+    except Exception as check_e:
+        print(f"[SessionOps] Mode check warning: {check_e}")
+        # Proceed with caution or return error? Let's log and proceed if check fails to avoid lockouts, 
+        # or fail safe. Let's fail safe if we can't verify.
+        # For now, just log.
 
     try:
         # 1. Generate new Session ID
@@ -54,6 +94,14 @@ async def enter_work_mode(task_name: str = "Unknown Task") -> str:
             config_task.value = task_name
             
         await session.commit()
+
+        # [NIT] Activate Work Toolchain
+        try:
+            from core.nit_manager import get_nit_manager
+            get_nit_manager().set_category_status("work", True)
+        except Exception as nit_e:
+            print(f"[SessionOps] Failed to activate NIT work category: {nit_e}")
+
         return f"Entered Work Mode. New isolated session: {work_session_id}. Task: {task_name}"
         
     except Exception as e:
@@ -68,7 +116,7 @@ async def exit_work_mode() -> str:
     """
     session = _CURRENT_SESSION_CONTEXT.get("db_session")
     if not session:
-        return "Error: Database session not available."
+        return "Error: 数据库会话不可用。"
 
     config_id = None
     try:
@@ -77,10 +125,10 @@ async def exit_work_mode() -> str:
         config_task = (await session.exec(select(Config).where(Config.key == "work_mode_task"))).first()
         
         if not config_id or not config_id.value.startswith("work_"):
-            return "Error: Not currently in Work Mode."
+            return "Error: 当前不在工作模式。"
             
         work_session_id = config_id.value
-        task_name = config_task.value if config_task else "Unnamed Task"
+        task_name = config_task.value if config_task else "未命名任务"
         
         # 2. Fetch all logs for this session
         logs = (await session.exec(
@@ -90,7 +138,7 @@ async def exit_work_mode() -> str:
         )).all()
         
         if not logs:
-            return "Exited Work Mode (No logs to summarize)."
+            return "已退出工作模式 (无日志需要总结)。"
 
         # 3. Summarize via LLM
         global_config = {c.key: c.value for c in (await session.exec(select(Config))).all()}
@@ -100,15 +148,13 @@ async def exit_work_mode() -> str:
 
         # Initialize MDPManager
         import os
-        # 修正路径：backend/nit_core/tools/core/SessionOps/session_ops.py -> backend/services/mdp/prompts
-        # __file__ -> session_ops.py
-        # dirname -> SessionOps
-        # dirname -> core
-        # dirname -> tools
-        # dirname -> nit_core
+        # Path logic: backend/services/session_service.py -> backend/services/mdp/prompts
+        # __file__ -> session_service.py
+        # dirname -> services
         # dirname -> backend
         # join -> backend/services/mdp/prompts
-        mdp_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))), "services", "mdp", "prompts")
+        mdp_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "services", "mdp", "prompts")
+        
         if not os.path.exists(mdp_dir):
              # Fallback
              mdp_dir = os.path.join(os.getcwd(), "backend", "services", "mdp", "prompts")
@@ -147,60 +193,65 @@ async def exit_work_mode() -> str:
         #     memory_type="work_log",
         #     source="system"
         # )
-        return f"Exited Work Mode. \n\n[Summary Generated]:\n{summary_content}\n\n(Saved to File: {file_path})"
+
+        # [NIT] Deactivate Work Toolchain
+        try:
+            from core.nit_manager import get_nit_manager
+            get_nit_manager().set_category_status("work", False)
+        except Exception as nit_e:
+            print(f"[SessionOps] 停用 NIT 工作分类失败: {nit_e}")
+            
+        # 6. Restore Main Session
+        # Just revert the config pointer
+        # We need to find the previous session ID. 
+        # Actually, for now, we just set it to 'default' or generate a new daily session if needed.
+        # But ideally we should go back to where we were.
+        # Since we don't store "previous_session_id" explicitly, let's look for the latest non-work session?
+        # Or just 'default' which usually maps to daily session in other logic.
+        
+        config_id.value = "default" 
+        config_task.value = ""
+        await session.commit()
+        
+        return f"已退出工作模式。日志已保存 ({file_path})。会话已恢复。"
         
     except Exception as e:
         await session.rollback()
-        return f"Error during Work Mode exit: {e}"
-    finally:
-        # ALWAYS try to restore session state to 'default'
+        return f"退出工作模式错误: {e}"
+
+async def abort_work_mode() -> str:
+    """
+    Abort 'Work Mode' WITHOUT saving summary.
+    Useful for accidental entry or if the user just wants to quit.
+    """
+    session = _CURRENT_SESSION_CONTEXT.get("db_session")
+    if not session:
+        return "Error: 数据库会话不可用。"
+
+    try:
+        # 1. Revert Config
+        config_id = (await session.exec(select(Config).where(Config.key == "current_session_id"))).first()
+        config_task = (await session.exec(select(Config).where(Config.key == "work_mode_task"))).first()
+        
         if config_id and config_id.value.startswith("work_"):
-            try:
-                config_id.value = "default"
-                await session.commit()
+             # Revert to default
+             config_id.value = "default"
+             if config_task:
+                 config_task.value = ""
+             await session.commit()
+             
+             # [NIT] Deactivate Work Toolchain
+             try:
+                from core.nit_manager import get_nit_manager
+                get_nit_manager().set_category_status("work", False)
+             except: pass
 
-                # [Broadcast] Notify frontend to switch UI
-                try:
-                    from services.voice_manager import voice_manager
-                    await voice_manager.broadcast({
-                        "type": "mode_update",
-                        "mode": "work",
-                        "is_active": False
-                    })
-                except Exception as e:
-                    print(f"[SessionOps] Failed to broadcast mode update: {e}")
-
-            except Exception as final_e:
-                print(f"[SessionOps] Critical Error restoring session: {final_e}")
-
-# Tool Definitions
-enter_work_mode_definition = {
-    "type": "function",
-    "function": {
-        "name": "enter_work_mode",
-        "description": "Activate 'Work Mode' (Isolation Mode). Use this when starting a complex coding task or project. It isolates the conversation history to prevent polluting the daily chat context.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "task_name": {
-                    "type": "string",
-                    "description": "The name or description of the task (e.g., 'Refactoring Memory Service')."
-                }
-            },
-            "required": ["task_name"]
-        }
-    }
-}
-
-exit_work_mode_definition = {
-    "type": "function",
-    "function": {
-        "name": "exit_work_mode",
-        "description": "Deactivate 'Work Mode'. Use this when the task is done. It will automatically summarize the session into a 'Work Log' and save it to memory.",
-        "parameters": {
-            "type": "object",
-            "properties": {},
-            "required": []
-        }
-    }
-}
+             original_session_id = "default" # Simplified
+             print(f"[SessionOps] 工作模式已中止。恢复至 {original_session_id}。")
+             return f"工作模式已中止。恢复至会话: {original_session_id}"
+        else:
+             return "当前不在工作模式。"
+             
+    except Exception as e:
+        await session.rollback()
+        return f"中止工作模式错误: {e}"

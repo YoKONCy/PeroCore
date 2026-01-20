@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict
 from sqlmodel.ext.asyncio.session import AsyncSession
 from database import get_session
-from nit_core.tools.core.SessionOps.session_ops import enter_work_mode, exit_work_mode
+from services.session_service import enter_work_mode, exit_work_mode
 
 router = APIRouter(prefix="/api/ide", tags=["ide"])
 
@@ -23,10 +23,36 @@ class WorkModeRequest(BaseModel):
 class ReadFileRequest(BaseModel):
     path: str
 
+class CreateFileRequest(BaseModel):
+    path: str
+    is_directory: bool = False
+
+class WriteFileRequest(BaseModel):
+    path: str
+    content: str
+
+class DeleteFileRequest(BaseModel):
+    path: str
+
+class RenameFileRequest(BaseModel):
+    path: str
+    new_name: str
+
 class ChatRequest(BaseModel):
     messages: List[Dict[str, str]]
     source: str = "ide"
     session_id: str = "default"
+
+class SkipCommandRequest(BaseModel):
+    pid: int
+
+@router.post("/tools/terminal/skip")
+async def skip_terminal_command(request: SkipCommandRequest):
+    from services.realtime_session_manager import realtime_session_manager
+    success = realtime_session_manager.skip_command(request.pid)
+    if not success:
+        raise HTTPException(status_code=404, detail="Command not found or not active")
+    return {"status": "ok"}
 
 @router.post("/chat")
 async def chat(request: ChatRequest, session: AsyncSession = Depends(get_session)):
@@ -45,14 +71,14 @@ async def chat(request: ChatRequest, session: AsyncSession = Depends(get_session
             request.session_id = "default"
 
     # [Feature] Real-time ReAct Broadcasting
-    # We use voice_manager's broadcast capability to send "thinking" statuses to the frontend (ChatInterface/PetView)
+    # We use realtime_session_manager's broadcast capability to send "thinking" statuses to the frontend (ChatInterface/PetView)
     # This ensures that even for IDE chats, we get real-time visualization via WebSocket.
-    from services.voice_manager import voice_manager
+    from services.realtime_session_manager import realtime_session_manager
     
     async def on_status(status_type: str, content: str):
         # Broadcast thinking steps to all connected clients (IDE, PetView, etc.)
         if status_type == "thinking":
-            await voice_manager.broadcast({
+            await realtime_session_manager.broadcast({
                 "type": "status",
                 "content": "thinking",
                 "detail": content # Pass detailed thought
@@ -70,19 +96,25 @@ async def chat(request: ChatRequest, session: AsyncSession = Depends(get_session
                 yield chunk
         
         # Reset status to idle after generation
-        await voice_manager.broadcast({"type": "status", "content": "idle"})
+        await realtime_session_manager.broadcast({"type": "status", "content": "idle"})
 
     return StreamingResponse(generate(), media_type="text/plain")
 
 def get_workspace_root():
     """
     Get the absolute path to the workspace root.
-    Defaults to the parent directory of the backend (project root).
+    Defaults to PeroCore/pero_workspace
     """
-    base_dir = os.getcwd()
-    # Go up one level to reach PeroCore root
-    workspace_root = os.path.abspath(os.path.join(base_dir, ".."))
-    return workspace_root
+    current_file_dir = os.path.dirname(os.path.abspath(__file__)) # PeroCore/backend/routers
+    backend_dir = os.path.dirname(current_file_dir) # PeroCore/backend
+    project_root = os.path.dirname(backend_dir) # PeroCore
+    
+    workspace_dir = os.path.join(project_root, "pero_workspace")
+    
+    if not os.path.exists(workspace_dir):
+        os.makedirs(workspace_dir, exist_ok=True)
+        
+    return workspace_dir
 
 @router.get("/files", response_model=List[FileNode])
 async def list_files(path: Optional[str] = None):
@@ -148,10 +180,94 @@ async def read_file(request: ReadFileRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/file/create")
+async def create_file_or_dir(request: CreateFileRequest):
+    base_dir = get_workspace_root()
+    target_path = os.path.abspath(os.path.join(base_dir, request.path))
+    
+    if not target_path.startswith(base_dir):
+        raise HTTPException(status_code=403, detail="Access denied")
+        
+    if os.path.exists(target_path):
+        raise HTTPException(status_code=400, detail="Path already exists")
+        
+    try:
+        if request.is_directory:
+            os.makedirs(target_path)
+        else:
+            # Create parent dirs if needed
+            os.makedirs(os.path.dirname(target_path), exist_ok=True)
+            with open(target_path, 'w', encoding='utf-8') as f:
+                f.write("")
+        return {"status": "success", "path": request.path}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/file/write")
+async def write_file(request: WriteFileRequest):
+    base_dir = get_workspace_root()
+    target_path = os.path.abspath(os.path.join(base_dir, request.path))
+    
+    if not target_path.startswith(base_dir):
+        raise HTTPException(status_code=403, detail="Access denied")
+        
+    try:
+        # Create parent dirs if needed (just in case)
+        os.makedirs(os.path.dirname(target_path), exist_ok=True)
+        with open(target_path, 'w', encoding='utf-8') as f:
+            f.write(request.content)
+        return {"status": "success", "path": request.path}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/file/delete")
+async def delete_file(request: DeleteFileRequest):
+    base_dir = get_workspace_root()
+    target_path = os.path.abspath(os.path.join(base_dir, request.path))
+    
+    if not target_path.startswith(base_dir):
+        raise HTTPException(status_code=403, detail="Access denied")
+        
+    if not os.path.exists(target_path):
+        raise HTTPException(status_code=404, detail="Path not found")
+        
+    try:
+        if os.path.isdir(target_path):
+            import shutil
+            shutil.rmtree(target_path)
+        else:
+            os.remove(target_path)
+        return {"status": "success", "path": request.path}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/file/rename")
+async def rename_file(request: RenameFileRequest):
+    base_dir = get_workspace_root()
+    target_path = os.path.abspath(os.path.join(base_dir, request.path))
+    
+    if not target_path.startswith(base_dir):
+        raise HTTPException(status_code=403, detail="Access denied")
+        
+    if not os.path.exists(target_path):
+        raise HTTPException(status_code=404, detail="Path not found")
+        
+    parent_dir = os.path.dirname(target_path)
+    new_path = os.path.join(parent_dir, request.new_name)
+    
+    if os.path.exists(new_path):
+        raise HTTPException(status_code=400, detail="New name already exists")
+        
+    try:
+        os.rename(target_path, new_path)
+        return {"status": "success", "old_path": request.path, "new_path": request.new_name}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.post("/work_mode/enter")
 async def api_enter_work_mode(request: WorkModeRequest, session: AsyncSession = Depends(get_session)):
     # Inject session into SessionOps context (as it relies on global context currently)
-    from nit_core.tools.core.SessionOps.session_ops import set_current_session_context
+    from services.session_service import set_current_session_context
     set_current_session_context(session)
     
     result = await enter_work_mode(request.task_name)
@@ -160,7 +276,7 @@ async def api_enter_work_mode(request: WorkModeRequest, session: AsyncSession = 
 @router.post("/work_mode/exit")
 async def api_exit_work_mode(session: AsyncSession = Depends(get_session)):
     # Inject session
-    from nit_core.tools.core.SessionOps.session_ops import set_current_session_context
+    from services.session_service import set_current_session_context
     set_current_session_context(session)
     
     result = await exit_work_mode()
@@ -173,12 +289,20 @@ async def api_abort_work_mode(session: AsyncSession = Depends(get_session)):
     """
     from models import Config
     from sqlmodel import select
+    from core.nit_manager import get_nit_manager
     
     try:
         config_id = (await session.exec(select(Config).where(Config.key == "current_session_id"))).first()
         if config_id and config_id.value.startswith("work_"):
             config_id.value = "default"
             await session.commit()
+            
+            # [NIT] Deactivate Work Toolchain
+            try:
+                get_nit_manager().set_category_status("work", False)
+            except Exception as nit_e:
+                print(f"[IDE Router] Failed to deactivate NIT work category: {nit_e}")
+
             return {"message": "Work Mode aborted (No summary generated)."}
         else:
             return {"message": "Not in Work Mode."}

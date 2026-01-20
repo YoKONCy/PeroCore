@@ -22,14 +22,14 @@ else:
     old_db_path = Path.home() / ".perocore" / "perocore.db"
     
     if old_db_path.exists() and not new_db_path.exists():
-        print(f"[Database] Migrating from {old_db_path} to {new_db_path}...")
+        print(f"[Database] 正在从 {old_db_path} 迁移数据到 {new_db_path}...")
         try:
             import shutil
             shutil.move(str(old_db_path), str(new_db_path))
-            print("[Database] Migration successful.")
+            print("[Database] 迁移成功。")
             db_path = new_db_path
         except Exception as e:
-            print(f"[Database] Migration failed: {e}. Using old path as fallback.")
+            print(f"[Database] 迁移失败: {e}。将使用旧路径作为后备。")
             db_path = old_db_path
     else:
         db_path = new_db_path

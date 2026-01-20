@@ -513,7 +513,9 @@ const toggleLaunch = async () => {
       
       // 1. Start Backend
       backendStatus.value = 'STARTING'
-      await invoke('start_backend')
+      await invoke('start_backend', {
+        enableSocialMode: isSocialEnabled.value
+      })
       backendStatus.value = 'RUNNING'
       addLog('[SYSTEM] 核心服务已启动。')
       
@@ -537,6 +539,7 @@ const toggleLaunch = async () => {
 
     } catch (e) {
       addLog(`[ERROR] Start failed: ${e}`)
+      console.error("[ERROR] Start failed details:", e)
       isStarting.value = false
       isRunning.value = false
       backendStatus.value = 'ERROR'

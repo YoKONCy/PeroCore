@@ -606,7 +606,7 @@ class SocialService:
             await self._generate_daily_summary(yesterday_str)
             
             # 3. 更新配置
-            self.config_manager.set("last_social_summary_date", yesterday_str)
+            await self.config_manager.set("last_social_summary_date", yesterday_str)
             logger.info(f"[Social] {yesterday_str} 的每日摘要已完成。")
             
         except Exception as e:
@@ -1771,11 +1771,10 @@ class SocialService:
         logger.info(f"[Social] 通知主人 [{importance}]: {content}")
         # 广播到前端
         try:
-            # 如果可能，我们需要在方法内部导入 voice_manager 以避免循环导入
+            # 如果可能，我们需要在方法内部导入 realtime_session_manager 以避免循环导入
             # 或者只是依赖 services 中的那个
-            from backend.services.voice_manager import get_voice_manager
-            vm = get_voice_manager()
-            await vm.broadcast({
+            from services.realtime_session_manager import realtime_session_manager
+            await realtime_session_manager.broadcast({
                 "type": "text_response",
                 "content": f"【社交汇报】\n{content}",
                 "status": "report"

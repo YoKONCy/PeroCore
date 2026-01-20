@@ -3,9 +3,10 @@ import numpy as np
 from typing import Dict, Any, List
 import datetime
 from sqlmodel import select
-from models import Config, PetState
+from models import Config, PetState, ConversationLog
 from .base import BasePreprocessor
 from services.embedding_service import embedding_service
+from sqlmodel import select, desc
 
 class UserInputPreprocessor(BasePreprocessor):
     """
@@ -58,9 +59,16 @@ class HistoryPreprocessor(BasePreprocessor):
 
         # Fetch recent logs
         try:
-            history_logs = await memory_service.get_recent_logs(session, source, session_id, limit=40)
+            # [Context Window Adjustment]
+            # Work Mode needs longer context for coding tasks.
+            is_work_context = session_id.startswith("work_") or source == "ide"
+            
+            # 策略调整：先拉取足够多的日志 (例如 200 条)，然后基于 Token 进行截断
+            limit = 200 if is_work_context else 40
+            
+            history_logs = await memory_service.get_recent_logs(session, source, session_id, limit=limit)
         except Exception as e:
-            print(f"[HistoryPreprocessor] Failed to fetch history logs: {e}")
+            print(f"[HistoryPreprocessor] 获取历史日志失败: {e}")
             history_logs = []
 
         history_messages = []
@@ -81,6 +89,39 @@ class HistoryPreprocessor(BasePreprocessor):
                 content = content.strip()
                 if content:
                     history_messages.append({"role": log.role, "content": content})
+
+        # [Token Based Truncation]
+        # 如果处于工作模式，我们使用 100K Token 的滑动窗口策略
+        if is_work_context and history_messages:
+            try:
+                import tiktoken
+                enc = tiktoken.get_encoding("cl100k_base") # 适用于 GPT-4/GPT-3.5
+                
+                MAX_TOKENS = 100000 # 100K Limit
+                current_tokens = 0
+                truncated_history = []
+                
+                # 从最新的消息开始累加 (history_messages 是按时间顺序排列的，所以我们要倒序遍历)
+                for msg in reversed(history_messages):
+                    content = msg.get("content", "")
+                    tokens = len(enc.encode(content))
+                    
+                    if current_tokens + tokens > MAX_TOKENS:
+                        print(f"[History] Token limit reached ({current_tokens} + {tokens} > {MAX_TOKENS}). Truncating older messages.")
+                        break
+                    
+                    current_tokens += tokens
+                    truncated_history.insert(0, msg) # 保持原有顺序插入头部
+                
+                history_messages = truncated_history
+                
+            except ImportError:
+                print("[History] tiktoken not found. Fallback to message count limit.")
+                # Fallback: Keep last 100 messages if tiktoken fails
+                if len(history_messages) > 100:
+                    history_messages = history_messages[-100:]
+            except Exception as e:
+                print(f"[History] Token truncation failed: {e}")
 
         # Deduplication logic
         if current_messages and history_messages:
@@ -436,11 +477,46 @@ class SystemPromptPreprocessor(BasePreprocessor):
         full_context_messages = context.get("full_context_messages", [])
         is_voice_mode = context.get("is_voice_mode", False)
         nit_id = context.get("nit_id")
+        
+        # [Work Mode Detection]
+        session_id = context.get("session_id", "default")
+        source = context.get("source", "desktop")
+        is_work_mode = session_id.startswith("work_") or source == "ide"
+
+        # [Work Mode Context Injection]
+        if is_work_mode:
+            try:
+                # 获取最近的非工作模式对话 (default session) 作为前情提要
+                # 排除所有 work_ 开头的 session，只取日常对话
+                stmt = select(ConversationLog).where(
+                    ~ConversationLog.session_id.startswith("work_")
+                ).order_by(desc(ConversationLog.timestamp)).limit(4)
+                
+                recent_logs = (await context["session"].exec(stmt)).all()
+                # 结果是倒序的 (最新的在前)，我们需要反转回来按时间顺序显示
+                recent_logs = sorted(recent_logs, key=lambda x: x.timestamp)
+                
+                context_str = ""
+                if recent_logs:
+                    context_str = "[近期日常对话回顾]\n"
+                    for log in recent_logs:
+                         role = "主人" if log.role == "user" else "Pero"
+                         # 简单的清理
+                         content = re.sub(r'<[^>]+>', '', log.content).strip()
+                         if len(content) > 100: content = content[:100] + "..."
+                         context_str += f"- {role}: {content}\n"
+                
+                variables["recent_history_context"] = context_str
+                
+            except Exception as e:
+                print(f"[SystemPromptBuilder] Failed to inject work mode context: {e}")
+                variables["recent_history_context"] = ""
 
         final_messages = prompt_manager.compose_messages(
             full_context_messages, 
             variables, 
-            is_voice_mode=is_voice_mode
+            is_voice_mode=is_voice_mode,
+            is_work_mode=is_work_mode
         )
         
         # [NIT Security] 将动态握手 ID 注入系统提示词

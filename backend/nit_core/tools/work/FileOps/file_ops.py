@@ -2,12 +2,16 @@ import os
 import fitz  # PyMuPDF
 import docx
 import json
+import ast
+import logging
 from pathlib import Path
 
 # 定义工作空间根目录，强制隔离所有文件操作
 # backend/nit_core/tools/work/FileOps/file_ops.py -> PeroCore/pero_workspace
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 WORKSPACE_ROOT = os.path.join(BASE_DIR, "pero_workspace")
+
+logger = logging.getLogger(__name__)
 
 def _get_safe_path(input_path: str) -> str:
     """
@@ -34,6 +38,115 @@ def _get_safe_path(input_path: str) -> str:
         raise PermissionError(f"Access Denied: Path traversal detected. Target: {target_path} is outside of {WORKSPACE_ROOT}")
     
     return target_path
+
+def validate_code(file_path: str, content: str) -> list:
+    """
+    Simple Code Validator.
+    Currently supports Python syntax checking via ast.
+    Returns a list of error messages.
+    """
+    errors = []
+    ext = os.path.splitext(file_path)[1].lower()
+    
+    if ext == '.py':
+        try:
+            ast.parse(content)
+        except SyntaxError as e:
+            errors.append(f"Line {e.lineno}, Col {e.offset}: {e.msg}")
+        except Exception as e:
+            errors.append(f"AST Parse Error: {str(e)}")
+            
+    # Future: Add checks for JS/TS/CSS if needed, potentially calling external tools if available.
+    
+    return errors
+
+import re
+
+def apply_diff_logic(original_content: str, diff_content: str) -> str:
+    """
+    Applies a diff block to the original content.
+    Supports two formats:
+    1. Standard (7 chars): <<<<<<< SEARCH ... ======= ... >>>>>>> REPLACE
+    2. Clean (4 chars):    <<<< SEARCH ... ==== ... >>>> REPLACE
+    
+    Features:
+    - Wildcard '...' in SEARCH block matches any content (non-greedy).
+    - Whitespace normalization (ignores \\r).
+    """
+    # 1. Normalize Newlines in Original
+    # We work with \n internally for consistent matching
+    original_normalized = original_content.replace('\r\n', '\n')
+    
+    # 2. Parse Diff Content
+    start_marker_7 = '<<<<<<< SEARCH'
+    start_marker_4 = '<<<< SEARCH'
+    
+    if start_marker_7 in diff_content:
+        start_marker = start_marker_7
+        mid_marker = '======='
+        end_marker = '>>>>>>> REPLACE'
+    elif start_marker_4 in diff_content:
+        start_marker = start_marker_4
+        mid_marker = '===='
+        end_marker = '>>>> REPLACE'
+    else:
+        raise ValueError("Invalid diff format: No SEARCH blocks found (checked <<<<<<< SEARCH and <<<< SEARCH).")
+
+    # Extract Block
+    try:
+        # split by start_marker, take the second part (first block)
+        block = diff_content.split(start_marker, 1)[1]
+        
+        if mid_marker not in block:
+            raise ValueError(f"Invalid diff format: Missing {mid_marker} separator.")
+            
+        parts = block.split(mid_marker)
+        search_part = parts[0]
+        
+        if end_marker not in parts[1]:
+             raise ValueError(f"Invalid diff format: Missing {end_marker} separator.")
+             
+        replace_part = parts[1].split(end_marker)[0]
+    except IndexError:
+        raise ValueError("Invalid diff format: Structure parsing failed.")
+
+    # 3. Process Search Content
+    # Support legacy '-------' separator
+    if '-------' in search_part:
+        search_content = search_part.split('-------', 1)[1]
+    else:
+        search_content = search_part
+
+    # Trim empty lines from start/end of search content to avoid strict whitespace issues
+    search_content = search_content.strip('\n') 
+    replace_content = replace_part.strip('\n')
+    
+    # Normalize search content newlines
+    search_content = search_content.replace('\r\n', '\n')
+    
+    # 4. Construct Regex for Matching
+    # Escape special characters
+    search_pattern = re.escape(search_content)
+    
+    # Replace escaped '...' with non-greedy wildcard
+    # re.escape might produce '\.\.\.' or '...' depending on version
+    search_pattern = search_pattern.replace(r'\.\.\.', r'[\s\S]*?')
+    search_pattern = search_pattern.replace('...', r'[\s\S]*?')
+
+    # 5. Find and Replace
+    # Use re.search to find the span
+    match = re.search(search_pattern, original_normalized)
+    
+    if match:
+        start, end = match.span()
+        # Use slicing to replace, safer than re.sub for literal replacement string
+        modified_content = original_normalized[:start] + replace_content + original_normalized[end:]
+        return modified_content
+    else:
+        # Fallback: if no wildcard was used, maybe try exact string match just in case regex failed? 
+        # But regex should cover exact match.
+        # Let's raise error with debug info.
+        raise ValueError(f"Diff application failed: SEARCH content not found.\nSearch Pattern: {search_pattern[:200]}...")
 
 async def read_file_content(file_path: str, **kwargs) -> str:
     """
@@ -91,3 +204,65 @@ async def list_directory(path: str = ".", **kwargs) -> str:
         return str(pe)
     except Exception as e:
         return f"Error listing directory: {str(e)}"
+
+async def write_file(file_path: str, content: str, **kwargs) -> str:
+    """
+    Write content to a file. (Sandboxed & Validated)
+    """
+    try:
+        safe_path = _get_safe_path(file_path)
+        
+        # 1. Validate Code
+        errors = validate_code(safe_path, content)
+        validation_msg = ""
+        if errors:
+            validation_msg = "\n\n[Warning] Code Validation Issues:\n" + "\n".join(errors)
+            # We don't block writing, but we warn the user.
+        
+        # 2. Write File
+        with open(safe_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+            
+        return f"File written successfully to {file_path}.{validation_msg}"
+        
+    except PermissionError as pe:
+        return str(pe)
+    except Exception as e:
+        return f"Error writing file: {str(e)}"
+
+async def apply_diff(file_path: str, diff_content: str, **kwargs) -> str:
+    """
+    Apply a smart diff to a file.
+    """
+    try:
+        safe_path = _get_safe_path(file_path)
+        
+        if not os.path.exists(safe_path):
+            return f"Error: File not found at {file_path}"
+            
+        # 1. Read Original
+        with open(safe_path, 'r', encoding='utf-8') as f:
+            original_content = f.read()
+            
+        # 2. Apply Diff
+        try:
+            new_content = apply_diff_logic(original_content, diff_content)
+        except ValueError as ve:
+            return f"Diff Error: {str(ve)}"
+            
+        # 3. Validate New Code
+        errors = validate_code(safe_path, new_content)
+        validation_msg = ""
+        if errors:
+            validation_msg = "\n\n[Warning] Code Validation Issues:\n" + "\n".join(errors)
+            
+        # 4. Write Back
+        with open(safe_path, 'w', encoding='utf-8') as f:
+            f.write(new_content)
+            
+        return f"Diff applied successfully to {file_path}.{validation_msg}"
+        
+    except PermissionError as pe:
+        return str(pe)
+    except Exception as e:
+        return f"Error applying diff: {str(e)}"

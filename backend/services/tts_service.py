@@ -104,7 +104,7 @@ class TTSService:
         voice = overrides.get("voice") or config_json.get("voice", "alloy")
         
         # 语速处理：Edge 使用 "+15%"，OpenAI 使用 1.15。
-        # VoiceManager 传递 "+15%"。如果需要，我们需要进行转换，或者为了安全起见，暂时忽略 OpenAI 的语速覆盖
+        # RealtimeSessionManager 传递 "+15%"。如果需要，我们需要进行转换，或者为了安全起见，暂时忽略 OpenAI 的语速覆盖
         # 或者简单的转换：
         speed = 1.0
         try:

@@ -93,9 +93,9 @@
           ref="inputRef"
           v-model="userInput" 
           @keyup.enter="sendMessage"
-          :placeholder="`跟 ${AGENT_NAME} 对话...`"
+          :placeholder="isWorkMode ? '工作模式下已禁用输入' : `跟 ${AGENT_NAME} 对话...`"
           class="chat-input"
-          :disabled="isThinking"
+          :disabled="isThinking || isWorkMode"
           style="-webkit-app-region: no-drag;"
         />
       </div>
@@ -158,6 +158,9 @@ const voiceModeTitle = computed(() => {
 })
 
 const handleGlobalKeyDown = (e) => {
+  // Block voice controls in Work Mode
+  if (isWorkMode.value) return
+
   // 1. Alt + V 切换语音模式
   if (e.altKey && !e.shiftKey && e.code === 'KeyV') {
     e.preventDefault()
@@ -173,12 +176,20 @@ const handleGlobalKeyDown = (e) => {
 }
 
 const handleGlobalKeyUp = (e) => {
+  // Block voice controls in Work Mode
+  if (isWorkMode.value) return
+
   if (e.code === 'KeyV' && voiceMode.value === 2 && isPTTRecording.value) {
     stopPTT()
   }
 }
 
 const cycleVoiceMode = async () => {
+  if (isWorkMode.value) {
+    currentText.value = '(工作模式下已禁用语音功能)'
+    return
+  }
+  
   const nextMode = (voiceMode.value + 1) % 3
   voiceMode.value = nextMode
   localStorage.setItem('ppc.voice_mode', nextMode.toString())
@@ -247,8 +258,9 @@ const parsedBubbleContent = computed(() => {
   // 改进正则表达式，支持多行 Thought/Action 和更灵活的匹配
   // 1. 【Type: Content】 - 块格式
   // 2. *Action* - 星号动作格式
-  // 3. Thought/Action: Content - 标准 ReAct 格式（支持多行，直到下一个标识符或结束）
-  const regex = /(?:【(Thinking|Error|Reflection|Monologue)[:：]?\s*([\s\S]*?)】)|(?:\n|^)\s*\*([\s\S]+?)\*|(?:\n|^)\s*(Thought|Action)[:：]\s*([\s\S]+?)(?=\n\s*(?:Thought|Action)[:：]|\n\s*\*|【(?:Thinking|Error|Reflection|Monologue)|$)/gi
+  // 3. Thought/Action: Content - 标准 ReAct 格式
+  // 4. NIT 标签 - <nit...>...</nit...> 或 [[[NIT...]]] (需要被过滤)
+  const regex = /(?:【(Thinking|Error|Reflection|Monologue)[:：]?\s*([\s\S]*?)】)|(?:\n|^)\s*\*([\s\S]+?)\*|(?:\n|^)\s*(Thought|Action)[:：]\s*([\s\S]+?)(?=\n\s*(?:Thought|Action)[:：]|\n\s*\*|【(?:Thinking|Error|Reflection|Monologue)|$)|(?:<(nit(?:-[a-zA-Z0-9-]+)?)>[\s\S]*?<\/\1>)|(?:\[\[\[NIT_CALL\]\]\][\s\S]*?\[\[\[NIT_END\]\]\])/gi
   
   let lastIndex = 0
   let match
@@ -267,14 +279,20 @@ const parsedBubbleContent = computed(() => {
       // Tagged 块 (Thinking/Error/Reflection)
       const type = match[1].toLowerCase()
       segments.push({ type: type === 'thinking' ? 'thinking' : type, content: match[2].trim() })
-    // 3. *Action* - 星号动作格式
+    
     } else if (match[3] !== undefined) {
       // Action 块 (*Action*)
       segments.push({ type: 'action', content: match[3].trim() })
-    // 4. 标准 ReAct 块 (Thought:/Action:)
+    
     } else if (match[4] !== undefined) {
+      // 标准 ReAct 块 (Thought:/Action:)
       const type = match[4].toLowerCase() === 'thought' ? 'thinking' : 'action'
       segments.push({ type, content: match[5].trim() })
+    
+    } else if (match[0].startsWith('<nit') || match[0].startsWith('[[[NIT')) {
+      // NIT 标签 - 直接忽略 (不添加到 segments)
+      // 这实际上已经在正则匹配中被消耗掉了，所以只需要不处理即可
+      // console.log('Filtered NIT tag:', match[0])
     }
     
     lastIndex = regex.lastIndex
@@ -383,31 +401,40 @@ onMounted(async () => {
       // 让我们检查一下 IDE 侧的代码。
   })
 
-  // 监听来自 IDE 的消息同步 (如果 IDE 发消息，Pet 也要显示)
-  const unlistenIdeMsg = await listen('sync-chat-to-pet', (event) => {
-      // 检查是否在工作模式 (如果需要严格隔离，可以加判断)
-      // 但实际上后端通常已经做过隔离，或者 IDE 侧发过来就意味着应该显示
-      // 不过设计文档说 "Work Mode Isolation ... cut off synchronization"
-      // 所以这里加上判断
-      if (isWorkMode.value) return;
+  // 监听 IDE 消息 (单向：Pet -> Chat 已由后端处理，这里监听 Chat -> Pet 的同步)
+  // [Modified] 用户要求移除 Chat -> Pet 的同步显示
+  // const unlistenIdeMsg = await listen('sync-chat-to-pet', (event) => {
+  //     // 确保工作模式下隔离
+  //     // 但实际上后端通常已经做过隔离，或者 IDE 侧发过来就意味着应该显示
+  //     // 不过设计文档说 "Work Mode Isolation ... cut off synchronization"
+  //     // 所以这里加上判断
+  //     if (isWorkMode.value) return;
 
-      const { role, content } = event.payload
-      if (role === 'assistant') {
-          currentText.value = content
-      } else if (role === 'user') {
-          // 可选：是否显示用户发送的内容？通常 Pet 气泡只显示 AI 回复。
-          // 或者显示 "用户说了: ..."
-          // 暂时忽略用户消息，只同步 AI 回复
-      }
-  })
+  //     const { role, content } = event.payload
+  //     if (role === 'assistant') {
+  //         currentText.value = content
+  //     } else if (role === 'user') {
+  //         // 可选：是否显示用户发送的内容？通常 Pet 气泡只显示 AI 回复。
+  //         // 或者显示 "用户说了: ..."
+  //         // 暂时忽略用户消息，只同步 AI 回复
+  //     }
+  // })
 
   // 监听工作模式切换
   const unlistenWorkMode = await listen('work-mode-changed', (event) => {
       isWorkMode.value = event.payload.is_work_mode
       if (isWorkMode.value) {
-          // 进入工作模式，隐藏气泡或显示提示
-          currentText.value = ''
+          // 进入工作模式，强制关闭语音/输入
+          showInput.value = false
+          if (voiceMode.value !== 0) {
+            // 暂时保存当前语音模式，以便退出时恢复？
+            // 目前简单处理：直接关闭，用户退出工作模式后需手动开启或保持关闭
+            stopVoiceMode()
+          }
+          currentText.value = '进入工作模式 (Session Isolated)'
           isThinking.value = false
+      } else {
+          currentText.value = '工作辛苦啦！'
       }
   })
 
@@ -438,7 +465,7 @@ onMounted(async () => {
     unlistenVibe()
     unlistenMind()
     unlistenSyncChat()
-    unlistenIdeMsg()
+    // unlistenIdeMsg() // Removed
     unlistenWorkMode()
     unlistenSearch()
     unlistenPTTStart()

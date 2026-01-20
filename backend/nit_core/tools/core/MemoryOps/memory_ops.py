@@ -10,24 +10,24 @@ try:
     from models import Memory, MaintenanceRecord, ScheduledTask
     from services.memory_service import MemoryService
     try:
-        from nit_core.tools.core.SessionOps.session_ops import _CURRENT_SESSION_CONTEXT
+        from services.session_service import _CURRENT_SESSION_CONTEXT
     except ImportError:
         try:
-            from backend.nit_core.tools.core.SessionOps.session_ops import _CURRENT_SESSION_CONTEXT
+            from backend.services.session_service import _CURRENT_SESSION_CONTEXT
         except ImportError:
-            from tools.core.SessionOps.session_ops import _CURRENT_SESSION_CONTEXT
+            from services.session_service import _CURRENT_SESSION_CONTEXT
 except ImportError:
     try:
         from backend.models import Memory, MaintenanceRecord, ScheduledTask
         from backend.services.memory_service import MemoryService
         # Try to import session context from SessionOps
         try:
-            from backend.nit_core.tools.core.SessionOps.session_ops import _CURRENT_SESSION_CONTEXT
+            from backend.services.session_service import _CURRENT_SESSION_CONTEXT
         except ImportError:
             try:
-                from nit_core.tools.core.SessionOps.session_ops import _CURRENT_SESSION_CONTEXT
+                from services.session_service import _CURRENT_SESSION_CONTEXT
             except ImportError:
-                from tools.core.SessionOps.session_ops import _CURRENT_SESSION_CONTEXT
+                from services.session_service import _CURRENT_SESSION_CONTEXT
     except ImportError:
         # Fallback for dev/testing without full backend context
         # This might fail in production if paths are wrong, but we'll handle it gracefully

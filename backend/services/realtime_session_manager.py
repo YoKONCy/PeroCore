@@ -16,21 +16,84 @@ from sqlmodel import select
 # 配置日志
 logger = logging.getLogger(__name__)
 
-class RealtimeVoiceManager:
+class RealtimeSessionManager:
     """
-    实时语音对话管理器 (模拟 N.E.K.O 的实时语音流程)
-    - 接收前端音频流
+    实时会话管理器 (原 VoiceManager)
+    - 接收前端音频流/文本流
     - VAD 检测 (目前由前端做，这里只接收分片)
     - 语音转文字 (ASR)
     - 文本对话 (Agent)
     - 文字转语音 (TTS)
-    - 推送音频流回前端
+    - 推送音频流/文本流回前端
     """
     def __init__(self):
         self.active_connections: list[WebSocket] = []
         self.asr_service = get_asr_service()
         self.tts_service = get_tts_service()
         self.current_task: Optional[asyncio.Task] = None
+        self.pending_confirmations: dict[str, asyncio.Future] = {}
+        self.active_commands: dict[int, asyncio.Event] = {}
+
+    def register_skippable_command(self, pid: int, event: asyncio.Event):
+        """注册一个可跳过等待的命令"""
+        self.active_commands[pid] = event
+
+    def unregister_skippable_command(self, pid: int):
+        """注销命令"""
+        if pid in self.active_commands:
+            del self.active_commands[pid]
+
+    def skip_command(self, pid: int) -> bool:
+        """触发跳过命令等待"""
+        if pid in self.active_commands:
+            logger.info(f"Skipping command wait for PID {pid}")
+            self.active_commands[pid].set()
+            return True
+        return False
+
+    async def request_user_confirmation(self, command: str, risk_info: dict = None, is_high_risk: bool = False) -> bool:
+        """
+        向前端发送确认请求，并等待用户响应。
+        返回 True (同意) 或 False (拒绝)。
+        :param command: 指令内容
+        :param risk_info: 详细的风险审计信息 {level, reason, highlight}
+        :param is_high_risk: (兼容旧参数) 是否高风险，如果 risk_info 存在，优先使用 risk_info['level'] >= 2 判断
+        """
+        import uuid
+        request_id = str(uuid.uuid4())
+        
+        # 创建 Future 以等待响应
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+        self.pending_confirmations[request_id] = future
+        
+        # 兼容处理
+        if risk_info is None:
+            risk_info = {
+                "level": 2 if is_high_risk else 1,
+                "reason": "检测到高风险操作" if is_high_risk else "常规操作",
+                "highlight": None
+            }
+        
+        try:
+            # 广播请求
+            await self.broadcast({
+                "type": "confirmation_request",
+                "id": request_id,
+                "command": command,
+                "risk_info": risk_info,
+                "is_high_risk": risk_info["level"] >= 2 # 供前端快速判断样式
+            })
+            
+            # 等待响应 (设置超时，例如 5 分钟)
+            result = await asyncio.wait_for(future, timeout=300)
+            return result
+        except asyncio.TimeoutError:
+            logger.warning(f"Confirmation request {request_id} timed out.")
+            return False
+        finally:
+            if request_id in self.pending_confirmations:
+                del self.pending_confirmations[request_id]
 
     def _clean_text(self, text: str, for_tts: bool = True) -> str:
         """清洗文本，移除标签、动作描述等不应朗读的内容"""
@@ -93,10 +156,11 @@ class RealtimeVoiceManager:
                     block_pattern = r'(?m)^(?:Plan|计划|Action|Action Input|Observation|Result|Thought|Prompt)[:：][\s\S]*?(?=(?:^(?:Plan|计划|Action|Action Input|Observation|Result|Thought|Prompt|Final Answer|最终回答|回复)[:：])|\Z)'
                     cleaned = re.sub(block_pattern, '', cleaned)
 
-        # 4. 移除动作描述 *...* 或 (动作)
+        # 4. 移除动作描述 *...* 或 (动作) 或 （动作）
         if for_tts:
             cleaned = re.sub(r'\*.*?\*', '', cleaned)
-            cleaned = re.sub(r'\(.*?\)', '', cleaned) # 移除括号内的动作或备注
+            cleaned = re.sub(r'\(.*?\)', '', cleaned) # 移除半角括号内的动作或备注
+            cleaned = re.sub(r'（.*?）', '', cleaned) # 移除全角括号内的动作或备注
         
         # 5. 移除 Markdown 标记
         if for_tts:
@@ -218,6 +282,18 @@ class RealtimeVoiceManager:
                     # 为了简化，我们假设前端已经做了 VAD，发送的是一段完整的语音 (speech_end)
                     pass
                 
+                elif message.get("type") == "confirmation_response":
+                    # 用户确认响应
+                    req_id = message.get("id")
+                    approved = message.get("approved")
+                    
+                    if req_id in self.pending_confirmations:
+                        future = self.pending_confirmations[req_id]
+                        if not future.done():
+                            future.set_result(approved)
+                    else:
+                        logger.warning(f"Received confirmation for unknown request: {req_id}")
+
                 elif message.get("type") == "speech_end":
                     # 语音结束，开始处理
                     audio_data_base64 = message.get("data")
@@ -263,7 +339,7 @@ class RealtimeVoiceManager:
             
             # 2. ASR: 语音转文字 (无论是否原生多模态，都需要 ASR 文本用于长记忆搜索和对话历史)
             print("[ASR] 正在转录音频...")
-            await websocket.send_json({"type": "status", "content": "listening"})
+            await self.broadcast({"type": "status", "content": "listening"})
             
             asr_start = time.time()
             try:
@@ -271,27 +347,27 @@ class RealtimeVoiceManager:
             except Exception as e:
                 error_msg = f"语音识别失败: {str(e)}"
                 logger.error(error_msg)
-                await websocket.send_json({"type": "text_response", "content": f"[{error_msg}]"})
-                await websocket.send_json({"type": "status", "content": "idle"})
+                await self.broadcast({"type": "text_response", "content": f"[{error_msg}]"})
+                await self.broadcast({"type": "status", "content": "idle"})
                 return
 
             asr_duration = time.time() - asr_start
             
             if not user_text or not user_text.strip():
                 print(f"[ASR] 未检测到语音 ({asr_duration:.2f}s)。")
-                await websocket.send_json({"type": "status", "content": "idle"})
+                await self.broadcast({"type": "status", "content": "idle"})
                 return
 
 
             print(f"[ASR] 用户说: \"{user_text}\" ({asr_duration:.2f}s)")
-            await websocket.send_json({"type": "transcription", "content": user_text})
+            await self.broadcast({"type": "transcription", "content": user_text})
 
             # 重置陪伴模式定时器
             try:
                 from services.companion_service import companion_service
                 companion_service.update_activity()
             except Exception as e:
-                logger.warning(f"[VoiceManager] 重置陪伴定时器失败: {e}")
+                logger.warning(f"[RealtimeSessionManager] 重置陪伴定时器失败: {e}")
 
             # 3. Agent: 获取回复
             print("[Agent] 正在生成响应...")
@@ -300,18 +376,22 @@ class RealtimeVoiceManager:
                 """内部回调，用于将 Agent 的进度推送到前端"""
                 print(f"   ⏳ [Status] {content}")
                 try:
-                    await websocket.send_json({"type": "status", "content": status_type, "message": content})
+                    await self.broadcast({"type": "status", "content": status_type, "message": content})
                 except Exception as e:
                     logger.warning(f"发送状态失败 (连接可能已关闭): {e}")
                     # 如果连接断开，这里抛出异常会中断 Agent 的执行
                     # 为了不让 AgentService 记为 Error，我们可以选择吞掉异常，
                     # 或者让 AgentService 识别这种中断。
                     # 目前选择抛出，以便停止后续无用的生成。
-                    raise WebSocketDisconnect()
+                    if websocket not in self.active_connections:
+                        raise WebSocketDisconnect()
 
             try:
-                await websocket.send_json({"type": "status", "content": "thinking"})
+                await self.broadcast({"type": "status", "content": "thinking"})
             except Exception:
+                pass # Broadcast handles errors
+            
+            if websocket not in self.active_connections:
                 return # 发送失败直接结束
             
             agent_start = time.time()
@@ -440,9 +520,9 @@ class RealtimeVoiceManager:
 
                 # 4.3 发送纯文本给前端展示
                 try:
-                    await websocket.send_json({"type": "status", "content": "speaking"})
+                    await self.broadcast({"type": "status", "content": "speaking"})
                     
-                    await websocket.send_json({"type": "text_response", "content": ui_response})
+                    await self.broadcast({"type": "text_response", "content": ui_response})
                 except Exception as e:
                     logger.warning(f"发送文本响应失败: {e}")
                     return
@@ -486,7 +566,7 @@ class RealtimeVoiceManager:
                 print("="*60 + "\n")
                 
                 try:
-                    await websocket.send_json({"type": "status", "content": "idle"})
+                    await self.broadcast({"type": "status", "content": "idle"})
                 except:
                     pass
                 break # 只处理一次 session
@@ -504,4 +584,4 @@ class RealtimeVoiceManager:
                 os.remove(temp_audio_path)
 
 # 单例
-voice_manager = RealtimeVoiceManager()
+realtime_session_manager = RealtimeSessionManager()

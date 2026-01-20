@@ -13,6 +13,8 @@
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { marked } from 'marked'
 import dompurify from 'dompurify'
+import hljs from 'highlight.js'
+import 'highlight.js/styles/atom-one-dark.css'
 
 const props = defineProps({
   content: {
@@ -25,6 +27,18 @@ const container = ref(null)
 const isRendered = ref(false)
 const renderedContent = ref('')
 let observer = null
+
+// Configure marked with highlight.js
+const renderer = new marked.Renderer()
+renderer.code = ({ text, lang }) => {
+  const language = lang && hljs.getLanguage(lang) ? lang : ''
+  const highlighted = language 
+    ? hljs.highlight(text, { language }).value 
+    : hljs.highlightAuto(text).value
+  return `<pre><code class="hljs language-${language}">${highlighted}</code></pre>`
+}
+
+marked.use({ renderer })
 
 const render = () => {
   if (isRendered.value) return
@@ -128,14 +142,17 @@ watch(() => props.content, () => {
 </script>
 
 <style>
-/* Global styles for markdown-body to ensure consistent text colors */
+/* Global styles for markdown-body */
 .markdown-body {
-  color: #303133 !important;
   font-size: 14px;
   line-height: 1.6;
 }
-.markdown-body p, .markdown-body li, .markdown-body span, .markdown-body div {
-  color: #303133 !important;
+/* Remove forced colors to allow inheritance */
+.markdown-body pre {
+  background-color: #282c34; /* Atom One Dark background */
+  border-radius: 6px;
+  padding: 1em;
+  overflow-x: auto;
 }
 </style>
 

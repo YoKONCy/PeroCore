@@ -449,6 +449,7 @@ async fn start_backend(
     app: tauri::AppHandle,
     state: tauri::State<'_, BackendState>,
     log_store: tauri::State<'_, LogStore>,
+    enable_social_mode: bool,
 ) -> Result<(), String> {
     // 1. 先运行诊断（无需锁，且包含异步操作）
     let diag = get_diagnostics(app.clone()).await?;
@@ -522,6 +523,7 @@ async fn start_backend(
         .env("PYTHONNOUSERSITE", "1") // 禁止加载用户目录下的包
         .env("PYTHONUNBUFFERED", "1") // 强制无缓冲输出
         .env("PORT", "9120")
+        .env("ENABLE_SOCIAL_MODE", enable_social_mode.to_string())
         .env("PERO_DATA_DIR", data_dir.to_string_lossy().to_string())
         .env("PERO_DATABASE_PATH", db_path.to_string_lossy().to_string())
         .env("PERO_CONFIG_PATH", config_path.to_string_lossy().to_string())

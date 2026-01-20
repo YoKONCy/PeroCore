@@ -3,7 +3,7 @@
   "name": "FileOps",
   "displayName": "深度文件操作 (FileOps)",
   "version": "1.0.1",
-  "description": "深度阅读。支持PDF/Word等复杂文档的读取。",
+  "description": "深度文件操作工具，支持读写、编辑、代码检查和智能Diff。",
   "author": "PeroCore",
   "pluginType": "python-module",
   "entryPoint": "file_ops.py",
@@ -16,6 +16,14 @@
       {
         "commandIdentifier": "list_directory",
         "description": "列出文件。查看目录下的详细文件列表。"
+      },
+      {
+        "commandIdentifier": "write_file",
+        "description": "写入文件。覆盖写入指定文件内容，会自动进行代码语法检查。"
+      },
+      {
+        "commandIdentifier": "apply_diff",
+        "description": "应用补丁。使用 SEARCH/REPLACE 格式对文件进行局部修改，会自动进行代码语法检查。"
       }
     ]
   }

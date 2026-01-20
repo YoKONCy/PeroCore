@@ -3,11 +3,11 @@ from typing import Dict, Any, Optional, List, Union
 from datetime import datetime
 
 try:
-    from nit_core.tools.core.SessionOps.session_ops import _CURRENT_SESSION_CONTEXT
+    from services.session_service import _CURRENT_SESSION_CONTEXT
     from models import PetState
     from sqlmodel import select
 except ImportError:
-    from backend.nit_core.tools.core.SessionOps.session_ops import _CURRENT_SESSION_CONTEXT
+    from backend.services.session_service import _CURRENT_SESSION_CONTEXT
     from backend.models import PetState
     from sqlmodel import select
 
@@ -131,11 +131,11 @@ async def update_character_status(
         try:
             # Lazy import to avoid circular dependency
             try:
-                from services.voice_manager import voice_manager
+                from services.realtime_session_manager import realtime_session_manager
             except ImportError:
-                from backend.services.voice_manager import voice_manager
+                from backend.services.realtime_session_manager import realtime_session_manager
                 
-            await voice_manager.broadcast({
+            await realtime_session_manager.broadcast({
                 "type": "triggers",
                 "data": triggers
             })

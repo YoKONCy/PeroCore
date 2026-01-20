@@ -35,7 +35,7 @@ from models import Config, Memory, PetState, ScheduledTask, AIModelConfig, MCPCo
 from sqlmodel import select, desc
 from nit_core.tools import TOOLS_MAPPING, TOOLS_DEFINITIONS, plugin_manager
 from nit_core.tools.core.ScreenVision.screen_ocr import get_screenshot_base64, save_screenshot
-from nit_core.tools.core.SessionOps.session_ops import set_current_session_context
+from services.session_service import set_current_session_context
 from nit_core.tools.core.WindowsOps.windows_ops import get_active_windows
 from nit_core.security import NITSecurityManager
 
@@ -668,7 +668,7 @@ class AgentService:
             async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
             async with async_session() as session:
                 scorer = ScorerService(session)
-                await scorer.process_interaction(user_msg, assistant_msg, source, pair_id=pair_id, agent_id=agent_id)
+                await scorer.process_interaction(user_msg, assistant_msg, source, pair_id=pair_id)
         except Exception as e:
             print(f"[Agent] 后台秘书服务失败: {e}")
 
@@ -915,6 +915,29 @@ class AgentService:
             except Exception as e:
                 print(f"[AgentService] 警告: 列出客户端 {client.name} 的工具失败: {e}")
 
+        # [Work Mode] Tool Filtering
+        if session_id.startswith("work_"):
+            # Whitelist approach for maximum cleanliness
+            allowed_keywords = [
+                "screen", "window", "file", "dir", "read", "write", "search", "cmd", "exec", 
+                "browser", "click", "type", "scroll", "mouse", "keyboard", "system", "code", "terminal", "git"
+            ]
+            # Also allow specific essential tools
+            allowed_names = ["take_screenshot", "see_screen", "get_active_windows", "finish_task"]
+            
+            filtered_tools = []
+            for tool in dynamic_tools:
+                t_name = tool["function"]["name"].lower()
+                if any(k in t_name for k in allowed_keywords) or t_name in allowed_names:
+                    filtered_tools.append(tool)
+                else:
+                    # Allow memory search but restrict other memory ops
+                    if "memory" in t_name and ("search" in t_name or "read" in t_name):
+                         filtered_tools.append(tool)
+            
+            print(f"[Agent] 工作模式：工具列表已精简 ({len(dynamic_tools)} -> {len(filtered_tools)})")
+            dynamic_tools = filtered_tools
+
         # --- Native Tools Config ---
         disable_native_tools_config = (await self.session.exec(select(Config).where(Config.key == "disable_native_tools"))).first()
         disable_native_tools = disable_native_tools_config.value.lower() == "true" if disable_native_tools_config else False
@@ -1001,13 +1024,13 @@ class AgentService:
                     print(f"[Agent] 第 {turn_count} 轮未检测到工具调用")
 
                 # Apply Postprocessor Pipeline
-                # 如果 source 是 'ide'，则跳过 NIT 过滤，以便前端显示工具调用
+                # 如果 source 是 'ide' 或 'desktop'，则跳过 NIT 过滤，以便前端显示工具调用
                 processed_stream = self.postprocessor_manager.process_stream(
                     raw_stream_source(),
                     context={
                         "source": source, 
                         "session_id": session_id,
-                        "skip_nit_filter": (source == "ide")
+                        "skip_nit_filter": (source in ["ide", "desktop"])
                     }
                 )
 
@@ -1410,10 +1433,10 @@ class AgentService:
                                     # 2. 推送到前端 (通过 yield SSE)
                                     yield sse_message
                                     
-                                    # 3. 尝试广播给 VoiceManager (双保险，适用于语音模式)
+                                    # 3. 尝试广播给 RealtimeSessionManager (双保险，适用于语音模式)
                                     try:
-                                        from services.voice_manager import voice_manager
-                                        await voice_manager.broadcast({"type": "triggers", "data": triggers})
+                                        from services.realtime_session_manager import realtime_session_manager
+                                        await realtime_session_manager.broadcast({"type": "triggers", "data": triggers})
                                     except:
                                         pass
                                         

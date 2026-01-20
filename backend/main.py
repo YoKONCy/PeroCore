@@ -1,3 +1,16 @@
+#  ██████╗ ███████╗██████╗  ██████╗ 
+#  ██╔══██╗██╔════╝██╔══██╗██╔═══██╗
+#  ██████╔╝█████╗  ██████╔╝██║   ██║
+#  ██╔═══╝ ██╔══╝  ██╔══██╗██║   ██║
+#  ██║     ███████╗██║  ██║╚██████╔╝
+#  ╚═╝     ╚══════╝╚═╝  ╚═╝ ╚═════╝ 
+#                                      
+#          v     v
+#         ( > ‿ < )   < Hi~ Master!
+#         /  |><|  \
+#        (  _____  )
+#
+
 import asyncio
 import os
 import sys
@@ -33,6 +46,10 @@ configure_logging(log_file=log_file)
 
 logger = logging.getLogger(__name__)
 
+# [DEBUG] Print startup args and env for troubleshooting
+print(f"[Startup Debug] sys.argv: {sys.argv}")
+print(f"[Startup Debug] ENABLE_SOCIAL_MODE env: {os.environ.get('ENABLE_SOCIAL_MODE')}")
+
 import uvicorn
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, Body, BackgroundTasks, UploadFile, File, WebSocket, WebSocketDisconnect, Header
@@ -52,7 +69,7 @@ from services.memory_service import MemoryService
 from services.memory_secretary_service import MemorySecretaryService
 from services.asr_service import get_asr_service
 from services.tts_service import get_tts_service
-from services.voice_manager import voice_manager
+from services.realtime_session_manager import realtime_session_manager
 from services.companion_service import companion_service
 from services.embedding_service import embedding_service
 from services.browser_bridge_service import browser_bridge_service
@@ -63,9 +80,19 @@ from core.nit_manager import get_nit_manager
 from nit_core.dispatcher import XMLStreamFilter
 from routers.ide_router import router as ide_router
 
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup Technical Fingerprint
+    print(r"""
+██████╗ ███████╗██████╗  ██████╗  ██████╗ ██████╗ ██████╗ ███████╗
+██╔══██╗██╔════╝██╔══██╗██╔═══██╗██╔════╝██╔═══██╗██╔══██╗██╔════╝
+██████╔╝█████╗  ██████╔╝██║   ██║██║     ██║   ██║██████╔╝█████╗  
+██╔═══╝ ██╔══╝  ██╔══██╗██║   ██║██║     ██║   ██║██╔══██╗██╔══╝  
+██║     ███████╗██║  ██║╚██████╔╝╚██████╗╚██████╔╝██║  ██║███████╗
+╚═╝     ╚══════╝╚═╝  ╚═╝ ╚═════╝  ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚══════╝
+""")
     print("="*50)
     print("🚀 PeroCore 后端启动中...")
     print(f"📅 时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -86,6 +113,18 @@ async def lifespan(app: FastAPI):
 
     # Startup
     await init_db()
+    
+    # Load Config from DB
+    await get_config_manager().load_from_db()
+    
+    # [Debug] Print loaded critical configs
+    cm = get_config_manager()
+    print(f"🔧 当前配置状态:")
+    print(f"   - 轻量模式: {cm.get('lightweight_mode')}")
+    print(f"   - 陪伴模式: {cm.get('companion_mode_enabled')}")
+    print(f"   - 社交模式: {cm.get('enable_social_mode')}")
+    print("="*50)
+    
     await seed_voice_configs()
     await companion_service.start()
     screenshot_manager.start_background_task()
@@ -396,7 +435,7 @@ async def lifespan(app: FastAPI):
         
         try:
             # 1. Notify clients that Pero is thinking
-            await voice_manager.broadcast({"type": "status", "content": "thinking"})
+            await realtime_session_manager.broadcast({"type": "status", "content": "thinking"})
             
             # 2. Run the chat
             async for chunk in agent_service.chat(
@@ -408,16 +447,16 @@ async def lifespan(app: FastAPI):
                     full_response += chunk
             
             if full_response:
-                # 3. Clean and parse response (using voice_manager's logic)
-                ui_response = voice_manager._clean_text(full_response, for_tts=False)
-                tts_response = voice_manager._clean_text(full_response, for_tts=True)
+                # 3. Clean and parse response (using realtime_session_manager's logic)
+                ui_response = realtime_session_manager._clean_text(full_response, for_tts=False)
+                tts_response = realtime_session_manager._clean_text(full_response, for_tts=True)
                 
                 # 4. Broadcast the text response
-                await voice_manager.broadcast({"type": "status", "content": "speaking"})
-                await voice_manager.broadcast({"type": "text_response", "content": ui_response})
+                await realtime_session_manager.broadcast({"type": "status", "content": "speaking"})
+                await realtime_session_manager.broadcast({"type": "text_response", "content": ui_response})
                 
                 # 5. Handle TTS and broadcast audio (Optional but recommended for consistency)
-                target_voice, target_rate, target_pitch = voice_manager._get_voice_params(full_response)
+                target_voice, target_rate, target_pitch = realtime_session_manager._get_voice_params(full_response)
                 tts_service = get_tts_service()
                 audio_path = await tts_service.synthesize(
                     tts_response,
@@ -431,17 +470,17 @@ async def lifespan(app: FastAPI):
                     with open(audio_path, "rb") as f:
                         audio_content = f.read()
                         audio_b64 = base64.b64encode(audio_content).decode('utf-8')
-                        await voice_manager.broadcast({
+                        await realtime_session_manager.broadcast({
                             "type": "audio_response", 
                             "data": audio_b64,
                             "format": ext
                         })
                 
                 # 6. Reset to idle
-                await voice_manager.broadcast({"type": "status", "content": "idle"})
+                await realtime_session_manager.broadcast({"type": "status", "content": "idle"})
         except Exception as e:
             print(f"[Main] Failed to execute and broadcast trigger chat: {e}")
-            await voice_manager.broadcast({"type": "status", "content": "idle"})
+            await realtime_session_manager.broadcast({"type": "status", "content": "idle"})
 
     async def periodic_trigger_check():
         from database import engine
@@ -525,6 +564,41 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="PeroCore Backend", description="AI Agent powered backend for Pero", lifespan=lifespan)
 app.include_router(ide_router)
+
+class TTSPreviewRequest(BaseModel):
+    text: str
+
+@app.post("/api/tts/preview")
+async def preview_tts(request: TTSPreviewRequest):
+    """
+    Generate TTS audio for the given text, applying the same filtering and mood analysis as the voice mode.
+    """
+    text = request.text
+    if not text:
+        raise HTTPException(status_code=400, detail="Text is empty")
+
+    # 1. Clean Text (Reuse logic from RealtimeSessionManager)
+    # _clean_text is protected but we access it here for consistency
+    cleaned_text = realtime_session_manager._clean_text(text, for_tts=True)
+    
+    if not cleaned_text or not cleaned_text.strip():
+        # If nothing remains (e.g. only thinking process), return 204 No Content or 400
+        # Front-end should handle this gracefully
+        raise HTTPException(status_code=400, detail="No speakable text content")
+    
+    # 2. Get Voice Params (Mood analysis based on FULL original text)
+    voice, rate, pitch = realtime_session_manager._get_voice_params(text)
+    
+    # 3. Synthesize
+    tts = get_tts_service()
+    
+    filepath = await tts.synthesize(cleaned_text, voice=voice, rate=rate, pitch=pitch)
+    
+    if not filepath or not os.path.exists(filepath):
+        raise HTTPException(status_code=500, detail="TTS generation failed")
+        
+    return FileResponse(filepath, media_type="audio/mpeg", filename="preview.mp3")
+
 
 dist_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "dist")
 if os.path.exists(dist_path):
@@ -620,7 +694,7 @@ async def websocket_browser_endpoint(websocket: WebSocket):
 
 @app.websocket("/ws/voice")
 async def websocket_voice_endpoint(websocket: WebSocket):
-    await voice_manager.handle_websocket(websocket)
+    await realtime_session_manager.handle_websocket(websocket)
 
 @app.get("/api/pet/state")
 async def get_pet_state(session: AsyncSession = Depends(get_session)):
@@ -723,7 +797,7 @@ async def get_lightweight_mode():
 
 @app.post("/api/config/lightweight_mode")
 async def set_lightweight_mode(enabled: bool = Body(..., embed=True)):
-    get_config_manager().set("lightweight_mode", enabled)
+    await get_config_manager().set("lightweight_mode", enabled)
     return {"status": "success", "enabled": enabled}
 
 @app.get("/api/config/aura_vision")
@@ -732,7 +806,7 @@ async def get_aura_vision_mode():
 
 @app.post("/api/config/aura_vision")
 async def set_aura_vision_mode(enabled: bool = Body(..., embed=True)):
-    get_config_manager().set("aura_vision_enabled", enabled)
+    await get_config_manager().set("aura_vision_enabled", enabled)
     
     from services.aura_vision_service import aura_vision_service
     if enabled:
@@ -752,7 +826,7 @@ async def get_tts_mode():
 
 @app.post("/api/config/tts")
 async def set_tts_mode(enabled: bool = Body(..., embed=True)):
-    get_config_manager().set("tts_enabled", enabled)
+    await get_config_manager().set("tts_enabled", enabled)
     return {"status": "success", "enabled": enabled}
 
 @app.delete("/api/memories/by_timestamp/{msg_timestamp}")
@@ -903,6 +977,9 @@ async def toggle_companion(enabled: bool = Body(..., embed=True), session: Async
     config.updated_at = datetime.utcnow()
     await session.commit()
     
+    # Sync with ConfigManager
+    await get_config_manager().set("companion_mode_enabled", enabled)
+    
     if enabled:
         await companion_service.start()
     else:
@@ -919,24 +996,11 @@ async def get_social_status(session: AsyncSession = Depends(get_session)):
 
 @app.post("/api/social/toggle")
 async def toggle_social(enabled: bool = Body(..., embed=True), session: AsyncSession = Depends(get_session)):
-    # 1. Update DB
-    config = await session.get(Config, "enable_social_mode")
-    if not config:
-        config = Config(key="enable_social_mode", value="false")
-        session.add(config)
-    
-    config.value = "true" if enabled else "false"
-    config.updated_at = datetime.utcnow()
-    await session.commit()
+    # 1. Update DB & Memory
+    await get_config_manager().set("enable_social_mode", enabled)
     
     # 2. Update Service
     social_service = get_social_service()
-    # Force update config manager cache if needed, or service reads directly
-    # Ideally ConfigManager should be refreshed or we manually set the internal flag if possible.
-    # But SocialService reads from ConfigManager. 
-    # Let's ensure ConfigManager is updated.
-    cm = get_config_manager()
-    cm.set("enable_social_mode", config.value == "true")
     
     # 3. Refresh NIT Tools (ensure social tools are added/removed)
     try:
@@ -1008,6 +1072,31 @@ async def get_configs(session: AsyncSession = Depends(get_session)):
 
 @app.post("/api/configs")
 async def update_config(configs: Dict[str, str], session: AsyncSession = Depends(get_session)):
+    # [Check] Block enabling incompatible modes if in Work Mode
+    try:
+        current_session = (await session.exec(select(Config).where(Config.key == "current_session_id"))).first()
+        is_work_mode = current_session and current_session.value.startswith("work_")
+        
+        if is_work_mode:
+            blocking_modes = ["lightweight_mode", "companion_mode", "aura_vision_enabled"]
+            # Map keys to Chinese names
+            name_map = {
+                "lightweight_mode": "轻量模式",
+                "companion_mode": "陪伴模式",
+                "aura_vision_enabled": "主动视觉模式"
+            }
+            
+            for key, value in configs.items():
+                if key in blocking_modes:
+                    # Check if user is trying to enable it (value is true)
+                    is_enabling = str(value).lower() == 'true'
+                    if is_enabling:
+                         raise HTTPException(status_code=403, detail=f"无法启用{name_map.get(key, key)}：当前处于工作模式（会话隔离中）。请先退出工作模式。")
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[Config] Work Mode check failed: {e}")
+
     for key, value in configs.items():
         config_obj = await session.get(Config, key)
         if config_obj:

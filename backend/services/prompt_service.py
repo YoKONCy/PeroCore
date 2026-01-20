@@ -22,10 +22,15 @@ class PromptManager:
         # Use singleton MDP manager
         self.mdp = mdp
 
-    def build_system_prompt(self, variables: Dict[str, Any], is_social_mode: bool = False) -> str:
+    def build_system_prompt(self, variables: Dict[str, Any], is_social_mode: bool = False, is_work_mode: bool = False) -> str:
         # 0. 检查轻量级模式
         config = get_config_manager()
         is_lightweight = config.get("lightweight_mode", False)
+
+        # [工作模式专用构建]
+        if is_work_mode:
+            # 暂存逻辑，稍后在变量填充完毕后统一处理
+            pass
 
         # 1. 构建能力字符串
         enable_vision = variables.get("enable_vision", False)
@@ -147,6 +152,29 @@ class PromptManager:
             
         variables["chain_logic"] = chain_content
 
+        # [工作模式最终覆盖]
+        if is_work_mode:
+            # 1. 覆盖 NIT 工具描述 (只用核心工具)
+            try:
+                dispatcher = get_dispatcher()
+                tools_desc = dispatcher.get_tools_description(category_filter='core')
+                if not tools_desc or len(tools_desc) < 10:
+                    tools_desc = dispatcher.get_tools_description()
+                variables["nit_tools_description"] = tools_desc
+            except Exception as e:
+                logger.error(f"Error loading work tools: {e}")
+
+            # 2. 简化 Ability NIT (移除 ReAct 思考步骤，同轻量模式)
+            nit_prompt = self.mdp.get_prompt("ability_nit")
+            if nit_prompt:
+                content = nit_prompt.content
+                content = re.sub(r'### 3\. 执行逻辑与思考[\s\S]*?(?=### 4\.|$)', '', content)
+                content = content.replace("在执行任何外部操作时，必须遵循‘思考-行动-观察’的循环。", "")
+                variables["ability_nit"] = content
+
+            # 3. 渲染工作模式专用模板 (此时 variables 中已包含 persona_definition, agent_name 等)
+            return self.mdp.render("system_work", variables)
+
         # 3. 渲染
         final_prompt = self.mdp.render("system_template", variables)
         
@@ -227,7 +255,8 @@ class PromptManager:
                          history: List[Dict[str, str]], 
                          variables: Dict[str, Any],
                          is_voice_mode: bool = False,
-                         is_social_mode: bool = False) -> List[Dict[str, str]]:
+                         is_social_mode: bool = False,
+                         is_work_mode: bool = False) -> List[Dict[str, str]]:
         """
         组装完整的消息列表（System + History）
         """
@@ -239,9 +268,9 @@ class PromptManager:
                 voice_reminder = "\n\n【系统提醒: 当前主人正在使用原生语音进行交流。你已获得主人的原生音频输入（Multimodal Audio），这能让你感受到主人的语气、情感和环境背景。请优先基于你听到的音频内容进行回复。】"
             else:
                 voice_reminder = "\n\n【系统提醒: 当前主人正在使用语音输入，但你目前只能接收到 ASR (自动语音识别) 转录后的文本。由于 ASR 可能存在同音错别字，请你结合上下文进行合理推测，并以可爱的语气给予回应。】"
-            system_content = self.build_system_prompt(variables, is_social_mode=is_social_mode) + voice_reminder
+            system_content = self.build_system_prompt(variables, is_social_mode=is_social_mode, is_work_mode=is_work_mode) + voice_reminder
         else:
-            system_content = self.build_system_prompt(variables, is_social_mode=is_social_mode)
+            system_content = self.build_system_prompt(variables, is_social_mode=is_social_mode, is_work_mode=is_work_mode)
         
         # 对历史记录进行清洗
         cleaned_history = []

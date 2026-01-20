@@ -1,5 +1,114 @@
 <template>
-  <div class="flex flex-col h-full transition-colors duration-300" :class="workMode ? 'bg-[#1e293b] text-slate-200' : 'bg-transparent text-slate-700'">
+  <div class="flex flex-col h-full transition-colors duration-300 relative" :class="workMode ? 'bg-[#1e293b] text-slate-200' : 'bg-transparent text-slate-700'">
+    
+    <!-- Command Execution Overlay -->
+    <Transition name="fade">
+      <div v-if="activeCommand" class="absolute inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-6">
+        <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200 dark:border-slate-700 transform transition-all animate-scale-in">
+          <!-- Header -->
+          <div class="px-6 py-4 bg-sky-50 dark:bg-sky-900/20 border-b border-sky-100 dark:border-sky-800/30 flex items-center gap-3">
+            <div class="p-2 bg-sky-100 dark:bg-sky-800/40 rounded-full text-sky-600 dark:text-sky-400 animate-spin-slow">
+              <Terminal class="w-5 h-5" />
+            </div>
+            <div>
+              <h3 class="font-bold text-slate-800 dark:text-slate-100">正在执行指令...</h3>
+              <p class="text-xs text-slate-500 dark:text-slate-400">请稍候，任务正在后台运行</p>
+            </div>
+          </div>
+          
+          <!-- Content -->
+          <div class="p-6">
+            <div class="bg-slate-900 rounded-lg p-4 font-mono text-sm text-green-400 overflow-x-auto custom-scrollbar border border-slate-700 shadow-inner relative">
+              <span class="select-text">{{ activeCommand.command }}</span>
+              <div class="absolute bottom-2 right-2 flex gap-1">
+                <div class="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></div>
+                <div class="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse delay-75"></div>
+                <div class="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse delay-150"></div>
+              </div>
+            </div>
+            <div class="mt-4 flex items-center justify-between">
+              <p class="text-xs text-slate-500 dark:text-slate-400">PID: {{ activeCommand.pid }}</p>
+              <button 
+                @click="skipCommandWait" 
+                class="text-xs text-amber-500 hover:text-amber-600 font-medium underline underline-offset-2 transition-colors"
+              >
+                跳过等待 (后台继续)
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
+    <!-- Command Confirmation Overlay -->
+    <Transition name="fade">
+      <div v-if="pendingConfirmation" class="absolute inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-6">
+        <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200 dark:border-slate-700 transform transition-all animate-scale-in">
+          <!-- Header -->
+          <div 
+            class="px-6 py-4 flex items-center gap-3 border-b transition-colors"
+            :class="pendingConfirmation.riskInfo?.level >= 2 ? 'bg-red-50 dark:bg-red-900/20 border-red-100 dark:border-red-800/30' : 'bg-amber-50 dark:bg-amber-900/20 border-amber-100 dark:border-amber-800/30'"
+          >
+            <div 
+              class="p-2 rounded-full transition-colors"
+              :class="pendingConfirmation.riskInfo?.level >= 2 ? 'bg-red-100 dark:bg-red-800/40 text-red-600 dark:text-red-400 animate-pulse' : 'bg-amber-100 dark:bg-amber-800/40 text-amber-600 dark:text-amber-400'"
+            >
+              <Terminal class="w-5 h-5" />
+            </div>
+            <div>
+              <h3 class="font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                请求执行终端指令
+                <span v-if="pendingConfirmation.riskInfo?.level >= 2" class="px-2 py-0.5 bg-red-500 text-white text-[10px] rounded-full uppercase tracking-wide font-bold">High Risk</span>
+              </h3>
+              <p class="text-xs text-slate-500 dark:text-slate-400">Pero 申请在您的系统中执行以下命令</p>
+            </div>
+          </div>
+          
+          <!-- Content -->
+          <div class="p-6">
+            <div 
+                class="bg-slate-900 rounded-lg p-4 font-mono text-sm overflow-x-auto custom-scrollbar border shadow-inner transition-colors"
+                :class="pendingConfirmation.riskInfo?.level >= 2 ? 'text-red-300 border-red-900/50 bg-red-950/20' : 'text-green-400 border-slate-700'"
+            >
+              <span v-if="pendingConfirmation.riskInfo?.highlight" v-html="highlightCommand(pendingConfirmation.command, pendingConfirmation.riskInfo.highlight)"></span>
+              <span v-else class="select-text">{{ pendingConfirmation.command }}</span>
+            </div>
+            
+            <div v-if="pendingConfirmation.riskInfo?.level >= 2" class="mt-4 p-3 bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-900/30 rounded-lg flex gap-3 items-start">
+                 <div class="p-1 bg-red-100 dark:bg-red-800/50 rounded text-red-600 dark:text-red-400 shrink-0">
+                    <AlertTriangle class="w-4 h-4" />
+                 </div>
+                 <div class="text-xs text-red-600 dark:text-red-400">
+                    <p class="font-bold mb-1">系统警告：{{ pendingConfirmation.riskInfo?.reason || '敏感操作' }}</p>
+                    <p class="opacity-90">此指令包含可能修改系统关键配置或删除文件的操作。请务必确认指令来源和意图。</p>
+                 </div>
+            </div>
+            <p v-else class="mt-4 text-xs text-slate-500 dark:text-slate-400 text-center">
+              说明: {{ pendingConfirmation.riskInfo?.reason || '请仔细检查指令内容。此操作将在您的系统终端中真实执行。' }}
+            </p>
+          </div>
+          
+          <!-- Actions -->
+          <div class="px-6 py-4 bg-slate-50 dark:bg-slate-800/50 flex justify-end gap-3 border-t border-slate-100 dark:border-slate-700">
+            <button 
+              @click="respondConfirmation(false)" 
+              class="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+            >
+              拒绝执行
+            </button>
+            <button 
+              @click="respondConfirmation(true)" 
+              class="px-4 py-2 rounded-lg text-sm font-medium text-white shadow-lg transition-all active:scale-95 flex items-center gap-2"
+              :class="pendingConfirmation.riskInfo?.level >= 2 ? 'bg-red-500 hover:bg-red-600 shadow-red-500/30' : 'bg-amber-500 hover:bg-amber-600 shadow-amber-500/30'"
+            >
+              <Check class="w-4 h-4" />
+              <span>{{ pendingConfirmation.isHighRisk ? '确认授权并执行' : '批准并执行' }}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
     <!-- Messages Area -->
     <div class="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar flex flex-col" ref="msgContainer">
       <!-- Load More Button -->
@@ -59,6 +168,17 @@
                
                <!-- Actions -->
                <div class="flex gap-2 ml-2" v-if="!editingMsgId">
+                  <button 
+                    @click="playMessage(msg)" 
+                    class="transition-colors"
+                    :class="[
+                      playingMsgId === msg.id ? 'text-sky-500 animate-pulse' : 'text-slate-400 hover:text-sky-500',
+                      isLoadingAudio && playingMsgId === msg.id ? 'cursor-wait' : ''
+                    ]"
+                    :title="playingMsgId === msg.id ? '停止播放' : '播放语音'"
+                  >
+                    <component :is="playingMsgId === msg.id ? Square : Volume2" class="w-3 h-3" />
+                  </button>
                   <button @click="startEdit(msg)" class="text-slate-400 hover:text-sky-500 transition-colors"><Edit2 class="w-3 h-3" /></button>
                   <button @click="deleteMessage(msg.id)" class="text-slate-400 hover:text-red-500 transition-colors"><Trash2 class="w-3 h-3" /></button>
                </div>
@@ -146,14 +266,14 @@
                       </div>
                    </div>
                    <div v-show="!isCollapsed(idx, sIdx)" class="p-3 text-xs font-mono overflow-x-auto custom-scrollbar whitespace-pre"
-                      :class="workMode ? 'bg-[#0f172a]/80 text-blue-200' : 'bg-slate-50/50 text-slate-600'"
+                      :class="workMode ? 'bg-[#0f172a]/80 text-blue-100' : 'bg-slate-50/50 text-slate-600'"
                    >
                       {{ segment.content }}
                    </div>
                 </div>
 
                 <!-- Normal Text -->
-                <div v-else class="min-h-[1.5em]">
+                <div v-else class="min-h-[1.5em]" :class="workMode ? 'text-slate-100' : 'text-slate-700'">
                    <AsyncMarkdown :content="segment.content" v-if="segment.content" />
                 </div>
                 
@@ -270,16 +390,19 @@
           v-model="input" 
           @keydown.enter.prevent="handleEnter"
           class="w-full bg-transparent text-sm p-4 pr-16 rounded-2xl focus:outline-none resize-none h-14 max-h-32 min-h-[56px] custom-scrollbar font-sans"
-          :class="workMode ? 'text-slate-200 placeholder-slate-500' : 'text-slate-800 placeholder-slate-400'"
-          :placeholder="`问 ${AGENT_NAME} 任何问题...`"
-          :disabled="isSending"
+          :class="[
+            workMode ? 'text-slate-200 placeholder-slate-500' : 'text-slate-800 placeholder-slate-400',
+            disabled ? 'opacity-50 cursor-not-allowed' : ''
+          ]"
+          :placeholder="disabled ? '工作区初始化中...' : `问 ${AGENT_NAME} 任何问题...`"
+          :disabled="isInputLocked || disabled"
           style="field-sizing: content;" 
         ></textarea>
         
         <div class="absolute right-2 bottom-2 flex items-center gap-1">
           <button 
              @click="sendMessage" 
-             :disabled="isSending || !input.trim()"
+             :disabled="isInputLocked || !input.trim() || disabled"
              class="p-2 text-white rounded-xl transition-all shadow-lg flex items-center justify-center group"
              :class="workMode 
                ? 'bg-amber-500 hover:bg-amber-600 shadow-amber-500/20 disabled:bg-slate-700 disabled:text-slate-500' 
@@ -296,19 +419,183 @@
         {{ AGENT_NAME.toUpperCase() }} AI AGENT · POWERED BY RE-ACT ENGINE
       </div>
     </div>
+    <CustomDialog
+      v-model:visible="deleteDialogVisible"
+      type="confirm"
+      title="删除消息"
+      :message="deleteDialogMessage"
+      @confirm="handleConfirmDelete"
+    />
   </div>
 </template>
 
 <script setup>
-import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue';
+import { ref, watch, nextTick, onMounted, onUnmounted, computed } from 'vue';
 import { emit, listen } from '@tauri-apps/api/event';
-import { Brain, MessageSquareQuote, Terminal, Play, Pause, Square, Clock, Edit2, Trash2, Check, X } from 'lucide-vue-next';
+import { Brain, MessageSquareQuote, Terminal, Play, Pause, Square, Clock, Edit2, Trash2, Check, X, Volume2, AlertTriangle } from 'lucide-vue-next';
 import AsyncMarkdown from '../AsyncMarkdown.vue';
+import CustomDialog from '../ui/CustomDialog.vue';
 import { AGENT_NAME, AGENT_AVATAR_TEXT } from '../../config';
 
 const props = defineProps({
-  workMode: Boolean
+  workMode: Boolean,
+  disabled: Boolean
 });
+
+// Confirmation State
+const pendingConfirmation = ref(null);
+let ws = null; // Store WebSocket reference if available or use emit/listen mechanism
+
+// Setup Confirmation Listener
+onMounted(async () => {
+  // Listen for WebSocket messages forwarded from parent or global bus
+  // Since we don't have direct access to the global WS here, we'll use Tauri event bus
+  // Assuming MainWindow or similar forwards 'ws-message' events
+  
+  // Actually, let's establish a lightweight connection or rely on event bus
+  // For now, let's use the standard Tauri event listener pattern
+  // The backend RealtimeSessionManager broadcasts via WebSocket. 
+  // We need to ensure the WebSocket client in the frontend (probably in store or global) handles this.
+  
+  // TEMPORARY: Listen to a custom event that should be emitted when WS receives 'confirmation_request'
+  // Ideally, the global WebSocket handler (e.g. in pinia store or MainWindow) should emit this.
+  // Let's assume there is a global event bus for WS messages.
+  
+  unlistenConfirmation = await listen('ws-message', (event) => {
+    const msg = event.payload;
+    if (msg.type === 'confirmation_request') {
+      pendingConfirmation.value = {
+        id: msg.id,
+        command: msg.command,
+        riskInfo: msg.risk_info,
+        isHighRisk: msg.is_high_risk || false
+      };
+    }
+  });
+});
+
+let unlistenConfirmation = null;
+
+const highlightCommand = (command, highlight) => {
+  if (!highlight) return command;
+  // 使用正则替换以支持多次出现，忽略大小写
+  try {
+    const regex = new RegExp(`(${highlight})`, 'gi');
+    return command.replace(regex, '<span class="bg-red-500/30 text-red-200 font-bold px-1 rounded">$1</span>');
+  } catch (e) {
+    return command;
+  }
+};
+
+const respondConfirmation = async (approved) => {
+  if (!pendingConfirmation.value) return;
+  
+  const response = {
+    type: 'confirmation_response',
+    id: pendingConfirmation.value.id,
+    approved: approved
+  };
+  
+  // Send back via global WS event bus
+  // The parent component or global store should listen to this and send via WS
+  await emit('ws-send', response);
+  
+  pendingConfirmation.value = null;
+};
+
+// Active Command State
+const activeCommand = ref(null);
+
+const skipCommandWait = async () => {
+  if (!activeCommand.value) return;
+  
+  try {
+    await fetch(`${API_BASE}/api/ide/tools/terminal/skip`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pid: activeCommand.value.pid })
+    });
+    // Optimistically clear the overlay
+    activeCommand.value = null;
+  } catch (e) {
+    console.error('Failed to skip command', e);
+  }
+};
+
+onUnmounted(() => {
+  if (unlistenConfirmation) unlistenConfirmation();
+});
+
+// TTS State
+const playingMsgId = ref(null);
+const isLoadingAudio = ref(false);
+const currentAudio = ref(null);
+
+const playMessage = async (msg) => {
+  // 如果当前正在播放这条消息，则停止
+  if (playingMsgId.value === msg.id) {
+    if (currentAudio.value) {
+      currentAudio.value.pause();
+      currentAudio.value = null;
+    }
+    playingMsgId.value = null;
+    isLoadingAudio.value = false;
+    return;
+  }
+
+  // 停止之前的播放
+  if (currentAudio.value) {
+    currentAudio.value.pause();
+    currentAudio.value = null;
+  }
+
+  playingMsgId.value = msg.id;
+  isLoadingAudio.value = true;
+
+  try {
+    const response = await fetch('http://localhost:8000/api/tts/preview', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ text: msg.content })
+    });
+
+    if (!response.ok) {
+      throw new Error('TTS request failed');
+    }
+
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    
+    currentAudio.value = audio;
+    
+    audio.onended = () => {
+      playingMsgId.value = null;
+      currentAudio.value = null;
+      isLoadingAudio.value = false;
+      URL.revokeObjectURL(url);
+    };
+
+    audio.onerror = (e) => {
+      console.error("Audio playback error:", e);
+      playingMsgId.value = null;
+      currentAudio.value = null;
+      isLoadingAudio.value = false;
+      URL.revokeObjectURL(url);
+    };
+
+    await audio.play();
+    isLoadingAudio.value = false; // 开始播放，停止加载动画
+
+  } catch (error) {
+    console.error("TTS Error:", error);
+    playingMsgId.value = null;
+    isLoadingAudio.value = false;
+    currentAudio.value = null;
+  }
+};
 
 const emitEvent = defineEmits(['mode-change']);
 
@@ -318,8 +605,10 @@ const hasMore = ref(true);
 const input = ref('');
 const msgContainer = ref(null);
 const isSending = ref(false);
+const isInputLocked = computed(() => {
+  return isSending.value || (activeThoughtChain.value && activeThoughtChain.value.isThinking);
+});
 const isConnected = ref(false);
-let ws = null;
 let reconnectTimer = null;
 
 // Configuration
@@ -401,6 +690,8 @@ const parseMessage = (content) => {
   return segments.length > 0 ? segments : [{ type: 'text', content: content }];
 };
 
+
+
 // --- Collapse Logic ---
 const collapsedStates = ref(new Set());
 
@@ -450,15 +741,33 @@ const saveEdit = async (msg) => {
   }
 };
 
-const deleteMessage = async (msgId) => {
-  if (!confirm('确定删除这条消息吗？')) return;
+// --- Dialog Logic ---
+const deleteDialogVisible = ref(false);
+const deleteDialogMessage = ref('');
+const pendingDeleteId = ref(null);
+
+const deleteMessage = (msgId) => {
+  pendingDeleteId.value = msgId;
+  deleteDialogMessage.value = '确定删除这条消息吗？此操作无法撤销。';
+  deleteDialogVisible.value = true;
+};
+
+const handleConfirmDelete = async () => {
+  if (!pendingDeleteId.value) return;
+  
   try {
-    const res = await fetch(`${API_BASE}/api/history/${msgId}`, { method: 'DELETE' });
+    const res = await fetch(`${API_BASE}/api/history/${pendingDeleteId.value}`, {
+      method: 'DELETE'
+    });
+    
     if (res.ok) {
-      messages.value = messages.value.filter(m => m.id !== msgId);
+      messages.value = messages.value.filter(m => m.id !== pendingDeleteId.value);
     }
   } catch (e) {
     console.error('Failed to delete message', e);
+  } finally {
+    deleteDialogVisible.value = false;
+    pendingDeleteId.value = null;
   }
 };
 
@@ -488,6 +797,8 @@ const connectWS = () => {
 
 const handleWSMessage = (data) => {
   if (data.type === 'status') {
+    if (data.target === 'pet_view_only') return;
+    
     if (data.content === 'thinking') {
       ensureActiveThoughtChain();
       if (data.detail) {
@@ -509,19 +820,36 @@ const handleWSMessage = (data) => {
     }
   }
   else if (data.type === 'text_response') {
+    // Check target: If 'pet_view_only', ignore in Chat Interface
+    if (data.target === 'pet_view_only') {
+      return;
+    }
+
     if (!isSending.value) {
-      messages.value.push({ role: 'assistant', content: data.content });
+      messages.value.push({ role: 'assistant', content: data.content, timestamp: new Date().toISOString() });
       scrollToBottom();
-      // Emit sync event for PetView
-      if (!props.workMode) {
-        emit('sync-chat-to-pet', { role: 'assistant', content: data.content });
-      }
+      // Removed sync event emission as per user request
+    }
+  }
+  else if (data.type === 'transcription') {
+    if (!isSending.value) {
+      messages.value.push({ role: 'user', content: data.content, timestamp: new Date().toISOString() });
+      scrollToBottom();
     }
   }
   else if (data.type === 'mode_update') {
     if (data.mode === 'work') {
       emitEvent('mode-change', data.is_active);
     }
+  }
+  else if (data.type === 'command_running') {
+    activeCommand.value = {
+      command: data.command,
+      pid: data.pid
+    };
+  }
+  else if (data.type === 'command_finished') {
+    activeCommand.value = null;
   }
 };
 
@@ -762,12 +1090,13 @@ const sendMessage = async () => {
 
   } catch (e) {
     assistantMsg.content = `Error: ${e.message}`;
-  } finally {
-    isSending.value = false;
+    // Force reset thought chain on error
     if (activeThoughtChain.value) {
       activeThoughtChain.value.isThinking = false;
       activeThoughtChain.value = null;
     }
+  } finally {
+    isSending.value = false;
     scrollToBottom();
   }
 };

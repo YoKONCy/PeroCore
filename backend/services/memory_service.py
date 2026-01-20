@@ -333,6 +333,12 @@ class MemoryService:
         """
         statement = select(ConversationLog).order_by(desc(ConversationLog.timestamp))
         
+        # [Security] Work Mode Isolation
+        # Ensure work mode logs (starting with work_) are NOT queryable via search
+        # This prevents them from appearing in Dashboard global search or lists.
+        # Work mode logs should only be accessed via get_recent_logs with explicit session_id.
+        statement = statement.where(~ConversationLog.session_id.startswith("work_"))
+        
         if agent_id:
             statement = statement.where(ConversationLog.agent_id == agent_id)
 
@@ -344,7 +350,7 @@ class MemoryService:
                 
         if query:
             statement = statement.where(ConversationLog.content.contains(query))
-            
+        
         statement = statement.limit(limit)
         return (await session.exec(statement)).all()
 

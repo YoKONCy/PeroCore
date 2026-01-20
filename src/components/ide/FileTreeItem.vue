@@ -3,31 +3,41 @@
   <div>
     <div 
       @click="toggle"
-      :class="['flex items-center py-1 cursor-pointer hover:bg-[#2a2d2e] whitespace-nowrap transition-colors duration-100', isSelected ? 'bg-[#37373d] text-white' : 'text-gray-400']"
-      :style="{ paddingLeft: (level * 12 + 12) + 'px' }"
+      @contextmenu.prevent.stop="$emit('contextmenu', { event: $event, item })"
+      :class="[
+        'flex items-center py-1.5 cursor-pointer whitespace-nowrap transition-all duration-200 rounded-lg mx-1', 
+        isSelected 
+          ? 'bg-indigo-500/20 text-indigo-300 font-medium' 
+          : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
+      ]"
+      :style="{ paddingLeft: (level * 12 + 8) + 'px' }"
     >
       <!-- Icon -->
-      <span v-if="item.type === 'directory'" class="mr-1.5 flex-shrink-0">
-        <ChevronRightIcon v-if="!isOpen" class="w-3.5 h-3.5" />
-        <ChevronDownIcon v-else class="w-3.5 h-3.5" />
+      <span v-if="item.type === 'directory'" class="mr-2 flex-shrink-0 opacity-70">
+        <FolderOpenIcon v-if="isOpen" class="w-4 h-4 text-amber-400" />
+        <FolderIcon v-else class="w-4 h-4 text-amber-400/80" />
       </span>
-      <span v-else class="mr-1.5 flex-shrink-0">
-        <FileIcon class="w-3.5 h-3.5 text-gray-500" />
+      <span v-else class="mr-2 flex-shrink-0 opacity-70">
+        <FileCodeIcon v-if="item.name.endsWith('.py')" class="w-4 h-4 text-blue-400" />
+        <FileJsonIcon v-else-if="item.name.endsWith('.json')" class="w-4 h-4 text-yellow-400" />
+        <FileTextIcon v-else-if="item.name.endsWith('.md')" class="w-4 h-4 text-gray-400" />
+        <FileIcon v-else class="w-4 h-4 text-slate-500" />
       </span>
       
       <!-- Name -->
-      <span class="truncate">{{ item.name }}</span>
+      <span class="truncate text-xs">{{ item.name }}</span>
     </div>
 
     <!-- Children -->
-    <div v-if="isOpen && item.type === 'directory'">
-      <div v-if="loading" class="pl-8 py-1 text-xs text-gray-600">加载中...</div>
+    <div v-if="isOpen && item.type === 'directory'" class="mt-0.5 border-l border-white/5 ml-3 pl-1">
+      <div v-if="loading" class="pl-4 py-1 text-[10px] text-slate-600 animate-pulse">扫描中...</div>
       <FileTreeItem 
         v-for="child in children" 
         :key="child.path" 
         :item="child" 
         :level="level + 1"
         @select="$emit('select', $event)"
+        @contextmenu="$emit('contextmenu', $event)"
       />
     </div>
   </div>
@@ -35,14 +45,22 @@
 
 <script setup>
 import { ref } from 'vue';
-import { ChevronRight as ChevronRightIcon, ChevronDown as ChevronDownIcon, File as FileIcon } from 'lucide-vue-next';
+import { 
+  Folder as FolderIcon, 
+  FolderOpen as FolderOpenIcon, 
+  File as FileIcon,
+  FileCode as FileCodeIcon,
+  FileJson as FileJsonIcon,
+  FileText as FileTextIcon
+} from 'lucide-vue-next';
 
 const props = defineProps({
   item: Object,
   level: { type: Number, default: 0 }
 });
+// ... rest of script stays mostly same, but need to check imports
 
-const emit = defineEmits(['select']);
+const emit = defineEmits(['select', 'contextmenu']);
 
 const isOpen = ref(false);
 const children = ref([]);
@@ -54,7 +72,7 @@ const toggle = async () => {
     if (!isOpen.value && children.value.length === 0) {
       loading.value = true;
       try {
-        const res = await fetch(`http://localhost:8000/api/ide/files?path=${encodeURIComponent(props.item.path)}`);
+        const res = await fetch(`http://localhost:9120/api/ide/files?path=${encodeURIComponent(props.item.path)}`);
         if (res.ok) {
             children.value = await res.json();
         }

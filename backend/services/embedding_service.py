@@ -10,6 +10,8 @@ data_dir = os.environ.get("PERO_DATA_DIR", os.path.dirname(os.path.dirname(os.pa
 os.environ["SENTENCE_TRANSFORMERS_HOME"] = os.path.join(data_dir, "models_cache")
 # 设置 HuggingFace 镜像，解决国内连接问题
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+# 同时设置 HF_HOME，确保 huggingface_hub也能找到缓存
+os.environ["HF_HOME"] = os.environ["SENTENCE_TRANSFORMERS_HOME"]
 
 class EmbeddingService:
     _instance = None
@@ -21,57 +23,100 @@ class EmbeddingService:
             cls._instance = super(EmbeddingService, cls).__new__(cls)
         return cls._instance
 
+    def _resolve_local_path(self, model_name: str) -> Optional[str]:
+        """
+        Manually resolve model path from cache to bypass huggingface_hub issues
+        """
+        try:
+            cache_dir = os.environ.get("SENTENCE_TRANSFORMERS_HOME")
+            if not cache_dir:
+                return None
+            
+            repo_id = "models--" + model_name.replace("/", "--")
+            ref_path = os.path.join(cache_dir, repo_id, "refs", "main")
+            
+            if os.path.exists(ref_path):
+                with open(ref_path, 'r') as f:
+                    commit_hash = f.read().strip()
+                snapshot_path = os.path.join(cache_dir, repo_id, "snapshots", commit_hash)
+                if os.path.exists(snapshot_path):
+                    return snapshot_path
+        except Exception as e:
+            print(f"[Embedding] Manual path resolution failed: {e}", flush=True)
+        return None
+
     def _load_model(self):
         if self._model is None:
-            print("[Embedding] Loading embedding model (all-MiniLM-L6-v2)...", flush=True)
+            print("[Embedding] 正在加载嵌入模型 (all-MiniLM-L6-v2)...", flush=True)
+            from sentence_transformers import SentenceTransformer
+            
+            # Strategy: Try Local First -> Then Online (to avoid network timeouts if cached)
             try:
-                from sentence_transformers import SentenceTransformer
-                
-                # 检查本地是否有完整的模型文件
-                # HuggingFace 的本地缓存目录结构比较复杂，通常位于 models_cache/models--sentence-transformers--all-MiniLM-L6-v2
-                # 如果快照存在，我们尝试直接加载本地快照，或者依赖 sentence_transformers 的自动缓存机制
-                
-                # 1. 尝试使用 sentence_transformers 的自动加载（会利用我们设置的 SENTENCE_TRANSFORMERS_HOME）
-                # 如果本地有缓存且完整，它应该不会联网。
-                # 但如果之前下载中断导致文件损坏，它可能会尝试重新联网。
-                
-                self._model = SentenceTransformer('all-MiniLM-L6-v2', local_files_only=False) # 允许联网以修复不完整的缓存，但在 HF_ENDPOINT 设置下应连接镜像
-                print("[Embedding] Model loaded.", flush=True)
+                # 1. Try offline load first
+                self._model = SentenceTransformer('all-MiniLM-L6-v2', local_files_only=True)
+                print("[Embedding] 已从本地缓存加载模型。", flush=True)
             except Exception as e:
-                print(f"[Embedding] Error loading model from cache/internet: {e}", flush=True)
-                print("[Embedding] Attempting to load with local_files_only=True...", flush=True)
+                print(f"[Embedding] 本地缓存未命中 (all-MiniLM-L6-v2): {e}。尝试手动路径解析...", flush=True)
+                
+                # 1.5 Try manual path resolution
+                local_path = self._resolve_local_path('sentence-transformers/all-MiniLM-L6-v2')
+                if local_path:
+                    try:
+                        print(f"[Embedding] 发现本地缓存路径: {local_path}，尝试直接加载...", flush=True)
+                        self._model = SentenceTransformer(local_path)
+                        print("[Embedding] 已从本地缓存路径加载模型。", flush=True)
+                        return
+                    except Exception as manual_e:
+                        print(f"[Embedding] 手动路径加载失败: {manual_e}", flush=True)
+
+                print("[Embedding] 正在从镜像下载...", flush=True)
                 try:
-                    # 2. 如果联网失败（即使是镜像），强制尝试仅加载本地文件
-                    self._model = SentenceTransformer('all-MiniLM-L6-v2', local_files_only=True)
-                    print("[Embedding] Model loaded from local cache (offline mode).", flush=True)
-                except Exception as local_e:
-                    print(f"[Embedding] Fatal: Could not load model even from local cache: {local_e}", flush=True)
-                    raise e
+                    # 2. Download from mirror
+                    self._model = SentenceTransformer('all-MiniLM-L6-v2', local_files_only=False)
+                    print("[Embedding] 模型下载并加载完成。", flush=True)
+                except Exception as net_e:
+                    print(f"[Embedding] 致命错误: 无法下载模型: {net_e}", flush=True)
+                    # Last ditch: try loading anyway just in case (original logic) but unlikely to work if step 1 failed
+                    raise net_e
 
     def _load_reranker(self):
         if self._cross_encoder is None:
-            print("[Embedding] Loading reranker model (BAAI/bge-reranker-v2-m3)...", flush=True)
+            print("[Embedding] 正在加载重排序模型 (BAAI/bge-reranker-v2-m3)...", flush=True)
+            from sentence_transformers import CrossEncoder
+            
+            # Strategy: Try Local First -> Then Online
             try:
-                from sentence_transformers import CrossEncoder
-                # 使用 BGE-Reranker-v2-M3
-                self._cross_encoder = CrossEncoder('BAAI/bge-reranker-v2-m3', local_files_only=False)
-                print("[Embedding] Reranker loaded.", flush=True)
+                # 1. Try offline load first
+                self._cross_encoder = CrossEncoder('BAAI/bge-reranker-v2-m3', local_files_only=True)
+                print("[Embedding] 已从本地缓存加载重排序模型。", flush=True)
             except Exception as e:
-                print(f"[Embedding] Error loading reranker from internet: {e}", flush=True)
-                print("[Embedding] Attempting to load reranker with local_files_only=True...", flush=True)
+                print(f"[Embedding] 本地缓存未命中 (BAAI/bge-reranker-v2-m3): {e}。尝试手动路径解析...", flush=True)
+                
+                # 1.5 Try manual path resolution
+                local_path = self._resolve_local_path('BAAI/bge-reranker-v2-m3')
+                if local_path:
+                    try:
+                        print(f"[Embedding] 发现本地缓存路径: {local_path}，尝试直接加载...", flush=True)
+                        self._cross_encoder = CrossEncoder(local_path)
+                        print("[Embedding] 已从本地缓存路径加载重排序模型。", flush=True)
+                        return
+                    except Exception as manual_e:
+                        print(f"[Embedding] 手动路径加载失败: {manual_e}", flush=True)
+
+                print("[Embedding] 正在从镜像下载重排序模型...", flush=True)
                 try:
-                    from sentence_transformers import CrossEncoder
-                    self._cross_encoder = CrossEncoder('BAAI/bge-reranker-v2-m3', local_files_only=True)
-                    print("[Embedding] Reranker loaded from local cache (offline mode).", flush=True)
-                except Exception as local_e:
-                    print(f"[Embedding] Fatal: Could not load reranker even from local cache: {local_e}", flush=True)
-                    raise e
+                    # 2. Download from mirror
+                    self._cross_encoder = CrossEncoder('BAAI/bge-reranker-v2-m3', local_files_only=False)
+                    print("[Embedding] 重排序模型下载并加载完成。", flush=True)
+                except Exception as net_e:
+                    print(f"[Embedding] 致命错误: 无法下载重排序模型: {net_e}", flush=True)
+                    raise net_e
 
     def warm_up(self):
         """
         预热模型，防止首次请求超时
         """
-        print("[Embedding] Warming up models...", flush=True)
+        print("[Embedding] 正在预热模型...", flush=True)
         
         # 1. Warm up Embedding Model
         try:
@@ -80,7 +125,7 @@ class EmbeddingService:
             if self._model:
                 self._model.encode(["warm up"])
         except Exception as e:
-            print(f"[Embedding] Embedding model warm up failed: {e}", flush=True)
+            print(f"[Embedding] 嵌入模型预热失败: {e}", flush=True)
 
         # 2. Warm up Reranker Model
         try:
@@ -88,9 +133,9 @@ class EmbeddingService:
             if self._cross_encoder:
                 self._cross_encoder.predict([["warm up", "test"]])
         except Exception as e:
-            print(f"[Embedding] Reranker model warm up failed: {e}", flush=True)
+            print(f"[Embedding] 重排序模型预热失败: {e}", flush=True)
 
-        print("[Embedding] Warm up process finished.", flush=True)
+        print("[Embedding] 预热流程结束。", flush=True)
 
     def encode(self, texts: List[str]) -> List[List[float]]:
         """
@@ -105,7 +150,7 @@ class EmbeddingService:
             # 转换为 list
             return embeddings.tolist()
         except Exception as e:
-            print(f"[Embedding] Encode failed: {e}", flush=True)
+            print(f"[Embedding] Rerank 失败: {e}", flush=True)
             return []
 
     def encode_one(self, text: str) -> List[float]:
@@ -178,7 +223,7 @@ class EmbeddingService:
                 return results[:top_k]
             return results
         except Exception as e:
-            print(f"[Embedding] Rerank failed: {e}", flush=True)
+            print(f"[Embedding] 重排序失败: {e}", flush=True)
             # 返回原始顺序的分数（降级）
             return [{"index": i, "score": 1.0, "doc": doc} for i, doc in enumerate(docs[:top_k] if top_k else docs)]
 

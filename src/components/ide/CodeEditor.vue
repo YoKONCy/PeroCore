@@ -20,25 +20,29 @@ const props = defineProps({
   filePath: String
 });
 
-const emit = defineEmits(['save']);
+const emit = defineEmits(['save', 'change']);
 
 const code = ref(props.initialContent || '');
 const editorRef = shallowRef();
 
 const editorOptions = {
   automaticLayout: true,
-  minimap: { enabled: true },
-  fontSize: 14,
-  fontFamily: "'Consolas', 'Monaco', monospace",
+  minimap: { enabled: true, renderCharacters: false },
+  fontSize: 15,
+  fontFamily: "'Comic Shanns', 'Comic Sans MS', 'Cascadia Code', 'Fira Code', monospace",
+  fontWeight: "600",
+  lineHeight: 24,
   scrollBeyondLastLine: false,
   wordWrap: 'on',
   smoothScrolling: true,
-  cursorBlinking: "smooth"
+  cursorBlinking: "smooth",
+  cursorSmoothCaretAnimation: "on",
+  roundedSelection: true,
+  renderLineHighlight: "all",
+  fontLigatures: true,
 };
 
 watch(() => props.initialContent, (newVal) => {
-    // Only update if content is significantly different to avoid cursor jumps
-    // In a real app we'd use a more robust model tracking
     if (newVal !== code.value) {
         code.value = newVal || '';
     }
@@ -46,6 +50,11 @@ watch(() => props.initialContent, (newVal) => {
 
 const handleMount = (editor, monaco) => {
   editorRef.value = editor;
+  
+  // Track changes
+  editor.onDidChangeModelContent(() => {
+    emit('change', code.value);
+  });
   
   // Add Save Command (Ctrl+S)
   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {

@@ -1,0 +1,32 @@
+{
+  "manifestVersion": "1.0.0",
+  "name": "TerminalExecutor",
+  "displayName": "终端指令 (TerminalExecutor)",
+  "version": "1.0.0",
+  "description": "安全地执行终端指令。执行前会请求用户确认。",
+  "author": "PeroCore",
+  "pluginType": "python-module",
+  "entryPoint": "terminal_executor.py",
+  "capabilities": {
+    "invocationCommands": [
+      {
+        "commandIdentifier": "execute_terminal_command",
+        "description": "在终端中执行系统指令。执行前会向用户展示指令内容并请求批准。如需连续执行多条指令，请使用 && 连接或分多次调用。",
+        "params": [
+          {
+            "name": "command",
+            "type": "string",
+            "description": "要执行的 Shell 指令。",
+            "required": true
+          },
+          {
+            "name": "cwd",
+            "type": "string",
+            "description": "执行指令的工作目录 (可选)。",
+            "required": false
+          }
+        ]
+      }
+    ]
+  }
+}
