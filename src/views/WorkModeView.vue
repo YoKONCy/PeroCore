@@ -305,13 +305,37 @@ const closeFile = async (file) => {
 };
 
 const getLanguage = (filename) => {
-  if (filename.endsWith('.py')) return 'python';
-  if (filename.endsWith('.js')) return 'javascript';
-  if (filename.endsWith('.vue')) return 'html'; 
-  if (filename.endsWith('.rs')) return 'rust';
-  if (filename.endsWith('.json')) return 'json';
-  if (filename.endsWith('.md')) return 'markdown';
-  return 'plaintext';
+  const ext = filename.split('.').pop().toLowerCase();
+  
+  const map = {
+    'py': 'python',
+    'js': 'javascript',
+    'ts': 'typescript',
+    'vue': 'html', // Monaco doesn't have built-in Vue support, HTML works reasonably well
+    'html': 'html',
+    'css': 'css',
+    'scss': 'scss',
+    'less': 'less',
+    'json': 'json',
+    'md': 'markdown',
+    'rs': 'rust',
+    'java': 'java',
+    'c': 'c',
+    'cpp': 'cpp',
+    'go': 'go',
+    'sh': 'shell',
+    'bash': 'shell',
+    'sql': 'sql',
+    'yaml': 'yaml',
+    'yml': 'yaml',
+    'xml': 'xml',
+    'ini': 'ini',
+    'toml': 'ini',
+    'bat': 'bat',
+    'ps1': 'powershell'
+  };
+
+  return map[ext] || 'plaintext';
 };
 
 const onContentChange = (newContent) => {

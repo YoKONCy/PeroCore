@@ -1466,15 +1466,22 @@ class SocialService:
                 
                 # 如果没有 Reflection 模型，尝试使用主模型
                 if not model_id:
-                    model_id = configs.get("model")
+                    model_id = configs.get("current_model_id")
                 
                 if model_id:
                     model_config = await main_session.get(AIModelConfig, int(model_id))
                     if model_config:
+                        # [Fix] 正确处理 API Key 和 Base URL (参考 AgentService 逻辑)
+                        global_api_key = configs.get("global_llm_api_key", "")
+                        global_api_base = configs.get("global_llm_api_base", "https://api.openai.com")
+                        
+                        final_api_key = model_config.api_key if model_config.provider_type == 'custom' else global_api_key
+                        final_api_base = model_config.api_base if model_config.provider_type == 'custom' else global_api_base
+                        
                         llm_service = LLMService(
-                            api_key=model_config.api_key,
-                            api_base=model_config.api_base,
-                            model=model_config.model_id, # [Fix] model_name -> model_id
+                            api_key=final_api_key,
+                            api_base=final_api_base,
+                            model=model_config.model_id,
                             provider=model_config.provider
                         )
             

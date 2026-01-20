@@ -8,7 +8,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 from typing import Optional
 from services.asr_service import get_asr_service
 from services.tts_service import get_tts_service
-from services.agent_service import AgentService
+# from services.agent_service import AgentService # Moved to local import to avoid circular dependency
 from database import get_session
 from models import ConversationLog, Config, AIModelConfig
 from sqlmodel import select
@@ -460,6 +460,7 @@ class RealtimeSessionManager:
                         # 回退到纯文本模式
                         messages_payload = [{"role": "user", "content": user_text}]
 
+                from services.agent_service import AgentService
                 agent = AgentService(session)
                 full_response = ""
                 # tts_text_parts = ["", ""] # [first_turn_text, last_turn_text] (已弃用)
