@@ -81,8 +81,8 @@ class AuraVisionService:
         )
         
         # 锚点数据路径
-        data_dir = os.environ.get("PERO_DATA_DIR", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        self.anchors_path = os.path.join(data_dir, "rust_db", "intent_anchors.json")
+        base_dir = os.environ.get("PERO_DATA_DIR", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        self.anchors_path = os.path.join(base_dir, "data", "rust_db", "intent_anchors.json")
         
         # 配置参数
         self.observation_interval = 30  # 秒

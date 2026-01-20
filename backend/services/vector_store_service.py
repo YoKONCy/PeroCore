@@ -34,7 +34,8 @@ class VectorStoreService:
         if self._initialized: return
         
         base_dir = os.environ.get("PERO_DATA_DIR", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        self.data_dir = os.path.join(base_dir, "rust_db")
+        data_dir = os.path.join(base_dir, "data")
+        self.data_dir = os.path.join(data_dir, "rust_db")
         if not os.path.exists(self.data_dir):
             os.makedirs(self.data_dir, exist_ok=True)
 
