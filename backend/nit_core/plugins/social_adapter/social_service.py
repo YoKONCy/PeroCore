@@ -489,12 +489,16 @@ class SocialService:
     def _clean_cq_codes(self, content: str) -> str:
         """
         清理消息内容中的 CQ 码，将其转换为人类可读的文本标签。
-        例如: [CQ:image,...] -> [图片] 或 [摘要]
+        例如: 
+        [CQ:image,...] -> [图片] 或 [摘要]
+        [CQ:file,...] -> [文件: filename]
         """
-        if "[CQ:image" not in content:
+        if "[CQ:" not in content:
             return content
             
         import re
+        
+        # --- Helper for Images ---
         def replace_cq_image(match):
             full_tag = match.group(0)
             # 尝试提取 summary
@@ -513,8 +517,29 @@ class SocialService:
                     return summary_text
                 return f"[{summary_text}]"
             return "[图片]"
+
+        # --- Helper for Files ---
+        def replace_cq_file(match):
+            full_tag = match.group(0)
+            # 尝试提取文件名
+            # 优先找 name= (NapCat/GoCQ 某些版本) 或 file= (标准)
             
-        return re.sub(r'\[CQ:image,[^\]]*\]', replace_cq_image, content)
+            name_match = re.search(r'name=([^,\]]+)', full_tag)
+            file_match = re.search(r'file=([^,\]]+)', full_tag)
+            
+            filename = "未知文件"
+            if name_match:
+                filename = name_match.group(1)
+            elif file_match:
+                filename = file_match.group(1)
+                
+            return f"[文件: {filename}]"
+            
+        # Apply replacements
+        content = re.sub(r'\[CQ:image,[^\]]*\]', replace_cq_image, content)
+        content = re.sub(r'\[CQ:file,[^\]]*\]', replace_cq_file, content)
+        
+        return content
 
     async def _attempt_random_thought(self, target_session: Optional[SocialSession] = None) -> bool:
         """

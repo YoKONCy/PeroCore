@@ -420,14 +420,15 @@
           <!-- Image Upload Button -->
            <input type="file" ref="fileInput" accept="image/*" multiple class="hidden" @change="handleFileSelect" />
            <button 
-              v-if="isVisionEnabled"
               @click="triggerUpload" 
-              :disabled="isInputLocked || disabled"
-             class="p-2 rounded-xl transition-all flex items-center justify-center group"
-             :class="workMode 
-               ? 'text-slate-400 hover:text-amber-400 hover:bg-slate-800' 
-               : 'text-slate-400 hover:text-sky-500 hover:bg-white/50'"
-             title="上传图片"
+              :disabled="isInputLocked || disabled || !isVisionEnabled"
+             class="p-2 rounded-xl transition-all flex items-center justify-center group relative"
+             :class="workMode
+               ? (!isVisionEnabled 
+                   ? 'opacity-30 cursor-not-allowed text-slate-400' 
+                   : 'text-amber-500/80 bg-amber-500/10 hover:bg-amber-500/20 hover:text-amber-400')
+               : 'bg-sky-500 hover:bg-sky-600 text-white shadow-lg shadow-sky-500/20 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none disabled:cursor-not-allowed'"
+             :title="!isVisionEnabled ? '当前模型不支持视觉功能 (请在设置中开启)' : '上传图片'"
           >
              <ImageIcon class="w-5 h-5" />
           </button>
@@ -1088,11 +1089,14 @@ const loadMore = async () => {
 
 let unlistenSync = null;
 let unlistenDelete = null;
+let visionCheckInterval = null;
 
 onMounted(async () => {
   connectWS();
   fetchHistory();
   checkVisionCapability();
+  // Poll for vision capability changes (e.g. model switch)
+  visionCheckInterval = setInterval(checkVisionCapability, 5000);
 
   // Setup Tauri Event Listeners for Chat Sync
   try {
@@ -1132,6 +1136,7 @@ watch(() => props.workMode, () => {
 onUnmounted(() => {
   if (ws) ws.close();
   if (reconnectTimer) clearTimeout(reconnectTimer);
+  if (visionCheckInterval) clearInterval(visionCheckInterval);
   if (unlistenSync) unlistenSync();
   if (unlistenDelete) unlistenDelete();
 });
