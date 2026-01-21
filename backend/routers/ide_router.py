@@ -2,9 +2,9 @@
 import os
 import glob
 from fastapi import APIRouter, HTTPException, Depends
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from sqlmodel.ext.asyncio.session import AsyncSession
 from database import get_session
 from services.session_service import enter_work_mode, exit_work_mode
@@ -39,7 +39,7 @@ class RenameFileRequest(BaseModel):
     new_name: str
 
 class ChatRequest(BaseModel):
-    messages: List[Dict[str, str]]
+    messages: List[Dict[str, Any]]
     source: str = "ide"
     session_id: str = "default"
 
@@ -115,6 +115,22 @@ def get_workspace_root():
         os.makedirs(workspace_dir, exist_ok=True)
         
     return workspace_dir
+
+@router.get("/image")
+async def get_workspace_image(path: str):
+    base_dir = get_workspace_root()
+    # Path should be relative to workspace, e.g. "uploads/2026-01-21/xxx.png"
+    # Prevent directory traversal
+    safe_path = os.path.normpath(path)
+    if safe_path.startswith("..") or os.path.isabs(safe_path):
+         raise HTTPException(status_code=403, detail="Access denied")
+         
+    target_path = os.path.join(base_dir, safe_path)
+    
+    if not os.path.exists(target_path):
+        raise HTTPException(status_code=404, detail="Image not found")
+        
+    return FileResponse(target_path)
 
 @router.get("/files", response_model=List[FileNode])
 async def list_files(path: Optional[str] = None):

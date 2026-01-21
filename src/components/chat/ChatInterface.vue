@@ -124,6 +124,13 @@
         <!-- User Message -->
         <div v-if="msg.role === 'user'" class="flex justify-end mb-4 animate-fade-in-up group">
           <div class="max-w-[85%] animate-float flex flex-col items-end">
+            <!-- Images Display -->
+            <div v-if="msg.images && msg.images.length > 0" class="flex gap-2 mb-2 flex-wrap justify-end">
+               <div v-for="(img, iIdx) in msg.images" :key="iIdx" class="relative">
+                  <img :src="img" class="max-h-32 rounded-lg shadow-md border border-white/10 object-cover hover:scale-105 transition-transform cursor-pointer" @click="window.open(img, '_blank')" />
+               </div>
+            </div>
+
             <div 
               class="px-5 py-3 rounded-2xl rounded-tr-sm shadow-md text-sm leading-relaxed whitespace-pre-wrap font-sans transition-all backdrop-blur-xl border border-white/10 hover:scale-[1.02] hover:-translate-y-[2px] hover:shadow-lg hover:shadow-sky-500/30 relative hover:z-10 duration-300 ease-out"
               :class="workMode ? 'bg-amber-600/90 text-white' : 'bg-gradient-to-br from-sky-500/60 to-blue-600/60 text-white shadow-sky-500/20'"
@@ -381,15 +388,25 @@
     <!-- Input Area -->
     <div class="p-6 pt-0 bg-transparent flex-shrink-0">
       <div 
-        class="relative rounded-2xl shadow-xl border transition-all"
+        class="relative rounded-2xl shadow-xl border transition-all flex flex-col"
         :class="workMode 
           ? 'bg-[#0f172a] border-slate-700/50 focus-within:border-amber-500/50 focus-within:shadow-amber-500/10' 
           : 'bg-white/60 border-sky-200/50 focus-within:border-sky-400/50 focus-within:shadow-sky-400/20 backdrop-blur-md'"
       >
+        <!-- Pending Images Preview -->
+        <div v-if="pendingImages.length > 0" class="px-4 pt-4 pb-2 flex gap-2 overflow-x-auto custom-scrollbar">
+           <div v-for="(img, idx) in pendingImages" :key="idx" class="relative group flex-shrink-0">
+              <img :src="img.url" class="h-16 w-16 object-cover rounded-lg shadow-sm" :class="workMode ? 'border border-slate-700' : 'border border-slate-200'" />
+              <button @click="removePendingImage(idx)" class="absolute -top-1.5 -right-1.5 bg-white rounded-full shadow-md hover:scale-110 transition-transform" :class="workMode ? 'text-slate-900 hover:text-red-600' : 'text-slate-500 hover:text-red-500'">
+                 <XCircle class="w-4 h-4 fill-current" />
+              </button>
+           </div>
+        </div>
+
         <textarea 
           v-model="input" 
           @keydown.enter.prevent="handleEnter"
-          class="w-full bg-transparent text-sm p-4 pr-16 rounded-2xl focus:outline-none resize-none h-14 max-h-32 min-h-[56px] custom-scrollbar font-sans"
+          class="w-full bg-transparent text-sm p-4 pr-24 rounded-2xl focus:outline-none resize-none h-14 max-h-32 min-h-[56px] custom-scrollbar font-sans"
           :class="[
             workMode ? 'text-slate-200 placeholder-slate-500' : 'text-slate-800 placeholder-slate-400',
             disabled ? 'opacity-50 cursor-not-allowed' : ''
@@ -400,9 +417,24 @@
         ></textarea>
         
         <div class="absolute right-2 bottom-2 flex items-center gap-1">
+          <!-- Image Upload Button -->
+           <input type="file" ref="fileInput" accept="image/*" multiple class="hidden" @change="handleFileSelect" />
+           <button 
+              v-if="isVisionEnabled"
+              @click="triggerUpload" 
+              :disabled="isInputLocked || disabled"
+             class="p-2 rounded-xl transition-all flex items-center justify-center group"
+             :class="workMode 
+               ? 'text-slate-400 hover:text-amber-400 hover:bg-slate-800' 
+               : 'text-slate-400 hover:text-sky-500 hover:bg-white/50'"
+             title="上传图片"
+          >
+             <ImageIcon class="w-5 h-5" />
+          </button>
+
           <button 
              @click="sendMessage" 
-             :disabled="isInputLocked || !input.trim() || disabled"
+             :disabled="isInputLocked || (!input.trim() && pendingImages.length === 0) || disabled"
              class="p-2 text-white rounded-xl transition-all shadow-lg flex items-center justify-center group"
              :class="workMode 
                ? 'bg-amber-500 hover:bg-amber-600 shadow-amber-500/20 disabled:bg-slate-700 disabled:text-slate-500' 
@@ -432,7 +464,7 @@
 <script setup>
 import { ref, watch, nextTick, onMounted, onUnmounted, computed } from 'vue';
 import { emit, listen } from '@tauri-apps/api/event';
-import { Brain, MessageSquareQuote, Terminal, Play, Pause, Square, Clock, Edit2, Trash2, Check, X, Volume2, AlertTriangle } from 'lucide-vue-next';
+import { Brain, MessageSquareQuote, Terminal, Play, Pause, Square, Clock, Edit2, Trash2, Check, X, Volume2, AlertTriangle, Image as ImageIcon, XCircle } from 'lucide-vue-next';
 import AsyncMarkdown from '../AsyncMarkdown.vue';
 import CustomDialog from '../ui/CustomDialog.vue';
 import { AGENT_NAME, AGENT_AVATAR_TEXT } from '../../config';
@@ -603,6 +635,62 @@ const messages = ref([]);
 const offset = ref(0);
 const hasMore = ref(true);
 const input = ref('');
+const fileInput = ref(null);
+const pendingImages = ref([]);
+const isVisionEnabled = ref(false);
+
+const checkVisionCapability = async () => {
+  try {
+    const configRes = await fetch(`${API_BASE}/api/configs`);
+    if (!configRes.ok) return;
+    const configs = await configRes.json();
+    const modelId = configs.current_model_id;
+    
+    if (modelId) {
+        const modelsRes = await fetch(`${API_BASE}/api/models`);
+        if (!modelsRes.ok) return;
+        const models = await modelsRes.json();
+        const currentModel = models.find(m => m.id == modelId);
+        if (currentModel && currentModel.enable_vision) {
+            isVisionEnabled.value = true;
+        } else {
+            isVisionEnabled.value = false;
+        }
+    }
+  } catch (e) {
+    console.error('Failed to check vision capability', e);
+  }
+};
+
+const triggerUpload = () => {
+  fileInput.value.click();
+};
+
+const handleFileSelect = (event) => {
+  const files = event.target.files;
+  if (!files || files.length === 0) return;
+
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    if (!file.type.startsWith('image/')) continue;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      pendingImages.value.push({
+        file: file,
+        url: e.target.result // Data URL for preview and sending
+      });
+    };
+    reader.readAsDataURL(file);
+  }
+  // Reset input
+  event.target.value = '';
+};
+
+const removePendingImage = (index) => {
+  pendingImages.value.splice(index, 1);
+};
+
 const msgContainer = ref(null);
 const isSending = ref(false);
 const isInputLocked = computed(() => {
@@ -935,12 +1023,25 @@ const fetchHistory = async (append = false) => {
         hasMore.value = false;
       }
       
-      const newMsgs = logs.map(log => ({
-        id: log.id,
-        role: log.role,
-        content: log.raw_content || log.content, // Prioritize raw_content for NIT tool display
-        timestamp: log.timestamp
-      }));
+      const newMsgs = logs.map(log => {
+        let images = [];
+        try {
+            if (log.metadata_json) {
+                const meta = JSON.parse(log.metadata_json);
+                if (meta.images && Array.isArray(meta.images)) {
+                    images = meta.images.map(path => `${API_BASE}/api/ide/image?path=${encodeURIComponent(path)}`);
+                }
+            }
+        } catch (e) { console.warn('Meta parse error', e); }
+
+        return {
+          id: log.id,
+          role: log.role,
+          content: log.raw_content || log.content, // Prioritize raw_content for NIT tool display
+          timestamp: log.timestamp,
+          images: images
+        };
+      });
       
       // Reverse to get [Oldest, ..., Newest] order for display
       newMsgs.reverse();
@@ -991,6 +1092,7 @@ let unlistenDelete = null;
 onMounted(async () => {
   connectWS();
   fetchHistory();
+  checkVisionCapability();
 
   // Setup Tauri Event Listeners for Chat Sync
   try {
@@ -1041,17 +1143,40 @@ const handleEnter = (e) => {
 };
 
 const sendMessage = async () => {
-  if (!input.value.trim() || isSending.value) return;
+  if ((!input.value.trim() && pendingImages.value.length === 0) || isSending.value) return;
   
   const content = input.value;
-  messages.value.push({ role: 'user', content, timestamp: new Date().toISOString() });
+  
+  // Capture images for local display
+  const currentImages = pendingImages.value.map(p => p.url);
+  
+  const userMsg = { 
+      role: 'user', 
+      content, 
+      timestamp: new Date().toISOString(),
+      images: currentImages
+  };
+  messages.value.push(userMsg);
   
   // Emit sync event for PetView if not in Work Mode
   if (!props.workMode) {
     emit('sync-chat-to-pet', { role: 'user', content, timestamp: new Date().toISOString() });
   }
 
+  // Construct Payload Content (Structured if images exist)
+  let payloadContent;
+  if (currentImages.length > 0) {
+      payloadContent = [];
+      if (content) payloadContent.push({ type: 'text', text: content });
+      currentImages.forEach(url => {
+          payloadContent.push({ type: 'image_url', image_url: { url } });
+      });
+  } else {
+      payloadContent = content;
+  }
+
   input.value = '';
+  pendingImages.value = [];
   isSending.value = true;
   
   await nextTick();
@@ -1064,12 +1189,20 @@ const sendMessage = async () => {
   scrollToBottom();
 
   try {
+    // Construct messages list for API
+    const historyMsgs = messages.value.slice(0, -1).filter(m => m.role === 'user' || m.role === 'assistant').slice(-10);
+    const apiMessages = historyMsgs.map(m => {
+        if (m === userMsg) {
+            return { role: 'user', content: payloadContent };
+        }
+        return { role: m.role, content: m.content }; // History is always text
+    });
+
     const res = await fetch(`${API_BASE}/api/ide/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
-        // Filter out the empty assistant message we just added
-        messages: messages.value.slice(0, -1).filter(m => m.role === 'user' || m.role === 'assistant').slice(-10), 
+        messages: apiMessages, 
         source: props.workMode ? 'ide' : 'desktop',
         session_id: props.workMode ? 'current_work_session' : 'default'
       })

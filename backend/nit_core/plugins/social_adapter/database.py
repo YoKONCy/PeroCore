@@ -4,6 +4,7 @@ from sqlmodel import SQLModel
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.orm import sessionmaker
 from sqlmodel.ext.asyncio.session import AsyncSession
+from sqlalchemy import text
 from .models_db import QQMessage, QQUser, QQGroup
 
 # 使用绝对路径确保数据库文件位置正确
@@ -13,11 +14,20 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.pa
 DATABASE_FILE = os.path.join(BASE_DIR, "data", "social_storage_v2.db")
 DATABASE_URL = f"sqlite+aiosqlite:///{DATABASE_FILE}"
 
-social_engine = create_async_engine(DATABASE_URL, echo=False)
+social_engine = create_async_engine(
+    DATABASE_URL, 
+    echo=False,
+    connect_args={"check_same_thread": False}, # Allow multi-threading for SQLite
+    pool_size=20, # Increase pool size
+    max_overflow=10,
+    pool_timeout=30 # Timeout for getting connection
+)
 
 async def init_social_db():
     """初始化社交数据库表"""
     async with social_engine.begin() as conn:
+        # Enable WAL mode for better concurrency
+        await conn.execute(text("PRAGMA journal_mode=WAL;"))
         await conn.run_sync(SQLModel.metadata.create_all)
 
 async def get_social_db_session():

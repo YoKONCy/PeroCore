@@ -334,14 +334,25 @@ class SocialService:
 
     async def _random_thought_worker(self):
         """
-        定期检查 Pero 是否想自发说话的后台任务。
-        实现了基于会话活跃度的状态机逻辑。
+        [Master Worker] 协调并行的群聊扫描和私聊扫描。
         """
-        logger.info("[Social] 随机想法流已初始化（基于会话状态）。")
+        logger.info("[Social] 社交观察服务已启动。")
         
+        # 启动两个并行的循环
+        await asyncio.gather(
+            self._group_scan_loop(),
+            self._private_scan_loop()
+        )
+
+    async def _group_scan_loop(self):
+        """
+        [Group] 群聊扫描循环
+        机制：全局单一计时器。到点后，从活跃群聊中随机选一个“看一眼”。
+        """
+        logger.info("[Social] 群聊扫描线程已启动。")
         while self.running:
             try:
-                # 检查频率：每 30 秒检查一次状态
+                # 基础休眠
                 await asyncio.sleep(30)
                 
                 if not self.running or not self.enabled:
@@ -353,62 +364,157 @@ class SocialService:
                     continue
 
                 # 初始化下一次思考时间
-                if not hasattr(self, "_next_thought_time"):
-                    self._next_thought_time = datetime.now() + timedelta(seconds=random.randint(60, 120))
+                if not hasattr(self, "_next_group_thought_time"):
+                    self._next_group_thought_time = datetime.now() + timedelta(seconds=random.randint(60, 120))
                 
-                if now < self._next_thought_time:
+                if now < self._next_group_thought_time:
                     continue
 
                 # 到了思考时间，尝试冒泡
-                # 随机选择一个活跃会话
-                sessions = self.session_manager.get_active_sessions(limit=5)
+                # 随机选择一个活跃群聊
+                sessions = self.session_manager.get_active_sessions(limit=5, session_type="group")
                 
                 # [Fix] 如果内存中没有活跃会话（例如刚重启），尝试从数据库复活
                 if not sessions:
                     revived = await self._revive_sessions_from_db()
                     if revived > 0:
-                        sessions = self.session_manager.get_active_sessions(limit=5)
+                        sessions = self.session_manager.get_active_sessions(limit=5, session_type="group")
 
                 if not sessions:
-                    # 没有活跃会话，休眠久一点 (10-20分钟)
+                    # 没有活跃会话，休眠久一点
                     interval = random.randint(600, 1200)
-                    self._next_thought_time = now + timedelta(seconds=interval)
-                    # logger.debug("[Social] No active sessions, sleeping...")
+                    self._next_group_thought_time = now + timedelta(seconds=interval)
                     continue
                 
                 target_session = random.choice(sessions)
                 
-                # 检查该会话的状态
-                # 活跃定义：最近 2 分钟内有活动 (用户说话或 Pero 说话)
+                # 检查状态
                 time_since_active = (now - target_session.last_active_time).total_seconds()
                 is_active = time_since_active < 120
-                
                 session_state = "ACTIVE" if is_active else "DIVE"
-                logger.info(f"[Social] 触发冒泡检查: {target_session.session_name} (状态: {session_state}, 上次活跃: {time_since_active:.0f}秒前)...")
+                
+                logger.info(f"[Social-Group] 触发检查: {target_session.session_name} (状态: {session_state})")
                 
                 # 尝试说话
-                # 注意：_attempt_random_thought 需要修改为返回是否说话了
-                spoke = await self._attempt_random_thought(target_session)
+                spoke = False
+                if is_active:
+                     # Active 状态下直接调用 Agent
+                     spoke = await self._perform_active_agent_response(target_session, "ACTIVE_OBSERVATION")
+                else:
+                     # DIVE 状态调用秘书
+                     spoke = await self._attempt_random_thought(target_session)
                 
                 # 决定下一次检查时间
                 if spoke:
-                    # 如果说话了，进入/保持活跃节奏 (2分钟)
                     interval = 120
                 elif is_active:
-                    # 如果没说话但会话很活跃 (例如插不上话，或者秘书觉得不需要插话)，
-                    # 稍微快点回来检查 (1分钟)，以免错过插话机会
                     interval = 60
                 else:
-                    # 没说话且会话不活跃 (潜水节奏)
-                    interval = random.randint(600, 1200)
+                    interval = random.randint(600, 1200) # 10-20分钟
                     
-                self._next_thought_time = now + timedelta(seconds=interval)
-                logger.info(f"[Social] 下次冒泡检查将在 {interval} 秒后。")
+                self._next_group_thought_time = now + timedelta(seconds=interval)
+                logger.info(f"[Social-Group] 下次检查将在 {interval} 秒后。")
 
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"[Social] 随机想法工作线程错误: {e}", exc_info=True)
+                logger.error(f"[Social-Group] Error: {e}", exc_info=True)
+                await asyncio.sleep(60)
+
+    async def _private_scan_loop(self):
+        """
+        [Private] 私聊扫描循环
+        机制：每个私聊对象有独立的时间表 (next_scan_time)。
+        - 默认潜水周期：20-40分钟。
+        - 激活后周期：2-4分钟（如果最近有对话）。
+        """
+        logger.info("[Social] 私聊扫描线程已启动。")
+        while self.running:
+            try:
+                # 检查频率要高一些，因为每个人的时间点不同
+                await asyncio.sleep(10)
+                
+                if not self.running or not self.enabled:
+                    continue
+
+                now = datetime.now()
+                if 0 <= now.hour < 8:
+                    continue
+                
+                # 获取所有活跃的私聊会话（扩大范围，不仅仅是 Top 5，因为要遍历检查每个人）
+                # 这里我们假设内存中的 session 都是相关的。
+                # 也可以使用 get_active_sessions(limit=100, session_type="private")
+                sessions = self.session_manager.get_active_sessions(limit=20, session_type="private")
+                
+                for session in sessions:
+                    if now >= session.next_scan_time:
+                        # 到了该会话的检查点
+                        
+                        # 检查状态
+                        time_since_active = (now - session.last_active_time).total_seconds()
+                        is_active = time_since_active < 120
+                        
+                        # 活跃期跳过（私聊策略：不主动 Double Text）
+                        if is_active:
+                            # 仍然在活跃期，推迟检查
+                            session.next_scan_time = now + timedelta(seconds=60)
+                            continue
+                            
+                        # 潜水期检查
+                        logger.info(f"[Social-Private] 触发检查: {session.session_name}")
+                        spoke = await self._attempt_random_thought(session)
+                        
+                        # 设定下一次检查时间
+                        # 逻辑：无论是否说话，除非用户回复（这会重置为短周期），否则回归长周期
+                        # 用户要求的“后继扫描保持不变” -> 理解为回归常态
+                        # [Adjustment] 私聊长周期大幅拉长到 4~8 小时
+                        next_interval = random.randint(14400, 28800) # 4-8 小时 (14400-28800秒)
+                        
+                        if spoke:
+                            # 如果我们也说话了，可能希望稍微快一点再看一眼？
+                            # 但按照“不主动连发”原则，还是保持长周期比较好。
+                            # 等用户回了，handle_message 会把时间改成 2-4分钟。
+                            pass
+                            
+                        session.next_scan_time = now + timedelta(seconds=next_interval)
+                        logger.info(f"[Social-Private] {session.session_name} 下次检查在 {next_interval//3600} 小时后。")
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"[Social-Private] Error: {e}", exc_info=True)
+                await asyncio.sleep(60)
+
+
+    def _clean_cq_codes(self, content: str) -> str:
+        """
+        清理消息内容中的 CQ 码，将其转换为人类可读的文本标签。
+        例如: [CQ:image,...] -> [图片] 或 [摘要]
+        """
+        if "[CQ:image" not in content:
+            return content
+            
+        import re
+        def replace_cq_image(match):
+            full_tag = match.group(0)
+            # 尝试提取 summary
+            summary_match = re.search(r'summary=\[(.*?)\]', full_tag)
+            # 有些实现可能没有 summary 或者格式不同，这里做个简单兼容
+            if not summary_match:
+                 summary_match = re.search(r'summary=([^,\]]+)', full_tag)
+
+            if summary_match:
+                summary_text = summary_match.group(1)
+                # 解码 HTML 实体
+                summary_text = summary_text.replace("&#91;", "[").replace("&#93;", "]").replace("&amp;", "&")
+                
+                # 如果 summary 本身已经包含了 []，就不再包裹
+                if summary_text.startswith("[") and summary_text.endswith("]"):
+                    return summary_text
+                return f"[{summary_text}]"
+            return "[图片]"
+            
+        return re.sub(r'\[CQ:image,[^\]]*\]', replace_cq_image, content)
 
     async def _attempt_random_thought(self, target_session: Optional[SocialSession] = None) -> bool:
         """
@@ -464,7 +570,9 @@ class SocialService:
                 elif target_session.session_type == "private" and sender == target_session.session_name:
                     sender = "User"
                 
-                recent_context += f"[{sender}]: {msg.content}\n"
+                # [Fix] Clean CQ codes for cleaner context
+                clean_content = self._clean_cq_codes(msg.content)
+                recent_context += f"[{sender}]: {clean_content}\n"
             
             if not recent_context:
                 recent_context = "(本地缓存为空)"
@@ -478,7 +586,12 @@ class SocialService:
             
             bot_name = self.bot_info.get("nickname", self.config_manager.get("bot_name", "Pero"))
             
-            prompt = mdp.render("tasks/social/secretary_decision", {
+            # [Refactor] Split prompts for Group and Private to avoid schizophrenia
+            template_name = "tasks/social/secretary_decision_group"
+            if target_session.session_type == "private":
+                template_name = "tasks/social/secretary_decision_private"
+                
+            prompt = mdp.render(template_name, {
                 "agent_name": bot_name,
                 "current_time": datetime.now().strftime('%H:%M'),
                 "session_state": session_state,
@@ -491,15 +604,6 @@ class SocialService:
             from services.agent_service import AgentService
             agent = AgentService(db_session)
             
-            # 构造消息
-            messages = [
-                {"role": "system", "content": prompt},
-                {"role": "user", "content": f"Context:\n{recent_context}\n\nDecision?"}
-            ]
-            
-            # 秘书不需要工具，纯文本判断即可
-            social_tools = []
-
             config = await agent._get_llm_config()
             from services.llm_service import LLMService
             llm = LLMService(
@@ -508,6 +612,52 @@ class SocialService:
                 model=config.get("model")
             )
             
+            # [Multimodal] 收集最近的图片 (从 Buffer 中获取已下载的本地路径)
+            processed_images = []
+            if config.get("enable_vision"):
+                # 倒序检查 Buffer (优先看最新的)
+                for msg in reversed(target_session.buffer):
+                    if msg.images:
+                        for img_path in msg.images:
+                            # 检查是否为本地路径 (Buffer 在 handle_session_flush 中已被 hydrate)
+                            if os.path.exists(img_path):
+                                try:
+                                    async with aiofiles.open(img_path, "rb") as f:
+                                        img_data = await f.read()
+                                        b64_data = base64.b64encode(img_data).decode("utf-8")
+                                        mime_type = "image/jpeg"
+                                        if img_path.endswith(".png"): mime_type = "image/png"
+                                        elif img_path.endswith(".gif"): mime_type = "image/gif"
+                                        
+                                        data_url = f"data:{mime_type};base64,{b64_data}"
+                                        processed_images.append(data_url)
+                                        if len(processed_images) >= 2: break
+                                except Exception as e:
+                                    logger.error(f"[Social] Secretary 读取图片失败: {e}")
+                    if len(processed_images) >= 2: break
+                
+                # 翻转回来，保持时间顺序
+                processed_images.reverse()
+
+            # 构造消息
+            user_content_payload = [{"type": "text", "text": f"Context:\n{recent_context}\n\nDecision?"}]
+            
+            if processed_images:
+                logger.info(f"[Social] Secretary 发现 {len(processed_images)} 张图片，注入上下文。")
+                for img_url in processed_images:
+                    user_content_payload.append({
+                        "type": "image_url",
+                        "image_url": {"url": img_url}
+                    })
+
+            messages = [
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": user_content_payload}
+            ]
+            
+            # 秘书不需要工具，纯文本判断即可
+            social_tools = []
+
             # 执行 LLM 调用 (纯文本模式)
             # 我们使用简单的单轮对话，因为秘书不需要使用工具
             try:
@@ -659,7 +809,8 @@ class SocialService:
                         if "session_name" in meta: sender += f" ({meta['session_name']})"
                     except: pass
                     
-                    context_text += f"[{log.timestamp.strftime('%H:%M')}] {sender}: {log.content}\n"
+                    clean_content = self._clean_cq_codes(log.content)
+                    context_text += f"[{log.timestamp.strftime('%H:%M')}] {sender}: {clean_content}\n"
                 
                 # 如果太长则截断（MVP 的简单字符限制）
                 if len(context_text) > 50000:
@@ -1034,6 +1185,410 @@ class SocialService:
         await self._send_api("delete_friend", {"user_id": user_id})
         logger.info(f"[Social] 好友 {user_id} 已删除。")
 
+    async def _perform_active_agent_response(self, session: SocialSession, current_mode: str = "ACTIVE_OBSERVATION", extra_images: list = None) -> bool:
+        """
+        [Action Layer] 直接调用 Agent 进行思考和回复。
+        用于 Active 状态下的即时响应（消息触发或主动触发）。
+        
+        Args:
+            session: 目标会话
+            current_mode: "SUMMONED" 或 "ACTIVE_OBSERVATION"
+            extra_images: 也就是 session.buffer 中的图片，用于 Vision 分析
+            
+        Returns:
+            bool: 是否发送了消息
+        """
+        logger.info(f"[{session.session_id}] _perform_active_agent_response 开始执行。")
+        spoke = False
+        
+        # [Preemption] 注册当前任务到 Session
+        session.active_response_task = asyncio.current_task()
+        
+        try:
+            # [Scheme 2] 强制延迟 0.5s，给数据库写入留出喘息时间，释放文件锁
+            # [Debug] Check if sleep hangs
+            logger.info(f"[{session.session_id}] 正在休眠 0.5s 以等待数据库写入...")
+            await asyncio.sleep(0.5)
+            logger.info(f"[{session.session_id}] 休眠结束。")
+            
+            # 1. 构建 XML 上下文
+            history_limit = 100
+            
+            logger.info(f"[{session.session_id}] 获取最近消息历史...")
+            # 获取历史记录
+            # [Fix] Add timeout to detect hang
+            try:
+                # [Scheme 3] 内存优先 + 数据库补充
+                # 先尝试从数据库获取，如果超时或失败，不再阻塞流程，而是使用 Buffer 降级
+                # 超时时间设为 2s，避免让用户等太久
+                recent_messages = await asyncio.wait_for(
+                    self.session_manager.get_recent_messages(
+                        session.session_id, 
+                        session.session_type, 
+                        limit=history_limit
+                    ),
+                    timeout=2.0
+                )
+                logger.info(f"[{session.session_id}] 获取到 {len(recent_messages)} 条历史消息。")
+            except asyncio.TimeoutError:
+                logger.error(f"[{session.session_id}] 获取最近消息历史超时 (2s)！启用内存降级策略。")
+                recent_messages = []
+            except Exception as e:
+                logger.error(f"[{session.session_id}] 获取最近消息历史失败: {e}。启用内存降级策略。")
+                recent_messages = []
+            
+            # [Scheme 3 Implementation] 如果数据库读取失败（空），强制合并 Buffer
+            # 注意：如果数据库读取成功，理论上它包含了 Buffer 里的消息（因为已经 persist 了）
+            # 但为了保险起见，如果数据库返回空，我们必须把 session.buffer 接上去
+            if not recent_messages and session.buffer:
+                logger.warning(f"[{session.session_id}] 数据库历史为空或超时，使用内存 Buffer 构建上下文。")
+                recent_messages = list(session.buffer) # Shallow copy
+            
+            # [Enhancement] Fetch Related Private Contexts (Cross-Context Awareness)
+            if not recent_messages:
+                # logger.warning(f"[{session.session_id}] 数据库历史记录为空，回退到缓冲区。")
+                recent_messages = session.buffer
+            
+            # [Enhancement] Fetch Related Private Contexts (Cross-Context Awareness)
+            private_contexts = {} # user_id -> list[SocialMessage]
+            injected_ids = set() # For deduplication
+
+            # 1. Identify relevant users from recent 10 messages
+            relevant_users = []
+            seen_users = set()
+            
+            # Check last 10 messages (or fewer if not enough)
+            scan_range = recent_messages[-10:] if len(recent_messages) >= 10 else recent_messages
+            
+            # Self ID
+            my_id = self.bot_info.get("user_id") if hasattr(self, "bot_info") and self.bot_info else ""
+            
+            # Scan in reverse (latest first)
+            for msg in reversed(scan_range):
+                uid = str(msg.sender_id)
+                # Filter: Not Self, Not System, Not Duplicate, limit to 3
+                # [Fix] In private chat, exclude the current session user to avoid redundancy and potential deadlocks
+                is_current_session_user = (session.session_type == "private" and uid == str(session.session_id))
+                
+                if uid and uid != my_id and uid != "system" and uid not in seen_users and not is_current_session_user:
+                    # Also ensure it's a valid user ID (digits)
+                    if uid.isdigit():
+                        relevant_users.append(uid)
+                        seen_users.add(uid)
+                        if len(relevant_users) >= 3:
+                            break
+            
+            logger.info(f"[{session.session_id}] 发现相关用户: {relevant_users}")
+            
+            # 2. Fetch private history for these users
+            if relevant_users:
+                logger.info(f"[{session.session_id}] 正在获取相关私聊上下文: {relevant_users}")
+                # 使用并发获取以提高速度，并增加超时保护
+                async def fetch_private_safe(uid):
+                        try:
+                            # 增加 2 秒超时，避免获取私聊历史卡死主流程
+                            return uid, await asyncio.wait_for(
+                                self.session_manager.get_recent_messages(uid, "private", limit=10),
+                                timeout=2.0
+                            )
+                        except Exception as e:
+                            logger.warning(f"获取 {uid} 的私聊上下文失败或超时: {e}")
+                            return uid, []
+
+                # 并发执行
+                tasks = [fetch_private_safe(uid) for uid in relevant_users]
+                if tasks:
+                    results = await asyncio.gather(*tasks)
+                    for uid, p_msgs in results:
+                        if p_msgs:
+                            private_contexts[uid] = p_msgs
+                            for pm in p_msgs:
+                                injected_ids.add(str(pm.msg_id))
+            
+            # Set ContextVar for tool deduplication
+            token = injected_msg_ids_var.set(injected_ids)
+
+            xml_context = "<social_context>\n"
+            
+            # 3. Inject Private Contexts
+            if private_contexts:
+                xml_context += "  <related_private_contexts>\n"
+                for uid, p_msgs in private_contexts.items():
+                    p_name = f"User{uid}"
+                    if p_msgs:
+                        for m in p_msgs:
+                            if str(m.sender_id) == uid:
+                                p_name = m.sender_name
+                                break
+                    
+                    xml_context += f"    <session type=\"private\" id=\"{uid}\" name=\"{p_name}\">\n"
+                    # [Fix] Deduplicate: Don't inject messages that are already in recent_messages
+                    # This happens if we fetch cross-context history for the current user (which we shouldn't, but just in case)
+                    # Or if there's overlap in data fetching logic
+                    
+                    current_session_msg_ids = {str(m.msg_id) for m in recent_messages}
+                    
+                    for pm in p_msgs:
+                        if str(pm.msg_id) in current_session_msg_ids:
+                             continue
+
+                        content = self._clean_cq_codes(pm.content)
+                        xml_context += f"      <msg sender=\"{pm.sender_name}\" sender_id=\"{pm.sender_id}\" id=\"{pm.msg_id}\" time=\"{pm.timestamp.strftime('%H:%M:%S')}\">{content}</msg>\n"
+                    xml_context += "    </session>\n"
+                xml_context += "  </related_private_contexts>\n"
+
+            # 4. [Enhancement] Inject Related Group Context (For Private Chat)
+            # 只有在私聊模式下，才去寻找最近活跃的群上下文
+            if session.session_type == "private":
+                latest_group_id = await self.session_manager.get_latest_active_group(session.session_id)
+                if latest_group_id:
+                    logger.info(f"[{session.session_id}] 发现最近活跃群聊: {latest_group_id}，正在获取上下文...")
+                    try:
+                        # Fetch group history (limit 10)
+                        # 这里我们不需要太复杂的并发，因为只有一个群
+                        group_msgs = await self.session_manager.get_recent_messages(latest_group_id, "group", limit=10)
+                        
+                        if group_msgs:
+                            xml_context += "  <related_group_contexts>\n"
+                            # 为了节省 token，我们简化群聊上下文的格式，不使用详细的 per-msg 标签
+                            # 而是合并为一个大的 block，或者简化标签
+                            xml_context += f"    <session type=\"group\" id=\"{latest_group_id}\" name=\"Recent Group Context\">\n"
+                            
+                            for gm in group_msgs:
+                                # Skip duplicates if any (unlikely across different session types, but good practice)
+                                if str(gm.msg_id) in injected_ids:
+                                    continue
+                                
+                                # Process CQ codes for images
+                                content = self._clean_cq_codes(gm.content)
+                                
+                                # Simplified format: Time User: Content
+                                time_str = gm.timestamp.strftime('%H:%M')
+                                xml_context += f"      [{time_str}] {gm.sender_name}: {content}\n"
+                                injected_ids.add(str(gm.msg_id)) # Add to deduplication set
+                                
+                            xml_context += "    </session>\n"
+                            xml_context += "  </related_group_contexts>\n"
+                            
+                    except Exception as e:
+                        logger.error(f"获取群聊上下文失败: {e}")
+
+            xml_context += "  <recent_messages>\n"
+            xml_context += f"    <session type=\"{session.session_type}\" id=\"{session.session_id}\" name=\"{session.session_name}\">\n"
+            
+            # 使用加载的历史记录构建上下文
+            for msg in recent_messages:
+                content = self._clean_cq_codes(msg.content)
+                img_tag = "" 
+                
+                xml_context += f"      <msg sender=\"{msg.sender_name}\" sender_id=\"{msg.sender_id}\" id=\"{msg.msg_id}\" time=\"{msg.timestamp.strftime('%H:%M:%S')}\">{content}{img_tag}</msg>\n"
+
+            # [Multimodal Enhancement] Collect images from recent history (last 2 turns) + buffer
+            # This ensures Pero can see images sent just before the trigger.
+            history_images = []
+            if recent_messages:
+                # Check last 2 messages in history
+                for msg in recent_messages[-2:]:
+                    # Extract CQ codes for images
+                    import re
+                    # Pattern to find [CQ:image,file=...,url=...]
+                    # We prioritize 'url' if available, or 'file' if it's a local path or filename
+                    # Note: models_db stores 'content' which has CQ codes.
+                    # Standard OneBot CQ: [CQ:image,file=http://...,url=...] or [CQ:image,file=abc.jpg,url=...]
+                    
+                    # Regex to capture url or file
+                    # Try to find 'url' parameter first
+                    cq_matches = re.finditer(r'\[CQ:image,.*?\]', msg.content)
+                    for match in cq_matches:
+                        full_tag = match.group(0)
+                        
+                        # Extract URL
+                        url_match = re.search(r'url=([^,\]]+)', full_tag)
+                        if url_match:
+                            history_images.append(url_match.group(1))
+                            continue
+                            
+                        # If no URL, try file (might be url or filename)
+                        file_match = re.search(r'file=([^,\]]+)', full_tag)
+                        if file_match:
+                            val = file_match.group(1)
+                            if val.startswith("http"):
+                                history_images.append(val)
+                            # If it's a filename, we might need to resolve it via ImageCacheManager if we downloaded it before
+                            # But reconstructing the hash path is tricky without the original URL.
+                            # For now, we prioritize URLs found in history.
+            
+            # Combine history images and buffer images
+            # Buffer images (extra_images) are already local paths or URLs
+            # History images are URLs extracted from CQ codes. We need to download them if not cached?
+            # For this context, we pass URLs to LLM, or better, try to use local cache if available.
+            
+            # [Optimization] 限制图片数量，防止上下文过大
+            # Logic: Buffer images (Newest) > History images (Older)
+            # We want to keep the NEWEST images, up to 2.
+            
+            all_potential_images = history_images + (extra_images or [])
+            session_images = []
+            
+            if all_potential_images:
+                # Take the last 2 (newest)
+                if len(all_potential_images) > 2:
+                    dropped_count = len(all_potential_images) - 2
+                    logger.info(f"[Social] 发现 {len(all_potential_images)} 张图片 (历史+缓冲)，丢弃旧的 {dropped_count} 张。保留最后 2 张。")
+                    session_images = all_potential_images[-2:]
+                else:
+                    session_images = all_potential_images
+                
+                # Ensure history images (URLs) are handled. 
+                # If they are URLs, the downstream logic handles download/base64 conversion?
+                # The downstream logic (lines 1448+) checks `os.path.exists(img_path)`.
+                # If it's a URL, it falls into the `else` block (line 1463).
+                # The `else` block skips incompatible URLs (multimedia.nt.qq.com.cn etc) but appends others as URL.
+                # So if history has valid http URLs, they will be passed as `image_url` to LLM.
+                # If history has unsupported URLs, they are skipped.
+                # If history has local paths (unlikely in CQ code unless we modified DB), they are loaded.
+                
+            xml_context += "    </session>\n"
+            xml_context += "  </recent_messages>\n"
+            
+            xml_context += "</social_context>"
+            
+            # [Optimization] Skip if context is empty
+            if not recent_messages and not private_contexts:
+                logger.warning(f"[{session.session_id}] 上下文为空，跳过主动搭话。")
+                return False
+
+            # 2. 调用 AgentService
+            from services.agent_service import AgentService # 延迟导入以避免循环依赖
+            
+            logger.info(f"[{session.session_id}] 正在建立主数据库连接...")
+            async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+            async with async_session() as db_session:
+                logger.info(f"[{session.session_id}] 主数据库连接已建立。初始化 AgentService...")
+                from services.agent_service import AgentService
+                agent = AgentService(db_session)
+                
+                from services.prompt_service import PromptManager
+                prompt_manager = PromptManager()
+                logger.info(f"[{session.session_id}] 获取系统 Prompt...")
+                core_system_prompt = await prompt_manager.get_rendered_system_prompt(db_session, is_social_mode=True)
+                
+                owner_qq = self.config_manager.get("owner_qq") or "未知"
+                
+                # Prepare sticker list
+                self._ensure_sticker_map()
+                sticker_list = ", ".join(self._sticker_map.keys())
+                
+                logger.info(f"[{session.session_id}] 渲染 Social Instructions...")
+                social_instructions = mdp.render("tasks/social/social_instructions", {
+                    "agent_name": self.config_manager.get("bot_name", "Pero"),
+                    "current_mode": current_mode,
+                    "owner_qq": owner_qq,
+                    "sticker_list": sticker_list
+                })
+                
+                # [Fix] Inject XML Guide and Time Awareness for Active Initiative
+                current_time_str = datetime.now().strftime('%H:%M:%S')
+                xml_guide = mdp.render("tasks/social/active_mode_guide", {
+                    "current_time": current_time_str
+                })
+                
+                full_system_prompt = core_system_prompt + social_instructions + xml_guide
+                
+                messages = [
+                    {"role": "system", "content": full_system_prompt}
+                ]
+                
+                user_content = [{"type": "text", "text": xml_context}]
+                
+                # [Multimodal] 处理本地缓存图片转 Base64
+                processed_images = []
+                for img_path in session_images:
+                    if os.path.exists(img_path):
+                        try:
+                            async with aiofiles.open(img_path, "rb") as f:
+                                img_data = await f.read()
+                                b64_data = base64.b64encode(img_data).decode("utf-8")
+                                mime_type = "image/jpeg"
+                                if img_path.endswith(".png"): mime_type = "image/png"
+                                elif img_path.endswith(".gif"): mime_type = "image/gif"
+                                
+                                data_url = f"data:{mime_type};base64,{b64_data}"
+                                processed_images.append(data_url)
+                        except Exception as e:
+                            logger.error(f"[Social] 读取图片文件 {img_path} 失败: {e}")
+                    else:
+                        if "multimedia.nt.qq.com.cn" in img_path or "c2cpicdw.qpic.cn" in img_path or "gchat.qpic.cn" in img_path:
+                            logger.warning(f"[Social] 跳过不兼容的图片 URL: {img_path[:50]}...")
+                            continue
+                        processed_images.append(img_path)
+
+                config = await agent._get_llm_config()
+                if config.get("enable_vision") and processed_images:
+                    logger.info(f"注入 {len(processed_images)} 张图片到社交聊天上下文。")
+                    for img_url in processed_images:
+                        user_content.append({
+                            "type": "image_url",
+                            "image_url": {"url": img_url}
+                        })
+                
+                messages.append({"role": "user", "content": user_content})
+                
+                logger.info(f"正在呼叫会话 {session.session_id} 的社交 Agent ({current_mode})...")
+                logger.info(f"[{session.session_id}] 准备调用 agent.social_chat...")
+                response_text = await agent.social_chat(messages, session_id=f"social_{session.session_id}")
+                logger.info(f"[{session.session_id}] agent.social_chat 返回。")
+                
+                logger.info(f"社交 Agent 响应: {response_text}")
+                
+                # 3. 发送回复
+                # [Fix] 增强空值检查，防止 response_text 为 None 时报错
+                if response_text is None:
+                    response_text = ""
+                
+                if response_text and response_text.strip() and "IGNORE" not in response_text and "[PASS]" not in response_text:
+                    await self.send_msg(session, response_text)
+                    spoke = True
+                    
+                    # 更新会话状态
+                    # session.last_active_time = datetime.now() # 移除
+                    self._next_thought_time = datetime.now() + timedelta(seconds=120)
+
+                    # [持久化] 保存 Pero 的回复
+                    try:
+                        await self.session_manager.persist_outgoing_message(
+                            session.session_id,
+                            session.session_type,
+                            response_text,
+                            sender_name="Pero"
+                        )
+                    except Exception as e:
+                        logger.error(f"持久化 Pero 回复失败: {e}")
+                elif response_text and "[PASS]" in response_text:
+                     logger.info(f"[{session.session_id}] Agent 决定 PASS (活跃观察)。")
+                else:
+                    logger.info(f"[Social] 跳过回复。响应为空或 IGNORE。（内容: '{response_text}'）")
+            
+            # [State Reset] 如果是 Summoned，处理完必须清除
+            if session.state == "summoned":
+                logger.info(f"[{session.session_id}] 正在将状态从 SUMMONED 重置为 OBSERVING。")
+                session.state = "observing"
+                
+            return spoke
+
+        except asyncio.CancelledError:
+            logger.warning(f"[{session.session_id}] Active Agent Response 被取消（可能是因为用户发了新消息）。")
+            raise
+        except Exception as e:
+            logger.error(f"[{session.session_id}] Active Agent 错误: {e}", exc_info=True)
+        finally:
+            # [Preemption] 清理任务标记
+            if session.active_response_task == asyncio.current_task():
+                session.active_response_task = None
+                
+            if 'token' in locals():
+                injected_msg_ids_var.reset(token)
+
     async def handle_session_flush(self, session: SocialSession):
         """
         缓冲区刷新时来自 SessionManager 的回调。
@@ -1047,27 +1602,8 @@ class SocialService:
         # 即使这次不回复，我们也检查是否积累了足够的消息需要总结
         asyncio.create_task(self._check_and_summarize_memory(session))
         
-        # 1. 检查状态
-        # [Refactor] Active 状态下直接由 Agent 决策 (Pass or Reply)
-        # 活跃定义: 距离上次活跃时间在 ACTIVE_DURATION 内
-        is_active = False
-        time_since_active = (datetime.now() - session.last_active_time).total_seconds()
-        if time_since_active < self.session_manager.ACTIVE_DURATION:
-            is_active = True
-
-        if session.state != "summoned" and not is_active:
-            # 既不是被召唤，也不活跃（潜水模式），交给秘书层判断 (Low Cost)
-            # 如果缓冲区是因为满了或超时刷新的，说明可能正在热聊
-            logger.info(f"[{session.session_id}] 偷听刷新 (潜水模式)。委派给秘书。")
-            await self._attempt_random_thought(target_session=session)
-            return
-
-        # 确定模式，供 Prompt 使用
-        current_mode = "SUMMONED" if session.state == "summoned" else "ACTIVE_OBSERVATION"
-        logger.info(f"[{session.session_id}] 正在以 {current_mode} 模式处理。调用主 Agent。")
-
         # [Multimodal Barrier] Ensure all pending image downloads are complete
-        # Collect tasks from buffer messages
+        # We do this FIRST so both Secretary and Agent can see the images.
         all_pending_tasks = []
         task_to_msg_map = {} # task -> (msg, index)
         
@@ -1108,279 +1644,53 @@ class SocialService:
                 
                 if pending:
                     logger.warning(f"[{session.session_id}] {len(pending)} 个图片下载超时。")
-                    # Optional: cancel pending tasks? No, let them finish in background for future reference.
             except Exception as e:
                 logger.error(f"[{session.session_id}] 等待图片时出错: {e}")
 
+        # 1. 检查状态
+        # [Refactor] Active 状态下直接由 Agent 决策 (Pass or Reply)
+        # 活跃定义: 距离上次活跃时间在 ACTIVE_DURATION 内
+        is_active = False
+        time_since_active = (datetime.now() - session.last_active_time).total_seconds()
+        if time_since_active < self.session_manager.ACTIVE_DURATION:
+            is_active = True
+
+        if session.state != "summoned" and not is_active:
+            # 既不是被召唤，也不活跃（潜水模式），交给秘书层判断 (Low Cost)
+            # 如果缓冲区是因为满了或超时刷新的，说明可能正在热聊
+            logger.info(f"[{session.session_id}] 偷听刷新 (潜水模式)。委派给秘书。")
+            await self._attempt_random_thought(target_session=session)
+            return
+
+        # 确定模式，供 Prompt 使用
+        current_mode = "SUMMONED" if session.state == "summoned" else "ACTIVE_OBSERVATION"
+        logger.info(f"[{session.session_id}] 正在以 {current_mode} 模式处理。调用主 Agent。")
+
         # --- 以下是被动呼唤 (Summoned) 或 活跃观察 (Active) 的处理逻辑 (Action Layer) ---
         
-        # 1. 构建 XML 上下文
-        # [核心优化] 从数据库加载更长的历史记录 (Unified to 100)
-        history_limit = 100
-        
-        # 获取历史记录（包括缓冲区中已持久化的消息）
-        # 注意：get_recent_messages 返回 SocialMessage 对象列表
-        recent_messages = await self.session_manager.get_recent_messages(
-            session.session_id, 
-            session.session_type, 
-            limit=history_limit
-        )
-        
-        # 如果数据库为空（极少见，因为刚存入了 buffer），则回退到 buffer
-        if not recent_messages:
-            logger.warning(f"[{session.session_id}] 数据库历史记录为空，回退到缓冲区。")
-            recent_messages = session.buffer
-            
-        # [Enhancement] Fetch Related Private Contexts (Cross-Context Awareness)
-        # 1. Identify relevant users from recent 10 messages
-        relevant_users = []
-        seen_users = set()
-        
-        # Check last 10 messages (or fewer if not enough)
-        scan_range = recent_messages[-10:] if len(recent_messages) >= 10 else recent_messages
-        
-        # Self ID
-        my_id = self.bot_info.get("user_id") if hasattr(self, "bot_info") and self.bot_info else ""
-        
-        # Scan in reverse (latest first)
-        for msg in reversed(scan_range):
-            uid = str(msg.sender_id)
-            # Filter: Not Self, Not System, Not Duplicate, limit to 3
-            if uid and uid != my_id and uid != "system" and uid not in seen_users:
-                # Also ensure it's a valid user ID (digits)
-                if uid.isdigit():
-                    relevant_users.append(uid)
-                    seen_users.add(uid)
-                    if len(relevant_users) >= 3:
-                        break
-        
-        # 2. Fetch private history for these users
-        private_contexts = {} # user_id -> list[SocialMessage]
-        injected_ids = set() # For deduplication
-        
-        if relevant_users:
-            logger.info(f"[{session.session_id}] 正在获取相关私聊上下文: {relevant_users}")
-            for uid in relevant_users:
-                try:
-                    p_msgs = await self.session_manager.get_recent_messages(uid, "private", limit=10)
-                    if p_msgs:
-                        private_contexts[uid] = p_msgs
-                        # Collect IDs for deduplication
-                        for pm in p_msgs:
-                            injected_ids.add(str(pm.msg_id))
-                except Exception as e:
-                    logger.warning(f"获取 {uid} 的私聊上下文失败: {e}")
-
-        # Set ContextVar for tool deduplication
-        token = injected_msg_ids_var.set(injected_ids)
-
-        # [Optimization] Unified context limit to 100 (Logic handled in get_recent_messages)
-        # Note: XML construction logic starts here
-        
-        xml_context = "<social_context>\n"
-        
-        # 3. Inject Private Contexts (Moved to top)
-        if private_contexts:
-            xml_context += "  <related_private_contexts>\n"
-            for uid, p_msgs in private_contexts.items():
-                # Get user name from first message if possible, or just ID
-                p_name = f"User{uid}"
-                if p_msgs:
-                    # Find a message from this user to get name
-                    for m in p_msgs:
-                        if str(m.sender_id) == uid:
-                            p_name = m.sender_name
-                            break
-                
-                xml_context += f"    <session type=\"private\" id=\"{uid}\" name=\"{p_name}\">\n"
-                for pm in p_msgs:
-                    # [Optimization] Clean CQ codes in content to save tokens
-                    content = pm.content
-                    if "[CQ:image" in content:
-                        import re
-                        # Extract summary if present, otherwise use [图片]
-                        # Pattern matches [CQ:image, ... summary=[text], ...]
-                        # This simple regex might need adjustment for complex cases
-                        # Let's just simplify all CQ:image to [图片] or summary if easy
-                        
-                        # Replace [CQ:image...] with [图片]
-                        # If we want to be fancy, we can try to extract 'summary'
-                        def replace_cq_image(match):
-                            full_tag = match.group(0)
-                            summary_match = re.search(r'summary=\[(.*?)\]', full_tag)
-                            if summary_match:
-                                return f"[{summary_match.group(1)}]"
-                            return "[图片]"
-                            
-                        content = re.sub(r'\[CQ:image,[^\]]*\]', replace_cq_image, content)
-
-                    xml_context += f"      <msg sender=\"{pm.sender_name}\" sender_id=\"{pm.sender_id}\" id=\"{pm.msg_id}\" time=\"{pm.timestamp.strftime('%H:%M:%S')}\">{content}</msg>\n"
-                xml_context += "    </session>\n"
-            xml_context += "  </related_private_contexts>\n"
-
-        xml_context += "  <recent_messages>\n"
-        xml_context += f"    <session type=\"{session.session_type}\" id=\"{session.session_id}\" name=\"{session.session_name}\">\n"
-        
-        session_images = []
-        
-        # 使用加载的历史记录构建上下文
-        for msg in recent_messages:
-            # [Optimization] Clean CQ codes in content
-            content = msg.content
-            img_tag = "" # Legacy placeholder, kept for structure
-            
-            if "[CQ:image" in content:
-                import re
-                def replace_cq_image(match):
-                    full_tag = match.group(0)
-                    # Try to find summary
-                    # OneBot often uses summary=[text]
-                    # Also decoding URL encoded chars might be needed if complex
-                    summary_match = re.search(r'summary=\[(.*?)\]', full_tag)
-                    if summary_match:
-                        return f"[{summary_match.group(1)}]"
-                    return "[图片]"
-                    
-                content = re.sub(r'\[CQ:image,[^\]]*\]', replace_cq_image, content)
-            
-            xml_context += f"      <msg sender=\"{msg.sender_name}\" sender_id=\"{msg.sender_id}\" id=\"{msg.msg_id}\" time=\"{msg.timestamp.strftime('%H:%M:%S')}\">{content}{img_tag}</msg>\n"
-
-        # 收集当前 Buffer 中的图片用于 Vision 分析
-        for buf_msg in session.buffer:
-            if buf_msg.images:
-                session_images.extend(buf_msg.images)
-
-        # [优化] 限制图片数量，防止上下文过大
-        if len(session_images) > 2:
-            dropped_count = len(session_images) - 2
-            logger.info(f"[Social] 发现 {len(session_images)} 张图片，丢弃最旧的 {dropped_count} 张。保留最后 2 张。")
-            session_images = session_images[-2:]
-            
-        xml_context += "    </session>\n"
-        xml_context += "  </recent_messages>\n"
-        
-        xml_context += "</social_context>"
-        
-        # 2. 调用 AgentService
         try:
-            from services.agent_service import AgentService # 延迟导入以避免循环依赖
-            
-            async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-            async with async_session() as db_session:
-                from services.agent_service import AgentService
-                agent = AgentService(db_session)
-                
-                # [迁移] 使用 PromptManager 获取系统提示
-                from services.prompt_service import PromptManager
-                prompt_manager = PromptManager()
-                # 我们需要为社交模式构建特定的上下文
-                # 目前，我们获取核心提示并附加社交指令
-                core_system_prompt = await prompt_manager.get_rendered_system_prompt(db_session, is_social_mode=True)
-                
-                owner_qq = self.config_manager.get("owner_qq") or "未知"
-                
-                social_instructions = mdp.render("tasks/social/social_instructions", {
-                    "agent_name": self.config_manager.get("bot_name", "Pero"),
-                    "current_mode": current_mode,
-                    "owner_qq": owner_qq
-                })
-                
-                full_system_prompt = core_system_prompt + social_instructions
-                
-                messages = [
-                    {"role": "system", "content": full_system_prompt}
-                ]
-                
-                # 构建用户内容（文本 + 可选图像）
-                user_content = [{"type": "text", "text": xml_context}]
-                
-                # 添加图像（如果有）（原生多模态）
-                # 检查模型是否支持视觉？AgentService.social_chat 将处理配置检查，
-                # 但我们需要传递结构。
-                # 理想情况下，我们仅在配置允许的情况下传递图像，但在这里我们构建候选消息。
-                # AgentService 的 LLMService 应该在禁用视觉时处理过滤？
-                # 实际上，如果将图像传递给非视觉模型，LLMService 通常会报错。
-                # 所以我们应该在这里检查配置或让 AgentService 处理它。
-                # 让我们先验证配置。
-                
-                # [Multimodal] 处理本地缓存图片转 Base64
-                processed_images = []
-                for img_path in session_images:
-                    # 检查是否为本地文件路径
-                    if os.path.exists(img_path):
-                        try:
-                            async with aiofiles.open(img_path, "rb") as f:
-                                img_data = await f.read()
-                                b64_data = base64.b64encode(img_data).decode("utf-8")
-                                # 简单的 MIME 类型推断
-                                mime_type = "image/jpeg"
-                                if img_path.endswith(".png"): mime_type = "image/png"
-                                elif img_path.endswith(".gif"): mime_type = "image/gif"
-                                
-                                data_url = f"data:{mime_type};base64,{b64_data}"
-                                processed_images.append(data_url)
-                        except Exception as e:
-                            logger.error(f"[Social] 读取图片文件 {img_path} 失败: {e}")
-                    else:
-                        # 如果不是本地文件，假设是 URL (回退逻辑)
-                        # 仍需过滤腾讯内网 URL
-                        if "multimedia.nt.qq.com.cn" in img_path or "c2cpicdw.qpic.cn" in img_path or "gchat.qpic.cn" in img_path:
-                            logger.warning(f"[Social] 跳过不兼容的图片 URL: {img_path[:50]}...")
-                            continue
-                        processed_images.append(img_path)
+            # 收集当前 Buffer 中的图片用于 Vision 分析
+            session_images = []
+            for buf_msg in session.buffer:
+                if buf_msg.images:
+                    session_images.extend(buf_msg.images)
 
-                config = await agent._get_llm_config()
-                if config.get("enable_vision") and processed_images:
-                    logger.info(f"注入 {len(processed_images)} 张图片到社交聊天上下文。")
-                    for img_url in processed_images:
-                        user_content.append({
-                            "type": "image_url",
-                            "image_url": {"url": img_url}
-                        })
-                
-                messages.append({"role": "user", "content": user_content})
-                
-                logger.info(f"正在呼叫会话 {session.session_id} 的社交 Agent...")
-                response_text = await agent.social_chat(messages, session_id=f"social_{session.session_id}")
-                
-                logger.info(f"社交 Agent 响应: {response_text}")
-                
-                # 3. 发送回复
-                if response_text and response_text.strip() and "IGNORE" not in response_text and "[PASS]" not in response_text:
-                    await self.send_msg(session, response_text)
-                    
-                    # 更新会话状态
-                    # [Fix] 移除 Pero 自身回复对活跃时间的重置
-                    # session.last_active_time = datetime.now()
-                    
-                    # 既然已经说话了，推迟下一次随机思考
-                    self._next_thought_time = datetime.now() + timedelta(seconds=120)
-
-                    # [持久化] 保存 Pero 的回复到独立数据库
-                    try:
-                        await self.session_manager.persist_outgoing_message(
-                            session.session_id,
-                            session.session_type,
-                            response_text,
-                            sender_name="Pero"
-                        )
-                        
-                        # [Legacy Removed] 不再保存到主数据库，仅使用独立数据库 social_storage.db
-                        # await MemoryService.save_log(...)
-                        
-                    except Exception as e:
-                        logger.error(f"持久化 Pero 回复失败: {e}")
-                elif response_text and "[PASS]" in response_text:
-                     logger.info(f"[{session.session_id}] Agent 决定 PASS (活跃观察)。")
-                else:
-                    logger.info(f"[Social] 跳过回复。响应为空或 IGNORE。（内容: '{response_text}'）")
+            # 调用统一的 Action Layer
+            logger.debug(f"[{session.session_id}] 正在进入 _perform_active_agent_response...")
             
-            # [State Reset] 处理完成后，重置状态为 observing
-            # Active 状态由时间窗口 (ACTIVE_DURATION) 隐式控制，不需要显式状态
-            # Summoned 状态必须被清除，否则后续的 Buffer Flush 会被错误地当作 Summoned 处理
-            if session.state == "summoned":
-                logger.info(f"[{session.session_id}] 正在将状态从 SUMMONED 重置为 OBSERVING。")
-                session.state = "observing"
+            # [CRITICAL FIX] 使用 create_task 避免阻塞 flush 逻辑，但必须确保持有引用
+            # 注意：原代码是直接 await，这会导致 flush 阻塞，进而可能影响 WS 接收。
+            # 如果改为 create_task，则必须持有引用防止 GC。
+            task = asyncio.create_task(self._perform_active_agent_response(session, current_mode, session_images))
+            
+            # [CRITICAL FIX] 保存任务引用，防止被垃圾回收
+            # 我们使用 session 对象本身来持有这个引用，因为它生命周期足够长
+            if not hasattr(session, "active_tasks"):
+                session.active_tasks = set()
+            session.active_tasks.add(task)
+            task.add_done_callback(session.active_tasks.discard)
+            
+            logger.debug(f"[{session.session_id}] _perform_active_agent_response 已调度为后台任务。")
 
         except Exception as e:
             logger.error(f"handle_session_flush 错误: {e}", exc_info=True)
@@ -1489,12 +1799,24 @@ class SocialService:
                 logger.error("[Social] 初始化 LLMService 失败: 未找到有效的模型配置。")
                 return
 
-            # 使用 chat 接口
-            response = await llm_service.chat(
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-                response_format={"type": "json_object"}
-            )
+            # 使用 chat 接口 (带重试机制)
+            response = None
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    response = await llm_service.chat(
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=0.3,
+                        response_format={"type": "json_object"}
+                    )
+                    break
+                except Exception as api_err:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"[Social] 总结 API 调用失败 (尝试 {attempt+1}/{max_retries}): {api_err}. 2秒后重试...")
+                        await asyncio.sleep(2)
+                    else:
+                        # 最后一次失败，抛出异常供外层捕获
+                        raise api_err
             
             # 解析响应内容
             content = response["choices"][0]["message"]["content"]
@@ -1544,7 +1866,8 @@ class SocialService:
                 logger.error(f"解析总结 JSON 失败: {response_json_str}")
                 
         except Exception as e:
-            logger.error(f"执行总结时出错: {e}")
+            import traceback
+            logger.error(f"执行总结时出错: {e}\n{traceback.format_exc()}")
 
     async def send_msg(self, session: SocialSession, message: str):
         """
@@ -1604,11 +1927,78 @@ class SocialService:
                 del self.pending_requests[echo_id]
             raise TimeoutError(f"API {action} timed out.")
 
+    def _ensure_sticker_map(self):
+        if not hasattr(self, "_sticker_map"):
+             try:
+                 import os
+                 import json
+                 base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+                 sticker_path = os.path.join(base_dir, "assets", "stickers", "index.json")
+                 if os.path.exists(sticker_path):
+                     with open(sticker_path, "r", encoding="utf-8") as f:
+                         self._sticker_map = json.load(f)
+                     self._sticker_base_dir = os.path.dirname(sticker_path)
+                 else:
+                     self._sticker_map = {}
+             except Exception as e:
+                 logger.error(f"Failed to load sticker index: {e}")
+                 self._sticker_map = {}
+
+    def _process_stickers(self, message: str) -> str:
+        """
+        Parse [sticker:name] tags and replace them with CQ codes.
+        Robustness: Handles full/half width colons, spaces, and case-insensitivity.
+        """
+        import re
+        import os
+        
+        self._ensure_sticker_map()
+
+        def replace_match(match):
+            # Clean up the sticker name: remove whitespace
+            sticker_name_raw = match.group(1).strip()
+            
+            # Try exact match first
+            filename = self._sticker_map.get(sticker_name_raw)
+            
+            # If not found, try case-insensitive match (slow but robust)
+            if not filename:
+                for k, v in self._sticker_map.items():
+                    if k.lower() == sticker_name_raw.lower():
+                        filename = v
+                        break
+            
+            if filename:
+                # Construct absolute path for NapCat/OneBot
+                # OneBot usually supports file:// protocol
+                full_path = os.path.join(self._sticker_base_dir, filename)
+                # Convert to forward slashes for compatibility
+                full_path = full_path.replace("\\", "/")
+                return f"[CQ:image,file=file:///{full_path}]"
+            
+            # If still not found, keep original text to let user know it failed (or silently fail)
+            # Keeping original is better for debugging prompt issues.
+            return match.group(0)
+
+        # Regex to find [sticker:xxx]
+        # Supports:
+        # - Standard: [sticker:name]
+        # - Spaces: [ sticker : name ]
+        # - Full-width colon: [sticker：name]
+        # - Mixed: [sticker ： name]
+        pattern = r"\[\s*sticker\s*[:：]\s*(.*?)\s*\]"
+        
+        return re.sub(pattern, replace_match, message, flags=re.IGNORECASE)
+
     async def send_group_msg(self, group_id: int, message: str):
-        await self._send_api("send_group_msg", {"group_id": group_id, "message": message})
+        # Preprocess stickers
+        final_message = self._process_stickers(message)
+        await self._send_api("send_group_msg", {"group_id": group_id, "message": final_message})
         
     async def send_private_msg(self, user_id: int, message: str):
-        await self._send_api("send_private_msg", {"user_id": user_id, "message": message})
+        # Preprocess stickers
+        final_message = self._process_stickers(message)
+        await self._send_api("send_private_msg", {"user_id": user_id, "message": final_message})
         
     async def handle_friend_request(self, flag: str, approve: bool, remark: str = ""):
         await self._send_api("set_friend_add_request", {"flag": flag, "approve": approve, "remark": remark})
@@ -1653,6 +2043,20 @@ class SocialService:
         except Exception as e:
             logger.error(f"获取群信息失败: {e}")
             return {}
+
+    async def get_group_name(self, group_id: str) -> str:
+        try:
+            info = await self.get_group_info(int(group_id))
+            return info.get("group_name", "")
+        except Exception:
+            return ""
+
+    async def get_user_nickname(self, user_id: str) -> str:
+        try:
+            info = await self.get_stranger_info(int(user_id))
+            return info.get("nickname", "")
+        except Exception:
+            return ""
 
     async def get_group_member_info(self, group_id: int, user_id: int):
         """
@@ -1741,10 +2145,26 @@ class SocialService:
                      return "No relevant social memories found in independent database."
                  
                  result_text = "Found Social Memories (Independent DB):\n"
+                 
+                 # Prepare to fetch session names (Group names / User nicknames)
+                 session_names = {}
+                 sessions_to_fetch = set()
+                 for msg in results:
+                     sessions_to_fetch.add((msg.session_type, msg.session_id))
+                 
+                 # Batch fetch session names
+                 for s_type, s_id in sessions_to_fetch:
+                    if s_type == "group":
+                        session_names[s_id] = await self.get_group_name(s_id) or s_id
+                    elif s_type == "private":
+                         session_names[s_id] = await self.get_user_nickname(s_id) or s_id
+
                  for msg in results:
                      time_str = msg.timestamp.strftime("%Y-%m-%d %H:%M")
-                     type_label = f"[{msg.session_type}]"
-                     result_text += f"{type_label} [{time_str}] {msg.sender_name}: {msg.content}\n"
+                     # Enhanced format: [group:12345(GroupName)] or [private:67890(NickName)]
+                     session_name = session_names.get(msg.session_id, msg.session_id)
+                     source_label = f"[{msg.session_type}:{msg.session_id}({session_name})]"
+                     result_text += f"{source_label} [{time_str}] {msg.sender_name}: {msg.content}\n"
                      
                  return result_text
                  

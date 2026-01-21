@@ -3,7 +3,7 @@ Target Service: backend/nit_core/plugins/social_adapter/social_memory_service.py
 Target Function: generate_daily_report
 Injected Via: MDPManager.render("tasks/social/daily_report_generator")
 -->
-任务：根据今天的活动为 {{ agent_name }} 生成一份“社交日报”。
+任务：{{ agent_name }}，你要根据今天的活动，为 {{ agent_name }} 成一份“社交日报”。
 
 日期: {{ date_str }}
 消息总数: {{ total_messages }}

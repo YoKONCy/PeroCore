@@ -387,6 +387,26 @@
                         </span>
                       </el-tooltip>
                     </div>
+
+                    <!-- Image Preview -->
+                    <div v-if="log.images && log.images.length > 0" class="log-images-preview" style="margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap;">
+                       <div v-for="(img, iIdx) in log.images" :key="iIdx" class="log-image-item">
+                          <el-image 
+                            :src="img" 
+                            :preview-src-list="log.images"
+                            fit="cover"
+                            style="width: 120px; height: 120px; border-radius: 8px; border: 1px solid rgba(0,0,0,0.1);"
+                            hide-on-click-modal
+                            :initial-index="iIdx"
+                          >
+                            <template #error>
+                              <div class="image-slot" style="display: flex; justify-content: center; align-items: center; width: 100%; height: 100%; background: #f5f7fa; color: #909399; font-size: 20px;">
+                                <el-icon><Picture /></el-icon>
+                              </div>
+                            </template>
+                          </el-image>
+                       </div>
+                    </div>
                     
                     <div v-if="editingLogId === log.id" class="edit-mode">
                       <el-input 
@@ -1096,7 +1116,8 @@ import {
   ChatDotSquare,
   Monitor,
   Tools,
-  Aim
+  Aim,
+  Picture
 } from '@element-plus/icons-vue'
 import TerminalPanel from '../components/TerminalPanel.vue'
 import NapCatTerminal from '../components/NapCatTerminal.vue'
@@ -2661,13 +2682,19 @@ const fetchLogs = async () => {
 
     const processedLogs = rawLogs.map(log => {
         const metadata = getLogMetadata(log)
+        let images = []
+        if (metadata.images && Array.isArray(metadata.images)) {
+             images = metadata.images.map(path => `${API_BASE}/ide/image?path=${encodeURIComponent(path)}`)
+        }
+
         return Object.freeze({
           ...log,
           // content is passed raw to AsyncMarkdown
           displayTime: new Date(log.timestamp).toLocaleString(),
           metadata: metadata,
           sentiment: log.sentiment || metadata.sentiment,
-          importance: log.importance || metadata.importance
+          importance: log.importance || metadata.importance,
+          images: images
         })
     })
       

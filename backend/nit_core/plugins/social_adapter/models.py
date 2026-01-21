@@ -37,6 +37,12 @@ class SocialSession:
     
     # 定时器句柄（如果新消息到达则取消）
     flush_timer_task: Optional[object] = None # asyncio.Task
+    
+    # [Preemption] 当前正在执行的主动搭话任务（如果用户发消息则取消）
+    active_response_task: Optional[object] = None # asyncio.Task
+    
+    # [Scanner] 下次主动审视时间（用于私聊的独立周期）
+    next_scan_time: datetime = field(default_factory=datetime.now)
 
     def add_message(self, msg: SocialMessage):
         self.buffer.append(msg)

@@ -295,7 +295,7 @@ class MemoryService:
         return log
 
     @staticmethod
-    async def save_log_pair(session: AsyncSession, source: str, session_id: str, user_content: str, assistant_content: str, pair_id: str, metadata: dict = None, assistant_raw_content: str = None, agent_id: str = "pero"):
+    async def save_log_pair(session: AsyncSession, source: str, session_id: str, user_content: str, assistant_content: str, pair_id: str, metadata: dict = None, assistant_raw_content: str = None, agent_id: str = "pero", user_metadata: dict = None):
         """原子性保存用户消息与助手回复成对记录"""
         try:
             # [特性] 系统触发角色修正
@@ -304,8 +304,11 @@ class MemoryService:
             if user_content and user_content.startswith("【系统触发】"):
                 user_role = "system"
 
+            # Use user_metadata if provided, else fall back to metadata (shared)
+            u_meta = user_metadata if user_metadata is not None else metadata
+
             # 创建用户消息记录
-            user_log = await MemoryService.save_log(session, source, session_id, user_role, user_content, metadata, pair_id, agent_id=agent_id)
+            user_log = await MemoryService.save_log(session, source, session_id, user_role, user_content, u_meta, pair_id, agent_id=agent_id)
             # 创建助手消息记录
             # 为助手传递原始内容
             assistant_log = await MemoryService.save_log(session, source, session_id, "assistant", assistant_content, metadata, pair_id, raw_content=assistant_raw_content, agent_id=agent_id)

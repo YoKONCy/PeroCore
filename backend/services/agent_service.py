@@ -588,6 +588,10 @@ class AgentService:
             content = response_msg.get("content", "")
             tool_calls = response_msg.get("tool_calls", [])
             
+            # [Fix] 如果 content 是 None (这在仅有 tool_calls 时可能发生)，将其设为空字符串
+            if content is None:
+                content = ""
+            
             # 4. Handle Tool Calls (Simple Loop)
             # If tool calls exist, execute them and recurse (limit 3 turns)
             # For MVP Phase 2, let's just execute and return the result or confirmation.
@@ -1597,6 +1601,57 @@ class AgentService:
                         else:
                             print(f"[Agent] 严重: 无法从输入中提取用户消息。日志将不会被保存。")
 
+                # [Feature] User Image Persistence (Fire and Forget)
+                user_metadata = {}
+                try:
+                    target_msg = None
+                    for m in reversed(messages):
+                        if m.get("role") == "user":
+                            target_msg = m
+                            break
+                    
+                    if target_msg and isinstance(target_msg.get("content"), list):
+                        images = []
+                        import base64
+                        
+                        for item in target_msg["content"]:
+                            if isinstance(item, dict) and item.get("type") == "image_url":
+                                url = item["image_url"]["url"]
+                                if url.startswith("data:image"):
+                                    try:
+                                        header, encoded = url.split(",", 1)
+                                        ext = "png"
+                                        if "jpeg" in header: ext = "jpg"
+                                        elif "gif" in header: ext = "gif"
+                                        elif "webp" in header: ext = "webp"
+                                        
+                                        img_data = base64.b64decode(encoded)
+                                        
+                                        current_dir = os.path.dirname(os.path.abspath(__file__))
+                                        project_root = os.path.dirname(os.path.dirname(current_dir))
+                                        workspace_dir = os.path.join(project_root, "pero_workspace")
+                                        
+                                        date_str = datetime.now().strftime("%Y-%m-%d")
+                                        upload_dir = os.path.join(workspace_dir, "uploads", date_str)
+                                        os.makedirs(upload_dir, exist_ok=True)
+                                        
+                                        filename = f"{uuid.uuid4()}.{ext}"
+                                        file_path = os.path.join(upload_dir, filename)
+                                        
+                                        with open(file_path, "wb") as f:
+                                            f.write(img_data)
+                                            
+                                        rel_path = f"uploads/{date_str}/{filename}"
+                                        images.append(rel_path)
+                                    except Exception as img_e:
+                                        print(f"[Agent] Failed to save image: {img_e}")
+                        
+                        if images:
+                            user_metadata["images"] = images
+                            print(f"[Agent] Persisted {len(images)} images for display.")
+                except Exception as e:
+                    print(f"[Agent] Image processing error: {e}")
+
                 should_save = not skip_save and user_message and full_response_text
                 print(f"[Agent] 日志保存检查: save={should_save} (skip_save={skip_save}, has_user_msg={bool(user_message)}, resp_len={len(full_response_text) if full_response_text else 0})")
                 
@@ -1611,7 +1666,8 @@ class AgentService:
                             final_user_msg, 
                             full_response_text, 
                             pair_id,
-                            assistant_raw_content=raw_full_text
+                            assistant_raw_content=raw_full_text,
+                            user_metadata=user_metadata
                         )
                         print(f"[Agent] 对话日志对已保存 (pair_id: {pair_id})")
                     except Exception as e:

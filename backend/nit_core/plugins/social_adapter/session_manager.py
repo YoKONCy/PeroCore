@@ -133,19 +133,24 @@ class SocialSessionManager:
             from .models_db import QQMessage
             import json
 
+            # [Optimization] Use a separate task or quick commit to avoid holding lock
             async for db_session in get_social_db_session():
-                new_msg = QQMessage(
-                    msg_id=msg.msg_id,
-                    session_id=session.session_id,
-                    session_type=session.session_type,
-                    sender_id=msg.sender_id,
-                    sender_name=msg.sender_name,
-                    content=msg.content,
-                    timestamp=msg.timestamp,
-                    raw_event_json=json.dumps(msg.raw_event, default=str)
-                )
-                db_session.add(new_msg)
-                await db_session.commit()
+                try:
+                    new_msg = QQMessage(
+                        msg_id=msg.msg_id,
+                        session_id=session.session_id,
+                        session_type=session.session_type,
+                        sender_id=msg.sender_id,
+                        sender_name=msg.sender_name,
+                        content=msg.content,
+                        timestamp=msg.timestamp,
+                        raw_event_json=json.dumps(msg.raw_event, default=str)
+                    )
+                    db_session.add(new_msg)
+                    await db_session.commit()
+                except Exception as inner_e:
+                    logger.error(f"DB Insert Error: {inner_e}")
+                    await db_session.rollback()
                 
         except Exception as e:
             logger.error(f"Failed to persist social message to independent DB: {e}")
@@ -208,38 +213,97 @@ class SocialSessionManager:
         """
         从独立数据库获取最近的消息作为上下文。
         """
+        logger.info(f"[{session_id}] 调用 get_recent_messages。类型: {session_type}, 限制: {limit}")
         try:
             from .database import get_social_db_session
             from .models_db import QQMessage
             from sqlmodel import select
             
             messages = []
+            logger.info(f"[{session_id}] 正在请求数据库会话...")
+            
+            # [Critical Fix] Use run_in_executor to avoid blocking the event loop with synchronous DB calls
+            # Even though db_session.exec is awaitable, the underlying aiosqlite/sqlite driver might be blocking the GIL or thread
+            loop = asyncio.get_running_loop()
+            
+            def run_sync_query():
+                 # This function will run in a separate thread
+                 # We need a NEW synchronous engine and session here because we are crossing thread boundaries
+                 # and async engines are not thread-safe in this manner for sync execution.
+                 # BUT, we are inside an async function.
+                 
+                 # Let's try a different approach: forcing a yield to the event loop before execution
+                 pass
+
             async for db_session in get_social_db_session():
-                statement = select(QQMessage).where(
-                    QQMessage.session_id == session_id,
-                    QQMessage.session_type == session_type
-                ).order_by(QQMessage.timestamp.desc()).limit(limit)
+                logger.info(f"[{session_id}] 已获取数据库会话。正在执行查询...")
                 
-                results = (await db_session.exec(statement)).all()
+                try:
+                    # [Critical Debug] Add a sleep to ensure loop is yielding
+                    await asyncio.sleep(0.01)
+                    
+                    statement = select(QQMessage).where(
+                        QQMessage.session_id == session_id,
+                        QQMessage.session_type == session_type
+                    ).order_by(QQMessage.timestamp.desc()).limit(limit)
+                    
+                    # [Fix] Wrap execution in a shield or check if it's truly awaited
+                    logger.info(f"[{session_id}] 正在等待 db_session.exec...")
+                    result = await asyncio.wait_for(db_session.exec(statement), timeout=3.0)
+                    logger.info(f"[{session_id}] db_session.exec 返回。正在获取所有结果...")
+                    results = result.all()
+                    
+                    logger.info(f"[{session_id}] 查询返回了 {len(results)} 行。")
+                    
+                    # 转换回 SocialMessage（或类似的字典）并反转顺序
+                    for row in reversed(results):
+                         msg = SocialMessage(
+                             msg_id=row.msg_id,
+                             sender_id=row.sender_id,
+                             sender_name=row.sender_name,
+                             content=row.content,
+                             timestamp=row.timestamp,
+                             raw_event={} 
+                         )
+                         messages.append(msg)
+                except asyncio.TimeoutError:
+                    logger.error(f"[{session_id}] 数据库查询超时 (3s)！")
+                    # Don't raise, just return empty list to let the flow continue
+                    # [Fallback] If DB fails, return buffer content? No, caller handles fallback.
+                    return []
+                except Exception as query_e:
+                    logger.error(f"[{session_id}] 查询执行错误: {query_e}")
+                    raise query_e
                 
-                # 转换回 SocialMessage（或类似的字典）并反转顺序
-                for row in reversed(results):
-                     # 如果可能的话处理图像？目前数据库存储 raw_event_json，但我们可能不会在这里解析它。
-                     # 对于上下文，文本是最重要的。
-                     msg = SocialMessage(
-                         msg_id=row.msg_id,
-                         sender_id=row.sender_id,
-                         sender_name=row.sender_name,
-                         content=row.content,
-                         timestamp=row.timestamp,
-                         raw_event={} # 上下文重建不需要
-                     )
-                     messages.append(msg)
+            logger.info(f"[{session_id}] get_recent_messages 完成。返回 {len(messages)} 条消息。")
             return messages
             
         except Exception as e:
-            logger.error(f"Failed to get recent messages from DB: {e}")
+            logger.error(f"Failed to get recent messages from DB: {e}", exc_info=True)
             return []
+
+    async def get_latest_active_group(self, user_id: str) -> str | None:
+        """
+        查找指定用户最近活跃的群聊 ID。
+        """
+        try:
+            # 使用同步的 session 上下文管理器
+            with self.Session() as db_session:
+                # 执行查询
+                result = db_session.execute(
+                    select(QQMessage.session_id)
+                    .where(QQMessage.sender_id == user_id)
+                    .where(QQMessage.session_type == "group")
+                    .order_by(QQMessage.timestamp.desc())
+                    .limit(1)
+                ).scalar_one_or_none()
+                
+                if result:
+                    return str(result)
+                return None
+        except Exception as e:
+            logger.error(f"Failed to get latest active group for user {user_id}: {e}")
+            return None
 
     async def handle_message(self, event: dict):
         """
@@ -316,6 +380,21 @@ class SocialSessionManager:
             # Get Session
             session = self.get_or_create_session(session_id, msg_type, session_name)
             
+            # [Preemption] 检查并取消正在进行的秘书/主动搭话任务
+            if session.active_response_task and not session.active_response_task.done():
+                logger.info(f"[{session_id}] 检测到用户新输入，正在打断之前的主动搭话任务...")
+                session.active_response_task.cancel()
+                session.active_response_task = None
+            
+            # [Dynamic Scan Cycle] 如果是私聊且有新消息，重置下一次扫描周期为短周期 (2-4分钟)
+            if msg_type == "private":
+                import random
+                from datetime import timedelta
+                # 设置为 2-4 分钟后
+                next_scan = datetime.now() + timedelta(seconds=random.randint(120, 240))
+                session.next_scan_time = next_scan
+                logger.info(f"[{session_id}] 私聊活跃，下次主动审视时间重置为: {next_scan.strftime('%H:%M:%S')}")
+            
             # [Persistence] Save user message immediately
             await self._persist_message(session, msg, "user")
             
@@ -335,16 +414,41 @@ class SocialSessionManager:
             # "Active" -> "More sensitive", maybe shorter buffer or immediate? 
             # For MVP Phase 1: Mention = Immediate Flush.
             
+            # [Refactor] Implement accumulation buffer for Summoned state
+            # Private chat: 7s, Group chat: 15s
             if is_mentioned:
-                session.state = "summoned"
-                logger.info(f"[{session_id}] Summoned by mention!")
-                await self._trigger_flush(session, reason="summoned")
+                if session.state != "summoned":
+                    # First mention: Switch state and start FIXED timer
+                    session.state = "summoned"
+                    
+                    # Determine buffer duration based on session type
+                    buffer_duration = 7 if msg_type == "private" else 15
+                    
+                    logger.info(f"[{session_id}] Summoned by mention ({msg_type})! Starting {buffer_duration}s accumulation timer.")
+                    
+                    # Cancel any existing inactivity timer
+                    if session.flush_timer_task:
+                        session.flush_timer_task.cancel()
+                    
+                    # Start fixed timer
+                    # This timer will NOT be reset by subsequent messages because of the state check below
+                    session.flush_timer_task = asyncio.create_task(self._timer_callback(session, buffer_duration))
+                else:
+                    # Already summoned: Do nothing (Accumulate)
+                    logger.info(f"[{session_id}] Mentioned again while accumulating. Continuing wait.")
+
             elif len(session.buffer) >= self.BUFFER_MAX_SIZE:
                 logger.info(f"[{session_id}] Buffer full!")
                 await self._trigger_flush(session, reason="buffer_full")
             else:
-                # Reset Timer
-                self._reset_flush_timer(session)
+                # Normal message
+                if session.state == "summoned":
+                    # We are in summoned state (waiting for 15s timer).
+                    # Do NOT reset the timer. Just let it accumulate.
+                    pass
+                else:
+                    # Standard observing mode -> Reset inactivity timer (20s)
+                    self._reset_flush_timer(session)
                 
         except Exception as e:
             logger.error(f"Error handling message: {e}", exc_info=True)
@@ -407,13 +511,22 @@ class SocialSessionManager:
             # Always clear buffer after flush to avoid duplicates
             session.clear_buffer()
 
-    def get_active_sessions(self, limit: int = 5) -> list[SocialSession]:
+    def get_active_sessions(self, limit: int = 5, session_type: Optional[str] = None) -> list[SocialSession]:
         """
         获取活跃会话列表（按活跃时间倒序）。
+        
+        Args:
+            limit: 返回数量限制
+            session_type: 筛选类型 "group" 或 "private"。None 表示不筛选。
         """
+        candidates = self.sessions.values()
+        
+        if session_type:
+            candidates = [s for s in candidates if s.session_type == session_type]
+            
         # 按 last_active_time 倒序排序
         sorted_sessions = sorted(
-            self.sessions.values(), 
+            candidates, 
             key=lambda s: s.last_active_time, 
             reverse=True
         )
