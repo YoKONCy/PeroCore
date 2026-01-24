@@ -39,16 +39,18 @@ class VectorStoreService:
         if not os.path.exists(self.data_dir):
             os.makedirs(self.data_dir, exist_ok=True)
 
-        self.memory_index_path = os.path.join(self.data_dir, "memory.index")
+        # [Multi-Agent Refactor]
+        # 不再使用单一的 memory_index_path，而是维护一个 agent_id -> Index 的映射
+        self.indices: Dict[str, SemanticVectorIndex] = {}
+        
+        # Tags 索引目前是全局共享还是隔离？
+        # 考虑到 Tags 是对概念的抽象，建议保持全局共享 (Global Concept Space)
+        # 或者也进行隔离。为了架构一致性，我们暂且保持 Tags 为全局，因为它们通常是通用的。
         self.tag_index_path = os.path.join(self.data_dir, "tags.index")
         self.tag_map_path = os.path.join(self.data_dir, "tags.json")
         
-        self.dimension = 384 # text-embedding-ada-002 默认为 1536，但本地模型通常为 384/768。
-                             # TODO: 应该从 embedding service 检测。
-                             # 目前，假设为 384 (MiniLM) 或 1024 (BGE)。
-                             # 让我们尝试检测或延迟初始化。
+        self.dimension = 384 
         
-        self.memory_index = None
         self.tag_index = None
         
         # 标签映射
@@ -59,55 +61,58 @@ class VectorStoreService:
         self._initialized = True
         self._lazy_loaded = False
 
+    def _get_agent_index_path(self, agent_id: str) -> str:
+        """获取指定 Agent 的索引文件路径"""
+        agent_dir = os.path.join(self.data_dir, "agents", agent_id)
+        if not os.path.exists(agent_dir):
+            os.makedirs(agent_dir, exist_ok=True)
+        return os.path.join(agent_dir, "memory.index")
+
+    def _get_index(self, agent_id: str) -> Optional[SemanticVectorIndex]:
+        """获取或加载指定 Agent 的索引实例"""
+        if not RUST_AVAILABLE: return None
+        
+        if agent_id not in self.indices:
+            path = self._get_agent_index_path(agent_id)
+            if os.path.exists(path):
+                try:
+                    index = SemanticVectorIndex.load_index(path, self.dimension)
+                    self.indices[agent_id] = index
+                except Exception as e:
+                    print(f"[VectorStore] Failed to load index for {agent_id}: {e}")
+                    # Backup and recreate
+                    try:
+                        import shutil
+                        shutil.copy2(path, path + f".bak.{int(time.time())}")
+                    except: pass
+                    self.indices[agent_id] = SemanticVectorIndex(self.dimension, 10000)
+            else:
+                self.indices[agent_id] = SemanticVectorIndex(self.dimension, 10000)
+        
+        return self.indices[agent_id]
+
     def _ensure_loaded(self):
         if not RUST_AVAILABLE: return
         if self._lazy_loaded: return
         
         # 如果可能，从 embedding service 检测维度
-        # 我们将执行一个虚拟编码来检查维度
         try:
             dummy_vec = embedding_service.encode_one("test")
             self.dimension = len(dummy_vec)
-            # print(f"[VectorStore] Detected embedding dimension: {self.dimension}")
         except Exception as e:
             print(f"[VectorStore] Failed to detect dimension: {e}. Using default 384.")
             self.dimension = 384
 
-        # 加载记忆索引
-        if os.path.exists(self.memory_index_path):
-            try:
-                self.memory_index = SemanticVectorIndex.load_index(self.memory_index_path, self.dimension)
-                # print(f"[VectorStore] Memory index loaded. Size: {self.memory_index.size()}")
-            except Exception as e:
-                print(f"[VectorStore] Failed to load memory index: {e}.")
-                # 备份损坏/不匹配的索引文件
-                try:
-                    import shutil
-                    backup_path = self.memory_index_path + f".bak.{int(time.time())}"
-                    shutil.copy2(self.memory_index_path, backup_path)
-                    print(f"[VectorStore] ⚠️ Existing index backed up to {backup_path}")
-                except Exception as backup_e:
-                    print(f"[VectorStore] Failed to backup index: {backup_e}")
-                
-                print("[VectorStore] Creating new empty index.")
-                self.memory_index = SemanticVectorIndex(self.dimension, 10000)
-        else:
-            self.memory_index = SemanticVectorIndex(self.dimension, 10000)
-
-        # 加载标签索引
+        # 加载标签索引 (全局)
         if os.path.exists(self.tag_index_path):
             try:
                 self.tag_index = SemanticVectorIndex.load_index(self.tag_index_path, self.dimension)
             except Exception as e:
                 print(f"[VectorStore] Failed to load tag index: {e}.")
-                # 同样备份标签索引
                 try:
                     import shutil
-                    backup_path = self.tag_index_path + f".bak.{int(time.time())}"
-                    shutil.copy2(self.tag_index_path, backup_path)
+                    shutil.copy2(self.tag_index_path, self.tag_index_path + f".bak.{int(time.time())}")
                 except Exception: pass
-                
-                print("[VectorStore] Creating new empty tag index.")
                 self.tag_index = SemanticVectorIndex(self.dimension, 1000)
         else:
             self.tag_index = SemanticVectorIndex(self.dimension, 1000)
@@ -123,18 +128,34 @@ class VectorStoreService:
             except Exception as e:
                 print(f"[VectorStore] Failed to load tag map: {e}")
         
+        # 兼容旧数据迁移: 检查是否存在根目录下的 memory.index (属于 Pero)
+        # 如果存在，将其移动到 agents/pero/memory.index
+        legacy_path = os.path.join(self.data_dir, "memory.index")
+        if os.path.exists(legacy_path):
+            print("[VectorStore] Detected legacy index. Migrating to 'pero' agent namespace...")
+            pero_path = self._get_agent_index_path("pero")
+            if not os.path.exists(pero_path):
+                try:
+                    import shutil
+                    shutil.move(legacy_path, pero_path)
+                    print("[VectorStore] Migration successful.")
+                except Exception as e:
+                    print(f"[VectorStore] Migration failed: {e}")
+
         self._lazy_loaded = True
 
     def save(self):
         if not RUST_AVAILABLE or not self._lazy_loaded: return
         try:
-            # Atomic save for memory index
-            temp_memory_path = self.memory_index_path + ".tmp"
-            self.memory_index.persist_index(temp_memory_path)
-            if os.path.exists(self.memory_index_path):
-                os.replace(temp_memory_path, self.memory_index_path)
-            else:
-                os.rename(temp_memory_path, self.memory_index_path)
+            # Save all loaded agent indices
+            for agent_id, index in self.indices.items():
+                path = self._get_agent_index_path(agent_id)
+                temp_path = path + ".tmp"
+                index.persist_index(temp_path)
+                if os.path.exists(path):
+                    os.replace(temp_path, path)
+                else:
+                    os.rename(temp_path, path)
 
             # Atomic save for tag index
             temp_tag_path = self.tag_index_path + ".tmp"
@@ -160,70 +181,60 @@ class VectorStoreService:
 
     # --- Memory Operations ---
 
-    def add_memory(self, memory_id: int, embedding: List[float]):
-        """添加记忆向量"""
+    def add_memory(self, memory_id: int, embedding: List[float], metadata: Dict[str, Any] = None):
+        """
+        添加记忆向量
+        :param metadata: 必须包含 agent_id
+        """
         self._ensure_loaded()
-        if not self.memory_index: return
+        
+        agent_id = "pero"
+        if metadata and "agent_id" in metadata:
+            agent_id = metadata["agent_id"]
+            
+        index = self._get_index(agent_id)
+        if not index: return
         
         try:
-            self.memory_index.insert_vector(memory_id, embedding)
-            # 每次都自动保存开销很大，但很安全。
-            # 鉴于 Rust 保存是原子的，并且对于小文件很快，我们可以这样做。
-            # 或者依赖定期保存/程序退出保存。
-            # 目前，我们直接保存。
-            self.save()
+            index.insert_vector(memory_id, embedding)
+            self.save() # TODO: Optimize save frequency
         except Exception as e:
-            print(f"[VectorStore] Add memory failed: {e}")
+            print(f"[VectorStore] Add memory failed for {agent_id}: {e}")
 
-    def add_memories_batch(self, ids: List[int], embeddings: List[List[float]]):
-        """批量添加记忆 (Migration optimized)"""
+    def add_memories_batch(self, ids: List[int], embeddings: List[List[float]], agent_id: str = "pero"):
+        """批量添加记忆"""
         self._ensure_loaded()
-        if not self.memory_index: return
+        index = self._get_index(agent_id)
+        if not index: return
         
         try:
-            # Rust 支持批量添加
-            self.memory_index.batch_insert_vectors(ids, embeddings)
+            index.batch_insert_vectors(ids, embeddings)
             self.save()
         except Exception as e:
-            print(f"[VectorStore] Batch add failed: {e}")
+            print(f"[VectorStore] Batch add failed for {agent_id}: {e}")
 
-    def search_memory(self, query_vec: List[float], limit: int = 10) -> List[Dict]:
+    def search_memory(self, query_vector: List[float], limit: int = 10, agent_id: str = "pero") -> List[Dict]:
         """
         搜索记忆
-        返回: [{"id": int, "score": float}, ...]
+        :param agent_id: 指定 Agent ID 进行隔离搜索
         """
         self._ensure_loaded()
-        if not self.memory_index: return []
+        index = self._get_index(agent_id)
+        if not index: return []
         
         try:
-            # Rust 返回 [(id, dist), ...]
-            results = self.memory_index.search_similar_vectors(query_vec, limit)
-            
-            output = []
-            for mid, dist in results:
-                # 将 L2 距离转换为相似度分数 (近似值)
-                # 因为我们使用 Cosine/L2sq。如果向量已归一化，L2 = 2(1-cos)。
-                # Sim = 1 - dist/2 ? 或者直接使用 1/(1+dist)。
-                # 假设使用标准的 usearch 度量。
-                # 如果是余弦距离，我们直接返回 score = 1.0 - dist (截断到 0)
-                # 但 L2sq 可能 > 1。
-                # 让我们假设向量已归一化。
-                # 归一化 L2 的近似值
-                sim = 1.0 - (dist / 2.0) 
-                output.append({
-                    "id": mid,
-                    "score": max(0.0, sim),
-                    "dist": dist
-                })
-            return output
+            results = index.search_knn(query_vector, limit)
+            # results format: [(id, score), ...]
+            return [{"id": int(r[0]), "score": float(r[1])} for r in results]
         except Exception as e:
-            print(f"[VectorStore] Search failed: {e}")
+            print(f"[VectorStore] Search failed for {agent_id}: {e}")
             return []
-            
-    def count_memories(self) -> int:
+
+    def count_memories(self, agent_id: str = "pero") -> int:
         self._ensure_loaded()
-        if not self.memory_index: return 0
-        return self.memory_index.size()
+        index = self._get_index(agent_id)
+        if not index: return 0
+        return index.size()
 
     # --- Tag Operations ---
 

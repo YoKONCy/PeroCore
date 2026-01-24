@@ -169,7 +169,7 @@ class SocialSessionManager:
                     msg_id=str(uuid.uuid4()), # 为内部消息生成 ID
                     session_id=session_id,
                     session_type=session_type,
-                    sender_id="self", # 如果已知，则为 Pero 的 ID
+                    sender_id="self", # 如果已知，则为 Bot 的 ID
                     sender_name=sender_name,
                     content=content,
                     timestamp=datetime.now(),
@@ -287,20 +287,26 @@ class SocialSessionManager:
         查找指定用户最近活跃的群聊 ID。
         """
         try:
-            # 使用同步的 session 上下文管理器
-            with self.Session() as db_session:
-                # 执行查询
-                result = db_session.execute(
+            from .database import get_social_db_session
+            from .models_db import QQMessage
+            from sqlmodel import select
+            
+            async for db_session in get_social_db_session():
+                result = await db_session.exec(
                     select(QQMessage.session_id)
                     .where(QQMessage.sender_id == user_id)
                     .where(QQMessage.session_type == "group")
                     .order_by(QQMessage.timestamp.desc())
                     .limit(1)
-                ).scalar_one_or_none()
-                
-                if result:
-                    return str(result)
+                )
+                first_result = result.first()
+                if first_result:
+                    return str(first_result)
+                # 如果没有结果，继续循环还是直接返回？
+                # 由于 get_social_db_session 是个生成器，我们只希望用第一个可用的 session 执行一次
                 return None
+                
+            return None
         except Exception as e:
             logger.error(f"Failed to get latest active group for user {user_id}: {e}")
             return None
@@ -404,6 +410,23 @@ class SocialSessionManager:
             # [Fix] In Private Chat, always consider as mentioned
             if msg_type == "private":
                 is_mentioned = True
+            
+            # [State Logic] Renew Active State or Enter Active State
+            if is_mentioned:
+                # Enter or Renew Active
+                session.last_active_time = datetime.now()
+                logger.info(f"[{session_id}] Mention detected! Updating last_active_time.")
+            elif session.state == "active":
+                # [Renew] Normal message in Active state renews the session
+                # Check if it's within the window (e.g. 2 mins)
+                # But since we are IN active state (which is determined by last_active_time in scan loop), 
+                # we should just update it.
+                # Double check: Is state property updated in real-time? 
+                # Currently state is updated in flush_callback or scan_loop?
+                # Actually state is property of session.
+                # Let's ensure we keep it alive.
+                session.last_active_time = datetime.now()
+                logger.info(f"[{session_id}] Active session renewed by normal message.")
             
             # 3. Add to Buffer
             session.add_message(msg)
@@ -524,10 +547,10 @@ class SocialSessionManager:
         if session_type:
             candidates = [s for s in candidates if s.session_type == session_type]
             
-        # 按 last_active_time 倒序排序
+        # 按 last_message_time 倒序排序 (寻找最近有消息的群，无论 Bot 是否参与)
         sorted_sessions = sorted(
             candidates, 
-            key=lambda s: s.last_active_time, 
+            key=lambda s: s.last_message_time, 
             reverse=True
         )
         return sorted_sessions[:limit]

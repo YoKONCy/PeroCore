@@ -245,6 +245,19 @@ onErrorCaptured((err) => {
 
 // State
 const isReady = ref(false);
+const agentName = ref('Pero');
+
+const fetchActiveAgent = async () => {
+  try {
+    const res = await fetch('http://localhost:9120/api/agents');
+    if (res.ok) {
+      const agents = await res.json();
+      const active = agents.find(a => a.is_active);
+      if (active) agentName.value = active.name;
+    }
+  } catch (e) { console.error(e); }
+};
+
 const activeTab = ref('explorer');
 const openFiles = ref([]);
 const currentFile = ref(null);

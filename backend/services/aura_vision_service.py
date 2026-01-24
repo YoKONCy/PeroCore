@@ -25,6 +25,7 @@ from typing import Optional, List, Dict, Any
 from loguru import logger
 
 from services.screenshot_service import screenshot_manager
+from services.mdp.manager import mdp
 
 # 多模态协调器 (V3.0)
 try:
@@ -449,7 +450,7 @@ class AuraVisionService:
             # 构建内部感知提示词
             memory_ids_str = ", ".join(str(id) for id in result.activated_memory_ids[:5])
             
-            internal_prompt = self.mdp.render("capabilities/aura_internal_sense", {
+            internal_prompt = mdp.render("services/perception/aura", {
                 "visual_intent": result.top_description,
                 "confidence": f"{result.top_similarity:.4f}",
                 "saturation": f"{result.saturation:.4f}",

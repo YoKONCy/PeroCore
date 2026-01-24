@@ -36,10 +36,14 @@ async def enter_work_mode(task_name: str = "Unknown Task") -> str:
         
         # 1. Check Config via ConfigManager (memory cache)
         from core.config_manager import get_config_manager
+        from services.agent_manager import get_agent_manager
+        
         config_mgr = get_config_manager()
+        agent_manager = get_agent_manager()
+        agent_id = agent_manager.active_agent_id
         
         # Log current state for debugging
-        print(f"[SessionOps] 正在检查模式冲突。当前配置: lightweight_mode={config_mgr.get('lightweight_mode')}, aura_vision={config_mgr.get('aura_vision_enabled')}")
+        print(f"[SessionOps] 正在检查模式冲突。当前配置: lightweight_mode={config_mgr.get('lightweight_mode')}, aura_vision={config_mgr.get('aura_vision_enabled')}, agent={agent_id}")
         
         if config_mgr.get("lightweight_mode", False):
             active_blockers.append("lightweight_mode")
@@ -69,26 +73,28 @@ async def enter_work_mode(task_name: str = "Unknown Task") -> str:
         # For now, just log.
 
     try:
-        # 1. Generate new Session ID
+        # 1. Generate new Session ID (Agent-Aware)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        work_session_id = f"work_{timestamp}_{uuid.uuid4().hex[:4]}"
+        work_session_id = f"work_{agent_id}_{timestamp}_{uuid.uuid4().hex[:4]}"
         
         # 2. Update Config
         # current_session_id: The actual session ID to use for logs
         # work_mode_task: The name of the task
         
-        # Update current_session_id
-        config_id = (await session.exec(select(Config).where(Config.key == "current_session_id"))).first()
+        # Update current_session_id_{agent_id}
+        session_key = f"current_session_id_{agent_id}"
+        config_id = (await session.exec(select(Config).where(Config.key == session_key))).first()
         if not config_id:
-            config_id = Config(key="current_session_id", value=work_session_id)
+            config_id = Config(key=session_key, value=work_session_id)
             session.add(config_id)
         else:
             config_id.value = work_session_id
             
-        # Update work_mode_task
-        config_task = (await session.exec(select(Config).where(Config.key == "work_mode_task"))).first()
+        # Update work_mode_task_{agent_id}
+        task_key = f"work_mode_task_{agent_id}"
+        config_task = (await session.exec(select(Config).where(Config.key == task_key))).first()
         if not config_task:
-            config_task = Config(key="work_mode_task", value=task_name)
+            config_task = Config(key=task_key, value=task_name)
             session.add(config_task)
         else:
             config_task.value = task_name
@@ -120,12 +126,21 @@ async def exit_work_mode() -> str:
 
     config_id = None
     try:
-        # 1. Get current work info
-        config_id = (await session.exec(select(Config).where(Config.key == "current_session_id"))).first()
-        config_task = (await session.exec(select(Config).where(Config.key == "work_mode_task"))).first()
+        from services.agent_manager import get_agent_manager
+        agent_manager = get_agent_manager()
+        agent_id = agent_manager.active_agent_id
         
-        if not config_id or not config_id.value.startswith("work_"):
-            return "Error: 当前不在工作模式。"
+        session_key = f"current_session_id_{agent_id}"
+        task_key = f"work_mode_task_{agent_id}"
+
+        # 1. Get current work info
+        config_id = (await session.exec(select(Config).where(Config.key == session_key))).first()
+        config_task = (await session.exec(select(Config).where(Config.key == task_key))).first()
+        
+        if not config_id or not config_id.value.startswith(f"work_{agent_id}_"):
+            # Fallback for old sessions or just generic check
+            if not config_id or not config_id.value.startswith("work_"):
+                return "Error: 当前不在工作模式。"
             
         work_session_id = config_id.value
         task_name = config_task.value if config_task else "未命名任务"
@@ -162,10 +177,27 @@ async def exit_work_mode() -> str:
         from services.mdp.manager import MDPManager
         mdp = MDPManager(mdp_dir)
         
-        llm = LLMService(api_key, api_base, "gpt-4o")
+        # [Unified Model Fix] Use current_model_id instead of hardcoded gpt-4o
+        from models import AIModelConfig
+        current_model_id = global_config.get("current_model_id")
+        
+        # Default fallback if config fails
+        model_to_use = "gpt-4o" 
+        
+        if current_model_id:
+             model_config = await session.get(AIModelConfig, int(current_model_id))
+             if model_config:
+                 model_to_use = model_config.model_id
+                 # Also ensure we use the correct API key/base if it's a custom provider
+                 if model_config.provider_type == 'custom':
+                     api_key = model_config.api_key
+                     api_base = model_config.api_base
+
+        llm = LLMService(api_key, api_base, model_to_use)
         log_text = "\n".join([f"{log.role}: {log.content}" for log in logs])
         
-        prompt = mdp.render("tasks/nit/work_log", {
+        from services.mdp.manager import mdp
+        prompt = mdp.render("core/abilities/work_log", {
             "agent_name": bot_name,
             "task_name": task_name,
             "log_text": log_text
@@ -175,10 +207,11 @@ async def exit_work_mode() -> str:
         summary_content = summary["choices"][0]["message"]["content"]
         
         # 4. Save to File (MD)
-        from backend.utils.memory_file_manager import MemoryFileManager
+        from utils.memory_file_manager import MemoryFileManager
         timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_task_name = "".join(c for c in task_name if c.isalnum() or c in (' ', '-', '_')).strip()[:30]
-        file_path = await MemoryFileManager.save_log("work_logs", f"{timestamp_str}_{safe_task_name}", summary_content)
+        # Use active agent ID for log isolation
+        file_path = await MemoryFileManager.save_log("work_logs", f"{timestamp_str}_{safe_task_name}", summary_content, agent_id=agent_id)
         
         # 5. Save to Memory (DB)
         # [Modified] User requested NOT to store document types in DB.
@@ -229,9 +262,16 @@ async def abort_work_mode() -> str:
         return "Error: 数据库会话不可用。"
 
     try:
+        from services.agent_manager import get_agent_manager
+        agent_manager = get_agent_manager()
+        agent_id = agent_manager.active_agent_id
+        
+        session_key = f"current_session_id_{agent_id}"
+        task_key = f"work_mode_task_{agent_id}"
+
         # 1. Revert Config
-        config_id = (await session.exec(select(Config).where(Config.key == "current_session_id"))).first()
-        config_task = (await session.exec(select(Config).where(Config.key == "work_mode_task"))).first()
+        config_id = (await session.exec(select(Config).where(Config.key == session_key))).first()
+        config_task = (await session.exec(select(Config).where(Config.key == task_key))).first()
         
         if config_id and config_id.value.startswith("work_"):
              # Revert to default

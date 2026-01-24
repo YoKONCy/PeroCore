@@ -59,12 +59,21 @@ async def chat(request: ChatRequest, session: AsyncSession = Depends(get_session
     from services.agent_service import AgentService
     from models import Config
     from sqlmodel import select
+    from services.agent_manager import get_agent_manager
     
     agent_service = AgentService(session)
+    agent_manager = get_agent_manager()
+    agent_id = agent_manager.active_agent_id
     
     # Check if we are in work mode and if session_id should be overridden
     if request.session_id == "current_work_session":
-        config_id = (await session.exec(select(Config).where(Config.key == "current_session_id"))).first()
+        session_key = f"current_session_id_{agent_id}"
+        config_id = (await session.exec(select(Config).where(Config.key == session_key))).first()
+        
+        # Fallback to global if not found (backward compatibility)
+        if not config_id:
+             config_id = (await session.exec(select(Config).where(Config.key == "current_session_id"))).first()
+             
         if config_id and config_id.value.startswith("work_"):
             request.session_id = config_id.value
         else:
@@ -100,25 +109,16 @@ async def chat(request: ChatRequest, session: AsyncSession = Depends(get_session
 
     return StreamingResponse(generate(), media_type="text/plain")
 
-def get_workspace_root():
-    """
-    Get the absolute path to the workspace root.
-    Defaults to PeroCore/pero_workspace
-    """
-    current_file_dir = os.path.dirname(os.path.abspath(__file__)) # PeroCore/backend/routers
-    backend_dir = os.path.dirname(current_file_dir) # PeroCore/backend
-    project_root = os.path.dirname(backend_dir) # PeroCore
-    
-    workspace_dir = os.path.join(project_root, "pero_workspace")
-    
-    if not os.path.exists(workspace_dir):
-        os.makedirs(workspace_dir, exist_ok=True)
-        
-    return workspace_dir
+# [Refactor] Use workspace_utils for multi-agent support
+from utils.workspace_utils import get_workspace_root, get_global_workspace_root
+
+# def get_workspace_root(): ... (Removed)
 
 @router.get("/image")
 async def get_workspace_image(path: str):
-    base_dir = get_workspace_root()
+    # For images, we might want to search in current agent's workspace OR global
+    # But for simplicity, let's stick to the active agent's workspace
+    base_dir = get_workspace_root() 
     # Path should be relative to workspace, e.g. "uploads/2026-01-21/xxx.png"
     # Prevent directory traversal
     safe_path = os.path.normpath(path)
@@ -306,9 +306,19 @@ async def api_abort_work_mode(session: AsyncSession = Depends(get_session)):
     from models import Config
     from sqlmodel import select
     from core.nit_manager import get_nit_manager
+    from services.agent_manager import get_agent_manager
     
     try:
-        config_id = (await session.exec(select(Config).where(Config.key == "current_session_id"))).first()
+        agent_manager = get_agent_manager()
+        agent_id = agent_manager.active_agent_id
+        session_key = f"current_session_id_{agent_id}"
+        
+        config_id = (await session.exec(select(Config).where(Config.key == session_key))).first()
+        
+        # Fallback
+        if not config_id:
+             config_id = (await session.exec(select(Config).where(Config.key == "current_session_id"))).first()
+        
         if config_id and config_id.value.startswith("work_"):
             config_id.value = "default"
             await session.commit()

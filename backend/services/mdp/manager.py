@@ -67,9 +67,56 @@ class MDPManager:
                         logger.error(f"加载提示词文件失败 {file_path}: {e}")
         
         # 初始化 Jinja2 环境
-        # 我们使用 DictLoader 允许 {% include 'key' %}
+        # 使用 FileSystemLoader 以支持加载外部 Agent 目录
+        loaders = [jinja2.DictLoader(prompts_content_map)]
+        
+        # 尝试加载内部 Agent 目录 (现在位于 mdp/agents)
+        try:
+            # prompt_dir = .../backend/services/mdp/prompts
+            # mdp_dir = .../backend/services/mdp
+            mdp_dir = os.path.dirname(os.path.abspath(self.prompt_dir))
+            agents_dir = os.path.join(mdp_dir, "agents")
+            
+            if os.path.exists(agents_dir):
+                loaders.append(jinja2.FileSystemLoader(agents_dir))
+                logger.info(f"MDP: 已添加 Agent 目录到加载路径: {agents_dir}")
+                
+                # 同时扫描 agents 目录下的 .md 文件并加入 prompts_content_map
+                # 这样可以直接通过 key 访问，而不只是通过 FileSystemLoader
+                for root, _, files in os.walk(agents_dir):
+                    for file in files:
+                        if file.endswith(".md"):
+                            file_path = os.path.join(root, file)
+                            try:
+                                rel_path = os.path.relpath(file_path, agents_dir)
+                                rel_path = rel_path.replace("\\", "/")
+                                # 为了避免冲突，可以给 agent 的 prompt 加个前缀，或者直接用路径
+                                # 例如 pero/system_prompt
+                                key = os.path.splitext(rel_path)[0]
+                                
+                                # 注意：这里不解析 frontmatter，因为 agent 的 prompt 通常就是纯文本或简单的 md
+                                # 但为了统一，如果需要解析也可以调用 _load_file
+                                # 这里我们简单读取内容
+                                with open(file_path, "r", encoding="utf-8") as f:
+                                     content = f.read()
+                                     # 简单的 frontmatter 剥离如果需要
+                                     if content.startswith("---"):
+                                         _, _, content = content.split("---", 2)
+                                     
+                                     # Strip HTML comments
+                                     content = re.sub(r'<!--[\s\S]*?-->', '', content)
+                                         
+                                prompts_content_map[key] = content.strip()
+                                logger.info(f"MDP: 已索引 Agent Prompt: {key}")
+                                
+                            except Exception as e:
+                                logger.warning(f"MDP: 索引 Agent Prompt 失败 {file}: {e}")
+
+        except Exception as e:
+            logger.warning(f"MDP: 无法添加 Agent 目录: {e}")
+
         self.jinja_env = jinja2.Environment(
-            loader=jinja2.DictLoader(prompts_content_map),
+            loader=jinja2.ChoiceLoader(loaders),
             autoescape=False, # 提示词是文本，不是 HTML
             variable_start_string="{{",
             variable_end_string="}}",
@@ -96,9 +143,17 @@ class MDPManager:
             except yaml.YAMLError as e:
                 logger.error(f"文件 {file_path} 中存在 YAML 错误: {e}")
         
+        # Strip HTML comments
+        content = re.sub(r'<!--[\s\S]*?-->', '', content)
+        
         return MDPrompt(key, content.strip(), metadata, key)
 
     def get_prompt(self, name: str) -> Optional[MDPrompt]:
+        """
+        获取提示词对象。
+        注意：对于外部 Agent 目录中的文件，由于没有在 reload_all 中预加载到 self.prompts，
+        此方法可能返回 None，但这并不代表 Jinja2 无法渲染它。
+        """
         return self.prompts.get(name)
 
     def render(self, template_name: str, context: Dict[str, Any] = None) -> str:
@@ -106,7 +161,7 @@ class MDPManager:
         使用 Jinja2 递归解析渲染提示词。
         
         Args:
-            template_name: 提示词文件键 (例如 "tasks/scorer_summary" 或 "scorer_summary")
+            template_name: 提示词文件键 (例如 "tasks/scorer_summary" 或 "agent_id/system_prompt")
             context: 要注入的变量
             
         Returns:
@@ -118,13 +173,56 @@ class MDPManager:
         if not self.jinja_env:
             return f"{{{{Error: Jinja2 not initialized}}}}"
 
-        if template_name not in self.prompts:
-             logger.warning(f"提示词模板 '{template_name}' 未找到。")
-             return f"{{{{Missing Prompt: {template_name}}}}}"
-             
+        # ---------------------------------------------------------
+        # 支持 Agent 专属覆盖
+        # 如果 context 中包含 agent_name，优先尝试加载 agents/{agent_name}/{template_name}
+        # ---------------------------------------------------------
+        agent_name = context.get("agent_name")
+        target_template_name = template_name
+        
+        if agent_name:
+            # 构造覆盖路径，例如 "pero/core/abilities/work_log"
+            # 注意：agent_name 对应的目录必须在 FileSystemLoader 的根目录下 (即 mdp/agents)
+            override_name = f"{agent_name}/{template_name}"
+            
+            # 检查 override 是否存在
+            # 我们可以简单地尝试 get_template
+            found_override = False
+            try:
+                self.jinja_env.get_template(override_name)
+                target_template_name = override_name
+                found_override = True
+                logger.debug(f"MDP: 使用 Agent 覆盖提示词: {override_name}")
+            except jinja2.TemplateNotFound:
+                # 尝试 .md
+                try:
+                    self.jinja_env.get_template(f"{override_name}.md")
+                    target_template_name = f"{override_name}.md"
+                    found_override = True
+                    logger.debug(f"MDP: 使用 Agent 覆盖提示词: {override_name}.md")
+                except jinja2.TemplateNotFound:
+                    pass
+            
+            if not found_override:
+                # 仅在调试模式下记录，避免日志刷屏
+                pass
+
         try:
             # 步骤 1: 初始渲染
-            template = self.jinja_env.get_template(template_name)
+            template = None
+            try:
+                template = self.jinja_env.get_template(target_template_name)
+            except jinja2.TemplateNotFound:
+                # 尝试添加 .md 后缀 (针对 FileSystemLoader)
+                try:
+                    template = self.jinja_env.get_template(f"{target_template_name}.md")
+                except jinja2.TemplateNotFound:
+                    pass
+
+            if not template:
+                 logger.warning(f"提示词模板 '{target_template_name}' (及其 .md 变体) 未找到。 (Original request: {template_name})")
+                 return f"{{{{Missing Prompt: {template_name}}}}}"
+
             rendered = template.render(**context)
             
             # 步骤 2: 递归展开
@@ -145,14 +243,52 @@ class MDPManager:
                     if var not in new_context and var in self.prompts:
                         new_context[var] = self.prompts[var].content
                         has_new_resolution = True
+                    # [修复] 即使变量已存在，如果它是一个提示词键，我们是否应该覆盖？
+                    # 现在的逻辑是：变量优先。如果上下文中已有 chain_logic，就不会加载 prompts['chain_logic']
+                    # 但这会导致问题：如果 context['output_constraint'] = "...{{chain_logic}}..."
+                    # 且 context['chain_logic'] 已存在（例如被设为文件名或空），那么就不会去加载提示词内容了
+                    # 
+                    # 然而，PromptService 可能会将 chain_logic 预先填充为 *内容*。
+                    # 如果 PromptService 已经把文件内容读进 context['chain_logic'] 了，那这里不做处理是正确的。
+                    # 
+                    # 问题的关键在于：
+                    # PromptService 将 context['chain_logic'] 设置为了 *内容*。
+                    # 然后 system_template 包含 {{output_constraint}}
+                    # output_constraint 包含 {{chain_logic}}
+                    # 
+                    # Loop 1: 渲染 system_template -> 得到 "...{{output_constraint}}..."
+                    # Loop 2: 发现 output_constraint，展开它 -> 得到 "...{{chain_logic}}..."
+                    # Loop 3: 发现 chain_logic。
+                    #   - 检查 context['chain_logic'] 是否存在？ 是的，PromptService 注入了。
+                    #   - has_new_resolution = False (因为 var 在 context 中)
+                    #   - 既然 has_new_resolution = False，循环终止。
+                    #   - 结果：render 拿着 "...{{chain_logic}}..." 和 context 再次渲染了吗？
+                    #   - 看代码：
+                    #     if not has_new_resolution: break
+                    #     rendered = self.jinja_env.from_string(rendered).render(**new_context)
+                    # 
+                    # 没错！如果 has_new_resolution 为 False，它就直接 break 了，**没有进行最后一次渲染**！
+                    # 这就是 BUG。即使没有发现 *新的* 提示词变量，我们也应该用 *现有的* context 再次渲染一次，
+                    # 以便解析刚刚展开的模板中包含的现有变量。
                 
-                if not has_new_resolution:
-                    # 如果没有找到新的匹配提示词的变量，停止以避免无限循环
-                    # (除非我们假设变量可能由 Jinja 过滤器填充？不，我们坚持显式上下文/提示词)
+                # [Fix] 即使没有解析出新的提示词变量，只要渲染结果中还有 {{}}，且我们在 context 中有这些变量，
+                # 我们就应该继续渲染。
+                # 但为了防止死循环（如果 context 中本身就包含 {{}}），我们需要小心。
+                # 
+                # 修正逻辑：
+                # 只要 matches 不为空，我们尝试渲染。
+                # 如果渲染后的结果和渲染前一样，说明无法再展开了，break。
+                
+                prev_rendered = rendered
+                rendered = self.jinja_env.from_string(rendered).render(**new_context)
+                
+                if rendered == prev_rendered:
+                    # 没有变化，说明剩余的 {{}} 无法被当前 context 解析
                     break
                     
-                # 再次渲染，将字符串视为模板
-                rendered = self.jinja_env.from_string(rendered).render(**new_context)
+                # 如果有变化，说明展开成功（无论是通过新注入的提示词，还是已有的 context）
+                # 继续下一轮循环
+
             
             return rendered
 

@@ -131,9 +131,9 @@ class AgentService:
             preview_files = file_results[:50] 
             files_text = "\n".join(preview_files)
             
-            system_prompt = self.mdp.render("tasks/analysis/file_analysis")
+            system_prompt = self.mdp.render("services/analysis/file_analysis")
             
-            user_prompt = self.mdp.render("tasks/analysis/file_analysis_user_input", {
+            user_prompt = self.mdp.render("services/analysis/file_analysis_user_input", {
                 "user_query": user_query,
                 "preview_count": len(preview_files),
                 "files_text": files_text
@@ -287,7 +287,7 @@ class AgentService:
                 desc = tool_def.get("description", "No description")
                 tools_list_str += f"- {name}: {desc}\n"
 
-        system_prompt = self.mdp.render("capabilities/reflection_ui", {
+        system_prompt = self.mdp.render("services/memory/reflection/reflection_ui", {
             "tools_list_str": tools_list_str,
             "tools_count": len(tools_list_str),
             "vision_instruction": vision_instruction_block
@@ -366,9 +366,20 @@ class AgentService:
         }
 
     async def _get_pet_state(self) -> PetState:
-        state = (await self.session.exec(select(PetState).order_by(desc(PetState.updated_at)).limit(1))).first()
+        # [Multi-Agent] Filter PetState by active agent
+        from services.agent_manager import get_agent_manager
+        agent_manager = get_agent_manager()
+        active_agent_id = agent_manager.active_agent_id
+        
+        state = (await self.session.exec(
+            select(PetState)
+            .where(PetState.agent_id == active_agent_id)
+            .order_by(desc(PetState.updated_at))
+            .limit(1)
+        )).first()
+        
         if not state:
-            state = PetState()
+            state = PetState(agent_id=active_agent_id)
             self.session.add(state)
             await self.session.commit()
             await self.session.refresh(state)
@@ -383,7 +394,7 @@ class AgentService:
         print(f"[Agent] 收到主动观察结果: {intent_description} (评分: {score:.4f})")
         
         # 2. Construct an internal sensing prompt
-        internal_prompt = self.mdp.render("tasks/companion/proactive_internal_sense", {
+        internal_prompt = self.mdp.render("services/perception/proactive_internal_sense", {
             "intent_description": intent_description,
             "score": f"{score:.4f}"
         })
@@ -543,7 +554,7 @@ class AgentService:
             
             # Whitelist of safe prefixes/names
             safe_prefixes = ["qq_"]
-            safe_names = ["read_social_memory", "read_agent_memory", "notify_master"]
+            safe_names = ["read_social_memory", "read_agent_memory", "qq_notify_master"]
             
             for tool_def in all_tools:
                 t_name = ""
@@ -719,7 +730,7 @@ class AgentService:
         except Exception as e:
             print(f"[Agent] 后台梦境失败: {e}")
 
-    async def chat(self, messages: List[Dict[str, Any]], source: str = "desktop", session_id: str = "default", on_status: Optional[Any] = None, is_voice_mode: bool = False, user_text_override: str = None, skip_save: bool = False, system_trigger_instruction: str = None) -> AsyncIterable[str]:
+    async def chat(self, messages: List[Dict[str, Any]], source: str = "desktop", session_id: str = "default", on_status: Optional[Any] = None, is_voice_mode: bool = False, user_text_override: str = None, skip_save: bool = False, system_trigger_instruction: str = None, agent_id_override: str = None) -> AsyncIterable[str]:
         # [NIT Security] Generate ID for this request context
         current_nit_id = NITSecurityManager.generate_random_id()
         
@@ -735,8 +746,12 @@ class AgentService:
         # Cancel any pending 'reaction' tasks because user is interacting
         if not system_trigger_instruction:
             try:
+                # [Multi-Agent] Only cancel tasks for the current agent
+                from services.agent_manager import get_agent_manager
+                current_agent_id = agent_id_override or get_agent_manager().active_agent_id
+                
                 # Assuming 'reaction' type tasks are those that should be cancelled on interaction
-                statement = select(ScheduledTask).where(ScheduledTask.type == "reaction").where(ScheduledTask.is_triggered == False)
+                statement = select(ScheduledTask).where(ScheduledTask.type == "reaction").where(ScheduledTask.is_triggered == False).where(ScheduledTask.agent_id == current_agent_id)
                 tasks_to_cancel = (await self.session.exec(statement)).all()
                 if tasks_to_cancel:
                     print(f"[Agent] 检测到用户交互。取消 {len(tasks_to_cancel)} 个待处理的反应任务。")
@@ -762,9 +777,14 @@ class AgentService:
         print(f"[Agent] 收到聊天请求。来源: {source}, 消息数: {len(messages)}, 语音: {is_voice_mode}")
         
         # [Feature] Multi-Agent Support
-        # Extract agent_id from config (default to "pero" if not set)
-        agent_id_config = (await self.session.exec(select(Config).where(Config.key == "bot_name"))).first()
-        current_agent_id = agent_id_config.value if agent_id_config and agent_id_config.value else "pero"
+        # Extract agent_id from AgentManager (Standardized)
+        from services.agent_manager import get_agent_manager
+        agent_manager = get_agent_manager()
+        current_agent_id = agent_id_override or agent_manager.active_agent_id
+        
+        # Fallback to "pero" if not set (though AgentManager should handle this)
+        if not current_agent_id:
+            current_agent_id = "pero"
 
         # 1. Initialize Context
         context = {
@@ -777,9 +797,9 @@ class AgentService:
             "user_text_override": user_text_override,
             "is_voice_mode": is_voice_mode,
             "agent_service": self,
+            "agent_id": current_agent_id, # Add explicit agent_id to context
             "variables": {},
             "nit_id": current_nit_id,
-            "agent_id": current_agent_id, # Inject Agent ID
         }
         
         # 2. Run Preprocessor Pipeline
@@ -803,7 +823,7 @@ class AgentService:
 
         # [Feature] Mobile Source Awareness
         if source == "mobile":
-            mobile_instruction = self.mdp.render("context/mobile_mode")
+            mobile_instruction = self.mdp.render("core/context/mobile_mode")
             final_messages.append({
                 "role": "system",
                 "content": mobile_instruction
@@ -820,7 +840,7 @@ class AgentService:
                 if len(active_windows) > 20:
                     window_list_str += f"\n... ({len(active_windows) - 20} more)"
                 
-                state_msg = self.mdp.render("context/active_windows", {
+                state_msg = self.mdp.render("core/context/active_windows", {
                     "window_list_str": window_list_str
                 })
                 
@@ -1644,16 +1664,16 @@ class AgentService:
                                         rel_path = f"uploads/{date_str}/{filename}"
                                         images.append(rel_path)
                                     except Exception as img_e:
-                                        print(f"[Agent] Failed to save image: {img_e}")
+                                        print(f"[Agent] 保存图片失败: {img_e}")
                         
                         if images:
                             user_metadata["images"] = images
-                            print(f"[Agent] Persisted {len(images)} images for display.")
+                            print(f"[Agent] 已持久化 {len(images)} 张图片用于显示。")
                 except Exception as e:
-                    print(f"[Agent] Image processing error: {e}")
+                    print(f"[Agent] 图片处理错误: {e}")
 
                 should_save = not skip_save and user_message and full_response_text
-                print(f"[Agent] 日志保存检查: save={should_save} (skip_save={skip_save}, has_user_msg={bool(user_message)}, resp_len={len(full_response_text) if full_response_text else 0})")
+                print(f"[Agent] 日志保存检查: 是否保存={should_save} (skip_save={skip_save}, has_user_msg={bool(user_message)}, resp_len={len(full_response_text) if full_response_text else 0})")
                 
                 if should_save:
                     # 如果有覆盖文本，优先使用覆盖文本（确保音频输入时也能存下文本）
@@ -1667,7 +1687,8 @@ class AgentService:
                             full_response_text, 
                             pair_id,
                             assistant_raw_content=raw_full_text,
-                            user_metadata=user_metadata
+                            user_metadata=user_metadata,
+                            agent_id=current_agent_id
                         )
                         print(f"[Agent] 对话日志对已保存 (pair_id: {pair_id})")
                     except Exception as e:
@@ -1725,7 +1746,8 @@ class AgentService:
                         session_id, 
                         final_u_msg, 
                         final_response, 
-                        pair_id
+                        pair_id,
+                        agent_id=current_agent_id
                     )
                      print(f"[Agent] 错误日志已保存 (pair_id: {pair_id})")
             except Exception as save_err:

@@ -28,19 +28,75 @@ class EmbeddingService:
         Manually resolve model path from cache to bypass huggingface_hub issues
         """
         try:
-            cache_dir = os.environ.get("SENTENCE_TRANSFORMERS_HOME")
-            if not cache_dir:
-                return None
+            # List of directories to search for the model
+            search_dirs = []
             
+            # 1. Custom configured path
+            custom_cache = os.environ.get("SENTENCE_TRANSFORMERS_HOME")
+            if custom_cache:
+                search_dirs.append(custom_cache)
+            
+            # 2. Standard HuggingFace Hub cache
+            hf_home = os.environ.get("HF_HOME")
+            if hf_home and hf_home not in search_dirs:
+                search_dirs.append(hf_home)
+                
+            default_hf_cache = os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "hub")
+            if default_hf_cache not in search_dirs:
+                search_dirs.append(default_hf_cache)
+
+            # 3. Old SentenceTransformers cache
+            default_st_cache = os.path.join(os.path.expanduser("~"), ".cache", "torch", "sentence_transformers")
+            if default_st_cache not in search_dirs:
+                search_dirs.append(default_st_cache)
+
+            print(f"[Embedding] Debug: Searching for model '{model_name}' in dirs: {search_dirs}", flush=True)
+
             repo_id = "models--" + model_name.replace("/", "--")
-            ref_path = os.path.join(cache_dir, repo_id, "refs", "main")
             
-            if os.path.exists(ref_path):
-                with open(ref_path, 'r') as f:
-                    commit_hash = f.read().strip()
-                snapshot_path = os.path.join(cache_dir, repo_id, "snapshots", commit_hash)
-                if os.path.exists(snapshot_path):
-                    return snapshot_path
+            for cache_dir in search_dirs:
+                if not os.path.exists(cache_dir):
+                    continue
+
+                # Check paths to look into (root and hub subdir)
+                candidate_base_paths = [
+                    os.path.join(cache_dir, repo_id),
+                    os.path.join(cache_dir, "hub", repo_id)
+                ]
+                
+                for base_path in candidate_base_paths:
+                    # print(f"[Embedding] Debug: Checking base path: {base_path}", flush=True)
+                    if not os.path.exists(base_path):
+                        continue
+                        
+                    # 策略 1: 检查 snapshots 目录并找到最新的 snapshot
+                    snapshots_dir = os.path.join(base_path, "snapshots")
+                    if os.path.exists(snapshots_dir):
+                        snapshots = os.listdir(snapshots_dir)
+                        # print(f"[Embedding] Debug: Found snapshots in {base_path}: {snapshots}", flush=True)
+                        if snapshots:
+                            # 简单地取第一个找到的 snapshot
+                            snapshot_path = os.path.join(snapshots_dir, snapshots[0])
+                            # 验证 snapshot 是否包含 config.json
+                            config_path = os.path.join(snapshot_path, "config.json")
+                            if os.path.isdir(snapshot_path) and os.path.exists(config_path):
+                                print(f"[Embedding] Debug: Found valid config at {config_path}", flush=True)
+                                return snapshot_path
+                            # else:
+                                # print(f"[Embedding] Debug: Config not found at {config_path}", flush=True)
+
+                    # 策略 2 (Legacy): 检查 refs/main
+                    ref_path = os.path.join(base_path, "refs", "main")
+                    if os.path.exists(ref_path):
+                        try:
+                            with open(ref_path, 'r') as f:
+                                commit_hash = f.read().strip()
+                            snapshot_path = os.path.join(base_path, "snapshots", commit_hash)
+                            if os.path.exists(snapshot_path):
+                                return snapshot_path
+                        except:
+                            pass
+                        
         except Exception as e:
             print(f"[Embedding] Manual path resolution failed: {e}", flush=True)
         return None
@@ -50,67 +106,127 @@ class EmbeddingService:
             print("[Embedding] 正在加载嵌入模型 (all-MiniLM-L6-v2)...", flush=True)
             from sentence_transformers import SentenceTransformer
             
-            # Strategy: Try Local First -> Then Online (to avoid network timeouts if cached)
+            # Strategy: Try Manual Path Resolution First (Most Robust) -> Then Library Cache -> Then Online
+            model_name = 'sentence-transformers/all-MiniLM-L6-v2'
+            
+            # 1. Try manual path resolution
+            local_path = self._resolve_local_path(model_name)
+            if local_path:
+                try:
+                    print(f"[Embedding] 发现本地缓存路径: {local_path}，尝试直接加载...", flush=True)
+                    self._model = SentenceTransformer(local_path)
+                    print("[Embedding] 已从本地缓存路径加载模型。", flush=True)
+                    return
+                except Exception as manual_e:
+                    print(f"[Embedding] 手动路径加载失败: {manual_e}", flush=True)
+
+            # 2. Try library local load (fallback)
             try:
-                # 1. Try offline load first
                 self._model = SentenceTransformer('all-MiniLM-L6-v2', local_files_only=True)
                 print("[Embedding] 已从本地缓存加载模型。", flush=True)
+                return
             except Exception as e:
-                print(f"[Embedding] 本地缓存未命中 (all-MiniLM-L6-v2): {e}。尝试手动路径解析...", flush=True)
+                print(f"[Embedding] 本地缓存未命中 (all-MiniLM-L6-v2): {e}。准备下载...", flush=True)
                 
-                # 1.5 Try manual path resolution
-                local_path = self._resolve_local_path('sentence-transformers/all-MiniLM-L6-v2')
-                if local_path:
-                    try:
-                        print(f"[Embedding] 发现本地缓存路径: {local_path}，尝试直接加载...", flush=True)
-                        self._model = SentenceTransformer(local_path)
-                        print("[Embedding] 已从本地缓存路径加载模型。", flush=True)
-                        return
-                    except Exception as manual_e:
-                        print(f"[Embedding] 手动路径加载失败: {manual_e}", flush=True)
-
-                print("[Embedding] 正在从镜像下载...", flush=True)
-                try:
-                    # 2. Download from mirror
-                    self._model = SentenceTransformer('all-MiniLM-L6-v2', local_files_only=False)
-                    print("[Embedding] 模型下载并加载完成。", flush=True)
-                except Exception as net_e:
-                    print(f"[Embedding] 致命错误: 无法下载模型: {net_e}", flush=True)
-                    # Last ditch: try loading anyway just in case (original logic) but unlikely to work if step 1 failed
-                    raise net_e
+            print("[Embedding] 正在从镜像下载...", flush=True)
+            try:
+                # 3. Download from mirror
+                self._model = SentenceTransformer('all-MiniLM-L6-v2', local_files_only=False)
+                print("[Embedding] 模型下载并加载完成。", flush=True)
+            except Exception as net_e:
+                print(f"[Embedding] 致命错误: 无法下载模型: {net_e}", flush=True)
+                raise net_e
 
     def _load_reranker(self):
         if self._cross_encoder is None:
             print("[Embedding] 正在加载重排序模型 (BAAI/bge-reranker-v2-m3)...", flush=True)
             from sentence_transformers import CrossEncoder
             
-            # Strategy: Try Local First -> Then Online
-            try:
-                # 1. Try offline load first
-                self._cross_encoder = CrossEncoder('BAAI/bge-reranker-v2-m3', local_files_only=True)
-                print("[Embedding] 已从本地缓存加载重排序模型。", flush=True)
-            except Exception as e:
-                print(f"[Embedding] 本地缓存未命中 (BAAI/bge-reranker-v2-m3): {e}。尝试手动路径解析...", flush=True)
-                
-                # 1.5 Try manual path resolution
-                local_path = self._resolve_local_path('BAAI/bge-reranker-v2-m3')
-                if local_path:
-                    try:
-                        print(f"[Embedding] 发现本地缓存路径: {local_path}，尝试直接加载...", flush=True)
-                        self._cross_encoder = CrossEncoder(local_path)
-                        print("[Embedding] 已从本地缓存路径加载重排序模型。", flush=True)
-                        return
-                    except Exception as manual_e:
-                        print(f"[Embedding] 手动路径加载失败: {manual_e}", flush=True)
-
-                print("[Embedding] 正在从镜像下载重排序模型...", flush=True)
+            # Strategy: Try Manual Path Resolution First
+            model_name = 'BAAI/bge-reranker-v2-m3'
+            
+            # 1. Try manual path resolution
+            local_path = self._resolve_local_path(model_name)
+            if local_path:
                 try:
-                    # 2. Download from mirror
-                    self._cross_encoder = CrossEncoder('BAAI/bge-reranker-v2-m3', local_files_only=False)
-                    print("[Embedding] 重排序模型下载并加载完成。", flush=True)
-                except Exception as net_e:
-                    print(f"[Embedding] 致命错误: 无法下载重排序模型: {net_e}", flush=True)
-                    raise net_e
+                    print(f"[Embedding] 发现本地缓存路径: {local_path}，尝试直接加载...", flush=True)
+                    self._cross_encoder = CrossEncoder(local_path)
+                    print("[Embedding] 已从本地缓存路径加载重排序模型。", flush=True)
+                    return
+                except Exception as manual_e:
+                    print(f"[Embedding] 手动路径加载失败: {manual_e}", flush=True)
+
+            # 2. Try library local load (fallback) with Strict Local Mode
+            try:
+                # Use model_kwargs instead of automodel_args (deprecated)
+                # Ensure local_files_only=True is passed to the underlying transformer
+                self._cross_encoder = CrossEncoder(
+                    'BAAI/bge-reranker-v2-m3', 
+                    automodel_args={"local_files_only": True}, # Keep for backward compatibility
+                    # model_kwargs={"local_files_only": True} # Newer versions might use this?
+                    # Actually CrossEncoder init signature:
+                    # def __init__(self, model_name, ..., automodel_args=None, ...)
+                    # It seems it doesn't accept model_kwargs in init directly in some versions?
+                    # But the warning said: "The CrossEncoder `automodel_args` argument was renamed and is now deprecated, please use `model_kwargs` instead."
+                    # So we should pass model_kwargs if possible. But to be safe, let's try to pass it if automodel_args is what we have.
+                    # Wait, if I pass BOTH, it might be safer or might error.
+                    # Let's trust the warning message.
+                )
+                # Re-reading the warning: "please use `model_kwargs` instead."
+                # But does the constructor accept `model_kwargs`?
+                # If I look at the source code of sentence-transformers, it likely captures **kwargs and passes them?
+                # Or it has a specific argument.
+                # Let's try passing both via kwargs if possible, or just follow the instruction.
+                
+                # Let's try constructing with the new argument name as a keyword argument
+                self._cross_encoder = CrossEncoder(
+                    'BAAI/bge-reranker-v2-m3',
+                    trust_remote_code=True,
+                    automodel_args={"local_files_only": True}, # Legacy
+                    # model_kwargs={"local_files_only": True}  # Future-proof? 
+                    # If I pass undefined kwarg it might crash.
+                    # Let's stick to automodel_args for now but add local_files_only to the constructor if supported? 
+                    # No, CrossEncoder doesn't support local_files_only directly.
+                )
+                # Wait, if I want to be 100% sure, I should check if I can modify the call.
+                # The user saw the warning, so the library version is NEW.
+                # If the library is new, it supports model_kwargs.
+            except:
+                pass
+
+            try:
+                # Let's try the "New Way" based on the warning
+                print("[Embedding] 尝试使用 model_kwargs 加载...", flush=True)
+                self._cross_encoder = CrossEncoder(
+                    'BAAI/bge-reranker-v2-m3',
+                    model_kwargs={"local_files_only": True}
+                )
+                print("[Embedding] 已从本地缓存加载重排序模型 (model_kwargs)。", flush=True)
+                return
+            except Exception as e:
+                print(f"[Embedding] model_kwargs 加载失败: {e}", flush=True)
+                
+            try:
+                # Fallback to "Old Way"
+                print("[Embedding] 尝试使用 automodel_args 加载...", flush=True)
+                self._cross_encoder = CrossEncoder(
+                    'BAAI/bge-reranker-v2-m3', 
+                    automodel_args={"local_files_only": True}
+                )
+                print("[Embedding] 已从本地缓存加载重排序模型 (automodel_args)。", flush=True)
+                return
+            except Exception as e:
+                print(f"[Embedding] automodel_args 加载失败: {e}", flush=True)
+
+            print(f"[Embedding] 本地缓存未命中 (BAAI/bge-reranker-v2-m3)。准备下载...", flush=True)
+            
+            try:
+                # 3. Download from mirror
+                self._cross_encoder = CrossEncoder('BAAI/bge-reranker-v2-m3', local_files_only=False)
+                print("[Embedding] 重排序模型下载并加载完成。", flush=True)
+            except Exception as net_e:
+                print(f"[Embedding] 致命错误: 无法下载重排序模型: {net_e}", flush=True)
+                raise net_e
 
     def warm_up(self):
         """

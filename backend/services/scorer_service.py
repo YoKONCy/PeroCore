@@ -2,7 +2,7 @@ from typing import Optional, List, Dict, Any
 from sqlmodel.ext.asyncio.session import AsyncSession
 from services.llm_service import LLMService
 from services.memory_service import MemoryService
-from services.mdp.manager import MDPManager
+from services.mdp.manager import mdp
 from models import Config, AIModelConfig, ConversationLog, Memory
 from sqlmodel import select
 from sqlalchemy import update
@@ -17,8 +17,7 @@ class ScorerService:
         self.memory_service = MemoryService()
         
         # Initialize MDPManager
-        mdp_dir = os.path.join(os.path.dirname(__file__), "mdp", "prompts")
-        self.mdp = MDPManager(mdp_dir)
+        self.mdp = mdp
 
     def _smart_clean_text(self, text: str) -> str:
         """
@@ -73,14 +72,26 @@ class ScorerService:
                 "model": model_config.model_id,
                 "temperature": 0.3 # Scorer 需要相对客观
             }
-        else:
-            # 如果没有特定于评分者的配置，则回退到默认的低成本模型或用户的主模型
-            return {
-                "api_key": global_api_key,
-                "api_base": global_api_base,
-                "model": "gpt-4o-mini", # 默认假设用户有这个模型
-                "temperature": 0.3
-            }
+        
+        # 3. 尝试使用主模型回退
+        main_model_id = configs.get("current_model_id")
+        if main_model_id:
+            main_config = await self.session.get(AIModelConfig, int(main_model_id))
+            if main_config:
+                 return {
+                    "api_key": main_config.api_key if main_config.provider_type == 'custom' else global_api_key,
+                    "api_base": main_config.api_base if main_config.provider_type == 'custom' else global_api_base,
+                    "model": main_config.model_id,
+                    "temperature": 0.3
+                }
+
+        # 4. 如果没有特定于评分者的配置，也没有主模型，则回退到默认的低成本模型（作为最后手段）
+        return {
+            "api_key": global_api_key,
+            "api_base": global_api_base,
+            "model": "gpt-4o-mini", # 最后的兜底
+            "temperature": 0.3
+        }
 
     async def _update_log_status(self, pair_id: str, status: str, error: str = None, increment_retry: bool = False):
         """更新日志的分析状态"""
@@ -186,20 +197,25 @@ class ScorerService:
         )
         
         # 获取当前 Agent 名称 (用于 Prompt 注入)
-        bot_name = "Pero"
-        try:
-            config_entry = await self.session.get(Config, "bot_name")
-            if config_entry and config_entry.value:
-                bot_name = config_entry.value
-        except Exception:
-            pass
+        config_manager = get_config_manager()
+        bot_name = config_manager.get("bot_name", "Pero")
+        
+        # Get Agent Profile for dynamic persona injection
+        agent_manager = AgentManager()
+        agent_profile = agent_manager.agents.get(agent_manager.active_agent_id)
+        identity_label = agent_profile.identity_label if agent_profile else "智能助手"
+        personality_tags = "、".join(agent_profile.personality_tags) if agent_profile else ""
 
-        # 使用 MDPManager 加载 System Prompt
-        system_prompt = self.mdp.render("tasks/analysis/scorer_summary", {"agent_name": bot_name})
+        # 渲染分析提示词
+        system_prompt = self.mdp.render("services/memory/scorer/summary", {
+            "agent_name": bot_name,
+            "identity_label": identity_label,
+            "personality_tags": personality_tags
+        })
         
         # 验证是否加载成功，如果包含 Error 则记录警告 (虽然 render 会返回错误信息，但不会抛出异常)
         if "Missing Prompt" in system_prompt:
-             print(f"[秘书] Warning: MDP Prompt 'tasks/analysis/scorer_summary' missing. Check mdp/prompts directory.")
+             print(f"[秘书] Warning: MDP Prompt 'services/memory/scorer/summary' missing. Check mdp/prompts directory.")
         
         # Determine the role label and process user content if it's a system trigger
         owner_name = "用户"
@@ -222,7 +238,7 @@ class ScorerService:
             # Let's keep it but emphasize the label.
         
         # 使用 MDPManager 渲染 User Prompt
-        user_prompt = self.mdp.render("tasks/analysis/scorer_user_input", {
+        user_prompt = self.mdp.render("services/memory/scorer/user_input", {
             "user_label": user_label,
             "user_content": user_content,
             "agent_name": bot_name,

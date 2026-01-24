@@ -38,7 +38,7 @@ class Memory(SQLModel, table=True):
 
     # --- 向量数据 ---
     # 存储向量 JSON (例如: "[0.123, -0.456, ...]")
-    embedding_json: str = "[]" 
+    embedding_json: str = Field(default="[]", sa_column=Column(Text))
 
 class MemoryRelation(SQLModel, table=True):
     """
@@ -98,6 +98,31 @@ class PetState(SQLModel, table=True):
     click_messages_json: str = "{}" # 包含 head, chest, body 的点击语
     idle_messages_json: str = "[]"  # 挂机语列表
     back_messages_json: str = "[]"  # 回归语列表
+    
+    updated_at: datetime = Field(default_factory=get_local_now)
+
+class GroupChatRoom(SQLModel, table=True):
+    id: str = Field(primary_key=True) # UUID
+    name: str
+    description: Optional[str] = None
+    created_at: datetime = Field(default_factory=get_local_now)
+    creator_id: str # 'user' or agent_id
+
+class GroupChatMember(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    room_id: str = Field(foreign_key="groupchatroom.id", index=True)
+    agent_id: str = Field(index=True) # 'user' or agent_id
+    joined_at: datetime = Field(default_factory=get_local_now)
+    role: str = "member" # member, admin, host
+
+class GroupChatMessage(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    room_id: str = Field(foreign_key="groupchatroom.id", index=True)
+    sender_id: str = Field(index=True) # 'user' or agent_id
+    content: str = Field(sa_column=Column(Text))
+    role: str # user, assistant, system
+    timestamp: datetime = Field(default_factory=get_local_now)
+    mentions_json: str = "[]" # List of mentioned agent_ids
     
     updated_at: datetime = Field(default_factory=get_local_now)
 
@@ -216,7 +241,8 @@ class AgentProfile(SQLModel, table=True):
     Agent 角色配置 (Multi-Agent Support)
     """
     id: Optional[int] = Field(default=None, primary_key=True)
-    name: str = Field(unique=True, index=True) # 角色名，如 "Pero"
+    role: str = Field(index=True) # "user", "assistant", "system"
+    name: str = Field(unique=True, index=True) # 角色名，如 "Pero" 或自定义 Agent 名
     avatar: Optional[str] = None # 头像 URL 或路径
     description: Optional[str] = None # 角色描述
     

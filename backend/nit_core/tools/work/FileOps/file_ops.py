@@ -5,11 +5,13 @@ import json
 import ast
 import logging
 from pathlib import Path
+from utils.workspace_utils import get_workspace_root
 
 # 定义工作空间根目录，强制隔离所有文件操作
 # backend/nit_core/tools/work/FileOps/file_ops.py -> PeroCore/pero_workspace
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
-WORKSPACE_ROOT = os.path.join(BASE_DIR, "pero_workspace")
+# [Refactor] Use dynamic workspace root
+# BASE_DIR = ...
+# WORKSPACE_ROOT = ...
 
 logger = logging.getLogger(__name__)
 
@@ -19,23 +21,26 @@ def _get_safe_path(input_path: str) -> str:
     如果 input_path 是绝对路径，则检查其是否在 WORKSPACE_ROOT 内。
     如果 input_path 是相对路径，则将其拼接到 WORKSPACE_ROOT 后并校验。
     """
+    # 获取当前 Active Agent 的工作空间
+    workspace_root = get_workspace_root()
+    
     # 确保根目录存在
-    if not os.path.exists(WORKSPACE_ROOT):
-        os.makedirs(WORKSPACE_ROOT, exist_ok=True)
+    if not os.path.exists(workspace_root):
+        os.makedirs(workspace_root, exist_ok=True)
         
     # 处理可能的空输入或当前目录表示
     if not input_path or input_path.strip() in [".", "./"]:
-        return WORKSPACE_ROOT
+        return workspace_root
 
     # 统一解析为绝对路径
     if os.path.isabs(input_path):
         target_path = os.path.abspath(input_path)
     else:
-        target_path = os.path.abspath(os.path.join(WORKSPACE_ROOT, input_path))
+        target_path = os.path.abspath(os.path.join(workspace_root, input_path))
     
     # 路径逃逸校验：目标路径必须以工作空间根路径开头
-    if not target_path.startswith(WORKSPACE_ROOT):
-        raise PermissionError(f"Access Denied: Path traversal detected. Target: {target_path} is outside of {WORKSPACE_ROOT}")
+    if not target_path.startswith(workspace_root):
+        raise PermissionError(f"Access Denied: Path traversal detected. Target: {target_path} is outside of {workspace_root}")
     
     return target_path
 

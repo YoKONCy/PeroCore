@@ -105,32 +105,28 @@ async def exit_work_mode() -> str:
         global_config = {c.key: c.value for c in (await session.exec(select(Config))).all()}
         api_key = global_config.get("global_llm_api_key")
         api_base = global_config.get("global_llm_api_base")
-        
-        # 获取当前 Agent 名称
+        # Default to "Pero" only if not configured
         bot_name = global_config.get("bot_name", "Pero")
 
-        # 初始化 MDPManager (hacky way since runtime isn't a service)
-        import os
-        # 假设 runtime.py 位于 backend/nit_core/interpreter/
-        # 我们需要指向 backend/services/mdp/prompts
-        backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-        # 修正路径计算：当前在 backend/nit_core/interpreter/runtime.py
-        # __file__ -> runtime.py
-        # dirname -> interpreter
-        # dirname -> nit_core
-        # dirname -> backend
-        # join -> backend/services/mdp/prompts
-        mdp_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "backend", "services", "mdp", "prompts")
-        # 如果路径不对，尝试相对路径
-        if not os.path.exists(mdp_dir):
-             mdp_dir = os.path.join(os.getcwd(), "backend", "services", "mdp", "prompts")
+        from services.mdp.manager import mdp
 
-        mdp = MDPManager(mdp_dir)
+        # [Unified Model Fix] Use current_model_id instead of hardcoded gpt-4o
+        from models import AIModelConfig
+        current_model_id = global_config.get("current_model_id")
+        
+        model_to_use = "gpt-4o"
+        if current_model_id:
+             model_config = await session.get(AIModelConfig, int(current_model_id))
+             if model_config:
+                 model_to_use = model_config.model_id
+                 if model_config.provider_type == 'custom':
+                     api_key = model_config.api_key
+                     api_base = model_config.api_base
 
-        llm = LLMService(api_key, api_base, "gpt-4o")
+        llm = LLMService(api_key, api_base, model_to_use)
         log_text = "\n".join([f"{log.role}: {log.content}" for log in logs])
         
-        prompt = mdp.render("tasks/nit/work_log", {
+        prompt = mdp.render("core/abilities/work_log", {
             "agent_name": bot_name,
             "task_name": task_name,
             "log_text": log_text

@@ -286,12 +286,21 @@ class SocialMemoryService:
             except:
                 bot_name = "Pero"
 
-            report_prompt = mdp.render("tasks/social/daily_report_generator", {
+            # Get Agent Profile for dynamic persona injection
+            agent_manager = AgentManager()
+            agent_profile = agent_manager.agents.get(agent_manager.active_agent_id)
+            identity_label = agent_profile.identity_label if agent_profile else "智能助手"
+            personality_tags = "、".join(agent_profile.personality_tags) if agent_profile else ""
+
+            from services.mdp.manager import mdp
+            report_prompt = mdp.render("services/social/reporting/daily_report_generator", {
                 "agent_name": bot_name,
                 "date_str": date_str,
                 "total_messages": total_messages,
                 "active_groups_count": len(active_groups),
-                "summary_content": summary_content
+                "summary_content": summary_content,
+                "identity_label": identity_label,
+                "personality_tags": personality_tags
             })
             
             from services.llm_service import llm_service

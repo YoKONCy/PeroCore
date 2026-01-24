@@ -130,7 +130,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, toRaw, nextTick } from 'vue'
-import { AGENT_NAME } from '../config'
+import { API_BASE } from '../config'
 import FileSearchModal from '../components/FileSearchModal.vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, emit } from '@tauri-apps/api/event'
@@ -139,6 +139,20 @@ import { getAllWebviewWindows, WebviewWindow } from '@tauri-apps/api/webviewWind
 import { PhysicalPosition } from '@tauri-apps/api/dpi'
 
 const appWindow = getCurrentWindow();
+
+const currentAgentName = ref('Pero')
+const fetchActiveAgent = async () => {
+    try {
+        const res = await fetch(`${API_BASE}/agents`)
+        if (res.ok) {
+            const agents = await res.json()
+            const active = agents.find(a => a.is_active)
+            if (active) {
+                currentAgentName.value = active.name
+            }
+        }
+    } catch (e) { console.error('Failed to fetch active agent:', e) }
+}
 
 const voiceMode = ref(parseInt(localStorage.getItem('ppc.voice_mode') || '0')) // 0: off, 1: auto(vad), 2: ptt
 const isWorkMode = ref(false) // 新增工作模式状态
@@ -322,6 +336,8 @@ let replyTimer = null
 
 const showFileModal = ref(false)
 const foundFiles = ref([])
+const currentAgentId = ref('pero')
+const currentAgentName = ref(AGENT_NAME)
 
 // 气泡折叠相关
 const isBubbleExpanded = ref(false)
@@ -358,6 +374,7 @@ const checkOverflow = () => {
 }
 
 onMounted(async () => {
+  fetchActiveAgent()
   // 初始开启穿透
   setIgnoreMouse(true)
   
@@ -513,6 +530,12 @@ const fetchPetState = async () => {
         if (res.ok) {
             const data = await res.json()
             
+            // 0. 更新当前 Agent 名称和 ID
+            if (data.active_agent) {
+                if (data.active_agent.name) currentAgentName.value = data.active_agent.name
+                if (data.active_agent.id) currentAgentId.value = data.active_agent.id
+            }
+
             // 构建 applyTriggers 需要的数据结构
             const triggerData = {}
             
@@ -835,8 +858,10 @@ const applyTriggers = (data) => {
 
   // 2. 处理交互消息 (Click/Idle/Back)
   let curTexts = {}
+  const storageKey = `ppc.waifu.texts.${currentAgentId.value}`
+  
   try {
-    const saved = localStorage.getItem('ppc.waifu.texts')
+    const saved = localStorage.getItem(storageKey)
     if (saved) curTexts = JSON.parse(saved)
   } catch (e) {}
 
@@ -879,7 +904,7 @@ const applyTriggers = (data) => {
   }
 
   if (updated) {
-    localStorage.setItem('ppc.waifu.texts', JSON.stringify(curTexts))
+    localStorage.setItem(storageKey, JSON.stringify(curTexts))
     window.dispatchEvent(new CustomEvent('ppc:waifu-texts-updated', { detail: curTexts }))
     window.WAIFU_TEXTS = curTexts
     localTexts.value = curTexts
@@ -1217,6 +1242,8 @@ const showToast = (msg) => {
 const localTexts = ref({})
 const loadLocalTexts = async () => {
   try {
+    const storageKey = `ppc.waifu.texts.${currentAgentId.value}`
+    
     // 0. 尝试从后端同步最新配置 (新增)
     try {
         const syncRes = await fetch('http://localhost:9120/api/configs/waifu-texts')
@@ -1225,10 +1252,10 @@ const loadLocalTexts = async () => {
             if (syncData && Object.keys(syncData).length > 0) {
                 // 读取现有的 localStorage，避免覆盖非云端管理的字段
                 let existing = {}
-                try { existing = JSON.parse(localStorage.getItem('ppc.waifu.texts') || '{}') } catch(e) {}
+                try { existing = JSON.parse(localStorage.getItem(storageKey) || '{}') } catch(e) {}
                 
                 const merged = { ...existing, ...syncData }
-                localStorage.setItem('ppc.waifu.texts', JSON.stringify(merged))
+                localStorage.setItem(storageKey, JSON.stringify(merged))
                 console.log('[PetView] Synced waifu texts from backend')
             }
         }
@@ -1243,7 +1270,7 @@ const loadLocalTexts = async () => {
     // 2. 加载 localStorage 中的动态更新台词
     let dynamicTexts = {}
     try {
-      const saved = localStorage.getItem('ppc.waifu.texts')
+      const saved = localStorage.getItem(storageKey)
       if (saved) dynamicTexts = JSON.parse(saved)
     } catch (e) {
       console.warn('Failed to parse dynamic texts from localStorage:', e)
@@ -1665,12 +1692,12 @@ onMounted(async () => {
     
     console.log('PetView mounted, starting Live2D load...')
 
-  // 加载本地台词
-  await loadLocalTexts()
-
   // [Fix] 立即同步一次后端状态，并开启轮询
   await fetchPetState()
   setInterval(fetchPetState, 30000)
+
+  // 加载本地台词 (必须在 fetchPetState 之后，以获取正确的 currentAgentId)
+  await loadLocalTexts()
   
   // 显示欢迎语
    showWelcomeMessage()
@@ -1896,9 +1923,9 @@ const sendMessage = async (systemMsg = null, isHidden = false) => {
   currentText.value = ''
   
   // 发送“正在思考”状态
-  window.dispatchEvent(new CustomEvent('ppc:chat', { detail: 'Pero正在思考中...' }))
+ window.dispatchEvent(new CustomEvent('ppc:chat', { detail: `${currentAgentName.value}正在思考中...` }))
   
-  // 优先使用 localStorage 中的 sessionId，如果没有则默认为 'default'
+  try {// 优先使用 localStorage 中的 sessionId，如果没有则默认为 'default'
   let desktopSessionId = localStorage.getItem('ppc.sessionId') || 'default'
   
   // 强制修正：如果 sessionId 不符合规范（例如是旧版本的 UUID 格式），则重置为 'default'

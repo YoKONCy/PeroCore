@@ -30,73 +30,83 @@ async def main():
     async for session in get_session():
         try:
             print("[1/3] Checking SQL Database...")
-            statement = select(func.count(Memory.id))
-            result = await session.exec(statement)
-            db_count = result.one()
-            print(f"📊 SQL Database Memories: {db_count}")
+            # Get distinct agent_ids
+            agent_ids_result = await session.exec(select(Memory.agent_id).distinct())
+            agent_ids = agent_ids_result.all()
+            # Handle None agent_id if any (should default to 'pero')
+            agent_ids = [aid if aid else 'pero' for aid in agent_ids]
+            agent_ids = list(set(agent_ids)) # Unique
             
-            # 3. Get Vector Store Count
-            print("[2/3] Checking Vector Store...")
-            try:
-                # Force ensure loaded
-                vector_store._ensure_loaded()
-                vec_count = vector_store.count_memories()
-                print(f"📊 Vector Store Memories: {vec_count}")
-            except Exception as e:
-                print(f"❌ Vector Store Error: {e}")
-                return
+            if not agent_ids:
+                agent_ids = ['pero']
+                
+            print(f"Found agents: {agent_ids}")
 
-            if db_count == vec_count:
-                print("\n✅ Counts match! No synchronization needed.")
-                return
+            for agent_id in agent_ids:
+                print(f"\n--- Syncing Agent: {agent_id} ---")
+                statement = select(func.count(Memory.id)).where(Memory.agent_id == agent_id)
+                result = await session.exec(statement)
+                db_count = result.one()
+                print(f"📊 SQL Database Memories ({agent_id}): {db_count}")
+                
+                # 3. Get Vector Store Count
+                print(f"[2/3] Checking Vector Store ({agent_id})...")
+                try:
+                    # Force ensure loaded
+                    vector_store._ensure_loaded()
+                    vec_count = vector_store.count_memories(agent_id=agent_id)
+                    print(f"📊 Vector Store Memories ({agent_id}): {vec_count}")
+                except Exception as e:
+                    print(f"❌ Vector Store Error: {e}")
+                    continue
 
-            print(f"\n⚠️ Mismatch detected! (DB: {db_count} vs Vector: {vec_count})")
-            print("🔄 Starting Synchronization...")
-            
-            # 4. Synchronization (One-way: DB -> Vector)
-            # Fetch all memories
-            stmt = select(Memory)
-            memories = (await session.exec(stmt)).all()
-            
-            synced_count = 0
-            t_start = time.time()
-            
-            # Batch process
-            BATCH_SIZE = 50
-            total_batches = (len(memories) + BATCH_SIZE - 1) // BATCH_SIZE
-            
-            for i in range(0, len(memories), BATCH_SIZE):
-                batch = memories[i:i+BATCH_SIZE]
+                if db_count == vec_count:
+                    print(f"✅ Counts match for {agent_id}! No synchronization needed.")
+                    continue
+
+                print(f"⚠️ Mismatch detected for {agent_id}! (DB: {db_count} vs Vector: {vec_count})")
+                print("🔄 Starting Synchronization...")
                 
-                # Check which ones are missing (simple check: try to add all, 
-                # vector store should handle updates/duplicates or we just overwrite)
-                # Actually, vector_service.add_memory usually overwrites.
+                # 4. Synchronization (One-way: DB -> Vector)
+                # Fetch all memories for this agent
+                stmt = select(Memory).where(Memory.agent_id == agent_id)
+                memories = (await session.exec(stmt)).all()
                 
-                # Prepare vectors
-                texts = [m.content for m in batch]
-                embeddings = embedding_service.encode(texts)
+                synced_count = 0
+                t_start = time.time()
                 
-                for m, vec in zip(batch, embeddings):
-                    if not m.id: continue
-                    try:
-                        vector_store.add_memory(
-                            memory_id=m.id,
-                            embedding=vec
-                        )
-                        synced_count += 1
-                    except Exception as ve:
-                        print(f"Failed to add memory {m.id}: {ve}")
+                # Batch process
+                BATCH_SIZE = 50
+                total_batches = (len(memories) + BATCH_SIZE - 1) // BATCH_SIZE
                 
-                print(f"   Processed batch {i//BATCH_SIZE + 1}/{total_batches} ({synced_count}/{len(memories)})")
+                for i in range(0, len(memories), BATCH_SIZE):
+                    batch = memories[i:i+BATCH_SIZE]
+                    
+                    # Prepare vectors
+                    texts = [m.content for m in batch]
+                    embeddings = embedding_service.encode(texts)
+                    
+                    for m, vec in zip(batch, embeddings):
+                        if not m.id: continue
+                        try:
+                            vector_store.add_memory(
+                                memory_id=m.id,
+                                embedding=vec,
+                                metadata={"agent_id": agent_id}
+                            )
+                            synced_count += 1
+                        except Exception as ve:
+                            print(f"Failed to add memory {m.id}: {ve}")
+                    
+                    print(f"   Processed batch {i//BATCH_SIZE + 1}/{total_batches} ({synced_count}/{len(memories)})")
                 
-            # Save index
-            vector_store.save()
-            t_end = time.time()
-            
+                # Save index
+                vector_store.save()
+                t_end = time.time()
+                print(f"✅ Synced {synced_count} memories for {agent_id} in {t_end - t_start:.2f}s")
+
             print("\n" + "="*50)
-            print(f"✅ Synchronization Complete!")
-            print(f"📥 Synced {synced_count} memories.")
-            print(f"⏱️ Time: {t_end - t_start:.2f}s")
+            print(f"✅ All Agents Synchronization Complete!")
             print("="*50)
 
         except Exception as e:

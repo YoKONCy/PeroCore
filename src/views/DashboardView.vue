@@ -151,8 +151,32 @@
                 <el-col :span="24">
                   <el-card shadow="never" class="glass-card">
                     <template #header>
-                      <div class="card-header">
+                      <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
                         <span>当前状态</span>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                           <span style="font-size: 12px; color: #909399;">Active Agent:</span>
+                           <el-dropdown @command="switchAgent" trigger="click" :disabled="isSwitchingAgent">
+                              <span class="el-dropdown-link" style="cursor: pointer; display: flex; align-items: center; gap: 5px; color: #409EFF; font-weight: bold;">
+                                 {{ activeAgent?.name || 'Unknown' }}
+                                 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                              </span>
+                              <template #dropdown>
+                                <el-dropdown-menu>
+                                   <el-dropdown-item 
+                                      v-for="agent in availableAgents" 
+                                      :key="agent.id" 
+                                      :command="agent.id"
+                                      :disabled="agent.id === activeAgent?.id || !agent.is_enabled"
+                                   >
+                                      <div style="display: flex; align-items: center; gap: 8px;">
+                                         <span>{{ agent.name }}</span>
+                                         <span v-if="!agent.is_enabled" style="font-size: 10px; color: #999;">(Disabled)</span>
+                                      </div>
+                                   </el-dropdown-item>
+                                </el-dropdown-menu>
+                              </template>
+                           </el-dropdown>
+                        </div>
                       </div>
                     </template>
                     <el-row :gutter="20">
@@ -256,7 +280,7 @@
                         <div style="font-size: 24px;">🔮</div>
                         <div>
                            <div style="font-weight: bold; font-size: 16px;">主动视觉感应 (AuraVision)</div>
-                           <div style="font-size: 13px; color: #666; margin-top: 4px;">开启后，Pero 将通过屏幕主动感知你的存在并触发互动。采用隐私保护设计，仅提取特征。</div>
+                           <div style="font-size: 13px; color: #666; margin-top: 4px;">开启后，{{ activeAgent?.name || 'Pero' }} 将通过屏幕主动感知你的存在并触发互动。采用隐私保护设计，仅提取特征。</div>
                         </div>
                       </div>
                       <el-switch 
@@ -281,7 +305,7 @@
                         <div>
                            <div style="font-weight: bold; font-size: 16px;">智能陪伴模式 (Companion Mode)</div>
                            <div style="font-size: 13px; color: #666; margin-top: 4px;">
-                             Pero 将自动观察你的屏幕动态并进行互动。
+                             {{ activeAgent?.name || 'Pero' }} 将自动观察你的屏幕动态并进行互动。
                              <span v-if="!isLightweightEnabled" style="color: #f56c6c; margin-left: 8px;">(需要先开启“轻量模式”)</span>
                            </div>
                         </div>
@@ -311,6 +335,29 @@
             <div v-else-if="currentTab === 'logs'" key="logs" class="view-container logs-layout">
               <el-card shadow="never" class="glass-card filter-card">
                 <el-form :inline="true" size="default">
+                  <el-form-item label="角色">
+                    <el-dropdown @command="switchAgent" trigger="click" :disabled="isSwitchingAgent">
+                      <span class="el-dropdown-link" style="cursor: pointer; display: flex; align-items: center; gap: 5px; color: #409EFF;">
+                         {{ activeAgent?.name || 'Unknown' }}
+                         <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                      </span>
+                      <template #dropdown>
+                        <el-dropdown-menu>
+                           <el-dropdown-item 
+                              v-for="agent in availableAgents" 
+                              :key="agent.id" 
+                              :command="agent.id"
+                              :disabled="agent.id === activeAgent?.id || !agent.is_enabled"
+                           >
+                              <div style="display: flex; align-items: center; gap: 8px;">
+                                 <span>{{ agent.name }}</span>
+                                 <span v-if="!agent.is_enabled" style="font-size: 10px; color: #999;">(Disabled)</span>
+                              </div>
+                           </el-dropdown-item>
+                        </el-dropdown-menu>
+                      </template>
+                    </el-dropdown>
+                  </el-form-item>
                   <el-form-item label="来源">
                     <el-select v-model="selectedSource" @change="fetchLogs" style="width: 120px">
                       <el-option label="Desktop" value="desktop" />
@@ -363,7 +410,7 @@
                   </div>
                   <div class="bubble-content-box">
                     <div class="bubble-meta">
-                      <span class="role-name">{{ log.role === 'user' ? 'You' : 'Pero' }}</span>
+                      <span class="role-name">{{ log.role === 'user' ? 'You' : (activeAgent?.name || 'Pero') }}</span>
                       <span class="time">{{ log.displayTime }}</span>
                       
                       <!-- 消息元数据指示器 -->
@@ -452,6 +499,30 @@
               <div class="toolbar memory-toolbar">
                  <h3 class="section-title">长期记忆库</h3>
                  <div class="filters">
+                    <div style="display: flex; align-items: center; margin-right: 15px;">
+                        <span style="font-size: 12px; margin-right: 8px; color: #606266;">角色:</span>
+                        <el-dropdown @command="switchAgent" trigger="click" :disabled="isSwitchingAgent">
+                          <span class="el-dropdown-link" style="cursor: pointer; display: flex; align-items: center; gap: 5px; color: #409EFF;">
+                             {{ activeAgent?.name || 'Unknown' }}
+                             <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                          </span>
+                          <template #dropdown>
+                            <el-dropdown-menu>
+                               <el-dropdown-item 
+                                  v-for="agent in availableAgents" 
+                                  :key="agent.id" 
+                                  :command="agent.id"
+                                  :disabled="agent.id === activeAgent?.id || !agent.is_enabled"
+                               >
+                                  <div style="display: flex; align-items: center; gap: 8px;">
+                                     <span>{{ agent.name }}</span>
+                                     <span v-if="!agent.is_enabled" style="font-size: 10px; color: #999;">(Disabled)</span>
+                                  </div>
+                               </el-dropdown-item>
+                            </el-dropdown-menu>
+                          </template>
+                        </el-dropdown>
+                    </div>
                     <el-select 
                         v-model="memoryFilterType" 
                         placeholder="类型筛选" 
@@ -646,8 +717,32 @@
 
             <!-- 4. 待办任务 -->
             <div v-else-if="currentTab === 'tasks'" key="tasks" class="view-container">
-               <div class="toolbar">
+               <div class="toolbar" style="display: flex; justify-content: space-between; align-items: center;">
                  <h3 class="section-title">待办与计划列表</h3>
+                 <div style="display: flex; align-items: center;">
+                     <span style="font-size: 12px; margin-right: 8px; color: #606266;">角色:</span>
+                     <el-dropdown @command="switchAgent" trigger="click" :disabled="isSwitchingAgent">
+                       <span class="el-dropdown-link" style="cursor: pointer; display: flex; align-items: center; gap: 5px; color: #409EFF;">
+                          {{ activeAgent?.name || 'Unknown' }}
+                          <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                       </span>
+                       <template #dropdown>
+                         <el-dropdown-menu>
+                            <el-dropdown-item 
+                               v-for="agent in availableAgents" 
+                               :key="agent.id" 
+                               :command="agent.id"
+                               :disabled="agent.id === activeAgent?.id || !agent.is_enabled"
+                            >
+                               <div style="display: flex; align-items: center; gap: 8px;">
+                                  <span>{{ agent.name }}</span>
+                                  <span v-if="!agent.is_enabled" style="font-size: 10px; color: #999;">(Disabled)</span>
+                               </div>
+                            </el-dropdown-item>
+                         </el-dropdown-menu>
+                       </template>
+                     </el-dropdown>
+                 </div>
                </div>
 
                <div class="task-waterfall">
@@ -800,10 +895,10 @@
                 </template>
                 <el-form label-position="top">
                   <el-form-item label="主人的名字 (Owner Name)">
-                    <el-input v-model="userSettings.owner_name" placeholder="Pero 对你的称呼" />
+                    <el-input v-model="userSettings.owner_name" :placeholder="(activeAgent?.name || 'Pero') + ' 对你的称呼'" />
                   </el-form-item>
                   <el-form-item label="主人的 QQ 号 (Owner QQ)">
-                    <el-input v-model="userSettings.owner_qq" placeholder="用于 Pero 主动联系你" />
+                    <el-input v-model="userSettings.owner_qq" :placeholder="'用于 ' + (activeAgent?.name || 'Pero') + ' 主动联系你'" />
                   </el-form-item>
                   <el-form-item label="主人的人设信息 (Owner Persona)">
                     <el-input 
@@ -1117,7 +1212,8 @@ import {
   Monitor,
   Tools,
   Aim,
-  Picture
+  Picture,
+  ArrowDown
 } from '@element-plus/icons-vue'
 import TerminalPanel from '../components/TerminalPanel.vue'
 import NapCatTerminal from '../components/NapCatTerminal.vue'
@@ -1156,6 +1252,53 @@ const isDreaming = ref(false)
 const showDebugDialog = ref(false)
 const currentDebugLog = ref(null)
 const debugSegments = ref([])
+
+// --- API 交互 ---
+const API_BASE = 'http://localhost:9120/api'
+
+// 带超时的 fetch 包装函数
+const fetchWithTimeout = async (url, options = {}, timeout = 5000) => {
+  const controller = new AbortController()
+  const id = setTimeout(() => controller.abort(), timeout)
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    })
+    clearTimeout(id)
+    return response
+  } catch (error) {
+    clearTimeout(id)
+    // 只有当错误不是 AbortError 且未开启 silent 模式时才打印
+    if (error.name !== 'AbortError' && !options.silent) {
+      console.warn(`[Fetch] Request failed for ${url}:`, error.message)
+    }
+    throw error
+  }
+}
+
+// 模型配置相关
+const models = ref([])
+const showGlobalSettings = ref(false)
+const showModelEditor = ref(false)
+const remoteModels = ref([])
+const isFetchingRemote = ref(false)
+const currentEditingModel = ref({})
+const globalConfig = ref({ global_llm_api_key: '', global_llm_api_base: '' })
+
+// MCP 配置相关
+const mcps = ref([])
+const showMcpEditor = ref(false)
+const currentEditingMcp = ref({})
+const currentActiveModelId = ref(null)
+const secretaryModelId = ref(null)
+const reflectionModelId = ref(null)
+const auxModelId = ref(null)
+
+// --- Agents Management ---
+const availableAgents = ref([])
+const activeAgent = ref(null)
+const isSwitchingAgent = ref(false)
 
 const openDebugDialog = (log) => {
   currentDebugLog.value = log
@@ -1419,6 +1562,20 @@ watch([selectedSessionId, selectedSource, selectedSort, selectedDate], () => {
   }
 })
 
+// Watch active agent change to refresh data
+watch(activeAgent, () => {
+  // Clear existing data to force refresh
+  memories.value = []
+  logs.value = []
+  tasks.value = []
+  
+  fetchStats() // Update overview stats
+  
+  if (currentTab.value === 'logs') fetchLogs()
+  else if (currentTab.value === 'memories') fetchMemories()
+  else if (currentTab.value === 'tasks') fetchTasks()
+})
+
 const topTags = computed(() => {
   if (!tagCloud.value) return []
   if (Array.isArray(tagCloud.value)) {
@@ -1493,47 +1650,61 @@ const getLogMetadata = (log) => {
   }
 }
 
-// --- API 交互 ---
-const API_BASE = 'http://localhost:9120/api'
 
-// 带超时的 fetch 包装函数
-const fetchWithTimeout = async (url, options = {}, timeout = 5000) => {
-  const controller = new AbortController()
-  const id = setTimeout(() => controller.abort(), timeout)
+
+const fetchAgents = async () => {
   try {
-    const response = await fetch(url, {
-      ...options,
-      signal: controller.signal
-    })
-    clearTimeout(id)
-    return response
-  } catch (error) {
-    clearTimeout(id)
-    // 只有当错误不是 AbortError 且未开启 silent 模式时才打印
-    if (error.name !== 'AbortError' && !options.silent) {
-      console.warn(`[Fetch] Request failed for ${url}:`, error.message)
+    const res = await fetchWithTimeout(`${API_BASE}/agents`, {}, 2000)
+    if (res.ok) {
+        const agents = await res.json()
+        availableAgents.value = agents
+        const active = agents.find(a => a.is_active)
+        if (active) {
+            activeAgent.value = active
+        }
     }
-    throw error
+  } catch (e) {
+      console.error('Failed to fetch agents:', e)
   }
 }
 
-// 模型配置相关
-const models = ref([])
-const showGlobalSettings = ref(false)
-const showModelEditor = ref(false)
-const remoteModels = ref([])
-const isFetchingRemote = ref(false)
-const currentEditingModel = ref({})
-const globalConfig = ref({ global_llm_api_key: '', global_llm_api_base: '' })
+const switchAgent = async (agentId) => {
+    if (isSwitchingAgent.value || agentId === activeAgent.value?.id) return
+    isSwitchingAgent.value = true
+    try {
+        // 1. Call API to switch active agent
+        const res = await fetchWithTimeout(`${API_BASE}/agents/active`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ agent_id: agentId })
+        }, 5000)
+        
+        if (!res.ok) {
+            const err = await res.json()
+            throw new Error(err.detail || 'Failed to switch agent')
+        }
+        
+        // 2. Refresh list to update UI
+        await fetchAgents()
+        ElMessage.success(`已切换到角色: ${activeAgent.value?.name}`)
+        
+        // 3. Persist to launch config via Tauri (Fire and forget)
+        if (window.__TAURI__) {
+            const invoke = window.__TAURI__.core?.invoke || window.__TAURI__.invoke
+            // Get current enabled list
+            const enabled = availableAgents.value.filter(a => a.is_enabled).map(a => a.id)
+            invoke('save_agent_launch_config', { 
+                enabledAgents: enabled,
+                activeAgent: agentId 
+            }).catch(e => console.error('Failed to save launch config:', e))
+        }
 
-// MCP 配置相关
-const mcps = ref([])
-const showMcpEditor = ref(false)
-const currentEditingMcp = ref({})
-const currentActiveModelId = ref(null)
-const secretaryModelId = ref(null)
-const reflectionModelId = ref(null)
-const auxModelId = ref(null)
+    } catch (e) {
+        ElMessage.error(e.message)
+    } finally {
+        isSwitchingAgent.value = false
+    }
+}
 
 // --- Methods ---
 
@@ -1590,7 +1761,11 @@ const formatBytes = (bytes, decimals = 1) => {
 
 const fetchStats = async () => {
   try {
-    const res = await fetchWithTimeout(`${API_BASE}/stats/overview`, {}, 2000)
+    let url = `${API_BASE}/stats/overview`
+    if (activeAgent.value) {
+      url += `?agent_id=${activeAgent.value.id}`
+    }
+    const res = await fetchWithTimeout(url, {}, 2000)
     const data = await res.json()
     stats.value = data
   } catch (e) {
@@ -1607,7 +1782,8 @@ const fetchAllData = async () => {
     await Promise.all([
       fetchPetState(),
       fetchConfig(),
-      fetchStats()
+      fetchStats(),
+      fetchAgents()
     ])
   } catch (e) { console.error('Core fetch error:', e) }
 
@@ -1681,7 +1857,11 @@ const fetchMemoryGraph = async () => {
     try {
         isLoadingGraph.value = true
         // 降低限制到 100 以提升性能，防止大规模节点渲染导致主线程阻塞
-        const res = await fetchWithTimeout(`${API_BASE}/memories/graph?limit=100`, {}, 8000)
+        let url = `${API_BASE}/memories/graph?limit=100`
+        if (activeAgent.value) {
+            url += `&agent_id=${activeAgent.value.id}`
+        }
+        const res = await fetchWithTimeout(url, {}, 8000)
         const data = await res.json()
         
         // 确保在数据拉取后，且仍然在 memory 标签页时才初始化图表
@@ -2184,6 +2364,10 @@ const fetchMemories = async () => {
     if (memoryFilterTags.value.length > 0) {
         url += `&tags=${memoryFilterTags.value.join(',')}`
     }
+    // Add active agent filter
+    if (activeAgent.value) {
+      url += `&agent_id=${activeAgent.value.id}`
+    }
     const res = await fetchWithTimeout(url, {}, 5000)
     const rawMemories = await res.json()
     
@@ -2231,7 +2415,12 @@ const fetchTasks = async () => {
   fetchTasks.lastRequestId = currentRequestId
 
   try {
-    const res = await fetchWithTimeout(`${API_BASE}/tasks`, {}, 5000)
+    let url = `${API_BASE}/tasks`
+    // Add active agent filter
+    if (activeAgent.value) {
+      url += `?agent_id=${activeAgent.value.id}`
+    }
+    const res = await fetchWithTimeout(url, {}, 5000)
     const rawTasks = await res.json()
     
     // Process all at once if count is small (< 100), otherwise batch
@@ -2364,7 +2553,7 @@ const handleSystemReset = async () => {
   if (isSaving.value) return
   try {
     const { value, action } = await ElMessageBox.prompt(
-      '<div class="danger-main-text">主人，真的要让 Pero 忘掉你吗？o(╥﹏╥)o</div>' +
+      '<div class="danger-main-text">主人，真的要让 ' + (activeAgent.value?.name || 'Pero') + ' 忘掉你吗？o(╥﹏╥)o</div>' +
       '<div class="danger-sub-text">（此操作将执行深度清理，如需继续，请在文本框中输入“我们还会再见的...”）</div>',
       '终极警告',
       {
@@ -2670,6 +2859,10 @@ const fetchLogs = async () => {
     let url = `${API_BASE}/history/${selectedSource.value}/${selectedSessionId.value}?limit=200&sort=${selectedSort.value}`
     if (selectedDate.value) {
       url += `&date=${selectedDate.value}`
+    }
+    // Add active agent filter
+    if (activeAgent.value) {
+      url += `&agent_id=${activeAgent.value.id}`
     }
     
     const res = await fetchWithTimeout(url, {}, 5000)

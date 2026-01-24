@@ -687,6 +687,117 @@ fn open_root_folder() {
     let _ = Command::new("explorer").arg(".").spawn();
 }
 
+
+#[derive(Serialize, serde::Deserialize, Clone)]
+struct AgentLaunchInfo {
+    id: String,
+    name: String,
+    description: String,
+    is_enabled: bool,
+    is_active: bool,
+}
+
+#[derive(Serialize, serde::Deserialize)]
+struct AgentLaunchConfig {
+    enabled_agents: Vec<String>,
+    active_agent: String,
+}
+
+#[tauri::command]
+fn scan_local_agents() -> Result<Vec<AgentLaunchInfo>, String> {
+    let workspace_root = get_workspace_root();
+    let agents_dir = workspace_root.join("backend/services/mdp/agents");
+    
+    // Load existing config to sync state
+    let config_path = get_workspace_root().join("backend/data/agent_launch_config.json");
+    let mut config = AgentLaunchConfig {
+        enabled_agents: vec![],
+        active_agent: "pero".to_string(),
+    };
+    
+    if config_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&config_path) {
+            if let Ok(c) = serde_json::from_str(&content) {
+                config = c;
+            }
+        }
+    }
+
+    let mut agents = Vec::new();
+    if agents_dir.exists() {
+        if let Ok(entries) = std::fs::read_dir(agents_dir) {
+            for entry in entries {
+                if let Ok(entry) = entry {
+                    if let Ok(file_type) = entry.file_type() {
+                        if file_type.is_dir() {
+                            let agent_id = entry.file_name().to_string_lossy().to_string().to_lowercase();
+                            let config_file = entry.path().join("config.json");
+                            
+                            let mut name = agent_id.clone(); // Default to ID
+                            let mut description = String::new();
+                            
+                            if config_file.exists() {
+                                if let Ok(content) = std::fs::read_to_string(config_file) {
+                                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                                        if let Some(n) = json.get("name").and_then(|v| v.as_str()) {
+                                            name = n.to_string();
+                                        }
+                                        if let Some(d) = json.get("description").and_then(|v| v.as_str()) {
+                                            description = d.to_string();
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // Determine status
+                            // If config is empty (first run), default enable all
+                            let is_enabled = if config.enabled_agents.is_empty() {
+                                true
+                            } else {
+                                config.enabled_agents.contains(&agent_id)
+                            };
+                            
+                            let is_active = config.active_agent == agent_id;
+
+                            agents.push(AgentLaunchInfo {
+                                id: agent_id,
+                                name,
+                                description,
+                                is_enabled,
+                                is_active
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Sort by ID to keep consistent order
+    agents.sort_by(|a, b| a.id.cmp(&b.id));
+    
+    Ok(agents)
+}
+
+#[tauri::command]
+fn save_agent_launch_config(enabled_agents: Vec<String>, active_agent: String) -> Result<(), String> {
+    let config = AgentLaunchConfig {
+        enabled_agents,
+        active_agent,
+    };
+    
+    let data_dir = get_workspace_root().join("backend/data");
+    if !data_dir.exists() {
+        let _ = std::fs::create_dir_all(&data_dir);
+    }
+    
+    let config_path = data_dir.join("agent_launch_config.json");
+    let content = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
+    
+    std::fs::write(config_path, content).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[tauri::command]
 fn check_napcat(app: tauri::AppHandle) -> bool {
     napcat::check_napcat_installed(&app)
@@ -833,7 +944,9 @@ pub fn run() {
             get_config,
             save_config,
             get_diagnostics,
-            get_system_stats
+            get_system_stats,
+            scan_local_agents,
+            save_agent_launch_config
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {

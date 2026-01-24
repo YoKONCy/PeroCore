@@ -181,7 +181,7 @@ async def read_agent_memory(query: str):
     except Exception as e:
         return f"Failed to read agent memory: {e}"
 
-async def notify_master(content: str, importance: str = "medium"):
+async def qq_notify_master(content: str, importance: str = "medium"):
     """
     Proactively report important social events to the master.
     """

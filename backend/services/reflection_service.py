@@ -22,13 +22,22 @@ class ReflectionService:
         
         reflection_model_id = configs.get("reflection_model_id")
         
-        # 默认回退
+        # 默认回退到主模型
+        main_model_id = configs.get("current_model_id")
+        
         api_key = configs.get("global_llm_api_key", "")
         api_base = configs.get("global_llm_api_base", "https://api.openai.com")
-        model = "gpt-4o" # 默认高智商模型
+        model = "gpt-4o" # Fallback if everything fails, but we try to use main model first
 
         if reflection_model_id:
             model_config = await self.session.get(AIModelConfig, int(reflection_model_id))
+            if model_config:
+                api_key = model_config.api_key if model_config.provider_type == 'custom' else api_key
+                api_base = model_config.api_base if model_config.provider_type == 'custom' else api_base
+                model = model_config.model_id
+        elif main_model_id:
+             # Use Main Model as fallback
+            model_config = await self.session.get(AIModelConfig, int(main_model_id))
             if model_config:
                 api_key = model_config.api_key if model_config.provider_type == 'custom' else api_key
                 api_base = model_config.api_base if model_config.provider_type == 'custom' else api_base
@@ -406,7 +415,7 @@ class ReflectionService:
 
     async def _analyze_relation(self, llm: LLMService, m1: Memory, m2: Memory) -> Optional[dict]:
         """让 LLM 分析两条记忆的关系"""
-        prompt = mdp.render("capabilities/reflection_relation", {
+        prompt = mdp.render("services/memory/reflection/relation", {
             "m1_time": m1.realTime,
             "m1_content": m1.content,
             "m1_tags": m1.tags,

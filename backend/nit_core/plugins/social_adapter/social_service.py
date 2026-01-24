@@ -23,6 +23,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlalchemy.orm import sessionmaker
 from services.memory_service import MemoryService
 from services.mdp.manager import mdp
+from services.agent_manager import AgentManager
 # from services.agent_service import AgentService (Moved inside method)
 # from services.prompt_service import PromptManager (Moved inside method to avoid circular import)
 
@@ -71,66 +72,8 @@ class SocialService:
         except Exception as e:
             logger.error(f"[Social] 初始化社交数据库失败: {e}")
         
-        # [动态注册工具] 注册 notify_master 为 Agent 可用的工具
-        try:
-            from core.plugin_manager import plugin_manager
-            
-            # 定义工具函数
-            async def qq_notify_master(content: str):
-                """
-                【仅限社交模式】发送通知给主人（Owner）。
-                当你在与他人聊天时遇到无法处理的情况，或者需要向主人汇报（如收到好友申请、发现有趣的事情）时，请务必使用此工具。
-                严禁在与陌生人的聊天窗口中直接呼叫“主人”。
-                
-                Args:
-                    content: 要汇报给主人的内容。
-                """
-                await self.notify_master(content, "high")
-                return f"已将通知发送给主人：{content}"
-            
-            # 注册到 tools_map
-            plugin_manager.tools_map["qq_notify_master"] = qq_notify_master
-            
-            # 注册到定义列表（为了让 AgentService.social_chat 能筛选到它）
-            # 注意：这只是临时的内存注入，重启后需要重新注册。
-            # 由于 plugin_manager.get_all_definitions() 是从 self.plugins 动态生成的，
-            # 我们需要构造一个伪造的 manifest 或直接修改 get_all_definitions 的行为？
-            # 不，AgentService.social_chat 调用 plugin_manager.get_all_definitions()。
-            # 我们直接把这个工具定义注入到一个名为 'SocialRuntime' 的虚拟插件中。
-            
-            if "SocialRuntime" not in plugin_manager.plugins:
-                plugin_manager.plugins["SocialRuntime"] = {
-                    "name": "SocialRuntime",
-                    "_category": "runtime",
-                    "capabilities": {
-                        "invocationCommands": []
-                    }
-                }
-            
-            # 检查是否已存在
-            defs = plugin_manager.plugins["SocialRuntime"]["capabilities"]["invocationCommands"]
-            if not any(d["function"]["name"] == "qq_notify_master" for d in defs):
-                defs.append({
-                    "function": {
-                        "name": "qq_notify_master",
-                        "description": "【仅限社交模式】发送通知给主人（Owner）。当你在与他人聊天时遇到无法处理的情况，或者需要向主人汇报（如收到好友申请、发现有趣的事情）时，请务必使用此工具。严禁在与陌生人的聊天窗口中直接呼叫“主人”。",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "content": {
-                                    "type": "string",
-                                    "description": "要汇报给主人的内容"
-                                }
-                            },
-                            "required": ["content"]
-                        }
-                    }
-                })
-                
-            logger.info("[Social] 已注册动态工具: qq_notify_master")
-            
-        except Exception as e:
-            logger.error(f"[Social] 注册动态工具失败: {e}")
+        # [动态注册工具] 已移除：qq_notify_master 现在是 qq_tools.py 中的静态工具
+        # 此处不需要再进行动态注入。
 
         self.running = True
         logger.info("社交服务已启动。等待 WebSocket 连接于 /api/social/ws")
@@ -309,7 +252,11 @@ class SocialService:
                         # session_name 暂时用 ID 或 Sender Name 填充
                         name = f"Session {msg.session_id}"
                         if msg.session_type == "private":
-                             name = msg.sender_name # 私聊对方名字通常就是 Session Name
+                             # [Fix] 如果最后一条消息是自己发的，不要把 Session Name 设为自己
+                             if msg.sender_id == "self" or msg.sender_name == self.config_manager.get("bot_name", "Pero"):
+                                 name = "某人"
+                             else:
+                                 name = msg.sender_name
                         elif msg.session_type == "group":
                              name = f"Group {msg.session_id}"
 
@@ -371,7 +318,7 @@ class SocialService:
                     continue
 
                 # 到了思考时间，尝试冒泡
-                # 随机选择一个活跃群聊
+                # 随机选择一个活跃群聊 (注意：这里现在按 last_message_time 排序，即寻找热闹的群)
                 sessions = self.session_manager.get_active_sessions(limit=5, session_type="group")
                 
                 # [Fix] 如果内存中没有活跃会话（例如刚重启），尝试从数据库复活
@@ -388,12 +335,16 @@ class SocialService:
                 
                 target_session = random.choice(sessions)
                 
-                # 检查状态
+                # 检查状态 (Active vs Dive)
+                # 使用 last_active_time 判断 Bot 是否处于活跃互动期
                 time_since_active = (now - target_session.last_active_time).total_seconds()
                 is_active = time_since_active < 120
-                session_state = "ACTIVE" if is_active else "DIVE"
                 
-                logger.info(f"[Social-Group] 触发检查: {target_session.session_name} (状态: {session_state})")
+                # 更新 session.state 以便 session_manager 能够感知
+                session_state = "active" if is_active else "observing"
+                target_session.state = session_state # Sync state
+                
+                logger.info(f"[Social-Group] 触发检查: {target_session.session_name} (状态: {session_state}, 上次互动: {int(time_since_active)}s 前)")
                 
                 # 尝试说话
                 spoke = False
@@ -403,6 +354,12 @@ class SocialService:
                 else:
                      # DIVE 状态调用秘书
                      spoke = await self._attempt_random_thought(target_session)
+                     
+                     # [State Update] 如果秘书决定主动说话，Bot 进入活跃状态
+                     if spoke:
+                         target_session.last_active_time = datetime.now()
+                         target_session.state = "active"
+                         logger.info(f"[Social-Group] 主动发言成功，{target_session.session_name} 进入活跃状态。")
                 
                 # 决定下一次检查时间
                 if spoke:
@@ -589,11 +546,17 @@ class SocialService:
             for msg in recent_messages:
                 # [Fix] 明确区分自己和他人，防止精分
                 sender = msg.sender_name
-                bot_name = self.config_manager.get("bot_name", "Pero")
-                if sender == bot_name or sender == "Me":
-                    sender = f"Me ({bot_name})"
+                # bot_name is defined below, but we need it here. Let's pre-calculate it.
+                # Get Agent Profile for dynamic persona injection
+                if not 'agent_manager' in locals():
+                    agent_manager = AgentManager()
+                agent_profile = agent_manager.agents.get(agent_manager.active_agent_id)
+                current_agent_name = agent_profile.name if agent_profile else self.config_manager.get("bot_name", "Pero")
+                
+                if sender == current_agent_name or sender == "Me" or sender == self.config_manager.get("bot_name", "Pero"):
+                    sender = f"Me ({current_agent_name})"
                 elif target_session.session_type == "private" and sender == target_session.session_name:
-                    sender = "User"
+                    sender = "某人"
                 
                 # [Fix] Clean CQ codes for cleaner context
                 clean_content = self._clean_cq_codes(msg.content)
@@ -612,16 +575,34 @@ class SocialService:
             bot_name = self.bot_info.get("nickname", self.config_manager.get("bot_name", "Pero"))
             
             # [Refactor] Split prompts for Group and Private to avoid schizophrenia
-            template_name = "tasks/social/secretary_decision_group"
+            template_name = "services/social/decisions/secretary_decision_group"
             if target_session.session_type == "private":
-                template_name = "tasks/social/secretary_decision_private"
+                template_name = "services/social/decisions/secretary_decision_private"
+            
+            # [Fix] Determine correct target name for private chat
+            target_name = target_session.session_name
+            if target_session.session_type == "private":
+                 # If session name is same as bot (because bot sent last message), fallback to "User"
+                 if target_name == bot_name or target_name == "Me":
+                     target_name = "某人"
                 
+            # Get Agent Profile for dynamic persona injection
+            agent_manager = AgentManager()
+            agent_profile = agent_manager.agents.get(agent_manager.active_agent_id)
+            identity_label = agent_profile.identity_label if agent_profile else "智能助手"
+            personality_tags = "、".join(agent_profile.personality_tags) if agent_profile else ""
+
+            if agent_profile:
+                bot_name = agent_profile.name
+
             prompt = mdp.render(template_name, {
                 "agent_name": bot_name,
                 "current_time": datetime.now().strftime('%H:%M'),
                 "session_state": session_state,
                 "session_type_str": session_type_str,
-                "target_session_name": target_session.session_name
+                "target_session_name": target_name,
+                "identity_label": identity_label,
+                "personality_tags": personality_tags
             })
 
             # ... (Tool calling logic reused) ...
@@ -677,7 +658,8 @@ class SocialService:
 
             messages = [
                 {"role": "system", "content": prompt},
-                {"role": "user", "content": user_content_payload}
+                {"role": "user", "content": user_content_payload},
+                {"role": "system", "content": rules_prompt}
             ]
             
             # 秘书不需要工具，纯文本判断即可
@@ -716,9 +698,11 @@ class SocialService:
                 
                 # 2. 去除常见前缀
                 import re
-                bot_name = self.config_manager.get("bot_name", "Pero")
+                # bot_name = self.config_manager.get("bot_name", "Pero") 
+                # Use current_agent_name derived above
+                
                 # 动态构建正则以匹配当前 bot_name
-                pattern = r'^(' + re.escape(bot_name) + r'|Me|Reply|Answer|Decision):\s*'
+                pattern = r'^(' + re.escape(current_agent_name) + r'|Me|Reply|Answer|Decision):\s*'
                 content = re.sub(pattern, '', content, flags=re.IGNORECASE).strip()
                 
                 if content.upper() in ["PASS", "IGNORE", "NONE", "NULL", "NO"]:
@@ -745,11 +729,14 @@ class SocialService:
                 self._next_thought_time = datetime.now() + timedelta(seconds=120)
                 
                 # 持久化
+                # [Fix] 使用动态 Agent Name 而非硬编码 "Pero"
+                # sender_name = self.bot_info.get("nickname", self.config_manager.get("bot_name", "Pero"))
+                sender_name = bot_name # bot_name is already set to active agent name above
                 await self.session_manager.persist_outgoing_message(
                     target_session.session_id,
                     target_session.session_type,
                     content,
-                    sender_name="Pero"
+                    sender_name=sender_name
                 )
                 return True
             except Exception as e:
@@ -855,34 +842,47 @@ class SocialService:
                     model=config.get("model")
                 )
                 
-                prompt = mdp.render("tasks/social/daily_summary", {
-                    "agent_name": self.config_manager.get("bot_name", "Pero"),
+                # Get active agent name
+                agent_manager = AgentManager()
+                active_agent = agent_manager.agents.get(agent_manager.active_agent_id)
+                bot_name = active_agent.name if active_agent else self.config_manager.get("bot_name", "Pero")
+                
+                prompt = mdp.render("services/social/reporting/daily_report_generator", {
+                    "agent_name": bot_name,
                     "date_str": date_str,
+                    "total_messages": len(logs),
                     "context_text": context_text
                 })
                 
                 messages = [{"role": "user", "content": prompt}]
-                response = await llm.chat(messages, temperature=0.3)
+                # 使用较高的 temperature 以获得更生动、更有创意的日记
+                
+                # [Fix] 增加重试机制，防止网络抖动导致任务失败
+                import asyncio
+                retry_count = 3
+                response = None
+                last_error = None
+                
+                for i in range(retry_count):
+                    try:
+                        response = await llm.chat(messages, temperature=0.7)
+                        break
+                    except Exception as e:
+                        last_error = e
+                        logger.warning(f"[Social] 生成摘要 LLM 请求失败 (尝试 {i+1}/{retry_count}): {e}")
+                        await asyncio.sleep(2 * (i + 1)) # 简单的退避策略
+                
+                if not response:
+                    raise Exception(f"LLM 请求在 {retry_count} 次尝试后失败: {last_error}")
+
                 summary_content = response["choices"][0]["message"]["content"]
                 
                 # 4. 保存到文件 (MD)
                 from utils.memory_file_manager import MemoryFileManager
-                file_path = await MemoryFileManager.save_log("social_daily", f"{date_str}_Social_Summary", summary_content)
+                # Use active agent name to isolate logs
+                file_path = await MemoryFileManager.save_log("social_daily", f"{date_str}_Diary", summary_content, agent_id=bot_name)
                 
-                # 5. 保存到记忆 (DB)
-                # [Modified] User requested NOT to store document types in DB at all.
-                # db_content = f"【社交日报 {date_str}】\n{summary_content}\n\n> 📁 File Archived: {file_path}"
-                
-                # await MemoryService.save_memory(
-                #     session=session,
-                #     content=db_content,
-                #     tags="social_summary,daily_log",
-                #     importance=5, # 中等重要性
-                #     source="social_summary",
-                #     memory_type="summary"
-                # )
-                
-                logger.info(f"[Social] 摘要已生成并仅保存到文件（数据库已禁用）。")
+                logger.info(f"[Social] 社交日记已生成并保存: {file_path}")
 
         except Exception as e:
             logger.error(f"[Social] 生成摘要错误: {e}", exc_info=True)
@@ -1081,18 +1081,31 @@ class SocialService:
 
         try:
             # 1. 咨询 LLM
-            from services.agent_service import AgentService
-            async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-            async with async_session() as db_session:
-                agent = AgentService(db_session)
-                config = await agent._get_llm_config()
-                
-                # 构建提示（中文）
-                bot_name = self.config_manager.get("bot_name", "Pero")
-                prompt = mdp.render("tasks/social/friend_request_decision", {
+                from services.agent_service import AgentService
+                async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+                async with async_session() as db_session:
+                    agent = AgentService(db_session)
+                    config = await agent._get_llm_config()
+                    
+                    # 构建提示（中文）
+                    # Get Agent Profile for dynamic persona injection
+                    agent_manager = AgentManager()
+                    agent_profile = agent_manager.agents.get(agent_manager.active_agent_id)
+                    
+                    bot_name = agent_profile.name if agent_profile else self.config_manager.get("bot_name", "Pero")
+                    
+                    identity_label = agent_profile.identity_label if agent_profile else "智能助手"
+                    personality_tags = "、".join(agent_profile.personality_tags) if agent_profile else ""
+                    
+                    if agent_profile:
+                        bot_name = agent_profile.name
+
+                prompt = mdp.render("services/social/decisions/friend_request_decision", {
                     "agent_name": bot_name,
                     "user_id": user_id,
-                    "comment": comment
+                    "comment": comment,
+                    "identity_label": identity_label,
+                    "personality_tags": personality_tags
                 })
                 
                 messages = [{"role": "system", "content": prompt}]
@@ -1504,17 +1517,66 @@ class SocialService:
                 self._ensure_sticker_map()
                 sticker_list = ", ".join(self._sticker_map.keys())
                 
-                logger.info(f"[{session.session_id}] 渲染 Social Instructions...")
-                social_instructions = mdp.render("tasks/social/social_instructions", {
-                    "agent_name": self.config_manager.get("bot_name", "Pero"),
+                # [Refactor] Inject Decoupled Persona & Traits
+                # [User Request] Temporarily disable multi-agent support in Social Mode.
+                # Always use default Pero configuration regardless of active agent.
+                
+                # from services.agent_manager import get_agent_manager
+                # agent_manager = get_agent_manager()
+                # active_agent = agent_manager.get_active_agent()
+                
+                # 默认值 (Fallback)
+                agent_name = self.config_manager.get("bot_name", "Pero")
+                custom_persona = None
+                traits = ["visual_expression"]
+
+                # Get Agent Profile for dynamic persona injection
+                agent_manager = AgentManager()
+                agent_profile = agent_manager.agents.get(agent_manager.active_agent_id)
+                
+                # [Enabled] Multi-agent support in Social Mode
+                if agent_profile:
+                    agent_name = agent_profile.name
+                    custom_persona = agent_profile.social_custom_persona
+                    traits = agent_profile.social_traits
+                    logger.info(f"[{session.session_id}] Using active agent persona: {agent_name}")
+
+                identity_label = agent_profile.identity_label if agent_profile else "智能助手"
+                personality_tags = "、".join(agent_profile.personality_tags) if agent_profile else ""
+
+                if not custom_persona:
+                    # 尝试从 MDP 加载默认人设模板 (personas/social_default.md)
+                    fallback_persona = f"你是一个{identity_label}，正在以社交模式与用户交流。"
+                    try:
+                        rendered_default = mdp.render("services/social/personas/social_default", {
+                            "owner_qq": owner_qq,
+                            "identity_label": identity_label,
+                            "personality_tags": personality_tags
+                        })
+                        if "Missing Prompt" not in rendered_default and "Error" not in rendered_default:
+                            custom_persona = rendered_default
+                        else:
+                            custom_persona = fallback_persona
+                    except Exception:
+                         custom_persona = fallback_persona
+                
+                # 如果从 Config 读取到了 traits，则覆盖 (旧兼容)
+                if self.config_manager.get("social_traits"):
+                    traits = self.config_manager.get("social_traits")
+
+                logger.info(f"[{session.session_id}] 渲染 Social Instructions (Agent: {agent_name})...")
+                social_instructions = mdp.render("services/social/social_instructions", {
+                    "agent_name": agent_name,
                     "current_mode": current_mode,
                     "owner_qq": owner_qq,
-                    "sticker_list": sticker_list
+                    "sticker_list": sticker_list,
+                    "custom_persona": custom_persona,
+                    "traits": traits
                 })
                 
                 # [Fix] Inject XML Guide and Time Awareness for Active Initiative
                 current_time_str = datetime.now().strftime('%H:%M:%S')
-                xml_guide = mdp.render("tasks/social/active_mode_guide", {
+                xml_guide = mdp.render("services/social/active_mode_guide", {
                     "current_time": current_time_str
                 })
                 
@@ -1558,6 +1620,10 @@ class SocialService:
                         })
                 
                 messages.append({"role": "user", "content": user_content})
+
+                # [Refactor] Append Instructions AFTER history (User message)
+                # This ensures the model sees the rules and double-thinking instructions last.
+                messages.append({"role": "system", "content": instruction_prompt})
                 
                 logger.info(f"正在呼叫会话 {session.session_id} 的社交 Agent ({current_mode})...")
                 logger.info(f"[{session.session_id}] 准备调用 agent.social_chat...")
@@ -1585,7 +1651,7 @@ class SocialService:
                             session.session_id,
                             session.session_type,
                             response_text,
-                            sender_name="Pero"
+                            sender_name=agent_name
                         )
                     except Exception as e:
                         logger.error(f"持久化 Pero 回复失败: {e}")
@@ -1777,7 +1843,7 @@ class SocialService:
             for msg in messages:
                 chat_text += f"{msg.sender_name}: {msg.content}\n"
                 
-            prompt = mdp.render("tasks/social/memory_segment_summarizer", {
+            prompt = mdp.render("services/social/reporting/memory_segment_summarizer", {
                 "session_type": session.session_type,
                 "session_name": session.session_name,
                 "chat_text": chat_text
@@ -1868,7 +1934,11 @@ class SocialService:
                         await mem_service.initialize()
                     
                     # 获取当前 Agent 名称作为 ID (默认 Pero)
-                    agent_id = self.config_manager.get("bot_name", "Pero")
+                    # agent_id = self.config_manager.get("bot_name", "Pero")
+                    # Use active agent name
+                    agent_manager = AgentManager()
+                    active_agent = agent_manager.agents.get(agent_manager.active_agent_id)
+                    agent_id = active_agent.name if active_agent else self.config_manager.get("bot_name", "Pero")
 
                     await mem_service.add_summary(
                         content=summary,
@@ -2018,12 +2088,22 @@ class SocialService:
     async def send_group_msg(self, group_id: int, message: str):
         # Preprocess stickers
         final_message = self._process_stickers(message)
-        await self._send_api("send_group_msg", {"group_id": group_id, "message": final_message})
+        # Use _send_api_and_wait to ensure delivery and catch errors (e.g. muted, group not found)
+        try:
+            await self._send_api_and_wait("send_group_msg", {"group_id": group_id, "message": final_message})
+        except Exception as e:
+            logger.error(f"[Social] Failed to send group message to {group_id}: {e}")
+            raise e
         
     async def send_private_msg(self, user_id: int, message: str):
         # Preprocess stickers
         final_message = self._process_stickers(message)
-        await self._send_api("send_private_msg", {"user_id": user_id, "message": final_message})
+        # Use _send_api_and_wait to ensure delivery
+        try:
+            await self._send_api_and_wait("send_private_msg", {"user_id": user_id, "message": final_message})
+        except Exception as e:
+            logger.error(f"[Social] Failed to send private message to {user_id}: {e}")
+            raise e
         
     async def handle_friend_request(self, flag: str, approve: bool, remark: str = ""):
         await self._send_api("set_friend_add_request", {"flag": flag, "approve": approve, "remark": remark})

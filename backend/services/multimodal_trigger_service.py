@@ -406,7 +406,7 @@ class MultimodalTriggerCoordinator:
         time_context: TimeContext
     ) -> str:
         """构建注入 LLM 的上下文"""
-        lines = ["[PERO_INTERNAL_SENSE]"]
+        lines = ["[INTERNAL_SENSE]"]
         
         # 时间上下文
         lines.append(time_context.to_prompt_segment())

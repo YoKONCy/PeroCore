@@ -149,10 +149,14 @@ class CompanionService:
         logger.info(f"[Companion] 正在总结 {len(self.chat_cache)} 条消息...")
         
         try:
+            # 获取 bot_name
+            config_mgr = get_config_manager()
+            bot_name = config_mgr.get("bot_name", "Pero")
+
             # 构建对话文本
             conv_text = ""
             for msg in self.chat_cache:
-                role = "Pero" if msg['role'] == 'assistant' else "主人"
+                role = bot_name if msg['role'] == 'assistant' else "主人"
                 conv_text += f"{role}: {msg['content']}\n"
 
             # 使用 LLM 进行总结
@@ -182,7 +186,8 @@ class CompanionService:
                         content=f"[陪伴模式总结] {summary}",
                         tags="陪伴模式, 自动总结",
                         importance=2,
-                        source="companion"
+                        source="companion",
+                        agent_id=agent_id
                     )
                     logger.info("[Companion] 记忆总结已保存。")
                     
@@ -345,7 +350,8 @@ class CompanionService:
             llm = LLMService(api_key, api_base, model_config.model_id)
 
             # 获取当前 Agent 名称
-            bot_name = "Pero"
+            config_mgr = get_config_manager()
+            bot_name = config_mgr.get("bot_name", "Pero")
             try:
                 config_entry = await session.get(Config, "bot_name")
                 if config_entry and config_entry.value:
@@ -357,11 +363,11 @@ class CompanionService:
             system_prompt = (await self.prompt_manager.get_rendered_system_prompt(session)).replace("{current_time}", datetime.now().strftime("%Y-%m-%d %H:%M"))
             
             # 使用 MDPManager 渲染陪伴指令
-            companion_instruction = self.mdp.render("tasks/companion/screen_observe_system", {"agent_name": bot_name})
+            companion_instruction = self.mdp.render("services/perception/screen_observe_system", {"agent_name": bot_name})
             system_prompt += f"\n\n{companion_instruction}"
 
             # 使用 MDPManager 渲染系统注入消息
-            user_injection = self.mdp.render("tasks/companion/screen_observe_user_injection", {"agent_name": bot_name})
+            user_injection = self.mdp.render("services/perception/screen_observe_user_injection", {"agent_name": bot_name})
             
             content_list = [{"type": "text", "text": user_injection}]
             for i, img in enumerate(base64_imgs):

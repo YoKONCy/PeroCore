@@ -29,8 +29,36 @@ pub mod intent_engine;
 // 重导出核心类型
 pub use intent_engine::{IntentAnchor, IntentEngine};
 
-// === 常量 ===
+// === 常量与元数据 ===
 const MAX_INPUT_LENGTH: usize = 100_000;
+const CORE_VERSION: &str = "0.2.1-stable";
+const ENGINE_FINGERPRINT: &str = "PERO-CORE-KDN-SIMD-PRO-v2-2026";
+
+/// 引擎元数据信息
+#[pyclass]
+#[derive(Clone)]
+struct EngineManifest {
+    #[pyo3(get)]
+    version: String,
+    #[pyo3(get)]
+    fingerprint: String,
+    #[pyo3(get)]
+    simd_support: String,
+    #[pyo3(get)]
+    memory_layout: String,
+    #[pyo3(get)]
+    optimization_level: String,
+}
+
+#[pymethods]
+impl EngineManifest {
+    fn __repr__(&self) -> String {
+        format!(
+            "PeroCore Engine Manifest [v{} | SIMD: {} | Layout: {}]",
+            self.version, self.simd_support, self.memory_layout
+        )
+    }
+}
 
 // ============================================================================
 // 文本清洗器 (保留原有功能)
@@ -170,6 +198,25 @@ impl CognitiveGraphEngine {
                 target_node_id: tgt as i32,
                 connection_strength: quantized_weight,
             });
+        }
+    }
+
+    /// 获取引擎技术清单 (用于诊断与合规性检查)
+    fn get_manifest(&self) -> EngineManifest {
+        let simd_info = if cfg!(all(target_arch = "x86_64", target_feature = "avx2")) {
+            "AVX2-Enabled (Manual Intrinsics)".to_string()
+        } else if cfg!(target_arch = "aarch64") {
+            "NEON-Enabled (Auto-Vectorization)".to_string()
+        } else {
+            "Generic (SIMD Disabled)".to_string()
+        };
+
+        EngineManifest {
+            version: CORE_VERSION.to_string(),
+            fingerprint: ENGINE_FINGERPRINT.to_string(),
+            simd_support: simd_info,
+            memory_layout: "Simulated CSR (Quantized u16)".to_string(),
+            optimization_level: if cfg!(debug_assertions) { "Debug" } else { "Release (Full O3)" }.to_string(),
         }
     }
 
@@ -376,10 +423,10 @@ impl SemanticVectorIndex {
 #[pymodule]
 fn pero_memory_core(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // 核心类 (记忆/搜索部分 - 始终包含)
-    // m.add_class::<IntentEngine>()?;  // IntentEngine 未实现 PyClass，仅供内部使用或通过 SemanticVectorIndex 间接使用
     m.add_class::<CognitiveGraphEngine>()?;
     m.add_class::<SemanticVectorIndex>()?;
     m.add_class::<TextSanitizer>()?;
+    m.add_class::<EngineManifest>()?;
 
     // 辅助函数
     m.add_function(wrap_pyfunction!(sanitize_text_content, m)?)?;

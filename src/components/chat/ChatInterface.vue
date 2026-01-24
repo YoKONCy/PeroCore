@@ -60,7 +60,7 @@
                 请求执行终端指令
                 <span v-if="pendingConfirmation.riskInfo?.level >= 2" class="px-2 py-0.5 bg-red-500 text-white text-[10px] rounded-full uppercase tracking-wide font-bold">High Risk</span>
               </h3>
-              <p class="text-xs text-slate-500 dark:text-slate-400">Pero 申请在您的系统中执行以下命令</p>
+              <p class="text-xs text-slate-500 dark:text-slate-400">{{ agentName }} 申请在您的系统中执行以下命令</p>
             </div>
           </div>
           
@@ -162,7 +162,7 @@
           <div class="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center text-white shadow-md transition-all overflow-hidden relative animate-float"
             :class="workMode ? 'bg-gradient-to-br from-indigo-400 to-purple-500' : 'bg-gradient-to-br from-sky-400 to-blue-500 shadow-sky-500/20'"
           >
-             <span class="text-sm font-bold">{{ AGENT_AVATAR_TEXT }}</span>
+             <span class="text-sm font-bold">{{ (msg.senderId && msg.senderId !== 'pero' && msg.senderId !== 'user') ? msg.senderId[0].toUpperCase() : AGENT_AVATAR_TEXT }}</span>
              <!-- Online Status Dot -->
              <div class="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 border-2 border-white rounded-full"></div>
           </div>
@@ -170,7 +170,7 @@
           <div class="max-w-[85%] min-w-[200px] animate-float" style="animation-delay: 1s;">
              <!-- Name & Time -->
              <div class="flex items-center gap-2 mb-1.5 ml-1 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-               <span class="text-xs font-bold" :class="workMode ? 'text-indigo-300' : 'text-slate-500'">{{ AGENT_NAME }}</span>
+               <span class="text-xs font-bold" :class="workMode ? 'text-indigo-300' : 'text-slate-500'">{{ (msg.senderId && msg.senderId !== 'pero' && msg.senderId !== 'user') ? msg.senderId : AGENT_NAME }}</span>
                <span class="text-[10px] text-slate-400">{{ formatTime(msg.timestamp) }}</span>
                
                <!-- Actions -->
@@ -411,7 +411,7 @@
             workMode ? 'text-slate-200 placeholder-slate-500' : 'text-slate-800 placeholder-slate-400',
             disabled ? 'opacity-50 cursor-not-allowed' : ''
           ]"
-          :placeholder="disabled ? '工作区初始化中...' : `问 ${AGENT_NAME} 任何问题...`"
+          :placeholder="disabled ? '工作区初始化中...' : `问 ${agentName} 任何问题...`"
           :disabled="isInputLocked || disabled"
           style="field-sizing: content;" 
         ></textarea>
@@ -472,7 +472,9 @@ import { AGENT_NAME, AGENT_AVATAR_TEXT } from '../../config';
 
 const props = defineProps({
   workMode: Boolean,
-  disabled: Boolean
+  disabled: Boolean,
+  mode: { type: String, default: 'direct' }, // 'direct' | 'group'
+  targetId: { type: String, default: 'pero' }
 });
 
 // Confirmation State
@@ -974,7 +976,7 @@ const togglePause = async () => {
 };
 
 const injectInstruction = async (action) => {
-  const sessionId = props.workMode ? 'current_work_session' : 'default'; 
+  const sessionId = props.workMode ? 'current_work_session' : (props.targetId || 'default'); 
   try {
     if (action === 'pause') {
       await fetch(`${API_BASE}/api/task/${sessionId}/pause`, { method: 'POST' });
@@ -1016,8 +1018,14 @@ const fetchHistory = async (append = false) => {
   const sessionId = props.workMode ? 'current_work_session' : 'default';
   
   try {
-    // Fetch desc (Newest first)
-    const res = await fetch(`${API_BASE}/api/history/${source}/${sessionId}?limit=${HISTORY_LIMIT}&offset=${offset.value}&sort=desc`);
+    let res;
+    if (props.mode === 'group') {
+        if (append) { hasMore.value = false; return; } // Group chat pagination not supported yet
+        res = await fetch(`${API_BASE}/api/groupchat/rooms/${props.targetId}/history?limit=${HISTORY_LIMIT}`);
+    } else {
+        res = await fetch(`${API_BASE}/api/history/${source}/${sessionId}?limit=${HISTORY_LIMIT}&offset=${offset.value}&sort=desc`);
+    }
+
     if (res.ok) {
       const logs = await res.json();
       if (logs.length < HISTORY_LIMIT) {
@@ -1034,18 +1042,29 @@ const fetchHistory = async (append = false) => {
                 }
             }
         } catch (e) { console.warn('Meta parse error', e); }
+        
+        // Group Chat Compatibility
+        let role = log.role;
+        if (props.mode === 'group') {
+            role = log.sender_id === 'user' ? 'user' : 'assistant';
+        }
 
         return {
           id: log.id,
-          role: log.role,
+          role: role,
           content: log.raw_content || log.content, // Prioritize raw_content for NIT tool display
           timestamp: log.timestamp,
-          images: images
+          images: images,
+          senderId: log.sender_id
         };
       });
       
       // Reverse to get [Oldest, ..., Newest] order for display
-      newMsgs.reverse();
+      // Direct history returns DESC (Newest first), so reverse needed.
+      // Group history returns ASC (Oldest first), so NO reverse needed.
+      if (props.mode !== 'group') {
+        newMsgs.reverse();
+      }
 
       if (append) {
         // Prepend older messages (history) to the top
@@ -1133,10 +1152,16 @@ watch(() => props.workMode, () => {
   fetchHistory();
 });
 
+watch(() => props.mode, () => {
+    stopGroupPolling();
+    startGroupPolling();
+});
+
 onUnmounted(() => {
   if (ws) ws.close();
   if (reconnectTimer) clearTimeout(reconnectTimer);
   if (visionCheckInterval) clearInterval(visionCheckInterval);
+  stopGroupPolling();
   if (unlistenSync) unlistenSync();
   if (unlistenDelete) unlistenDelete();
 });
@@ -1194,6 +1219,25 @@ const sendMessage = async () => {
   scrollToBottom();
 
   try {
+    if (props.mode === 'group') {
+        const res = await fetch(`${API_BASE}/api/groupchat/rooms/${props.targetId}/messages`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                sender_id: 'user', 
+                content: content,
+                role: 'user'
+            })
+        });
+        if (res.ok) {
+            assistantMsg.content = ""; // Clear placeholder
+            messages.value.pop(); // Remove placeholder assistant msg
+        } else {
+             assistantMsg.content = "Failed to send message.";
+        }
+        return;
+    }
+
     // Construct messages list for API
     const historyMsgs = messages.value.slice(0, -1).filter(m => m.role === 'user' || m.role === 'assistant').slice(-10);
     const apiMessages = historyMsgs.map(m => {
@@ -1209,7 +1253,7 @@ const sendMessage = async () => {
       body: JSON.stringify({ 
         messages: apiMessages, 
         source: props.workMode ? 'ide' : 'desktop',
-        session_id: props.workMode ? 'current_work_session' : 'default'
+        session_id: props.workMode ? 'current_work_session' : (props.targetId || 'default')
       })
     });
     

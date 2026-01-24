@@ -11,6 +11,8 @@ if backend_dir not in sys.path:
 # from services.vector_service import VectorService # 已弃用
 from services.embedding_service import embedding_service
 from services.memory_service import MemoryService
+from services.mdp.manager import mdp
+from core.config_manager import get_config_manager
 
 class ThinkingChainService:
     def __init__(self):
@@ -77,7 +79,7 @@ class ThinkingChainService:
         # 默认：无特定链（日常聊天使用标准 RAG 或不使用）
         return None
 
-    async def execute_chain(self, session: Any, chain_name: str, query: str) -> Dict[str, Any]:
+    async def execute_chain(self, session: Any, chain_name: str, query: str, agent_id: str = "pero") -> Dict[str, Any]:
         """
         执行思维链检索。
         返回结构化结果：
@@ -128,7 +130,8 @@ class ThinkingChainService:
                     session=session,
                     query_vec=query_embedding,
                     limit=k,
-                    filter_criteria=filter_criteria
+                    filter_criteria=filter_criteria,
+                    agent_id=agent_id
                 )
             except Exception as e:
                 print(f"[ThinkingChain] Error searching cluster '{cluster_name}': {e}")
@@ -177,7 +180,7 @@ class ThinkingChainService:
             
         return "\n".join(output)
 
-    async def generate_weekly_report_context(self, session: Any) -> str:
+    async def generate_weekly_report_context(self, session: Any, agent_id: str = "pero") -> str:
         """
         生成周报上下文（主题回顾）。
         获取过去 7 天的记忆，以及相关的历史记忆。
@@ -212,7 +215,8 @@ class ThinkingChainService:
             memories = await MemoryService.get_memories_by_filter(
                 session=session,
                 limit=8,
-                filter_criteria=filter_criteria
+                filter_criteria=filter_criteria,
+                agent_id=agent_id
             )
             
             if not memories:
@@ -258,7 +262,8 @@ class ThinkingChainService:
                 session=session,
                 query_vec=query_vec,
                 limit=5,
-                filter_criteria=hist_filter
+                filter_criteria=hist_filter,
+                agent_id=agent_id
             )
             
             if hist_memories:
@@ -340,7 +345,7 @@ class ThinkingChainService:
             
         return "\n".join(output)
 
-    async def generate_weekly_report(self, session: Any) -> str:
+    async def generate_weekly_report(self, session: Any, agent_id: str = "pero") -> str:
         """
         使用 LLM 生成实际的周报。
         """
@@ -348,7 +353,7 @@ class ThinkingChainService:
         from models import AIModelConfig
         from services.llm_service import LLMService
 
-        context = await self.generate_weekly_report_context(session)
+        context = await self.generate_weekly_report_context(session, agent_id=agent_id)
         if "No activities found" in context:
             return ""
 
@@ -375,11 +380,20 @@ class ThinkingChainService:
 
         from datetime import datetime
         now_str = datetime.now().strftime('%Y-%m-%d %H:%M')
+        
+        config_manager = get_config_manager()
+        bot_name = config_manager.get("bot_name", "Pero")
 
-        prompt = mdp.render("tasks/analysis/weekly_report", {
+        # Get Agent Profile for dynamic persona injection
+        agent_manager = AgentManager()
+        agent_profile = agent_manager.agents.get(agent_manager.active_agent_id)
+        identity_label = agent_profile.identity_label if agent_profile else "智能助手"
+
+        prompt = mdp.render("services/analysis/weekly_report", {
             "agent_name": bot_name,
             "current_time": now_str,
-            "context": context
+            "context": context,
+            "identity_label": identity_label
         })
         try:
             messages = [{"role": "user", "content": prompt}]

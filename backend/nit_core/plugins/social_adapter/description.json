@@ -1,44 +1,44 @@
 {
   "name": "social_adapter",
   "version": "1.0.0",
-  "description": "Adapter for OneBot 11 (NapCatQQ) integration.",
+  "description": "OneBot 11 (NapCatQQ) 社交适配器。",
   "pluginType": "python-module",
   "entryPoint": "qq_tools.py",
   "capabilities": {
     "invocationCommands": [
       {
         "commandIdentifier": "qq_send_group_msg",
-        "description": "Send a message to a QQ group.",
+        "description": "发送QQ群消息。向指定群聊发送消息。",
         "parameters": {
           "type": "object",
           "properties": {
-            "group_id": { "type": "string", "description": "Target Group ID" },
-            "message": { "type": "string", "description": "Message content" }
+            "group_id": { "type": "string", "description": "目标群号" },
+            "message": { "type": "string", "description": "消息内容" }
           },
           "required": ["group_id", "message"]
         }
       },
       {
         "commandIdentifier": "qq_send_private_msg",
-        "description": "Send a private message to a QQ user.",
+        "description": "发送QQ私聊消息。向指定用户发送消息。",
         "parameters": {
           "type": "object",
           "properties": {
-            "user_id": { "type": "integer", "description": "Target QQ ID" },
-            "content": { "type": "string", "description": "Message content" }
+            "user_id": { "type": "string", "description": "目标QQ号" },
+            "content": { "type": "string", "description": "消息内容" }
           },
           "required": ["user_id", "content"]
         }
       },
       {
         "commandIdentifier": "qq_handle_friend_request",
-        "description": "Approve or reject a friend request. Use this to finalize a pending request after Master's instruction.",
+        "description": "处理好友请求。批准或拒绝好友申请。请在获得主人指示后使用。",
         "parameters": {
           "type": "object",
           "properties": {
-            "flag": { "type": "string", "description": "The request flag" },
-            "approve": { "type": "boolean", "description": "True to approve, False to reject" },
-            "remark": { "type": "string", "description": "Optional remark for the new friend" }
+            "flag": { "type": "string", "description": "请求Flag" },
+            "approve": { "type": "boolean", "description": "是否批准 (True/False)" },
+            "remark": { "type": "string", "description": "好友备注 (可选)" }
           },
           "required": ["flag", "approve"]
         }
@@ -50,12 +50,12 @@
           "type": "object",
           "properties": {
             "user_id": {
-              "type": "integer",
-              "description": "Target QQ ID to delete. Usually extracted from context or session ID."
+              "type": "string",
+              "description": "要删除的QQ号。通常从上下文或会话ID中提取。"
             },
             "reason": {
               "type": "string",
-              "description": "Reason for deletion (for logging)."
+              "description": "删除原因 (用于记录)。"
             }
           },
           "required": ["user_id"]
@@ -81,47 +81,47 @@
       },
       {
         "commandIdentifier": "qq_get_stranger_info",
-        "description": "Get public information of a stranger.",
+        "description": "获取陌生人信息。查询指定用户的公开资料。",
         "parameters": {
           "type": "object",
           "properties": {
-            "user_id": { "type": "integer", "description": "Target QQ ID" }
+            "user_id": { "type": "string", "description": "目标QQ号" }
           },
           "required": ["user_id"]
         }
       },
       {
         "commandIdentifier": "qq_get_group_history",
-        "description": "Get historical messages from a QQ group. Use this to fetch previous context (up to 20 messages).",
+        "description": "获取群聊历史。获取指定群的最近消息 (默认20条) 以了解上下文。",
         "parameters": {
           "type": "object",
           "properties": {
-            "group_id": { "type": "integer", "description": "Target Group ID" },
-            "count": { "type": "integer", "description": "Number of messages to fetch (default 20)" }
+            "group_id": { "type": "string", "description": "目标群号" },
+            "count": { "type": "integer", "description": "获取数量 (默认20)" }
           },
           "required": ["group_id"]
         }
       },
       {
         "commandIdentifier": "read_social_memory",
-        "description": "Read Pero's social memory logs (QQ chats).",
+        "description": "读取社交记忆。查阅QQ聊天记录日志。",
         "parameters": {
           "type": "object",
           "properties": {
-            "query": { "type": "string", "description": "Search query" },
-            "filter": { "type": "string", "description": "Optional filter" }
+            "query": { "type": "string", "description": "搜索关键词" },
+            "filter": { "type": "string", "description": "可选过滤器" }
           },
           "required": ["query"]
         }
       },
       {
-        "commandIdentifier": "notify_master",
-        "description": "Proactively report important social events to the master.",
+        "commandIdentifier": "qq_notify_master",
+        "description": "向主人汇报。主动向主人报告重要的社交事件。",
         "parameters": {
           "type": "object",
           "properties": {
-            "content": { "type": "string", "description": "Report content" },
-            "importance": { "type": "string", "enum": ["low", "medium", "high"], "description": "Importance level" }
+            "content": { "type": "string", "description": "汇报内容" },
+            "importance": { "type": "string", "enum": ["low", "medium", "high"], "description": "重要程度" }
           },
           "required": ["content"]
         }

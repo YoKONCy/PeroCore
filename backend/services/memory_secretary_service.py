@@ -7,6 +7,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from models import Memory, MemoryRelation, Config, AIModelConfig, MaintenanceRecord
 from services.llm_service import LLMService
 from services.mdp.manager import MDPManager
+import os
 
 class MemorySecretaryService:
     def __init__(self, session: AsyncSession):
@@ -18,6 +19,10 @@ class MemorySecretaryService:
         
         # Initialize MDPManager
         import os
+        # Point to the root mdp directory, usually backend/services/mdp
+        # mdp/manager.py is in backend/services/mdp
+        # so os.path.dirname(__file__) in memory_secretary_service.py is backend/services
+        # We need backend/services/mdp/prompts
         mdp_dir = os.path.join(os.path.dirname(__file__), "mdp", "prompts")
         self.mdp = MDPManager(mdp_dir)
 
@@ -39,12 +44,16 @@ class MemorySecretaryService:
 
         target_model_id = secretary_model_id or configs.get("current_model_id")
         
+        # 如果没有目标模型，回退到 fallback_config (但 fallback_config 本身可能包含 ppc.modelName)
         if not target_model_id:
+            # 如果 fallback_config['model'] 也是默认的 gpt-4o-mini 且没有明确配置，这可能是一个问题
+            # 但我们保留它作为最后的防线
             return LLMService(fallback_config["api_key"], fallback_config["api_base"], fallback_config["model"])
 
         try:
             model_config = await self.session.get(AIModelConfig, int(target_model_id))
             if not model_config:
+                 # ID 存在但找不到配置，回退
                 return LLMService(fallback_config["api_key"], fallback_config["api_base"], fallback_config["model"])
             
             final_api_key = model_config.api_key if model_config.provider_type == 'custom' else global_api_key
@@ -108,10 +117,8 @@ class MemorySecretaryService:
                 # 6. 维护边界处理 (Wait, does this need agent_id? Probably)
                 # report["retired_count"] += await self._handle_maintenance_boundary(agent_id) # Need to check this method
 
-            # 6. 自动更新动态台词 (Welcome & System) - This might be global or per agent?
-            # Currently Waifu texts are in PetState or Config?
-            # Let's assume global for now or just run once.
-            report["waifu_texts_updated"] = await self._update_waifu_texts(llm)
+            # 6. 自动更新动态台词 (Welcome & System) - per agent
+            report["waifu_texts_updated"] += await self._update_waifu_texts(llm, agent_id)
 
             # 7. 保存维护记录用于撤回
             record = MaintenanceRecord(
@@ -199,7 +206,7 @@ class MemorySecretaryService:
         bot_name = await self._get_bot_name()
         if agent_id != "pero": bot_name = agent_id.capitalize()
 
-        prompt = self.mdp.render("tasks/maintenance/memory_auditor", {
+        prompt = self.mdp.render("services/memory/maintenance/memory_auditor", {
             "agent_name": bot_name,
             "memory_data": json.dumps(mem_data, ensure_ascii=False)
         })
@@ -236,7 +243,7 @@ class MemorySecretaryService:
         bot_name = await self._get_bot_name()
         if agent_id != "pero": bot_name = agent_id.capitalize()
 
-        prompt = self.mdp.render("tasks/maintenance/preference_extractor", {
+        prompt = self.mdp.render("services/memory/maintenance/preference_extractor", {
             "agent_name": bot_name,
             "memory_texts": chr(10).join(memory_texts)
         })
@@ -263,16 +270,16 @@ class MemorySecretaryService:
             print(f"提取偏好时出错: {e}")
         return 0
 
-    async def _tag_importance(self, llm: LLMService) -> int:
+    async def _tag_importance(self, llm: LLMService, agent_id: str = "pero") -> int:
         """优化重要性打分逻辑"""
-        statement = select(Memory).where(Memory.type == "event").where(Memory.importance == 1).order_by(desc(Memory.timestamp)).limit(50)
+        statement = select(Memory).where(Memory.type == "event").where(Memory.importance == 1).where(Memory.agent_id == agent_id).order_by(desc(Memory.timestamp)).limit(50)
         memories = (await self.session.exec(statement)).all()
         if not memories: return 0
 
         mem_data = [{"id": m.id, "content": m.content} for m in memories]
         
         bot_name = await self._get_bot_name()
-        prompt = self.mdp.render("tasks/maintenance/importance_tagger", {
+        prompt = self.mdp.render("services/memory/maintenance/importance_tagger", {
             "agent_name": bot_name,
             "memory_data": json.dumps(mem_data, ensure_ascii=False)
         })
@@ -323,7 +330,7 @@ class MemorySecretaryService:
         batch_memories = memories[:80]
         mem_data = [{"id": m.id, "content": m.content, "time": m.realTime} for m in batch_memories]
         
-        prompt = self.mdp.render("tasks/maintenance/memory_consolidator", {
+        prompt = self.mdp.render("services/memory/maintenance/memory_consolidator", {
             "memory_data": json.dumps(mem_data, ensure_ascii=False)
         })
 
@@ -457,11 +464,13 @@ class MemorySecretaryService:
             print(f"清理重复社交摘要时出错: {e}")
             return 0
 
-    async def _update_waifu_texts(self, llm: LLMService) -> bool:
+    async def _update_waifu_texts(self, llm: LLMService, agent_id: str = "pero") -> int:
         """根据近期记忆更新欢迎语和系统台词"""
         try:
             # 1. 获取当前配置
-            config_key = "waifu_dynamic_texts"
+            # 兼容旧 key: pero 使用 "waifu_dynamic_texts"，其他 agent 使用 "waifu_dynamic_texts_{agent_id}"
+            config_key = "waifu_dynamic_texts" if agent_id == "pero" else f"waifu_dynamic_texts_{agent_id}"
+            
             current_config = await self.session.get(Config, config_key)
             current_texts = {}
             if current_config:
@@ -475,25 +484,27 @@ class MemorySecretaryService:
                 try:
                     import os
                     # 假设相对路径或绝对路径
-                    static_path = r"c:\Users\Administrator\Desktop\Perofamily\Peroperochat-PE\public\live2d-widget\waifu-texts.json"
+                    # [Fix] 指向 PeroCore 自己的台词文件，而不是 Peroperochat-PE 的
+                    static_path = r"c:\Users\Administrator\Desktop\Perofamily\PeroCore\public\live2d-widget\waifu-texts.json"
                     if os.path.exists(static_path):
                         with open(static_path, "r", encoding="utf-8") as f:
                             current_texts = json.load(f)
                 except Exception as e:
                     print(f"加载静态 Waifu 文本失败: {e}")
 
-            # 2. 获取近期记忆摘要作为上下文
-            statement = select(Memory).where(Memory.type == "event").order_by(desc(Memory.timestamp)).limit(20)
+            # 2. 获取近期记忆摘要作为上下文 (Filter by agent_id)
+            statement = select(Memory).where(Memory.type == "event").where(Memory.agent_id == agent_id).order_by(desc(Memory.timestamp)).limit(20)
             memories = (await self.session.exec(statement)).all()
             context_text = "\n".join([f"- {m.content}" for m in memories])
 
             if not context_text:
-                return False
+                return 0
 
             # 3. 构建 Prompt
             # 定义需要更新的字段及其说明
             target_fields = {
                 "visibilityBack": "主人切回窗口时的欢迎语 (简短可爱)",
+                "idleMessages": "挂机时的随机闲聊 (数组，3-5句)",
                 "welcome_timeRanges_morningEarly": "清晨 (4:00-7:00) 问候",
                 "welcome_timeRanges_morning": "上午 (7:00-11:00) 问候",
                 "welcome_timeRanges_noon": "中午 (11:00-13:00) 问候",
@@ -507,11 +518,17 @@ class MemorySecretaryService:
             }
 
             bot_name = await self._get_bot_name()
+            if agent_id != "pero":
+                 bot_name = agent_id.capitalize()
+
             # 获取风格描述 (从 AgentProfile 或配置中获取，目前先从 Identity.md 中提取或默认)
             # 暂时使用默认风格
             tone_style = "可爱、元气、偶尔调皮或温柔"
 
-            prompt = self.mdp.render("tasks/maintenance/waifu_text_updater", {
+            # [Fix] 显式禁止使用 Pio/Tia 等默认名，强制使用 bot_name
+            # 在 Prompt 中已添加 "禁止使用其他名字" 的约束
+
+            prompt = self.mdp.render("services/memory/maintenance/waifu_text_updater", {
                 "agent_name": bot_name,
                 "tone_style": tone_style,
                 "context_text": context_text,
@@ -530,9 +547,9 @@ class MemorySecretaryService:
                 
                 # 简单校验
                 if not isinstance(new_texts, dict):
-                    return False
+                    return 0
 
-                # 5. 保存更新
+                # 5. 保存更新到 Config (Welcome/System)
                 if not current_config:
                     current_config = Config(key=config_key, value=json.dumps(new_texts, ensure_ascii=False))
                     self.session.add(current_config)
@@ -540,13 +557,40 @@ class MemorySecretaryService:
                     current_config.value = json.dumps(new_texts, ensure_ascii=False)
                     self.session.add(current_config) # Ensure it's marked for update
                 
+                # 6. [Feature] 同步更新 PetState (Idle/Back/Click)
+                # 这样前端 PetView 通过 get_pet_state 就能获取到最新的动态台词
+                from models import PetState
+                state = (await self.session.exec(select(PetState).where(PetState.agent_id == agent_id))).first()
+                if not state:
+                     # Create if not exists (though usually it should exist)
+                     state = PetState(agent_id=agent_id)
+                     self.session.add(state)
+                
+                if state:
+                    # Update Back Messages (visibilityBack -> back_messages_json)
+                    if "visibilityBack" in new_texts:
+                        # PetState expects a JSON list string
+                        state.back_messages_json = json.dumps([new_texts["visibilityBack"]], ensure_ascii=False)
+                    
+                    # Update Idle Messages
+                    if "idleMessages" in new_texts:
+                        msgs = new_texts["idleMessages"]
+                        if isinstance(msgs, str): msgs = [msgs]
+                        if isinstance(msgs, list):
+                            state.idle_messages_json = json.dumps(msgs, ensure_ascii=False)
+                    
+                    # Note: Click messages are complex (head/body/chest), currently prompt doesn't generate them structurely.
+                    # We skip click_messages for now or add them later.
+
+                    self.session.add(state)
+
                 await self.session.commit()
-                print(f"[MemorySecretary] 已更新动态 Waifu 文本。")
-                return True
+                print(f"[MemorySecretary] 已更新动态 Waifu 文本 (Agent: {agent_id})。")
+                return 1
 
         except Exception as e:
             print(f"更新 Waifu 文本时出错: {e}")
-            return False
+            return 0
 
     async def _handle_maintenance_boundary(self) -> int:
         """处理 1000 条维护边界"""

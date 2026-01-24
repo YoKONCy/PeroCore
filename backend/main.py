@@ -47,8 +47,8 @@ configure_logging(log_file=log_file)
 logger = logging.getLogger(__name__)
 
 # [DEBUG] Print startup args and env for troubleshooting
-print(f"[Startup Debug] sys.argv: {sys.argv}")
-print(f"[Startup Debug] ENABLE_SOCIAL_MODE env: {os.environ.get('ENABLE_SOCIAL_MODE')}")
+print(f"[启动调试] sys.argv: {sys.argv}")
+print(f"[启动调试] ENABLE_SOCIAL_MODE 环境变量: {os.environ.get('ENABLE_SOCIAL_MODE')}")
 
 import uvicorn
 from contextlib import asynccontextmanager
@@ -79,6 +79,8 @@ from core.config_manager import get_config_manager
 from core.nit_manager import get_nit_manager
 from nit_core.dispatcher import XMLStreamFilter
 from routers.ide_router import router as ide_router
+from routers.agent_router import router as agent_router
+from routers.group_chat_router import router as group_chat_router
 
 
 
@@ -479,7 +481,7 @@ async def lifespan(app: FastAPI):
                 # 6. Reset to idle
                 await realtime_session_manager.broadcast({"type": "status", "content": "idle"})
         except Exception as e:
-            print(f"[Main] Failed to execute and broadcast trigger chat: {e}")
+            print(f"[Main] 执行并广播触发对话失败: {e}")
             await realtime_session_manager.broadcast({"type": "status", "content": "idle"})
 
     async def periodic_trigger_check():
@@ -498,7 +500,7 @@ async def lifespan(app: FastAPI):
                     # 1. Reminders
                     due_reminders = [t for t in tasks if t.type == "reminder" and datetime.fromisoformat(t.time.replace('Z', '+00:00')).replace(tzinfo=None) <= now]
                     for task in due_reminders:
-                        print(f"[Main] Triggering Reminder: {task.content}")
+                        print(f"[Main] 触发提醒: {task.content}")
                         instruction = f"【管理系统提醒：Pero，你与主人的约定时间已到，请主动提醒主人。约定内容：{task.content}】"
                         
                         # Mark as triggered FIRST
@@ -538,7 +540,7 @@ async def lifespan(app: FastAPI):
                         await execute_and_broadcast_chat(instruction, session)
 
             except Exception as e:
-                print(f"[Main] Trigger check task error: {e}")
+                print(f"[Main] 触发检查任务错误: {e}")
             
             await asyncio.sleep(30) # Check every 30 seconds
 
@@ -549,21 +551,25 @@ async def lifespan(app: FastAPI):
     # Shutdown
     cleanup_task.cancel()
     weekly_report_task.cancel()
-    dream_task.cancel()
+    # dream_task is not defined here, it's inside maintenance_task
     maintenance_task.cancel()
     trigger_task.cancel()
+    lonely_scan_task.cancel() # Added
+    
     try:
         await cleanup_task
         await weekly_report_task
-        await dream_task
         await maintenance_task
         await trigger_task
+        await lonely_scan_task # Added
     except asyncio.CancelledError:
         pass
     await companion_service.stop()
 
 app = FastAPI(title="PeroCore Backend", description="AI Agent powered backend for Pero", lifespan=lifespan)
 app.include_router(ide_router)
+app.include_router(agent_router)
+app.include_router(group_chat_router)
 
 class TTSPreviewRequest(BaseModel):
     text: str
@@ -699,10 +705,20 @@ async def websocket_voice_endpoint(websocket: WebSocket):
 @app.get("/api/pet/state")
 async def get_pet_state(session: AsyncSession = Depends(get_session)):
     try:
-        state = (await session.exec(select(PetState).limit(1))).first()
+        # Get active agent info FIRST
+        from services.agent_manager import get_agent_manager
+        agent_manager = get_agent_manager()
+        active_agent = agent_manager.get_active_agent()
+        active_agent_id = active_agent.id if active_agent else "pero"
+
+        # Find PetState for active agent
+        statement = select(PetState).where(PetState.agent_id == active_agent_id)
+        state = (await session.exec(statement)).first()
+        
         if not state:
             # 初始化默认状态
             state = PetState(
+                agent_id=active_agent_id,
                 mood="开心",
                 vibe="正常",
                 mind="正在想主人..."
@@ -710,7 +726,16 @@ async def get_pet_state(session: AsyncSession = Depends(get_session)):
             session.add(state)
             await session.commit()
             await session.refresh(state)
-        return state
+            
+        # Convert to dict and add active_agent info
+        response_data = state.model_dump()
+        if active_agent:
+            response_data["active_agent"] = {
+                "id": active_agent.id,
+                "name": active_agent.name
+            }
+            
+        return response_data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -851,10 +876,19 @@ async def get_chat_history(
     offset: int = 0,
     date: str = None,
     sort: str = "asc",
+    agent_id: Optional[str] = None, # Add agent_id param
     session: AsyncSession = Depends(get_session)
 ):
     service = MemoryService()
-    logs = await service.get_recent_logs(session, source, session_id, limit, offset=offset, date_str=date, sort=sort)
+    # If agent_id is not provided, default to "pero" to maintain backward compatibility,
+    # OR we can make it optional in service.get_recent_logs?
+    # service.get_recent_logs defaults to "pero".
+    # If we want to support "all agents" when agent_id is None, we need to modify service.
+    # But usually dashboard views a specific agent.
+    # Let's pass agent_id if provided, otherwise default "pero" (handled by service default).
+    
+    target_agent = agent_id if agent_id else "pero"
+    logs = await service.get_recent_logs(session, source, session_id, limit, offset=offset, date_str=date, sort=sort, agent_id=target_agent)
     return [{
         "id": log.id, 
         "role": log.role, 
@@ -881,7 +915,7 @@ async def run_retry_background(log_id: int):
             scorer = ScorerService(session)
             await scorer.retry_interaction(log_id)
     except Exception as e:
-        print(f"[Main] Background retry failed for log {log_id}: {e}")
+        print(f"[Main] 后台重试日志 {log_id} 失败: {e}")
 
 @app.post("/api/history/{log_id}/retry_analysis")
 async def retry_log_analysis(log_id: int, background_tasks: BackgroundTasks, session: AsyncSession = Depends(get_session)):
@@ -1019,8 +1053,11 @@ async def toggle_social(enabled: bool = Body(..., embed=True), session: AsyncSes
     return {"status": "success", "enabled": enabled}
 
 @app.get("/api/tasks", response_model=List[ScheduledTask])
-async def get_tasks(session: AsyncSession = Depends(get_session)):
-    return (await session.exec(select(ScheduledTask).where(ScheduledTask.is_triggered == False))).all()
+async def get_tasks(agent_id: Optional[str] = None, session: AsyncSession = Depends(get_session)):
+    statement = select(ScheduledTask).where(ScheduledTask.is_triggered == False)
+    if agent_id:
+        statement = statement.where(ScheduledTask.agent_id == agent_id)
+    return (await session.exec(statement)).all()
 
 @app.delete("/api/tasks/{task_id}")
 async def delete_task(task_id: int, session: AsyncSession = Depends(get_session)):
@@ -1206,10 +1243,13 @@ async def list_memories(
     date_end: str = None, 
     tags: str = None,
     type: str = None, # Allow filtering by memory type
+    agent_id: Optional[str] = None, # Add agent_id param
     session: AsyncSession = Depends(get_session)
 ):
     service = MemoryService()
-    return await service.get_all_memories(session, limit, offset, date_start, date_end, tags, memory_type=type)
+    # Pass agent_id to get_all_memories
+    target_agent = agent_id if agent_id else "pero"
+    return await service.get_all_memories(session, limit, offset, date_start, date_end, tags, memory_type=type, agent_id=target_agent)
 
 @app.get("/api/memories/graph")
 async def get_memory_graph(limit: int = 100, session: AsyncSession = Depends(get_session)):
@@ -1824,12 +1864,31 @@ async def delete_audio(filename: str):
 
 @app.get("/api/configs/waifu-texts")
 async def get_waifu_texts(session: AsyncSession = Depends(get_session)):
-    """获取动态生成的 Live2D 台词配置"""
+    """获取动态生成的 Live2D 台词配置 (Agent 专属)"""
     try:
+        # 1. 获取当前活跃 Agent
+        from services.agent_manager import get_agent_manager
+        agent_manager = get_agent_manager()
+        active_agent = agent_manager.get_active_agent()
+        agent_id = active_agent.id if active_agent else "pero"
+        
+        # 2. 尝试从 Agent 目录加载 waifu_texts.json
+        agent_dir = os.path.join(current_dir, "services", "mdp", "agents", agent_id)
+        texts_path = os.path.join(agent_dir, "waifu_texts.json")
+        
+        if os.path.exists(texts_path):
+            try:
+                with open(texts_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception as e:
+                print(f"[Main] Failed to load waifu_texts for agent {agent_id}: {e}")
+        
+        # 3. 如果没找到，尝试回退到 Config (旧版逻辑)
         config = await session.get(Config, "waifu_dynamic_texts")
-        if not config:
-            return {}
-        return json.loads(config.value)
+        if config:
+            return json.loads(config.value)
+            
+        return {}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1918,21 +1977,27 @@ async def get_maintenance_records(session: AsyncSession = Depends(get_session)):
     return (await session.exec(statement)).all()
 
 @app.get("/api/stats/overview")
-async def get_overview_stats(session: AsyncSession = Depends(get_session)):
+async def get_overview_stats(agent_id: Optional[str] = None, session: AsyncSession = Depends(get_session)):
     """
     获取概览页面的统计数据（总数），解耦渲染数量和显示数量。
     """
     try:
         # Count memories
         mem_statement = select(func.count()).select_from(Memory)
+        if agent_id:
+            mem_statement = mem_statement.where(Memory.agent_id == agent_id)
         mem_count = (await session.exec(mem_statement)).one()
         
         # Count logs
         log_statement = select(func.count()).select_from(ConversationLog)
+        if agent_id:
+            log_statement = log_statement.where(ConversationLog.agent_id == agent_id)
         log_count = (await session.exec(log_statement)).one()
         
         # Count tasks (ScheduledTask)
         task_statement = select(func.count()).select_from(ScheduledTask)
+        if agent_id:
+            task_statement = task_statement.where(ScheduledTask.agent_id == agent_id)
         task_count = (await session.exec(task_statement)).one()
 
         return {

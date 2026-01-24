@@ -465,13 +465,13 @@ class MemoryService:
             # 1. 向量搜索找到初始锚点 (Anchors)
             query_vec = embedding_service.encode_one(text)
             if not query_vec:
-                print("[Memory] Logical flashback: Empty query vector")
+                print("[Memory] 逻辑闪回: 查询向量为空")
                 return []
             
             # 召回稍微多一点，作为扩散起点
-            vector_results = vector_service.search(query_vec, limit=10)
+            vector_results = vector_service.search(query_vec, limit=10, agent_id=agent_id)
             if not vector_results:
-                print("[Memory] Logical flashback: No vector results found")
+                print("[Memory] 逻辑闪回: 未找到向量结果")
                 return []
 
             anchor_ids = [res["id"] for res in vector_results]
@@ -483,16 +483,16 @@ class MemoryService:
             engine = await get_rust_engine(session)
             if engine:
                 # 扩散 2 步，扩大联想范围
-                print(f"[Memory] Spreading activation from anchors: {anchor_ids}")
+                print(f"[Memory] 正在从锚点扩散激活: {anchor_ids}")
                 flashback_scores = engine.propagate_activation(
                     activation_scores,
                     steps=2,
                     decay=0.7,
                     min_threshold=0.05
                 )
-                print(f"[Memory] Spread result count: {len(flashback_scores)}")
+                print(f"[Memory] 扩散结果数量: {len(flashback_scores)}")
             else:
-                print("[Memory] Rust engine unavailable, using anchors only")
+                print("[Memory] Rust 引擎不可用，仅使用锚点")
                 flashback_scores = activation_scores
 
             # 3. 提取 Top 关联记忆并转换为碎片标签
@@ -532,7 +532,7 @@ class MemoryService:
             return results[:limit]
 
         except Exception as e:
-            print(f"[Memory] Logical flashback failed: {e}")
+            print(f"[Memory] 逻辑闪回失败: {e}")
             return []
 
     @staticmethod
@@ -588,7 +588,7 @@ class MemoryService:
             query_vec = embedding_service.encode_one(text)
             
         if not query_vec:
-            print("[Memory] Embedding failed, falling back to keyword search.")
+            print("[Memory] Embedding 失败，回退到关键词搜索。")
             if text:
                 return await MemoryService._keyword_search_fallback(session, text, limit, exclude_after_time, agent_id=agent_id)
             return []
@@ -596,11 +596,11 @@ class MemoryService:
         # 2. 向量检索 (VectorDB Search)
         try:
             # [Optimization] 扩大召回范围至 60，以便在过滤掉近期记忆（上下文窗口）后仍有足够的候选
-            vector_results = vector_service.search(query_vec, limit=60) 
+            vector_results = vector_service.search(query_vec, limit=60, agent_id=agent_id) 
             
             if not vector_results:
                 # 尝试从 SQLite 回退 (如果是迁移过渡期)
-                print("[Memory] VectorDB returned no results, trying SQLite fallback...")
+                print("[Memory] VectorDB 未返回结果，尝试 SQLite 回退...")
                 fallback_res = await MemoryService._keyword_search_fallback(session, text, limit, exclude_after_time, agent_id=agent_id)
                 if update_access_stats and fallback_res:
                     await MemoryService.mark_memories_accessed(session, fallback_res)
@@ -626,14 +626,14 @@ class MemoryService:
                 valid_memories = [m for m in valid_memories if m.timestamp < exclude_ts]
                 filtered_count = len(valid_memories)
                 if original_count != filtered_count:
-                    print(f"[Memory] Context Filter: Excluded {original_count - filtered_count} memories overlapping with context window.")
+                    print(f"[Memory] 上下文过滤: 排除了 {original_count - filtered_count} 条与上下文窗口重叠的记忆。")
 
             # 如果过滤后为空，直接返回空（符合用户期望：若长记忆条目全在上下文窗口内，则跳过检索）
             if not valid_memories:
                 return []
 
         except Exception as e:
-            print(f"[Memory] VectorDB search failed: {e}. Falling back.")
+            print(f"[Memory] VectorDB 搜索失败: {e}。正在回退。")
             fallback_res = await MemoryService._keyword_search_fallback(session, text, limit, exclude_after_time, agent_id=agent_id)
             if update_access_stats and fallback_res:
                 await MemoryService.mark_memories_accessed(session, fallback_res)
@@ -673,7 +673,7 @@ class MemoryService:
 
         # [Rust 集成] 针对百万级节点优化
         try:
-            engine = await get_rust_engine(session)
+            engine = await get_rust_engine(session, agent_id=agent_id)
             if engine:
                 # 执行扩散：引入动态阈值 min_threshold
                 # 如果是重要查询，可以调低阈值以获取更多联想；否则保持 0.01 保证性能
@@ -770,7 +770,7 @@ class MemoryService:
                     original_idx = res["index"]
                     result_memories.append(top_candidates[original_idx])
             except Exception as e:
-                print(f"[Memory] Reranking failed: {e}. Falling back to initial scores.")
+                print(f"[Memory] 重排序失败: {e}。回退到初始分数。")
                 result_memories = top_candidates[:limit]
             final_memories = result_memories
         else:
@@ -795,7 +795,7 @@ class MemoryService:
                                 # 或者直接替换
                                 m.content = file_content 
                 except Exception as e:
-                    print(f"[MemoryService] Failed to hydrate archived memory {m.id}: {e}")
+                    print(f"[MemoryService] 填充归档记忆 {m.id} 失败: {e}")
 
         # [修复] 更新访问统计 (强化)
         # 只要被检索到并最终返回，就视为被"激活"了一次
@@ -809,13 +809,14 @@ class MemoryService:
     async def get_memories_by_filter(
         session: AsyncSession, 
         limit: int = 10, 
-        filter_criteria: Dict = None
+        filter_criteria: Dict = None,
+        agent_id: str = "pero"
     ) -> List[Dict]:
         """
         基于 Metadata 过滤记忆 (用于周报生成等)
         替代 vector_service.query_memories
         """
-        statement = select(Memory)
+        statement = select(Memory).where(Memory.agent_id == agent_id)
         
         if filter_criteria:
             # 时间戳范围的简单实现
@@ -855,7 +856,8 @@ class MemoryService:
         session: AsyncSession,
         query_vec: List[float],
         limit: int = 5,
-        filter_criteria: Dict = None
+        filter_criteria: Dict = None,
+        agent_id: str = "pero"
     ) -> List[Dict]:
         """
         简单的向量搜索 + Metadata 过滤 (用于 ChainService 查找历史)
@@ -864,14 +866,14 @@ class MemoryService:
         
         # 1. 搜索 VectorDB (获取更多候选以允许过滤)
         # HACK: Rust 索引不支持预过滤，所以我们获取更多并进行后过滤。
-        candidates = vector_service.search(query_vec, limit=limit * 5)
+        candidates = vector_service.search(query_vec, limit=limit * 5, agent_id=agent_id)
         if not candidates: return []
         
         ids = [c["id"] for c in candidates]
         score_map = {c["id"]: c["score"] for c in candidates}
         
         # 2. 从带过滤器的 DB 中获取
-        statement = select(Memory).where(Memory.id.in_(ids))
+        statement = select(Memory).where(Memory.id.in_(ids)).where(Memory.agent_id == agent_id)
         
         if filter_criteria:
             ts_filter = filter_criteria.get("timestamp")
@@ -949,12 +951,17 @@ class MemoryService:
         date_start: str = None, 
         date_end: str = None, 
         tags: str = None,
-        memory_type: str = None
+        memory_type: str = None,
+        agent_id: str = None # Allow filtering by agent
     ) -> List[Memory]:
         from datetime import datetime
         import time
         
         statement = select(Memory)
+        
+        # Agent Filter
+        if agent_id:
+            statement = statement.where(Memory.agent_id == agent_id)
         
         # 类型过滤器
         if memory_type:
@@ -967,7 +974,7 @@ class MemoryService:
                 start_ms = start_dt.timestamp() * 1000
                 statement = statement.where(Memory.timestamp >= start_ms)
             except Exception as e:
-                print(f"[MemoryService] Invalid start date: {e}")
+                print(f"[MemoryService] 无效的开始日期: {e}")
                 
         if date_end:
             try:
@@ -976,7 +983,7 @@ class MemoryService:
                 end_ms = (end_dt.timestamp() + 86400) * 1000
                 statement = statement.where(Memory.timestamp < end_ms)
             except Exception as e:
-                print(f"[MemoryService] Invalid end date: {e}")
+                print(f"[MemoryService] 无效的结束日期: {e}")
         
         # 标签过滤器 (简单的字符串包含)
         if tags:

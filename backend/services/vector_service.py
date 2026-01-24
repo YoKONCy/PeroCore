@@ -19,7 +19,7 @@ class VectorService:
         它们存储在由 MemoryService 管理的 SQLite 中。
         """
         if not embedding: return
-        vector_store.add_memory(memory_id, embedding)
+        vector_store.add_memory(memory_id, embedding, metadata)
 
     def delete_memory(self, memory_id: int):
         """删除记忆向量"""
@@ -29,7 +29,7 @@ class VectorService:
         print(f"[VectorService] Warning: delete_memory not fully implemented for Rust index yet.")
         pass
 
-    def search(self, query_embedding: List[float], limit: int = 10, filter_criteria: Dict = None) -> List[Dict]:
+    def search(self, query_embedding: List[float], limit: int = 10, filter_criteria: Dict = None, agent_id: str = "pero") -> List[Dict]:
         """
         向量检索
         返回: [{"id": int, "score": float}]
@@ -38,7 +38,7 @@ class VectorService:
         if filter_criteria:
             print(f"[VectorService] Warning: 'filter_criteria' is NOT supported in Rust Vector Search. Ignored.")
         
-        return vector_store.search_memory(query_embedding, limit)
+        return vector_store.search_memory(query_embedding, limit, agent_id)
 
     def query_memories(self, limit: int = 10, filter_criteria: Dict = None) -> List[Dict]:
         """

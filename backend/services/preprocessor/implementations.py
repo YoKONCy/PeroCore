@@ -203,7 +203,7 @@ class RAGPreprocessor(BasePreprocessor):
             
             if chain_name:
                 print(f"[RAGPreprocessor] 触发思考链: {chain_name}")
-                chain_result = await chain_service.execute_chain(session, chain_name, user_message)
+                chain_result = await chain_service.execute_chain(session, chain_name, user_message, agent_id=agent_id)
                 formatted_chain = chain_service.format_chain_result(chain_result)
                 
                 if formatted_chain:
@@ -352,6 +352,7 @@ class WeeklyReportPreprocessor(BasePreprocessor):
         session = context["session"]
         memory_service = context["memory_service"]
         user_message = context.get("user_message", "")
+        agent_id = context.get("agent_id", "pero")
         
         weekly_report_context = ""
         
@@ -369,13 +370,14 @@ class WeeklyReportPreprocessor(BasePreprocessor):
                     user_message,
                     limit=1,
                     filter_tags=["weekly_report"],
-                    memory_type="weekly_report" # 确保只检索此类型
+                    memory_type="weekly_report", # 确保只检索此类型
+                    agent_id=agent_id
                 )
             else:
                 # 如果没有用户输入（可能是系统触发），则取最新的一条
                 from models import Memory
                 from sqlmodel import desc, col
-                stmt = select(Memory).where(Memory.memory_type == "weekly_report").order_by(desc(Memory.timestamp)).limit(1)
+                stmt = select(Memory).where(Memory.memory_type == "weekly_report").where(Memory.agent_id == agent_id).order_by(desc(Memory.timestamp)).limit(1)
                 reports = (await session.exec(stmt)).all()
                 
             if reports:
@@ -496,11 +498,16 @@ class SystemPromptPreprocessor(BasePreprocessor):
                 # 结果是倒序的 (最新的在前)，我们需要反转回来按时间顺序显示
                 recent_logs = sorted(recent_logs, key=lambda x: x.timestamp)
                 
+                # 获取当前 Bot Name
+                from core.config_manager import get_config_manager
+                config_mgr = get_config_manager()
+                bot_name = config_mgr.get("bot_name", "Pero")
+
                 context_str = ""
                 if recent_logs:
                     context_str = "[近期日常对话回顾]\n"
                     for log in recent_logs:
-                         role = "主人" if log.role == "user" else "Pero"
+                         role = "主人" if log.role == "user" else bot_name
                          # 简单的清理
                          content = re.sub(r'<[^>]+>', '', log.content).strip()
                          if len(content) > 100: content = content[:100] + "..."

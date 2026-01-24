@@ -1,26 +1,30 @@
 import os
 import json
+from utils.workspace_utils import get_workspace_root
 
 # Define the workspace root relative to this file
 # backend/nit_core/tools/work/WorkspaceOps/workspace_ops.py -> PeroCore/pero_workspace
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
-WORKSPACE_ROOT = os.path.join(BASE_DIR, "pero_workspace")
+# [Refactor] Use dynamic workspace root
+# BASE_DIR = ...
+# WORKSPACE_ROOT = ...
 
 def _ensure_workspace():
-    if not os.path.exists(WORKSPACE_ROOT):
-        os.makedirs(WORKSPACE_ROOT)
+    root = get_workspace_root()
+    if not os.path.exists(root):
+        os.makedirs(root)
 
 def _is_safe_path(file_path):
     # Ensure the path is within the workspace
     # Resolve relative paths
     try:
+        workspace_root = get_workspace_root()
         # Join workspace root with the provided path
         # Note: os.path.join handles absolute paths in the second argument by discarding the first, 
         # so we must strip leading slashes or drive letters if present (though unlikely from LLM)
         # But for safety, we treat it as relative.
         file_path = file_path.lstrip("/\\")
-        abs_path = os.path.abspath(os.path.join(WORKSPACE_ROOT, file_path))
-        return abs_path.startswith(WORKSPACE_ROOT)
+        abs_path = os.path.abspath(os.path.join(workspace_root, file_path))
+        return abs_path.startswith(workspace_root)
     except Exception:
         return False
 
@@ -33,8 +37,9 @@ def write_workspace_file(filename: str, content: str) -> str:
         return "Error: Access denied. You can only write to files within your workspace."
     
     try:
+        workspace_root = get_workspace_root()
         filename = filename.lstrip("/\\")
-        full_path = os.path.join(WORKSPACE_ROOT, filename)
+        full_path = os.path.join(workspace_root, filename)
         # Create directories if they don't exist
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
         
@@ -53,8 +58,9 @@ def read_workspace_file(filename: str) -> str:
         return "Error: Access denied. You can only read files within your workspace."
     
     try:
+        workspace_root = get_workspace_root()
         filename = filename.lstrip("/\\")
-        full_path = os.path.join(WORKSPACE_ROOT, filename)
+        full_path = os.path.join(workspace_root, filename)
         if not os.path.exists(full_path):
             return "Error: File not found."
             
@@ -68,13 +74,14 @@ def list_workspace_files(subdir: str = "") -> str:
     List files in the workspace.
     """
     _ensure_workspace()
+    workspace_root = get_workspace_root()
     
     if subdir:
         if not _is_safe_path(subdir):
              return "Error: Access denied."
-        target_dir = os.path.join(WORKSPACE_ROOT, subdir.lstrip("/\\"))
+        target_dir = os.path.join(workspace_root, subdir.lstrip("/\\"))
     else:
-        target_dir = WORKSPACE_ROOT
+        target_dir = workspace_root
         
     if not os.path.exists(target_dir):
         return "Error: Directory not found."
@@ -85,7 +92,7 @@ def list_workspace_files(subdir: str = "") -> str:
             for filename in filenames:
                 # Get relative path from WORKSPACE_ROOT
                 abs_file = os.path.join(root, filename)
-                rel_path = os.path.relpath(abs_file, WORKSPACE_ROOT)
+                rel_path = os.path.relpath(abs_file, workspace_root)
                 file_list.append(rel_path)
         
         if not file_list:

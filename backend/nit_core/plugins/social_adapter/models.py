@@ -27,13 +27,15 @@ class SocialSession:
     session_id: str  # group_id or user_id
     session_type: Literal["group", "private"]
     session_name: str = ""
+    agent_id: str = "pero" # 所属 Agent ID
     
     # 消息缓冲区
     buffer: List[SocialMessage] = field(default_factory=list)
     
     # 状态机
     state: Literal["observing", "summoned", "active"] = "observing"
-    last_active_time: datetime = field(default_factory=datetime.now)
+    last_active_time: datetime = field(default_factory=datetime.now) # Bot 真正活跃（互动）的时间
+    last_message_time: datetime = field(default_factory=datetime.now) # 群里最后一条消息的时间（无论是否与 Bot 有关）
     
     # 定时器句柄（如果新消息到达则取消）
     flush_timer_task: Optional[object] = None # asyncio.Task
@@ -46,7 +48,9 @@ class SocialSession:
 
     def add_message(self, msg: SocialMessage):
         self.buffer.append(msg)
-        self.last_active_time = datetime.now()
+        # 注意：这里不再自动更新 last_active_time，只更新 last_message_time
+        # last_active_time 的更新逻辑移交到 SessionManager/SocialService 层级控制
+        self.last_message_time = datetime.now()
 
     def clear_buffer(self):
         self.buffer.clear()

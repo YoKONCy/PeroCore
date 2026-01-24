@@ -166,7 +166,88 @@
           </div>
         </div>
 
+        <!-- Agents Tab -->
+        <div v-if="activeTab === 'agents'" class="h-full flex flex-col gap-6">
+          <div class="flex items-center justify-between">
+            <h2 class="text-xl font-bold tracking-tight">角色配置</h2>
+            <div class="flex items-center gap-3">
+              <button 
+                @click="fetchAgents" 
+                :disabled="isLoadingAgents"
+                class="p-2 rounded-lg bg-slate-800/50 hover:bg-white/10 text-slate-400 hover:text-emerald-400 transition-colors disabled:opacity-50"
+                title="刷新列表"
+              >
+                <div :class="{'animate-spin': isLoadingAgents}">
+                   <component :is="isLoadingAgents ? Sparkles : Search" :size="16" />
+                </div>
+              </button>
+              <div class="px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-bold text-emerald-500 uppercase tracking-widest">
+                {{ `Local: ${agentList.length}` }}
+              </div>
+            </div>
+          </div>
 
+          <div v-if="agentList.length === 0" class="flex-1 flex flex-col items-center justify-center text-slate-500 gap-4">
+             <div class="p-6 rounded-full bg-slate-800/50 border border-slate-700/50">
+               <Users :size="48" class="opacity-30" />
+             </div>
+             <div class="text-center">
+               <h3 class="text-lg font-medium text-slate-400 mb-1">未找到角色配置</h3>
+               <p class="text-sm opacity-60">请检查 backend/services/mdp/agents 目录</p>
+             </div>
+          </div>
+
+          <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 overflow-y-auto pr-2 custom-scrollbar">
+             <div v-for="agent in agentList" :key="agent.id" 
+                  class="glass-effect rounded-2xl p-5 border border-slate-800/50 transition-all duration-300 group relative overflow-hidden"
+                  :class="agent.is_enabled ? 'hover:border-emerald-500/30 hover:shadow-lg hover:shadow-emerald-500/10' : 'opacity-60 grayscale hover:opacity-80'"
+             >
+                <!-- Background Gradient -->
+                <div v-if="agent.is_active" class="absolute inset-0 bg-gradient-to-br from-emerald-500/10 to-transparent pointer-events-none"></div>
+
+                <div class="flex items-start justify-between mb-4 relative z-10">
+                   <div class="flex items-center gap-4">
+                      <div class="w-12 h-12 rounded-2xl flex items-center justify-center text-white font-bold text-xl shadow-lg ring-1 ring-white/10"
+                           :class="agent.is_enabled ? 'bg-gradient-to-br from-emerald-400 to-cyan-500' : 'bg-slate-700'"
+                      >
+                         {{ agent.name ? agent.name[0].toUpperCase() : '?' }}
+                      </div>
+                      <div>
+                         <h3 class="font-bold text-lg leading-tight">{{ agent.name }}</h3>
+                         <span class="text-[10px] text-slate-500 font-mono bg-slate-800/50 px-1.5 py-0.5 rounded">{{ agent.id }}</span>
+                      </div>
+                   </div>
+                   <div class="relative">
+                      <input type="checkbox" :checked="agent.is_enabled" @change="toggleAgentEnabled(agent)" 
+                             class="peer sr-only" :id="'check-' + agent.id">
+                      <label :for="'check-' + agent.id" 
+                             class="block w-11 h-6 bg-slate-700/80 rounded-full cursor-pointer transition-colors peer-checked:bg-emerald-500 relative after:absolute after:top-1 after:left-1 after:w-4 after:h-4 after:bg-white after:rounded-full after:transition-transform peer-checked:after:translate-x-5 shadow-inner">
+                      </label>
+                   </div>
+                </div>
+                
+                <p class="text-xs text-slate-400 leading-relaxed line-clamp-2 h-9 mb-4 relative z-10">
+                   {{ agent.description || '暂无描述' }}
+                </p>
+
+                <div class="flex items-center justify-between mt-auto pt-3 border-t border-white/5 relative z-10">
+                   <span class="text-[10px] uppercase font-bold tracking-wider flex items-center gap-1.5" 
+                         :class="agent.is_active ? 'text-emerald-400' : (agent.is_enabled ? 'text-slate-400' : 'text-slate-600')">
+                      <div class="w-1.5 h-1.5 rounded-full" :class="agent.is_active ? 'bg-emerald-400 shadow-[0_0_5px_currentColor]' : 'bg-slate-600'"></div>
+                      {{ agent.is_active ? 'Active Agent' : (agent.is_enabled ? 'Ready' : 'Disabled') }}
+                   </span>
+                   
+                   <!-- Only show "Set Active" if enabled but not active -->
+                   <button v-if="agent.is_enabled && !agent.is_active" 
+                           @click="setAsActive(agent)"
+                           class="text-[10px] px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-emerald-500 hover:text-white transition-all font-medium border border-slate-700 hover:border-emerald-400"
+                   >
+                      设为活跃
+                   </button>
+                </div>
+             </div>
+          </div>
+        </div>
 
         <!-- Plugins Tab -->
         <div v-if="activeTab === 'plugins'" class="h-full flex flex-col gap-6">
@@ -336,11 +417,12 @@ import {
   Sparkles, Home, Settings, FolderOpen,
   Cpu, Database, Activity, Power, ShieldCheck,
   LayoutGrid, ScrollText, Play, Shield,
-  Menu, Zap, X, Plug, Search, Plus, Code
+  Menu, Zap, X, Plug, Search, Plus, Code, MessageSquare, Users
 } from 'lucide-vue-next'
 
 const router = useRouter()
 const activeTab = ref('home')
+const napcatLogs = ref([])
 
 watch(activeTab, async (val) => {
   // Logic for other tabs if needed
@@ -457,6 +539,7 @@ onUnmounted(() => {
 
 const navItems = [
   { id: 'home', name: '控制面板', icon: Home },
+  { id: 'agents', name: '角色配置', icon: Users },
   { id: 'plugins', name: '插件管理', icon: Plug },
   { id: 'tools', name: '工具箱', icon: LayoutGrid },
 ]
@@ -569,6 +652,64 @@ const installES = async () => {
     isInstallingES.value = false
   }
 }
+
+// --- Agent Logic ---
+const agentList = ref([])
+const isLoadingAgents = ref(false)
+
+const fetchAgents = async () => {
+  isLoadingAgents.value = true
+  try {
+    // 使用 Tauri 本地命令替代 fetch API
+    const agents = await invoke('scan_local_agents')
+    agentList.value = agents
+  } catch (e) {
+    console.error("Failed to fetch agents via Rust", e)
+    addLog(`[ERROR] Failed to fetch agents: ${e}`)
+  } finally {
+    isLoadingAgents.value = false
+  }
+}
+
+const toggleAgentEnabled = async (agent) => {
+  // Optimistic update
+  const originalState = agent.is_enabled
+  agent.is_enabled = !agent.is_enabled
+  
+  await saveAgentConfig()
+}
+
+const setAsActive = async (agent) => {
+  // Update local state
+  agentList.value.forEach(a => a.is_active = (a.id === agent.id))
+  await saveAgentConfig()
+  addLog(`[CONFIG] Active agent set to: ${agent.name}`)
+}
+
+const saveAgentConfig = async () => {
+  const enabledIds = agentList.value.filter(a => a.is_enabled).map(a => a.id)
+  const activeAgent = agentList.value.find(a => a.is_active)
+  const activeId = activeAgent ? activeAgent.id : (enabledIds.length > 0 ? enabledIds[0] : 'pero')
+
+  try {
+    await invoke('save_agent_launch_config', {
+      enabledAgents: enabledIds,
+      activeAgent: activeId
+    })
+  } catch (e) {
+    console.error("Failed to save agent config", e)
+    addLog(`[ERROR] Failed to save agent config: ${e}`)
+  }
+}
+
+// Watchers
+watch(activeTab, (val) => {
+  if (val === 'agents') {
+    fetchAgents()
+  }
+})
+
+// Removed watch(isRunning) since we now load independently
 </script>
 
 <style>

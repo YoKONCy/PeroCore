@@ -89,7 +89,7 @@ class RealtimeSessionManager:
             result = await asyncio.wait_for(future, timeout=300)
             return result
         except asyncio.TimeoutError:
-            logger.warning(f"Confirmation request {request_id} timed out.")
+            logger.warning(f"确认请求 {request_id} 超时。")
             return False
         finally:
             if request_id in self.pending_confirmations:
@@ -292,7 +292,7 @@ class RealtimeSessionManager:
                         if not future.done():
                             future.set_result(approved)
                     else:
-                        logger.warning(f"Received confirmation for unknown request: {req_id}")
+                        logger.warning(f"收到未知请求的确认: {req_id}")
 
                 elif message.get("type") == "speech_end":
                     # 语音结束，开始处理
