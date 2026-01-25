@@ -1,4 +1,5 @@
 import os
+import logging
 import subprocess
 import json
 import shutil
@@ -20,9 +21,9 @@ except ImportError:
     Presentation = None
 
 try:
-    import fitz # PyMuPDF
+    import pypdf
 except ImportError:
-    fitz = None
+    pypdf = None
 
 def find_es_executable() -> Optional[str]:
     """Find the 'es.exe' executable in common paths."""
@@ -216,16 +217,15 @@ def read_file_content(file_path: str, max_length: int = 10000) -> str:
 
         # 1. Handle PDF
         if ext == '.pdf':
-            if not fitz:
-                return "Error: PyMuPDF (fitz) is not installed. Cannot read PDF files."
+            if not pypdf:
+                return "Error: pypdf is not installed. Cannot read PDF files."
             try:
-                doc = fitz.open(file_path)
+                reader = pypdf.PdfReader(file_path)
                 text = ""
-                for page in doc:
-                    text += page.get_text()
+                for page in reader.pages:
+                    text += page.extract_text()
                     if len(text) > max_length:
                         break
-                doc.close()
                 return text[:max_length] + ("\n...[Content Truncated]..." if len(text) > max_length else "")
             except Exception as e:
                 return f"Error reading PDF: {str(e)}"

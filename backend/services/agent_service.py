@@ -1,6 +1,15 @@
 # Copyright (c) 2026 YoKONCy. All rights reserved.
-# This software is licensed under the GNU General Public License v3.0.
-# Any unauthorized commercial use or closed-source redistribution is a direct violation of the GPL-3.0 license.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 # Original Repository: https://github.com/YoKONCy/PeroCore
 
 import json
@@ -26,7 +35,8 @@ from services.preprocessor.implementations import (
     GraphFlashbackPreprocessor,
     ConfigPreprocessor,
     SystemPromptPreprocessor,
-    WeeklyReportPreprocessor # Added
+    WeeklyReportPreprocessor, # Added
+    PerceptionPreprocessor # Added
 )
 from services.postprocessor.manager import PostprocessorManager
 from services.postprocessor.implementations import NITFilterPostprocessor, ThinkingFilterPostprocessor
@@ -60,6 +70,7 @@ class AgentService:
         self.preprocessor_manager.register(RAGPreprocessor())
         self.preprocessor_manager.register(GraphFlashbackPreprocessor())
         self.preprocessor_manager.register(ConfigPreprocessor())
+        self.preprocessor_manager.register(PerceptionPreprocessor()) # Added: Injects silent perception logs
         self.preprocessor_manager.register(SystemPromptPreprocessor())
 
         # Initialize Postprocessor Pipeline

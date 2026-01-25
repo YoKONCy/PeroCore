@@ -1,5 +1,5 @@
 import os
-import fitz  # PyMuPDF
+import pypdf
 import docx
 import json
 import ast
@@ -183,10 +183,10 @@ async def read_file_content(file_path: str, **kwargs) -> str:
         ext = ext.lower()
         
         if ext == '.pdf':
-            doc = fitz.open(safe_path)
+            reader = pypdf.PdfReader(safe_path)
             text = ""
-            for page in doc:
-                text += page.get_text() + "\n"
+            for page in reader.pages:
+                text += page.extract_text() + "\n"
             return text
             
         elif ext in ['.docx', '.doc']:

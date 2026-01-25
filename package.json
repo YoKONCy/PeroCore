@@ -1,8 +1,8 @@
 {
-  "name": "perocore",
+  "name": "pero-core",
   "private": true,
-  "version": "0.0.0",
-  "license": "GPL-3.0",
+  "version": "1.0.0",
+  "license": "Apache-2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -24,6 +24,7 @@
     "lucide-vue-next": "^0.562.0",
     "marked": "^17.0.1",
     "monaco-editor": "^0.55.1",
+    "three": "^0.182.0",
     "vue": "^3.5.24",
     "vue-router": "^4.6.4"
   },

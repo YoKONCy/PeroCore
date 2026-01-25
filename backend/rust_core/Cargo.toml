@@ -3,7 +3,7 @@ name = "pero_memory_core"
 version = "0.2.4"
 edition = "2021"
 description = "High-performance spreading activation engine for Pero"
-license = "GPL-3.0"
+license = "Apache-2.0"
 repository = "https://github.com/perofamily/perocore"
 
 [lib]

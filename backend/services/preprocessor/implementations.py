@@ -534,3 +534,57 @@ class SystemPromptPreprocessor(BasePreprocessor):
         
         context["final_messages"] = final_messages
         return context
+
+class PerceptionPreprocessor(BasePreprocessor):
+    """
+    [NEW] 感知日志注入器
+    将 AuraVision 的静默感知记录注入到上下文中。
+    """
+    @property
+    def name(self) -> str:
+        return "PerceptionInjector"
+
+    async def process(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            from services.multimodal_trigger_service import multimodal_coordinator
+            
+            # 获取最近的感知记录
+            recent_perceptions = multimodal_coordinator.get_recent_perceptions(limit=5)
+            
+            if not recent_perceptions:
+                return context
+                
+            # 格式化感知日志
+            perception_context = "[Internal Sense Log (Silent Observations)]\n"
+            for p in recent_perceptions:
+                timestamp = p.get("timestamp", "").split("T")[-1][:8] # HH:MM:SS
+                visual = p.get("visual", "Unknown")
+                perception_context += f"- [{timestamp}] Observed: {visual}\n"
+            
+            perception_context += "(Use these observations to understand user's recent context, but don't explicitly mention 'I saw you' unless relevant.)"
+            
+            # 注入变量 (追加到 memory_context)
+            variables = context.get("variables", {})
+            existing_memory = variables.get("memory_context", "")
+            variables["memory_context"] = existing_memory + "\n\n" + perception_context
+            context["variables"] = variables
+            
+            print(f"[PerceptionPreprocessor] Injected {len(recent_perceptions)} perception logs.")
+            
+            # 注入后清空日志? 
+            # 策略：读取后不清空，只有在 AgentService 真正回复后，
+            # 由 MultimodalCoordinator 的 clear_perception_log 清空 (这部分逻辑在 agent_service.py 并没有调用，需要补充)
+            # 或者我们在读取后就视为“已消费”？
+            # 暂时保持读取，让 Coordinator 的 clear_perception_log 在交互发生时被调用。
+            
+            # 补充：AgentService 回复后应该清空。
+            # 既然这里是 Preprocessor，说明用户已经发起了对话。
+            # 我们可以认为这次对话就会消费掉这些感知。
+            multimodal_coordinator.clear_perception_log()
+            
+        except ImportError:
+            pass
+        except Exception as e:
+            print(f"[PerceptionPreprocessor] Failed: {e}")
+            
+        return context

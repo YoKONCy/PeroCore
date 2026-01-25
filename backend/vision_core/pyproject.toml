@@ -3,10 +3,11 @@ requires = ["maturin>=1.5,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "pero-vision-core"
+name = "pero_vision_core"
 version = "0.1.0"
-description = "High-performance vision engine for Pero"
-license = { text = "GPL-3.0" }
+description = "High-performance computer vision core for Pero using Rust"
+license = { text = "Apache-2.0" }
+readme = "README.md"
 authors = [
     { name = "PeroCore Developer" }
 ]

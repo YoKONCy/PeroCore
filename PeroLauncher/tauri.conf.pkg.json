@@ -9,6 +9,7 @@
         "frontendDist": "../dist"
     },
     "app": {
+        "withGlobalTauri": true,
         "windows": [
             {
                 "label": "launcher",
@@ -17,12 +18,17 @@
                 "width": 900,
                 "height": 600,
                 "resizable": true,
-                "decorations": true,
-                "transparent": false,
+                "decorations": false,
+                "transparent": true,
                 "alwaysOnTop": false,
                 "visible": true,
-                "maximized": true,
-                "center": true
+                "maximized": false,
+                "center": true,
+                "shadow": true,
+                "windowEffects": {
+                    "effects": ["mica"],
+                    "state": "active"
+                }
             },
             {
                 "label": "pet",
@@ -48,14 +54,19 @@
             {
                 "label": "ide",
                 "url": "/#/ide",
-                "title": "Pero IDE",
+                "title": "Pero Chat",
                 "width": 1280,
                 "height": 800,
                 "resizable": true,
-                "decorations": true,
-                "transparent": false,
+                "decorations": false,
+                "transparent": true,
                 "visible": false,
-                "center": true
+                "center": true,
+                "shadow": true,
+                "windowEffects": {
+                    "effects": ["mica"],
+                    "state": "active"
+                }
             }
         ],
         "security": {
@@ -83,7 +94,12 @@
             "../backend/services",
             "../backend/utils",
             "../backend/nit_core",
-            "../backend/nit_core/tools"
+            "../backend/nit_core/tools",
+            "../backend/services/mdp/prompts/**/*.md",
+            "../backend/services/mdp/agents/**/*.md",
+            "../public/icon.png",
+            "../public/vite.svg",
+            "../src/assets"
         ]
     }
 }

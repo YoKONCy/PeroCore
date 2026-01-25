@@ -143,6 +143,28 @@ jobs:
                Get-ChildItem -Path "$SEARCHER_SRC_DIR" -Recurse -Filter "CodeSearcher.exe"
            }
 
+           # 5. Build nit_terminal_auditor (Wasm)
+           Write-Host "Building nit_terminal_auditor..."
+           cargo build --release --target wasm32-unknown-unknown --manifest-path backend/nit_core/nit_terminal_auditor/Cargo.toml
+           
+           $WASM_SRC = "backend/nit_core/nit_terminal_auditor/target/wasm32-unknown-unknown/release/nit_terminal_auditor.wasm"
+           # Fallback path if workspace target dir is used
+           if (!(Test-Path $WASM_SRC)) {
+               $WASM_SRC = "target/wasm32-unknown-unknown/release/nit_terminal_auditor.wasm"
+           }
+           
+           $WASM_TARGET_DIR = "backend/nit_core/tools/work/TerminalExecutor"
+           
+           if (Test-Path $WASM_SRC) {
+               Write-Host "Found Wasm binary at $WASM_SRC"
+               Copy-Item -Path $WASM_SRC -Destination "$WASM_TARGET_DIR/auditor.wasm" -Force
+               Write-Host "auditor.wasm deployed to $WASM_TARGET_DIR"
+           } else {
+               Write-Warning "nit_terminal_auditor.wasm not found after build!"
+               # List dirs to debug
+               Get-ChildItem -Path "backend/nit_core/nit_terminal_auditor" -Recurse
+           }
+
       - name: install frontend dependencies
         run: npm install
 
