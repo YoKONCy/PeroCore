@@ -269,7 +269,7 @@ impl Lexer {
             }
         }
 
-        Err(pyo3::exceptions::PyValueError::new_err("Unterminated string"))
+        Err(pyo3::exceptions::PyValueError::new_err("未闭合的字符串"))
     }
 
     fn read_number(&mut self, py: Python) -> PyResult<Token> {

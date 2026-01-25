@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class AgentProfile:
     """
-    Represents a loaded agent profile.
+    表示已加载的代理配置文件。
     """
     id: str
     name: str
@@ -28,7 +28,7 @@ class AgentProfile:
 
 class AgentManager:
     """
-    Manages the lifecycle, configuration, and discovery of Agents.
+    管理代理的生命周期、配置和发现。
     """
     _instance = None
 
@@ -42,15 +42,15 @@ class AgentManager:
         if self._initialized:
             return
         
-        # Base directory for agents: backend/services/mdp/agents
+        # 代理的基础目录: backend/services/mdp/agents
         self.agents_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "mdp", "agents"))
         self.agents: Dict[str, AgentProfile] = {}
-        self.active_agent_id: str = "pero" # Default active agent
-        self.enabled_agents: set[str] = set() # Set of enabled agent IDs
+        self.active_agent_id: str = "pero" # 默认活跃代理
+        self.enabled_agents: set[str] = set() # 已启用代理 ID 集合
         
         self.reload_agents()
         
-        # Load launch config from file (synced with frontend)
+        # 从文件加载启动配置 (与前端同步)
         try:
             data_dir = os.environ.get("PERO_DATA_DIR", os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data")))
             config_path = os.path.join(data_dir, "agent_launch_config.json")
@@ -61,39 +61,39 @@ class AgentManager:
                     active = launch_config.get("active_agent")
                     
                     if enabled:
-                        # Validate IDs
+                        # 验证 ID
                         valid_enabled = [aid for aid in enabled if aid in self.agents]
                         self.enabled_agents = set(valid_enabled)
-                        logger.info(f"Loaded enabled agents from launch config: {self.enabled_agents}")
+                        logger.info(f"从启动配置加载已启用的代理: {self.enabled_agents}")
                     
                     if active and active in self.agents:
                         self.active_agent_id = active
-                        logger.info(f"Loaded active agent from launch config: {active}")
+                        logger.info(f"从启动配置加载活跃代理: {active}")
             else:
-                logger.info("No agent launch config found, using defaults.")
+                logger.info("未找到代理启动配置，使用默认设置。")
                 self.enabled_agents = set(self.agents.keys())
         except Exception as e:
-            logger.error(f"Failed to load agent launch config: {e}")
+            logger.error(f"加载代理启动配置失败: {e}")
             self.enabled_agents = set(self.agents.keys())
         
-        # Fallback: if config was empty or invalid, ensure defaults
+        # 回退：如果配置为空或无效，确保默认值
         if not self.enabled_agents and self.agents:
              self.enabled_agents = set(self.agents.keys())
 
         self._initialized = True
 
     def reload_agents(self):
-        """Scans the agents directory and loads all configurations."""
+        """扫描代理目录并加载所有配置。"""
         self.agents.clear()
         
         if not os.path.exists(self.agents_dir):
-            logger.warning(f"Agent directory not found: {self.agents_dir}")
-            # Create default directory if not exists
+            logger.warning(f"代理目录未找到: {self.agents_dir}")
+            # 如果不存在则创建默认目录
             try:
                 os.makedirs(self.agents_dir)
-                logger.info(f"Created agent directory: {self.agents_dir}")
+                logger.info(f"已创建代理目录: {self.agents_dir}")
             except Exception as e:
-                logger.error(f"Failed to create agent directory: {e}")
+                logger.error(f"创建代理目录失败: {e}")
                 return
 
         for entry in os.scandir(self.agents_dir):
@@ -106,16 +106,16 @@ class AgentManager:
                     try:
                         profile = self._load_agent_config(agent_id, config_path, prompt_path)
                         self.agents[agent_id] = profile
-                        logger.info(f"Loaded agent: {profile.name} ({agent_id})")
+                        logger.info(f"已加载代理: {profile.name} ({agent_id})")
                     except Exception as e:
-                        logger.error(f"Failed to load agent {agent_id}: {e}")
+                        logger.error(f"加载代理 {agent_id} 失败: {e}")
                 else:
-                    logger.debug(f"Skipping directory {agent_id}: No config.json found")
+                    logger.debug(f"跳过目录 {agent_id}: 未找到 config.json")
 
         if not self.agents:
-            logger.warning("No agents loaded! Please check backend/agents directory.")
+            logger.warning("未加载任何代理！请检查 backend/agents 目录。")
         
-        # Ensure active agent is in the list, if not, reset to first available or 'pero'
+        # 确保活跃代理在列表中，如果不在，重置为第一个可用的或 'pero'
         if self.active_agent_id not in self.agents and self.agents:
              self.active_agent_id = next(iter(self.agents))
 
@@ -125,9 +125,9 @@ class AgentManager:
         
         agent_dir = os.path.dirname(config_path)
         
-        # Helper to load persona content
+        # 加载人设内容的辅助函数
         def load_persona(type_key: str, legacy_key: str) -> str:
-            # Try loading from file first
+            # 首先尝试从文件加载
             personas = config.get("personas", {})
             if type_key in personas:
                 rel_path = personas[type_key]
@@ -137,17 +137,17 @@ class AgentManager:
                         with open(abs_path, "r", encoding="utf-8") as pf:
                             return pf.read()
                     else:
-                        logger.warning(f"Persona file not found: {abs_path}")
+                        logger.warning(f"人设文件未找到: {abs_path}")
                 except Exception as e:
-                    logger.error(f"Error reading persona file {abs_path}: {e}")
+                    logger.error(f"读取人设文件 {abs_path} 错误: {e}")
             
-            # Fallback to legacy key in config
+            # 回退到配置中的旧键
             return config.get(legacy_key, "")
 
         work_persona = load_persona("work", "work_custom_persona")
         social_persona = load_persona("social", "social_custom_persona")
         
-        # Handle traits (new nested structure vs old flat structure)
+        # 处理特征 (新嵌套结构 vs 旧扁平结构)
         traits = config.get("traits", {})
         work_traits = traits.get("work", config.get("work_traits", []))
         social_traits = traits.get("social", config.get("social_traits", []))
@@ -177,21 +177,21 @@ class AgentManager:
     def set_active_agent(self, agent_id: str) -> bool:
         if agent_id.lower() in self.agents:
             self.active_agent_id = agent_id.lower()
-            logger.info(f"Switched active agent to: {agent_id}")
+            logger.info(f"已切换活跃代理为: {agent_id}")
             return True
-        logger.warning(f"Cannot switch to unknown agent: {agent_id}")
+        logger.warning(f"无法切换到未知代理: {agent_id}")
         return False
 
     def set_enabled_agents(self, agent_ids: List[str]):
-        """Sets the list of enabled agents."""
+        """设置已启用的代理列表。"""
         valid_ids = [aid.lower() for aid in agent_ids if aid.lower() in self.agents]
         self.enabled_agents = set(valid_ids)
-        logger.info(f"Enabled agents updated: {self.enabled_agents}")
+        logger.info(f"已启用代理更新: {self.enabled_agents}")
         
-        # If active agent is not in enabled list, warn or switch?
-        # For now, just warn, as the user might be configuring for the future.
+        # 如果活跃代理不在启用列表中，警告或切换？
+        # 目前仅警告，因为用户可能是在为未来配置。
         if self.active_agent_id not in self.enabled_agents and self.enabled_agents:
-            logger.warning(f"Active agent {self.active_agent_id} is not in enabled list!")
+            logger.warning(f"活跃代理 {self.active_agent_id} 不在启用列表中！")
 
     def get_enabled_agents(self) -> List[str]:
         return list(self.enabled_agents)
@@ -200,15 +200,15 @@ class AgentManager:
         return agent_id.lower() in self.enabled_agents
 
     def list_agents(self) -> List[Dict[str, Any]]:
-        # Defensive: If no agents loaded, try reloading once
+        # 防御性编程：如果未加载代理，尝试重新加载一次
         if not self.agents:
-            logger.info("No agents found in memory, attempting to reload...")
+            logger.info("内存中未找到代理，尝试重新加载...")
             self.reload_agents()
-            # If still empty, ensure enabled_agents is also cleared to avoid inconsistency
+            # 如果仍然为空，确保 enabled_agents 也被清除以避免不一致
             if not self.agents:
                 self.enabled_agents.clear()
             else:
-                # If loaded, default enable all if none enabled (first run scenario)
+                # 如果已加载，且没有启用任何代理，则默认启用所有 (首次运行场景)
                 if not self.enabled_agents:
                     self.enabled_agents = set(self.agents.keys())
 
@@ -223,7 +223,7 @@ class AgentManager:
             for p in self.agents.values()
         ]
 
-# Global instance accessor
+# 全局实例访问器
 _agent_manager_instance = None
 
 def get_agent_manager() -> AgentManager:

@@ -6,15 +6,9 @@ from services.embedding_service import embedding_service
 
 # 尝试导入 Rust 核心
 try:
-    # PeroCore 差异化特性:
-    # -------------------------------------------------------------------------
-    # 关于 HNSW 的工程说明:
-    # 为什么不直接用 FAISS 或 Milvus？
-    # 1. 动态更新：FAISS 的 HNSW 索引在频繁进行单条插入/删除时容易产生“索引空洞”，导致检索精度下降。
-    #    我们的 Rust 实现采用了自定义的节点重平衡逻辑，支持真正的“增量式无限记忆”。
-    # 2. 内存对齐：我们利用了 Rust 的 SIMD 指令集优化了内积计算，在普通的 i5 处理器上也能实现 0.1ms 级别的向量比对。
-    # 3. 嵌入式友好：我们需要一个 0 依赖、可直接打包进 MSI 的向量存储方案，而不是让用户去配置 Docker 跑 Milvus。
-    # -------------------------------------------------------------------------
+    # 引入 Rust 核心模块 `pero_memory_core`。
+    # 该模块实现了定制化的 HNSW 索引，针对增量更新、SIMD 性能优化及嵌入式部署进行了专门设计，
+    # 相比 FAISS/Milvus 更适合本项目的轻量级、零依赖需求。
     from pero_memory_core import SemanticVectorIndex
     RUST_AVAILABLE = True
 except ImportError:
@@ -223,7 +217,7 @@ class VectorStoreService:
         if not index: return []
         
         try:
-            results = index.search_knn(query_vector, limit)
+            results = index.search_similar_vectors(query_vector, limit)
             # results format: [(id, score), ...]
             return [{"id": int(r[0]), "score": float(r[1])} for r in results]
         except Exception as e:
@@ -267,12 +261,12 @@ class VectorStoreService:
         try:
             results = self.tag_index.search_similar_vectors(query_vec, limit)
             output = []
-            for tid, dist in results:
+            for tid, score in results:
                 tag_name = self.tag_map_rev.get(tid, f"Unknown_{tid}")
-                sim = 1.0 - (dist / 2.0)
+                # Rust core returns cosine similarity directly
                 output.append({
                     "tag": tag_name,
-                    "score": max(0.0, sim)
+                    "score": max(0.0, float(score))
                 })
             return output
         except Exception as e:

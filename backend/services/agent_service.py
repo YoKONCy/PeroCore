@@ -167,12 +167,6 @@ class AgentService:
         except Exception as e:
             print(f"[Agent] 辅助分析出错: {e}")
             return None
-                
-            return response_text
-
-        except Exception as e:
-            print(f"[Agent] 辅助分析失败: {e}")
-            return None
 
     async def _analyze_screen_with_mcp(self, mcp_client: Optional[McpClient] = None) -> Optional[str]:
         """通过 MCP 调用视觉模型分析当前屏幕"""
@@ -218,7 +212,7 @@ class AgentService:
                 print(f"[Vision] 列出配置键失败: {e}", flush=True)
             return "❌ 视觉功能不可用：未配置 MCP 服务器。请在设置中添加支持视觉能力的 MCP 服务器配置（如 GLM-4V）。"
 
-    async def _analyze_screen_with_mcp(self) -> str:
+    async def _analyze_screen_with_mcp_deprecated(self) -> str:
         """
         [已弃用] 旧版 MCP 视觉分析方法
         现已迁移至 NIT 架构，此方法保留仅为防止运行时 AttributeError，实际不应被调用。

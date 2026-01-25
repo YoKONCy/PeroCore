@@ -29,11 +29,9 @@ class LLMService:
         return f"{self.api_base}/v1{suffix}"
 
     async def chat(self, messages: List[Dict[str, Any]], temperature: float = 0.7, tools: List[Dict] = None, response_format: Optional[Dict] = None) -> Dict[str, Any]:
-        # [Fix] 智能纠错：如果模型名称明显属于 Gemini 但 Provider 被误设为 Anthropic，
-        # 或者用户正在使用 OneAPI/NewAPI 转发 Gemini 模型（通常通过 OpenAI 协议），
-        # 则强制回退到默认的 OpenAI 兼容模式。
+        # 智能纠错：若模型为 Gemini 但 Provider 误设为 Anthropic，强制回退到 OpenAI 兼容模式以支持聚合 API。
         if self.provider in ["claude", "anthropic"] and "gemini" in self.model.lower():
-             print(f"[LLMService] Detected Gemini model '{self.model}' with Anthropic provider. Falling back to OpenAI-compatible protocol for OneAPI/Aggregator compatibility.")
+             print(f"[LLMService] 检测到 Gemini 模型 '{self.model}' 使用 Anthropic 提供商。强制回退到 OpenAI 兼容协议以支持 OneAPI/Aggregator。")
              # 不执行 return，直接向下流转到默认的 OpenAI 逻辑
         elif self.provider == "gemini":
             return await self._chat_gemini(messages, temperature, tools)

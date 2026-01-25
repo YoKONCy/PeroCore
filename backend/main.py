@@ -224,8 +224,11 @@ async def lifespan(app: FastAPI):
                                 # User said "PeroCore\pero_workspace\log". 
                                 # Assuming workspace is at project root (PeroCore/).
                                 project_root = os.path.dirname(backend_dir)
-                                # [Update] Change path to pero_workspace/log/weeklyport
-                                log_dir = os.path.join(project_root, "pero_workspace", "log", "weeklyport")
+                                # [Update] Change path to pero_workspace/{agent_id}/weeklyport
+                                from services.agent_manager import AgentManager
+                                agent_manager = AgentManager()
+                                active_agent_id = agent_manager.active_agent_id
+                                log_dir = os.path.join(project_root, "pero_workspace", active_agent_id, "weeklyport")
                                 os.makedirs(log_dir, exist_ok=True)
                                 
                                 filename = f"{now.strftime('%Y-%m-%d')}_Weekly_Report.md"
@@ -1252,9 +1255,10 @@ async def list_memories(
     return await service.get_all_memories(session, limit, offset, date_start, date_end, tags, memory_type=type, agent_id=target_agent)
 
 @app.get("/api/memories/graph")
-async def get_memory_graph(limit: int = 100, session: AsyncSession = Depends(get_session)):
+async def get_memory_graph(limit: int = 100, agent_id: Optional[str] = None, session: AsyncSession = Depends(get_session)):
     service = MemoryService()
-    return await service.get_memory_graph(session, limit)
+    target_agent = agent_id if agent_id else "pero"
+    return await service.get_memory_graph(session, limit, agent_id=target_agent)
 
 @app.delete("/api/memories/orphaned_edges")
 async def delete_orphaned_edges(session: AsyncSession = Depends(get_session)):
@@ -1284,9 +1288,10 @@ async def trigger_dream(limit: int = 10, session: AsyncSession = Depends(get_ses
     return result
 
 @app.get("/api/memories/tags")
-async def get_tag_cloud(session: AsyncSession = Depends(get_session)):
+async def get_tag_cloud(agent_id: Optional[str] = None, session: AsyncSession = Depends(get_session)):
     service = MemoryService()
-    return await service.get_tag_cloud(session)
+    target_agent = agent_id if agent_id else "pero"
+    return await service.get_tag_cloud(session, agent_id=target_agent)
 
 @app.get("/api/voice-configs", response_model=List[VoiceConfig])
 async def get_voice_configs(session: AsyncSession = Depends(get_session)):

@@ -268,9 +268,9 @@ const createGroup = async () => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 name: newGroupName.value,
-                creator_id: 'user', // User created
+                creator_id: 'user', // 用户创建
                 member_ids: newGroupMembers.value,
-                description: 'User created group'
+                description: '用户创建的群组'
             })
         });
         

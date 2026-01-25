@@ -995,13 +995,17 @@ class MemoryService:
         return (await session.exec(statement)).all()
 
     @staticmethod
-    async def get_tag_cloud(session: AsyncSession) -> List[Dict[str, Any]]:
+    async def get_tag_cloud(session: AsyncSession, agent_id: str = "pero") -> List[Dict[str, Any]]:
         """
         获取标签云数据 (Top 20 tags)
         """
         # 简单实现：取出所有 Memory 的 tags 字段，在内存中统计
         # TODO: 后期可以使用 SQL group by 优化
-        memories = (await session.exec(select(Memory))).all()
+        statement = select(Memory)
+        if agent_id:
+            statement = statement.where(Memory.agent_id == agent_id)
+            
+        memories = (await session.exec(statement)).all()
         tag_counts = {}
         
         for m in memories:
@@ -1043,19 +1047,28 @@ class MemoryService:
         return result.rowcount
 
     @staticmethod
-    async def get_memory_graph(session: AsyncSession, limit: int = 200) -> Dict[str, Any]:
+    async def get_memory_graph(session: AsyncSession, limit: int = 200, agent_id: str = "pero") -> Dict[str, Any]:
         """返回用于图形可视化的节点和边 (针对酷炫 UI 增强)"""
         # 获取最近 N 条记忆
-        memories = (await session.exec(select(Memory).order_by(desc(Memory.timestamp)).limit(limit))).all()
+        statement = select(Memory).order_by(desc(Memory.timestamp)).limit(limit)
+        if agent_id:
+            statement = statement.where(Memory.agent_id == agent_id)
+            
+        memories = (await session.exec(statement)).all()
         if not memories:
             return {"nodes": [], "edges": []}
             
         memory_ids = [m.id for m in memories]
         
         # 获取连接这些记忆的关系
-        relations = (await session.exec(select(MemoryRelation).where(
+        rel_statement = select(MemoryRelation).where(
             (MemoryRelation.source_id.in_(memory_ids)) | (MemoryRelation.target_id.in_(memory_ids))
-        ))).all()
+        )
+        # 关系表也有 agent_id，增加过滤更严谨，虽然基于 memory_ids 过滤已经隐含了隔离
+        if agent_id:
+            rel_statement = rel_statement.where(MemoryRelation.agent_id == agent_id)
+            
+        relations = (await session.exec(rel_statement)).all()
         
         # 格式化为前端格式 (ECharts 力导向图)
         nodes = []

@@ -12,6 +12,7 @@ if backend_dir not in sys.path:
 from services.embedding_service import embedding_service
 from services.memory_service import MemoryService
 from services.mdp.manager import mdp
+from services.agent_manager import AgentManager
 from core.config_manager import get_config_manager
 
 class ThinkingChainService:

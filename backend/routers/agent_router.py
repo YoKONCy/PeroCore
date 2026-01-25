@@ -20,26 +20,26 @@ class ActiveAgentRequest(BaseModel):
 
 @router.get("", response_model=List[AgentInfo])
 async def list_agents():
-    """List all available agents with their status."""
+    """列出所有可用代理及其状态。"""
     manager = get_agent_manager()
     return manager.list_agents()
 
 @router.get("/enabled", response_model=List[str])
 async def get_enabled_agents():
-    """Get list of enabled agent IDs."""
+    """获取已启用代理 ID 的列表。"""
     manager = get_agent_manager()
     return manager.get_enabled_agents()
 
 @router.post("/enabled")
 async def set_enabled_agents(request: EnabledAgentsRequest):
-    """Set the list of enabled agents."""
+    """设置已启用的代理列表。"""
     manager = get_agent_manager()
     manager.set_enabled_agents(request.agent_ids)
     return {"status": "ok", "enabled_agents": manager.get_enabled_agents()}
 
 @router.get("/active", response_model=Dict[str, Any])
 async def get_active_agent():
-    """Get the current active agent."""
+    """获取当前活跃的代理。"""
     manager = get_agent_manager()
     profile = manager.get_active_agent()
     if not profile:
@@ -53,7 +53,7 @@ async def get_active_agent():
 
 @router.post("/active")
 async def set_active_agent(request: ActiveAgentRequest):
-    """Switch the active agent."""
+    """切换活跃代理。"""
     manager = get_agent_manager()
     success = manager.set_active_agent(request.agent_id)
     if not success:

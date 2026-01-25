@@ -85,31 +85,31 @@ const files = ref([]);
 const loading = ref(true);
 const searchQuery = ref('');
 
-// Recursive search function
+// 递归搜索函数
 const filterTree = (nodes, query) => {
   if (!query) return nodes;
   
   const lowerQuery = query.toLowerCase();
   
   return nodes.reduce((acc, node) => {
-    // Check if current node matches
+    // 检查当前节点是否匹配
     const matches = node.name.toLowerCase().includes(lowerQuery);
     
-    // If it's a directory, check children
+    // 如果是目录，检查子节点
     if (node.type === 'directory' && node.children) {
       const filteredChildren = filterTree(node.children, query);
       
-      // If matches or has matching children, include it
+      // 如果匹配或包含匹配的子节点，则包含该节点
       if (matches || filteredChildren.length > 0) {
         acc.push({
           ...node,
-          // If node matches, keep all children (optional, but usually better to filter them too unless "expanded")
-          // Here we choose to filter children strictly to help finding specific files
+          // 如果节点匹配，保留所有子节点（可选，但通常过滤它们更好，除非"已展开"）
+          // 这里我们选择严格过滤子节点以帮助查找特定文件
           children: filteredChildren 
         });
       }
     } else if (matches) {
-      // If it's a file and matches, include it
+      // 如果是文件且匹配，则包含它
       acc.push(node);
     }
     
@@ -245,7 +245,7 @@ const handleItemContextMenu = (payload) => {
   contextMenu.visible = true;
 };
 
-// --- Operations ---
+// --- 操作 ---
 
 const createFile = async (parentItem) => {
   const name = await showDialog({

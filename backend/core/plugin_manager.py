@@ -12,27 +12,27 @@ logger = logging.getLogger(__name__)
 
 class PluginManager:
     """
-    Manages the discovery, loading, and registration of plugins in PeroCore.
+    负责 PeroCore 中插件的发现、加载和注册管理。
     """
 
     def __init__(self, plugin_dir: str):
         """
-        Initialize the PluginManager.
+        初始化插件管理器。
         
         Args:
-            plugin_dir: Absolute path to the directory containing plugins.
+            plugin_dir: 包含插件的绝对路径目录。
         """
         self.plugin_dir = plugin_dir
-        self.plugins: Dict[str, Dict[str, Any]] = {}  # Map plugin name to manifest
-        self.tools_map: Dict[str, Callable] = {}      # Map command identifier to function
-        self.loaded_modules: Dict[str, Any] = {}      # Map plugin name to loaded module
+        self.plugins: Dict[str, Dict[str, Any]] = {}  # 插件名 -> 清单(Manifest)
+        self.tools_map: Dict[str, Callable] = {}      # 命令ID -> 可执行函数
+        self.loaded_modules: Dict[str, Any] = {}      # 插件名 -> 已加载模块对象
         self.config_manager = get_config_manager()
         self.nit_manager = get_nit_manager()
 
     def load_plugins(self):
         """
-        Scans the plugin directory and loads all valid plugins.
-        Supports nested structure: core, work, plugins (extensions).
+        扫描插件目录并加载所有有效插件。
+        支持嵌套结构：core (核心), work (工作), plugins (扩展)。
         """
         logger.info(f"正在 {self.plugin_dir} 中扫描插件...")
         
@@ -40,13 +40,13 @@ class PluginManager:
             logger.error(f"插件目录 {self.plugin_dir} 不存在。")
             return
 
-        # Define sub-categories to scan
-        categories = ['core', 'work', '../plugins'] # relative to tools dir
+        # 定义需要扫描的子分类
+        categories = ['core', 'work', '../plugins'] # 相对于 tools 目录
         
-        # Scan root (legacy compatibility)
+        # 扫描根目录 (兼容旧版本)
         self._scan_directory(self.plugin_dir)
 
-        # Scan categories
+        # 扫描分类目录
         for category in categories:
             cat_path = os.path.normpath(os.path.join(self.plugin_dir, category))
             if os.path.exists(cat_path) and os.path.isdir(cat_path):
@@ -57,7 +57,7 @@ class PluginManager:
 
     def reload_plugins(self):
         """
-        Clears existing plugins and tools, then reloads from directory.
+        清除现有插件和工具，并从目录重新加载。
         """
         logger.info("正在重新加载所有插件...")
         self.plugins.clear()
@@ -66,7 +66,7 @@ class PluginManager:
         self.load_plugins()
 
     def _scan_directory(self, directory: str, category_prefix: str = None):
-        """Helper to scan a specific directory for plugins."""
+        """扫描特定目录下的插件 (Helper)。"""
         for item in os.listdir(directory):
             item_path = os.path.join(directory, item)
             if os.path.isdir(item_path):
@@ -74,7 +74,7 @@ class PluginManager:
 
     def _load_single_plugin(self, plugin_path: str, plugin_folder_name: str, category_prefix: str = None):
         """
-        Loads a single plugin from a directory.
+        从目录加载单个插件。
         """
         manifest_path = os.path.join(plugin_path, "description.json")
         if not os.path.exists(manifest_path):
@@ -87,16 +87,16 @@ class PluginManager:
             logger.error(f"解析 {plugin_folder_name} 的清单失败: {e}")
             return
 
-        # Basic Validation
+        # 基础校验
         if "name" not in manifest or "entryPoint" not in manifest:
             logger.error(f" {plugin_folder_name} 的清单无效: 缺少 name 或 entryPoint。")
             return
 
         plugin_name = manifest["name"]
 
-        # Inject category info into manifest for Dispatcher filtering
+        # 注入分类信息以便 Dispatcher 过滤
         if category_prefix:
-            # Handle ../plugins case -> plugins
+            # 处理 ../plugins 路径 -> plugins
             clean_category = os.path.basename(category_prefix) if '..' in category_prefix else category_prefix
             manifest['_category'] = clean_category
 
@@ -113,7 +113,7 @@ class PluginManager:
 
     def _load_python_module_plugin(self, plugin_path: str, plugin_folder_name: str, manifest: Dict[str, Any], category_prefix: str = None):
         """
-        Loads a python-module type plugin.
+        加载 python-module 类型的插件。
         """
         entry_point = manifest["entryPoint"]
         module_file = entry_point
@@ -122,14 +122,14 @@ class PluginManager:
         else:
             module_name = module_file
 
-        # Construct import path
-        # Try dynamic path construction based on category
+        # 构建导入路径
+        # 尝试基于分类的动态路径构建
         import_paths_to_try = []
         
         if category_prefix:
-            # Normalize path separators for import
-            # e.g. "core" -> "backend.nit_core.tools.core"
-            # e.g. "../plugins" -> "backend.nit_core.plugins"
+            # 规范化导入路径的分隔符
+            # 例如 "core" -> "backend.nit_core.tools.core"
+            # 例如 "../plugins" -> "backend.nit_core.plugins"
             
             if "plugins" in category_prefix:
                  import_paths_to_try.append(f"backend.nit_core.plugins.{plugin_folder_name}.{module_name}")
@@ -138,7 +138,7 @@ class PluginManager:
                  import_paths_to_try.append(f"backend.nit_core.tools.{category_prefix}.{plugin_folder_name}.{module_name}")
                  import_paths_to_try.append(f"nit_core.tools.{category_prefix}.{plugin_folder_name}.{module_name}")
         
-        # Legacy fallbacks
+        # 旧版兼容路径
         import_paths_to_try.append(f"backend.nit_core.tools.{plugin_folder_name}.{module_name}")
         import_paths_to_try.append(f"nit_core.tools.{plugin_folder_name}.{module_name}")
 
@@ -151,7 +151,7 @@ class PluginManager:
                 continue
         
         if not module:
-             # Last ditch effort: sys.path hack (not recommended but robust for moving files)
+             # 最后的尝试: sys.path hack (不推荐，但对文件移动具有鲁棒性)
              try:
                  spec = importlib.util.spec_from_file_location(module_name, os.path.join(plugin_path, module_file))
                  if spec and spec.loader:
@@ -161,43 +161,43 @@ class PluginManager:
                  logger.error(f"从 {plugin_path} 加载模块 {module_name} 失败: {e}")
                  return
 
-        # Register functions
+        # 注册功能函数
         if "capabilities" in manifest and "invocationCommands" in manifest["capabilities"]:
             for cmd in manifest["capabilities"]["invocationCommands"]:
                 cmd_id = cmd["commandIdentifier"]
-                # Try to find function in module
-                # Convention: function name same as commandIdentifier
+                # 尝试在模块中查找函数
+                # 约定: 函数名与 commandIdentifier 相同
                 if hasattr(module, cmd_id):
                     self.tools_map[cmd_id] = getattr(module, cmd_id)
                 else:
-                    # Fallback: maybe the module has a main entry point?
-                    # For now, just warn
+                    # 回退策略: 也许模块有一个主入口点?
+                    # 目前仅记录警告
                     logger.warning(f"在插件 '{manifest['name']}' 的模块 '{module_name}' 中未找到函数 '{cmd_id}'。")
 
         self.loaded_modules[manifest['name']] = module
 
     def list_plugins(self) -> List[str]:
         """
-        List all discovered plugin names.
+        列出所有已发现的插件名称。
         """
         return list(self.plugins.keys())
 
     def get_tool(self, command_identifier: str) -> Optional[Callable]:
         """
-        Get the callable function for a given command identifier.
+        获取指定命令 ID 对应的可调用函数。
         """
         return self.tools_map.get(command_identifier)
 
     def get_all_tools_map(self) -> Dict[str, Callable]:
         """
-        Get the full map of command identifiers to functions.
+        获取完整的命令 ID 到函数的映射。
         """
         return self.tools_map
 
     def get_all_definitions(self) -> List[Dict[str, Any]]:
         definitions = []
         for plugin_name, manifest in self.plugins.items():
-            # Check for invocationCommands (standard in our NIT format)
+            # 检查 invocationCommands (NIT 格式标准)
             if "capabilities" in manifest and "invocationCommands" in manifest["capabilities"]:
                 definitions.extend(manifest["capabilities"]["invocationCommands"])
             elif "capabilities" in manifest and "toolDefinitions" in manifest["capabilities"]:
@@ -206,7 +206,7 @@ class PluginManager:
     
     def get_all_manifests(self) -> List[Dict[str, Any]]:
         """
-        Get all loaded plugin manifests.
+        获取所有已加载的插件清单。
         """
         return list(self.plugins.values())
 

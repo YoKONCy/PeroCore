@@ -50,7 +50,7 @@ impl NITScope {
                 let content = py_str.to_string_lossy();
                 // 简单的字符截断 (注意这可能不是最快的方法，但比 Python 快)
                 let truncated: String = content.chars().take(self.max_string_len).collect();
-                let new_value = truncated + "... [Truncated by NIT Rust Scope]";
+                let new_value = truncated + "... [已被 NIT Rust Scope 截断]";
                 
                 self.variables.insert(key, new_value.into_py(py));
                 return Ok(());

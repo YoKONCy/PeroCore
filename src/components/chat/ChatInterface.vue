@@ -1,11 +1,11 @@
 <template>
   <div class="flex flex-col h-full transition-colors duration-300 relative" :class="workMode ? 'bg-[#1e293b] text-slate-200' : 'bg-transparent text-slate-700'">
     
-    <!-- Command Execution Overlay -->
+    <!-- 指令执行遮罩 -->
     <Transition name="fade">
       <div v-if="activeCommand" class="absolute inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-6">
         <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200 dark:border-slate-700 transform transition-all animate-scale-in">
-          <!-- Header -->
+          <!-- 标题栏 -->
           <div class="px-6 py-4 bg-sky-50 dark:bg-sky-900/20 border-b border-sky-100 dark:border-sky-800/30 flex items-center gap-3">
             <div class="p-2 bg-sky-100 dark:bg-sky-800/40 rounded-full text-sky-600 dark:text-sky-400 animate-spin-slow">
               <Terminal class="w-5 h-5" />
@@ -16,7 +16,7 @@
             </div>
           </div>
           
-          <!-- Content -->
+          <!-- 内容区域 -->
           <div class="p-6">
             <div class="bg-slate-900 rounded-lg p-4 font-mono text-sm text-green-400 overflow-x-auto custom-scrollbar border border-slate-700 shadow-inner relative">
               <span class="select-text">{{ activeCommand.command }}</span>
@@ -40,11 +40,11 @@
       </div>
     </Transition>
 
-    <!-- Command Confirmation Overlay -->
+    <!-- 指令确认遮罩 -->
     <Transition name="fade">
       <div v-if="pendingConfirmation" class="absolute inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-6">
         <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200 dark:border-slate-700 transform transition-all animate-scale-in">
-          <!-- Header -->
+          <!-- 标题栏 -->
           <div 
             class="px-6 py-4 flex items-center gap-3 border-b transition-colors"
             :class="pendingConfirmation.riskInfo?.level >= 2 ? 'bg-red-50 dark:bg-red-900/20 border-red-100 dark:border-red-800/30' : 'bg-amber-50 dark:bg-amber-900/20 border-amber-100 dark:border-amber-800/30'"
@@ -58,13 +58,13 @@
             <div>
               <h3 class="font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
                 请求执行终端指令
-                <span v-if="pendingConfirmation.riskInfo?.level >= 2" class="px-2 py-0.5 bg-red-500 text-white text-[10px] rounded-full uppercase tracking-wide font-bold">High Risk</span>
+                <span v-if="pendingConfirmation.riskInfo?.level >= 2" class="px-2 py-0.5 bg-red-500 text-white text-[10px] rounded-full uppercase tracking-wide font-bold">高风险 (High Risk)</span>
               </h3>
               <p class="text-xs text-slate-500 dark:text-slate-400">{{ agentName }} 申请在您的系统中执行以下命令</p>
             </div>
           </div>
           
-          <!-- Content -->
+          <!-- 内容区域 -->
           <div class="p-6">
             <div 
                 class="bg-slate-900 rounded-lg p-4 font-mono text-sm overflow-x-auto custom-scrollbar border shadow-inner transition-colors"
@@ -109,9 +109,9 @@
       </div>
     </Transition>
 
-    <!-- Messages Area -->
+    <!-- 消息区域 -->
     <div class="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar flex flex-col" ref="msgContainer">
-      <!-- Load More Button -->
+      <!-- 加载更多按钮 -->
       <div v-if="hasMore" class="flex justify-center py-4">
          <button @click="loadMore" class="text-xs text-slate-400 hover:text-sky-500 transition-colors flex items-center gap-1">
            <Clock class="w-3 h-3" />
@@ -121,10 +121,10 @@
 
       <div v-for="(msg, idx) in messages" :key="idx" class="flex flex-col">
         
-        <!-- User Message -->
+        <!-- 用户消息 -->
         <div v-if="msg.role === 'user'" class="flex justify-end mb-4 animate-fade-in-up group">
           <div class="max-w-[85%] animate-float flex flex-col items-end">
-            <!-- Images Display -->
+            <!-- 图片显示 -->
             <div v-if="msg.images && msg.images.length > 0" class="flex gap-2 mb-2 flex-wrap justify-end">
                <div v-for="(img, iIdx) in msg.images" :key="iIdx" class="relative">
                   <img :src="img" class="max-h-32 rounded-lg shadow-md border border-white/10 object-cover hover:scale-105 transition-transform cursor-pointer" @click="window.open(img, '_blank')" />
@@ -156,9 +156,9 @@
           </div>
         </div>
 
-        <!-- Pero Message -->
+        <!-- 助手消息 -->
         <div v-else-if="msg.role === 'assistant'" class="flex justify-start mb-4 gap-3 group animate-fade-in-up">
-          <!-- Avatar -->
+          <!-- 头像 -->
           <div class="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center text-white shadow-md transition-all overflow-hidden relative animate-float"
             :class="workMode ? 'bg-gradient-to-br from-indigo-400 to-purple-500' : 'bg-gradient-to-br from-sky-400 to-blue-500 shadow-sky-500/20'"
           >
@@ -168,7 +168,7 @@
           </div>
           
           <div class="max-w-[85%] min-w-[200px] animate-float" style="animation-delay: 1s;">
-             <!-- Name & Time -->
+             <!-- 名称与时间 -->
              <div class="flex items-center gap-2 mb-1.5 ml-1 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
                <span class="text-xs font-bold" :class="workMode ? 'text-indigo-300' : 'text-slate-500'">{{ (msg.senderId && msg.senderId !== 'pero' && msg.senderId !== 'user') ? msg.senderId : AGENT_NAME }}</span>
                <span class="text-[10px] text-slate-400">{{ formatTime(msg.timestamp) }}</span>
@@ -215,7 +215,7 @@
               </template>
               <template v-else v-for="(segment, sIdx) in parseMessage(msg.content)" :key="sIdx">
                 
-                <!-- Thinking Block -->
+                <!-- 思考过程块 -->
                 <div v-if="segment.type === 'thinking'" class="rounded-lg overflow-hidden border my-1 transition-all duration-300"
                    :class="workMode ? 'bg-slate-800/50 border-slate-700' : 'bg-slate-50/50 border-slate-200/60'"
                 >
@@ -225,7 +225,7 @@
                    >
                       <div class="flex items-center gap-2 text-xs font-bold">
                         <Brain class="w-3.5 h-3.5" />
-                        <span>Thinking Process</span>
+                        <span>思考过程 (Thinking Process)</span>
                       </div>
                       <span class="text-[10px] transition-transform duration-200" :class="{'rotate-180': isCollapsed(idx, sIdx)}">▼</span>
                    </div>
@@ -234,7 +234,7 @@
                    </div>
                 </div>
 
-                <!-- Monologue Block -->
+                <!-- 独白块 -->
                 <div v-else-if="segment.type === 'monologue'" class="rounded-lg overflow-hidden border relative my-1 transition-all duration-300"
                    :class="workMode ? 'bg-pink-900/10 border-pink-500/20' : 'bg-pink-50/30 border-pink-100/60'"
                 >
@@ -246,7 +246,7 @@
                    >
                       <div class="flex items-center gap-2 text-xs font-bold">
                         <MessageSquareQuote class="w-3.5 h-3.5" />
-                        <span>Inner Monologue</span>
+                        <span>内心独白 (Inner Monologue)</span>
                       </div>
                       <span class="text-[10px] transition-transform duration-200" :class="{'rotate-180': isCollapsed(idx, sIdx)}">▼</span>
                    </div>
@@ -255,7 +255,7 @@
                    </div>
                 </div>
 
-                <!-- Tool Block (NIT) -->
+                <!-- 工具调用块 (NIT) -->
                 <div v-else-if="segment.type === 'tool'" class="rounded-xl overflow-hidden border shadow-sm my-2"
                    :class="workMode ? 'border-blue-500/30' : 'border-blue-100/60'"
                 >
@@ -279,7 +279,7 @@
                    </div>
                 </div>
 
-                <!-- Normal Text -->
+                <!-- 普通文本 -->
                 <div v-else class="min-h-[1.5em]" :class="workMode ? 'text-slate-100' : 'text-slate-700'">
                    <AsyncMarkdown :content="segment.content" v-if="segment.content" />
                 </div>
@@ -290,7 +290,7 @@
           </div>
         </div>
 
-        <!-- Thought Chain Card -->
+        <!-- 思维链卡片 -->
         <div v-else-if="msg.role === 'thought_chain'" class="flex justify-start mb-4 gap-3 w-full">
            <div class="w-10 h-10 flex-shrink-0"></div> <!-- Spacer -->
            <div class="w-full max-w-2xl">
@@ -385,7 +385,7 @@
       </div>
     </div>
 
-    <!-- Input Area -->
+    <!-- 输入区域 -->
     <div class="p-6 pt-0 bg-transparent flex-shrink-0">
       <div 
         class="relative rounded-2xl shadow-xl border transition-all flex flex-col"
@@ -393,7 +393,7 @@
           ? 'bg-[#0f172a] border-slate-700/50 focus-within:border-amber-500/50 focus-within:shadow-amber-500/10' 
           : 'bg-white/60 border-sky-200/50 focus-within:border-sky-400/50 focus-within:shadow-sky-400/20 backdrop-blur-md'"
       >
-        <!-- Pending Images Preview -->
+        <!-- 待发送图片预览 -->
         <div v-if="pendingImages.length > 0" class="px-4 pt-4 pb-2 flex gap-2 overflow-x-auto custom-scrollbar">
            <div v-for="(img, idx) in pendingImages" :key="idx" class="relative group flex-shrink-0">
               <img :src="img.url" class="h-16 w-16 object-cover rounded-lg shadow-sm" :class="workMode ? 'border border-slate-700' : 'border border-slate-200'" />
@@ -417,7 +417,7 @@
         ></textarea>
         
         <div class="absolute right-2 bottom-2 flex items-center gap-1">
-          <!-- Image Upload Button -->
+          <!-- 图片上传按钮 -->
            <input type="file" ref="fileInput" accept="image/*" multiple class="hidden" @change="handleFileSelect" />
            <button 
               @click="triggerUpload" 
@@ -477,11 +477,11 @@ const props = defineProps({
   targetId: { type: String, default: 'pero' }
 });
 
-// Confirmation State
+// 确认状态
 const pendingConfirmation = ref(null);
-let ws = null; // Store WebSocket reference if available or use emit/listen mechanism
+let ws = null; // 存储 WebSocket 引用或使用 emit/listen 机制
 
-// Setup Confirmation Listener
+// 设置确认监听器
 onMounted(async () => {
   // Listen for WebSocket messages forwarded from parent or global bus
   // Since we don't have direct access to the global WS here, we'll use Tauri event bus
@@ -538,7 +538,7 @@ const respondConfirmation = async (approved) => {
   pendingConfirmation.value = null;
 };
 
-// Active Command State
+// 当前活动指令状态
 const activeCommand = ref(null);
 
 const skipCommandWait = async () => {
@@ -561,7 +561,7 @@ onUnmounted(() => {
   if (unlistenConfirmation) unlistenConfirmation();
 });
 
-// TTS State
+// TTS 语音状态
 const playingMsgId = ref(null);
 const isLoadingAudio = ref(false);
 const currentAudio = ref(null);
@@ -702,7 +702,7 @@ const isInputLocked = computed(() => {
 const isConnected = ref(false);
 let reconnectTimer = null;
 
-// Configuration
+// 配置
 const API_BASE = 'http://localhost:9120';
 const WS_BASE = 'ws://localhost:9120';
 const HISTORY_LIMIT = 30;
@@ -712,7 +712,7 @@ const parseMessage = (content) => {
   
   const segments = [];
   
-  // Robust Regex Pattern
+  // 健壮的正则模式
   // 1. Thinking/Monologue: 【Thinking: ...】 or 【Monologue: ...】
   // 2. NIT Tool: <nit>...</nit> or <nit-ID>...</nit-ID> or [[[NIT_CALL]]]...[[[NIT_END]]]
   // 3. DeepSeek Thinking: <think>...</think>
@@ -753,7 +753,7 @@ const parseMessage = (content) => {
        
        const trimmedCode = code.trim();
        
-       let toolName = 'Script Execution';
+       let toolName = '脚本执行'; // Script Execution -> 脚本执行
        const funcMatch = /([a-zA-Z_][a-zA-Z0-9_]*)\./.exec(trimmedCode);
        if (funcMatch) {
          toolName = funcMatch[1];
@@ -783,7 +783,7 @@ const parseMessage = (content) => {
 
 
 
-// --- Collapse Logic ---
+// --- 折叠逻辑 ---
 const collapsedStates = ref(new Set());
 
 const toggleCollapse = (msgIdx, segIdx) => {
@@ -832,7 +832,7 @@ const saveEdit = async (msg) => {
   }
 };
 
-// --- Dialog Logic ---
+// --- 对话框逻辑 ---
 const deleteDialogVisible = ref(false);
 const deleteDialogMessage = ref('');
 const pendingDeleteId = ref(null);
@@ -862,7 +862,7 @@ const handleConfirmDelete = async () => {
   }
 };
 
-// --- WebSocket Logic for Real-time Thoughts ---
+// --- 实时思维 WebSocket 逻辑 ---
 const connectWS = () => {
   if (ws) ws.close();
   ws = new WebSocket(`${WS_BASE}/ws/voice`);

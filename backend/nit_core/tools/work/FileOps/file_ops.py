@@ -33,10 +33,23 @@ def _get_safe_path(input_path: str) -> str:
         return workspace_root
 
     # 统一解析为绝对路径
-    if os.path.isabs(input_path):
-        target_path = os.path.abspath(input_path)
+    # [Fix] 如果 input_path 是绝对路径但不是以 workspace_root 开头，强制视为相对路径处理
+    # 这样可以防止用户传入 "C:\Windows\System32" 这种路径
+    # 但允许传入已经正确的绝对路径 "C:\PeroCore\pero_workspace\pero\file.txt"
+    
+    temp_abs_path = os.path.abspath(input_path) if os.path.isabs(input_path) else ""
+    
+    if temp_abs_path and temp_abs_path.startswith(workspace_root):
+        target_path = temp_abs_path
     else:
-        target_path = os.path.abspath(os.path.join(workspace_root, input_path))
+        # 视为相对路径
+        # 移除可能的盘符和前导斜杠
+        clean_path = input_path.lstrip("/\\")
+        # 如果包含冒号（盘符），也移除
+        if ":" in clean_path:
+            clean_path = clean_path.split(":", 1)[1].lstrip("/\\")
+            
+        target_path = os.path.abspath(os.path.join(workspace_root, clean_path))
     
     # 路径逃逸校验：目标路径必须以工作空间根路径开头
     if not target_path.startswith(workspace_root):

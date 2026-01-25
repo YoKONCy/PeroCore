@@ -93,7 +93,7 @@
           ref="inputRef"
           v-model="userInput" 
           @keyup.enter="sendMessage"
-          :placeholder="isWorkMode ? '工作模式下已禁用输入' : `跟 ${AGENT_NAME} 对话...`"
+          :placeholder="isWorkMode ? '工作模式下已禁用输入' : `跟 ${currentAgentName} 对话...`"
           class="chat-input"
           :disabled="isThinking || isWorkMode"
           style="-webkit-app-region: no-drag;"
@@ -337,8 +337,6 @@ let replyTimer = null
 const showFileModal = ref(false)
 const foundFiles = ref([])
 const currentAgentId = ref('pero')
-const currentAgentName = ref(AGENT_NAME)
-
 // 气泡折叠相关
 const isBubbleExpanded = ref(false)
 const isContentOverflowing = ref(false)
@@ -2045,6 +2043,9 @@ const sendMessage = async (systemMsg = null, isHidden = false) => {
   } finally {
     // isSpeaking.value = false // Don't force stop speaking, as audio might be playing
     isThinking.value = false
+  }
+  } catch (e) {
+    console.error('Unexpected error in sendMessage:', e)
   }
 }
 

@@ -22,12 +22,12 @@ impl From<ParserError> for PyErr {
         match err {
             ParserError::UnexpectedToken { expected, got, line, col } => {
                 pyo3::exceptions::PyValueError::new_err(format!(
-                    "Syntax Error: Expected {}, got {} at line {}, col {}",
+                    "语法错误: 预期 {}, 实际得到 {} (行 {}, 列 {})",
                     expected, got, line, col
                 ))
             }
             ParserError::UnexpectedEOF => {
-                pyo3::exceptions::PyValueError::new_err("Unexpected End of File")
+                pyo3::exceptions::PyValueError::new_err("意外的文件结束")
             }
             ParserError::PythonError(e) => e,
         }
@@ -103,19 +103,19 @@ impl Parser {
     fn parse_statement(&mut self, py: Python) -> Result<PyObject, ParserError> {
         let token = self.peek();
         
-        // case 1: Assignment ($var = ...)
+        // 情况 1: 赋值 ($var = ...)
         if token.type_ == "VARIABLE" {
             return self.parse_assignment(py);
         }
         
-        // case 2: Call (tool(...))
+        // 情况 2: 调用 (tool(...))
         // 可能是 IDENTIFIER 或 KEYWORD_ASYNC
         if token.type_ == "IDENTIFIER" || token.type_ == "KEYWORD_ASYNC" {
             return self.parse_call(py).map(|n| n.into_py(py)); // CallNode -> PyObject
         }
         
         Err(ParserError::UnexpectedToken {
-            expected: "Statement (Variable or Call)".to_string(),
+            expected: "语句 (变量或调用)".to_string(),
             got: token.type_.clone(),
             line: token.line,
             col: token.column,
@@ -224,7 +224,7 @@ impl Parser {
         }
         
         Err(ParserError::UnexpectedToken {
-            expected: "Value".to_string(),
+            expected: "值 (Value)".to_string(),
             got: token.type_.clone(),
             line: token.line,
             col: token.column,

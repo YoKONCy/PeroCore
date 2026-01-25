@@ -9,6 +9,7 @@ from utils.workspace_utils import get_workspace_root
 # WORKSPACE_ROOT = ...
 
 def _ensure_workspace():
+    # Use active agent's workspace by default
     root = get_workspace_root()
     if not os.path.exists(root):
         os.makedirs(root)

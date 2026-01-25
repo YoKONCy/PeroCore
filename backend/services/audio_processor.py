@@ -32,13 +32,8 @@ class AudioProcessor:
             # 加载声音
             sound = parselmouth.Sound(input_path)
             
-            # 使用 Praat 的 "Change gender" 功能进行高质量的音高和共振峰偏移
-            # 参数: (sound, formants_floor, formants_ceiling, formant_shift_ratio, 
-            #       pitch_median_shift_ratio, pitch_range_shift_ratio, duration_factor)
-            # 默认值参考: 
-            #   formants_floor=75.0, formants_ceiling=600.0 (适合一般人声)
-            #   pitch_range_shift_ratio=1.0 (保持原有的语调起伏)
-            #   duration_factor=1.0 (保持语速)
+            # 使用 Praat "Change gender" 算法调整音高和共振峰。
+            # 参数说明：75.0-600.0 为共振峰范围，后序参数依次为：共振峰偏移、音高偏移、音高范围比(1.0)、时长比(1.0)。
             
             new_sound = call(sound, "Change gender", 75.0, 600.0, 
                             formant_factor, pitch_factor, 1.0, 1.0)

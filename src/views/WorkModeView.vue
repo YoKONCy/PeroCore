@@ -1,7 +1,7 @@
 <template>
   <div class="h-full w-full bg-gradient-to-br from-gray-950 via-slate-900 to-gray-950 text-slate-200 font-sans flex overflow-hidden relative p-4 gap-4">
     
-    <!-- Error Overlay -->
+    <!-- 错误遮罩 -->
     <div v-if="error" class="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-8">
       <div class="bg-slate-900/90 border border-red-500/30 p-6 rounded-2xl shadow-2xl max-w-2xl w-full">
         <div class="flex items-center gap-3 text-red-400 mb-4">
@@ -18,7 +18,7 @@
       </div>
     </div>
 
-    <!-- Loading Overlay -->
+    <!-- 加载遮罩 -->
     <div v-if="!isReady && !error" class="absolute inset-0 z-50 flex items-center justify-center bg-slate-950">
        <div class="flex flex-col items-center gap-6">
          <div class="relative">
@@ -31,29 +31,29 @@
        </div>
     </div>
 
-    <!-- Left Panel: Explorer (Floating Card) -->
+    <!-- 左侧面板: 资源管理器 (悬浮卡片) -->
     <div v-show="isReady && !error" class="w-72 bg-[#1e293b]/60 backdrop-blur-xl border border-white/5 rounded-2xl flex flex-col shadow-2xl overflow-hidden transition-all duration-300 hover:border-white/10 group/sidebar">
-      <!-- Panel Header -->
+      <!-- 面板标题栏 -->
       <div class="h-14 px-5 flex items-center justify-between border-b border-white/5 bg-white/5">
         <div class="flex items-center gap-2 text-indigo-400">
           <FolderOpenIcon class="w-5 h-5" />
           <span class="font-bold tracking-wide text-sm">项目工程</span>
         </div>
-        <!-- Optional: Sidebar Toggles could go here -->
+        <!-- 可选: 侧边栏切换按钮可放在此处 -->
       </div>
       
-      <!-- File Tree -->
+      <!-- 文件树 -->
       <div class="flex-1 overflow-hidden">
         <FileExplorer @file-selected="onFileSelected" />
       </div>
     </div>
 
-    <!-- Main Content Area (Floating Card) -->
+    <!-- 主内容区域 (悬浮卡片) -->
     <div v-show="isReady && !error" class="flex-1 flex flex-col relative gap-4 overflow-hidden">
       
-      <!-- Top Navigation Bar -->
+      <!-- 顶部导航栏 -->
       <header class="h-14 px-6 bg-[#1e293b]/60 backdrop-blur-xl border border-white/5 rounded-2xl flex items-center justify-between shadow-lg shrink-0">
-        <!-- Breadcrumbs / Status -->
+        <!-- 面包屑 / 状态 -->
         <div class="flex items-center gap-4">
           <div class="flex items-center gap-2 px-3 py-1 bg-indigo-500/10 border border-indigo-500/20 rounded-full">
             <div class="w-2 h-2 bg-indigo-500 rounded-full animate-pulse"></div>
@@ -66,7 +66,7 @@
           </span>
         </div>
 
-        <!-- Work Mode Actions -->
+        <!-- 工作模式操作 -->
         <div class="flex items-center gap-3">
            <button 
              @click="emit('exit', false)"
@@ -88,15 +88,15 @@
         </div>
       </header>
 
-      <!-- Editor & Chat & Terminal Container -->
+      <!-- 编辑器 & 聊天 & 终端容器 -->
       <div class="flex-1 flex flex-col gap-4 overflow-hidden">
         
-        <!-- Editor & Chat Split View -->
+        <!-- 编辑器 & 聊天分屏视图 -->
         <div class="flex-1 flex gap-4 overflow-hidden min-h-0">
           
-          <!-- Code Editor Container -->
+          <!-- 代码编辑器容器 -->
           <div class="flex-1 flex flex-col bg-[#1e293b]/80 backdrop-blur-md border border-white/5 rounded-2xl shadow-2xl overflow-hidden relative group/editor">
-             <!-- Editor Tabs -->
+             <!-- 编辑器标签页 -->
              <div class="h-10 bg-black/20 flex items-center px-2 gap-1 overflow-x-auto no-scrollbar">
                 <div 
                   v-for="file in openFiles" 
@@ -107,19 +107,19 @@
                 >
                   <FileCodeIcon class="w-3.5 h-3.5 opacity-70" />
                   <span class="truncate">{{ file.name }}</span>
-                  <!-- Close Button -->
+                  <!-- 关闭按钮 -->
                   <button 
                     @click.stop="closeFile(file)" 
                     class="absolute right-1 p-0.5 rounded-md opacity-0 group-hover/tab:opacity-100 hover:bg-white/10 text-slate-400 transition-all"
                   >
                     <XIcon class="w-3 h-3" />
                   </button>
-                  <!-- Dirty Indicator -->
+                  <!-- 未保存指示器 -->
                   <div v-if="dirtyFiles.has(file.path)" class="absolute right-2 w-1.5 h-1.5 rounded-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.5)]"></div>
                 </div>
              </div>
 
-             <!-- Editor Content -->
+             <!-- 编辑器内容 -->
               <div class="flex-1 relative bg-[#0f172a]/50">
                 <CodeEditor 
                   v-if="currentFile"
@@ -138,7 +138,7 @@
                    <p class="text-xs text-slate-600 mt-2">使用左侧资源管理器浏览文件</p>
                 </div>
                 
-                <!-- Floating Save Button -->
+                <!-- 悬浮保存按钮 -->
                 <Transition name="fade">
                     <button 
                         v-if="currentFile && dirtyFiles.has(currentFile.path)"
@@ -153,14 +153,14 @@
               </div>
           </div>
 
-          <!-- Chat Area (Floating Sidebar) -->
+          <!-- 聊天区域 (悬浮侧边栏) -->
           <div class="w-[400px] flex flex-col bg-[#1e293b]/80 backdrop-blur-md border border-white/5 rounded-2xl shadow-2xl overflow-hidden transition-all duration-500">
              <ChatInterface :work-mode="true" :disabled="!isReady" class="flex-1" />
           </div>
 
         </div>
 
-        <!-- Terminal Manager -->
+        <!-- 终端管理器 -->
         <TerminalManager />
       
       </div>
@@ -206,7 +206,7 @@ const props = defineProps({
 
 const emit = defineEmits(['exit']);
 
-// Dialog State
+// 对话框状态
 const dialog = reactive({
   visible: false,
   type: 'alert',
@@ -235,7 +235,7 @@ const handleDialogCancel = () => {
   dialog.visible = false;
 };
 
-// Error Handling
+// 错误处理
 const error = ref(null);
 onErrorCaptured((err) => {
   console.error("WorkModeView Error:", err);
@@ -243,7 +243,7 @@ onErrorCaptured((err) => {
   return true; 
 });
 
-// State
+// 状态
 const isReady = ref(false);
 const agentName = ref('Pero');
 
@@ -269,7 +269,7 @@ onMounted(() => {
   isReady.value = true;
 });
 
-// File Handling
+// 文件处理
 const onFileSelected = async (fileNode) => {
   const existing = openFiles.value.find(f => f.path === fileNode.path);
   if (existing) {
@@ -324,7 +324,7 @@ const getLanguage = (filename) => {
     'py': 'python',
     'js': 'javascript',
     'ts': 'typescript',
-    'vue': 'html', // Monaco doesn't have built-in Vue support, HTML works reasonably well
+    'vue': 'html', // Monaco 没有内置 Vue 支持，使用 HTML 效果尚可
     'html': 'html',
     'css': 'css',
     'scss': 'scss',
@@ -353,7 +353,7 @@ const getLanguage = (filename) => {
 
 const onContentChange = (newContent) => {
   if (currentFile.value) {
-    currentFile.value.content = newContent; // Update in-memory content
+    currentFile.value.content = newContent; // 更新内存中的内容
     dirtyFiles.value.add(currentFile.value.path);
   }
 };
@@ -385,7 +385,7 @@ const saveFile = async (content) => {
 </script>
 
 <style scoped>
-/* Custom Scrollbar for dark theme */
+/* 深色主题自定义滚动条 */
 .custom-scrollbar::-webkit-scrollbar {
   width: 4px;
 }

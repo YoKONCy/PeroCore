@@ -232,53 +232,18 @@ class MDPManager:
                 if "{{" not in rendered:
                     break
                 
-                # 扫描剩余的 {{ var }}，这些可能匹配提示词名称
-                # 这支持隐式包含：如果 'my_sub_prompt' 是一个提示词键，{{ my_sub_prompt }} 将展开
+                # 扫描剩余的 {{ var }}，支持隐式包含
                 matches = re.findall(r"\{\{\s*([a-zA-Z0-9_./]+)\s*\}\}", rendered)
                 new_context = context.copy()
-                has_new_resolution = False
                 
                 for var in matches:
                     # 如果 var 不在上下文中但作为提示词存在，则注入它
                     if var not in new_context and var in self.prompts:
                         new_context[var] = self.prompts[var].content
-                        has_new_resolution = True
-                    # [修复] 即使变量已存在，如果它是一个提示词键，我们是否应该覆盖？
-                    # 现在的逻辑是：变量优先。如果上下文中已有 chain_logic，就不会加载 prompts['chain_logic']
-                    # 但这会导致问题：如果 context['output_constraint'] = "...{{chain_logic}}..."
-                    # 且 context['chain_logic'] 已存在（例如被设为文件名或空），那么就不会去加载提示词内容了
-                    # 
-                    # 然而，PromptService 可能会将 chain_logic 预先填充为 *内容*。
-                    # 如果 PromptService 已经把文件内容读进 context['chain_logic'] 了，那这里不做处理是正确的。
-                    # 
-                    # 问题的关键在于：
-                    # PromptService 将 context['chain_logic'] 设置为了 *内容*。
-                    # 然后 system_template 包含 {{output_constraint}}
-                    # output_constraint 包含 {{chain_logic}}
-                    # 
-                    # Loop 1: 渲染 system_template -> 得到 "...{{output_constraint}}..."
-                    # Loop 2: 发现 output_constraint，展开它 -> 得到 "...{{chain_logic}}..."
-                    # Loop 3: 发现 chain_logic。
-                    #   - 检查 context['chain_logic'] 是否存在？ 是的，PromptService 注入了。
-                    #   - has_new_resolution = False (因为 var 在 context 中)
-                    #   - 既然 has_new_resolution = False，循环终止。
-                    #   - 结果：render 拿着 "...{{chain_logic}}..." 和 context 再次渲染了吗？
-                    #   - 看代码：
-                    #     if not has_new_resolution: break
-                    #     rendered = self.jinja_env.from_string(rendered).render(**new_context)
-                    # 
-                    # 没错！如果 has_new_resolution 为 False，它就直接 break 了，**没有进行最后一次渲染**！
-                    # 这就是 BUG。即使没有发现 *新的* 提示词变量，我们也应该用 *现有的* context 再次渲染一次，
-                    # 以便解析刚刚展开的模板中包含的现有变量。
                 
-                # [Fix] 即使没有解析出新的提示词变量，只要渲染结果中还有 {{}}，且我们在 context 中有这些变量，
-                # 我们就应该继续渲染。
-                # 但为了防止死循环（如果 context 中本身就包含 {{}}），我们需要小心。
-                # 
-                # 修正逻辑：
-                # 只要 matches 不为空，我们尝试渲染。
-                # 如果渲染后的结果和渲染前一样，说明无法再展开了，break。
-                
+                # 即使没有从 prompts 加载新变量，上下文中可能已包含需要展开的变量（如 chain_logic）。
+                # 因此，只要发现 {{}} 占位符，就尝试使用当前上下文再次渲染。
+                # 通过比较渲染前后的结果来检测是否收敛，防止因无法解析的变量导致的死循环。
                 prev_rendered = rendered
                 rendered = self.jinja_env.from_string(rendered).render(**new_context)
                 

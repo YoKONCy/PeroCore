@@ -51,12 +51,12 @@ watch(() => props.initialContent, (newVal) => {
 const handleMount = (editor, monaco) => {
   editorRef.value = editor;
   
-  // Track changes
+  // 监听内容变更
   editor.onDidChangeModelContent(() => {
     emit('change', code.value);
   });
   
-  // Add Save Command (Ctrl+S)
+  // 绑定保存快捷键 (Ctrl+S)
   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
     emit('save', code.value);
   });

@@ -21,19 +21,19 @@ class ConfigManager:
     _instance = None
     
     def __init__(self, config_path=None):
-        # Default configuration
+        # 默认配置
         self.config = {
             "napcat_ws_url": "ws://localhost:3001",
             "napcat_http_url": "http://localhost:3000",
             "lightweight_mode": False,
             "aura_vision_enabled": False,
-            "enable_social_mode": False,  # Default to False for safety
+            "enable_social_mode": False,  # 默认关闭以确保安全
             "tts_enabled": True
         }
         
         self.env_loaded_keys = set()
         
-        # Load from Environment Variables (Override defaults)
+        # 从环境变量加载 (覆盖默认值)
         for key in self.config.keys():
             env_key = key.upper()
             env_val = os.environ.get(env_key)
@@ -42,37 +42,37 @@ class ConfigManager:
                 self.env_loaded_keys.add(key)
                 logger.info(f"Loaded config from ENV: {key}={self.config[key]}")
 
-        # Load from Command Line Arguments (Highest Priority, overrides ENV)
-        # Supports format: --key=value (e.g., --enable-social-mode=true)
-        # Note: keys in args use dashes instead of underscores (e.g., enable-social-mode)
+        # 从命令行参数加载 (最高优先级，覆盖环境变量)
+        # 支持格式: --key=value (例如 --enable-social-mode=true)
+        # 注意: 参数中的键使用连字符而不是下划线 (例如 enable-social-mode)
         for arg in sys.argv:
             if arg.startswith("--"):
                 try:
-                    # Remove -- and split by =
+                    # 移除 -- 并按 = 分割
                     clean_arg = arg[2:]
                     if "=" in clean_arg:
                         k, v = clean_arg.split("=", 1)
                     else:
-                        # Handle boolean flags like --enable-social-mode (implies true)
+                        # 处理布尔标记，如 --enable-social-mode (隐含 true)
                         k = clean_arg
                         v = "true"
                     
-                    # Convert dashes to underscores to match config keys
+                    # 将连字符转换为下划线以匹配配置键
                     config_key = k.replace("-", "_")
                     
                     if config_key in self.config:
                         self.config[config_key] = self._parse_value(v)
-                        self.env_loaded_keys.add(config_key) # Treat CLI args as ENV-level overrides
+                        self.env_loaded_keys.add(config_key) # 将 CLI 参数视为环境变量级别的覆盖
                         logger.info(f"Loaded config from CLI: {config_key}={self.config[config_key]}")
                         print(f"[ConfigManager] Loaded CLI: {config_key}={self.config[config_key]}")
                 except Exception as e:
                     logger.warning(f"Failed to parse CLI argument {arg}: {e}")
 
-        # Note: We do not load from DB in __init__ because it requires async.
-        # Call await load_from_db() during app startup.
+        # 注意: 我们不在 __init__ 中从数据库加载，因为它需要 async。
+        # 请在应用启动期间调用 await load_from_db()。
 
     async def load_from_db(self):
-        """Loads configuration from the database into memory."""
+        """将配置从数据库加载到内存中。"""
         try:
             async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
             async with async_session() as session:
@@ -81,9 +81,9 @@ class ConfigManager:
                 configs = results.all()
                 
                 for config in configs:
-                    # If config was loaded from ENV, do not overwrite with DB value
+                    # 如果配置已从 ENV 加载，则不要用数据库值覆盖
                     if config.key in self.env_loaded_keys:
-                        logger.info(f"Ignoring DB config for {config.key} (overridden by ENV)")
+                        logger.info(f"忽略 {config.key} 的数据库配置 (已被 ENV 覆盖)")
                         continue
                     
                     self.config[config.key] = self._parse_value(config.value)
@@ -93,7 +93,7 @@ class ConfigManager:
             logger.error(f"无法从数据库加载配置: {e}")
 
     def _parse_value(self, value_str: str) -> Any:
-        """Parses string value from DB back to appropriate type."""
+        """将数据库中的字符串值解析回适当的类型。"""
         if value_str.lower() == "true":
             return True
         if value_str.lower() == "false":
@@ -112,11 +112,11 @@ class ConfigManager:
         return self.config.get(key, default)
 
     async def set(self, key, value):
-        """Updates config in memory and database."""
+        """更新内存和数据库中的配置。"""
         logger.info(f"正在更新配置: {key} = {value}")
         self.config[key] = value
         
-        # Convert to string for DB storage
+        # 转换为字符串以便数据库存储
         str_value = str(value)
         if isinstance(value, bool):
             str_value = str(value).lower()

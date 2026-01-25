@@ -254,7 +254,8 @@ class SocialService:
                         if msg.session_type == "private":
                              # [Fix] 如果最后一条消息是自己发的，不要把 Session Name 设为自己
                              if msg.sender_id == "self" or msg.sender_name == self.config_manager.get("bot_name", "Pero"):
-                                 name = "某人"
+                                 # 尝试使用 msg.session_id (通常是 QQ 号)
+                                 name = str(msg.session_id)
                              else:
                                  name = msg.sender_name
                         elif msg.session_type == "group":
@@ -555,8 +556,8 @@ class SocialService:
                 
                 if sender == current_agent_name or sender == "Me" or sender == self.config_manager.get("bot_name", "Pero"):
                     sender = f"Me ({current_agent_name})"
-                elif target_session.session_type == "private" and sender == target_session.session_name:
-                    sender = "某人"
+                # elif target_session.session_type == "private" and sender == target_session.session_name:
+                #     sender = "某人"
                 
                 # [Fix] Clean CQ codes for cleaner context
                 clean_content = self._clean_cq_codes(msg.content)
@@ -576,15 +577,17 @@ class SocialService:
             
             # [Refactor] Split prompts for Group and Private to avoid schizophrenia
             template_name = "services/social/decisions/secretary_decision_group"
+            rules_template_name = "services/social/decisions/secretary_decision_group_rules"
             if target_session.session_type == "private":
                 template_name = "services/social/decisions/secretary_decision_private"
+                rules_template_name = "services/social/decisions/secretary_decision_private_rules"
             
             # [Fix] Determine correct target name for private chat
             target_name = target_session.session_name
-            if target_session.session_type == "private":
-                 # If session name is same as bot (because bot sent last message), fallback to "User"
-                 if target_name == bot_name or target_name == "Me":
-                     target_name = "某人"
+            # if target_session.session_type == "private":
+            #      # If session name is same as bot (because bot sent last message), fallback to "User"
+            #      if target_name == bot_name or target_name == "Me":
+            #          target_name = "某人"
                 
             # Get Agent Profile for dynamic persona injection
             agent_manager = AgentManager()
@@ -595,7 +598,7 @@ class SocialService:
             if agent_profile:
                 bot_name = agent_profile.name
 
-            prompt = mdp.render(template_name, {
+            prompt_context = {
                 "agent_name": bot_name,
                 "current_time": datetime.now().strftime('%H:%M'),
                 "session_state": session_state,
@@ -603,7 +606,10 @@ class SocialService:
                 "target_session_name": target_name,
                 "identity_label": identity_label,
                 "personality_tags": personality_tags
-            })
+            }
+
+            prompt = mdp.render(template_name, prompt_context)
+            rules_prompt = mdp.render(rules_template_name, prompt_context)
 
             # ... (Tool calling logic reused) ...
             # 为节省篇幅，复用现有 AgentService 调用逻辑
@@ -1578,6 +1584,10 @@ class SocialService:
                 current_time_str = datetime.now().strftime('%H:%M:%S')
                 xml_guide = mdp.render("services/social/active_mode_guide", {
                     "current_time": current_time_str
+                })
+
+                instruction_prompt = mdp.render("services/social/social_rules", {
+                    "current_mode": current_mode
                 })
                 
                 full_system_prompt = core_system_prompt + social_instructions + xml_guide

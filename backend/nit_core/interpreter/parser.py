@@ -1,7 +1,7 @@
 """
-[LEGACY] Python-based Parser Implementation.
-NOTE: This module is used as a fallback when the Rust extension (nit_rust_runtime) is not available.
-Main implementation: rust_binding/src/parser.rs
+[LEGACY] 基于 Python 的 Parser 实现。
+注意: 此模块仅作为 Rust 扩展 (nit_rust_runtime) 不可用时的回退方案。
+主要实现位于: rust_binding/src/parser.rs
 """
 
 from typing import List, Optional
@@ -21,7 +21,7 @@ class Parser:
 
     def peek(self) -> Token:
         if self.pos >= len(self.tokens):
-            # Fallback to the last token (usually EOF) if out of bounds
+            # 如果越界，回退到最后一个 token (通常是 EOF)
             return self.tokens[-1]
         return self.tokens[self.pos]
 
@@ -45,11 +45,11 @@ class Parser:
         return PipelineNode(statements=statements)
 
     def parse_statement(self) -> ASTNode:
-        # Check if it is an assignment: $var = ...
+        # 检查是否为赋值语句: $var = ...
         if self.peek().type == TokenType.VARIABLE:
             return self.parse_assignment()
         
-        # Or a direct call (async or sync)
+        # 或者是直接调用 (异步或同步)
         return self.parse_call()
 
     def parse_assignment(self) -> AssignmentNode:
@@ -83,8 +83,8 @@ class Parser:
         
         self.match(TokenType.RPAREN)
         
-        # Check for callback in async calls (convention: callback="func_name")
-        # In our syntax, callback is just an arg, but we might want to lift it to AST property
+        # 检查异步调用中的回调 (约定: callback="func_name")
+        # 在我们的语法中，callback 只是一个参数，但我们可能希望将其提升到 AST 属性
         callback = None
         if "callback" in args and isinstance(args["callback"], LiteralNode):
             callback = str(args["callback"].value)

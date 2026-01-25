@@ -39,13 +39,13 @@ class NITManager:
             try:
                 with open(self.config_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                    # Deep merge or update
+                    # 深度合并或更新
                     if "categories" in data:
                         self.settings["categories"].update(data["categories"])
                     if "plugins" in data:
                         self.settings["plugins"].update(data["plugins"])
             except Exception as e:
-                logger.error(f"Failed to load NIT settings from {self.config_path}: {e}")
+                logger.error(f"从 {self.config_path} 加载 NIT 设置失败: {e}")
         else:
             self.save_settings()
 
@@ -54,7 +54,7 @@ class NITManager:
             with open(self.config_path, 'w', encoding='utf-8') as f:
                 json.dump(self.settings, f, indent=4)
         except Exception as e:
-            logger.error(f"Failed to save NIT settings to {self.config_path}: {e}")
+            logger.error(f"保存 NIT 设置到 {self.config_path} 失败: {e}")
 
     def is_category_enabled(self, category: str) -> bool:
         """检查分类是否启用 (第一层调度)"""

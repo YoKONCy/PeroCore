@@ -541,9 +541,22 @@ class MemorySecretaryService:
             content = response.get("choices", [{}])[0].get("message", {}).get("content", "")
             
             import re
-            json_match = re.search(r'\{[\s\S]*\}', content)
-            if json_match:
-                new_texts = json.loads(json_match.group(0))
+            # 优先匹配 Markdown 代码块
+            code_block_match = re.search(r'```json\s*(\{[\s\S]*?\})\s*```', content)
+            if code_block_match:
+                json_str = code_block_match.group(1)
+            else:
+                # 备用：寻找最外层的 {}，但为了防止前文干扰，我们尝试从后往前找或者使用非贪婪？
+                # 贪婪匹配 {.*} 确实容易把前文包含进去。
+                # 简单修复：如果贪婪匹配失败，尝试寻找第一个 { 和最后一个 }
+                json_match = re.search(r'\{[\s\S]*\}', content)
+                if json_match:
+                    json_str = json_match.group(0)
+                else:
+                    json_str = None
+
+            if json_str:
+                new_texts = json.loads(json_str)
                 
                 # 简单校验
                 if not isinstance(new_texts, dict):
@@ -589,7 +602,9 @@ class MemorySecretaryService:
                 return 1
 
         except Exception as e:
-            print(f"更新 Waifu 文本时出错: {e}")
+            import traceback
+            traceback.print_exc()
+            print(f"更新 Waifu 文本时出错: {e!r}")
             return 0
 
     async def _handle_maintenance_boundary(self) -> int:

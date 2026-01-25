@@ -20,8 +20,8 @@ except ImportError:
     from backend.services.mdp.manager import MDPManager
 import json
 
-# Global variable to hold session reference (injected by AgentService)
-# This is a bit hacky but works for tool-to-service communication
+# 全局变量，用于保存会话引用 (由 AgentService 注入)
+# 这有点 hacky，但对于 tool-to-service 通信是有效的
 _CURRENT_SESSION_CONTEXT = {}
 
 def set_current_session_context(session):
@@ -29,24 +29,24 @@ def set_current_session_context(session):
 
 async def enter_work_mode(task_name: str = "Unknown Task") -> str:
     """
-    Enter 'Work Mode' (Isolation Mode).
-    Creates a temporary, isolated session for coding or complex tasks.
-    History from this session will NOT pollute the main chat, but will be summarized later.
+    进入 'Work Mode' (隔离模式)。
+    为编码或复杂任务创建一个临时的、隔离的会话。
+    此会话的历史记录不会污染主聊天，但稍后会被汇总。
     """
     session = _CURRENT_SESSION_CONTEXT.get("db_session")
     if not session:
         return "Error: Database session not available."
 
     try:
-        # 1. Generate new Session ID
+        # 1. 生成新 Session ID
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         work_session_id = f"work_{timestamp}_{uuid.uuid4().hex[:4]}"
         
-        # 2. Update Config
-        # current_session_id: The actual session ID to use for logs
-        # work_mode_task: The name of the task
+        # 2. 更新 Config
+        # current_session_id: 用于日志的实际会话 ID
+        # work_mode_task: 任务名称
         
-        # Update current_session_id
+        # 更新 current_session_id
         config_id = (await session.exec(select(Config).where(Config.key == "current_session_id"))).first()
         if not config_id:
             config_id = Config(key="current_session_id", value=work_session_id)
@@ -54,7 +54,7 @@ async def enter_work_mode(task_name: str = "Unknown Task") -> str:
         else:
             config_id.value = work_session_id
             
-        # Update work_mode_task
+        # 更新 work_mode_task
         config_task = (await session.exec(select(Config).where(Config.key == "work_mode_task"))).first()
         if not config_task:
             config_task = Config(key="work_mode_task", value=task_name)
@@ -71,9 +71,9 @@ async def enter_work_mode(task_name: str = "Unknown Task") -> str:
 
 async def exit_work_mode() -> str:
     """
-    Exit 'Work Mode'.
-    Summarizes the entire work session into a 'Handwritten Log' and saves it to long-term memory.
-    Restores the main chat session.
+    退出 'Work Mode'。
+    将整个工作会话汇总为 'Handwritten Log' 并保存到长期记忆中。
+    恢复主聊天会话。
     """
     session = _CURRENT_SESSION_CONTEXT.get("db_session")
     if not session:
@@ -81,7 +81,7 @@ async def exit_work_mode() -> str:
 
     config_id = None
     try:
-        # 1. Get current work info
+        # 1. 获取当前工作信息
         config_id = (await session.exec(select(Config).where(Config.key == "current_session_id"))).first()
         config_task = (await session.exec(select(Config).where(Config.key == "work_mode_task"))).first()
         
@@ -91,7 +91,7 @@ async def exit_work_mode() -> str:
         work_session_id = config_id.value
         task_name = config_task.value if config_task else "Unnamed Task"
         
-        # 2. Fetch all logs for this session
+        # 2. 获取此会话的所有日志
         logs = (await session.exec(
             select(ConversationLog)
             .where(ConversationLog.session_id == work_session_id)
@@ -101,16 +101,16 @@ async def exit_work_mode() -> str:
         if not logs:
             return "Exited Work Mode (No logs to summarize)."
 
-        # 3. Summarize via LLM
+        # 3. 通过 LLM 汇总
         global_config = {c.key: c.value for c in (await session.exec(select(Config))).all()}
         api_key = global_config.get("global_llm_api_key")
         api_base = global_config.get("global_llm_api_base")
-        # Default to "Pero" only if not configured
+        # 如果未配置，默认为 "Pero"
         bot_name = global_config.get("bot_name", "Pero")
 
         from services.mdp.manager import mdp
 
-        # [Unified Model Fix] Use current_model_id instead of hardcoded gpt-4o
+        # [Unified Model Fix] 使用 current_model_id 而不是硬编码的 gpt-4o
         from models import AIModelConfig
         current_model_id = global_config.get("current_model_id")
         
@@ -135,7 +135,7 @@ async def exit_work_mode() -> str:
         summary = await llm.chat([{"role": "user", "content": prompt}])
         summary_content = summary["choices"][0]["message"]["content"]
         
-        # 4. Save to Memory (Long-term)
+        # 4. 保存到记忆 (长期)
         await MemoryService.save_memory(
             session=session,
             content=summary_content,
@@ -151,13 +151,14 @@ async def exit_work_mode() -> str:
         await session.rollback()
         return f"Error during Work Mode exit: {e}"
     finally:
-        # ALWAYS try to restore session state to 'default'
+        # 始终尝试将会话状态恢复为 'default'
         if config_id and config_id.value.startswith("work_"):
             try:
                 config_id.value = "default"
                 await session.commit()
             except Exception as final_e:
                 print(f"[Runtime] Critical Error restoring session: {final_e}")
+
 
 class NITRuntime:
     def __init__(self, tool_executor):

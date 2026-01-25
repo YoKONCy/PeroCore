@@ -38,15 +38,15 @@ async def get_room_history(room_id: str, limit: int = 50, session: Session = Dep
 @router.post("/rooms/{room_id}/messages", response_model=GroupChatMessage)
 async def send_message(room_id: str, request: SendMessageRequest, session: Session = Depends(get_session)):
     service = GroupChatService(session)
-    # Verify room exists
+    # 验证房间是否存在
     if not await service.get_room(room_id):
         raise HTTPException(status_code=404, detail="Room not found")
     
     msg = await service.add_message(room_id, request.sender_id, request.content, request.role, request.mentions)
     
-    # Trigger Reply All (if sender is user)
+    # 触发全员回复 (如果发送者是用户)
     if request.sender_id == 'user':
-        # Use background trigger to avoid blocking
+        # 使用后台触发以避免阻塞
         await GroupChatService.trigger_group_response(room_id)
         
     return msg

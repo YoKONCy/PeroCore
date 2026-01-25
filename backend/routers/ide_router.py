@@ -65,12 +65,12 @@ async def chat(request: ChatRequest, session: AsyncSession = Depends(get_session
     agent_manager = get_agent_manager()
     agent_id = agent_manager.active_agent_id
     
-    # Check if we are in work mode and if session_id should be overridden
+    # 检查我们是否处于工作模式，以及是否应覆盖 session_id
     if request.session_id == "current_work_session":
         session_key = f"current_session_id_{agent_id}"
         config_id = (await session.exec(select(Config).where(Config.key == session_key))).first()
         
-        # Fallback to global if not found (backward compatibility)
+        # 如果未找到，回退到全局 (向后兼容)
         if not config_id:
              config_id = (await session.exec(select(Config).where(Config.key == "current_session_id"))).first()
              
@@ -79,21 +79,21 @@ async def chat(request: ChatRequest, session: AsyncSession = Depends(get_session
         else:
             request.session_id = "default"
 
-    # [Feature] Real-time ReAct Broadcasting
-    # We use realtime_session_manager's broadcast capability to send "thinking" statuses to the frontend (ChatInterface/PetView)
-    # This ensures that even for IDE chats, we get real-time visualization via WebSocket.
+    # [Feature] 实时 ReAct 广播
+    # 我们使用 realtime_session_manager 的广播功能将“思考”状态发送到前端 (ChatInterface/PetView)
+    # 这确保了即使是 IDE 聊天，我们也能通过 WebSocket 获得实时可视化。
     from services.realtime_session_manager import realtime_session_manager
     
     async def on_status(status_type: str, content: str):
-        # Broadcast thinking steps to all connected clients (IDE, PetView, etc.)
+        # 广播思考步骤到所有连接的客户端 (IDE, PetView 等)
         if status_type == "thinking":
             await realtime_session_manager.broadcast({
                 "type": "status",
                 "content": "thinking",
-                "detail": content # Pass detailed thought
+                "detail": content # 传递详细思考内容
             })
 
-    # Use streaming response
+    # 使用流式响应
     async def generate():
         async for chunk in agent_service.chat(
             request.messages, 
@@ -104,23 +104,23 @@ async def chat(request: ChatRequest, session: AsyncSession = Depends(get_session
             if chunk:
                 yield chunk
         
-        # Reset status to idle after generation
+        # 生成后重置状态为空闲
         await realtime_session_manager.broadcast({"type": "status", "content": "idle"})
 
     return StreamingResponse(generate(), media_type="text/plain")
 
-# [Refactor] Use workspace_utils for multi-agent support
+# [Refactor] 使用 workspace_utils 支持多代理
 from utils.workspace_utils import get_workspace_root, get_global_workspace_root
 
 # def get_workspace_root(): ... (Removed)
 
 @router.get("/image")
 async def get_workspace_image(path: str):
-    # For images, we might want to search in current agent's workspace OR global
-    # But for simplicity, let's stick to the active agent's workspace
+    # 对于图像，我们可能希望在当前代理的工作区或全局工作区中搜索
+    # 但为了简单起见，我们暂时坚持使用活跃代理的工作区
     base_dir = get_workspace_root() 
-    # Path should be relative to workspace, e.g. "uploads/2026-01-21/xxx.png"
-    # Prevent directory traversal
+    # 路径应相对于工作区，例如 "uploads/2026-01-21/xxx.png"
+    # 防止目录遍历攻击
     safe_path = os.path.normpath(path)
     if safe_path.startswith("..") or os.path.isabs(safe_path):
          raise HTTPException(status_code=403, detail="Access denied")
@@ -135,14 +135,14 @@ async def get_workspace_image(path: str):
 @router.get("/files", response_model=List[FileNode])
 async def list_files(path: Optional[str] = None):
     """
-    List files in the given directory path.
-    If path is None, list from the workspace root.
+    列出给定目录路径中的文件。
+    如果 path 为 None，则从工作区根目录列出。
     """
     base_dir = get_workspace_root()
     
     if path:
         target_dir = os.path.abspath(os.path.join(base_dir, path))
-        # Simple security check to prevent directory traversal
+        # 简单的安全检查以防止目录遍历
         if not target_dir.startswith(base_dir):
             raise HTTPException(status_code=403, detail="Access denied")
     else:
@@ -155,7 +155,7 @@ async def list_files(path: Optional[str] = None):
     try:
         with os.scandir(target_dir) as entries:
             for entry in entries:
-                # Skip hidden files and common ignore folders
+                # 跳过隐藏文件和常见的忽略文件夹
                 if entry.name.startswith('.') or entry.name in ['__pycache__', 'node_modules', 'venv', 'dist']:
                     continue
                 
@@ -168,7 +168,7 @@ async def list_files(path: Optional[str] = None):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-    # Sort directories first, then files
+    # 先对目录排序，然后是文件
     items.sort(key=lambda x: (x.type != "directory", x.name.lower()))
     return items
 

@@ -27,7 +27,7 @@ try:
     )
     RUST_AVAILABLE = True
 except ImportError:
-    # Fallback to Python implementation (if available) or existing ast_nodes
+    # 回退到 Python 实现 (如果可用) 或现有的 ast_nodes
     from .ast_nodes import PipelineNode, AssignmentNode, CallNode, LiteralNode, VariableRefNode, ListNode
     RUST_AVAILABLE = False
     print("[NIT] Warning: Rust extension not available. Using Python fallback.")
@@ -36,13 +36,13 @@ logger = logging.getLogger("pero.nit.engine")
 
 class NITRuntime:
     """
-    NIT 2.0 Script Interpreter Engine (Hybrid Rust/Python).
-    Pure logic for variable management and tool execution.
+    NIT 2.0 脚本解释器引擎 (Rust/Python 混合架构)。
+    负责变量管理和工具执行的核心逻辑。
     """
     
     def __init__(self, tool_executor):
         """
-        :param tool_executor: Async function(name, params) -> result
+        :param tool_executor: 异步函数(name, params) -> result
         """
         # 运行时防御检查
         is_bad, reason = _security_check()
@@ -60,7 +60,7 @@ class NITRuntime:
         self.tool_executor = tool_executor
         
         if RUST_AVAILABLE:
-            # Use Rust NITScope for memory-safe variable storage
+            # 使用 Rust NITScope 进行内存安全的变量存储
             self.variables = NITScope(max_count=100, max_string_len=100_000)
         else:
             self.variables = {}
@@ -86,10 +86,10 @@ class NITRuntime:
                     self.variables.set(statement.target_var, value)
                 except ValueError as e:
                     logger.warning(f"[NIT] Security Alert: {e}")
-                    # In case of error, we might return the value but not store it, or propagate error
+                    # 发生错误时，可能返回该值但不存储，或抛出错误
                     pass
             else:
-                # [Legacy Python Logic]
+                # [旧版 Python 逻辑]
                 if len(self.variables) >= self.MAX_VARIABLES and statement.target_var not in self.variables:
                     print(f"[NIT] Security Alert: Variable limit reached ({self.MAX_VARIABLES}). Skipping {statement.target_var}")
                     return value
@@ -115,14 +115,14 @@ class NITRuntime:
         return None
 
     async def execute_call(self, call_node: CallNode) -> Any:
-        # Resolve arguments
+        # 解析参数
         resolved_args = {}
-        # Support both Rust HashMap and Python dict
+        # 支持 Rust HashMap 和 Python dict
         args_iter = call_node.args.items() if isinstance(call_node.args, dict) else call_node.args
         
         for name, node in args_iter:
             resolved_args[name] = self.evaluate_value(node)
         
-        # Execute tool
+        # 执行工具
         result = await self.tool_executor(call_node.tool_name, resolved_args)
         return result

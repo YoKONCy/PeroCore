@@ -3,7 +3,7 @@
     class="flex flex-col border-t border-white/10 bg-[#1e293b]/95 backdrop-blur-xl shadow-2xl transition-all duration-200 z-40"
     :style="{ height: isCollapsed ? '40px' : height + 'px' }"
   >
-    <!-- Header / Resize Handle -->
+    <!-- 标题栏 / 调整大小句柄 -->
     <div 
       class="h-10 flex items-center justify-between px-4 bg-slate-900/50 border-b border-white/5 select-none hover:bg-white/5 transition-colors group"
       :class="{ 'cursor-ns-resize': !isCollapsed, 'cursor-pointer': isCollapsed }"
@@ -37,16 +37,16 @@
       </div>
     </div>
 
-    <!-- Content -->
+    <!-- 内容区域 -->
     <div v-show="!isCollapsed" class="flex-1 flex overflow-hidden">
-       <!-- Sidebar -->
+       <!-- 侧边栏 -->
        <div class="w-56 bg-slate-950/30 border-r border-white/5 flex flex-col">
-          <!-- Sidebar Header -->
+          <!-- 侧边栏标题 -->
           <div class="h-8 flex items-center px-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-black/10">
              会话列表
           </div>
           
-          <!-- List -->
+          <!-- 列表 -->
           <div class="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1">
             <div 
                 v-for="term in terminals" 
@@ -69,7 +69,7 @@
                     {{ term.command }}
                 </div>
                 
-                <!-- Progress Bar Background (Optional for task progress?) -->
+                <!-- 进度条背景 (可选用于任务进度) -->
                 <div v-if="term.active" class="absolute bottom-0 left-0 h-0.5 bg-indigo-500/50 animate-pulse w-full"></div>
             </div>
             
@@ -167,7 +167,7 @@ const stopResize = () => {
     document.body.style.userSelect = '';
 };
 
-// Terminal Logic
+// 终端逻辑
 let unlisten = null;
 
 const scrollToBottom = async () => {
@@ -178,8 +178,8 @@ const scrollToBottom = async () => {
 };
 
 const stopActiveTerminal = async () => {
-    // TODO: Implement kill logic via API if needed
-    // Currently purely frontend display
+    // TODO: 如果需要，通过 API 实现终止逻辑
+    // 目前仅为前端显示
 };
 
 onMounted(async () => {
@@ -196,8 +196,8 @@ onMounted(async () => {
                     active: true,
                     exitCode: null
                 });
-                activePid.value = msg.pid; // Auto-switch to new terminal
-                isCollapsed.value = false; // Auto-expand
+                activePid.value = msg.pid; // 自动切换到新终端
+                isCollapsed.value = false; // 自动展开
                 scrollToBottom();
             }
         }
