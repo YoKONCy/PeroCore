@@ -84,7 +84,8 @@
             "icons/icon.ico"
         ],
         "resources": [
-            "src-tauri/python",
+            { "src": "src-tauri/python", "target": "python" },
+            { "src": "src-tauri/bin/node.exe", "target": "bin/node.exe" },
             "backend_dist/*.py",
             "backend_dist/core",
             "backend_dist/routers",

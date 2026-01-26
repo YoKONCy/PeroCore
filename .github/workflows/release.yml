@@ -75,6 +75,34 @@ jobs:
           Write-Host "Installing Python dependencies to $LIB_DIR..."
           pip install -r backend/requirements.txt --target $LIB_DIR --no-warn-script-location
 
+      - name: Prepare Embedded Node.js (Windows)
+        shell: pwsh
+        run: |
+          $NODE_VERSION = "20.18.1"
+          $NODE_URL = "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-win-x64.zip"
+          $TARGET_DIR = "PeroLauncher/src-tauri/bin"
+          
+          if (!(Test-Path $TARGET_DIR)) { New-Item -ItemType Directory -Path $TARGET_DIR -Force }
+          
+          Write-Host "Downloading Node.js from $NODE_URL..."
+          Invoke-WebRequest -Uri $NODE_URL -OutFile "node_embed.zip"
+          
+          # Extract and move only node.exe
+          $TEMP_DIR = "node_temp"
+          Expand-Archive -Path "node_embed.zip" -DestinationPath $TEMP_DIR -Force
+          
+          $EXTRACTED_NODE = Get-ChildItem -Path $TEMP_DIR -Filter "node.exe" -Recurse | Select-Object -First 1
+          if ($EXTRACTED_NODE) {
+              Copy-Item -Path $EXTRACTED_NODE.FullName -Destination "$TARGET_DIR/node.exe" -Force
+              Write-Host "node.exe deployed to $TARGET_DIR"
+          } else {
+              Write-Error "node.exe not found in zip"
+              exit 1
+          }
+          
+          Remove-Item "node_embed.zip"
+          Remove-Item $TEMP_DIR -Recurse -Force
+
       - name: Build and Install Rust Core Extensions
         shell: pwsh
         run: |

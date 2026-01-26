@@ -378,6 +378,10 @@ pub fn start_napcat_process(app: AppHandle, state: tauri::State<NapCatState>) ->
         for line in reader.lines() {
             if let Ok(l) = line {
                 emit_log(&app_clone_err, format!("[ERR] {}", l));
+                // 转发严重错误到前端通知
+                if l.contains("Error") || l.contains("Exception") || l.contains("Failed") {
+                     let _ = app_clone_err.emit("system-error", format!("NapCat: {}", l));
+                }
             }
         }
     });

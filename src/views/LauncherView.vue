@@ -135,16 +135,24 @@
                 <div v-if="isStarting" class="absolute inset-[-20px] rounded-full border-2 border-emerald-500/50 border-t-transparent animate-spin"></div>
                 <button 
                   @click="toggleLaunch"
-                  :disabled="isStarting"
+                  :disabled="isStarting || envStatus === 'error'"
                   :class="[
                     'relative w-32 h-32 md:w-40 md:h-40 rounded-full flex flex-col items-center justify-center gap-2 transition-all duration-500 group',
                     isRunning 
                       ? 'bg-rose-500/10 text-rose-500 border-2 border-rose-500/50 hover:bg-rose-500 hover:text-white hover:shadow-[0_0_40px_rgba(244,63,94,0.4)]' 
-                      : 'bg-emerald-500 text-white shadow-[0_0_40px_rgba(16,185,129,0.3)] hover:shadow-[0_0_60px_rgba(16,185,129,0.5)] hover:scale-105 active:scale-95'
+                      : (envStatus === 'error' 
+                          ? 'bg-slate-700 text-slate-500 border-2 border-slate-600 cursor-not-allowed opacity-80' 
+                          : 'bg-emerald-500 text-white shadow-[0_0_40px_rgba(16,185,129,0.3)] hover:shadow-[0_0_60px_rgba(16,185,129,0.5)] hover:scale-105 active:scale-95')
                   ]"
                 >
-                  <Power :size="40" class="md:w-12 md:h-12" :stroke-width="2.5" />
-                  <span class="text-xs md:text-sm font-bold uppercase tracking-widest">{{ isRunning ? '停止服务' : '启动 Pero' }}</span>
+                  <div v-if="envStatus === 'error'" class="flex flex-col items-center gap-1">
+                    <XCircle :size="32" class="opacity-50" />
+                    <span class="text-xs font-bold">环境缺失</span>
+                  </div>
+                  <template v-else>
+                    <Power :size="40" class="md:w-12 md:h-12" :stroke-width="2.5" />
+                    <span class="text-xs md:text-sm font-bold uppercase tracking-widest">{{ isRunning ? '停止服务' : '启动 Pero' }}</span>
+                  </template>
                 </button>
 
                 <button 
@@ -299,6 +307,255 @@
           </div>
         </div>
 
+        <!-- Environment Tab -->
+        <div v-if="activeTab === 'environment'" class="h-full flex flex-col gap-6">
+          <div class="flex items-center justify-between">
+            <h2 class="text-xl font-bold tracking-tight">环境检测</h2>
+            <div class="flex items-center gap-2 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest"
+                 :class="{
+                    'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20': envStatus === 'ok',
+                    'bg-amber-500/10 text-amber-500 border border-amber-500/20': envStatus === 'warning',
+                    'bg-rose-500/10 text-rose-500 border border-rose-500/20': envStatus === 'error',
+                    'bg-slate-500/10 text-slate-500 border border-slate-500/20': envStatus === 'checking'
+                 }">
+               <div class="w-2 h-2 rounded-full animate-pulse" 
+                    :class="{
+                        'bg-emerald-500': envStatus === 'ok',
+                        'bg-amber-500': envStatus === 'warning',
+                        'bg-rose-500': envStatus === 'error',
+                        'bg-slate-500': envStatus === 'checking'
+                    }"></div>
+               {{ envStatus === 'checking' ? '正在检测...' : (envStatus === 'ok' ? '环境就绪' : (envStatus === 'warning' ? '部分就绪' : '环境异常')) }}
+            </div>
+          </div>
+
+          <div v-if="envReport" class="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-6">
+             <!-- Critical Components -->
+             <div class="space-y-4">
+               <h3 class="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                 <Shield :size="14" /> 核心运行时 (必须)
+               </h3>
+               
+               <div class="grid grid-cols-1 gap-3">
+                 <!-- Python -->
+                 <div class="glass-effect p-4 rounded-xl border border-slate-800/50 flex items-center justify-between group hover:border-slate-700 transition-colors">
+                   <div class="flex items-center gap-4">
+                     <div class="p-2.5 rounded-lg bg-yellow-500/10 text-yellow-500">
+                       <Code :size="20" />
+                     </div>
+                     <div>
+                       <div class="font-bold text-sm">Python 运行时</div>
+                       <div class="text-xs text-slate-500 font-mono mt-0.5">
+                         {{ envReport.python_exists ? `v${envReport.python_version}` : '未检测到' }}
+                       </div>
+                     </div>
+                   </div>
+                   <div class="flex items-center gap-3">
+                     <span class="text-[10px] font-mono text-slate-600 hidden md:inline-block max-w-[150px] truncate" :title="envReport.python_path">
+                       {{ envReport.python_path || 'PATH NOT FOUND' }}
+                     </span>
+                     <CheckCircle2 v-if="envReport.python_exists" :size="20" class="text-emerald-500" />
+                     <XCircle v-else :size="20" class="text-rose-500" />
+                   </div>
+                 </div>
+
+                 <!-- Backend Script -->
+                 <div class="glass-effect p-4 rounded-xl border border-slate-800/50 flex items-center justify-between group hover:border-slate-700 transition-colors">
+                   <div class="flex items-center gap-4">
+                     <div class="p-2.5 rounded-lg bg-blue-500/10 text-blue-500">
+                       <ScrollText :size="20" />
+                     </div>
+                     <div>
+                       <div class="font-bold text-sm">后端核心脚本</div>
+                       <div class="text-xs text-slate-500 mt-0.5">
+                         main.py 入口文件
+                       </div>
+                     </div>
+                   </div>
+                   <div class="flex items-center gap-3">
+                     <CheckCircle2 v-if="envReport.script_exists" :size="20" class="text-emerald-500" />
+                     <XCircle v-else :size="20" class="text-rose-500" />
+                   </div>
+                 </div>
+
+                 <!-- VC++ Redist -->
+                 <div class="glass-effect p-4 rounded-xl border border-slate-800/50 flex items-center justify-between group hover:border-slate-700 transition-colors">
+                   <div class="flex items-center gap-4">
+                     <div class="p-2.5 rounded-lg bg-indigo-500/10 text-indigo-500">
+                       <Database :size="20" />
+                     </div>
+                     <div>
+                       <div class="font-bold text-sm">Visual C++ 运行库</div>
+                       <div class="text-xs text-slate-500 mt-0.5">
+                         VCRUNTIME140.dll
+                       </div>
+                     </div>
+                   </div>
+                   <div class="flex items-center gap-3">
+                     <CheckCircle2 v-if="envReport.vc_redist_installed" :size="20" class="text-emerald-500" />
+                     <div v-else class="flex items-center gap-2">
+                        <a href="https://aka.ms/vs/17/release/vc_redist.x64.exe" target="_blank" class="text-xs text-blue-400 hover:underline">下载安装</a>
+                        <XCircle :size="20" class="text-rose-500" />
+                     </div>
+                   </div>
+                 </div>
+                 
+                 <!-- Data Dir -->
+                 <div class="glass-effect p-4 rounded-xl border border-slate-800/50 flex items-center justify-between group hover:border-slate-700 transition-colors">
+                   <div class="flex items-center gap-4">
+                     <div class="p-2.5 rounded-lg bg-slate-700/30 text-slate-400">
+                       <FolderOpen :size="20" />
+                     </div>
+                     <div>
+                       <div class="font-bold text-sm">数据目录权限</div>
+                       <div class="text-xs text-slate-500 mt-0.5">
+                         读写访问检查
+                       </div>
+                     </div>
+                   </div>
+                   <div class="flex items-center gap-3">
+                     <CheckCircle2 v-if="envReport.data_dir_writable" :size="20" class="text-emerald-500" />
+                     <XCircle v-else :size="20" class="text-rose-500" />
+                   </div>
+                 </div>
+               </div>
+             </div>
+
+             <!-- Optional Components -->
+             <div class="space-y-4">
+               <h3 class="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                 <Sparkles :size="14" /> 功能组件 (可选)
+               </h3>
+               
+               <div class="grid grid-cols-1 gap-3">
+                 <!-- WebView2 -->
+                 <div class="glass-effect p-4 rounded-xl border border-slate-800/50 flex items-center justify-between group hover:border-slate-700 transition-colors">
+                   <div class="flex items-center gap-4">
+                     <div class="p-2.5 rounded-lg bg-cyan-500/10 text-cyan-500">
+                       <LayoutGrid :size="20" />
+                     </div>
+                     <div>
+                       <div class="font-bold text-sm">Edge WebView2</div>
+                       <div class="text-xs text-slate-500 mt-0.5">
+                         UI 渲染引擎
+                       </div>
+                     </div>
+                   </div>
+                   <div class="flex items-center gap-3">
+                     <CheckCircle2 v-if="envReport.webview2_installed" :size="20" class="text-emerald-500" />
+                     <AlertCircle v-else :size="20" class="text-amber-500" title="缺失可能导致界面无法显示" />
+                   </div>
+                 </div>
+
+                 <!-- Node.js -->
+                 <div class="glass-effect p-4 rounded-xl border border-slate-800/50 flex items-center justify-between group hover:border-slate-700 transition-colors">
+                   <div class="flex items-center gap-4">
+                     <div class="p-2.5 rounded-lg bg-green-500/10 text-green-500">
+                       <Terminal :size="20" />
+                     </div>
+                     <div>
+                       <div class="font-bold text-sm">Node.js 运行时</div>
+                       <div class="text-xs text-slate-500 font-mono mt-0.5">
+                         {{ envReport.node_exists ? `v${envReport.node_version}` : '未检测到' }}
+                       </div>
+                     </div>
+                   </div>
+                   <div class="flex items-center gap-3">
+                     <span class="text-[10px] font-mono text-slate-600 hidden md:inline-block max-w-[150px] truncate" :title="envReport.node_path">
+                       {{ envReport.node_path || 'PATH NOT FOUND' }}
+                     </span>
+                     <CheckCircle2 v-if="envReport.node_exists" :size="20" class="text-emerald-500" />
+                     <AlertCircle v-else :size="20" class="text-amber-500" title="NapCat 依赖此组件" />
+                   </div>
+                 </div>
+
+                 <!-- NapCat -->
+                 <div class="glass-effect p-4 rounded-xl border border-slate-800/50 flex items-center justify-between group hover:border-slate-700 transition-colors">
+                   <div class="flex items-center gap-4">
+                     <div class="p-2.5 rounded-lg bg-pink-500/10 text-pink-500">
+                       <MessageSquare :size="20" />
+                     </div>
+                     <div>
+                       <div class="font-bold text-sm">NapCat 适配器</div>
+                       <div class="text-xs text-slate-500 mt-0.5">
+                         QQ 协议支持
+                       </div>
+                     </div>
+                   </div>
+                   <div class="flex items-center gap-3">
+                      <span v-if="!isSocialEnabled" class="text-[10px] uppercase font-bold text-slate-600 bg-slate-800 px-2 py-1 rounded">Disabled</span>
+                      <CheckCircle2 v-else-if="envReport.napcat_installed" :size="20" class="text-emerald-500" />
+                      <div v-else class="flex items-center gap-2">
+                         <span class="text-xs text-amber-500">未安装</span>
+                         <AlertCircle :size="20" class="text-amber-500" />
+                      </div>
+                   </div>
+                 </div>
+
+                 <!-- Port 9120 -->
+                 <div class="glass-effect p-4 rounded-xl border border-slate-800/50 flex items-center justify-between group hover:border-slate-700 transition-colors">
+                   <div class="flex items-center gap-4">
+                     <div class="p-2.5 rounded-lg bg-orange-500/10 text-orange-500">
+                       <Activity :size="20" />
+                     </div>
+                     <div>
+                       <div class="font-bold text-sm">端口占用 (9120)</div>
+                       <div class="text-xs text-slate-500 mt-0.5">
+                         API 服务端口
+                       </div>
+                     </div>
+                   </div>
+                   <div class="flex items-center gap-3">
+                     <CheckCircle2 v-if="envReport.port_9120_free" :size="20" class="text-emerald-500" />
+                     <div v-else class="flex items-center gap-2">
+                        <span class="text-xs text-rose-500 font-bold">已占用</span>
+                        <XCircle :size="20" class="text-rose-500" />
+                     </div>
+                   </div>
+                 </div>
+                 
+                 <!-- Memory Core -->
+                 <div class="glass-effect p-4 rounded-xl border border-slate-800/50 flex items-center justify-between group hover:border-slate-700 transition-colors">
+                   <div class="flex items-center gap-4">
+                     <div class="p-2.5 rounded-lg bg-purple-500/10 text-purple-500">
+                       <Cpu :size="20" />
+                     </div>
+                     <div>
+                       <div class="font-bold text-sm">Pero Memory Core</div>
+                       <div class="text-xs text-slate-500 mt-0.5">
+                         Rust 加速模块
+                       </div>
+                     </div>
+                   </div>
+                   <div class="flex items-center gap-3">
+                     <CheckCircle2 v-if="envReport.core_available" :size="20" class="text-emerald-500" />
+                     <AlertCircle v-else :size="20" class="text-amber-500" title="性能将受限" />
+                   </div>
+                 </div>
+               </div>
+             </div>
+             
+             <!-- Error Log -->
+             <div v-if="envReport.errors && envReport.errors.length > 0" class="p-4 rounded-xl bg-rose-500/10 border border-rose-500/20">
+                <h3 class="text-xs font-bold text-rose-500 uppercase tracking-widest mb-2 flex items-center gap-2">
+                  <AlertCircle :size="14" /> 错误详情
+                </h3>
+                <ul class="space-y-1">
+                  <li v-for="(err, idx) in envReport.errors" :key="idx" class="text-xs text-rose-300 font-mono">
+                    • {{ err }}
+                  </li>
+                </ul>
+             </div>
+          </div>
+          
+          <div v-else class="flex-1 flex items-center justify-center">
+             <div class="flex flex-col items-center gap-4 text-slate-500">
+                <div class="w-12 h-12 border-2 border-slate-700 border-t-emerald-500 rounded-full animate-spin"></div>
+                <span class="text-sm font-medium animate-pulse">正在全面检测运行环境...</span>
+             </div>
+          </div>
+        </div>
+
         <!-- Tools Tab -->
         <div v-if="activeTab === 'tools'" class="h-full flex flex-col gap-6">
           <div class="flex items-center justify-between">
@@ -417,15 +674,21 @@ import {
   Sparkles, Home, Settings, FolderOpen,
   Cpu, Database, Activity, Power, ShieldCheck,
   LayoutGrid, ScrollText, Play, Shield,
-  Menu, Zap, X, Plug, Search, Plus, Code, MessageSquare, Users
+  Menu, Zap, X, Plug, Search, Plus, Code, MessageSquare, Users,
+  CheckCircle2, XCircle, AlertCircle, Terminal
 } from 'lucide-vue-next'
 
 const router = useRouter()
 const activeTab = ref('home')
 const napcatLogs = ref([])
 
+const envReport = ref(null)
+const envStatus = ref('checking') // checking, ok, warning, error
+
 watch(activeTab, async (val) => {
-  // Logic for other tabs if needed
+  if (val === 'environment') {
+     await checkEnvironment()
+  }
 })
 
 const isSidebarCollapsed = ref(false)
@@ -531,6 +794,18 @@ onMounted(async () => {
   // Start stats polling
   updateStats()
   statsInterval = setInterval(updateStats, 2000)
+
+  // 初始环境检查
+  const status = await checkEnvironment()
+  if (status === 'error') {
+     if (window.$notify) {
+       window.$notify("关键运行环境缺失，启动已禁用。请前往环境检测页修复。", "error", "环境缺失", 8000)
+     }
+  } else if (status === 'warning') {
+     if (window.$notify) {
+       window.$notify("环境存在警告，建议检查。", "warning", "环境警告", 5000)
+     }
+  }
 })
 
 onUnmounted(() => {
@@ -542,6 +817,7 @@ const navItems = [
   { id: 'agents', name: '角色配置', icon: Users },
   { id: 'plugins', name: '插件管理', icon: Plug },
   { id: 'tools', name: '工具箱', icon: LayoutGrid },
+  { id: 'environment', name: '环境检测', icon: ShieldCheck },
 ]
 
 const getStatusColor = (status) => {
@@ -586,10 +862,66 @@ const stopServices = async () => {
   }
 }
 
+const checkEnvironment = async () => {
+  try {
+    envStatus.value = 'checking'
+    const report = await invoke('get_diagnostics')
+    envReport.value = report
+    
+    // Determine overall status
+    let criticalMissing = false
+    let warning = false
+    
+    // Critical checks
+    if (!report.python_exists) criticalMissing = true
+    if (!report.script_exists) criticalMissing = true
+    if (!report.data_dir_writable) criticalMissing = true
+    if (!report.vc_redist_installed) criticalMissing = true
+    
+    // Warning checks
+    if (!report.port_9120_free) warning = true
+    if (!report.core_available) warning = true
+    if (!report.webview2_installed) warning = true // Should be critical but let's be lenient
+    if (isSocialEnabled.value && !report.napcat_installed) warning = true // Optional based on setting
+    if (isSocialEnabled.value && !report.node_exists) warning = true // Node.js required for NapCat
+    
+    if (criticalMissing) {
+       envStatus.value = 'error'
+    } else if (warning) {
+       envStatus.value = 'warning'
+    } else {
+       envStatus.value = 'ok'
+    }
+    
+    return envStatus.value
+  } catch (e) {
+    console.error("Env check failed:", e)
+    envStatus.value = 'error'
+    return 'error'
+  }
+}
+
 const toggleLaunch = async () => {
   if (isRunning.value) {
     await stopServices()
   } else {
+    // 启动前强制检查
+    const status = await checkEnvironment()
+    if (status === 'error') {
+       if (window.$notify) {
+         window.$notify("环境检测未通过，缺少关键组件，无法启动。", "error", "启动阻止")
+       }
+       // 自动跳转到环境页
+       activeTab.value = 'environment'
+       return
+    }
+
+    if (status === 'warning') {
+       if (window.$notify) {
+         window.$notify("环境存在警告，可能影响部分功能。", "warning", "系统警告")
+       }
+    }
+
     isStarting.value = true
     try {
       addLog("[SYSTEM] Starting services...")
@@ -623,6 +955,12 @@ const toggleLaunch = async () => {
     } catch (e) {
       addLog(`[ERROR] Start failed: ${e}`)
       console.error("[ERROR] Start failed details:", e)
+      
+      // 使用 NotificationManager 显示非模态错误
+      if (window.$notify) {
+          window.$notify(`启动失败: ${e}`, 'error', '启动异常', 10000)
+      }
+
       isStarting.value = false
       isRunning.value = false
       backendStatus.value = 'ERROR'

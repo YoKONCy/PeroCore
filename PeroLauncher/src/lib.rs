@@ -95,6 +95,12 @@ struct DiagnosticReport {
     data_dir_writable: bool,
     data_dir: String,
     core_available: bool,
+    vc_redist_installed: bool,
+    napcat_installed: bool,
+    webview2_installed: bool,
+    node_exists: bool,
+    node_path: String,
+    node_version: String,
     errors: Vec<String>,
 }
 
@@ -222,12 +228,65 @@ async fn get_diagnostics(app: tauri::AppHandle) -> Result<DiagnosticReport, Stri
 
     // 6. 系统组件检查 (VC++ Redistributable)
     let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
-    let vc_runtime = std::path::PathBuf::from(system_root).join("System32/vcruntime140.dll");
-    if !vc_runtime.exists() {
-        // 尝试检查 SysWOW64 (如果是 64位系统跑 32位程序，或者反之，虽然 Python 通常匹配系统架构)
-        let sys_wow64 = std::path::PathBuf::from(std::env::var("SystemRoot").unwrap()).join("SysWOW64/vcruntime140.dll");
-        if !sys_wow64.exists() {
+    let vc_runtime = std::path::PathBuf::from(system_root.clone()).join("System32/vcruntime140.dll");
+    let mut vc_redist_installed = vc_runtime.exists();
+    if !vc_redist_installed {
+        // 尝试检查 SysWOW64
+        let sys_wow64 = std::path::PathBuf::from(std::env::var("SystemRoot").unwrap_or(system_root)).join("SysWOW64/vcruntime140.dll");
+        if sys_wow64.exists() {
+            vc_redist_installed = true;
+        } else {
              errors.push("关键系统组件缺失: VCRUNTIME140.dll (Visual C++ Redistributable)。这会导致 Python 无法启动。".to_string());
+        }
+    }
+
+    // 7. NapCat 检查
+    let napcat_installed = napcat::check_napcat_installed(&app);
+
+    // 8. WebView2 (简单检查注册表，或者假设能运行到这里说明 WebView2 存在？不一定，Tauri 启动后可能没加载页面)
+    // Tauri 2 默认在初始化时检查。这里我们假设如果是 Windows 且能调用此命令，通常 WebView2 存在或正在安装。
+    // 但为了显示，我们可以查注册表。
+    let webview2_installed = check_webview2_registry();
+
+    // 9. Node.js 检查
+    let mut node_path = std::path::PathBuf::new();
+    let mut node_exists = false;
+    let mut node_version = String::from("Unknown");
+
+    let napcat_dir = napcat::get_napcat_dir(&app);
+    let node_trials = [
+        resource_dir.join("nodejs/node.exe"),
+        resource_dir.join("bin/node.exe"),
+        resource_dir.join("_up_/nodejs/node.exe"),
+        napcat_dir.join("node.exe"),
+    ];
+
+    for trial in node_trials {
+        if trial.exists() {
+            node_path = trial;
+            node_exists = true;
+            break;
+        }
+    }
+
+    if !node_exists {
+        // Try system node
+        if let Ok(path) = which::which("node") {
+            node_path = path;
+            node_exists = true;
+        }
+    }
+
+    if node_exists {
+        let output = std::process::Command::new(&node_path)
+            .arg("--version")
+            .creation_flags(0x08000000)
+            .output();
+        if let Ok(out) = output {
+             node_version = String::from_utf8_lossy(&out.stdout).trim().to_string();
+             if node_version.is_empty() {
+                node_version = String::from_utf8_lossy(&out.stderr).trim().to_string();
+             }
         }
     }
 
@@ -241,6 +300,12 @@ async fn get_diagnostics(app: tauri::AppHandle) -> Result<DiagnosticReport, Stri
         data_dir_writable,
         data_dir: data_dir.to_string_lossy().to_string(),
         core_available,
+        vc_redist_installed,
+        napcat_installed,
+        webview2_installed,
+        node_exists,
+        node_path: node_path.to_string_lossy().to_string(),
+        node_version,
         errors: errors.clone(),
     };
 
@@ -252,6 +317,29 @@ async fn get_diagnostics(app: tauri::AppHandle) -> Result<DiagnosticReport, Stri
     }
     
     Ok(report)
+}
+
+fn check_webview2_registry() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        use winreg::enums::*;
+        use winreg::RegKey;
+        let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+        let subkey = r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
+        if hklm.open_subkey(subkey).is_ok() { return true; }
+        let subkey_64 = r"SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
+        if hklm.open_subkey(subkey_64).is_ok() { return true; }
+        // 用户级安装
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        if hkcu.open_subkey(subkey).is_ok() { return true; }
+        if hkcu.open_subkey(subkey_64).is_ok() { return true; }
+        
+        false
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        true // Linux/macOS uses WebKit
+    }
 }
 
 #[tauri::command]
@@ -580,6 +668,15 @@ async fn start_backend(
                 log::error!("[Backend] {}", l); // 同时记录到 Rust 日志系统
                 let err_msg = format!("[ERR] {}", l);
                 let _ = app_stderr.emit("backend-log", &err_msg);
+
+                // 发送系统错误通知给前端 (非模态框)
+                // 过滤掉一些非关键的 Warning，只发送真正的 Error
+                // Python 的 Traceback 通常包含 "Traceback", "Error:", "Exception:"
+                // 或者我们可以简单地将所有 stderr 发送过去，让前端展示？
+                // 不，stderr 可能包含进度条等杂讯。最好只针对明显的错误关键词。
+                if l.contains("Error") || l.contains("Exception") || l.contains("Traceback") || l.contains("CRITICAL") {
+                    let _ = app_stderr.emit("system-error", format!("Backend: {}", l));
+                }
                 
                 // 1. Startup buffer
                 if let Ok(mut logs) = logs_stderr.lock() {
