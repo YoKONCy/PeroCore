@@ -28,7 +28,7 @@ class LLMService:
             return f"{self.api_base}{suffix}"
         return f"{self.api_base}/v1{suffix}"
 
-    async def chat(self, messages: List[Dict[str, Any]], temperature: float = 0.7, tools: List[Dict] = None, response_format: Optional[Dict] = None) -> Dict[str, Any]:
+    async def chat(self, messages: List[Dict[str, Any]], temperature: float = 0.7, tools: List[Dict] = None, response_format: Optional[Dict] = None, timeout: float = 300.0) -> Dict[str, Any]:
         # 智能纠错：若模型为 Gemini 但 Provider 误设为 Anthropic，强制回退到 OpenAI 兼容模式以支持聚合 API。
         if self.provider in ["claude", "anthropic"] and "gemini" in self.model.lower():
              print(f"[LLMService] 检测到 Gemini 模型 '{self.model}' 使用 Anthropic 提供商。强制回退到 OpenAI 兼容协议以支持 OneAPI/Aggregator。")
@@ -71,7 +71,7 @@ class LLMService:
         if tools:
             payload["tools"] = tools
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.post(url, headers=headers, json=payload)
             if response.status_code != 200:
                 error_text = response.text

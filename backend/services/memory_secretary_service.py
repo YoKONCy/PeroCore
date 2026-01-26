@@ -537,7 +537,7 @@ class MemorySecretaryService:
             })
 
             # 4. 调用 LLM
-            response = await llm.chat([{"role": "user", "content": prompt}], temperature=0.7)
+            response = await llm.chat([{"role": "user", "content": prompt}], temperature=0.7, timeout=300.0)
             content = response.get("choices", [{}])[0].get("message", {}).get("content", "")
             
             import re

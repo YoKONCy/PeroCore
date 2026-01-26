@@ -426,7 +426,8 @@ class ReflectionService:
         
         try:
             # [Fix] GLM-4 等部分模型不支持 response_format="json_object"，移除该参数以兼容
-            response = await llm.chat([{"role": "user", "content": prompt}], temperature=0.1)
+            # 显式设置超时时间为 300s (5分钟)，防止反思分析超时
+            response = await llm.chat([{"role": "user", "content": prompt}], temperature=0.1, timeout=300.0)
             content = response["choices"][0]["message"]["content"]
             
             # Parse JSON (Simple)
