@@ -92,19 +92,7 @@ jobs:
               exit 1
           }
 
-          # 2. Build and Install pero_vision_core
-           Write-Host "Building pero_vision_core..."
-           maturin build --release --manifest-path backend/vision_core/Cargo.toml --out dist
-           $VISION_WHEEL = Get-ChildItem dist/pero_vision_core*.whl | Select-Object -First 1
-           if ($VISION_WHEEL) {
-               Write-Host "Installing $($VISION_WHEEL.Name)..."
-               pip install $VISION_WHEEL.FullName --target $TARGET_LIB --no-deps --force-reinstall
-           } else {
-               Write-Error "Failed to build pero_vision_core wheel"
-               exit 1
-           }
-
-           # 3. Build and Install nit_rust_runtime
+          # 2. Build and Install nit_rust_runtime
            Write-Host "Building nit_rust_runtime..."
            maturin build --release --manifest-path backend/nit_core/interpreter/rust_binding/Cargo.toml --out dist
            $NIT_WHEEL = Get-ChildItem dist/nit_rust_runtime*.whl | Select-Object -First 1

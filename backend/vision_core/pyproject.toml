@@ -7,6 +7,7 @@ name = "pero_vision_core"
 version = "0.1.0"
 description = "High-performance computer vision core for Pero using Rust"
 license = { text = "Apache-2.0" }
+readme = "README.md"
 authors = [
     { name = "PeroCore Developer" }
 ]
