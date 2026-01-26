@@ -30,9 +30,6 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
-      - name: Rust Cachewith:
-          targets: wasm32-unknown-unknown
-
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
         with:
