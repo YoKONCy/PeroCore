@@ -170,6 +170,13 @@ jobs:
                Get-ChildItem -Path "backend/nit_core/nit_terminal_auditor" -Recurse
            }
 
+           # Clean target directories to prevent WiX build failure due to long paths or too many files
+           # We keep rust_core target because it is explicitly referenced in resources
+           Get-ChildItem -Path "backend" -Recurse -Directory -Filter "target" | 
+             Where-Object { $_.FullName -notmatch "rust_core" } | 
+             Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+           Write-Host "Cleaned up target directories."
+
       - name: install frontend dependencies
         run: npm install
 
