@@ -180,6 +180,63 @@ jobs:
       - name: install frontend dependencies
         run: npm install
 
+      - name: Prepare Clean Backend Assets
+        shell: pwsh
+        run: |
+          # Create a distribution directory for backend assets
+          $DIST_DIR = "PeroLauncher/backend_dist"
+          if (Test-Path $DIST_DIR) { Remove-Item -Path $DIST_DIR -Recurse -Force }
+          New-Item -ItemType Directory -Path $DIST_DIR -Force
+          
+          # Function to Copy with Exclusion
+          function Copy-Clean {
+              param($Src, $Dest)
+              Write-Host "Copying $Src to $Dest ..."
+              Copy-Item -Path $Src -Destination $Dest -Recurse -Force
+          }
+          
+          # 1. Copy necessary directories
+          $DIRS = @("core", "routers", "assets", "models", "services", "utils", "nit_core")
+          foreach ($dir in $DIRS) {
+              Copy-Clean -Src "backend/$dir" -Dest "$DIST_DIR/$dir"
+          }
+          
+          # 2. Copy root python files
+          Get-ChildItem -Path "backend" -Filter "*.py" | Copy-Item -Destination $DIST_DIR
+          
+          # 3. Copy built DLL
+          # Ensure DLL dir exists
+          New-Item -ItemType Directory -Path "$DIST_DIR/rust_core" -Force
+          $DLL_SRC = "backend/rust_core/target/release/pero_memory_core.dll"
+          if (Test-Path $DLL_SRC) {
+              Copy-Item -Path $DLL_SRC -Destination "$DIST_DIR/rust_core/pero_memory_core.dll" -Force
+          } else {
+              Write-Warning "pero_memory_core.dll not found at $DLL_SRC"
+          }
+          
+          # 4. AGGRESSIVE CLEANUP
+          # Remove build artifacts, version control, and temporary files
+          Write-Host "Cleaning up unnecessary files..."
+          $EXCLUDES = @("target", "node_modules", "__pycache__", ".git", ".vscode", ".idea", "*.pdb", "*.ilk", "*.exp", "*.lib", "*.obj", "*.rlib", "*.rmeta")
+          
+          foreach ($pattern in $EXCLUDES) {
+              Get-ChildItem -Path $DIST_DIR -Recurse -Force | 
+                  Where-Object { $_.Name -eq $pattern -or $_.Extension -eq $pattern.TrimStart("*") } | 
+                  Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+          }
+          
+          # Remove Rust source files and configs from bundled assets (not needed for runtime)
+          Get-ChildItem -Path $DIST_DIR -Recurse -Include "*.rs", "Cargo.toml", "Cargo.lock" | Remove-Item -Force
+          
+          # Remove NapCat directory entirely as requested
+          $NAPCAT_DIR = "$DIST_DIR/nit_core/plugins/social_adapter/NapCat"
+          if (Test-Path $NAPCAT_DIR) {
+               Write-Host "Removing NapCat directory..."
+               Remove-Item -Path $NAPCAT_DIR -Recurse -Force
+          }
+
+          Write-Host "Backend assets prepared in $DIST_DIR"
+
       - name: build frontend
         run: npm run build
 
