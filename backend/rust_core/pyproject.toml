@@ -12,7 +12,6 @@ authors = [
 ]
 requires-python = ">=3.8"
 dependencies = []
-readme = "README_LIB.md"
 keywords = ["AI", "Memory", "Rust", "SpreadingActivation", "RAG"]
 classifiers = [
     "Programming Language :: Rust",
