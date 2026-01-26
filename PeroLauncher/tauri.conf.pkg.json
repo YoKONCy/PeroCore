@@ -89,7 +89,6 @@
             "../backend/core",
             "../backend/routers",
             "../backend/assets",
-            "../backend/config.json",
             "../backend/models",
             "../backend/services",
             "../backend/utils",
