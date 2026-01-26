@@ -84,6 +84,9 @@ jobs:
           
           # 1. Build and Install pero_memory_core
           Write-Host "Building pero_memory_core..."
+          # Build DLL explicitly for bundling
+          cargo build --release --manifest-path backend/rust_core/Cargo.toml
+          # Build wheel for Python
           maturin build --release --manifest-path backend/rust_core/Cargo.toml --out dist
           $MEMORY_WHEEL = Get-ChildItem dist/pero_memory_core*.whl | Select-Object -First 1
           if ($MEMORY_WHEEL) {
