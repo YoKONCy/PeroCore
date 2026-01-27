@@ -257,6 +257,8 @@ async fn get_diagnostics(app: tauri::AppHandle) -> Result<DiagnosticReport, Stri
     let node_trials = [
         resource_dir.join("nodejs/node.exe"),
         resource_dir.join("bin/node.exe"),
+        resource_dir.join("node.exe"), // 适配扁平化资源结构
+        resource_dir.join("src-tauri/bin/node.exe"), // 适配保留路径结构
         resource_dir.join("_up_/nodejs/node.exe"),
         napcat_dir.join("node.exe"),
     ];
