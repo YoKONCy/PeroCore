@@ -266,6 +266,7 @@ const dirtyFiles = ref(new Set());
 onMounted(() => {
   console.log("WorkModeView Mounted");
   // Instant ready for smoother transition since parent handles overlap
+  // 立即就绪，以便更平滑的过渡，因为父级处理重叠
   isReady.value = true;
 });
 
@@ -374,6 +375,7 @@ const saveFile = async (content) => {
     if (res.ok) {
       dirtyFiles.value.delete(currentFile.value.path);
       // Optional: Toast notification
+      // 可选：Toast 通知
     } else {
       showDialog({ type: 'alert', title: '错误', message: "保存文件失败" });
     }

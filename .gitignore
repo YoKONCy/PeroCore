@@ -14,8 +14,15 @@ jspm_packages/
 # Build outputs
 dist/
 dist-ssr/
+dist-electron/
+dist_electron/
+release/
+out/
 build/
 target/
+*.blockmap
+builder-debug.yml
+builder-effective-config.yaml
 
 # IDE/Editor
 .vscode/*
@@ -35,6 +42,9 @@ env/
 venv/
 backend/venv_fix/
 backend/scripts/
+backend/build/
+backend/dist/
+*.spec
 .env
 .venv
 pip-log.txt
@@ -87,6 +97,7 @@ PeroLauncher/target/
 **/target/
 *.msi
 *.exe
+resources/python/
 
 # Local Config
 backend/config.json

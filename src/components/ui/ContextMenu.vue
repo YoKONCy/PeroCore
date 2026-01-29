@@ -36,6 +36,7 @@ const props = defineProps({
   x: Number,
   y: Number,
   items: Array // [{ label, action, type: 'item'|'separator', disabled, shortcut }]
+  // [{ label: 标签, action: 动作, type: 'item'|'separator' 类型, disabled: 禁用, shortcut: 快捷键 }]
 });
 
 const emit = defineEmits(['close', 'action']);
@@ -50,7 +51,7 @@ const close = () => emit('close');
 
 onMounted(() => {
   window.addEventListener('click', close);
-  window.addEventListener('contextmenu', close); // Close on right click elsewhere
+  window.addEventListener('contextmenu', close); // Close on right click elsewhere // 在其他地方右键单击时关闭
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') close();
   });

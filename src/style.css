@@ -18,6 +18,11 @@ body {
   margin: 0;
   overflow: hidden;
   user-select: none;
+  background-color: transparent !important; /* Force transparent */
+}
+
+html {
+  background-color: transparent !important; /* Force transparent */
 }
 
 #app {

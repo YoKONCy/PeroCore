@@ -13,6 +13,8 @@
       :style="{ paddingLeft: (level * 12 + 8) + 'px' }"
     >
       <!-- Icon -->
+      <!-- Icon -->
+      <!-- 图标 -->
       <span v-if="item.type === 'directory'" class="mr-2 flex-shrink-0 opacity-70">
         <FolderOpenIcon v-if="isOpen" class="w-4 h-4 text-amber-400" />
         <FolderIcon v-else class="w-4 h-4 text-amber-400/80" />
@@ -25,10 +27,14 @@
       </span>
       
       <!-- Name -->
+      <!-- Name -->
+      <!-- 名称 -->
       <span class="truncate text-xs">{{ item.name }}</span>
     </div>
 
     <!-- Children -->
+    <!-- Children -->
+    <!-- 子项 -->
     <div v-if="isOpen && item.type === 'directory'" class="mt-0.5 border-l border-white/5 ml-3 pl-1">
       <div v-if="loading" class="pl-4 py-1 text-[10px] text-slate-600 animate-pulse">扫描中...</div>
       <FileTreeItem 
@@ -65,7 +71,7 @@ const emit = defineEmits(['select', 'contextmenu']);
 const isOpen = ref(false);
 const children = ref([]);
 const loading = ref(false);
-const isSelected = ref(false); // TODO: Sync with parent
+const isSelected = ref(false); // TODO: Sync with parent // TODO: 与父级同步 // TODO: 与父级同步
 
 const toggle = async () => {
   if (props.item.type === 'directory') {

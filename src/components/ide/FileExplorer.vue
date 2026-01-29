@@ -2,8 +2,10 @@
   <div class="h-full flex flex-col text-slate-400 select-none bg-transparent" @click="closeContextMenu">
     
     <!-- Toolbar & Search -->
+    <!-- 工具栏与搜索 -->
     <div class="flex flex-col border-b border-white/5 bg-black/10">
         <!-- Actions -->
+        <!-- 操作按钮 -->
         <div class="px-3 py-2 flex justify-end items-center gap-1">
             <button class="p-1.5 hover:bg-white/10 rounded-lg hover:text-indigo-400 transition-colors" title="新建文件" @click.stop="createFile(null)">
               <PlusIcon class="w-4 h-4" />
@@ -17,6 +19,7 @@
         </div>
         
         <!-- Search Input -->
+        <!-- 搜索输入框 -->
         <div class="px-3 pb-2">
             <div class="relative group">
                 <SearchIcon class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-indigo-400 transition-colors" />
@@ -31,6 +34,7 @@
     </div>
 
     <!-- Tree -->
+    <!-- 文件树 -->
     <div class="flex-1 overflow-y-auto custom-scrollbar px-2 py-2" @contextmenu.prevent="handleRootContextMenu">
       <div v-if="loading" class="flex flex-col items-center justify-center h-20 gap-2 text-slate-600">
         <RefreshCwIcon class="w-4 h-4 animate-spin" />
@@ -52,6 +56,7 @@
     </div>
 
     <!-- Context Menu -->
+    <!-- 上下文菜单 -->
     <ContextMenu 
       :visible="contextMenu.visible" 
       :x="contextMenu.x" 
@@ -130,6 +135,7 @@ const contextMenu = reactive({
 });
 
 // Dialog State
+// 对话框状态
 const dialog = reactive({
   visible: false,
   type: 'alert',
@@ -198,6 +204,7 @@ const onSelect = (fileNode) => {
 };
 
 // --- Context Menu Logic ---
+// --- 上下文菜单逻辑 ---
 
 const closeContextMenu = () => {
   contextMenu.visible = false;
@@ -218,6 +225,7 @@ const handleRootContextMenu = (e) => {
 
 const handleItemContextMenu = (payload) => {
   // Handle payload format from FileTreeItem emit
+  // 处理来自 FileTreeItem 发出的 payload 格式
   const event = payload.event || payload; 
   const item = payload.item;
 
@@ -227,6 +235,7 @@ const handleItemContextMenu = (payload) => {
   }
 
   // Safe check for item type
+  // 项目类型的安全检查
   const isDir = item && item.type === 'directory';
 
   contextMenu.x = event.clientX;

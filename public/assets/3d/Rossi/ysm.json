@@ -1,0 +1,168 @@
+{
+  "spec": 2,
+  "metadata": {
+    "name": "§6终末地\n§c<Rossi>",
+    "tips": "Rossi the wolf girl",
+    "license": {
+      "type": "--"
+    },
+    "authors": [
+    ],
+    "link": {
+    }
+  },
+  "files": {
+    "player": {
+      "model": {
+        "main": "models/main.json",
+        "arm": "models/arm.json"
+      },
+      "animation": {
+        "arm": "animations/arm.animation.json",
+        "main": "animations/main.animation.json",
+        "extra": "animations/extra.animation.json",
+        "tac": "animations/tac.animation.json",
+        "carryon": "animations/carryon.animation.json",
+        "tlm": "animations/tlm.animation.json"
+      },
+      "texture": [
+        "textures/texture.png"
+      ],
+      "animation_controllers": ["controller/controller.json"]
+    }
+  },
+  "properties": {
+    "height_scale": 0.7,
+    "width_scale": 0.7,
+    "extra_animation": {
+      "extra0": "#换装",
+      "extra1": "打招呼",
+      "extra2": "鼓掌",
+      "extra3": "是的",
+      "extra4": "不行",
+      "extra5": "卖萌",
+      "extra20": "跳舞",
+      "变更体型": "#个性化"
+    },
+    "extra_animation_buttons": [
+{
+        "id": "换装",
+        "name": "§d穿脱兜帽",
+        "config_forms": [
+          {
+            "type": "checkbox",
+            "title": "披肩",
+            "description": " (切换显示帽子和披风)",
+            "value": "v.player_armor_head"
+          },
+          {
+            "type": "checkbox",
+            "title": "裙子",
+            "description": " (切换显示裙子)",
+            "value": "v.player_armor_body"
+          },
+          {
+            "type": "checkbox",
+            "title": "手套",
+            "description": " (切换显示手套)",
+            "value": "v.player_armor_arm"
+          },
+          {
+            "type": "checkbox",
+            "title": "靴子",
+            "description": " (切换显示靴子)",
+            "value": "v.player_armor_leg"
+          },
+{
+            "type": "checkbox",
+            "title": "内搭",
+            "description": " (切换显示内搭)",
+            "value": "v.player_armor_inner"
+          },
+{
+            "type": "checkbox",
+            "title": "最终防线",
+            "description": " (切换显示绑头发的线)",
+            "value": "v.player_armor_innest"
+          }
+]
+},
+      {
+        "id": "个性化",
+        "name": "§d个性化",
+        "config_forms": [
+{
+            "type": "checkbox",
+            "title": "禁用额外粒子",
+            "description": " (切换显示额外粒子效果)",
+            "value": "v.particle_on"
+          },
+          {
+            "type": "range",
+            "title": "角色大小: ",
+            "description": "调整角色大小",
+            "value": "v.CBody",
+            "step": 0.5,
+            "min": -9,
+            "max": 30
+          },
+          {
+            "type": "range",
+            "title": "头部大小: ",
+            "description": "调整头部大小",
+            "value": "v.CHead",
+            "step": 0.5,
+            "min": -9,
+            "max": 10
+          },
+          {
+            "type": "range",
+            "title": "尾巴大小: ",
+            "description": "调整尾巴大小",
+            "value": "v.CTail",
+            "step": 0.5,
+            "min": -10,
+            "max": 10
+          },
+          {
+            "type": "range",
+            "title": "裙子大小: ",
+            "description": "调整裙子大小",
+            "value": "v.CDress",
+            "step": 0.5,
+            "min": -1,
+            "max": 1
+          },
+          {
+            "type": "range",
+            "title": "披风大小: ",
+            "description": "调整披风大小",
+            "value": "v.CBackArmour",
+            "step": 0.5,
+            "min": -10,
+            "max": 5
+          },
+	{
+            "type": "radio",
+            "title": "体型预设",
+            "description": "",
+            "value": "",
+            "labels": {
+"少女(默认)": "v.CBody=0;v.CHead=0;v.CTail=0;v.CDress=0;v.CBackArmour=0",
+"我是小孩":"v.CBody=-2;v.CHead=2;v.CTail=4;v.CDress=1;v.CBackArmour=1",
+"我是大人": "v.CBody=1;v.CHead=-1;v.CTail=-1;v.CDress=0;v.CBackArmour=0",
+"我是巨人": "v.CBody=10;v.CHead=-2;v.CTail=0;v.CDress=-2;v.CBackArmour=0",
+"我是蚁人": "v.CBody=-9;v.CHead=5;v.CTail=8;v.CDress=1;v.CBackArmour=5"
+            }
+          }
+        ]
+      }
+],
+    "preview_animation": "gui",
+    "default_texture": "texture",
+    "free": false,
+    "render_layers_first": false,
+    "disable_preview_rotation": true,
+    "all_cutout": false
+  }
+}

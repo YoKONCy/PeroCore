@@ -108,6 +108,7 @@ const checkTaskStatus = async () => {
     }
   } catch (e) {
     // silent fail
+    // 静默失败
   }
 }
 

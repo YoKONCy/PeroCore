@@ -41,15 +41,16 @@
 import { ref, nextTick, watch, onMounted, onUnmounted } from 'vue'
 import { ChatDotSquare, Delete, Monitor, ArrowRight } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { listen } from '@tauri-apps/api/event'
-
+import { listen, invoke } from '@/utils/ipcAdapter'
 // State
+// 状态
 const logs = ref([])
 const inputValue = ref('')
 const logContainer = ref(null)
 let unlistenFn = null
 
 // Actions
+// 操作
 const clearLogs = () => {
   logs.value = []
 }
@@ -70,12 +71,10 @@ const sendCommand = async () => {
   const cmd = inputValue.value
   
   try {
-    if (window.__TAURI__) {
-         const invoke = window.__TAURI__.core?.invoke || window.__TAURI__.invoke
-         await invoke('send_napcat_command_wrapper', { command: cmd })
-    }
+    await invoke('send_napcat_command_wrapper', { command: cmd })
     
     // Mirror the input to the terminal
+    // 将输入镜像到终端
     logs.value.push({
       time: new Date().toLocaleTimeString(),
       content: `> ${cmd}`,
@@ -89,6 +88,7 @@ const sendCommand = async () => {
 }
 
 // ANSI to HTML helper
+// ANSI 转 HTML 辅助函数
 const ansiToHtml = (text) => {
   if (!text) return ''
   let result = text
@@ -97,6 +97,7 @@ const ansiToHtml = (text) => {
     .replace(/>/g, '&gt;')
   
   // Basic ANSI colors
+  // 基本 ANSI 颜色
   const colors = {
     '0': 'reset',
     '30': 'text-slate-500', // black
@@ -111,6 +112,7 @@ const ansiToHtml = (text) => {
   }
 
   // Very basic implementation
+  // 非常基础的实现
   result = result.replace(/\x1b\[(\d+)m/g, (match, code) => {
     const className = colors[code]
     if (className === 'reset') return '</span>'
@@ -123,11 +125,10 @@ const ansiToHtml = (text) => {
 
 onMounted(async () => {
   try {
-    if (window.__TAURI__) {
-      const invoke = window.__TAURI__.core?.invoke || window.__TAURI__.invoke
-      
+      const invoke = (cmd, args) => import('@/utils/ipcAdapter').then(m => m.invoke(cmd, args))
       // 1. Fetch history first to show past logs (including QR code)
-      const history = await invoke('get_napcat_logs')
+      // 1. 首先获取历史记录以显示过去的日志（包括二维码）
+      const history = await (await import('@/utils/ipcAdapter')).invoke('get_napcat_logs')
       if (history && history.length > 0) {
           logs.value = history.map(line => ({
             time: new Date().toLocaleTimeString(),
@@ -137,8 +138,12 @@ onMounted(async () => {
       }
 
       // 2. Start listening for new logs
-      unlistenFn = await listen('napcat-log', (event) => {
-        const logLine = event.payload
+      // 2. 开始监听新日志
+      unlistenFn = await listen('napcat_log', (payload) => {
+        // 在 Electron 中，payload 就是日志内容本身 (字符串)
+        // 在 Tauri 中，payload 可能是 event.payload，但 ipcAdapter 已处理过
+        const logLine = typeof payload === 'string' ? payload : (payload.payload || String(payload))
+        
         const timestamp = new Date().toLocaleTimeString()
         
         logs.value.push({
@@ -149,7 +154,6 @@ onMounted(async () => {
         
         if (logs.value.length > 500) logs.value.shift()
       })
-    }
   } catch (e) {
     console.error('Failed to init napcat logs', e)
   }
@@ -205,6 +209,7 @@ onUnmounted(() => {
 }
 
 /* Scrollbar */
+/* 滚动条 */
 .terminal-content::-webkit-scrollbar {
   width: 8px;
 }
@@ -235,6 +240,7 @@ onUnmounted(() => {
 }
 
 /* Empty State */
+/* 空状态 */
 .empty-state {
     height: 100%;
     display: flex;
@@ -250,6 +256,7 @@ onUnmounted(() => {
 }
 
 /* Input Area */
+/* 输入区域 */
 .terminal-input-area {
     display: flex;
     align-items: center;
@@ -280,6 +287,7 @@ onUnmounted(() => {
 }
 
 /* Tailwind-like text colors for ANSI */
+/* 类似 Tailwind 的 ANSI 文本颜色 */
 .text-slate-500 { color: #64748b; }
 .text-red-400 { color: #f87171; }
 .text-emerald-400 { color: #34d399; }

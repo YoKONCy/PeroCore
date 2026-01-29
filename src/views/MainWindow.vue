@@ -1,6 +1,6 @@
 <template>
   <div class="relative w-screen h-screen overflow-hidden bg-transparent">
-    <!-- Custom Title Bar (Always visible, handles drag & window controls) -->
+    <!-- 自定义标题栏 (始终可见，处理拖拽和窗口控制) -->
     <CustomTitleBar 
       :is-work-mode="isWorkMode" 
       :show-mode-toggle="!isWorkMode"
@@ -8,7 +8,7 @@
       @toggle-mode="toggleMode" 
     />
 
-    <!-- Views Container -->
+    <!-- 视图容器 -->
     <div class="absolute top-8 left-0 right-0 bottom-0 bg-[#1e293b] overflow-hidden">
       <Transition name="fade-slide">
         <KeepAlive>
@@ -24,7 +24,7 @@
       </Transition>
     </div>
     
-    <!-- Blocking Alert Dialog -->
+    <!-- 阻断性警告对话框 -->
     <CustomDialog
       v-model:visible="showErrorDialog"
       type="alert"
@@ -36,8 +36,9 @@
 
 <script setup>
 import { ref, computed, watch, defineAsyncComponent, onMounted } from 'vue'
-import { emit } from '@tauri-apps/api/event'
-import { getCurrentWindow } from '@tauri-apps/api/window'
+import { listen, invoke, emit } from '@/utils/ipcAdapter'
+// import { listen } from '@tauri-apps/api/event'
+// import { getCurrentWindow } from '@tauri-apps/api/window'
 import { APP_TITLE } from '../config'
 import CustomTitleBar from '../components/layout/CustomTitleBar.vue'
 import CustomDialog from '../components/ui/CustomDialog.vue'
@@ -48,20 +49,24 @@ const isWorkMode = ref(false)
 const showErrorDialog = ref(false)
 const isSessionReady = ref(false)
 const errorMessage = ref('')
-const appWindow = getCurrentWindow()
 
-// Intercept close request to hide window instead of destroying it
+// In Electron, window management is handled by the main process via IPC
+// We don't need to intercept close requests here like in Tauri.
+// Instead, the main process (windows/manager.ts) should handle 'close' events to hide the window.
+// 在 Electron 中，窗口管理通过 IPC 由主进程处理
+// 我们不需要像在 Tauri 中那样在此处拦截关闭请求。
+// 相反，主进程 (windows/manager.ts) 应该处理 'close' 事件以隐藏窗口。
 onMounted(async () => {
-  await appWindow.onCloseRequested(async (event) => {
-    event.preventDefault()
-    await appWindow.hide()
-  })
+  // Optional: Notify main process that frontend is ready
+  // 可选：通知主进程前端已准备就绪
+  // await invoke('main_window_ready')
 })
 
 const currentView = computed(() => isWorkMode.value ? WorkModeView : ChatModeView)
 
 const toggleMode = async () => {
-  // Check if we are trying to enter Work Mode
+  // Check if we are trying to enter work mode
+  // 检查我们是否试图进入工作模式
   if (!isWorkMode.value) {
      try {
        const API_BASE = 'http://localhost:9120'
@@ -83,11 +88,12 @@ const toggleMode = async () => {
 }
 
 // Watch mode changes and broadcast to system (e.g. for PetView isolation)
+// 监听模式变化并广播到系统 (例如用于 PetView 隔离)
 watch(isWorkMode, async (newVal) => {
   await emit('work-mode-changed', { is_work_mode: newVal })
   
   if (newVal) {
-    // Entering Work Mode
+    // 进入工作模式
     isSessionReady.value = false
     try {
        const API_BASE = 'http://localhost:9120'
@@ -101,6 +107,7 @@ watch(isWorkMode, async (newVal) => {
        
        if (data.message && data.message.startsWith("Error")) {
           // Blocked by backend check
+          // 被后端检查阻止
           console.warn("[WorkMode] Blocked:", data.message)
           errorMessage.value = data.message.replace("Error: ", "")
           showErrorDialog.value = true
@@ -109,18 +116,19 @@ watch(isWorkMode, async (newVal) => {
        }
 
        console.log("[WorkMode] Entered:", data.message)
-       // Add a small delay for UI transition smoothness
+       // Add small delay for smooth UI transition
+       // 添加少量延迟以保证 UI 过渡平滑
        setTimeout(() => {
           isSessionReady.value = true
        }, 500)
     } catch (e) {
        console.error("[WorkMode] Failed to enter session:", e)
-       // Optional: Show error via dialog or just fallback
+       // 可选：通过对话框显示错误或仅回退
        isSessionReady.value = true // Allow UI to show anyway? Or error state?
-       // Ideally we should show error in WorkModeView, but for now let it render
+       // 理想情况下应该在 WorkModeView 中显示错误，但现在先让它渲染
     }
   } else {
-    // Exiting Work Mode - Session teardown handled by handleWorkExit or Abort
+    // 退出工作模式 - 会话清理已由 handleWorkExit 或 Abort 处理
     isSessionReady.value = false
   }
 })
@@ -143,7 +151,7 @@ const handleWorkExit = async (save) => {
 </script>
 
 <style>
-/* Simultaneous Transition (Overlapping) */
+/* 同时过渡 (重叠) */
 .fade-slide-enter-active,
 .fade-slide-leave-active {
   transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);

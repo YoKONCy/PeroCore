@@ -47,6 +47,10 @@ def configure_logging(level: int = logging.INFO, log_file: Optional[str] = None)
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
     logging.getLogger("watchfiles").setLevel(logging.WARNING)
     
+    # Silence ML libraries
+    logging.getLogger("transformers").setLevel(logging.ERROR)
+    logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
+
     # 确保 PeroCore 日志记录器至少为 INFO
     logging.getLogger("pero").setLevel(level)
 

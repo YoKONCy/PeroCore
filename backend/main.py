@@ -14,6 +14,22 @@
 import asyncio
 import os
 import sys
+import warnings
+
+# --- Suppress Logging & Progress Bars (MUST BE FIRST) ---
+os.environ["TQDM_DISABLE"] = "1"
+os.environ["TRANSFORMERS_VERBOSITY"] = "error"
+os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+
+# Suppress warnings
+warnings.filterwarnings("ignore", category=UserWarning) # General user warnings
+# Specifically ignore CryptographyDeprecationWarning from pypdf/cryptography
+try:
+    from cryptography.utils import CryptographyDeprecationWarning
+    warnings.filterwarnings("ignore", category=CryptographyDeprecationWarning)
+except ImportError:
+    pass
+# --------------------------------------------------------
 
 # 路径防御：确保打包后或不同目录下启动都能正确找到模块
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -133,6 +149,10 @@ async def lifespan(app: FastAPI):
     
     # 异步预热 Embedding 模型
     asyncio.create_task(asyncio.to_thread(embedding_service.warm_up))
+    
+    # 异步预热 ASR 模型
+    asr_service = get_asr_service()
+    asyncio.create_task(asyncio.to_thread(asr_service.warm_up))
     
     # Start Social Service (if enabled)
     social_service = get_social_service()

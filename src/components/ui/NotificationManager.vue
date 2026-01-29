@@ -24,7 +24,8 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue';
-import { listen } from '@tauri-apps/api/event';
+import { listen } from '@/utils/ipcAdapter'
+// import { listen } from '@tauri-apps/api/event';
 
 const notifications = ref([]);
 let nextId = 0;
@@ -51,8 +52,6 @@ const remove = (id) => {
 onMounted(async () => {
   // 监听系统级错误
   unlistenFn = await listen('system-error', (event) => {
-    // 错误消息可能包含换行，截取前100字符作为预览，或者显示完整？
-    // 考虑到是报错提醒，最好显示清晰。
     let msg = event.payload;
     let title = '系统错误';
     
@@ -152,6 +151,7 @@ window.$notify = add;
 }
 
 /* Transition animations */
+/* 过渡动画 */
 .list-enter-active,
 .list-leave-active {
   transition: all 0.3s ease;

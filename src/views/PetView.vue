@@ -4,9 +4,12 @@
       class="character-wrapper" 
       :class="{ shake: isShaking, dragging: isDragging }"
       @mousedown="handleMouseDown"
-      @dblclick.prevent.stop="handleDblClick"
+      @mouseenter="handleMouseEnter"
+      @mouseleave="handleMouseLeave"
+      @dblclick="handleDblClick"
       data-tauri-drag-region
     >
+      <!-- Status Display (Mood/Mind/Vibe) -->
       <!-- 状态显示 (Mood/Mind/Vibe) -->
       <transition name="fade">
         <div class="status-tags" v-show="showInput">
@@ -16,25 +19,31 @@
         </div>
       </transition>
 
+      <!-- Bubble Dialog -->
       <!-- 气泡对话框 -->
       <transition name="fade">
         <div class="bubble" v-if="currentText || isThinking" :class="{ 'expanded': isBubbleExpanded }">
+          <!-- Normal Text -->
           <!-- 普通文本显示 -->
           <div class="text-content" :class="{ 'cursor-pointer': isThinking }" style="-webkit-app-region: no-drag;" @mousedown.stop>
             <template v-if="isThinking">
               <span class="thinking-text">{{ thinkingMessage }}</span>
             </template>
             <template v-else>
+              <!-- Render Parsed Segments -->
               <!-- 渲染解析后的片段 -->
               <div class="bubble-scroll-area" ref="bubbleScrollArea">
                 <div v-for="(segment, index) in parsedBubbleContent" :key="index" class="bubble-segment">
+                  <!-- Plain Text -->
                   <!-- 普通文本 -->
                   <span v-if="segment.type === 'text'">{{ segment.content }}</span>
                   
+                  <!-- Action Description -->
                   <!-- 动作描述 -->
                   <span v-else-if="segment.type === 'action'" class="action-text">*{{ segment.content }}*</span>
                 </div>
               </div>
+              <!-- Expand/Collapse Button -->
               <!-- 展开/收起按钮 -->
               <div v-if="isContentOverflowing" class="bubble-expand-btn" @click.stop="toggleBubbleExpand" @mousedown.stop>
                 {{ isBubbleExpanded ? '收起' : '展开' }}
@@ -45,15 +54,18 @@
         </div>
       </transition>
 
+      <!-- Task Monitor (Removed, moved to standalone window) -->
       <!-- 任务详情/监控窗口 (已移除，改为独立窗口) -->
       <!-- <TaskMonitorModal v-model:visible="showTaskDetail" :segments="parsedBubbleContent" /> -->
 
+      <!-- Minimal Trigger -->
       <!-- 极简灵动触发器 -->
       <div 
         class="floating-trigger" 
         :class="{ active: showInput }"
         @click.stop="toggleUI"
         style="-webkit-app-region: no-drag;"
+        @mouseenter="onInteractionEnter"
       >
         <div class="trigger-core">
           <div class="pulse-ring"></div>
@@ -61,15 +73,19 @@
         </div>
       </div>
       
+      <!-- Live2D Container -->
       <!-- Live2D 模型容器 -->
       <div id="waifu-container" class="pet-avatar-container" data-tauri-drag-region>
+        <!-- Loading Placeholder -->
         <!-- 加载状态占位 -->
         <div v-if="isLoading" class="loading-placeholder">
           <img src="/icon.png" class="loading-icon" />
           <div class="loading-text">大脑加载中...</div>
         </div>
+        <!-- Live2D elements injected to body, then moved here -->
         <!-- Live2D 元素会被自动注入到 body，然后由脚本移动到这里 -->
         
+        <!-- PTT Button (Hold-to-Talk mode only) -->
         <!-- PTT 悬浮按钮 (仅在按住说话模式显示) -->
         <transition name="fade">
           <div 
@@ -87,8 +103,9 @@
         </transition>
       </div>
 
+      <!-- Quick Input (Show on hover) -->
       <!-- 快速输入框 (鼠标移入显示) -->
-      <div class="input-overlay" v-show="showInput">
+      <div class="input-overlay" v-show="showInput" @mouseenter="onInteractionEnter">
         <input 
           ref="inputRef"
           v-model="userInput" 
@@ -100,8 +117,9 @@
         />
       </div>
 
+      <!-- Floating Toolbar -->
       <!-- 悬浮工具栏 -->
-      <div class="pet-tools" v-show="showInput" style="-webkit-app-region: no-drag;">
+      <div class="pet-tools" v-show="showInput" style="-webkit-app-region: no-drag;" @mouseenter="onInteractionEnter">
         <button class="tool-btn" @click.stop="randTextures" title="换装">👕</button>
         <button class="tool-btn" @click.stop="reloadPet" title="重载">🔄</button>
         <button 
@@ -123,6 +141,7 @@
 
     </div>
     
+    <!-- File Search Modal -->
     <!-- 文件搜索结果模态框 -->
     <FileSearchModal v-model:visible="showFileModal" :files="foundFiles" />
   </div>
@@ -132,13 +151,11 @@
 import { ref, computed, onMounted, onUnmounted, watch, toRaw, nextTick } from 'vue'
 import { API_BASE } from '../config'
 import FileSearchModal from '../components/FileSearchModal.vue'
-import { invoke } from '@tauri-apps/api/core'
-import { listen, emit } from '@tauri-apps/api/event'
-import { getCurrentWindow } from '@tauri-apps/api/window'
-import { getAllWebviewWindows, WebviewWindow } from '@tauri-apps/api/webviewWindow'
-import { PhysicalPosition } from '@tauri-apps/api/dpi'
+import { invoke, listen } from '@/utils/ipcAdapter'
+// Tauri APIs removed for Electron migration
+// 已移除 Tauri API 以进行 Electron 迁移
 
-const appWindow = getCurrentWindow();
+// const appWindow = getCurrentWindow();
 
 const currentAgentName = ref('Pero')
 const fetchActiveAgent = async () => {
@@ -154,8 +171,8 @@ const fetchActiveAgent = async () => {
     } catch (e) { console.error('Failed to fetch active agent:', e) }
 }
 
-const voiceMode = ref(parseInt(localStorage.getItem('ppc.voice_mode') || '0')) // 0: off, 1: auto(vad), 2: ptt
-const isWorkMode = ref(false) // 新增工作模式状态
+const voiceMode = ref(parseInt(localStorage.getItem('ppc.voice_mode') || '0')) // 0: Off, 1: Auto (VAD), 2: PTT // 0: 关闭, 1: 自动(vad), 2: 按住说话(ptt)
+const isWorkMode = ref(false) // Work mode status // 工作模式状态
 const isPTTRecording = ref(false)
 const isVoiceActive = computed(() => voiceMode.value !== 0)
 
@@ -173,8 +190,10 @@ const voiceModeTitle = computed(() => {
 
 const handleGlobalKeyDown = (e) => {
   // Block voice controls in Work Mode
+  // 在工作模式下屏蔽语音控制
   if (isWorkMode.value) return
 
+  // 1. Alt + V Toggle Voice Mode
   // 1. Alt + V 切换语音模式
   if (e.altKey && !e.shiftKey && e.code === 'KeyV') {
     e.preventDefault()
@@ -182,6 +201,7 @@ const handleGlobalKeyDown = (e) => {
     return
   }
 
+  // 2. Alt + Shift + V PTT (Mode 2 only)
   // 2. Alt + Shift + V PTT (仅在模式为 2 时)
   if (e.altKey && e.shiftKey && e.code === 'KeyV' && voiceMode.value === 2 && !isPTTRecording.value) {
     e.preventDefault()
@@ -191,12 +211,47 @@ const handleGlobalKeyDown = (e) => {
 
 const handleGlobalKeyUp = (e) => {
   // Block voice controls in Work Mode
+  // 在工作模式下屏蔽语音控制
   if (isWorkMode.value) return
 
   if (e.code === 'KeyV' && voiceMode.value === 2 && isPTTRecording.value) {
     stopPTT()
   }
 }
+
+// Mouse Transparency Logic for Electron
+// Electron 鼠标穿透逻辑
+const handleMouseEnter = async () => {
+    // Capture mouse events when entering character area
+    // 当鼠标进入角色区域时，捕获鼠标事件
+    await invoke('set_ignore_mouse', false)
+}
+
+const handleMouseLeave = async () => {
+    // Ignore mouse events when leaving character area (click-through)
+    // 当鼠标离开角色区域时，忽略鼠标事件 (允许点击穿透)
+    await invoke('set_ignore_mouse', true)
+}
+
+// Ensure initial state allows click-through except on content
+// 确保初始状态允许点击穿透，除非在内容上
+onMounted(async () => {
+    // Wait for window ready
+    // 等待窗口准备就绪
+    setTimeout(async () => {
+        // Strategy: 
+        // 策略：
+        // 1. Set window to ignore mouse by default.
+        // 1. 默认设置窗口忽略鼠标。
+        // 2. Listen to mouseover/mouseout on specific interactive elements to disable ignore.
+        // 2. 监听特定交互元素的 mouseover/mouseout 以禁用忽略。
+        // Electron's setIgnoreMouseEvents(true, { forward: true }) allows mouse move events to still reach the web contents!
+        // Electron 的 setIgnoreMouseEvents(true, { forward: true }) 允许鼠标移动事件仍然到达 Web 内容！
+        await invoke('set_ignore_mouse', true)
+    }, 1000)
+    
+    // ... existing onMounted logic ...
+})
 
 const cycleVoiceMode = async () => {
   if (isWorkMode.value) {
@@ -211,6 +266,7 @@ const cycleVoiceMode = async () => {
   if (nextMode === 0) {
     stopVoiceMode()
   } else {
+    // Start if not active
     // 如果还没开启麦克风/WS，则开启
     if (!voiceWs.value) {
       await startVoiceMode()
@@ -230,6 +286,7 @@ const startPTT = async () => {
         return
       }
       
+      // Ensure AudioContext active
       // 确保 AudioContext 已激活
       if (audioContext.value && audioContext.value.state === 'suspended') {
         await audioContext.value.resume()
@@ -261,25 +318,28 @@ const audioQueue = ref([])
 const isAudioPlaying = ref(false)
 
 const currentText = ref('主人，我在桌面等你很久啦！')
-// const showTaskDetail = ref(false) // 弃用，改为独立窗口
+// const showTaskDetail = ref(false) // Deprecated, moved to standalone // 弃用，改为独立窗口
 
+// Parse bubble content, separate Thinking blocks and Action descriptions
 // 解析气泡文本，分离 Thinking 块和动作描述
 const parsedBubbleContent = computed(() => {
   const text = currentText.value || ''
   if (!text) return []
 
   const segments = []
+  // Improved regex for multi-line Thought/Action
   // 改进正则表达式，支持多行 Thought/Action 和更灵活的匹配
-  // 1. 【Type: Content】 - 块格式
-  // 2. *Action* - 星号动作格式
-  // 3. Thought/Action: Content - 标准 ReAct 格式
-  // 4. NIT 标签 - <nit...>...</nit...> 或 [[[NIT...]]] (需要被过滤)
+  // 1. 【Type: Content】 - Block format // 块格式
+  // 2. *Action* - Star action format // 星号动作格式
+  // 3. Thought/Action: Content - Standard ReAct format // 标准 ReAct 格式
+  // 4. NIT tags - <nit...>...</nit...> or [[[NIT...]]] (filtered) // NIT 标签 (过滤)
   const regex = /(?:【(Thinking|Error|Reflection|Monologue)[:：]?\s*([\s\S]*?)】)|(?:\n|^)\s*\*([\s\S]+?)\*|(?:\n|^)\s*(Thought|Action)[:：]\s*([\s\S]+?)(?=\n\s*(?:Thought|Action)[:：]|\n\s*\*|【(?:Thinking|Error|Reflection|Monologue)|$)|(?:<(nit(?:-[a-zA-Z0-9-]+)?)>[\s\S]*?<\/\1>)|(?:\[\[\[NIT_CALL\]\]\][\s\S]*?\[\[\[NIT_END\]\]\])/gi
   
   let lastIndex = 0
   let match
 
   while ((match = regex.exec(text)) !== null) {
+    // 1. Add normal text before match
     // 1. 添加匹配前的普通文本
     if (match.index > lastIndex) {
       const normalText = text.substring(lastIndex, match.index)
@@ -288,23 +348,29 @@ const parsedBubbleContent = computed(() => {
       }
     }
     
+    // 2. Determine match type
     // 2. 判断匹配类型
     if (match[1] !== undefined) {
+      // Tagged Block (Thinking/Error/Reflection)
       // Tagged 块 (Thinking/Error/Reflection)
       const type = match[1].toLowerCase()
       segments.push({ type: type === 'thinking' ? 'thinking' : type, content: match[2].trim() })
     
     } else if (match[3] !== undefined) {
+      // Action Block (*Action*)
       // Action 块 (*Action*)
       segments.push({ type: 'action', content: match[3].trim() })
     
     } else if (match[4] !== undefined) {
+      // Standard ReAct Block (Thought:/Action:)
       // 标准 ReAct 块 (Thought:/Action:)
       const type = match[4].toLowerCase() === 'thought' ? 'thinking' : 'action'
       segments.push({ type, content: match[5].trim() })
     
     } else if (match[0].startsWith('<nit') || match[0].startsWith('[[[NIT')) {
-      // NIT 标签 - 直接忽略 (不添加到 segments)
+      // NIT Tags - Ignore
+      // NIT 标签 - 直接忽略
+      // Consumed by regex, just don't add to segments
       // 这实际上已经在正则匹配中被消耗掉了，所以只需要不处理即可
       // console.log('Filtered NIT tag:', match[0])
     }
@@ -312,6 +378,7 @@ const parsedBubbleContent = computed(() => {
     lastIndex = regex.lastIndex
   }
   
+  // 3. Add remaining text
   // 3. 添加剩余的普通文本
   if (lastIndex < text.length) {
     const normalText = text.substring(lastIndex)
@@ -320,6 +387,7 @@ const parsedBubbleContent = computed(() => {
     }
   }
   
+  // Filter Thinking and Monologue, keep Text and Action
   // 过滤掉 Thinking 和 Monologue，只保留文本和动作
   return segments.filter(s => s.type === 'text' || s.type === 'action')
 })
@@ -417,7 +485,7 @@ onMounted(async () => {
   })
 
   // 监听 IDE 消息 (单向：Pet -> Chat 已由后端处理，这里监听 Chat -> Pet 的同步)
-  // [Modified] 用户要求移除 Chat -> Pet 的同步显示
+  // [已修改] 用户要求移除 Chat -> Pet 的同步显示
   // const unlistenIdeMsg = await listen('sync-chat-to-pet', (event) => {
   //     // 确保工作模式下隔离
   //     // 但实际上后端通常已经做过隔离，或者 IDE 侧发过来就意味着应该显示
@@ -480,7 +548,7 @@ onMounted(async () => {
     unlistenVibe()
     unlistenMind()
     unlistenSyncChat()
-    // unlistenIdeMsg() // Removed
+    // unlistenIdeMsg() // 已移除
     unlistenWorkMode()
     unlistenSearch()
     unlistenPTTStart()
@@ -488,15 +556,28 @@ onMounted(async () => {
   })
 })
 
+// Listen to UI state, toggle click-through dynamically
 // 监听 UI 显示状态，动态切换穿透
 watch([showInput, parsedBubbleContent, isThinking], ([inputVisible, bubbleContent, thinking]) => {
+  // Disable click-through if input shown, bubble has content, or thinking
   // 如果输入框显示，或者有气泡内容，或者正在思考（显示气泡），则不穿透
   const hasContent = bubbleContent && bubbleContent.length > 0
   const shouldInteract = inputVisible || hasContent || thinking
   
-  // console.log('Update IgnoreMouse:', !shouldInteract, { inputVisible, hasContent, thinking })
   setIgnoreMouse(!shouldInteract)
 })
+
+const onInteractionEnter = () => {
+    // Enter interactive area, disable click-through
+    // 鼠标进入交互区域（按钮、输入框等），确保不穿透
+    setIgnoreMouse(false)
+}
+const onInteractionLeave = () => {
+    // Leave interactive area
+    // 离开交互区域
+    // Handled by wrapper mouseleave
+    // 实际上由 wrapper 的 mouseleave 处理即可
+}
 
 const moodText = ref(localStorage.getItem('ppc.mood') || '开心')
 const mindText = ref(localStorage.getItem('ppc.mind') || '正在想主人...')
@@ -520,6 +601,7 @@ const fetchAuthToken = async () => {
 }
 
 const fetchPetState = async () => {
+    // Update Token
     // 顺便更新 Token，防止后端重启后 Token 失效
     await fetchAuthToken()
 
@@ -528,15 +610,18 @@ const fetchPetState = async () => {
         if (res.ok) {
             const data = await res.json()
             
+            // 0. Update Agent info
             // 0. 更新当前 Agent 名称和 ID
             if (data.active_agent) {
                 if (data.active_agent.name) currentAgentName.value = data.active_agent.name
                 if (data.active_agent.id) currentAgentId.value = data.active_agent.id
             }
 
+            // Build trigger data
             // 构建 applyTriggers 需要的数据结构
             const triggerData = {}
             
+            // 1. State
             // 1. 状态
             const stateData = {}
             if (data.mood) stateData.mood = data.mood
@@ -546,6 +631,7 @@ const fetchPetState = async () => {
                 triggerData.state = stateData
             }
 
+            // 2. Interaction Messages (Parse JSON)
             // 2. 交互台词 (需要解析 JSON 字符串)
             if (data.click_messages_json) {
                 try {
@@ -565,6 +651,7 @@ const fetchPetState = async () => {
                 } catch (e) { console.warn('Failed to parse back_messages_json', e) }
             }
 
+            // Apply updates
             // 应用更新
             if (Object.keys(triggerData).length > 0) {
                 applyTriggers(triggerData)
@@ -572,9 +659,11 @@ const fetchPetState = async () => {
         }
     } catch (e) {
         // Silent fail
+        // 静默失败
     }
 }
 
+// Toggle Voice Mode (Deprecated, use cycleVoiceMode)
 // 切换语音模式 (已弃用，使用 cycleVoiceMode 代替)
 const toggleVoiceMode = async () => {
     await cycleVoiceMode()
@@ -583,6 +672,7 @@ const toggleVoiceMode = async () => {
 const startVoiceMode = async () => {
     console.log('[Voice] Starting voice mode...');
     try {
+        // 0. Ensure AudioContext active
         // 0. 确保 AudioContext 存在并激活
         if (!audioContext.value || audioContext.value.state === 'closed') {
             audioContext.value = new (window.AudioContext || window.webkitAudioContext)()
@@ -591,9 +681,11 @@ const startVoiceMode = async () => {
             await audioContext.value.resume()
         }
 
+        // 1. Get Microphone Permission
         // 1. 获取麦克风权限
         mediaStream.value = await navigator.mediaDevices.getUserMedia({ audio: true });
         
+        // Check tracks
         // 检查音频轨道
         const audioTracks = mediaStream.value.getAudioTracks();
         if (audioTracks.length === 0) {
@@ -601,6 +693,7 @@ const startVoiceMode = async () => {
         }
         console.log('[Voice] Microphone access granted:', audioTracks[0].label);
         
+        // 2. Connect WebSocket
         // 2. 连接 WebSocket
         voiceWs.value = new WebSocket('ws://localhost:9120/ws/voice');
         
@@ -608,6 +701,7 @@ const startVoiceMode = async () => {
             console.log('Voice WebSocket connected');
             showToast(`语音对话已开启: ${voiceModeTitle.value}`);
             
+            // 3. Start Recording
             // 3. 开始录音处理
             startRecording();
         };
@@ -655,7 +749,7 @@ const startRecording = () => {
     audioContext.value = new (window.AudioContext || window.webkitAudioContext)()
     const source = audioContext.value.createMediaStreamSource(mediaStream.value)
     
-    // 使用 ScriptProcessorNode 处理音频流 (deprecated but widely supported)
+    // 使用 ScriptProcessorNode 处理音频流 (已弃用但广泛支持)
     // 也可以用 AudioWorklet，但在 Vue 单文件中稍微麻烦点
     scriptProcessor.value = audioContext.value.createScriptProcessor(4096, 1, 1)
     
@@ -792,6 +886,7 @@ const handleVoiceMessage = (event) => {
     
     if (msg.type === 'status') {
         if (msg.content === 'listening') {
+             // Show listening state
              // 可以在 UI 上显示“正在听...”
              stopAudioPlayback(true)
              isThinking.value = true
@@ -803,26 +898,30 @@ const handleVoiceMessage = (event) => {
              currentText.value = ''
         } else if (msg.content === 'speaking') {
              isThinking.value = false
-             thinkingMessage.value = '努力思考中...' // 重置默认值
+             thinkingMessage.value = '努力思考中...' // Reset // 重置默认值
         } else if (msg.content === 'idle') {
              isThinking.value = false
              thinkingMessage.value = '努力思考中...'
         }
     } else if (msg.type === 'transcription') {
+        // Show user speech (optional)
         // 显示用户说的话 (可选)
         console.log('User said:', msg.content)
     } else if (msg.type === 'text_response') {
         currentText.value = msg.content
+        // Force stop thinking state
         // 收到文本回复时，强制结束思考状态，防止 UI 卡在"思考中"
         isThinking.value = false
         thinkingMessage.value = '努力思考中...'
     } else if (msg.type === 'triggers') {
+        // Apply triggers
         // 处理语音会话返回的触发器和状态
         applyTriggers(msg.data)
     } else if (msg.type === 'audio_response') {
         playAudio(msg.data)
     } else if (msg.type === 'error') {
         // Handle backend errors
+        // 处理后端错误
         console.error('Voice Error:', msg.content)
         currentText.value = `(错误: ${msg.content})`
         isThinking.value = false
@@ -830,10 +929,12 @@ const handleVoiceMessage = (event) => {
     }
 }
 
+// Apply triggers and status updates
 // 应用触发器和状态更新
 const applyTriggers = (data) => {
   if (!data) return
   
+  // 1. Update State (Mood/Mind/Vibe)
   // 1. 处理状态 (Mood/Mind/Vibe)
   if (data.state) {
     const statusMap = data.state
@@ -854,6 +955,7 @@ const applyTriggers = (data) => {
     }
   }
 
+  // 2. Interaction Messages (Click/Idle/Back)
   // 2. 处理交互消息 (Click/Idle/Back)
   let curTexts = {}
   const storageKey = `ppc.waifu.texts.${currentAgentId.value}`
@@ -865,6 +967,7 @@ const applyTriggers = (data) => {
 
   let updated = false
   
+  // Click messages
   // 处理点击语
   if (data.click_messages) {
     const clickData = data.click_messages
@@ -885,6 +988,7 @@ const applyTriggers = (data) => {
     }
   }
 
+  // Idle messages
   // 处理挂机语
   if (data.idle_messages && Array.isArray(data.idle_messages)) {
     data.idle_messages.forEach((msg, i) => {
@@ -893,6 +997,7 @@ const applyTriggers = (data) => {
     updated = true
   }
 
+  // Back messages
   // 处理回归语
   if (data.back_messages && Array.isArray(data.back_messages)) {
     data.back_messages.forEach((msg, i) => {
@@ -921,7 +1026,8 @@ const stopAudioPlayback = (clearQueue = false) => {
         try {
             currentAudioSource.value.stop()
         } catch (e) {
-            // ignore
+            // Ignore errors
+            // 忽略
         }
         currentAudioSource.value = null
     }
@@ -1262,7 +1368,7 @@ const loadLocalTexts = async () => {
     }
 
     // 1. 加载基础静态台词
-    const response = await fetch('/live2d-widget/waifu-texts.json')
+    const response = await fetch('live2d-widget/waifu-texts.json')
     const baseTexts = await response.json()
     
     // 2. 加载 localStorage 中的动态更新台词
@@ -1453,7 +1559,7 @@ const loadLive2D = () => {
 
     // 直接加载 autoload.js，由它负责后续资源的加载
     const autoload = document.createElement('script')
-    autoload.src = '/live2d-widget/autoload.js'
+    autoload.src = 'live2d-widget/autoload.js'
     autoload.id = 'live2d-autoload'
     autoload.onload = () => {
       console.log('Live2D autoload.js loaded')
@@ -1527,168 +1633,14 @@ const showWelcomeMessage = () => {
 }
 
 onMounted(async () => {
-   // Tauri Global Mouse Listener
-   // Tauri Global Mouse Listener
-   // if (window.__TAURI__) { // Removed obsolete check
-       // const invoke = window.__TAURI__.core?.invoke || window.__TAURI__.invoke; // Use imported invoke
-       invoke('set_fix_window_topmost').catch(e => console.error('Failed to set topmost:', e));
-
-       listen('mouse-pos', async (event) => {
-           if (isDragging.value) return;
-           
-           const { x, y } = event.payload;
-           try {
-               const outerPos = await appWindow.outerPosition();
-               const scaleFactor = window.devicePixelRatio || 1;
-               
-               // Convert physical pixels (Rust/OS) to logical CSS pixels (Browser)
-               const localX = (x - outerPos.x) / scaleFactor;
-               const localY = (y - outerPos.y) / scaleFactor;
-
-               // Synthetic Event for Live2D Eyes (Live2D typically expects coordinates relative to the canvas/window)
-               // Note: If Live2D widget handles DPI internally, we might need to adjust. 
-               // Usually standard MouseEvent clientX/Y are in CSS pixels.
-               const mouseEventInit = {
-                   clientX: localX,
-                   clientY: localY,
-                   screenX: x,
-                   screenY: y,
-                   pageX: localX,
-                   pageY: localY,
-                   bubbles: true,
-                   cancelable: true
-               };
-               const mouseEvent = new MouseEvent('mousemove', mouseEventInit);
-               window.dispatchEvent(mouseEvent);
-               
-               // 尝试直接派发给 canvas 以确保一些库能正确接收
-               const canvas = document.querySelector('#live2d');
-               if (canvas) {
-                   canvas.dispatchEvent(new MouseEvent('mousemove', mouseEventInit));
-                   
-                   // 手动更新模型参数作为兜底
-                   if (window._pero_models && window._pero_models.length > 0) {
-                       const rect = canvas.getBoundingClientRect();
-                       const canvasX = localX - rect.left;
-                       const canvasY = localY - rect.top;
-                       
-                       // 归一化坐标 (-1 到 1)
-                       const normX = (canvasX / rect.width) * 2 - 1;
-                       const normY = 1 - (canvasY / rect.height) * 2;
-                       
-                       window._pero_models.forEach(model => {
-                           // 针对不同版本的 Live2D SDK 尝试设置不同的目标变量
-                           const target = model.live2DModel || model;
-                           
-                           // Cubism 2.1 风格
-                           if ('dragX' in target) target.dragX = normX;
-                           if ('dragY' in target) target.dragY = normY;
-                           if ('faceTargetX' in target) target.faceTargetX = normX;
-                           if ('faceTargetY' in target) target.faceTargetY = normY;
-                           
-                           // Cubism 4+ 风格 (如果使用了某些特定的 wrapper)
-                           if (target.focus && typeof target.focus === 'function') {
-                               target.focus(localX, localY);
-                           }
-                       });
-                   }
-               }
-
-               // Hit Test
-               if (showFileModal.value) { setIgnoreMouse(false); return; }
-
-               let el = document.elementFromPoint(localX, localY);
-                
-                // [Fix] 增加兜底逻辑：如果 elementFromPoint 没拿到元素（可能因为透明度或层级问题），
-                // 但坐标在角色区域或 PTT 区域内，则尝试手动判定
-                if (!el) {
-                    const wrapper = document.querySelector('.character-wrapper');
-                    if (wrapper) {
-                        const rect = wrapper.getBoundingClientRect();
-                        if (localX >= rect.left && localX <= rect.right && 
-                            localY >= rect.top && localY <= rect.bottom) {
-                            el = wrapper;
-                        }
-                    }
-                    
-                    // 额外检查 PTT 按钮区域
-                    if (voiceMode.value === 2 && showInput.value) {
-                        const ptt = document.querySelector('.ptt-container');
-                        if (ptt) {
-                            const rect = ptt.getBoundingClientRect();
-                            if (localX >= rect.left && localX <= rect.right && 
-                                localY >= rect.top && localY <= rect.bottom) {
-                                el = ptt;
-                            }
-                        }
-                    }
-                }
-
-                if (el) {
-                   // 1. Check UI elements first (High Priority)
-                   const isUI = el.closest('.input-overlay') || 
-                                el.closest('.floating-trigger') ||
-                                el.closest('.bubble') ||
-                                el.closest('.status-tags') ||
-                                el.closest('.pet-tools') ||
-                                el.closest('.ptt-container') ||
-                                el.closest('.task-monitor-modal') ||
-                                el.closest('.file-search-modal');
-                   
-                   if (isUI) {
-                       setIgnoreMouse(false);
-                       return;
-                   }
-
-                   // 2. Check character area with pixel transparency
-                   const isCharacter = el.tagName === 'CANVAS' || 
-                                       el.id === 'live2d' ||
-                                       el.classList.contains('character-wrapper') || 
-                                       el.closest('.character-wrapper') ||
-                                       el.closest('.pet-avatar-container');
-                   
-                   if (isCharacter) {
-                       const canvas = document.querySelector('#live2d');
-                       if (canvas) {
-                           const rect = canvas.getBoundingClientRect();
-                           const canvasX = localX - rect.left;
-                           const canvasY = localY - rect.top;
-
-                           if (canvasX >= 0 && canvasX <= rect.width && canvasY >= 0 && canvasY <= rect.height) {
-                               const ctx = canvas.getContext('2d', { willReadFrequently: true });
-                               if (ctx) {
-                                   try {
-                                        const pixel = ctx.getImageData(Math.floor(canvasX), Math.floor(canvasY), 1, 1).data;
-                                        // [Fix] 更加宽松的透明度判定，Alpha > 5 就认为点到了角色
-                                        const isTransparent = pixel[3] < 5; 
-                                        setIgnoreMouse(isTransparent);
-                                        return;
-                                    } catch (e) {
-                                       // ImageData 可能失败，回退到非穿透
-                                       setIgnoreMouse(false);
-                                       return;
-                                   }
-                               }
-                           }
-                       }
-                       // 如果没找到 canvas 或者 canvas 检查没通过，但确实在角色区域，则不穿透
-                       setIgnoreMouse(false);
-                   } else {
-                       // 既不是 UI 也不是角色，穿透
-                       setIgnoreMouse(true);
-                   }
-               } else {
-                   // 没点到任何东西，穿透
-                   setIgnoreMouse(true);
-               }
-           } catch(e) { console.error(e); }
-       });
-   // }
-
-   // 默认开启穿透
-    // setIgnoreMouse(true) // Removed to avoid duplication
+  // Tauri Global Mouse Listener (Cleaned up for Electron)
+  // Electron does not provide global mouse position by default.
+  // We rely on standard mouse events (mouseenter/leave) and IPC drag.
+  
+  // Default to ignore mouse (allow click-through)
+  // setIgnoreMouse(true) // Removed to avoid duplication
     
-    console.log('PetView mounted, starting Live2D load...')
+   console.log('PetView mounted, starting Live2D load...')
 
   // [Fix] 立即同步一次后端状态，并开启轮询
   await fetchPetState()
@@ -1710,6 +1662,31 @@ onMounted(async () => {
   window.addEventListener('ppc:chat', onChatUpdate)
   window.addEventListener('waifu-message', onWaifuMessage)
   
+  // [热修复] Monkey Patch Live2D 2.x hitTestSimpleCustom 以防止点击崩溃
+  // 原始函数直接访问 arguments[0]，在某些情况下可能是 undefined
+  const patchLive2D = () => {
+      if (window.Live2DModelWebGL && window.Live2DModelWebGL.prototype.hitTestSimpleCustom) {
+          console.log('[Pero] Patching Live2DModelWebGL.hitTestSimpleCustom');
+          const original = window.Live2DModelWebGL.prototype.hitTestSimpleCustom;
+          window.Live2DModelWebGL.prototype.hitTestSimpleCustom = function(drawDataID, testX, testY) {
+              try {
+                  if (!drawDataID) return false;
+                  // 确保在访问之前索引存在 (这就是 "reading '0'" 错误发生的地方)
+                  const drawDataIndex = this.getModelContext().getDrawDataIndex(drawDataID);
+                  if (drawDataIndex < 0) return false;
+                  return original.apply(this, arguments);
+              } catch (e) {
+                  console.warn('[Pero] Suppressed Live2D hitTest error:', e);
+                  return false;
+              }
+          }
+      } else {
+          // Retry later if not loaded yet
+          setTimeout(patchLive2D, 1000);
+      }
+  }
+  patchLive2D();
+
   try {
     // 1. 清理可能存在的旧元素（处理 HMR 热更新）
     const oldWaifu = document.getElementById('waifu')
@@ -1719,7 +1696,13 @@ onMounted(async () => {
     }
 
     // 2. 检查是否已经加载过脚本，如果没有则加载
-    await loadLive2D()
+    await loadLive2D().catch(e => {
+        console.error('[Live2D] loadLive2D failed:', e)
+        // 手动尝试加载关键依赖
+        const script = document.createElement('script')
+        script.src = 'live2d-widget/live2d.min.js'
+        document.body.appendChild(script)
+    })
     
     // 3. 如果脚本已经加载过（initWidget 已存在），手动触发一次初始化
     // 因为单页应用切回来时，autoload.js 不会重新运行
@@ -1738,6 +1721,13 @@ onMounted(async () => {
       const waifu = document.getElementById('waifu')
       const container = document.getElementById('waifu-container')
       
+      console.log(`[Live2D] Checking waifu element... Attempt ${attempts}`, { 
+        waifuExists: !!waifu, 
+        containerExists: !!container,
+        live2dObject: !!window.Live2D,
+        initWidget: !!window.initWidget
+      })
+
       if (waifu && container) {
         console.log('Found waifu element, moving to container')
         container.appendChild(waifu)
@@ -1781,6 +1771,7 @@ onMounted(async () => {
 // 设置鼠标穿透状态
  const setIgnoreMouse = (ignore) => {
    // Tauri Implementation
+   // Tauri 实现
    // Tauri Implementation
    // if (window.__TAURI__) {
        if (window._lastIgnoreState === ignore) return;
@@ -1832,40 +1823,99 @@ const handleMouseDown = async (e) => {
   // 强制调用一次 setIgnoreMouse(false)，确保窗口现在可以接收后续事件
   setIgnoreMouse(false);
 
-  // 立即尝试启动原生拖拽
-  try {
-    console.log('Attempting to start dragging...');
-    await appWindow.startDragging();
-  } catch (err) {
-    console.error('startDragging failed:', err);
-  }
-
-  // 记录按下时的位置和时间，用于判定点击
+  // Manual Drag Logic (Optimized: Main Process Polling)
+  // 手动拖拽逻辑 (优化：主进程轮询)
+  // Instead of calculating delta here and sending 'window-move', 
+  // 而不是在这里计算增量并发送 'window-move'，
+  // we just tell main process "Start dragging, here is my offset"
+  // 我们只是告诉主进程 "开始拖拽，这是我的偏移量"
+  
+  // Calculate offset from window top-left
+  // e.screenX is global mouse X
+  // window.screenX is global window X
+  const offsetX = e.screenX - window.screenX
+  const offsetY = e.screenY - window.screenY
+  
+  // Don't start dragging immediately to avoid conflict with click
+  // isDragging.value = true
   mouseDownTime = Date.now()
   startX = e.screenX
   startY = e.screenY
-  
-  // 标记可能进入拖拽状态
-  isDragging.value = true
 
-  // 监听全局 mouseup 处理点击事件
-  const onMouseUp = (upEvent) => {
-    window.removeEventListener('mouseup', onMouseUp)
-    isDragging.value = false
-    console.log('MouseUp triggered');
-
-    const duration = Date.now() - mouseDownTime
-    const totalDeltaX = Math.abs(upEvent.screenX - startX)
-    const totalDeltaY = Math.abs(upEvent.screenY - startY)
-    
-    // 只有在位移非常小且时间非常短的情况下，才判定为点击
-    if (duration < 200 && totalDeltaX < 5 && totalDeltaY < 5) {
-      handleHaptic()
-      handlePpcClick()
-    }
+  // Add move listener to detect drag intent
+  const onMouseMove = (moveEvent) => {
+      // Threshold check: only start drag if moved > 5px
+      const movedX = Math.abs(moveEvent.screenX - startX)
+      const movedY = Math.abs(moveEvent.screenY - startY)
+      
+      if (!isDragging.value && (movedX > 5 || movedY > 5)) {
+          isDragging.value = true
+          // Send start command ONLY ONCE when threshold reached
+          if (window.electron && window.electron.send) {
+              window.electron.send('window-drag-start', { offsetX, offsetY });
+          } else {
+             // Fallback
+             invoke('window-drag-start', { offsetX, offsetY }).catch(() => {})
+          }
+      }
+      
+      // Restore Eye Tracking Logic (Desktop Only)
+      if (window._pero_models && window._pero_models.length > 0) {
+           const scaleFactor = window.devicePixelRatio || 1;
+           const outerPos = { x: window.screenX * scaleFactor, y: window.screenY * scaleFactor };
+           
+           // Convert physical pixels to logical CSS pixels
+           // Note: moveEvent.screenX is in physical pixels usually? No, it's screen coordinates.
+           // Actually, we need coordinates relative to the window/canvas
+           const localX = moveEvent.clientX
+           const localY = moveEvent.clientY
+           
+           const canvas = document.querySelector('#live2d');
+           if (canvas) {
+               const rect = canvas.getBoundingClientRect();
+               const canvasX = localX - rect.left;
+               const canvasY = localY - rect.top;
+               
+               // Normalize (-1 to 1)
+               const normX = (canvasX / rect.width) * 2 - 1;
+               const normY = 1 - (canvasY / rect.height) * 2;
+               
+               window._pero_models.forEach(model => {
+                   const target = model.live2DModel || model;
+                   if ('dragX' in target) target.dragX = normX;
+                   if ('dragY' in target) target.dragY = normY;
+                   if (target.focus && typeof target.focus === 'function') {
+                       target.focus(localX, localY);
+                   }
+               });
+           }
+      }
   }
-  
-  window.addEventListener('mouseup', onMouseUp)
+
+  const onMouseUp = (upEvent) => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+      
+      if (isDragging.value) {
+          isDragging.value = false;
+          // Stop drag
+          if (window.electron && window.electron.send) {
+              window.electron.send('window-drag-end');
+          } else {
+              invoke('window-drag-end').catch(() => {})
+          }
+      } else {
+          // If not dragging, it's a click
+          const duration = Date.now() - mouseDownTime;
+          if (duration < 500) { // Increased duration tolerance
+               handleHaptic();
+               handlePpcClick();
+          }
+      }
+  }
+
+  window.addEventListener('mousemove', onMouseMove);
+  window.addEventListener('mouseup', onMouseUp);
 }
 
 const randTextures = () => {
@@ -2042,6 +2092,7 @@ const sendMessage = async (systemMsg = null, isHidden = false) => {
     currentText.value = '哎呀，网络好像出了一点小状况...'
   } finally {
     // isSpeaking.value = false // Don't force stop speaking, as audio might be playing
+    // isSpeaking.value = false // 不要强制停止说话，因为音频可能正在播放
     isThinking.value = false
   }
   } catch (e) {
@@ -2096,7 +2147,7 @@ onUnmounted(() => {
   align-items: center;
   transition: transform 0.2s;
   user-select: none;
-  -webkit-app-region: drag;
+  -webkit-app-region: no-drag;
 }
 
 .character-wrapper.dragging {

@@ -1,6 +1,12 @@
 <template>
-  <router-view />
-  <NotificationManager />
+  <div id="app-root" style="width:100%; height:100%; background: transparent !important;">
+    <router-view v-slot="{ Component }">
+      <keep-alive>
+        <component :is="Component" />
+      </keep-alive>
+    </router-view>
+    <NotificationManager />
+  </div>
 </template>
 
 <script setup>

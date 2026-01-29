@@ -89,6 +89,7 @@
           </div>
           
           <!-- Actions -->
+          <!-- 操作按钮 -->
           <div class="px-6 py-4 bg-slate-50 dark:bg-slate-800/50 flex justify-end gap-3 border-t border-slate-100 dark:border-slate-700">
             <button 
               @click="respondConfirmation(false)" 
@@ -119,7 +120,7 @@
          </button>
       </div>
 
-      <div v-for="(msg, idx) in messages" :key="idx" class="flex flex-col">
+      <div v-for="msg in messages" :key="msg.id || msg.timestamp" class="flex flex-col">
         
         <!-- 用户消息 -->
         <div v-if="msg.role === 'user'" class="flex justify-end mb-4 animate-fade-in-up group">
@@ -164,6 +165,7 @@
           >
              <span class="text-sm font-bold">{{ (msg.senderId && msg.senderId !== 'pero' && msg.senderId !== 'user') ? msg.senderId[0].toUpperCase() : AGENT_AVATAR_TEXT }}</span>
              <!-- Online Status Dot -->
+             <!-- 在线状态点 -->
              <div class="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 border-2 border-white rounded-full"></div>
           </div>
           
@@ -174,6 +176,7 @@
                <span class="text-[10px] text-slate-400">{{ formatTime(msg.timestamp) }}</span>
                
                <!-- Actions -->
+               <!-- 操作按钮 -->
                <div class="flex gap-2 ml-2" v-if="!editingMsgId">
                   <button 
                     @click="playMessage(msg)" 
@@ -292,7 +295,7 @@
 
         <!-- 思维链卡片 -->
         <div v-else-if="msg.role === 'thought_chain'" class="flex justify-start mb-4 gap-3 w-full">
-           <div class="w-10 h-10 flex-shrink-0"></div> <!-- Spacer -->
+           <div class="w-10 h-10 flex-shrink-0"></div> <!-- Spacer --> <!-- 占位符 -->
            <div class="w-full max-w-2xl">
               <div 
                 class="rounded-2xl overflow-hidden shadow-lg transition-all duration-300 border hover:shadow-xl hover:scale-[1.01] hover:-translate-y-[2px]"
@@ -301,6 +304,7 @@
                   : 'bg-white/40 backdrop-blur-md border-white/30 shadow-sky-200/30'"
               >
                 <!-- Header -->
+                <!-- 头部 -->
                 <div 
                   class="px-4 py-3 flex items-center justify-between cursor-pointer transition-colors"
                   :class="workMode ? 'hover:bg-slate-800/50' : 'hover:bg-white/40'"
@@ -403,12 +407,22 @@
            </div>
         </div>
 
+      </div>
+      <div class="text-center mt-2 text-[10px] font-medium tracking-wide" :class="workMode ? 'text-slate-600' : 'text-slate-400'">
+        {{ AGENT_NAME.toUpperCase() }} AI AGENT · POWERED BY RE-ACT ENGINE
+      </div>
+    </div>
+
+    <!-- Input Area -->
+    <!-- 输入区域 -->
+    <div class="flex-none p-6 pt-0 relative z-20">
+      <div class="relative">
         <textarea 
           v-model="input" 
           @keydown.enter.prevent="handleEnter"
-          class="w-full bg-transparent text-sm p-4 pr-24 rounded-2xl focus:outline-none resize-none h-14 max-h-32 min-h-[56px] custom-scrollbar font-sans"
+          class="w-full bg-transparent text-sm p-4 pr-24 rounded-2xl focus:outline-none resize-none h-14 max-h-32 min-h-[56px] custom-scrollbar font-sans border transition-colors shadow-sm"
           :class="[
-            workMode ? 'text-slate-200 placeholder-slate-500' : 'text-slate-800 placeholder-slate-400',
+            workMode ? 'text-slate-200 placeholder-slate-500 bg-[#0f172a]/50 border-slate-700 focus:border-slate-600' : 'text-slate-800 placeholder-slate-400 bg-white/50 border-white/20 focus:bg-white/80 shadow-sky-100/20',
             disabled ? 'opacity-50 cursor-not-allowed' : ''
           ]"
           :placeholder="disabled ? '工作区初始化中...' : `问 ${agentName} 任何问题...`"
@@ -448,9 +462,6 @@
           </button>
         </div>
       </div>
-      <div class="text-center mt-2 text-[10px] font-medium tracking-wide" :class="workMode ? 'text-slate-600' : 'text-slate-400'">
-        {{ AGENT_NAME.toUpperCase() }} AI AGENT · POWERED BY RE-ACT ENGINE
-      </div>
     </div>
     <CustomDialog
       v-model:visible="deleteDialogVisible"
@@ -464,7 +475,8 @@
 
 <script setup>
 import { ref, watch, nextTick, onMounted, onUnmounted, computed } from 'vue';
-import { emit, listen } from '@tauri-apps/api/event';
+import { listen, emit } from '@/utils/ipcAdapter';
+// import { emit, listen } from '@tauri-apps/api/event';
 import { Brain, MessageSquareQuote, Terminal, Play, Pause, Square, Clock, Edit2, Trash2, Check, X, Volume2, AlertTriangle, Image as ImageIcon, XCircle } from 'lucide-vue-next';
 import AsyncMarkdown from '../AsyncMarkdown.vue';
 import CustomDialog from '../ui/CustomDialog.vue';
@@ -474,7 +486,8 @@ const props = defineProps({
   workMode: Boolean,
   disabled: Boolean,
   mode: { type: String, default: 'direct' }, // 'direct' | 'group'
-  targetId: { type: String, default: 'pero' }
+  targetId: { type: String, default: 'pero' },
+  agentName: { type: String, default: AGENT_NAME }
 });
 
 // 确认状态
@@ -484,17 +497,27 @@ let ws = null; // 存储 WebSocket 引用或使用 emit/listen 机制
 // 设置确认监听器
 onMounted(async () => {
   // Listen for WebSocket messages forwarded from parent or global bus
+  // 监听从父组件或全局总线转发的 WebSocket 消息
   // Since we don't have direct access to the global WS here, we'll use Tauri event bus
+  // 由于这里无法直接访问全局 WS，我们将使用 Tauri 事件总线
   // Assuming MainWindow or similar forwards 'ws-message' events
+  // 假设 MainWindow 或类似组件转发 'ws-message' 事件
   
   // Actually, let's establish a lightweight connection or rely on event bus
+  // 实际上，让我们建立一个轻量级连接或依赖事件总线
   // For now, let's use the standard Tauri event listener pattern
+  // 目前，让我们使用标准的 Tauri 事件监听器模式
   // The backend RealtimeSessionManager broadcasts via WebSocket. 
+  // 后端 RealtimeSessionManager 通过 WebSocket 广播。
   // We need to ensure the WebSocket client in the frontend (probably in store or global) handles this.
+  // 我们需要确保前端的 WebSocket 客户端（可能在 store 或全局中）处理此问题。
   
   // TEMPORARY: Listen to a custom event that should be emitted when WS receives 'confirmation_request'
+  // 临时：监听当 WS 收到 'confirmation_request' 时应发出的自定义事件
   // Ideally, the global WebSocket handler (e.g. in pinia store or MainWindow) should emit this.
+  // 理想情况下，全局 WebSocket 处理程序（例如在 pinia store 或 MainWindow 中）应发出此事件。
   // Let's assume there is a global event bus for WS messages.
+  // 让我们假设有一个用于 WS 消息的全局事件总线。
   
   unlistenConfirmation = await listen('ws-message', (event) => {
     const msg = event.payload;
@@ -532,7 +555,9 @@ const respondConfirmation = async (approved) => {
   };
   
   // Send back via global WS event bus
+  // 通过全局 WS 事件总线发送回
   // The parent component or global store should listen to this and send via WS
+  // 父组件或全局 store 应监听此事件并通过 WS 发送
   await emit('ws-send', response);
   
   pendingConfirmation.value = null;
@@ -551,6 +576,7 @@ const skipCommandWait = async () => {
       body: JSON.stringify({ pid: activeCommand.value.pid })
     });
     // Optimistically clear the overlay
+    // 乐观地清除覆盖层
     activeCommand.value = null;
   } catch (e) {
     console.error('Failed to skip command', e);
@@ -682,11 +708,13 @@ const handleFileSelect = (event) => {
       pendingImages.value.push({
         file: file,
         url: e.target.result // Data URL for preview and sending
+        // Data URL 用于预览和发送
       });
     };
     reader.readAsDataURL(file);
   }
   // Reset input
+  // 重置输入
   event.target.value = '';
 };
 
@@ -714,8 +742,11 @@ const parseMessage = (content) => {
   
   // 健壮的正则模式
   // 1. Thinking/Monologue: 【Thinking: ...】 or 【Monologue: ...】
+  // 1. 思考/独白: 【Thinking: ...】 或 【Monologue: ...】
   // 2. NIT Tool: <nit>...</nit> or <nit-ID>...</nit-ID> or [[[NIT_CALL]]]...[[[NIT_END]]]
+  // 2. NIT 工具: <nit>...</nit> 或 <nit-ID>...</nit-ID> 或 [[[NIT_CALL]]]...[[[NIT_END]]]
   // 3. DeepSeek Thinking: <think>...</think>
+  // 3. DeepSeek 思考: <think>...</think>
   
   const regex = /【(Thinking|Monologue)\s*:\s*([\s\S]*?)】|<(nit(?:-[a-zA-Z0-9-]+)?)>([\s\S]*?)<\/\3>|\[\[\[NIT_CALL\]\]\]([\s\S]*?)\[\[\[NIT_END\]\]\]|<think>([\s\S]*?)<\/think>/g;
   
@@ -724,6 +755,7 @@ const parseMessage = (content) => {
   
   while ((match = regex.exec(content)) !== null) {
     // Add text before match
+    // 添加匹配前的文本
     if (match.index > lastIndex) {
       const text = content.slice(lastIndex, match.index);
       if (text.trim()) {
@@ -732,20 +764,25 @@ const parseMessage = (content) => {
     }
     
     if (match[1]) { // Thinking or Monologue (Standard)
+      // 思考或独白（标准）
       segments.push({ 
         type: match[1].toLowerCase(), 
         content: match[2].trim() 
       });
     } else if (match[6]) { // DeepSeek <think>
+      // DeepSeek <think>
       segments.push({ 
         type: 'thinking', 
         content: match[6].trim() 
       });
     } else if (match[3] || match[5]) { // NIT Tool (XML or Bracket)
+       // NIT 工具（XML 或括号）
        const nitTag = match[3];
        const code = match[4] || match[5]; // Group 4 for XML, Group 5 for Bracket
+       // Group 4 用于 XML，Group 5 用于括号
        
        // Extract ID from tag if present (e.g. nit-123 -> 123)
+       // 如果存在，从标签中提取 ID（例如 nit-123 -> 123）
        let toolId = 'unknown';
        if (nitTag && nitTag.startsWith('nit-')) {
          toolId = nitTag.substring(4);
@@ -800,6 +837,7 @@ const isCollapsed = (msgIdx, segIdx) => {
 };
 
 // --- Editing Logic ---
+// --- 编辑逻辑 ---
 const editingMsgId = ref(null);
 const editingContent = ref('');
 
@@ -912,6 +950,7 @@ const handleWSMessage = (data) => {
   }
   else if (data.type === 'text_response') {
     // Check target: If 'pet_view_only', ignore in Chat Interface
+    // 检查目标：如果是 'pet_view_only'，在聊天界面中忽略
     if (data.target === 'pet_view_only') {
       return;
     }
@@ -920,6 +959,7 @@ const handleWSMessage = (data) => {
       messages.value.push({ role: 'assistant', content: data.content, timestamp: new Date().toISOString() });
       scrollToBottom();
       // Removed sync event emission as per user request
+      // 根据用户请求移除了同步事件发射
     }
   }
   else if (data.type === 'transcription') {
@@ -1032,7 +1072,9 @@ const fetchHistory = async (append = false) => {
         hasMore.value = false;
       }
       
-      const newMsgs = logs.map(log => {
+      const newMsgs = (Array.isArray(logs) ? logs : [])
+        .filter(log => log && typeof log === 'object')
+        .map(log => {
         let images = [];
         try {
             if (log.metadata_json) {

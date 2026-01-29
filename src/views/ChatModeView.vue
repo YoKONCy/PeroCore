@@ -1,11 +1,14 @@
 <template>
   <!-- Global colored background layer -->
+  <!-- 全局彩色背景层 -->
   <div class="absolute inset-0 bg-gradient-to-br from-sky-200/20 via-sky-100/10 to-transparent pointer-events-none z-0"></div>
   
   <div class="h-full w-full flex overflow-hidden backdrop-blur-xl relative z-10">
     <!-- Sidebar -->
+    <!-- 侧边栏 -->
     <div class="w-64 flex flex-col border-r border-white/40 bg-white/40 backdrop-blur-md pt-8">
       <!-- Search -->
+      <!-- 搜索 -->
       <div class="px-4 pb-4 pt-2">
         <div class="relative">
           <input 
@@ -18,6 +21,7 @@
       </div>
 
       <!-- Agent List -->
+      <!-- 助手列表 -->
       <div class="flex-1 overflow-y-auto custom-scrollbar px-2 space-y-1">
         <div class="flex items-center justify-between px-2 py-1.5">
             <div class="text-[10px] font-bold text-slate-500/70 uppercase tracking-widest">Agents</div>
@@ -87,6 +91,7 @@
       </div>
 
       <!-- Bottom Actions -->
+      <!-- 底部操作 -->
       <div class="p-4 border-t border-white/20 flex gap-2">
         <button 
             @click="showCreateGroup = true"
@@ -99,8 +104,10 @@
     </div>
 
     <!-- Main Chat Area -->
+    <!-- 主聊天区域 -->
     <div class="flex-1 flex flex-col relative z-10 pt-8">
       <!-- Header -->
+      <!-- 顶部标题栏 -->
       <header class="h-14 px-6 flex items-center justify-between border-b border-white/20 bg-white/20 backdrop-blur-sm">
         <div class="flex items-center gap-3">
           <span class="text-lg font-bold text-slate-800">
@@ -119,7 +126,9 @@
       </header>
 
       <!-- Chat Component -->
+      <!-- 聊天组件 -->
       <!-- Force remount when target changes using key -->
+      <!-- 使用 key 强制在目标改变时重新挂载 -->
       <ChatInterface 
         v-if="activeMode === 'direct' && activeAgentId || activeMode === 'group' && activeGroupId"
         :work-mode="false" 
@@ -138,6 +147,7 @@
   </div>
   
   <!-- Simple Create Group Modal -->
+  <!-- 简易创建群组模态框 -->
   <div v-if="showCreateGroup" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
       <div class="bg-white text-slate-900 rounded-2xl shadow-2xl w-96 p-6">
           <h3 class="text-lg font-bold mb-4 text-slate-900">创建群聊</h3>
@@ -166,44 +176,52 @@ import { Search, User, Bell, Settings, Plus, Users } from 'lucide-vue-next';
 import ChatInterface from '../components/chat/ChatInterface.vue';
 
 const API_BASE = 'http://127.0.0.1:9120'; // Use IP to avoid localhost resolution issues
+// 使用 IP 避免 localhost 解析问题
 
 // State
+// 状态
 const agents = ref([]);
 const groups = ref([]);
 const isLoading = ref(false);
 const errorMsg = ref('');
-const activeMode = ref('direct'); // 'direct' | 'group'
+const activeMode = ref('direct'); // 'direct' (私聊) | 'group' (群聊)
 const activeAgentId = ref(null);
 const activeAgentName = ref('Pero');
 const activeGroupId = ref(null);
 const activeGroupName = ref('');
 
 // Create Group State
+// 创建群组状态
 const showCreateGroup = ref(false);
 const newGroupName = ref('');
 const newGroupMembers = ref([]);
 
 // Fetch Data
+// 获取数据
 const loadAgents = async () => {
     isLoading.value = true;
     errorMsg.value = '';
     try {
         // Fetch ALL agents with status
+        // 获取所有助手的状态
         const resAll = await fetch(`${API_BASE}/api/agents`);
         if (!resAll.ok) throw new Error(`HTTP ${resAll.status}`);
         
         const allAgents = await resAll.json();
         
         // Filter enabled agents directly from the response
+        // 直接从响应中筛选已启用的助手
         agents.value = allAgents.filter(a => a.is_enabled);
         
         // Fetch Active Agent (Double check with backend or just use local flag)
+        // 获取活跃助手（与后端再次确认或仅使用本地标志）
         const active = allAgents.find(a => a.is_active);
         if (active) {
             activeAgentId.value = active.id;
             activeAgentName.value = active.name;
         } else if (agents.value.length > 0) {
             // Fallback
+            // 降级处理
             activeAgentId.value = agents.value[0].id;
             activeAgentName.value = agents.value[0].name;
         }
@@ -227,12 +245,14 @@ const loadGroups = async () => {
 };
 
 // Actions
+// 操作
 const switchAgent = async (agent) => {
     activeMode.value = 'direct';
     activeAgentId.value = agent.id;
     activeAgentName.value = agent.name;
     
     // Call API to switch active agent in backend
+    // 调用 API 在后端切换活跃助手
     try {
         await fetch(`${API_BASE}/api/agents/active`, {
             method: 'POST',

@@ -29,6 +29,7 @@ const renderedContent = ref('')
 let observer = null
 
 // Configure marked with highlight.js
+// 配置带有 highlight.js 的 marked
 const renderer = new marked.Renderer()
 renderer.code = ({ text, lang }) => {
   const language = lang && hljs.getLanguage(lang) ? lang : ''
@@ -44,6 +45,7 @@ const render = () => {
   if (isRendered.value) return
   
   // Custom Render Logic (migrated from DashboardView)
+  // 自定义渲染逻辑 (从 DashboardView 迁移)
   let formatted = props.content || ''
   
   // 仅保留少数仍在使用的功能性 XML 标签 (如核心记忆)
@@ -105,11 +107,14 @@ const render = () => {
   })
 
   // 4. Sanitize
+  // 4. 净化 (Sanitize)
   let sanitized = dompurify.sanitize(html)
 
   // Fallback: If result is empty but source wasn't, use raw content (wrapped in p)
+  // 降级处理：如果结果为空但源内容不为空，使用原始内容（包裹在 p 标签中）
   if (!sanitized && formatted.trim().length > 0) {
       // Basic escape for raw content
+      // 原始内容的基本转义
       const escaped = formatted
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
@@ -125,7 +130,9 @@ const render = () => {
 
 onMounted(() => {
   // Always render immediately to avoid "empty" issues caused by IntersectionObserver delays or v-show interactions
+  // 始终立即渲染以避免由 IntersectionObserver 延迟或 v-show 交互导致的“空白”问题
   // Performance impact for 50 items is acceptable compared to invisible content
+  // 与内容不可见相比，50 个项目的性能影响是可以接受的
   render()
 })
 
@@ -143,13 +150,15 @@ watch(() => props.content, () => {
 
 <style>
 /* Global styles for markdown-body */
+/* markdown-body 的全局样式 */
 .markdown-body {
   font-size: 14px;
   line-height: 1.6;
 }
 /* Remove forced colors to allow inheritance */
+/* 移除强制颜色以允许继承 */
 .markdown-body pre {
-  background-color: #282c34; /* Atom One Dark background */
+  background-color: #282c34; /* Atom One Dark background */ /* Atom One Dark 背景 */
   border-radius: 6px;
   padding: 1em;
   overflow-x: auto;
@@ -178,6 +187,6 @@ watch(() => props.content, () => {
 }
 
 .async-markdown {
-    min-height: 40px; /* Prevent layout thrashing */
+    min-height: 40px; /* Prevent layout thrashing */ /* 防止布局抖动 */
 }
 </style>

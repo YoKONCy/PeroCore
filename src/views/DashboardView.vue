@@ -209,6 +209,7 @@
 
 
               <!-- NIT Status Card -->
+              <!-- NIT 协议状态卡片 -->
               <el-row :gutter="20" style="margin-top: 20px;" v-if="nitStatus">
                 <el-col :span="24">
                    <el-card shadow="hover" class="glass-card" :body-style="{ padding: '15px 20px' }">
@@ -420,7 +421,7 @@
                       <span v-if="log.importance > 1" class="log-meta-tag importance" :title="`重要度: ${log.importance}`">
                         ⭐{{ log.importance }}
                       </span>
-                      <span v-if="log.metadata.memory_extracted || log.memory_id" class="log-meta-tag memory" title="此对话已提取为核心记忆">
+                      <span v-if="(log.metadata?.memory_extracted) || log.memory_id" class="log-meta-tag memory" title="此对话已提取为核心记忆">
                         🧠
                       </span>
 
@@ -436,6 +437,7 @@
                     </div>
 
                     <!-- Image Preview -->
+                    <!-- 图片预览 -->
                     <div v-if="log.images && log.images.length > 0" class="log-images-preview" style="margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap;">
                        <div v-for="(img, iIdx) in log.images" :key="iIdx" class="log-image-item">
                           <el-image 
@@ -495,6 +497,7 @@
             </div>
 
             <!-- 3. 核心记忆 (Refactored) -->
+            <!-- 3. 核心记忆 (重构版) -->
             <div v-else-if="currentTab === 'memories'" key="memories" class="view-container">
               <div class="toolbar memory-toolbar">
                  <h3 class="section-title">长期记忆库</h3>
@@ -603,6 +606,7 @@
               </div>
 
               <!-- Tag Cloud Area -->
+              <!-- 标签云区域 -->
               <div class="tag-cloud-area" v-if="topTags.length">
                   <span class="tag-cloud-label">热门标签:</span>
                   <div class="tag-cloud-chips">
@@ -623,6 +627,7 @@
               </div>
 
               <!-- List Mode -->
+              <!-- 列表模式 -->
               <div v-show="memoryViewMode === 'list'" class="memory-waterfall">
                 <div v-for="m in memories" :key="m.id" class="memory-item">
                   <el-card shadow="hover" class="memory-card" :class="m.type">
@@ -667,6 +672,7 @@
               </div>
 
               <!-- Graph Mode -->
+              <!-- 图谱模式 -->
               <div v-show="memoryViewMode === 'graph'" class="memory-graph-container" v-loading="isLoadingGraph">
                  <div class="graph-placeholder" v-if="memoryGraphData.nodes.length === 0">
                     <el-empty description="暂无关联数据或数据量过少" />
@@ -944,6 +950,7 @@
             </div>
 
             <!-- 10. NapCat Terminal -->
+            <!-- 10. NapCat 终端 -->
             <div v-else-if="currentTab === 'napcat'" key="napcat" class="view-container" style="height:100%; display: flex; flex-direction: column;">
                <el-card shadow="never" class="glass-card" :body-style="{ padding: '0', display: 'flex', flexDirection: 'column', height: '100%' }" style="flex: 1; display: flex; flex-direction: column;">
                   <NapCatTerminal style="height: 100%;" />
@@ -951,6 +958,7 @@
             </div>
 
             <!-- 11. System Terminal -->
+            <!-- 11. 系统终端 -->
             <div v-else-if="currentTab === 'terminal'" key="terminal" class="view-container" style="height:100%;">
                 <el-card shadow="never" class="glass-card" :body-style="{ padding: '0', height: '100%' }" style="height: 100%; display: flex; flex-direction: column;">
                    <TerminalPanel style="height: 100%;" />
@@ -964,6 +972,7 @@
   </el-container>
 
     <!-- Dialogs -->
+    <!-- 弹窗 -->
     <el-dialog v-model="showGlobalSettings" title="全局服务商配置" width="500px" center>
       <el-form label-position="top">
         <el-form-item label="API Key">
@@ -1120,6 +1129,7 @@
 
 <style scoped>
 /* Debug Dialog Styles */
+/* 调试对话框样式 */
 .debug-segments-viewer {
   display: flex;
   flex-direction: column;
@@ -1180,8 +1190,9 @@
 <script setup>
 import { ref, shallowRef, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import CustomTitleBar from '../components/layout/CustomTitleBar.vue'
-import { listen, emit } from '@tauri-apps/api/event'
-import { WebviewWindow, getAllWebviewWindows } from '@tauri-apps/api/webviewWindow'
+import { listen, invoke } from '@/utils/ipcAdapter'
+// import { listen, emit } from '@tauri-apps/api/event'
+// import { getAllWebviewWindows } from '@tauri-apps/api/webviewWindow'
 import VoiceConfigPanel from './VoiceConfigPanel.vue'
 import AsyncMarkdown from '../components/AsyncMarkdown.vue'
 import { marked } from 'marked'
@@ -1221,10 +1232,7 @@ import logoImg from '../assets/logo1.png'
 
 // 为了防止在非 Tauri 环境下报错，定义一个 fallback 的 listen
 const listenSafe = (event, callback) => {
-  if (window.__TAURI__) {
-    return listen(event, callback)
-  }
-  return Promise.resolve(() => {})
+  return listen(event, callback)
 }
 
 // --- 状态管理 ---
@@ -1296,6 +1304,7 @@ const reflectionModelId = ref(null)
 const auxModelId = ref(null)
 
 // --- Agents Management ---
+// --- 助手管理 ---
 const availableAgents = ref([])
 const activeAgent = ref(null)
 const isSwitchingAgent = ref(false)
@@ -1313,6 +1322,7 @@ const parseDebugContent = (content) => {
   }
   
   // Regex patterns
+  // 正则表达式模式
   const patterns = [
     { type: 'nit', regex: /\[\[\[NIT_CALL\]\]\][\s\S]*?\[\[\[NIT_END\]\]\]/gi },
     { type: 'nit', regex: /<(nit(?:-[0-9a-fA-F]{4})?)>[\s\S]*?<\/\1>/gi },
@@ -1381,6 +1391,7 @@ const parseDebugContent = (content) => {
 const formatLogContent = (content) => {
   if (!content) return ''
   // Hide Thinking and Monologue blocks (but keep them in raw data)
+  // 隐藏 Thinking 和 Monologue 块（但在原始数据中保留它们）
   return content.replace(/【(Thinking|Monologue)[\s\S]*?】/gi, '')
 }
 
@@ -1408,108 +1419,34 @@ const selectedDate = ref('')
 const selectedSort = ref('desc')
 
 const openIdeWorkspace = async () => {
+  try { await invoke('open_ide_window'); return; } catch(e) { console.error(e); ElMessage.error('无法打开 IDE 窗口'); return; }
   console.log('[Dashboard] User clicked openIdeWorkspace')
   try {
-    if (window.__TAURI__) {
-      console.log('[Dashboard] Tauri environment detected')
-      
-      // Try to find existing window
-      let existingWin = null;
-      
-      // Optimization: Try getByLabel first as it might be cached locally
-      if (WebviewWindow.getByLabel) {
-         console.log('[Dashboard] Trying WebviewWindow.getByLabel("ide")...')
-         try {
-             existingWin = await WebviewWindow.getByLabel('ide')
-             if (existingWin) console.log('[Dashboard] Found existing IDE window via getByLabel')
-         } catch (e) {
-             console.warn('[Dashboard] getByLabel failed:', e)
-         }
-      }
-      
-      // Method 2: getAllWebviewWindows with timeout (to avoid hanging during ReAct/IPC flood)
-      if (!existingWin) {
-          console.log('[Dashboard] calling getAllWebviewWindows()...')
-          try {
-            const timeoutPromise = new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('getAllWebviewWindows timed out')), 2000)
-            );
-            const windows = await Promise.race([
-                getAllWebviewWindows(),
-                timeoutPromise
-            ]);
-            existingWin = windows.find(w => w.label === 'ide')
-            if (existingWin) console.log('[Dashboard] Found existing IDE window via getAllWebviewWindows')
-          } catch (err) {
-            console.warn('[Dashboard] getAllWebviewWindows failed or timed out:', err)
-          }
-      }
-
-      if (existingWin) {
-        console.log('[Dashboard] Found existing IDE window, showing...')
-        if (typeof existingWin.show === 'function') {
-            await existingWin.show()
-            await existingWin.setFocus()
-        } else {
-            console.warn('Existing window found but .show() is not a function', existingWin)
-            // Fallback: try to re-create or ignore
-             const newWin = new WebviewWindow('ide', {
-                url: '/#/ide',
-                title: 'Pero IDE',
-                width: 1280,
-                height: 800,
-                resizable: true,
-                decorations: true,
-                center: true
-              })
-        }
-        return
-      }
-      
-      console.log('[Dashboard] Creating new IDE window...')
-      const newWin = new WebviewWindow('ide', {
-        url: '/#/ide',
-        title: 'Pero IDE',
-        width: 1280,
-        height: 800,
-        resizable: true,
-        decorations: true,
-        center: true
-      })
-      
-      newWin.once('tauri://created', function () {
-          console.log('IDE window created successfully')
-      })
-      newWin.once('tauri://error', function (e) {
-          console.error('IDE window creation error:', e)
-          ElMessage.error('IDE窗口创建失败: ' + JSON.stringify(e))
-      })
-    } else {
-      console.log('Not in Tauri, using window.open')
-      window.open('/#/ide', '_blank', 'width=1280,height=800,menubar=no,toolbar=no,location=no,status=no')
-    }
+      await invoke('open_ide_window')
   } catch (e) {
     console.error('Failed to open IDE window:', e)
     const errorMsg = e instanceof Error ? e.message : JSON.stringify(e)
     ElMessage.error('无法打开 IDE 窗口: ' + errorMsg)
-    // Fallback
-    window.open('/#/ide', '_blank', 'width=1280,height=800,menubar=no,toolbar=no,location=no,status=no')
   }
 }
 
 
 
 // --- Polling State ---
+// --- 轮询状态 ---
 const pollingInterval = ref(null)
 
 // --- Refactored Memory Dashboard State ---
+// --- 重构的记忆仪表板状态 ---
 const nitStatus = ref(null)
 const memoryViewMode = ref('list') // 'list' or 'graph'
+// 'list' (列表) 或 'graph' (图谱)
 const memoryGraphData = shallowRef({ nodes: [], edges: [] })
 const tagCloud = ref({})
 const memoryFilterTags = ref([])
 const memoryFilterDate = ref(null)
 const memoryFilterType = ref('') // New type filter
+// 新的类型筛选
 const isLoadingGraph = ref(false)
 const graphRef = ref(null)
 let chartInstance = null
@@ -1526,6 +1463,7 @@ watch(memoryViewMode, (val) => {
         })
     } else {
         // Dispose chart when switching back to list mode to save memory
+        // 切换回列表模式时销毁图表以节省内存
         if (chartInstance) {
             chartInstance.dispose()
             chartInstance = null
@@ -1549,6 +1487,7 @@ watch(currentTab, (newTab) => {
   }
 
   // Dispose graph when leaving memories tab
+  // 离开记忆标签页时销毁图谱
   if (newTab !== 'memories' && chartInstance) {
     chartInstance.dispose()
     chartInstance = null
@@ -1563,13 +1502,16 @@ watch([selectedSessionId, selectedSource, selectedSort, selectedDate], () => {
 })
 
 // Watch active agent change to refresh data
+// 监听活跃助手变化以刷新数据
 watch(activeAgent, () => {
   // Clear existing data to force refresh
+  // 清除现有数据以强制刷新
   memories.value = []
   logs.value = []
   tasks.value = []
   
   fetchStats() // Update overview stats
+  // 更新概览统计
   
   if (currentTab.value === 'logs') fetchLogs()
   else if (currentTab.value === 'memories') fetchMemories()
@@ -1608,8 +1550,8 @@ const getMemoryTagType = (type) => {
   if (type === 'preference') return 'danger'
   if (type === 'event' || type === 'summary' || type === 'interaction_summary') return 'primary'
   if (type === 'archived_event') return 'info'
-  if (type === 'fact') return 'success' // Green for facts
-  if (type === 'promise') return 'warning' // Orange for promises
+  if (type === 'fact') return 'success' // Green for facts // 事实为绿色
+  if (type === 'promise') return 'warning' // Orange for promises // 誓言为橙色
   if (type === 'work_log') return 'warning'
   return 'info'
 }
@@ -1643,6 +1585,7 @@ const getSentimentEmoji = (sentiment) => {
 }
 
 const getLogMetadata = (log) => {
+  if (!log) return {}
   try {
     return JSON.parse(log.metadata_json || '{}')
   } catch (e) {
@@ -1688,16 +1631,15 @@ const switchAgent = async (agentId) => {
         await fetchAgents()
         ElMessage.success(`已切换到角色: ${activeAgent.value?.name}`)
         
-        // 3. Persist to launch config via Tauri (Fire and forget)
-        if (window.__TAURI__) {
-            const invoke = window.__TAURI__.core?.invoke || window.__TAURI__.invoke
-            // Get current enabled list
-            const enabled = availableAgents.value.filter(a => a.is_enabled).map(a => a.id)
-            invoke('save_agent_launch_config', { 
-                enabledAgents: enabled,
-                activeAgent: agentId 
-            }).catch(e => console.error('Failed to save launch config:', e))
-        }
+        // 3. Persist to launch config via Electron IPC (Fire and forget)
+        // 3. 通过 Electron IPC 持久化启动配置（即发即弃）
+        // Get current enabled list
+        // 获取当前已启用的列表
+        const enabled = availableAgents.value.filter(a => a.is_enabled).map(a => a.id)
+        invoke('save_agent_launch_config', { 
+            enabledAgents: enabled,
+            activeAgent: agentId 
+        }).catch(e => console.error('Failed to save launch config:', e))
 
     } catch (e) {
         ElMessage.error(e.message)
@@ -1866,7 +1808,7 @@ const fetchMemoryGraph = async () => {
         
         // 确保在数据拉取后，且仍然在 memory 标签页时才初始化图表
         if (currentTab.value === 'memories') {
-            memoryGraphData.value = Object.freeze(data) // Freeze data to avoid Vue reactivity overhead
+            memoryGraphData.value = Object.freeze(data) // 冻结数据以避免 Vue 响应式开销 // 冻结数据以避免 Vue 响应式开销
             nextTick(() => {
                 requestAnimationFrame(() => initGraph())
             })
@@ -1900,6 +1842,7 @@ const clearOrphanedEdges = async () => {
         ElMessage.success(`清理完成，共移除 ${data.deleted_count} 条无效连线`)
         
         // Refresh graph if in graph mode
+        // 如果在图谱模式下，刷新图谱
         if (memoryViewMode.value === 'graph') {
             fetchMemoryGraph()
         }
@@ -1924,6 +1867,7 @@ const triggerScanLonely = async () => {
         if (data.status === 'success') {
              ElMessage.success(`扫描完成: 处理了 ${data.processed_count} 条记忆，发现了 ${data.connections_found} 个新关联`)
              fetchMemories() // Refresh list
+             // 刷新列表
         } else if (data.status === 'skipped') {
              ElMessage.warning(`扫描跳过: ${data.reason}`)
         } else {
@@ -1954,6 +1898,7 @@ const triggerMaintenance = async () => {
         const res = await fetchWithTimeout(`${API_BASE}/memories/maintenance`, {
             method: 'POST'
         }, 120000) // Longer timeout for deep maintenance
+        // 深度维护需要更长的超时时间
         const data = await res.json()
         if (data.status === 'success') {
              ElMessage.success(`维护完成: 标记重要性 ${data.important_tagged}, 记忆合并 ${data.consolidated}, 清理 ${data.cleaned_count}`)
@@ -2011,14 +1956,16 @@ const initGraph = () => {
     if (!graphRef.value) return
     if (chartInstance) chartInstance.dispose()
     
-    chartInstance = echarts.init(graphRef.value, 'dark') // Use dark theme base if available, or just manual colors
+    chartInstance = echarts.init(graphRef.value, 'dark') // Use dark theme base if available, or just manual colors // 如果可用则使用暗色主题基底，或者仅使用手动颜色
     
     const nodes = memoryGraphData.value.nodes.map(node => ({
         ...node,
         // Ensure name is string
+        // 确保名称为字符串
         name: String(node.id),
         category: getMemoryTypeLabel(node.category),
         // Visual style based on sentiment/type
+        // 基于情感/类型的视觉样式
         itemStyle: {
             color: getSentimentColor(node.sentiment),
             shadowBlur: 10,
@@ -2029,10 +1976,12 @@ const initGraph = () => {
     const links = memoryGraphData.value.edges
     
     // Generate categories from data
+    // 从数据生成类别
     const categories = [...new Set(nodes.map(n => n.category))].map(c => ({ name: c }))
 
     const option = {
         backgroundColor: '#1a1a2e', // Deep space blue/black
+        // 深空蓝/黑
         title: {
             text: '神经网络记忆图谱',
             subtext: '交互式知识图谱',
@@ -2125,21 +2074,23 @@ const initGraph = () => {
     }
     
     // Resize handler
+    // 调整大小处理程序
     if (resizeHandler) window.removeEventListener('resize', resizeHandler)
     resizeHandler = () => chartInstance && chartInstance.resize()
     window.addEventListener('resize', resizeHandler)
 }
 
 // Helper for colors
+// 颜色助手
 const getSentimentColor = (sentiment) => {
     const map = {
-        'positive': '#67c23a', // green
-        'negative': '#f56c6c', // red
-        'neutral': '#a0c4ff', // blue
-        'happy': '#e6a23c', // orange/yellow
-        'sad': '#909399', // grey
+        'positive': '#67c23a', // green // 绿色
+        'negative': '#f56c6c', // red // 红色
+        'neutral': '#a0c4ff', // blue // 蓝色
+        'happy': '#e6a23c', // orange/yellow // 橙色/黄色
+        'sad': '#909399', // grey // 灰色
         'angry': '#f56c6c',
-        'excited': '#ff88aa' // pink
+        'excited': '#ff88aa' // pink // 粉色
     }
     return map[sentiment] || '#a0c4ff'
 }
@@ -2171,11 +2122,11 @@ const toggleCompanion = async (val) => {
       ElMessage.success(data.enabled ? '已开启陪伴模式' : '已关闭陪伴模式')
     } else {
       const errorData = await res.json()
-      isCompanionEnabled.value = !val // revert
+      isCompanionEnabled.value = !val // revert // 恢复
       ElMessage.warning(errorData.detail || '切换失败')
     }
   } catch (e) {
-    isCompanionEnabled.value = !val // revert
+    isCompanionEnabled.value = !val // revert // 恢复
     ElMessage.error('网络错误')
   } finally {
     isTogglingCompanion.value = false
@@ -2208,11 +2159,11 @@ const toggleSocial = async (val) => {
       isSocialEnabled.value = data.enabled
       ElMessage.success(data.enabled ? '已开启社交模式' : '已关闭社交模式')
     } else {
-      isSocialEnabled.value = !val // revert
+      isSocialEnabled.value = !val // revert // 恢复
       ElMessage.error('切换失败')
     }
   } catch (e) {
-    isSocialEnabled.value = !val // revert
+    isSocialEnabled.value = !val // revert // 恢复
     ElMessage.error('网络错误')
   } finally {
     isTogglingSocial.value = false
@@ -2245,11 +2196,11 @@ const toggleLightweight = async (val) => {
       isLightweightEnabled.value = data.enabled
       ElMessage.success(data.enabled ? '已开启轻量聊天模式' : '已关闭轻量聊天模式')
     } else {
-      isLightweightEnabled.value = !val // revert
+      isLightweightEnabled.value = !val // revert // 恢复
       ElMessage.error('切换失败')
     }
   } catch (e) {
-    isLightweightEnabled.value = !val // revert
+    isLightweightEnabled.value = !val // revert // 恢复
     ElMessage.error('网络错误')
   } finally {
     isTogglingLightweight.value = false
@@ -2282,11 +2233,11 @@ const toggleAuraVision = async (val) => {
       isAuraVisionEnabled.value = data.enabled
       ElMessage.success(data.enabled ? '已开启主动视觉感应 (AuraVision)' : '已关闭主动视觉感应 (AuraVision)')
     } else {
-      isAuraVisionEnabled.value = !val // revert
+      isAuraVisionEnabled.value = !val // revert // 恢复
       ElMessage.error('切换失败')
     }
   } catch (e) {
-    isAuraVisionEnabled.value = !val // revert
+    isAuraVisionEnabled.value = !val // revert // 恢复
     ElMessage.error('网络错误')
   } finally {
     isTogglingAuraVision.value = false
@@ -2305,12 +2256,7 @@ const handleQuitApp = () => {
     }
   ).then(async () => {
     try {
-      if (window.__TAURI__) {
-        const invoke = window.__TAURI__.core?.invoke || window.__TAURI__.invoke
         await invoke('quit_app')
-      } else {
-        ElMessage.error('非 Tauri 环境，无法执行退出')
-      }
     } catch (e) {
       console.error('Failed to quit app', e)
     }
@@ -2341,6 +2287,7 @@ const fetchPetState = async () => {
     }
   } catch (e) { 
     // Silent fail for polling, no need to log Failed to fetch
+    // 轮询静默失败，无需记录获取失败
   } finally {
     fetchPetState.isPolling = false
   }
@@ -2365,6 +2312,7 @@ const fetchMemories = async () => {
         url += `&tags=${memoryFilterTags.value.join(',')}`
     }
     // Add active agent filter
+    // 添加活动助手过滤器
     if (activeAgent.value) {
       url += `&agent_id=${activeAgent.value.id}`
     }
@@ -2372,6 +2320,7 @@ const fetchMemories = async () => {
     const rawMemories = await res.json()
     
     // Process in larger batches to reduce Vue churn
+    // 分批处理以减少 Vue 抖动
     const processedMemories = []
     const batchSize = 50
     
@@ -2393,7 +2342,7 @@ const fetchMemories = async () => {
       memories.value = [...processedMemories]
       
       if (endIndex < rawMemories.length) {
-        setTimeout(() => processBatch(endIndex), 16) // Use 16ms to allow one frame of UI response
+        setTimeout(() => processBatch(endIndex), 16) // Use 16ms to allow one frame of UI response // 使用 16ms 允许一帧 UI 响应
       } else {
         fetchMemories.isLoading = false
       }
@@ -2417,6 +2366,7 @@ const fetchTasks = async () => {
   try {
     let url = `${API_BASE}/tasks`
     // Add active agent filter
+    // 添加活动助手过滤器
     if (activeAgent.value) {
       url += `?agent_id=${activeAgent.value.id}`
     }
@@ -2424,6 +2374,7 @@ const fetchTasks = async () => {
     const rawTasks = await res.json()
     
     // Process all at once if count is small (< 100), otherwise batch
+    // 如果数量较小 (< 100)，则一次性处理，否则分批处理
     if (rawTasks.length < 100) {
         tasks.value = rawTasks.map(t => Object.freeze(t))
         fetchTasks.isLoading = false
@@ -2477,8 +2428,11 @@ const fetchConfig = async () => {
     userSettings.value.owner_qq = data.owner_qq || ''
 
     // [Fix] Sync current session ID if in Work Mode
+    // [修复] 如果在工作模式下，同步当前会话 ID
     // Only sync if the backend value is different from what we last synced,
+    // 仅当后端值与我们要同步的值不同时才同步，
     // to avoid overwriting user's manual selection in the dropdown.
+    // 以避免覆盖用户在下拉列表中手动选择的内容。
     if (data.current_session_id && data.current_session_id !== 'default') {
        if (data.current_session_id !== lastSyncedSessionId.value) {
            selectedSessionId.value = data.current_session_id
@@ -2486,6 +2440,7 @@ const fetchConfig = async () => {
        }
     } else {
         // If backend is default, we can clear our tracking so if it switches to work again, we sync
+        // 如果后端是默认值，我们可以清除跟踪，以便再次切换到工作模式时进行同步
         lastSyncedSessionId.value = null
     }
   } catch (e) { console.error(e) }
@@ -2549,6 +2504,7 @@ const saveUserSettings = async () => {
 }
 
 // System Reset Logic
+// 系统重置逻辑
 const handleSystemReset = async () => {
   if (isSaving.value) return
   try {
@@ -2597,6 +2553,7 @@ const handleSystemReset = async () => {
 }
 
 // MCP Logic
+// MCP 逻辑
 const openMcpEditor = (mcp) => {
   if (mcp) {
     currentEditingMcp.value = JSON.parse(JSON.stringify(mcp))
@@ -2617,6 +2574,7 @@ const saveMcp = async () => {
     const method = mcp.id ? 'PUT' : 'POST'
     
     // Validate JSON
+    // 验证 JSON
     if (mcp.type === 'stdio') {
       JSON.parse(mcp.args || '[]')
       JSON.parse(mcp.env || '{}')
@@ -2677,7 +2635,7 @@ const toggleMcpEnabled = async (mcp) => {
     const res = await fetchWithTimeout(`${API_BASE}/mcp/${mcp.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...mcp, enabled: mcp.enabled }) // Element Plus switch updates v-model directly
+      body: JSON.stringify({ ...mcp, enabled: mcp.enabled }) // Element Plus switch updates v-model directly // Element Plus 开关直接更新 v-model
     }, 5000)
     if (!res.ok) throw new Error('更新失败')
     await fetchMcps()
@@ -2688,6 +2646,7 @@ const toggleMcpEnabled = async (mcp) => {
 }
 
 // Model Logic
+// 模型逻辑
 const openModelEditor = (model) => {
   remoteModels.value = []
   if (model) {
@@ -2835,6 +2794,7 @@ const activateModel = async (id, configKey) => {
 }
 
 // Logs Logic
+// 日志逻辑
 const initSessionAndFetchLogs = async () => {
   // 不在这里设置 isLogsFetching，而是交给 fetchLogs 统一管理
   // 仅负责初始化 session ID
@@ -2852,6 +2812,7 @@ const fetchLogs = async () => {
   isLogsFetching.value = true
   
   // Create a unique symbol for this fetch request
+  // 为此获取请求创建一个唯一的符号
   const currentRequestId = Symbol('fetchLogs')
   fetchLogs.lastRequestId = currentRequestId
 
@@ -2861,6 +2822,7 @@ const fetchLogs = async () => {
       url += `&date=${selectedDate.value}`
     }
     // Add active agent filter
+    // 添加活动助手过滤器
     if (activeAgent.value) {
       url += `&agent_id=${activeAgent.value.id}`
     }
@@ -2869,14 +2831,19 @@ const fetchLogs = async () => {
     const rawLogs = await res.json()
     
     // Only skip update if the request is stale
+    // 仅当请求过时时跳过更新
     if (fetchLogs.lastRequestId !== currentRequestId) {
       return
     }
 
-    const processedLogs = rawLogs.map(log => {
+    // Filter out invalid logs first
+    // 首先过滤掉无效日志
+    const processedLogs = (Array.isArray(rawLogs) ? rawLogs : [])
+      .filter(log => log && typeof log === 'object')
+      .map(log => {
         const metadata = getLogMetadata(log)
         let images = []
-        if (metadata.images && Array.isArray(metadata.images)) {
+        if (metadata && metadata.images && Array.isArray(metadata.images)) {
              images = metadata.images.map(path => `${API_BASE}/ide/image?path=${encodeURIComponent(path)}`)
         }
 
@@ -2884,9 +2851,9 @@ const fetchLogs = async () => {
           ...log,
           // content is passed raw to AsyncMarkdown
           displayTime: new Date(log.timestamp).toLocaleString(),
-          metadata: metadata,
-          sentiment: log.sentiment || metadata.sentiment,
-          importance: log.importance || metadata.importance,
+          metadata: metadata || {},
+          sentiment: log.sentiment || (metadata?.sentiment ?? null),
+          importance: log.importance || (metadata?.importance ?? null),
           images: images
         })
     })
@@ -3047,6 +3014,7 @@ const updateLogStatus = (logId, status) => {
   if (index !== -1) {
     const newLog = { ...logs.value[index], analysis_status: status }
     // Update array immutably to support shallowRef and Object.freeze
+    // 不可变地更新数组以支持 shallowRef 和 Object.freeze
     const newLogs = [...logs.value]
     newLogs[index] = Object.freeze(newLog)
     logs.value = newLogs
@@ -3186,7 +3154,6 @@ onMounted(() => {
 
   // Listen for monitor updates
   try {
-    if (window.__TAURI__) {
       // Add debounced history update listener
       let logFetchTimeout = null
       listen('history-update', () => {
@@ -3201,7 +3168,6 @@ onMounted(() => {
       listen('pet-state-update', (event) => {
          petState.value = event.payload
       })
-    }
   } catch (e) {
     console.error('Failed to listen to Tauri updates', e)
   }

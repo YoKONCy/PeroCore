@@ -13,6 +13,8 @@ try:
     RUST_AVAILABLE = True
 except ImportError:
     RUST_AVAILABLE = False
+    # Define dummy class to prevent NameError in type hints
+    class SemanticVectorIndex: pass
     print("[VectorStore] ❌ Critical: pero_memory_core not found! Vector search will be disabled.")
 
 class VectorStoreService:

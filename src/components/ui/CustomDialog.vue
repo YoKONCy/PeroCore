@@ -2,6 +2,7 @@
   <div v-if="visible" class="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50 backdrop-blur-sm" @click.self="handleOverlayClick">
     <div class="bg-[#252526] border border-[#454545] rounded-lg shadow-2xl w-[400px] overflow-hidden transform transition-all">
       <!-- Header -->
+      <!-- 头部 -->
       <div class="px-4 py-3 border-b border-[#333333] flex justify-between items-center bg-[#2d2d2d]">
         <h3 class="text-sm font-semibold text-[#cccccc] select-none">{{ title }}</h3>
         <button @click="handleCancel" class="text-[#888888] hover:text-white transition-colors">
@@ -10,6 +11,7 @@
       </div>
 
       <!-- Body -->
+      <!-- 内容 -->
       <div class="p-4">
         <p v-if="message" class="text-sm text-[#cccccc] mb-4 whitespace-pre-wrap">{{ message }}</p>
         
@@ -25,6 +27,7 @@
       </div>
 
       <!-- Footer -->
+      <!-- 底部 -->
       <div class="px-4 py-3 bg-[#2d2d2d] flex justify-end gap-2">
         <button 
           v-if="type !== 'alert'"
@@ -51,7 +54,7 @@ const props = defineProps({
   visible: Boolean,
   type: {
     type: String,
-    default: 'alert', // alert, confirm, prompt
+    default: 'alert', // alert (警告), confirm (确认), prompt (输入)
     validator: (value) => ['alert', 'confirm', 'prompt'].includes(value)
   },
   title: {
@@ -77,6 +80,8 @@ const emit = defineEmits(['update:visible', 'confirm', 'cancel']);
 const inputValue = ref('');
 const inputRef = ref(null);
 
+// Watch for visibility changes to set focus
+// 监听可见性变化以设置焦点
 watch(() => props.visible, async (newVal) => {
   if (newVal) {
     inputValue.value = props.defaultValue;
@@ -88,6 +93,8 @@ watch(() => props.visible, async (newVal) => {
   }
 });
 
+// Handle confirm action
+// 处理确认操作
 const handleConfirm = () => {
   if (props.type === 'prompt') {
     emit('confirm', inputValue.value);
@@ -97,11 +104,15 @@ const handleConfirm = () => {
   emit('update:visible', false);
 };
 
+// Handle cancel action
+// 处理取消操作
 const handleCancel = () => {
   emit('cancel');
   emit('update:visible', false);
 };
 
+// Handle overlay click
+// 处理遮罩层点击
 const handleOverlayClick = () => {
   if (props.type !== 'alert') {
     handleCancel();

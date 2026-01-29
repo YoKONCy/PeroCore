@@ -13,6 +13,13 @@ os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 # 同时设置 HF_HOME，确保 huggingface_hub也能找到缓存
 os.environ["HF_HOME"] = os.environ["SENTENCE_TRANSFORMERS_HOME"]
 
+# --- Suppress Logging & Progress Bars ---
+# Disable tqdm progress bars globally (e.g. for model loading)
+os.environ["TQDM_DISABLE"] = "1"
+# Suppress transformers info/warning logs
+os.environ["TRANSFORMERS_VERBOSITY"] = "error"
+# ----------------------------------------
+
 class EmbeddingService:
     _instance = None
     _model = None

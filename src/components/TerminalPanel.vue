@@ -30,8 +30,11 @@
 <script setup>
 import { ref, shallowRef, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { Monitor, Delete } from '@element-plus/icons-vue'
-import { listen } from '@tauri-apps/api/event'
-import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@/utils/ipcAdapter'
+// import { listen } from '@tauri-apps/api/event'
+// 引入调用函数
+import { invoke } from '@/utils/ipcAdapter'
+// import { invoke } from '@tauri-apps/api/core'
 
 const logs = shallowRef([])
 const logContainer = ref(null)
@@ -40,11 +43,18 @@ let unlistenFn = null
 let pendingLogs = []
 let updateTimer = null
 
+const extractTimestamp = (msg) => {
+  // 尝试从消息中提取时间戳 HH:mm:ss (例如 21:35:06)
+  // 优先匹配带毫秒的，如 21:35:06.123
+  const timeMatch = msg && msg.match(/(\d{1,2}:\d{2}:\d{2}(?:\.\d+)?)/);
+  return timeMatch ? timeMatch[1] : new Date().toLocaleTimeString();
+}
+
 const addLog = (source, type, message) => {
-  const timestamp = new Date().toLocaleTimeString()
+  const timestamp = extractTimestamp(message)
   pendingLogs.push({
-    source, // 'backend' | 'frontend'
-    type,   // 'stdout' | 'stderr' | 'info' | 'warn' | 'error' | 'system'
+    source, // 'backend' (后端) | 'frontend' (前端)
+    type,   // 'stdout' (标准输出) | 'stderr' (标准错误) | 'info' (信息) | 'warn' (警告) | 'error' (错误) | 'system' (系统)
     message,
     timestamp
   })
@@ -92,7 +102,7 @@ const formatMessage = (msg) => {
 
   // 匹配并染色常见的后端标签 [TAG]
   const tagColors = {
-    'Agent': '#ff88aa',    // 粉色
+    'AGENT': '#ff88aa',    // 粉色
     'VOICE': '#a0c4ff',    // 蓝色
     'PROCESS': '#a8e6cf',  // 绿色
     'LLM': '#bdb2ff',      // 紫色
@@ -156,7 +166,7 @@ onMounted(async () => {
             source: 'backend',
             type,
             message: logLine,
-            timestamp: new Date().toLocaleTimeString() // 这里时间可能不准，但后端没传时间戳
+            timestamp: extractTimestamp(logLine) // 尝试从日志中提取时间戳
           }]
         })
         scrollToBottom()
@@ -167,7 +177,7 @@ onMounted(async () => {
 
     // 2. 监听来自 Rust 的后端原始日志
     unlistenFn = await listen('backend-log', (event) => {
-      const msg = event.payload
+      const msg = event.payload || ''
       let type = 'info'
       if (msg.toLowerCase().includes('[err]') || msg.toLowerCase().includes('error')) {
         type = 'error'
@@ -293,7 +303,7 @@ onUnmounted(() => {
   flex: 1;
 }
 
-/* Log types */
+/* 日志类型 */
 .log-line.stderr .message, 
 .log-line.error .message {
   color: #f48771;

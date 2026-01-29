@@ -21,6 +21,7 @@
       
       <div class="flex items-center gap-2">
          <!-- Quick Actions -->
+         <!-- 快捷操作 -->
          <button 
            v-if="!isCollapsed && activeTerminal && activeTerminal.active"
            @click.stop="stopActiveTerminal"
@@ -81,9 +82,11 @@
        </div>
        
        <!-- Terminal Viewport -->
+       <!-- 终端视口 -->
        <div class="flex-1 bg-[#0f172a] flex flex-col min-w-0">
           <template v-if="activeTerminal">
              <!-- Viewport Header -->
+             <!-- 视口头部 -->
              <div class="h-8 flex items-center justify-between px-4 border-b border-white/5 bg-[#0f172a] sticky top-0 z-10">
                 <div class="flex items-center gap-2 overflow-hidden">
                     <span class="text-green-500 font-mono text-xs">$</span>
@@ -93,6 +96,8 @@
              </div>
              
              <!-- Output Area -->
+             <!-- Output Area -->
+             <!-- 输出区域 -->
              <div class="flex-1 overflow-y-auto p-4 font-mono text-xs custom-scrollbar" ref="viewport">
                 <div class="whitespace-pre-wrap text-slate-300 leading-relaxed font-ligatures-none">{{ activeTerminal.output }}</div>
                 
@@ -120,10 +125,11 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
-import { listen } from '@tauri-apps/api/event';
+import { listen } from '@/utils/ipcAdapter'
+// import { listen } from '@tauri-apps/api/event';
 import { Terminal, ChevronDown, ChevronUp, Square } from 'lucide-vue-next';
 
-const isCollapsed = ref(true); // Default collapsed
+const isCollapsed = ref(true); // Default collapsed // 默认折叠
 const height = ref(300);
 const terminals = ref([]);
 const activePid = ref(null);
@@ -137,11 +143,13 @@ const toggleCollapse = () => {
 };
 
 // Resizing Logic
+// 调整大小逻辑
 let startY = 0;
 let startHeight = 0;
 
 const handleMouseDown = (e) => {
     // Only resize if clicking on the header itself, not buttons
+    // 仅在点击标题栏本身时调整大小，而不是按钮
     if (isCollapsed.value) return;
     startResize(e);
 };
@@ -156,7 +164,7 @@ const startResize = (e) => {
 };
 
 const onResize = (e) => {
-    const delta = startY - e.clientY; // Dragging up increases height
+    const delta = startY - e.clientY; // Dragging up increases height // 向上拖动增加高度
     height.value = Math.max(150, Math.min(window.innerHeight - 100, startHeight + delta));
 };
 

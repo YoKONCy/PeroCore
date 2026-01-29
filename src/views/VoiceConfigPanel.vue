@@ -57,7 +57,7 @@
       </el-tab-pane>
     </el-tabs>
 
-    <!-- Editor Dialog -->
+    <!-- 编辑器对话框 -->
     <el-dialog v-model="showEditor" :title="editingConfig.id ? '编辑配置' : '添加配置'" width="600px">
        <el-form label-width="120px">
           <el-form-item label="类型">
@@ -128,7 +128,7 @@ import { AGENT_NAME } from '../config'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
-const API_BASE = 'http://localhost:9120/api' // Adjust if needed
+const API_BASE = 'http://localhost:9120/api' // Adjust if needed (如果需要，请调整)
 const activeTab = ref('stt')
 const configs = ref([])
 const showEditor = ref(false)
@@ -164,6 +164,7 @@ const toggleTTSMode = async (val) => {
   } catch (e) {
     ElMessage.error('设置失败')
     ttsEnabled.value = !val // revert
+    // 恢复原状
   }
 }
 
@@ -227,6 +228,7 @@ const saveConfig = async () => {
    try {
       isSaving.value = true
       // Validate JSON
+      // 验证 JSON
       try {
          JSON.parse(editingConfig.value.config_json || '{}')
       } catch {

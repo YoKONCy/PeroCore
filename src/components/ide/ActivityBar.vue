@@ -1,6 +1,7 @@
 <template>
   <div class="w-12 h-full bg-[#333333] flex flex-col items-center py-2 select-none z-20 border-r border-[#2b2b2b]">
     <!-- Explorer -->
+    <!-- 资源管理器 -->
     <div 
       class="w-12 h-12 flex items-center justify-center cursor-pointer transition-colors relative mb-1"
       :class="activeTab === 'explorer' ? 'text-white' : 'text-[#858585] hover:text-white'"
@@ -12,6 +13,7 @@
     </div>
 
     <!-- Search -->
+    <!-- 搜索 -->
     <div 
       class="w-12 h-12 flex items-center justify-center cursor-pointer transition-colors relative mb-1"
       :class="activeTab === 'search' ? 'text-white' : 'text-[#858585] hover:text-white'"
@@ -25,6 +27,7 @@
     <div class="flex-1"></div>
 
     <!-- Settings -->
+    <!-- 设置 -->
     <div 
       class="w-12 h-12 flex items-center justify-center cursor-pointer transition-colors text-[#858585] hover:text-white mb-1"
       title="Settings"
