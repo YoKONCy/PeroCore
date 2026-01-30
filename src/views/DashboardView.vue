@@ -1229,6 +1229,7 @@ import {
 import TerminalPanel from '../components/TerminalPanel.vue'
 import NapCatTerminal from '../components/NapCatTerminal.vue'
 import logoImg from '../assets/logo1.png'
+import { gatewayClient } from '../api/gateway'
 
 // 为了防止在非 Tauri 环境下报错，定义一个 fallback 的 listen
 const listenSafe = (event, callback) => {
@@ -1691,8 +1692,6 @@ const waitForBackend = async () => {
 }
 
 // [Feature] Listen for new messages via Gateway
-import { gatewayClient } from '../api/gateway';
-import { onMounted } from 'vue';
 
 onMounted(() => {
     gatewayClient.on('action:new_message', (payload) => {
