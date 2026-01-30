@@ -2,7 +2,9 @@ name: Build and Release
 
 on:
   push:
-    branches: [ main ]
+    branches: [ electron ]
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 permissions:
@@ -55,3 +57,27 @@ jobs:
         with:
           name: PeroCore-Windows
           path: PeroCore-Electron/dist_electron/*.exe
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: PeroCore-Electron/dist_electron/*.exe
+          name: PeroCore 版本 ${{ github.ref_name }}
+          body: |
+            ## 🎉 更新内容
+            
+            这是 PeroCore 的 Electron 重构版本自动构建发布。
+            
+            ### ✨ 特性
+            - **集成网关**: 内置 Go 语言编写的 Gateway，支持多端通信。
+            - **Electron**: 完整的 Electron 桌面应用体验。
+            
+            ### 📦 包含文件
+            - `PeroCore-Setup-*.exe`: Windows 安装程序
+            
+            _此 Release 由 GitHub Actions 自动生成_
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
