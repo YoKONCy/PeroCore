@@ -1,6 +1,6 @@
 [package]
 name = "pero_memory_core"
-version = "0.2.5"
+version = "0.2.6"
 edition = "2021"
 description = "High-performance spreading activation engine for Pero"
 license = "Apache-2.0"
