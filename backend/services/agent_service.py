@@ -540,7 +540,9 @@ class AgentService:
 
     async def social_chat(self, messages: List[Dict[str, Any]], session_id: str) -> str:
         """
-        Specialized chat mode for Social Interactions (QQ/OneBot).
+        [DEPRECATED] Specialized chat mode for Social Interactions (QQ/OneBot).
+        Please use `chat(..., source='social', capabilities=['social'])` instead.
+        
         - Uses isolated session history.
         - Restricted toolset (Safe tools only).
         - Returns the final response text directly.
@@ -735,7 +737,7 @@ class AgentService:
         except Exception as e:
             print(f"[Agent] 后台梦境失败: {e}")
 
-    async def chat(self, messages: List[Dict[str, Any]], source: str = "desktop", session_id: str = "default", on_status: Optional[Any] = None, is_voice_mode: bool = False, user_text_override: str = None, skip_save: bool = False, system_trigger_instruction: str = None, agent_id_override: str = None) -> AsyncIterable[str]:
+    async def chat(self, messages: List[Dict[str, Any]], source: str = "desktop", session_id: str = "default", on_status: Optional[Any] = None, is_voice_mode: bool = False, user_text_override: str = None, skip_save: bool = False, system_trigger_instruction: str = None, agent_id_override: str = None, capabilities: List[str] = None, skip_system_prompt: bool = False) -> AsyncIterable[str]:
         # [NIT Security] Generate ID for this request context
         current_nit_id = NITSecurityManager.generate_random_id()
         
@@ -898,6 +900,28 @@ class AgentService:
             # 如果是多模态模型，且工具是 screen_ocr，则跳过不注入
             if enable_vision and tool_name == "screen_ocr":
                 continue
+            
+            # [Stage 3] Dynamic Capability Filtering
+            # If capabilities are specified (e.g. social), filter tools
+            if capabilities:
+                # 1. Check metadata (required_capability)
+                # Note: Currently tools might not have this metadata, so we default to "core"
+                req_cap = tool_def.get("required_capability", "core")
+                
+                # 2. Check whitelist/blacklist based on source/capability
+                if "social" in capabilities:
+                    # Social Mode Whitelist Logic
+                    safe_prefixes = ["qq_"]
+                    safe_names = ["read_social_memory", "read_agent_memory", "qq_notify_master", "add_reminder", "list_reminders", "delete_reminder"]
+                    
+                    is_safe = False
+                    if req_cap == "social":
+                        is_safe = True
+                    elif any(tool_name.startswith(p) for p in safe_prefixes) or tool_name in safe_names:
+                        is_safe = True
+                    
+                    if not is_safe:
+                        continue
             
             if tool_name == "take_screenshot" or tool_name == "see_screen":
                 if not enable_vision:

@@ -598,6 +598,15 @@ class MemorySecretaryService:
                     self.session.add(state)
 
                 await self.session.commit()
+                
+                # [Feature] Broadcast State Update via Gateway
+                if state:
+                    try:
+                        from services.gateway_client import gateway_client
+                        await gateway_client.broadcast_pet_state(state.model_dump())
+                    except Exception as e:
+                        print(f"[MemorySecretary] Broadcast failed: {e}")
+
                 print(f"[MemorySecretary] 已更新动态 Waifu 文本 (Agent: {agent_id})。")
                 return 1
 

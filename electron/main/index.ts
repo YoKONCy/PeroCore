@@ -2,6 +2,7 @@ import { app, BrowserWindow, shell, ipcMain, screen } from 'electron'
 import { release } from 'os'
 import { join } from 'path'
 import { startBackend, stopBackend, getBackendLogs } from './services/python.js'
+import { startGateway, stopGateway } from './services/gateway.js'
 import { getDiagnostics } from './services/diagnostics.js'
 import { getSystemStats, getConfig, saveConfig } from './services/system.js'
 import { scanLocalAgents, getPlugins, saveAgentLaunchConfig, saveGlobalLaunchConfig } from './services/agents.js'
@@ -57,6 +58,7 @@ app.whenReady().then(createWindow)
 
 app.on('window-all-closed', () => {
   stopBackend() // Ensure backend is killed // 确保后端被杀死
+  stopGateway() // Ensure gateway is killed // 确保网关被杀死
   if (process.platform !== 'darwin') app.quit()
 })
 
@@ -79,6 +81,11 @@ app.on('activate', () => {
   }
 })
 
+// IPC Handlers - Log from Renderer
+ipcMain.on('log-from-renderer', (_, message) => {
+  console.log('[Renderer]', message)
+})
+
 // IPC Handlers - Tauri Adapter
 // IPC 处理程序 - Tauri 适配器
 console.log('主进程: 正在注册 IPC 处理程序...')
@@ -92,6 +99,9 @@ ipcMain.handle('start_backend', async (_, args) => {
     const win = windowManager.launcherWin
     if (!win) return
     try {
+        // Start Gateway first
+        await startGateway(win)
+        // Then start Backend
         await startBackend(win, args?.enableSocialMode ?? true)
         return null // Ok(())
     } catch (e: any) {

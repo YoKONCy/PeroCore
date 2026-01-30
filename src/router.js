@@ -1,5 +1,4 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
-import PetView from './views/PetView.vue'
 import Pet3DView from './views/Pet3DView.vue'
 import DashboardView from './views/DashboardView.vue'
 import LauncherView from './views/LauncherView.vue'
@@ -10,7 +9,6 @@ const routes = [
   { path: '/', redirect: '/launcher' },
   { path: '/launcher', component: LauncherView },
   { path: '/ide', component: MainWindow },
-  { path: '/pet', component: PetView },
   { path: '/pet-3d', component: Pet3DView },
   { path: '/dashboard', component: DashboardView },
   { path: '/test-3d', component: BedrockAvatar }

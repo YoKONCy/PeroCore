@@ -1690,6 +1690,46 @@ const waitForBackend = async () => {
   check()
 }
 
+// [Feature] Listen for new messages via Gateway
+import { gatewayClient } from '../api/gateway';
+import { onMounted } from 'vue';
+
+onMounted(() => {
+    gatewayClient.on('action:new_message', (payload) => {
+        // Only update if logs tab is active or we want to update stats
+        if (currentTab.value === 'logs') {
+            // Check if log belongs to current view filter (session/agent)
+            // Ideally we check payload.session_id and payload.agent_id
+            
+            // For now, just prepend to logs if it's not a duplicate
+            const exists = logs.value.some(l => l.id == payload.id);
+            if (!exists) {
+                // Construct log object compatible with UI
+                const newLog = {
+                    id: payload.id,
+                    role: payload.role,
+                    content: payload.content,
+                    timestamp: payload.timestamp,
+                    displayTime: new Date(payload.timestamp).toLocaleString(),
+                    agent_id: payload.agent_id,
+                    session_id: payload.session_id,
+                    metadata: JSON.parse(payload.metadata || '{}'),
+                    // Default values for other fields
+                    sentiment: 'neutral',
+                    importance: 1,
+                    analysis_status: 'pending' 
+                };
+                
+                // Add to list
+                logs.value.unshift(newLog);
+                
+                // Update stats locally
+                stats.value.total_logs = (stats.value.total_logs || 0) + 1;
+            }
+        }
+    });
+});
+
 const formatBytes = (bytes, decimals = 1) => {
     if (bytes === 0) return '0 B';
     const k = 1024;
@@ -3127,30 +3167,46 @@ const deleteTask = async (taskId) => {
   }
 }
 
+// Handler for state updates via Gateway
+const handleStateUpdate = (payload) => {
+  if (currentTab.value === 'overview') {
+    fetchPetState()
+  }
+}
+
+// Handler for schedule updates via Gateway
+const handleScheduleUpdate = (payload) => {
+  if (currentTab.value === 'tasks') {
+    fetchTasks()
+  }
+}
+
+// Handler for agent changes via Gateway
+const handleAgentChanged = (payload) => {
+  fetchAgents()
+}
+
+// Handler for log updates via Gateway
+const handleLogUpdate = (payload) => {
+  if (currentTab.value === 'logs') {
+     // If it's a delete, we can remove locally to be snappier
+     if (payload.operation === 'delete') {
+         logs.value = logs.value.filter(l => l.id != payload.id)
+     } else {
+         // For updates or new analysis results, we fetch to get fresh data
+         fetchLogs()
+     }
+  }
+}
+
 onMounted(() => {
   waitForBackend()
-  // Add real-time polling for pet state
-  const pollPetState = async () => {
-    if (!isBackendOnline.value) {
-      setTimeout(pollPetState, 3000)
-      return
-    }
-    
-    // Only poll when on Overview tab and not already polling
-    if (currentTab.value === 'overview') {
-      try {
-        await fetchPetState()
-      } catch (e) {
-        // Ignore polling errors
-      }
-    }
-    
-    // Schedule next poll only after current one finishes
-    pollingInterval.value = setTimeout(pollPetState, 3000)
-  }
   
-  // Start polling loop
-  pollPetState()
+  // Listen for real-time updates
+  gatewayClient.on('action:state_update', handleStateUpdate)
+  gatewayClient.on('action:schedule_update', handleScheduleUpdate)
+  gatewayClient.on('action:agent_changed', handleAgentChanged)
+  gatewayClient.on('action:log_updated', handleLogUpdate)
 
   // Listen for monitor updates
   try {
@@ -3161,19 +3217,20 @@ onMounted(() => {
         logFetchTimeout = setTimeout(() => {
           fetchLogs()
           logFetchTimeout = null
-        }, 800)
-      })
-
-      // Add pet state update listener
-      listen('pet-state-update', (event) => {
-         petState.value = event.payload
+        }, 500)
       })
   } catch (e) {
-    console.error('Failed to listen to Tauri updates', e)
+      console.warn('Tauri listeners not available')
   }
 })
 
 onUnmounted(() => {
+  gatewayClient.off('action:new_message')
+  gatewayClient.off('action:state_update', handleStateUpdate)
+  gatewayClient.off('action:schedule_update', handleScheduleUpdate)
+  gatewayClient.off('action:agent_changed', handleAgentChanged)
+  gatewayClient.off('action:log_updated', handleLogUpdate)
+  
   if (pollingInterval.value) {
     clearTimeout(pollingInterval.value)
   }

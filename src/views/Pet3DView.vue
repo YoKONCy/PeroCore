@@ -184,6 +184,7 @@ import BedrockAvatar from '../components/avatar/BedrockAvatar.vue';
 import FileSearchModal from '../components/FileSearchModal.vue';
 import { invoke, listen } from '@/utils/ipcAdapter';
 import { API_BASE } from '../config';
+import { gatewayClient } from '../api/gateway';
 
 const currentText = ref('主人，我在桌面等你很久啦！');
 const isBubbleExpanded = ref(false);
@@ -212,7 +213,7 @@ const voiceMode = ref(parseInt(localStorage.getItem('ppc.voice_mode') || '0'));
 const isThinking = ref(false);
 const isPTTRecording = ref(false); // PTT State
 const isSpeaking = ref(false); // TTS State
-const voiceWs = ref(null);
+// const voiceWs = ref(null); // Deprecated
 const audioContext = ref(null);
 const mediaStream = ref(null);
 const scriptProcessor = ref(null);
@@ -356,10 +357,10 @@ const cycleVoiceMode = async () => {
   bubbleKey.value++;
   
   if (nextMode !== 0) {
-    // 如果还没开启麦克风/WS，则开启
-    if (!voiceWs.value) {
+    // 如果还没开启麦克风，则开启
+    // if (!voiceWs.value) { // WS check removed
       await startVoiceMode()
-    }
+    // }
   }
 }
 
@@ -384,26 +385,21 @@ const startVoiceMode = async () => {
         }
         console.log('[Voice] Microphone access granted:', audioTracks[0].label);
         
-        // 2. 连接 WebSocket
-        voiceWs.value = new WebSocket('ws://localhost:9120/ws/voice');
+        // 2. Gateway 连接 (假设已经连接，只需注册监听器)
+        // 监听来自 Backend 的 Voice Update Request
+        gatewayClient.on('action:voice_update', handleVoiceUpdateRequest);
         
-        voiceWs.value.onopen = () => {
-            console.log('Voice WebSocket connected');
-            // 在气泡中显示连接成功
-            currentText.value = `语音连接成功: ${voiceModeTitle.value}`;
-            isBubbleExpanded.value = true;
-            bubbleKey.value++;
-            
-            // 3. 开始录音处理
-            startRecording();
-        };
+        // 监听来自 Backend 的 Audio Stream (TTS)
+        gatewayClient.on('stream', handleAudioStream);
         
-        voiceWs.value.onmessage = handleVoiceMessage;
+        console.log('Voice Gateway listeners registered');
+        // 在气泡中显示连接成功
+        currentText.value = `语音连接成功: ${voiceModeTitle.value}`;
+        isBubbleExpanded.value = true;
+        bubbleKey.value++;
         
-        voiceWs.value.onclose = () => {
-            console.log('Voice WebSocket closed');
-            stopVoiceMode();
-        };
+        // 3. 开始录音处理
+        startRecording();
         
     } catch (err) {
         console.error('Failed to start voice mode:', err);
@@ -411,10 +407,9 @@ const startVoiceMode = async () => {
 };
 
 const stopVoiceMode = () => {
-    if (voiceWs.value) {
-        voiceWs.value.close()
-        voiceWs.value = null
-    }
+    // Remove listeners
+    gatewayClient.off('action:voice_update', handleVoiceUpdateRequest);
+    gatewayClient.off('stream', handleAudioStream);
     
     if (mediaStream.value) {
         mediaStream.value.getTracks().forEach(track => track.stop())
@@ -594,42 +589,51 @@ const encodeWAV = (samples, sampleRate) => {
     return new Blob([view], { type: 'audio/wav' })
 }
 
-const handleVoiceMessage = (event) => {
-    const msg = JSON.parse(event.data)
+// Handler for Voice Update Requests (Status, Text, etc.)
+const handleVoiceUpdateRequest = (req) => {
+    const type = req.params.type;
+    const content = req.params.content;
+    const message = req.params.message;
     
-    if (msg.type === 'status') {
-        if (msg.content === 'listening') {
+    if (type === 'status') {
+        if (content === 'listening') {
              stopAudioPlayback(true)
              isThinking.value = true
              thinkingMessage.value = '正在听主人说话...'
              currentText.value = ''
-        } else if (msg.content === 'thinking') {
+        } else if (content === 'thinking') {
              isThinking.value = true
-             thinkingMessage.value = msg.message || '努力思考中...'
+             thinkingMessage.value = message || '努力思考中...'
              currentText.value = ''
-        } else if (msg.content === 'speaking') {
+        } else if (content === 'speaking') {
              isThinking.value = false
              thinkingMessage.value = '努力思考中...'
-        } else if (msg.content === 'idle') {
+        } else if (content === 'idle') {
              isThinking.value = false
              thinkingMessage.value = '努力思考中...'
         }
-    } else if (msg.type === 'transcription') {
-        console.log('User said:', msg.content)
-    } else if (msg.type === 'text_response') {
-        currentText.value = msg.content
+    } else if (type === 'transcription') {
+        console.log('User said:', content)
+    } else if (type === 'text_response') {
+        currentText.value = content
         isThinking.value = false
         thinkingMessage.value = '努力思考中...'
-    } else if (msg.type === 'triggers') {
-        // applyTriggers(msg.data) // Not implemented in 3D view yet
-    } else if (msg.type === 'audio_response') {
-        playAudio(msg.data)
-    } else if (msg.type === 'error') {
-        console.error('Voice Error:', msg.content)
-        currentText.value = `(错误: ${msg.content})`
+    } else if (type === 'error') {
+        console.error('Voice Error:', content)
+        currentText.value = `(错误: ${content})`
         isThinking.value = false
     }
 }
+
+// Handler for Audio Stream (TTS)
+const handleAudioStream = (stream) => {
+    if (stream.data) {
+        playAudio(stream.data)
+    }
+}
+
+// Removed handleVoiceMessage (Legacy WS)
+const handleVoiceMessage = (event) => {}
 
 const stopAudioPlayback = (clearQueue = false) => {
     stopLipSync(); // Stop lip sync immediately
@@ -713,7 +717,7 @@ const processAudioQueue = async () => {
     }
 
     isAudioPlaying.value = true
-    const base64Audio = audioQueue.value.shift()
+    const audioData = audioQueue.value.shift()
 
     isSpeaking.value = true
     
@@ -733,14 +737,28 @@ const processAudioQueue = async () => {
     }
     
     try {
-        const binaryString = window.atob(base64Audio)
-        const len = binaryString.length
-        const bytes = new Uint8Array(len)
-        for (let i = 0; i < len; i++) {
-            bytes[i] = binaryString.charCodeAt(i)
+        let arrayBuffer;
+        if (typeof audioData === 'string') {
+             // Fallback for base64 string if any legacy path remains
+             const binaryString = window.atob(audioData)
+             const len = binaryString.length
+             const bytes = new Uint8Array(len)
+             for (let i = 0; i < len; i++) {
+                 bytes[i] = binaryString.charCodeAt(i)
+             }
+             arrayBuffer = bytes.buffer;
+        } else if (audioData instanceof Uint8Array) {
+             // New path: Uint8Array from Protobuf
+             // Need to copy to ArrayBuffer because decodeAudioData detaches it? 
+             // Or just use .buffer. 
+             // Note: Uint8Array.buffer might be the whole buffer of the message if it's a slice.
+             // Safe way: new Uint8Array(audioData).buffer
+             arrayBuffer = new Uint8Array(audioData).buffer;
+        } else {
+             throw new Error("Unknown audio data type");
         }
         
-        const audioBuffer = await ctx.decodeAudioData(bytes.buffer)
+        const audioBuffer = await ctx.decodeAudioData(arrayBuffer)
         
         const source = ctx.createBufferSource()
         source.buffer = audioBuffer
@@ -913,6 +931,10 @@ onMounted(async () => {
   // Attach Drag Listener
   window.addEventListener('mousedown', onMouseDown);
   
+  // Attach Key Listeners
+  window.addEventListener('keydown', handleGlobalKeyDown);
+  window.addEventListener('keyup', handleGlobalKeyUp);
+  
   // ... rest of listeners ...
   // Backend Log -> Thinking Bubble
   const unlistenLog = await listen('backend-log', (event) => {
@@ -975,6 +997,34 @@ onMounted(async () => {
     showFileModal.value = true;
   });
   unlistenFunctions.push(unlistenSearch);
+
+  // Reminder Trigger (from Gateway)
+  gatewayClient.on('action:reminder_trigger', (params) => {
+    const content = params.content || '提醒时间到！';
+    
+    // 1. Show Bubble
+    currentText.value = `⏰ ${content}`;
+    isBubbleExpanded.value = true;
+    bubbleKey.value++;
+    
+    // 2. Play Sound / TTS
+    if (voiceMode.value !== 0) {
+        // Use browser native TTS for instant feedback
+        if ('speechSynthesis' in window) {
+            const utterance = new SpeechSynthesisUtterance(content);
+            // Try to find a Chinese voice
+            const voices = window.speechSynthesis.getVoices();
+            const zhVoice = voices.find(v => v.lang.includes('zh'));
+            if (zhVoice) utterance.voice = zhVoice;
+            window.speechSynthesis.speak(utterance);
+        }
+    }
+    
+    // 3. Desktop Notification (Native)
+    if (window.electron && window.electron.send) {
+        window.electron.send('show-notification', { title: 'Pero 提醒', body: content });
+    }
+  });
 
 // Global Mouse Tracking (Fix for character not following mouse when outside window)
 if (window.electron && window.electron.on) {

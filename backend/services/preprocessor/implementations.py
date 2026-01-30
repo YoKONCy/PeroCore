@@ -474,6 +474,21 @@ class SystemPromptPreprocessor(BasePreprocessor):
         return "SystemPromptBuilder"
 
     async def process(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        # [Feature] Skip System Prompt Generation (e.g. for Social Mode where prompt is manually built)
+        if context.get("skip_system_prompt", False):
+            # Pass through existing messages as final_messages
+            context["final_messages"] = context.get("full_context_messages", [])
+            
+            # [NIT Security] Still inject ID if needed, assuming the first message IS a system prompt
+            nit_id = context.get("nit_id")
+            final_messages = context["final_messages"]
+            if nit_id and final_messages and final_messages[0]["role"] == "system":
+                from nit_core.security import NITSecurityManager
+                security_prompt = NITSecurityManager.get_injection_prompt(nit_id)
+                final_messages[0]["content"] += "\n" + security_prompt
+            
+            return context
+
         prompt_manager = context["prompt_manager"]
         variables = context.get("variables", {})
         full_context_messages = context.get("full_context_messages", [])

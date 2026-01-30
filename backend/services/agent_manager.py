@@ -178,9 +178,43 @@ class AgentManager:
         if agent_id.lower() in self.agents:
             self.active_agent_id = agent_id.lower()
             logger.info(f"已切换活跃代理为: {agent_id}")
+            
+            # Broadcast change
+            self._broadcast_agent_change(self.active_agent_id)
+            
             return True
         logger.warning(f"无法切换到未知代理: {agent_id}")
         return False
+
+    def _broadcast_agent_change(self, agent_id: str):
+        """Broadcast agent change event"""
+        try:
+            from services.gateway_client import gateway_client
+            from proto import perolink_pb2
+            import uuid
+            import time
+            import asyncio
+            
+            async def _send():
+                envelope = perolink_pb2.Envelope()
+                envelope.id = str(uuid.uuid4())
+                envelope.source_id = "agent_manager"
+                envelope.target_id = "broadcast"
+                envelope.timestamp = int(time.time() * 1000)
+                
+                envelope.request.action_name = "agent_changed"
+                envelope.request.params["agent_id"] = agent_id
+                
+                await gateway_client.send(envelope)
+
+            # Check if there is a running loop
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(_send())
+            except RuntimeError:
+                asyncio.run(_send())
+        except Exception as e:
+            logger.error(f"Failed to broadcast agent change: {e}")
 
     def set_enabled_agents(self, agent_ids: List[str]):
         """设置已启用的代理列表。"""

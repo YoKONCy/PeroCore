@@ -90,6 +90,8 @@ from services.companion_service import companion_service
 from services.embedding_service import embedding_service
 from services.browser_bridge_service import browser_bridge_service
 from services.screenshot_service import screenshot_manager
+from services.gateway_client import gateway_client
+from services.scheduler_service import scheduler_service
 from nit_core.plugins.social_adapter.social_service import get_social_service
 from core.config_manager import get_config_manager
 from core.nit_manager import get_nit_manager
@@ -97,7 +99,7 @@ from nit_core.dispatcher import XMLStreamFilter
 from routers.ide_router import router as ide_router
 from routers.agent_router import router as agent_router
 from routers.group_chat_router import router as group_chat_router
-
+from routers.scheduler_router import router as scheduler_router
 
 
 @asynccontextmanager
@@ -157,6 +159,15 @@ async def lifespan(app: FastAPI):
     # Start Social Service (if enabled)
     social_service = get_social_service()
     await social_service.start()
+
+    # Start Gateway Client
+    gateway_client.start_background()
+
+    # Initialize Scheduler
+    scheduler_service.initialize()
+
+    # Initialize RealtimeSessionManager with Gateway
+    realtime_session_manager.initialize()
 
     # Start AuraVision (if enabled)
     config_mgr = get_config_manager()
@@ -569,9 +580,14 @@ async def lifespan(app: FastAPI):
 
     trigger_task = asyncio.create_task(periodic_trigger_check())
     
+    # Start Gateway Client
+    gateway_client.start_background()
+    print("[Main] Gateway Client started.")
+
     yield
     
     # Shutdown
+    await gateway_client.stop()
     cleanup_task.cancel()
     weekly_report_task.cancel()
     # dream_task is not defined here, it's inside maintenance_task
@@ -593,6 +609,7 @@ app = FastAPI(title="PeroCore Backend", description="AI Agent powered backend fo
 app.include_router(ide_router)
 app.include_router(agent_router)
 app.include_router(group_chat_router)
+app.include_router(scheduler_router, prefix="/api/scheduler", tags=["Scheduler"])
 
 class TTSPreviewRequest(BaseModel):
     text: str
@@ -692,8 +709,24 @@ async def seed_voice_configs():
             session.add(tts)
             
         # Seed Frontend Access Token (Dynamic Handshake Security)
-        # 每次启动都生成一个新的强加密随机令牌
-        new_dynamic_token = secrets.token_urlsafe(32)
+        # 尝试从 Gateway 生成的令牌文件中读取
+        # 路径: backend/data/gateway_token.json
+        token_path = os.path.join(current_dir, "data", "gateway_token.json")
+        new_dynamic_token = None
+        
+        if os.path.exists(token_path):
+            try:
+                with open(token_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    new_dynamic_token = data.get("token")
+                    print(f"[Main] Loaded Gateway Token: {new_dynamic_token[:8]}...")
+            except Exception as e:
+                print(f"[Main] Failed to read gateway token: {e}")
+
+        # Fallback if file not found (e.g. Gateway not started)
+        if not new_dynamic_token:
+            new_dynamic_token = secrets.token_urlsafe(32)
+            print(f"[Main] Warning: Gateway token file not found. Generated local fallback token.")
         
         token_stmt = select(Config).where(Config.key == "frontend_access_token")
         token_result = await session.exec(token_stmt)
@@ -707,11 +740,14 @@ async def seed_voice_configs():
             existing_token.updated_at = datetime.utcnow()
             session.add(existing_token)
             
+        # Configure GatewayClient with this token
+        gateway_client.set_token(new_dynamic_token)
+
         print(f"\n" + "="*60)
         print(f"🛡️  PERO-CORE 安全模式已启动")
         print(f"🔑 动态访问令牌 (Handshake Token):")
         print(f"    {new_dynamic_token}")
-        print(f"⚠️  请注意：此令牌仅本次启动有效，重启后端后需重新配置。")
+        print(f"⚠️  请注意：此令牌由 Gateway 生成 (或本地回退)，用于前后端握手及 HTTP 鉴权。")
         print(f"="*60 + "\n")
             
         await session.commit()
@@ -720,10 +756,6 @@ async def seed_voice_configs():
 @app.websocket("/ws/browser")
 async def websocket_browser_endpoint(websocket: WebSocket):
     await browser_bridge_service.connect(websocket)
-
-@app.websocket("/ws/voice")
-async def websocket_voice_endpoint(websocket: WebSocket):
-    await realtime_session_manager.handle_websocket(websocket)
 
 @app.get("/api/pet/state")
 async def get_pet_state(session: AsyncSession = Depends(get_session)):
@@ -931,12 +963,28 @@ async def run_retry_background(log_id: int):
     from sqlmodel.ext.asyncio.session import AsyncSession
     from sqlalchemy.orm import sessionmaker
     from services.scorer_service import ScorerService
+    from services.gateway_client import gateway_client
+    from proto import perolink_pb2
+    import uuid
+    import time
     
     try:
         async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
         async with async_session() as session:
             scorer = ScorerService(session)
             await scorer.retry_interaction(log_id)
+            
+            # Broadcast update
+            envelope = perolink_pb2.Envelope()
+            envelope.id = str(uuid.uuid4())
+            envelope.source_id = "backend_main"
+            envelope.target_id = "broadcast"
+            envelope.timestamp = int(time.time() * 1000)
+            envelope.request.action_name = "log_updated"
+            envelope.request.params["id"] = str(log_id)
+            envelope.request.params["operation"] = "update"
+            await gateway_client.send(envelope)
+            
     except Exception as e:
         print(f"[Main] 后台重试日志 {log_id} 失败: {e}")
 
@@ -958,6 +1006,25 @@ async def delete_chat_log(log_id: int, session: AsyncSession = Depends(get_sessi
     try:
         service = MemoryService()
         await service.delete_log(session, log_id)
+        
+        # Broadcast
+        try:
+            from services.gateway_client import gateway_client
+            from proto import perolink_pb2
+            import uuid
+            import time
+            envelope = perolink_pb2.Envelope()
+            envelope.id = str(uuid.uuid4())
+            envelope.source_id = "backend_main"
+            envelope.target_id = "broadcast"
+            envelope.timestamp = int(time.time() * 1000)
+            envelope.request.action_name = "log_updated"
+            envelope.request.params["id"] = str(log_id)
+            envelope.request.params["operation"] = "delete"
+            await gateway_client.send(envelope)
+        except Exception as e:
+            print(f"Broadcast delete failed: {e}")
+
         return {"status": "success"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -972,6 +1039,25 @@ async def update_chat_log(log_id: int, payload: Dict[str, Any] = Body(...), sess
             log.content = payload["content"]
         await session.commit()
         await session.refresh(log)
+        
+        # Broadcast
+        try:
+            from services.gateway_client import gateway_client
+            from proto import perolink_pb2
+            import uuid
+            import time
+            envelope = perolink_pb2.Envelope()
+            envelope.id = str(uuid.uuid4())
+            envelope.source_id = "backend_main"
+            envelope.target_id = "broadcast"
+            envelope.timestamp = int(time.time() * 1000)
+            envelope.request.action_name = "log_updated"
+            envelope.request.params["id"] = str(log_id)
+            envelope.request.params["operation"] = "update"
+            await gateway_client.send(envelope)
+        except Exception as e:
+             print(f"Broadcast update failed: {e}")
+
         return log
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

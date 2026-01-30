@@ -119,6 +119,14 @@ async def update_character_status(
             pet_state.updated_at = datetime.now()
             session.add(pet_state)
             await session.commit()
+            
+            # [Feature] Broadcast State Update via Gateway
+            try:
+                from services.gateway_client import gateway_client
+                await gateway_client.broadcast_pet_state(pet_state.model_dump())
+            except Exception as e:
+                print(f"[CharacterOps] Broadcast failed: {e}")
+            
             # No refresh needed unless we read back
             
         else:

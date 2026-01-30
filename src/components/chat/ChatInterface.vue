@@ -481,6 +481,7 @@ import { Brain, MessageSquareQuote, Terminal, Play, Pause, Square, Clock, Edit2,
 import AsyncMarkdown from '../AsyncMarkdown.vue';
 import CustomDialog from '../ui/CustomDialog.vue';
 import { AGENT_NAME, AGENT_AVATAR_TEXT } from '../../config';
+import { gatewayClient } from '../../api/gateway';
 
 const props = defineProps({
   workMode: Boolean,
@@ -492,43 +493,42 @@ const props = defineProps({
 
 // 确认状态
 const pendingConfirmation = ref(null);
-let ws = null; // 存储 WebSocket 引用或使用 emit/listen 机制
 
 // 设置确认监听器
 onMounted(async () => {
-  // Listen for WebSocket messages forwarded from parent or global bus
-  // 监听从父组件或全局总线转发的 WebSocket 消息
-  // Since we don't have direct access to the global WS here, we'll use Tauri event bus
-  // 由于这里无法直接访问全局 WS，我们将使用 Tauri 事件总线
-  // Assuming MainWindow or similar forwards 'ws-message' events
-  // 假设 MainWindow 或类似组件转发 'ws-message' 事件
+  checkVisionCapability();
+  fetchHistory(true);
   
-  // Actually, let's establish a lightweight connection or rely on event bus
-  // 实际上，让我们建立一个轻量级连接或依赖事件总线
-  // For now, let's use the standard Tauri event listener pattern
-  // 目前，让我们使用标准的 Tauri 事件监听器模式
-  // The backend RealtimeSessionManager broadcasts via WebSocket. 
-  // 后端 RealtimeSessionManager 通过 WebSocket 广播。
-  // We need to ensure the WebSocket client in the frontend (probably in store or global) handles this.
-  // 我们需要确保前端的 WebSocket 客户端（可能在 store 或全局中）处理此问题。
-  
-  // TEMPORARY: Listen to a custom event that should be emitted when WS receives 'confirmation_request'
-  // 临时：监听当 WS 收到 'confirmation_request' 时应发出的自定义事件
-  // Ideally, the global WebSocket handler (e.g. in pinia store or MainWindow) should emit this.
-  // 理想情况下，全局 WebSocket 处理程序（例如在 pinia store 或 MainWindow 中）应发出此事件。
-  // Let's assume there is a global event bus for WS messages.
-  // 让我们假设有一个用于 WS 消息的全局事件总线。
-  
-  unlistenConfirmation = await listen('ws-message', (event) => {
-    const msg = event.payload;
-    if (msg.type === 'confirmation_request') {
-      pendingConfirmation.value = {
-        id: msg.id,
-        command: msg.command,
-        riskInfo: msg.risk_info,
-        isHighRisk: msg.is_high_risk || false
-      };
+  // 1. Listen for WebSocket messages forwarded from parent or global bus (via Gateway)
+  gatewayClient.on('action:new_message', (payload) => {
+    // Append new message if it belongs to current session or is relevant
+    // We assume default session for now or check payload.session_id
+    console.log('[ChatInterface] Received new message via Gateway:', payload);
+    
+    // Check duplication
+    const exists = messages.value.some(m => m.id == payload.id);
+    if (!exists) {
+        messages.value.push({
+            id: payload.id,
+            role: payload.role,
+            content: payload.content,
+            timestamp: payload.timestamp,
+            senderId: payload.agent_id || 'pero',
+            images: [], // Images handled separately or via metadata
+            metadata: JSON.parse(payload.metadata || '{}')
+        });
+        
+        scrollToBottom();
     }
+  });
+
+  gatewayClient.on('action:confirmation_request', (payload) => {
+      pendingConfirmation.value = {
+        id: payload.id,
+        command: payload.command,
+        riskInfo: payload.risk_info,
+        isHighRisk: payload.is_high_risk || false
+      };
   });
 });
 
@@ -548,17 +548,15 @@ const highlightCommand = (command, highlight) => {
 const respondConfirmation = async (approved) => {
   if (!pendingConfirmation.value) return;
   
-  const response = {
-    type: 'confirmation_response',
-    id: pendingConfirmation.value.id,
-    approved: approved
-  };
-  
-  // Send back via global WS event bus
-  // 通过全局 WS 事件总线发送回
-  // The parent component or global store should listen to this and send via WS
-  // 父组件或全局 store 应监听此事件并通过 WS 发送
-  await emit('ws-send', response);
+  // Send back via Gateway
+  try {
+      await gatewayClient.sendRequest('backend', 'confirm', {
+          id: pendingConfirmation.value.id,
+          approved: approved ? 'true' : 'false'
+      });
+  } catch (e) {
+      console.error("Failed to send confirmation response:", e);
+  }
   
   pendingConfirmation.value = null;
 };
@@ -727,12 +725,9 @@ const isSending = ref(false);
 const isInputLocked = computed(() => {
   return isSending.value || (activeThoughtChain.value && activeThoughtChain.value.isThinking);
 });
-const isConnected = ref(false);
-let reconnectTimer = null;
 
 // 配置
 const API_BASE = 'http://localhost:9120';
-const WS_BASE = 'ws://localhost:9120';
 const HISTORY_LIMIT = 30;
 
 const parseMessage = (content) => {
@@ -900,88 +895,62 @@ const handleConfirmDelete = async () => {
   }
 };
 
-// --- 实时思维 WebSocket 逻辑 ---
-const connectWS = () => {
-  if (ws) ws.close();
-  ws = new WebSocket(`${WS_BASE}/ws/voice`);
+// --- Gateway Event Logic ---
+const handleVoiceUpdate = (params) => {
+  if (params.target === 'pet_view_only') return;
   
-  ws.onopen = () => {
-    isConnected.value = true;
-  };
-  
-  ws.onclose = () => {
-    isConnected.value = false;
-    reconnectTimer = setTimeout(connectWS, 3000);
-  };
-  
-  ws.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data);
-      handleWSMessage(data);
-    } catch (e) {
-      console.error('WS Parse Error', e);
+  if (params.status === 'thinking') {
+    ensureActiveThoughtChain();
+    if (params.detail) {
+      const stepContent = params.detail;
+      const lastStep = activeThoughtChain.value.steps[activeThoughtChain.value.steps.length - 1];
+      if (!lastStep || lastStep.content !== stepContent) {
+         activeThoughtChain.value.steps.push({
+           type: 'thinking', 
+           content: stepContent
+         });
+         scrollToBottom();
+      }
     }
+  } else if (params.status === 'idle') {
+    if (activeThoughtChain.value) {
+      activeThoughtChain.value.isThinking = false;
+      activeThoughtChain.value = null; 
+    }
+  }
+};
+
+const handleTextStream = (params) => {
+  if (params.target === 'pet_view_only') return;
+
+  if (!isSending.value) {
+    messages.value.push({ role: 'assistant', content: params.content, timestamp: new Date().toISOString() });
+    scrollToBottom();
+  }
+};
+
+const handleTranscription = (params) => {
+  if (!isSending.value) {
+    messages.value.push({ role: 'user', content: params.text, timestamp: new Date().toISOString() });
+    scrollToBottom();
+  }
+};
+
+const handleCommandRunning = (params) => {
+  activeCommand.value = {
+    command: params.command,
+    pid: params.pid
   };
 };
 
-const handleWSMessage = (data) => {
-  if (data.type === 'status') {
-    if (data.target === 'pet_view_only') return;
-    
-    if (data.content === 'thinking') {
-      ensureActiveThoughtChain();
-      if (data.detail) {
-        const stepContent = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail);
-        const lastStep = activeThoughtChain.value.steps[activeThoughtChain.value.steps.length - 1];
-        if (!lastStep || lastStep.content !== stepContent) {
-           activeThoughtChain.value.steps.push({
-             type: 'thinking', 
-             content: stepContent
-           });
-           scrollToBottom();
-        }
-      }
-    } else if (data.content === 'idle') {
-      if (activeThoughtChain.value) {
-        activeThoughtChain.value.isThinking = false;
-        activeThoughtChain.value = null; 
-      }
-    }
-  }
-  else if (data.type === 'text_response') {
-    // Check target: If 'pet_view_only', ignore in Chat Interface
-    // 检查目标：如果是 'pet_view_only'，在聊天界面中忽略
-    if (data.target === 'pet_view_only') {
-      return;
-    }
+const handleCommandFinished = (params) => {
+  activeCommand.value = null;
+};
 
-    if (!isSending.value) {
-      messages.value.push({ role: 'assistant', content: data.content, timestamp: new Date().toISOString() });
-      scrollToBottom();
-      // Removed sync event emission as per user request
-      // 根据用户请求移除了同步事件发射
+const handleModeUpdate = (params) => {
+    if (params.mode === 'work') {
+      emitEvent('mode-change', params.is_active === 'true' || params.is_active === true);
     }
-  }
-  else if (data.type === 'transcription') {
-    if (!isSending.value) {
-      messages.value.push({ role: 'user', content: data.content, timestamp: new Date().toISOString() });
-      scrollToBottom();
-    }
-  }
-  else if (data.type === 'mode_update') {
-    if (data.mode === 'work') {
-      emitEvent('mode-change', data.is_active);
-    }
-  }
-  else if (data.type === 'command_running') {
-    activeCommand.value = {
-      command: data.command,
-      pid: data.pid
-    };
-  }
-  else if (data.type === 'command_finished') {
-    activeCommand.value = null;
-  }
 };
 
 const activeThoughtChain = ref(null);
@@ -1153,7 +1122,13 @@ let unlistenDelete = null;
 let visionCheckInterval = null;
 
 onMounted(async () => {
-  connectWS();
+  gatewayClient.on('action:voice_update', handleVoiceUpdate);
+  gatewayClient.on('action:text_stream', handleTextStream);
+  gatewayClient.on('action:transcription', handleTranscription);
+  gatewayClient.on('action:command_running', handleCommandRunning);
+  gatewayClient.on('action:command_finished', handleCommandFinished);
+  gatewayClient.on('action:mode_update', handleModeUpdate);
+
   fetchHistory();
   checkVisionCapability();
   // Poll for vision capability changes (e.g. model switch)
@@ -1200,8 +1175,13 @@ watch(() => props.mode, () => {
 });
 
 onUnmounted(() => {
-  if (ws) ws.close();
-  if (reconnectTimer) clearTimeout(reconnectTimer);
+  gatewayClient.off('action:voice_update', handleVoiceUpdate);
+  gatewayClient.off('action:text_stream', handleTextStream);
+  gatewayClient.off('action:transcription', handleTranscription);
+  gatewayClient.off('action:command_running', handleCommandRunning);
+  gatewayClient.off('action:command_finished', handleCommandFinished);
+  gatewayClient.off('action:mode_update', handleModeUpdate);
+
   if (visionCheckInterval) clearInterval(visionCheckInterval);
   stopGroupPolling();
   if (unlistenSync) unlistenSync();

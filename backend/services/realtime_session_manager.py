@@ -4,7 +4,6 @@ import logging
 import re
 import json
 import base64
-from fastapi import WebSocket, WebSocketDisconnect
 from typing import Optional
 from services.asr_service import get_asr_service
 from services.tts_service import get_tts_service
@@ -12,6 +11,10 @@ from services.tts_service import get_tts_service
 from database import get_session
 from models import ConversationLog, Config, AIModelConfig
 from sqlmodel import select
+from services.gateway_client import gateway_client
+from proto import perolink_pb2
+import uuid
+import time
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -27,12 +30,56 @@ class RealtimeSessionManager:
     - 推送音频流/文本流回前端
     """
     def __init__(self):
-        self.active_connections: list[WebSocket] = []
         self.asr_service = get_asr_service()
         self.tts_service = get_tts_service()
         self.current_task: Optional[asyncio.Task] = None
         self.pending_confirmations: dict[str, asyncio.Future] = {}
         self.active_commands: dict[int, asyncio.Event] = {}
+        
+    def initialize(self):
+        """Initialize Gateway listeners"""
+        gateway_client.on("stream", self.handle_stream)
+        gateway_client.on("action:voice_interaction", self.handle_voice_interaction)
+        gateway_client.on("action:confirm", self.handle_confirmation_response_action)
+        logger.info("RealtimeSessionManager initialized with GatewayClient")
+
+    async def handle_stream(self, envelope):
+        """Handle incoming audio stream"""
+        # Currently we expect VAD to be done on client, receiving full speech segment?
+        # Or raw stream? 
+        # If stream_id implies a session.
+        # For now, let's assume client sends a stream that represents a "speech_end" equivalent or raw chunks.
+        # But looking at previous logic: "speech_end" event contained base64 data.
+        # DataStream payload has bytes.
+        
+        # If it's a complete audio file (simulated stream):
+        if envelope.stream.is_end:
+             # Process as voice turn
+             await self._process_voice_turn_gateway(envelope.source_id, envelope.stream.data, envelope.trace_id)
+
+    async def handle_voice_interaction(self, envelope):
+        """Handle voice control messages (text, status, etc)"""
+        req = envelope.request
+        msg_type = req.params.get("type")
+        
+        if msg_type == "text":
+            # Handle text input equivalent to voice
+            pass # TODO
+
+    async def handle_confirmation_response_action(self, envelope):
+        """Handle confirmation response via ActionRequest"""
+        req = envelope.request
+        req_id = req.params.get("id")
+        approved = req.params.get("approved") == "true"
+        
+        if req_id in self.pending_confirmations:
+            future = self.pending_confirmations[req_id]
+            if not future.done():
+                future.set_result(approved)
+        else:
+            logger.warning(f"收到未知请求的确认: {req_id}")
+
+    # ... existing methods ...
 
     def register_skippable_command(self, pid: int, event: asyncio.Event):
         """注册一个可跳过等待的命令"""
@@ -50,6 +97,202 @@ class RealtimeSessionManager:
             self.active_commands[pid].set()
             return True
         return False
+
+    async def broadcast_gateway(self, message: dict):
+        """Broadcast message via Gateway"""
+        envelope = perolink_pb2.Envelope()
+        envelope.id = str(uuid.uuid4())
+        envelope.source_id = gateway_client.device_id
+        envelope.target_id = "broadcast"
+        envelope.timestamp = int(time.time() * 1000)
+        
+        envelope.request.action_name = "voice_update"
+        for k, v in message.items():
+            envelope.request.params[k] = str(v)
+            
+        await gateway_client.send(envelope)
+
+    async def broadcast(self, message: dict):
+        """[Deprecated] Forward legacy broadcast calls to Gateway"""
+        await self.broadcast_gateway(message)
+
+    async def send_audio_stream_gateway(self, target_id: str, trace_id: str, audio_path: str):
+        """Send audio file as DataStream via Gateway"""
+        try:
+            with open(audio_path, "rb") as f:
+                audio_data = f.read()
+            
+            envelope = perolink_pb2.Envelope()
+            envelope.id = str(uuid.uuid4())
+            envelope.source_id = gateway_client.device_id
+            envelope.target_id = target_id
+            envelope.timestamp = int(time.time() * 1000)
+            envelope.trace_id = trace_id
+            
+            # Use DataStream
+            envelope.stream.stream_id = str(uuid.uuid4())
+            envelope.stream.data = audio_data
+            envelope.stream.is_end = True
+            envelope.stream.content_type = "audio/mp3" # or wav based on file
+            
+            await gateway_client.send(envelope)
+        except Exception as e:
+            logger.error(f"Failed to send audio stream via gateway: {e}")
+
+    async def _process_voice_turn_gateway(self, source_id: str, audio_bytes: bytes, trace_id: str):
+        """Handle voice turn via Gateway"""
+        import time
+        start_turn_time = time.time()
+        
+        # 1. Save temp file
+        temp_audio_path = f"temp_voice_gw_{source_id}_{int(time.time())}.wav"
+        try:
+            print("\n" + "="*60)
+            print(f"[Gateway Voice] Start Turn {time.strftime('%H:%M:%S')}")
+            print("="*60)
+            
+            with open(temp_audio_path, "wb") as f:
+                f.write(audio_bytes)
+            
+            # 2. ASR
+            print("[ASR] Transcribing...")
+            await self.broadcast_gateway({"type": "status", "content": "listening"})
+            
+            asr_start = time.time()
+            try:
+                user_text = await self.asr_service.transcribe(temp_audio_path)
+            except Exception as e:
+                error_msg = f"ASR Failed: {str(e)}"
+                logger.error(error_msg)
+                await self.broadcast_gateway({"type": "text_response", "content": f"[{error_msg}]"})
+                await self.broadcast_gateway({"type": "status", "content": "idle"})
+                return
+
+            asr_duration = time.time() - asr_start
+            
+            if not user_text or not user_text.strip():
+                print(f"[ASR] No speech detected ({asr_duration:.2f}s).")
+                await self.broadcast_gateway({"type": "status", "content": "idle"})
+                return
+
+            print(f"[ASR] User: \"{user_text}\" ({asr_duration:.2f}s)")
+            await self.broadcast_gateway({"type": "transcription", "content": user_text})
+
+            # Reset companion timer
+            try:
+                from services.companion_service import companion_service
+                companion_service.update_activity()
+            except Exception as e:
+                logger.warning(f"Failed to update activity: {e}")
+
+            # 3. Agent
+            print("[Agent] Generating response...")
+            
+            async def report_status(status_type: str, content: str):
+                await self.broadcast_gateway({"type": "status", "content": status_type, "message": content})
+
+            await self.broadcast_gateway({"type": "status", "content": "thinking"})
+            
+            agent_start = time.time()
+            async for session in get_session():
+                # Check native voice input
+                enable_voice_input = False
+                try:
+                    config_obj = (await session.exec(select(Config).where(Config.key == "current_model_id"))).first()
+                    if config_obj and config_obj.value:
+                        model_id_db = int(config_obj.value)
+                        model_config = await session.get(AIModelConfig, model_id_db)
+                        if model_config and model_config.enable_voice:
+                            enable_voice_input = True
+                except: pass
+
+                messages_payload = [{"role": "user", "content": user_text}]
+                if enable_voice_input:
+                    try:
+                        audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
+                        messages_payload = [{
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": f"[User speaking (ASR: {user_text})]"},
+                                {"type": "input_audio", "input_audio": {"data": audio_b64, "format": "wav"}}
+                            ]
+                        }]
+                    except Exception as e:
+                        print(f"Failed to prepare audio payload: {e}")
+
+                from services.agent_service import AgentService
+                agent = AgentService(session)
+                full_response = ""
+                generation_error = None
+                
+                try:
+                    async for chunk in agent.chat(
+                        messages_payload, 
+                        source="gateway",
+                        session_id="voice_session",
+                        on_status=report_status,
+                        is_voice_mode=True,
+                        user_text_override=user_text
+                    ):
+                        if chunk:
+                            full_response += chunk
+                except Exception as e:
+                    print(f"Generation error: {e}")
+                    generation_error = str(e)
+                
+                agent_duration = time.time() - agent_start
+                print(f"[Agent] Response generated ({len(full_response)} chars, {agent_duration:.2f}s)")
+                
+                # 4. Process Response & TTS
+                ui_response = self._clean_text(full_response, for_tts=False)
+                tts_response = self._clean_text(full_response, for_tts=True)
+                
+                if not ui_response:
+                    if generation_error:
+                        ui_response = f"(Error: {generation_error})"
+                        tts_response = "Oops, something went wrong."
+                    elif full_response.strip():
+                        ui_response = "(Pero executed action...)"
+                    else:
+                        ui_response = "..."
+                if not tts_response:
+                    tts_response = "..."
+
+                # Send text
+                await self.broadcast_gateway({"type": "status", "content": "speaking"})
+                await self.broadcast_gateway({"type": "text_response", "content": ui_response})
+
+                # TTS
+                target_voice, target_rate, target_pitch = self._get_voice_params(full_response)
+                print(f"[TTS] Synthesizing {target_voice}...")
+                tts_start = time.time()
+                audio_path = await self.tts_service.synthesize(
+                    tts_response, 
+                    voice=target_voice, 
+                    rate=target_rate, 
+                    pitch=target_pitch
+                )
+                tts_duration = time.time() - tts_start
+                
+                if audio_path:
+                    print(f"[TTS] Audio ready ({tts_duration:.2f}s). Sending stream.")
+                    await self.send_audio_stream_gateway(source_id, trace_id, audio_path)
+                else:
+                    print(f"❌ TTS Failed.")
+                
+                total_duration = time.time() - start_turn_time
+                print(f"🏁 [Gateway Voice] Turn End ({total_duration:.2f}s)\n")
+                
+                await self.broadcast_gateway({"type": "status", "content": "idle"})
+                break
+
+        except Exception as e:
+            logger.error(f"Gateway Voice Error: {e}")
+            await self.broadcast_gateway({"type": "error", "content": str(e)})
+        finally:
+            if os.path.exists(temp_audio_path):
+                try: os.remove(temp_audio_path)
+                except: pass
 
     async def request_user_confirmation(self, command: str, risk_info: dict = None, is_high_risk: bool = False) -> bool:
         """
@@ -77,13 +320,15 @@ class RealtimeSessionManager:
         
         try:
             # 广播请求
-            await self.broadcast({
+            payload = {
                 "type": "confirmation_request",
                 "id": request_id,
                 "command": command,
-                "risk_info": risk_info,
-                "is_high_risk": risk_info["level"] >= 2 # 供前端快速判断样式
-            })
+                "risk_info": json.dumps(risk_info), # Gateway params must be string
+                "is_high_risk": str(risk_info["level"] >= 2)
+            }
+            await self.broadcast_gateway(payload)
+            # Legacy broadcast removed
             
             # 等待响应 (设置超时，例如 5 分钟)
             result = await asyncio.wait_for(future, timeout=300)
@@ -245,344 +490,9 @@ class RealtimeSessionManager:
         """
         return {}
 
-    async def broadcast(self, message: dict):
-        """向所有连接的客户端广播消息"""
-        disconnected = []
-        for connection in self.active_connections:
-            try:
-                await connection.send_json(message)
-            except Exception as e:
-                logger.warning(f"向客户端广播失败: {e}")
-                disconnected.append(connection)
-        
-        for connection in disconnected:
-            if connection in self.active_connections:
-                self.active_connections.remove(connection)
-
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-        logger.info("实时语音客户端已连接")
-
-    def disconnect(self, websocket: WebSocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
-        logger.info("实时语音客户端已断开")
-
-    async def handle_websocket(self, websocket: WebSocket):
-        await self.connect(websocket)
-        try:
-            while True:
-                # 接收前端发送的消息
-                # 消息格式: {"type": "audio", "data": "base64..."} 或 {"type": "text", "content": "..."}
-                message = await websocket.receive_json()
-                
-                if message.get("type") == "audio_chunk":
-                    # 处理音频分片 (暂存或流式识别)
-                    # 为了简化，我们假设前端已经做了 VAD，发送的是一段完整的语音 (speech_end)
-                    pass
-                
-                elif message.get("type") == "confirmation_response":
-                    # 用户确认响应
-                    req_id = message.get("id")
-                    approved = message.get("approved")
-                    
-                    if req_id in self.pending_confirmations:
-                        future = self.pending_confirmations[req_id]
-                        if not future.done():
-                            future.set_result(approved)
-                    else:
-                        logger.warning(f"收到未知请求的确认: {req_id}")
-
-                elif message.get("type") == "speech_end":
-                    # 语音结束，开始处理
-                    audio_data_base64 = message.get("data")
-                    if audio_data_base64:
-                        # 1. 检查是否有正在进行的任务 (打断机制)
-                        if self.current_task and not self.current_task.done():
-                            print("[语音] 检测到打断！正在取消当前思考任务...")
-                            self.current_task.cancel()
-                            try:
-                                await self.current_task
-                            except asyncio.CancelledError:
-                                print("[语音] 上一个任务已成功取消。")
-                            except Exception as e:
-                                print(f"[语音] 取消上一个任务时出错: {e}")
-                        
-                        # 2. 启动新任务
-                        self.current_task = asyncio.create_task(self._process_voice_turn(websocket, audio_data_base64))
-
-        except WebSocketDisconnect:
-            self.disconnect(websocket)
-            if self.current_task and not self.current_task.done():
-                self.current_task.cancel()
-        except Exception as e:
-            logger.error(f"WebSocket 错误: {e}")
-            self.disconnect(websocket)
-            if self.current_task and not self.current_task.done():
-                self.current_task.cancel()
-
-    async def _process_voice_turn(self, websocket: WebSocket, audio_base64: str):
-        """处理一轮语音对话"""
-        import time
-        start_turn_time = time.time()
-        
-        # 1. 保存临时音频文件
-        temp_audio_path = f"temp_voice_{id(websocket)}.wav"
-        try:
-            print("\n" + "="*60)
-            print(f"[语音] 开始新一轮对话 {time.strftime('%H:%M:%S')}")
-            print("="*60)
-            
-            with open(temp_audio_path, "wb") as f:
-                f.write(base64.b64decode(audio_base64))
-            
-            # 2. ASR: 语音转文字 (无论是否原生多模态，都需要 ASR 文本用于长记忆搜索和对话历史)
-            print("[ASR] 正在转录音频...")
-            await self.broadcast({"type": "status", "content": "listening"})
-            
-            asr_start = time.time()
-            try:
-                user_text = await self.asr_service.transcribe(temp_audio_path)
-            except Exception as e:
-                error_msg = f"语音识别失败: {str(e)}"
-                logger.error(error_msg)
-                await self.broadcast({"type": "text_response", "content": f"[{error_msg}]"})
-                await self.broadcast({"type": "status", "content": "idle"})
-                return
-
-            asr_duration = time.time() - asr_start
-            
-            if not user_text or not user_text.strip():
-                print(f"[ASR] 未检测到语音 ({asr_duration:.2f}s)。")
-                await self.broadcast({"type": "status", "content": "idle"})
-                return
 
 
-            print(f"[ASR] 用户说: \"{user_text}\" ({asr_duration:.2f}s)")
-            await self.broadcast({"type": "transcription", "content": user_text})
 
-            # 重置陪伴模式定时器
-            try:
-                from services.companion_service import companion_service
-                companion_service.update_activity()
-            except Exception as e:
-                logger.warning(f"[RealtimeSessionManager] 重置陪伴定时器失败: {e}")
-
-            # 3. Agent: 获取回复
-            print("[Agent] 正在生成响应...")
-            
-            async def report_status(status_type: str, content: str):
-                """内部回调，用于将 Agent 的进度推送到前端"""
-                print(f"   ⏳ [Status] {content}")
-                try:
-                    await self.broadcast({"type": "status", "content": status_type, "message": content})
-                except Exception as e:
-                    logger.warning(f"发送状态失败 (连接可能已关闭): {e}")
-                    # 如果连接断开，这里抛出异常会中断 Agent 的执行
-                    # 为了不让 AgentService 记为 Error，我们可以选择吞掉异常，
-                    # 或者让 AgentService 识别这种中断。
-                    # 目前选择抛出，以便停止后续无用的生成。
-                    if websocket not in self.active_connections:
-                        raise WebSocketDisconnect()
-
-            try:
-                await self.broadcast({"type": "status", "content": "thinking"})
-            except Exception:
-                pass # Broadcast handles errors
-            
-            if websocket not in self.active_connections:
-                return # 发送失败直接结束
-            
-            agent_start = time.time()
-            # 获取数据库 session
-            async for session in get_session():
-                # --- 检查原生音频输入 ---
-                enable_voice_input = False
-                try:
-                    # 1. 获取当前模型 ID
-                    config_obj = (await session.exec(select(Config).where(Config.key == "current_model_id"))).first()
-                    if config_obj and config_obj.value:
-                        model_id_db = int(config_obj.value)
-                        # 2. 获取模型配置
-                        model_config = await session.get(AIModelConfig, model_id_db)
-                        if model_config and model_config.enable_voice:
-                            enable_voice_input = True
-                except Exception as e:
-                    logger.warning(f"检查语音输入配置失败: {e}")
-
-                messages_payload = [{"role": "user", "content": user_text}]
-                
-                if enable_voice_input:
-                    print(f"[语音] 原生音频输入已启用。路径: {temp_audio_path}")
-                    try:
-                        if os.path.exists(temp_audio_path):
-                            with open(temp_audio_path, "rb") as f:
-                                audio_bytes = f.read()
-                                audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
-                            
-                            print(f"[语音] 音频已加载。大小: {len(audio_bytes)} 字节。正在准备负载...")
-                            
-                            # --- 实验性功能：多模态兼容性 Payload ---
-                            # 我们同时提供新的 OpenAI 'input_audio'
-                            # 以及许多 Gemini 代理使用的 'data_url' 风格的内容。
-                            messages_payload = [{
-                                "role": "user",
-                                "content": [
-                                    {
-                                        "type": "text",
-                                        "text": f"[主人正在通过语音交流 (ASR 预览: {user_text})]" 
-                                    },
-                                    {
-                                        "type": "input_audio", 
-                                        "input_audio": {
-                                            "data": audio_b64,
-                                            "format": "wav" 
-                                        }
-                                    },
-                                    # Hack: 一些 Gemini 代理使用 image_url 来传输音频数据
-                                    {
-                                        "type": "image_url",
-                                        "image_url": {
-                                            "url": f"data:audio/wav;base64,{audio_b64}"
-                                        }
-                                    }
-                                ]
-                            }]
-                            print("[语音] 已发送鲁棒的多模态 (文本 + 音频 + 兼容性) 负载给 LLM。")
-                        else:
-                            print(f"[语音] 未找到音频文件: {temp_audio_path}")
-                            messages_payload = [{"role": "user", "content": user_text}]
-                    except Exception as e:
-                        print(f"[语音] 准备音频负载失败: {e}")
-                        import traceback
-                        traceback.print_exc()
-                        # 回退到纯文本模式
-                        messages_payload = [{"role": "user", "content": user_text}]
-
-                from services.agent_service import AgentService
-                agent = AgentService(session)
-                full_response = ""
-                # tts_text_parts = ["", ""] # [first_turn_text, last_turn_text] (已弃用)
-                
-                def report_status_wrapped(status, msg):
-                    return report_status(status, msg)
-                
-                # 流式获取回复文本
-                generation_error = None
-                try:
-                    async for chunk in agent.chat(
-                        messages_payload, 
-                        source="desktop",
-                        session_id="voice_session",
-                        on_status=report_status_wrapped,
-                        is_voice_mode=True,
-                        user_text_override=user_text # 在此处传递文本用于记忆/日志记录
-                    ):
-                        if chunk:
-                            full_response += chunk
-                except WebSocketDisconnect:
-                    print("[语音] 用户在生成过程中断开连接。")
-                    return
-                except Exception as e:
-                    print(f"[语音] 生成过程中出错: {e}")
-                    generation_error = str(e)
-                
-                agent_duration = time.time() - agent_start
-                print(f"[Agent] 响应已生成 (长度: {len(full_response)}, {agent_duration:.2f}s)")
-                
-                # 4. 处理回复：解析标签、保存日志 (AgentService 已处理)、TTS
-                print("[Process] 正在解析标签并准备 TTS...")
-                
-                # 4.1 解析并执行元数据 (AgentService.chat 内部已调用 _save_parsed_metadata)
-                # 但由于 _save_parsed_metadata 是在 chat 结束时调用的，这里我们可以保留或删除
-                # 为了安全，AgentService.chat 已经处理了 _save_parsed_metadata
-                
-                # 4.2 提取纯文本
-                # UI 展示用：保留完整思考过程和动作描述
-                ui_response = self._clean_text(full_response, for_tts=False)
-                
-                # TTS 合成用：仅合成首轮和末轮的内容，并移除思考过程和动作描述
-                # [优化] 直接使用 full_response 进行清洗，依赖 _clean_text 的 Smart Filter 策略
-                # 这样可以更准确地提取“最终回答”，而不是机械地拼接首尾轮次
-                tts_response = self._clean_text(full_response, for_tts=True)
-                
-                if not ui_response:
-                    # 如果原始内容不为空（说明执行了动作但没有说话），则显示操作提示
-                    if generation_error:
-                        ui_response = f"(发生错误: {generation_error})"
-                        tts_response = "哎呀，我好像出错了。"
-                    elif full_response and full_response.strip():
-                        ui_response = "（Pero默默执行了操作...）"
-                    else:
-                        ui_response = "唔...Pero好像走神了..." # 针对完全空回复的回退
-                if not tts_response:
-                    tts_response = "唔...Pero好像走神了..." # 回退
-
-                # 4.3 发送纯文本给前端展示
-                try:
-                    await self.broadcast({"type": "status", "content": "speaking"})
-                    
-                    await self.broadcast({"type": "text_response", "content": ui_response})
-                except Exception as e:
-                    logger.warning(f"发送文本响应失败: {e}")
-                    return
-
-                # 4.4 动态选择音色和语速
-                target_voice, target_rate, target_pitch = self._get_voice_params(full_response)
-                
-                # 4.6 TTS 合成并播放
-                print(f"[TTS] 正在合成 {target_voice} (语速: {target_rate})...")
-                tts_start = time.time()
-                audio_path = await self.tts_service.synthesize(
-                    tts_response, 
-                    voice=target_voice, 
-                    rate=target_rate, 
-                    pitch=target_pitch
-                )
-                tts_duration = time.time() - tts_start
-                
-                if audio_path:
-                    print(f"[TTS] 音频就绪 ({tts_duration:.2f}s)，正在发送给客户端。")
-                    # 读取音频文件并转为 base64 发送
-                    try:
-                        ext = os.path.splitext(audio_path)[1].replace('.', '') or "mp3"
-                        with open(audio_path, "rb") as f:
-                            audio_content = f.read()
-                            audio_b64 = base64.b64encode(audio_content).decode('utf-8')
-                            await websocket.send_json({
-                                "type": "audio_response", 
-                                "data": audio_b64,
-                                "format": ext
-                            })
-                    except Exception as e:
-                        logger.warning(f"发送音频响应失败: {e}")
-                        return
-                else:
-                    print(f"❌ [4/4] TTS: 合成音频失败 ({tts_duration:.2f}s)。")
-                
-                total_duration = time.time() - start_turn_time
-                print("="*60)
-                print(f"🏁 [语音流程] 本轮结束，耗时 {total_duration:.2f}s")
-                print("="*60 + "\n")
-                
-                try:
-                    await self.broadcast({"type": "status", "content": "idle"})
-                except:
-                    pass
-                break # 只处理一次 session
-
-        except WebSocketDisconnect:
-            logger.info("客户端在语音对话期间断开连接")
-        except Exception as e:
-            logger.error(f"处理语音对话出错: {e}")
-            try:
-                await websocket.send_json({"type": "error", "content": str(e)})
-            except:
-                pass # 忽略发送错误信息时的失败
-        finally:
-            if os.path.exists(temp_audio_path):
-                os.remove(temp_audio_path)
 
 # 单例
 realtime_session_manager = RealtimeSessionManager()

@@ -1,0 +1,70 @@
+syntax = "proto3";
+
+package perolink;
+
+option go_package = "github.com/YoKONCy/PeroLink/proto;perolink";
+
+// 消息信封：所有通信的最外层包装
+message Envelope {
+  string id = 1;            // 消息唯一 ID (UUID)
+  string source_id = 2;     // 发送方 Node ID
+  string target_id = 3;     // 接收方 Node ID ("master", "broadcast", or specific UUID)
+  int64 timestamp = 4;      // Unix 时间戳
+  string trace_id = 5;      // 链路追踪 ID
+
+  // 消息载荷 (OneOf 保证只能是其中一种)
+  oneof payload {
+    Heartbeat heartbeat = 10;
+    Hello hello = 11;             // 握手/认证
+    CapabilityRegister register = 12; // 能力注册
+    
+    ActionRequest request = 20;   // 请求执行动作
+    ActionResponse response = 21; // 动作执行结果
+    
+    DataStream stream = 30;       // 二进制流 (音频/视频片段)
+  }
+}
+
+message Heartbeat {
+  int64 seq = 1;
+}
+
+message Hello {
+  string token = 1;             // 鉴权 Token
+  string device_name = 2;       // 设备名称 (e.g. "My iPhone")
+  string client_version = 3;    // 客户端版本
+  string platform = 4;          // "android", "windows", "linux"
+}
+
+// 能力定义
+message Capability {
+  string name = 1;              // 能力名称 (e.g. "camera.take_photo")
+  string description = 2;       // 描述
+  repeated string params = 3;   // 参数列表描述
+}
+
+message CapabilityRegister {
+  repeated Capability capabilities = 1;
+}
+
+// 动作请求
+message ActionRequest {
+  string action_name = 1;       // 要调用的能力名称
+  map<string, string> params = 2; // 参数 (KV 形式，简单起见)
+  // 复杂参数可以用 JSON string 传递
+}
+
+// 动作响应
+message ActionResponse {
+  string request_id = 1;        // 对应的请求 ID
+  int32 status = 2;             // 0=OK, 1=Error
+  string data = 3;              // 结果数据 (JSON string or text)
+  string error_msg = 4;         // 错误信息
+}
+
+message DataStream {
+  string stream_id = 1;
+  bytes data = 2;
+  bool is_end = 3;
+  string content_type = 4;      // "audio/pcm", "image/jpeg"
+}

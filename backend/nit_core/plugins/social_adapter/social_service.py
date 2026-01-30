@@ -1636,9 +1636,28 @@ class SocialService:
                 messages.append({"role": "system", "content": instruction_prompt})
                 
                 logger.info(f"正在呼叫会话 {session.session_id} 的社交 Agent ({current_mode})...")
-                logger.info(f"[{session.session_id}] 准备调用 agent.social_chat...")
-                response_text = await agent.social_chat(messages, session_id=f"social_{session.session_id}")
-                logger.info(f"[{session.session_id}] agent.social_chat 返回。")
+                logger.info(f"[{session.session_id}] 准备调用 agent.chat (Unified Pipeline)...")
+                
+                # [Stage 3 Refactor] Use unified chat pipeline with Capability Filter
+                response_text = ""
+                try:
+                    chat_gen = agent.chat(
+                        messages, 
+                        source="social", 
+                        session_id=f"social_{session.session_id}",
+                        capabilities=["social"],
+                        skip_system_prompt=True,
+                        agent_id_override=agent_manager.active_agent_id if 'agent_manager' in locals() else None
+                    )
+                    
+                    async for chunk in chat_gen:
+                        response_text += chunk
+                        
+                except Exception as e:
+                    logger.error(f"[{session.session_id}] Agent.chat 调用失败: {e}")
+                    response_text = "" # Fallback
+
+                logger.info(f"[{session.session_id}] agent.chat 完成。")
                 
                 logger.info(f"社交 Agent 响应: {response_text}")
                 

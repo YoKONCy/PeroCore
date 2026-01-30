@@ -316,6 +316,37 @@ class MemoryService:
             await session.commit()
             await session.refresh(user_log)
             await session.refresh(assistant_log)
+
+            # [Feature] Broadcast new messages to Gateway (Event-Driven)
+            try:
+                from services.gateway_client import gateway_client
+                from proto import perolink_pb2
+                import uuid
+                import time
+
+                async def broadcast_log(log):
+                    envelope = perolink_pb2.Envelope()
+                    envelope.id = str(uuid.uuid4())
+                    envelope.source_id = "memory_service"
+                    envelope.target_id = "broadcast"
+                    envelope.timestamp = int(time.time() * 1000)
+                    
+                    envelope.request.action_name = "new_message"
+                    envelope.request.params["id"] = str(log.id)
+                    envelope.request.params["role"] = log.role
+                    envelope.request.params["content"] = log.content
+                    envelope.request.params["timestamp"] = log.timestamp.isoformat() if log.timestamp else ""
+                    envelope.request.params["agent_id"] = log.agent_id or ""
+                    envelope.request.params["session_id"] = log.session_id or ""
+                    envelope.request.params["metadata"] = log.metadata_json or "{}"
+                    
+                    await gateway_client.send(envelope)
+
+                await broadcast_log(user_log)
+                await broadcast_log(assistant_log)
+            except Exception as gw_e:
+                print(f"[MemoryService] Broadcast failed: {gw_e}")
+
             return user_log, assistant_log
         except Exception as e:
             await session.rollback()
