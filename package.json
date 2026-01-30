@@ -92,7 +92,14 @@
           "!**/__pycache__",
           "!**/*.pyc",
           "!**/.git*",
-          "!**/.DS_Store"
+          "!**/.DS_Store",
+          "!**/target",
+          "!**/node_modules",
+          "!**/*.rs",
+          "!**/Cargo.toml",
+          "!**/Cargo.lock",
+          "!**/*.pdb",
+          "!**/nit_core/plugins/social_adapter/NapCat"
         ]
       }
     ],
