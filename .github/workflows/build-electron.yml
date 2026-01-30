@@ -40,6 +40,49 @@ jobs:
           cache: 'npm'
           cache-dependency-path: PeroCore-Electron/package.json
 
+      - name: Setup Python for Dependency Installation
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10' 
+
+      - name: Setup Python Environment
+        shell: powershell
+        run: |
+          # 1. Download Embedded Python
+          $Url = "https://www.python.org/ftp/python/3.10.11/python-3.10.11-embed-amd64.zip"
+          $ZipPath = "python.zip"
+          $Dest = "PeroCore-Electron/resources/python"
+          
+          echo "Downloading Python..."
+          Invoke-WebRequest -Uri $Url -OutFile $ZipPath
+          
+          echo "Extracting Python..."
+          New-Item -ItemType Directory -Force -Path $Dest
+          Expand-Archive -Path $ZipPath -DestinationPath $Dest -Force
+          
+          # 2. Configure .pth to enable site-packages
+          $PthFile = "$Dest/python310._pth"
+          $Content = Get-Content $PthFile
+          $Content = $Content -replace "#import site", "import site"
+          $Content | Set-Content $PthFile
+          
+          # 3. Install Dependencies
+           echo "Installing dependencies..."
+           $SitePackages = "$Dest/Lib/site-packages"
+           New-Item -ItemType Directory -Force -Path $SitePackages
+           
+           # Use the runner's pip to install into the embedded python's site-packages
+           # We force cpu-only torch to reduce size (unless user wants cuda)
+           # We install torch first with the CPU index
+           
+           pip install --target $SitePackages torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+           
+           # Then install the rest
+           pip install --target $SitePackages -r PeroCore-Electron/backend/requirements.txt --no-warn-script-location
+          
+          # Clean up
+          Remove-Item $ZipPath
+
       - name: Install Dependencies
         run: |
           cd PeroCore-Electron
