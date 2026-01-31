@@ -1,7 +1,7 @@
 {
   "name": "pero-core",
   "private": true,
-  "version": "1.0.0",
+  "version": "0.5.0",
   "license": "Apache-2.0",
   "main": "dist-electron/main/index.js",
   "scripts": {
@@ -55,17 +55,17 @@
     "cross-env": "^10.1.0",
     "electron": "^40.0.0",
     "electron-builder": "^26.4.0",
+    "esbuild": "^0.25.12",
+    "markdown-it-mathjax3": "^4.3.2",
     "postcss": "^8.5.6",
     "rimraf": "^6.1.2",
     "tailwindcss": "^4.1.18",
     "ts-proto": "^2.11.1",
-    "vite": "npm:rolldown-vite@^7.2.5",
+    "vite": "^6.2.0",
     "vitepress": "^1.6.4",
     "wait-on": "^9.0.3"
   },
-  "overrides": {
-    "vite": "npm:rolldown-vite@^7.2.5"
-  },
+  "overrides": {},
   "build": {
     "appId": "com.perocore.dev",
     "productName": "PeroCore",
@@ -116,7 +116,8 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "${productName}-Setup-${version}.${ext}"
     }
   }
 }

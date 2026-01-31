@@ -1,4 +1,7 @@
 import { defineConfig } from 'vitepress'
+import mathjax3 from 'markdown-it-mathjax3'
+import fs from 'fs'
+import path from 'path'
 
 // https://vitepress.dev/reference/site-config
 export default defineConfig({
@@ -6,6 +9,16 @@ export default defineConfig({
   description: "Documentation for PeroCore - The AI Desktop Companion",
   head: [['link', { rel: 'icon', href: '/logo.png' }]],
   appearance: true, // Enable dark mode toggle
+  markdown: {
+    config: (md) => {
+      md.use(mathjax3)
+    },
+    languages: [
+      {
+        ...JSON.parse(fs.readFileSync(path.resolve(__dirname, './grammars/nit.tmLanguage.json'), 'utf-8'))
+      }
+    ]
+  },
   themeConfig: {
     logo: '/logo.png',
     // https://vitepress.dev/reference/default-theme-config
@@ -27,7 +40,6 @@ export default defineConfig({
         items: [
           { text: '记忆系统', link: '/core-systems/memory' },
           { text: '扩散激活算法', link: '/core-systems/spreading-activation' },
-          { text: '社交模式', link: '/core-systems/social' },
           { text: 'MDP 系统', link: '/core-systems/mdp' },
           { text: 'NIT 协议', link: '/core-systems/nit' }
         ]
@@ -42,6 +54,7 @@ export default defineConfig({
       {
         text: '🌐 生态扩展',
         items: [
+          { text: '社交模式', link: '/ecosystem/social' },
           { text: '浏览器插件', link: '/ecosystem/extension' },
           { text: '移动端 App', link: '/ecosystem/mobile' },
           { text: '创意工坊', link: '/ecosystem/workshop' }
@@ -60,3 +73,4 @@ export default defineConfig({
     ]
   }
 })
+

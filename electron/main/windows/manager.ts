@@ -49,7 +49,7 @@ export class WindowManager {
     if (process.env.VITE_DEV_SERVER_URL) {
       return `${process.env.VITE_DEV_SERVER_URL}#${route}`
     } else {
-      return `file://${join(__dirname, '../../dist/index.html')}#${route}`
+      return `file://${join(__dirname, '../../../dist/index.html')}#${route}`
     }
   }
 

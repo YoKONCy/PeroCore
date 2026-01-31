@@ -1,50 +1,44 @@
 # 项目简介 (Introduction)
 
-PeroCore 是一个运行在您桌面上的智能 AI 伴侣核心。它不仅仅是一个聊天机器人，更是一个深度集成到操作系统、拥有长期记忆与视觉感知能力的智能体。
+> **"Technology should not be cold. We build memories, not just databases."**
+
+欢迎来到 PeroCore 的世界。
+
+这不是另一个冰冷的“工具类” AI 助手，而是一个尝试赋予 AI **“温度”**与**“灵魂”**的项目。PeroCore 的诞生源于我们对“伙伴”最朴素的渴望：一个能记住你的偏好、理解你的情绪、甚至能主动关怀你的桌面伙伴。
+
+## 核心愿景 (Vision)
+
+-   **从“搜索”到“联想”**：基于自研的 KDN 算子，PeroCore 能够像人脑一样实现逻辑联想，而非死板的向量检索。
+-   **从“被动”到“主动”**：通过 AuraVision 视觉引擎，它能感知你的桌面状态，在你需要时递上一句鼓励或安慰。
+-   **从“工具”到“羁绊”**：通过 NIT 协议，它在与你的互动中不断进化，学习如何成为更懂你的那个“人”。
 
 ## 技术架构 (Architecture)
 
-PeroCore 采用现代化的 **Electron + Python** 双进程架构，结合了 Web 前端的灵活性与 Python AI 生态的强大能力。
+PeroCore 采用现代化的 **Electron + Python** 双进程架构，巧妙地平衡了 Web 开发的极致体验与 AI 算法的深厚底蕴。通过 Go Gateway 实现多端同步，并利用 Rust 重构核心算子，确保每一声“问候”都能毫秒级响应。
 
 ### 前端 (Frontend / Electron)
 
 ![Electron](https://img.shields.io/badge/Electron-47848F?style=for-the-badge&logo=electron&logoColor=white) ![Vue.js](https://img.shields.io/badge/Vue.js-35495E?style=for-the-badge&logo=vue.js&logoColor=4FC08D) ![Vite](https://img.shields.io/badge/Vite-646CFF?style=for-the-badge&logo=vite&logoColor=white) ![Element Plus](https://img.shields.io/badge/Element%20Plus-409EFF?style=for-the-badge&logo=element-plus&logoColor=white) ![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white) ![Three.js](https://img.shields.io/badge/Three.js-000000?style=for-the-badge&logo=three.js&logoColor=white)
 
-- **职责**: 负责用户界面渲染、窗口管理、系统托盘以及 Python 后端进程的生命周期管理。
+-   **职责**: 构建 Pero 的“躯壳”。负责极致的 UI 渲染、流畅的窗口管理以及对后端进程的精准生命周期控制。
 
 ### 后端 (Backend / Python)
 
 ![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white) ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white) ![SQLModel](https://img.shields.io/badge/SQLModel-000000?style=for-the-badge&logo=postgresql&logoColor=white)
 
-- **职责**: 处理自然语言理解、记忆检索、视觉分析、NIT 工具执行以及所有复杂的 AI 逻辑。
+-   **职责**: Pero 的“思维中枢”。承载 MDP 提示词工程、记忆检索逻辑、视觉分析意图以及复杂的 NIT 工具调度。
 
 ### 底层核心 (Low-level Core / Rust)
 
 ![Rust](https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white) ![WebAssembly](https://img.shields.io/badge/WebAssembly-654FF0?style=for-the-badge&logo=webassembly&logoColor=white)
 
-- **Rust Core (pero_memory_core)**: 高性能意图-记忆扩散引擎 (SIMD 加速)。
-- **NIT Runtime**: 高性能解释器扩展 (PyO3 绑定)。
-- **Terminal Auditor**: 终端指令审计模块 (Wasm 沙箱)。
+-   **Rust Core**: 提供毫秒级响应的 KDN 记忆算子，通过 SIMD 加速让“联想”瞬间发生。
+-   **NIT Runtime**: 为 AI 打造的指令解释器，让 Agent 调用工具像呼吸一样自然。
+-   **Terminal Auditor**: 安全沙箱，保护系统安全的同时赋予 AI 操作终端的能力。
 
 ### 通信机制 (Communication)
-- **Gateway**: 系统内置一个 GO 语言编写的高性能网关，负责前后端之间的流量分发、鉴权与长连接管理。
-- **协议**: 采用 HTTP/2 与 WebSocket 进行实时全双工通信。
 
-## 核心系统 (Core Systems)
+![Go](https://img.shields.io/badge/Go-00ADD8?style=for-the-badge&logo=go&logoColor=white) ![WebSocket](https://img.shields.io/badge/WebSocket-010101?style=for-the-badge&logo=socket.io&logoColor=white)
 
-PeroCore 由多个相互协作的智能子系统构成：
-
-### 🧠 KDN 记忆系统 (Knowledge Diffusion Network)
-不同于传统的 RAG（检索增强生成），KDN 实现了**扩散激活 (Spreading Activation)** 算法。它模拟人脑的联想机制，能够根据当前上下文“激活”相关的记忆节点，从而找回跨越时间与话题的深层逻辑关联，而非仅仅依赖关键词匹配。
-
-### 👁️ AuraVision 视觉意图
-隐私优先的视觉感知系统。AuraVision 能够实时分析屏幕内容，但在输入模型前会将图像降采样至极低分辨率（如 64x64），仅提取用户状态（如“正在编程”、“观看视频”、“空闲”）而不读取具体的文本内容，确保您的隐私安全。
-
-### 🛠️ NIT 协议 (Non-invasive Integration Tools)
-专为 AI 设计的非侵入式工具集成协议。NIT 允许 PeroCore 通过标准化的接口调用外部工具与脚本，支持复杂的流水线操作、多步依赖执行与错误自愈，赋予 AI 真正的“行动力”。
-
-### 🎭 MDP 系统 (Model-Driven Prompting)
-基于模型驱动的提示工程架构。MDP 将复杂的 Prompt 拆解为模块化的组件（如角色设定、能力描述、上下文规则），并根据当前的交互场景动态组装。这使得 PeroCore 能够流畅地在不同角色（如“工作模式”与“社交模式”）之间切换。
-
-### 💬 社交模式 (Social Mode)
-通过集成 **NapCat** (基于 OneBot 11 协议)，PeroCore 能够连接到您的社交账号（如 QQ），在群聊中以独立的身份参与互动，实现真正的“伴侣”体验。
+-   **Gateway**: 高性能 Go 语言网关，负责全双工流量分发与鉴权，它是连接 Pero 与用户各端设备的“神经纤维”。
+-   **协议**: 深度定制的协议栈，支持状态实时同步与指令下发。

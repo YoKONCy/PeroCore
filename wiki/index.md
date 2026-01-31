@@ -6,7 +6,7 @@ hero:
   text: "智能 AI 伙伴"
   tagline: "高性能记忆框架驱动"
   image:
-    src: /hero.jpg
+    src: /hero.png
     alt: PeroCore
   actions:
     - theme: brand
@@ -21,7 +21,7 @@ features:
     details: 高度模块化的现代架构
     icon: ⚡
   - title: 🧠 仿生记忆引擎
-    details: 赋予 AI 恒久记忆
+    details: 赋予永恒记忆
     icon: 🧠
   - title: 👁️ 视觉意图
     details: “所见即所思，所思即所得”
