@@ -1433,10 +1433,13 @@ const selectedDate = ref('')
 const selectedSort = ref('desc')
 
 const openIdeWorkspace = async () => {
-  try { await invoke('open_ide_window'); return; } catch(e) { console.error('打开 IDE 窗口失败:', e); ElMessage.error('无法打开 IDE 窗口'); return; }
   console.log('[仪表盘] 用户点击打开 IDE 工作区')
   try {
-      await invoke('open_ide_window')
+      if (window.electron && window.electron.invoke) {
+          await window.electron.invoke('open_ide_window')
+      } else {
+          throw new Error('Electron environment not detected')
+      }
   } catch (e) {
     console.error('打开 IDE 窗口失败:', e)
     const errorMsg = e instanceof Error ? e.message : JSON.stringify(e)
@@ -3075,7 +3078,6 @@ const deleteLog = async (logId) => {
     if (res.ok) {
       ElMessage.success('已删除')
       await fetchLogs()
-      emit('log-deleted', logId)
     } else {
       const err = await res.json()
       ElMessage.error(err.message || '删除失败')
@@ -3246,18 +3248,18 @@ onMounted(() => {
   gatewayClient.on('action:log_updated', handleLogUpdate)
 
   // Listen for monitor updates
-  try {
+  if (window.electron && window.electron.on) {
       // Add debounced history update listener
       let logFetchTimeout = null
-      listen('history-update', () => {
+      window.electron.on('history-update', () => {
         if (logFetchTimeout) clearTimeout(logFetchTimeout)
         logFetchTimeout = setTimeout(() => {
           fetchLogs()
           logFetchTimeout = null
         }, 500)
       })
-  } catch (e) {
-      console.warn('Tauri listeners not available')
+  } else {
+      console.warn('Electron listeners not available')
   }
 })
 

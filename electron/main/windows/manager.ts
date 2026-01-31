@@ -94,9 +94,15 @@ export class WindowManager {
     }
 
     this.launcherWin.loadURL(this.getPageUrl('/launcher'))
+    console.log(`[WindowManager] Loading URL: ${this.getPageUrl('/launcher')}`)
 
     this.launcherWin.on('ready-to-show', () => {
+      console.log('[WindowManager] Window ready-to-show event fired')
       this.launcherWin?.show()
+    })
+
+    this.launcherWin.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+        console.error(`[WindowManager] Failed to load: ${errorDescription} (${errorCode})`)
     })
 
     // Handle external links

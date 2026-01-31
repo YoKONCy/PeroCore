@@ -16,6 +16,6 @@ Injected Via: mdp.render("services/social/decisions/secretary_decision_group_rul
 
 **输出格式**:
 - 如果决定不说话 -> 仅输出 `PASS`。
-- 如果决定说话 -> 直接输出你要说的话，最好言简意赅！
+- 如果决定说话 -> 直接输出你要说的话，最好言简意赅，严禁带表情包！
   * 例子："笑死"、"确实"、"？"、"啊这"、"图裂了"
   * 错误示范："我决定回复：笑死" (不要带前缀！)

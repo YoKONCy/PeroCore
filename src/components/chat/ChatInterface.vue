@@ -896,7 +896,8 @@ const handleConfirmDelete = async () => {
 };
 
 // --- Gateway Event Logic ---
-const handleVoiceUpdate = (params) => {
+const handleVoiceUpdate = (data) => {
+  const params = data.params || data;
   if (params.target === 'pet_view_only') return;
   
   if (params.status === 'thinking') {
@@ -920,7 +921,8 @@ const handleVoiceUpdate = (params) => {
   }
 };
 
-const handleTextStream = (params) => {
+const handleTextStream = (data) => {
+  const params = data.params || data;
   if (params.target === 'pet_view_only') return;
 
   if (!isSending.value) {
@@ -929,25 +931,28 @@ const handleTextStream = (params) => {
   }
 };
 
-const handleTranscription = (params) => {
+const handleTranscription = (data) => {
+  const params = data.params || data;
   if (!isSending.value) {
     messages.value.push({ role: 'user', content: params.text, timestamp: new Date().toISOString() });
     scrollToBottom();
   }
 };
 
-const handleCommandRunning = (params) => {
+const handleCommandRunning = (data) => {
+  const params = data.params || data;
   activeCommand.value = {
     command: params.command,
     pid: params.pid
   };
 };
 
-const handleCommandFinished = (params) => {
+const handleCommandFinished = (data) => {
   activeCommand.value = null;
 };
 
-const handleModeUpdate = (params) => {
+const handleModeUpdate = (data) => {
+    const params = data.params || data;
     if (params.mode === 'work') {
       emitEvent('mode-change', params.is_active === 'true' || params.is_active === true);
     }

@@ -1564,7 +1564,10 @@ async def chat(
                     clean_text = re.sub(r'<[^>]+>', '', clean_text)
                     # Filter out Thinking blocks (Safety net)
                     # Use strict pattern but case insensitive
-                    clean_text = re.sub(r'【(Thinking|Monologue).*?】', '', clean_text, flags=re.S | re.IGNORECASE)
+                    # [Fix] Add support for square brackets [] and standard parentheses ()
+                    clean_text = re.sub(r'【(?:Thinking|Monologue).*?】', '', clean_text, flags=re.S | re.IGNORECASE)
+                    clean_text = re.sub(r'\[(?:Thinking|Monologue).*?\]', '', clean_text, flags=re.S | re.IGNORECASE)
+                    clean_text = re.sub(r'\((?:Thinking|Monologue).*?\)', '', clean_text, flags=re.S | re.IGNORECASE)
                     
                     # Filter out Emoji and special symbols that edge-tts might read
                     clean_text = re.sub(r'[\U00010000-\U0010ffff]', '', clean_text)
@@ -1612,10 +1615,11 @@ async def chat(
                 filler_cache_path = os.path.join(current_dir, "assets", "filler_thinking.mp3")
 
                 # 初始化过滤器，防止 TTS 读取 XML 标签和 NIT 工具调用块
-                from nit_core.dispatcher import XMLStreamFilter, NITStreamFilter
+                from nit_core.dispatcher import XMLStreamFilter, NITStreamFilter, ThinkingBlockStreamFilter
                 # 显式过滤 thought 标签和 PEROCUE 等标签
                 xml_filter = XMLStreamFilter(tag_names=["THOUGHT", "PEROCUE", "CHARACTER_STATUS", "METADATA"])
                 nit_filter = NITStreamFilter()
+                thinking_filter = ThinkingBlockStreamFilter() # 新增：专门处理思考块
                 
                 try:
                     while True:
@@ -1679,7 +1683,10 @@ async def chat(
                         # Apply Filters: First XML, then NIT
                         filtered_xml = xml_filter.filter(raw_chunk)
                         filtered_nit = nit_filter.filter(filtered_xml)
-                        tts_buffer += filtered_nit
+                        # 应用思考块过滤器：防止思考内容进入 TTS buffer 导致被读出
+                        filtered_thinking = thinking_filter.filter(filtered_nit)
+                        
+                        tts_buffer += filtered_thinking
                         
                         # 流式分句逻辑：查找分隔符
                         # 只有当 buffer 长度达到一定程度或出现标点符号时才切分，保证语调

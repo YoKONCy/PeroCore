@@ -59,14 +59,6 @@ class ReflectionService:
         
         semaphore = asyncio.Semaphore(concurrency_limit)
         
-        async def retry_task(task):
-            async with semaphore:
-                print(f"[Reflection] 正在回填失败的任务 (ID: {task.id})...")
-                # Local import to avoid circular dependency
-                from services.scorer_service import ScorerService
-                scorer_service = ScorerService(self.session)
-                await scorer_service.retry_interaction(task.id)
-        
         # 1. 查找失败的分析任务
         statement = select(ConversationLog).where(
             (ConversationLog.analysis_status == "failed") &
@@ -79,7 +71,21 @@ class ReflectionService:
             return
         
         # 2. 并发处理失败任务
-        tasks = [retry_task(task) for task in failed_tasks]
+        # 注意：必须为每个并发任务创建独立的 Session，因为 SQLAlchemy Session 不是并发安全的
+        from database import engine
+        from sqlalchemy.orm import sessionmaker
+        
+        async def retry_task(task_id):
+            async with semaphore:
+                async_session_factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+                async with async_session_factory() as local_session:
+                    print(f"[Reflection] 正在回填失败的任务 (ID: {task_id})...")
+                    # Local import to avoid circular dependency
+                    from services.scorer_service import ScorerService
+                    scorer_service = ScorerService(local_session)
+                    await scorer_service.retry_interaction(task_id)
+
+        tasks = [retry_task(task.id) for task in failed_tasks]
         await asyncio.gather(*tasks)
         
         await self.session.commit()

@@ -152,8 +152,12 @@ class GatewayClient:
             envelope.request.params["content"] = content
             envelope.request.params["target"] = target
             
+            # [Fix] Also send 'chat' event for legacy compatibility if needed
+            # But frontend listens to 'action:text_response', so this is fine.
+            # However, we must ensure content is not empty if we want to show bubble.
+            
             await self.send(envelope)
-            # logger.info(f"Broadcasted text_response: {content[:30]}...")
+            logger.info(f"Broadcasted text_response: {content[:30]}...")
         except Exception as e:
             logger.error(f"广播文本响应失败: {e}")
 

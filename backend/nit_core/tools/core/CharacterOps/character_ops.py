@@ -123,9 +123,47 @@ async def update_character_status(
             # [Feature] Broadcast State Update via Gateway
             try:
                 from services.gateway_client import gateway_client
-                await gateway_client.broadcast_pet_state(pet_state.model_dump())
+                from peroproto import perolink_pb2
+                import uuid
+                import time
+                
+                # Construct payload
+                payload = {}
+                if mood: payload["mood"] = mood
+                if vibe: payload["vibe"] = vibe
+                if mind: payload["mind"] = mind
+                
+                # Include triggers (click_messages, idle_messages, etc.)
+                if click_data: payload["click_messages"] = click_data
+                if "idle_messages" in triggers: payload["idle_messages"] = triggers["idle_messages"]
+                if "back_messages" in triggers: payload["back_messages"] = triggers["back_messages"]
+                
+                if payload:
+                    envelope = perolink_pb2.Envelope()
+                    envelope.id = str(uuid.uuid4())
+                    envelope.source_id = "backend_character_ops"
+                    envelope.target_id = "broadcast"
+                    envelope.timestamp = int(time.time() * 1000)
+                    envelope.request.action_name = "state_update"
+                    
+                    # Convert payload to JSON string for params
+                    for k, v in payload.items():
+                        if isinstance(v, (dict, list)):
+                            envelope.request.params[k] = json.dumps(v, ensure_ascii=False)
+                        else:
+                            envelope.request.params[k] = str(v)
+                            
+                    await gateway_client.send(envelope)
+                    print(f"[CharacterOps] Broadcasted state update: {payload.keys()}")
+                else:
+                    try:
+                        from services.gateway_client import gateway_client
+                        await gateway_client.broadcast_pet_state(pet_state.model_dump())
+                    except Exception as e:
+                        print(f"[CharacterOps] Broadcast failed: {e}")
+
             except Exception as e:
-                print(f"[CharacterOps] Broadcast failed: {e}")
+                print(f"[CharacterOps] Failed to broadcast state update: {e}")
             
             # No refresh needed unless we read back
             

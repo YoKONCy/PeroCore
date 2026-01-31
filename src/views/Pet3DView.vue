@@ -12,16 +12,17 @@
     <!-- UI Overlay -->
     <!-- UI 覆盖层 -->
     <div class="ui-overlay" @mouseenter="onUIEnter" @mouseleave="onUILeave">
-       <!-- Status Tags (Top Left) -->
-       <!-- 状态标签 (左上角) -->
-       <transition name="fade">
-         <div class="status-tags" v-show="showInput">
-            <div class="status-tag mood" :title="'情绪: ' + moodText">❤️ {{ moodText }}</div>
-            <div class="status-tag vibe" :title="'氛围: ' + vibeText">✨ {{ vibeText }}</div>
-            <div class="status-tag mind" :title="'内心: ' + mindText">💭 {{ mindText }}</div>
-         </div>
-       </transition>
+      <!-- Status Tags (Top Left) -->
+      <!-- 状态标签 (左上角) -->
+      <transition name="fade">
+        <div class="status-tags" v-show="showInput" :style="{ transform: `scale(${uiScale})`, transformOrigin: 'top left' }">
+           <div class="status-tag mood" :title="'情绪: ' + moodText">❤️ {{ moodText }}</div>
+           <div class="status-tag vibe" :title="'氛围: ' + vibeText">✨ {{ vibeText }}</div>
+           <div class="status-tag mind" :title="'内心: ' + mindText">💭 {{ mindText }}</div>
+        </div>
+      </transition>
 
+      <div class="ui-scalable-wrapper" :style="{ transform: `scale(${uiScale})` }">
       <!-- Floating Trigger (Light Orb) -->
       <!-- 悬浮触发器 (光球) -->
       <div 
@@ -172,6 +173,7 @@
           <div class="bubble-tail"></div>
         </div>
       </transition>
+      </div>
     </div>
 
     <!-- 文件搜索模态框 -->
@@ -203,6 +205,17 @@ const showDebug = ref(false);
 const isContentOverflowing = ref(false);
 const bubbleScrollArea = ref(null);
 const thinkingMessage = ref('努力思考中...');
+
+const uiScale = ref(1);
+
+const updateScale = () => {
+    const minDim = Math.min(window.innerWidth, window.innerHeight);
+    // 基准尺寸 800px
+    let s = minDim / 800; 
+    // 限制缩放范围 [0.5, 1.3]
+    s = Math.min(Math.max(s, 0.5), 1.3); 
+    uiScale.value = s;
+};
 
 // --- 状态管理 (第一阶段) ---
 const currentAgentName = ref('Pero');
@@ -295,24 +308,29 @@ watch(parsedBubbleContent, async () => {
   checkOverflow();
 }, { deep: true });
 
-// 气泡自动消失逻辑
-watch([currentText, isThinking], ([newText, newThinking]) => {
-  if (bubbleTimer) {
-    clearTimeout(bubbleTimer);
-    bubbleTimer = null;
-  }
-
-  // 只有在非思考状态且有文字时，才启动自动消失定时器
-  if (newText && !newThinking) {
-    // 根据文字长度调整停留时间，最少 5 秒，最多 15 秒
-    const duration = Math.min(Math.max(5000, newText.length * 200), 15000);
-    bubbleTimer = setTimeout(() => {
-      currentText.value = '';
-      isBubbleExpanded.value = false;
+  // 气泡自动消失逻辑
+  watch([currentText, isThinking], ([newText, newThinking]) => {
+    if (bubbleTimer) {
+      clearTimeout(bubbleTimer);
       bubbleTimer = null;
-    }, duration);
-  }
-});
+    }
+  
+    // 只有在非思考状态且有文字时，才启动自动消失定时器
+    if (newText && !newThinking) {
+      // 检查是否是长文本（例如 LLM 回复），长文本停留更久
+      const isLongText = newText.length > 50;
+      // 根据文字长度调整停留时间，最少 5 秒，最多 30 秒 (之前是 15s，对于长回复太短了)
+      const duration = Math.min(Math.max(5000, newText.length * 200), 30000);
+      
+      bubbleTimer = setTimeout(() => {
+        // [Modified] 不再完全清空，而是收起气泡？或者保留最后一句？
+        // 为了用户体验，自动消失是合理的，但时间要够长。
+        currentText.value = '';
+        isBubbleExpanded.value = false;
+        bubbleTimer = null;
+      }, duration);
+    }
+  });
 
 const toggleBubbleExpand = () => {
   isBubbleExpanded.value = !isBubbleExpanded.value;
@@ -927,6 +945,53 @@ onMounted(async () => {
   fetchActiveAgent();
   loadLocalTexts();
   
+  // Initial Fetch of Pet State (Sync with Backend)
+  const fetchPetState = async () => {
+    try {
+        // Use a simple fetch to get current state from backend
+        // Assuming backend is on port 9120 or gateway default
+        // We can use gatewayClient to request state if available, or fetch HTTP
+        // Let's use fetch for simplicity as in Dashboard
+        const API_BASE = "http://localhost:9120/api"; // [Fix] Added /api suffix to match backend router
+        const res = await fetch(`${API_BASE}/pet/state`);
+        if (res.ok) {
+            const state = await res.json();
+            if (state.mood) {
+                moodText.value = state.mood;
+                localStorage.setItem('ppc.mood', state.mood);
+            }
+            if (state.vibe) {
+                vibeText.value = state.vibe;
+                localStorage.setItem('ppc.vibe', state.vibe);
+            }
+            if (state.mind) {
+                mindText.value = state.mind;
+                localStorage.setItem('ppc.mind', state.mind);
+            }
+            
+            // Sync interaction texts
+            if (state.click_messages_json) {
+                try {
+                    const clickData = JSON.parse(state.click_messages_json);
+                    let curTexts = localTexts.value || {};
+                    // Merge logic similar to state_update
+                    if (clickData.head) curTexts['click_head_01'] = Array.isArray(clickData.head) ? clickData.head[0] : clickData.head;
+                    if (clickData.chest) curTexts['click_chest_01'] = Array.isArray(clickData.chest) ? clickData.chest[0] : clickData.chest;
+                    if (clickData.body) curTexts['click_body_01'] = Array.isArray(clickData.body) ? clickData.body[0] : clickData.body;
+                    if (clickData.default) curTexts['click_messages_01'] = Array.isArray(clickData.default) ? clickData.default[0] : clickData.default;
+                    localTexts.value = { ...curTexts };
+                } catch(e) {}
+            }
+        }
+    } catch (e) {
+        console.warn("[Pet3DView] Failed to fetch initial state:", e);
+    }
+  };
+  
+  // Fetch immediately and then poll occasionally as backup
+  fetchPetState();
+  setInterval(fetchPetState, 30000); // 30s polling fallback
+
   // 1. Initial Mouse Transparency
   await invoke('set_ignore_mouse', true);
 
@@ -1000,6 +1065,81 @@ onMounted(async () => {
   });
   unlistenFunctions.push(unlistenSearch);
 
+  // Status Updates (from Gateway)
+  gatewayClient.on('action:state_update', (data) => {
+    // The gateway emits the full ActionRequest object, so the actual data is in 'params'
+    // GatewayClient emits: this.emit(`action:${envelope.request.actionName}`, envelope.request);
+    const params = data.params || data;
+
+    // 1. Basic Status
+    if (params.mood) {
+      moodText.value = params.mood;
+      localStorage.setItem('ppc.mood', params.mood);
+    }
+    if (params.vibe) {
+      vibeText.value = params.vibe;
+      localStorage.setItem('ppc.vibe', params.vibe);
+    }
+    if (params.mind) {
+      mindText.value = params.mind;
+      localStorage.setItem('ppc.mind', params.mind);
+    }
+
+    // 2. Interaction Messages (Click/Idle/Back)
+    let curTexts = {};
+    const storageKey = `ppc.waifu.texts.${currentAgentName.value || 'Pero'}`;
+    
+    try {
+        const saved = localStorage.getItem(storageKey);
+        if (saved) curTexts = JSON.parse(saved);
+    } catch (e) {}
+
+    let updated = false;
+
+    // Handle Click Messages
+    if (params.click_messages) {
+        let clickData = params.click_messages;
+        if (typeof clickData === 'string') {
+            try { clickData = JSON.parse(clickData); } catch(e) {}
+        }
+        
+        if (typeof clickData === 'object') {
+            // Merge simple format { "body": ["msg1"] } into waifu-tips format
+            if (clickData.head) {
+                curTexts['click_head_01'] = Array.isArray(clickData.head) ? clickData.head[0] : clickData.head;
+            }
+            if (clickData.chest) {
+                curTexts['click_chest_01'] = Array.isArray(clickData.chest) ? clickData.chest[0] : clickData.chest;
+            }
+            if (clickData.body) {
+                curTexts['click_body_01'] = Array.isArray(clickData.body) ? clickData.body[0] : clickData.body;
+            }
+            updated = true;
+        }
+    }
+
+    // Handle Idle Messages
+    if (data.idle_messages) {
+        let msgs = data.idle_messages;
+        if (typeof msgs === 'string') {
+            try { msgs = JSON.parse(msgs); } catch(e) {}
+        }
+        
+        if (Array.isArray(msgs)) {
+            msgs.forEach((msg, i) => {
+                curTexts[`idleMessages_0${i+1}`] = msg;
+            });
+            updated = true;
+        }
+    }
+
+    if (updated) {
+        localStorage.setItem(storageKey, JSON.stringify(curTexts));
+        localTexts.value = curTexts;
+        console.log('[Pet3DView] Interaction texts updated via Gateway:', curTexts);
+    }
+  });
+
   // Reminder Trigger (from Gateway)
   gatewayClient.on('action:reminder_trigger', (params) => {
     const content = params.content || '提醒时间到！';
@@ -1066,6 +1206,7 @@ onUnmounted(() => {
   unlistenFunctions.forEach(fn => fn());
   unlistenFunctions = [];
   window.removeEventListener('mousedown', onMouseDown);
+  window.removeEventListener('resize', updateScale);
 });
 
 const toggleUI = () => {
@@ -1195,15 +1336,21 @@ onMounted(async () => {
     // 监听 Gateway 消息（通过 IPC 或 WebSocket）
     // 假设后端通过 Gateway 广播 'action:text_response'
     gatewayClient.on('action:text_response', (data) => {
-        const content = data.content;
+        const params = data.params || data;
+        const content = params.content;
+        
         currentText.value = content;
         isThinking.value = false;
-        isBubbleExpanded.value = true;
+        // Fix: isBubbleExpanded is true only if content is not empty
+        isBubbleExpanded.value = !!content;
         bubbleKey.value++;
     });
     
     // 监听状态更新
-    gatewayClient.on('action:voice_update', handleVoiceUpdateRequest);
+    gatewayClient.on('action:voice_update', (data) => {
+        const params = data.params || data;
+        handleVoiceUpdateRequest(params);
+    });
     
     // 监听 TTS 音频流
     gatewayClient.on('stream', handleAudioStream);
@@ -1211,6 +1358,10 @@ onMounted(async () => {
     // 初始化时连接 Gateway
     // (如果 App.vue 或其他地方已经连接，这里可能需要调整，但 GatewayClient 是单例或共享的吗？)
     // 假设 gatewayClient 是全局导入的单例
+    
+    // 初始化 UI 缩放
+    window.addEventListener('resize', updateScale);
+    updateScale();
 });
 
 const windowSizes = [
@@ -1274,6 +1425,19 @@ const openDashboard = () => {
   width: 100%;
   height: 100%;
   pointer-events: none; /* Let clicks pass through to 3D scene/desktop */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.ui-scalable-wrapper {
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  transform-origin: center center;
   display: flex;
   justify-content: center;
   align-items: center;
@@ -1476,14 +1640,14 @@ const openDashboard = () => {
 /* 状态标签 (Voxel) */
 .status-tags {
   position: absolute;
-  left: 50%; 
-  top: 50%;
-  transform: translate(-320px, -250px);
+  left: 40px; 
+  top: 160px;
+  /* transform: translate(-320px, -250px); Removed, using inline scale */
   display: flex;
   flex-direction: column;
   gap: 12px;
   perspective: 1000px;
-  align-items: flex-end;
+  align-items: flex-start;
   pointer-events: auto;
 }
 
@@ -1510,7 +1674,7 @@ const openDashboard = () => {
 }
 
 .status-tag:hover {
-  transform: translateX(-5px);
+  transform: translateX(5px);
   background: rgba(40, 40, 40, 0.95);
   box-shadow: 6px 6px 0px rgba(0, 0, 0, 0.6);
   z-index: 110;

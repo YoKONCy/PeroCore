@@ -178,6 +178,83 @@ class XMLStreamFilter:
         self.buffer = ""
         return res
 
+class ThinkingBlockStreamFilter:
+    """
+    思考块流式过滤器
+    用于在流式输出过程中拦截并隐藏 Thinking/Monologue 块
+    支持 【Thinking...】, [Thinking...], (Thinking...) 等格式
+    """
+    def __init__(self, tag_names: List[str] = None):
+        if tag_names is None:
+            # 这些是我们要过滤的标签关键词
+            self.tag_names = ["Thinking", "Monologue"]
+        
+        # 预编译正则，用于快速检测起始标记
+        # 匹配 【Thinking, [Thinking, (Thinking
+        # 使用 re.IGNORECASE
+        pattern_str = r'(?:【|\[|\()(?:' + '|'.join(self.tag_names) + r')'
+        self.start_pattern = re.compile(pattern_str, re.IGNORECASE)
+        
+        self.buffer = ""
+        self.in_block = False
+        self.current_closer = "" # 当前块对应的结束符号
+
+    def filter(self, chunk: str) -> str:
+        self.buffer += chunk
+        output = ""
+
+        while self.buffer:
+            if not self.in_block:
+                # 查找起始标记
+                match = self.start_pattern.search(self.buffer)
+                if not match:
+                    # 没有找到起始标记，输出缓冲区的大部分（保留末尾一小段以防标记被截断）
+                    # 最长可能的标记是 【Thinking (9 chars)
+                    safe_len = max(0, len(self.buffer) - 15)
+                    output += self.buffer[:safe_len]
+                    self.buffer = self.buffer[safe_len:]
+                    return output
+                
+                # 找到起始标记
+                start_idx = match.start()
+                
+                # 确定结束符号
+                opener = match.group(0)[0] # '【', '[', '('
+                if opener == '【':
+                    self.current_closer = '】'
+                elif opener == '[':
+                    self.current_closer = ']'
+                elif opener == '(':
+                    self.current_closer = ')'
+                else:
+                    self.current_closer = '】' # Default fallback
+                
+                # 输出起始标记之前的内容
+                output += self.buffer[:start_idx]
+                self.buffer = self.buffer[start_idx:]
+                self.in_block = True
+            
+            else:
+                # 正在块内，寻找结束符号
+                closer_idx = self.buffer.find(self.current_closer)
+                if closer_idx != -1:
+                    # 找到结束符号，丢弃块内容
+                    self.buffer = self.buffer[closer_idx + len(self.current_closer):]
+                    self.in_block = False
+                    self.current_closer = ""
+                else:
+                    # 还没结束，保留缓冲区继续等待
+                    return output
+        
+        return output
+
+    def flush(self) -> str:
+        res = ""
+        if not self.in_block:
+            res = self.buffer
+        self.buffer = ""
+        return res
+
 class NITDispatcher:
     """
     NIT 核心调度器

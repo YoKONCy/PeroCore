@@ -646,7 +646,24 @@ function onMouseDown(event: MouseEvent) {
                    currentObj.name.includes('Arm') || 
                    currentObj.name.includes('Leg') ||
                    currentObj.name.includes('Chest') ||
-                   currentObj.name.includes('Waist')
+                   currentObj.name.includes('Waist') ||
+                   // Accessories & Clothing
+                   currentObj.name.includes('Hair') ||
+                   currentObj.name.includes('Hat') ||
+                   currentObj.name.includes('Ribbon') ||
+                   currentObj.name.includes('Face') ||
+                   currentObj.name.includes('Eye') ||
+                   currentObj.name.includes('Dress') ||
+                   currentObj.name.includes('Skirt') ||
+                   currentObj.name.includes('Cloth') ||
+                   currentObj.name.includes('Apron') ||
+                   currentObj.name.includes('Breast') ||
+                   currentObj.name.includes('Hand') ||
+                   currentObj.name.includes('Sleeve') ||
+                   currentObj.name.includes('Foot') ||
+                   currentObj.name.includes('Shoe') ||
+                   currentObj.name.includes('Boot') ||
+                   currentObj.name.includes('Sock')
                )) {
                    partName = currentObj.name;
                    break;
@@ -663,10 +680,16 @@ function onMouseDown(event: MouseEvent) {
                // 离散点击事件，触发不需要状态保持
                isPetting = true; 
                let type = 'body';
-               if (partName.includes('Head')) type = 'head';
-               else if (partName.includes('Arm')) type = 'arm';
-               else if (partName.includes('Leg')) type = 'leg';
-               else if (partName.includes('Chest') || partName.includes('Waist') || partName.includes('Body')) type = 'body';
+               
+               if (partName.includes('Head') || partName.includes('Hair') || partName.includes('Hat') || partName.includes('Ribbon') || partName.includes('Face') || partName.includes('Eye')) {
+                   type = 'head';
+               } else if (partName.includes('Arm') || partName.includes('Hand') || partName.includes('Sleeve')) {
+                   type = 'arm';
+               } else if (partName.includes('Leg') || partName.includes('Foot') || partName.includes('Shoe') || partName.includes('Boot') || partName.includes('Sock')) {
+                   type = 'leg';
+               } else if (partName.includes('Chest') || partName.includes('Waist') || partName.includes('Body') || partName.includes('Dress') || partName.includes('Skirt') || partName.includes('Cloth') || partName.includes('Apron') || partName.includes('Breast')) {
+                   type = 'body';
+               }
                
                emit('pet', { type: type, rawPart: partName });
            }

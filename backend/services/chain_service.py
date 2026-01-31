@@ -352,6 +352,7 @@ class ThinkingChainService:
         from sqlmodel import select
         from models import AIModelConfig
         from services.llm_service import LLMService
+        from services.agent_manager import AgentManager
 
         context = await self.generate_weekly_report_context(session, agent_id=agent_id)
         if "No activities found" in context:

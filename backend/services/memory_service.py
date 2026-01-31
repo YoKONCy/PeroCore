@@ -704,7 +704,8 @@ class MemoryService:
 
         # [Rust 集成] 针对百万级节点优化
         try:
-            engine = await get_rust_engine(session, agent_id=agent_id)
+            # Fix: get_rust_engine only takes session as argument
+            engine = await get_rust_engine(session)
             if engine:
                 # 执行扩散：引入动态阈值 min_threshold
                 # 如果是重要查询，可以调低阈值以获取更多联想；否则保持 0.01 保证性能

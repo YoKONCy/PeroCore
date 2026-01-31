@@ -3,8 +3,8 @@ import vue from '@vitejs/plugin-vue'
 import path from 'path'
 
 // https://vite.dev/config/
-export default defineConfig({
-  base: './',
+export default defineConfig(({ command }) => ({
+  base: command === 'serve' ? '/' : './',
   plugins: [vue()],
   resolve: {
     alias: {
@@ -27,9 +27,7 @@ export default defineConfig({
       'echarts',
       'marked',
       'dompurify',
-      '@element-plus/icons-vue',
-      '@tauri-apps/api',
-      '@tauri-apps/plugin-shell'
+      '@element-plus/icons-vue'
     ]
   }
-})
+}))

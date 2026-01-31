@@ -1,11 +1,11 @@
 {
   "name": "pero-core",
   "private": true,
-  "version": "0.5.0",
+  "version": "0.5.1",
   "license": "Apache-2.0",
   "main": "dist-electron/main/index.js",
   "scripts": {
-    "dev:electron": "concurrently -k \"tsc -p electron/tsconfig.json -w\" \"vite\" \"wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
+    "dev:electron": "concurrently -k \"tsc -p electron/tsconfig.json -w\" \"vite\" \"wait-on tcp:127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
     "build:electron": "node scripts/copy-gateway.js && vite build && tsc -p electron/tsconfig.json && electron-builder",
     "dev": "vite",
     "build": "vite build",

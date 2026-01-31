@@ -345,14 +345,24 @@ class RealtimeSessionManager:
         if not text:
             return ""
 
+        cleaned = text
+
         # 1. 移除 XML 标签 (包括内容)
-        cleaned = re.sub(r'<[^>]+>.*?</[^>]+>', '', text, flags=re.DOTALL)
+        cleaned = re.sub(r'<[^>]+>.*?</[^>]+>', '', cleaned, flags=re.DOTALL)
         
         # 2. 移除 NIT 调用块
         from nit_core.dispatcher import remove_nit_tags
         cleaned = remove_nit_tags(cleaned)
         
         if for_tts:
+            # [重要] 优先移除 Markdown 代码块，避免朗读代码内容
+            # 匹配 ```...``` (多行) 和 `...` (单行)
+            cleaned = re.sub(r'```[\s\S]*?```', ' ', cleaned)
+            cleaned = re.sub(r'`[^`\n]+`', ' ', cleaned)
+
+            # [重要] 移除 URL 链接
+            cleaned = re.sub(r'https?://\S+', ' ', cleaned)
+
             # [特性] 智能 ReAct 过滤器
             # 目标：只朗读最终回复，忽略 思考/计划/行动/观察 (Thinking/Plan/Action/Observation) 的历史记录。
             
@@ -411,12 +421,16 @@ class RealtimeSessionManager:
         if for_tts:
             cleaned = re.sub(r'#+\s+', '', cleaned) # 移除标题符号
             cleaned = re.sub(r'\[(.*?)\]\(.*?\)', r'\1', cleaned) # 移除链接，只保留文字
-            cleaned = re.sub(r'[*_`]', '', cleaned) # 移除粗体、斜体、代码块标记
+            cleaned = re.sub(r'[*_~]', '', cleaned) # 移除粗体、斜体、删除线等标记
         
         # 6. 移除 Emoji 和特殊符号 (仅针对 TTS)
         if for_tts:
+            # 移除常见 Emoji
             cleaned = re.sub(r'[\U00010000-\U0010ffff]', '', cleaned)
+            # 移除特定颜文字或符号
             cleaned = re.sub(r'[^\w\s\u4e00-\u9fa5，。！？；：“”（）\n\.,!\?\-]', '', cleaned)
+            # 进一步清洗可能残留的连续标点或无意义字符
+            cleaned = re.sub(r'[\-_]{2,}', ' ', cleaned)
         
         # 7. 移除多余空白
         cleaned = re.sub(r'\n+', '\n', cleaned).strip()
