@@ -13,7 +13,7 @@
 <br/>
 
 <!-- 全球首发地位声明 -->
-<a href="./benchmarks/reports/PEROCORE_FULL_BENCHMARK_REPORT.md">
+<a href="./benchmarks/reports/CONSOLIDATED_BENCHMARK_REPORT.md">
   <img src="https://img.shields.io/badge/Status-World's_First_KDN_Engineering_Implementation-red?style=for-the-badge&logo=rocket" alt="Pioneer">
 </a>
 
@@ -37,25 +37,22 @@
 </a>
 
 <br/><br/>
-
----
-
-<p align="center">
-  <b>🌐 Language / 语言</b><br/>
-  <a href="./README_EN.md">English</a> | <b>简体中文</b>
-</p>
+</div>
 
 ---
 
 <br/><br/>
 
+<div align="center">
+
 > **"Technology should not be cold. We build memories, not just databases."**
-
-<br/>
-
-<img src="./resources/cover.png" width="100%" alt="PeroCore Cover"/>
-
-<br/>
+ 
+ <br/>
+ 
+ <img src="./github_src/cover.png" width="100%" alt="PeroCore Cover"/>
+ 
+ <br/>
+</div>
 
 <div align="center">
 
@@ -86,6 +83,7 @@
 <img src="https://user-images.githubusercontent.com/73097560/115834477-dbab4500-a447-11eb-908a-139a6edaec5c.gif" width="100%">
 
 <br/>
+</div>
 
 ## 🌟 愿景与团队 (Philosophy & Team)
 
