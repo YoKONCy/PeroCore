@@ -1,11 +1,27 @@
 import subprocess
 import os
 import platform
-import pyautogui
 import shutil
-import winreg
 import time
-import pyperclip
+
+# Optional imports for Windows-specific features
+try:
+    import pyautogui
+    import pyperclip
+    # 尝试从 utils 导入适配器，如果环境不支持可能导入失败
+    from utils.screen_adapter import screen_adapter, scaled_pyautogui
+except ImportError:
+    pyautogui = None
+    pyperclip = None
+    screen_adapter = None
+    scaled_pyautogui = None
+
+# winreg is Windows-only
+try:
+    import winreg
+except ImportError:
+    winreg = None
+
 try:
     import win32gui
     import win32process
@@ -15,12 +31,18 @@ except ImportError:
     win32process = None
     psutil = None
 
-from utils.screen_adapter import screen_adapter, scaled_pyautogui
+def _is_server_mode():
+    """检查是否运行在 Server 模式或非 Windows 环境"""
+    # 显式 Server 模式 或 非 Windows 系统
+    return os.environ.get("PERO_ENV") == "server" or platform.system() != "Windows"
 
 def find_app_path(app_name: str):
     """
     聪明型路径搜索器：尝试通过多种方式定位应用程序的完整路径。
     """
+    if _is_server_mode():
+        return None # Server 模式下没有“应用路径”的概念
+
     # 1. 已经是存在的绝对路径或相对路径
     if os.path.exists(app_name):
         return os.path.abspath(app_name)
@@ -31,20 +53,21 @@ def find_app_path(app_name: str):
         return path_found
         
     # 3. 在注册表 "App Paths" 中寻找 (Windows 软件通用注册位置)
-    # 尝试带 .exe 和不带 .exe 的两种情况
-    names_to_try = [app_name, f"{app_name}.exe"] if not app_name.lower().endswith(".exe") else [app_name]
-    
-    for name in names_to_try:
-        for root in [winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER]:
-            try:
-                reg_path = f"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\{name}"
-                with winreg.OpenKey(root, reg_path) as key:
-                    # 获取默认值 (即程序路径)
-                    path, _ = winreg.QueryValueEx(key, "")
-                    if path and os.path.exists(path):
-                        return path
-            except (FileNotFoundError, OSError):
-                continue
+    if winreg:
+        # 尝试带 .exe 和不带 .exe 的两种情况
+        names_to_try = [app_name, f"{app_name}.exe"] if not app_name.lower().endswith(".exe") else [app_name]
+        
+        for name in names_to_try:
+            for root in [winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER]:
+                try:
+                    reg_path = f"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\{name}"
+                    with winreg.OpenKey(root, reg_path) as key:
+                        # 获取默认值 (即程序路径)
+                        path, _ = winreg.QueryValueEx(key, "")
+                        if path and os.path.exists(path):
+                            return path
+                except (FileNotFoundError, OSError):
+                    continue
                 
     return None
 
@@ -53,6 +76,9 @@ def open_application(app_name: str):
     打开 Windows 应用程序。
     使用增强的搜索逻辑，优先使用 os.startfile 以获得更安全、无黑窗的体验。
     """
+    if _is_server_mode():
+        return "Error: Server mode does not support opening desktop applications."
+
     if not app_name:
         return "请提供要打开的应用程序名称。"
 
@@ -64,13 +90,14 @@ def open_application(app_name: str):
         
         if full_path:
             # 使用 os.startfile 打开，这相当于双击文件，最稳健
-            os.startfile(full_path)
-            return f"已成功通过路径打开: {full_path}"
-        else:
-            # 如果实在找不到确切路径，退回到使用 start 命令 (shell 模式)
-            # 这种方式可以处理一些特殊的协议名，如 'calc:', 'notepad:' 等
-            subprocess.Popen(f'start "" "{app_name}"', shell=True)
-            return f"未找到确切路径，已尝试通过系统命令开启: {app_name}"
+            if hasattr(os, 'startfile'):
+                os.startfile(full_path)
+                return f"已成功通过路径打开: {full_path}"
+        
+        # 如果实在找不到确切路径，或者在没有 os.startfile 的环境(虽然已经 check 了 server mode)
+        # 退回到使用 start 命令 (shell 模式)
+        subprocess.Popen(f'start "" "{app_name}"', shell=True)
+        return f"未找到确切路径，已尝试通过系统命令开启: {app_name}"
             
     except Exception as e:
         return f"打开应用 '{app_name}' 失败: {str(e)}"
@@ -80,6 +107,9 @@ def get_active_windows():
     获取当前所有可见的顶层窗口及其对应的进程名。
     返回格式：List[str] (e.g. ["chrome.exe - Google Chrome", ...])
     """
+    if _is_server_mode():
+        return [] # Server 模式下没有窗口
+
     if not win32gui or not psutil:
         return "Error: win32gui or psutil not installed."
 
@@ -125,6 +155,9 @@ def activate_window(target_name: str):
     通过进程名或窗口标题切换/置顶窗口。
     target_name: 可以是进程名 (e.g. 'chrome.exe') 或标题关键词 (e.g. 'Google Chrome')
     """
+    if _is_server_mode():
+        return "Error: Server mode does not support window activation."
+
     if not win32gui:
         return "Error: win32gui not installed."
 
@@ -223,6 +256,9 @@ def automation_execute(action: str, target: str = None, x: int = None, y: int = 
     """
     执行自动化操作。
     """
+    if _is_server_mode():
+        return f"Error: Server mode does not support automation action '{action}'."
+
     # Robustly cast coordinates to integers
     x = safe_int(x)
     y = safe_int(y)
@@ -272,9 +308,12 @@ def automation_execute(action: str, target: str = None, x: int = None, y: int = 
                 # old_clip = pyperclip.paste()
                 
                 # 2. 写入新内容
+            if pyperclip:
                 pyperclip.copy(target)
-                
-                # 3. 短暂等待确保写入生效
+            else:
+                return "Error: pyperclip not installed or supported."
+            
+            # 3. 短暂等待确保写入生效
                 time.sleep(0.1)
                 
                 # 4. 模拟粘贴

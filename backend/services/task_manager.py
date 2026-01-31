@@ -21,7 +21,7 @@ class TaskManager:
         """为会话注册一个新的任务上下文。"""
         if session_id in self.tasks:
             # 如果存在旧的任务上下文，则进行清理（尽管通常应该已经完成）
-            logger.info(f"[TaskManager] Overwriting existing context for {session_id}")
+            logger.info(f"[TaskManager] 正在覆盖 {session_id} 的现有上下文")
         
         self.tasks[session_id] = {
             "pause_event": asyncio.Event(),
@@ -29,29 +29,29 @@ class TaskManager:
             "status": "running" # running (运行中), paused (已暂停)
         }
         self.tasks[session_id]["pause_event"].set() # 初始状态为运行中
-        logger.info(f"[TaskManager] Registered task for {session_id}")
+        logger.info(f"[TaskManager] 已注册 {session_id} 的任务")
 
     def unregister(self, session_id: str):
         """注销任务上下文。"""
         if session_id in self.tasks:
             del self.tasks[session_id]
-            logger.info(f"[TaskManager] Unregistered task for {session_id}")
+            logger.info(f"[TaskManager] 已注销 {session_id} 的任务")
 
     async def check_pause(self, session_id: str):
         """如果任务已暂停，则等待。"""
         if session_id in self.tasks:
             event = self.tasks[session_id]["pause_event"]
             if not event.is_set():
-                logger.info(f"[TaskManager] Task {session_id} is paused. Waiting...")
+                logger.info(f"[TaskManager] 任务 {session_id} 已暂停。正在等待...")
                 await event.wait()
-                logger.info(f"[TaskManager] Task {session_id} resumed.")
+                logger.info(f"[TaskManager] 任务 {session_id} 已恢复。")
 
     def pause(self, session_id: str):
         """暂停任务。"""
         if session_id in self.tasks:
             self.tasks[session_id]["pause_event"].clear()
             self.tasks[session_id]["status"] = "paused"
-            logger.info(f"[TaskManager] Paused task {session_id}")
+            logger.info(f"[TaskManager] 暂停了任务 {session_id}")
             return True
         return False
 
@@ -60,7 +60,7 @@ class TaskManager:
         if session_id in self.tasks:
             self.tasks[session_id]["pause_event"].set()
             self.tasks[session_id]["status"] = "running"
-            logger.info(f"[TaskManager] Resumed task {session_id}")
+            logger.info(f"[TaskManager] 恢复了任务 {session_id}")
             return True
         return False
 
@@ -68,7 +68,7 @@ class TaskManager:
         """向运行中的任务注入用户指令。"""
         if session_id in self.tasks:
             self.tasks[session_id]["injected_messages"].put_nowait(instruction)
-            logger.info(f"[TaskManager] Injected instruction to {session_id}: {instruction}")
+            logger.info(f"[TaskManager] 向 {session_id} 注入指令: {instruction}")
             return True
         return False
 

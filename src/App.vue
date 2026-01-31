@@ -1,6 +1,5 @@
 <template>
   <div class="app-container">
-    <TitleBar />
     <div class="main-content">
       <router-view v-slot="{ Component }">
         <keep-alive>
@@ -24,10 +23,10 @@ const testPing = async () => {
   try {
     const resp = await gatewayClient.sendRequest('broadcast', 'ping');
     testResult.value = `Success: ${resp.data}`;
-    console.log('Ping response:', resp);
+    console.log('Ping 响应:', resp);
   } catch (e) {
     testResult.value = `Error: ${e.message}`;
-    console.error('Ping error:', e);
+    console.error('Ping 错误:', e);
   }
 };
 
@@ -40,21 +39,21 @@ const testChat = async () => {
         'chat', 
         { text: 'Hello, who are you?' },
         (partial) => {
-            console.log('Partial:', partial.data);
+            console.log('部分响应:', partial.data);
             fullResponse += partial.data;
             testResult.value = `Agent Thinking:\n${fullResponse}`;
         }
     );
     // Final response data is empty string as per protocol, so we use fullResponse
     testResult.value = `Agent Response (Done):\n${fullResponse}`;
-    console.log('Chat response done:', resp);
+    console.log('对话响应完成:', resp);
   } catch (e) {
     testResult.value = `Error: ${e.message}`;
-    console.error('Chat error:', e);
+    console.error('对话错误:', e);
   }
 };
 
-console.log('[App] App.vue initialized');
+console.log('[App] App.vue 已初始化');
 
 onMounted(() => {
   // 启动网关连接
@@ -66,7 +65,7 @@ window.addEventListener('error', (event) => {
   if (window.$notify) {
     window.$notify(event.message, 'error', '前端异常');
   } else {
-    console.error('Notification system not ready:', event.message);
+    console.error('通知系统未就绪:', event.message);
   }
 });
 

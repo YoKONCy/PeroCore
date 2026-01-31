@@ -5,6 +5,7 @@
   "version": "1.0.1",
   "description": "系统控制。执行打开应用、按键模拟等Windows操作。",
   "author": "PeroCore",
+  "platforms": ["windows"],
   "pluginType": "python-module",
   "entryPoint": "windows_ops.py",
   "capabilities": {

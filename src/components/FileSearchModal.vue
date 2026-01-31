@@ -51,6 +51,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, reactive } from 'vue'
+import { API_BASE } from '../config'
 
 const props = defineProps({
   visible: {
@@ -161,9 +162,9 @@ const openFile = async (path) => {
   try {
     // 确保路径中的反斜杠被正确处理
     const sanitizedPath = path.replace(/\\/g, '/')
-    console.log('[FileSearchModal] Attempting to open path:', sanitizedPath)
+    console.log('[FileSearchModal] 尝试打开路径:', sanitizedPath)
     
-    const response = await fetch('http://localhost:9120/api/open-path', {
+    const response = await fetch(`${API_BASE}/open-path`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -173,12 +174,12 @@ const openFile = async (path) => {
     
     if (!response.ok) {
         const errData = await response.json()
-        throw new Error(errData.detail || `HTTP error! status: ${response.status}`)
+        throw new Error(errData.detail || `HTTP 错误! 状态码: ${response.status}`)
     }
     
-    console.log('[FileSearchModal] Successfully opened path')
+    console.log('[FileSearchModal] 成功打开路径')
   } catch (error) {
-    console.error('Failed to open file:', error)
+    console.error('打开文件失败:', error)
     alert('无法打开目录: ' + error.message)
   }
 }

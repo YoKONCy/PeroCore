@@ -160,3 +160,4 @@ async def update_character_status(
 # Aliases for backward compatibility if needed by direct python calls
 update_status = update_character_status
 set_status = update_character_status
+set_state = update_character_status

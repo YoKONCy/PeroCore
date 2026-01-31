@@ -66,6 +66,10 @@
       {
         "commandIdentifier": "set_status",
         "description": "别名：update_character_status"
+      },
+      {
+        "commandIdentifier": "set_state",
+        "description": "别名：update_character_status"
       }
     ]
   }

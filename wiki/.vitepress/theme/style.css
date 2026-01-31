@@ -1,0 +1,208 @@
+/* Import default theme styles */
+:root {
+  /* Brand Colors - Premium Violet/Blue Gradient vibe */
+  --vp-c-brand-1: #8b5cf6;
+  --vp-c-brand-2: #6366f1;
+  --vp-c-brand-3: #4f46e5;
+  --vp-c-brand-soft: rgba(139, 92, 246, 0.14);
+
+  /* Glassmorphism Variables */
+  --glass-bg: rgba(255, 255, 255, 0.7);
+  --glass-border: rgba(255, 255, 255, 0.5);
+  --glass-blur: 20px;
+  
+  /* Dark mode glass */
+  --glass-bg-dark: rgba(30, 30, 30, 0.7);
+  --glass-border-dark: rgba(255, 255, 255, 0.1);
+}
+
+.dark {
+  --glass-bg: var(--glass-bg-dark);
+  --glass-border: var(--glass-border-dark);
+}
+
+/* 1. Global Transitions */
+a, button, .VPFeature {
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+/* 2. Glassmorphism for Nav and Sidebar */
+.VPNavBar {
+  background-color: var(--glass-bg) !important;
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border-bottom: 1px solid var(--glass-border) !important;
+}
+
+.VPSidebar {
+  background-color: var(--glass-bg) !important;
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border-right: 1px solid var(--glass-border) !important;
+}
+
+/* 3. Hero Section Animations */
+.VPHero .image-bg {
+  opacity: 0.8;
+  filter: blur(40px);
+  transform: scale(1.5);
+  animation: breathe 8s infinite alternate;
+}
+
+@keyframes breathe {
+  0% { opacity: 0.5; transform: scale(1.4) rotate(0deg); }
+  100% { opacity: 0.8; transform: scale(1.6) rotate(5deg); }
+}
+
+.VPHero .name {
+  background: -webkit-linear-gradient(315deg, #42d392 25%, #647eff);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 0 15px rgba(139, 92, 246, 0.5));
+  animation: hue-rotate 10s infinite linear, pulse-scale 3s ease-in-out infinite alternate;
+}
+
+@keyframes pulse-scale {
+  0% { transform: scale(1); }
+  100% { transform: scale(1.02); }
+}
+
+@keyframes hue-rotate {
+  from { filter: hue-rotate(0deg) drop-shadow(0 0 15px rgba(139, 92, 246, 0.5)); }
+  to { filter: hue-rotate(360deg) drop-shadow(0 0 15px rgba(139, 92, 246, 0.5)); }
+}
+
+.VPHero .text {
+  opacity: 0.8;
+  text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  animation: fade-in-up 1s ease-out;
+}
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 0.8; transform: translateY(0); }
+}
+
+/* 7. 3D Buttons & Breathing Effect */
+.VPButton.brand {
+  background: linear-gradient(135deg, var(--vp-c-brand-1), var(--vp-c-brand-2)) !important;
+  box-shadow: 0 4px 15px rgba(139, 92, 246, 0.4), 
+              0 6px 0 rgba(111, 76, 199, 1), /* 3D bottom edge */
+              inset 0 1px 0 rgba(255, 255, 255, 0.3); /* Top highlight */
+  border: none !important;
+  transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1) !important;
+  transform: translateY(0);
+  position: relative;
+  overflow: visible !important;
+  z-index: 1;
+}
+
+.VPButton.brand:hover {
+  transform: translateY(4px); /* Press down effect */
+  box-shadow: 0 2px 5px rgba(139, 92, 246, 0.4), 
+              0 2px 0 rgba(111, 76, 199, 1) !important;
+}
+
+.VPButton.brand:active {
+  transform: translateY(6px);
+  box-shadow: none !important;
+}
+
+/* Breathing glow for brand button */
+.VPButton.brand::after {
+  content: '';
+  position: absolute;
+  top: -5px; left: -5px; right: -5px; bottom: -5px;
+  border-radius: inherit;
+  background: inherit;
+  z-index: -1;
+  filter: blur(15px);
+  opacity: 0.5;
+  animation: breathe-glow 2s infinite alternate;
+}
+
+@keyframes breathe-glow {
+  0% { opacity: 0.3; transform: scale(0.95); }
+  100% { opacity: 0.7; transform: scale(1.05); }
+}
+
+/* 8. Dynamic Background Animation */
+body {
+  background-color: var(--vp-c-bg);
+}
+
+.Layout::before {
+  content: '';
+  position: fixed;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: 
+    radial-gradient(circle at center, rgba(139, 92, 246, 0.15) 0%, transparent 40%),
+    radial-gradient(circle at 80% 20%, rgba(66, 211, 146, 0.1) 0%, transparent 30%);
+  z-index: -99;
+  animation: rotate-bg 20s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes rotate-bg {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* 4. Feature Cards Enhancement */
+.VPFeature {
+  border: 1px solid transparent !important;
+  background-color: var(--vp-c-bg-soft) !important;
+  border-radius: 16px !important;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+.VPFeature:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  background-color: var(--vp-c-brand-soft) !important;
+  border-color: var(--vp-c-brand-1) !important;
+}
+
+/* 5. Page Content Transitions (View Transition API) */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+::view-transition-old(root) {
+  animation: fade-out 0.3s ease-in-out forwards;
+}
+
+::view-transition-new(root) {
+  animation: fade-in 0.3s ease-in-out forwards;
+}
+
+@keyframes fade-in {
+  0% { opacity: 0; transform: translateY(10px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-out {
+  0% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(-10px); }
+}
+
+/* 6. Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--vp-c-gray-3);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--vp-c-brand-1);
+}

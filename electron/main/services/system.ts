@@ -59,3 +59,22 @@ export function saveConfig(config: any) {
     fs.ensureDirSync(dataDir)
     fs.writeJsonSync(path.join(dataDir, 'config.json'), config, { spaces: 2 })
 }
+
+export function getGatewayToken(): string {
+    // Development path
+    const devPath = path.join(process.cwd(), 'backend/data/gateway_token.json')
+    // Production path (next to exe or in userData)
+    const prodPath = path.join(app.getPath('userData'), 'data/gateway_token.json')
+    
+    const tokenPath = fs.existsSync(devPath) ? devPath : prodPath
+    
+    if (fs.existsSync(tokenPath)) {
+        try {
+            const data = fs.readJsonSync(tokenPath)
+            return data.token || ''
+        } catch (e) {
+            return ''
+        }
+    }
+    return ''
+}

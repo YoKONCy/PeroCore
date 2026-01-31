@@ -1,4 +1,5 @@
 import { Envelope, Hello, Heartbeat, ActionRequest, ActionResponse } from './proto/perolink';
+import { invoke } from '../utils/ipcAdapter';
 
 const logToMain = (msg: string, ...args: any[]) => {
   const message = msg + (args.length ? ' ' + JSON.stringify(args) : '');
@@ -17,11 +18,18 @@ export class GatewayClient {
   private isConnected: boolean = false;
 
   private pendingRequests: Map<string, { resolve: (data: any) => void, reject: (err: any) => void, onProgress?: (data: any) => void }> = new Map();
-  private token: string = 'test-token';
+  private token: string = '';
   private listeners: Map<string, Function[]> = new Map();
 
   constructor(url?: string) {
-    if (url) this.url = url;
+    if (url) {
+      this.url = url;
+    } else if (!(window as any).electron) {
+      // Browser mode: derive from current location
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      this.url = `${protocol}//${window.location.host}/gateway/ws`;
+      console.log(`[Gateway] Using Browser URL: ${this.url}`);
+    }
   }
 
   on(event: string, callback: Function) {
@@ -50,7 +58,7 @@ export class GatewayClient {
   setToken(token: string) {
     this.token = token;
     if (this.isConnected) {
-      console.log('Token updated, reconnecting...');
+      console.log('令牌已更新，正在重连...');
       this.ws?.close();
     }
   }
@@ -58,7 +66,7 @@ export class GatewayClient {
   async sendRequest(targetId: string, actionName: string, params: Record<string, string> = {}, onProgress?: (data: any) => void): Promise<ActionResponse> {
     return new Promise((resolve, reject) => {
       if (!this.isConnected) {
-        reject(new Error('Not connected to gateway'));
+        reject(new Error('未连接到网关'));
         return;
       }
 
@@ -88,7 +96,7 @@ export class GatewayClient {
       setTimeout(() => {
         if (this.pendingRequests.has(envelope.id)) {
           this.pendingRequests.delete(envelope.id);
-          reject(new Error('Request timed out'));
+          reject(new Error('请求超时'));
         }
       }, 10000); // 10s timeout
 
@@ -98,7 +106,7 @@ export class GatewayClient {
 
   async sendStream(targetId: string, data: Uint8Array, contentType: string = 'audio/wav', traceId?: string): Promise<void> {
     if (!this.isConnected) {
-      throw new Error('Not connected to gateway');
+      throw new Error('未连接到网关');
     }
 
     const envelope: Envelope = {
@@ -123,7 +131,20 @@ export class GatewayClient {
     this.send(envelope);
   }
 
-  connect() {
+  async connect() {
+    // Try to get token
+    try {
+        const token = await invoke('get_gateway_token');
+        if (token) {
+            this.token = token;
+            logToMain(`Using Gateway Token: ${token.substring(0, 8)}...`);
+        } else {
+            logToMain('Warning: Received empty token');
+        }
+    } catch (e) {
+        logToMain('Failed to get token');
+    }
+
     logToMain(`Connecting to Gateway at ${this.url}...`);
     try {
         this.ws = new WebSocket(this.url);
@@ -164,7 +185,7 @@ export class GatewayClient {
 
   private sendHello() {
     const hello: Hello = {
-      token: 'test-token',
+      token: this.token,
       deviceName: 'PeroCore Desktop',
       clientVersion: '1.0.0',
       platform: 'windows',
@@ -224,7 +245,7 @@ export class GatewayClient {
       const data = Envelope.encode(envelope).finish();
       this.ws.send(data);
     } else {
-      console.warn('WebSocket is not open. Cannot send message.');
+      console.warn('WebSocket 未连接，无法发送消息。');
     }
   }
 
@@ -262,10 +283,10 @@ export class GatewayClient {
         } else {
           // Error
           this.pendingRequests.delete(requestId);
-          reject(new Error(resp.errorMsg || 'Unknown error from backend'));
+          reject(new Error(resp.errorMsg || '后端未知错误'));
         }
       } else {
-        logToMain('Received response for unknown request ID: ' + requestId);
+        logToMain('收到未知请求 ID 的响应: ' + requestId);
       }
     }
   }

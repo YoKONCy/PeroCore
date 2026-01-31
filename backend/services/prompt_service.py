@@ -24,7 +24,10 @@ class PromptManager:
         self.mdp = mdp
         self.agent_manager = get_agent_manager()
 
-    def build_system_prompt(self, variables: Dict[str, Any], is_social_mode: bool = False, is_work_mode: bool = False) -> str:
+    def _enrich_variables(self, variables: Dict[str, Any], is_social_mode: bool, is_work_mode: bool):
+        """
+        丰富和处理变量，从配置和Agent状态中填充缺失信息
+        """
         # 0. 检查轻量级模式
         config = get_config_manager()
         is_lightweight = config.get("lightweight_mode", False)
@@ -49,11 +52,6 @@ class PromptManager:
         # 我们使用 setdefault 确保如果不传 agent_name，则使用 Agent 的名字
         for k, v in agent_config.items():
             variables.setdefault(k, v)
-
-        # [工作模式专用构建]
-        if is_work_mode:
-            # 暂存逻辑，稍后在变量填充完毕后统一处理
-            pass
 
         # 1. 构建能力字符串
         enable_vision = variables.get("enable_vision", False)
@@ -98,108 +96,21 @@ class PromptManager:
 
             # 语音
             if enable_voice:
-                # 检查提示是否存在以避免错误，如果需要则回退
                 prompt = self.mdp.get_prompt("core/abilities/ability_voice")
                 if prompt:
                     abilities_parts.append(prompt.content)
-            
-            # 视频
-            if enable_video:
-                # 检查提示是否存在以避免错误，如果需要则回退
-                prompt = self.mdp.get_prompt("core/abilities/ability_video")
+            else:
+                prompt = self.mdp.get_prompt("core/abilities/ability_voice_placeholder")
                 if prompt:
                     abilities_parts.append(prompt.content)
 
-        variables["abilities"] = "\n".join(abilities_parts)
+            # 视频
+            if enable_video:
+                prompt = self.mdp.get_prompt("core/abilities/ability_video")
+                if prompt:
+                    abilities_parts.append(prompt.content)
         
-        # 2. 默认值
-        variables.setdefault("owner_name", "主人")
-        variables.setdefault("user_persona", "未设定")
-        variables.setdefault("mood", "开心")
-        variables.setdefault("vibe", "活泼")
-        variables.setdefault("mind", "正在想主人...")
-        variables.setdefault("vision_status", "")
-        variables.setdefault("memory_context", "")
-        # output_constraint 由 system_template 内的 {{output_constraint}} 处理
-        
-        # [Social Identity Injection]
-        # 尝试从 SocialService 获取当前 Bot 的昵称 (QQ昵称)
-        # 优先使用配置中的 bot_name，如果没有则默认为 "Pero"
-        default_name = config.get("bot_name", "Pero")
-        bot_name = default_name
-        try:
-            from nit_core.plugins.social_adapter.social_service import get_social_service
-            social_service = get_social_service()
-            if social_service and social_service.bot_info:
-                bot_name = social_service.bot_info.get("nickname", default_name)
-        except ImportError:
-            pass
-        
-        variables["bot_name"] = bot_name # 保留 bot_name 以兼容旧的 Prompt
-        variables.setdefault("agent_name", bot_name) # 仅当未设定时使用 bot_name 作为 agent_name
-
-        # [Work Mode Decoupling]
-        # 注入工作模式专用的人设和 Traits
-        # 默认值保持与旧版一致 (高效、极简)
-        variables["custom_persona"] = config.get("work_custom_persona", "你是一个全能的 AI 助手，你的名字是 {{ agent_name }}。")
-        variables["work_traits"] = config.get("work_traits", ["mode:concise"])
-
-        # [Persona Loading]
-        # 动态加载人设文件
-        # 从配置中获取 template 路径，如果不存在则使用默认
-        # MDP 已经支持从 backend/agents/ 目录加载
-        
-        # 1. 尝试使用 agent_id/system_prompt (新架构)
-        # 优先从 variables 获取 agent_id (由 AgentManager 注入)，否则回退到 config
-        agent_id = variables.get("agent_id") or config.get("agent_id", "pero")
-        agent_id = str(agent_id).lower()
-        
-        # 默认使用 Agent 专属模板 (backend/agents/{id}/system_prompt.md)
-        persona_template = config.get("persona_template", f"{agent_id}/system_prompt")
-        
-        # 直接渲染 (MDPManager 会自动查找 backend/agents 目录)
-        # 如果找不到，render 会返回错误提示，这比回退到旧文件更好，因为我们希望强制迁移
-        # 使用当前的 agent_name 变量，而不是强制使用 bot_name
-        render_context = {"agent_name": variables.get("agent_name", bot_name)}
-        # 也可以注入 owner_name 等其他可能在 system_prompt 中用到的变量
-        if "owner_name" in variables:
-            render_context["owner_name"] = variables["owner_name"]
-            
-        variables["persona_definition"] = self.mdp.render(persona_template, render_context)
-        
-        # 注入 NIT 工具描述
-        try:
-            if not is_social_mode:
-                dispatcher = get_dispatcher()
-                # 默认为核心工具
-                tools_desc = dispatcher.get_tools_description(category_filter='core')
-                
-                # 检查工作模式
-                # 假设变量或配置中有 'work_mode' 布尔值
-                if variables.get("work_mode_enabled", False):
-                    tools_desc += "\n\n" + dispatcher.get_tools_description(category_filter='work')
-                    
-                variables["nit_tools_description"] = tools_desc
-            else:
-                variables["nit_tools_description"] = ""
-        except Exception as e:
-            print(f"[PromptManager] Error injecting NIT tools description: {e}")
-            variables["nit_tools_description"] = "Error loading tools."
-
-        # 注入链逻辑（思维链）
-        chain_name = variables.get("chain_name", "default")
-        chain_content = ""
-        try:
-            chain_path = os.path.join(os.path.dirname(__file__), "mdp", "prompts", "chains", f"{chain_name}.md")
-            if os.path.exists(chain_path):
-                with open(chain_path, "r", encoding="utf-8") as f:
-                    chain_content = f.read()
-            else:
-                logger.warning(f"Chain prompt not found: {chain_path}")
-        except Exception as e:
-            logger.error(f"Error loading chain prompt: {e}")
-            
-        variables["chain_logic"] = chain_content
+        variables["ability_sensory"] = "\n".join(abilities_parts)
 
         # [Core Abilities Loading]
         # 显式加载 ability 和 ability_nit，以支持新版目录结构 (core/abilities/...)
@@ -219,8 +130,73 @@ class PromptManager:
         if "output_constraint" not in variables:
             prompt = self.mdp.get_prompt("core/rules/output_constraint")
             variables["output_constraint"] = prompt.content if prompt else ""
+        
+        # [Social Identity Injection]
+        default_name = config.get("bot_name", "Pero")
+        bot_name = default_name
+        try:
+            from nit_core.plugins.social_adapter.social_service import get_social_service
+            social_service = get_social_service()
+            if social_service and social_service.bot_info:
+                bot_name = social_service.bot_info.get("nickname", default_name)
+        except ImportError:
+            pass
+        
+        variables["bot_name"] = bot_name # 保留 bot_name 以兼容旧的 Prompt
+        variables.setdefault("agent_name", bot_name) # 仅当未设定时使用 bot_name 作为 agent_name
 
-        # [工作模式最终覆盖]
+        # [Work Mode Decoupling]
+        variables["custom_persona"] = config.get("work_custom_persona", "你是一个全能的 AI 助手，你的名字是 {{ agent_name }}。")
+        variables["work_traits"] = config.get("work_traits", ["mode:concise"])
+
+        # [Persona Loading]
+        agent_id = variables.get("agent_id") or config.get("agent_id", "pero")
+        agent_id = str(agent_id).lower()
+        persona_template = config.get("persona_template", f"{agent_id}/system_prompt")
+        
+        render_context = {"agent_name": variables.get("agent_name", bot_name)}
+        if "owner_name" in variables:
+            render_context["owner_name"] = variables["owner_name"]
+            
+        variables["persona_definition"] = self.mdp.render(persona_template, render_context)
+        
+        # 注入 NIT 工具描述
+        try:
+            if not is_social_mode:
+                dispatcher = get_dispatcher()
+                tools_desc = dispatcher.get_tools_description(category_filter='core')
+                if variables.get("work_mode_enabled", False):
+                    tools_desc += "\n\n" + dispatcher.get_tools_description(category_filter='work')
+                variables["nit_tools_description"] = tools_desc
+            else:
+                variables["nit_tools_description"] = ""
+        except Exception as e:
+            print(f"[PromptManager] 注入 NIT 工具描述错误: {e}")
+            variables["nit_tools_description"] = "加载工具出错。"
+
+        # 注入链逻辑（思维链）
+        chain_name = variables.get("chain_name", "default")
+        chain_prompt = self.mdp.get_prompt(f"chains/{chain_name}")
+        variables["chain_logic"] = chain_prompt.content if chain_prompt else ""
+        
+        # 2. 默认值
+        variables.setdefault("owner_name", "主人")
+        variables.setdefault("user_persona", "未设定")
+        variables.setdefault("mood", "开心")
+        variables.setdefault("vibe", "活泼")
+        variables.setdefault("mind", "正在想主人...")
+        variables.setdefault("vision_status", "")
+        variables.setdefault("memory_context", "")
+        
+        # [社交模式/轻量模式特殊处理]
+        if is_social_mode or is_lightweight:
+            variables["chain_logic"] = ""
+
+    def build_system_prompt(self, variables: Dict[str, Any], is_social_mode: bool = False, is_work_mode: bool = False) -> str:
+        # 0. 丰富变量
+        self._enrich_variables(variables, is_social_mode, is_work_mode)
+        
+        # [工作模式专用构建]
         if is_work_mode:
             # 1. 覆盖 NIT 工具描述 (只用核心工具)
             try:
@@ -230,7 +206,7 @@ class PromptManager:
                     tools_desc = dispatcher.get_tools_description()
                 variables["nit_tools_description"] = tools_desc
             except Exception as e:
-                logger.error(f"Error loading work tools: {e}")
+                logger.error(f"加载工作工具错误: {e}")
 
             # 2. 简化 Ability NIT (移除 ReAct 思考步骤，同轻量模式)
             nit_prompt = self.mdp.get_prompt("core/abilities/ability_nit")
@@ -240,26 +216,43 @@ class PromptManager:
                 content = content.replace("在执行任何外部操作时，必须遵循‘思考-行动-观察’的循环。", "")
                 variables["ability_nit"] = content
             
-            # 3. 确保 chain_logic 存在（工作模式需要）
-            # 已在上方加载，此处无需操作。
-
-            # 4. 渲染工作模式专用模板 (此时 variables 中已包含 persona_definition, agent_name 等)
+            # 4. 渲染工作模式专用模板
             return self.mdp.render("core/templates/system_work", variables)
 
-        # 3. 渲染
-        # [社交模式/轻量模式特殊处理]
-        if is_social_mode or is_lightweight:
-            # 社交模式和轻量模式不需要思维链引导
-            variables["chain_logic"] = ""
-            
+        # 1. 渲染模板
         final_prompt = self.mdp.render("core/templates/system_template", variables)
         
         # [轻量级模式提醒]
+        config = get_config_manager()
+        is_lightweight = config.get("lightweight_mode", False)
         if is_lightweight and not is_social_mode:
             lightweight_reminder = "\n\n【重要系统提醒：轻量聊天模式已开启。为了节省系统资源，目前除了“视觉感知(ScreenVision)”、“形象管理(CharacterOps)”和“核心记忆(MemoryOps)”之外的所有高级工具已被临时禁用。此外，为了保持极速响应，请你跳过复杂的思考过程（Thinking），直接输出回复内容。如果你需要调用工具，请直接在回复中编写 NIT 脚本，无需多余的解释或分析。】"
             final_prompt += lightweight_reminder
             
         return final_prompt
+
+    def build_instruction_prompt(self, variables: Dict[str, Any], is_social_mode: bool = False, is_work_mode: bool = False) -> str:
+        """
+        构建指令部分的 Prompt (Rules, Tools, COT)
+        通常放在消息列表的最后，作为 System Message 提醒模型
+        """
+        # [工作模式]
+        # 工作模式通常在 system_work 中包含了必要的指令，或者需要专门的 instruction_work
+        # 目前暂不追加 instruction_work，以免重复
+        if is_work_mode:
+            return ""
+            
+        # [主程序模式] (非社交, 非工作)
+        # 渲染 core/templates/instruction_default
+        # 包含: ability, ability_nit, output_constraint
+        if not is_social_mode:
+            return self.mdp.render("core/templates/instruction_default", variables)
+            
+        # [社交模式]
+        # 社交模式目前暂不追加额外的指令，以免引入不必要的复杂性 (如 Thinking/Monologue 可能不适合 QQ)
+        # 如果未来需要，可以创建 instruction_social.md
+        
+        return ""
 
     async def get_rendered_system_prompt(self, session: AsyncSession, is_social_mode: bool = False) -> str:
         """
@@ -339,6 +332,27 @@ class PromptManager:
         # 1. 丰富变量
         self._enrich_variables(variables, is_social_mode, is_work_mode)
         
+        # [Social Mode MDP Route]
+        if is_social_mode:
+            # 社交模式使用独立的 MDP 模板
+            base_prompt = self.mdp.render("core/templates/system_social", variables)
+            
+            # 社交模式下，Instruction 通常已经包含在 system_social 模板中（通过 social_rules 等变量）
+            # 或者通过 variables["instruction_prompt"] 传递
+            # 因此这里不需要额外构建 instruction_prompt，也不需要 cleaned_history（因为已经在 xml_context 中了）
+            
+            messages = [{"role": "system", "content": base_prompt}]
+            
+            # 如果 history 中包含了用户传来的非 XML 消息（例如图片或其他临时消息），可以追加
+            # 但目前 SocialService 将所有内容都打包进了 xml_context 变量中
+            # 除了可能的最后一条用户消息（如果是纯文本交互）
+            # 但 SocialService 的设计是完全通过 System Prompt 传递上下文。
+            # 为了兼容性，如果 history 不为空，我们追加它（通常是空的，因为 Preprocessor 把它清空了）
+            if history:
+                 messages.extend(history)
+                 
+            return messages
+
         # 2. 构建基础 System Prompt (Identity, Context)
         base_prompt = ""
         if is_work_mode:

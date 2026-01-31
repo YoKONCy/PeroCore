@@ -4,6 +4,8 @@ import { existsSync } from 'fs'
 import { windowManager } from '../windows/manager.js'
 import { stopBackend } from './python.js'
 
+import { stopGateway } from './gateway.js'
+
 let tray: Tray | null = null
 
 export function createTray() {
@@ -30,11 +32,11 @@ export function createTray() {
         }
     }
 
-    console.log('Tray icon candidate paths:', paths)
-    console.log('Selected tray icon path:', iconPath)
+    console.log('托盘图标候选路径:', paths)
+    console.log('选定的托盘图标路径:', iconPath)
 
     if (!iconPath) {
-        console.error('Tray icon not found')
+        console.error('未找到托盘图标')
         return
     }
     
@@ -70,6 +72,7 @@ export function createTray() {
                 label: '彻底退出', 
                 click: () => {
                     stopBackend()
+                    stopGateway()
                     app.quit()
                 }
             }
@@ -83,7 +86,7 @@ export function createTray() {
         })
         
     } catch (e) {
-        console.error('Failed to create tray:', e)
+        console.error('创建托盘失败:', e)
     }
 }
 

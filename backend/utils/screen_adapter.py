@@ -1,7 +1,16 @@
 import platform
 import ctypes
-import pyautogui
+import os
+import logging
+
+try:
+    import pyautogui
+except ImportError:
+    pyautogui = None
+
 from typing import Tuple
+
+logger = logging.getLogger(__name__)
 
 def set_dpi_awareness():
     """
@@ -29,7 +38,14 @@ class ScreenAdapter:
 
     def _refresh_screen_info(self):
         # 获取物理屏幕尺寸
-        self.screen_width, self.screen_height = pyautogui.size()
+        if pyautogui:
+            try:
+                self.screen_width, self.screen_height = pyautogui.size()
+            except Exception:
+                # Headless or error
+                self.screen_width, self.screen_height = 1920, 1080
+        else:
+            self.screen_width, self.screen_height = 1920, 1080
         
     def get_physical_coords(self, logical_x: float, logical_y: float, max_logical_width: int = 1000, max_logical_height: int = 1000) -> Tuple[int, int]:
         """
@@ -73,26 +89,37 @@ class ScaledPyAutoGUI:
         set_dpi_awareness()
 
     def _get_phys_coords(self, x, y):
-        screen_w, screen_h = self._backend.size()
+        if not self._backend:
+            return x, y
+            
+        try:
+            screen_w, screen_h = self._backend.size()
+        except Exception:
+            return x, y
+
         phys_x = int(round((x / 1000.0) * screen_w))
         phys_y = int(round((y / 1000.0) * screen_h))
         return max(0, min(phys_x, screen_w - 1)), max(0, min(phys_y, screen_h - 1))
 
     def moveTo(self, x, y, **kwargs):
+        if not self._backend: return
         px, py = self._get_phys_coords(x, y)
         return self._backend.moveTo(px, py, **kwargs)
 
     def click(self, x=None, y=None, **kwargs):
+        if not self._backend: return
         if x is not None and y is not None:
             x, y = self._get_phys_coords(x, y)
         return self._backend.click(x, y, **kwargs)
 
     def doubleClick(self, x=None, y=None, **kwargs):
+        if not self._backend: return
         if x is not None and y is not None:
             x, y = self._get_phys_coords(x, y)
         return self._backend.doubleClick(x, y, **kwargs)
 
     def rightClick(self, x=None, y=None, **kwargs):
+        if not self._backend: return
         if x is not None and y is not None:
             x, y = self._get_phys_coords(x, y)
         return self._backend.rightClick(x, y, **kwargs)

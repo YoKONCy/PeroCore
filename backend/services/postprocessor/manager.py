@@ -27,7 +27,7 @@ class PostprocessorManager:
                 # logger.debug(f"Running postprocessor: {processor.name}")
                 current_content = await processor.process(current_content, context)
             except Exception as e:
-                logger.error(f"Error in postprocessor {processor.name} (batch): {e}", exc_info=True)
+                logger.error(f"后处理器 {processor.name} (批处理) 出错: {e}", exc_info=True)
         
         return current_content
 
@@ -43,7 +43,7 @@ class PostprocessorManager:
                 # 调用它会立即返回一个 AsyncGenerator。
                 current_stream = processor.process_stream(current_stream, context)
             except Exception as e:
-                logger.error(f"Error chaining postprocessor {processor.name}: {e}")
+                logger.error(f"链接后处理器 {processor.name} 出错: {e}")
         
         async for chunk in current_stream:
             yield chunk

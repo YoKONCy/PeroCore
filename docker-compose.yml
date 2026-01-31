@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    volumes:
+      - ./backend/data:/app/data
+      - ./config:/app/config
+    environment:
+      - PERO_ENV=server
+      - TZ=Asia/Shanghai
+    networks:
+      - pero-net
+
+  napcat:
+    image: mlikiowa/napcat-docker:latest
+    volumes:
+      - ./napcat/config:/app/config
+    environment:
+      - TZ=Asia/Shanghai
+    networks:
+      - pero-net
+
+  gateway:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.gateway
+    volumes:
+      - ./backend/data:/app/data
+    environment:
+      - TZ=Asia/Shanghai
+    networks:
+      - pero-net
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    environment:
+      - TZ=Asia/Shanghai
+    networks:
+      - pero-net
+
+networks:
+  pero-net:
+    driver: bridge

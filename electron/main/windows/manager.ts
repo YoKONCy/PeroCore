@@ -1,5 +1,6 @@
 import { BrowserWindow, app, shell, screen } from 'electron'
 import { join } from 'path'
+import { existsSync } from 'fs'
 import { is } from '@electron-toolkit/utils'
 
 export class WindowManager {
@@ -25,6 +26,25 @@ export class WindowManager {
     return join(__dirname, '../../preload/index.js')
   }
 
+  private getIconPath(): string {
+    // Prefer ICO on Windows for better quality/compatibility
+    const iconName = process.platform === 'win32' ? 'icon.ico' : 'icon.png'
+    const paths = [
+        join(process.cwd(), 'public', iconName), // Dev
+        join(process.cwd(), 'resources', iconName), // Prod
+        join(process.resourcesPath, iconName), // Prod resources
+        join(__dirname, '../../public', iconName), // Relative dev
+        join(__dirname, '../../../public', iconName), // Relative dev deep
+        join(__dirname, '../../', iconName) // Fallback
+    ]
+    for (const p of paths) {
+        if (existsSync(p)) {
+            return p
+        }
+    }
+    return ''
+  }
+
   private getPageUrl(route: string = ''): string {
     if (process.env.VITE_DEV_SERVER_URL) {
       return `${process.env.VITE_DEV_SERVER_URL}#${route}`
@@ -42,6 +62,7 @@ export class WindowManager {
 
     this.launcherWin = new BrowserWindow({
       title: 'Pero Launcher',
+      icon: this.getIconPath(),
       width: 900,
       height: 600,
       // Wait for ready-to-show
@@ -103,6 +124,7 @@ export class WindowManager {
 
     this.petWin = new BrowserWindow({
       title: 'Pero Pet',
+      icon: this.getIconPath(),
       width: 800,
       height: 800,
       x: width - 850,
@@ -197,7 +219,7 @@ export class WindowManager {
         // 发送到渲染进程
         this.petWin.webContents.send('global-mouse-move', { x: relativeX, y: relativeY });
       } catch (e) {
-        console.error('Mouse tracking error:', e)
+        console.error('鼠标追踪错误:', e)
       }
     }, 33)
   }
@@ -218,6 +240,7 @@ export class WindowManager {
 
     this.dashboardWin = new BrowserWindow({
         title: 'Pero Dashboard',
+        icon: this.getIconPath(),
         width: 1280,
         height: 800,
         show: false,
@@ -267,6 +290,7 @@ export class WindowManager {
 
     this.ideWin = new BrowserWindow({
         title: 'Pero IDE',
+        icon: this.getIconPath(),
         width: 1400,
         height: 900,
         show: false,

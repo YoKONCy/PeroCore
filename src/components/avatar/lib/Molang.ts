@@ -150,7 +150,7 @@ export class Molang {
             this.cache.set(expression, func);
             return func;
         } catch (e) {
-            console.warn(`Failed to compile Molang: ${expression}`, e);
+            console.warn(`编译 Molang 失败: ${expression}`, e);
             return () => 0;
         }
     }

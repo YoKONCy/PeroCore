@@ -2,9 +2,16 @@ import time
 import threading
 from collections import deque
 from typing import List, Dict, Optional
-import pyautogui
 import io
 import base64
+import os
+import platform
+
+# Optional import for pyautogui
+try:
+    import pyautogui
+except ImportError:
+    pyautogui = None
 
 class ScreenshotManager:
     def __init__(self, max_size: int = 10, interval: int = 30):
@@ -12,9 +19,14 @@ class ScreenshotManager:
         self.interval = interval
         self.running = False
         self._thread = None
+        self._is_server = os.environ.get("PERO_ENV") == "server" or platform.system() != "Windows"
 
-    def capture(self) -> Dict:
+    def capture(self) -> Optional[Dict]:
         """捕获当前屏幕并存入池中"""
+        if self._is_server or not pyautogui:
+            # Server 模式或缺少依赖时不执行截图
+            return None
+
         try:
             start_time = time.time()
             screenshot = pyautogui.screenshot()
@@ -38,10 +50,10 @@ class ScreenshotManager:
             self.pool.append(data)
             
             duration = (now - start_time) * 1000
-            print(f"[ScreenshotManager] Captured screenshot at {time_str} (Took {duration:.2f}ms)")
+            print(f"[ScreenshotManager] 已截屏于 {time_str} (耗时 {duration:.2f}ms)")
             return data
         except Exception as e:
-            print(f"[ScreenshotManager] Capture failed: {e}")
+            print(f"[ScreenshotManager] 截图失败: {e}")
             return None
 
     def get_recent(self, count: int = 1, max_age: int = None) -> List[Dict]:
@@ -68,7 +80,7 @@ class ScreenshotManager:
         self.running = True
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
-        print(f"[ScreenshotManager] Background task started (interval: {self.interval}s)")
+        print(f"[ScreenshotManager] 后台任务已启动 (间隔: {self.interval}s)")
 
     def _run(self):
         while self.running:

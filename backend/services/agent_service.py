@@ -281,15 +281,15 @@ class AgentService:
             if "function" in tool_def:
                 func = tool_def["function"]
                 name = func.get("name", "unknown")
-                desc = func.get("description", "No description")
+                desc = func.get("description", "无描述")
                 tools_list_str += f"- {name}: {desc}\n"
             elif "name" in tool_def: # 支持 NIT 风格的定义
                 name = tool_def.get("name", "unknown")
-                desc = tool_def.get("description", "No description")
+                desc = tool_def.get("description", "无描述")
                 tools_list_str += f"- {name}: {desc}\n"
             elif "commandIdentifier" in tool_def: # 支持 NIT 2.0 风格定义
                 name = tool_def.get("commandIdentifier", "unknown")
-                desc = tool_def.get("description", "No description")
+                desc = tool_def.get("description", "无描述")
                 tools_list_str += f"- {name}: {desc}\n"
 
         system_prompt = self.mdp.render("services/memory/reflection/reflection_ui", {
@@ -507,7 +507,7 @@ class AgentService:
                     # 检查 text 中是否包含 <nit> 且内容涉及敏感词
                     if "<nit" in text and any(kw in text.lower() for kw in sensitive_tool_keywords):
                         print(f"[🛡️ 安全拦截] 已拦截来自移动端的 NIT 脚本执行: {text[:50]}...")
-                        return [{"status": "error", "message": "Permission Denied: NIT script contains restricted tools for mobile source."}]
+                        return [{"status": "error", "message": "权限拒绝：NIT 脚本包含移动端受限的工具。"}]
 
                 from nit_core.dispatcher import get_dispatcher
                 nit_dispatcher = get_dispatcher()
@@ -655,9 +655,9 @@ class AgentService:
                             else:
                                 tool_result = func(**args)
                         except Exception as e:
-                            tool_result = f"Error executing {func_name}: {e}"
+                            tool_result = f"执行 {func_name} 出错: {e}"
                     else:
-                        tool_result = f"Tool {func_name} not found."
+                        tool_result = f"未找到工具 {func_name}。"
                         
                     # Append Tool Result
                     messages.append({
@@ -737,7 +737,7 @@ class AgentService:
         except Exception as e:
             print(f"[Agent] 后台梦境失败: {e}")
 
-    async def chat(self, messages: List[Dict[str, Any]], source: str = "desktop", session_id: str = "default", on_status: Optional[Any] = None, is_voice_mode: bool = False, user_text_override: str = None, skip_save: bool = False, system_trigger_instruction: str = None, agent_id_override: str = None, capabilities: List[str] = None, skip_system_prompt: bool = False) -> AsyncIterable[str]:
+    async def chat(self, messages: List[Dict[str, Any]], source: str = "desktop", session_id: str = "default", on_status: Optional[Any] = None, is_voice_mode: bool = False, user_text_override: str = None, skip_save: bool = False, system_trigger_instruction: str = None, agent_id_override: str = None, capabilities: List[str] = None, skip_system_prompt: bool = False, initial_variables: Dict[str, Any] = None) -> AsyncIterable[str]:
         # [NIT Security] Generate ID for this request context
         current_nit_id = NITSecurityManager.generate_random_id()
         
@@ -805,8 +805,9 @@ class AgentService:
             "is_voice_mode": is_voice_mode,
             "agent_service": self,
             "agent_id": current_agent_id, # Add explicit agent_id to context
-            "variables": {},
+            "variables": initial_variables if initial_variables else {},
             "nit_id": current_nit_id,
+            "skip_system_prompt": skip_system_prompt, # Pass skip flag to preprocessors
         }
         
         # 2. Run Preprocessor Pipeline
@@ -839,25 +840,27 @@ class AgentService:
 
         # [Feature] Active Window Injection
         # 注入当前活跃窗口列表，防止 AI 幻觉（以为应用已打开）
-        try:
-            active_windows = get_active_windows()
-            if isinstance(active_windows, list) and active_windows:
-                # Limit to avoid token explosion
-                window_list_str = "\n".join(active_windows[:20]) 
-                if len(active_windows) > 20:
-                    window_list_str += f"\n... ({len(active_windows) - 20} more)"
-                
-                state_msg = self.mdp.render("core/context/active_windows", {
-                    "window_list_str": window_list_str
-                })
-                
-                # Append to messages (System role)
-                final_messages.append({
-                    "role": "system",
-                    "content": state_msg
-                })
-        except Exception as e:
-            print(f"[Agent] 注入活跃窗口失败: {e}")
+        # [Fix] Social/Mobile 模式下不注入 PC 窗口信息，防止上下文混淆
+        if source not in ["social", "mobile"]:
+            try:
+                active_windows = get_active_windows()
+                if isinstance(active_windows, list) and active_windows:
+                    # Limit to avoid token explosion
+                    window_list_str = "\n".join(active_windows[:20]) 
+                    if len(active_windows) > 20:
+                        window_list_str += f"\n... ({len(active_windows) - 20} more)"
+                    
+                    state_msg = self.mdp.render("core/context/active_windows", {
+                        "window_list_str": window_list_str
+                    })
+                    
+                    # Append to messages (System role)
+                    final_messages.append({
+                        "role": "system",
+                        "content": state_msg
+                    })
+            except Exception as e:
+                print(f"[Agent] 注入活跃窗口失败: {e}")
         
         # Fallback if config is missing (should not happen if ConfigPreprocessor runs)
         if not config:
@@ -1077,13 +1080,13 @@ class AgentService:
                     print(f"[Agent] 第 {turn_count} 轮未检测到工具调用")
 
                 # Apply Postprocessor Pipeline
-                # 如果 source 是 'ide' 或 'desktop'，则跳过 NIT 过滤，以便前端显示工具调用
+                # 如果 source 是 'ide' 或 'desktop' 或 'social'，则跳过 NIT 过滤，以便前端显示工具调用或后端直接处理
                 processed_stream = self.postprocessor_manager.process_stream(
                     raw_stream_source(),
                     context={
                         "source": source, 
                         "session_id": session_id,
-                        "skip_nit_filter": (source in ["ide", "desktop"])
+                        "skip_nit_filter": (source in ["ide", "desktop", "social"])
                     }
                 )
 
@@ -1289,7 +1292,7 @@ class AgentService:
                             "tool_call_id": tool_call["id"],
                             "role": "tool",
                             "name": function_name,
-                            "content": f"Error: {arg_parsing_error}. Please ensure arguments are valid JSON.",
+                            "content": f"错误: {arg_parsing_error}。请确保参数是有效的 JSON。",
                         })
                          continue
                     
@@ -1303,7 +1306,7 @@ class AgentService:
                             "tool_call_id": tool_call["id"],
                             "role": "tool",
                             "name": function_name,
-                            "content": f"Error: Permission Denied. Tool '{function_name}' is restricted for remote/mobile connections for security reasons.",
+                            "content": f"错误：权限拒绝。出于安全原因，工具 '{function_name}' 被限制远程/移动连接使用。",
                         })
                         continue
 
@@ -1321,7 +1324,7 @@ class AgentService:
                             "tool_call_id": tool_call["id"],
                             "role": "tool",
                             "name": function_name,
-                            "content": "Task finished. Terminating loop.",
+                            "content": "任务已完成。终止循环。",
                         })
                         should_terminate_loop = True
                         break
@@ -1364,7 +1367,7 @@ class AgentService:
                             function_response = f"System: 已成功处理。获取到 {count} 条数据，UI 列表已在后台准备就绪。{aux_msg}\n请结合辅助模型的分析结果（如果有），告知用户你已经处理完成，并可以简要复述分析结论。"
                             print(f"[Agent] {function_name} 已拦截。{count} 项已从 LLM 上下文中隐藏。")
                         except Exception as e:
-                            function_response = f"Error during intercepted tool execution: {e}"
+                            function_response = f"拦截工具执行期间出错: {e}"
 
                         final_messages.append({
                             "tool_call_id": tool_call["id"],
@@ -1505,7 +1508,7 @@ class AgentService:
 
                         except Exception as e:
                             print(f"[Agent] NIT 工具 {function_name} 失败: {e}")
-                            function_response = f"Error executing tool: {e}"
+                            function_response = f"执行工具出错: {e}"
                             
                         final_messages.append({
                             "tool_call_id": tool_call["id"],
@@ -1521,7 +1524,7 @@ class AgentService:
                         client = mcp_tool_map.get(function_name)
                         if not client:
                             print(f"[Agent] 映射中未找到 MCP 工具 {function_name}")
-                            mcp_response = f"Error: MCP tool {function_name} not found."
+                            mcp_response = f"错误: 未找到 MCP 工具 {function_name}。"
                         else:
                             print(f"[Agent] 调用 MCP 工具: {real_tool_name} (在 {client.name} 上)")
                             if on_status: await on_status("thinking", f"正在调用插件 ({client.name}): {real_tool_name}...")
@@ -1623,6 +1626,14 @@ class AgentService:
                         )
                     except Exception as pp_e:
                         print(f"[Agent] 后处理器失败: {pp_e}。使用原始文本。")
+
+                # Broadcast LLM response to frontend via Gateway
+                if not is_voice_mode and source == "desktop":
+                    from services.gateway_client import gateway_client
+                    await gateway_client.broadcast_text_response(full_response_text)
+                    
+                    # Trigger TTS (Text Mode)
+                    asyncio.create_task(self._generate_and_stream_tts(full_response_text))
 
                 # 仅在正常生成回复（且不是报错）时才保存对话记录
                 # 用户消息与 Pero 回复进行原子性绑定保存
@@ -1795,3 +1806,60 @@ class AgentService:
                     except:
                         pass
             pass
+
+    async def _generate_and_stream_tts(self, text: str):
+        """Generate TTS audio and stream it to frontend (Text Mode)"""
+        try:
+            # Clean text (remove emojis, think tags, etc.)
+            import re
+            cleaned_text = re.sub(r'[\U00010000-\U0010ffff]', '', text) # Remove emojis
+            cleaned_text = re.sub(r'【.*?】', '', cleaned_text) # Remove think tags
+            cleaned_text = re.sub(r'<.*?>', '', cleaned_text) # Remove html tags
+            cleaned_text = re.sub(r'\*.*?\*', '', cleaned_text) # Remove actions
+            cleaned_text = cleaned_text.strip()
+            
+            if not cleaned_text:
+                return
+
+            from services.tts_service import get_tts_service
+            from services.gateway_client import gateway_client
+            import uuid
+            import time
+            from peroproto import perolink_pb2
+
+            tts_service = get_tts_service()
+            
+            # Check if TTS is enabled
+            from core.config_manager import get_config_manager
+            if not get_config_manager().get("tts_enabled", True):
+                return
+
+            # Use default voice params
+            audio_path = await tts_service.synthesize(cleaned_text)
+            
+            if audio_path:
+                # Stream via Gateway
+                with open(audio_path, "rb") as f:
+                    audio_data = f.read()
+                
+                envelope = perolink_pb2.Envelope()
+                envelope.id = str(uuid.uuid4())
+                envelope.source_id = gateway_client.device_id
+                envelope.target_id = "broadcast"
+                envelope.timestamp = int(time.time() * 1000)
+                
+                envelope.stream.stream_id = str(uuid.uuid4())
+                envelope.stream.data = audio_data
+                envelope.stream.is_end = True
+                envelope.stream.content_type = "audio/mp3"
+                
+                await gateway_client.send(envelope)
+                
+                # Cleanup
+                try:
+                    import os
+                    os.remove(audio_path)
+                except:
+                    pass
+        except Exception as e:
+            print(f"[Agent] TTS 生成失败: {e}")

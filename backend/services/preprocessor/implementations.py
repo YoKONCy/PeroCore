@@ -37,7 +37,7 @@ class UserInputPreprocessor(BasePreprocessor):
                         user_message = " ".join(texts)
                     break
         
-        print(f"[UserInputPreprocessor] Extracted user_message: {user_message[:50]}...")
+        print(f"[UserInputPreprocessor] 提取用户消息: {user_message[:50]}...")
         context["user_message"] = user_message
         context["is_multimodal"] = is_multimodal
         return context
@@ -56,6 +56,24 @@ class HistoryPreprocessor(BasePreprocessor):
         source = context.get("source", "desktop")
         session_id = context.get("session_id", "default")
         current_messages = context.get("messages", [])
+
+        # [Configurable Preprocessor] Check if history fetch is disabled via config
+        # Default to True unless explicitly disabled
+        # Social Mode: Disabled by default (as it provides its own context)
+        enable_history = True
+        if source == "social":
+            enable_history = False
+            
+        # Allow override via variables (if injected by SocialService)
+        variables = context.get("variables", {})
+        if "enable_history" in variables:
+            enable_history = variables["enable_history"]
+
+        if not enable_history:
+             context["history_messages"] = []
+             context["full_context_messages"] = current_messages
+             context["earliest_timestamp"] = None
+             return context
 
         # Fetch recent logs
         try:
@@ -107,7 +125,7 @@ class HistoryPreprocessor(BasePreprocessor):
                     tokens = len(enc.encode(content))
                     
                     if current_tokens + tokens > MAX_TOKENS:
-                        print(f"[History] Token limit reached ({current_tokens} + {tokens} > {MAX_TOKENS}). Truncating older messages.")
+                        print(f"[History] 达到 Token 上限 ({current_tokens} + {tokens} > {MAX_TOKENS}). 正在截断旧消息。")
                         break
                     
                     current_tokens += tokens
@@ -116,12 +134,12 @@ class HistoryPreprocessor(BasePreprocessor):
                 history_messages = truncated_history
                 
             except ImportError:
-                print("[History] tiktoken not found. Fallback to message count limit.")
+                print("[History] 未找到 tiktoken。回退到消息计数限制。")
                 # Fallback: Keep last 100 messages if tiktoken fails
                 if len(history_messages) > 100:
                     history_messages = history_messages[-100:]
             except Exception as e:
-                print(f"[History] Token truncation failed: {e}")
+                print(f"[History] Token 截断失败: {e}")
 
         # Deduplication logic
         if current_messages and history_messages:
@@ -177,6 +195,22 @@ class RAGPreprocessor(BasePreprocessor):
         return state
 
     async def process(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        source = context.get("source", "desktop")
+        
+        # [Configurable Preprocessor] Check if RAG is disabled
+        enable_rag = True
+        if source == "social":
+            enable_rag = False
+            
+        variables = context.get("variables", {})
+        if "enable_rag" in variables:
+            enable_rag = variables["enable_rag"]
+            
+        if not enable_rag:
+            variables["memory_context"] = "" # Explicitly clear it
+            context["variables"] = variables
+            return context
+
         session = context["session"]
         memory_service = context["memory_service"]
         user_message = context.get("user_message", "")
@@ -278,7 +312,7 @@ class RAGPreprocessor(BasePreprocessor):
                         query_vec = merged_vec.tolist()
 
                 # Perform Search
-                print(f"[RAGPreprocessor] Searching relevant memories for: {user_message[:30]}...")
+                print(f"[RAGPreprocessor] 正在搜索相关记忆: {user_message[:30]}...")
                 memories = await memory_service.get_relevant_memories(
                     session, 
                     user_message, 
@@ -287,7 +321,7 @@ class RAGPreprocessor(BasePreprocessor):
                     query_vec=query_vec,
                     agent_id=agent_id
                 )
-                print(f"[RAGPreprocessor] Found {len(memories) if memories else 0} memories.")
+                print(f"[RAGPreprocessor] 找到 {len(memories) if memories else 0} 条记忆。")
                 
                 # [特性] RAG 刷新块构建
                 # 创建富含元数据的注释块以进行动态刷新
@@ -322,7 +356,7 @@ class RAGPreprocessor(BasePreprocessor):
                 # to ensure consistency across all access paths (including fallback).
 
         except Exception as e:
-            print(f"[RAGPreprocessor] Failed to retrieve memories: {e}")
+            print(f"[RAGPreprocessor] 检索记忆失败: {e}")
             memory_context = "无相关记忆 (检索出错)"
 
         # Populate variables
@@ -349,6 +383,22 @@ class WeeklyReportPreprocessor(BasePreprocessor):
         return "WeeklyReportInjector"
 
     async def process(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        source = context.get("source", "desktop")
+        
+        # [Configurable Preprocessor] Check if Graph is disabled
+        enable_graph = True
+        if source == "social":
+            enable_graph = False
+            
+        variables = context.get("variables", {})
+        if "enable_graph" in variables:
+            enable_graph = variables["enable_graph"]
+            
+        if not enable_graph:
+            variables["graph_context"] = ""
+            context["variables"] = variables
+            return context
+
         session = context["session"]
         memory_service = context["memory_service"]
         user_message = context.get("user_message", "")
@@ -383,10 +433,10 @@ class WeeklyReportPreprocessor(BasePreprocessor):
             if reports:
                 report = reports[0]
                 weekly_report_context = f"【相关周报】({report.realTime})\n{report.content}"
-                print(f"[WeeklyReport] Injected report from {report.realTime}")
+                print(f"[WeeklyReport] 注入了来自 {report.realTime} 的周报")
             
         except Exception as e:
-            print(f"[WeeklyReport] Failed to retrieve report: {e}")
+            print(f"[WeeklyReport] 检索周报失败: {e}")
             
         variables = context.get("variables", {})
         variables["weekly_report_context"] = weekly_report_context
@@ -409,12 +459,12 @@ class GraphFlashbackPreprocessor(BasePreprocessor):
         agent_id = context.get("agent_id", "pero")
         
         if not user_message:
-            print("[GraphFlashback] Skipping: No user_message")
+            print("[GraphFlashback] 跳过: 无用户消息")
             return context
 
         # Perform logical flashback
         try:
-            print(f"[GraphFlashback] Starting logical_flashback for: {user_message[:30]}...")
+            print(f"[GraphFlashback] 开始逻辑闪回: {user_message[:30]}...")
             flashback = await memory_service.logical_flashback(session, user_message, limit=5, agent_id=agent_id)
             
             graph_context = ""
@@ -422,9 +472,9 @@ class GraphFlashbackPreprocessor(BasePreprocessor):
                 # Format the flashback fragments
                 fragments = [item["name"] for item in flashback]
                 graph_context = "关联思绪: " + ", ".join(fragments)
-                print(f"[GraphFlashback] Found {len(fragments)} fragments: {fragments}")
+                print(f"[GraphFlashback] 找到 {len(fragments)} 个碎片: {fragments}")
             else:
-                print("[GraphFlashback] No fragments found.")
+                print("[GraphFlashback] 未找到碎片。")
             
             # Populate variables
             variables = context.get("variables", {})
@@ -432,7 +482,7 @@ class GraphFlashbackPreprocessor(BasePreprocessor):
             context["variables"] = variables
             
         except Exception as e:
-            print(f"[GraphFlashback] Failed: {e}")
+            print(f"[GraphFlashback] 失败: {e}")
             
         return context
 
@@ -531,13 +581,14 @@ class SystemPromptPreprocessor(BasePreprocessor):
                 variables["recent_history_context"] = context_str
                 
             except Exception as e:
-                print(f"[SystemPromptBuilder] Failed to inject work mode context: {e}")
+                print(f"[SystemPromptBuilder] 注入工作模式上下文失败: {e}")
                 variables["recent_history_context"] = ""
 
         final_messages = prompt_manager.compose_messages(
             full_context_messages, 
             variables, 
             is_voice_mode=is_voice_mode,
+            is_social_mode=context.get("source") == "social", # Pass is_social_mode
             is_work_mode=is_work_mode
         )
         
@@ -584,7 +635,7 @@ class PerceptionPreprocessor(BasePreprocessor):
             variables["memory_context"] = existing_memory + "\n\n" + perception_context
             context["variables"] = variables
             
-            print(f"[PerceptionPreprocessor] Injected {len(recent_perceptions)} perception logs.")
+            print(f"[PerceptionPreprocessor] 注入了 {len(recent_perceptions)} 条感知日志。")
             
             # 注入后清空日志? 
             # 策略：读取后不清空，只有在 AgentService 真正回复后，
@@ -600,6 +651,6 @@ class PerceptionPreprocessor(BasePreprocessor):
         except ImportError:
             pass
         except Exception as e:
-            print(f"[PerceptionPreprocessor] Failed: {e}")
+            print(f"[PerceptionPreprocessor] 失败: {e}")
             
         return context

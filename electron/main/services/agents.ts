@@ -36,7 +36,8 @@ export async function scanLocalAgents() {
     let globalConfig = { enabled_agents: [] as string[], active_agent: '' }
     try {
         if (await fs.pathExists(globalConfigPath)) {
-            globalConfig = await fs.readJson(globalConfigPath)
+            const loadedConfig = await fs.readJson(globalConfigPath)
+            globalConfig = { ...globalConfig, ...loadedConfig }
             console.log('[Agents] 已加载全局配置:', globalConfig)
         } else {
             console.log('[Agents] 全局配置未找到，使用默认值')
@@ -76,8 +77,8 @@ export async function scanLocalAgents() {
                             ...config
                         })
                     } catch (e) {
-                        console.error(`Failed to read agent config for ${file}`, e)
-                        agents.push({ id: file, name: file, description: 'Config Error' })
+                        console.error(`无法读取 ${file} 的配置`, e)
+                        agents.push({ id: file, name: file, description: '配置错误' })
                     }
                 }
             }
@@ -95,7 +96,7 @@ export async function getPlugins() {
     // 后端结构: backend/nit_core/plugins
     const pluginsDir = path.join(root, 'backend/nit_core/plugins')
     
-    console.log(`[Plugins] Scanning plugins at: ${pluginsDir}`)
+    console.log(`[插件] 正在扫描插件，路径: ${pluginsDir}`)
 
     if (!await fs.pathExists(pluginsDir)) {
         console.warn(`[Plugins] Directory not found: ${pluginsDir}`)

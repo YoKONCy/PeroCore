@@ -1,6 +1,9 @@
 import * as THREE from 'three';
 import { AnimationManager } from './AnimationManager';
 
+// Global texture cache to prevent reloading across model resets
+const textureCache = new Map<string, THREE.Texture>();
+
 export class BedrockLoader {
     boneMap: any = {};
     textureWidth: number = 64;
@@ -14,14 +17,14 @@ export class BedrockLoader {
         this.boneMap = {}; // Reset
         const rootGroup = new THREE.Group();
 
-        // Helper for fetch with timeout
-        // 带超时的 fetch 助手
-        const fetchWithTimeout = async (url: string, timeout = 10000) => {
+        // Helper: Fetch with timeout
+        const fetchWithTimeout = async (url: string, timeout = 30000) => {
             const controller = new AbortController();
             const id = setTimeout(() => controller.abort(), timeout);
             try {
                 const response = await fetch(url, { signal: controller.signal });
                 clearTimeout(id);
+                if (!response.ok) throw new Error(`HTTP ${response.status}: ${url}`);
                 return response;
             } catch (error) {
                 clearTimeout(id);
@@ -29,80 +32,106 @@ export class BedrockLoader {
             }
         };
 
-        // Load Texture
-        // 加载纹理
-        const textureLoader = new THREE.TextureLoader();
-        const texture = await new Promise<THREE.Texture>((resolve, reject) => {
-            // Add timeout for texture loading
-            // 为纹理加载添加超时
-            const timer = setTimeout(() => reject(new Error(`Texture load timeout: ${config.texture}`)), 10000);
-            
-            textureLoader.load(
-                config.texture, 
-                (t) => {
-                    clearTimeout(timer);
-                    resolve(t);
-                }, 
-                undefined, 
-                (err) => {
-                    clearTimeout(timer);
-                    reject(err);
-                }
-            );
-        });
-        texture.magFilter = THREE.NearestFilter;
-        texture.minFilter = THREE.NearestFilter;
-        texture.colorSpace = THREE.SRGBColorSpace;
-
-        // Use MeshStandardMaterial for more realistic PBR lighting
-        // 使用 MeshStandardMaterial 进行更逼真的 PBR 光照
-        const material = new THREE.MeshStandardMaterial({
-            map: texture,
-            alphaTest: 0.5,
-            side: THREE.DoubleSide,
-            roughness: 0.4, // Lower roughness for more specular highlights (smoother surface) // 较低的粗糙度以获得更多的高光（更光滑的表面）
-            metalness: 0.1, // Slight metalness for better light response // 轻微的金属感以获得更好的光照响应
-            emissive: 0x000000,
-            emissiveIntensity: 0
-        });
-
-        rootGroup.traverse((child: any) => {
-            if (child.isMesh) {
-                child.castShadow = true;
-                child.receiveShadow = true;
+        // Helper: Retryable Texture Load with Cache
+        const loadTextureWithRetry = async (url: string, retries = 3): Promise<THREE.Texture> => {
+            if (textureCache.has(url)) {
+                return textureCache.get(url)!;
             }
-        });
 
-        // Load Main Model
-        // 加载主模型
-        await this.loadJsonModel(config.model, material, rootGroup, true, fetchWithTimeout);
-        
-        // Load Arm Model
-        // 加载手臂模型
-        if (config.arm) {
-            await this.loadJsonModel(config.arm, material, rootGroup, false, fetchWithTimeout);
+            let lastError;
+            for (let i = 0; i < retries; i++) {
+                try {
+                    return await new Promise<THREE.Texture>((resolve, reject) => {
+                        const loader = new THREE.TextureLoader();
+                        // 30s timeout per attempt
+                        const timer = setTimeout(() => reject(new Error(`纹理加载超时 (Timeout): ${url}`)), 30000);
+                        
+                        loader.load(url, (t) => {
+                            clearTimeout(timer);
+                            t.magFilter = THREE.NearestFilter;
+                            t.minFilter = THREE.NearestFilter;
+                            t.colorSpace = THREE.SRGBColorSpace;
+                            textureCache.set(url, t);
+                            resolve(t);
+                        }, undefined, (err) => {
+                            clearTimeout(timer);
+                            reject(err);
+                        });
+                    });
+                } catch (e: any) {
+                    lastError = e;
+                    console.warn(`[BedrockLoader] Texture load failed (attempt ${i+1}/${retries}): ${url}`, e);
+                    if (i < retries - 1) await new Promise(r => setTimeout(r, 1000 + i * 500)); // Backoff
+                }
+            }
+            throw new Error(`Failed to load texture after ${retries} attempts: ${lastError?.message || 'Unknown error'}`);
+        };
+
+        try {
+            // Parallel Loading: Texture + JSONs
+            const texturePromise = loadTextureWithRetry(config.texture);
+            const modelPromise = fetchWithTimeout(config.model).then(r => r.json());
+            const armPromise = config.arm ? fetchWithTimeout(config.arm).then(r => r.json()) : Promise.resolve(null);
+
+            const [texture, modelJson, armJson] = await Promise.all([texturePromise, modelPromise, armPromise]);
+
+            // Create Material
+            // 使用 MeshStandardMaterial 进行更逼真的 PBR 光照
+            const material = new THREE.MeshStandardMaterial({
+                map: texture,
+                alphaTest: 0.5,
+                side: THREE.DoubleSide,
+                roughness: 0.4, // Lower roughness for more specular highlights (smoother surface) // 较低的粗糙度以获得更多的高光（更光滑的表面）
+                metalness: 0.1, // Slight metalness for better light response // 轻微的金属感以获得更好的光照响应
+                emissive: 0x000000,
+                emissiveIntensity: 0
+            });
+
+            rootGroup.traverse((child: any) => {
+                if (child.isMesh) {
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+                }
+            });
+
+            // Parse Models using fetched data
+            this.parseJsonModel(modelJson, config.model, material, rootGroup, true);
+            if (armJson) {
+                this.parseJsonModel(armJson, config.arm, material, rootGroup, false);
+            }
+
+            // Pass boneMap to AnimationManager
+            // 将 boneMap 传递给 AnimationManager
+            animManager.setBoneMap(this.boneMap);
+            
+            // Load Animation
+            // 加载动画
+            await animManager.load(config);
+
+            return rootGroup;
+        } catch (error) {
+            console.error("[BedrockLoader] Critical loading error:", error);
+            throw error;
         }
-
-        // Pass boneMap to AnimationManager
-        // 将 boneMap 传递给 AnimationManager
-        animManager.setBoneMap(this.boneMap);
-        
-        // Load Animation
-        // 加载动画
-        await animManager.load(config);
-
-        return rootGroup;
     }
 
+    // Legacy wrapper for compatibility
     async loadJsonModel(path: string, material: THREE.Material, rootGroup: THREE.Group, isMain: boolean, fetchFn: Function = fetch) {
         try {
             const response = await fetchFn(path);
             if (!response.ok) {
-                console.warn(`Failed to load ${path}`);
+                console.warn(`加载失败 ${path}`);
                 return;
             }
             const json = await response.json();
+            this.parseJsonModel(json, path, material, rootGroup, isMain);
+        } catch (e) {
+            console.warn(`加载模型失败 ${path}`, e);
+        }
+    }
 
+    parseJsonModel(json: any, path: string, material: THREE.Material, rootGroup: THREE.Group, isMain: boolean) {
+        try {
         // Parse Bedrock Model
         // 解析 Bedrock 模型
         const geometryData = json['minecraft:geometry'][0];
@@ -215,7 +244,7 @@ export class BedrockLoader {
             }
         });
         } catch (e) {
-            console.warn(`Failed to parse model ${path}`, e);
+            console.warn(`解析模型失败 ${path}`, e);
         }
     }
 

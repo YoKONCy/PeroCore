@@ -1,18 +1,34 @@
 import os
 import tempfile
-import pyautogui
-import easyocr
 import numpy as np
 from PIL import Image
 import base64
 import io
+import platform
+
+# Optional imports
+try:
+    import pyautogui
+except ImportError:
+    pyautogui = None
+
+try:
+    import easyocr
+except ImportError:
+    easyocr = None
 
 # 全局初始化 reader，避免每次调用都重新加载模型
 # ['ch_sim', 'en'] 表示支持简体中文和英文
 _reader = None
 
+def _is_server_mode():
+    return os.environ.get("PERO_ENV") == "server" or platform.system() != "Windows"
+
 def get_screenshot_base64():
     """获取当前屏幕截图并返回 base64 编码的字符串"""
+    if _is_server_mode() or not pyautogui:
+        return "Error: Server mode or missing dependencies."
+
     try:
         screenshot = pyautogui.screenshot()
         buffered = io.BytesIO()
@@ -24,6 +40,9 @@ def get_screenshot_base64():
 
 def save_screenshot():
     """获取当前屏幕截图并保存到临时文件，返回文件路径"""
+    if _is_server_mode() or not pyautogui:
+        return None
+
     try:
         # 创建临时文件
         # [Refactor] 统一移动到 backend/data/temp_vision
@@ -48,6 +67,11 @@ def screen_ocr(return_detail=False):
     获取屏幕截图并识别其中的文字内容。
     :param return_detail: 是否返回详细的坐标信息。如果为 True，返回列表 [{text, box, confidence}]
     """
+    if _is_server_mode() or not pyautogui or not easyocr:
+        if return_detail:
+            return []
+        return "Error: Server mode or missing OCR dependencies."
+
     global _reader
     try:
         # 懒加载 reader

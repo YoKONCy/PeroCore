@@ -97,15 +97,15 @@ export async function startNapCat(window: BrowserWindow) {
     const qqPath = await getQQPath()
     
     if (!await fs.pathExists(napcatDir)) {
-        throw new Error(`NapCat directory not found: ${napcatDir}`)
+        throw new Error(`NapCat 目录未找到: ${napcatDir}`)
     }
 
     if (qqPath) {
-        window.webContents.send('napcat-log', `[SYSTEM] Found QQ at: ${qqPath}`)
-        console.log(`[NapCat] Found QQ at: ${qqPath}`)
+        window.webContents.send('napcat-log', `[系统] 在以下位置找到 QQ: ${qqPath}`)
+        console.log(`[NapCat] 在以下位置找到 QQ: ${qqPath}`)
     } else {
-        window.webContents.send('system-error', 'QQ not found. NapCat requires QQ installed.')
-        throw new Error('QQ not found in default paths or Registry.')
+        window.webContents.send('system-error', '未找到 QQ。NapCat 需要安装 QQ。')
+        throw new Error('默认路径或注册表中未找到 QQ。')
     }
 
     // Try NapCat.Shell.exe first
@@ -115,11 +115,11 @@ export async function startNapCat(window: BrowserWindow) {
     const indexJs = path.join(napcatDir, 'index.js')
     const napcatMjs = path.join(napcatDir, 'napcat.mjs')
     
-    console.log(`[NapCat] Checking entry points in ${napcatDir}`)
-    console.log(`[NapCat] Shell exists: ${fs.existsSync(shellExe)}`)
-    console.log(`[NapCat] MJS exists: ${fs.existsSync(napcatMjs)}`)
-    console.log(`[NapCat] Bat exists: ${fs.existsSync(napcatBat)}`)
-    console.log(`[NapCat] Index exists: ${fs.existsSync(indexJs)}`)
+    console.log(`[NapCat] 正在检查入口点 ${napcatDir}`)
+    console.log(`[NapCat] Shell 存在: ${fs.existsSync(shellExe)}`)
+    console.log(`[NapCat] MJS 存在: ${fs.existsSync(napcatMjs)}`)
+    console.log(`[NapCat] Bat 存在: ${fs.existsSync(napcatBat)}`)
+    console.log(`[NapCat] Index 存在: ${fs.existsSync(indexJs)}`)
 
     let cmd = ''
     let args: string[] = []
@@ -132,7 +132,10 @@ export async function startNapCat(window: BrowserWindow) {
         // Prefer direct node execution for napcat.mjs (fixes index.js CJS/ESM conflict)
         // 优先直接用 node 执行 napcat.mjs (修复 index.js CJS/ESM 冲突)
         cmd = 'node'
-        args = ['napcat.mjs', '-q', qqPath]
+        // [Fix] Remove -q args to match Rust behavior and fix auto-login issue
+        // Rust PeroLauncher does not pass -q for Node versions, allowing NapCat to use its own config/session.
+        // Passing -q forces quick login which might fail if local QQ client state is invalid, ignoring saved session.
+        args = ['napcat.mjs']
         
         // Replicate environment variables from index.js
         // 复制 index.js 中的环境变量
@@ -150,18 +153,19 @@ export async function startNapCat(window: BrowserWindow) {
         // 让我们检查是否可以强制作为 CJS 执行 index.js？不，package.json 阻止了它。
         // 也许我们可以尝试运行 napcat.mjs 即使 existsSync 失败？(不太可能)
         
-        console.warn("[NapCat] Falling back to napcat.bat, but this may fail on v4.12.8+")
+        console.warn("[NapCat] 正在回退到 napcat.bat，但这可能会在 v4.12.8+ 上失败")
         cmd = 'cmd.exe'
         args = ['/c', 'napcat.bat', '-q', qqPath]
     } else if (fs.existsSync(indexJs)) {
         cmd = 'node'
-        args = ['index.js', '-q', qqPath]
+        // [Fix] Remove -q args to match Rust behavior
+        args = ['index.js']
     } else {
-         throw new Error('No valid NapCat entry point found.')
+         throw new Error('未找到有效的 NapCat 入口点。')
     }
 
-    console.log(`[NapCat] Starting: ${cmd} ${args.join(' ')} in ${napcatDir}`)
-    window.webContents.send('napcat-log', `[SYSTEM] Launching NapCat...`)
+    console.log(`[NapCat] 正在启动: ${cmd} ${args.join(' ')} 在 ${napcatDir}`)
+    window.webContents.send('napcat-log', `[系统] 正在启动 NapCat...`)
 
     napcatProcess = spawn(cmd, args, {
         cwd: napcatDir,
@@ -181,14 +185,14 @@ export async function startNapCat(window: BrowserWindow) {
     napcatProcess.stderr?.on('data', (data) => {
         const line = data.toString().trim()
         if (!line) return
-        console.error(`[NapCat ERR] ${line}`)
-        window.webContents.send('napcat-log', `[ERR] ${line}`)
+        console.error(`[NapCat 错误] ${line}`)
+        window.webContents.send('napcat-log', `[错误] ${line}`)
     })
 
     napcatProcess.on('close', (code) => {
-        console.log(`[NapCat] Exited with code ${code}`)
+        console.log(`[NapCat] 已退出，代码 ${code}`)
         napcatProcess = null
-        window.webContents.send('napcat-log', `[SYSTEM] NapCat exited (Code: ${code})`)
+        window.webContents.send('napcat-log', `[系统] NapCat 已退出 (代码: ${code})`)
     })
 }
 
@@ -207,7 +211,7 @@ export function sendNapCatCommand(command: string) {
     if (napcatProcess && napcatProcess.stdin) {
         napcatProcess.stdin.write(command + '\n')
     } else {
-        throw new Error('NapCat not running')
+        throw new Error('NapCat 未运行')
     }
 }
 
@@ -222,18 +226,18 @@ export function checkNapCatInstalled() {
 export async function installNapCat(window: BrowserWindow) {
     const dir = getNapCatDir()
     const emit = (msg: string) => {
-        console.log(`[NapCat Installer] ${msg}`)
+        console.log(`[NapCat 安装程序] ${msg}`)
         window.webContents.send('napcat-log', msg)
     }
 
-    emit(`Checking NapCat in: ${dir}`)
+    emit(`正在检查 NapCat: ${dir}`)
 
     if (checkNapCatInstalled()) {
-        emit("NapCat already installed.")
+        emit("NapCat 已安装。")
         return true
     }
 
-    emit("NapCat not found. Starting download...")
+    emit("未找到 NapCat。开始下载...")
     await fs.ensureDir(dir)
 
     const version = "v4.12.8"
@@ -265,21 +269,21 @@ export async function installNapCat(window: BrowserWindow) {
     
     for (const url of mirrors) {
         try {
-            emit(`Trying download from: ${url}`)
+            emit(`尝试下载: ${url}`)
             zipBuffer = await download(url)
             if (zipBuffer) break
         } catch (e: any) {
-            emit(`Failed: ${e.message}`)
+            emit(`失败: ${e.message}`)
             continue
         }
     }
 
     if (!zipBuffer) {
-        emit("Download failed from all mirrors.")
-        throw new Error("Download failed from all mirrors.")
+        emit("所有镜像下载失败。")
+        throw new Error("所有镜像下载失败。")
     }
 
-    emit("Download complete. Extracting...")
+    emit("下载完成。正在解压...")
     
     try {
         const zip = new AdmZip(zipBuffer)
@@ -309,10 +313,10 @@ export async function installNapCat(window: BrowserWindow) {
              }
         }
 
-        emit("Installation complete.")
+        emit("安装完成。")
         return true
     } catch (e: any) {
-        emit(`Installation failed: ${e.message}`)
+        emit(`安装失败: ${e.message}`)
         return false
     }
 }

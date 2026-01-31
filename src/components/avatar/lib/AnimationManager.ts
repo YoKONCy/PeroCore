@@ -125,7 +125,7 @@ export class AnimationManager {
             }
         };
 
-        // 1. Load Animations
+        // 1. Load Animations (Parallel)
         let animPaths: string[] = [];
         if (config.animation) {
              animPaths = Array.isArray(config.animation) ? config.animation : [config.animation];
@@ -133,47 +133,51 @@ export class AnimationManager {
             animPaths = [config.model.replace('.json', '.animation.json')];
         }
 
-        for (const path of animPaths) {
+        const animPromises = animPaths.map(async (path) => {
             try {
-                const response = await fetchWithTimeout(path + '?v=' + Date.now());
+                // Remove cache busting to allow browser caching
+                // 移除缓存破坏以允许浏览器缓存
+                const response = await fetchWithTimeout(path);
                 if (!response.ok) {
-                    console.warn(`Failed to fetch animation ${path}: ${response.statusText}`);
-                    continue;
+                    console.warn(`获取动画失败 ${path}: ${response.statusText}`);
+                    return;
                 }
                 const json = await response.json();
                 const anims = json.animations;
-                if (!anims) continue;
+                if (!anims) return;
 
                 for (const [name, data] of Object.entries(anims)) {
                     this.animations[name] = this.parseAnimation(data);
                 }
             } catch (e) {
-                console.warn(`Animation load failed for ${path}`, e);
+                console.warn(`动画加载失败 ${path}`, e);
             }
-        }
+        });
+        await Promise.all(animPromises);
         
-        // 2. Load Controllers
-        // 2. 加载控制器
+        // 2. Load Controllers (Parallel)
+        // 2. 加载控制器 (并行)
         if (config.animation_controllers) {
             const ctrlPaths = Array.isArray(config.animation_controllers) ? config.animation_controllers : [config.animation_controllers];
-            for (const path of ctrlPaths) {
+            const ctrlPromises = ctrlPaths.map(async (path: string) => {
                  try {
-                    const response = await fetchWithTimeout(path + '?v=' + Date.now());
+                    const response = await fetchWithTimeout(path);
                     if (!response.ok) {
-                        console.warn(`Failed to fetch controller ${path}: ${response.statusText}`);
-                        continue;
+                        console.warn(`获取控制器失败 ${path}: ${response.statusText}`);
+                        return;
                     }
                     const json = await response.json();
                     const ctrls = json.animation_controllers;
-                    if (!ctrls) continue;
+                    if (!ctrls) return;
 
                     for (const [name, data] of Object.entries(ctrls)) {
                         this.controllers.push(new AnimationController(name, data, this));
                     }
                 } catch (e) {
-                    console.error(`Controller load failed for ${path}`, e);
+                    console.error(`控制器加载失败 ${path}`, e);
                 }
-            }
+            });
+            await Promise.all(ctrlPromises);
         }
 
         // Auto-start
@@ -352,13 +356,13 @@ export class AnimationManager {
 
     playDebug(name: string) {
         if (!this.animations[name]) {
-            console.warn(`Animation ${name} not found`);
+            console.warn(`未找到动画 ${name}`);
             return;
         }
         this.debugAnim = this.animations[name];
         this.debugStartTime = Date.now() / 1000;
         this.isPlaying = true;
-        console.log(`[Debug] Playing ${name}`);
+        console.log(`[调试] 播放 ${name}`);
     }
 
     resetBones() {

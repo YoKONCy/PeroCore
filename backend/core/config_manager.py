@@ -1,8 +1,9 @@
+# type: ignore
 import logging
 import asyncio
 import os
 import sys
-from typing import Any
+from typing import Any, Optional, Dict, Set
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlalchemy.orm import sessionmaker
@@ -18,11 +19,11 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 class ConfigManager:
-    _instance = None
+    _instance: Optional['ConfigManager'] = None
     
-    def __init__(self, config_path=None):
+    def __init__(self, config_path: Optional[str] = None):
         # 默认配置
-        self.config = {
+        self.config: Dict[str, Any] = {
             "napcat_ws_url": "ws://localhost:3001",
             "napcat_http_url": "http://localhost:3000",
             "lightweight_mode": False,
@@ -31,7 +32,7 @@ class ConfigManager:
             "tts_enabled": True
         }
         
-        self.env_loaded_keys = set()
+        self.env_loaded_keys: Set[str] = set()
         
         # 从环境变量加载 (覆盖默认值)
         for key in self.config.keys():
@@ -63,10 +64,10 @@ class ConfigManager:
                     if config_key in self.config:
                         self.config[config_key] = self._parse_value(v)
                         self.env_loaded_keys.add(config_key) # 将 CLI 参数视为环境变量级别的覆盖
-                        logger.info(f"Loaded config from CLI: {config_key}={self.config[config_key]}")
-                        print(f"[ConfigManager] Loaded CLI: {config_key}={self.config[config_key]}")
+                        logger.info(f"已从 CLI 加载配置: {config_key}={self.config[config_key]}")
+                        print(f"[ConfigManager] 已加载 CLI 配置: {config_key}={self.config[config_key]}")
                 except Exception as e:
-                    logger.warning(f"Failed to parse CLI argument {arg}: {e}")
+                    logger.warning(f"无法解析 CLI 参数 {arg}: {e}")
 
         # 注意: 我们不在 __init__ 中从数据库加载，因为它需要 async。
         # 请在应用启动期间调用 await load_from_db()。
@@ -74,8 +75,8 @@ class ConfigManager:
     async def load_from_db(self):
         """将配置从数据库加载到内存中。"""
         try:
-            async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-            async with async_session() as session:
+            async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False) # type: ignore
+            async with async_session() as session: # type: ignore
                 statement = select(Config)
                 results = await session.exec(statement)
                 configs = results.all()
@@ -108,10 +109,10 @@ class ConfigManager:
             pass
         return value_str
 
-    def get(self, key, default=None):
+    def get(self, key: str, default: Any = None) -> Any:
         return self.config.get(key, default)
 
-    async def set(self, key, value):
+    async def set(self, key: str, value: Any):
         """更新内存和数据库中的配置。"""
         logger.info(f"正在更新配置: {key} = {value}")
         self.config[key] = value

@@ -20,7 +20,14 @@ const router = createRouter({
 })
 
 router.beforeEach((to, from, next) => {
-  console.log(`[Router] Navigating from ${from.path} to ${to.path}`); // [路由] 正在从 ${from.path} 导航到 ${to.path}
+  console.log(`[路由] 正在从 ${from.path} 导航到 ${to.path}`);
+  
+  // Docker Mode Redirect
+  if (!window.electron && to.path === '/launcher') {
+    next('/dashboard');
+    return;
+  }
+
   next();
 });
 

@@ -20,7 +20,7 @@ if (fs.existsSync(path.join(GATEWAY_SRC_DIR, 'gateway/main.go'))) {
     try {
         console.log('Running go build...');
         // Build directly to destination
-        execSync(`go build -o "${GATEWAY_DEST_FILE}" gateway/main.go`, { cwd: GATEWAY_SRC_DIR, stdio: 'inherit' });
+        execSync(`go build -o "${GATEWAY_DEST_FILE}" ./gateway`, { cwd: GATEWAY_SRC_DIR, stdio: 'inherit' });
         
         if (fs.existsSync(GATEWAY_DEST_FILE)) {
             console.log('Build successful! Gateway placed at:', GATEWAY_DEST_FILE);

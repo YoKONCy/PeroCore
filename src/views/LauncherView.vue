@@ -753,9 +753,10 @@ const loadConfig = async () => {
   try {
     const config = await invoke('get_config')
     appConfig.value = config
-    isSocialEnabled.value = config.enable_social_mode !== false
+    // Default to false if missing or undefined
+    isSocialEnabled.value = config.enable_social_mode === true
   } catch (e) {
-    console.error("Failed to load config:", e)
+    console.error("加载配置失败:", e)
   }
 }
 
@@ -778,7 +779,7 @@ const toggleSocialMode = async () => {
       napcatStatus.value = 'STOPPED'
     }
   } catch (e) {
-    console.error("Failed to save config:", e)
+    console.error("保存配置失败:", e)
     // Revert UI on failure
     isSocialEnabled.value = !isSocialEnabled.value
     
@@ -801,7 +802,7 @@ onMounted(async () => {
         // }
         await invoke('show_window')
     } catch (e) {
-        console.warn("Window control error", e)
+        console.warn("窗口控制错误", e)
     }
   }, 200)
 
@@ -833,7 +834,7 @@ onMounted(async () => {
   try {
     plugins.value = await invoke('get_plugins')
   } catch (e) {
-    console.error("Failed to load plugins:", e)
+    console.error("加载插件失败:", e)
     addLog(`[ERROR] Failed to load plugins: ${e}`)
   }
 
@@ -858,7 +859,7 @@ onMounted(async () => {
         addLog("[SYSTEM] NapCat 环境检查/安装失败")
       }
     }).catch(e => {
-       console.error("NapCat auto-install check failed", e)
+       console.error("NapCat 自动安装检查失败", e)
     })
   }
 
@@ -928,7 +929,7 @@ const stopServices = async () => {
     await invoke('close_dashboard')
       
   } catch (e) {
-    addLog(`[ERROR] Failed to stop: ${e}`)
+    addLog(`[错误] 停止失败: ${e}`)
   }
 }
 
@@ -965,7 +966,7 @@ const checkEnvironment = async () => {
     
     return envStatus.value
   } catch (e) {
-    console.error("Env check failed:", e)
+    console.error("环境检查失败:", e)
     envStatus.value = 'error'
     return 'error'
   }

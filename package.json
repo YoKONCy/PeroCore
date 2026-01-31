@@ -9,7 +9,10 @@
     "build:electron": "node scripts/copy-gateway.js && vite build && tsc -p electron/tsconfig.json && electron-builder",
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "docs:dev": "vitepress dev wiki",
+    "docs:build": "vitepress build wiki",
+    "docs:preview": "vitepress preview wiki"
   },
   "dependencies": {
     "@bufbuild/protobuf": "^2.11.0",
@@ -31,6 +34,7 @@
     "protobufjs": "^8.0.0",
     "systeminformation": "^5.30.6",
     "three": "^0.182.0",
+    "tree-kill": "^1.2.2",
     "vue": "^3.5.24",
     "vue-router": "^4.6.4",
     "which": "^6.0.0",
@@ -56,6 +60,7 @@
     "tailwindcss": "^4.1.18",
     "ts-proto": "^2.11.1",
     "vite": "npm:rolldown-vite@^7.2.5",
+    "vitepress": "^1.6.4",
     "wait-on": "^9.0.3"
   },
   "overrides": {

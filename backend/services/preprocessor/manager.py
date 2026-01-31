@@ -26,7 +26,7 @@ class PreprocessorManager:
                 # logger.debug(f"Running preprocessor: {processor.name}")
                 current_context = await processor.process(current_context)
             except Exception as e:
-                logger.error(f"Error in preprocessor {processor.name}: {e}", exc_info=True)
+                logger.error(f"预处理器 {processor.name} 出错: {e}", exc_info=True)
                 # Decide whether to halt or continue. For now, we continue but log error.
                 # In a robust system, we might want to flag this in the context.
                 current_context["errors"] = current_context.get("errors", []) + [f"{processor.name}: {str(e)}"]

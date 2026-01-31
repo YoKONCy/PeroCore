@@ -55,13 +55,13 @@ class ReflectionService:
         [补录记忆]
         处理失败的Scorer分析任务
         """
-        print("[Reflection] Starting failed Scorer tasks backfill...", flush=True)
+        print("[Reflection] 开始回填失败的 Scorer 任务...", flush=True)
         
         semaphore = asyncio.Semaphore(concurrency_limit)
         
         async def retry_task(task):
             async with semaphore:
-                print(f"[Reflection] Backfilling failed task (ID: {task.id})...")
+                print(f"[Reflection] 正在回填失败的任务 (ID: {task.id})...")
                 # Local import to avoid circular dependency
                 from services.scorer_service import ScorerService
                 scorer_service = ScorerService(self.session)
@@ -75,7 +75,7 @@ class ReflectionService:
         
         failed_tasks = (await self.session.exec(statement)).all()
         if not failed_tasks:
-            print("[Reflection] No failed Scorer tasks to backfill.")
+            print("[Reflection] 没有需要回填的失败 Scorer 任务。")
             return
         
         # 2. 并发处理失败任务
@@ -83,14 +83,14 @@ class ReflectionService:
         await asyncio.gather(*tasks)
         
         await self.session.commit()
-        print(f"[Reflection] Backfilled {len(failed_tasks)} failed Scorer tasks.")
+        print(f"[Reflection] 已回填 {len(failed_tasks)} 个失败的 Scorer 任务。")
 
     async def consolidate_memories(self, lookback_days: int = 3, importance_threshold: int = 4):
         """
         [Memory Consolidation]
         压缩低重要性、陈旧的记忆为陈述性总结。
         """
-        print(f"[Reflection] Starting memory consolidation (older than {lookback_days} days, importance < {importance_threshold})...", flush=True)
+        print(f"[Reflection] 开始记忆整合 (超过 {lookback_days} 天，重要性 < {importance_threshold})...", flush=True)
         
         # 1. 查找候选记忆
         cutoff_time = datetime.now() - timedelta(days=lookback_days)
@@ -105,7 +105,7 @@ class ReflectionService:
         candidates = (await self.session.exec(statement)).all()
         
         if not candidates:
-            print("[Reflection] No memories to consolidate.")
+            print("[Reflection] 没有需要整合的记忆。")
             return
 
         # 2. 按日期分组
@@ -117,7 +117,7 @@ class ReflectionService:
             
         config = await self._get_reflection_config()
         if not config["api_key"]:
-            print("[Reflection] No API Key, skipping consolidation.")
+            print("[Reflection] 未配置 API Key，跳过整合。")
             return
 
         llm = LLMService(
@@ -131,7 +131,7 @@ class ReflectionService:
             if len(group) < 3:
                 continue # 跳过太少的组
             
-            print(f"[Reflection] Consolidating {len(group)} memories from {date_key}...")
+            print(f"[Reflection] 正在整合来自 {date_key} 的 {len(group)} 条记忆...")
             
             # 生成总结
             summary_text = await self._generate_summary(llm, group, date_key)
@@ -217,9 +217,9 @@ class ReflectionService:
             
             # 立即提交，释放写锁，防止长事务阻塞
             await self.session.commit()
-            print(f"[Reflection] Consolidated {len(group)} memories into ID {summary_mem.id}: {summary_text[:50]}...")
+            print(f"[Reflection] 已将 {len(group)} 条记忆整合为 ID {summary_mem.id}: {summary_text[:50]}...")
             
-        print("[Reflection] Memory consolidation complete.")
+        print("[Reflection] 记忆整合完成。")
 
     async def _generate_summary(self, llm: LLMService, memories: List[Memory], date_str: str) -> str:
         mem_text = "\n".join([f"- {m.realTime.split(' ')[1] if m.realTime else ''}: {m.content}" for m in memories])
@@ -233,7 +233,7 @@ class ReflectionService:
             res = await llm.chat([{"role": "user", "content": prompt}], temperature=0.3)
             return res["choices"][0]["message"]["content"].strip()
         except Exception as e:
-            print(f"Summary generation failed: {e}")
+            print(f"生成总结失败: {e}")
             return None
 
     async def dream_and_associate(self, limit: int = 10) -> dict:
@@ -244,19 +244,19 @@ class ReflectionService:
         """
         from services.memory_service import MemoryService
         
-        print("[Reflection] Entering dream mode (scanning for associations)...", flush=True)
+        print("[Reflection] 进入梦境模式 (扫描关联)...", flush=True)
         
         # 1. 获取最近的 N 条记忆 (Event 类型) 作为"梦境锚点"
         statement = select(Memory).where(Memory.type == "event").order_by(desc(Memory.timestamp)).limit(limit)
         anchors = (await self.session.exec(statement)).all()
         
         if len(anchors) < 1:
-            print("[Reflection] Not enough memories to associate.")
+            print("[Reflection] 记忆不足，无法关联。")
             return {"status": "skipped", "reason": "Not enough memories to associate"}
 
         config = await self._get_reflection_config()
         if not config["api_key"]:
-            print("[Reflection] No API Key, skipping.")
+            print("[Reflection] 未配置 API Key，跳过。")
             return {"status": "skipped", "reason": "No API Key configured"}
 
         llm = LLMService(
@@ -271,7 +271,7 @@ class ReflectionService:
         new_relations_count = 0
 
         for target_memory in anchors:
-            print(f"[Reflection] Dreaming about: {target_memory.content[:30]}...")
+            print(f"[Reflection] 正在梦到: {target_memory.content[:30]}...")
             
             # 使用 MemoryService 的高级检索 (Vector + Graph)
             # 排除掉自己，且不限制时间范围 (exclude_after_time=None) 以允许连接过去
@@ -315,10 +315,10 @@ class ReflectionService:
                     )
                     self.session.add(new_relation)
                     await self.session.commit() # 发现一个关联就提交一个，避免长事务
-                    print(f"[Reflection] New association found: {relation['description']} (Strength: {relation['strength']})")
+                    print(f"[Reflection] 发现新关联: {relation['description']} (强度: {relation['strength']})")
                     new_relations_count += 1
             
-        print("[Reflection] Dream cycle complete.")
+        print("[Reflection] 梦境循环完成。")
         return {"status": "success", "new_relations": new_relations_count, "anchors_processed": len(anchors)}
 
     async def scan_lonely_memories(self, limit: int = 5) -> dict:
@@ -328,11 +328,10 @@ class ReflectionService:
         """
         from services.memory_service import MemoryService
         
-        print("[Reflection] Scanning for lonely memories...", flush=True)
+        print("[Reflection] 正在扫描孤独记忆...", flush=True)
         
         # 1. 查找孤立记忆 (没有作为 source 或 target 出现在 Relation 表中)
-        # SQLModel 不支持直接的 except/minus，我们用 python 集合处理 (小数据量可行) 或子查询
-        # 这里为了兼容性，先查出所有有关系的 ID，再排除
+        # 优化: 使用 SQL 过滤而非 Python 内存过滤，避免全量加载 Memory 表导致阻塞
         
         # 获取所有有关系的 ID
         rel_statement = select(MemoryRelation.source_id, MemoryRelation.target_id)
@@ -344,19 +343,24 @@ class ReflectionService:
             
         # 查找不在 connected_ids 中的 Event 记忆
         # 优先处理最近的孤独记忆
-        statement = select(Memory).where(Memory.type == "event").order_by(desc(Memory.timestamp))
-        all_memories = (await self.session.exec(statement)).all()
+        statement = select(Memory).where(Memory.type == "event")
         
-        lonely_memories = [m for m in all_memories if m.id not in connected_ids][:limit]
+        if connected_ids:
+            # 过滤掉已有关系的记忆
+            statement = statement.where(Memory.id.notin_(list(connected_ids)))
+            
+        statement = statement.order_by(desc(Memory.timestamp)).limit(limit)
+        
+        lonely_memories = (await self.session.exec(statement)).all()
         
         if not lonely_memories:
-            print("[Reflection] No lonely memories found.")
-            return {"status": "skipped", "reason": "No lonely memories found"}
+            print("[Reflection] 未发现孤独记忆。")
+            return {"status": "skipped", "reason": "未发现孤独记忆"}
 
         config = await self._get_reflection_config()
         if not config["api_key"]:
-            print("[Reflection] No API Key, skipping.")
-            return {"status": "skipped", "reason": "No API Key configured"}
+            print("[Reflection] 未配置 API Key，跳过。")
+            return {"status": "skipped", "reason": "未配置 API Key"}
 
         llm = LLMService(
             api_key=config["api_key"],
@@ -368,7 +372,7 @@ class ReflectionService:
 
         # 2. 为每个孤独记忆寻找归宿
         for lonely_mem in lonely_memories:
-            print(f"[Reflection] Trying to connect lonely memory: {lonely_mem.content[:30]}...")
+            print(f"[Reflection] 尝试连接孤独记忆: {lonely_mem.content[:30]}...")
             
             # 使用向量检索寻找相似记忆
             candidates = await MemoryService.get_relevant_memories(
@@ -404,13 +408,13 @@ class ReflectionService:
                     )
                     self.session.add(new_relation)
                     await self.session.commit()
-                    print(f"[Reflection] Connected lonely memory! {relation['description']}")
+                    print(f"[Reflection] 已连接孤独记忆! {relation['description']}")
                     connections_found += 1
                     # 找到一个关联就跳出当前候选循环，继续下一个孤独记忆 (避免过度连接)
                     # 或者也可以继续找，看策略。这里选择继续找，织网越密越好。
         
         await self.session.commit()
-        print(f"[Reflection] Lonely memory scan complete. Processed {len(lonely_memories)} items.")
+        print(f"[Reflection] 孤独记忆扫描完成。处理了 {len(lonely_memories)} 条项目。")
         return {"status": "success", "processed_count": len(lonely_memories), "connections_found": connections_found}
 
     async def _analyze_relation(self, llm: LLMService, m1: Memory, m2: Memory) -> Optional[dict]:
@@ -441,5 +445,5 @@ class ReflectionService:
                 return data
             return None
         except Exception as e:
-            print(f"[Reflection] Error analyzing relation: {e}")
+            print(f"[Reflection] 分析关联错误: {e}")
             return None

@@ -1,0 +1,23 @@
+# 构建阶段
+FROM golang:1.23-alpine AS builder
+WORKDIR /app
+
+# 复制 Gateway 源码
+COPY gateway/ .
+# 复制 Proto 定义 (假设 gateway/proto/perolink.proto 存在或在上级)
+# 根据 DOCKER_PLAN.md，gateway 是独立的 Go 项目
+# 假设 gateway 目录结构是标准的 Go 项目
+
+# 编译
+RUN go build -o gateway ./gateway/main.go
+
+# 运行阶段
+FROM alpine:latest
+WORKDIR /app
+COPY --from=builder /app/gateway .
+
+# 端口
+EXPOSE 14747
+
+# 启动
+CMD ["./gateway"]

@@ -12,7 +12,7 @@ from database import get_session
 from models import ConversationLog, Config, AIModelConfig
 from sqlmodel import select
 from services.gateway_client import gateway_client
-from proto import perolink_pb2
+from peroproto import perolink_pb2
 import uuid
 import time
 
@@ -41,7 +41,7 @@ class RealtimeSessionManager:
         gateway_client.on("stream", self.handle_stream)
         gateway_client.on("action:voice_interaction", self.handle_voice_interaction)
         gateway_client.on("action:confirm", self.handle_confirmation_response_action)
-        logger.info("RealtimeSessionManager initialized with GatewayClient")
+        logger.info("实时会话管理器已使用 GatewayClient 初始化")
 
     async def handle_stream(self, envelope):
         """Handle incoming audio stream"""
@@ -93,7 +93,7 @@ class RealtimeSessionManager:
     def skip_command(self, pid: int) -> bool:
         """触发跳过命令等待"""
         if pid in self.active_commands:
-            logger.info(f"Skipping command wait for PID {pid}")
+            logger.info(f"跳过 PID {pid} 的命令等待")
             self.active_commands[pid].set()
             return True
         return False
@@ -137,7 +137,7 @@ class RealtimeSessionManager:
             
             await gateway_client.send(envelope)
         except Exception as e:
-            logger.error(f"Failed to send audio stream via gateway: {e}")
+            logger.error(f"通过网关发送音频流失败: {e}")
 
     async def _process_voice_turn_gateway(self, source_id: str, audio_bytes: bytes, trace_id: str):
         """Handle voice turn via Gateway"""
@@ -148,21 +148,21 @@ class RealtimeSessionManager:
         temp_audio_path = f"temp_voice_gw_{source_id}_{int(time.time())}.wav"
         try:
             print("\n" + "="*60)
-            print(f"[Gateway Voice] Start Turn {time.strftime('%H:%M:%S')}")
+            print(f"[Gateway Voice] 开始对话轮次 {time.strftime('%H:%M:%S')}")
             print("="*60)
             
             with open(temp_audio_path, "wb") as f:
                 f.write(audio_bytes)
             
             # 2. ASR
-            print("[ASR] Transcribing...")
+            print("[ASR] 正在转录...")
             await self.broadcast_gateway({"type": "status", "content": "listening"})
             
             asr_start = time.time()
             try:
                 user_text = await self.asr_service.transcribe(temp_audio_path)
             except Exception as e:
-                error_msg = f"ASR Failed: {str(e)}"
+                error_msg = f"ASR 失败: {str(e)}"
                 logger.error(error_msg)
                 await self.broadcast_gateway({"type": "text_response", "content": f"[{error_msg}]"})
                 await self.broadcast_gateway({"type": "status", "content": "idle"})
@@ -171,11 +171,11 @@ class RealtimeSessionManager:
             asr_duration = time.time() - asr_start
             
             if not user_text or not user_text.strip():
-                print(f"[ASR] No speech detected ({asr_duration:.2f}s).")
+                print(f"[ASR] 未检测到语音 ({asr_duration:.2f}s).")
                 await self.broadcast_gateway({"type": "status", "content": "idle"})
                 return
 
-            print(f"[ASR] User: \"{user_text}\" ({asr_duration:.2f}s)")
+            print(f"[ASR] 用户: \"{user_text}\" ({asr_duration:.2f}s)")
             await self.broadcast_gateway({"type": "transcription", "content": user_text})
 
             # Reset companion timer
@@ -183,10 +183,10 @@ class RealtimeSessionManager:
                 from services.companion_service import companion_service
                 companion_service.update_activity()
             except Exception as e:
-                logger.warning(f"Failed to update activity: {e}")
+                logger.warning(f"更新活动失败: {e}")
 
             # 3. Agent
-            print("[Agent] Generating response...")
+            print("[Agent] 正在生成回复...")
             
             async def report_status(status_type: str, content: str):
                 await self.broadcast_gateway({"type": "status", "content": status_type, "message": content})
@@ -218,7 +218,7 @@ class RealtimeSessionManager:
                             ]
                         }]
                     except Exception as e:
-                        print(f"Failed to prepare audio payload: {e}")
+                        print(f"准备音频负载失败: {e}")
 
                 from services.agent_service import AgentService
                 agent = AgentService(session)
@@ -237,11 +237,11 @@ class RealtimeSessionManager:
                         if chunk:
                             full_response += chunk
                 except Exception as e:
-                    print(f"Generation error: {e}")
+                    print(f"生成错误: {e}")
                     generation_error = str(e)
                 
                 agent_duration = time.time() - agent_start
-                print(f"[Agent] Response generated ({len(full_response)} chars, {agent_duration:.2f}s)")
+                print(f"[Agent] 回复已生成 ({len(full_response)} 字符, {agent_duration:.2f}s)")
                 
                 # 4. Process Response & TTS
                 ui_response = self._clean_text(full_response, for_tts=False)
@@ -249,10 +249,10 @@ class RealtimeSessionManager:
                 
                 if not ui_response:
                     if generation_error:
-                        ui_response = f"(Error: {generation_error})"
-                        tts_response = "Oops, something went wrong."
+                        ui_response = f"(错误: {generation_error})"
+                        tts_response = "哎呀，出错了。"
                     elif full_response.strip():
-                        ui_response = "(Pero executed action...)"
+                        ui_response = "(Pero 执行了动作...)"
                     else:
                         ui_response = "..."
                 if not tts_response:
@@ -264,7 +264,7 @@ class RealtimeSessionManager:
 
                 # TTS
                 target_voice, target_rate, target_pitch = self._get_voice_params(full_response)
-                print(f"[TTS] Synthesizing {target_voice}...")
+                print(f"[TTS] 正在合成 {target_voice}...")
                 tts_start = time.time()
                 audio_path = await self.tts_service.synthesize(
                     tts_response, 
@@ -275,19 +275,19 @@ class RealtimeSessionManager:
                 tts_duration = time.time() - tts_start
                 
                 if audio_path:
-                    print(f"[TTS] Audio ready ({tts_duration:.2f}s). Sending stream.")
+                    print(f"[TTS] 音频就绪 ({tts_duration:.2f}s). 正在发送流.")
                     await self.send_audio_stream_gateway(source_id, trace_id, audio_path)
                 else:
-                    print(f"❌ TTS Failed.")
+                    print(f"❌ TTS 失败.")
                 
                 total_duration = time.time() - start_turn_time
-                print(f"🏁 [Gateway Voice] Turn End ({total_duration:.2f}s)\n")
+                print(f"🏁 [Gateway Voice] 对话轮次结束 ({total_duration:.2f}s)\n")
                 
                 await self.broadcast_gateway({"type": "status", "content": "idle"})
                 break
 
         except Exception as e:
-            logger.error(f"Gateway Voice Error: {e}")
+            logger.error(f"Gateway 语音错误: {e}")
             await self.broadcast_gateway({"type": "error", "content": str(e)})
         finally:
             if os.path.exists(temp_audio_path):

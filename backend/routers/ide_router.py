@@ -327,7 +327,7 @@ async def api_abort_work_mode(session: AsyncSession = Depends(get_session)):
             try:
                 get_nit_manager().set_category_status("work", False)
             except Exception as nit_e:
-                print(f"[IDE Router] Failed to deactivate NIT work category: {nit_e}")
+                print(f"[IDE Router] 停用 NIT 工作分类失败: {nit_e}")
 
             return {"message": "Work Mode aborted (No summary generated)."}
         else:

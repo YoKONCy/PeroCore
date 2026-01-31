@@ -25,7 +25,7 @@ class BrowserBridgeService:
         self.page_update_future: Optional[asyncio.Future] = None
         self.cleanup_task: Optional[asyncio.Task] = None
         self.initialized = True
-        logger.info("[BrowserBridge] Service initialized.")
+        logger.info("[BrowserBridge] 服务已初始化。")
 
     async def _cleanup_dead_connections(self):
         """定期清理超过 30 秒没有心跳的连接"""
@@ -36,7 +36,7 @@ class BrowserBridgeService:
             to_remove = []
             for ws, last_time in self.client_activity.items():
                 if now - last_time > 30:
-                    logger.warning(f"[BrowserBridge] Client timed out, closing connection.")
+                    logger.warning(f"[BrowserBridge] 客户端超时，正在关闭连接。")
                     to_remove.append(ws)
             
             for ws in to_remove:
@@ -57,12 +57,12 @@ class BrowserBridgeService:
         # 启动清理死连接的任务 (确保在事件循环运行中启动)
         if self.cleanup_task is None or self.cleanup_task.done():
             self.cleanup_task = asyncio.create_task(self._cleanup_dead_connections())
-            logger.info("[BrowserBridge] Cleanup task started.")
+            logger.info("[BrowserBridge] 清理任务已启动。")
 
         await websocket.accept()
         self.connected_clients.append(websocket)
         self.client_activity[websocket] = time.time()
-        logger.info(f"[BrowserBridge] Client connected. Total clients: {len(self.connected_clients)}")
+        logger.info(f"[BrowserBridge] 客户端已连接。总客户端数: {len(self.connected_clients)}")
         try:
             while True:
                 data = await websocket.receive_text()
@@ -74,11 +74,11 @@ class BrowserBridgeService:
                 await self._handle_message(data)
         except WebSocketDisconnect:
             await self._close_connection(websocket)
-            logger.info(f"[BrowserBridge] Client disconnected. Total clients: {len(self.connected_clients)}")
+            logger.info(f"[BrowserBridge] 客户端断开连接。总客户端数: {len(self.connected_clients)}")
             if not self.connected_clients:
                 self.latest_page_info = None
         except Exception as e:
-            logger.error(f"[BrowserBridge] WebSocket error: {e}")
+            logger.error(f"[BrowserBridge] WebSocket 错误: {e}")
             await self._close_connection(websocket)
 
     async def _handle_message(self, message_str: str):
@@ -101,13 +101,13 @@ class BrowserBridgeService:
                         future.set_result(data)
                         
         except json.JSONDecodeError:
-            logger.error(f"[BrowserBridge] Failed to decode message: {message_str}")
+            logger.error(f"[BrowserBridge] 解码消息失败: {message_str}")
         except Exception as e:
-            logger.error(f"[BrowserBridge] Error handling message: {e}")
+            logger.error(f"[BrowserBridge] 处理消息错误: {e}")
 
     async def send_command(self, command: str, target: Optional[str] = None, text: Optional[str] = None, url: Optional[str] = None, wait_for_page_info: bool = True) -> Dict[str, Any]:
         if not self.connected_clients:
-            return {"status": "error", "error": "No browser connected. Please ensure the Pero Browser Extension is installed and running."}
+            return {"status": "error", "error": "没有连接的浏览器。请确保 Pero 浏览器扩展已安装并运行。"}
 
         # 优先使用最近活跃的连接
         client = self.connected_clients[-1]
@@ -140,7 +140,7 @@ class BrowserBridgeService:
 
         try:
             await client.send_text(json.dumps(payload))
-            logger.info(f"[BrowserBridge] Sent command: {command} (ID: {request_id})")
+            logger.info(f"[BrowserBridge] 发送命令: {command} (ID: {request_id})")
             
             # 等待命令结果（30 秒后超时）
             result = await asyncio.wait_for(future, timeout=30.0)
@@ -151,15 +151,15 @@ class BrowserBridgeService:
                     # 最多等待 5 秒以获取页面更新
                     await asyncio.wait_for(self.page_update_future, timeout=5.0)
                 except asyncio.TimeoutError:
-                    logger.warning("[BrowserBridge] Timed out waiting for pageInfoUpdate.")
+                    logger.warning("[BrowserBridge] 等待 pageInfoUpdate 超时。")
                 except asyncio.CancelledError:
                     pass
             
             return result
         except asyncio.TimeoutError:
-            return {"status": "error", "error": "Command execution timed out."}
+            return {"status": "error", "error": "命令执行超时。"}
         except Exception as e:
-            return {"status": "error", "error": f"Failed to send command: {str(e)}"}
+            return {"status": "error", "error": f"发送命令失败: {str(e)}"}
         finally:
             if request_id in self.pending_commands:
                 del self.pending_commands[request_id]
@@ -177,9 +177,9 @@ class BrowserBridgeService:
 
     def get_current_page_markdown(self) -> str:
         if not self.connected_clients:
-            return "Error: Browser extension not connected. Please ensure the Pero Browser Extension is installed and running."
+            return "错误：浏览器扩展未连接。请确保 Pero 浏览器扩展已安装并运行。"
         if not self.latest_page_info:
-            return "Error: Connected to browser, but no page content received yet. Please try refreshing the page or navigating to a URL."
+            return "错误：已连接到浏览器，但尚未收到页面内容。请尝试刷新页面或访问 URL。"
         return self.latest_page_info.get("markdown", "")
 
 # 全局实例

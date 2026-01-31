@@ -44,8 +44,8 @@ export async function getDiagnostics(): Promise<DiagnosticReport> {
     const errors: string[] = []
     const resourceDir = getResourceDir()
     
-    console.log(`[Diagnostics] Workspace: ${workspaceRoot}`)
-    console.log(`[Diagnostics] Resources: ${resourceDir}`)
+    console.log(`[诊断] 工作区: ${workspaceRoot}`)
+    console.log(`[诊断] 资源目录: ${resourceDir}`)
 
     // 1. Python Path
     // 1. Python 路径

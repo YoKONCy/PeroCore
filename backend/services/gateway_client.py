@@ -4,7 +4,7 @@ import time
 import uuid
 import platform
 import websockets
-from proto import perolink_pb2
+from peroproto import perolink_pb2
 
 logger = logging.getLogger(__name__)
 
@@ -39,17 +39,17 @@ class GatewayClient:
                     try:
                         callback(*args, **kwargs)
                     except Exception as e:
-                        logger.error(f"Error in listener for {event_name}: {e}")
+                        logger.error(f"{event_name} 监听器错误: {e}")
 
     async def start(self):
         self.running = True
         # Run in background loop to avoid blocking startup if connection fails immediately
         while self.running:
             try:
-                logger.info(f"Connecting to Gateway at {self.uri}...")
+                logger.info(f"正在连接到 Gateway {self.uri}...")
                 async with websockets.connect(self.uri) as websocket:
                     self.websocket = websocket
-                    logger.info("Connected to Gateway")
+                    logger.info("已连接到 Gateway")
                     
                     await self.send_hello()
                     await self.send_test_broadcast()
@@ -60,7 +60,7 @@ class GatewayClient:
                     # Listen for messages
                     await self.listen()
             except Exception as e:
-                logger.error(f"Gateway connection error: {e}")
+                logger.error(f"Gateway 连接错误: {e}")
                 if self.heartbeat_task:
                     self.heartbeat_task.cancel()
                 self.websocket = None
@@ -84,7 +84,7 @@ class GatewayClient:
                     envelope.ParseFromString(message)
                     await self.handle_envelope(envelope)
         except websockets.ConnectionClosed:
-            logger.warning("Gateway connection closed")
+            logger.warning("Gateway 连接已关闭")
 
     async def send_hello(self):
         envelope = perolink_pb2.Envelope()
@@ -109,7 +109,7 @@ class GatewayClient:
         envelope.trace_id = "TEST-BROADCAST"
         envelope.request.action_name = "ping"
         
-        logger.info(f"Sending broadcast ping from {self.device_id}")
+        logger.info(f"正在发送广播 Ping，来自 {self.device_id}")
         await self.send(envelope)
 
     async def broadcast_pet_state(self, state_dict: dict):
@@ -132,9 +132,30 @@ class GatewayClient:
                     envelope.request.params[k] = str(v)
             
             await self.send(envelope)
-            logger.info(f"Broadcasted PetState update: {state_dict.get('mood')}")
+            logger.info(f"广播 PetState 更新: {state_dict.get('mood')}")
         except Exception as e:
-            logger.error(f"Failed to broadcast PetState: {e}")
+            logger.error(f"广播 PetState 失败: {e}")
+
+    async def broadcast_text_response(self, content: str, target: str = "all"):
+        """Broadcast LLM text response to frontend clients."""
+        if not self.websocket or not self.running:
+            return
+
+        try:
+            envelope = perolink_pb2.Envelope()
+            envelope.id = str(uuid.uuid4())
+            envelope.source_id = self.device_id
+            envelope.target_id = "broadcast"
+            envelope.timestamp = int(time.time() * 1000)
+            
+            envelope.request.action_name = "text_response"
+            envelope.request.params["content"] = content
+            envelope.request.params["target"] = target
+            
+            await self.send(envelope)
+            # logger.info(f"Broadcasted text_response: {content[:30]}...")
+        except Exception as e:
+            logger.error(f"广播文本响应失败: {e}")
 
     async def heartbeat_loop(self):
         seq = 0
@@ -153,7 +174,7 @@ class GatewayClient:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"Heartbeat error: {e}")
+                logger.error(f"心跳错误: {e}")
                 break
 
     async def send(self, envelope):
@@ -162,7 +183,7 @@ class GatewayClient:
             await self.websocket.send(data)
 
     async def handle_envelope(self, envelope):
-        logger.info(f"Received Envelope: {envelope.id} from {envelope.source_id}")
+        # logger.info(f"Received Envelope: {envelope.id} from {envelope.source_id}")
         
         if envelope.HasField("request"):
             await self.handle_request(envelope)
@@ -173,7 +194,7 @@ class GatewayClient:
 
     async def handle_request(self, envelope):
         req = envelope.request
-        logger.info(f"Handling request: {req.action_name} params={req.params}")
+        logger.info(f"处理请求: {req.action_name} 参数={req.params}")
         
         # Emit generic request event
         self.emit("request", envelope)

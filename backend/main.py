@@ -564,7 +564,7 @@ async def lifespan(app: FastAPI):
                     # 3. Reactions (Pre-actions)
                     due_reactions = [t for t in tasks if t.type == "reaction" and not t.is_triggered and datetime.fromisoformat(t.time.replace('Z', '+00:00')).replace(tzinfo=None) <= now]
                     for task in due_reactions:
-                        print(f"[Main] Triggering Reaction: {task.content}")
+                        print(f"[Main] 触发反应: {task.content}")
                         instruction = f"【管理系统提醒：Pero，你之前决定：‘{task.content}’。现在触发时间已到，请立刻执行该行为。】"
                         
                         task.is_triggered = True
@@ -582,7 +582,7 @@ async def lifespan(app: FastAPI):
     
     # Start Gateway Client
     gateway_client.start_background()
-    print("[Main] Gateway Client started.")
+    print("[Main] Gateway 客户端已启动。")
 
     yield
     
@@ -609,6 +609,11 @@ app = FastAPI(title="PeroCore Backend", description="AI Agent powered backend fo
 app.include_router(ide_router)
 app.include_router(agent_router)
 app.include_router(group_chat_router)
+
+# [Plugin] Social Adapter Router
+from nit_core.plugins.social_adapter.social_router import router as social_router
+app.include_router(social_router)
+
 app.include_router(scheduler_router, prefix="/api/scheduler", tags=["Scheduler"])
 
 class TTSPreviewRequest(BaseModel):
@@ -719,14 +724,14 @@ async def seed_voice_configs():
                 with open(token_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     new_dynamic_token = data.get("token")
-                    print(f"[Main] Loaded Gateway Token: {new_dynamic_token[:8]}...")
+                    print(f"[Main] 已加载 Gateway 令牌: {new_dynamic_token[:8]}...")
             except Exception as e:
-                print(f"[Main] Failed to read gateway token: {e}")
+                print(f"[Main] 读取 Gateway 令牌失败: {e}")
 
         # Fallback if file not found (e.g. Gateway not started)
         if not new_dynamic_token:
             new_dynamic_token = secrets.token_urlsafe(32)
-            print(f"[Main] Warning: Gateway token file not found. Generated local fallback token.")
+            print(f"[Main] 警告: 未找到 Gateway 令牌文件。已生成本地回退令牌。")
         
         token_stmt = select(Config).where(Config.key == "frontend_access_token")
         token_result = await session.exec(token_stmt)
@@ -827,7 +832,7 @@ async def get_system_status():
             "boot_time": psutil.boot_time()
         }
     except Exception as e:
-        print(f"System status error: {e}")
+        print(f"获取系统状态错误: {e}")
         return {"error": str(e)}
 
 @app.get("/api/nit/settings")
@@ -866,10 +871,7 @@ async def set_social_mode(enabled: bool = Body(..., embed=True)):
 async def get_social_mode():
     return {"enabled": get_nit_manager().is_plugin_enabled("social_adapter")}
 
-@app.websocket("/api/social/ws")
-async def social_websocket(websocket: WebSocket):
-    social_service = get_social_service()
-    await social_service.handle_websocket(websocket)
+
 
 @app.get("/api/config/lightweight_mode")
 async def get_lightweight_mode():
@@ -964,7 +966,7 @@ async def run_retry_background(log_id: int):
     from sqlalchemy.orm import sessionmaker
     from services.scorer_service import ScorerService
     from services.gateway_client import gateway_client
-    from proto import perolink_pb2
+    from peroproto import perolink_pb2
     import uuid
     import time
     
@@ -1010,7 +1012,7 @@ async def delete_chat_log(log_id: int, session: AsyncSession = Depends(get_sessi
         # Broadcast
         try:
             from services.gateway_client import gateway_client
-            from proto import perolink_pb2
+            from peroproto import perolink_pb2
             import uuid
             import time
             envelope = perolink_pb2.Envelope()
@@ -1043,7 +1045,7 @@ async def update_chat_log(log_id: int, payload: Dict[str, Any] = Body(...), sess
         # Broadcast
         try:
             from services.gateway_client import gateway_client
-            from proto import perolink_pb2
+            from peroproto import perolink_pb2
             import uuid
             import time
             envelope = perolink_pb2.Envelope()
@@ -2125,11 +2127,25 @@ async def get_overview_stats(agent_id: Optional[str] = None, session: AsyncSessi
             "total_tasks": 0
         }
 
+@app.get("/api/gateway/token")
+async def get_gateway_token_api():
+    """获取 Gateway Token (用于前端连接 Gateway)"""
+    try:
+        token_path = os.path.join(current_dir, "data", "gateway_token.json")
+        if os.path.exists(token_path):
+             with open(token_path, "r", encoding="utf-8") as f:
+                 data = json.load(f)
+                 return {"token": data.get("token")}
+        raise HTTPException(status_code=404, detail="Token not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 if __name__ == "__main__":
-    # 优先从环境变量读取端口
+    # 优先从环境变量读取端口和Host
     port = int(os.environ.get("PORT", 9120))
+    host = os.environ.get("HOST", "127.0.0.1")
     # 强制禁用 reload 模式，因为 Uvicorn 的 reloader 在 Windows 下会强制使用 SelectorEventLoop
     # 这会导致 subprocess (MCP Stdio) 报错 NotImplementedError
-    print(f"后端启动，事件循环: {asyncio.get_event_loop().__class__.__name__}")
-    uvicorn.run("main:app", host="127.0.0.1", port=port, reload=False)
+    print(f"后端启动，事件循环: {asyncio.get_event_loop().__class__.__name__}, Host: {host}, Port: {port}")
+    uvicorn.run("main:app", host=host, port=port, reload=False)
 

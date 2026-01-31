@@ -89,6 +89,75 @@ class SocialService:
         # 我们需要等待 WS 连接
         asyncio.create_task(self._startup_check_worker())
 
+    async def handle_raw_event(self, raw_data: str):
+        """
+        处理来自 WebSocket 的原始 JSON 事件。
+        """
+        try:
+            event = json.loads(raw_data)
+            
+            # 处理 API 响应 (如果有 echo 字段)
+            if "echo" in event:
+                echo_id = event["echo"]
+                if echo_id in self.pending_requests:
+                    future = self.pending_requests.pop(echo_id)
+                    if not future.done():
+                        future.set_result(event)
+                return
+
+            # 1. 忽略心跳 meta_event
+            post_type = event.get("post_type")
+            if post_type == "meta_event":
+                # 可以在这里更新心跳状态
+                # self.last_heartbeat = datetime.now()
+                return
+
+            # 2. 消息事件
+            if post_type == "message":
+                await self._handle_message_event(event)
+            
+            # 3. 请求事件 (好友请求等)
+            elif post_type == "request":
+                await self._handle_request_event(event)
+                
+            # 4. 通知事件 (群成员变动等 - 可选)
+            elif post_type == "notice":
+                pass
+                
+        except json.JSONDecodeError:
+            pass
+        except Exception as e:
+            logger.error(f"[Social] 处理事件失败: {e}")
+
+    async def _handle_message_event(self, event: dict):
+        # 1. 基础日志
+        try:
+            msg_type = event.get("message_type") # group / private
+            user_id = str(event.get("user_id"))
+            self_id = str(event.get("self_id", ""))
+            
+            # 更新 Bot 自身 ID
+            if not self.bot_info and self_id:
+                 self.bot_info["user_id"] = self_id
+                 logger.info(f"[Social] 自动检测到 Bot QQ: {self_id}")
+
+            # 忽略自己发的消息
+            if user_id == str(self.bot_info.get("user_id")):
+                return
+
+            logger.info(f"[Social] 处理消息事件: type={msg_type}, user={user_id}")
+
+            # 2. 转交 Session Manager 处理完整逻辑 (Buffer, Persistence, Trigger)
+            await self.session_manager.handle_message(event)
+
+        except Exception as e:
+            logger.error(f"[Social] 处理消息失败: {e}", exc_info=True)
+
+    async def _handle_request_event(self, event: dict):
+        req_type = event.get("request_type")
+        if req_type == "friend":
+            await self._handle_incoming_friend_request(event)
+
     async def _startup_check_worker(self):
         """
         等待 WS 连接，然后执行启动检查：
@@ -376,7 +445,7 @@ class SocialService:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"[Social-Group] Error: {e}", exc_info=True)
+                logger.error(f"[Social-Group] 错误: {e}", exc_info=True)
                 await asyncio.sleep(60)
 
     async def _private_scan_loop(self):
@@ -440,7 +509,7 @@ class SocialService:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"[Social-Private] Error: {e}", exc_info=True)
+                logger.error(f"[Social-Private] 错误: {e}", exc_info=True)
                 await asyncio.sleep(60)
 
 
@@ -530,6 +599,10 @@ class SocialService:
         
         async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
         async with async_session() as db_session:
+            # Import locally to avoid circular dependency/NameError
+            from services.agent_manager import AgentManager
+            agent_manager = AgentManager()
+
             # 上下文获取逻辑
             # [Optimization] Unified context limit to 100 as per user request
             history_limit = 100
@@ -549,8 +622,7 @@ class SocialService:
                 sender = msg.sender_name
                 # bot_name is defined below, but we need it here. Let's pre-calculate it.
                 # Get Agent Profile for dynamic persona injection
-                if not 'agent_manager' in locals():
-                    agent_manager = AgentManager()
+                # agent_manager initialized at start of block
                 agent_profile = agent_manager.agents.get(agent_manager.active_agent_id)
                 current_agent_name = agent_profile.name if agent_profile else self.config_manager.get("bot_name", "Pero")
                 
@@ -590,7 +662,7 @@ class SocialService:
             #          target_name = "某人"
                 
             # Get Agent Profile for dynamic persona injection
-            agent_manager = AgentManager()
+            # agent_manager initialized at start of block
             agent_profile = agent_manager.agents.get(agent_manager.active_agent_id)
             identity_label = agent_profile.identity_label if agent_profile else "智能助手"
             personality_tags = "、".join(agent_profile.personality_tags) if agent_profile else ""
@@ -712,7 +784,7 @@ class SocialService:
                 content = re.sub(pattern, '', content, flags=re.IGNORECASE).strip()
                 
                 if content.upper() in ["PASS", "IGNORE", "NONE", "NULL", "NO"]:
-                    # logger.info("[Social] Secretary decided to PASS.")
+                    logger.info(f"[Social] 秘书决定不说话 (PASS)。原因/内容: {content}")
                     return False
                 
                 if not content:
@@ -746,7 +818,7 @@ class SocialService:
                 )
                 return True
             except Exception as e:
-                logger.error(f"[Social] 秘书错误: {e}")
+                logger.error(f"[Social] 秘书错误: {e}", exc_info=True)
                 return False
 
     # 移除旧的 _attempt_random_thought (已被上面覆盖)
@@ -849,6 +921,7 @@ class SocialService:
                 )
                 
                 # Get active agent name
+                from services.agent_manager import AgentManager
                 agent_manager = AgentManager()
                 active_agent = agent_manager.agents.get(agent_manager.active_agent_id)
                 bot_name = active_agent.name if active_agent else self.config_manager.get("bot_name", "Pero")
@@ -910,7 +983,7 @@ class SocialService:
 
     async def handle_websocket(self, websocket: WebSocket):
         if not self.enabled:
-            await websocket.close(code=1000, reason="Social Mode Disabled")
+            await websocket.close(code=1000, reason="社交模式已禁用")
             return
 
         await websocket.accept()
@@ -922,7 +995,7 @@ class SocialService:
                 # [隔离检查] 在每次循环迭代中重新检查启用状态
                 if not self.enabled:
                     logger.warning("运行时社交模式已禁用。正在关闭连接。")
-                    await websocket.close(code=1000, reason="Social Mode Disabled")
+                    await websocket.close(code=1000, reason="社交模式已禁用")
                     self.active_ws = None
                     break
 
@@ -1095,6 +1168,7 @@ class SocialService:
                     
                     # 构建提示（中文）
                     # Get Agent Profile for dynamic persona injection
+                    from services.agent_manager import AgentManager
                     agent_manager = AgentManager()
                     agent_profile = agent_manager.agents.get(agent_manager.active_agent_id)
                     
@@ -1590,13 +1664,17 @@ class SocialService:
                     "current_mode": current_mode
                 })
                 
-                full_system_prompt = core_system_prompt + social_instructions + xml_guide
+                # [MDP Refactor] 构建变量字典供 MDP 渲染使用
+                prompt_variables = {
+                    "system_core": core_system_prompt,
+                    "social_instructions": social_instructions,
+                    "xml_guide": xml_guide,
+                    "xml_context": xml_context,
+                    "instruction_prompt": instruction_prompt,
+                }
                 
-                messages = [
-                    {"role": "system", "content": full_system_prompt}
-                ]
-                
-                user_content = [{"type": "text", "text": xml_context}]
+                # [Refactor] 仅传递 User Content (Images)，System Message 由 MDP 自动插入
+                user_content = []
                 
                 # [Multimodal] 处理本地缓存图片转 Base64
                 processed_images = []
@@ -1629,35 +1707,41 @@ class SocialService:
                             "image_url": {"url": img_url}
                         })
                 
-                messages.append({"role": "user", "content": user_content})
-
-                # [Refactor] Append Instructions AFTER history (User message)
-                # This ensures the model sees the rules and double-thinking instructions last.
-                messages.append({"role": "system", "content": instruction_prompt})
+                # 构造最终的消息列表 (仅包含 User Content)
+                # 为防止 Empty User Message 错误，如果没有图片则添加默认触发词
+                if not user_content:
+                    user_content.append({"type": "text", "text": "(Listening...)"})
                 
+                messages = [{"role": "user", "content": user_content}]
+
                 logger.info(f"正在呼叫会话 {session.session_id} 的社交 Agent ({current_mode})...")
                 logger.info(f"[{session.session_id}] 准备调用 agent.chat (Unified Pipeline)...")
                 
                 # [Stage 3 Refactor] Use unified chat pipeline with Capability Filter
                 response_text = ""
                 try:
+                    logger.info(f"[{session.session_id}] 调用 AgentService.chat (source=social, MDP-Driven)...")
+                    
+                    # [MDP Integration] Inject variables into AgentService context via initial_variables
+                    
                     chat_gen = agent.chat(
                         messages, 
                         source="social", 
                         session_id=f"social_{session.session_id}",
                         capabilities=["social"],
-                        skip_system_prompt=True,
-                        agent_id_override=agent_manager.active_agent_id if 'agent_manager' in locals() else None
+                        skip_system_prompt=False, # [MDP] Enable System Prompt Generation
+                        agent_id_override=agent_manager.active_agent_id if 'agent_manager' in locals() else None,
+                        initial_variables=prompt_variables # [New] Pass variables
                     )
                     
                     async for chunk in chat_gen:
                         response_text += chunk
                         
                 except Exception as e:
-                    logger.error(f"[{session.session_id}] Agent.chat 调用失败: {e}")
+                    logger.error(f"[{session.session_id}] Agent.chat 调用失败: {e}", exc_info=True)
                     response_text = "" # Fallback
 
-                logger.info(f"[{session.session_id}] agent.chat 完成。")
+                logger.info(f"[{session.session_id}] agent.chat 完成。收到响应长度: {len(response_text)}")
                 
                 logger.info(f"社交 Agent 响应: {response_text}")
                 
@@ -1778,8 +1862,17 @@ class SocialService:
         if session.state != "summoned" and not is_active:
             # 既不是被召唤，也不活跃（潜水模式），交给秘书层判断 (Low Cost)
             # 如果缓冲区是因为满了或超时刷新的，说明可能正在热聊
-            logger.info(f"[{session.session_id}] 偷听刷新 (潜水模式)。委派给秘书。")
-            await self._attempt_random_thought(target_session=session)
+            logger.info(f"[{session.session_id}] 偷听刷新 (潜水模式)。委派给秘书 (后台任务)。")
+            
+            # [Optimization] 使用 create_task 避免阻塞 flush 流程
+            task = asyncio.create_task(self._attempt_random_thought(target_session=session))
+            
+            # 保存任务引用，防止被 GC
+            if not hasattr(session, "active_tasks"):
+                session.active_tasks = set()
+            session.active_tasks.add(task)
+            task.add_done_callback(session.active_tasks.discard)
+            
             return
 
         # 确定模式，供 Prompt 使用
@@ -2117,9 +2210,11 @@ class SocialService:
     async def send_group_msg(self, group_id: int, message: str):
         # Preprocess stickers
         final_message = self._process_stickers(message)
+        logger.info(f"[Social] 准备发送群消息给 {group_id}: {final_message}")
         # Use _send_api_and_wait to ensure delivery and catch errors (e.g. muted, group not found)
         try:
             await self._send_api_and_wait("send_group_msg", {"group_id": group_id, "message": final_message})
+            logger.info(f"[Social] 群消息发送成功 (Group: {group_id})")
         except Exception as e:
             logger.error(f"[Social] Failed to send group message to {group_id}: {e}")
             raise e

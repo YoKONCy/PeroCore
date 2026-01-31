@@ -79,7 +79,7 @@ class GroupChatService:
                         agent_id=member.agent_id
                     )
                 except Exception as e:
-                    print(f"[GroupChat] Memory injection failed for {member.agent_id}: {e}")
+                    print(f"[GroupChat] 为 {member.agent_id} 注入记忆失败: {e}")
 
         return msg
 
@@ -107,7 +107,7 @@ class GroupChatService:
                 service = GroupChatService(session)
                 await service.process_group_response_logic(room_id)
         except Exception as e:
-            print(f"[GroupChat] Background task failed: {e}")
+            print(f"[GroupChat] 后台任务失败: {e}")
 
     async def process_group_response_logic(self, room_id: str):
         """Trigger responses from all agents in the group."""
@@ -175,7 +175,7 @@ class GroupChatService:
                     await self.add_message(room_id, agent_id, response_content, role="assistant")
                     
             except Exception as e:
-                print(f"[GroupChat] Response failed for {agent_id}: {e}")
+                print(f"[GroupChat] {agent_id} 响应失败: {e}")
 
         # Run sequentially to avoid DB session conflicts
         for aid in agent_ids:

@@ -172,7 +172,7 @@ onMounted(async () => {
         scrollToBottom()
       }
     } catch (err) {
-      console.error('Failed to fetch log history:', err)
+      console.error('获取日志历史失败:', err)
     }
 
     // 2. 监听来自 Rust 的后端原始日志
@@ -200,7 +200,7 @@ onMounted(async () => {
       unlistenTerminal()
     }
   } catch (e) {
-    console.error('Failed to setup Tauri listener', e)
+    console.error('设置 Tauri 监听器失败', e)
     addLog('system', 'error', 'Failed to connect to backend logs.')
   }
 })

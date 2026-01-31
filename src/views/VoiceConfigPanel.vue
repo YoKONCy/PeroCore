@@ -149,7 +149,7 @@ const fetchTTSMode = async () => {
        ttsEnabled.value = data.enabled
     }
   } catch (e) {
-    console.error(e)
+    console.error('获取 TTS 模式错误:', e)
   }
 }
 
@@ -175,7 +175,7 @@ const fetchConfigs = async () => {
        configs.value = await res.json()
     }
   } catch (e) {
-    console.error(e)
+    console.error('获取配置错误:', e)
   }
 }
 

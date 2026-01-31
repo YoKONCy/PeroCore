@@ -57,6 +57,7 @@
       <div class="pet-tools" v-show="showInput" style="-webkit-app-region: no-drag;" @mouseenter="onUIEnter">
         <button class="tool-btn" @click.stop="toggleAppearanceMenu" title="外观设置" :class="{ active: showAppearanceMenu }">🎨</button>
         <button class="tool-btn" @click.stop="reloadPet" title="重载">🔄</button>
+        <button class="tool-btn" @click.stop="toggleWindowSize" title="调整大小">📏</button>
         <button 
           class="tool-btn voice-btn" 
           @click.stop="cycleVoiceMode" 
@@ -365,7 +366,7 @@ const cycleVoiceMode = async () => {
 }
 
 const startVoiceMode = async () => {
-    console.log('[Voice] Starting voice mode...');
+    console.log('[语音] 正在启动语音模式...');
     try {
         // 0. 确保 AudioContext 存在并激活
         if (!audioContext.value || audioContext.value.state === 'closed') {
@@ -381,9 +382,9 @@ const startVoiceMode = async () => {
         // 检查音频轨道
         const audioTracks = mediaStream.value.getAudioTracks();
         if (audioTracks.length === 0) {
-            throw new Error('No audio tracks found in media stream');
+            throw new Error('媒体流中未找到音频轨道');
         }
-        console.log('[Voice] Microphone access granted:', audioTracks[0].label);
+        console.log('[语音] 已获得麦克风权限:', audioTracks[0].label);
         
         // 2. Gateway 连接 (假设已经连接，只需注册监听器)
         // 监听来自 Backend 的 Voice Update Request
@@ -392,7 +393,7 @@ const startVoiceMode = async () => {
         // 监听来自 Backend 的 Audio Stream (TTS)
         gatewayClient.on('stream', handleAudioStream);
         
-        console.log('Voice Gateway listeners registered');
+        console.log('语音网关监听器已注册');
         // 在气泡中显示连接成功
         currentText.value = `语音连接成功: ${voiceModeTitle.value}`;
         isBubbleExpanded.value = true;
@@ -402,7 +403,7 @@ const startVoiceMode = async () => {
         startRecording();
         
     } catch (err) {
-        console.error('Failed to start voice mode:', err);
+        console.error('启动语音模式失败:', err);
     }
 };
 
@@ -468,7 +469,7 @@ const startRecording = () => {
         if (rms > VAD_THRESHOLD) {
             silenceStart = Date.now()
             if (!isSpeakingState) {
-                console.log('Speech detected (Volume:', rms.toFixed(4), ')')
+                console.log('检测到语音 (音量:', rms.toFixed(4), ')')
                 isSpeakingState = true
                 audioBuffer = [] // 清空 buffer
             }
@@ -478,7 +479,7 @@ const startRecording = () => {
             if (isSpeakingState) {
                 // 如果静音超过 1000ms，认为一句话结束
                 if (Date.now() - silenceStart > 1000) {
-                    console.log('Speech ended, sending buffer...')
+                    console.log('语音结束，正在发送缓冲区...')
                     isSpeakingState = false
                     sendAudioBuffer()
                 } else {
@@ -497,7 +498,7 @@ const startPTT = async () => {
     isStartingPTT = true
     try {
       if (isThinking.value || isSpeaking.value) {
-        console.log('PTT Ignored: Pero is busy', { isThinking: isThinking.value, isSpeaking: isSpeaking.value })
+        console.log('PTT 已忽略: Pero 正忙', { isThinking: isThinking.value, isSpeaking: isSpeaking.value })
         return
       }
       
@@ -509,7 +510,7 @@ const startPTT = async () => {
       isPTTRecording.value = true
       isSpeakingState = true
       audioBuffer = []
-      console.log('PTT Started')
+      console.log('PTT 已启动')
     } finally {
       isStartingPTT = false
     }
@@ -519,7 +520,7 @@ const stopPTT = () => {
   if (!isPTTRecording.value) return
   isPTTRecording.value = false
   isSpeakingState = false
-  console.log('PTT Ended, sending buffer...')
+  console.log('PTT 结束，正在发送缓冲区...')
   sendAudioBuffer()
 }
 
@@ -613,13 +614,14 @@ const handleVoiceUpdateRequest = (req) => {
              thinkingMessage.value = '努力思考中...'
         }
     } else if (type === 'transcription') {
-        console.log('User said:', content)
+        console.log('用户说:', content)
     } else if (type === 'text_response') {
         currentText.value = content
         isThinking.value = false
         thinkingMessage.value = '努力思考中...'
+        bubbleKey.value++;
     } else if (type === 'error') {
-        console.error('Voice Error:', content)
+        console.error('语音错误:', content)
         currentText.value = `(错误: ${content})`
         isThinking.value = false
     }
@@ -732,7 +734,7 @@ const processAudioQueue = async () => {
         try {
             await ctx.resume()
         } catch (e) {
-            console.warn('[Pero] Failed to resume AudioContext:', e)
+            console.warn('[Pero] 恢复 AudioContext 失败:', e)
         }
     }
     
@@ -755,7 +757,7 @@ const processAudioQueue = async () => {
              // Safe way: new Uint8Array(audioData).buffer
              arrayBuffer = new Uint8Array(audioData).buffer;
         } else {
-             throw new Error("Unknown audio data type");
+             throw new Error("未知音频数据类型");
         }
         
         const audioBuffer = await ctx.decodeAudioData(arrayBuffer)
@@ -785,7 +787,7 @@ const processAudioQueue = async () => {
         }
         
     } catch (e) {
-        console.error('[Pero] Audio decode error:', e)
+        console.error('[Pero] 音频解码错误:', e)
         processAudioQueue()
     }
 }
@@ -829,7 +831,7 @@ const fetchActiveAgent = async () => {
                 // TODO: Trigger model reload if needed
             }
         }
-    } catch (e) { console.error('Failed to fetch active agent:', e); }
+    } catch (e) { console.error('获取活跃 Agent 失败:', e); }
 };
 
 // --- Lifecycle & IPC ---
@@ -838,7 +840,7 @@ let unlistenFunctions = [];
 const setIgnoreMouse = (ignore) => {
   if (window._lastIgnoreState === ignore) return;
   window._lastIgnoreState = ignore;
-  invoke('set_ignore_mouse', ignore).catch(e => console.error("set_ignore_mouse failed", e));
+  invoke('set_ignore_mouse', ignore).catch(e => console.error("set_ignore_mouse 失败", e));
 }
 
 const onHoverStart = () => {
@@ -1187,6 +1189,45 @@ const sendMessage = async () => {
         currentText.value = "发送失败...";
     }
 }
+
+// 监听后端回复
+onMounted(async () => {
+    // 监听 Gateway 消息（通过 IPC 或 WebSocket）
+    // 假设后端通过 Gateway 广播 'action:text_response'
+    gatewayClient.on('action:text_response', (data) => {
+        const content = data.content;
+        currentText.value = content;
+        isThinking.value = false;
+        isBubbleExpanded.value = true;
+        bubbleKey.value++;
+    });
+    
+    // 监听状态更新
+    gatewayClient.on('action:voice_update', handleVoiceUpdateRequest);
+    
+    // 监听 TTS 音频流
+    gatewayClient.on('stream', handleAudioStream);
+    
+    // 初始化时连接 Gateway
+    // (如果 App.vue 或其他地方已经连接，这里可能需要调整，但 GatewayClient 是单例或共享的吗？)
+    // 假设 gatewayClient 是全局导入的单例
+});
+
+const windowSizes = [
+    { width: 600, height: 600 },
+    { width: 800, height: 800 },
+    { width: 1000, height: 1000 },
+    { width: 1200, height: 1200 }
+];
+const currentSizeIndex = ref(1); // Default 800x800
+
+const toggleWindowSize = () => {
+    currentSizeIndex.value = (currentSizeIndex.value + 1) % windowSizes.length;
+    const size = windowSizes[currentSizeIndex.value];
+    if (window.electron && window.electron.send) {
+        window.electron.send('resize-pet-window', size);
+    }
+};
 
 const reloadPet = () => {
     window.location.reload();

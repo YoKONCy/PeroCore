@@ -20,15 +20,15 @@ _CURRENT_SESSION_CONTEXT = {}
 def set_current_session_context(session):
     _CURRENT_SESSION_CONTEXT["db_session"] = session
 
-async def enter_work_mode(task_name: str = "Unknown Task") -> str:
+async def enter_work_mode(task_name: str = "未知任务") -> str:
     """
-    Enter 'Work Mode' (Isolation Mode).
-    Creates a temporary, isolated session for coding or complex tasks.
-    History from this session will NOT pollute the main chat, but will be summarized later.
+    进入“工作模式”（隔离模式）。
+    为编码或复杂任务创建一个临时的、隔离的会话。
+    该会话的历史记录不会污染主聊天记录，但稍后会被总结。
     """
     session = _CURRENT_SESSION_CONTEXT.get("db_session")
     if not session:
-        return "Error: 数据库会话不可用。"
+        return "错误: 数据库会话不可用。"
 
     # [Check] Block Work Mode if incompatible modes are active
     try:
@@ -64,10 +64,10 @@ async def enter_work_mode(task_name: str = "Unknown Task") -> str:
                 "aura_vision_enabled": "主动视觉模式"
             }
             modes_str = "、".join([name_map.get(m, m) for m in active_blockers])
-            return f"Error: 无法进入工作模式。检测到以下模式正在运行：{modes_str}。请先关闭它们。"
+            return f"错误: 无法进入工作模式。检测到以下模式正在运行：{modes_str}。请先关闭它们。"
             
     except Exception as check_e:
-        print(f"[SessionOps] Mode check warning: {check_e}")
+        print(f"[SessionOps] 模式检查警告: {check_e}")
         # Proceed with caution or return error? Let's log and proceed if check fails to avoid lockouts, 
         # or fail safe. Let's fail safe if we can't verify.
         # For now, just log.
@@ -106,23 +106,23 @@ async def enter_work_mode(task_name: str = "Unknown Task") -> str:
             from core.nit_manager import get_nit_manager
             get_nit_manager().set_category_status("work", True)
         except Exception as nit_e:
-            print(f"[SessionOps] Failed to activate NIT work category: {nit_e}")
+            print(f"[SessionOps] 激活 NIT 工作分类失败: {nit_e}")
 
-        return f"Entered Work Mode. New isolated session: {work_session_id}. Task: {task_name}"
+        return f"已进入工作模式。新隔离会话: {work_session_id}. 任务: {task_name}"
         
     except Exception as e:
         await session.rollback()
-        return f"Error entering Work Mode: {e}"
+        return f"进入工作模式错误: {e}"
 
 async def exit_work_mode() -> str:
     """
-    Exit 'Work Mode'.
-    Summarizes the entire work session into a 'Handwritten Log' and saves it to long-term memory.
-    Restores the main chat session.
+    退出“工作模式”。
+    将整个工作会话总结为“手写日志”并保存到长期记忆中。
+    恢复主聊天会话。
     """
     session = _CURRENT_SESSION_CONTEXT.get("db_session")
     if not session:
-        return "Error: 数据库会话不可用。"
+        return "错误: 数据库会话不可用。"
 
     config_id = None
     try:
@@ -140,7 +140,7 @@ async def exit_work_mode() -> str:
         if not config_id or not config_id.value.startswith(f"work_{agent_id}_"):
             # Fallback for old sessions or just generic check
             if not config_id or not config_id.value.startswith("work_"):
-                return "Error: 当前不在工作模式。"
+                return "错误: 当前不在工作模式。"
             
         work_session_id = config_id.value
         task_name = config_task.value if config_task else "未命名任务"
@@ -259,7 +259,7 @@ async def abort_work_mode() -> str:
     """
     session = _CURRENT_SESSION_CONTEXT.get("db_session")
     if not session:
-        return "Error: 数据库会话不可用。"
+        return "错误: 数据库会话不可用。"
 
     try:
         from services.agent_manager import get_agent_manager
@@ -287,7 +287,6 @@ async def abort_work_mode() -> str:
              except: pass
 
              original_session_id = "default" # Simplified
-             print(f"[SessionOps] 工作模式已中止。恢复至 {original_session_id}。")
              return f"工作模式已中止。恢复至会话: {original_session_id}"
         else:
              return "当前不在工作模式。"

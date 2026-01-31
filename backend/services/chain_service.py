@@ -12,7 +12,6 @@ if backend_dir not in sys.path:
 from services.embedding_service import embedding_service
 from services.memory_service import MemoryService
 from services.mdp.manager import mdp
-from services.agent_manager import AgentManager
 from core.config_manager import get_config_manager
 
 class ThinkingChainService:
@@ -96,7 +95,7 @@ class ThinkingChainService:
         """
         if chain_name not in self.chains:
             # 如果未找到链，回退到简单搜索
-            print(f"[ThinkingChain] Chain '{chain_name}' not found. Returning empty.")
+            print(f"[ThinkingChain] 未找到思维链 '{chain_name}'。返回空。")
             return {"chain_name": chain_name, "steps": [], "error": "Chain not found"}
 
         chain_steps = self.chains[chain_name]
@@ -107,7 +106,7 @@ class ThinkingChainService:
             "steps": []
         }
 
-        print(f"[ThinkingChain] Executing chain '{chain_name}' for query: {query}")
+        print(f"[ThinkingChain] 正在执行思维链 '{chain_name}'，查询: {query}")
 
         for step in chain_steps:
             cluster_name = step["cluster"]
@@ -135,7 +134,7 @@ class ThinkingChainService:
                     agent_id=agent_id
                 )
             except Exception as e:
-                print(f"[ThinkingChain] Error searching cluster '{cluster_name}': {e}")
+                print(f"[ThinkingChain] 搜索簇 '{cluster_name}' 出错: {e}")
                 memories = []
             
             results["steps"].append({
@@ -172,7 +171,7 @@ class ThinkingChainService:
                 content = mem.get("document", "")
                 # 元数据可能包含时间戳等。
                 meta = mem.get("metadata", {})
-                ts = meta.get("timestamp", "Unknown Time")
+                ts = meta.get("timestamp", "未知时间")
                 # 添加分数用于调试/透明度？可能不需要用于最终提示词。
                 output.append(f"{i}. [{ts}] {content}")
         
@@ -197,7 +196,7 @@ class ThinkingChainService:
         clusters_to_review = ["逻辑推理簇", "反思簇", "计划意图簇", "创造灵感簇"]
         
         output = ["### 自动化周报生成上下文 (Thinking Pipeline Phase 2)"]
-        output.append(f"Report Period: {datetime.fromtimestamp(one_week_ago/1000).strftime('%Y-%m-%d')} to {datetime.now().strftime('%Y-%m-%d')}")
+        output.append(f"报告周期: {datetime.fromtimestamp(one_week_ago/1000).strftime('%Y-%m-%d')} 至 {datetime.now().strftime('%Y-%m-%d')}")
         
         has_content = False
         all_weekly_contents = [] # 存储用于历史搜索
@@ -278,7 +277,7 @@ class ThinkingChainService:
                     try:
                         ts_str = datetime.fromtimestamp(ts_val/1000).strftime('%Y-%m-%d')
                     except:
-                        ts_str = "Unknown"
+                        ts_str = "未知"
                     output.append(f"- [{ts_str}] {content}")
             else:
                 output.append("(无显著相关的历史记忆)")
@@ -291,7 +290,7 @@ class ThinkingChainService:
         full_text = "\n".join(output)
         
         if len(full_text) > 10000:
-            print(f"[ThinkingChain] Context too long ({len(full_text)} chars), enforcing strict truncation...")
+            print(f"[ThinkingChain] 上下文过长 ({len(full_text)} 字符)，正在执行严格截断...")
             
             # 策略：保留头部 + 回响 + 高重要性周报条目
             # 我们已经按重要性对周报条目进行了排序。
@@ -327,7 +326,7 @@ class ThinkingChainService:
             # 将回响添加到安全输出（它们很关键）
             # 如果回响本身很大，也截断它们
             if len("\n".join(echo_items)) > 2000:
-                echo_items = echo_items[:10] + ["... (More historical echoes truncated)"]
+                echo_items = echo_items[:10] + ["... (更多历史回响已截断)"]
             
             remaining_chars -= len("\n".join(echo_items))
             
@@ -338,7 +337,7 @@ class ThinkingChainService:
                     safe_output.append(item)
                     current_chars += len(item)
                 else:
-                    safe_output.append("... (Remaining weekly items truncated for safety) ...")
+                    safe_output.append("... (剩余周报条目已截断以确保安全) ...")
                     break
             
             safe_output.extend(echo_items)
@@ -369,7 +368,7 @@ class ThinkingChainService:
             model_config = result.first()
         
         if not model_config:
-            print("[ThinkingChain] No active model config found for weekly report.")
+            print("[ThinkingChain] 未找到用于周报的活跃模型配置。")
             return ""
 
         llm = LLMService(
@@ -402,7 +401,7 @@ class ThinkingChainService:
             content = response["choices"][0]["message"]["content"]
             return content
         except Exception as e:
-            print(f"[ThinkingChain] Error generating weekly report: {e}")
+            print(f"[ThinkingChain] 生成周报出错: {e}")
             return ""
 
 # 单例实例

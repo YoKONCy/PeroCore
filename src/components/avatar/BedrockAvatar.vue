@@ -379,9 +379,9 @@ async function loadRossi() {
     }, 100);
 
     loading.value = false;
-    console.log("Rossi loaded successfully");
+    console.log("Rossi 加载成功");
   } catch (e: any) {
-    console.error("Failed to load Rossi", e);
+    console.error("加载 Rossi 失败", e);
     errorMsg.value = "Failed to load Rossi: " + (e.message || e);
     loading.value = false;
   }

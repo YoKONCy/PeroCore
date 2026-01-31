@@ -39,14 +39,14 @@ export async function installEs(window: BrowserWindow) {
     const dir = getEsDir()
     const emit = (msg: string) => window.webContents.send('es-log', msg)
     
-    emit(`Checking ES tool in: ${dir}`)
+    emit(`正在检查 ES 工具: ${dir}`)
     
     if (checkEsInstalled()) {
-        emit("ES tool already installed.")
+        emit("ES 工具已安装。")
         return true
     }
     
-    emit("ES tool not found. Starting download...")
+    emit("未找到 ES 工具。正在开始下载...")
     await fs.ensureDir(dir)
     
     try {
@@ -70,13 +70,13 @@ export async function installEs(window: BrowserWindow) {
         }
         
         if (!found) {
-            throw new Error("es.exe not found in downloaded zip")
+            throw new Error("下载的 zip 中未找到 es.exe")
         }
         
-        emit("ES tool installation complete.")
+        emit("ES 工具安装完成。")
         return true
     } catch (e: any) {
-        emit(`Download/Install failed: ${e.message}`)
+        emit(`下载/安装失败: ${e.message}`)
         return false
     }
 }

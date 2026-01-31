@@ -10,6 +10,7 @@ import json
 import asyncio
 import os
 import re
+from core.config_manager import get_config_manager
 
 class ScorerService:
     def __init__(self, session: AsyncSession):
@@ -135,18 +136,18 @@ class ScorerService:
             await self.session.commit()
             
         except Exception as e:
-            print(f"[秘书] Failed to update status for {pair_id}: {e}")
+            print(f"[秘书] 更新 {pair_id} 的状态失败: {e}")
 
     async def retry_interaction(self, log_id: int):
         """重试指定日志的分析任务"""
         # 查找日志
         log = await self.session.get(ConversationLog, log_id)
         if not log:
-            print(f"[秘书] Log {log_id} not found")
+            print(f"[秘书] 未找到日志 {log_id}")
             return False
         
         if not log.pair_id:
-            print(f"[秘书] Log {log_id} has no pair_id, cannot retry")
+            print(f"[秘书] 日志 {log_id} 没有 pair_id，无法重试")
             return False
             
         # 查找配对
@@ -157,7 +158,7 @@ class ScorerService:
         assistant_msg = next((r for r in results if r.role == 'assistant'), None)
         
         if not user_msg or not assistant_msg:
-             print(f"[秘书] Incomplete pair for {log.pair_id}")
+             print(f"[秘书] {log.pair_id} 的配对不完整")
              # 如果我们至少有一个，我们可能会尝试？但是 user_content 和 assistant_content 是必需的。
              # 如果只有一个存在，我们实际上无法进行“交互分析”。
              return False
@@ -174,7 +175,7 @@ class ScorerService:
         """
         处理一次交互：调用秘书分析，然后存入 Memory
         """
-        print(f"[秘书] Starting interaction analysis... (pair_id: {pair_id})", flush=True)
+        print(f"[秘书] 开始交互分析... (pair_id: {pair_id})", flush=True)
         
         # 智能清理助手内容以删除数据转储
         assistant_content = self._smart_clean_text(assistant_content)
@@ -185,9 +186,9 @@ class ScorerService:
         config = await self._get_scorer_config()
         
         if not config.get("api_key"):
-            print("[秘书] No API Key configured, skipping analysis.")
+            print("[秘书] 未配置 API Key，跳过分析。")
             if pair_id:
-                await self._update_log_status(pair_id, "failed", "No API Key configured", increment_retry=True)
+                await self._update_log_status(pair_id, "failed", "未配置 API Key", increment_retry=True)
             return
 
         llm = LLMService(
@@ -201,6 +202,7 @@ class ScorerService:
         bot_name = config_manager.get("bot_name", "Pero")
         
         # Get Agent Profile for dynamic persona injection
+        from services.agent_manager import AgentManager
         agent_manager = AgentManager()
         agent_profile = agent_manager.agents.get(agent_manager.active_agent_id)
         identity_label = agent_profile.identity_label if agent_profile else "智能助手"
@@ -215,7 +217,7 @@ class ScorerService:
         
         # 验证是否加载成功，如果包含 Error 则记录警告 (虽然 render 会返回错误信息，但不会抛出异常)
         if "Missing Prompt" in system_prompt:
-             print(f"[秘书] Warning: MDP Prompt 'services/memory/scorer/summary' missing. Check mdp/prompts directory.")
+             print(f"[秘书] 警告: 缺少 MDP 提示词 'services/memory/scorer/summary'。请检查 mdp/prompts 目录。")
         
         # Determine the role label and process user content if it's a system trigger
         owner_name = "用户"
@@ -226,7 +228,7 @@ class ScorerService:
             if config_entry and config_entry.value:
                 owner_name = config_entry.value
         except Exception as e:
-            print(f"[秘书] Failed to fetch owner_name: {e}")
+            print(f"[秘书] 获取 owner_name 失败: {e}")
 
         user_label = f"{owner_name} (主人)"
         
@@ -266,9 +268,9 @@ class ScorerService:
                     try:
                         data = json.loads(content)
                     except:
-                        print(f"[秘书] Failed to parse JSON even after cleanup: {content}")
+                        print(f"[秘书] 即使在清理后仍无法解析 JSON: {content}")
                 else:
-                    print(f"[秘书] Failed to parse JSON: {content}")
+                    print(f"[秘书] 无法解析 JSON: {content}")
             
             if not data or not data.get("content"):
                 # 如果是 null 或没有内容，尝试更新日志元数据（即使没有记忆摘要）
@@ -284,11 +286,11 @@ class ScorerService:
                             )
                         )
                         await self.session.commit()
-                        print(f"[秘书] Updated ConversationLog metadata (sentiment only) for pair_id: {pair_id}")
+                        print(f"[秘书] 已更新 pair_id 的 ConversationLog 元数据（仅情感）: {pair_id}")
                     except Exception as meta_err:
-                        print(f"[秘书] Failed to update log metadata: {meta_err}")
+                        print(f"[秘书] 更新日志元数据失败: {meta_err}")
                 
-                print("[秘书] No meaningful memory content extracted (ignored).")
+                print("[秘书] 未提取到有意义的记忆内容（已忽略）。")
                 return
 
             # 使用服务保存到内存（处理 VectorDB 和聚类索引）
@@ -323,13 +325,13 @@ class ScorerService:
                         )
                     )
                 except Exception as meta_err:
-                    print(f"[秘书] Failed to update log metadata: {meta_err}")
+                    print(f"[秘书] 更新日志元数据失败: {meta_err}")
 
             # 注意：save_memory 已经提交，但如果未包含，update_log 需要提交
             await self.session.commit()
-            print(f"[秘书] Memory saved successfully: {data['content']}")
+            print(f"[秘书] 记忆保存成功: {data['content']}")
             
         except Exception as e:
-            print(f"[秘书] Error processing interaction: {e}")
+            print(f"[秘书] 处理交互时出错: {e}")
             if pair_id:
                 await self._update_log_status(pair_id, "failed", str(e), increment_retry=True)

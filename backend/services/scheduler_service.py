@@ -12,8 +12,8 @@ logger = logging.getLogger(__name__)
 
 class SchedulerService:
     """
-    Unified Scheduler Service based on APScheduler.
-    Manages timed tasks (reminders, alarms, system maintenance).
+    基于 APScheduler 的统一调度服务。
+    管理定时任务（提醒、闹钟、系统维护）。
     """
     _instance = None
     
@@ -24,7 +24,7 @@ class SchedulerService:
         return cls._instance
 
     def initialize(self):
-        """Initialize the scheduler with database job store"""
+        """使用数据库作业存储初始化调度器"""
         if self.scheduler:
             return
 
@@ -48,14 +48,14 @@ class SchedulerService:
         
         self.scheduler = AsyncIOScheduler(jobstores=jobstores)
         self.scheduler.start()
-        logger.info("SchedulerService initialized and started.")
+        logger.info("调度服务已初始化并启动。")
 
     def add_reminder(self, trigger_time: datetime, content: str, repeat: str = None):
         """
-        Add a reminder task.
-        :param trigger_time: When to trigger
-        :param content: Reminder content
-        :param repeat: Repeat rule ('daily', 'weekly', or 'cron: * * * * *')
+        添加提醒任务。
+        :param trigger_time: 触发时间
+        :param content: 提醒内容
+        :param repeat: 重复规则 ('daily', 'weekly', 或 'cron: * * * * *')
         """
         trigger = None
         
@@ -79,10 +79,10 @@ class SchedulerService:
             SchedulerService._trigger_reminder,
             trigger=trigger,
             args=[content],
-            name=f"Reminder: {content[:20]}",
+            name=f"提醒: {content[:20]}",
             replace_existing=False
         )
-        logger.info(f"Added reminder job {job.id} at {trigger_time} (Repeat: {repeat})")
+        logger.info(f"已添加提醒任务 {job.id} 于 {trigger_time} (重复: {repeat})")
         
         # Broadcast update
         self._broadcast_update("add", {"id": job.id, "content": content, "next_run_time": str(job.next_run_time)})
@@ -90,24 +90,24 @@ class SchedulerService:
         return job.id
 
     def list_jobs(self):
-        """List all active jobs"""
+        """列出所有活动任务"""
         if not self.scheduler: return []
         return self.scheduler.get_jobs()
 
     def remove_job(self, job_id: str):
-        """Remove a job by ID"""
+        """根据 ID 移除任务"""
         if self.scheduler:
             try:
                 self.scheduler.remove_job(job_id)
                 self._broadcast_update("remove", {"id": job_id})
             except Exception as e:
-                logger.warning(f"Failed to remove job {job_id}: {e}")
+                logger.warning(f"移除任务 {job_id} 失败: {e}")
 
     def _broadcast_update(self, operation: str, data: dict):
-        """Broadcast schedule update event"""
+        """广播调度更新事件"""
         try:
             from services.gateway_client import gateway_client
-            from proto import perolink_pb2
+            from peroproto import perolink_pb2
             import uuid
             import time
             import asyncio
@@ -137,18 +137,18 @@ class SchedulerService:
                 # No running loop, create one (rare case for service methods called from scripts)
                 asyncio.run(_send())
         except Exception as e:
-            logger.error(f"Failed to broadcast schedule update: {e}")
+            logger.error(f"广播调度更新失败: {e}")
 
     @staticmethod
     async def _trigger_reminder(content: str):
         """
-        Callback when reminder is triggered.
-        Broadcasts 'action:reminder_trigger' to Gateway.
+        提醒触发时的回调。
+        向网关广播 'action:reminder_trigger'。
         """
-        logger.info(f"TRIGGER REMINDER: {content}")
+        logger.info(f"触发提醒: {content}")
         
         from services.gateway_client import gateway_client
-        from proto import perolink_pb2
+        from peroproto import perolink_pb2
         import uuid
         import time
 

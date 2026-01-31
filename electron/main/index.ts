@@ -1,10 +1,10 @@
-import { app, BrowserWindow, shell, ipcMain, screen } from 'electron'
+import { app, BrowserWindow, shell, ipcMain, screen, Notification } from 'electron'
 import { release } from 'os'
 import { join } from 'path'
 import { startBackend, stopBackend, getBackendLogs } from './services/python.js'
 import { startGateway, stopGateway } from './services/gateway.js'
 import { getDiagnostics } from './services/diagnostics.js'
-import { getSystemStats, getConfig, saveConfig } from './services/system.js'
+import { getSystemStats, getConfig, saveConfig, getGatewayToken } from './services/system.js'
 import { scanLocalAgents, getPlugins, saveAgentLaunchConfig, saveGlobalLaunchConfig } from './services/agents.js'
 import { startNapCat, stopNapCat, getNapCatLogs, sendNapCatCommand, installNapCat } from './services/napcat.js'
 import { checkEsInstalled, installEs } from './services/everything.js'
@@ -13,6 +13,7 @@ import { createTray, destroyTray } from './services/tray.js'
 import { registerShortcuts } from './services/shortcuts.js'
 import { fileURLToPath } from 'url'
 import { dirname } from 'path'
+import axios from 'axios'
 
 // Disable GPU Acceleration for Windows 7
 // 禁用 Windows 7 的 GPU 加速
@@ -57,9 +58,14 @@ async function createWindow() {
 app.whenReady().then(createWindow)
 
 app.on('window-all-closed', () => {
+  // Do nothing, keep app running in tray
+  // 什么都不做，保持应用在托盘中运行
+  if (process.platform === 'darwin') return
+})
+
+app.on('before-quit', () => {
   stopBackend() // Ensure backend is killed // 确保后端被杀死
   stopGateway() // Ensure gateway is killed // 确保网关被杀死
-  if (process.platform !== 'darwin') app.quit()
 })
 
 app.on('second-instance', () => {
@@ -86,6 +92,48 @@ ipcMain.on('log-from-renderer', (_, message) => {
   console.log('[Renderer]', message)
 })
 
+ipcMain.on('show-notification', (_, { title, body }) => {
+    new Notification({ title, body }).show()
+})
+
+ipcMain.on('resize-pet-window', (event, { width, height }) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (win) {
+        win.setSize(width, height)
+    }
+})
+
+ipcMain.handle('emit_event', (_, { event, payload }) => {
+    BrowserWindow.getAllWindows().forEach(win => {
+        win.webContents.send(event, payload)
+    })
+})
+
+ipcMain.handle('chat-message', async (_, args) => {
+    try {
+        const token = getGatewayToken()
+        const port = 9120
+        const { message } = args
+        
+        console.log('[IPC] 正在发送聊天消息到后端:', message)
+
+    await axios.post(`http://localhost:${port}/api/ide/chat`, {
+        messages: [{ role: 'user', content: message }],
+        source: 'desktop',
+        session_id: 'default'
+    }, {
+        headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+        }
+    })
+    return { status: 'ok' }
+} catch (error: any) {
+    console.error('[IPC] chat-message 失败:', error.message)
+    throw error
+}
+})
+
 // IPC Handlers - Tauri Adapter
 // IPC 处理程序 - Tauri 适配器
 console.log('主进程: 正在注册 IPC 处理程序...')
@@ -102,7 +150,7 @@ ipcMain.handle('start_backend', async (_, args) => {
         // Start Gateway first
         await startGateway(win)
         // Then start Backend
-        await startBackend(win, args?.enableSocialMode ?? true)
+        await startBackend(win, args?.enableSocialMode ?? false)
         return null // Ok(())
     } catch (e: any) {
         throw e.message
@@ -125,6 +173,10 @@ ipcMain.handle('get_config', () => {
     const config = getConfig()
     console.log('[IPC] get_config 返回配置:', config)
     return config
+})
+
+ipcMain.handle('get_gateway_token', () => {
+    return getGatewayToken()
 })
 
 ipcMain.handle('save_config', (_, args) => {
@@ -292,7 +344,7 @@ ipcMain.on('window-drag-start', (event, { offsetX, offsetY }) => {
                 height
             })
         } catch (e) {
-            console.error('Drag error:', e)
+            console.error('拖拽错误:', e)
             if (dragInterval) clearInterval(dragInterval)
         }
     }, 1) // 1ms interval (max smoothness) // 1ms 间隔 (最大平滑度)

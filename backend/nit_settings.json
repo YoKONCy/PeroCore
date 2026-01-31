@@ -1,7 +1,7 @@
 {
     "categories": {
         "core": true,
-        "work": true,
+        "work": false,
         "plugins": true
     },
     "plugins": {

@@ -6,8 +6,9 @@ from sqlmodel import select, desc, col, delete
 from sqlmodel.ext.asyncio.session import AsyncSession
 from models import Memory, MemoryRelation, Config, AIModelConfig, MaintenanceRecord
 from services.llm_service import LLMService
-from services.mdp.manager import MDPManager
+from services.mdp.manager import mdp as mdp_manager
 import os
+from core.config_manager import get_config_manager
 
 class MemorySecretaryService:
     def __init__(self, session: AsyncSession):
@@ -17,14 +18,8 @@ class MemorySecretaryService:
         self.deleted_data = []
         self.modified_data = []
         
-        # Initialize MDPManager
-        import os
-        # Point to the root mdp directory, usually backend/services/mdp
-        # mdp/manager.py is in backend/services/mdp
-        # so os.path.dirname(__file__) in memory_secretary_service.py is backend/services
-        # We need backend/services/mdp/prompts
-        mdp_dir = os.path.join(os.path.dirname(__file__), "mdp", "prompts")
-        self.mdp = MDPManager(mdp_dir)
+        # Use singleton MDP manager
+        self.mdp = mdp_manager
 
     async def _get_llm_service(self) -> LLMService:
         """获取配置并初始化 LLM 服务"""
@@ -92,10 +87,10 @@ class MemorySecretaryService:
             if not agent_ids: agent_ids = ["pero"]
             
             report["agents_processed"] = agent_ids
-            print(f"[MemorySecretary] Running maintenance for agents: {agent_ids}")
+            print(f"[MemorySecretary] 正在为以下代理运行维护: {agent_ids}")
 
             for agent_id in agent_ids:
-                print(f"[MemorySecretary] Processing Agent: {agent_id}")
+                print(f"[MemorySecretary] 正在处理代理: {agent_id}")
                 # 1. 提取偏好 (已按需关闭)
                 report["preferences_extracted"] += 0 # await self._extract_preferences(llm, agent_id)
 
@@ -142,7 +137,7 @@ class MemorySecretaryService:
         await self.session.refresh(record)
         
         report["record_id"] = record.id
-        print(f"[MemorySecretary] Maintenance finished. Record ID: {record.id}, Report: {report}")
+        print(f"[MemorySecretary] 维护完成。记录 ID: {record.id}, 报告: {report}")
         return report
 
     async def undo_maintenance(self, record_id: int) -> bool:
@@ -605,7 +600,7 @@ class MemorySecretaryService:
                         from services.gateway_client import gateway_client
                         await gateway_client.broadcast_pet_state(state.model_dump())
                     except Exception as e:
-                        print(f"[MemorySecretary] Broadcast failed: {e}")
+                        print(f"[MemorySecretary] 广播失败: {e}")
 
                 print(f"[MemorySecretary] 已更新动态 Waifu 文本 (Agent: {agent_id})。")
                 return 1

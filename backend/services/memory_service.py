@@ -320,7 +320,7 @@ class MemoryService:
             # [Feature] Broadcast new messages to Gateway (Event-Driven)
             try:
                 from services.gateway_client import gateway_client
-                from proto import perolink_pb2
+                from peroproto import perolink_pb2
                 import uuid
                 import time
 
@@ -344,8 +344,8 @@ class MemoryService:
 
                 await broadcast_log(user_log)
                 await broadcast_log(assistant_log)
-            except Exception as gw_e:
-                print(f"[MemoryService] Broadcast failed: {gw_e}")
+            except Exception as e:
+                print(f"[MemoryService] 广播失败: {e}")
 
             return user_log, assistant_log
         except Exception as e:
@@ -719,7 +719,7 @@ class MemoryService:
                 # 引擎不可用时的回退逻辑
                 pass
         except Exception as e:
-            print(f"[Memory] Rust engine runtime error: {e}. Falling back.")
+            print(f"[Memory] Rust 引擎运行时错误: {e}. 正在回退。")
             # [回退到 Python]
             # print("[Memory] Rust engine not found. Using Python fallback.")
             relation_map = {}
@@ -747,7 +747,7 @@ class MemoryService:
                         activation_scores[target_id] += base_score * rel.strength * 0.5
         except Exception as e:
             # 极致稳定性：如果 Rust 引擎运行报错（如 OOM），记录日志并继续，不中断对话
-            print(f"[Memory] Rust engine runtime error: {e}. Falling back to initial scores.")
+            print(f"[Memory] Rust 引擎运行时错误: {e}. 回退到初始分数。")
             # 此时保持 activation_scores 不变（即仅使用向量搜索结果）
 
         # 4. 综合排序 (最终排名) 带时间衰减和簇软加权

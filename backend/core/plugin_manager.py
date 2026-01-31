@@ -3,6 +3,7 @@ import json
 import importlib
 import sys
 import logging
+import platform
 from typing import Dict, Any, List, Optional, Callable
 from core.config_manager import get_config_manager
 from core.nit_manager import get_nit_manager
@@ -99,6 +100,18 @@ class PluginManager:
             # 处理 ../plugins 路径 -> plugins
             clean_category = os.path.basename(category_prefix) if '..' in category_prefix else category_prefix
             manifest['_category'] = clean_category
+
+        # 平台兼容性检查
+        supported_platforms = manifest.get("platforms")
+        if supported_platforms:
+            current_platform = platform.system().lower()
+            # Server Mode 模拟 Linux 环境 -> 改为 'server' 以区分 Linux Desktop
+            if os.environ.get("PERO_ENV") == "server":
+                current_platform = "server"
+                
+            if current_platform not in [p.lower() for p in supported_platforms]:
+                logger.info(f"跳过插件 {plugin_name}: 当前平台 ({current_platform}) 不在支持列表 {supported_platforms} 中。")
+                return
 
         plugin_type = manifest.get("pluginType", "python-module")
 

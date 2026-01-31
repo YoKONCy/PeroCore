@@ -57,7 +57,7 @@ class EmbeddingService:
             if default_st_cache not in search_dirs:
                 search_dirs.append(default_st_cache)
 
-            print(f"[Embedding] Debug: Searching for model '{model_name}' in dirs: {search_dirs}", flush=True)
+            print(f"[Embedding] 调试: 正在目录中搜索模型 '{model_name}': {search_dirs}", flush=True)
 
             repo_id = "models--" + model_name.replace("/", "--")
             
@@ -87,7 +87,7 @@ class EmbeddingService:
                             # 验证 snapshot 是否包含 config.json
                             config_path = os.path.join(snapshot_path, "config.json")
                             if os.path.isdir(snapshot_path) and os.path.exists(config_path):
-                                print(f"[Embedding] Debug: Found valid config at {config_path}", flush=True)
+                                print(f"[Embedding] 调试: 发现有效配置于 {config_path}", flush=True)
                                 return snapshot_path
                             # else:
                                 # print(f"[Embedding] Debug: Config not found at {config_path}", flush=True)
@@ -105,7 +105,7 @@ class EmbeddingService:
                             pass
                         
         except Exception as e:
-            print(f"[Embedding] Manual path resolution failed: {e}", flush=True)
+            print(f"[Embedding] 手动路径解析失败: {e}", flush=True)
         return None
 
     def _load_model(self):
@@ -325,7 +325,7 @@ class EmbeddingService:
             # 限制输入文档数量，确保精排在 1 秒内完成
             max_rerank_docs = 15
             if len(docs) > max_rerank_docs:
-                print(f"[Embedding] Truncating rerank input from {len(docs)} to {max_rerank_docs} for performance.")
+                print(f"[Embedding] 为了性能，将重排序输入从 {len(docs)} 截断为 {max_rerank_docs}。")
                 docs = docs[:max_rerank_docs]
                 
             pairs = [[query, doc] for doc in docs]

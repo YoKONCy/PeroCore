@@ -74,14 +74,14 @@ const toggleMode = async () => {
        if (configRes.ok) {
            const config = await configRes.json()
            if (config.enabled) {
-               console.warn("[WorkMode] Blocked by frontend pre-check: Lightweight mode enabled")
+               console.warn("[工作模式] 被前端预检查阻止：轻量模式已启用")
                errorMessage.value = "无法进入工作模式。检测到以下模式正在运行：轻量模式。请先关闭它们。"
                showErrorDialog.value = true
                return
            }
        }
      } catch (e) {
-         console.warn("[WorkMode] Pre-check failed, letting backend handle it:", e)
+         console.warn("[工作模式] 预检查失败，交由后端处理:", e)
      }
   }
   isWorkMode.value = !isWorkMode.value
@@ -108,21 +108,21 @@ watch(isWorkMode, async (newVal) => {
        if (data.message && data.message.startsWith("Error")) {
           // Blocked by backend check
           // 被后端检查阻止
-          console.warn("[WorkMode] Blocked:", data.message)
+          console.warn("[工作模式] 被阻止:", data.message)
           errorMessage.value = data.message.replace("Error: ", "")
           showErrorDialog.value = true
           isWorkMode.value = false // Revert state
           return
        }
 
-       console.log("[WorkMode] Entered:", data.message)
+       console.log("[工作模式] 已进入:", data.message)
        // Add small delay for smooth UI transition
        // 添加少量延迟以保证 UI 过渡平滑
        setTimeout(() => {
           isSessionReady.value = true
        }, 500)
     } catch (e) {
-       console.error("[WorkMode] Failed to enter session:", e)
+       console.error("[工作模式] 进入会话失败:", e)
        // 可选：通过对话框显示错误或仅回退
        isSessionReady.value = true // Allow UI to show anyway? Or error state?
        // 理想情况下应该在 WorkModeView 中显示错误，但现在先让它渲染
@@ -137,14 +137,14 @@ const handleWorkExit = async (save) => {
   const API_BASE = 'http://localhost:9120'
   try {
     if (save) {
-      console.log("Work session finishing...")
+      console.log("工作会话正在完成...")
       await fetch(`${API_BASE}/api/ide/work_mode/exit`, { method: 'POST' })
     } else {
-      console.log("Work session aborting...")
+      console.log("工作会话正在中止...")
       await fetch(`${API_BASE}/api/ide/work_mode/abort`, { method: 'POST' })
     }
   } catch (e) {
-    console.error("Failed to sync work session exit:", e)
+    console.error("同步工作会话退出失败:", e)
   }
   isWorkMode.value = false
 }

@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -29,9 +28,12 @@ func generateAndSaveToken() {
 	authToken = base64.URLEncoding.EncodeToString(b)
 	log.Printf("🔑 Gateway Access Token: %s", authToken)
 
-	// Define path to save token: ../PeroCore-Electron/backend/data/gateway_token.json
-	// Assuming running from PeroLink root
-	path := filepath.Join("..", "PeroCore-Electron", "backend", "data", "gateway_token.json")
+	// Define path to save token: defaults to data/gateway_token.json (Docker/Local relative)
+	// Can be overridden by env var for legacy dev support
+	path := os.Getenv("GATEWAY_TOKEN_PATH")
+	if path == "" {
+		path = filepath.Join("data", "gateway_token.json")
+	}
 
 	// Ensure directory exists
 	dir := filepath.Dir(path)
@@ -45,8 +47,6 @@ func generateAndSaveToken() {
 	fileData, _ := json.MarshalIndent(data, "", "  ")
 	if err := os.WriteFile(path, fileData, 0644); err != nil {
 		log.Printf("Warning: Could not save token to file %s: %v", path, err)
-	} else {
-		log.Printf("Token saved to %s", path)
 	}
 }
 
@@ -79,7 +79,7 @@ func (h *Hub) removeNodeByConn(conn *websocket.Conn) {
 	for id, node := range h.nodes {
 		if node.Conn == conn {
 			delete(h.nodes, id)
-			log.Printf("Node %s disconnected", id)
+			// log.Printf("Node %s disconnected", id)
 			break
 		}
 	}
@@ -103,7 +103,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 	defer hub.removeNodeByConn(conn)
 
-	log.Println("New connection from", r.RemoteAddr)
+	// log.Println("New connection from", r.RemoteAddr)
 
 	for {
 		messageType, p, err := conn.ReadMessage()
@@ -129,7 +129,8 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleEnvelope(conn *websocket.Conn, envelope *perolink.Envelope) {
-	fmt.Printf("Received Envelope: ID=%s Source=%s Target=%s\n", envelope.Id, envelope.SourceId, envelope.TargetId)
+	// Only log errors or warnings by default, or use debug flag
+	// fmt.Printf("Received Envelope: ID=%s Source=%s Target=%s\n", envelope.Id, envelope.SourceId, envelope.TargetId)
 
 	// Handle Hello (Handshake)
 	if hello := envelope.GetHello(); hello != nil {
@@ -138,7 +139,7 @@ func handleEnvelope(conn *websocket.Conn, envelope *perolink.Envelope) {
 
 	// Handle Heartbeat
 	if hb := envelope.GetHeartbeat(); hb != nil {
-		fmt.Printf("Heartbeat from %s: seq=%d (ts=%d)\n", envelope.SourceId, hb.Seq, envelope.Timestamp)
+		// fmt.Printf("Heartbeat from %s: seq=%d (ts=%d)\n", envelope.SourceId, hb.Seq, envelope.Timestamp)
 		return // Heartbeats are not forwarded
 	}
 
@@ -196,21 +197,14 @@ func unicastMessage(envelope *perolink.Envelope) {
 }
 
 func handleHello(conn *websocket.Conn, sourceID string, hello *perolink.Hello) {
-	log.Printf("Hello from %s (Device: %s, Platform: %s)\n", sourceID, hello.DeviceName, hello.Platform)
+	// log.Printf("Hello from %s (Device: %s, Platform: %s)\n", sourceID, hello.DeviceName, hello.Platform)
 
 	// Verify Token
 	if hello.Token != authToken {
 		log.Printf("⚠️  Invalid token from %s: %s (Expected: %s)", sourceID, hello.Token, authToken)
-		// TODO: Close connection or send error?
-		// For now, we just log warning but allow connection to avoid breaking dev flow immediately,
-		// or strictly enforce it.
-		// Let's enforce it.
-		// conn.Close()
-		// return
-		// But for migration safety, let's just warn for now until clients are updated.
-		log.Println("⚠️  Authentication failed (Continuing for migration...)")
+		// log.Println("⚠️  Authentication failed (Continuing for migration...)")
 	} else {
-		log.Println("✅ Authentication successful")
+		// log.Println("✅ Authentication successful")
 	}
 
 	hub.mu.Lock()
@@ -220,5 +214,5 @@ func handleHello(conn *websocket.Conn, sourceID string, hello *perolink.Hello) {
 	}
 	hub.mu.Unlock()
 
-	log.Printf("Node %s registered", sourceID)
+	// log.Printf("Node %s registered", sourceID)
 }

@@ -1,53 +1,56 @@
 {
-    "plugin_name": "Scheduler",
+    "name": "Scheduler",
     "description": "任务调度与提醒管理工具",
     "category": "system",
     "version": "1.0.0",
-    "tools": [
-        {
-            "name": "add_reminder",
-            "description": "添加一个定时提醒。当时间到达时，系统会主动提醒用户。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "time": {
-                        "type": "string",
-                        "description": "触发时间，支持自然语言（如 '10分钟后'、'明天早上8点'、'2024-01-01 12:00'）"
+    "entryPoint": "scheduler_ops.py",
+    "capabilities": {
+        "invocationCommands": [
+            {
+                "commandIdentifier": "add_reminder",
+                "description": "添加一个定时提醒。当时间到达时，系统会主动提醒用户。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "time": {
+                            "type": "string",
+                            "description": "触发时间，支持自然语言（如 '10分钟后'、'明天早上8点'、'2024-01-01 12:00'）"
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "提醒的具体内容"
+                        },
+                        "repeat_rule": {
+                            "type": "string",
+                            "description": "重复规则（可选）。支持 'daily' (每天), 'weekly' (每周), 或 'cron: * * * * *' (Cron表达式)。不填则为单次提醒。"
+                        }
                     },
-                    "content": {
-                        "type": "string",
-                        "description": "提醒的具体内容"
+                    "required": ["time", "content"]
+                }
+            },
+            {
+                "commandIdentifier": "list_reminders",
+                "description": "列出当前所有待执行的提醒任务。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            },
+            {
+                "commandIdentifier": "delete_reminder",
+                "description": "删除指定的提醒任务。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "id": {
+                            "type": "string",
+                            "description": "要删除的任务 ID"
+                        }
                     },
-                    "repeat_rule": {
-                        "type": "string",
-                        "description": "重复规则（可选）。支持 'daily' (每天), 'weekly' (每周), 或 'cron: * * * * *' (Cron表达式)。不填则为单次提醒。"
-                    }
-                },
-                "required": ["time", "content"]
+                    "required": ["id"]
+                }
             }
-        },
-        {
-            "name": "list_reminders",
-            "description": "列出当前所有待执行的提醒任务。",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": []
-            }
-        },
-        {
-            "name": "delete_reminder",
-            "description": "删除指定的提醒任务。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "id": {
-                        "type": "string",
-                        "description": "要删除的任务 ID"
-                    }
-                },
-                "required": ["id"]
-            }
-        }
-    ]
+        ]
+    }
 }

@@ -76,7 +76,7 @@ export async function startBackend(window: BrowserWindow, enableSocialMode: bool
 
     child.stdout?.on('data', (data) => {
         const line = data.toString().trim()
-        console.log(`[Backend] ${line}`)
+        console.log(`[后端] ${line}`)
         window.webContents.send('backend-log', line)
         
         if (logHistory.length >= MAX_LOGS) logHistory.shift()
@@ -85,28 +85,37 @@ export async function startBackend(window: BrowserWindow, enableSocialMode: bool
 
     child.stderr?.on('data', (data) => {
         const line = data.toString().trim()
-        console.error(`[Backend Error] ${line}`)
-        window.webContents.send('backend-log', `[Error] ${line}`)
+        console.error(`[后端错误] ${line}`)
+        window.webContents.send('backend-log', `[错误] ${line}`)
         
         if (logHistory.length >= MAX_LOGS) logHistory.shift()
-        logHistory.push(`[Error] ${line}`)
+        logHistory.push(`[错误] ${line}`)
         
         if (line.includes('Error') || line.includes('Exception') || line.includes('Traceback')) {
-            window.webContents.send('system-error', `Backend Error: ${line}`)
+            window.webContents.send('system-error', `后端错误: ${line}`)
         }
     })
 
     child.on('close', (code) => {
-        console.log(`Backend exited with code: ${code}`)
+        console.log(`后端已退出，退出码: ${code}`)
         backendProcess = null
     })
 
     backendProcess = child
 }
 
+import treeKill from 'tree-kill'
+
 export function stopBackend() {
     if (backendProcess) {
-        backendProcess.kill()
+        console.log('Stopping Backend...')
+        if (backendProcess.pid) {
+             treeKill(backendProcess.pid, 'SIGKILL', (err) => {
+                if (err) console.error('Error killing backend process tree:', err)
+             })
+        } else {
+             backendProcess.kill()
+        }
         backendProcess = null
     }
 }

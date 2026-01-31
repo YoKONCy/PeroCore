@@ -82,7 +82,7 @@ const sendCommand = async () => {
     })
     inputValue.value = ''
   } catch (e) {
-    console.error(`[Error] Failed to send command: ${e}`)
+    console.error(`[错误] 发送指令失败: ${e}`)
     ElMessage.error(`发送指令失败: ${e}`)
   }
 }
@@ -155,7 +155,7 @@ onMounted(async () => {
         if (logs.value.length > 500) logs.value.shift()
       })
   } catch (e) {
-    console.error('Failed to init napcat logs', e)
+    console.error('初始化 NapCat 日志失败', e)
   }
 })
 

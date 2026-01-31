@@ -18,10 +18,17 @@ pyo3 = { version = "0.21", features = ["extension-module"] }
 tract-onnx = { version = "0.21" }
 
 # 图像处理
-image = { version = "0.25" }
+image = "0.24"
+ndarray = "0.15"
 
-# 工具库
+# 并行计算
+rayon = "1.8"
+
+# 错误处理
 anyhow = "1.0"
-serde = { version = "1.0", features = ["derive"] }
-smallvec = "1.15.1"
+
+# 数据结构
 ahash = "0.8"
+smallvec = "1.11"
+
+[workspace]

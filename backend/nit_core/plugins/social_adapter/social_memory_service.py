@@ -40,7 +40,7 @@ class SocialMemoryService:
         
     async def initialize(self):
         """初始化 Rust 引擎和加载索引"""
-        print("[SocialMemory] Initializing...", flush=True)
+        print("[SocialMemory] 正在初始化...", flush=True)
         await self._init_rust_engine()
         await self._load_keyword_index()
         
@@ -59,9 +59,9 @@ class SocialMemoryService:
                     chunk_relations = [(rel.source_id, rel.target_id, rel.strength) for rel in relations]
                     self._rust_engine.batch_add_connections(chunk_relations)
             
-            print(f"[SocialMemory] Rust Engine initialized with {len(relations) if 'relations' in locals() else 0} connections.", flush=True)
+            print(f"[SocialMemory] Rust 引擎已初始化，包含 {len(relations) if 'relations' in locals() else 0} 个连接。", flush=True)
         except Exception as e:
-            print(f"[SocialMemory] Failed to init Rust engine: {e}")
+            print(f"[SocialMemory] 初始化 Rust 引擎失败: {e}")
             self._rust_engine = None
 
     async def _load_keyword_index(self):
@@ -91,7 +91,7 @@ class SocialMemoryService:
                 vec = embedding_service.encode_one(content)
             except Exception as e:
                 # 允许 Embedding 失败，不阻断流程
-                print(f"[SocialMemory] Warning: Embedding generation failed: {e}")
+                print(f"[SocialMemory] 警告: 生成 Embedding 失败: {e}")
                 vec = []
             
             memory = SocialMemory(
@@ -201,7 +201,7 @@ class SocialMemoryService:
                 spread_result = self._rust_engine.spread(entry_point_ids, 2, 0.5)
                 activated_ids = set(spread_result.keys())
             except Exception as e:
-                print(f"[SocialMemory] Rust engine spread failed: {e}")
+                print(f"[SocialMemory] Rust 引擎扩散激活失败: {e}")
                 # Fallback: 仅使用直接命中的节点
                 pass
         
@@ -287,6 +287,7 @@ class SocialMemoryService:
                 bot_name = "Pero"
 
             # Get Agent Profile for dynamic persona injection
+            from services.agent_manager import AgentManager
             agent_manager = AgentManager()
             agent_profile = agent_manager.agents.get(agent_manager.active_agent_id)
             identity_label = agent_profile.identity_label if agent_profile else "智能助手"
@@ -321,7 +322,7 @@ class SocialMemoryService:
             session.add(report)
             await session.commit()
             
-            print(f"[SocialMemory] Daily report generated for {date_str}")
+            print(f"[SocialMemory] 已生成 {date_str} 的日报")
             return report
 
 def get_social_memory_service():

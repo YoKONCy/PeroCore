@@ -11,9 +11,9 @@ async def qq_send_group_msg(group_id: str, message: str):
     try:
         gid = int(group_id)
         await service.send_group_msg(gid, message)
-        return f"Message sent to group {group_id}"
+        return f"已发送消息到群 {group_id}"
     except Exception as e:
-        return f"Failed to send group message: {e}"
+        return f"发送群消息失败: {e}"
 
 async def qq_send_private_msg(user_id: str, content: str):
     """
@@ -21,16 +21,16 @@ async def qq_send_private_msg(user_id: str, content: str):
     """
     service = get_social_service()
     if not service.enabled:
-        return "Social mode is not enabled."
+        return "社交模式未启用。"
         
     try:
         uid = int(user_id)
-        logger.info(f"[SocialAdapter] Sending private message to {uid}: {content}")
+        logger.info(f"[SocialAdapter] 正在发送私聊消息给 {uid}: {content}")
         await service.send_private_msg(uid, content)
-        return f"Message sent to user {uid}"
+        return f"已发送消息给用户 {uid}"
     except Exception as e:
-        logger.error(f"[SocialAdapter] Failed to send private message: {e}")
-        return f"Failed to send private message: {e}"
+        logger.error(f"[SocialAdapter] 发送私聊消息失败: {e}")
+        return f"发送私聊消息失败: {e}"
 
 async def qq_handle_friend_request(flag: str, approve: bool, remark: str = ""):
     """
@@ -40,9 +40,9 @@ async def qq_handle_friend_request(flag: str, approve: bool, remark: str = ""):
     service = get_social_service()
     try:
         await service.handle_friend_request(flag, approve, remark)
-        return f"Friend request handled (Approve={approve})"
+        return f"好友请求已处理 (同意={approve})"
     except Exception as e:
-        return f"Failed to handle friend request: {e}"
+        return f"处理好友请求失败: {e}"
 
 async def qq_delete_friend(user_id: int, reason: str = "") -> str:
     """
@@ -50,15 +50,15 @@ async def qq_delete_friend(user_id: int, reason: str = "") -> str:
     """
     service = get_social_service()
     if not service.enabled:
-        return "Social mode is not enabled."
+        return "社交模式未启用。"
         
     try:
-        logger.info(f"[SocialAdapter] Deleting friend {user_id}. Reason: {reason}")
+        logger.info(f"[SocialAdapter] 正在删除好友 {user_id}。原因: {reason}")
         await service.delete_friend(user_id)
-        return f"Friend {user_id} has been deleted. Reason: {reason}"
+        return f"好友 {user_id} 已删除。原因: {reason}"
     except Exception as e:
-        logger.error(f"[SocialAdapter] Failed to delete friend: {e}")
-        return f"Failed to delete friend: {e}"
+        logger.error(f"[SocialAdapter] 删除好友失败: {e}")
+        return f"删除好友失败: {e}"
 
 async def qq_get_friend_list() -> str:
     """
@@ -66,14 +66,14 @@ async def qq_get_friend_list() -> str:
     """
     service = get_social_service()
     if not service.enabled:
-        return "Social mode is not enabled."
+        return "社交模式未启用。"
         
     try:
         friends = await service.get_friend_list()
         if not friends:
-            return "Friend list is empty."
+            return "好友列表为空。"
             
-        result = "Friend List:\n"
+        result = "好友列表:\n"
         for f in friends:
             remark = f.get("remark", "")
             nickname = f.get("nickname", "")
@@ -83,8 +83,8 @@ async def qq_get_friend_list() -> str:
             
         return result
     except Exception as e:
-        logger.error(f"[SocialAdapter] Failed to get friend list: {e}")
-        return f"Failed to get friend list: {e}"
+        logger.error(f"[SocialAdapter] 获取好友列表失败: {e}")
+        return f"获取好友列表失败: {e}"
 
 async def qq_get_group_list() -> str:
     """
@@ -92,14 +92,14 @@ async def qq_get_group_list() -> str:
     """
     service = get_social_service()
     if not service.enabled:
-        return "Social mode is not enabled."
+        return "社交模式未启用。"
         
     try:
         groups = await service.get_group_list()
         if not groups:
-            return "Group list is empty."
+            return "群列表为空。"
             
-        result = "Group List:\n"
+        result = "群列表:\n"
         for g in groups:
             group_id = g.get("group_id", "")
             group_name = g.get("group_name", "")
@@ -108,8 +108,8 @@ async def qq_get_group_list() -> str:
             
         return result
     except Exception as e:
-        logger.error(f"[SocialAdapter] Failed to get group list: {e}")
-        return f"Failed to get group list: {e}"
+        logger.error(f"[SocialAdapter] 获取群组列表失败: {e}")
+        return f"获取群组列表失败: {e}"
 
 async def qq_get_stranger_info(user_id: str):
     """
@@ -121,7 +121,7 @@ async def qq_get_stranger_info(user_id: str):
         info = await service.get_stranger_info(uid)
         return str(info)
     except Exception as e:
-        return f"Failed to get stranger info: {e}"
+        return f"获取陌生人信息失败: {e}"
 
 async def qq_get_group_info(group_id: str):
     """
@@ -133,7 +133,7 @@ async def qq_get_group_info(group_id: str):
         info = await service.get_group_info(gid)
         return str(info)
     except Exception as e:
-        return f"Failed to get group info: {e}"
+        return f"获取群信息失败: {e}"
 
 async def qq_get_group_member_info(group_id: str, user_id: str):
     """
@@ -146,7 +146,7 @@ async def qq_get_group_member_info(group_id: str, user_id: str):
         info = await service.get_group_member_info(gid, uid)
         return str(info)
     except Exception as e:
-        return f"Failed to get group member info: {e}"
+        return f"获取群成员信息失败: {e}"
 
 async def qq_get_group_history(group_id: str, count: int = 20):
     """
@@ -158,7 +158,7 @@ async def qq_get_group_history(group_id: str, count: int = 20):
         gid = int(group_id)
         return await service.get_group_msg_history(gid, count)
     except Exception as e:
-        return f"Failed to get group history: {e}"
+        return f"获取群历史失败: {e}"
 
 async def read_social_memory(query: str, filter: str = ""):
     """
@@ -168,7 +168,7 @@ async def read_social_memory(query: str, filter: str = ""):
     try:
         return await service.read_memory(query, filter)
     except Exception as e:
-        return f"Failed to read social memory: {e}"
+        return f"读取社交记忆失败: {e}"
 
 async def read_agent_memory(query: str):
     """
@@ -179,7 +179,7 @@ async def read_agent_memory(query: str):
     try:
         return await service.read_agent_memory(query)
     except Exception as e:
-        return f"Failed to read agent memory: {e}"
+        return f"读取代理记忆失败: {e}"
 
 async def qq_notify_master(content: str, importance: str = "medium"):
     """
@@ -188,6 +188,6 @@ async def qq_notify_master(content: str, importance: str = "medium"):
     service = get_social_service()
     try:
         await service.notify_master(content, importance)
-        return "Master notified."
+        return "已通知主人。"
     except Exception as e:
-        return f"Failed to notify master: {e}"
+        return f"通知主人失败: {e}"

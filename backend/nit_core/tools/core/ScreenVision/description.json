@@ -5,6 +5,7 @@
   "version": "1.0.1",
   "description": "视觉感知。查看屏幕内容或识别文字。",
   "author": "PeroCore",
+  "platforms": ["windows", "linux", "darwin"],
   "pluginType": "python-module",
   "entryPoint": "screen_ocr.py",
   "capabilities": {

@@ -109,8 +109,6 @@ class AgentManager:
                         logger.info(f"已加载代理: {profile.name} ({agent_id})")
                     except Exception as e:
                         logger.error(f"加载代理 {agent_id} 失败: {e}")
-                else:
-                    logger.debug(f"跳过目录 {agent_id}: 未找到 config.json")
 
         if not self.agents:
             logger.warning("未加载任何代理！请检查 backend/agents 目录。")
@@ -190,7 +188,7 @@ class AgentManager:
         """Broadcast agent change event"""
         try:
             from services.gateway_client import gateway_client
-            from proto import perolink_pb2
+            from peroproto import perolink_pb2
             import uuid
             import time
             import asyncio
@@ -214,7 +212,7 @@ class AgentManager:
             except RuntimeError:
                 asyncio.run(_send())
         except Exception as e:
-            logger.error(f"Failed to broadcast agent change: {e}")
+            logger.error(f"广播代理变更失败: {e}")
 
     def set_enabled_agents(self, agent_ids: List[str]):
         """设置已启用的代理列表。"""

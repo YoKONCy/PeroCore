@@ -26,7 +26,7 @@ class VectorService:
         # Rust 索引目前不容易支持删除 (HNSW 针对仅追加进行了优化)。
         # 我们可以实现一个墓碑列表或重建索引。
         # 目前，我们忽略删除或 TODO: 在 Rust 核心中实现删除。
-        print(f"[VectorService] Warning: delete_memory not fully implemented for Rust index yet.")
+        print(f"[VectorService] 警告: delete_memory 在 Rust 索引中尚未完全实现。")
         pass
 
     def search(self, query_embedding: List[float], limit: int = 10, filter_criteria: Dict = None, agent_id: str = "pero") -> List[Dict]:
@@ -36,7 +36,7 @@ class VectorService:
         注意：不再返回 "document" 和 "metadata"，调用者需要回查数据库。
         """
         if filter_criteria:
-            print(f"[VectorService] Warning: 'filter_criteria' is NOT supported in Rust Vector Search. Ignored.")
+            print(f"[VectorService] 警告: 'filter_criteria' 在 Rust 向量搜索中不受支持。已忽略。")
         
         return vector_store.search_memory(query_embedding, limit, agent_id)
 
@@ -44,7 +44,7 @@ class VectorService:
         """
         DEPRECATED: Use MemoryService.get_memories_by_filter instead.
         """
-        print("[VectorService] Error: query_memories is deprecated. Please use MemoryService.")
+        print("[VectorService] 错误: query_memories 已弃用。请使用 MemoryService。")
         return []
 
     def count(self) -> int:

@@ -15,7 +15,7 @@ except ImportError:
     RUST_AVAILABLE = False
     # Define dummy class to prevent NameError in type hints
     class SemanticVectorIndex: pass
-    print("[VectorStore] ❌ Critical: pero_memory_core not found! Vector search will be disabled.")
+    print("[VectorStore] ❌ 严重错误: 未找到 pero_memory_core！向量搜索将被禁用。")
 
 class VectorStoreService:
     _instance = None
@@ -75,7 +75,7 @@ class VectorStoreService:
                     index = SemanticVectorIndex.load_index(path, self.dimension)
                     self.indices[agent_id] = index
                 except Exception as e:
-                    print(f"[VectorStore] Failed to load index for {agent_id}: {e}")
+                    print(f"[VectorStore] 加载 {agent_id} 的索引失败: {e}")
                     # Backup and recreate
                     try:
                         import shutil
@@ -96,7 +96,7 @@ class VectorStoreService:
             dummy_vec = embedding_service.encode_one("test")
             self.dimension = len(dummy_vec)
         except Exception as e:
-            print(f"[VectorStore] Failed to detect dimension: {e}. Using default 384.")
+            print(f"[VectorStore] 检测维度失败: {e}。使用默认值 384。")
             self.dimension = 384
 
         # 加载标签索引 (全局)
@@ -104,7 +104,7 @@ class VectorStoreService:
             try:
                 self.tag_index = SemanticVectorIndex.load_index(self.tag_index_path, self.dimension)
             except Exception as e:
-                print(f"[VectorStore] Failed to load tag index: {e}.")
+                print(f"[VectorStore] 加载标签索引失败: {e}。")
                 try:
                     import shutil
                     shutil.copy2(self.tag_index_path, self.tag_index_path + f".bak.{int(time.time())}")
@@ -122,21 +122,21 @@ class VectorStoreService:
                     self.next_tag_id = data.get("next_id", 1)
                     self.tag_map_rev = {int(v): k for k, v in self.tag_map.items()}
             except Exception as e:
-                print(f"[VectorStore] Failed to load tag map: {e}")
+                print(f"[VectorStore] 加载标签映射失败: {e}")
         
         # 兼容旧数据迁移: 检查是否存在根目录下的 memory.index (属于 Pero)
         # 如果存在，将其移动到 agents/pero/memory.index
         legacy_path = os.path.join(self.data_dir, "memory.index")
         if os.path.exists(legacy_path):
-            print("[VectorStore] Detected legacy index. Migrating to 'pero' agent namespace...")
+            print("[VectorStore] 检测到遗留索引。正在迁移到 'pero' 代理命名空间...")
             pero_path = self._get_agent_index_path("pero")
             if not os.path.exists(pero_path):
                 try:
                     import shutil
                     shutil.move(legacy_path, pero_path)
-                    print("[VectorStore] Migration successful.")
+                    print("[VectorStore] 迁移成功。")
                 except Exception as e:
-                    print(f"[VectorStore] Migration failed: {e}")
+                    print(f"[VectorStore] 迁移失败: {e}")
 
         self._lazy_loaded = True
 
@@ -173,7 +173,7 @@ class VectorStoreService:
             else:
                 os.rename(temp_map_path, self.tag_map_path)
         except Exception as e:
-            print(f"[VectorStore] Save failed: {e}")
+            print(f"[VectorStore] 保存失败: {e}")
 
     # --- Memory Operations ---
 
@@ -195,7 +195,7 @@ class VectorStoreService:
             index.insert_vector(memory_id, embedding)
             self.save() # TODO: Optimize save frequency
         except Exception as e:
-            print(f"[VectorStore] Add memory failed for {agent_id}: {e}")
+            print(f"[VectorStore] 为 {agent_id} 添加记忆失败: {e}")
 
     def add_memories_batch(self, ids: List[int], embeddings: List[List[float]], agent_id: str = "pero"):
         """批量添加记忆"""
@@ -207,7 +207,7 @@ class VectorStoreService:
             index.batch_insert_vectors(ids, embeddings)
             self.save()
         except Exception as e:
-            print(f"[VectorStore] Batch add failed for {agent_id}: {e}")
+            print(f"[VectorStore] 为 {agent_id} 批量添加失败: {e}")
 
     def search_memory(self, query_vector: List[float], limit: int = 10, agent_id: str = "pero") -> List[Dict]:
         """
@@ -223,7 +223,7 @@ class VectorStoreService:
             # results format: [(id, score), ...]
             return [{"id": int(r[0]), "score": float(r[1])} for r in results]
         except Exception as e:
-            print(f"[VectorStore] Search failed for {agent_id}: {e}")
+            print(f"[VectorStore] 搜索 {agent_id} 失败: {e}")
             return []
 
     def count_memories(self, agent_id: str = "pero") -> int:
@@ -254,7 +254,7 @@ class VectorStoreService:
                 self.tag_index.insert_vector(tid, embedding)
                 self.save()
             except Exception as e:
-                print(f"[VectorStore] Add tag failed: {e}")
+                print(f"[VectorStore] 添加标签失败: {e}")
 
     def search_tags(self, query_vec: List[float], limit: int = 5) -> List[Dict]:
         self._ensure_loaded()
@@ -272,7 +272,7 @@ class VectorStoreService:
                 })
             return output
         except Exception as e:
-            print(f"[VectorStore] Search tags failed: {e}")
+            print(f"[VectorStore] 搜索标签失败: {e}")
             return []
 
 vector_store = VectorStoreService()

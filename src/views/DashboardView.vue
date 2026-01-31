@@ -994,10 +994,23 @@
           <el-input v-model="currentEditingModel.name" placeholder="例如：GPT-4o" />
         </el-form-item>
         <el-form-item label="服务商 (Provider)">
-          <el-select v-model="currentEditingModel.provider" placeholder="选择服务商" style="width:100%">
+          <el-select v-model="currentEditingModel.provider" placeholder="选择服务商" style="width:100%" @change="handleProviderChange">
             <el-option label="OpenAI (兼容)" value="openai" />
             <el-option label="Gemini (原生)" value="gemini" />
             <el-option label="Claude (Anthropic)" value="anthropic" />
+            <el-option label="SiliconFlow (硅基流动)" value="siliconflow" />
+            <el-option label="DeepSeek (深度求索)" value="deepseek" />
+            <el-option label="Moonshot (Kimi)" value="moonshot" />
+            <el-option label="DashScope (阿里百炼)" value="dashscope" />
+            <el-option label="Volcengine (火山引擎)" value="volcengine" />
+            <el-option label="Groq" value="groq" />
+            <el-option label="Zhipu (智谱GLM)" value="zhipu" />
+            <el-option label="MiniMax" value="minimax" />
+            <el-option label="Mistral" value="mistral" />
+            <el-option label="01.AI (零一万物)" value="yi" />
+            <el-option label="xAI (Grok)" value="xai" />
+            <el-option label="StepFun (阶跃星辰)" value="stepfun" />
+            <el-option label="Hunyuan (腾讯混元)" value="hunyuan" />
           </el-select>
         </el-form-item>
         <el-form-item label="Model ID">
@@ -1020,7 +1033,7 @@
           <el-form-item label="API Key">
              <el-input v-model="currentEditingModel.api_key" type="password" />
           </el-form-item>
-          <el-form-item label="Base URL">
+          <el-form-item label="Base URL" v-if="!['gemini', 'anthropic'].includes(currentEditingModel.provider)">
              <el-input v-model="currentEditingModel.api_base" />
           </el-form-item>
         </div>
@@ -1263,7 +1276,7 @@ const currentDebugLog = ref(null)
 const debugSegments = ref([])
 
 // --- API 交互 ---
-const API_BASE = 'http://localhost:9120/api'
+const API_BASE = (window.electron) ? 'http://localhost:9120/api' : '/api'
 
 // 带超时的 fetch 包装函数
 const fetchWithTimeout = async (url, options = {}, timeout = 5000) => {
@@ -1280,7 +1293,7 @@ const fetchWithTimeout = async (url, options = {}, timeout = 5000) => {
     clearTimeout(id)
     // 只有当错误不是 AbortError 且未开启 silent 模式时才打印
     if (error.name !== 'AbortError' && !options.silent) {
-      console.warn(`[Fetch] Request failed for ${url}:`, error.message)
+      console.warn(`[Fetch] 请求失败 ${url}:`, error.message)
     }
     throw error
   }
@@ -1420,12 +1433,12 @@ const selectedDate = ref('')
 const selectedSort = ref('desc')
 
 const openIdeWorkspace = async () => {
-  try { await invoke('open_ide_window'); return; } catch(e) { console.error(e); ElMessage.error('无法打开 IDE 窗口'); return; }
-  console.log('[Dashboard] User clicked openIdeWorkspace')
+  try { await invoke('open_ide_window'); return; } catch(e) { console.error('打开 IDE 窗口失败:', e); ElMessage.error('无法打开 IDE 窗口'); return; }
+  console.log('[仪表盘] 用户点击打开 IDE 工作区')
   try {
       await invoke('open_ide_window')
   } catch (e) {
-    console.error('Failed to open IDE window:', e)
+    console.error('打开 IDE 窗口失败:', e)
     const errorMsg = e instanceof Error ? e.message : JSON.stringify(e)
     ElMessage.error('无法打开 IDE 窗口: ' + errorMsg)
   }
@@ -1608,7 +1621,7 @@ const fetchAgents = async () => {
         }
     }
   } catch (e) {
-      console.error('Failed to fetch agents:', e)
+      console.error('获取助手列表失败:', e)
   }
 }
 
@@ -1640,7 +1653,7 @@ const switchAgent = async (agentId) => {
         invoke('save_agent_launch_config', { 
             enabledAgents: enabled,
             activeAgent: agentId 
-        }).catch(e => console.error('Failed to save launch config:', e))
+        }).catch(e => console.error('保存启动配置失败:', e))
 
     } catch (e) {
         ElMessage.error(e.message)
@@ -1750,7 +1763,7 @@ const fetchStats = async () => {
     const data = await res.json()
     stats.value = data
   } catch (e) {
-    console.error('Failed to fetch stats:', e)
+    console.error('获取统计信息失败:', e)
   }
 }
 
@@ -1766,7 +1779,7 @@ const fetchAllData = async () => {
       fetchStats(),
       fetchAgents()
     ])
-  } catch (e) { console.error('Core fetch error:', e) }
+  } catch (e) { console.error('核心数据获取错误:', e) }
 
   // 2. 稍微延迟后加载次要配置，避免一次性涌入过多数据更新
   setTimeout(async () => {
@@ -1780,7 +1793,7 @@ const fetchAllData = async () => {
         fetchAuraVisionStatus(),
         fetchNitStatus()
       ])
-    } catch (e) { console.error('Secondary fetch error:', e) }
+    } catch (e) { console.error('次要数据获取错误:', e) }
   }, 100)
 
   // 3. 顺序加载所有标签页数据，确保 v-show 切换时内容已就绪
@@ -1799,7 +1812,7 @@ const fetchAllData = async () => {
       fetchTagCloud()
       ElMessage.success('所有数据已同步')
     } catch (e) { 
-      console.error('Tab data fetch error:', e) 
+      console.error('标签页数据获取错误:', e) 
       ElMessage.error('部分数据刷新失败')
     } finally {
       isGlobalRefreshing.value = false
@@ -1814,7 +1827,7 @@ const fetchNitStatus = async () => {
     const res = await fetchWithTimeout(`${API_BASE}/nit/status`, {}, 2000)
     nitStatus.value = await res.json()
   } catch (e) { 
-    console.error(e) 
+    console.error('NIT 状态获取错误:', e) 
   } finally {
     fetchNitStatus.isLoading = false
   }
@@ -1827,7 +1840,7 @@ const fetchTagCloud = async () => {
         const res = await fetchWithTimeout(`${API_BASE}/memories/tags`, {}, 3000)
         tagCloud.value = await res.json()
     } catch(e) { 
-        console.error(e) 
+        console.error('标签云获取错误:', e) 
     } finally {
         fetchTagCloud.isLoading = false
     }
@@ -1853,7 +1866,7 @@ const fetchMemoryGraph = async () => {
             })
         }
     } catch(e) { 
-        console.error(e) 
+        console.error('记忆图谱获取错误:', e) 
     } finally { 
         isLoadingGraph.value = false 
     }
@@ -1887,7 +1900,7 @@ const clearOrphanedEdges = async () => {
         }
     } catch (e) {
         if (e !== 'cancel') {
-            console.error(e)
+            console.error('清理孤立连线错误:', e)
             ElMessage.error('清理失败: ' + e.message)
         }
     } finally {
@@ -1983,7 +1996,7 @@ const triggerDream = async () => {
         }
     } catch (e) {
         if (e !== 'cancel') {
-            console.error(e)
+            console.error('梦境联想请求错误:', e)
             ElMessage.error('请求出错: ' + e.message)
         }
     } finally {
@@ -2696,12 +2709,37 @@ const openModelEditor = (model) => {
     }
   } else {
     currentEditingModel.value = {
-      name: '', model_id: '', provider_type: 'global', provider: 'openai',
+      name: '', model_id: '', provider_type: 'custom', provider: 'openai',
       api_key: '', api_base: '', temperature: 0.7, stream: true,
       enable_vision: false, enable_voice: false, enable_video: false
     }
   }
   showModelEditor.value = true
+}
+
+const handleProviderChange = (val) => {
+  // Auto-fill API Base for known providers if empty or using default
+  const defaults = {
+    "siliconflow": "https://api.siliconflow.cn/v1",
+    "deepseek": "https://api.deepseek.com",
+    "moonshot": "https://api.moonshot.cn/v1",
+    "dashscope": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "volcengine": "https://ark.cn-beijing.volces.com/api/v3",
+    "groq": "https://api.groq.com/openai/v1",
+    "zhipu": "https://open.bigmodel.cn/api/paas/v4",
+    "minimax": "https://api.minimax.chat/v1",
+    "mistral": "https://api.mistral.ai/v1",
+    "yi": "https://api.lingyiwanwu.com/v1",
+    "xai": "https://api.x.ai/v1",
+    "stepfun": "https://api.stepfun.com/v1",
+    "hunyuan": "https://api.hunyuan.cloud.tencent.com/v1"
+  }
+  
+  if (defaults[val] && (!currentEditingModel.value.api_base || currentEditingModel.value.api_base.includes('api.openai.com'))) {
+     currentEditingModel.value.api_base = defaults[val]
+  } else if (val === 'openai' && !currentEditingModel.value.api_base) {
+     currentEditingModel.value.api_base = "https://api.openai.com"
+  }
 }
 
 const fetchRemoteModels = async () => {
@@ -2717,7 +2755,7 @@ const fetchRemoteModels = async () => {
       apiBase = currentEditingModel.value.api_base
     }
     
-    if (!apiBase) {
+    if (!apiBase && !['openai', 'gemini', 'anthropic', 'siliconflow', 'deepseek', 'moonshot', 'dashscope', 'volcengine', 'groq', 'zhipu', 'minimax', 'mistral', 'yi', 'xai', 'stepfun', 'hunyuan', 'ollama'].includes(currentEditingModel.value.provider)) {
       ElMessage.warning('请先配置 API Base URL')
       return
     }

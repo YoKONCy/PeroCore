@@ -69,10 +69,10 @@ class ImageCacheManager:
                     self._cleanup()
                     return abs_path
                 else:
-                    logger.warning(f"[ImageCache] Failed to download image {url}: {resp.status_code}")
+                    logger.warning(f"[ImageCache] 下载图片失败 {url}: {resp.status_code}")
                     return None
         except Exception as e:
-            logger.error(f"[ImageCache] Error downloading image: {e}")
+            logger.error(f"[ImageCache] 下载图片错误: {e}")
             return None
             
     def _cleanup(self):
@@ -95,7 +95,7 @@ class ImageCacheManager:
                 except Exception:
                     pass
         except Exception as e:
-            logger.warning(f"[ImageCache] Cleanup failed: {e}")
+            logger.warning(f"[ImageCache] 清理失败: {e}")
 
 class SocialSessionManager:
     def __init__(self, flush_callback: Callable[[SocialSession], Awaitable[None]]):
@@ -149,11 +149,11 @@ class SocialSessionManager:
                     db_session.add(new_msg)
                     await db_session.commit()
                 except Exception as inner_e:
-                    logger.error(f"DB Insert Error: {inner_e}")
+                    logger.error(f"数据库插入错误: {inner_e}")
                     await db_session.rollback()
                 
         except Exception as e:
-            logger.error(f"Failed to persist social message to independent DB: {e}")
+            logger.error(f"持久化社交消息到独立数据库失败: {e}")
 
     async def persist_outgoing_message(self, session_id: str, session_type: str, content: str, sender_name: str = "Assistant"):
         """
@@ -178,7 +178,7 @@ class SocialSessionManager:
                 db_session.add(new_msg)
                 await db_session.commit()
         except Exception as e:
-            logger.error(f"Failed to persist outgoing message: {e}")
+            logger.error(f"持久化发出消息失败: {e}")
 
     async def persist_system_notification(self, session_id: str, session_type: str, content: str, raw_event: dict = None):
         """
@@ -207,7 +207,7 @@ class SocialSessionManager:
                 db_session.add(new_msg)
                 await db_session.commit()
         except Exception as e:
-            logger.error(f"Failed to persist system notification: {e}")
+            logger.error(f"持久化系统通知失败: {e}")
 
     async def get_recent_messages(self, session_id: str, session_type: str, limit: int = 20) -> list[SocialMessage]:
         """
@@ -523,13 +523,13 @@ class SocialSessionManager:
         if not session.buffer:
             return
 
-        logger.info(f"[{session.session_id}] Flushing buffer. Reason: {reason}. Messages: {len(session.buffer)}")
+        logger.info(f"[{session.session_id}] 正在刷新缓冲区。原因: {reason}。消息数: {len(session.buffer)}")
         
         # Call the callback (SocialService logic)
         try:
             await self.flush_callback(session)
         except Exception as e:
-            logger.error(f"Error in flush callback: {e}", exc_info=True)
+            logger.error(f"刷新回调错误: {e}", exc_info=True)
         finally:
             # Always clear buffer after flush to avoid duplicates
             session.clear_buffer()

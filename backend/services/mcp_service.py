@@ -227,7 +227,7 @@ class McpClient:
                     return result.get("result")
                     
             except Exception as e:
-                logger.error(f"[MCP] Request {method} failed: {e}")
+                logger.error(f"[MCP] 请求 {method} 失败: {e}")
                 return None
 
     async def initialize(self) -> bool:
