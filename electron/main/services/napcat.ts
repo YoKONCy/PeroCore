@@ -101,10 +101,10 @@ export async function startNapCat(window: BrowserWindow) {
     }
 
     if (qqPath) {
-        window.webContents.send('napcat-log', `[系统] 在以下位置找到 QQ: ${qqPath}`)
+        try { if (!window.isDestroyed()) window.webContents.send('napcat-log', `[系统] 在以下位置找到 QQ: ${qqPath}`) } catch(e){}
         console.log(`[NapCat] 在以下位置找到 QQ: ${qqPath}`)
     } else {
-        window.webContents.send('system-error', '未找到 QQ。NapCat 需要安装 QQ。')
+        try { if (!window.isDestroyed()) window.webContents.send('system-error', '未找到 QQ。NapCat 需要安装 QQ。') } catch(e){}
         throw new Error('默认路径或注册表中未找到 QQ。')
     }
 
@@ -165,7 +165,7 @@ export async function startNapCat(window: BrowserWindow) {
     }
 
     console.log(`[NapCat] 正在启动: ${cmd} ${args.join(' ')} 在 ${napcatDir}`)
-    window.webContents.send('napcat-log', `[系统] 正在启动 NapCat...`)
+    try { if (!window.isDestroyed()) window.webContents.send('napcat-log', `[系统] 正在启动 NapCat...`) } catch(e){}
 
     napcatProcess = spawn(cmd, args, {
         cwd: napcatDir,
@@ -179,20 +179,20 @@ export async function startNapCat(window: BrowserWindow) {
         if (!line) return
         napcatLogs.push(line)
         if (napcatLogs.length > 2000) napcatLogs.shift()
-        window.webContents.send('napcat-log', line)
+        try { if (!window.isDestroyed()) window.webContents.send('napcat-log', line) } catch(e){}
     })
 
     napcatProcess.stderr?.on('data', (data) => {
         const line = data.toString().trim()
         if (!line) return
         console.error(`[NapCat 错误] ${line}`)
-        window.webContents.send('napcat-log', `[错误] ${line}`)
+        try { if (!window.isDestroyed()) window.webContents.send('napcat-log', `[错误] ${line}`) } catch(e){}
     })
 
     napcatProcess.on('close', (code) => {
         console.log(`[NapCat] 已退出，代码 ${code}`)
         napcatProcess = null
-        window.webContents.send('napcat-log', `[系统] NapCat 已退出 (代码: ${code})`)
+        try { if (!window.isDestroyed()) window.webContents.send('napcat-log', `[系统] NapCat 已退出 (代码: ${code})`) } catch(e){}
     })
 }
 
@@ -227,7 +227,7 @@ export async function installNapCat(window: BrowserWindow) {
     const dir = getNapCatDir()
     const emit = (msg: string) => {
         console.log(`[NapCat 安装程序] ${msg}`)
-        window.webContents.send('napcat-log', msg)
+        try { if (!window.isDestroyed()) window.webContents.send('napcat-log', msg) } catch(e){}
     }
 
     emit(`正在检查 NapCat: ${dir}`)

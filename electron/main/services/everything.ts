@@ -37,7 +37,9 @@ export function checkEsInstalled() {
 
 export async function installEs(window: BrowserWindow) {
     const dir = getEsDir()
-    const emit = (msg: string) => window.webContents.send('es-log', msg)
+    const emit = (msg: string) => {
+        try { if (!window.isDestroyed()) window.webContents.send('es-log', msg) } catch(e){}
+    }
     
     emit(`正在检查 ES 工具: ${dir}`)
     

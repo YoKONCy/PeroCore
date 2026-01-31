@@ -743,8 +743,10 @@ class AgentService:
         
         # Notify CompanionService of user activity to prevent interruption
         try:
-            from services.companion_service import companion_service
-            companion_service.update_activity()
+            # [Fix] Skip companion update for social/mobile
+            if source not in ["social", "mobile"]:
+                from services.companion_service import companion_service
+                companion_service.update_activity()
         except ImportError:
             pass
         except Exception as e:
@@ -1633,6 +1635,7 @@ class AgentService:
                     await gateway_client.broadcast_text_response(full_response_text)
                     
                     # Trigger TTS (Text Mode)
+                    # [Fix] Explicitly check source again to be safe (though source=="desktop" covers it)
                     asyncio.create_task(self._generate_and_stream_tts(full_response_text))
 
                 # 仅在正常生成回复（且不是报错）时才保存对话记录
@@ -1749,17 +1752,23 @@ class AgentService:
                 )
 
                 if not skip_save and user_message and full_response_text and not is_error_response:
-                    final_user_msg = user_text_override if user_text_override else user_message
-                    if len(full_response_text) > 5:
-                        # 使用 background_task 包装以确保独立 Session
-                        asyncio.create_task(self._run_scorer_background(final_user_msg, full_response_text, source, pair_id=pair_id))
+                    # [Fix] Skip background scorer for social/mobile mode as they have their own logic
+                    # 社交模式/移动端有自己独立的总结机制，不需要触发“对话分析师”
+                    if source in ["social", "mobile"]:
+                        print(f"[Agent] 跳过 {source} 模式的后台分析。")
+                    else:
+                        final_user_msg = user_text_override if user_text_override else user_message
+                        if len(full_response_text) > 5:
+                            # 使用 background_task 包装以确保独立 Session
+                            asyncio.create_task(self._run_scorer_background(final_user_msg, full_response_text, source, pair_id=pair_id))
 
                 # 显式提交，确保在流式响应的上下文中数据已持久化
                 await self.session.commit()
                 
                 # [Trigger Dream] 3% probability to trigger background memory consolidation
+                # [Fix] Disable Dream for social/mobile modes
                 import random
-                if random.random() < 0.03:
+                if source not in ["social", "mobile"] and random.random() < 0.03:
                      asyncio.create_task(self._trigger_dream())
 
             except Exception as log_err:

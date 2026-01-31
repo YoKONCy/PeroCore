@@ -51,7 +51,7 @@ async function createWindow() {
   // Test active push message to Renderer-process
   // 测试向渲染进程主动推送消息
   win.webContents.on('did-finish-load', () => {
-    win?.webContents.send('main-process-message', new Date().toLocaleString())
+    try { if (!win.isDestroyed()) win.webContents.send('main-process-message', new Date().toLocaleString()) } catch(e){}
   })
 }
 
@@ -96,16 +96,41 @@ ipcMain.on('show-notification', (_, { title, body }) => {
     new Notification({ title, body }).show()
 })
 
-ipcMain.on('resize-pet-window', (event, { width, height }) => {
+ipcMain.handle('resize-pet-window', (event, { width, height }) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (win) {
-        win.setSize(width, height)
+        console.log(`[IPC] Resizing window to ${width}x${height}`)
+        try {
+            // Temporary allow resize to ensure OS accepts the change (especially on Windows with transparent windows)
+            // 临时允许调整大小以确保操作系统接受更改 (特别是在具有透明窗口的 Windows 上)
+            win.setResizable(true)
+            win.setMinimumSize(200, 200) // Reset limits // 重置限制
+            
+            // Use setBounds for better atomic update
+            // 使用 setBounds 进行更好的原子更新
+            const bounds = win.getBounds()
+            win.setBounds({ 
+                x: bounds.x, 
+                y: bounds.y, 
+                width: Math.round(width), 
+                height: Math.round(height) 
+            })
+            
+            // Revert resizable state
+            // 恢复可调整大小状态
+            win.setResizable(false)
+            return true
+        } catch (e) {
+            console.error('[IPC] Resize failed:', e)
+            return false
+        }
     }
+    return false
 })
 
 ipcMain.handle('emit_event', (_, { event, payload }) => {
     BrowserWindow.getAllWindows().forEach(win => {
-        win.webContents.send(event, payload)
+        if (!win.isDestroyed()) win.webContents.send(event, payload)
     })
 })
 

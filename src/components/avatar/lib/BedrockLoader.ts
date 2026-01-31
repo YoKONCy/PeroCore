@@ -68,12 +68,17 @@ export class BedrockLoader {
         };
 
         try {
-            // Parallel Loading: Texture + JSONs
-            const texturePromise = loadTextureWithRetry(config.texture);
-            const modelPromise = fetchWithTimeout(config.model).then(r => r.json());
-            const armPromise = config.arm ? fetchWithTimeout(config.arm).then(r => r.json()) : Promise.resolve(null);
-
-            const [texture, modelJson, armJson] = await Promise.all([texturePromise, modelPromise, armPromise]);
+            // Serial Loading: Texture -> Model -> Arm
+            // 串行加载：纹理 -> 模型 -> 手臂
+            const texture = await loadTextureWithRetry(config.texture);
+            const modelResponse = await fetchWithTimeout(config.model);
+            const modelJson = await modelResponse.json();
+            
+            let armJson = null;
+            if (config.arm) {
+                const armResponse = await fetchWithTimeout(config.arm);
+                armJson = await armResponse.json();
+            }
 
             // Create Material
             // 使用 MeshStandardMaterial 进行更逼真的 PBR 光照

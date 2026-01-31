@@ -63,7 +63,7 @@ export async function startGateway(window: BrowserWindow) {
         if (!found) {
             const error = `Gateway 可执行文件未找到: ${gatewayPath}`
             console.error(error)
-            window.webContents.send('system-error', error)
+            try { if (!window.isDestroyed()) window.webContents.send('system-error', error) } catch(e){}
             throw new Error(error)
         }
     }

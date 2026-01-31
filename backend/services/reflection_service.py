@@ -138,9 +138,9 @@ class ReflectionService:
             if not summary_text:
                 continue
                 
-            # Save to File (MD)
-            from utils.memory_file_manager import MemoryFileManager
-            file_path = await MemoryFileManager.save_log("periodic_summaries", f"{date_key}_Consolidated", summary_text)
+            # Save to File (MD) - REMOVED per user request
+            # from utils.memory_file_manager import MemoryFileManager
+            # file_path = await MemoryFileManager.save_log("periodic_summaries", f"{date_key}_Consolidated", summary_text)
             
             # 创建总结性记忆
             # 我们将其插入到该组第一条记忆的位置
@@ -159,7 +159,7 @@ class ReflectionService:
                 embedding_json = json.dumps(vec)
             except: pass
             
-            db_content = f"{summary_text}\n\n> 📁 File Archived: {file_path}"
+            db_content = summary_text
 
             summary_mem = Memory(
                 content=db_content,

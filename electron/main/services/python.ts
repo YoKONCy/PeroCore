@@ -77,7 +77,13 @@ export async function startBackend(window: BrowserWindow, enableSocialMode: bool
     child.stdout?.on('data', (data) => {
         const line = data.toString().trim()
         console.log(`[后端] ${line}`)
-        window.webContents.send('backend-log', line)
+        try {
+            if (window && !window.isDestroyed()) {
+                window.webContents.send('backend-log', line)
+            }
+        } catch (e) {
+            // Ignore send error
+        }
         
         if (logHistory.length >= MAX_LOGS) logHistory.shift()
         logHistory.push(line)
@@ -86,13 +92,25 @@ export async function startBackend(window: BrowserWindow, enableSocialMode: bool
     child.stderr?.on('data', (data) => {
         const line = data.toString().trim()
         console.error(`[后端错误] ${line}`)
-        window.webContents.send('backend-log', `[错误] ${line}`)
+        try {
+            if (window && !window.isDestroyed()) {
+                window.webContents.send('backend-log', `[错误] ${line}`)
+            }
+        } catch (e) {
+            // Ignore
+        }
         
         if (logHistory.length >= MAX_LOGS) logHistory.shift()
         logHistory.push(`[错误] ${line}`)
         
         if (line.includes('Error') || line.includes('Exception') || line.includes('Traceback')) {
-            window.webContents.send('system-error', `后端错误: ${line}`)
+            try {
+                if (window && !window.isDestroyed()) {
+                    window.webContents.send('system-error', `后端错误: ${line}`)
+                }
+            } catch (e) {
+                // Ignore
+            }
         }
     })
 

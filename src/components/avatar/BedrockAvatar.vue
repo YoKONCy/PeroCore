@@ -366,10 +366,19 @@ async function loadRossi() {
     // 填充调试用的动画列表
     animList.value = Object.keys(animManager.animations).sort();
     
-    // Auto-select 'idle' if available
-    // 如果可用，自动选择 'idle'
-    if (animList.value.includes('idle')) {
-      selectedAnim.value = 'idle';
+    // Only auto-select idle if NO controllers are loaded (Legacy Mode)
+    // 仅当未加载控制器时才自动选择 idle (传统模式)
+    if (animManager.controllers.length === 0) {
+        // Auto-select 'idle' or 'tac:idle' if available
+        // 如果可用，自动选择 'idle' 或 'tac:idle'
+        const idleAnim = animList.value.find(n => n === 'idle') || animList.value.find(n => n === 'tac:idle');
+        if (idleAnim) {
+          selectedAnim.value = idleAnim;
+        }
+    } else {
+        // If controllers exist, clear selectedAnim to avoid forcing debug mode
+        // 如果控制器存在，清除 selectedAnim 以避免强制调试模式
+        selectedAnim.value = '';
     }
 
     // Initial clothing update (hide censored parts)

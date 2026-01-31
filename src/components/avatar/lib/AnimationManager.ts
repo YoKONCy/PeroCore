@@ -94,6 +94,7 @@ export class AnimationManager {
     // 用于强制调试播放
     debugStartTime: number = 0;
     headBones: any[] | null = null;
+    lastTime: number = 0;
 
     constructor() {
         this.animations = {};
@@ -125,7 +126,7 @@ export class AnimationManager {
             }
         };
 
-        // 1. Load Animations (Parallel)
+        // 1. Load Animations (Serial)
         let animPaths: string[] = [];
         if (config.animation) {
              animPaths = Array.isArray(config.animation) ? config.animation : [config.animation];
@@ -133,18 +134,18 @@ export class AnimationManager {
             animPaths = [config.model.replace('.json', '.animation.json')];
         }
 
-        const animPromises = animPaths.map(async (path) => {
+        for (const path of animPaths) {
             try {
                 // Remove cache busting to allow browser caching
                 // 移除缓存破坏以允许浏览器缓存
                 const response = await fetchWithTimeout(path);
                 if (!response.ok) {
                     console.warn(`获取动画失败 ${path}: ${response.statusText}`);
-                    return;
+                    continue;
                 }
                 const json = await response.json();
                 const anims = json.animations;
-                if (!anims) return;
+                if (!anims) continue;
 
                 for (const [name, data] of Object.entries(anims)) {
                     this.animations[name] = this.parseAnimation(data);
@@ -152,23 +153,22 @@ export class AnimationManager {
             } catch (e) {
                 console.warn(`动画加载失败 ${path}`, e);
             }
-        });
-        await Promise.all(animPromises);
+        }
         
-        // 2. Load Controllers (Parallel)
-        // 2. 加载控制器 (并行)
+        // 2. Load Controllers (Serial)
+        // 2. 加载控制器 (串行)
         if (config.animation_controllers) {
             const ctrlPaths = Array.isArray(config.animation_controllers) ? config.animation_controllers : [config.animation_controllers];
-            const ctrlPromises = ctrlPaths.map(async (path: string) => {
+            for (const path of ctrlPaths) {
                  try {
                     const response = await fetchWithTimeout(path);
                     if (!response.ok) {
                         console.warn(`获取控制器失败 ${path}: ${response.statusText}`);
-                        return;
+                        continue;
                     }
                     const json = await response.json();
                     const ctrls = json.animation_controllers;
-                    if (!ctrls) return;
+                    if (!ctrls) continue;
 
                     for (const [name, data] of Object.entries(ctrls)) {
                         this.controllers.push(new AnimationController(name, data, this));
@@ -176,14 +176,14 @@ export class AnimationManager {
                 } catch (e) {
                     console.error(`控制器加载失败 ${path}`, e);
                 }
-            });
-            await Promise.all(ctrlPromises);
+            }
         }
 
         // Auto-start
         if (this.controllers.length > 0) {
             this.isPlaying = true;
             this.startTime = Date.now() / 1000;
+            this.lastTime = this.startTime;
         } else {
             // Legacy Mode
             // 遗留模式
@@ -268,6 +268,7 @@ export class AnimationManager {
             this.legacyAnim = this.animations[name];
             this.startTime = Date.now() / 1000;
             this.isPlaying = true;
+            this.lastTime = this.startTime;
             
             const lowerName = name.toLowerCase();
             molangContext.query.is_moving = (lowerName.includes('walk') || lowerName.includes('run') || lowerName.includes('move')) ? 1 : 0;
@@ -292,7 +293,13 @@ export class AnimationManager {
         if (!this.isPlaying) return;
 
         const now = Date.now() / 1000;
-        const dt = 1/60; 
+        let dt = now - this.lastTime;
+        // Safety clamp for large gaps (e.g. tab switching or initialization)
+        if (dt > 0.1 || dt < 0) {
+             dt = 1/60;
+        }
+        this.lastTime = now;
+        
         molangContext.query.life_time += dt;
 
         this.resetBones();
@@ -362,6 +369,7 @@ export class AnimationManager {
         this.debugAnim = this.animations[name];
         this.debugStartTime = Date.now() / 1000;
         this.isPlaying = true;
+        this.lastTime = this.debugStartTime;
         console.log(`[调试] 播放 ${name}`);
     }
 

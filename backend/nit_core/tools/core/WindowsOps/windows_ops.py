@@ -308,12 +308,12 @@ def automation_execute(action: str, target: str = None, x: int = None, y: int = 
                 # old_clip = pyperclip.paste()
                 
                 # 2. 写入新内容
-            if pyperclip:
-                pyperclip.copy(target)
-            else:
-                return "Error: pyperclip not installed or supported."
+                if pyperclip:
+                    pyperclip.copy(target)
+                else:
+                    return "Error: pyperclip not installed or supported."
             
-            # 3. 短暂等待确保写入生效
+                # 3. 短暂等待确保写入生效
                 time.sleep(0.1)
                 
                 # 4. 模拟粘贴

@@ -437,7 +437,8 @@ class SocialService:
                 elif is_active:
                     interval = 60
                 else:
-                    interval = random.randint(600, 1200) # 10-20分钟
+                    # [Fix] 调大潜水观察间隔，避免过于频繁 (10-20分钟 -> 30-60分钟)
+                    interval = random.randint(1800, 3600) 
                     
                 self._next_group_thought_time = now + timedelta(seconds=interval)
                 logger.info(f"[Social-Group] 下次检查将在 {interval} 秒后。")
@@ -446,6 +447,8 @@ class SocialService:
                 break
             except Exception as e:
                 logger.error(f"[Social-Group] 错误: {e}", exc_info=True)
+                # [Fix] 异常发生后也要更新下次检查时间，防止死循环重试
+                self._next_group_thought_time = datetime.now() + timedelta(seconds=300)
                 await asyncio.sleep(60)
 
     async def _private_scan_loop(self):

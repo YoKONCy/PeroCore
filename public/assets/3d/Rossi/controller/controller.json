@@ -5,7 +5,7 @@
 			"initial_state": "空闲",
 			"states": {
 				"空闲": {
-					"animations": ["empty"],
+					"animations": ["idle"],
 					"transitions": [
 						{"起跳": "!ctrl.fly&&!ctrl.elytra_fly&&ctrl.jump&&q.vertical_speed>0"},
 						{"下落初期": "!ctrl.fly&&!ctrl.elytra_fly&&ctrl.jump&&q.vertical_speed<=0"},

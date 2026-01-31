@@ -43,6 +43,7 @@ export const invoke = async (cmd: string, args?: any) => {
     case 'open_ide_window':
     case 'show_window':
     case 'hide_pet_window':
+    case 'resize-pet-window':
       return Promise.resolve();
 
     default:

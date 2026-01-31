@@ -1214,18 +1214,25 @@ onMounted(async () => {
 });
 
 const windowSizes = [
+    { width: 500, height: 500 },
     { width: 600, height: 600 },
     { width: 800, height: 800 },
     { width: 1000, height: 1000 },
     { width: 1200, height: 1200 }
 ];
-const currentSizeIndex = ref(1); // Default 800x800
+const currentSizeIndex = ref(0); // Default 500x500
 
-const toggleWindowSize = () => {
+const toggleWindowSize = async () => {
+    // Increment index and wrap around
+    // 增加索引并循环
     currentSizeIndex.value = (currentSizeIndex.value + 1) % windowSizes.length;
     const size = windowSizes[currentSizeIndex.value];
-    if (window.electron && window.electron.send) {
-        window.electron.send('resize-pet-window', size);
+    console.log(`[Pet3DView] Toggling window size to: ${size.width}x${size.height} (Index: ${currentSizeIndex.value})`);
+    
+    try {
+        await invoke('resize-pet-window', size);
+    } catch (e) {
+        console.error('[Pet3DView] Resize failed:', e);
     }
 };
 
