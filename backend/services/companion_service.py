@@ -181,6 +181,10 @@ class CompanionService:
                 if summary and not summary.startswith("Error:"):
                     # 保存到 Memory 表
                     from services.memory_service import MemoryService
+                    
+                    config = get_config_manager()
+                    agent_id = config.get("agent_id", "pero")
+
                     await MemoryService.save_memory(
                         session=session,
                         content=f"[陪伴模式总结] {summary}",

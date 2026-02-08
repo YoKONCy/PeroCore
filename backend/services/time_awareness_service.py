@@ -330,7 +330,15 @@ class TimeAwarenessService:
         today = datetime.now().date()
         to_remove = set()
         
-        for key in self.triggered_today:
+        # [Fix] 增加对 set 元素类型的检查，防止 RuntimeError: Set changed size during iteration
+        # 最好先复制一份 keys
+        current_keys = list(self.triggered_today)
+        
+        for key in current_keys:
+            # 确保 key 是字符串
+            if not isinstance(key, str):
+                continue
+                
             # 提取日期部分
             if "_" in key:
                 parts = key.rsplit("_", 1)

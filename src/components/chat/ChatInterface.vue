@@ -852,7 +852,14 @@ const handleConfirmDelete = async () => {
     });
     
     if (res.ok) {
-      messages.value = messages.value.filter(m => m.id !== pendingDeleteId.value);
+      const deletedMsg = messages.value.find(m => m.id === pendingDeleteId.value);
+      if (deletedMsg && deletedMsg.pair_id) {
+        // 如果有 pair_id，删除本地所有匹配的消息（原子化同步）
+        messages.value = messages.value.filter(m => m.pair_id !== deletedMsg.pair_id);
+      } else {
+        // 否则仅删除单条
+        messages.value = messages.value.filter(m => m.id !== pendingDeleteId.value);
+      }
     }
   } catch (e) {
     console.error('Failed to delete message', e);
@@ -1055,7 +1062,8 @@ const fetchHistory = async (append = false) => {
           content: log.raw_content || log.content, // Prioritize raw_content for NIT tool display
           timestamp: log.timestamp,
           images: images,
-          senderId: log.sender_id
+          senderId: log.sender_id,
+          pair_id: log.pair_id
         };
       });
       

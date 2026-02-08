@@ -8,6 +8,8 @@ from models import Memory, MemoryRelation, Config, AIModelConfig, MaintenanceRec
 from services.llm_service import LLMService
 from services.mdp.manager import MDPManager
 import os
+import traceback
+from core.config_manager import get_config_manager
 
 class MemorySecretaryService:
     def __init__(self, session: AsyncSession):
@@ -219,17 +221,36 @@ class MemorySecretaryService:
             match = re.search(r'\[.*\]', content, re.S)
             if match:
                 ids_to_delete = json.loads(match.group(0))
+                if not isinstance(ids_to_delete, list):
+                    print(f"[MemorySecretary] LLM 返回格式错误 (期望 list): {type(ids_to_delete)}")
+                    return 0
+
                 count = 0
                 for mid in ids_to_delete:
-                    mem = await self.session.get(Memory, int(mid))
-                    if mem:
-                        self.deleted_data.append(mem.dict())
-                        await self.session.delete(mem)
-                        count += 1
+                    try:
+                        mem_id = int(mid)
+                        mem = await self.session.get(Memory, mem_id)
+                        if mem:
+                            self.deleted_data.append(mem.dict())
+                            await self.session.delete(mem)
+                            
+                            # [Fix] 同步删除向量
+                            try:
+                                from services.vector_service import vector_service
+                                vector_service.delete_memory(mem.id, agent_id=agent_id)
+                            except Exception as ve:
+                                print(f"[MemorySecretary] 向量删除失败: {ve}")
+
+                            count += 1
+                    except ValueError:
+                        print(f"[MemorySecretary] 跳过无效 ID: {mid}")
+                        continue
+                        
                 await self.session.commit()
                 return count
         except Exception as e:
             print(f"清理记忆时出错: {e}")
+            traceback.print_exc()
         return 0
 
     async def _extract_preferences(self, llm: LLMService, agent_id: str) -> int:
@@ -255,8 +276,15 @@ class MemorySecretaryService:
             json_match = re.search(r'\[.*\]', content, re.S)
             if json_match:
                 preferences = json.loads(json_match.group(0))
+                if not isinstance(preferences, list):
+                    print(f"[MemorySecretary] LLM 返回格式错误 (期望 list): {type(preferences)}")
+                    return 0
+
                 count = 0
                 for pref in preferences:
+                    if not isinstance(pref, str):
+                        continue
+                        
                     existing = (await self.session.exec(select(Memory).where(Memory.type == "preference").where(Memory.content == pref).where(Memory.agent_id == agent_id))).first()
                     if not existing:
                         new_mem = Memory(content=pref, type="preference", source="secretary", tags="偏好", agent_id=agent_id)
@@ -268,6 +296,7 @@ class MemorySecretaryService:
                 return count
         except Exception as e:
             print(f"提取偏好时出错: {e}")
+            traceback.print_exc()
         return 0
 
     async def _tag_importance(self, llm: LLMService, agent_id: str = "pero") -> int:

@@ -6,7 +6,7 @@
 <br/>
 
 <!-- 动态打字效果 Slogan -->
-<a href="https://github.com/Perofamily/PeroCore">
+<a href="https://github.com/YoKONCy/PeroCore">
   <img src="https://readme-typing-svg.demolab.com?font=Noto+Serif+SC&weight=600&size=28&duration=4000&pause=1000&color=7C3AED&center=true&vCenter=true&multiline=true&repeat=false&width=800&height=70&lines=Let+AI+become+a+truly+warm+companion;%E8%AE%A9+AI+%E6%88%90%E4%B8%BA%E7%9C%9F%E6%AD%A3%E6%9C%89%E6%B8%A9%E5%BA%A6%E7%9A%84%E4%BC%99%E4%BC%B4;Rust+Core+%E2%9C%A6+NIT+Protocol+%E2%9C%A6+Deep+Memory" alt="Slogan" />
 </a>
 
@@ -442,7 +442,7 @@ PeroCore 旨在接管你的数字生活，它拥有两只“手”：
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/Perofamily/PeroCore.git
+git clone https://github.com/YoKONCy/PeroCore.git
 cd PeroCore
 
 # 2. 安装 Python 依赖
@@ -510,7 +510,7 @@ npm run tauri dev
   year = {2026},
   month = {1},
   day = {1},
-  url = {https://github.com/Perofamily/PeroCore},
+  url = {https://github.com/YoKONCy/PeroCore},
   note = {First released on January 1st, 2026. Introducing Logical Causality Retrieval via Knowledge Diffusion.}
 }
 ```

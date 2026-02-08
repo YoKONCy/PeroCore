@@ -901,6 +901,7 @@ async def get_chat_history(
         "sentiment": getattr(log, "sentiment", None),
         "importance": getattr(log, "importance", None),
         "metadata_json": log.metadata_json,
+        "pair_id": getattr(log, "pair_id", None),
         "analysis_status": getattr(log, "analysis_status", "pending"),
         "retry_count": getattr(log, "retry_count", 0),
         "last_error": getattr(log, "last_error", None)

@@ -902,9 +902,6 @@ class MemoryService:
         output.sort(key=lambda x: x["score"], reverse=True)
         return output[:limit]
 
-            
-        return top_candidates[:limit]
-
     @staticmethod
     async def _keyword_search_fallback(session: AsyncSession, text: str, limit: int = 10, exclude_after_time=None, agent_id: str = "pero") -> List[Memory]:
         """原有的关键词搜索逻辑，作为兜底"""

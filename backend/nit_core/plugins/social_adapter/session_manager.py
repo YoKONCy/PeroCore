@@ -554,8 +554,3 @@ class SocialSessionManager:
             reverse=True
         )
         return sorted_sessions[:limit]
-            
-        # 刷新逻辑后清除缓冲区（还是应该由回调处理？通常管理器处理缓冲区）
-        # 但是如果回调失败，我们可能会丢失消息。
-        # 设计选择：立即清除以防止双重处理。
-        session.clear_buffer()

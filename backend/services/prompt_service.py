@@ -130,8 +130,11 @@ class PromptManager:
         try:
             from nit_core.plugins.social_adapter.social_service import get_social_service
             social_service = get_social_service()
-            if social_service and social_service.bot_info:
-                bot_name = social_service.bot_info.get("nickname", default_name)
+            if social_service and hasattr(social_service, 'bot_infos') and social_service.bot_infos:
+                # 获取第一个可用的 bot_info (通常我们只关心一个主号，或者取默认的一个)
+                first_key = next(iter(social_service.bot_infos))
+                info = social_service.bot_infos[first_key]
+                bot_name = info.get("nickname", default_name)
         except ImportError:
             pass
         

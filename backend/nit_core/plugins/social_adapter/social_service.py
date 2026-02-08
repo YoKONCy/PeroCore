@@ -1798,10 +1798,6 @@ class SocialService:
         finally:
             # 重置会话状态
             session.state = "observing"
-            
-            # Reset ContextVar token if set
-            if 'token' in locals():
-                injected_msg_ids_var.reset(token)
 
     async def _check_and_summarize_memory(self, session: SocialSession):
         """

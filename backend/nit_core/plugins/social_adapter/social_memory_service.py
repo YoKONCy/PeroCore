@@ -283,11 +283,14 @@ class SocialMemoryService:
                 from core.config_manager import get_config_manager
                 config = get_config_manager()
                 bot_name = config.get("bot_name", "Pero")
+                agent_id = config.get("agent_id", "pero")
             except:
                 bot_name = "Pero"
+                agent_id = "pero"
 
             # Get Agent Profile for dynamic persona injection
-            agent_manager = AgentManager()
+            from core.agent_manager import get_agent_manager
+            agent_manager = get_agent_manager()
             agent_profile = agent_manager.agents.get(agent_manager.active_agent_id)
             identity_label = agent_profile.identity_label if agent_profile else "智能助手"
             personality_tags = "、".join(agent_profile.personality_tags) if agent_profile else ""

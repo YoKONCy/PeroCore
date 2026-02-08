@@ -6,7 +6,7 @@
 <br/>
 
 <!-- Typing Effect Slogan -->
-<a href="https://github.com/Perofamily/PeroCore">
+<a href="https://github.com/YoKONCy/PeroCore">
   <img src="https://readme-typing-svg.demolab.com?font=Noto+Serif+SC&weight=600&size=28&duration=4000&pause=1000&color=7C3AED&center=true&vCenter=true&multiline=true&repeat=false&width=800&height=70&lines=Let+AI+become+a+truly+warm+companion;Transforming+AI+into+Empathic+Partners;Rust+Core+%E2%9C%A6+NIT+Protocol+%E2%9C%A6+Deep+Memory" alt="Slogan" />
 </a>
 
@@ -254,7 +254,7 @@ If you use PeroCore's theories (such as the KDN diffusion operator, PEDSA algori
   year = {2026},
   month = {1},
   day = {1},
-  url = {https://github.com/Perofamily/PeroCore},
+  url = {https://github.com/YoKONCy/PeroCore},
   note = {First released on January 1st, 2026. Introducing Logical Causality Retrieval via Knowledge Diffusion.}
 }
 ```
