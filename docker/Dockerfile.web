@@ -1,5 +1,5 @@
 # --- 阶段 1: 前端构建器 (Node + pnpm) ---
-FROM node:18 AS builder
+FROM node:20 AS builder
 WORKDIR /app
 
 # 启用 corepack 以使用 pnpm

@@ -26,7 +26,7 @@ FROM python:3.10-slim AS python-builder
  RUN cargo build --release \
      --manifest-path backend/nit_core/tools/work/CodeSearcher/src/Cargo.toml
  
- FROM node:18 AS web-builder
+ FROM node:20 AS web-builder
  
  WORKDIR /app
  
