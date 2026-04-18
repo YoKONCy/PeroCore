@@ -51,6 +51,7 @@ docker/
 
 # 其他
 benchmarks/
-wiki/
+wiki/*
+!wiki/package.json
 docs/
 .github/
