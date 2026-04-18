@@ -6,6 +6,8 @@
  
 - `Dockerfile`
   - 当前唯一且权威的单服务镜像构建入口，供 Zeabur 与手动 `docker build` 共用
+- `zbpack.json`
+  - 仅用于将 Zeabur 的 `app_dir` 固定为仓库根目录 `/`，避免在 pnpm workspace 下误选 `wiki` 子应用
 - `backend/main.py`
   - 当检测到 `dist/` 存在时挂载 `/web`，并将 `/` 重定向到 `/web/`
  
@@ -44,3 +46,5 @@
 - `napcat_ws_url` 和 `napcat_http_url` 仍然是易失占位配置，在当前反向 WebSocket 部署路径中不是必需项。
 - WebUI 现在已经提供“标准管理”级别的社交模式管理能力：连接状态、API 响应、Bot 身份、基础诊断与最近错误。
 - 浏览器模式不再暴露旧的 Electron 专用 NapCat 终端；如需远程排查，请使用 Web 管理面板。
+- 由于仓库使用了 `pnpm-workspace.yaml` 且包含 `wiki`（VitePress 文档站点），Zeabur 可能会默认把 `wiki` 识别为要部署的 Node.js 应用，导致构建预览出现 `WORKDIR /src/wiki`、`vitepress` 等信息。
+- 当前 `zbpack.json` 的作用就是把 `app_dir` 固定为 `/`，让 Zeabur 在仓库根目录检查并使用根 `Dockerfile` 进行 Docker 部署。
