@@ -1,15 +1,4 @@
-FROM rust:latest AS wasm-builder
- 
- RUN curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
- 
- WORKDIR /app
- 
- COPY backend/nit_core/nit_terminal_auditor/ backend/nit_core/nit_terminal_auditor/
- 
- WORKDIR /app/backend/nit_core/nit_terminal_auditor
- RUN wasm-pack build --target web --out-dir /out --out-name auditor
- 
- FROM python:3.10-slim AS python-builder
+FROM python:3.10-slim AS python-builder
  
   RUN apt-get update && apt-get install -y \
       curl \
@@ -48,8 +37,6 @@ FROM rust:latest AS wasm-builder
  RUN pnpm install --frozen-lockfile
  
  COPY . .
- COPY --from=wasm-builder /out/auditor_bg.wasm public/assets/wasm/auditor.wasm
- COPY --from=wasm-builder /out/auditor.js public/assets/wasm/auditor.js
  RUN pnpm run build:docker
  
  FROM python:3.10-slim
