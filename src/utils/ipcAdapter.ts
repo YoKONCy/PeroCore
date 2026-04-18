@@ -16,50 +16,56 @@ declare global {
   }
 }
 
-import { buildAuthenticatedWebSocketUrl, desktopAuthState } from '@/api/runtimeAuth'
+import { getRuntimeCapabilities } from '@/utils/runtimeCapabilities'
 
 export const isElectron = () => !!window.electron
 
 // Web Bridge 支持
-let ws: WebSocket | null = null
 const listeners = new Map<string, Set<(payload: any) => void>>()
 
 const initWs = () => {
-  if (isElectron() || ws) return
-  if (!desktopAuthState.bootstrapped) return
-  if (desktopAuthState.required && !desktopAuthState.authorized) return
+  if (isElectron()) return
+}
 
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const wsUrl = buildAuthenticatedWebSocketUrl(`${protocol}//${window.location.host}/ws/browser`)
+const emitBrowserEvent = (event: string, payload: any) => {
+  const handlers = listeners.get(event)
+  if (!handlers) {
+    return
+  }
 
-  console.log('[IPC Adapter] 正在连接到 Web Bridge:', wsUrl)
-  ws = new WebSocket(wsUrl)
-
-  ws.onmessage = (event) => {
+  handlers.forEach((handler) => {
     try {
-      const data = JSON.parse(event.data)
-      if (data.type === 'event' && data.channel) {
-        const handlers = listeners.get(data.channel)
-        if (handlers) {
-          // WebBridge 发送数组参数，取首个作为 payload
-          const payload = data.args && data.args.length > 0 ? data.args[0] : undefined
-          handlers.forEach((h) => h(payload))
-        }
-      }
-    } catch (e) {
-      console.error('[IPC Adapter] WS 消息解析错误:', e)
+      handler(payload)
+    } catch (error) {
+      console.error(`[IPC Adapter] 浏览器事件 '${event}' 处理失败:`, error)
+    }
+  })
+}
+
+const readBrowserIpcResponse = async (response: Response): Promise<any> => {
+  if (response.status === 204) {
+    return null
+  }
+
+  try {
+    return await response.json()
+  } catch {
+    return null
+  }
+}
+
+const unwrapBrowserIpcResponse = (data: any): any => {
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    if ('error' in data && data.error) {
+      throw new Error(String(data.error))
+    }
+
+    if ('result' in data) {
+      return data.result
     }
   }
 
-  ws.onclose = () => {
-    console.log('[IPC Adapter] Web Bridge 已断开连接。3秒后重连...')
-    ws = null
-    setTimeout(initWs, 3000)
-  }
-
-  ws.onerror = (err) => {
-    console.error('[IPC Adapter] Web Bridge 连接错误:', err)
-  }
+  return data ?? null
 }
 
 export const invoke = async (cmd: string, args?: any) => {
@@ -87,6 +93,14 @@ export const invoke = async (cmd: string, args?: any) => {
     return 'web' // 或者 'docker'
   }
 
+  if (cmd === 'emit_event') {
+    const payload = Array.isArray(args) ? args[0] : args
+    if (payload?.event) {
+      emitBrowserEvent(payload.event, payload.payload)
+    }
+    return null
+  }
+
   // 浏览器模式 (HTTP Bridge)
   try {
     // 包装参数适配 WebBridge
@@ -100,11 +114,8 @@ export const invoke = async (cmd: string, args?: any) => {
       throw new Error(`HTTP 错误: ${response.status} ${response.statusText}`)
     }
 
-    const data = await response.json()
-    if (data.error) {
-      throw new Error(data.error)
-    }
-    return data.result
+    const data = await readBrowserIpcResponse(response)
+    return unwrapBrowserIpcResponse(data)
   } catch (e) {
     console.error(`[IPC Adapter] 调用 '${cmd}' 失败:`, e)
 
@@ -121,6 +132,10 @@ export const listen = async (event: string, handler: (payload: any) => void) => 
   }
 
   initWs()
+
+  if (getRuntimeCapabilities().eventTransport !== 'browser-local') {
+    return () => {}
+  }
 
   // 浏览器模式 (WebSocket)
   if (!listeners.has(event)) {
@@ -146,5 +161,6 @@ export const emit = async (event: string, payload?: any) => {
   }
 
   // 浏览器模式: emit 映射为 invoke
-  return invoke('emit_event', { event, payload })
+  emitBrowserEvent(event, payload)
+  return null
 }

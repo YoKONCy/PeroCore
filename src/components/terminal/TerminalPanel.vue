@@ -74,6 +74,7 @@
 import { ref, shallowRef, onMounted, onUnmounted, nextTick } from 'vue'
 import PixelIcon from '../ui/PixelIcon.vue'
 import { listen } from '@/utils/ipcAdapter'
+import { getRuntimeCapabilities } from '@/utils/runtimeCapabilities'
 // 引入调用函数
 import { invoke } from '@/utils/ipcAdapter'
 
@@ -83,6 +84,7 @@ const autoScroll = ref(true)
 let unlistenFn = null
 let pendingLogs = []
 let updateTimer = null
+const runtimeCapabilities = getRuntimeCapabilities()
 
 const getLogClass = (type) => {
   switch (type) {
@@ -133,6 +135,14 @@ const addLog = (source, type, message) => {
       }
     }, 100) // 100ms 批量更新一次，极大减轻渲染压力
   }
+}
+
+const unwrapEventPayload = (event) => {
+  if (event && typeof event === 'object' && 'payload' in event) {
+    return event.payload
+  }
+
+  return event
 }
 
 const scrollToBottom = () => {
@@ -208,74 +218,101 @@ onMounted(async () => {
   hookConsole()
 
   try {
-    // 1. 先拉取历史日志
-    try {
-      const historyLogs = await invoke('get_backend_logs')
-      if (Array.isArray(historyLogs)) {
-        historyLogs.forEach((logLine) => {
-          let type = 'info'
-          if (logLine.toLowerCase().includes('[err]') || logLine.toLowerCase().includes('error')) {
-            type = 'error'
-          } else if (logLine.toLowerCase().includes('warn')) {
-            type = 'warn'
-          }
-          // 直接添加，不走 pending 以确保立即显示
-          logs.value = [
-            ...logs.value,
-            {
-              source: 'backend',
-              type,
-              message: logLine,
-              timestamp: extractTimestamp(logLine) // 尝试从日志中提取时间戳
-            }
-          ]
-        })
-        scrollToBottom()
-      }
-    } catch (err) {
-      console.error('获取日志历史失败:', err)
+    if (!runtimeCapabilities.backendLogHistory && !runtimeCapabilities.backendLogStream) {
+      addLog(
+        'system',
+        'info',
+        '当前运行模式不提供内建后端实时日志；如需查看服务端输出，请使用部署平台或宿主环境的 Runtime Logs。'
+      )
+      return
     }
 
+    // 1. 先拉取历史日志
+    if (runtimeCapabilities.backendLogHistory) {
+      try {
+        const historyLogs = await invoke('get_backend_logs')
+        if (Array.isArray(historyLogs)) {
+          historyLogs.forEach((logLine) => {
+            let type = 'info'
+            if (
+              logLine.toLowerCase().includes('[err]') ||
+              logLine.toLowerCase().includes('error')
+            ) {
+              type = 'error'
+            } else if (logLine.toLowerCase().includes('warn')) {
+              type = 'warn'
+            }
+            logs.value = [
+              ...logs.value,
+              {
+                source: 'backend',
+                type,
+                message: logLine,
+                timestamp: extractTimestamp(logLine)
+              }
+            ]
+          })
+          scrollToBottom()
+        }
+      } catch (err) {
+        console.error('获取日志历史失败:', err)
+      }
+    }
+
+    if (!runtimeCapabilities.backendLogStream) {
+      return
+    }
+
+    const unlisteners = []
+
     // 2. 监听来自 Rust 的后端原始日志
-    unlistenFn = await listen('backend-log', (event) => {
-      const msg = event.payload || ''
-      let type = 'info'
-      if (msg.toLowerCase().includes('[err]') || msg.toLowerCase().includes('error')) {
-        type = 'error'
-      } else if (msg.toLowerCase().includes('warn')) {
-        type = 'warn'
-      }
-      addLog('backend', type, msg)
-    })
+    unlisteners.push(
+      await listen('backend-log', (event) => {
+        const msg = unwrapEventPayload(event) || ''
+        let type = 'info'
+        if (
+          typeof msg === 'string' &&
+          (msg.toLowerCase().includes('[err]') || msg.toLowerCase().includes('error'))
+        ) {
+          type = 'error'
+        } else if (typeof msg === 'string' && msg.toLowerCase().includes('warn')) {
+          type = 'warn'
+        }
+        addLog('backend', type, String(msg))
+      })
+    )
 
-    // 监听批量日志 (优化版)
-    const unlistenBatch = await listen('backend-log-batch', (event) => {
-      const logs = event.payload || []
-      if (Array.isArray(logs)) {
-        logs.forEach((msg) => {
-          let type = 'info'
-          if (msg.toLowerCase().includes('[err]') || msg.toLowerCase().includes('error')) {
-            type = 'error'
-          } else if (msg.toLowerCase().includes('warn')) {
-            type = 'warn'
-          }
-          addLog('backend', type, msg)
-        })
-      }
-    })
+    unlisteners.push(
+      await listen('backend-log-batch', (event) => {
+        const batchLogs = unwrapEventPayload(event) || []
+        if (Array.isArray(batchLogs)) {
+          batchLogs.forEach((msg) => {
+            let type = 'info'
+            if (
+              typeof msg === 'string' &&
+              (msg.toLowerCase().includes('[err]') || msg.toLowerCase().includes('error'))
+            ) {
+              type = 'error'
+            } else if (typeof msg === 'string' && msg.toLowerCase().includes('warn')) {
+              type = 'warn'
+            }
+            addLog('backend', type, String(msg))
+          })
+        }
+      })
+    )
 
-    // 监听其他系统级日志 (如果需要)
-    const unlistenTerminal = await listen('terminal-log', (event) => {
-      const log = event.payload
-      addLog('backend', log.type, log.message)
-    })
+    unlisteners.push(
+      await listen('terminal-log', (event) => {
+        const log = unwrapEventPayload(event)
+        if (log && typeof log === 'object') {
+          addLog('backend', log.type || 'info', log.message || '')
+        }
+      })
+    )
 
-    // 组合清理函数
-    const originalUnlisten = unlistenFn
     unlistenFn = () => {
-      originalUnlisten()
-      unlistenBatch()
-      unlistenTerminal()
+      unlisteners.forEach((dispose) => dispose())
     }
   } catch (e) {
     console.error('设置 Tauri 监听器失败', e)
