@@ -524,7 +524,7 @@
                     <div>
                       <div class="text-xs font-black tracking-widest text-indigo-500">SERVER URL</div>
                       <div class="text-[11px] text-slate-400 mt-1">
-                        例如：`https://your-app.zeabur.app`
+                        例如：`https://your-app.com`
                       </div>
                       <div class="text-[11px] text-slate-400 mt-1">
                         如果服务器设置了 `PERO_DESKTOP_API_KEY`，请在下方填写相同密钥。
@@ -542,7 +542,7 @@
                       v-model="remoteBackendUrlInput"
                       type="text"
                       class="flex-1 px-4 py-3 bg-white pixel-border-indigo text-sm text-slate-700 outline-none"
-                      placeholder="https://your-app.zeabur.app"
+                      placeholder="https://your-app.com"
                       @keydown.enter.prevent="saveRemoteBackendUrl"
                       @blur="saveRemoteBackendUrl"
                     />
