@@ -2,6 +2,14 @@ declare global {
   interface Window {
     electron?: {
       invoke: (channel: string, ...args: any[]) => Promise<any>
+      send: (channel: string, ...args: any[]) => void
+      getBackendConnectionConfigSync: () => {
+        mode: 'local' | 'remote'
+        baseUrl: string
+        apiBase: string
+        wsBase: string
+        configured: boolean
+      }
       on: (channel: string, listener: (event: any, ...args: any[]) => void) => () => void
       scanLocalModels: () => Promise<any[]>
     }

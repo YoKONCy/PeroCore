@@ -18,6 +18,11 @@ from sqlalchemy import func
 from sqlmodel import delete, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from core.desktop_auth import (
+    DESKTOP_API_KEY_HEADER,
+    desktop_auth_required,
+    verify_desktop_api_key,
+)
 from database import get_session
 from models import (
     Config,
@@ -41,7 +46,11 @@ async def ping():
 
 @router.get("/health")
 async def health_check():
-    return {"status": "healthy"}
+    return {
+        "status": "healthy",
+        "desktop_auth_required": desktop_auth_required(),
+        "desktop_auth_header": DESKTOP_API_KEY_HEADER,
+    }
 
 
 @router.get("/system/status")
@@ -107,15 +116,27 @@ async def open_path(payload: OpenPathRequest):
 
 
 @router.get("/gateway/token")
-async def get_gateway_token_api():
+async def get_gateway_token_api(
+    _: None = Depends(verify_desktop_api_key),
+    session: AsyncSession = Depends(get_session),
+):
     """获取 Gateway Token (用于前端连接 Gateway)"""
     try:
-        token_path = os.path.join(current_dir, "data", "gateway_token.json")
+        token_stmt = select(Config).where(Config.key == "frontend_access_token")
+        token_result = await session.exec(token_stmt)
+        token_config = token_result.first()
+        if token_config and token_config.value:
+            return {"token": token_config.value}
+
+        data_dir = os.environ.get("PERO_DATA_DIR", os.path.join(current_dir, "data"))
+        token_path = os.path.join(data_dir, "gateway_token.json")
         if os.path.exists(token_path):
             with open(token_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 return {"token": data.get("token")}
         raise HTTPException(status_code=404, detail="Token not found")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 

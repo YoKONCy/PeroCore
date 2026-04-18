@@ -3,6 +3,7 @@ import fs from 'fs-extra'
 import { execSync, spawnSync } from 'child_process'
 import which from 'which'
 import { checkNapCatInstalled } from './napcat.js'
+import { checkRemoteBackendConnection, getBackendConnectionConfig } from './system.js'
 import { isDev, paths, isElectron } from '../utils/env'
 import { logger } from '../utils/logger'
 
@@ -47,9 +48,40 @@ function getResourceDir(): string {
 export async function getDiagnostics(): Promise<DiagnosticReport> {
   const errors: string[] = []
   const resourceDir = getResourceDir()
+  const connectionConfig = getBackendConnectionConfig()
 
   logger.info('Main', `[诊断] 工作区: ${workspaceRoot}`)
   logger.info('Main', `[诊断] 资源目录: ${resourceDir}`)
+
+  if (connectionConfig.mode === 'remote') {
+    const remoteCheck = await checkRemoteBackendConnection(connectionConfig.baseUrl)
+
+    if (!remoteCheck.ok) {
+      errors.push(`远程后端不可用: ${remoteCheck.message}`)
+    }
+
+    return {
+      python_exists: remoteCheck.ok,
+      python_path: connectionConfig.baseUrl,
+      python_version: remoteCheck.ok ? 'Remote Backend' : 'Unavailable',
+      script_exists: remoteCheck.ok,
+      script_path: connectionConfig.baseUrl,
+      port_9120_free: true,
+      data_dir_writable: remoteCheck.ok,
+      data_dir: connectionConfig.baseUrl || '未配置远程后端地址',
+      core_available: remoteCheck.ok,
+      vc_redist_installed: remoteCheck.ok,
+      napcat_installed: true,
+      webview2_installed: true,
+      node_exists: true,
+      node_path: connectionConfig.baseUrl,
+      node_version: remoteCheck.ok ? 'Remote Backend' : 'Unavailable',
+      embedding_model_exists: remoteCheck.ok,
+      reranker_model_exists: remoteCheck.ok,
+      whisper_model_exists: remoteCheck.ok,
+      errors
+    }
+  }
 
   // 1. Python 路径
   let pythonPath = ''

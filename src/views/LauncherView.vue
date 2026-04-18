@@ -480,10 +480,90 @@
                 <p class="text-slate-400 text-xs md:text-sm max-w-md text-center">
                   {{
                     isRunning
-                      ? '所有系统在线。角色窗口已激活。'
-                      : '点击上方按钮初始化所有后端服务及角色窗口。'
+                      ? isRemoteBackendMode
+                        ? '远程后端已连接。角色窗口已激活。'
+                        : '所有系统在线。角色窗口已激活。'
+                      : isRemoteBackendMode
+                        ? '配置服务器地址后，Windows 端将只连接远程后端并打开角色窗口。'
+                        : '点击上方按钮初始化所有后端服务及角色窗口。'
                   }}
                 </p>
+              </div>
+
+              <div class="w-full max-w-2xl px-6 relative z-10 space-y-4">
+                <div class="grid grid-cols-2 gap-3">
+                  <button
+                    class="px-4 py-3 text-xs font-black tracking-widest transition-all pixel-hover-lift"
+                    :class="
+                      !isRemoteBackendMode
+                        ? 'pixel-btn-sky text-white'
+                        : 'bg-white text-slate-500 pixel-border-sky hover:text-sky-500'
+                    "
+                    @click="setBackendMode('local')"
+                  >
+                    本地后端
+                  </button>
+                  <button
+                    class="px-4 py-3 text-xs font-black tracking-widest transition-all pixel-hover-lift"
+                    :class="
+                      isRemoteBackendMode
+                        ? 'pixel-btn-indigo text-white'
+                        : 'bg-white text-slate-500 pixel-border-indigo hover:text-indigo-500'
+                    "
+                    @click="setBackendMode('remote')"
+                  >
+                    远程服务器
+                  </button>
+                </div>
+
+                <div
+                  v-if="isRemoteBackendMode"
+                  class="bg-white/85 pixel-border-indigo p-4 flex flex-col gap-3"
+                >
+                  <div class="flex items-center justify-between gap-3">
+                    <div>
+                      <div class="text-xs font-black tracking-widest text-indigo-500">SERVER URL</div>
+                      <div class="text-[11px] text-slate-400 mt-1">
+                        例如：`https://your-app.zeabur.app`
+                      </div>
+                      <div class="text-[11px] text-slate-400 mt-1">
+                        如果服务器设置了 `PERO_DESKTOP_API_KEY`，请在下方填写相同密钥。
+                      </div>
+                    </div>
+                    <span
+                      class="px-3 py-1 text-[10px] font-black tracking-widest pixel-border-indigo bg-indigo-50 text-indigo-500"
+                    >
+                      REMOTE
+                    </span>
+                  </div>
+
+                  <div class="flex flex-col md:flex-row gap-3">
+                    <input
+                      v-model="remoteBackendUrlInput"
+                      type="text"
+                      class="flex-1 px-4 py-3 bg-white pixel-border-indigo text-sm text-slate-700 outline-none"
+                      placeholder="https://your-app.zeabur.app"
+                      @keydown.enter.prevent="saveRemoteBackendUrl"
+                      @blur="saveRemoteBackendUrl"
+                    />
+                    <button
+                      class="px-5 py-3 pixel-btn-indigo text-white text-xs font-black tracking-widest pixel-hover-lift"
+                      @click="saveRemoteBackendUrl"
+                    >
+                      保存远程配置
+                    </button>
+                  </div>
+
+                  <input
+                    v-model="remoteBackendApiKeyInput"
+                    type="password"
+                    class="w-full px-4 py-3 bg-white pixel-border-indigo text-sm text-slate-700 outline-none"
+                    placeholder="桌面访问密钥（可选，对应服务端 PERO_DESKTOP_API_KEY）"
+                    autocomplete="off"
+                    @keydown.enter.prevent="saveRemoteBackendUrl"
+                    @blur="saveRemoteBackendUrl"
+                  />
+                </div>
               </div>
             </div>
           </div>
@@ -1629,7 +1709,10 @@
 
               <!-- NapCat 社交适配器 -->
               <div
-                class="bg-white p-10 pixel-border-pink hover:bg-pink-50/50 transition-all duration-300 group relative overflow-hidden pixel-hover-lift press-effect"
+                :class="[
+                  'bg-white p-10 pixel-border-pink transition-all duration-300 group relative overflow-hidden pixel-hover-lift press-effect',
+                  isRemoteBackendMode ? 'opacity-70' : 'hover:bg-pink-50/50'
+                ]"
               >
                 <!-- 背景装饰 -->
                 <div class="absolute -top-6 -left-6 text-pink-50/50 pointer-events-none -rotate-12">
@@ -1660,12 +1743,19 @@
                   <p class="text-sm text-slate-500 mb-10 leading-relaxed opacity-80 font-medium">
                     通过 NapCat 框架深度连接社交协议。开启后应用将具备跨平台的智能互动能力。
                   </p>
+                  <p
+                    v-if="isRemoteBackendMode"
+                    class="text-[11px] text-slate-400 mb-6 leading-relaxed font-medium"
+                  >
+                    远程模式下，NapCat 与社交协议由服务器端负责，本地启动器不会再启动它。
+                  </p>
                   <div class="flex items-center justify-between mt-auto">
                     <div class="flex items-center gap-5">
                       <div
                         class="w-14 h-7 bg-slate-200 pixel-border-sky cursor-pointer transition-all relative after:absolute after:top-1 after:left-1 after:w-5 after:h-5 after:bg-white after:pixel-border-sky after:transition-all pixel-hover-lift"
                         :class="{
-                          'bg-pink-400 after:translate-x-6': isSocialEnabled
+                          'bg-pink-400 after:translate-x-6': isSocialEnabled,
+                          'cursor-not-allowed opacity-50': isRemoteBackendMode
                         }"
                         @click="toggleSocialMode"
                       >
@@ -1975,6 +2065,63 @@ const downloadProgress = ref({
   error: false,
   completed: false
 })
+const remoteBackendUrlInput = ref('')
+const remoteBackendApiKeyInput = ref('')
+const isRemoteBackendMode = computed(() => appConfig.value.backend_mode === 'remote')
+
+const persistAppConfig = async (nextConfig) => {
+  const cleanConfig = JSON.parse(JSON.stringify(nextConfig))
+  await invoke('save_config', { config: cleanConfig })
+  appConfig.value = nextConfig
+}
+
+const normalizeRemoteBackendUrl = (value) => {
+  const trimmed = (value || '').trim()
+  if (!trimmed) return ''
+  return (/^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`).replace(/\/+$/, '')
+}
+
+const setBackendMode = async (mode) => {
+  if (appConfig.value.backend_mode === mode) return
+
+  try {
+    const nextConfig = { ...appConfig.value, backend_mode: mode }
+    await persistAppConfig(nextConfig)
+    if (mode === 'remote') {
+      remoteBackendUrlInput.value = nextConfig.remote_backend_url || ''
+      remoteBackendApiKeyInput.value = nextConfig.remote_backend_api_key || ''
+      napcatStatus.value = 'STOPPED'
+    }
+    await checkEnvironment()
+  } catch (e) {
+    console.error('切换后端模式失败:', e)
+    if (window.$notify) {
+      window.$notify(`切换后端模式失败: ${e}`, 'error', '设置错误')
+    }
+  }
+}
+
+const saveRemoteBackendUrl = async () => {
+  if (!isRemoteBackendMode.value) return
+
+  try {
+    const normalized = normalizeRemoteBackendUrl(remoteBackendUrlInput.value)
+    remoteBackendUrlInput.value = normalized
+    const nextConfig = {
+      ...appConfig.value,
+      backend_mode: 'remote',
+      remote_backend_url: normalized,
+      remote_backend_api_key: (remoteBackendApiKeyInput.value || '').trim()
+    }
+    await persistAppConfig(nextConfig)
+    await checkEnvironment()
+  } catch (e) {
+    console.error('保存远程后端地址失败:', e)
+    if (window.$notify) {
+      window.$notify(`保存服务器地址失败: ${e}`, 'error', '设置错误')
+    }
+  }
+}
 
 const handleOnboardingFinish = async () => {
   try {
@@ -2009,14 +2156,22 @@ const updateStats = async () => {
 const loadConfig = async () => {
   try {
     const config = await invoke('get_config')
-    appConfig.value = config
+    const normalizedConfig = {
+      ...config,
+      backend_mode: config.backend_mode === 'remote' ? 'remote' : 'local',
+      remote_backend_url: config.remote_backend_url || '',
+      remote_backend_api_key: config.remote_backend_api_key || ''
+    }
+    appConfig.value = normalizedConfig
+    remoteBackendUrlInput.value = normalizedConfig.remote_backend_url
+    remoteBackendApiKeyInput.value = normalizedConfig.remote_backend_api_key
     // 默认为 false
-    isSocialEnabled.value = config.enable_social_mode === true
+    isSocialEnabled.value = normalizedConfig.enable_social_mode === true
 
     // 检查 EULA 状态
-    if (config.eula_accepted !== true) {
+    if (normalizedConfig.eula_accepted !== true) {
       showEulaModal.value = true
-    } else if (config.onboarding_completed === false) {
+    } else if (normalizedConfig.onboarding_completed === false) {
       // 只有新用户且接受了 EULA 后，才自动开启第一阶段引导喵~ 🌸
       showOnboarding.value = true
     }
@@ -2049,6 +2204,13 @@ const handleDeclineEula = () => {
 }
 
 const toggleSocialMode = async () => {
+  if (isRemoteBackendMode.value) {
+    if (window.$notify) {
+      window.$notify('远程模式下，NapCat 由服务器端负责，本地启动器不再控制。', 'info', '远程模式')
+    }
+    return
+  }
+
   // 乐观更新
   isSocialEnabled.value = !isSocialEnabled.value
 
@@ -2261,14 +2423,14 @@ const checkEnvironment = async () => {
     if (!report.vc_redist_installed) criticalMissing = true
 
     // 警告检查
-    if (!report.port_9120_free) warning = true
+    if (!isRemoteBackendMode.value && !report.port_9120_free) warning = true
     if (!report.core_available) warning = true
     if (!report.webview2_installed) warning = true // Should be critical but let's be lenient
-    if (isSocialEnabled.value && !report.napcat_installed) warning = true // Optional based on setting
-    if (isSocialEnabled.value && !report.node_exists) warning = true // Node.js required for NapCat
+    if (!isRemoteBackendMode.value && isSocialEnabled.value && !report.napcat_installed) warning = true // Optional based on setting
+    if (!isRemoteBackendMode.value && isSocialEnabled.value && !report.node_exists) warning = true // Node.js required for NapCat
 
     // 模型检查：模型必须存在，否则阻止启动以防后端死循环/崩溃
-    if (report.embedding_model_exists && report.whisper_model_exists) {
+    if (isRemoteBackendMode.value || (report.embedding_model_exists && report.whisper_model_exists)) {
       allModelsExist.value = true
     } else {
       allModelsExist.value = false
@@ -2319,7 +2481,7 @@ const toggleLaunch = async () => {
 
       // 0. NapCat 预检（如果社交模式已启用）
       // 0. NapCat 预检 (如果开启了社交模式)
-      if (isSocialEnabled.value) {
+      if (!isRemoteBackendMode.value && isSocialEnabled.value) {
         addLog('[SYSTEM] 正在检查 NapCat 环境...')
         napcatStatus.value = 'INSTALLING' // 使用临时状态或 STARTING
 
@@ -2349,14 +2511,20 @@ const toggleLaunch = async () => {
       // 1. 启动后端
       backendStatus.value = 'STARTING'
       await invoke('start_backend', {
-        enableSocialMode: isSocialEnabled.value
+        enableSocialMode: !isRemoteBackendMode.value && isSocialEnabled.value
       })
       backendStatus.value = 'RUNNING'
-      addLog('[SYSTEM] 核心服务已启动。')
+      addLog(
+        isRemoteBackendMode.value
+          ? `[SYSTEM] 远程后端已连接: ${appConfig.value.remote_backend_url || remoteBackendUrlInput.value}`
+          : '[SYSTEM] 核心服务已启动。'
+      )
 
       // 2. 启动 NapCat
       // 2. 启动 NapCat
-      if (isSocialEnabled.value) {
+      if (isRemoteBackendMode.value) {
+        addLog('[SYSTEM] 远程模式下跳过本地 NapCat 启动。')
+      } else if (isSocialEnabled.value) {
         napcatStatus.value = 'STARTING'
         await invoke('start_napcat')
         napcatStatus.value = 'RUNNING'

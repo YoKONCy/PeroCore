@@ -12,7 +12,7 @@ const logToMain = (msg: string, ...args: any[]) => {
 
 export class GatewayClient {
   private ws: WebSocket | null = null
-  private url: string = `${WS_BASE}/gateway`
+  private url: string = ''
   private reconnectInterval: number = 3000
   private heartbeatInterval: any = null
   private deviceId: string = 'electron-client-' + Math.random().toString(36).substr(2, 9)
@@ -29,6 +29,10 @@ export class GatewayClient {
     if (url) {
       this.url = url
     }
+  }
+
+  private resolveUrl() {
+    return `${WS_BASE}/gateway`
   }
 
   /**
@@ -156,6 +160,8 @@ export class GatewayClient {
   }
 
   async connect() {
+    this.url = this.resolveUrl()
+
     // 尝试获取令牌
     try {
       const token = await invoke('get_gateway_token')
@@ -163,10 +169,14 @@ export class GatewayClient {
         this.token = token
         logToMain(`使用 Gateway 令牌: ${token.substring(0, 8)}...`)
       } else {
-        logToMain('警告: 收到空令牌')
+        logToMain('警告: 收到空令牌，稍后重试 Gateway 连接')
+        setTimeout(() => this.connect(), this.reconnectInterval)
+        return
       }
-    } catch {
-      logToMain('获取令牌失败')
+    } catch (e: any) {
+      logToMain(`获取令牌失败: ${e?.message || e}`)
+      setTimeout(() => this.connect(), this.reconnectInterval)
+      return
     }
 
     logToMain(`正在连接到 Gateway: ${this.url}...`)
