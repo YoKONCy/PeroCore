@@ -308,7 +308,7 @@
         <main class="flex-1 overflow-hidden p-8">
           <div
             v-if="activeTab === 'home'"
-            class="h-full flex flex-col gap-6 overflow-y-auto pr-2 custom-scrollbar"
+            class="h-full flex flex-col gap-6 overflow-y-auto pr-2 pb-6 custom-scrollbar"
           >
             <!-- 状态卡片 -->
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 shrink-0">
@@ -404,7 +404,7 @@
 
             <!-- 主要启动区域 -->
             <div
-              class="flex-1 min-h-[300px] flex flex-col items-center justify-center gap-8 bg-white/40 pixel-border-sky relative overflow-hidden"
+              class="shrink-0 min-h-[300px] flex flex-col items-center justify-center gap-8 bg-white/40 pixel-border-sky relative py-10"
             >
               <!-- 背景图案 (像素点) - 更加可爱的颜色 -->
               <div
