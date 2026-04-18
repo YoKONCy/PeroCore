@@ -26,7 +26,6 @@ class ConfigManager:
     # 易失性配置列表：这些配置仅在内存中维护，不会从数据库加载或保存
     # 通常由环境变量或命令行参数控制
     VOLATILE_CONFIGS = {
-        "enable_social_mode",
         "napcat_ws_url",
         "napcat_http_url",
     }

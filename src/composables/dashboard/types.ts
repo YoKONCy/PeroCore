@@ -33,11 +33,27 @@ export interface NitStatus {
   [key: string]: unknown
 }
 
+export interface NapCatBotInfo {
+  nickname?: string
+  user_id?: string
+  [key: string]: unknown
+}
+
 export interface NapCatStatus {
   ws_connected: boolean
   api_responsive: boolean
   latency_ms: number
   disabled: boolean
+  bot_info: NapCatBotInfo | null
+  bot_infos: NapCatBotInfo[]
+  connection_count: number
+  connected_ids: string[]
+  last_connected_at: string | null
+  last_event_at: string | null
+  last_error: string | null
+  ws_auth_required: boolean
+  ws_auth_header: string
+  ws_auth_query: string
 }
 
 export interface MemoryConfig {

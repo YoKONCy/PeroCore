@@ -80,7 +80,7 @@ from fastapi import (
 )
 from fastapi.exceptions import RequestValidationError, ResponseValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -142,7 +142,7 @@ logger = logging.getLogger(__name__)
 # print(f"[启动调试] sys.argv: {sys.argv}")
 # print(f"[启动调试] ENABLE_SOCIAL_MODE 环境变量: {os.environ.get('ENABLE_SOCIAL_MODE')}")
 
-
+# [功能] 思考管道：周报任务
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 启动 Logo
@@ -1018,9 +1018,12 @@ from mods._external_plugins.router import router as external_plugin_router
 
 app.include_router(external_plugin_router)
 
-
 dist_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "dist")
 if os.path.exists(dist_path):
+    @app.get("/", include_in_schema=False)
+    async def web_root_redirect():
+        return RedirectResponse(url="/web/")
+
     app.mount("/web", StaticFiles(directory=dist_path, html=True), name="static")
 
 app.add_middleware(

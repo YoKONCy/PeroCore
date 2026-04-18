@@ -334,7 +334,7 @@ export function useDashboard() {
     {
       title: 'SYSTEM',
       items: [
-        { id: 'napcat', label: 'NapCat 终端', icon: 'terminal' },
+        { id: 'napcat', label: 'NapCat 管理', icon: 'terminal' },
         { id: 'terminal', label: '系统终端', icon: 'desktop' },
         { id: 'system_reset', label: '危险区域', icon: 'alert', variant: 'danger' }
       ]

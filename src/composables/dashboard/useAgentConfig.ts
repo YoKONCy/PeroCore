@@ -18,7 +18,7 @@ export function useAgentConfig() {
   const fetchAgents = async (): Promise<void> => {
     try {
       const agents = await fetchJson<Agent[]>(`${API_BASE}/agents`, {}, 2000)
-      availableAgents.value = agents.map((a) => ({
+      availableAgents.value = agents.map((a: Agent) => ({
         ...a,
         avatarUrl: a.avatar
           ? a.avatar.startsWith('http')
@@ -26,7 +26,7 @@ export function useAgentConfig() {
             : `${API_BASE.replace('/api', '')}${a.avatar}`
           : null
       }))
-      const active = availableAgents.value.find((a) => a.is_active)
+      const active = availableAgents.value.find((a: Agent) => a.is_active)
       if (active) activeAgent.value = active
     } catch (e) {
       console.error('获取助手列表失败:', e)
@@ -49,7 +49,9 @@ export function useAgentConfig() {
       if (!res.ok) throw new Error('Failed to switch agent')
       await fetchAgents()
       window.$notify(`已切换到角色: ${activeAgent.value?.name}`, 'success')
-      const enabled = availableAgents.value.filter((a) => a.is_enabled).map((a) => a.id)
+      const enabled = availableAgents.value
+        .filter((a: Agent) => a.is_enabled)
+        .map((a: Agent) => a.id)
       invoke('save_global_launch_config', { enabledAgents: enabled, activeAgent: agentId }).catch(
         (e) => console.error('保存启动配置失败:', e)
       )
@@ -65,13 +67,24 @@ export function useAgentConfig() {
     ws_connected: false,
     api_responsive: false,
     latency_ms: -1,
-    disabled: false
+    disabled: true,
+    bot_info: null,
+    bot_infos: [],
+    connection_count: 0,
+    connected_ids: [],
+    last_connected_at: null,
+    last_event_at: null,
+    last_error: null,
+    ws_auth_required: false,
+    ws_auth_header: '',
+    ws_auth_query: ''
   })
 
   // --- 功能开关 ---
   const isCompanionEnabled = ref<boolean>(false)
   const isTogglingCompanion = ref<boolean>(false)
   const isSocialEnabled = ref<boolean>(false)
+  const isTogglingSocial = ref<boolean>(false)
   const isLightweightEnabled = ref<boolean>(false)
   const isTogglingLightweight = ref<boolean>(false)
   const isAuraVisionEnabled = ref<boolean>(false)
@@ -109,10 +122,71 @@ export function useAgentConfig() {
 
   const fetchSocialStatus = async (): Promise<void> => {
     try {
-      const data = await fetchJson<{ enabled: boolean }>(`${API_BASE}/social/status`, {}, 2000)
+      const data = await fetchJson<{
+        enabled: boolean
+        ws_connected: boolean
+        api_responsive: boolean
+        latency_ms: number
+        bot_info: NapCatStatus['bot_info']
+        bot_infos: NapCatStatus['bot_infos']
+        connection_count: number
+        connected_ids: string[]
+        last_connected_at: string | null
+        last_event_at: string | null
+        last_error: string | null
+        ws_auth_required: boolean
+        ws_auth_header: string
+        ws_auth_query: string
+      }>(`${API_BASE}/social/status`, {}, 2000)
       isSocialEnabled.value = data.enabled
+      napCatStatus.value = {
+        ws_connected: data.ws_connected,
+        api_responsive: data.api_responsive,
+        latency_ms: data.latency_ms ?? -1,
+        disabled: !data.enabled,
+        bot_info: data.bot_info ?? null,
+        bot_infos: Array.isArray(data.bot_infos) ? data.bot_infos : [],
+        connection_count: data.connection_count ?? 0,
+        connected_ids: Array.isArray(data.connected_ids) ? data.connected_ids : [],
+        last_connected_at: data.last_connected_at ?? null,
+        last_event_at: data.last_event_at ?? null,
+        last_error: data.last_error ?? null,
+        ws_auth_required: Boolean(data.ws_auth_required),
+        ws_auth_header: data.ws_auth_header ?? '',
+        ws_auth_query: data.ws_auth_query ?? ''
+      }
     } catch {
+      napCatStatus.value = {
+        ...napCatStatus.value,
+        ws_connected: false,
+        api_responsive: false,
+        latency_ms: -1,
+        disabled: true
+      }
       console.error('Failed to fetch social status')
+    }
+  }
+
+  const toggleSocial = async (val: boolean): Promise<void> => {
+    try {
+      isTogglingSocial.value = true
+      const data = await fetchJson<{ status: string; message: string; data: { enabled: boolean } }>(
+        `${API_BASE}/configs/social_mode`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: val })
+        },
+        5000
+      )
+      isSocialEnabled.value = data.data.enabled
+      await fetchSocialStatus()
+      window.$notify(data.message || (data.data.enabled ? '已开启社交模式' : '已关闭社交模式'), 'success')
+    } catch (e) {
+      isSocialEnabled.value = !val
+      window.$notify(`社交模式切换失败: ${(e as Error).message}`, 'error')
+    } finally {
+      isTogglingSocial.value = false
     }
   }
 
@@ -236,6 +310,8 @@ export function useAgentConfig() {
     toggleCompanion,
     fetchCompanionStatus,
     isSocialEnabled,
+    isTogglingSocial,
+    toggleSocial,
     fetchSocialStatus,
     isLightweightEnabled,
     isTogglingLightweight,

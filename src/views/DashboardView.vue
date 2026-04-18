@@ -957,6 +957,8 @@ const {
   toggleCompanion,
   fetchCompanionStatus,
   isSocialEnabled,
+  isTogglingSocial,
+  toggleSocial,
   fetchSocialStatus,
   isLightweightEnabled,
   isTogglingLightweight,
@@ -1167,6 +1169,8 @@ provide(AGENT_CONFIG_KEY, {
   toggleCompanion,
   fetchCompanionStatus,
   isSocialEnabled,
+  isTogglingSocial,
+  toggleSocial,
   fetchSocialStatus,
   isLightweightEnabled,
   isTogglingLightweight,
@@ -1322,6 +1326,12 @@ provide(MODEL_CONFIG_KEY, {
 const showOnboarding = ref(false)
 const appConfig = ref({})
 const handleOnboardingFinish = async (choice) => {
+  if (!isElectron()) {
+    showOnboarding.value = false
+    appConfig.value = { ...appConfig.value, onboarding_completed: true }
+    return
+  }
+
   if (choice === 'launch') {
     try {
       const config = await invoke('get_config')
@@ -1458,7 +1468,10 @@ watch(embeddingProvider, (newVal) => {
   if (newVal === 'api' && isAuraVisionEnabled.value) toggleAuraVision(false)
 })
 
-const listenSafe = (event, callback) => listen(event, callback)
+const listenSafe = (event, callback) => {
+  if (!isElectron()) return Promise.resolve(() => {})
+  return listen(event, callback)
+}
 const handleStateUpdate = () => {
   if (currentTab.value === 'overview') fetchPetState()
 }
@@ -1508,24 +1521,37 @@ onMounted(async () => {
       }
     }
   })
-  try {
-    const config = await invoke('get_config')
-    appConfig.value = config
-    if (config.onboarding_completed !== true) showOnboarding.value = true
-  } catch (e) {
-    console.error('加载配置失败:', e)
+  if (isElectron()) {
+    try {
+      const config = await invoke('get_config')
+      appConfig.value = config
+      if (config.onboarding_completed !== true) showOnboarding.value = true
+    } catch (e) {
+      console.error('加载配置失败:', e)
+    }
+  } else {
+    appConfig.value = { onboarding_completed: true }
+    showOnboarding.value = false
   }
   await listenSafe('update-message', (data) => handleUpdateMessage(data, openConfirm))
-  try {
-    const v = await invoke('get_app_version')
-    if (v) appVersion.value = v
-  } catch {
-    /* noop */
+  if (isElectron()) {
+    try {
+      const v = await invoke('get_app_version')
+      if (v) appVersion.value = v
+    } catch {
+      /* noop */
+    }
+  } else {
+    appVersion.value = 'web'
   }
   gatewayClient.on('action:state_update', handleStateUpdate)
   gatewayClient.on('action:schedule_update', handleScheduleUpdate)
   gatewayClient.on('action:agent_changed', handleAgentChanged)
   gatewayClient.on('action:log_updated', _handleLogUpdate)
+  pollingInterval.value = setInterval(() => {
+    if (!isBackendOnline.value) return
+    fetchSocialStatus().catch(() => {})
+  }, 5000)
   if (window.electron && window.electron.on) {
     let logFetchTimeout = null
     window.electron.on('history-update', () => {
@@ -1544,7 +1570,7 @@ onUnmounted(() => {
   gatewayClient.off('action:schedule_update', handleScheduleUpdate)
   gatewayClient.off('action:agent_changed', handleAgentChanged)
   gatewayClient.off('action:log_updated', _handleLogUpdate)
-  if (pollingInterval.value) clearTimeout(pollingInterval.value)
+  if (pollingInterval.value) clearInterval(pollingInterval.value)
   disposeGraph()
 })
 </script>

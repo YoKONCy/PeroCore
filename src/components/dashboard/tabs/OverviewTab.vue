@@ -373,6 +373,112 @@
       </div>
     </PCard>
 
+    <!-- 社交管理卡片 -->
+    <div class="mt-6">
+      <PCard pixel class="group/social">
+        <template #header>
+          <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div class="flex items-start gap-4">
+              <div class="text-2xl text-sky-500 mt-1">
+                <PixelIcon name="chat" size="lg" />
+              </div>
+              <div>
+                <div class="font-bold text-slate-800 flex items-center gap-2 text-lg">
+                  社交模式
+                  <span class="text-xs font-normal text-slate-400 font-mono">NapCat Social</span>
+                </div>
+                <div class="text-sm text-slate-500 mt-1 leading-relaxed">
+                  服务器将与独立部署的 NapCat 保持常驻连接，并通过反向 WebSocket 接收 OneBot 事件。
+                </div>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-3">
+              <PButton variant="secondary" size="sm" @click="fetchSocialStatus">
+                <template #icon>
+                  <PixelIcon name="refresh" size="xs" />
+                </template>
+                刷新状态
+              </PButton>
+              <PSwitch
+                v-model="isSocialEnabled"
+                :loading="isTogglingSocial"
+                @update:model-value="toggleSocial"
+              />
+            </div>
+          </div>
+        </template>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+          <div class="bg-sky-50/60 pixel-border-sky p-4">
+            <div class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">WebSocket</div>
+            <div class="mt-2 text-sm font-bold" :class="napCatStatus.ws_connected ? 'text-sky-600' : 'text-rose-500'">
+              {{ napCatStatus.ws_connected ? '已连接' : '未连接' }}
+            </div>
+            <div class="mt-1 text-xs text-slate-500">连接数 {{ napCatStatus.connection_count }}</div>
+          </div>
+
+          <div class="bg-sky-50/60 pixel-border-sky p-4">
+            <div class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">OneBot API</div>
+            <div
+              class="mt-2 text-sm font-bold"
+              :class="napCatStatus.api_responsive ? 'text-sky-600' : 'text-amber-500'"
+            >
+              {{ napCatStatus.api_responsive ? '响应正常' : '未响应' }}
+            </div>
+            <div class="mt-1 text-xs text-slate-500">
+              {{ napCatStatus.api_responsive ? `${napCatStatus.latency_ms}ms` : '等待心跳响应' }}
+            </div>
+          </div>
+
+          <div class="bg-sky-50/60 pixel-border-sky p-4">
+            <div class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Bot</div>
+            <div class="mt-2 text-sm font-bold text-sky-600">
+              {{ napCatStatus.bot_info?.nickname || '未识别' }}
+            </div>
+            <div class="mt-1 text-xs text-slate-500 font-mono">
+              {{ napCatStatus.bot_info?.user_id || '等待登录信息' }}
+            </div>
+          </div>
+
+          <div class="bg-sky-50/60 pixel-border-sky p-4">
+            <div class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">鉴权</div>
+            <div class="mt-2 text-sm font-bold" :class="napCatStatus.ws_auth_required ? 'text-amber-500' : 'text-slate-500'">
+              {{ napCatStatus.ws_auth_required ? '需要 Secret' : '未启用 Secret' }}
+            </div>
+            <div class="mt-1 text-xs text-slate-500 font-mono">
+              {{ napCatStatus.ws_auth_required ? napCatStatus.ws_auth_query || napCatStatus.ws_auth_header : '开放环境慎用' }}
+            </div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 mt-4">
+          <div class="bg-white/70 border border-sky-100 rounded-[1.5rem] p-4 space-y-2">
+            <div class="text-xs font-bold text-slate-500 uppercase tracking-widest">连接诊断</div>
+            <div class="text-sm text-slate-600">
+              最后连接时间：<span class="font-mono text-sky-600">{{ formatStatusTime(napCatStatus.last_connected_at) }}</span>
+            </div>
+            <div class="text-sm text-slate-600">
+              最后事件时间：<span class="font-mono text-sky-600">{{ formatStatusTime(napCatStatus.last_event_at) }}</span>
+            </div>
+            <div class="text-sm text-slate-600">
+              当前连接 ID：
+              <span class="font-mono text-sky-600">{{ napCatStatus.connected_ids.length ? napCatStatus.connected_ids.join(', ') : '默认连接' }}</span>
+            </div>
+          </div>
+
+          <div class="rounded-[1.5rem] p-4 border" :class="napCatStatus.last_error ? 'bg-rose-50 border-rose-100' : 'bg-emerald-50 border-emerald-100'">
+            <div class="text-xs font-bold uppercase tracking-widest" :class="napCatStatus.last_error ? 'text-rose-500' : 'text-emerald-500'">
+              最近状态
+            </div>
+            <div class="mt-2 text-sm leading-relaxed" :class="napCatStatus.last_error ? 'text-rose-600' : 'text-emerald-600'">
+              {{ napCatStatus.last_error || '最近状态正常，后端已准备好与 NapCat 保持常驻连接。' }}
+            </div>
+          </div>
+        </div>
+      </PCard>
+    </div>
+
     <!-- 功能开关卡片组 -->
     <div class="space-y-4">
       <!-- 轻量模式 -->
@@ -760,7 +866,7 @@
               <div
                 class="bg-white/60 p-5 rounded-3xl border border-sky-100 hover:border-sky-300 transition-all group/adv shadow-sm"
               >
-                <label class="text-sm font-bold text-slate-700 block mb-3 flex items-center gap-2">
+                <label class="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
                   图片感知上限
                   <span
                     class="text-[10px] text-slate-400 font-normal opacity-0 group-hover/adv:opacity-100 transition-opacity"
@@ -780,7 +886,7 @@
               <div
                 class="bg-white/60 p-5 rounded-3xl border border-sky-100 hover:border-sky-300 transition-all group/adv shadow-sm"
               >
-                <label class="text-sm font-bold text-slate-700 block mb-3 flex items-center gap-2">
+                <label class="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
                   跨会话感知人数
                   <span
                     class="text-[10px] text-slate-400 font-normal opacity-0 group-hover/adv:opacity-100 transition-opacity"
@@ -800,7 +906,7 @@
               <div
                 class="bg-white/60 p-5 rounded-3xl border border-sky-100 hover:border-sky-300 transition-all group/adv shadow-sm"
               >
-                <label class="text-sm font-bold text-slate-700 block mb-3 flex items-center gap-2">
+                <label class="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
                   跨会话历史深度
                   <span
                     class="text-[10px] text-slate-400 font-normal opacity-0 group-hover/adv:opacity-100 transition-opacity"
@@ -869,6 +975,10 @@ const {
   isCompanionEnabled,
   isTogglingCompanion,
   toggleCompanion,
+  isSocialEnabled,
+  isTogglingSocial,
+  toggleSocial,
+  fetchSocialStatus,
   isLightweightEnabled,
   isTogglingLightweight,
   toggleLightweight,
@@ -885,4 +995,13 @@ const { logs } = inject(LOGS_KEY)!
 const { memories, showImportStoryDialog } = inject(MEMORIES_KEY)!
 const { tasks } = inject(TASKS_KEY)!
 const { embeddingProvider, isCurrentModelVisionEnabled } = inject(MODEL_CONFIG_KEY)!
+
+const formatStatusTime = (value: string | null): string => {
+  if (!value) return '暂无'
+  try {
+    return new Date(value).toLocaleString()
+  } catch {
+    return value
+  }
+}
 </script>

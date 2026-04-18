@@ -74,6 +74,9 @@ class SocialService:
 
         # [修复] 初始化 pending_requests，防止同步 API 调用崩溃
         self.pending_requests: Dict[str, asyncio.Future] = {}
+        self.last_connected_at: Optional[datetime] = None
+        self.last_event_at: Optional[datetime] = None
+        self.last_error: Optional[str] = None
 
     def _load_agent_mappings(self):
         """从所有 Agent 加载社交配置"""
@@ -97,6 +100,8 @@ class SocialService:
 
     def register_connection(self, self_id: Optional[str], websocket: WebSocket):
         """注册新的 WebSocket 连接"""
+        self.last_connected_at = datetime.now()
+        self.last_error = None
         if self_id:
             self.connections[str(self_id)] = websocket
             # 检查此 QQ 是否有 Agent 映射
@@ -118,14 +123,28 @@ class SocialService:
             self.default_ws = None
             logger.info("[Social] 已注销默认连接")
 
-    @property
-    def active_ws(self):
-        """向后兼容属性 - 返回第一个可用连接"""
+    def record_error(self, error: Any):
+        self.last_error = str(error)
+
+    def clear_error(self):
+        self.last_error = None
+
+    def _mark_event(self):
+        self.last_event_at = datetime.now()
+
+    def _get_target_ws(self, self_id: Optional[str] = None) -> Optional[WebSocket]:
+        if self_id and str(self_id) in self.connections:
+            return self.connections[str(self_id)]
         if self.default_ws:
             return self.default_ws
         if self.connections:
-            return list(self.connections.values())[0]
+            return next(iter(self.connections.values()))
         return None
+
+    @property
+    def active_ws(self):
+        """向后兼容属性 - 返回第一个可用连接"""
+        return self._get_target_ws()
 
     @active_ws.setter
     def active_ws(self, ws):
@@ -309,6 +328,7 @@ class SocialService:
         """
         try:
             event = json.loads(raw_data)
+            self._mark_event()
 
             # 处理 API 响应 (如果有 echo 字段)
             if "echo" in event:
@@ -341,6 +361,7 @@ class SocialService:
         except json.JSONDecodeError:
             pass
         except Exception as e:
+            self.record_error(e)
             logger.error(f"[Social] 处理事件失败: {e}")
 
     async def _handle_message_event(self, event: dict):
@@ -502,15 +523,24 @@ class SocialService:
         获取 NapCat 连接状态 (双向检查)
         """
         # 如果 self.bot_infos 有数据，取第一个作为展示，或者返回 None
-        first_bot_info = None
-        if self.bot_infos:
-            first_bot_info = next(iter(self.bot_infos.values()))
+        bot_infos = list(self.bot_infos.values())
+        first_bot_info = bot_infos[0] if bot_infos else (self.bot_info or None)
 
         status = {
             "ws_connected": False,
             "api_responsive": False,
             "bot_info": first_bot_info,
+            "bot_infos": bot_infos,
             "latency_ms": -1,
+            "connection_count": len(self.connections) + (1 if self.default_ws else 0),
+            "connected_ids": list(self.connections.keys()),
+            "last_connected_at": self.last_connected_at.isoformat()
+            if self.last_connected_at
+            else None,
+            "last_event_at": self.last_event_at.isoformat()
+            if self.last_event_at
+            else None,
+            "last_error": self.last_error,
         }
 
         # 检查是否有任何活动连接
@@ -531,11 +561,13 @@ class SocialService:
                     "get_version_info", {}, self_id=target_id, timeout=2
                 )
                 if resp and resp.get("status") == "ok":
+                    self.clear_error()
                     status["api_responsive"] = True
                     # 计算延迟
                     latency = (datetime.now() - start_time).total_seconds() * 1000
                     status["latency_ms"] = int(latency)
-            except Exception:
+            except Exception as e:
+                self.record_error(e)
                 # logger.warning(f"[Social] 状态检查失败: {e}")
                 pass
 
@@ -1270,12 +1302,15 @@ class SocialService:
                     "nickname": data.get("nickname", "Pero"),
                     "user_id": str(data.get("user_id", "")),
                 }
+                if self.bot_info["user_id"]:
+                    self.bot_infos[self.bot_info["user_id"]] = dict(self.bot_info)
                 logger.info(f"[Social] Bot 信息已更新: {self.bot_info}")
 
                 # [修复] 同步 Bot ID 到 SessionManager 以过滤消息
                 if self.bot_info["user_id"]:
                     self.session_manager.set_bot_id(self.bot_info["user_id"])
         except Exception as e:
+            self.record_error(e)
             logger.error(f"[Social] 获取 Bot 信息失败: {e}")
             # 如需清理，虽然 pop 发生在 handle_websocket 中
             if request_id in self.pending_requests:
@@ -2479,8 +2514,11 @@ class SocialService:
         except Exception as e:
             logger.error(f"发送消息到 {session.session_id} 失败: {e}")
 
-    async def _send_api(self, action: str, params: Dict[str, Any]):
-        if not self.active_ws:
+    async def _send_api(
+        self, action: str, params: Dict[str, Any], self_id: Optional[str] = None
+    ):
+        target_ws = self._get_target_ws(self_id)
+        if not target_ws:
             raise RuntimeError("No active Social Adapter connection.")
 
         # 简单的即发即弃（旧版支持，或者如果手动处理 echo）
@@ -2490,16 +2528,21 @@ class SocialService:
         echo_id = str(uuid.uuid4())
 
         payload = {"action": action, "params": params, "echo": echo_id}
-        await self.active_ws.send_text(json.dumps(payload))
+        await target_ws.send_text(json.dumps(payload))
         return echo_id
 
     async def _send_api_and_wait(
-        self, action: str, params: Dict[str, Any], timeout: int = 10
+        self,
+        action: str,
+        params: Dict[str, Any],
+        timeout: int = 10,
+        self_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         发送 API 请求并等待响应。
         """
-        if not self.active_ws:
+        target_ws = self._get_target_ws(self_id)
+        if not target_ws:
             raise RuntimeError("No active Social Adapter connection.")
 
         import uuid
@@ -2511,7 +2554,7 @@ class SocialService:
         future = asyncio.get_running_loop().create_future()
         self.pending_requests[echo_id] = future
 
-        await self.active_ws.send_text(json.dumps(payload))
+        await target_ws.send_text(json.dumps(payload))
 
         try:
             response = await asyncio.wait_for(future, timeout=timeout)
@@ -2519,6 +2562,7 @@ class SocialService:
         except asyncio.TimeoutError:
             if echo_id in self.pending_requests:
                 del self.pending_requests[echo_id]
+            self.record_error(f"API {action} timed out")
             raise TimeoutError(f"API {action} timed out.") from None
 
     def _load_agent_stickers(self, agent_id: str) -> str:
