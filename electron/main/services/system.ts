@@ -38,6 +38,7 @@ export interface BackendConnectionConfig {
   apiBase: string
   wsBase: string
   configured: boolean
+  apiKey?: string
 }
 
 // 缓存 CPU 负载 (定期更新以降低开销)
@@ -165,7 +166,8 @@ export function getBackendConnectionConfig(): BackendConnectionConfig {
       baseUrl,
       apiBase: buildApiBase(baseUrl),
       wsBase: buildWsBase(baseUrl),
-      configured: !!baseUrl
+      configured: !!baseUrl,
+      apiKey: normalizeRemoteBackendApiKey(config.remote_backend_api_key || '')
     }
   }
 
@@ -175,7 +177,8 @@ export function getBackendConnectionConfig(): BackendConnectionConfig {
     baseUrl,
     apiBase: `${baseUrl}/api`,
     wsBase: 'ws://localhost:9120/ws',
-    configured: true
+    configured: true,
+    apiKey: ''
   }
 }
 

@@ -8,6 +8,7 @@ type RuntimeBackendConnectionConfig = {
   apiBase: string
   wsBase: string
   configured: boolean
+  apiKey?: string
 }
 
 const createDynamicString = (resolver: () => string): string =>
@@ -24,7 +25,8 @@ const getBrowserConnectionConfig = (): RuntimeBackendConnectionConfig => {
       baseUrl: '',
       apiBase: '',
       wsBase: '',
-      configured: false
+      configured: false,
+      apiKey: ''
     }
   }
 
@@ -34,7 +36,8 @@ const getBrowserConnectionConfig = (): RuntimeBackendConnectionConfig => {
     baseUrl: origin,
     apiBase: '/api',
     wsBase: `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`,
-    configured: true
+    configured: true,
+    apiKey: ''
   }
 }
 

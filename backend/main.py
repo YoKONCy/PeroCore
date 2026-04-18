@@ -14,6 +14,7 @@
 
 import asyncio
 import base64
+import html
 import io
 import json
 import logging
@@ -24,6 +25,7 @@ import time
 import warnings
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime
+from urllib.parse import quote
 
 # 路径防御：确保打包后或不同目录下启动都能正确找到模块 (必须放在自定义模块导入之前)
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -80,13 +82,22 @@ from fastapi import (
 )
 from fastapi.exceptions import RequestValidationError, ResponseValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from core.config_manager import get_config_manager
+from core.desktop_auth import (
+    DESKTOP_API_KEY_HEADER,
+    DESKTOP_API_KEY_COOKIE,
+    DESKTOP_API_KEY_QUERY,
+    desktop_auth_required,
+    has_valid_desktop_api_key,
+    request_requires_desktop_auth,
+    resolve_desktop_api_key,
+)
 from database import engine, get_session, init_db
 from models import (
     Config,
@@ -1017,6 +1028,148 @@ app.include_router(chat_router)
 from mods._external_plugins.router import router as external_plugin_router
 
 app.include_router(external_plugin_router)
+
+
+def _normalize_web_unlock_target(target: str | None) -> str:
+    if not target:
+        return "/web/"
+
+    normalized = target.strip()
+    if not normalized.startswith("/") or normalized.startswith("//"):
+        return "/web/"
+
+    return normalized
+
+
+@app.get("/web-unlock", include_in_schema=False)
+async def web_unlock(request: Request, next: str = "/web/"):
+    target = _normalize_web_unlock_target(next)
+
+    if not desktop_auth_required():
+        return RedirectResponse(url=target)
+
+    if has_valid_desktop_api_key(resolve_desktop_api_key(request)):
+        return RedirectResponse(url=target)
+
+    escaped_header = html.escape(DESKTOP_API_KEY_HEADER, quote=True)
+    escaped_query = html.escape(DESKTOP_API_KEY_QUERY, quote=True)
+    escaped_cookie = html.escape(DESKTOP_API_KEY_COOKIE, quote=True)
+
+    return HTMLResponse(
+        f"""
+<!doctype html>
+<html lang=\"zh-CN\">
+  <head>
+    <meta charset=\"utf-8\" />
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+    <title>解锁 PeroCore WebUI</title>
+    <style>
+      * {{ box-sizing: border-box; }}
+      body {{ margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; font-family: Inter, Arial, sans-serif; background: radial-gradient(circle at top, rgba(255,181,230,.18), transparent 35%), linear-gradient(180deg, rgba(20,16,31,.98), rgba(12,10,18,1)); color: #f8f4ff; }}
+      .card {{ width: min(100%, 460px); margin: 24px; border-radius: 24px; border: 1px solid rgba(255,255,255,.08); background: rgba(24,20,36,.92); box-shadow: 0 24px 80px rgba(0,0,0,.35); padding: 28px; }}
+      .badge {{ display: inline-flex; margin-bottom: 16px; border-radius: 999px; background: rgba(236,72,153,.18); color: #f9a8d4; padding: 6px 12px; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }}
+      h1 {{ margin: 0 0 12px; font-size: 28px; }}
+      p {{ margin: 0; color: rgba(248,244,255,.72); line-height: 1.6; }}
+      form {{ display: flex; flex-direction: column; gap: 14px; margin-top: 24px; }}
+      label {{ font-size: 14px; color: rgba(248,244,255,.82); }}
+      input {{ border: 1px solid rgba(255,255,255,.12); border-radius: 14px; background: rgba(10,8,18,.9); color: #fff; padding: 14px 16px; font-size: 15px; outline: none; }}
+      input:focus {{ border-color: rgba(236,72,153,.9); box-shadow: 0 0 0 3px rgba(236,72,153,.2); }}
+      button {{ border: none; border-radius: 14px; background: linear-gradient(135deg, #ec4899, #8b5cf6); color: #fff; padding: 14px 16px; font-size: 15px; font-weight: 700; cursor: pointer; }}
+      button:disabled {{ cursor: not-allowed; opacity: .6; }}
+      .meta {{ margin-top: 16px; font-size: 13px; }}
+      .error {{ margin-top: 12px; color: #fda4af; font-size: 14px; min-height: 20px; }}
+    </style>
+  </head>
+  <body>
+    <div class=\"card\">
+      <div class=\"badge\">Protected</div>
+      <h1>请输入访问密钥</h1>
+      <p>当前 PeroCore WebUI 已启用访问保护。验证成功后会写入受保护 Cookie，随后自动跳转回原始页面。</p>
+      <form id=\"unlock-form\">
+        <label for=\"api-key\">访问密钥</label>
+        <input id=\"api-key\" type=\"password\" autocomplete=\"current-password\" placeholder=\"请输入 PERO_DESKTOP_API_KEY\" />
+        <button id=\"unlock-btn\" type=\"submit\">解锁 WebUI</button>
+      </form>
+      <p class=\"meta\">请求头：{escaped_header} ｜ Query：{escaped_query} ｜ Cookie：{escaped_cookie}</p>
+      <div id=\"error\" class=\"error\"></div>
+    </div>
+    <script>
+      const form = document.getElementById('unlock-form');
+      const input = document.getElementById('api-key');
+      const button = document.getElementById('unlock-btn');
+      const errorEl = document.getElementById('error');
+      const nextTarget = {json.dumps(target)};
+      const sessionStorageKey = 'perocore.desktop_api_key.session';
+      const localStorageKey = 'perocore.desktop_api_key.local';
+      const readStoredKey = () => {{
+        try {{
+          return sessionStorage.getItem(sessionStorageKey) || localStorage.getItem(localStorageKey) || '';
+        }} catch (_error) {{
+          return '';
+        }}
+      }};
+      form.addEventListener('submit', async (event) => {{
+        event.preventDefault();
+        const apiKey = input.value.trim();
+        if (!apiKey) {{
+          errorEl.textContent = '请输入访问密钥';
+          return;
+        }}
+        errorEl.textContent = '';
+        button.disabled = true;
+        button.textContent = '验证中...';
+        try {{
+          const response = await fetch('/api/system/auth/validate', {{
+            method: 'POST',
+            headers: {{ 'Content-Type': 'application/json' }},
+            body: JSON.stringify({{ api_key: apiKey }})
+          }});
+          const payload = await response.json().catch(() => ({{}}));
+          if (!response.ok) {{
+            throw new Error(payload.detail || '访问密钥无效');
+          }}
+          window.location.replace(nextTarget);
+        }} catch (error) {{
+          errorEl.textContent = error?.message || '访问密钥无效';
+          button.disabled = false;
+          button.textContent = '解锁 WebUI';
+        }}
+      }});
+      const storedKey = readStoredKey().trim();
+      if (storedKey) {{
+        input.value = storedKey;
+        queueMicrotask(() => form.requestSubmit());
+      }}
+    </script>
+  </body>
+</html>
+        """.strip()
+    )
+
+
+@app.middleware("http")
+async def desktop_auth_middleware(request: Request, call_next):
+    if request_requires_desktop_auth(request):
+        provided = resolve_desktop_api_key(request)
+        if not has_valid_desktop_api_key(provided):
+            if request.url.path == "/" or request.url.path == "/web" or request.url.path.startswith("/web/"):
+                target = request.url.path
+                if request.url.query:
+                    target = f"{target}?{request.url.query}"
+                unlock_target = quote(target, safe="/?=&%#")
+                return RedirectResponse(url=f"/web-unlock?next={unlock_target}")
+
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "detail": "Invalid desktop API key",
+                    "desktop_auth_required": True,
+                    "desktop_auth_header": DESKTOP_API_KEY_HEADER,
+                    "desktop_auth_query": DESKTOP_API_KEY_QUERY,
+                },
+            )
+
+    return await call_next(request)
 
 dist_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "dist")
 if os.path.exists(dist_path):

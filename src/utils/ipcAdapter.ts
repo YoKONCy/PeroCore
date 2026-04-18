@@ -16,6 +16,8 @@ declare global {
   }
 }
 
+import { buildAuthenticatedWebSocketUrl, desktopAuthState } from '@/api/runtimeAuth'
+
 export const isElectron = () => !!window.electron
 
 // Web Bridge 支持
@@ -24,10 +26,11 @@ const listeners = new Map<string, Set<(payload: any) => void>>()
 
 const initWs = () => {
   if (isElectron() || ws) return
+  if (!desktopAuthState.bootstrapped) return
+  if (desktopAuthState.required && !desktopAuthState.authorized) return
 
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  // 使用当前 Host (Docker/CLI 兼容)
-  const wsUrl = `${protocol}//${window.location.host}`
+  const wsUrl = buildAuthenticatedWebSocketUrl(`${protocol}//${window.location.host}/ws/browser`)
 
   console.log('[IPC Adapter] 正在连接到 Web Bridge:', wsUrl)
   ws = new WebSocket(wsUrl)
@@ -57,12 +60,6 @@ const initWs = () => {
   ws.onerror = (err) => {
     console.error('[IPC Adapter] Web Bridge 连接错误:', err)
   }
-}
-
-// 浏览器模式自动初始化
-if (!isElectron()) {
-  // 稍作延迟确保环境就绪
-  setTimeout(initWs, 100)
 }
 
 export const invoke = async (cmd: string, args?: any) => {
@@ -122,6 +119,8 @@ export const listen = async (event: string, handler: (payload: any) => void) => 
   if (isElectron()) {
     return window.electron!.on(event, (_e: any, ...args: any[]) => handler(args[0]))
   }
+
+  initWs()
 
   // 浏览器模式 (WebSocket)
   if (!listeners.has(event)) {

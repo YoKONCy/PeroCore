@@ -1492,8 +1492,7 @@ onMounted(async () => {
     isBackendOnline,
     (online) => {
       if (online) {
-        console.log('[Dashboard] Backend online, connecting to Gateway...')
-        gatewayClient.connect()
+        console.log('[Dashboard] Backend online, Gateway 连接由 App 鉴权层接管')
       }
     },
     { immediate: false }
