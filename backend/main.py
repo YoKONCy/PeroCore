@@ -1292,7 +1292,8 @@ async def seed_voice_configs():
 if __name__ == "__main__":
     # 优先从环境变量读取端口和Host
     port = int(os.environ.get("PORT", 9120))
-    host = os.environ.get("HOST", "127.0.0.1")
+    default_host = "0.0.0.0" if os.environ.get("PERO_ENV") == "server" else "127.0.0.1"
+    host = os.environ.get("HOST", default_host)
     # 强制禁用 reload 模式，因为 Uvicorn 的 reloader 在 Windows 下会强制使用 SelectorEventLoop
     # 这会导致 subprocess (MCP Stdio) 报错 NotImplementedError
     print(
