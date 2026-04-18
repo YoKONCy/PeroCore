@@ -316,6 +316,12 @@ export const bootstrapDesktopAuth = async () => {
   return bootstrapPromise
 }
 
+export const refreshDesktopAuth = async () => {
+  bootstrapPromise = null
+  desktopAuthState.bootstrapped = false
+  return bootstrapDesktopAuth()
+}
+
 export const clearDesktopAuth = (): void => {
   clearStoredApiKey()
   desktopAuthState.apiKey = ''

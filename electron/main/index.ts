@@ -605,6 +605,10 @@ ipcMain.handle('get_system_stats', async () => {
   return await getSystemStats()
 })
 
+ipcMain.handle('get_diagnostics', async () => {
+  return await getDiagnostics()
+})
+
 ipcMain.handle('get_config', () => {
   const config = getConfig()
   logger.info('Main', `IPC: get_config 返回配置: ${JSON.stringify(sanitizeValueForLog(config))}`)

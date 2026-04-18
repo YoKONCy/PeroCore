@@ -2012,7 +2012,9 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
-import { AGENT_NAME, API_BASE, BASE_URL } from '../config'
+import { AGENT_NAME, BASE_URL } from '../config'
+import { refreshDesktopAuth } from '@/api/runtimeAuth'
+import { gatewayClient } from '@/api/gateway'
 
 import CustomTitleBar from '../components/layout/CustomTitleBar.vue'
 import PTooltip from '../components/ui/PTooltip.vue'
@@ -2081,6 +2083,12 @@ const normalizeRemoteBackendUrl = (value) => {
   return (/^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`).replace(/\/+$/, '')
 }
 
+const reinitializeRemoteAuthAndGateway = async () => {
+  await refreshDesktopAuth()
+  gatewayClient.disconnect()
+  await gatewayClient.connect()
+}
+
 const setBackendMode = async (mode) => {
   if (appConfig.value.backend_mode === mode) return
 
@@ -2091,6 +2099,9 @@ const setBackendMode = async (mode) => {
       remoteBackendUrlInput.value = nextConfig.remote_backend_url || ''
       remoteBackendApiKeyInput.value = nextConfig.remote_backend_api_key || ''
       napcatStatus.value = 'STOPPED'
+      if (nextConfig.remote_backend_url) {
+        await reinitializeRemoteAuthAndGateway()
+      }
     }
     await checkEnvironment()
   } catch (e) {
@@ -2114,6 +2125,9 @@ const saveRemoteBackendUrl = async () => {
       remote_backend_api_key: (remoteBackendApiKeyInput.value || '').trim()
     }
     await persistAppConfig(nextConfig)
+    if (normalized) {
+      await reinitializeRemoteAuthAndGateway()
+    }
     await checkEnvironment()
   } catch (e) {
     console.error('保存远程后端地址失败:', e)
