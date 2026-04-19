@@ -1,0 +1,23 @@
+{
+  "id": "finish-task",
+  "name": "任务完成",
+  "version": "1.0.0",
+  "author": "PeroCore Team",
+  "description": "结束当前任务，始终允许调用的生命周期工具",
+  "type": "tool",
+  "entry": "index.ts",
+  "category": "core",
+  "platforms": ["windows", "linux", "darwin", "docker"],
+  "toolDefinition": {
+    "name": "finish_task",
+    "description": "结束当前任务。当你完成了用户的请求，或确认无需进一步操作时调用。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "summary": { "type": "string", "description": "任务完成总结" },
+        "status": { "type": "string", "description": "完成状态", "enum": ["done", "partial", "failed"] }
+      },
+      "required": ["summary"]
+    }
+  }
+}

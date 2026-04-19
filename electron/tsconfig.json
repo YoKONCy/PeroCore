@@ -1,0 +1,9 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "../dist-electron",
+    "types": ["node"]
+  },
+  "include": ["main/**/*.ts", "preload/**/*.ts"],
+  "exclude": ["node_modules"]
+}

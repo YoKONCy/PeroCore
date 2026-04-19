@@ -1,0 +1,49 @@
+# 依赖
+node_modules/
+.pnpm-store/
+
+# 构建产物
+dist/
+dist-electron/
+dist_electron/
+
+# Rust 构建
+target/
+packages/native/*/pkg/
+*.node
+
+# 环境与配置
+.env
+.env.local
+.env.*.local
+
+# 编辑器
+.vscode/
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 测试覆盖率
+coverage/
+.vitest/
+
+# 日志
+*.log
+main.log
+
+# 运行时数据
+data/
+
+# 缓存
+.ruff_cache/
+__pycache__/
+*.pyc
+.eslintcache
+.prettiercache

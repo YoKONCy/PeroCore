@@ -1,0 +1,43 @@
+{
+  "name": "@perocore/backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/app.ts",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "clean": "rimraf dist",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.14.0",
+    "@hono/zod-validator": "^0.7.6",
+    "@perocore/shared": "workspace:*",
+    "better-sqlite3": "^11.9.0",
+    "consola": "^3.4.2",
+    "drizzle-orm": "^0.44.0",
+    "hono": "^4.7.0",
+    "nunjucks": "^3.2.4",
+    "triviumdb": "^0.5.1",
+    "zod": "^3.25.76"
+  },
+  "optionalDependencies": {
+    "@perocore/auditor-wasm": "workspace:*",
+    "@perocore/nit-runtime": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.15.0",
+    "@types/nunjucks": "^3.2.6",
+    "drizzle-kit": "^0.31.0",
+    "rimraf": "^6.1.2",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.3"
+  }
+}

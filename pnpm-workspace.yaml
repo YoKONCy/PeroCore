@@ -1,0 +1,5 @@
+# PeroCore-TS Monorepo — pnpm workspace 配置
+packages:
+  - 'packages/*'
+  - 'packages/native/*'
+  - 'electron'

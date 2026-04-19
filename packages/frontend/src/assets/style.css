@@ -1,0 +1,202 @@
+/**
+ * 全局样式入口
+ *
+ * 加载顺序：设计令牌 → Tailwind → 像素风组件类
+ */
+
+/* 1. 设计令牌 (必须最先) */
+@import './tokens.css';
+
+/* 2. Tailwind 层 */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── 3. 像素风组件类 (沿用 v1) ── */
+
+/* 通用像素边框 - 经典 3 层结构 (轮廓/阴影/高光) */
+.pixel-border-sm {
+  box-shadow:
+    calc(var(--pixel-border-width) * -1) 0 0 0 var(--sky-outline),
+    var(--pixel-border-width) 0 0 0 var(--sky-outline),
+    0 calc(var(--pixel-border-width) * -1) 0 0 var(--sky-outline),
+    0 var(--pixel-border-width) 0 0 var(--sky-outline),
+    inset calc(var(--pixel-border-width) * -1) calc(var(--pixel-border-width) * -1) 0 0 var(--sky-light),
+    inset var(--pixel-border-width) var(--pixel-border-width) 0 0 #f8fafc;
+  border: none;
+  transition: var(--transition-normal);
+}
+
+.pixel-border-sm:hover {
+  box-shadow:
+    calc(var(--pixel-border-width) * -1) 0 0 0 var(--sky-hover),
+    var(--pixel-border-width) 0 0 0 var(--sky-hover),
+    0 calc(var(--pixel-border-width) * -1) 0 0 var(--sky-hover),
+    0 var(--pixel-border-width) 0 0 var(--sky-hover),
+    inset calc(var(--pixel-border-width) * -1) calc(var(--pixel-border-width) * -1) 0 0 var(--sky-light),
+    inset var(--pixel-border-width) var(--pixel-border-width) 0 0 #f0f9ff;
+  transform: translateY(-1px);
+}
+
+.pixel-border-sm:active {
+  transform: translateY(1px);
+}
+
+/* 像素风按钮 — Sky */
+.pixel-btn-sky {
+  background-color: var(--sky-face);
+  color: var(--text-on-primary);
+  position: relative;
+  box-shadow:
+    -2px 0 0 0 var(--sky-outline),
+    2px 0 0 0 var(--sky-outline),
+    0 -2px 0 0 var(--sky-outline),
+    0 2px 0 0 var(--sky-outline),
+    inset -2px -2px 0 0 var(--sky-shadow),
+    inset 2px 2px 0 0 var(--sky-light);
+  transition: transform var(--transition-fast);
+}
+
+.pixel-btn-sky:active {
+  transform: translate(2px, 2px);
+  box-shadow:
+    -2px 0 0 0 var(--sky-outline),
+    2px 0 0 0 var(--sky-outline),
+    0 -2px 0 0 var(--sky-outline),
+    0 2px 0 0 var(--sky-outline),
+    inset 2px 2px 0 0 var(--sky-shadow);
+}
+
+/* 像素风按钮 — Pink */
+.pixel-btn-pink {
+  background-color: var(--pink-face);
+  color: var(--text-on-primary);
+  position: relative;
+  box-shadow:
+    -2px 0 0 0 var(--pink-outline),
+    2px 0 0 0 var(--pink-outline),
+    0 -2px 0 0 var(--pink-outline),
+    0 2px 0 0 var(--pink-outline),
+    inset -2px -2px 0 0 var(--pink-shadow),
+    inset 2px 2px 0 0 var(--pink-light);
+  transition: transform var(--transition-fast);
+}
+
+.pixel-btn-pink:active {
+  transform: translate(2px, 2px);
+}
+
+/* 像素风卡片 */
+.pixel-card {
+  background: var(--bg-card);
+  position: relative;
+  box-shadow:
+    -4px 0 0 0 var(--text-primary),
+    4px 0 0 0 var(--text-primary),
+    0 -4px 0 0 var(--text-primary),
+    0 4px 0 0 var(--text-primary);
+}
+
+/* 像素亚克力 (毛玻璃) */
+.pixel-glass {
+  background: var(--bg-glass);
+  backdrop-filter: blur(12px);
+  position: relative;
+  box-shadow:
+    -2px 0 0 0 rgba(255, 255, 255, 0.3),
+    2px 0 0 0 rgba(255, 255, 255, 0.3),
+    0 -2px 0 0 rgba(255, 255, 255, 0.3),
+    0 2px 0 0 rgba(255, 255, 255, 0.3);
+}
+
+/* 像素网格叠加层 */
+.pixel-grid-overlay {
+  position: relative;
+  overflow: hidden;
+}
+
+.pixel-grid-overlay::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(14, 165, 233, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(14, 165, 233, 0.05) 1px, transparent 1px);
+  background-size: 4px 4px;
+  pointer-events: none;
+  z-index: 0;
+  image-rendering: pixelated;
+}
+
+/* ── 像素风动画 ── */
+
+@keyframes pixel-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(0.95); }
+}
+
+@keyframes pixel-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+@keyframes pixel-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
+}
+
+@keyframes jelly {
+  0%, 100% { transform: scale(1, 1); }
+  25% { transform: scale(0.98, 1.02); }
+  50% { transform: scale(1.02, 0.98); }
+  75% { transform: scale(0.99, 1.01); }
+}
+
+.animate-pixel-pulse { animation: pixel-pulse 2s steps(4) infinite; }
+.animate-pixel-bounce { animation: pixel-bounce 0.6s steps(2) infinite; }
+.animate-pixel-float { animation: pixel-float 2s steps(4) infinite; }
+.bouncy-hover:hover { animation: jelly 0.4s steps(4); }
+.pixel-hover-lift:hover { transform: translateY(-2px); }
+.press-effect:active { transform: translate(1px, 1px); }
+
+/* ── 自定义滚动条 (像素风) ── */
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+  box-shadow: inset 2px 0 0 0 var(--scrollbar-track-border);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  box-shadow:
+    inset -2px -2px 0 0 var(--scrollbar-thumb-shadow),
+    inset 2px 2px 0 0 var(--scrollbar-thumb-light);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--sky-hover);
+}
+
+/* ── 全局基础 ── */
+
+body {
+  margin: 0;
+  overflow: hidden;
+  user-select: none;
+  background-color: var(--bg-page);
+  font-family: var(--font-sans);
+  color: var(--text-primary);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#app {
+  width: 100vw;
+  height: 100vh;
+}

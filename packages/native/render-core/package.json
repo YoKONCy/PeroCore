@@ -1,0 +1,14 @@
+{
+  "name": "@perocore/render-core",
+  "version": "0.1.0",
+  "description": "PeroCore 资产加密/反调/打包模块 (Rust N-API, Electron 专属)",
+  "main": "index.ts",
+  "types": "index.d.ts",
+  "scripts": {
+    "build": "napi build --platform --release",
+    "build:debug": "napi build --platform"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^2.14.0"
+  }
+}

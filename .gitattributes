@@ -1,0 +1,12 @@
+# 统一换行符为 LF (11_CROSS_PLATFORM.md §4.1)
+* text=auto eol=lf
+
+# 强制二进制
+*.png binary
+*.jpg binary
+*.ico binary
+*.node binary
+*.wasm binary
+*.tdb binary
+*.db binary
+*.pero binary

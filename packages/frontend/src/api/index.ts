@@ -1,0 +1,6 @@
+export { apiClient } from './client'
+export { transport } from './transport'
+export { streamRequest } from './stream'
+export type { SseEvents } from './stream'
+export type { Transport } from './transport'
+export { ApiError, NetworkError, ErrorSeverity, ERROR_UI_MAP } from './errors'

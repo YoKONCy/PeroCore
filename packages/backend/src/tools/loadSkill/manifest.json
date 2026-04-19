@@ -1,0 +1,22 @@
+{
+  "id": "load-skill",
+  "name": "技能加载",
+  "version": "1.0.0",
+  "author": "PeroCore Team",
+  "description": "按需加载技能的详细操作指令，始终允许调用的生命周期工具",
+  "type": "tool",
+  "entry": "index.ts",
+  "category": "core",
+  "platforms": ["windows", "linux", "darwin", "docker"],
+  "toolDefinition": {
+    "name": "load_skill",
+    "description": "加载指定技能的详细操作指令。当你需要执行某个专业任务时，先调用此工具获取步骤说明。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "skill_id": { "type": "string", "description": "要加载的技能 ID" }
+      },
+      "required": ["skill_id"]
+    }
+  }
+}
