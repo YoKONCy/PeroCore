@@ -75,11 +75,25 @@ async function submitButler() {
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
 onMounted(async () => {
-  // TODO: 接入 API
-  // await fetchFacilities()
-  // await fetchButler()
-  // await fetchAgentsStatus()
-  // pollTimer = setInterval(fetchAgentsStatus, 5000)
+  // Mock 数据 (F3 替换为 API)
+  facilities.value = [
+    { id: 1, name: '佩洛公馆', icon: 'building', description: '默认据点', roomCount: 3 },
+    { id: 2, name: '远程工作站', icon: 'terminal', description: '编程与调试', roomCount: 2 },
+  ] as any
+  rooms.value = [
+    { id: 101, facilityId: 1, name: '客厅', description: '日常聊天', memberCount: 2 },
+    { id: 102, facilityId: 1, name: '书房', description: '知识探讨', memberCount: 1 },
+    { id: 103, facilityId: 1, name: '卧室', description: '深夜闲聊', memberCount: 0 },
+    { id: 201, facilityId: 2, name: '主控室', description: '项目管理', memberCount: 1 },
+    { id: 202, facilityId: 2, name: '调试间', description: 'Debug', memberCount: 0 },
+  ] as any
+  currentFacility.value = facilities.value[0]
+  agentsStatus.value = [
+    { id: 'pero', name: 'Pero', status: 'online', room_id: 101, avatar: 'P' },
+    { id: 'asst2', name: '小助手', status: 'idle', room_id: 101, avatar: 'A' },
+    { id: 'code', name: '代码酱', status: 'online', room_id: 201, avatar: 'C' },
+  ] as any
+  butlerConfig.value = { name: '管家', enabled: true } as any
 })
 
 onUnmounted(() => {

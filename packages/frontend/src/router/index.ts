@@ -34,6 +34,18 @@ const router = createRouter({
       component: () => import('@/views/LauncherView.vue'),
       meta: { title: '启动器' },
     },
+    {
+      path: '/pet',
+      name: 'Pet',
+      component: () => import('@/views/Pet3DView.vue'),
+      meta: { title: '宠物' },
+    },
+    {
+      path: '/stronghold',
+      name: 'Stronghold',
+      component: () => import('@/views/StrongholdView.vue'),
+      meta: { title: '据点' },
+    },
   ],
 })
 
