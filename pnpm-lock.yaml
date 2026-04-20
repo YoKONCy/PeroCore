@@ -91,8 +91,8 @@ importers:
         specifier: ^3.2.4
         version: 3.2.4(chokidar@3.6.0)
       triviumdb:
-        specifier: ^0.5.0
-        version: 0.5.0
+        specifier: ^0.5.1
+        version: 0.5.1
       zod:
         specifier: ^3.25.76
         version: 3.25.76
@@ -2472,8 +2472,8 @@ packages:
     resolution: {integrity: sha512-65P7iz6X5yEr1cwcgvQxbbIw7Uk3gOy5dIdtZ4rDveLqhrdJP+Li/Hx6tyK0NEb+2GCyneCMJiGqrADCSNk8sQ==}
     engines: {node: '>=8.0'}
 
-  triviumdb@0.5.0:
-    resolution: {integrity: sha512-Hoac9RtUpyyAJbzS+pqaS4xd7EvYm0NI0zP3Behtb9lrV4WMMzrU6V1Z1pufTQ282SaecXT6bQrkNiQ5biGkiA==}
+  triviumdb@0.5.1:
+    resolution: {integrity: sha512-G0a9O9dgtSAIpDk/TP6F+CzUboJavUUoMeSV8odfGAHdoqHfvbkboa/P7Nuuy67uA1wYJ+eGKQZoZRfY8BTW9Q==}
 
   ts-api-utils@2.5.0:
     resolution: {integrity: sha512-OJ/ibxhPlqrMM0UiNHJ/0CKQkoKF243/AEmplt3qpRgkW8VG7IfOS41h7V8TjITqdByHzrjcS/2si+y4lIh8NA==}
@@ -4754,7 +4754,7 @@ snapshots:
     dependencies:
       is-number: 7.0.0
 
-  triviumdb@0.5.0: {}
+  triviumdb@0.5.1: {}
 
   ts-api-utils@2.5.0(typescript@5.9.3):
     dependencies:
