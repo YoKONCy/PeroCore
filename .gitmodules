@@ -1,0 +1,6 @@
+[submodule "packages/native/render-core"]
+	path = packages/native/render-core
+	# 正式开发时请将 url 替换为私有远程仓库地址，例如:
+	# url = git@github.com:YOUR_ORG/pero-render-core-private.git
+	# 当前为本地路径占位，适用于无远程时的本地备份场景
+	url = file://C:/Users/Administrator/OneDrive/桌面/workspace/PeroCore-TS/packages/native/render-core
