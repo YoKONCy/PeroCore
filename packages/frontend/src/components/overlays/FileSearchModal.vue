@@ -15,6 +15,7 @@
 import PixelIcon from '../pixel/PixelIcon.vue'
 import { PButton } from '../pixel'
 import { useEventListener } from '../../composables'
+import { systemApi } from '../../api/modules/systemApi'
 
 interface Props {
   visible?: boolean
@@ -45,17 +46,27 @@ function getFileName(path: string): string {
 function getFileIcon(path: string): string {
   const ext = path.split('.').pop()?.toLowerCase() ?? ''
   const icons: Record<string, string> = {
-    pdf: 'file', doc: 'file', docx: 'file',
-    png: 'image', jpg: 'image', jpeg: 'image', gif: 'image',
-    txt: 'file', log: 'file', zip: 'folder',
+    pdf: 'file',
+    doc: 'file',
+    docx: 'file',
+    png: 'image',
+    jpg: 'image',
+    jpeg: 'image',
+    gif: 'image',
+    txt: 'file',
+    log: 'file',
+    zip: 'folder',
   }
   return icons[ext] ?? 'file'
 }
 
-/** 打开文件 (TODO: 接入 systemApi) */
-function openFile(path: string) {
-  // TODO: 通过 systemApi.openPath(path) 打开
-  void path
+/** 打开文件 (P2-13: 接入 systemApi) */
+async function openFile(path: string) {
+  try {
+    await systemApi.openPath(path)
+  } catch (err) {
+    console.error('打开文件失败:', err)
+  }
 }
 
 /** Esc 关闭 */
@@ -139,7 +150,7 @@ useEventListener(window, 'keydown', (e: Event) => {
   align-items: center;
   justify-content: space-between;
   border-bottom: 2px solid var(--color-border);
-  background: var(--color-blue-50);
+  background: var(--color-sky-50);
 }
 .fsm-header-title {
   display: flex;
@@ -157,7 +168,9 @@ useEventListener(window, 'keydown', (e: Event) => {
   cursor: pointer;
   transition: color 0.15s;
 }
-.fsm-close-btn:hover { color: var(--color-red-500); }
+.fsm-close-btn:hover {
+  color: var(--color-red-face);
+}
 
 .fsm-body {
   flex: 1;
@@ -166,7 +179,11 @@ useEventListener(window, 'keydown', (e: Event) => {
   padding: 8px;
 }
 
-.fsm-list { display: flex; flex-direction: column; gap: 4px; }
+.fsm-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
 
 .fsm-file-item {
   display: flex;
@@ -179,11 +196,17 @@ useEventListener(window, 'keydown', (e: Event) => {
 }
 .fsm-file-item:hover {
   background: var(--color-bg-hover);
-  border-color: var(--color-blue-200);
+  border-color: var(--color-sky-light);
   transform: translateX(2px);
 }
-.fsm-file-icon { color: var(--color-blue-400); flex-shrink: 0; }
-.fsm-file-info { flex: 1; min-width: 0; }
+.fsm-file-icon {
+  color: var(--color-sky-hover);
+  flex-shrink: 0;
+}
+.fsm-file-info {
+  flex: 1;
+  min-width: 0;
+}
 .fsm-file-name {
   display: block;
   font-size: 13px;
@@ -220,7 +243,7 @@ useEventListener(window, 'keydown', (e: Event) => {
   align-items: center;
   justify-content: space-between;
   border-top: 2px solid var(--color-border);
-  background: var(--color-blue-50);
+  background: var(--color-sky-50);
 }
 .fsm-hint {
   font-size: 11px;
@@ -228,12 +251,25 @@ useEventListener(window, 'keydown', (e: Event) => {
 }
 
 /* 过渡 */
-.fade-enter-active { transition: opacity 0.2s; }
-.fade-leave-active { transition: opacity 0.15s; }
-.fade-enter-from, .fade-leave-to { opacity: 0; }
+.fade-enter-active {
+  transition: opacity 0.2s;
+}
+.fade-leave-active {
+  transition: opacity 0.15s;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
 
 /* 滚动条 */
-.fsm-body::-webkit-scrollbar { width: 4px; }
-.fsm-body::-webkit-scrollbar-track { background: transparent; }
-.fsm-body::-webkit-scrollbar-thumb { background: var(--color-blue-200); }
+.fsm-body::-webkit-scrollbar {
+  width: 4px;
+}
+.fsm-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+.fsm-body::-webkit-scrollbar-thumb {
+  background: var(--color-sky-light);
+}
 </style>

@@ -50,13 +50,13 @@ const store = useNotificationStore()
 }
 
 .modal-error {
-  border-color: var(--color-red-500);
+  border-color: var(--color-red-face);
 }
 .modal-warning {
   border-color: var(--color-yellow-500);
 }
 .modal-info {
-  border-color: var(--color-blue-500);
+  border-color: var(--color-sky-500);
 }
 
 .modal-header {

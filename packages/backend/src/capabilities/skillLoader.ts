@@ -6,7 +6,7 @@
  * 2. 按需加载完整 Skill 指令 (L2 渐进式加载)
  * 3. 按需加载参考文件 (L3)
  *
- * 文件结构见 16_CAPABILITY_GATE.md §3.1
+ * 文件结构
  *
  * @module packages/backend/src/capabilities/skillLoader
  */

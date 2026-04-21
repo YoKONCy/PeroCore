@@ -2,7 +2,7 @@
  * 应用级错误类
  *
  * 携带业务 code 和 HTTP 状态码，
- * 配合 errorHandler 中间件自动格式化响应 (02_API_RESPONSE_SPEC.md §7.1)。
+ * 配合 errorHandler 中间件自动格式化响应。
  *
  * @module packages/backend/src/lib/appError
  */

@@ -70,14 +70,21 @@ export class ToolRegistry {
    */
   syncFromExtensionManager(extensionManager: {
     getAllToolDefinitions(): Array<{ name: string; description: string; parameters?: unknown }>
-    getTool(name: string): {
-      execute?(args: Record<string, unknown>, ctx: unknown): Promise<{ success: boolean; data?: unknown; error?: string }>
-    } | undefined
+    getTool(name: string):
+      | {
+          execute?(
+            args: Record<string, unknown>,
+            ctx: unknown,
+          ): Promise<{ success: boolean; data?: unknown; error?: string }>
+        }
+      | undefined
   }): number {
     const definitions = extensionManager.getAllToolDefinitions()
     let synced = 0
 
     for (const def of definitions) {
+      if (!def?.name) continue // 防御性跳过无效定义
+
       // 静态内置工具优先，不覆盖
       if (this.tools.has(def.name)) {
         logger.debug(`跳过已注册工具: ${def.name} (内置优先)`)
@@ -86,7 +93,7 @@ export class ToolRegistry {
 
       const tool = extensionManager.getTool(def.name)
       if (!tool?.execute) {
-        logger.warn(`ExtensionManager Tool ${def.name} 缺少 execute 方法，跳过`)
+        logger.debug(`ExtensionManager Tool ${def.name} 无顶层 execute (可能是多工具模块，已通过内置注册)`)
         continue
       }
 
@@ -100,7 +107,11 @@ export class ToolRegistry {
       }
 
       this.register(
-        { name: def.name, description: def.description, parameters: def.parameters as Record<string, unknown> },
+        {
+          name: def.name,
+          description: def.description,
+          parameters: def.parameters as Record<string, unknown>,
+        },
         handler,
       )
       synced++
@@ -144,4 +155,3 @@ export class ToolRegistry {
     return this.tools.size
   }
 }
-

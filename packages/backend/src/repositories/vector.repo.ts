@@ -1,7 +1,7 @@
 /**
  * 向量 Repository
  *
- * TriviumDB 的数据访问封装 (04_BACKEND_ARCHITECTURE.md §4.2)。
+ * TriviumDB 的数据访问封装。
  * 通过 MemoryStoreRegistry 获取物理隔离的 Store 实例。
  *
  * @module packages/backend/src/repositories/vector.repo
@@ -76,7 +76,7 @@ export class VectorRepository {
   }
 
   /**
-   * 认知管线高级检索 (PEDSA v2 入口)
+   * 认知管线高级检索 (PEDSA 入口)
    */
   async searchAdvanced(
     queryVector: number[],

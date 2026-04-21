@@ -33,9 +33,12 @@ const emit = defineEmits<{
 const content = ref(props.initialContent)
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 
-watch(() => props.initialContent, (v) => {
-  content.value = v
-})
+watch(
+  () => props.initialContent,
+  (v) => {
+    content.value = v
+  },
+)
 
 function onInput() {
   emit('change', content.value)
@@ -111,7 +114,7 @@ onMounted(() => {
   gap: 4px;
   font-size: 10px;
   font-weight: 700;
-  color: var(--color-blue-500);
+  color: var(--color-sky-500);
   text-transform: uppercase;
 }
 .ce-path {
@@ -139,7 +142,14 @@ onMounted(() => {
   white-space: pre;
   overflow: auto;
 }
-.ce-textarea::-webkit-scrollbar { width: 4px; height: 4px; }
-.ce-textarea::-webkit-scrollbar-track { background: transparent; }
-.ce-textarea::-webkit-scrollbar-thumb { background: var(--color-blue-200); }
+.ce-textarea::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+.ce-textarea::-webkit-scrollbar-track {
+  background: transparent;
+}
+.ce-textarea::-webkit-scrollbar-thumb {
+  background: var(--color-sky-light);
+}
 </style>

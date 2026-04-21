@@ -6,7 +6,7 @@
  * 2. 收集完整 NIT 脚本块供后续执行
  * 3. 正常文本透传
  *
- * 替代 v1 的 NITStreamFilter + ThinkingBlockStreamFilter。
+ * 统一 NIT 流式过滤与 Thinking 块过滤。
  *
  * @module packages/backend/src/nit/streamFilter
  */

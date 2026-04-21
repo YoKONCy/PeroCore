@@ -53,13 +53,13 @@ withDefaults(defineProps<Props>(), {
   border-color: var(--color-border);
 }
 .p-badge-primary {
-  background: var(--color-blue-100);
-  color: var(--color-blue-600);
-  border-color: var(--color-blue-300);
+  background: var(--color-sky-100);
+  color: var(--color-sky-shadow);
+  border-color: var(--color-sky-light);
 }
 .p-badge-success {
   background: var(--color-green-100);
-  color: var(--color-green-600);
+  color: var(--color-emerald-shadow);
   border-color: var(--color-green-300);
 }
 .p-badge-warning {
@@ -69,7 +69,7 @@ withDefaults(defineProps<Props>(), {
 }
 .p-badge-danger {
   background: var(--color-red-100);
-  color: var(--color-red-600);
+  color: var(--color-red-shadow);
   border-color: var(--color-red-300);
 }
 

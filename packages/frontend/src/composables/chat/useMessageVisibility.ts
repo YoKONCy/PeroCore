@@ -6,7 +6,6 @@
  * - 配合 CSS content-visibility: auto 优化布局开销
  * - 恢复时自动 resume
  *
- * @see 12_FRONTEND_PERFORMANCE.md §3.3
  */
 
 import { ref, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue'

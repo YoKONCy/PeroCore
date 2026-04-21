@@ -9,17 +9,12 @@
  *
  * 依赖 @perocore/nit-runtime 的 minGRU 前向推理 (TS mock 或 Rust N-API)。
  *
- * @see 10_MEMORY_SYSTEM.md §14.2.A
  * @module packages/backend/src/services/retrieval/contextRnn
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
-import {
-  HIDDEN_DIM,
-  minGruForward,
-  projectInput,
-} from '@perocore/nit-runtime'
+import { HIDDEN_DIM, minGruForward, projectInput } from '@perocore/nit-runtime'
 import type { PathResolver } from '../../core/pathResolver'
 import { createLogger } from '../../lib/logger'
 
@@ -108,7 +103,9 @@ export class ContextRnn {
     this.projMatrix = this.loadOrInitWeights('proj', PROJ_MATRIX_SIZE, INPUT_DIM, HIDDEN_DIM)
     this.outputMatrix = this.loadOrInitWeights('output', OUTPUT_MATRIX_SIZE, HIDDEN_DIM, INPUT_DIM)
 
-    logger.info(`ContextRNN 初始化完成 (inputDim=${this.config.inputDim}, hiddenDim=${this.config.hiddenDim})`)
+    logger.info(
+      `ContextRNN 初始化完成 (inputDim=${this.config.inputDim}, hiddenDim=${this.config.hiddenDim})`,
+    )
   }
 
   /**
@@ -267,10 +264,20 @@ export class ContextRnn {
    * 获取统计信息
    */
   getStats(): Array<{ agentId: string; mode: string; updateCount: number; lastUpdatedAt: number }> {
-    const stats: Array<{ agentId: string; mode: string; updateCount: number; lastUpdatedAt: number }> = []
+    const stats: Array<{
+      agentId: string
+      mode: string
+      updateCount: number
+      lastUpdatedAt: number
+    }> = []
     for (const [key, state] of this.states) {
       const [agentId, mode] = key.split(':') as [string, string]
-      stats.push({ agentId, mode, updateCount: state.updateCount, lastUpdatedAt: state.lastUpdatedAt })
+      stats.push({
+        agentId,
+        mode,
+        updateCount: state.updateCount,
+        lastUpdatedAt: state.lastUpdatedAt,
+      })
     }
     return stats
   }
@@ -305,16 +312,25 @@ export class ContextRnn {
     return this.pathResolver.resolve(`@data/shared/rnn_${name}.bin`)
   }
 
-  private loadOrInitWeights(name: string, size: number, fanIn: number, fanOut: number): Float32Array {
+  private loadOrInitWeights(
+    name: string,
+    size: number,
+    fanIn: number,
+    fanOut: number,
+  ): Float32Array {
     const filePath = this.resolveWeightsPath(name)
     if (existsSync(filePath)) {
       try {
         const buffer = readFileSync(filePath)
         if (buffer.length === size * 4) {
           logger.debug(`RNN 权重已加载: ${name} (${size} 元素)`)
-          return new Float32Array(buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength))
+          return new Float32Array(
+            buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength),
+          )
         }
-      } catch { /* fallthrough to init */ }
+      } catch {
+        /* fallthrough to init */
+      }
     }
 
     // Xavier 均匀初始化

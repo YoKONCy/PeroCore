@@ -2,7 +2,6 @@
 /**
  * PEmpty — 像素风空状态
  *
- * 迁移自 v1，保留漂浮星星 + 猫爪。
  */
 import PixelIcon from './PixelIcon.vue'
 
@@ -74,7 +73,7 @@ withDefaults(defineProps<Props>(), {
   transition: all 0.5s;
 }
 .p-empty:hover .p-empty-icon-box {
-  border-color: var(--color-blue-300);
+  border-color: var(--color-sky-light);
   box-shadow: 0 0 20px rgba(56, 189, 248, 0.1);
 }
 
@@ -84,7 +83,7 @@ withDefaults(defineProps<Props>(), {
 }
 .p-empty:hover .p-empty-icon {
   opacity: 0.6;
-  color: var(--color-blue-500);
+  color: var(--color-sky-500);
   transform: scale(1.1);
 }
 
@@ -93,19 +92,21 @@ withDefaults(defineProps<Props>(), {
   opacity: 0;
   transition: opacity 0.5s;
 }
-.p-empty:hover .p-empty-star { opacity: 1; }
+.p-empty:hover .p-empty-star {
+  opacity: 1;
+}
 .p-empty-star-1 {
   top: -8px;
   right: -8px;
   animation: bounce 1s infinite;
-  color: var(--color-blue-400);
+  color: var(--color-sky-hover);
 }
 .p-empty-star-2 {
   bottom: -4px;
   left: -12px;
   animation: pulse 1.5s infinite;
   animation-delay: 0.3s;
-  color: var(--color-blue-300);
+  color: var(--color-sky-light);
 }
 
 .p-empty-text {
@@ -118,7 +119,7 @@ withDefaults(defineProps<Props>(), {
   transition: color 0.5s;
 }
 .p-empty:hover .p-empty-desc {
-  color: var(--color-blue-500);
+  color: var(--color-sky-500);
 }
 
 .p-empty-hint {
@@ -139,13 +140,13 @@ withDefaults(defineProps<Props>(), {
 .p-empty-dot {
   width: 6px;
   height: 6px;
-  background: var(--color-blue-200);
+  background: var(--color-sky-light);
   border-radius: 50%;
 }
 .p-empty-hint-text {
   font-size: 10px;
   font-family: var(--font-pixel), monospace;
-  color: var(--color-blue-300);
+  color: var(--color-sky-light);
   font-style: italic;
 }
 
@@ -161,15 +162,25 @@ withDefaults(defineProps<Props>(), {
 }
 .p-empty:hover .p-empty-paw {
   opacity: 0.3;
-  color: var(--color-blue-400);
+  color: var(--color-sky-hover);
 }
 
 @keyframes bounce {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-3px); }
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
 }
 @keyframes pulse {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 </style>

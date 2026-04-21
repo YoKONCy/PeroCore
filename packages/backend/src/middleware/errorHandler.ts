@@ -2,7 +2,7 @@
  * 全局错误处理中间件
  *
  * 将 AppError 转为标准信封响应，未知异常兜底为 500。
- * 技术细节入日志，不泄露堆栈 (02_API_RESPONSE_SPEC.md §7.2)。
+ * 技术细节入日志，不泄露堆栈。
  *
  * @module packages/backend/src/middleware/errorHandler
  */

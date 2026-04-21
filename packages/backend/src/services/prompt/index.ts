@@ -13,8 +13,4 @@ export {
   type PromptPreset,
   type RenderedMessage,
 } from './mdpEngine'
-export {
-  PromptService,
-  type PromptResult,
-  type PromptMessagesResult,
-} from './promptService'
+export { PromptService, type PromptResult, type PromptMessagesResult } from './promptService'

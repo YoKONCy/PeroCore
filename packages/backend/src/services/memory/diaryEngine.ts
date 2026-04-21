@@ -1,21 +1,21 @@
 /**
  * Diary Engine — 统一日记生成引擎
  *
- * 替代 v1 的 5 套独立报告:
+ * 统一日记报告生成:
  * - desktop_diary  → profile="default"
  * - social_daily   → profile="social"
  * - work_log       → profile="work"
  * - weekly_report  → ❌ 砍掉 (D56)
  * - waifu_text     → Hook 扩展
  *
- * 核心创新 (10_MEMORY_SYSTEM.md §11.2):
+ * 核心创新:
  * 一次 LLM 调用同时输出日记 + 实体 + 图谱边 + 情感
  *
  * @module packages/backend/src/services/memory/diaryEngine
  */
 
 import type { LlmService, ModelConfig } from '../llm/llmService'
-import type { ConfigRepository } from '../../repositories/config.repo'
+import type { MdpEngine } from '../prompt/mdpEngine'
 import { parseLlmJson } from '../../shared/llmJsonParser'
 import { createLogger } from '../../lib/logger'
 
@@ -71,6 +71,8 @@ export interface DiaryInput {
   profile: string
   /** 主人名字 */
   ownerName?: string
+  /** Agent 人设定义 (完整人设文本) */
+  personaDefinition?: string
   /** 附加上下文 (如工作模式的任务名) */
   extraContext?: string
 }
@@ -82,17 +84,19 @@ export interface DiaryInput {
 export class DiaryEngine {
   constructor(
     private llmService: LlmService,
-    private configRepo: ConfigRepository,
+    private getModelConfig: () => Promise<ModelConfig | null>,
+    private mdpEngine: MdpEngine,
   ) {}
 
   /**
    * 生成日记
    *
    * 一次 LLM 调用，输出日记 + 实体 + 图谱边 + 情感。
-   * 替代 v1 的 3 次独立调用 (Scorer + GraphGardener + DiaryGenerator)。
+   * 单次调用统一编排 Scorer + GraphGardener + DiaryGenerator。
    */
   async generate(input: DiaryInput): Promise<DiaryEntry | null> {
-    const { summaries, agentId, agentName, profile, ownerName, extraContext } = input
+    const { summaries, agentId, agentName, profile, ownerName, personaDefinition, extraContext } =
+      input
 
     if (summaries.length === 0) {
       logger.info(`无摘要可生成日记: agent=${agentId}`)
@@ -108,8 +112,17 @@ export class DiaryEngine {
     const today = new Date().toISOString().slice(0, 10)
     const owner = ownerName ?? '主人'
 
-    // 组装 Prompt
-    const systemPrompt = this.buildPrompt(agentName, owner, profile, extraContext)
+    // 通过 MDP 模板渲染 Prompt
+    const profileDesc = PROFILE_DESCRIPTIONS[profile] ?? '日常对话'
+    const systemPrompt = this.mdpEngine.render('tasks/diary/diary', {
+      agent_name: agentName,
+      owner_name: owner,
+      persona_definition: personaDefinition ?? '',
+      profile_desc: profileDesc,
+      extra_context: extraContext ?? '',
+      date_str: today,
+      summaries: summaries.map((s, i) => `${i + 1}. ${s}`).join('\n'),
+    })
     const userContent = this.buildUserContent(summaries, today)
 
     try {
@@ -164,55 +177,12 @@ export class DiaryEngine {
 
   // ── 私有方法 ──
 
-  private buildPrompt(
-    agentName: string,
-    ownerName: string,
-    profile: string,
-    extraContext?: string,
-  ): string {
-    const profileDesc = PROFILE_DESCRIPTIONS[profile] ?? '日常对话'
-
-    const lines = [
-      `你是 ${agentName}，正在写今天的日记。`,
-      `你的主人叫 ${ownerName}。今天的对话属于「${profileDesc}」类型。`,
-      extraContext ? `额外信息: ${extraContext}` : '',
-      '',
-      '请根据今天的对话摘要，以第一人称视角写一篇简短日记。',
-      '同时提取出人物、地点、物品、概念等实体，以及它们之间的关系。',
-      '',
-      '输出严格 JSON 格式（不要使用 markdown 代码块）:',
-      '{',
-      '  "diary": "日记正文（200-400字，第一人称，带情感）",',
-      '  "entities": [{"name": "实体名", "type": "person|place|item|concept|event"}],',
-      '  "relations": [{"from": "主体", "to": "客体", "label": "关系", "weight": 0.0-1.0}],',
-      '  "mood": "happy|calm|sad|excited|tired|anxious|neutral",',
-      '  "highlights": ["今日亮点1", "今日亮点2"]',
-      '}',
-    ]
-    return lines.filter(Boolean).join('\n')
-  }
-
   private buildUserContent(summaries: string[], date: string): string {
     const lines = [`日期: ${date}`, '', '今日对话摘要:', '']
     for (let i = 0; i < summaries.length; i++) {
       lines.push(`${i + 1}. ${summaries[i]}`)
     }
     return lines.join('\n')
-  }
-
-  private async getModelConfig(): Promise<ModelConfig | null> {
-    const apiKey = await this.configRepo.get('global_llm_api_key')
-    if (!apiKey) return null
-
-    const apiBase = await this.configRepo.get('global_llm_api_base')
-    const modelId = await this.configRepo.get('diary_model_id')
-
-    return {
-      provider: 'openai',
-      modelId: modelId ?? 'gpt-4o-mini',
-      apiKey,
-      apiBase: apiBase ?? undefined,
-    }
   }
 }
 

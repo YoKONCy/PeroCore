@@ -2,7 +2,6 @@
 /**
  * PTooltip — 像素风提示气泡
  *
- * 迁移自 v1，4 方向 Teleport 定位 + 边界检查。
  */
 import { ref, computed, nextTick } from 'vue'
 
@@ -77,22 +76,12 @@ function hide() {
 </script>
 
 <template>
-  <div
-    ref="triggerRef"
-    class="p-tooltip-trigger"
-    @mouseenter="show"
-    @mouseleave="hide"
-  >
+  <div ref="triggerRef" class="p-tooltip-trigger" @mouseenter="show" @mouseleave="hide">
     <slot />
 
     <Teleport to="body">
       <Transition name="tooltip">
-        <div
-          v-if="visible"
-          ref="tooltipRef"
-          class="p-tooltip"
-          :style="positionStyle"
-        >
+        <div v-if="visible" ref="tooltipRef" class="p-tooltip" :style="positionStyle">
           {{ content }}
         </div>
       </Transition>
@@ -115,7 +104,7 @@ function hide() {
   font-family: var(--font-pixel), monospace;
   color: var(--color-text-primary);
   background: var(--color-bg-primary);
-  border: 2px solid var(--color-blue-400);
+  border: 2px solid var(--color-sky-hover);
   box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.1);
   pointer-events: none;
   user-select: none;
@@ -124,8 +113,12 @@ function hide() {
   word-break: break-word;
 }
 
-.tooltip-enter-active { transition: all 0.1s ease-out; }
-.tooltip-leave-active { transition: all 0.075s ease-in; }
+.tooltip-enter-active {
+  transition: all 0.1s ease-out;
+}
+.tooltip-leave-active {
+  transition: all 0.075s ease-in;
+}
 .tooltip-enter-from,
 .tooltip-leave-to {
   opacity: 0;

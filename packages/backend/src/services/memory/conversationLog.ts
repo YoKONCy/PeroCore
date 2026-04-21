@@ -119,4 +119,108 @@ export class ConversationLogService {
     await this.logRepo.deleteBySession(sessionId, agentId)
     logger.info(`会话已清除: ${sessionId}`)
   }
+
+  /** 编辑消息内容 (P2-7) */
+  async updateMessage(id: number, newContent: string): Promise<boolean> {
+    const ok = await this.logRepo.updateContent(id, newContent)
+    if (ok) logger.debug(`消息已编辑: id=${id}`)
+    return ok
+  }
+
+  /** 删除单条消息 (P2-7) */
+  async deleteMessage(id: number): Promise<boolean> {
+    const ok = await this.logRepo.deleteById(id)
+    if (ok) logger.debug(`消息已删除: id=${id}`)
+    return ok
+  }
+
+  /** 删除指定 Agent 的所有会话日志 */
+  async deleteAllSessions(agentId: string): Promise<number> {
+    const logs = await this.logRepo.query({ agentId, limit: 100000 })
+    const sessionIds = [...new Set(logs.map((l) => l.sessionId))]
+    for (const sid of sessionIds) {
+      await this.logRepo.deleteBySession(sid, agentId)
+    }
+    logger.info(`已删除 ${agentId} 的 ${sessionIds.length} 个会话`)
+    return sessionIds.length
+  }
+
+  /**
+   * 按 sessionId 分组，返回分页的会话摘要列表
+   *
+   * 将原 chat.router.ts 中的分组/排序/分页逻辑下沉至 Service 层。
+   * 返回 PaginatedData 分页结构。
+   */
+  async listSessionSummaries(params: {
+    agentId: string
+    source?: string
+    page: number
+    pageSize: number
+  }): Promise<{
+    items: SessionSummary[]
+    total: number
+    page: number
+    pageSize: number
+    hasMore: boolean
+  }> {
+    const { agentId, source, page, pageSize } = params
+    const offset = (page - 1) * pageSize
+
+    // 多取一些日志用于分组 (分组后数量远小于日志条数)
+    const logs = await this.logRepo.query({
+      agentId,
+      source,
+      limit: pageSize * 5,
+      offset: 0,
+    })
+
+    // 按 sessionId 分组
+    const sessionMap = new Map<string, SessionSummary>()
+
+    for (const log of logs) {
+      const sid = log.sessionId
+      const existing = sessionMap.get(sid)
+      const ts = log.timestamp ? new Date(log.timestamp).toISOString() : new Date().toISOString()
+
+      if (!existing) {
+        sessionMap.set(sid, {
+          sessionId: sid,
+          agentId: log.agentId,
+          source: log.source,
+          messageCount: 1,
+          firstMessageAt: ts,
+          lastMessageAt: ts,
+          preview: log.role === 'user' ? log.content.slice(0, 100) : '',
+        })
+      } else {
+        existing.messageCount++
+        if (ts < existing.firstMessageAt) existing.firstMessageAt = ts
+        if (ts > existing.lastMessageAt) existing.lastMessageAt = ts
+        if (log.role === 'user' && !existing.preview) {
+          existing.preview = log.content.slice(0, 100)
+        }
+      }
+    }
+
+    // 按最后消息时间排序 (DESC)
+    const allSessions = Array.from(sessionMap.values()).sort((a, b) =>
+      b.lastMessageAt.localeCompare(a.lastMessageAt),
+    )
+
+    const total = allSessions.length
+    const items = allSessions.slice(offset, offset + pageSize)
+
+    return { items, total, page, pageSize, hasMore: offset + pageSize < total }
+  }
+}
+
+/** 会话摘要 DTO */
+export interface SessionSummary {
+  sessionId: string
+  agentId: string
+  source: string
+  messageCount: number
+  firstMessageAt: string
+  lastMessageAt: string
+  preview: string
 }

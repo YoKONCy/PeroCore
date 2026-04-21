@@ -6,7 +6,7 @@
  * 2. 管理活跃 Agent 切换
  * 3. 提供 AgentProfile 数据给 PromptService / ToolPolicy
  *
- * v2 变化 (对比 v1 agent_manager.py 385行)：
+ * 核心特性：
  * - 移除全局单例，通过 DI 注入
  * - 移除 DB 访问和 Gateway 广播 (拆到 Router 层)
  * - 支持内置 + 用户自定义双目录
@@ -14,9 +14,18 @@
  * @module packages/backend/src/services/agent/agentManager
  */
 
-import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs'
 import path from 'node:path'
+import {
+  existsSync,
+  readdirSync,
+  statSync,
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  rmSync,
+} from 'node:fs'
 import type { PathResolver } from '../../core/pathResolver'
+import type { ConfigRepository } from '../../repositories/config.repo'
 import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('AgentManager')
@@ -50,6 +59,8 @@ export interface AgentProfile {
   promptPath: string
   /** 是否使用表情包 */
   useStickers: boolean
+  /** 看板娘动态文案 (合并自 waifu_texts.json) */
+  waifuTexts: Record<string, unknown> | null
 }
 
 // ─────────────────────────────────────────────
@@ -66,7 +77,10 @@ export class AgentManager {
   /** 已启用的 Agent ID 集合 */
   enabledAgents = new Set<string>()
 
-  constructor(private pathResolver: PathResolver) {
+  constructor(
+    private pathResolver: PathResolver,
+    private configRepo?: ConfigRepository,
+  ) {
     this.reloadAgents()
   }
 
@@ -166,6 +180,106 @@ export class AgentManager {
     }))
   }
 
+  /**
+   * 创建自定义 Agent (B6-3)
+   *
+   * 在 @data/agents/ 下创建目录结构:
+   *   <agentId>/
+   *     agent.json       ← 基本配置
+   *     personas/
+   *       work.md         ← 工作人设骨架
+   *       social.md       ← 社交人设骨架
+   */
+  createAgent(opts: { id: string; name: string; description?: string }): AgentProfile {
+    const agentId = opts.id.toLowerCase()
+
+    // 检查重复
+    if (this.agents.has(agentId)) {
+      throw new Error(`Agent "${agentId}" 已存在`)
+    }
+
+    // 创建目录
+    const userAgentsDir = this.pathResolver.resolve('@data/agents')
+    const agentDir = path.join(userAgentsDir, agentId)
+    mkdirSync(agentDir, { recursive: true })
+    mkdirSync(path.join(agentDir, 'personas'), { recursive: true })
+
+    // 写入 agent.json
+    const config = {
+      name: opts.name,
+      description: opts.description ?? '',
+      personas: {
+        work: 'personas/work.md',
+        social: 'personas/social.md',
+      },
+      traits: {
+        work: [],
+        social: [],
+      },
+      social: {},
+      tool_policies: {},
+    }
+    const configPath = path.join(agentDir, 'agent.json')
+    writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8')
+
+    // 写入人设骨架
+    const defaultPersona = `# ${opts.name} 人设\n\n请在此编写角色人设。\n`
+    writeFileSync(path.join(agentDir, 'personas', 'work.md'), defaultPersona, 'utf-8')
+    writeFileSync(path.join(agentDir, 'personas', 'social.md'), defaultPersona, 'utf-8')
+
+    // 加载到内存
+    const profile = this.loadAgentConfig(agentId, agentDir, configPath)
+    this.agents.set(agentId, profile)
+    this.enabledAgents.add(agentId)
+
+    logger.info(`创建自定义 Agent: ${opts.name} (${agentId})`)
+    return profile
+  }
+
+  /**
+   * 删除自定义 Agent (B6-3)
+   *
+   * 删除整个 Agent 目录并从内存中移除。
+   * 禁止删除内置 Agent 或当前活跃 Agent。
+   */
+  deleteAgent(agentId: string): void {
+    const id = agentId.toLowerCase()
+    const profile = this.agents.get(id)
+    if (!profile) {
+      throw new Error(`Agent "${id}" 不存在`)
+    }
+
+    // 禁止删除当前活跃角色
+    if (id === this.activeAgentId) {
+      throw new Error(`不能删除当前活跃的 Agent: ${id}`)
+    }
+
+    // 禁止删除内置 Agent (判断路径是否在 @data/ 下)
+    const userAgentsDir = this.pathResolver.resolve('@data/agents')
+    const isUserAgent = profile.configPath.startsWith(userAgentsDir)
+    if (!isUserAgent) {
+      throw new Error(`不能删除内置 Agent: ${id}`)
+    }
+
+    // 删除目录
+    const agentDir = path.dirname(profile.configPath)
+    rmSync(agentDir, { recursive: true, force: true })
+
+    // 从内存移除
+    this.agents.delete(id)
+    this.enabledAgents.delete(id)
+
+    logger.info(`已删除 Agent: ${id}`)
+  }
+
+  /** 判断 Agent 是否为用户自定义 (非内置) */
+  isUserAgent(agentId: string): boolean {
+    const profile = this.agents.get(agentId.toLowerCase())
+    if (!profile) return false
+    const userAgentsDir = this.pathResolver.resolve('@data/agents')
+    return profile.configPath.startsWith(userAgentsDir)
+  }
+
   // ─────────────────────────────────────────
   // 内部
   // ─────────────────────────────────────────
@@ -176,7 +290,11 @@ export class AgentManager {
       const agentDir = path.join(dir, entry)
       if (!statSync(agentDir).isDirectory()) continue
 
-      const configPath = path.join(agentDir, 'config.json')
+      // 优先 agent.json (合并格式), 回退 config.json
+      let configPath = path.join(agentDir, 'agent.json')
+      if (!existsSync(configPath)) {
+        configPath = path.join(agentDir, 'config.json')
+      }
       if (!existsSync(configPath)) continue
 
       try {
@@ -186,6 +304,47 @@ export class AgentManager {
       } catch (err) {
         logger.warn(`加载 Agent ${entry} 失败`, { error: err })
       }
+    }
+  }
+
+  /**
+   * 从 ConfigRepository (SQLite) 应用运行时社交覆盖值
+   *
+   * 只覆盖 social.enabled 和 social.qq_id —— 这两个是部署/用户特定的，
+   * 不应硬编码在静态 agent.json 中。
+   * use_stickers 等静态元数据仍从 agent.json 读取。
+   */
+  async applySocialOverrides(agentId: string): Promise<void> {
+    if (!this.configRepo) return
+    const profile = this.agents.get(agentId)
+    if (!profile) return
+
+    const enabledStr = await this.configRepo.get(`agent.${agentId}.social.enabled`)
+    if (enabledStr !== undefined) {
+      const enabled = enabledStr === 'true'
+      profile.socialBinding = {
+        ...profile.socialBinding,
+        enabled,
+      }
+    }
+
+    const qqId = await this.configRepo.get(`agent.${agentId}.social.qq_id`)
+    if (qqId !== undefined) {
+      profile.socialBinding = {
+        ...profile.socialBinding,
+        qq_id: qqId,
+      }
+    }
+  }
+
+  /**
+   * 应用所有 Agent 的运行时覆盖值
+   *
+   * 应在服务启动后、首次使用前调用。
+   */
+  async applyAllOverrides(): Promise<void> {
+    for (const agentId of this.agents.keys()) {
+      await this.applySocialOverrides(agentId)
     }
   }
 
@@ -228,6 +387,7 @@ export class AgentManager {
       configPath,
       promptPath: path.join(agentDir, 'system_prompt.md'),
       useStickers: (socialBinding.use_stickers as boolean) ?? false,
+      waifuTexts: config.waifu_texts as Record<string, unknown>,
     }
   }
 

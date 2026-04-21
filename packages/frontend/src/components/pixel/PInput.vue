@@ -49,8 +49,8 @@ defineEmits<{
 }
 
 .p-input:focus {
-  border-color: var(--color-blue-500);
-  box-shadow: 0 0 0 1px var(--color-blue-500);
+  border-color: var(--color-sky-500);
+  box-shadow: 0 0 0 1px var(--color-sky-500);
 }
 
 .p-input:disabled {

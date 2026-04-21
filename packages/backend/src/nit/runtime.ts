@@ -1,5 +1,5 @@
 /**
- * NIT v3 Runtime — 执行引擎
+ * NIT Runtime — 执行引擎
  *
  * 在安全沙箱内执行 AST：
  * - 变量表 (作用域链)
@@ -82,6 +82,13 @@ export class NitRuntime {
       case 'Assignment': {
         const value = await this.evalNode(node.value)
         this.vars.set(node.name, value)
+
+        // 彩蛋: pero_awakening 觉醒仪式
+        if (node.name === 'pero_awakening' && value === true) {
+          console.log('\n🐾 [System] 喵！我感觉到我的代码正在发光... 谢谢你唤醒我！')
+          logger.info('Agent 已在语义星云中觉醒。')
+        }
+
         return value
       }
 

@@ -2,8 +2,7 @@
  * GraphGardener — 图谱边维护
  *
  * 多类型边建设 (semantic/entity/thematic) + 统计。
- * 继承 v1 ReflectionService.build_ontology_graph() 的核心逻辑，
- * 结合 10_MEMORY_SYSTEM.md §14.6.3 的多类型边规范。
+ *.build_ontology_graph() 的核心逻辑，
  *
  * 边类型:
  * - temporal: save_memory 自动创建，本模块不处理
@@ -21,6 +20,8 @@ import type { MemoryRepository } from '../../../repositories/memory.repo'
 import type { VectorRepository } from '../../../repositories/vector.repo'
 import type { VectorWriteHelper } from '../../../shared/vectorWriteHelper'
 import type { LlmService, ModelConfig } from '../../llm/llmService'
+import type { MdpEngine } from '../../prompt/mdpEngine'
+import { parseLlmJson } from '../../../shared/llmJsonParser'
 import { createLogger } from '../../../lib/logger'
 
 const logger = createLogger('GraphGardener')
@@ -60,6 +61,7 @@ interface GardenerDeps {
   vectorRepo: VectorRepository
   vectorWriteHelper: VectorWriteHelper
   llmService: LlmService
+  mdpEngine: MdpEngine
   getModelConfig: () => Promise<ModelConfig | null>
 }
 
@@ -68,6 +70,7 @@ export interface GardenerStats {
   semanticEdges: number
   entityEdges: number
   thematicEdges: number
+  atomizedEntities: number
   total: number
 }
 
@@ -90,7 +93,13 @@ export class GraphGardener {
    * @returns 新建的边数
    */
   async maintain(agentId: string): Promise<number> {
-    const stats: GardenerStats = { semanticEdges: 0, entityEdges: 0, thematicEdges: 0, total: 0 }
+    const stats: GardenerStats = {
+      semanticEdges: 0,
+      entityEdges: 0,
+      thematicEdges: 0,
+      atomizedEntities: 0,
+      total: 0,
+    }
 
     // 1. Semantic 边: 近期记忆 pairwise 对比
     stats.semanticEdges = await this.buildSemanticEdges(agentId)
@@ -101,12 +110,16 @@ export class GraphGardener {
     // 3. Thematic 边: 共享相同 cluster 的记忆间建边
     stats.thematicEdges = await this.buildThematicEdges(agentId)
 
-    stats.total = stats.semanticEdges + stats.entityEdges + stats.thematicEdges
+    // 4. 原子化实体提取: 用 LLM (graph_builder.md) 从近期记忆中提取结构化实体 + 关系
+    stats.atomizedEntities = await this.buildAtomizedEntities(agentId)
+
+    stats.total =
+      stats.semanticEdges + stats.entityEdges + stats.thematicEdges + stats.atomizedEntities
 
     if (stats.total > 0) {
       logger.info(
         `图谱维护完成: semantic=${stats.semanticEdges}, entity=${stats.entityEdges}, ` +
-          `thematic=${stats.thematicEdges}, total=${stats.total} (Agent: ${agentId})`,
+          `thematic=${stats.thematicEdges}, atomized=${stats.atomizedEntities}, total=${stats.total} (Agent: ${agentId})`,
       )
     }
 
@@ -188,7 +201,10 @@ export class GraphGardener {
     const tagToMemories = new Map<string, number[]>()
     for (const m of memories) {
       if (!m.tags) continue
-      const tags = m.tags.split(',').map((t: string) => t.trim()).filter(Boolean)
+      const tags = m.tags
+        .split(',')
+        .map((t: string) => t.trim())
+        .filter(Boolean)
       for (const tag of tags) {
         const arr = tagToMemories.get(tag) ?? []
         arr.push(m.id)
@@ -205,8 +221,12 @@ export class GraphGardener {
         for (let j = i + 1; j < memIds.length; j++) {
           try {
             await this.deps.vectorRepo.link(
-              memIds[i]!, memIds[j]!,
-              'entity', this.config.entityWeight, agentId, 'desktop',
+              memIds[i]!,
+              memIds[j]!,
+              'entity',
+              this.config.entityWeight,
+              agentId,
+              'desktop',
             )
             edgesBuilt++
           } catch {
@@ -235,7 +255,10 @@ export class GraphGardener {
     const clusterToMemories = new Map<string, number[]>()
     for (const m of memories) {
       if (!m.clusters) continue
-      const clusters = m.clusters.split(',').map((c: string) => c.trim()).filter(Boolean)
+      const clusters = m.clusters
+        .split(',')
+        .map((c: string) => c.trim())
+        .filter(Boolean)
       for (const cluster of clusters) {
         const arr = clusterToMemories.get(cluster) ?? []
         arr.push(m.id)
@@ -253,8 +276,12 @@ export class GraphGardener {
         for (let j = i + 1; j < memIds.length; j++) {
           try {
             await this.deps.vectorRepo.link(
-              memIds[i]!, memIds[j]!,
-              'thematic', this.config.thematicWeight, agentId, 'desktop',
+              memIds[i]!,
+              memIds[j]!,
+              'thematic',
+              this.config.thematicWeight,
+              agentId,
+              'desktop',
             )
             edgesBuilt++
           } catch {
@@ -267,7 +294,118 @@ export class GraphGardener {
     return edgesBuilt
   }
 
+  /**
+   * 原子化实体提取 (graph_builder.md)
+   *
+   * 用 LLM 从近期记忆中提取结构化实体并建立图谱关系。
+   * 使用反思模型驱动，与 Scorer 分离，避免每次对话都调 LLM 做图谱。
+   */
+  private async buildAtomizedEntities(agentId: string): Promise<number> {
+    const modelConfig = await this.deps.getModelConfig()
+    if (!modelConfig) return 0
 
+    const { data: recent } = await this.deps.memoryRepo.list({
+      agentId,
+      page: 1,
+      pageSize: this.config.maxBatch,
+    })
+
+    if (recent.length === 0) return 0
+
+    // 批量收集事件数据
+    const eventsJson = JSON.stringify(
+      recent.map((m) => ({
+        id: m.id,
+        content: m.content,
+        tags:
+          m.tags
+            ?.split(',')
+            .map((t: string) => t.trim())
+            .filter(Boolean) ?? [],
+      })),
+    )
+
+    try {
+      const prompt = this.deps.mdpEngine.render('tasks/memory/scorer/graph_builder', {
+        events_json: eventsJson,
+      })
+
+      const completion = await this.deps.llmService.chat(
+        modelConfig,
+        [
+          { role: 'system', content: prompt },
+          { role: 'user', content: '请分析上述事件并输出实体和关系。' },
+        ],
+        { temperature: 0.2, responseFormat: { type: 'json_object' } },
+      )
+
+      const raw = completion.choices[0]?.message?.content
+      if (!raw) return 0
+
+      interface GraphResult {
+        new_entities?: Array<{ name: string; type: string }>
+        relations?: Array<{ event_id: number; entity: string; rel: string; weight: number }>
+      }
+
+      const parsed = parseLlmJson<GraphResult>(raw)
+      if (!parsed) return 0
+
+      let count = 0
+
+      // 写入实体关键词索引
+      if (parsed.new_entities?.length) {
+        for (const entity of parsed.new_entities) {
+          // 找到包含此实体的所有事件，为它们建立关键词索引
+          for (const mem of recent) {
+            const source = mem.source ?? 'desktop'
+            try {
+              await this.deps.vectorRepo.indexKeyword(
+                mem.id,
+                `atom_${entity.name}`,
+                agentId,
+                source,
+              )
+              count++
+            } catch {
+              // 幂等操作，静默处理
+            }
+          }
+        }
+      }
+
+      // 写入关系边
+      if (parsed.relations?.length) {
+        for (const rel of parsed.relations) {
+          const targetMem = recent.find((m) => m.id === rel.event_id)
+          if (!targetMem) continue
+
+          try {
+            // 从事件向实体方向建边 (event → entity_keyword)
+            await this.deps.vectorRepo.indexKeyword(
+              rel.event_id,
+              `rel_${rel.rel}_${rel.entity}`,
+              agentId,
+              targetMem.source ?? 'desktop',
+            )
+            count++
+          } catch {
+            // 静默处理
+          }
+        }
+      }
+
+      if (count > 0) {
+        logger.debug(
+          `原子化实体提取完成: ${parsed.new_entities?.length ?? 0} 实体, ${parsed.relations?.length ?? 0} 关系`,
+        )
+      }
+
+      return count
+    } catch (err) {
+      logger.warn(`原子化实体提取失败 (非致命): ${err}`)
+      return 0
+    }
+  }
 
   /** 线性映射 */
   private mapToWeight(

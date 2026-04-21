@@ -1,8 +1,7 @@
 /**
- * NIT v3 AST 节点类型
+ * NIT AST 节点类型
  *
  * 极简 Agent DSL 的抽象语法树定义。
- * 见 18_NIT_V3.md §4
  *
  * @module packages/backend/src/nit/types
  */

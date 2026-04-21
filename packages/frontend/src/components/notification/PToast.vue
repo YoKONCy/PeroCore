@@ -70,16 +70,16 @@ const iconMap: Record<string, string> = {
 }
 
 .toast-info {
-  border-color: var(--color-blue-500);
+  border-color: var(--color-sky-500);
 }
 .toast-success {
-  border-color: var(--color-green-500);
+  border-color: var(--color-emerald-face);
 }
 .toast-warning {
   border-color: var(--color-yellow-500);
 }
 .toast-error {
-  border-color: var(--color-red-500);
+  border-color: var(--color-red-face);
 }
 
 .toast-icon {

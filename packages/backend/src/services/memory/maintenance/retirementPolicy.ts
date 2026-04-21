@@ -6,7 +6,7 @@
  *
  * TriviumDB 三层原子联删自动处理向量+边清理。
  *
- * 策略 (v1 _handle_maintenance_boundary 增强):
+ * 策略:
  * 1. 时间窗口: 超过 N 天的低重要性记忆
  * 2. 容量边界: event 类型超过 1000 条时清理最旧的
  * 3. 类型豁免: preference/promise 永不退役
@@ -75,7 +75,7 @@ export class RetirementPolicy {
     // 1. 低重要性 + 超时退役
     total += await this.retireByAgeAndImportance(agentId)
 
-    // 2. 容量边界退役 (v1 _handle_maintenance_boundary)
+    // 2. 容量边界退役
     total += await this.retireByCapacity(agentId)
 
     return total
@@ -127,7 +127,7 @@ export class RetirementPolicy {
   }
 
   /**
-   * 策略2: 容量边界退役 (v1 _handle_maintenance_boundary)
+   * 策略2: 容量边界退役
    *
    * 当 event 类型记忆超过 1000 条时，
    * 清理最旧的低重要性记忆 (offset 1000 之后的)。

@@ -1,0 +1,46 @@
+# ===================================================================
+# PeroCore-TS 前端 Docker 镜像
+#
+# 多阶段构建: 依赖安装 → Vite 构建 → Nginx 服务
+# 职责: 纯静态文件服务 (Vue SPA)
+#
+# 构建: docker build -f docker/Dockerfile.frontend -t perocore-frontend .
+#
+# @see _docs_/07_DUAL_DEPLOYMENT.md §3.2
+# ===================================================================
+
+# ── Stage 1: 构建 ──
+FROM node:22-slim AS builder
+
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
+WORKDIR /build
+
+# 依赖声明（利用缓存层）
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY packages/shared/package.json packages/shared/
+COPY packages/frontend/package.json packages/frontend/
+
+# 安装依赖
+RUN pnpm install --frozen-lockfile --filter @perocore/shared --filter @perocore/frontend
+
+# 复制源码
+COPY packages/shared/ packages/shared/
+COPY packages/frontend/ packages/frontend/
+
+# Vite 构建
+RUN pnpm --filter @perocore/frontend build
+
+
+# ── Stage 2: Nginx 静态服务 ──
+FROM nginx:alpine AS production
+
+# 复制 Nginx 配置
+COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
+
+# 复制构建产物
+COPY --from=builder /build/packages/frontend/dist/ /usr/share/nginx/html/
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]

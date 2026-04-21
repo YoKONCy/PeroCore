@@ -2,7 +2,6 @@
 /**
  * PTextarea — 像素风多行文本输入
  *
- * 迁移自 v1，保留光晕 + 猫爪装饰 + 底部动态线。
  */
 import PixelIcon from './PixelIcon.vue'
 
@@ -103,7 +102,9 @@ function handleInput(e: Event) {
   line-height: 1.6;
   resize: none;
   outline: none;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
   position: relative;
   z-index: 1;
 }
@@ -111,8 +112,8 @@ function handleInput(e: Event) {
   color: var(--color-text-muted);
 }
 .p-textarea:focus {
-  border-color: var(--color-blue-500);
-  box-shadow: 0 0 0 1px var(--color-blue-500);
+  border-color: var(--color-sky-500);
+  box-shadow: 0 0 0 1px var(--color-sky-500);
 }
 .p-textarea-disabled {
   opacity: 0.5;
@@ -123,7 +124,7 @@ function handleInput(e: Event) {
 .p-textarea-glow {
   position: absolute;
   inset: 0;
-  background: var(--color-blue-500);
+  background: var(--color-sky-500);
   opacity: 0;
   filter: blur(20px);
   pointer-events: none;
@@ -142,14 +143,16 @@ function handleInput(e: Event) {
   color: var(--color-text-muted);
   pointer-events: none;
   z-index: 2;
-  transition: opacity 0.3s, color 0.3s;
+  transition:
+    opacity 0.3s,
+    color 0.3s;
 }
 .p-textarea-container:hover .p-textarea-paw {
   opacity: 0.4;
 }
 .p-textarea-container:focus-within .p-textarea-paw {
   opacity: 1;
-  color: var(--color-blue-400);
+  color: var(--color-sky-hover);
 }
 
 /* 底部动态线 */
@@ -160,7 +163,7 @@ function handleInput(e: Event) {
   transform: translateX(-50%);
   width: 0;
   height: 2px;
-  background: linear-gradient(90deg, transparent, var(--color-blue-400), transparent);
+  background: linear-gradient(90deg, transparent, var(--color-sky-hover), transparent);
   z-index: 2;
   transition: width 0.7s;
 }
@@ -169,10 +172,14 @@ function handleInput(e: Event) {
 }
 
 /* 滚动条样式 */
-.p-textarea::-webkit-scrollbar { width: 4px; }
-.p-textarea::-webkit-scrollbar-track { background: transparent; }
+.p-textarea::-webkit-scrollbar {
+  width: 4px;
+}
+.p-textarea::-webkit-scrollbar-track {
+  background: transparent;
+}
 .p-textarea::-webkit-scrollbar-thumb {
-  background: var(--color-blue-200);
+  background: var(--color-sky-light);
   border-radius: 2px;
 }
 </style>

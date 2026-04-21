@@ -8,7 +8,12 @@ export { ExtensionManager, type ExtensionManagerConfig } from './extensionManage
 export { ExtensionLoader, type LoadResult } from './extensionLoader'
 export { HookRegistry } from './hookRegistry'
 export { ServiceRunner, type ServiceStatus } from './serviceRunner'
-export type { ServiceTransport, JsonRpcRequest, JsonRpcResponse, JsonRpcNotification } from './transports/transport'
+export type {
+  ServiceTransport,
+  JsonRpcRequest,
+  JsonRpcResponse,
+  JsonRpcNotification,
+} from './transports/transport'
 export { StdioTransport } from './transports/stdioTransport'
 export type {
   ExtensionType,

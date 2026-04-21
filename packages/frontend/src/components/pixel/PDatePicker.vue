@@ -53,11 +53,13 @@ function handleInput(e: Event) {
   padding: 8px 12px;
   border: 2px solid var(--color-border);
   background: var(--color-bg-primary);
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
 }
 .p-datepicker:focus-within {
-  border-color: var(--color-blue-400);
-  box-shadow: 0 0 0 2px var(--color-blue-50);
+  border-color: var(--color-sky-hover);
+  box-shadow: 0 0 0 2px var(--color-sky-50);
 }
 .p-datepicker-disabled {
   opacity: 0.5;
@@ -70,7 +72,7 @@ function handleInput(e: Event) {
   transition: color 0.15s;
 }
 .p-datepicker:focus-within .p-datepicker-icon {
-  color: var(--color-blue-500);
+  color: var(--color-sky-500);
 }
 
 .p-datepicker-input {

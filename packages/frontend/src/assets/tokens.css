@@ -2,89 +2,132 @@
  * 像素风设计令牌 (Design Tokens)
  *
  * 单一真相源：所有颜色/尺寸/字体集中管理。
- * Tailwind 通过 tailwind.config.ts 桥接引用这些变量。
- * 组件代码禁止硬编码色值，必须引用 var(--*)。
+ * 变量命名规范: --color-{色系}-{语义/色阶}
  *
- * @see 01_NAMING_CONVENTIONS.md §5.2
+ * 使用方式:
+ *   1. 在 scoped CSS 中: var(--color-sky-face)
+ *   2. 在 TailwindCSS 中: bg-sky-face (通过 style.css @theme 桥接)
+ *   3. 语义色: var(--color-primary) / bg-primary
+ *
+ * ⚠️ 禁止硬编码色值，必须引用 var(--color-*)
+ * ⚠️ 禁止创建别名映射层，所有变量直接定义为最终值
+ *
+ * @see A03_FRONTEND_ARCHITECTURE.md §6
  */
 
 :root {
   /* ── 像素边框体系 ── */
   --pixel-border-width: 2px;
 
+  /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+  /* 色阶体系 — 每个色系 5 级: outline → shadow → face → light → hover */
+  /* 用途: outline=描边 shadow=投影 face=主色 light=浅底 hover=悬浮 */
+  /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+
   /* Sky 色系 (天蓝, 主角色) */
-  --sky-outline: #0369a1;
-  --sky-shadow: #0284c7;
-  --sky-light: #7dd3fc;
-  --sky-face: #38bdf8;
-  --sky-hover: #0ea5e9;
+  --color-sky-outline: #0369a1;
+  --color-sky-shadow: #0284c7;
+  --color-sky-face: #38bdf8;
+  --color-sky-light: #7dd3fc;
+  --color-sky-hover: #0ea5e9;
+  --color-sky-50: rgba(56, 189, 248, 0.05);
+  --color-sky-100: rgba(56, 189, 248, 0.12);
 
   /* Pink 色系 (粉红, 强调色) */
-  --pink-outline: #831843;
-  --pink-shadow: #db2777;
-  --pink-light: #fbcfe8;
-  --pink-face: #f472b6;
-  --pink-hover: #ec4899;
+  --color-pink-outline: #831843;
+  --color-pink-shadow: #db2777;
+  --color-pink-face: #f472b6;
+  --color-pink-light: #fbcfe8;
+  --color-pink-hover: #ec4899;
 
   /* Amber 色系 (琥珀, 警告) */
-  --amber-outline: #78350f;
-  --amber-shadow: #d97706;
-  --amber-light: #fde68a;
-  --amber-face: #fbbf24;
+  --color-amber-outline: #78350f;
+  --color-amber-shadow: #d97706;
+  --color-amber-face: #fbbf24;
+  --color-amber-light: #fde68a;
 
   /* Emerald 色系 (翠绿, 成功) */
-  --emerald-outline: #064e3b;
-  --emerald-shadow: #059669;
-  --emerald-light: #a7f3d0;
-  --emerald-face: #10b981;
+  --color-emerald-outline: #064e3b;
+  --color-emerald-shadow: #059669;
+  --color-emerald-face: #10b981;
+  --color-emerald-light: #a7f3d0;
+  --color-emerald-400: #4ade80;
 
   /* Indigo 色系 (靛蓝, 信息) */
-  --indigo-outline: #1e1b4b;
-  --indigo-shadow: #4f46e5;
-  --indigo-light: #c7d2fe;
-  --indigo-face: #6366f1;
+  --color-indigo-outline: #1e1b4b;
+  --color-indigo-shadow: #4f46e5;
+  --color-indigo-face: #6366f1;
+  --color-indigo-light: #c7d2fe;
 
   /* Red 色系 (红色, 危险) */
-  --red-outline: #7f1d1d;
-  --red-shadow: #dc2626;
-  --red-light: #fecaca;
-  --red-face: #ef4444;
+  --color-red-outline: #7f1d1d;
+  --color-red-shadow: #dc2626;
+  --color-red-face: #ef4444;
+  --color-red-light: #fecaca;
+  --color-red-400: #f87171;
+
+  /* Yellow 色系 (黄色, 辅助标注) */
+  --color-yellow-100: rgba(234, 179, 8, 0.1);
+  --color-yellow-300: rgba(234, 179, 8, 0.4);
+  --color-yellow-500: #eab308;
+  --color-yellow-600: #ca8a04;
+
+  /* Green 色系 (绿色, 辅助状态) */
+  --color-green-100: rgba(16, 185, 129, 0.1);
+  --color-green-300: rgba(16, 185, 129, 0.4);
 
   /* Moe 色系 (萌动链接专属) */
-  --moe-outline: #2d1b1e;
-  --moe-card-bg: rgba(255, 255, 255, 0.85);
-  --moe-bg-gradient: linear-gradient(135deg, #a7d8f0 0%, #e8d5ff 100%);
+  --color-moe-sky: #a7d8f0;
+  --color-moe-pink: #f9a8d4;
+  --color-moe-purple: #c084fc;
+  --color-moe-yellow: #fde047;
+  --color-moe-cocoa: #2d1b1e;
+  --color-moe-cloud: #ffffff;
+  --color-moe-card-bg: rgba(255, 255, 255, 0.85);
+  --color-moe-bg-gradient: linear-gradient(135deg, #a7d8f0 0%, #e8d5ff 100%);
 
-  /* ── 语义色 ── */
-  --color-primary: var(--sky-face);
-  --color-accent: var(--pink-face);
-  --color-success: var(--emerald-face);
-  --color-warning: var(--amber-face);
-  --color-danger: var(--red-face);
-  --color-info: var(--indigo-face);
+  /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+  /* 语义令牌 — 组件代码应优先使用这些 */
+  /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+
+  /* ── 主色 ── */
+  --color-primary: #38bdf8;
+  --color-accent: #f472b6;
+  --color-success: #10b981;
+  --color-warning: #fbbf24;
+  --color-danger: #ef4444;
+  --color-info: #6366f1;
 
   /* ── 背景 ── */
-  --bg-card: rgba(255, 255, 255, 0.9);
-  --bg-glass: rgba(255, 255, 255, 0.6);
-  --bg-page: transparent;
-  --bg-overlay: rgba(0, 0, 0, 0.3);
+  --color-bg-primary: rgba(255, 255, 255, 0.9);
+  --color-bg-secondary: rgba(255, 255, 255, 0.6);
+  --color-bg-page: transparent;
+  --color-bg-overlay: rgba(0, 0, 0, 0.3);
+  --color-bg-hover: rgba(56, 189, 248, 0.06);
 
   /* ── 文字 ── */
-  --text-primary: #0f172a;
-  --text-secondary: #64748b;
-  --text-muted: #94a3b8;
-  --text-on-primary: #ffffff;
+  --color-text-primary: #0f172a;
+  --color-text-secondary: #64748b;
+  --color-text-muted: #94a3b8;
+  --color-text-on-primary: #ffffff;
 
   /* ── 边框 ── */
-  --border-default: #e2e8f0;
-  --border-hover: #cbd5e1;
+  --color-border: #e2e8f0;
+  --color-border-hover: #cbd5e1;
+
+  /* ── 阴影 ── */
+  --color-shadow: rgba(0, 0, 0, 0.1);
 
   /* ── 滚动条 ── */
-  --scrollbar-track: #f1f5f9;
-  --scrollbar-track-border: #cbd5e1;
-  --scrollbar-thumb: var(--sky-face);
-  --scrollbar-thumb-shadow: var(--sky-shadow);
-  --scrollbar-thumb-light: var(--sky-light);
+  --color-scrollbar-track: #f1f5f9;
+  --color-scrollbar-track-border: #cbd5e1;
+  --color-scrollbar-thumb: #38bdf8;
+  --color-scrollbar-thumb-shadow: #0284c7;
+  --color-scrollbar-thumb-light: #7dd3fc;
+
+  /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+  /* 非色彩令牌 */
+  /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 
   /* ── 间距 ── */
   --spacing-xs: 4px;
@@ -94,8 +137,8 @@
   --spacing-xl: 32px;
 
   /* ── 字体 ── */
-  --font-sans: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Segoe UI',
-    system-ui, sans-serif;
+  --font-sans:
+    'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Segoe UI', system-ui, sans-serif;
   --font-pixel: 'Zpix', 'DotGothic16', monospace;
 
   /* ── 圆角 (像素风一般不用, 备用) ── */
@@ -107,81 +150,29 @@
   --transition-fast: 0.1s steps(2);
   --transition-normal: 0.3s ease;
   --transition-pixel: 0.2s steps(4);
-
-  /* ── 扩展色阶别名 (组件引用补全) ── */
-  --color-bg-hover: rgba(56, 189, 248, 0.06);
-  --color-blue-300: var(--sky-light);
-  --color-blue-700: var(--sky-outline);
-  --color-green-100: rgba(16, 185, 129, 0.1);
-  --color-green-300: rgba(16, 185, 129, 0.4);
-  --color-red-100: rgba(239, 68, 68, 0.1);
-  --color-red-300: rgba(239, 68, 68, 0.4);
-  --color-shadow: rgba(0, 0, 0, 0.1);
-  --color-yellow-100: rgba(234, 179, 8, 0.1);
-  --color-yellow-300: rgba(234, 179, 8, 0.4);
-  --color-yellow-600: #ca8a04;
-
-  /* ── 组件语义别名 (供组件 scoped CSS 引用) ── */
-  /* ▸ 蓝色阶梯 (映射 sky 色系) */
-  --color-blue-50:  rgba(56, 189, 248, 0.05);
-  --color-blue-100: rgba(56, 189, 248, 0.12);
-  --color-blue-200: var(--sky-light);
-  --color-blue-400: var(--sky-hover);
-  --color-blue-500: var(--sky-face);
-  --color-blue-600: var(--sky-shadow);
-
-  /* ▸ 红色阶梯 (映射 red 色系) */
-  --color-red-200:  var(--red-light);
-  --color-red-400:  #f87171;
-  --color-red-500:  var(--red-face);
-  --color-red-600:  var(--red-shadow);
-  --color-red-700:  var(--red-outline);
-
-  /* ▸ 绿色阶梯 */
-  --color-green-400: #4ade80;
-  --color-green-500: var(--emerald-face);
-  --color-green-600: var(--emerald-shadow);
-
-  /* ▸ 粉色阶梯 (映射 pink 色系) */
-  --color-pink-200: var(--pink-light);
-  --color-pink-500: var(--pink-face);
-  --color-pink-600: var(--pink-shadow);
-
-  /* ▸ 黄色/琥珀阶梯 */
-  --color-yellow-500: var(--amber-face);
-
-  /* ▸ 语义背景 */
-  --color-bg-primary:   var(--bg-card);
-  --color-bg-secondary: var(--bg-glass);
-
-  /* ▸ 语义文字 */
-  --color-text-primary:   var(--text-primary);
-  --color-text-secondary: var(--text-secondary);
-  --color-text-muted:     var(--text-muted);
-
-  /* ▸ 语义边框 */
-  --color-border: var(--border-default);
 }
 
 /* ── 工作模式 (暗色主题) ── */
 [data-theme='work'] {
-  --sky-face: #1e3a5f;
-  --sky-outline: #020617;
-  --sky-shadow: #0c4a6e;
-  --sky-light: #1e3a5f;
-  --sky-hover: #0369a1;
+  --color-sky-face: #1e3a5f;
+  --color-sky-outline: #020617;
+  --color-sky-shadow: #0c4a6e;
+  --color-sky-light: #1e3a5f;
+  --color-sky-hover: #0369a1;
 
-  --bg-card: rgba(15, 23, 42, 0.9);
-  --bg-glass: rgba(15, 23, 42, 0.6);
-  --bg-page: #0f172a;
+  --color-bg-primary: rgba(15, 23, 42, 0.9);
+  --color-bg-secondary: rgba(15, 23, 42, 0.6);
+  --color-bg-page: #0f172a;
 
-  --text-primary: #e2e8f0;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
+  --color-text-primary: #e2e8f0;
+  --color-text-secondary: #94a3b8;
+  --color-text-muted: #64748b;
 
-  --border-default: #334155;
-  --border-hover: #475569;
+  --color-border: #334155;
+  --color-border-hover: #475569;
 
-  --scrollbar-track: #1e293b;
-  --scrollbar-track-border: #334155;
+  --color-scrollbar-track: #1e293b;
+  --color-scrollbar-track-border: #334155;
+
+  --color-primary: #1e3a5f;
 }

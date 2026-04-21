@@ -1,7 +1,7 @@
 /**
  * 记忆 Store 注册表 — 三层隔离架构
  *
- * 管理 TriviumDB 实例的物理隔离 (10_MEMORY_SYSTEM.md §15.4)。
+ * 管理 TriviumDB 实例的物理隔离。
  * 每个 Agent 拥有独立的 main.tdb / social.tdb，
  * 共享日记 Store (shared/diary.tdb) 所有 Agent 可读写。
  *
@@ -24,7 +24,11 @@
 
 import path from 'node:path'
 import { mkdirSync, existsSync } from 'node:fs'
-import { TriviumDB } from 'triviumdb'
+import { createRequire } from 'node:module'
+const _require = createRequire(import.meta.url)
+// triviumdb 是 NAPI CJS 模块 (module.exports = nativeBinding)，ESM 只能通过 require 加载
+import type { TriviumDB as TriviumDBType } from 'triviumdb'
+const TriviumDB = _require('triviumdb') as typeof TriviumDBType & (new (...args: unknown[]) => TriviumDBType)
 import type { PathResolver } from '../core/pathResolver'
 import { createLogger } from '../lib/logger'
 
@@ -42,7 +46,7 @@ const DEFAULT_DIM = 1536
 
 export class MemoryStoreRegistry {
   /** 缓存已打开的 TriviumDB 实例 (key = 文件路径) */
-  private stores = new Map<string, TriviumDB>()
+  private stores = new Map<string, TriviumDBType>()
 
   constructor(
     private pathResolver: PathResolver,
@@ -54,7 +58,7 @@ export class MemoryStoreRegistry {
    *
    * @example getAgentStore('pero', 'main') → data/agent_pero/main.tdb
    */
-  getAgentStore(agentId: string, mode: StoreMode = 'main'): TriviumDB {
+  getAgentStore(agentId: string, mode: StoreMode = 'main'): TriviumDBType {
     const tdbPath = this.resolveAgentStorePath(agentId, mode)
     return this.getOrCreate(tdbPath)
   }
@@ -64,7 +68,7 @@ export class MemoryStoreRegistry {
    *
    * @returns data/shared/diary.tdb
    */
-  getDiaryStore(): TriviumDB {
+  getDiaryStore(): TriviumDBType {
     const tdbPath = this.pathResolver.resolve('@data/shared/diary.tdb')
     return this.getOrCreate(tdbPath)
   }
@@ -75,7 +79,7 @@ export class MemoryStoreRegistry {
    * @param agentId Agent ID
    * @param source  记忆来源 (MemorySource)
    */
-  getStoreBySource(agentId: string, source: string): TriviumDB {
+  getStoreBySource(agentId: string, source: string): TriviumDBType {
     switch (source) {
       case 'social':
       case 'group_chat':
@@ -131,7 +135,7 @@ export class MemoryStoreRegistry {
         stats.push({
           path: tdbPath,
           nodeCount: store.nodeCount(),
-          memoryMB: Math.round(store.estimatedMemory() / 1024 / 1024 * 100) / 100,
+          memoryMB: Math.round((store.estimatedMemory() / 1024 / 1024) * 100) / 100,
         })
       } catch {
         stats.push({ path: tdbPath, nodeCount: -1, memoryMB: -1 })
@@ -141,7 +145,7 @@ export class MemoryStoreRegistry {
   }
 
   /** 获取或创建 TriviumDB 实例 */
-  private getOrCreate(tdbPath: string): TriviumDB {
+  private getOrCreate(tdbPath: string): TriviumDBType {
     let store = this.stores.get(tdbPath)
     if (store) return store
 
@@ -156,7 +160,7 @@ export class MemoryStoreRegistry {
 
     // 性能与安全配置 (TriviumDB 最佳实践)
     store.enableAutoCompaction(300) // 每 5 分钟自动压缩落盘
-    store.setMemoryLimit(512)       // 内存上限 512MB，防止 OOM
+    store.setMemoryLimit(512) // 内存上限 512MB，防止 OOM
     this.stores.set(tdbPath, store)
     return store
   }

@@ -2,7 +2,6 @@
 /**
  * PSlider — 像素风滑块
  *
- * 迁移自 v1，保留渐变轨道 + 条纹动画 + 数字输入。
  */
 import PixelIcon from './PixelIcon.vue'
 import { computed } from 'vue'
@@ -120,7 +119,7 @@ function handleInput(e: Event) {
 
 .p-slider-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--color-blue-300), var(--color-blue-400));
+  background: linear-gradient(90deg, var(--color-sky-light), var(--color-sky-hover));
   position: relative;
   transition: width 0.15s;
   box-shadow: 0 0 10px rgba(56, 189, 248, 0.2);
@@ -154,13 +153,15 @@ function handleInput(e: Event) {
   width: 20px;
   height: 20px;
   background: white;
-  border: 2px solid var(--color-blue-400);
+  border: 2px solid var(--color-sky-hover);
   display: flex;
   align-items: center;
   justify-content: center;
   pointer-events: none;
   z-index: 10;
-  transition: left 0.15s, transform 0.2s;
+  transition:
+    left 0.15s,
+    transform 0.2s;
   box-shadow: 0 2px 8px rgba(56, 189, 248, 0.2);
 }
 .p-slider-wrapper:hover .p-slider-thumb {
@@ -173,7 +174,7 @@ function handleInput(e: Event) {
 .p-slider-thumb-dot {
   width: 8px;
   height: 8px;
-  background: var(--color-blue-400);
+  background: var(--color-sky-hover);
   animation: pulse 1.5s ease-in-out infinite;
 }
 
@@ -186,7 +187,7 @@ function handleInput(e: Event) {
   opacity: 0;
   transition: all 0.3s;
   pointer-events: none;
-  color: var(--color-blue-400);
+  color: var(--color-sky-hover);
 }
 .p-slider-wrapper:hover .p-slider-paw {
   opacity: 1;
@@ -208,19 +209,34 @@ function handleInput(e: Event) {
   outline: none;
 }
 .p-slider-input:focus {
-  border-color: var(--color-blue-500);
+  border-color: var(--color-sky-500);
 }
 
 @keyframes stripe-scroll {
-  from { background-position: 0 0; }
-  to { background-position: 100px 0; }
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 100px 0;
+  }
 }
 @keyframes pulse {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.2); }
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.2);
+  }
 }
 
 /* Firefox range 样式 */
-.p-slider-native::-moz-range-track { background: transparent; border: none; }
-.p-slider-native::-moz-range-thumb { background: transparent; border: none; }
+.p-slider-native::-moz-range-track {
+  background: transparent;
+  border: none;
+}
+.p-slider-native::-moz-range-thumb {
+  background: transparent;
+  border: none;
+}
 </style>

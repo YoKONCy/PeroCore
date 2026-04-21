@@ -7,7 +7,6 @@
  * 注意: DPP 核心算法已在 TriviumDB Rust 内核中实现，
  * 本模块**不重复实现** DPP 数学，只做 TS 侧的 context-aware 重排。
  *
- * @see 10_MEMORY_SYSTEM.md §14.3 Step 4
  * @module packages/backend/src/services/retrieval/dpDiversity
  */
 

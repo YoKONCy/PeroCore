@@ -190,7 +190,12 @@ const LEVEL_LABELS: Record<number, string> = {
  * 输出格式:
  * [2026-04-20T01:20:00.000Z] [INFO] [MemoryService] 记忆已创建 {"memoryId":42}
  */
-export function formatLogLine(level: number, tag: string, message: string, args: unknown[]): string {
+export function formatLogLine(
+  level: number,
+  tag: string,
+  message: string,
+  args: unknown[],
+): string {
   const timestamp = new Date().toISOString()
   const levelLabel = LEVEL_LABELS[level] ?? 'LOG'
 

@@ -9,8 +9,6 @@
  * - 任务状态查询 API
  * - 活跃任务列表
  *
- * 替代 v1 的 task_manager.py (121行 → ~200行)。
- *
  * @module packages/backend/src/services/agent/taskManager
  */
 
@@ -203,7 +201,11 @@ export class TaskManager {
     const now = Date.now()
     return [...this.tasks.entries()].map(([sessionId, state]) => ({
       sessionId,
-      state: state.cancelled ? 'cancelled' as const : state.paused ? 'paused' as const : 'running' as const,
+      state: state.cancelled
+        ? ('cancelled' as const)
+        : state.paused
+          ? ('paused' as const)
+          : ('running' as const),
       startedAt: state.startedAt,
       currentTurn: state.currentTurn,
       elapsedMs: now - state.startedAt,

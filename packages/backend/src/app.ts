@@ -2,7 +2,7 @@
  * Hono 应用入口
  *
  * 负责中间件注册、路由挂载与健康检查端点。
- * 使用 createApp() 工厂模式，便于测试 (04_BACKEND_ARCHITECTURE.md)。
+ * 使用 createApp() 工厂模式，便于测试。
  *
  * @module packages/backend/src/app
  */
@@ -12,6 +12,7 @@ import { cors } from 'hono/cors'
 import { CODE_MESSAGES, CLIENT_ERROR_CODES } from '@perocore/shared'
 import { errorHandler } from './middleware/errorHandler'
 import { requestLogger } from './middleware/requestLogger'
+import { createHealthRouter } from './routers/health.router'
 import type { AppContext } from './container'
 import {
   createChatRouter,
@@ -23,11 +24,14 @@ import {
   createSchedulerRouter,
   createAssetRouter,
   createGatewayRouter,
+  createMaintenanceRouter,
+  createSocialRouter,
+  createVoiceRouter,
 } from './routers'
 
 /**
  * 创建并配置 Hono 应用实例
- * @param ctx - 依赖注入上下文 (04_BACKEND_ARCHITECTURE.md §5)
+ * @param ctx - 依赖注入上下文
  */
 export function createApp(ctx: AppContext) {
   const app = new Hono()
@@ -36,11 +40,14 @@ export function createApp(ctx: AppContext) {
   app.use('*', cors())
   app.use('*', requestLogger)
 
-  // ── 全局错误处理 (02_API_RESPONSE_SPEC.md §7.2) ──
+  // ── 全局错误处理 ──
   app.onError(errorHandler)
 
-  // ── API 路由挂载 (04_BACKEND_ARCHITECTURE.md §2) ──
-  // 资源用复数名词, 路径 2-4 层 (01_NAMING_CONVENTIONS.md §3)
+  // ── 健康检查 (白名单，无需鉴权) ──
+  app.route('/api/health', createHealthRouter())
+
+  // ── API 路由挂载 ──
+  // 资源用复数名词, 路径 2-4 层
   app.route('/api/chat', createChatRouter(ctx))
   app.route('/api/memories', createMemoryRouter(ctx))
   app.route('/api/configs', createConfigRouter(ctx))
@@ -49,6 +56,12 @@ export function createApp(ctx: AppContext) {
   app.route('/api/agents', createAgentRouter(ctx))
   app.route('/api/scheduler', createSchedulerRouter(ctx))
   app.route('/api/assets', createAssetRouter(ctx))
+  app.route('/api/maintenance', createMaintenanceRouter(ctx))
+  app.route('/api/social', createSocialRouter(ctx))
+  app.route(
+    '/api/voice',
+    createVoiceRouter({ ttsService: ctx.ttsService, asrService: ctx.asrService }),
+  )
   app.route('/ws', createGatewayRouter(ctx.gatewayHub))
 
   // ── 404 兜底 ──

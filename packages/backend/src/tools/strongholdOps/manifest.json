@@ -1,0 +1,18 @@
+{
+  "id": "stronghold-ops",
+  "name": "据点操作",
+  "version": "1.0.0",
+  "author": "PeroCore Team",
+  "description": "据点/群聊空间管理工具。支持房间移动、环境调整、呼叫管家等。仅在 group_chat 模式下可用。",
+  "type": "tool",
+  "entry": "index.ts",
+  "category": "core",
+  "platforms": ["windows", "darwin", "linux"],
+  "tools": [
+    { "name": "stronghold_move_to_room", "description": "移动到据点内的另一个房间" },
+    { "name": "stronghold_list_rooms", "description": "列出据点内所有可用房间" },
+    { "name": "stronghold_get_room_info", "description": "查看房间详情 (环境、在场角色)" },
+    { "name": "stronghold_set_environment", "description": "调整当前房间环境变量" },
+    { "name": "stronghold_call_butler", "description": "呼叫据点管家" }
+  ]
+}

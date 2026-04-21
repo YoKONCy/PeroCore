@@ -85,6 +85,29 @@ function onPaste(e: ClipboardEvent) {
   }
 }
 
+/** 文件选择器 ref */
+const fileInputRef = ref<HTMLInputElement | null>(null)
+
+/** 打开文件选择对话框 */
+function openFileDialog() {
+  fileInputRef.value?.click()
+}
+
+/** 文件选择回调 */
+function handleFileSelect(e: Event) {
+  const target = e.target as HTMLInputElement
+  const files = target.files
+  if (!files) return
+  for (const file of files) {
+    if (file.type.startsWith('image/')) {
+      const url = URL.createObjectURL(file)
+      pendingImages.value.push({ url, file })
+    }
+  }
+  // 重置 input 以允许重复选择同一文件
+  target.value = ''
+}
+
 /** 移除待发送图片 */
 function removeImage(idx: number) {
   const img = pendingImages.value[idx]
@@ -127,6 +150,24 @@ defineExpose({ focus })
       />
 
       <div class="input-bar-actions">
+        <!-- 图片选择按钮 -->
+        <button
+          v-if="!isSending"
+          class="input-bar-btn input-bar-btn-attach"
+          title="添加图片"
+          @click="openFileDialog"
+        >
+          <PixelIcon name="image" size="xs" />
+        </button>
+        <input
+          ref="fileInputRef"
+          type="file"
+          accept="image/*"
+          multiple
+          class="input-bar-file-input"
+          @change="handleFileSelect"
+        />
+
         <!-- 停止按钮 -->
         <button
           v-if="isSending"
@@ -156,11 +197,13 @@ defineExpose({ focus })
 .input-bar {
   border: 2px solid var(--color-border);
   background: var(--color-bg-primary);
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
   box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.05);
 }
 .input-bar:focus-within {
-  border-color: var(--color-blue-400);
+  border-color: var(--color-sky-hover);
   box-shadow: 0 -4px 16px rgba(56, 189, 248, 0.08);
 }
 
@@ -188,7 +231,7 @@ defineExpose({ focus })
   right: -6px;
   width: 18px;
   height: 18px;
-  background: var(--color-red-500, #ef4444);
+  background: var(--color-red-face, #ef4444);
   color: white;
   border: none;
   display: flex;
@@ -251,23 +294,38 @@ defineExpose({ focus })
 
 .input-bar-btn-send {
   padding: 6px 12px;
-  background: var(--color-blue-500);
+  background: var(--color-sky-500);
   color: white;
-  border: 2px solid var(--color-blue-600);
+  border: 2px solid var(--color-sky-shadow);
 }
 .input-bar-btn-send:hover:not(:disabled) {
-  background: var(--color-blue-400);
+  background: var(--color-sky-hover);
 }
 .input-bar-btn-send:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
 
+/* 附件按钮 */
+.input-bar-btn-attach {
+  padding: 6px 8px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-muted);
+  border: 2px solid var(--color-border);
+}
+.input-bar-btn-attach:hover {
+  border-color: var(--color-sky-hover);
+  color: var(--color-sky-500);
+}
+.input-bar-file-input {
+  display: none;
+}
+
 .input-bar-btn-stop {
   padding: 4px 10px;
-  background: var(--color-red-500, #ef4444);
+  background: var(--color-red-face, #ef4444);
   color: white;
-  border: 2px solid var(--color-red-600, #dc2626);
+  border: 2px solid var(--color-red-shadow, #dc2626);
 }
 .input-bar-btn-stop:hover {
   background: var(--color-red-400, #f87171);

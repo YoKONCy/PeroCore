@@ -52,9 +52,7 @@ const emit = defineEmits<{ skip: [] }>()
           </div>
           <div class="cmd-footer">
             <span v-if="command.pid" class="cmd-pid">PID: {{ command.pid }}</span>
-            <button class="cmd-skip-btn" @click="emit('skip')">
-              跳过等待 (后台继续)
-            </button>
+            <button class="cmd-skip-btn" @click="emit('skip')">跳过等待 (后台继续)</button>
           </div>
         </div>
       </div>
@@ -90,12 +88,12 @@ const emit = defineEmits<{ skip: [] }>()
   gap: 12px;
   padding: 16px 24px;
   border-bottom: 2px solid var(--color-border);
-  background: var(--color-blue-50, rgba(56, 189, 248, 0.06));
+  background: var(--color-sky-50, rgba(56, 189, 248, 0.06));
 }
 .cmd-header-icon {
   padding: 8px;
-  background: var(--color-blue-100, rgba(56, 189, 248, 0.12));
-  color: var(--color-blue-500);
+  background: var(--color-sky-100, rgba(56, 189, 248, 0.12));
+  color: var(--color-sky-500);
 }
 .cmd-title {
   font-size: 14px;
@@ -117,7 +115,7 @@ const emit = defineEmits<{ skip: [] }>()
   border: 1px solid var(--color-border);
   font-family: monospace;
   font-size: 13px;
-  color: var(--color-green-400, #4ade80);
+  color: var(--color-emerald-400, #4ade80);
   overflow-x: auto;
 }
 .cmd-code-text {
@@ -133,11 +131,15 @@ const emit = defineEmits<{ skip: [] }>()
 .cmd-dot {
   width: 6px;
   height: 6px;
-  background: var(--color-green-500, #22c55e);
+  background: var(--color-emerald-face, #22c55e);
   animation: dot-pulse 1.5s infinite;
 }
-.cmd-dot-2 { animation-delay: 0.15s; }
-.cmd-dot-3 { animation-delay: 0.3s; }
+.cmd-dot-2 {
+  animation-delay: 0.15s;
+}
+.cmd-dot-3 {
+  animation-delay: 0.3s;
+}
 
 .cmd-footer {
   margin-top: 16px;
@@ -152,7 +154,7 @@ const emit = defineEmits<{ skip: [] }>()
 .cmd-skip-btn {
   font-size: 12px;
   font-weight: 700;
-  color: var(--color-blue-500);
+  color: var(--color-sky-500);
   text-decoration: underline;
   text-underline-offset: 4px;
   background: none;
@@ -161,17 +163,28 @@ const emit = defineEmits<{ skip: [] }>()
   transition: color 0.15s;
 }
 .cmd-skip-btn:hover {
-  color: var(--color-blue-400);
+  color: var(--color-sky-hover);
 }
 
 @keyframes dot-pulse {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 /* 过渡动画 */
-.fade-enter-active { transition: opacity 0.3s; }
-.fade-leave-active { transition: opacity 0.2s; }
+.fade-enter-active {
+  transition: opacity 0.3s;
+}
+.fade-leave-active {
+  transition: opacity 0.2s;
+}
 .fade-enter-from,
-.fade-leave-to { opacity: 0; }
+.fade-leave-to {
+  opacity: 0;
+}
 </style>

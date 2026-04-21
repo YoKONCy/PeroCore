@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 
 /**
  * @file Vitest 全局配置
- * @description 遵循 13_TESTING_STANDARDS.md 规范
+ * @description规范
  */
 export default defineConfig({
   plugins: [vue()],
@@ -32,7 +32,7 @@ export default defineConfig({
         '**/constants/**',
         '**/index.ts',
       ],
-      // 覆盖率红线 (13_TESTING_STANDARDS.md §6.2)
+      // 覆盖率红线
       thresholds: {
         statements: 60,
         branches: 50,

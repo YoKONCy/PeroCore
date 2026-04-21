@@ -9,7 +9,6 @@
  * - XML 触发器展开 (<MEMORY>)
  *
  * @props content - Markdown 源文本
- * @see 12_FRONTEND_PERFORMANCE.md §3.2
  */
 import { ref, watch, onMounted } from 'vue'
 import { marked } from 'marked'
@@ -36,7 +35,7 @@ function render() {
 
     // 1. 提取 <MEMORY> 触发器块，替换为占位符
     const replacements: { placeholder: string; html: string }[] = []
-    let formatted = raw.replace(
+    const formatted = raw.replace(
       /<\s*MEMORY\s*>([\s\S]*?)<\s*\/\s*MEMORY\s*>/gi,
       (_match, jsonStr: string) => {
         try {
@@ -47,9 +46,7 @@ function render() {
             .replace(/&gt;/g, '>')
             .replace(/&amp;/g, '&')
           const data = JSON.parse(clean) as { content?: string; tags?: string[] }
-          const tagHtml = (data.tags ?? [])
-            .map((t) => `<span class="md-tag">${t}</span>`)
-            .join('')
+          const tagHtml = (data.tags ?? []).map((t) => `<span class="md-tag">${t}</span>`).join('')
           const placeholder = `__PERO_MEM_${replacements.length}__`
           replacements.push({
             placeholder,
@@ -75,10 +72,7 @@ function render() {
 
     // 5. 降级：净化后为空但源不为空
     if (!sanitized && raw.trim()) {
-      const escaped = raw
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
+      const escaped = raw.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       sanitized = `<p>${escaped}</p>`
     }
 
@@ -92,7 +86,10 @@ function render() {
 
 onMounted(() => render())
 
-watch(() => props.content, () => render())
+watch(
+  () => props.content,
+  () => render(),
+)
 </script>
 
 <template>
@@ -121,21 +118,26 @@ watch(() => props.content, () => render())
 }
 .md-skeleton-line {
   height: 12px;
-  background: var(--color-blue-50);
+  background: var(--color-sky-50);
   animation: md-pulse 1.5s infinite;
 }
 
 @keyframes md-pulse {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 .md-error {
   padding: 12px;
   font-size: 12px;
-  color: var(--color-red-500);
+  color: var(--color-red-face);
   background: var(--color-red-100);
-  border: 1px solid var(--color-red-200);
+  border: 1px solid var(--color-red-light);
 }
 </style>
 
@@ -147,19 +149,29 @@ watch(() => props.content, () => render())
   color: var(--color-text-primary);
   word-break: break-word;
 }
-.md-body p { margin: 0.5em 0; }
-.md-body h1, .md-body h2, .md-body h3 {
+.md-body p {
+  margin: 0.5em 0;
+}
+.md-body h1,
+.md-body h2,
+.md-body h3 {
   font-weight: 800;
   margin: 1em 0 0.5em;
   color: var(--color-text-primary);
 }
-.md-body h1 { font-size: 1.4em; }
-.md-body h2 { font-size: 1.2em; }
-.md-body h3 { font-size: 1.1em; }
+.md-body h1 {
+  font-size: 1.4em;
+}
+.md-body h2 {
+  font-size: 1.2em;
+}
+.md-body h3 {
+  font-size: 1.1em;
+}
 .md-body code {
   padding: 2px 6px;
-  background: var(--color-blue-50);
-  border: 1px solid var(--color-blue-100);
+  background: var(--color-sky-50);
+  border: 1px solid var(--color-sky-100);
   font-family: monospace;
   font-size: 0.9em;
 }
@@ -176,50 +188,60 @@ watch(() => props.content, () => render())
   border: none;
   color: #e2e8f0;
 }
-.md-body ul, .md-body ol {
+.md-body ul,
+.md-body ol {
   padding-left: 1.5em;
   margin: 0.5em 0;
 }
-.md-body li { margin: 0.25em 0; }
+.md-body li {
+  margin: 0.25em 0;
+}
 .md-body blockquote {
-  border-left: 3px solid var(--color-blue-400);
+  border-left: 3px solid var(--color-sky-hover);
   padding: 8px 16px;
   margin: 0.5em 0;
-  background: var(--color-blue-50);
+  background: var(--color-sky-50);
   color: var(--color-text-secondary);
 }
 .md-body a {
-  color: var(--color-blue-500);
+  color: var(--color-sky-500);
   text-decoration: underline;
   text-underline-offset: 3px;
 }
-.md-body a:hover { color: var(--color-blue-400); }
+.md-body a:hover {
+  color: var(--color-sky-hover);
+}
 .md-body img {
   max-width: 100%;
   border: 2px solid var(--color-border);
 }
-.md-body table { border-collapse: collapse; width: 100%; margin: 0.5em 0; }
-.md-body th, .md-body td {
+.md-body table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.5em 0;
+}
+.md-body th,
+.md-body td {
   border: 1px solid var(--color-border);
   padding: 6px 12px;
   font-size: 13px;
 }
 .md-body th {
-  background: var(--color-blue-50);
+  background: var(--color-sky-50);
   font-weight: 700;
 }
 
 /* 记忆触发器 */
 .md-memory {
-  border: 2px solid var(--color-blue-200);
+  border: 2px solid var(--color-sky-light);
   margin: 8px 0;
 }
 .md-memory-header {
   padding: 8px 12px;
   font-size: 12px;
   font-weight: 700;
-  color: var(--color-blue-600);
-  background: var(--color-blue-50);
+  color: var(--color-sky-shadow);
+  background: var(--color-sky-50);
   cursor: pointer;
   user-select: none;
 }
@@ -238,7 +260,7 @@ watch(() => props.content, () => render())
   padding: 2px 8px;
   font-size: 10px;
   font-weight: 700;
-  background: var(--color-blue-100);
-  color: var(--color-blue-600);
+  background: var(--color-sky-100);
+  color: var(--color-sky-shadow);
 }
 </style>

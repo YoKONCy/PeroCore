@@ -10,7 +10,8 @@
  */
 
 interface Props {
-  visible: boolean
+  /** 控制显示/隐藏 (支持 v-model) */
+  modelValue: boolean
   title?: string
   message?: string
   mode?: 'confirm' | 'prompt'
@@ -36,7 +37,7 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 const emit = defineEmits<{
-  'update:visible': [value: boolean]
+  'update:modelValue': [value: boolean]
   confirm: [value?: string]
   cancel: []
 }>()
@@ -48,8 +49,10 @@ const slots = useSlots()
 const inputValue = ref(props.defaultValue)
 
 watch(
-  () => props.visible,
-  (val) => { if (val) inputValue.value = props.defaultValue },
+  () => props.modelValue,
+  (val) => {
+    if (val) inputValue.value = props.defaultValue
+  },
 )
 
 function handleConfirm() {
@@ -58,24 +61,24 @@ function handleConfirm() {
   } else {
     emit('confirm')
   }
-  emit('update:visible', false)
+  emit('update:modelValue', false)
 }
 
 function handleCancel() {
   emit('cancel')
-  emit('update:visible', false)
+  emit('update:modelValue', false)
 }
 
 /** 允许 v-model 用法 */
 function close() {
-  emit('update:visible', false)
+  emit('update:modelValue', false)
 }
 </script>
 
 <template>
   <Teleport to="body">
     <Transition name="dialog">
-      <div v-if="visible" class="p-dialog-overlay" @click.self="handleCancel">
+      <div v-if="modelValue" class="p-dialog-overlay" @click.self="handleCancel">
         <div class="p-dialog" :style="width ? { minWidth: width, maxWidth: width } : {}">
           <div class="p-dialog-header">
             <span>{{ title }}</span>
@@ -101,8 +104,12 @@ function close() {
               <slot name="footer" />
             </template>
             <template v-else>
-              <PButton variant="secondary" size="sm" @click="handleCancel">{{ cancelText }}</PButton>
-              <PButton :variant="confirmVariant" size="sm" @click="handleConfirm">{{ confirmText }}</PButton>
+              <PButton variant="secondary" size="sm" @click="handleCancel">{{
+                cancelText
+              }}</PButton>
+              <PButton :variant="confirmVariant" size="sm" @click="handleConfirm">{{
+                confirmText
+              }}</PButton>
             </template>
           </div>
         </div>
@@ -113,13 +120,19 @@ function close() {
 
 <style scoped>
 .p-dialog-overlay {
-  position: fixed; inset: 0; z-index: 10000;
-  display: flex; align-items: center; justify-content: center;
-  background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(2px);
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(2px);
 }
 
 .p-dialog {
-  min-width: 340px; max-width: 560px;
+  min-width: 340px;
+  max-width: 560px;
   background: var(--color-bg-primary);
   border: 3px solid var(--color-border);
   box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.15);
@@ -128,38 +141,70 @@ function close() {
 .p-dialog-header {
   padding: 12px 16px;
   border-bottom: 2px solid var(--color-border);
-  font-weight: 700; font-size: 15px;
+  font-weight: 700;
+  font-size: 15px;
   color: var(--color-text-primary);
-  display: flex; justify-content: space-between; align-items: center;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
 .p-dialog-close {
-  background: none; border: none; cursor: pointer;
-  color: var(--color-text-muted); font-size: 14px; padding: 2px 6px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  font-size: 14px;
+  padding: 2px 6px;
   transition: color 0.15s;
 }
-.p-dialog-close:hover { color: var(--color-text-primary); }
+.p-dialog-close:hover {
+  color: var(--color-text-primary);
+}
 
-.p-dialog-body { padding: 16px; }
-.p-dialog-message { font-size: 14px; line-height: 1.6; color: var(--color-text-secondary); margin-bottom: 12px; }
+.p-dialog-body {
+  padding: 16px;
+}
+.p-dialog-message {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+  margin-bottom: 12px;
+}
 
 .p-dialog-input {
-  width: 100%; padding: 6px 12px;
+  width: 100%;
+  padding: 6px 12px;
   border: 2px solid var(--color-border);
   background: var(--color-bg-secondary);
   color: var(--color-text-primary);
-  font-family: var(--font-pixel), monospace; font-size: 14px; outline: none;
+  font-family: var(--font-pixel), monospace;
+  font-size: 14px;
+  outline: none;
 }
-.p-dialog-input:focus { border-color: var(--color-blue-500); }
+.p-dialog-input:focus {
+  border-color: var(--color-sky-500);
+}
 
 .p-dialog-footer {
   padding: 12px 16px;
   border-top: 2px solid var(--color-border);
-  display: flex; justify-content: flex-end; gap: 8px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
-.dialog-enter-active { transition: all 0.2s ease-out; }
-.dialog-leave-active { transition: all 0.15s ease-in; }
-.dialog-enter-from, .dialog-leave-to { opacity: 0; }
-.dialog-enter-from .p-dialog { transform: scale(0.9); }
+.dialog-enter-active {
+  transition: all 0.2s ease-out;
+}
+.dialog-leave-active {
+  transition: all 0.15s ease-in;
+}
+.dialog-enter-from,
+.dialog-leave-to {
+  opacity: 0;
+}
+.dialog-enter-from .p-dialog {
+  transform: scale(0.9);
+}
 </style>

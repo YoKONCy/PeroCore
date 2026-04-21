@@ -1,0 +1,26 @@
+{
+  "id": "run-script",
+  "name": "脚本编排",
+  "version": "1.0.0",
+  "author": "PeroCore Team",
+  "description": "执行 NIT 脚本，用于需要条件判断、循环、并行执行等复杂编排的场景。脚本中可调用所有其他可用工具。",
+  "type": "tool",
+  "entry": "index.ts",
+  "category": "core",
+  "platforms": ["windows", "linux", "darwin", "docker"],
+
+  "toolDefinition": {
+    "name": "run_script",
+    "description": "执行 NIT 脚本，用于需要条件判断、循环、并行执行等复杂编排的场景。脚本中可以调用所有其他可用工具。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "NIT 脚本代码。支持变量赋值、条件分支 (if/else)、循环 (for)、并行执行 (parallel)、try/catch。"
+        }
+      },
+      "required": ["code"]
+    }
+  }
+}

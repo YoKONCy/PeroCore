@@ -1,7 +1,7 @@
 /**
  * Transport 抽象接口
  *
- * 定义 Service 扩展与核心之间的通信协议 (09_EXTENSION_SYSTEM.md §10)。
+ * 定义 Service 扩展与核心之间的通信协议。
  * Layer 2: StdioTransport (JSON-RPC over stdio)
  * Layer 3: HttpTransport (预留)
  *

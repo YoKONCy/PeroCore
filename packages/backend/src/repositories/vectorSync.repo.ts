@@ -2,7 +2,7 @@
  * TriviumDB 补偿同步 Repository
  *
  * 当向量写入/删除失败时，任务入队等待后台重试。
- * 消除 v1 中 10+ 处重复的"写入-失败-补偿"模式 (10_MEMORY_SYSTEM.md §4.1)。
+ * 统一"写入-失败-补偿"模式，消除重复逻辑。
  *
  * @module packages/backend/src/repositories/vectorSync.repo
  */

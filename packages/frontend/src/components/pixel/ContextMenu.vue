@@ -2,7 +2,6 @@
 /**
  * ContextMenu — 像素风右键菜单
  *
- * 迁移自 v1，用 useEventListener 管理生命周期。
  */
 import { useEventListener } from '../../composables'
 
@@ -43,7 +42,7 @@ useEventListener(window, 'click', close)
 useEventListener(window, 'contextmenu', close)
 useEventListener(window, 'keydown', ((e: KeyboardEvent) => {
   if (e.key === 'Escape') close()
-}) as EventListener)
+}) as (e: Event) => void)
 </script>
 
 <template>
@@ -106,7 +105,7 @@ useEventListener(window, 'keydown', ((e: KeyboardEvent) => {
   transition: all 0.1s;
 }
 .p-ctx-item:hover:not(:disabled) {
-  background: var(--color-blue-500);
+  background: var(--color-sky-500);
   color: white;
 }
 .p-ctx-item-disabled {
@@ -125,8 +124,12 @@ useEventListener(window, 'keydown', ((e: KeyboardEvent) => {
 }
 
 /* 动画 */
-.ctx-menu-enter-active { transition: all 0.1s ease-out; }
-.ctx-menu-leave-active { transition: all 0.075s ease-in; }
+.ctx-menu-enter-active {
+  transition: all 0.1s ease-out;
+}
+.ctx-menu-leave-active {
+  transition: all 0.075s ease-in;
+}
 .ctx-menu-enter-from,
 .ctx-menu-leave-to {
   opacity: 0;

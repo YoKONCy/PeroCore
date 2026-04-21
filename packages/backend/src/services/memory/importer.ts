@@ -4,7 +4,7 @@
  * 将用户提供的长文本（故事、回忆录等）通过 LLM 拆分为
  * 独立的事件记忆，批量写入记忆系统。
  *
- * 继承 v1 memory_importer.py 的核心逻辑:
+ *.py 的核心逻辑:
  * 1. 将长文本分段
  * 2. LLM 逐段提取事件
  * 3. 批量创建记忆 + 建时间链
@@ -14,7 +14,8 @@
 
 import type { MemoryService } from './memoryService'
 import type { LlmService, ModelConfig } from '../llm/llmService'
-import type { ConfigRepository } from '../../repositories/config.repo'
+import type { MdpEngine } from '../prompt/mdpEngine'
+import { AppError } from '../../lib/appError'
 import { parseLlmJson } from '../../shared/llmJsonParser'
 import { createLogger } from '../../lib/logger'
 
@@ -72,7 +73,8 @@ export class MemoryImporter {
   constructor(
     private memoryService: MemoryService,
     private llmService: LlmService,
-    private configRepo: ConfigRepository,
+    private getModelConfig: () => Promise<ModelConfig | null>,
+    private mdpEngine: MdpEngine,
   ) {}
 
   /**
@@ -96,10 +98,7 @@ export class MemoryImporter {
       return { imported: 0, skipped: 0, details: [] }
     }
 
-    const modelConfig = await this.getModelConfig()
-    if (!modelConfig) {
-      throw new Error('未配置 LLM，无法导入')
-    }
+    const modelConfig = await this.resolveModelConfig()
 
     // 1. 分段
     const chunks = this.splitIntoChunks(text, chunkSize)
@@ -185,23 +184,11 @@ export class MemoryImporter {
     chunkIndex: number,
     totalChunks: number,
   ): Promise<ExtractedEvent[]> {
-    const systemPrompt = [
-      '你是一个记忆提取助手。请从以下文本中提取独立的事件/事实/偏好记忆。',
-      `这是第 ${chunkIndex}/${totalChunks} 段文本。`,
-      `每条记忆应该是一个独立的、简洁的陈述（1-2 句话）。`,
-      `最多提取 ${MAX_EVENTS_PER_CHUNK} 条。`,
-      '',
-      '输出 JSON 数组:',
-      '[',
-      '  {',
-      '    "content": "事件描述",',
-      '    "tags": ["标签1", "标签2"],',
-      '    "importance": 1-10,',
-      '    "sentiment": "positive/negative/neutral",',
-      '    "type": "event/fact/preference"',
-      '  }',
-      ']',
-    ].join('\n')
+    const systemPrompt = this.mdpEngine.render('tasks/memory/importer/extract_events', {
+      chunk_index: String(chunkIndex),
+      total_chunks: String(totalChunks),
+      max_events: String(MAX_EVENTS_PER_CHUNK),
+    })
 
     const completion = await this.llmService.chat(
       modelConfig,
@@ -227,17 +214,14 @@ export class MemoryImporter {
     return []
   }
 
-  /** 获取模型配置 */
-  private async getModelConfig(): Promise<ModelConfig | null> {
-    const apiKey = await this.configRepo.get('global_llm_api_key')
-    if (!apiKey) return null
-
-    const apiBase = await this.configRepo.get('global_llm_api_base')
-    return {
-      provider: 'openai',
-      modelId: 'gpt-4o-mini',
-      apiKey,
-      apiBase: apiBase ?? undefined,
+  /** 获取模型配置 (由 ModelRoleResolver 提供，缺失时抛出异常) */
+  private async resolveModelConfig(): Promise<ModelConfig> {
+    const config = await this.getModelConfig()
+    if (!config) {
+      throw new AppError('CONFIG_ERROR', {
+        message: '未配置 LLM 模型，无法导入记忆',
+      })
     }
+    return config
   }
 }

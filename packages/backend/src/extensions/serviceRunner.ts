@@ -1,7 +1,7 @@
 /**
  * Service Runner — Service 扩展子进程管理
  *
- * 负责 Layer 2 (子进程 IPC) 的生命周期管理 (09_EXTENSION_SYSTEM.md §9)。
+ * 负责 Layer 2 (子进程 IPC) 的生命周期管理。
  * - 启动子进程 (Node/Bun)
  * - 建立 StdioTransport 双向通信
  * - 健康检查 + 自动重启
@@ -79,7 +79,9 @@ export class ServiceRunner {
         if (code !== 0 && this.restartCount < this.maxRestarts) {
           this.restartCount++
           const delay = Math.min(1000 * Math.pow(2, this.restartCount), 30_000)
-          logger.warn(`Service ${this.manifest.id} 将在 ${delay}ms 后重启 (${this.restartCount}/${this.maxRestarts})`)
+          logger.warn(
+            `Service ${this.manifest.id} 将在 ${delay}ms 后重启 (${this.restartCount}/${this.maxRestarts})`,
+          )
           setTimeout(() => this.start().catch(() => {}), delay)
         }
       })

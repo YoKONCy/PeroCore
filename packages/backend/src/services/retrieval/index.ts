@@ -1,5 +1,5 @@
 /**
- * PEDSA v2 认知检索引擎桶导出
+ * PEDSA 认知检索引擎桶导出
  *
  * @module packages/backend/src/services/retrieval
  */

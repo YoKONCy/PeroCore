@@ -5,17 +5,14 @@
  * - **对话模式**: 使用 SillyTavern 风格的槽位拼接 (buildPromptMessages)
  * - **后台任务**: 使用单模板渲染 (renderTemplate)
  *
- * 替代 v1 的 prompt_service.py (692行 → ~180行)。
- *
  * @module packages/backend/src/services/prompt/promptService
  */
 
 import type { MdpEngine, PromptSlot, PromptPreset, RenderedMessage } from './mdpEngine'
+import type { PresetLoader } from './presetLoader'
 import type { AgentManager, AgentProfile } from '../agent/agentManager'
 import type { EnrichedContext } from '../pipeline/types'
-import { createLogger } from '../../lib/logger'
-
-const logger = createLogger('PromptService')
+import { AppError } from '../../lib/appError'
 
 /** Prompt 组装结果 (单模板模式, 向后兼容) */
 export interface PromptResult {
@@ -37,6 +34,7 @@ export class PromptService {
   constructor(
     private mdp: MdpEngine,
     private agentManager: AgentManager,
+    private presetLoader: PresetLoader,
   ) {}
 
   // ─────────────────────────────────────────
@@ -61,17 +59,21 @@ export class PromptService {
   ): PromptMessagesResult {
     const agent = this.agentManager.getAgent(agentId)
     if (!agent) {
-      logger.warn(`Agent ${agentId} 未找到，返回空消息列表`)
-      return {
-        messages: [{ role: 'system', content: '你是一个 AI 助手。', slotId: 'fallback' }],
-        slots: [],
-      }
+      throw new AppError('CONFIG_ERROR', {
+        message: `Agent ${agentId} 未找到，无法组装提示词`,
+      })
     }
 
     // 1. 构建默认槽位
     let slots = this.mdp.buildDefaultSlots(agentId)
 
-    // 2. 应用预设覆盖
+    // 2. 应用内置模式 Preset (根据 source 自动选择)
+    const builtinPreset = this.presetLoader.getPresetForSource(source)
+    if (builtinPreset) {
+      slots = this.mdp.applyPreset(slots, builtinPreset)
+    }
+
+    // 3. 应用用户自定义 Preset (优先级最高)
     if (preset) {
       slots = this.mdp.applyPreset(slots, preset)
     }
@@ -113,14 +115,32 @@ export class PromptService {
   ): PromptResult {
     const agent = this.agentManager.getAgent(agentId)
     if (!agent) {
-      logger.warn(`Agent ${agentId} 未找到，使用默认 Prompt`)
-      return { systemPrompt: '你是一个 AI 助手。', footer: '' }
+      throw new AppError('CONFIG_ERROR', {
+        message: `Agent ${agentId} 未找到，无法组装提示词`,
+      })
     }
 
     // 构建模板变量字典
     const vars = this.buildVars(agent, source, enriched, extraVars)
 
-    // 渲染系统提示词
+    // 检查是否有内置 Preset (社交/工作/群聊/轻量模式)
+    const builtinPreset = this.presetLoader.getPresetForSource(source)
+    if (builtinPreset) {
+      // 有 Preset: 使用槽位拼接模式
+      let slots = this.mdp.buildDefaultSlots(agentId)
+      slots = this.mdp.applyPreset(slots, builtinPreset)
+      const messages = this.mdp.renderSlots(slots, vars, {
+        mergeAdjacentRoles: true,
+        skipEmpty: true,
+      })
+      const systemParts = messages.filter((m) => m.role === 'system').map((m) => m.content)
+      return {
+        systemPrompt: systemParts.join('\n\n'),
+        footer: '',
+      }
+    }
+
+    // 默认桌面模式: 单模板渲染
     const systemPrompt = this.mdp.render('system_prompt', vars)
 
     // 注入模式特定人设
@@ -185,12 +205,18 @@ export class PromptService {
       owner_name: enriched.ownerName,
       user_persona: enriched.userPersona,
 
+      // 环境
+      environment_info: enriched.environmentInfo,
+
       // 来源
       source,
 
       // 模式特定人设
       work_persona: agent.workPersona,
       social_persona: agent.socialPersona,
+
+      // 社交上下文
+      social_context: enriched.socialContext,
 
       // 调用方覆盖
       ...extraVars,

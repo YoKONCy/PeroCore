@@ -3,27 +3,33 @@
  * DashboardView — 仪表盘页面
  *
  * 侧边栏菜单 + 异步 Tab 内容区。
- * 所有 Tab 使用 defineAsyncComponent 异步加载 (12_FRONTEND_PERFORMANCE §3.5)。
+ * 所有 Tab 使用 defineAsyncComponent 异步加载。
  *
- * @see 06_FILE_SIZE_LIMITS.md §2.2 — DashboardView 拆分方案
+ * @see DashboardView 拆分方案
  */
 import { ref, defineAsyncComponent, computed, type Component } from 'vue'
 import { PixelIcon, PTooltip } from '../components/pixel'
 
 defineOptions({ name: 'DashboardView' })
 
-// ── Tab 异步加载 (§3.5 defineAsyncComponent) ──
+// ── Tab 异步加载 (defineAsyncComponent) ──
 
 const tabComponents: Record<string, Component> = {
   overview: defineAsyncComponent(() => import('../components/dashboard/tabs/OverviewTab.vue')),
   logs: defineAsyncComponent(() => import('../components/dashboard/tabs/LogsTab.vue')),
   memories: defineAsyncComponent(() => import('../components/dashboard/tabs/MemoriesTab.vue')),
   tasks: defineAsyncComponent(() => import('../components/dashboard/tabs/TasksTab.vue')),
-  model_config: defineAsyncComponent(() => import('../components/dashboard/tabs/ModelConfigTab.vue')),
+  model_config: defineAsyncComponent(
+    () => import('../components/dashboard/tabs/ModelConfigTab.vue'),
+  ),
   voice_config: defineAsyncComponent(() => import('../components/dashboard/tabs/VoiceTab.vue')),
   mcp_config: defineAsyncComponent(() => import('../components/dashboard/tabs/McpTab.vue')),
-  user_settings: defineAsyncComponent(() => import('../components/dashboard/tabs/UserSettingsTab.vue')),
+  user_settings: defineAsyncComponent(
+    () => import('../components/dashboard/tabs/UserSettingsTab.vue'),
+  ),
   system_reset: defineAsyncComponent(() => import('../components/dashboard/tabs/ResetTab.vue')),
+  terminal: defineAsyncComponent(() => import('../components/dashboard/tabs/TerminalTab.vue')),
+  napcat: defineAsyncComponent(() => import('../components/dashboard/tabs/SocialTab.vue')),
 }
 
 // ── 菜单结构 ──
@@ -64,8 +70,8 @@ const menuGroups: MenuGroup[] = [
   {
     title: 'SYSTEM',
     items: [
-      { id: 'napcat', label: 'NapCat 终端', icon: 'terminal', disabled: true },
-      { id: 'terminal', label: '系统终端', icon: 'desktop', disabled: true },
+      { id: 'napcat', label: '社交适配器', icon: 'terminal' },
+      { id: 'terminal', label: '系统终端', icon: 'desktop' },
       { id: 'system_reset', label: '危险区域', icon: 'alert', variant: 'danger' },
     ],
   },
@@ -203,8 +209,8 @@ async function handleRefresh() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, var(--color-blue-400), var(--color-blue-600));
-  border: 2px solid var(--color-blue-600);
+  background: linear-gradient(135deg, var(--color-sky-hover), var(--color-sky-shadow));
+  border: 2px solid var(--color-sky-shadow);
   color: white;
   font-weight: 800;
   font-size: 20px;
@@ -230,7 +236,7 @@ async function handleRefresh() {
 .dash-brand-title {
   font-size: 18px;
   font-weight: 800;
-  background: linear-gradient(135deg, var(--color-text-primary), var(--color-blue-500));
+  background: linear-gradient(135deg, var(--color-text-primary), var(--color-sky-500));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -286,19 +292,19 @@ async function handleRefresh() {
 }
 .dash-nav-item:hover:not(.dash-nav-item-disabled) {
   background: var(--color-bg-primary);
-  color: var(--color-blue-500);
+  color: var(--color-sky-500);
   transform: translateX(2px);
 }
 
 .dash-nav-item-active {
   background: var(--color-bg-primary);
-  color: var(--color-blue-600);
-  border-color: var(--color-blue-100, rgba(56, 189, 248, 0.2));
+  color: var(--color-sky-shadow);
+  border-color: var(--color-sky-100, rgba(56, 189, 248, 0.2));
   box-shadow: 0 2px 8px rgba(56, 189, 248, 0.08);
   transform: translateX(2px);
 }
 .dash-nav-item-danger {
-  color: var(--color-red-500, #ef4444);
+  color: var(--color-red-face, #ef4444);
   border-color: rgba(239, 68, 68, 0.2);
   box-shadow: 0 2px 8px rgba(239, 68, 68, 0.05);
 }
@@ -314,10 +320,10 @@ async function handleRefresh() {
   top: 8px;
   bottom: 8px;
   width: 3px;
-  background: var(--color-blue-500);
+  background: var(--color-sky-500);
 }
 .dash-nav-item-danger .dash-nav-indicator {
-  background: var(--color-red-500, #ef4444);
+  background: var(--color-red-face, #ef4444);
 }
 
 .dash-nav-icon {
@@ -350,7 +356,7 @@ async function handleRefresh() {
 .dash-status-dot {
   width: 10px;
   height: 10px;
-  background: var(--color-green-500, #22c55e);
+  background: var(--color-emerald-face, #22c55e);
   flex-shrink: 0;
   animation: pulse 2s infinite;
 }
@@ -368,7 +374,7 @@ async function handleRefresh() {
 .dash-status-value {
   font-size: 10px;
   font-weight: 700;
-  color: var(--color-green-600, #16a34a);
+  color: var(--color-emerald-shadow, #16a34a);
 }
 .dash-refresh-btn {
   padding: 6px;
@@ -379,8 +385,8 @@ async function handleRefresh() {
   transition: all 0.15s;
 }
 .dash-refresh-btn:hover {
-  border-color: var(--color-blue-400);
-  color: var(--color-blue-500);
+  border-color: var(--color-sky-hover);
+  color: var(--color-sky-500);
 }
 
 /* ── 主内容区 ── */
@@ -404,15 +410,32 @@ async function handleRefresh() {
 }
 
 /* 滚动条 */
-.dash-nav::-webkit-scrollbar { width: 4px; }
-.dash-nav::-webkit-scrollbar-track { background: transparent; }
-.dash-nav::-webkit-scrollbar-thumb { background: var(--color-blue-200); }
-.dash-main::-webkit-scrollbar { width: 4px; }
-.dash-main::-webkit-scrollbar-track { background: transparent; }
-.dash-main::-webkit-scrollbar-thumb { background: var(--color-blue-200); }
+.dash-nav::-webkit-scrollbar {
+  width: 4px;
+}
+.dash-nav::-webkit-scrollbar-track {
+  background: transparent;
+}
+.dash-nav::-webkit-scrollbar-thumb {
+  background: var(--color-sky-light);
+}
+.dash-main::-webkit-scrollbar {
+  width: 4px;
+}
+.dash-main::-webkit-scrollbar-track {
+  background: transparent;
+}
+.dash-main::-webkit-scrollbar-thumb {
+  background: var(--color-sky-light);
+}
 
 @keyframes pulse {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 </style>

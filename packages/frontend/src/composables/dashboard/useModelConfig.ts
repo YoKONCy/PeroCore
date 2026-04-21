@@ -4,16 +4,21 @@
  * 管理 LLM 模型列表的 CRUD + 角色分配 (主/秘书/反思/辅助)
  * 以及向量模型 (Embedding / Reranker) 配置。
  *
- * F1 阶段: 使用 mock 数据，F3 阶段替换为 modelApi 调用。
+ * F3: 已对接 modelApi + configApi 真实后端。
+ *
+ * @module packages/frontend/src/composables/dashboard/useModelConfig
  */
-import { ref, computed } from 'vue'
+import { ref, shallowRef, computed, onMounted } from 'vue'
+import { modelApi } from '../../api/modules/modelApi'
+import type { ModelConfigItem } from '../../api/modules/modelApi'
+import { configApi } from '../../api/modules/configApi'
 
 // ── 类型 ──
 
 export interface LlmModel {
   id: string
   name: string
-  provider: 'openai' | 'gemini' | 'anthropic' | 'custom'
+  provider: string
   modelId: string
   maxTokens: number | null
   enableVision: boolean
@@ -21,6 +26,7 @@ export interface LlmModel {
   topP: number
   apiBase?: string
   apiKey?: string
+  providerType?: string
 }
 
 export interface ModelRoles {
@@ -32,66 +38,39 @@ export interface ModelRoles {
 
 export type ModelTab = 'llm' | 'vector'
 
-// ── Mock 数据 (F1 占位，F3 替换) ──
+// ── 辅助函数 ──
 
-const MOCK_MODELS: LlmModel[] = [
-  {
-    id: 'gpt4o',
-    name: 'GPT-4o',
-    provider: 'openai',
-    modelId: 'gpt-4o',
-    maxTokens: 128000,
-    enableVision: true,
-    temperature: 0.7,
-    topP: 1,
-  },
-  {
-    id: 'claude-sonnet',
-    name: 'Claude 3.5 Sonnet',
-    provider: 'anthropic',
-    modelId: 'claude-3-5-sonnet-20241022',
-    maxTokens: 200000,
-    enableVision: true,
-    temperature: 0.7,
-    topP: 1,
-  },
-  {
-    id: 'gemini-pro',
-    name: 'Gemini 2.0 Flash',
-    provider: 'gemini',
-    modelId: 'gemini-2.0-flash',
-    maxTokens: 1000000,
-    enableVision: true,
-    temperature: 0.7,
-    topP: 1,
-  },
-  {
-    id: 'deepseek',
-    name: 'DeepSeek V3',
-    provider: 'custom',
-    modelId: 'deepseek-chat',
-    maxTokens: 64000,
+/** 后端 DTO → 前端 LlmModel */
+function toLlmModel(item: ModelConfigItem): LlmModel {
+  return {
+    id: String(item.id),
+    name: item.name,
+    provider: item.provider,
+    modelId: item.modelId,
+    maxTokens: null,
     enableVision: false,
     temperature: 0.7,
     topP: 1,
-    apiBase: 'https://api.deepseek.com/v1',
-  },
-]
+    apiBase: item.apiBase,
+    apiKey: item.apiKey, // 后端已遮蔽
+  }
+}
 
 // ── Composable ──
 
 export function useModelConfig() {
   // ── LLM 模型列表 ──
-  const models = ref<LlmModel[]>([...MOCK_MODELS])
+  const models = shallowRef<LlmModel[]>([])
   const currentTab = ref<ModelTab>('llm')
   const isLoading = ref(false)
+  const error = ref<string | null>(null)
 
   // ── 模型角色 ──
   const roles = ref<ModelRoles>({
-    main: 'gpt4o',
-    secretary: 'claude-sonnet',
-    reflection: 'gemini-pro',
-    aux: 'deepseek',
+    main: null,
+    secretary: null,
+    reflection: null,
+    aux: null,
   })
 
   // ── 编辑弹窗 ──
@@ -138,7 +117,43 @@ export function useModelConfig() {
     { label: '自定义 (兼容 OpenAI)', value: 'custom' },
   ])
 
-  // ── 操作方法 ──
+  // ── API 操作 ──
+
+  /** 从后端加载模型列表 */
+  async function fetchModels(): Promise<void> {
+    isLoading.value = true
+    error.value = null
+    try {
+      const res = await modelApi.list()
+      models.value = (res.data ?? []).map(toLlmModel)
+    } catch (e) {
+      error.value = (e as Error).message
+      console.error('[ModelConfig] 加载模型列表失败:', e)
+    } finally {
+      isLoading.value = false
+    }
+  }
+
+  /** 从后端加载角色配置 */
+  async function fetchRoles(): Promise<void> {
+    try {
+      const res = await configApi.batch([
+        'model.role.main',
+        'model.role.secretary',
+        'model.role.reflection',
+        'model.role.aux',
+      ])
+      const data = res.data ?? {}
+      roles.value = {
+        main: (data['model.role.main'] as string) || null,
+        secretary: (data['model.role.secretary'] as string) || null,
+        reflection: (data['model.role.reflection'] as string) || null,
+        aux: (data['model.role.aux'] as string) || null,
+      }
+    } catch {
+      // 首次使用可能不存在配置，保持默认
+    }
+  }
 
   function openEditor(model: LlmModel | null) {
     if (model) {
@@ -162,33 +177,64 @@ export function useModelConfig() {
     isEditorOpen.value = true
   }
 
-  function saveModel() {
-    if (editingModel.value) {
-      // 编辑模式
-      const idx = models.value.findIndex((m) => m.id === editingModel.value!.id)
-      if (idx !== -1) models.value[idx] = { ...editorForm.value }
-    } else {
-      // 新增模式
-      const newId = editorForm.value.name.toLowerCase().replace(/\s+/g, '-') + '-' + Date.now()
-      models.value.push({ ...editorForm.value, id: newId })
+  /** 保存模型（创建或更新） */
+  async function saveModel(): Promise<void> {
+    isLoading.value = true
+    try {
+      const form = editorForm.value
+      if (editingModel.value) {
+        // 更新
+        await modelApi.update(editingModel.value.id, {
+          name: form.name,
+          provider: form.provider,
+          modelId: form.modelId,
+          apiKey: form.apiKey || undefined,
+          apiBase: form.apiBase || undefined,
+        })
+      } else {
+        // 创建
+        await modelApi.create({
+          name: form.name,
+          provider: form.provider,
+          modelId: form.modelId,
+          apiKey: form.apiKey || '',
+          apiBase: form.apiBase || undefined,
+        })
+      }
+      isEditorOpen.value = false
+      await fetchModels()
+    } catch (e) {
+      error.value = (e as Error).message
+    } finally {
+      isLoading.value = false
     }
-    isEditorOpen.value = false
   }
 
-  function deleteModel(id: string) {
-    models.value = models.value.filter((m) => m.id !== id)
-    // 清理角色引用
-    for (const key of Object.keys(roles.value) as Array<keyof ModelRoles>) {
-      if (roles.value[key] === id) roles.value[key] = null
+  /** 删除模型 */
+  async function deleteModel(id: string): Promise<void> {
+    try {
+      await modelApi.remove(id)
+      await fetchModels()
+      // 清理角色引用
+      for (const key of Object.keys(roles.value) as Array<keyof ModelRoles>) {
+        if (roles.value[key] === id) {
+          roles.value[key] = null
+          await configApi.set(`model.role.${key}`, '')
+        }
+      }
+    } catch (e) {
+      error.value = (e as Error).message
     }
   }
 
-  function setRole(role: keyof ModelRoles, modelId: string) {
-    // 如果该模型已被分配为同一角色，则取消
+  /** 设置角色 */
+  async function setRole(role: keyof ModelRoles, modelId: string): Promise<void> {
     if (roles.value[role] === modelId) {
       roles.value[role] = null
+      await configApi.set(`model.role.${role}`, '')
     } else {
       roles.value[role] = modelId
+      await configApi.set(`model.role.${role}`, modelId)
     }
   }
 
@@ -201,17 +247,36 @@ export function useModelConfig() {
     return result
   }
 
-  function saveVectorConfig() {
+  /** 保存向量配置 */
+  async function saveVectorConfig(): Promise<void> {
     isSavingVector.value = true
-    // TODO: F3 阶段替换为 configApi.setBatch(...)
-    setTimeout(() => { isSavingVector.value = false }, 800)
+    try {
+      // 批量写入向量相关配置
+      await configApi.set('embedding.provider', embeddingProvider.value)
+      await configApi.set('embedding.model', embeddingModelId.value)
+      await configApi.set('embedding.dimension', String(embeddingDimension.value))
+      if (embeddingApiBase.value) await configApi.set('embedding.apiBase', embeddingApiBase.value)
+      if (embeddingApiKey.value) await configApi.set('embedding.apiKey', embeddingApiKey.value)
+      await configApi.set('reranker.enabled', String(rerankerEnabled.value))
+      if (rerankerModelId.value) await configApi.set('reranker.model', rerankerModelId.value)
+    } catch (e) {
+      error.value = (e as Error).message
+    } finally {
+      isSavingVector.value = false
+    }
   }
+
+  // ── 初始化 ──
+  onMounted(async () => {
+    await Promise.all([fetchModels(), fetchRoles()])
+  })
 
   return {
     // LLM
     models,
     currentTab,
     isLoading,
+    error,
     roles,
     providerOptions,
     // 编辑器
@@ -223,6 +288,7 @@ export function useModelConfig() {
     deleteModel,
     setRole,
     getModelRoles,
+    fetchModels,
     // 全局配置
     isGlobalOpen,
     globalConfig,

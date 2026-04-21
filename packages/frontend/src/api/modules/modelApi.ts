@@ -1,7 +1,6 @@
 /**
  * Model API 模块
  *
- * @see 05_FRONTEND_ARCHITECTURE.md §1.2
  */
 
 import { apiClient } from '../client'

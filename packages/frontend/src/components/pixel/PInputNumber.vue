@@ -2,11 +2,10 @@
 /**
  * PInputNumber — 像素风数字输入
  *
- * 迁移自 v1，加减按钮 + 像素风格。
  */
 
 interface Props {
-  modelValue: number
+  modelValue: number | null
   min?: number
   max?: number
   step?: number
@@ -23,7 +22,7 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 const emit = defineEmits<{
-  'update:modelValue': [value: number]
+  'update:modelValue': [value: number | null]
 }>()
 
 function clampAndEmit(val: number) {
@@ -33,12 +32,12 @@ function clampAndEmit(val: number) {
 
 function increment() {
   if (props.disabled) return
-  clampAndEmit(props.modelValue + props.step)
+  clampAndEmit((props.modelValue ?? 0) + props.step)
 }
 
 function decrement() {
   if (props.disabled) return
-  clampAndEmit(props.modelValue - props.step)
+  clampAndEmit((props.modelValue ?? 0) - props.step)
 }
 
 function handleInput(e: Event) {
@@ -55,7 +54,7 @@ function handleInput(e: Event) {
       <button class="p-input-number-btn" :disabled="disabled" @click="decrement">−</button>
       <input
         type="number"
-        :value="modelValue"
+        :value="modelValue ?? ''"
         :min="min"
         :max="max"
         :step="step"
@@ -108,11 +107,11 @@ function handleInput(e: Event) {
   user-select: none;
 }
 .p-input-number-btn:hover:not(:disabled) {
-  background: var(--color-blue-100);
-  color: var(--color-blue-600);
+  background: var(--color-sky-100);
+  color: var(--color-sky-shadow);
 }
 .p-input-number-btn:active:not(:disabled) {
-  background: var(--color-blue-200);
+  background: var(--color-sky-light);
 }
 
 .p-input-number-input {

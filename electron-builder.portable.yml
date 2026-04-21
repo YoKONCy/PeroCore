@@ -1,0 +1,11 @@
+# 便携版构建配置
+# 解压即用，数据存在应用同级 data/ 目录
+extends: electron-builder.standard.yml
+
+win:
+  icon: public/Logo.png
+  target:
+    - portable
+
+portable:
+  artifactName: '${productName}-Portable-${version}.${ext}'

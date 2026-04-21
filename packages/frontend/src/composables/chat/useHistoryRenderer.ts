@@ -6,7 +6,6 @@
  * 2. requestIdleCallback 分批插入旧消息
  * 3. 每批间隔 80ms 避免卡顿
  *
- * @see 12_FRONTEND_PERFORMANCE.md §3.4
  */
 
 import { ref, nextTick } from 'vue'
@@ -43,10 +42,7 @@ export function useHistoryRenderer<T>() {
    * @param messages - 完整消息列表 (时间正序)
    * @param options - 配置
    */
-  async function renderHistory(
-    messages: T[],
-    options?: HistoryRendererOptions,
-  ) {
+  async function renderHistory(messages: T[], options?: HistoryRendererOptions) {
     const { initialBatch, batchSize, batchDelay } = {
       ...DEFAULT_OPTIONS,
       ...options,

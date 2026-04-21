@@ -40,9 +40,16 @@ function getIcon(): string {
   if (isDir) return isExpanded.value ? 'folder-open' : 'folder'
   const ext = props.item.name.split('.').pop()?.toLowerCase()
   const iconMap: Record<string, string> = {
-    ts: 'code', js: 'code', vue: 'code', py: 'code',
-    md: 'document', json: 'settings', css: 'palette',
-    html: 'globe', rs: 'code', go: 'code',
+    ts: 'code',
+    js: 'code',
+    vue: 'code',
+    py: 'code',
+    md: 'document',
+    json: 'settings',
+    css: 'palette',
+    html: 'globe',
+    rs: 'code',
+    go: 'code',
   }
   return iconMap[ext ?? ''] ?? 'document'
 }
@@ -94,7 +101,7 @@ function getIcon(): string {
 }
 .fti-row:hover {
   background: var(--color-bg-secondary);
-  color: var(--color-blue-500);
+  color: var(--color-sky-500);
 }
 
 .fti-arrow {

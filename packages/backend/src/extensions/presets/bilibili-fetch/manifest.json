@@ -1,0 +1,36 @@
+{
+  "id": "bilibili-fetch",
+  "name": "B站助手",
+  "version": "1.0.1",
+  "author": "PeroCore",
+  "description": "B站助手。获取 Bilibili 视频信息与 CC 字幕内容。",
+  "type": "tool",
+  "entry": "index.ts",
+  "category": "community",
+  "platforms": ["windows", "linux", "darwin", "docker"],
+
+  "tools": [
+    {
+      "name": "bilibili_get_info",
+      "description": "获取 Bilibili 视频信息。解析链接或 BV 号，返回标题、简介、UP主及数据。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string", "description": "视频链接或 BV 号" }
+        },
+        "required": ["url"]
+      }
+    },
+    {
+      "name": "bilibili_get_subtitles",
+      "description": "获取 Bilibili 视频的 CC 字幕。提取字幕内容以便总结视频。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string", "description": "视频链接或 BV 号" }
+        },
+        "required": ["url"]
+      }
+    }
+  ]
+}

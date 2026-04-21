@@ -28,7 +28,7 @@ app.use(router)
 // ── 初始化通知 Store (Pinia 已挂载后可用) ──
 const notificationStore = useNotificationStore()
 
-// ── 全局错误处理 (05_FRONTEND_ARCHITECTURE.md §3.3) ──
+// ── 全局错误处理 ──
 app.config.errorHandler = (err) => {
   if (err instanceof ApiError) {
     const severity = ERROR_UI_MAP[err.code] ?? ErrorSeverity.TOAST

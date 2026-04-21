@@ -2,9 +2,14 @@
  * useMemories — 记忆管理 composable
  *
  * 管理记忆节点的列表展示、搜索过滤、详情查看。
- * F1 阶段: 使用 mock 数据，F3 替换为 memoryApi 调用。
+ * F3: 已对接 memoryApi 真实后端。
+ *
+ * @module packages/frontend/src/composables/dashboard/useMemories
  */
-import { ref, computed } from 'vue'
+import { ref, shallowRef, computed, onMounted } from 'vue'
+import { memoryApi } from '../../api/modules/memoryApi'
+import { maintenanceApi } from '../../api/modules/maintenanceApi'
+import type { MemoryDto } from '../../api/modules/memoryApi'
 
 // ── 类型 ──
 
@@ -18,30 +23,48 @@ export interface MemoryNode {
   tags: string[]
   createdAt: string
   source: string
+  /** 情感标记 */
+  sentiment?: string
 }
 
-// ── Mock 数据 ──
+// ── 辅助函数 ──
 
-const MOCK_MEMORIES: MemoryNode[] = [
-  { id: 'm1', type: 'core', content: '主人喜欢在深夜编程，偏好 TypeScript 和 Rust 语言。工作时会放轻音乐~', importance: 9, tags: ['偏好', '编程', '习惯'], createdAt: '2026-04-18T22:30:00Z', source: '对话推理' },
-  { id: 'm2', type: 'core', content: '主人的名字是 YoKONCy，住在东京。养了一只叫「杏仁」的猫咪！', importance: 10, tags: ['身份', '宠物'], createdAt: '2026-03-15T10:00:00Z', source: '用户告知' },
-  { id: 'm3', type: 'episodic', content: '今天一起完成了 PeroCore-TS 后端 B6 集成，包括 ReAct 循环升级和 SSE 事件对齐，全程零编译错误。', importance: 7, tags: ['项目', 'PeroCore'], createdAt: '2026-04-20T04:43:00Z', source: '对话记录' },
-  { id: 'm4', type: 'diary', content: '日记：今天主人工作了很久，从中午一直到凌晨，完成了后端的全部接线工作。主人看起来很开心~', importance: 6, tags: ['日记', '情绪'], createdAt: '2026-04-20T05:00:00Z', source: '自动生成' },
-  { id: 'm5', type: 'reflection', content: '反思：主人倾向于一次性完成大量工作而不是分段进行，适合给出完整方案而不是分步骤问询。', importance: 8, tags: ['行为模式', '工作'], createdAt: '2026-04-19T12:00:00Z', source: '反思系统' },
-  { id: 'm6', type: 'core', content: '主人正在开发 TriviumDB，一个 AI-native 的嵌入式数据库，使用 Rust 编写。', importance: 8, tags: ['项目', 'TriviumDB', 'Rust'], createdAt: '2026-04-07T16:00:00Z', source: '对话推理' },
-  { id: 'm7', type: 'episodic', content: '讨论了 InfinityOS 的架构设计，一个基于 Debian 的纯 AI Native 操作系统概念。', importance: 5, tags: ['项目', 'InfinityOS'], createdAt: '2026-04-13T16:30:00Z', source: '对话记录' },
-  { id: 'm8', type: 'episodic', content: '一起分析了东方居酒屋异世录项目的架构，包含 Vue 前端、Go 后端和移动端配置。', importance: 4, tags: ['项目', '分析'], createdAt: '2026-04-01T06:30:00Z', source: '对话记录' },
-]
+/** 后端 DTO → 前端 MemoryNode */
+function toMemoryNode(dto: MemoryDto): MemoryNode {
+  return Object.freeze({
+    id: String(dto.id),
+    type: (dto.type || 'episodic') as MemoryType,
+    content: dto.content,
+    importance: dto.importance,
+    tags: dto.tags
+      ? dto.tags
+          .split(',')
+          .map((t) => t.trim())
+          .filter(Boolean)
+      : [],
+    createdAt: new Date(dto.timestamp * 1000).toISOString(),
+    source: dto.source || '对话记录',
+    sentiment: dto.sentiment ?? 'neutral',
+  })
+}
 
 // ── Composable ──
 
 export function useMemories() {
-  const memories = ref<MemoryNode[]>([...MOCK_MEMORIES])
+  const memories = shallowRef<MemoryNode[]>([])
   const isLoading = ref(false)
+  const error = ref<string | null>(null)
   const searchQuery = ref('')
   const filterType = ref<MemoryType | 'all'>('all')
   const selectedMemory = ref<MemoryNode | null>(null)
   const isDetailOpen = ref(false)
+  const currentPage = ref(1)
+  const totalCount = ref(0)
+  const pageSize = 50
+  /** 日期筛选 */
+  const filterDate = ref('')
+  /** 视图模式：列表 / 图谱 */
+  const viewMode = ref<'list' | 'graph'>('list')
 
   const typeOptions = [
     { label: '全部类型', value: 'all' },
@@ -65,22 +88,99 @@ export function useMemories() {
     reflection: 'type-reflection',
   }
 
+  // ── API 操作 ──
+
+  /** 从后端加载记忆列表 */
+  async function fetchMemories(): Promise<void> {
+    isLoading.value = true
+    error.value = null
+    try {
+      const typeParam = filterType.value !== 'all' ? filterType.value : undefined
+      const res = await memoryApi.list({
+        page: currentPage.value,
+        pageSize,
+        type: typeParam,
+        agentId: 'pero',
+        dateStart: filterDate.value || undefined,
+      })
+      const paginated = res.data
+      if (paginated) {
+        memories.value = paginated.data.map(toMemoryNode)
+        totalCount.value = paginated.total
+      }
+    } catch (e) {
+      error.value = (e as Error).message
+      console.error('[Memories] 加载记忆列表失败:', e)
+    } finally {
+      isLoading.value = false
+    }
+  }
+
+  /** 语义搜索 */
+  async function searchMemories(): Promise<void> {
+    const q = searchQuery.value.trim()
+    if (!q) {
+      await fetchMemories()
+      return
+    }
+
+    isLoading.value = true
+    error.value = null
+    try {
+      const res = await memoryApi.search({ query: q, agentId: 'pero', topK: 50 })
+      const results = res.data ?? []
+      memories.value = results.map((r) => ({
+        id: String(r.id),
+        type: 'episodic' as MemoryType,
+        content: r.content,
+        importance: r.importance,
+        tags: r.tags
+          ? r.tags
+              .split(',')
+              .map((t) => t.trim())
+              .filter(Boolean)
+          : [],
+        createdAt: '',
+        source: `语义匹配 (${(r.score * 100).toFixed(1)}%)`,
+      }))
+      totalCount.value = results.length
+    } catch (e) {
+      error.value = (e as Error).message
+    } finally {
+      isLoading.value = false
+    }
+  }
+
+  /** 删除记忆 */
+  async function deleteMemory(id: string): Promise<void> {
+    try {
+      await memoryApi.remove(Number(id))
+      memories.value = memories.value.filter((m) => m.id !== id)
+      totalCount.value = Math.max(0, totalCount.value - 1)
+      if (selectedMemory.value?.id === id) isDetailOpen.value = false
+    } catch (e) {
+      error.value = (e as Error).message
+    }
+  }
+
+  // ── 计算属性 ──
+
+  /** 已过滤的记忆列表（前端侧的本地二次过滤） */
   const filteredMemories = computed(() => {
     let list = memories.value
-    if (filterType.value !== 'all') {
-      list = list.filter((m) => m.type === filterType.value)
-    }
+    // 本地搜索（searchMemories 已经做过后端语义搜索了，这里做前端文本过滤互补）
     if (searchQuery.value.trim()) {
       const q = searchQuery.value.toLowerCase()
       list = list.filter(
-        (m) => m.content.toLowerCase().includes(q) || m.tags.some((t) => t.toLowerCase().includes(q)),
+        (m) =>
+          m.content.toLowerCase().includes(q) || m.tags.some((t) => t.toLowerCase().includes(q)),
       )
     }
     return list.sort((a, b) => b.importance - a.importance)
   })
 
   const stats = computed(() => ({
-    total: memories.value.length,
+    total: totalCount.value,
     core: memories.value.filter((m) => m.type === 'core').length,
     episodic: memories.value.filter((m) => m.type === 'episodic').length,
     diary: memories.value.filter((m) => m.type === 'diary').length,
@@ -92,20 +192,236 @@ export function useMemories() {
     isDetailOpen.value = true
   }
 
-  function deleteMemory(id: string) {
-    memories.value = memories.value.filter((m) => m.id !== id)
-    if (selectedMemory.value?.id === id) isDetailOpen.value = false
+  function formatDate(iso: string): string {
+    if (!iso) return '—'
+    return new Date(iso).toLocaleDateString('zh-CN', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
   }
 
-  function formatDate(iso: string): string {
-    return new Date(iso).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  // ── 标签筛选 ──
+
+  const selectedTags = ref<string[]>([])
+
+  /** 提取热门标签 (按出现频次排序) */
+  const topTags = computed(() => {
+    const tagCount = new Map<string, number>()
+    for (const m of memories.value) {
+      for (const t of m.tags) {
+        tagCount.set(t, (tagCount.get(t) ?? 0) + 1)
+      }
+    }
+    return [...tagCount.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 20)
+      .map(([tag, count]) => ({ tag, count }))
+  })
+
+  function toggleTag(tag: string) {
+    const idx = selectedTags.value.indexOf(tag)
+    if (idx >= 0) {
+      selectedTags.value.splice(idx, 1)
+    } else {
+      selectedTags.value.push(tag)
+    }
   }
+
+  // ── 维护操作 ──
+
+  const isRunningMaintenance = ref(false)
+  const isScanningLonely = ref(false)
+  const isDreaming = ref(false)
+
+  async function triggerMaintenance(): Promise<void> {
+    isRunningMaintenance.value = true
+    try {
+      await maintenanceApi.trigger('daily_maintenance')
+    } catch (e) {
+      error.value = (e as Error).message
+    } finally {
+      isRunningMaintenance.value = false
+    }
+  }
+
+  async function triggerScanLonely(): Promise<void> {
+    isScanningLonely.value = true
+    try {
+      await maintenanceApi.trigger('scan_lonely')
+    } catch (e) {
+      error.value = (e as Error).message
+    } finally {
+      isScanningLonely.value = false
+    }
+  }
+
+  async function triggerDream(): Promise<void> {
+    isDreaming.value = true
+    try {
+      await maintenanceApi.trigger('dream_association')
+    } catch (e) {
+      error.value = (e as Error).message
+    } finally {
+      isDreaming.value = false
+    }
+  }
+
+  async function triggerReindex(): Promise<void> {
+    try {
+      await maintenanceApi.reindex('pero')
+    } catch (e) {
+      error.value = (e as Error).message
+    }
+  }
+
+  // ── 故事导入 ──
+
+  const isImportOpen = ref(false)
+  const importText = ref('')
+  const isImporting = ref(false)
+
+  async function importStory(): Promise<void> {
+    const content = importText.value.trim()
+    if (!content) return
+
+    isImporting.value = true
+    try {
+      await memoryApi.create({
+        content,
+        agentId: 'pero',
+        type: 'episodic',
+        source: '故事导入',
+        importance: 5,
+      })
+      isImportOpen.value = false
+      importText.value = ''
+      await fetchMemories()
+    } catch (e) {
+      error.value = (e as Error).message
+    } finally {
+      isImporting.value = false
+    }
+  }
+
+  // ── 图谱 ──
+
+  const graphData = shallowRef<{ nodes: unknown[]; edges: unknown[] }>({ nodes: [], edges: [] })
+  const isLoadingGraph = ref(false)
+
+  /** 获取图谱数据 */
+  async function fetchGraph(): Promise<void> {
+    if (isLoadingGraph.value) return
+    isLoadingGraph.value = true
+    try {
+      const res = await memoryApi.graph('pero', 100)
+      if (res.data) {
+        graphData.value = Object.freeze(res.data)
+      }
+    } catch (e) {
+      error.value = (e as Error).message
+      console.error('[Memories] 图谱加载失败:', e)
+    } finally {
+      isLoadingGraph.value = false
+    }
+  }
+
+  // ── 情感工具 （ ──
+
+  const sentimentEmojiMap: Record<string, string> = {
+    positive: 'mood-happy',
+    negative: 'mood-sad',
+    neutral: 'mood-neutral',
+    happy: 'mood-happy',
+    sad: 'mood-sad',
+    angry: 'mood-angry',
+    excited: 'mood-excited',
+  }
+
+  const sentimentLabelMap: Record<string, string> = {
+    positive: '开心',
+    negative: '忧郁',
+    neutral: '平静',
+    happy: '开心',
+    sad: '忧郁',
+    angry: '愤怒',
+    excited: '激动',
+  }
+
+  const sentimentColorMap: Record<string, string> = {
+    positive: '#38bdf8',
+    negative: '#fb7185',
+    neutral: '#94a3b8',
+    happy: '#fbbf24',
+    sad: '#818cf8',
+    angry: '#f87171',
+    excited: '#e879f9',
+  }
+
+  function getSentimentEmoji(sentiment?: string): string {
+    return sentimentEmojiMap[sentiment ?? ''] ?? 'mood-neutral'
+  }
+
+  function getSentimentLabel(sentiment?: string): string {
+    return sentimentLabelMap[sentiment ?? ''] ?? '平静'
+  }
+
+  function getSentimentColor(sentiment?: string): string {
+    return sentimentColorMap[sentiment ?? ''] ?? '#38bdf8'
+  }
+
+  // ── 初始化 ──
+  onMounted(fetchMemories)
 
   return {
-    memories, isLoading, searchQuery, filterType,
-    selectedMemory, isDetailOpen,
-    typeOptions, typeLabels, typeColors,
-    filteredMemories, stats,
-    openDetail, deleteMemory, formatDate,
+    memories,
+    isLoading,
+    error,
+    searchQuery,
+    filterType,
+    selectedMemory,
+    isDetailOpen,
+    currentPage,
+    totalCount,
+    typeOptions,
+    typeLabels,
+    typeColors,
+    filteredMemories,
+    stats,
+    fetchMemories,
+    searchMemories,
+    openDetail,
+    deleteMemory,
+    formatDate,
+    // P2: 标签筛选
+    selectedTags,
+    topTags,
+    toggleTag,
+    // P2: 维护操作
+    isRunningMaintenance,
+    isScanningLonely,
+    isDreaming,
+    triggerMaintenance,
+    triggerScanLonely,
+    triggerDream,
+    triggerReindex,
+    // P4: 故事导入
+    isImportOpen,
+    importText,
+    isImporting,
+    importStory,
+    // 日期筛选
+    filterDate,
+    // 视图模式
+    viewMode,
+    // 图谱
+    graphData,
+    isLoadingGraph,
+    fetchGraph,
+    // 情感工具
+    getSentimentEmoji,
+    getSentimentLabel,
+    getSentimentColor,
   }
 }

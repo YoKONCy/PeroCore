@@ -2,7 +2,6 @@
 /**
  * PSwitch — 像素风开关
  *
- * 迁移自 v1，保留弹性动画 + 猫爪装饰。
  */
 import PixelIcon from './PixelIcon.vue'
 
@@ -31,10 +30,7 @@ function toggle() {
 </script>
 
 <template>
-  <div
-    :class="['p-switch-wrapper', { 'p-switch-disabled': disabled }]"
-    @click="toggle"
-  >
+  <div :class="['p-switch-wrapper', { 'p-switch-disabled': disabled }]" @click="toggle">
     <!-- 开关轨道 -->
     <div :class="['p-switch-track', { 'p-switch-on': modelValue }]">
       <!-- 滑块 -->
@@ -81,8 +77,8 @@ function toggle() {
   transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 .p-switch-on {
-  background: var(--color-blue-400);
-  border-color: var(--color-blue-500);
+  background: var(--color-sky-hover);
+  border-color: var(--color-sky-500);
 }
 
 .p-switch-thumb {
@@ -104,7 +100,7 @@ function toggle() {
 }
 
 .p-switch-thumb-icon {
-  color: var(--color-blue-400);
+  color: var(--color-sky-hover);
   transition: all 0.5s;
   animation: pixel-pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
@@ -119,7 +115,7 @@ function toggle() {
   transition: color 0.3s;
 }
 .p-switch-wrapper:hover .p-switch-label {
-  color: var(--color-blue-500);
+  color: var(--color-sky-500);
 }
 
 .p-switch-sparkle {
@@ -128,11 +124,22 @@ function toggle() {
 }
 
 @keyframes pixel-pop {
-  0% { transform: scale(0.5) rotate(-45deg); opacity: 0; }
-  100% { transform: scale(1) rotate(0); opacity: 1; }
+  0% {
+    transform: scale(0.5) rotate(-45deg);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1) rotate(0);
+    opacity: 1;
+  }
 }
 @keyframes bounce {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-3px); }
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
 }
 </style>

@@ -1,0 +1,24 @@
+{
+  "id": "file-search",
+  "name": "文件搜索",
+  "version": "1.0.0",
+  "author": "PeroCore Team",
+  "description": "按文件名搜索文件。Windows 优先使用 Everything (es.exe)，跨平台降级到 fd 或 Node.js 递归搜索。",
+  "type": "tool",
+  "entry": "index.ts",
+  "category": "core",
+  "platforms": ["windows", "linux", "darwin", "docker"],
+
+  "toolDefinition": {
+    "name": "search_files",
+    "description": "按文件名搜索文件。在整台计算机上查找文件位置。(要搜索文件内容，请用 code_search)",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": { "type": "string", "description": "文件名关键词 (支持通配符)" },
+        "limit": { "type": "number", "description": "返回最大结果数 (默认 50)" }
+      },
+      "required": ["query"]
+    }
+  }
+}

@@ -1,7 +1,7 @@
 /**
  * Stdio Transport — JSON-RPC over stdio
  *
- * Layer 2 通信实现 (09_EXTENSION_SYSTEM.md §10)。
+ * Layer 2 通信实现。
  * 通过子进程的 stdin/stdout 交换 JSON-RPC 消息。
  *
  * 协议：每行一个 JSON 对象，\n 分隔。
@@ -11,7 +11,12 @@
 
 import type { Writable, Readable } from 'node:stream'
 import { createInterface } from 'node:readline'
-import type { ServiceTransport, JsonRpcRequest, JsonRpcResponse, JsonRpcNotification } from './transport'
+import type {
+  ServiceTransport,
+  JsonRpcRequest,
+  JsonRpcResponse,
+  JsonRpcNotification,
+} from './transport'
 import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('StdioTransport')
@@ -23,7 +28,11 @@ export class StdioTransport implements ServiceTransport {
   private nextId = 1
   private pendingCalls = new Map<
     number | string,
-    { resolve: (value: unknown) => void; reject: (err: Error) => void; timer: ReturnType<typeof setTimeout> }
+    {
+      resolve: (value: unknown) => void
+      reject: (err: Error) => void
+      timer: ReturnType<typeof setTimeout>
+    }
   >()
   private notificationHandler?: (method: string, params: unknown) => void
   private alive = true

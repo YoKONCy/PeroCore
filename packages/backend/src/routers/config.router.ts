@@ -40,6 +40,13 @@ const importConfigSchema = z.object({
   overwrite: z.boolean().default(true),
 })
 
+/**
+ * 架构说明: ConfigRepo 是一个纯 KV CRUD，业务逻辑极简 (get/set/delete/listAll)，
+ * 中间插入 Service 层只会增加无意义的透传。因此这里 Router 直接调用 Repo 是
+ * 三层架构的**允许例外**。
+ *
+ * ⚠️ 请勿将此模式复制到复杂资源 (如 Model/Memory/Agent) 的 Router 中。
+ */
 export function createConfigRouter(ctx: AppContext) {
   const router = new Hono()
 

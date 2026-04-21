@@ -174,7 +174,7 @@ defineExpose({ refresh })
   transition: all 0.15s;
 }
 .fe-action-btn:hover {
-  color: var(--color-blue-500);
+  color: var(--color-sky-500);
   border-color: var(--color-border);
   background: var(--color-bg-secondary);
 }
@@ -199,7 +199,7 @@ defineExpose({ refresh })
   transition: border-color 0.2s;
 }
 .fe-search-input:focus {
-  border-color: var(--color-blue-400);
+  border-color: var(--color-sky-hover);
 }
 .fe-search-input::placeholder {
   color: var(--color-text-muted);
@@ -210,9 +210,15 @@ defineExpose({ refresh })
   overflow-y: auto;
   padding: 8px;
 }
-.fe-tree::-webkit-scrollbar { width: 4px; }
-.fe-tree::-webkit-scrollbar-track { background: transparent; }
-.fe-tree::-webkit-scrollbar-thumb { background: var(--color-blue-200); }
+.fe-tree::-webkit-scrollbar {
+  width: 4px;
+}
+.fe-tree::-webkit-scrollbar-track {
+  background: transparent;
+}
+.fe-tree::-webkit-scrollbar-thumb {
+  background: var(--color-sky-light);
+}
 
 .fe-loading,
 .fe-empty {

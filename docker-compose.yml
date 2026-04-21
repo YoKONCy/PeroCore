@@ -1,0 +1,63 @@
+# ===================================================================
+# PeroCore-TS Docker Compose 编排
+#
+# 启动: docker compose up -d
+# 停止: docker compose down
+# 查看日志: docker compose logs -f backend
+#
+# 环境变量:
+#   PERO_PORT           后端端口 (默认 9120)
+#   PEROCORE_AUTH_TOKEN  鉴权令牌 (可选，不设则首次自动生成)
+#
+# @see _docs_/07_DUAL_DEPLOYMENT.md §6, §8
+# @see _docs_/15_DEVOPS_OPERATIONS.md §5.2
+# ===================================================================
+
+services:
+  # ── 后端服务 ──
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: perocore-backend
+    restart: unless-stopped
+    ports:
+      - "${PERO_PORT:-9120}:9120"
+    volumes:
+      - pero-data:/app/data
+    environment:
+      - NODE_ENV=production
+      - PERO_PORT=9120
+      - PERO_HOST=0.0.0.0
+      - PERO_DATA_DIR=/app/data
+      - PERO_DATABASE_PATH=/app/data/perocore.db
+      - PERO_LOG_LEVEL=3
+      - PEROCORE_DOCKER=1
+      # 鉴权 (D34, 07_DUAL_DEPLOYMENT.md §8)
+      # 不设则首次启动自动生成随机 Token
+      - PEROCORE_AUTH_TOKEN=${PEROCORE_AUTH_TOKEN:-}
+    # 健康检查 (15_DEVOPS_OPERATIONS.md §5.2)
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9120/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ── 前端服务 (Nginx) ──
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+    container_name: perocore-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+# ── 持久化数据卷 ──
+volumes:
+  pero-data:
+    driver: local

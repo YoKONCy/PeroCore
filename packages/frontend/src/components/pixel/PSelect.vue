@@ -2,7 +2,6 @@
 /**
  * PSelect — 像素风下拉选择器
  *
- * 迁移自 v1，规范化：
  * - CSS 变量色值 (取代硬编码 sky-400)
  * - useEventListener 管理点击外部关闭
  * - TypeScript strict
@@ -44,9 +43,7 @@ const emit = defineEmits<{
 const isOpen = ref(false)
 const containerRef = ref<HTMLElement | null>(null)
 
-const selectedOption = computed(() =>
-  props.options.find((opt) => opt.value === props.modelValue),
-)
+const selectedOption = computed(() => props.options.find((opt) => opt.value === props.modelValue))
 
 function toggleDropdown() {
   if (props.disabled) return
@@ -157,24 +154,35 @@ useEventListener(document as unknown as EventTarget, 'click', (e: Event) => {
   border-radius: 0;
   color: var(--color-text-primary);
   cursor: pointer;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
   font-family: var(--font-pixel), monospace;
 }
 .p-select-trigger:hover:not(:disabled) {
-  border-color: var(--color-blue-400);
+  border-color: var(--color-sky-hover);
 }
 .p-select-trigger:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 .p-select-open {
-  border-color: var(--color-blue-500);
-  box-shadow: 0 0 0 1px var(--color-blue-500);
+  border-color: var(--color-sky-500);
+  box-shadow: 0 0 0 1px var(--color-sky-500);
 }
 
-.p-select-sm { padding: 4px 8px; font-size: 12px; }
-.p-select-md { padding: 6px 12px; font-size: 14px; }
-.p-select-lg { padding: 10px 16px; font-size: 16px; }
+.p-select-sm {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.p-select-md {
+  padding: 6px 12px;
+  font-size: 14px;
+}
+.p-select-lg {
+  padding: 10px 16px;
+  font-size: 16px;
+}
 
 .p-select-value {
   display: flex;
@@ -192,7 +200,7 @@ useEventListener(document as unknown as EventTarget, 'click', (e: Event) => {
 }
 .p-select-arrow-open {
   transform: rotate(180deg);
-  color: var(--color-blue-500);
+  color: var(--color-sky-500);
 }
 
 .p-select-dropdown {
@@ -214,16 +222,18 @@ useEventListener(document as unknown as EventTarget, 'click', (e: Event) => {
   padding: 8px 12px;
   font-size: 13px;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
   color: var(--color-text-secondary);
 }
 .p-select-option:hover {
   background: var(--color-bg-hover);
-  color: var(--color-blue-500);
+  color: var(--color-sky-500);
 }
 .p-select-option-active {
-  background: var(--color-blue-50, rgba(56, 189, 248, 0.08));
-  color: var(--color-blue-600);
+  background: var(--color-sky-50, rgba(56, 189, 248, 0.08));
+  color: var(--color-sky-shadow);
   font-weight: 700;
 }
 .p-select-option-disabled {
@@ -236,12 +246,16 @@ useEventListener(document as unknown as EventTarget, 'click', (e: Event) => {
   gap: 8px;
 }
 .p-select-check {
-  color: var(--color-blue-500);
+  color: var(--color-sky-500);
 }
 
 /* 下拉动画 */
-.select-dropdown-enter-active { transition: all 0.1s ease-out; }
-.select-dropdown-leave-active { transition: all 0.075s ease-in; }
+.select-dropdown-enter-active {
+  transition: all 0.1s ease-out;
+}
+.select-dropdown-leave-active {
+  transition: all 0.075s ease-in;
+}
 .select-dropdown-enter-from,
 .select-dropdown-leave-to {
   opacity: 0;

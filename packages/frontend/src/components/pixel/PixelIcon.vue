@@ -1,8 +1,5 @@
 <template>
-  <div
-    class="pixel-icon"
-    :class="[sizeClass, animationClass]"
-  >
+  <div class="pixel-icon" :class="[sizeClass, animationClass]">
     <svg
       :viewBox="`0 0 ${viewBoxSize} ${viewBoxSize}`"
       class="pixel-icon-svg"
@@ -18,7 +15,6 @@
 /**
  * PixelIcon — 像素风内联 SVG 图标库
  *
- * 迁移自 v1，保留全部 70+ 图标路径。
  * 后续实测阶段可逐个调整不准确的路径。
  *
  * @usage <PixelIcon name="heart" size="md" animation="bounce" />
@@ -62,7 +58,9 @@ const ANIMATION_MAP: Record<string, string> = {
 }
 
 const sizeClass = computed(() => SIZE_MAP[props.size] ?? 'pixel-icon-md')
-const animationClass = computed(() => (props.animation ? ANIMATION_MAP[props.animation] ?? '' : ''))
+const animationClass = computed(() =>
+  props.animation ? (ANIMATION_MAP[props.animation] ?? '') : '',
+)
 
 // ─────────────────────────────────────────────
 // 图标路径字典 (16×16 viewBox)
@@ -87,7 +85,8 @@ const icons: Record<string, string> = {
   // 沙漏 (⏳)
   hourglass: 'M3 2h10v2h-2v2l-2 2 2 2v2h2v2H3v-2h2v-2l2-2-2-2V4H3V2z',
   // 心形 (💗)
-  heart: 'M4 3h2v2H4V3zm6 0h2v2h-2V3zm-8 2h2v2H2V5zm12 0h-2v2h2V5zm-12 2h2v2H2V7zm12 0h-2v2h2V7zm-10 2h2v2H4V9zm6 0h2v2h-2V9zm-4 2h2v2H6v-2z',
+  heart:
+    'M4 3h2v2H4V3zm6 0h2v2h-2V3zm-8 2h2v2H2V5zm12 0h-2v2h2V5zm-12 2h2v2H2V7zm12 0h-2v2h2V7zm-10 2h2v2H4V9zm6 0h2v2h-2V9zm-4 2h2v2H6v-2z',
   // 星形 (⭐)
   star: 'M7 2h2v3h3v2h-2v3h2v2h-3v2H7v-2H4v-2h2v-3H4V7h3V2z',
   // 显示器 (💻)
@@ -161,7 +160,8 @@ const icons: Record<string, string> = {
   // 下载 (⬇️)
   download: 'M7 2h2v6h2l-3 3-3-3h2V2zm-5 10h12v2H2v-2z',
   // 机器人 (🤖)
-  robot: 'M4 3h8v9H4V3zm2 2v2h1v-2H6zm3 0v2h1v-2H9zm-3 5h6v1H6v-1z M3 6h1v3H3V6zm10 0h1v3h-1V6z M7 1h2v2H7V1z',
+  robot:
+    'M4 3h8v9H4V3zm2 2v2h1v-2H6zm3 0v2h1v-2H9zm-3 5h6v1H6v-1z M3 6h1v3H3V6zm10 0h1v3h-1V6z M7 1h2v2H7V1z',
   // 向下 (🔽)
   'chevron-down': 'M3 5h2v2h2v2h2v-2h2v-2h2v2h-2v2h-2v2h-2v-2h-2v-2h-2v-2z',
   // 向上 (🔼)
@@ -189,7 +189,8 @@ const icons: Record<string, string> = {
   // 耳机 (🎧)
   headphones: 'M2 7h3v6H2V7zm9 0h3v6h-3V7zM5 3h6v2h2v2h-2V5H5V7H3V5h2V3z',
   // 静音 (🔇)
-  'volume-x': 'M2 6h2v4H2V6zm3-2h2v8H5V4zm3-2h2v12H8V2z M13 5h2v2h-2V5zm4 4h2v2h-2V9zm-4 4h2v2h-2v-2zm4-8h2v2h-2V5z',
+  'volume-x':
+    'M2 6h2v4H2V6zm3-2h2v8H5V4zm3-2h2v12H8V2z M13 5h2v2h-2V5zm4 4h2v2h-2V9zm-4 4h2v2h-2v-2zm4-8h2v2h-2V5z',
   // 钥匙 (🔑)
   key: 'M6 6h2v2h2v2h2v2h2v-2h2v-2h-2V6h-2V4H6v2zm-2 2h2v2H4V8zm8 6h2v2h-2v-2z',
   // 退出 (🚪)
@@ -237,7 +238,8 @@ const icons: Record<string, string> = {
   // 数据库
   database: 'M4 2h8v3H4V2zm0 5h8v3H4V7zm0 5h8v3H4v-3z',
   // 电源 (⏻)
-  power: 'M7 2h2v6H7V2zm-3 2h2v2H4V4zm8 0h2v2h-2V4zm2 4h2v4h-2V8zm-2 4h2v2h-2v-2zm-8 0h2v2H4v-2zm-2-4h2v4H2V8z',
+  power:
+    'M7 2h2v6H7V2zm-3 2h2v2H4V4zm8 0h2v2h-2V4zm2 4h2v4h-2V8zm-2 4h2v2h-2v-2zm-8 0h2v2H4v-2zm-2-4h2v4H2V8z',
   // 盾牌 (🛡️)
   shield: 'M3 2h10v4l-5 8-5-8V2zm2 2v2l3 5 3-5V4H5z',
   // 游戏手柄 (🎮)
@@ -271,26 +273,63 @@ const iconPath = computed(() => icons[props.name] ?? icons['sparkle'] ?? '')
 }
 
 /* 尺寸 */
-.pixel-icon-xs { width: 12px; height: 12px; }
-.pixel-icon-sm { width: 16px; height: 16px; }
-.pixel-icon-md { width: 20px; height: 20px; }
-.pixel-icon-lg { width: 24px; height: 24px; }
-.pixel-icon-xl { width: 32px; height: 32px; }
-.pixel-icon-2xl { width: 40px; height: 40px; }
-.pixel-icon-3xl { width: 48px; height: 48px; }
+.pixel-icon-xs {
+  width: 12px;
+  height: 12px;
+}
+.pixel-icon-sm {
+  width: 16px;
+  height: 16px;
+}
+.pixel-icon-md {
+  width: 20px;
+  height: 20px;
+}
+.pixel-icon-lg {
+  width: 24px;
+  height: 24px;
+}
+.pixel-icon-xl {
+  width: 32px;
+  height: 32px;
+}
+.pixel-icon-2xl {
+  width: 40px;
+  height: 40px;
+}
+.pixel-icon-3xl {
+  width: 48px;
+  height: 48px;
+}
 
 /* 动画 */
 @keyframes pixel-bounce {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-20%); }
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-20%);
+  }
 }
 @keyframes pixel-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 @keyframes pixel-pulse {
-  0%, 100% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.1); opacity: 0.8; }
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 0.8;
+  }
 }
 
 .animate-pixel-bounce {

@@ -2,7 +2,7 @@
 /**
  * OnboardingOverlay — 新手引导遮罩
  *
- * v1 542 行 → v2 拆分为 OnboardingOverlay + SpotlightMask。
+ * 拆分为 OnboardingOverlay + SpotlightMask。
  * 打字机对话框 + 聚光灯高亮 + 角色立绘占位。
  *
  * @props visible - 是否显示
@@ -141,10 +141,7 @@ onUnmounted(() => {
         </div>
 
         <!-- 对话框 -->
-        <div
-          :class="['onb-dialog', { 'onb-dialog-visible': isAppearing }]"
-          @click="handleNext"
-        >
+        <div :class="['onb-dialog', { 'onb-dialog-visible': isAppearing }]" @click="handleNext">
           <!-- 名称标签 -->
           <div class="onb-name-tag">
             {{ currentStep?.speaker ?? 'Pero' }}
@@ -169,9 +166,7 @@ onUnmounted(() => {
           </div>
 
           <!-- 继续提示 -->
-          <div v-if="!currentStep?.choices && isTypingDone" class="onb-hint">
-            点击此处继续喵...
-          </div>
+          <div v-if="!currentStep?.choices && isTypingDone" class="onb-hint">点击此处继续喵...</div>
         </div>
       </div>
     </Transition>
@@ -211,7 +206,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--color-blue-200);
+  color: var(--color-sky-light);
   opacity: 0.3;
 }
 
@@ -221,7 +216,7 @@ onUnmounted(() => {
   max-width: 800px;
   padding: 40px;
   background: var(--color-bg-primary);
-  border: 2px solid var(--color-blue-500);
+  border: 2px solid var(--color-sky-500);
   box-shadow: 0 20px 60px rgba(56, 189, 248, 0.15);
   position: relative;
   z-index: 20;
@@ -240,12 +235,12 @@ onUnmounted(() => {
   top: -20px;
   left: 24px;
   padding: 8px 24px;
-  background: var(--color-blue-500);
+  background: var(--color-sky-500);
   color: white;
   font-weight: 800;
   font-size: 16px;
   letter-spacing: 0.15em;
-  border: 2px solid var(--color-blue-600);
+  border: 2px solid var(--color-sky-shadow);
 }
 
 .onb-text {
@@ -259,7 +254,7 @@ onUnmounted(() => {
 .onb-cursor {
   display: inline-block;
   margin-left: 8px;
-  color: var(--color-blue-400);
+  color: var(--color-sky-hover);
   animation: bounce 1s infinite;
 }
 
@@ -292,11 +287,21 @@ onUnmounted(() => {
 }
 
 @keyframes bounce {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(4px); }
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(4px);
+  }
 }
 @keyframes pulse {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 </style>

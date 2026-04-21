@@ -3,9 +3,12 @@
  * LogsTab — 对话日志 Tab (F1-3)
  *
  * 按日期分组展示会话日志，支持搜索、Agent 筛选、展开详情。
+ * F3: 已对接 sessionsApi 真实后端。
  */
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { PixelIcon, PInput, PSelect, PButton, PEmpty } from '../../pixel'
+import { sessionsApi } from '../../../api/modules/sessionsApi'
+import type { SessionSummary } from '../../../api/modules/sessionsApi'
 
 // ── 类型 ──
 
@@ -16,59 +19,23 @@ interface LogEntry {
   agentName: string
   summary: string
   messageCount: number
-  tokenCount: number
   createdAt: string
-  /** 消息片段预览 */
-  messages: Array<{ role: 'user' | 'assistant'; content: string }>
+  /** 展开后加载的消息 */
+  messages: Array<{ role: string; content: string }>
+  /** 消息是否已加载 */
+  messagesLoaded: boolean
 }
-
-// ── Mock 数据 ──
-
-const mockLogs: LogEntry[] = [
-  {
-    id: 'log1', sessionId: 'sess-001', agentId: 'pero', agentName: 'Pero',
-    summary: '完成了 PeroCore-TS 后端 B6 集成工作',
-    messageCount: 24, tokenCount: 18500, createdAt: '2026-04-20T04:30:00Z',
-    messages: [
-      { role: 'user', content: '我们来做 B6-2 到 B6-5 吧' },
-      { role: 'assistant', content: '好的主人！让我先重读一遍规范文档...' },
-    ],
-  },
-  {
-    id: 'log2', sessionId: 'sess-002', agentId: 'pero', agentName: 'Pero',
-    summary: '讨论了 TriviumDB 0.5.1 版本发布',
-    messageCount: 8, tokenCount: 5200, createdAt: '2026-04-20T05:00:00Z',
-    messages: [
-      { role: 'user', content: '更新一下 TriviumDB 的依赖到 0.5.1 版本吧' },
-      { role: 'assistant', content: '好的主人！让我检查 package.json...' },
-    ],
-  },
-  {
-    id: 'log3', sessionId: 'sess-003', agentId: 'pero', agentName: 'Pero',
-    summary: '分析了前端迁移状态',
-    messageCount: 6, tokenCount: 12300, createdAt: '2026-04-20T05:20:00Z',
-    messages: [
-      { role: 'user', content: '深入对比分析一下整个 PeroCore-TS 和 PeroCore 的后端' },
-      { role: 'assistant', content: '好的主人，让我仔仔细细地对比分析两个后端...' },
-    ],
-  },
-  {
-    id: 'log4', sessionId: 'sess-004', agentId: 'pero', agentName: 'Pero',
-    summary: '迁移了 Dashboard 的 11 个 Tab 组件',
-    messageCount: 32, tokenCount: 28000, createdAt: '2026-04-19T14:00:00Z',
-    messages: [
-      { role: 'user', content: '开始迁移 DashboardView' },
-      { role: 'assistant', content: '了解！先分析 v1 的 DashboardView 结构...' },
-    ],
-  },
-]
 
 // ── 状态 ──
 
-const logs = ref<LogEntry[]>(mockLogs)
+const logs = ref<LogEntry[]>([])
+const isLoading = ref(false)
 const searchQuery = ref('')
 const filterAgent = ref('all')
 const expandedId = ref<string | null>(null)
+const currentPage = ref(1)
+const totalCount = ref(0)
+const pageSize = 20
 
 const agentOptions = [
   { label: '所有 Agent', value: 'all' },
@@ -84,20 +51,84 @@ const filteredLogs = computed(() => {
     const q = searchQuery.value.toLowerCase()
     list = list.filter((l) => l.summary.toLowerCase().includes(q))
   }
-  return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+  return list
 })
 
-function toggleExpand(id: string) {
-  expandedId.value = expandedId.value === id ? null : id
+// ── API 操作 ──
+
+/** 从后端加载会话列表 */
+async function fetchSessions(): Promise<void> {
+  isLoading.value = true
+  try {
+    const agentId = filterAgent.value !== 'all' ? filterAgent.value : undefined
+    const res = await sessionsApi.list({
+      agentId,
+      page: currentPage.value,
+      pageSize,
+    })
+    const data = res.data
+    if (data) {
+      logs.value = data.items.map(toLogEntry)
+      totalCount.value = data.total
+    }
+  } catch (e) {
+    console.error('[LogsTab] 加载会话列表失败:', e)
+  } finally {
+    isLoading.value = false
+  }
+}
+
+/** 展开时加载消息详情 */
+async function toggleExpand(id: string): Promise<void> {
+  if (expandedId.value === id) {
+    expandedId.value = null
+    return
+  }
+  expandedId.value = id
+
+  // 懒加载消息
+  const log = logs.value.find((l) => l.id === id)
+  if (log && !log.messagesLoaded) {
+    try {
+      const res = await sessionsApi.detail(log.sessionId, { agentId: log.agentId, limit: 20 })
+      if (res.data) {
+        log.messages = res.data.messages.map((m) => ({
+          role: m.role,
+          content: m.content,
+        }))
+        log.messagesLoaded = true
+      }
+    } catch (e) {
+      console.error('[LogsTab] 加载会话详情失败:', e)
+    }
+  }
+}
+
+/** SessionSummary → LogEntry */
+function toLogEntry(s: SessionSummary): LogEntry {
+  return {
+    id: s.sessionId,
+    sessionId: s.sessionId,
+    agentId: s.agentId,
+    agentName: s.agentId === 'pero' ? 'Pero' : s.agentId,
+    summary: s.preview || `会话 ${s.sessionId.slice(0, 8)}...`,
+    messageCount: s.messageCount,
+    createdAt: s.lastMessageAt,
+    messages: [],
+    messagesLoaded: false,
+  }
 }
 
 function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  return new Date(iso).toLocaleDateString('zh-CN', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }
 
-function formatTokens(n: number): string {
-  return n >= 1000 ? (n / 1000).toFixed(1) + 'K' : String(n)
-}
+onMounted(fetchSessions)
 </script>
 
 <template>
@@ -132,20 +163,24 @@ function formatTokens(n: number): string {
                 <span class="log-meta-item">
                   <PixelIcon name="chat" size="xs" /> {{ log.messageCount }} 条
                 </span>
-                <span class="log-meta-item">
-                  <PixelIcon name="sparkle" size="xs" /> {{ formatTokens(log.tokenCount) }} tokens
-                </span>
+
                 <span class="log-meta-item">{{ formatDate(log.createdAt) }}</span>
               </div>
             </div>
           </div>
-          <PixelIcon :name="expandedId === log.id ? 'chevron-up' : 'chevron-down'" size="xs" class="log-expand-icon" />
+          <PixelIcon
+            :name="expandedId === log.id ? 'chevron-up' : 'chevron-down'"
+            size="xs"
+            class="log-expand-icon"
+          />
         </div>
 
         <!-- 展开内容 -->
         <div v-if="expandedId === log.id" class="log-preview">
           <div v-for="(msg, i) in log.messages" :key="i" class="log-msg">
-            <span :class="['log-msg-role', msg.role === 'user' ? 'log-msg-user' : 'log-msg-assistant']">
+            <span
+              :class="['log-msg-role', msg.role === 'user' ? 'log-msg-user' : 'log-msg-assistant']"
+            >
               {{ msg.role === 'user' ? '你' : log.agentName }}
             </span>
             <span class="log-msg-content">{{ msg.content }}</span>
@@ -158,44 +193,168 @@ function formatTokens(n: number): string {
 </template>
 
 <style scoped>
-.tab-logs { padding: 32px; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
-.tab-header { margin-bottom: 24px; flex-shrink: 0; }
-.tab-title { display: flex; align-items: center; gap: 12px; font-size: 24px; font-weight: 800; color: var(--color-text-primary); }
-.tab-subtitle { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.15em; color: var(--color-text-muted); margin-top: 4px; margin-left: 36px; }
+.tab-logs {
+  padding: 32px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.tab-header {
+  margin-bottom: 24px;
+  flex-shrink: 0;
+}
+.tab-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--color-text-primary);
+}
+.tab-subtitle {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--color-text-muted);
+  margin-top: 4px;
+  margin-left: 36px;
+}
 
-.logs-toolbar { display: flex; gap: 8px; margin-bottom: 16px; align-items: center; flex-shrink: 0; }
-.logs-search { flex: 1; max-width: 300px; }
-.logs-filter { width: 140px; }
+.logs-toolbar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  align-items: center;
+  flex-shrink: 0;
+}
+.logs-search {
+  flex: 1;
+  max-width: 300px;
+}
+.logs-filter {
+  width: 140px;
+}
 
-.logs-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
-.logs-list::-webkit-scrollbar { width: 4px; }
-.logs-list::-webkit-scrollbar-thumb { background: var(--color-blue-200); }
-.logs-empty { flex: 1; display: flex; align-items: center; justify-content: center; }
+.logs-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.logs-list::-webkit-scrollbar {
+  width: 4px;
+}
+.logs-list::-webkit-scrollbar-thumb {
+  background: var(--color-sky-light);
+}
+.logs-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 
 .log-item {
-  border: 2px solid var(--color-border); background: var(--color-bg-primary);
-  padding: 16px; cursor: pointer; transition: all 0.2s;
+  border: 2px solid var(--color-border);
+  background: var(--color-bg-primary);
+  padding: 16px;
+  cursor: pointer;
+  transition: all 0.2s;
 }
-.log-item:hover { border-color: var(--color-blue-200); }
+.log-item:hover {
+  border-color: var(--color-sky-light);
+}
 
-.log-header { display: flex; justify-content: space-between; align-items: center; }
-.log-header-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.log-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.log-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
 .log-agent-avatar {
-  width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, var(--color-blue-400), var(--color-blue-600));
-  color: white; font-weight: 800; font-size: 14px; flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, var(--color-sky-hover), var(--color-sky-shadow));
+  color: white;
+  font-weight: 800;
+  font-size: 14px;
+  flex-shrink: 0;
 }
-.log-info { min-width: 0; }
-.log-summary { font-size: 13px; font-weight: 700; color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.log-meta { display: flex; gap: 12px; margin-top: 4px; }
-.log-meta-item { font-size: 10px; color: var(--color-text-muted); display: flex; align-items: center; gap: 3px; }
-.log-expand-icon { color: var(--color-text-muted); flex-shrink: 0; }
+.log-info {
+  min-width: 0;
+}
+.log-summary {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.log-meta {
+  display: flex;
+  gap: 12px;
+  margin-top: 4px;
+}
+.log-meta-item {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.log-expand-icon {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
 
-.log-preview { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-border); display: flex; flex-direction: column; gap: 8px; }
-.log-msg { display: flex; gap: 8px; align-items: flex-start; }
-.log-msg-role { font-size: 10px; font-weight: 700; padding: 1px 6px; flex-shrink: 0; }
-.log-msg-user { color: var(--color-blue-600); background: var(--color-blue-50, rgba(56,189,248,0.1)); }
-.log-msg-assistant { color: var(--color-pink-600, #db2777); background: rgba(236,72,153,0.1); }
-.log-msg-content { font-size: 12px; color: var(--color-text-secondary); line-height: 1.5; }
-.log-preview-hint { font-size: 10px; color: var(--color-text-muted); text-align: center; font-style: italic; }
+.log-preview {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.log-msg {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+.log-msg-role {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  flex-shrink: 0;
+}
+.log-msg-user {
+  color: var(--color-sky-shadow);
+  background: var(--color-sky-50, rgba(56, 189, 248, 0.1));
+}
+.log-msg-assistant {
+  color: var(--color-pink-shadow, #db2777);
+  background: rgba(236, 72, 153, 0.1);
+}
+.log-msg-content {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+.log-preview-hint {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  text-align: center;
+  font-style: italic;
+}
 </style>

@@ -2,7 +2,7 @@
  * LLM Service — 统一 LLM 调用门面
  *
  * 通过 Provider 模式支持 OpenAI / Gemini / Anthropic 三大协议。
- * 大多数厂商走 OpenAI 兼容协议 (04_BACKEND_ARCHITECTURE.md §6)。
+ * 大多数厂商走 OpenAI 兼容协议。
  *
  * 功能：
  * - Provider 工厂 (按 provider 类型分发)
@@ -14,7 +14,14 @@
  * @module packages/backend/src/services/llm/llmService
  */
 
-import type { LlmProvider, ChatMessage, ChatOptions, ChatCompletion, ChatDelta, UsageInfo } from './types'
+import type {
+  LlmProvider,
+  ChatMessage,
+  ChatOptions,
+  ChatCompletion,
+  ChatDelta,
+  UsageInfo,
+} from './types'
 import { OpenAiProvider } from './providers/openaiProvider'
 import { GeminiProvider } from './providers/geminiProvider'
 import { AnthropicProvider } from './providers/anthropicProvider'
@@ -291,9 +298,7 @@ export class LlmService {
 
         // 判断是否可重试
         const isRetryable =
-          err instanceof AppError &&
-          RETRYABLE_CODES.has(err.code) &&
-          attempt < retry.maxRetries
+          err instanceof AppError && RETRYABLE_CODES.has(err.code) && attempt < retry.maxRetries
 
         if (!isRetryable) throw err
 

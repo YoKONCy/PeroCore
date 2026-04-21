@@ -3,45 +3,72 @@
  * MessageBubble — 单条消息气泡
  *
  * 根据消息角色 (user/assistant) 渲染不同样式的气泡。
- * assistant 消息内部使用 MessageSegment 解析段落。
+ * F3: 支持 v-html Markdown 渲染 + 工具调用展示 + 流式光标。
  */
+import { ref } from 'vue'
 import PixelIcon from '../pixel/PixelIcon.vue'
 import MessageSegment from './MessageSegment.vue'
 import ThinkingIndicator from './ThinkingIndicator.vue'
 import type { Segment } from './MessageSegment.vue'
+
+/** 工具调用信息 */
+export interface ToolCallInfo {
+  name: string
+  args: string
+  result?: string
+  isError?: boolean
+}
 
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant'
   content: string
   timestamp?: number
-  /** 发送者 ID (多 Agent 场景) */
   senderId?: string
-  /** 用户消息附带的图片 */
   images?: string[]
-  /** 解析后的段落 (assistant 用) */
   segments?: Segment[]
+  /** 渲染后的 HTML（由 useStreamMarkdown 提供） */
+  renderedHtml?: string
+  /** 工具调用信息 */
+  toolCalls?: ToolCallInfo[]
 }
 
 interface Props {
   message: ChatMessage
-  /** Agent 名称 (显示头像) */
   agentName?: string
-  /** 是否为最新正在生成的消息 */
   isStreaming?: boolean
+  /** 当前正在播放 TTS 的消息 ID */
+  playingMsgId?: string | null
+  /** TTS 音频加载中 */
+  isLoadingAudio?: boolean
 }
 
-withDefaults(defineProps<Props>(), {
+const props = withDefaults(defineProps<Props>(), {
   agentName: 'Pero',
   isStreaming: false,
+  playingMsgId: null,
+  isLoadingAudio: false,
 })
 
 const emit = defineEmits<{
   edit: [msg: ChatMessage]
   delete: [id: string]
+  /** TTS 播放/停止切换 */
+  ttsPlay: [msg: ChatMessage]
 }>()
 
-/** 格式化时间 */
+/** 工具调用展开/折叠 */
+const expandedTools = ref<Set<number>>(new Set())
+function toggleTool(idx: number) {
+  if (expandedTools.value.has(idx)) {
+    expandedTools.value.delete(idx)
+  } else {
+    expandedTools.value.add(idx)
+  }
+  // 触发响应性
+  expandedTools.value = new Set(expandedTools.value)
+}
+
 function formatTime(ts?: number): string {
   if (!ts) return ''
   const d = new Date(ts)
@@ -98,6 +125,25 @@ function formatTime(ts?: number): string {
         <span class="msg-assistant-name">{{ agentName }}</span>
         <span class="msg-time">{{ formatTime(message.timestamp) }}</span>
         <div class="msg-actions">
+          <!-- TTS 播放按钮（ playMessage） -->
+          <button
+            v-if="message.role === 'assistant' && message.content && !isStreaming"
+            class="msg-action-btn"
+            :class="{ 'msg-action-btn-active': props.playingMsgId === message.id }"
+            :title="props.playingMsgId === message.id ? '停止播放' : '朗读此消息'"
+            @click="emit('ttsPlay', message)"
+          >
+            <PixelIcon
+              :name="
+                props.playingMsgId === message.id
+                  ? 'square'
+                  : props.isLoadingAudio && props.playingMsgId === message.id
+                    ? 'loader'
+                    : 'volume-2'
+              "
+              size="xs"
+            />
+          </button>
           <button class="msg-action-btn" @click="emit('edit', message)">
             <PixelIcon name="edit" size="xs" />
           </button>
@@ -109,24 +155,63 @@ function formatTime(ts?: number): string {
 
       <!-- 消息体 -->
       <div class="msg-bubble msg-bubble-assistant">
-        <!-- 思考中 -->
-        <ThinkingIndicator
-          v-if="isStreaming && !message.content"
-          :name="agentName"
-        />
+        <!-- 思考中（无内容时） -->
+        <ThinkingIndicator v-if="isStreaming && !message.content" :name="agentName" />
 
         <!-- 段落列表 -->
         <template v-else-if="message.segments?.length">
-          <MessageSegment
-            v-for="(seg, idx) in message.segments"
-            :key="idx"
-            :segment="seg"
-          />
+          <MessageSegment v-for="(seg, idx) in message.segments" :key="idx" :segment="seg" />
         </template>
+
+        <!-- Markdown HTML 渲染（优先 renderedHtml） -->
+        <!-- eslint-disable-next-line vue/no-v-html -->
+        <div v-else-if="message.renderedHtml" class="msg-markdown" v-html="message.renderedHtml" />
 
         <!-- 纯文本回退 -->
         <div v-else class="msg-plain-text">
           {{ message.content }}
+        </div>
+
+        <!-- 流式光标 -->
+        <span v-if="isStreaming && message.content" class="msg-streaming-cursor" />
+
+        <!-- 工具调用展示 -->
+        <div v-if="message.toolCalls?.length" class="msg-tools">
+          <div
+            v-for="(tc, idx) in message.toolCalls"
+            :key="idx"
+            class="msg-tool-item"
+            @click="toggleTool(idx)"
+          >
+            <div class="msg-tool-header">
+              <PixelIcon name="settings" size="xs" />
+              <span class="msg-tool-name">{{ tc.name }}</span>
+              <span
+                v-if="tc.result"
+                :class="['msg-tool-badge', tc.isError ? 'msg-tool-error' : 'msg-tool-ok']"
+              >
+                {{ tc.isError ? '失败' : '完成' }}
+              </span>
+              <span v-else class="msg-tool-badge msg-tool-running">执行中...</span>
+              <PixelIcon
+                :name="expandedTools.has(idx) ? 'chevron-up' : 'chevron-down'"
+                size="xs"
+                class="msg-tool-chevron"
+              />
+            </div>
+            <div v-if="expandedTools.has(idx)" class="msg-tool-detail">
+              <div v-if="tc.args" class="msg-tool-section">
+                <span class="msg-tool-label">参数</span>
+                <pre class="msg-tool-pre">{{ tc.args }}</pre>
+              </div>
+              <div v-if="tc.result" class="msg-tool-section">
+                <span class="msg-tool-label">结果</span>
+                <pre :class="['msg-tool-pre', tc.isError ? 'msg-tool-pre-error' : '']">{{
+                  tc.result
+                }}</pre>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -154,9 +239,9 @@ function formatTime(ts?: number): string {
 /* 用户气泡 */
 .msg-bubble-user {
   padding: 10px 16px;
-  background: var(--color-blue-500);
+  background: var(--color-sky-500);
   color: white;
-  border: 2px solid var(--color-blue-600);
+  border: 2px solid var(--color-sky-shadow);
   font-size: 14px;
   line-height: 1.5;
   white-space: pre-wrap;
@@ -184,7 +269,7 @@ function formatTime(ts?: number): string {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, var(--color-blue-400), var(--color-blue-600));
+  background: linear-gradient(135deg, var(--color-sky-hover), var(--color-sky-shadow));
   color: white;
   font-weight: 700;
   font-size: 14px;
@@ -196,7 +281,7 @@ function formatTime(ts?: number): string {
   right: 0;
   width: 10px;
   height: 10px;
-  background: var(--color-green-500, #22c55e);
+  background: var(--color-emerald-face, #22c55e);
   border: 2px solid white;
 }
 
@@ -221,7 +306,7 @@ function formatTime(ts?: number): string {
 .msg-assistant-name {
   font-size: 12px;
   font-weight: 700;
-  color: var(--color-blue-500);
+  color: var(--color-sky-500);
 }
 
 /* 通用 */
@@ -261,10 +346,10 @@ function formatTime(ts?: number): string {
   transition: color 0.15s;
 }
 .msg-action-btn:hover {
-  color: var(--color-blue-500);
+  color: var(--color-sky-500);
 }
 .msg-action-btn-danger:hover {
-  color: var(--color-red-500, #ef4444);
+  color: var(--color-red-face, #ef4444);
 }
 
 /* 图片 */
@@ -292,6 +377,143 @@ function formatTime(ts?: number): string {
   white-space: pre-wrap;
 }
 
+/* Markdown 渲染容器 */
+.msg-markdown {
+  color: var(--color-text-primary);
+  line-height: 1.6;
+  word-break: break-word;
+}
+.msg-markdown :deep(p) {
+  margin: 4px 0;
+}
+.msg-markdown :deep(pre) {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  padding: 12px;
+  overflow-x: auto;
+  font-size: 12px;
+  margin: 8px 0;
+}
+.msg-markdown :deep(code) {
+  font-size: 12px;
+  background: var(--color-bg-secondary);
+  padding: 1px 4px;
+}
+.msg-markdown :deep(pre code) {
+  background: none;
+  padding: 0;
+}
+.msg-markdown :deep(ul),
+.msg-markdown :deep(ol) {
+  padding-left: 20px;
+  margin: 4px 0;
+}
+.msg-markdown :deep(blockquote) {
+  border-left: 3px solid var(--color-sky-hover);
+  padding-left: 12px;
+  margin: 8px 0;
+  color: var(--color-text-secondary);
+}
+
+/* 流式光标 */
+.msg-streaming-cursor {
+  display: inline-block;
+  width: 6px;
+  height: 14px;
+  background: var(--color-sky-hover);
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  animation: cursor-blink 0.8s steps(2) infinite;
+}
+
+/* 工具调用区 */
+.msg-tools {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.msg-tool-item {
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.msg-tool-item:hover {
+  border-color: var(--color-sky-light);
+}
+.msg-tool-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 11px;
+}
+.msg-tool-name {
+  font-weight: 700;
+  color: var(--color-text-primary);
+  font-family: monospace;
+}
+.msg-tool-badge {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+}
+.msg-tool-ok {
+  color: var(--color-emerald-shadow, #16a34a);
+  background: rgba(34, 197, 94, 0.1);
+}
+.msg-tool-error {
+  color: var(--color-red-face, #ef4444);
+  background: rgba(239, 68, 68, 0.1);
+}
+.msg-tool-running {
+  color: var(--color-sky-500);
+  background: var(--color-sky-50, rgba(56, 189, 248, 0.1));
+}
+.msg-tool-chevron {
+  margin-left: auto;
+  color: var(--color-text-muted);
+}
+.msg-tool-detail {
+  padding: 8px 10px;
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.msg-tool-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.msg-tool-label {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--color-text-muted);
+}
+.msg-tool-pre {
+  font-size: 11px;
+  font-family: monospace;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  padding: 6px 8px;
+  margin: 0;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.msg-tool-pre-error {
+  border-color: rgba(239, 68, 68, 0.3);
+  color: var(--color-red-face, #ef4444);
+}
+
 @keyframes fade-in-up {
   from {
     opacity: 0;
@@ -300,6 +522,15 @@ function formatTime(ts?: number): string {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes cursor-blink {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
   }
 }
 </style>

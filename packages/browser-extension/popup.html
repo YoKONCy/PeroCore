@@ -1,0 +1,205 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <style>
+      :root {
+        --primary-color: #6366f1;
+        --primary-hover: #4f46e5;
+        --success-color: #22c55e;
+        --error-color: #ef4444;
+        --bg-color: #ffffff;
+        --text-main: #1f2937;
+        --text-muted: #6b7280;
+        --border-color: #e5e7eb;
+      }
+
+      body {
+        width: 240px;
+        margin: 0;
+        padding: 16px;
+        font-family:
+          -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+        background-color: var(--bg-color);
+        color: var(--text-main);
+      }
+
+      .container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 16px;
+      }
+
+      .header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+      }
+
+      .logo {
+        width: 24px;
+        height: 24px;
+        background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+        border-radius: 6px;
+      }
+
+      .title {
+        font-size: 16px;
+        font-weight: 600;
+        margin: 0;
+      }
+
+      .status-card {
+        width: 100%;
+        padding: 12px;
+        border-radius: 12px;
+        background-color: #f9fafb;
+        border: 1px solid var(--border-color);
+        box-sizing: border-box;
+      }
+
+      .status-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+      }
+
+      .status-item:last-child {
+        margin-bottom: 0;
+      }
+
+      .label {
+        font-size: 12px;
+        color: var(--text-muted);
+      }
+
+      .value {
+        font-size: 12px;
+        font-weight: 500;
+      }
+
+      .indicator {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        margin-right: 4px;
+      }
+
+      .status-connected {
+        color: var(--success-color);
+      }
+      .status-connected .indicator {
+        background-color: var(--success-color);
+        box-shadow: 0 0 8px var(--success-color);
+      }
+
+      .status-disconnected {
+        color: var(--error-color);
+      }
+      .status-disconnected .indicator {
+        background-color: var(--error-color);
+      }
+
+      .status-connecting {
+        color: var(--primary-color);
+      }
+      .status-connecting .indicator {
+        background-color: var(--primary-color);
+        animation: pulse 1.5s infinite;
+      }
+
+      @keyframes pulse {
+        0% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.4;
+        }
+        100% {
+          opacity: 1;
+        }
+      }
+
+      .btn-reconnect {
+        width: 100%;
+        padding: 10px;
+        border: none;
+        border-radius: 8px;
+        background-color: var(--primary-color);
+        color: white;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .btn-reconnect:hover {
+        background-color: var(--primary-hover);
+        transform: translateY(-1px);
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+      }
+
+      .btn-reconnect:active {
+        transform: translateY(0);
+      }
+
+      .footer {
+        font-size: 10px;
+        color: var(--text-muted);
+        text-align: center;
+        width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <div class="logo"></div>
+        <h3 class="title">Pero Bridge</h3>
+      </div>
+
+      <div class="status-card">
+        <div class="status-item">
+          <span class="label">连接状态</span>
+          <span id="status" class="value status-disconnected">
+            <span class="indicator"></span>未连接
+          </span>
+        </div>
+        <div class="status-item">
+          <span class="label">重连尝试</span>
+          <span id="attempts" class="value">0 次</span>
+        </div>
+      </div>
+
+      <button id="reconnect" class="btn-reconnect">
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.5"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path d="M21 2v6h-6"></path>
+          <path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path>
+          <path d="M3 22v-6h6"></path>
+          <path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path>
+        </svg>
+        主动连接
+      </button>
+
+      <div class="footer">Pero Family · 浏览器扩展</div>
+    </div>
+    <script src="popup.js"></script>
+  </body>
+</html>

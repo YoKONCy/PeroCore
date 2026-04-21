@@ -1,14 +1,15 @@
 /**
  * SSE 流式客户端
  *
- * 对接后端 chat/stream 端点，处理 02_API_RESPONSE_SPEC.md §9 定义的事件格式：
+ * 对接后端 chat/stream 端点，处理 SSE 事件格式：
  * - event: delta    → 增量内容
  * - event: done     → 完成 (含 usage)
  * - event: error    → 错误
  * - event: status   → 状态变更 (thinking/tool_call 等)
  *
- * @see 02_API_RESPONSE_SPEC.md §9
  */
+
+import { getBaseUrl } from './transportUtils'
 
 /** SSE 事件类型 */
 export interface SseEvents {
@@ -40,8 +41,8 @@ export function streamRequest(endpoint: string, body: unknown, events: SseEvents
   // 异步启动，不阻塞调用方
   void (async () => {
     try {
-      // 直接用 fetch (Transport 没有 SSE 接口，这里是唯一的 fetch 例外)
-      const baseUrl = (window as any).electron ? 'http://localhost:9120' : window.location.origin
+      // 直接用 fetch (Transport 没有 SSE 接口，这里是允许的二进制/流式例外)
+      const baseUrl = getBaseUrl()
 
       const res = await fetch(`${baseUrl}/api${endpoint}`, {
         method: 'POST',

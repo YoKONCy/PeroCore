@@ -2,7 +2,7 @@
  * 记忆 Repository
  *
  * SQLite 记忆节点表 (memory_nodes) 的数据访问层。
- * Service 层通过本 Repo 操作记忆，不直接接触 Drizzle ORM (04_BACKEND_ARCHITECTURE.md §4)。
+ * Service 层通过本 Repo 操作记忆，不直接接触 Drizzle ORM。
  *
  * @module packages/backend/src/repositories/memory.repo
  */
@@ -248,18 +248,13 @@ export class MemoryRepository {
     const result = await this.db
       .select({ count: sql<number>`count(*)` })
       .from(memoryNodes)
-      .where(
-        and(
-          eq(memoryNodes.agentId, agentId),
-          gte(memoryNodes.timestamp, todayStartMs),
-        ),
-      )
+      .where(and(eq(memoryNodes.agentId, agentId), gte(memoryNodes.timestamp, todayStartMs)))
       .get()
     return result?.count ?? 0
   }
 
   /**
-   * 更新检索质量分数 (PEDSA v2 反馈闭环 §14.4)
+   * 更新检索质量分数 (PEDSA 反馈闭环)
    *
    * @param delta 增量 (正=有用, 负=无效)
    */
@@ -278,10 +273,7 @@ export class MemoryRepository {
       .select()
       .from(memoryNodes)
       .where(
-        and(
-          eq(memoryNodes.agentId, agentId),
-          sql`${memoryNodes.tags} LIKE ${'%' + tag + '%'}`,
-        ),
+        and(eq(memoryNodes.agentId, agentId), sql`${memoryNodes.tags} LIKE ${'%' + tag + '%'}`),
       )
       .orderBy(desc(memoryNodes.timestamp))
       .limit(limit)
@@ -293,12 +285,7 @@ export class MemoryRepository {
     const result = await this.db
       .select({ count: sql<number>`count(*)` })
       .from(memoryNodes)
-      .where(
-        and(
-          eq(memoryNodes.agentId, agentId),
-          gte(memoryNodes.timestamp, sinceMs),
-        ),
-      )
+      .where(and(eq(memoryNodes.agentId, agentId), gte(memoryNodes.timestamp, sinceMs)))
       .get()
     return result?.count ?? 0
   }
@@ -317,12 +304,7 @@ export class MemoryRepository {
     const result = await this.db
       .select({ count: sql<number>`count(*)` })
       .from(memoryNodes)
-      .where(
-        and(
-          eq(memoryNodes.agentId, agentId),
-          eq(memoryNodes.type, type),
-        ),
-      )
+      .where(and(eq(memoryNodes.agentId, agentId), eq(memoryNodes.type, type)))
       .get()
     return result?.count ?? 0
   }
@@ -337,16 +319,60 @@ export class MemoryRepository {
     return this.db
       .select()
       .from(memoryNodes)
-      .where(
-        and(
-          eq(memoryNodes.agentId, agentId),
-          eq(memoryNodes.type, type),
-        ),
-      )
+      .where(and(eq(memoryNodes.agentId, agentId), eq(memoryNodes.type, type)))
       .orderBy(desc(memoryNodes.timestamp))
       .offset(offset)
       .limit(limit)
       .all()
   }
-}
 
+  /**
+   * 查找孤独记忆 (长期未被检索命中)
+   *
+   * 条件: accessCount === 0 且 timestamp < thresholdMs
+   * 用于 lifecycle/cron/lonelyScan。
+   */
+  async findLonelyMemories(agentId: string, thresholdMs: number, limit = 50): Promise<MemoryRow[]> {
+    return this.db
+      .select()
+      .from(memoryNodes)
+      .where(
+        and(
+          eq(memoryNodes.agentId, agentId),
+          eq(memoryNodes.accessCount, 0),
+          lt(memoryNodes.timestamp, thresholdMs),
+          ne(memoryNodes.type, 'reflection'),
+          ne(memoryNodes.type, 'summary'),
+        ),
+      )
+      .orderBy(asc(memoryNodes.timestamp))
+      .limit(limit)
+      .all()
+  }
+
+  /**
+   * 更新记忆元数据 (JSON 扩展字段)
+   *
+   * 将 metadata 合并写入 clusters 字段 (临时方案，后续可扩展 schema)。
+   */
+  async updateMetadata(id: number, metadata: Record<string, unknown>): Promise<void> {
+    const existing = await this.findById(id)
+    if (!existing) return
+
+    // 合并到 clusters 字段 (JSON 序列化)
+    let currentMeta: Record<string, unknown> = {}
+    if (existing.clusters) {
+      try {
+        currentMeta = JSON.parse(existing.clusters)
+      } catch {
+        /* 忽略解析失败 */
+      }
+    }
+
+    const merged = { ...currentMeta, ...metadata }
+    await this.db
+      .update(memoryNodes)
+      .set({ clusters: JSON.stringify(merged) })
+      .where(eq(memoryNodes.id, id))
+  }
+}

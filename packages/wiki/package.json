@@ -1,0 +1,17 @@
+{
+  "name": "@perocore/wiki",
+  "version": "0.9.0",
+  "description": "PeroCore Wiki — VitePress 文档站点",
+  "private": true,
+  "scripts": {
+    "dev": "vitepress dev --port 6657",
+    "build": "vitepress build",
+    "preview": "vitepress preview --port 6657"
+  },
+  "devDependencies": {
+    "@types/three": "^0.184.0",
+    "markdown-it-mathjax3": "^4.3.2",
+    "three": "^0.184.0",
+    "vitepress": "^1.6.4"
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "id": "system-info",
+  "name": "系统信息",
+  "version": "1.0.0",
+  "author": "PeroCore Team",
+  "description": "系统信息查询与应用启动。包含系统状态、窗口管理、应用启动等能力。跨平台降级到 shell 命令。",
+  "type": "tool",
+  "entry": "index.ts",
+  "category": "core",
+  "platforms": ["windows", "linux", "darwin"],
+
+  "tools": [
+    {
+      "name": "get_system_info",
+      "description": "获取系统信息: 操作系统、版本、CPU、内存等。",
+      "parameters": { "type": "object", "properties": {} }
+    },
+    {
+      "name": "open_application",
+      "description": "打开一个应用程序。跨平台支持。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "app_name": { "type": "string", "description": "应用程序名称或路径" }
+        },
+        "required": ["app_name"]
+      }
+    },
+    {
+      "name": "get_active_windows",
+      "description": "列出当前所有可见的窗口及其进程名。",
+      "parameters": { "type": "object", "properties": {} }
+    },
+    {
+      "name": "activate_window",
+      "description": "切换并置顶指定的窗口。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "target": { "type": "string", "description": "窗口标题关键词或进程名" }
+        },
+        "required": ["target"]
+      }
+    }
+  ]
+}

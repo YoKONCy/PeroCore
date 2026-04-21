@@ -2,7 +2,7 @@
  * 对话日志 Repository
  *
  * SQLite conversation_logs 表的数据访问层。
- * 对话日志与记忆是不同的领域实体，必须分开 (10_MEMORY_SYSTEM.md §3)。
+ * 对话日志与记忆是不同的领域实体，必须分开。
  *
  * @module packages/backend/src/repositories/conversationLog.repo
  */
@@ -193,5 +193,20 @@ export class ConversationLogRepository {
     await this.db
       .delete(conversationLogs)
       .where(and(eq(conversationLogs.sessionId, sessionId), eq(conversationLogs.agentId, agentId)))
+  }
+
+  /** 编辑消息内容 (P2-7) */
+  async updateContent(id: number, newContent: string): Promise<boolean> {
+    const result = await this.db
+      .update(conversationLogs)
+      .set({ content: newContent })
+      .where(eq(conversationLogs.id, id))
+    return (result as unknown as { changes: number }).changes > 0
+  }
+
+  /** 删除单条消息 (P2-7) */
+  async deleteById(id: number): Promise<boolean> {
+    const result = await this.db.delete(conversationLogs).where(eq(conversationLogs.id, id))
+    return (result as unknown as { changes: number }).changes > 0
   }
 }

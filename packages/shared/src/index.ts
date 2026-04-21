@@ -67,3 +67,24 @@ export {
 
 // 常量导出（类型）
 export type { ResponseCode } from './constants'
+
+// 类型导出 — Gateway WS 协议
+export type {
+  GatewayMessageType,
+  GatewayEnvelope,
+  GatewayPayload,
+  StateUpdatePayload,
+  StreamDeltaPayload,
+  StreamEndPayload,
+  ToolStatusPayload,
+  TaskProgressPayload,
+  NotificationPayload,
+  SystemErrorPayload,
+  HelloPayload,
+  HelloAckPayload,
+  HeartbeatPayload,
+  ChatRequestPayload,
+  GenericPayload,
+  PushAction,
+  RequestAction,
+} from './types'

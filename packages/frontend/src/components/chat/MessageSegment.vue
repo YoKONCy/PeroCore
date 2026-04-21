@@ -121,16 +121,16 @@ function toggleCollapse() {
 
 /* 思考 */
 .msg-segment-thinking {
-  border-color: var(--color-blue-200);
-  background: var(--color-blue-50, rgba(56, 189, 248, 0.05));
+  border-color: var(--color-sky-light);
+  background: var(--color-sky-50, rgba(56, 189, 248, 0.05));
 }
 .msg-segment-header-thinking {
-  color: var(--color-blue-600);
-  background: var(--color-blue-50, rgba(56, 189, 248, 0.08));
-  border-bottom: 1px solid var(--color-blue-200);
+  color: var(--color-sky-shadow);
+  background: var(--color-sky-50, rgba(56, 189, 248, 0.08));
+  border-bottom: 1px solid var(--color-sky-light);
 }
 .msg-segment-header-thinking:hover {
-  background: var(--color-blue-100, rgba(56, 189, 248, 0.12));
+  background: var(--color-sky-100, rgba(56, 189, 248, 0.12));
 }
 .msg-segment-body-thinking {
   padding: 12px;
@@ -138,18 +138,18 @@ function toggleCollapse() {
   font-family: monospace;
   white-space: pre-wrap;
   line-height: 1.6;
-  color: var(--color-blue-700);
+  color: var(--color-sky-outline);
 }
 
 /* 独白 */
 .msg-segment-monologue {
-  border-color: var(--color-pink-200, #fbcfe8);
+  border-color: var(--color-pink-light, #fbcfe8);
   background: rgba(244, 114, 182, 0.03);
 }
 .msg-segment-header-monologue {
-  color: var(--color-pink-600, #db2777);
+  color: var(--color-pink-shadow, #db2777);
   background: rgba(244, 114, 182, 0.06);
-  border-bottom: 1px solid var(--color-pink-200, #fbcfe8);
+  border-bottom: 1px solid var(--color-pink-light, #fbcfe8);
 }
 .msg-segment-header-monologue:hover {
   background: rgba(244, 114, 182, 0.1);
@@ -164,14 +164,14 @@ function toggleCollapse() {
 
 /* 工具调用 */
 .msg-segment-tool {
-  border-color: var(--color-blue-400);
+  border-color: var(--color-sky-hover);
 }
 .msg-segment-header-tool {
   color: white;
-  background: var(--color-blue-500);
+  background: var(--color-sky-500);
 }
 .msg-segment-header-tool:hover {
-  background: var(--color-blue-600);
+  background: var(--color-sky-shadow);
 }
 .msg-segment-tool-meta {
   display: flex;

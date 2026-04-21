@@ -5,7 +5,6 @@
  * - onMounted / onActivated → start
  * - onUnmounted / onDeactivated → stop
  *
- * @see 12_FRONTEND_PERFORMANCE.md §3.7
  */
 
 import { onMounted, onUnmounted, onActivated, onDeactivated } from 'vue'

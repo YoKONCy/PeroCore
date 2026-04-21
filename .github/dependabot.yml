@@ -1,0 +1,26 @@
+# Dependabot 依赖安全扫描
+version: 2
+updates:
+  # pnpm 依赖
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+    groups:
+      # 将小版本更新归组，减少 PR 噪音
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  # GitHub Actions 版本
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    labels:
+      - ci

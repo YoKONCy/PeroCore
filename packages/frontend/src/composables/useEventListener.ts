@@ -5,7 +5,6 @@
  * - onMounted / onActivated → addEventListener
  * - onUnmounted / onDeactivated → removeEventListener
  *
- * @see 12_FRONTEND_PERFORMANCE.md §3.6
  */
 
 import { onMounted, onUnmounted, onActivated, onDeactivated, unref, watch } from 'vue'

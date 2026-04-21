@@ -8,7 +8,6 @@
  * - TriviumDB 后续会在 Rust 内核层面原生支持
  * - 届时只需替换 runClustering() 的内部实现
  *
- * @see 10_MEMORY_SYSTEM.md §14.2.B
  * @module packages/backend/src/services/retrieval/clusterRouter
  */
 

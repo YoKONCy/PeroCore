@@ -80,12 +80,12 @@ const items = [
   transition: all 0.15s;
 }
 .ab-item:hover {
-  color: var(--color-blue-500);
+  color: var(--color-sky-500);
   background: var(--color-bg-hover);
 }
 
 .ab-item-active {
-  color: var(--color-blue-500);
+  color: var(--color-sky-500);
   background: var(--color-bg-hover);
 }
 
@@ -95,10 +95,12 @@ const items = [
   top: 4px;
   bottom: 4px;
   width: 3px;
-  background: var(--color-blue-500);
+  background: var(--color-sky-500);
 }
 
-.ab-spacer { flex: 1; }
+.ab-spacer {
+  flex: 1;
+}
 
 .ab-item-bottom {
   margin-bottom: 0;

@@ -4,7 +4,6 @@
  * 所有 HTTP 请求必须通过 ApiClient 发出，禁止直接调用 fetch。
  * 基于 Transport 层，自动处理信封解包和错误转化。
  *
- * @see 05_FRONTEND_ARCHITECTURE.md §1
  */
 
 import { transport } from './transport'
@@ -54,6 +53,14 @@ class ApiClient {
   /** DELETE */
   async delete<T>(endpoint: string): Promise<ApiResponse<T>> {
     return this.request<T>(endpoint, { method: 'DELETE' })
+  }
+
+  /** PATCH (P2-7: 消息编辑) */
+  async patch<T>(endpoint: string, data: unknown): Promise<ApiResponse<T>> {
+    return this.request<T>(endpoint, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    })
   }
 }
 

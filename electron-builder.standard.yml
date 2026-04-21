@@ -1,0 +1,9 @@
+# 标准版构建配置
+# 无 Steam SDK，通过 GitHub Releases 自动更新
+extends: electron-builder.base.yml
+
+# 基础配置已包含 publish: github，无需覆写
+win:
+  icon: public/Logo.png
+  target:
+    - nsis

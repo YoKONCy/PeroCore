@@ -2,7 +2,7 @@
 /**
  * PButton — 像素风按钮
  *
- * 沿用 v1 的 pixel-btn 系列样式，支持变体和尺寸。
+ * pixel-btn 系列样式，支持变体和尺寸。
  */
 import PixelIcon from './PixelIcon.vue'
 
@@ -65,12 +65,12 @@ withDefaults(defineProps<Props>(), {
 
 /* 变体 */
 .p-btn-primary {
-  background: var(--color-blue-500);
+  background: var(--color-sky-500);
   color: white;
-  border-color: var(--color-blue-600);
+  border-color: var(--color-sky-shadow);
 }
 .p-btn-primary:hover:not(:disabled) {
-  background: var(--color-blue-600);
+  background: var(--color-sky-shadow);
 }
 
 .p-btn-secondary {
@@ -83,12 +83,12 @@ withDefaults(defineProps<Props>(), {
 }
 
 .p-btn-danger {
-  background: var(--color-red-500);
+  background: var(--color-red-face);
   color: white;
-  border-color: var(--color-red-600);
+  border-color: var(--color-red-shadow);
 }
 .p-btn-danger:hover:not(:disabled) {
-  background: var(--color-red-600);
+  background: var(--color-red-shadow);
 }
 
 .p-btn-ghost {

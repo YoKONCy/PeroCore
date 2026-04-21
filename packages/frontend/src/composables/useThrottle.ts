@@ -1,7 +1,6 @@
 /**
  * useThrottleFn / useDebounceFn — 节流与防抖
  *
- * @see 12_FRONTEND_PERFORMANCE.md §2.6 (滚动节流 100ms / 保存防抖 1000ms)
  */
 
 /**

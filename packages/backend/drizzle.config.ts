@@ -1,7 +1,7 @@
 /**
  * Drizzle Kit 配置
  *
- * 用于生成和管理数据库迁移 (15_DEVOPS_OPERATIONS.md §4)。
+ * 用于生成和管理数据库迁移。
  *
  * @module packages/backend/drizzle.config
  */

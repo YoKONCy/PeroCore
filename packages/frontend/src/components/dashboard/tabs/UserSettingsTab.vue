@@ -3,12 +3,13 @@
  * UserSettingsTab — 用户设定 Tab (F1-3)
  *
  * 基础设置 (昵称/称呼)、外观 (主题/字体)、高级 (数据目录/日志)
+ * F3: 已对接 configApi 读写。
  */
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { PixelIcon, PInput, PSelect, PSlider, PSwitch, PButton } from '../../pixel'
+import { configApi } from '../../../api/modules/configApi'
 
-// mock 设置数据
-const userName = ref('YoKONCy')
+const userName = ref('主人')
 const ownerTitle = ref('主人')
 const language = ref('zh-CN')
 const theme = ref('dark')
@@ -39,11 +40,62 @@ const logOptions = [
   { label: 'Error', value: 'error' },
 ]
 
-function handleSave() {
-  isSaving.value = true
-  // TODO: F3 替换为 configApi
-  setTimeout(() => { isSaving.value = false }, 600)
+/** 从后端加载配置 */
+async function loadSettings() {
+  try {
+    const res = await configApi.batch([
+      'user.name',
+      'user.ownerTitle',
+      'user.language',
+      'ui.theme',
+      'ui.fontSize',
+      'ui.animations',
+      'ui.soundEffects',
+      'system.dataDir',
+      'system.logLevel',
+      'system.autoSave',
+    ])
+    const d = res.data ?? {}
+    if (d['user.name']) userName.value = d['user.name'] as string
+    if (d['user.ownerTitle']) ownerTitle.value = d['user.ownerTitle'] as string
+    if (d['user.language']) language.value = d['user.language'] as string
+    if (d['ui.theme']) theme.value = d['ui.theme'] as string
+    if (d['ui.fontSize']) fontSize.value = Number(d['ui.fontSize'])
+    if (d['ui.animations'] !== undefined) enableAnimations.value = d['ui.animations'] === 'true'
+    if (d['ui.soundEffects'] !== undefined)
+      enableSoundEffects.value = d['ui.soundEffects'] === 'true'
+    if (d['system.dataDir']) dataDir.value = d['system.dataDir'] as string
+    if (d['system.logLevel']) logLevel.value = d['system.logLevel'] as string
+    if (d['system.autoSave'] !== undefined) autoSave.value = d['system.autoSave'] !== 'false'
+  } catch {
+    // 首次使用，保持默认值
+  }
 }
+
+/** 保存配置到后端 */
+async function handleSave() {
+  isSaving.value = true
+  try {
+    const pairs: Array<[string, string]> = [
+      ['user.name', userName.value],
+      ['user.ownerTitle', ownerTitle.value],
+      ['user.language', language.value],
+      ['ui.theme', theme.value],
+      ['ui.fontSize', String(fontSize.value)],
+      ['ui.animations', String(enableAnimations.value)],
+      ['ui.soundEffects', String(enableSoundEffects.value)],
+      ['system.logLevel', logLevel.value],
+      ['system.autoSave', String(autoSave.value)],
+    ]
+    await Promise.all(pairs.map(([k, v]) => configApi.set(k, v)))
+  } catch (e) {
+    console.error('[UserSettings] 保存失败:', e)
+  } finally {
+    isSaving.value = false
+  }
+}
+
+onMounted(loadSettings)
 </script>
 
 <template>
@@ -134,22 +186,98 @@ function handleSave() {
 </template>
 
 <style scoped>
-.tab-settings { padding: 32px; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
-.tab-header { margin-bottom: 24px; flex-shrink: 0; }
-.tab-title { display: flex; align-items: center; gap: 12px; font-size: 24px; font-weight: 800; color: var(--color-text-primary); }
-.tab-subtitle { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.15em; color: var(--color-text-muted); margin-top: 4px; margin-left: 36px; }
+.tab-settings {
+  padding: 32px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.tab-header {
+  margin-bottom: 24px;
+  flex-shrink: 0;
+}
+.tab-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--color-text-primary);
+}
+.tab-subtitle {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--color-text-muted);
+  margin-top: 4px;
+  margin-left: 36px;
+}
 
-.settings-scroll { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 24px; padding-right: 4px; }
-.settings-scroll::-webkit-scrollbar { width: 4px; }
-.settings-scroll::-webkit-scrollbar-thumb { background: var(--color-blue-200); }
+.settings-scroll {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding-right: 4px;
+}
+.settings-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+.settings-scroll::-webkit-scrollbar-thumb {
+  background: var(--color-sky-light);
+}
 
-.settings-section { border: 2px solid var(--color-border); background: var(--color-bg-primary); padding: 24px; }
-.section-title { font-size: 14px; font-weight: 800; color: var(--color-text-primary); display: flex; align-items: center; gap: 8px; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 1px solid var(--color-border); }
-.settings-grid { display: flex; flex-direction: column; gap: 16px; }
-.setting-field { display: flex; flex-direction: column; gap: 6px; }
-.setting-label { font-size: 12px; font-weight: 700; color: var(--color-text-secondary); }
-.setting-desc { font-size: 10px; color: var(--color-text-muted); }
-.setting-row { flex-direction: row; align-items: center; justify-content: space-between; }
-.setting-row-info { display: flex; flex-direction: column; gap: 2px; }
-.settings-footer { padding-top: 8px; display: flex; justify-content: flex-end; }
+.settings-section {
+  border: 2px solid var(--color-border);
+  background: var(--color-bg-primary);
+  padding: 24px;
+}
+.section-title {
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--color-text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+.settings-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.setting-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.setting-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+}
+.setting-desc {
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
+.setting-row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.setting-row-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.settings-footer {
+  padding-top: 8px;
+  display: flex;
+  justify-content: flex-end;
+}
 </style>

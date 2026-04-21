@@ -1,0 +1,30 @@
+node_modules/
+dist/
+dist_electron/
+.git/
+.gitmodules
+
+# Electron 和桌面专属（Docker 不需要）
+electron/
+packages/native/render-core/src/
+packages/native/render-core/target/
+packages/native/render-core/Cargo.*
+
+# 开发工具和文档
+_docs_/
+.agent/
+.vscode/
+*.md
+!packages/wiki/**/*.md
+
+# 系统文件
+.DS_Store
+Thumbs.db
+*.log
+
+# 测试
+**/__tests__/
+**/*.test.ts
+**/*.spec.ts
+vitest.config.ts
+coverage/

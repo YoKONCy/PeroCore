@@ -6,7 +6,6 @@
  *
  * 零 Token 开销 — 不需要 LLM 二次判定。
  *
- * @see 10_MEMORY_SYSTEM.md §14.2.C
  * @module packages/backend/src/services/retrieval/retrievalFeedback
  */
 
@@ -138,9 +137,7 @@ export class RetrievalFeedback {
 
     for (const signal of signals) {
       // 1. 更新 retrieval_quality
-      const delta = signal.isPositive
-        ? this.config.positiveDelta
-        : this.config.negativeDelta
+      const delta = signal.isPositive ? this.config.positiveDelta : this.config.negativeDelta
 
       await this.memoryRepo.updateRetrievalQuality(signal.memoryId, delta)
 
@@ -206,7 +203,7 @@ export class RetrievalFeedback {
       pendingSamples: this.trainingSamples.length,
       positiveRate:
         this.stats.totalSignals > 0
-          ? (this.stats.positiveCount / this.stats.totalSignals * 100).toFixed(1) + '%'
+          ? ((this.stats.positiveCount / this.stats.totalSignals) * 100).toFixed(1) + '%'
           : 'N/A',
     }
   }
@@ -225,7 +222,7 @@ function tokenize(text: string): Set<string> {
   const tokens = new Set<string>()
 
   // 英文/数字按空格分词
-  const words = text.toLowerCase().split(/[\s,，.。!！?？;；:：()（）\[\]【】{}""'''"]+/)
+  const words = text.toLowerCase().split(/[\s,，.。!！?？;；:：()（）[]【】{}""'''"]+/)
   for (const w of words) {
     const trimmed = w.trim()
     if (trimmed.length >= 2) {

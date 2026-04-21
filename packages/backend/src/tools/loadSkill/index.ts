@@ -16,7 +16,8 @@ import type { BuiltinTool } from '../index'
 export const loadSkillTool: BuiltinTool = {
   definition: {
     name: 'load_skill',
-    description: '加载指定技能的详细操作指令。当你需要执行某个专业任务时，先调用此工具获取步骤说明。',
+    description:
+      '加载指定技能的详细操作指令。当你需要执行某个专业任务时，先调用此工具获取步骤说明。',
     parameters: {
       type: 'object',
       properties: {

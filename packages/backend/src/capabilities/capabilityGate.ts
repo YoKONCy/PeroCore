@@ -3,12 +3,10 @@
  *
  * 单一权威来源：(Agent, Mode) → ResolvedCapability
  *
- * 取代 v1 散布在 3 处的 if-else 工具过滤：
+ * 统一工具过滤逻辑：
  * - PromptService._enrich_variables() 400+ 行
  * - NITDispatcher.dispatch() 白名单
  * - NITDispatcher._execute_plugin() 轻量模式检查
- *
- * 见 16_CAPABILITY_GATE.md §2
  *
  * @module packages/backend/src/capabilities/capabilityGate
  */

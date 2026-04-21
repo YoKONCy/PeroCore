@@ -17,6 +17,7 @@ import { createConsola, type ConsolaReporter, type LogObject } from 'consola'
 import { LOG_LEVEL } from './env'
 import { LogFileTransport, formatLogLine, type LogFileConfig } from './logFileTransport'
 import path from 'node:path'
+import os from 'node:os'
 
 // ─────────────────────────────────────────────
 // 文件 Transport (全局单例)
@@ -34,10 +35,9 @@ let fileTransport: LogFileTransport | null = null
  * @param config - 日志文件配置 (可选，默认使用 $PERO_DATA_DIR/logs)
  */
 export function initLogFile(config?: Partial<LogFileConfig>): void {
-  const logDir = config?.logDir ?? path.join(
-    process.env.PERO_DATA_DIR ?? path.join(require('node:os').homedir(), '.perocore'),
-    'logs',
-  )
+  const logDir =
+    config?.logDir ??
+    path.join(process.env.PERO_DATA_DIR ?? path.join(os.homedir(), '.perocore'), 'logs')
 
   fileTransport = new LogFileTransport({
     logDir,
@@ -104,16 +104,14 @@ const fileReporter: ConsolaReporter = {
  * ```
  */
 export function createLogger(module: string) {
-  return createConsola({
+  const instance = createConsola({
     level: LOG_LEVEL,
-    reporters: [
-      // 默认的终端 reporter (consola 内置 fancy 输出)
-      // 传入空对象使用默认 reporter
-      ...([] as ConsolaReporter[]),
-      // 文件持久化 reporter
-      fileReporter,
-    ],
   }).withTag(module)
+
+  // 追加文件持久化 reporter（不覆盖默认终端输出）
+  instance.addReporter(fileReporter)
+
+  return instance
 }
 
 /** 根 logger（不带模块标签） */

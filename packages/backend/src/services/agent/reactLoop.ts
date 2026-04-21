@@ -3,23 +3,15 @@
  *
  * Agent 的核心推理引擎：
  * 1. 流式调用 LLM
- * 2. 收集 FC tool_calls 和 NIT 脚本块
- * 3. FC → 委托 ToolExecutor 执行
- * 4. NIT → 委托 NitRuntime 执行 (D57)
- * 5. 将结果注入上下文继续循环
- * 6. 熔断保护 (连续错误 ≥ 3 次)
+ * 2. 收集 FC tool_calls
+ * 3. 委托 ToolExecutor 执行（含 run_script 工具）
+ * 4. 将结果注入上下文继续循环
+ * 5. 熔断保护 (连续错误 ≥ 3 次)
  *
- * B6-2 升级:
- * - 多 tool_calls 增量组装 (使用 StreamToolCallDelta.index)
- * - NIT 执行超时保护 (默认 30s)
- * - SSE 事件推送 (tool_call / tool_result / status)
- * - TaskManager 取消检测
- * - finish_task 广播 Gateway
- *
- * 双轨工具调用：
- *   FC (原生): LLM tool_calls → ToolExecutor → ToolRegistry
- *   NIT v3:    LLM <nit>脚本</nit> → NitRuntime → ToolExecutor → ToolRegistry
- *   两条路径共享同一个 ToolRegistry，权限由 CapabilityGate 统一控制。
+ * 工具调用架构 (统一 FC)：
+ *   LLM → FC tool_calls → ToolExecutor → ToolRegistry
+ *   复杂编排场景：LLM 调用 run_script 工具 → NitRuntime → ToolRegistry
+ *   NIT 解释器作为 FC 工具存在，不再是独立的调用通道。
  *
  * @module packages/backend/src/services/agent/reactLoop
  */
@@ -28,8 +20,7 @@ import type { LlmService, ModelConfig } from '../llm/llmService'
 import type { ChatMessage } from '../pipeline/types'
 import type { ToolCallRecord, ToolDefinition } from '../pipeline/types'
 import type { ChatDelta } from '../llm/types'
-import { NitStreamFilter, ThinkingStreamFilter } from '../../nit/streamFilter'
-import { executeNit } from '../../nit'
+import { ThinkingStreamFilter } from '../../nit/streamFilter'
 import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('ReActLoop')
@@ -46,10 +37,6 @@ export interface ReActConfig {
   errorThreshold: number
   /** 单轮超时 (ms) */
   turnTimeoutMs: number
-  /** 是否启用 NIT 脚本检测 (默认 true) */
-  enableNit: boolean
-  /** NIT 脚本执行超时 (ms, 默认 30s) */
-  nitTimeoutMs: number
 }
 
 /** 模式对应的默认最大轮次 */
@@ -63,11 +50,8 @@ const MODE_MAX_TURNS: Record<string, number> = {
   scheduler: 1,
 }
 
-/** NIT 默认超时 (ms) */
-const DEFAULT_NIT_TIMEOUT_MS = 30_000
-
 // ─────────────────────────────────────────────
-// SSE 事件 (02_API_RESPONSE_SPEC.md §9)
+// SSE 事件
 // ─────────────────────────────────────────────
 
 /** ReAct 产出的 SSE 事件 (非文本) */
@@ -109,7 +93,7 @@ export interface CancelChecker {
 /**
  * 执行 ReAct 循环
  *
- * @yields 流式文本片段 / SSE 事件 (NIT 块和 Thinking 块已过滤)
+ * @yields 流式文本片段 / SSE 事件 (Thinking 块已过滤)
  */
 export async function* runReActLoop(params: {
   llmService: LlmService
@@ -125,8 +109,6 @@ export async function* runReActLoop(params: {
   const { llmService, modelConfig, messages, source, toolExecutor } = params
   const maxTurns = params.config?.maxTurns ?? MODE_MAX_TURNS[source] ?? 30
   const errorThreshold = params.config?.errorThreshold ?? 3
-  const enableNit = params.config?.enableNit ?? true
-  const nitTimeoutMs = params.config?.nitTimeoutMs ?? DEFAULT_NIT_TIMEOUT_MS
   const sessionId = params.sessionId ?? 'default'
 
   const allToolCalls: ToolCallRecord[] = []
@@ -156,8 +138,7 @@ export async function* runReActLoop(params: {
     }> = []
     let hasToolCalls = false
 
-    // ── 流式过滤器 ──
-    const nitFilter = enableNit ? new NitStreamFilter() : null
+    // ── 流式过滤器 (仅 Thinking 块) ──
     const thinkingFilter = new ThinkingStreamFilter()
 
     // ── 流式 LLM 调用 ──
@@ -182,12 +163,8 @@ export async function* runReActLoop(params: {
       if (content) {
         turnText += content
 
-        // 流式过滤: NIT 块 → 隐藏, Thinking 块 → 隐藏
-        let filtered = content
-        if (nitFilter) {
-          filtered = nitFilter.filter(filtered)
-        }
-        filtered = thinkingFilter.filter(filtered)
+        // 流式过滤: Thinking 块 → 隐藏
+        const filtered = thinkingFilter.filter(content)
         if (filtered) {
           yield filtered
         }
@@ -215,23 +192,18 @@ export async function* runReActLoop(params: {
     }
 
     // ── 流式过滤器刷新 ──
-    let flushed = ''
-    if (nitFilter) flushed += nitFilter.flush()
-    flushed += thinkingFilter.flush()
+    const flushed = thinkingFilter.flush()
     if (flushed) yield flushed
 
-    // ── 检测 NIT v3 脚本 ──
-    const hasNitScripts = nitFilter?.hasScripts() ?? false
-
-    // ── 无工具调用也无 NIT 脚本 → 正常结束 ──
-    if (!hasToolCalls && !hasNitScripts) {
+    // ── 无工具调用 → 正常结束 ──
+    if (!hasToolCalls) {
       if (!turnText.trim() && turn === 0) {
         yield '⚠️ AI 没有返回有效内容。请检查网络连接或 API Key 配置。'
       }
       break
     }
 
-    // ── 需要执行工具/脚本但没有 Executor ──
+    // ── 需要执行工具但没有 Executor ──
     if (!toolExecutor) {
       logger.warn('有工具调用但未配置 ToolExecutor，跳过')
       break
@@ -245,7 +217,7 @@ export async function* runReActLoop(params: {
 
     let shouldTerminate = false
 
-    // ── 执行 FC tool_calls (支持多个并行收集的调用) ──
+    // ── 执行 FC tool_calls ──
     for (const tc of collectedCalls) {
       if (!tc) continue
 
@@ -273,7 +245,7 @@ export async function* runReActLoop(params: {
         data: { state: 'calling', message: `正在调用工具: ${fnName}`, turn: turn + 1 },
       }
 
-      logger.info(`执行工具 (FC): ${fnName}`)
+      logger.info(`执行工具: ${fnName}`)
       const result = await toolExecutor.execute(fnName, fnArgs, source)
 
       allToolCalls.push({
@@ -310,105 +282,6 @@ export async function* runReActLoop(params: {
       if (result.shouldTerminate) {
         shouldTerminate = true
         break
-      }
-    }
-
-    // ── 执行 NIT v3 脚本 (带超时保护) ──
-    if (!shouldTerminate && hasNitScripts) {
-      const scripts = nitFilter!.getCollectedScripts()
-      logger.info(`执行 ${scripts.length} 个 NIT v3 脚本`)
-
-      // 推送状态: NIT 执行中
-      yield {
-        event: 'status',
-        data: { state: 'calling', message: '正在执行 NIT 脚本...', turn: turn + 1 },
-      }
-
-      for (const script of scripts) {
-        // 取消检测
-        if (params.cancelChecker?.isCancelled(sessionId)) {
-          logger.info('NIT 执行阶段被取消')
-          break
-        }
-
-        const startTime = Date.now()
-        try {
-          // ── NIT 超时保护 ──
-          const nitPromise = executeNit(script, async (name, args) => {
-            const execResult = await toolExecutor.execute(name, args, source)
-            return execResult.output
-          })
-
-          const timeoutPromise = new Promise<never>((_, reject) => {
-            setTimeout(
-              () => reject(new Error(`NIT 脚本执行超时 (${nitTimeoutMs}ms)`)),
-              nitTimeoutMs,
-            )
-          })
-
-          const nitResult = await Promise.race([nitPromise, timeoutPromise])
-
-          const durationMs = Date.now() - startTime
-          const outputStr =
-            typeof nitResult.value === 'string'
-              ? nitResult.value
-              : JSON.stringify(nitResult.value ?? null)
-
-          // 记录 NIT 内部的所有工具调用
-          for (const tc of nitResult.toolCalls) {
-            allToolCalls.push({
-              name: tc.name,
-              args: tc.args as Record<string, unknown>,
-              result: String(tc.result),
-              durationMs: 0, // NIT 内部不单独记时
-            })
-          }
-
-          // 将 NIT 执行结果注入上下文
-          messages.push({
-            role: 'tool',
-            content: `[NIT 脚本执行结果 (${durationMs}ms)]\n${outputStr}`,
-            tool_call_id: `nit-${turn}`,
-          })
-
-          // 推送 SSE: tool_result (NIT)
-          yield {
-            event: 'tool_result',
-            data: {
-              name: `nit-script-${turn}`,
-              result: outputStr.slice(0, 2000),
-              isError: false,
-              durationMs,
-              toolCallCount: nitResult.toolCalls.length,
-            },
-          }
-
-          logger.info(
-            `NIT 脚本执行完成 (${durationMs}ms, ${nitResult.toolCalls.length} 次工具调用)`,
-          )
-          consecutiveErrors = 0
-        } catch (err) {
-          consecutiveErrors++
-          const errMsg = err instanceof Error ? err.message : String(err)
-          logger.error(`NIT 脚本执行失败: ${errMsg}`)
-
-          messages.push({
-            role: 'tool',
-            content: `[NIT 脚本执行失败] ${errMsg}`,
-            tool_call_id: `nit-${turn}`,
-          })
-
-          // 推送 SSE: tool_result (NIT 失败)
-          yield {
-            event: 'tool_result',
-            data: {
-              name: `nit-script-${turn}`,
-              result: errMsg,
-              isError: true,
-              durationMs: Date.now() - startTime,
-            },
-          }
-        }
       }
     }
 

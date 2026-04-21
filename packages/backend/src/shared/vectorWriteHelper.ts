@@ -1,7 +1,7 @@
 /**
  * 向量写入辅助器
  *
- * 消除 v1 中 10+ 处重复的"写入-失败-补偿"模式 (10_MEMORY_SYSTEM.md §4.1)。
+ * 统一向量写入的"写入-失败-补偿"模式。
  * 统一 embedding 生成 → TriviumDB 写入 → 失败入补偿队列的流程。
  *
  * @module packages/backend/src/shared/vectorWriteHelper

@@ -6,7 +6,6 @@
  * - 左侧 Agent 列表侧边栏
  * - 右侧 ChatContainer 主聊天区
  *
- * 对应 v1 ChatModeView.vue (367 行)
  */
 import { ref, computed, onMounted } from 'vue'
 import { ChatContainer } from '../components/chat'
@@ -24,9 +23,7 @@ const isLoading = ref(false)
 const filteredAgents = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
   if (!q) return agentStore.agents
-  return agentStore.agents.filter((a) =>
-    a.name?.toLowerCase().includes(q),
-  )
+  return agentStore.agents.filter((a) => a.name?.toLowerCase().includes(q))
 })
 
 /** 当前活跃的 Agent */
@@ -72,9 +69,7 @@ onMounted(() => {
       <!-- Agent 列表 -->
       <div class="sidebar-list">
         <div class="sidebar-list-header">
-          <span class="sidebar-list-label">
-            AGENTS <span class="sidebar-dot" />
-          </span>
+          <span class="sidebar-list-label"> AGENTS <span class="sidebar-dot" /> </span>
           <PTooltip content="刷新列表" placement="top">
             <button class="sidebar-refresh-btn" @click="loadAgents">
               <PixelIcon name="refresh" size="xs" :animation="isLoading ? 'spin' : ''" />
@@ -100,13 +95,23 @@ onMounted(() => {
           <div v-if="activeAgent?.id === agent.id" class="sidebar-agent-indicator" />
 
           <!-- 头像 -->
-          <div :class="['sidebar-agent-avatar', { 'sidebar-agent-avatar-active': activeAgent?.id === agent.id }]">
+          <div
+            :class="[
+              'sidebar-agent-avatar',
+              { 'sidebar-agent-avatar-active': activeAgent?.id === agent.id },
+            ]"
+          >
             {{ agent.name?.[0]?.toUpperCase() ?? '?' }}
           </div>
 
           <!-- 信息 -->
           <div class="sidebar-agent-info">
-            <span :class="['sidebar-agent-name', { 'sidebar-agent-name-active': activeAgent?.id === agent.id }]">
+            <span
+              :class="[
+                'sidebar-agent-name',
+                { 'sidebar-agent-name-active': activeAgent?.id === agent.id },
+              ]"
+            >
               {{ agent.name }}
             </span>
             <span class="sidebar-agent-status">
@@ -197,7 +202,7 @@ onMounted(() => {
   transition: border-color 0.2s;
 }
 .sidebar-search-input:focus {
-  border-color: var(--color-blue-400);
+  border-color: var(--color-sky-hover);
 }
 .sidebar-search-input::placeholder {
   color: var(--color-text-muted);
@@ -227,7 +232,7 @@ onMounted(() => {
 .sidebar-dot {
   width: 4px;
   height: 4px;
-  background: var(--color-blue-400);
+  background: var(--color-sky-hover);
   animation: pulse 2s infinite;
 }
 .sidebar-refresh-btn {
@@ -239,8 +244,8 @@ onMounted(() => {
   transition: all 0.15s;
 }
 .sidebar-refresh-btn:hover {
-  border-color: var(--color-blue-400);
-  color: var(--color-blue-500);
+  border-color: var(--color-sky-hover);
+  color: var(--color-sky-500);
 }
 
 /* Agent 卡片 */
@@ -269,7 +274,7 @@ onMounted(() => {
   top: 8px;
   bottom: 8px;
   width: 3px;
-  background: var(--color-blue-500);
+  background: var(--color-sky-500);
 }
 
 .sidebar-agent-avatar {
@@ -281,13 +286,13 @@ onMounted(() => {
   color: white;
   font-weight: 700;
   font-size: 14px;
-  background: var(--color-blue-400);
+  background: var(--color-sky-hover);
   border: 2px solid var(--color-border);
   transition: all 0.2s;
 }
 .sidebar-agent-avatar-active {
-  background: var(--color-blue-500);
-  border-color: var(--color-blue-600);
+  background: var(--color-sky-500);
+  border-color: var(--color-sky-shadow);
 }
 
 .sidebar-agent-info {
@@ -304,7 +309,7 @@ onMounted(() => {
   white-space: nowrap;
 }
 .sidebar-agent-name-active {
-  color: var(--color-blue-500);
+  color: var(--color-sky-500);
 }
 .sidebar-agent-status {
   font-size: 10px;
@@ -339,7 +344,7 @@ onMounted(() => {
 .chat-header-icon {
   padding: 6px;
   background: rgba(56, 189, 248, 0.1);
-  color: var(--color-blue-500);
+  color: var(--color-sky-500);
 }
 .chat-header-name {
   font-size: 18px;
@@ -351,9 +356,9 @@ onMounted(() => {
   padding: 2px 8px;
   font-size: 10px;
   font-weight: 700;
-  border: 1px solid var(--color-blue-200);
+  border: 1px solid var(--color-sky-light);
   background: rgba(56, 189, 248, 0.05);
-  color: var(--color-blue-500);
+  color: var(--color-sky-500);
 }
 
 .chat-main-body {
@@ -375,7 +380,7 @@ onMounted(() => {
   padding: 24px;
   background: rgba(56, 189, 248, 0.05);
   border: 2px solid var(--color-border);
-  color: var(--color-blue-200);
+  color: var(--color-sky-light);
 }
 .chat-empty-text {
   text-align: center;
@@ -391,8 +396,13 @@ onMounted(() => {
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 /* 滚动条 */
@@ -403,6 +413,6 @@ onMounted(() => {
   background: transparent;
 }
 .sidebar-list::-webkit-scrollbar-thumb {
-  background: var(--color-blue-200);
+  background: var(--color-sky-light);
 }
 </style>

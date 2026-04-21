@@ -19,7 +19,8 @@ const DEFAULT_TIMEOUT_MS = 30_000
 export const terminalExecutorTool: BuiltinTool = {
   definition: {
     name: 'terminal_execute',
-    description: '在系统终端中执行命令并获取输出。支持任意 shell 命令。注意：请谨慎执行有副作用的命令。',
+    description:
+      '在系统终端中执行命令并获取输出。支持任意 shell 命令。注意：请谨慎执行有副作用的命令。',
     parameters: {
       type: 'object',
       properties: {

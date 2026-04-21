@@ -1,0 +1,79 @@
+{
+  "asset_id": "com.perocore.model.rossi",
+  "type": "model_3d",
+  "source": "official",
+  "display_name": "Rossi",
+  "version": "1.0.0",
+  "description": "Rossi 虚拟形象模型",
+  "author": "PeroCore",
+  "metadata": {
+    "name": "Rossi",
+    "version": "1.0.0"
+  },
+  "featureButtons": [
+    { "id": "dress", "label": "连衣裙", "group": "服装", "defaultValue": true },
+    { "id": "armour", "label": "盔甲", "group": "服装", "defaultValue": true },
+    { "id": "hat", "label": "帽子", "group": "配饰", "defaultValue": true },
+    { "id": "underwear", "label": "内衣", "group": "服装", "defaultValue": true },
+    { "id": "censored", "label": "和谐方块", "group": "其他", "defaultValue": false }
+  ],
+  "parts": [
+    { "id": "dress", "meshes": ["Dress", "BreastDress"], "defaultVisible": true },
+    { "id": "armour", "meshes": ["Armour"], "defaultVisible": true },
+    { "id": "hat", "meshes": ["Hat"], "defaultVisible": true },
+    { "id": "underwear", "meshes": ["Underwear", "underwear"], "defaultVisible": true },
+    { "id": "censored", "meshes": ["Censored"], "defaultVisible": false },
+    { "id": "embarrassed", "meshes": ["embarrassed"], "defaultVisible": false }
+  ],
+  "retargetingMap": {
+    "mapping": {
+      "Root": "Root",
+      "Body": "UpBody",
+      "Head": "Head",
+      "LeftArm": "LeftArm",
+      "RightArm": "RightArm",
+      "LeftLeg": "LeftLeg",
+      "RightLeg": "RightLeg",
+      "Mouth": "Mouth",
+      "EyeBrow": "EyeBrow",
+      "RightEyelidBase": "RightEyelidBase",
+      "LeftEyelidBase": "LeftEyelidBase",
+      "weixiao": "weixiao",
+      "AllBody": "AllBody",
+      "UpperBody": "UpperBody",
+      "DownBody": "DownBody"
+    },
+    "restPoseCorrection": {}
+  },
+  "resources": {
+    "model": "assets/3d/Rossi/models/main.json",
+    "texture": "assets/3d/Rossi/textures/texture.png",
+    "animations": [
+      "assets/3d/Rossi/animations/main.animation.json",
+      "assets/3d/Rossi/animations/tac.animation.json",
+      "assets/3d/Rossi/animations/carryon.animation.json",
+      "assets/3d/Rossi/animations/extra.animation.json",
+      "assets/3d/Rossi/animations/tlm.animation.json"
+    ]
+  },
+  "boneFilterPatterns": [
+    "GUI",
+    "Hud",
+    "Panel",
+    "Button",
+    "Text",
+    "Start",
+    "End",
+    "background",
+    "molang"
+  ],
+  "shyParts": [
+    {
+      "meshPattern": "embarrassed",
+      "zOffset": -1.2,
+      "zThreshold": -3.0
+    }
+  ],
+  "shyTriggerParts": ["dress", "underwear"],
+  "animation_controllers": "assets/3d/Rossi/controller/controller.json"
+}

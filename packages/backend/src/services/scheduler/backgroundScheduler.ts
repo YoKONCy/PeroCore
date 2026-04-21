@@ -7,8 +7,7 @@
  * 3. Reflection 周期性维护 (6h 间隔)
  * 4. VectorSync 补偿队列消费
  *
- * 替代 v1 分散的 asyncio.create_task + threading.Timer。
- * v2 统一为一个调度器管理所有后台任务。
+ * 统一调度器管理所有后台任务。
  *
  * @module packages/backend/src/services/scheduler/backgroundScheduler
  */

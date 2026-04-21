@@ -136,10 +136,16 @@ const emit = defineEmits<{
   overflow-y: auto;
   padding: 16px;
 }
-.ap-body::-webkit-scrollbar { width: 4px; }
-.ap-body::-webkit-scrollbar-thumb { background: var(--color-blue-200); }
+.ap-body::-webkit-scrollbar {
+  width: 4px;
+}
+.ap-body::-webkit-scrollbar-thumb {
+  background: var(--color-sky-light);
+}
 
-.ap-section { margin-bottom: 24px; }
+.ap-section {
+  margin-bottom: 24px;
+}
 .ap-section-header {
   display: flex;
   align-items: center;
@@ -157,10 +163,18 @@ const emit = defineEmits<{
   font-weight: 700;
   color: white;
 }
-.ap-badge-local { background: var(--color-green-500); }
-.ap-badge-remote { background: var(--color-blue-500); }
+.ap-badge-local {
+  background: var(--color-emerald-face);
+}
+.ap-badge-remote {
+  background: var(--color-sky-500);
+}
 
-.ap-agents { display: flex; flex-direction: column; gap: 8px; }
+.ap-agents {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 
 .ap-agent-card {
   display: flex;
@@ -171,7 +185,10 @@ const emit = defineEmits<{
   background: var(--color-bg-secondary);
   transition: all 0.2s;
 }
-.ap-agent-card:hover { transform: translateY(-1px); box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+.ap-agent-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
 
 .ap-avatar {
   width: 40px;
@@ -179,7 +196,7 @@ const emit = defineEmits<{
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--color-pink-500);
+  background: var(--color-pink-face);
   color: white;
   font-weight: 800;
   font-size: 16px;
@@ -200,7 +217,10 @@ const emit = defineEmits<{
   transition: opacity 0.2s;
 }
 
-.ap-agent-info { flex: 1; min-width: 0; }
+.ap-agent-info {
+  flex: 1;
+  min-width: 0;
+}
 .ap-agent-name {
   display: block;
   font-size: 12px;
@@ -213,13 +233,13 @@ const emit = defineEmits<{
   gap: 4px;
   font-size: 9px;
   font-weight: 700;
-  color: var(--color-green-500);
+  color: var(--color-emerald-face);
   margin-top: 2px;
 }
 .ap-online-dot {
   width: 5px;
   height: 5px;
-  background: var(--color-green-500);
+  background: var(--color-emerald-face);
   animation: pulse 2s infinite;
 }
 
@@ -234,7 +254,9 @@ const emit = defineEmits<{
 .ap-agent-row:hover {
   background: var(--color-bg-secondary);
 }
-.ap-agent-row:hover .ap-avatar-sm { opacity: 1; }
+.ap-agent-row:hover .ap-avatar-sm {
+  opacity: 1;
+}
 .ap-agent-name-sm {
   display: block;
   font-size: 11px;
@@ -280,7 +302,12 @@ const emit = defineEmits<{
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 </style>

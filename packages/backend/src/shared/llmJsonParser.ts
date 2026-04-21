@@ -1,7 +1,7 @@
 /**
  * LLM JSON 鲁棒解析器
  *
- * 消除 v1 中 5+ 处重复的 JSON 解析逻辑 (10_MEMORY_SYSTEM.md §4.2)。
+ * 统一 LLM 返回的 JSON 解析逻辑。
  * 支持：
  * - 直接 JSON
  * - ```json ... ``` 代码块
@@ -71,7 +71,7 @@ export function parseLlmJson<T = unknown>(raw: string): T | null {
   try {
     const fixed = candidate
       .replace(/,\s*([\]}])/g, '$1') // 移除尾随逗号
-      .replace(/(?<=[\[{,]\s*)'([^']*)'(?=\s*[:,\]}])/g, '"$1"') // 简单单引号 → 双引号
+      .replace(/(?<=[{[,]\s*)'([^']*)'(?=\s*[:,\]}])/g, '"$1"') // 简单单引号 → 双引号
     return JSON.parse(fixed) as T
   } catch {
     /* noop */

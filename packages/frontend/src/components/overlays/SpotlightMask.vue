@@ -80,7 +80,7 @@ defineExpose({ rect, updateRect })
       :width="rect.width + padding * 2 + 4"
       :height="rect.height + padding * 2 + 4"
       fill="none"
-      stroke="var(--color-blue-500)"
+      stroke="var(--color-sky-500)"
       stroke-width="2"
       stroke-dasharray="6 4"
     />

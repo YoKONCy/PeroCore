@@ -1,7 +1,7 @@
 /**
  * Extension Manager — 统一扩展管理器
  *
- * PeroCore 扩展系统的大脑 (09_EXTENSION_SYSTEM.md §8)。
+ * PeroCore 扩展系统的大脑。
  * 统一管理 Tool / Hook / Service 三种扩展类型。
  *
  * 职责：
@@ -143,7 +143,9 @@ export class ExtensionManager {
   }
 
   /** 注册 Service 反向通知处理器 */
-  onServiceNotification(handler: (serviceId: string, method: string, params: unknown) => void): void {
+  onServiceNotification(
+    handler: (serviceId: string, method: string, params: unknown) => void,
+  ): void {
     this.serviceNotificationHandler = handler
   }
 
@@ -224,7 +226,8 @@ export class ExtensionManager {
       name: record.manifest.name ?? record.manifest.id,
       type: record.manifest.type,
       version: record.manifest.version ?? '0.0.0',
-      status: record.status === 'loaded' ? 'loaded' : record.status === 'error' ? 'error' : 'disabled',
+      status:
+        record.status === 'loaded' ? 'loaded' : record.status === 'error' ? 'error' : 'disabled',
     }))
   }
 
@@ -273,8 +276,23 @@ export class ExtensionManager {
   /** 注册 Tool */
   private async registerTool(manifest: ExtensionManifest, tool: ToolExtension): Promise<void> {
     const name = tool.definition?.name ?? manifest.toolDefinition?.name ?? manifest.id
-    await tool.onLoad?.()
-    this.tools.set(name, tool)
+
+    // ESM 模块对象可能是 frozen 的，不能直接赋值属性
+    // 若 definition 不存在，用包装对象补全
+    let registeredTool = tool
+    if (!tool.definition) {
+      registeredTool = {
+        ...tool,
+        definition: {
+          name,
+          description: manifest.description ?? manifest.name ?? name,
+          parameters: manifest.toolDefinition?.parameters ?? { type: 'object' as const, properties: {} },
+        },
+      }
+    }
+
+    await registeredTool.onLoad?.()
+    this.tools.set(name, registeredTool)
     logger.debug(`Tool 已注册: ${name}`)
   }
 

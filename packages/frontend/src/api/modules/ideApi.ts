@@ -26,8 +26,7 @@ export const ideApi = {
   },
 
   /** 读取文件内容 */
-  readFile: (path: string) =>
-    apiClient.post<FileContent>('/ide/file/read', { path }),
+  readFile: (path: string) => apiClient.post<FileContent>('/ide/file/read', { path }),
 
   /** 写入文件 */
   writeFile: (path: string, content: string) =>
@@ -42,6 +41,5 @@ export const ideApi = {
     apiClient.post<void>('/ide/file/rename', { path, new_name: newName }),
 
   /** 删除 */
-  deleteFile: (path: string) =>
-    apiClient.post<void>('/ide/file/delete', { path }),
+  deleteFile: (path: string) => apiClient.post<void>('/ide/file/delete', { path }),
 }

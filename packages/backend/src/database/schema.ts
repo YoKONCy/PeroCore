@@ -1,8 +1,8 @@
 /**
  * Drizzle ORM Schema 定义
  *
- * 从 PeroCore v1 models.py 迁移，表名遵循 snake_case 复数 (01_NAMING_CONVENTIONS.md §4)。
- * 列名 snake_case (01_NAMING_CONVENTIONS.md §4)。
+ * 数据库 Schema 定义，表名遵循 snake_case 复数。
+ * 列名 snake_case。
  *
  * @module packages/backend/src/database/schema
  */
@@ -44,10 +44,10 @@ export const memoryNodes = sqliteTable(
     type: text('type').default('event'),
     agentId: text('agent_id').notNull().default('pero'),
 
-    // 向量 (JSON 字符串, 兼容 v1 迁移)
+    // 向量 (JSON 字符串)
     embeddingJson: text('embedding_json').default('[]'),
 
-    // PEDSA v2 检索反馈 (§14.4)
+    // PEDSA 检索反馈
     retrievalQuality: real('retrieval_quality').default(0.0),
   },
   (table) => [
@@ -115,26 +115,7 @@ export const conversationLogs = sqliteTable(
 // Agent / 宠物状态
 // ─────────────────────────────────────────────
 
-/** Agent 角色配置表 */
-export const agentProfiles = sqliteTable(
-  'agent_profiles',
-  {
-    id: integer('id').primaryKey({ autoIncrement: true }),
-    role: text('role').notNull().default('assistant'),
-    name: text('name').notNull(),
-    avatar: text('avatar'),
-    description: text('description'),
-    systemPrompt: text('system_prompt'),
-    voiceConfigId: integer('voice_config_id'),
-    isActive: integer('is_active', { mode: 'boolean' }).default(false),
-    createdAt: text('created_at').default(sql`(datetime('now', 'localtime'))`),
-    updatedAt: text('updated_at').default(sql`(datetime('now', 'localtime'))`),
-  },
-  (table) => [
-    uniqueIndex('uq_agent_profiles_name').on(table.name),
-    index('idx_agent_profiles_role').on(table.role),
-  ],
-)
+// 无需 DB 表。
 
 /** 宠物状态表 */
 export const petStates = sqliteTable(
@@ -181,24 +162,7 @@ export const aiModelConfigs = sqliteTable(
   (table) => [uniqueIndex('uq_ai_model_configs_name').on(table.name)],
 )
 
-/** 语音配置表 */
-export const voiceConfigs = sqliteTable(
-  'voice_configs',
-  {
-    id: integer('id').primaryKey({ autoIncrement: true }),
-    type: text('type').notNull(),
-    name: text('name').notNull(),
-    provider: text('provider').notNull(),
-    apiKey: text('api_key'),
-    apiBase: text('api_base'),
-    model: text('model'),
-    configJson: text('config_json').default('{}'),
-    isActive: integer('is_active', { mode: 'boolean' }).default(false),
-    createdAt: text('created_at').default(sql`(datetime('now', 'localtime'))`),
-    updatedAt: text('updated_at').default(sql`(datetime('now', 'localtime'))`),
-  },
-  (table) => [uniqueIndex('uq_voice_configs_name').on(table.name)],
-)
+// 无需独立表。
 
 // ─────────────────────────────────────────────
 // 群聊 / 据点
@@ -245,6 +209,100 @@ export const groupChatMessages = sqliteTable(
   (table) => [
     index('idx_group_chat_messages_room_id').on(table.roomId),
     index('idx_group_chat_messages_sender_id').on(table.senderId),
+  ],
+)
+
+// ─────────────────────────────────────────────
+// 据点系统
+// ─────────────────────────────────────────────
+
+/** 据点设施表 */
+export const strongholdFacilities = sqliteTable('stronghold_facilities', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),
+  description: text('description'),
+  icon: text('icon'),
+  createdAt: text('created_at').default(sql`(datetime('now', 'localtime'))`),
+})
+
+/** 据点房间表 (关联设施 + 群聊房间) */
+export const strongholdRooms = sqliteTable(
+  'stronghold_rooms',
+  {
+    /** 与 groupChatRooms.id 相同，实现 1:1 关联 */
+    id: text('id').primaryKey(),
+    facilityId: integer('facility_id').notNull(),
+    name: text('name').notNull(),
+    description: text('description'),
+    /** 允许进入的 Agent 列表 (JSON 数组, 空=全部允许) */
+    allowedAgentsJson: text('allowed_agents_json').default('[]'),
+    /** 环境变量 (JSON 对象: 光照/温度/音乐等) */
+    environmentJson: text('environment_json').default('{}'),
+    createdAt: text('created_at').default(sql`(datetime('now', 'localtime'))`),
+  },
+  (table) => [index('idx_stronghold_rooms_facility_id').on(table.facilityId)],
+)
+
+/** Agent 位置表 (当前在哪个房间) */
+export const agentLocations = sqliteTable('agent_locations', {
+  agentId: text('agent_id').primaryKey(),
+  roomId: text('room_id').notNull(),
+  updatedAt: text('updated_at').default(sql`(datetime('now', 'localtime'))`),
+})
+
+/** 管家配置表 */
+export const butlerConfigs = sqliteTable('butler_configs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull().default('Butler'),
+  persona: text('persona'),
+  enabled: integer('enabled', { mode: 'boolean' }).default(true),
+  updatedAt: text('updated_at').default(sql`(datetime('now', 'localtime'))`),
+})
+
+// ─────────────────────────────────────────────
+// 社交消息
+// ─────────────────────────────────────────────
+
+/**
+ * 社交消息表
+ *
+ * 存储来自外部平台 (QQ/Discord/...) 的原始消息，
+ * 与 conversationLogs (Agent 对话对) 互补:
+ * - socialMessages: 记录平台上 **所有人** 说的话 (含非 Agent 回复)
+ * - conversationLogs: 只记录 Agent 参与的对话对 (source='social')
+ */
+export const socialMessages = sqliteTable(
+  'social_messages',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    /** 平台消息 ID */
+    msgId: text('msg_id').notNull(),
+    /** 平台名称 (qq / discord / ...) */
+    platform: text('platform').notNull().default('qq'),
+    /** 会话 ID (群号 / 用户 QQ 号) */
+    channelId: text('channel_id').notNull(),
+    /** 会话类型 */
+    channelType: text('channel_type').notNull(),
+    /** 发送者 ID */
+    senderId: text('sender_id').notNull(),
+    /** 发送者显示名 */
+    senderName: text('sender_name').default(''),
+    /** 消息正文 (已清洗) */
+    content: text('content').notNull(),
+    /** 关联的 Agent ID */
+    agentId: text('agent_id').notNull().default('pero'),
+    /** 原始平台事件 JSON (调试用) */
+    rawEventJson: text('raw_event_json').default('{}'),
+    /** 消息时间 */
+    timestamp: text('timestamp').default(sql`(datetime('now', 'localtime'))`),
+    /** 是否已被社交 Scorer 总结 (v1: QQMessage.is_summarized) */
+    isSummarized: integer('is_summarized', { mode: 'boolean' }).default(false),
+  },
+  (table) => [
+    index('idx_social_messages_channel').on(table.channelId, table.channelType),
+    index('idx_social_messages_agent').on(table.agentId),
+    index('idx_social_messages_timestamp').on(table.timestamp),
+    index('idx_social_messages_unsummarized').on(table.isSummarized, table.agentId),
   ],
 )
 

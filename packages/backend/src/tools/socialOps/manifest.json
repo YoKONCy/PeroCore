@@ -1,0 +1,21 @@
+{
+  "id": "social-ops",
+  "name": "社交平台操作",
+  "version": "1.0.0",
+  "author": "PeroCore Team",
+  "description": "跨平台社交操作工具。通过 SocialMessagingProvider 适配不同平台 (QQ/Discord/Telegram)。仅在社交模式下可用。",
+  "type": "tool",
+  "entry": "index.ts",
+  "category": "core",
+  "platforms": ["windows", "darwin", "linux"],
+  "tools": [
+    { "name": "social_send_message", "description": "发送消息到社交平台的指定会话" },
+    { "name": "social_get_contacts", "description": "获取联系人/好友列表" },
+    { "name": "social_get_groups", "description": "获取群组列表" },
+    { "name": "social_get_contact_info", "description": "查询指定用户的详细信息" },
+    { "name": "social_get_group_info", "description": "查询指定群组的详细信息" },
+    { "name": "social_get_group_members", "description": "查询群组成员列表" },
+    { "name": "social_handle_request", "description": "处理好友请求 (接受或拒绝)" },
+    { "name": "social_notify_owner", "description": "向主人发送重要社交事件通知" }
+  ]
+}

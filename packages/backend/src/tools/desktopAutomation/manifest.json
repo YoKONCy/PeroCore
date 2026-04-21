@@ -1,0 +1,48 @@
+{
+  "id": "desktop-automation",
+  "name": "桌面自动化",
+  "version": "1.0.0",
+  "author": "PeroCore Team",
+  "description": "桌面 GUI 自动化操作。通过 DesktopAutomationProvider 适配不同平台。需要桌面环境。",
+  "type": "tool",
+  "entry": "index.ts",
+  "category": "core",
+  "platforms": ["windows", "darwin"],
+
+  "tools": [
+    {
+      "name": "automation_execute",
+      "description": "执行桌面 GUI 自动化操作: 鼠标点击、拖拽、文字输入、快捷键、系统通知。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "自动化动作类型",
+            "enum": [
+              "click",
+              "double_click",
+              "right_click",
+              "drag",
+              "type",
+              "hotkey",
+              "notification"
+            ]
+          },
+          "x": { "type": "number", "description": "鼠标 X 坐标" },
+          "y": { "type": "number", "description": "鼠标 Y 坐标" },
+          "x2": { "type": "number", "description": "拖拽目标 X 坐标" },
+          "y2": { "type": "number", "description": "拖拽目标 Y 坐标" },
+          "text": { "type": "string", "description": "文本/快捷键/通知标题" },
+          "message": { "type": "string", "description": "通知正文" }
+        },
+        "required": ["action"]
+      }
+    },
+    {
+      "name": "get_mouse_position",
+      "description": "获取当前鼠标的屏幕坐标。",
+      "parameters": { "type": "object", "properties": {} }
+    }
+  ]
+}

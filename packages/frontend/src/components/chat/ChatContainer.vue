@@ -3,12 +3,12 @@
  * ChatContainer — 聊天主容器
  *
  * 组装消息列表 + 输入框 + 指令遮罩，接管滚动和流式逻辑。
- * 从 useSessionStore 获取消息，通过 chatApi 发送。
+ * F3: 已通过 useChat composable 接入 SSE 流式对话管道。
  *
  * @props agentId - 目标 Agent ID
  * @props agentName - Agent 名称
  */
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import MessageBubble from './MessageBubble.vue'
 import InputBar from './InputBar.vue'
 import CommandOverlay from './CommandOverlay.vue'
@@ -18,7 +18,10 @@ import type { ChatMessage as BubbleMessage } from './MessageBubble.vue'
 import type { ActiveCommand } from './CommandOverlay.vue'
 import type { PendingConfirmation } from './ConfirmOverlay.vue'
 import { useChatScroll, useMessageVisibility } from '../../composables'
+import { useChat } from '../../composables/chat/useChat'
+import { useStreamMarkdown } from '../../composables/chat/useStreamMarkdown'
 import { useSessionStore } from '../../stores'
+import { Marked } from 'marked'
 
 export interface Props {
   /** 目标 Agent ID */
@@ -32,7 +35,59 @@ withDefaults(defineProps<Props>(), {
 })
 
 const containerRef = ref<HTMLElement | null>(null)
-const store = useSessionStore()
+
+// ── 对话管道 (F3: 真实 SSE 流) ──
+const {
+  messages: chatMessages,
+  isGenerating,
+  sendMessage: chatSend,
+  stopGeneration,
+} = useChat({ source: 'desktop' })
+
+const sessionStore = useSessionStore()
+
+// ── Markdown 渲染器 ──
+const marked = new Marked({ breaks: true, gfm: true })
+const renderMd = (md: string): string => marked.parse(md) as string
+
+// ── 流式 Markdown 增量渲染 ──
+const streamMd = useStreamMarkdown(renderMd)
+
+// 监听流式消息变化，驱动 useStreamMarkdown
+watch(
+  () => {
+    if (!isGenerating.value) return null
+    const list = chatMessages.value
+    if (list.length === 0) return null
+    const last = list[list.length - 1]!
+    return last.isStreaming ? last.content : null
+  },
+  (content) => {
+    if (content !== null) {
+      streamMd.onChunk(content)
+    }
+  },
+)
+
+// 生成结束时 finish
+watch(isGenerating, (generating, wasGenerating) => {
+  if (!generating && wasGenerating) {
+    streamMd.finish()
+  }
+})
+
+// 新消息开始时 reset
+watch(
+  () => {
+    const list = chatMessages.value
+    return list.length > 0 && list[list.length - 1]?.isStreaming ? list[list.length - 1]!.id : null
+  },
+  (newId, oldId) => {
+    if (newId && newId !== oldId) {
+      streamMd.reset()
+    }
+  },
+)
 
 // ── 指令遮罩状态 ──
 
@@ -41,74 +96,65 @@ const pendingConfirmation = ref<PendingConfirmation | null>(null)
 
 // ── 消息列表 ──
 
-/** 映射 store → MessageBubble 格式 */
+/** 映射 store → MessageBubble 格式（含 renderedHtml + toolCalls） */
 const messages = computed<BubbleMessage[]>(() => {
-  return store.messages.map((m) => ({
-    id: m.id,
-    role: m.role as 'user' | 'assistant',
-    content: m.content ?? '',
-    timestamp: m.timestamp ? new Date(m.timestamp).getTime() : undefined,
-    senderId: m.senderId,
-    images: m.images,
-    // TODO: 接入 parseMessage 段落解析
-    segments: undefined,
-  }))
+  return chatMessages.value.map((m, idx) => {
+    const isLast = idx === chatMessages.value.length - 1
+    const isStreamingMsg = isGenerating.value && isLast && m.role === 'assistant'
+
+    // 流式消息用 useStreamMarkdown 的输出，历史消息用全量渲染
+    let renderedHtml: string | undefined
+    if (m.role === 'assistant' && m.content) {
+      if (isStreamingMsg) {
+        renderedHtml = streamMd.stableHtml.value + streamMd.tailHtml.value
+      } else {
+        renderedHtml = renderMd(m.content)
+      }
+    }
+
+    return {
+      id: m.id,
+      role: m.role as 'user' | 'assistant',
+      content: m.content ?? '',
+      timestamp: m.timestamp ? new Date(m.timestamp).getTime() : undefined,
+      senderId: m.senderId,
+      images: m.images,
+      segments: undefined,
+      renderedHtml,
+      toolCalls: m.toolCalls,
+    }
+  })
 })
 
 const messageCount = computed(() => messages.value.length)
 
-// ── 滚动管理 (12_FRONTEND_PERFORMANCE §3) ──
+// ── 滚动管理 ──
 
 const { showScrollDown, scrollToBottom } = useChatScroll(containerRef, messageCount)
 
-// ── IntersectionObserver 不可见消息暂停 (§3.3) ──
+// ── IntersectionObserver 不可见消息暂停 ──
 
 const { observe, unobserve } = useMessageVisibility(containerRef)
 
-/** 消息元素挂载时注册观察 */
 function onBubbleMounted(el: HTMLElement) {
   observe(el)
 }
 
-/** 消息元素卸载时取消观察 */
 function onBubbleUnmounted(el: HTMLElement) {
   unobserve(el)
 }
 
 // ── 发送消息 ──
 
-async function handleSend(text: string, images: string[]) {
-  store.addMessage({
-    id: crypto.randomUUID(),
-    role: 'user',
-    content: text,
-    timestamp: new Date().toISOString(),
-    images: images.length > 0 ? images : undefined,
-  })
-
-  // 发送后滚动到底部
+async function handleSend(text: string, _images: string[]) {
+  await chatSend(text)
   await nextTick()
   scrollToBottom()
-
-  // TODO: 接入 chatApi.sendMessage + SSE 流式 (useStreamMarkdown)
-  store.generationState = 'generating'
-
-  // 临时模拟
-  setTimeout(() => {
-    store.addMessage({
-      id: crypto.randomUUID(),
-      role: 'assistant',
-      content: `[模拟回复] 收到消息: "${text}"`,
-      timestamp: new Date().toISOString(),
-    })
-    store.generationState = 'idle'
-  }, 1000)
 }
 
 /** 停止生成 */
-function handleStop() {
-  // TODO: chatApi.stopGeneration
-  store.generationState = 'idle'
+async function handleStop() {
+  await stopGeneration()
 }
 
 /** 跳过指令等待 */
@@ -118,28 +164,45 @@ function handleSkipCommand() {
 
 /** 响应指令确认 */
 function handleConfirmResponse(approved: boolean) {
-  // TODO: chatApi.respondConfirmation(approved)
   pendingConfirmation.value = null
   if (approved) {
-    // eslint-disable-next-line no-console
     console.log('[ChatContainer] 用户批准指令执行')
   }
 }
 
-/** 编辑消息 */
+// ── 消息编辑/删除 ──
+
+/** 编辑状态 */
+const editingMessage = ref<BubbleMessage | null>(null)
+const editText = ref('')
+
+/** 进入编辑模式 */
 function handleEdit(msg: BubbleMessage) {
-  // TODO: 实现消息编辑
-  void msg
+  editingMessage.value = msg
+  editText.value = msg.content
+}
+
+/** 保存编辑 */
+function saveEdit() {
+  if (!editingMessage.value) return
+  sessionStore.editMessage(editingMessage.value.id, editText.value)
+  editingMessage.value = null
+  editText.value = ''
+}
+
+/** 取消编辑 */
+function cancelEdit() {
+  editingMessage.value = null
+  editText.value = ''
 }
 
 /** 删除消息 */
 function handleDelete(id: string) {
-  // TODO: 实现消息删除
-  void id
+  // TODO: 后端补充消息删除 API 后对接
+  sessionStore.deleteMessage(id)
 }
 
 onMounted(() => {
-  // TODO: 接入 useHistoryRenderer 分批加载历史消息
   scrollToBottom(false)
 })
 
@@ -168,7 +231,7 @@ onUnmounted(() => {
         :message="msg"
         :agent-name="agentName"
         :is-streaming="
-          store.isGenerating && msg === messages[messages.length - 1] && msg.role === 'assistant'
+          isGenerating && msg === messages[messages.length - 1] && msg.role === 'assistant'
         "
         @edit="handleEdit"
         @delete="handleDelete"
@@ -186,8 +249,25 @@ onUnmounted(() => {
 
     <!-- 输入框 -->
     <div class="chat-input-area">
-      <InputBar :is-sending="store.isGenerating" @send="handleSend" @stop="handleStop" />
+      <InputBar :is-sending="isGenerating" @send="handleSend" @stop="handleStop" />
     </div>
+
+    <!-- 编辑对话框 -->
+    <Teleport to="body">
+      <div v-if="editingMessage" class="chat-edit-overlay" @click.self="cancelEdit">
+        <div class="chat-edit-dialog">
+          <div class="chat-edit-header">
+            <PixelIcon name="edit" size="sm" />
+            <span>编辑消息</span>
+          </div>
+          <textarea v-model="editText" class="chat-edit-textarea" rows="5" />
+          <div class="chat-edit-actions">
+            <button class="chat-edit-btn chat-edit-cancel" @click="cancelEdit">取消</button>
+            <button class="chat-edit-btn chat-edit-save" @click="saveEdit">保存</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -217,7 +297,7 @@ onUnmounted(() => {
   background: transparent;
 }
 .chat-messages::-webkit-scrollbar-thumb {
-  background: var(--color-blue-200);
+  background: var(--color-sky-light);
 }
 
 .chat-input-area {
@@ -245,8 +325,8 @@ onUnmounted(() => {
   z-index: 10;
 }
 .chat-scroll-down:hover {
-  border-color: var(--color-blue-400);
-  color: var(--color-blue-500);
+  border-color: var(--color-sky-hover);
+  color: var(--color-sky-500);
   transform: translateX(-50%) translateY(-2px);
 }
 
@@ -260,5 +340,129 @@ onUnmounted(() => {
 .scroll-down-leave-to {
   opacity: 0;
   transform: translateX(-50%) translateY(12px);
+}
+
+/* ── 不可见消息暂停 CSS ── */
+:deep(.msg-paused) {
+  content-visibility: auto;
+  /* contain-intrinsic-size 由 JS 动态设置 */
+}
+
+:deep(.msg-paused) video,
+:deep(.msg-paused) canvas {
+  visibility: hidden;
+}
+
+/* 暂停 CSS 动画 */
+:deep(.msg-paused) * {
+  animation-play-state: paused !important;
+}
+
+/* ── 流式渲染区域 ── */
+:deep(.stream-stable) {
+  /* 已闭合区域不再变化，允许浏览器优化渲染 */
+  contain: content;
+}
+
+:deep(.stream-tail) {
+  /* 尾部每帧更新，不启用 contain — 保持正常渲染流 */
+  contain: none;
+}
+</style>
+
+<!-- 编辑对话框样式 (Teleport 到 body 需要非 scoped) -->
+<style>
+.chat-edit-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  animation: fadeIn 0.15s;
+}
+
+.chat-edit-dialog {
+  width: 480px;
+  max-width: 90vw;
+  background: var(--color-bg-primary, #fff);
+  border: 2px solid var(--color-border, #e2e8f0);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+}
+
+.chat-edit-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text-primary, #1e293b);
+}
+
+.chat-edit-textarea {
+  width: 100%;
+  min-height: 100px;
+  padding: 10px;
+  border: 2px solid var(--color-border, #e2e8f0);
+  background: var(--color-bg-secondary, #f8fafc);
+  color: var(--color-text-primary, #1e293b);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+}
+
+.chat-edit-textarea:focus {
+  border-color: var(--color-sky-hover, #38bdf8);
+}
+
+.chat-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.chat-edit-btn {
+  padding: 6px 16px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: all 0.15s;
+}
+
+.chat-edit-cancel {
+  background: var(--color-bg-secondary, #f1f5f9);
+  color: var(--color-text-secondary, #64748b);
+  border-color: var(--color-border, #e2e8f0);
+}
+
+.chat-edit-cancel:hover {
+  background: var(--color-bg-primary, #fff);
+}
+
+.chat-edit-save {
+  background: var(--color-sky-500, #0ea5e9);
+  color: white;
+  border-color: var(--color-sky-shadow, #0284c7);
+}
+
+.chat-edit-save:hover {
+  background: var(--color-sky-hover, #38bdf8);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 </style>

@@ -21,7 +21,11 @@ export interface AuditResult {
 
 /** 危险命令模式 (TS fallback 基础规则) */
 const DANGEROUS_PATTERNS = [
-  { pattern: /rm\s+(-rf?|--recursive)\s+[\/\\]/, risk: 'critical' as const, reason: '递归删除根目录' },
+  {
+    pattern: /rm\s+(-rf?|--recursive)\s+[/\\]/,
+    risk: 'critical' as const,
+    reason: '递归删除根目录',
+  },
   { pattern: /format\s+[a-zA-Z]:/, risk: 'critical' as const, reason: '格式化磁盘' },
   { pattern: /del\s+\/[sS]\s+\/[qQ]/, risk: 'high' as const, reason: '静默批量删除' },
   { pattern: /shutdown|reboot|restart/, risk: 'medium' as const, reason: '系统关机/重启' },
@@ -64,5 +68,5 @@ export function auditCommand(command: string, _shell: string = 'powershell'): Au
  * @returns 审计结果列表
  */
 export function auditCommands(commands: string[]): AuditResult[] {
-  return commands.map(cmd => auditCommand(cmd))
+  return commands.map((cmd) => auditCommand(cmd))
 }

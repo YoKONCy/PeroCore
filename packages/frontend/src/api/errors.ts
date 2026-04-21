@@ -1,7 +1,6 @@
 /**
  * API 错误类型定义
  *
- * @see 05_FRONTEND_ARCHITECTURE.md §3
  */
 
 /** 业务级 API 错误 (后端返回了有效的错误信封) */
@@ -39,13 +38,16 @@ export enum ErrorSeverity {
 
 /** 错误码 → UI 严重性映射 */
 export const ERROR_UI_MAP: Record<string, ErrorSeverity> = {
+  // ── 服务端 code ──
   VALIDATION_ERROR: ErrorSeverity.TOAST,
   LLM_ERROR: ErrorSeverity.TOAST,
   RATE_LIMITED: ErrorSeverity.TOAST,
   UNAUTHORIZED: ErrorSeverity.MODAL,
   DB_ERROR: ErrorSeverity.MODAL,
   INTERNAL_ERROR: ErrorSeverity.TOAST,
-  NETWORK_ERROR: ErrorSeverity.TOAST,
   MODEL_NOT_FOUND: ErrorSeverity.TOAST,
   AGENT_NOT_FOUND: ErrorSeverity.TOAST,
+  // ── 前端客户端专用 code (不来自后端，由 Transport/SSE 层生成) ──
+  NETWORK_ERROR: ErrorSeverity.TOAST,
+  STREAM_ERROR: ErrorSeverity.TOAST,
 }

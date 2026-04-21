@@ -1,8 +1,8 @@
 /**
- * NIT v3 Lexer — 词法分析器
+ * NIT Lexer — 词法分析器
  *
  * 将 NIT 脚本文本转换为 Token 流。
- * 纯 TS 实现，替代 v1 的 Python + Rust 双轨 Lexer。
+ * 纯 TS 实现。
  *
  * @module packages/backend/src/nit/lexer
  */

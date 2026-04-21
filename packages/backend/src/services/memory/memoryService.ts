@@ -2,7 +2,7 @@
  * 记忆 Service — 核心 CRUD 编排
  *
  * 纯业务编排层：协调 MemoryRepo + VectorWriteHelper 完成记忆的增删改。
- * 不直接操作 Drizzle 或 TriviumDB (04_BACKEND_ARCHITECTURE.md §3)。
+ * 不直接操作 Drizzle 或 TriviumDB。
  *
  * @module packages/backend/src/services/memory/memoryService
  */
@@ -35,7 +35,7 @@ export class MemoryService {
   /**
    * 创建记忆 + 向量写入 + 时间链串联
    *
-   * 完整流程 (04_BACKEND_ARCHITECTURE.md §3.1):
+   * 完整流程:
    * 1. SQLite 写入
    * 2. 向量生成 + TriviumDB 写入 (失败入补偿队列)
    * 3. 建立时间链 (temporal edge)
@@ -186,6 +186,52 @@ export class MemoryService {
     if (affected.length > 0) {
       logger.debug(`按 msgTimestamp 删除了 ${affected.length} 条记忆`)
     }
+  }
+
+  /**
+   * 获取记忆图谱数据
+   *
+   * 返回节点 (记忆) + 连线 (关联关系) 的 force-directed graph 数据。
+   */
+  async getGraph(agentId: string, limit = 100) {
+    // 1. 查出最新的 N 条记忆
+    const result = await this.memoryRepo.list({ agentId, page: 1, pageSize: limit })
+    const memories = result.data
+
+    // 2. 构建节点
+    const nodes = memories.map((m) => ({
+      id: m.id,
+      name: String(m.id),
+      value: m.importance ?? 5,
+      category: m.type ?? 'event',
+      sentiment: m.sentiment ?? 'neutral',
+      full_content: m.content,
+    }))
+
+    // 3. 收集所有连线 (temporal + 语义关联)
+    const nodeIds = new Set(nodes.map((n) => n.id))
+    const edges: Array<{
+      source: number
+      target: number
+      value: number
+      relation_type: string
+    }> = []
+
+    // 利用时间链构建 temporal 连线
+    for (const m of memories) {
+      if (m.nextId && nodeIds.has(m.nextId)) {
+        edges.push({
+          source: m.id,
+          target: m.nextId,
+          value: 1,
+          relation_type: 'temporal',
+        })
+      }
+    }
+
+    logger.debug(`图谱数据: ${nodes.length} 节点, ${edges.length} 连线`)
+
+    return { nodes, edges }
   }
 
   /** 增加访问计数 */

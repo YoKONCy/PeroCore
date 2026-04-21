@@ -2,9 +2,9 @@
  * Scorer Service — 记忆提炼引擎
  *
  * 攒批处理对话日志，通过 LLM 提炼为结构化记忆。
- * 批次大小可调，设为 1 时向下兼容 v1 的逐轮触发行为。
+ * 批次大小可调，设为 1 时退化为逐轮触发。
  *
- * 输出字段 (10_MEMORY_SYSTEM.md §14.6.2):
+ * 输出字段:
  * - content, tags, importance, sentiment, memory_type    (基础)
  * - entities, causal_refs, topic_keys, nearest_cluster   (Leiden 边建材)
  *
@@ -14,7 +14,7 @@
 import type { ConversationLogService } from './conversationLog'
 import type { MemoryService } from './memoryService'
 import type { LlmService, ModelConfig } from '../llm/llmService'
-import type { ConfigRepository } from '../../repositories/config.repo'
+import type { MdpEngine } from '../prompt/mdpEngine'
 import type { VectorRepository } from '../../repositories/vector.repo'
 import type { EmbeddingProvider } from '../embedding/embeddingService'
 import { parseLlmJson } from '../../shared/llmJsonParser'
@@ -27,7 +27,7 @@ const logger = createLogger('ScorerService')
 // ─────────────────────────────────────────────
 
 export interface ScorerConfig {
-  /** 攒批阈值：每多少轮对话触发一次 Scorer (设为 1 = v1 逐轮行为) */
+  /** 攒批阈值：每多少轮对话触发一次 Scorer (设为 1 = 逐轮触发) */
   batchSize: number
   /** 最大等待时间 (毫秒)：超时后即使不满批也触发 */
   maxWaitMs: number
@@ -51,7 +51,7 @@ const DEFAULT_CONFIG: ScorerConfig = {
 }
 
 // ─────────────────────────────────────────────
-// Scorer 输出结构 (§14.6.2)
+// Scorer 输出结构
 // ─────────────────────────────────────────────
 
 /** LLM 返回的结构化分析结果 */
@@ -67,7 +67,7 @@ export interface ScorerOutput {
   /** 记忆类型 */
   memory_type: string
 
-  // ── Leiden 边建材 (§14.6.2 新增) ──
+  // ── Leiden 边建材 ──
 
   /** 实体提取 */
   entities: Array<{ name: string; type: 'person' | 'place' | 'item' | 'concept' }>
@@ -90,7 +90,8 @@ export class ScorerService {
     private memoryService: MemoryService,
     private logService: ConversationLogService,
     private llmService: LlmService,
-    private configRepo: ConfigRepository,
+    private getModelConfig: () => Promise<ModelConfig | null>,
+    private mdpEngine: MdpEngine,
     private vectorRepo?: VectorRepository,
     private embeddingService?: EmbeddingProvider,
     config?: Partial<ScorerConfig>,
@@ -120,11 +121,11 @@ export class ScorerService {
    *
    * 核心流程:
    * 1. 拉取 pending 对话对
-   * 2. 余弦去重 (§11.1，可选)
+   * 2. 余弦去重 (可选)
    * 3. 拼接对话上下文 (含 Token 预检)
    * 4. 调用 LLM 提炼
    * 5. 保存记忆 + 建时间链/图谱边
-   * 6. 处理 entities → 图谱边建材 (§14.6.2)
+   * 6. 处理 entities → 图谱边建材
    * 7. 更新对话日志的 analysisStatus
    */
   async processBatch(agentId: string): Promise<void> {
@@ -145,7 +146,7 @@ export class ScorerService {
       pending.push(...trimmed)
     }
 
-    // 余弦去重 (§11.1)
+    // 余弦去重
     const dedupedPending = await this.deduplicateByEmbedding(pending)
     if (dedupedPending.length === 0) {
       logger.info('所有对话被余弦去重过滤，跳过')
@@ -163,7 +164,7 @@ export class ScorerService {
     const fullContext = contextLines.join('\n')
 
     // 获取 Scorer 模型配置
-    const modelConfig = await this.getScorerModelConfig()
+    const modelConfig = await this.getModelConfig()
     if (!modelConfig) {
       logger.warn('未配置 Scorer 模型，跳过分析')
       return
@@ -195,8 +196,9 @@ export class ScorerService {
         source: pending[0]?.source ?? 'desktop',
       })
 
-      // 处理 Leiden 边建材 (§14.6.2)
+      // 处理 Leiden 边建材
       await this.processEdgeMaterials(result, memory.id, agentId, pending[0]?.source ?? 'desktop')
+      // 注意: 图谱构建 (graph_builder) 由 Reflection 管道处理，不在 Scorer 阶段调用
 
       // 更新对话日志状态
       for (const pairId of pairIds) {
@@ -235,13 +237,19 @@ export class ScorerService {
   // ── 内部方法 ──
 
   /**
-   * 余弦去重 (§11.1)
+   * 余弦去重
    *
    * 入队前与 buffer 中已有对话比余弦相似度，> dedupThreshold 跳过。
    * 需要 EmbeddingService 可用，否则跳过去重。
    */
   private async deduplicateByEmbedding(
-    logs: Array<{ id: number; role: string; content: string; pairId: string | null; source: string }>,
+    logs: Array<{
+      id: number
+      role: string
+      content: string
+      pairId: string | null
+      source: string
+    }>,
   ): Promise<typeof logs> {
     if (!this.embeddingService || logs.length <= 1) return logs
 
@@ -289,7 +297,7 @@ export class ScorerService {
   }
 
   /**
-   * 处理 Leiden 边建材 (§14.6.2)
+   * 处理 Leiden 边建材
    *
    * 将 Scorer 输出的 entities 和 causal_refs 写入图谱。
    */
@@ -305,12 +313,7 @@ export class ScorerService {
     if (result.entities?.length) {
       for (const entity of result.entities) {
         try {
-          await this.vectorRepo.indexKeyword(
-            memoryId,
-            `entity_${entity.name}`,
-            agentId,
-            source,
-          )
+          await this.vectorRepo.indexKeyword(memoryId, `entity_${entity.name}`, agentId, source)
         } catch (err) {
           logger.debug(`Entity 索引失败: ${entity.name}: ${err}`)
         }
@@ -346,26 +349,14 @@ export class ScorerService {
   private async callLlm(
     modelConfig: ModelConfig,
     context: string,
-    messageCount: number,
+    _messageCount: number,
     _agentId: string,
   ): Promise<ScorerOutput | null> {
-    // 构建 System Prompt
-    // TODO: 后续接入 MDP TemplateEngine 渲染
-    const systemPrompt = [
-      `你是一个专业的记忆提炼助手。`,
-      `请分析以下 ${messageCount} 条对话记录，提取核心记忆。`,
-      `输出严格 JSON 格式（不要使用 markdown 代码块）:`,
-      `{`,
-      `  "content": "提炼后的简洁记忆（一两句话）",`,
-      `  "tags": ["标签1", "标签2"],`,
-      `  "importance": 1-10,`,
-      `  "sentiment": "positive/negative/neutral",`,
-      `  "memory_type": "event/preference/knowledge/emotion",`,
-      `  "entities": [{"name": "实体名", "type": "person/place/item/concept"}],`,
-      `  "causal_refs": [],`,
-      `  "topic_keys": ["关键词1", "关键词2"]`,
-      `}`,
-    ].join('\n')
+    // 使用 MDP 模板渲染系统提示词
+    const systemPrompt = this.mdpEngine.render('tasks/memory/scorer/summary', {
+      agent_name: 'AI',
+      owner_name: '主人',
+    })
 
     const completion = await this.llmService.chat(
       modelConfig,
@@ -386,30 +377,9 @@ export class ScorerService {
   }
 
   /**
-   * 获取 Scorer 专用模型配置
-   *
-   * 优先级: 秘书专用配置 > 主模型配置 > 兜底
-   */
-  private async getScorerModelConfig(): Promise<ModelConfig | null> {
-    const apiKey = await this.configRepo.get('global_llm_api_key')
-    if (!apiKey) return null
-
-    const apiBase = await this.configRepo.get('global_llm_api_base')
-    const scorerModel = await this.configRepo.get('scorer_model_id')
-
-    return {
-      provider: 'openai',
-      modelId: scorerModel ?? 'gpt-4o-mini',
-      apiKey,
-      apiBase: apiBase ?? undefined,
-      temperature: this.config.temperature,
-    }
-  }
-
-  /**
    * 清洗对话文本
    *
-   * 移除系统注入标签、Thinking 块等噪音 (继承 v1 _smart_clean_text)
+   * 移除系统注入标签、Thinking 块等噪音
    */
   private cleanText(text: string): string {
     if (!text) return ''

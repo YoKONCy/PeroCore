@@ -2,7 +2,7 @@
  * Enrichment Runner — 并行上下文注入
  *
  * 并行执行所有注册的 Enricher，合并结果。
- * 替代 v1 的 HistoryPreprocessor + MemoryPreprocessor + StatePreprocessor。
+ * 统一管线增强：History + Memory + State 三阶段。
  *
  * @module packages/backend/src/services/pipeline/enrichers/enrichmentRunner
  */
@@ -25,9 +25,12 @@ function createDefaultContext(): EnrichedContext {
     vibe: 'active',
     mind: '...',
     ownerName: '主人',
+    environmentInfo: '',
     userPersona: '未设定',
     enableVision: false,
     enableVoice: false,
+    socialContext: '',
+    socialMemoryContext: '',
   }
 }
 

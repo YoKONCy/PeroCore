@@ -3,9 +3,12 @@
  * VoiceTab — 语音功能 Tab (F1-4)
  *
  * TTS (语音合成) + ASR (语音识别) 配置面板。
+ * F3: 已对接 configApi 读写。
  */
-import { ref } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { PixelIcon, PInput, PSelect, PSlider, PSwitch, PButton } from '../../pixel'
+import { configApi } from '../../../api/modules/configApi'
+import { voiceApi } from '../../../api/modules/voiceApi'
 
 // ── TTS 配置 ──
 const ttsEnabled = ref(true)
@@ -44,13 +47,89 @@ const asrLanguageOptions = [
   { label: '自动检测', value: 'auto' },
 ]
 
+// ── 加载 / 自动保存 ──
+
+async function loadVoiceConfig() {
+  try {
+    const res = await configApi.batch([
+      'tts.enabled',
+      'tts.provider',
+      'tts.voice',
+      'tts.speed',
+      'tts.pitch',
+      'tts.apiBase',
+      'tts.apiKey',
+      'asr.enabled',
+      'asr.language',
+      'asr.wakeWord',
+      'asr.sensitivity',
+    ])
+    const d = res.data ?? {}
+    if (d['tts.enabled'] !== undefined) ttsEnabled.value = d['tts.enabled'] !== 'false'
+    if (d['tts.provider']) ttsProvider.value = d['tts.provider'] as string
+    if (d['tts.voice']) ttsVoice.value = d['tts.voice'] as string
+    if (d['tts.speed']) ttsSpeed.value = Number(d['tts.speed'])
+    if (d['tts.pitch']) ttsPitch.value = Number(d['tts.pitch'])
+    if (d['tts.apiBase']) ttsApiBase.value = d['tts.apiBase'] as string
+    if (d['tts.apiKey']) ttsApiKey.value = d['tts.apiKey'] as string
+    if (d['asr.enabled'] !== undefined) asrEnabled.value = d['asr.enabled'] === 'true'
+    if (d['asr.language']) asrLanguage.value = d['asr.language'] as string
+    if (d['asr.wakeWord']) wakeWord.value = d['asr.wakeWord'] as string
+    if (d['asr.sensitivity']) asrSensitivity.value = Number(d['asr.sensitivity'])
+  } catch {
+    // 默认值
+  }
+}
+
+/** 防抖自动保存 */
+let saveTimer: ReturnType<typeof setTimeout> | null = null
+function debouncedSave(key: string, value: string) {
+  if (saveTimer) clearTimeout(saveTimer)
+  saveTimer = setTimeout(() => {
+    configApi.set(key, value).catch(() => {})
+  }, 500)
+}
+
+// 监听关键字段变化，自动保存
+watch(ttsEnabled, (v) => debouncedSave('tts.enabled', String(v)))
+watch(ttsProvider, (v) => debouncedSave('tts.provider', v))
+watch(ttsVoice, (v) => debouncedSave('tts.voice', v))
+watch(ttsSpeed, (v) => debouncedSave('tts.speed', String(v)))
+watch(asrEnabled, (v) => debouncedSave('asr.enabled', String(v)))
+watch(asrLanguage, (v) => debouncedSave('asr.language', v))
+
 // ── 测试 ──
 const isTestPlaying = ref(false)
-function testTts() {
+const testError = ref('')
+async function testTts() {
   isTestPlaying.value = true
-  // TODO: F3 替换为真实 TTS 调用
-  setTimeout(() => { isTestPlaying.value = false }, 2000)
+  testError.value = ''
+  try {
+    // 调用后端 /api/voice/tts 合成
+    const audioBuffer = await voiceApi.synthesize({
+      text: '主人你好呀！这是佩洛的语音测试喵~',
+      voice: ttsVoice.value,
+      speed: ttsSpeed.value,
+    })
+
+    // 使用 Web Audio API 播放
+    const audioCtx = new AudioContext()
+    const decoded = await audioCtx.decodeAudioData(audioBuffer)
+    const source = audioCtx.createBufferSource()
+    source.buffer = decoded
+    source.connect(audioCtx.destination)
+    source.onended = () => {
+      isTestPlaying.value = false
+      audioCtx.close()
+    }
+    source.start()
+  } catch (e) {
+    testError.value = (e as Error).message
+    isTestPlaying.value = false
+  }
 }
+
+onMounted(loadVoiceConfig)
 </script>
 
 <template>
@@ -110,6 +189,7 @@ function testTts() {
               <PixelIcon :name="isTestPlaying ? 'refresh' : 'mic'" size="xs" />
               {{ isTestPlaying ? '播放中...' : '试听效果' }}
             </PButton>
+            <span v-if="testError" class="voice-test-error">{{ testError }}</span>
           </div>
         </template>
       </section>
@@ -156,32 +236,132 @@ function testTts() {
 </template>
 
 <style scoped>
-.tab-voice { padding: 32px; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
-.tab-header { margin-bottom: 24px; flex-shrink: 0; }
-.tab-title { display: flex; align-items: center; gap: 12px; font-size: 24px; font-weight: 800; color: var(--color-text-primary); }
-.tab-subtitle { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.15em; color: var(--color-text-muted); margin-top: 4px; margin-left: 36px; }
+.tab-voice {
+  padding: 32px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.tab-header {
+  margin-bottom: 24px;
+  flex-shrink: 0;
+}
+.tab-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--color-text-primary);
+}
+.tab-subtitle {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--color-text-muted);
+  margin-top: 4px;
+  margin-left: 36px;
+}
 
-.voice-scroll { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 24px; }
-.voice-scroll::-webkit-scrollbar { width: 4px; }
-.voice-scroll::-webkit-scrollbar-thumb { background: var(--color-blue-200); }
+.voice-scroll {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.voice-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+.voice-scroll::-webkit-scrollbar-thumb {
+  background: var(--color-sky-light);
+}
 
-.voice-section { border: 2px solid var(--color-border); background: var(--color-bg-primary); padding: 24px; }
-.voice-section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-.voice-section-left { display: flex; align-items: center; gap: 16px; }
-.voice-icon { width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; color: white; flex-shrink: 0; }
-.voice-icon-blue { background: var(--color-blue-500); }
-.voice-icon-green { background: var(--color-green-500, #22c55e); }
-.voice-icon-muted { background: var(--color-text-muted); }
-.voice-section-title { font-size: 16px; font-weight: 800; color: var(--color-text-primary); }
-.voice-section-desc { font-size: 12px; color: var(--color-text-muted); margin-top: 2px; }
+.voice-section {
+  border: 2px solid var(--color-border);
+  background: var(--color-bg-primary);
+  padding: 24px;
+}
+.voice-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+.voice-section-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.voice-icon {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  flex-shrink: 0;
+}
+.voice-icon-blue {
+  background: var(--color-sky-500);
+}
+.voice-icon-green {
+  background: var(--color-emerald-face, #22c55e);
+}
+.voice-icon-muted {
+  background: var(--color-text-muted);
+}
+.voice-section-title {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--color-text-primary);
+}
+.voice-section-desc {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-top: 2px;
+}
 
-.voice-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.voice-field { display: flex; flex-direction: column; gap: 6px; }
-.voice-field-full { grid-column: 1 / -1; }
-.voice-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--color-text-muted); }
-.voice-hint { font-size: 10px; color: var(--color-text-muted); font-style: italic; }
+.voice-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.voice-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.voice-field-full {
+  grid-column: 1 / -1;
+}
+.voice-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--color-text-muted);
+}
+.voice-hint {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  font-style: italic;
+}
 
-.voice-test { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--color-border); }
+.voice-test {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border);
+}
 
-.voice-disabled-hint { padding: 16px; background: var(--color-bg-secondary); border: 1px solid var(--color-border); text-align: center; font-size: 13px; color: var(--color-text-muted); }
+.voice-disabled-hint {
+  padding: 16px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  text-align: center;
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
 </style>

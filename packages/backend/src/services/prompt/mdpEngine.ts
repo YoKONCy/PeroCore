@@ -101,12 +101,16 @@ export interface PromptPreset {
   name: string
   /** 预设描述 */
   description?: string
-  /** 槽位排列 (只保存 id + position + enabled + userOverride) */
+  /** 槽位排列 (override 现有槽位 + 可新增自定义槽位) */
   slots: Array<{
     id: string
     position: number
     enabled: boolean
     userOverride?: string
+    /** 以下字段仅用于用户新增的自定义槽位 (builtin 槽位无需填写) */
+    label?: string
+    role?: 'system' | 'user' | 'assistant'
+    template?: string
   }>
 }
 
@@ -126,8 +130,12 @@ export interface RenderedMessage {
 export const DEFAULT_POSITIONS = {
   /** 系统核心人设 */
   SYSTEM_PERSONA: 100,
+  /** COT 思维链引导 */
+  COT_GUIDANCE: 150,
   /** 能力描述 */
   ABILITIES: 200,
+  /** 草稿心流 (预留) */
+  DRAFT_FLOW: 250,
   /** 工具描述 */
   TOOLS: 300,
   /** 规则约束 */
@@ -323,6 +331,24 @@ export class MdpEngine {
         userOverride: override.userOverride,
       }
     })
+
+    // 合并用户自定义新增槽位 (preset 中有但 defaultSlots 中没有的)
+    const existingIds = new Set(result.map((s) => s.id))
+    for (const ps of preset.slots) {
+      if (!existingIds.has(ps.id) && ps.template) {
+        result.push({
+          id: ps.id,
+          label: ps.label ?? ps.id,
+          role: ps.role ?? 'system',
+          position: ps.position,
+          enabled: ps.enabled,
+          template: ps.template,
+          group: 'custom',
+          editable: true,
+          builtin: false,
+        })
+      }
+    }
 
     // 按新的 position 排序
     return result.sort((a, b) => a.position - b.position)
@@ -571,7 +597,7 @@ export class MdpEngine {
       return arr.filter(Boolean).join('\n')
     })
 
-    // XML 包裹 (v1 格式兼容)
+    // XML 包裹
     this.nj.addFilter('xmlwrap', (content: string, tag: string) => {
       if (!content?.trim()) return ''
       return `<${tag}>\n${content}\n</${tag}>`

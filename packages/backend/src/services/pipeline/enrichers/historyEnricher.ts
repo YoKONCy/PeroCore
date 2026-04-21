@@ -4,7 +4,7 @@
  * 从 ConversationLogService 拉取最近对话，
  * 压扁为 XML 格式注入 EnrichedContext。
  *
- * 替代 v1 的 HistoryPreprocessor (200+ 行)。
+ * 历史记录增强器。
  *
  * @module packages/backend/src/services/pipeline/enrichers/historyEnricher
  */
@@ -44,7 +44,7 @@ export class HistoryEnricher implements Enricher {
    * 将消息列表压扁为 XML 格式
    *
    * 格式：<message role="user" name="User">内容</message>
-   * v1 的 _flatten_history 移植。
+   * 将嵌套历史记录扁平化。
    */
   private flatten(messages: HistoryEntry[], agentName: string): string {
     if (messages.length === 0) {

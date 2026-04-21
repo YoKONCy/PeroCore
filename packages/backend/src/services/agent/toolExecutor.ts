@@ -269,4 +269,3 @@ function truncate(text: string): string {
   }
   return text
 }
-

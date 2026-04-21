@@ -4,11 +4,11 @@
  * 管理当前聊天会话的消息列表、输入、生成状态等。
  * 消息列表使用 shallowRef 以避免深度响应性能问题。
  *
- * @see 12_FRONTEND_PERFORMANCE.md §3.8
  */
 
 import { defineStore } from 'pinia'
 import { ref, shallowRef, computed } from 'vue'
+import { chatApi } from '../api/modules/chatApi'
 
 /** 聊天消息 */
 export interface ChatMessage {
@@ -91,6 +91,34 @@ export const useSessionStore = defineStore('session', () => {
     inputText.value = ''
   }
 
+  /**
+   * 编辑指定消息内容 (P2-7: 本地 + 后端同步)
+   */
+  function editMessage(id: string, newContent: string) {
+    messages.value = messages.value.map((m) => (m.id === id ? { ...m, content: newContent } : m))
+    // 后端同步 (异步，不阻塞 UI)
+    const numId = Number(id)
+    if (Number.isInteger(numId) && numId > 0) {
+      chatApi.editMessage(numId, newContent).catch((err) => {
+        console.error('消息编辑同步失败:', err)
+      })
+    }
+  }
+
+  /**
+   * 删除指定消息 (P2-7: 本地 + 后端同步)
+   */
+  function deleteMessage(id: string) {
+    messages.value = messages.value.filter((m) => m.id !== id)
+    // 后端同步
+    const numId = Number(id)
+    if (Number.isInteger(numId) && numId > 0) {
+      chatApi.deleteMessage(numId).catch((err) => {
+        console.error('消息删除同步失败:', err)
+      })
+    }
+  }
+
   /** 设置新会话 */
   function startSession(newSessionId: string, newSource = 'desktop') {
     clearSession()
@@ -113,6 +141,8 @@ export const useSessionStore = defineStore('session', () => {
     appendToLast,
     finishStreaming,
     clearSession,
+    editMessage,
+    deleteMessage,
     startSession,
   }
 })

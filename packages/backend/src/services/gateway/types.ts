@@ -2,7 +2,7 @@
  * Gateway 协议类型
  *
  * 定义前后端 WebSocket 通信的消息格式。
- * v2 使用 JSON-RPC 格式代替 v1 的 Protobuf Envelope。
+ * 使用 JSON-RPC 格式。
  *
  * @module packages/backend/src/services/gateway/types
  */
@@ -55,8 +55,10 @@ export type PushAction =
   | 'stream_end' // 流式结束
   | 'agent_changed' // Agent 切换
   | 'tool_status' // 工具执行状态
+  | 'task_progress' // 任务进度
   | 'notification' // 通知
   | 'system_error' // 系统错误
+  | 'audio_chunk' // TTS 音频推送
 
 /** Request 请求的 action 名 */
 export type RequestAction =
@@ -65,6 +67,8 @@ export type RequestAction =
   | 'stop_generation' // 停止生成
   | 'switch_agent' // 切换 Agent
   | 'inject_instruction' // 注入即时指令
+  | 'tts_speak' // TTS 语音合成
+  | 'asr_recognize' // ASR 语音识别
 
 // ─────────────────────────────────────────────
 // 辅助

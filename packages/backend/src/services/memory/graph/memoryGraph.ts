@@ -2,7 +2,7 @@
  * Memory Graph — 图谱可视化数据生成
  *
  * 从 TriviumDB 图谱中提取节点和边，转换为前端可视化所需的结构。
- * 继承 v1 MemoryService.get_memory_graph() 的功能。
+ *.get_memory_graph() 的功能。
  *
  * 前端使用 force-directed graph 或 D3.js 渲染。
  *
@@ -168,8 +168,9 @@ export class MemoryGraphService {
           if (nodeSet.has(neighborId) && neighborId !== nodeId) {
             // 避免重复边
             const exists = edges.some(
-              (e) => (e.source === nodeId && e.target === neighborId) ||
-                     (e.source === neighborId && e.target === nodeId),
+              (e) =>
+                (e.source === nodeId && e.target === neighborId) ||
+                (e.source === neighborId && e.target === nodeId),
             )
             if (!exists) {
               edges.push({ source: nodeId, target: neighborId, label: 'graph', weight: 0.5 })
@@ -188,13 +189,31 @@ export class MemoryGraphService {
     return { nodes, edges, stats }
   }
 
+  /** 标签云 TTL 缓存 */
+  private tagCloudCache = new Map<
+    string,
+    { data: Array<{ tag: string; count: number }>; expiresAt: number }
+  >()
+  private static readonly TAG_CLOUD_TTL_MS = 5 * 60 * 1000 // 5 分钟
+
   /**
-   * 获取 Tag Cloud 数据
+   * 获取 Tag Cloud 数据 (带 TTL 缓存)
+   *
+   * 使用内存缓存避免高频全表扫描，TTL = 5 分钟。
+   * 记忆增删时应调用 invalidateTagCloudCache() 使缓存失效。
    */
   async getTagCloud(
     agentId: string,
     limit: number = 30,
   ): Promise<Array<{ tag: string; count: number }>> {
+    const now = Date.now()
+
+    // 命中缓存则直接返回
+    const cached = this.tagCloudCache.get(agentId)
+    if (cached && now < cached.expiresAt) {
+      return cached.data.slice(0, limit)
+    }
+
     const { data: memories } = await this.memoryRepo.list({
       agentId,
       page: 1,
@@ -204,16 +223,36 @@ export class MemoryGraphService {
     const tagCounts = new Map<string, number>()
     for (const m of memories) {
       if (!m.tags) continue
-      const tags = m.tags.split(',').map((t: string) => t.trim()).filter(Boolean)
+      const tags = m.tags
+        .split(',')
+        .map((t: string) => t.trim())
+        .filter(Boolean)
       for (const tag of tags) {
         tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1)
       }
     }
 
-    return [...tagCounts.entries()]
+    const result = [...tagCounts.entries()]
       .sort((a, b) => b[1] - a[1])
-      .slice(0, limit)
+      .slice(0, 50) // 缓存 top-50，按需截取
       .map(([tag, count]) => ({ tag, count }))
+
+    // 写入缓存
+    this.tagCloudCache.set(agentId, {
+      data: result,
+      expiresAt: now + MemoryGraphService.TAG_CLOUD_TTL_MS,
+    })
+
+    return result.slice(0, limit)
+  }
+
+  /** 使标签云缓存失效 (记忆增删后调用) */
+  invalidateTagCloudCache(agentId?: string): void {
+    if (agentId) {
+      this.tagCloudCache.delete(agentId)
+    } else {
+      this.tagCloudCache.clear()
+    }
   }
 
   // ── 内部方法 ──

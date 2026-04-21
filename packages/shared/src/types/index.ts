@@ -54,3 +54,23 @@ export type {
   InboundEvent,
   ExtensionInfo,
 } from './extension.types'
+
+export type {
+  GatewayMessageType,
+  GatewayEnvelope,
+  GatewayPayload,
+  StateUpdatePayload,
+  StreamDeltaPayload,
+  StreamEndPayload,
+  ToolStatusPayload,
+  TaskProgressPayload,
+  NotificationPayload,
+  SystemErrorPayload,
+  HelloPayload,
+  HelloAckPayload,
+  HeartbeatPayload,
+  ChatRequestPayload,
+  GenericPayload,
+  PushAction,
+  RequestAction,
+} from './gateway.types'

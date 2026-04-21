@@ -6,7 +6,7 @@
  * - Function Calling (FC) 多轮工具调用
  * - SSE 事件分发 (delta / tool_call / tool_result / status)
  *
- * 02_API_RESPONSE_SPEC.md §9:
+ * SSE 事件类型:
  * - delta: 文本增量
  * - tool_call: 工具开始调用
  * - tool_result: 工具执行结果
@@ -28,7 +28,7 @@ const logger = createLogger('Synthesis')
 // 类型
 // ─────────────────────────────────────────────
 
-/** SSE 事件 (对齐 02_API §9) */
+/** SSE 事件类型 */
 export interface SseEvent {
   event: 'delta' | 'tool_call' | 'tool_result' | 'status' | 'done' | 'error'
   data: Record<string, unknown>
@@ -97,11 +97,9 @@ export async function runSynthesis(
   let fullText = ''
 
   for (let round = 0; round <= cfg.maxToolRounds; round++) {
-    const completion = await deps.llmService.chat(
-      deps.modelConfig,
-      messages,
-      { tools: input.tools },
-    )
+    const completion = await deps.llmService.chat(deps.modelConfig, messages, {
+      tools: input.tools,
+    })
 
     const choice = completion.choices[0]
     if (!choice) break
@@ -194,11 +192,7 @@ export async function* runSynthesisStream(
     }
 
     // 调用 LLM 流式接口
-    const stream = deps.llmService.chatStream(
-      deps.modelConfig,
-      messages,
-      { tools: input.tools },
-    )
+    const stream = deps.llmService.chatStream(deps.modelConfig, messages, { tools: input.tools })
 
     let currentText = ''
     let pendingToolCalls: Array<{ id: string; name: string; arguments: string }> = []

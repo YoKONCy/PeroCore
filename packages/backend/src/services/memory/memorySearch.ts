@@ -2,7 +2,7 @@
  * 记忆检索 Service — 语义搜索 + 逻辑闪回
  *
  * 封装 TriviumDB 的多种检索策略，提供统一的检索入口。
- * 后续 PEDSA v2 的 ContextualRetriever 将替换此 Service 的核心检索逻辑。
+ * 后续 PEDSA 的 ContextualRetriever 将替换此 Service 的核心检索逻辑。
  *
  * @module packages/backend/src/services/memory/memorySearch
  */
@@ -45,12 +45,12 @@ export interface SearchParams {
   minScore?: number
 }
 
-/** 高级检索参数 (PEDSA v2 准备) */
+/** 高级检索参数 (PEDSA 准备) */
 export interface AdvancedSearchParams extends SearchParams {
   config?: JsSearchConfig
 }
 
-/** 按模式的 RAG 限制 (10_MEMORY_SYSTEM.md §11.5) */
+/** 按模式的 RAG 限制 */
 const RAG_LIMITS: Record<string, { memories: number; flashback: number }> = {
   desktop: { memories: 8, flashback: 3 },
   social: { memories: 0, flashback: 0 },
@@ -105,7 +105,7 @@ export class MemorySearchService {
   }
 
   /**
-   * 高级认知管线检索 (PEDSA v2 入口)
+   * 高级认知管线检索 (PEDSA 入口)
    *
    * 使用 TriviumDB 的 searchAdvanced API，支持：
    * - FISTA 残差寻隐

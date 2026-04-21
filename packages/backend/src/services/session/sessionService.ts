@@ -3,9 +3,7 @@
  *
  * 管理会话的创建、切换、恢复。
  * 支持工作模式隔离 (独立 session_id 避免历史污染)。
- * 支持 Profile 切换 (17_MODE_SYSTEM.md §2.2)。
- *
- * 替代 v1 的 session_service.py (296行 → ~200行)。
+ * 支持 Profile 切换。
  *
  * @module packages/backend/src/services/session/sessionService
  */
@@ -22,6 +20,17 @@ const logger = createLogger('SessionService')
 
 /** 支持的 Profile */
 export type DesktopProfile = 'default' | 'lightweight' | 'companion' | 'work'
+
+/** 陪伴调度器句柄 (轻接口，避免直接依赖 CompanionScheduler) */
+export interface CompanionSchedulerHandle {
+  start(): void
+  stop(): Promise<void>
+  notifyActivity(): void
+  readonly isRunning: boolean
+}
+
+/** 陪伴调度器工厂函数 (由 container 注入) */
+export type CompanionSchedulerFactory = (agentId: string) => CompanionSchedulerHandle
 
 /** 会话信息 */
 export interface SessionInfo {
@@ -85,12 +94,12 @@ export class SessionService {
   }
 
   /**
-   * 切换 Profile (17_MODE_SYSTEM.md §2.2)
+   * 切换 Profile
    *
    * Profile 影响 Enricher 门控:
    * - default: 全部启用
    * - lightweight: 跳过 MemoryEnricher、ToolEnricher
-   * - companion: 全部启用 + 定时主动行为
+   * - companion: 全部启用 + 定时主动行为 (自动启动 CompanionScheduler)
    * - work: 全部启用 + 工作工具链 (通过 enterWorkMode 触发)
    */
   async switchProfile(agentId: string, profile: DesktopProfile): Promise<SessionInfo> {
@@ -98,14 +107,79 @@ export class SessionService {
       throw new Error('请使用 enterWorkMode() 进入工作模式')
     }
 
+    const current = this.activeSessions.get(agentId) ?? (await this.getOrCreateDefault(agentId))
+    const previousProfile = current.profile
+
     await this.configRepo.set(`session.${agentId}.profile`, profile)
 
-    const current = this.activeSessions.get(agentId) ?? await this.getOrCreateDefault(agentId)
     const updated: SessionInfo = { ...current, profile }
     this.activeSessions.set(agentId, updated)
 
-    logger.info(`Profile 已切换: agent=${agentId}, profile=${profile}`)
+    // ── 陪伴模式联动 ──
+    // 切入 companion → 启动调度
+    if (profile === 'companion' && previousProfile !== 'companion') {
+      await this.startCompanionScheduler(agentId)
+    }
+    // 切出 companion → 停止调度
+    if (profile !== 'companion' && previousProfile === 'companion') {
+      await this.stopCompanionScheduler(agentId)
+    }
+
+    logger.info(`Profile 已切换: agent=${agentId}, ${previousProfile} → ${profile}`)
     return updated
+  }
+
+  // ── 陪伴调度器管理 ──
+
+  /** 注入的调度器工厂 (由 container 设置) */
+  private companionSchedulerFactory: CompanionSchedulerFactory | null = null
+
+  /** 运行中的调度器实例 */
+  private activeCompanionSchedulers = new Map<string, CompanionSchedulerHandle>()
+
+  /**
+   * 设置陪伴调度器工厂 (DI 注入)
+   *
+   * container.ts 初始化后调用此方法注入工厂函数。
+   */
+  setCompanionSchedulerFactory(factory: CompanionSchedulerFactory): void {
+    this.companionSchedulerFactory = factory
+  }
+
+  /**
+   * 通知陪伴调度器：用户有活动 (重置空闲计时器)
+   */
+  notifyCompanionActivity(agentId: string): void {
+    const handle = this.activeCompanionSchedulers.get(agentId)
+    if (handle) {
+      handle.notifyActivity()
+    }
+  }
+
+  /** 启动陪伴调度 */
+  private async startCompanionScheduler(agentId: string): Promise<void> {
+    // 已在运行则跳过
+    if (this.activeCompanionSchedulers.has(agentId)) return
+
+    if (!this.companionSchedulerFactory) {
+      logger.warn('陪伴调度器工厂未注入，无法启动')
+      return
+    }
+
+    const handle = this.companionSchedulerFactory(agentId)
+    handle.start()
+    this.activeCompanionSchedulers.set(agentId, handle)
+    logger.info(`陪伴调度已启动: agent=${agentId}`)
+  }
+
+  /** 停止陪伴调度 */
+  private async stopCompanionScheduler(agentId: string): Promise<void> {
+    const handle = this.activeCompanionSchedulers.get(agentId)
+    if (!handle) return
+
+    await handle.stop()
+    this.activeCompanionSchedulers.delete(agentId)
+    logger.info(`陪伴调度已停止: agent=${agentId}`)
   }
 
   /**
@@ -169,7 +243,8 @@ export class SessionService {
     const logCount = await this.logService.count(agentId, current.sessionId)
 
     // 恢复之前的 profile
-    const prevProfile = ((await this.configRepo.get(`session.${agentId}.prev_profile`)) ?? 'default') as DesktopProfile
+    const prevProfile = ((await this.configRepo.get(`session.${agentId}.prev_profile`)) ??
+      'default') as DesktopProfile
     await this.configRepo.set(`session.${agentId}.current`, 'default')
     await this.configRepo.set(`session.${agentId}.profile`, prevProfile)
     await this.configRepo.delete(`session.${agentId}.work_task`)

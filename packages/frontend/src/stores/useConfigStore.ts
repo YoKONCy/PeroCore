@@ -1,7 +1,6 @@
 /**
  * useConfigStore — 全局配置状态
  *
- * @see 05_FRONTEND_ARCHITECTURE.md §4.1
  */
 
 import { defineStore } from 'pinia'
@@ -34,7 +33,7 @@ export const useConfigStore = defineStore('config', () => {
   /** 设置配置 */
   async function setConfig(key: string, value: unknown): Promise<boolean> {
     try {
-      await configApi.set(key, value)
+      await configApi.set(key, value as string)
       cache.value[key] = value
       return true
     } catch {

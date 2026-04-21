@@ -1,7 +1,6 @@
 /**
  * Gateway Hub — WebSocket 消息路由器
  *
- * 替代 v1 的 gateway_hub.py (293行)。
  * 核心变化：
  * 1. Protobuf → JSON (后续可扩展 Protobuf 通道)
  * 2. FastAPI WebSocket → Hono WSContext
@@ -326,6 +325,30 @@ export class GatewayHub {
     )
   }
 
+  /** 推送 TTS 音频 chunk (base64 编码) */
+  async pushAudioChunk(audioData: ArrayBuffer, sessionId: string): Promise<void> {
+    // 将 ArrayBuffer 转为 base64 字符串，通过 JSON 推送
+    const base64 = Buffer.from(audioData).toString('base64')
+    await this.broadcast(
+      createEnvelope('push', {
+        action: 'audio_chunk',
+        audio: base64,
+        sessionId,
+      }),
+    )
+  }
+
+  /** 推送语音管道状态变更 */
+  async pushVoiceState(sessionId: string, state: string): Promise<void> {
+    await this.broadcast(
+      createEnvelope('push', {
+        action: 'voice_state',
+        sessionId,
+        state,
+      }),
+    )
+  }
+
   /** 推送系统错误 */
   async pushError(message: string, title = '错误'): Promise<void> {
     await this.broadcast(
@@ -335,6 +358,36 @@ export class GatewayHub {
         title,
       }),
     )
+  }
+
+  /**
+   * RPC 响应回送 — 对应前端 request() 的 response
+   *
+   * @param requestId - 原始请求的 id (用于前端 pendingRequests 配对)
+   * @param targetNodeId - 目标节点 ID
+   * @param payload - 响应负载
+   */
+  async sendResponse(
+    requestId: string,
+    targetNodeId: string,
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    const envelope = createEnvelope('response', payload, targetNodeId)
+    envelope.id = requestId // 保持 id 与 request 一致
+    await this.unicast(envelope)
+  }
+
+  /**
+   * RPC 错误回送
+   *
+   * @param requestId - 原始请求的 id
+   * @param targetNodeId - 目标节点 ID
+   * @param message - 错误消息
+   */
+  async sendError(requestId: string, targetNodeId: string, message: string): Promise<void> {
+    const envelope = createEnvelope('error', { message }, targetNodeId)
+    envelope.id = requestId
+    await this.unicast(envelope)
   }
 
   // ── 握手 / 心跳 ──

@@ -1,6 +1,8 @@
 export { agentApi } from './agentApi'
 export { chatApi } from './chatApi'
 export { configApi } from './configApi'
+export { maintenanceApi } from './maintenanceApi'
 export { memoryApi } from './memoryApi'
 export { modelApi } from './modelApi'
+export { socialApi } from './socialApi'
 export { systemApi } from './systemApi'

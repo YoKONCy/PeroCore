@@ -1,0 +1,101 @@
+/**
+ * screenVision — 屏幕截图工具
+ *
+ * 为 Agent 提供视觉感知能力。
+ * 通过「截图提供者」抽象层解耦：
+ *   - Electron 桌面端: desktopCapturer / IPC 注入
+ *   - 其他环境: 可替换为 native addon (screenshot-desktop) 或远程截图服务
+ * 截图结果以 base64 data URI 形式返回，由 ReActLoop 作为多模态内容注入。
+ *
+ * @module packages/backend/src/tools/screenVision
+ */
+
+import type { BuiltinTool } from '../index'
+import { createLogger } from '../../lib/logger'
+
+const logger = createLogger('ScreenVision')
+
+// ── 截图提供者抽象 ──
+
+/** 截图提供者接口 (由 container.ts 注入) */
+export interface ScreenshotProvider {
+  /** 截取当前屏幕，返回 base64 编码的 PNG 数据 */
+  capture(): Promise<string | null>
+}
+
+/** 全局引用: 在 container 接线阶段注入 */
+let screenshotProvider: ScreenshotProvider | null = null
+
+/** 注入截图提供者 (由 container.ts 调用) */
+export function injectScreenshotProvider(provider: ScreenshotProvider): void {
+  screenshotProvider = provider
+  logger.info('截图提供者已注入')
+}
+
+// ── take_screenshot 工具 ──
+
+export const takeScreenshotTool: BuiltinTool = {
+  definition: {
+    name: 'take_screenshot',
+    description:
+      '截取当前屏幕画面。当主人请求"看看"、"看一下屏幕"时使用。' +
+      '返回屏幕截图的 base64 数据，可直接进行视觉分析。',
+    parameters: {
+      type: 'object',
+      properties: {
+        count: {
+          type: 'number',
+          description: '截图数量 (默认 1，最大 3)',
+        },
+      },
+    },
+  },
+
+  async execute(args) {
+    if (!screenshotProvider) {
+      return JSON.stringify({
+        error: '截图服务未初始化。当前环境可能不支持屏幕截图。',
+      })
+    }
+
+    const count = Math.min(Math.max(1, (args.count as number) ?? 1), 3)
+
+    try {
+      const screenshots: string[] = []
+
+      for (let i = 0; i < count; i++) {
+        const base64 = await screenshotProvider.capture()
+        if (base64) {
+          screenshots.push(base64)
+        } else {
+          logger.warn(`第 ${i + 1} 张截图获取失败`)
+        }
+
+        // 多张截图之间间隔 500ms (捕捉动态变化)
+        if (i < count - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 500))
+        }
+      }
+
+      if (screenshots.length === 0) {
+        return JSON.stringify({ error: '截图获取失败，请稍后重试' })
+      }
+
+      logger.info(`已获取 ${screenshots.length} 张截图`)
+
+      return JSON.stringify({
+        success: true,
+        screenshots: screenshots.map((data, i) => ({
+          index: i,
+          // 返回 data URI，ReActLoop 会将其转为多模态 image_url
+          dataUri: `data:image/png;base64,${data}`,
+        })),
+        message: `已获取 ${screenshots.length} 张屏幕截图`,
+      })
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err)
+      logger.error(`截图失败: ${errMsg}`)
+      return JSON.stringify({ error: `截图失败: ${errMsg}` })
+    }
+  },
+}

@@ -12,6 +12,7 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { createLogger } from '../lib/logger'
 import type { ExtensionManifest, ToolExtension, HookExtension, ServiceExtension } from './types'
 
@@ -89,7 +90,12 @@ export class ExtensionLoader {
     } catch (err) {
       const msg = `manifest.json 解析失败: ${extDir}`
       logger.warn(msg, { error: err })
-      return { manifest: { id: path.basename(extDir), name: '', version: '', type: 'tool', entry: '' }, dirPath: extDir, module: null, error: msg }
+      return {
+        manifest: { id: path.basename(extDir), name: '', version: '', type: 'tool', entry: '' },
+        dirPath: extDir,
+        module: null,
+        error: msg,
+      }
     }
 
     // 2. 验证必要字段
@@ -102,7 +108,12 @@ export class ExtensionLoader {
     // 3. 平台兼容性检查
     if (manifest.platforms && !manifest.platforms.includes(this.currentPlatform as any)) {
       logger.info(`扩展 ${manifest.id} 不兼容当前平台 (${this.currentPlatform})`)
-      return { manifest, dirPath: extDir, module: null, error: `不兼容平台: ${this.currentPlatform}` }
+      return {
+        manifest,
+        dirPath: extDir,
+        module: null,
+        error: `不兼容平台: ${this.currentPlatform}`,
+      }
     }
 
     // 4. Service 类型不在此处加载模块 (由 ServiceRunner 管理)
@@ -120,7 +131,7 @@ export class ExtensionLoader {
     }
 
     try {
-      const mod = await import(entryPath)
+      const mod = await import(pathToFileURL(entryPath).href)
       const extension = mod.default ?? mod
 
       logger.debug(`扩展已加载: ${manifest.id} (${manifest.type})`)

@@ -5,7 +5,7 @@
  * 分三栏布局：文件树 + 编辑器(含 Tab) + 聊天侧栏。
  * 底部终端管理器 (P5 延后)。
  *
- * @see 06_FILE_SIZE_LIMITS.md §2.3 — WorkModeView 拆分方案
+ * @see WorkModeView 拆分方案
  */
 import { ref, onMounted, onErrorCaptured } from 'vue'
 import { PixelIcon } from '../components/pixel'
@@ -87,10 +87,23 @@ async function saveFile(content: string) {
 function getLanguage(filename: string): string {
   const ext = filename.split('.').pop()?.toLowerCase() ?? ''
   const map: Record<string, string> = {
-    py: 'python', js: 'javascript', ts: 'typescript', vue: 'html',
-    html: 'html', css: 'css', json: 'json', md: 'markdown',
-    rs: 'rust', go: 'go', sh: 'shell', yaml: 'yaml', yml: 'yaml',
-    sql: 'sql', xml: 'xml', toml: 'ini', ps1: 'powershell',
+    py: 'python',
+    js: 'javascript',
+    ts: 'typescript',
+    vue: 'html',
+    html: 'html',
+    css: 'css',
+    json: 'json',
+    md: 'markdown',
+    rs: 'rust',
+    go: 'go',
+    sh: 'shell',
+    yaml: 'yaml',
+    yml: 'yaml',
+    sql: 'sql',
+    xml: 'xml',
+    toml: 'ini',
+    ps1: 'powershell',
   }
   return map[ext] ?? 'plaintext'
 }
@@ -225,7 +238,7 @@ onMounted(async () => {
 }
 .wv-error-card {
   max-width: 640px;
-  border: 2px solid var(--color-red-500);
+  border: 2px solid var(--color-red-face);
   background: var(--color-bg-primary);
   padding: 24px;
 }
@@ -233,7 +246,7 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--color-red-500);
+  color: var(--color-red-face);
   font-size: 18px;
   font-weight: 800;
   margin-bottom: 16px;
@@ -266,7 +279,7 @@ onMounted(async () => {
   border-bottom: 2px solid var(--color-border);
   font-size: 13px;
   font-weight: 700;
-  color: var(--color-blue-500);
+  color: var(--color-sky-500);
 }
 
 /* 编辑器区 */
@@ -297,17 +310,17 @@ onMounted(async () => {
   align-items: center;
   gap: 6px;
   padding: 4px 12px;
-  border: 1px solid var(--color-blue-200);
-  background: var(--color-blue-50);
+  border: 1px solid var(--color-sky-light);
+  background: var(--color-sky-50);
   font-size: 10px;
   font-weight: 700;
-  color: var(--color-blue-500);
+  color: var(--color-sky-500);
   text-transform: uppercase;
 }
 .wv-mode-dot {
   width: 6px;
   height: 6px;
-  background: var(--color-blue-500);
+  background: var(--color-sky-500);
   animation: pulse 2s infinite;
 }
 
@@ -319,8 +332,12 @@ onMounted(async () => {
   background: var(--color-bg-secondary);
   flex-shrink: 0;
 }
-.wv-tabs::-webkit-scrollbar { height: 2px; }
-.wv-tabs::-webkit-scrollbar-thumb { background: var(--color-blue-200); }
+.wv-tabs::-webkit-scrollbar {
+  height: 2px;
+}
+.wv-tabs::-webkit-scrollbar-thumb {
+  background: var(--color-sky-light);
+}
 
 .wv-tab {
   display: flex;
@@ -343,8 +360,8 @@ onMounted(async () => {
 }
 .wv-tab-active {
   background: var(--color-bg-primary);
-  color: var(--color-blue-500);
-  border-bottom: 2px solid var(--color-blue-500);
+  color: var(--color-sky-500);
+  border-bottom: 2px solid var(--color-sky-500);
 }
 .wv-tab-name {
   overflow: hidden;
@@ -371,7 +388,7 @@ onMounted(async () => {
   opacity: 1;
 }
 .wv-tab-close:hover {
-  color: var(--color-red-500);
+  color: var(--color-red-face);
 }
 
 /* 编辑器主体 */
@@ -406,7 +423,12 @@ onMounted(async () => {
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 </style>

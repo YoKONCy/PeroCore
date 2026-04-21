@@ -1,8 +1,8 @@
 /**
- * NIT v3 Parser — 语法分析器
+ * NIT Parser — 语法分析器
  *
  * 将 Token 流转换为 AST。
- * 递归下降解析器，支持 NIT v3 的全部语法。
+ * 递归下降解析器，支持 NIT 的全部语法。
  *
  * @module packages/backend/src/nit/parser
  */

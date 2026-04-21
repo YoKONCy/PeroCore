@@ -31,7 +31,11 @@ const switchAgentSchema = z.object({
 })
 
 const createAgentSchema = z.object({
-  id: z.string().min(1).max(32).regex(/^[a-z0-9_-]+$/, 'ID 只允许小写字母、数字、下划线和短横线'),
+  id: z
+    .string()
+    .min(1)
+    .max(32)
+    .regex(/^[a-z0-9_-]+$/, 'ID 只允许小写字母、数字、下划线和短横线'),
   name: z.string().min(1).max(50),
   description: z.string().max(200).optional(),
 })
@@ -118,47 +122,50 @@ export function createAgentRouter(ctx: AppContext) {
   // POST /api/agents — 创建自定义 Agent (B6-3)
   router.post('/', zValidator('json', createAgentSchema), (c) => {
     const body = c.req.valid('json')
-    const existing = ctx.agentManager.getAgent(body.id)
-    if (existing) {
+
+    try {
+      const profile = ctx.agentManager.createAgent({
+        id: body.id,
+        name: body.name,
+        description: body.description,
+      })
+      return c.json(
+        {
+          code: 'CREATED',
+          message: `Agent "${profile.id}" 创建成功`,
+          data: { id: profile.id, name: profile.name, description: profile.description },
+        },
+        201,
+      )
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
       throw new AppError('ALREADY_EXISTS', {
-        message: `Agent "${body.id}" 已存在`,
+        message: msg,
         data: { resource: 'agent' },
       })
     }
-
-    // TODO: 实际创建 Agent 目录 + config.json
-    // 当前返回占位响应，等 AgentManager.createAgent() 实装后接入
-    return c.json(
-      {
-        code: 'CREATED',
-        message: `Agent "${body.id}" 创建成功`,
-        data: { id: body.id, name: body.name, description: body.description ?? '' },
-      },
-      201,
-    )
   })
 
   // DELETE /api/agents/:id — 删除自定义 Agent (B6-3)
   router.delete('/:id', (c) => {
     const id = c.req.param('id')
-    if (id === ctx.agentManager.activeAgentId) {
+
+    try {
+      ctx.agentManager.deleteAgent(id)
+      return c.json({ code: 'OK', message: `Agent "${id}" 已删除` })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (msg.includes('不存在')) {
+        throw new AppError('AGENT_NOT_FOUND', {
+          message: msg,
+          data: { agentId: id },
+        })
+      }
       throw new AppError('UNPROCESSABLE', {
-        message: '不能删除当前活跃的 Agent',
+        message: msg,
         data: { agentId: id },
       })
     }
-
-    const agent = ctx.agentManager.getAgent(id)
-    if (!agent) {
-      throw new AppError('AGENT_NOT_FOUND', {
-        message: `Agent "${id}" 不存在`,
-        data: { agentId: id },
-      })
-    }
-
-    // TODO: 实际删除 Agent 目录
-    // 当前返回占位响应
-    return c.json({ code: 'OK', message: `Agent "${id}" 已删除` })
   })
 
   // POST /api/agents/:id/enable — 启用 Agent

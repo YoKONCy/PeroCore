@@ -9,6 +9,7 @@
  */
 import { ref, watch, nextTick } from 'vue'
 import { PixelIcon, PButton } from '../pixel'
+import { chatApi } from '../../api/modules/chatApi'
 
 export interface ReActSegment {
   type: 'text' | 'action' | 'thinking' | 'error' | 'reflection'
@@ -42,21 +43,34 @@ watch(
   },
 )
 
-// ── 任务控制 (占位 — TODO: 接入 taskApi) ──
+// ── 任务控制 (P2-11: 接入 chatApi) ──
 
 async function togglePause() {
-  // TODO: 接入 taskApi.pause / taskApi.resume
-  isTaskPaused.value = !isTaskPaused.value
+  const sessionId = 'default' // TODO: 从 props 或 store 获取实际 sessionId
+  try {
+    if (isTaskPaused.value) {
+      await chatApi.resumeTask(sessionId)
+    } else {
+      await chatApi.pauseTask(sessionId)
+    }
+    isTaskPaused.value = !isTaskPaused.value
+  } catch (err) {
+    console.error('任务控制失败:', err)
+  }
 }
 
 async function sendInjection() {
   if (!injection.value.trim()) return
   isSending.value = true
-  // TODO: 接入 taskApi.inject
-  setTimeout(() => {
+  const sessionId = 'default'
+  try {
+    await chatApi.injectInstruction(sessionId, injection.value)
     injection.value = ''
+  } catch (err) {
+    console.error('指令注入失败:', err)
+  } finally {
     isSending.value = false
-  }, 500)
+  }
 }
 
 /** 段类型图标映射 */
@@ -94,7 +108,15 @@ function segIcon(type: string): string {
       <div v-for="(seg, i) in segments" :key="i" :class="['rv-seg', `rv-seg-${seg.type}`]">
         <div class="rv-seg-label">
           <PixelIcon :name="segIcon(seg.type)" size="xs" />
-          <span>{{ { thinking: '思考链', action: '动作', error: '错误', reflection: '自我反思', text: '文本' }[seg.type] }}</span>
+          <span>{{
+            {
+              thinking: '思考链',
+              action: '动作',
+              error: '错误',
+              reflection: '自我反思',
+              text: '文本',
+            }[seg.type]
+          }}</span>
         </div>
         <div class="rv-seg-content">{{ seg.content }}</div>
       </div>
@@ -152,7 +174,7 @@ function segIcon(type: string): string {
   height: 8px;
 }
 .rv-dot-running {
-  background: var(--color-green-500);
+  background: var(--color-emerald-face);
   animation: pulse 2s infinite;
 }
 .rv-dot-paused {
@@ -169,9 +191,15 @@ function segIcon(type: string): string {
   flex-direction: column;
   gap: 12px;
 }
-.rv-body::-webkit-scrollbar { width: 4px; }
-.rv-body::-webkit-scrollbar-track { background: transparent; }
-.rv-body::-webkit-scrollbar-thumb { background: var(--color-blue-200); }
+.rv-body::-webkit-scrollbar {
+  width: 4px;
+}
+.rv-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+.rv-body::-webkit-scrollbar-thumb {
+  background: var(--color-sky-light);
+}
 
 .rv-empty {
   text-align: center;
@@ -210,25 +238,35 @@ function segIcon(type: string): string {
 
 /* 段类型色彩 */
 .rv-seg-thinking {
-  border-left: 3px solid var(--color-blue-500);
-  background: var(--color-blue-50);
+  border-left: 3px solid var(--color-sky-500);
+  background: var(--color-sky-50);
 }
-.rv-seg-thinking .rv-seg-label { color: var(--color-blue-500); }
+.rv-seg-thinking .rv-seg-label {
+  color: var(--color-sky-500);
+}
 
 .rv-seg-error {
-  border-left: 3px solid var(--color-red-500);
+  border-left: 3px solid var(--color-red-face);
   background: rgba(239, 68, 68, 0.03);
 }
-.rv-seg-error .rv-seg-label { color: var(--color-red-500); }
+.rv-seg-error .rv-seg-label {
+  color: var(--color-red-face);
+}
 
 .rv-seg-reflection {
   border-left: 3px solid var(--color-yellow-500);
   background: rgba(234, 179, 8, 0.03);
 }
-.rv-seg-reflection .rv-seg-label { color: var(--color-yellow-500); }
+.rv-seg-reflection .rv-seg-label {
+  color: var(--color-yellow-500);
+}
 
-.rv-seg-action .rv-seg-label { color: var(--color-text-muted); }
-.rv-seg-action .rv-seg-content { font-style: italic; }
+.rv-seg-action .rv-seg-label {
+  color: var(--color-text-muted);
+}
+.rv-seg-action .rv-seg-content {
+  font-style: italic;
+}
 
 /* 注入区 */
 .rv-inject {
@@ -249,11 +287,16 @@ function segIcon(type: string): string {
   transition: border-color 0.2s;
 }
 .rv-inject-input:focus {
-  border-color: var(--color-blue-400);
+  border-color: var(--color-sky-hover);
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 </style>

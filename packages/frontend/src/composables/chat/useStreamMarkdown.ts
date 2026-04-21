@@ -7,7 +7,6 @@
  *
  * 配合 30fps 帧率限制，避免每个 SSE delta 都触发完整重渲。
  *
- * @see 12_FRONTEND_PERFORMANCE.md §3.2
  */
 
 import { ref } from 'vue'
@@ -111,7 +110,6 @@ export function useStreamMarkdown(renderFn: (md: string) => string) {
  * - 工具调用块 (<<<[TOOL_REQUEST]>>> → <<<[/TOOL_REQUEST]>>>)
  * - 完整的段落（以双换行结尾）
  *
- * @see 12_FRONTEND_PERFORMANCE.md §3.2 findStablePrefix()
  */
 function findStablePrefix(text: string, startOffset: number): number {
   let stableCutoff = startOffset
@@ -199,7 +197,6 @@ function findMatchingFenceEnd(text: string, startIdx: number): number {
  * - 完整的 HTML 净化
  * - 语法高亮
  *
- * @see 12_FRONTEND_PERFORMANCE.md §2.7
  */
 function applyStreamFastPipeline(text: string): string {
   let result = text

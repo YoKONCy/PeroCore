@@ -1,10 +1,10 @@
 /**
  * Reflection 编排器
  *
- * 周期性维护任务的总调度器 (10_MEMORY_SYSTEM.md §7)。
- * 协调 7 个子模块按顺序执行: 标注 → 整合 → 审计 → 退役 → 梦境关联 → 图谱维护。
+ * 周期性维护任务的总调度器。
+ * 协调 7 个子模块按顺序执行: 标注 → 整合 → 审计 → 退役 → 梦境关联 → 图谱维护 → 台词更新。
  *
- * 增强功能 (v1 run_maintenance 移植):
+ * 增强功能:
  * - 降本决策: 今日新增记忆 < 阈值时跳过 LLM 密集型步骤
  * - 多 Agent 循环: 扫描全部已启用 Agent
  * - 进度广播: 通过 GatewayHub 推送维护进度
@@ -19,6 +19,7 @@ import type { Auditor } from './auditor'
 import type { RetirementPolicy } from './retirementPolicy'
 import type { DreamAssociator } from './dreamAssociator'
 import type { GraphGardener } from './graphGardener'
+import type { WaifuTextUpdater } from '../../agent/waifuTextUpdater'
 import type { MemoryRepository } from '../../../repositories/memory.repo'
 import type { GatewayHub } from '../../gateway/gatewayHub'
 import { createLogger } from '../../../lib/logger'
@@ -38,6 +39,7 @@ export interface AgentReflectionResult {
   retired: number
   dreamLinked: number
   graphEdges: number
+  waifuTextsUpdated: number
   skippedReason?: string
 }
 
@@ -54,11 +56,11 @@ export interface ReflectionConfig {
   minIntervalMs: number
   /** 每次标注的最大记忆数 */
   maxTagBatch: number
-  /** 每批用 LLM 处理的记忆数 (§11.3) */
+  /** 每批用 LLM 处理的记忆数 */
   tagBatchSize: number
   /** 降本阈值: 今日新增记忆 < 此值则跳过 LLM 密集型步骤 */
   costSavingThreshold: number
-  /** 整合最大轮次 (对应 v1 的 for _ in range(3)) */
+  /** 整合最大轮次 */
   maxConsolidateRounds: number
 }
 
@@ -81,6 +83,7 @@ export interface ReflectionDeps {
   retirementPolicy: RetirementPolicy
   dreamAssociator: DreamAssociator
   graphGardener: GraphGardener
+  waifuTextUpdater?: WaifuTextUpdater
   memoryRepo: MemoryRepository
   gateway?: GatewayHub
 }
@@ -115,7 +118,9 @@ export class ReflectionOrchestrator {
     // 频率限制
     const now = Date.now()
     if (now - this.lastRunTime < this.config.minIntervalMs) {
-      const hoursLeft = ((this.config.minIntervalMs - (now - this.lastRunTime)) / 3600000).toFixed(1)
+      const hoursLeft = ((this.config.minIntervalMs - (now - this.lastRunTime)) / 3600000).toFixed(
+        1,
+      )
       logger.info(`距上次运行不足间隔，跳过 (还需 ${hoursLeft}h)`)
       return { agents: [], totalDurationMs: 0, skippedByThreshold: 0 }
     }
@@ -130,7 +135,7 @@ export class ReflectionOrchestrator {
 
     try {
       // 获取 Agent 列表
-      const agents = agentIds ?? await this.discoverAgents()
+      const agents = agentIds ?? (await this.discoverAgents())
       logger.info(`Reflection 开始 (Agents: ${agents.join(', ')})`)
 
       await this.broadcastProgress('started', `开始维护 ${agents.length} 个 Agent`)
@@ -153,8 +158,13 @@ export class ReflectionOrchestrator {
       this.lastRunTime = Date.now()
 
       // 广播完成
-      const summary = results.map((r) => `${r.agentId}: 标${r.tagged} 合${r.consolidated} 审${r.audited} 退${r.retired}`).join(' | ')
-      await this.broadcastProgress('completed', `维护完成 (${(totalDurationMs / 1000).toFixed(1)}s): ${summary}`)
+      const summary = results
+        .map((r) => `${r.agentId}: 标${r.tagged} 合${r.consolidated} 审${r.audited} 退${r.retired}`)
+        .join(' | ')
+      await this.broadcastProgress(
+        'completed',
+        `维护完成 (${(totalDurationMs / 1000).toFixed(1)}s): ${summary}`,
+      )
 
       logger.info(`Reflection 完成: 耗时 ${totalDurationMs}ms, ${results.length} Agents`)
       return { agents: results, totalDurationMs, skippedByThreshold }
@@ -172,7 +182,7 @@ export class ReflectionOrchestrator {
 
     const result = this.emptyAgentResult(agentId)
 
-    // 降本决策: 检查今日新增记忆数 (v1 L474-500)
+    // 降本决策: 检查今日新增记忆数
     const todayStart = new Date()
     todayStart.setHours(0, 0, 0, 0)
     const todayNewCount = await this.deps.memoryRepo.countSince(agentId, todayStart.getTime())
@@ -193,18 +203,31 @@ export class ReflectionOrchestrator {
       return result
     }
 
-    // 1. 标注 (LLM 密集)
+    // 1. 标注 + 反思 (一次 LLM 调用完成评估 + 合并建议)
+    let mergeGroups: import('./tagger').MergeGroup[] = []
     try {
-      await this.broadcastProgress('tagging', `正在标注 ${agentId} 的记忆`)
-      result.tagged = await this.deps.tagger.tagUntaggedMemories(agentId, this.config.maxTagBatch)
-      logger.debug(`标注完成: ${result.tagged} 条`)
+      await this.broadcastProgress('tagging', `正在反思 ${agentId} 的记忆`)
+      const reflectionResult = await this.deps.tagger.tagUntaggedMemories(
+        agentId,
+        this.config.maxTagBatch,
+      )
+      result.tagged = reflectionResult.tagged
+      mergeGroups = reflectionResult.mergeGroups
+      logger.debug(`标注完成: ${result.tagged} 条, ${mergeGroups.length} 个合并建议`)
     } catch (err) {
-      logger.error(`标注失败: ${err}`)
+      logger.error(`反思失败: ${err}`)
     }
 
-    // 2. 整合 (LLM 密集, 多轮)
+    // 2. 整合 — 优先使用被动模式 (零 LLM Token)
     try {
       await this.broadcastProgress('consolidating', `正在整合 ${agentId} 的记忆`)
+
+      // 被动模式: 应用 Tagger 的合并建议
+      if (mergeGroups.length > 0) {
+        result.consolidated += await this.deps.consolidator.applyMergeGroups(agentId, mergeGroups)
+      }
+
+      // 主动模式: 处理历史积压 (Tagger 不覆盖的旧记忆)
       for (let round = 0; round < this.config.maxConsolidateRounds; round++) {
         const merged = await this.deps.consolidator.consolidate(agentId)
         result.consolidated += merged
@@ -250,6 +273,17 @@ export class ReflectionOrchestrator {
       logger.error(`图谱维护失败: ${err}`)
     }
 
+    // 7. 台词更新 (低成本, 1 次 LLM 调用)
+    if (this.deps.waifuTextUpdater) {
+      try {
+        await this.broadcastProgress('waifu_text', `正在更新 ${agentId} 的台词`)
+        result.waifuTextsUpdated = await this.deps.waifuTextUpdater.update(agentId)
+        logger.debug(`台词更新完成: ${result.waifuTextsUpdated} 个字段`)
+      } catch (err) {
+        logger.error(`台词更新失败: ${err}`)
+      }
+    }
+
     return result
   }
 
@@ -288,6 +322,7 @@ export class ReflectionOrchestrator {
       retired: 0,
       dreamLinked: 0,
       graphEdges: 0,
+      waifuTextsUpdated: 0,
       skippedReason,
     }
   }

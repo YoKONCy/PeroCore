@@ -1,0 +1,120 @@
+# Pero Agent 能力矩阵 — CapabilityGate (D51)
+# 单一权威: (Agent, Mode) → 可用工具 + 技能 + 提示词片段
+#
+# 工具名必须与 ToolRegistry 中注册的 definition.name 完全一致。
+# 已注册工具清单见 packages/backend/src/tools/index.ts
+
+agent: pero
+
+modes:
+  desktop:
+    tools:
+      # 生命周期
+      - finish_task
+      - load_skill
+      # 文件系统
+      - read_file
+      - write_file
+      - get_file_info
+      - list_directory
+      - search_files
+      - code_search
+      # 终端
+      - terminal_execute
+      # 视觉感知
+      - take_screenshot
+      # 网页 & 浏览器
+      - web_fetch
+      - browser_open_url
+      - browser_click
+      - browser_type
+      - browser_scroll
+      - browser_back
+      - browser_get_content
+      # 系统 & 桌面
+      - get_system_info
+      - open_application
+      - get_active_windows
+      - activate_window
+      - automation_execute
+      - get_mouse_position
+      # 提醒 & 日程
+      - set_reminder
+      - list_reminders
+      - cancel_reminder
+      # 脚本编排
+      - run_script
+    skills:
+      - memory_management
+      - code_assistance
+    prompt_fragments:
+      - components/abilities/vision
+      - components/abilities/workspace
+      - components/output/output_constraint
+
+  work:
+    tools:
+      - finish_task
+      - load_skill
+      - read_file
+      - write_file
+      - get_file_info
+      - list_directory
+      - search_files
+      - code_search
+      - terminal_execute
+      - web_fetch
+      - run_script
+    skills:
+      - code_assistance
+    prompt_fragments:
+      - components/abilities/workspace
+      - components/output/output_constraint
+
+  social:
+    tools:
+      - finish_task
+      - set_reminder
+      - list_reminders
+      - cancel_reminder
+      # ── 社交工具 ──
+      - social_send_message
+      - social_get_contacts
+      - social_get_groups
+      - social_get_contact_info
+      - social_get_group_info
+      - social_get_group_members
+      - social_handle_request
+      - social_notify_owner
+    skills: []
+    prompt_fragments: []
+
+  group_chat:
+    tools:
+      - finish_task
+      # ── 据点工具 ──
+      - stronghold_move_to_room
+      - stronghold_list_rooms
+      - stronghold_get_room_info
+      - stronghold_set_environment
+      - stronghold_call_butler
+    skills: []
+    prompt_fragments: []
+
+  lightweight:
+    tools:
+      - finish_task
+      - take_screenshot
+      - set_reminder
+      - list_reminders
+      - cancel_reminder
+    skills: []
+    prompt_fragments:
+      - components/abilities/vision
+
+  companion:
+    tools:
+      - finish_task
+    skills: []
+    prompt_fragments: []
+

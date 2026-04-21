@@ -2,7 +2,6 @@
  * Capability Gate 类型定义
  *
  * (Agent, Mode) → ResolvedCapability 的类型体系。
- * 见 16_CAPABILITY_GATE.md §2.4
  *
  * @module packages/backend/src/capabilities/types
  */

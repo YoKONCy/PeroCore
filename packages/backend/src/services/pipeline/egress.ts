@@ -3,13 +3,11 @@
  *
  * 职责：
  * 1. 过滤 Thinking 块
- * 2. 清理 NIT 标签
+ * 2. 清理残留标签
  * 3. 生成 TTS 文本
  * 4. 保存对话日志 (savePair)
  * 5. 触发 Scorer 攒批检查
  * 6. 广播宠物状态更新
- *
- * 替代 v1 的 ThinkingFilterPostprocessor + NITFilterPostprocessor。
  *
  * @module packages/backend/src/services/pipeline/egress
  */
@@ -34,9 +32,6 @@ const RE_XML_BLOCK = /<([A-Z_]+)>[\s\S]*?<\/\1>/g
 
 /** 残留 HTML 标签 */
 const RE_HTML_TAG = /<[^>]+>/g
-
-/** NIT 工具调用标签 (v1: <nit-XXXX>, v3: <nit>) */
-const RE_NIT_TAG = /<(nit(?:-[a-zA-Z0-9_]+)?)>[\s\S]*?<\/\1>/g
 
 /** RAG 注释块 */
 const RE_RAG_BLOCK = /<!-- PERO_RAG_BLOCK_START[\s\S]*?-->[\s\S]*?<!-- PERO_RAG_BLOCK_END -->/g
@@ -89,9 +84,10 @@ export class EgressService {
     // 2. 持久化对话日志
     let logPairId: string | null = null
     try {
-      const userText = typeof request.messages[request.messages.length - 1]?.content === 'string'
-        ? request.messages[request.messages.length - 1]?.content as string
-        : ''
+      const userText =
+        typeof request.messages[request.messages.length - 1]?.content === 'string'
+          ? (request.messages[request.messages.length - 1]?.content as string)
+          : ''
 
       const result = await this.logService.savePair({
         sessionId,
@@ -139,9 +135,6 @@ function cleanForDisplay(text: string, toolCalls: ToolCallRecord[]): string {
 
   // 移除 RAG 注释块
   cleaned = cleaned.replace(RE_RAG_BLOCK, '')
-
-  // 移除 NIT 标签
-  cleaned = cleaned.replace(RE_NIT_TAG, '')
 
   // 移除 XML 大写标签块
   cleaned = cleaned.replace(RE_XML_BLOCK, '')

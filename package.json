@@ -1,8 +1,9 @@
 {
   "name": "perocore-ts",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.9.0",
   "description": "PeroCore-TS — 萌动链接：PeroperoChat！的 TypeScript 全栈引擎",
+  "main": "dist-electron/main/index.js",
   "author": "YoKONCy",
   "license": "Apache-2.0",
   "repository": {
@@ -15,8 +16,11 @@
   },
   "packageManager": "pnpm@9.15.9",
   "scripts": {
+    "version:sync": "tsx scripts/sync-version.ts",
     "dev": "pnpm --filter @perocore/backend dev",
     "dev:frontend": "pnpm --filter @perocore/frontend dev",
+    "dev:electron": "electron-vite dev --config electron.vite.config.ts",
+    "start": "node scripts/start-dev.mjs",
     "build": "pnpm -r run build",
     "clean": "pnpm -r run clean",
     "test": "vitest",
@@ -30,20 +34,45 @@
     "lint:fix": "eslint . --ext .vue,.js,.ts,.jsx,.tsx --fix",
     "format": "prettier --write \"packages/*/src/**/*.{ts,vue,css,json}\"",
     "format:check": "prettier --check \"packages/*/src/**/*.{ts,vue,css,json}\"",
-    "typecheck": "pnpm -r run typecheck"
+    "typecheck": "pnpm -r run typecheck",
+    "docker:build": "docker compose build",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f backend",
+    "pm2:start": "pm2 start ecosystem.config.cjs --env production",
+    "pm2:stop": "pm2 stop perocore-backend",
+    "pm2:restart": "pm2 restart perocore-backend",
+    "pm2:logs": "pm2 logs perocore-backend",
+    "changeset": "changeset",
+    "changeset:version": "changeset version",
+    "changeset:publish": "changeset publish",
+    "release": "changeset version && pnpm version:sync && pnpm build && changeset publish",
+    "electron:build": "pnpm version:sync && pnpm build && electron-builder --config electron-builder.standard.yml",
+    "electron:build:steam": "cross-env PEROCORE_EDITION=steam pnpm version:sync && pnpm build && electron-builder --config electron-builder.steam.yml",
+    "electron:build:standard": "pnpm version:sync && pnpm build && electron-builder --config electron-builder.standard.yml",
+    "electron:build:portable": "pnpm version:sync && pnpm build && electron-builder --config electron-builder.portable.yml"
   },
   "devDependencies": {
+    "@changesets/changelog-github": "^0.6.0",
+    "@changesets/cli": "^2.31.0",
     "@typescript-eslint/eslint-plugin": "^8.54.0",
     "@typescript-eslint/parser": "^8.54.0",
     "@vitejs/plugin-vue": "^6.0.1",
     "@vue/test-utils": "^2.4.6",
+    "cross-env": "^10.1.0",
+    "electron-builder": "^26.8.1",
+    "electron-vite": "^3.1.0",
     "eslint": "^8.57.1",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.5",
     "eslint-plugin-vue": "^9.33.0",
     "prettier": "^3.8.1",
+    "tsx": "^4.20.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18",
     "vue-eslint-parser": "^10.4.0"
+  },
+  "dependencies": {
+    "steamworks.js": "0.4.0"
   }
 }

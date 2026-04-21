@@ -53,9 +53,7 @@ export const readFileTool: BuiltinTool = {
     }
 
     const truncated = content.length > maxLength
-    return truncated
-      ? content.slice(0, maxLength) + '\n...[内容已截断]...'
-      : content
+    return truncated ? content.slice(0, maxLength) + '\n...[内容已截断]...' : content
   },
 }
 
@@ -95,7 +93,9 @@ export const writeFileTool: BuiltinTool = {
 
       return JSON.stringify({ success: true, path: filePath, bytes: Buffer.byteLength(content) })
     } catch (err) {
-      return JSON.stringify({ error: `写入失败: ${err instanceof Error ? err.message : String(err)}` })
+      return JSON.stringify({
+        error: `写入失败: ${err instanceof Error ? err.message : String(err)}`,
+      })
     }
   },
 }

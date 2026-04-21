@@ -1,27 +1,132 @@
 /**
  * 全局样式入口
  *
- * 加载顺序：设计令牌 → Tailwind → 像素风组件类
+ * 加载顺序：TailwindCSS → 设计令牌 → CSS Reset 补充 → 像素风组件类
+ *
+ * TailwindCSS 4 使用 @import "tailwindcss" 加载，
+ * @theme 指令用于将 tokens.css 的 CSS Variables 桥接为 Tailwind 设计令牌。
  */
 
-/* 1. 设计令牌 (必须最先) */
+/* 1. TailwindCSS 4 (提供 utility classes: flex, p-6, bg-white 等) */
+@import 'tailwindcss';
+
+/* 2. 设计令牌 (CSS Variables 单一真相源) */
 @import './tokens.css';
 
-/* 2. Tailwind 层 */
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/*
+ * 3. @theme 桥接 — 将 tokens.css 的 --color-* 变量注册为 Tailwind 令牌
+ *    tokens.css 已统一使用 --color-* 标准命名，此处直接引用。
+ *
+ *    使用示例:
+ *    - Tailwind class: bg-sky-face, text-pink-shadow, border-amber-outline
+ *    - Scoped CSS:     var(--color-sky-face), var(--color-pink-shadow)
+ *
+ *    ⚠️ 使用规范 (参见 A03_FRONTEND_ARCHITECTURE.md §6):
+ *    - 布局/间距/排版: 允许 Tailwind utility (flex, p-4, text-lg, gap-3)
+ *    - 像素风组件: 必须使用自定义 CSS class (pixel-border-*, pixel-btn-*)
+ *    - 颜色: 优先使用语义令牌 (bg-sky-face), 其次 Tailwind 色板 (bg-slate-50)
+ *    - 禁止: 在 Tailwind 中硬编码 arbitrary values [#ff00ff] 代替令牌
+ */
+@theme inline {
+  /* ── Sky 色系 ── */
+  --color-sky-outline: var(--color-sky-outline);
+  --color-sky-shadow: var(--color-sky-shadow);
+  --color-sky-face: var(--color-sky-face);
+  --color-sky-light: var(--color-sky-light);
+  --color-sky-hover: var(--color-sky-hover);
+  --color-sky-50: var(--color-sky-50);
+  --color-sky-100: var(--color-sky-100);
+
+  /* ── Pink 色系 ── */
+  --color-pink-outline: var(--color-pink-outline);
+  --color-pink-shadow: var(--color-pink-shadow);
+  --color-pink-face: var(--color-pink-face);
+  --color-pink-light: var(--color-pink-light);
+  --color-pink-hover: var(--color-pink-hover);
+
+  /* ── Amber 色系 ── */
+  --color-amber-outline: var(--color-amber-outline);
+  --color-amber-shadow: var(--color-amber-shadow);
+  --color-amber-face: var(--color-amber-face);
+  --color-amber-light: var(--color-amber-light);
+
+  /* ── Emerald 色系 ── */
+  --color-emerald-outline: var(--color-emerald-outline);
+  --color-emerald-shadow: var(--color-emerald-shadow);
+  --color-emerald-face: var(--color-emerald-face);
+  --color-emerald-light: var(--color-emerald-light);
+  --color-emerald-400: var(--color-emerald-400);
+
+  /* ── Indigo 色系 ── */
+  --color-indigo-outline: var(--color-indigo-outline);
+  --color-indigo-shadow: var(--color-indigo-shadow);
+  --color-indigo-face: var(--color-indigo-face);
+  --color-indigo-light: var(--color-indigo-light);
+
+  /* ── Red 色系 ── */
+  --color-red-outline: var(--color-red-outline);
+  --color-red-shadow: var(--color-red-shadow);
+  --color-red-face: var(--color-red-face);
+  --color-red-light: var(--color-red-light);
+  --color-red-400: var(--color-red-400);
+
+  /* ── Moe 色板 ── */
+  --color-moe-sky: var(--color-moe-sky);
+  --color-moe-pink: var(--color-moe-pink);
+  --color-moe-purple: var(--color-moe-purple);
+  --color-moe-yellow: var(--color-moe-yellow);
+  --color-moe-cocoa: var(--color-moe-cocoa);
+  --color-moe-cloud: var(--color-moe-cloud);
+
+  /* ── 语义色 ── */
+  --color-primary: var(--color-primary);
+  --color-accent: var(--color-accent);
+  --color-success: var(--color-success);
+  --color-warning: var(--color-warning);
+  --color-danger: var(--color-danger);
+  --color-info: var(--color-info);
+
+  /* ── 字体 ── */
+  --font-sans: var(--font-sans);
+  --font-pixel: var(--font-pixel);
+}
+
+/* 2. 轻量 CSS Reset (替代 Tailwind base) */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  border-width: 0;
+  border-style: solid;
+}
+
+img,
+video,
+canvas,
+svg {
+  display: block;
+  max-width: 100%;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
 
 /* ── 3. 像素风组件类 (沿用 v1) ── */
 
 /* 通用像素边框 - 经典 3 层结构 (轮廓/阴影/高光) */
 .pixel-border-sm {
   box-shadow:
-    calc(var(--pixel-border-width) * -1) 0 0 0 var(--sky-outline),
-    var(--pixel-border-width) 0 0 0 var(--sky-outline),
-    0 calc(var(--pixel-border-width) * -1) 0 0 var(--sky-outline),
-    0 var(--pixel-border-width) 0 0 var(--sky-outline),
-    inset calc(var(--pixel-border-width) * -1) calc(var(--pixel-border-width) * -1) 0 0 var(--sky-light),
+    calc(var(--pixel-border-width) * -1) 0 0 0 var(--color-sky-outline),
+    var(--pixel-border-width) 0 0 0 var(--color-sky-outline),
+    0 calc(var(--pixel-border-width) * -1) 0 0 var(--color-sky-outline),
+    0 var(--pixel-border-width) 0 0 var(--color-sky-outline),
+    inset calc(var(--pixel-border-width) * -1) calc(var(--pixel-border-width) * -1) 0 0
+      var(--color-sky-light),
     inset var(--pixel-border-width) var(--pixel-border-width) 0 0 #f8fafc;
   border: none;
   transition: var(--transition-normal);
@@ -29,11 +134,12 @@
 
 .pixel-border-sm:hover {
   box-shadow:
-    calc(var(--pixel-border-width) * -1) 0 0 0 var(--sky-hover),
-    var(--pixel-border-width) 0 0 0 var(--sky-hover),
-    0 calc(var(--pixel-border-width) * -1) 0 0 var(--sky-hover),
-    0 var(--pixel-border-width) 0 0 var(--sky-hover),
-    inset calc(var(--pixel-border-width) * -1) calc(var(--pixel-border-width) * -1) 0 0 var(--sky-light),
+    calc(var(--pixel-border-width) * -1) 0 0 0 var(--color-sky-hover),
+    var(--pixel-border-width) 0 0 0 var(--color-sky-hover),
+    0 calc(var(--pixel-border-width) * -1) 0 0 var(--color-sky-hover),
+    0 var(--pixel-border-width) 0 0 var(--color-sky-hover),
+    inset calc(var(--pixel-border-width) * -1) calc(var(--pixel-border-width) * -1) 0 0
+      var(--color-sky-light),
     inset var(--pixel-border-width) var(--pixel-border-width) 0 0 #f0f9ff;
   transform: translateY(-1px);
 }
@@ -44,41 +150,41 @@
 
 /* 像素风按钮 — Sky */
 .pixel-btn-sky {
-  background-color: var(--sky-face);
-  color: var(--text-on-primary);
+  background-color: var(--color-sky-face);
+  color: var(--color-text-on-primary);
   position: relative;
   box-shadow:
-    -2px 0 0 0 var(--sky-outline),
-    2px 0 0 0 var(--sky-outline),
-    0 -2px 0 0 var(--sky-outline),
-    0 2px 0 0 var(--sky-outline),
-    inset -2px -2px 0 0 var(--sky-shadow),
-    inset 2px 2px 0 0 var(--sky-light);
+    -2px 0 0 0 var(--color-sky-outline),
+    2px 0 0 0 var(--color-sky-outline),
+    0 -2px 0 0 var(--color-sky-outline),
+    0 2px 0 0 var(--color-sky-outline),
+    inset -2px -2px 0 0 var(--color-sky-shadow),
+    inset 2px 2px 0 0 var(--color-sky-light);
   transition: transform var(--transition-fast);
 }
 
 .pixel-btn-sky:active {
   transform: translate(2px, 2px);
   box-shadow:
-    -2px 0 0 0 var(--sky-outline),
-    2px 0 0 0 var(--sky-outline),
-    0 -2px 0 0 var(--sky-outline),
-    0 2px 0 0 var(--sky-outline),
-    inset 2px 2px 0 0 var(--sky-shadow);
+    -2px 0 0 0 var(--color-sky-outline),
+    2px 0 0 0 var(--color-sky-outline),
+    0 -2px 0 0 var(--color-sky-outline),
+    0 2px 0 0 var(--color-sky-outline),
+    inset 2px 2px 0 0 var(--color-sky-shadow);
 }
 
 /* 像素风按钮 — Pink */
 .pixel-btn-pink {
-  background-color: var(--pink-face);
-  color: var(--text-on-primary);
+  background-color: var(--color-pink-face);
+  color: var(--color-text-on-primary);
   position: relative;
   box-shadow:
-    -2px 0 0 0 var(--pink-outline),
-    2px 0 0 0 var(--pink-outline),
-    0 -2px 0 0 var(--pink-outline),
-    0 2px 0 0 var(--pink-outline),
-    inset -2px -2px 0 0 var(--pink-shadow),
-    inset 2px 2px 0 0 var(--pink-light);
+    -2px 0 0 0 var(--color-pink-outline),
+    2px 0 0 0 var(--color-pink-outline),
+    0 -2px 0 0 var(--color-pink-outline),
+    0 2px 0 0 var(--color-pink-outline),
+    inset -2px -2px 0 0 var(--color-pink-shadow),
+    inset 2px 2px 0 0 var(--color-pink-light);
   transition: transform var(--transition-fast);
 }
 
@@ -88,18 +194,18 @@
 
 /* 像素风卡片 */
 .pixel-card {
-  background: var(--bg-card);
+  background: var(--color-bg-primary);
   position: relative;
   box-shadow:
-    -4px 0 0 0 var(--text-primary),
-    4px 0 0 0 var(--text-primary),
-    0 -4px 0 0 var(--text-primary),
-    0 4px 0 0 var(--text-primary);
+    -4px 0 0 0 var(--color-text-primary),
+    4px 0 0 0 var(--color-text-primary),
+    0 -4px 0 0 var(--color-text-primary),
+    0 4px 0 0 var(--color-text-primary);
 }
 
 /* 像素亚克力 (毛玻璃) */
 .pixel-glass {
-  background: var(--bg-glass);
+  background: var(--color-bg-secondary);
   backdrop-filter: blur(12px);
   position: relative;
   box-shadow:
@@ -109,10 +215,274 @@
     0 2px 0 0 rgba(255, 255, 255, 0.3);
 }
 
+/* 像素边框 — Sky (天蓝, 主角色) */
+.pixel-border-sky {
+  box-shadow:
+    -2px 0 0 0 var(--color-sky-outline),
+    2px 0 0 0 var(--color-sky-outline),
+    0 -2px 0 0 var(--color-sky-outline),
+    0 2px 0 0 var(--color-sky-outline),
+    inset -2px -2px 0 0 var(--color-sky-hover),
+    inset 2px 2px 0 0 #bae6fd;
+  border: none;
+  transition: var(--transition-normal);
+}
+
+.pixel-border-sky:hover {
+  box-shadow:
+    -2px 0 0 0 var(--color-sky-shadow),
+    2px 0 0 0 var(--color-sky-shadow),
+    0 -2px 0 0 var(--color-sky-shadow),
+    0 2px 0 0 var(--color-sky-shadow),
+    inset -2px -2px 0 0 var(--color-sky-face),
+    inset 2px 2px 0 0 #e0f2fe;
+}
+
+/* 像素边框 — Pink (粉红, 强调色) */
+.pixel-border-pink {
+  box-shadow:
+    -2px 0 0 0 var(--color-pink-outline),
+    2px 0 0 0 var(--color-pink-outline),
+    0 -2px 0 0 var(--color-pink-outline),
+    0 2px 0 0 var(--color-pink-outline),
+    inset -2px -2px 0 0 var(--color-pink-shadow),
+    inset 2px 2px 0 0 var(--color-pink-light);
+  border: none;
+}
+
+/* 像素边框 — Amber (琥珀, 警告) */
+.pixel-border-amber {
+  box-shadow:
+    -2px 0 0 0 var(--color-amber-outline),
+    2px 0 0 0 var(--color-amber-outline),
+    0 -2px 0 0 var(--color-amber-outline),
+    0 2px 0 0 var(--color-amber-outline),
+    inset -2px -2px 0 0 var(--color-amber-shadow),
+    inset 2px 2px 0 0 var(--color-amber-light);
+  border: none;
+}
+
+/* 像素边框 — Emerald (翠绿, 成功) */
+.pixel-border-emerald {
+  box-shadow:
+    -2px 0 0 0 var(--color-emerald-outline),
+    2px 0 0 0 var(--color-emerald-outline),
+    0 -2px 0 0 var(--color-emerald-outline),
+    0 2px 0 0 var(--color-emerald-outline),
+    inset -2px -2px 0 0 var(--color-emerald-shadow),
+    inset 2px 2px 0 0 var(--color-emerald-light);
+  border: none;
+}
+
+/* 像素边框 — Mint (薄荷, emerald 变体) */
+.pixel-border-mint {
+  box-shadow:
+    -2px 0 0 0 #065f46,
+    2px 0 0 0 #065f46,
+    0 -2px 0 0 #065f46,
+    0 2px 0 0 #065f46,
+    inset -2px -2px 0 0 var(--color-emerald-face),
+    inset 2px 2px 0 0 #d1fae5;
+  border: none;
+}
+
+/* 像素边框 — Yellow (黄色) */
+.pixel-border-yellow {
+  box-shadow:
+    -2px 0 0 0 #854d0e,
+    2px 0 0 0 #854d0e,
+    0 -2px 0 0 #854d0e,
+    0 2px 0 0 #854d0e,
+    inset -2px -2px 0 0 var(--color-yellow-500),
+    inset 2px 2px 0 0 #fef9c3;
+  border: none;
+}
+
+/* 像素边框 — Indigo (靛蓝, 信息) */
+.pixel-border-indigo {
+  box-shadow:
+    -2px 0 0 0 var(--color-indigo-outline),
+    2px 0 0 0 var(--color-indigo-outline),
+    0 -2px 0 0 var(--color-indigo-outline),
+    0 2px 0 0 var(--color-indigo-outline),
+    inset -2px -2px 0 0 var(--color-indigo-shadow),
+    inset 2px 2px 0 0 var(--color-indigo-light);
+  border: none;
+}
+
+/* 像素边框 — Dark (深色/工作模式) */
+.pixel-border-dark {
+  box-shadow:
+    -2px 0 0 0 #020617,
+    2px 0 0 0 #020617,
+    0 -2px 0 0 #020617,
+    0 2px 0 0 #020617,
+    inset -2px -2px 0 0 rgba(0, 0, 0, 0.4),
+    inset 2px 2px 0 0 rgba(0, 0, 0, 0.2);
+  border: none;
+  position: relative;
+}
+
+.pixel-border-sm-dark {
+  box-shadow:
+    -2px 0 0 0 #0f172a,
+    2px 0 0 0 #0f172a,
+    0 -2px 0 0 #0f172a,
+    0 2px 0 0 #0f172a,
+    inset -2px -2px 0 0 rgba(0, 0, 0, 0.2),
+    inset 2px 2px 0 0 rgba(0, 0, 0, 0.1);
+  border: none;
+  transition: var(--transition-normal);
+}
+
+.pixel-border-sm-dark:hover {
+  box-shadow:
+    -2px 0 0 0 #334155,
+    2px 0 0 0 #334155,
+    0 -2px 0 0 #334155,
+    0 2px 0 0 #334155,
+    inset -2px -2px 0 0 rgba(0, 0, 0, 0.3);
+}
+
+/* 通用像素边框 (黑色描边) */
+.pixel-border {
+  box-shadow:
+    -2px 0 0 0 #0f172a,
+    2px 0 0 0 #0f172a,
+    0 -2px 0 0 #0f172a,
+    0 2px 0 0 #0f172a,
+    inset -2px -2px 0 0 rgba(0, 0, 0, 0.1),
+    inset 2px 2px 0 0 rgba(0, 0, 0, 0.05);
+  border: none;
+  position: relative;
+}
+
+/* ── Moe 风格系列 (萌动链接专属) ── */
+
+.pixel-border-moe {
+  box-shadow:
+    -2px 0 0 0 var(--color-moe-cocoa),
+    2px 0 0 0 var(--color-moe-cocoa),
+    0 -2px 0 0 var(--color-moe-cocoa),
+    0 2px 0 0 var(--color-moe-cocoa),
+    inset -2px -2px 0 0 rgba(0, 0, 0, 0.1),
+    inset 2px 2px 0 0 rgba(255, 255, 255, 0.3);
+  border: none;
+  position: relative;
+}
+
+.pixel-card-moe {
+  background: var(--color-moe-card-bg);
+  backdrop-filter: blur(8px);
+  box-shadow:
+    -2px 0 0 0 var(--color-moe-cocoa),
+    2px 0 0 0 var(--color-moe-cocoa),
+    0 -2px 0 0 var(--color-moe-cocoa),
+    0 2px 0 0 var(--color-moe-cocoa),
+    inset -2px -2px 0 0 rgba(249, 168, 212, 0.2),
+    inset 2px 2px 0 0 rgba(255, 255, 255, 0.5);
+  border: none;
+  position: relative;
+}
+
+.pixel-btn-moe-pink {
+  background-color: var(--color-moe-pink);
+  color: white;
+  box-shadow:
+    -2px 0 0 0 var(--color-moe-cocoa),
+    2px 0 0 0 var(--color-moe-cocoa),
+    0 -2px 0 0 var(--color-moe-cocoa),
+    0 2px 0 0 var(--color-moe-cocoa),
+    inset -2px -2px 0 0 var(--color-pink-shadow),
+    inset 2px 2px 0 0 var(--color-pink-light);
+  border: none;
+  position: relative;
+  transition: var(--transition-fast);
+}
+
+.pixel-btn-moe-pink:hover {
+  background-color: var(--color-pink-face);
+  transform: translateY(-2px);
+}
+
+.pixel-btn-moe-pink:active {
+  transform: translate(1px, 1px);
+}
+
+.pixel-bg-moe {
+  background: var(--color-moe-bg-gradient);
+}
+
+/* ── 额外像素按钮 ── */
+
+/* 像素按钮 — Yellow (黄色) */
+.pixel-btn-yellow {
+  background-color: var(--color-amber-face);
+  color: white;
+  position: relative;
+  box-shadow:
+    -2px 0 0 0 #854d0e,
+    2px 0 0 0 #854d0e,
+    0 -2px 0 0 #854d0e,
+    0 2px 0 0 #854d0e,
+    inset -2px -2px 0 0 var(--color-yellow-500),
+    inset 2px 2px 0 0 #fef9c3;
+  transition: transform var(--transition-fast);
+}
+
+.pixel-btn-yellow:active {
+  transform: translate(2px, 2px);
+  box-shadow:
+    -2px 0 0 0 #854d0e,
+    2px 0 0 0 #854d0e,
+    0 -2px 0 0 #854d0e,
+    0 2px 0 0 #854d0e,
+    inset 2px 2px 0 0 var(--color-yellow-500);
+}
+
+/* 像素按钮 — Red (红色, 危险) */
+.pixel-btn-red {
+  background-color: var(--color-red-face);
+  color: white;
+  position: relative;
+  box-shadow:
+    -2px 0 0 0 var(--color-red-outline),
+    2px 0 0 0 var(--color-red-outline),
+    0 -2px 0 0 var(--color-red-outline),
+    0 2px 0 0 var(--color-red-outline),
+    inset -2px -2px 0 0 var(--color-red-shadow),
+    inset 2px 2px 0 0 var(--color-red-light);
+  transition: transform var(--transition-fast);
+}
+
+.pixel-btn-red:active {
+  transform: translate(2px, 2px);
+  box-shadow:
+    -2px 0 0 0 var(--color-red-outline),
+    2px 0 0 0 var(--color-red-outline),
+    0 -2px 0 0 var(--color-red-outline),
+    0 2px 0 0 var(--color-red-outline),
+    inset 2px 2px 0 0 var(--color-red-shadow);
+}
+
+/* 像素步进过渡 */
+.transition-pixel {
+  transition-timing-function: steps(4);
+}
+
 /* 像素网格叠加层 */
 .pixel-grid-overlay {
   position: relative;
   overflow: hidden;
+}
+
+.pixel-grid-overlay::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at center, transparent 0%, rgba(240, 242, 255, 0.15) 100%);
+  pointer-events: none;
+  z-index: 0;
 }
 
 .pixel-grid-overlay::after {
@@ -131,33 +501,135 @@
 /* ── 像素风动画 ── */
 
 @keyframes pixel-pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.7; transform: scale(0.95); }
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(0.95);
+  }
 }
 
 @keyframes pixel-bounce {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-4px); }
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
 }
 
 @keyframes pixel-float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-2px); }
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-2px);
+  }
 }
 
 @keyframes jelly {
-  0%, 100% { transform: scale(1, 1); }
-  25% { transform: scale(0.98, 1.02); }
-  50% { transform: scale(1.02, 0.98); }
-  75% { transform: scale(0.99, 1.01); }
+  0%,
+  100% {
+    transform: scale(1, 1);
+  }
+  25% {
+    transform: scale(0.98, 1.02);
+  }
+  50% {
+    transform: scale(1.02, 0.98);
+  }
+  75% {
+    transform: scale(0.99, 1.01);
+  }
 }
 
-.animate-pixel-pulse { animation: pixel-pulse 2s steps(4) infinite; }
-.animate-pixel-bounce { animation: pixel-bounce 0.6s steps(2) infinite; }
-.animate-pixel-float { animation: pixel-float 2s steps(4) infinite; }
-.bouncy-hover:hover { animation: jelly 0.4s steps(4); }
-.pixel-hover-lift:hover { transform: translateY(-2px); }
-.press-effect:active { transform: translate(1px, 1px); }
+.animate-pixel-pulse {
+  animation: pixel-pulse 2s steps(4) infinite;
+}
+.animate-pixel-bounce {
+  animation: pixel-bounce 0.6s steps(2) infinite;
+}
+.animate-pixel-float {
+  animation: pixel-float 2s steps(4) infinite;
+}
+.animate-pixel-shake {
+  animation: pixel-shake 0.3s steps(3) infinite;
+}
+.animate-pixel-bg-float {
+  animation: pixel-bg-float 20s linear infinite;
+}
+.animate-pixel-star {
+  animation: pixel-star-pulse 1.5s steps(3) infinite;
+}
+.animate-pixel-bubble {
+  animation: pixel-bubble-float 4s steps(8) infinite;
+}
+.bouncy-hover:hover {
+  animation: jelly 0.4s steps(4);
+}
+.pixel-hover-lift:hover {
+  transform: translateY(-2px);
+}
+.press-effect:active {
+  transform: translate(1px, 1px);
+}
+
+/* 缺失动画 keyframes (从 v1 搬迁) */
+
+@keyframes pixel-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-2px);
+  }
+  75% {
+    transform: translateX(2px);
+  }
+}
+
+@keyframes pixel-bg-float {
+  0% {
+    background-position: 0 0;
+  }
+  100% {
+    background-position: 32px 32px;
+  }
+}
+
+@keyframes pixel-star-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.4;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 0.8;
+  }
+}
+
+@keyframes pixel-bubble-float {
+  0% {
+    transform: translateY(0) translateX(0);
+  }
+  33% {
+    transform: translateY(-10px) translateX(5px);
+  }
+  66% {
+    transform: translateY(-20px) translateX(-5px);
+  }
+  100% {
+    transform: translateY(-30px) translateX(0);
+    opacity: 0;
+  }
+}
 
 /* ── 自定义滚动条 (像素风) ── */
 
@@ -167,19 +639,19 @@
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--scrollbar-track);
-  box-shadow: inset 2px 0 0 0 var(--scrollbar-track-border);
+  background: var(--color-scrollbar-track);
+  box-shadow: inset 2px 0 0 0 var(--color-scrollbar-track-border);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--scrollbar-thumb);
+  background: var(--color-scrollbar-thumb);
   box-shadow:
-    inset -2px -2px 0 0 var(--scrollbar-thumb-shadow),
-    inset 2px 2px 0 0 var(--scrollbar-thumb-light);
+    inset -2px -2px 0 0 var(--color-scrollbar-thumb-shadow),
+    inset 2px 2px 0 0 var(--color-scrollbar-thumb-light);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--sky-hover);
+  background: var(--color-sky-hover);
 }
 
 /* ── 全局基础 ── */
@@ -188,9 +660,9 @@ body {
   margin: 0;
   overflow: hidden;
   user-select: none;
-  background-color: var(--bg-page);
+  background-color: var(--color-bg-page);
   font-family: var(--font-sans);
-  color: var(--text-primary);
+  color: var(--color-text-primary);
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;

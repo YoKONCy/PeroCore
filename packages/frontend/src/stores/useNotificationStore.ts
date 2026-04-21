@@ -1,7 +1,7 @@
 /**
  * useNotificationStore — 全局通知系统
  *
- * 对接 ErrorSeverity 三级映射 (05_FRONTEND_ARCHITECTURE.md §3.2)：
+ * 对接 ErrorSeverity 三级映射：
  * - SILENT → 仅记日志
  * - TOAST → 非阻断弹出
  * - MODAL → 阻断对话框
@@ -106,7 +106,7 @@ export const useNotificationStore = defineStore('notification', () => {
   }
 })
 
-/** 错误码 → UI 严重性映射 (05§3.2) */
+/** 错误码 → UI 严重性映射 */
 const ERROR_UI_MAP: Record<string, NotificationSeverity> = {
   VALIDATION_ERROR: 'toast',
   LLM_ERROR: 'toast',

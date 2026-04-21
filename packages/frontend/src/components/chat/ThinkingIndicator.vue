@@ -36,21 +36,30 @@ withDefaults(defineProps<Props>(), {
 .thinking-dot {
   width: 6px;
   height: 6px;
-  background: var(--color-blue-400);
+  background: var(--color-sky-hover);
   animation: dot-bounce 1s infinite;
 }
-.thinking-dot-2 { animation-delay: 0.1s; }
-.thinking-dot-3 { animation-delay: 0.2s; }
+.thinking-dot-2 {
+  animation-delay: 0.1s;
+}
+.thinking-dot-3 {
+  animation-delay: 0.2s;
+}
 
 .thinking-text {
   font-size: 12px;
   font-weight: 700;
-  color: var(--color-blue-400);
+  color: var(--color-sky-hover);
   margin-left: 8px;
 }
 
 @keyframes dot-bounce {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-4px); }
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
 }
 </style>

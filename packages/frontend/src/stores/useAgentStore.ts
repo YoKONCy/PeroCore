@@ -1,7 +1,6 @@
 /**
  * useAgentStore — Agent 全局状态
  *
- * @see 05_FRONTEND_ARCHITECTURE.md §4.1
  */
 
 import { defineStore } from 'pinia'

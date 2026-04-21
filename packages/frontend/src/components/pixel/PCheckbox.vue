@@ -2,7 +2,6 @@
 /**
  * PCheckbox — 像素风复选框
  *
- * 迁移自 v1，保留勾选动画 + 猫爪悬浮提示。
  */
 import { computed } from 'vue'
 import PixelIcon from './PixelIcon.vue'
@@ -39,10 +38,7 @@ function toggle() {
 </script>
 
 <template>
-  <div
-    :class="['p-checkbox-wrapper', { 'p-checkbox-disabled': disabled }]"
-    @click="toggle"
-  >
+  <div :class="['p-checkbox-wrapper', { 'p-checkbox-disabled': disabled }]" @click="toggle">
     <!-- 复选框主体 -->
     <div :class="['p-checkbox-box', { 'p-checkbox-checked': isChecked }]">
       <PixelIcon v-if="isChecked" name="check" size="xs" class="p-checkbox-icon" />
@@ -85,15 +81,15 @@ function toggle() {
   background: var(--color-bg-primary);
 }
 .p-checkbox-wrapper:not(.p-checkbox-disabled):hover .p-checkbox-box {
-  border-color: var(--color-blue-400);
+  border-color: var(--color-sky-hover);
 }
 .p-checkbox-wrapper:active .p-checkbox-box {
   transform: scale(0.9);
 }
 
 .p-checkbox-checked {
-  background: var(--color-blue-400);
-  border-color: var(--color-blue-400);
+  background: var(--color-sky-hover);
+  border-color: var(--color-sky-hover);
   color: white;
   box-shadow: 0 0 8px rgba(56, 189, 248, 0.2);
 }
@@ -109,7 +105,7 @@ function toggle() {
   align-items: center;
   justify-content: center;
   opacity: 0;
-  color: var(--color-blue-400);
+  color: var(--color-sky-hover);
   transition: opacity 0.2s;
 }
 .p-checkbox-wrapper:hover .p-checkbox-hover-hint {
@@ -122,11 +118,17 @@ function toggle() {
   transition: color 0.2s;
 }
 .p-checkbox-wrapper:hover .p-checkbox-label {
-  color: var(--color-blue-500);
+  color: var(--color-sky-500);
 }
 
 @keyframes zoom-in {
-  from { transform: scale(0.3); opacity: 0; }
-  to { transform: scale(1); opacity: 1; }
+  from {
+    transform: scale(0.3);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 </style>

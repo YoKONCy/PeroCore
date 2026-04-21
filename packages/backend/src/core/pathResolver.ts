@@ -2,8 +2,8 @@
  * 虚拟路径管理器
  *
  * 处理逻辑路径 (@app/@data/@workshop/@temp) 到物理路径的映射。
- * 两种部署模式通用，数据源差异通过 roots 配置自然消化 (14_STEAM_INTEGRATION.md §3)。
- * 路径永远不能硬编码 (11_CROSS_PLATFORM.md §1)。
+ * 两种部署模式通用，数据源差异通过 roots 配置自然消化。
+ * 路径永远不能硬编码。
  *
  * @module packages/backend/src/core/pathResolver
  */
@@ -35,7 +35,7 @@ export interface RuntimeEnv {
 }
 
 // ─────────────────────────────────────────────
-// 逻辑前缀常量 (14_STEAM_INTEGRATION.md §3.1)
+// 逻辑前缀常量
 // ─────────────────────────────────────────────
 
 /** 支持的逻辑路径前缀 */
@@ -93,7 +93,7 @@ export class PathResolver {
       throw new Error('路径不能为空')
     }
 
-    // 规范化路径分隔符 (11_CROSS_PLATFORM.md §1.3)
+    // 规范化路径分隔符
     const normalized = logicalPath.replace(/\\/g, '/')
 
     // 匹配逻辑前缀

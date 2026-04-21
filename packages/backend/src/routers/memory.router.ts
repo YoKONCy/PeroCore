@@ -1,7 +1,7 @@
 /**
  * 记忆 API 路由
  *
- * CRUD + 语义搜索端点 (04_BACKEND_ARCHITECTURE.md §2)。
+ * CRUD + 语义搜索端点。
  *
  * @module packages/backend/src/routers/memory.router
  */
@@ -50,6 +50,14 @@ export function createMemoryRouter(ctx: AppContext) {
       minScore: body.minScore,
     })
     return c.json({ code: 'OK', message: '搜索完成', data: results })
+  })
+
+  // GET /api/memories/graph — 图谱数据
+  router.get('/graph', async (c) => {
+    const agentId = c.req.query('agentId') ?? 'pero'
+    const limit = Number(c.req.query('limit') ?? 100)
+    const graph = await ctx.memoryService.getGraph(agentId, limit)
+    return c.json({ code: 'OK', message: '获取成功', data: graph })
   })
 
   // DELETE /api/memories/:id — 删除

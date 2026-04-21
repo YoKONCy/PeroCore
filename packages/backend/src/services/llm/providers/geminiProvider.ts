@@ -31,7 +31,7 @@ const logger = createLogger('GeminiProvider')
 /** Gemini 默认 API 基址 */
 const GEMINI_DEFAULT_BASE = 'https://generativelanguage.googleapis.com'
 
-/** Gemini 安全设置 — 全部关闭 (继承 v1 行为) */
+/** Gemini 安全设置 — 全部关闭 */
 const SAFETY_SETTINGS = [
   { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
   { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },

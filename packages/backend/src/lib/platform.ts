@@ -2,7 +2,7 @@
  * 平台检测与运行时环境常量
  *
  * 提供操作系统、运行时和部署形态检测常量。
- * 后端服务根据这些常量选择平台特化策略 (11_CROSS_PLATFORM.md §3.1)。
+ * 后端服务根据这些常量选择平台特化策略。
  *
  * @module packages/backend/src/lib/platform
  */

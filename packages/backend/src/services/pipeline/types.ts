@@ -4,7 +4,7 @@
  * 5 阶段管道架构：
  * Ingress → Enrichment → PromptAssembly → ReActLoop → Egress
  *
- * 每个 Phase 的输入/输出都有严格类型 (替代 v1 的 Dict[str, Any] 黑洞)。
+ * 每个 Phase 的输入/输出都有严格类型。
  *
  * @module packages/backend/src/services/pipeline/types
  */
@@ -109,6 +109,8 @@ export interface EnrichedContext {
   mind: string
   /** 主人名 */
   ownerName: string
+  /** 运行环境信息 (跨平台, 由 StateEnricher 注入) */
+  environmentInfo: string
   /** 用户画像 */
   userPersona: string
 
@@ -117,6 +119,12 @@ export interface EnrichedContext {
   enableVision: boolean
   /** 是否启用语音 */
   enableVoice: boolean
+
+  // ── 社交上下文 ──
+  /** 社交平台最近消息 (由 SocialEnricher 注入) */
+  socialContext: string
+  /** 社交跨会话记忆 (从 social.tdb 图谱检索, 由 SocialEnricher 注入) */
+  socialMemoryContext: string
 }
 
 // ─────────────────────────────────────────────

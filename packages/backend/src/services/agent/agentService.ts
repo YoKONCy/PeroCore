@@ -4,10 +4,8 @@
  * 整个系统的主编排器，串联 5 阶段管道：
  * Ingress → Enrichment → PromptAssembly → Synthesis → Egress
  *
- * 替代 v1 的 agent_service.py (516行)。
- *
  * 主要改进:
- * - Profile 门控 (17_MODE_SYSTEM.md §2.2)
+ * - Profile 门控
  * - Synthesis 独立 LLM 层 (替代 runReActLoop)
  * - ConfigRepo 模型解析 (替代硬编码 env)
  * - EgressService 自动触发 Scorer 攒批
@@ -22,12 +20,19 @@ import type { ConversationLogService } from '../memory/conversationLog'
 import type { ConfigRepository } from '../../repositories/config.repo'
 import type { AgentManager } from './agentManager'
 import type { ToolExecutor, CancelChecker, ReActYield } from './reactLoop'
-import type { ChatRequest, ChatMessage, Enricher, ToolCallRecord, ToolDefinition } from '../pipeline/types'
+import type {
+  ChatRequest,
+  ChatMessage,
+  Enricher,
+  ToolCallRecord,
+  ToolDefinition,
+} from '../pipeline/types'
 import type { DesktopProfile } from '../session/sessionService'
 import { runIngress } from '../pipeline/ingress'
 import { runEgress } from '../pipeline/egress'
 import { runEnrichment } from '../pipeline/enrichers/enrichmentRunner'
 import { runReActLoop } from './reactLoop'
+import { AppError } from '../../lib/appError'
 import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('AgentService')
@@ -206,7 +211,7 @@ export class AgentService {
     })
 
     // B6-2: finish_task 广播 Gateway
-    if (this.deps.gatewayBroadcast && toolCalls.some(tc => tc.name === 'finish_task')) {
+    if (this.deps.gatewayBroadcast && toolCalls.some((tc) => tc.name === 'finish_task')) {
       this.deps.gatewayBroadcast('stream_end', { sessionId }).catch(() => {})
     }
 
@@ -278,7 +283,7 @@ export class AgentService {
   }
 
   /**
-   * 解析 Profile (17_MODE_SYSTEM.md §2.2)
+   * 解析 Profile
    *
    * 优先级: ConfigRepo > 默认
    */
@@ -288,7 +293,7 @@ export class AgentService {
   }
 
   /**
-   * Profile 门控 — 过滤 Enricher (§2.1)
+   * Profile 门控 — 过滤 Enricher
    *
    * - default: 全部启用
    * - lightweight: 跳过 MemoryEnricher、ToolEnricher (省 Token)
@@ -332,19 +337,35 @@ export class AgentService {
       const globalApiBase = await this.deps.configRepo.get('global_llm_api_base')
       const globalModel = await this.deps.configRepo.get('global_llm_model_id')
       const globalProvider = await this.deps.configRepo.get('global_llm_provider')
+
+      if (!globalModel) {
+        throw new AppError('CONFIG_ERROR', {
+          message: '全局 LLM 配置缺少 model_id，请在设置中配置模型',
+        })
+      }
+
       return {
         provider: globalProvider ?? 'openai',
-        modelId: globalModel ?? 'gpt-4o-mini',
+        modelId: globalModel,
         apiKey: globalApiKey,
         apiBase: globalApiBase ?? undefined,
       }
     }
 
     // 环境变量兜底
+    const envApiKey = process.env.PERO_LLM_API_KEY
+    const envModel = process.env.PERO_LLM_MODEL
+    if (!envApiKey || !envModel) {
+      throw new AppError('CONFIG_ERROR', {
+        message:
+          'LLM 未配置: 请设置全局 API Key 和模型，或环境变量 PERO_LLM_API_KEY / PERO_LLM_MODEL',
+      })
+    }
+
     return {
       provider: process.env.PERO_LLM_PROVIDER ?? 'openai',
-      modelId: process.env.PERO_LLM_MODEL ?? 'gpt-4o-mini',
-      apiKey: process.env.PERO_LLM_API_KEY ?? '',
+      modelId: envModel,
+      apiKey: envApiKey,
       apiBase: process.env.PERO_LLM_API_BASE,
     }
   }

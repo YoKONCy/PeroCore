@@ -1,0 +1,295 @@
+# 发布流水线 — PeroCore
+# 触发: push tag v* 或手动触发
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '发布版本号'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  # ── 1. 质量门禁 (复用 CI) ──
+  ci:
+    name: Quality Gate
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  # ── 2. Electron 标准版 (NSIS 安装包) ──
+  build-standard:
+    name: Build Standard (Windows)
+    runs-on: windows-latest
+    needs: ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: 版本号同步
+        run: pnpm version:sync
+
+      - name: 构建前端 + 后端
+        run: pnpm build
+
+      - name: 构建 Electron 标准版 (NSIS)
+        run: pnpm exec electron-builder --config electron-builder.standard.yml
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PEROCORE_EDITION: standard
+
+      # 验证: 确认标准版不含 Steam 组件
+      - name: 验证 Steam 组件已排除
+        shell: powershell
+        run: |
+          $UNPACKED = "dist-electron/win-unpacked"
+          $steamFiles = Get-ChildItem $UNPACKED -Recurse -Include "steam_api64.dll","steamworksjs.*.node","steam_appid.txt" -ErrorAction SilentlyContinue
+          if ($steamFiles.Count -gt 0) {
+            Write-Error "❌ 标准版中发现 Steam 组件！构建被拒绝。"
+            $steamFiles | ForEach-Object { Write-Error "  → $($_.FullName)" }
+            exit 1
+          }
+          Write-Host "✅ 标准版 Steam 组件检查通过"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: electron-standard
+          path: dist-electron/*.exe
+
+  # ── 3. Electron 便携版 (ZIP 解压即用) ──
+  build-portable:
+    name: Build Portable (Windows)
+    runs-on: windows-latest
+    needs: ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: 版本号同步
+        run: pnpm version:sync
+
+      - name: 构建前端 + 后端
+        run: pnpm build
+
+      - name: 构建 Electron 便携版
+        run: pnpm exec electron-builder --config electron-builder.portable.yml
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PEROCORE_EDITION: standard
+
+      # 验证: 确认便携版不含 Steam 组件
+      - name: 验证 Steam 组件已排除
+        shell: powershell
+        run: |
+          $portableExe = Get-ChildItem "dist-electron" -Filter "*.exe" | Select-Object -First 1
+          if ($portableExe) {
+            Write-Host "✅ 便携版构建产物: $($portableExe.Name)"
+          } else {
+            Write-Error "❌ 未找到便携版构建产物"
+            exit 1
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: electron-portable
+          path: dist-electron/*Portable*.exe
+
+  # ── 4. Electron Steam 版 (仅限 release 分支或手动触发) ──
+  build-steam:
+    name: Build Steam (Windows)
+    runs-on: windows-latest
+    needs: ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: 版本号同步
+        run: pnpm version:sync
+
+      - name: 构建前端 + 后端
+        run: pnpm build
+
+      - name: 构建 Electron Steam 版
+        run: pnpm exec electron-builder --config electron-builder.steam.yml
+        env:
+          PEROCORE_EDITION: steam
+
+      # 验证: 确认 Steam 版包含必要的 Steam 组件
+      - name: 验证 Steam 组件已包含
+        shell: powershell
+        run: |
+          $UNPACKED = "dist-electron/win-unpacked"
+          $dll = Test-Path "$UNPACKED/steam_api64.dll"
+          $appid = Test-Path "$UNPACKED/steam_appid.txt"
+          if (!$dll -or !$appid) {
+            Write-Error "❌ Steam 版缺少必要组件 (steam_api64.dll / steam_appid.txt)"
+            exit 1
+          }
+          Write-Host "✅ Steam 版 Steam 组件校验通过"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: electron-steam
+          path: dist-electron/win-unpacked/**/*
+
+  # ── 5. Docker 镜像构建 ──
+  build-docker:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 提取版本号
+        id: meta
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+        if: github.event_name != 'pull_request'
+
+      - name: 构建后端镜像
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.backend
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/perocore-backend:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/perocore-backend:${{ steps.meta.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: 构建前端镜像
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.frontend
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/perocore-frontend:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/perocore-frontend:${{ steps.meta.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ── 6. GitHub Release ──
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [build-standard, build-portable, build-steam, build-docker]
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: electron-standard
+          path: release-assets/
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: electron-portable
+          path: release-assets/
+
+      # Steam 版不上传到 GitHub Release（通过 SteamPipe 发布）
+
+      - name: 生成 Changelog
+        id: changelog
+        run: |
+          # 从最近两个 tag 之间提取 commit 信息
+          PREV_TAG=$(git tag --sort=-v:refname | sed -n '2p')
+          if [ -z "$PREV_TAG" ]; then
+            COMMITS=$(git log --oneline --no-decorate)
+          else
+            COMMITS=$(git log --oneline --no-decorate "${PREV_TAG}..HEAD")
+          fi
+          echo "commits<<EOF" >> $GITHUB_OUTPUT
+          echo "$COMMITS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: 创建 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          name: '萌动链接：PeroperoChat！ ${{ github.ref_name }}'
+          body: |
+            ## 🎉 ${{ github.ref_name }} 版本更新
+
+            > 萌动链接：PeroperoChat！是一款开源的 AI 桌面伴侣应用，集成本地大模型、3D 桌宠、Plugin 系统与多智能体框架。
+
+            ---
+
+            ### 📦 下载说明
+
+            | 文件 | 说明 | 推荐人群 |
+            |------|------|----------|
+            | `*-Setup-*.exe` | 安装版 | 普通用户，数据存储在系统用户目录 |
+            | `*-Portable-*.exe` | 便携版（解压即用） | 随身携带或多设备使用 |
+
+            > 🎮 **Steam 用户**：请直接通过 Steam 客户端获取更新。
+
+            ---
+
+            ### 📝 变更记录
+
+            ${{ steps.changelog.outputs.commits }}
+
+            ---
+
+            ### 🐳 Docker 用户
+
+            ```bash
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/perocore-backend:${{ github.ref_name }}
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/perocore-frontend:${{ github.ref_name }}
+            ```
+
+            ---
+
+            *由 GitHub Actions 自动构建发布*
+          draft: false
+          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

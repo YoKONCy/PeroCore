@@ -116,8 +116,8 @@ const emit = defineEmits<{
 }
 .sh-sidebar-icon {
   padding: 10px;
-  background: var(--color-pink-200);
-  color: var(--color-pink-600);
+  background: var(--color-pink-light);
+  color: var(--color-pink-shadow);
 }
 .sh-sidebar-title {
   font-size: 20px;
@@ -140,7 +140,9 @@ const emit = defineEmits<{
   border-bottom: 2px solid var(--color-border);
   overflow-x: auto;
 }
-.sh-fac-tabs::-webkit-scrollbar { height: 0; }
+.sh-fac-tabs::-webkit-scrollbar {
+  height: 0;
+}
 
 .sh-fac-btn {
   display: flex;
@@ -158,11 +160,14 @@ const emit = defineEmits<{
   transition: all 0.2s;
   flex-shrink: 0;
 }
-.sh-fac-btn:hover { color: var(--color-pink-500); border-color: var(--color-pink-200); }
+.sh-fac-btn:hover {
+  color: var(--color-pink-face);
+  border-color: var(--color-pink-light);
+}
 .sh-fac-btn-active {
-  background: var(--color-pink-500);
+  background: var(--color-pink-face);
   color: white;
-  border-color: var(--color-pink-600);
+  border-color: var(--color-pink-shadow);
 }
 .sh-fac-label {
   text-transform: uppercase;
@@ -179,9 +184,15 @@ const emit = defineEmits<{
   overflow-y: auto;
   padding: 16px;
 }
-.sh-rooms::-webkit-scrollbar { width: 4px; }
-.sh-rooms::-webkit-scrollbar-track { background: transparent; }
-.sh-rooms::-webkit-scrollbar-thumb { background: var(--color-blue-200); }
+.sh-rooms::-webkit-scrollbar {
+  width: 4px;
+}
+.sh-rooms::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sh-rooms::-webkit-scrollbar-thumb {
+  background: var(--color-sky-light);
+}
 
 .sh-rooms-header {
   display: flex;
@@ -197,7 +208,11 @@ const emit = defineEmits<{
   letter-spacing: 0.15em;
   flex-shrink: 0;
 }
-.sh-rooms-line { flex: 1; height: 1px; background: var(--color-border); }
+.sh-rooms-line {
+  flex: 1;
+  height: 1px;
+  background: var(--color-border);
+}
 
 .sh-loading {
   display: flex;
@@ -221,7 +236,9 @@ const emit = defineEmits<{
   position: relative;
   margin-bottom: 8px;
 }
-.sh-room:hover { background: var(--color-bg-secondary); }
+.sh-room:hover {
+  background: var(--color-bg-secondary);
+}
 .sh-room-active {
   background: var(--color-bg-primary);
   border-color: var(--color-border);
@@ -234,11 +251,19 @@ const emit = defineEmits<{
   top: 8px;
   bottom: 8px;
   width: 3px;
-  background: var(--color-pink-500);
+  background: var(--color-pink-face);
 }
-.sh-room-icon { color: var(--color-text-muted); flex-shrink: 0; }
-.sh-room-active .sh-room-icon { color: var(--color-pink-500); }
-.sh-room-info { flex: 1; min-width: 0; }
+.sh-room-icon {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+.sh-room-active .sh-room-icon {
+  color: var(--color-pink-face);
+}
+.sh-room-info {
+  flex: 1;
+  min-width: 0;
+}
 .sh-room-name {
   display: block;
   font-size: 13px;

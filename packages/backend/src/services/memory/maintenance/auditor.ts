@@ -4,7 +4,7 @@
  * 检测矛盾记忆、重复记忆、错误/噪音记忆，
  * 通过 LLM 判定后自动清理。
  *
- * 增强功能 (v1 _clean_invalid_memories 扩展):
+ * 增强功能:
  * 1. 内容哈希去重: 完全重复的记忆直接清理 (不消耗 LLM Token)
  * 2. LLM 审计: 识别矛盾/噪音/过期记忆
  * 3. 安全检查: 只删除本次审计范围内的记忆
@@ -15,6 +15,7 @@
 import type { MemoryRepository } from '../../../repositories/memory.repo'
 import type { VectorWriteHelper } from '../../../shared/vectorWriteHelper'
 import type { LlmService, ModelConfig } from '../../llm/llmService'
+import type { MdpEngine } from '../../prompt/mdpEngine'
 import { parseLlmJson } from '../../../shared/llmJsonParser'
 import { createLogger } from '../../../lib/logger'
 
@@ -44,6 +45,7 @@ interface AuditorDeps {
   vectorWriteHelper: VectorWriteHelper
   llmService: LlmService
   getModelConfig: () => Promise<ModelConfig | null>
+  mdpEngine: MdpEngine
 }
 
 // ─────────────────────────────────────────────
@@ -96,7 +98,13 @@ export class Auditor {
    * 不消耗任何 LLM Token。
    */
   private async deduplicateByContent(
-    memories: Array<{ id: number; content: string; importance: number | null; type: string | null; source: string | null }>,
+    memories: Array<{
+      id: number
+      content: string
+      importance: number | null
+      type: string | null
+      source: string | null
+    }>,
     agentId: string,
   ): Promise<number> {
     // 按内容分组
@@ -110,7 +118,6 @@ export class Auditor {
       const arr: Array<{ id: number; importance: number }> = contentMap.get(fingerprint) ?? []
       arr.push({ id: m.id, importance: m.importance ?? 1 })
       contentMap.set(fingerprint, arr)
-
     }
 
     let cleaned = 0
@@ -164,22 +171,9 @@ export class Auditor {
       type: m.type,
     }))
 
-    const systemPrompt = [
-      '你是一个专业的记忆审计员。请检查以下记忆列表，找出需要删除的问题记忆。',
-      '',
-      '问题类型:',
-      '- 矛盾记忆: 两条记忆描述相反的事实 (只删旧的)',
-      '- 噪音记忆: 无实际信息量的系统残留、空白内容',
-      '- 过期事件: 已明确过期的一次性事件 (如"明天要开会"但已过期数周)',
-      '',
-      '注意:',
-      '- 只删确实有问题的，不要误删正常记忆',
-      '- preference/promise 类型要格外谨慎',
-      '',
-      '输出需要删除的记忆 ID 列表:',
-      '{ "ids": [1, 2, 3], "reasons": { "1": "噪音", "2": "矛盾", "3": "过期" } }',
-      '如果没有问题: { "ids": [], "reasons": {} }',
-    ].join('\n')
+    const systemPrompt = this.deps.mdpEngine.render('tasks/memory/reflection/auditor', {
+      memory_data: JSON.stringify(memData, null, 2),
+    })
 
     try {
       const completion = await this.deps.llmService.chat(
@@ -196,7 +190,9 @@ export class Auditor {
 
       // 解析删除列表
       let idsToDelete: number[] = []
-      const parsed = parseLlmJson<{ ids: number[]; reasons?: Record<string, string> } | number[]>(raw)
+      const parsed = parseLlmJson<{ ids: number[]; reasons?: Record<string, string> } | number[]>(
+        raw,
+      )
 
       if (Array.isArray(parsed)) {
         idsToDelete = parsed.filter((id): id is number => typeof id === 'number')
@@ -218,7 +214,11 @@ export class Auditor {
           if (!memory) continue
 
           await this.deps.memoryRepo.delete(id)
-          await this.deps.vectorWriteHelper.deleteWithFallback(id, agentId, memory.source ?? 'desktop')
+          await this.deps.vectorWriteHelper.deleteWithFallback(
+            id,
+            agentId,
+            memory.source ?? 'desktop',
+          )
           cleaned++
 
           logger.debug(`已清理: id=${id}, "${memory.content.slice(0, 40)}..."`)

@@ -15,3 +15,4 @@ export {
 export { RegistryToolExecutor } from './toolExecutor'
 export { ToolRegistry, type ToolHandler, type ToolContext } from './toolRegistry'
 export { TaskManager } from './taskManager'
+export { WaifuTextUpdater, type WaifuTextUpdaterDeps } from './waifuTextUpdater'

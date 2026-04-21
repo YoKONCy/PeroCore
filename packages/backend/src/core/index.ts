@@ -11,3 +11,4 @@ export {
   type AssetSource,
   type AssetType,
 } from './assetRegistry'
+export { PromptTemplateLoader } from './promptTemplateLoader'

@@ -1,0 +1,61 @@
+{
+  "id": "file-ops",
+  "name": "文件操作",
+  "version": "1.0.0",
+  "author": "PeroCore Team",
+  "description": "提供文件读写、信息查询、目录列表能力。Node.js 原生 fs 实现，完全跨平台。",
+  "type": "tool",
+  "entry": "index.ts",
+  "category": "core",
+  "platforms": ["windows", "linux", "darwin", "docker"],
+
+  "tools": [
+    {
+      "name": "read_file",
+      "description": "读取文件内容。支持文本文件，自动检测编码。大文件会自动截断。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": { "type": "string", "description": "文件的绝对路径" },
+          "max_length": { "type": "number", "description": "最大读取字符数 (默认 10000)" }
+        },
+        "required": ["file_path"]
+      }
+    },
+    {
+      "name": "write_file",
+      "description": "写入内容到文件。如果文件不存在会自动创建（含父目录）。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": { "type": "string", "description": "文件的绝对路径" },
+          "content": { "type": "string", "description": "要写入的内容" },
+          "append": { "type": "boolean", "description": "是否追加模式 (默认 false，覆写)" }
+        },
+        "required": ["file_path", "content"]
+      }
+    },
+    {
+      "name": "get_file_info",
+      "description": "获取文件或目录的元数据信息 (大小、创建/修改时间、类型)。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": { "type": "string", "description": "文件或目录的绝对路径" }
+        },
+        "required": ["file_path"]
+      }
+    },
+    {
+      "name": "list_directory",
+      "description": "列出目录中的所有文件和子目录。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "dir_path": { "type": "string", "description": "目录的绝对路径" }
+        },
+        "required": ["dir_path"]
+      }
+    }
+  ]
+}

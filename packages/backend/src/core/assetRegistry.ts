@@ -3,7 +3,6 @@
  *
  * 统一扫描并注册所有可用资产，
  * 覆盖优先级: @data/custom (用户) > @workshop (订阅) > @app (官方)。
- * (14_STEAM_INTEGRATION.md §4)
  *
  * @module packages/backend/src/core/assetRegistry
  */
@@ -16,7 +15,7 @@ import { createLogger } from '../lib/logger'
 const logger = createLogger('AssetRegistry')
 
 // ─────────────────────────────────────────────
-// 资产元数据 (14_STEAM_INTEGRATION.md §4.3-4.4)
+// 资产元数据
 // ─────────────────────────────────────────────
 
 /** 资产来源 */
@@ -158,11 +157,10 @@ export class AssetRegistry {
    * 尝试从目录加载资产元数据
    *
    * 优先查找 asset.json (新标准)，兼容 manifest.json / description.json
-   * (14_STEAM_INTEGRATION.md §4.4)
    */
   private loadAssetMeta(dirPath: string, source: AssetSource): AssetMetadata | null {
     // 按优先级查找元数据文件
-    const candidates = ['asset.json', 'manifest.json', 'description.json']
+    const candidates = ['agent.json', 'asset.json', 'manifest.json', 'description.json']
 
     for (const filename of candidates) {
       const filePath = path.join(dirPath, filename)
@@ -186,7 +184,11 @@ export class AssetRegistry {
           assetId,
           type: (raw.type as AssetType) ?? 'unknown',
           source,
-          displayName: (raw.display_name as string) ?? (raw.displayName as string) ?? (raw.title as string) ?? assetId,
+          displayName:
+            (raw.display_name as string) ??
+            (raw.displayName as string) ??
+            (raw.title as string) ??
+            assetId,
           version: (raw.version as string) ?? '1.0.0',
           path: dirPath,
           workshopId,

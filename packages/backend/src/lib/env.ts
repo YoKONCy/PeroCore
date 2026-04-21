@@ -2,7 +2,7 @@
  * 环境变量与运行时配置
  *
  * 提供路径工厂函数和服务器配置常量，
- * 路径禁止硬编码 (11_CROSS_PLATFORM.md)。
+ * 路径禁止硬编码。
  *
  * @module packages/backend/src/lib/env
  */
@@ -11,7 +11,7 @@ import path from 'node:path'
 import os from 'node:os'
 
 // ─────────────────────────────────────────────
-// 路径工厂 (11_CROSS_PLATFORM.md §1.4)
+// 路径工厂
 // ─────────────────────────────────────────────
 
 /** 应用数据根目录 */
@@ -50,7 +50,7 @@ export const SERVER_PORT = Number(process.env.PERO_PORT ?? 9120)
 export const SERVER_HOST = process.env.PERO_HOST ?? '127.0.0.1'
 
 // ─────────────────────────────────────────────
-// 日志配置 (08_LOGGING_SPEC.md)
+// 日志配置
 // ─────────────────────────────────────────────
 
 /**

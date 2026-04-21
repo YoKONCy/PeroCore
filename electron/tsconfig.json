@@ -2,8 +2,24 @@
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "../dist-electron",
-    "types": ["node"]
+    "types": ["node"],
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false
   },
-  "include": ["main/**/*.ts", "preload/**/*.ts"],
-  "exclude": ["node_modules"]
+  "include": [
+    "main/**/*.ts",
+    "preload/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist-electron"
+  ]
 }

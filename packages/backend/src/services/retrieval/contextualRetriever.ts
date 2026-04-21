@@ -1,5 +1,5 @@
 /**
- * ContextualRetriever — PEDSA v2 统一认知检索管线
+ * ContextualRetriever — PEDSA 统一认知检索管线
  *
  * 7 步编排:
  *   1. ContextRNN 更新 (h_t → h_{t+1})
@@ -13,7 +13,6 @@
  * TriviumDB 内核已实现 PPR + FISTA + DPP，
  * 本模块仅做 TS 侧的编排、路由、context-aware 后处理。
  *
- * @see 10_MEMORY_SYSTEM.md §14.3
  * @module packages/backend/src/services/retrieval/contextualRetriever
  */
 
@@ -82,7 +81,7 @@ interface FlashbackMemory {
   direction: 'prev' | 'next'
 }
 
-/** 按模式的 RAG 限制 (10_MEMORY_SYSTEM.md §11.5) */
+/** 按模式的 RAG 限制 */
 const RAG_LIMITS: Record<string, number> = {
   desktop: 8,
   social: 0,
@@ -117,7 +116,7 @@ export class ContextualRetriever {
   }
 
   /**
-   * PEDSA v2 统一检索入口
+   * PEDSA 统一检索入口
    *
    * 7 步管线: RNN更新 → 簇路由 → 超召回 → 重排 → 去冗余 → 闪回 → 返回
    */
@@ -233,7 +232,7 @@ export class ContextualRetriever {
 
     const durationMs = Date.now() - startMs
     logger.info(
-      `PEDSA v2 检索完成: ${diverse.length} 记忆 + ${flashbackMemories.length} 闪回 ` +
+      `PEDSA 检索完成: ${diverse.length} 记忆 + ${flashbackMemories.length} 闪回 ` +
         `(${durationMs}ms, clusters=${activeClusters.length}, Agent=${agentId})`,
     )
 
@@ -255,10 +254,7 @@ export class ContextualRetriever {
    *
    * 应在对话管线中、LLM 回复完成后调用。
    */
-  async onLlmReply(
-    injectedMemories: InjectedMemory[],
-    llmReply: string,
-  ): Promise<void> {
+  async onLlmReply(injectedMemories: InjectedMemory[], llmReply: string): Promise<void> {
     if (injectedMemories.length === 0) return
 
     const signals = this.deps.retrievalFeedback.collectSignals(injectedMemories, llmReply)

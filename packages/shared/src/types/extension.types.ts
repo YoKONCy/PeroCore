@@ -1,7 +1,7 @@
 /**
  * 扩展系统类型定义
  *
- * 对齐 09_EXTENSION_SYSTEM.md §6-7：
+ * 对齐
  * - 三种扩展类型：Tool / Hook / Service
  * - Hook 事件清单 + 处理函数签名
  * - manifest.json 结构
@@ -90,11 +90,14 @@ export interface ExtensionManifest {
 /** JSON Schema 风格的参数定义 */
 export interface ToolParameterSchema {
   type: 'object'
-  properties: Record<string, {
-    type: string
-    description?: string
-    enum?: string[]
-  }>
+  properties: Record<
+    string,
+    {
+      type: string
+      description?: string
+      enum?: string[]
+    }
+  >
   required?: string[]
 }
 
@@ -146,7 +149,7 @@ export interface ToolExtension {
 }
 
 // ─────────────────────────────────────────────
-// Hook 扩展 (09_EXTENSION_SYSTEM §7)
+// Hook 扩展
 // ─────────────────────────────────────────────
 
 /**
@@ -197,10 +200,7 @@ export interface HookContext {
 }
 
 /** Hook 处理函数 */
-export type HookHandler<T = unknown> = (
-  data: T,
-  ctx: HookContext,
-) => Promise<T | undefined | void>
+export type HookHandler<T = unknown> = (data: T, ctx: HookContext) => Promise<T | undefined | void>
 
 /** Hook 扩展接口 */
 export interface HookExtension {
@@ -229,7 +229,7 @@ export interface ServiceExtension {
 }
 
 // ─────────────────────────────────────────────
-// 入站消息 (Service → Core, 09_EXT §6.4)
+// 入站消息 (Service → Core)
 // ─────────────────────────────────────────────
 
 /** 统一入站消息格式 (平台无关) */

@@ -135,7 +135,7 @@ useEventListener(window, 'keydown', (e: Event) => {
   transition: all 0.15s;
 }
 .piv-close:hover {
-  color: var(--color-red-500);
+  color: var(--color-red-face);
   border-color: var(--color-red-300);
 }
 
@@ -152,15 +152,19 @@ useEventListener(window, 'keydown', (e: Event) => {
   transition: all 0.15s;
 }
 .piv-nav:hover:not(:disabled) {
-  color: var(--color-blue-500);
-  border-color: var(--color-blue-400);
+  color: var(--color-sky-500);
+  border-color: var(--color-sky-hover);
 }
 .piv-nav:disabled {
   opacity: 0.2;
   cursor: not-allowed;
 }
-.piv-nav-left { left: 24px; }
-.piv-nav-right { right: 24px; }
+.piv-nav-left {
+  left: 24px;
+}
+.piv-nav-right {
+  right: 24px;
+}
 
 .piv-image-wrap {
   max-width: calc(100vw - 200px);
@@ -190,11 +194,23 @@ useEventListener(window, 'keydown', (e: Event) => {
   color: var(--color-text-primary);
   z-index: 10;
 }
-.piv-counter-current { color: var(--color-blue-500); }
-.piv-counter-sep { color: var(--color-text-muted); margin: 0 4px; }
+.piv-counter-current {
+  color: var(--color-sky-500);
+}
+.piv-counter-sep {
+  color: var(--color-text-muted);
+  margin: 0 4px;
+}
 
 /* 过渡 */
-.viewer-enter-active { transition: all 0.3s ease-out; }
-.viewer-leave-active { transition: all 0.2s ease-in; }
-.viewer-enter-from, .viewer-leave-to { opacity: 0; }
+.viewer-enter-active {
+  transition: all 0.3s ease-out;
+}
+.viewer-leave-active {
+  transition: all 0.2s ease-in;
+}
+.viewer-enter-from,
+.viewer-leave-to {
+  opacity: 0;
+}
 </style>

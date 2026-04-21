@@ -4,8 +4,6 @@
  * 从原始 ChatMessage[] 中提取用户文本和多模态标记。
  * 无副作用，不访问数据库。
  *
- * 替代 v1 的 UserInputPreprocessor (14→52行)。
- *
  * 支持来源:
  * - desktop / work: 标准 ChatMessage 格式
  * - social: NapCat Adapter 的统一消息格式
@@ -116,7 +114,7 @@ export function convertSocialToChat(msg: InboundSocialMessage): ChatMessage[] {
 /**
  * 检测群聊中是否需要回复
  *
- * 规则 (17_MODE_SYSTEM.md §4.3):
+ * 规则:
  * 1. 被 @mention → 一定回复
  * 2. 最近 3 条都是同一 Agent → 冷却
  * 3. 短回复 ("嗯", "好") → 降低概率

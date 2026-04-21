@@ -1,7 +1,7 @@
 /**
  * LLM 类型定义
  *
- * 统一的消息格式和 Provider 接口 (04_BACKEND_ARCHITECTURE.md §6)。
+ * 统一的消息格式和 Provider 接口。
  * 所有 Provider 的输出统一转换为 OpenAI 格式。
  *
  * @module packages/backend/src/services/llm/types
@@ -130,7 +130,7 @@ export interface ChatDelta {
 // Provider 接口
 // ─────────────────────────────────────────────
 
-/** LLM Provider 接口 (04_BACKEND_ARCHITECTURE.md §6) */
+/** LLM Provider 接口 */
 export interface LlmProvider {
   /** 非流式调用 */
   chat(messages: ChatMessage[], opts: ChatOptions): Promise<ChatCompletion>

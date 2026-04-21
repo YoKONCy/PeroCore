@@ -95,7 +95,10 @@ function tsFallback_minGruForward(hidden: Float32Array, input: Float32Array): Fl
   return result
 }
 
-function tsFallback_projectInput(queryEmbedding: Float32Array, projMatrix: Float32Array): Float32Array {
+function tsFallback_projectInput(
+  queryEmbedding: Float32Array,
+  projMatrix: Float32Array,
+): Float32Array {
   const inputDim = queryEmbedding.length
   const result = new Float32Array(HIDDEN_DIM)
   for (let j = 0; j < HIDDEN_DIM; j++) {

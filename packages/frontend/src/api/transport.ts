@@ -7,8 +7,6 @@
  * - Docker/Web 模式 → HttpTransport (纯 fetch)
  * - Electron 模式   → ElectronTransport (API 走 HTTP, 系统能力走 IPC)
  *
- * @see 05_FRONTEND_ARCHITECTURE.md §2
- * @see 07_DUAL_DEPLOYMENT.md §3
  */
 
 import type { ApiResponse } from '@perocore/shared'
@@ -78,6 +76,16 @@ class ElectronTransport implements Transport {
         ...options?.headers,
       },
     })
+
+    if (!res.ok) {
+      // 与 HttpTransport 一致的错误降级处理
+      const body = await res.json().catch(() => ({
+        code: 'NETWORK_ERROR',
+        message: `HTTP ${res.status} ${res.statusText}`,
+      }))
+      return body as ApiResponse<T>
+    }
+
     return res.json()
   }
 

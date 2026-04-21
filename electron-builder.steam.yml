@@ -1,0 +1,34 @@
+# Steam 版构建配置
+# 包含 Steam SDK 文件 + steamworks.js 原生模块
+# ⚠️ 这是唯一允许包含 Steam 组件的构建变体
+extends: electron-builder.base.yml
+
+# 覆写 files: 取消 base 中对 Steam 文件的排除
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - resources/steam/**/*
+  # ✅ Steam 版不排除 steamworks.js
+  # (base 中的排除规则在此被完全覆写)
+
+asarUnpack:
+  - '**/*.node'
+  - '**/*.dll'
+  - '**/*.wasm'
+  - node_modules/steamworks.js/**/*
+
+# Steam SDK 文件放到应用根目录（.exe 同级）
+extraFiles:
+  - from: node_modules/steamworks.js/dist/win64/steam_api64.dll
+    to: .
+  - from: resources/steam/steam_appid.txt
+    to: .
+
+# Steam 版不需要 electron-updater，由 Steam 自带更新
+publish: null
+
+win:
+  icon: public/Logo.png
+  target:
+    - nsis
+    - dir

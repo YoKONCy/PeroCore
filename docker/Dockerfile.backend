@@ -1,0 +1,80 @@
+# ===================================================================
+# PeroCore-TS 后端 Docker 镜像
+#
+# 多阶段构建: 依赖安装 → 编译 → 生产镜像
+# 运行时: Node.js (统一，见 Bun 讨论结论)
+# 进程守护: PM2
+#
+# 构建: docker build -f docker/Dockerfile.backend -t perocore-backend .
+# 运行: docker run -p 9120:9120 -v pero-data:/app/data perocore-backend
+#
+# @see _docs_/07_DUAL_DEPLOYMENT.md §6
+# @see _docs_/15_DEVOPS_OPERATIONS.md §5.2
+# ===================================================================
+
+# ── Stage 1: 依赖安装 + 编译 ──
+FROM node:22-slim AS builder
+
+# 安装 pnpm
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
+WORKDIR /build
+
+# 先复制依赖声明（利用 Docker 缓存层）
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY packages/shared/package.json packages/shared/
+COPY packages/backend/package.json packages/backend/
+
+# 安装依赖（仅 shared + backend）
+RUN pnpm install --frozen-lockfile --filter @perocore/shared --filter @perocore/backend
+
+# 复制源码
+COPY packages/shared/ packages/shared/
+COPY packages/backend/ packages/backend/
+
+# 编译 TypeScript
+RUN pnpm --filter @perocore/backend build
+
+
+# ── Stage 2: 生产镜像 ──
+FROM node:22-slim AS production
+
+# 安装 PM2 (进程守护) + curl (健康检查)
+RUN npm install -g pm2 && apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# 从 builder 复制编译产物和依赖
+COPY --from=builder /build/packages/backend/dist/ ./packages/backend/dist/
+COPY --from=builder /build/packages/shared/ ./packages/shared/
+COPY --from=builder /build/node_modules/ ./node_modules/
+COPY --from=builder /build/packages/backend/node_modules/ ./packages/backend/node_modules/
+
+# 复制 PM2 配置
+COPY ecosystem.config.cjs ./
+
+# 复制静态资源（提示词模板等）
+COPY packages/backend/src/assets/ ./packages/backend/dist/assets/
+
+# ── 环境变量 (对齐 lib/env.ts) ──
+ENV NODE_ENV=production
+ENV PERO_PORT=9120
+ENV PERO_HOST=0.0.0.0
+ENV PERO_DATA_DIR=/app/data
+ENV PERO_DATABASE_PATH=/app/data/perocore.db
+ENV PERO_LOG_LEVEL=3
+# Docker 标识 (07_DUAL_DEPLOYMENT.md §9.4)
+ENV PEROCORE_DOCKER=1
+
+# 数据持久化卷
+VOLUME /app/data
+
+# 暴露端口 (HTTP + WS 同端口, D32)
+EXPOSE 9120
+
+# 健康检查 (15_DEVOPS_OPERATIONS.md §5.2)
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD curl -f http://localhost:9120/api/health || exit 1
+
+# PM2 以 production 模式启动
+CMD ["pm2-runtime", "start", "ecosystem.config.cjs", "--env", "production"]

@@ -18,14 +18,24 @@ import { createLogger } from '../lib/logger'
 
 const logger = createLogger('BuiltinTools')
 
-/** 内置工具标准接口 (与 ToolExtension 对齐，但更轻量) */
+/** 内置工具标准接口 */
 export interface BuiltinTool {
-  /** 工具定义 (给 LLM function calling + NIT v3) */
+  /** 工具定义 (给 LLM Function Calling) */
   definition: ToolDefinition
   /** 执行函数 */
-  execute(args: Record<string, unknown>, ctx: { agentId: string; sessionId: string; source: string }): Promise<string>
+  execute(
+    args: Record<string, unknown>,
+    ctx: { agentId: string; sessionId: string; source: string },
+  ): Promise<string>
   /** 可选：初始化 */
   onLoad?(): Promise<void>
+  /** 内部字段：run_script 专用 */
+  _toolExecutor?:
+    | ((name: string, args: Record<string, unknown>, source: string) => Promise<string>)
+    | null
+  bindToolExecutor?(
+    executor: (name: string, args: Record<string, unknown>, source: string) => Promise<string>,
+  ): void
 }
 
 // ─────────────────────────────────────────────
@@ -38,6 +48,42 @@ import { readFileTool, writeFileTool, fileInfoTool, listDirectoryTool } from './
 import { terminalExecutorTool } from './terminalExecutor'
 import { codeSearcherTool } from './codeSearcher'
 import { fileSearchTool } from './fileSearch'
+import { setReminderTool, listRemindersTool, cancelReminderTool } from './scheduler'
+import { runScriptTool } from './runScript'
+import { takeScreenshotTool } from './screenVision'
+import { webFetchTool } from './webFetch'
+import {
+  browserOpenUrlTool,
+  browserClickTool,
+  browserTypeTool,
+  browserScrollTool,
+  browserBackTool,
+  browserGetContentTool,
+} from './browserControl'
+import {
+  getSystemInfoTool,
+  openApplicationTool,
+  getActiveWindowsTool,
+  activateWindowTool,
+} from './systemInfo'
+import { automationExecuteTool, getMousePositionTool } from './desktopAutomation'
+import {
+  socialSendMessageTool,
+  socialGetContactsTool,
+  socialGetGroupsTool,
+  socialGetContactInfoTool,
+  socialGetGroupInfoTool,
+  socialGetGroupMembersTool,
+  socialHandleRequestTool,
+  socialNotifyOwnerTool,
+} from './socialOps'
+import {
+  strongholdMoveToRoomTool,
+  strongholdListRoomsTool,
+  strongholdGetRoomInfoTool,
+  strongholdSetEnvironmentTool,
+  strongholdCallButlerTool,
+} from './strongholdOps'
 
 /** 全部内置工具列表 */
 const ALL_BUILTIN_TOOLS: BuiltinTool[] = [
@@ -56,12 +102,54 @@ const ALL_BUILTIN_TOOLS: BuiltinTool[] = [
   terminalExecutorTool,
   codeSearcherTool,
 
-  // ── 待迁移 (需 native addon 或平台适配) ──
-  // screenVisionTool,
-  // desktopAutomationTool,
-  // systemOpsTool,
-  // browserOpsTool,
-  // schedulerTool,
+  // ── 提醒 & 日程 ──
+  setReminderTool,
+  listRemindersTool,
+  cancelReminderTool,
+
+  // ── 脚本编排 (NIT → FC 工具化) ──
+  runScriptTool,
+
+  // ── 视觉感知 (ScreenshotProvider 注入) ──
+  takeScreenshotTool,
+
+  // ── 网页抓取 (跨平台) ──
+  webFetchTool,
+
+  // ── 浏览器控制 (BrowserBridge 注入) ──
+  browserOpenUrlTool,
+  browserClickTool,
+  browserTypeTool,
+  browserScrollTool,
+  browserBackTool,
+  browserGetContentTool,
+
+  // ── 系统信息 & 应用管理 (跨平台) ──
+  getSystemInfoTool,
+  openApplicationTool,
+  getActiveWindowsTool,
+  activateWindowTool,
+
+  // ── 桌面自动化 (DesktopAutomationProvider 注入, GUI 环境) ──
+  automationExecuteTool,
+  getMousePositionTool,
+
+  // ── 社交操作 (SocialMessagingProvider 注入, 社交模式) ──
+  socialSendMessageTool,
+  socialGetContactsTool,
+  socialGetGroupsTool,
+  socialGetContactInfoTool,
+  socialGetGroupInfoTool,
+  socialGetGroupMembersTool,
+  socialHandleRequestTool,
+  socialNotifyOwnerTool,
+
+  // ── 据点操作 (StrongholdService 注入, 群聊模式) ──
+  strongholdMoveToRoomTool,
+  strongholdListRoomsTool,
+  strongholdGetRoomInfoTool,
+  strongholdSetEnvironmentTool,
+  strongholdCallButlerTool,
 ]
 
 /**
@@ -72,10 +160,7 @@ const ALL_BUILTIN_TOOLS: BuiltinTool[] = [
 export async function registerBuiltinTools(registry: ToolRegistry): Promise<void> {
   for (const tool of ALL_BUILTIN_TOOLS) {
     await tool.onLoad?.()
-    registry.register(
-      tool.definition,
-      (args, ctx) => tool.execute(args, ctx),
-    )
+    registry.register(tool.definition, (args, ctx) => tool.execute(args, ctx))
   }
   logger.info(`内置工具已注册: ${ALL_BUILTIN_TOOLS.length} 个`)
 }

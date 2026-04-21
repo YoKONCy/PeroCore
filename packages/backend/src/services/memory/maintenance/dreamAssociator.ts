@@ -5,8 +5,8 @@
  *
  * 功能:
  * 1. 梦境关联: 对近期记忆做语义检索，建立跨时间联想边
- * 2. LLM 关系判定: 调用 LLM 判断两条记忆是否有深层关联 (v1 _analyze_relation)
- * 3. 孤独记忆修复: 检测无关联边的记忆，尝试将其织入关系网 (v1 scan_lonely_memories)
+ * 2. LLM 关系判定: 调用 LLM 判断两条记忆是否有深层关联
+ * 3. 孤独记忆修复: 检测无关联边的记忆，尝试将其织入关系网
  *
  * 注意: TriviumDB 三层原子联删，删节点时自动断边，无需手动清理悬挂边。
  *
@@ -17,6 +17,7 @@ import type { MemorySearchService } from '../memorySearch'
 import type { VectorRepository } from '../../../repositories/vector.repo'
 import type { MemoryRepository } from '../../../repositories/memory.repo'
 import type { LlmService, ModelConfig } from '../../llm/llmService'
+import type { MdpEngine } from '../../prompt/mdpEngine'
 import { parseLlmJson } from '../../../shared/llmJsonParser'
 import { createLogger } from '../../../lib/logger'
 
@@ -32,6 +33,7 @@ interface DreamDeps {
   memoryRepo: MemoryRepository
   llmService: LlmService
   getModelConfig: () => Promise<ModelConfig | null>
+  mdpEngine: MdpEngine
 }
 
 /** DreamAssociator 配置 */
@@ -88,10 +90,10 @@ export class DreamAssociator {
   async associate(agentId: string): Promise<number> {
     let linked = 0
 
-    // 1. 梦境关联 (v1 dream_and_associate)
+    // 1. 梦境关联
     linked += await this.dreamAndLink(agentId)
 
-    // 2. 孤独记忆修复 (v1 scan_lonely_memories)
+    // 2. 孤独记忆修复
     linked += await this.rescueLonelyMemories(agentId)
 
     return linked
@@ -171,7 +173,7 @@ export class DreamAssociator {
   }
 
   /**
-   * 孤独记忆修复 (v1 scan_lonely_memories)
+   * 孤独记忆修复
    *
    * 检测图谱中无连接边的孤立记忆，为其寻找至少一个关联。
    * 注意: TriviumDB 的节点如果没有 link，neighbors() 返回空数组，
@@ -185,7 +187,12 @@ export class DreamAssociator {
     })
 
     // 筛选孤立记忆: 在 TriviumDB 图谱层面没有邻居
-    const lonelyMemories: Array<{ id: number; content: string; source: string; timestamp: number }> = []
+    const lonelyMemories: Array<{
+      id: number
+      content: string
+      source: string
+      timestamp: number
+    }> = []
 
     for (const mem of recent) {
       if (mem.type === 'retired') continue
@@ -274,7 +281,7 @@ export class DreamAssociator {
   }
 
   /**
-   * LLM 关系判定 (v1 _analyze_relation)
+   * LLM 关系判定
    *
    * 让 LLM 分析两条记忆之间是否存在深层关联。
    */
@@ -285,20 +292,10 @@ export class DreamAssociator {
     const modelConfig = await this.deps.getModelConfig()
     if (!modelConfig) return null
 
-    const prompt = [
-      '分析以下两条记忆是否存在关联关系:',
-      '',
-      `记忆A: ${m1.content}`,
-      `记忆B: ${m2.content}`,
-      '',
-      '如果存在关联，输出 JSON:',
-      '{ "has_relation": true, "type": "关联类型", "description": "关系描述", "strength": 0.5 }',
-      '',
-      '关联类型可选: cause_effect(因果), similar(相似), contrast(对比), follow_up(后续), thematic(主题相关)',
-      '强度范围: 0.1-1.0',
-      '',
-      '如果无关联: { "has_relation": false }',
-    ].join('\n')
+    const prompt = this.deps.mdpEngine.render('tasks/memory/reflection/dream_associator', {
+      memory_a: m1.content,
+      memory_b: m2.content,
+    })
 
     try {
       const completion = await this.deps.llmService.chat(

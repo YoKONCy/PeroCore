@@ -7,7 +7,6 @@
  * 3. 流式生成时自动吸底
  * 4. 滚动事件 100ms 节流
  *
- * @see 12_FRONTEND_PERFORMANCE.md §2.6
  */
 
 import { ref, watch, nextTick } from 'vue'
@@ -22,10 +21,7 @@ const BOTTOM_THRESHOLD = 50
  * @param containerRef - 可滚动容器
  * @param messageCount - 消息数量 (Ref), 用于监听变化自动滚动
  */
-export function useChatScroll(
-  containerRef: Ref<HTMLElement | null>,
-  messageCount?: Ref<number>,
-) {
+export function useChatScroll(containerRef: Ref<HTMLElement | null>, messageCount?: Ref<number>) {
   /** 是否在底部 */
   const isAtBottom = ref(true)
   /** 是否显示"回到底部"按钮 */

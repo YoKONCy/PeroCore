@@ -3,53 +3,49 @@
  * StrongholdView — 据点管理页面
  *
  * 三栏布局: 设施/房间侧栏 + 聊天主区 + 成员/管家右栏。
- * v1 747 行 → 拆分为 StrongholdView + FacilitySidebar + AgentPanel。
- *
- * TODO: 接入 strongholdApi + useStronghold composable
+ * 通过 useStronghold composable 接入真实 API。
  *
  * @see 06_FILE_SIZE_LIMITS.md
  */
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref } from 'vue'
 import { PixelIcon, PButton, PDialog } from '../components/pixel'
 import FacilitySidebar from '../components/stronghold/FacilitySidebar.vue'
 import AgentPanel from '../components/stronghold/AgentPanel.vue'
 import { ChatContainer } from '../components/chat'
 import type { Facility, Room } from '../components/stronghold/FacilitySidebar.vue'
-import type { AgentStatus, ButlerConfig } from '../components/stronghold/AgentPanel.vue'
+import { useStronghold } from '../composables/useStronghold'
 
 defineOptions({ name: 'StrongholdView' })
 
-// ── 状态 (TODO: 移入 useStronghold composable) ──
+// ── useStronghold (真实 API) ──
 
-const facilities = ref<Facility[]>([])
-const rooms = ref<Room[]>([])
-const currentFacility = ref<Facility | null>(null)
-const currentRoom = ref<Room | null>(null)
-const isLoading = ref(false)
-const agentsStatus = ref<AgentStatus[]>([])
-const butlerConfig = ref<ButlerConfig | null>(null)
+const {
+  facilities,
+  rooms,
+  currentFacility,
+  currentRoom,
+  isLoading,
+  agentsStatus,
+  butlerConfig,
+  currentRoomAgents,
+  selectFacility: selectFac,
+  selectRoom: selectRm,
+  callButler,
+} = useStronghold()
 
 // 管家弹窗
 const showButler = ref(false)
 const butlerQuery = ref('')
 const isCalling = ref(false)
 
-/** 当前房间成员 */
-const currentRoomAgents = computed(() => {
-  if (!currentRoom.value) return []
-  return agentsStatus.value.filter((a) => a.room_id === currentRoom.value!.id)
-})
-
-/** 选择设施 */
+/** 选择设施 (适配 FacilitySidebar emit 类型) */
 function selectFacility(fac: Facility) {
-  currentFacility.value = fac
-  currentRoom.value = null
-  // TODO: fetchRooms(fac.id)
+  selectFac(fac as any)
 }
 
 /** 选择房间 */
 function selectRoom(room: Room) {
-  currentRoom.value = room
+  selectRm(room as any)
 }
 
 /** 召唤智能体 */
@@ -62,43 +58,20 @@ function summonAgent(name: string) {
 async function submitButler() {
   if (!butlerQuery.value.trim()) return
   isCalling.value = true
-  // TODO: 接入 strongholdApi.callButler
-  setTimeout(() => {
+  try {
+    await callButler(butlerQuery.value)
+  } finally {
     showButler.value = false
     butlerQuery.value = ''
     isCalling.value = false
-  }, 800)
+  }
 }
 
-// ── 轮询 ──
-
-let pollTimer: ReturnType<typeof setInterval> | null = null
-
-onMounted(async () => {
-  // Mock 数据 (F3 替换为 API)
-  facilities.value = [
-    { id: 1, name: '佩洛公馆', icon: 'building', description: '默认据点', roomCount: 3 },
-    { id: 2, name: '远程工作站', icon: 'terminal', description: '编程与调试', roomCount: 2 },
-  ] as any
-  rooms.value = [
-    { id: 101, facilityId: 1, name: '客厅', description: '日常聊天', memberCount: 2 },
-    { id: 102, facilityId: 1, name: '书房', description: '知识探讨', memberCount: 1 },
-    { id: 103, facilityId: 1, name: '卧室', description: '深夜闲聊', memberCount: 0 },
-    { id: 201, facilityId: 2, name: '主控室', description: '项目管理', memberCount: 1 },
-    { id: 202, facilityId: 2, name: '调试间', description: 'Debug', memberCount: 0 },
-  ] as any
-  currentFacility.value = facilities.value[0]
-  agentsStatus.value = [
-    { id: 'pero', name: 'Pero', status: 'online', room_id: 101, avatar: 'P' },
-    { id: 'asst2', name: '小助手', status: 'idle', room_id: 101, avatar: 'A' },
-    { id: 'code', name: '代码酱', status: 'online', room_id: 201, avatar: 'C' },
-  ] as any
-  butlerConfig.value = { name: '管家', enabled: true } as any
-})
-
-onUnmounted(() => {
-  if (pollTimer) clearInterval(pollTimer)
-})
+/** 打开管家弹窗 */
+function openButler() {
+  showButler.value = true
+  butlerQuery.value = ''
+}
 </script>
 
 <template>
@@ -107,8 +80,8 @@ onUnmounted(() => {
     <FacilitySidebar
       :facilities="facilities"
       :rooms="rooms"
-      :current-facility="currentFacility"
-      :current-room="currentRoom"
+      :current-facility="currentFacility as any"
+      :current-room="currentRoom as any"
       :is-loading="isLoading"
       @select-facility="selectFacility"
       @select-room="selectRoom"
@@ -151,32 +124,36 @@ onUnmounted(() => {
       <!-- 未选择 -->
       <div v-else class="sh-empty">
         <PixelIcon name="building" size="3xl" />
-        <h3 class="sh-empty-title">请选择一个房间喵</h3>
+        <h3 class="sh-empty-title">请选择一个房间</h3>
         <p class="sh-empty-sub">等待接入授权中...</p>
       </div>
     </main>
 
     <!-- 右侧栏 -->
     <AgentPanel
-      :current-room-agents="currentRoomAgents"
-      :all-agents="agentsStatus"
-      :butler-config="butlerConfig"
+      :current-room-agents="currentRoomAgents as any"
+      :all-agents="agentsStatus as any"
+      :butler-config="butlerConfig as any"
       @summon="summonAgent"
-      @open-butler="showButler = true; butlerQuery = ''"
+      @open-butler="openButler"
     />
 
     <!-- 管家弹窗 -->
-    <PDialog v-model:visible="showButler" title="BUTLER INTERFACE">
+    <PDialog v-model="showButler" title="BUTLER INTERFACE">
       <div class="sh-butler-body">
         <textarea
           v-model="butlerQuery"
           class="sh-butler-input"
-          placeholder="告诉管家你需要什么喵..."
+          placeholder="告诉管家你需要什么..."
           @keydown.ctrl.enter="submitButler"
         />
         <div class="sh-butler-actions">
           <PButton variant="ghost" @click="showButler = false">取消</PButton>
-          <PButton variant="primary" :disabled="!butlerQuery.trim() || isCalling" @click="submitButler">
+          <PButton
+            variant="primary"
+            :disabled="!butlerQuery.trim() || isCalling"
+            @click="submitButler"
+          >
             {{ isCalling ? '发送中...' : '发送指令' }}
           </PButton>
         </div>
@@ -212,20 +189,23 @@ onUnmounted(() => {
   border-bottom: 2px solid var(--color-border);
   flex-shrink: 0;
 }
+
 .sh-room-header-left {
   display: flex;
   align-items: center;
   gap: 16px;
 }
+
 .sh-room-icon {
   width: 48px;
   height: 48px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--color-blue-500);
+  background: var(--color-sky-500);
   color: white;
 }
+
 .sh-room-title {
   font-size: 24px;
   font-weight: 800;
@@ -234,15 +214,17 @@ onUnmounted(() => {
   align-items: center;
   gap: 12px;
 }
+
 .sh-room-fac-badge {
   padding: 4px 12px;
-  background: var(--color-pink-500);
+  background: var(--color-pink-face);
   color: white;
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.15em;
 }
+
 .sh-room-sub {
   display: flex;
   align-items: center;
@@ -254,10 +236,11 @@ onUnmounted(() => {
   text-transform: uppercase;
   letter-spacing: 0.2em;
 }
+
 .sh-online-dot {
   width: 6px;
   height: 6px;
-  background: var(--color-green-500);
+  background: var(--color-emerald-face);
   animation: pulse 2s infinite;
 }
 
@@ -276,11 +259,13 @@ onUnmounted(() => {
   gap: 16px;
   color: var(--color-text-muted);
 }
+
 .sh-empty-title {
   font-size: 24px;
   font-weight: 800;
   color: var(--color-text-secondary);
 }
+
 .sh-empty-sub {
   font-size: 10px;
   font-weight: 700;
@@ -290,7 +275,10 @@ onUnmounted(() => {
 }
 
 /* 管家弹窗 */
-.sh-butler-body { padding: 24px; }
+.sh-butler-body {
+  padding: 24px;
+}
+
 .sh-butler-input {
   width: 100%;
   height: 160px;
@@ -303,8 +291,15 @@ onUnmounted(() => {
   outline: none;
   transition: border-color 0.2s;
 }
-.sh-butler-input:focus { border-color: var(--color-blue-400); }
-.sh-butler-input::placeholder { color: var(--color-text-muted); }
+
+.sh-butler-input:focus {
+  border-color: var(--color-sky-hover);
+}
+
+.sh-butler-input::placeholder {
+  color: var(--color-text-muted);
+}
+
 .sh-butler-actions {
   display: flex;
   justify-content: flex-end;
@@ -313,7 +308,13 @@ onUnmounted(() => {
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+
+  50% {
+    opacity: 1;
+  }
 }
 </style>

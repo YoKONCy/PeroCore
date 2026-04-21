@@ -35,7 +35,11 @@ const STORAGE_KEY = 'ppc.lyric_pos'
 onMounted(() => {
   const saved = localStorage.getItem(STORAGE_KEY)
   if (saved) {
-    try { pos.value = JSON.parse(saved) } catch { /* 忽略 */ }
+    try {
+      pos.value = JSON.parse(saved)
+    } catch {
+      /* 忽略 */
+    }
   } else {
     pos.value = { x: window.innerWidth / 2, y: window.innerHeight - 80 }
   }
@@ -51,23 +55,31 @@ let fadeTimer: ReturnType<typeof setTimeout> | null = null
 function startFade() {
   if (fadeTimer) clearTimeout(fadeTimer)
   if (props.duration <= 0) return
-  fadeTimer = setTimeout(() => { visible.value = false }, props.duration)
+  fadeTimer = setTimeout(() => {
+    visible.value = false
+  }, props.duration)
 }
 
-watch(() => props.text, (v) => {
-  if (v) {
-    visible.value = true
-    if (!props.isThinking) startFade()
-  }
-})
-watch(() => props.isThinking, (v) => {
-  if (v) {
-    visible.value = true
-    if (fadeTimer) clearTimeout(fadeTimer)
-  } else if (props.text) {
-    startFade()
-  }
-})
+watch(
+  () => props.text,
+  (v) => {
+    if (v) {
+      visible.value = true
+      if (!props.isThinking) startFade()
+    }
+  },
+)
+watch(
+  () => props.isThinking,
+  (v) => {
+    if (v) {
+      visible.value = true
+      if (fadeTimer) clearTimeout(fadeTimer)
+    } else if (props.text) {
+      startFade()
+    }
+  },
+)
 
 onUnmounted(() => {
   if (fadeTimer) clearTimeout(fadeTimer)
@@ -159,7 +171,7 @@ function onMouseUp() {
 .lyric-bar {
   padding: 10px 24px;
   background: rgba(15, 23, 42, 0.85);
-  border: 2px solid var(--color-blue-500);
+  border: 2px solid var(--color-sky-500);
   color: white;
   font-size: 14px;
   font-weight: 700;
@@ -185,11 +197,15 @@ function onMouseUp() {
 .lyric-dot {
   width: 6px;
   height: 6px;
-  background: var(--color-blue-400);
+  background: var(--color-sky-hover);
   animation: dot-pulse 1.4s infinite;
 }
-.lyric-dot:nth-child(2) { animation-delay: 0.2s; }
-.lyric-dot:nth-child(3) { animation-delay: 0.4s; }
+.lyric-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.lyric-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
 
 .lyric-text {
   overflow: hidden;
@@ -200,7 +216,9 @@ function onMouseUp() {
 /* Transition */
 .lyric-fade-enter-active,
 .lyric-fade-leave-active {
-  transition: opacity 0.3s, transform 0.3s;
+  transition:
+    opacity 0.3s,
+    transform 0.3s;
 }
 .lyric-fade-enter-from,
 .lyric-fade-leave-to {
@@ -209,7 +227,13 @@ function onMouseUp() {
 }
 
 @keyframes dot-pulse {
-  0%, 80%, 100% { opacity: 0.3; }
-  40% { opacity: 1; }
+  0%,
+  80%,
+  100% {
+    opacity: 0.3;
+  }
+  40% {
+    opacity: 1;
+  }
 }
 </style>

@@ -1,0 +1,288 @@
+/* 🌸 萌动链接：PeroperoChat！ 像素风 Wiki 主题 🌸 */
+
+:root {
+  /* 1. 萌动配色系统 (Moe Palette) 🎨 */
+  --moe-sky-blue: #a7d8f0;
+  --moe-sakura-pink: #f9a8d4;
+  --moe-sakura-pink-dark: #f472b6;
+  --moe-dreamy-purple: #c084fc;
+  --moe-vanilla-yellow: #fde047;
+  --moe-cocoa-brown: #2d1b1e;
+  --moe-cloud-white: #ffffff;
+  --moe-bg-gradient: linear-gradient(135deg, #a7d8f0 0%, #e0f2fe 50%, #e8d5ff 100%);
+  --moe-glass-bg: rgba(255, 255, 255, 0.7);
+  --moe-glass-border: rgba(45, 27, 30, 0.1);
+
+  /* 2. VitePress 变量重写 (全天候萌动色) */
+  --vp-c-brand-1: var(--moe-sakura-pink-dark);
+  --vp-c-brand-2: var(--moe-sakura-pink);
+  --vp-c-brand-3: var(--moe-dreamy-purple);
+  --vp-c-brand-soft: rgba(249, 168, 212, 0.2);
+
+  --vp-c-bg: #fcfaff; /* 极浅的紫粉色，更有质感 */
+  --vp-c-bg-soft: rgba(249, 168, 212, 0.05);
+  --vp-c-bg-mute: rgba(167, 216, 240, 0.1);
+
+  --vp-c-text-1: var(--moe-cocoa-brown);
+  --vp-c-text-2: #4b3a3d;
+  --vp-c-text-3: #6b5a5d;
+
+  --vp-c-divider: var(--moe-cocoa-brown);
+  --vp-c-gutter: var(--moe-cocoa-brown);
+  --vp-c-border: var(--moe-cocoa-brown);
+
+  --vp-font-family-base: 'ZCOOL KuaiLe', 'DotGothic16', 'Microsoft YaHei', sans-serif;
+  --vp-font-family-mono: 'DotGothic16', monospace;
+
+  /* 3. 像素风渲染设置 - 降低锐利度，仅对图像和特定元素开启 */
+  --pixel-render: pixelated;
+}
+
+img,
+canvas,
+.pixel-icon {
+  image-rendering: var(--pixel-render);
+}
+
+/* --- 全局样式基础 --- */
+
+body {
+  background: var(--moe-bg-gradient) fixed;
+  /* 恢复字体平滑，让中文更柔和 */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 4. 像素边框与硬阴影 ✨ - 调整为柔和阴影 */
+
+.pixel-border-moe {
+  border: 2px solid var(--moe-cocoa-brown) !important;
+  box-shadow: 4px 4px 0 rgba(45, 27, 30, 0.2) !important;
+  border-radius: 4px !important;
+}
+
+/* 重写 VitePress 默认组件样式 */
+
+.VPNavBar {
+  background-color: var(--moe-glass-bg) !important;
+  backdrop-filter: blur(12px) saturate(180%);
+  border-bottom: 2px solid var(--moe-cocoa-brown) !important;
+  background-image: radial-gradient(rgba(45, 27, 30, 0.05) 1px, transparent 1px);
+  background-size: 8px 8px;
+}
+
+.VPSidebar {
+  background-color: var(--moe-glass-bg) !important;
+  backdrop-filter: blur(8px);
+  border-right: 2px solid var(--moe-cocoa-brown) !important;
+  background-image:
+    linear-gradient(rgba(167, 216, 240, 0.1) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(167, 216, 240, 0.1) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.VPSidebarItem.level-0 .text {
+  font-weight: 900 !important;
+  color: var(--moe-cocoa-brown) !important;
+}
+
+.VPSidebarItem.is-active .text {
+  color: var(--moe-sakura-pink-dark) !important;
+}
+
+.VPSidebarItem.is-active::before {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 8px;
+  height: 8px;
+  background-color: var(--moe-sakura-pink-dark);
+  border: 1px solid var(--moe-cocoa-brown);
+}
+
+/* 5. 首页 Hero 区域增强 🌸 */
+
+.VPHero .name {
+  color: var(--moe-sakura-pink-dark) !important;
+  background: none !important;
+  -webkit-text-fill-color: initial !important;
+  text-shadow: 4px 4px 0 rgba(45, 27, 30, 0.1);
+  font-size: 4rem !important;
+}
+
+.VPHero .image-bg {
+  display: none; /* 移除旧的模糊背景 */
+}
+
+/* 6. 特性卡片像素化 (VPFeature) */
+
+.VPFeature {
+  background: linear-gradient(
+    165deg,
+    rgba(255, 255, 255, 0.95) 0%,
+    rgba(252, 250, 255, 0.9) 100%
+  ) !important;
+  border: 2px solid var(--moe-cocoa-brown) !important;
+  border-radius: 8px !important;
+  box-shadow:
+    4px 4px 0 var(--moe-cocoa-brown),
+    inset -2px -2px 0 rgba(249, 168, 212, 0.3) !important;
+  transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
+  overflow: hidden;
+  position: relative;
+}
+
+.VPFeature::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 4px;
+  background: var(--moe-sakura-pink);
+  opacity: 0.5;
+}
+
+.VPFeature:hover {
+  transform: translate(-4px, -4px);
+  box-shadow:
+    8px 8px 0 var(--moe-sakura-pink),
+    inset -2px -2px 0 rgba(249, 168, 212, 0.5) !important;
+}
+
+/* 7. 按钮交互 (VPButton) 🖱️ */
+
+.VPButton.brand {
+  background-color: var(--moe-sakura-pink) !important;
+  border: 2px solid var(--moe-cocoa-brown) !important;
+  border-radius: 0 !important;
+  color: var(--moe-cocoa-brown) !important;
+  font-weight: bold;
+  box-shadow: 0 4px 0 var(--moe-cocoa-brown) !important;
+  transition: transform 0.1s steps(2) !important;
+}
+
+.VPButton.brand:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 0 var(--moe-cocoa-brown) !important;
+}
+
+.VPButton.brand:active {
+  transform: translateY(2px);
+  box-shadow: 0 2px 0 var(--moe-cocoa-brown) !important;
+}
+
+.VPButton.alt {
+  background-color: var(--moe-cloud-white) !important;
+  border: 2px solid var(--moe-cocoa-brown) !important;
+  border-radius: 0 !important;
+  color: var(--moe-cocoa-brown) !important;
+  box-shadow: 0 4px 0 var(--moe-cocoa-brown) !important;
+  transition: transform 0.1s steps(2) !important;
+}
+
+.VPButton.alt:hover {
+  background-color: var(--moe-vanilla-yellow) !important;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 0 var(--moe-cocoa-brown) !important;
+}
+
+/* 8. 文本修饰与代码块 */
+
+code {
+  background-color: var(--moe-vanilla-yellow) !important;
+  color: var(--moe-cocoa-brown) !important;
+  border: 1px solid var(--moe-cocoa-brown);
+  border-radius: 0 !important;
+  padding: 0 4px !important;
+}
+
+.vp-doc {
+  background: rgba(255, 255, 255, 0.4);
+  padding: 40px;
+  border-radius: 12px;
+  box-shadow: 0 0 20px rgba(167, 216, 240, 0.1);
+}
+
+.vp-doc h1,
+.vp-doc h2,
+.vp-doc h3 {
+  color: var(--moe-cocoa-brown);
+  border-bottom: 2px solid var(--moe-cocoa-brown);
+  padding-bottom: 0.5rem;
+}
+
+/* 加粗文本增强样式 🌸 */
+.vp-doc strong {
+  color: var(--moe-sakura-pink-dark);
+  font-weight: 800;
+  background: linear-gradient(transparent 60%, rgba(249, 168, 212, 0.2) 60%);
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+/* 9. 滚动条像素化 🌸 */
+
+::-webkit-scrollbar {
+  width: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--moe-sky-blue);
+  border-left: 2px solid var(--moe-cocoa-brown);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--moe-sakura-pink);
+  border: 2px solid var(--moe-cocoa-brown);
+  box-shadow: inset -2px -2px 0 var(--moe-sakura-pink-dark);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--moe-sakura-pink-dark);
+}
+
+/* 10. 动画配置 🎬 */
+
+* {
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+/* 移除 VitePress 默认的深色模式过渡 */
+::view-transition-old(*),
+::view-transition-new(*) {
+  animation: none !important;
+  mix-blend-mode: normal !important;
+}
+
+/* 11. 像素背景装饰 ☁️ */
+.Layout::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  /* 组合装饰：大网格 + 小像素点 */
+  background-image:
+    linear-gradient(var(--moe-sky-blue) 1px, transparent 1px),
+    linear-gradient(90deg, var(--moe-sky-blue) 1px, transparent 1px),
+    radial-gradient(var(--moe-dreamy-purple) 1px, transparent 1px);
+  background-size:
+    100px 100px,
+    100px 100px,
+    20px 20px;
+  opacity: 0.1;
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* 12. 内容区域质感优化 */
+.VPContent {
+  background-image:
+    linear-gradient(rgba(249, 168, 212, 0.02) 2px, transparent 2px),
+    linear-gradient(90deg, rgba(249, 168, 212, 0.02) 2px, transparent 2px);
+  background-size: 40px 40px;
+}

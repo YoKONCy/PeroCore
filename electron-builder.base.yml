@@ -1,0 +1,68 @@
+# electron-builder 基础配置
+# 所有构建变体共享此基础配置
+# ⚠️ Steam 组件严格过滤：base 配置默认排除所有 Steam 相关文件
+#    仅 electron-builder.steam.yml 会覆写此规则
+appId: com.perocore.peroperochat
+productName: '萌动链接：PeroperoChat！'
+copyright: Copyright © 2024-2026 YoKONCy and PeroCore Contributors
+
+directories:
+  output: dist-electron
+
+# Electron 主进程 + 前端构建产物
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  # ── Steam 文件严格排除（非 Steam 版不得包含） ──
+  - '!resources/steam/**'
+  - '!**/steamworks.js/**'
+  - '!**/steam_api64.dll'
+  - '!**/steam_api64.lib'
+  - '!**/steamworksjs.*.node'
+
+# 原生模块解包 (避免 asar 内的 .node 加载失败)
+asar: true
+asarUnpack:
+  - '**/*.node'
+  - '**/*.dll'
+  - '**/*.wasm'
+
+# 后端构建产物 + 资源
+extraResources:
+  - from: packages/backend/dist
+    to: backend
+    filter:
+      - '**/*'
+  - from: packages/backend/prompts
+    to: backend/prompts
+    filter:
+      - '**/*'
+  - from: packages/backend/agents
+    to: backend/agents
+    filter:
+      - '**/*'
+  - from: public/Logo.png
+    to: Logo.png
+
+# 不使用 npm rebuild (pnpm workspace 已经处理好原生模块)
+npmRebuild: false
+
+# 发布到 GitHub Releases (electron-updater 拉取更新)
+publish:
+  - provider: github
+    owner: YoKONCy
+    repo: PeroCore
+
+# Windows 通用配置
+win:
+  icon: public/Logo.png
+  target:
+    - nsis
+
+# NSIS 安装包配置
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  artifactName: '${productName}-Setup-${version}.${ext}'
+  shortcutName: '萌动链接：PeroperoChat！'
+  uninstallDisplayName: '萌动链接：PeroperoChat！'

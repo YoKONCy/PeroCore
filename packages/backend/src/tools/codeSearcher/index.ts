@@ -21,7 +21,8 @@ const SEARCH_TIMEOUT_MS = 15_000
 export const codeSearcherTool: BuiltinTool = {
   definition: {
     name: 'code_search',
-    description: '在代码文件中搜索文本或正则模式。基于 ripgrep，速度极快。返回匹配的文件名、行号和内容。',
+    description:
+      '在代码文件中搜索文本或正则模式。基于 ripgrep，速度极快。返回匹配的文件名、行号和内容。',
     parameters: {
       type: 'object',
       properties: {
@@ -46,11 +47,13 @@ export const codeSearcherTool: BuiltinTool = {
 
     // 构建 rg 命令
     const rgArgs = [
-      '--json',           // JSON 输出
-      '-n',               // 显示行号
-      '-I',               // 不显示二进制
-      '--max-count', String(MAX_RESULTS),
-      '--max-columns', '200',
+      '--json', // JSON 输出
+      '-n', // 显示行号
+      '-I', // 不显示二进制
+      '--max-count',
+      String(MAX_RESULTS),
+      '--max-columns',
+      '200',
     ]
 
     if (!isRegex) {
@@ -78,9 +81,12 @@ export const codeSearcherTool: BuiltinTool = {
           if (error && !stdout) {
             // 可能 rg 未安装
             if (error.message.includes('not found') || error.message.includes('not recognized')) {
-              resolve(JSON.stringify({
-                error: 'ripgrep (rg) 未安装。请安装: https://github.com/BurntSushi/ripgrep/releases',
-              }))
+              resolve(
+                JSON.stringify({
+                  error:
+                    'ripgrep (rg) 未安装。请安装: https://github.com/BurntSushi/ripgrep/releases',
+                }),
+              )
               return
             }
             resolve(JSON.stringify({ matches: [], message: '未找到匹配' }))

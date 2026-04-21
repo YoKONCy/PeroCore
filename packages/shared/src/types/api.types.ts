@@ -1,6 +1,6 @@
 /**
  * @file API 响应类型定义
- * @description 遵循 02_API_RESPONSE_SPEC.md 统一信封规范
+ * @description统一信封规范
  * @module @perocore/shared/types/api
  */
 
@@ -41,17 +41,11 @@ export interface PaginationParams {
 }
 
 // ─────────────────────────────────────────────
-// SSE 流式事件类型 (02_API_RESPONSE_SPEC §9)
+// SSE 流式事件类型
 // ─────────────────────────────────────────────
 
 /** SSE 事件类型标识 */
-export type SseEventType =
-  | 'delta'
-  | 'tool_call'
-  | 'tool_result'
-  | 'status'
-  | 'done'
-  | 'error'
+export type SseEventType = 'delta' | 'tool_call' | 'tool_result' | 'status' | 'done' | 'error'
 
 /** 文本增量事件 */
 export interface SseDeltaEvent {
