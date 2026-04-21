@@ -2,59 +2,70 @@ declare global {
   interface Window {
     electron?: {
       invoke: (channel: string, ...args: any[]) => Promise<any>
+      send: (channel: string, ...args: any[]) => void
+      getBackendConnectionConfigSync: () => {
+        mode: 'local' | 'remote'
+        baseUrl: string
+        apiBase: string
+        wsBase: string
+        configured: boolean
+      }
       on: (channel: string, listener: (event: any, ...args: any[]) => void) => () => void
       scanLocalModels: () => Promise<any[]>
     }
   }
 }
 
+import { getRuntimeCapabilities } from '@/utils/runtimeCapabilities'
+
 export const isElectron = () => !!window.electron
 
 // Web Bridge 支持
-let ws: WebSocket | null = null
 const listeners = new Map<string, Set<(payload: any) => void>>()
 
 const initWs = () => {
-  if (isElectron() || ws) return
+  if (isElectron()) return
+}
 
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  // 使用当前 Host (Docker/CLI 兼容)
-  const wsUrl = `${protocol}//${window.location.host}`
+const emitBrowserEvent = (event: string, payload: any) => {
+  const handlers = listeners.get(event)
+  if (!handlers) {
+    return
+  }
 
-  console.log('[IPC Adapter] 正在连接到 Web Bridge:', wsUrl)
-  ws = new WebSocket(wsUrl)
-
-  ws.onmessage = (event) => {
+  handlers.forEach((handler) => {
     try {
-      const data = JSON.parse(event.data)
-      if (data.type === 'event' && data.channel) {
-        const handlers = listeners.get(data.channel)
-        if (handlers) {
-          // WebBridge 发送数组参数，取首个作为 payload
-          const payload = data.args && data.args.length > 0 ? data.args[0] : undefined
-          handlers.forEach((h) => h(payload))
-        }
-      }
-    } catch (e) {
-      console.error('[IPC Adapter] WS 消息解析错误:', e)
+      handler(payload)
+    } catch (error) {
+      console.error(`[IPC Adapter] 浏览器事件 '${event}' 处理失败:`, error)
     }
+  })
+}
+
+const readBrowserIpcResponse = async (response: Response): Promise<any> => {
+  if (response.status === 204) {
+    return null
   }
 
-  ws.onclose = () => {
-    console.log('[IPC Adapter] Web Bridge 已断开连接。3秒后重连...')
-    ws = null
-    setTimeout(initWs, 3000)
-  }
-
-  ws.onerror = (err) => {
-    console.error('[IPC Adapter] Web Bridge 连接错误:', err)
+  try {
+    return await response.json()
+  } catch {
+    return null
   }
 }
 
-// 浏览器模式自动初始化
-if (!isElectron()) {
-  // 稍作延迟确保环境就绪
-  setTimeout(initWs, 100)
+const unwrapBrowserIpcResponse = (data: any): any => {
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    if ('error' in data && data.error) {
+      throw new Error(String(data.error))
+    }
+
+    if ('result' in data) {
+      return data.result
+    }
+  }
+
+  return data ?? null
 }
 
 export const invoke = async (cmd: string, args?: any) => {
@@ -82,6 +93,14 @@ export const invoke = async (cmd: string, args?: any) => {
     return 'web' // 或者 'docker'
   }
 
+  if (cmd === 'emit_event') {
+    const payload = Array.isArray(args) ? args[0] : args
+    if (payload?.event) {
+      emitBrowserEvent(payload.event, payload.payload)
+    }
+    return null
+  }
+
   // 浏览器模式 (HTTP Bridge)
   try {
     // 包装参数适配 WebBridge
@@ -95,11 +114,8 @@ export const invoke = async (cmd: string, args?: any) => {
       throw new Error(`HTTP 错误: ${response.status} ${response.statusText}`)
     }
 
-    const data = await response.json()
-    if (data.error) {
-      throw new Error(data.error)
-    }
-    return data.result
+    const data = await readBrowserIpcResponse(response)
+    return unwrapBrowserIpcResponse(data)
   } catch (e) {
     console.error(`[IPC Adapter] 调用 '${cmd}' 失败:`, e)
 
@@ -113,6 +129,12 @@ export const invoke = async (cmd: string, args?: any) => {
 export const listen = async (event: string, handler: (payload: any) => void) => {
   if (isElectron()) {
     return window.electron!.on(event, (_e: any, ...args: any[]) => handler(args[0]))
+  }
+
+  initWs()
+
+  if (getRuntimeCapabilities().eventTransport !== 'browser-local') {
+    return () => {}
   }
 
   // 浏览器模式 (WebSocket)
@@ -139,5 +161,6 @@ export const emit = async (event: string, payload?: any) => {
   }
 
   // 浏览器模式: emit 映射为 invoke
-  return invoke('emit_event', { event, payload })
+  emitBrowserEvent(event, payload)
+  return null
 }

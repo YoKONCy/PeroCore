@@ -43,7 +43,14 @@ import { startBackend, stopBackend, getBackendLogs } from './services/python.js'
 import { startGateway, stopGateway } from './services/gateway.js'
 import { appEvents } from './events'
 import { getDiagnostics } from './services/diagnostics.js'
-import { getSystemStats, getConfig, saveConfig, getGatewayToken } from './services/system.js'
+import {
+  getSystemStats,
+  getConfig,
+  saveConfig,
+  getBackendConnectionConfig,
+  resolveGatewayToken,
+  checkRemoteBackendConnection
+} from './services/system.js'
 import {
   scanLocalAgents,
   getPlugins,
@@ -77,6 +84,26 @@ import fs from 'fs-extra'
 // 改为在第一次实际调用时才加载，任何崩溃只影响 IPC 调用，不影响 Electron 窗口的显示
 let native: any = null
 let nativeLoadAttempted = false
+
+function sanitizeValueForLog(value: any): any {
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeValueForLog(item))
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, nestedValue]) => {
+        const lowered = key.toLowerCase()
+        if (lowered.includes('token') || lowered.endsWith('_api_key') || lowered.includes('secret')) {
+          return [key, nestedValue ? '***' : '']
+        }
+        return [key, sanitizeValueForLog(nestedValue)]
+      })
+    )
+  }
+
+  return value
+}
 
 function loadNativeModule(): any {
   if (nativeLoadAttempted) return native
@@ -480,24 +507,28 @@ ipcMain.handle('emit_event', (_, { event, payload }) => {
 
 ipcMain.handle('chat-message', async (_, args) => {
   try {
-    const token = getGatewayToken()
-    const port = 9120
+    const token = await resolveGatewayToken()
+    const connection = getBackendConnectionConfig()
     const { message } = args
 
     logger.info('Main', `IPC: 正在发送聊天消息到后端: ${message}`)
 
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json'
+    }
+    if (token) {
+      headers.Authorization = `Bearer ${token}`
+    }
+
     await axios.post(
-      `http://localhost:${port}/api/ide/chat`,
+      `${connection.apiBase}/ide/chat`,
       {
         messages: [{ role: 'user', content: message }],
         source: 'desktop',
         session_id: 'default'
       },
       {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
+        headers
       }
     )
     return { status: 'ok' }
@@ -507,18 +538,35 @@ ipcMain.handle('chat-message', async (_, args) => {
   }
 })
 
-ipcMain.handle('open_stronghold_window', () => {
-  windowManager.createStrongholdWindow()
-  return null
+ipcMain.on('get_backend_connection_config_sync', (event) => {
+  event.returnValue = getBackendConnectionConfig()
 })
 
-// IPC 处理程序 - Tauri 适配器
-logger.info('Main', '主进程: 正在注册 IPC 处理程序...')
-ipcMain.handle('get_diagnostics', async () => {
-  return await getDiagnostics()
+ipcMain.handle('get_backend_connection_config', () => {
+  return getBackendConnectionConfig()
 })
 
 ipcMain.handle('start_backend', async (_, args) => {
+  const connection = getBackendConnectionConfig()
+
+  if (connection.mode === 'remote') {
+    if (!connection.configured) {
+      throw new Error('远程后端地址未配置')
+    }
+
+    try {
+      const remoteCheck = await checkRemoteBackendConnection(connection.baseUrl)
+      if (!remoteCheck.ok) {
+        throw new Error(remoteCheck.message)
+      }
+      logger.info('Main', `远程后端连接成功: ${connection.baseUrl}`)
+      return null
+    } catch (error: any) {
+      logger.error('Main', `远程后端连接失败: ${error.message}`)
+      throw new Error(`远程后端不可用: ${error.message}`)
+    }
+  }
+
   // Tauri invoke 将 args 作为对象传递 { enableSocialMode: true }
   const win = windowManager.launcherWin
   if (!win) return
@@ -534,35 +582,50 @@ ipcMain.handle('start_backend', async (_, args) => {
 })
 
 ipcMain.handle('start_gateway', async (event) => {
+  const connection = getBackendConnectionConfig()
+  if (connection.mode === 'remote') {
+    return
+  }
+
   const win = BrowserWindow.fromWebContents(event.sender)
   if (win) await startGateway()
 })
 
 ipcMain.handle('stop_backend', async () => {
+  const connection = getBackendConnectionConfig()
+  if (connection.mode === 'remote') {
+    return
+  }
+
   await stopBackend()
   await stopGateway()
-})
-
-ipcMain.handle('quit_app', () => {
-  app.quit()
 })
 
 ipcMain.handle('get_system_stats', async () => {
   return await getSystemStats()
 })
 
+ipcMain.handle('get_diagnostics', async () => {
+  return await getDiagnostics()
+})
+
 ipcMain.handle('get_config', () => {
   const config = getConfig()
-  logger.info('Main', `IPC: get_config 返回配置: ${JSON.stringify(config)}`)
+  logger.info('Main', `IPC: get_config 返回配置: ${JSON.stringify(sanitizeValueForLog(config))}`)
   return config
 })
 
-ipcMain.handle('get_gateway_token', () => {
-  return getGatewayToken()
+ipcMain.handle('get_gateway_token', async () => {
+  return await resolveGatewayToken()
+})
+
+ipcMain.handle('quit_app', () => {
+  isQuitting = true
+  app.quit()
 })
 
 ipcMain.handle('save_config', (_, args) => {
-  logger.info('Main', `IPC: save_config 收到数据: ${JSON.stringify(args)}`)
+  logger.info('Main', `IPC: save_config 收到数据: ${JSON.stringify(sanitizeValueForLog(args))}`)
   // 前端发送 { config: ... } 以匹配 Tauri 签名
   let config = args.config || args
 
@@ -578,7 +641,7 @@ ipcMain.handle('save_config', (_, args) => {
     }
   }
 
-  logger.info('Main', `IPC: 正在保存处理后的配置: ${JSON.stringify(config)}`)
+  logger.info('Main', `IPC: 正在保存处理后的配置: ${JSON.stringify(sanitizeValueForLog(config))}`)
   saveConfig(config)
   return null
 })

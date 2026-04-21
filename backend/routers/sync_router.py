@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
+from core.desktop_auth import desktop_auth_required, verify_desktop_api_key
 from core.config_manager import get_config_manager
 from database import get_session
 from models import Config
@@ -89,13 +90,16 @@ async def get_sync_status():
 
 
 @router.get("/server-info")
-async def get_server_info():
+async def get_server_info(_: None = Depends(verify_desktop_api_key)):
     """(Server模式) 获取本机连接信息"""
     # 读取本地Gateway Token
     token = ""
     try:
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        token_path = os.path.join(current_dir, "..", "data", "gateway_token.json")
+        data_dir = os.environ.get(
+            "PERO_DATA_DIR", os.path.join(current_dir, "..", "data")
+        )
+        token_path = os.path.join(data_dir, "gateway_token.json")
         if os.path.exists(token_path):
             with open(token_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -104,4 +108,8 @@ async def get_server_info():
         pass
 
     # 猜测IP（前端应显示localhost或询问用户），返回端口很有用
-    return {"port": 9120, "token": token}
+    return {
+        "port": int(os.environ.get("PORT", "9120")),
+        "token": token,
+        "desktop_auth_required": desktop_auth_required(),
+    }

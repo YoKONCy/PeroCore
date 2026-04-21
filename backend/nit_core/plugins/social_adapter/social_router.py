@@ -1,7 +1,14 @@
 import json
 import logging
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, WebSocketException, status
+
+from core.desktop_auth import (
+    SOCIAL_WS_SECRET_HEADER,
+    SOCIAL_WS_SECRET_QUERY,
+    social_ws_auth_required,
+    verify_social_ws_secret,
+)
 
 from .social_service import get_social_service
 
@@ -12,22 +19,29 @@ logger = logging.getLogger(__name__)
 @router.get("/status")
 async def get_social_status():
     service = get_social_service()
-    if not service.enabled:
-        return {"enabled": False}
-
     status = await service.get_connection_status()
-    return {"enabled": True, **status}
+    return {
+        "enabled": service.enabled,
+        "ws_auth_required": social_ws_auth_required(),
+        "ws_auth_header": SOCIAL_WS_SECRET_HEADER,
+        "ws_auth_query": SOCIAL_WS_SECRET_QUERY,
+        **status,
+    }
 
 
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
     service = get_social_service()
 
     # 检查社交模式是否启用
     if not service.enabled:
-        await websocket.close(code=1008, reason="Social mode disabled")
-        return
+        raise WebSocketException(
+            code=status.WS_1008_POLICY_VIOLATION,
+            reason="Social mode disabled",
+        )
+
+    verify_social_ws_secret(websocket)
+    await websocket.accept()
 
     # [多 Agent 支持] 从请求头中提取 X-Self-ID
     # NapCat 发送 X-Self-ID 以指示此连接属于哪个 QQ 账号。
@@ -96,6 +110,7 @@ async def websocket_endpoint(websocket: WebSocket):
         logger.info(f"[Social] WebSocket 已断开连接 (QQ: {x_self_id})。")
         service.unregister_connection(x_self_id)
     except Exception as e:
+        service.record_error(e)
         logger.error(f"[Social] WebSocket 错误: {e}", exc_info=True)
         if x_self_id:
             service.unregister_connection(x_self_id)

@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
-import path from 'path'
+import { fileURLToPath, URL } from 'node:url'
 
 // https://vite.dev/config/
 export default defineConfig(({ command }) => ({
@@ -8,7 +8,7 @@ export default defineConfig(({ command }) => ({
   plugins: [vue()],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src')
+      '@': fileURLToPath(new URL('./src', import.meta.url))
     }
   },
   server: {
@@ -33,7 +33,7 @@ export default defineConfig(({ command }) => ({
   optimizeDeps: {
     // 排除会被扫描到的非源码目录中的内容，并且不扫描 native 文件夹
     entries: [
-      'index.html', 
+      'index.html',
       'src/**/*.{vue,ts,js,tsx,jsx}',
       '!src/components/avatar/native/**/*'
     ],

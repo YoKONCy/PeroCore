@@ -1,6 +1,7 @@
 import { Envelope, Hello, Heartbeat, ActionRequest, ActionResponse } from './proto/perolink'
 import { invoke } from '../utils/ipcAdapter'
-import { WS_BASE } from '../config'
+import { API_BASE, WS_BASE } from '../config'
+import { buildAuthenticatedWebSocketUrl } from './runtimeAuth'
 
 const logToMain = (msg: string, ...args: any[]) => {
   const message = msg + (args.length ? ' ' + JSON.stringify(args) : '')
@@ -12,11 +13,12 @@ const logToMain = (msg: string, ...args: any[]) => {
 
 export class GatewayClient {
   private ws: WebSocket | null = null
-  private url: string = `${WS_BASE}/gateway`
+  private url: string = ''
   private reconnectInterval: number = 3000
   private heartbeatInterval: any = null
   private deviceId: string = 'electron-client-' + Math.random().toString(36).substr(2, 9)
   private isConnected: boolean = false
+  private shouldReconnect: boolean = true
 
   private pendingRequests: Map<
     string,
@@ -29,6 +31,24 @@ export class GatewayClient {
     if (url) {
       this.url = url
     }
+  }
+
+  private resolveUrl() {
+    return buildAuthenticatedWebSocketUrl(`${WS_BASE}/gateway`)
+  }
+
+  private async resolveGatewayToken(): Promise<string> {
+    if ((window as any).electron) {
+      return (await invoke('get_gateway_token')) || ''
+    }
+
+    const response = await fetch(`${API_BASE}/system/gateway/token`)
+    if (!response.ok) {
+      throw new Error(`获取 Gateway 令牌失败 (${response.status})`)
+    }
+
+    const data = await response.json()
+    return data?.token || ''
   }
 
   /**
@@ -156,17 +176,24 @@ export class GatewayClient {
   }
 
   async connect() {
+    this.shouldReconnect = true
+    this.url = this.resolveUrl()
+
     // 尝试获取令牌
     try {
-      const token = await invoke('get_gateway_token')
+      const token = await this.resolveGatewayToken()
       if (token) {
         this.token = token
         logToMain(`使用 Gateway 令牌: ${token.substring(0, 8)}...`)
       } else {
-        logToMain('警告: 收到空令牌')
+        logToMain('警告: 收到空令牌，稍后重试 Gateway 连接')
+        setTimeout(() => this.connect(), this.reconnectInterval)
+        return
       }
-    } catch {
-      logToMain('获取令牌失败')
+    } catch (e: any) {
+      logToMain(`获取令牌失败: ${e?.message || e}`)
+      setTimeout(() => this.connect(), this.reconnectInterval)
+      return
     }
 
     logToMain(`正在连接到 Gateway: ${this.url}...`)
@@ -216,7 +243,9 @@ export class GatewayClient {
         }
         this.isConnected = false
         this.stopHeartbeat()
-        setTimeout(() => this.connect(), this.reconnectInterval)
+        if (this.shouldReconnect) {
+          setTimeout(() => this.connect(), this.reconnectInterval)
+        }
       }
 
       this.ws.onerror = () => {
@@ -226,6 +255,16 @@ export class GatewayClient {
       }
     } catch (e) {
       logToMain('创建 WebSocket 失败', e)
+    }
+  }
+
+  disconnect() {
+    this.shouldReconnect = false
+    this.stopHeartbeat()
+    this.isConnected = false
+    if (this.ws) {
+      this.ws.close()
+      this.ws = null
     }
   }
 

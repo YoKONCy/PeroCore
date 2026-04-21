@@ -2,12 +2,17 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import TerminalPanel from '@/components/terminal/TerminalPanel.vue'
 import { listen, invoke } from '@/utils/ipcAdapter'
+import { getRuntimeCapabilities } from '@/utils/runtimeCapabilities'
 import { nextTick } from 'vue'
 
 // 模拟 ipcAdapter
 vi.mock('@/utils/ipcAdapter', () => ({
   listen: vi.fn(),
   invoke: vi.fn()
+}))
+
+vi.mock('@/utils/runtimeCapabilities', () => ({
+  getRuntimeCapabilities: vi.fn()
 }))
 
 // 模拟 PixelIcon 组件
@@ -24,6 +29,15 @@ describe('TerminalPanel.vue', () => {
     vi.useFakeTimers()
     vi.clearAllMocks()
     listeners = {}
+
+    ;(getRuntimeCapabilities as any).mockReturnValue({
+      host: 'electron-local',
+      eventTransport: 'electron-ipc',
+      backendLogHistory: true,
+      backendLogStream: true,
+      localServiceControl: true,
+      nativeWindowControl: true
+    })
 
     // 默认 mock 实现
     ;(invoke as any).mockResolvedValue([])
@@ -131,5 +145,25 @@ describe('TerminalPanel.vue', () => {
     const text = wrapper.text()
     expect(text).toContain('Frontend log message')
     expect(text).toContain('[frontend]') // 检查来源标记
+  })
+
+  it('Web 模式下应优雅降级到前端日志提示', async () => {
+    ;(getRuntimeCapabilities as any).mockReturnValue({
+      host: 'web',
+      eventTransport: 'browser-local',
+      backendLogHistory: false,
+      backendLogStream: false,
+      localServiceControl: false,
+      nativeWindowControl: false
+    })
+
+    wrapper = mountComponent()
+    await flushPromises()
+    vi.advanceTimersByTime(200)
+    await nextTick()
+
+    expect(invoke).not.toHaveBeenCalledWith('get_backend_logs')
+    expect(listeners['backend-log']).toBeUndefined()
+    expect(wrapper.text()).toContain('Runtime Logs')
   })
 })

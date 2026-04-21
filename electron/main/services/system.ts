@@ -1,6 +1,9 @@
 import { paths } from '../utils/env'
 import fs from 'fs-extra'
 import path from 'path'
+import axios from 'axios'
+
+export const DESKTOP_API_KEY_HEADER = 'x-pero-desktop-api-key'
 
 /**
  * systeminformation 延迟加载。
@@ -27,6 +30,15 @@ export interface SystemStats {
   cpu_usage: number
   memory_used: number
   memory_total: number
+}
+
+export interface BackendConnectionConfig {
+  mode: 'local' | 'remote'
+  baseUrl: string
+  apiBase: string
+  wsBase: string
+  configured: boolean
+  apiKey?: string
 }
 
 // 缓存 CPU 负载 (定期更新以降低开销)
@@ -64,6 +76,47 @@ export async function getSystemStats(): Promise<SystemStats> {
   }
 }
 
+function normalizeRemoteBackendUrl(rawUrl: string): string {
+  const trimmed = rawUrl.trim()
+  if (!trimmed) return ''
+  const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
+  return withProtocol.replace(/\/+$/, '')
+}
+
+function normalizeRemoteBackendApiKey(rawApiKey: string): string {
+  return (rawApiKey || '').trim()
+}
+
+function buildApiBase(baseUrl: string): string {
+  if (!baseUrl) return ''
+  const url = new URL(baseUrl)
+  url.pathname = `${url.pathname.replace(/\/+$/, '')}/api`
+  url.search = ''
+  url.hash = ''
+  return url.toString().replace(/\/+$/, '')
+}
+
+function buildRemoteDesktopAuthHeaders(rawApiKey?: string): Record<string, string> {
+  const apiKey = normalizeRemoteBackendApiKey(rawApiKey || '')
+  if (!apiKey) {
+    return {}
+  }
+
+  return {
+    [DESKTOP_API_KEY_HEADER]: apiKey
+  }
+}
+
+function buildWsBase(baseUrl: string): string {
+  if (!baseUrl) return ''
+  const url = new URL(baseUrl)
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  url.pathname = `${url.pathname.replace(/\/+$/, '')}/ws`
+  url.search = ''
+  url.hash = ''
+  return url.toString().replace(/\/+$/, '')
+}
+
 export function getBackendLogs(): string[] {
   // 目前返回空 (待办: 实现日志存储)
   return []
@@ -89,8 +142,44 @@ export function getConfig(): any {
   if (config.eula_accepted === undefined) {
     config.eula_accepted = false
   }
+  if (config.backend_mode !== 'remote') {
+    config.backend_mode = 'local'
+  }
+  if (typeof config.remote_backend_url !== 'string') {
+    config.remote_backend_url = ''
+  }
+  if (typeof config.remote_backend_api_key !== 'string') {
+    config.remote_backend_api_key = ''
+  }
 
   return config
+}
+
+export function getBackendConnectionConfig(): BackendConnectionConfig {
+  const config = getConfig()
+  const mode: 'local' | 'remote' = config.backend_mode === 'remote' ? 'remote' : 'local'
+
+  if (mode === 'remote') {
+    const baseUrl = normalizeRemoteBackendUrl(config.remote_backend_url || '')
+    return {
+      mode,
+      baseUrl,
+      apiBase: buildApiBase(baseUrl),
+      wsBase: buildWsBase(baseUrl),
+      configured: !!baseUrl,
+      apiKey: normalizeRemoteBackendApiKey(config.remote_backend_api_key || '')
+    }
+  }
+
+  const baseUrl = 'http://localhost:9120'
+  return {
+    mode,
+    baseUrl,
+    apiBase: `${baseUrl}/api`,
+    wsBase: 'ws://localhost:9120/ws',
+    configured: true,
+    apiKey: ''
+  }
 }
 
 export function saveConfig(config: any) {
@@ -98,6 +187,81 @@ export function saveConfig(config: any) {
   const dataDir = path.join(paths.userData, 'data')
   fs.ensureDirSync(dataDir)
   fs.writeJsonSync(path.join(dataDir, 'config.json'), config, { spaces: 2 })
+}
+
+export async function checkRemoteBackendConnection(rawUrl?: string) {
+  const config = getConfig()
+  const normalizedUrl = normalizeRemoteBackendUrl(rawUrl ?? config.remote_backend_url ?? '')
+  const apiKey = normalizeRemoteBackendApiKey(config.remote_backend_api_key ?? '')
+
+  if (!normalizedUrl) {
+    return {
+      ok: false,
+      message: '未配置远程后端地址',
+      normalizedUrl: ''
+    }
+  }
+
+  try {
+    const apiBase = buildApiBase(normalizedUrl)
+    const healthResponse = await axios.get(apiBase + '/system/health', {
+      timeout: 5000
+    })
+    const authRequired = healthResponse.data?.desktop_auth_required === true
+    const authHeader = healthResponse.data?.desktop_auth_header || DESKTOP_API_KEY_HEADER
+
+    if (authRequired && !apiKey) {
+      return {
+        ok: false,
+        message: `远程后端要求桌面访问密钥，请在启动器中填写 ${authHeader}`,
+        normalizedUrl,
+        authRequired,
+        authHeader
+      }
+    }
+
+    const tokenResponse = await axios.get(`${apiBase}/system/gateway/token`, {
+      timeout: 5000,
+      headers: buildRemoteDesktopAuthHeaders(apiKey)
+    })
+
+    if (!tokenResponse.data?.token) {
+      return {
+        ok: false,
+        message: '远程后端未返回前端访问令牌',
+        normalizedUrl,
+        authRequired,
+        authHeader
+      }
+    }
+
+    return {
+      ok: true,
+      message: authRequired ? '远程后端连接正常，桌面访问密钥已验证' : '远程后端连接正常',
+      normalizedUrl,
+      authRequired,
+      authHeader
+    }
+  } catch (error: any) {
+    const status = error?.response?.status
+    const detail = error?.response?.data?.detail
+
+    if (status === 401 || status === 403) {
+      return {
+        ok: false,
+        message: '远程后端桌面访问密钥无效',
+        normalizedUrl,
+        authRequired: true,
+        authHeader: DESKTOP_API_KEY_HEADER
+      }
+    }
+
+    return {
+      ok: false,
+      message: detail || error?.message || '远程后端连接失败',
+      normalizedUrl
+    }
+  }
 }
 
 export function getGatewayToken(): string {
@@ -122,4 +286,23 @@ export function getGatewayToken(): string {
     }
   }
   return ''
+}
+
+export async function resolveGatewayToken(): Promise<string> {
+  const connection = getBackendConnectionConfig()
+  const config = getConfig()
+
+  if (connection.mode !== 'remote') {
+    return getGatewayToken()
+  }
+
+  if (!connection.apiBase) {
+    return ''
+  }
+
+  const response = await axios.get(`${connection.apiBase}/system/gateway/token`, {
+    timeout: 5000,
+    headers: buildRemoteDesktopAuthHeaders(config.remote_backend_api_key ?? '')
+  })
+  return response.data?.token || ''
 }

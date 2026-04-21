@@ -1,7 +1,20 @@
 <template>
   <div class="app-container h-full w-full">
     <div class="main-content h-full w-full">
-      <router-view v-slot="{ Component }">
+      <div v-if="!desktopAuthState.bootstrapped" class="auth-loading-shell">
+        <div class="auth-loading-card">
+          <div class="auth-loading-spinner"></div>
+          <p>正在检查服务端鉴权状态...</p>
+        </div>
+      </div>
+      <AuthGate
+        v-else-if="desktopAuthState.required && !desktopAuthState.authorized"
+        :busy="desktopAuthState.validating"
+        :error="desktopAuthState.error"
+        :header-name="desktopAuthState.headerName"
+        @unlock="handleUnlock"
+      />
+      <router-view v-else v-slot="{ Component }">
         <keep-alive>
           <component :is="Component" />
         </keep-alive>
@@ -12,39 +25,76 @@
 </template>
 
 <script setup>
-import { onMounted } from 'vue'
+import { onMounted, watch } from 'vue'
+import { bootstrapDesktopAuth, desktopAuthState, validateDesktopAuthKey } from './api/runtimeAuth'
+import AuthGate from './components/auth/AuthGate.vue'
 import NotificationManager from './components/ui/NotificationManager.vue'
 import { gatewayClient } from './api/gateway'
 
 console.log('[App] App.vue 已初始化')
 
-onMounted(() => {
-  // 启动网关连接
-  gatewayClient.connect()
+let gatewayInitialized = false
+let gatewayListenersRegistered = false
 
-  // 监听网关广播的系统错误并转发给通知系统 🌸
-  gatewayClient.on('action:system_error', (payload) => {
-    console.warn('[Gateway] 收到系统错误广播:', payload)
-    if (window.$notify) {
-      const msg = payload.message || payload.payload || JSON.stringify(payload)
-      const title = payload.title || '系统提示'
-      const type = payload.type || 'error'
-      window.$notify(msg, type, title, 10000)
+const ensureGatewayReady = () => {
+  if (!desktopAuthState.bootstrapped) return
+  if (desktopAuthState.required && !desktopAuthState.authorized) {
+    if (gatewayInitialized) {
+      gatewayClient.disconnect()
+      gatewayInitialized = false
     }
-  })
+    return
+  }
 
-  // 监听 MOD / 外部插件的通用通知推送 🔌
-  gatewayClient.on('action:mod_notification', (payload) => {
-    console.log('[Gateway] 收到 MOD 通知:', payload)
-    if (window.$notify) {
-      const params = payload.params || payload
-      const title = params.title || 'MOD 通知'
-      const body = params.body || ''
-      const level = params.level || 'info'
-      const duration = parseInt(params.duration || '5000', 10)
-      window.$notify(body, level, title, duration)
-    }
-  })
+  if (!gatewayListenersRegistered) {
+    gatewayListenersRegistered = true
+
+    gatewayClient.on('action:system_error', (payload) => {
+      console.warn('[Gateway] 收到系统错误广播:', payload)
+      if (window.$notify) {
+        const msg = payload.message || payload.payload || JSON.stringify(payload)
+        const title = payload.title || '系统提示'
+        const type = payload.type || 'error'
+        window.$notify(msg, type, title, 10000)
+      }
+    })
+
+    gatewayClient.on('action:mod_notification', (payload) => {
+      console.log('[Gateway] 收到 MOD 通知:', payload)
+      if (window.$notify) {
+        const params = payload.params || payload
+        const title = params.title || 'MOD 通知'
+        const body = params.body || ''
+        const level = params.level || 'info'
+        const duration = parseInt(params.duration || '5000', 10)
+        window.$notify(body, level, title, duration)
+      }
+    })
+  }
+
+  if (!gatewayInitialized) {
+    gatewayInitialized = true
+    gatewayClient.connect()
+  }
+}
+
+const handleUnlock = async (apiKey, remember) => {
+  const ok = await validateDesktopAuthKey(apiKey, { remember })
+  if (ok) {
+    ensureGatewayReady()
+  }
+}
+
+watch(
+  () => [desktopAuthState.bootstrapped, desktopAuthState.required, desktopAuthState.authorized],
+  () => {
+    ensureGatewayReady()
+  }
+)
+
+onMounted(async () => {
+  await bootstrapDesktopAuth()
+  ensureGatewayReady()
 })
 
 // 全局 JS 错误捕获
@@ -95,5 +145,37 @@ html {
   width: 100%;
   height: 100%;
   background: transparent !important;
+}
+
+.auth-loading-shell {
+  display: flex;
+  height: 100%;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(180deg, rgba(20, 16, 31, 0.98), rgba(12, 10, 18, 1));
+}
+
+.auth-loading-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  color: #f8f4ff;
+}
+
+.auth-loading-spinner {
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  border: 3px solid rgba(255, 255, 255, 0.12);
+  border-top-color: #ec4899;
+  animation: auth-spin 0.8s linear infinite;
+}
+
+@keyframes auth-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>

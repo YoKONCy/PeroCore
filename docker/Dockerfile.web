@@ -1,20 +1,5 @@
-# --- 阶段 1: WASM 构建器 (Rust) ---
-FROM rust:latest AS wasm-builder
-
-# 安装 wasm-pack
-RUN curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-
-WORKDIR /app
-
-# 复制 WASM 模块源码
-COPY backend/nit_core/nit_terminal_auditor/ backend/nit_core/nit_terminal_auditor/
-
-# 构建 Web 端 WASM
-WORKDIR /app/backend/nit_core/nit_terminal_auditor
-RUN wasm-pack build --target web --out-dir /out --out-name auditor
-
-# --- 阶段 2: 前端构建器 (Node + pnpm) ---
-FROM node:18 AS builder
+# --- 阶段 1: 前端构建器 (Node + pnpm) ---
+FROM node:20 AS builder
 WORKDIR /app
 
 # 启用 corepack 以使用 pnpm
@@ -28,10 +13,6 @@ RUN pnpm install --frozen-lockfile
 
 # 复制源码
 COPY . .
-
-# 复制构建好的 WASM 到 public 目录
-COPY --from=wasm-builder /out/auditor_bg.wasm public/assets/wasm/auditor.wasm
-COPY --from=wasm-builder /out/auditor.js public/assets/wasm/auditor.js
 
 # 复制 Docker 环境变量
 COPY .env.docker .env.production.local

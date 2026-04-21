@@ -12,12 +12,24 @@ from datetime import datetime
 from typing import Dict, Optional
 
 import psutil
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import func
 from sqlmodel import delete, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from core.desktop_auth import (
+    DESKTOP_API_KEY_HEADER,
+    DESKTOP_API_KEY_COOKIE,
+    DESKTOP_API_KEY_QUERY,
+    clear_desktop_auth_cookie,
+    desktop_auth_required,
+    has_valid_desktop_api_key,
+    resolve_desktop_api_key,
+    set_desktop_auth_cookie,
+    verify_desktop_api_key,
+)
 from database import get_session
 from models import (
     Config,
@@ -34,6 +46,18 @@ current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 logger = logging.getLogger(__name__)
 
 
+def _request_is_secure(request: Request) -> bool:
+    forwarded_proto = request.headers.get("x-forwarded-proto", "")
+    if forwarded_proto:
+        return forwarded_proto.split(",")[0].strip().lower() == "https"
+
+    forwarded_ssl = request.headers.get("x-forwarded-ssl", "")
+    if forwarded_ssl:
+        return forwarded_ssl.strip().lower() == "on"
+
+    return request.url.scheme == "https"
+
+
 @router.get("/ping")
 async def ping():
     return {"status": "ok", "timestamp": datetime.now().isoformat()}
@@ -41,7 +65,65 @@ async def ping():
 
 @router.get("/health")
 async def health_check():
-    return {"status": "healthy"}
+    return {
+        "status": "healthy",
+        "desktop_auth_required": desktop_auth_required(),
+        "desktop_auth_header": DESKTOP_API_KEY_HEADER,
+        "desktop_auth_cookie": DESKTOP_API_KEY_COOKIE,
+        "desktop_auth_query": DESKTOP_API_KEY_QUERY,
+    }
+
+
+class DesktopAuthValidateRequest(BaseModel):
+    api_key: str = ""
+
+
+@router.get("/auth/status")
+async def get_desktop_auth_status(request: Request):
+    provided = resolve_desktop_api_key(request)
+    authorized = has_valid_desktop_api_key(provided)
+    return {
+        "authorized": authorized,
+        "desktop_auth_required": desktop_auth_required(),
+        "desktop_auth_header": DESKTOP_API_KEY_HEADER,
+        "desktop_auth_cookie": DESKTOP_API_KEY_COOKIE,
+        "desktop_auth_query": DESKTOP_API_KEY_QUERY,
+    }
+
+
+@router.post("/auth/validate")
+async def validate_desktop_auth(
+    payload: DesktopAuthValidateRequest,
+    request: Request,
+    response: Response,
+):
+    if not desktop_auth_required():
+        return {
+            "valid": True,
+            "desktop_auth_required": False,
+            "desktop_auth_header": DESKTOP_API_KEY_HEADER,
+            "desktop_auth_cookie": DESKTOP_API_KEY_COOKIE,
+            "desktop_auth_query": DESKTOP_API_KEY_QUERY,
+        }
+
+    provided = (payload.api_key or "").strip()
+    if not has_valid_desktop_api_key(provided):
+        error_response = JSONResponse(
+            status_code=401,
+            content={"detail": "Invalid desktop API key"},
+        )
+        clear_desktop_auth_cookie(error_response, secure=_request_is_secure(request))
+        return error_response
+
+    set_desktop_auth_cookie(response, provided, secure=_request_is_secure(request))
+
+    return {
+        "valid": True,
+        "desktop_auth_required": True,
+        "desktop_auth_header": DESKTOP_API_KEY_HEADER,
+        "desktop_auth_cookie": DESKTOP_API_KEY_COOKIE,
+        "desktop_auth_query": DESKTOP_API_KEY_QUERY,
+    }
 
 
 @router.get("/system/status")
@@ -107,15 +189,27 @@ async def open_path(payload: OpenPathRequest):
 
 
 @router.get("/gateway/token")
-async def get_gateway_token_api():
+async def get_gateway_token_api(
+    _: None = Depends(verify_desktop_api_key),
+    session: AsyncSession = Depends(get_session),
+):
     """获取 Gateway Token (用于前端连接 Gateway)"""
     try:
-        token_path = os.path.join(current_dir, "data", "gateway_token.json")
+        token_stmt = select(Config).where(Config.key == "frontend_access_token")
+        token_result = await session.exec(token_stmt)
+        token_config = token_result.first()
+        if token_config and token_config.value:
+            return {"token": token_config.value}
+
+        data_dir = os.environ.get("PERO_DATA_DIR", os.path.join(current_dir, "data"))
+        token_path = os.path.join(data_dir, "gateway_token.json")
         if os.path.exists(token_path):
             with open(token_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 return {"token": data.get("token")}
         raise HTTPException(status_code=404, detail="Token not found")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
