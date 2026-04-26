@@ -17,8 +17,13 @@ import {
   PTooltip,
   PDialog,
   PCheckbox,
+  PCard,
 } from '../../pixel'
+import { watch, type Ref } from 'vue'
 import { useModelConfig } from '../../../composables/dashboard/useModelConfig'
+import { useDashboardContext } from '../../../composables/dashboard'
+
+const ctx = useDashboardContext()
 
 const {
   models,
@@ -35,6 +40,7 @@ const {
   getModelRoles,
   isGlobalOpen,
   globalConfig,
+  saveGlobalConfig,
   embeddingProvider,
   embeddingModelId,
   embeddingDimension,
@@ -46,7 +52,37 @@ const {
   rerankerApiKey,
   isSavingVector,
   saveVectorConfig,
+  fetchModels,
+  // 远程模型列表
+  remoteModels,
+  isFetchingRemote,
+  fetchRemoteModels,
+  customProviderTypeOptions,
+  handleProviderChange,
+  providerDefaults,
+  // 向量远程模型列表
+  remoteEmbeddingModels,
+  isFetchingEmbedding,
+  fetchRemoteEmbeddingModels,
+  remoteRerankerModels,
+  isFetchingReranker,
+  fetchRemoteRerankerModels,
 } = useModelConfig()
+
+/** 将 globalConfig 转为 Record<string,...> 供弹窗模板遍历使用，避免 TS 索引类型报错 */
+const globalConfigRecord = globalConfig as Ref<Record<string, { apiBase: string; apiKey: string }>>
+
+// 监听全局刷新
+watch(
+  () => ctx.refreshKey.value,
+  () => fetchModels(),
+)
+
+/** 保存全局配置并关闭弹窗 */
+async function handleSaveGlobal() {
+  await saveGlobalConfig()
+  isGlobalOpen.value = false
+}
 
 // 角色配置表
 const rolesMeta = [
@@ -75,38 +111,96 @@ function formatTokens(tokens: number | null): string {
 const providerLabels: Record<string, string> = {
   openai: 'OpenAI',
   anthropic: 'Anthropic',
-  gemini: 'Google',
+  gemini: 'Google Gemini',
+  xai: 'xAI (Grok)',
+  mistral: 'Mistral',
+  groq: 'Groq',
+  siliconflow: '硅基流动',
+  deepseek: 'DeepSeek',
+  moonshot: 'Moonshot (Kimi)',
+  dashscope: '阿里百炼',
+  volcengine: '火山引擎',
+  zhipu: '智谱 GLM',
+  minimax: 'MiniMax',
+  yi: '01.AI 零一万物',
+  stepfun: '阶跃星辰',
+  hunyuan: '腾讯混元',
+  ollama: 'Ollama',
   custom: 'Custom',
 }
+
+/** 供应商分组，用于全局弹窗分组展示 */
+const providerGroups = [
+  {
+    label: '国际主流',
+    keys: ['openai', 'anthropic', 'gemini', 'xai', 'mistral', 'groq'],
+  },
+  {
+    label: '国内服务商',
+    keys: [
+      'siliconflow',
+      'deepseek',
+      'moonshot',
+      'dashscope',
+      'volcengine',
+      'zhipu',
+      'minimax',
+      'yi',
+      'stepfun',
+      'hunyuan',
+    ],
+  },
+  {
+    label: '本地部署',
+    keys: ['ollama'],
+  },
+]
+
+// providerDefaults 已从 composable 导入供模板直接使用
+void providerDefaults
 </script>
 
 <template>
-  <div class="tab-model">
+  <div class="p-8 h-full flex flex-col overflow-hidden">
     <!-- 头部 + 子选项卡 -->
-    <div class="tab-header">
-      <div class="tab-header-left">
-        <div class="tab-switcher">
+    <div class="flex items-start justify-between gap-4 mb-6 flex-shrink-0 relative group/header">
+      <!-- 背景氛围光晕 -->
+      <div
+        class="absolute -right-20 -top-10 w-40 h-40 bg-sky-400/5 blur-[60px] rounded-full pointer-events-none group-hover/header:bg-sky-400/15 transition-all duration-1000"
+      />
+      <div class="flex flex-col gap-1">
+        <div class="flex items-center gap-2">
           <button
-            :class="['tab-sw-btn', { 'tab-sw-active': currentTab === 'llm' }]"
+            :class="[
+              'flex items-center gap-2 text-xl font-black bg-none border-none cursor-pointer p-0 transition-all',
+              currentTab === 'llm'
+                ? 'text-slate-800 scale-[1.02]'
+                : 'text-slate-400 hover:text-slate-500',
+            ]"
             @click="currentTab = 'llm'"
           >
             <PixelIcon name="settings" size="sm" />
-            <span>模型配置</span>
+            <span class="font-pixel">模型配置</span>
           </button>
-          <span class="tab-sw-sep">/</span>
+          <span class="text-slate-200 text-xl font-light">/</span>
           <button
-            :class="['tab-sw-btn', { 'tab-sw-active': currentTab === 'vector' }]"
+            :class="[
+              'flex items-center gap-2 text-xl font-black bg-none border-none cursor-pointer p-0 transition-all',
+              currentTab === 'vector'
+                ? 'text-slate-800 scale-[1.02]'
+                : 'text-slate-400 hover:text-slate-500',
+            ]"
             @click="currentTab = 'vector'"
           >
             <PixelIcon name="brain" size="sm" />
-            <span>向量模型</span>
+            <span class="font-pixel">向量模型</span>
           </button>
         </div>
-        <p class="tab-subtitle">
+        <p class="text-[10px] font-bold uppercase tracking-[0.15em] text-slate-400 ml-7 font-pixel">
           {{ currentTab === 'llm' ? 'LLM MODEL MANAGEMENT' : 'VECTOR CONFIGURATION' }}
         </p>
       </div>
-      <div class="tab-header-actions">
+      <div class="flex gap-2 items-center">
         <template v-if="currentTab === 'llm'">
           <PButton variant="ghost" @click="isGlobalOpen = true">
             <PixelIcon name="settings" size="xs" />
@@ -126,28 +220,37 @@ const providerLabels: Record<string, string> = {
     </div>
 
     <!-- LLM 模型网格 -->
-    <div v-if="currentTab === 'llm'" class="model-grid">
-      <div v-for="model in models" :key="model.id" class="model-card">
+    <div
+      v-if="currentTab === 'llm'"
+      class="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] content-start gap-4 flex-1 overflow-y-auto pr-1 model-scrollbar"
+    >
+      <PCard v-for="model in models" :key="model.id" pixel hoverable class="flex flex-col gap-3">
         <!-- 卡片头部 -->
-        <div class="model-card-header">
-          <div class="model-card-info">
-            <h3 class="model-card-name">{{ model.name }}</h3>
-            <span class="model-card-provider">{{
-              providerLabels[model.provider] ?? model.provider
-            }}</span>
+        <div class="flex justify-between items-start">
+          <div class="flex flex-col gap-0.5 min-w-0">
+            <h3 class="text-base font-black text-slate-800 truncate">{{ model.name }}</h3>
+            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
+              {{ providerLabels[model.provider] ?? model.provider }}
+            </span>
           </div>
-          <div v-if="model.enableVision" class="model-vision-badge">
+          <div
+            v-if="model.enableVision"
+            class="flex items-center gap-1 px-2 py-0.5 text-[9px] font-bold text-sky-500 bg-sky-50 border border-sky-200"
+          >
             <PixelIcon name="eye" size="xs" />
             <span>VISION</span>
           </div>
         </div>
 
         <!-- 角色徽章 -->
-        <div v-if="getModelRoles(model.id).length > 0" class="model-roles">
+        <div v-if="getModelRoles(model.id).length > 0" class="flex gap-1.5 flex-wrap">
           <span
             v-for="r in rolesMeta.filter((rm) => getModelRoles(model.id).includes(rm.key))"
             :key="r.key"
-            :class="['role-badge', getRoleBadgeClass(r.color)]"
+            :class="[
+              'flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold border',
+              getRoleBadgeClass(r.color),
+            ]"
           >
             <PixelIcon :name="r.icon" size="xs" />
             {{ r.label }}
@@ -155,25 +258,31 @@ const providerLabels: Record<string, string> = {
         </div>
 
         <!-- 模型详情 -->
-        <div class="model-card-details">
-          <div class="model-detail-row">
-            <span class="model-detail-label">模型 ID</span>
-            <span class="model-detail-value">{{ model.modelId }}</span>
+        <div class="flex flex-col gap-1.5">
+          <div class="flex justify-between items-center">
+            <span class="text-[11px] text-slate-400">模型 ID</span>
+            <span class="text-[11px] font-bold text-slate-500 font-mono max-w-[160px] truncate">
+              {{ model.modelId }}
+            </span>
           </div>
-          <div class="model-detail-row">
-            <span class="model-detail-label">上下文窗口</span>
-            <span class="model-detail-value">{{ formatTokens(model.maxTokens) }}</span>
+          <div class="flex justify-between items-center">
+            <span class="text-[11px] text-slate-400">上下文窗口</span>
+            <span class="text-[11px] font-bold text-slate-500 font-mono">
+              {{ formatTokens(model.maxTokens) }}
+            </span>
           </div>
-          <div class="model-detail-row">
-            <span class="model-detail-label">温度 / TopP</span>
-            <span class="model-detail-value">{{ model.temperature }} / {{ model.topP }}</span>
+          <div class="flex justify-between items-center">
+            <span class="text-[11px] text-slate-400">温度 / TopP</span>
+            <span class="text-[11px] font-bold text-slate-500 font-mono">
+              {{ model.temperature }} / {{ model.topP }}
+            </span>
           </div>
         </div>
 
         <!-- 操作按钮 -->
-        <div class="model-card-footer">
+        <div class="flex justify-between items-center pt-3 border-t border-slate-100 mt-auto">
           <!-- 快速角色切换 -->
-          <div class="model-quick-roles">
+          <div class="flex gap-1">
             <PTooltip
               v-for="r in rolesMeta"
               :key="r.key"
@@ -182,9 +291,8 @@ const providerLabels: Record<string, string> = {
             >
               <button
                 :class="[
-                  'quick-role-btn',
-                  `qr-${r.color}`,
-                  { 'quick-role-active': roles[r.key] === model.id },
+                  'w-7 h-7 flex items-center justify-center bg-slate-50 border border-slate-200 cursor-pointer text-slate-400 transition-all hover:scale-110',
+                  { [`qr-${r.color}-active`]: roles[r.key] === model.id },
                 ]"
                 @click="setRole(r.key, model.id)"
               >
@@ -192,143 +300,281 @@ const providerLabels: Record<string, string> = {
               </button>
             </PTooltip>
           </div>
-          <div class="model-card-ops">
+          <div class="flex gap-1">
             <PTooltip content="编辑" placement="top">
-              <button class="model-op-btn" @click="openEditor(model)">
+              <button
+                class="p-1.5 bg-none border-none cursor-pointer text-slate-400 hover:text-sky-500 transition-all"
+                @click="openEditor(model)"
+              >
                 <PixelIcon name="pencil" size="xs" />
               </button>
             </PTooltip>
             <PTooltip content="删除" placement="top">
-              <button class="model-op-btn model-op-danger" @click="deleteModel(model.id)">
+              <button
+                class="p-1.5 bg-none border-none cursor-pointer text-slate-400 hover:text-rose-500 transition-all"
+                @click="deleteModel(model.id)"
+              >
                 <PixelIcon name="trash" size="xs" />
               </button>
             </PTooltip>
           </div>
         </div>
-      </div>
+      </PCard>
     </div>
 
     <!-- 向量模型配置 -->
-    <div v-else class="vector-config">
+    <div v-else class="flex-1 overflow-y-auto flex flex-col gap-6">
       <!-- Embedding -->
-      <div class="vec-section">
-        <div class="vec-section-header">
-          <div class="vec-section-icon vec-icon-blue"><PixelIcon name="brain" size="sm" /></div>
+      <PCard pixel padding="lg" overflow-visible>
+        <div class="flex items-center gap-4 mb-5">
+          <div
+            class="w-12 h-12 flex items-center justify-center bg-sky-500 text-white flex-shrink-0"
+          >
+            <PixelIcon name="brain" size="sm" />
+          </div>
           <div>
-            <h4 class="vec-section-title">Embedding 嵌入模型</h4>
-            <p class="vec-section-desc">将记忆文本转换为数学向量，是 RAG 检索的核心</p>
+            <h4 class="text-base font-black text-slate-800 font-pixel">Embedding 嵌入模型</h4>
+            <p class="text-xs text-slate-400 mt-0.5">将记忆文本转换为数学向量，是 RAG 检索的核心</p>
           </div>
         </div>
-        <div class="vec-form-grid">
-          <div class="vec-field">
-            <label class="vec-label">模型来源 Provider</label>
+        <div class="grid grid-cols-2 gap-4">
+          <div class="flex flex-col gap-1.5">
+            <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
+              模型来源 Provider
+            </label>
             <PSelect
               v-model="embeddingProvider"
               :options="[
-                { label: '本地内置 (BGE-512)', value: 'local' },
+                { label: '本地内置 (BGE-512) — 待实现', value: 'local', disabled: true },
                 { label: '在线 API (OpenAI 兼容)', value: 'api' },
               ]"
             />
           </div>
-          <div class="vec-field">
-            <label class="vec-label">向量维度 Dimension</label>
+          <div class="flex flex-col gap-1.5">
+            <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
+              向量维度 Dimension
+            </label>
             <PInputNumber
               v-model="embeddingDimension"
               :min="1"
               :max="4096"
               :disabled="embeddingProvider === 'local'"
             />
-            <p v-if="embeddingProvider === 'local'" class="vec-hint">* 本地模型固定为 512 维</p>
+            <p v-if="embeddingProvider === 'local'" class="text-[10px] text-slate-400 italic">
+              * 本地模型固定为 512 维
+            </p>
           </div>
           <template v-if="embeddingProvider === 'api'">
-            <div class="vec-field vec-field-full">
-              <label class="vec-label">模型 ID</label>
-              <PInput v-model="embeddingModelId" placeholder="例如: text-embedding-3-small" />
+            <div class="flex flex-col gap-1.5 col-span-2">
+              <label
+                class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel flex items-center justify-between"
+              >
+                模型 ID
+                <PButton
+                  variant="ghost"
+                  size="sm"
+                  :loading="isFetchingEmbedding"
+                  @click="fetchRemoteEmbeddingModels"
+                >
+                  <PixelIcon name="refresh" size="xs" />
+                  获取模型列表
+                </PButton>
+              </label>
+              <PSelect
+                v-if="remoteEmbeddingModels.length > 0"
+                v-model="embeddingModelId"
+                :options="remoteEmbeddingModels.map((m) => ({ label: m, value: m }))"
+                placeholder="从列表中选择..."
+              />
+              <PInput
+                v-else
+                v-model="embeddingModelId"
+                placeholder="例如: text-embedding-3-small"
+              />
             </div>
-            <div class="vec-field">
-              <label class="vec-label">API Base URL (可选)</label>
+            <div class="flex flex-col gap-1.5">
+              <label
+                class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel"
+              >
+                API Base URL (可选)
+              </label>
               <PInput v-model="embeddingApiBase" placeholder="留空则使用全局配置" />
             </div>
-            <div class="vec-field">
-              <label class="vec-label">API Key (可选)</label>
+            <div class="flex flex-col gap-1.5">
+              <label
+                class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel"
+              >
+                API Key (可选)
+              </label>
               <PInput v-model="embeddingApiKey" type="password" placeholder="留空则使用全局配置" />
             </div>
           </template>
         </div>
-      </div>
+      </PCard>
 
       <!-- Reranker -->
-      <div :class="['vec-section', { 'vec-section-disabled': !rerankerEnabled }]">
-        <div class="vec-section-header">
-          <div :class="['vec-section-icon', rerankerEnabled ? 'vec-icon-amber' : 'vec-icon-muted']">
+      <PCard pixel padding="lg" overflow-visible :class="{ 'opacity-65': !rerankerEnabled }">
+        <div class="flex items-center gap-4 mb-5">
+          <div
+            :class="[
+              'w-12 h-12 flex items-center justify-center text-white flex-shrink-0',
+              rerankerEnabled ? 'bg-amber-500' : 'bg-slate-400',
+            ]"
+          >
             <PixelIcon name="sparkle" size="sm" />
           </div>
-          <div class="vec-section-header-text">
-            <h4 class="vec-section-title">Reranker 重排序模型</h4>
-            <p class="vec-section-desc">对初步检索结果精排，提升检索准确度</p>
+          <div class="flex-1">
+            <h4 class="text-base font-black text-slate-800 font-pixel">Reranker 重排序模型</h4>
+            <p class="text-xs text-slate-400 mt-0.5">对初步检索结果精排，提升检索准确度</p>
           </div>
-          <PSwitch v-model="rerankerEnabled" class="vec-section-switch" />
+          <PSwitch v-model="rerankerEnabled" class="flex-shrink-0" />
         </div>
         <template v-if="rerankerEnabled">
-          <div class="vec-form-grid">
-            <div class="vec-field vec-field-full">
-              <label class="vec-label">模型 ID</label>
-              <PInput v-model="rerankerModelId" placeholder="例如: bge-reranker-v2-m3" />
+          <div class="grid grid-cols-2 gap-4">
+            <div class="flex flex-col gap-1.5 col-span-2">
+              <label
+                class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel flex items-center justify-between"
+              >
+                模型 ID
+                <PButton
+                  variant="ghost"
+                  size="sm"
+                  :loading="isFetchingReranker"
+                  @click="fetchRemoteRerankerModels"
+                >
+                  <PixelIcon name="refresh" size="xs" />
+                  获取模型列表
+                </PButton>
+              </label>
+              <PSelect
+                v-if="remoteRerankerModels.length > 0"
+                v-model="rerankerModelId"
+                :options="remoteRerankerModels.map((m) => ({ label: m, value: m }))"
+                placeholder="从列表中选择..."
+              />
+              <PInput v-else v-model="rerankerModelId" placeholder="例如: bge-reranker-v2-m3" />
             </div>
-            <div class="vec-field">
-              <label class="vec-label">API Base URL (可选)</label>
+            <div class="flex flex-col gap-1.5">
+              <label
+                class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel"
+              >
+                API Base URL (可选)
+              </label>
               <PInput v-model="rerankerApiBase" placeholder="留空则使用全局配置" />
             </div>
-            <div class="vec-field">
-              <label class="vec-label">API Key (可选)</label>
+            <div class="flex flex-col gap-1.5">
+              <label
+                class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel"
+              >
+                API Key (可选)
+              </label>
               <PInput v-model="rerankerApiKey" type="password" placeholder="留空则使用全局配置" />
             </div>
           </div>
         </template>
-        <div v-else class="vec-disabled-hint">
-          <p>Reranker 已关闭。<strong>建议开启</strong>以获得更精准的记忆检索效果。</p>
+        <div
+          v-else
+          class="p-4 bg-slate-50 border border-slate-200 text-center text-[13px] text-slate-400"
+        >
+          <p>
+            Reranker 已关闭。
+            <strong class="text-amber-600">建议开启</strong>
+            以获得更精准的记忆检索效果。
+          </p>
         </div>
-      </div>
+      </PCard>
     </div>
 
     <!-- 模型编辑弹窗 -->
-    <PDialog v-model="isEditorOpen" :title="editingModel ? '编辑模型' : '添加模型'" width="520px">
-      <div class="editor-form">
-        <div class="editor-field">
-          <label class="vec-label">模型名称</label>
+    <PDialog v-model="isEditorOpen" :title="editingModel ? '编辑模型' : '添加模型'" width="560px">
+      <div class="flex flex-col gap-4">
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
+            模型名称
+          </label>
           <PInput v-model="editorForm.name" placeholder="给模型起个名字" />
         </div>
-        <div class="editor-field">
-          <label class="vec-label">Provider</label>
-          <PSelect v-model="editorForm.provider" :options="providerOptions" />
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
+            Provider
+          </label>
+          <PSelect
+            v-model="editorForm.provider"
+            :options="providerOptions"
+            @change="(v: string | number) => handleProviderChange(String(v))"
+          />
         </div>
-        <div class="editor-field">
-          <label class="vec-label">模型 ID</label>
-          <PInput v-model="editorForm.modelId" placeholder="例如: gpt-4o" />
+        <!-- 自定义 Provider 的协议格式选择 -->
+        <div v-if="editorForm.provider === 'custom'" class="flex flex-col gap-1.5">
+          <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
+            协议格式
+          </label>
+          <PSelect v-model="editorForm.providerType" :options="customProviderTypeOptions" />
+          <p class="text-[10px] text-slate-400 italic">* 选择当前自定义 API 兼容的协议格式</p>
         </div>
-        <div class="editor-row">
-          <div class="editor-field">
-            <label class="vec-label">温度</label>
+        <!-- 自定义 API Base / Key -->
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
+            API Base (可选)
+          </label>
+          <PInput
+            v-model="editorForm.apiBase"
+            :placeholder="
+              editorForm.provider === 'custom' ? 'https://api.example.com/v1' : '留空则使用全局配置'
+            "
+          />
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
+            API Key (可选)
+          </label>
+          <PInput v-model="editorForm.apiKey" type="password" placeholder="留空则使用全局配置" />
+        </div>
+        <!-- 模型 ID + 获取列表 -->
+        <div class="flex flex-col gap-1.5">
+          <label
+            class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel flex items-center justify-between"
+          >
+            模型 ID
+            <PButton
+              variant="ghost"
+              size="sm"
+              :loading="isFetchingRemote"
+              @click="fetchRemoteModels"
+            >
+              <PixelIcon name="refresh" size="xs" />
+              获取模型列表
+            </PButton>
+          </label>
+          <PSelect
+            v-if="remoteModels.length > 0"
+            v-model="editorForm.modelId"
+            :options="remoteModels.map((m) => ({ label: m, value: m }))"
+            placeholder="从列表中选择..."
+          />
+          <PInput v-else v-model="editorForm.modelId" placeholder="例如: gpt-4o" />
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+          <div class="flex flex-col gap-1.5">
+            <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
+              温度
+            </label>
             <PInputNumber v-model="editorForm.temperature" :min="0" :max="2" :step="0.1" />
           </div>
-          <div class="editor-field">
-            <label class="vec-label">Top P</label>
+          <div class="flex flex-col gap-1.5">
+            <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
+              Top P
+            </label>
             <PInputNumber v-model="editorForm.topP" :min="0" :max="1" :step="0.1" />
           </div>
         </div>
-        <div class="editor-field">
-          <label class="vec-label">最大 Token 数</label>
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
+            最大 Token 数
+          </label>
           <PInputNumber v-model="editorForm.maxTokens" :min="1024" :max="2000000" :step="1024" />
         </div>
-        <div v-if="editorForm.provider === 'custom'" class="editor-field">
-          <label class="vec-label">自定义 API Base</label>
-          <PInput v-model="editorForm.apiBase" placeholder="https://api.example.com/v1" />
-        </div>
-        <div v-if="editorForm.provider === 'custom'" class="editor-field">
-          <label class="vec-label">API Key</label>
-          <PInput v-model="editorForm.apiKey" type="password" />
-        </div>
-        <div class="editor-check-row">
+        <div class="pt-1">
           <PCheckbox v-model="editorForm.enableVision" label="启用视觉能力 (Vision)" />
         </div>
       </div>
@@ -339,433 +585,107 @@ const providerLabels: Record<string, string> = {
     </PDialog>
 
     <!-- 全局服务商弹窗 -->
-    <PDialog v-model="isGlobalOpen" title="全局服务商配置" width="560px">
-      <div class="global-form">
-        <div v-for="(cfg, provider) in globalConfig" :key="provider" class="global-provider">
-          <h5 class="global-provider-name">{{ providerLabels[provider] ?? provider }}</h5>
-          <div class="global-provider-fields">
-            <div class="editor-field">
-              <label class="vec-label">API Base</label>
-              <PInput v-model="cfg.apiBase" />
-            </div>
-            <div class="editor-field">
-              <label class="vec-label">API Key</label>
-              <PInput v-model="cfg.apiKey" type="password" placeholder="sk-..." />
-            </div>
+    <PDialog v-model="isGlobalOpen" title="全局服务商配置" width="640px">
+      <div class="flex flex-col gap-6 max-h-[60vh] overflow-y-auto pr-1">
+        <p class="text-xs text-slate-400 -mb-2">
+          为各供应商预置全局 API Key。添加模型时若不填写单独 Key，则将使用这里的配置。
+        </p>
+
+        <!-- 分组展示 -->
+        <div v-for="group in providerGroups" :key="group.label" class="flex flex-col gap-2">
+          <h5
+            class="text-[10px] font-bold uppercase tracking-[0.15em] text-slate-400 font-pixel pb-1.5 border-b border-slate-100"
+          >
+            {{ group.label }}
+          </h5>
+          <div
+            v-for="key in group.keys"
+            :key="key"
+            class="grid grid-cols-[140px_1fr_1fr] items-center gap-2"
+          >
+            <span class="text-xs font-semibold text-slate-600 truncate">
+              {{ providerLabels[key] ?? key }}
+            </span>
+            <PInput
+              v-model="globalConfigRecord[key]!.apiBase"
+              placeholder="API Base (optional)"
+              class="text-xs h-8"
+            />
+            <PInput
+              v-model="globalConfigRecord[key]!.apiKey"
+              type="password"
+              placeholder="API Key"
+              class="text-xs h-8"
+            />
           </div>
         </div>
       </div>
       <template #footer>
         <PButton variant="ghost" @click="isGlobalOpen = false">关闭</PButton>
-        <PButton variant="primary" @click="isGlobalOpen = false">保存</PButton>
+        <PButton variant="primary" @click="handleSaveGlobal">保存</PButton>
       </template>
     </PDialog>
   </div>
 </template>
 
 <style scoped>
-.tab-model {
-  padding: 32px;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-/* ── 头部 ── */
-.tab-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 24px;
-  flex-shrink: 0;
-}
-.tab-header-left {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.tab-header-actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.tab-switcher {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.tab-sw-btn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 20px;
-  font-weight: 800;
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 0;
-  color: var(--color-text-muted);
-  transition: all 0.2s;
-}
-.tab-sw-btn:hover {
-  color: var(--color-text-secondary);
-}
-.tab-sw-active {
-  color: var(--color-text-primary);
-  transform: scale(1.02);
-}
-.tab-sw-sep {
-  color: var(--color-border);
-  font-size: 20px;
-  font-weight: 300;
-}
-.tab-subtitle {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.15em;
-  color: var(--color-text-muted);
-  margin-left: 28px;
-}
-
-/* ── 模型网格 ── */
-.model-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 16px;
-  flex: 1;
-  overflow-y: auto;
-  padding-right: 4px;
-}
-.model-grid::-webkit-scrollbar {
-  width: 4px;
-}
-.model-grid::-webkit-scrollbar-thumb {
-  background: var(--color-sky-light);
-}
-
-/* ── 模型卡片 ── */
-.model-card {
-  border: 2px solid var(--color-border);
-  background: var(--color-bg-primary);
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  transition: all 0.25s;
-}
-.model-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
-  border-color: var(--color-sky-light);
-}
-
-.model-card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-}
-.model-card-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-.model-card-name {
-  font-size: 16px;
-  font-weight: 800;
-  color: var(--color-text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.model-card-provider {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  color: var(--color-text-muted);
-}
-
-.model-vision-badge {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  font-size: 9px;
-  font-weight: 700;
-  color: var(--color-sky-500);
-  background: var(--color-sky-50, rgba(56, 189, 248, 0.1));
-  border: 1px solid var(--color-sky-light);
-}
-
-/* 角色徽章 */
-.model-roles {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-.role-badge {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  font-size: 10px;
-  font-weight: 700;
-  border: 1px solid;
-}
+/* 角色徽章颜色 — 无法用纯 Tailwind 完美表达的 CSS 变量色 */
 .role-badge-blue {
-  color: var(--color-sky-shadow);
-  background: var(--color-sky-50, rgba(56, 189, 248, 0.1));
-  border-color: var(--color-sky-light);
+  color: #0284c7;
+  background: rgba(56, 189, 248, 0.1);
+  border-color: rgba(56, 189, 248, 0.3);
 }
+
 .role-badge-amber {
-  color: var(--color-yellow-600, #d97706);
+  color: #d97706;
   background: rgba(234, 179, 8, 0.1);
   border-color: rgba(234, 179, 8, 0.3);
 }
+
 .role-badge-pink {
-  color: var(--color-pink-shadow, #db2777);
+  color: #db2777;
   background: rgba(236, 72, 153, 0.1);
   border-color: rgba(236, 72, 153, 0.3);
 }
+
 .role-badge-purple {
   color: #7c3aed;
   background: rgba(124, 58, 237, 0.1);
   border-color: rgba(124, 58, 237, 0.3);
 }
 
-/* 模型详情 */
-.model-card-details {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.model-detail-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.model-detail-label {
-  font-size: 11px;
-  color: var(--color-text-muted);
-}
-.model-detail-value {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--color-text-secondary);
-  font-family: monospace;
-  max-width: 160px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* 快速角色激活态 */
+.qr-blue-active {
+  background: #0ea5e9 !important;
+  color: white !important;
+  border-color: #0ea5e9 !important;
 }
 
-/* 底部操作 */
-.model-card-footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding-top: 12px;
-  border-top: 1px solid var(--color-border);
-  margin-top: auto;
-}
-.model-quick-roles {
-  display: flex;
-  gap: 4px;
-}
-.quick-role-btn {
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  cursor: pointer;
-  color: var(--color-text-muted);
-  transition: all 0.15s;
-}
-.quick-role-btn:hover {
-  transform: scale(1.1);
-}
-.qr-blue.quick-role-active {
-  background: var(--color-sky-500);
-  color: white;
-  border-color: var(--color-sky-500);
-}
-.qr-amber.quick-role-active {
-  background: var(--color-yellow-500, #eab308);
-  color: white;
-  border-color: var(--color-yellow-500, #eab308);
-}
-.qr-pink.quick-role-active {
-  background: var(--color-pink-face, #ec4899);
-  color: white;
-  border-color: var(--color-pink-face, #ec4899);
-}
-.qr-purple.quick-role-active {
-  background: #7c3aed;
-  color: white;
-  border-color: #7c3aed;
+.qr-amber-active {
+  background: #eab308 !important;
+  color: white !important;
+  border-color: #eab308 !important;
 }
 
-.model-card-ops {
-  display: flex;
-  gap: 4px;
-}
-.model-op-btn {
-  padding: 6px;
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: var(--color-text-muted);
-  transition: all 0.15s;
-}
-.model-op-btn:hover {
-  color: var(--color-sky-500);
-}
-.model-op-danger:hover {
-  color: var(--color-red-face, #ef4444);
+.qr-pink-active {
+  background: #ec4899 !important;
+  color: white !important;
+  border-color: #ec4899 !important;
 }
 
-/* ── 向量配置 ── */
-.vector-config {
-  flex: 1;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-}
-.vec-section {
-  border: 2px solid var(--color-border);
-  background: var(--color-bg-primary);
-  padding: 24px;
-}
-.vec-section-disabled {
-  opacity: 0.65;
-}
-.vec-section-header {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 20px;
-}
-.vec-section-header-text {
-  flex: 1;
-}
-.vec-section-switch {
-  flex-shrink: 0;
-}
-.vec-section-icon {
-  width: 48px;
-  height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  flex-shrink: 0;
-}
-.vec-icon-blue {
-  background: var(--color-sky-500);
-}
-.vec-icon-amber {
-  background: var(--color-yellow-500, #eab308);
-}
-.vec-icon-muted {
-  background: var(--color-text-muted);
-}
-.vec-section-title {
-  font-size: 16px;
-  font-weight: 800;
-  color: var(--color-text-primary);
-}
-.vec-section-desc {
-  font-size: 12px;
-  color: var(--color-text-muted);
-  margin-top: 2px;
-}
-.vec-form-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-}
-.vec-field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.vec-field-full {
-  grid-column: 1 / -1;
-}
-.vec-label {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  color: var(--color-text-muted);
-}
-.vec-hint {
-  font-size: 10px;
-  color: var(--color-text-muted);
-  font-style: italic;
-}
-.vec-disabled-hint {
-  padding: 16px;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  text-align: center;
-  font-size: 13px;
-  color: var(--color-text-muted);
-}
-.vec-disabled-hint strong {
-  color: var(--color-yellow-600, #d97706);
+.qr-purple-active {
+  background: #7c3aed !important;
+  color: white !important;
+  border-color: #7c3aed !important;
 }
 
-/* ── 编辑器弹窗 ── */
-.editor-form {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-.editor-field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.editor-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-}
-.editor-check-row {
-  padding-top: 4px;
+/* 像素风滚动条 */
+.model-scrollbar::-webkit-scrollbar {
+  width: 4px;
 }
 
-/* ── 全局配置弹窗 ── */
-.global-form {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-}
-.global-provider {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.global-provider-name {
-  font-size: 14px;
-  font-weight: 800;
-  color: var(--color-text-primary);
-  padding-bottom: 4px;
-  border-bottom: 1px solid var(--color-border);
-}
-.global-provider-fields {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
+.model-scrollbar::-webkit-scrollbar-thumb {
+  background: #bae6fd;
+  border-radius: 0;
 }
 </style>

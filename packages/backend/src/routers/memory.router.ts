@@ -39,6 +39,31 @@ export function createMemoryRouter(ctx: AppContext) {
     return c.json({ code: 'CREATED', message: '记忆已创建', data: memory }, 201)
   })
 
+  // POST /api/memories/import — 故事/文本导入
+  router.post('/import', async (c) => {
+    const body = await c.req.json<{
+      text?: string
+      story?: string
+      agentId?: string
+      source?: string
+    }>()
+    // 兼容 v1 的 "story" 字段名和 v2 的 "text"
+    const text = body.text ?? body.story ?? ''
+    if (!text.trim()) {
+      return c.json({ code: 'MISSING_FIELD', message: '请提供要导入的文本内容' }, 400)
+    }
+    const result = await ctx.memoryImporter.importStory({
+      text,
+      agentId: body.agentId ?? 'pero',
+      source: body.source ?? 'import',
+    })
+    return c.json({
+      code: 'OK',
+      message: `导入完成: ${result.imported} 条记忆`,
+      data: result,
+    })
+  })
+
   // POST /api/memories/search — 语义搜索
   router.post('/search', zValidator('json', searchMemorySchema), async (c) => {
     const body = c.req.valid('json')

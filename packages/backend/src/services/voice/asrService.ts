@@ -1,12 +1,12 @@
 /**
  * ASR 服务 — 语音识别
  *
- * 支持多 Provider (OpenAI Whisper / Azure Speech / 本地)。
- * 当前实现 OpenAI Whisper API。
+ * 调用 OpenAI 兼容的 `/audio/transcriptions` 端点进行语音转文字。
+ * 任何兼容该接口格式的服务（OpenAI、SiliconFlow、本地 FasterWhisper 等）
+ * 都可以直接使用，只需配置对应的 API Base / Key / Model。
  *
  * 三层架构：Service 层 — 负责业务逻辑编排，禁止直接构造 HTTP 响应。
  *
- * @see 三层架构
  * @module packages/backend/src/services/voice/asrService
  */
 
@@ -22,10 +22,8 @@ export interface AsrRequest {
   audio: ArrayBuffer
   /** 音频文件 MIME 类型 */
   mimeType?: string
-  /** 识别语言 (BCP-47) */
+  /** 识别语言 (BCP-47, 如 zh / en / ja) */
   language?: string
-  /** ASR Provider */
-  provider?: 'openai' | 'azure' | 'local'
 }
 
 /** ASR 结果 */
@@ -40,19 +38,21 @@ export interface AsrResult {
   durationMs: number
 }
 
-/** ASR Provider 配置 */
+/** ASR 配置 (模型无关，仅需 API 地址/Key/模型名) */
 export interface AsrConfig {
-  provider: 'openai' | 'azure' | 'local'
+  /** API 基址 (OpenAI 兼容的 /audio/transcriptions) */
   apiBase: string
+  /** API 密钥 */
   apiKey: string
+  /** 默认识别语言 */
   language: string
+  /** 模型名称 (如 whisper-1, FunAudioLLM/SenseVoiceSmall 等) */
   model: string
 }
 
 // ── 默认配置 ──
 
 const DEFAULT_CONFIG: AsrConfig = {
-  provider: 'openai',
   apiBase: 'https://api.openai.com/v1',
   apiKey: '',
   language: 'zh',
@@ -66,47 +66,33 @@ export class AsrService {
 
   constructor(config?: Partial<AsrConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config }
-    logger.info(`初始化完成 (Provider: ${this.config.provider}, 语言: ${this.config.language})`)
+    logger.info(`初始化完成 (API Base: ${this.config.apiBase}, 模型: ${this.config.model})`)
+  }
+
+  /** 返回当前 ASR 配置是否有效可用 */
+  get isAvailable(): boolean {
+    return !!this.config.apiKey
   }
 
   /** 更新配置 */
   updateConfig(partial: Partial<AsrConfig>): void {
     this.config = { ...this.config, ...partial }
-    logger.info(`配置已更新 (Provider: ${this.config.provider})`)
+    logger.info(`配置已更新 (API Base: ${this.config.apiBase}, 模型: ${this.config.model})`)
   }
 
   /**
-   * 语音识别
+   * 语音识别 — 调用 OpenAI 兼容的音频转写接口
    *
    * @param request - ASR 请求参数
    * @returns 识别结果
    * @throws {Error} API 调用失败或配置缺失
    */
   async recognize(request: AsrRequest): Promise<AsrResult> {
-    const provider = request.provider ?? this.config.provider
-
-    switch (provider) {
-      case 'openai':
-        return this.recognizeWhisper(request)
-      case 'azure':
-        // TODO: Azure Speech SDK 集成
-        throw new Error('Azure ASR 尚未实现')
-      case 'local':
-        // TODO: 本地 ASR 集成
-        throw new Error('本地 ASR 尚未实现')
-      default:
-        throw new Error(`不支持的 ASR Provider: ${provider}`)
-    }
-  }
-
-  // ── OpenAI Whisper ──
-
-  private async recognizeWhisper(request: AsrRequest): Promise<AsrResult> {
-    const apiBase = this.config.apiBase || 'https://api.openai.com/v1'
+    const apiBase = this.config.apiBase || DEFAULT_CONFIG.apiBase
     const apiKey = this.config.apiKey
 
     if (!apiKey) {
-      throw new Error('OpenAI Whisper 需要 API Key，请在 VoiceTab 中配置')
+      throw new Error('ASR 需要 API Key，请在语音配置中填写')
     }
 
     const language = request.language ?? this.config.language
@@ -125,12 +111,13 @@ export class AsrService {
     const ext = extMap[mimeType] ?? 'webm'
 
     logger.info(
-      `开始语音识别 (${(request.audio.byteLength / 1024).toFixed(1)}KB, 语言: ${language})`,
+      `开始语音识别 (${(request.audio.byteLength / 1024).toFixed(1)}KB, ` +
+        `模型: ${this.config.model}, 语言: ${language})`,
     )
 
     const startTime = Date.now()
 
-    // 构建 FormData
+    // 构建 FormData — OpenAI 兼容的 /audio/transcriptions
     const formData = new FormData()
     const audioBlob = new Blob([request.audio], { type: mimeType })
     formData.append('file', audioBlob, `audio.${ext}`)
@@ -148,7 +135,7 @@ export class AsrService {
 
     if (!response.ok) {
       const body = await response.text()
-      logger.error(`Whisper API 失败: ${response.status} — ${body}`)
+      logger.error(`ASR API 失败: ${response.status} — ${body}`)
       throw new Error(`ASR API 调用失败: ${response.status}`)
     }
 

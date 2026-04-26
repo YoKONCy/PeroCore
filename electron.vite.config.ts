@@ -9,6 +9,7 @@
 
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import vue from '@vitejs/plugin-vue'
+import tailwindcss from '@tailwindcss/vite'
 import { resolve } from 'node:path'
 import { readFileSync } from 'node:fs'
 
@@ -24,7 +25,7 @@ export default defineConfig({
       outDir: 'dist-electron/main',
       rollupOptions: {
         input: resolve(__dirname, 'electron/main/index.ts'),
-        external: ['winreg', 'adm-zip', 'steamworks.js', 'electron-updater'],
+        external: ['winreg', 'steamworks.js', 'electron-updater'],
       },
     },
   },
@@ -44,7 +45,7 @@ export default defineConfig({
   renderer: {
     root: resolve(__dirname, 'packages/frontend'),
     publicDir: resolve(__dirname, 'public'),
-    plugins: [vue()],
+    plugins: [vue(), tailwindcss()],
     define: {
       __APP_VERSION__: JSON.stringify(APP_VERSION),
     },

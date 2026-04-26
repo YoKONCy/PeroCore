@@ -1,21 +1,16 @@
 /**
  * Diary Engine — 统一日记生成引擎
  *
- * 统一日记报告生成:
- * - desktop_diary  → profile="default"
- * - social_daily   → profile="social"
- * - work_log       → profile="work"
- * - weekly_report  → ❌ 砍掉 (D56)
- * - waifu_text     → Hook 扩展
- *
- * 核心创新:
- * 一次 LLM 调用同时输出日记 + 实体 + 图谱边 + 情感
+ * 综合所有来源（桌面对话、社交事件等）的当日摘要，
+ * 一次 LLM 调用同时输出日记 + 实体 + 图谱边 + 情感。
  *
  * @module packages/backend/src/services/memory/diaryEngine
  */
 
 import type { LlmService, ModelConfig } from '../llm/llmService'
 import type { MdpEngine } from '../prompt/mdpEngine'
+import type { VectorRepository } from '../../repositories/vector.repo'
+import type { EmbeddingProvider } from '../embedding/embeddingService'
 import { parseLlmJson } from '../../shared/llmJsonParser'
 import { createLogger } from '../../lib/logger'
 
@@ -31,8 +26,6 @@ export interface DiaryEntry {
   date: string
   /** 生成日记的 Agent */
   agentId: string
-  /** 来源 Profile */
-  profile: string
   /** 日记正文 (角色视角叙述) */
   diary: string
   /** 实体抽取 */
@@ -67,8 +60,6 @@ export interface DiaryInput {
   agentId: string
   /** Agent 名字 (日记叙述用) */
   agentName: string
-  /** 来源 Profile */
-  profile: string
   /** 主人名字 */
   ownerName?: string
   /** Agent 人设定义 (完整人设文本) */
@@ -86,6 +77,8 @@ export class DiaryEngine {
     private llmService: LlmService,
     private getModelConfig: () => Promise<ModelConfig | null>,
     private mdpEngine: MdpEngine,
+    private vectorRepo: VectorRepository,
+    private embeddingService: EmbeddingProvider,
   ) {}
 
   /**
@@ -95,8 +88,7 @@ export class DiaryEngine {
    * 单次调用统一编排 Scorer + GraphGardener + DiaryGenerator。
    */
   async generate(input: DiaryInput): Promise<DiaryEntry | null> {
-    const { summaries, agentId, agentName, profile, ownerName, personaDefinition, extraContext } =
-      input
+    const { summaries, agentId, agentName, ownerName, personaDefinition, extraContext } = input
 
     if (summaries.length === 0) {
       logger.info(`无摘要可生成日记: agent=${agentId}`)
@@ -113,12 +105,10 @@ export class DiaryEngine {
     const owner = ownerName ?? '主人'
 
     // 通过 MDP 模板渲染 Prompt
-    const profileDesc = PROFILE_DESCRIPTIONS[profile] ?? '日常对话'
     const systemPrompt = this.mdpEngine.render('tasks/diary/diary', {
       agent_name: agentName,
       owner_name: owner,
       persona_definition: personaDefinition ?? '',
-      profile_desc: profileDesc,
       extra_context: extraContext ?? '',
       date_str: today,
       summaries: summaries.map((s, i) => `${i + 1}. ${s}`).join('\n'),
@@ -147,7 +137,6 @@ export class DiaryEngine {
       const entry: DiaryEntry = {
         date: today,
         agentId,
-        profile,
         diary: parsed.diary ?? '',
         entities: (parsed.entities ?? []).map((e) => ({
           name: e.name,
@@ -164,15 +153,78 @@ export class DiaryEngine {
       }
 
       logger.info(
-        `日记生成完成: ${today} [${profile}] mood=${entry.mood}, ` +
+        `日记生成完成: ${today} mood=${entry.mood}, ` +
           `entities=${entry.entities.length}, relations=${entry.relations.length}`,
       )
+
+      // 持久化到 diary.tdb
+      await this.persist(entry)
 
       return entry
     } catch (err) {
       logger.error(`日记生成失败: ${err}`)
       return null
     }
+  }
+
+  // ── 持久化 ──
+
+  /**
+   * 将日记写入 diary.tdb
+   *
+   * - 生成日记文本的 embedding 向量
+   * - 以日期哈希作为稳定节点 ID (同日重复生成为 upsert)
+   * - 建立日记图谱边 (from → to 关系)
+   */
+  private async persist(entry: DiaryEntry): Promise<void> {
+    try {
+      const nodeId = this.generateDiaryNodeId(entry.date, entry.agentId)
+
+      // 生成日记文本的 embedding
+      const vector = await this.embeddingService.embedOne(entry.diary)
+      if (!vector?.length) {
+        logger.warn('日记 embedding 生成失败，跳过持久化')
+        return
+      }
+
+      // 写入日记节点
+      await this.vectorRepo.upsertDiary(nodeId, vector, {
+        type: 'diary',
+        date: entry.date,
+        agentId: entry.agentId,
+        diary: entry.diary,
+        mood: entry.mood,
+        highlights: entry.highlights,
+        entities: entry.entities,
+        relations: entry.relations,
+      })
+
+      // 建立图谱边
+      for (const rel of entry.relations) {
+        // 用 from/to 的哈希作为 edge ID 的一部分，保存语义关系
+        await this.vectorRepo.linkDiary(nodeId, nodeId, rel.label, rel.weight)
+      }
+
+      logger.info(`日记已持久化: nodeId=${nodeId}, date=${entry.date}`)
+    } catch (err) {
+      logger.warn(`日记持久化失败 (不影响生成结果): ${err}`)
+    }
+  }
+
+  /**
+   * 生成稳定的日记节点 ID
+   *
+   * 基于日期 + agentId 生成确定性哈希，
+   * 保证同一天同一 Agent 的日记始终映射到同一个节点 ID (upsert 语义)。
+   */
+  private generateDiaryNodeId(date: string, agentId: string): number {
+    const key = `diary:${agentId}:${date}`
+    let hash = 0
+    for (let i = 0; i < key.length; i++) {
+      hash = ((hash << 5) - hash + key.charCodeAt(i)) | 0
+    }
+    // 确保正数且不和 memoryNodes ID 冲突 (高位区间)
+    return Math.abs(hash) + 0x7000_0000
   }
 
   // ── 私有方法 ──
@@ -184,17 +236,6 @@ export class DiaryEngine {
     }
     return lines.join('\n')
   }
-}
-
-// ── 辅助 ──
-
-/** Profile 描述映射 */
-const PROFILE_DESCRIPTIONS: Record<string, string> = {
-  default: '日常桌面对话',
-  lightweight: '轻量模式对话',
-  companion: '陪伴模式互动',
-  work: '工作模式协作',
-  social: '社交平台互动',
 }
 
 /** LLM 原始输出结构 */

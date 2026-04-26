@@ -2,8 +2,8 @@
 /**
  * OnboardingOverlay — 新手引导遮罩
  *
- * 拆分为 OnboardingOverlay + SpotlightMask。
- * 打字机对话框 + 聚光灯高亮 + 角色立绘占位。
+ * 还原 v1 完整实现：打字机对话框 + 聚光灯高亮 + 表情-立绘映射。
+ * 立绘资源位于 /assets/onboarding/ 目录。
  *
  * @props visible - 是否显示
  * @props steps - 引导步骤
@@ -12,13 +12,14 @@
 import { ref, computed, watch, onUnmounted } from 'vue'
 import { PixelIcon, PButton } from '../pixel'
 import SpotlightMask from './SpotlightMask.vue'
+import { logger } from '../../lib/logger'
 
 export interface OnboardingStep {
   /** 说话者名称 */
   speaker?: string
   /** 对话文本 */
   text: string
-  /** 表情标识 (用于立绘/图标) */
+  /** 表情标识 (用于立绘切换): 'normal' | 'proud' | 'none' */
   expression?: string
   /** 聚焦元素 CSS 选择器 */
   focusSelector?: string | null
@@ -47,7 +48,77 @@ let typeTimer: ReturnType<typeof setInterval> | null = null
 
 const currentStep = computed(() => props.steps[currentIndex.value])
 
-/** 开始打字机效果 */
+/** 当前步骤是否有聚光灯 */
+const hasSpotlight = computed(() => !!currentStep.value?.focusSelector)
+
+// ── 表情-立绘映射 (还原 v1) ──
+
+interface ExpressionInfo {
+  icon: string
+  label: string
+  image: string
+}
+
+const expressions: Record<string, ExpressionInfo> = {
+  normal: {
+    icon: 'cat',
+    label: '乖巧的 Pero',
+    image: '/assets/onboarding/pero_normal.png',
+  },
+  proud: {
+    icon: 'sparkle',
+    label: '得意的 Pero',
+    image: '/assets/onboarding/pero_proud.png',
+  },
+}
+
+/** 当前表情对应的图标 */
+const currentExpressionIcon = computed(
+  () => expressions[currentStep.value?.expression ?? '']?.icon ?? 'cat',
+)
+
+/** 当前表情对应的标签 */
+const currentExpressionLabel = computed(
+  () => expressions[currentStep.value?.expression ?? '']?.label ?? 'Pero',
+)
+
+/** 当前表情对应的立绘路径 */
+const currentExpressionImage = computed(
+  () => expressions[currentStep.value?.expression ?? '']?.image ?? null,
+)
+
+// ── 立绘预加载 ──
+
+const preloadedImages = ref(new Set<string>())
+
+/** 预加载所有立绘资源 */
+function preloadOnboardingImages() {
+  const imageUrls = Object.values(expressions)
+    .map((e) => e.image)
+    .filter(Boolean)
+
+  imageUrls.forEach((url) => {
+    if (preloadedImages.value.has(url)) return
+    const img = new Image()
+    img.src = url
+    img.onload = () => {
+      preloadedImages.value.add(url)
+      logger.info('Onboarding', `立绘预加载成功: ${url}`)
+    }
+    img.onerror = () => {
+      logger.error('Onboarding', `立绘预加载失败: ${url}`)
+    }
+  })
+}
+
+/** 当前立绘是否已就绪 */
+const isImageReady = computed(() => {
+  const url = currentExpressionImage.value
+  return url != null && preloadedImages.value.has(url)
+})
+
+// ── 打字机效果 ──
+
 function startTyping() {
   if (typeTimer) clearInterval(typeTimer)
   const text = currentStep.value?.text ?? ''
@@ -68,13 +139,12 @@ function startTyping() {
 /** 跳到完整文本 / 下一步 */
 function handleNext() {
   if (!isTypingDone.value) {
-    // 跳过打字，直接显示完整文本
     if (typeTimer) clearInterval(typeTimer)
     displayedText.value = currentStep.value?.text ?? ''
     isTypingDone.value = true
     return
   }
-  if (currentStep.value?.choices) return // 有选择项时不自动跳转
+  if (currentStep.value?.choices) return
   advance()
 }
 
@@ -84,7 +154,6 @@ function advance() {
     currentIndex.value++
     startTyping()
   } else {
-    // 完成
     isAppearing.value = false
     setTimeout(() => {
       emit('finish')
@@ -104,6 +173,7 @@ watch(
   () => props.visible,
   (v) => {
     if (v) {
+      preloadOnboardingImages()
       currentIndex.value = 0
       setTimeout(() => {
         isAppearing.value = true
@@ -127,34 +197,88 @@ onUnmounted(() => {
     <Transition name="onb-fade">
       <div
         v-if="visible"
-        :class="['onb-overlay', { 'onb-visible': isAppearing }]"
+        :class="[
+          'fixed inset-0 z-[10000] flex flex-col items-center justify-end p-12 transition-all duration-[600ms] pointer-events-none',
+          isAppearing ? 'opacity-100' : 'opacity-0',
+          hasSpotlight ? 'bg-transparent' : 'bg-black/40 backdrop-blur-[12px]',
+        ]"
         @click.self="handleNext"
       >
         <!-- 聚光灯 -->
         <SpotlightMask :selector="currentStep?.focusSelector ?? null" />
 
-        <!-- 角色占位 (立绘 TODO: P5 接入资源) -->
-        <div v-if="currentStep?.expression !== 'none'" class="onb-character">
-          <div class="onb-char-placeholder">
-            <PixelIcon name="heart" size="3xl" />
+        <!-- Pero 的 2D 立绘 (还原 v1) -->
+        <div
+          v-if="currentStep?.expression !== 'none'"
+          :class="[
+            'absolute bottom-0 left-1/2 z-10 transition-all duration-1000 ease-out',
+            isAppearing
+              ? '-translate-x-1/2 translate-y-0 opacity-100'
+              : '-translate-x-1/2 translate-y-10 opacity-0',
+          ]"
+        >
+          <div class="relative group">
+            <!-- 发光效果 -->
+            <div class="absolute inset-0 bg-sky-400/15 blur-[120px] rounded-full onb-glow-pulse" />
+
+            <!-- 立绘容器 -->
+            <div class="w-[500px] h-[700px] flex items-end justify-center relative">
+              <!-- 立绘图片 (带淡入淡出) -->
+              <Transition name="fade">
+                <img
+                  v-if="isImageReady"
+                  :key="currentExpressionImage!"
+                  :src="currentExpressionImage!"
+                  :alt="currentExpressionLabel"
+                  class="max-w-full max-h-full object-contain z-10 drop-shadow-[0_20px_50px_rgba(14,165,233,0.3)]"
+                />
+              </Transition>
+
+              <!-- 占位符 (立绘未加载) -->
+              <div
+                v-if="!isImageReady"
+                class="w-[450px] h-[650px] flex items-center justify-center border-2 border-sky-400 bg-white/5 backdrop-blur-[20px] relative overflow-hidden"
+              >
+                <div class="flex flex-col items-center gap-8 onb-float">
+                  <div
+                    class="p-10 bg-white/10 border-2 border-sky-400 text-sky-400 shadow-[8px_8px_0_0_rgba(14,165,233,0.2)]"
+                  >
+                    <PixelIcon :name="currentExpressionIcon" size="3xl" />
+                  </div>
+                  <div
+                    class="px-8 py-3 bg-white border-2 border-sky-400 text-sky-400 font-black text-2xl shadow-[8px_8px_0_0_rgba(14,165,233,0.2)]"
+                  >
+                    {{ currentExpressionLabel }}
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
         <!-- 对话框 -->
-        <div :class="['onb-dialog', { 'onb-dialog-visible': isAppearing }]" @click="handleNext">
+        <div
+          :class="[
+            'w-full max-w-[800px] p-10 bg-white border-2 border-sky-500 shadow-[0_30px_60px_rgba(14,165,233,0.15)] relative z-20 cursor-pointer pointer-events-auto transition-all duration-500',
+            isAppearing ? 'translate-y-0 opacity-100' : 'translate-y-5 opacity-0',
+          ]"
+          @click="handleNext"
+        >
           <!-- 名称标签 -->
-          <div class="onb-name-tag">
+          <div
+            class="absolute -top-5 left-6 px-6 py-2 bg-sky-500 text-white font-black text-base tracking-[0.15em] border-2 border-sky-600"
+          >
             {{ currentStep?.speaker ?? 'Pero' }}
           </div>
 
           <!-- 文本 -->
-          <div class="onb-text">
+          <div class="text-lg font-bold text-slate-800 leading-[1.8] min-h-[80px]">
             <span>{{ displayedText }}</span>
-            <span v-if="isTypingDone" class="onb-cursor">▼</span>
+            <span v-if="isTypingDone" class="inline-block ml-2 text-sky-300 onb-bounce">▼</span>
           </div>
 
           <!-- 选择按钮 -->
-          <div v-if="currentStep?.choices && isTypingDone" class="onb-choices">
+          <div v-if="currentStep?.choices && isTypingDone" class="flex gap-4 mt-6">
             <PButton
               v-for="choice in currentStep.choices"
               :key="choice.value"
@@ -166,7 +290,12 @@ onUnmounted(() => {
           </div>
 
           <!-- 继续提示 -->
-          <div v-if="!currentStep?.choices && isTypingDone" class="onb-hint">点击此处继续喵...</div>
+          <div
+            v-if="!currentStep?.choices && isTypingDone"
+            class="absolute bottom-4 right-6 text-[11px] font-bold text-slate-400 uppercase tracking-[0.3em] onb-hint-pulse"
+          >
+            点击此处继续喵...
+          </div>
         </div>
       </div>
     </Transition>
@@ -174,119 +303,30 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.onb-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 10000;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: flex-end;
-  padding: 48px;
-  background: rgba(0, 0, 0, 0.4);
-  opacity: 0;
-  transition: opacity 0.5s;
-  pointer-events: auto;
-}
-.onb-visible {
-  opacity: 1;
-}
-
-/* 角色 */
-.onb-character {
-  position: absolute;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 10;
-}
-.onb-char-placeholder {
-  width: 200px;
-  height: 300px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--color-sky-light);
-  opacity: 0.3;
-}
-
-/* 对话框 */
-.onb-dialog {
-  width: 100%;
-  max-width: 800px;
-  padding: 40px;
-  background: var(--color-bg-primary);
-  border: 2px solid var(--color-sky-500);
-  box-shadow: 0 20px 60px rgba(56, 189, 248, 0.15);
-  position: relative;
-  z-index: 20;
-  cursor: pointer;
-  transform: translateY(20px);
-  opacity: 0;
-  transition: all 0.5s;
-}
-.onb-dialog-visible {
-  transform: translateY(0);
-  opacity: 1;
-}
-
-.onb-name-tag {
-  position: absolute;
-  top: -20px;
-  left: 24px;
-  padding: 8px 24px;
-  background: var(--color-sky-500);
-  color: white;
-  font-weight: 800;
-  font-size: 16px;
-  letter-spacing: 0.15em;
-  border: 2px solid var(--color-sky-shadow);
-}
-
-.onb-text {
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--color-text-primary);
-  line-height: 1.8;
-  min-height: 80px;
-}
-
-.onb-cursor {
-  display: inline-block;
-  margin-left: 8px;
-  color: var(--color-sky-hover);
-  animation: bounce 1s infinite;
-}
-
-.onb-choices {
-  display: flex;
-  gap: 16px;
-  margin-top: 24px;
-}
-
-.onb-hint {
-  position: absolute;
-  bottom: 16px;
-  right: 24px;
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--color-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.3em;
-  animation: pulse 2s infinite;
-}
-
-/* Transition */
+/* 过渡动画 */
 .onb-fade-enter-active,
 .onb-fade-leave-active {
   transition: opacity 0.5s;
 }
+
 .onb-fade-enter-from,
 .onb-fade-leave-to {
   opacity: 0;
 }
 
-@keyframes bounce {
+/* 立绘淡入淡出 */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.5s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+/* 关键帧动画 — Tailwind 无法表达 */
+@keyframes onb-bounce {
   0%,
   100% {
     transform: translateY(0);
@@ -295,7 +335,12 @@ onUnmounted(() => {
     transform: translateY(4px);
   }
 }
-@keyframes pulse {
+
+.onb-bounce {
+  animation: onb-bounce 1s infinite;
+}
+
+@keyframes onb-pulse {
   0%,
   100% {
     opacity: 0.4;
@@ -303,5 +348,27 @@ onUnmounted(() => {
   50% {
     opacity: 1;
   }
+}
+
+.onb-hint-pulse {
+  animation: onb-pulse 2s infinite;
+}
+
+.onb-glow-pulse {
+  animation: onb-pulse 3s ease-in-out infinite;
+}
+
+@keyframes onb-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+.onb-float {
+  animation: onb-float 3s ease-in-out infinite;
 }
 </style>

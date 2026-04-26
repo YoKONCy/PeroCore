@@ -16,7 +16,7 @@ export default defineConfig({
     environment: 'node',
 
     // 文件匹配
-    include: ['packages/**/*.{test,spec}.{ts,tsx}'],
+    include: ['packages/*/tests/**/*.{test,spec}.{ts,tsx}'],
     exclude: ['**/node_modules/**', '**/dist/**'],
 
     // 覆盖率配置

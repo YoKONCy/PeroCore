@@ -10,6 +10,7 @@
 import { ref, watch, nextTick } from 'vue'
 import { PixelIcon, PButton } from '../pixel'
 import { chatApi } from '../../api/modules/chatApi'
+import { logger } from '../../lib/logger'
 
 export interface ReActSegment {
   type: 'text' | 'action' | 'thinking' | 'error' | 'reflection'
@@ -55,7 +56,7 @@ async function togglePause() {
     }
     isTaskPaused.value = !isTaskPaused.value
   } catch (err) {
-    console.error('任务控制失败:', err)
+    logger.error('ReActViewer', '任务控制失败', err)
   }
 }
 
@@ -67,7 +68,7 @@ async function sendInjection() {
     await chatApi.injectInstruction(sessionId, injection.value)
     injection.value = ''
   } catch (err) {
-    console.error('指令注入失败:', err)
+    logger.error('ReActViewer', '指令注入失败', err)
   } finally {
     isSending.value = false
   }
@@ -84,15 +85,43 @@ function segIcon(type: string): string {
   }
   return map[type] ?? 'chat'
 }
+
+/** 段类型色彩 */
+function segClasses(type: string): string {
+  const map: Record<string, string> = {
+    thinking: 'border-l-[3px] border-l-sky-500 bg-sky-50',
+    error: 'border-l-[3px] border-l-rose-500 bg-rose-50/30',
+    reflection: 'border-l-[3px] border-l-amber-500 bg-amber-50/30',
+    action: '',
+    text: '',
+  }
+  return map[type] ?? ''
+}
+
+function labelColor(type: string): string {
+  const map: Record<string, string> = {
+    thinking: 'text-sky-500',
+    error: 'text-rose-500',
+    reflection: 'text-amber-500',
+    action: 'text-slate-400',
+    text: 'text-slate-400',
+  }
+  return map[type] ?? 'text-slate-400'
+}
 </script>
 
 <template>
-  <div class="react-viewer">
+  <div class="w-full h-full flex flex-col overflow-hidden">
     <!-- 工具栏 (Live 模式) -->
-    <div v-if="isLive" class="rv-toolbar">
-      <div class="rv-status">
-        <span :class="['rv-status-dot', isTaskPaused ? 'rv-dot-paused' : 'rv-dot-running']" />
-        <span class="rv-status-text">{{ isTaskPaused ? '任务已暂停' : '正在思考中...' }}</span>
+    <div
+      v-if="isLive"
+      class="px-4 py-3 flex items-center justify-between border-b-2 border-slate-200 flex-shrink-0"
+    >
+      <div class="flex items-center gap-2 text-[13px] font-bold text-slate-500">
+        <span
+          :class="['w-2 h-2', isTaskPaused ? 'bg-amber-500 rv-pulse' : 'bg-emerald-500 rv-pulse']"
+        />
+        <span>{{ isTaskPaused ? '任务已暂停' : '正在思考中...' }}</span>
       </div>
       <PButton :variant="isTaskPaused ? 'primary' : 'ghost'" size="sm" @click="togglePause">
         {{ isTaskPaused ? '继续运行' : '暂停思考' }}
@@ -100,33 +129,54 @@ function segIcon(type: string): string {
     </div>
 
     <!-- 内容区 -->
-    <div ref="scrollRef" class="rv-body">
-      <div v-if="segments.length === 0" class="rv-empty">
+    <div ref="scrollRef" class="flex-1 overflow-y-auto p-4 flex flex-col gap-3 rv-scrollbar">
+      <div v-if="segments.length === 0" class="text-center text-slate-400 font-bold mt-[60px]">
         {{ isLive ? '等待思考数据...' : '无思考过程记录' }}
       </div>
 
-      <div v-for="(seg, i) in segments" :key="i" :class="['rv-seg', `rv-seg-${seg.type}`]">
-        <div class="rv-seg-label">
+      <div
+        v-for="(seg, i) in segments"
+        :key="i"
+        :class="[
+          'px-4 py-3 border border-slate-200 bg-white max-w-[800px] w-full mx-auto',
+          segClasses(seg.type),
+        ]"
+      >
+        <div
+          :class="[
+            'flex items-center gap-1.5 text-[11px] font-bold uppercase mb-1.5',
+            labelColor(seg.type),
+          ]"
+        >
           <PixelIcon :name="segIcon(seg.type)" size="xs" />
-          <span>{{
-            {
-              thinking: '思考链',
-              action: '动作',
-              error: '错误',
-              reflection: '自我反思',
-              text: '文本',
-            }[seg.type]
-          }}</span>
+          <span>
+            {{
+              {
+                thinking: '思考链',
+                action: '动作',
+                error: '错误',
+                reflection: '自我反思',
+                text: '文本',
+              }[seg.type]
+            }}
+          </span>
         </div>
-        <div class="rv-seg-content">{{ seg.content }}</div>
+        <div
+          :class="[
+            'text-[13px] leading-relaxed text-slate-800 whitespace-pre-wrap font-mono',
+            seg.type === 'action' ? 'italic' : '',
+          ]"
+        >
+          {{ seg.content }}
+        </div>
       </div>
     </div>
 
     <!-- 指令注入 (Live 模式) -->
-    <div v-if="isLive" class="rv-inject">
+    <div v-if="isLive" class="px-4 py-3 flex gap-2 border-t-2 border-slate-200 flex-shrink-0">
       <input
         v-model="injection"
-        class="rv-inject-input"
+        class="flex-1 px-3 py-2 border-2 border-slate-200 bg-white text-slate-800 text-[13px] outline-none transition-colors focus:border-sky-300"
         placeholder="发送指令干预思考..."
         :disabled="isSending"
         @keyup.enter="sendInjection"
@@ -144,153 +194,7 @@ function segIcon(type: string): string {
 </template>
 
 <style scoped>
-.react-viewer {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-/* 工具栏 */
-.rv-toolbar {
-  padding: 12px 16px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 2px solid var(--color-border);
-  flex-shrink: 0;
-}
-.rv-status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--color-text-secondary);
-}
-.rv-status-dot {
-  width: 8px;
-  height: 8px;
-}
-.rv-dot-running {
-  background: var(--color-emerald-face);
-  animation: pulse 2s infinite;
-}
-.rv-dot-paused {
-  background: var(--color-yellow-500);
-  animation: pulse 2s infinite;
-}
-
-/* 内容 */
-.rv-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.rv-body::-webkit-scrollbar {
-  width: 4px;
-}
-.rv-body::-webkit-scrollbar-track {
-  background: transparent;
-}
-.rv-body::-webkit-scrollbar-thumb {
-  background: var(--color-sky-light);
-}
-
-.rv-empty {
-  text-align: center;
-  color: var(--color-text-muted);
-  font-weight: 700;
-  margin-top: 60px;
-}
-
-/* 段落 */
-.rv-seg {
-  padding: 12px 16px;
-  border: 1px solid var(--color-border);
-  background: var(--color-bg-primary);
-  max-width: 800px;
-  width: 100%;
-  margin: 0 auto;
-}
-
-.rv-seg-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  margin-bottom: 6px;
-}
-
-.rv-seg-content {
-  font-size: 13px;
-  line-height: 1.6;
-  color: var(--color-text-primary);
-  white-space: pre-wrap;
-  font-family: 'Cascadia Code', 'Fira Code', monospace;
-}
-
-/* 段类型色彩 */
-.rv-seg-thinking {
-  border-left: 3px solid var(--color-sky-500);
-  background: var(--color-sky-50);
-}
-.rv-seg-thinking .rv-seg-label {
-  color: var(--color-sky-500);
-}
-
-.rv-seg-error {
-  border-left: 3px solid var(--color-red-face);
-  background: rgba(239, 68, 68, 0.03);
-}
-.rv-seg-error .rv-seg-label {
-  color: var(--color-red-face);
-}
-
-.rv-seg-reflection {
-  border-left: 3px solid var(--color-yellow-500);
-  background: rgba(234, 179, 8, 0.03);
-}
-.rv-seg-reflection .rv-seg-label {
-  color: var(--color-yellow-500);
-}
-
-.rv-seg-action .rv-seg-label {
-  color: var(--color-text-muted);
-}
-.rv-seg-action .rv-seg-content {
-  font-style: italic;
-}
-
-/* 注入区 */
-.rv-inject {
-  padding: 12px 16px;
-  display: flex;
-  gap: 8px;
-  border-top: 2px solid var(--color-border);
-  flex-shrink: 0;
-}
-.rv-inject-input {
-  flex: 1;
-  padding: 8px 12px;
-  border: 2px solid var(--color-border);
-  background: var(--color-bg-primary);
-  color: var(--color-text-primary);
-  font-size: 13px;
-  outline: none;
-  transition: border-color 0.2s;
-}
-.rv-inject-input:focus {
-  border-color: var(--color-sky-hover);
-}
-
-@keyframes pulse {
+@keyframes rv-pulse-anim {
   0%,
   100% {
     opacity: 0.4;
@@ -298,5 +202,17 @@ function segIcon(type: string): string {
   50% {
     opacity: 1;
   }
+}
+
+.rv-pulse {
+  animation: rv-pulse-anim 2s infinite;
+}
+
+.rv-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+.rv-scrollbar::-webkit-scrollbar-thumb {
+  background: #bae6fd;
+  border-radius: 0;
 }
 </style>

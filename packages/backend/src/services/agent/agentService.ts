@@ -28,6 +28,7 @@ import type {
   ToolDefinition,
 } from '../pipeline/types'
 import type { DesktopProfile } from '../session/sessionService'
+import type { CapabilityGate } from '../../capabilities/capabilityGate'
 import { runIngress } from '../pipeline/ingress'
 import { runEgress } from '../pipeline/egress'
 import { runEnrichment } from '../pipeline/enrichers/enrichmentRunner'
@@ -54,10 +55,14 @@ export interface AgentServiceDeps {
   toolExecutor?: ToolExecutor
   /** 工具定义获取 (从 ToolRegistry) */
   getToolDefinitions?: (source: string) => ToolDefinition[]
+  /** 能力门控 (工具描述 + 技能菜单注入 System Prompt) */
+  capabilityGate?: CapabilityGate
   /** 取消检测器 (TaskManager) */
   cancelChecker?: CancelChecker
   /** Gateway 广播 (finish_task 通知) */
   gatewayBroadcast?: (action: string, payload: Record<string, unknown>) => Promise<void>
+  /** 主模型配置获取器 (ModelRoleResolver.bind('main')) */
+  getModelConfig: () => Promise<ModelConfig | null>
 }
 
 // ─────────────────────────────────────────────
@@ -106,12 +111,14 @@ export class AgentService {
       sessionId,
     })
 
-    // ── Phase 3: Prompt Assembly ──
+    // ── Phase 3: Prompt Assembly (含 CapabilityGate 能力注入) ──
+    const capabilityVars = this.resolveCapabilityVars(agentId, source, sessionId)
+    const mergedExtraVars = { ...capabilityVars, ...request.extraVars }
     const { systemPrompt, footer } = this.deps.promptService.assemble(
       agentId,
       source,
       enriched,
-      request.extraVars,
+      mergedExtraVars,
     )
     const llmMessages = this.assembleLlmMessages(systemPrompt, messages, footer)
 
@@ -127,7 +134,7 @@ export class AgentService {
     })
 
     // 异步持久化 + Scorer 攒批
-    this.persistAndScore(request, ingress.userText, egress.reply).catch((err) => {
+    this.persistAndScore(request, ingress.userText, egress.reply, text).catch((err) => {
       logger.warn('持久化失败', { error: err })
     })
 
@@ -168,12 +175,14 @@ export class AgentService {
       sessionId,
     })
 
-    // Phase 3: Prompt Assembly
+    // Phase 3: Prompt Assembly (含 CapabilityGate 能力注入)
+    const capabilityVars = this.resolveCapabilityVars(agentId, source, sessionId)
+    const mergedExtraVars = { ...capabilityVars, ...request.extraVars }
     const { systemPrompt, footer } = this.deps.promptService.assemble(
       agentId,
       source,
       enriched,
-      request.extraVars,
+      mergedExtraVars,
     )
     const llmMessages = this.assembleLlmMessages(systemPrompt, messages, footer)
 
@@ -206,7 +215,7 @@ export class AgentService {
     const toolCalls = result.value ?? []
 
     // Phase 5: Egress (异步)
-    this.persistAndScore(request, ingress.userText, fullText).catch((err) => {
+    this.persistAndScore(request, ingress.userText, fullText, fullText).catch((err) => {
       logger.warn('持久化失败', { error: err })
     })
 
@@ -245,7 +254,9 @@ export class AgentService {
     let text = ''
     let result = await gen.next()
     while (!result.done) {
-      text += result.value
+      if (typeof result.value === 'string') {
+        text += result.value
+      }
       result = await gen.next()
     }
     return { text, toolCalls: result.value ?? [] }
@@ -283,6 +294,27 @@ export class AgentService {
   }
 
   /**
+   * 从 CapabilityGate 解析工具描述 + 技能菜单变量
+   *
+   * 注入到模板变量中，填充 300_tools.md 的 {{ tools_description }} 和 {{ skill_menu }}。
+   */
+  private resolveCapabilityVars(
+    agentId: string,
+    source: string,
+    sessionId?: string,
+  ): Record<string, string> {
+    if (!this.deps.capabilityGate) {
+      return {}
+    }
+
+    const resolved = this.deps.capabilityGate.resolve(agentId, source, sessionId)
+    return {
+      tools_description: resolved.toolsDescription,
+      skill_menu: resolved.skillMenuText,
+    }
+  }
+
+  /**
    * 解析 Profile
    *
    * 优先级: ConfigRepo > 默认
@@ -313,44 +345,13 @@ export class AgentService {
   /**
    * 解析 LLM 模型配置
    *
-   * 优先级: Agent 专属配置 > 全局配置 > 环境变量兜底
+   * 统一使用 ModelRoleResolver (和 DiaryEngine/ScorerService 等保持一致)。
+   * 回退链: ModelRoleResolver(DB) → 环境变量兜底
    */
-  private async resolveModelConfig(agentId: string): Promise<ModelConfig> {
-    // 尝试 Agent 专属配置
-    const agentModel = await this.deps.configRepo.get(`agent.${agentId}.model_id`)
-    const agentApiKey = await this.deps.configRepo.get(`agent.${agentId}.api_key`)
-
-    if (agentModel && agentApiKey) {
-      const agentApiBase = await this.deps.configRepo.get(`agent.${agentId}.api_base`)
-      const agentProvider = await this.deps.configRepo.get(`agent.${agentId}.provider`)
-      return {
-        provider: agentProvider ?? 'openai',
-        modelId: agentModel,
-        apiKey: agentApiKey,
-        apiBase: agentApiBase ?? undefined,
-      }
-    }
-
-    // 全局配置
-    const globalApiKey = await this.deps.configRepo.get('global_llm_api_key')
-    if (globalApiKey) {
-      const globalApiBase = await this.deps.configRepo.get('global_llm_api_base')
-      const globalModel = await this.deps.configRepo.get('global_llm_model_id')
-      const globalProvider = await this.deps.configRepo.get('global_llm_provider')
-
-      if (!globalModel) {
-        throw new AppError('CONFIG_ERROR', {
-          message: '全局 LLM 配置缺少 model_id，请在设置中配置模型',
-        })
-      }
-
-      return {
-        provider: globalProvider ?? 'openai',
-        modelId: globalModel,
-        apiKey: globalApiKey,
-        apiBase: globalApiBase ?? undefined,
-      }
-    }
+  private async resolveModelConfig(_agentId: string): Promise<ModelConfig> {
+    // 通过 ModelRoleResolver 获取主模型配置
+    const config = await this.deps.getModelConfig()
+    if (config) return config
 
     // 环境变量兜底
     const envApiKey = process.env.PERO_LLM_API_KEY
@@ -358,7 +359,7 @@ export class AgentService {
     if (!envApiKey || !envModel) {
       throw new AppError('CONFIG_ERROR', {
         message:
-          'LLM 未配置: 请设置全局 API Key 和模型，或环境变量 PERO_LLM_API_KEY / PERO_LLM_MODEL',
+          'LLM 未配置: 请在 Dashboard 模型配置中设置主模型，或设置环境变量 PERO_LLM_API_KEY / PERO_LLM_MODEL',
       })
     }
 
@@ -377,16 +378,18 @@ export class AgentService {
     request: ChatRequest,
     userText: string,
     reply: string,
+    rawReply?: string,
   ): Promise<void> {
     const { agentId, source, sessionId } = request
 
-    // 保存对话日志
+    // 保存对话日志 (rawReply 保留原始 LLM 输出，含 Thinking/Monologue 块)
     await this.deps.logService.savePair({
       sessionId,
       source,
       agentId,
       userContent: userText,
       assistantContent: reply,
+      assistantRawContent: rawReply,
     })
 
     // 触发 Scorer 攒批

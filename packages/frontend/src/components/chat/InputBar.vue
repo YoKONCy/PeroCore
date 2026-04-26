@@ -124,36 +124,48 @@ defineExpose({ focus })
 </script>
 
 <template>
-  <div class="input-bar">
+  <div
+    class="border-2 border-slate-200 bg-white transition-all shadow-[0_-4px_16px_rgba(0,0,0,0.05)] focus-within:border-sky-300 focus-within:shadow-[0_-4px_16px_rgba(56,189,248,0.08)]"
+  >
     <!-- 待发送图片预览 -->
-    <div v-if="pendingImages.length > 0" class="input-bar-images">
-      <div v-for="(img, idx) in pendingImages" :key="idx" class="input-bar-image-wrap">
-        <img :src="img.url" class="input-bar-image" alt="待发送图片" />
-        <button class="input-bar-image-remove" @click="removeImage(idx)">
+    <div
+      v-if="pendingImages.length > 0"
+      class="flex gap-2 px-4 pt-3 pb-2 overflow-x-auto border-b border-slate-200"
+    >
+      <div v-for="(img, idx) in pendingImages" :key="idx" class="relative flex-shrink-0">
+        <img
+          :src="img.url"
+          class="w-16 h-16 object-cover border border-slate-200"
+          alt="待发送图片"
+        />
+        <button
+          class="absolute -top-1.5 -right-1.5 w-[18px] h-[18px] bg-rose-500 text-white border-none flex items-center justify-center cursor-pointer transition-transform hover:scale-110"
+          @click="removeImage(idx)"
+        >
           <PixelIcon name="close" size="xs" />
         </button>
       </div>
     </div>
 
     <!-- 输入区 -->
-    <div class="input-bar-main">
+    <div class="flex items-end gap-2 px-4 py-3">
       <textarea
         ref="textareaRef"
         v-model="inputText"
         :placeholder="placeholder"
         :disabled="disabled || isSending"
-        class="input-bar-textarea"
+        class="flex-1 min-h-[24px] max-h-[200px] border-none bg-transparent text-slate-800 font-pixel text-sm leading-relaxed resize-none outline-none placeholder:text-slate-400 disabled:opacity-50"
         rows="1"
         @keydown="onKeydown"
         @input="autoResize"
         @paste="onPaste"
       />
 
-      <div class="input-bar-actions">
+      <div class="flex-shrink-0 flex gap-2">
         <!-- 图片选择按钮 -->
         <button
           v-if="!isSending"
-          class="input-bar-btn input-bar-btn-attach"
+          class="flex items-center gap-1 px-2 py-1.5 bg-slate-50 text-slate-400 border-2 border-slate-200 cursor-pointer font-bold text-xs transition-all active:scale-95 hover:border-sky-300 hover:text-sky-500"
           title="添加图片"
           @click="openFileDialog"
         >
@@ -164,14 +176,14 @@ defineExpose({ focus })
           type="file"
           accept="image/*"
           multiple
-          class="input-bar-file-input"
+          class="hidden"
           @change="handleFileSelect"
         />
 
         <!-- 停止按钮 -->
         <button
           v-if="isSending"
-          class="input-bar-btn input-bar-btn-stop"
+          class="flex items-center gap-1 px-2.5 py-1 bg-rose-500 text-white border-2 border-rose-600 cursor-pointer font-bold text-xs transition-all active:scale-95 hover:bg-rose-400"
           title="停止生成"
           @click="emit('stop')"
         >
@@ -182,7 +194,7 @@ defineExpose({ focus })
         <!-- 发送按钮 -->
         <button
           v-else
-          class="input-bar-btn input-bar-btn-send"
+          class="flex items-center gap-1 px-3 py-1.5 bg-sky-500 text-white border-2 border-sky-600 cursor-pointer font-bold text-xs transition-all active:scale-95 hover:bg-sky-400 disabled:opacity-40 disabled:cursor-not-allowed"
           :disabled="disabled || (!inputText.trim() && pendingImages.length === 0)"
           @click="send"
         >
@@ -192,142 +204,3 @@ defineExpose({ focus })
     </div>
   </div>
 </template>
-
-<style scoped>
-.input-bar {
-  border: 2px solid var(--color-border);
-  background: var(--color-bg-primary);
-  transition:
-    border-color 0.2s,
-    box-shadow 0.2s;
-  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.05);
-}
-.input-bar:focus-within {
-  border-color: var(--color-sky-hover);
-  box-shadow: 0 -4px 16px rgba(56, 189, 248, 0.08);
-}
-
-/* 图片预览 */
-.input-bar-images {
-  display: flex;
-  gap: 8px;
-  padding: 12px 16px 8px;
-  overflow-x: auto;
-  border-bottom: 1px solid var(--color-border);
-}
-.input-bar-image-wrap {
-  position: relative;
-  flex-shrink: 0;
-}
-.input-bar-image {
-  width: 64px;
-  height: 64px;
-  object-fit: cover;
-  border: 1px solid var(--color-border);
-}
-.input-bar-image-remove {
-  position: absolute;
-  top: -6px;
-  right: -6px;
-  width: 18px;
-  height: 18px;
-  background: var(--color-red-face, #ef4444);
-  color: white;
-  border: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: transform 0.15s;
-}
-.input-bar-image-remove:hover {
-  transform: scale(1.1);
-}
-
-/* 主输入区 */
-.input-bar-main {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  padding: 12px 16px;
-}
-
-.input-bar-textarea {
-  flex: 1;
-  min-height: 24px;
-  max-height: 200px;
-  border: none;
-  background: transparent;
-  color: var(--color-text-primary);
-  font-family: var(--font-pixel), monospace;
-  font-size: 14px;
-  line-height: 1.5;
-  resize: none;
-  outline: none;
-}
-.input-bar-textarea::placeholder {
-  color: var(--color-text-muted);
-}
-.input-bar-textarea:disabled {
-  opacity: 0.5;
-}
-
-/* 按钮 */
-.input-bar-actions {
-  flex-shrink: 0;
-  display: flex;
-  gap: 8px;
-}
-.input-bar-btn {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  border: none;
-  cursor: pointer;
-  font-weight: 700;
-  font-size: 12px;
-  transition: all 0.15s;
-}
-.input-bar-btn:active {
-  transform: scale(0.95);
-}
-
-.input-bar-btn-send {
-  padding: 6px 12px;
-  background: var(--color-sky-500);
-  color: white;
-  border: 2px solid var(--color-sky-shadow);
-}
-.input-bar-btn-send:hover:not(:disabled) {
-  background: var(--color-sky-hover);
-}
-.input-bar-btn-send:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-/* 附件按钮 */
-.input-bar-btn-attach {
-  padding: 6px 8px;
-  background: var(--color-bg-secondary);
-  color: var(--color-text-muted);
-  border: 2px solid var(--color-border);
-}
-.input-bar-btn-attach:hover {
-  border-color: var(--color-sky-hover);
-  color: var(--color-sky-500);
-}
-.input-bar-file-input {
-  display: none;
-}
-
-.input-bar-btn-stop {
-  padding: 4px 10px;
-  background: var(--color-red-face, #ef4444);
-  color: white;
-  border: 2px solid var(--color-red-shadow, #dc2626);
-}
-.input-bar-btn-stop:hover {
-  background: var(--color-red-400, #f87171);
-}
-</style>

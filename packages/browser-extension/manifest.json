@@ -2,6 +2,7 @@
   "manifest_version": 3,
   "name": "Pero 浏览器桥接器",
   "version": "0.9.0",
+  "version_name": "0.9-rc1",
   "description": "将您的浏览器连接到 PeroCore AI 助手，提供网页交互能力。",
   "permissions": ["activeTab", "scripting", "tabs", "alarms"],
   "host_permissions": ["<all_urls>"],

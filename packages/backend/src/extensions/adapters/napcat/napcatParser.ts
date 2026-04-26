@@ -147,7 +147,20 @@ export function toOneBotSegments(content: string, attachments?: Attachment[]): O
   // 附件段
   if (attachments) {
     for (const att of attachments) {
-      if (att.type === 'image') {
+      if (att.type === 'sticker') {
+        // 表情包: 使用 subType=1 让 QQ 显示为表情而非普通图片
+        const file = att.localPath
+          ? `file:///${att.localPath.replace(/\\/g, '/')}`
+          : (att.url ?? '')
+        segments.push({
+          type: 'image',
+          data: {
+            file,
+            subType: 1, // 关键: 告诉 NTQQ 这是表情包
+            summary: '[表情]', // 非图形界面的摘要显示
+          },
+        })
+      } else if (att.type === 'image') {
         const file = att.localPath ? `file:///${att.localPath}` : (att.url ?? '')
         segments.push({ type: 'image', data: { file } })
       }

@@ -16,7 +16,7 @@
  */
 import { ref, shallowRef, onMounted, onUnmounted, nextTick } from 'vue'
 import { PixelIcon, PButton, PSwitch } from '../pixel'
-import { invoke, listen } from '../../utils/ipcAdapter'
+import { useSystemLogStream } from '../../composables/system/useSystemLogStream'
 
 // ── 类型定义 ──
 
@@ -39,7 +39,6 @@ const autoScroll = ref(true)
 // 批量缓冲 (100ms 聚合一次，减轻渲染压力)
 let pendingLogs: LogEntry[] = []
 let updateTimer: ReturnType<typeof setTimeout> | null = null
-let unlistenFn: (() => void) | null = null
 
 // 原始 console 引用
 const origLog = console.log
@@ -103,14 +102,6 @@ function formatMessage(msg: string): string {
   })
 }
 
-/** 推断日志级别 */
-function inferType(msg: string): LogType {
-  const lower = msg.toLowerCase()
-  if (lower.includes('[err]') || lower.includes('error')) return 'error'
-  if (lower.includes('warn')) return 'warn'
-  return 'info'
-}
-
 // ── 核心逻辑 ──
 
 function addLog(source: LogSource, type: LogType, message: string): void {
@@ -169,60 +160,35 @@ function unhookConsole(): void {
   console.error = origError
 }
 
+// ── SSE 连接 (Electron / Browser 通用) ──
+
+const logStream = useSystemLogStream({
+  onLog: (event) => {
+    const level = event.level?.toLowerCase() ?? 'info'
+    const type: LogType =
+      level === 'error' || level === 'fatal' ? 'error' : level === 'warn' ? 'warn' : 'info'
+    addLog('backend', type, event.line)
+  },
+  onOpen: (url) => {
+    addLog('system', 'system', `日志流已连接: ${url}`)
+  },
+  onReconnect: () => {
+    addLog('system', 'warn', '日志流已断开，5秒后重连...')
+  },
+})
+
 // ── 生命周期 ──
 
 onMounted(async () => {
   hookConsole()
 
-  try {
-    // 1. 拉取历史日志
-    const history = (await invoke('get-backend-logs')) as string[] | null
-    if (Array.isArray(history)) {
-      const entries: LogEntry[] = history.map((line) => ({
-        source: 'backend' as const,
-        type: inferType(line),
-        message: line,
-        timestamp: extractTimestamp(line),
-      }))
-      logs.value = entries
-      scrollToBottom()
-    }
-
-    // 2. 监听实时日志事件
-    const unlisten1 = await listen('backend-log', (payload) => {
-      const msg =
-        typeof payload === 'string'
-          ? payload
-          : ((payload as { payload?: string })?.payload ?? String(payload))
-      addLog('backend', inferType(msg), msg)
-    })
-
-    const unlisten2 = await listen('backend-log-batch', (payload) => {
-      const batch = payload as string[]
-      if (Array.isArray(batch)) {
-        batch.forEach((msg) => addLog('backend', inferType(msg), msg))
-      }
-    })
-
-    const unlisten3 = await listen('terminal-log', (payload) => {
-      const log = payload as { type?: string; message?: string }
-      addLog('backend', (log.type as LogType) ?? 'info', log.message ?? '')
-    })
-
-    // 组合清理函数
-    unlistenFn = () => {
-      unlisten1()
-      unlisten2()
-      unlisten3()
-    }
-  } catch (e) {
-    addLog('system', 'error', `无法连接到后端日志: ${e}`)
-  }
+  // 统一使用 SSE 获取后端实时日志（Electron / Browser 通用）
+  logStream.connect()
 })
 
 onUnmounted(() => {
   unhookConsole()
-  unlistenFn?.()
+  logStream.disconnect()
   if (updateTimer) clearTimeout(updateTimer)
 })
 </script>
@@ -362,7 +328,9 @@ onUnmounted(() => {
   overflow-y: auto;
   padding: 12px 16px;
   position: relative;
-  z-index: 0;
+  z-index: 5;
+  user-select: text;
+  cursor: text;
 }
 
 .terminal-body::-webkit-scrollbar {

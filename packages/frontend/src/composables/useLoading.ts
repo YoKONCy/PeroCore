@@ -10,16 +10,15 @@ import { ref } from 'vue'
  * @param fn - 异步函数
  * @returns { execute, isLoading, error }
  */
-export function useLoading<T extends (...args: never[]) => Promise<unknown>>(fn: T) {
+export function useLoading<TArgs extends unknown[], TResult>(fn: (...args: TArgs) => Promise<TResult>) {
   const isLoading = ref(false)
   const error = ref<Error | null>(null)
 
-  const execute = async (...args: Parameters<T>): Promise<ReturnType<T> | undefined> => {
+  const execute = async (...args: TArgs): Promise<TResult | undefined> => {
     isLoading.value = true
     error.value = null
     try {
-      const result = await fn(...args)
-      return result as ReturnType<T>
+      return await fn(...args)
     } catch (err) {
       error.value = err instanceof Error ? err : new Error(String(err))
       return undefined

@@ -39,27 +39,26 @@ export interface BrowserCommandResult {
   data?: unknown
 }
 
-/** 全局引用 */
-let browserBridge: BrowserBridge | null = null
+/** 模块引用 */
+let _browserBridge: BrowserBridge | null = null
 
-/** 注入浏览器桥接 (由 container.ts 调用) */
-export function injectBrowserBridge(bridge: BrowserBridge): void {
-  browserBridge = bridge
-  logger.info('浏览器桥接已注入')
+/** 设置浏览器桥接 */
+export function setBrowserBridge(bridge: BrowserBridge | null): void {
+  _browserBridge = bridge
 }
 
 /** 辅助: 执行命令并附加页面内容 */
 async function execWithContent(command: string, params?: Record<string, unknown>): Promise<string> {
-  if (!browserBridge) {
+  if (!_browserBridge) {
     return JSON.stringify({ error: '浏览器桥接未初始化。请确保浏览器插件已连接。' })
   }
 
-  if (!browserBridge.isConnected) {
+  if (!_browserBridge.isConnected) {
     return JSON.stringify({ error: '浏览器未连接。请确保浏览器插件已启动并连接。' })
   }
 
-  const result = await browserBridge.sendCommand(command, params)
-  const content = await browserBridge.getPageContent()
+  const result = await _browserBridge.sendCommand(command, params)
+  const content = await _browserBridge.getPageContent()
 
   const status =
     result.status === 'success' ? '✅ 执行成功' : `❌ 执行失败: ${result.error ?? '未知错误'}`
@@ -209,14 +208,14 @@ export const browserGetContentTool: BuiltinTool = {
   },
 
   async execute() {
-    if (!browserBridge) {
+    if (!_browserBridge) {
       return JSON.stringify({ error: '浏览器桥接未初始化' })
     }
-    if (!browserBridge.isConnected) {
+    if (!_browserBridge.isConnected) {
       return JSON.stringify({ error: '浏览器未连接' })
     }
 
-    const content = await browserBridge.getPageContent()
+    const content = await _browserBridge.getPageContent()
     logger.info(`获取页面内容: ${content.length} 字符`)
 
     return JSON.stringify({

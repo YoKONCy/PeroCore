@@ -32,14 +32,14 @@ interface PetStateUpdateData {
   backMessages?: string[]
 }
 
-/** 由 container.ts 注入 */
+/** 模块引用 */
 let _petStateUpdater: PetStateUpdater | null = null
 let _gatewayBroadcast:
   | ((action: string, payload: Record<string, unknown>) => Promise<void>)
   | null = null
 
-/** DI 注入点 — 在 container.ts 中调用 */
-export function injectFinishTaskDeps(deps: {
+/** 设置 finishTask 依赖 */
+export function setFinishTaskDeps(deps: {
   petStateUpdater: PetStateUpdater
   gatewayBroadcast?: (action: string, payload: Record<string, unknown>) => Promise<void>
 }) {

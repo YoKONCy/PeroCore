@@ -10,6 +10,15 @@
 /* 1. TailwindCSS 4 (提供 utility classes: flex, p-6, bg-white 等) */
 @import 'tailwindcss';
 
+/* 加载 Zpix 中文像素字体 (本地文件, 从 GitHub release v3.1.11 下载) */
+@font-face {
+  font-family: 'Zpix';
+  src: url('./fonts/zpix.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* 2. 设计令牌 (CSS Variables 单一真相源) */
 @import './tokens.css';
 

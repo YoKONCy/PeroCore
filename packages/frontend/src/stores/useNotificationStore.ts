@@ -27,6 +27,13 @@ export interface Notification {
 
 let nextId = 0
 
+/** Toast 通知选项 */
+export interface ToastOptions {
+  type?: NotificationType
+  title?: string
+  duration?: number
+}
+
 export const useNotificationStore = defineStore('notification', () => {
   // ── 状态 ──
   /** Toast 通知队列 */
@@ -38,20 +45,28 @@ export const useNotificationStore = defineStore('notification', () => {
   // ── 动作 ──
 
   /** 显示 Toast 通知 */
-  function toast(message: string, type: NotificationType = 'info', duration = 4000) {
+  function toast(
+    message: string,
+    typeOrOpts: NotificationType | ToastOptions = 'info',
+    duration = 4000,
+  ) {
+    const opts: ToastOptions =
+      typeof typeOrOpts === 'string' ? { type: typeOrOpts, duration } : typeOrOpts
+
     const notification: Notification = {
       id: nextId++,
-      type,
+      type: opts.type ?? 'info',
       severity: 'toast',
+      title: opts.title,
       message,
-      duration,
+      duration: opts.duration ?? duration,
       createdAt: Date.now(),
     }
     toasts.value.push(notification)
 
     // 自动移除
-    if (duration > 0) {
-      setTimeout(() => removeToast(notification.id), duration)
+    if (notification.duration > 0) {
+      setTimeout(() => removeToast(notification.id), notification.duration)
     }
   }
 
@@ -83,7 +98,7 @@ export const useNotificationStore = defineStore('notification', () => {
     const severity = ERROR_UI_MAP[code] ?? 'toast'
 
     if (severity === 'silent') {
-      console.warn(`[静默错误] ${code}: ${message}`)
+      // 静默错误仅记日志，不显示 UI
       return
     }
 

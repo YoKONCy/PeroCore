@@ -25,23 +25,22 @@ const logger = createLogger('StrongholdOps')
 // Provider 注入
 // ─────────────────────────────────────────────
 
-/** 全局引用 */
-let strongholdService: StrongholdService | null = null
+/** 模块引用 */
+let _strongholdService: StrongholdService | null = null
 
-/** 注入据点服务 (由 container.ts 调用) */
-export function injectStrongholdService(service: StrongholdService): void {
-  strongholdService = service
-  logger.info('据点服务已注入')
+/** 设置据点服务 */
+export function setStrongholdService(service: StrongholdService | null): void {
+  _strongholdService = service
 }
 
 /** 辅助: 检查 Service 可用性 */
 function requireService(): StrongholdService | string {
-  if (!strongholdService) {
+  if (!_strongholdService) {
     return JSON.stringify({
       error: '据点服务未初始化。当前环境不支持据点操作。',
     })
   }
-  return strongholdService
+  return _strongholdService
 }
 
 // ─────────────────────────────────────────────

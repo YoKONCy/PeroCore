@@ -1,0 +1,32 @@
+{
+  "id": "diary-search",
+  "name": "日记查找",
+  "version": "1.0.0",
+  "author": "PeroCore Team",
+  "description": "按语义或日期查找历史日记，帮助回忆过去的经历和情感",
+  "type": "tool",
+  "entry": "index.ts",
+  "category": "memory",
+  "platforms": ["windows", "linux", "darwin", "docker"],
+  "toolDefinition": {
+    "name": "search_diary",
+    "description": "搜索历史日记。可以按关键词语义查找，也可以按日期范围筛选。当主人问「之前某天发生了什么」「上次我们讨论过XX」「最近的日记」等场景时使用。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "搜索关键词或问题 (语义检索)。例如「和主人讨论过美食的日子」「心情不好的时候」"
+        },
+        "date": {
+          "type": "string",
+          "description": "精确日期 (ISO 格式 YYYY-MM-DD)。例如 2026-04-25"
+        },
+        "limit": {
+          "type": "number",
+          "description": "最多返回条数 (默认 5，最大 20)"
+        }
+      }
+    }
+  }
+}

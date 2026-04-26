@@ -18,6 +18,7 @@ import { modelApi } from '../../api/modules/modelApi'
 import { memoryApi } from '../../api/modules/memoryApi'
 import { agentApi } from '../../api/modules/agentApi'
 import { invoke, isElectron } from '../../utils/ipcAdapter'
+import { logger } from '../../lib/logger'
 
 export type LaunchPhase = 'connecting' | 'checking' | 'ready' | 'entering' | 'done'
 
@@ -69,6 +70,8 @@ export function useLauncher() {
         showEula.value = true
       } else {
         eulaChecked.value = true
+        // EULA 已接受 → 检查引导状态 (否则 onboardingCompleted 永远是 false)
+        await checkOnboardingStatus()
       }
     } catch {
       // 配置不存在 = 新用户 → 需要 EULA
@@ -89,7 +92,7 @@ export function useLauncher() {
       // 检查引导状态 — EULA 通过后才可能触发引导
       await checkOnboardingStatus()
     } catch (e) {
-      console.error('保存 EULA 状态失败:', e)
+      logger.error('Launcher', '保存 EULA 状态失败', e)
     }
   }
 
@@ -130,7 +133,7 @@ export function useLauncher() {
       await configApi.set('onboarding_completed', 'launcher_done')
       onboardingCompleted.value = true
     } catch (e) {
-      console.error('保存引导状态失败:', e)
+      logger.error('Launcher', '保存引导状态失败', e)
     }
   }
 
@@ -153,22 +156,16 @@ export function useLauncher() {
     }
   }
 
-  /** 检查数据库连接（通过尝试读取一个配置） */
+  /** 检查数据库连接（通过 batch 接口探测，避免 404 WARN 日志） */
   async function checkDatabase(item: CheckItem): Promise<void> {
     try {
-      await configApi.get('system.initialized')
+      // 用 batch 接口：即使 key 不存在也返回 200，不会触发后端 WARN
+      await configApi.batch(['system.initialized'])
       item.status = 'ok'
       item.message = '正常'
-    } catch (e) {
-      const msg = (e as Error).message
-      // NOT_FOUND 说明数据库可达但 key 不存在 — 这是正常的
-      if (msg.includes('NOT_FOUND') || msg.includes('不存在')) {
-        item.status = 'ok'
-        item.message = '正常'
-      } else {
-        item.status = 'error'
-        item.message = '数据库连接失败'
-      }
+    } catch {
+      item.status = 'error'
+      item.message = '数据库连接失败'
     }
   }
 
@@ -301,32 +298,34 @@ export function useLauncher() {
     try {
       // 第 1 步: 启动后端进程
       enteringText.value = '正在启动后端服务...'
-      console.log('[Launcher] 正在通过 IPC 启动后端...')
+      logger.info('Launcher', '正在通过 IPC 启动后端...')
       await invoke('start-backend')
-      console.log('[Launcher] 后端启动指令已发送')
+      logger.info('Launcher', '后端启动指令已发送')
 
       // 第 2 步: 等待后端就绪 (最多 30 秒轮询)
       enteringText.value = '等待后端就绪...'
       const backendReady = await waitForBackend(30000)
       if (!backendReady) {
-        console.warn('[Launcher] 后端未在超时内就绪，仍然尝试拉起桌宠')
+        logger.warn('Launcher', '后端未在超时内就绪，仍然尝试拉起桌宠')
       }
 
-      // 第 3 步: 拉起 Pet3D 桌宠窗口 (核心入口！)
+      // 第 3 步: 先隐藏 Launcher，避免后续窗口事件触发竞争
       enteringText.value = '正在召唤 Pero 出现在桌面上...'
-      console.log('[Launcher] 正在创建 Pet3D 窗口...')
+      logger.info('Launcher', '先隐藏 Launcher 窗口')
+      await invoke('hide-launcher')
+
+      // 第 4 步: 拉起 Pet3D 桌宠窗口 (核心入口！)
+      logger.info('Launcher', '正在创建 Pet3D 窗口...')
       await invoke('open-pet-window')
 
-      // 第 4 步: 短暂延迟后隐藏 Launcher (给 Pet3D 窗口一点时间渲染)
-      await new Promise((r) => setTimeout(r, 800))
+      // 第 5 步: 短暂等待 Pet3D 渲染就绪
+      await new Promise((r) => setTimeout(r, 500))
       enteringText.value = '欢迎回来，主人！'
-      console.log('[Launcher] 隐藏 Launcher 窗口')
-      await invoke('hide-launcher')
 
       phase.value = 'done'
       return 'pet'
     } catch (e) {
-      console.error('[Launcher] 启动流程出错:', e)
+      logger.error('Launcher', '启动流程出错', e)
       enteringText.value = '启动出错，请重试'
       errorMessage.value = `启动失败: ${e}`
       // 回退到 ready 状态，允许用户重试
@@ -348,7 +347,7 @@ export function useLauncher() {
       try {
         const res = await systemApi.health()
         if (res.data?.status === 'ok') {
-          console.log('[Launcher] 后端已就绪!')
+          logger.info('Launcher', '后端已就绪!')
           return true
         }
       } catch {
@@ -363,6 +362,16 @@ export function useLauncher() {
   /** 重试 */
   function retry(): void {
     void startLaunch()
+  }
+
+  /** 手动触发 EULA 弹窗 */
+  function triggerEula(): void {
+    showEula.value = true
+  }
+
+  /** 手动触发新手引导 */
+  function triggerOnboarding(): void {
+    showOnboarding.value = true
   }
 
   return {
@@ -382,8 +391,10 @@ export function useLauncher() {
     showEula,
     acceptEula,
     declineEula,
+    triggerEula,
     // 引导
     showOnboarding,
     finishOnboarding,
+    triggerOnboarding,
   }
 }

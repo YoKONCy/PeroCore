@@ -5,7 +5,7 @@
  *
  *              窗口类型:
  *              - Launcher    启动器 (900×600, 透明, 无边框, 亚克力)
- *              - Pet3D       桌宠   (800×800, 透明, 置顶, 鼠标追踪)
+ *              - Pet3D       桌宠   (600×600, 透明, 置顶, 鼠标追踪)
  *              - Dashboard   控制面板 (1280×800, 透明, 无边框)
  *              - Stronghold  据点   (1200×800, 透明, 无边框)
  *              - IDE         工作台 (1400×900, 透明, 无边框)
@@ -44,8 +44,8 @@ const WINDOW_CONFIGS: Record<string, WindowConfig> = {
   },
   pet: {
     route: '/pet-3d',
-    width: 800,
-    height: 800,
+    width: 600,
+    height: 600,
     transparent: true,
     alwaysOnTop: true,
     skipTaskbar: true,
@@ -190,6 +190,7 @@ export class WindowManager {
   ): BrowserWindow {
     // 如果已存在且未销毁，聚焦并返回
     if (existing && !existing.isDestroyed()) {
+      // 始终显示并聚焦（调用者明确想要这个窗口）
       if (!existing.isVisible()) existing.show()
       if (existing.isMinimized()) existing.restore()
       existing.focus()
@@ -198,6 +199,9 @@ export class WindowManager {
 
     const cfg = WINDOW_CONFIGS[configKey]
     if (!cfg) throw new Error(`未知窗口配置: ${configKey}`)
+
+    // 分离 webPreferences 避免被 extraOpts 展开覆盖
+    const { webPreferences: extraWebPrefs, ...restExtraOpts } = extraOpts ?? {}
 
     const win = new BrowserWindow({
       title: '萌动链接：PeroperoChat！',
@@ -218,9 +222,9 @@ export class WindowManager {
         nodeIntegration: false,
         contextIsolation: true,
         backgroundThrottling: false,
-        ...extraOpts?.webPreferences,
+        ...extraWebPrefs,
       },
-      ...extraOpts,
+      ...restExtraOpts,
     })
 
     // 亚克力效果 (非 Pet 窗口)
@@ -289,7 +293,7 @@ export class WindowManager {
 
     // 初始定位: 屏幕右下角
     const { width, height } = screen.getPrimaryDisplay().workAreaSize
-    this.petWin.setPosition(width - 850, height - 850)
+    this.petWin.setPosition(width - 650, height - 650)
 
     // 启动鼠标追踪 (30fps)
     this.startMouseTracking()

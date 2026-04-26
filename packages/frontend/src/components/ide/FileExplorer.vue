@@ -7,7 +7,7 @@
  *
  * @emits file-selected - 选中文件时触发
  */
-import { ref, computed, onMounted } from 'vue'
+import { ref, shallowRef, computed, onMounted } from 'vue'
 import { PixelIcon } from '../pixel'
 import FileTreeItem from './FileTreeItem.vue'
 import { ideApi } from '../../api/modules/ideApi'
@@ -23,7 +23,7 @@ const emit = defineEmits<{
   'file-selected': [node: FileNode]
 }>()
 
-const files = ref<FileNode[]>([])
+const files = shallowRef<FileNode[]>([])
 const isLoading = ref(true)
 const searchQuery = ref('')
 

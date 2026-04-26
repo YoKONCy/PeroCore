@@ -11,10 +11,13 @@
  * 4. Service 子进程生命周期管理
  * 5. 热重载 / 卸载
  * 6. 扩展列表查询 (给 Dashboard API)
+ * 7. Skill 联邦发现 — 自动扫描 Extension 中的 skills/ 目录
  *
  * @module packages/backend/src/extensions/extensionManager
  */
 
+import { existsSync, statSync } from 'node:fs'
+import path from 'node:path'
 import type {
   ExtensionManifest,
   ToolExtension,
@@ -59,15 +62,22 @@ export class ExtensionManager {
   /** 反向通知处理器 (Service → Core，如社交适配器收到消息) */
   private serviceNotificationHandler?: (serviceId: string, method: string, params: unknown) => void
 
+  /** 发现的 Extension skills 目录 (联邦路径) */
+  private discoveredSkillDirs: string[] = []
+
   // ─────────────────────────────────────────
   // 公开 API: 初始化
   // ─────────────────────────────────────────
 
   /**
    * 扫描并加载所有扩展
+   *
+   * 同时自动发现每个 Extension 目录下的 skills/ 子目录，
+   * 收集后可通过 getDiscoveredSkillDirs() 获取。
    */
   async loadAll(config: ExtensionManagerConfig): Promise<void> {
     logger.info('开始加载扩展...')
+    this.discoveredSkillDirs = []
 
     // 1. 加载内置 Tool
     const builtinResults = await this.loader.scanAndLoadAll(config.builtinToolsDir)
@@ -75,16 +85,28 @@ export class ExtensionManager {
       await this.registerLoadResult(result)
     }
 
-    // 2. 加载用户扩展
+    // 2. 加载用户扩展 (同时发现 skills/ 目录)
     const userResults = await this.loader.scanAndLoadAll(config.userExtensionsDir)
     for (const result of userResults) {
       await this.registerLoadResult(result)
+      // 检查该 Extension 目录下是否有 skills/ 子目录
+      this.discoverSkillsInExtension(result.dirPath)
     }
 
     logger.info(
       `扩展加载完成: ${this.tools.size} Tool, ` +
-        `${this.hookRegistry.count} Hook, ${this.services.size} Service`,
+        `${this.hookRegistry.count} Hook, ${this.services.size} Service, ` +
+        `${this.discoveredSkillDirs.length} 个 Skill 目录`,
     )
+  }
+
+  /**
+   * 获取所有发现的 Extension skills 目录
+   *
+   * 在 loadAll() 后调用，结果传给 SkillLoader.addDirs() 完成联邦注入。
+   */
+  getDiscoveredSkillDirs(): string[] {
+    return [...this.discoveredSkillDirs]
   }
 
   // ─────────────────────────────────────────
@@ -286,7 +308,10 @@ export class ExtensionManager {
         definition: {
           name,
           description: manifest.description ?? manifest.name ?? name,
-          parameters: manifest.toolDefinition?.parameters ?? { type: 'object' as const, properties: {} },
+          parameters: manifest.toolDefinition?.parameters ?? {
+            type: 'object' as const,
+            properties: {},
+          },
         },
       }
     }
@@ -322,5 +347,14 @@ export class ExtensionManager {
 
     this.services.set(manifest.id, runner)
     logger.debug(`Service 已注册 (未启动): ${manifest.id}`)
+  }
+
+  /** 检查 Extension 目录下是否有 skills/ 子目录 */
+  private discoverSkillsInExtension(extDirPath: string): void {
+    const skillsDir = path.join(extDirPath, 'skills')
+    if (existsSync(skillsDir) && statSync(skillsDir).isDirectory()) {
+      this.discoveredSkillDirs.push(skillsDir)
+      logger.debug(`发现 Extension skills 目录: ${skillsDir}`)
+    }
   }
 }

@@ -1,6 +1,6 @@
 {
   "name": "@perocore/backend",
-  "version": "0.9.0",
+  "version": "0.9-rc1",
   "private": true,
   "type": "module",
   "main": "./src/app.ts",
@@ -20,14 +20,16 @@
     "@hono/zod-validator": "^0.7.6",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@perocore/shared": "workspace:*",
+    "@types/ws": "^8.18.1",
     "better-sqlite3": "^11.9.0",
     "consola": "^3.4.2",
     "drizzle-orm": "^0.44.0",
-    "edge-tts": "^1.0.1",
     "hono": "^4.7.0",
+    "msedge-tts": "^2.0.5",
     "nunjucks": "^3.2.4",
     "triviumdb": "^0.5.1",
     "uuid": "^14.0.0",
+    "ws": "^8.20.0",
     "zod": "^3.25.76"
   },
   "optionalDependencies": {

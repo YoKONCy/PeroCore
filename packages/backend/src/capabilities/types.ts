@@ -34,6 +34,14 @@ export interface SkillManifest {
   description: string
   /** 依赖的工具 ID 列表 (load_skill 时临时解锁) */
   requiredTools: string[]
+  /** 分类标签 (如 "productivity", "creative") */
+  category: string
+  /** 标签列表 (便于搜索和筛选) */
+  tags: string[]
+  /** 可接收的参数定义 (参数名 → 描述) */
+  parameters: Record<string, string>
+  /** 依赖的子 Skill ID 列表 (嵌套调用) */
+  dependsOnSkills: string[]
 }
 
 /** 解析后的完整能力上下文 (Gate 输出) */

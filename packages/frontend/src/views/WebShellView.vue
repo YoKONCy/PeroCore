@@ -7,8 +7,6 @@
  *
  * Electron 版不使用此组件（有自己的窗口管理体系）。
  *
- * UI 风格复用 DashboardView 的侧边栏设计语言。
- *
  * @see _docs_/07_DUAL_DEPLOYMENT.md
  */
 import { ref, computed } from 'vue'
@@ -55,7 +53,6 @@ const navGroups: ShellNavGroup[] = [
 /** 当前活跃的导航项 */
 const activeNavId = computed(() => {
   const path = route.path
-  // 精确匹配子路由
   const matched = navGroups
     .flatMap((g) => g.items)
     .find((item) => path === item.path || (item.path !== '/app' && path.startsWith(item.path)))
@@ -81,62 +78,90 @@ async function handleRefresh() {
 </script>
 
 <template>
-  <div class="web-shell">
+  <div class="flex w-full h-full overflow-hidden bg-white">
     <!-- 侧边栏 -->
-    <aside class="shell-sidebar">
-      <!-- 品牌 (复用 Dashboard 设计语言) -->
-      <div class="shell-brand">
-        <div class="shell-brand-icon">
-          <span class="shell-brand-letter">P</span>
+    <aside
+      class="w-60 flex flex-col h-full border-r-2 border-slate-200 bg-slate-50/40 flex-shrink-0"
+    >
+      <!-- 品牌 -->
+      <div class="px-5 pt-6 pb-4 flex items-center gap-3">
+        <div
+          class="w-11 h-11 flex items-center justify-center bg-gradient-to-br from-sky-300 to-sky-600 border-2 border-sky-600 text-white font-black text-lg transition-transform hover:scale-105 hover:rotate-3"
+        >
+          <span class="select-none">P</span>
         </div>
-        <div class="shell-brand-text">
-          <span class="shell-brand-sub">PeroperoChat</span>
-          <span class="shell-brand-title">萌动链接</span>
+        <div class="flex flex-col">
+          <span class="text-[9px] font-bold uppercase tracking-wider text-slate-400">
+            PeroperoChat
+          </span>
+          <span
+            class="text-base font-black bg-gradient-to-br from-slate-800 to-sky-500 bg-clip-text text-transparent"
+          >
+            萌动链接
+          </span>
         </div>
       </div>
 
       <!-- 导航菜单 -->
-      <nav class="shell-nav">
-        <div v-for="(group, gIdx) in navGroups" :key="gIdx" class="shell-nav-group">
-          <div v-if="group.title" class="shell-nav-group-title">
-            <span class="shell-nav-dot" />
+      <nav class="flex-1 overflow-y-auto px-3 shell-scrollbar">
+        <div v-for="(group, gIdx) in navGroups" :key="gIdx" class="mb-4">
+          <div
+            v-if="group.title"
+            class="flex items-center gap-2 px-2 pb-2 text-[10px] font-bold text-slate-400 uppercase tracking-[0.15em]"
+          >
+            <span class="w-1 h-1 bg-slate-400 flex-shrink-0" />
             <span>{{ group.title }}</span>
-            <div class="shell-nav-line" />
+            <div class="flex-1 h-px bg-slate-200" />
           </div>
 
           <button
             v-for="item in group.items"
             :key="item.id"
-            :class="['shell-nav-item', { 'shell-nav-item-active': activeNavId === item.id }]"
+            :class="[
+              'w-full flex items-center gap-3 px-3 py-2.5 text-[13px] font-bold bg-none border-2 border-transparent cursor-pointer relative transition-all mb-1',
+              activeNavId === item.id
+                ? 'bg-white text-sky-600 border-sky-100 shadow-sm shadow-sky-100/30 translate-x-0.5'
+                : 'text-slate-500 hover:bg-white hover:text-sky-500 hover:translate-x-0.5',
+            ]"
             @click="navigateTo(item)"
           >
-            <div v-if="activeNavId === item.id" class="shell-nav-indicator" />
-            <PixelIcon :name="item.icon" size="sm" class="shell-nav-icon" />
+            <div
+              v-if="activeNavId === item.id"
+              class="absolute left-0 top-2 bottom-2 w-[3px] bg-sky-500"
+            />
+            <PixelIcon :name="item.icon" size="sm" class="transition-colors" />
             <span>{{ item.label }}</span>
           </button>
         </div>
       </nav>
 
       <!-- 底部状态 -->
-      <div class="shell-sidebar-footer">
-        <div class="shell-status">
-          <span class="shell-status-dot" />
-          <div class="shell-status-text">
-            <span class="shell-status-label">Docker</span>
-            <span class="shell-status-value">SYSTEM ONLINE</span>
+      <div class="p-3 border-t-2 border-slate-200">
+        <div class="flex items-center gap-2 p-2 border border-slate-200 bg-white">
+          <span class="w-2.5 h-2.5 bg-emerald-500 flex-shrink-0 shell-pulse" />
+          <div class="flex-1 flex flex-col">
+            <span class="text-[10px] font-bold uppercase text-slate-400">Docker</span>
+            <span class="text-[10px] font-bold text-emerald-600">SYSTEM ONLINE</span>
           </div>
           <PTooltip content="刷新" placement="top">
-            <button class="shell-refresh-btn" @click="handleRefresh">
+            <button
+              class="p-1.5 bg-white border-2 border-slate-200 text-slate-400 cursor-pointer transition-all hover:border-sky-300 hover:text-sky-500"
+              @click="handleRefresh"
+            >
               <PixelIcon name="refresh" size="xs" :animation="isRefreshing ? 'spin' : ''" />
             </button>
           </PTooltip>
         </div>
-        <div class="shell-version">v{{ appVersion }} · PeroCore-TS</div>
+        <div
+          class="mt-2 text-center text-[9px] font-bold text-slate-400 tracking-wider uppercase opacity-60"
+        >
+          v{{ appVersion }} · PeroCore-TS
+        </div>
       </div>
     </aside>
 
     <!-- 主内容区：嵌套路由出口 -->
-    <main class="shell-main">
+    <main class="flex-1 overflow-y-auto overflow-x-hidden shell-main-scrollbar">
       <router-view v-slot="{ Component }">
         <keep-alive :include="['DashboardView']" :max="3">
           <component :is="Component" />
@@ -147,234 +172,20 @@ async function handleRefresh() {
 </template>
 
 <style scoped>
-.web-shell {
-  display: flex;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  background: var(--color-bg-primary);
-}
-
-/* ── 侧边栏 (复用 DashboardView 设计语言) ── */
-
-.shell-sidebar {
-  width: 240px;
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  border-right: 2px solid var(--color-border);
-  background: var(--color-bg-secondary, rgba(255, 255, 255, 0.4));
-  flex-shrink: 0;
-}
-
-/* 品牌 */
-.shell-brand {
-  padding: 24px 20px 16px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.shell-brand-icon {
-  width: 44px;
-  height: 44px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, var(--color-sky-hover), var(--color-sky-shadow));
-  border: 2px solid var(--color-sky-shadow);
-  color: white;
-  font-weight: 800;
-  font-size: 18px;
-  transition: transform 0.3s;
-}
-.shell-brand-icon:hover {
-  transform: scale(1.05) rotate(3deg);
-}
-.shell-brand-letter {
-  user-select: none;
-}
-.shell-brand-text {
-  display: flex;
-  flex-direction: column;
-}
-.shell-brand-sub {
-  font-size: 9px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--color-text-muted);
-}
-.shell-brand-title {
-  font-size: 16px;
-  font-weight: 800;
-  background: linear-gradient(135deg, var(--color-text-primary), var(--color-sky-500));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-/* 导航菜单 */
-.shell-nav {
-  flex: 1;
-  overflow-y: auto;
-  padding: 0 12px;
-}
-.shell-nav-group {
-  margin-bottom: 16px;
-}
-.shell-nav-group-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 8px 8px;
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--color-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.15em;
-}
-.shell-nav-dot {
-  width: 4px;
-  height: 4px;
-  background: var(--color-text-muted);
-  flex-shrink: 0;
-}
-.shell-nav-line {
-  flex: 1;
-  height: 1px;
-  background: var(--color-border);
-}
-
-.shell-nav-item {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--color-text-secondary);
-  background: none;
-  border: 2px solid transparent;
-  cursor: pointer;
-  position: relative;
-  transition: all 0.2s;
-  margin-bottom: 4px;
-}
-.shell-nav-item:hover {
-  background: var(--color-bg-primary);
-  color: var(--color-sky-500);
-  transform: translateX(2px);
-}
-
-.shell-nav-item-active {
-  background: var(--color-bg-primary);
-  color: var(--color-sky-shadow);
-  border-color: var(--color-sky-100, rgba(56, 189, 248, 0.2));
-  box-shadow: 0 2px 8px rgba(56, 189, 248, 0.08);
-  transform: translateX(2px);
-}
-
-.shell-nav-indicator {
-  position: absolute;
-  left: 0;
-  top: 8px;
-  bottom: 8px;
-  width: 3px;
-  background: var(--color-sky-500);
-}
-
-.shell-nav-icon {
-  transition: color 0.15s;
-}
-
-/* 底部 */
-.shell-sidebar-footer {
-  padding: 12px;
-  border-top: 2px solid var(--color-border);
-}
-.shell-status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px;
-  border: 1px solid var(--color-border);
-  background: var(--color-bg-primary);
-}
-.shell-status-dot {
-  width: 10px;
-  height: 10px;
-  background: var(--color-emerald-face, #22c55e);
-  flex-shrink: 0;
-  animation: shell-pulse 2s infinite;
-}
-.shell-status-text {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-}
-.shell-status-label {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  color: var(--color-text-muted);
-}
-.shell-status-value {
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--color-emerald-shadow, #16a34a);
-}
-.shell-refresh-btn {
-  padding: 6px;
-  background: var(--color-bg-primary);
-  border: 2px solid var(--color-border);
-  color: var(--color-text-muted);
-  cursor: pointer;
-  transition: all 0.15s;
-}
-.shell-refresh-btn:hover {
-  border-color: var(--color-sky-hover);
-  color: var(--color-sky-500);
-}
-.shell-version {
-  margin-top: 8px;
-  text-align: center;
-  font-size: 9px;
-  font-weight: 700;
-  color: var(--color-text-muted);
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  opacity: 0.6;
-}
-
-/* 主内容 */
-.shell-main {
-  flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
-}
-
-/* 滚动条 */
-.shell-nav::-webkit-scrollbar {
+/* 像素风滚动条 */
+.shell-scrollbar::-webkit-scrollbar,
+.shell-main-scrollbar::-webkit-scrollbar {
   width: 4px;
 }
-.shell-nav::-webkit-scrollbar-track {
-  background: transparent;
-}
-.shell-nav::-webkit-scrollbar-thumb {
-  background: var(--color-sky-light);
-}
-.shell-main::-webkit-scrollbar {
-  width: 4px;
-}
-.shell-main::-webkit-scrollbar-track {
-  background: transparent;
-}
-.shell-main::-webkit-scrollbar-thumb {
-  background: var(--color-sky-light);
+
+.shell-scrollbar::-webkit-scrollbar-thumb,
+.shell-main-scrollbar::-webkit-scrollbar-thumb {
+  background: #bae6fd;
+  border-radius: 0;
 }
 
-@keyframes shell-pulse {
+/* 在线脉冲 */
+@keyframes shell-pulse-anim {
   0%,
   100% {
     opacity: 0.4;
@@ -382,5 +193,9 @@ async function handleRefresh() {
   50% {
     opacity: 1;
   }
+}
+
+.shell-pulse {
+  animation: shell-pulse-anim 2s infinite;
 }
 </style>

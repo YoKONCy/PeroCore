@@ -134,6 +134,29 @@ export class ConversationLogService {
     return ok
   }
 
+  /**
+   * 通过消息 ID 级联删除整对消息 (用户+助手)
+   *
+   * 先查找该消息的 pairId，再删除同 pair 的所有消息。
+   * 如果消息没有 pairId，则仅删除单条消息。
+   *
+   * @returns 实际删除的消息数量
+   */
+  async deleteMessagePair(id: number): Promise<number> {
+    const msg = await this.logRepo.findById(id)
+    if (!msg) return 0
+
+    if (msg.pairId) {
+      const count = await this.logRepo.deleteByPairId(msg.pairId)
+      logger.debug(`对话对已删除: pairId=${msg.pairId}, 共 ${count} 条`)
+      return count
+    }
+
+    // 没有 pairId 的消息，退化为单条删除
+    const ok = await this.logRepo.deleteById(id)
+    return ok ? 1 : 0
+  }
+
   /** 删除指定 Agent 的所有会话日志 */
   async deleteAllSessions(agentId: string): Promise<number> {
     const logs = await this.logRepo.query({ agentId, limit: 100000 })

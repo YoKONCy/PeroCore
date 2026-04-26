@@ -22,7 +22,7 @@ services:
     container_name: perocore-backend
     restart: unless-stopped
     ports:
-      - "${PERO_PORT:-9120}:9120"
+      - '${PERO_PORT:-9120}:9120'
     volumes:
       - pero-data:/app/data
     environment:
@@ -38,7 +38,7 @@ services:
       - PEROCORE_AUTH_TOKEN=${PEROCORE_AUTH_TOKEN:-}
     # 健康检查 (15_DEVOPS_OPERATIONS.md §5.2)
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9120/api/health"]
+      test: ['CMD', 'curl', '-f', 'http://localhost:9120/api/health']
       interval: 30s
       timeout: 5s
       retries: 3
@@ -52,7 +52,7 @@ services:
     container_name: perocore-frontend
     restart: unless-stopped
     ports:
-      - "3000:80"
+      - '3000:80'
     depends_on:
       backend:
         condition: service_healthy

@@ -168,6 +168,42 @@ export class NapcatAdapter extends AbstractSocialAdapter {
       logger.info('已注册默认 QQ 连接 (无 X-Self-ID)')
     }
     this.emitConnected()
+
+    // 异步获取 Bot 自身信息 (昵称、QQ号等)
+    this.fetchBotInfo(selfId).catch((err) => {
+      logger.warn(`获取 Bot 信息失败 (非致命): ${err}`)
+    })
+  }
+
+  /** 获取 Bot 自身信息并缓存 */
+  private async fetchBotInfo(selfId?: string): Promise<void> {
+    try {
+      const resp = (await this.callApi('get_login_info', {}, 5000)) as Record<
+        string,
+        unknown
+      > | null
+      if (resp && resp.status === 'ok') {
+        const data = resp.data as Record<string, unknown> | undefined
+        if (data) {
+          const botId = String(data.user_id ?? selfId ?? '')
+          this.botInfos.set(botId, {
+            user_id: botId,
+            nickname: data.nickname ?? '',
+          })
+          logger.info(`Bot 信息已获取: ${data.nickname} (${botId})`)
+        }
+      }
+    } catch {
+      // get_login_info 超时/不支持, 使用 selfId 兜底
+      if (selfId && !this.botInfos.has(selfId)) {
+        this.botInfos.set(selfId, { user_id: selfId })
+      }
+    }
+  }
+
+  /** 获取所有已缓存的 Bot 信息 (供外部使用) */
+  getBotInfos(): Map<string, Record<string, unknown>> {
+    return this.botInfos
   }
 
   /** 注销连接 */

@@ -14,12 +14,6 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false
   },
-  "include": [
-    "main/**/*.ts",
-    "preload/**/*.ts"
-  ],
-  "exclude": [
-    "node_modules",
-    "dist-electron"
-  ]
+  "include": ["main/**/*.ts", "preload/**/*.ts"],
+  "exclude": ["node_modules", "dist-electron"]
 }

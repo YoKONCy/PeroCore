@@ -30,8 +30,8 @@
   --color-sky-face: #38bdf8;
   --color-sky-light: #7dd3fc;
   --color-sky-hover: #0ea5e9;
-  --color-sky-50: rgba(56, 189, 248, 0.05);
-  --color-sky-100: rgba(56, 189, 248, 0.12);
+  --color-sky-50: #f0f9ff;
+  --color-sky-100: #e0f2fe;
 
   /* Pink 色系 (粉红, 强调色) */
   --color-pink-outline: #831843;
@@ -65,6 +65,18 @@
   --color-red-face: #ef4444;
   --color-red-light: #fecaca;
   --color-red-400: #f87171;
+
+  /* Purple 色系 (紫色, 变体卡片) */
+  --color-purple-outline: #581c87;
+  --color-purple-shadow: #7c3aed;
+  --color-purple-face: #a855f7;
+  --color-purple-light: #e9d5ff;
+
+  /* Orange 色系 (橙色, 变体卡片) */
+  --color-orange-outline: #7c2d12;
+  --color-orange-shadow: #ea580c;
+  --color-orange-face: #fb923c;
+  --color-orange-light: #fed7aa;
 
   /* Yellow 色系 (黄色, 辅助标注) */
   --color-yellow-100: rgba(234, 179, 8, 0.1);
@@ -104,6 +116,7 @@
   --color-bg-page: transparent;
   --color-bg-overlay: rgba(0, 0, 0, 0.3);
   --color-bg-hover: rgba(56, 189, 248, 0.06);
+  --launcher-bg: #f0f9ff; /* sky-50 — Launcher 专用不透明背景 (Electron transparent 窗口兼容) */
 
   /* ── 文字 ── */
   --color-text-primary: #0f172a;
@@ -138,7 +151,8 @@
 
   /* ── 字体 ── */
   --font-sans:
-    'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Segoe UI', system-ui, sans-serif;
+    'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Segoe UI', system-ui, 'Zpix',
+    'DotGothic16', 'Helvetica Neue', Helvetica, Arial, sans-serif;
   --font-pixel: 'Zpix', 'DotGothic16', monospace;
 
   /* ── 圆角 (像素风一般不用, 备用) ── */

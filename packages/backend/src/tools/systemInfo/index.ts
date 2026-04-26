@@ -23,7 +23,7 @@ const logger = createLogger('SystemInfo')
 
 // ── 窗口管理提供者抽象 ──
 
-/** 窗口管理提供者接口 (可选注入) */
+/** 窗口管理提供者接口 (可选) */
 export interface WindowProvider {
   /** 获取活跃窗口列表 */
   getActiveWindows(): Promise<WindowInfo[]>
@@ -40,13 +40,17 @@ export interface WindowInfo {
   handle?: number
 }
 
-/** 全局引用 */
-let windowProvider: WindowProvider | null = null
+/** 工厂函数: 供 tools/index.ts 调用 (闭包内无模块级可变状态) */
+let _windowProvider: WindowProvider | null = null
 
-/** 注入窗口管理提供者 */
-export function injectWindowProvider(provider: WindowProvider): void {
-  windowProvider = provider
-  logger.info('窗口管理提供者已注入')
+/** 设置 WindowProvider（仅供向后兼容，建议使用 createSystemInfoTools） */
+export function setWindowProvider(provider: WindowProvider | null): void {
+  _windowProvider = provider
+}
+
+/** 获取当前 WindowProvider (工具内部使用) */
+export function getWindowProvider(): WindowProvider | null {
+  return _windowProvider
 }
 
 // ── get_system_info ──
@@ -173,12 +177,12 @@ export const getActiveWindowsTool: BuiltinTool = {
 
   async execute() {
     // 优先使用注入的 WindowProvider
-    if (windowProvider) {
+    if (_windowProvider) {
       try {
-        const windows = await windowProvider.getActiveWindows()
+        const windows = await _windowProvider.getActiveWindows()
         return JSON.stringify({
           success: true,
-          windows: windows.map((w) => `[${w.processName}] ${w.title}`),
+          windows: windows.map((w: WindowInfo) => `[${w.processName}] ${w.title}`),
           total: windows.length,
         })
       } catch (err) {
@@ -247,9 +251,9 @@ export const activateWindowTool: BuiltinTool = {
     }
 
     // 优先使用注入的 WindowProvider
-    if (windowProvider) {
+    if (_windowProvider) {
       try {
-        const result = await windowProvider.activateWindow(target)
+        const result = await _windowProvider.activateWindow(target)
         return JSON.stringify({ success: true, message: result })
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err)

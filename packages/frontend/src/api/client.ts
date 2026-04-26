@@ -10,8 +10,8 @@ import { transport } from './transport'
 import { ApiError } from './errors'
 import type { ApiResponse } from '@perocore/shared'
 
-/** 成功码集合 */
-const SUCCESS_CODES = new Set(['OK', 'CREATED', 'ACCEPTED'])
+/** 成功码集合 (对齐 S02_API_SPEC §5.1) */
+const SUCCESS_CODES = new Set(['OK', 'CREATED', 'ACCEPTED', 'NOT_CONFIGURED'])
 
 function isSuccessCode(code: string): boolean {
   return SUCCESS_CODES.has(code)

@@ -47,7 +47,8 @@
 ### 3.1 `<keep-alive>` 白名单
 
 - **原则**：只缓存切换频繁且初始化开销大的页面。
-- **白名单**：`['DashboardView']`
+- **Electron 白名单**：`['DashboardView']`
+- **Browser/Docker 例外**：`WebShellView` 作为 Web 容器入口承载浏览器模式的长生命周期 Shell 状态，顶层允许在 Browser/Docker 模式缓存 `['WebShellView']`。
 - **必须销毁**：`Pet3DView` (释放 WebGL)、`LauncherView` (停止下载计时器)、`ChatInterface` (断开 SSE)
 
 ### 3.2 响应式性能
@@ -66,6 +67,7 @@
 ### 3.4 视界优化 (IntersectionObserver)
 
 不使用复杂的虚拟滚动，采用 **"不可见暂停"** 策略：
+
 - 监测每条消息是否在视口内。
 - **不可见时**：暂停消息内的 Web Animations、CSS 动效、Video/Audio、Canvas 循环。
 - **可见时**：恢复运行。
@@ -81,7 +83,9 @@
 // composables/chat/useChatFlow.ts (Logic 层)
 export function useChatFlow() {
   const messages = shallowRef<ChatMessage[]>([])
-  async function sendMessage(text: string) { /* ... */ }
+  async function sendMessage(text: string) {
+    /* ... */
+  }
   return { messages, sendMessage }
 }
 ```
@@ -118,90 +122,148 @@ const Pet3DView = () => import('@/views/Pet3DView.vue') // 3D 组件必须异步
 
 ## 6. CSS 样式体系
 
-### 6.1 架构分层
+### 6.1 核心原则：Tailwind-First
+
+**Tailwind 是默认选择，scoped CSS 是例外。**
+
+所有组件的布局、间距、颜色、字体、交互状态优先使用 Tailwind utility class 直接写在模板中。只有以下场景才使用 scoped CSS：
+
+- 复杂动画 (`@keyframes`)
+- 伪元素 (`::before`, `::after`)
+- 滚动条自定义 (`::-webkit-scrollbar`)
+- WebGL/Canvas 容器的特殊布局
+
+**禁止的做法**：在 `<style scoped>` 中用自定义类名重新发明 Tailwind 已经提供的 utility（如 `display: flex`、`padding: 8px`、`color: xxx`）。
+
+### 6.2 架构分层
 
 ```
-┌─────────────────────────────────────────────┐
-│  TailwindCSS 4 (utility 工具类)              │
-│  布局/间距/排版/响应式: flex, p-4, text-lg   │
-└──────────────────┬──────────────────────────┘
-                   │
-┌──────────────────▼──────────────────────────┐
-│  tokens.css (CSS Variables 设计令牌)         │
-│  单一真相源: --sky-face, --pink-outline      │
-└──────────────────┬──────────────────────────┘
-                   │
-┌──────────────────▼──────────────────────────┐
-│  style.css (@theme 桥接 + 像素风组件类)      │
-│  pixel-border-*, pixel-btn-*, 动画           │
-└──────────────────┬──────────────────────────┘
-                   │
-┌──────────────────▼──────────────────────────┐
-│  <style scoped> (组件专属样式)               │
-│  组件级别的布局细节                           │
-└─────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│  Tailwind Utilities (模板 class="..." 中直接使用)        │
+│  ★ 主力：布局/间距/颜色/字体/交互/响应式 全部在这里      │
+└──────────────────┬──────────────────────────────────────┘
+                   │ 混合使用
+┌──────────────────▼──────────────────────────────────────┐
+│  全局像素类 (style.css 中定义)                           │
+│  pixel-border-*, pixel-btn-*, press-effect, font-pixel  │
+│  ★ 像素风视觉语言，直接在模板 class 中引用               │
+└──────────────────┬──────────────────────────────────────┘
+                   │ 支撑
+┌──────────────────▼──────────────────────────────────────┐
+│  tokens.css (CSS Variables)                              │
+│  颜色令牌单一真相源 → 通过 @theme 桥接到 Tailwind        │
+└──────────────────┬──────────────────────────────────────┘
+                   │ 仅在必要时
+┌──────────────────▼──────────────────────────────────────┐
+│  <style scoped> (例外场景)                               │
+│  仅用于: @keyframes / 伪元素 / 滚动条 / 复杂选择器       │
+└─────────────────────────────────────────────────────────┘
 ```
 
-### 6.2 TailwindCSS 使用规范
+### 6.3 模板写法示例
+
+```vue
+<!-- ✅ 正确：Tailwind + 全局像素类混合 -->
+<div class="flex items-center gap-3 p-4 bg-white pixel-border-sky press-effect">
+  <span class="text-sm font-bold text-slate-600 font-pixel">标题</span>
+</div>
+
+<!-- ❌ 错误：用 scoped CSS 重写同样效果 -->
+<div class="my-card">
+  <span class="my-card-title">标题</span>
+</div>
+<style scoped>
+.my-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+}
+.my-card-title {
+  font-size: 14px;
+  font-weight: 700;
+}
+</style>
+```
+
+### 6.4 Tailwind 使用范围
 
 #### ✅ 允许使用
 
-| 用途 | 示例 | 说明 |
-|---|---|---|
-| 布局 | `flex`, `grid`, `items-center` | Flexbox/Grid 布局 |
-| 间距 | `p-4`, `m-2`, `gap-3` | 内外边距 |
-| 排版 | `text-lg`, `font-bold`, `tracking-wide` | 字号/字重/字间距 |
-| 尺寸 | `w-10`, `h-10`, `max-w-xs` | 宽高约束 |
-| 显隐 | `hidden`, `block`, `inline-flex` | Display 切换 |
-| 定位 | `relative`, `absolute`, `z-10` | 定位上下文 |
-| 溢出 | `overflow-hidden`, `truncate` | 溢出控制 |
-| 过渡 | `transition-all`, `duration-300` | 过渡动画 |
-| 原生色板 | `bg-white`, `bg-slate-50`, `text-slate-700` | Tailwind 标准色板 |
-| 语义令牌色 | `bg-sky-face`, `text-pink-shadow` | @theme 桥接的自定义色 |
-| 交互修饰 | `hover:bg-sky-50`, `group-hover:scale-105` | 伪类状态 |
-| 响应式 | `md:grid-cols-2`, `sm:hidden` | 响应式断点 |
+| 用途   | 示例                                                                 |
+| ------ | -------------------------------------------------------------------- |
+| 布局   | `flex`, `grid`, `items-center`, `justify-between`                    |
+| 间距   | `p-4`, `m-2`, `gap-3`, `space-y-2`                                   |
+| 排版   | `text-lg`, `font-bold`, `font-pixel`, `tracking-wide`                |
+| 尺寸   | `w-10`, `h-10`, `min-w-0`, `max-w-xs`                                |
+| 颜色   | `bg-white`, `bg-sky-50`, `text-slate-700`, `bg-sky-face`             |
+| 边框   | `border`, `border-sky-100`, `rounded-xl`                             |
+| 阴影   | `shadow-md`, `shadow-sky-100/50`                                     |
+| 交互   | `hover:bg-sky-50`, `group-hover:scale-105`, `active:translate-y-0.5` |
+| 过渡   | `transition-all`, `duration-300`                                     |
+| 响应式 | `md:grid-cols-2`, `sm:hidden`                                        |
+| 条件   | `:class="[cond ? 'bg-white' : 'bg-transparent']"`                    |
 
-#### ❌ 严禁使用
+#### ❌ 禁止
 
-| 禁止行为 | 原因 |
-|---|---|
-| `bg-[#ff00ff]` arbitrary values 硬编码颜色 | 必须通过 tokens.css 定义 |
-| `w-[137px]` arbitrary values 硬编码尺寸 | 优先使用标准间距或 scoped CSS |
-| `@apply` 在 scoped style 中大量使用 | 与 Vanilla CSS 架构冲突 |
-| 用 Tailwind 替代像素风组件类 | `pixel-border-sky`, `pixel-btn-pink` 等必须使用自定义 CSS |
-| 在 `tailwind.config` 中重复定义 tokens.css 已有的变量 | 单一真相源原则 |
+| 禁止行为                                       | 原因                                                 |
+| ---------------------------------------------- | ---------------------------------------------------- |
+| `bg-[#ff00ff]` 硬编码颜色                      | 必须通过 tokens.css → @theme 桥接                    |
+| `w-[137px]` 硬编码尺寸                         | 用标准尺寸或极端情况 scoped CSS                      |
+| `@apply` 在 scoped style 中大量使用            | 失去了 Tailwind 的优势                               |
+| scoped CSS 重写 Tailwind utility               | 不要用 `.card { display: flex }` 代替 `class="flex"` |
+| 用 Tailwind `box-shadow` 替代 `pixel-border-*` | 像素风类是项目核心视觉，不可替代                     |
 
-#### 🔶 谨慎使用
-
-| 场景 | 指导 |
-|---|---|
-| 条件样式过多 | 超过 5 个 Tailwind class 含交互修饰符时，考虑提取为 scoped CSS |
-| 组件级颜色变体 | 优先用 tokens.css 语义变量 + scoped CSS，而非 Tailwind 色板 |
-
-### 6.3 色彩使用优先级
+### 6.5 色彩使用优先级
 
 ```
-1. tokens.css 语义变量 (var(--sky-face), var(--color-primary))
-   ↓ 如果不够用
-2. @theme 桥接色 (bg-sky-face, text-pink-outline)
-   ↓ 如果是通用色
-3. Tailwind 原生色板 (bg-white, text-slate-700, bg-emerald-50)
-   ↓ 禁止跳到这里
-4. ❌ 硬编码 (bg-[#ff0000])
+1. @theme 桥接色 (bg-sky-face, text-pink-shadow, border-sky-100)
+   ↓ 通用中性色
+2. Tailwind 原生色板 (bg-white, text-slate-700, bg-emerald-50)
+   ↓ 极端情况需要自定义
+3. tokens.css var() 在 scoped CSS 中 (仅 @keyframes / 伪元素等)
+   ↓ 禁止
+4. ❌ 硬编码 (bg-[#ff0000], color: #xxx)
 ```
 
-### 6.4 像素风组件类 (pixel-*)
+### 6.6 像素风全局类 (pixel-\*)
 
-以下自定义 CSS 类是项目核心视觉语言，**不可用 Tailwind 替代**：
+以下定义在 `style.css` 中的类是项目核心视觉语言，**直接在模板 class 中引用**：
 
-- 像素边框系列: `pixel-border-sm`, `pixel-border-sky`, `pixel-border-pink` 等
-- 像素按钮系列: `pixel-btn-sky`, `pixel-btn-pink`, `pixel-btn-yellow` 等
-- 像素卡片: `pixel-card`, `pixel-card-moe`
-- 像素亚克力: `pixel-glass`
-- 像素网格: `pixel-grid-overlay`
-- 像素动画: `animate-pixel-bounce`, `animate-pixel-float`, `animate-pixel-shake` 等
-- 交互效果: `pixel-hover-lift`, `press-effect`, `bouncy-hover`
+| 类别     | 类名                                                                                                     | 用途                      |
+| -------- | -------------------------------------------------------------------------------------------------------- | ------------------------- |
+| 像素边框 | `pixel-border-sm`, `pixel-border-sky`, `pixel-border-pink`, `pixel-border-emerald`, `pixel-border-amber` | FC 风多层 box-shadow 边框 |
+| 像素按钮 | `pixel-btn-sky`, `pixel-btn-pink`, `pixel-btn-yellow`                                                    | 完整像素风按钮样式        |
+| 像素卡片 | `pixel-card`, `pixel-card-moe`                                                                           | 像素风卡片容器            |
+| 像素字体 | `font-pixel`                                                                                             | Zpix/DotGothic16 像素字体 |
+| 像素网格 | `pixel-grid-overlay`                                                                                     | 4px 网格纹理叠加层        |
+| 交互效果 | `press-effect`, `bouncy-hover`, `pixel-hover-lift`                                                       | 按下/悬浮/抬升效果        |
+| 像素动画 | `animate-pixel-bounce`, `animate-pixel-float`, `animate-pixel-shake`                                     | 像素步进动画              |
+
+### 6.7 scoped CSS 保留场景
+
+仅在以下场景使用 `<style scoped>`：
+
+```vue
+<style scoped>
+/* ✅ 动画关键帧 */
+@keyframes fade-slide { ... }
+.fade-slide-enter-active { ... }
+
+/* ✅ 伪元素 */
+.indicator::before { content: ''; ... }
+
+/* ✅ 滚动条 */
+.scrollarea::-webkit-scrollbar { width: 4px; }
+
+/* ✅ 多层嵌套选择器（Tailwind 无法表达） */
+.timeline-item:last-child { border-bottom: none; }
+
+/* ❌ 禁止：重写 Tailwind utility */
+.my-box { display: flex; padding: 8px; color: red; }
+</style>
+```
 
 ---
 
-*本文档由 Carola 整理，适用于 PeroCore-TS 前端架构规范。*
+_本文档由 Carola 整理，适用于 PeroCore-TS 前端架构规范。_

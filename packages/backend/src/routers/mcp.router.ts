@@ -10,12 +10,11 @@
 
 import { Hono } from 'hono'
 import type { AppContext } from '../container'
-import { McpConfigRepository } from '../repositories/mcp.repo'
 import { AppError } from '../lib/appError'
 
 export function createMcpRouter(ctx: AppContext) {
   const router = new Hono()
-  const mcpRepo = new McpConfigRepository(ctx.db)
+  const mcpRepo = ctx.mcpRepo
 
   // ── GET /api/mcp/configs — 获取所有 MCP 配置 ──
   router.get('/configs', async (c) => {
@@ -142,6 +141,68 @@ export function createMcpRouter(ctx: AppContext) {
     }
     const tools = ctx.mcpManager.getAllTools()
     return c.json({ code: 'OK', message: '获取成功', data: tools })
+  })
+
+  // ── GET /api/mcp/skills — 获取所有已加载的 Skill 清单 ──
+  router.get('/skills', async (c) => {
+    const manifests = ctx.skillLoader.getAllManifests()
+    return c.json({ code: 'OK', message: '获取成功', data: manifests })
+  })
+
+  // ── GET /api/mcp/skills/:id/content — 获取 Skill 的完整内容 (L2) ──
+  router.get('/skills/:id/content', async (c) => {
+    const skillId = c.req.param('id')
+    const content = ctx.skillLoader.loadSkillContent(skillId)
+    if (!content) {
+      throw new AppError('NOT_FOUND', { message: `Skill "${skillId}" 不存在` })
+    }
+    return c.json({ code: 'OK', message: '获取成功', data: { id: skillId, content } })
+  })
+
+  // ── POST /api/mcp/skills/reload — 重新扫描所有 Skill 目录 ──
+  router.post('/skills/reload', async (c) => {
+    ctx.skillLoader.reloadAll()
+    const manifests = ctx.skillLoader.getAllManifests()
+    return c.json({
+      code: 'OK',
+      message: `已重新加载 ${manifests.length} 个 Skill`,
+      data: manifests,
+    })
+  })
+
+  // ── POST /api/mcp/skills/import — 导入本地 Skill 文件夹 ──
+  router.post('/skills/import', async (c) => {
+    const body = await c.req.json<{ sourcePath: string }>()
+    const sourcePath = body.sourcePath?.trim()
+
+    if (!sourcePath) {
+      throw new AppError('VALIDATION_ERROR', { message: 'sourcePath 为必填字段' })
+    }
+
+    // 业务逻辑下沉到 SkillLoader (Service 层)
+    const folderName = ctx.skillLoader.importFromPath(sourcePath)
+    const manifests = ctx.skillLoader.getAllManifests()
+
+    return c.json({
+      code: 'OK',
+      message: `Skill "${folderName}" 已成功导入`,
+      data: manifests,
+    })
+  })
+
+  // ── DELETE /api/mcp/skills/:id — 删除用户 Skill ──
+  router.delete('/skills/:id', async (c) => {
+    const skillId = c.req.param('id')
+
+    // 业务逻辑下沉到 SkillLoader (Service 层)
+    ctx.skillLoader.deleteById(skillId)
+    const manifests = ctx.skillLoader.getAllManifests()
+
+    return c.json({
+      code: 'OK',
+      message: `Skill "${skillId}" 已删除`,
+      data: manifests,
+    })
   })
 
   return router

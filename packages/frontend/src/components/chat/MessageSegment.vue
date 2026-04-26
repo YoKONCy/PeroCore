@@ -35,168 +35,72 @@ function toggleCollapse() {
 
 <template>
   <!-- 思考过程块 -->
-  <div v-if="segment.type === 'thinking'" class="msg-segment msg-segment-thinking">
-    <div class="msg-segment-header msg-segment-header-thinking" @click="toggleCollapse">
-      <div class="msg-segment-title">
+  <div v-if="segment.type === 'thinking'" class="my-1 border-2 border-sky-200 bg-sky-50/50">
+    <div
+      class="flex items-center justify-between px-3 py-1.5 cursor-pointer select-none text-xs font-bold text-sky-600 bg-sky-50 border-b border-sky-200 transition-colors hover:bg-sky-100"
+      @click="toggleCollapse"
+    >
+      <div class="flex items-center gap-1.5">
         <PixelIcon name="brain" size="xs" />
         <span>思考过程</span>
       </div>
-      <span :class="['msg-segment-arrow', { 'msg-segment-arrow-open': !isCollapsed }]">▼</span>
+      <span :class="['text-[10px] transition-transform', { 'rotate-180': !isCollapsed }]">▼</span>
     </div>
-    <div v-show="!isCollapsed" class="msg-segment-body msg-segment-body-thinking">
+    <div
+      v-show="!isCollapsed"
+      class="p-3 text-xs font-mono whitespace-pre-wrap leading-relaxed text-sky-700"
+    >
       {{ segment.content }}
     </div>
   </div>
 
   <!-- 内心独白块 -->
-  <div v-else-if="segment.type === 'monologue'" class="msg-segment msg-segment-monologue">
-    <div class="msg-segment-header msg-segment-header-monologue" @click="toggleCollapse">
-      <div class="msg-segment-title">
+  <div v-else-if="segment.type === 'monologue'" class="my-1 border-2 border-pink-200 bg-pink-50/30">
+    <div
+      class="flex items-center justify-between px-3 py-1.5 cursor-pointer select-none text-xs font-bold text-pink-600 bg-pink-50/60 border-b border-pink-200 transition-colors hover:bg-pink-100/60"
+      @click="toggleCollapse"
+    >
+      <div class="flex items-center gap-1.5">
         <PixelIcon name="quote" size="xs" />
         <span>内心独白</span>
       </div>
-      <span :class="['msg-segment-arrow', { 'msg-segment-arrow-open': !isCollapsed }]">▼</span>
+      <span :class="['text-[10px] transition-transform', { 'rotate-180': !isCollapsed }]">▼</span>
     </div>
-    <div v-show="!isCollapsed" class="msg-segment-body msg-segment-body-monologue">
+    <div
+      v-show="!isCollapsed"
+      class="p-3 text-xs whitespace-pre-wrap leading-relaxed text-slate-500"
+    >
       {{ segment.content }}
     </div>
   </div>
 
   <!-- 工具调用块 (NIT) -->
-  <div v-else-if="segment.type === 'tool'" class="msg-segment msg-segment-tool">
-    <div class="msg-segment-header msg-segment-header-tool" @click="toggleCollapse">
-      <div class="msg-segment-title">
+  <div v-else-if="segment.type === 'tool'" class="my-1 border-2 border-sky-300">
+    <div
+      class="flex items-center justify-between px-3 py-1.5 cursor-pointer select-none text-xs font-bold text-white bg-sky-500 transition-colors hover:bg-sky-600"
+      @click="toggleCollapse"
+    >
+      <div class="flex items-center gap-1.5">
         <PixelIcon name="terminal" size="xs" />
         <span>NIT: {{ segment.name }}</span>
       </div>
-      <div class="msg-segment-tool-meta">
-        <span v-if="segment.id" class="msg-segment-tool-id">{{ segment.id }}</span>
-        <span :class="['msg-segment-arrow', { 'msg-segment-arrow-open': !isCollapsed }]">▼</span>
+      <div class="flex items-center gap-2">
+        <span v-if="segment.id" class="font-mono text-[10px] opacity-70">{{ segment.id }}</span>
+        <span :class="['text-[10px] transition-transform', { 'rotate-180': !isCollapsed }]">▼</span>
       </div>
     </div>
-    <div v-show="!isCollapsed" class="msg-segment-body msg-segment-body-tool">
+    <div
+      v-show="!isCollapsed"
+      class="p-3 text-xs font-mono whitespace-pre overflow-x-auto bg-slate-50 text-slate-800"
+    >
       {{ segment.content }}
     </div>
   </div>
 
   <!-- 普通文本 (Markdown) -->
-  <div v-else class="msg-segment-text">
+  <div v-else class="min-h-[1.5em] font-bold text-slate-800">
     <!-- TODO: P4c-1 接入 AsyncMarkdown / useStreamMarkdown -->
     <!-- FIXME: v-html 必须接入 DOMPurify 净化，防止 XSS -->
     <div v-if="segment.content" v-html="segment.content" />
   </div>
 </template>
-
-<style scoped>
-.msg-segment {
-  margin: 4px 0;
-  border: 2px solid var(--color-border);
-}
-
-.msg-segment-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 12px;
-  cursor: pointer;
-  user-select: none;
-  font-size: 12px;
-  font-weight: 700;
-  transition: background 0.15s;
-}
-
-.msg-segment-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.msg-segment-arrow {
-  font-size: 10px;
-  transition: transform 0.2s;
-}
-.msg-segment-arrow-open {
-  transform: rotate(180deg);
-}
-
-/* 思考 */
-.msg-segment-thinking {
-  border-color: var(--color-sky-light);
-  background: var(--color-sky-50, rgba(56, 189, 248, 0.05));
-}
-.msg-segment-header-thinking {
-  color: var(--color-sky-shadow);
-  background: var(--color-sky-50, rgba(56, 189, 248, 0.08));
-  border-bottom: 1px solid var(--color-sky-light);
-}
-.msg-segment-header-thinking:hover {
-  background: var(--color-sky-100, rgba(56, 189, 248, 0.12));
-}
-.msg-segment-body-thinking {
-  padding: 12px;
-  font-size: 12px;
-  font-family: monospace;
-  white-space: pre-wrap;
-  line-height: 1.6;
-  color: var(--color-sky-outline);
-}
-
-/* 独白 */
-.msg-segment-monologue {
-  border-color: var(--color-pink-light, #fbcfe8);
-  background: rgba(244, 114, 182, 0.03);
-}
-.msg-segment-header-monologue {
-  color: var(--color-pink-shadow, #db2777);
-  background: rgba(244, 114, 182, 0.06);
-  border-bottom: 1px solid var(--color-pink-light, #fbcfe8);
-}
-.msg-segment-header-monologue:hover {
-  background: rgba(244, 114, 182, 0.1);
-}
-.msg-segment-body-monologue {
-  padding: 12px;
-  font-size: 12px;
-  white-space: pre-wrap;
-  line-height: 1.6;
-  color: var(--color-text-secondary);
-}
-
-/* 工具调用 */
-.msg-segment-tool {
-  border-color: var(--color-sky-hover);
-}
-.msg-segment-header-tool {
-  color: white;
-  background: var(--color-sky-500);
-}
-.msg-segment-header-tool:hover {
-  background: var(--color-sky-shadow);
-}
-.msg-segment-tool-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.msg-segment-tool-id {
-  font-family: monospace;
-  font-size: 10px;
-  opacity: 0.7;
-}
-.msg-segment-body-tool {
-  padding: 12px;
-  font-size: 12px;
-  font-family: monospace;
-  white-space: pre;
-  overflow-x: auto;
-  background: var(--color-bg-secondary);
-  color: var(--color-text-primary);
-}
-
-/* 普通文本 */
-.msg-segment-text {
-  min-height: 1.5em;
-  font-weight: 700;
-  color: var(--color-text-primary);
-}
-</style>

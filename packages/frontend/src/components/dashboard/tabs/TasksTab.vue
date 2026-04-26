@@ -1,14 +1,20 @@
 <script setup lang="ts">
 /**
- * TasksTab — 任务管理 Tab (F1-4)
+ * TasksTab — 待办提醒 & 后台任务 Tab (F1-4)
  *
- * 展示后台任务列表，支持手动触发。
+ * 上半区：用户通过 Agent 创建的提醒 (reminder/topic/reaction)
+ * 下半区：系统后台定时任务 (cron scheduler)
+ *
  * F3: 已对接 schedulerApi 真实后端。
  */
-import { ref, computed, onMounted } from 'vue'
-import { PixelIcon, PButton } from '../../pixel'
+import { ref, shallowRef, computed, onMounted, watch } from 'vue'
+import { PixelIcon, PButton, PCard, PEmpty } from '../../pixel'
 import { schedulerApi } from '../../../api/modules/schedulerApi'
-import type { SchedulerTask } from '../../../api/modules/schedulerApi'
+import type { SchedulerTask, ReminderItem } from '../../../api/modules/schedulerApi'
+import { useDashboardContext } from '../../../composables/dashboard'
+import { logger } from '../../../lib/logger'
+
+const ctx = useDashboardContext()
 
 // ── 类型 ──
 
@@ -31,34 +37,61 @@ interface TaskItem {
 
 // ── 状态 ──
 
-const tasks = ref<TaskItem[]>([])
-const isLoading = ref(false)
-const showHistory = ref(false)
+/** 用户提醒列表 */
+const reminders = shallowRef<ReminderItem[]>([])
+const isLoadingReminders = ref(false)
+
+/** 系统后台任务列表 */
+const tasks = shallowRef<TaskItem[]>([])
+const isLoadingTasks = ref(false)
+const showCronTasks = ref(false)
 
 const activeTasks = computed(() => tasks.value.filter((t) => t.status === 'running'))
 const idleTasks = computed(() => tasks.value.filter((t) => t.status !== 'running'))
 
 const statusMeta: Record<TaskStatus, { label: string; color: string }> = {
   running: { label: '运行中', color: 'status-running' },
-  idle: { label: '空闲', color: 'status-completed' },
-  completed: { label: '就绪', color: 'status-completed' },
-  error: { label: '有错误', color: 'status-failed' },
+  idle: { label: '空闲', color: 'status-ready' },
+  completed: { label: '就绪', color: 'status-ready' },
+  error: { label: '有错误', color: 'status-error' },
+}
+
+/** 提醒类型元数据 */
+const reminderTypeMeta: Record<string, { label: string; icon: string; color: string }> = {
+  reminder: { label: '提醒', icon: 'bell', color: 'text-amber-500 bg-amber-50' },
+  topic: { label: '话题', icon: 'chat', color: 'text-sky-500 bg-sky-50' },
+  reaction: { label: '反应', icon: 'flash', color: 'text-rose-500 bg-rose-50' },
 }
 
 // ── API 操作 ──
 
-/** 从后端加载任务列表 */
+/** 加载用户提醒列表 */
+async function fetchReminders(): Promise<void> {
+  isLoadingReminders.value = true
+  try {
+    const res = await schedulerApi.reminders()
+    if (res.data) {
+      reminders.value = res.data.items
+    }
+  } catch (e) {
+    logger.error('TasksTab', '加载提醒列表失败', e)
+  } finally {
+    isLoadingReminders.value = false
+  }
+}
+
+/** 加载系统后台任务列表 */
 async function fetchTasks(): Promise<void> {
-  isLoading.value = true
+  isLoadingTasks.value = true
   try {
     const res = await schedulerApi.tasks()
     if (res.data) {
       tasks.value = res.data.items.map(toTaskItem)
     }
   } catch (e) {
-    console.error('[TasksTab] 加载任务列表失败:', e)
+    logger.error('TasksTab', '加载任务列表失败', e)
   } finally {
-    isLoading.value = false
+    isLoadingTasks.value = false
   }
 }
 
@@ -66,10 +99,9 @@ async function fetchTasks(): Promise<void> {
 async function triggerTask(name: string): Promise<void> {
   try {
     await schedulerApi.trigger(name)
-    // 刷新列表
     await fetchTasks()
   } catch (e) {
-    console.error('[TasksTab] 触发任务失败:', e)
+    logger.error('TasksTab', '触发任务失败', e)
   }
 }
 
@@ -107,257 +139,221 @@ function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
 }
 
-onMounted(fetchTasks)
+function formatReminderTime(iso: string): string {
+  const d = new Date(iso)
+  const now = new Date()
+  const diffMs = d.getTime() - now.getTime()
+
+  // 格式化日期 + 时间
+  const dateStr = d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
+  const timeStr = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+
+  // 计算相对时间
+  if (diffMs < 0) return `${dateStr} ${timeStr} (已过期)`
+  const hours = Math.floor(diffMs / 3600_000)
+  const mins = Math.floor((diffMs % 3600_000) / 60_000)
+  if (hours > 24) {
+    const days = Math.floor(hours / 24)
+    return `${dateStr} ${timeStr} (${days}天后)`
+  }
+  if (hours > 0) return `${dateStr} ${timeStr} (${hours}h${mins}m后)`
+  return `${timeStr} (${mins}分钟后)`
+}
+
+// 监听全局刷新
+watch(
+  () => ctx.refreshKey.value,
+  () => {
+    fetchReminders()
+    fetchTasks()
+  },
+)
+
+onMounted(() => {
+  fetchReminders()
+  fetchTasks()
+})
 </script>
 
 <template>
-  <div class="tab-tasks">
-    <div class="tab-header">
-      <h2 class="tab-title">
-        <PixelIcon name="list" size="md" />
-        <span>后台任务</span>
-        <span v-if="activeTasks.length > 0" class="task-active-count"
-          >{{ activeTasks.length }} 运行中</span
+  <div class="p-8 h-full flex flex-col overflow-y-auto">
+    <!-- ═══ 标题区 ═══ -->
+    <div class="mb-6 relative group/header">
+      <!-- 背景氛围光晕 -->
+      <div
+        class="absolute -right-20 -top-10 w-40 h-40 bg-amber-400/5 blur-[60px] rounded-full pointer-events-none group-hover/header:bg-amber-400/15 transition-all duration-1000"
+      />
+      <h2 class="flex items-center gap-3 text-2xl font-black text-slate-800 font-pixel">
+        <span
+          class="group-hover/header:scale-110 group-hover/header:rotate-6 transition-transform duration-500"
         >
+          <PixelIcon name="bell" size="md" />
+        </span>
+        <span>待办提醒</span>
+        <span
+          v-if="reminders.length > 0"
+          class="text-[11px] font-bold px-2.5 py-0.5 bg-amber-50 text-amber-600 border border-amber-300/30"
+        >
+          {{ reminders.length }} 条待触发
+        </span>
+        <span class="opacity-0 group-hover/header:opacity-100 transition-opacity duration-500">
+          <PixelIcon name="sparkle" size="xs" />
+        </span>
       </h2>
-      <p class="tab-subtitle">SCHEDULER TASKS</p>
+      <p
+        class="text-[10px] font-bold uppercase tracking-[0.15em] text-slate-400 mt-1 ml-9 font-pixel"
+      >
+        REMINDERS & TOPICS
+      </p>
     </div>
 
-    <!-- 运行中的任务 -->
-    <h3 class="section-label">
-      <span class="section-dot section-dot-active" />
-      运行中 ({{ activeTasks.length }})
-    </h3>
+    <!-- ═══ 用户提醒列表 ═══ -->
+    <div class="mb-8">
+      <!-- 空状态 -->
+      <PEmpty
+        v-if="!isLoadingReminders && reminders.length === 0"
+        icon="bell"
+        title="暂无待办提醒"
+        description="通过聊天让 Agent 帮你设置提醒吧~"
+      />
 
-    <div v-if="activeTasks.length === 0" class="task-empty-hint">
-      <PixelIcon name="check" size="sm" />
-      <span>当前没有运行中的任务</span>
-    </div>
-    <div v-else class="task-list">
-      <div v-for="task in activeTasks" :key="task.id" class="task-item task-item-active">
-        <div class="task-item-main">
-          <div class="task-agent-dot" />
-          <div class="task-info">
-            <h4 class="task-desc">{{ task.description }}</h4>
-            <div class="task-meta">
-              <span :class="['task-status', statusMeta[task.status].color]">
-                {{ statusMeta[task.status].label }}
-              </span>
-              <span class="task-meta-item">{{ task.totalRuns }} 次执行</span>
-              <span class="task-meta-item">{{ formatElapsed(task.lastDurationMs) }}</span>
+      <!-- 提醒卡片列表 -->
+      <div v-else class="flex flex-col gap-2.5">
+        <PCard v-for="item in reminders" :key="item.id" pixel hoverable class="group/reminder">
+          <div class="flex items-start gap-3.5">
+            <!-- 类型图标 -->
+            <div
+              class="flex-shrink-0 mt-0.5 p-2.5 pixel-border-sm group-hover/reminder:scale-110 transition-transform"
+              :class="reminderTypeMeta[item.type]?.color ?? 'text-slate-400 bg-slate-50'"
+            >
+              <PixelIcon :name="reminderTypeMeta[item.type]?.icon ?? 'list'" size="sm" />
+            </div>
+
+            <!-- 内容 -->
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 mb-1">
+                <span
+                  class="text-[10px] font-bold px-1.5 py-0.5 font-pixel"
+                  :class="reminderTypeMeta[item.type]?.color ?? 'text-slate-400 bg-slate-50'"
+                >
+                  {{ reminderTypeMeta[item.type]?.label ?? item.type }}
+                </span>
+                <span class="text-[10px] text-slate-400 font-pixel">#{{ item.id }}</span>
+              </div>
+              <h4 class="text-[13px] font-bold text-slate-700 leading-relaxed">
+                {{ item.content }}
+              </h4>
+              <div class="flex items-center gap-2 mt-1.5">
+                <PixelIcon name="clock" size="xs" class="text-slate-400" />
+                <span class="text-[11px] text-slate-400 font-pixel">
+                  {{ formatReminderTime(item.time) }}
+                </span>
+              </div>
             </div>
           </div>
-        </div>
+        </PCard>
       </div>
     </div>
 
-    <!-- 已注册的任务列表 -->
-    <h3
-      class="section-label"
-      style="margin-top: 24px; cursor: pointer"
-      @click="showHistory = !showHistory"
-    >
-      <span class="section-dot" />
-      全部任务 ({{ idleTasks.length }})
-      <PixelIcon :name="showHistory ? 'chevron-up' : 'chevron-down'" size="xs" />
-    </h3>
+    <!-- ═══ 系统后台任务 (折叠区) ═══ -->
+    <div class="border-t border-slate-100 pt-6">
+      <h3
+        class="flex items-center gap-2 text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 cursor-pointer hover:text-slate-500 transition-colors select-none"
+        @click="showCronTasks = !showCronTasks"
+      >
+        <PixelIcon name="desktop" size="xs" />
+        系统后台任务 ({{ tasks.length }})
+        <PixelIcon :name="showCronTasks ? 'chevron-up' : 'chevron-down'" size="xs" />
+        <span
+          v-if="activeTasks.length > 0"
+          class="text-[10px] font-bold px-1.5 py-0.5 bg-emerald-50 text-emerald-600 ml-1"
+        >
+          {{ activeTasks.length }} 运行中
+        </span>
+      </h3>
 
-    <div v-if="showHistory" class="task-list">
-      <div v-for="task in idleTasks" :key="task.id" class="task-item">
-        <div class="task-item-main">
-          <div class="task-info">
-            <h4 class="task-desc task-desc-muted">{{ task.description }}</h4>
-            <div class="task-meta">
-              <span :class="['task-status', statusMeta[task.status].color]">
-                {{ statusMeta[task.status].label }}
-              </span>
-              <span class="task-meta-item">共 {{ task.totalRuns }} 次</span>
-              <span class="task-meta-item">成功 {{ task.successCount }}</span>
-              <span
-                v-if="task.errorCount > 0"
-                class="task-meta-item"
-                style="color: var(--color-red-face, #ef4444)"
-              >
-                失败 {{ task.errorCount }}
-              </span>
-              <span class="task-meta-item">{{ formatTime(task.lastRunAt) }}</span>
+      <div v-if="showCronTasks" class="flex flex-col gap-2">
+        <!-- 运行中 -->
+        <div
+          v-for="task in activeTasks"
+          :key="task.id"
+          class="flex justify-between items-center gap-3 px-4 py-3 bg-white pixel-border-emerald border-l-[3px] border-l-emerald-500 transition-all hover:translate-x-0.5"
+        >
+          <div class="flex items-center gap-3 min-w-0">
+            <div class="w-2 h-2 bg-emerald-500 flex-shrink-0 active-pulse" />
+            <div class="min-w-0">
+              <h4 class="text-[13px] font-bold text-slate-800 truncate">{{ task.description }}</h4>
+              <div class="flex gap-2.5 mt-1">
+                <span
+                  :class="['text-[10px] font-bold px-1.5 py-0.5', statusMeta[task.status].color]"
+                >
+                  {{ statusMeta[task.status].label }}
+                </span>
+                <span class="text-[10px] text-slate-400">{{ task.totalRuns }} 次执行</span>
+                <span class="text-[10px] text-slate-400 font-pixel">
+                  {{ formatElapsed(task.lastDurationMs) }}
+                </span>
+              </div>
             </div>
-            <div v-if="task.lastError" class="task-error-hint">最近错误: {{ task.lastError }}</div>
           </div>
         </div>
-        <div class="task-actions">
-          <PButton variant="ghost" size="sm" @click.stop="triggerTask(task.name)">
-            手动触发
-          </PButton>
-        </div>
+
+        <!-- 空闲 -->
+        <PCard
+          v-for="task in idleTasks"
+          :key="task.id"
+          pixel
+          class="flex justify-between items-center gap-3"
+        >
+          <div class="min-w-0">
+            <h4 class="text-[13px] font-bold text-slate-500 truncate">{{ task.description }}</h4>
+            <div class="flex gap-2.5 mt-1">
+              <span :class="['text-[10px] font-bold px-1.5 py-0.5', statusMeta[task.status].color]">
+                {{ statusMeta[task.status].label }}
+              </span>
+              <span class="text-[10px] text-slate-400">共 {{ task.totalRuns }} 次</span>
+              <span class="text-[10px] text-slate-400">成功 {{ task.successCount }}</span>
+              <span v-if="task.errorCount > 0" class="text-[10px] text-rose-500">
+                失败 {{ task.errorCount }}
+              </span>
+              <span class="text-[10px] text-slate-400 font-pixel">
+                {{ formatTime(task.lastRunAt) }}
+              </span>
+            </div>
+            <div v-if="task.lastError" class="text-[10px] text-rose-500/80 mt-1">
+              最近错误: {{ task.lastError }}
+            </div>
+          </div>
+          <div class="flex gap-1.5 flex-shrink-0">
+            <PButton variant="ghost" size="sm" @click.stop="triggerTask(task.name)">
+              手动触发
+            </PButton>
+          </div>
+        </PCard>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.tab-tasks {
-  padding: 32px;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-}
-.tab-header {
-  margin-bottom: 24px;
-}
-.tab-title {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 24px;
-  font-weight: 800;
-  color: var(--color-text-primary);
-}
-.task-active-count {
-  font-size: 11px;
-  font-weight: 700;
-  padding: 2px 10px;
-  background: var(--color-green-50, rgba(34, 197, 94, 0.1));
-  color: var(--color-emerald-shadow, #16a34a);
-  border: 1px solid rgba(34, 197, 94, 0.3);
-}
-.tab-subtitle {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.15em;
-  color: var(--color-text-muted);
-  margin-top: 4px;
-  margin-left: 36px;
-}
-
-.section-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--color-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  margin-bottom: 12px;
-}
-.section-dot {
-  width: 6px;
-  height: 6px;
-  background: var(--color-text-muted);
-}
-.section-dot-active {
-  background: var(--color-emerald-face, #22c55e);
-  animation: pulse 2s infinite;
-}
-
-.task-empty-hint {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 16px;
-  color: var(--color-text-muted);
-  font-size: 13px;
-  font-weight: 700;
-  border: 1px dashed var(--color-border);
-}
-
-.task-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.task-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 16px;
-  border: 2px solid var(--color-border);
-  background: var(--color-bg-primary);
-  transition: all 0.2s;
-}
-.task-item:hover {
-  border-color: var(--color-sky-light);
-}
-.task-item-active {
-  border-left: 3px solid var(--color-emerald-face, #22c55e);
-}
-.task-item-main {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
-.task-agent-dot {
-  width: 8px;
-  height: 8px;
-  background: var(--color-emerald-face, #22c55e);
-  flex-shrink: 0;
-  animation: pulse 2s infinite;
-}
-.task-info {
-  min-width: 0;
-}
-.task-desc {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--color-text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.task-desc-muted {
-  color: var(--color-text-secondary);
-}
-.task-meta {
-  display: flex;
-  gap: 10px;
-  margin-top: 4px;
-}
-.task-meta-item {
-  font-size: 10px;
-  color: var(--color-text-muted);
-}
-.task-status {
-  font-size: 10px;
-  font-weight: 700;
-  padding: 1px 6px;
-}
+/* 状态标签颜色 */
 .status-running {
-  color: var(--color-emerald-shadow, #16a34a);
+  color: #16a34a;
   background: rgba(34, 197, 94, 0.1);
 }
-.status-paused {
-  color: var(--color-yellow-600, #d97706);
-  background: rgba(234, 179, 8, 0.1);
+
+.status-ready {
+  color: #0284c7;
+  background: rgba(56, 189, 248, 0.1);
 }
-.status-completed {
-  color: var(--color-sky-shadow);
-  background: var(--color-sky-50, rgba(56, 189, 248, 0.1));
-}
-.status-cancelled {
-  color: var(--color-text-muted);
-  background: var(--color-bg-secondary);
-}
-.status-failed {
-  color: var(--color-red-face, #ef4444);
+
+.status-error {
+  color: #ef4444;
   background: rgba(239, 68, 68, 0.1);
 }
-.task-actions {
-  display: flex;
-  gap: 6px;
-  flex-shrink: 0;
-}
-.task-error-hint {
-  font-size: 10px;
-  color: var(--color-red-face, #ef4444);
-  margin-top: 4px;
-  opacity: 0.8;
-}
-@keyframes pulse {
+
+/* 运行中脉冲 */
+@keyframes active-pulse {
   0%,
   100% {
     opacity: 0.4;
@@ -365,5 +361,9 @@ onMounted(fetchTasks)
   50% {
     opacity: 1;
   }
+}
+
+.active-pulse {
+  animation: active-pulse 2s infinite;
 }
 </style>

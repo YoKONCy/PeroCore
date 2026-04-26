@@ -47,7 +47,20 @@ export function registerIpcHandlers(): void {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function registerWindowHandlers(): void {
   ipcMain.handle('window-minimize', (event) => {
-    BrowserWindow.fromWebContents(event.sender)?.minimize()
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return
+
+    // Windows + transparent + frameless 窗口的已知 bug:
+    // 最大化状态下 minimize() 无效。
+    // 解决: 先 unmaximize()，等 DWM 更新后再 minimize()。
+    if (process.platform === 'win32' && win.isMaximized()) {
+      win.unmaximize()
+      setTimeout(() => {
+        if (!win.isDestroyed()) win.minimize()
+      }, 100)
+    } else {
+      win.minimize()
+    }
   })
 
   ipcMain.handle('window-maximize', (event) => {
@@ -287,6 +300,16 @@ function registerNapCatHandlers(): void {
   ipcMain.handle('check-napcat', async () => {
     const { checkNapCat } = await getNapCatService()
     return checkNapCat()
+  })
+
+  ipcMain.handle('napcat-status', async () => {
+    const { getNapCatStatus } = await getNapCatService()
+    return getNapCatStatus()
+  })
+
+  ipcMain.handle('ensure-napcat-config', async () => {
+    const { ensureNapCatConfig } = await getNapCatService()
+    return ensureNapCatConfig()
   })
 }
 

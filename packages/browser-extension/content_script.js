@@ -90,18 +90,25 @@ function findElement(target) {
   if (target.startsWith('/') || target.startsWith('(')) {
     try {
       const result = document.evaluate(
-        target, document, null,
-        XPathResult.FIRST_ORDERED_NODE_TYPE, null,
+        target,
+        document,
+        null,
+        XPathResult.FIRST_ORDERED_NODE_TYPE,
+        null,
       )
       if (result.singleNodeValue) return result.singleNodeValue
-    } catch { /* 非法 XPath，继续尝试其他策略 */ }
+    } catch {
+      /* 非法 XPath，继续尝试其他策略 */
+    }
   }
 
   // 2. CSS 选择器
   try {
     const el = document.querySelector(target)
     if (el) return el
-  } catch { /* 非法选择器，继续 */ }
+  } catch {
+    /* 非法选择器，继续 */
+  }
 
   // 3. 精确文本匹配 (忽略大小写)
   const interactiveElements = document.querySelectorAll(
@@ -136,7 +143,7 @@ function findElement(target) {
       (el.placeholder && el.placeholder.toLowerCase().includes(targetLower)) ||
       (el.name && el.name.toLowerCase().includes(targetLower)) ||
       (el.id && el.id.toLowerCase().includes(targetLower)) ||
-      (el.getAttribute('aria-label')?.toLowerCase().includes(targetLower))
+      el.getAttribute('aria-label')?.toLowerCase().includes(targetLower)
     ) {
       return el
     }

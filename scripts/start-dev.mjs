@@ -63,6 +63,7 @@ backend = spawn('pnpm', ['dev'], {
   cwd: process.cwd(),
   shell: isWin,
   stdio: ['ignore', 'pipe', 'pipe'],
+  env: { ...process.env, NODE_OPTIONS: '--no-warnings=DEP0040' },
 })
 backend.stdout.on('data', (d) => prefix('backend', BLUE, d))
 backend.stderr.on('data', (d) => prefix('backend', BLUE, d))
@@ -84,6 +85,7 @@ function tryStartElectron() {
     cwd: process.cwd(),
     shell: isWin,
     stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, NODE_OPTIONS: '--no-warnings=DEP0040' },
   })
   electron.stdout.on('data', (d) => prefix('electron', MAGENTA, d))
   electron.stderr.on('data', (d) => prefix('electron', MAGENTA, d))

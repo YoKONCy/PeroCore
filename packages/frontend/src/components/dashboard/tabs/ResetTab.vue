@@ -1,24 +1,20 @@
 <script setup lang="ts">
 /**
- * ResetTab — 危险区域 Tab (F1-5 增强)
+ * ResetTab — 危险区域 Tab
  *
  * 分级重置选项 + 数据导出 + 二次确认。
+ * Phase 2: 改用 DashboardContext 的全局 openConfirm 弹窗。
  */
 import { ref } from 'vue'
-import { PixelIcon, PButton, PInput, PDialog } from '../../pixel'
+import { PixelIcon, PButton, PCard } from '../../pixel'
 import { chatApi } from '../../../api/modules/chatApi'
 import { configApi } from '../../../api/modules/configApi'
+import { useDashboardContext } from '../../../composables/dashboard'
+import { logger } from '../../../lib/logger'
 
-// ── 确认弹窗 ──
-const isConfirmOpen = ref(false)
-const confirmAction = ref<{
-  label: string
-  action: string
-  description: string
-  icon: string
-  severity: 'medium' | 'high' | 'critical'
-} | null>(null)
-const confirmInput = ref('')
+const ctx = useDashboardContext()
+
+// ── 操作状态 ──
 const isProcessing = ref(false)
 
 const dangerActions = [
@@ -45,33 +41,37 @@ const dangerActions = [
   },
 ]
 
-const severityColors: Record<string, string> = {
-  medium: 'sev-medium',
-  high: 'sev-high',
-  critical: 'sev-critical',
-}
-
-function openConfirm(action: (typeof dangerActions)[0]) {
-  confirmAction.value = action
-  confirmInput.value = ''
-  isConfirmOpen.value = true
-}
-
-async function executeAction() {
-  if (!confirmAction.value) return
-  if (confirmAction.value.severity === 'critical' && confirmInput.value !== '确认删除') return
-  isProcessing.value = true
+/** 通过全局 openConfirm 打开确认弹窗并执行操作 */
+async function handleDangerAction(action: (typeof dangerActions)[0]) {
   try {
-    await chatApi.reset(confirmAction.value.action)
-  } catch (err) {
-    console.error('重置操作失败:', err)
+    const isCritical = action.severity === 'critical'
+    const result = await ctx.openConfirm(
+      `⚠️ ${action.label}`,
+      `${action.description}\n\n⚠️ 此操作不可撤销！`,
+      {
+        type: action.severity === 'medium' ? 'warning' : 'error',
+        isPrompt: isCritical,
+        inputPlaceholder: isCritical ? '请输入"确认删除"以继续' : undefined,
+      },
+    )
+
+    // critical 操作需要验证输入
+    if (isCritical && result.value !== '确认删除') {
+      logger.warn('ResetTab', '输入不匹配，操作已取消')
+      return
+    }
+
+    isProcessing.value = true
+    await chatApi.reset(action.action)
+    logger.info('ResetTab', `${action.label} 执行成功`)
+  } catch {
+    // openConfirm reject = 用户取消，不做任何事
   } finally {
     isProcessing.value = false
-    isConfirmOpen.value = false
   }
 }
 
-// 数据导出 (P2-12)
+// 数据导出
 const isExporting = ref(false)
 async function exportData() {
   isExporting.value = true
@@ -86,7 +86,7 @@ async function exportData() {
     a.click()
     URL.revokeObjectURL(url)
   } catch (err) {
-    console.error('导出失败:', err)
+    logger.error('ResetTab', '导出失败', err)
   } finally {
     isExporting.value = false
   }
@@ -94,223 +94,73 @@ async function exportData() {
 </script>
 
 <template>
-  <div class="tab-reset">
-    <div class="tab-header">
-      <h2 class="tab-title tab-title-danger">
-        <PixelIcon name="alert" size="md" /><span>危险区域</span>
+  <div class="p-8 h-full overflow-y-auto">
+    <div class="mb-6 relative group/header">
+      <!-- 背景氛围光晕 (红色警告感) -->
+      <div
+        class="absolute -right-20 -top-10 w-40 h-40 bg-rose-400/5 blur-[60px] rounded-full pointer-events-none group-hover/header:bg-rose-400/15 transition-all duration-1000"
+      />
+      <h2 class="flex items-center gap-3 text-2xl font-black text-rose-500 font-pixel">
+        <span
+          class="group-hover/header:scale-110 group-hover/header:rotate-6 transition-transform duration-500"
+        >
+          <PixelIcon name="alert" size="md" />
+        </span>
+        <span>危险区域</span>
       </h2>
-      <p class="tab-subtitle">DANGER ZONE</p>
+      <p
+        class="text-[10px] font-bold uppercase tracking-[0.15em] text-slate-400 mt-1 ml-9 font-pixel"
+      >
+        DANGER ZONE
+      </p>
     </div>
 
     <!-- 数据导出 (安全操作) -->
-    <div class="safe-section">
-      <div class="safe-section-header">
+    <PCard pixel class="flex justify-between items-center mb-6">
+      <div class="flex items-center gap-3 text-slate-500">
         <PixelIcon name="download" size="sm" />
         <div>
-          <h3 class="safe-title">数据导出</h3>
-          <p class="safe-desc">导出所有配置、记忆和对话记录为 JSON 文件</p>
+          <h3 class="text-sm font-black text-slate-800">数据导出</h3>
+          <p class="text-[11px] text-slate-400 mt-0.5">导出所有配置、记忆和对话记录为 JSON 文件</p>
         </div>
       </div>
       <PButton variant="ghost" :loading="isExporting" @click="exportData">
         <PixelIcon name="download" size="xs" />
         导出全部数据
       </PButton>
-    </div>
+    </PCard>
 
     <!-- 危险操作列表 -->
-    <div class="danger-list">
+    <div class="flex flex-col gap-3">
       <div
         v-for="action in dangerActions"
         :key="action.action"
-        :class="['danger-item', severityColors[action.severity]]"
+        :class="[
+          'flex justify-between items-center p-5 border-2 transition-all',
+          action.severity === 'medium' ? 'border-amber-300/30 bg-amber-50/30' : '',
+          action.severity === 'high' ? 'border-rose-400/30 bg-rose-50/30' : '',
+          action.severity === 'critical' ? 'border-rose-400/50 bg-rose-50/60' : '',
+        ]"
       >
-        <div class="danger-info">
-          <div class="danger-icon-wrap">
+        <div class="flex items-center gap-4">
+          <div class="w-10 h-10 flex items-center justify-center bg-rose-100 text-rose-500">
             <PixelIcon :name="action.icon" size="sm" />
           </div>
           <div>
-            <h4 class="danger-label">{{ action.label }}</h4>
-            <p class="danger-desc">{{ action.description }}</p>
+            <h4 class="text-sm font-black text-slate-800">{{ action.label }}</h4>
+            <p class="text-[11px] text-slate-400 mt-0.5 max-w-[400px]">
+              {{ action.description }}
+            </p>
           </div>
         </div>
-        <PButton variant="danger" @click="openConfirm(action)">
+        <PButton variant="danger" :loading="isProcessing" @click="handleDangerAction(action)">
           {{ action.label }}
         </PButton>
       </div>
     </div>
-
-    <!-- 确认弹窗 -->
-    <PDialog v-model="isConfirmOpen" title="⚠️ 危险操作确认" width="440px">
-      <template v-if="confirmAction">
-        <div class="confirm-body">
-          <div class="confirm-warning">
-            <PixelIcon name="alert" size="md" />
-            <p>
-              你确定要 <strong>{{ confirmAction.label }}</strong> 吗？
-            </p>
-          </div>
-          <p class="confirm-desc">{{ confirmAction.description }}</p>
-          <p class="confirm-warning-text">⚠️ 此操作不可撤销！</p>
-          <div v-if="confirmAction.severity === 'critical'" class="confirm-input-area">
-            <p class="confirm-input-hint">请输入 <strong>确认删除</strong> 以继续：</p>
-            <PInput v-model="confirmInput" placeholder="确认删除" />
-          </div>
-        </div>
-      </template>
-      <template #footer>
-        <PButton variant="ghost" @click="isConfirmOpen = false">取消</PButton>
-        <PButton
-          variant="danger"
-          :loading="isProcessing"
-          :disabled="confirmAction?.severity === 'critical' && confirmInput !== '确认删除'"
-          @click="executeAction"
-        >
-          确认执行
-        </PButton>
-      </template>
-    </PDialog>
   </div>
 </template>
 
 <style scoped>
-.tab-reset {
-  padding: 32px;
-  height: 100%;
-  overflow-y: auto;
-}
-.tab-header {
-  margin-bottom: 24px;
-}
-.tab-title {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 24px;
-  font-weight: 800;
-}
-.tab-title-danger {
-  color: var(--color-red-face, #ef4444);
-}
-.tab-subtitle {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.15em;
-  color: var(--color-text-muted);
-  margin-top: 4px;
-  margin-left: 36px;
-}
-
-/* 安全区 */
-.safe-section {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 20px;
-  border: 2px solid var(--color-border);
-  background: var(--color-bg-primary);
-  margin-bottom: 24px;
-}
-.safe-section-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  color: var(--color-text-secondary);
-}
-.safe-title {
-  font-size: 14px;
-  font-weight: 800;
-  color: var(--color-text-primary);
-}
-.safe-desc {
-  font-size: 11px;
-  color: var(--color-text-muted);
-  margin-top: 2px;
-}
-
-/* 危险列表 */
-.danger-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.danger-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 20px;
-  border: 2px solid;
-  transition: all 0.2s;
-}
-.sev-medium {
-  border-color: rgba(234, 179, 8, 0.3);
-  background: rgba(234, 179, 8, 0.03);
-}
-.sev-high {
-  border-color: rgba(239, 68, 68, 0.3);
-  background: rgba(239, 68, 68, 0.03);
-}
-.sev-critical {
-  border-color: rgba(239, 68, 68, 0.5);
-  background: rgba(239, 68, 68, 0.06);
-}
-.danger-info {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-.danger-icon-wrap {
-  width: 40px;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(239, 68, 68, 0.1);
-  color: var(--color-red-face, #ef4444);
-}
-.danger-label {
-  font-size: 14px;
-  font-weight: 800;
-  color: var(--color-text-primary);
-}
-.danger-desc {
-  font-size: 11px;
-  color: var(--color-text-muted);
-  margin-top: 2px;
-  max-width: 400px;
-}
-
-/* 确认弹窗 */
-.confirm-body {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-.confirm-warning {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  color: var(--color-red-face, #ef4444);
-  font-size: 14px;
-  font-weight: 700;
-}
-.confirm-desc {
-  font-size: 13px;
-  color: var(--color-text-secondary);
-  line-height: 1.6;
-}
-.confirm-warning-text {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--color-red-face, #ef4444);
-}
-.confirm-input-area {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.confirm-input-hint {
-  font-size: 12px;
-  color: var(--color-text-muted);
-}
+/* ResetTab 无需额外 scoped CSS — 全部使用 Tailwind + pixel 类 */
 </style>

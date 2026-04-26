@@ -8,6 +8,7 @@
  */
 
 import { ref } from 'vue'
+import { logger } from '../../lib/logger'
 import type * as THREE from 'three'
 import type { IModelAdapter } from '../../components/avatar/lib/adapter/IModelAdapter'
 import type { IModelProvider } from '../../components/avatar/lib/adapter/IModelProvider'
@@ -99,10 +100,10 @@ export function useAvatarModel() {
       (config.texture?.endsWith('.pero') || config.texture === config.model)
 
     if (isContainerFormat) {
-      console.log(`[AvatarModel] 使用容器加载器: ${manifest.metadata.name}`)
+      logger.info('AvatarModel', `使用容器加载器: ${manifest.metadata.name}`)
       return new PeroContainerProvider(config.model, boneFilterPatterns)
     } else if (config.model.endsWith('.pero')) {
-      console.log(`[AvatarModel] 使用安全模型加载器: ${manifest.metadata.name}`)
+      logger.info('AvatarModel', `使用安全模型加载器: ${manifest.metadata.name}`)
       return new PeroSecureProvider(config, boneFilterPatterns)
     } else {
       return new StandardBedrockProvider(config, boneFilterPatterns)
@@ -122,14 +123,14 @@ export function useAvatarModel() {
         }
         const controllers = await providerWithCtrl.getAnimationControllers()
         if (controllers.size > 0) {
-          console.log(`[AvatarModel] 从 Provider 加载了 ${controllers.size} 个动画控制器`)
+          logger.info('AvatarModel', `从 Provider 加载了 ${controllers.size} 个动画控制器`)
           controllerSystem.loadFromJson({
             format_version: '1.10.0',
             animation_controllers: Object.fromEntries(controllers),
           } as Parameters<typeof controllerSystem.loadFromJson>[0])
         }
       } catch (e) {
-        console.warn('[AvatarModel] 从 Provider 加载控制器失败:', e)
+        logger.warn('AvatarModel', '从 Provider 加载控制器失败', e)
       }
     }
 
@@ -196,12 +197,13 @@ export function useAvatarModel() {
               boneFilterPatterns:
                 (cm.boneFilterPatterns as string[]) || manifest.boneFilterPatterns,
             }
-            console.log(
-              `[AvatarModel] 容器 manifest 加载成功，${effectiveManifest.featureButtons?.length || 0} 个功能按钮`,
+            logger.info(
+              'AvatarModel',
+              `容器 manifest 加载成功，${effectiveManifest.featureButtons?.length || 0} 个功能按钮`,
             )
           }
         } catch (e) {
-          console.warn('[AvatarModel] 从容器加载 manifest 失败，使用默认配置:', e)
+          logger.warn('AvatarModel', '从容器加载 manifest 失败，使用默认配置', e)
         }
       }
 
@@ -261,10 +263,10 @@ export function useAvatarModel() {
       setTimeout(() => updateClothing(), 100)
 
       loading.value = false
-      console.log(`[AvatarModel] 模型 ${manifest.metadata.name} 加载成功`)
+      logger.info('AvatarModel', `模型 ${manifest.metadata.name} 加载成功`)
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e)
-      console.error('[AvatarModel] 加载模型失败:', e)
+      logger.error('AvatarModel', '加载模型失败', e)
       errorMsg.value = `加载模型失败: ${msg}`
       loading.value = false
     }
@@ -293,7 +295,7 @@ export function useAvatarModel() {
         await loadAvatar(manifest, scene)
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e)
-        console.error('[AvatarModel] 加载初始 manifest 失败:', e)
+        logger.error('AvatarModel', '加载初始 manifest 失败', e)
         errorMsg.value = `加载模型失败: ${msg}`
       } finally {
         loading.value = false
@@ -313,13 +315,13 @@ export function useAvatarModel() {
       await loadAvatar(manifest, scene)
       return
     } catch (e) {
-      console.warn('[AvatarModel] manifest.json 加载失败，尝试容器:', e)
+      logger.warn('AvatarModel', 'manifest.json 加载失败，尝试容器', e)
     }
 
     try {
       await loadAvatar(createPeroManifest(containerPath), scene)
     } catch (e2) {
-      console.error('[AvatarModel] 所有加载路径均失败:', e2)
+      logger.error('AvatarModel', '所有加载路径均失败', e2)
       errorMsg.value = '加载模型失败: 无可用的模型文件'
       loading.value = false
     }

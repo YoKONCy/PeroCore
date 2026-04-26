@@ -97,23 +97,22 @@ export interface SocialMessagingProvider {
 // Provider 注入
 // ─────────────────────────────────────────────
 
-/** 全局引用 */
-let messagingProvider: SocialMessagingProvider | null = null
+/** 模块引用 */
+let _messagingProvider: SocialMessagingProvider | null = null
 
-/** 注入社交消息提供者 (由 container.ts 调用) */
-export function injectSocialMessagingProvider(provider: SocialMessagingProvider): void {
-  messagingProvider = provider
-  logger.info(`社交消息提供者已注入 (平台: ${provider.platform})`)
+/** 设置社交消息提供者 */
+export function setSocialMessagingProvider(provider: SocialMessagingProvider | null): void {
+  _messagingProvider = provider
 }
 
 /** 辅助: 检查 Provider 可用性，不可用时返回错误 JSON */
 function requireProvider(): SocialMessagingProvider | string {
-  if (!messagingProvider) {
+  if (!_messagingProvider) {
     return JSON.stringify({
       error: '社交服务未初始化。当前环境可能无社交适配器连接。',
     })
   }
-  return messagingProvider
+  return _messagingProvider
 }
 
 // ─────────────────────────────────────────────

@@ -47,7 +47,6 @@ watch(() => props.selector, updateRect)
 
 onMounted(() => {
   updateRect()
-  // 窗口变化时重新计算
   window.addEventListener('resize', updateRect)
 })
 onUnmounted(() => {
@@ -58,7 +57,7 @@ defineExpose({ rect, updateRect })
 </script>
 
 <template>
-  <svg v-if="rect" class="spot-mask">
+  <svg v-if="rect" class="absolute inset-0 w-full h-full pointer-events-none z-0">
     <defs>
       <mask id="spot-cutout">
         <rect width="100%" height="100%" fill="white" />
@@ -86,14 +85,3 @@ defineExpose({ rect, updateRect })
     />
   </svg>
 </template>
-
-<style scoped>
-.spot-mask {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  z-index: 0;
-}
-</style>

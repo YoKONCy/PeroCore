@@ -35,9 +35,12 @@ export type GatewayMessageType =
   // ── 心跳 ──
   | 'heartbeat'
   | 'heartbeat_ack'
+  | 'ping'
   // ── 请求/响应 ──
   | 'request'
   | 'response'
+  // ── 控制 ──
+  | 'abort'
   // ── 推送 (广播) ──
   | 'push'
   // ── 错误 ──

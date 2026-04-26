@@ -13,11 +13,13 @@
  * @module electron/main/services/napcat
  */
 
-import { ChildProcess, spawn } from 'node:child_process'
+import type { ChildProcess } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import path from 'node:path'
 import fs from 'node:fs'
 import https from 'node:https'
 import { BrowserWindow } from 'electron'
+import AdmZip from 'adm-zip'
 import { logger } from '../utils/logger'
 import { paths } from '../utils/env'
 
@@ -51,18 +53,23 @@ function broadcastDownloadProgress(data: Record<string, unknown>): void {
 // 路径查找
 // ─────────────────────────────────────────────
 
+/** 后端 WS 端口 */
+const BACKEND_PORT = Number(process.env.PERO_PORT ?? 9120)
+
+/** 后端反向 WS 端点 (NapCat 连入后端的地址) */
+const REVERSE_WS_URL = `ws://127.0.0.1:${BACKEND_PORT}/api/social/ws`
+
+/** 我们在 NapCat 配置中使用的连接名称 (用于标识是我们自动注入的) */
+const WS_CLIENT_NAME = 'PeroCore'
+
 /** 获取 NapCat 安装目录 */
 function getNapCatDir(): string {
-  // 优先检查 data 目录 (用户安装)
-  const userDir = path.join(paths.data, 'tools', 'NapCat')
-  if (fs.existsSync(userDir)) return userDir
+  return path.join(paths.data, 'tools', 'NapCat')
+}
 
-  // 备用: 旧路径
-  const legacyDir = path.join(paths.data, 'napcat')
-  if (fs.existsSync(legacyDir)) return legacyDir
-
-  // 默认返回用户安装位置 (供 installNapCat 写入)
-  return userDir
+/** 获取 NapCat 配置目录 */
+function getNapCatConfigDir(): string {
+  return path.join(getNapCatDir(), 'config')
 }
 
 /** 从注册表/默认路径查找 QQ.exe */
@@ -188,6 +195,112 @@ async function resolveEntryPoint(napCatDir: string): Promise<{
 }
 
 // ─────────────────────────────────────────────
+// 反向 WS 自动配置
+// ─────────────────────────────────────────────
+
+/**
+ * 扫描 NapCat 已登录的 QQ 号配置文件，
+ * 自动注入指向后端 /api/social/ws 的反向 WS 连接。
+ *
+ * 配置文件格式: config/onebot11_<QQ号>.json
+ * 目标字段:     network.websocketClients[]
+ *
+ * 逻辑:
+ * - 扫描 config/ 目录下所有 onebot11_*.json
+ * - 如果已有 name='PeroCore' 的连接 → 确保 url 和 enable 正确
+ * - 如果没有 → 追加一条新连接
+ * - 如果 config/ 目录不存在或没有配置文件 → 跳过 (等用户扫码登录后再说)
+ *
+ * @returns 已配置的 QQ 号列表
+ */
+export function ensureNapCatConfig(): string[] {
+  const configDir = getNapCatConfigDir()
+  const configuredAccounts: string[] = []
+
+  if (!fs.existsSync(configDir)) {
+    logger.info('NapCat', '配置目录不存在，跳过自动配置 (等待首次登录)')
+    return configuredAccounts
+  }
+
+  // 扫描所有 onebot11_<QQ号>.json
+  let entries: string[]
+  try {
+    entries = fs.readdirSync(configDir).filter((f) => /^onebot11_\d+\.json$/.test(f))
+  } catch {
+    logger.warn('NapCat', '读取配置目录失败')
+    return configuredAccounts
+  }
+
+  if (entries.length === 0) {
+    logger.info('NapCat', '未发现已登录账号配置文件，跳过自动配置')
+    return configuredAccounts
+  }
+
+  for (const filename of entries) {
+    const filePath = path.join(configDir, filename)
+    const qqNumber = filename.replace('onebot11_', '').replace('.json', '')
+
+    try {
+      const raw = fs.readFileSync(filePath, 'utf-8')
+      const config = JSON.parse(raw) as Record<string, unknown>
+
+      // 确保 network 对象存在
+      if (!config.network || typeof config.network !== 'object') {
+        config.network = {}
+      }
+      const network = config.network as Record<string, unknown>
+
+      // 确保 websocketClients 数组存在
+      if (!Array.isArray(network.websocketClients)) {
+        network.websocketClients = []
+      }
+      const clients = network.websocketClients as Array<Record<string, unknown>>
+
+      // 查找是否已有 PeroCore 连接
+      const existing = clients.find((c) => c.name === WS_CLIENT_NAME)
+
+      if (existing) {
+        // 已有 → 确保 url 和 enable 正确
+        let changed = false
+        if (existing.url !== REVERSE_WS_URL) {
+          existing.url = REVERSE_WS_URL
+          changed = true
+        }
+        if (existing.enable !== true) {
+          existing.enable = true
+          changed = true
+        }
+        if (changed) {
+          fs.writeFileSync(filePath, JSON.stringify(config, null, 2), 'utf-8')
+          logger.info('NapCat', `已更新 QQ ${qqNumber} 的反向 WS 配置 → ${REVERSE_WS_URL}`)
+        } else {
+          logger.info('NapCat', `QQ ${qqNumber} 反向 WS 配置已是最新`)
+        }
+      } else {
+        // 没有 → 追加新连接
+        clients.push({
+          name: WS_CLIENT_NAME,
+          enable: true,
+          url: REVERSE_WS_URL,
+          messagePostFormat: 'array',
+          reportSelfMessage: false,
+          token: '',
+        })
+        fs.writeFileSync(filePath, JSON.stringify(config, null, 2), 'utf-8')
+        logger.info('NapCat', `已为 QQ ${qqNumber} 注入反向 WS 配置 → ${REVERSE_WS_URL}`)
+      }
+
+      configuredAccounts.push(qqNumber)
+    } catch (err) {
+      logger.warn('NapCat', `处理配置文件 ${filename} 失败: ${err}`)
+    }
+  }
+
+  broadcastNapCatLog(`[系统] 已自动配置 ${configuredAccounts.length} 个账号的反向 WS 连接`)
+  return configuredAccounts
+}
+
+// ─────────────────────────────────────────────
 // 启动 / 停止
 // ─────────────────────────────────────────────
 
@@ -201,6 +314,12 @@ export async function startNapCat(): Promise<void> {
   const napCatDir = getNapCatDir()
   if (!checkNapCat()) {
     throw new Error('NapCat 未安装，请先执行安装')
+  }
+
+  // 启动前自动配置反向 WS (零配置体验)
+  const configured = ensureNapCatConfig()
+  if (configured.length > 0) {
+    broadcastNapCatLog(`[系统] 已预配置 ${configured.length} 个账号: ${configured.join(', ')}`)
   }
 
   const { cmd, args, env } = await resolveEntryPoint(napCatDir)
@@ -399,13 +518,6 @@ export async function installNapCat(): Promise<boolean> {
   broadcastDownloadProgress({ percent: 100, status: '解压中...', processing: true })
 
   try {
-    // 动态导入 adm-zip (可能需要安装)
-    const AdmZip = await import('adm-zip').then((m) => m.default).catch(() => null)
-    if (!AdmZip) {
-      emit('需要 adm-zip 依赖来解压，请手动安装: pnpm add -D adm-zip')
-      return false
-    }
-
     const zip = new AdmZip(zipBuffer)
     zip.extractAllTo(dir, true)
 

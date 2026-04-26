@@ -59,8 +59,10 @@ export interface EmbeddingConfig {
 export class EmbeddingService implements EmbeddingProvider {
   private provider: EmbeddingProvider
   private reranker: RerankerProvider | null = null
+  private currentConfig: EmbeddingConfig
 
   constructor(config: EmbeddingConfig) {
+    this.currentConfig = config
     // 唯一的 Provider: 远程 API (OpenAI 兼容)
     this.provider = new ApiEmbeddingProvider(config)
 
@@ -69,6 +71,33 @@ export class EmbeddingService implements EmbeddingProvider {
       this.reranker = new ApiRerankerProvider(config.reranker)
       logger.info(`Reranker 已启用: model=${config.reranker.model}`)
     }
+  }
+
+  /**
+   * 热更新配置
+   *
+   * 运行时替换内部 Provider，不需要重启后端。
+   * 由 config 路由在保存 embedding.* 相关配置后自动调用。
+   */
+  reconfigure(config: EmbeddingConfig): void {
+    this.currentConfig = config
+    this.provider = new ApiEmbeddingProvider(config)
+    logger.info(
+      `Embedding 配置已热更新: model=${config.model}, apiBase=${config.apiBase}, dim=${config.dimension}`,
+    )
+
+    // 重建 Reranker
+    if (config.reranker?.apiKey) {
+      this.reranker = new ApiRerankerProvider(config.reranker)
+      logger.info(`Reranker 已热更新: model=${config.reranker.model}`)
+    } else {
+      this.reranker = null
+    }
+  }
+
+  /** 获取当前配置快照 (调试/API 用) */
+  getConfig(): Readonly<EmbeddingConfig> {
+    return this.currentConfig
   }
 
   async embed(texts: string[]): Promise<number[][]> {

@@ -96,6 +96,7 @@ export class StateEnricher implements Enricher {
     const vibe = (await this.configRepo.get(`agent.${agentId}.vibe`)) ?? 'active'
     const mind = (await this.configRepo.get(`agent.${agentId}.mind`)) ?? '...'
     const ownerName = (await this.configRepo.get('owner.name')) ?? '主人'
+    const userPersona = (await this.configRepo.get('owner.persona')) ?? ''
 
     // 环境信息 = 静态部分 + 动态运行时长
     const uptimeHours = (uptime() / 3600).toFixed(1)
@@ -107,6 +108,7 @@ export class StateEnricher implements Enricher {
       vibe,
       mind,
       ownerName,
+      userPersona,
       environmentInfo,
     }
   }

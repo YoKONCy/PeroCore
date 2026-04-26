@@ -47,9 +47,12 @@ const createAgentSchema = z.object({
 export function createAgentRouter(ctx: AppContext) {
   const router = new Hono()
 
-  // GET /api/agents — 列出所有 Agent
+  // GET /api/agents — 列出所有 Agent (含 avatarUrl)
   router.get('/', (c) => {
-    const agents = ctx.agentManager.listAgents()
+    const agents = ctx.agentManager.listAgents().map((a) => ({
+      ...a,
+      avatarUrl: `/agents/${a.id}/avatar`,
+    }))
     return c.json({ code: 'OK', message: '获取成功', data: agents })
   })
 
@@ -74,6 +77,18 @@ export function createAgentRouter(ctx: AppContext) {
     })
   })
 
+  // GET /api/agents/:id/avatar — 获取 Agent 头像图片
+  router.get('/:id/avatar', (c) => {
+    const agentId = c.req.param('id')
+    const avatarData = ctx.agentManager.getAvatarData(agentId)
+    if (!avatarData) {
+      return c.json({ code: 'NOT_FOUND', message: '该 Agent 没有头像' }, 404)
+    }
+    c.header('Content-Type', avatarData.mime)
+    c.header('Cache-Control', 'public, max-age=3600')
+    return c.body(new Uint8Array(avatarData.buffer))
+  })
+
   // PUT /api/agents/active — 切换活跃 Agent
   router.put('/active', zValidator('json', switchAgentSchema), (c) => {
     const { agentId } = c.req.valid('json')
@@ -84,6 +99,9 @@ export function createAgentRouter(ctx: AppContext) {
         data: { agentId },
       })
     }
+    // 广播 Agent 切换事件给前端
+    void ctx.gatewayHub.pushStateUpdate({ action: 'agent_changed', agentId })
+
     return c.json({
       code: 'OK',
       message: `已切换到 ${agentId}`,
@@ -224,6 +242,23 @@ export function createAgentRouter(ctx: AppContext) {
       code: 'OK',
       message: `已重载，共 ${agents.length} 个 Agent`,
       data: agents,
+    })
+  })
+
+  // GET /api/agents/:id/texts — 获取 Agent 看板娘台词 (静态 + 动态合并)
+  router.get('/:id/texts', async (c) => {
+    const id = c.req.param('id')
+    const texts = await ctx.agentManager.getWaifuTexts(id)
+    if (!texts) {
+      throw new AppError('AGENT_NOT_FOUND', {
+        message: `Agent "${id}" 不存在`,
+        data: { agentId: id },
+      })
+    }
+    return c.json({
+      code: 'OK',
+      message: '获取成功',
+      data: texts,
     })
   })
 

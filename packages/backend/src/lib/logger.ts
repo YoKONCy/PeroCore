@@ -91,6 +91,8 @@ const fileReporter: ConsolaReporter = {
 // Logger 工厂
 // ─────────────────────────────────────────────
 
+import { sseReporter } from './logBroadcaster'
+
 /**
  * 创建带模块标签的 logger 实例
  *
@@ -110,6 +112,9 @@ export function createLogger(module: string) {
 
   // 追加文件持久化 reporter（不覆盖默认终端输出）
   instance.addReporter(fileReporter)
+
+  // 追加 SSE 广播 reporter（Dashboard 终端实时日志）
+  instance.addReporter(sseReporter)
 
   return instance
 }

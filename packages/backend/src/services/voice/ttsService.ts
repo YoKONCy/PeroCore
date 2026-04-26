@@ -99,6 +99,13 @@ export class TtsService {
     logger.info(`初始化完成 (Provider: ${this.config.provider}, 声音: ${this.config.voice})`)
   }
 
+  /** 返回当前 TTS 配置是否有效可用 */
+  get isAvailable(): boolean {
+    if (this.config.provider === 'openai') return !!this.config.apiKey
+    if (this.config.provider === 'edge_tts') return true
+    return false
+  }
+
   /** 更新配置 */
   updateConfig(partial: Partial<TtsConfig>): void {
     this.config = { ...this.config, ...partial }
@@ -144,23 +151,39 @@ export class TtsService {
    * 默认音调：+5Hz (对齐 v1)
    */
   private async synthesizeEdge(request: TtsRequest): Promise<TtsResult> {
-    // 动态导入 edge-tts（避免在未安装时影响其他 Provider）
-    let edgeTts: typeof import('edge-tts')
+    // 动态导入 msedge-tts（避免在未安装时影响其他 Provider）
+    let MsEdgeTTS: typeof import('msedge-tts').MsEdgeTTS
+    let OUTPUT_FORMAT: typeof import('msedge-tts').OUTPUT_FORMAT
     try {
-      edgeTts = await import('edge-tts')
+      const msedge = await import('msedge-tts')
+      MsEdgeTTS = msedge.MsEdgeTTS
+      OUTPUT_FORMAT = msedge.OUTPUT_FORMAT
     } catch {
-      throw new Error('edge-tts 包未安装，请运行: pnpm add edge-tts')
+      throw new Error('msedge-tts 包未安装，请运行: pnpm add msedge-tts')
     }
 
     const voice = (request.voice as string) ?? this.config.voice
-    const rate = (request.speed as string) ?? this.config.rate
+    // Edge TTS 的 rate/pitch 是字符串格式 ("+25%", "+5Hz")
+    // request.speed 可能是数字 (OpenAI 格式)，不能直接用于 Edge
+    const rate = (typeof request.speed === 'string' ? request.speed : null) ?? this.config.rate
     const pitch = request.pitch ?? this.config.pitch
 
-    logger.info(`[Edge] 合成: "${request.text.slice(0, 50)}..." (声音: ${voice})`)
+    logger.info(
+      `[Edge] 合成: "${request.text.slice(0, 50)}..." (声音: ${voice}, 语速: ${rate}, 音调: ${pitch})`,
+    )
     const startTime = Date.now()
 
-    // edge-tts API: tts(text, { voice, rate, pitch }) → Promise<Buffer>
-    const buffer = await edgeTts.tts(request.text, { voice, rate, pitch })
+    const tts = new MsEdgeTTS()
+    await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_96KBITRATE_MONO_MP3)
+
+    const { audioStream } = tts.toStream(request.text, { rate, pitch })
+
+    // 将流转换为 Buffer
+    const chunks: Buffer[] = []
+    for await (const chunk of audioStream) {
+      chunks.push(chunk as Buffer)
+    }
+    const buffer = Buffer.concat(chunks)
 
     const durationMs = Date.now() - startTime
     logger.info(

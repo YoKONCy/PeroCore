@@ -1,0 +1,26 @@
+name: Stale Bot
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # 每天午夜运行一次
+  issue_comment:
+    types: [created]
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@v9
+        with:
+          days-before-stale: 30
+          days-before-close: 7
+          stale-issue-message: '喵！这个帖子好像已经沉睡了 30 天了。由于长期不活跃，Carola 先把它打上 stale 标记啦。如果还有问题，只需回复一下就会自动唤醒哦！✨'
+          stale-pr-message: '喵！这个 PR 好像已经停滞了 30 天了。为了保持仓库整洁，Carola 把它打上 stale 标记啦。如果还在开发中，回复一下我就会取消标记哦！🛠️'
+          stale-issue-label: 'stale'
+          stale-pr-label: 'stale'
+          close-issue-message: '因为沉睡太久，Carola 悄悄把这个问题关掉啦。如果未来还需要协助，欢迎随时重新打开喵！🚪'
+          close-pr-message: '因为沉睡太久，Carola 帮你把这个 PR 关掉啦。如果还需要继续工作，欢迎随时重开喵！🚪'

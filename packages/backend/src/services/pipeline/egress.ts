@@ -95,6 +95,7 @@ export class EgressService {
         agentId,
         userContent: userText,
         assistantContent: reply,
+        assistantRawContent: rawReply,
       })
       logPairId = result.pairId
       logger.debug(`对话日志已保存: pairId=${logPairId}`)

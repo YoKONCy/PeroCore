@@ -202,22 +202,34 @@ export class GatewayHub {
         await this.handleHeartbeat(nodeId)
         break
       case 'request':
+        // 注入发送者 nodeId (用于 RPC 响应回送)
+        envelope.sourceId = nodeId
         this.emit('request', envelope)
         this.emit(`action:${envelope.payload.action as string}`, envelope)
-        // 路由
+        // 路由: 无 targetId 或 targetId=backend → 仅触发事件 (由后端 Service 处理)
         if (envelope.targetId === 'broadcast') {
           await this.broadcast(envelope, nodeId)
-        } else if (envelope.targetId !== 'backend') {
+        } else if (envelope.targetId && envelope.targetId !== 'backend') {
           await this.unicast(envelope)
         }
+        // else: targetId 为空/backend → 事件已触发, 由后端 Service 自行响应
+        break
+      case 'abort':
+        // 前端中断思考 (fire-and-forget)
+        this.emit('abort', envelope)
+        break
+      case 'ping':
+        // 前端心跳探测 → 等同 heartbeat
+        await this.handleHeartbeat(nodeId)
         break
       default:
         // push / response / error 直接路由
         if (envelope.targetId === 'broadcast') {
           await this.broadcast(envelope, nodeId)
-        } else {
+        } else if (envelope.targetId) {
           await this.unicast(envelope)
         }
+      // else: 无目标的推送消息，静默忽略
     }
   }
 

@@ -15,21 +15,18 @@ import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('ScreenVision')
 
-// ── 截图提供者抽象 ──
-
-/** 截图提供者接口 (由 container.ts 注入) */
+/** 截图提供者接口 */
 export interface ScreenshotProvider {
   /** 截取当前屏幕，返回 base64 编码的 PNG 数据 */
   capture(): Promise<string | null>
 }
 
-/** 全局引用: 在 container 接线阶段注入 */
-let screenshotProvider: ScreenshotProvider | null = null
+/** 模块引用 */
+let _screenshotProvider: ScreenshotProvider | null = null
 
-/** 注入截图提供者 (由 container.ts 调用) */
-export function injectScreenshotProvider(provider: ScreenshotProvider): void {
-  screenshotProvider = provider
-  logger.info('截图提供者已注入')
+/** 设置截图提供者 */
+export function setScreenshotProvider(provider: ScreenshotProvider | null): void {
+  _screenshotProvider = provider
 }
 
 // ── take_screenshot 工具 ──
@@ -52,7 +49,7 @@ export const takeScreenshotTool: BuiltinTool = {
   },
 
   async execute(args) {
-    if (!screenshotProvider) {
+    if (!_screenshotProvider) {
       return JSON.stringify({
         error: '截图服务未初始化。当前环境可能不支持屏幕截图。',
       })
@@ -64,7 +61,7 @@ export const takeScreenshotTool: BuiltinTool = {
       const screenshots: string[] = []
 
       for (let i = 0; i < count; i++) {
-        const base64 = await screenshotProvider.capture()
+        const base64 = await _screenshotProvider.capture()
         if (base64) {
           screenshots.push(base64)
         } else {
@@ -87,7 +84,6 @@ export const takeScreenshotTool: BuiltinTool = {
         success: true,
         screenshots: screenshots.map((data, i) => ({
           index: i,
-          // 返回 data URI，ReActLoop 会将其转为多模态 image_url
           dataUri: `data:image/png;base64,${data}`,
         })),
         message: `已获取 ${screenshots.length} 张屏幕截图`,

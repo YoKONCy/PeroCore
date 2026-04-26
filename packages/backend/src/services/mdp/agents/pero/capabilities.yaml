@@ -44,6 +44,8 @@ modes:
       - cancel_reminder
       # 脚本编排
       - run_script
+      # 日记查找
+      - search_diary
     skills:
       - memory_management
       - code_assistance
@@ -77,6 +79,8 @@ modes:
       - set_reminder
       - list_reminders
       - cancel_reminder
+      # ── 日记查找 ──
+      - search_diary
       # ── 社交工具 ──
       - social_send_message
       - social_get_contacts
@@ -108,6 +112,8 @@ modes:
       - set_reminder
       - list_reminders
       - cancel_reminder
+      # 日记查找
+      - search_diary
     skills: []
     prompt_fragments:
       - components/abilities/vision
@@ -115,6 +121,8 @@ modes:
   companion:
     tools:
       - finish_task
+      # 日记查找
+      - search_diary
     skills: []
     prompt_fragments: []
 

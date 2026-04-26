@@ -20,7 +20,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { FeatureButton } from './lib/adapter/IAvatarManifest'
+import type { FeatureButton } from './lib/adapter/IAvatarManifest'
 
 const props = defineProps<{
   featureButtons: FeatureButton[]

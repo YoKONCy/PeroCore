@@ -39,6 +39,7 @@ import { useAvatarScene } from '../../composables/avatar/useAvatarScene'
 import { useAvatarModel } from '../../composables/avatar/useAvatarModel'
 import { useAvatarInteraction } from '../../composables/avatar/useAvatarInteraction'
 import type { PetEvent } from '../../composables/avatar/useAvatarInteraction'
+import { logger } from '../../lib/logger'
 
 const props = defineProps<{
   isDragging?: boolean
@@ -144,7 +145,7 @@ watch(
         : await ManifestLoader.fromJson(newPath)
       await model.loadAvatar(manifest, sceneCtx.scene.value)
     } catch (e) {
-      console.error('[BedrockAvatar] 加载新 manifest 失败:', e)
+      logger.error('BedrockAvatar', '加载新 manifest 失败', e)
       model.errorMsg.value = `加载模型失败: ${e}`
     } finally {
       model.loading.value = false

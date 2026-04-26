@@ -4,11 +4,19 @@
     <div class="input-section">
       <div class="node input">
         <span class="icon">👤</span>
-        <span class="label">User Input<br /><small>用户输入</small></span>
+        <span class="label">
+          User Input
+          <br />
+          <small>用户输入</small>
+        </span>
       </div>
       <div class="connection-line vertical">
         <span class="arrow">↓</span>
-        <span class="desc">Embedding<br />向量化</span>
+        <span class="desc">
+          Embedding
+          <br />
+          向量化
+        </span>
       </div>
     </div>
 
@@ -23,15 +31,27 @@
         <div class="layer-content">
           <div class="node db">
             <span class="icon">🗄️</span>
-            <span class="label">SQLite<br /><small>(SQLModel)</small></span>
+            <span class="label">
+              SQLite
+              <br />
+              <small>(SQLModel)</small>
+            </span>
           </div>
           <div class="connection-line horizontal double">
             <span class="arrow">↔</span>
-            <span class="desc">CRUD<br />读写</span>
+            <span class="desc">
+              CRUD
+              <br />
+              读写
+            </span>
           </div>
           <div class="node service main-node">
             <span class="icon">🧠</span>
-            <span class="label">Memory Service<br /><small>记忆服务</small></span>
+            <span class="label">
+              Memory Service
+              <br />
+              <small>记忆服务</small>
+            </span>
           </div>
         </div>
       </div>
@@ -39,12 +59,20 @@
       <!-- Cross-Language Bridge -->
       <div class="bridge">
         <div class="flow down">
-          <span class="desc">Query (Vector)<br />向量查询</span>
+          <span class="desc">
+            Query (Vector)
+            <br />
+            向量查询
+          </span>
           <span class="arrow">↓</span>
         </div>
         <div class="flow up">
           <span class="arrow">↑</span>
-          <span class="desc">Activated IDs<br />激活节点</span>
+          <span class="desc">
+            Activated IDs
+            <br />
+            激活节点
+          </span>
         </div>
       </div>
 
@@ -57,15 +85,27 @@
         <div class="layer-content">
           <div class="node engine">
             <span class="icon">⚡</span>
-            <span class="label">Intent Engine<br /><small>意图引擎 (SIMD)</small></span>
+            <span class="label">
+              Intent Engine
+              <br />
+              <small>意图引擎 (SIMD)</small>
+            </span>
           </div>
           <div class="connection-line horizontal">
-            <span class="desc">Initial Energy<br />初始能量</span>
+            <span class="desc">
+              Initial Energy
+              <br />
+              初始能量
+            </span>
             <span class="arrow">→</span>
           </div>
           <div class="node engine">
             <span class="icon">🕸️</span>
-            <span class="label">Cognitive Graph<br /><small>认知图谱 (扩散激活)</small></span>
+            <span class="label">
+              Cognitive Graph
+              <br />
+              <small>认知图谱 (扩散激活)</small>
+            </span>
           </div>
         </div>
       </div>

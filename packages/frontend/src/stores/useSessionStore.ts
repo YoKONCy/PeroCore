@@ -9,6 +9,7 @@
 import { defineStore } from 'pinia'
 import { ref, shallowRef, computed } from 'vue'
 import { chatApi } from '../api/modules/chatApi'
+import { logger } from '../lib/logger'
 
 /** 聊天消息 */
 export interface ChatMessage {
@@ -100,7 +101,7 @@ export const useSessionStore = defineStore('session', () => {
     const numId = Number(id)
     if (Number.isInteger(numId) && numId > 0) {
       chatApi.editMessage(numId, newContent).catch((err) => {
-        console.error('消息编辑同步失败:', err)
+        logger.error('SessionStore', '消息编辑同步失败', err)
       })
     }
   }
@@ -114,7 +115,7 @@ export const useSessionStore = defineStore('session', () => {
     const numId = Number(id)
     if (Number.isInteger(numId) && numId > 0) {
       chatApi.deleteMessage(numId).catch((err) => {
-        console.error('消息删除同步失败:', err)
+        logger.error('SessionStore', '消息删除同步失败', err)
       })
     }
   }

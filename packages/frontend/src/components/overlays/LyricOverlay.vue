@@ -119,28 +119,32 @@ function onMouseUp() {
     <Transition name="lyric-fade">
       <div
         v-if="visible"
-        class="lyric-overlay"
+        class="fixed z-[1000] -translate-x-1/2 select-none cursor-move"
         :style="{ left: pos.x + 'px', top: pos.y + 'px' }"
         @mousedown="onMouseDown"
       >
         <!-- 拖拽手柄 -->
-        <div class="lyric-handle">
+        <div
+          class="flex justify-center py-0.5 text-slate-400 opacity-0 transition-opacity hover:opacity-100"
+        >
           <PixelIcon name="grip" size="xs" />
         </div>
 
-        <div class="lyric-bar">
+        <div
+          class="px-6 py-2.5 bg-slate-900/85 border-2 border-sky-500 text-white text-sm font-bold max-w-[600px] text-center backdrop-blur-[12px]"
+        >
           <!-- 思考状态 -->
-          <div v-if="isThinking" class="lyric-thinking">
-            <span class="lyric-dots">
-              <span class="lyric-dot" />
-              <span class="lyric-dot" />
-              <span class="lyric-dot" />
+          <div v-if="isThinking" class="flex items-center gap-2">
+            <span class="flex gap-1">
+              <span class="w-1.5 h-1.5 bg-sky-300 lyric-dot" />
+              <span class="w-1.5 h-1.5 bg-sky-300 lyric-dot lyric-dot-2" />
+              <span class="w-1.5 h-1.5 bg-sky-300 lyric-dot lyric-dot-3" />
             </span>
-            <span class="lyric-thinking-text">{{ thinkingMessage }}</span>
+            <span class="text-xs tracking-[0.15em] opacity-90">{{ thinkingMessage }}</span>
           </div>
 
           <!-- 文字 -->
-          <div v-else class="lyric-text">{{ text }}</div>
+          <div v-else class="truncate">{{ text }}</div>
         </div>
       </div>
     </Transition>
@@ -148,71 +152,6 @@ function onMouseUp() {
 </template>
 
 <style scoped>
-.lyric-overlay {
-  position: fixed;
-  z-index: 1000;
-  transform: translateX(-50%);
-  user-select: none;
-  cursor: move;
-}
-
-.lyric-handle {
-  display: flex;
-  justify-content: center;
-  padding: 2px 0;
-  color: var(--color-text-muted);
-  opacity: 0;
-  transition: opacity 0.2s;
-}
-.lyric-overlay:hover .lyric-handle {
-  opacity: 1;
-}
-
-.lyric-bar {
-  padding: 10px 24px;
-  background: rgba(15, 23, 42, 0.85);
-  border: 2px solid var(--color-sky-500);
-  color: white;
-  font-size: 14px;
-  font-weight: 700;
-  max-width: 600px;
-  text-align: center;
-  backdrop-filter: blur(12px);
-}
-
-.lyric-thinking {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.lyric-thinking-text {
-  font-size: 12px;
-  letter-spacing: 0.15em;
-  opacity: 0.9;
-}
-.lyric-dots {
-  display: flex;
-  gap: 4px;
-}
-.lyric-dot {
-  width: 6px;
-  height: 6px;
-  background: var(--color-sky-hover);
-  animation: dot-pulse 1.4s infinite;
-}
-.lyric-dot:nth-child(2) {
-  animation-delay: 0.2s;
-}
-.lyric-dot:nth-child(3) {
-  animation-delay: 0.4s;
-}
-
-.lyric-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* Transition */
 .lyric-fade-enter-active,
 .lyric-fade-leave-active {
@@ -220,13 +159,15 @@ function onMouseUp() {
     opacity 0.3s,
     transform 0.3s;
 }
+
 .lyric-fade-enter-from,
 .lyric-fade-leave-to {
   opacity: 0;
   transform: translateX(-50%) translateY(10px);
 }
 
-@keyframes dot-pulse {
+/* 圆点脉冲 */
+@keyframes lyric-dot-pulse {
   0%,
   80%,
   100% {
@@ -235,5 +176,15 @@ function onMouseUp() {
   40% {
     opacity: 1;
   }
+}
+
+.lyric-dot {
+  animation: lyric-dot-pulse 1.4s infinite;
+}
+.lyric-dot-2 {
+  animation-delay: 0.2s;
+}
+.lyric-dot-3 {
+  animation-delay: 0.4s;
 }
 </style>

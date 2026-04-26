@@ -39,9 +39,9 @@ export function createDrizzleConnection(databasePath: string) {
 
   // ── 首次启动自动建表 ──────────────────────────────────────
   // 检测核心表是否存在，不存在则执行全部 migration SQL
-  const tableCheck = sqlite.prepare(
-    "SELECT name FROM sqlite_master WHERE type='table' AND name='configs'",
-  ).get()
+  const tableCheck = sqlite
+    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='configs'")
+    .get()
 
   if (!tableCheck) {
     logger.info('检测到首次启动，正在创建数据库表...')
@@ -70,9 +70,47 @@ export function createDrizzleConnection(databasePath: string) {
       logger.error(`数据库初始化失败: ${err}`)
       throw err // 建表失败是致命错误，不能静默
     }
+  } else {
+    // ── 增量 Schema 修补 (旧数据库兼容) ──
+    applySchemaFixups(sqlite)
   }
 
   const db = drizzle(sqlite, { schema })
   logger.success('数据库连接成功')
   return db
+}
+
+/**
+ * 增量 Schema 修补
+ *
+ * 对已有数据库应用缺失的约束和列。
+ * 每个修补都是幂等的 (先检测再执行)。
+ */
+function applySchemaFixups(sqlite: Database.Database): void {
+  // Fixup 1: trivium_sync_tasks.dedupe_key 需要 UNIQUE 约束
+  // (onConflictDoUpdate 要求 target 列必须有 UNIQUE 或 PRIMARY KEY 约束)
+  try {
+    const hasUniqueIdx = sqlite
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='trivium_sync_tasks' AND sql LIKE '%UNIQUE%dedupe_key%'",
+      )
+      .get()
+
+    if (!hasUniqueIdx) {
+      logger.info('修补: 为 trivium_sync_tasks.dedupe_key 添加 UNIQUE 约束')
+      sqlite.exec(`
+        -- 清理可能的重复数据，保留最新的
+        DELETE FROM trivium_sync_tasks WHERE id NOT IN (
+          SELECT MAX(id) FROM trivium_sync_tasks GROUP BY dedupe_key
+        );
+        -- 删除旧的非 UNIQUE 索引
+        DROP INDEX IF EXISTS idx_trivium_sync_tasks_dedupe_key;
+        -- 创建 UNIQUE 索引
+        CREATE UNIQUE INDEX IF NOT EXISTS trivium_sync_tasks_dedupe_key_unique ON trivium_sync_tasks(dedupe_key);
+      `)
+      logger.success('修补完成: trivium_sync_tasks.dedupe_key UNIQUE 约束已添加')
+    }
+  } catch (err) {
+    logger.warn(`Schema 修补失败 (非致命): ${err}`)
+  }
 }

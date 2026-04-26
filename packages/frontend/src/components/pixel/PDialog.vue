@@ -104,12 +104,12 @@ function close() {
               <slot name="footer" />
             </template>
             <template v-else>
-              <PButton variant="secondary" size="sm" @click="handleCancel">{{
-                cancelText
-              }}</PButton>
-              <PButton :variant="confirmVariant" size="sm" @click="handleConfirm">{{
-                confirmText
-              }}</PButton>
+              <PButton variant="secondary" size="sm" @click="handleCancel">
+                {{ cancelText }}
+              </PButton>
+              <PButton :variant="confirmVariant" size="sm" @click="handleConfirm">
+                {{ confirmText }}
+              </PButton>
             </template>
           </div>
         </div>

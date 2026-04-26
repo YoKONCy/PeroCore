@@ -21,12 +21,12 @@ module.exports = {
       script: 'packages/backend/dist/main.js',
 
       // 进程管理
-      instances: 1,            // 单实例（SQLite 不支持多写）
-      exec_mode: 'fork',       // fork 模式（非 cluster）
-      autorestart: true,       // 异常退出自动重启
-      max_restarts: 10,        // 最大连续重启次数
-      restart_delay: 3000,     // 重启间隔 3 秒
-      max_memory_restart: '512M',  // 内存超限重启
+      instances: 1, // 单实例（SQLite 不支持多写）
+      exec_mode: 'fork', // fork 模式（非 cluster）
+      autorestart: true, // 异常退出自动重启
+      max_restarts: 10, // 最大连续重启次数
+      restart_delay: 3000, // 重启间隔 3 秒
+      max_memory_restart: '512M', // 内存超限重启
 
       // 日志（对齐 08_LOGGING_SPEC.md: 按天轮转 + 14 天清理）
       log_date_format: 'YYYY-MM-DD HH:mm:ss.SSS',
@@ -42,8 +42,8 @@ module.exports = {
       env: {
         NODE_ENV: 'development',
         PERO_PORT: 9120,
-        PERO_HOST: '0.0.0.0',    // Docker 容器内需要监听所有接口
-        PERO_LOG_LEVEL: 4,       // debug
+        PERO_HOST: '0.0.0.0', // Docker 容器内需要监听所有接口
+        PERO_LOG_LEVEL: 4, // debug
       },
 
       // 生产环境覆盖
@@ -51,7 +51,7 @@ module.exports = {
         NODE_ENV: 'production',
         PERO_PORT: 9120,
         PERO_HOST: '0.0.0.0',
-        PERO_LOG_LEVEL: 3,       // info
+        PERO_LOG_LEVEL: 3, // info
       },
     },
   ],

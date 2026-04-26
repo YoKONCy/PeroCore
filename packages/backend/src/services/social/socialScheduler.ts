@@ -32,21 +32,21 @@ const logger = createLogger('SocialScheduler')
 // ─────────────────────────────────────────────
 
 export interface SocialSchedulerConfig {
-  /** 群聊扫描间隔 (秒) */
-  groupScanInterval: number
-  /** 私聊扫描间隔 (秒) */
-  privateScanInterval: number
   /** 最少缓冲消息数才触发思考状态机审视 */
   minMessagesForReview: number
   /** 思考状态机 LLM 温度 */
   thinkingTemperature: number
+  /** 夜间静音开始小时 (0-23) */
+  nightSilenceStart: number
+  /** 夜间静音结束小时 (0-23) */
+  nightSilenceEnd: number
 }
 
 const DEFAULT_CONFIG: SocialSchedulerConfig = {
-  groupScanInterval: 5 * 60, // 5 分钟
-  privateScanInterval: 2 * 60, // 2 分钟
   minMessagesForReview: 3,
   thinkingTemperature: 0.3,
+  nightSilenceStart: 0, // 00:00
+  nightSilenceEnd: 8, // 08:00
 }
 
 // ─────────────────────────────────────────────
@@ -85,8 +85,12 @@ export class SocialScheduler {
   private deps: SocialSchedulerDeps
   private config: SocialSchedulerConfig
   private running = false
-  private groupTimer: ReturnType<typeof setInterval> | null = null
-  private privateTimer: ReturnType<typeof setInterval> | null = null
+  /** 群聊轮询 timer */
+  private groupTimer: ReturnType<typeof setTimeout> | null = null
+  /** 私聊轮询 timer */
+  private privateTimer: ReturnType<typeof setTimeout> | null = null
+  /** 群聊下次触发时间 (启动后延迟 5~10 分钟) */
+  private nextGroupThoughtTime = 0
 
   constructor(deps: SocialSchedulerDeps, config?: Partial<SocialSchedulerConfig>) {
     this.deps = deps
@@ -99,96 +103,173 @@ export class SocialScheduler {
     if (this.running) return
     this.running = true
 
-    this.groupTimer = setInterval(() => {
-      this.scanGroupSessions().catch((err) => logger.error(`群聊扫描错误: ${err}`))
-    }, this.config.groupScanInterval * 1000)
+    // 群聊: 启动延迟 5~10 分钟 (与 v1 对齐)
+    this.nextGroupThoughtTime = Date.now() + (300 + Math.floor(Math.random() * 300)) * 1000
 
-    this.privateTimer = setInterval(() => {
-      this.scanPrivateSessions().catch((err) => logger.error(`私聊扫描错误: ${err}`))
-    }, this.config.privateScanInterval * 1000)
+    // 群聊轮询: 每 30s 检查一次 (v1: asyncio.sleep(30))
+    this.scheduleGroupPoll()
+    // 私聊轮询: 每 10s 检查一次 (v1: asyncio.sleep(10))
+    this.schedulePrivatePoll()
 
-    logger.info(
-      `社交调度器已启动 (群聊=${this.config.groupScanInterval}s, ` +
-        `私聊=${this.config.privateScanInterval}s)`,
-    )
+    logger.info('社交调度器已启动 (v1 动态周期模式)')
   }
 
   stop(): void {
     this.running = false
 
     if (this.groupTimer) {
-      clearInterval(this.groupTimer)
+      clearTimeout(this.groupTimer)
       this.groupTimer = null
     }
     if (this.privateTimer) {
-      clearInterval(this.privateTimer)
+      clearTimeout(this.privateTimer)
       this.privateTimer = null
     }
 
     logger.info('社交调度器已停止')
   }
 
+  // ── 群聊轮询调度 ──
+
+  private scheduleGroupPoll(): void {
+    if (!this.running) return
+    this.groupTimer = setTimeout(() => {
+      this.scanGroupSessions()
+        .catch((err) => logger.error(`群聊扫描错误: ${err}`))
+        .finally(() => this.scheduleGroupPoll())
+    }, 30_000) // 30s 轮询
+  }
+
+  // ── 私聊轮询调度 ──
+
+  private schedulePrivatePoll(): void {
+    if (!this.running) return
+    this.privateTimer = setTimeout(() => {
+      this.scanPrivateSessions()
+        .catch((err) => logger.error(`私聊扫描错误: ${err}`))
+        .finally(() => this.schedulePrivatePoll())
+    }, 10_000) // 10s 轮询
+  }
+
   // ── 扫描循环 ──
 
   /**
-   * 群聊扫描
+   * 群聊扫描 (对齐 v1 _group_scan_loop)
    *
-   * 遍历所有活跃群聊会话，通过思考状态机判断是否需要主动回复。
+   * 全局单一计时器，随机选择活跃群聊进行观察。
+   * 时间表动态调整:
+   * - 活跃且刚说完话: 120s
+   * - 活跃未说话: 60s
+   * - 潜水/观察: 30~60min
+   * - 无活跃会话: 10~20min
    */
   private async scanGroupSessions(): Promise<void> {
-    const sessions = this.deps.sessionManager.getActiveSessions('group', 10)
+    // 夜间静音检查
+    if (this.isNightSilence()) return
+
     const now = Date.now()
 
-    for (const session of sessions) {
-      // 检查活跃状态过期
-      this.deps.sessionManager.checkActiveExpiry(session)
+    // 未到触发时间
+    if (now < this.nextGroupThoughtTime) return
 
-      // 跳过 dive 状态
-      if (session.state === 'dive') continue
+    const sessions = this.deps.sessionManager.getActiveSessions('group', 5)
 
-      // 跳过未到扫描时间的
-      if (now < session.nextScanTime) continue
-
-      // 跳过缓冲区为空或消息太少的
-      if (session.buffer.length < this.config.minMessagesForReview) continue
-
-      // 思考状态机决策
-      try {
-        const decision = await this.thinkingDecision(session, session.buffer)
-
-        if (decision.shouldReply) {
-          logger.info(`[${session.channelId}] 思考状态机决定主动发言: ${decision.reason}`)
-          const messages = [...session.buffer]
-          session.buffer = []
-          await this.deps.onDecideReply(session, messages)
-        } else {
-          logger.debug(`[${session.channelId}] 思考状态机决定不发: ${decision.reason}`)
-        }
-
-        // 更新下次扫描时间 (随机化避免节奏感)
-        const jitter = Math.floor(Math.random() * 120 - 60) // ±60s
-        session.nextScanTime = now + (this.config.groupScanInterval + jitter) * 1000
-      } catch (err) {
-        logger.error(`[${session.channelId}] 思考状态机决策失败: ${err}`)
-      }
+    if (sessions.length === 0) {
+      // 无活跃会话 → 休眠 10~20 分钟 (v1: 600-1200)
+      const interval = 600 + Math.floor(Math.random() * 600)
+      this.nextGroupThoughtTime = now + interval * 1000
+      return
     }
+
+    // 随机选择一个活跃群聊 (v1: random.choice)
+    const target = sessions[Math.floor(Math.random() * sessions.length)]!
+
+    // 检查活跃状态 (120s 内互动过)
+    this.deps.sessionManager.checkActiveExpiry(target)
+    if (target.state === 'dive') return
+
+    const isActive = target.state === 'active'
+
+    // 跳过缓冲区为空的
+    if (target.buffer.length < this.config.minMessagesForReview) {
+      // 缓冲不足 → 短间隔重试
+      this.nextGroupThoughtTime = now + (isActive ? 60 : 300) * 1000
+      return
+    }
+
+    // 思考状态机决策
+    let spoke = false
+    try {
+      const decision = await this.thinkingDecision(target, target.buffer)
+
+      if (decision.shouldReply) {
+        logger.info(`[${target.channelId}] 思考状态机决定主动发言: ${decision.reason}`)
+        const messages = [...target.buffer]
+        target.buffer = []
+        await this.deps.onDecideReply(target, messages)
+        spoke = true
+      } else {
+        logger.debug(`[${target.channelId}] 思考状态机决定不发: ${decision.reason}`)
+      }
+    } catch (err) {
+      logger.error(`[${target.channelId}] 思考状态机决策失败: ${err}`)
+      this.nextGroupThoughtTime = now + 300_000 // 错误后 5 分钟重试
+      return
+    }
+
+    // 动态决定下次检查时间 (与 v1 完全对齐)
+    let interval: number
+    if (spoke) {
+      // 发言成功: 活跃状态 120s, 潜水状态 30~60min 贤者模式
+      interval = isActive ? 120 : 1800 + Math.floor(Math.random() * 1800)
+    } else if (isActive) {
+      // 活跃但没发言: 60s 后再看
+      interval = 60
+    } else {
+      // 潜水观察: 30~60 分钟 (v1: 1800-3600)
+      interval = 1800 + Math.floor(Math.random() * 1800)
+    }
+
+    this.nextGroupThoughtTime = now + interval * 1000
+    logger.debug(`[群聊] 下次检查将在 ${interval} 秒后`)
   }
 
   /**
-   * 私聊扫描
+   * 私聊扫描 (对齐 v1 _private_scan_loop)
    *
-   * 私聊更敏感 — 如果有未回复的消息且超过扫描间隔，直接回复。
+   * 每个私聊有独立的 nextScanTime:
+   * - 活跃期 (120s 内互动过): 跳过，60s 后再看
+   * - 非活跃: 触发秘书决策
+   * - 发言后: 4~8 小时长周期 (v1: 14400-28800)
    */
   private async scanPrivateSessions(): Promise<void> {
-    const sessions = this.deps.sessionManager.getActiveSessions('private', 10)
+    // 夜间静音检查
+    if (this.isNightSilence()) return
+
+    const sessions = this.deps.sessionManager.getActiveSessions('private', 20)
     const now = Date.now()
 
     for (const session of sessions) {
       if (session.state === 'dive') continue
       if (now < session.nextScanTime) continue
-      if (session.buffer.length === 0) continue
 
-      // 私聊不做思考状态机决策，直接回复
+      // 检查活跃状态 (120s 内互动过)
+      this.deps.sessionManager.checkActiveExpiry(session)
+      const isActive = session.state === 'active'
+
+      // 活跃期不主动 Double Text (v1: 60s 跳过)
+      if (isActive) {
+        session.nextScanTime = now + 60_000
+        continue
+      }
+
+      if (session.buffer.length === 0) {
+        // 无消息，长周期
+        session.nextScanTime = now + (14400 + Math.floor(Math.random() * 14400)) * 1000
+        continue
+      }
+
+      // 触发秘书检查
       logger.info(`[${session.channelId}] 私聊有未回复消息, 触发回复`)
 
       const messages = [...session.buffer]
@@ -200,9 +281,12 @@ export class SocialScheduler {
         logger.error(`[${session.channelId}] 私聊回复失败: ${err}`)
       }
 
-      // 更新下次扫描 (私聊活跃时短周期)
-      const shortInterval = 120 + Math.floor(Math.random() * 120)
-      session.nextScanTime = now + shortInterval * 1000
+      // 私聊长周期: 4~8 小时 (v1: 14400-28800)
+      const nextInterval = 14400 + Math.floor(Math.random() * 14400)
+      session.nextScanTime = now + nextInterval * 1000
+      logger.debug(
+        `[私聊] ${session.channelId} 下次检查在 ${Math.floor(nextInterval / 3600)} 小时后`,
+      )
     }
   }
 
@@ -249,11 +333,38 @@ export class SocialScheduler {
     const systemPrompt = `${systemPart}\n\n${rulesPart}`
 
     try {
+      // 多模态: 收集缓冲区中最近的图片附件 (最多 2 张)
+      const imageUrls: string[] = []
+      for (let i = messages.length - 1; i >= 0 && imageUrls.length < 2; i--) {
+        const attachments = messages[i]!.attachments ?? []
+        for (const att of attachments) {
+          if (att.type === 'image' && att.url) {
+            imageUrls.push(att.url)
+            if (imageUrls.length >= 2) break
+          }
+        }
+      }
+
+      // 构建 user 消息 (支持多模态)
+      type ContentPart =
+        | { type: 'text'; text: string }
+        | { type: 'image_url'; image_url: { url: string } }
+      const userContent: string | ContentPart[] =
+        imageUrls.length > 0
+          ? [
+              { type: 'text' as const, text: `群聊 ${session.channelId} 最近消息:\n${context}` },
+              ...imageUrls.map((url) => ({
+                type: 'image_url' as const,
+                image_url: { url },
+              })),
+            ]
+          : `群聊 ${session.channelId} 最近消息:\n${context}`
+
       const completion = await this.deps.llmService.chat(
         modelConfig,
         [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: `群聊 ${session.channelId} 最近消息:\n${context}` },
+          { role: 'user', content: userContent },
         ],
         { temperature: this.config.thinkingTemperature },
       )
@@ -277,5 +388,19 @@ export class SocialScheduler {
       logger.error(`思考状态机 LLM 调用失败: ${err}`)
       return { shouldReply: false, reason: `LLM 错误: ${err}` }
     }
+  }
+
+  // ── 辅助方法 ──
+
+  /** 检查当前是否在夜间静音时段 */
+  private isNightSilence(): boolean {
+    const hour = new Date().getHours()
+    const { nightSilenceStart, nightSilenceEnd } = this.config
+    if (nightSilenceStart <= nightSilenceEnd) {
+      // 正常范围: 如 0-8
+      return hour >= nightSilenceStart && hour < nightSilenceEnd
+    }
+    // 跨午夜: 如 23-7
+    return hour >= nightSilenceStart || hour < nightSilenceEnd
   }
 }

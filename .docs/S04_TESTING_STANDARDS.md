@@ -12,7 +12,7 @@
 |---|---|
 | **模块必须有测试** | Service / Repository / Composable / 工具函数必须有 `*.test.ts` |
 | **PR 不裸奔** | 不允许提交没有测试的业务模块代码（纯类型/常量除外） |
-| **测试伴随代码** | 测试文件与源码同目录 |
+| **测试伴随代码** | 测试文件放在对应 package 的 `tests/unit` 目录，并保持与 `src` 内模块路径一致 |
 | **测试即文档** | 测试用例描述必须使用中文 |
 
 ### 豁免范围
@@ -35,17 +35,25 @@
 
 ## 3. 文件组织
 
-### Co-located 模式
+### Package 级 `tests/unit` 模式
+
+单元测试统一放在对应 package 的 `tests/unit` 目录下，目录结构应镜像 `src` 内被测模块路径。这样既能保持源码目录纯净，也能在 monorepo 中清晰区分 frontend、backend、shared 等 package 的测试边界。
 
 ```
-packages/backend/src/
-├── services/memory/
-│   ├── memoryService.ts
-│   ├── memoryService.test.ts      ← 单元测试
-│   ├── memoryRepository.ts
-│   └── memoryRepository.test.ts
-└── __tests__/                      ← 跨模块集成测试
-    └── memoryPipeline.integration.test.ts
+packages/backend/
+├── src/
+│   ├── services/memory/
+│   │   └── memoryService.ts
+│   └── repositories/
+│       └── memory.repo.ts
+└── tests/
+    ├── unit/
+    │   ├── services/memory/
+    │   │   └── memoryService.test.ts
+    │   └── repositories/
+    │       └── memory.repo.test.ts
+    └── integration/
+        └── memoryPipeline.integration.test.ts
 ```
 
 ### 命名规则
@@ -62,23 +70,29 @@ packages/backend/src/
 
 ### 4.1 AAA 模式 + 中文描述
 
+测试用例必须遵循 Arrange / Act / Assert 三段式。可用空行分隔三个阶段；如测试逻辑较长，可以使用中文注释标记阶段。测试描述必须使用中文，并说明期望行为。
+
 ```typescript
 describe('MemoryService', () => {
   describe('创建记忆', () => {
     it('应当成功创建并返回新记忆的 ID', async () => {
-      // Arrange
+      const mockRepo = { create: vi.fn() }
+      const service = new MemoryService(mockRepo)
       mockRepo.create.mockResolvedValue({ id: 'mem_001', content: '测试' })
-      // Act
+
       const result = await service.createMemory({ content: '测试', agentId: 'agent_001' })
-      // Assert
+
       expect(result.id).toBe('mem_001')
       expect(mockRepo.create).toHaveBeenCalledOnce()
     })
 
     it('内容为空时应当抛出验证错误', async () => {
-      await expect(
-        service.createMemory({ content: '', agentId: 'agent_001' })
-      ).rejects.toThrow('内容不能为空')
+      const mockRepo = { create: vi.fn() }
+      const service = new MemoryService(mockRepo)
+
+      await expect(service.createMemory({ content: '', agentId: 'agent_001' })).rejects.toThrow(
+        '内容不能为空',
+      )
     })
   })
 })

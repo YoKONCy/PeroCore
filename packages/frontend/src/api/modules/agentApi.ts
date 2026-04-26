@@ -12,6 +12,8 @@ export interface AgentListItem {
   description: string
   isActive: boolean
   isEnabled: boolean
+  /** 头像 URL (/api/agents/:id/avatar) */
+  avatarUrl?: string
 }
 
 export const agentApi = {
@@ -32,4 +34,7 @@ export const agentApi = {
 
   /** 重载所有 Agent 配置 */
   reload: () => apiClient.post<void>('/agents/reload'),
+
+  /** 获取 Agent 看板娘台词 (静态 + 动态合并) */
+  getTexts: (agentId: string) => apiClient.get<Record<string, unknown>>(`/agents/${agentId}/texts`),
 }

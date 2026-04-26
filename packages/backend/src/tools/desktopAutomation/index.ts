@@ -52,13 +52,12 @@ export interface DesktopAutomationProvider {
   getMousePosition(): Promise<{ x: number; y: number }>
 }
 
-/** 全局引用 */
-let automationProvider: DesktopAutomationProvider | null = null
+/** 模块引用 (由 setDesktopAutomationProvider 设置) */
+let _automationProvider: DesktopAutomationProvider | null = null
 
-/** 注入自动化提供者 (由 container.ts 调用) */
-export function injectDesktopAutomationProvider(provider: DesktopAutomationProvider): void {
-  automationProvider = provider
-  logger.info('桌面自动化提供者已注入')
+/** 设置自动化提供者 (构造时调用) */
+export function setDesktopAutomationProvider(provider: DesktopAutomationProvider | null): void {
+  _automationProvider = provider
 }
 
 // ── automation_execute ──
@@ -96,7 +95,7 @@ export const automationExecuteTool: BuiltinTool = {
   },
 
   async execute(args) {
-    if (!automationProvider) {
+    if (!_automationProvider) {
       return JSON.stringify({
         error: '桌面自动化服务未初始化。当前环境可能不支持 GUI 操作。',
       })
@@ -115,22 +114,22 @@ export const automationExecuteTool: BuiltinTool = {
     try {
       switch (action) {
         case 'click':
-          await automationProvider.click(x, y)
+          await _automationProvider.click(x, y)
           return JSON.stringify({ success: true, message: `已在 (${x}, ${y}) 执行点击` })
 
         case 'double_click':
-          await automationProvider.doubleClick(x, y)
+          await _automationProvider.doubleClick(x, y)
           return JSON.stringify({ success: true, message: `已在 (${x}, ${y}) 执行双击` })
 
         case 'right_click':
-          await automationProvider.rightClick(x, y)
+          await _automationProvider.rightClick(x, y)
           return JSON.stringify({ success: true, message: `已在 (${x}, ${y}) 执行右键点击` })
 
         case 'drag':
           if (x == null || y == null || x2 == null || y2 == null) {
             return JSON.stringify({ error: '拖拽操作需要起始坐标 (x, y) 和目标坐标 (x2, y2)' })
           }
-          await automationProvider.drag(x, y, x2, y2)
+          await _automationProvider.drag(x, y, x2, y2)
           return JSON.stringify({
             success: true,
             message: `已从 (${x}, ${y}) 拖拽到 (${x2}, ${y2})`,
@@ -140,7 +139,7 @@ export const automationExecuteTool: BuiltinTool = {
           if (!text) {
             return JSON.stringify({ error: '请提供要输入的文本 (text)' })
           }
-          await automationProvider.typeText(text)
+          await _automationProvider.typeText(text)
           return JSON.stringify({ success: true, message: `已输入文本: "${text.slice(0, 50)}"` })
 
         case 'hotkey': {
@@ -148,14 +147,14 @@ export const automationExecuteTool: BuiltinTool = {
             return JSON.stringify({ error: '请提供快捷键组合 (text), 如 "ctrl+c"' })
           }
           const keys = text.replace(/\s/g, '').split('+')
-          await automationProvider.hotkey(keys)
+          await _automationProvider.hotkey(keys)
           return JSON.stringify({ success: true, message: `已执行快捷键: ${text}` })
         }
 
         case 'notification': {
           const title = text ?? 'Pero 提醒'
           const body = message ?? '主人，我有事情要告诉你哦！'
-          await automationProvider.sendNotification(title, body)
+          await _automationProvider.sendNotification(title, body)
           return JSON.stringify({ success: true, message: `已发送通知: ${title}` })
         }
 
@@ -183,12 +182,12 @@ export const getMousePositionTool: BuiltinTool = {
   },
 
   async execute() {
-    if (!automationProvider) {
+    if (!_automationProvider) {
       return JSON.stringify({ error: '桌面自动化服务未初始化' })
     }
 
     try {
-      const pos = await automationProvider.getMousePosition()
+      const pos = await _automationProvider.getMousePosition()
       return JSON.stringify({
         success: true,
         position: pos,

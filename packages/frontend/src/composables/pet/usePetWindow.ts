@@ -13,6 +13,7 @@
 
 import { ref, onMounted, onUnmounted } from 'vue'
 import { invoke, listen, send, isElectron } from '../../utils/ipcAdapter'
+import { logger } from '../../lib/logger'
 
 /** 全局鼠标坐标 (相对于 Pet 窗口) */
 export interface GlobalMousePosition {
@@ -155,7 +156,7 @@ export function usePetWindow() {
       })
       cleanupFns.push(unlistenMouse)
     } catch {
-      console.warn('[usePetWindow] 全局鼠标追踪注册失败')
+      logger.warn('PetWindow', '全局鼠标追踪注册失败')
     }
 
     // 4. 注册拖拽事件

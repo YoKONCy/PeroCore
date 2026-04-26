@@ -10,14 +10,7 @@ import TerminalPanel from '../../terminal/TerminalPanel.vue'
 </script>
 
 <template>
-  <div class="terminal-tab">
+  <div class="h-full overflow-hidden">
     <TerminalPanel />
   </div>
 </template>
-
-<style scoped>
-.terminal-tab {
-  height: 100%;
-  overflow: hidden;
-}
-</style>

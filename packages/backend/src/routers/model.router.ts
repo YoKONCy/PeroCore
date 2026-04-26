@@ -31,8 +31,8 @@ const createModelSchema = z.object({
   provider: z.string().min(1),
   /** 模型 ID (如 gpt-4o, claude-sonnet-4-20250514) */
   modelId: z.string().min(1),
-  /** API Key */
-  apiKey: z.string().min(1),
+  /** API Key (可选，留空使用全局配置) */
+  apiKey: z.string().default(''),
   /** API 基址 (可选，留空使用默认) */
   apiBase: z.string().optional(),
   /** 温度 0-2 */
@@ -90,6 +90,24 @@ export function createModelRouter(ctx: AppContext) {
     await ctx.modelService.delete(id)
     return c.json({ code: 'OK', message: '模型配置已删除' })
   })
+
+  // POST /api/models/list-remote — 获取远程模型列表
+  router.post(
+    '/list-remote',
+    zValidator(
+      'json',
+      z.object({
+        provider: z.string().min(1),
+        apiKey: z.string().min(1),
+        apiBase: z.string().optional(),
+      }),
+    ),
+    async (c) => {
+      const body = c.req.valid('json')
+      const models = await ctx.modelService.listRemoteModels(body)
+      return c.json({ code: 'OK', message: '获取成功', data: models })
+    },
+  )
 
   // POST /api/models/:id/test — 测试模型连通性
   router.post('/:id/test', async (c) => {

@@ -46,12 +46,14 @@ import { Consolidator } from './services/memory/maintenance/consolidator'
 import { Auditor } from './services/memory/maintenance/auditor'
 import { RetirementPolicy } from './services/memory/maintenance/retirementPolicy'
 import { ReflectionOrchestrator } from './services/memory/maintenance/reflectionOrchestrator'
+import { MaintenanceService } from './services/memory/maintenance/maintenanceService'
 import { SocialScorerService } from './services/memory/socialScorer'
 import { WaifuTextUpdater } from './services/agent/waifuTextUpdater'
 
 // ── Service (Phase 3: Agent 域) ──
 import { AgentManager } from './services/agent/agentManager'
 import { AgentService } from './services/agent/agentService'
+import { ChatResetService } from './services/agent/chatResetService'
 import { ToolRegistry } from './services/agent/toolRegistry'
 import { RegistryToolExecutor } from './services/agent/toolExecutor'
 import { TaskManager } from './services/agent/taskManager'
@@ -83,7 +85,8 @@ import { VectorWriteHelper } from './shared/vectorWriteHelper'
 // ── Extension System (B6) ──
 import { ExtensionManager } from './extensions/extensionManager'
 import { registerBuiltinTools } from './tools'
-import { injectSchedulerService } from './tools/scheduler'
+import { setSchedulerService } from './tools/scheduler'
+import { setDiarySearchDeps } from './tools/diarySearch'
 import { runCleanup, runLonelyScan } from './lifecycle/cron'
 import { McpClientManager, bridgeMcpTools } from './services/mcp'
 import { McpConfigRepository } from './repositories/mcp.repo'
@@ -93,23 +96,28 @@ import { GroupChatDispatcher } from './services/stronghold/groupChatDispatcher'
 import { CompanionScheduler } from './services/companion/companionScheduler'
 import { createEnvelope } from './services/gateway/types'
 import { SocialBridge } from './services/social/socialBridge'
+import { ImageCacheManager } from './services/social/imageCacheManager'
+import { StickerService } from './services/social/stickerService'
 import { NapcatAdapter } from './extensions/adapters/napcat'
 import { SocialMessageRepository } from './repositories/socialMessage.repo'
 
 // ── Platform Providers — 工具注入 (仅桌面环境) ──
 import { createDesktopProviders } from './providers/platformProviders'
-import { injectScreenshotProvider } from './tools/screenVision'
-import { injectWindowProvider } from './tools/systemInfo'
-import { injectDesktopAutomationProvider } from './tools/desktopAutomation'
-import { injectSocialMessagingProvider } from './tools/socialOps'
-import { injectStrongholdService } from './tools/strongholdOps'
-import { injectFinishTaskDeps } from './tools/finishTask'
+import { setScreenshotProvider } from './tools/screenVision'
+import { setWindowProvider } from './tools/systemInfo'
+import { setDesktopAutomationProvider } from './tools/desktopAutomation'
+import { setSocialMessagingProvider } from './tools/socialOps'
+import { setStrongholdService } from './tools/strongholdOps'
+import { setFinishTaskDeps } from './tools/finishTask'
 import { PetStateService } from './services/agent/petStateService'
 
 // ── Service (Voice 域) ──
 import { TtsService } from './services/voice/ttsService'
 import { AsrService } from './services/voice/asrService'
 import { RealtimeSessionManager } from './services/voice/realtimeSessionManager'
+
+// ── Service (System 域) ──
+import { SystemService } from './services/system/systemService'
 
 const logger = createLogger('Container')
 
@@ -162,12 +170,14 @@ export interface AppContext {
   scorerService: ScorerService
   memoryImporter: MemoryImporter
   diaryEngine: DiaryEngine
+  maintenanceService: MaintenanceService
   modelRegistry: ModelRegistry
   modelService: ModelService
 
   // ── Service (Agent 域) ──
   agentManager: AgentManager
   agentService: AgentService
+  chatResetService: ChatResetService
   promptService: PromptService
   toolRegistry: ToolRegistry
   taskManager: TaskManager
@@ -205,6 +215,17 @@ export interface AppContext {
   ttsService: TtsService
   asrService: AsrService
   realtimeSessionManager: RealtimeSessionManager
+
+  // ── 系统信息 ──
+  systemService: SystemService
+
+  // ── 热更新 ──
+  /** 从 DB 重新加载 Embedding 配置并热更新 Provider */
+  reloadEmbeddingConfig(): Promise<void>
+  /** 从 DB 重新加载 TTS 配置并热更新 */
+  reloadTtsConfig(): Promise<void>
+  /** 从 DB 重新加载 ASR 配置并热更新 */
+  reloadAsrConfig(): Promise<void>
 }
 
 // ─────────────────────────────────────────────
@@ -246,7 +267,7 @@ export function createDefaultConfig(): AppConfig {
  * 按依赖顺序初始化所有组件：
  * 基础设施 → Repository → Service (Memory) → Service (Agent)
  */
-export function createAppContext(config: AppConfig): AppContext {
+export async function createAppContext(config: AppConfig): Promise<AppContext> {
   logger.info('正在初始化依赖注入容器...')
 
   // ── 1. 核心基础设施 ──
@@ -263,9 +284,37 @@ export function createAppContext(config: AppConfig): AppContext {
   const configRepo = new ConfigRepository(db)
   const storeRegistry = new MemoryStoreRegistry(pathResolver)
   const vectorRepo = new VectorRepository(storeRegistry)
+  const mcpRepo = new McpConfigRepository(db)
 
   // ── 4. Shared 工具 ──
-  const embeddingService = new EmbeddingService(config.embedding)
+
+  // Embedding/Reranker: 优先从 DB (Dashboard 配置) 读取, fallback 到环境变量默认值
+  const dbEmbeddingApiBase = await configRepo.get('embedding.apiBase')
+  const dbEmbeddingApiKey = await configRepo.get('embedding.apiKey')
+  const dbEmbeddingModel = await configRepo.get('embedding.model')
+  const dbEmbeddingDim = await configRepo.get('embedding.dimension')
+  const dbRerankerApiBase = await configRepo.get('reranker.apiBase')
+  const dbRerankerApiKey = await configRepo.get('reranker.apiKey')
+  const dbRerankerModel = await configRepo.get('reranker.model')
+
+  const embeddingConfig = {
+    ...config.embedding,
+    apiBase: dbEmbeddingApiBase || config.embedding.apiBase,
+    apiKey: dbEmbeddingApiKey || config.embedding.apiKey,
+    model: dbEmbeddingModel || config.embedding.model,
+    dimension: dbEmbeddingDim ? Number(dbEmbeddingDim) : config.embedding.dimension,
+    reranker: {
+      ...config.embedding.reranker!,
+      apiBase: dbRerankerApiBase || config.embedding.reranker!.apiBase,
+      apiKey: dbRerankerApiKey || config.embedding.reranker!.apiKey,
+      model: dbRerankerModel || config.embedding.reranker!.model,
+    },
+  }
+  logger.info(
+    `Embedding 配置: model=${embeddingConfig.model}, dim=${embeddingConfig.dimension} (来源: ${dbEmbeddingModel ? 'DB' : 'ENV'})`,
+  )
+
+  const embeddingService = new EmbeddingService(embeddingConfig)
   const vectorWriteHelper = new VectorWriteHelper(vectorRepo, vectorSyncRepo, embeddingService)
 
   // ── 5. MDP 引擎 (后台任务和 Agent 域都依赖) ──
@@ -277,7 +326,7 @@ export function createAppContext(config: AppConfig): AppContext {
   const modelRepo = new ModelRepository(db)
   const llmService = new LlmService()
   const modelService = new ModelService(modelRepo, llmService, modelRegistry)
-  const modelRoles = new ModelRoleResolver(configRepo)
+  const modelRoles = new ModelRoleResolver(configRepo, modelRepo)
   const memoryService = new MemoryService(memoryRepo, vectorRepo, vectorWriteHelper)
   const memorySearchService = new MemorySearchService(vectorRepo, memoryRepo, embeddingService)
   const logService = new ConversationLogService(logRepo)
@@ -351,10 +400,10 @@ export function createAppContext(config: AppConfig): AppContext {
   // Tool Registry + Capability Gate
   const toolRegistry = new ToolRegistry()
 
-  // SkillLoader: 扫描 builtin + custom skills 目录
-  const builtinSkillsDir = pathResolver.resolve('@app/backend/src/skills/builtin')
-  const customSkillsDir = pathResolver.resolve('@data/skills/custom')
-  const skillLoader = new SkillLoader([builtinSkillsDir, customSkillsDir])
+  // SkillLoader: 先初始化基础目录 (内置 + 用户)
+  const builtinSkillsDir = pathResolver.resolve('@app/backend/src/skills')
+  const customSkillsDir = pathResolver.resolve('@data/skills')
+  const skillLoader = new SkillLoader([builtinSkillsDir, customSkillsDir], customSkillsDir)
 
   // CapabilityGate: 扫描 agents/*/capabilities.yaml
   const agentBuiltinDir = pathResolver.resolve('@app/backend/src/services/mdp/agents')
@@ -365,8 +414,17 @@ export function createAppContext(config: AppConfig): AppContext {
     toolRegistry,
   )
 
-  // ── B6-5: ExtensionManager (hookEmitter 需要后注入) ──
+  // ── ExtensionManager: 加载扩展 → 发现 Extension skills → 注入 SkillLoader ──
   const extensionManager = new ExtensionManager()
+  const builtinToolsDir = pathResolver.resolve('@app/backend/src/tools')
+  const userExtensionsDir = pathResolver.resolve('@data/extensions')
+  await extensionManager.loadAll({ builtinToolsDir, userExtensionsDir })
+
+  // Extension 中发现的 skills/ 目录，追加注入到 SkillLoader
+  const discoveredSkillDirs = extensionManager.getDiscoveredSkillDirs()
+  if (discoveredSkillDirs.length > 0) {
+    skillLoader.addDirs(discoveredSkillDirs)
+  }
 
   // ── B6-5: ToolExecutor 接入 hookEmitter (ExtensionManager) ──
   const toolExecutor = new RegistryToolExecutor(
@@ -404,6 +462,8 @@ export function createAppContext(config: AppConfig): AppContext {
     getToolDefinitions: (source: string) => {
       return toolRegistry.getDefinitions(source)
     },
+    // D51: CapabilityGate 注入 (工具描述 + 技能菜单 → System Prompt)
+    capabilityGate,
     // B6-5: 取消检测 → TaskManager
     cancelChecker: taskManager,
     // B6-5: Gateway 广播
@@ -416,13 +476,32 @@ export function createAppContext(config: AppConfig): AppContext {
           await gatewayHub.pushNotification({ title: action, body: JSON.stringify(payload) })
       }
     },
+    // 主模型配置: 统一通过 ModelRoleResolver 获取 (与 DiaryEngine/Scorer 一致)
+    getModelConfig: modelRoles.bind('main'),
   })
 
-  // DiaryEngine (统一日记 → 主模型)
-  const diaryEngine = new DiaryEngine(llmService, modelRoles.bind('main'), mdpEngine)
+  const chatResetService = new ChatResetService({
+    logService,
+    memoryService,
+    configRepo,
+  })
+
+  // DiaryEngine (统一日记 → 主模型 + 持久化到 diary.tdb)
+  const diaryEngine = new DiaryEngine(
+    llmService,
+    modelRoles.bind('main'),
+    mdpEngine,
+    vectorRepo,
+    embeddingService,
+  )
 
   // BackgroundScheduler (后台定时任务)
   const scheduler = new BackgroundScheduler()
+  const maintenanceService = new MaintenanceService({
+    scheduler,
+    memoryService,
+    vectorSyncRepo,
+  })
 
   // 注册定时任务: Scorer 超时刷新 (30 分钟)
   scheduler.register('scorer-flush', 30 * 60 * 1000, async () => {
@@ -430,26 +509,57 @@ export function createAppContext(config: AppConfig): AppContext {
     await scorerService.processBatch(activeAgent)
   })
 
-  // 注册定时任务: 日记生成 (每 4 小时检查, P2-8)
-  scheduler.register('diary-generate', 4 * 60 * 60 * 1000, async () => {
+  // 注册定时任务: 综合日记生成 (每 30 分钟检查, 23:00 后当日仅触发一次)
+  let lastDiaryDate = '' // 记录上次生成日期，防止重复生成
+  scheduler.register('diary-generate', 30 * 60 * 1000, async () => {
+    // 仅在 23:00~23:59 触发
+    const now = new Date()
+    if (now.getHours() !== 23) return
+
+    const todayStr = now.toISOString().slice(0, 10)
+    if (lastDiaryDate === todayStr) return // 今日已生成
+
     const activeAgent = agentManager.activeAgentId
     const agent = agentManager.getAgent(activeAgent)
     if (!agent) return
 
-    // 收集当日 Scorer 已处理的记忆作为摘要输入
+    const todaySummaries: string[] = []
+
+    // 来源 1: memoryNodes (桌面对话记忆)
     const { data: recentMemories } = await memoryRepo.list({
       agentId: activeAgent,
       page: 1,
       pageSize: 50,
     })
-
-    // 仅取今天的记忆
     const todayStart = new Date()
     todayStart.setHours(0, 0, 0, 0)
     const todayMs = todayStart.getTime()
-    const todaySummaries = recentMemories
-      .filter((m) => m.timestamp >= todayMs)
-      .map((m) => m.content)
+    for (const m of recentMemories) {
+      if (m.timestamp >= todayMs) {
+        todaySummaries.push(m.content)
+      }
+    }
+
+    // 来源 2: social.tdb (社交事件记忆)
+    try {
+      const socialStore = storeRegistry.getAgentStore(activeAgent, 'social')
+      if (socialStore.nodeCount() > 0) {
+        const todayStartSec = Math.floor(todayMs / 1000)
+        for (const id of socialStore.allNodeIds()) {
+          const node = socialStore.get(id)
+          if (!node) continue
+          const payload = node.payload as Record<string, unknown>
+          if (payload?.type !== 'event') continue
+          const ts = (payload?.timestamp as number) ?? 0
+          if (ts >= todayStartSec) {
+            const content = (payload?.content as string) ?? ''
+            if (content) todaySummaries.push(content)
+          }
+        }
+      }
+    } catch {
+      // social.tdb 可能不存在，忽略
+    }
 
     if (todaySummaries.length === 0) {
       logger.debug('日记定时检查: 今日无新记忆，跳过')
@@ -461,11 +571,12 @@ export function createAppContext(config: AppConfig): AppContext {
         summaries: todaySummaries,
         agentId: activeAgent,
         agentName: agent.name,
-        profile: 'default',
       })
       if (entry) {
+        lastDiaryDate = todayStr
         logger.info(
-          `日记生成完成: agent=${activeAgent}, mood=${entry.mood}, highlights=${entry.highlights.length}`,
+          `综合日记生成完成: agent=${activeAgent}, sources=${todaySummaries.length}, ` +
+            `mood=${entry.mood}, highlights=${entry.highlights.length}`,
         )
       }
     } catch (err) {
@@ -562,63 +673,45 @@ export function createAppContext(config: AppConfig): AppContext {
     }
   })
 
-  // 注册定时任务: 社交日报 (每 6 小时, D56 DiaryEngine 统一化)
-  scheduler.register('social-diary', 6 * 60 * 60 * 1000, async () => {
-    const agentId = agentManager.activeAgentId
-    if (!agentId) return
-    const agent = agentManager.getAgent(agentId)
-    if (!agent) return
-
-    try {
-      // 从 social.tdb 收集当日事件摘要
-      const socialStore = storeRegistry.getAgentStore(agentId, 'social')
-      if (socialStore.nodeCount() === 0) return
-
-      const todayStart = Math.floor(new Date().setHours(0, 0, 0, 0) / 1000)
-      const allIds = socialStore.allNodeIds()
-      const todaySummaries: string[] = []
-
-      for (const id of allIds) {
-        const node = socialStore.get(id)
-        if (!node) continue
-        const payload = node.payload as Record<string, unknown>
-        if (payload?.type !== 'event') continue
-        const ts = (payload?.timestamp as number) ?? 0
-        if (ts >= todayStart) {
-          todaySummaries.push((payload?.content as string) ?? '')
-        }
-      }
-
-      if (todaySummaries.length === 0) {
-        logger.debug('社交日报: 今日无新事件，跳过')
-        return
-      }
-
-      const entry = await diaryEngine.generate({
-        summaries: todaySummaries,
-        agentId,
-        agentName: agent.name,
-        profile: 'social',
-      })
-
-      if (entry) {
-        logger.info(
-          `社交日报生成完成: agent=${agentId}, events=${todaySummaries.length}, ` +
-            `mood=${entry.mood}, highlights=${entry.highlights.length}`,
-        )
-        // TODO: 写入 diary.tdb (待 DiaryEngine 持久化层实装)
-      }
-    } catch (err) {
-      logger.warn(`社交日报生成失败: ${err}`)
-    }
-  })
-
   // ── B6-5: 启动 GatewayHub 心跳循环 ──
   gatewayHub.startHeartbeat()
 
   // ── 语音服务 (单实例复用，供 RealtimeSessionManager 共享) ──
-  const ttsService = new TtsService()
-  const asrService = new AsrService()
+  // TTS: 优先从 DB (Dashboard VoiceTab) 读取, fallback 到默认值
+  const dbTtsProvider = await configRepo.get('tts.provider')
+  const dbTtsVoice = await configRepo.get('tts.voice')
+  const dbTtsRate = await configRepo.get('tts.rate')
+  const dbTtsEdgePitch = await configRepo.get('tts.edgePitch')
+  const dbTtsSpeed = await configRepo.get('tts.speed')
+  const dbTtsApiBase = await configRepo.get('tts.apiBase')
+  const dbTtsApiKey = await configRepo.get('tts.apiKey')
+  const ttsService = new TtsService({
+    ...(dbTtsProvider && { provider: dbTtsProvider as 'edge_tts' | 'openai' }),
+    ...(dbTtsVoice && { voice: dbTtsVoice }),
+    ...(dbTtsRate && { rate: dbTtsRate }),
+    ...(dbTtsEdgePitch && { pitch: dbTtsEdgePitch }),
+    ...(dbTtsSpeed && { speed: Number(dbTtsSpeed) }),
+    ...(dbTtsApiBase && { apiBase: dbTtsApiBase }),
+    ...(dbTtsApiKey && { apiKey: dbTtsApiKey }),
+  })
+  logger.info(
+    `TTS 配置: provider=${dbTtsProvider || 'edge_tts'} (来源: ${dbTtsProvider ? 'DB' : 'DEFAULT'})`,
+  )
+
+  // ASR: 优先从 DB (Dashboard VoiceTab) 读取, fallback 到默认值
+  const dbAsrApiBase = await configRepo.get('asr.apiBase')
+  const dbAsrApiKey = await configRepo.get('asr.apiKey')
+  const dbAsrModel = await configRepo.get('asr.model')
+  const dbAsrLanguage = await configRepo.get('asr.language')
+  const asrService = new AsrService({
+    ...(dbAsrApiBase && { apiBase: dbAsrApiBase }),
+    ...(dbAsrApiKey && { apiKey: dbAsrApiKey }),
+    ...(dbAsrModel && { model: dbAsrModel }),
+    ...(dbAsrLanguage && { language: dbAsrLanguage }),
+  })
+  logger.info(
+    `ASR 配置: model=${dbAsrModel || 'whisper-1'} (来源: ${dbAsrModel ? 'DB' : 'DEFAULT'})`,
+  )
 
   return {
     db,
@@ -638,10 +731,12 @@ export function createAppContext(config: AppConfig): AppContext {
     scorerService,
     memoryImporter,
     diaryEngine,
+    maintenanceService,
     modelRegistry,
     modelService,
     agentManager,
     agentService,
+    chatResetService,
     promptService,
     toolRegistry,
     taskManager,
@@ -653,8 +748,8 @@ export function createAppContext(config: AppConfig): AppContext {
     skillLoader,
     vectorWriteHelper,
     extensionManager,
-    mcpManager: new McpClientManager(new McpConfigRepository(db)),
-    mcpRepo: new McpConfigRepository(db),
+    mcpManager: new McpClientManager(mcpRepo),
+    mcpRepo,
     promptTemplateLoader: new PromptTemplateLoader(pathResolver),
     strongholdService: new StrongholdService(db),
     groupChatService: new GroupChatService(db),
@@ -668,6 +763,10 @@ export function createAppContext(config: AppConfig): AppContext {
       getThinkingModel: modelRoles.bind('secretary'),
       socialMessageRepo,
       mdpEngine,
+      imageCacheManager: new ImageCacheManager({
+        cacheDir: pathResolver.resolve('@data/social_images'),
+      }),
+      stickerService: new StickerService(agentBuiltinDir),
     }),
 
     // ── 语音服务 ──
@@ -680,6 +779,72 @@ export function createAppContext(config: AppConfig): AppContext {
       gatewayHub,
       sessionService,
     }),
+
+    // ── 系统信息 ──
+    systemService: new SystemService(pathResolver),
+
+    // ── 热更新 ──
+    async reloadEmbeddingConfig(): Promise<void> {
+      const dbApiBase = await configRepo.get('embedding.apiBase')
+      const dbApiKey = await configRepo.get('embedding.apiKey')
+      const dbModel = await configRepo.get('embedding.model')
+      const dbDim = await configRepo.get('embedding.dimension')
+      const dbRerankerApiBase = await configRepo.get('reranker.apiBase')
+      const dbRerankerApiKey = await configRepo.get('reranker.apiKey')
+      const dbRerankerModel = await configRepo.get('reranker.model')
+
+      const newConfig: EmbeddingConfig = {
+        ...config.embedding,
+        apiBase: dbApiBase || config.embedding.apiBase,
+        apiKey: dbApiKey || config.embedding.apiKey,
+        model: dbModel || config.embedding.model,
+        dimension: dbDim ? Number(dbDim) : config.embedding.dimension,
+        reranker: {
+          ...config.embedding.reranker!,
+          apiBase: dbRerankerApiBase || config.embedding.reranker!.apiBase,
+          apiKey: dbRerankerApiKey || config.embedding.reranker!.apiKey,
+          model: dbRerankerModel || config.embedding.reranker!.model,
+        },
+      }
+
+      embeddingService.reconfigure(newConfig)
+    },
+
+    async reloadTtsConfig(): Promise<void> {
+      const provider = await configRepo.get('tts.provider')
+      const voice = await configRepo.get('tts.voice')
+      const rate = await configRepo.get('tts.rate')
+      const pitch = await configRepo.get('tts.edgePitch')
+      const speed = await configRepo.get('tts.speed')
+      const apiBase = await configRepo.get('tts.apiBase')
+      const apiKey = await configRepo.get('tts.apiKey')
+
+      ttsService.updateConfig({
+        ...(provider && { provider: provider as 'edge_tts' | 'openai' }),
+        ...(voice && { voice }),
+        ...(rate && { rate }),
+        ...(pitch && { pitch }),
+        ...(speed && { speed: Number(speed) }),
+        ...(apiBase && { apiBase }),
+        ...(apiKey && { apiKey }),
+      })
+      logger.info('TTS 配置已热更新')
+    },
+
+    async reloadAsrConfig(): Promise<void> {
+      const apiBase = await configRepo.get('asr.apiBase')
+      const apiKey = await configRepo.get('asr.apiKey')
+      const model = await configRepo.get('asr.model')
+      const language = await configRepo.get('asr.language')
+
+      asrService.updateConfig({
+        ...(apiBase && { apiBase }),
+        ...(apiKey && { apiKey }),
+        ...(model && { model }),
+        ...(language && { language }),
+      })
+      logger.info('ASR 配置已热更新')
+    },
   }
 }
 
@@ -709,13 +874,13 @@ export async function initAppContext(ctx: AppContext): Promise<void> {
   })
 
   // 1.5 注入 SchedulerService 到 Scheduler 工具 (避免循环依赖)
-  injectSchedulerService(ctx.schedulerService)
+  setSchedulerService(ctx.schedulerService)
 
   // 1.5.1 注入 PetStateService 到 finishTask 工具 (角色状态更新)
   const petStateService = new PetStateService(ctx.db)
-  injectFinishTaskDeps({
+  setFinishTaskDeps({
     petStateUpdater: petStateService,
-    gatewayBroadcast: async (action, payload) => {
+    gatewayBroadcast: async (action: string, payload: Record<string, unknown>) => {
       ctx.gatewayHub.broadcast(createEnvelope('push', { action, ...payload }, 'broadcast'))
     },
   })
@@ -725,9 +890,9 @@ export async function initAppContext(ctx: AppContext): Promise<void> {
   if (!process.env.PERO_DOCKER) {
     const providers = await createDesktopProviders()
     if (providers) {
-      injectScreenshotProvider(providers.screenshot)
-      injectWindowProvider(providers.window)
-      injectDesktopAutomationProvider(providers.automation)
+      setScreenshotProvider(providers.screenshot)
+      setWindowProvider(providers.window)
+      setDesktopAutomationProvider(providers.automation)
       logger.info('桌面 Provider 已注入 (nut-js): 截图 + 窗口管理 + 桌面自动化')
     } else {
       logger.info('nut-js 不可用，桌面 GUI 工具已禁用 (截图/窗口/自动化)')
@@ -740,7 +905,7 @@ export async function initAppContext(ctx: AppContext): Promise<void> {
   if (ctx.socialBridge.hasActiveAdapter()) {
     const socialProvider = ctx.socialBridge.createMessagingProvider()
     if (socialProvider) {
-      injectSocialMessagingProvider(socialProvider)
+      setSocialMessagingProvider(socialProvider)
       logger.info(`社交工具 Provider 已注入 (平台: ${socialProvider.platform})`)
     }
   } else {
@@ -748,8 +913,16 @@ export async function initAppContext(ctx: AppContext): Promise<void> {
   }
 
   // 1.8 注入据点服务到工具层 (始终可用，群聊模式由 CapabilityGate 门控)
-  injectStrongholdService(ctx.strongholdService)
+  setStrongholdService(ctx.strongholdService)
   logger.info('据点工具已注入 (StrongholdService)')
+
+  // 1.9 注入日记查找工具依赖 (VectorRepo + EmbeddingService + StoreRegistry)
+  setDiarySearchDeps({
+    vectorRepo: ctx.vectorRepo,
+    embeddingService: ctx.embeddingService,
+    storeRegistry: ctx.storeRegistry,
+  })
+  logger.info('日记查找工具已注入')
 
   // 2. 加载用户扩展 (动态扫描目录)
   const userExtDir = ctx.pathResolver.resolve('@data/extensions')
@@ -876,6 +1049,16 @@ export async function initAppContext(ctx: AppContext): Promise<void> {
 
     // 启动桥接 (适配器等待反向 WS 连接)
     await ctx.socialBridge.start()
+
+    // 适配器注册后，重新注入社交工具 Provider (修复 §1.7 注入时序问题)
+    if (ctx.socialBridge.hasActiveAdapter()) {
+      const socialProvider = ctx.socialBridge.createMessagingProvider()
+      if (socialProvider) {
+        setSocialMessagingProvider(socialProvider)
+        logger.info(`社交工具 Provider 已注入 (平台: ${socialProvider.platform})`)
+      }
+    }
+
     logger.info('社交模式已初始化 (等待 NapCat 连接)')
   } catch (err) {
     logger.warn(`社交模式初始化出错 (非致命): ${err}`)

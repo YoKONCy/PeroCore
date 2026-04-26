@@ -69,17 +69,21 @@ export const chatApi = {
   /** 删除单条消息 */
   deleteMessage: (id: number) => apiClient.delete(`/chat/messages/${id}`),
 
+  /** 级联删除整对消息 (用户+助手，通过 pair_id 关联) */
+  deleteMessagePair: (id: number) =>
+    apiClient.delete<{ deletedCount: number }>(`/chat/messages/${id}/pair`),
+
   // ── 任务控制 (P2-11) ──
 
   /** 暂停任务 */
-  pauseTask: (sessionId: string) => apiClient.post<void>('/chat/task/pause', { sessionId }),
+  pauseTask: (sessionId: string) => apiClient.post<void>('/chat/tasks/pause', { sessionId }),
 
   /** 恢复任务 */
-  resumeTask: (sessionId: string) => apiClient.post<void>('/chat/task/resume', { sessionId }),
+  resumeTask: (sessionId: string) => apiClient.post<void>('/chat/tasks/resume', { sessionId }),
 
   /** 注入指令 */
   injectInstruction: (sessionId: string, instruction: string) =>
-    apiClient.post<void>('/chat/task/inject', { sessionId, instruction }),
+    apiClient.post<void>('/chat/tasks/inject', { sessionId, instruction }),
 
   // ── 数据重置 (P2-12) ──
 

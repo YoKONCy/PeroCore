@@ -11,10 +11,11 @@
  * @module packages/backend/src/capabilities/skillLoader
  */
 
-import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs'
+import { readFileSync, readdirSync, existsSync, statSync, cpSync, mkdirSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import type { SkillManifest } from './types'
 import { createLogger } from '../lib/logger'
+import { AppError } from '../lib/appError'
 
 const logger = createLogger('SkillLoader')
 
@@ -31,8 +32,12 @@ export class SkillLoader {
   /** Skill 目录路径 */
   private skillDirs: string[]
 
-  constructor(skillDirs: string[]) {
+  /** 用户 Skill 目录 (导入/删除操作目标) */
+  private userSkillsDir: string
+
+  constructor(skillDirs: string[], userSkillsDir: string) {
     this.skillDirs = skillDirs
+    this.userSkillsDir = userSkillsDir
     this.reloadAll()
   }
 
@@ -47,6 +52,29 @@ export class SkillLoader {
     }
 
     logger.info(`已加载 ${this.manifests.size} 个 Skill 清单`)
+  }
+
+  /**
+   * 运行时追加扫描目录 (Extension 联邦)
+   *
+   * ExtensionManager 加载完后调用，将发现的 Extension skills 目录注入。
+   * 追加后自动扫描新目录中的 SKILL.md。
+   */
+  addDirs(dirs: string[]): void {
+    let added = 0
+    for (const dir of dirs) {
+      if (this.skillDirs.includes(dir)) continue
+      this.skillDirs.push(dir)
+      if (existsSync(dir)) {
+        this.scanDir(dir)
+        added++
+      }
+    }
+    if (added > 0) {
+      logger.info(
+        `追加扫描 ${added} 个 Extension skills 目录，当前共 ${this.manifests.size} 个 Skill`,
+      )
+    }
   }
 
   /** 获取 Skill 清单 (L1: 只有 name + description) */
@@ -107,6 +135,76 @@ export class SkillLoader {
     return null
   }
 
+  // ── 导入 / 删除 (用户 Skill 管理) ──
+
+  /**
+   * 导入本地 Skill 文件夹到用户目录
+   *
+   * 验证来源有 SKILL.md → 检查目标不重复 → 递归复制 → 重新扫描。
+   * @returns 导入后的文件夹名
+   */
+  importFromPath(sourcePath: string): string {
+    // 验证来源路径存在
+    if (!existsSync(sourcePath) || !statSync(sourcePath).isDirectory()) {
+      throw new AppError('VALIDATION_ERROR', { message: `路径不存在或不是目录: ${sourcePath}` })
+    }
+
+    // 验证来源有 SKILL.md
+    const skillMdPath = path.join(sourcePath, 'SKILL.md')
+    if (!existsSync(skillMdPath)) {
+      throw new AppError('VALIDATION_ERROR', {
+        message: '该目录下没有 SKILL.md 文件，不是有效的 Skill 文件夹',
+      })
+    }
+
+    // 确保用户目录存在
+    if (!existsSync(this.userSkillsDir)) {
+      mkdirSync(this.userSkillsDir, { recursive: true })
+    }
+
+    // 复制到 userSkillsDir/<folder-name>
+    const folderName = path.basename(sourcePath)
+    const destPath = path.join(this.userSkillsDir, folderName)
+
+    // 检查目标是否已存在
+    if (existsSync(destPath)) {
+      throw new AppError('ALREADY_EXISTS', {
+        message: `目标目录已存在: ${folderName}，请先删除或重命名`,
+        data: { resource: folderName },
+      })
+    }
+
+    // 递归复制
+    cpSync(sourcePath, destPath, { recursive: true })
+    logger.info(`Skill 已导入: ${folderName}`, { sourcePath, destPath })
+
+    // 重新扫描
+    this.reloadAll()
+
+    return folderName
+  }
+
+  /**
+   * 删除用户 Skill
+   *
+   * 只允许删除 userSkillsDir 下的 Skill，不允许删内置或 Extension 的。
+   */
+  deleteById(skillId: string): void {
+    const skillPath = path.join(this.userSkillsDir, skillId)
+
+    if (!existsSync(skillPath)) {
+      throw new AppError('NOT_FOUND', {
+        message: `Skill "${skillId}" 不存在或不在用户目录中`,
+      })
+    }
+
+    rmSync(skillPath, { recursive: true, force: true })
+    logger.info(`Skill 已删除: ${skillId}`)
+
+    // 重新扫描
+    this.reloadAll()
+  }
+
   // ── 内部 ──
 
   private scanDir(dir: string): void {
@@ -146,7 +244,32 @@ export class SkillLoader {
       name: fields.name ?? skillId,
       description: fields.description ?? '',
       requiredTools: this.parseYamlList(fields.requiredTools),
+      category: fields.category ?? 'general',
+      tags: this.parseYamlList(fields.tags),
+      parameters: this.parseYamlMap(fields.parameters),
+      dependsOnSkills: this.parseYamlList(fields.dependsOnSkills),
     }
+  }
+
+  /**
+   * 加载 Skill 内容并注入参数 (L2+)
+   *
+   * 参数通过 `{{param_name}}` 模板变量注入到 SKILL.md body 中。
+   * 未提供的参数保留原始占位符。
+   */
+  loadSkillContentWithParams(skillId: string, params?: Record<string, string>): string | null {
+    const raw = this.loadSkillContent(skillId)
+    if (!raw) return null
+
+    // 无参数时直接返回
+    if (!params || Object.keys(params).length === 0) return raw
+
+    // 模板变量替换: {{key}} → value
+    let result = raw
+    for (const [key, value] of Object.entries(params)) {
+      result = result.replaceAll(`{{${key}}}`, value)
+    }
+    return result
   }
 
   /** 极简 YAML 解析器 (只处理 key: value 和 key:\n  - item 两种) */
@@ -204,5 +327,43 @@ export class SkillLoader {
         .map((s) => s.trim())
         .filter(Boolean)
     }
+  }
+
+  /**
+   * 解析 YAML key: value 映射字段
+   *
+   * 支持两种格式:
+   * 1. 内联 JSON: `parameters: {"key": "desc"}`
+   * 2. YAML 列表格式 (被 parseSimpleYaml 解析为逐条 "key: value"):
+   *    parameters:
+   *      - project_name: 项目名称
+   *      - date_range: 日期范围
+   */
+  private parseYamlMap(value?: string): Record<string, string> {
+    if (!value) return {}
+    try {
+      // 尝试 JSON 格式
+      const parsed = JSON.parse(value)
+      if (Array.isArray(parsed)) {
+        // 列表格式: ["project_name: 项目名称", "date_range: 日期范围"]
+        const map: Record<string, string> = {}
+        for (const item of parsed) {
+          const idx = String(item).indexOf(':')
+          if (idx > 0) {
+            map[String(item).slice(0, idx).trim()] = String(item)
+              .slice(idx + 1)
+              .trim()
+          }
+        }
+        return map
+      }
+      // 对象格式: {"project_name": "项目名称"}
+      if (typeof parsed === 'object' && parsed !== null) {
+        return parsed as Record<string, string>
+      }
+    } catch {
+      // 单行 key: value 格式 无法解析
+    }
+    return {}
   }
 }

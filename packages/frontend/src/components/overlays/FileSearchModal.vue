@@ -3,7 +3,6 @@
  * FileSearchModal — 文件搜索结果对话框
  *
  * 展示工具调用中找到的文件列表，支持：
- * - 可拖拽头部
  * - 点击文件在资源管理器中打开
  * - Esc 关闭
  *
@@ -16,6 +15,7 @@ import PixelIcon from '../pixel/PixelIcon.vue'
 import { PButton } from '../pixel'
 import { useEventListener } from '../../composables'
 import { systemApi } from '../../api/modules/systemApi'
+import { logger } from '../../lib/logger'
 
 interface Props {
   visible?: boolean
@@ -65,7 +65,7 @@ async function openFile(path: string) {
   try {
     await systemApi.openPath(path)
   } catch (err) {
-    console.error('打开文件失败:', err)
+    logger.error('FileSearch', '打开文件失败', err)
   }
 }
 
@@ -77,44 +77,62 @@ useEventListener(window, 'keydown', (e: Event) => {
 
 <template>
   <Transition name="fade">
-    <div v-if="visible" class="fsm-overlay" @click.self="close">
-      <div class="fsm-card">
+    <div
+      v-if="visible"
+      class="fixed inset-0 z-[9999] flex items-center justify-center bg-black/30 backdrop-blur-sm"
+      @click.self="close"
+    >
+      <div
+        class="w-[580px] max-h-[80vh] flex flex-col border-2 border-slate-200 bg-white shadow-[8px_8px_0_rgba(0,0,0,0.1)]"
+      >
         <!-- 头部 -->
-        <div class="fsm-header">
-          <div class="fsm-header-title">
+        <div
+          class="px-4 py-3 flex items-center justify-between border-b-2 border-slate-200 bg-sky-50"
+        >
+          <div class="flex items-center gap-2 text-sm font-bold text-slate-800">
             <PixelIcon name="search" size="sm" />
             <span>找到的文件 ({{ files.length }})</span>
           </div>
-          <button class="fsm-close-btn" @click="close">
+          <button
+            class="p-1 bg-none border-none text-slate-400 cursor-pointer transition-colors hover:text-rose-500"
+            @click="close"
+          >
             <PixelIcon name="close" size="xs" />
           </button>
         </div>
 
         <!-- 文件列表 -->
-        <div class="fsm-body">
-          <div v-if="files.length > 0" class="fsm-list">
+        <div class="flex-1 overflow-y-auto min-h-[200px] p-2 fsm-scrollbar">
+          <div v-if="files.length > 0" class="flex flex-col gap-1">
             <div
               v-for="(file, idx) in files"
               :key="idx"
-              class="fsm-file-item"
+              class="flex items-center gap-3 px-3 py-2.5 cursor-pointer border-2 border-transparent transition-all hover:bg-sky-50 hover:border-sky-200 hover:translate-x-0.5"
               @click="openFile(file)"
             >
-              <PixelIcon :name="getFileIcon(file)" size="sm" class="fsm-file-icon" />
-              <div class="fsm-file-info">
-                <span class="fsm-file-name">{{ getFileName(file) }}</span>
-                <span class="fsm-file-path">{{ file }}</span>
+              <PixelIcon :name="getFileIcon(file)" size="sm" class="text-sky-300 flex-shrink-0" />
+              <div class="flex-1 min-w-0">
+                <span class="block text-[13px] font-bold text-slate-800 truncate">
+                  {{ getFileName(file) }}
+                </span>
+                <span class="block text-[11px] font-mono text-slate-400 truncate">{{ file }}</span>
               </div>
             </div>
           </div>
-          <div v-else class="fsm-empty">
+          <div
+            v-else
+            class="flex flex-col items-center justify-center h-[200px] text-slate-400 font-bold gap-2"
+          >
             <PixelIcon name="folder" size="xl" />
             <p>没有找到相关文件</p>
           </div>
         </div>
 
         <!-- 底部 -->
-        <div class="fsm-footer">
-          <span class="fsm-hint">点击文件可在资源管理器中定位</span>
+        <div
+          class="px-4 py-3 flex items-center justify-between border-t-2 border-slate-200 bg-sky-50"
+        >
+          <span class="text-[11px] text-slate-400">点击文件可在资源管理器中定位</span>
           <PButton variant="primary" @click="close">确定</PButton>
         </div>
       </div>
@@ -123,134 +141,6 @@ useEventListener(window, 'keydown', (e: Event) => {
 </template>
 
 <style scoped>
-.fsm-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.3);
-  backdrop-filter: blur(4px);
-}
-
-.fsm-card {
-  width: 580px;
-  max-height: 80vh;
-  display: flex;
-  flex-direction: column;
-  border: 2px solid var(--color-border);
-  background: var(--color-bg-primary);
-  box-shadow: 8px 8px 0 var(--color-shadow);
-}
-
-.fsm-header {
-  padding: 12px 16px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 2px solid var(--color-border);
-  background: var(--color-sky-50);
-}
-.fsm-header-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--color-text-primary);
-}
-.fsm-close-btn {
-  padding: 4px;
-  background: none;
-  border: none;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  transition: color 0.15s;
-}
-.fsm-close-btn:hover {
-  color: var(--color-red-face);
-}
-
-.fsm-body {
-  flex: 1;
-  overflow-y: auto;
-  min-height: 200px;
-  padding: 8px;
-}
-
-.fsm-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.fsm-file-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  cursor: pointer;
-  border: 2px solid transparent;
-  transition: all 0.15s;
-}
-.fsm-file-item:hover {
-  background: var(--color-bg-hover);
-  border-color: var(--color-sky-light);
-  transform: translateX(2px);
-}
-.fsm-file-icon {
-  color: var(--color-sky-hover);
-  flex-shrink: 0;
-}
-.fsm-file-info {
-  flex: 1;
-  min-width: 0;
-}
-.fsm-file-name {
-  display: block;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--color-text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.fsm-file-path {
-  display: block;
-  font-size: 11px;
-  font-family: monospace;
-  color: var(--color-text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.fsm-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 200px;
-  color: var(--color-text-muted);
-  font-weight: 700;
-  gap: 8px;
-}
-
-.fsm-footer {
-  padding: 12px 16px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-top: 2px solid var(--color-border);
-  background: var(--color-sky-50);
-}
-.fsm-hint {
-  font-size: 11px;
-  color: var(--color-text-muted);
-}
-
-/* 过渡 */
 .fade-enter-active {
   transition: opacity 0.2s;
 }
@@ -262,14 +152,11 @@ useEventListener(window, 'keydown', (e: Event) => {
   opacity: 0;
 }
 
-/* 滚动条 */
-.fsm-body::-webkit-scrollbar {
+.fsm-scrollbar::-webkit-scrollbar {
   width: 4px;
 }
-.fsm-body::-webkit-scrollbar-track {
-  background: transparent;
-}
-.fsm-body::-webkit-scrollbar-thumb {
-  background: var(--color-sky-light);
+.fsm-scrollbar::-webkit-scrollbar-thumb {
+  background: #bae6fd;
+  border-radius: 0;
 }
 </style>

@@ -235,7 +235,9 @@ export class ContextRnn {
 
       const updateCount = buffer.readUInt32LE(0)
       const lastUpdatedAt = buffer.readDoubleBE(4)
-      const hidden = new Float32Array(buffer.buffer.slice(12, 12 + HIDDEN_DIM * 4))
+      const hidden = new Float32Array(
+        buffer.buffer.slice(buffer.byteOffset + 12, buffer.byteOffset + 12 + HIDDEN_DIM * 4),
+      )
 
       const key = `${agentId}:${mode}`
       this.states.set(key, { hidden, lastUpdatedAt, updateCount })

@@ -122,28 +122,39 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="work-view">
+  <div class="flex w-full h-full overflow-hidden bg-white gap-1 p-1">
     <!-- 错误遮罩 -->
-    <div v-if="error" class="wv-error-mask">
-      <div class="wv-error-card">
-        <div class="wv-error-header">
+    <div
+      v-if="error"
+      class="absolute inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-white text-slate-400 font-bold"
+    >
+      <div class="max-w-[640px] border-2 border-rose-500 bg-white p-6">
+        <div class="flex items-center gap-2 text-rose-500 text-lg font-black mb-4">
           <PixelIcon name="alert" size="md" />
           <span>组件错误</span>
         </div>
-        <pre class="wv-error-pre">{{ error }}</pre>
+        <pre
+          class="p-4 font-mono text-xs bg-slate-50 border border-slate-200 overflow-auto max-h-[300px] text-slate-500"
+          >{{ error }}</pre
+        >
       </div>
     </div>
 
     <!-- 加载 -->
-    <div v-if="!isReady && !error" class="wv-loading">
+    <div
+      v-if="!isReady && !error"
+      class="absolute inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-white text-slate-400 font-bold"
+    >
       <PixelIcon name="refresh" size="lg" animation="spin" />
       <span>正在初始化工作环境...</span>
     </div>
 
     <template v-if="isReady && !error">
       <!-- 左侧: 文件树 -->
-      <aside class="wv-sidebar">
-        <div class="wv-sidebar-header">
+      <aside class="w-64 flex flex-col border-2 border-slate-200 bg-white overflow-hidden">
+        <div
+          class="px-4 py-3 flex items-center gap-2 border-b-2 border-slate-200 text-[13px] font-bold text-sky-500"
+        >
           <PixelIcon name="folder" size="sm" />
           <span>项目工程</span>
         </div>
@@ -151,36 +162,47 @@ onMounted(async () => {
       </aside>
 
       <!-- 中间: 编辑器 -->
-      <div class="wv-editor-area">
+      <div class="flex-1 flex flex-col border-2 border-slate-200 bg-white overflow-hidden min-w-0">
         <!-- 顶部导航 -->
-        <header class="wv-topbar">
-          <div class="wv-topbar-left">
-            <div class="wv-mode-badge">
-              <div class="wv-mode-dot" />
-              <span>专注模式</span>
-            </div>
+        <header class="h-10 px-4 flex items-center border-b border-slate-200 flex-shrink-0">
+          <div
+            class="flex items-center gap-1.5 px-3 py-1 border border-sky-200 bg-sky-50 text-[10px] font-bold text-sky-500 uppercase"
+          >
+            <div class="w-1.5 h-1.5 bg-sky-500 wv-pulse" />
+            <span>专注模式</span>
           </div>
         </header>
 
         <!-- 编辑器 Tab -->
-        <div class="wv-tabs">
+        <div
+          class="flex overflow-x-auto border-b border-slate-200 bg-slate-50 flex-shrink-0 wv-tabs-scrollbar"
+        >
           <div
             v-for="file in openFiles"
             :key="file.path"
-            :class="['wv-tab', { 'wv-tab-active': currentFile?.path === file.path }]"
+            :class="[
+              'flex items-center gap-1.5 px-3 py-2 text-xs font-bold cursor-pointer border-r border-slate-200 transition-all min-w-[100px] max-w-[180px] relative',
+              currentFile?.path === file.path
+                ? 'bg-white text-sky-500 border-b-2 border-b-sky-500'
+                : 'text-slate-400 hover:bg-white hover:text-slate-500',
+            ]"
             @click="currentFile = file"
           >
             <PixelIcon name="code" size="xs" />
-            <span class="wv-tab-name">{{ file.name }}</span>
-            <div v-if="dirtyPaths.has(file.path)" class="wv-tab-dirty" />
-            <button class="wv-tab-close" @click.stop="closeTab(file)">
+            <span class="truncate flex-1">{{ file.name }}</span>
+            <div v-if="dirtyPaths.has(file.path)" class="w-1.5 h-1.5 bg-amber-500 flex-shrink-0" />
+            <button
+              class="p-0.5 bg-none border-none text-slate-400 cursor-pointer opacity-0 transition-all hover:text-rose-500 group-hover:opacity-100"
+              :class="{ 'opacity-100': currentFile?.path === file.path }"
+              @click.stop="closeTab(file)"
+            >
               <PixelIcon name="close" size="xs" />
             </button>
           </div>
         </div>
 
         <!-- 编辑器内容 -->
-        <div class="wv-editor-body">
+        <div class="flex-1 overflow-hidden">
           <CodeEditor
             v-if="currentFile"
             :key="currentFile.path"
@@ -190,16 +212,16 @@ onMounted(async () => {
             @save="saveFile"
             @change="onContentChange"
           />
-          <div v-else class="wv-editor-empty">
+          <div v-else class="flex flex-col items-center justify-center h-full gap-3 text-slate-400">
             <PixelIcon name="code" size="3xl" />
-            <p class="wv-editor-empty-title">选择一个文件以开始编辑</p>
-            <p class="wv-editor-empty-sub">使用左侧资源管理器浏览文件</p>
+            <p class="text-sm font-bold text-slate-500">选择一个文件以开始编辑</p>
+            <p class="text-xs">使用左侧资源管理器浏览文件</p>
           </div>
         </div>
       </div>
 
       <!-- 右侧: 聊天 -->
-      <aside class="wv-chat">
+      <aside class="w-[380px] border-2 border-slate-200 bg-white overflow-hidden">
         <ChatContainer
           v-if="agentStore.currentAgent"
           :agent-id="agentStore.currentAgent.id"
@@ -211,218 +233,8 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.work-view {
-  display: flex;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  background: var(--color-bg-primary);
-  gap: 4px;
-  padding: 4px;
-}
-
-/* 错误/加载 */
-.wv-error-mask,
-.wv-loading {
-  position: absolute;
-  inset: 0;
-  z-index: 50;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-  background: var(--color-bg-primary);
-  color: var(--color-text-muted);
-  font-weight: 700;
-}
-.wv-error-card {
-  max-width: 640px;
-  border: 2px solid var(--color-red-face);
-  background: var(--color-bg-primary);
-  padding: 24px;
-}
-.wv-error-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--color-red-face);
-  font-size: 18px;
-  font-weight: 800;
-  margin-bottom: 16px;
-}
-.wv-error-pre {
-  padding: 16px;
-  font-family: monospace;
-  font-size: 12px;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  overflow: auto;
-  max-height: 300px;
-  color: var(--color-text-secondary);
-}
-
-/* 侧边栏 */
-.wv-sidebar {
-  width: 256px;
-  display: flex;
-  flex-direction: column;
-  border: 2px solid var(--color-border);
-  background: var(--color-bg-primary);
-  overflow: hidden;
-}
-.wv-sidebar-header {
-  padding: 12px 16px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border-bottom: 2px solid var(--color-border);
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--color-sky-500);
-}
-
-/* 编辑器区 */
-.wv-editor-area {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  border: 2px solid var(--color-border);
-  background: var(--color-bg-primary);
-  overflow: hidden;
-  min-width: 0;
-}
-.wv-topbar {
-  height: 40px;
-  padding: 0 16px;
-  display: flex;
-  align-items: center;
-  border-bottom: 1px solid var(--color-border);
-  flex-shrink: 0;
-}
-.wv-topbar-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.wv-mode-badge {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 12px;
-  border: 1px solid var(--color-sky-light);
-  background: var(--color-sky-50);
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--color-sky-500);
-  text-transform: uppercase;
-}
-.wv-mode-dot {
-  width: 6px;
-  height: 6px;
-  background: var(--color-sky-500);
-  animation: pulse 2s infinite;
-}
-
-/* Tab 栏 */
-.wv-tabs {
-  display: flex;
-  overflow-x: auto;
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-bg-secondary);
-  flex-shrink: 0;
-}
-.wv-tabs::-webkit-scrollbar {
-  height: 2px;
-}
-.wv-tabs::-webkit-scrollbar-thumb {
-  background: var(--color-sky-light);
-}
-
-.wv-tab {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  border-right: 1px solid var(--color-border);
-  transition: all 0.15s;
-  min-width: 100px;
-  max-width: 180px;
-  position: relative;
-}
-.wv-tab:hover {
-  background: var(--color-bg-primary);
-  color: var(--color-text-secondary);
-}
-.wv-tab-active {
-  background: var(--color-bg-primary);
-  color: var(--color-sky-500);
-  border-bottom: 2px solid var(--color-sky-500);
-}
-.wv-tab-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
-}
-.wv-tab-dirty {
-  width: 6px;
-  height: 6px;
-  background: var(--color-yellow-500);
-  flex-shrink: 0;
-}
-.wv-tab-close {
-  padding: 2px;
-  background: none;
-  border: none;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  opacity: 0;
-  transition: all 0.15s;
-}
-.wv-tab:hover .wv-tab-close {
-  opacity: 1;
-}
-.wv-tab-close:hover {
-  color: var(--color-red-face);
-}
-
-/* 编辑器主体 */
-.wv-editor-body {
-  flex: 1;
-  overflow: hidden;
-}
-.wv-editor-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  gap: 12px;
-  color: var(--color-text-muted);
-}
-.wv-editor-empty-title {
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--color-text-secondary);
-}
-.wv-editor-empty-sub {
-  font-size: 12px;
-}
-
-/* 聊天侧栏 */
-.wv-chat {
-  width: 380px;
-  border: 2px solid var(--color-border);
-  background: var(--color-bg-primary);
-  overflow: hidden;
-}
-
-@keyframes pulse {
+/* 脉冲动画 */
+@keyframes wv-pulse-anim {
   0%,
   100% {
     opacity: 0.4;
@@ -430,5 +242,18 @@ onMounted(async () => {
   50% {
     opacity: 1;
   }
+}
+
+.wv-pulse {
+  animation: wv-pulse-anim 2s infinite;
+}
+
+/* Tab 横向滚动条 */
+.wv-tabs-scrollbar::-webkit-scrollbar {
+  height: 2px;
+}
+
+.wv-tabs-scrollbar::-webkit-scrollbar-thumb {
+  background: #bae6fd;
 }
 </style>

@@ -14,6 +14,7 @@
  */
 
 import { ref, onUnmounted } from 'vue'
+import { logger } from '../../lib/logger'
 
 /** 语音输入模式 */
 export type VoiceInputMode = 'vad' | 'ptt' | 'off'
@@ -76,7 +77,7 @@ export function usePetVoice(
 
       return true
     } catch (e) {
-      console.error('[PetVoice] 麦克风权限获取失败:', e)
+      logger.error('PetVoice', '麦克风权限获取失败', e)
       return false
     }
   }
@@ -123,7 +124,7 @@ export function usePetVoice(
 
       if (buffer.byteLength > 0) {
         sendStreamFn(buffer)
-        console.log(`[PetVoice] 音频已发送 (${(buffer.byteLength / 1024).toFixed(1)}KB)`)
+        logger.info('PetVoice', `音频已发送 (${(buffer.byteLength / 1024).toFixed(1)}KB)`)
       }
     }
 

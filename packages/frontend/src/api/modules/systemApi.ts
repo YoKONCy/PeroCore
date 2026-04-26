@@ -19,6 +19,12 @@ export interface SystemInfo {
       rss: number
       heapUsed: number
     }
+    cpuPercent: number
+    totalMemoryMB: number
+  }
+  storage: {
+    sqliteSizeMB: number
+    triviumSizeMB: number
   }
   agents: {
     total: number

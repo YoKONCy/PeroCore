@@ -104,7 +104,9 @@ export async function invoke(cmd: string, args?: unknown): Promise<unknown> {
     cmd === 'get-napcat-logs' ||
     cmd === 'send-napcat-command' ||
     cmd === 'install-napcat' ||
-    cmd === 'check-napcat'
+    cmd === 'check-napcat' ||
+    cmd === 'napcat-status' ||
+    cmd === 'ensure-napcat-config'
   ) {
     console.warn(`[ipcAdapter] NapCat 在浏览器模式不可用: ${cmd}`)
     return null

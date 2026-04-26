@@ -1,0 +1,38 @@
+name: Compress Images
+on:
+  pull_request:
+    paths:
+      - '**.jpg'
+      - '**.jpeg'
+      - '**.png'
+      - '**.webp'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  build:
+    name: calibreapp/image-actions
+    runs-on: ubuntu-latest
+    # 如果是由 dependabot 或者自己触发的压缩，不再重复执行防止无限循环
+    if: github.actor != 'dependabot[bot]'
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+
+      - name: Compress Images
+        id: calibre
+        uses: calibreapp/image-actions@main
+        with:
+          githubToken: ${{ secrets.GITHUB_TOKEN }}
+          compressOnly: true
+          # 在 PR 中自动添加一段评论，告诉你压缩了多少体积
+          ignorePaths: 'node_modules/**'
+
+      - name: Commit compressed images
+        if: steps.calibre.outputs.markdown != ''
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: 'chore: ✨ Compress Images'
+          file_pattern: '*.jpg *.jpeg *.png *.webp'

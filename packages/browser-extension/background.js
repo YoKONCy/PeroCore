@@ -154,18 +154,15 @@ function injectContentScript(tabId, callback, errorCallback) {
       return
     }
 
-    chrome.scripting.executeScript(
-      { target: { tabId }, files: ['content_script.js'] },
-      () => {
-        if (chrome.runtime.lastError) {
-          console.error('[Pero] 注入失败:', chrome.runtime.lastError.message)
-          errorCallback?.(chrome.runtime.lastError)
-        } else {
-          console.log('[Pero] Content Script 注入成功')
-          callback?.()
-        }
-      },
-    )
+    chrome.scripting.executeScript({ target: { tabId }, files: ['content_script.js'] }, () => {
+      if (chrome.runtime.lastError) {
+        console.error('[Pero] 注入失败:', chrome.runtime.lastError.message)
+        errorCallback?.(chrome.runtime.lastError)
+      } else {
+        console.log('[Pero] Content Script 注入成功')
+        callback?.()
+      }
+    })
   })
 }
 
@@ -174,10 +171,12 @@ function injectContentScript(tabId, callback, errorCallback) {
 /** 将命令结果回传后端 */
 function sendCommandResult(requestId, result) {
   if (socket && isConnected && socket.readyState === WebSocket.OPEN) {
-    socket.send(JSON.stringify({
-      type: 'command_result',
-      data: { requestId, ...result },
-    }))
+    socket.send(
+      JSON.stringify({
+        type: 'command_result',
+        data: { requestId, ...result },
+      }),
+    )
   }
 }
 
@@ -242,13 +241,17 @@ function handleCommand(commandData) {
         injectContentScript(
           tabId,
           () => {
-            chrome.tabs.sendMessage(tabId, { type: 'execute_command', data: commandData }, (retryRes) => {
-              if (chrome.runtime.lastError) {
-                sendCommandResult(requestId, { error: chrome.runtime.lastError.message })
-              } else {
-                sendCommandResult(requestId, retryRes)
-              }
-            })
+            chrome.tabs.sendMessage(
+              tabId,
+              { type: 'execute_command', data: commandData },
+              (retryRes) => {
+                if (chrome.runtime.lastError) {
+                  sendCommandResult(requestId, { error: chrome.runtime.lastError.message })
+                } else {
+                  sendCommandResult(requestId, retryRes)
+                }
+              },
+            )
           },
           (err) => {
             sendCommandResult(requestId, { error: '注入 Content Script 失败: ' + err.message })

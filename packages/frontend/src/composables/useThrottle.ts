@@ -9,14 +9,14 @@
  * @param fn - 需要节流的函数
  * @param delay - 节流间隔 (ms)
  */
-export function useThrottleFn<T extends (...args: never[]) => void>(
-  fn: T,
+export function useThrottleFn<TArgs extends unknown[]>(
+  fn: (...args: TArgs) => void,
   delay: number,
-): (...args: Parameters<T>) => void {
+): (...args: TArgs) => void {
   let lastTime = 0
   let timer: ReturnType<typeof setTimeout> | null = null
 
-  return (...args: Parameters<T>) => {
+  return (...args: TArgs) => {
     const now = Date.now()
     const remaining = delay - (now - lastTime)
 
@@ -44,13 +44,13 @@ export function useThrottleFn<T extends (...args: never[]) => void>(
  * @param fn - 需要防抖的函数
  * @param delay - 防抖延迟 (ms)
  */
-export function useDebounceFn<T extends (...args: never[]) => void>(
-  fn: T,
+export function useDebounceFn<TArgs extends unknown[]>(
+  fn: (...args: TArgs) => void,
   delay: number,
-): (...args: Parameters<T>) => void {
+): (...args: TArgs) => void {
   let timer: ReturnType<typeof setTimeout> | null = null
 
-  return (...args: Parameters<T>) => {
+  return (...args: TArgs) => {
     if (timer) clearTimeout(timer)
     timer = setTimeout(() => {
       timer = null

@@ -92,6 +92,20 @@ export interface CreateMemoryParams {
   sentiment?: string
 }
 
+/** 故事导入参数 — 对齐后端 MemoryImporter */
+export interface ImportStoryParams {
+  text: string
+  agentId?: string
+  source?: string
+}
+
+/** 故事导入结果 — 对齐后端 ImportResult */
+export interface ImportResult {
+  imported: number
+  skipped: number
+  details: Array<{ content: string; tags: string; importance: number }>
+}
+
 export const memoryApi = {
   /** 分页列表 */
   list: (params?: ListMemoryParams) => {
@@ -120,4 +134,7 @@ export const memoryApi = {
   /** 删除记忆（后端还需 agentId/source query） */
   remove: (id: number, agentId = 'pero', source = 'desktop') =>
     apiClient.delete(`/memories/${id}?agentId=${agentId}&source=${source}`),
+
+  /** 故事/文本批量导入 */
+  importStory: (data: ImportStoryParams) => apiClient.post<ImportResult>('/memories/import', data),
 }

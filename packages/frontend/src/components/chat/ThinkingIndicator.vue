@@ -16,44 +16,16 @@ withDefaults(defineProps<Props>(), {
 </script>
 
 <template>
-  <div class="thinking-indicator">
-    <span class="thinking-dot" />
-    <span class="thinking-dot thinking-dot-2" />
-    <span class="thinking-dot thinking-dot-3" />
-    <span class="thinking-text">{{ name }} 正在思考...</span>
+  <div class="flex items-center gap-1 h-6 px-1">
+    <span class="w-1.5 h-1.5 bg-sky-300 think-dot" />
+    <span class="w-1.5 h-1.5 bg-sky-300 think-dot think-dot-2" />
+    <span class="w-1.5 h-1.5 bg-sky-300 think-dot think-dot-3" />
+    <span class="text-xs font-bold text-sky-300 ml-2">{{ name }} 正在思考...</span>
   </div>
 </template>
 
 <style scoped>
-.thinking-indicator {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  height: 24px;
-  padding: 0 4px;
-}
-
-.thinking-dot {
-  width: 6px;
-  height: 6px;
-  background: var(--color-sky-hover);
-  animation: dot-bounce 1s infinite;
-}
-.thinking-dot-2 {
-  animation-delay: 0.1s;
-}
-.thinking-dot-3 {
-  animation-delay: 0.2s;
-}
-
-.thinking-text {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--color-sky-hover);
-  margin-left: 8px;
-}
-
-@keyframes dot-bounce {
+@keyframes think-bounce {
   0%,
   100% {
     transform: translateY(0);
@@ -61,5 +33,15 @@ withDefaults(defineProps<Props>(), {
   50% {
     transform: translateY(-4px);
   }
+}
+
+.think-dot {
+  animation: think-bounce 1s infinite;
+}
+.think-dot-2 {
+  animation-delay: 0.1s;
+}
+.think-dot-3 {
+  animation-delay: 0.2s;
 }
 </style>

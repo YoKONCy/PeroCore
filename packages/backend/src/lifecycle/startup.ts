@@ -32,7 +32,7 @@ export async function runStartupTasks(ctx: AppContext): Promise<void> {
   ctx.scheduler.start()
   logger.success('后台调度器已启动')
 
-  // ── 2. 恢复 Scorer 待处理任务 (P2-14) ──
+  // ── 2. 恢复 Scorer 待处理任务 ──
   try {
     const activeAgent = ctx.agentManager.activeAgentId
     await ctx.scorerService.processBatch(activeAgent)
@@ -41,7 +41,7 @@ export async function runStartupTasks(ctx: AppContext): Promise<void> {
     logger.warn(`Scorer 恢复失败: ${err}`)
   }
 
-  // ── 3. 恢复 VectorSync 补偿任务 (P2-14) ──
+  // ── 3. 恢复 VectorSync 补偿任务 ──
   try {
     const pending = await ctx.vectorSyncRepo.getPending(50)
     if (pending.length > 0) {
@@ -56,6 +56,18 @@ export async function runStartupTasks(ctx: AppContext): Promise<void> {
   // ── 4. 注册 Gateway 语音管道事件处理 ──
   registerVoicePipelineHandler(ctx)
   logger.success('语音管道 Gateway 触发已注册')
+
+  // ── 5. 注册 Gateway 对话事件处理 (action:chat) ──
+  registerChatHandler(ctx)
+  logger.success('对话 Gateway RPC 已注册')
+
+  // ── 6. 注册 abort 事件处理 (前端中断对话) ──
+  ctx.gatewayHub.on('abort', (envelope: GatewayEnvelope) => {
+    const sessionId = (envelope.payload?.sessionId as string) || 'default'
+    ctx.taskManager.cancel(sessionId)
+    logger.info(`对话已中断: session=${sessionId}`)
+  })
+  logger.success('对话中断 Gateway 触发已注册')
 
   logger.success('启动后任务执行完毕')
 }
@@ -142,6 +154,102 @@ function registerVoicePipelineHandler(ctx: AppContext): void {
           error: (err as Error).message,
         }),
       )
+    }
+  })
+}
+
+/**
+ * 注册 Gateway 对话处理 (action:chat)
+ *
+ * 前端桌宠通过 WS 发送 request('chat', { messages, source, sessionId })。
+ * 此处接收请求后:
+ * 1. 调用 agentService.chatStream() 执行流式对话
+ * 2. 将每个 delta 通过 pushStreamDelta 推送到前端
+ * 3. 对话完成后发送 stream_end + RPC response 回送
+ */
+function registerChatHandler(ctx: AppContext): void {
+  ctx.gatewayHub.on('action:chat', async (envelope: GatewayEnvelope) => {
+    const payload = envelope.payload as Record<string, unknown>
+    const messages = (payload.messages as Array<{ role: string; content: string }>) || []
+    const source = (payload.source as string) || 'desktop'
+    const sessionId = (payload.sessionId as string) || 'default'
+    const agentId = (payload.agentId as string) || 'pero'
+    const requestId = envelope.id
+    const sourceNodeId = envelope.sourceId ?? ''
+
+    if (messages.length === 0) {
+      if (requestId && sourceNodeId) {
+        await ctx.gatewayHub.sendError(requestId, sourceNodeId, '消息内容为空')
+      }
+      return
+    }
+
+    // 消息计数 + 陪伴活动通知
+    ctx.sessionService?.incrementMessageCount?.(agentId)
+    ctx.sessionService?.notifyCompanionActivity?.(agentId)
+
+    // TaskManager 注册任务
+    ctx.taskManager.register(sessionId)
+
+    try {
+      const gen = ctx.agentService.chatStream({
+        messages: messages as { role: 'system' | 'user' | 'assistant' | 'tool'; content: string }[],
+        agentId,
+        source: source as 'desktop' | 'social',
+        sessionId,
+      })
+
+      let fullReply = ''
+
+      for await (const chunk of gen) {
+        if (typeof chunk === 'string') {
+          // delta 文本 → 推送流式增量到前端
+          fullReply += chunk
+          await ctx.gatewayHub.pushStreamDelta(chunk, sessionId)
+        } else if (chunk && typeof chunk === 'object' && 'event' in chunk) {
+          // 工具调用/状态等结构化事件
+          const sseEvent = chunk as { event: string; data: unknown }
+          if (sseEvent.event === 'tool_call') {
+            const toolData = sseEvent.data as { name?: string }
+            await ctx.gatewayHub.pushToolStatus({
+              name: toolData?.name ?? 'unknown',
+              state: 'calling',
+              sessionId,
+            })
+          } else if (sseEvent.event === 'tool_result') {
+            const toolData = sseEvent.data as { name?: string }
+            await ctx.gatewayHub.pushToolStatus({
+              name: toolData?.name ?? 'unknown',
+              state: 'completed',
+              sessionId,
+            })
+          }
+        }
+      }
+
+      // 流结束
+      await ctx.gatewayHub.pushStreamEnd(sessionId)
+
+      // RPC 响应回送 (前端 request() 的 Promise resolve)
+      if (requestId && sourceNodeId) {
+        await ctx.gatewayHub.sendResponse(requestId, sourceNodeId, {
+          success: true,
+          reply: fullReply,
+        })
+      }
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err)
+      logger.error(`Gateway chat 失败: ${errMsg}`)
+
+      // 推送错误到前端
+      await ctx.gatewayHub.pushStreamEnd(sessionId)
+
+      // RPC 错误回送
+      if (requestId && sourceNodeId) {
+        await ctx.gatewayHub.sendError(requestId, sourceNodeId, errMsg)
+      }
+    } finally {
+      ctx.taskManager.unregister(sessionId)
     }
   })
 }

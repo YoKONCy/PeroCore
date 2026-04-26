@@ -410,7 +410,7 @@ PeroCore/
 ├── docker/                        # 🐳 Dockerfile (backend + frontend)
 ├── .github/workflows/             # ⚙️ CI/CD (ci.yml + release.yml)
 ├── .changeset/                    # 🏷️ Changeset 版本管理
-└── _docs_/                        # 📋 工程规范文档 (S/A/M 三类)
+└── .docs/                        # 📋 工程规范文档 (S/A/M 三类)
 ```
 
 ### 核心技术选型

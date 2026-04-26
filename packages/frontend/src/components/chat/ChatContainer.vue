@@ -22,6 +22,8 @@ import { useChat } from '../../composables/chat/useChat'
 import { useStreamMarkdown } from '../../composables/chat/useStreamMarkdown'
 import { useSessionStore } from '../../stores'
 import { Marked } from 'marked'
+import { logger } from '../../lib/logger'
+import { chatApi } from '../../api/modules/chatApi'
 
 export interface Props {
   /** 目标 Agent ID */
@@ -166,7 +168,7 @@ function handleSkipCommand() {
 function handleConfirmResponse(approved: boolean) {
   pendingConfirmation.value = null
   if (approved) {
-    console.log('[ChatContainer] 用户批准指令执行')
+    logger.info('ChatContainer', '用户批准指令执行')
   }
 }
 
@@ -196,10 +198,44 @@ function cancelEdit() {
   editText.value = ''
 }
 
-/** 删除消息 */
-function handleDelete(id: string) {
-  // TODO: 后端补充消息删除 API 后对接
-  sessionStore.deleteMessage(id)
+/** 级联删除对话对 (用户+助手) */
+function handleDeletePair(id: string) {
+  // 本地: 找到相邻的对话对并删除 (user 和紧跟其后的 assistant)
+  const idx = sessionStore.messages.findIndex((m) => m.id === id)
+  if (idx >= 0) {
+    const msg = sessionStore.messages[idx]!
+    const pairIds = [id]
+
+    if (msg.role === 'user' && idx + 1 < sessionStore.messages.length) {
+      // 用户消息: 也删紧跟其后的助手回复
+      const next = sessionStore.messages[idx + 1]!
+      if (next.role === 'assistant') pairIds.push(next.id)
+    } else if (msg.role === 'assistant' && idx - 1 >= 0) {
+      // 助手消息: 也删其前的用户消息
+      const prev = sessionStore.messages[idx - 1]!
+      if (prev.role === 'user') pairIds.push(prev.id)
+    }
+
+    sessionStore.messages = sessionStore.messages.filter((m) => !pairIds.includes(m.id))
+  }
+
+  // 后端同步 (异步，不阻塞 UI)
+  const numId = Number(id)
+  if (Number.isInteger(numId) && numId > 0) {
+    chatApi.deleteMessagePair(numId).catch((err) => {
+      logger.error('ChatContainer', '对话对删除同步失败', err)
+    })
+  }
+}
+
+/** 复制消息内容到剪贴板 */
+async function handleCopy(content: string) {
+  try {
+    await navigator.clipboard.writeText(content)
+    logger.info('ChatContainer', '消息已复制到剪贴板')
+  } catch (err) {
+    logger.error('ChatContainer', '复制失败', err)
+  }
 }
 
 onMounted(() => {
@@ -234,7 +270,8 @@ onUnmounted(() => {
           isGenerating && msg === messages[messages.length - 1] && msg.role === 'assistant'
         "
         @edit="handleEdit"
-        @delete="handleDelete"
+        @delete-pair="handleDeletePair"
+        @copy="handleCopy"
         @vue:mounted="($event: any) => onBubbleMounted($event.el)"
         @vue:unmounted="($event: any) => onBubbleUnmounted($event.el)"
       />

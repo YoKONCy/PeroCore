@@ -101,6 +101,7 @@ throw new AppError('NOT_FOUND', { message: '未找到 ID 为 42 的记忆' })
 | HTTP | code | 默认 message | data | 场景 |
 |---|---|---|---|---|
 | 200 | `OK` | 操作成功 | 业务数据或省略 | 查询、更新、删除、通用成功 |
+| 200 | `NOT_CONFIGURED` | 配置未设置 | `{ key, value: null }` | 请求了尚未初始化的 KV 配置，使用其兜底并避免 404 日志告警 |
 | 201 | `CREATED` | 创建成功 | 新创建的资源 | 新建记忆、模型、Agent |
 | 202 | `ACCEPTED` | 任务已提交，正在后台处理 | `{ taskId?: string }` | 重索引、维护、梦境生成 |
 
@@ -151,7 +152,7 @@ throw new AppError('NOT_FOUND', { message: '未找到 ID 为 42 的记忆' })
 | 504 | `GATEWAY_TIMEOUT` | 上游服务响应超时 | `{ service? }` | 通用超时 |
 | 504 | `LLM_TIMEOUT` | AI 服务响应超时 | `{ provider, model? }` | LLM 超时 |
 
-**统计**：HTTP 状态码 15 个，业务 code 38 个（成功 3 / 客户端错误 20 / 服务端错误 15）。
+**统计**：HTTP 状态码 15 个，业务 code 39 个（成功 4 / 客户端错误 20 / 服务端错误 15）。
 
 ---
 
@@ -176,7 +177,7 @@ export class AppError extends Error {
 }
 
 const CODE_TO_HTTP: Record<string, number> = {
-  OK: 200, CREATED: 201, ACCEPTED: 202,
+  OK: 200, CREATED: 201, ACCEPTED: 202, NOT_CONFIGURED: 200,
   BAD_REQUEST: 400, VALIDATION_ERROR: 400, MISSING_FIELD: 400,
   INVALID_FORMAT: 400, OUT_OF_RANGE: 400, INVALID_PARAMETER: 400,
   UNAUTHORIZED: 401, TOKEN_EXPIRED: 401, TOKEN_INVALID: 401,

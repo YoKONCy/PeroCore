@@ -31,6 +31,8 @@ export interface SessionMessage {
   id: number
   role: string
   content: string
+  /** 原始 LLM 输出 (含 Thinking/Monologue 块, 调试用) */
+  rawContent: string | null
   timestamp: string | null
   pairId: string | null
 }

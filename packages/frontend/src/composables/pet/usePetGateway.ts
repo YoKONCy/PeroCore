@@ -15,6 +15,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useGateway } from '../gateway/useGateway'
 import type { GatewayNotification, TaskProgress } from '../gateway/useGateway'
+import { useNotificationStore } from '../../stores'
 
 // ── 导出类型 ──
 
@@ -39,6 +40,28 @@ export interface PetGatewayOptions {
   onAudioChunk?: (data: ArrayBuffer) => void
 }
 
+/**
+ * 聊天错误码 → 用户友好消息
+ *
+ * 使用看板娘口吻翻译技术错误，让用户不会看到令人困惑的技术术语。
+ * 错误码来源: 后端 AppError.code → Gateway RPC error → err.code
+ */
+const CHAT_ERROR_MESSAGES: Record<string, { title: string; message: string }> = {
+  LLM_ERROR: { title: 'AI 服务异常', message: '请检查模型配置后再试试' },
+  LLM_RATE_LIMITED: { title: 'AI 服务繁忙', message: '请过一会儿再找我聊天吧~' },
+  LLM_TIMEOUT: { title: 'AI 响应超时', message: '要不再试一次？' },
+  EMBEDDING_ERROR: { title: '向量服务异常', message: '记忆检索遇到了问题' },
+  MODEL_NOT_FOUND: { title: '模型未配置', message: '去设置里添加一个 AI 模型吧~' },
+  CONFIG_ERROR: { title: '配置异常', message: '检查一下设置吧' },
+  RATE_LIMITED: { title: '请求频率过高', message: '让我休息一下吧~' },
+  NETWORK_ERROR: { title: '网络连接失败', message: '检查一下网络连接？' },
+  GATEWAY_TIMEOUT: { title: '服务响应超时', message: '后端服务可能在启动中' },
+  SERVICE_UNAVAILABLE: { title: '服务不可用', message: '可能在维护中...' },
+  SERVICE_INITIALIZING: { title: '服务启动中', message: '马上就好~' },
+  GATEWAY_ERROR: { title: '消息发送失败', message: '检查一下后端是否在运行？' },
+  DEFAULT: { title: '发送失败', message: '再试一次吧~' },
+}
+
 export function usePetGateway(options?: PetGatewayOptions) {
   // ── 状态 ──
 
@@ -47,8 +70,8 @@ export function usePetGateway(options?: PetGatewayOptions) {
     thinkingMessage: '努力思考中...',
     currentText: '',
     mood: '开心',
-    vibe: '平静',
-    mind: '...',
+    vibe: '轻松',
+    mind: '发呆',
   })
 
   /** 流式回复缓冲 */
@@ -146,9 +169,13 @@ export function usePetGateway(options?: PetGatewayOptions) {
         sessionId: activeSessionId.value || 'default',
       })
     } catch (err) {
-      console.error('[PetGateway] 发送消息失败:', err)
       chatState.value.isThinking = false
-      chatState.value.currentText = '发送消息失败了...再试一次吧 😿'
+
+      // 错误走 Toast 通知，不污染气泡和聊天记录
+      const code = (err as Error & { code?: string })?.code ?? ''
+      const info = CHAT_ERROR_MESSAGES[code] || CHAT_ERROR_MESSAGES['DEFAULT']!
+      const notif = useNotificationStore()
+      notif.toast(info.message, { type: 'error', title: info.title, duration: 6000 })
     }
   }
 

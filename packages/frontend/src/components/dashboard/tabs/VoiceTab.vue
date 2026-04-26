@@ -5,27 +5,47 @@
  * TTS (语音合成) + ASR (语音识别) 配置面板。
  * F3: 已对接 configApi 读写。
  */
-import { ref, onMounted, watch } from 'vue'
-import { PixelIcon, PInput, PSelect, PSlider, PSwitch, PButton } from '../../pixel'
+import { ref, computed, onMounted, watch } from 'vue'
+import { PixelIcon, PInput, PSelect, PSlider, PSwitch, PButton, PCard } from '../../pixel'
 import { configApi } from '../../../api/modules/configApi'
 import { voiceApi } from '../../../api/modules/voiceApi'
+import { modelApi } from '../../../api/modules/modelApi'
+import { useDashboardContext } from '../../../composables/dashboard'
 
-// ── TTS 配置 ──
+const ctx = useDashboardContext()
+
+// ── TTS 配置 (对齐后端 ttsService 默认值) ──
 const ttsEnabled = ref(true)
-const ttsProvider = ref('openai')
-const ttsVoice = ref('shimmer')
+const ttsProvider = ref('edge_tts')
+const ttsVoice = ref('zh-CN-XiaoyiNeural')
 const ttsSpeed = ref(1.0)
 const ttsPitch = ref(1.0)
+const ttsRate = ref('+25%') // Edge TTS 语速格式
+const ttsEdgePitch = ref('+5Hz') // Edge TTS 音调格式
 const ttsApiBase = ref('')
 const ttsApiKey = ref('')
 
 const ttsProviderOptions = [
+  { label: 'Edge TTS (免费，推荐)', value: 'edge_tts' },
   { label: 'OpenAI TTS', value: 'openai' },
   { label: 'Azure Speech', value: 'azure' },
-  { label: '本地 (Piper)', value: 'local' },
+  { label: '本地 (Piper) — 待实现', value: 'local', disabled: true },
 ]
 
-const ttsVoiceOptions = [
+// Edge TTS 常用中文音色
+const edgeVoiceOptions = [
+  { label: '晓伊 (活泼女声，默认)', value: 'zh-CN-XiaoyiNeural' },
+  { label: '晓晓 (自然女声)', value: 'zh-CN-XiaoxiaoNeural' },
+  { label: '晓萱 (温柔女声)', value: 'zh-CN-XiaoxuanNeural' },
+  { label: '晓墨 (甜美女声)', value: 'zh-CN-XiaomoNeural' },
+  { label: '晓辰 (活力女声)', value: 'zh-CN-XiaochenNeural' },
+  { label: '晓涵 (沉稳女声)', value: 'zh-CN-XiaohanNeural' },
+  { label: '云溪 (男声)', value: 'zh-CN-YunxiNeural' },
+  { label: '云健 (男声)', value: 'zh-CN-YunjianNeural' },
+]
+
+// OpenAI TTS 音色
+const openaiVoiceOptions = [
   { label: 'Shimmer (自然女声)', value: 'shimmer' },
   { label: 'Nova (活泼女声)', value: 'nova' },
   { label: 'Alloy (中性)', value: 'alloy' },
@@ -34,11 +54,40 @@ const ttsVoiceOptions = [
   { label: 'Onyx (深沉男声)', value: 'onyx' },
 ]
 
-// ── ASR 配置 ──
+// 根据当前 Provider 动态显示对应的音色列表
+const ttsVoiceOptions = computed(() => {
+  return ttsProvider.value === 'openai' ? openaiVoiceOptions : edgeVoiceOptions
+})
+
+// ── ASR 配置 (OpenAI 兼容接口，模型无关) ──
 const asrEnabled = ref(false)
+const asrApiBase = ref('')
+const asrApiKey = ref('')
+const asrModel = ref('')
 const asrLanguage = ref('zh-CN')
 const wakeWord = ref('佩洛')
 const asrSensitivity = ref(0.7)
+
+/** ASR 获取远程模型列表 */
+const isFetchingAsrModels = ref(false)
+const remoteAsrModels = ref<string[]>([])
+
+async function fetchRemoteAsrModels() {
+  if (!asrApiBase.value && !asrApiKey.value) return
+  isFetchingAsrModels.value = true
+  try {
+    const res = await modelApi.listRemote({
+      provider: 'openai',
+      apiKey: asrApiKey.value,
+      apiBase: asrApiBase.value || undefined,
+    })
+    remoteAsrModels.value = res.data ?? []
+  } catch {
+    remoteAsrModels.value = []
+  } finally {
+    isFetchingAsrModels.value = false
+  }
+}
 
 const asrLanguageOptions = [
   { label: '简体中文', value: 'zh-CN' },
@@ -57,9 +106,14 @@ async function loadVoiceConfig() {
       'tts.voice',
       'tts.speed',
       'tts.pitch',
+      'tts.rate',
+      'tts.edgePitch',
       'tts.apiBase',
       'tts.apiKey',
       'asr.enabled',
+      'asr.apiBase',
+      'asr.apiKey',
+      'asr.model',
       'asr.language',
       'asr.wakeWord',
       'asr.sensitivity',
@@ -72,7 +126,12 @@ async function loadVoiceConfig() {
     if (d['tts.pitch']) ttsPitch.value = Number(d['tts.pitch'])
     if (d['tts.apiBase']) ttsApiBase.value = d['tts.apiBase'] as string
     if (d['tts.apiKey']) ttsApiKey.value = d['tts.apiKey'] as string
+    if (d['tts.rate']) ttsRate.value = d['tts.rate'] as string
+    if (d['tts.edgePitch']) ttsEdgePitch.value = d['tts.edgePitch'] as string
     if (d['asr.enabled'] !== undefined) asrEnabled.value = d['asr.enabled'] === 'true'
+    if (d['asr.apiBase']) asrApiBase.value = d['asr.apiBase'] as string
+    if (d['asr.apiKey']) asrApiKey.value = d['asr.apiKey'] as string
+    if (d['asr.model']) asrModel.value = d['asr.model'] as string
     if (d['asr.language']) asrLanguage.value = d['asr.language'] as string
     if (d['asr.wakeWord']) wakeWord.value = d['asr.wakeWord'] as string
     if (d['asr.sensitivity']) asrSensitivity.value = Number(d['asr.sensitivity'])
@@ -95,7 +154,12 @@ watch(ttsEnabled, (v) => debouncedSave('tts.enabled', String(v)))
 watch(ttsProvider, (v) => debouncedSave('tts.provider', v))
 watch(ttsVoice, (v) => debouncedSave('tts.voice', v))
 watch(ttsSpeed, (v) => debouncedSave('tts.speed', String(v)))
+watch(ttsRate, (v) => debouncedSave('tts.rate', v))
+watch(ttsEdgePitch, (v) => debouncedSave('tts.edgePitch', v))
 watch(asrEnabled, (v) => debouncedSave('asr.enabled', String(v)))
+watch(asrApiBase, (v) => debouncedSave('asr.apiBase', v))
+watch(asrApiKey, (v) => debouncedSave('asr.apiKey', v))
+watch(asrModel, (v) => debouncedSave('asr.model', v))
 watch(asrLanguage, (v) => debouncedSave('asr.language', v))
 
 // ── 测试 ──
@@ -129,239 +193,255 @@ async function testTts() {
   }
 }
 
+// 监听全局刷新
+watch(
+  () => ctx.refreshKey.value,
+  () => loadVoiceConfig(),
+)
+
 onMounted(loadVoiceConfig)
 </script>
 
 <template>
-  <div class="tab-voice">
-    <div class="tab-header">
-      <h2 class="tab-title"><PixelIcon name="mic" size="md" /><span>语音功能</span></h2>
-      <p class="tab-subtitle">VOICE CONFIGURATION</p>
+  <div class="p-8 h-full flex flex-col overflow-hidden">
+    <div class="mb-6 flex-shrink-0 relative group/header">
+      <!-- 背景氛围光晕 -->
+      <div
+        class="absolute -right-20 -top-10 w-40 h-40 bg-purple-400/5 blur-[60px] rounded-full pointer-events-none group-hover/header:bg-purple-400/15 transition-all duration-1000"
+      />
+      <h2 class="flex items-center gap-3 text-2xl font-black text-slate-800 font-pixel">
+        <span
+          class="group-hover/header:scale-110 group-hover/header:rotate-6 transition-transform duration-500"
+        >
+          <PixelIcon name="mic" size="md" />
+        </span>
+        <span>语音功能</span>
+        <span class="opacity-0 group-hover/header:opacity-100 transition-opacity duration-500">
+          <PixelIcon name="sparkle" size="xs" />
+        </span>
+      </h2>
+      <p
+        class="text-[10px] font-bold uppercase tracking-[0.15em] text-slate-400 mt-1 ml-9 font-pixel"
+      >
+        VOICE CONFIGURATION
+      </p>
     </div>
 
-    <div class="voice-scroll">
+    <div class="flex-1 overflow-y-auto flex flex-col gap-6 voice-scrollbar">
       <!-- TTS -->
-      <section class="voice-section">
-        <div class="voice-section-header">
-          <div class="voice-section-left">
-            <div class="voice-icon voice-icon-blue"><PixelIcon name="mic" size="sm" /></div>
+      <PCard pixel padding="lg" overflow-visible>
+        <div class="flex justify-between items-center mb-5">
+          <div class="flex items-center gap-4">
+            <div
+              class="w-12 h-12 flex items-center justify-center bg-sky-500 text-white flex-shrink-0"
+            >
+              <PixelIcon name="mic" size="sm" />
+            </div>
             <div>
-              <h3 class="voice-section-title">语音合成 TTS</h3>
-              <p class="voice-section-desc">让 Pero 用声音回复你</p>
+              <h3 class="text-base font-black text-slate-800 font-pixel">语音合成 TTS</h3>
+              <p class="text-xs text-slate-400 mt-0.5">让 Pero 用声音回复你</p>
             </div>
           </div>
           <PSwitch v-model="ttsEnabled" />
         </div>
 
         <template v-if="ttsEnabled">
-          <div class="voice-grid">
-            <div class="voice-field">
-              <label class="voice-label">Provider</label>
+          <div class="grid grid-cols-2 gap-4">
+            <div class="flex flex-col gap-1.5">
+              <label
+                class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel"
+              >
+                Provider
+              </label>
               <PSelect v-model="ttsProvider" :options="ttsProviderOptions" />
             </div>
-            <div class="voice-field">
-              <label class="voice-label">声音</label>
+            <div class="flex flex-col gap-1.5">
+              <label
+                class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel"
+              >
+                声音
+              </label>
               <PSelect v-model="ttsVoice" :options="ttsVoiceOptions" />
             </div>
-            <div class="voice-field">
-              <label class="voice-label">语速 ({{ ttsSpeed.toFixed(1) }}x)</label>
-              <PSlider v-model="ttsSpeed" :min="0.5" :max="2.0" :step="0.1" />
-            </div>
-            <div class="voice-field">
-              <label class="voice-label">音调 ({{ ttsPitch.toFixed(1) }}x)</label>
-              <PSlider v-model="ttsPitch" :min="0.5" :max="2.0" :step="0.1" />
-            </div>
-            <template v-if="ttsProvider !== 'local'">
-              <div class="voice-field">
-                <label class="voice-label">API Base (可选)</label>
+            <!-- Edge TTS 特有参数 -->
+            <template v-if="ttsProvider === 'edge_tts'">
+              <div class="flex flex-col gap-1.5">
+                <label
+                  class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel"
+                >
+                  语速 Rate
+                </label>
+                <PInput v-model="ttsRate" placeholder="+25%" />
+                <span class="text-[10px] text-slate-400">如 +25%, -10%, +0%</span>
+              </div>
+              <div class="flex flex-col gap-1.5">
+                <label
+                  class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel"
+                >
+                  音调 Pitch
+                </label>
+                <PInput v-model="ttsEdgePitch" placeholder="+5Hz" />
+                <span class="text-[10px] text-slate-400">如 +5Hz, -2Hz, +0Hz</span>
+              </div>
+            </template>
+
+            <!-- OpenAI TTS 特有参数 -->
+            <template v-if="ttsProvider === 'openai'">
+              <div class="flex flex-col gap-1.5">
+                <label
+                  class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel"
+                >
+                  语速 ({{ ttsSpeed.toFixed(1) }}x)
+                </label>
+                <PSlider v-model="ttsSpeed" :min="0.5" :max="2.0" :step="0.1" />
+              </div>
+              <div class="flex flex-col gap-1.5">
+                <label
+                  class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel"
+                >
+                  API Base
+                </label>
                 <PInput v-model="ttsApiBase" placeholder="留空则使用全局配置" />
               </div>
-              <div class="voice-field">
-                <label class="voice-label">API Key (可选)</label>
+              <div class="flex flex-col gap-1.5">
+                <label
+                  class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel"
+                >
+                  API Key
+                </label>
                 <PInput v-model="ttsApiKey" type="password" placeholder="留空则使用全局配置" />
               </div>
             </template>
           </div>
 
           <!-- 试听 -->
-          <div class="voice-test">
+          <div class="mt-4 pt-4 border-t border-slate-100 flex items-center gap-3">
             <PButton variant="ghost" :loading="isTestPlaying" @click="testTts">
               <PixelIcon :name="isTestPlaying ? 'refresh' : 'mic'" size="xs" />
               {{ isTestPlaying ? '播放中...' : '试听效果' }}
             </PButton>
-            <span v-if="testError" class="voice-test-error">{{ testError }}</span>
+            <span v-if="testError" class="text-xs text-rose-500">{{ testError }}</span>
           </div>
         </template>
-      </section>
+      </PCard>
 
       <!-- ASR -->
-      <section class="voice-section">
-        <div class="voice-section-header">
-          <div class="voice-section-left">
-            <div :class="['voice-icon', asrEnabled ? 'voice-icon-green' : 'voice-icon-muted']">
+      <PCard pixel padding="lg" overflow-visible>
+        <div class="flex justify-between items-center mb-5">
+          <div class="flex items-center gap-4">
+            <div
+              :class="[
+                'w-12 h-12 flex items-center justify-center text-white flex-shrink-0',
+                asrEnabled ? 'bg-emerald-500' : 'bg-slate-400',
+              ]"
+            >
               <PixelIcon name="mic" size="sm" />
             </div>
             <div>
-              <h3 class="voice-section-title">语音识别 ASR</h3>
-              <p class="voice-section-desc">用语音与 Pero 对话</p>
+              <h3 class="text-base font-black text-slate-800 font-pixel">语音识别 ASR</h3>
+              <p class="text-xs text-slate-400 mt-0.5">用语音与 Pero 对话</p>
             </div>
           </div>
           <PSwitch v-model="asrEnabled" />
         </div>
 
         <template v-if="asrEnabled">
-          <div class="voice-grid">
-            <div class="voice-field">
-              <label class="voice-label">识别语言</label>
+          <div class="grid grid-cols-2 gap-4">
+            <!-- API Base -->
+            <div class="flex flex-col gap-1.5">
+              <label
+                class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel"
+              >
+                API Base
+              </label>
+              <PInput v-model="asrApiBase" placeholder="https://api.siliconflow.cn/v1" />
+              <p class="text-[10px] text-slate-400 italic">
+                * 任何兼容 /audio/transcriptions 的接口均可
+              </p>
+            </div>
+            <!-- API Key -->
+            <div class="flex flex-col gap-1.5">
+              <label
+                class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel"
+              >
+                API Key
+              </label>
+              <PInput v-model="asrApiKey" type="password" placeholder="sk-..." />
+            </div>
+            <!-- 模型 + 获取列表 -->
+            <div class="flex flex-col gap-1.5 col-span-2">
+              <label
+                class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel flex items-center justify-between"
+              >
+                模型
+                <PButton
+                  variant="ghost"
+                  size="sm"
+                  :loading="isFetchingAsrModels"
+                  @click="fetchRemoteAsrModels"
+                >
+                  <PixelIcon name="refresh" size="xs" />
+                  获取模型列表
+                </PButton>
+              </label>
+              <PSelect
+                v-if="remoteAsrModels.length > 0"
+                v-model="asrModel"
+                :options="remoteAsrModels.map((m) => ({ label: m, value: m }))"
+                placeholder="从列表中选择..."
+              />
+              <PInput v-else v-model="asrModel" placeholder="例如: FunAudioLLM/SenseVoiceSmall" />
+            </div>
+            <!-- 识别语言 -->
+            <div class="flex flex-col gap-1.5">
+              <label
+                class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel"
+              >
+                识别语言
+              </label>
               <PSelect v-model="asrLanguage" :options="asrLanguageOptions" />
             </div>
-            <div class="voice-field">
-              <label class="voice-label">唤醒词</label>
+            <!-- 唤醒词 -->
+            <div class="flex flex-col gap-1.5">
+              <label
+                class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel"
+              >
+                唤醒词
+              </label>
               <PInput v-model="wakeWord" placeholder="例如: 佩洛" />
-              <p class="voice-hint">说出唤醒词后开始语音输入</p>
+              <p class="text-[10px] text-slate-400 italic">说出唤醒词后开始语音输入</p>
             </div>
-            <div class="voice-field voice-field-full">
-              <label class="voice-label">灵敏度 ({{ (asrSensitivity * 100).toFixed(0) }}%)</label>
+            <!-- 灵敏度 -->
+            <div class="flex flex-col gap-1.5 col-span-2">
+              <label
+                class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel"
+              >
+                灵敏度 ({{ (asrSensitivity * 100).toFixed(0) }}%)
+              </label>
               <PSlider v-model="asrSensitivity" :min="0.1" :max="1.0" :step="0.05" />
             </div>
           </div>
         </template>
 
-        <div v-if="!asrEnabled" class="voice-disabled-hint">
+        <div
+          v-if="!asrEnabled"
+          class="p-4 bg-slate-50 border border-slate-200 text-center text-[13px] text-slate-400"
+        >
           <p>语音识别已关闭。开启后可以用声音与 Pero 对话喵~</p>
         </div>
-      </section>
+      </PCard>
     </div>
   </div>
 </template>
 
 <style scoped>
-.tab-voice {
-  padding: 32px;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.tab-header {
-  margin-bottom: 24px;
-  flex-shrink: 0;
-}
-.tab-title {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 24px;
-  font-weight: 800;
-  color: var(--color-text-primary);
-}
-.tab-subtitle {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.15em;
-  color: var(--color-text-muted);
-  margin-top: 4px;
-  margin-left: 36px;
-}
-
-.voice-scroll {
-  flex: 1;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-}
-.voice-scroll::-webkit-scrollbar {
+/* 像素风滚动条 */
+.voice-scrollbar::-webkit-scrollbar {
   width: 4px;
 }
-.voice-scroll::-webkit-scrollbar-thumb {
-  background: var(--color-sky-light);
-}
 
-.voice-section {
-  border: 2px solid var(--color-border);
-  background: var(--color-bg-primary);
-  padding: 24px;
-}
-.voice-section-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-}
-.voice-section-left {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-.voice-icon {
-  width: 48px;
-  height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  flex-shrink: 0;
-}
-.voice-icon-blue {
-  background: var(--color-sky-500);
-}
-.voice-icon-green {
-  background: var(--color-emerald-face, #22c55e);
-}
-.voice-icon-muted {
-  background: var(--color-text-muted);
-}
-.voice-section-title {
-  font-size: 16px;
-  font-weight: 800;
-  color: var(--color-text-primary);
-}
-.voice-section-desc {
-  font-size: 12px;
-  color: var(--color-text-muted);
-  margin-top: 2px;
-}
-
-.voice-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-}
-.voice-field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.voice-field-full {
-  grid-column: 1 / -1;
-}
-.voice-label {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  color: var(--color-text-muted);
-}
-.voice-hint {
-  font-size: 10px;
-  color: var(--color-text-muted);
-  font-style: italic;
-}
-
-.voice-test {
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px solid var(--color-border);
-}
-
-.voice-disabled-hint {
-  padding: 16px;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  text-align: center;
-  font-size: 13px;
-  color: var(--color-text-muted);
+.voice-scrollbar::-webkit-scrollbar-thumb {
+  background: #bae6fd;
+  border-radius: 0;
 }
 </style>

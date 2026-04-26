@@ -22,11 +22,11 @@ export interface PetStats {
 }
 
 const moodLabels: Record<PetMood, string> = {
-  happy: '开心 ☺️',
-  neutral: '平静 😐',
-  sleepy: '困了 😴',
-  excited: '兴奋 ✨',
-  curious: '好奇 🤔',
+  happy: '开心',
+  neutral: '平静',
+  sleepy: '困了',
+  excited: '兴奋',
+  curious: '好奇',
 }
 
 const moodEmoji: Record<PetMood, string> = {

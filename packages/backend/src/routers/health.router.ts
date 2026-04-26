@@ -29,7 +29,7 @@ export function createHealthRouter() {
       message: '成功',
       data: {
         status: 'ok',
-        version: '0.9.0',
+        version: '0.9-rc1',
         uptime: Math.round(uptime),
         uptimeHuman: formatUptime(uptime),
         port: SERVER_PORT,
@@ -50,11 +50,14 @@ export function createHealthRouter() {
   router.get('/logs', (c) => {
     const transport = getLogFileTransport()
     if (!transport) {
-      return c.json({
-        code: 'LOG_FILE_NOT_ENABLED',
-        message: '日志文件持久化未启用',
-        files: [],
-      })
+      return c.json(
+        {
+          code: 'PRECONDITION_FAILED',
+          message: '日志文件持久化未启用',
+          data: { reason: '未配置日志文件输出' },
+        },
+        422,
+      )
     }
 
     const logDir = transport.getLogDir()
@@ -75,12 +78,16 @@ export function createHealthRouter() {
         .sort((a, b) => b.modified.localeCompare(a.modified))
 
       return c.json({
-        logDir,
-        currentFile: path.basename(transport.getLogPath()),
-        files,
+        code: 'OK',
+        message: '获取成功',
+        data: {
+          logDir,
+          currentFile: path.basename(transport.getLogPath()),
+          files,
+        },
       })
-    } catch (err) {
-      return c.json({ code: 'LOG_READ_ERROR', message: '读取日志目录失败' }, 500)
+    } catch {
+      return c.json({ code: 'INTERNAL_ERROR', message: '读取日志目录失败' }, 500)
     }
   })
 
@@ -88,7 +95,7 @@ export function createHealthRouter() {
   router.get('/logs/:filename', (c) => {
     const transport = getLogFileTransport()
     if (!transport) {
-      return c.json({ code: 'LOG_FILE_NOT_ENABLED', message: '日志文件持久化未启用' }, 400)
+      return c.json({ code: 'PRECONDITION_FAILED', message: '日志文件持久化未启用' }, 422)
     }
 
     const logDir = transport.getLogDir()
@@ -96,14 +103,14 @@ export function createHealthRouter() {
 
     // 安全检查：防止路径遍历
     if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
-      return c.json({ code: 'INVALID_FILENAME', message: '非法文件名' }, 400)
+      return c.json({ code: 'BAD_REQUEST', message: '非法文件名' }, 400)
     }
 
     const filePath = path.join(logDir, filename)
 
     // 确保文件在日志目录内
     if (!filePath.startsWith(logDir)) {
-      return c.json({ code: 'INVALID_FILENAME', message: '非法文件路径' }, 400)
+      return c.json({ code: 'BAD_REQUEST', message: '非法文件路径' }, 400)
     }
 
     try {
@@ -118,14 +125,18 @@ export function createHealthRouter() {
       const outputLines = tail > 0 ? allLines.slice(-tail) : allLines
 
       return c.json({
-        filename,
-        size: formatBytes(stat.size),
-        totalLines: allLines.length,
-        returnedLines: outputLines.length,
-        lines: outputLines,
+        code: 'OK',
+        message: '获取成功',
+        data: {
+          filename,
+          size: formatBytes(stat.size),
+          totalLines: allLines.length,
+          returnedLines: outputLines.length,
+          lines: outputLines,
+        },
       })
     } catch {
-      return c.json({ code: 'FILE_NOT_FOUND', message: `日志文件不存在: ${filename}` }, 404)
+      return c.json({ code: 'NOT_FOUND', message: `日志文件不存在: ${filename}` }, 404)
     }
   })
 

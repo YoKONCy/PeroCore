@@ -75,7 +75,7 @@ function openButler() {
 </script>
 
 <template>
-  <div class="stronghold">
+  <div class="flex w-full h-full overflow-hidden gap-1 p-1 bg-white">
     <!-- 左侧栏 -->
     <FacilitySidebar
       :facilities="facilities"
@@ -88,23 +88,28 @@ function openButler() {
     />
 
     <!-- 中间: 聊天 -->
-    <main class="sh-main">
+    <main class="flex-1 flex flex-col border-2 border-slate-200 bg-white overflow-hidden min-w-0">
       <template v-if="currentRoom">
         <!-- 房间标题 -->
-        <header class="sh-room-header">
-          <div class="sh-room-header-left">
-            <div class="sh-room-icon">
+        <header class="px-6 py-5 border-b-2 border-slate-200 flex-shrink-0">
+          <div class="flex items-center gap-4">
+            <div class="w-12 h-12 flex items-center justify-center bg-sky-500 text-white">
               <PixelIcon name="door-open" size="md" />
             </div>
             <div>
-              <h1 class="sh-room-title">
+              <h1 class="text-2xl font-black text-slate-800 flex items-center gap-3">
                 {{ currentRoom.name }}
-                <span v-if="currentFacility" class="sh-room-fac-badge">
+                <span
+                  v-if="currentFacility"
+                  class="px-3 py-1 bg-pink-500 text-white text-[10px] font-bold uppercase tracking-[0.15em]"
+                >
                   {{ currentFacility.name }}
                 </span>
               </h1>
-              <p class="sh-room-sub">
-                <span class="sh-online-dot" />
+              <p
+                class="flex items-center gap-1.5 text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-[0.2em]"
+              >
+                <span class="w-1.5 h-1.5 bg-emerald-500 sh-pulse" />
                 据点通讯链路：已建立加密连接
               </p>
             </div>
@@ -112,7 +117,7 @@ function openButler() {
         </header>
 
         <!-- 聊天区 -->
-        <div class="sh-chat-area">
+        <div class="flex-1 overflow-hidden">
           <ChatContainer
             :key="currentRoom.id"
             :agent-id="currentRoom.id.toString()"
@@ -122,10 +127,10 @@ function openButler() {
       </template>
 
       <!-- 未选择 -->
-      <div v-else class="sh-empty">
+      <div v-else class="flex flex-col items-center justify-center h-full gap-4 text-slate-400">
         <PixelIcon name="building" size="3xl" />
-        <h3 class="sh-empty-title">请选择一个房间</h3>
-        <p class="sh-empty-sub">等待接入授权中...</p>
+        <h3 class="text-2xl font-black text-slate-500">请选择一个房间</h3>
+        <p class="text-[10px] font-bold uppercase tracking-[0.3em] sh-pulse">等待接入授权中...</p>
       </div>
     </main>
 
@@ -140,14 +145,14 @@ function openButler() {
 
     <!-- 管家弹窗 -->
     <PDialog v-model="showButler" title="BUTLER INTERFACE">
-      <div class="sh-butler-body">
+      <div class="p-6">
         <textarea
           v-model="butlerQuery"
-          class="sh-butler-input"
+          class="w-full h-40 p-4 border-2 border-slate-200 bg-white text-slate-800 text-sm resize-none outline-none transition-colors focus:border-sky-300 placeholder:text-slate-400"
           placeholder="告诉管家你需要什么..."
           @keydown.ctrl.enter="submitButler"
         />
-        <div class="sh-butler-actions">
+        <div class="flex justify-end gap-3 mt-4">
           <PButton variant="ghost" @click="showButler = false">取消</PButton>
           <PButton
             variant="primary"
@@ -163,158 +168,17 @@ function openButler() {
 </template>
 
 <style scoped>
-.stronghold {
-  display: flex;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  gap: 4px;
-  padding: 4px;
-  background: var(--color-bg-primary);
-}
-
-/* 主区 */
-.sh-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  border: 2px solid var(--color-border);
-  background: var(--color-bg-primary);
-  overflow: hidden;
-  min-width: 0;
-}
-
-.sh-room-header {
-  padding: 20px 24px;
-  border-bottom: 2px solid var(--color-border);
-  flex-shrink: 0;
-}
-
-.sh-room-header-left {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.sh-room-icon {
-  width: 48px;
-  height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--color-sky-500);
-  color: white;
-}
-
-.sh-room-title {
-  font-size: 24px;
-  font-weight: 800;
-  color: var(--color-text-primary);
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.sh-room-fac-badge {
-  padding: 4px 12px;
-  background: var(--color-pink-face);
-  color: white;
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.15em;
-}
-
-.sh-room-sub {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--color-text-muted);
-  margin-top: 4px;
-  text-transform: uppercase;
-  letter-spacing: 0.2em;
-}
-
-.sh-online-dot {
-  width: 6px;
-  height: 6px;
-  background: var(--color-emerald-face);
-  animation: pulse 2s infinite;
-}
-
-.sh-chat-area {
-  flex: 1;
-  overflow: hidden;
-}
-
-/* 空状态 */
-.sh-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  gap: 16px;
-  color: var(--color-text-muted);
-}
-
-.sh-empty-title {
-  font-size: 24px;
-  font-weight: 800;
-  color: var(--color-text-secondary);
-}
-
-.sh-empty-sub {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.3em;
-  animation: pulse 2s infinite;
-}
-
-/* 管家弹窗 */
-.sh-butler-body {
-  padding: 24px;
-}
-
-.sh-butler-input {
-  width: 100%;
-  height: 160px;
-  padding: 16px;
-  border: 2px solid var(--color-border);
-  background: var(--color-bg-primary);
-  color: var(--color-text-primary);
-  font-size: 14px;
-  resize: none;
-  outline: none;
-  transition: border-color 0.2s;
-}
-
-.sh-butler-input:focus {
-  border-color: var(--color-sky-hover);
-}
-
-.sh-butler-input::placeholder {
-  color: var(--color-text-muted);
-}
-
-.sh-butler-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  margin-top: 16px;
-}
-
-@keyframes pulse {
+@keyframes sh-pulse-anim {
   0%,
   100% {
     opacity: 0.4;
   }
-
   50% {
     opacity: 1;
   }
+}
+
+.sh-pulse {
+  animation: sh-pulse-anim 2s infinite;
 }
 </style>

@@ -354,7 +354,7 @@ export const triviumSyncTasks = sqliteTable(
     operation: text('operation').notNull(),
     memoryId: integer('memory_id'),
     storeName: text('store_name').default('memory'),
-    dedupeKey: text('dedupe_key'),
+    dedupeKey: text('dedupe_key').unique(),
     payloadJson: text('payload_json').default('{}'),
     status: text('status').default('pending'),
     retryCount: integer('retry_count').default(0),
@@ -367,7 +367,6 @@ export const triviumSyncTasks = sqliteTable(
     index('idx_trivium_sync_tasks_operation').on(table.operation),
     index('idx_trivium_sync_tasks_status').on(table.status),
     index('idx_trivium_sync_tasks_memory_id').on(table.memoryId),
-    index('idx_trivium_sync_tasks_dedupe_key').on(table.dedupeKey),
     index('idx_trivium_sync_tasks_agent_id').on(table.agentId),
   ],
 )

@@ -84,6 +84,7 @@ import {
   strongholdSetEnvironmentTool,
   strongholdCallButlerTool,
 } from './strongholdOps'
+import { searchDiaryTool } from './diarySearch'
 
 /** 全部内置工具列表 */
 const ALL_BUILTIN_TOOLS: BuiltinTool[] = [
@@ -110,7 +111,7 @@ const ALL_BUILTIN_TOOLS: BuiltinTool[] = [
   // ── 脚本编排 (NIT → FC 工具化) ──
   runScriptTool,
 
-  // ── 视觉感知 (ScreenshotProvider 注入) ──
+  // ── 视觉感知 (ScreenshotProvider 通过 set 模式设置) ──
   takeScreenshotTool,
 
   // ── 网页抓取 (跨平台) ──
@@ -150,6 +151,9 @@ const ALL_BUILTIN_TOOLS: BuiltinTool[] = [
   strongholdGetRoomInfoTool,
   strongholdSetEnvironmentTool,
   strongholdCallButlerTool,
+
+  // ── 日记查找 (diary.tdb 语义检索) ──
+  searchDiaryTool,
 ]
 
 /**
@@ -169,3 +173,22 @@ export async function registerBuiltinTools(registry: ToolRegistry): Promise<void
 export function getBuiltinToolDefinitions(): ToolDefinition[] {
   return ALL_BUILTIN_TOOLS.map((t) => t.definition)
 }
+
+// ─────────────────────────────────────────────
+// Re-export: 工具依赖设置函数 (供 container.ts 使用)
+// ─────────────────────────────────────────────
+
+export { setScreenshotProvider } from './screenVision'
+export type { ScreenshotProvider } from './screenVision'
+export { setWindowProvider } from './systemInfo'
+export type { WindowProvider } from './systemInfo'
+export { setDesktopAutomationProvider } from './desktopAutomation'
+export type { DesktopAutomationProvider } from './desktopAutomation'
+export { setSocialMessagingProvider } from './socialOps'
+export type { SocialMessagingProvider } from './socialOps'
+export { setStrongholdService } from './strongholdOps'
+export { setSchedulerService } from './scheduler'
+export { setFinishTaskDeps } from './finishTask'
+export { setBrowserBridge } from './browserControl'
+export type { BrowserBridge } from './browserControl'
+export { setDiarySearchDeps } from './diarySearch'

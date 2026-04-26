@@ -35,4 +35,8 @@ export const modelApi = {
 
   /** 测试模型连通性 */
   test: (id: string) => apiClient.post<{ latencyMs: number }>(`/models/${id}/test`),
+
+  /** 获取远程模型列表 */
+  listRemote: (params: { provider: string; apiKey: string; apiBase?: string }) =>
+    apiClient.post<string[]>('/models/list-remote', params),
 }

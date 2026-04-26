@@ -11,6 +11,27 @@
 
 import type { ApiResponse } from '@perocore/shared'
 
+/**
+ * Electron 模式下后端服务根地址。
+ *
+ * 所有 localhost:9120 引用**必须**使用此常量，
+ * 禁止在其他文件中硬编码端口号 (S05 §3)。
+ */
+export const ELECTRON_BACKEND_ORIGIN = 'http://localhost:9120'
+
+export function isElectronRuntime(): boolean {
+  return (window as unknown as Record<string, unknown>).electron !== undefined
+}
+
+export function getGatewayWsUrl(): string {
+  if (isElectronRuntime()) {
+    return `${ELECTRON_BACKEND_ORIGIN.replace(/^http/, 'ws')}/ws/gateway`
+  }
+
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  return `${protocol}//${window.location.host}/ws/gateway`
+}
+
 // ─────────────────────────────────────────────
 // Transport 接口
 // ─────────────────────────────────────────────
@@ -69,7 +90,7 @@ class HttpTransport implements Transport {
 class ElectronTransport implements Transport {
   async request<T>(endpoint: string, options?: RequestInit): Promise<ApiResponse<T>> {
     // 业务 API 照样走 HTTP (localhost:9120)
-    const res = await fetch(`http://localhost:9120/api${endpoint}`, {
+    const res = await fetch(`${ELECTRON_BACKEND_ORIGIN}/api${endpoint}`, {
       ...options,
       headers: {
         'Content-Type': 'application/json',
@@ -91,7 +112,11 @@ class ElectronTransport implements Transport {
 
   async invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
     // Electron 专属能力走 IPC
-    return (window as any).electron.invoke(channel, ...args)
+    return (
+      window as unknown as {
+        electron: { invoke<T>(channel: string, ...args: unknown[]): Promise<T> }
+      }
+    ).electron.invoke(channel, ...args)
   }
 }
 
@@ -100,6 +125,17 @@ class ElectronTransport implements Transport {
 // ─────────────────────────────────────────────
 
 /** 当前 Transport 实例 (单例) */
-export const transport: Transport = (window as any).electron
+export const transport: Transport = isElectronRuntime()
   ? new ElectronTransport()
   : new HttpTransport(window.location.origin)
+
+/**
+ * 获取 API 根路径 (含 /api 前缀)
+ *
+ * 用于非 fetch 场景 (如 img src) 拼接完整 URL。
+ * Electron: http://localhost:9120/api
+ * Web:      {window.location.origin}/api
+ */
+export function getApiBaseUrl(): string {
+  return isElectronRuntime() ? `${ELECTRON_BACKEND_ORIGIN}/api` : `${window.location.origin}/api`
+}

@@ -18,6 +18,11 @@ export type {
 export { SocialScheduler } from './socialScheduler'
 export type { SocialSchedulerConfig, SocialSchedulerDeps } from './socialScheduler'
 
+export { ImageCacheManager } from './imageCacheManager'
+export type { ImageCacheConfig } from './imageCacheManager'
+
+export { StickerService } from './stickerService'
+
 export type {
   InboundMessage,
   OutboundMessage,

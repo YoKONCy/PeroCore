@@ -10,6 +10,8 @@ import { ref, shallowRef, computed, onMounted } from 'vue'
 import { memoryApi } from '../../api/modules/memoryApi'
 import { maintenanceApi } from '../../api/modules/maintenanceApi'
 import type { MemoryDto } from '../../api/modules/memoryApi'
+import { useNotificationStore } from '../../stores/useNotificationStore'
+import { logger } from '../../lib/logger'
 
 // ── 类型 ──
 
@@ -51,6 +53,7 @@ function toMemoryNode(dto: MemoryDto): MemoryNode {
 // ── Composable ──
 
 export function useMemories() {
+  const notify = useNotificationStore()
   const memories = shallowRef<MemoryNode[]>([])
   const isLoading = ref(false)
   const error = ref<string | null>(null)
@@ -110,7 +113,8 @@ export function useMemories() {
       }
     } catch (e) {
       error.value = (e as Error).message
-      console.error('[Memories] 加载记忆列表失败:', e)
+      notify.toast('加载记忆列表失败: ' + (e as Error).message, 'error')
+      logger.error('Memories', '加载记忆列表失败', e)
     } finally {
       isLoading.value = false
     }
@@ -146,6 +150,7 @@ export function useMemories() {
       totalCount.value = results.length
     } catch (e) {
       error.value = (e as Error).message
+      notify.toast('语义搜索失败: ' + (e as Error).message, 'error')
     } finally {
       isLoading.value = false
     }
@@ -158,8 +163,10 @@ export function useMemories() {
       memories.value = memories.value.filter((m) => m.id !== id)
       totalCount.value = Math.max(0, totalCount.value - 1)
       if (selectedMemory.value?.id === id) isDetailOpen.value = false
+      notify.toast('记忆已删除', 'success')
     } catch (e) {
       error.value = (e as Error).message
+      notify.toast('删除记忆失败: ' + (e as Error).message, 'error')
     }
   }
 
@@ -233,46 +240,46 @@ export function useMemories() {
 
   const isRunningMaintenance = ref(false)
   const isScanningLonely = ref(false)
-  const isDreaming = ref(false)
 
+  /**
+   * 触发记忆维护（Reflection Orchestrator）
+   *
+   * 包含：标签、合并、审计、退役、梦境联想、图谱修剪
+   */
   async function triggerMaintenance(): Promise<void> {
     isRunningMaintenance.value = true
     try {
-      await maintenanceApi.trigger('daily_maintenance')
+      await maintenanceApi.trigger('reflection')
+      notify.toast('记忆维护已触发', 'success')
     } catch (e) {
       error.value = (e as Error).message
+      notify.toast('记忆维护失败: ' + (e as Error).message, 'error')
     } finally {
       isRunningMaintenance.value = false
     }
   }
 
+  /** 触发孤立记忆扫描 */
   async function triggerScanLonely(): Promise<void> {
     isScanningLonely.value = true
     try {
-      await maintenanceApi.trigger('scan_lonely')
+      await maintenanceApi.trigger('lonely-scan')
+      notify.toast('孤立记忆扫描已触发', 'success')
     } catch (e) {
       error.value = (e as Error).message
+      notify.toast('孤立记忆扫描失败: ' + (e as Error).message, 'error')
     } finally {
       isScanningLonely.value = false
-    }
-  }
-
-  async function triggerDream(): Promise<void> {
-    isDreaming.value = true
-    try {
-      await maintenanceApi.trigger('dream_association')
-    } catch (e) {
-      error.value = (e as Error).message
-    } finally {
-      isDreaming.value = false
     }
   }
 
   async function triggerReindex(): Promise<void> {
     try {
       await maintenanceApi.reindex('pero')
+      notify.toast('重建索引已触发', 'success')
     } catch (e) {
       error.value = (e as Error).message
+      notify.toast('重建索引失败: ' + (e as Error).message, 'error')
     }
   }
 
@@ -298,8 +305,10 @@ export function useMemories() {
       isImportOpen.value = false
       importText.value = ''
       await fetchMemories()
+      notify.toast('故事导入成功', 'success')
     } catch (e) {
       error.value = (e as Error).message
+      notify.toast('故事导入失败: ' + (e as Error).message, 'error')
     } finally {
       isImporting.value = false
     }
@@ -321,7 +330,8 @@ export function useMemories() {
       }
     } catch (e) {
       error.value = (e as Error).message
-      console.error('[Memories] 图谱加载失败:', e)
+      notify.toast('图谱加载失败: ' + (e as Error).message, 'error')
+      logger.error('Memories', '图谱加载失败', e)
     } finally {
       isLoadingGraph.value = false
     }
@@ -401,10 +411,8 @@ export function useMemories() {
     // P2: 维护操作
     isRunningMaintenance,
     isScanningLonely,
-    isDreaming,
     triggerMaintenance,
     triggerScanLonely,
-    triggerDream,
     triggerReindex,
     // P4: 故事导入
     isImportOpen,

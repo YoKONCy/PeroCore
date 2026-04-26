@@ -7,6 +7,7 @@
  * @module packages/backend/src/main
  */
 
+import type { Server } from 'node:http'
 import { serve } from '@hono/node-server'
 import { createApp } from './app'
 import { createAppContext, createDefaultConfig, initAppContext } from './container'
@@ -14,6 +15,7 @@ import { runStartupTasks } from './lifecycle'
 import { logger, initLogFile } from './lib/logger'
 import { SERVER_HOST, SERVER_PORT } from './lib/env'
 import { registerProcessGuards, onShutdown } from './lib/processGuards'
+import { setupGatewayWebSocket } from './services/gateway/wsUpgrade'
 
 // 0. 启动 Banner (最早输出，在任何初始化之前)
 printBanner()
@@ -27,7 +29,7 @@ registerProcessGuards()
 async function main() {
   // 1. 初始化 DI 容器 (同步阶段)
   const config = createDefaultConfig()
-  const ctx = createAppContext(config)
+  const ctx = await createAppContext(config)
 
   // 2. 异步初始化 (工具注册 + 扩展加载 + 资产扫描)
   await initAppContext(ctx)
@@ -41,7 +43,7 @@ async function main() {
   // 5. 启动 HTTP 服务器
   logger.info(`PeroCore 后端启动中... → http://${SERVER_HOST}:${SERVER_PORT}`)
 
-  serve(
+  const server = serve(
     {
       fetch: app.fetch,
       hostname: SERVER_HOST,
@@ -51,6 +53,11 @@ async function main() {
       logger.success(`PeroCore 后端已就绪 → http://${info.address}:${info.port}`)
     },
   )
+
+  // 6. 挂载 WebSocket 升级 (A02 §7: Gateway 与 HTTP 共用端口 :9120)
+  //    同时挂载社交适配器 WS 端点 (/api/social/ws → NapCat 反向连接)
+  setupGatewayWebSocket(server as Server, ctx.gatewayHub, ctx)
+  ctx.gatewayHub.startHeartbeat()
 
   // 注册优雅退出回调
   onShutdown(async () => {

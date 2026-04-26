@@ -26,9 +26,12 @@ import path from 'node:path'
 import { mkdirSync, existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 const _require = createRequire(import.meta.url)
-// triviumdb 是 NAPI CJS 模块 (module.exports = nativeBinding)，ESM 只能通过 require 加载
+// triviumdb 是 NAPI CJS 模块 (module.exports = { TriviumDB })，ESM 只能通过 require 加载
 import type { TriviumDB as TriviumDBType } from 'triviumdb'
-const TriviumDB = _require('triviumdb') as typeof TriviumDBType & (new (...args: unknown[]) => TriviumDBType)
+const _triviumModule = _require('triviumdb') as {
+  TriviumDB: new (...args: unknown[]) => TriviumDBType
+}
+const TriviumDB = _triviumModule.TriviumDB
 import type { PathResolver } from '../core/pathResolver'
 import { createLogger } from '../lib/logger'
 

@@ -410,7 +410,7 @@ PeroCore/
 ├── docker/                        # 🐳 Dockerfile (backend + frontend)
 ├── .github/workflows/             # ⚙️ CI/CD (ci.yml + release.yml)
 ├── .changeset/                    # 🏷️ Changeset version management
-└── _docs_/                        # 📋 Engineering spec docs (S/A/M categories)
+└── .docs/                        # 📋 Engineering spec docs (S/A/M categories)
 ```
 
 ### Core Technology Stack

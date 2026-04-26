@@ -50,28 +50,36 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="chat-view">
+  <div class="flex w-full h-full overflow-hidden bg-white">
     <!-- 侧边栏 -->
-    <aside class="chat-sidebar">
+    <aside class="w-64 flex flex-col h-full border-r-2 border-slate-200 bg-slate-50/40">
       <!-- 搜索 -->
-      <div class="sidebar-search">
-        <div class="sidebar-search-wrapper">
-          <PixelIcon name="search" size="xs" class="sidebar-search-icon" />
+      <div class="px-4 pt-2 pb-4 flex-shrink-0">
+        <div class="relative">
+          <PixelIcon name="search" size="xs" class="absolute left-3 top-2.5 text-slate-400" />
           <input
             v-model="searchQuery"
             type="text"
             placeholder="搜索助手..."
-            class="sidebar-search-input"
+            class="w-full py-2 px-3 pl-9 text-xs border-2 border-slate-200 bg-white text-slate-800 outline-none transition-colors focus:border-sky-300 placeholder:text-slate-400"
           />
         </div>
       </div>
 
       <!-- Agent 列表 -->
-      <div class="sidebar-list">
-        <div class="sidebar-list-header">
-          <span class="sidebar-list-label"> AGENTS <span class="sidebar-dot" /> </span>
+      <div class="flex-1 overflow-y-auto px-3 pb-3 chat-scrollbar">
+        <div class="flex items-center justify-between px-2 pb-2">
+          <span
+            class="text-[10px] font-bold text-slate-400 uppercase tracking-[0.15em] flex items-center gap-1"
+          >
+            AGENTS
+            <span class="w-1 h-1 bg-sky-300 sidebar-pulse" />
+          </span>
           <PTooltip content="刷新列表" placement="top">
-            <button class="sidebar-refresh-btn" @click="loadAgents">
+            <button
+              class="p-1.5 bg-white border-2 border-slate-200 text-slate-400 cursor-pointer transition-all hover:border-sky-300 hover:text-sky-500"
+              @click="loadAgents"
+            >
               <PixelIcon name="refresh" size="xs" :animation="isLoading ? 'spin' : ''" />
             </button>
           </PTooltip>
@@ -88,33 +96,41 @@ onMounted(() => {
         <div
           v-for="agent in filteredAgents"
           :key="agent.id"
-          :class="['sidebar-agent', { 'sidebar-agent-active': activeAgent?.id === agent.id }]"
+          :class="[
+            'flex items-center gap-3 p-2 cursor-pointer relative transition-all mb-1 hover:bg-white hover:translate-x-0.5',
+            activeAgent?.id === agent.id ? 'bg-white border-2 border-slate-200' : '',
+          ]"
           @click="switchAgent(agent)"
         >
           <!-- 活跃指示器 -->
-          <div v-if="activeAgent?.id === agent.id" class="sidebar-agent-indicator" />
+          <div
+            v-if="activeAgent?.id === agent.id"
+            class="absolute left-0 top-2 bottom-2 w-[3px] bg-sky-500"
+          />
 
           <!-- 头像 -->
           <div
             :class="[
-              'sidebar-agent-avatar',
-              { 'sidebar-agent-avatar-active': activeAgent?.id === agent.id },
+              'w-10 h-10 flex items-center justify-center text-white font-bold text-sm border-2 transition-all',
+              activeAgent?.id === agent.id
+                ? 'bg-sky-500 border-sky-600'
+                : 'bg-sky-300 border-slate-200',
             ]"
           >
             {{ agent.name?.[0]?.toUpperCase() ?? '?' }}
           </div>
 
           <!-- 信息 -->
-          <div class="sidebar-agent-info">
+          <div class="flex-1 min-w-0">
             <span
               :class="[
-                'sidebar-agent-name',
-                { 'sidebar-agent-name-active': activeAgent?.id === agent.id },
+                'block text-[13px] font-bold truncate',
+                activeAgent?.id === agent.id ? 'text-sky-500' : 'text-slate-500',
               ]"
             >
               {{ agent.name }}
             </span>
-            <span class="sidebar-agent-status">
+            <span class="text-[10px] font-mono text-slate-400">
               {{ activeAgent?.id === agent.id ? 'ONLINE' : 'STANDBY' }}
             </span>
           </div>
@@ -123,15 +139,23 @@ onMounted(() => {
     </aside>
 
     <!-- 主聊天区 -->
-    <div class="chat-main">
+    <div class="flex-1 flex flex-col overflow-hidden">
       <!-- 头部 -->
-      <header class="chat-header">
-        <div class="chat-header-left">
-          <div class="chat-header-icon">
+      <header
+        class="h-14 px-6 flex items-center justify-between border-b-2 border-slate-200 bg-white/30 flex-shrink-0"
+      >
+        <div class="flex items-center gap-3">
+          <div class="p-1.5 bg-sky-50 text-sky-500">
             <PixelIcon name="chat" size="sm" />
           </div>
-          <span class="chat-header-name">{{ activeAgent?.name ?? 'Pero' }}</span>
-          <span class="chat-header-badge">CONNECTED</span>
+          <span class="text-lg font-black text-slate-800 tracking-wide">
+            {{ activeAgent?.name ?? 'Pero' }}
+          </span>
+          <span
+            class="px-2 py-0.5 text-[10px] font-bold border border-sky-200 bg-sky-50/50 text-sky-500"
+          >
+            CONNECTED
+          </span>
         </div>
       </header>
 
@@ -141,17 +165,17 @@ onMounted(() => {
         :key="activeAgent.id"
         :agent-id="activeAgent.id"
         :agent-name="activeAgent.name"
-        class="chat-main-body"
+        class="flex-1 overflow-hidden"
       />
 
       <!-- 无选中状态 -->
-      <div v-else class="chat-empty">
-        <div class="chat-empty-icon-wrap">
+      <div v-else class="flex-1 flex flex-col items-center justify-center gap-4 text-slate-400">
+        <div class="p-6 bg-sky-50/50 border-2 border-slate-200 text-sky-200">
           <PixelIcon name="chat" size="3xl" />
         </div>
-        <div class="chat-empty-text">
-          <p class="chat-empty-title">等待连接...</p>
-          <p class="chat-empty-sub">请从左侧选择一个助手开始聊天</p>
+        <div class="text-center">
+          <p class="text-lg font-bold text-slate-500">等待连接...</p>
+          <p class="text-xs mt-1">请从左侧选择一个助手开始聊天</p>
         </div>
       </div>
     </div>
@@ -159,243 +183,18 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.chat-view {
-  display: flex;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  background: var(--color-bg-primary);
-}
-
-/* ── 侧边栏 ── */
-
-.chat-sidebar {
-  width: 256px;
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  border-right: 2px solid var(--color-border);
-  background: var(--color-bg-secondary, rgba(255, 255, 255, 0.4));
-}
-
-.sidebar-search {
-  padding: 8px 16px 16px;
-  flex-shrink: 0;
-}
-.sidebar-search-wrapper {
-  position: relative;
-}
-.sidebar-search-icon {
-  position: absolute;
-  left: 12px;
-  top: 10px;
-  color: var(--color-text-muted);
-}
-.sidebar-search-input {
-  width: 100%;
-  padding: 8px 12px 8px 36px;
-  font-size: 12px;
-  border: 2px solid var(--color-border);
-  background: var(--color-bg-primary);
-  color: var(--color-text-primary);
-  outline: none;
-  transition: border-color 0.2s;
-}
-.sidebar-search-input:focus {
-  border-color: var(--color-sky-hover);
-}
-.sidebar-search-input::placeholder {
-  color: var(--color-text-muted);
-}
-
-.sidebar-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 0 12px 12px;
-}
-.sidebar-list-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 4px 8px 8px;
-}
-.sidebar-list-label {
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--color-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.15em;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.sidebar-dot {
+/* 像素风滚动条 */
+.chat-scrollbar::-webkit-scrollbar {
   width: 4px;
-  height: 4px;
-  background: var(--color-sky-hover);
-  animation: pulse 2s infinite;
-}
-.sidebar-refresh-btn {
-  padding: 6px;
-  background: var(--color-bg-primary);
-  border: 2px solid var(--color-border);
-  color: var(--color-text-muted);
-  cursor: pointer;
-  transition: all 0.15s;
-}
-.sidebar-refresh-btn:hover {
-  border-color: var(--color-sky-hover);
-  color: var(--color-sky-500);
 }
 
-/* Agent 卡片 */
-.sidebar-agent {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px;
-  cursor: pointer;
-  position: relative;
-  transition: all 0.2s;
-  margin-bottom: 4px;
-}
-.sidebar-agent:hover {
-  background: var(--color-bg-primary);
-  transform: translateX(2px);
-}
-.sidebar-agent-active {
-  background: var(--color-bg-primary);
-  border: 2px solid var(--color-border);
+.chat-scrollbar::-webkit-scrollbar-thumb {
+  background: #bae6fd;
+  border-radius: 0;
 }
 
-.sidebar-agent-indicator {
-  position: absolute;
-  left: 0;
-  top: 8px;
-  bottom: 8px;
-  width: 3px;
-  background: var(--color-sky-500);
-}
-
-.sidebar-agent-avatar {
-  width: 40px;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  font-weight: 700;
-  font-size: 14px;
-  background: var(--color-sky-hover);
-  border: 2px solid var(--color-border);
-  transition: all 0.2s;
-}
-.sidebar-agent-avatar-active {
-  background: var(--color-sky-500);
-  border-color: var(--color-sky-shadow);
-}
-
-.sidebar-agent-info {
-  flex: 1;
-  min-width: 0;
-}
-.sidebar-agent-name {
-  display: block;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--color-text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.sidebar-agent-name-active {
-  color: var(--color-sky-500);
-}
-.sidebar-agent-status {
-  font-size: 10px;
-  font-family: monospace;
-  color: var(--color-text-muted);
-}
-
-/* ── 主聊天区 ── */
-
-.chat-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.chat-header {
-  height: 56px;
-  padding: 0 24px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 2px solid var(--color-border);
-  background: var(--color-bg-secondary, rgba(255, 255, 255, 0.3));
-  flex-shrink: 0;
-}
-.chat-header-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.chat-header-icon {
-  padding: 6px;
-  background: rgba(56, 189, 248, 0.1);
-  color: var(--color-sky-500);
-}
-.chat-header-name {
-  font-size: 18px;
-  font-weight: 800;
-  color: var(--color-text-primary);
-  letter-spacing: 0.03em;
-}
-.chat-header-badge {
-  padding: 2px 8px;
-  font-size: 10px;
-  font-weight: 700;
-  border: 1px solid var(--color-sky-light);
-  background: rgba(56, 189, 248, 0.05);
-  color: var(--color-sky-500);
-}
-
-.chat-main-body {
-  flex: 1;
-  overflow: hidden;
-}
-
-/* 空状态 */
-.chat-empty {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-  color: var(--color-text-muted);
-}
-.chat-empty-icon-wrap {
-  padding: 24px;
-  background: rgba(56, 189, 248, 0.05);
-  border: 2px solid var(--color-border);
-  color: var(--color-sky-light);
-}
-.chat-empty-text {
-  text-align: center;
-}
-.chat-empty-title {
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--color-text-secondary);
-}
-.chat-empty-sub {
-  font-size: 12px;
-  margin-top: 4px;
-}
-
-@keyframes pulse {
+/* 侧边栏脉冲点 */
+@keyframes sidebar-pulse {
   0%,
   100% {
     opacity: 0.4;
@@ -405,14 +204,7 @@ onMounted(() => {
   }
 }
 
-/* 滚动条 */
-.sidebar-list::-webkit-scrollbar {
-  width: 4px;
-}
-.sidebar-list::-webkit-scrollbar-track {
-  background: transparent;
-}
-.sidebar-list::-webkit-scrollbar-thumb {
-  background: var(--color-sky-light);
+.sidebar-pulse {
+  animation: sidebar-pulse 2s infinite;
 }
 </style>

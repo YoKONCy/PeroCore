@@ -56,6 +56,20 @@ export function createSchedulerRouter(ctx: AppContext) {
     })
   })
 
+  // GET /api/scheduler/reminders — 获取待触发的用户提醒列表
+  router.get('/reminders', async (c) => {
+    const agentId = c.req.query('agentId') ?? undefined
+    const reminders = await ctx.schedulerService.listPending(agentId)
+    return c.json({
+      code: 'OK',
+      message: '获取成功',
+      data: {
+        items: reminders,
+        total: reminders.length,
+      },
+    })
+  })
+
   // POST /api/scheduler/trigger/:name — 手动触发
   router.post('/trigger/:name', async (c) => {
     const taskName = c.req.param('name')

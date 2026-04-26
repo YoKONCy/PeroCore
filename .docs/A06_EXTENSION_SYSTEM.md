@@ -24,14 +24,60 @@ Skill 取代了传统意义上的"复杂助手配置"，允许 LLM 按需加载�
 ### 2.1 文件结构
 ```
 skills/
-└── diary_query/
+└── weekly_report/
     ├── SKILL.md       # 指令文件
     └── references/    # 参考资料 (JSON/Schema)
 ```
 
-### 2.2 渐进式加载 (L1-L2)
+### 2.2 SKILL.md Frontmatter 格式
+
+```yaml
+---
+name: 周报生成器
+description: 自动汇总本周工作并生成格式化周报
+category: productivity
+tags:
+  - report
+  - automation
+requiredTools:
+  - read_file
+  - write_file
+parameters:
+  - project_name: 项目名称
+  - date_range: 日期范围 (如 2026-04-20~2026-04-26)
+dependsOnSkills:
+  - file_organizer
+---
+(Markdown 指令内容，支持 {{project_name}} 模板变量...)
+```
+
+| 字段 | 必填 | 说明 |
+|------|:----:|------|
+| `name` | ✅ | Skill 显示名称 |
+| `description` | ✅ | L1 菜单摘要 |
+| `category` | — | 分类 (默认 `general`) |
+| `tags` | — | 标签列表 (便于搜索) |
+| `requiredTools` | — | 加载时临时解锁的工具 ID |
+| `parameters` | — | 可接收的参数 (模板变量名 → 描述) |
+| `dependsOnSkills` | — | 依赖的子 Skill ID (递归解锁工具) |
+
+### 2.3 渐进式加载 (L1→L2)
 - **L1 (菜单)**：随 System Prompt 注入，仅含 Skill 名和简短描述。
-- **L2 (详情)**：LLM 调用 `load_skill` 后注入完整的执行步骤。
+- **L2 (详情)**：LLM 调用 `load_skill(skill_id, params?)` 后注入完整的执行步骤。
+
+### 2.4 参数化 Skill
+
+Agent 调用 `load_skill` 时可传入 `params` 参数：
+```json
+{ "skill_id": "weekly_report", "params": { "project_name": "PeroCore", "date_range": "2026-04-20~2026-04-26" } }
+```
+SkillLoader 会将 SKILL.md body 中的 `{{project_name}}` 替换为实际值。
+
+### 2.5 嵌套调用
+
+Skill 声明 `dependsOnSkills` 后，加载时会递归解锁子 Skill 的工具权限。
+Agent 可在执行父 Skill 指令的过程中，按需 `load_skill` 子 Skill 获取更细粒度的指令。
+系统通过 `visited` 集合防止循环依赖。
 
 ---
 

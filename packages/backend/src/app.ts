@@ -27,6 +27,7 @@ import {
   createMaintenanceRouter,
   createSocialRouter,
   createVoiceRouter,
+  createMcpRouter,
 } from './routers'
 
 /**
@@ -62,6 +63,7 @@ export function createApp(ctx: AppContext) {
     '/api/voice',
     createVoiceRouter({ ttsService: ctx.ttsService, asrService: ctx.asrService }),
   )
+  app.route('/api/mcp', createMcpRouter(ctx))
   app.route('/ws', createGatewayRouter(ctx.gatewayHub))
 
   // ── 404 兜底 ──

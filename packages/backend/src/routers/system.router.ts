@@ -9,14 +9,12 @@
  */
 
 import { Hono } from 'hono'
+import { streamSSE } from 'hono/streaming'
 import type { AppContext } from '../container'
-import { AppError } from '../lib/appError'
-import { createLogger } from '../lib/logger'
-
-const logger = createLogger('SystemRouter')
+import { addLogListener, getLogHistory } from '../lib/logBroadcaster'
 
 /** 应用版本号 (由 scripts/sync-version.ts 自动同步) */
-const APP_VERSION = '0.9.0'
+const APP_VERSION = '0.9-rc1'
 
 export function createSystemRouter(ctx: AppContext) {
   const router = new Hono()
@@ -35,8 +33,12 @@ export function createSystemRouter(ctx: AppContext) {
   })
 
   // GET /api/system/info — 系统信息
-  router.get('/info', (c) => {
+  router.get('/info', async (c) => {
     const agents = ctx.agentManager.listAgents()
+
+    // 业务逻辑委托 Service 层 (S05 §2)
+    const snapshot = await ctx.systemService.getSnapshot()
+
     return c.json({
       code: 'OK',
       message: '获取成功',
@@ -49,9 +51,15 @@ export function createSystemRouter(ctx: AppContext) {
           pid: process.pid,
           uptime: Math.floor(process.uptime()),
           memoryUsage: {
-            rss: Math.round(process.memoryUsage().rss / 1024 / 1024),
-            heapUsed: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+            rss: snapshot.memoryUsedMB,
+            heapUsed: snapshot.heapUsedMB,
           },
+          cpuPercent: snapshot.cpuPercent,
+          totalMemoryMB: snapshot.totalMemoryMB,
+        },
+        storage: {
+          sqliteSizeMB: snapshot.sqliteSizeMB,
+          triviumSizeMB: snapshot.triviumSizeMB,
         },
         agents: {
           total: agents.length,
@@ -69,35 +77,59 @@ export function createSystemRouter(ctx: AppContext) {
   router.post('/open-path', async (c) => {
     const body = await c.req.json().catch(() => ({}) as Record<string, unknown>)
     const targetPath = (body as Record<string, unknown>).path as string
-    if (!targetPath?.trim()) {
-      throw new AppError('MISSING_FIELD', {
-        message: '缺少 path 参数',
-        data: { field: 'path' },
+
+    await ctx.systemService.openPath(targetPath)
+
+    return c.json({ code: 'OK', message: '已请求打开' })
+  })
+
+  // GET /api/system/logs/stream — SSE 日志流
+  // 支持 EventSource 断线续传 (Last-Event-ID header)
+  router.get('/logs/stream', (c) => {
+    // 解析 Last-Event-ID（断线重连时 EventSource 自动携带）
+    const lastEventId = c.req.header('Last-Event-ID')
+    const afterId = lastEventId ? parseInt(lastEventId, 10) : undefined
+
+    return streamSSE(c, async (stream) => {
+      // 1. 先发送缓冲区中的历史日志（支持增量续传）
+      const history = getLogHistory(afterId)
+      for (const event of history) {
+        await stream.writeSSE({
+          event: 'log',
+          id: String(event.id),
+          data: JSON.stringify(event),
+        })
+      }
+
+      // 2. 注册实时监听
+      let alive = true
+      const unlisten = addLogListener((event) => {
+        if (!alive) return
+        stream
+          .writeSSE({
+            event: 'log',
+            id: String(event.id),
+            data: JSON.stringify(event),
+          })
+          .catch(() => {
+            // 连接已断开，忽略
+            alive = false
+          })
       })
-    }
 
-    try {
-      const { exec } = await import('node:child_process')
-      const platform = process.platform
-      const cmd =
-        platform === 'win32'
-          ? `start "" "${targetPath}"`
-          : platform === 'darwin'
-            ? `open "${targetPath}"`
-            : `xdg-open "${targetPath}"`
-
-      exec(cmd, (err) => {
-        if (err) {
-          logger.error(`打开路径失败: ${err.message}`)
+      // 3. 心跳保活（防止代理/负载均衡器超时断开）
+      try {
+        while (alive) {
+          await stream.writeSSE({ event: 'ping', data: '' })
+          await stream.sleep(15000)
         }
-      })
-
-      return c.json({ code: 'OK', message: '已请求打开' })
-    } catch (err) {
-      throw new AppError('INTERNAL_ERROR', {
-        message: `打开失败: ${err instanceof Error ? err.message : err}`,
-      })
-    }
+      } catch {
+        // 客户端断开
+      } finally {
+        alive = false
+        unlisten()
+      }
+    })
   })
 
   return router

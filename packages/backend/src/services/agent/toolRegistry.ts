@@ -93,7 +93,9 @@ export class ToolRegistry {
 
       const tool = extensionManager.getTool(def.name)
       if (!tool?.execute) {
-        logger.debug(`ExtensionManager Tool ${def.name} 无顶层 execute (可能是多工具模块，已通过内置注册)`)
+        logger.debug(
+          `ExtensionManager Tool ${def.name} 无顶层 execute (可能是多工具模块，已通过内置注册)`,
+        )
         continue
       }
 

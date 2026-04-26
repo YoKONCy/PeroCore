@@ -4,7 +4,7 @@
  * 管理与外部 MCP Server 的连接生命周期:
  * - 根据 mcpConfigs 配置自动连接/断开
  * - 从 MCP Server 发现工具 → 桥接到 ToolRegistry
- * - 支持 stdio 和 SSE 两种 transport
+ * - 支持 stdio 和 Streamable HTTP 两种 transport (MCP 2025.03+ 标准)
  *
  * 使用官方 @modelcontextprotocol/sdk。
  *
@@ -13,7 +13,7 @@
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
-import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import type { McpConfigRepository } from '../../repositories/mcp.repo'
 import { createLogger } from '../../lib/logger'
 
@@ -30,7 +30,7 @@ export interface McpConnection {
   /** MCP Client 实例 */
   client: Client
   /** Transport 实例 */
-  transport: StdioClientTransport | SSEClientTransport
+  transport: StdioClientTransport | StreamableHTTPClientTransport
   /** 连接状态 */
   status: 'connected' | 'disconnected' | 'error'
   /** 发现的工具列表 */
@@ -126,7 +126,7 @@ export class McpClientManager {
 
       // 创建 Client
       const client = new Client(
-        { name: `perocore-${name}`, version: '0.9.0' },
+        { name: `perocore-${name}`, version: '0.9-rc1' },
         { capabilities: {} },
       )
 
@@ -295,11 +295,12 @@ export class McpClientManager {
     args: string | null
     env: string | null
     url: string | null
-  }): StdioClientTransport | SSEClientTransport {
+  }): StdioClientTransport | StreamableHTTPClientTransport {
     const type = config.type ?? 'stdio'
 
     if (type === 'sse' && config.url) {
-      return new SSEClientTransport(new URL(config.url))
+      // MCP 2025.03+ 标准: Streamable HTTP 替代旧版 SSE
+      return new StreamableHTTPClientTransport(new URL(config.url))
     }
 
     // stdio (默认)

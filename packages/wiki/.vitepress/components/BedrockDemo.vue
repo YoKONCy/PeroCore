@@ -20,25 +20,29 @@
         <div class="control-group">
           <span class="label">服装 (Clothing):</span>
           <div class="checkbox-group">
-            <label
-              ><input v-model="clothingState.dress" type="checkbox" @change="updateClothing" />
-              Dress</label
-            >
-            <label
-              ><input v-model="clothingState.hat" type="checkbox" @change="updateClothing" />
-              Hat</label
-            >
-            <label
-              ><input v-model="clothingState.armour" type="checkbox" @change="updateClothing" />
-              Armour</label
-            >
+            <label>
+              <input v-model="clothingState.dress" type="checkbox" @change="updateClothing" />
+              Dress
+            </label>
+            <label>
+              <input v-model="clothingState.hat" type="checkbox" @change="updateClothing" />
+              Hat
+            </label>
+            <label>
+              <input v-model="clothingState.armour" type="checkbox" @change="updateClothing" />
+              Armour
+            </label>
           </div>
         </div>
       </div>
     </div>
 
     <div class="demo-instructions">
-      <p>👆 <b>交互演示</b>: 左键旋转视角 | Ctrl + 左键平移 | 滚轮缩放</p>
+      <p>
+        👆
+        <b>交互演示</b>
+        : 左键旋转视角 | Ctrl + 左键平移 | 滚轮缩放
+      </p>
       <p class="author-credit">
         模型作者:
         <a href="https://space.bilibili.com/5950899" target="_blank" rel="noopener">@Dr咕咚</a>
@@ -78,7 +82,7 @@ const clothingState = ref({
   armour: true,
   hat: true,
   underwear: true,
-  censored: false
+  censored: false,
 })
 
 // Three.js 对象
@@ -164,7 +168,7 @@ function initThree() {
     40,
     container.value.clientWidth / container.value.clientHeight,
     0.1,
-    1000
+    1000,
   )
   c.position.set(0, 20, 90)
   camera.value = c
@@ -185,7 +189,7 @@ function initThree() {
   ctrl.mouseButtons = {
     LEFT: THREE.MOUSE.ROTATE,
     MIDDLE: THREE.MOUSE.DOLLY,
-    RIGHT: THREE.MOUSE.PAN // 虽然保留右键平移，但由于浏览器手势冲突，我们将主推 Ctrl+左键
+    RIGHT: THREE.MOUSE.PAN, // 虽然保留右键平移，但由于浏览器手势冲突，我们将主推 Ctrl+左键
   }
   // 启用按键修改器：允许通过 Ctrl 键将左键行为临时改为平移
   ctrl.enablePan = true
@@ -224,8 +228,8 @@ async function loadModel() {
         withBase('/assets/3d/Rossi/animations/tac.animation.json'),
         withBase('/assets/3d/Rossi/animations/carryon.animation.json'),
         withBase('/assets/3d/Rossi/animations/extra.animation.json'),
-        withBase('/assets/3d/Rossi/animations/tlm.animation.json')
-      ]
+        withBase('/assets/3d/Rossi/animations/tlm.animation.json'),
+      ],
     }
 
     const provider = new WikiModelProvider(config, [
@@ -237,7 +241,7 @@ async function loadModel() {
       'START',
       'END',
       'BACKGROUND',
-      'MOLANG'
+      'MOLANG',
     ])
     const rootGroup = await avatarRenderer.build(provider)
     characterModel = rootGroup

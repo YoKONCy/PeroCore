@@ -23,6 +23,8 @@ import type { SocialMessageRepository } from '../../repositories/socialMessage.r
 import type { InboundMessage, OutboundMessage } from './types'
 import { SocialSessionManager, type SocialSession } from './socialSessionManager'
 import { SocialScheduler } from './socialScheduler'
+import type { ImageCacheManager } from './imageCacheManager'
+import type { StickerService } from './stickerService'
 import { createEnvelope } from '../gateway/types'
 import { createLogger } from '../../lib/logger'
 
@@ -40,6 +42,10 @@ export interface SocialBridgeDeps {
   getThinkingModel: () => Promise<ModelConfig | null>
   socialMessageRepo: SocialMessageRepository
   mdpEngine: MdpEngine
+  /** 图片缓存管理器 (可选) */
+  imageCacheManager?: ImageCacheManager
+  /** 表情包服务 (可选) */
+  stickerService?: StickerService
 }
 
 // ─────────────────────────────────────────────
@@ -54,11 +60,17 @@ export class SocialBridge {
   private running = false
   /** 会话管理器 */
   private sessionManager: SocialSessionManager
+  /** 图片缓存 */
+  private imageCache: ImageCacheManager | null
+  /** 表情包服务 */
+  private stickerService: StickerService | null
   /** 调度器 */
   private scheduler: SocialScheduler
 
   constructor(deps: SocialBridgeDeps) {
     this.deps = deps
+    this.imageCache = deps.imageCacheManager ?? null
+    this.stickerService = deps.stickerService ?? null
 
     // 初始化 SessionManager (flush 回调 → agentService.chat)
     this.sessionManager = new SocialSessionManager(async (session, messages, reason) => {
@@ -142,6 +154,9 @@ export class SocialBridge {
       }
     }
 
+    // 冷启动: 从 DB 恢复最近活跃的会话
+    await this.reviveSessionsFromDb()
+
     // 启动调度器
     this.scheduler.start()
   }
@@ -192,7 +207,24 @@ export class SocialBridge {
       logger.warn(`消息持久化失败 (非致命): ${err}`)
     }
 
-    // 2. 交给 SessionManager 缓冲处理
+    // 2. 异步下载图片到本地缓存 (非阻塞)
+    if (this.imageCache && inbound.attachments) {
+      for (const att of inbound.attachments) {
+        if (att.type === 'image' && att.url && !att.localPath) {
+          // 异步下载，不阻塞消息处理
+          this.imageCache
+            .download(att.url)
+            .then((localPath) => {
+              if (localPath) att.localPath = localPath
+            })
+            .catch(() => {
+              /* 下载失败不影响主流程 */
+            })
+        }
+      }
+    }
+
+    // 3. 交给 SessionManager 缓冲处理
     await this.sessionManager.handleInbound(inbound)
 
     // 3. 通知前端
@@ -240,14 +272,42 @@ export class SocialBridge {
       })
 
       if (reply) {
-        // 发送到平台
         const platform = messages[0]!.platform
-        await this.sendReply(platform, { channelId, channelType, content: reply })
+
+        // 分段发送: 文字和表情包分开发
+        if (this.stickerService && this.stickerService.hasStickers(agentId)) {
+          const segments = this.stickerService.splitIntoSegments(reply, agentId)
+
+          for (const seg of segments) {
+            if (seg.type === 'text') {
+              await this.sendReply(platform, { channelId, channelType, content: seg.content })
+            } else {
+              // 表情包作为 sticker 附件独立发送 (适配器层决定具体格式)
+              await this.sendReply(platform, {
+                channelId,
+                channelType,
+                content: '',
+                attachments: [
+                  {
+                    type: 'sticker',
+                    localPath: seg.filePath,
+                    name: seg.name,
+                  },
+                ],
+              })
+            }
+            // 段间延迟 300ms，避免乱序
+            await new Promise((r) => setTimeout(r, 300))
+          }
+        } else {
+          // 无表情包，直接发送
+          await this.sendReply(platform, { channelId, channelType, content: reply })
+        }
 
         // 标记会话为活跃
         this.sessionManager.markReplied(session)
 
-        // 持久化 Agent 回复
+        // 持久化 Agent 回复 (保存原始完整文本)
         try {
           await this.deps.socialMessageRepo.insert({
             msgId: `agent_${Date.now()}`,
@@ -311,6 +371,55 @@ export class SocialBridge {
     this.deps.gatewayHub.broadcast(createEnvelope('push', { action, ...data })).catch(() => {
       /* 忽略广播错误 */
     })
+  }
+
+  // ── 冷启动会话复活 ──
+
+  /**
+   * 从 DB 恢复最近活跃的会话到 SessionManager
+   *
+   * 查询每个 Agent 最近活跃的频道，为每个频道创建一个 session。
+   * 复活的会话 nextScanTime 延迟 5~15 分钟，防止启动爆发。
+   */
+  private async reviveSessionsFromDb(): Promise<void> {
+    try {
+      // 查最近 20 条活跃频道记录 (所有 Agent，内存去重取前 10)
+      const recentChannels = await this.deps.socialMessageRepo.getRecentChannels('', 20)
+
+      // 为每个频道创建 session
+      let revivedCount = 0
+      for (const ch of recentChannels) {
+        if (revivedCount >= 10) break
+
+        // 创建虚拟入站消息来触发 session 创建
+        this.sessionManager.getOrCreate({
+          platform: 'qq',
+          channelId: ch.channelId,
+          channelType: ch.channelType as 'private' | 'group',
+          senderId: '',
+          senderName: '',
+          content: '',
+          agentId: '',
+        })
+
+        // 让复活的会话延迟扫描 (5-15 分钟)
+        const sessions = this.sessionManager.getActiveSessions(undefined, 50)
+        const session = sessions.find((s) => s.channelId === ch.channelId)
+        if (session) {
+          const delay = 300 + Math.floor(Math.random() * 600) // 5~15 分钟
+          session.nextScanTime = Date.now() + delay * 1000
+          revivedCount++
+        }
+      }
+
+      if (revivedCount > 0) {
+        logger.info(`冷启动: 从 DB 恢复了 ${revivedCount} 个会话`)
+      } else {
+        logger.info('冷启动: 无历史会话需要恢复')
+      }
+    } catch (err) {
+      logger.warn(`冷启动会话恢复失败 (非致命): ${err}`)
+    }
   }
 
   // ── 社交工具 Provider 桥接 ──

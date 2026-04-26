@@ -15,6 +15,7 @@
 
 import { ref, onUnmounted } from 'vue'
 import { voiceApi } from '../../api/modules/voiceApi'
+import { logger } from '../../lib/logger'
 
 /** TTS 播放请求 */
 export interface TtsRequest {
@@ -101,7 +102,7 @@ export function usePetAudio() {
         // 需要先请求后端 TTS API
         const arrayBuffer = await fetchTtsAudio(item.text)
         if (!arrayBuffer) {
-          console.warn(`[PetAudio] TTS 获取失败: ${item.id}`)
+          logger.warn('PetAudio', `TTS 获取失败: ${item.id}`)
           await playNext()
           return
         }
@@ -110,7 +111,7 @@ export function usePetAudio() {
 
       await playBuffer(buffer)
     } catch (e) {
-      console.error(`[PetAudio] 播放失败: ${item.id}`, e)
+      logger.error('PetAudio', `播放失败: ${item.id}`, e)
     }
 
     // 播放完成 → 下一个
@@ -200,7 +201,7 @@ export function usePetAudio() {
     try {
       return await voiceApi.synthesize({ text })
     } catch (e) {
-      console.error('[PetAudio] TTS 请求失败:', e)
+      logger.error('PetAudio', 'TTS 请求失败', e)
       return null
     }
   }

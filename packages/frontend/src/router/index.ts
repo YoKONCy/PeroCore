@@ -109,6 +109,13 @@ const dockerRoutes: RouteRecordRaw[] = [
     path: '/',
     redirect: '/app',
   },
+  // 兜底: pet-3d 在 Docker 中不需要但 Electron HMR 时可能触发
+  {
+    path: '/pet-3d',
+    name: 'PetFallback',
+    component: () => import('@/views/Pet3DView.vue'),
+    meta: { title: '桌宠', standalone: true },
+  },
 ]
 
 // ── 创建路由实例 ──

@@ -89,7 +89,7 @@ export class AgentManager {
     this.agents.clear()
 
     // 1. 内置 Agent 目录 (@app/agents 或 mdp/agents)
-    const builtinDir = this.pathResolver.resolve('@app/packages/backend/src/services/mdp/agents')
+    const builtinDir = this.pathResolver.resolve('@app/backend/src/services/mdp/agents')
     if (existsSync(builtinDir)) {
       this.scanAgents(builtinDir)
     }
@@ -121,6 +121,41 @@ export class AgentManager {
   /** 获取活跃 Agent */
   getActiveAgent(): AgentProfile | undefined {
     return this.agents.get(this.activeAgentId)
+  }
+
+  /**
+   * 获取 Agent 看板娘台词 (静态 + 动态合并)
+   *
+   * 数据来源:
+   * 1. agent.json → waifu_texts (静态默认台词)
+   * 2. ConfigRepository → waifu_dynamic_texts_{id} (LLM 动态更新覆盖)
+   *
+   * @returns 合并后的台词对象，agent 不存在时返回 null
+   */
+  async getWaifuTexts(agentId: string): Promise<Record<string, unknown> | null> {
+    const agent = this.agents.get(agentId)
+    if (!agent) return null
+
+    // 1. 静态台词
+    const staticTexts = (agent.waifuTexts ?? {}) as Record<string, unknown>
+
+    // 2. 动态台词 (由 WaifuTextUpdater 维护周期写入)
+    let dynamicTexts: Record<string, unknown> = {}
+    if (this.configRepo) {
+      try {
+        const configVal = await this.configRepo.getJson<Record<string, unknown>>(
+          `waifu_dynamic_texts_${agentId}`,
+        )
+        if (configVal && typeof configVal === 'object') {
+          dynamicTexts = configVal
+        }
+      } catch {
+        // 动态台词不存在时使用空对象
+      }
+    }
+
+    // 3. 浅合并: 动态覆盖静态
+    return { ...staticTexts, ...dynamicTexts }
   }
 
   /** 切换活跃 Agent */
@@ -410,5 +445,28 @@ export class AgentManager {
       if (existsSync(filePath)) return filePath
     }
     return null
+  }
+
+  /**
+   * 获取 Agent 头像二进制数据 (供 Router 层使用)
+   *
+   * 返回 { buffer, mime } 或 null (无头像)。
+   * 文件 I/O 封装在 Service 层，Router 不直接操作文件。
+   */
+  getAvatarData(agentId: string): { buffer: Buffer; mime: string } | null {
+    const agent = this.agents.get(agentId.toLowerCase())
+    if (!agent?.avatarPath || !existsSync(agent.avatarPath)) return null
+
+    const ext = agent.avatarPath.split('.').pop()?.toLowerCase() ?? 'png'
+    const mimeMap: Record<string, string> = {
+      png: 'image/png',
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      webp: 'image/webp',
+    }
+    return {
+      buffer: readFileSync(agent.avatarPath),
+      mime: mimeMap[ext] ?? 'image/png',
+    }
   }
 }

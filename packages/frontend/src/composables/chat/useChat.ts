@@ -10,6 +10,7 @@
 import { computed } from 'vue'
 import { useSessionStore } from '../../stores'
 import { useAgentStore } from '../../stores'
+import { useNotificationStore } from '../../stores/useNotificationStore'
 import { chatApi } from '../../api/modules/chatApi'
 import type { ChatRequest, ChatMessagePayload } from '../../api/modules/chatApi'
 
@@ -24,6 +25,7 @@ export function useChat(options: UseChatOptions = {}) {
 
   const sessionStore = useSessionStore()
   const agentStore = useAgentStore()
+  const notify = useNotificationStore()
 
   /** 当前是否在生成中 */
   const isGenerating = computed(() => sessionStore.isGenerating)
@@ -138,6 +140,8 @@ export function useChat(options: UseChatOptions = {}) {
         sessionStore.appendToLast(`\n\n⚠️ ${data.message}`)
         sessionStore.finishStreaming()
         currentAbort = null
+        // Toast 通知用户
+        notify.toast(data.message || '对话生成失败', 'error')
       },
     })
   }

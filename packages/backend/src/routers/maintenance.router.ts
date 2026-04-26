@@ -24,47 +24,12 @@ export function createMaintenanceRouter(ctx: AppContext) {
 
   // GET /api/maintenance/status — 维护系统状态
   router.get('/status', async (c) => {
-    // 从 Scheduler 获取维护相关任务的状态
-    const schedulerTasks = ctx.scheduler.getStatus()
-    const maintenanceTasks = schedulerTasks.filter(
-      (t) => t.name.includes('scorer') || t.name.includes('diary') || t.name.includes('reflection'),
-    )
-
-    // 记忆统计 (通过 memoryService / memoryRepo)
-    let totalMemories = 0
-    try {
-      const result = await ctx.memoryService.list({ agentId: 'pero', page: 1, pageSize: 1 })
-      totalMemories = result.total
-    } catch {
-      // 统计失败不影响状态返回
-    }
-
-    // VectorSync 队列状态
-    let pendingSyncCount = 0
-    try {
-      const pending = await ctx.vectorSyncRepo.getPending(1)
-      pendingSyncCount = pending.length
-    } catch {
-      // 忽略
-    }
+    const status = await ctx.maintenanceService.getStatus()
 
     return c.json({
       code: 'OK',
       message: '获取成功',
-      data: {
-        schedulerRunning: ctx.scheduler.isStarted,
-        tasks: maintenanceTasks.map((t) => ({
-          name: t.name,
-          running: t.running,
-          lastRunAt: new Date(t.lastRunAt).toISOString(),
-          intervalDesc: formatInterval(t.intervalMs),
-          stats: t.stats,
-        })),
-        memory: {
-          totalMemories,
-          pendingSyncCount,
-        },
-      },
+      data: status,
     })
   })
 
@@ -113,33 +78,17 @@ export function createMaintenanceRouter(ctx: AppContext) {
       })
     }
 
-    // 获取待同步数量
-    let pendingCount = 0
-    try {
-      const pending = await ctx.vectorSyncRepo.getPending(1)
-      pendingCount = pending.length
-    } catch {
-      // 忽略
-    }
+    const reindexStatus = await ctx.maintenanceService.getReindexStatus(agentId)
 
     return c.json(
       {
         code: 'ACCEPTED',
-        message: `向量重索引已触发 (Agent: ${agentId}, 待同步: ${pendingCount})`,
-        data: { agentId, pendingCount },
+        message: `向量重索引已触发 (Agent: ${agentId}, 待同步: ${reindexStatus.pendingCount})`,
+        data: reindexStatus,
       },
       202,
     )
   })
 
   return router
-}
-
-// ── 辅助函数 ──
-
-/** 将毫秒间隔转为可读描述 */
-function formatInterval(ms: number): string {
-  if (ms < 60_000) return `${Math.round(ms / 1000)}秒`
-  if (ms < 3600_000) return `${Math.round(ms / 60_000)}分钟`
-  return `${(ms / 3600_000).toFixed(1)}小时`
 }

@@ -483,9 +483,17 @@ export class MdpEngine {
 
   /** 解析 Agent 覆盖 (pero/system_prompt → 回退 system_prompt) */
   private resolveKey(key: string, vars: Record<string, unknown>): string {
+    // 优先使用 agent_id（目录名一致，大小写精确匹配）
+    const agentId = (vars.agent_id ?? vars.agentId) as string | undefined
+    if (agentId) {
+      const overrideKey = `${agentId}/${key}`
+      if (this.prompts.has(overrideKey)) return overrideKey
+    }
+
+    // 回退到 agent_name（兼容旧调用，但做小写匹配）
     const agentName = (vars.agent_name ?? vars.agentName) as string | undefined
     if (agentName) {
-      const overrideKey = `${agentName}/${key}`
+      const overrideKey = `${agentName.toLowerCase()}/${key}`
       if (this.prompts.has(overrideKey)) return overrideKey
     }
     return key
@@ -531,9 +539,14 @@ export class MdpEngine {
       this.prompts.set(key, { key, content, meta })
 
       // 注册基名 (兼容短名调用)
-      const basename = path.basename(key)
-      if (!this.prompts.has(basename)) {
-        this.prompts.set(basename, { key, content, meta })
+      // 但 agents/ 目录下的模板不应注册全局 basename，
+      // 否则先加载的 agent 模板会污染其他 agent 的 fallback
+      const isAgentTemplate = key.includes('/')
+      if (!isAgentTemplate) {
+        const basename = path.basename(key)
+        if (!this.prompts.has(basename)) {
+          this.prompts.set(basename, { key, content, meta })
+        }
       }
     } catch (err) {
       logger.warn(`加载模板失败: ${filePath}`, { error: err })

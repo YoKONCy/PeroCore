@@ -11,7 +11,9 @@
  * @module packages/frontend/src/composables/gateway/useGateway
  */
 
-import { ref, onUnmounted } from 'vue'
+import { ref, computed, onUnmounted } from 'vue'
+import { getGatewayWsUrl } from '../../api/transport'
+import { logger } from '../../lib/logger'
 
 /** WS 连接状态 */
 export type GatewayState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting'
@@ -21,6 +23,15 @@ export interface GatewayMessage {
   type: string
   payload: Record<string, unknown>
 }
+
+export interface GatewayEnvelope extends GatewayMessage {
+  id?: string
+  sourceId?: string
+  targetId?: string
+  timestamp?: number
+}
+
+type PushHandler = (payload: Record<string, unknown>) => void
 
 /** 通知推送 */
 export interface GatewayNotification {
@@ -79,6 +90,8 @@ const DEFAULT_RECONNECT: ReconnectConfig = {
 export function useGateway(events: GatewayEvents = {}) {
   const state = ref<GatewayState>('disconnected')
   const retryCount = ref(0)
+  const lastError = ref<string | null>(null)
+  const isConnected = computed(() => state.value === 'connected')
 
   let ws: WebSocket | null = null
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
@@ -87,16 +100,53 @@ export function useGateway(events: GatewayEvents = {}) {
 
   /** RPC 请求/响应配对 Map */
   const pendingRequests = new Map<string, PendingRequest>()
+  const pushHandlers = new Map<string, PushHandler[]>()
+  const wildcardHandlers: PushHandler[] = []
 
-  // ═══ WS URL 计算 ═══
-
-  function getWsUrl(): string {
-    const isElectron = (window as unknown as Record<string, unknown>).electron !== undefined
-    if (isElectron) {
-      return 'ws://localhost:9120/ws/gateway'
+  function createEnvelope(
+    type: string,
+    payload: Record<string, unknown> = {},
+    targetId = 'backend',
+  ): GatewayEnvelope {
+    return {
+      id: crypto.randomUUID(),
+      type,
+      sourceId: 'frontend',
+      targetId,
+      timestamp: Date.now(),
+      payload,
     }
-    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    return `${proto}//${window.location.host}/ws/gateway`
+  }
+
+  function onPush(action: string, handler: PushHandler): void {
+    if (action === '*') {
+      wildcardHandlers.push(handler)
+      return
+    }
+
+    const list = pushHandlers.get(action) ?? []
+    list.push(handler)
+    pushHandlers.set(action, list)
+  }
+
+  function offPush(action: string, handler: PushHandler): void {
+    if (action === '*') {
+      const index = wildcardHandlers.indexOf(handler)
+      if (index >= 0) {
+        wildcardHandlers.splice(index, 1)
+      }
+      return
+    }
+
+    const list = pushHandlers.get(action)
+    if (!list) {
+      return
+    }
+
+    pushHandlers.set(
+      action,
+      list.filter((item) => item !== handler),
+    )
   }
 
   // ═══ 连接管理 ═══
@@ -111,8 +161,9 @@ export function useGateway(events: GatewayEvents = {}) {
     state.value = retryCount.value > 0 ? 'reconnecting' : 'connecting'
 
     try {
-      ws = new WebSocket(getWsUrl())
-    } catch {
+      ws = new WebSocket(getGatewayWsUrl())
+    } catch (error) {
+      lastError.value = (error as Error).message
       scheduleReconnect()
       return
     }
@@ -120,8 +171,10 @@ export function useGateway(events: GatewayEvents = {}) {
     ws.onopen = () => {
       state.value = 'connected'
       retryCount.value = 0
+      lastError.value = null
+      sendEnvelope(createEnvelope('hello', { deviceName: 'Frontend' }))
       startHeartbeat()
-      console.log('[Gateway] WS 已连接')
+      logger.info('Gateway', 'WS 已连接')
     }
 
     ws.onmessage = (event) => {
@@ -147,8 +200,17 @@ export function useGateway(events: GatewayEvents = {}) {
     }
 
     ws.onerror = () => {
-      // onclose 会自动触发，这里不重复处理
+      lastError.value = '连接错误'
     }
+  }
+
+  function sendEnvelope(envelope: GatewayEnvelope): void {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      logger.warn('Gateway', 'WS 未连接，无法发送消息')
+      return
+    }
+
+    ws.send(JSON.stringify(envelope))
   }
 
   /** 断开连接 */
@@ -176,10 +238,10 @@ export function useGateway(events: GatewayEvents = {}) {
   /** 发送消息 (fire-and-forget) */
   function send(type: string, payload: Record<string, unknown> = {}): void {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-      console.warn('[Gateway] WS 未连接，无法发送消息')
+      logger.warn('Gateway', 'WS 未连接，无法发送消息')
       return
     }
-    ws.send(JSON.stringify({ type, payload }))
+    sendEnvelope(createEnvelope(type, payload))
   }
 
   /**
@@ -212,7 +274,10 @@ export function useGateway(events: GatewayEvents = {}) {
       }, timeoutMs)
 
       pendingRequests.set(id, { resolve, reject, timer })
-      ws.send(JSON.stringify({ id, type: 'request', payload: { action, ...payload } }))
+      sendEnvelope({
+        ...createEnvelope('request', { action, ...payload }),
+        id,
+      })
     })
   }
 
@@ -223,7 +288,7 @@ export function useGateway(events: GatewayEvents = {}) {
    */
   function sendStream(audioData: ArrayBuffer): void {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-      console.warn('[Gateway] WS 未连接，无法发送音频流')
+      logger.warn('Gateway', 'WS 未连接，无法发送音频流')
       return
     }
     ws.send(audioData)
@@ -231,10 +296,32 @@ export function useGateway(events: GatewayEvents = {}) {
 
   // ═══ 消息分发 ═══
 
+  function dispatchPush(action: string, payload: Record<string, unknown>): void {
+    for (const handler of wildcardHandlers) {
+      try {
+        handler(payload)
+      } catch (error) {
+        logger.error('Gateway', '通配符回调错误', error)
+      }
+    }
+
+    const handlers = pushHandlers.get(action)
+    if (!handlers) {
+      return
+    }
+
+    for (const handler of handlers) {
+      try {
+        handler(payload)
+      } catch (error) {
+        logger.error('Gateway', `回调错误 (${action})`, error)
+      }
+    }
+  }
+
   function handleMessage(raw: string): void {
     try {
-      const msg = JSON.parse(raw) as GatewayMessage & {
-        id?: string
+      const msg = JSON.parse(raw) as GatewayEnvelope & {
         payload: Record<string, unknown>
       }
       const action = msg.payload?.action as string | undefined
@@ -250,16 +337,22 @@ export function useGateway(events: GatewayEvents = {}) {
         }
       }
 
-      // ── RPC 错误 ──
+      // ── RPC 错误 (携带 code，方便上层区分错误类型) ──
       if (msg.type === 'error' && msg.id) {
         const pending = pendingRequests.get(msg.id)
         if (pending) {
           clearTimeout(pending.timer)
           pendingRequests.delete(msg.id)
-          pending.reject(new Error((msg.payload?.message as string) ?? '未知网关错误'))
+          const errMsg = (msg.payload?.message as string) ?? '未知网关错误'
+          const errCode = (msg.payload?.code as string) ?? 'GATEWAY_ERROR'
+          const error = new Error(errMsg) as Error & { code?: string }
+          error.code = errCode
+          pending.reject(error)
           return
         }
       }
+
+      dispatchPush(action ?? msg.type, msg.payload)
 
       // ── 推送事件分发 ──
       switch (action ?? msg.type) {
@@ -303,7 +396,7 @@ export function useGateway(events: GatewayEvents = {}) {
           events.onHeartbeat?.()
           break
         default:
-          console.debug(`[Gateway] 未知消息: type=${msg.type} action=${action}`)
+          logger.debug('Gateway', `未知消息: type=${msg.type} action=${action}`)
       }
     } catch {
       // JSON 解析失败，忽略
@@ -314,7 +407,7 @@ export function useGateway(events: GatewayEvents = {}) {
 
   function scheduleReconnect(): void {
     if (retryCount.value >= DEFAULT_RECONNECT.maxRetries) {
-      console.error(`[Gateway] 已达最大重连次数 (${DEFAULT_RECONNECT.maxRetries})，停止重连`)
+      logger.error('Gateway', `已达最大重连次数 (${DEFAULT_RECONNECT.maxRetries})，停止重连`)
       state.value = 'disconnected'
       return
     }
@@ -325,7 +418,7 @@ export function useGateway(events: GatewayEvents = {}) {
       DEFAULT_RECONNECT.maxDelay,
     )
 
-    console.log(`[Gateway] ${delay.toFixed(0)}ms 后重连 (第 ${retryCount.value + 1} 次)`)
+    logger.info('Gateway', `${delay.toFixed(0)}ms 后重连 (第 ${retryCount.value + 1} 次)`)
     state.value = 'reconnecting'
 
     reconnectTimer = setTimeout(() => {
@@ -347,7 +440,7 @@ export function useGateway(events: GatewayEvents = {}) {
     stopHeartbeat()
     // 每 30 秒发送 ping，与后端 GatewayHub 心跳周期对齐
     heartbeatTimer = setInterval(() => {
-      send('ping')
+      sendEnvelope(createEnvelope('heartbeat'))
     }, 30_000)
   }
 
@@ -364,12 +457,22 @@ export function useGateway(events: GatewayEvents = {}) {
   return {
     /** 连接状态 */
     state,
+    /** WS 是否已连接 */
+    isConnected,
+    /** 最后一次错误 */
+    lastError,
     /** 重连次数 */
     retryCount,
     /** 建立连接 */
     connect,
     /** 断开连接 */
     disconnect,
+    /** 注册 push 回调 */
+    onPush,
+    /** 移除 push 回调 */
+    offPush,
+    /** 手动重连 */
+    reconnect: connect,
     /** 发送消息 (fire-and-forget) */
     send,
     /** RPC 请求/响应 */

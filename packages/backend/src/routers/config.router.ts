@@ -19,6 +19,20 @@ import { zValidator } from '@hono/zod-validator'
 import { setConfigSchema, batchGetConfigSchema } from '../schemas/config.schema'
 import { z } from 'zod'
 import type { AppContext } from '../container'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('ConfigRouter')
+
+/** 配置 key 前缀到热更新方法的映射 */
+const HOT_RELOAD_MAP: Array<{
+  prefix: string
+  method: keyof Pick<AppContext, 'reloadEmbeddingConfig' | 'reloadTtsConfig' | 'reloadAsrConfig'>
+}> = [
+  { prefix: 'embedding.', method: 'reloadEmbeddingConfig' },
+  { prefix: 'reranker.', method: 'reloadEmbeddingConfig' },
+  { prefix: 'tts.', method: 'reloadTtsConfig' },
+  { prefix: 'asr.', method: 'reloadAsrConfig' },
+]
 
 // ── 额外 Schema (B6-3) ──
 
@@ -65,8 +79,13 @@ export function createConfigRouter(ctx: AppContext) {
   router.get('/:key', async (c) => {
     const key = c.req.param('key')
     const value = await ctx.configRepo.get(key)
-    if (value === null) {
-      return c.json({ code: 'NOT_FOUND', message: `配置 "${key}" 不存在` }, 404)
+    if (value == null) {
+      // 找不到配置时返回 200 OK + null，避免触发后端 Hono logger 的 404 WARN
+      return c.json({
+        code: 'NOT_CONFIGURED',
+        message: `配置 "${key}" 未设置`,
+        data: { key, value: null },
+      })
     }
     return c.json({ code: 'OK', message: '获取成功', data: { key, value } })
   })
@@ -75,6 +94,16 @@ export function createConfigRouter(ctx: AppContext) {
   router.put('/', zValidator('json', setConfigSchema), async (c) => {
     const { key, value } = c.req.valid('json')
     await ctx.configRepo.set(key, value)
+
+    // 检测是否需要触发服务热更新
+    for (const { prefix, method } of HOT_RELOAD_MAP) {
+      if (key.startsWith(prefix)) {
+        logger.info(`检测到配置变更: ${key}，触发 ${method}`)
+        await ctx[method]()
+        break
+      }
+    }
+
     return c.json({ code: 'OK', message: '配置已更新', data: { key, value } })
   })
 
@@ -82,7 +111,7 @@ export function createConfigRouter(ctx: AppContext) {
   router.delete('/:key', async (c) => {
     const key = c.req.param('key')
     const existing = await ctx.configRepo.get(key)
-    if (existing === null) {
+    if (existing == null) {
       return c.json({ code: 'NOT_FOUND', message: `配置 "${key}" 不存在` }, 404)
     }
     await ctx.configRepo.delete(key)
@@ -102,9 +131,27 @@ export function createConfigRouter(ctx: AppContext) {
   // PUT /api/configs/batch — 批量设置 (B6-3)
   router.put('/batch', zValidator('json', batchSetConfigSchema), async (c) => {
     const { items } = c.req.valid('json')
+    const pendingReloads = new Set<string>()
     for (const item of items) {
       await ctx.configRepo.set(item.key, item.value)
+      for (const { prefix, method } of HOT_RELOAD_MAP) {
+        if (item.key.startsWith(prefix)) {
+          pendingReloads.add(method)
+        }
+      }
     }
+
+    // 批量完成后统一触发热更新 (每个 service 最多一次)
+    for (const method of pendingReloads) {
+      logger.info(`批量配置变更，触发 ${method}`)
+      await ctx[
+        method as keyof Pick<
+          AppContext,
+          'reloadEmbeddingConfig' | 'reloadTtsConfig' | 'reloadAsrConfig'
+        >
+      ]()
+    }
+
     return c.json({
       code: 'OK',
       message: `已更新 ${items.length} 项配置`,
@@ -135,7 +182,7 @@ export function createConfigRouter(ctx: AppContext) {
     for (const [key, value] of Object.entries(data)) {
       if (!overwrite) {
         const existing = await ctx.configRepo.get(key)
-        if (existing !== null) {
+        if (existing != null) {
           skipped++
           continue
         }

@@ -25,6 +25,12 @@ import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('ReActLoop')
 
+/** 截断长文本用于日志输出 */
+function truncate(text: string, maxLen = 4000): string {
+  if (text.length <= maxLen) return text
+  return text.slice(0, maxLen) + `... (共${text.length}字符)`
+}
+
 // ─────────────────────────────────────────────
 // 配置
 // ─────────────────────────────────────────────
@@ -122,7 +128,35 @@ export async function* runReActLoop(params: {
       break
     }
 
-    logger.debug(`ReAct 第 ${turn + 1} 轮开始`)
+    logger.debug(
+      `ReAct 第 ${turn + 1} 轮开始 (messages=${messages.length}, tools=${currentTools?.length ?? 0})`,
+    )
+
+    // 第 0 轮: 打印完整 system prompt
+    if (turn === 0) {
+      const systemMsg = messages.find((m) => m.role === 'system')
+      if (systemMsg) {
+        const content =
+          typeof systemMsg.content === 'string'
+            ? systemMsg.content
+            : JSON.stringify(systemMsg.content)
+        logger.debug(`[Prompt] System Prompt:\n${truncate(content, 16000)}`)
+      }
+      // 打印 user 消息
+      const userMsgs = messages.filter((m) => m.role === 'user')
+      for (const um of userMsgs) {
+        const content = typeof um.content === 'string' ? um.content : JSON.stringify(um.content)
+        logger.debug(`[Prompt] User 消息: ${truncate(content, 4000)}`)
+      }
+    } else {
+      // 后续轮次: 打印最近追加的消息摘要
+      const lastMsg = messages[messages.length - 1]
+      if (lastMsg) {
+        const content =
+          typeof lastMsg.content === 'string' ? lastMsg.content : JSON.stringify(lastMsg.content)
+        logger.debug(`[Context] 最新消息 [${lastMsg.role}]: ${truncate(content, 4000)}`)
+      }
+    }
 
     // 推送状态: 思考中
     yield {
@@ -195,6 +229,11 @@ export async function* runReActLoop(params: {
     const flushed = thinkingFilter.flush()
     if (flushed) yield flushed
 
+    // 打印 LLM 原始回复文本
+    if (turnText) {
+      logger.debug(`[LLM回复] ${truncate(turnText, 4000)}`)
+    }
+
     // ── 无工具调用 → 正常结束 ──
     if (!hasToolCalls) {
       if (!turnText.trim() && turn === 0) {
@@ -246,7 +285,11 @@ export async function* runReActLoop(params: {
       }
 
       logger.info(`执行工具: ${fnName}`)
+      logger.debug(`[工具调用] ${fnName} 参数: ${truncate(JSON.stringify(fnArgs), 4000)}`)
       const result = await toolExecutor.execute(fnName, fnArgs, source)
+      logger.debug(
+        `[工具返回] ${fnName} (${result.durationMs}ms, error=${result.isError}): ${truncate(result.output, 8000)}`,
+      )
 
       allToolCalls.push({
         name: fnName,

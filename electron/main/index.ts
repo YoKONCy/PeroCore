@@ -120,6 +120,18 @@ app.whenReady().then(async () => {
 // ─── 服务崩溃联动 ─────────────────────────────────────
 appEvents.on('backend-crashed', async () => {
   logger.error('Main', '后端崩溃')
+
+  // 向所有渲染窗口推送系统错误通知
+  const { BrowserWindow } = await import('electron')
+  BrowserWindow.getAllWindows().forEach((win) => {
+    if (!win.isDestroyed()) {
+      win.webContents.send('system-error', {
+        title: '后端服务异常',
+        message: '后端进程意外退出，部分功能可能不可用。请检查日志或重启应用。',
+        type: 'error',
+      })
+    }
+  })
 })
 
 // ─── 应用生命周期 ─────────────────────────────────────

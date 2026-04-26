@@ -16,6 +16,7 @@ export const SUCCESS_CODES = {
   OK: 'OK',
   CREATED: 'CREATED',
   ACCEPTED: 'ACCEPTED',
+  NOT_CONFIGURED: 'NOT_CONFIGURED',
 } as const
 
 /** 客户端错误类 (4xx) */
@@ -79,6 +80,7 @@ export const CODE_MESSAGES: Record<ResponseCode, string> = {
   OK: '操作成功',
   CREATED: '创建成功',
   ACCEPTED: '任务已提交，正在后台处理',
+  NOT_CONFIGURED: '配置未设置',
 
   // 客户端错误 — 400
   BAD_REQUEST: '请求参数有误',
@@ -156,6 +158,7 @@ export const CODE_TO_HTTP: Record<ResponseCode, number> = {
   OK: 200,
   CREATED: 201,
   ACCEPTED: 202,
+  NOT_CONFIGURED: 200,
 
   // 4xx
   BAD_REQUEST: 400,

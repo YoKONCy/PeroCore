@@ -127,6 +127,31 @@ export class ModelService {
     logger.info(`模型配置已删除: ${existing.name} (${id})`)
   }
 
+  /**
+   * 获取远程模型列表
+   *
+   * 通过 provider + apiKey + apiBase 向远程 API 查询可用模型 ID 列表。
+   */
+  async listRemoteModels(params: {
+    provider: string
+    apiKey: string
+    apiBase?: string
+  }): Promise<string[]> {
+    try {
+      return await this.llmService.listModels({
+        provider: params.provider,
+        modelId: '', // listModels 不需要具体 modelId
+        apiKey: params.apiKey,
+        apiBase: params.apiBase,
+      })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      throw new AppError('LLM_ERROR', {
+        message: `获取远程模型列表失败: ${msg}`,
+      })
+    }
+  }
+
   /** 测试模型连通性 */
   async test(id: number): Promise<TestResult> {
     const model = await this.modelRepo.findById(id)

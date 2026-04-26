@@ -52,7 +52,8 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{
   edit: [msg: ChatMessage]
-  delete: [id: string]
+  deletePair: [id: string]
+  copy: [content: string]
   /** TTS 播放/停止切换 */
   ttsPlay: [msg: ChatMessage]
 }>()
@@ -99,10 +100,17 @@ function formatTime(ts?: number): string {
       <!-- 时间 + 操作 -->
       <div class="msg-meta msg-meta-user">
         <div class="msg-actions">
+          <button class="msg-action-btn" title="复制" @click="emit('copy', message.content)">
+            <PixelIcon name="copy" size="xs" />
+          </button>
           <button class="msg-action-btn" @click="emit('edit', message)">
             <PixelIcon name="edit" size="xs" />
           </button>
-          <button class="msg-action-btn msg-action-btn-danger" @click="emit('delete', message.id)">
+          <button
+            class="msg-action-btn msg-action-btn-danger"
+            title="删除对话对"
+            @click="emit('deletePair', message.id)"
+          >
             <PixelIcon name="trash" size="xs" />
           </button>
         </div>
@@ -144,10 +152,17 @@ function formatTime(ts?: number): string {
               size="xs"
             />
           </button>
+          <button class="msg-action-btn" title="复制" @click="emit('copy', message.content)">
+            <PixelIcon name="copy" size="xs" />
+          </button>
           <button class="msg-action-btn" @click="emit('edit', message)">
             <PixelIcon name="edit" size="xs" />
           </button>
-          <button class="msg-action-btn msg-action-btn-danger" @click="emit('delete', message.id)">
+          <button
+            class="msg-action-btn msg-action-btn-danger"
+            title="删除对话对"
+            @click="emit('deletePair', message.id)"
+          >
             <PixelIcon name="trash" size="xs" />
           </button>
         </div>

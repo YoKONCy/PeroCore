@@ -10,7 +10,7 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
 import router from './router'
-import { ApiError, ERROR_UI_MAP, ErrorSeverity } from './api'
+import { ApiError, ERROR_UI_MAP, ERROR_TITLE_MAP, ErrorSeverity } from './api'
 import { useNotificationStore } from './stores'
 
 // 全局样式 (令牌 → Tailwind → 像素风组件)
@@ -28,22 +28,65 @@ app.use(router)
 // ── 初始化通知 Store (Pinia 已挂载后可用) ──
 const notificationStore = useNotificationStore()
 
+// 仅在开发环境下注入全局便于控制台测试，生产构建时会自动剥离这段代码
+if (import.meta.env.DEV) {
+  // @ts-expect-error 开发环境暴露调试入口
+  window.$toast = notificationStore.toast
+}
+
 // ── 全局错误处理 ──
 app.config.errorHandler = (err) => {
   if (err instanceof ApiError) {
     const severity = ERROR_UI_MAP[err.code] ?? ErrorSeverity.TOAST
+    const title = ERROR_TITLE_MAP[err.code] ?? '错误'
 
     if (severity === ErrorSeverity.SILENT) {
-      console.warn(`[静默] ${err.code}: ${err.message}`)
+      // 静默错误仅记日志
     } else if (severity === ErrorSeverity.MODAL) {
-      notificationStore.showModal(err.message, `错误: ${err.code}`, 'error')
+      notificationStore.showModal(err.message, title, 'error')
     } else {
-      notificationStore.toast(err.message, 'error')
+      notificationStore.toast(err.message, { type: 'error', title })
     }
   } else {
-    console.error('[未捕获错误]', err)
-    notificationStore.toast('发生未知错误', 'error')
+    notificationStore.toast('发生未知错误', { type: 'error', title: '内部错误' })
   }
 }
+
+// ── IPC 系统错误监听 (Electron 主进程推送) ──
+import { listen } from './utils/ipcAdapter'
+
+listen('system-error', (event: unknown) => {
+  let msg = ''
+  let title = '系统错误'
+
+  if (typeof event === 'string') {
+    msg = event
+  } else if (typeof event === 'object' && event !== null) {
+    const e = event as Record<string, unknown>
+    msg = (e.payload ?? e.message ?? JSON.stringify(event)) as string
+    if (e.title) title = e.title as string
+    if (e.type === 'info' || e.type === 'warning') {
+      // 非严重错误使用对应类型
+      notificationStore.toast(msg, {
+        type: e.type as 'info' | 'warning',
+        title,
+        duration: 6000,
+      })
+      return
+    }
+  } else {
+    msg = String(event)
+  }
+
+  // 智能标题推断 (v1 还原)
+  if (title === '系统错误') {
+    if (msg.includes('Python')) title = 'Python 后端异常'
+    else if (msg.includes('NapCat')) title = 'NapCat 异常'
+    else if (msg.includes('WebView2')) title = 'WebView2 组件异常'
+    else if (msg.includes('DLL')) title = '系统组件缺失'
+  }
+
+  notificationStore.toast(msg, { type: 'error', title, duration: 10000 })
+})
 
 app.mount('#app')

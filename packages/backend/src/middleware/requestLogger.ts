@@ -23,10 +23,14 @@ export const requestLogger: MiddlewareHandler = async (c, next) => {
   const elapsed = Date.now() - start
   const status = c.res.status
 
-  // 只有非 2xx 或耗时 > 1s 时才打 warn
-  if (status >= 400 || elapsed > 1000) {
+  // 语音/AI 类请求天然耗时较长，放宽阈值
+  const isSlowAllowed = path.startsWith('/api/voice') || path.startsWith('/api/chat')
+  const slowThreshold = isSlowAllowed ? 10_000 : 1000
+
+  // 非 2xx 或超阈值慢请求 → warn; 成功请求 → trace (默认不显示)
+  if (status >= 400 || elapsed > slowThreshold) {
     logger.warn(`${method} ${path} → ${status} (${elapsed}ms)`)
   } else {
-    logger.debug(`${method} ${path} → ${status} (${elapsed}ms)`)
+    logger.trace(`${method} ${path} → ${status} (${elapsed}ms)`)
   }
 }

@@ -62,9 +62,11 @@ export class NitStreamFilter {
         const endIdx = this.buffer.indexOf(this.END_TAG)
 
         if (endIdx === -1) {
-          // 还没看到结尾 → 收集到 currentScript，清空 buffer
-          this.currentScript += this.buffer
-          this.buffer = ''
+          const keepLen = this.END_TAG.length - 1
+          if (this.buffer.length > keepLen) {
+            this.currentScript += this.buffer.slice(0, this.buffer.length - keepLen)
+            this.buffer = this.buffer.slice(this.buffer.length - keepLen)
+          }
           return output
         }
 

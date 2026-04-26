@@ -21,20 +21,14 @@ export interface ClusterResult {
   centroids: Map<number, Float32Array>
 }
 
-export declare function minGruForward(
-  hidden: Float32Array,
-  input: Float32Array,
-): Float32Array
+export declare function minGruForward(hidden: Float32Array, input: Float32Array): Float32Array
 
 export declare function projectInput(
   queryEmbedding: Float32Array,
   projMatrix: Float32Array,
 ): Float32Array
 
-export declare function minGruTrain(
-  samples: TrainingSample[],
-  learningRate?: number,
-): number
+export declare function minGruTrain(samples: TrainingSample[], learningRate?: number): number
 
 export declare function leidenCluster(
   adjacency: Map<number, Array<{ target: number; weight: number }>>,

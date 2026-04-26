@@ -240,6 +240,7 @@ export function createChatRouter(ctx: AppContext) {
       id: log.id,
       role: log.role,
       content: log.content,
+      rawContent: log.rawContent ?? null,
       timestamp: log.timestamp ? new Date(log.timestamp).toISOString() : null,
       pairId: log.pairId,
     }))
@@ -300,6 +301,26 @@ export function createChatRouter(ctx: AppContext) {
     return c.json({ code: 'OK', message: '消息已删除' })
   })
 
+  // DELETE /api/chat/messages/:id/pair — 级联删除整对消息 (用户+助手)
+  router.delete('/messages/:id/pair', async (c) => {
+    const id = Number(c.req.param('id'))
+    if (!Number.isInteger(id) || id <= 0) {
+      throw new AppError('INVALID_PARAMETER', {
+        message: '无效的消息 ID',
+        data: { field: 'id', expected: 'positive integer' },
+      })
+    }
+    const count = await ctx.logService.deleteMessagePair(id)
+    if (count === 0) {
+      throw new AppError('NOT_FOUND', { message: '消息不存在' })
+    }
+    return c.json({
+      code: 'OK',
+      message: `已删除 ${count} 条关联消息`,
+      data: { deletedCount: count },
+    })
+  })
+
   // ─────────────────────────────────────────────
   // 任务控制 (P2-11: ReActViewer 消费)
   // ─────────────────────────────────────────────
@@ -307,11 +328,11 @@ export function createChatRouter(ctx: AppContext) {
   // GET /api/chat/tasks — 活跃任务列表
   router.get('/tasks', (c) => {
     const tasks = ctx.taskManager.listActiveTasks()
-    return c.json({ code: 'OK', data: tasks })
+    return c.json({ code: 'OK', message: '获取成功', data: tasks })
   })
 
-  // POST /api/chat/task/pause — 暂停任务
-  router.post('/task/pause', async (c) => {
+  // POST /api/chat/tasks/pause — 暂停任务
+  router.post('/tasks/pause', async (c) => {
     const body = await c.req.json().catch(() => ({}) as Record<string, unknown>)
     const sessionId = ((body as Record<string, unknown>).sessionId as string) ?? ''
     if (!sessionId) {
@@ -326,8 +347,8 @@ export function createChatRouter(ctx: AppContext) {
       : c.json({ code: 'NOT_FOUND', message: '任务不存在' }, 404)
   })
 
-  // POST /api/chat/task/resume — 恢复任务
-  router.post('/task/resume', async (c) => {
+  // POST /api/chat/tasks/resume — 恢复任务
+  router.post('/tasks/resume', async (c) => {
     const body = await c.req.json().catch(() => ({}) as Record<string, unknown>)
     const sessionId = ((body as Record<string, unknown>).sessionId as string) ?? ''
     if (!sessionId) {
@@ -342,8 +363,8 @@ export function createChatRouter(ctx: AppContext) {
       : c.json({ code: 'NOT_FOUND', message: '任务不存在' }, 404)
   })
 
-  // POST /api/chat/task/inject — 注入指令
-  router.post('/task/inject', async (c) => {
+  // POST /api/chat/tasks/inject — 注入指令
+  router.post('/tasks/inject', async (c) => {
     const body = await c.req.json().catch(() => ({}) as Record<string, unknown>)
     const sessionId = ((body as Record<string, unknown>).sessionId as string) ?? ''
     const instruction = ((body as Record<string, unknown>).instruction as string) ?? ''
@@ -368,49 +389,9 @@ export function createChatRouter(ctx: AppContext) {
     const body = await c.req.json().catch(() => ({}) as Record<string, unknown>)
     const action = (body as Record<string, unknown>).action as string
     const agentId = ((body as Record<string, unknown>).agentId as string) ?? 'pero'
+    const result = await ctx.chatResetService.reset(action, agentId)
 
-    switch (action) {
-      case 'clear_logs': {
-        // 通过 logService 删除所有对话日志
-        const count = await ctx.logService.deleteAllSessions(agentId)
-        return c.json({ code: 'OK', message: `已删除 ${count} 个会话的对话记录` })
-      }
-      case 'reset_memories': {
-        // 通过 memoryService 删除所有记忆
-        const { data: memories } = await ctx.memoryService.list({
-          agentId,
-          page: 1,
-          pageSize: 100000,
-        })
-        for (const mem of memories) {
-          await ctx.memoryService.delete(mem.id, agentId)
-        }
-        return c.json({ code: 'OK', message: `已删除 ${memories.length} 条记忆` })
-      }
-      case 'factory_reset': {
-        // 全量重置: 日志 + 记忆 + 配置
-        await ctx.logService.deleteAllSessions(agentId)
-        const { data: memories } = await ctx.memoryService.list({
-          agentId,
-          page: 1,
-          pageSize: 100000,
-        })
-        for (const mem of memories) {
-          await ctx.memoryService.delete(mem.id, agentId)
-        }
-        // 清除该 agent 的配置 (ConfigRepo 是 KV CRUD，Router→Repo 直调是可接受的例外)
-        const configs = await ctx.configRepo.listAll(`agent.${agentId}`)
-        for (const cfg of configs) {
-          await ctx.configRepo.delete(cfg.key)
-        }
-        return c.json({ code: 'OK', message: '恢复出厂设置完成' })
-      }
-      default:
-        throw new AppError('INVALID_PARAMETER', {
-          message: `未知操作: ${action}`,
-          data: { field: 'action', expected: 'clear_logs | reset_memories | factory_reset' },
-        })
-    }
+    return c.json({ code: 'OK', message: result.message, data: result.data })
   })
 
   return router

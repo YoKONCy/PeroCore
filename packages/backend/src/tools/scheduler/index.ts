@@ -15,12 +15,12 @@
 import type { BuiltinTool } from '../index'
 import type { SchedulerService } from '../../services/scheduler/schedulerService'
 
-// ── 全局引用: 在 container 接线阶段注入 ──
-let schedulerServiceRef: SchedulerService | null = null
+/** 模块引用 */
+let _schedulerService: SchedulerService | null = null
 
-/** 注入 SchedulerService 引用 (由 container.ts 调用) */
-export function injectSchedulerService(svc: SchedulerService): void {
-  schedulerServiceRef = svc
+/** 设置 SchedulerService */
+export function setSchedulerService(svc: SchedulerService | null): void {
+  _schedulerService = svc
 }
 
 // ── set_reminder ──
@@ -56,7 +56,7 @@ export const setReminderTool: BuiltinTool = {
   },
 
   async execute(args) {
-    if (!schedulerServiceRef) {
+    if (!_schedulerService) {
       return JSON.stringify({ error: '提醒服务未初始化' })
     }
 
@@ -75,7 +75,7 @@ export const setReminderTool: BuiltinTool = {
       return JSON.stringify({ error: '不能设置过去的时间哦' })
     }
 
-    const reminder = await schedulerServiceRef.create({
+    const reminder = await _schedulerService.create({
       time: parsed.toISOString(),
       content,
       type: type as 'reminder' | 'topic' | 'reaction',
@@ -109,11 +109,11 @@ export const listRemindersTool: BuiltinTool = {
   },
 
   async execute(_args, ctx) {
-    if (!schedulerServiceRef) {
+    if (!_schedulerService) {
       return JSON.stringify({ error: '提醒服务未初始化' })
     }
 
-    const reminders = await schedulerServiceRef.listPending(ctx.agentId)
+    const reminders = await _schedulerService.listPending(ctx.agentId)
 
     if (reminders.length === 0) {
       return JSON.stringify({ items: [], message: '当前没有待触发的提醒哦' })
@@ -154,12 +154,12 @@ export const cancelReminderTool: BuiltinTool = {
   },
 
   async execute(args) {
-    if (!schedulerServiceRef) {
+    if (!_schedulerService) {
       return JSON.stringify({ error: '提醒服务未初始化' })
     }
 
     const id = args.id as number
-    const success = await schedulerServiceRef.cancel(id)
+    const success = await _schedulerService.cancel(id)
 
     if (!success) {
       return JSON.stringify({ error: `未找到 ID 为 ${id} 的提醒，或已触发` })

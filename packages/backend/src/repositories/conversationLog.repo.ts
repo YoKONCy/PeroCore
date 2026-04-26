@@ -209,4 +209,15 @@ export class ConversationLogRepository {
     const result = await this.db.delete(conversationLogs).where(eq(conversationLogs.id, id))
     return (result as unknown as { changes: number }).changes > 0
   }
+
+  /** 通过 id 查找单条消息 */
+  async findById(id: number): Promise<ConversationLogRow | undefined> {
+    return this.db.select().from(conversationLogs).where(eq(conversationLogs.id, id)).get()
+  }
+
+  /** 通过 pairId 级联删除一对消息 (用户+助手) */
+  async deleteByPairId(pairId: string): Promise<number> {
+    const result = await this.db.delete(conversationLogs).where(eq(conversationLogs.pairId, pairId))
+    return (result as unknown as { changes: number }).changes
+  }
 }

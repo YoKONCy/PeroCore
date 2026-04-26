@@ -1,23 +1,32 @@
 <template>
-  <div class="pixel-icon" :class="[sizeClass, animationClass]">
+  <div
+    class="pixel-icon inline-flex items-center justify-center"
+    :class="[sizeClass, animationClass]"
+  >
     <svg
       :viewBox="`0 0 ${viewBoxSize} ${viewBoxSize}`"
-      class="pixel-icon-svg"
-      fill="currentColor"
+      class="w-full h-full"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
       xmlns="http://www.w3.org/2000/svg"
     >
-      <path :d="iconPath" />
+      <!-- 部分图标需要 fill, 通过 iconFill 控制 -->
+      <path :d="iconPath" :fill="iconFill" />
     </svg>
   </div>
 </template>
 
 <script setup lang="ts">
 /**
- * PixelIcon — 像素风内联 SVG 图标库
+ * PixelIcon — 内联 SVG 图标库 (24×24 线性图标)
  *
- * 后续实测阶段可逐个调整不准确的路径。
+ * 重构自 v1 的 16×16 像素图标，升级为清晰的 24×24 线性风格。
+ * 保持像素 UI 设计语言（边框/按钮/卡片），但图标本身使用专业线性风格。
  *
- * @usage <PixelIcon name="heart" size="md" animation="bounce" />
+ * @usage <PixelIcon name="heart" size="md" />
  */
 import { computed } from 'vue'
 
@@ -35,223 +44,192 @@ const props = withDefaults(defineProps<Props>(), {
   animation: '',
 })
 
-const viewBoxSize = 16
+const viewBoxSize = 24
 
-/** 尺寸映射 */
-const SIZE_MAP: Record<string, string> = {
-  xs: 'pixel-icon-xs',
-  sm: 'pixel-icon-sm',
-  md: 'pixel-icon-md',
-  lg: 'pixel-icon-lg',
-  xl: 'pixel-icon-xl',
-  '2xl': 'pixel-icon-2xl',
-  '3xl': 'pixel-icon-3xl',
-}
+/** 尺寸 class (使用 Tailwind，与 v1 一致) */
+const sizeClass = computed(() => {
+  const map: Record<string, string> = {
+    xs: 'w-3 h-3',
+    sm: 'w-4 h-4',
+    md: 'w-5 h-5',
+    lg: 'w-6 h-6',
+    xl: 'w-8 h-8',
+    '2xl': 'w-10 h-10',
+    '3xl': 'w-12 h-12',
+  }
+  return map[props.size] ?? 'w-5 h-5'
+})
 
-/** 动画映射 */
-const ANIMATION_MAP: Record<string, string> = {
-  bounce: 'animate-pixel-bounce',
-  spin: 'animate-pixel-spin',
-  pulse: 'animate-pixel-pulse',
-  'hover-spin': 'hover-pixel-spin',
-  'hover-bounce': 'hover-pixel-bounce',
-}
+/** 动画 class */
+const animationClass = computed(() => {
+  if (!props.animation) return ''
+  const map: Record<string, string> = {
+    bounce: 'animate-pixel-bounce',
+    spin: 'animate-pixel-spin',
+    pulse: 'animate-pixel-pulse',
+    'hover-spin': 'hover-pixel-spin',
+    'hover-bounce': 'hover-pixel-bounce',
+  }
+  return map[props.animation] ?? ''
+})
 
-const sizeClass = computed(() => SIZE_MAP[props.size] ?? 'pixel-icon-md')
-const animationClass = computed(() =>
-  props.animation ? (ANIMATION_MAP[props.animation] ?? '') : '',
-)
+/** 需要 fill 的图标列表 (实心图标) */
+const FILLED_ICONS = new Set(['heart', 'star', 'circle'])
+
+const iconFill = computed(() => (FILLED_ICONS.has(props.name) ? 'currentColor' : 'none'))
 
 // ─────────────────────────────────────────────
-// 图标路径字典 (16×16 viewBox)
+// 图标路径字典 (24×24 viewBox, 线性风格)
 // ─────────────────────────────────────────────
 const icons: Record<string, string> = {
-  // 核心记忆 (🧠)
-  brain: 'M4 4h8v2h2v6h-2v2H4v-2H2V6h2V4zm2 2v2h4V6H6z',
-  // 对话气泡 (💬)
-  chat: 'M2 2h12v8H8l-4 4v-4H2V2zm2 2v4h8V4H4z',
-  // 闪电 (⚡)
-  flash: 'M9 2H5l-2 6h4l-2 6 8-8H8l2-4z',
-  // 猫爪 (🐾)
-  paw: 'M3 5h2v2H3V5zm10 0h-2v2h2V5zm-8 4h6v4H5V9zm-3 1h2v2H2v-2zm12 0h-2v2h2v-2z',
-  // 十字星 (✨)
-  sparkle: 'M7 2h2v2H7V2zm0 10h2v2H7v-2zm-5-5h2v2H2V7zm10 0h2v2h-2V7zm-3-1h2v2H9V6zm-4 0h2v2H5V6z',
-  // 思考云 (💭)
-  thought: 'M5 2h6v2h2v4h-2v2h-2v2H7v-2H5v-2H3V4h2V2z',
-  // 书本 (📚)
-  book: 'M3 2h10v12H3V2zm2 2v8h6V4H5z',
-  // 日历 (📅)
-  calendar: 'M2 2h12v12H2V2zm2 4v6h8V6H4zm1-3h2v2H5V3zm5 0h2v2h-2V3z',
-  // 沙漏 (⏳)
-  hourglass: 'M3 2h10v2h-2v2l-2 2 2 2v2h2v2H3v-2h2v-2l2-2-2-2V4H3V2z',
-  // 心形 (💗)
+  // ── 导航 & 布局 ──
+  home: 'M3 9.5L12 3l9 6.5V20a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9.5z M9 22V12h6v10',
+  menu: 'M4 6h16 M4 12h16 M4 18h16',
+  search: 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z M21 21l-4.35-4.35',
+  settings:
+    'M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+  layout: 'M3 3h7v7H3V3z M14 3h7v7h-7V3z M14 14h7v7h-7v-7z M3 14h7v7H3v-7z',
+  list: 'M8 6h13 M8 12h13 M8 18h13 M3 6h.01 M3 12h.01 M3 18h.01',
+
+  // ── 状态 & 形状 ──
   heart:
-    'M4 3h2v2H4V3zm6 0h2v2h-2V3zm-8 2h2v2H2V5zm12 0h-2v2h2V5zm-12 2h2v2H2V7zm12 0h-2v2h2V7zm-10 2h2v2H4V9zm6 0h2v2h-2V9zm-4 2h2v2H6v-2z',
-  // 星形 (⭐)
-  star: 'M7 2h2v3h3v2h-2v3h2v2h-3v2H7v-2H4v-2h2v-3H4V7h3V2z',
-  // 显示器 (💻)
-  desktop: 'M2 3h12v8H2V3zm2 2v4h8V5H4zm2 7h4v2H6v-2z',
-  // 手机 (📱)
-  mobile: 'M5 2h6v12H5V2zm2 2v8h2V4H7z',
-  // 眼睛 (👁️)
-  eye: 'M2 6h2V4h8v2h2v4h-2v2H4v-2H2V6zm4 0v4h4V6H6z',
-  // 归档 (🗄️)
-  archive: 'M2 3h12v10H2V3zm2 2v2h8V5H4zm0 4v2h8V9H4z',
-  // 扳手 (🛠️)
-  tool: 'M10 2l4 4-2 2-4-4 2-2zM3 9l4 4-5 1 1-5z',
-  // 刷新 (🔃)
-  refresh: 'M13 2v4h-4V5h2V3H5v7h2v2H3v-3h2V5h8V2z M3 14v-4h4v1H5v2h6V6h-2V4h4v10H3z',
-  // 时钟 (🕰️)
-  clock: 'M6 2h4v2h2v2h2v4h-2v2h-2v2H6v-2H4v-2H2V6h2V4h2V2zm2 3v4h3v2H7V5h1z',
-  // 表情：开心
-  'mood-happy': 'M2 2h12v12H2V2zm3 3v2h2V5H5zm4 0v2h2V5H9zm-5 5v2h8v-2H4z',
-  // 表情：难过
-  'mood-sad': 'M2 2h12v12H2V2zm3 3v2h2V5H5zm4 0v2h2V5H9zm1 6v-2H6v2h4z',
-  // 表情：一般
-  'mood-neutral': 'M2 2h12v12H2V2zm3 3v2h2V5H5zm4 0v2h2V5H9zm-1 6h4v-1H8v1z',
-  // 表情：生气
-  'mood-angry': 'M2 2h12v12H2V2zm2 2l2 2H4V4zm8 0l-2 2h2V4zm-8 6h8v2H4v-2z',
-  // 表情：兴奋
-  'mood-excited': 'M2 2h12v12H2V2zm2 2l2 2-2 2V4zm8 0l-2 2 2 2V4zm-8 6l4 2 4-2v2H4v-2z',
-  // 用户组 (👥)
-  users: 'M3 10v4h4v-4H3zm6 0v4h4v-4H9zm-4-6v4h4V4H5zm4-2v2h2V2H9z',
-  // 叶子 (🍃)
-  leaf: 'M8 2h4v2h2v4h-2v2H8v4H6v-4H4v-2H2V4h2V2h4z',
-  // 水晶球 (🔮)
-  crystal: 'M4 2h8v2h2v8h-2v2H4v-2H2V4h2V2zm2 10h4v2H6v-2z',
-  // 灯泡 (💡)
-  lightbulb: 'M5 2h6v2h2v6h-2v2h-2v2H7v-2H5v-2H3V4h2V2zm2 10h2v2H7v-2z',
-  // 鞭炮 (🧨)
-  firecracker: 'M6 2h4v2h2v10h-2v2H6v-2H4V4h2V2zm2 0h1v1H8V2z',
-  // 拼图 (🧩)
-  puzzle: 'M2 4h4V2h4v2h4v4h2v4h-2v4H10v-2H6v2H2V4z',
-  // 握手 (🤝)
-  handshake: 'M2 6h4v2H2V6zm10 0h2v2h-2V6zm-6 2h4v2H6V8zm-2 2h2v2H4v-2zm6 0h2v2h-2v-2z',
-  // 调色盘 (🎨)
-  palette: 'M2 4h12v10H2V4zm3 2v2h2V6H5zm4 0v2h2V6H9zm-4 4v2h2v-2H5z',
-  // 铅笔 (📝)
-  pencil: 'M10 2l4 4-6 6-4 2 2-4 6-6zM3 13h2v1H3v-1z',
-  // 链接 (🔗)
-  link: 'M2 6h6v2H2V6zm6 2h6v2H8V8zm-4 2h6v2H4v-2z',
-  // 火焰 (🔥)
-  fire: 'M7 2h2v2H7V2zm-2 4h2v2H5V6zm4 0h2v2H9V6zm-2 4h2v2H7v-2z',
-  // 搜索 (🔍)
-  search: 'M2 2h8v2h2v6h-2v2H2V2zm2 2v6h4V4H4zm8 8h2v2h-2v-2z',
-  // 列表 (📋)
-  list: 'M3 4h2v2H3V4zm4 0h6v2H7V4zm-4 4h2v2H3V8zm4 0h6v2H7V8zm-4 4h2v2H3v-2zm4 0h6v2H7v-2z',
-  // 图表 (📊)
-  chart: 'M2 10h2v4H2v-4zm4-4h2v8H6V6zm4-4h2v12h-2V2zm4 4h2v8h-2V6z',
-  // 垃圾桶 (🗑️)
-  trash: 'M5 2h6v2h2v2h-2v8H5V6H3V4h2V2zm2 4v6h2V6H7z',
-  // 设置 (⚙️)
-  settings: 'M6 2h4v2h2v2h2v4h-2v2h-2v2H6v-2H4v-2h2V6h2V4h2V2zm2 4v4h4V6H8z',
-  // 终端 (💻)
-  terminal: 'M2 4h12v8H2V4zm2 2v4h8V6H4z',
-  // 加号 (➕)
-  plus: 'M7 2h2v4h4v2H9v4H7V8H3V6h4V2z',
-  // 减号 (➖)
-  minus: 'M4 7h8v2H4V7z',
-  // 地球 (🌐)
-  globe: 'M6 2h4v2h2v2h2v4h-2v2h-2v2H6v-2H4v-2H2V6h2V4h2V2zm2 4v4h4V6H8z',
-  // 用户 (👤)
-  user: 'M6 3h4v2h2v2h-2v2H6V7H4V5h2V3zm-2 6h8v2h2v4H2v-4h2V9z',
-  // 警告 (⚠️)
-  alert: 'M7 2h2v2h2v2h2v2h2v4H1v-4h2V6h2V4h2V2zm1 4v3h-1V6h1zm-1 5h2v2H7v-2z',
-  // 下载 (⬇️)
-  download: 'M7 2h2v6h2l-3 3-3-3h2V2zm-5 10h12v2H2v-2z',
-  // 机器人 (🤖)
-  robot:
-    'M4 3h8v9H4V3zm2 2v2h1v-2H6zm3 0v2h1v-2H9zm-3 5h6v1H6v-1z M3 6h1v3H3V6zm10 0h1v3h-1V6z M7 1h2v2H7V1z',
-  // 向下 (🔽)
-  'chevron-down': 'M3 5h2v2h2v2h2v-2h2v-2h2v2h-2v2h-2v2h-2v-2h-2v-2h-2v-2z',
-  // 向上 (🔼)
-  'chevron-up': 'M3 11h2v-2h2v-2h2v2h2v2h2v-2h-2v-2h-2v-2h-2v2h-2v2h-2v2z',
-  // 向右 (▶️)
-  'chevron-right': 'M5 3h2v2h2v2h2v2h-2v2h-2v2H5v-2h2v-2h2v-2h-2V7H5V3z',
-  // 方块 (🔲)
-  square: 'M3 3h10v10H3V3zm2 2v6h6V5H5z',
-  // 复制 (❐)
-  copy: 'M5 5h8v8H5V5zm-2-2h8v2H3v8H1V3h2z',
-  // 公文包 (💼)
-  briefcase: 'M5 2h6v2h2v8H3V4h2V2zm2 2v2h2V4H7zm-2 4h6v2H5V8z',
-  // 收件箱 (📥)
-  inbox: 'M2 3h12v10H2V3zm2 2v4h2v2h4V9h2V5H4zm0 6v2h8v-2H4z',
-  // 勾选 (✔️)
-  check: 'M2 9h2v2h2v2h2v-2h2v-2h2v-2h2v-2h-2v2h-2v2h-2v2H6v-2H4v-2H2v2z',
-  // 关闭 (✖️)
-  close: 'M3 3h2v2h2v2h2V5h2V3h2v2h-2v2h-2v2h2v2h2v2h-2v-2h-2v-2H7v2H5v2H3v-2h2V9H3V7h2V5H3V3z',
-  // 发送 (📤)
-  send: 'M2 12h2v-1h2v-1h2v-1h2v-1h2v-1h2v-1h-2v-1h-2v-1h-2v-1h-2v-1h-2v-1H2v11z',
-  // 保存 (💾)
-  save: 'M3 2h10v12H3V2zm2 2v3h6V4H5zm0 10v-4h6v4H5z',
-  // 麦克风 (🎤)
-  mic: 'M7 2h2v6H7V2zm-2 4h2v2H5V6zm6 0h-2v2h2V6zm-3 4h2v2H8v-2z',
-  // 耳机 (🎧)
-  headphones: 'M2 7h3v6H2V7zm9 0h3v6h-3V7zM5 3h6v2h2v2h-2V5H5V7H3V5h2V3z',
-  // 静音 (🔇)
-  'volume-x':
-    'M2 6h2v4H2V6zm3-2h2v8H5V4zm3-2h2v12H8V2z M13 5h2v2h-2V5zm4 4h2v2h-2V9zm-4 4h2v2h-2v-2zm4-8h2v2h-2V5z',
-  // 钥匙 (🔑)
-  key: 'M6 6h2v2h2v2h2v2h2v-2h2v-2h-2V6h-2V4H6v2zm-2 2h2v2H4V8zm8 6h2v2h-2v-2z',
-  // 退出 (🚪)
-  logout: 'M4 3h8v2H6v6h6v2H4V3zm7 2h3v2h-3V5zm3 2h3v2h-3V7zm-3 2h3v2h-3V9z',
-  // 门 - 关
-  'door-closed': 'M4 2h8v12H4V2zm6 6h2v2h-2V8z',
-  // 门 - 开
-  'door-open': 'M4 2h2v12H4V2zm4 1l4 2v8l-4 2V3zm2 6h2v2h-2V9z',
-  // 信息 (ℹ️)
-  info: 'M7 2h2v2H7V2zm0 4h2v8H7V6z',
-  // 编辑 (✏️)
-  edit: 'M10 2l4 4-6 6-4 2 2-4 6-6zM3 13h2v1H3v-1z',
-  // 图片 (🖼️)
-  image: 'M2 3h12v10H2V3zm2 2v6h8V5H4zm2 2h2v2H6V7z',
-  // 音量 (🔊)
-  volume: 'M2 6h3v4H2V6zm4-1h2v6H6V5zm3-2h2v10H9V3z',
-  // 引用 (❝)
-  quote: 'M3 4h4v4H3V4zm2 6h2v2H5v-2zm6-6h4v4h-4V4zm2 6h2v2h-2v-2z',
-  // 文件夹 (📁)
-  folder: 'M2 4h4l2 2h6v8H2V4zm2 2v6h8V6H8L6 4H4z',
-  // 打开文件夹 (📂)
-  'folder-open': 'M2 4h4l2 2h6v8H2V4zm2 3h8v5H4V7zm0-1h10v1H2V6z',
-  // 新建文件夹 (📂+)
-  'folder-plus': 'M2 4h4l2 2h6v8H2V4zm2 2v6h8V6H8L6 4H4zm3 2h2v1H9v2H8V9H6V8h2V6z',
-  // 文件 (📄)
-  file: 'M3 2h8l4 4v10H3V2zm1 1v12h10V7h-3V3H4zm7 0v3h3l-3-3z',
-  // 代码 (💻)
-  code: 'M5 4l-3 4 3 4 1.5-1.5L4 8l2.5-2.5L5 4zm6 0l-1.5 1.5L12 8l-2.5 2.5L11 12l3-4-3-4z',
-  // 布局 (⊞)
-  layout: 'M2 2h12v12H2V2zm2 2v3h3V4H4zm5 0v3h3V4H9zm-5 5v3h3V9H4zm5 0v3h3V9H9z',
-  // 首页 (🏠)
-  home: 'M8 2L2 8h2v6h3v-4h2v4h3V8h2L8 2z',
-  // 建筑 (🏢)
-  building: 'M4 2h8v12H4V2zm2 2v2h4V4H6zm0 4v2h4V8H6zm0 4v2h4v-2H6z',
-  // 定位 (📍)
-  'map-pin': 'M5 2h6v2h2v4h-2v2h-2v4H7v-4H5V8H3V4h2V2zm2 2v2h2V4H7z',
-  // 机器人 (别名)
-  bot: 'M4 3h8v9H4V3zm2 2v2h1v-2H6zm3 0v2h1v-2H9zm-3 5h6v1H6v-1z M3 6h1v3H3V6zm10 0h1v3h-1V6z M7 1h2v2H7V1z',
-  // 加载
-  loader: 'M13 2v4h-4V5h2V3H5v7h2v2H3v-3h2V5h8V2z M3 14v-4h4v1H5v2h6V6h-2V4h4v10H3z',
-  // 菜单 (☰)
-  menu: 'M3 4h10v2H3V4zm0 4h10v2H3V8zm0 4h10v2H3v-2z',
-  // CPU
-  cpu: 'M4 4h8v8H4V4zm2 2v4h4V6H6zm-2-2H2v2h2V4zm0 4H2v2h2V8zm0 4H2v2h2v-2zm4-8V2h2v2H8zm4 0V2h2v2h-2zm0 4h2v2h-2V8zm0 4h2v2h-2v-2zm-4 4v2h2v-2H8zm-4 0v2h2v-2H4z',
-  // 数据库
-  database: 'M4 2h8v3H4V2zm0 5h8v3H4V7zm0 5h8v3H4v-3z',
-  // 电源 (⏻)
-  power:
-    'M7 2h2v6H7V2zm-3 2h2v2H4V4zm8 0h2v2h-2V4zm2 4h2v4h-2V8zm-2 4h2v2h-2v-2zm-8 0h2v2H4v-2zm-2-4h2v4H2V8z',
-  // 盾牌 (🛡️)
-  shield: 'M3 2h10v4l-5 8-5-8V2zm2 2v2l3 5 3-5V4H5z',
-  // 游戏手柄 (🎮)
-  gamepad: 'M2 6h12v6H2V6zm2 2v2h2V8H4zm6 0h2v2h-2V8z',
-  // 圆圈 (⭕)
-  circle: 'M6 2h4v2h2v2h2v4h-2v2h-2v2H6v-2H4v-2H2V6h2V4h2V2zm0 2v8h4V4H6z',
-  // 插头 (🔌)
-  plug: 'M6 2h4v4h-4V2zm2 4v2H4v2h2v4h4v-4h2V8H8V6zm0 6v2h-2v2h2v-2h2v-2H8z',
-  // 猫咪 (🐱)
-  cat: 'M2 4v3h2v2h8V7h2V4h-2v2h-1V4H9v2H7V4H5v2H4V4H2zm3 6h6v2H5v-2zm1 3h4v1H6v-1z',
-  // 活动脉冲 (📈)
-  activity: 'M2 8h3l2-4 3 8 3-8 2 4h3',
+    'M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z',
+  star: 'M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z',
+  sparkle:
+    'M12 3v2 M12 19v2 M5.64 5.64l1.41 1.41 M16.95 16.95l1.41 1.41 M3 12h2 M19 12h2 M5.64 18.36l1.41-1.41 M16.95 7.05l1.41-1.41',
+  circle: 'M12 22c5.52 0 10-4.48 10-10S17.52 2 12 2 2 6.48 2 12s4.48 10 10 10z',
+  check: 'M20 6L9 17l-5-5',
+  close: 'M18 6L6 18 M6 6l12 12',
+  plus: 'M12 5v14 M5 12h14',
+  minus: 'M5 12h14',
+  info: 'M12 22c5.52 0 10-4.48 10-10S17.52 2 12 2 2 6.48 2 12s4.48 10 10 10z M12 16v-4 M12 8h.01',
+  alert:
+    'M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z M12 9v4 M12 17h.01',
+
+  // ── 用户 & 角色 ──
+  user: 'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2 M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
+  users:
+    'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2 M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z M23 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75',
+  cat: 'M12 5C8.13 5 5 8.13 5 12v7h14v-7c0-3.87-3.13-7-7-7z M5 12L2 6 M19 12l3-6 M9 16h.01 M15 16h.01 M10 19h4',
+  robot: 'M5 8h14v12H5V8z M9 12v2 M15 12v2 M10 17h4 M4 12H2 M22 12h-2 M12 4V2 M8 8V5 M16 8V5',
+
+  // ── 系统 & 技术 ──
+  cpu: 'M6 6h12v12H6V6z M9 2v4 M15 2v4 M9 18v4 M15 18v4 M2 9h4 M2 15h4 M18 9h4 M18 15h4 M10 10h4v4h-4v-4z',
+  database:
+    'M12 2C6.48 2 2 4.69 2 8v8c0 3.31 4.48 6 10 6s10-2.69 10-6V8c0-3.31-4.48-6-10-6z M2 8c0 3.31 4.48 6 10 6s10-2.69 10-6 M2 14c0 3.31 4.48 6 10 6s10-2.69 10-6',
+  power: 'M18.36 6.64a9 9 0 1 1-12.73 0 M12 2v10',
+  activity: 'M22 12h-4l-3 9L9 3l-3 9H2',
+  terminal: 'M4 17l6-6-6-6 M12 19h8',
+  code: 'M16 18l6-6-6-6 M8 6l-6 6 6 6',
+  globe:
+    'M12 22c5.52 0 10-4.48 10-10S17.52 2 12 2 2 6.48 2 12s4.48 10 10 10z M2 12h20 M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10A15.3 15.3 0 0 1 12 2z',
+
+  // ── 对话 & 交互 ──
+  chat: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10z',
+  send: 'M22 2L11 13 M22 2l-7 20-4-9-9-4 20-7z',
+  mic: 'M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z M19 10v2a7 7 0 0 1-14 0v-2 M12 19v4 M8 23h8',
+  volume: 'M11 5L6 9H2v6h4l5 4V5z M19.07 4.93a10 10 0 0 1 0 14.14 M15.54 8.46a5 5 0 0 1 0 7.07',
+  headphones:
+    'M3 18v-6a9 9 0 0 1 18 0v6 M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3v5z M3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3v5z',
+
+  // ── 文件 & 数据 ──
+  file: 'M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-7-7z M13 2v7h7',
+  folder: 'M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2v11z',
+  save: 'M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z M17 21v-8H7v8 M7 3v5h8',
+  download: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4 M7 10l5 5 5-5 M12 15V3',
+  trash:
+    'M3 6h18 M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6 M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2 M10 11v6 M14 11v6',
+  archive: 'M21 8v13H3V8 M1 3h22v5H1V3z M10 12h4',
+  image:
+    'M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z M8.5 10a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z M21 15l-5-5L5 21',
+
+  // ── 表情 ──
+  'mood-happy':
+    'M12 22c5.52 0 10-4.48 10-10S17.52 2 12 2 2 6.48 2 12s4.48 10 10 10z M8 14s1.5 2 4 2 4-2 4-2 M9 9h.01 M15 9h.01',
+  'mood-sad':
+    'M12 22c5.52 0 10-4.48 10-10S17.52 2 12 2 2 6.48 2 12s4.48 10 10 10z M16 16s-1.5-2-4-2-4 2-4 2 M9 9h.01 M15 9h.01',
+  'mood-neutral':
+    'M12 22c5.52 0 10-4.48 10-10S17.52 2 12 2 2 6.48 2 12s4.48 10 10 10z M8 15h8 M9 9h.01 M15 9h.01',
+  'mood-angry':
+    'M12 22c5.52 0 10-4.48 10-10S17.52 2 12 2 2 6.48 2 12s4.48 10 10 10z M16 16s-1.5-2-4-2-4 2-4 2 M7.5 8l2 1 M16.5 8l-2 1',
+  'mood-excited':
+    'M12 22c5.52 0 10-4.48 10-10S17.52 2 12 2 2 6.48 2 12s4.48 10 10 10z M8 14s1.5 2 4 2 4-2 4-2 M9 9l-1-1 1-1 M15 9l1-1-1-1',
+
+  // ── 方向 & 控制 ──
+  'chevron-down': 'M6 9l6 6 6-6',
+  'chevron-up': 'M18 15l-6-6-6 6',
+  'chevron-right': 'M9 18l6-6-6-6',
+  'chevron-left': 'M15 18l-6-6 6-6',
+  square: 'M3 3h18v18H3V3z',
+  copy: 'M20 9H11a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2z M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1',
+  refresh:
+    'M23 4v6h-6 M1 20v-6h6 M3.51 9a9 9 0 0 1 14.85-3.36L23 10 M1 14l4.64 4.36A9 9 0 0 0 20.49 15',
+  loader:
+    'M12 2v4 M12 18v4 M4.93 4.93l2.83 2.83 M16.24 16.24l2.83 2.83 M2 12h4 M18 12h4 M4.93 19.07l2.83-2.83 M16.24 7.76l2.83-2.83',
+
+  // ── 工具 & 通用 ──
+  tool: 'M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z',
+  key: 'M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4',
+  shield: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z',
+  link: 'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71 M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71',
+  plug: 'M12 22v-5 M9 8V2 M15 8V2 M17 8H7a5 5 0 0 0 5 5 5 5 0 0 0 5-5z M7 8a5 5 0 0 0 5 9v0a5 5 0 0 0 5-9',
+  gamepad:
+    'M6 11h4 M8 9v4 M15 12h.01 M18 10h.01 M17.32 5H6.68a4 4 0 0 0-3.978 3.59c-.006.052-.01.101-.017.152C2.604 9.416 2 14.456 2 16a3 3 0 0 0 3 3c1 0 2.5-.8 3-2l1.409-2.818A2 2 0 0 1 11.2 13h1.6a2 2 0 0 1 1.79 1.106L16 17c.5 1.2 2 2 3 2a3 3 0 0 0 3-3c0-1.545-.604-6.584-.685-7.258-.007-.05-.011-.1-.017-.152A4 4 0 0 0 17.32 5z',
+  clock: 'M12 22c5.52 0 10-4.48 10-10S17.52 2 12 2 2 6.48 2 12s4.48 10 10 10z M12 6v6l4 2',
+  calendar:
+    'M19 4H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z M16 2v4 M8 2v4 M3 10h18',
+
+  // ── 文书 & 通信 ──
+  pencil: 'M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z',
+  book: 'M4 19.5A2.5 2.5 0 0 1 6.5 17H20 M4 19.5A2.5 2.5 0 0 0 6.5 22H20V2H6.5A2.5 2.5 0 0 0 4 4.5v15z',
+  quote:
+    'M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.97V11c0 1.25.75 2 2 2h2c.85 0 1.693-.39 2-1 M17 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.97V11c0 1.25.75 2 2 2h2c.85 0 1.693-.39 2-1',
+  inbox:
+    'M22 12h-6l-2 3H10l-2-3H2 M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z',
+  briefcase:
+    'M20 7H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16',
+
+  // ── 自然 & 装饰 ──
+  leaf: 'M11 20A7 7 0 0 0 9.8 6.9C15.5 4.9 20 2 20 2s-3 5-4.5 8.5c-1.1 2.6-.7 6-.7 6L11 20z M6.7 17.3L11 20',
+  fire: 'M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z',
+  lightbulb:
+    'M9 18h6 M10 22h4 M12 2v1 M4.22 4.22l.7.7 M2 12h1 M20 12h1 M19.07 4.93l-.7.7 M15 9.34a3 3 0 1 0-3.34 4.95L9 18h6l-2.66-3.71A3 3 0 0 0 15 9.34z',
+  crystal: 'M6 3h12l4 8-10 11L2 11l4-8z M12 22V11 M2 11h20',
+  paw: 'M9 12.5a3 3 0 0 1-3 3 3 3 0 0 1-3-3C3 9.5 6 5 9 8.5c0 1.333 0 2.667 0 4z M15 12.5a3 3 0 0 0 3 3 3 3 0 0 0 3-3C21 9.5 18 5 15 8.5v4z M8 19s1 4 4 4 4-4 4-4-1.5-2-4-2-4 2-4 2z M7 6.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z M17 6.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z',
+
+  // ── 其他 ──
+  eye: 'M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+  logout: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4 M16 17l5-5-5-5 M21 12H9',
+  'door-closed': 'M18 20V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16 M2 20h20 M14 12v.01',
+  'door-open':
+    'M13 4h3a2 2 0 0 1 2 2v14 M2 20h3 M13 20h7 M10 12v.01 M13 4.562v16.157a1 1 0 0 1-1.242.97L5 20V5.562a2 2 0 0 1 1.515-1.94l4.242-1.03A1 1 0 0 1 12 3.562z',
+  flash: 'M13 2L3 14h9l-1 8 10-12h-9l1-8z',
+  hourglass:
+    'M5 22h14 M5 2h14 M17 22v-2c0-4-3-6-5-8 2-2 5-4 5-8V2 M7 22v-2c0-4 3-6 5-8-2-2-5-4-5-8V2',
+  brain:
+    'M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24A2.5 2.5 0 0 1 9.5 2z M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24A2.5 2.5 0 0 0 14.5 2z',
+  thought:
+    'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10z M8 10h.01 M12 10h.01 M16 10h.01',
+  desktop: 'M2 4h20v12H2V4z M8 20h8 M12 16v4',
+  mobile: 'M7 2h10a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z M12 18h.01',
+  chart: 'M18 20V10 M12 20V4 M6 20v-6',
+  edit: 'M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7 M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z',
+  puzzle:
+    'M19.439 7.85c-.049.322.059.648.289.878l1.568 1.568c.47.47.706 1.087.706 1.704s-.236 1.234-.706 1.704l-1.611 1.611a.98.98 0 0 1-.837.276c-.47-.07-.802-.480-.968-.925a2.501 2.501 0 1 0-3.214 3.214c.446.166.856.498.925.968a.98.98 0 0 1-.276.837l-1.61 1.611a2.41 2.41 0 0 1-1.705.707 2.41 2.41 0 0 1-1.704-.707l-1.568-1.568a1.026 1.026 0 0 0-.877-.29c-.493.074-.84.504-1.02.968a2.5 2.5 0 1 1-3.237-3.237c.464-.18.894-.527.968-1.02a1.026 1.026 0 0 0-.29-.877L2.28 12.29A2.41 2.41 0 0 1 1.573 10.585c0-.617.236-1.234.706-1.704L3.89 7.27a.98.98 0 0 1 .837-.276c.47.07.802.48.968.925a2.501 2.501 0 1 0 3.214-3.214c-.446-.166-.856-.498-.925-.968a.979.979 0 0 1 .276-.837l1.611-1.611a2.413 2.413 0 0 1 3.409 0l1.568 1.568c.23.23.556.338.877.29.493-.074.84-.504 1.02-.968a2.5 2.5 0 1 1 3.237 3.237c-.464.18-.894.527-.968 1.02z',
+  'map-pin': 'M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z M12 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+  building:
+    'M3 21h18 M5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16 M9 7h.01 M15 7h.01 M9 11h.01 M15 11h.01 M9 15h.01 M15 15h.01',
+  bot: 'M12 8V4H8 M5 12H2a10 10 0 0 0 20 0h-3 M6 12a6 6 0 0 1 12 0 M9 16h.01 M15 16h.01 M12 20v2',
+  'volume-x': 'M11 5L6 9H2v6h4l5 4V5z M23 9l-6 6 M17 9l6 6',
+  palette:
+    'M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.555C21.965 6.012 17.461 2 12 2z M6.5 12a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z M9 6.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z M15 6.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z M17.5 12a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z',
+  handshake: 'M11 17l-5-5 M7 12l5 5 2.5-2.5 M17 7l-5 5 M2 12l5-5 M22 12l-5 5',
+  firecracker: 'M13 2L3 14h9l-1 8 10-12h-9l1-8z',
+
+  // ── 桌宠互动 ──
+  hand: 'M18 11V6a2 2 0 0 0-4 0v3 M14 10V4a2 2 0 0 0-4 0v7 M10 10.5V6a2 2 0 0 0-4 0v8 M18 8a2 2 0 0 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34L3.35 16.3a2 2 0 0 1 3.3-2.3L8 16',
+  music: 'M9 18V5l12-2v13 M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0z M21 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z',
+  cake: 'M2 22h20 M2 18h20 M6 18v-2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2 M6 12V9 M18 12V9 M12 12V6 M8 9h8 M12 6l-1.5-3 M12 6l1.5-3',
 }
 
 const iconPath = computed(() => icons[props.name] ?? icons['sparkle'] ?? '')
@@ -259,47 +237,7 @@ const iconPath = computed(() => icons[props.name] ?? icons['sparkle'] ?? '')
 
 <style scoped>
 .pixel-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  image-rendering: pixelated;
   transition: all 0.3s;
-}
-
-.pixel-icon-svg {
-  width: 100%;
-  height: 100%;
-  transition: transform 0.5s;
-}
-
-/* 尺寸 */
-.pixel-icon-xs {
-  width: 12px;
-  height: 12px;
-}
-.pixel-icon-sm {
-  width: 16px;
-  height: 16px;
-}
-.pixel-icon-md {
-  width: 20px;
-  height: 20px;
-}
-.pixel-icon-lg {
-  width: 24px;
-  height: 24px;
-}
-.pixel-icon-xl {
-  width: 32px;
-  height: 32px;
-}
-.pixel-icon-2xl {
-  width: 40px;
-  height: 40px;
-}
-.pixel-icon-3xl {
-  width: 48px;
-  height: 48px;
 }
 
 /* 动画 */
@@ -341,10 +279,10 @@ const iconPath = computed(() => icons[props.name] ?? icons['sparkle'] ?? '')
 .animate-pixel-pulse {
   animation: pixel-pulse 1.5s ease-in-out infinite;
 }
-.hover-pixel-spin:hover .pixel-icon-svg {
+.hover-pixel-spin:hover svg {
   animation: pixel-spin 1s linear infinite;
 }
-.hover-pixel-bounce:hover .pixel-icon-svg {
+.hover-pixel-bounce:hover svg {
   animation: pixel-bounce 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) infinite;
 }
 </style>

@@ -1,7 +1,7 @@
 {
   "name": "perocore-ts",
   "private": true,
-  "version": "0.9.0",
+  "version": "0.9-rc1",
   "description": "PeroCore-TS — 萌动链接：PeroperoChat！的 TypeScript 全栈引擎",
   "main": "dist-electron/main/index.js",
   "author": "YoKONCy",
@@ -55,9 +55,12 @@
   "devDependencies": {
     "@changesets/changelog-github": "^0.6.0",
     "@changesets/cli": "^2.31.0",
+    "@tailwindcss/vite": "^4.2.4",
+    "@types/node": "^22.19.17",
     "@typescript-eslint/eslint-plugin": "^8.54.0",
     "@typescript-eslint/parser": "^8.54.0",
     "@vitejs/plugin-vue": "^6.0.1",
+    "@vitest/coverage-v8": "^4.1.4",
     "@vue/test-utils": "^2.4.6",
     "cross-env": "^10.1.0",
     "electron-builder": "^26.8.1",
@@ -66,10 +69,13 @@
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.5",
     "eslint-plugin-vue": "^9.33.0",
+    "happy-dom": "^20.9.0",
     "prettier": "^3.8.1",
     "tsx": "^4.20.0",
     "typescript": "^5.9.3",
+    "vite": "^6.4.2",
     "vitest": "^4.0.18",
+    "vue": "^3.5.32",
     "vue-eslint-parser": "^10.4.0"
   },
   "dependencies": {

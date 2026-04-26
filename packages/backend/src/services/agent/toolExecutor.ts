@@ -236,7 +236,11 @@ export class RegistryToolExecutor implements ToolExecutor {
       }
     }
 
-    const fullContent = this.skillLoader.loadSkillContent(skillId)
+    // 提取可选参数
+    const params = (args.params as Record<string, string>) ?? undefined
+
+    // 加载 Skill 内容 (支持模板变量替换)
+    const fullContent = this.skillLoader.loadSkillContentWithParams(skillId, params)
     if (!fullContent) {
       return {
         output: `Skill "${skillId}" 不存在或加载失败`,
@@ -246,18 +250,49 @@ export class RegistryToolExecutor implements ToolExecutor {
       }
     }
 
-    // 临时解锁 Skill 关联的工具
+    // 临时解锁 Skill 关联的工具 + 递归解锁子 Skill 的工具
     if (this.capabilityGate) {
-      this.capabilityGate.unlockSkillTools(sessionId, skillId)
+      this.unlockSkillToolsRecursive(sessionId, skillId, new Set())
     }
 
-    logger.info(`Skill ${skillId} 已加载 (session=${sessionId})`)
+    const paramKeys = params ? Object.keys(params) : []
+    const paramInfo = paramKeys.length > 0 ? ` (已注入参数: ${paramKeys.join(', ')})` : ''
+    logger.info(`Skill ${skillId} 已加载${paramInfo} (session=${sessionId})`)
 
     return {
       output: fullContent,
       durationMs: Date.now() - startTime,
       isError: false,
       shouldTerminate: false,
+    }
+  }
+
+  /**
+   * 递归解锁 Skill 及其依赖子 Skill 的工具
+   *
+   * visited 防止循环依赖导致的无限递归。
+   */
+  private unlockSkillToolsRecursive(
+    sessionId: string,
+    skillId: string,
+    visited: Set<string>,
+  ): void {
+    if (visited.has(skillId)) return
+    visited.add(skillId)
+
+    // 解锁当前 Skill 的工具
+    this.capabilityGate!.unlockSkillTools(sessionId, skillId)
+
+    // 获取子 Skill 列表并递归解锁
+    if (!this.skillLoader) return
+    const manifest = this.skillLoader.getManifest(skillId)
+    if (!manifest?.dependsOnSkills?.length) return
+
+    for (const childSkillId of manifest.dependsOnSkills) {
+      this.unlockSkillToolsRecursive(sessionId, childSkillId, visited)
+      logger.debug(
+        `子 Skill ${childSkillId} 工具已递归解锁 (parent=${skillId}, session=${sessionId})`,
+      )
     }
   }
 }

@@ -7,12 +7,16 @@
  * @module electron/main/services/backendProcess
  */
 
-import { ChildProcess, spawn } from 'node:child_process'
+import type { ChildProcess } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import path from 'node:path'
 import { BrowserWindow } from 'electron'
 import { logger } from '../utils/logger'
 import { isDev, paths } from '../utils/env'
 import { appEvents } from '../events'
+
+/** Dev 模式下后端是否由外部脚本管理 (pnpm start) */
+let externalBackendRunning = false
 
 let backendProcess: ChildProcess | null = null
 const backendLogs: string[] = []
@@ -61,14 +65,17 @@ export async function startBackend(args?: { enableSocialMode?: boolean }): Promi
   }
 
   // 启动方式
+  // @platform WINDOWS — npx 在 Windows 上需要 shell:true 或使用 npx.cmd
   const runtime = isDev ? 'npx' : process.execPath
   const runtimeArgs = isDev ? ['tsx', entryPoint] : [entryPoint]
+  const useShell = isDev && process.platform === 'win32'
 
   try {
     backendProcess = spawn(runtime, runtimeArgs, {
       env,
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
+      shell: useShell,
     })
 
     logger.info('Backend', `后端进程已启动 (PID: ${backendProcess.pid})`)
@@ -103,15 +110,27 @@ export async function startBackend(args?: { enableSocialMode?: boolean }): Promi
       backendProcess = null
 
       if (code !== 0 && code !== null) {
-        logger.error('Backend', `后端非正常退出 (code: ${code})，触发崩溃事件`)
-        appEvents.emit('backend-crashed')
+        if (isDev) {
+          // Dev 模式: 后端由 pnpm start 独立管理，Electron spawn 退出是预期行为
+          logger.info('Backend', `Dev 模式: 后端进程退出 (code: ${code})，外部后端可能已在运行`)
+          externalBackendRunning = true
+        } else {
+          logger.error('Backend', `后端非正常退出 (code: ${code})，触发崩溃事件`)
+          appEvents.emit('backend-crashed')
+        }
       }
     })
 
     backendProcess.on('error', (err) => {
-      logger.error('Backend', `后端进程启动失败: ${err.message}`)
+      if (isDev) {
+        // Dev 模式: npx/tsx 启动失败是预期的 (外部后端已在运行)
+        logger.info('Backend', `Dev 模式: 后端进程启动跳过 (${err.message})，使用外部后端`)
+        externalBackendRunning = true
+      } else {
+        logger.error('Backend', `后端进程启动失败: ${err.message}`)
+        appEvents.emit('backend-crashed')
+      }
       backendProcess = null
-      appEvents.emit('backend-crashed')
     })
   } catch (e: unknown) {
     logger.error('Backend', `启动后端失败: ${e}`)

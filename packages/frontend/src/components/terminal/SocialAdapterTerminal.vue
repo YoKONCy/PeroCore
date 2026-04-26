@@ -518,7 +518,7 @@ onUnmounted(() => {
 .sa-log-line {
   white-space: pre-wrap;
   word-break: break-all;
-  line-height: 1.6;
+  line-height: 1.1;
   font-size: 12px;
   padding: 1px var(--spacing-xs);
 }

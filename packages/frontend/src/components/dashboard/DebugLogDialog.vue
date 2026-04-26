@@ -40,18 +40,28 @@ defineExpose({ open })
 
 <template>
   <PDialog v-model="isOpen" title="调试日志" width="720px">
-    <div class="dbg-dialog">
+    <div class="flex flex-col gap-3">
       <!-- 选项卡 -->
-      <div class="dbg-tabs">
+      <div class="flex gap-1">
         <button
-          :class="['dbg-tab', tab === 'response' ? 'dbg-tab-active' : '']"
+          :class="[
+            'flex items-center gap-1.5 px-3.5 py-1.5 text-[11px] font-bold border-2 cursor-pointer transition-all',
+            tab === 'response'
+              ? 'bg-sky-50 border-sky-300 text-sky-600'
+              : 'bg-slate-50 border-slate-200 text-slate-400 hover:border-sky-200 hover:text-sky-500',
+          ]"
           @click="tab = 'response'"
         >
           <PixelIcon name="chat" size="xs" />
           Response
         </button>
         <button
-          :class="['dbg-tab', tab === 'prompt' ? 'dbg-tab-active' : '']"
+          :class="[
+            'flex items-center gap-1.5 px-3.5 py-1.5 text-[11px] font-bold border-2 cursor-pointer transition-all',
+            tab === 'prompt'
+              ? 'bg-sky-50 border-sky-300 text-sky-600'
+              : 'bg-slate-50 border-slate-200 text-slate-400 hover:border-sky-200 hover:text-sky-500',
+          ]"
           @click="tab = 'prompt'"
         >
           <PixelIcon name="terminal" size="xs" />
@@ -60,7 +70,10 @@ defineExpose({ open })
       </div>
 
       <!-- 内容 -->
-      <pre class="dbg-content">{{ displayContent }}</pre>
+      <pre
+        class="max-h-[400px] overflow-auto p-4 border-2 border-slate-200 bg-slate-50 text-slate-800 font-mono text-xs leading-relaxed whitespace-pre-wrap break-all dbg-scrollbar"
+        >{{ displayContent }}</pre
+      >
     </div>
 
     <template #footer>
@@ -70,61 +83,13 @@ defineExpose({ open })
 </template>
 
 <style scoped>
-.dbg-dialog {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.dbg-tabs {
-  display: flex;
-  gap: 4px;
-}
-
-.dbg-tab {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--color-text-muted);
-  border: 2px solid var(--color-border);
-  background: var(--color-bg-secondary);
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.dbg-tab:hover {
-  border-color: var(--color-sky-light);
-  color: var(--color-sky-500);
-}
-
-.dbg-tab-active {
-  background: var(--color-sky-50, rgba(56, 189, 248, 0.1));
-  border-color: var(--color-sky-hover);
-  color: var(--color-sky-shadow);
-}
-
-.dbg-content {
-  max-height: 400px;
-  overflow: auto;
-  padding: 16px;
-  border: 2px solid var(--color-border);
-  background: var(--color-bg-secondary);
-  color: var(--color-text-primary);
-  font-family: 'Fira Code', 'Consolas', monospace;
-  font-size: 12px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-
-.dbg-content::-webkit-scrollbar {
+/* 像素风滚动条 */
+.dbg-scrollbar::-webkit-scrollbar {
   width: 4px;
 }
 
-.dbg-content::-webkit-scrollbar-thumb {
-  background: var(--color-sky-light);
+.dbg-scrollbar::-webkit-scrollbar-thumb {
+  background: #bae6fd;
+  border-radius: 0;
 }
 </style>

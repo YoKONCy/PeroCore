@@ -11,9 +11,11 @@
  * @module packages/frontend/src/composables/useStronghold
  */
 
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, shallowRef, computed, onMounted, onUnmounted, watch } from 'vue'
 import { strongholdApi } from '../api/modules/strongholdApi'
 import type { Facility, Room, ButlerConfig, GroupMessage } from '../api/modules/strongholdApi'
+import { useNotificationStore } from '../stores/useNotificationStore'
+import { logger } from '../lib/logger'
 
 /** Agent 展示状态 (前端扩展) */
 export interface AgentDisplayStatus {
@@ -27,19 +29,20 @@ export interface AgentDisplayStatus {
 const POLL_INTERVAL_MS = 5000
 
 export function useStronghold() {
+  const notify = useNotificationStore()
   // ── 状态 ──
 
-  const facilities = ref<Facility[]>([])
-  const rooms = ref<Room[]>([])
+  const facilities = shallowRef<Facility[]>([])
+  const rooms = shallowRef<Room[]>([])
   const currentFacility = ref<Facility | null>(null)
   const currentRoom = ref<Room | null>(null)
   const isLoading = ref(false)
 
-  const agentsStatus = ref<AgentDisplayStatus[]>([])
+  const agentsStatus = shallowRef<AgentDisplayStatus[]>([])
   const butlerConfig = ref<ButlerConfig | null>(null)
 
   // 群聊消息
-  const messages = ref<GroupMessage[]>([])
+  const messages = shallowRef<GroupMessage[]>([])
   const isLoadingMessages = ref(false)
 
   /** 错误信息 */
@@ -66,7 +69,7 @@ export function useStronghold() {
       }
     } catch (e) {
       error.value = `加载设施失败: ${(e as Error).message}`
-      console.error('[Stronghold]', error.value)
+      logger.error('Stronghold', error.value)
     } finally {
       isLoading.value = false
     }
@@ -92,7 +95,7 @@ export function useStronghold() {
       rebuildAgentStatus()
     } catch (e) {
       error.value = `加载房间失败: ${(e as Error).message}`
-      console.error('[Stronghold]', error.value)
+      logger.error('Stronghold', error.value)
     }
   }
 
@@ -130,7 +133,7 @@ export function useStronghold() {
       const res = await strongholdApi.getMessages(roomId, 50)
       messages.value = res.data ?? []
     } catch (e) {
-      console.error('[Stronghold] 加载消息失败:', e)
+      logger.error('Stronghold', '加载消息失败', e)
     } finally {
       isLoadingMessages.value = false
     }
@@ -145,7 +148,8 @@ export function useStronghold() {
       // 发送后重新拉取消息 (包含 Agent 回复)
       await fetchMessages(roomId)
     } catch (e) {
-      console.error('[Stronghold] 发送消息失败:', e)
+      notify.toast('发送消息失败: ' + (e as Error).message, 'error')
+      logger.error('Stronghold', '发送消息失败', e)
     }
   }
 
@@ -171,7 +175,8 @@ export function useStronghold() {
       await strongholdApi.sendMessage(roomId, query, 'Butler')
       await fetchMessages(roomId)
     } catch (e) {
-      console.error('[Stronghold] 管家调用失败:', e)
+      notify.toast('管家调用失败: ' + (e as Error).message, 'error')
+      logger.error('Stronghold', '管家调用失败', e)
     }
   }
 
