@@ -10,7 +10,9 @@ import { ref } from 'vue'
  * @param fn - 异步函数
  * @returns { execute, isLoading, error }
  */
-export function useLoading<TArgs extends unknown[], TResult>(fn: (...args: TArgs) => Promise<TResult>) {
+export function useLoading<TArgs extends unknown[], TResult>(
+  fn: (...args: TArgs) => Promise<TResult>,
+) {
   const isLoading = ref(false)
   const error = ref<Error | null>(null)
 

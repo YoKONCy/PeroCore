@@ -230,7 +230,7 @@ describe('SystemRouter', () => {
     expect(await readJson(info)).toMatchObject({
       code: 'OK',
       data: {
-        version: '0.9-rc1',
+        version: '0.9-rc2',
         runtime: { memoryUsage: { rss: 100, heapUsed: 50 }, cpuPercent: 12, totalMemoryMB: 16000 },
         storage: { sqliteSizeMB: 3, triviumSizeMB: 4 },
         agents: { total: 2, enabled: 1, activeId: 'pero' },

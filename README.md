@@ -401,7 +401,8 @@ PeroCore/
 │   │       ├── stores/            # 📦 Pinia 全局状态
 │   │       └── api/               # 📡 Transport 层 (IPC / REST 自动切换)
 │   ├── native/                    # 🦀 Rust Native 模块
-│   │   ├── render-core/           # 加密/反调/打包 (N-API)
+│   │   ├── render-core/           # 加密/反调/打包源码子模块 (N-API)
+│   │   ├── render-core-runtime/   # 渲染核心运行时产物 (.node)
 │   │   ├── nit-runtime/           # NIT 解释器加速 (N-API)
 │   │   └── auditor-wasm/          # 终端命令审计 (WASM)
 │   └── wiki/                      # 📖 VitePress 文档站

@@ -11,6 +11,7 @@ dist_electron/
 target/
 packages/native/*/pkg/
 *.node
+!packages/native/render-core-runtime/*.node
 
 # 环境与配置
 .env

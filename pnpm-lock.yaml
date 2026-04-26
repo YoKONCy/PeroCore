@@ -280,6 +280,8 @@ importers:
         specifier: ^2.14.0
         version: 2.18.4
 
+  packages/native/render-core-runtime: {}
+
   packages/shared:
     devDependencies:
       rimraf:

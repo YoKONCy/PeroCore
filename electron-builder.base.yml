@@ -29,6 +29,10 @@ asarUnpack:
 
 # 后端构建产物 + 资源
 extraResources:
+  - from: packages/native/render-core-runtime
+    to: native
+    filter:
+      - '**/*'
   - from: packages/backend/dist
     to: backend
     filter:

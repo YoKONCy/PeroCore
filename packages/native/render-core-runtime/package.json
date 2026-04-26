@@ -1,0 +1,16 @@
+{
+  "name": "@perocore/render-core-runtime",
+  "version": "0.9-rc2",
+  "private": true,
+  "description": "PeroCore 渲染核心运行时产物包",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "*.node"
+  ],
+  "engines": {
+    "node": ">= 20"
+  }
+}

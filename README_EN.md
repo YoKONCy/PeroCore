@@ -108,16 +108,16 @@
 <summary><b>Quick Navigation</b></summary>
 <br/>
 
-| Section | Description                                      |                Link                 |
-| :-----: | :----------------------------------------------- | :---------------------------------: |
-|   📖    | **Wiki** — Official documentation                | [Visit](https://www.perofamily.top) |
-|   🌟    | **Philosophy** — Our vision: a warm companion    |    [Jump](#-origin--companions)     |
-|   🧠    | **Memory** — PEDSA memory engine deep dive       |  [Jump](#-memory-engine-deep-dive)  |
-|   🔌    | **Extension** — Extension system                 |    [Jump](#-extension-system)     |
-|   🏗️    | **Architecture** — TypeScript full-stack arch     |   [Jump](#-behind-the-scenes)    |
-|   💬    | **Social Mode** — Social mode & group chat       |      [Jump](#-social-mode)       |
-|   🐳    | **Docker** — Containerized deployment            |   [Jump](#-docker-deployment)    |
-|   🚀    | **Quick Start** — One-click launch guide         |      [Jump](#-quick-start)       |
+| Section | Description                                   |                Link                 |
+| :-----: | :-------------------------------------------- | :---------------------------------: |
+|   📖    | **Wiki** — Official documentation             | [Visit](https://www.perofamily.top) |
+|   🌟    | **Philosophy** — Our vision: a warm companion |    [Jump](#-origin--companions)     |
+|   🧠    | **Memory** — PEDSA memory engine deep dive    |  [Jump](#-memory-engine-deep-dive)  |
+|   🔌    | **Extension** — Extension system              |     [Jump](#-extension-system)      |
+|   🏗️    | **Architecture** — TypeScript full-stack arch |     [Jump](#-behind-the-scenes)     |
+|   💬    | **Social Mode** — Social mode & group chat    |        [Jump](#-social-mode)        |
+|   🐳    | **Docker** — Containerized deployment         |     [Jump](#-docker-deployment)     |
+|   🚀    | **Quick Start** — One-click launch guide      |        [Jump](#-quick-start)        |
 
 </details>
 
@@ -245,14 +245,14 @@ Three things happen synchronously during write:
 
 When the user sends a new message, the retrieval pipeline works in six stages:
 
-| Stage                  | Algorithm              | Purpose                                                                          | Implementation                     |
-| :--------------------- | :--------------------- | :------------------------------------------------------------------------------- | :--------------------------------- |
-| ① Vector recall        | Cosine + HNSW          | Quickly find semantically similar candidates from the vector index               | TriviumDB `search_advanced`        |
-| ② Graph diffusion      | PEDSA + PPR            | Propagate activation energy along dual-layer graph to discover logically related distant memories | TriviumDB built-in dual-layer graph |
-| ③ NMF semantic analysis | Lee & Seung, 1999      | Decompose candidates into latent topics, evaluate query's semantic depth, topic coverage, and novelty | TriviumDB L3~L6 deep manifold     |
-| ④ FISTA residual discovery | Beck & Teboulle, 2009 | Use sparse coding to detect "unexplained" semantic residuals, triggering secondary retrieval for weak signals | TriviumDB `enable_sparse_residual` |
-| ⑤ Co-occurrence boost  | Statistical association | Enhance ranking of associated memories based on entity co-occurrence frequency   | GraphGardener                      |
-| ⑥ DPP diversity sampling | Kulesza & Taskar, 2012 | Use determinantal point processes to select the highest quality and most diverse results | TriviumDB `enable_dpp`             |
+| Stage                      | Algorithm               | Purpose                                                                                                       | Implementation                      |
+| :------------------------- | :---------------------- | :------------------------------------------------------------------------------------------------------------ | :---------------------------------- |
+| ① Vector recall            | Cosine + HNSW           | Quickly find semantically similar candidates from the vector index                                            | TriviumDB `search_advanced`         |
+| ② Graph diffusion          | PEDSA + PPR             | Propagate activation energy along dual-layer graph to discover logically related distant memories             | TriviumDB built-in dual-layer graph |
+| ③ NMF semantic analysis    | Lee & Seung, 1999       | Decompose candidates into latent topics, evaluate query's semantic depth, topic coverage, and novelty         | TriviumDB L3~L6 deep manifold       |
+| ④ FISTA residual discovery | Beck & Teboulle, 2009   | Use sparse coding to detect "unexplained" semantic residuals, triggering secondary retrieval for weak signals | TriviumDB `enable_sparse_residual`  |
+| ⑤ Co-occurrence boost      | Statistical association | Enhance ranking of associated memories based on entity co-occurrence frequency                                | GraphGardener                       |
+| ⑥ DPP diversity sampling   | Kulesza & Taskar, 2012  | Use determinantal point processes to select the highest quality and most diverse results                      | TriviumDB `enable_dpp`              |
 
 ### PEDSA Three Core Components
 
@@ -310,12 +310,12 @@ All vectors, graphs, and retrieval algorithms are unified under **TriviumDB**:
 
 ### 4. Four-Layer Memory Storage
 
-| Layer                 | Carrier            | Content                      | Retrieval Method    | Lifecycle |
-| :-------------------- | :----------------- | :--------------------------- | :------------------ | :-------- |
-| **Layer 0 (Working)** | JSON / LLM Context | Current session context      | Sequential read     | Short     |
-| **Layer 1 (Vector)**  | TriviumDB          | Raw segment vectors + BM25   | Vector search + BM25| Long      |
-| **Layer 2 (Graph)**   | TriviumDB          | Entity/event graph + edges   | Graph diffusion     | Long      |
-| **Layer 3 (Diary)**   | SQLite / TDB       | Daily/weekly summaries       | Keyword + timeline  | Permanent |
+| Layer                 | Carrier            | Content                    | Retrieval Method     | Lifecycle |
+| :-------------------- | :----------------- | :------------------------- | :------------------- | :-------- |
+| **Layer 0 (Working)** | JSON / LLM Context | Current session context    | Sequential read      | Short     |
+| **Layer 1 (Vector)**  | TriviumDB          | Raw segment vectors + BM25 | Vector search + BM25 | Long      |
+| **Layer 2 (Graph)**   | TriviumDB          | Entity/event graph + edges | Graph diffusion      | Long      |
+| **Layer 3 (Diary)**   | SQLite / TDB       | Daily/weekly summaries     | Keyword + timeline   | Permanent |
 
 ### 5. Reflection Layer: Autonomous Memory Maintenance
 
@@ -401,7 +401,8 @@ PeroCore/
 │   │       ├── stores/            # 📦 Pinia global state
 │   │       └── api/               # 📡 Transport layer (IPC / REST auto-switch)
 │   ├── native/                    # 🦀 Rust Native modules
-│   │   ├── render-core/           # Encryption/anti-debug/packaging (N-API)
+│   │   ├── render-core/           # Private source submodule for encryption/anti-debug/packaging (N-API)
+│   │   ├── render-core-runtime/   # Render core runtime artifacts (.node)
 │   │   ├── nit-runtime/           # NIT interpreter acceleration (N-API)
 │   │   └── auditor-wasm/          # Terminal command auditing (WASM)
 │   └── browser-extension/         # 🌐 Browser bridge extension
@@ -415,16 +416,16 @@ PeroCore/
 
 ### Core Technology Stack
 
-| Layer           | Technology       | Rationale                                |
-| :-------------- | :--------------- | :--------------------------------------- |
-| **Backend**     | Hono             | Lightweight, native TS, Web Standard API |
-| **ORM**         | Drizzle          | SQL-like API, first-class SQLite support |
-| **Vector+Graph**| TriviumDB (Rust) | Proprietary engine: vector+graph+relations unified |
-| **Frontend**    | Vue 3 + Pinia    | Reactive + Composable pattern            |
-| **Communication** | Protobuf over WS | Clear advantage for audio transport    |
-| **Desktop Shell** | Electron       | 3D rendering + system-level interaction  |
-| **Container**   | Docker + Bun     | Cold start performance + faster GC       |
-| **CI/CD**       | GitHub Actions   | Tag-triggered auto-release               |
+| Layer             | Technology       | Rationale                                          |
+| :---------------- | :--------------- | :------------------------------------------------- |
+| **Backend**       | Hono             | Lightweight, native TS, Web Standard API           |
+| **ORM**           | Drizzle          | SQL-like API, first-class SQLite support           |
+| **Vector+Graph**  | TriviumDB (Rust) | Proprietary engine: vector+graph+relations unified |
+| **Frontend**      | Vue 3 + Pinia    | Reactive + Composable pattern                      |
+| **Communication** | Protobuf over WS | Clear advantage for audio transport                |
+| **Desktop Shell** | Electron         | 3D rendering + system-level interaction            |
+| **Container**     | Docker + Bun     | Cold start performance + faster GC                 |
+| **CI/CD**         | GitHub Actions   | Tag-triggered auto-release                         |
 
 <br/>
 
@@ -523,11 +524,11 @@ Data is persisted to Docker Volume `pero-data`. Authentication can be configured
 
 #### Requirements
 
-| Dependency  | Version      | Notes                                        |
-| :---------- | :----------- | :------------------------------------------- |
-| **Node.js** | ≥20.0.0      | Backend + frontend runtime                   |
+| Dependency  | Version      | Notes                                           |
+| :---------- | :----------- | :---------------------------------------------- |
+| **Node.js** | ≥20.0.0      | Backend + frontend runtime                      |
 | **pnpm**    | ≥9.0.0       | Package manager (`packageManager: pnpm@9.15.9`) |
-| **Rust**    | stable 1.75+ | Compile `packages/native/*` (optional)       |
+| **Rust**    | stable 1.75+ | Compile `packages/native/*` (optional)          |
 
 #### Step 1: Clone the repository
 

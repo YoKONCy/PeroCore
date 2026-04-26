@@ -203,7 +203,7 @@ describe('createHealthRouter', () => {
     expect(body).toMatchObject({ code: 'OK', message: '成功' })
     expect(body.data).toMatchObject({
       status: 'ok',
-      version: '0.9-rc1',
+      version: '0.9-rc2',
       platform: process.platform,
       nodeVersion: process.version,
     })

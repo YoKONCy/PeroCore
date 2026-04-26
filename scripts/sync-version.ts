@@ -117,6 +117,7 @@ const subPackagePaths = [
   'packages/backend/package.json',
   'packages/frontend/package.json',
   'packages/wiki/package.json',
+  'packages/native/render-core-runtime/package.json',
   'packages/native/render-core/package.json',
   'packages/native/nit-runtime/package.json',
   'packages/native/auditor-wasm/package.json',
