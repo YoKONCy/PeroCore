@@ -18,6 +18,10 @@ import { logger } from '../utils/logger'
 let steamworks: any = null
 let steamLoadAttempted = false
 
+function getSteamworksModuleName(): string {
+  return ['steamworks', 'js'].join('.')
+}
+
 function loadSteamworks(): any {
   if (steamLoadAttempted) return steamworks
   steamLoadAttempted = true
@@ -33,7 +37,7 @@ function loadSteamworks(): any {
       return null
     }
 
-    steamworks = require('steamworks.js')
+    steamworks = require(getSteamworksModuleName())
   } catch (e) {
     logger.warn('Steam', `无法加载 steamworks.js (可能缺少 steam_api64.dll): ${e}`)
     steamworks = null

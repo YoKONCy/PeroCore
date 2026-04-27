@@ -7,10 +7,6 @@ settings:
 importers:
 
   .:
-    dependencies:
-      steamworks.js:
-        specifier: 0.4.0
-        version: 0.4.0
     devDependencies:
       '@changesets/changelog-github':
         specifier: ^0.6.0
@@ -66,6 +62,9 @@ importers:
       prettier:
         specifier: ^3.8.1
         version: 3.8.3
+      steamworks.js:
+        specifier: 0.4.0
+        version: 0.4.0
       tsx:
         specifier: ^4.20.0
         version: 4.21.0
@@ -97,9 +96,6 @@ importers:
       electron-updater:
         specifier: ^6.6.3
         version: 6.8.3
-      steamworks.js:
-        specifier: ^0.4.0
-        version: 0.4.0
     devDependencies:
       '@types/node':
         specifier: ^22.15.0

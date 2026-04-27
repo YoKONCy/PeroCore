@@ -19,7 +19,6 @@
     "typescript": "^5.9.3"
   },
   "optionalDependencies": {
-    "electron-updater": "^6.6.3",
-    "steamworks.js": "^0.4.0"
+    "electron-updater": "^6.6.3"
   }
 }

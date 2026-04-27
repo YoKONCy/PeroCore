@@ -10,6 +10,8 @@ electronVersion: 40.2.1
 
 extraMetadata:
   main: main/index.js
+  dependencies: {}
+  optionalDependencies: {}
 
 directories:
   output: release-electron
@@ -63,6 +65,8 @@ extraResources:
 
 # 不使用 npm rebuild (pnpm workspace 已经处理好原生模块)
 npmRebuild: false
+
+afterPack: scripts/electron-after-pack.cjs
 
 # 发布到 GitHub Releases (electron-updater 拉取更新)
 publish:

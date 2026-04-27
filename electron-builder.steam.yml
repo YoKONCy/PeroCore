@@ -3,6 +3,12 @@
 # ⚠️ 这是唯一允许包含 Steam 组件的构建变体
 extends: electron-builder.base.yml
 
+extraMetadata:
+  main: main/index.js
+  dependencies:
+    steamworks.js: 0.4.0
+  optionalDependencies: {}
+
 # 覆写 files: 包含 Steam 组件
 files:
   - from: .
@@ -19,6 +25,10 @@ files:
       - '**/*'
   - from: dist/renderer
     to: renderer
+    filter:
+      - '**/*'
+  - from: node_modules/steamworks.js
+    to: node_modules/steamworks.js
     filter:
       - '**/*'
   - from: resources/steam

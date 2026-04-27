@@ -1,6 +1,8 @@
 # 依赖
 node_modules/
 .pnpm-store/
+.pnpm-cache/
+.pnpm-home/
 
 # 构建产物
 dist/

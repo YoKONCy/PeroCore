@@ -100,8 +100,9 @@ class CloudSyncService {
     if (!IS_STEAM()) return false
 
     try {
+      const moduleName = ['steamworks', 'js'].join('.')
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { cloud } = require('steamworks.js')
+      const { cloud } = require(moduleName)
       this.steamCloud = cloud
       return true
     } catch {
