@@ -1,10 +1,13 @@
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createConfigRouter } from '@perocore/backend/routers/config.router'
 import type { AppContext } from '@perocore/backend/container'
 
+const appVersion = (
+  JSON.parse(readFileSync(resolve(process.cwd(), 'package.json'), 'utf8')) as { version: string }
+).version
 const logTransportState: { transport: unknown } = { transport: null }
 
 vi.mock('@perocore/backend/lib/logger', () => ({
@@ -203,7 +206,7 @@ describe('createHealthRouter', () => {
     expect(body).toMatchObject({ code: 'OK', message: '成功' })
     expect(body.data).toMatchObject({
       status: 'ok',
-      version: '0.9-rc2',
+      version: appVersion,
       platform: process.platform,
       nodeVersion: process.version,
     })

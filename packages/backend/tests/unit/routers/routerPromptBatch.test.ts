@@ -1,8 +1,14 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { createModelRouter } from '@perocore/backend/routers/model.router'
 import { createAssetRouter } from '@perocore/backend/routers/asset.router'
 import { createSystemRouter } from '@perocore/backend/routers/system.router'
 import { PromptService } from '@perocore/backend/services/prompt/promptService'
+
+const appVersion = (
+  JSON.parse(readFileSync(resolve(process.cwd(), 'package.json'), 'utf8')) as { version: string }
+).version
 
 async function readJson(response: Response) {
   return response.json() as Promise<Record<string, unknown>>
@@ -230,7 +236,7 @@ describe('SystemRouter', () => {
     expect(await readJson(info)).toMatchObject({
       code: 'OK',
       data: {
-        version: '0.9-rc2',
+        version: appVersion,
         runtime: { memoryUsage: { rss: 100, heapUsed: 50 }, cpuPercent: 12, totalMemoryMB: 16000 },
         storage: { sqliteSizeMB: 3, triviumSizeMB: 4 },
         agents: { total: 2, enabled: 1, activeId: 'pero' },
