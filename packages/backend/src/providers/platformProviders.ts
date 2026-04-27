@@ -18,6 +18,7 @@
  */
 
 import { execSync } from 'node:child_process'
+import { createRequire } from 'node:module'
 import os from 'node:os'
 import zlib from 'node:zlib'
 import { createLogger } from '../lib/logger'
@@ -32,11 +33,52 @@ const logger = createLogger('PlatformProviders')
 // nut-js 懒加载 (optionalDependency, 动态 import)
 // ─────────────────────────────────────────────
 
-/** nut-js 模块类型 (动态导入后的 namespace) */
-type NutJsModule = typeof import('@nut-tree/nut-js')
+/** nut-js 图片结构 */
+interface NutImage {
+  data: Buffer
+  width: number
+  height: number
+  channels: number
+}
+
+/** nut-js 窗口结构 */
+interface NutWindow {
+  title: Promise<string> | string
+  focus(): Promise<void>
+}
+
+/** nut-js 模块最小结构类型 */
+interface NutJsModule {
+  screen: {
+    grab(): Promise<NutImage>
+  }
+  getWindows(): Promise<NutWindow[]>
+  mouse: {
+    setPosition(point: unknown): Promise<void>
+    click(button: number): Promise<void>
+    doubleClick(button: number): Promise<void>
+    pressButton(button: number): Promise<void>
+    releaseButton(button: number): Promise<void>
+    move(path: unknown): Promise<void>
+    getPosition(): Promise<{ x: number; y: number }>
+  }
+  keyboard: {
+    type(text: string): Promise<void>
+    pressKey(...keys: number[]): Promise<void>
+    releaseKey(...keys: number[]): Promise<void>
+  }
+  Point: new (x: number, y: number) => unknown
+  Button: {
+    LEFT: number
+    RIGHT: number
+  }
+  Key: Record<string, number>
+  straightTo(point: unknown): Promise<unknown> | unknown
+}
 
 /** 单例缓存: undefined=未尝试, null=不可用, NutJsModule=已加载 */
 let _nutJs: NutJsModule | null | undefined
+const require = createRequire(import.meta.url)
 
 /**
  * 懒加载 nut-js — 首次调用时动态 import，后续返回缓存
@@ -46,7 +88,7 @@ let _nutJs: NutJsModule | null | undefined
 async function getNutJs(): Promise<NutJsModule | null> {
   if (_nutJs !== undefined) return _nutJs
   try {
-    _nutJs = await import('@nut-tree/nut-js')
+    _nutJs = require('@nut-tree/nut-js') as NutJsModule
     logger.info('nut-js 已加载，桌面自动化功能可用')
     return _nutJs
   } catch (err) {
