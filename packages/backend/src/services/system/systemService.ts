@@ -11,7 +11,7 @@
 
 import { spawn } from 'node:child_process'
 import { statSync, readdirSync } from 'node:fs'
-import { join, relative, resolve, isAbsolute } from 'node:path'
+import path, { join, resolve } from 'node:path'
 import os from 'node:os'
 import type { PathResolver } from '../../core/pathResolver'
 import { AppError } from '../../lib/appError'
@@ -60,7 +60,7 @@ export class SystemService {
       })
     }
 
-    const resolvedPath = resolve(this.pathResolver.resolve(trimmedPath))
+    const resolvedPath = this.resolveOpenPath(this.pathResolver.resolve(trimmedPath))
     if (!this.isAllowedOpenPath(resolvedPath)) {
       throw new AppError('FORBIDDEN', {
         message: '目标路径不在允许访问范围内',
@@ -69,6 +69,16 @@ export class SystemService {
     }
 
     return resolvedPath
+  }
+
+  private resolveOpenPath(targetPath: string): string {
+    return this.isWindowsAbsolutePath(targetPath)
+      ? path.win32.resolve(targetPath)
+      : resolve(targetPath)
+  }
+
+  private isWindowsAbsolutePath(targetPath: string): boolean {
+    return /^[a-zA-Z]:[\\/]/.test(targetPath) || targetPath.startsWith('\\\\')
   }
 
   private isAllowedOpenPath(targetPath: string): boolean {
@@ -80,9 +90,13 @@ export class SystemService {
         return false
       }
 
-      const resolvedRoot = resolve(rootPath)
-      const relativePath = relative(resolvedRoot, targetPath)
-      return relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath))
+      const resolvedRoot = this.resolveOpenPath(rootPath)
+      const pathModule = this.isWindowsAbsolutePath(resolvedRoot) ? path.win32 : path
+      const relativePath = pathModule.relative(resolvedRoot, targetPath)
+      return (
+        relativePath === '' ||
+        (!relativePath.startsWith('..') && !pathModule.isAbsolute(relativePath))
+      )
     })
   }
 
