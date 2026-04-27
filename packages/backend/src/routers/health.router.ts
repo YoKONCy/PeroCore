@@ -29,7 +29,7 @@ export function createHealthRouter() {
       message: '成功',
       data: {
         status: 'ok',
-        version: '0.9-rc2',
+        version: '0.9.0-rc3',
         uptime: Math.round(uptime),
         uptimeHuman: formatUptime(uptime),
         port: SERVER_PORT,

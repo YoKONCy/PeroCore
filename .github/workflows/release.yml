@@ -1,17 +1,11 @@
 # 发布流水线 — PeroCore
-# 触发: push tag v* 或手动触发
+# 触发: 推送任意 tag
 name: Release
 
 on:
   push:
     tags:
-      - 'v*'
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: '发布版本号'
-        required: true
-        type: string
+      - '*'
 
 permissions:
   contents: write
@@ -244,6 +238,10 @@ jobs:
           echo "$COMMITS" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
+      - name: 生成发布元数据
+        id: release_meta
+        run: echo "build_time=$(date '+%Y-%m-%dT%H:%M:%S%z')" >> $GITHUB_OUTPUT
+
       - name: 创建 Release
         uses: softprops/action-gh-release@v2
         with:
@@ -252,7 +250,7 @@ jobs:
           body: |
             ## 🎉 ${{ github.ref_name }} 版本更新
 
-            > 萌动链接：PeroperoChat！是一款开源的 AI 桌面伴侣应用，集成本地大模型、3D 桌宠、Plugin 系统与多智能体框架。
+            萌动链接：PeroperoChat！是一款开源的 AI 桌面伴侣应用，集成本地大模型、3D 桌宠、Plugin 系统与多智能体框架。
 
             ---
 
@@ -261,15 +259,41 @@ jobs:
             | 文件 | 说明 | 推荐人群 |
             |------|------|----------|
             | `*-Setup-*.exe` | 安装版 | 普通用户，数据存储在系统用户目录 |
-            | `*-Portable-*.exe` | 便携版（解压即用） | 随身携带或多设备使用 |
+            | `*-Portable*.exe` | 便携版（解压即用） | 随身携带或多设备使用，数据存储于程序目录 |
 
-            > 🎮 **Steam 用户**：请直接通过 Steam 客户端获取更新。
+            > ⚠️ Windows 可能弹出 SmartScreen 警告，点击“仍要运行”即可。本软件为开源项目，源码可在仓库中查阅。
+            > 🎮 Steam 用户请直接通过 Steam 客户端获取更新。
 
             ---
 
-            ### 📝 变更记录
+            ### 🆕 本版本更新内容
+
+            #### ✨ 新特性
+
+            请查阅本次 Commit 记录了解具体变更。
+
+            #### 🐛 问题修复
+
+            请查阅本次 Commit 记录了解具体变更。
+
+            #### 🏗️ 架构优化
+
+            请查阅本次 Commit 记录了解具体变更。
+
+            ---
+
+            ### 📝 Commit 记录
 
             ${{ steps.changelog.outputs.commits }}
+
+            ---
+
+            ### 🚀 快速开始
+
+            1. 下载并安装（安装版）或直接运行（便携版）。
+            2. 首次启动后在设置中配置 LLM API Key。
+            3. 如需 Docker 部署，可拉取对应版本镜像。
+            4. 详细使用文档请参阅项目 Wiki。
 
             ---
 
@@ -282,7 +306,7 @@ jobs:
 
             ---
 
-            *由 GitHub Actions 自动构建发布*
+            *由 GitHub Actions 自动构建发布 · 构建时间：${{ steps.release_meta.outputs.build_time }}*
           draft: false
           prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
         env:
