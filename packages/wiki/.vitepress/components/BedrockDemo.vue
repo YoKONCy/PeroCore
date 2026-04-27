@@ -63,12 +63,12 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 // 由于 vitepress 构建机制，直接引用 src 下的 ts 文件可能会有问题，最好是构建好的 lib 或者简单的内联
 // 为了保证演示的稳定性，我们将使用一个简化的内联加载逻辑，或者尝试直接 import
 
-import { AvatarRenderer } from '../../../src/components/avatar/lib/AvatarRenderer'
-import { AnimationEngine } from '../../../src/components/avatar/lib/animation/AnimationEngine'
-import { AnimationLibrary } from '../../../src/components/avatar/lib/animation/AnimationLibrary'
-import { RetargetingManager } from '../../../src/components/avatar/lib/retargeting/RetargetingManager'
+import { AvatarRenderer } from '../../../frontend/src/components/avatar/lib/AvatarRenderer'
+import { AnimationEngine } from '../../../frontend/src/components/avatar/lib/animation/AnimationEngine'
+import { AnimationLibrary } from '../../../frontend/src/components/avatar/lib/animation/AnimationLibrary'
+import { RetargetingManager } from '../../../frontend/src/components/avatar/lib/retargeting/RetargetingManager'
 import { WikiModelProvider } from './WikiModelProvider'
-import { StandardBones } from '../../../src/components/avatar/lib/retargeting/RetargetingConfig'
+import { StandardBones } from '../../../frontend/src/components/avatar/lib/retargeting/RetargetingConfig'
 
 const container = ref<HTMLElement | null>(null)
 const canvasContainer = ref<HTMLElement | null>(null)

@@ -90,9 +90,6 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: 安装 wasm-pack
-        run: cargo install wasm-pack --locked
-
       - name: 版本号同步
         run: pnpm version:sync
 

@@ -34,6 +34,7 @@ interface PackageJson {
 
 const rootPkg: PackageJson = JSON.parse(fs.readFileSync(rootPkgPath, 'utf8'))
 const VERSION = rootPkg.version
+const CARGO_VERSION = toCargoVersion(VERSION)
 
 console.log(`\n[版本同步] 🎯 唯一事实来源 → package.json: ${VERSION}`)
 console.log('═'.repeat(55))
@@ -42,6 +43,16 @@ let updatedCount = 0
 let checkedCount = 0
 
 // ─── 工具函数 ──────────────────────────────────────────
+
+function toCargoVersion(version: string): string {
+  const prereleaseMatch = version.match(/^(\d+)\.(\d+)-(.+)$/)
+  if (prereleaseMatch) {
+    const [, major, minor, prerelease] = prereleaseMatch
+    return `${major}.${minor}.0-${prerelease}`
+  }
+
+  return version
+}
 
 /** 同步 JSON 文件中的 version 字段 */
 function syncJsonVersion(relPath: string): void {
@@ -70,11 +81,10 @@ function syncCargoVersion(relPath: string): void {
   }
   checkedCount++
   const content = fs.readFileSync(fullPath, 'utf8')
-  // 匹配 [package] 段下的 version = "..."
-  const replaced = content.replace(/^version\s*=\s*".*"/m, `version = "${VERSION}"`)
+  const replaced = content.replace(/^version\s*=\s*".*"/m, `version = "${CARGO_VERSION}"`)
   if (content !== replaced) {
     fs.writeFileSync(fullPath, replaced)
-    console.log(`[版本同步] ✅ ${relPath} → ${VERSION}`)
+    console.log(`[版本同步] ✅ ${relPath} → ${CARGO_VERSION}`)
     updatedCount++
   }
 }

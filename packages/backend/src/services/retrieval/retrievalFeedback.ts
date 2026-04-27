@@ -10,7 +10,7 @@
  */
 
 import type { MemoryRepository } from '../../repositories/memory.repo'
-import type { TrainingSample } from '@perocore/nit-runtime'
+import type { JsTrainingSample } from '@perocore/nit-runtime'
 import { minGruTrain } from '@perocore/nit-runtime'
 import { createLogger } from '../../lib/logger'
 
@@ -70,7 +70,7 @@ export class RetrievalFeedback {
   private memoryRepo: MemoryRepository
 
   /** 累积训练样本 (等待 batch 触发) */
-  private trainingSamples: TrainingSample[] = []
+  private trainingSamples: JsTrainingSample[] = []
 
   /** 历史反馈统计 */
   private stats = {
