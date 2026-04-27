@@ -6,6 +6,8 @@ appId: com.perocore.peroperochat
 productName: '萌动链接：PeroperoChat！'
 copyright: Copyright © 2024-2026 YoKONCy and PeroCore Contributors
 
+electronVersion: 40.2.1
+
 directories:
   output: dist-electron
 
