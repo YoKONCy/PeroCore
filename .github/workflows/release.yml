@@ -60,7 +60,7 @@ jobs:
           }
           Write-Host "Standard build Steam component check passed"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: electron-standard
           path: release-electron/*.exe
@@ -106,7 +106,7 @@ jobs:
             exit 1
           }
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: electron-portable
           path: release-electron/*Portable*.exe
@@ -152,7 +152,7 @@ jobs:
           }
           Write-Host "Steam build component check passed"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: electron-steam
           path: release-electron/win-unpacked/**/*
