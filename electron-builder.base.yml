@@ -8,19 +8,30 @@ copyright: Copyright © 2024-2026 YoKONCy and PeroCore Contributors
 
 electronVersion: 40.2.1
 
+extraMetadata:
+  main: main/index.js
+
 directories:
   output: release-electron
 
 # Electron 主进程 + 前端构建产物
 files:
-  - dist/**/*
-  - dist-electron/**/*
-  # ── Steam 文件严格排除（非 Steam 版不得包含） ──
-  - '!resources/steam/**'
-  - '!**/steamworks.js/**'
-  - '!**/steam_api64.dll'
-  - '!**/steam_api64.lib'
-  - '!**/steamworksjs.*.node'
+  - from: .
+    to: .
+    filter:
+      - package.json
+  - from: dist-electron/main
+    to: main
+    filter:
+      - '**/*'
+  - from: dist-electron/preload
+    to: preload
+    filter:
+      - '**/*'
+  - from: dist/renderer
+    to: renderer
+    filter:
+      - '**/*'
 
 # 原生模块解包 (避免 asar 内的 .node 加载失败)
 asar: true

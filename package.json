@@ -21,7 +21,7 @@
     "dev:frontend": "pnpm --filter @perocore/frontend dev",
     "dev:electron": "electron-vite dev --config electron.vite.config.ts",
     "start": "node scripts/start-dev.mjs",
-    "build": "pnpm -r --filter \"*\" --filter \"!@perocore/render-core\" run build",
+    "build": "pnpm -r --filter \"*\" --filter \"!@perocore/render-core\" run build && electron-vite build --config electron.vite.config.ts",
     "clean": "pnpm -r run clean",
     "test": "vitest",
     "test:run": "vitest run",

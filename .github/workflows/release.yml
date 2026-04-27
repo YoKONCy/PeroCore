@@ -38,7 +38,7 @@ jobs:
       - name: 版本号同步
         run: pnpm version:sync
 
-      - name: 构建前端 + 后端
+      - name: 构建前端 + 后端 + Electron
         run: pnpm build
 
       - name: 构建 Electron 标准版 (NSIS)
@@ -131,7 +131,7 @@ jobs:
       - name: 版本号同步
         run: pnpm version:sync
 
-      - name: 构建前端 + 后端
+      - name: 构建前端 + 后端 + Electron
         run: pnpm build
 
       - name: 构建 Electron Steam 版

@@ -3,13 +3,28 @@
 # ⚠️ 这是唯一允许包含 Steam 组件的构建变体
 extends: electron-builder.base.yml
 
-# 覆写 files: 取消 base 中对 Steam 文件的排除
+# 覆写 files: 包含 Steam 组件
 files:
-  - dist/**/*
-  - dist-electron/**/*
-  - resources/steam/**/*
-  # ✅ Steam 版不排除 steamworks.js
-  # (base 中的排除规则在此被完全覆写)
+  - from: .
+    to: .
+    filter:
+      - package.json
+  - from: dist-electron/main
+    to: main
+    filter:
+      - '**/*'
+  - from: dist-electron/preload
+    to: preload
+    filter:
+      - '**/*'
+  - from: dist/renderer
+    to: renderer
+    filter:
+      - '**/*'
+  - from: resources/steam
+    to: resources/steam
+    filter:
+      - '**/*'
 
 asarUnpack:
   - '**/*.node'
