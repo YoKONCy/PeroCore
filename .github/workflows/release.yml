@@ -54,11 +54,11 @@ jobs:
           $UNPACKED = "release-electron/win-unpacked"
           $steamFiles = Get-ChildItem $UNPACKED -Recurse -Include "steam_api64.dll","steamworksjs.*.node","steam_appid.txt" -ErrorAction SilentlyContinue
           if ($steamFiles.Count -gt 0) {
-            Write-Error "❌ 标准版中发现 Steam 组件！构建被拒绝。"
-            $steamFiles | ForEach-Object { Write-Error "  → $($_.FullName)" }
+            Write-Error "Steam components found in standard build. Build rejected."
+            $steamFiles | ForEach-Object { Write-Error "  -> $($_.FullName)" }
             exit 1
           }
-          Write-Host "✅ 标准版 Steam 组件检查通过"
+          Write-Host "Standard build Steam component check passed"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -100,9 +100,9 @@ jobs:
         run: |
           $portableExe = Get-ChildItem "release-electron" -Filter "*.exe" | Select-Object -First 1
           if ($portableExe) {
-            Write-Host "✅ 便携版构建产物: $($portableExe.Name)"
+            Write-Host "Portable artifact found: $($portableExe.Name)"
           } else {
-            Write-Error "❌ 未找到便携版构建产物"
+            Write-Error "Portable artifact not found"
             exit 1
           }
 
@@ -147,10 +147,10 @@ jobs:
           $dll = Test-Path "$UNPACKED/steam_api64.dll"
           $appid = Test-Path "$UNPACKED/steam_appid.txt"
           if (!$dll -or !$appid) {
-            Write-Error "❌ Steam 版缺少必要组件 (steam_api64.dll / steam_appid.txt)"
+            Write-Error "Steam build is missing required components (steam_api64.dll / steam_appid.txt)"
             exit 1
           }
-          Write-Host "✅ Steam 版 Steam 组件校验通过"
+          Write-Host "Steam build component check passed"
 
       - uses: actions/upload-artifact@v4
         with:
