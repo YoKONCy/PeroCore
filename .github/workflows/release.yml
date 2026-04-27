@@ -23,6 +23,10 @@ jobs:
     name: Build Standard (Windows)
     runs-on: windows-latest
     needs: ci
+    env:
+      ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
+      ELECTRON_CACHE: ${{ github.workspace }}\\.electron-cache
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
     steps:
       - uses: actions/checkout@v4
 
@@ -32,6 +36,11 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.ELECTRON_CACHE }}
+          key: electron-${{ runner.os }}-40.2.1
 
       - run: pnpm install --frozen-lockfile
 
@@ -70,6 +79,10 @@ jobs:
     name: Build Portable (Windows)
     runs-on: windows-latest
     needs: ci
+    env:
+      ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
+      ELECTRON_CACHE: ${{ github.workspace }}\\.electron-cache
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
     steps:
       - uses: actions/checkout@v4
 
@@ -79,6 +92,11 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.ELECTRON_CACHE }}
+          key: electron-${{ runner.os }}-40.2.1
 
       - run: pnpm install --frozen-lockfile
 
@@ -116,6 +134,10 @@ jobs:
     name: Build Steam (Windows)
     runs-on: windows-latest
     needs: ci
+    env:
+      ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
+      ELECTRON_CACHE: ${{ github.workspace }}\\.electron-cache
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
     steps:
       - uses: actions/checkout@v4
 
@@ -125,6 +147,11 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.ELECTRON_CACHE }}
+          key: electron-${{ runner.os }}-40.2.1
 
       - run: pnpm install --frozen-lockfile
 
