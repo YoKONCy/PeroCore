@@ -247,7 +247,7 @@ When the user sends a new message, the retrieval pipeline works in six stages:
 
 | Stage                      | Algorithm               | Purpose                                                                                                       | Implementation                      |
 | :------------------------- | :---------------------- | :------------------------------------------------------------------------------------------------------------ | :---------------------------------- |
-| ① Vector recall            | Cosine + HNSW           | Quickly find semantically similar candidates from the vector index                                            | TriviumDB `search_advanced`         |
+| ① Vector recall            | Cosine           | Quickly find semantically similar candidates from the vector index                                            | TriviumDB `search_advanced`         |
 | ② Graph diffusion          | PEDSA + PPR             | Propagate activation energy along dual-layer graph to discover logically related distant memories             | TriviumDB built-in dual-layer graph |
 | ③ NMF semantic analysis    | Lee & Seung, 1999       | Decompose candidates into latent topics, evaluate query's semantic depth, topic coverage, and novelty         | TriviumDB L3~L6 deep manifold       |
 | ④ FISTA residual discovery | Beck & Teboulle, 2009   | Use sparse coding to detect "unexplained" semantic residuals, triggering secondary retrieval for weak signals | TriviumDB `enable_sparse_residual`  |

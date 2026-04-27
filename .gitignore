@@ -6,6 +6,7 @@ node_modules/
 dist/
 dist-electron/
 dist_electron/
+release-electron/
 
 # Rust 构建
 target/

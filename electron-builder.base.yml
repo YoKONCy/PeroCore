@@ -9,7 +9,7 @@ copyright: Copyright © 2024-2026 YoKONCy and PeroCore Contributors
 electronVersion: 40.2.1
 
 directories:
-  output: dist-electron
+  output: release-electron
 
 # Electron 主进程 + 前端构建产物
 files:
@@ -62,8 +62,6 @@ publish:
 # Windows 通用配置
 win:
   icon: public/Logo.png
-  target:
-    - nsis
 
 # NSIS 安装包配置
 nsis:

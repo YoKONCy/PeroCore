@@ -51,7 +51,7 @@ jobs:
       - name: 验证 Steam 组件已排除
         shell: powershell
         run: |
-          $UNPACKED = "dist-electron/win-unpacked"
+          $UNPACKED = "release-electron/win-unpacked"
           $steamFiles = Get-ChildItem $UNPACKED -Recurse -Include "steam_api64.dll","steamworksjs.*.node","steam_appid.txt" -ErrorAction SilentlyContinue
           if ($steamFiles.Count -gt 0) {
             Write-Error "❌ 标准版中发现 Steam 组件！构建被拒绝。"
@@ -63,7 +63,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: electron-standard
-          path: dist-electron/*.exe
+          path: release-electron/*.exe
 
   # ── 3. Electron 便携版 (ZIP 解压即用) ──
   build-portable:
@@ -98,7 +98,7 @@ jobs:
       - name: 验证 Steam 组件已排除
         shell: powershell
         run: |
-          $portableExe = Get-ChildItem "dist-electron" -Filter "*.exe" | Select-Object -First 1
+          $portableExe = Get-ChildItem "release-electron" -Filter "*.exe" | Select-Object -First 1
           if ($portableExe) {
             Write-Host "✅ 便携版构建产物: $($portableExe.Name)"
           } else {
@@ -109,7 +109,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: electron-portable
-          path: dist-electron/*Portable*.exe
+          path: release-electron/*Portable*.exe
 
   # ── 4. Electron Steam 版 (仅限 release 分支或手动触发) ──
   build-steam:
@@ -143,7 +143,7 @@ jobs:
       - name: 验证 Steam 组件已包含
         shell: powershell
         run: |
-          $UNPACKED = "dist-electron/win-unpacked"
+          $UNPACKED = "release-electron/win-unpacked"
           $dll = Test-Path "$UNPACKED/steam_api64.dll"
           $appid = Test-Path "$UNPACKED/steam_appid.txt"
           if (!$dll -or !$appid) {
@@ -155,7 +155,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: electron-steam
-          path: dist-electron/win-unpacked/**/*
+          path: release-electron/win-unpacked/**/*
 
   # ── 5. Docker 镜像构建 ──
   build-docker:

@@ -57,5 +57,12 @@ module.exports = {
       },
     },
   ],
-  ignorePatterns: ['dist', 'dist-electron', 'node_modules', '*.d.ts', 'packages/native/*/pkg'],
+  ignorePatterns: [
+    'dist',
+    'dist-electron',
+    'release-electron',
+    'node_modules',
+    '*.d.ts',
+    'packages/native/*/pkg',
+  ],
 }
