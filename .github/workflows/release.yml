@@ -116,9 +116,9 @@ jobs:
       - name: 验证 Steam 组件已排除
         shell: powershell
         run: |
-          $portableExe = Get-ChildItem "release-electron" -Filter "*.exe" | Select-Object -First 1
-          if ($portableExe) {
-            Write-Host "Portable artifact found: $($portableExe.Name)"
+          $portableZip = Get-ChildItem "release-electron" -Filter "*Portable*.zip" | Select-Object -First 1
+          if ($portableZip) {
+            Write-Host "Portable artifact found: $($portableZip.Name)"
           } else {
             Write-Error "Portable artifact not found"
             exit 1
@@ -127,7 +127,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: electron-portable
-          path: release-electron/*Portable*.exe
+          path: release-electron/*Portable*.zip
 
   # ── 4. Electron Steam 版 (仅限 release 分支或手动触发) ──
   build-steam:
@@ -291,7 +291,7 @@ jobs:
             | 文件 | 说明 | 推荐人群 |
             |------|------|----------|
             | `*-Setup-*.exe` | 安装版 | 普通用户，数据存储在系统用户目录 |
-            | `*-Portable*.exe` | 便携版（解压即用） | 随身携带或多设备使用，数据存储于程序目录 |
+            | `*-Portable*.zip` | 便携版（解压即用） | 随身携带或多设备使用，数据存储于程序目录 |
 
             > ⚠️ Windows 可能弹出 SmartScreen 警告，点击“仍要运行”即可。本软件为开源项目，源码可在仓库中查阅。
             > 🎮 Steam 用户请直接通过 Steam 客户端获取更新。

@@ -5,7 +5,6 @@ extends: electron-builder.base.yml
 win:
   icon: public/Logo.png
   target:
-    - portable
+    - zip
 
-portable:
-  artifactName: '${productName}-Portable-${version}.${ext}'
+artifactName: '${productName}-Portable-${version}.${ext}'
