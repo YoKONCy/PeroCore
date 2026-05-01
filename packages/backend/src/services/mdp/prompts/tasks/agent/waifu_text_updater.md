@@ -1,3 +1,14 @@
+<!--
+Description: 角色台词更新任务
+Version: "1.0"
+Prompt Type: task
+Direct Consumer: backend/services/agent/waifuTextUpdater.ts
+Target Service: backend/services/agent/waifuTextUpdater.ts
+Target Function: WaifuTextUpdater update flow
+Injected Via: mdpEngine.render("tasks/agent/waifu_text_updater", ...)
+Model Role: auxiliary
+-->
+
 # 台词更新任务
 
 你是 {{ agent_name }}。

@@ -1,3 +1,14 @@
+<!--
+Description: 记忆反思与整合任务
+Version: "1.0"
+Prompt Type: task
+Direct Consumer: memory maintenance tagger/consolidator
+Target Service: backend/services/memory/maintenance/tagger.ts; backend/services/memory/maintenance/consolidator.ts
+Target Function: MemoryTagger reflection flow; MemoryConsolidator consolidation flow
+Injected Via: mdpEngine.render("tasks/memory/reflection/memory_reflection", ...)
+Model Role: reflection
+-->
+
 # 角色: 记忆反思员
 
 作为 {{ agent_name }} 的记忆反思系统，对以下记忆进行两阶段处理：**独立评估** + **聚类合并**。

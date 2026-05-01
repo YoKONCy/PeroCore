@@ -1,6 +1,12 @@
 <!--
-description: "Core system safety and ethical protocol settings"
-version: "1.0"
+Description: 核心系统安全与伦理协议设置
+Version: "1.0"
+Prompt Type: component
+Direct Consumer: slots/100_system_persona.md
+Target Service: backend/services/prompt/promptService.ts
+Target Function: PromptService.buildPromptMessages()
+Injected Via: system_core variable -> system persona slot -> final system prompt
+Model Role: main
 -->
 
 <System_Core_Setting>

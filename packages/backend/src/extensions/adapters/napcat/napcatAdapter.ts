@@ -388,6 +388,7 @@ export class NapcatAdapter extends AbstractSocialAdapter {
 
   // ── Layer 2 新增: 联系人/群组查询 (OneBot v11 API Bridge) ──
 
+  /** 拉取好友列表，并适配为社交工具层统一的联系人结构。 */
   async getContacts(): Promise<import('../../../tools/socialOps').SocialContact[]> {
     const resp = (await this.callApi('get_friend_list', {})) as Record<string, unknown>
     const data = resp?.data as Array<Record<string, unknown>> | undefined
@@ -401,6 +402,7 @@ export class NapcatAdapter extends AbstractSocialAdapter {
     }))
   }
 
+  /** 拉取群列表，并把 OneBot 字段归一化为社交工具层使用的群结构。 */
   async getGroups(): Promise<import('../../../tools/socialOps').SocialGroup[]> {
     const resp = (await this.callApi('get_group_list', {})) as Record<string, unknown>
     const data = resp?.data as Array<Record<string, unknown>> | undefined
@@ -414,6 +416,7 @@ export class NapcatAdapter extends AbstractSocialAdapter {
     }))
   }
 
+  /** 查询单个 QQ 用户资料；OneBot 失败时返回 null，让上层工具自行决定降级展示。 */
   async getContactInfo(
     userId: string,
   ): Promise<import('../../../tools/socialOps').SocialContact | null> {
@@ -436,6 +439,7 @@ export class NapcatAdapter extends AbstractSocialAdapter {
     }
   }
 
+  /** 查询单个群资料；接口不可用或群不存在时返回 null。 */
   async getGroupInfo(
     groupId: string,
   ): Promise<import('../../../tools/socialOps').SocialGroup | null> {
@@ -458,6 +462,7 @@ export class NapcatAdapter extends AbstractSocialAdapter {
     }
   }
 
+  /** 拉取群成员列表；OneBot 字段 card 优先作为群名片，nickname 作为兜底名称。 */
   async getGroupMembers(
     groupId: string,
   ): Promise<import('../../../tools/socialOps').SocialContact[]> {
@@ -479,6 +484,7 @@ export class NapcatAdapter extends AbstractSocialAdapter {
     }
   }
 
+  /** 手动处理好友请求，供社交工具或管理界面调用。 */
   async handleFriendRequest(flag: string, approve: boolean, remark?: string): Promise<void> {
     await this.callApi('set_friend_add_request', {
       flag,
@@ -487,6 +493,7 @@ export class NapcatAdapter extends AbstractSocialAdapter {
     })
   }
 
+  /** 删除 QQ 好友；这里仅做 OneBot API 转发，不维护额外本地联系人缓存。 */
   async removeFriend(userId: string): Promise<void> {
     await this.callApi('delete_friend', { user_id: Number(userId) })
   }

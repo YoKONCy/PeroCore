@@ -23,25 +23,7 @@ const logger = createLogger('RunScript')
 const SCRIPT_TIMEOUT_MS = 30_000
 
 export const runScriptTool: BuiltinTool = {
-  definition: {
-    name: 'run_script',
-    description:
-      '执行 NIT 脚本，用于需要条件判断、循环、并行执行等复杂编排的场景。' +
-      '脚本中可以调用所有其他可用工具。' +
-      '语法示例: result = web_search(query="hello")\\n' +
-      'if result.length < 50 { result = web_search(query="hello world") }',
-    parameters: {
-      type: 'object',
-      properties: {
-        code: {
-          type: 'string',
-          description:
-            'NIT 脚本代码。支持变量赋值、条件分支(if/else)、循环(for)、并行执行(parallel)、try/catch。',
-        },
-      },
-      required: ['code'],
-    },
-  },
+  name: 'run_script',
 
   async execute(args, ctx) {
     const code = args.code as string

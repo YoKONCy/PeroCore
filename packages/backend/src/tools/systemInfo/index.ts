@@ -56,14 +56,7 @@ export function getWindowProvider(): WindowProvider | null {
 // ── get_system_info ──
 
 export const getSystemInfoTool: BuiltinTool = {
-  definition: {
-    name: 'get_system_info',
-    description: '获取系统信息: 操作系统、版本、CPU、内存、磁盘等。' + '用于了解主人的设备环境。',
-    parameters: {
-      type: 'object',
-      properties: {},
-    },
-  },
+  name: 'get_system_info',
 
   async execute() {
     try {
@@ -101,21 +94,7 @@ export const getSystemInfoTool: BuiltinTool = {
 // ── open_application ──
 
 export const openApplicationTool: BuiltinTool = {
-  definition: {
-    name: 'open_application',
-    description:
-      '打开一个应用程序。跨平台支持: Windows 使用 start, macOS 使用 open, Linux 使用 xdg-open。',
-    parameters: {
-      type: 'object',
-      properties: {
-        app_name: {
-          type: 'string',
-          description: '应用程序名称或路径。例如 "notepad", "chrome", "/usr/bin/firefox"',
-        },
-      },
-      required: ['app_name'],
-    },
-  },
+  name: 'open_application',
 
   async execute(args) {
     const appName = (args.app_name as string)?.trim()
@@ -166,14 +145,7 @@ export const openApplicationTool: BuiltinTool = {
 // ── get_active_windows ──
 
 export const getActiveWindowsTool: BuiltinTool = {
-  definition: {
-    name: 'get_active_windows',
-    description: '列出当前所有可见的窗口及其进程名。可用于了解主人正在使用什么软件。',
-    parameters: {
-      type: 'object',
-      properties: {},
-    },
-  },
+  name: 'get_active_windows',
 
   async execute() {
     // 优先使用注入的 WindowProvider
@@ -229,20 +201,7 @@ export const getActiveWindowsTool: BuiltinTool = {
 // ── activate_window ──
 
 export const activateWindowTool: BuiltinTool = {
-  definition: {
-    name: 'activate_window',
-    description: '切换并置顶指定的窗口。通过进程名或窗口标题关键词匹配。',
-    parameters: {
-      type: 'object',
-      properties: {
-        target: {
-          type: 'string',
-          description: '窗口标题关键词或进程名 (如 "chrome", "Visual Studio Code")',
-        },
-      },
-      required: ['target'],
-    },
-  },
+  name: 'activate_window',
 
   async execute(args) {
     const target = (args.target as string)?.trim()

@@ -65,8 +65,10 @@ export interface ExtensionManifest {
   platforms?: PlatformId[]
   /** 权限声明 */
   permissions?: ExtensionPermission[]
-  /** Tool 专属: 工具定义 (给 LLM function calling) */
+  /** Tool 专属: 单工具定义 (给 LLM function calling) */
   toolDefinition?: ToolDefinition
+  /** Tool 专属: 多工具定义 (给 LLM function calling) */
+  tools?: ToolDefinition[]
   /** Service 专属配置 */
   service?: {
     transport: 'stdio' | 'http'

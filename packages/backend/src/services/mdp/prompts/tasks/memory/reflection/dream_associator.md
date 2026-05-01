@@ -1,3 +1,14 @@
+<!--
+Description: 梦境式记忆联想任务
+Version: "1.0"
+Prompt Type: task
+Direct Consumer: backend/services/memory/maintenance/dreamAssociator.ts
+Target Service: backend/services/memory/maintenance/dreamAssociator.ts
+Target Function: DreamAssociator association flow
+Injected Via: mdpEngine.render("tasks/memory/reflection/dream_associator", ...)
+Model Role: reflection
+-->
+
 # 角色: 梦境联想分析师
 
 分析以下两条记忆是否存在深层关联关系。

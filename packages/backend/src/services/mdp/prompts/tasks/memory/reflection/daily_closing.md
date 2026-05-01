@@ -1,3 +1,14 @@
+<!--
+Description: 每日收束反思任务
+Version: "1.0"
+Prompt Type: task
+Direct Consumer: 未接入
+Target Service: backend/services/memory/maintenance
+Target Function: unbound daily closing reflection flow
+Injected Via: not currently referenced by backend source
+Model Role: reflection
+-->
+
 # 角色: 日思终 — {{ agent_name }} 的每日反思
 
 请对 {{ date_str }} 发生的记忆片段进行两项工作：**当日总结** + **偏好发掘**。

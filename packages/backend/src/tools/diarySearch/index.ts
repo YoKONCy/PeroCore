@@ -44,30 +44,7 @@ interface DiaryPayload {
 }
 
 export const searchDiaryTool: BuiltinTool = {
-  definition: {
-    name: 'search_diary',
-    description:
-      '搜索历史日记。可以按关键词语义查找，也可以按日期查找。' +
-      '当主人问「之前某天发生了什么」「上次聊过XX」「最近的日记」等场景时使用。',
-    parameters: {
-      type: 'object',
-      properties: {
-        query: {
-          type: 'string',
-          description:
-            '搜索关键词或问题 (语义检索)。例如「和主人讨论过美食的日子」「心情不好的时候」',
-        },
-        date: {
-          type: 'string',
-          description: '精确日期 (ISO 格式 YYYY-MM-DD)。例如 2026-04-25',
-        },
-        limit: {
-          type: 'number',
-          description: '最多返回条数 (默认 5，最大 20)',
-        },
-      },
-    },
-  },
+  name: 'search_diary',
 
   async execute(args, ctx) {
     if (!_vectorRepo || !_embeddingService || !_storeRegistry) {

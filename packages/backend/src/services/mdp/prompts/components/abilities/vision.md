@@ -1,6 +1,12 @@
 <!--
-description: "视觉能力描述"
-version: "1.0"
+Description: 视觉能力描述
+Version: "1.0"
+Prompt Type: component
+Direct Consumer: agents/*/capabilities.yaml prompt_fragments
+Target Service: backend/services/prompt/promptService.ts
+Target Function: PromptService.buildPromptMessages()
+Injected Via: capability prompt_fragments -> final system prompt
+Model Role: main / lightweight
 -->
 
 - **观察与理解屏幕内容**:

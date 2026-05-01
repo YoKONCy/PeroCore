@@ -1,3 +1,14 @@
+<!--
+Description: 每日综合日记生成任务
+Version: "1.0"
+Prompt Type: task
+Direct Consumer: backend/services/memory/diaryEngine.ts
+Target Service: backend/services/memory/diaryEngine.ts
+Target Function: DiaryEngine.generateDiary()
+Injected Via: mdpEngine.render("tasks/diary/diary", ...)
+Model Role: reflection
+-->
+
 任务：{{ agent_name }}，请根据今天和{{ owner_name }}的所有互动，写一篇综合日记。
 
 # 核心人设

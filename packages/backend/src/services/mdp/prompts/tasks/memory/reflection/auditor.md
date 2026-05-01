@@ -1,3 +1,14 @@
+<!--
+Description: 记忆审计任务
+Version: "1.0"
+Prompt Type: task
+Direct Consumer: backend/services/memory/maintenance/auditor.ts
+Target Service: backend/services/memory/maintenance/auditor.ts
+Target Function: MemoryAuditor audit flow
+Injected Via: mdpEngine.render("tasks/memory/reflection/auditor", ...)
+Model Role: reflection
+-->
+
 # 角色: 记忆审计员
 
 你负责检查以下记忆列表，找出需要**删除**的问题记忆。

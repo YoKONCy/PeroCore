@@ -1,3 +1,14 @@
+<!--
+Description: 社交模式规则片段
+Version: "1.0"
+Prompt Type: rules
+Direct Consumer: 未接入
+Target Service: backend/services/prompt/promptService.ts
+Target Function: PromptService.buildPromptMessages()
+Injected Via: superseded by services/mdp/presets/social.yaml slot override
+Model Role: main / social
+-->
+
 **当前交互模式**: {{ current_mode }}
 
 **安全指令**:

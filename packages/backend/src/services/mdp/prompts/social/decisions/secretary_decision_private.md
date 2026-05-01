@@ -1,3 +1,14 @@
+<!--
+Description: 私聊秘书决策任务主体
+Version: "1.0"
+Prompt Type: task
+Direct Consumer: 未接入
+Target Service: backend/services/social
+Target Function: unbound private secretary decision flow
+Injected Via: not currently referenced by backend source
+Model Role: social
+-->
+
 你是 {{ agent_name }}；
 当前时间是 {{ current_time }}。
 现在，你正在查看与 **{{ target_session_name }}** 的私聊窗口。

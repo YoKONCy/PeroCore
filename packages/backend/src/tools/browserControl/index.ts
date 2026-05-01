@@ -74,17 +74,7 @@ async function execWithContent(command: string, params?: Record<string, unknown>
 // ── browser_open_url ──
 
 export const browserOpenUrlTool: BuiltinTool = {
-  definition: {
-    name: 'browser_open_url',
-    description: '在浏览器中打开指定的 URL。需要浏览器插件已连接。',
-    parameters: {
-      type: 'object',
-      properties: {
-        url: { type: 'string', description: '要打开的 URL' },
-      },
-      required: ['url'],
-    },
-  },
+  name: 'browser_open_url',
 
   async execute(args) {
     let url = args.url as string
@@ -101,17 +91,7 @@ export const browserOpenUrlTool: BuiltinTool = {
 // ── browser_click ──
 
 export const browserClickTool: BuiltinTool = {
-  definition: {
-    name: 'browser_click',
-    description: '点击当前页面上的元素（按钮、链接等）。通过文本内容或 CSS 选择器定位。',
-    parameters: {
-      type: 'object',
-      properties: {
-        target: { type: 'string', description: '元素的文本内容或 CSS 选择器' },
-      },
-      required: ['target'],
-    },
-  },
+  name: 'browser_click',
 
   async execute(args) {
     const target = args.target as string
@@ -127,18 +107,7 @@ export const browserClickTool: BuiltinTool = {
 // ── browser_type ──
 
 export const browserTypeTool: BuiltinTool = {
-  definition: {
-    name: 'browser_type',
-    description: '在输入框中输入文本。先通过选择器定位输入框，再输入内容。',
-    parameters: {
-      type: 'object',
-      properties: {
-        target: { type: 'string', description: '输入框的选择器或标签文本' },
-        text: { type: 'string', description: '要输入的文本' },
-      },
-      required: ['target', 'text'],
-    },
-  },
+  name: 'browser_type',
 
   async execute(args) {
     const target = args.target as string
@@ -155,20 +124,7 @@ export const browserTypeTool: BuiltinTool = {
 // ── browser_scroll ──
 
 export const browserScrollTool: BuiltinTool = {
-  definition: {
-    name: 'browser_scroll',
-    description: '向上或向下滚动当前页面。',
-    parameters: {
-      type: 'object',
-      properties: {
-        direction: {
-          type: 'string',
-          description: '滚动方向: "up" 或 "down"',
-          enum: ['up', 'down'],
-        },
-      },
-    },
-  },
+  name: 'browser_scroll',
 
   async execute(args) {
     const direction = (args.direction as string) ?? 'down'
@@ -180,14 +136,7 @@ export const browserScrollTool: BuiltinTool = {
 // ── browser_back ──
 
 export const browserBackTool: BuiltinTool = {
-  definition: {
-    name: 'browser_back',
-    description: '返回浏览器历史记录中的上一页。',
-    parameters: {
-      type: 'object',
-      properties: {},
-    },
-  },
+  name: 'browser_back',
 
   async execute() {
     logger.info('返回上一页')
@@ -198,14 +147,7 @@ export const browserBackTool: BuiltinTool = {
 // ── browser_get_content ──
 
 export const browserGetContentTool: BuiltinTool = {
-  definition: {
-    name: 'browser_get_content',
-    description: '获取当前浏览器页面的文本内容 (Markdown 格式)。',
-    parameters: {
-      type: 'object',
-      properties: {},
-    },
-  },
+  name: 'browser_get_content',
 
   async execute() {
     if (!_browserBridge) {

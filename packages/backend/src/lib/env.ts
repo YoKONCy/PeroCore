@@ -61,3 +61,6 @@ export const SERVER_HOST = process.env.PERO_HOST ?? '127.0.0.1'
 export const LOG_LEVEL = Number(
   process.env.PERO_LOG_LEVEL ?? (process.env.NODE_ENV === 'production' ? 3 : 4),
 )
+
+/** 日志输出格式：text 适合本地阅读，json 适合日志采集 */
+export const LOG_FORMAT = process.env.PERO_LOG_FORMAT === 'json' ? 'json' : 'text'

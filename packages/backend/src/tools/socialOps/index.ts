@@ -120,29 +120,7 @@ function requireProvider(): SocialMessagingProvider | string {
 // ─────────────────────────────────────────────
 
 export const socialSendMessageTool: BuiltinTool = {
-  definition: {
-    name: 'social_send_message',
-    description: '发送消息到社交平台的指定会话。支持私聊和群聊。' + '需要社交适配器已连接。',
-    parameters: {
-      type: 'object',
-      properties: {
-        target: {
-          type: 'string',
-          description: '目标会话 ID (用户 ID 或群组 ID)',
-        },
-        content: {
-          type: 'string',
-          description: '消息文本内容',
-        },
-        type: {
-          type: 'string',
-          description: '消息类型',
-          enum: ['private', 'group'],
-        },
-      },
-      required: ['target', 'content', 'type'],
-    },
-  },
+  name: 'social_send_message',
 
   async execute(args) {
     const provider = requireProvider()
@@ -169,11 +147,7 @@ export const socialSendMessageTool: BuiltinTool = {
 // ─────────────────────────────────────────────
 
 export const socialGetContactsTool: BuiltinTool = {
-  definition: {
-    name: 'social_get_contacts',
-    description: '获取当前社交平台的联系人/好友列表。',
-    parameters: { type: 'object', properties: {} },
-  },
+  name: 'social_get_contacts',
 
   async execute() {
     const provider = requireProvider()
@@ -205,11 +179,7 @@ export const socialGetContactsTool: BuiltinTool = {
 // ─────────────────────────────────────────────
 
 export const socialGetGroupsTool: BuiltinTool = {
-  definition: {
-    name: 'social_get_groups',
-    description: '获取当前社交平台的群组列表。',
-    parameters: { type: 'object', properties: {} },
-  },
+  name: 'social_get_groups',
 
   async execute() {
     const provider = requireProvider()
@@ -242,17 +212,7 @@ export const socialGetGroupsTool: BuiltinTool = {
 // ─────────────────────────────────────────────
 
 export const socialGetContactInfoTool: BuiltinTool = {
-  definition: {
-    name: 'social_get_contact_info',
-    description: '查询社交平台上指定用户的详细信息 (昵称、备注等)。',
-    parameters: {
-      type: 'object',
-      properties: {
-        user_id: { type: 'string', description: '目标用户 ID' },
-      },
-      required: ['user_id'],
-    },
-  },
+  name: 'social_get_contact_info',
 
   async execute(args) {
     const provider = requireProvider()
@@ -277,17 +237,7 @@ export const socialGetContactInfoTool: BuiltinTool = {
 // ─────────────────────────────────────────────
 
 export const socialGetGroupInfoTool: BuiltinTool = {
-  definition: {
-    name: 'social_get_group_info',
-    description: '查询指定群组的详细信息 (群名、成员数等)。',
-    parameters: {
-      type: 'object',
-      properties: {
-        group_id: { type: 'string', description: '目标群组 ID' },
-      },
-      required: ['group_id'],
-    },
-  },
+  name: 'social_get_group_info',
 
   async execute(args) {
     const provider = requireProvider()
@@ -312,17 +262,7 @@ export const socialGetGroupInfoTool: BuiltinTool = {
 // ─────────────────────────────────────────────
 
 export const socialGetGroupMembersTool: BuiltinTool = {
-  definition: {
-    name: 'social_get_group_members',
-    description: '查询指定群组的成员列表。',
-    parameters: {
-      type: 'object',
-      properties: {
-        group_id: { type: 'string', description: '目标群组 ID' },
-      },
-      required: ['group_id'],
-    },
-  },
+  name: 'social_get_group_members',
 
   async execute(args) {
     const provider = requireProvider()
@@ -348,19 +288,7 @@ export const socialGetGroupMembersTool: BuiltinTool = {
 // ─────────────────────────────────────────────
 
 export const socialHandleRequestTool: BuiltinTool = {
-  definition: {
-    name: 'social_handle_request',
-    description: '处理收到的好友请求 — 接受或拒绝。',
-    parameters: {
-      type: 'object',
-      properties: {
-        flag: { type: 'string', description: '好友请求的标识 flag' },
-        approve: { type: 'boolean', description: '是否接受 (true=接受, false=拒绝)' },
-        remark: { type: 'string', description: '接受后的备注名 (可选)' },
-      },
-      required: ['flag', 'approve'],
-    },
-  },
+  name: 'social_handle_request',
 
   async execute(args) {
     const provider = requireProvider()
@@ -386,23 +314,7 @@ export const socialHandleRequestTool: BuiltinTool = {
 // ─────────────────────────────────────────────
 
 export const socialNotifyOwnerTool: BuiltinTool = {
-  definition: {
-    name: 'social_notify_owner',
-    description:
-      '向主人报告重要的社交事件或信息。' + '消息会通过社交平台或系统通知渠道发送给主人。',
-    parameters: {
-      type: 'object',
-      properties: {
-        content: { type: 'string', description: '通知内容' },
-        importance: {
-          type: 'string',
-          description: '重要程度',
-          enum: ['low', 'medium', 'high'],
-        },
-      },
-      required: ['content'],
-    },
-  },
+  name: 'social_notify_owner',
 
   async execute(args) {
     const provider = requireProvider()

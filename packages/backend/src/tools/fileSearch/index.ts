@@ -18,18 +18,7 @@ const MAX_RESULTS = 50
 const SEARCH_TIMEOUT_MS = 15_000
 
 export const fileSearchTool: BuiltinTool = {
-  definition: {
-    name: 'search_files',
-    description: '按文件名搜索文件。在整台计算机上查找文件位置。(要搜索文件内容，请用 code_search)',
-    parameters: {
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: '文件名关键词 (支持通配符)' },
-        limit: { type: 'number', description: '返回最大结果数 (默认 50)' },
-      },
-      required: ['query'],
-    },
-  },
+  name: 'search_files',
 
   async execute(args) {
     const query = args.query as string

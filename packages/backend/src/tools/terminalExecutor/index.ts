@@ -17,20 +17,7 @@ const MAX_OUTPUT_LENGTH = 20_000
 const DEFAULT_TIMEOUT_MS = 30_000
 
 export const terminalExecutorTool: BuiltinTool = {
-  definition: {
-    name: 'terminal_execute',
-    description:
-      '在系统终端中执行命令并获取输出。支持任意 shell 命令。注意：请谨慎执行有副作用的命令。',
-    parameters: {
-      type: 'object',
-      properties: {
-        command: { type: 'string', description: '要执行的命令' },
-        cwd: { type: 'string', description: '工作目录 (可选，默认用户主目录)' },
-        timeout: { type: 'number', description: '超时时间(毫秒)，默认 30000' },
-      },
-      required: ['command'],
-    },
-  },
+  name: 'terminal_execute',
 
   async execute(args) {
     const command = args.command as string

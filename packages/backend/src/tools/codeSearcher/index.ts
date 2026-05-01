@@ -19,21 +19,7 @@ const MAX_RESULTS = 50
 const SEARCH_TIMEOUT_MS = 15_000
 
 export const codeSearcherTool: BuiltinTool = {
-  definition: {
-    name: 'code_search',
-    description:
-      '在代码文件中搜索文本或正则模式。基于 ripgrep，速度极快。返回匹配的文件名、行号和内容。',
-    parameters: {
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: '搜索关键词或正则表达式' },
-        path: { type: 'string', description: '搜索目录路径 (默认用户主目录)' },
-        is_regex: { type: 'boolean', description: '是否为正则模式 (默认 false)' },
-        file_type: { type: 'string', description: '限定文件类型，如 "ts", "py", "go"' },
-      },
-      required: ['query'],
-    },
-  },
+  name: 'code_search',
 
   async execute(args) {
     const query = args.query as string

@@ -26,34 +26,7 @@ export function setSchedulerService(svc: SchedulerService | null): void {
 // ── set_reminder ──
 
 export const setReminderTool: BuiltinTool = {
-  definition: {
-    name: 'set_reminder',
-    description:
-      '为主人设置一个提醒、话题或预设反应。' +
-      '当主人说"帮我设个提醒"、"XX点提醒我"、"下次想聊XX"等场景时使用。',
-    parameters: {
-      type: 'object',
-      properties: {
-        time: {
-          type: 'string',
-          description:
-            '触发时间，ISO 8601 格式。例如 "2026-04-21T08:00:00"。' +
-            '如果主人说"5分钟后"，需要计算具体的 ISO 时间。',
-        },
-        content: {
-          type: 'string',
-          description: '提醒内容。例如 "该喝水啦" 或 "提醒主人开会"。',
-        },
-        type: {
-          type: 'string',
-          description:
-            '类型: "reminder" (一次性提醒，默认) | "topic" (想找主人聊的话题) | "reaction" (预设反应)',
-          enum: ['reminder', 'topic', 'reaction'],
-        },
-      },
-      required: ['time', 'content'],
-    },
-  },
+  name: 'set_reminder',
 
   async execute(args) {
     if (!_schedulerService) {
@@ -97,16 +70,7 @@ export const setReminderTool: BuiltinTool = {
 // ── list_reminders ──
 
 export const listRemindersTool: BuiltinTool = {
-  definition: {
-    name: 'list_reminders',
-    description:
-      '查看当前所有待触发的提醒、话题和反应。' +
-      '当主人问"我设了什么提醒"、"有什么待办"等场景时使用。',
-    parameters: {
-      type: 'object',
-      properties: {},
-    },
-  },
+  name: 'list_reminders',
 
   async execute(_args, ctx) {
     if (!_schedulerService) {
@@ -135,23 +99,7 @@ export const listRemindersTool: BuiltinTool = {
 // ── cancel_reminder ──
 
 export const cancelReminderTool: BuiltinTool = {
-  definition: {
-    name: 'cancel_reminder',
-    description:
-      '取消一个待触发的提醒。' +
-      '当主人说"取消那个提醒"、"不用提醒我了"等场景时使用。' +
-      '需要先用 list_reminders 获取 ID。',
-    parameters: {
-      type: 'object',
-      properties: {
-        id: {
-          type: 'number',
-          description: '要取消的提醒 ID (从 list_reminders 获取)',
-        },
-      },
-      required: ['id'],
-    },
-  },
+  name: 'cancel_reminder',
 
   async execute(args) {
     if (!_schedulerService) {

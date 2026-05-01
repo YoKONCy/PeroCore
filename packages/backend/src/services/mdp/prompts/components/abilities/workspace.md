@@ -1,6 +1,12 @@
 <!--
-description: "个人工作区使用说明"
-version: "1.1"
+Description: 个人工作区使用说明
+Version: "1.1"
+Prompt Type: component
+Direct Consumer: agents/*/capabilities.yaml prompt_fragments
+Target Service: backend/services/prompt/promptService.ts
+Target Function: PromptService.buildPromptMessages()
+Injected Via: capability prompt_fragments -> final system prompt
+Model Role: main / work
 -->
 
 <Ability>

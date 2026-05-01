@@ -1,3 +1,14 @@
+<!--
+Description: 私聊秘书决策规则片段
+Version: "1.0"
+Prompt Type: rules
+Direct Consumer: social/decisions/secretary_decision_private.md
+Target Service: backend/services/social
+Target Function: unbound private secretary decision flow
+Injected Via: parent prompt is not currently referenced by backend source
+Model Role: social
+-->
+
 **决策逻辑 (私聊特化)**:
 
 1.  **分析上下文**:

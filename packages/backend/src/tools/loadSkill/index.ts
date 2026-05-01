@@ -14,27 +14,7 @@
 import type { BuiltinTool } from '../index'
 
 export const loadSkillTool: BuiltinTool = {
-  definition: {
-    name: 'load_skill',
-    description:
-      '加载指定技能的详细操作指令。当你需要执行某个专业任务时，先调用此工具获取步骤说明。可传入参数来定制技能行为。',
-    parameters: {
-      type: 'object',
-      properties: {
-        skill_id: {
-          type: 'string',
-          description: '要加载的技能 ID (从技能菜单中选择)',
-        },
-        params: {
-          type: 'object',
-          description:
-            '可选的技能参数 (key-value 键值对)，用于定制技能行为。具体支持哪些参数由各技能的 SKILL.md 定义。',
-          additionalProperties: { type: 'string' },
-        },
-      },
-      required: ['skill_id'],
-    },
-  },
+  name: 'load_skill',
 
   async execute(args) {
     const skillId = args.skill_id as string

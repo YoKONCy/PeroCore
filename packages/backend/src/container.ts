@@ -962,7 +962,7 @@ export async function initAppContext(ctx: AppContext): Promise<void> {
     if (mcpTools.length > 0) {
       const bridged = bridgeMcpTools(ctx.mcpManager, mcpTools)
       for (const tool of bridged) {
-        ctx.toolRegistry.register(tool.definition, (args, _ctx) => tool.execute(args, _ctx))
+        ctx.toolRegistry.register(tool.definition, (args, _ctx) => tool.execute(args))
       }
       logger.info(`MCP 工具桥接完成: ${mcpTools.length} 个工具已注册`)
     }

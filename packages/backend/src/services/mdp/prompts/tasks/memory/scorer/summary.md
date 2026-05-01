@@ -1,3 +1,14 @@
+<!--
+Description: 对话摘要与记忆评分任务
+Version: "1.0"
+Prompt Type: task
+Direct Consumer: backend/services/memory/scorerService.ts
+Target Service: backend/services/memory/scorerService.ts
+Target Function: ScorerService score flow
+Injected Via: mdpEngine.render("tasks/memory/scorer/summary", ...)
+Model Role: reflection
+-->
+
 # 角色: 对话分析师与知识图谱架构师
 
 请你带入 {{ owner_name }} (即"主人") 与 {{ agent_name }} 之间的对话，提取核心记忆信息，并构建高密度的检索标签。

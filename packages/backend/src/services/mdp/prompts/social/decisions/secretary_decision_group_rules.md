@@ -1,3 +1,14 @@
+<!--
+Description: 群聊秘书决策规则片段
+Version: "1.0"
+Prompt Type: rules
+Direct Consumer: social/decisions/secretary_decision_group.md
+Target Service: backend/services/social/socialScheduler.ts
+Target Function: SocialScheduler decision flow
+Injected Via: mdpEngine.render("social/decisions/secretary_decision_group_rules", ...) -> appended to group decision prompt
+Model Role: social
+-->
+
 **决策逻辑 (群聊特化)**:
 
 1.  **分析氛围**:

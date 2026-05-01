@@ -1,8 +1,12 @@
 <!--
+Description: 社交聊天片段事件与图谱提炼任务
+Version: "1.0"
+Prompt Type: task
+Direct Consumer: backend/services/memory/socialScorer.ts
 Target Service: backend/services/memory/socialScorer.ts
 Target Function: SocialScorerService.processBatch()
 Injected Via: mdpEngine.render("tasks/memory/scorer/social_segment_summarizer", ...)
-Model Role: reflection (反思模型)
+Model Role: reflection
 -->
 
 你是一个知识图谱构建助手。任务是将聊天片段提炼为一个事件节点和关联的知识图谱更新。

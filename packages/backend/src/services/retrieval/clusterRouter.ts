@@ -4,9 +4,9 @@
  * 管理记忆图谱的社区聚类 (Leiden/Louvain) 并提供基于
  * ContextRNN 隐状态的 cluster 路由能力。
  *
- * 当前 Leiden 实现为**空 API 占位**:
- * - TriviumDB 后续会在 Rust 内核层面原生支持
- * - 届时只需替换 runClustering() 的内部实现
+ * 当前聚类由 TriviumDB 原生 Leiden 能力执行，本模块负责把原生返回的平铺结构
+ * 转换为 TypeScript 侧可缓存、可路由的社区索引。
+ * 新记忆的增量归属暂未实现，仍需依赖周期性 rebuildClusters() 刷新缓存。
  *
  * @module packages/backend/src/services/retrieval/clusterRouter
  */
@@ -92,14 +92,14 @@ export class ClusterRouter {
   async rebuildClusters(agentId: string, source: string = 'desktop'): Promise<number> {
     logger.info(`开始记忆社区聚类 (Agent: ${agentId})`)
 
-    // 通过 storeRegistry 获取 TriviumDB 实例
+    // 通过 storeRegistry 获取对应 source 的 TriviumDB 实例；不同来源可落在不同向量存储中。
     const store = this.deps.storeRegistry.getStoreBySource(agentId, source)
     if (!store) {
       logger.warn(`找不到对应的 store: ${agentId}/${source}，停止聚类`)
       return 0
     }
 
-    // 使用可配置参数调用 TriviumDB 原生 Leiden 聚类
+    // TriviumDB 返回的是跨语言传输友好的平铺数组，下面会解包为 Map/Set 结构供路由阶段快速读取。
     const result = store.leidenCluster({
       minCommunitySize: this.config.minCommunitySize,
     })
@@ -224,10 +224,12 @@ export class ClusterRouter {
   /**
    * 更新单个节点的簇归属 (用于新记忆创建时)
    *
-   * 当前为空实现 (无聚类数据)
+   * 当前只保留接口形状，不直接写入缓存。
+   * 原因是单点插入会让 centroid、memberIds、nodeMapping 三份缓存产生一致性风险；
+   * 在 TriviumDB 提供可靠的增量社区更新前，统一通过 rebuildClusters() 重建。
    */
   assignNodeToCluster(_agentId: string, _nodeId: number, _clusterId: number): void {
-    // 空 API 占位 — 等 TriviumDB 原生 Leiden 后实现
+    // 增量聚类未接入，保持 no-op，避免写入半更新缓存。
   }
 
   /**

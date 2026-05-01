@@ -1,3 +1,14 @@
+<!--
+Description: 好友申请决策任务
+Version: "1.0"
+Prompt Type: task
+Direct Consumer: 未接入
+Target Service: backend/services/social
+Target Function: unbound friend request decision flow
+Injected Via: not currently referenced by backend source
+Model Role: social / auxiliary
+-->
+
 [系统通知: 收到新的好友申请]
 申请人QQ: {{ user_id }}
 申请备注: "{{ comment }}"

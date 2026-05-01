@@ -100,7 +100,9 @@ export function useGateway(events: GatewayEvents = {}) {
 
   /** RPC 请求/响应配对 Map */
   const pendingRequests = new Map<string, PendingRequest>()
+  /** 按 action 精确订阅的推送回调，适合页面或组件只监听自己关心的事件。 */
   const pushHandlers = new Map<string, PushHandler[]>()
+  /** 通配订阅回调，主要用于调试面板或日志面板观察所有 Gateway 推送。 */
   const wildcardHandlers: PushHandler[] = []
 
   function createEnvelope(
@@ -296,6 +298,12 @@ export function useGateway(events: GatewayEvents = {}) {
 
   // ═══ 消息分发 ═══
 
+  /**
+   * 分发后端主动推送。
+   *
+   * onPush 注册的是额外监听器；GatewayEvents 是常用事件的强类型快捷回调。
+   * 两者都会收到同一条推送，因此页面应避免在两边重复执行有副作用的逻辑。
+   */
   function dispatchPush(action: string, payload: Record<string, unknown>): void {
     for (const handler of wildcardHandlers) {
       try {
@@ -324,6 +332,7 @@ export function useGateway(events: GatewayEvents = {}) {
       const msg = JSON.parse(raw) as GatewayEnvelope & {
         payload: Record<string, unknown>
       }
+      // 后端推送通常把业务动作放在 payload.action；没有 action 时退回使用 envelope.type。
       const action = msg.payload?.action as string | undefined
 
       // ── RPC 响应配对 ──

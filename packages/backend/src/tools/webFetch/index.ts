@@ -60,26 +60,7 @@ function htmlToText(html: string): string {
 }
 
 export const webFetchTool: BuiltinTool = {
-  definition: {
-    name: 'web_fetch',
-    description:
-      '获取网页的文本内容。用于快速阅读文章、查看文档、获取静态页面信息。' +
-      '注意：只能获取文本，无法执行 JavaScript 或进行交互。',
-    parameters: {
-      type: 'object',
-      properties: {
-        url: {
-          type: 'string',
-          description: '要获取的网页 URL',
-        },
-        max_length: {
-          type: 'number',
-          description: '最大返回字符数 (默认 20000)',
-        },
-      },
-      required: ['url'],
-    },
-  },
+  name: 'web_fetch',
 
   async execute(args) {
     let url = args.url as string

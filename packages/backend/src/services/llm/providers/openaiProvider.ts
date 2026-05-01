@@ -88,6 +88,7 @@ export class OpenAiProvider implements LlmProvider {
         const { done, value } = await reader.read()
         if (done) break
 
+        // SSE chunk 可能在任意字节边界截断，必须先进入 buffer，再按换行拆出完整 data 行。
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split('\n')
         buffer = lines.pop() ?? ''
@@ -102,7 +103,7 @@ export class OpenAiProvider implements LlmProvider {
             const chunk = JSON.parse(data) as Record<string, unknown>
             yield this.normalizeDelta(chunk)
           } catch {
-            // 跳过无法解析的行
+            // 少数兼容厂商会混入非 JSON 行；跳过坏行，避免整个流式会话被中断。
             logger.debug(`跳过无法解析的 SSE 数据: ${data.slice(0, 100)}`)
           }
         }
@@ -258,6 +259,7 @@ export class OpenAiProvider implements LlmProvider {
           delta: {
             role: rawDelta.role as string | undefined,
             content: rawDelta.content as string | undefined,
+            // 流式 Function Calling 会把同一个工具调用拆成多段 delta，上层按 index/id 继续拼接参数字符串。
             toolCalls: rawToolCalls?.map((tc) => ({
               index: (tc.index as number) ?? 0,
               id: tc.id as string | undefined,

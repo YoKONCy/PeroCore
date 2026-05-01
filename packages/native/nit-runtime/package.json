@@ -1,6 +1,6 @@
 {
   "name": "@perocore/nit-runtime",
-  "version": "0.9.0-rc3",
+  "version": "0.9.1",
   "description": "PeroCore Rust N-API: minGRU 推理/训练 + Leiden 聚类",
   "main": "index.ts",
   "types": "index.d.ts",

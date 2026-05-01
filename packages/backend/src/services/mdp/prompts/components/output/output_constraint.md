@@ -1,6 +1,12 @@
 <!--
-description: "输出格式约束和元数据要求"
-version: "2.2"
+Description: 输出格式约束和元数据要求
+Version: "2.2"
+Prompt Type: component
+Direct Consumer: agents/*/capabilities.yaml prompt_fragments
+Target Service: backend/services/prompt/promptService.ts
+Target Function: PromptService.buildPromptMessages()
+Injected Via: capability prompt_fragments -> final system prompt
+Model Role: main / work
 -->
 
 <Output_Constraint>

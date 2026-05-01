@@ -1,3 +1,14 @@
+<!--
+Description: 屏幕观察陪伴回复任务
+Version: "1.0"
+Prompt Type: task
+Direct Consumer: 未接入
+Target Service: backend/services/companion
+Target Function: unbound screen observation response flow
+Injected Via: not currently referenced by backend source
+Model Role: vision / companion
+-->
+
 [陪伴模式核心指令]
 
 1. 你正通过屏幕观察主人。请基于看到的【连续多张截图】了解主人的最新动态。

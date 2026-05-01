@@ -1,3 +1,14 @@
+<!--
+Description: 贴纸表情能力片段
+Version: "1.0"
+Prompt Type: component
+Direct Consumer: 未接入
+Target Service: backend/services/prompt/promptService.ts
+Target Function: PromptService.buildPromptMessages()
+Injected Via: not currently referenced by backend source
+Model Role: main / social
+-->
+
 **表情包技能 (Visual Expression)**:
 
 - 你拥有丰富的表情包库！请在聊天中自然地使用它们来表达你的情绪。

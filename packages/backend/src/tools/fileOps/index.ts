@@ -15,18 +15,7 @@ import type { BuiltinTool } from '../index'
 const MAX_READ_SIZE = 10 * 1024 * 1024
 
 export const readFileTool: BuiltinTool = {
-  definition: {
-    name: 'read_file',
-    description: '读取文件内容。支持文本文件，自动检测编码。大文件会自动截断。',
-    parameters: {
-      type: 'object',
-      properties: {
-        file_path: { type: 'string', description: '文件的绝对路径' },
-        max_length: { type: 'number', description: '最大读取字符数 (默认 10000)' },
-      },
-      required: ['file_path'],
-    },
-  },
+  name: 'read_file',
 
   async execute(args) {
     const filePath = args.file_path as string
@@ -58,19 +47,7 @@ export const readFileTool: BuiltinTool = {
 }
 
 export const writeFileTool: BuiltinTool = {
-  definition: {
-    name: 'write_file',
-    description: '写入内容到文件。如果文件不存在会自动创建（含父目录）。',
-    parameters: {
-      type: 'object',
-      properties: {
-        file_path: { type: 'string', description: '文件的绝对路径' },
-        content: { type: 'string', description: '要写入的内容' },
-        append: { type: 'boolean', description: '是否追加模式 (默认 false，覆盖)' },
-      },
-      required: ['file_path', 'content'],
-    },
-  },
+  name: 'write_file',
 
   async execute(args) {
     const filePath = args.file_path as string
@@ -101,17 +78,7 @@ export const writeFileTool: BuiltinTool = {
 }
 
 export const fileInfoTool: BuiltinTool = {
-  definition: {
-    name: 'get_file_info',
-    description: '获取文件或目录的元数据信息 (大小、创建/修改时间、类型)。',
-    parameters: {
-      type: 'object',
-      properties: {
-        file_path: { type: 'string', description: '文件或目录的绝对路径' },
-      },
-      required: ['file_path'],
-    },
-  },
+  name: 'get_file_info',
 
   async execute(args) {
     const filePath = args.file_path as string
@@ -133,17 +100,7 @@ export const fileInfoTool: BuiltinTool = {
 }
 
 export const listDirectoryTool: BuiltinTool = {
-  definition: {
-    name: 'list_directory',
-    description: '列出目录中的所有文件和子目录。',
-    parameters: {
-      type: 'object',
-      properties: {
-        dir_path: { type: 'string', description: '目录的绝对路径' },
-      },
-      required: ['dir_path'],
-    },
-  },
+  name: 'list_directory',
 
   async execute(args) {
     const dirPath = args.dir_path as string

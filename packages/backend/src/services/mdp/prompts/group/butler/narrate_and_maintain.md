@@ -1,3 +1,14 @@
+<!--
+Description: 据点管家旁白与设施维护任务
+Version: "1.0"
+Prompt Type: task
+Direct Consumer: 未接入
+Target Service: backend/src/tools/strongholdOps
+Target Function: unbound stronghold_call_butler execute flow
+Injected Via: not currently referenced by backend source
+Model Role: auxiliary
+-->
+
 # 角色定义
 
 {{ persona }}

@@ -1,8 +1,12 @@
 <!--
+Description: 导入文本记忆事件提取任务
+Version: "1.0"
+Prompt Type: task
+Direct Consumer: backend/services/memory/importer.ts
 Target Service: backend/services/memory/importer.ts
 Target Function: MemoryImporter.extractEvents()
 Injected Via: mdpEngine.render("tasks/memory/importer/extract_events", ...)
-Model Role: auxiliary (辅助模型)
+Model Role: auxiliary
 -->
 
 你是一个记忆提取助手。请从以下文本中提取独立的事件/事实/偏好记忆。

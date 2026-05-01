@@ -10,27 +10,32 @@
  * @module packages/backend/src/services/mcp/mcpToolBridge
  */
 
+import type { ToolDefinition } from '../pipeline/types'
 import type { McpClientManager, McpToolInfo } from './mcpClientManager'
-import type { BuiltinTool } from '../../tools'
 import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('MCPToolBridge')
 
+export interface BridgedMcpTool {
+  definition: ToolDefinition
+  execute(args: Record<string, unknown>): Promise<string>
+}
+
 /**
- * 将 MCP 工具转换为 BuiltinTool 格式
+ * 将 MCP 工具转换为 ToolRegistry 可注册的格式
  *
  * @param manager MCP Client Manager 引用
  * @param tools 要转换的 MCP 工具列表
  * @returns 可注册到 ToolRegistry 的工具数组
  */
-export function bridgeMcpTools(manager: McpClientManager, tools: McpToolInfo[]): BuiltinTool[] {
+export function bridgeMcpTools(manager: McpClientManager, tools: McpToolInfo[]): BridgedMcpTool[] {
   return tools.map((tool) => createBridgedTool(manager, tool))
 }
 
 /**
  * 创建单个桥接工具
  */
-function createBridgedTool(manager: McpClientManager, tool: McpToolInfo): BuiltinTool {
+function createBridgedTool(manager: McpClientManager, tool: McpToolInfo): BridgedMcpTool {
   // 为避免与内置工具冲突，MCP 工具名加前缀
   const qualifiedName = `mcp_${tool.serverName}_${tool.name}`
 

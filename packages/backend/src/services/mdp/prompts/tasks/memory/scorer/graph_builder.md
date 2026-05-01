@@ -1,3 +1,14 @@
+<!--
+Description: 记忆图谱构建任务
+Version: "1.0"
+Prompt Type: task
+Direct Consumer: backend/services/memory/maintenance/graphGardener.ts
+Target Service: backend/services/memory/maintenance/graphGardener.ts
+Target Function: GraphGardener graph build flow
+Injected Via: mdpEngine.render("tasks/memory/scorer/graph_builder", ...)
+Model Role: reflection
+-->
+
 # 角色: 知识图谱架构师
 
 你负责将用户的碎片化记忆提炼为结构化的知识图谱。

@@ -168,6 +168,9 @@ const RE_FRONTMATTER = /^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/
 /** HTML 注释 */
 const RE_COMMENT = /<!--[\s\S]*?-->/g
 
+/** 顶部 HTML 注释元数据匹配 */
+const RE_TOP_COMMENT = /^<!--[\s\S]*?-->\s*/
+
 // ─────────────────────────────────────────────
 // 引擎
 // ─────────────────────────────────────────────
@@ -525,9 +528,10 @@ export class MdpEngine {
 
       let content = raw
       let meta: PromptMeta = {}
+      const yamlSource = raw.replace(RE_TOP_COMMENT, '')
 
       // 解析 YAML Frontmatter
-      const fmMatch = RE_FRONTMATTER.exec(raw)
+      const fmMatch = RE_FRONTMATTER.exec(yamlSource)
       if (fmMatch) {
         meta = this.parseSimpleYaml(fmMatch[1] ?? '')
         content = fmMatch[2] ?? ''

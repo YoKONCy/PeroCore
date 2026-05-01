@@ -63,36 +63,7 @@ export function setDesktopAutomationProvider(provider: DesktopAutomationProvider
 // ── automation_execute ──
 
 export const automationExecuteTool: BuiltinTool = {
-  definition: {
-    name: 'automation_execute',
-    description:
-      '执行桌面 GUI 自动化操作。支持鼠标点击、双击、右击、拖拽、文字输入、快捷键和系统通知。' +
-      '需要桌面环境。坐标使用屏幕像素坐标系。',
-    parameters: {
-      type: 'object',
-      properties: {
-        action: {
-          type: 'string',
-          description: '自动化动作类型',
-          enum: ['click', 'double_click', 'right_click', 'drag', 'type', 'hotkey', 'notification'],
-        },
-        x: {
-          type: 'number',
-          description: '鼠标 X 坐标 (click/double_click/right_click/drag 起点)',
-        },
-        y: { type: 'number', description: '鼠标 Y 坐标' },
-        x2: { type: 'number', description: '拖拽目标 X 坐标 (仅 drag)' },
-        y2: { type: 'number', description: '拖拽目标 Y 坐标 (仅 drag)' },
-        text: {
-          type: 'string',
-          description:
-            '要输入的文本 (type) / 快捷键组合 (hotkey, 如 "ctrl+c") / 通知标题 (notification)',
-        },
-        message: { type: 'string', description: '通知正文内容 (仅 notification)' },
-      },
-      required: ['action'],
-    },
-  },
+  name: 'automation_execute',
 
   async execute(args) {
     if (!_automationProvider) {
@@ -172,14 +143,7 @@ export const automationExecuteTool: BuiltinTool = {
 // ── get_mouse_position ──
 
 export const getMousePositionTool: BuiltinTool = {
-  definition: {
-    name: 'get_mouse_position',
-    description: '获取当前鼠标的屏幕坐标。',
-    parameters: {
-      type: 'object',
-      properties: {},
-    },
-  },
+  name: 'get_mouse_position',
 
   async execute() {
     if (!_automationProvider) {

@@ -48,20 +48,7 @@ function requireService(): StrongholdService | string {
 // ─────────────────────────────────────────────
 
 export const strongholdMoveToRoomTool: BuiltinTool = {
-  definition: {
-    name: 'stronghold_move_to_room',
-    description: '移动到据点内的另一个房间。移动后你会进入该房间的群聊上下文。',
-    parameters: {
-      type: 'object',
-      properties: {
-        room_name: {
-          type: 'string',
-          description: '目标房间的名称 (如 "客厅"、"卧室"、"工作室")',
-        },
-      },
-      required: ['room_name'],
-    },
-  },
+  name: 'stronghold_move_to_room',
 
   async execute(args, ctx) {
     const service = requireService()
@@ -112,11 +99,7 @@ export const strongholdMoveToRoomTool: BuiltinTool = {
 // ─────────────────────────────────────────────
 
 export const strongholdListRoomsTool: BuiltinTool = {
-  definition: {
-    name: 'stronghold_list_rooms',
-    description: '列出据点内的所有可用房间及其简要信息。',
-    parameters: { type: 'object', properties: {} },
-  },
+  name: 'stronghold_list_rooms',
 
   async execute(_args, ctx) {
     const service = requireService()
@@ -159,19 +142,7 @@ export const strongholdListRoomsTool: BuiltinTool = {
 // ─────────────────────────────────────────────
 
 export const strongholdGetRoomInfoTool: BuiltinTool = {
-  definition: {
-    name: 'stronghold_get_room_info',
-    description: '查看某个房间的详细信息，包括环境变量 (灯光/温度/音乐等) 和在场的角色。',
-    parameters: {
-      type: 'object',
-      properties: {
-        room_name: {
-          type: 'string',
-          description: '房间名称。不填则查看当前所在房间。',
-        },
-      },
-    },
-  },
+  name: 'stronghold_get_room_info',
 
   async execute(args, ctx) {
     const service = requireService()
@@ -217,24 +188,7 @@ export const strongholdGetRoomInfoTool: BuiltinTool = {
 // ─────────────────────────────────────────────
 
 export const strongholdSetEnvironmentTool: BuiltinTool = {
-  definition: {
-    name: 'stronghold_set_environment',
-    description: '调整当前所在房间的环境变量。例如调节灯光亮度、温度、播放音乐等。',
-    parameters: {
-      type: 'object',
-      properties: {
-        key: {
-          type: 'string',
-          description: '环境变量名 (如 "灯光"、"温度"、"音乐"、"清洁度")',
-        },
-        value: {
-          type: 'string',
-          description: '环境变量值 (如 "50"、"22"、"Lo-Fi Jazz")',
-        },
-      },
-      required: ['key', 'value'],
-    },
-  },
+  name: 'stronghold_set_environment',
 
   async execute(args, ctx) {
     const service = requireService()
@@ -272,22 +226,7 @@ export const strongholdSetEnvironmentTool: BuiltinTool = {
 // ─────────────────────────────────────────────
 
 export const strongholdCallButlerTool: BuiltinTool = {
-  definition: {
-    name: 'stronghold_call_butler',
-    description:
-      '呼叫据点管家。管家可以帮你管理设施和房间，如打扫卫生、调整布局、维修设备等。' +
-      '管家会根据请求自动执行相应操作。',
-    parameters: {
-      type: 'object',
-      properties: {
-        request: {
-          type: 'string',
-          description: '对管家的请求或指示 (如 "把灯光调暗一点"、"帮我打扫卧室")',
-        },
-      },
-      required: ['request'],
-    },
-  },
+  name: 'stronghold_call_butler',
 
   async execute(args, ctx) {
     const service = requireService()

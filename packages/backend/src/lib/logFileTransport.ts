@@ -12,6 +12,8 @@
 
 import { appendFileSync, existsSync, mkdirSync, statSync, readdirSync, unlinkSync } from 'node:fs'
 import path from 'node:path'
+import { LOG_FORMAT } from './env'
+import { getRequestContext } from './requestContext'
 
 // ─────────────────────────────────────────────
 // 配置
@@ -187,8 +189,14 @@ const LEVEL_LABELS: Record<number, string> = {
 /**
  * 格式化日志行 (用于文件持久化)
  *
- * 输出格式:
- * [2026-04-20T01:20:00.000Z] [INFO] [MemoryService] 记忆已创建 {"memoryId":42}
+ * 默认输出人类可读文本；当 PERO_LOG_FORMAT=json 时输出 JSON Lines，
+ * 便于后续接入日志采集系统，并把 requestId/traceId 等链路字段提升为顶层字段。
+ *
+ * 文本输出格式:
+ * [2026-04-20T01:20:00.000Z] [INFO] [MemoryService] [req_xxx] 记忆已创建 {"memoryId":42}
+ *
+ * JSON Lines 输出格式:
+ * {"timestamp":"...","level":"INFO","tag":"MemoryService","message":"记忆已创建","requestId":"req_xxx","memoryId":42}
  */
 export function formatLogLine(
   level: number,
@@ -198,9 +206,50 @@ export function formatLogLine(
 ): string {
   const timestamp = new Date().toISOString()
   const levelLabel = LEVEL_LABELS[level] ?? 'LOG'
+  /** 当前请求上下文；如果日志不在 HTTP 请求链路中产生，则这里为空 */
+  const context = getRequestContext()
+
+  if (LOG_FORMAT === 'json') {
+    /** JSON Lines 记录：每次调用返回一行完整 JSON，便于后续接入 Loki/ELK/云日志采集 */
+    const record: Record<string, unknown> = {
+      timestamp,
+      level: levelLabel,
+      tag,
+      message,
+    }
+
+    /** 将链路字段提升为顶层字段，方便按 requestId/traceId 直接检索 */
+    if (context?.requestId) record.requestId = context.requestId
+    if (context?.traceId) record.traceId = context.traceId
+    if (context?.agentId) record.agentId = context.agentId
+    if (context?.sessionId) record.sessionId = context.sessionId
+    if (context?.source) record.source = context.source
+
+    /** 将业务传入的结构化对象合并为顶层字段；非对象值统一放进 extra 数组 */
+    for (const arg of args) {
+      if (arg === undefined || arg === null) continue
+      if (typeof arg === 'object' && !Array.isArray(arg)) {
+        Object.assign(record, arg)
+      } else if (!record.extra) {
+        record.extra = [arg]
+      } else if (Array.isArray(record.extra)) {
+        record.extra.push(arg)
+      }
+    }
+
+    try {
+      return JSON.stringify(record)
+    } catch {
+      /** 极端情况下结构化字段不可序列化时，仍然输出一条可被日志系统解析的 JSON 行 */
+      return JSON.stringify({ timestamp, level: levelLabel, tag, message, serializeError: true })
+    }
+  }
 
   let line = `[${timestamp}] [${levelLabel}]`
   if (tag) line += ` [${tag}]`
+  /** 文本模式保留原有人类可读格式，并追加链路字段辅助本地排查 */
+  if (context?.requestId) line += ` [${context.requestId}]`
+  if (context?.traceId) line += ` [trace:${context.traceId}]`
   line += ` ${message}`
 
   // 附加结构化数据

@@ -32,21 +32,7 @@ export function setScreenshotProvider(provider: ScreenshotProvider | null): void
 // ── take_screenshot 工具 ──
 
 export const takeScreenshotTool: BuiltinTool = {
-  definition: {
-    name: 'take_screenshot',
-    description:
-      '截取当前屏幕画面。当主人请求"看看"、"看一下屏幕"时使用。' +
-      '返回屏幕截图的 base64 数据，可直接进行视觉分析。',
-    parameters: {
-      type: 'object',
-      properties: {
-        count: {
-          type: 'number',
-          description: '截图数量 (默认 1，最大 3)',
-        },
-      },
-    },
-  },
+  name: 'take_screenshot',
 
   async execute(args) {
     if (!_screenshotProvider) {

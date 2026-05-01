@@ -16,12 +16,28 @@ import type { ToolRegistry } from '../services/agent/toolRegistry'
 import type { ToolDefinition } from '../services/pipeline/types'
 import { createLogger } from '../lib/logger'
 
+import browserControlManifest from './browserControl/manifest.json'
+import codeSearcherManifest from './codeSearcher/manifest.json'
+import desktopAutomationManifest from './desktopAutomation/manifest.json'
+import diarySearchManifest from './diarySearch/manifest.json'
+import fileOpsManifest from './fileOps/manifest.json'
+import fileSearchManifest from './fileSearch/manifest.json'
+import finishTaskManifest from './finishTask/manifest.json'
+import loadSkillManifest from './loadSkill/manifest.json'
+import runScriptManifest from './runScript/manifest.json'
+import schedulerManifest from './scheduler/manifest.json'
+import screenVisionManifest from './screenVision/manifest.json'
+import socialOpsManifest from './socialOps/manifest.json'
+import strongholdOpsManifest from './strongholdOps/manifest.json'
+import systemInfoManifest from './systemInfo/manifest.json'
+import terminalExecutorManifest from './terminalExecutor/manifest.json'
+import webFetchManifest from './webFetch/manifest.json'
+
 const logger = createLogger('BuiltinTools')
 
 /** 内置工具标准接口 */
 export interface BuiltinTool {
-  /** 工具定义 (给 LLM Function Calling) */
-  definition: ToolDefinition
+  name: string
   /** 执行函数 */
   execute(
     args: Record<string, unknown>,
@@ -156,6 +172,65 @@ const ALL_BUILTIN_TOOLS: BuiltinTool[] = [
   searchDiaryTool,
 ]
 
+interface ManifestToolDefinition {
+  name: string
+  description: string
+  parameters?: Record<string, unknown>
+}
+
+interface ToolManifest {
+  toolDefinition?: ManifestToolDefinition
+  tools?: ManifestToolDefinition[]
+}
+
+const MANIFEST_DEFINITIONS = new Map<string, ToolDefinition>()
+
+function toToolDefinition(definition: ManifestToolDefinition): ToolDefinition {
+  return {
+    name: definition.name,
+    description: definition.description,
+    parameters: definition.parameters ?? {
+      type: 'object',
+      properties: {},
+    },
+  }
+}
+
+function collectManifestDefinitions(manifest: ToolManifest): ToolDefinition[] {
+  if (manifest.tools?.length) return manifest.tools.map(toToolDefinition)
+  return manifest.toolDefinition ? [toToolDefinition(manifest.toolDefinition)] : []
+}
+
+for (const manifest of [
+  browserControlManifest,
+  codeSearcherManifest,
+  desktopAutomationManifest,
+  diarySearchManifest,
+  fileOpsManifest,
+  fileSearchManifest,
+  finishTaskManifest,
+  loadSkillManifest,
+  runScriptManifest,
+  schedulerManifest,
+  screenVisionManifest,
+  socialOpsManifest,
+  strongholdOpsManifest,
+  systemInfoManifest,
+  terminalExecutorManifest,
+  webFetchManifest,
+] satisfies ToolManifest[]) {
+  for (const definition of collectManifestDefinitions(manifest)) {
+    MANIFEST_DEFINITIONS.set(definition.name, definition)
+  }
+}
+
+function getToolDefinition(tool: BuiltinTool): ToolDefinition {
+  const manifestDefinition = MANIFEST_DEFINITIONS.get(tool.name)
+  if (manifestDefinition) return manifestDefinition
+
+  throw new Error(`内置工具 ${tool.name} 缺少 manifest.json 工具定义`)
+}
+
 /**
  * 注册所有内置工具到 ToolRegistry
  *
@@ -164,14 +239,14 @@ const ALL_BUILTIN_TOOLS: BuiltinTool[] = [
 export async function registerBuiltinTools(registry: ToolRegistry): Promise<void> {
   for (const tool of ALL_BUILTIN_TOOLS) {
     await tool.onLoad?.()
-    registry.register(tool.definition, (args, ctx) => tool.execute(args, ctx))
+    registry.register(getToolDefinition(tool), (args, ctx) => tool.execute(args, ctx))
   }
   logger.info(`内置工具已注册: ${ALL_BUILTIN_TOOLS.length} 个`)
 }
 
 /** 获取所有内置工具定义 (调试用) */
 export function getBuiltinToolDefinitions(): ToolDefinition[] {
-  return ALL_BUILTIN_TOOLS.map((t) => t.definition)
+  return ALL_BUILTIN_TOOLS.map(getToolDefinition)
 }
 
 // ─────────────────────────────────────────────
