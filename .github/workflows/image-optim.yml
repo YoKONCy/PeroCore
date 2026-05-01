@@ -32,7 +32,7 @@ jobs:
 
       - name: Commit compressed images
         if: steps.calibre.outputs.markdown != ''
-        uses: stefanzweifel/git-auto-commit-action@v5
+        uses: stefanzweifel/git-auto-commit-action@v7
         with:
           commit_message: 'chore: ✨ Compress Images'
           file_pattern: '*.jpg *.jpeg *.png *.webp'
