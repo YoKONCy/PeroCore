@@ -10,7 +10,7 @@
   },
   "devDependencies": {
     "@types/three": "^0.184.0",
-    "markdown-it-mathjax3": "^4.3.2",
+    "markdown-it-mathjax3": "^5.2.0",
     "three": "^0.184.0",
     "vitepress": "^1.6.4"
   }
