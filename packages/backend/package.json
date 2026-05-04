@@ -21,7 +21,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@perocore/shared": "workspace:*",
     "@types/ws": "^8.18.1",
-    "better-sqlite3": "^11.9.0",
+    "better-sqlite3": "^12.9.0",
     "consola": "^3.4.2",
     "drizzle-orm": "^0.44.0",
     "hono": "^4.7.0",
