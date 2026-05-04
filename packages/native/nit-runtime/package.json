@@ -17,7 +17,7 @@
     "test": "cargo test"
   },
   "devDependencies": {
-    "@napi-rs/cli": "^2.14.0"
+    "@napi-rs/cli": "^3.6.2"
   },
   "files": [
     "index.ts",
