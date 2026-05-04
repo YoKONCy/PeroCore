@@ -31,7 +31,7 @@
     "triviumdb": "^0.5.1",
     "uuid": "^14.0.0",
     "ws": "^8.20.0",
-    "zod": "^3.25.76"
+    "zod": "^4.4.3"
   },
   "optionalDependencies": {
     "@nut-tree/nut-js": "^4.2.0",
