@@ -9,7 +9,7 @@
     "preview": "vitepress preview --port 6657"
   },
   "devDependencies": {
-    "@types/three": "^0.184.0",
+    "@types/three": "^0.184.1",
     "markdown-it-mathjax3": "^4.3.2",
     "three": "^0.184.0",
     "vitepress": "^1.6.4"

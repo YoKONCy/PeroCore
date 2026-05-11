@@ -53,15 +53,15 @@
     "electron:build:portable": "pnpm version:sync && pnpm build && electron-builder --config electron-builder.portable.yml"
   },
   "devDependencies": {
-    "@changesets/changelog-github": "^0.6.0",
+    "@changesets/changelog-github": "^0.7.0",
     "@changesets/cli": "^2.31.0",
-    "@tailwindcss/vite": "^4.2.4",
+    "@tailwindcss/vite": "^4.3.0",
     "@types/node": "^22.19.17",
-    "@typescript-eslint/eslint-plugin": "^8.54.0",
-    "@typescript-eslint/parser": "^8.54.0",
+    "@typescript-eslint/eslint-plugin": "^8.59.2",
+    "@typescript-eslint/parser": "^8.59.2",
     "@vitejs/plugin-vue": "^6.0.1",
-    "@vitest/coverage-v8": "^4.1.4",
-    "@vue/test-utils": "^2.4.6",
+    "@vitest/coverage-v8": "^4.1.5",
+    "@vue/test-utils": "^2.4.10",
     "cross-env": "^10.1.0",
     "electron-builder": "^26.8.1",
     "electron-vite": "^3.1.0",
@@ -75,8 +75,8 @@
     "tsx": "^4.20.0",
     "typescript": "^5.9.3",
     "vite": "^6.4.2",
-    "vitest": "^4.0.18",
-    "vue": "^3.5.32",
+    "vitest": "^4.1.5",
+    "vue": "^3.5.34",
     "vue-eslint-parser": "^10.4.0"
   }
 }
