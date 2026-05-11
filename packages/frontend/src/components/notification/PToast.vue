@@ -63,23 +63,24 @@ const defaultTitleMap: Record<string, string> = {
 </template>
 
 <style scoped>
-/* ═══ 容器 (右上角堆叠) ═══ */
+/* ═══ 容器 (全局最高通知层，右上角堆叠) ═══ */
 .toast-container {
   position: fixed;
-  top: 24px;
-  right: 24px;
-  z-index: 9999;
+  inset: 0;
+  z-index: 2147483647;
   display: flex;
   flex-direction: column;
+  align-items: flex-end;
   gap: 14px;
   pointer-events: none;
-  max-width: 420px;
-  width: 100%;
+  padding: 24px;
+  isolation: isolate;
 }
 
 /* ═══ 单条通知 (硬核心像素风) ═══ */
 .toast-item {
   pointer-events: auto;
+  width: min(420px, calc(100vw - 48px));
   /* 强制使用实心暗色背景，避免浅色透明变量导致白色字体不可见 */
   background: #1e1e24;
   border: 2px solid #0f172a;

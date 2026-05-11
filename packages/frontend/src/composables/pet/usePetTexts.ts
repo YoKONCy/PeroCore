@@ -13,6 +13,7 @@
 
 import { ref, onMounted, onUnmounted, type Ref } from 'vue'
 import { agentApi } from '../../api/modules/agentApi'
+import { listen } from '../../utils/ipcAdapter'
 
 /** 台词系统初始化参数 */
 interface UsePetTextsOptions {
@@ -39,6 +40,7 @@ export function usePetTexts(opts: UsePetTextsOptions) {
     click_leg_01: '哇！不要碰那里啦！😳',
     click_messages_01: '嗯？怎么了喵？',
   })
+  const fallbackLocalTexts = { ...localTexts.value }
 
   // ── 空闲消息池 ──
   const idleMessages = ref([
@@ -53,9 +55,12 @@ export function usePetTexts(opts: UsePetTextsOptions) {
     '嗯~今天做了什么有趣的事？',
     '主人工作辛苦了！要休息一下吗？',
   ])
+  const fallbackIdleMessages = [...idleMessages.value]
 
   // ── 空闲消息定时器 ──
   let idleTimer: ReturnType<typeof setTimeout> | null = null
+  let unlistenAgentChanged: (() => void) | null = null
+  let textLoadSeq = 0
 
   function startIdleTimer() {
     if (idleTimer) clearTimeout(idleTimer)
@@ -103,27 +108,32 @@ export function usePetTexts(opts: UsePetTextsOptions) {
   }
 
   // ── 动态台词加载 ──
-  async function loadDynamicTexts() {
-    try {
-      const activeRes = await agentApi.getActive()
-      const agentId = (activeRes?.data as { agentId?: string })?.agentId ?? 'pero'
-      activeAgentId.value = agentId
+  async function loadDynamicTexts(options: { agentId?: string; showWelcome?: boolean } = {}) {
+    const { agentId: agentIdOverride, showWelcome = true } = options
+    const currentSeq = ++textLoadSeq
 
-      // 获取 Agent 名称 (用于 UI 显示)
+    try {
+      const activeRes = agentIdOverride ? null : await agentApi.getActive()
+      const agentId = agentIdOverride ?? activeRes?.data?.agentId ?? 'pero'
+      if (currentSeq !== textLoadSeq) return
+      activeAgentId.value = agentId
+      localTexts.value = { ...fallbackLocalTexts }
+      idleMessages.value = [...fallbackIdleMessages]
+
       try {
         const listRes = await agentApi.list()
         const agents = (listRes?.data ?? []) as Array<{ id: string; name?: string }>
         const matched = agents.find((a) => a.id === agentId)
-        if (matched?.name) agentName.value = matched.name
+        agentName.value = matched?.name ?? ''
       } catch {
-        // 获取名称失败不影响核心功能
+        agentName.value = ''
       }
 
       const result = await agentApi.getTexts(agentId)
+      if (currentSeq !== textLoadSeq) return
       const texts = result?.data as Record<string, unknown> | undefined
       if (!texts || typeof texts !== 'object') return
 
-      // click 台词
       const click = texts.click as Record<string, unknown> | undefined
       if (click) {
         for (const [part, lines] of Object.entries(click)) {
@@ -136,17 +146,14 @@ export function usePetTexts(opts: UsePetTextsOptions) {
         }
       }
 
-      // idleMessages
       if (Array.isArray(texts.idleMessages) && texts.idleMessages.length > 0) {
         idleMessages.value = texts.idleMessages as string[]
       }
 
-      // visibilityBack
       if (typeof texts.visibilityBack === 'string') {
         localTexts.value['visibilityBack'] = texts.visibilityBack
       }
 
-      // welcome 分时段
       const welcome = texts.welcome as Record<string, string> | undefined
       if (welcome) {
         for (const [time, msg] of Object.entries(welcome)) {
@@ -154,22 +161,23 @@ export function usePetTexts(opts: UsePetTextsOptions) {
         }
       }
 
-      // lateNight
       if (Array.isArray(texts.lateNight)) {
         localTexts.value['lateNight'] = JSON.stringify(texts.lateNight)
       }
 
-      // 换装台词
       const rt = texts.randTextures as Record<string, string> | undefined
       if (rt) {
         if (rt.noClothes) localTexts.value['randTextures_noClothes'] = rt.noClothes
         if (rt.success) localTexts.value['randTextures_success'] = rt.success
       }
 
-      // 台词加载完成后显示分时段欢迎语
-      showTimeBasedWelcome()
+      if (showWelcome) {
+        showTimeBasedWelcome()
+      }
     } catch {
-      // 台词加载失败不影响核心功能
+      if (currentSeq !== textLoadSeq) return
+      localTexts.value = { ...fallbackLocalTexts }
+      idleMessages.value = [...fallbackIdleMessages]
     }
   }
 
@@ -201,11 +209,21 @@ export function usePetTexts(opts: UsePetTextsOptions) {
 
   onMounted(() => {
     loadDynamicTexts()
+    listen('agent_changed', (payload) => {
+      const agentId = (payload as { agentId?: unknown } | null)?.agentId
+      if (typeof agentId === 'string' && agentId && agentId !== activeAgentId.value) {
+        loadDynamicTexts({ agentId, showWelcome: false })
+      }
+    }).then((unlisten) => {
+      unlistenAgentChanged = unlisten
+    })
     document.addEventListener('visibilitychange', handleVisibilityChange)
   })
 
   onUnmounted(() => {
     if (idleTimer) clearTimeout(idleTimer)
+    unlistenAgentChanged?.()
+    unlistenAgentChanged = null
     document.removeEventListener('visibilitychange', handleVisibilityChange)
   })
 

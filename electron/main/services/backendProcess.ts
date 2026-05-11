@@ -44,8 +44,8 @@ export async function startBackend(args?: { enableSocialMode?: boolean }): Promi
     // 开发模式: 直接运行 TS (通过 tsx 或 ts-node)
     entryPoint = path.resolve(__dirname, '../../packages/backend/src/app.ts')
   } else {
-    // 生产模式: 运行编译后的 JS
-    entryPoint = path.join(paths.resources, 'backend', 'dist', 'app.js')
+    // 生产模式: 运行 electron-builder extraResources 中的后端编译入口
+    entryPoint = path.join(paths.resources, 'backend', 'backend', 'src', 'main.js')
   }
 
   logger.info('Backend', `后端入口: ${entryPoint}`)

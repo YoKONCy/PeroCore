@@ -4,6 +4,7 @@
  */
 
 import { apiClient } from '../client'
+import { emit } from '../../utils/ipcAdapter'
 
 /** Agent 列表项 */
 export interface AgentListItem {
@@ -24,7 +25,11 @@ export const agentApi = {
   getActive: () => apiClient.get<{ agentId: string }>('/agents/active'),
 
   /** 切换活跃 Agent */
-  setActive: (agentId: string) => apiClient.put<void>('/agents/active', { agentId }),
+  setActive: async (agentId: string) => {
+    const result = await apiClient.put<void>('/agents/active', { agentId })
+    await emit('agent_changed', { agentId })
+    return result
+  },
 
   /** 启用 Agent */
   enable: (agentId: string) => apiClient.post<void>(`/agents/${agentId}/enable`),

@@ -42,7 +42,7 @@ asarUnpack:
   - '**/*.dll'
   - '**/*.wasm'
 
-# 后端构建产物 + 资源
+# 后端构建产物 + 运行时资源
 extraResources:
   - from: packages/native/render-core-runtime
     to: native
@@ -52,12 +52,24 @@ extraResources:
     to: backend
     filter:
       - '**/*'
-  - from: packages/backend/prompts
-    to: backend/prompts
+  - from: packages/backend/src/services/mdp/prompts
+    to: backend/backend/src/services/mdp/prompts
     filter:
       - '**/*'
-  - from: packages/backend/agents
-    to: backend/agents
+  - from: packages/backend/src/services/mdp/agents
+    to: backend/backend/src/services/mdp/agents
+    filter:
+      - '**/*'
+  - from: packages/backend/src/services/mdp/presets
+    to: backend/backend/src/services/mdp/presets
+    filter:
+      - '**/*'
+  - from: packages/backend/src/tools
+    to: backend/backend/src/tools
+    filter:
+      - '**/manifest.json'
+  - from: packages/backend/src/assets
+    to: backend/backend/src/assets
     filter:
       - '**/*'
   - from: public/Logo.png

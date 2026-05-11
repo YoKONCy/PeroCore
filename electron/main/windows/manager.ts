@@ -141,7 +141,7 @@ export class WindowManager {
       win.loadURL(url)
     } else {
       const { app } = require('electron')
-      const indexPath = path.join(app.getAppPath(), 'dist', 'index.html')
+      const indexPath = path.join(app.getAppPath(), 'renderer', 'index.html')
       logger.info('WindowManager', `加载文件: ${indexPath}, hash: ${route}`)
       win.loadFile(indexPath, { hash: route })
     }

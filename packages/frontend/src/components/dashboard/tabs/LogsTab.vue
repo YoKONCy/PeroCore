@@ -71,10 +71,13 @@ const currentPage = ref(1)
 const totalCount = ref(0)
 const pageSize = 20
 
-const agentOptions = [
+const agentOptions = computed(() => [
   { label: '全部角色', value: 'all' },
-  { label: 'Pero', value: 'pero' },
-]
+  ...agentStore.agents.map((agent) => ({
+    label: agent.name || agent.id,
+    value: agent.id,
+  })),
+])
 
 const sourceOptions = [
   { label: '全部来源', value: 'all' },
@@ -180,12 +183,16 @@ async function toggleExpand(id: string): Promise<void> {
   }
 }
 
+function getAgentName(agentId: string): string {
+  return agentStore.agents.find((agent) => agent.id === agentId)?.name || agentId
+}
+
 function toLogEntry(s: SessionSummary): LogEntry {
   return {
     id: s.sessionId,
     sessionId: s.sessionId,
     agentId: s.agentId,
-    agentName: s.agentId === 'pero' ? 'Pero' : s.agentId,
+    agentName: getAgentName(s.agentId),
     summary: s.preview || `会话 ${s.sessionId.slice(0, 8)}...`,
     messageCount: s.messageCount,
     source: s.source || 'desktop',
@@ -327,10 +334,10 @@ watch(
   () => fetchSessions(),
 )
 
-onMounted(() => {
-  fetchSessions()
-  // 确保 agentStore 已加载（Dashboard 窗口独立于 Launcher，需要自行初始化）
-  if (!agentStore.agents.length) agentStore.fetchAgents()
+onMounted(async () => {
+  // Dashboard 窗口可能独立于 Launcher 打开，需要先拿到完整 Agent 列表再渲染筛选项和显示名
+  if (!agentStore.agents.length) await agentStore.fetchAgents()
+  await fetchSessions()
 })
 </script>
 
