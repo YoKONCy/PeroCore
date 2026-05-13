@@ -51,9 +51,8 @@ jobs:
         run: pnpm build
 
       - name: 构建 Electron 标准版 (NSIS)
-        run: pnpm exec electron-builder --config electron-builder.standard.yml
+        run: pnpm exec electron-builder --config electron-builder.standard.yml --publish never
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PEROCORE_EDITION: standard
 
       # 验证: 确认标准版不含 Steam 组件
@@ -107,9 +106,8 @@ jobs:
         run: pnpm build
 
       - name: 构建 Electron 便携版
-        run: pnpm exec electron-builder --config electron-builder.portable.yml
+        run: pnpm exec electron-builder --config electron-builder.portable.yml --publish never
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PEROCORE_EDITION: standard
 
       # 验证: 确认便携版不含 Steam 组件

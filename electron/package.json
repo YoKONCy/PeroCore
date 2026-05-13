@@ -1,6 +1,6 @@
 {
   "name": "perocore-electron",
-  "version": "0.9.1-hotfix.1",
+  "version": "0.9.1-hotfix.2",
   "private": true,
   "main": "main/index.ts",
   "scripts": {

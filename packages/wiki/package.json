@@ -1,6 +1,6 @@
 {
   "name": "@perocore/wiki",
-  "version": "0.9.1-hotfix.1",
+  "version": "0.9.1-hotfix.2",
   "description": "PeroCore Wiki — VitePress 文档站点",
   "private": true,
   "scripts": {

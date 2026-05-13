@@ -4,8 +4,8 @@
  * 管理启动流程状态机: connecting → checking → ready → entering → done
  *
  * 正确流程:
- *   EULA → 系统检查 → 就绪 → 新手引导(可选) → 点击启动
- *   → 启动后端 → 隐藏 Launcher → 拉起 Pet3D 桌宠窗口
+ *   主进程启动后端 → 等待后端就绪 → EULA → 系统检查 → 就绪 → 新手引导(可选)
+ *   → 点击启动 → 隐藏 Launcher → 拉起 Pet3D 桌宠窗口
  *
  * Pet3D 桌宠是整个应用的核心入口，Chat/Dashboard 从桌宠或托盘拉起。
  *
@@ -88,11 +88,14 @@ export function useLauncher() {
       await configApi.set('eula_accepted', 'true')
       showEula.value = false
       eulaChecked.value = true
+      errorMessage.value = ''
 
       // 检查引导状态 — EULA 通过后才可能触发引导
       await checkOnboardingStatus()
+      await runChecks()
     } catch (e) {
       logger.error('Launcher', '保存 EULA 状态失败', e)
+      errorMessage.value = '保存用户协议状态失败，请确认后端服务已启动后重试'
     }
   }
 
@@ -261,13 +264,32 @@ export function useLauncher() {
     phase.value = 'connecting'
     progress.value = 0
     errorMessage.value = ''
+    showEula.value = false
     checks.value.forEach((c) => {
       c.status = 'pending'
       c.message = undefined
     })
 
-    // 先检查 EULA 状态
+    // Electron 主进程会随应用自动拉起后端；启动器先等待后端，再读取 EULA/角色等热更新配置
+    if (isElectron()) {
+      const backendReady = await waitForBackend(30000)
+      if (!backendReady) {
+        errorMessage.value = '后端服务启动超时，请重启应用或查看日志'
+        const backendCheck = checks.value.find((c) => c.id === 'backend')
+        if (backendCheck) {
+          backendCheck.status = 'error'
+          backendCheck.message = '后端服务启动超时'
+        }
+        phase.value = 'checking'
+        return
+      }
+    }
+
     await checkEulaStatus()
+    if (showEula.value) {
+      phase.value = 'checking'
+      return
+    }
 
     // 给 UI 一点缓冲时间展示 connecting 动画
     await new Promise((r) => setTimeout(r, 400))
@@ -275,11 +297,10 @@ export function useLauncher() {
   }
 
   /**
-   * 进入应用 — 核心启动逻辑
+   * 进入应用 — 唤出桌宠入口
    *
-   * 还原 v1 正确流程:
-   *   Electron: 启动后端 → 隐藏 Launcher → 拉起 Pet3D 桌宠窗口
-   *   Browser/Docker: 直接跳转到 /app (由 router 处理)
+   * Electron: 确认后端可用 → 隐藏 Launcher → 拉起 Pet3D 桌宠窗口。
+   * Browser/Docker: 直接跳转到 /app。
    *
    * @returns 'pet' | 'browser' — 表示启动目标，供 View 层决定后续行为
    */
@@ -293,32 +314,23 @@ export function useLauncher() {
       return 'browser'
     }
 
-    // ── Electron 模式: 还原 v1 启动流程 ──
-
     try {
-      // 第 1 步: 启动后端进程
-      enteringText.value = '正在启动后端服务...'
-      logger.info('Launcher', '正在通过 IPC 启动后端...')
-      await invoke('start-backend')
-      logger.info('Launcher', '后端启动指令已发送')
-
-      // 第 2 步: 等待后端就绪 (最多 30 秒轮询)
-      enteringText.value = '等待后端就绪...'
+      enteringText.value = '正在确认后端服务状态...'
       const backendReady = await waitForBackend(30000)
       if (!backendReady) {
-        logger.warn('Launcher', '后端未在超时内就绪，仍然尝试拉起桌宠')
+        throw new Error('后端服务未就绪')
       }
 
-      // 第 3 步: 先隐藏 Launcher，避免后续窗口事件触发竞争
+      // 第 1 步: 先隐藏 Launcher，避免后续窗口事件触发竞争
       enteringText.value = '正在召唤 Pero 出现在桌面上...'
       logger.info('Launcher', '先隐藏 Launcher 窗口')
       await invoke('hide-launcher')
 
-      // 第 4 步: 拉起 Pet3D 桌宠窗口 (核心入口！)
+      // 第 2 步: 拉起 Pet3D 桌宠窗口 (核心入口！)
       logger.info('Launcher', '正在创建 Pet3D 窗口...')
       await invoke('open-pet-window')
 
-      // 第 5 步: 短暂等待 Pet3D 渲染就绪
+      // 第 3 步: 短暂等待 Pet3D 渲染就绪
       await new Promise((r) => setTimeout(r, 500))
       enteringText.value = '欢迎回来，主人！'
 

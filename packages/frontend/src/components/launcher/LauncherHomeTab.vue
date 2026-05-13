@@ -4,7 +4,7 @@
  *
  * 包含：3个系统监控卡片 (CPU/内存/运行状态) + 大启动按钮
  */
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { PixelIcon } from '../pixel'
 import { systemApi } from '../../api/modules/systemApi'
 import type { SystemInfo } from '../../api/modules/systemApi'
@@ -38,6 +38,10 @@ const enabledCount = ref(0)
 const gatewayNodes = ref(0)
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
+
+const statusDescription = computed(() =>
+  props.isRunning ? '所有系统在线。角色窗口已激活。' : '点击上方按钮唤出桌宠窗口。',
+)
 
 async function fetchSysInfo() {
   try {
@@ -246,11 +250,7 @@ function formatUptime(seconds: number): string {
           {{ props.isRunning ? 'PeroCore 正在运行' : '准备就绪' }}
         </h3>
         <p class="text-slate-400 text-xs md:text-sm max-w-md text-center">
-          {{
-            props.isRunning
-              ? '所有系统在线。角色窗口已激活。'
-              : '点击上方按钮初始化所有后端服务及角色窗口。'
-          }}
+          {{ statusDescription }}
         </p>
         <p
           v-if="phase === 'entering'"

@@ -17,6 +17,7 @@
 import { app, BrowserWindow, dialog, protocol } from 'electron'
 import { release } from 'node:os'
 import { logger } from './utils/logger'
+import { isDev } from './utils/env'
 import { windowManager } from './windows/manager'
 import { registerIpcHandlers } from './ipcBridge'
 import { appEvents } from './events'
@@ -100,6 +101,16 @@ app.whenReady().then(async () => {
 
     // 创建 Launcher 窗口
     windowManager.createLauncherWindow()
+
+    // Electron 桌面端的启动器需要立即读取配置、角色与系统状态，因此后端必须随主进程启动
+    const { startBackend } = await import('./services/backendProcess')
+    if (isDev) {
+      startBackend().catch((e) => {
+        logger.info('Main', `开发模式后端自动启动跳过，可能已由外部脚本托管: ${e}`)
+      })
+    } else {
+      await startBackend()
+    }
 
     // 启动系统服务
     const { createTray } = await import('./services/tray')

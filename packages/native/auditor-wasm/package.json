@@ -1,6 +1,6 @@
 {
   "name": "@perocore/auditor-wasm",
-  "version": "0.9.1-hotfix.1",
+  "version": "0.9.1-hotfix.2",
   "description": "PeroCore 终端命令安全审计模块 (WASM)",
   "main": "index.ts",
   "types": "index.d.ts",

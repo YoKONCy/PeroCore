@@ -14,7 +14,7 @@ import type { AppContext } from '../container'
 import { addLogListener, getLogHistory } from '../lib/logBroadcaster'
 
 /** 应用版本号 (由 scripts/sync-version.ts 自动同步) */
-const APP_VERSION = '0.9.1-hotfix.1'
+const APP_VERSION = '0.9.1-hotfix.2'
 
 export function createSystemRouter(ctx: AppContext) {
   const router = new Hono()
