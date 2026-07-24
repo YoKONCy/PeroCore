@@ -19,7 +19,7 @@ jobs:
     if: github.actor != 'dependabot[bot]'
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Compress Images
         id: calibre
