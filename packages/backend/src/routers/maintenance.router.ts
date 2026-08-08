@@ -10,7 +10,7 @@
  * Tagger, Consolidator, Auditor, RetirementPolicy,
  * DreamAssociator, GraphGardener, ReflectionOrchestrator
  *
- * 遵循 02_API_RESPONSE_SPEC.md 信封规范。
+ * 遵循 .docs/S02_API_SPEC.md 信封规范。
  *
  * @module packages/backend/src/routers/maintenance.router
  */

@@ -9,6 +9,8 @@
  * @see https://bedrock.dev/docs/stable/MoLang
  */
 
+import { logger } from '../../../lib/logger'
+
 // ══════ 类型定义 ══════
 
 /** Molang 运行时查询变量 — 对应 Bedrock 的 query.* 命名空间 */
@@ -239,7 +241,7 @@ export class Molang {
       return func
     } catch (e) {
       // 编译失败时只警告一次，然后缓存返回 0 的函数
-      console.warn(`[Molang] 编译失败 (已静默): ${expression}`, e)
+      logger.warn('Molang', `编译失败，已静默: ${expression}`, e)
       const fallback: MolangFunc = () => 0
       this.cache.set(key, fallback)
       return fallback

@@ -2,23 +2,31 @@
 /**
  * WorkView — 工作模式页面 (IDE)
  *
+ * ⚠️ 架构过渡说明（AIOS 重构）：
+ * 这是旧架构下耦合在主 Agent 里的 IDE 页面，语义在 AIOS 下已不成立：
+ * - 重活（大规模 coding）→ 未来的独立 coding sub 应用
+ * - 主 Agent 轻量编辑 → 计划合并到 ChatView 的综合面板
+ *
+ * 当前后端无 /api/ide 路由，此页面的文件操作会 404。
+ * 组件（FileExplorer/CodeEditor）保留供未来综合面板复用。
+ * TODO: ChatView 综合面板重构完成后，删除此 View 和对应路由入口。
+ *
  * 分三栏布局：文件树 + 编辑器(含 Tab) + 聊天侧栏。
  * 底部终端管理器 (P5 延后)。
- *
- * @see WorkModeView 拆分方案
  */
 import { ref, onMounted, onErrorCaptured } from 'vue'
 import { PixelIcon } from '../components/pixel'
 import FileExplorer from '../components/ide/FileExplorer.vue'
 import CodeEditor from '../components/ide/CodeEditor.vue'
 import { ChatContainer } from '../components/chat'
-import { useAgentStore } from '../stores'
+import { useAgentStore, useNotificationStore } from '../stores'
 import { ideApi } from '../api/modules/ideApi'
 import type { FileNode } from '../components/ide/FileExplorer.vue'
 
 defineOptions({ name: 'WorkView' })
 
 const agentStore = useAgentStore()
+const notif = useNotificationStore()
 const error = ref<string | null>(null)
 const isReady = ref(false)
 
@@ -78,8 +86,9 @@ async function saveFile(content: string) {
   try {
     await ideApi.writeFile(currentFile.value.path, content)
     dirtyPaths.value.delete(currentFile.value.path)
+    notif.toast('文件已保存', { type: 'success' })
   } catch {
-    // 已通知
+    notif.toast('保存失败', { type: 'error' })
   }
 }
 

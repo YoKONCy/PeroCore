@@ -52,6 +52,7 @@ const emit = defineEmits<{
   (e: 'ptt-down'): void
   (e: 'ptt-up'): void
   (e: 'model-change', manifestPath: string): void
+  (e: 'display-mode-change', mode: 'bubble' | 'lyric'): void
 }>()
 
 // ── 展开/收起 (v1: showInput) ──
@@ -136,8 +137,7 @@ function reloadPet() {
 }
 
 function openChatWindow() {
-  // 打开 IDE/工作台窗口 (含 ChatView)
-  invoke('open-ide-window').catch(() => {})
+  invoke('open-chat-window').catch(() => {})
 }
 
 function openDashboard() {
@@ -176,6 +176,7 @@ const displayMode = ref(
 function toggleDisplayMode() {
   displayMode.value = displayMode.value === 'bubble' ? 'lyric' : 'bubble'
   localStorage.setItem('ppc.display_mode', displayMode.value)
+  emit('display-mode-change', displayMode.value as 'bubble' | 'lyric')
 }
 
 // ── 外观菜单: 获取 avatar 数据 ──
@@ -360,7 +361,7 @@ defineExpose({ displayMode })
           :title="displayMode === 'bubble' ? '切换到歌词模式' : '切换到气泡模式'"
           @click.stop="toggleDisplayMode"
         >
-          <PixelIcon :name="displayMode === 'bubble' ? 'mic' : 'chat'" size="sm" />
+          <PixelIcon :name="displayMode === 'bubble' ? 'sparkle' : 'quote'" size="sm" />
         </button>
         <button class="tool-btn" title="聊天" @click.stop="openChatWindow">
           <PixelIcon name="chat" size="sm" />
@@ -739,8 +740,9 @@ defineExpose({ displayMode })
 }
 
 .tool-btn {
-  background: rgba(20, 20, 20, 0.85);
-  border: 2px solid #e0e0e0;
+  /* 霓虹风格: 透明背景 + 柔和发光边框 */
+  background: rgba(20, 20, 20, 0.75);
+  border: 2px solid rgba(255, 255, 255, 0.35);
   width: 42px;
   height: 42px;
   border-radius: 4px;
@@ -749,33 +751,69 @@ defineExpose({ displayMode })
   align-items: center;
   justify-content: center;
   font-size: 18px;
-  transition: all 0.2s;
-  box-shadow: 4px 4px 0px rgba(0, 0, 0, 0.5);
-  color: #ffffff;
-  text-shadow: 1px 1px 0px #000;
+  transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+  box-shadow:
+    0 0 8px rgba(255, 255, 255, 0.08),
+    4px 4px 0px rgba(0, 0, 0, 0.4);
+  color: rgba(255, 255, 255, 0.7);
+  text-shadow: none;
 }
 
-.tool-btn:hover,
-.tool-btn.active {
-  transform: translateX(-5px); /* 向内滑动，与左侧标签从左向右滑动对称 */
-  background: rgba(40, 40, 40, 0.95);
-  border-color: #ffffff;
-  box-shadow: 6px 6px 0px rgba(0, 0, 0, 0.6);
+.tool-btn:hover {
+  transform: translateX(-4px) scale(1.05);
+  background: rgba(60, 60, 80, 0.9);
+  border-color: rgba(255, 255, 255, 0.8);
   color: #ffffff;
+  box-shadow:
+    0 0 16px rgba(255, 255, 255, 0.25),
+    0 0 32px rgba(200, 220, 255, 0.15),
+    6px 6px 0px rgba(0, 0, 0, 0.4);
 }
 
+.tool-btn.active,
 .tool-btn:active {
-  transform: translateX(-3px) translateY(2px);
-  box-shadow: 2px 2px 0px rgba(0, 0, 0, 0.6);
+  transform: translateX(-4px) scale(0.96);
+  background: rgba(80, 80, 120, 0.95);
+  border-color: rgba(255, 255, 255, 1);
+  color: #ffffff;
+  box-shadow:
+    0 0 20px rgba(255, 255, 255, 0.35),
+    0 0 40px rgba(200, 180, 255, 0.2),
+    2px 2px 0px rgba(0, 0, 0, 0.4);
+}
+
+.tool-btn:focus-visible {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.9);
+  box-shadow:
+    0 0 0 3px rgba(255, 255, 255, 0.15),
+    0 0 16px rgba(255, 255, 255, 0.2);
 }
 
 .voice-btn.active.mode-vad {
+  border-color: rgba(255, 136, 204, 0.8);
   color: #ff99cc;
-  border-color: #ff99cc;
+  box-shadow:
+    0 0 12px rgba(255, 136, 204, 0.4),
+    0 0 24px rgba(255, 136, 204, 0.2);
 }
+.voice-btn.active.mode-vad:hover {
+  box-shadow:
+    0 0 20px rgba(255, 136, 204, 0.6),
+    0 0 40px rgba(255, 136, 204, 0.3);
+}
+
 .voice-btn.active.mode-ptt {
+  border-color: rgba(95, 184, 120, 0.8);
   color: #5fb878;
-  border-color: #5fb878;
+  box-shadow:
+    0 0 12px rgba(95, 184, 120, 0.4),
+    0 0 24px rgba(95, 184, 120, 0.2);
+}
+.voice-btn.active.mode-ptt:hover {
+  box-shadow:
+    0 0 20px rgba(95, 184, 120, 0.6),
+    0 0 40px rgba(95, 184, 120, 0.3);
 }
 
 /* ── PTT 按钮 ── */

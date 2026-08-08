@@ -21,7 +21,9 @@ import type { TtsService, TtsResult } from './ttsService'
 import type { AsrService, AsrResult } from './asrService'
 import type { AgentService } from '../agent/agentService'
 import type { GatewayHub } from '../gateway/gatewayHub'
-import type { SessionService } from '../session/sessionService'
+// AIOS: SessionService 依赖已移除（新版不再使用旧 Session 模型）
+import type { ThreadService } from '../thread/threadService'
+import type { ContextCompiler } from '../context/contextCompiler'
 import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('RealtimeSession')
@@ -80,7 +82,9 @@ export interface RealtimeSessionDeps {
   asrService: AsrService
   agentService: AgentService
   gatewayHub: GatewayHub
-  sessionService: SessionService
+  // AIOS: 新增 Thread + ContextCompiler 依赖，替代旧 SessionService
+  threadService: ThreadService
+  contextCompiler: ContextCompiler
 }
 
 // ── Service ──
@@ -210,16 +214,53 @@ export class RealtimeSessionManager {
     return this.deps.asrService.recognize({ audio, language })
   }
 
-  /** 执行 Agent 对话 */
+  /**
+   * 执行 Agent 对话（AIOS 新版流程）
+   *
+   * 语音场景的 sessionId 作为 threadId 使用：
+   * 1. 获取或创建 desktop Thread
+   * 2. 追加 user 消息
+   * 3. ContextCompiler 编译上下文
+   * 4. AgentService 执行对话（chatWithCompiledMessages）
+   * 5. 追加 assistant 回复
+   */
   private async runAgent(text: string, agentId: string, sessionId: string): Promise<string> {
-    // 通过 AgentService 走标准 5 阶段管道
-    const reply = await this.deps.agentService.chat({
-      messages: [{ role: 'user', content: text }],
+    const threadId = sessionId
+
+    // 获取或创建 Thread（语音复用 sessionId 作为 threadId）
+    let thread = await this.deps.threadService.getThread(threadId)
+    if (!thread) {
+      thread = await this.deps.threadService.createThread({
+        id: threadId, // 语音场景复用 sessionId 作为 threadId
+        agentId,
+        channel: 'desktop',
+        title: '语音对话',
+      })
+    }
+
+    // 追加用户消息
+    await this.deps.threadService.appendUserMessage(threadId, text)
+
+    // 编译上下文
+    const compiled = await this.deps.contextCompiler.compile(threadId, agentId)
+
+    // 执行对话
+    const reply = await this.deps.agentService.chatWithCompiledMessages({
+      messages: compiled.messages,
       agentId,
-      source: 'desktop',
-      sessionId,
-      isVoiceMode: true,
+      threadId,
     })
+
+    // 追加 Agent 回复
+    const pairId = `pair_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    if (reply) {
+      await this.deps.threadService.appendAssistantMessage({
+        threadId,
+        content: reply,
+        pairId,
+        agentId,
+      })
+    }
 
     return reply
   }

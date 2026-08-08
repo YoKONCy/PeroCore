@@ -9,6 +9,7 @@
  */
 
 import * as THREE from 'three'
+import { logger } from '../../../../lib/logger'
 import type { IModelProvider, ParsedModelData, ParsedBone } from './IModelProvider'
 import type { IAvatarManifest } from './IAvatarManifest'
 // Provider 接收到的路径已经是可直接 fetch 的 URL，无需额外转换
@@ -88,12 +89,12 @@ export class StandardBedrockProvider implements IModelProvider {
         )
         return parsedData
       } catch (e) {
-        console.warn('[StandardBedrockProvider] Rust 解析失败，回退到 JS 路径:', e)
+        logger.warn('StandardBedrockProvider', 'Rust 解析失败，回退到 JS 路径', e)
       }
     }
 
     // JS 回退路径：直接解析 Bedrock JSON
-    console.log('[StandardBedrockProvider] 使用 JS 路径解析模型')
+    logger.info('StandardBedrockProvider', '使用 JS 路径解析模型')
     const jsonStr = new TextDecoder().decode(arrayBuffer)
     const json = JSON.parse(jsonStr)
 
@@ -163,7 +164,7 @@ export class StandardBedrockProvider implements IModelProvider {
             })
           }
         } catch (e) {
-          console.warn(`[StandardBedrockProvider] 加载动画失败: ${path}`, e)
+          logger.warn('StandardBedrockProvider', `加载动画失败: ${path}`, e)
         }
       }
     }

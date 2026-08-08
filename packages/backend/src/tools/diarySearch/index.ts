@@ -5,7 +5,7 @@
  * 1. 语义检索 (query) — 通过 embedding 向量匹配最相关的日记
  * 2. 精确日期 (date) — 直接按日期查找指定天的日记
  *
- * 日记存储在 shared/diary.tdb 中，由 DiaryEngine 每日 23:00 生成。
+ * 日记存储在 agent_{agentId}/diary.tdb 中（AIOS Phase5 按 Agent 隔离），由 DiaryEngine 每日 23:00 生成。
  *
  * @module packages/backend/src/tools/diarySearch
  */
@@ -62,7 +62,7 @@ export const searchDiaryTool: BuiltinTool = {
 
     // 模式 2: 语义检索
     if (query) {
-      return await searchBySemantic(query, limit)
+      return await searchBySemantic(query, limit, ctx.agentId)
     }
 
     // 无参数 — 返回最近的日记
@@ -72,7 +72,8 @@ export const searchDiaryTool: BuiltinTool = {
 
 /** 按日期精确查找 */
 async function searchByDate(date: string, agentId: string): Promise<string> {
-  const store = _storeRegistry!.getDiaryStore()
+  // AIOS(Phase5): 日记按 Agent 隔离，getDiaryStore 需要 agentId
+  const store = _storeRegistry!.getDiaryStore(agentId)
   const allIds = store.allNodeIds()
 
   const results: DiaryPayload[] = []
@@ -81,8 +82,7 @@ async function searchByDate(date: string, agentId: string): Promise<string> {
     if (!node) continue
     const payload = node.payload as unknown as DiaryPayload
     if (payload?.type !== 'diary') continue
-    if (payload.date === date && payload.agentId === agentId) {
-      // 可选：只返回匹配 agentId 的日记，或全部
+    if (payload.date === date) {
       results.push(payload)
     }
   }
@@ -102,15 +102,15 @@ async function searchByDate(date: string, agentId: string): Promise<string> {
 }
 
 /** 语义检索 */
-async function searchBySemantic(query: string, limit: number): Promise<string> {
+async function searchBySemantic(query: string, limit: number, agentId: string): Promise<string> {
   // 生成查询向量
   const queryVector = await _embeddingService!.embedOne(query)
   if (!queryVector?.length) {
     return JSON.stringify({ error: '查询向量生成失败' })
   }
 
-  // 在 diary.tdb 中语义检索
-  const hits = await _vectorRepo!.searchDiary(queryVector, limit)
+  // AIOS(Phase5): 在 agent_{agentId}/diary.tdb 中语义检索
+  const hits = await _vectorRepo!.searchDiary(queryVector, agentId, limit)
 
   if (hits.length === 0) {
     return JSON.stringify({
@@ -140,7 +140,8 @@ async function searchBySemantic(query: string, limit: number): Promise<string> {
 
 /** 列出最近日记 (按日期倒序) */
 async function listRecentDiaries(limit: number, agentId: string): Promise<string> {
-  const store = _storeRegistry!.getDiaryStore()
+  // AIOS(Phase5): 日记按 Agent 隔离，getDiaryStore 需要 agentId
+  const store = _storeRegistry!.getDiaryStore(agentId)
   const allIds = store.allNodeIds()
 
   const allDiaries: DiaryPayload[] = []
@@ -149,7 +150,6 @@ async function listRecentDiaries(limit: number, agentId: string): Promise<string
     if (!node) continue
     const payload = node.payload as unknown as DiaryPayload
     if (payload?.type !== 'diary') continue
-    if (payload.agentId !== agentId) continue
     allDiaries.push(payload)
   }
 

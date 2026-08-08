@@ -6,7 +6,7 @@ Direct Consumer: agents/*/capabilities.yaml prompt_fragments
 Target Service: backend/services/prompt/promptService.ts
 Target Function: PromptService.buildPromptMessages()
 Injected Via: capability prompt_fragments -> final system prompt
-Model Role: main / work
+Model Role: main
 -->
 
 <Ability>

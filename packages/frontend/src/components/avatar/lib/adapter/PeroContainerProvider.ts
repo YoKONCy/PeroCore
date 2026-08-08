@@ -10,6 +10,7 @@
  */
 
 import * as THREE from 'three'
+import { logger } from '../../../../lib/logger'
 import type { IModelProvider, ParsedModelData } from './IModelProvider'
 // Provider 接收到的路径已经是可直接 fetch 的 URL，无需额外转换
 
@@ -70,7 +71,7 @@ export class PeroContainerProvider implements IModelProvider {
         const text = new TextDecoder().decode(manifestData)
         return JSON.parse(text)
       } catch (e) {
-        console.warn('[PeroContainer] 解析 manifest 失败:', e)
+        logger.warn('PeroContainer', '解析 manifest 失败', e)
       }
     }
 
@@ -92,10 +93,7 @@ export class PeroContainerProvider implements IModelProvider {
       this.findFile(['.json']) // 兜底
 
     if (!modelData) {
-      console.error(
-        '[PeroContainer] 容器内未找到模型文件, 可用文件:',
-        Array.from(this.files.keys()),
-      )
+      logger.error('PeroContainer', '容器内未找到模型文件', Array.from(this.files.keys()))
       throw new Error('[PeroContainer] 容器内未找到模型文件')
     }
 
@@ -105,19 +103,17 @@ export class PeroContainerProvider implements IModelProvider {
       throw new Error('容器模型解析需要 Electron 环境（Rust Native 模块）')
     }
 
-    console.time('[PeroContainer] Rust 解析模型')
-    console.log(`[PeroContainer] 准备解析模型, 数据大小: ${modelData.length} bytes`)
+    logger.debug('PeroContainer', '准备解析模型', { dataSize: modelData.length })
 
     const parsedData = await electronWin.electron.loadStandardModel(
       modelData,
       this.boneFilterPatterns,
     )
-    console.timeEnd('[PeroContainer] Rust 解析模型')
 
     if (!parsedData?.bones?.length) {
-      console.warn('[PeroContainer] 解析出的模型骨骼为空')
+      logger.warn('PeroContainer', '解析出的模型骨骼为空')
     } else {
-      console.log(`[PeroContainer] 模型解析成功, 包含 ${parsedData.bones.length} 个骨骼`)
+      logger.debug('PeroContainer', '模型解析成功', { boneCount: parsedData.bones.length })
     }
 
     return parsedData
@@ -161,7 +157,7 @@ export class PeroContainerProvider implements IModelProvider {
         },
         undefined,
         (error) => {
-          console.error('[PeroContainer] 加载纹理失败:', error)
+          logger.error('PeroContainer', '加载纹理失败', error)
           URL.revokeObjectURL(url)
           reject(error)
         },
@@ -185,7 +181,7 @@ export class PeroContainerProvider implements IModelProvider {
           }
         }
       } catch (e) {
-        console.warn(`[PeroContainer] 解析动画失败: ${path}`, e)
+        logger.warn('PeroContainer', `解析动画失败: ${path}`, e)
       }
     }
 
@@ -209,7 +205,7 @@ export class PeroContainerProvider implements IModelProvider {
           }
         }
       } catch (e) {
-        console.warn(`[PeroContainer] 解析动画控制器失败: ${path}`, e)
+        logger.warn('PeroContainer', `解析动画控制器失败: ${path}`, e)
       }
     }
 
@@ -235,7 +231,7 @@ export class PeroContainerProvider implements IModelProvider {
           }
         }
       } catch (e) {
-        console.warn(`[PeroContainer] 解析渲染控制器失败: ${path}`, e)
+        logger.warn('PeroContainer', `解析渲染控制器失败: ${path}`, e)
       }
     }
 
@@ -274,9 +270,7 @@ export class PeroContainerProvider implements IModelProvider {
     const arrayBuffer = await response.arrayBuffer()
 
     // 调用 Rust Native 解密并解包
-    console.time('[PeroContainer] 解密并解包')
     const container = await electronWin.electron.loadPeroContainer(new Uint8Array(arrayBuffer))
-    console.timeEnd('[PeroContainer] 解密并解包')
 
     // 构建文件映射（路径统一为小写、正斜杠）
     for (const file of container.files) {

@@ -21,7 +21,7 @@ export function useMessageVisibility(chatContainer: Ref<HTMLElement | null>) {
   const pausedMessages = new WeakSet<HTMLElement>()
 
   function createObserver() {
-    if (!chatContainer.value) return
+    if (observer.value || !chatContainer.value) return
 
     observer.value = new IntersectionObserver(
       (entries) => {
@@ -100,12 +100,15 @@ export function useMessageVisibility(chatContainer: Ref<HTMLElement | null>) {
   // ── 公开 API ──
 
   /** 开始观察一个消息元素 */
-  function observe(messageEl: HTMLElement) {
+  function observe(messageEl: Element | null | undefined) {
+    if (!(messageEl instanceof HTMLElement)) return
+    if (!observer.value) createObserver()
     observer.value?.observe(messageEl)
   }
 
   /** 停止观察 */
-  function unobserve(messageEl: HTMLElement) {
+  function unobserve(messageEl: Element | null | undefined) {
+    if (!(messageEl instanceof HTMLElement)) return
     observer.value?.unobserve(messageEl)
     pausedMessages.delete(messageEl)
   }

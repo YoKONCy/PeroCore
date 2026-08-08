@@ -11,7 +11,6 @@
   "name": "Nana",
   "description": "雌小鬼Nana！可爱的小傲娇！",
   "personas": {
-    "work": "personas/work.md",
     "social": "personas/social.md",
     "group": "personas/group.md"
   },

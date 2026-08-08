@@ -129,7 +129,7 @@ function createRetriever(overrides: Record<string, unknown> = {}) {
     ],
   ])
   const deps = {
-    embeddingService: { embedOne: vi.fn().mockResolvedValue([1, 0]) },
+    embeddingService: { embedOne: vi.fn().mockResolvedValue([1, 0]), isAvailable: true },
     contextRnn: {
       update: vi.fn(),
       generateBias: vi.fn(() => new Float32Array([1, 0])),
@@ -171,7 +171,7 @@ describe('ContextualRetriever', () => {
     })
 
     const emptyEmbedding = createRetriever({
-      embeddingService: { embedOne: vi.fn().mockResolvedValue([]) },
+      embeddingService: { embedOne: vi.fn().mockResolvedValue([]), isAvailable: true },
     })
     const emptyEmbeddingResult = await emptyEmbedding.retriever.search({
       query: '你好',

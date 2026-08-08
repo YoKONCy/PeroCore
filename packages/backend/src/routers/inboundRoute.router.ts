@@ -1,0 +1,146 @@
+/**
+ * InboundRoute Router — 入站路由表管理 API
+ *
+ * 第七阶段 #7：提供外部消息路由规则的 CRUD 端点。
+ * 管理员通过此 API 配置"消息来源 → Agent/Channel"的映射，
+ * 替代旧的全局活跃 Agent 对外部消息的决定作用。
+ *
+ * 端点：
+ * - GET    /api/inbound-routes           列出所有路由
+ * - GET    /api/inbound-routes/resolve   按 (source, identifier) 查询路由
+ * - POST   /api/inbound-routes           创建路由
+ * - PUT    /api/inbound-routes/:id       更新路由
+ * - DELETE /api/inbound-routes/:id       删除路由
+ *
+ * @module packages/backend/src/routers/inboundRoute.router
+ */
+
+import { Hono } from 'hono'
+import { zValidator } from '@hono/zod-validator'
+import { z } from 'zod'
+import { AppError } from '../lib/appError'
+import type { AppContext } from '../container'
+
+// ─────────────────────────────────────────────
+// Zod Schema
+// ─────────────────────────────────────────────
+
+/** 合法的来源类型 */
+const SOURCE_VALUES = ['qq_private', 'qq_group', 'discord', 'webhook', 'monitor'] as const
+
+/** 合法的通道类型 */
+const CHANNEL_VALUES = ['desktop', 'social', 'group', 'companion'] as const
+
+/** 创建路由的请求体 Schema */
+const createRouteSchema = z.object({
+  source: z.enum(SOURCE_VALUES),
+  identifier: z.string().min(1).max(200),
+  agentId: z
+    .string()
+    .min(1)
+    .max(32)
+    .regex(/^[a-z0-9_-]+$/, 'agentId 只允许小写字母、数字、下划线和短横线'),
+  channel: z.enum(CHANNEL_VALUES).optional().default('social'),
+  threadId: z.string().max(64).optional().nullable(),
+  config: z.record(z.unknown()).optional(),
+})
+
+/** 更新路由的请求体 Schema（所有字段可选） */
+const updateRouteSchema = z.object({
+  agentId: z
+    .string()
+    .min(1)
+    .max(32)
+    .regex(/^[a-z0-9_-]+$/)
+    .optional(),
+  channel: z.enum(CHANNEL_VALUES).optional(),
+  threadId: z.string().max(64).optional().nullable(),
+  config: z.record(z.unknown()).optional(),
+})
+
+// ─────────────────────────────────────────────
+// Router
+// ─────────────────────────────────────────────
+
+export function createInboundRouteRouter(ctx: AppContext) {
+  const router = new Hono()
+
+  // GET /api/inbound-routes — 列出所有路由
+  router.get('/', async (c) => {
+    const routes = await ctx.inboundRouteRepo.list()
+    return c.json({ code: 'OK', message: '获取成功', data: routes })
+  })
+
+  // GET /api/inbound-routes/resolve — 按 (source, identifier) 查询路由
+  // 便捷接口：外部消息入口可直接调用此端点测试路由命中情况
+  router.get('/resolve', async (c) => {
+    const source = c.req.query('source')
+    const identifier = c.req.query('identifier')
+    if (!source || !identifier) {
+      throw new AppError('VALIDATION_ERROR', {
+        message: '缺少参数 source 或 identifier',
+      })
+    }
+    const resolved = await ctx.inboundRouteRepo.resolve(source, identifier)
+    if (!resolved) {
+      return c.json({ code: 'NOT_FOUND', message: '未匹配到路由', data: null }, 404)
+    }
+    return c.json({ code: 'OK', message: '路由命中', data: resolved })
+  })
+
+  // POST /api/inbound-routes — 创建路由
+  router.post('/', zValidator('json', createRouteSchema), async (c) => {
+    const body = c.req.valid('json')
+    try {
+      const route = await ctx.inboundRouteRepo.create({
+        source: body.source,
+        identifier: body.identifier,
+        agentId: body.agentId,
+        channel: body.channel,
+        threadId: body.threadId ?? null,
+        config: body.config,
+      })
+      return c.json(
+        { code: 'CREATED', message: '路由创建成功', data: route },
+        201,
+      )
+    } catch (err) {
+      // 唯一索引冲突（source + identifier 已存在）
+      const msg = err instanceof Error ? err.message : String(err)
+      throw new AppError('ALREADY_EXISTS', {
+        message: `路由已存在: ${body.source}/${body.identifier}`,
+        data: { source: body.source, identifier: body.identifier, detail: msg },
+      })
+    }
+  })
+
+  // PUT /api/inbound-routes/:id — 更新路由
+  router.put('/:id', zValidator('json', updateRouteSchema), async (c) => {
+    const id = c.req.param('id')
+    const body = c.req.valid('json')
+    const updated = await ctx.inboundRouteRepo.update(id, body)
+    if (!updated) {
+      throw new AppError('NOT_FOUND', {
+        message: `路由 "${id}" 不存在`,
+        data: { id },
+      })
+    }
+    return c.json({ code: 'OK', message: '路由更新成功', data: updated })
+  })
+
+  // DELETE /api/inbound-routes/:id — 删除路由
+  router.delete('/:id', async (c) => {
+    const id = c.req.param('id')
+    const existing = await ctx.inboundRouteRepo.findById(id)
+    if (!existing) {
+      throw new AppError('NOT_FOUND', {
+        message: `路由 "${id}" 不存在`,
+        data: { id },
+      })
+    }
+    await ctx.inboundRouteRepo.delete(id)
+    return c.json({ code: 'OK', message: `路由 "${id}" 已删除` })
+  })
+
+  return router
+}

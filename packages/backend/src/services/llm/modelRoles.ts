@@ -1,23 +1,36 @@
 /**
- * ModelRoleResolver — 统一模型角色解析
+ * ModelRoleResolver — 统一模型任务槽解析
  *
- * 模型分工 (四角色):
+ * 设计理念：
+ * 用户在 Dashboard 配置若干"模型实例"（如 GPT-4o、Claude），
+ * 并指定其中一个为主模型。系统内所有需要 LLM 的任务通过"任务槽"
+ * 指派使用哪个模型实例，未指派的回退到主模型。
+ *
+ * 任务槽（中粒度，按子系统+用途分组）:
  * ──────────────────────────────────────────────────────────────
- *   角色        config key                    职责
+ *   任务槽              config key                     职责
  * ──────────────────────────────────────────────────────────────
- *   主模型      model.role.main               Agent 对话、日记生成、台词更新
- *   书记员      model.role.secretary           Scorer 记忆提炼、图谱构建
- *   反思        model.role.reflection          Tagger / Consolidator / Auditor
- *   辅助        model.role.auxiliary           NIT 工具调用
+ *   main（主模型）      model.main                     Agent 对话、日记生成
+ *   scorer             model.task.scorer              记忆提炼（Scorer、Importer）
+ *   reflection         model.task.reflection          记忆反思（Tagger/Consolidator/Auditor/Gardener/Dreamer/WaifuUpdater）
+ *   social_reply       model.task.social_reply        社交回复生成（需人格表现力）
+ *   social_scheduler   model.task.social_scheduler    社交决策（思考状态机）
+ *   social_scorer      model.task.social_scorer       社交记忆炼化
  * ──────────────────────────────────────────────────────────────
+ *
+ * ⚠️ 特例说明（社交应用任务槽统一配置）：
+ * 按 AIOS 资源隔离原则，subagent 应独立管理自己的模型配置。
+ * 但社交应用极为特殊（由用户在 Dashboard 直接启动、跟随主 Agent 生命周期），
+ * 因此社交相关的 3 个任务槽（social_reply/social_scheduler/social_scorer）
+ * 统一在主配置页指派。**其他 subagent 应用绝对不能这样做**，
+ * 必须在应用自己的 manifest/config 中声明模型需求。
  *
  * 数据流:
- * Dashboard ModelConfigTab  →  ai_model_configs 表 (ModelRepository)
- *                           →  config KV: model.role.main = modelId
+ * Dashboard 模型配置页 → ai_model_configs 表（模型实例池）
+ *                       → config KV: model.main = instanceId（主模型指定）
+ *                       → config KV: model.task.{slot} = instanceId（任务指派）
  *
- * 本模块: 读 model.role.{role} → 查 ModelRepository → 组装 ModelConfig
- *
- * 回退规则: 角色未配置时回退到主模型 → 环境变量兜底。
+ * 回退链: task 专用模型 → 主模型 → 环境变量 → null
  *
  * @module packages/backend/src/services/llm/modelRoles
  */
@@ -29,24 +42,53 @@ import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('ModelRoleResolver')
 
-/** 模型角色枚举 */
-export type ModelRole = 'main' | 'secretary' | 'reflection' | 'auxiliary'
+// ─────────────────────────────────────────────
+// 任务槽定义
+// ─────────────────────────────────────────────
 
-/** config KV 中的角色 key */
-const ROLE_CONFIG_KEYS: Record<ModelRole, string> = {
-  main: 'model.role.main',
-  secretary: 'model.role.secretary',
-  reflection: 'model.role.reflection',
-  auxiliary: 'model.role.aux',
+/**
+ * 任务槽枚举
+ *
+ * - main: 主模型（特殊，不是 task slot，是所有任务的回退默认值）
+ * - 其他: 具体任务槽，未配置时回退到 main
+ */
+export type ModelTaskSlot =
+  | 'main'
+  | 'scorer'
+  | 'reflection'
+  | 'social_reply'
+  | 'social_scheduler'
+  | 'social_scorer'
+
+/** config KV 中的 key 映射 */
+const TASK_CONFIG_KEYS: Record<ModelTaskSlot, string> = {
+  main: 'model.main',
+  scorer: 'model.task.scorer',
+  reflection: 'model.task.reflection',
+  social_reply: 'model.task.social_reply',
+  social_scheduler: 'model.task.social_scheduler',
+  social_scorer: 'model.task.social_scorer',
 }
 
-/** 各角色的默认温度 */
-const ROLE_DEFAULT_TEMPERATURE: Record<ModelRole, number> = {
+/**
+ * 各任务槽的默认温度
+ *
+ * main/social_reply 需要创意表现力 → 较高温度
+ * scorer/social_scorer/social_scheduler 需要结构化输出/决策 → 较低温度
+ * reflection 需要稳定分析 → 最低温度
+ */
+const TASK_DEFAULT_TEMPERATURE: Record<ModelTaskSlot, number> = {
   main: 0.7,
-  secretary: 0.3,
+  scorer: 0.3,
   reflection: 0.2,
-  auxiliary: 0.1,
+  social_reply: 0.7, // 社交回复是对外人格表现，需要创意
+  social_scheduler: 0.3, // 决策类，低温
+  social_scorer: 0.3, // 结构化输出，低温
 }
+
+// ─────────────────────────────────────────────
+// Resolver
+// ─────────────────────────────────────────────
 
 export class ModelRoleResolver {
   constructor(
@@ -55,58 +97,59 @@ export class ModelRoleResolver {
   ) {}
 
   /**
-   * 获取指定角色的模型配置
+   * 获取指定任务槽的模型配置
    *
-   * 回退链: 角色专用模型 → 主模型 → 环境变量 → null
+   * 回退链: 任务槽专用模型 → 主模型 → 环境变量 → null
    */
-  async resolve(role: ModelRole): Promise<ModelConfig | null> {
-    // 1. 尝试获取角色专用模型
-    if (role !== 'main') {
-      const roleConfig = await this.loadFromDb(ROLE_CONFIG_KEYS[role])
-      if (roleConfig) {
-        logger.debug(`使用 ${role} 专用模型: ${roleConfig.modelId}`)
+  async resolve(task: ModelTaskSlot): Promise<ModelConfig | null> {
+    // 1. 尝试获取任务槽专用模型（main 本身跳过此步）
+    if (task !== 'main') {
+      const taskConfig = await this.loadFromDb(TASK_CONFIG_KEYS[task])
+      if (taskConfig) {
+        logger.debug(`使用 ${task} 任务模型: ${taskConfig.modelId}`)
         return {
-          ...roleConfig,
-          temperature: roleConfig.temperature ?? ROLE_DEFAULT_TEMPERATURE[role],
+          ...taskConfig,
+          temperature: taskConfig.temperature ?? TASK_DEFAULT_TEMPERATURE[task],
         }
       }
     }
 
     // 2. 回退到主模型
-    const mainConfig = await this.loadFromDb(ROLE_CONFIG_KEYS.main)
+    const mainConfig = await this.loadFromDb(TASK_CONFIG_KEYS.main)
     if (mainConfig) {
-      if (role !== 'main') {
-        logger.debug(`${role} 未配置专用模型, 回退到主模型: ${mainConfig.modelId}`)
+      if (task !== 'main') {
+        logger.debug(`${task} 未配置专用模型, 回退到主模型: ${mainConfig.modelId}`)
       }
       return {
         ...mainConfig,
-        temperature: mainConfig.temperature ?? ROLE_DEFAULT_TEMPERATURE[role],
+        temperature: mainConfig.temperature ?? TASK_DEFAULT_TEMPERATURE[task],
       }
     }
 
     // 3. 环境变量兜底
     const envConfig = this.loadFromEnv()
     if (envConfig) {
-      logger.debug(`${role} 从环境变量加载: ${envConfig.modelId}`)
+      logger.debug(`${task} 从环境变量加载: ${envConfig.modelId}`)
       return {
         ...envConfig,
-        temperature: ROLE_DEFAULT_TEMPERATURE[role],
+        temperature: TASK_DEFAULT_TEMPERATURE[task],
       }
     }
 
-    logger.warn(`${role} 无可用模型配置`)
+    logger.warn(`${task} 无可用模型配置`)
     return null
   }
 
   /**
-   * 创建绑定到特定角色的 getter (用于依赖注入)
+   * 创建绑定到特定任务槽的 getter（用于依赖注入）
    *
    * @example
    * const getMainModel = resolver.bind('main')
-   * const config = await getMainModel()
+   * const getScorerModel = resolver.bind('scorer')
+   * const config = await getScorerModel()
    */
-  bind(role: ModelRole): () => Promise<ModelConfig | null> {
-    return () => this.resolve(role)
+  bind(task: ModelTaskSlot): () => Promise<ModelConfig | null> {
+    return () => this.resolve(task)
   }
 
   // ─────────────────────────────────────────
@@ -116,17 +159,15 @@ export class ModelRoleResolver {
   /**
    * 从 DB 加载模型配置
    *
-   * 流程: config KV (model.role.main) → 获取 modelId
+   * 流程: config KV (model.main / model.task.{slot}) → 获取 instanceId
    *       → ModelRepository 查 ai_model_configs 表获取完整信息
    *       → 如果模型自身没有 apiKey，从全局供应商配置 fallback
    */
   private async loadFromDb(configKey: string): Promise<ModelConfig | null> {
     try {
-      // 读 config KV 获取模型 ID
       const modelIdStr = await this.configRepo.get(configKey)
       if (!modelIdStr) return null
 
-      // 查 ai_model_configs 表
       const modelId = Number(modelIdStr)
       if (isNaN(modelId)) return null
 
@@ -141,7 +182,6 @@ export class ModelRoleResolver {
       let apiBase: string | undefined = row.apiBase ?? undefined
 
       if (!apiKey) {
-        // 全局供应商 fallback: global.{provider}.apiKey
         const provider = row.provider
         const globalApiKey = await this.configRepo.get(`global.${provider}.apiKey`)
         const globalApiBase = await this.configRepo.get(`global.${provider}.apiBase`)
@@ -163,6 +203,7 @@ export class ModelRoleResolver {
         apiBase,
         temperature: row.temperature ?? undefined,
         maxTokens: row.maxTokens ?? undefined,
+        enableVision: row.enableVision ?? false,
       }
     } catch (err) {
       logger.warn(`加载模型配置失败 (key=${configKey}): ${err}`)
@@ -181,6 +222,7 @@ export class ModelRoleResolver {
       modelId,
       apiKey,
       apiBase: process.env.PERO_LLM_API_BASE,
+      enableVision: false,
     }
   }
 }

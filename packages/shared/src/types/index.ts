@@ -35,6 +35,17 @@ export type {
 
 export type { ChatRole, ConversationLogDto, AnalysisStatus, AiModelConfigDto } from './chat.types'
 
+// 第七阶段修复（批次 E2）：能力协议共享类型
+export type {
+  DaemonToNodeMessage,
+  NodeToDaemonMessage,
+  DaemonMessage,
+  ScreenCaptureResult,
+  ClipboardReadResult,
+  ClipboardWriteResult,
+  ActiveWindowResult,
+} from './capability.types'
+
 export type {
   ExtensionType,
   ExtensionCategory,

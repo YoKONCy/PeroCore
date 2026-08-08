@@ -1,74 +1,27 @@
 /**
- * 后端服务启动入口
+ * 后端服务启动入口（开发期 / Electron spawn 兼容期）
  *
- * 初始化 DI 容器 → 异步初始化 → 创建 Hono 应用 → 启动 HTTP 服务器。
- * 默认监听 127.0.0.1:9120。
+ * 实际启动逻辑由 @perocore/backend/startup 中的 startServer() 统一处理，
+ * 本文件仅保留 Banner 与启动调用，确保 `pnpm start` 默认路径下行为
+ * 与 daemon/main.ts 完全对齐。
+ *
+ * 独立部署请使用 @perocore/daemon（packages/daemon/src/main.ts）。
  *
  * @module packages/backend/src/main
  */
 
-import type { Server } from 'node:http'
-import { serve } from '@hono/node-server'
-import { createApp } from './app'
-import { createAppContext, createDefaultConfig, initAppContext } from './container'
-import { runStartupTasks } from './lifecycle'
-import { logger, initLogFile } from './lib/logger'
-import { SERVER_HOST, SERVER_PORT } from './lib/env'
-import { registerProcessGuards, onShutdown } from './lib/processGuards'
-import { setupGatewayWebSocket } from './services/gateway/wsUpgrade'
+import { startServer } from './startup'
+import { logger } from './lib/logger'
 
-// 0. 启动 Banner (最早输出，在任何初始化之前)
-printBanner()
-
-// 1. 初始化日志文件持久化 (越早越好)
-initLogFile()
-
-// 2. 注册进程守护 (日志就绪后立即注册)
-registerProcessGuards()
-
-async function main() {
-  // 1. 初始化 DI 容器 (同步阶段)
-  const config = createDefaultConfig()
-  const ctx = await createAppContext(config)
-
-  // 2. 异步初始化 (工具注册 + 扩展加载 + 资产扫描)
-  await initAppContext(ctx)
-
-  // 3. 启动后任务 (调度器启动 + 任务恢复)
-  await runStartupTasks(ctx)
-
-  // 4. 创建 Hono 应用
-  const app = createApp(ctx)
-
-  // 5. 启动 HTTP 服务器
-  logger.info(`PeroCore 后端启动中... → http://${SERVER_HOST}:${SERVER_PORT}`)
-
-  const server = serve(
-    {
-      fetch: app.fetch,
-      hostname: SERVER_HOST,
-      port: SERVER_PORT,
-    },
-    (info) => {
-      logger.success(`PeroCore 后端已就绪 → http://${info.address}:${info.port}`)
-    },
-  )
-
-  // 6. 挂载 WebSocket 升级 (A02 §7: Gateway 与 HTTP 共用端口 :9120)
-  //    同时挂载社交适配器 WS 端点 (/api/social/ws → NapCat 反向连接)
-  setupGatewayWebSocket(server as Server, ctx.gatewayHub, ctx)
-  ctx.gatewayHub.startHeartbeat()
-
-  // 注册优雅退出回调
-  onShutdown(async () => {
-    logger.info('正在关闭数据库连接...')
-    // TODO: ctx.db.close() 等资源清理
-    logger.info('资源清理完成')
-  })
-}
-
-// 启动
-main().catch((err) => {
+// 启动（公共启动逻辑统一委托给 startServer）
+startServer({
+  processName: 'PeroCore 后端',
+  printBanner: printBanner,
+  onHttpReady: (address, port) => {
+    // backend 入口保留 success 日志（绿色对勾），与历史行为一致
+    logger.success(`PeroCore 后端已就绪 → http://${address}:${port}`)
+  },
+}).catch((err) => {
   logger.error(`启动失败: ${err}`)
   if (err instanceof Error) {
     console.error(err.stack)

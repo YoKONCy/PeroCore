@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentListItem } from '@perocore/frontend/api/modules/agentApi'
 import type { Notification } from '@perocore/frontend/stores/useNotificationStore'
-import type { ChatMessage, GenerationState } from '@perocore/frontend/stores/useSessionStore'
+import type { ChatMessage, GenerationState } from '@perocore/frontend/stores/useThreadStore'
 
 type RefValue<T> = { value: T }
 
@@ -34,9 +34,9 @@ type AgentTestStore = {
   switchAgent: (agentId: string) => Promise<void>
 }
 
-type SessionTestStore = {
-  sessionId: RefValue<string>
-  source: RefValue<string>
+type ThreadTestStore = {
+  threadId: RefValue<string>
+  channel: RefValue<string>
   messages: RefValue<ChatMessage[]>
   generationState: RefValue<GenerationState>
   isGenerating: RefValue<boolean>
@@ -46,7 +46,7 @@ type SessionTestStore = {
   finishStreaming: () => void
   editMessage: (id: string, newContent: string) => void
   deleteMessage: (id: string) => void
-  startSession: (newSessionId: string, newSource?: string) => void
+  startThread: (newThreadId: string, newChannel?: string) => void
 }
 
 const vueState = vi.hoisted(() => ({
@@ -55,7 +55,8 @@ const vueState = vi.hoisted(() => ({
 
 const apiMocks = vi.hoisted(() => ({
   agentList: vi.fn(),
-  agentSetActive: vi.fn(),
+  // 第七阶段修复（批次 C）：agentApi.setActive 已删除，改用 runtimeApi.setWindowAgent
+  runtimeSetWindowAgent: vi.fn(),
   configGet: vi.fn(),
   configSet: vi.fn(),
   configBatch: vi.fn(),
@@ -63,6 +64,28 @@ const apiMocks = vi.hoisted(() => ({
   chatDeleteMessage: vi.fn(),
   loggerError: vi.fn(),
 }))
+
+// 第七阶段修复（批次 C）：useAgentStore.getWindowId 依赖 localStorage
+// 测试环境（node）无 localStorage，需要提供最小 mock
+const localStorageMock = vi.hoisted(() => {
+  const store = new Map<string, string>()
+  return {
+    getItem: vi.fn((key: string) => store.get(key) ?? null),
+    setItem: vi.fn((key: string, value: string) => {
+      store.set(key, value)
+    }),
+    removeItem: vi.fn((key: string) => {
+      store.delete(key)
+    }),
+    clear: vi.fn(() => {
+      store.clear()
+    }),
+  }
+})
+Object.defineProperty(globalThis, 'localStorage', {
+  value: localStorageMock,
+  configurable: true,
+})
 
 vi.mock('vue', () => ({
   ref: <T>(value: T) => ({ value }),
@@ -86,7 +109,14 @@ vi.mock('pinia', () => ({
 vi.mock('@perocore/frontend/api/modules/agentApi', () => ({
   agentApi: {
     list: apiMocks.agentList,
-    setActive: apiMocks.agentSetActive,
+    // 第七阶段修复（批次 C）：setActive 已删除，不再 mock
+  },
+}))
+
+// 第七阶段修复（批次 C）：新增 runtimeApi mock
+vi.mock('@perocore/frontend/api/modules/runtimeApi', () => ({
+  runtimeApi: {
+    setWindowAgent: apiMocks.runtimeSetWindowAgent,
   },
 }))
 
@@ -105,6 +135,16 @@ vi.mock('@perocore/frontend/api/modules/chatApi', () => ({
   },
 }))
 
+// 屏蔽 threadsApi 以避免 transport.ts 在 node 测试环境引用 window
+vi.mock('@perocore/frontend/api/modules/threadsApi', () => ({
+  threadsApi: {
+    list: vi.fn(),
+    get: vi.fn(),
+    create: vi.fn(),
+    getLatest: vi.fn(),
+  },
+}))
+
 vi.mock('@perocore/frontend/lib/logger', () => ({
   logger: {
     error: apiMocks.loggerError,
@@ -114,7 +154,7 @@ vi.mock('@perocore/frontend/lib/logger', () => ({
 import { useAgentStore } from '@perocore/frontend/stores/useAgentStore'
 import { useConfigStore } from '@perocore/frontend/stores/useConfigStore'
 import { useNotificationStore } from '@perocore/frontend/stores/useNotificationStore'
-import { useSessionStore } from '@perocore/frontend/stores/useSessionStore'
+import { useThreadStore } from '@perocore/frontend/stores/useThreadStore'
 
 describe('useNotificationStore', () => {
   beforeEach(() => {
@@ -255,27 +295,32 @@ describe('useAgentStore', () => {
 
   it('应当切换活跃 Agent 并刷新列表', async () => {
     const store = useAgentStore() as unknown as AgentTestStore
-    apiMocks.agentSetActive.mockResolvedValue({ code: 'OK' })
+    // 第七阶段修复（批次 C）：改用 runtimeApi.setWindowAgent 而非 agentApi.setActive
+    apiMocks.runtimeSetWindowAgent.mockResolvedValue({ code: 'OK' })
     apiMocks.agentList.mockResolvedValue({
       data: [{ id: 'assistant', name: 'Assistant', isEnabled: true, isActive: true }],
     })
 
     await store.switchAgent('assistant')
 
-    expect(apiMocks.agentSetActive).toHaveBeenCalledWith('assistant')
+    // 断言调用了 runtimeApi.setWindowAgent，参数为 (windowId, 'assistant')
+    expect(apiMocks.runtimeSetWindowAgent).toHaveBeenCalledWith(
+      expect.stringMatching(/^win-/),
+      'assistant',
+    )
     expect(store.activeAgentId.value).toBe('assistant')
     expect(store.agents.value).toHaveLength(1)
   })
 })
 
-describe('useSessionStore', () => {
+describe('useThreadStore', () => {
   beforeEach(() => {
     vueState.stores.clear()
     vi.clearAllMocks()
   })
 
   it('应当添加消息、追加内容并完成流式生成', () => {
-    const store = useSessionStore() as unknown as SessionTestStore
+    const store = useThreadStore() as unknown as ThreadTestStore
 
     store.addMessage({
       id: '1',
@@ -294,10 +339,12 @@ describe('useSessionStore', () => {
     expect(store.streamingMessageId.value).toBeNull()
   })
 
-  it('应当编辑和删除消息并同步合法数字 ID', async () => {
-    const store = useSessionStore() as unknown as SessionTestStore
+  it('应当在 threadId 就绪后编辑和删除消息并同步后端', async () => {
+    const store = useThreadStore() as unknown as ThreadTestStore
     apiMocks.chatEditMessage.mockResolvedValue({ code: 'OK' })
     apiMocks.chatDeleteMessage.mockResolvedValue({ code: 'OK' })
+
+    store.startThread('thread-1', 'desktop')
     store.addMessage({ id: '12', role: 'user', content: '旧内容', timestamp: 'now' })
     store.addMessage({ id: 'draft', role: 'assistant', content: '草稿', timestamp: 'now' })
 
@@ -306,23 +353,24 @@ describe('useSessionStore', () => {
     store.editMessage('draft', '新草稿')
     await Promise.resolve()
 
-    expect(apiMocks.chatEditMessage).toHaveBeenCalledWith(12, '新内容')
-    expect(apiMocks.chatDeleteMessage).toHaveBeenCalledWith(12)
+    expect(apiMocks.chatEditMessage).toHaveBeenCalledWith('thread-1', '12', '新内容')
+    expect(apiMocks.chatEditMessage).toHaveBeenCalledWith('thread-1', 'draft', '新草稿')
+    expect(apiMocks.chatDeleteMessage).toHaveBeenCalledWith('thread-1', '12')
     expect(store.messages.value).toEqual([
       { id: 'draft', role: 'assistant', content: '新草稿', timestamp: 'now' },
     ])
   })
 
-  it('应当重置会话并维护生成状态 getter', () => {
-    const store = useSessionStore() as unknown as SessionTestStore
+  it('应当重置 Thread 并维护生成状态 getter', () => {
+    const store = useThreadStore() as unknown as ThreadTestStore
 
     store.generationState.value = 'thinking'
     expect(store.isGenerating.value).toBe(true)
 
-    store.startSession('session-1', 'web')
+    store.startThread('thread-1', 'desktop')
 
-    expect(store.sessionId.value).toBe('session-1')
-    expect(store.source.value).toBe('web')
+    expect(store.threadId.value).toBe('thread-1')
+    expect(store.channel.value).toBe('desktop')
     expect(store.messages.value).toEqual([])
     expect(store.isGenerating.value).toBe(false)
   })

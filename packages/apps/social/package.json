@@ -1,0 +1,15 @@
+{
+  "name": "@perocore/social",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "drizzle-orm": "^0.44.0",
+    "hono": "^4.7.0",
+    "triviumdb": "^0.5.1",
+    "uuid": "^14.0.0"
+  },
+  "devDependencies": {
+    "@types/uuid": "^11.0.0"
+  }
+}

@@ -3,7 +3,6 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ModelRoleResolver } from '@perocore/backend/services/llm/modelRoles'
-import { PresetLoader } from '@perocore/backend/services/prompt/presetLoader'
 import { AssetRegistry } from '@perocore/backend/core/assetRegistry'
 import type { PathResolver } from '@perocore/backend/core/pathResolver'
 
@@ -30,7 +29,7 @@ describe('ModelRoleResolver', () => {
 
   it('应当优先使用角色专用模型并补默认温度', async () => {
     const { configRepo, modelRepo } = createModelDeps(
-      { 'model.role.secretary': '2' },
+      { 'model.task.scorer': '2' },
       {
         2: {
           provider: 'openai',
@@ -43,7 +42,7 @@ describe('ModelRoleResolver', () => {
     )
     const resolver = new ModelRoleResolver(configRepo as never, modelRepo as never)
 
-    const config = await resolver.resolve('secretary')
+    const config = await resolver.resolve('scorer')
 
     expect(config).toEqual({
       provider: 'openai',
@@ -52,13 +51,14 @@ describe('ModelRoleResolver', () => {
       apiBase: undefined,
       temperature: 0.3,
       maxTokens: 1000,
+      enableVision: false,
     })
-    expect(configRepo.get).toHaveBeenCalledWith('model.role.secretary')
+    expect(configRepo.get).toHaveBeenCalledWith('model.task.scorer')
   })
 
   it('应当在角色未配置时回退主模型并使用角色温度', async () => {
     const { configRepo, modelRepo } = createModelDeps(
-      { 'model.role.main': '1' },
+      { 'model.main': '1' },
       { 1: { provider: 'gemini', modelId: 'main-model', apiKey: 'main-key', temperature: null } },
     )
     const resolver = new ModelRoleResolver(configRepo as never, modelRepo as never)
@@ -76,7 +76,7 @@ describe('ModelRoleResolver', () => {
   it('应当使用全局供应商 API Key 作为模型配置兜底', async () => {
     const { configRepo, modelRepo } = createModelDeps(
       {
-        'model.role.main': '1',
+        'model.main': '1',
         'global.openai.apiKey': 'global-key',
         'global.openai.apiBase': 'https://api.example.com',
       },
@@ -105,10 +105,10 @@ describe('ModelRoleResolver', () => {
     process.env.PERO_LLM_API_KEY = 'env-key'
     process.env.PERO_LLM_MODEL = 'env-model'
     process.env.PERO_LLM_PROVIDER = 'anthropic'
-    const { configRepo, modelRepo } = createModelDeps({ 'model.role.main': 'abc' }, {})
+    const { configRepo, modelRepo } = createModelDeps({ 'model.main': 'abc' }, {})
     const resolver = new ModelRoleResolver(configRepo as never, modelRepo as never)
 
-    const config = await resolver.resolve('auxiliary')
+    const config = await resolver.resolve('reflection')
     delete process.env.PERO_LLM_API_KEY
     delete process.env.PERO_LLM_MODEL
     const missing = await resolver.resolve('main')
@@ -117,7 +117,7 @@ describe('ModelRoleResolver', () => {
       provider: 'anthropic',
       modelId: 'env-model',
       apiKey: 'env-key',
-      temperature: 0.1,
+      temperature: 0.2,
     })
     expect(missing).toBeNull()
     expect(modelRepo.findById).not.toHaveBeenCalled()
@@ -125,7 +125,7 @@ describe('ModelRoleResolver', () => {
 
   it('应当创建绑定到指定角色的 getter', async () => {
     const { configRepo, modelRepo } = createModelDeps(
-      { 'model.role.main': '1' },
+      { 'model.main': '1' },
       { 1: { provider: 'openai', modelId: 'main', apiKey: 'key' } },
     )
     const resolver = new ModelRoleResolver(configRepo as never, modelRepo as never)
@@ -133,50 +133,6 @@ describe('ModelRoleResolver', () => {
     const getMain = resolver.bind('main')
 
     await expect(getMain()).resolves.toMatchObject({ modelId: 'main' })
-  })
-})
-
-describe('PresetLoader', () => {
-  let root: string
-
-  beforeEach(() => {
-    root = join(tmpdir(), `perocore-presets-${Date.now()}-${Math.random()}`)
-    mkdirSync(root, { recursive: true })
-  })
-
-  afterEach(() => {
-    rmSync(root, { recursive: true, force: true })
-  })
-
-  it('应当加载 yaml preset 并按 source 映射返回', () => {
-    writeFileSync(
-      join(root, 'social.yaml'),
-      '---\nname: social\ndescription: 社交模式\n---\n- id: memory\n  enabled: false\n  userOverride: |\n    使用社交记忆\n    保持简短\n- id: tools\n  enabled: true\n',
-    )
-    const loader = new PresetLoader(root)
-
-    const preset = loader.getPresetForSource('social')
-
-    expect(preset).toEqual({
-      name: 'social',
-      description: '社交模式',
-      slots: [
-        { id: 'memory', position: 0, enabled: false, userOverride: '使用社交记忆\n保持简短' },
-        { id: 'tools', position: 0, enabled: true },
-      ],
-    })
-    expect(loader.getPresetForSource('desktop')).toBeUndefined()
-  })
-
-  it('应当忽略缺失 frontmatter、非 yaml 文件和不存在的目录', () => {
-    writeFileSync(join(root, 'bad.yaml'), 'name: bad')
-    writeFileSync(join(root, 'note.txt'), 'ignore')
-
-    const loader = new PresetLoader(root)
-    const missingLoader = new PresetLoader(join(root, 'missing'))
-
-    expect(loader.getPresetForSource('social')).toBeUndefined()
-    expect(missingLoader.getPresetForSource('social')).toBeUndefined()
   })
 })
 

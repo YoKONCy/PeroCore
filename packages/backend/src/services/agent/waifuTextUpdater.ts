@@ -22,6 +22,7 @@ import type { AgentManager } from './agentManager'
 import type { MemoryRepository } from '../../repositories/memory.repo'
 import { parseLlmJson } from '../../shared/llmJsonParser'
 import { createLogger } from '../../lib/logger'
+import { readFileSync } from 'fs'
 
 const logger = createLogger('WaifuTextUpdater')
 
@@ -108,9 +109,16 @@ export class WaifuTextUpdater {
     }
 
     // 4. 渲染提示词
+    // AIOS: 人设统一从 system_prompt.md 读取（原 workPersona 已移除）
+    let personaDefinition = ''
+    try {
+      personaDefinition = readFileSync(agent.promptPath, 'utf-8')
+    } catch {
+      logger.warn(`读取人设文件失败: ${agent.promptPath}`)
+    }
     const systemPrompt = this.deps.mdpEngine.render('tasks/agent/waifu_text_updater', {
       agent_name: agent.name,
-      persona_definition: agent.workPersona ?? '',
+      persona_definition: personaDefinition,
       context_text: contextText,
       current_texts: JSON.stringify(currentTexts, null, 2),
       target_fields: Object.entries(TARGET_FIELDS)

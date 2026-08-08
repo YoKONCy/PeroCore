@@ -14,6 +14,9 @@
  */
 
 import type { BuiltinTool } from '../index'
+import { createLogger } from '../../lib/logger'
+
+const logger = createLogger('FinishTask')
 
 // ─────────────────────────────────────────────
 // 运行时注入的依赖 (由 container.ts 设置)
@@ -101,6 +104,11 @@ export const finishTaskTool: BuiltinTool = {
     const hasStateUpdate =
       mood || vibe || mind || Object.keys(clickMessages).length > 0 || idleMsgs || backMsgs
 
+    if (hasStateUpdate && !_petStateUpdater) {
+      // 依赖未注入：状态会被静默丢弃，必须告警，否则前端永远收不到更新
+      logger.warn('检测到角色状态更新，但 _petStateUpdater 未注入，状态更新被跳过！')
+    }
+
     if (hasStateUpdate && _petStateUpdater) {
       try {
         await _petStateUpdater.update(ctx.agentId, {
@@ -111,10 +119,14 @@ export const finishTaskTool: BuiltinTool = {
           idleMessages: idleMsgs,
           backMessages: backMsgs,
         })
+        logger.info(
+          `角色状态已更新: agent=${ctx.agentId}, mood=${mood ?? '-'}, vibe=${vibe ?? '-'}, mind=${mind ? mind.slice(0, 20) : '-'}`,
+        )
 
         // Gateway 广播 state_update
         if (_gatewayBroadcast) {
-          const payload: Record<string, unknown> = {}
+          // agentId 必带：前端按当前活跃 agent 过滤，避免非活跃 agent 的更新污染显示
+          const payload: Record<string, unknown> = { agentId: ctx.agentId }
           if (mood) payload.mood = mood
           if (vibe) payload.vibe = vibe
           if (mind) payload.mind = mind
@@ -122,10 +134,16 @@ export const finishTaskTool: BuiltinTool = {
           if (idleMsgs) payload.idle_messages = idleMsgs
           if (backMsgs) payload.back_messages = backMsgs
 
-          await _gatewayBroadcast('state_update', payload).catch(() => {})
+          await _gatewayBroadcast('state_update', payload).catch((err) => {
+            logger.warn(`state_update 广播失败: ${err}`)
+          })
+          logger.debug('已广播 state_update 至前端')
+        } else {
+          logger.warn('_gatewayBroadcast 未注入，state_update 无法推送到前端')
         }
-      } catch {
-        // 状态更新失败不阻断 finish_task
+      } catch (err) {
+        // 状态更新失败不阻断 finish_task，但必须打日志暴露根因 (DB/schema/注入问题)
+        logger.error(`角色状态更新失败: ${err instanceof Error ? err.stack || err.message : err}`)
       }
     }
 

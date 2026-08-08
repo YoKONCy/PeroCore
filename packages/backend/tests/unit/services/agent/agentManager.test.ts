@@ -17,7 +17,8 @@ function createAgent(
   files: Record<string, string> = {},
 ) {
   const agentDir = join(root, id)
-  mkdirSync(join(agentDir, 'personas'), { recursive: true })
+  // AIOS: personas 目录已废弃，人设统一由 system_prompt.md 管理
+  mkdirSync(agentDir, { recursive: true })
   writeFileSync(join(agentDir, 'agent.json'), JSON.stringify(config, null, 2), 'utf-8')
   for (const [relativePath, content] of Object.entries(files)) {
     writeFileSync(join(agentDir, relativePath), content, 'utf-8')
@@ -63,15 +64,14 @@ describe('AgentManager', () => {
       {
         name: 'Pero',
         description: '猫猫助手',
-        personas: { work: 'personas/work.md', social: 'personas/social.md' },
+        // AIOS: personas 字段已废弃，人设统一由 system_prompt.md 管理
         traits: { work: ['认真'], social: ['可爱'] },
         social: { use_stickers: true, qq_id: '123' },
         tool_policies: { file: 'allow' },
         waifu_texts: { idle: '喵' },
       },
       {
-        'personas/work.md': '工作人设',
-        'personas/social.md': '社交人设',
+        'system_prompt.md': '你是 Pero，一只猫猫助手。',
         'avatar.png': 'png',
       },
     )
@@ -81,45 +81,39 @@ describe('AgentManager', () => {
     const pero = manager.getAgent('PERO')
     const agents = manager.listAgents()
 
+    // AIOS: workPersona/socialPersona 已移除，改用 promptPath 指向 system_prompt.md
     expect(pero).toMatchObject({
       id: 'pero',
       name: 'Pero',
       description: '猫猫助手',
-      workPersona: '工作人设',
-      socialPersona: '社交人设',
-      workTraits: ['认真'],
       socialTraits: ['可爱'],
       socialBinding: { use_stickers: true, qq_id: '123' },
       toolPolicies: { file: 'allow' },
       useStickers: true,
       waifuTexts: { idle: '喵' },
     })
+    expect(pero?.promptPath).toContain('system_prompt.md')
     expect(pero?.avatarPath).toContain('avatar.png')
     expect(agents.map((agent) => agent.id).sort()).toEqual(['custom', 'pero'])
     expect(manager.enabledAgents).toEqual(new Set(['pero', 'custom']))
-    expect(manager.getActiveAgent()?.id).toBe('pero')
+    expect(manager.getDefaultAgent()?.id).toBe('pero')
   })
 
-  it('应当切换、启用与禁用 Agent 并拒绝非法状态', () => {
+  it('应当启用与禁用 Agent 并拒绝非法状态', () => {
     createAgent(builtinDir, 'pero', { name: 'Pero' })
     createAgent(dataDir, 'custom', { name: 'Custom' })
     const manager = new AgentManager(createResolver(builtinDir, dataDir))
 
-    const switched = manager.setActiveAgent('custom')
-    const disableActive = manager.disableAgent('custom')
-    const disablePero = manager.disableAgent('pero')
-    const switchDisabled = manager.setActiveAgent('pero')
+    // AIOS: setActiveAgent 已移除，defaultAgentId 永远是 pero，不能禁用默认 Agent
+    const disableDefault = manager.disableAgent('pero')
+    const disableCustom = manager.disableAgent('custom')
     const enableMissing = manager.enableAgent('missing')
-    const enablePero = manager.enableAgent('pero')
-    const switchPero = manager.setActiveAgent('pero')
+    const enableCustom = manager.enableAgent('custom')
 
-    expect(switched).toBe(true)
-    expect(disableActive).toBe(false)
-    expect(disablePero).toBe(true)
-    expect(switchDisabled).toBe(false)
+    expect(disableDefault).toBe(false) // 不能禁用默认 Agent
+    expect(disableCustom).toBe(true) // custom 非默认，可以禁用
     expect(enableMissing).toBe(false)
-    expect(enablePero).toBe(true)
-    expect(switchPero).toBe(true)
+    expect(enableCustom).toBe(true)
   })
 
   it('应当创建和删除用户自定义 Agent', () => {
@@ -134,15 +128,16 @@ describe('AgentManager', () => {
     expect(() => manager.createAgent({ id: 'pero', name: '重复' })).toThrow('已存在')
   })
 
-  it('应当拒绝删除当前 Agent、内置 Agent 和不存在的 Agent', () => {
+  it('应当拒绝删除默认 Agent、内置 Agent 和不存在的 Agent', () => {
     createAgent(builtinDir, 'pero', { name: 'Pero' })
     createAgent(dataDir, 'custom', { name: 'Custom' })
     const manager = new AgentManager(createResolver(builtinDir, dataDir))
 
     expect(() => manager.deleteAgent('missing')).toThrow('不存在')
+    // AIOS: pero 是默认 Agent，不能删除（setActiveAgent 已移除，无法切换默认）
     expect(() => manager.deleteAgent('pero')).toThrow('当前活跃')
-    expect(manager.setActiveAgent('custom')).toBe(true)
-    expect(() => manager.deleteAgent('pero')).toThrow('内置')
+    // custom 是用户自定义且非默认，可以删除
+    expect(() => manager.deleteAgent('custom')).not.toThrow()
   })
 
   it('应当合并动态台词并应用社交覆盖配置', async () => {

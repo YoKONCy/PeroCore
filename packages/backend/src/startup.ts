@@ -1,0 +1,226 @@
+/**
+ * 公共启动模块
+ *
+ * 提取 backend/main.ts 与 daemon/main.ts 中重复的启动逻辑：
+ * - Banner 打印
+ * - 日志文件初始化
+ * - 进程守护注册
+ * - DI 容器初始化 + 异步初始化 + 启动后任务
+ * - Hono 应用创建 + HTTP 服务器启动
+ * - Gateway WebSocket 挂载
+ * - CapabilityBridge WS 服务端启动
+ * - 优雅退出回调注册
+ *
+ * 入口文件（backend/main.ts、daemon/main.ts）只需提供差异化的 Banner
+ * 和回调，其余启动流程统一委托给 startServer()。
+ *
+ * @module packages/backend/src/startup
+ */
+
+import type { Server } from 'node:http'
+import { serve } from '@hono/node-server'
+import { createApp } from './app'
+import { createAppContext, createDefaultConfig, initAppContext } from './container'
+import { runStartupTasks } from './lifecycle'
+import { logger, initLogFile } from './lib/logger'
+import { SERVER_HOST, SERVER_PORT } from './lib/env'
+import { registerProcessGuards, onShutdown } from './lib/processGuards'
+import { setupGatewayWebSocket } from './services/gateway/wsUpgrade'
+
+// ─────────────────────────────────────────────
+// 类型定义
+// ─────────────────────────────────────────────
+
+/**
+ * 启动服务器选项
+ *
+ * 入口文件通过此选项注入差异化内容（Banner、回调等），
+ * 公共启动流程由 startServer() 统一处理。
+ */
+export interface StartServerOptions {
+  /** 进程显示名（用于日志，如 "PeroCore 后端" / "PeroCore Daemon"） */
+  processName: string
+  /** 启动 Banner 打印函数（在日志文件初始化之前调用，越早越好） */
+  printBanner: () => void
+  /** HTTP 服务器就绪回调（可选，默认使用 logger.info） */
+  onHttpReady?: (address: string, port: number) => void
+  /** 额外的退出清理回调（在 CapabilityBridge.stop 之后执行） */
+  onExtraShutdown?: () => Promise<void> | void
+}
+
+// ─────────────────────────────────────────────
+// 启动函数
+// ─────────────────────────────────────────────
+
+/**
+ * 启动 PeroCore 服务（公共入口）
+ *
+ * 统一 backend 与 daemon 的启动链路：
+ * 1. 打印 Banner
+ * 2. 初始化日志文件持久化
+ * 3. 注册进程守护（uncaughtException / SIGINT / SIGTERM）
+ * 4. 初始化 DI 容器（同步阶段）
+ * 5. 异步初始化（工具注册 + 扩展加载 + 资产扫描）
+ * 6. 启动后任务（调度器启动 + 任务恢复）
+ * 7. 创建 Hono 应用
+ * 8. 启动 HTTP 业务服务器（:9120）
+ * 9. 挂载 Gateway WebSocket 升级（业务通道，与 HTTP 共用端口）
+ * 10. 启动 CapabilityBridge WS 服务端（能力通道 :9121）
+ * 11. 注册优雅退出回调
+ *
+ * @param options 启动选项
+ */
+export async function startServer(options: StartServerOptions): Promise<void> {
+  const { processName, printBanner, onHttpReady, onExtraShutdown } = options
+
+  // 0. 启动 Banner（最早输出，在任何初始化之前）
+  printBanner()
+
+  // 1. 初始化日志文件持久化（越早越好）
+  initLogFile()
+
+  // 2. 注册进程守护（日志就绪后立即注册）
+  registerProcessGuards()
+
+  // 3. 初始化 DI 容器（同步阶段）
+  const config = createDefaultConfig()
+  const ctx = await createAppContext(config)
+
+  // 4. 异步初始化（工具注册 + 扩展加载 + 资产扫描）
+  await initAppContext(ctx)
+
+  // 5. 启动后任务（调度器启动 + 任务恢复）
+  await runStartupTasks(ctx)
+
+  // 6. 创建 Hono 应用
+  const app = createApp(ctx)
+
+  // 6.1 注入主 app 实例给 AppManager，启用 sub app 动态路由挂载
+  // 必须在 launch 任何需要 HTTP 路由的 sub app（如社交）之前完成
+  ctx.appManager.setHonoApp(app)
+
+  // 6.2 自动启动内置社交应用
+  // AIOS: 社交应用是特殊应用，跟随主 Agent 启停。
+  // 后端就绪后自动 install + launch，前端 SocialTab 只管 NapCat 进程。
+  await autoLaunchSocialApp(ctx)
+
+  // 7. 启动 HTTP 业务服务器（:9120）
+  logger.info(`${processName} 启动中... → http://${SERVER_HOST}:${SERVER_PORT}`)
+
+  const server = serve(
+    {
+      fetch: app.fetch,
+      hostname: SERVER_HOST,
+      port: SERVER_PORT,
+    },
+    (info) => {
+      if (onHttpReady) {
+        onHttpReady(info.address, info.port)
+      } else {
+        // 默认回退：使用 info 日志
+        logger.info(`${processName} 已就绪 → http://${info.address}:${info.port}`)
+      }
+    },
+  )
+
+  // 8. 挂载 Gateway WebSocket 升级（业务通道，与 HTTP 共用 :9120）
+  //    同时挂载社交适配器 WS 端点（/api/social/ws → NapCat 反向连接）
+  setupGatewayWebSocket(server as Server, ctx.gatewayHub, ctx)
+  ctx.gatewayHub.startHeartbeat()
+
+  // 9. 启动 CapabilityBridge WS 服务端（能力通道 :9121）
+  //    接收 Electron / Mobile 等节点的能力注册，转发平台工具调用。
+  //    复用 container 中已实例化的 capabilityBridge（已通过 setCapabilityBridge
+  //    注入到 toolExecutor），确保 WS 服务端与工具调用桥接同一对象。
+  const capabilityBridgePort = Number(process.env.PERO_CAPABILITY_PORT ?? 9121)
+  try {
+    await ctx.capabilityBridge.start(capabilityBridgePort)
+    logger.info(`CapabilityBridge 已启动，监听端口 ${capabilityBridgePort}`)
+  } catch (err) {
+    logger.error(`CapabilityBridge 启动失败（平台能力将不可用）: ${err}`)
+  }
+
+  // 10. 注册优雅退出回调
+  onShutdown(async () => {
+    logger.info(`${processName} 正在关闭资源...`)
+    try {
+      await ctx.capabilityBridge.stop()
+    } catch (err) {
+      logger.warn(`CapabilityBridge 关闭失败: ${err}`)
+    }
+    if (onExtraShutdown) {
+      await onExtraShutdown()
+    }
+    // TODO: ctx.db.close() 等资源清理
+    logger.info(`${processName} 资源清理完成`)
+  })
+}
+
+// ─────────────────────────────────────────────
+// 内置应用自动启动
+// ─────────────────────────────────────────────
+
+/**
+ * 自动启动内置社交应用
+ *
+ * AIOS 设计：社交应用是特殊应用，跟随主 Agent 启停。
+ * 后端就绪后自动 install（幂等）+ launch，无需前端手动触发。
+ * 前端 SocialTab 只负责 NapCat 进程管理，社交应用运行时由后端自动维护。
+ *
+ * 流程：
+ * 1. 检查 social app 是否已 install（appRegistry 表），未安装则自动 install
+ * 2. 检查是否已有 running 实例，无则 launch
+ *
+ * 失败不阻塞主启动流程（catch 后仅 warn）。
+ */
+async function autoLaunchSocialApp(ctx: import('./container').AppContext): Promise<void> {
+  logger.info('=== [autoLaunchSocialApp] 开始自动启动社交应用 ===')
+  try {
+    // 0. 清理孤儿实例（上次运行残留的 running/launching 状态，内存中已不存在）
+    // 必须在 listInstances 检查之前调用，否则会误判旧实例仍在运行
+    await ctx.appManager.cleanupStaleInstances()
+
+    const hostAgentId = ctx.agentManager.defaultAgentId
+    const SOCIAL_APP_ID = 'social'
+
+    // 1. 检查是否已安装，未安装则自动 install
+    const manifest = await ctx.appManager.getManifest(SOCIAL_APP_ID)
+    if (!manifest) {
+      // 定位 social app 目录（packages/apps/social）
+      // startup.ts 位于 packages/backend/src/，相对路径 ../../apps/social
+      const { fileURLToPath } = await import('node:url')
+      const path = await import('node:path')
+      const startupDir = path.dirname(fileURLToPath(import.meta.url))
+      const socialAppDir = path.resolve(startupDir, '..', '..', 'apps', 'social')
+
+      logger.info(`正在自动安装内置社交应用: ${socialAppDir}`)
+      const { warnings } = await ctx.appManager.install(socialAppDir)
+      if (warnings.length > 0) {
+        logger.warn(`社交应用安装警告: ${warnings.join('; ')}`)
+      }
+      logger.success('内置社交应用已安装')
+    }
+
+    // 2. 检查是否已有 running 实例（避免重复 launch）
+    const instances = await ctx.appManager.listInstances({
+      appId: SOCIAL_APP_ID,
+      status: 'running',
+    })
+    if (instances.length > 0) {
+      logger.info(`社交应用已在运行 (instanceId=${instances[0]!.instanceId})，跳过自动启动`)
+      return
+    }
+
+    // 3. 启动社交应用实例
+    logger.info('正在自动启动社交应用...')
+    const instanceId = await ctx.appManager.launch({
+      appId: SOCIAL_APP_ID,
+      hostAgentId,
+      launchedBy: 'system-autostart',
+    })
+    logger.success(`社交应用已自动启动 (instanceId=${instanceId}, hostAgent=${hostAgentId})`)
+  } catch (err) {
+    // 失败不阻塞主启动流程
+    logger.warn(`社交应用自动启动失败（不影响主服务）: ${err}`)
+  }
+}

@@ -20,7 +20,7 @@ import type { PendingConfirmation } from './ConfirmOverlay.vue'
 import { useChatScroll, useMessageVisibility } from '../../composables'
 import { useChat } from '../../composables/chat/useChat'
 import { useStreamMarkdown } from '../../composables/chat/useStreamMarkdown'
-import { useSessionStore } from '../../stores'
+import { useThreadStore, useNotificationStore } from '../../stores'
 import { Marked } from 'marked'
 import { logger } from '../../lib/logger'
 import { chatApi } from '../../api/modules/chatApi'
@@ -32,7 +32,7 @@ export interface Props {
   agentName?: string
 }
 
-withDefaults(defineProps<Props>(), {
+const props = withDefaults(defineProps<Props>(), {
   agentName: 'Pero',
 })
 
@@ -42,11 +42,15 @@ const containerRef = ref<HTMLElement | null>(null)
 const {
   messages: chatMessages,
   isGenerating,
+  isLoadingHistory,
+  historyError,
   sendMessage: chatSend,
   stopGeneration,
-} = useChat({ source: 'desktop' })
+  loadLatestHistory,
+} = useChat({ channel: 'desktop' })
 
-const sessionStore = useSessionStore()
+const threadStore = useThreadStore()
+const notif = useNotificationStore()
 
 // ── Markdown 渲染器 ──
 const marked = new Marked({ breaks: true, gfm: true })
@@ -138,12 +142,22 @@ const { showScrollDown, scrollToBottom } = useChatScroll(containerRef, messageCo
 
 const { observe, unobserve } = useMessageVisibility(containerRef)
 
-function onBubbleMounted(el: HTMLElement) {
-  observe(el)
+function getComponentRootElement(event: unknown): Element | null {
+  if (event instanceof Element) return event
+  if (event && typeof event === 'object') {
+    const instance = event as { el?: unknown; $el?: unknown }
+    if (instance.el instanceof Element) return instance.el
+    if (instance.$el instanceof Element) return instance.$el
+  }
+  return null
 }
 
-function onBubbleUnmounted(el: HTMLElement) {
-  unobserve(el)
+function onBubbleMounted(event: unknown) {
+  observe(getComponentRootElement(event))
+}
+
+function onBubbleUnmounted(event: unknown) {
+  unobserve(getComponentRootElement(event))
 }
 
 // ── 发送消息 ──
@@ -187,7 +201,7 @@ function handleEdit(msg: BubbleMessage) {
 /** 保存编辑 */
 function saveEdit() {
   if (!editingMessage.value) return
-  sessionStore.editMessage(editingMessage.value.id, editText.value)
+  threadStore.editMessage(editingMessage.value.id, editText.value)
   editingMessage.value = null
   editText.value = ''
 }
@@ -201,28 +215,27 @@ function cancelEdit() {
 /** 级联删除对话对 (用户+助手) */
 function handleDeletePair(id: string) {
   // 本地: 找到相邻的对话对并删除 (user 和紧跟其后的 assistant)
-  const idx = sessionStore.messages.findIndex((m) => m.id === id)
+  const idx = threadStore.messages.findIndex((m) => m.id === id)
   if (idx >= 0) {
-    const msg = sessionStore.messages[idx]!
+    const msg = threadStore.messages[idx]!
     const pairIds = [id]
 
-    if (msg.role === 'user' && idx + 1 < sessionStore.messages.length) {
+    if (msg.role === 'user' && idx + 1 < threadStore.messages.length) {
       // 用户消息: 也删紧跟其后的助手回复
-      const next = sessionStore.messages[idx + 1]!
+      const next = threadStore.messages[idx + 1]!
       if (next.role === 'assistant') pairIds.push(next.id)
     } else if (msg.role === 'assistant' && idx - 1 >= 0) {
       // 助手消息: 也删其前的用户消息
-      const prev = sessionStore.messages[idx - 1]!
+      const prev = threadStore.messages[idx - 1]!
       if (prev.role === 'user') pairIds.push(prev.id)
     }
 
-    sessionStore.messages = sessionStore.messages.filter((m) => !pairIds.includes(m.id))
+    threadStore.messages = threadStore.messages.filter((m) => !pairIds.includes(m.id))
   }
 
-  // 后端同步 (异步，不阻塞 UI)
-  const numId = Number(id)
-  if (Number.isInteger(numId) && numId > 0) {
-    chatApi.deleteMessagePair(numId).catch((err) => {
+  // 后端同步 (异步，不阻塞 UI) — 需要传 threadId 和 msgId
+  if (threadStore.threadId && id) {
+    chatApi.deleteMessagePair(threadStore.threadId, id).catch((err) => {
       logger.error('ChatContainer', '对话对删除同步失败', err)
     })
   }
@@ -233,10 +246,22 @@ async function handleCopy(content: string) {
   try {
     await navigator.clipboard.writeText(content)
     logger.info('ChatContainer', '消息已复制到剪贴板')
+    notif.toast('已复制到剪贴板', { type: 'success' })
   } catch (err) {
     logger.error('ChatContainer', '复制失败', err)
+    notif.toast('复制失败', { type: 'error' })
   }
 }
+
+watch(
+  () => props.agentId,
+  async (agentId) => {
+    await loadLatestHistory(agentId)
+    await nextTick()
+    scrollToBottom(false)
+  },
+  { immediate: true },
+)
 
 onMounted(() => {
   scrollToBottom(false)
@@ -261,6 +286,16 @@ onUnmounted(() => {
 
     <!-- 消息列表 -->
     <div ref="containerRef" class="chat-messages">
+      <div v-if="isLoadingHistory" class="chat-history-state pixel-border-moe">
+        <PixelIcon name="refresh" size="sm" animation="spin" />
+        <span>正在同步历史聊天记录...</span>
+      </div>
+
+      <div v-else-if="historyError" class="chat-history-state chat-history-error pixel-border-moe">
+        <PixelIcon name="alert" size="sm" />
+        <span>历史记录同步失败：{{ historyError }}</span>
+      </div>
+
       <MessageBubble
         v-for="msg in messages"
         :key="msg.id"
@@ -272,8 +307,8 @@ onUnmounted(() => {
         @edit="handleEdit"
         @delete-pair="handleDeletePair"
         @copy="handleCopy"
-        @vue:mounted="($event: any) => onBubbleMounted($event.el)"
-        @vue:unmounted="($event: any) => onBubbleUnmounted($event.el)"
+        @vue:mounted="onBubbleMounted"
+        @vue:unmounted="onBubbleUnmounted"
       />
     </div>
 
@@ -315,12 +350,13 @@ onUnmounted(() => {
   height: 100%;
   position: relative;
   overflow: hidden;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 252, 249, 0.24));
 }
 
 .chat-messages {
   flex: 1;
   overflow-y: auto;
-  padding: 24px;
+  padding: 28px 30px 24px;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -334,36 +370,57 @@ onUnmounted(() => {
   background: transparent;
 }
 .chat-messages::-webkit-scrollbar-thumb {
-  background: var(--color-sky-light);
+  background: rgba(249, 168, 212, 0.72);
 }
 
 .chat-input-area {
   flex-shrink: 0;
-  padding: 0 24px 24px;
+  padding: 0 30px 28px;
+}
+
+.chat-history-state {
+  align-self: center;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 16px;
+  padding: 8px 12px;
+  background: rgba(255, 252, 249, 0.82);
+  color: rgba(45, 27, 30, 0.62);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.chat-history-error {
+  background: rgba(254, 226, 226, 0.78);
+  color: var(--color-red-outline);
 }
 
 /* 回到底部按钮 */
 .chat-scroll-down {
   position: absolute;
-  bottom: 120px;
+  bottom: 124px;
   left: 50%;
   transform: translateX(-50%);
-  width: 36px;
-  height: 36px;
+  width: 38px;
+  height: 38px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--color-bg-primary);
-  border: 2px solid var(--color-border);
-  color: var(--color-text-muted);
+  background: rgba(255, 252, 249, 0.92);
+  color: var(--color-moe-pink);
   cursor: pointer;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  box-shadow:
+    -2px 0 0 0 var(--color-moe-cocoa),
+    2px 0 0 0 var(--color-moe-cocoa),
+    0 -2px 0 0 var(--color-moe-cocoa),
+    0 2px 0 0 var(--color-moe-cocoa),
+    0 10px 26px rgba(249, 168, 212, 0.2);
   transition: all 0.2s;
   z-index: 10;
 }
 .chat-scroll-down:hover {
-  border-color: var(--color-sky-hover);
-  color: var(--color-sky-500);
+  background: rgba(249, 168, 212, 0.16);
   transform: translateX(-50%) translateY(-2px);
 }
 
@@ -423,13 +480,17 @@ onUnmounted(() => {
 .chat-edit-dialog {
   width: 480px;
   max-width: 90vw;
-  background: var(--color-bg-primary, #fff);
-  border: 2px solid var(--color-border, #e2e8f0);
+  background: rgba(255, 252, 249, 0.94);
   display: flex;
   flex-direction: column;
   gap: 12px;
   padding: 20px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  box-shadow:
+    -2px 0 0 0 var(--color-moe-cocoa),
+    2px 0 0 0 var(--color-moe-cocoa),
+    0 -2px 0 0 var(--color-moe-cocoa),
+    0 2px 0 0 var(--color-moe-cocoa),
+    0 24px 64px rgba(249, 168, 212, 0.24);
 }
 
 .chat-edit-header {
@@ -437,17 +498,17 @@ onUnmounted(() => {
   align-items: center;
   gap: 8px;
   font-size: 14px;
-  font-weight: 700;
-  color: var(--color-text-primary, #1e293b);
+  font-weight: 900;
+  color: var(--color-moe-cocoa);
 }
 
 .chat-edit-textarea {
   width: 100%;
   min-height: 100px;
   padding: 10px;
-  border: 2px solid var(--color-border, #e2e8f0);
-  background: var(--color-bg-secondary, #f8fafc);
-  color: var(--color-text-primary, #1e293b);
+  border: 2px solid rgba(45, 27, 30, 0.14);
+  background: rgba(255, 255, 255, 0.68);
+  color: var(--color-moe-cocoa);
   font-family: inherit;
   font-size: 13px;
   line-height: 1.5;
@@ -456,7 +517,7 @@ onUnmounted(() => {
 }
 
 .chat-edit-textarea:focus {
-  border-color: var(--color-sky-hover, #38bdf8);
+  border-color: rgba(249, 168, 212, 0.56);
 }
 
 .chat-edit-actions {
@@ -475,23 +536,23 @@ onUnmounted(() => {
 }
 
 .chat-edit-cancel {
-  background: var(--color-bg-secondary, #f1f5f9);
-  color: var(--color-text-secondary, #64748b);
-  border-color: var(--color-border, #e2e8f0);
+  background: rgba(255, 255, 255, 0.62);
+  color: rgba(45, 27, 30, 0.62);
+  border-color: rgba(45, 27, 30, 0.12);
 }
 
 .chat-edit-cancel:hover {
-  background: var(--color-bg-primary, #fff);
+  background: rgba(255, 255, 255, 0.9);
 }
 
 .chat-edit-save {
-  background: var(--color-sky-500, #0ea5e9);
+  background: var(--color-moe-pink);
   color: white;
-  border-color: var(--color-sky-shadow, #0284c7);
+  border-color: var(--color-moe-cocoa);
 }
 
 .chat-edit-save:hover {
-  background: var(--color-sky-hover, #38bdf8);
+  background: #f472b6;
 }
 
 @keyframes fadeIn {

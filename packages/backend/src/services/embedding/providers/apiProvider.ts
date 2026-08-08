@@ -17,7 +17,17 @@ const logger = createLogger('ApiEmbeddingProvider')
 const MAX_BATCH_SIZE = 256
 
 export class ApiEmbeddingProvider implements EmbeddingProvider {
-  constructor(private config: EmbeddingConfig) {}
+  /** AIOS 第八阶段：配置完整性标记 */
+  private readonly _isAvailable: boolean
+
+  constructor(private config: EmbeddingConfig) {
+    this._isAvailable = Boolean(config.apiBase && config.apiKey && config.model)
+  }
+
+  /** Embedding 是否可用（配置完整） */
+  get isAvailable(): boolean {
+    return this._isAvailable
+  }
 
   /**
    * 批量向量化

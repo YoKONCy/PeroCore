@@ -15,8 +15,7 @@
 import type { Server, IncomingMessage } from 'node:http'
 import { WebSocketServer, type WebSocket } from 'ws'
 import type { GatewayHub } from './gatewayHub'
-import type { AppContext } from '../../container'
-import { getNapcatAdapter, createWsSender } from '../../routers/social.router'
+import { getSocialNapcatAdapter, createWsSender } from '../../applications/socialWsBridge'
 import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('WebSocketUpgrade')
@@ -33,9 +32,9 @@ let nodeCounter = 0
  *
  * @param server - @hono/node-server 的 serve() 返回的 HTTP Server
  * @param hub - GatewayHub 实例 (DI 注入)
- * @param ctx - 完整应用上下文 (社交适配器需要)
+ * @param _ctx - 已废弃（社交适配器现在通过 socialWsBridge 全局注册表获取）
  */
-export function setupGatewayWebSocket(server: Server, hub: GatewayHub, ctx?: AppContext): void {
+export function setupGatewayWebSocket(server: Server, hub: GatewayHub, _ctx?: unknown): void {
   const gatewayWss = new WebSocketServer({ noServer: true })
   const socialWss = new WebSocketServer({ noServer: true })
 
@@ -50,7 +49,7 @@ export function setupGatewayWebSocket(server: Server, hub: GatewayHub, ctx?: App
       return
     }
 
-    if (url.pathname === WS_SOCIAL_PATH && ctx) {
+    if (url.pathname === WS_SOCIAL_PATH) {
       socialWss.handleUpgrade(request, socket, head, (ws) => {
         socialWss.emit('connection', ws, request)
       })
@@ -86,46 +85,44 @@ export function setupGatewayWebSocket(server: Server, hub: GatewayHub, ctx?: App
   })
 
   // ── 社交适配器 WS 连接 (NapCat OneBot v11 反向 WS) ──
-  if (ctx) {
-    socialWss.on('connection', (ws: WebSocket, request: IncomingMessage) => {
-      const adapter = getNapcatAdapter(ctx)
-      if (!adapter) {
-        logger.warn('收到社交 WS 连接但无 NapCat 适配器注册，关闭连接')
-        ws.close()
-        return
-      }
+  // 通过 socialWsBridge 全局注册表获取 SocialAppRuntime 注入的 NapcatAdapter
+  socialWss.on('connection', (ws: WebSocket, request: IncomingMessage) => {
+    const adapter = getSocialNapcatAdapter()
+    if (!adapter) {
+      logger.warn('收到社交 WS 连接但无 NapCat 适配器注册（社交应用未启动），关闭连接')
+      ws.close()
+      return
+    }
 
-      // 从 NapCat 的 X-Self-ID header 获取 Bot QQ 号
-      const selfId = request.headers['x-self-id'] as string | undefined
-      logger.info(`NapCat 反向 WS 连接建立: selfId=${selfId ?? '未知'}`)
+    // 从 NapCat 的 X-Self-ID header 获取 Bot QQ 号
+    const selfId = request.headers['x-self-id'] as string | undefined
+    logger.info(`NapCat 反向 WS 连接建立: selfId=${selfId ?? '未知'}`)
 
-      // 注册连接到适配器
-      const sender = createWsSender({
-        send: (data: string) => ws.send(data),
-        close: () => ws.close(),
-      })
-      adapter.registerConnection(selfId, sender)
+    // 注册连接到适配器
+    const sender = createWsSender({
+      send: (data: string) => ws.send(data),
+      close: () => ws.close(),
+    })
+    adapter.registerConnection(selfId, sender)
 
-      // 转发消息到适配器处理
-      ws.on('message', (data: Buffer | string) => {
-        const text = typeof data === 'string' ? data : data.toString('utf-8')
-        adapter.handleRawEvent(text).catch((err) => {
-          logger.warn(`NapCat 事件处理失败: ${err}`)
-        })
-      })
-
-      ws.on('close', () => {
-        adapter.unregisterConnection(selfId)
-        logger.info(`NapCat 反向 WS 连接断开: selfId=${selfId ?? '未知'}`)
-      })
-
-      ws.on('error', (err) => {
-        logger.warn(`NapCat WS 错误: ${err.message}`)
+    // 转发消息到适配器处理
+    ws.on('message', (data: Buffer | string) => {
+      const text = typeof data === 'string' ? data : data.toString('utf-8')
+      adapter.handleRawEvent(text).catch((err) => {
+        logger.warn(`NapCat 事件处理失败: ${err}`)
       })
     })
 
-    logger.info(`社交 WS 端点已挂载: ${WS_SOCIAL_PATH}`)
-  }
+    ws.on('close', () => {
+      adapter.unregisterConnection(selfId)
+      logger.info(`NapCat 反向 WS 连接断开: selfId=${selfId ?? '未知'}`)
+    })
 
+    ws.on('error', (err) => {
+      logger.warn(`NapCat WS 错误: ${err.message}`)
+    })
+  })
+
+  logger.info(`社交 WS 端点已挂载: ${WS_SOCIAL_PATH}`)
   logger.info(`Gateway WS 端点已挂载: ${WS_GATEWAY_PATH}`)
 }

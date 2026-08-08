@@ -14,7 +14,6 @@ function createAgent() {
     name: 'Pero',
     description: '猫娘助手',
     avatarPath: 'avatar.png',
-    workTraits: ['认真'],
     socialTraits: ['活泼'],
     useStickers: true,
   }
@@ -25,14 +24,15 @@ describe('AgentRouter', () => {
     const agent = createAgent()
     return {
       agentManager: {
-        activeAgentId: 'pero',
+        // AIOS 架构迁移：activeAgentId 已重命名为 defaultAgentId
+        defaultAgentId: 'pero',
         listAgents: vi.fn(() => [agent]),
-        getActiveAgent: vi.fn(() => agent),
+        getDefaultAgent: vi.fn(() => agent),
         getAvatarData: vi.fn(() => ({
           mime: 'image/png',
           buffer: new Uint8Array([1, 2, 3]).buffer,
         })),
-        setActiveAgent: vi.fn((id: string) => id === 'pero'),
+        // setActiveAgent 已废弃：PUT /api/agents/active 路由已移除，不再支持运行时切换全局活跃 Agent
         getAgent: vi.fn((id: string) => (id === 'pero' ? agent : null)),
         createAgent: vi.fn((body: Record<string, unknown>) => body),
         deleteAgent: vi.fn(),
@@ -43,7 +43,6 @@ describe('AgentRouter', () => {
           Promise.resolve(id === 'pero' ? { idle: ['喵'] } : null),
         ),
       },
-      gatewayHub: { pushStateUpdate: vi.fn(() => Promise.resolve()) },
       capabilityGate: {
         getAgentModes: vi.fn(() => ['chat']),
         getAgentSkills: vi.fn(() => ['memory']),
@@ -51,18 +50,14 @@ describe('AgentRouter', () => {
     }
   }
 
-  it('应当管理 Agent 查询、切换、头像和能力配置', async () => {
+  it('应当管理 Agent 查询、头像和能力配置', async () => {
     const ctx = createCtx()
     const router = createAgentRouter(ctx as never)
 
     const list = await router.request('http://test/')
     const active = await router.request('http://test/active')
     const avatar = await router.request('http://test/pero/avatar')
-    const switched = await router.request('http://test/active', {
-      method: 'PUT',
-      body: JSON.stringify({ agentId: 'pero' }),
-      headers: { 'content-type': 'application/json' },
-    })
+    // AIOS 架构下 PUT /api/agents/active 已移除，不再支持运行时切换全局活跃 Agent
     const detail = await router.request('http://test/pero')
     const capabilities = await router.request('http://test/pero/capabilities')
     const texts = await router.request('http://test/pero/texts')
@@ -74,11 +69,6 @@ describe('AgentRouter', () => {
     expect(await readJson(active)).toMatchObject({ code: 'OK', data: { id: 'pero' } })
     expect(avatar.headers.get('content-type')).toBe('image/png')
     expect(await avatar.arrayBuffer()).toHaveProperty('byteLength', 3)
-    expect(await readJson(switched)).toMatchObject({ code: 'OK', data: { agentId: 'pero' } })
-    expect(ctx.gatewayHub.pushStateUpdate).toHaveBeenCalledWith({
-      action: 'agent_changed',
-      agentId: 'pero',
-    })
     expect(await readJson(detail)).toMatchObject({
       code: 'OK',
       data: { id: 'pero', useStickers: true },

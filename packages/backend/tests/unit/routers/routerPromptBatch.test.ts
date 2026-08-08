@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createModelRouter } from '@perocore/backend/routers/model.router'
 import { createAssetRouter } from '@perocore/backend/routers/asset.router'
 import { createSystemRouter } from '@perocore/backend/routers/system.router'
-import { PromptService } from '@perocore/backend/services/prompt/promptService'
+// AIOS: PromptService 已废弃移除（死代码清理），相关测试块一并移除
 
 const appVersion = (
   JSON.parse(readFileSync(resolve(process.cwd(), 'package.json'), 'utf8')) as { version: string }
@@ -49,34 +49,7 @@ function createAssetCtx() {
   }
 }
 
-function createEnriched(overrides: Record<string, string> = {}) {
-  return {
-    currentTime: '2026-01-01',
-    flattenedDesktopHistory: '桌面历史',
-    flattenedGroupHistory: '群聊历史',
-    memoryContext: '记忆',
-    graphContext: '图谱',
-    weeklyReportContext: '周报',
-    mood: '开心',
-    vibe: '轻松',
-    mind: '专注',
-    ownerName: '主人',
-    userPersona: '用户画像',
-    environmentInfo: '环境',
-    socialContext: '社交上下文',
-    ...overrides,
-  }
-}
-
-function createAgent() {
-  return {
-    id: 'pero',
-    name: 'Pero',
-    description: '猫娘助手',
-    workPersona: '工作人设',
-    socialPersona: '社交人设',
-  }
-}
+// AIOS: createEnriched / createAgent 辅助函数已随 PromptService 测试块一并移除
 
 describe('ModelRouter', () => {
   it('应当提供模型 CRUD、远程列表和连通性测试端点', async () => {
@@ -205,7 +178,8 @@ describe('SystemRouter', () => {
           { id: 'pero', isEnabled: true },
           { id: 'neko', isEnabled: false },
         ]),
-        activeAgentId: 'pero',
+        // AIOS: activeAgentId 已重命名为 defaultAgentId
+        defaultAgentId: 'pero',
       },
       systemService: {
         getSnapshot: vi.fn(() =>
@@ -248,119 +222,4 @@ describe('SystemRouter', () => {
   })
 })
 
-describe('PromptService', () => {
-  it('应当按默认槽位、内置预设和用户预设组装消息', () => {
-    const slots = [{ id: 'base', role: 'system', template: 'base', enabled: true }]
-    const builtinPreset = {
-      name: 'social',
-      description: '社交',
-      slots: [{ id: 'social', enabled: true, position: 1 }],
-    }
-    const userPreset = {
-      name: 'user',
-      description: '用户',
-      slots: [{ id: 'user', enabled: true, position: 2 }],
-    }
-    const mdp = {
-      buildDefaultSlots: vi.fn(() => slots),
-      applyPreset: vi.fn((input, preset) => [...input, ...preset.slots]),
-      renderSlots: vi.fn(() => [{ role: 'system', content: '渲染结果' }]),
-    }
-    const agentManager = { getAgent: vi.fn(() => createAgent()) }
-    const presetLoader = { getPresetForSource: vi.fn(() => builtinPreset) }
-    const service = new PromptService(mdp as never, agentManager as never, presetLoader as never)
-
-    const result = service.buildPromptMessages(
-      'pero',
-      'social',
-      createEnriched() as never,
-      userPreset as never,
-      { extra: '覆盖' },
-    )
-
-    expect(result.messages).toEqual([{ role: 'system', content: '渲染结果' }])
-    expect(result.slots).toEqual([...slots, ...builtinPreset.slots, ...userPreset.slots])
-    expect(mdp.renderSlots).toHaveBeenCalledWith(
-      expect.any(Array),
-      expect.objectContaining({
-        agent_name: 'Pero',
-        source: 'social',
-        extra: '覆盖',
-        social_context: '社交上下文',
-      }),
-      { mergeAdjacentRoles: true, skipEmpty: true },
-    )
-  })
-
-  it('应当用内置预设兼容 assemble 的 systemPrompt 汇总模式', () => {
-    const mdp = {
-      buildDefaultSlots: vi.fn(() => [{ id: 'base', enabled: true }]),
-      applyPreset: vi.fn((input) => input),
-      renderSlots: vi.fn(() => [
-        { role: 'system', content: '第一段' },
-        { role: 'user', content: '用户段' },
-        { role: 'system', content: '第二段' },
-      ]),
-    }
-    const service = new PromptService(
-      mdp as never,
-      { getAgent: vi.fn(() => createAgent()) } as never,
-      {
-        getPresetForSource: vi.fn(() => ({ name: 'work', description: '工作', slots: [] })),
-      } as never,
-    )
-
-    const result = service.assemble('pero', 'work', createEnriched() as never)
-
-    expect(result).toEqual({ systemPrompt: '第一段\n\n第二段', footer: '' })
-  })
-
-  it('应当在无预设时使用单模板并追加来源人设和有效 footer', () => {
-    const mdp = {
-      render: vi.fn((key: string) => (key === 'system_prompt' ? '系统提示词' : 'Footer 内容')),
-      renderString: vi.fn((template: string) => `渲染:${template}`),
-      buildDefaultSlots: vi.fn(() => []),
-    }
-    const service = new PromptService(
-      mdp as never,
-      { getAgent: vi.fn(() => createAgent()) } as never,
-      { getPresetForSource: vi.fn(() => undefined) } as never,
-    )
-
-    const result = service.assemble('pero', 'ide', createEnriched() as never)
-    const rendered = service.renderTemplate('task', { a: 1 })
-    const renderedString = service.renderString('你好 {{name}}', { name: '主人' })
-
-    expect(result).toEqual({ systemPrompt: '系统提示词\n\n工作人设', footer: 'Footer 内容' })
-    expect(rendered).toBe('Footer 内容')
-    expect(renderedString).toBe('渲染:你好 {{name}}')
-  })
-
-  it('应当在 Agent 不存在时抛出配置错误并隐藏缺失 footer', () => {
-    const missingAgentService = new PromptService(
-      { buildDefaultSlots: vi.fn(), render: vi.fn() } as never,
-      { getAgent: vi.fn(() => null) } as never,
-      { getPresetForSource: vi.fn(() => undefined) } as never,
-    )
-    const footerService = new PromptService(
-      {
-        render: vi.fn((key: string) =>
-          key === 'system_prompt' ? '系统提示词' : '{{Missing footer}}',
-        ),
-      } as never,
-      { getAgent: vi.fn(() => createAgent()) } as never,
-      { getPresetForSource: vi.fn(() => undefined) } as never,
-    )
-
-    expect(() =>
-      missingAgentService.buildPromptMessages('missing', 'desktop', createEnriched() as never),
-    ).toThrow('Agent missing 未找到')
-    expect(() =>
-      missingAgentService.assemble('missing', 'desktop', createEnriched() as never),
-    ).toThrow('Agent missing 未找到')
-    expect(footerService.assemble('pero', 'desktop', createEnriched() as never)).toEqual({
-      systemPrompt: '系统提示词',
-      footer: '',
-    })
-  })
-})
+// AIOS: PromptService 已废弃移除（死代码清理），相关测试块一并移除

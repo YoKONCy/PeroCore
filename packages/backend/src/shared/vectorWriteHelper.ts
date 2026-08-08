@@ -29,6 +29,10 @@ export class VectorWriteHelper {
    * 生成向量 + 写入 TriviumDB，失败自动入补偿队列
    *
    * Tag 加权：将 tags 前置两次以提升检索时的 tag 权重。
+   *
+   * AIOS 第八阶段：embedding 不可用时跳过向量写入，
+   * 不往补偿队列塞无效数据（补偿队列重试时同样会失败）。
+   * 记忆的 SQLite 行和 BM25 索引仍会正常写入，只是无法做向量检索。
    */
   async upsertWithFallback(opts: {
     memoryId: number
@@ -39,6 +43,14 @@ export class VectorWriteHelper {
     source?: string
     storeName?: string
   }): Promise<void> {
+    // AIOS 第八阶段：embedding 不可用时跳过向量写入
+    if (!this.embeddingService.isAvailable) {
+      logger.debug(
+        `记忆 ${opts.memoryId} 跳过向量写入（embedding 不可用），仅 SQLite + BM25 可用`,
+      )
+      return
+    }
+
     // Tag 加权: "料理 美食 料理 美食 今天学了做螺蛳粉..."
     const enriched = opts.tags ? `${opts.tags} ${opts.tags} ${opts.content}` : opts.content
 

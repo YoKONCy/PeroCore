@@ -125,7 +125,7 @@ Docker Compose 中配置 healthcheck：
 
 ```yaml
 healthcheck:
-  test: ["CMD", "curl", "-f", "http://localhost:9120/health"]
+  test: ["CMD", "curl", "-f", "http://localhost:9120/api/health"]
   interval: 30s
   timeout: 5s
   retries: 3

@@ -71,6 +71,8 @@ describe('RetrievalFeedback', () => {
       lastTrainLoss: 0,
       pendingSamples: 1,
       positiveRate: '50.0%',
+      // AIOS: CCSA W_out 更新次数（新增统计字段）
+      wOutUpdates: 0,
     })
   })
 

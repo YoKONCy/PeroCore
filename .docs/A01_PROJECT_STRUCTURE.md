@@ -67,7 +67,7 @@ PeroCore-TS/
 │   ├── main/                      # 主进程 (index.ts, ipcBridge.ts, services/...)
 │   └── preload/                   # 预加载脚本
 │
-├── _docs_/                        # 规范文档
+├── .docs/                         # 规范文档
 ├── .github/workflows/             # CI/CD
 ├── .changeset/                    # Changeset 配置
 ├── pnpm-workspace.yaml

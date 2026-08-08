@@ -125,7 +125,7 @@ export class VectorRepository {
     }
   }
 
-  /** 建立 BM25 文本索引 */
+  /** 建立 BM25 文本索引（增量追加，需 buildTextIndex 才生效） */
   async indexText(
     memoryId: number,
     text: string,
@@ -134,6 +134,13 @@ export class VectorRepository {
   ): Promise<void> {
     const store = this.storeRegistry.getStoreBySource(agentId, source)
     store.indexText(memoryId, text)
+    // AIOS 第八阶段：标记脏，等下次 searchHybrid 时懒编译
+    this.storeRegistry.markTextIndexDirty(
+      this.storeRegistry.resolveAgentStorePath(
+        agentId,
+        ['social', 'group', 'group_chat'].includes(source) ? 'social' : 'main',
+      ),
+    )
   }
 
   /** 建立关键词索引 */
@@ -167,12 +174,18 @@ export class VectorRepository {
   // ── 日记 Store 操作 ──
 
   /** 写入日记向量节点 */
+  /**
+   * 日记 Store upsert（按 Agent 隔离）
+   *
+   * AIOS(Phase5): 新增 agentId 参数，路由到 agent_{agentId}/diary.tdb
+   */
   async upsertDiary(
     nodeId: number,
     vector: number[],
     payload: Record<string, unknown>,
+    agentId: string,
   ): Promise<void> {
-    const store = this.storeRegistry.getDiaryStore()
+    const store = this.storeRegistry.getDiaryStore(agentId)
     const existing = store.get(nodeId)
     if (existing) {
       store.updateVector(nodeId, vector)
@@ -182,20 +195,29 @@ export class VectorRepository {
     }
   }
 
-  /** 日记 Store 检索 */
-  async searchDiary(queryVector: number[], topK: number = 5): Promise<JsSearchHit[]> {
-    const store = this.storeRegistry.getDiaryStore()
+  /**
+   * 日记 Store 检索（按 Agent 隔离）
+   *
+   * AIOS(Phase5): 新增 agentId 参数
+   */
+  async searchDiary(queryVector: number[], agentId: string, topK: number = 5): Promise<JsSearchHit[]> {
+    const store = this.storeRegistry.getDiaryStore(agentId)
     return store.search(queryVector, topK, 1, 0.3)
   }
 
-  /** 日记 Store 建边 */
+  /**
+   * 日记 Store 建边（按 Agent 隔离）
+   *
+   * AIOS(Phase5): 新增 agentId 参数
+   */
   async linkDiary(
     srcId: number,
     dstId: number,
     label: string,
-    weight: number = 1.0,
+    weight: number,
+    agentId: string,
   ): Promise<void> {
-    const store = this.storeRegistry.getDiaryStore()
+    const store = this.storeRegistry.getDiaryStore(agentId)
     store.link(srcId, dstId, label, weight)
   }
 }

@@ -180,6 +180,12 @@ export class DiaryEngine {
     try {
       const nodeId = this.generateDiaryNodeId(entry.date, entry.agentId)
 
+      // AIOS 第八阶段：embedding 不可用时跳过日记持久化
+      if (!this.embeddingService.isAvailable) {
+        logger.warn('Embedding 不可用，日记跳过持久化（文本仍保存到 SQLite）')
+        return
+      }
+
       // 生成日记文本的 embedding
       const vector = await this.embeddingService.embedOne(entry.diary)
       if (!vector?.length) {
@@ -187,7 +193,7 @@ export class DiaryEngine {
         return
       }
 
-      // 写入日记节点
+      // AIOS(Phase5): 日记按 Agent 隔离，upsertDiary 需要 agentId 路由到 agent_{id}/diary.tdb
       await this.vectorRepo.upsertDiary(nodeId, vector, {
         type: 'diary',
         date: entry.date,
@@ -197,15 +203,15 @@ export class DiaryEngine {
         highlights: entry.highlights,
         entities: entry.entities,
         relations: entry.relations,
-      })
+      }, entry.agentId)
 
       // 建立图谱边
       for (const rel of entry.relations) {
         // 用 from/to 的哈希作为 edge ID 的一部分，保存语义关系
-        await this.vectorRepo.linkDiary(nodeId, nodeId, rel.label, rel.weight)
+        await this.vectorRepo.linkDiary(nodeId, nodeId, rel.label, rel.weight, entry.agentId)
       }
 
-      logger.info(`日记已持久化: nodeId=${nodeId}, date=${entry.date}`)
+      logger.info(`日记已持久化: nodeId=${nodeId}, date=${entry.date}, agent=${entry.agentId}`)
     } catch (err) {
       logger.warn(`日记持久化失败 (不影响生成结果): ${err}`)
     }

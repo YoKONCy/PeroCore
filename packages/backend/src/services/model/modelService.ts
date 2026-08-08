@@ -137,19 +137,13 @@ export class ModelService {
     apiKey: string
     apiBase?: string
   }): Promise<string[]> {
-    try {
-      return await this.llmService.listModels({
-        provider: params.provider,
-        modelId: '', // listModels 不需要具体 modelId
-        apiKey: params.apiKey,
-        apiBase: params.apiBase,
-      })
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      throw new AppError('LLM_ERROR', {
-        message: `获取远程模型列表失败: ${msg}`,
-      })
-    }
+    const results = await this.llmService.listModels({
+      provider: params.provider,
+      modelId: '', // listModels 不需要具体 modelId
+      apiKey: params.apiKey,
+      apiBase: params.apiBase,
+    })
+    return results
   }
 
   /** 测试模型连通性 */

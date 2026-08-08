@@ -229,7 +229,7 @@ describe('SocialScorerService', () => {
     await service.checkAndProcess('pero')
 
     expect(deps.mdpEngine.render).toHaveBeenCalledWith(
-      'tasks/memory/scorer/social_segment_summarizer',
+      'apps/social/tasks/social_segment_summarizer',
       expect.objectContaining({
         session_type: 'private',
         session_name: '私聊',

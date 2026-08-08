@@ -12,6 +12,7 @@ import App from './App.vue'
 import router from './router'
 import { ApiError, ERROR_UI_MAP, ERROR_TITLE_MAP, ErrorSeverity } from './api'
 import { useNotificationStore } from './stores'
+import { logger } from './lib/logger'
 
 // 全局样式 (令牌 → Tailwind → 像素风组件)
 import './assets/style.css'
@@ -48,7 +49,9 @@ app.config.errorHandler = (err) => {
       notificationStore.toast(err.message, { type: 'error', title })
     }
   } else {
-    notificationStore.toast('发生未知错误', { type: 'error', title: '内部错误' })
+    const message = err instanceof Error ? err.message : String(err)
+    logger.error('VueErrorHandler', '未捕获的前端运行时异常', err)
+    notificationStore.toast(message || '发生未知错误', { type: 'error', title: '内部错误' })
   }
 }
 

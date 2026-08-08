@@ -19,15 +19,17 @@ group: state
 editable: false
 builtin: true
 ---
+{# 守卫：当 enableStateInjection=false 时（social/group channel）所有状态变量为空，整个槽位不应输出空壳 XML #}
+{% if current_time %}
 <Current_Status>
 - 当前时间: {{ current_time }}
 - 心情: {{ mood }}
 - 氛围: {{ vibe }}
 - 心理活动: {{ mind }}
-{% if vision_status %}
-{{ vision_status }}
-{% endif %}
 </Current_Status>
+{% endif %}
+{% if environment_info %}
 <Environment>
 {{ environment_info }}
 </Environment>
+{% endif %}

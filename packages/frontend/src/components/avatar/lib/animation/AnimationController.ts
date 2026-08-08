@@ -10,6 +10,7 @@
 
 import type { AnimationEngine } from './AnimationEngine'
 import type { AnimationLibrary } from './AnimationLibrary'
+import { logger } from '../../../../lib/logger'
 import { molang } from '../Molang'
 
 // ══════ Bedrock JSON 结构定义 ══════
@@ -155,7 +156,7 @@ export class BedrockAnimationController {
   private enterState(stateName: string): void {
     const nextState = this.states.get(stateName)
     if (!nextState) {
-      console.warn(`[动画控制器] 未找到状态: ${stateName}`)
+      logger.warn('AnimationController', `未找到状态: ${stateName}`)
       return
     }
 
@@ -192,7 +193,10 @@ export class BedrockAnimationController {
     this.currentState = nextState
     this.stateTime = 0
 
-    console.log(`[控制器: ${this.name}] 转换: ${prevStateName} -> ${stateName}`)
+    logger.debug('AnimationController', `控制器 ${this.name} 状态转换`, {
+      from: prevStateName,
+      to: stateName,
+    })
 
     // 执行新状态的进入指令 (on_entry)
     if (this.currentState.def.on_entry) {
@@ -257,7 +261,7 @@ export class AnimationControllerSystem {
       const json = (await response.json()) as IBedrockControllerJson
       this.loadFromJson(json)
     } catch (e) {
-      console.error(`[AnimationControllerSystem] 从 ${url} 加载控制器出错:`, e)
+      logger.error('AnimationControllerSystem', `从 ${url} 加载控制器出错`, e)
     }
   }
 

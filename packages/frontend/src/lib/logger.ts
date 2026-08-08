@@ -9,8 +9,9 @@
  *   logger.error('ApiClient', '请求失败', { endpoint: '/api/chat' })
  *
  * ❌ 禁止使用:
- *   console.log('sending message...')
- *   console.log('error:', err)
+ * @example
+ * logger.info('Chat', '发送消息中')
+ * logger.error('Chat', '发送失败', err)
  *
  * @module packages/frontend/src/lib/logger
  */

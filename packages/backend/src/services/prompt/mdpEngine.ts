@@ -185,6 +185,16 @@ export class MdpEngine {
   /** Agent 模板根目录 (用于覆盖查找) */
   private agentsDir: string
 
+  /**
+   * 额外的模板根目录列表（由应用通过 addTemplateRoot 注册）
+   *
+   * AIOS 第八阶段：允许独立应用注册自己的模板目录，
+   * 通过 prefix 前缀隔离避免与主 Agent 模板键冲突。
+   * 例如社交应用注册 prefix="apps/social" 后，
+   * 其 `decisions/foo.md` 的键为 `apps/social/decisions/foo`。
+   */
+  private additionalRoots: Array<{ dir: string; prefix?: string }> = []
+
   constructor(private promptDir: string) {
     this.agentsDir = path.join(path.dirname(promptDir), 'agents')
 
@@ -210,17 +220,54 @@ export class MdpEngine {
   reloadAll(): void {
     this.prompts.clear()
 
-    // 1. 加载 prompts/ 下所有 .md
+    // 1. 加载 prompts/ 下所有 .md（主 Agent 模板根目录）
     if (existsSync(this.promptDir)) {
       this.scanDir(this.promptDir, this.promptDir)
     }
 
-    // 2. 加载 agents/ 下所有 .md
+    // 2. 加载 agents/ 下所有 .md（Agent 覆盖模板）
     if (existsSync(this.agentsDir)) {
       this.scanDir(this.agentsDir, this.agentsDir)
     }
 
+    // 3. 加载应用注册的额外模板根目录（带前缀隔离）
+    for (const root of this.additionalRoots) {
+      if (existsSync(root.dir)) {
+        this.scanDir(root.dir, root.dir, root.prefix)
+      }
+    }
+
     logger.info(`已加载 ${this.prompts.size} 个 MDP 模板`)
+  }
+
+  /**
+   * 添加额外的模板根目录（AIOS 第八阶段：应用模板注册）
+   *
+   * 允许独立应用（如社交应用）注册自己的模板目录。
+   * 通过 prefix 前缀隔离，避免与主 Agent 模板键冲突。
+   *
+   * @param dir    模板目录绝对路径
+   * @param prefix 键前缀（如 "apps/social"），注册后该目录下
+   *                `decisions/foo.md` 的键为 `apps/social/decisions/foo`
+   *
+   * 注意：带前缀的模板不会注册 basename 别名，避免污染全局短名空间。
+   * reloadAll() 会自动重新扫描已注册的额外根目录。
+   */
+  addTemplateRoot(dir: string, prefix?: string): void {
+    // 去重：如果已注册相同 dir + prefix，跳过
+    const exists = this.additionalRoots.some(
+      (r) => r.dir === dir && r.prefix === prefix,
+    )
+    if (exists) {
+      logger.warn(`模板根目录已注册，跳过: ${dir} (prefix=${prefix ?? '无'})`)
+      return
+    }
+
+    this.additionalRoots.push({ dir, prefix })
+    this.scanDir(dir, dir, prefix)
+    logger.info(
+      `已注册额外模板根目录: ${dir} (prefix=${prefix ?? '无'}, 当前共 ${this.additionalRoots.length} 个额外根)`,
+    )
   }
 
   /** 获取模板对象 */
@@ -286,6 +333,11 @@ export class MdpEngine {
 
     for (const [key, prompt] of this.prompts) {
       const meta = prompt.meta
+
+      // 跳过 basename 别名条目：loadFile 会为每个模板额外注册一个 basename 别名
+      // (如 slots/100_system_persona 同时注册别名 system_persona)，两者指向同一 prompt 对象。
+      // 别名条目的 Map key 与 prompt.key 不一致，若不跳过会导致每个槽位被收录两次、提示词整体重复。
+      if (key !== prompt.key) continue
 
       // 只有带 role 元数据的模板才参与槽位系统
       if (!meta.role) continue
@@ -506,25 +558,42 @@ export class MdpEngine {
   // 内部方法: 文件扫描
   // ─────────────────────────────────────────
 
-  /** 递归扫描目录加载 .md 文件 */
-  private scanDir(dir: string, baseDir: string): void {
+  /**
+   * 递归扫描目录加载 .md 文件
+   *
+   * @param dir     当前扫描目录
+   * @param baseDir 基准目录（用于计算相对路径作为键）
+   * @param prefix  键前缀（应用模板隔离用，如 "apps/social"）
+   */
+  private scanDir(dir: string, baseDir: string, prefix?: string): void {
     for (const entry of readdirSync(dir)) {
       const fullPath = path.join(dir, entry)
       const stat = statSync(fullPath)
       if (stat.isDirectory()) {
-        this.scanDir(fullPath, baseDir)
+        this.scanDir(fullPath, baseDir, prefix)
       } else if (entry.endsWith('.md') || entry.endsWith('.txt')) {
-        this.loadFile(fullPath, baseDir)
+        this.loadFile(fullPath, baseDir, prefix)
       }
     }
   }
 
-  /** 解析单个模板文件 */
-  private loadFile(filePath: string, baseDir: string): void {
+  /**
+   * 解析单个模板文件
+   *
+   * @param filePath 文件绝对路径
+   * @param baseDir  基准目录（用于计算相对路径作为键）
+   * @param prefix   键前缀（应用模板隔离用，如 "apps/social"）
+   */
+  private loadFile(filePath: string, baseDir: string, prefix?: string): void {
     try {
       const raw = readFileSync(filePath, 'utf-8')
       const relPath = path.relative(baseDir, filePath).replace(/\\/g, '/')
-      const key = relPath.replace(/\.(md|txt)$/, '')
+      let key = relPath.replace(/\.(md|txt)$/, '')
+
+      // 带前缀的模板：键 = prefix/relativePath（如 apps/social/decisions/foo）
+      if (prefix) {
+        key = `${prefix}/${key}`
+      }
 
       let content = raw
       let meta: PromptMeta = {}
@@ -543,11 +612,13 @@ export class MdpEngine {
       this.prompts.set(key, { key, content, meta })
 
       // 注册基名 (兼容短名调用)
-      // 但 agents/ 目录下的模板不应注册全局 basename，
-      // 否则先加载的 agent 模板会污染其他 agent 的 fallback
-      const isAgentTemplate = key.includes('/')
-      if (!isAgentTemplate) {
-        const basename = path.basename(key)
+      // agents/ 目录下的模板不注册全局 basename，避免 agent 特定模板污染全局
+      // slots/ 目录下的模板使用 frontmatter slotId 作为基名（如 footer），而不是带数字的文件名（如 9500_footer）
+      // 带前缀的应用模板不注册全局 basename，避免污染主 Agent 短名空间
+      const isAgentsTemplate = key.startsWith('agents/')
+      const isPrefixedTemplate = Boolean(prefix)
+      if (!isAgentsTemplate && !isPrefixedTemplate) {
+        const basename = meta.slotId && key.startsWith('slots/') ? meta.slotId : path.basename(key)
         if (!this.prompts.has(basename)) {
           this.prompts.set(basename, { key, content, meta })
         }

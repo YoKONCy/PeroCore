@@ -16,6 +16,8 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { useGateway } from '../gateway/useGateway'
 import type { GatewayNotification, TaskProgress } from '../gateway/useGateway'
 import { useNotificationStore } from '../../stores'
+import { agentApi } from '../../api/modules/agentApi'
+import { listen } from '../../utils/ipcAdapter'
 
 // ── 导出类型 ──
 
@@ -38,6 +40,45 @@ export interface PetChatState {
 export interface PetGatewayOptions {
   /** Gateway 推送的 TTS 音频 chunk → 播放 */
   onAudioChunk?: (data: ArrayBuffer) => void
+}
+
+/**
+ * 过滤 Thinking/Monologue 等内部推理内容
+ *
+ * LLM 输出中包含的【Thinking】...【/Thinking】、【Monologue】...【/Monologue】
+ * 等标签是内部推理过程，不应作为可见回复显示给用户。
+ * 需要同时处理不完整的标签（如流式输出中标签可能被截断）。
+ */
+function stripInternalThinking(text: string): { visible: string; hasThinking: boolean } {
+  // 检测是否全是内部推理内容（可能被截断）
+  const trimmed = text.trim()
+  if (!trimmed) return { visible: '', hasThinking: false }
+
+  // 匹配完整的 Thinking/Monologue 块（包括中文和英文标签）
+  // 包括跨行匹配，支持不完整的标签（流式输出中标签可能被截断）
+  const fullBlockRegex =
+    /【\s*(?:Thinking|Monologue)\s*[\s\S]*?【\/\s*(?:Thinking|Monologue)\s*】|\[\s*(?:Thinking|Monologue)\s*:\s*[\s\S]*?\[\/\s*(?:Thinking|Monologue)\s*\]/gi
+
+  // 匹配开标签但没有闭标签的情况（流式输出中闭标签尚未输出）
+  const openTagOnlyRegex =
+    /^[\s\u3000]*【\s*(?:Thinking|Monologue)\s*[:：]?|^[\s\u3000]*\[\s*(?:Thinking|Monologue)\s*:\s*/gi
+
+  // 匹配闭标签（此时内容已被前面的规则处理完）
+  const closeTagOnlyRegex =
+    /^[\s\u3000]*【\/\s*(?:Thinking|Monologue)\s*】[\s\u3000]*$|^[\s\u3000]*\[\/\s*(?:Thinking|Monologue)\s*\][\s\u3000]*$/gi
+
+  // 移除完整块
+  let visible = text.replace(fullBlockRegex, '')
+  // 移除只有开标签的行（整行都是 Thinking 开始）
+  visible = visible.replace(openTagOnlyRegex, '')
+  // 移除只有闭标签的行
+  visible = visible.replace(closeTagOnlyRegex, '')
+
+  // 判断原文本是否包含 Thinking 内容
+  const hasThinking =
+    fullBlockRegex.test(text) || openTagOnlyRegex.test(text) || closeTagOnlyRegex.test(text)
+
+  return { visible: visible.trim(), hasThinking }
 }
 
 /**
@@ -74,10 +115,12 @@ export function usePetGateway(options?: PetGatewayOptions) {
     mind: '发呆',
   })
 
-  /** 流式回复缓冲 */
-  let streamBuffer = ''
   /** 当前活跃的 session ID */
   const activeSessionId = ref<string | null>(null)
+  /** 当前活跃的 agentId (用于过滤 state_update，避免非活跃 agent 的更新污染显示) */
+  const activeAgentId = ref('pero')
+  /** 是否已收到过真正的可见文本 (非纯 Thinking 内容) */
+  let hasReceivedVisibleText = false
 
   // ── Gateway 连接 ──
 
@@ -90,21 +133,38 @@ export function usePetGateway(options?: PetGatewayOptions) {
   } = useGateway({
     // 流式文字 delta (逐字推送)
     onStreamDelta: (data) => {
-      streamBuffer += data.content
-      chatState.value.currentText = streamBuffer
-      chatState.value.isThinking = false
+      // 过滤 Thinking/Monologue 等内部推理内容
+      const { visible, hasThinking } = stripInternalThinking(data.content)
+
+      // 追加过滤后的可见文本到 buffer
+      if (visible) {
+        hasReceivedVisibleText = true
+        chatState.value.currentText += visible
+      }
+
+      // 只有在收到过真正的可见文本后才退出思考状态
+      // 纯 Thinking 内容、工具调用内容等不应触发思考状态结束
+      if (hasReceivedVisibleText && !hasThinking) {
+        chatState.value.isThinking = false
+      }
+
       activeSessionId.value = data.sessionId
     },
 
     // 流结束
     onStreamEnd: (_data) => {
       chatState.value.isThinking = false
-      // 保持 currentText 不清空，让气泡继续显示
-      streamBuffer = ''
+      // 没有可见文本时清空内容，避免气泡停留在“思考中”旧状态
+      if (!hasReceivedVisibleText) {
+        chatState.value.currentText = ''
+      }
+      hasReceivedVisibleText = false
     },
 
     // 状态更新 (心情/氛围/想法)
     onStateUpdate: (data) => {
+      // 仅接受当前活跃 agent 的状态更新 (广播带 agentId，缺省时兼容旧逻辑放行)
+      if (data.agentId && data.agentId !== activeAgentId.value) return
       if (data.mood) chatState.value.mood = data.mood as string
       if (data.vibe) chatState.value.vibe = data.vibe as string
       if (data.mind) chatState.value.mind = data.mind as string
@@ -159,14 +219,16 @@ export function usePetGateway(options?: PetGatewayOptions) {
     chatState.value.isThinking = true
     chatState.value.thinkingMessage = '努力思考中...'
     chatState.value.currentText = ''
-    streamBuffer = ''
+    hasReceivedVisibleText = false
 
     try {
       // 使用 RPC 请求发送聊天
+      // 传 threadId（后端 AIOS 架构字段），activeSessionId 为空时不传，
+      // 让后端通过 getOrCreateLatest 自动获取/创建 Thread，避免硬编码 'default' 产生脏数据
       await request('chat', {
         messages: [{ role: 'user', content: text }],
         source,
-        sessionId: activeSessionId.value || 'default',
+        threadId: activeSessionId.value || undefined,
       })
     } catch (err) {
       chatState.value.isThinking = false
@@ -184,19 +246,57 @@ export function usePetGateway(options?: PetGatewayOptions) {
    */
   function abortThinking(): void {
     if (!chatState.value.isThinking) return
-    send('abort', { sessionId: activeSessionId.value || 'default' })
+    // 中断时传 threadId（与发送时一致），为空时不传
+    send('abort', { threadId: activeSessionId.value || undefined })
     chatState.value.isThinking = false
     chatState.value.currentText = '(已中断)'
   }
 
+  // ── 加载持久化状态 ──
+
+  /**
+   * 启动时从后端拉取持久化的角色状态 (pet_states 表)，
+   * 恢复 finish_task 上次写入的 mood/vibe/mind，避免重启后丢失。
+   */
+  async function loadPetState(agentIdOverride?: string): Promise<void> {
+    try {
+      const agentId = agentIdOverride ?? (await agentApi.getActive())?.data?.agentId ?? 'pero'
+      activeAgentId.value = agentId
+      const res = await agentApi.getPetState(agentId)
+      const state = res?.data
+      if (state) {
+        chatState.value.mood = state.mood
+        chatState.value.vibe = state.vibe
+        chatState.value.mind = state.mind
+      }
+    } catch {
+      // 静默：拉取失败时保留默认值
+    }
+  }
+
   // ── 生命周期 ──
+
+  /** agent_changed 事件取消监听器 */
+  let unlistenAgentChanged: (() => void) | null = null
 
   onMounted(() => {
     connect()
+    loadPetState()
+    // 切换 Agent 时重新拉取对应角色的持久化状态，保证 mood/vibe/mind 跟随切换
+    listen('agent_changed', (payload) => {
+      const agentId = (payload as { agentId?: unknown } | null)?.agentId
+      if (typeof agentId === 'string' && agentId && agentId !== activeAgentId.value) {
+        loadPetState(agentId)
+      }
+    }).then((unlisten) => {
+      unlistenAgentChanged = unlisten
+    })
   })
 
   onUnmounted(() => {
     disconnect()
+    unlistenAgentChanged?.()
+    unlistenAgentChanged = null
   })
 
   return {

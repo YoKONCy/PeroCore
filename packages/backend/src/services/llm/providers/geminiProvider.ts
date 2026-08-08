@@ -16,6 +16,7 @@
 import type {
   LlmProvider,
   ChatMessage,
+  ContentPart,
   ChatOptions,
   ChatCompletion,
   ChatDelta,
@@ -24,6 +25,7 @@ import type {
   UsageInfo,
 } from '../types'
 import { AppError } from '../../../lib/appError'
+import { stripBase64DataUris } from '../sanitize'
 import { createLogger } from '../../../lib/logger'
 
 const logger = createLogger('GeminiProvider')
@@ -43,6 +45,8 @@ const SAFETY_SETTINGS = [
 
 interface GeminiPart {
   text?: string
+  /** 多模态图片块 (base64) */
+  inlineData?: { mimeType: string; data: string }
   functionCall?: { name: string; args: Record<string, unknown> }
   functionResponse?: { name: string; response: Record<string, unknown> }
 }
@@ -250,8 +254,12 @@ export class GeminiProvider implements LlmProvider {
       if (msg.role === 'tool') {
         let responseData: Record<string, unknown>
         try {
+          // 兜底防御：剥离 tool 返回里可能混入的 base64 data URI，避免爆 token / 污染上下文。
+          // 合法图片以 inlineData 数组块形式传递 (非字符串)，不受影响。
+          const sanitized =
+            typeof msg.content === 'string' ? stripBase64DataUris(msg.content) : msg.content
           responseData =
-            typeof msg.content === 'string' ? JSON.parse(msg.content) : { result: msg.content }
+            typeof sanitized === 'string' ? JSON.parse(sanitized) : { result: sanitized }
         } catch {
           responseData = { result: msg.content }
         }
@@ -288,15 +296,47 @@ export class GeminiProvider implements LlmProvider {
         continue
       }
 
-      // 普通消息
+      // 普通消息 (支持多模态: 字符串 / ContentPart[])
       const role = msg.role === 'assistant' ? 'model' : 'user'
-      const text = typeof msg.content === 'string' ? msg.content : ''
-      if (text) {
-        contents.push({ role, parts: [{ text }] })
+      const parts = this.contentToParts(msg.content)
+      if (parts.length > 0) {
+        contents.push({ role, parts })
       }
     }
 
     return { systemInstruction: systemInstruction?.trim() ?? null, contents }
+  }
+
+  /**
+   * 将消息内容 (字符串或多模态块) 转为 Gemini parts
+   *
+   * 重要: 截图等图片以 image_url 块形式放在 user 消息里，必须转为 Gemini 的 inlineData，
+   * 否则会被丢弃，导致多模态模型根本「看不到」图片。
+   */
+  private contentToParts(content: string | ContentPart[] | null): GeminiPart[] {
+    if (typeof content === 'string') {
+      return content ? [{ text: content }] : []
+    }
+    if (!Array.isArray(content)) return []
+
+    const parts: GeminiPart[] = []
+    for (const part of content) {
+      if (part.type === 'text') {
+        if (part.text) parts.push({ text: part.text })
+      } else if (part.type === 'image_url') {
+        const inline = this.dataUriToInline(part.image_url.url)
+        if (inline) parts.push({ inlineData: inline })
+      }
+      // input_audio: Gemini REST 当前不在此处支持，跳过
+    }
+    return parts
+  }
+
+  /** 解析 data URI → Gemini inlineData (mimeType + base64) */
+  private dataUriToInline(url: string): { mimeType: string; data: string } | null {
+    const match = /^data:([^;]+);base64,(.+)$/s.exec(url)
+    if (!match) return null
+    return { mimeType: match[1]!, data: match[2]! }
   }
 
   // ── 内部方法: 响应规范化 ──

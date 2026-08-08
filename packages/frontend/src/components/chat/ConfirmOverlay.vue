@@ -43,72 +43,65 @@ function getRiskLabel(level?: number): string {
 
 /** 风险等级颜色 */
 function getRiskColor(level?: number): string {
-  if (!level || level <= 1) return 'bg-sky-500'
-  if (level === 2) return 'bg-amber-500'
-  return 'bg-rose-500'
+  if (!level || level <= 1) return 'risk-low'
+  if (level === 2) return 'risk-medium'
+  return 'risk-high'
 }
 </script>
 
 <template>
   <Transition name="fade">
-    <div
-      v-if="confirmation"
-      class="absolute inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-6"
-    >
-      <div
-        class="w-full max-w-md border-2 border-slate-200 bg-white shadow-[8px_8px_0_rgba(0,0,0,0.15)] overflow-hidden"
-      >
+    <div v-if="confirmation" class="confirm-overlay">
+      <div class="confirm-dialog pixel-border-moe">
         <!-- 标题 -->
-        <div class="flex items-center gap-3 px-6 py-4 border-b-2 border-slate-200">
-          <div class="p-2 bg-sky-100 text-sky-500">
+        <div class="confirm-header">
+          <div class="confirm-icon pixel-border-moe">
             <PixelIcon name="terminal" size="sm" />
           </div>
           <div>
-            <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2">
+            <h3 class="confirm-title">
               请求执行终端指令
               <span
                 v-if="confirmation.riskInfo?.level"
                 :class="[
-                  'px-2 py-0.5 text-[10px] font-bold text-white uppercase tracking-wider',
+                  'confirm-risk-badge pixel-border-moe',
                   getRiskColor(confirmation.riskInfo.level),
                 ]"
               >
                 {{ getRiskLabel(confirmation.riskInfo.level) }}
               </span>
             </h3>
-            <p class="text-xs text-slate-400">{{ agentName }} 申请在您的系统中执行以下命令</p>
+            <p class="confirm-subtitle">{{ agentName }} 申请在您的系统中执行以下命令</p>
           </div>
         </div>
 
         <!-- 内容 -->
-        <div class="p-6">
+        <div class="confirm-body">
           <!-- 命令 -->
-          <div
-            class="p-4 bg-slate-900 border border-slate-200 font-mono text-[13px] text-emerald-400 overflow-x-auto"
-          >
+          <div class="confirm-code pixel-border-moe">
             <span class="select-text">{{ confirmation.command }}</span>
           </div>
 
           <!-- 高风险警告 -->
           <div
             v-if="confirmation.riskInfo && confirmation.riskInfo.level >= 2"
-            class="mt-4 p-3 flex gap-3 items-start border border-rose-200 bg-rose-50/50"
+            class="confirm-warning pixel-border-moe"
           >
-            <div class="p-1.5 flex-shrink-0 bg-rose-100 text-rose-500">
+            <div class="confirm-warning-icon pixel-border-moe">
               <PixelIcon name="alert" size="xs" />
             </div>
-            <div class="text-xs text-rose-600">
-              <p class="font-bold mb-1">
+            <div class="confirm-warning-text">
+              <p class="confirm-warning-title">
                 系统警告：{{ confirmation.riskInfo.reason ?? '敏感操作' }}
               </p>
-              <p class="opacity-90 leading-relaxed">
+              <p class="confirm-warning-desc">
                 此指令包含可能修改系统关键配置或删除文件的操作。请务必确认指令来源和意图。
               </p>
             </div>
           </div>
 
           <!-- 低风险说明 -->
-          <p v-else class="mt-4 text-xs text-center text-slate-400">
+          <p v-else class="confirm-tip">
             说明:
             {{
               confirmation.riskInfo?.reason ??
@@ -118,15 +111,15 @@ function getRiskColor(level?: number): string {
         </div>
 
         <!-- 操作按钮 -->
-        <div class="flex justify-end gap-3 px-6 py-4 border-t-2 border-slate-200 bg-slate-50">
+        <div class="confirm-actions">
           <button
-            class="flex items-center gap-1.5 px-4 py-2 text-[13px] font-bold border-2 border-slate-200 bg-white text-slate-500 cursor-pointer transition-all active:scale-95 hover:border-sky-300 hover:text-sky-500"
+            class="confirm-btn confirm-reject pixel-border-moe"
             @click="emit('respond', false)"
           >
             拒绝执行
           </button>
           <button
-            class="flex items-center gap-1.5 px-4 py-2 text-[13px] font-bold border-2 border-sky-600 bg-sky-500 text-white cursor-pointer transition-all active:scale-95 hover:bg-sky-400"
+            class="confirm-btn confirm-approve pixel-border-moe"
             @click="emit('respond', true)"
           >
             <PixelIcon name="check" size="xs" />
@@ -145,6 +138,174 @@ function getRiskColor(level?: number): string {
 </template>
 
 <style scoped>
+.confirm-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(45, 27, 30, 0.42);
+  backdrop-filter: blur(6px);
+}
+
+.confirm-dialog {
+  width: 100%;
+  max-width: 448px;
+  overflow: hidden;
+  background: rgba(255, 252, 249, 0.96);
+  box-shadow: 10px 10px 0 rgba(249, 168, 212, 0.24);
+}
+
+.confirm-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 24px;
+  border-bottom: 1px solid rgba(45, 27, 30, 0.08);
+  background: rgba(249, 168, 212, 0.08);
+}
+
+.confirm-icon {
+  padding: 8px;
+  color: var(--color-moe-pink);
+  background: rgba(249, 168, 212, 0.16);
+}
+
+.confirm-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-moe-cocoa);
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.confirm-subtitle {
+  margin-top: 4px;
+  color: rgba(45, 27, 30, 0.44);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.confirm-risk-badge {
+  padding: 2px 8px;
+  color: white;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.risk-low {
+  background: var(--color-moe-sky);
+}
+
+.risk-medium {
+  background: var(--color-moe-yellow);
+  color: var(--color-moe-cocoa);
+}
+
+.risk-high {
+  background: var(--color-red-face);
+}
+
+.confirm-body {
+  padding: 24px;
+}
+
+.confirm-code {
+  overflow-x: auto;
+  padding: 16px;
+  background: rgba(45, 27, 30, 0.92);
+  color: #86efac;
+  font-family: monospace;
+  font-size: 13px;
+}
+
+.confirm-warning {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-top: 16px;
+  padding: 12px;
+  background: rgba(254, 226, 226, 0.72);
+}
+
+.confirm-warning-icon {
+  flex-shrink: 0;
+  padding: 6px;
+  color: var(--color-red-face);
+  background: rgba(254, 202, 202, 0.72);
+}
+
+.confirm-warning-text {
+  color: var(--color-red-outline);
+  font-size: 12px;
+}
+
+.confirm-warning-title {
+  margin-bottom: 4px;
+  font-weight: 900;
+}
+
+.confirm-warning-desc {
+  line-height: 1.6;
+  opacity: 0.9;
+}
+
+.confirm-tip {
+  margin-top: 16px;
+  text-align: center;
+  color: rgba(45, 27, 30, 0.44);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 16px 24px;
+  border-top: 1px solid rgba(45, 27, 30, 0.08);
+  background: rgba(255, 255, 255, 0.34);
+}
+
+.confirm-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 900;
+  transition: all 0.16s ease;
+}
+
+.confirm-btn:active {
+  transform: translate(1px, 1px);
+}
+
+.confirm-reject {
+  background: rgba(255, 255, 255, 0.68);
+  color: rgba(45, 27, 30, 0.62);
+}
+
+.confirm-reject:hover {
+  color: var(--color-moe-pink);
+  background: rgba(249, 168, 212, 0.08);
+}
+
+.confirm-approve {
+  background: var(--color-moe-pink);
+  color: white;
+}
+
+.confirm-approve:hover {
+  background: #f472b6;
+  transform: translateY(-1px);
+}
+
 .fade-enter-active {
   transition: opacity 0.3s;
 }

@@ -1,7 +1,7 @@
 /**
  * useModelConfig — 模型配置 composable
  *
- * 管理 LLM 模型列表的 CRUD + 角色分配 (主/秘书/反思/辅助)
+ * 管理 LLM 模型列表的 CRUD + 任务指派 (主模型 + 任务槽)
  * 以及向量模型 (Embedding / Reranker) 配置。
  *
  * F3: 已对接 modelApi + configApi 真实后端。
@@ -32,14 +32,16 @@ export interface LlmModel {
   providerType: string
 }
 
-export interface ModelRoles {
-  main: string | null
-  secretary: string | null
-  reflection: string | null
-  aux: string | null
-}
-
 export type ModelTab = 'llm' | 'vector'
+
+/** 任务槽元数据（供前端 UI 使用） */
+export const TASK_SLOTS = [
+  { key: 'scorer', label: '记忆提炼', description: 'Scorer、Importer — 结构化输出，低温', icon: 'brain' },
+  { key: 'reflection', label: '记忆反思', description: 'Tagger/Consolidator/Auditor/Gardener/Dreamer — 最低温', icon: 'brain' },
+  { key: 'social_reply', label: '社交回复生成', description: '对外人格表现，需创意 — 默认用主模型', icon: 'chat' },
+  { key: 'social_scheduler', label: '社交决策', description: '思考状态机 — 决策类低温', icon: 'brain' },
+  { key: 'social_scorer', label: '社交记忆炼化', description: '结构化输出，低温', icon: 'brain' },
+] as const
 
 // ── 辅助函数 ──
 
@@ -51,7 +53,7 @@ function toLlmModel(item: ModelConfigItem): LlmModel {
     provider: item.provider,
     modelId: item.modelId,
     maxTokens: null,
-    enableVision: false,
+    enableVision: item.enableVision ?? false,
     temperature: 0.7,
     topP: 1,
     apiBase: item.apiBase,
@@ -70,13 +72,11 @@ export function useModelConfig() {
   const isLoading = ref(false)
   const error = ref<string | null>(null)
 
-  // ── 模型角色 ──
-  const roles = ref<ModelRoles>({
-    main: null,
-    secretary: null,
-    reflection: null,
-    aux: null,
-  })
+  // ── 主模型 + 任务指派 ──
+  const mainModelId = ref<string | null>(null)
+  const taskAssignments = ref<Record<string, string | null>>({})
+  // 任务指派弹窗
+  const isTaskAssignOpen = ref(false)
 
   // ── 编辑弹窗 ──
   const isEditorOpen = ref(false)
@@ -100,10 +100,10 @@ export function useModelConfig() {
   // 每个主流供应商的全局 apiBase/apiKey
   const globalConfig = ref({
     openai: { apiBase: 'https://api.openai.com/v1', apiKey: '' },
-    anthropic: { apiBase: 'https://api.anthropic.com', apiKey: '' },
-    gemini: { apiBase: 'https://generativelanguage.googleapis.com', apiKey: '' },
+    anthropic: { apiBase: 'https://api.anthropic.com/v1', apiKey: '' },
+    gemini: { apiBase: 'https://generativelanguage.googleapis.com/v1beta', apiKey: '' },
     siliconflow: { apiBase: 'https://api.siliconflow.cn/v1', apiKey: '' },
-    deepseek: { apiBase: 'https://api.deepseek.com', apiKey: '' },
+    deepseek: { apiBase: 'https://api.deepseek.com/v1', apiKey: '' },
     moonshot: { apiBase: 'https://api.moonshot.cn/v1', apiKey: '' },
     dashscope: { apiBase: 'https://dashscope.aliyuncs.com/compatible-mode/v1', apiKey: '' },
     volcengine: { apiBase: 'https://ark.cn-beijing.volces.com/api/v3', apiKey: '' },
@@ -164,10 +164,10 @@ export function useModelConfig() {
    */
   const providerDefaults: Record<string, string> = {
     openai: 'https://api.openai.com/v1',
-    anthropic: 'https://api.anthropic.com',
-    gemini: 'https://generativelanguage.googleapis.com',
+    anthropic: 'https://api.anthropic.com/v1',
+    gemini: 'https://generativelanguage.googleapis.com/v1beta',
     siliconflow: 'https://api.siliconflow.cn/v1',
-    deepseek: 'https://api.deepseek.com',
+    deepseek: 'https://api.deepseek.com/v1',
     moonshot: 'https://api.moonshot.cn/v1',
     dashscope: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     volcengine: 'https://ark.cn-beijing.volces.com/api/v3',
@@ -274,22 +274,28 @@ export function useModelConfig() {
     }
   }
 
-  /** 从后端加载角色配置 */
-  async function fetchRoles(): Promise<void> {
+  /** 从后端加载主模型配置 (config KV: model.main) */
+  async function fetchMainModel(): Promise<void> {
     try {
-      const res = await configApi.batch([
-        'model.role.main',
-        'model.role.secretary',
-        'model.role.reflection',
-        'model.role.aux',
-      ])
+      const res = await configApi.get('model.main')
+      mainModelId.value = (res.data?.value as string) || null
+    } catch {
+      // 首次使用可能不存在配置，保持默认
+    }
+  }
+
+  /** 从后端批量加载任务指派 (config KV: model.task.*) */
+  async function fetchTaskAssignments(): Promise<void> {
+    try {
+      const keys = TASK_SLOTS.map((s) => `model.task.${s.key}`)
+      const res = await configApi.batch(keys)
       const data = res.data ?? {}
-      roles.value = {
-        main: (data['model.role.main'] as string) || null,
-        secretary: (data['model.role.secretary'] as string) || null,
-        reflection: (data['model.role.reflection'] as string) || null,
-        aux: (data['model.role.aux'] as string) || null,
+      const next: Record<string, string | null> = {}
+      for (const slot of TASK_SLOTS) {
+        const v = data[`model.task.${slot.key}`]
+        next[slot.key] = (v as string) || null
       }
+      taskAssignments.value = next
     } catch {
       // 首次使用可能不存在配置，保持默认
     }
@@ -332,6 +338,7 @@ export function useModelConfig() {
           modelId: form.modelId,
           apiKey: form.apiKey || undefined,
           apiBase: form.apiBase || undefined,
+          enableVision: form.enableVision,
         })
         notify.toast(`模型 "${form.name}" 已更新`, 'success')
       } else {
@@ -342,6 +349,7 @@ export function useModelConfig() {
           modelId: form.modelId,
           apiKey: form.apiKey || '',
           apiBase: form.apiBase || undefined,
+          enableVision: form.enableVision,
         })
         notify.toast(`模型 "${form.name}" 已添加`, 'success')
       }
@@ -360,11 +368,16 @@ export function useModelConfig() {
     try {
       await modelApi.remove(id)
       await fetchModels()
-      // 清理角色引用
-      for (const key of Object.keys(roles.value) as Array<keyof ModelRoles>) {
-        if (roles.value[key] === id) {
-          roles.value[key] = null
-          await configApi.set(`model.role.${key}`, '')
+      // 清理主模型引用
+      if (mainModelId.value === id) {
+        mainModelId.value = null
+        await configApi.set('model.main', '')
+      }
+      // 清理任务指派引用
+      for (const slot of TASK_SLOTS) {
+        if (taskAssignments.value[slot.key] === id) {
+          taskAssignments.value[slot.key] = null
+          await configApi.set(`model.task.${slot.key}`, '')
         }
       }
       notify.toast('模型已删除', 'success')
@@ -374,30 +387,26 @@ export function useModelConfig() {
     }
   }
 
-  /** 设置角色 */
-  async function setRole(role: keyof ModelRoles, modelId: string): Promise<void> {
+  /** 设置主模型 (config KV: model.main) */
+  async function setMainModel(modelId: string): Promise<void> {
     try {
-      if (roles.value[role] === modelId) {
-        roles.value[role] = null
-        await configApi.set(`model.role.${role}`, '')
-        notify.toast(`已取消 ${role} 角色分配`, 'info')
-      } else {
-        roles.value[role] = modelId
-        await configApi.set(`model.role.${role}`, modelId)
-        notify.toast(`已设置 ${role} 角色`, 'success')
-      }
+      mainModelId.value = modelId
+      await configApi.set('model.main', modelId)
+      notify.toast('已设置为主模型', 'success')
     } catch (e) {
-      notify.toast('角色设置失败: ' + (e as Error).message, 'error')
+      notify.toast('主模型设置失败: ' + (e as Error).message, 'error')
     }
   }
 
-  function getModelRoles(modelId: string): string[] {
-    const result: string[] = []
-    if (roles.value.main === modelId) result.push('main')
-    if (roles.value.secretary === modelId) result.push('secretary')
-    if (roles.value.reflection === modelId) result.push('reflection')
-    if (roles.value.aux === modelId) result.push('aux')
-    return result
+  /** 设置任务指派 (config KV: model.task.{taskSlot}) */
+  async function setTaskAssignment(taskSlot: string, modelId: string | null): Promise<void> {
+    try {
+      taskAssignments.value[taskSlot] = modelId
+      await configApi.set(`model.task.${taskSlot}`, modelId ?? '')
+      notify.toast(modelId ? '已指派任务模型' : '已取消任务指派', modelId ? 'success' : 'info')
+    } catch (e) {
+      notify.toast('任务指派失败: ' + (e as Error).message, 'error')
+    }
   }
 
   /** 获取 Embedding 远程模型列表 */
@@ -560,7 +569,13 @@ export function useModelConfig() {
 
   // ── 初始化 ──
   onMounted(async () => {
-    await Promise.all([fetchModels(), fetchRoles(), loadGlobalConfig(), loadVectorConfig()])
+    await Promise.all([
+      fetchModels(),
+      fetchMainModel(),
+      fetchTaskAssignments(),
+      loadGlobalConfig(),
+      loadVectorConfig(),
+    ])
   })
 
   return {
@@ -569,7 +584,9 @@ export function useModelConfig() {
     currentTab,
     isLoading,
     error,
-    roles,
+    mainModelId,
+    taskAssignments,
+    isTaskAssignOpen,
     providerOptions,
     // 编辑器
     isEditorOpen,
@@ -578,8 +595,10 @@ export function useModelConfig() {
     openEditor,
     saveModel,
     deleteModel,
-    setRole,
-    getModelRoles,
+    setMainModel,
+    setTaskAssignment,
+    fetchMainModel,
+    fetchTaskAssignments,
     fetchModels,
     // 远程模型列表
     remoteModels,

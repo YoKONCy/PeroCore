@@ -15,16 +15,17 @@ import { PixelIcon, PCard, PButton, PSwitch, PSlider, PDialog } from '../../pixe
 import { systemApi } from '../../../api/modules/systemApi'
 import { memoryApi } from '../../../api/modules/memoryApi'
 import { schedulerApi } from '../../../api/modules/schedulerApi'
-import { sessionsApi } from '../../../api/modules/sessionsApi'
+import { threadsApi } from '../../../api/modules/threadsApi'
 import { agentApi, type AgentListItem } from '../../../api/modules/agentApi'
-import { chatApi } from '../../../api/modules/chatApi'
 import { configApi } from '../../../api/modules/configApi'
 import { useGateway } from '../../../composables/dashboard'
 import { getApiBaseUrl } from '../../../api/transport'
 import { logger } from '../../../lib/logger'
+import { useNotificationStore } from '../../../stores'
 
 // ══════ DashboardContext 接入 ══════
 const ctx = useDashboardContext()
+const notif = useNotificationStore()
 
 const isLoading = ref(true)
 
@@ -45,10 +46,13 @@ async function switchAgent(id: string) {
   if (isSwitchingAgent.value || id === activeAgent.value?.id) return
   isSwitchingAgent.value = true
   try {
-    await agentApi.setActive(id)
+    // AIOS: 后端不再维护全局活跃 Agent，仅更新本地窗口级状态
+    // TODO: 待 RuntimeStateService 前端 API 就绪后，通过 WS 设置窗口级 Agent
     activeAgent.value = agents.value.find((a) => a.id === id) ?? null
     // 同步到全局 Context
     ctx.activeAgentId.value = id
+    // 切换 Agent 后重新加载其角色状态 (mood/vibe/mind)
+    await loadPetState()
   } catch (e) {
     logger.error('OverviewTab', '切换 Agent 失败', e)
   } finally {
@@ -63,52 +67,39 @@ function selectAgent(id: string) {
 }
 
 // ══════ 宠物状态 (心情/氛围/想法) ══════
+// 直接显示 LLM 设置的原文，不做任何翻译，与 Pet3DView 保持一致
 const petState = ref({
-  mood: 'neutral',
-  vibe: 'idle',
-  mind: '...',
+  mood: '开心',
+  vibe: '轻松',
+  mind: '发呆',
 })
 
-// ── 中文标签映射 (与 Pet3D usePetState 保持一致) ──
-const moodLabels: Record<string, string> = {
-  happy: '开心',
-  neutral: '平静',
-  sleepy: '困了',
-  excited: '兴奋',
-  curious: '好奇',
-}
-const vibeLabels: Record<string, string> = {
-  active: '活跃',
-  relaxed: '轻松',
-  tired: '疲惫',
-  idle: '闲置',
-}
-
-/** 从与 Pet3D 一致的 KV key 加载状态（pet.mood / pet.energy / pet.name） */
+/** 从 pet_states 表加载角色状态 */
 async function loadPetState() {
   try {
-    const res = await configApi.batch(['pet.mood', 'pet.energy', 'pet.mind', 'pet.name'])
+    const active = await agentApi.getActive()
+    const agentId = active?.data?.agentId ?? ctx.activeAgentId.value ?? 'pero'
+    const res = await agentApi.getPetState(agentId)
     if (res.data) {
-      petState.value.mood = (res.data['pet.mood'] as string) || 'neutral'
-      // 能量值转换为氛围 key
-      const energy = Number(res.data['pet.energy']) || 50
-      petState.value.vibe = energy >= 70 ? 'active' : energy >= 30 ? 'relaxed' : 'tired'
-      // mind: 优先 pet.mind，回退 '在发呆...'
-      petState.value.mind = (res.data['pet.mind'] as string) || '在发呆...'
+      petState.value.mood = res.data.mood
+      petState.value.vibe = res.data.vibe
+      petState.value.mind = res.data.mind
     }
   } catch {
     // 静默，使用默认值
   }
 }
 
-// ── Gateway 实时推送: 监听 state_update 同步宠物状态 ──
+// ── Gateway 实时推送: 监听 state_update 同步宠物状态 (mood/vibe/mind) ──
 const { onPush: onOverviewPush } = useGateway()
 onOverviewPush('state_update', (payload) => {
+  // 仅接受当前活跃 agent 的状态更新 (广播带 agentId，缺省时兼容旧逻辑放行)
+  const updateAgentId = payload.agentId
+  const currentId = activeAgent.value?.id ?? ctx.activeAgentId.value
+  if (typeof updateAgentId === 'string' && currentId && updateAgentId !== currentId) return
   if (payload.mood !== undefined) petState.value.mood = payload.mood as string
-  if (payload.energy !== undefined) {
-    const energy = Number(payload.energy)
-    petState.value.vibe = energy >= 70 ? 'active' : energy >= 30 ? 'relaxed' : 'tired'
-  }
+  if (payload.vibe !== undefined) petState.value.vibe = payload.vibe as string
+  if (payload.mind !== undefined) petState.value.mind = payload.mind as string
 })
 
 // ══════ 功能开关 (Profile) ══════
@@ -125,8 +116,7 @@ async function toggleLightweight(val: boolean) {
   isTogglingProfile.value = true
   try {
     const target = val ? 'lightweight' : 'default'
-    const agentId = activeAgent.value?.id ?? 'pero'
-    await chatApi.switchProfile(agentId, target)
+    // TODO: 后端 Thread 架构下 Profile 切换接口待补齐，暂仅更新本地状态
     currentProfile.value = target
   } catch (e) {
     logger.error('OverviewTab', '切换轻量模式失败', e)
@@ -140,8 +130,7 @@ async function toggleCompanion(val: boolean) {
   isTogglingProfile.value = true
   try {
     const target = val ? 'companion' : 'lightweight'
-    const agentId = activeAgent.value?.id ?? 'pero'
-    await chatApi.switchProfile(agentId, target)
+    // TODO: 后端 Thread 架构下 Profile 切换接口待补齐，暂仅更新本地状态
     currentProfile.value = target
   } catch (e) {
     logger.error('OverviewTab', '切换陪伴模式失败', e)
@@ -182,8 +171,10 @@ async function saveMemoryConfig() {
   try {
     // 将整个配置对象序列化为 JSON string 存入单个 KV key
     await configApi.set('memory.config', JSON.stringify(memoryConfig.value))
+    notif.toast('记忆配置已保存', { type: 'success', title: '记忆配置' })
   } catch (e) {
     logger.error('OverviewTab', '保存记忆配置失败', e)
+    notif.toast('保存失败，请稍后重试', { type: 'error', title: '记忆配置' })
   } finally {
     isSavingMemoryConfig.value = false
   }
@@ -212,7 +203,7 @@ async function loadOverview() {
       systemApi.info(),
       memoryApi.list({ page: 1, pageSize: 1 }),
       schedulerApi.reminders(),
-      sessionsApi.list({ pageSize: 5 }),
+      threadsApi.list({ pageSize: 5 }),
       agentApi.list(),
     ])
 
@@ -239,20 +230,25 @@ async function loadOverview() {
       stats.value.totalTasks = taskRes.value.data.total
     }
 
-    // 最近对话
+    // 最近对话 (Thread 列表)
+    // totalChats 统计真实消息总数（各 Thread messageCount 之和），而非 Thread 数
     if (sessRes.status === 'fulfilled' && sessRes.value.data) {
-      stats.value.totalChats = sessRes.value.data.total
-      recentChats.value = sessRes.value.data.items.map((s, i) => ({
+      const threadItems = sessRes.value.data.items
+      stats.value.totalChats = threadItems.reduce(
+        (sum, t) => sum + (t.messageCount ?? 0),
+        0,
+      )
+      recentChats.value = threadItems.map((s, i) => ({
         id: i,
-        summary: s.preview || '新对话',
+        summary: s.title || '新对话',
         agent: s.agentId || 'Pero',
-        time: new Date(s.lastMessageAt).toLocaleString('zh-CN', {
+        time: new Date(s.updatedAt || s.createdAt).toLocaleString('zh-CN', {
           month: 'short',
           day: 'numeric',
           hour: '2-digit',
           minute: '2-digit',
         }),
-        tokenCount: s.messageCount || 0,
+        tokenCount: 0,
       }))
     }
 
@@ -299,10 +295,12 @@ async function handleImportStory() {
       // 导入成功，刷新统计
       stats.value.totalMemories += res.data.imported
       importStoryText.value = ''
+      notif.toast(`已导入 ${res.data.imported} 条记忆`, { type: 'success', title: '故事导入' })
       showImportStory.value = false
     }
   } catch (e) {
     logger.error('OverviewTab', '故事导入失败', e)
+    notif.toast('导入失败，请稍后重试', { type: 'error', title: '故事导入' })
   } finally {
     isImportingStory.value = false
   }
@@ -562,7 +560,7 @@ onMounted(loadOverview)
             <div
               class="text-2xl font-black text-sky-500 mb-4 relative z-10 group-hover:scale-105 transition-transform origin-left"
             >
-              {{ moodLabels[petState.mood] || petState.mood }}
+              {{ petState.mood }}
             </div>
             <div class="h-1.5 bg-sky-100/50 overflow-hidden relative z-10">
               <div
@@ -595,7 +593,7 @@ onMounted(loadOverview)
             <div
               class="text-2xl font-black text-sky-500 mb-4 relative z-10 group-hover:scale-105 transition-transform origin-left"
             >
-              {{ vibeLabels[petState.vibe] || petState.vibe }}
+              {{ petState.vibe }}
             </div>
             <div class="h-1.5 bg-sky-100/50 overflow-hidden relative z-10">
               <div

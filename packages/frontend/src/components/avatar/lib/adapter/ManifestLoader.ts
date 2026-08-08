@@ -7,6 +7,7 @@
  * @module packages/frontend/src/components/avatar/lib/adapter/ManifestLoader
  */
 
+import { logger } from '../../../../lib/logger'
 import type { IAvatarManifest } from './IAvatarManifest'
 // Provider 接收到的路径已经是可直接 fetch 的 URL，无需额外转换
 
@@ -85,11 +86,11 @@ export class ManifestLoader {
       throw new Error('Manifest resources 缺少 texture 字段')
     }
     if (!manifest.retargetingMap) {
-      console.warn('[ManifestLoader] Manifest 缺少 retargetingMap，使用空映射')
+      logger.warn('ManifestLoader', 'Manifest 缺少 retargetingMap，使用空映射')
       manifest.retargetingMap = { mapping: {} }
     }
     if (!manifest.featureButtons) {
-      console.warn('[ManifestLoader] Manifest 缺少 featureButtons，使用空数组')
+      logger.warn('ManifestLoader', 'Manifest 缺少 featureButtons，使用空数组')
       manifest.featureButtons = []
     }
 

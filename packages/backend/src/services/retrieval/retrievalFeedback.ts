@@ -11,6 +11,7 @@
 
 import type { MemoryRepository } from '../../repositories/memory.repo'
 import type { JsTrainingSample } from '@perocore/nit-runtime'
+import type { ContextRnn } from './contextRnn'
 import { minGruTrain } from '@perocore/nit-runtime'
 import { createLogger } from '../../lib/logger'
 
@@ -59,6 +60,10 @@ export interface InjectedMemory {
   queryEmbedding?: Float32Array
   /** 检索时的 RNN 隐状态 */
   hiddenState?: Float32Array
+  /** 检索时的 CCSA diffusion bias (W_out · h_t)，用于 W_out 训练 */
+  contextBias?: Float32Array
+  /** 记忆节点的 embedding 向量，用于 W_out 训练的 target */
+  memoryEmbedding?: Float32Array
 }
 
 // ─────────────────────────────────────────────
@@ -68,6 +73,7 @@ export interface InjectedMemory {
 export class RetrievalFeedback {
   private config: FeedbackConfig
   private memoryRepo: MemoryRepository
+  private contextRnn: ContextRnn | null
 
   /** 累积训练样本 (等待 batch 触发) */
   private trainingSamples: JsTrainingSample[] = []
@@ -79,11 +85,17 @@ export class RetrievalFeedback {
     negativeCount: 0,
     trainTriggers: 0,
     lastTrainLoss: 0,
+    wOutUpdates: 0, // CCSA: W_out 更新次数
   }
 
-  constructor(memoryRepo: MemoryRepository, config?: Partial<FeedbackConfig>) {
+  constructor(
+    memoryRepo: MemoryRepository,
+    config?: Partial<FeedbackConfig>,
+    contextRnn?: ContextRnn,
+  ) {
     this.config = { ...DEFAULT_CONFIG, ...config }
     this.memoryRepo = memoryRepo
+    this.contextRnn = contextRnn ?? null
   }
 
   /**
@@ -149,6 +161,18 @@ export class RetrievalFeedback {
           queryEmbedding: mem.queryEmbedding,
           label: signal.isPositive ? 1 : 0,
         })
+      }
+
+      // 2b. CCSA: W_out 在线更新
+      // 当携带 contextBias + memoryEmbedding 且有 ContextRnn 实例时，利用反馈信号微调 W_out
+      if (mem?.contextBias && mem?.hiddenState && mem?.memoryEmbedding && this.contextRnn) {
+        this.contextRnn.updateOutputWeights(
+          mem.hiddenState,
+          mem.contextBias,
+          mem.memoryEmbedding,
+          signal.isPositive,
+        )
+        this.stats.wOutUpdates++
       }
 
       // 统计

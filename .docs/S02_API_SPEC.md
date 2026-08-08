@@ -152,7 +152,7 @@ throw new AppError('NOT_FOUND', { message: '未找到 ID 为 42 的记忆' })
 | 504 | `GATEWAY_TIMEOUT` | 上游服务响应超时 | `{ service? }` | 通用超时 |
 | 504 | `LLM_TIMEOUT` | AI 服务响应超时 | `{ provider, model? }` | LLM 超时 |
 
-**统计**：HTTP 状态码 15 个，业务 code 39 个（成功 4 / 客户端错误 20 / 服务端错误 15）。
+**统计**：HTTP 状态码 17 个，业务 code 41 个（成功 4 / 客户端错误 25 / 服务端错误 12）。
 
 ---
 

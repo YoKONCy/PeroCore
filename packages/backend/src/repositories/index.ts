@@ -10,13 +10,7 @@ export {
   type UpdateMemoryInput,
   type ListMemoriesParams,
 } from './memory.repo'
-export {
-  ConversationLogRepository,
-  type CreateLogInput,
-  type SaveLogPairInput,
-  type QueryLogsParams,
-  type UpdateLogMetaInput,
-} from './conversationLog.repo'
+// AIOS: ConversationLogRepository 已移除（废弃，Scorer 改用 ThreadRepository）
 export { ConfigRepository } from './config.repo'
 export { VectorRepository } from './vector.repo'
 export {

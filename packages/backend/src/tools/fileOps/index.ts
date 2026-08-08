@@ -1,73 +1,73 @@
 /**
  * file_ops — 文件操作工具
  *
- * 提供文件读写、信息查询能力。
- * Node.js 原生 fs 实现，完全跨平台。
+ * AIOS(Phase4): 改造为通过 WorkspaceService 执行文件操作，
+ * 按 channel 分级控制访问范围：
+ * - desktop: read 全局可读，write 限 workspace
+ * - companion/social/group: 读写都限 workspace
  *
  * @module packages/backend/src/tools/fileOps
  */
 
-import { readFileSync, writeFileSync, statSync, existsSync, mkdirSync } from 'node:fs'
-import path from 'node:path'
 import type { BuiltinTool } from '../index'
+import type { WorkspaceService } from '../../services/workspace/workspaceService'
+import { createLogger } from '../../lib/logger'
 
-/** 单文件最大读取字节 (10MB) */
-const MAX_READ_SIZE = 10 * 1024 * 1024
+const logger = createLogger('FileOps')
+
+/** WorkspaceService 实例（由 container.ts 通过 setWorkspaceService 注入） */
+let workspaceService: WorkspaceService | null = null
+
+/**
+ * 注入 WorkspaceService
+ *
+ * 在 container.ts 启动时调用一次。
+ */
+export function setWorkspaceService(service: WorkspaceService): void {
+  workspaceService = service
+  logger.info('WorkspaceService 已注入')
+}
+
+/** 获取 WorkspaceService，未注入时抛错 */
+function requireWorkspaceService(): WorkspaceService {
+  if (!workspaceService) {
+    throw new Error('WorkspaceService 未注入，文件工具不可用')
+  }
+  return workspaceService
+}
 
 export const readFileTool: BuiltinTool = {
   name: 'read_file',
 
-  async execute(args) {
+  async execute(args, ctx) {
     const filePath = args.file_path as string
     const maxLength = (args.max_length as number) ?? 10_000
 
-    if (!existsSync(filePath)) {
-      return JSON.stringify({ error: `文件不存在: ${filePath}` })
-    }
-
-    const stat = statSync(filePath)
-    if (!stat.isFile()) {
-      return JSON.stringify({ error: `路径不是文件: ${filePath}` })
-    }
-    if (stat.size > MAX_READ_SIZE) {
-      return JSON.stringify({ error: `文件过大 (${stat.size} bytes)，上限 10MB` })
-    }
-
-    // 尝试 UTF-8，失败后尝试 latin1
-    let content: string
     try {
-      content = readFileSync(filePath, 'utf-8')
-    } catch {
-      content = readFileSync(filePath, 'latin1')
+      const service = requireWorkspaceService()
+      // AIOS(Phase4): 按 channel 分级 containment 检查
+      const content = await service.read(ctx.agentId, filePath, ctx.channel, { maxLength })
+      return content
+    } catch (err) {
+      return JSON.stringify({
+        error: err instanceof Error ? err.message : String(err),
+      })
     }
-
-    const truncated = content.length > maxLength
-    return truncated ? content.slice(0, maxLength) + '\n...[内容已截断]...' : content
   },
 }
 
 export const writeFileTool: BuiltinTool = {
   name: 'write_file',
 
-  async execute(args) {
+  async execute(args, ctx) {
     const filePath = args.file_path as string
     const content = args.content as string
     const append = (args.append as boolean) ?? false
 
     try {
-      // 确保目录存在
-      const dir = path.dirname(filePath)
-      if (!existsSync(dir)) {
-        mkdirSync(dir, { recursive: true })
-      }
-
-      if (append) {
-        const { appendFileSync } = await import('node:fs')
-        appendFileSync(filePath, content, 'utf-8')
-      } else {
-        writeFileSync(filePath, content, 'utf-8')
-      }
-
+      const service = requireWorkspaceService()
+      // AIOS(Phase4): write 始终走 containment 检查（所有 channel 都限 workspace）
+      await service.write(ctx.agentId, filePath, content, ctx.channel, { append })
       return JSON.stringify({ success: true, path: filePath, bytes: Buffer.byteLength(content) })
     } catch (err) {
       return JSON.stringify({
@@ -80,48 +80,53 @@ export const writeFileTool: BuiltinTool = {
 export const fileInfoTool: BuiltinTool = {
   name: 'get_file_info',
 
-  async execute(args) {
+  async execute(args, ctx) {
     const filePath = args.file_path as string
 
-    if (!existsSync(filePath)) {
-      return JSON.stringify({ error: `路径不存在: ${filePath}` })
-    }
+    try {
+      const service = requireWorkspaceService()
+      // AIOS(Phase4): stat 走 read 权限（info 不修改文件）
+      const stat = await service.stat(ctx.agentId, filePath, ctx.channel)
 
-    const stat = statSync(filePath)
-    return JSON.stringify({
-      name: path.basename(filePath),
-      path: filePath,
-      size: stat.size,
-      isDirectory: stat.isDirectory(),
-      created: stat.birthtime.toISOString(),
-      modified: stat.mtime.toISOString(),
-    })
+      if (!stat.exists) {
+        return JSON.stringify({ error: `路径不存在: ${filePath}` })
+      }
+
+      return JSON.stringify({
+        size: stat.size,
+        isDirectory: stat.isDirectory,
+        modified: stat.modifiedAt?.toISOString() ?? null,
+      })
+    } catch (err) {
+      return JSON.stringify({
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
   },
 }
 
 export const listDirectoryTool: BuiltinTool = {
   name: 'list_directory',
 
-  async execute(args) {
+  async execute(args, ctx) {
     const dirPath = args.dir_path as string
 
-    if (!existsSync(dirPath)) {
-      return JSON.stringify({ error: `目录不存在: ${dirPath}` })
+    try {
+      const service = requireWorkspaceService()
+      // AIOS(Phase4): list 走 read 权限
+      const entries = await service.list(ctx.agentId, dirPath, ctx.channel)
+
+      const items = entries.map((e) => ({
+        name: e.name,
+        type: e.isDirectory ? 'directory' : 'file',
+        size: e.size,
+      }))
+
+      return JSON.stringify(items)
+    } catch (err) {
+      return JSON.stringify({
+        error: err instanceof Error ? err.message : String(err),
+      })
     }
-
-    const stat = statSync(dirPath)
-    if (!stat.isDirectory()) {
-      return JSON.stringify({ error: `路径不是目录: ${dirPath}` })
-    }
-
-    const { readdirSync } = await import('node:fs')
-    const entries = readdirSync(dirPath, { withFileTypes: true })
-    const items = entries.map((e) => ({
-      name: e.name,
-      type: e.isDirectory() ? 'directory' : 'file',
-      path: path.join(dirPath, e.name),
-    }))
-
-    return JSON.stringify(items)
   },
 }

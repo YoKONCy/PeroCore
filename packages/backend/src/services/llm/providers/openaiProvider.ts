@@ -23,6 +23,7 @@ import type {
   UsageInfo,
 } from '../types'
 import { AppError } from '../../../lib/appError'
+import { stripBase64DataUris } from '../sanitize'
 import { createLogger } from '../../../lib/logger'
 
 const logger = createLogger('OpenAiProvider')
@@ -113,27 +114,63 @@ export class OpenAiProvider implements LlmProvider {
     }
   }
 
-  /** 列出可用模型 */
+  /** 列出可用模型 (两级回退: /v1/models → /v1/embeddings) */
   async listModels(): Promise<string[]> {
-    const url = this.buildUrl('/models')
+    const seen = new Set<string>()
+    const results: string[] = []
 
+    // 优先尝试 /v1/models (大多数 LLM 服务商通用)
+    const modelList = await this.tryFetchModels('/v1/models')
+    for (const m of modelList) {
+      if (!seen.has(m)) {
+        seen.add(m)
+        results.push(m)
+      }
+    }
+
+    // 回退 /v1/embeddings (专用 embedding 服务商，如 Jina/AIHubMix embedding 端点)
+    if (results.length === 0) {
+      const embedList = await this.tryFetchModels('/v1/embeddings')
+      for (const m of embedList) {
+        if (!seen.has(m)) {
+          seen.add(m)
+          results.push(m)
+        }
+      }
+    }
+
+    return results.sort()
+  }
+
+  /** 尝试从指定 endpoint 获取模型列表 */
+  private async tryFetchModels(endpoint: string): Promise<string[]> {
+    const url = this.buildUrl(endpoint)
     try {
       const response = await fetch(url, {
         headers: this.buildHeaders(),
         signal: AbortSignal.timeout(10_000),
       })
 
-      if (!response.ok) return []
+      if (!response.ok) {
+        logger.warn(`listModels 请求失败`, {
+          url,
+          endpoint,
+          status: response.status,
+          statusText: response.statusText,
+        })
+        return []
+      }
 
       const data = (await response.json()) as Record<string, unknown>
-      const modelList = (data.data ?? data.models ?? []) as Array<Record<string, unknown>>
 
-      return modelList
-        .map((m) => (m.id ?? m.name ?? '') as string)
-        .filter(Boolean)
-        .sort()
+      // OpenAI 风格: { data: [{ id: "..." }] }
+      const list = (data.data ?? data.models ?? []) as Array<Record<string, unknown>>
+      return list.map((m) => (m.id ?? m.name ?? '') as string).filter(Boolean)
     } catch (err) {
-      logger.warn(`获取模型列表失败: ${err instanceof Error ? err.message : String(err)}`)
+      logger.warn(`listModels (${endpoint}) 请求异常`, {
+        url,
+        error: err instanceof Error ? err.message : String(err),
+      })
       return []
     }
   }
@@ -143,11 +180,12 @@ export class OpenAiProvider implements LlmProvider {
   /** 构建 API URL */
   private buildUrl(endpoint: string): string {
     const base = this.config.apiBase.replace(/\/$/, '')
-    // 如果 base 已带 /v1，直接拼接；否则加 /v1
+    // endpoint 统一带 /v1 前缀，base 末尾不带 /v1，直接拼
+    // 如果 base 末尾带 /v1，则去掉 endpoint 的 /v1 前缀避免重复
     if (base.endsWith('/v1')) {
-      return `${base}${endpoint}`
+      return `${base}${endpoint.replace(/^\/v1/, '')}`
     }
-    return `${base}/v1${endpoint}`
+    return `${base}${endpoint}`
   }
 
   /** 构建请求头 */
@@ -196,9 +234,16 @@ export class OpenAiProvider implements LlmProvider {
    */
   private serializeMessages(messages: ChatMessage[]): Array<Record<string, unknown>> {
     return messages.map((msg) => {
+      // 兜底防御：tool 返回的字符串内容若混入 base64 data URI (如截图泄漏)，统一剥离避免爆 token。
+      // 合法图片以 image_url 数组块形式存在 (非字符串)，不受影响。
+      const content =
+        msg.role === 'tool' && typeof msg.content === 'string'
+          ? stripBase64DataUris(msg.content)
+          : msg.content
+
       const serialized: Record<string, unknown> = {
         role: msg.role,
-        content: msg.content,
+        content,
       }
 
       if (msg.name) serialized.name = msg.name
@@ -259,10 +304,13 @@ export class OpenAiProvider implements LlmProvider {
           delta: {
             role: rawDelta.role as string | undefined,
             content: rawDelta.content as string | undefined,
-            // 流式 Function Calling 会把同一个工具调用拆成多段 delta，上层按 index/id 继续拼接参数字符串。
+            // 流式 Function Calling 会把同一个工具调用拆成多段 delta，上层按 index 继续拼接参数字符串。
+            // 部分厂商在 streaming delta 中可能不返回 id，通过 index 匹配。
             toolCalls: rawToolCalls?.map((tc) => ({
               index: (tc.index as number) ?? 0,
-              id: tc.id as string | undefined,
+              id:
+                (tc.id as string | undefined) ??
+                `auto-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
               type: tc.type as 'function' | undefined,
               function: tc.function as { name?: string; arguments?: string } | undefined,
             })),

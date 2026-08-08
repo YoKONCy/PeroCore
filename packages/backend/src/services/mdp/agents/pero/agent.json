@@ -11,7 +11,6 @@
   "name": "Pero",
   "description": "看板娘Pero! 核心桌宠角色",
   "personas": {
-    "work": "personas/work.md",
     "social": "personas/social.md",
     "group": "personas/group.md"
   },
@@ -20,6 +19,14 @@
     "qq_id": "",
     "use_stickers": true
   },
+
+  "channel_patches": {
+    "desktop": "",
+    "companion": "在陪伴场景下，你应更活泼可爱，多用语气词，主动陪伴主人。",
+    "social": "在社交场景下，你应更礼貌简洁，适合即时通讯场景。",
+    "group": "在群聊场景下，你应更活跃，主动参与话题。"
+  },
+
 
   "waifu_texts": {
     "idleMessages": [

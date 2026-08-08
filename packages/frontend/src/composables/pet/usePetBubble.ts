@@ -57,12 +57,26 @@ export function usePetBubble() {
 
   /**
    * 检测内容是否溢出 (需要展开按钮)
+   *
+   * 由于 pet-bubble-content 平时 overflow-y: hidden，scrollHeight 会被裁剪到
+   * 等于 clientHeight，导致永远检测不到溢出。所以测量时需要临时解除限制。
    */
   async function checkOverflow() {
     await nextTick()
+    // 等一小段时间确保 DOM 尺寸计算完毕
+    await new Promise((r) => setTimeout(r, 50))
     const el = bubbleContentRef.value
     if (el) {
-      isBubbleOverflow.value = el.scrollHeight > el.clientHeight + 2
+      // 临时解除限制，测量内容真实高度
+      const prevOverflow = el.style.overflowY
+      const prevMaxHeight = el.style.maxHeight
+      el.style.overflowY = 'visible'
+      el.style.maxHeight = 'none'
+      const naturalHeight = el.scrollHeight
+      el.style.overflowY = prevOverflow
+      el.style.maxHeight = prevMaxHeight
+
+      isBubbleOverflow.value = naturalHeight > 120
     } else {
       isBubbleOverflow.value = false
     }

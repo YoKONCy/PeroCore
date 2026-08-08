@@ -5,6 +5,11 @@
  * rg 二进制全平台可用（Windows/Linux/macOS），非必须依赖。
  * 降级方案：Node.js 内置 grep。
  *
+ * AIOS(Phase4): 搜索目录默认为 workspace，按 channel 分级控制：
+ * - desktop 通道（策略 authorized）：args.path 提供且目录存在时使用之，否则回退 workspace root
+ * - 其他通道（策略 workspace）：强制使用 workspace root，忽略 args.path
+ * rg 调用逻辑保持不变，仅搜索目录受 containment 约束。
+ *
  * @module packages/backend/src/tools/codeSearcher
  */
 
@@ -12,6 +17,7 @@ import { exec } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import os from 'node:os'
 import type { BuiltinTool } from '../index'
+import { getWorkspaceService } from '../workspaceServiceHolder'
 
 /** 单次搜索最大结果数 */
 const MAX_RESULTS = 50
@@ -21,11 +27,21 @@ const SEARCH_TIMEOUT_MS = 15_000
 export const codeSearcherTool: BuiltinTool = {
   name: 'code_search',
 
-  async execute(args) {
+  async execute(args, ctx) {
     const query = args.query as string
-    const searchPath = (args.path as string) ?? os.homedir()
     const isRegex = (args.is_regex as boolean) ?? false
     const fileType = args.file_type as string | undefined
+
+    // AIOS(Phase4): 按 channel 分级计算搜索目录
+    // - desktop 通道可授权使用 args.path（已存在的目录），否则回退 workspace root
+    // - 其他通道强制使用 workspace root，忽略 args.path
+    const workspaceService = getWorkspaceService()
+    const searchPath =
+      workspaceService?.resolveTerminalCwd(
+        ctx.agentId,
+        args.path as string | undefined,
+        ctx.channel,
+      ) ?? ((args.path as string) ?? os.homedir())
 
     if (!existsSync(searchPath)) {
       return JSON.stringify({ error: `搜索路径不存在: ${searchPath}` })

@@ -27,44 +27,32 @@ const emit = defineEmits<{ skip: [] }>()
 
 <template>
   <Transition name="fade">
-    <div
-      v-if="command"
-      class="absolute inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-6"
-    >
-      <div
-        class="w-full max-w-md border-2 border-slate-200 bg-white shadow-[8px_8px_0_rgba(0,0,0,0.15)] overflow-hidden"
-      >
+    <div v-if="command" class="command-overlay">
+      <div class="command-dialog pixel-border-moe">
         <!-- 标题 -->
-        <div class="flex items-center gap-3 px-6 py-4 border-b-2 border-slate-200 bg-sky-50">
-          <div class="p-2 bg-sky-100 text-sky-500">
+        <div class="command-header">
+          <div class="command-icon pixel-border-moe">
             <PixelIcon name="terminal" size="sm" animation="spin" />
           </div>
           <div>
-            <h3 class="text-sm font-bold text-slate-800">正在执行指令...</h3>
-            <p class="text-xs text-slate-400">请稍候，任务正在后台运行</p>
+            <h3 class="command-title">正在执行指令...</h3>
+            <p class="command-subtitle">请稍候，任务正在后台运行</p>
           </div>
         </div>
 
         <!-- 命令内容 -->
-        <div class="p-6">
-          <div
-            class="relative p-4 bg-slate-900 border border-slate-200 font-mono text-[13px] text-emerald-400 overflow-x-auto"
-          >
+        <div class="command-body">
+          <div class="command-code pixel-border-moe">
             <span class="select-text">{{ command.command }}</span>
-            <div class="absolute bottom-2 right-2 flex gap-[3px]">
-              <div class="w-1.5 h-1.5 bg-emerald-500 cmd-dot" />
-              <div class="w-1.5 h-1.5 bg-emerald-500 cmd-dot cmd-dot-2" />
-              <div class="w-1.5 h-1.5 bg-emerald-500 cmd-dot cmd-dot-3" />
+            <div class="command-dots">
+              <div class="command-dot" />
+              <div class="command-dot command-dot-2" />
+              <div class="command-dot command-dot-3" />
             </div>
           </div>
-          <div class="mt-4 flex items-center justify-between">
-            <span v-if="command.pid" class="text-xs text-slate-400">PID: {{ command.pid }}</span>
-            <button
-              class="text-xs font-bold text-sky-500 underline underline-offset-4 bg-none border-none cursor-pointer transition-colors hover:text-sky-400"
-              @click="emit('skip')"
-            >
-              跳过等待 (后台继续)
-            </button>
+          <div class="command-footer">
+            <span v-if="command.pid" class="command-pid">PID: {{ command.pid }}</span>
+            <button class="command-skip" @click="emit('skip')">跳过等待 (后台继续)</button>
           </div>
         </div>
       </div>
@@ -73,6 +61,111 @@ const emit = defineEmits<{ skip: [] }>()
 </template>
 
 <style scoped>
+.command-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(45, 27, 30, 0.42);
+  backdrop-filter: blur(6px);
+}
+
+.command-dialog {
+  width: 100%;
+  max-width: 448px;
+  overflow: hidden;
+  background: rgba(255, 252, 249, 0.96);
+  box-shadow: 10px 10px 0 rgba(249, 168, 212, 0.24);
+}
+
+.command-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 24px;
+  border-bottom: 1px solid rgba(45, 27, 30, 0.08);
+  background: rgba(249, 168, 212, 0.1);
+}
+
+.command-icon {
+  padding: 8px;
+  color: var(--color-moe-pink);
+  background: rgba(249, 168, 212, 0.16);
+}
+
+.command-title {
+  color: var(--color-moe-cocoa);
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.command-subtitle {
+  color: rgba(45, 27, 30, 0.44);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.command-body {
+  padding: 24px;
+}
+
+.command-code {
+  position: relative;
+  overflow-x: auto;
+  padding: 16px;
+  background: rgba(45, 27, 30, 0.92);
+  color: #86efac;
+  font-family: monospace;
+  font-size: 13px;
+}
+
+.command-dots {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  display: flex;
+  gap: 3px;
+}
+
+.command-dot {
+  width: 6px;
+  height: 6px;
+  background: #86efac;
+  animation: command-dot-pulse 1.5s infinite;
+}
+
+.command-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 16px;
+}
+
+.command-pid {
+  color: rgba(45, 27, 30, 0.42);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.command-skip {
+  border: none;
+  background: none;
+  color: var(--color-moe-pink);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 900;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  transition: color 0.16s ease;
+}
+
+.command-skip:hover {
+  color: #f472b6;
+}
+
 .fade-enter-active {
   transition: opacity 0.3s;
 }
@@ -84,7 +177,7 @@ const emit = defineEmits<{ skip: [] }>()
   opacity: 0;
 }
 
-@keyframes cmd-dot-pulse {
+@keyframes command-dot-pulse {
   0%,
   100% {
     opacity: 0.4;
@@ -94,13 +187,10 @@ const emit = defineEmits<{ skip: [] }>()
   }
 }
 
-.cmd-dot {
-  animation: cmd-dot-pulse 1.5s infinite;
-}
-.cmd-dot-2 {
+.command-dot-2 {
   animation-delay: 0.15s;
 }
-.cmd-dot-3 {
+.command-dot-3 {
   animation-delay: 0.3s;
 }
 </style>

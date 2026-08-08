@@ -1,0 +1,31 @@
+{
+  "name": "@perocore/daemon",
+  "version": "0.9.1-hotfix.2",
+  "private": true,
+  "type": "module",
+  "description": "PeroCore Daemon — 独立后端进程入口，不依赖 Electron",
+  "bin": {
+    "perocore-daemon": "./src/main.ts"
+  },
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "@perocore/backend": "workspace:*",
+    "@perocore/shared": "workspace:*",
+    "@hono/node-server": "^1.14.0",
+    "hono": "^4.7.0",
+    "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@types/ws": "^8.18.1",
+    "rimraf": "^6.1.2",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.3"
+  }
+}

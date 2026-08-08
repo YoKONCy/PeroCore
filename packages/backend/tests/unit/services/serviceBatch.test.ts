@@ -182,9 +182,10 @@ describe('ModelService', () => {
     await expect(service.getById(99)).rejects.toMatchObject({ code: 'MODEL_NOT_FOUND' })
     await expect(service.update(99, {} as never)).rejects.toMatchObject({ code: 'MODEL_NOT_FOUND' })
     await expect(service.delete(99)).rejects.toMatchObject({ code: 'MODEL_NOT_FOUND' })
+    // listRemoteModels 未对远程调用失败做封装，原始错误会原样向上抛出
     await expect(
       service.listRemoteModels({ provider: 'openai', apiKey: 'key' }),
-    ).rejects.toMatchObject({ code: 'LLM_ERROR' })
+    ).rejects.toThrow('网络失败')
   })
 
   it('应当列出远程模型并测试模型连通性', async () => {

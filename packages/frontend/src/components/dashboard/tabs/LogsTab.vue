@@ -9,15 +9,16 @@
  */
 import { ref, shallowRef, computed, onMounted, watch } from 'vue'
 import { PixelIcon, PInput, PSelect, PButton, PEmpty, PCard, PDialog } from '../../pixel'
-import { sessionsApi } from '../../../api/modules/sessionsApi'
+import { threadsApi } from '../../../api/modules/threadsApi'
 import { chatApi } from '../../../api/modules/chatApi'
-import type { SessionSummary } from '../../../api/modules/sessionsApi'
+import type { ThreadInfo, ThreadMessageInfo } from '../../../api/modules/threadsApi'
 import { useDashboardContext } from '../../../composables/dashboard'
-import { useAgentStore } from '../../../stores'
+import { useAgentStore, useNotificationStore } from '../../../stores'
 import { getApiBaseUrl } from '../../../api/transport'
 import { logger } from '../../../lib/logger'
 
 const ctx = useDashboardContext()
+const notif = useNotificationStore()
 const agentStore = useAgentStore()
 
 // ── 当前激活角色 ──
@@ -28,21 +29,23 @@ const activeAgentName = computed(() => {
 // ── 类型 ──
 
 interface LogMessage {
-  id: number
+  id: string
   role: string
   content: string
+  /** Agent 回复的原始内容（含调试块），仅 assistant 可能有值 */
   rawContent?: string | null
   timestamp?: string
 }
 
 interface LogEntry {
   id: string
-  sessionId: string
+  threadId: string
   agentId: string
   agentName: string
   summary: string
+  /** 列表预览不返回消息数，默认 0；展开加载后用实际消息数 */
   messageCount: number
-  source: string
+  channel: string
   createdAt: string
   /** 展开后加载的消息 */
   messages: LogMessage[]
@@ -54,7 +57,7 @@ interface LogEntry {
 
 /** 调试解析段落 */
 interface DebugSegment {
-  type: 'thinking' | 'monologue' | 'nit' | 'text'
+  type: 'thinking' | 'monologue' | 'nit' | 'tool' | 'text'
   content: string
 }
 
@@ -64,7 +67,7 @@ const logs = shallowRef<LogEntry[]>([])
 const isLoading = ref(false)
 const searchQuery = ref('')
 const filterAgent = ref('all')
-const filterSource = ref('all')
+const filterChannel = ref('all')
 const selectedSort = ref('desc')
 const expandedId = ref<string | null>(null)
 const currentPage = ref(1)
@@ -79,10 +82,10 @@ const agentOptions = computed(() => [
   })),
 ])
 
-const sourceOptions = [
-  { label: '全部来源', value: 'all' },
+const channelOptions = [
+  { label: '全部频道', value: 'all' },
   { label: 'Desktop', value: 'desktop' },
-  { label: 'Mobile', value: 'mobile' },
+  { label: 'Companion', value: 'companion' },
 ]
 
 const sortOptions = [
@@ -95,8 +98,8 @@ const filteredLogs = computed(() => {
   if (filterAgent.value !== 'all') {
     list = list.filter((l) => l.agentId === filterAgent.value)
   }
-  if (filterSource.value !== 'all') {
-    list = list.filter((l) => l.source === filterSource.value)
+  if (filterChannel.value !== 'all') {
+    list = list.filter((l) => l.channel === filterChannel.value)
   }
   if (searchQuery.value.trim()) {
     const q = searchQuery.value.toLowerCase()
@@ -111,16 +114,71 @@ const filteredLogs = computed(() => {
   return list
 })
 
+/** 时间分组标签 */
+type TimeGroup = 'today' | 'week' | 'older'
+
+interface LogGroup {
+  key: TimeGroup
+  label: string
+  logs: LogEntry[]
+}
+
+/**
+ * 按时间分组对话日志
+ *
+ * - today: 今天的对话
+ * - week:  7 天内（不含今天）
+ * - older: 更早的对话
+ */
+const groupedLogs = computed<LogGroup[]>(() => {
+  const list = filteredLogs.value
+  if (list.length === 0) return []
+
+  const now = new Date()
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const weekStart = new Date(todayStart)
+  weekStart.setDate(weekStart.getDate() - 7)
+
+  const groups: Record<TimeGroup, LogEntry[]> = {
+    today: [],
+    week: [],
+    older: [],
+  }
+
+  for (const log of list) {
+    const date = new Date(log.createdAt)
+    if (date >= todayStart) {
+      groups.today.push(log)
+    } else if (date >= weekStart) {
+      groups.week.push(log)
+    } else {
+      groups.older.push(log)
+    }
+  }
+
+  const result: LogGroup[] = []
+  if (groups.today.length > 0) {
+    result.push({ key: 'today', label: '今天', logs: groups.today })
+  }
+  if (groups.week.length > 0) {
+    result.push({ key: 'week', label: '七天内', logs: groups.week })
+  }
+  if (groups.older.length > 0) {
+    result.push({ key: 'older', label: '更早', logs: groups.older })
+  }
+  return result
+})
+
 // ── API 操作 ──
 
 async function fetchSessions(): Promise<void> {
   isLoading.value = true
   try {
     const agentId = filterAgent.value !== 'all' ? filterAgent.value : undefined
-    const source = filterSource.value !== 'all' ? filterSource.value : undefined
-    const res = await sessionsApi.list({
+    const channel = filterChannel.value !== 'all' ? filterChannel.value : undefined
+    const res = await threadsApi.list({
       agentId,
-      source,
+      channel,
       page: currentPage.value,
       pageSize,
     })
@@ -130,7 +188,7 @@ async function fetchSessions(): Promise<void> {
       totalCount.value = data.total
     }
   } catch (e) {
-    logger.error('LogsTab', '加载会话列表失败', e)
+    logger.error('LogsTab', '加载 Thread 列表失败', e)
   } finally {
     isLoading.value = false
   }
@@ -150,14 +208,17 @@ async function toggleExpand(id: string): Promise<void> {
       item.id === id ? { ...item, isLoadingMessages: true } : item,
     )
     try {
-      const res = await sessionsApi.detail(log.sessionId, { agentId: log.agentId, limit: 30 })
+      const res = await threadsApi.get(log.threadId, { pageSize: 30 })
       const data = res.data
       if (data) {
-        const messages = data.messages.map((m) => ({
-          id: m.id,
+        const messages = data.messages.map((m: ThreadMessageInfo) => ({
+          // 后端 id 为 number，本地统一转 string 以兼容删除等 API 调用
+          id: String(m.id),
           role: m.role,
           content: m.content,
-          rawContent: m.rawContent,
+          // 使用后端返回的原始内容（含调试块），缺失时回退为 null
+          rawContent: m.rawContent ?? null,
+          // 后端字段名为 timestamp（不是 createdAt）
           timestamp: m.timestamp ?? undefined,
         }))
         logs.value = logs.value.map((item) =>
@@ -165,6 +226,7 @@ async function toggleExpand(id: string): Promise<void> {
             ? {
                 ...item,
                 messages,
+                messageCount: messages.length,
                 messagesLoaded: true,
                 isLoadingMessages: false,
               }
@@ -172,7 +234,7 @@ async function toggleExpand(id: string): Promise<void> {
         )
       }
     } catch (e) {
-      logger.error('LogsTab', '加载会话详情失败', e)
+      logger.error('LogsTab', '加载 Thread 详情失败', e)
     } finally {
       if (!logs.value.find((item) => item.id === id)?.messagesLoaded) {
         logs.value = logs.value.map((item) =>
@@ -187,16 +249,16 @@ function getAgentName(agentId: string): string {
   return agentStore.agents.find((agent) => agent.id === agentId)?.name || agentId
 }
 
-function toLogEntry(s: SessionSummary): LogEntry {
+function toLogEntry(t: ThreadInfo): LogEntry {
   return {
-    id: s.sessionId,
-    sessionId: s.sessionId,
-    agentId: s.agentId,
-    agentName: getAgentName(s.agentId),
-    summary: s.preview || `会话 ${s.sessionId.slice(0, 8)}...`,
-    messageCount: s.messageCount,
-    source: s.source || 'desktop',
-    createdAt: s.lastMessageAt,
+    id: t.id,
+    threadId: t.id,
+    agentId: t.agentId,
+    agentName: getAgentName(t.agentId),
+    summary: t.title || `会话 ${t.id.slice(0, 8)}...`,
+    messageCount: 0,
+    channel: t.channel || 'desktop',
+    createdAt: t.updatedAt || t.createdAt,
     messages: [],
     messagesLoaded: false,
     isLoadingMessages: false,
@@ -234,15 +296,18 @@ async function handleCopy(content: string) {
   try {
     await navigator.clipboard.writeText(content)
     logger.info('LogsTab', '已复制日志内容')
+    notif.toast('已复制', { type: 'success' })
   } catch (err) {
     logger.error('LogsTab', '复制失败', err)
+    notif.toast('复制失败', { type: 'error' })
   }
 }
 
 /** 在日志中级联删除消息对 */
-async function handleDeletePair(log: LogEntry, id: number) {
+async function handleDeletePair(log: LogEntry, id: string) {
   // 本地 UI 乐观删除 (匹配上下游一对)
   const idx = log.messages.findIndex((m) => m.id === id)
+  let removedCount = 0
   if (idx >= 0) {
     const msg = log.messages[idx]
     if (msg) {
@@ -254,6 +319,7 @@ async function handleDeletePair(log: LogEntry, id: number) {
         const prevMsg = log.messages[idx - 1]
         if (prevMsg?.role === 'user') pairIds.push(prevMsg.id)
       }
+      removedCount = pairIds.length
       logs.value = logs.value.map((item) =>
         item.id === log.id
           ? {
@@ -266,11 +332,45 @@ async function handleDeletePair(log: LogEntry, id: number) {
     }
   }
 
-  // 异步删除
+  // 异步删除 — 需要传 threadId 和 msgId
   try {
-    await chatApi.deleteMessagePair(id)
+    await chatApi.deleteMessagePair(log.threadId, id)
+    notif.toast(`已删除 ${removedCount} 条消息`, { type: 'success', title: '对话日志' })
+    // 触发全局刷新，让总览页等同步更新统计
+    ctx.triggerRefresh()
   } catch (err) {
     logger.error('LogsTab', '日志删除失败', err)
+    notif.toast('删除失败，请稍后重试', { type: 'error', title: '对话日志' })
+    // 删除失败时回滚乐观删除：重新加载该 Thread 的消息
+    const current = logs.value.find((item) => item.id === log.id)
+    if (current) {
+      try {
+        const res = await threadsApi.get(log.threadId, { pageSize: 30 })
+        const data = res.data
+        if (data) {
+          const messages = data.messages.map((m: ThreadMessageInfo) => ({
+            id: String(m.id),
+            role: m.role,
+            content: m.content,
+            rawContent: m.rawContent ?? null,
+            timestamp: m.timestamp ?? undefined,
+          }))
+          logs.value = logs.value.map((item) =>
+            item.id === log.id
+              ? {
+                  ...item,
+                  messages,
+                  messageCount: messages.length,
+                  messagesLoaded: true,
+                  isLoadingMessages: false,
+                }
+              : item,
+          )
+        }
+      } catch (reloadErr) {
+        logger.error('LogsTab', '回滚重新加载失败', reloadErr)
+      }
+    }
   }
 }
 
@@ -294,8 +394,11 @@ function openDebugDialog(msg: LogMessage) {
  */
 function parseDebugSegments(text: string): DebugSegment[] {
   const segments: DebugSegment[] = []
-  // 匹配中文【】和英文 [] 两种格式
-  const regex = /[\u3010[]\s*(Thinking|Monologue|NIT)\s*[:：]?\s*([\s\S]*?)[\u3011\]]/gi
+  // 两类块统一一次扫描：
+  // 1) ⟦TOOL⟧…⟦/TOOL⟧  工具调用/返回摘要 (哨兵符号不会出现在 JSON 里，可安全包裹含 ] 的内容)
+  // 2) 中文【】或英文 [] 包裹的 Thinking / Monologue / NIT 标签块
+  const regex =
+    /⟦TOOL⟧([\s\S]*?)⟦\/TOOL⟧|[\u3010[]\s*(Thinking|Monologue|NIT)\s*[:：]?\s*([\s\S]*?)[\u3011\]]/gi
   let lastIndex = 0
   let match: RegExpExecArray | null
 
@@ -305,9 +408,13 @@ function parseDebugSegments(text: string): DebugSegment[] {
       const before = text.slice(lastIndex, match.index).trim()
       if (before) segments.push({ type: 'text', content: before })
     }
-    const matchTag = match[1]
-    const matchContent = match[2]
-    if (matchTag && matchContent) {
+    const toolContent = match[1]
+    const matchTag = match[2]
+    const matchContent = match[3]
+    if (toolContent !== undefined) {
+      // 工具调用块
+      segments.push({ type: 'tool', content: toolContent.trim() })
+    } else if (matchTag && matchContent) {
       const tag = matchTag.toLowerCase() as 'thinking' | 'monologue' | 'nit'
       segments.push({ type: tag, content: matchContent.trim() })
     }
@@ -430,7 +537,7 @@ onMounted(async () => {
               来源
               <span class="opacity-50 font-normal">Source</span>
             </label>
-            <PSelect v-model="filterSource" :options="sourceOptions" @change="fetchSessions" />
+            <PSelect v-model="filterChannel" :options="channelOptions" @change="fetchSessions" />
           </div>
 
           <!-- 排序 -->
@@ -477,7 +584,18 @@ onMounted(async () => {
       </PEmpty>
 
       <div v-else class="space-y-6 max-w-4xl mx-auto">
-        <div v-for="log in filteredLogs" :key="log.id" class="group/session">
+        <template v-for="group in groupedLogs" :key="group.key">
+          <!-- 时间分组标题 -->
+          <div
+            class="flex items-center gap-3 px-1 py-2 text-xs font-bold text-slate-400 uppercase tracking-wider"
+          >
+            <span class="w-8 h-px bg-slate-200" />
+            <span>{{ group.label }}</span>
+            <span class="flex-1 h-px bg-slate-200" />
+            <span class="text-[10px] font-normal text-slate-300">{{ group.logs.length }} 条</span>
+          </div>
+
+          <div v-for="log in group.logs" :key="log.id" class="group/session">
           <!-- 会话头 -->
           <PCard pixel hoverable padding="sm" class="cursor-pointer" @click="toggleExpand(log.id)">
             <div class="flex justify-between items-center relative">
@@ -515,7 +633,7 @@ onMounted(async () => {
                     <span
                       class="text-[10px] font-bold px-1.5 py-0.5 bg-sky-50 text-sky-500 border border-sky-100"
                     >
-                      {{ log.source }}
+                      {{ log.channel }}
                     </span>
                     <span class="text-[10px] text-slate-400 font-pixel">
                       {{ formatDate(log.createdAt) }}
@@ -686,6 +804,7 @@ onMounted(async () => {
             </template>
           </div>
         </div>
+        </template>
       </div>
     </div>
   </div>
@@ -766,6 +885,7 @@ onMounted(async () => {
             'bg-amber-50 border-amber-200': segment.type === 'thinking',
             'bg-sky-50 border-sky-200': segment.type === 'monologue',
             'bg-cyan-50 border-cyan-200': segment.type === 'nit',
+            'bg-violet-50 border-violet-200': segment.type === 'tool',
             'bg-white border-slate-100 shadow-sm': segment.type === 'text',
           }"
         >
@@ -776,6 +896,13 @@ onMounted(async () => {
           >
             <PixelIcon name="brain" size="xs" />
             Thinking Chain (思维链)
+          </div>
+          <div
+            v-else-if="segment.type === 'tool'"
+            class="px-3 py-1.5 bg-violet-100/50 text-violet-700 text-xs font-bold border-b border-violet-200 flex items-center gap-2"
+          >
+            <PixelIcon name="terminal" size="xs" />
+            Tool Call (工具调用)
           </div>
           <div
             v-else-if="segment.type === 'monologue'"
@@ -809,6 +936,12 @@ onMounted(async () => {
             >
               {{ segment.content }}
             </div>
+            <div
+              v-else-if="segment.type === 'tool'"
+              class="text-violet-800 font-mono text-xs whitespace-pre-wrap bg-violet-50/50 p-2"
+            >
+              {{ segment.content }}
+            </div>
             <div v-else class="text-slate-700 whitespace-pre-wrap">
               {{ segment.content }}
             </div>
@@ -825,9 +958,7 @@ onMounted(async () => {
       <div v-else class="max-h-[50vh] overflow-y-auto pr-2 logs-scrollbar">
         <pre
           class="p-4 bg-slate-50 border border-slate-200 text-xs text-slate-700 font-mono whitespace-pre-wrap leading-relaxed overflow-x-auto"
-        >
-        {{ currentDebugMsg.rawContent || currentDebugMsg.content }}</pre
-        >
+        ><code>{{ currentDebugMsg.rawContent || currentDebugMsg.content }}</code></pre>
       </div>
     </div>
 

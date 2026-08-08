@@ -5,5 +5,8 @@ export { maintenanceApi } from './maintenanceApi'
 export { mcpApi } from './mcpApi'
 export { memoryApi } from './memoryApi'
 export { modelApi } from './modelApi'
+// 第七阶段修复（批次 C）：新增 runtimeApi，替代已删除的 agentApi.setActive
+export { runtimeApi } from './runtimeApi'
 export { socialApi } from './socialApi'
 export { systemApi } from './systemApi'
+export { threadsApi } from './threadsApi'

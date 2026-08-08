@@ -13,6 +13,7 @@ export interface ModelConfigItem {
   modelId: string
   apiKey: string
   apiBase?: string
+  enableVision?: boolean
   isDefault?: boolean
 }
 

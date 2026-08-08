@@ -16,6 +16,7 @@
       "type": "object",
       "properties": {
         "query": { "type": "string", "description": "文件名关键词 (支持通配符)" },
+        "directory": { "type": "string", "description": "搜索目录 (可选，默认 workspace；仅 desktop 通道可指定其他目录)" },
         "limit": { "type": "number", "description": "返回最大结果数 (默认 50)" }
       },
       "required": ["query"]

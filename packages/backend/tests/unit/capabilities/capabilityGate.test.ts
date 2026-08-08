@@ -96,13 +96,17 @@ modes:
       expect(resolved.skillMenuText).toContain('- diary 技能: diary 描述')
     })
 
-    it('指定模式不存在时应当回退到 desktop 配置', () => {
+    it('第七阶段修复（批次 B3）：未配置的 channel 应当 fail-closed 返回空能力集', () => {
       const gate = new CapabilityGate([rootDir], skillLoader as never, toolRegistry as never)
 
+      // mobile channel 未在 capabilities.yaml 中配置
+      // 原实现会回退 desktop，导致意外继承桌面工具集 —— 安全漏洞
+      // 现在改为 fail-closed，未配置 = 最小权限
       const resolved = gate.resolve('pero', 'mobile')
 
-      expect([...resolved.allowedTools]).toEqual(['chat.send', 'memory.search'])
-      expect(resolved.promptFragments).toEqual(['prompts/base.md'])
+      expect([...resolved.allowedTools]).toEqual([])
+      expect(resolved.enabledSkills).toEqual([])
+      expect(resolved.promptFragments).toEqual([])
     })
 
     it('Agent 没有配置时应当返回空能力', () => {

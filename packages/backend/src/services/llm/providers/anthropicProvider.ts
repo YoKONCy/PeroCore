@@ -25,6 +25,7 @@ import type {
   UsageInfo,
 } from '../types'
 import { AppError } from '../../../lib/appError'
+import { stripBase64DataUris } from '../sanitize'
 import { createLogger } from '../../../lib/logger'
 
 const logger = createLogger('AnthropicProvider')
@@ -353,7 +354,8 @@ export class AnthropicProvider implements LlmProvider {
             {
               type: 'tool_result',
               tool_use_id: msg.toolCallId,
-              content: typeof msg.content === 'string' ? msg.content : '',
+              // 兜底防御：剥离 tool 返回里可能混入的 base64 data URI，避免爆 token / 污染上下文。
+              content: typeof msg.content === 'string' ? stripBase64DataUris(msg.content) : '',
             },
           ],
         })

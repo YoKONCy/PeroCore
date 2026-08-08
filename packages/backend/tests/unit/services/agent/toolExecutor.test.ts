@@ -40,9 +40,10 @@ describe('RegistryToolExecutor', () => {
     const capabilityGate = {
       isToolAllowed: vi.fn().mockReturnValue(false),
     } as unknown as CapabilityGate
+    // AIOS: mode 已改为 channel（Work 模式废弃，按对话通道鉴权）
     const executor = new RegistryToolExecutor(registry, capabilityGate, null, null, {
       agentId: 'pero',
-      mode: 'work',
+      channel: 'desktop',
       sessionId: 'session-1',
     })
 
@@ -50,7 +51,7 @@ describe('RegistryToolExecutor', () => {
 
     expect(capabilityGate.isToolAllowed).toHaveBeenCalledWith(
       'pero',
-      'work',
+      'desktop',
       'demo.run',
       'session-1',
     )
@@ -79,7 +80,14 @@ describe('RegistryToolExecutor', () => {
 
     expect(handler).toHaveBeenCalledWith(
       { value: 'hooked' },
-      { source: 'desktop', agentId: 'pero', sessionId: 'session-1' },
+      // AIOS: ToolContext 新增 threadId + channel 字段
+      {
+        source: 'desktop',
+        agentId: 'pero',
+        sessionId: 'session-1',
+        threadId: 'session-1',
+        channel: 'desktop',
+      },
     )
     expect(hookEmitter.emitHook).toHaveBeenCalledWith('tool:afterCall', {
       name: 'demo.run',
@@ -168,6 +176,90 @@ describe('RegistryToolExecutor', () => {
     expect(missingId).toMatchObject({ output: '缺少参数 skill_id', isError: true })
     expect(noLoader).toMatchObject({ output: 'Skill 系统未初始化', isError: true })
     expect(missingContent).toMatchObject({ output: 'Skill "x" 不存在或加载失败', isError: true })
+  })
+
+  // ── 第七阶段修复（批次 A2）：平台能力工具名 → 能力名映射 ──
+  describe('平台能力工具路由', () => {
+    it('take_screenshot 调用应当被映射为 screen_capture 能力名传给 CapabilityBridge', async () => {
+      const { registry } = createRegistry()
+      // mock CapabilityBridge：捕获实际被调用的能力名
+      // 必须包成 { invokeTool } 对象以符合 CapabilityBridgeLike 接口
+      const invokeTool = vi.fn().mockResolvedValue({
+        output: JSON.stringify({
+          success: true,
+          screenshots: [{ index: 0, dataUri: 'data:image/png;base64,xxx' }],
+          message: '已截取屏幕',
+        }),
+        isError: false,
+        durationMs: 50,
+      })
+      const executor = new RegistryToolExecutor(registry)
+      executor.setCapabilityBridge({ invokeTool })
+
+      const result = await executor.execute('take_screenshot', {}, 'desktop')
+
+      // 关键断言：传给 CapabilityBridge 的应是映射后的 screen_capture
+      expect(invokeTool).toHaveBeenCalledTimes(1)
+      expect(invokeTool).toHaveBeenCalledWith('screen_capture', {})
+      // 返回值应正常透传
+      expect(result.isError).toBe(false)
+      expect(result.output).toContain('screenshots')
+    })
+
+    it('screen_capture 工具名应当直接透传，不做映射', async () => {
+      const { registry } = createRegistry()
+      const invokeTool = vi.fn().mockResolvedValue({
+        output: JSON.stringify({ success: true, screenshots: [] }),
+        isError: false,
+        durationMs: 10,
+      })
+      const executor = new RegistryToolExecutor(registry)
+      executor.setCapabilityBridge({ invokeTool })
+
+      await executor.execute('screen_capture', {}, 'desktop')
+
+      // 没有映射项时，原工具名直接透传
+      expect(invokeTool).toHaveBeenCalledWith('screen_capture', {})
+    })
+
+    it('clipboard_read 等其他平台工具应当直接透传', async () => {
+      const { registry } = createRegistry()
+      const invokeTool = vi.fn().mockResolvedValue({
+        output: JSON.stringify({ text: '剪贴板内容' }),
+        isError: false,
+        durationMs: 5,
+      })
+      const executor = new RegistryToolExecutor(registry)
+      executor.setCapabilityBridge({ invokeTool })
+
+      await executor.execute('clipboard_read', {}, 'desktop')
+
+      expect(invokeTool).toHaveBeenCalledWith('clipboard_read', {})
+    })
+
+    it('CapabilityBridge 未注入时应当返回友好错误', async () => {
+      const { registry } = createRegistry()
+      // 不调用 setCapabilityBridge，模拟非 Daemon 模式
+      const executor = new RegistryToolExecutor(registry)
+
+      const result = await executor.execute('take_screenshot', {}, 'desktop')
+
+      expect(result.isError).toBe(true)
+      expect(result.output).toContain('不可用')
+      expect(result.shouldTerminate).toBe(false)
+    })
+
+    it('CapabilityBridge 抛错时应当返回错误信息', async () => {
+      const { registry } = createRegistry()
+      const invokeTool = vi.fn().mockRejectedValue(new Error('节点无响应'))
+      const executor = new RegistryToolExecutor(registry)
+      executor.setCapabilityBridge({ invokeTool })
+
+      const result = await executor.execute('take_screenshot', {}, 'desktop')
+
+      expect(result.isError).toBe(true)
+      expect(result.output).toContain('节点无响应')
+    })
   })
 
   it('应当在 before Hook 失败时继续执行工具', async () => {

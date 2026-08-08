@@ -72,8 +72,18 @@ const WINDOW_CONFIGS: Record<string, WindowConfig> = {
     resizable: true,
     hasShadow: true,
   },
+  chat: {
+    route: '/chat',
+    width: 1100,
+    height: 760,
+    transparent: true,
+    alwaysOnTop: false,
+    skipTaskbar: false,
+    resizable: true,
+    hasShadow: true,
+  },
   ide: {
-    route: '/ide',
+    route: '/work',
     width: 1400,
     height: 900,
     transparent: true,
@@ -92,6 +102,7 @@ export class WindowManager {
   public petWin: BrowserWindow | null = null
   public dashboardWin: BrowserWindow | null = null
   public strongholdWin: BrowserWindow | null = null
+  public chatWin: BrowserWindow | null = null
   public ideWin: BrowserWindow | null = null
 
   /** Pet 窗口鼠标追踪定时器 */
@@ -338,6 +349,14 @@ export class WindowManager {
     return this.strongholdWin
   }
 
+  public createChatWindow(): BrowserWindow {
+    this.chatWin = this.createOrFocus(this.chatWin, 'chat')
+    this.chatWin.on('closed', () => {
+      this.chatWin = null
+    })
+    return this.chatWin
+  }
+
   public createIDEWindow(): BrowserWindow {
     this.ideWin = this.createOrFocus(this.ideWin, 'ide')
     this.ideWin.on('closed', () => {
@@ -387,6 +406,7 @@ export class WindowManager {
     this.petWin = null
     this.dashboardWin = null
     this.strongholdWin = null
+    this.chatWin = null
     this.ideWin = null
   }
 }

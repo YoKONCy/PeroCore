@@ -4,7 +4,7 @@
  *
  * 启动方式: pnpm dev:electron
  *
- * @see _docs_/A04_DEPLOYMENT.md — Electron 部署规范
+ * @see .docs/A04_DEPLOYMENT.md — Electron 部署规范
  */
 
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
@@ -25,7 +25,10 @@ export default defineConfig({
       outDir: 'dist-electron/main',
       rollupOptions: {
         input: resolve(__dirname, 'electron/main/index.ts'),
-        external: ['winreg', 'steamworks.js', 'electron-updater'],
+        // bufferutil / utf-8-validate 是 ws 的可选原生依赖
+        // 在 Electron 环境经常无法编译，ws 内部已 try/catch 容错
+        // 标记为 external 避免 Rollup 尝试解析它们
+        external: ['winreg', 'steamworks.js', 'electron-updater', 'bufferutil', 'utf-8-validate'],
       },
     },
   },

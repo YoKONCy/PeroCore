@@ -26,6 +26,7 @@ export interface CreateModelInput {
   topP?: number
   maxTokens?: number
   providerType?: string
+  enableVision?: boolean
 }
 
 /** 更新模型配置输入 (所有字段可选) */
@@ -39,6 +40,7 @@ export interface UpdateModelInput {
   topP?: number
   maxTokens?: number
   providerType?: string
+  enableVision?: boolean
 }
 
 // Drizzle 推导行类型
@@ -76,6 +78,7 @@ export class ModelRepository {
         topP: data.topP,
         maxTokens: data.maxTokens,
         providerType: data.providerType ?? 'global',
+        enableVision: data.enableVision ?? false,
         createdAt: now,
         updatedAt: now,
       })
@@ -97,6 +100,7 @@ export class ModelRepository {
     if (data.topP !== undefined) updates.topP = data.topP
     if (data.maxTokens !== undefined) updates.maxTokens = data.maxTokens
     if (data.providerType !== undefined) updates.providerType = data.providerType
+    if (data.enableVision !== undefined) updates.enableVision = data.enableVision
 
     await this.db.update(aiModelConfigs).set(updates).where(eq(aiModelConfigs.id, id))
 

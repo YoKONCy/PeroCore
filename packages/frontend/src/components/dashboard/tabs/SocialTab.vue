@@ -17,6 +17,7 @@ import { PixelIcon, PButton } from '../../pixel'
 import { invoke } from '../../../utils/ipcAdapter'
 import { isElectron } from '../../../utils/ipcAdapter'
 import { socialApi } from '../../../api/modules/socialApi'
+import { logger } from '../../../lib/logger'
 import SocialAdapterTerminal from '../../terminal/SocialAdapterTerminal.vue'
 
 // ── 类型 ──
@@ -71,6 +72,17 @@ const adapterConnected = ref(false)
 /** 是否为 Electron 环境 (进程管理仅 Electron 可用) */
 const canManageProcess = isElectron()
 
+// ── 主人 QQ 配置 ──
+
+/** 主人 QQ 输入框绑定值 */
+const ownerQqInput = ref('')
+/** 配置加载中 */
+const configLoading = ref(false)
+/** 配置保存中 */
+const configSaving = ref(false)
+/** 配置已保存标记（用于显示成功提示） */
+const configSaved = ref(false)
+
 // ── 方法 ──
 
 /** 检查 NapCat 安装状态 */
@@ -104,7 +116,7 @@ async function installNapCat(): Promise<void> {
       napcatInstalled.value = true
     }
   } catch (e) {
-    console.error('NapCat 安装失败:', e)
+    logger.error('SocialTab', 'NapCat 安装失败', e)
   } finally {
     napcatInstalling.value = false
   }
@@ -116,7 +128,7 @@ async function startNapCat(): Promise<void> {
     await invoke('start-napcat')
     napcatRunning.value = true
   } catch (e) {
-    console.error('NapCat 启动失败:', e)
+    logger.error('SocialTab', 'NapCat 启动失败', e)
   }
 }
 
@@ -126,25 +138,87 @@ async function stopNapCat(): Promise<void> {
     await invoke('stop-napcat')
     napcatRunning.value = false
   } catch (e) {
-    console.error('NapCat 停止失败:', e)
+    logger.error('SocialTab', 'NapCat 停止失败', e)
+  }
+}
+
+// ── 主人 QQ 配置 ──
+
+/**
+ * 加载社交配置
+ *
+ * 从后端 /api/configs/social 读取配置，回填主人 QQ 输入框。
+ * 后端配置结构见 SocialConfig 类型。
+ */
+async function loadSocialConfig(): Promise<void> {
+  configLoading.value = true
+  try {
+    const cfg = await socialApi.getConfig()
+    ownerQqInput.value = cfg.ownerQq ?? ''
+  } catch (e) {
+    logger.error('SocialTab', '加载社交配置失败', e)
+  } finally {
+    configLoading.value = false
+  }
+}
+
+/**
+ * 保存主人 QQ 配置
+ *
+ * 采用"读-改-写"策略：先读取现有完整配置，更新 ownerQq 字段后整体回写，
+ * 避免覆盖 bindings 等其他字段。
+ *
+ * 注意：保存后需要重启社交应用才能让 adapter 更新 ownerQq 识别逻辑，
+ * 因为 SocialAppRuntime 在 initialize 时读取配置。prompt 注入也会在下次
+ * generateReply 时生效（每次 compile 都从 this.ownerQq 读取）。
+ */
+async function saveOwnerQq(): Promise<void> {
+  configSaving.value = true
+  configSaved.value = false
+  try {
+    // 读-改-写：保留其他字段
+    const existing = await socialApi.getConfig()
+    existing.ownerQq = ownerQqInput.value.trim() || undefined
+    await socialApi.saveConfig(existing)
+    configSaved.value = true
+    // 2 秒后清除成功提示
+    setTimeout(() => {
+      configSaved.value = false
+    }, 2000)
+  } catch (e) {
+    logger.error('SocialTab', '保存主人QQ配置失败', e)
+  } finally {
+    configSaving.value = false
   }
 }
 
 // ── 初始化 ──
 
 onMounted(async () => {
+  // 并行加载适配器状态和社交配置
+  const tasks: Promise<void>[] = []
+
   if (canManageProcess) {
-    await checkNapCat()
+    tasks.push(checkNapCat())
   } else {
     // Docker 模式：只检查 API 连接状态
-    try {
-      const res = await socialApi.getStatus()
-      const qqAdapter = res.data?.adapters?.find((a) => a.platform === 'qq')
-      adapterConnected.value = qqAdapter?.connected ?? false
-    } catch {
-      // 静默
-    }
+    tasks.push(
+      (async () => {
+        try {
+          const res = await socialApi.getStatus()
+          const qqAdapter = res.data?.adapters?.find((a) => a.platform === 'qq')
+          adapterConnected.value = qqAdapter?.connected ?? false
+        } catch {
+          // 静默
+        }
+      })(),
+    )
   }
+
+  // 加载主人 QQ 配置（Electron/Docker 通用）
+  tasks.push(loadSocialConfig())
+
+  await Promise.all(tasks)
 })
 </script>
 
@@ -186,6 +260,37 @@ onMounted(async () => {
           </div>
           <span v-else class="sp-card-tag">待实现</span>
         </button>
+      </div>
+    </div>
+
+    <!-- 主人 QQ 配置区（权限控制核心） -->
+    <div class="sp-owner-config">
+      <div class="sp-block-header">
+        <PixelIcon name="user" size="xs" />
+        <span>主人 QQ</span>
+      </div>
+      <div class="sp-owner-body">
+        <div class="sp-owner-row">
+          <input
+            v-model="ownerQqInput"
+            class="sp-owner-input"
+            type="text"
+            placeholder="输入主人的 QQ 号（用于权限识别）"
+            :disabled="configLoading || configSaving"
+          />
+          <PButton
+            size="sm"
+            variant="primary"
+            :disabled="configLoading || configSaving"
+            @click="saveOwnerQq"
+          >
+            <PixelIcon name="save" size="xs" />
+            {{ configSaving ? '保存中...' : configSaved ? '已保存' : '保存' }}
+          </PButton>
+        </div>
+        <div class="sp-hint">
+          配置后，Agent 能识别消息是否来自主人，并在 system prompt 中注入权限规则。只有主人能执行敏感操作（删好友、改设置等）。
+        </div>
       </div>
     </div>
 
@@ -441,6 +546,50 @@ onMounted(async () => {
 .sp-config {
   padding: 0 24px 12px;
   flex-shrink: 0;
+}
+
+/* ── 主人 QQ 配置区 ── */
+.sp-owner-config {
+  margin: 0 24px 12px;
+  background: white;
+  border: 2px solid var(--color-sky-100, #e0f2fe);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.sp-owner-body {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sp-owner-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.sp-owner-input {
+  flex: 1;
+  height: 32px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-family: 'Consolas', 'Monaco', monospace;
+  color: var(--text-primary, #1e293b);
+  background: var(--color-sky-50, #f0f9ff);
+  border: 1px solid var(--color-sky-200, #bae6fd);
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.sp-owner-input:focus {
+  border-color: var(--color-sky-400, #38bdf8);
+}
+
+.sp-owner-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .sp-config-row {

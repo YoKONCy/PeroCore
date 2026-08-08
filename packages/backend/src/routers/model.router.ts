@@ -43,6 +43,8 @@ const createModelSchema = z.object({
   maxTokens: z.number().int().min(1).optional(),
   /** Provider 类型 / 用途 (global/chat/scorer/reflection/task) */
   providerType: z.string().default('global'),
+  /** 启用视觉能力 (多模态) */
+  enableVision: z.boolean().optional(),
 })
 
 const updateModelSchema = createModelSchema.partial().extend({

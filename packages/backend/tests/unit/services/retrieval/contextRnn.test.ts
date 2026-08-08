@@ -5,17 +5,33 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@perocore/nit-runtime', () => ({
   HIDDEN_DIM: 4,
+  // AIOS 第八阶段：minGRU 权重大小（HIDDEN_DIM=4）
+  MIN_GRU_WEIGHT_SIZES: {
+    W_Z: 16,  // 4×4
+    B_Z: 4,
+    W_H: 16,  // 4×4
+    B_H: 4,
+    TOTAL: 40,
+  },
   projectInput: vi.fn(
     (input: Float32Array) => new Float32Array([input[0] ?? 0, input[1] ?? 0, 1, 2]),
   ),
-  minGruForward: vi.fn(
-    (hidden: Float32Array, projected: Float32Array) =>
+  // AIOS 第八阶段：改用 minGruForwardWithWeights（忽略 weights 参数，保持测试行为一致）
+  minGruForwardWithWeights: vi.fn(
+    (hidden: Float32Array, projected: Float32Array, _weights: unknown) =>
       new Float32Array(projected.map((value, index) => value + (hidden[index] ?? 0))),
   ),
+  xavierInitMinGruWeights: vi.fn((_hiddenDim?: number) => ({
+    wZ: new Float32Array(16).fill(0.01),
+    bZ: new Float32Array(4).fill(0.1),
+    wH: new Float32Array(16).fill(0.01),
+    bH: new Float32Array(4).fill(0.1),
+  })),
+  trainMinGruStep: vi.fn(() => 0.5),
 }))
 
 import { ContextRnn } from '@perocore/backend/services/retrieval/contextRnn'
-import { minGruForward, projectInput } from '@perocore/nit-runtime'
+import { minGruForwardWithWeights, projectInput } from '@perocore/nit-runtime'
 import type { PathResolver } from '@perocore/backend/core/pathResolver'
 
 function createResolver(root: string): PathResolver {
@@ -48,9 +64,10 @@ describe('ContextRnn', () => {
 
     expect(Array.from(initial)).toEqual([0, 0, 0, 0])
     expect(projectInput).toHaveBeenCalledWith(new Float32Array([3, 4, 5]), expect.any(Float32Array))
-    expect(minGruForward).toHaveBeenCalledWith(
+    expect(minGruForwardWithWeights).toHaveBeenCalledWith(
       new Float32Array([0, 0, 0, 0]),
       new Float32Array([3, 4, 1, 2]),
+      expect.any(Object), // minGruWeights
     )
     expect(Array.from(updated)).toEqual([3, 4, 1, 2])
     expect(rnn.getStats()).toEqual([

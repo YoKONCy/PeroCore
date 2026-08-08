@@ -25,8 +25,8 @@ const MAX_SCAN_BATCH = 50
 
 export interface LonelyScanDeps {
   memoryRepo: MemoryRepository
-  /** 当前活跃 Agent ID */
-  activeAgentId: string
+  /** 默认 Agent ID（AIOS: 原 activeAgentId，改名为 defaultAgentId 语义更准确） */
+  defaultAgentId: string
 }
 
 /**
@@ -36,13 +36,13 @@ export interface LonelyScanDeps {
  * 标记为 "lonely" 状态供后续 Reflection 处理。
  */
 export async function runLonelyScan(deps: LonelyScanDeps): Promise<LonelyScanResult> {
-  const { memoryRepo, activeAgentId } = deps
+  const { memoryRepo, defaultAgentId } = deps
   const thresholdMs = Date.now() - LONELY_THRESHOLD_DAYS * 24 * 60 * 60 * 1000
 
   try {
     // 查询长期未命中的记忆
     const lonelyMemories = await memoryRepo.findLonelyMemories(
-      activeAgentId,
+      defaultAgentId,
       thresholdMs,
       MAX_SCAN_BATCH,
     )

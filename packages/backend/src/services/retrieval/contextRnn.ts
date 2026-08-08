@@ -14,7 +14,15 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
-import { HIDDEN_DIM, minGruForward, projectInput } from '@perocore/nit-runtime'
+import {
+  HIDDEN_DIM,
+  projectInput,
+  minGruForwardWithWeights,
+  xavierInitMinGruWeights,
+  trainMinGruStep,
+  MIN_GRU_WEIGHT_SIZES,
+} from '@perocore/nit-runtime'
+import type { MinGruWeights } from '@perocore/nit-runtime'
 import type { PathResolver } from '../../core/pathResolver'
 import { createLogger } from '../../lib/logger'
 
@@ -95,6 +103,16 @@ export class ContextRnn {
   /** 输出矩阵 W_out (HIDDEN_DIM × INPUT_DIM) — h_t → 偏置向量 */
   private outputMatrix: Float32Array
 
+  /**
+   * minGRU 内部权重（AIOS 第八阶段：从 Rust 全局单例移到 TS 侧管理）
+   *
+   * W_z/b_z: 门控权重和偏置
+   * W_h/b_h: 候选状态权重和偏置
+   *
+   * 这些权重会被持久化到 rnn_mingru.bin，并在训练时在线更新。
+   */
+  private minGruWeights: MinGruWeights
+
   constructor(pathResolver: PathResolver, config?: Partial<ContextRnnConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config }
     this.pathResolver = pathResolver
@@ -102,6 +120,9 @@ export class ContextRnn {
     // 尝试加载已持久化的权重，否则 Xavier 初始化
     this.projMatrix = this.loadOrInitWeights('proj', PROJ_MATRIX_SIZE, INPUT_DIM, HIDDEN_DIM)
     this.outputMatrix = this.loadOrInitWeights('output', OUTPUT_MATRIX_SIZE, HIDDEN_DIM, INPUT_DIM)
+
+    // AIOS 第八阶段：加载或初始化 minGRU 内部权重
+    this.minGruWeights = this.loadOrInitMinGruWeights()
 
     logger.info(
       `ContextRNN 初始化完成 (inputDim=${this.config.inputDim}, hiddenDim=${this.config.hiddenDim})`,
@@ -112,6 +133,9 @@ export class ContextRnn {
    * 更新隐状态 h_t → h_{t+1}
    *
    * 每轮对话输入 query embedding，更新对话轨迹感知状态。
+   *
+   * AIOS 第八阶段：改用 minGruForwardWithWeights，使用 TS 侧管理的权重，
+   * 不再依赖 Rust 全局单例（确保权重持久化和训练生效）。
    */
   update(agentId: string, mode: string, queryEmbedding: number[]): void {
     const state = this.getOrCreateState(agentId, mode)
@@ -120,8 +144,8 @@ export class ContextRnn {
     const input = new Float32Array(queryEmbedding)
     const projected = projectInput(input, this.projMatrix)
 
-    // 2. minGRU 前向: h_t + x_t → h_{t+1}
-    const newHidden = minGruForward(state.hidden, projected)
+    // 2. minGRU 前向: h_t + x_t → h_{t+1}（使用 TS 侧管理的权重）
+    const newHidden = minGruForwardWithWeights(state.hidden, projected, this.minGruWeights)
 
     // 3. 更新状态
     state.hidden = newHidden
@@ -259,6 +283,7 @@ export class ContextRnn {
       this.save(agentId, mode)
     }
     this.saveWeights()
+    this.saveMinGruWeights()
     logger.info(`ContextRNN: 所有状态已保存 (${this.states.size} 个 Agent)`)
   }
 
@@ -282,6 +307,88 @@ export class ContextRnn {
       })
     }
     return stats
+  }
+
+  /**
+   * CCSA: W_out 在线 SGD 更新
+   *
+   * 基于反馈信号调整 W_out 矩阵，让 generateBias 产生的 diffusion bias
+   * 更好地引导图扩散方向。
+   *
+   * 核心梯度:
+   * - positive (bias 方向好): 减小 ‖bias - target_embedding‖² → W_out 向 target 方向移动
+   * - negative (bias 方向差): 增大 ‖bias - target_embedding‖² → W_out 远离 target 方向
+   *
+   * 更新规则: W_out -= lr × gradient
+   * gradient = (bias - target) ⊗ h_t  (positive)
+   * gradient = -(bias - target) ⊗ h_t  (negative，即推离)
+   *
+   * @param hiddenState  该轮对话的 h_t (256 维)
+   * @param contextBias  该轮的 diffusion bias = W_out · h_t (1536 维)
+   * @param targetEmbedding  被采纳/拒绝的记忆的 embedding (1536 维)
+   * @param isPositive  反馈信号：true = 该方向好，false = 该方向差
+   * @param learningRate  学习率 (默认 0.0005，小于 GRU 的 0.001 以保持稳定)
+   */
+  updateOutputWeights(
+    hiddenState: Float32Array,
+    contextBias: Float32Array,
+    targetEmbedding: Float32Array,
+    isPositive: boolean,
+    learningRate: number = 0.0005,
+  ): void {
+    const sign = isPositive ? 1.0 : -1.0
+
+    // 梯度: 对每个 W_out[j][i]，梯度 = (bias[i] - target[i]) * h[j]
+    // positive 时沿梯度下降，negative 时沿梯度上升
+    for (let j = 0; j < HIDDEN_DIM; j++) {
+      const hj = hiddenState[j]!
+      if (Math.abs(hj) < 1e-8) continue // 跳过零激活的隐单元
+
+      for (let i = 0; i < INPUT_DIM; i++) {
+        const diff = contextBias[i]! - targetEmbedding[i]!
+        const grad = sign * diff * hj
+        // SGD 更新 + 梯度裁剪（防止 Xavier 初始化早期的大梯度）
+        const clippedGrad = Math.max(-0.1, Math.min(0.1, grad))
+        this.outputMatrix[j * INPUT_DIM + i]! -= learningRate * clippedGrad
+      }
+    }
+  }
+
+  /**
+   * minGRU 内部权重在线训练（AIOS 第八阶段新增）
+   *
+   * 基于反馈信号更新 W_z/b_z/W_h/b_h，让 minGRU 的循环动力学
+   * 更好地编码"对话轨迹 → 有效记忆检索"的映射。
+   *
+   * 训练信号来源与 updateOutputWeights 相同：
+   * - positive（记忆被采纳）: label=1.0，强化当前隐状态方向
+   * - negative（记忆被拒绝）: label=0.0，抑制当前隐状态方向
+   *
+   * @param agentId   Agent ID
+   * @param mode      模式
+   * @param queryEmbedding 原始 query embedding（会先投影到 HIDDEN_DIM）
+   * @param isPositive 反馈信号：true=正面，false=负面
+   * @param learningRate 学习率（默认 0.001）
+   * @returns 训练损失值
+   */
+  trainMinGru(
+    agentId: string,
+    mode: string,
+    queryEmbedding: Float32Array,
+    isPositive: boolean,
+    learningRate: number = 0.001,
+  ): number {
+    const state = this.getOrCreateState(agentId, mode)
+
+    // 投影到 HIDDEN_DIM
+    const projected = projectInput(queryEmbedding, this.projMatrix)
+
+    // 单步 SGD 训练（原地更新 minGruWeights）
+    const label = isPositive ? 1.0 : 0.0
+    const loss = trainMinGruStep(state.hidden, projected, this.minGruWeights, label, learningRate)
+
+    logger.debug(`minGRU 训练: loss=${loss.toFixed(4)}, label=${label}`)
+    return loss
   }
 
   // ── 内部方法 ──
@@ -347,5 +454,73 @@ export class ContextRnn {
     writeFileSync(this.resolveWeightsPath('proj'), Buffer.from(this.projMatrix.buffer))
     writeFileSync(this.resolveWeightsPath('output'), Buffer.from(this.outputMatrix.buffer))
     logger.debug('RNN 权重已保存')
+  }
+
+  /**
+   * 加载或初始化 minGRU 内部权重（AIOS 第八阶段新增）
+   *
+   * 权重文件格式: [wZ | bZ | wH | bH] 拼接为单个 Float32 buffer
+   * 总大小: (W_Z + B_Z + W_H + B_H) × 4 字节 ≈ 514KB
+   *
+   * 如果文件不存在或损坏，使用 xavierInitMinGruWeights 初始化：
+   * - W_z/W_h: Xavier 均匀分布
+   * - b_z/b_h: 0.1（确保门控初始开度合理，不再是 0）
+   */
+  private loadOrInitMinGruWeights(): MinGruWeights {
+    const filePath = this.resolveWeightsPath('mingru')
+    const totalSize = MIN_GRU_WEIGHT_SIZES.TOTAL
+
+    if (existsSync(filePath)) {
+      try {
+        const buffer = readFileSync(filePath)
+        if (buffer.length === totalSize * 4) {
+          const float32 = new Float32Array(
+            buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength),
+          )
+          // 按布局切分: [wZ | bZ | wH | bH]
+          const wZSize = MIN_GRU_WEIGHT_SIZES.W_Z
+          const bZSize = MIN_GRU_WEIGHT_SIZES.B_Z
+          const wHSize = MIN_GRU_WEIGHT_SIZES.W_H
+
+          const wZ = float32.slice(0, wZSize)
+          const bZ = float32.slice(wZSize, wZSize + bZSize)
+          const wH = float32.slice(wZSize + bZSize, wZSize + bZSize + wHSize)
+          const bH = float32.slice(wZSize + bZSize + wHSize, totalSize)
+
+          logger.info(`minGRU 权重已加载: ${filePath} (${totalSize} 元素)`)
+          return { wZ, bZ, wH, bH }
+        }
+        logger.warn(`minGRU 权重文件大小不匹配: 期望 ${totalSize * 4}, 实际 ${buffer.length}`)
+      } catch (err) {
+        logger.warn(`minGRU 权重加载失败: ${filePath}`, { error: err })
+      }
+    }
+
+    // Xavier 初始化（偏置 0.1，不再是 0）
+    logger.info(`minGRU 权重 Xavier 初始化 (W_z/W_h: Xavier, b_z/b_h: 0.1)`)
+    return xavierInitMinGruWeights(HIDDEN_DIM)
+  }
+
+  /**
+   * 保存 minGRU 内部权重到磁盘
+   *
+   * 将 [wZ | bZ | wH | bH] 拼接为单个 buffer 写入 rnn_mingru.bin
+   */
+  private saveMinGruWeights(): void {
+    const dir = path.dirname(this.resolveWeightsPath('mingru'))
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+
+    const { wZ, bZ, wH, bH } = this.minGruWeights
+    // 拼接为单个 buffer
+    const total = MIN_GRU_WEIGHT_SIZES.TOTAL
+    const combined = new Float32Array(total)
+    let offset = 0
+    combined.set(wZ, offset); offset += wZ.length
+    combined.set(bZ, offset); offset += bZ.length
+    combined.set(wH, offset); offset += wH.length
+    combined.set(bH, offset)
+
+    writeFileSync(this.resolveWeightsPath('mingru'), Buffer.from(combined.buffer))
+    logger.debug('minGRU 权重已保存')
   }
 }

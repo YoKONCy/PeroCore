@@ -7,21 +7,21 @@
  */
 import { ref, computed } from 'vue'
 import { PixelIcon, PButton, PDialog } from '../pixel'
-import { useSessionStore } from '../../stores'
+import { useThreadStore } from '../../stores'
 
-const sessionStore = useSessionStore()
+const threadStore = useThreadStore()
 
 const isOpen = ref(false)
 const tab = ref<'prompt' | 'response'>('response')
 
 /** 提取最近一条 assistant 消息 */
 const lastAssistant = computed(() =>
-  [...sessionStore.messages].reverse().find((m) => m.role === 'assistant'),
+  [...threadStore.messages].reverse().find((m) => m.role === 'assistant'),
 )
 
 /** 提取最近一条 system 消息 */
 const lastSystem = computed(() =>
-  [...sessionStore.messages].reverse().find((m) => m.role === 'system'),
+  [...threadStore.messages].reverse().find((m) => m.role === 'system'),
 )
 
 const displayContent = computed(() => {

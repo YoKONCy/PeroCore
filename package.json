@@ -18,6 +18,7 @@
   "scripts": {
     "version:sync": "tsx scripts/sync-version.ts",
     "dev": "pnpm --filter @perocore/backend dev",
+    "dev:daemon": "pnpm --filter @perocore/daemon dev",
     "dev:frontend": "pnpm --filter @perocore/frontend dev",
     "dev:electron": "electron-vite dev --config electron.vite.config.ts",
     "start": "node scripts/start-dev.mjs",

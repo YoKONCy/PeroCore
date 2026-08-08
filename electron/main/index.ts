@@ -8,7 +8,7 @@
  *              2. 注册 IPC 通道 (通过 ipcBridge.ts)
  *              3. 创建窗口 (通过 WindowManager)
  *              4. 启动系统服务 (托盘, 快捷键, 自动更新)
- *              5. 启动后端子进程
+ *              5. 连接 Daemon CapabilityBridge 注册平台能力（第七阶段修复 E4：不再启动后端子进程）
  *
  * @platform ELECTRON
  * @module electron/main
@@ -17,10 +17,8 @@
 import { app, BrowserWindow, dialog, protocol } from 'electron'
 import { release } from 'node:os'
 import { logger } from './utils/logger'
-import { isDev } from './utils/env'
 import { windowManager } from './windows/manager'
 import { registerIpcHandlers } from './ipcBridge'
-import { appEvents } from './events'
 import { initSteam } from './services/steam'
 
 // ─── 全局错误捕获 ─────────────────────────────────────
@@ -102,15 +100,12 @@ app.whenReady().then(async () => {
     // 创建 Launcher 窗口
     windowManager.createLauncherWindow()
 
-    // Electron 桌面端的启动器需要立即读取配置、角色与系统状态，因此后端必须随主进程启动
-    const { startBackend } = await import('./services/backendProcess')
-    if (isDev) {
-      startBackend().catch((e) => {
-        logger.info('Main', `开发模式后端自动启动跳过，可能已由外部脚本托管: ${e}`)
-      })
-    } else {
-      await startBackend()
-    }
+    // 第七阶段：Electron 不再 spawn 后端，改为连接 Daemon 并注册平台能力
+    // Daemon 必须独立运行（pnpm dev:daemon 或系统服务），Electron 只作为能力节点
+    const { capabilityProvider } = await import('./services/capabilityProvider')
+    capabilityProvider.start().catch((e) => {
+      logger.error('Main', `CapabilityProvider 启动失败（Daemon 是否已运行？）: ${e}`)
+    })
 
     // 启动系统服务
     const { createTray } = await import('./services/tray')
@@ -122,27 +117,10 @@ app.whenReady().then(async () => {
     const { setupUpdater } = await import('./services/updater')
     setupUpdater()
 
-    logger.info('Main', '应用启动完成')
+    logger.info('Main', '应用启动完成（Daemon 连接模式）')
   } catch (e: unknown) {
     logger.error('Main', `App whenReady 失败: ${e}`)
   }
-})
-
-// ─── 服务崩溃联动 ─────────────────────────────────────
-appEvents.on('backend-crashed', async () => {
-  logger.error('Main', '后端崩溃')
-
-  // 向所有渲染窗口推送系统错误通知
-  const { BrowserWindow } = await import('electron')
-  BrowserWindow.getAllWindows().forEach((win) => {
-    if (!win.isDestroyed()) {
-      win.webContents.send('system-error', {
-        title: '后端服务异常',
-        message: '后端进程意外退出，部分功能可能不可用。请检查日志或重启应用。',
-        type: 'error',
-      })
-    }
-  })
 })
 
 // ─── 应用生命周期 ─────────────────────────────────────
@@ -164,9 +142,9 @@ app.on('before-quit', async (event) => {
     // 1. 销毁所有窗口
     windowManager.destroyAll()
 
-    // 2. 停止后端服务
-    const { stopBackend } = await import('./services/backendProcess')
-    await stopBackend()
+    // 2. 停止能力提供者（断开与 Daemon 的连接，注销能力）
+    const { capabilityProvider } = await import('./services/capabilityProvider')
+    capabilityProvider.stop()
 
     // 3. 停止 NapCat
     const { stopNapCat } = await import('./services/napcat')

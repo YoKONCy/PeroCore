@@ -1,27 +1,91 @@
 /**
  * Capability Gate 类型定义
  *
- * (Agent, Mode) → ResolvedCapability 的类型体系。
+ * (Agent, Channel) → ResolvedCapability 的类型体系。
+ *
+ * AIOS 改造说明：
+ * - Mode 概念已废弃，改为 Channel（Thread 持久属性）
+ * - ModeCapability → ChannelCapability
+ * - AgentCapabilityConfig.modes → channels
  *
  * @module packages/backend/src/capabilities/types
  */
 
-/** 单个模式的能力配置 (YAML 中的一个 mode 块) */
-export interface ModeCapability {
-  /** 该模式下可用的工具 ID 列表 */
+/** 单个 Channel 的能力配置 (YAML 中的一个 channel 块) */
+export interface ChannelCapability {
+  /** 该 channel 下可用的工具 ID 列表 */
   tools: string[]
-  /** 该模式下可用的 Skill ID 列表 */
+  /** 该 channel 下可用的 Skill ID 列表 */
   skills: string[]
   /** 需要注入的 prompt 片段路径 */
   prompt_fragments: string[]
+  /**
+   * 工具权限配置（第六阶段 #6: Resource Scope）
+   *
+   * key 为工具名，value 为该工具在本 channel 下的资源范围与参数策略。
+   * 缺失 key 表示该工具无额外资源范围限制（仍受 CapabilityGate 白名单约束）。
+   */
+  tool_permissions?: Record<string, ToolPermission>
 }
 
 /** 单个 Agent 的完整能力配置 (capabilities.yaml) */
 export interface AgentCapabilityConfig {
   /** Agent ID */
   agent: string
-  /** 各模式的能力配置 */
-  modes: Record<string, ModeCapability>
+  /** 各 channel 的能力配置 */
+  channels: Record<string, ChannelCapability>
+}
+
+// ─────────────────────────────────────────────
+// Resource Scope（第六阶段 #6）
+// ─────────────────────────────────────────────
+
+/**
+ * 资源范围
+ *
+ * 描述工具可操作的文件系统根目录与禁止路径。
+ * ToolExecutor 在调用涉及文件操作的工具前，会校验路径参数是否落在 allowedRoots 内
+ * 且不命中 deniedPaths。
+ */
+export interface ResourceScope {
+  /** 允许操作的根目录列表（绝对路径或相对 workspace 的别名，空数组表示不限制） */
+  allowedRoots: string[]
+  /** 禁止的路径列表（绝对路径或 glob，命中即拒绝） */
+  deniedPaths: string[]
+  /** 范围类型：principal_workspace=Agent 工作区 / user_authorized=用户授权目录 / system=系统级（不限制） */
+  scope: 'principal_workspace' | 'user_authorized' | 'system'
+}
+
+/**
+ * 参数策略（简化版，暂不实现完整逻辑）
+ *
+ * 预留字段，后续用于校验工具参数（如命令白名单、内容长度上限）。
+ * 第一版仅加数据结构，不实际生效。
+ */
+export interface ParamPolicy {
+  /** 内容最大长度（字符数） */
+  maxContentLength?: number
+  /** 允许的命令列表（如 terminal_execute 的命令白名单） */
+  allowedCommands?: string[]
+  /** 禁止的命令/参数模式（正则字符串） */
+  deniedPatterns?: string[]
+}
+
+/**
+ * 工具权限
+ *
+ * 描述单个工具在特定 (Agent, Channel) 下的资源范围与参数策略。
+ * 第一版简化：仅 ResourceScope 生效，ParamPolicy 与 requiresApproval 仅加数据结构。
+ */
+export interface ToolPermission {
+  /** 工具名（与 ToolRegistry definition.name 一致） */
+  toolName: string
+  /** 资源范围（路径白/黑名单） */
+  resourceScope: ResourceScope
+  /** 参数策略（预留，第一版不实现） */
+  paramPolicy?: ParamPolicy
+  /** 是否需要审批（预留，第一版不实现审批层） */
+  requiresApproval: boolean
 }
 
 /** Skill 清单 (SKILL.md 的 frontmatter) */
@@ -56,4 +120,10 @@ export interface ResolvedCapability {
   toolsDescription: string
   /** Skill 菜单文本 (L1, ~50 tokens) */
   skillMenuText: string
+  /**
+   * 工具权限表（第六阶段 #6: Resource Scope）
+   * key 为工具名，value 为该工具在本 (Agent, Channel) 下的资源范围与参数策略。
+   * 缺失 key 表示该工具无额外资源范围限制。
+   */
+  toolPermissions: Map<string, ToolPermission>
 }

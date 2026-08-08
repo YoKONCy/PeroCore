@@ -16,6 +16,9 @@ import type { ApiResponse } from '@perocore/shared'
  *
  * 所有 localhost:9120 引用**必须**使用此常量，
  * 禁止在其他文件中硬编码端口号 (S05 §3)。
+ *
+ * TODO(AIOS-Phase7): 第七阶段 Daemon 独立时改为从环境变量/配置读取，
+ * 不再硬编码 localhost:9120。Daemon 可作为系统服务运行在任意端口。
  */
 export const ELECTRON_BACKEND_ORIGIN = 'http://localhost:9120'
 

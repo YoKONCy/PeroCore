@@ -21,10 +21,12 @@ type VectorRepoMock = {
 type MemoryRepoMock = {
   findById: ReturnType<typeof vi.fn>
   findByIds: ReturnType<typeof vi.fn>
+  patternSearch: ReturnType<typeof vi.fn>
 }
 
 type EmbeddingServiceMock = {
   embedOne: ReturnType<typeof vi.fn>
+  isAvailable: boolean
 }
 
 describe('MemorySearchService', () => {
@@ -37,10 +39,12 @@ describe('MemorySearchService', () => {
   const memoryRepo: MemoryRepoMock = {
     findById: vi.fn(),
     findByIds: vi.fn(),
+    patternSearch: vi.fn().mockResolvedValue([]),
   }
 
   const embeddingService: EmbeddingServiceMock = {
     embedOne: vi.fn(),
+    isAvailable: true,
   }
 
   let service: MemorySearchService
@@ -75,6 +79,7 @@ describe('MemorySearchService', () => {
       memoryRepo.findByIds.mockResolvedValue([
         {
           id: 2,
+          agentId: 'pero',
           content: '记得今晚写周报',
           tags: '工作,提醒',
           importance: 4,
@@ -115,7 +120,7 @@ describe('MemorySearchService', () => {
 
       expect(result).toEqual([])
       expect(vectorRepo.search).not.toHaveBeenCalled()
-      expect(warnMock).toHaveBeenCalledWith('Embedding 为空，跳过检索')
+      expect(warnMock).toHaveBeenCalledWith('Embedding 返回空向量，跳过检索')
     })
   })
 
@@ -126,6 +131,7 @@ describe('MemorySearchService', () => {
       memoryRepo.findByIds.mockResolvedValue([
         {
           id: 5,
+          agentId: 'pero',
           content: '高级检索命中',
           tags: null,
           importance: null,
@@ -166,6 +172,7 @@ describe('MemorySearchService', () => {
       memoryRepo.findByIds.mockResolvedValue([
         {
           id: 6,
+          agentId: 'pero',
           content: '混合检索命中',
           tags: 'tag',
           importance: 2,
@@ -197,6 +204,164 @@ describe('MemorySearchService', () => {
     })
   })
 
+  describe('Pattern Search fallback', () => {
+    it('CJK 查询应当触发 patternSearch 并与向量召回 RRF 融合', async () => {
+      // 场景：向量召回命中 id=2，pattern 召回命中 id=7（仅 pattern 命中）
+      // RRF 融合后两者都应出现，证明 fallback 补充了向量漏召回
+      embeddingService.embedOne.mockResolvedValue([0.1, 0.2])
+      vectorRepo.search.mockResolvedValue([{ id: 2, score: 0.92 }])
+      memoryRepo.patternSearch.mockResolvedValue([
+        { id: 7, score: 1.0 }, // pattern 独占命中
+        { id: 2, score: 0.5 }, // 与向量重叠
+      ])
+      memoryRepo.findByIds.mockResolvedValue([
+        {
+          id: 2,
+          agentId: 'pero',
+          content: '向量召回记忆',
+          tags: '',
+          importance: 3,
+          source: 'desktop',
+          type: 'event',
+          timestamp: 1710000000,
+        },
+        {
+          id: 7,
+          agentId: 'pero',
+          content: 'pattern 补充记忆',
+          tags: '',
+          importance: 2,
+          source: 'desktop',
+          type: 'event',
+          timestamp: 1710000001,
+        },
+      ])
+
+      const result = await service.search({
+        query: '小猫娘', // CJK 文本，触发 bigram 提取
+        agentId: 'pero',
+        source: 'desktop',
+      })
+
+      // patternSearch 应被调用，terms 为 CJK bigrams
+      expect(memoryRepo.patternSearch).toHaveBeenCalledWith(
+        'pero',
+        expect.arrayContaining(['小猫', '猫娘']),
+        expect.any(Number),
+      )
+      // 融合后两条记忆都应出现
+      const ids = result.map((r) => r.id).sort()
+      expect(ids).toEqual([2, 7])
+    })
+
+    it('ASCII 长词（>=3 字符）不应触发 patternSearch', async () => {
+      // 长词由 BM25/向量处理，pattern search 不应被调用
+      embeddingService.embedOne.mockResolvedValue([0.5])
+      vectorRepo.search.mockResolvedValue([{ id: 1, score: 0.8 }])
+      memoryRepo.findByIds.mockResolvedValue([
+        {
+          id: 1,
+          agentId: 'pero',
+          content: 'long query test',
+          tags: '',
+          importance: 1,
+          source: 'desktop',
+          type: 'event',
+          timestamp: 1710000000,
+        },
+      ])
+
+      await service.search({
+        query: 'hello world', // 两个长词，不应触发
+        agentId: 'pero',
+        source: 'desktop',
+      })
+
+      expect(memoryRepo.patternSearch).not.toHaveBeenCalled()
+    })
+
+    it('ASCII 短词（<3 字符）应当触发 patternSearch', async () => {
+      embeddingService.embedOne.mockResolvedValue([0.5])
+      vectorRepo.search.mockResolvedValue([{ id: 1, score: 0.8 }])
+      memoryRepo.patternSearch.mockResolvedValue([{ id: 3, score: 1.0 }])
+      memoryRepo.findByIds.mockResolvedValue([
+        {
+          id: 1,
+          agentId: 'pero',
+          content: 'vector hit',
+          tags: '',
+          importance: 1,
+          source: 'desktop',
+          type: 'event',
+          timestamp: 1710000000,
+        },
+        {
+          id: 3,
+          agentId: 'pero',
+          content: 'short term hit',
+          tags: '',
+          importance: 1,
+          source: 'desktop',
+          type: 'event',
+          timestamp: 1710000001,
+        },
+      ])
+
+      await service.searchHybrid({
+        query: 'AI OK', // 两个短词
+        agentId: 'pero',
+        source: 'desktop',
+      })
+
+      // 短词应被提取并传给 patternSearch
+      expect(memoryRepo.patternSearch).toHaveBeenCalledWith(
+        'pero',
+        expect.arrayContaining(['AI', 'OK']),
+        expect.any(Number),
+      )
+    })
+
+    it('patternSearch 返回空时应当回退到原始向量召回结果', async () => {
+      // pattern 无命中时，应直接使用向量召回，不破坏原行为
+      embeddingService.embedOne.mockResolvedValue([0.5])
+      const vectorHit = { id: 9, score: 0.75 }
+      vectorRepo.search.mockResolvedValue([vectorHit])
+      memoryRepo.patternSearch.mockResolvedValue([]) // pattern 无命中
+      memoryRepo.findByIds.mockResolvedValue([
+        {
+          id: 9,
+          agentId: 'pero',
+          content: '原始向量召回',
+          tags: '',
+          importance: 1,
+          source: 'desktop',
+          type: 'event',
+          timestamp: 1710000000,
+        },
+      ])
+
+      const result = await service.search({
+        query: '小猫',
+        agentId: 'pero',
+        source: 'desktop',
+      })
+
+      // pattern 被调用但无贡献，最终结果应保留向量召原始 score
+      expect(result).toEqual([
+        {
+          id: 9,
+          content: '原始向量召回',
+          score: 0.75,
+          tags: '',
+          importance: 1,
+          source: 'desktop',
+          type: 'event',
+          timestamp: 1710000000,
+        },
+      ])
+    })
+  })
+
   describe('flashback', () => {
     it('应当沿前后链路展开上下文', async () => {
       // 链路: 8 <- 10 -> 12
@@ -209,6 +374,7 @@ describe('MemorySearchService', () => {
       memoryRepo.findByIds.mockResolvedValue([
         {
           id: 8,
+          agentId: 'pero',
           content: '前文记忆',
           tags: 'before',
           importance: 2,
@@ -218,6 +384,7 @@ describe('MemorySearchService', () => {
         },
         {
           id: 12,
+          agentId: 'pero',
           content: '后文记忆',
           tags: 'after',
           importance: 3,

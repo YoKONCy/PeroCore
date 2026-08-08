@@ -39,7 +39,7 @@ export interface RuntimeEnv {
 // ─────────────────────────────────────────────
 
 /** 支持的逻辑路径前缀 */
-export type LogicalPrefix = '@app' | '@data' | '@workshop' | '@temp'
+export type LogicalPrefix = '@app' | '@data' | '@workshop' | '@temp' | '@principal'
 
 /** 全部前缀清单 */
 export const ALL_PREFIXES: readonly LogicalPrefix[] = [
@@ -47,6 +47,7 @@ export const ALL_PREFIXES: readonly LogicalPrefix[] = [
   '@data',
   '@workshop',
   '@temp',
+  '@principal',
 ] as const
 
 // ─────────────────────────────────────────────
@@ -129,6 +130,32 @@ export class PathResolver {
   /** 获取指定前缀的根路径 */
   getRoot(prefix: string): string | undefined {
     return this.roots.get(prefix)
+  }
+
+  /**
+   * 解析 @principal 前缀路径
+   *
+   * @principal 是 Agent 的个人工作区前缀，解析到：
+   *   @data/agents/{agentId}/workspace/{relativePath}
+   *
+   * 与 resolve() 不同，此方法需要 agentId 上下文，
+   * 因为 @principal 的物理位置依赖 Agent。
+   *
+   * @param agentId Agent ID
+   * @param relativePath workspace 内的相对路径（如 'notes/diary.md'）
+   * @returns 绝对物理路径
+   */
+  resolvePrincipal(agentId: string, relativePath: string): string {
+    const dataRoot = this.roots.get('@data')
+    if (!dataRoot) {
+      throw new Error('@data 根目录未配置，无法解析 @principal')
+    }
+    return path.resolve(dataRoot, 'agents', agentId, 'workspace', relativePath)
+  }
+
+  /** 获取 Agent 的 workspace 根目录 */
+  getWorkspaceRoot(agentId: string): string {
+    return this.resolvePrincipal(agentId, '.')
   }
 
   /** 确保目录存在 */

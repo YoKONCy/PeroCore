@@ -38,19 +38,49 @@ const logger = createLogger('BuiltinTools')
 /** 内置工具标准接口 */
 export interface BuiltinTool {
   name: string
-  /** 执行函数 */
+  /**
+   * 执行函数
+   *
+   * AIOS: ctx 新增 threadId + channel 字段，工具可感知 Thread 上下文。
+   * - channel 等价于旧 source（desktop/companion/social/group）
+   * - threadId 等价于旧 sessionId（Thread ID）
+   */
   execute(
     args: Record<string, unknown>,
-    ctx: { agentId: string; sessionId: string; source: string },
+    ctx: {
+      agentId: string
+      sessionId: string
+      source: string
+      /** AIOS: Thread ID */
+      threadId: string
+      /** AIOS: 对话通道 */
+      channel: string
+    },
   ): Promise<string>
   /** 可选：初始化 */
   onLoad?(): Promise<void>
-  /** 内部字段：run_script 专用 */
+  /**
+   * 内部字段：run_script 专用
+   *
+   * 第六阶段 #7: 签名增加可选的 runtimeContext 参数（threadId + channel），
+   * 透传给 ToolExecutor.execute，让被调用的工具也走 CapabilityGate 鉴权
+   * 与 ResourceScope 路径校验。
+   */
   _toolExecutor?:
-    | ((name: string, args: Record<string, unknown>, source: string) => Promise<string>)
+    | ((
+        name: string,
+        args: Record<string, unknown>,
+        source: string,
+        runtimeContext?: { threadId?: string; channel?: string },
+      ) => Promise<string>)
     | null
   bindToolExecutor?(
-    executor: (name: string, args: Record<string, unknown>, source: string) => Promise<string>,
+    executor: (
+      name: string,
+      args: Record<string, unknown>,
+      source: string,
+      runtimeContext?: { threadId?: string; channel?: string },
+    ) => Promise<string>,
   ): void
 }
 
@@ -83,16 +113,7 @@ import {
   activateWindowTool,
 } from './systemInfo'
 import { automationExecuteTool, getMousePositionTool } from './desktopAutomation'
-import {
-  socialSendMessageTool,
-  socialGetContactsTool,
-  socialGetGroupsTool,
-  socialGetContactInfoTool,
-  socialGetGroupInfoTool,
-  socialGetGroupMembersTool,
-  socialHandleRequestTool,
-  socialNotifyOwnerTool,
-} from './socialOps'
+import { socialNotifyOwnerTool } from './socialOps/notifyOwner'
 import {
   strongholdMoveToRoomTool,
   strongholdListRoomsTool,
@@ -152,13 +173,8 @@ const ALL_BUILTIN_TOOLS: BuiltinTool[] = [
   getMousePositionTool,
 
   // ── 社交操作 (SocialMessagingProvider 注入, 社交模式) ──
-  socialSendMessageTool,
-  socialGetContactsTool,
-  socialGetGroupsTool,
-  socialGetContactInfoTool,
-  socialGetGroupInfoTool,
-  socialGetGroupMembersTool,
-  socialHandleRequestTool,
+  // 注意：其余 7 个社交工具已迁移到 packages/apps/social/tools/，
+  // 仅 social_notify_owner 保留在主 Agent 内核
   socialNotifyOwnerTool,
 
   // ── 据点操作 (StrongholdService 注入, 群聊模式) ──
@@ -259,11 +275,19 @@ export { setWindowProvider } from './systemInfo'
 export type { WindowProvider } from './systemInfo'
 export { setDesktopAutomationProvider } from './desktopAutomation'
 export type { DesktopAutomationProvider } from './desktopAutomation'
-export { setSocialMessagingProvider } from './socialOps'
-export type { SocialMessagingProvider } from './socialOps'
+export { setSocialMessagingProvider } from './socialOps/notifyOwner'
+export type { SocialMessagingProvider } from './socialOps/notifyOwner'
 export { setStrongholdService } from './strongholdOps'
 export { setSchedulerService } from './scheduler'
 export { setFinishTaskDeps } from './finishTask'
 export { setBrowserBridge } from './browserControl'
 export type { BrowserBridge } from './browserControl'
 export { setDiarySearchDeps } from './diarySearch'
+// AIOS(Phase4): WorkspaceService 注入
+// - fileOps 自带 setter（核心逻辑锁定不改）
+// - terminalExecutor / runScript / fileSearch / codeSearcher 共用 workspaceServiceHolder 的 setter
+export { setWorkspaceService } from './fileOps'
+export { setWorkspaceService as setSharedWorkspaceService } from './workspaceServiceHolder'
+export type { WorkspaceService } from '../services/workspace/workspaceService'
+// 第六阶段 #7: CapabilityGate 共享持有器（run_script 用于 ResourceScope 校验）
+export { setCapabilityGate } from './capabilityGateHolder'

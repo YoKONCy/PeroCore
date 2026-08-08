@@ -35,9 +35,9 @@ const logger = createLogger('LlmService')
 // ─────────────────────────────────────────────
 
 export const DEFAULT_API_BASES: Record<string, string> = {
-  openai: 'https://api.openai.com',
+  openai: 'https://api.openai.com/v1',
   siliconflow: 'https://api.siliconflow.cn/v1',
-  deepseek: 'https://api.deepseek.com',
+  deepseek: 'https://api.deepseek.com/v1',
   moonshot: 'https://api.moonshot.cn/v1',
   dashscope: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
   volcengine: 'https://ark.cn-beijing.volces.com/api/v3',
@@ -71,6 +71,8 @@ export interface ModelConfig {
   topP?: number
   /** 最大 token 数 */
   maxTokens?: number
+  /** 是否启用视觉能力 (多模态) */
+  enableVision?: boolean
 }
 
 // ─────────────────────────────────────────────

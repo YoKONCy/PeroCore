@@ -1,0 +1,117 @@
+{
+  "id": "social",
+  "name": "Social Bridge",
+  "description": "对外社交平台桥接应用（QQ/Discord 等），管理社交会话、缓冲、调度与回复。独立编译上下文，不依赖主 Agent 的 chat pipeline。",
+  "version": "1.0.0",
+  "author": "PeroCore",
+  "icon": "icon.png",
+  "runtimeEntry": "./runtime/index.ts",
+  "frontendEntry": "./frontend/index.js",
+  "providesTools": [
+    {
+      "name": "send_message",
+      "description": "向社交频道发送消息（私聊/群聊）",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "target": { "type": "string", "description": "目标会话 ID" },
+          "content": { "type": "string", "description": "消息内容" },
+          "type": { "type": "string", "enum": ["private", "group"], "description": "会话类型" }
+        },
+        "required": ["target", "content", "type"]
+      }
+    },
+    {
+      "name": "get_contacts",
+      "description": "获取联系人列表"
+    },
+    {
+      "name": "get_groups",
+      "description": "获取群组列表"
+    },
+    {
+      "name": "get_contact_info",
+      "description": "查询用户详情",
+      "parameters": {
+        "type": "object",
+        "properties": { "user_id": { "type": "string" } },
+        "required": ["user_id"]
+      }
+    },
+    {
+      "name": "get_group_info",
+      "description": "查询群组详情",
+      "parameters": {
+        "type": "object",
+        "properties": { "group_id": { "type": "string" } },
+        "required": ["group_id"]
+      }
+    },
+    {
+      "name": "get_group_members",
+      "description": "查询群组成员列表",
+      "parameters": {
+        "type": "object",
+        "properties": { "group_id": { "type": "string" } },
+        "required": ["group_id"]
+      }
+    },
+    {
+      "name": "handle_friend_request",
+      "description": "处理好友请求",
+      "requiresApproval": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "flag": { "type": "string" },
+          "approve": { "type": "boolean" },
+          "remark": { "type": "string" }
+        },
+        "required": ["flag", "approve"]
+      }
+    },
+    {
+      "name": "remove_friend",
+      "description": "删除好友",
+      "requiresApproval": true,
+      "parameters": {
+        "type": "object",
+        "properties": { "user_id": { "type": "string" } },
+        "required": ["user_id"]
+      }
+    }
+  ],
+  "requiresTools": [
+    "web_fetch",
+    "search_diary",
+    "set_reminder",
+    "list_reminders",
+    "cancel_reminder"
+  ],
+  "requiredPermissions": [
+    { "type": "memory.read", "description": "读取主 Agent 记忆以理解社交背景与用户偏好", "required": true },
+    { "type": "memory.write", "description": "提交社交记忆候选（经主 Agent MemoryGate 审核）", "required": true },
+    { "type": "network.access", "description": "连接 QQ/Discord 等社交平台", "required": true }
+  ],
+  "supportedAgentRoles": [],
+  "minAiosVersion": "1.0.0",
+  "contextRequirements": [
+    { "type": "persona", "required": true, "description": "继承主 Agent 人格投影" },
+    { "type": "memory", "required": true, "description": "社交相关记忆" },
+    { "type": "user_profile", "required": false, "description": "用户社交偏好" }
+  ],
+  "workspaceMode": "none",
+  "checkpointSchema": {
+    "fields": [
+      { "name": "connectedPlatforms", "type": "string[]", "description": "已连接的平台列表", "required": true },
+      { "name": "activeSessions", "type": "number", "description": "活跃社交会话数", "required": true },
+      { "name": "messagesProcessed", "type": "number", "description": "已处理消息总数", "required": true }
+    ]
+  },
+  "supportsMultipleSessions": false,
+  "defaultSessionPolicy": {
+    "tokenBudget": 6000,
+    "enableMemoryRetrieval": true,
+    "enableToolDescription": true
+  }
+}

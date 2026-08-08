@@ -17,6 +17,9 @@
 import { ref, shallowRef, onMounted, onUnmounted, nextTick } from 'vue'
 import { PixelIcon, PButton, PSwitch } from '../pixel'
 import { useSystemLogStream } from '../../composables/system/useSystemLogStream'
+import { useNotificationStore } from '../../stores'
+
+const notif = useNotificationStore()
 
 // ── 类型定义 ──
 
@@ -86,7 +89,7 @@ function extractTimestamp(msg: string): string {
   return m ? m[1]! : new Date().toLocaleTimeString()
 }
 
-/** 格式化消息：转义 HTML + 标签染色 */
+/** 格式化消息：转义 HTML + URL 链接化 + 标签染色 */
 function formatMessage(msg: string): string {
   if (!msg) return ''
   const escaped = msg
@@ -96,10 +99,55 @@ function formatMessage(msg: string): string {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;')
 
-  return escaped.replace(/\[([A-Z0-9_-]+)\]/gi, (_match, tag: string) => {
+  // URL 转为可点击链接（转义后的 &amp; 在 href 中会被浏览器正确解析为 &）
+  const withLinks = escaped.replace(
+    /(https?:\/\/[^\s<>"']+)/gi,
+    (url) =>
+      `<a href="${url}" class="log-link" data-url="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`,
+  )
+
+  // 标签染色 [AGENT] [LLM] 等
+  return withLinks.replace(/\[([A-Z0-9_-]+)\]/gi, (_match, tag: string) => {
     const color = TAG_COLORS[tag.toUpperCase()] ?? '#569cd6'
     return `<span style="color: ${color}; font-weight: bold;">[${tag}]</span>`
   })
+}
+
+/**
+ * 日志区点击事件委托：检测是否点击了链接
+ *
+ * 使用 window.open 在系统浏览器打开，Electron 和浏览器环境通用。
+ */
+function handleLogClick(event: MouseEvent): void {
+  const target = event.target as HTMLElement
+  const link = target.closest('.log-link') as HTMLAnchorElement | null
+  if (link) {
+    event.preventDefault()
+    // 从 data-url 取原始 URL（避免 HTML 实体编码问题）
+    const url = link.dataset.url
+    if (url) {
+      window.open(url, '_blank', 'noopener,noreferrer')
+    }
+  }
+}
+
+/**
+ * 日志区右键菜单：有选中文本时直接复制到剪贴板
+ *
+ * 无选中文本时不阻止默认行为，保留原生右键菜单。
+ */
+async function handleContextMenu(event: MouseEvent): Promise<void> {
+  const selection = window.getSelection()
+  const text = selection?.toString().trim()
+  if (text) {
+    event.preventDefault()
+    try {
+      await navigator.clipboard.writeText(text)
+      notif.toast('已复制选中文本', { type: 'success' })
+    } catch {
+      notif.toast('复制失败', { type: 'error' })
+    }
+  }
 }
 
 // ── 核心逻辑 ──
@@ -219,7 +267,12 @@ onUnmounted(() => {
     </div>
 
     <!-- 日志内容区 -->
-    <div ref="logContainer" class="terminal-body">
+    <div
+      ref="logContainer"
+      class="terminal-body"
+      @click="handleLogClick"
+      @contextmenu="handleContextMenu"
+    >
       <div
         v-for="(log, idx) in logs"
         :key="idx"
@@ -382,6 +435,26 @@ onUnmounted(() => {
 
 .log-message {
   flex: 1;
+}
+
+/* 日志中的链接 */
+.log-link {
+  color: #58a6ff;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  border-radius: 2px;
+  padding: 0 1px;
+  transition: background 0.1s;
+}
+
+.log-link:hover {
+  background: rgba(88, 166, 255, 0.15);
+  color: #79c0ff;
+}
+
+.log-link:active {
+  color: #a5d6ff;
 }
 
 /* 日志类型颜色 */

@@ -1,8 +1,8 @@
 /**
  * API 业务状态码定义与默认消息注册表
  *
- * 完整定义 38 个业务 Code、中文默认消息和 HTTP 状态码映射。
- * 新增 code 必须先更新 _docs_/02_API_RESPONSE_SPEC.md 并经过 review。
+ * 完整定义 41 个业务 Code、中文默认消息和 HTTP 状态码映射。
+ * 新增 code 必须先更新 .docs/S02_API_SPEC.md 并经过 review。
  *
  * @module packages/shared/src/constants/responseCodes
  */
@@ -64,7 +64,7 @@ export const SERVER_ERROR_CODES = {
   LLM_TIMEOUT: 'LLM_TIMEOUT',
 } as const
 
-/** 全部 38 个 Code 的联合类型 */
+/** 全部 41 个 Code 的联合类型 */
 export type ResponseCode =
   | (typeof SUCCESS_CODES)[keyof typeof SUCCESS_CODES]
   | (typeof CLIENT_ERROR_CODES)[keyof typeof CLIENT_ERROR_CODES]

@@ -3,7 +3,7 @@
  *
  * 管理 TriviumDB 实例的物理隔离。
  * 每个 Agent 拥有独立的 main.tdb / social.tdb，
- * 共享日记 Store (shared/diary.tdb) 所有 Agent 可读写。
+ * 共享日记 Store 已废弃，日记改为按 Agent 隔离。
  *
  * 文件结构:
  * ```
@@ -11,13 +11,14 @@
  * ├── agent_pero/
  * │   ├── main.tdb          ← 主模式事件记忆
  * │   ├── social.tdb        ← 社交模式事件记忆
+ * │   ├── diary.tdb         ← Agent 专属日记（AIOS Phase5 隔离）
  * │   ├── rnn_main.bin      ← ContextRNN 隐状态
  * │   └── rnn_social.bin
  * ├── agent_neko/
- * │   └── main.tdb
- * └── shared/
- *     └── diary.tdb         ← 共享日记
+ * │   ├── main.tdb
+ * │   └── diary.tdb
  * ```
+ * （shared/diary.tdb 已废弃，保留向后兼容但不再使用）
  *
  * @module packages/backend/src/repositories/storeRegistry
  */
@@ -50,6 +51,8 @@ const DEFAULT_DIM = 1536
 export class MemoryStoreRegistry {
   /** 缓存已打开的 TriviumDB 实例 (key = 文件路径) */
   private stores = new Map<string, TriviumDBType>()
+  /** 文本索引脏标记 (key = 文件路径，true 表示有新增 indexText 未编译) */
+  private textIndexDirty = new Map<string, boolean>()
 
   constructor(
     private pathResolver: PathResolver,
@@ -67,24 +70,34 @@ export class MemoryStoreRegistry {
   }
 
   /**
-   * 共享日记 Store (所有 Agent 可读写)
+   * Agent 专属日记 Store（按 Agent 隔离）
    *
-   * @returns data/shared/diary.tdb
+   * AIOS(Phase5): 日记从 shared/diary.tdb 改为 agent_{agentId}/diary.tdb，
+   * 避免不同 Agent 的日记互相污染。
+   *
+   * @returns data/agent_{agentId}/diary.tdb
    */
-  getDiaryStore(): TriviumDBType {
-    const tdbPath = this.pathResolver.resolve('@data/shared/diary.tdb')
+  getDiaryStore(agentId: string): TriviumDBType {
+    const tdbPath = this.pathResolver.resolve(`@data/agent_${agentId}/diary.tdb`)
     return this.getOrCreate(tdbPath)
   }
 
   /**
    * 根据来源自动选择 Store
    *
+   * AIOS(Phase5): 修复 Social Memory 路由——
+   * - 'social' / 'group' / 'group_chat' → social.tdb（社交记忆隔离）
+   * - 其他（desktop/companion）→ main.tdb（主记忆）
+   *
+   * 之前 'group' 不匹配 'group_chat'，会错误地写入 main.tdb 污染主记忆。
+   *
    * @param agentId Agent ID
-   * @param source  记忆来源 (MemorySource)
+   * @param source  记忆来源（channel 或旧版 MemorySource）
    */
   getStoreBySource(agentId: string, source: string): TriviumDBType {
     switch (source) {
       case 'social':
+      case 'group':
       case 'group_chat':
         return this.getAgentStore(agentId, 'social')
       default:
@@ -119,10 +132,60 @@ export class MemoryStoreRegistry {
     for (const [tdbPath, store] of this.stores) {
       try {
         store.buildTextIndex()
+        this.textIndexDirty.set(tdbPath, false)
         logger.debug(`文本索引已重编译: ${tdbPath}`)
       } catch (err) {
         logger.warn(`文本索引重编译失败: ${tdbPath}`, { error: err })
       }
+    }
+  }
+
+  /**
+   * 标记某 Store 的文本索引为脏（indexText 后调用）
+   *
+   * AIOS 第八阶段：修复主 Agent BM25 索引从未编译的 bug。
+   * indexText() 是增量追加，不会自动触发 buildTextIndex()。
+   * 此方法仅设置脏标记，实际编译延迟到 ensureTextIndexReady() 时执行。
+   */
+  markTextIndexDirty(tdbPath: string): void {
+    this.textIndexDirty.set(tdbPath, true)
+  }
+
+  /**
+   * 确保文本索引已编译（searchHybrid 前调用）
+   *
+   * 如果脏标记为 true，先执行 buildTextIndex() 再返回 Store。
+   * 这样保证 searchHybrid 的 BM25 路总是能拿到最新索引，
+   * 同时避免每次写入都全量重编译的性能开销。
+   */
+  ensureTextIndexReady(agentId: string, source: string): TriviumDBType {
+    // 复用 getStoreBySource 的路由逻辑拿到 tdbPath
+    const tdbPath = this.resolveStorePathBySource(agentId, source)
+    const store = this.getOrCreate(tdbPath)
+
+    if (this.textIndexDirty.get(tdbPath)) {
+      try {
+        store.buildTextIndex()
+        this.textIndexDirty.set(tdbPath, false)
+        logger.debug(`文本索引懒编译完成: ${tdbPath}`)
+      } catch (err) {
+        logger.warn(`文本索引懒编译失败: ${tdbPath}`, { error: err })
+      }
+    }
+    return store
+  }
+
+  /**
+   * 根据来源解析 Store 文件路径（仅供内部脏标记机制使用）
+   */
+  private resolveStorePathBySource(agentId: string, source: string): string {
+    switch (source) {
+      case 'social':
+      case 'group':
+      case 'group_chat':
+        return this.resolveAgentStorePath(agentId, 'social')
+      default:
+        return this.resolveAgentStorePath(agentId, 'main')
     }
   }
 

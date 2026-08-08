@@ -8,8 +8,8 @@
  *
  * 在 main.ts 中尽早调用 registerProcessGuards()。
  *
- * @see _docs_/08_LOGGING_SPEC.md
- * @see _docs_/15_DEVOPS_OPERATIONS.md
+ * @see .docs/S03_LOGGING_SPEC.md
+ * @see .docs/A08_DEVOPS.md
  * @module packages/backend/src/lib/processGuards
  */
 

@@ -11,6 +11,7 @@ import { ref, shallowRef, computed, onMounted } from 'vue'
 import { PixelIcon } from '../pixel'
 import FileTreeItem from './FileTreeItem.vue'
 import { ideApi } from '../../api/modules/ideApi'
+import { useNotificationStore } from '../../stores'
 
 export interface FileNode {
   name: string
@@ -26,6 +27,7 @@ const emit = defineEmits<{
 const files = shallowRef<FileNode[]>([])
 const isLoading = ref(true)
 const searchQuery = ref('')
+const notif = useNotificationStore()
 
 /** 递归过滤文件树 */
 function filterTree(nodes: FileNode[], query: string): FileNode[] {
@@ -76,8 +78,9 @@ async function createFile(parent: FileNode | null) {
   try {
     await ideApi.createFile(path, false)
     await refresh()
+    notif.toast(`文件 ${name} 已创建`, { type: 'success' })
   } catch {
-    // 已通知
+    notif.toast('创建文件失败', { type: 'error' })
   }
 }
 
@@ -90,8 +93,9 @@ async function createFolder(parent: FileNode | null) {
   try {
     await ideApi.createFile(path, true)
     await refresh()
+    notif.toast(`文件夹 ${name} 已创建`, { type: 'success' })
   } catch {
-    // 已通知
+    notif.toast('创建文件夹失败', { type: 'error' })
   }
 }
 

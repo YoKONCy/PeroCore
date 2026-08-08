@@ -43,12 +43,6 @@ const electronRoutes: RouteRecordRaw[] = [
     meta: { title: '启动器' },
   },
   {
-    path: '/pet',
-    name: 'Pet',
-    component: () => import('@/views/Pet3DView.vue'),
-    meta: { title: '宠物' },
-  },
-  {
     path: '/pet-3d',
     name: 'PetStandalone',
     component: () => import('@/views/Pet3DView.vue'),
@@ -63,8 +57,8 @@ const electronRoutes: RouteRecordRaw[] = [
 ]
 
 // ── Docker/浏览器模式路由 ──
-// WebShellView 作为外壳，所有功能页面嵌套在 /app 下，
-// Pet3DView 不注册（透明桌宠窗口在浏览器中无意义）。
+// WebShellView 作为外壳，所有功能页面嵌套在 /app 下。
+// /pet-3d 仅保留为 Electron HMR/开发态兜底，浏览器常规导航不展示透明桌宠窗口。
 
 const dockerRoutes: RouteRecordRaw[] = [
   {

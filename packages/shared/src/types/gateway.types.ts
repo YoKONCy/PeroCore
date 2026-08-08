@@ -67,13 +67,20 @@ export type GatewayPayload =
 // 已定型的 Payload
 // ─────────────────────────────────────────────
 
-/** PetState 更新推送 */
+/** PetState 更新推送 (finish_task 写入 pet_states 后广播，按 agentId 过滤) */
 export interface StateUpdatePayload {
   action: 'state_update'
-  affection?: number
-  energy?: number
+  /** 目标 agent，前端按当前活跃 agent 过滤 */
+  agentId?: string
   mood?: string
-  currentAction?: string
+  vibe?: string
+  mind?: string
+  /** 点击台词热更新 (按部位) */
+  click_messages?: Record<string, string[]>
+  /** 空闲台词热更新 */
+  idle_messages?: string[]
+  /** 回归台词热更新 */
+  back_messages?: string[]
 }
 
 /** 流式增量推送 */

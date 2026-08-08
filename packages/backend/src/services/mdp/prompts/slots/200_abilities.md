@@ -19,6 +19,8 @@ group: capability
 editable: true
 builtin: true
 ---
+{% if ability_fragments %}
 <Abilities>
 {{ ability_fragments }}
 </Abilities>
+{% endif %}

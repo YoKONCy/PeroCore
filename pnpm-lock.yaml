@@ -58,7 +58,7 @@ importers:
         version: 9.33.0(eslint@8.57.1)
       happy-dom:
         specifier: ^20.9.0
-        version: 20.9.0
+        version: 20.9.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
       prettier:
         specifier: ^3.8.1
         version: 3.8.3
@@ -76,7 +76,7 @@ importers:
         version: 6.4.2(@types/node@22.19.17)(jiti@2.6.1)(lightningcss@1.32.0)(tsx@4.21.0)
       vitest:
         specifier: ^4.0.18
-        version: 4.1.4(@opentelemetry/api@1.9.1)(@types/node@22.19.17)(@vitest/coverage-v8@4.1.4)(happy-dom@20.9.0)(vite@6.4.2(@types/node@22.19.17)(jiti@2.6.1)(lightningcss@1.32.0)(tsx@4.21.0))
+        version: 4.1.4(@opentelemetry/api@1.9.1)(@types/node@22.19.17)(@vitest/coverage-v8@4.1.4)(happy-dom@20.9.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(vite@6.4.2(@types/node@22.19.17)(jiti@2.6.1)(lightningcss@1.32.0)(tsx@4.21.0))
       vue:
         specifier: ^3.5.32
         version: 3.5.32(typescript@5.9.3)
@@ -92,14 +92,26 @@ importers:
       adm-zip:
         specifier: ^0.5.17
         version: 0.5.17
+      ws:
+        specifier: ^8.20.0
+        version: 8.20.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
     optionalDependencies:
+      bufferutil:
+        specifier: ^4.1.0
+        version: 4.1.0
       electron-updater:
         specifier: ^6.6.3
         version: 6.8.3
+      utf-8-validate:
+        specifier: ^6.0.6
+        version: 6.0.6
     devDependencies:
       '@types/node':
         specifier: ^22.15.0
         version: 22.19.17
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
       electron:
         specifier: ^40.2.1
         version: 40.9.1
@@ -112,6 +124,25 @@ importers:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
+
+  packages/apps/social:
+    dependencies:
+      drizzle-orm:
+        specifier: ^0.44.0
+        version: 0.44.7(@opentelemetry/api@1.9.1)(@types/better-sqlite3@7.6.13)(better-sqlite3@11.10.0)
+      hono:
+        specifier: ^4.7.0
+        version: 4.12.14
+      triviumdb:
+        specifier: ^0.5.1
+        version: 0.5.1
+      uuid:
+        specifier: ^14.0.0
+        version: 14.0.0
+    devDependencies:
+      '@types/uuid':
+        specifier: ^11.0.0
+        version: 11.0.0
 
   packages/backend:
     dependencies:
@@ -144,7 +175,7 @@ importers:
         version: 4.12.14
       msedge-tts:
         specifier: ^2.0.5
-        version: 2.0.5
+        version: 2.0.5(bufferutil@4.1.0)(utf-8-validate@6.0.6)
       nunjucks:
         specifier: ^3.2.4
         version: 3.2.4(chokidar@3.6.0)
@@ -159,7 +190,7 @@ importers:
         version: 14.0.0
       ws:
         specifier: ^8.20.0
-        version: 8.20.0
+        version: 8.20.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
       zod:
         specifier: ^3.25.76
         version: 3.25.76
@@ -200,6 +231,40 @@ importers:
         version: 5.9.3
 
   packages/browser-extension: {}
+
+  packages/daemon:
+    dependencies:
+      '@hono/node-server':
+        specifier: ^1.14.0
+        version: 1.19.14(hono@4.12.14)
+      '@perocore/backend':
+        specifier: workspace:*
+        version: link:../backend
+      '@perocore/shared':
+        specifier: workspace:*
+        version: link:../shared
+      hono:
+        specifier: ^4.7.0
+        version: 4.12.14
+      ws:
+        specifier: ^8.20.0
+        version: 8.20.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
+    devDependencies:
+      '@types/node':
+        specifier: ^22.15.0
+        version: 22.19.17
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
+      rimraf:
+        specifier: ^6.1.2
+        version: 6.1.3
+      tsx:
+        specifier: ^4.20.0
+        version: 4.21.0
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
 
   packages/frontend:
     dependencies:
@@ -1502,19 +1567,16 @@ packages:
   '@nut-tree/libnut-darwin@2.7.1':
     resolution: {integrity: sha512-yJKwAeWuORi+EN4tWkJj/9L5f/MO6FT7ida0CSeN8AT4KppCAsXdkLcQjirFTuWrCVvbkizVTSE3d/J7rVi0kw==}
     engines: {node: '>=10.15.3'}
-    cpu: [x64, arm64]
     os: [darwin, linux, win32]
 
   '@nut-tree/libnut-linux@2.7.1':
     resolution: {integrity: sha512-ZAGoKL1ugy/2fibseOGhyZkthCdBRuTqf2fgHZgum0DQQAZCCNis+mySiTj4p+Xqeowe5t0L0Pn279embjz4bw==}
     engines: {node: '>=10.15.3'}
-    cpu: [x64, arm64]
     os: [darwin, linux, win32]
 
   '@nut-tree/libnut-win32@2.7.1':
     resolution: {integrity: sha512-QmaQt1U7jXNjhqb10x6Ziijbhvqn2o50WgADZMM7mADVc5iDf3Xhd9yA1TmiGbgfqxkRPq9HpuInoYBz0U234g==}
     engines: {node: '>=10.15.3'}
-    cpu: [x64, arm64]
     os: [darwin, linux, win32]
 
   '@nut-tree/libnut@4.2.0':
@@ -2420,6 +2482,10 @@ packages:
 
   buffer@6.0.3:
     resolution: {integrity: sha512-FTiCpNxtwiZZHEZbcbTIcZjERVICn9yq/pDFkTl95/AxzD1naBctN7YO68riM/gLSDY7sdrMby8hofADYuuqOA==}
+
+  bufferutil@4.1.0:
+    resolution: {integrity: sha512-ZMANVnAixE6AWWnPzlW2KpUrxhm9woycYvPOo67jWHyFowASTEd9s+QN1EIMsSDtwhIxN4sWE1jotpuDUIgyIw==}
+    engines: {node: '>=6.14.2'}
 
   builder-util-runtime@9.5.1:
     resolution: {integrity: sha512-qt41tMfgHTllhResqM5DcnHyDIWNgzHvuY2jDcYP9iaGpkWxTUzV6GQjDeLnlR1/DtdlcsWQbA7sByMpmJFTLQ==}
@@ -4100,6 +4166,10 @@ packages:
       encoding:
         optional: true
 
+  node-gyp-build@4.8.4:
+    resolution: {integrity: sha512-LA4ZjwlnUblHVgq0oBF3Jl/6h/Nvs5fzBLwdEF4nuxnFdsfajde4WfxtJr3CaiH+F6ewcIB/q4jQ4UzPyid+CQ==}
+    hasBin: true
+
   node-gyp@11.5.0:
     resolution: {integrity: sha512-ra7Kvlhxn5V9Slyus0ygMa2h+UqExPqUIkfk7Pc8QTLT956JLSy51uWFwHtIYy0vI8cB4BDhc/S03+880My/LQ==}
     engines: {node: ^18.17.0 || >=20.5.0}
@@ -5013,6 +5083,10 @@ packages:
 
   uri-js@4.4.1:
     resolution: {integrity: sha512-7rKUyy33Q1yc98pQ1DAmLtwX109F7TIfWlW1Ydo8Wl1ii1SeHieeh0HHfPeL2fMXK6z0s8ecKs9frCuLJvndBg==}
+
+  utf-8-validate@6.0.6:
+    resolution: {integrity: sha512-q3l3P9UtEEiAHcsgsqTgf9PPjctrDWoIXW3NpOHFdRDbLvu4DLIcxHangJ4RLrWkBcKjmcs/6NkerI8T/rE4LA==}
+    engines: {node: '>=6.14.2'}
 
   utf8-byte-length@1.0.5:
     resolution: {integrity: sha512-Xn0w3MtiQ6zoz2vFyUVruaCL53O/DwUvkEeOvj+uulMm0BkUGYWmBYVyElqZaSLhY6ZD0ulfU3aBra2aVT4xfA==}
@@ -7120,7 +7194,7 @@ snapshots:
       obug: 2.1.1
       std-env: 4.1.0
       tinyrainbow: 3.1.0
-      vitest: 4.1.4(@opentelemetry/api@1.9.1)(@types/node@22.19.17)(@vitest/coverage-v8@4.1.4)(happy-dom@20.9.0)(vite@6.4.2(@types/node@22.19.17)(jiti@2.6.1)(lightningcss@1.32.0)(tsx@4.21.0))
+      vitest: 4.1.4(@opentelemetry/api@1.9.1)(@types/node@22.19.17)(@vitest/coverage-v8@4.1.4)(happy-dom@20.9.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(vite@6.4.2(@types/node@22.19.17)(jiti@2.6.1)(lightningcss@1.32.0)(tsx@4.21.0))
 
   '@vitest/expect@4.1.4':
     dependencies:
@@ -7590,6 +7664,11 @@ snapshots:
     dependencies:
       base64-js: 1.5.1
       ieee754: 1.2.1
+
+  bufferutil@4.1.0:
+    dependencies:
+      node-gyp-build: 4.8.4
+    optional: true
 
   builder-util-runtime@9.5.1:
     dependencies:
@@ -8769,14 +8848,14 @@ snapshots:
 
   graphemer@1.4.0: {}
 
-  happy-dom@20.9.0:
+  happy-dom@20.9.0(bufferutil@4.1.0)(utf-8-validate@6.0.6):
     dependencies:
       '@types/node': 22.19.17
       '@types/whatwg-mimetype': 3.0.2
       '@types/ws': 8.18.1
       entities: 7.0.1
       whatwg-mimetype: 3.0.0
-      ws: 8.20.0
+      ws: 8.20.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
@@ -8981,9 +9060,9 @@ snapshots:
       - encoding
     optional: true
 
-  isomorphic-ws@5.0.0(ws@8.20.0):
+  isomorphic-ws@5.0.0(ws@8.20.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)):
     dependencies:
-      ws: 8.20.0
+      ws: 8.20.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
 
   istanbul-lib-coverage@3.2.2: {}
 
@@ -9398,13 +9477,13 @@ snapshots:
 
   ms@2.1.3: {}
 
-  msedge-tts@2.0.5:
+  msedge-tts@2.0.5(bufferutil@4.1.0)(utf-8-validate@6.0.6):
     dependencies:
       axios: 1.15.2
       buffer: 6.0.3
-      isomorphic-ws: 5.0.0(ws@8.20.0)
+      isomorphic-ws: 5.0.0(ws@8.20.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))
       stream-browserify: 3.0.0
-      ws: 8.20.0
+      ws: 8.20.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
     transitivePeerDependencies:
       - bufferutil
       - debug
@@ -9449,6 +9528,9 @@ snapshots:
       whatwg-url: 5.0.0
     optionalDependencies:
       encoding: 0.1.13
+
+  node-gyp-build@4.8.4:
+    optional: true
 
   node-gyp@11.5.0:
     dependencies:
@@ -10407,6 +10489,11 @@ snapshots:
     dependencies:
       punycode: 2.3.1
 
+  utf-8-validate@6.0.6:
+    dependencies:
+      node-gyp-build: 4.8.4
+    optional: true
+
   utf8-byte-length@1.0.5: {}
 
   utif2@4.1.0:
@@ -10529,7 +10616,7 @@ snapshots:
       - typescript
       - universal-cookie
 
-  vitest@4.1.4(@opentelemetry/api@1.9.1)(@types/node@22.19.17)(@vitest/coverage-v8@4.1.4)(happy-dom@20.9.0)(vite@6.4.2(@types/node@22.19.17)(jiti@2.6.1)(lightningcss@1.32.0)(tsx@4.21.0)):
+  vitest@4.1.4(@opentelemetry/api@1.9.1)(@types/node@22.19.17)(@vitest/coverage-v8@4.1.4)(happy-dom@20.9.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(vite@6.4.2(@types/node@22.19.17)(jiti@2.6.1)(lightningcss@1.32.0)(tsx@4.21.0)):
     dependencies:
       '@vitest/expect': 4.1.4
       '@vitest/mocker': 4.1.4(vite@6.4.2(@types/node@22.19.17)(jiti@2.6.1)(lightningcss@1.32.0)(tsx@4.21.0))
@@ -10555,7 +10642,7 @@ snapshots:
       '@opentelemetry/api': 1.9.1
       '@types/node': 22.19.17
       '@vitest/coverage-v8': 4.1.4(vitest@4.1.4)
-      happy-dom: 20.9.0
+      happy-dom: 20.9.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
     transitivePeerDependencies:
       - msw
 
@@ -10677,7 +10764,10 @@ snapshots:
 
   wrappy@1.0.2: {}
 
-  ws@8.20.0: {}
+  ws@8.20.0(bufferutil@4.1.0)(utf-8-validate@6.0.6):
+    optionalDependencies:
+      bufferutil: 4.1.0
+      utf-8-validate: 6.0.6
 
   xhr@2.6.0:
     dependencies:

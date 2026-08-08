@@ -9,6 +9,7 @@
  */
 
 import * as THREE from 'three'
+import { logger } from '../../../../lib/logger'
 import type { IModelProvider, ParsedModelData } from './IModelProvider'
 import type { IAvatarManifest } from './IAvatarManifest'
 // Provider 接收到的路径已经是可直接 fetch 的 URL，无需额外转换
@@ -74,12 +75,10 @@ export class PeroSecureProvider implements IModelProvider {
       throw new Error('加密模型需要 Electron 环境（Rust Native 模块）')
     }
 
-    console.time('[PeroSecureProvider] Rust 解密+解析')
     const parsedData = await electronWin.electron.loadPeroModel(
       new Uint8Array(arrayBuffer),
       this.boneFilterPatterns,
     )
-    console.timeEnd('[PeroSecureProvider] Rust 解密+解析')
 
     return parsedData
   }
@@ -124,7 +123,7 @@ export class PeroSecureProvider implements IModelProvider {
             })
           }
         } catch (e) {
-          console.warn(`[PeroSecureProvider] 加载动画失败: ${path}`, e)
+          logger.warn('PeroSecureProvider', `加载动画失败: ${path}`, e)
         }
       }
     }

@@ -21,11 +21,25 @@ const logger = createLogger('ToolRegistry')
 /** 工具处理函数 */
 export type ToolHandler = (args: Record<string, unknown>, context: ToolContext) => Promise<string>
 
-/** 工具执行上下文 */
+/**
+ * 工具执行上下文
+ *
+ * AIOS: 新增 threadId + channel 字段，工具可感知 Thread 上下文。
+ * - threadId: 当前对话 Thread ID（用于持久化、状态查询）
+ * - channel: 当前对话通道（desktop/companion/social/group，用于权限/行为分支）
+ * - source/sessionId: 保留向后兼容，新代码请用 threadId/channel
+ */
 export interface ToolContext {
+  /** 消息来源（向后兼容，等价于 channel） */
   source: string
+  /** Agent ID */
   agentId: string
+  /** 会话 ID（向后兼容，等价于 threadId） */
   sessionId: string
+  /** AIOS: Thread ID（新版工具应优先使用此字段） */
+  threadId: string
+  /** AIOS: 对话通道（desktop/companion/social/group） */
+  channel: string
 }
 
 /** 注册的工具 */
@@ -34,10 +48,20 @@ interface RegisteredTool {
   handler: ToolHandler
   /** 允许的 source 模式 (空=全部允许) */
   allowedSources?: string[]
+  /** 所属应用 ID（应用工具专属，主 Agent 工具为 undefined） */
+  appId?: string
 }
 
 export class ToolRegistry {
   private tools = new Map<string, RegisteredTool>()
+  /**
+   * 应用工具命名空间（appId → 工具集）
+   *
+   * 应用工具用点号前缀隔离（如 coding.git_diff）。
+   * 主 Agent 不自动获得应用工具。
+   * 应用停止时调用 unregisterAppTools 清理。
+   */
+  private appTools = new Map<string, Set<string>>()
 
   /** 注册工具 */
   register(definition: ToolDefinition, handler: ToolHandler, allowedSources?: string[]): void {
@@ -47,6 +71,93 @@ export class ToolRegistry {
       allowedSources,
     })
     logger.debug(`工具已注册: ${definition.name}`)
+  }
+
+  /**
+   * 注册应用工具（自动加 appId 前缀）
+   *
+   * 应用工具用点号前缀隔离：`{appId}.{toolName}`。
+   * 仅在应用内可用，主 Agent 不自动获得。
+   *
+   * @param appId       应用 ID
+   * @param definition  工具定义（name 不含前缀）
+   * @param handler     工具处理函数
+   */
+  registerAppTool(
+    appId: string,
+    definition: ToolDefinition,
+    handler: ToolHandler,
+  ): void {
+    const prefixedName = `${appId}.${definition.name}`
+    this.tools.set(prefixedName, {
+      definition: { ...definition, name: prefixedName },
+      handler,
+      appId,
+    })
+
+    // 记录 appId → 工具名集合
+    let appSet = this.appTools.get(appId)
+    if (!appSet) {
+      appSet = new Set()
+      this.appTools.set(appId, appSet)
+    }
+    appSet.add(prefixedName)
+
+    logger.debug(`应用工具已注册: ${prefixedName}`)
+  }
+
+  /**
+   * 注销应用的所有工具
+   *
+   * 应用停止时调用，清理 ToolRegistry 中的应用工具。
+   *
+   * @returns 注销的工具数量
+   */
+  unregisterAppTools(appId: string): number {
+    const appSet = this.appTools.get(appId)
+    if (!appSet) return 0
+
+    const count = appSet.size
+    for (const toolName of appSet) {
+      this.tools.delete(toolName)
+    }
+    this.appTools.delete(appId)
+
+    if (count > 0) {
+      logger.info(`应用工具已注销: appId=${appId}, count=${count}`)
+    }
+    return count
+  }
+
+  /**
+   * 获取应用可用工具定义（应用专属 + requiresTools 声明的主 Agent 工具）
+   *
+   * 应用内 Compiler 调用此方法获取工具描述。
+   *
+   * @param appId          应用 ID
+   * @param requiredTools  Manifest.requiresTools 声明的主 Agent 工具白名单
+   */
+  getAppTools(appId: string, requiredTools: string[] = []): ToolDefinition[] {
+    const result: ToolDefinition[] = []
+
+    // 1. 应用专属工具
+    const appSet = this.appTools.get(appId)
+    if (appSet) {
+      for (const toolName of appSet) {
+        const tool = this.tools.get(toolName)
+        if (tool) result.push(tool.definition)
+      }
+    }
+
+    // 2. 主 Agent 工具（requiresTools 白名单）
+    for (const name of requiredTools) {
+      const tool = this.tools.get(name)
+      if (tool && !tool.appId) {
+        result.push(tool.definition)
+      }
+    }
+
+    return result
   }
 
   /** 批量注册 */

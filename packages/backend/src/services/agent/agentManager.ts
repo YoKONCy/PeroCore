@@ -26,9 +26,20 @@ import {
 } from 'node:fs'
 import type { PathResolver } from '../../core/pathResolver'
 import type { ConfigRepository } from '../../repositories/config.repo'
+import type { PetStateService } from './petStateService'
 import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('AgentManager')
+
+/** 安全解析 JSON，失败时返回兜底值 */
+function safeJsonParse<T>(text: string | null | undefined, fallback: T): T {
+  if (!text) return fallback
+  try {
+    return JSON.parse(text) as T
+  } catch {
+    return fallback
+  }
+}
 
 // ─────────────────────────────────────────────
 // 类型
@@ -39,18 +50,21 @@ export interface AgentProfile {
   id: string
   name: string
   description: string
-  /** 工作模式人设 (从文件加载) */
-  workPersona: string
-  /** 社交模式人设 (从文件加载) */
-  socialPersona: string
-  /** 工作模式特征标签 */
-  workTraits: string[]
+  // AIOS: workPersona 已移除（work 模式废弃），Social 由子 Agent 处理
   /** 社交模式特征标签 */
   socialTraits: string[]
   /** 社交绑定 (QQ ID 等) */
   socialBinding: Record<string, unknown>
   /** 工具策略覆写 */
   toolPolicies: Record<string, unknown>
+  /**
+   * 各 channel 的人格补丁（第六阶段 #1）
+   *
+   * key 为 channel 名（desktop/companion/social/group），
+   * value 为注入到 slots/600_channel_patch.md 槽位的补丁文本。
+   * 空字符串表示无补丁（槽位会被 skipEmpty 过滤掉）。
+   */
+  channelPatches: Record<string, string>
   /** 头像文件路径 */
   avatarPath: string | null
   /** config.json 文件路径 */
@@ -71,17 +85,31 @@ export class AgentManager {
   /** 所有已加载的 Agent */
   private agents = new Map<string, AgentProfile>()
 
-  /** 当前活跃 Agent ID */
-  activeAgentId = 'pero'
+  /**
+   * 默认 Agent ID
+   *
+   * AIOS 架构下不再有"全局活跃 Agent"的概念，前端窗口级状态由 RuntimeStateService 管理。
+   * 此字段仅作为"默认 Agent"用于无 Thread 上下场的场景（Scheduler/Cron/Startup），
+   * 不再允许运行时切换（setActiveAgent 已移除）。
+   */
+  defaultAgentId = 'pero'
 
   /** 已启用的 Agent ID 集合 */
   enabledAgents = new Set<string>()
+
+  /** 角色状态服务 (pet_states 表)，用于把 finish_task 写入的动态台词合并进看板娘台词 */
+  private petStateService?: PetStateService
 
   constructor(
     private pathResolver: PathResolver,
     private configRepo?: ConfigRepository,
   ) {
     this.reloadAgents()
+  }
+
+  /** 注入 PetStateService (容器装配阶段调用) */
+  setPetStateService(service: PetStateService): void {
+    this.petStateService = service
   }
 
   /** 扫描并加载所有 Agent 配置 */
@@ -106,8 +134,8 @@ export class AgentManager {
     }
 
     // 确保活跃 Agent 有效
-    if (!this.agents.has(this.activeAgentId) && this.agents.size > 0) {
-      this.activeAgentId = this.agents.keys().next().value!
+    if (!this.agents.has(this.defaultAgentId) && this.agents.size > 0) {
+      this.defaultAgentId = this.agents.keys().next().value!
     }
 
     logger.info(`已加载 ${this.agents.size} 个 Agent`)
@@ -118,9 +146,14 @@ export class AgentManager {
     return this.agents.get(agentId.toLowerCase())
   }
 
-  /** 获取活跃 Agent */
-  getActiveAgent(): AgentProfile | undefined {
-    return this.agents.get(this.activeAgentId)
+  /**
+   * 获取默认 Agent
+   *
+   * 返回 defaultAgentId 对应的 AgentProfile，用于无 Thread 上下文的场景
+   * （Scheduler/Cron/Startup）。前端窗口级 Agent 由 RuntimeStateService 管理。
+   */
+  getDefaultAgent(): AgentProfile | undefined {
+    return this.agents.get(this.defaultAgentId)
   }
 
   /**
@@ -155,23 +188,36 @@ export class AgentManager {
     }
 
     // 3. 浅合并: 动态覆盖静态
-    return { ...staticTexts, ...dynamicTexts }
-  }
+    const merged: Record<string, unknown> = { ...staticTexts, ...dynamicTexts }
 
-  /** 切换活跃 Agent */
-  setActiveAgent(agentId: string): boolean {
-    const id = agentId.toLowerCase()
-    if (!this.agents.has(id)) {
-      logger.warn(`无法切换到未知 Agent: ${agentId}`)
-      return false
+    // 4. pet_states 表合并 (finish_task 写入的动态台词，优先级最高)
+    //    click → texts.click (按部位深合并)；idle → texts.idleMessages；back → texts.backMessages
+    if (this.petStateService) {
+      try {
+        const petState = await this.petStateService.get(agentId)
+        if (petState) {
+          const petClick = safeJsonParse<Record<string, string[]>>(petState.clickMessagesJson, {})
+          if (petClick && Object.keys(petClick).length > 0) {
+            const baseClick = (merged.click as Record<string, unknown>) ?? {}
+            merged.click = { ...baseClick, ...petClick }
+          }
+
+          const petIdle = safeJsonParse<string[]>(petState.idleMessagesJson, [])
+          if (Array.isArray(petIdle) && petIdle.length > 0) {
+            merged.idleMessages = petIdle
+          }
+
+          const petBack = safeJsonParse<string[]>(petState.backMessagesJson, [])
+          if (Array.isArray(petBack) && petBack.length > 0) {
+            merged.backMessages = petBack
+          }
+        }
+      } catch (err) {
+        logger.warn(`合并 pet_states 台词失败: ${err}`)
+      }
     }
-    if (!this.enabledAgents.has(id)) {
-      logger.warn(`Agent ${id} 未启用，请先调用 enableAgent()`)
-      return false
-    }
-    this.activeAgentId = id
-    logger.info(`已切换活跃 Agent: ${id}`)
-    return true
+
+    return merged
   }
 
   /** 运行时热启用 Agent (D54) */
@@ -189,7 +235,7 @@ export class AgentManager {
   /** 运行时热禁用 Agent (D54) */
   disableAgent(agentId: string): boolean {
     const id = agentId.toLowerCase()
-    if (id === this.activeAgentId) {
+    if (id === this.defaultAgentId) {
       logger.warn(`不能禁用主角色: ${id}`)
       return false
     }
@@ -210,19 +256,15 @@ export class AgentManager {
       id: p.id,
       name: p.name,
       description: p.description,
-      isActive: p.id === this.activeAgentId,
+      isActive: p.id === this.defaultAgentId,
       isEnabled: this.enabledAgents.has(p.id),
     }))
   }
 
   /**
-   * 创建自定义 Agent (B6-3)
-   *
-   * 在 @data/agents/ 下创建目录结构:
    *   <agentId>/
    *     agent.json       ← 基本配置
    *     personas/
-   *       work.md         ← 工作人设骨架
    *       social.md       ← 社交人设骨架
    */
   createAgent(opts: { id: string; name: string; description?: string }): AgentProfile {
@@ -237,18 +279,13 @@ export class AgentManager {
     const userAgentsDir = this.pathResolver.resolve('@data/agents')
     const agentDir = path.join(userAgentsDir, agentId)
     mkdirSync(agentDir, { recursive: true })
-    mkdirSync(path.join(agentDir, 'personas'), { recursive: true })
 
     // 写入 agent.json
+    // AIOS: work 模式已废弃（由 subagent 应用处理），Social 由子 Agent 处理
     const config = {
       name: opts.name,
       description: opts.description ?? '',
-      personas: {
-        work: 'personas/work.md',
-        social: 'personas/social.md',
-      },
       traits: {
-        work: [],
         social: [],
       },
       social: {},
@@ -257,10 +294,10 @@ export class AgentManager {
     const configPath = path.join(agentDir, 'agent.json')
     writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8')
 
-    // 写入人设骨架
-    const defaultPersona = `# ${opts.name} 人设\n\n请在此编写角色人设。\n`
-    writeFileSync(path.join(agentDir, 'personas', 'work.md'), defaultPersona, 'utf-8')
-    writeFileSync(path.join(agentDir, 'personas', 'social.md'), defaultPersona, 'utf-8')
+    // AIOS: 不再写入 personas/social.md（人设统一由 system_prompt.md 管理）
+
+    // AIOS(Phase4): 自动创建 Principal Workspace 目录骨架
+    this.ensureWorkspaceDir(agentDir)
 
     // 加载到内存
     const profile = this.loadAgentConfig(agentId, agentDir, configPath)
@@ -285,7 +322,7 @@ export class AgentManager {
     }
 
     // 禁止删除当前活跃角色
-    if (id === this.activeAgentId) {
+    if (id === this.defaultAgentId) {
       throw new Error(`不能删除当前活跃的 Agent: ${id}`)
     }
 
@@ -335,6 +372,8 @@ export class AgentManager {
       try {
         const profile = this.loadAgentConfig(entry.toLowerCase(), agentDir, configPath)
         this.agents.set(profile.id, profile)
+        // AIOS(Phase4): 确保 workspace 目录存在（懒创建，首次扫描时）
+        this.ensureWorkspaceDir(agentDir)
         logger.debug(`已加载 Agent: ${profile.name} (${profile.id})`)
       } catch (err) {
         logger.warn(`加载 Agent ${entry} 失败`, { error: err })
@@ -383,23 +422,48 @@ export class AgentManager {
     }
   }
 
+  /**
+   * AIOS(Phase4): 确保 Principal Workspace 目录骨架存在
+   *
+   * 在 Agent 目录下创建 workspace/ 及其标准子目录：
+   *   workspace/{inbox,notes,diary,drafts,plans,documents,attachments,exports,archive}
+   *
+   * 幂等：目录已存在时跳过。
+   */
+  private ensureWorkspaceDir(agentDir: string): void {
+    const workspaceRoot = path.join(agentDir, 'workspace')
+    if (!existsSync(workspaceRoot)) {
+      mkdirSync(workspaceRoot, { recursive: true })
+    }
+    // 创建标准子目录骨架
+    const subdirs = [
+      'inbox',
+      'notes',
+      'diary',
+      'drafts',
+      'plans',
+      'documents',
+      'attachments',
+      'exports',
+      'archive',
+    ]
+    for (const subdir of subdirs) {
+      const dirPath = path.join(workspaceRoot, subdir)
+      if (!existsSync(dirPath)) {
+        mkdirSync(dirPath, { recursive: true })
+      }
+    }
+  }
+
   /** 加载单个 Agent 配置 */
   private loadAgentConfig(agentId: string, agentDir: string, configPath: string): AgentProfile {
     const raw = readFileSync(configPath, 'utf-8')
     const config = JSON.parse(raw) as Record<string, unknown>
 
-    // 加载人设文件
-    const personas = (config.personas ?? {}) as Record<string, string>
-    const workPersona =
-      this.loadPersonaFile(agentDir, personas.work) ?? (config.work_custom_persona as string) ?? ''
-    const socialPersona =
-      this.loadPersonaFile(agentDir, personas.social) ??
-      (config.social_custom_persona as string) ??
-      ''
+    // AIOS: workPersona/socialPersona 加载已移除（work 模式废弃，Social 由子 Agent 处理）
 
     // 特征
     const traits = (config.traits ?? {}) as Record<string, string[]>
-    const workTraits = traits.work ?? (config.work_traits as string[]) ?? []
     const socialTraits = traits.social ?? (config.social_traits as string[]) ?? []
 
     // 社交绑定
@@ -412,12 +476,11 @@ export class AgentManager {
       id: agentId,
       name: (config.name as string) ?? agentId,
       description: (config.description as string) ?? '',
-      workPersona,
-      socialPersona,
-      workTraits,
       socialTraits,
       socialBinding,
       toolPolicies: (config.tool_policies ?? {}) as Record<string, unknown>,
+      // 第六阶段 #1: 各 channel 的人格补丁（注入到 slots/600_channel_patch.md）
+      channelPatches: (config.channel_patches ?? {}) as Record<string, string>,
       avatarPath,
       configPath,
       promptPath: path.join(agentDir, 'system_prompt.md'),
@@ -426,17 +489,7 @@ export class AgentManager {
     }
   }
 
-  /** 从文件加载人设内容 */
-  private loadPersonaFile(agentDir: string, relPath?: string): string | null {
-    if (!relPath) return null
-    const absPath = path.join(agentDir, relPath)
-    if (!existsSync(absPath)) return null
-    try {
-      return readFileSync(absPath, 'utf-8')
-    } catch {
-      return null
-    }
-  }
+  // AIOS: loadPersonaFile 已移除（workPersona/socialPersona 废弃，人设统一由 system_prompt.md 管理）
 
   /** 查找头像文件 */
   private findAvatar(agentDir: string): string | null {

@@ -1,143 +1,46 @@
 /**
- * Pipeline Phase 类型定义
+ * 核心类型定义（AIOS 版）
  *
- * 5 阶段管道架构：
- * Ingress → Enrichment → PromptAssembly → ReActLoop → Egress
+ * AIOS: 旧版 5 阶段管道（Ingress → Enrichment → PromptAssembly → Egress）
+ * 已由 ContextCompiler + ThreadService 替代，相关 Phase 类型
+ * （ChatRequest/IngressResult/Enricher/EnrichedContext/AssembledPrompt/
+ *   EgressInput/EgressResult）已移除，完整内容见 types.ts.bak。
  *
- * 每个 Phase 的输入/输出都有严格类型。
+ * 本文件仅保留被 agentService / reactLoop / toolRegistry / mcpToolBridge
+ * 等活跃模块引用的核心类型。
  *
  * @module packages/backend/src/services/pipeline/types
  */
 
-import type { MemorySource } from '@perocore/shared'
-
 // ─────────────────────────────────────────────
-// 入口请求
+// 消息与工具类型（活跃）
 // ─────────────────────────────────────────────
-
-/** 对话请求 (Router → AgentService 传入) */
-export interface ChatRequest {
-  /** 消息列表 (OpenAI 格式) */
-  messages: ChatMessage[]
-  /** Agent ID */
-  agentId: string
-  /** 消息来源 */
-  source: MemorySource
-  /** 会话 ID */
-  sessionId: string
-  /** 是否语音模式 */
-  isVoiceMode?: boolean
-  /** 额外变量覆盖 (由调用方注入) */
-  extraVars?: Record<string, string>
-}
 
 /** 聊天消息 (OpenAI 格式兼容) */
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool'
-  content: string | MultimodalContent[]
+  content: string | MultimodalContent[] | null
   name?: string
-  tool_call_id?: string
+  /** 工具结果消息 (role:'tool') 关联的调用 ID，与 LLM 层 camelCase 命名保持一致 */
+  toolCallId?: string
+  /** assistant 消息发起的工具调用列表，必须与 assistant 消息一起下发，否则后续 tool 消息会成为孤儿 */
+  toolCalls?: Array<{
+    id: string
+    type: 'function'
+    function: { name: string; arguments: string }
+  }>
 }
 
-/** 多模态内容块 */
-export interface MultimodalContent {
-  type: 'text' | 'image_url'
-  text?: string
-  image_url?: { url: string }
-}
-
-// ─────────────────────────────────────────────
-// Phase 1: Ingress (纯数据提取, 无副作用)
-// ─────────────────────────────────────────────
-
-/** Ingress 输出 */
-export interface IngressResult {
-  /** 提取的用户文本 */
-  userText: string
-  /** 是否包含多模态内容 */
-  isMultimodal: boolean
-  /** 原始消息列表 */
-  rawMessages: ChatMessage[]
-  /** 图片/文件附件 URL */
-  attachments?: string[]
-  /** 消息来源 */
-  source?: string
-}
-
-// ─────────────────────────────────────────────
-// Phase 2: Enrichment (并行注入上下文)
-// ─────────────────────────────────────────────
-
-/** 单个 Enricher 的接口 */
-export interface Enricher {
-  readonly name: string
-  enrich(input: EnrichmentInput): Promise<Partial<EnrichedContext>>
-}
-
-/** Enricher 输入 */
-export interface EnrichmentInput {
-  userText: string
-  agentId: string
-  source: MemorySource
-  sessionId: string
-}
-
-/** Enrichment 输出 (所有 Enricher 结果合并) */
-export interface EnrichedContext {
-  // ── 历史 ──
-  /** 桌面历史 (XML 压扁) */
-  flattenedDesktopHistory: string
-  /** 群聊历史 (XML 压扁) */
-  flattenedGroupHistory: string
-
-  // ── 记忆 ──
-  /** RAG 检索结果 (格式化文本) */
-  memoryContext: string
-  /** 图谱闪回碎片 */
-  graphContext: string
-  /** 周报 */
-  weeklyReportContext: string
-
-  // ── 状态 ──
-  /** 当前时间 */
-  currentTime: string
-  /** Agent 心情 */
-  mood: string
-  /** 活力 */
-  vibe: string
-  /** 内心活动 */
-  mind: string
-  /** 主人名 */
-  ownerName: string
-  /** 运行环境信息 (跨平台, 由 StateEnricher 注入) */
-  environmentInfo: string
-  /** 用户画像 */
-  userPersona: string
-
-  // ── 能力 ──
-  /** 是否启用视觉 */
-  enableVision: boolean
-  /** 是否启用语音 */
-  enableVoice: boolean
-
-  // ── 社交上下文 ──
-  /** 社交平台最近消息 (由 SocialEnricher 注入) */
-  socialContext: string
-  /** 社交跨会话记忆 (从 social.tdb 图谱检索, 由 SocialEnricher 注入) */
-  socialMemoryContext: string
-}
-
-// ─────────────────────────────────────────────
-// Phase 3: Prompt Assembly
-// ─────────────────────────────────────────────
-
-/** PromptAssembly 输出 */
-export interface AssembledPrompt {
-  /** 组装好的消息列表 (可直接送 LLM) */
-  messages: ChatMessage[]
-  /** 可用的工具定义 (用于 ReAct) */
-  tools?: ToolDefinition[]
-}
+/**
+ * 多模态内容块 (判别联合)
+ *
+ * 定义为判别联合而非松散 interface，使其可直接赋值给 LLM 层的 ContentPart，
+ * 避免 image_url 块在传递过程中因类型不匹配而被静默丢弃。
+ */
+export type MultimodalContent =
+  | { type: 'text'; text: string }
+  /** detail 控制图片清晰度档位 (low/high/auto)，截图统一用 low 以省 token */
+  | { type: 'image_url'; image_url: { url: string; detail?: string } }
 
 /** 工具定义 (OpenAI function calling 格式) */
 export interface ToolDefinition {
@@ -146,40 +49,10 @@ export interface ToolDefinition {
   parameters: Record<string, unknown>
 }
 
-// ─────────────────────────────────────────────
-// Phase 4: ReAct Loop (在 reactLoop.ts 中定义)
-// ─────────────────────────────────────────────
-
-// ReAct Loop 的输出就是 LLM 的回复文本 + 工具调用记录
-
-// ─────────────────────────────────────────────
-// Phase 5: Egress (后处理 + 持久化)
-// ─────────────────────────────────────────────
-
-/** Egress 输入 */
-export interface EgressInput {
-  /** LLM 原始回复 */
-  rawReply: string
-  /** 工具调用历史 */
-  toolCalls: ToolCallRecord[]
-  /** 请求上下文 */
-  request: ChatRequest
-}
-
 /** 工具调用记录 */
 export interface ToolCallRecord {
   name: string
   args: Record<string, unknown>
   result: string
   durationMs: number
-}
-
-/** Egress 输出 */
-export interface EgressResult {
-  /** 清洗后的回复文本 (给用户看) */
-  reply: string
-  /** TTS 用的文本 (可能更短) */
-  ttsText: string
-  /** 保存的对话日志 ID */
-  logPairId: string | null
 }

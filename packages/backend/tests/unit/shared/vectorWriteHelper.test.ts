@@ -13,6 +13,7 @@ type VectorSyncRepoMock = {
 
 type EmbeddingServiceMock = {
   embedOne: ReturnType<typeof vi.fn>
+  isAvailable: boolean
 }
 
 describe('VectorWriteHelper', () => {
@@ -28,6 +29,7 @@ describe('VectorWriteHelper', () => {
 
   const embeddingService: EmbeddingServiceMock = {
     embedOne: vi.fn(),
+    isAvailable: true,
   }
 
   let helper: VectorWriteHelper

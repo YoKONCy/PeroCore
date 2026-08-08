@@ -35,72 +35,147 @@ function toggleCollapse() {
 
 <template>
   <!-- 思考过程块 -->
-  <div v-if="segment.type === 'thinking'" class="my-1 border-2 border-sky-200 bg-sky-50/50">
-    <div
-      class="flex items-center justify-between px-3 py-1.5 cursor-pointer select-none text-xs font-bold text-sky-600 bg-sky-50 border-b border-sky-200 transition-colors hover:bg-sky-100"
-      @click="toggleCollapse"
-    >
-      <div class="flex items-center gap-1.5">
+  <div v-if="segment.type === 'thinking'" class="segment-card segment-thinking pixel-border-moe">
+    <div class="segment-header segment-thinking-header" @click="toggleCollapse">
+      <div class="segment-title">
         <PixelIcon name="brain" size="xs" />
         <span>思考过程</span>
       </div>
-      <span :class="['text-[10px] transition-transform', { 'rotate-180': !isCollapsed }]">▼</span>
+      <span :class="['segment-chevron', { 'rotate-180': !isCollapsed }]">▼</span>
     </div>
-    <div
-      v-show="!isCollapsed"
-      class="p-3 text-xs font-mono whitespace-pre-wrap leading-relaxed text-sky-700"
-    >
+    <div v-show="!isCollapsed" class="segment-body segment-thinking-body">
       {{ segment.content }}
     </div>
   </div>
 
   <!-- 内心独白块 -->
-  <div v-else-if="segment.type === 'monologue'" class="my-1 border-2 border-pink-200 bg-pink-50/30">
-    <div
-      class="flex items-center justify-between px-3 py-1.5 cursor-pointer select-none text-xs font-bold text-pink-600 bg-pink-50/60 border-b border-pink-200 transition-colors hover:bg-pink-100/60"
-      @click="toggleCollapse"
-    >
-      <div class="flex items-center gap-1.5">
+  <div
+    v-else-if="segment.type === 'monologue'"
+    class="segment-card segment-monologue pixel-border-moe"
+  >
+    <div class="segment-header segment-monologue-header" @click="toggleCollapse">
+      <div class="segment-title">
         <PixelIcon name="quote" size="xs" />
         <span>内心独白</span>
       </div>
-      <span :class="['text-[10px] transition-transform', { 'rotate-180': !isCollapsed }]">▼</span>
+      <span :class="['segment-chevron', { 'rotate-180': !isCollapsed }]">▼</span>
     </div>
-    <div
-      v-show="!isCollapsed"
-      class="p-3 text-xs whitespace-pre-wrap leading-relaxed text-slate-500"
-    >
+    <div v-show="!isCollapsed" class="segment-body segment-monologue-body">
       {{ segment.content }}
     </div>
   </div>
 
   <!-- 工具调用块 (NIT) -->
-  <div v-else-if="segment.type === 'tool'" class="my-1 border-2 border-sky-300">
-    <div
-      class="flex items-center justify-between px-3 py-1.5 cursor-pointer select-none text-xs font-bold text-white bg-sky-500 transition-colors hover:bg-sky-600"
-      @click="toggleCollapse"
-    >
-      <div class="flex items-center gap-1.5">
+  <div v-else-if="segment.type === 'tool'" class="segment-card segment-tool pixel-border-moe">
+    <div class="segment-header segment-tool-header" @click="toggleCollapse">
+      <div class="segment-title">
         <PixelIcon name="terminal" size="xs" />
         <span>NIT: {{ segment.name }}</span>
       </div>
-      <div class="flex items-center gap-2">
-        <span v-if="segment.id" class="font-mono text-[10px] opacity-70">{{ segment.id }}</span>
-        <span :class="['text-[10px] transition-transform', { 'rotate-180': !isCollapsed }]">▼</span>
+      <div class="segment-title">
+        <span v-if="segment.id" class="segment-id">{{ segment.id }}</span>
+        <span :class="['segment-chevron', { 'rotate-180': !isCollapsed }]">▼</span>
       </div>
     </div>
-    <div
-      v-show="!isCollapsed"
-      class="p-3 text-xs font-mono whitespace-pre overflow-x-auto bg-slate-50 text-slate-800"
-    >
+    <div v-show="!isCollapsed" class="segment-body segment-tool-body">
       {{ segment.content }}
     </div>
   </div>
 
   <!-- 普通文本 (Markdown) -->
-  <div v-else class="min-h-[1.5em] font-bold text-slate-800">
+  <div v-else class="segment-text">
     <!-- TODO: P4c-1 接入 AsyncMarkdown / useStreamMarkdown -->
     <!-- FIXME: v-html 必须接入 DOMPurify 净化，防止 XSS -->
     <div v-if="segment.content" v-html="segment.content" />
   </div>
 </template>
+
+<style scoped>
+.segment-card {
+  margin: 6px 0;
+  overflow: hidden;
+  background: rgba(255, 252, 249, 0.72);
+}
+
+.segment-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 10px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 12px;
+  font-weight: 900;
+  transition: background 0.16s ease;
+}
+
+.segment-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.segment-thinking-header {
+  color: var(--color-moe-sky);
+  background: rgba(167, 216, 240, 0.12);
+}
+
+.segment-thinking-header:hover {
+  background: rgba(167, 216, 240, 0.2);
+}
+
+.segment-monologue-header {
+  color: var(--color-moe-pink);
+  background: rgba(249, 168, 212, 0.12);
+}
+
+.segment-monologue-header:hover {
+  background: rgba(249, 168, 212, 0.2);
+}
+
+.segment-tool-header {
+  color: white;
+  background: linear-gradient(90deg, var(--color-moe-pink), var(--color-moe-purple));
+}
+
+.segment-tool-header:hover {
+  filter: brightness(1.04);
+}
+
+.segment-chevron {
+  font-size: 10px;
+  transition: transform 0.16s ease;
+}
+
+.segment-body {
+  padding: 12px;
+  white-space: pre-wrap;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--color-moe-cocoa);
+  border-top: 1px solid rgba(45, 27, 30, 0.08);
+}
+
+.segment-thinking-body,
+.segment-tool-body {
+  font-family: monospace;
+}
+
+.segment-tool-body {
+  overflow-x: auto;
+  white-space: pre;
+  background: rgba(45, 27, 30, 0.04);
+}
+
+.segment-id {
+  font-family: monospace;
+  font-size: 10px;
+  opacity: 0.72;
+}
+
+.segment-text {
+  min-height: 1.5em;
+  color: var(--color-moe-cocoa);
+  font-weight: 700;
+}
+</style>

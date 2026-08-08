@@ -236,7 +236,7 @@ function formatTime(ts?: number): string {
 <style scoped>
 .msg-row {
   display: flex;
-  margin-bottom: 16px;
+  margin-bottom: 18px;
   animation: fade-in-up 0.3s ease-out;
 }
 .msg-row-user {
@@ -253,27 +253,70 @@ function formatTime(ts?: number): string {
 
 /* 用户气泡 */
 .msg-bubble-user {
-  padding: 10px 16px;
-  background: var(--color-sky-500);
+  position: relative;
+  padding: 12px 18px;
+  background: var(--color-moe-pink);
   color: white;
-  border: 2px solid var(--color-sky-shadow);
+  box-shadow:
+    -2px 0 0 0 var(--color-moe-cocoa),
+    2px 0 0 0 var(--color-moe-cocoa),
+    0 -2px 0 0 var(--color-moe-cocoa),
+    0 2px 0 0 var(--color-moe-cocoa),
+    inset -2px -2px 0 0 var(--color-pink-shadow),
+    inset 2px 2px 0 0 var(--color-pink-light),
+    0 12px 30px rgba(249, 168, 212, 0.22);
   font-size: 14px;
-  line-height: 1.5;
+  font-weight: 700;
+  line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-word;
+  transition: all 0.28s ease;
+}
+
+.msg-bubble-user:hover {
+  transform: translateY(-2px) scale(1.01);
+  box-shadow:
+    -2px 0 0 0 var(--color-moe-cocoa),
+    2px 0 0 0 var(--color-moe-cocoa),
+    0 -2px 0 0 var(--color-moe-cocoa),
+    0 2px 0 0 var(--color-moe-cocoa),
+    inset -2px -2px 0 0 var(--color-pink-shadow),
+    inset 2px 2px 0 0 var(--color-pink-light),
+    0 16px 36px rgba(249, 168, 212, 0.3);
 }
 
 /* 助手气泡 */
 .msg-bubble-assistant {
-  padding: 12px 16px;
-  background: var(--color-bg-primary);
-  border: 2px solid var(--color-border);
+  padding: 14px 18px;
+  background: rgba(255, 252, 249, 0.94);
+  backdrop-filter: blur(10px);
+  box-shadow:
+    -2px 0 0 0 var(--color-moe-cocoa),
+    2px 0 0 0 var(--color-moe-cocoa),
+    0 -2px 0 0 var(--color-moe-cocoa),
+    0 2px 0 0 var(--color-moe-cocoa),
+    inset -2px -2px 0 0 rgba(249, 168, 212, 0.14),
+    inset 2px 2px 0 0 rgba(255, 255, 255, 0.68),
+    0 12px 30px rgba(192, 132, 252, 0.08);
   font-size: 14px;
-  line-height: 1.5;
+  line-height: 1.6;
   display: flex;
   flex-direction: column;
   gap: 8px;
   min-width: 200px;
+  transition: all 0.28s ease;
+}
+
+.msg-bubble-assistant:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    -2px 0 0 0 var(--color-moe-cocoa),
+    2px 0 0 0 var(--color-moe-cocoa),
+    0 -2px 0 0 var(--color-moe-cocoa),
+    0 2px 0 0 var(--color-moe-cocoa),
+    inset -2px -2px 0 0 rgba(249, 168, 212, 0.18),
+    inset 2px 2px 0 0 rgba(255, 255, 255, 0.78),
+    0 16px 36px rgba(249, 168, 212, 0.12);
 }
 
 /* 头像 */
@@ -284,20 +327,26 @@ function formatTime(ts?: number): string {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, var(--color-sky-hover), var(--color-sky-shadow));
+  background: linear-gradient(135deg, var(--color-moe-sky), var(--color-moe-purple));
   color: white;
-  font-weight: 700;
+  font-weight: 900;
   font-size: 14px;
   position: relative;
+  text-shadow: 0 1px 0 rgba(45, 27, 30, 0.25);
+  box-shadow:
+    -2px 0 0 0 var(--color-moe-cocoa),
+    2px 0 0 0 var(--color-moe-cocoa),
+    0 -2px 0 0 var(--color-moe-cocoa),
+    0 2px 0 0 var(--color-moe-cocoa);
 }
 .msg-avatar-status {
   position: absolute;
-  bottom: 0;
-  right: 0;
+  bottom: -1px;
+  right: -1px;
   width: 10px;
   height: 10px;
-  background: var(--color-emerald-face, #22c55e);
-  border: 2px solid white;
+  background: var(--color-moe-pink);
+  border: 2px solid rgba(255, 252, 249, 0.96);
 }
 
 .msg-avatar-text {
@@ -320,15 +369,15 @@ function formatTime(ts?: number): string {
 
 .msg-assistant-name {
   font-size: 12px;
-  font-weight: 700;
-  color: var(--color-sky-500);
+  font-weight: 900;
+  color: var(--color-moe-pink);
 }
 
 /* 通用 */
 .msg-time {
   font-size: 10px;
-  font-weight: 700;
-  color: var(--color-text-muted);
+  font-weight: 800;
+  color: rgba(45, 27, 30, 0.36);
 }
 
 .msg-meta {
@@ -356,12 +405,15 @@ function formatTime(ts?: number): string {
   padding: 2px;
   background: none;
   border: none;
-  color: var(--color-text-muted);
+  color: rgba(45, 27, 30, 0.3);
   cursor: pointer;
-  transition: color 0.15s;
+  transition:
+    color 0.15s,
+    transform 0.15s;
 }
 .msg-action-btn:hover {
-  color: var(--color-sky-500);
+  color: var(--color-moe-pink);
+  transform: translateY(-1px);
 }
 .msg-action-btn-danger:hover {
   color: var(--color-red-face, #ef4444);
@@ -402,8 +454,8 @@ function formatTime(ts?: number): string {
   margin: 4px 0;
 }
 .msg-markdown :deep(pre) {
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid rgba(45, 27, 30, 0.12);
   padding: 12px;
   overflow-x: auto;
   font-size: 12px;
@@ -411,7 +463,7 @@ function formatTime(ts?: number): string {
 }
 .msg-markdown :deep(code) {
   font-size: 12px;
-  background: var(--color-bg-secondary);
+  background: rgba(249, 168, 212, 0.12);
   padding: 1px 4px;
 }
 .msg-markdown :deep(pre code) {
@@ -424,10 +476,10 @@ function formatTime(ts?: number): string {
   margin: 4px 0;
 }
 .msg-markdown :deep(blockquote) {
-  border-left: 3px solid var(--color-sky-hover);
+  border-left: 3px solid var(--color-moe-pink);
   padding-left: 12px;
   margin: 8px 0;
-  color: var(--color-text-secondary);
+  color: rgba(45, 27, 30, 0.62);
 }
 
 /* 流式光标 */
@@ -435,7 +487,7 @@ function formatTime(ts?: number): string {
   display: inline-block;
   width: 6px;
   height: 14px;
-  background: var(--color-sky-hover);
+  background: var(--color-moe-pink);
   margin-left: 2px;
   vertical-align: text-bottom;
   animation: cursor-blink 0.8s steps(2) infinite;
@@ -445,19 +497,23 @@ function formatTime(ts?: number): string {
 .msg-tools {
   margin-top: 8px;
   padding-top: 8px;
-  border-top: 1px solid var(--color-border);
+  border-top: 1px solid rgba(45, 27, 30, 0.08);
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 .msg-tool-item {
-  border: 1px solid var(--color-border);
-  background: var(--color-bg-secondary);
+  background: rgba(249, 168, 212, 0.06);
   cursor: pointer;
-  transition: border-color 0.15s;
+  transition: all 0.15s;
+  box-shadow:
+    -1px 0 0 0 rgba(45, 27, 30, 0.3),
+    1px 0 0 0 rgba(45, 27, 30, 0.3),
+    0 -1px 0 0 rgba(45, 27, 30, 0.3),
+    0 1px 0 0 rgba(45, 27, 30, 0.3);
 }
 .msg-tool-item:hover {
-  border-color: var(--color-sky-light);
+  background: rgba(249, 168, 212, 0.12);
 }
 .msg-tool-header {
   display: flex;
@@ -467,8 +523,8 @@ function formatTime(ts?: number): string {
   font-size: 11px;
 }
 .msg-tool-name {
-  font-weight: 700;
-  color: var(--color-text-primary);
+  font-weight: 800;
+  color: var(--color-moe-cocoa);
   font-family: monospace;
 }
 .msg-tool-badge {
@@ -485,16 +541,16 @@ function formatTime(ts?: number): string {
   background: rgba(239, 68, 68, 0.1);
 }
 .msg-tool-running {
-  color: var(--color-sky-500);
-  background: var(--color-sky-50, rgba(56, 189, 248, 0.1));
+  color: var(--color-moe-pink);
+  background: rgba(249, 168, 212, 0.12);
 }
 .msg-tool-chevron {
   margin-left: auto;
-  color: var(--color-text-muted);
+  color: rgba(45, 27, 30, 0.38);
 }
 .msg-tool-detail {
   padding: 8px 10px;
-  border-top: 1px solid var(--color-border);
+  border-top: 1px solid rgba(45, 27, 30, 0.08);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -506,16 +562,16 @@ function formatTime(ts?: number): string {
 }
 .msg-tool-label {
   font-size: 9px;
-  font-weight: 700;
+  font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: var(--color-text-muted);
+  color: rgba(45, 27, 30, 0.38);
 }
 .msg-tool-pre {
   font-size: 11px;
   font-family: monospace;
-  background: var(--color-bg-primary);
-  border: 1px solid var(--color-border);
+  background: rgba(255, 255, 255, 0.62);
+  border: 1px solid rgba(45, 27, 30, 0.1);
   padding: 6px 8px;
   margin: 0;
   overflow-x: auto;

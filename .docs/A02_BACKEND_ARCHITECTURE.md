@@ -2,7 +2,7 @@
 
 > **适用范围**：`packages/backend/` 全部代码
 > **技术栈**：Hono + Drizzle + better-sqlite3 + TriviumDB
-> **最后更新**：2026-04-21
+> **最后更新**：2026-06-11
 
 ---
 

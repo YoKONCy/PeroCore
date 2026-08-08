@@ -13,7 +13,7 @@
 
 <!-- Typing effect slogan -->
 <a href="https://github.com/YoKONCy/PeroCore">
-  <img src="https://readme-typing-svg.demolab.com?font=Noto+Serif+SC&weight=600&size=28&duration=4000&pause=1000&color=1E90FF&center=true&vCenter=true&multiline=true&repeat=false&width=800&height=70&lines=Let+AI+become+a+truly+warm+companion;TriviumDB+Engine+✦+NIT+Protocol+✦+Deep+Memory" alt="Slogan" />
+  <img src="https://readme-typing-svg.demolab.com?font=Noto%20Serif%20SC&weight=600&size=28&duration=4000&pause=1000&color=1E90FF&center=true&vCenter=true&multiline=true&repeat=false&width=800&height=70&lines=Let%20AI%20become%20a%20truly%20warm%20companion;TriviumDB%20Engine%20%E2%9C%A6%20NIT%20Protocol%20%E2%9C%A6%20Deep%20Memory" alt="Slogan" />
 </a>
 
 <br/>

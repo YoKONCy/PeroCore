@@ -5,7 +5,7 @@
  * 通过「截图提供者」抽象层解耦：
  *   - Electron 桌面端: desktopCapturer / IPC 注入
  *   - 其他环境: 可替换为 native addon (screenshot-desktop) 或远程截图服务
- * 截图结果以 base64 data URI 形式返回，由 ReActLoop 作为多模态内容注入。
+ * 截图结果以 base64 data URI 形式返回，reactLoop 提取后转为 image_url 内容块注入 LLM。
  *
  * @module packages/backend/src/tools/screenVision
  */

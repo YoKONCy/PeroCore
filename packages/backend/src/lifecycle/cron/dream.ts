@@ -29,8 +29,8 @@ export interface DreamCheckDeps {
   gatewayHub: GatewayHub
   /** 执行梦境关联的回调 (由 ReflectionOrchestrator.DreamAssociator 提供) */
   runDreamAssociation?: (agentId: string) => Promise<number>
-  /** 当前活跃 Agent ID */
-  activeAgentId: string
+  /** 默认 Agent ID（AIOS: 原 activeAgentId，改名为 defaultAgentId 语义更准确） */
+  defaultAgentId: string
 }
 
 /**
@@ -70,7 +70,7 @@ export async function runDreamCheck(deps: DreamCheckDeps): Promise<DreamCheckRes
   let associatedCount = 0
   if (deps.runDreamAssociation) {
     try {
-      associatedCount = await deps.runDreamAssociation(deps.activeAgentId)
+      associatedCount = await deps.runDreamAssociation(deps.defaultAgentId)
       logger.info(`梦境关联完成: 建立 ${associatedCount} 条新关联`)
     } catch (err) {
       logger.error(`梦境关联失败: ${err}`)

@@ -5,9 +5,8 @@ description: 群聊/据点模式 — 保留默认人设，注入据点环境和�
 # ── 100: 人设不变 (v1 group.md 使用相同的 system_core + persona_definition) ──
 
 # ── 禁用桌面专属槽位 ──
-# v1 group.md 没有 COT/draft_flow/pet_state/user_persona/knowledge/sensory abilities
-- id: "150_cot_guidance"
-  enabled: false
+# v1 group.md 没有 draft_flow/pet_state/user_persona/knowledge/sensory abilities
+# 注：150_cot_guidance slot 已删除（内容合并到 components/output/output_constraint.md）
 - id: "250_draft_flow"
   enabled: false
 - id: "500_knowledge"

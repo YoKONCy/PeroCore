@@ -124,48 +124,36 @@ defineExpose({ focus })
 </script>
 
 <template>
-  <div
-    class="border-2 border-slate-200 bg-white transition-all shadow-[0_-4px_16px_rgba(0,0,0,0.05)] focus-within:border-sky-300 focus-within:shadow-[0_-4px_16px_rgba(56,189,248,0.08)]"
-  >
+  <div class="input-shell pixel-border-moe">
     <!-- 待发送图片预览 -->
-    <div
-      v-if="pendingImages.length > 0"
-      class="flex gap-2 px-4 pt-3 pb-2 overflow-x-auto border-b border-slate-200"
-    >
-      <div v-for="(img, idx) in pendingImages" :key="idx" class="relative flex-shrink-0">
-        <img
-          :src="img.url"
-          class="w-16 h-16 object-cover border border-slate-200"
-          alt="待发送图片"
-        />
-        <button
-          class="absolute -top-1.5 -right-1.5 w-[18px] h-[18px] bg-rose-500 text-white border-none flex items-center justify-center cursor-pointer transition-transform hover:scale-110"
-          @click="removeImage(idx)"
-        >
+    <div v-if="pendingImages.length > 0" class="input-image-list">
+      <div v-for="(img, idx) in pendingImages" :key="idx" class="input-image-item">
+        <img :src="img.url" class="input-image-preview pixel-border-moe" alt="待发送图片" />
+        <button class="input-image-remove pixel-border-moe" @click="removeImage(idx)">
           <PixelIcon name="close" size="xs" />
         </button>
       </div>
     </div>
 
     <!-- 输入区 -->
-    <div class="flex items-end gap-2 px-4 py-3">
+    <div class="input-main">
       <textarea
         ref="textareaRef"
         v-model="inputText"
         :placeholder="placeholder"
         :disabled="disabled || isSending"
-        class="flex-1 min-h-[24px] max-h-[200px] border-none bg-transparent text-slate-800 font-pixel text-sm leading-relaxed resize-none outline-none placeholder:text-slate-400 disabled:opacity-50"
+        class="input-textarea"
         rows="1"
         @keydown="onKeydown"
         @input="autoResize"
         @paste="onPaste"
       />
 
-      <div class="flex-shrink-0 flex gap-2">
+      <div class="input-actions">
         <!-- 图片选择按钮 -->
         <button
           v-if="!isSending"
-          class="flex items-center gap-1 px-2 py-1.5 bg-slate-50 text-slate-400 border-2 border-slate-200 cursor-pointer font-bold text-xs transition-all active:scale-95 hover:border-sky-300 hover:text-sky-500"
+          class="input-action-btn input-image-btn pixel-border-moe"
           title="添加图片"
           @click="openFileDialog"
         >
@@ -183,7 +171,7 @@ defineExpose({ focus })
         <!-- 停止按钮 -->
         <button
           v-if="isSending"
-          class="flex items-center gap-1 px-2.5 py-1 bg-rose-500 text-white border-2 border-rose-600 cursor-pointer font-bold text-xs transition-all active:scale-95 hover:bg-rose-400"
+          class="input-action-btn input-stop-btn pixel-border-moe"
           title="停止生成"
           @click="emit('stop')"
         >
@@ -194,7 +182,7 @@ defineExpose({ focus })
         <!-- 发送按钮 -->
         <button
           v-else
-          class="flex items-center gap-1 px-3 py-1.5 bg-sky-500 text-white border-2 border-sky-600 cursor-pointer font-bold text-xs transition-all active:scale-95 hover:bg-sky-400 disabled:opacity-40 disabled:cursor-not-allowed"
+          class="input-action-btn input-send-btn pixel-border-moe"
           :disabled="disabled || (!inputText.trim() && pendingImages.length === 0)"
           @click="send"
         >
@@ -204,3 +192,164 @@ defineExpose({ focus })
     </div>
   </div>
 </template>
+
+<style scoped>
+.input-shell {
+  overflow: hidden;
+  background: rgba(255, 252, 249, 0.9);
+  backdrop-filter: blur(12px);
+  box-shadow:
+    -2px 0 0 0 var(--color-moe-cocoa),
+    2px 0 0 0 var(--color-moe-cocoa),
+    0 -2px 0 0 var(--color-moe-cocoa),
+    0 2px 0 0 var(--color-moe-cocoa),
+    inset -2px -2px 0 0 rgba(249, 168, 212, 0.14),
+    inset 2px 2px 0 0 rgba(255, 255, 255, 0.72),
+    0 -8px 28px rgba(249, 168, 212, 0.1);
+  transition: all 0.18s ease;
+}
+
+.input-shell:focus-within {
+  box-shadow:
+    -2px 0 0 0 var(--color-moe-cocoa),
+    2px 0 0 0 var(--color-moe-cocoa),
+    0 -2px 0 0 var(--color-moe-cocoa),
+    0 2px 0 0 var(--color-moe-cocoa),
+    inset -2px -2px 0 0 rgba(249, 168, 212, 0.22),
+    inset 2px 2px 0 0 rgba(255, 255, 255, 0.78),
+    0 -10px 32px rgba(249, 168, 212, 0.16);
+}
+
+.input-image-list {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid rgba(45, 27, 30, 0.08);
+}
+
+.input-image-item {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.input-image-preview {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+}
+
+.input-image-remove {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-red-face);
+  color: white;
+  cursor: pointer;
+  transition: transform 0.16s ease;
+}
+
+.input-image-remove:hover {
+  transform: scale(1.08);
+}
+
+.input-main {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 14px 16px;
+}
+
+.input-textarea {
+  flex: 1;
+  min-height: 26px;
+  max-height: 200px;
+  resize: none;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--color-moe-cocoa);
+  font-family: var(--font-pixel);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.65;
+}
+
+.input-textarea::placeholder {
+  color: rgba(45, 27, 30, 0.36);
+}
+
+.input-textarea:disabled {
+  opacity: 0.5;
+}
+
+.input-actions {
+  flex-shrink: 0;
+  display: flex;
+  gap: 8px;
+}
+
+.input-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 34px;
+  height: 32px;
+  padding: 0 10px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 900;
+  transition: all 0.16s ease;
+}
+
+.input-action-btn:active {
+  transform: translate(1px, 1px);
+}
+
+.input-action-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.input-image-btn {
+  background: rgba(255, 255, 255, 0.58);
+  color: rgba(45, 27, 30, 0.42);
+}
+
+.input-image-btn:hover {
+  background: rgba(167, 216, 240, 0.14);
+  color: var(--color-moe-sky);
+}
+
+.input-stop-btn {
+  background: var(--color-red-face);
+  color: white;
+}
+
+.input-stop-btn:hover {
+  background: var(--color-red-400);
+}
+
+.input-send-btn {
+  background: var(--color-moe-pink);
+  color: white;
+  box-shadow:
+    -2px 0 0 0 var(--color-moe-cocoa),
+    2px 0 0 0 var(--color-moe-cocoa),
+    0 -2px 0 0 var(--color-moe-cocoa),
+    0 2px 0 0 var(--color-moe-cocoa),
+    inset -2px -2px 0 0 var(--color-pink-shadow),
+    inset 2px 2px 0 0 var(--color-pink-light);
+}
+
+.input-send-btn:hover:not(:disabled) {
+  background: #f472b6;
+  transform: translateY(-1px);
+}
+</style>

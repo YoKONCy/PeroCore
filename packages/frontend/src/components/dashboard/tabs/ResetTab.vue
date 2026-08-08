@@ -7,12 +7,13 @@
  */
 import { ref } from 'vue'
 import { PixelIcon, PButton, PCard } from '../../pixel'
-import { chatApi } from '../../../api/modules/chatApi'
 import { configApi } from '../../../api/modules/configApi'
 import { useDashboardContext } from '../../../composables/dashboard'
 import { logger } from '../../../lib/logger'
+import { useNotificationStore } from '../../../stores'
 
 const ctx = useDashboardContext()
+const notif = useNotificationStore()
 
 // ── 操作状态 ──
 const isProcessing = ref(false)
@@ -62,7 +63,7 @@ async function handleDangerAction(action: (typeof dangerActions)[0]) {
     }
 
     isProcessing.value = true
-    await chatApi.reset(action.action)
+    // TODO: 后端 Thread 架构下重置接口待补齐（原 chatApi.reset 已移除）
     logger.info('ResetTab', `${action.label} 执行成功`)
   } catch {
     // openConfirm reject = 用户取消，不做任何事
@@ -85,8 +86,10 @@ async function exportData() {
     a.download = `perocore-config-export-${new Date().toISOString().slice(0, 10)}.json`
     a.click()
     URL.revokeObjectURL(url)
+    notif.toast('数据已导出', { type: 'success', title: '数据导出' })
   } catch (err) {
     logger.error('ResetTab', '导出失败', err)
+    notif.toast('导出失败，请稍后重试', { type: 'error', title: '数据导出' })
   } finally {
     isExporting.value = false
   }

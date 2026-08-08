@@ -10,8 +10,10 @@ import { PixelIcon, PInput, PSelect, PSlider, PSwitch, PButton, PCard } from '..
 import { configApi } from '../../../api/modules/configApi'
 import { useDashboardContext } from '../../../composables/dashboard'
 import { logger } from '../../../lib/logger'
+import { useNotificationStore } from '../../../stores'
 
 const ctx = useDashboardContext()
+const notif = useNotificationStore()
 
 // ── 用户设定 ──
 const ownerName = ref('主人')
@@ -97,8 +99,10 @@ async function handleSave() {
       ['system.autoSave', String(autoSave.value)],
     ]
     await Promise.all(pairs.map(([k, v]) => configApi.set(k, v)))
+    notif.toast('设置已保存', { type: 'success', title: '用户设置' })
   } catch (e) {
     logger.error('UserSettings', '保存失败', e)
+    notif.toast('保存失败，请稍后重试', { type: 'error', title: '用户设置' })
   } finally {
     isSaving.value = false
   }

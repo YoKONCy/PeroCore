@@ -67,9 +67,18 @@ function getNapCatDir(): string {
   return path.join(paths.data, 'tools', 'NapCat')
 }
 
-/** 获取 NapCat 配置目录 */
+/**
+ * 获取 NapCat 配置目录
+ *
+ * NapCat Shell 的目录结构：
+ *   <NapCat>/index.js          ← 启动入口（cwd）
+ *   <NapCat>/napcat/napcat.mjs ← NapCat 核心
+ *   <NapCat>/napcat/config/    ← 配置目录（onebot11_<QQ>.json 在这里）
+ *
+ * 旧代码误用 <NapCat>/config，实际 NapCat 把配置放在 napcat/config 子目录下。
+ */
 function getNapCatConfigDir(): string {
-  return path.join(getNapCatDir(), 'config')
+  return path.join(getNapCatDir(), 'napcat', 'config')
 }
 
 /** 从注册表/默认路径查找 QQ.exe */

@@ -35,6 +35,9 @@ pub struct MinGruWeights {
 
 impl MinGruWeights {
     /// Xavier 均匀初始化
+    ///
+    /// AIOS 第八阶段：偏置初始化为 0.1（不再是 0），
+    /// 确保 sigmoid 门控初始时有合理的开度（σ(0.1) ≈ 0.525），避免梯度消失。
     fn xavier_init() -> Self {
         let mut rng = rand::thread_rng();
         let fan = HIDDEN_DIM as f32;
@@ -43,9 +46,9 @@ impl MinGruWeights {
         let dim2 = HIDDEN_DIM * HIDDEN_DIM;
         Self {
             w_z: (0..dim2).map(|_| rng.gen_range(-limit..limit)).collect(),
-            b_z: vec![0.0; HIDDEN_DIM],
+            b_z: vec![0.1; HIDDEN_DIM], // 偏置 0.1，不再是 0
             w_h: (0..dim2).map(|_| rng.gen_range(-limit..limit)).collect(),
-            b_h: vec![0.0; HIDDEN_DIM],
+            b_h: vec![0.1; HIDDEN_DIM], // 偏置 0.1，不再是 0
         }
     }
 }
@@ -245,6 +248,155 @@ pub fn train(samples: &[TrainingSample], learning_rate: f32) -> f32 {
     total_loss / n
 }
 
+// ─────────────────────────────────────────────
+// 带外部权重的 API（AIOS 第八阶段新增）
+// ─────────────────────────────────────────────
+
+/// minGRU 权重包（外部传入，避免依赖全局单例）
+///
+/// 字段布局与 MinGruWeights 一致，但用于 napi 跨边界传递。
+/// forward 用 `&` 不可变借用，train 用 `&mut` 可变借用。
+pub struct ExternalWeights<'a> {
+    pub w_z: &'a [f32],
+    pub b_z: &'a [f32],
+    pub w_h: &'a [f32],
+    pub b_h: &'a [f32],
+}
+
+/// 带外部权重的 minGRU 前向推理
+///
+/// AIOS 第八阶段：权重由 TS 侧管理并持久化，不再依赖全局单例。
+/// 数学公式与 forward() 完全一致，只是权重来源不同。
+///
+/// 耗时: <2ms (纯 CPU, 无 GPU 依赖)
+pub fn forward_with_weights(hidden: &[f32], input: &[f32], weights: &ExternalWeights) -> Vec<f32> {
+    assert!(hidden.len() >= HIDDEN_DIM, "隐状态维度不足");
+    assert!(input.len() >= HIDDEN_DIM, "输入维度不足");
+    assert!(weights.w_z.len() >= HIDDEN_DIM * HIDDEN_DIM, "W_z 维度不足");
+    assert!(weights.b_z.len() >= HIDDEN_DIM, "b_z 维度不足");
+    assert!(weights.w_h.len() >= HIDDEN_DIM * HIDDEN_DIM, "W_h 维度不足");
+    assert!(weights.b_h.len() >= HIDDEN_DIM, "b_h 维度不足");
+
+    let mut z = vec![0.0f32; HIDDEN_DIM];
+    let mut h_candidate = vec![0.0f32; HIDDEN_DIM];
+    let mut result = vec![0.0f32; HIDDEN_DIM];
+
+    // 1. z_t = σ(W_z @ x_t + b_z) — 门控
+    for i in 0..HIDDEN_DIM {
+        let mut sum = weights.b_z[i];
+        for j in 0..HIDDEN_DIM {
+            sum += weights.w_z[i * HIDDEN_DIM + j] * input[j];
+        }
+        z[i] = sigmoid(sum);
+    }
+
+    // 2. h̃_t = W_h @ x_t + b_h — 候选状态
+    for i in 0..HIDDEN_DIM {
+        let mut sum = weights.b_h[i];
+        for j in 0..HIDDEN_DIM {
+            sum += weights.w_h[i * HIDDEN_DIM + j] * input[j];
+        }
+        h_candidate[i] = sum;
+    }
+
+    // 3. h_{t+1} = (1 - z_t) ⊙ h_t + z_t ⊙ h̃_t — 状态混合
+    for i in 0..HIDDEN_DIM {
+        result[i] = (1.0 - z[i]) * hidden[i] + z[i] * h_candidate[i];
+    }
+
+    result
+}
+
+/// 带外部权重的 minGRU 单步 SGD 训练
+///
+/// AIOS 第八阶段：权重由 TS 侧管理并持久化，训练时原地更新传入的权重数组。
+/// 数学逻辑与 train() 的单步一致，但：
+/// - 只处理单个样本（不批量平均）
+/// - 权重原地更新（不通过全局单例）
+/// - 增加梯度裁剪（防止早期大梯度）
+///
+/// 返回: 单步训练损失
+pub fn train_step(
+    hidden: &[f32],
+    input: &[f32],
+    w_z: &mut [f32],
+    b_z: &mut [f32],
+    w_h: &mut [f32],
+    b_h: &mut [f32],
+    label: f32,
+    learning_rate: f32,
+) -> f32 {
+    assert!(hidden.len() >= HIDDEN_DIM, "隐状态维度不足");
+    assert!(input.len() >= HIDDEN_DIM, "输入维度不足");
+    assert!(w_z.len() >= HIDDEN_DIM * HIDDEN_DIM, "W_z 维度不足");
+    assert!(b_z.len() >= HIDDEN_DIM, "b_z 维度不足");
+    assert!(w_h.len() >= HIDDEN_DIM * HIDDEN_DIM, "W_h 维度不足");
+    assert!(b_h.len() >= HIDDEN_DIM, "b_h 维度不足");
+
+    let mut z = vec![0.0f32; HIDDEN_DIM];
+    let mut h_cand = vec![0.0f32; HIDDEN_DIM];
+    let mut h_new = vec![0.0f32; HIDDEN_DIM];
+
+    // ── 前向传播 ──
+
+    // z_t = σ(W_z @ x + b_z)
+    for i in 0..HIDDEN_DIM {
+        let mut s = b_z[i];
+        for j in 0..HIDDEN_DIM {
+            s += w_z[i * HIDDEN_DIM + j] * input[j];
+        }
+        z[i] = sigmoid(s);
+    }
+
+    // h̃ = W_h @ x + b_h
+    for i in 0..HIDDEN_DIM {
+        let mut s = b_h[i];
+        for j in 0..HIDDEN_DIM {
+            s += w_h[i * HIDDEN_DIM + j] * input[j];
+        }
+        h_cand[i] = s;
+    }
+
+    // h_new = (1-z)⊙h + z⊙h̃
+    for i in 0..HIDDEN_DIM {
+        h_new[i] = (1.0 - z[i]) * hidden[i] + z[i] * h_cand[i];
+    }
+
+    // p = σ(mean(h_new))
+    let h_mean: f32 = h_new.iter().sum::<f32>() / HIDDEN_DIM as f32;
+    let p = sigmoid(h_mean);
+
+    // 交叉熵损失
+    let eps = 1e-7f32;
+    let loss = -(label * (p + eps).ln() + (1.0 - label) * (1.0 - p + eps).ln());
+
+    // ── 反向传播 ──
+
+    let dp = -label / (p + eps) + (1.0 - label) / (1.0 - p + eps);
+    let dh_mean = dp * p * (1.0 - p);
+    let dh_scale = dh_mean / HIDDEN_DIM as f32;
+
+    for i in 0..HIDDEN_DIM {
+        let dz = dh_scale * (h_cand[i] - hidden[i]);
+        let dz_pre = dz * z[i] * (1.0 - z[i]);
+        let dh_cand = dh_scale * z[i];
+
+        // 梯度裁剪（防止早期大梯度，与 TS 侧一致）
+        let clipped_dz_pre = dz_pre.max(-0.1).min(0.1);
+        let clipped_dh_cand = dh_cand.max(-0.1).min(0.1);
+
+        // 原地更新权重
+        for j in 0..HIDDEN_DIM {
+            w_z[i * HIDDEN_DIM + j] -= learning_rate * clipped_dz_pre * input[j];
+            w_h[i * HIDDEN_DIM + j] -= learning_rate * clipped_dh_cand * input[j];
+        }
+        b_z[i] -= learning_rate * clipped_dz_pre;
+        b_h[i] -= learning_rate * clipped_dh_cand;
+    }
+
+    loss
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -292,5 +444,96 @@ mod tests {
         let loss = train(&samples, 0.001);
         assert!(loss > 0.0);
         assert!(loss.is_finite());
+    }
+
+    // ── AIOS 第八阶段：带外部权重的 API 测试 ──
+
+    /// 辅助函数：构造测试用外部权重
+    fn make_test_weights() -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
+        let dim2 = HIDDEN_DIM * HIDDEN_DIM;
+        let w_z: Vec<f32> = (0..dim2).map(|i| 0.01 * (i as f32 % 7.0 - 3.0)).collect();
+        let b_z: Vec<f32> = vec![0.1; HIDDEN_DIM];
+        let w_h: Vec<f32> = (0..dim2).map(|i| 0.01 * (i as f32 % 5.0 - 2.0)).collect();
+        let b_h: Vec<f32> = vec![0.1; HIDDEN_DIM];
+        (w_z, b_z, w_h, b_h)
+    }
+
+    #[test]
+    fn test_forward_with_weights_output_dim() {
+        let hidden = vec![0.0f32; HIDDEN_DIM];
+        let input = vec![0.1f32; HIDDEN_DIM];
+        let (w_z, b_z, w_h, b_h) = make_test_weights();
+        let weights = ExternalWeights { w_z: &w_z, b_z: &b_z, w_h: &w_h, b_h: &b_h };
+        let result = forward_with_weights(&hidden, &input, &weights);
+        assert_eq!(result.len(), HIDDEN_DIM);
+    }
+
+    #[test]
+    fn test_forward_with_weights_nonzero() {
+        let hidden = vec![0.0f32; HIDDEN_DIM];
+        let input = vec![0.5f32; HIDDEN_DIM];
+        let (w_z, b_z, w_h, b_h) = make_test_weights();
+        let weights = ExternalWeights { w_z: &w_z, b_z: &b_z, w_h: &w_h, b_h: &b_h };
+        let result = forward_with_weights(&hidden, &input, &weights);
+        let sum: f32 = result.iter().map(|x| x.abs()).sum();
+        assert!(sum > 0.0, "前向传播应产生非零输出");
+    }
+
+    #[test]
+    fn test_forward_with_weights_bias_effect() {
+        // 验证偏置确实起作用：相同权重，不同偏置应产生不同结果
+        let hidden = vec![0.0f32; HIDDEN_DIM];
+        let input = vec![0.0f32; HIDDEN_DIM]; // 全零输入，只看偏置效果
+        let dim2 = HIDDEN_DIM * HIDDEN_DIM;
+        let w_z = vec![0.0f32; dim2];
+        let w_h = vec![0.0f32; dim2];
+
+        let b_zero = vec![0.0f32; HIDDEN_DIM];
+        let b_nonzero = vec![0.5f32; HIDDEN_DIM];
+
+        let weights_zero = ExternalWeights { w_z: &w_z, b_z: &b_zero, w_h: &w_h, b_h: &b_zero };
+        let weights_nonzero = ExternalWeights { w_z: &w_z, b_z: &b_nonzero, w_h: &w_h, b_h: &b_nonzero };
+
+        let result_zero = forward_with_weights(&hidden, &input, &weights_zero);
+        let result_nonzero = forward_with_weights(&hidden, &input, &weights_nonzero);
+
+        // 全零偏置 + 全零输入 → σ(0)=0.5，h_new = 0.5*0 + 0.5*0 = 0
+        let sum_zero: f32 = result_zero.iter().map(|x| x.abs()).sum();
+        assert!(sum_zero < 1e-6, "全零偏置+全零输入应产生零输出");
+
+        // 非零偏置 + 全零输入 → h̃ = 0.5（非零），h_new = z*0.5 ≠ 0
+        let sum_nonzero: f32 = result_nonzero.iter().map(|x| x.abs()).sum();
+        assert!(sum_nonzero > 0.1, "非零偏置应产生非零输出");
+    }
+
+    #[test]
+    fn test_train_step_returns_loss() {
+        let hidden = vec![0.0f32; HIDDEN_DIM];
+        let input = vec![0.1f32; HIDDEN_DIM];
+        let (mut w_z, mut b_z, mut w_h, mut b_h) = make_test_weights();
+
+        let loss = train_step(&hidden, &input, &mut w_z, &mut b_z, &mut w_h, &mut b_h, 1.0, 0.001);
+        assert!(loss > 0.0, "损失应为正");
+        assert!(loss.is_finite(), "损失应有限");
+    }
+
+    #[test]
+    fn test_train_step_updates_weights() {
+        // 验证训练确实更新了权重
+        let hidden = vec![0.0f32; HIDDEN_DIM];
+        let input = vec![0.5f32; HIDDEN_DIM];
+        let (mut w_z, mut b_z, mut w_h, mut b_h) = make_test_weights();
+
+        // 保存原始权重用于比较
+        let w_z_orig = w_z.clone();
+        let b_z_orig = b_z.clone();
+
+        let _ = train_step(&hidden, &input, &mut w_z, &mut b_z, &mut w_h, &mut b_h, 1.0, 0.01);
+
+        // 权重应该发生变化
+        let w_z_changed = w_z.iter().zip(w_z_orig.iter()).any(|(a, b)| (a - b).abs() > 1e-10);
+        let b_z_changed = b_z.iter().zip(b_z_orig.iter()).any(|(a, b)| (a - b).abs() > 1e-10);
+        assert!(w_z_changed, "W_z 应被训练更新");
+        assert!(b_z_changed, "b_z 应被训练更新");
     }
 }

@@ -81,11 +81,10 @@ interface FlashbackMemory {
   direction: 'prev' | 'next'
 }
 
-/** 按模式的 RAG 限制 */
+/** 按模式的 RAG 限制（AIOS 第八阶段：清理 work 残留） */
 const RAG_LIMITS: Record<string, number> = {
   desktop: 8,
   social: 0,
-  work: 5,
   group_chat: 3,
   mobile: 5,
   scheduler: 3,
@@ -143,6 +142,12 @@ export class ContextualRetriever {
     }
 
     // ── Step 1: 文本 → 向量化 ──
+    // AIOS 第八阶段：embedding 不可用时优雅返回空
+    if (!this.deps.embeddingService.isAvailable) {
+      logger.warn('Embedding 不可用，上下文检索返回空（请配置向量模型）')
+      return emptyResult(startMs)
+    }
+
     const queryVector = await this.deps.embeddingService.embedOne(query)
     if (!queryVector.length) {
       logger.warn('Embedding 为空，跳过检索')
@@ -157,6 +162,8 @@ export class ContextualRetriever {
     const activeClusters = this.deps.clusterRouter.routeByContext(agentId, mode)
 
     // ── Step 4: TriviumDB searchAdvanced 超召回 ──
+    // CCSA: 将 RNN 隐状态投影到 embedding 空间，作为图扩散的方向偏置
+    const contextBias = this.deps.contextRnn.generateBias(agentId, mode)
     const searchConfig: JsSearchConfig = {
       topK: effectiveTopK * overRecallMultiplier,
       expandDepth: 2,
@@ -166,6 +173,7 @@ export class ContextualRetriever {
       enableSparseResidual,
       enableDpp,
       enableRefractoryFatigue: true,
+      diffusionBias: contextBias ? Array.from(contextBias) : undefined,
     }
 
     const hits = await this.deps.vectorRepo.searchAdvanced(
@@ -209,7 +217,7 @@ export class ContextualRetriever {
     }
 
     // ── Step 6: Context-aware 重排 ──
-    const contextBias = this.deps.contextRnn.generateBias(agentId, mode)
+    // contextBias 已在 Step 4 声明，此处直接复用
     const reranked = contextAwareRerank(candidates, contextBias, {
       topK: effectiveTopK * 2, // 留余量给多样性过滤
     })
@@ -228,6 +236,8 @@ export class ContextualRetriever {
       content: m.content,
       queryEmbedding: queryEmb,
       hiddenState: new Float32Array(hiddenState),
+      contextBias: contextBias ? new Float32Array(contextBias) : undefined,
+      memoryEmbedding: m.embedding ? new Float32Array(m.embedding) : undefined,
     }))
 
     const durationMs = Date.now() - startMs

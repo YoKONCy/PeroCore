@@ -17,7 +17,7 @@ import { logger } from './utils/logger'
 
 // ─── 延迟导入的服务 (避免循环引用) ─────────────────────
 // 使用函数包装，在调用时才 import
-const getBackendService = () => import('./services/backendProcess')
+// 第七阶段：backendProcess 已移除（Daemon 独立运行）
 const getNapCatService = () => import('./services/napcat')
 const getNativeLoader = () => import('./services/nativeLoader')
 const getAssetService = () => import('./services/assets')
@@ -149,6 +149,10 @@ function registerNavigationHandlers(): void {
     windowManager.createStrongholdWindow()
   })
 
+  ipcMain.handle('open-chat-window', () => {
+    windowManager.createChatWindow()
+  })
+
   ipcMain.handle('open-ide-window', () => {
     windowManager.createIDEWindow()
   })
@@ -163,22 +167,24 @@ function registerNavigationHandlers(): void {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// 后端进程管理
+// 后端进程管理（第七阶段：已废弃，Daemon 独立运行）
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Electron 不再 spawn 后端进程，这些 IPC 通道保留仅为兼容旧前端调用。
+// 调用时返回提示信息，前端应迁移为通过 HTTP API 与 Daemon 交互。
 function registerBackendHandlers(): void {
-  ipcMain.handle('start-backend', async (_event, args) => {
-    const { startBackend } = await getBackendService()
-    return startBackend(args)
+  ipcMain.handle('start-backend', async () => {
+    logger.info('IPC', 'start-backend 已废弃：Daemon 独立运行，无需 Electron 启动')
+    return null
   })
 
   ipcMain.handle('stop-backend', async () => {
-    const { stopBackend } = await getBackendService()
-    return stopBackend()
+    logger.info('IPC', 'stop-backend 已废弃：Daemon 生命周期由自身管理')
+    return null
   })
 
   ipcMain.handle('get-backend-logs', async () => {
-    const { getBackendLogs } = await getBackendService()
-    return getBackendLogs()
+    logger.info('IPC', 'get-backend-logs 已废弃：请通过 Daemon HTTP API /api/maintenance 获取日志')
+    return []
   })
 }
 

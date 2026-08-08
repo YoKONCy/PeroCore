@@ -14,6 +14,7 @@ import { errorHandler } from './middleware/errorHandler'
 import { metricsMiddleware } from './middleware/metrics'
 import { requestContextMiddleware } from './middleware/requestContext'
 import { requestLogger } from './middleware/requestLogger'
+import { createAuthMiddleware, DEFAULT_PUBLIC_PATHS } from './middleware/auth'
 import { createHealthRouter } from './routers/health.router'
 import { createMetricsRouter } from './routers/metrics.router'
 import type { AppContext } from './container'
@@ -24,13 +25,17 @@ import {
   createModelRouter,
   createSystemRouter,
   createAgentRouter,
+  createRuntimeRouter,
   createSchedulerRouter,
   createAssetRouter,
   createGatewayRouter,
   createMaintenanceRouter,
-  createSocialRouter,
+  // 注意：createSocialRouter 已迁移到 packages/apps/social/runtime/social.router.ts
+  // （由 SocialAppRuntime.initialize 通过 ctx.mountRouter 动态挂载）
+  createInboundRouteRouter,
   createVoiceRouter,
   createMcpRouter,
+  createStrongholdRouter,
 } from './routers'
 
 /**
@@ -47,6 +52,14 @@ export function createApp(ctx: AppContext) {
   // request context 必须早于 requestLogger 注册，否则 HTTP 日志拿不到 requestId
   app.use('*', requestContextMiddleware)
   app.use('*', requestLogger)
+
+  // 第六阶段 #8: Token 鉴权中间件
+  // - 通过 PEROCORE_API_TOKEN 环境变量配置 token
+  // - 未配置时中间件自动放行（开发环境默认开放）
+  // - 健康检查、Prometheus 指标、登录接口等公共路径跳过鉴权
+  // - 必须在 requestLogger 之后注册，以便 401 响应也能被日志记录
+  const apiToken = process.env.PEROCORE_API_TOKEN ?? ''
+  app.use('*', createAuthMiddleware({ token: apiToken, publicPaths: DEFAULT_PUBLIC_PATHS }))
 
   // ── 全局错误处理 ──
   app.onError(errorHandler)
@@ -65,15 +78,20 @@ export function createApp(ctx: AppContext) {
   app.route('/api/models', createModelRouter(ctx))
   app.route('/api/system', createSystemRouter(ctx))
   app.route('/api/agents', createAgentRouter(ctx))
+  app.route('/api/runtime', createRuntimeRouter(ctx))
   app.route('/api/scheduler', createSchedulerRouter(ctx))
   app.route('/api/assets', createAssetRouter(ctx))
   app.route('/api/maintenance', createMaintenanceRouter(ctx))
-  app.route('/api/social', createSocialRouter(ctx))
+  // 注意：社交 HTTP 路由已迁移到 packages/apps/social/runtime/social.router.ts
+  // （由 SocialAppRuntime 管理，不再通过主 AppContext 挂载）
+  app.route('/api/inbound-routes', createInboundRouteRouter(ctx))
   app.route(
     '/api/voice',
     createVoiceRouter({ ttsService: ctx.ttsService, asrService: ctx.asrService }),
   )
   app.route('/api/mcp', createMcpRouter(ctx))
+  // 据点（群聊）路由：群聊房间管理、Agent 位置、管家配置等
+  app.route('/api/stronghold', createStrongholdRouter(ctx))
   app.route('/ws', createGatewayRouter(ctx.gatewayHub))
 
   // ── 404 兜底 ──

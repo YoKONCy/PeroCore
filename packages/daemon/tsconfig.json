@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "types": ["node"],
+    "paths": {
+      "@perocore/shared": ["../shared/src"],
+      "@perocore/shared/*": ["../shared/src/*"],
+      "@perocore/backend": ["../backend/src"],
+      "@perocore/backend/*": ["../backend/src/*"]
+    }
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.spec.ts"]
+}

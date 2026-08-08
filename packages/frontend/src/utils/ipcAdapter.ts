@@ -10,6 +10,8 @@
  * @module packages/frontend/src/utils/ipcAdapter
  */
 
+import { logger } from '../lib/logger'
+
 // ─── 类型声明 ─────────────────────────────────────────
 declare global {
   interface Window {
@@ -87,7 +89,7 @@ export async function invoke(cmd: string, args?: unknown): Promise<unknown> {
 
   // Native 模块: 不可用
   if (cmd.startsWith('native-') || cmd.startsWith('scan-3d') || cmd === 'get-model-load-path') {
-    console.warn(`[ipcAdapter] Native 功能在浏览器模式不可用: ${cmd}`)
+    logger.warn('ipcAdapter', `Native 功能在浏览器模式不可用: ${cmd}`)
     return null
   }
 
@@ -108,7 +110,7 @@ export async function invoke(cmd: string, args?: unknown): Promise<unknown> {
     cmd === 'napcat-status' ||
     cmd === 'ensure-napcat-config'
   ) {
-    console.warn(`[ipcAdapter] NapCat 在浏览器模式不可用: ${cmd}`)
+    logger.warn('ipcAdapter', `NapCat 在浏览器模式不可用: ${cmd}`)
     return null
   }
 
@@ -119,7 +121,7 @@ export async function invoke(cmd: string, args?: unknown): Promise<unknown> {
     cmd === 'read-clipboard-image' ||
     cmd === 'write-clipboard-image'
   ) {
-    console.warn(`[ipcAdapter] 桌面感知功能在浏览器模式不可用: ${cmd}`)
+    logger.warn('ipcAdapter', `桌面感知功能在浏览器模式不可用: ${cmd}`)
     return null
   }
 
@@ -148,18 +150,18 @@ export async function invoke(cmd: string, args?: unknown): Promise<unknown> {
 
   // 后端管理: 在 Docker 模式下后端独立运行，不需要通过 Electron 管理
   if (cmd === 'start-backend' || cmd === 'stop-backend') {
-    console.info(`[ipcAdapter] Docker 模式下后端独立运行，跳过: ${cmd}`)
+    logger.info('ipcAdapter', `Docker 模式下后端独立运行，跳过: ${cmd}`)
     return null
   }
 
   // 后端日志: Docker 模式可通过 HTTP API 获取
   if (cmd === 'get-backend-logs') {
-    console.info('[ipcAdapter] Docker 模式请通过 HTTP API 获取日志')
+    logger.info('ipcAdapter', 'Docker 模式请通过 HTTP API 获取日志')
     return []
   }
 
   // 未知通道: 打印警告
-  console.warn(`[ipcAdapter] 未处理的 IPC 通道: ${cmd}`)
+  logger.warn('ipcAdapter', `未处理的 IPC 通道: ${cmd}`)
   return null
 }
 
@@ -174,7 +176,7 @@ export async function invoke(cmd: string, args?: unknown): Promise<unknown> {
  *
  * @example
  * const unlisten = await listen('backend-log', (line) => {
- *   console.log('后端:', line)
+ *   logger.info('BackendLog', '收到后端日志', line)
  * })
  * // 组件卸载时调用 unlisten()
  */

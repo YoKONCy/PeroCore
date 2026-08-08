@@ -1,40 +1,50 @@
 /**
  * Chat 对话管道 Composable
  *
- * 串联 SessionStore + ChatApi，管理 SSE 流式对话的完整生命周期：
+ * 串联 ThreadStore + ChatApi，管理 SSE 流式对话的完整生命周期：
  * 发送 → thinking → streaming → tool_call → done
+ *
+ * AIOS 第三阶段：基于 Thread 的对话接口，请求体 `{ threadId, content, agentId? }`。
  *
  * @module packages/frontend/src/composables/chat/useChat
  */
 
 import { computed } from 'vue'
-import { useSessionStore } from '../../stores'
+import { useThreadStore } from '../../stores'
 import { useAgentStore } from '../../stores'
 import { useNotificationStore } from '../../stores/useNotificationStore'
 import { chatApi } from '../../api/modules/chatApi'
-import type { ChatRequest, ChatMessagePayload } from '../../api/modules/chatApi'
+import { logger } from '../../lib/logger'
+import type { ChatRequest } from '../../api/modules/chatApi'
+import type { ThreadChannel } from '../../api/modules/threadsApi'
 
 /** useChat 配置 */
 export interface UseChatOptions {
-  /** 消息来源标识 */
-  source?: string
+  /** 频道标识（替代旧 source） */
+  channel?: ThreadChannel
 }
 
 export function useChat(options: UseChatOptions = {}) {
-  const { source = 'desktop' } = options
+  const { channel = 'desktop' } = options
 
-  const sessionStore = useSessionStore()
+  const threadStore = useThreadStore()
   const agentStore = useAgentStore()
   const notify = useNotificationStore()
 
   /** 当前是否在生成中 */
-  const isGenerating = computed(() => sessionStore.isGenerating)
+  const isGenerating = computed(() => threadStore.isGenerating)
 
   /** 当前生成状态 */
-  const generationState = computed(() => sessionStore.generationState)
+  const generationState = computed(() => threadStore.generationState)
 
   /** 消息列表 */
-  const messages = computed(() => sessionStore.messages)
+  const messages = computed(() => threadStore.messages)
+
+  /** 历史记录加载状态 */
+  const isLoadingHistory = computed(() => threadStore.isLoadingHistory)
+
+  /** 历史记录加载错误 */
+  const historyError = computed(() => threadStore.historyError)
 
   /** 当前 AbortController（用于取消流） */
   let currentAbort: AbortController | null = null
@@ -50,95 +60,99 @@ export function useChat(options: UseChatOptions = {}) {
    */
   async function sendMessage(text: string): Promise<void> {
     const trimmed = text.trim()
-    if (!trimmed || sessionStore.isGenerating) return
+    if (!trimmed || threadStore.isGenerating) return
 
-    // 确保有 session
-    if (!sessionStore.sessionId) {
-      sessionStore.startSession(`session_${Date.now()}`, source)
+    // 确保有后端登记过的 thread
+    if (!threadStore.threadId) {
+      await threadStore.createNewThread(agentStore.activeAgentId, channel)
     }
 
     // 1. 添加用户消息
     const userMsg = createMessage('user', trimmed)
-    sessionStore.addMessage(userMsg)
-    sessionStore.inputText = ''
+    threadStore.addMessage(userMsg)
+    threadStore.inputText = ''
 
     // 2. 添加 assistant 占位消息
     const assistantMsg = createMessage('assistant', '', true)
-    sessionStore.addMessage(assistantMsg)
-    sessionStore.streamingMessageId = assistantMsg.id
-    sessionStore.generationState = 'thinking'
+    threadStore.addMessage(assistantMsg)
+    threadStore.streamingMessageId = assistantMsg.id
+    threadStore.generationState = 'thinking'
 
-    // 3. 构建请求 — 组装 messages 数组 (对齐后端 chatRequestSchema)
-    const historyMessages: ChatMessagePayload[] = sessionStore.messages
-      .filter((m) => !m.isStreaming) // 排除正在流式的占位消息
-      .map((m) => ({ role: m.role as ChatMessagePayload['role'], content: m.content }))
-
+    // 3. 构建请求 — Thread 模式：threadId + content + agentId
     const request: ChatRequest = {
-      messages: historyMessages,
-      source,
+      threadId: threadStore.threadId,
+      content: trimmed,
       agentId: agentStore.activeAgentId,
-      sessionId: sessionStore.sessionId,
     }
 
     // 4. 发起 SSE 流
     currentAbort = chatApi.stream(request, {
       onDelta: (data) => {
         // 首次 delta 时切换到 generating 状态
-        if (sessionStore.generationState === 'thinking') {
-          sessionStore.generationState = 'generating'
+        if (threadStore.generationState === 'thinking') {
+          threadStore.generationState = 'generating'
         }
-        sessionStore.appendToLast(data.content)
+        threadStore.appendToLast(data.content)
       },
 
       onStatus: (data) => {
         if (data.state === 'thinking') {
-          sessionStore.generationState = 'thinking'
-        } else if (data.state === 'tool_call' || data.state === 'calling') {
-          sessionStore.generationState = 'tool_calling'
+          threadStore.generationState = 'thinking'
+        } else if (data.state === 'calling') {
+          threadStore.generationState = 'tool_calling'
         } else if (data.state === 'generating') {
-          sessionStore.generationState = 'generating'
+          threadStore.generationState = 'generating'
         }
       },
 
       onToolCall: (data) => {
-        sessionStore.generationState = 'tool_calling'
-        // 追加工具调用信息到最后一条消息
-        const list = sessionStore.messages
+        threadStore.generationState = 'tool_calling'
+        // 追加工具调用信息到最后一条消息（带 callId，用于与 tool_result 关联）
+        const list = threadStore.messages
         if (list.length === 0) return
         const last = list[list.length - 1]!
-        const toolCalls = [...(last.toolCalls || []), { name: data.name, args: data.arguments }]
+        const toolCalls = [
+          ...(last.toolCalls || []),
+          { name: data.name, args: data.args, callId: data.callId },
+        ]
         const updated = { ...last, toolCalls }
-        sessionStore.messages = [...list.slice(0, -1), updated]
+        threadStore.messages = [...list.slice(0, -1), updated]
       },
 
       onToolResult: (data) => {
-        // 更新最后一个同名工具调用的结果
-        const list = sessionStore.messages
+        // 通过 callId 精确匹配对应的 tool_call，回填 result
+        const list = threadStore.messages
         if (list.length === 0) return
         const last = list[list.length - 1]!
         if (!last.toolCalls) return
 
         const toolCalls = last.toolCalls.map((tc) =>
-          tc.name === data.name && !tc.result
-            ? { ...tc, result: data.output, isError: data.isError }
+          tc.callId === data.callId && !tc.result
+            ? { ...tc, result: data.result, isError: data.isError }
             : tc,
         )
         const updated = { ...last, toolCalls }
-        sessionStore.messages = [...list.slice(0, -1), updated]
+        threadStore.messages = [...list.slice(0, -1), updated]
 
         // 工具执行完毕，回到 generating
-        sessionStore.generationState = 'generating'
+        threadStore.generationState = 'generating'
       },
 
       onDone: () => {
-        sessionStore.finishStreaming()
+        threadStore.finishStreaming()
         currentAbort = null
+        setTimeout(() => {
+          threadStore.refreshCurrentThread(agentStore.activeAgentId).catch((err) => {
+            logger.error('useChat', '对话完成后刷新历史失败', err)
+          })
+        }, 250)
       },
 
       onError: (data) => {
         // 追加错误信息到消息
-        sessionStore.appendToLast(`\n\n⚠️ ${data.message}`)
-        sessionStore.finishStreaming()
+        const tail = data.code === 'STREAM_TRUNCATED' ? `\n\n⚠️ [截断] ${data.message}` : `\n\n⚠️ ${data.message}`
+        threadStore.appendToLast(tail)
+        threadStore.finishStreaming()
         currentAbort = null
         // Toast 通知用户
         notify.toast(data.message || '对话生成失败', 'error')
@@ -154,25 +168,38 @@ export function useChat(options: UseChatOptions = {}) {
       currentAbort = null
     }
 
-    // 通知后端停止（传 sessionId 精确取消）
-    try {
-      await chatApi.stop({ sessionId: sessionStore.sessionId || undefined })
-    } catch {
-      // 忽略停止请求的错误
+    // 通知后端停止（传 threadId 精确取消）
+    if (threadStore.threadId) {
+      try {
+        await chatApi.stop({ threadId: threadStore.threadId })
+      } catch {
+        // 忽略停止请求的错误
+      }
     }
 
-    sessionStore.finishStreaming()
+    threadStore.finishStreaming()
+  }
+
+  /** 创建并切换到新的空白 Thread */
+  async function createNewThread(agentId = agentStore.activeAgentId): Promise<void> {
+    if (threadStore.isGenerating) return
+    await threadStore.createNewThread(agentId, channel)
+  }
+
+  /** 加载当前 Agent 的最新历史 Thread */
+  async function loadLatestHistory(agentId = agentStore.activeAgentId): Promise<void> {
+    await threadStore.loadLatestThread(agentId, channel)
   }
 
   /** 重新发送最后一条用户消息 */
   async function retryLast(): Promise<void> {
-    const list = sessionStore.messages
+    const list = threadStore.messages
     // 找最后一条用户消息
     for (let i = list.length - 1; i >= 0; i--) {
       if (list[i]!.role === 'user') {
         const text = list[i]!.content
         // 移除最后的 user + assistant 消息
-        sessionStore.messages = list.slice(0, i)
+        threadStore.messages = list.slice(0, i)
         await sendMessage(text)
         return
       }
@@ -196,10 +223,14 @@ export function useChat(options: UseChatOptions = {}) {
     messages,
     isGenerating,
     generationState,
+    isLoadingHistory,
+    historyError,
 
     // 动作
     sendMessage,
     stopGeneration,
     retryLast,
+    createNewThread,
+    loadLatestHistory,
   }
 }

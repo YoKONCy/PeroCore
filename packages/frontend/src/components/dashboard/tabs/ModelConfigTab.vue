@@ -3,7 +3,7 @@
  * ModelConfigTab — 模型配置 Tab (F1-1)
  *
  * 双面板设计: LLM 模型网格 + 向量模型配置
- * 功能: 模型 CRUD, 角色分配 (主/秘书/反思/辅助), Embedding/Reranker 配置
+ * 功能: 模型 CRUD, 主模型指定 + 任务指派, Embedding/Reranker 配置
  *
  * @see 06_FILE_SIZE_LIMITS.md — 逻辑抽到 useModelConfig composable
  */
@@ -20,7 +20,7 @@ import {
   PCard,
 } from '../../pixel'
 import { watch, type Ref } from 'vue'
-import { useModelConfig } from '../../../composables/dashboard/useModelConfig'
+import { useModelConfig, TASK_SLOTS } from '../../../composables/dashboard/useModelConfig'
 import { useDashboardContext } from '../../../composables/dashboard'
 
 const ctx = useDashboardContext()
@@ -28,7 +28,9 @@ const ctx = useDashboardContext()
 const {
   models,
   currentTab,
-  roles,
+  mainModelId,
+  taskAssignments,
+  isTaskAssignOpen,
   providerOptions,
   isEditorOpen,
   editingModel,
@@ -36,8 +38,8 @@ const {
   openEditor,
   saveModel,
   deleteModel,
-  setRole,
-  getModelRoles,
+  setMainModel,
+  setTaskAssignment,
   isGlobalOpen,
   globalConfig,
   saveGlobalConfig,
@@ -82,24 +84,6 @@ watch(
 async function handleSaveGlobal() {
   await saveGlobalConfig()
   isGlobalOpen.value = false
-}
-
-// 角色配置表
-const rolesMeta = [
-  { key: 'main' as const, label: '主模型', icon: 'terminal', color: 'blue' },
-  { key: 'secretary' as const, label: '秘书', icon: 'chat', color: 'amber' },
-  { key: 'reflection' as const, label: '反思', icon: 'brain', color: 'pink' },
-  { key: 'aux' as const, label: '辅助', icon: 'sparkle', color: 'purple' },
-]
-
-function getRoleBadgeClass(color: string) {
-  const map: Record<string, string> = {
-    blue: 'role-badge-blue',
-    amber: 'role-badge-amber',
-    pink: 'role-badge-pink',
-    purple: 'role-badge-purple',
-  }
-  return map[color] ?? ''
 }
 
 function formatTokens(tokens: number | null): string {
@@ -206,6 +190,10 @@ void providerDefaults
             <PixelIcon name="settings" size="xs" />
             <span>全局服务商</span>
           </PButton>
+          <PButton variant="ghost" @click="isTaskAssignOpen = true">
+            <PixelIcon name="brain" size="xs" />
+            <span>任务指派</span>
+          </PButton>
           <PButton variant="primary" @click="openEditor(null)">
             <PixelIcon name="plus" size="xs" />
             <span>添加模型</span>
@@ -233,28 +221,23 @@ void providerDefaults
               {{ providerLabels[model.provider] ?? model.provider }}
             </span>
           </div>
-          <div
-            v-if="model.enableVision"
-            class="flex items-center gap-1 px-2 py-0.5 text-[9px] font-bold text-sky-500 bg-sky-50 border border-sky-200"
-          >
-            <PixelIcon name="eye" size="xs" />
-            <span>VISION</span>
+          <div class="flex items-center gap-1.5 flex-shrink-0">
+            <!-- 主模型徽章（淡蓝色像素风） -->
+            <span
+              v-if="mainModelId === model.id"
+              class="flex items-center gap-1 px-2 py-0.5 text-[9px] font-bold text-sky-700 bg-sky-100 border-2 border-sky-300 shadow-[1px_1px_0_#7dd3fc] font-pixel"
+            >
+              <PixelIcon name="star" size="xs" />
+              <span>主模型</span>
+            </span>
+            <div
+              v-if="model.enableVision"
+              class="flex items-center gap-1 px-2 py-0.5 text-[9px] font-bold text-sky-500 bg-sky-50 border border-sky-200"
+            >
+              <PixelIcon name="eye" size="xs" />
+              <span>VISION</span>
+            </div>
           </div>
-        </div>
-
-        <!-- 角色徽章 -->
-        <div v-if="getModelRoles(model.id).length > 0" class="flex gap-1.5 flex-wrap">
-          <span
-            v-for="r in rolesMeta.filter((rm) => getModelRoles(model.id).includes(rm.key))"
-            :key="r.key"
-            :class="[
-              'flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold border',
-              getRoleBadgeClass(r.color),
-            ]"
-          >
-            <PixelIcon :name="r.icon" size="xs" />
-            {{ r.label }}
-          </span>
         </div>
 
         <!-- 模型详情 -->
@@ -281,25 +264,19 @@ void providerDefaults
 
         <!-- 操作按钮 -->
         <div class="flex justify-between items-center pt-3 border-t border-slate-100 mt-auto">
-          <!-- 快速角色切换 -->
-          <div class="flex gap-1">
-            <PTooltip
-              v-for="r in rolesMeta"
-              :key="r.key"
-              :content="`设为${r.label}`"
-              placement="top"
-            >
-              <button
-                :class="[
-                  'w-7 h-7 flex items-center justify-center bg-slate-50 border border-slate-200 cursor-pointer text-slate-400 transition-all hover:scale-110',
-                  { [`qr-${r.color}-active`]: roles[r.key] === model.id },
-                ]"
-                @click="setRole(r.key, model.id)"
-              >
-                <PixelIcon :name="r.icon" size="xs" />
-              </button>
-            </PTooltip>
-          </div>
+          <!-- 主模型按钮（像素风立体感：3px偏移阴影，按下位移+阴影缩小） -->
+          <button
+            :class="[
+              'flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold font-pixel border-2 cursor-pointer select-none transition-all duration-100',
+              mainModelId === model.id
+                ? 'bg-sky-500 text-white border-sky-600 shadow-[3px_3px_0_#0369a1] hover:bg-sky-600 active:translate-x-[2px] active:translate-y-[2px] active:shadow-[1px_1px_0_#0369a1]'
+                : 'bg-sky-50 text-sky-600 border-sky-300 shadow-[3px_3px_0_#bae6fd] hover:bg-sky-100 hover:border-sky-400 hover:shadow-[3px_3px_0_#7dd3fc] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[1px_1px_0_#7dd3fc]',
+            ]"
+            @click="setMainModel(model.id)"
+          >
+            <PixelIcon name="star" size="xs" />
+            <span>{{ mainModelId === model.id ? '主模型' : '设为主模型' }}</span>
+          </button>
           <div class="flex gap-1">
             <PTooltip content="编辑" placement="top">
               <button
@@ -625,60 +602,41 @@ void providerDefaults
         <PButton variant="primary" @click="handleSaveGlobal">保存</PButton>
       </template>
     </PDialog>
+
+    <!-- 任务指派弹窗 -->
+    <PDialog v-model="isTaskAssignOpen" title="任务指派" width="560px">
+      <div class="flex flex-col gap-4">
+        <p class="text-xs text-slate-400">为系统内的各项任务指派模型。未指派的任务将使用主模型。</p>
+        <div
+          v-for="slot in TASK_SLOTS"
+          :key="slot.key"
+          class="flex items-center justify-between gap-4"
+        >
+          <div class="flex flex-col gap-0.5">
+            <span class="text-sm font-bold text-slate-700">{{ slot.label }}</span>
+            <span class="text-[10px] text-slate-400">{{ slot.description }}</span>
+          </div>
+          <PSelect
+            :model-value="taskAssignments[slot.key] || ''"
+            :options="[
+              { label: '使用主模型（默认）', value: '' },
+              ...models.map((m) => ({ label: m.name, value: m.id })),
+            ]"
+            class="w-48"
+            @update:model-value="
+              (v: string | number) => setTaskAssignment(slot.key, v ? String(v) : null)
+            "
+          />
+        </div>
+      </div>
+      <template #footer>
+        <PButton variant="primary" @click="isTaskAssignOpen = false">完成</PButton>
+      </template>
+    </PDialog>
   </div>
 </template>
 
 <style scoped>
-/* 角色徽章颜色 — 无法用纯 Tailwind 完美表达的 CSS 变量色 */
-.role-badge-blue {
-  color: #0284c7;
-  background: rgba(56, 189, 248, 0.1);
-  border-color: rgba(56, 189, 248, 0.3);
-}
-
-.role-badge-amber {
-  color: #d97706;
-  background: rgba(234, 179, 8, 0.1);
-  border-color: rgba(234, 179, 8, 0.3);
-}
-
-.role-badge-pink {
-  color: #db2777;
-  background: rgba(236, 72, 153, 0.1);
-  border-color: rgba(236, 72, 153, 0.3);
-}
-
-.role-badge-purple {
-  color: #7c3aed;
-  background: rgba(124, 58, 237, 0.1);
-  border-color: rgba(124, 58, 237, 0.3);
-}
-
-/* 快速角色激活态 */
-.qr-blue-active {
-  background: #0ea5e9 !important;
-  color: white !important;
-  border-color: #0ea5e9 !important;
-}
-
-.qr-amber-active {
-  background: #eab308 !important;
-  color: white !important;
-  border-color: #eab308 !important;
-}
-
-.qr-pink-active {
-  background: #ec4899 !important;
-  color: white !important;
-  border-color: #ec4899 !important;
-}
-
-.qr-purple-active {
-  background: #7c3aed !important;
-  color: white !important;
-  border-color: #7c3aed !important;
-}
-
 /* 像素风滚动条 */
 .model-scrollbar::-webkit-scrollbar {
   width: 4px;

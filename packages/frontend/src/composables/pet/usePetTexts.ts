@@ -14,6 +14,7 @@
 import { ref, onMounted, onUnmounted, type Ref } from 'vue'
 import { agentApi } from '../../api/modules/agentApi'
 import { listen } from '../../utils/ipcAdapter'
+import { useGateway } from '../gateway/useGateway'
 
 /** 台词系统初始化参数 */
 interface UsePetTextsOptions {
@@ -62,6 +63,33 @@ export function usePetTexts(opts: UsePetTextsOptions) {
   let unlistenAgentChanged: (() => void) | null = null
   let textLoadSeq = 0
 
+  // ── Gateway: 监听 state_update 实时热更新台词 (finish_task 写入 pet_states 后即时生效) ──
+  const { connect: gwConnect, disconnect: gwDisconnect, onPush, offPush } = useGateway()
+
+  /** 将 state_update 广播里的 click/idle/back 台词热更新到本地台词库 */
+  function applyStateTexts(payload: Record<string, unknown>): void {
+    // 仅接受当前活跃 agent 的台词更新 (广播带 agentId，缺省时兼容旧逻辑放行)
+    const updateAgentId = payload.agentId
+    if (typeof updateAgentId === 'string' && updateAgentId !== activeAgentId.value) return
+    const click = payload.click_messages as Record<string, unknown> | undefined
+    if (click && typeof click === 'object') {
+      for (const [part, lines] of Object.entries(click)) {
+        if (Array.isArray(lines) && lines.length > 0) {
+          localTexts.value[`click_${part}_01`] = String(lines[0])
+          localTexts.value[`click_${part}_all`] = JSON.stringify(lines)
+        }
+      }
+    }
+    const idle = payload.idle_messages
+    if (Array.isArray(idle) && idle.length > 0) {
+      idleMessages.value = idle.map(String)
+    }
+    const back = payload.back_messages
+    if (Array.isArray(back) && back.length > 0) {
+      localTexts.value['visibilityBack_all'] = JSON.stringify(back)
+    }
+  }
+
   function startIdleTimer() {
     if (idleTimer) clearTimeout(idleTimer)
     const delay = 30000 + Math.random() * 30000
@@ -99,7 +127,17 @@ export function usePetTexts(opts: UsePetTextsOptions) {
   // ── visibilitychange ──
   function handleVisibilityChange() {
     if (document.visibilityState === 'visible') {
-      const backMsg = localTexts.value['visibilityBack']
+      // 优先从 finish_task 写入的回归台词池 (backMessages) 随机选取，回退单条 visibilityBack
+      let backMsg = localTexts.value['visibilityBack']
+      const backAll = localTexts.value['visibilityBack_all']
+      if (backAll) {
+        try {
+          const arr = JSON.parse(backAll) as string[]
+          if (arr.length > 0) backMsg = arr[Math.floor(Math.random() * arr.length)] ?? backMsg
+        } catch {
+          /* JSON 解析失败用单条 */
+        }
+      }
       if (backMsg) {
         showBubble(backMsg, 5000)
       }
@@ -152,6 +190,11 @@ export function usePetTexts(opts: UsePetTextsOptions) {
 
       if (typeof texts.visibilityBack === 'string') {
         localTexts.value['visibilityBack'] = texts.visibilityBack
+      }
+
+      // backMessages: finish_task 写入 pet_states 的回归台词池 (合并自后端 getWaifuTexts)
+      if (Array.isArray(texts.backMessages) && texts.backMessages.length > 0) {
+        localTexts.value['visibilityBack_all'] = JSON.stringify(texts.backMessages)
       }
 
       const welcome = texts.welcome as Record<string, string> | undefined
@@ -218,6 +261,10 @@ export function usePetTexts(opts: UsePetTextsOptions) {
       unlistenAgentChanged = unlisten
     })
     document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    // 监听 state_update 实时热更新台词 (无需重启即可生效)
+    gwConnect()
+    onPush('state_update', applyStateTexts)
   })
 
   onUnmounted(() => {
@@ -225,6 +272,8 @@ export function usePetTexts(opts: UsePetTextsOptions) {
     unlistenAgentChanged?.()
     unlistenAgentChanged = null
     document.removeEventListener('visibilitychange', handleVisibilityChange)
+    offPush('state_update', applyStateTexts)
+    gwDisconnect()
   })
 
   return {

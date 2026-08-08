@@ -24,6 +24,13 @@ export interface EmbeddingProvider {
   embed(texts: string[]): Promise<number[][]>
   embedOne(text: string): Promise<number[]>
   getDimension(): number
+  /**
+   * Embedding 是否可用
+   *
+   * AIOS 第八阶段：配置不完整或 provider 初始化失败时返回 false。
+   * 调用方应在调用 embed() 前先检查此属性，避免不必要的网络请求和异常。
+   */
+  readonly isAvailable: boolean
 }
 
 /** Reranker Provider 接口 (可选) */
@@ -61,10 +68,27 @@ export class EmbeddingService implements EmbeddingProvider {
   private reranker: RerankerProvider | null = null
   private currentConfig: EmbeddingConfig
 
+  /**
+   * Embedding 是否可用
+   *
+   * AIOS 第八阶段：构造时检测配置完整性，运行时可快速判断是否可调用。
+   * 配置缺失时标记为 false，避免每次调用都走 fetch 失败路径。
+   */
+  private available: boolean
+
   constructor(config: EmbeddingConfig) {
     this.currentConfig = config
     // 唯一的 Provider: 远程 API (OpenAI 兼容)
     this.provider = new ApiEmbeddingProvider(config)
+
+    // AIOS 第八阶段：配置完整性检测
+    // apiBase/apiKey/model 任一为空都视为不可用
+    this.available = Boolean(config.apiBase && config.apiKey && config.model)
+    if (!this.available) {
+      logger.warn(
+        'Embedding 配置不完整（apiBase/apiKey/model 任一为空），记忆向量化和 RAG 检索将不可用。请在 Dashboard → 模型配置 → 向量模型 中完成配置。',
+      )
+    }
 
     // Reranker (可选)
     if (config.reranker?.apiKey) {
@@ -82,9 +106,16 @@ export class EmbeddingService implements EmbeddingProvider {
   reconfigure(config: EmbeddingConfig): void {
     this.currentConfig = config
     this.provider = new ApiEmbeddingProvider(config)
-    logger.info(
-      `Embedding 配置已热更新: model=${config.model}, apiBase=${config.apiBase}, dim=${config.dimension}`,
-    )
+
+    // AIOS 第八阶段：重新检测可用性
+    this.available = Boolean(config.apiBase && config.apiKey && config.model)
+    if (this.available) {
+      logger.info(
+        `Embedding 配置已热更新: model=${config.model}, apiBase=${config.apiBase}, dim=${config.dimension}`,
+      )
+    } else {
+      logger.warn('Embedding 配置热更新后仍不完整，向量化和 RAG 检索不可用')
+    }
 
     // 重建 Reranker
     if (config.reranker?.apiKey) {
@@ -100,11 +131,28 @@ export class EmbeddingService implements EmbeddingProvider {
     return this.currentConfig
   }
 
+  /**
+   * Embedding 是否可用（配置完整且未检测到致命错误）
+   *
+   * 调用方应在调用 embed() 前先检查此属性，避免不必要的网络请求和异常处理。
+   */
+  get isAvailable(): boolean {
+    return this.available
+  }
+
   async embed(texts: string[]): Promise<number[][]> {
+    if (!this.available) {
+      logger.debug('Embedding 不可用（配置不完整），返回空数组')
+      return []
+    }
     return this.provider.embed(texts)
   }
 
   async embedOne(text: string): Promise<number[]> {
+    if (!this.available) {
+      logger.debug('Embedding 不可用（配置不完整），返回空向量')
+      return []
+    }
     const [vec] = await this.embed([text])
     const result = vec ?? []
 
@@ -117,7 +165,7 @@ export class EmbeddingService implements EmbeddingProvider {
         return Math.abs(a - 0.42) < 1e-9 || Math.abs(a - 4.2) < 1e-9
       })
     ) {
-      console.log('\n🌌 [System] ...42... 宇宙、生命与万物的终极答案正在此处共振。')
+      logger.info('...42... 宇宙、生命与万物的终极答案正在此处共振。')
       logger.info('向量星阵对齐完成，隐藏的信息浮现于语义空间。')
     }
 

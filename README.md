@@ -12,7 +12,7 @@
 
 <!-- 动态打字效果 Slogan -->
 <a href="https://github.com/YoKONCy/PeroCore">
-  <img src="https://readme-typing-svg.demolab.com?font=Noto+Serif+SC&weight=600&size=28&duration=4000&pause=1000&color=1E90FF&center=true&vCenter=true&multiline=true&repeat=false&width=800&height=70&lines=Let+AI+become+a+truly+warm+companion;让+AI+成为真正有温度的伙伴;TriviumDB+Engine+✦+NIT+Protocol+✦+Deep+Memory" alt="Slogan" />
+  <img src="https://readme-typing-svg.demolab.com?font=Noto%20Serif%20SC&weight=600&size=28&duration=4000&pause=1000&color=1E90FF&center=true&vCenter=true&multiline=true&repeat=false&width=800&height=70&lines=Let%20AI%20become%20a%20truly%20warm%20companion;%E8%AE%A9%20AI%20%E6%88%90%E4%B8%BA%E7%9C%9F%E6%AD%A3%E6%9C%89%E6%B8%A9%E5%BA%A6%E7%9A%84%E4%BC%99%E4%BC%B4;TriviumDB%20Engine%20%E2%9C%A6%20NIT%20Protocol%20%E2%9C%A6%20Deep%20Memory" alt="Slogan" />
 </a>
 
 <br/>

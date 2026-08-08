@@ -5,6 +5,42 @@
 
 /** minGRU 隐状态维度 */
 export const HIDDEN_DIM: number
+
+/** minGRU 内部权重各分量大小 */
+export const MIN_GRU_WEIGHT_SIZES: {
+  readonly W_Z: number
+  readonly B_Z: number
+  readonly W_H: number
+  readonly B_H: number
+  readonly TOTAL: number
+}
+
+/** minGRU 权重包（TS 侧管理，可持久化） */
+export interface MinGruWeights {
+  wZ: Float32Array
+  bZ: Float32Array
+  wH: Float32Array
+  bH: Float32Array
+}
+
+/** 初始化 minGRU 权重包（Xavier 初始化 + 偏置 0.1） */
+export declare function xavierInitMinGruWeights(hiddenDim?: number): MinGruWeights
+
+/** minGRU 带权重前向推理（正规 GRU 实现） */
+export declare function minGruForwardWithWeights(
+  hidden: Float32Array,
+  input: Float32Array,
+  weights: MinGruWeights,
+): Float32Array
+
+/** minGRU 单步 SGD 训练（原地更新权重，返回损失值） */
+export declare function trainMinGruStep(
+  hidden: Float32Array,
+  input: Float32Array,
+  weights: MinGruWeights,
+  label: number,
+  learningRate?: number,
+): number
 /**
  * minGRU 前向推理
  *

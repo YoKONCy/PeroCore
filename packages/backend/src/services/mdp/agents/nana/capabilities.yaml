@@ -1,14 +1,22 @@
-# Nana Agent 能力矩阵 — CapabilityGate (D51)
-# 单一权威: (Agent, Mode) → 可用工具 + 技能 + 提示词片段
+# Nana Agent 能力矩阵 — CapabilityGate (AIOS)
+# 单一权威: (Agent, Channel) → 可用工具 + 技能 + 提示词片段
 #
-# 工具名必须与 ToolRegistry 中注册的 definition.name 完全一致。
-# 已注册工具清单见 packages/backend/src/tools/index.ts
+# AIOS 改造说明：
+# - modes: 改为 channels:（与 Thread.channel 持久属性对齐）
+# - work 模式保留为 channel（未来由 Coding App + SubAgent 替代）
+# - lightweight 合并到 companion（极简陪伴场景）
+#
+# 第七阶段修复（批次 B3/B4）：
+# - social/group/group_chat 已显式配置最小工具集（原先缺失会 fail-open 回退 desktop）
+# - CapabilityGate 已改为 fail-closed：未在此文件声明的 channel 一律返回空工具集
+# - 新增 channel 时必须在此显式配置，否则该通道下 Agent 将无任何工具可用
 #
 # 能力矩阵与 pero 保持一致 (同等权限级别)。
+# 工具名必须与 ToolRegistry 中注册的 definition.name 完全一致。
 
 agent: nana
 
-modes:
+channels:
   desktop:
     tools:
       # 生命周期
@@ -54,8 +62,9 @@ modes:
     prompt_fragments:
       - components/abilities/vision
       - components/abilities/workspace
-      - components/output/output_constraint
+    # AIOS: output_constraint 已移至独立槽位 9100_output_format（近邻用户输入）
 
+  # work channel: 保留供未来 Coding App + SubAgent 使用
   work:
     tools:
       - finish_task
@@ -73,41 +82,10 @@ modes:
       - code_assistance
     prompt_fragments:
       - components/abilities/workspace
-      - components/output/output_constraint
+    # AIOS: output_constraint 已移至独立槽位 9100_output_format（近邻用户输入）
 
-  social:
-    tools:
-      - finish_task
-      - set_reminder
-      - list_reminders
-      - cancel_reminder
-      # ── 日记查找 ──
-      - search_diary
-      # ── 社交工具 ──
-      - social_send_message
-      - social_get_contacts
-      - social_get_groups
-      - social_get_contact_info
-      - social_get_group_info
-      - social_get_group_members
-      - social_handle_request
-      - social_notify_owner
-    skills: []
-    prompt_fragments: []
-
-  group_chat:
-    tools:
-      - finish_task
-      # ── 据点工具 ──
-      - stronghold_move_to_room
-      - stronghold_list_rooms
-      - stronghold_get_room_info
-      - stronghold_set_environment
-      - stronghold_call_butler
-    skills: []
-    prompt_fragments: []
-
-  lightweight:
+  # companion channel: 极简陪伴场景（原 lightweight + companion 合并）
+  companion:
     tools:
       - finish_task
       - take_screenshot
@@ -120,10 +98,38 @@ modes:
     prompt_fragments:
       - components/abilities/vision
 
-  companion:
+  # ─────────────────────────────────────────────
+  # 第七阶段修复（批次 B4）：social / group channel 最小配置
+  # 安全原则：社交通道面向外部不可信用户，绝不放开文件写入、终端执行、脚本编排。
+  # ─────────────────────────────────────────────
+
+  # social channel: 私聊场景（QQ 私聊 / Discord DM 等）
+  social:
     tools:
       - finish_task
-      # 日记查找
+      - load_skill
+      - web_fetch
       - search_diary
+      - set_reminder
+      - list_reminders
+      - cancel_reminder
+    skills: []
+    prompt_fragments: []
+
+  # group channel: 群聊场景，比 social 更严格
+  group:
+    tools:
+      - finish_task
+      - load_skill
+      - web_fetch
+    skills: []
+    prompt_fragments: []
+
+  # group_chat channel: 兼容旧 source 名（stronghold.router 传的是 'group_chat'）
+  group_chat:
+    tools:
+      - finish_task
+      - load_skill
+      - web_fetch
     skills: []
     prompt_fragments: []

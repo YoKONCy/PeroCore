@@ -64,7 +64,7 @@ export function createSystemRouter(ctx: AppContext) {
         agents: {
           total: agents.length,
           enabled: agents.filter((a) => a.isEnabled).length,
-          activeId: ctx.agentManager.activeAgentId,
+          activeId: ctx.agentManager.defaultAgentId,
         },
         gateway: {
           connectedNodes: ctx.gatewayHub.connectedCount,

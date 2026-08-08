@@ -62,7 +62,8 @@ label: 工具列表
 
       const keys = engine.listKeys().sort()
 
-      expect(keys).toEqual(['pero/system', 'plain', 'slots/tools', 'system'].sort())
+      // AIOS: slots/tools.md 现在同时注册 'slots/tools' 全名和 'tools' 短名
+      expect(keys).toEqual(['pero/system', 'plain', 'slots/tools', 'system', 'tools'].sort())
       expect(engine.getPrompt('system')).toMatchObject({
         key: 'system',
         meta: {

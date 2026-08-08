@@ -35,10 +35,10 @@ function createInbound(overrides: Partial<InboundMessage> = {}): InboundMessage 
 
 function createBridge(overrides: Record<string, unknown> = {}) {
   const deps = {
-    agentService: { chat: vi.fn(() => Promise.resolve('好的主人')) },
+    generateReply: vi.fn(() => Promise.resolve('好的主人')),
     gatewayHub: { broadcast: vi.fn(() => Promise.resolve()) },
     llmService: { chat: vi.fn() },
-    getThinkingModel: vi.fn(() =>
+    getSocialSchedulerModel: vi.fn(() =>
       Promise.resolve({ provider: 'openai', modelId: 'gpt', apiKey: 'key' }),
     ),
     socialMessageRepo: {
@@ -140,11 +140,15 @@ describe('SocialBridge', () => {
     await provider.sendMessage('group-2', '工具消息', 'group')
     await provider.notifyOwner('提醒主人', 'high')
 
-    expect(deps.agentService.chat).toHaveBeenCalledWith({
+    // 方案 B 迁移后：SocialBridge 不再调用 agentService.chat，
+    // 而是通过 generateReply 回调（由 SocialAppRuntime 提供独立编译+LLM 调用）
+    expect(deps.generateReply).toHaveBeenCalledWith({
       agentId: 'pero',
-      source: 'social',
-      sessionId: 'social_napcat_group-1',
-      messages: [{ role: 'user', content: '[主人]: 第一条\n[主人]: 第二条' }],
+      channelType: 'group',
+      channelId: 'group-1',
+      combinedMessage: '[主人]: 第一条\n[主人]: 第二条',
+      routeChannel: 'group',
+      routeThreadId: undefined,
     })
     expect(adapter.sendMessage).toHaveBeenCalledWith({
       channelId: 'group-1',
@@ -227,7 +231,7 @@ describe('SocialScheduler', () => {
         ),
       },
       mdpEngine: { render: vi.fn((key: string) => `prompt:${key}`) },
-      getThinkingModel: vi.fn(() =>
+      getSocialSchedulerModel: vi.fn(() =>
         Promise.resolve({ provider: 'openai', modelId: 'gpt', apiKey: 'key' }),
       ),
       onDecideReply: vi.fn(() => Promise.resolve()),
@@ -289,7 +293,7 @@ describe('SocialScheduler', () => {
 
     const noModelSession = createSession()
     const noModel = createScheduler([noModelSession], {
-      getThinkingModel: vi.fn(() => Promise.resolve(null)),
+      getSocialSchedulerModel: vi.fn(() => Promise.resolve(null)),
     })
     ;(noModel.scheduler as unknown as { nextGroupThoughtTime: number }).nextGroupThoughtTime = 0
     await (

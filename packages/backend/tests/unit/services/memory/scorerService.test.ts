@@ -3,18 +3,37 @@ import { ScorerService } from '@perocore/backend/services/memory/scorerService'
 
 const modelConfig = { provider: 'openai', modelId: 'scorer-model', apiKey: 'key' }
 
-function createLog(
-  id: number,
-  role: 'user' | 'assistant',
-  content: string,
-  pairId = `p${Math.ceil(id / 2)}`,
+/**
+ * 创建对话对（AIOS: 替代旧版 createLog，匹配 ThreadRepository.getPendingForScorer 返回结构）
+ *
+ * 返回 { userMessage, assistantMessage, pairId } 三元组，
+ * 其中 userMessage / assistantMessage 是 ThreadMessageRow 的最小子集。
+ * 第五阶段：新增 threadId 字段（Scorer 写候选时读取 pair.userMessage.threadId 作为 originThreadId）。
+ */
+function createPair(
+  userId: number,
+  userContent: string,
+  assistantId: number,
+  assistantContent: string,
+  pairId = `p${Math.ceil(userId / 2)}`,
+  threadId = 'thread-1',
 ) {
-  return { id, role, content, pairId, source: 'desktop' }
+  return {
+    userMessage: { id: userId, content: userContent, pairId, role: 'user' as const, threadId },
+    assistantMessage: {
+      id: assistantId,
+      content: assistantContent,
+      pairId,
+      role: 'assistant' as const,
+      threadId,
+    },
+    pairId,
+  }
 }
 
 function createService(
   options: {
-    pending?: ReturnType<typeof createLog>[]
+    pending?: ReturnType<typeof createPair>[]
     llmContent?: string | null
     model?: typeof modelConfig | null
     embedding?: number[][]
@@ -22,17 +41,32 @@ function createService(
     vectorReject?: boolean
   } = {},
 ) {
-  const pending = options.pending ?? [
-    createLog(1, 'user', '主人喜欢猫'),
-    createLog(2, 'assistant', '猫很可爱'),
-  ]
+  // AIOS: 默认一组对话对（user 主人喜欢猫 + assistant 猫很可爱）
+  const pending = options.pending ?? [createPair(1, '主人喜欢猫', 2, '猫很可爱', 'p1')]
+  // 第五阶段：memoryService 不再被 ScorerService 调用，但构造函数仍保留参数（向后兼容）
   const memoryService = {
     create: vi.fn().mockResolvedValue({ id: 99 }),
   }
-  const logService = {
+  // 第五阶段：memoryCandidateRepo 是 ScorerService 写入候选的目标
+  const memoryCandidateRepo = {
+    create: vi.fn().mockResolvedValue({
+      id: 'candidate-uuid',
+      agentId: 'pero',
+      source: 'thread',
+      originThreadId: 'thread-1',
+      summary: '',
+      evidenceRefs: [],
+      importance: 5,
+      confidence: 0.5,
+      suggestedType: 'event',
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+    }),
+  }
+  // AIOS: logService 已改为 threadRepo（数据源从 ConversationLog 改为 ThreadRepository）
+  const threadRepo = {
     getPendingForScorer: vi.fn().mockResolvedValue(pending),
-    markAnalyzed: vi.fn().mockResolvedValue(undefined),
-    markFailed: vi.fn().mockResolvedValue(undefined),
+    updateScorerStatus: vi.fn().mockResolvedValue(undefined),
   }
   const llmService = {
     chat: options.chatReject
@@ -53,6 +87,7 @@ function createService(
       : vi.fn().mockResolvedValue(undefined),
   }
   const embeddingService = {
+    isAvailable: true,
     embed: vi.fn().mockResolvedValue(
       options.embedding ?? [
         [1, 0],
@@ -64,11 +99,11 @@ function createService(
     .fn()
     .mockResolvedValue(options.model === undefined ? modelConfig : options.model)
   const service = new ScorerService(
-    memoryService as never,
-    logService as never,
+    threadRepo as never,
     llmService as never,
     getModelConfig as never,
     mdpEngine as never,
+    memoryCandidateRepo as never,
     vectorRepo as never,
     embeddingService as never,
     { batchSize: 2, maxBatchChars: 40, dedupThreshold: 0.9, temperature: 0.2 },
@@ -76,7 +111,8 @@ function createService(
   return {
     service,
     memoryService,
-    logService,
+    memoryCandidateRepo,
+    threadRepo,
     llmService,
     mdpEngine,
     vectorRepo,
@@ -87,17 +123,18 @@ function createService(
 
 describe('ScorerService', () => {
   it('应当在待处理数量不足时不触发批处理', async () => {
-    const { service, logService, llmService } = createService({
-      pending: [createLog(1, 'user', '一句话')],
+    const { service, threadRepo, llmService } = createService({
+      pending: [],
     })
 
     await service.checkAndProcess('pero')
 
-    expect(logService.getPendingForScorer).toHaveBeenCalledWith('pero', 2)
+    // AIOS(Phase5): getPendingForScorer 新增 threadId + channel 可选参数
+    expect(threadRepo.getPendingForScorer).toHaveBeenCalledWith('pero', 2, undefined, undefined)
     expect(llmService.chat).not.toHaveBeenCalled()
   })
 
-  it('应当批量提炼记忆、写入图谱建材并标记已分析', async () => {
+  it('应当批量提炼候选、写入 memory_candidates 并标记已分析（第五阶段：不再写 memory_nodes/向量）', async () => {
     const llmContent = JSON.stringify({
       content: '主人喜欢猫猫',
       tags: ['偏好', '猫'],
@@ -109,9 +146,15 @@ describe('ScorerService', () => {
       topic_keys: ['宠物'],
       nearest_cluster: 'animal',
     })
-    const { service, memoryService, logService, llmService, mdpEngine, vectorRepo } = createService(
-      { llmContent },
-    )
+    const {
+      service,
+      memoryService,
+      memoryCandidateRepo,
+      threadRepo,
+      llmService,
+      mdpEngine,
+      vectorRepo,
+    } = createService({ llmContent })
 
     await service.processBatch('pero')
 
@@ -127,33 +170,37 @@ describe('ScorerService', () => {
       ],
       { temperature: 0.2, responseFormat: { type: 'json_object' } },
     )
-    expect(memoryService.create).toHaveBeenCalledWith({
-      content: '主人喜欢猫猫',
-      agentId: 'pero',
-      tags: '偏好,猫',
-      importance: 8,
+    // 第五阶段：Scorer 不再调 memoryService.create，改为调 memoryCandidateRepo.create
+    expect(memoryService.create).not.toHaveBeenCalled()
+    expect(memoryCandidateRepo.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: 'pero',
+        source: 'thread',
+        originThreadId: 'thread-1',
+        originMessageIds: ['1', '2'],
+        summary: '主人喜欢猫猫',
+        importance: 8,
+        suggestedType: 'preference',
+        status: 'pending',
+      }),
+    )
+    // 第五阶段：Scorer 不再调 vectorRepo.indexKeyword（图谱建材改由 Reflection 管道负责）
+    expect(vectorRepo.indexKeyword).not.toHaveBeenCalled()
+    expect(vectorRepo.link).not.toHaveBeenCalled()
+    // updateScorerStatus 现在用 candidateId 关联（替代旧 memoryId）
+    expect(threadRepo.updateScorerStatus).toHaveBeenCalledWith('p1', 'analyzed', {
       sentiment: 'positive',
-      type: 'preference',
-      source: 'desktop',
-    })
-    expect(vectorRepo.indexKeyword).toHaveBeenCalledWith(99, 'entity_猫猫', 'pero', 'desktop')
-    expect(vectorRepo.indexKeyword).toHaveBeenCalledWith(99, 'topic_宠物', 'pero', 'desktop')
-    expect(vectorRepo.link).toHaveBeenCalledWith(7, 99, 'causal', 0.6, 'pero', 'desktop')
-    expect(logService.markAnalyzed).toHaveBeenCalledWith('p1', {
-      sentiment: 'positive',
       importance: 8,
-      memoryId: 99,
+      candidateId: 'candidate-uuid',
     })
   })
 
   it('应当对重复用户消息去重', async () => {
     const pending = [
-      createLog(1, 'user', '重复问题', 'p1'),
-      createLog(2, 'assistant', '回答一', 'p1'),
-      createLog(3, 'user', '重复问题', 'p2'),
-      createLog(4, 'assistant', '回答二', 'p2'),
+      createPair(1, '重复问题', 2, '回答一', 'p1'),
+      createPair(3, '重复问题', 4, '回答二', 'p2'),
     ]
-    const { service, llmService, embeddingService, logService } = createService({
+    const { service, llmService, embeddingService, threadRepo } = createService({
       pending,
       embedding: [
         [1, 0],
@@ -179,40 +226,46 @@ describe('ScorerService', () => {
     expect(userPrompt).toContain('主人: 重复问题')
     expect(userPrompt).toContain('AI: 回答一')
     expect(userPrompt).not.toContain('回答二')
-    expect(logService.markAnalyzed).toHaveBeenCalledWith('p1', expect.any(Object))
-    expect(logService.markAnalyzed).toHaveBeenCalledWith('p2', expect.any(Object))
+    // AIOS: 即使去重过滤了 p2 的上下文，pairIds 仍取自原始 pending，两者都标记已分析
+    expect(threadRepo.updateScorerStatus).toHaveBeenCalledWith('p1', 'analyzed', expect.any(Object))
+    expect(threadRepo.updateScorerStatus).toHaveBeenCalledWith('p2', 'analyzed', expect.any(Object))
   })
 
   it('应当在没有模型配置时跳过分析', async () => {
-    const { service, llmService, memoryService } = createService({ model: null })
+    const { service, llmService, memoryCandidateRepo } = createService({ model: null })
 
     await service.processBatch('pero')
 
     expect(llmService.chat).not.toHaveBeenCalled()
-    expect(memoryService.create).not.toHaveBeenCalled()
+    expect(memoryCandidateRepo.create).not.toHaveBeenCalled()
   })
 
-  it('应当在 LLM 未返回有效内容时标记对话已分析但不创建记忆', async () => {
-    const { service, logService, memoryService } = createService({ llmContent: null })
+  it('应当在 LLM 未返回有效内容时标记对话已分析但不创建候选', async () => {
+    const { service, threadRepo, memoryCandidateRepo } = createService({ llmContent: null })
 
     await service.processBatch('pero')
 
-    expect(memoryService.create).not.toHaveBeenCalled()
-    expect(logService.markAnalyzed).toHaveBeenCalledWith('p1', {})
+    expect(memoryCandidateRepo.create).not.toHaveBeenCalled()
+    expect(threadRepo.updateScorerStatus).toHaveBeenCalledWith('p1', 'analyzed', {})
   })
 
   it('应当在 LLM 或 JSON 失败时标记失败', async () => {
-    const { service, logService, memoryService } = createService({
+    const { service, threadRepo, memoryCandidateRepo } = createService({
       chatReject: new Error('模型失败'),
     })
 
     await service.processBatch('pero')
 
-    expect(memoryService.create).not.toHaveBeenCalled()
-    expect(logService.markFailed).toHaveBeenCalledWith('p1', expect.stringContaining('模型失败'))
+    expect(memoryCandidateRepo.create).not.toHaveBeenCalled()
+    // AIOS: markFailed 已改为 threadRepo.updateScorerStatus('failed', { error })
+    expect(threadRepo.updateScorerStatus).toHaveBeenCalledWith(
+      'p1',
+      'failed',
+      expect.objectContaining({ error: expect.stringContaining('模型失败') }),
+    )
   })
 
-  it('应当在 Embedding 去重失败或图谱写入失败时继续主流程', async () => {
+  it('应当在 Embedding 去重失败时继续主流程（第五阶段：不再依赖向量写入）', async () => {
     const llmContent = JSON.stringify({
       content: '稳定记忆',
       tags: [],
@@ -223,7 +276,7 @@ describe('ScorerService', () => {
       causal_refs: [1],
       topic_keys: ['主题'],
     })
-    const { service, embeddingService, memoryService, logService } = createService({
+    const { service, embeddingService, memoryCandidateRepo, threadRepo } = createService({
       llmContent,
       vectorReject: true,
     })
@@ -231,29 +284,32 @@ describe('ScorerService', () => {
 
     await service.processBatch('pero')
 
-    expect(memoryService.create).toHaveBeenCalledWith(
-      expect.objectContaining({ content: '稳定记忆' }),
+    // 第五阶段：即使 embedding 失败，候选仍应写入
+    expect(memoryCandidateRepo.create).toHaveBeenCalledWith(
+      expect.objectContaining({ summary: '稳定记忆' }),
     )
-    expect(logService.markAnalyzed).toHaveBeenCalledWith(
+    expect(threadRepo.updateScorerStatus).toHaveBeenCalledWith(
       'p1',
-      expect.objectContaining({ memoryId: 99 }),
+      'analyzed',
+      expect.objectContaining({ candidateId: 'candidate-uuid' }),
     )
   })
 
   it('应当恢复未完成任务直到没有待处理项', async () => {
-    const first = [createLog(1, 'user', '第一轮'), createLog(2, 'assistant', '回答')]
-    const logService = {
+    const first = [createPair(1, '第一轮', 2, '回答', 'p1')]
+    const threadRepo = {
       getPendingForScorer: vi
         .fn()
         .mockResolvedValueOnce(first)
         .mockResolvedValueOnce(first)
         .mockResolvedValueOnce([]),
-      markAnalyzed: vi.fn().mockResolvedValue(undefined),
-      markFailed: vi.fn().mockResolvedValue(undefined),
+      updateScorerStatus: vi.fn().mockResolvedValue(undefined),
+    }
+    const memoryCandidateRepo = {
+      create: vi.fn().mockResolvedValue({ id: 'candidate-1' }),
     }
     const service = new ScorerService(
-      { create: vi.fn().mockResolvedValue({ id: 1 }) } as never,
-      logService as never,
+      threadRepo as never,
       {
         chat: vi.fn().mockResolvedValue({
           choices: [
@@ -276,6 +332,7 @@ describe('ScorerService', () => {
       } as never,
       vi.fn().mockResolvedValue(modelConfig) as never,
       { render: vi.fn().mockReturnValue('提示词') } as never,
+      memoryCandidateRepo as never,
       undefined,
       undefined,
       { batchSize: 2 },
@@ -283,6 +340,8 @@ describe('ScorerService', () => {
 
     await service.recoverPendingTasks('pero')
 
-    expect(logService.getPendingForScorer).toHaveBeenCalledTimes(3)
+    expect(threadRepo.getPendingForScorer).toHaveBeenCalledTimes(3)
+    // processBatch 在循环1中执行一次（调用 create 一次）；循环2因 pending 为空直接退出
+    expect(memoryCandidateRepo.create).toHaveBeenCalledTimes(1)
   })
 })

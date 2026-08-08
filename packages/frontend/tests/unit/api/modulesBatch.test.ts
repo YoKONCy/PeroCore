@@ -27,7 +27,6 @@ describe('基础 API modules', () => {
   it('agentApi 应当转发 Agent 相关端点和请求体', () => {
     agentApi.list()
     agentApi.getActive()
-    agentApi.setActive('pero')
     agentApi.enable('assistant')
     agentApi.disable('assistant')
     agentApi.reload()
@@ -35,7 +34,6 @@ describe('基础 API modules', () => {
 
     expect(clientMock.get).toHaveBeenCalledWith('/agents')
     expect(clientMock.get).toHaveBeenCalledWith('/agents/active')
-    expect(clientMock.put).toHaveBeenCalledWith('/agents/active', { agentId: 'pero' })
     expect(clientMock.post).toHaveBeenCalledWith('/agents/assistant/enable')
     expect(clientMock.post).toHaveBeenCalledWith('/agents/assistant/disable')
     expect(clientMock.post).toHaveBeenCalledWith('/agents/reload')

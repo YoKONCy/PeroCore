@@ -7,7 +7,7 @@
  * @module packages/backend/src/repositories/memory.repo
  */
 
-import { eq, desc, asc, and, sql, inArray, lt, ne, gte } from 'drizzle-orm'
+import { eq, desc, asc, and, or, sql, inArray, lt, ne, gte } from 'drizzle-orm'
 import { memoryNodes } from '../database/schema'
 import type { DrizzleDb } from '../database'
 
@@ -278,6 +278,54 @@ export class MemoryRepository {
       .orderBy(desc(memoryNodes.timestamp))
       .limit(limit)
       .all()
+  }
+
+  /**
+   * 模式搜索（Pattern Search fallback）
+   *
+   * 针对 TriviumDB BM25 对短词（<3 字符）和 CJK 文本召回不足的问题，
+   * 使用 SQLite LIKE 进行模糊匹配补充召回。
+   *
+   * 适用场景：
+   * - 查询词为短词（如 "AI"、"猫"）时，BM25 难以命中
+   * - CJK 文本（中日韩）分词粒度过粗或过细时，bigram 模糊匹配兜底
+   *
+   * 打分策略：
+   * - 按时间戳倒序排列（新记忆优先）
+   * - 使用 1/(rank+1) 的倒数打分，便于上层 RRF 融合
+   * - 越靠前的结果得分越高（rank=0 时 score=1.0）
+   *
+   * @param agentId Agent ID（物理隔离保证）
+   * @param terms 已分好的查询词列表（CJK bigrams 或短词）
+   * @param limit 返回数量上限
+   * @returns 命中记忆 ID 和得分列表
+   */
+  async patternSearch(
+    agentId: string,
+    terms: string[],
+    limit = 20,
+  ): Promise<Array<{ id: number; score: number }>> {
+    // 空查询直接返回，避免生成无效 SQL
+    if (terms.length === 0) return []
+
+    // 构建 OR 条件：content LIKE '%term1%' OR content LIKE '%term2%' ...
+    // 注意：LIKE 对 % 无索引优化，会全表扫描，但记忆表规模通常在千~万级，可接受
+    const conditions = terms.map((term) => sql`${memoryNodes.content} LIKE ${`%${term}%`}`)
+
+    const rows = await this.db
+      .select({ id: memoryNodes.id })
+      .from(memoryNodes)
+      .where(and(eq(memoryNodes.agentId, agentId), or(...conditions)))
+      .orderBy(desc(memoryNodes.timestamp))
+      .limit(limit)
+      .all()
+
+    // RRF 友好打分：1/(rank+1)，rank 从 0 开始
+    // 与向量检索的余弦得分（0~1）处于同一量级，便于融合
+    return rows.map((row, index) => ({
+      id: row.id,
+      score: 1.0 / (index + 1),
+    }))
   }
 
   /** 统计某时间戳之后的记忆数 (Reflection 降本决策用) */

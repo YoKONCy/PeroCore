@@ -1,10 +1,9 @@
 /**
  * Agent Router — 角色管理 API
  *
- * 提供 Agent CRUD + 切换 + Capabilities 端点：
+ * 提供 Agent CRUD + Capabilities 端点：
  * - GET    /api/agents           列出所有 Agent
- * - GET    /api/agents/active    获取当前活跃 Agent
- * - PUT    /api/agents/active    切换活跃 Agent
+ * - GET    /api/agents/active    获取默认 Agent（AIOS: 不再有全局活跃概念）
  * - GET    /api/agents/:id       获取单个 Agent 详情
  * - POST   /api/agents           创建自定义 Agent (B6-3)
  * - DELETE /api/agents/:id       删除自定义 Agent (B6-3)
@@ -26,9 +25,7 @@ import type { AppContext } from '../container'
 // Zod Schema
 // ─────────────────────────────────────────────
 
-const switchAgentSchema = z.object({
-  agentId: z.string().min(1),
-})
+// AIOS: switchAgentSchema 已移除（PUT /api/agents/active 路由已删除）
 
 const createAgentSchema = z.object({
   id: z
@@ -56,13 +53,13 @@ export function createAgentRouter(ctx: AppContext) {
     return c.json({ code: 'OK', message: '获取成功', data: agents })
   })
 
-  // GET /api/agents/active — 获取当前活跃 Agent
+  // GET /api/agents/active — 获取默认 Agent（AIOS 架构下不再有"活跃"概念，返回默认 Agent）
   router.get('/active', (c) => {
-    const agent = ctx.agentManager.getActiveAgent()
+    const agent = ctx.agentManager.getDefaultAgent()
     if (!agent) {
       throw new AppError('AGENT_NOT_FOUND', {
-        message: '当前没有活跃的 Agent',
-        data: { agentId: ctx.agentManager.activeAgentId },
+        message: '当前没有默认 Agent',
+        data: { agentId: ctx.agentManager.defaultAgentId },
       })
     }
     return c.json({
@@ -89,25 +86,8 @@ export function createAgentRouter(ctx: AppContext) {
     return c.body(new Uint8Array(avatarData.buffer))
   })
 
-  // PUT /api/agents/active — 切换活跃 Agent
-  router.put('/active', zValidator('json', switchAgentSchema), (c) => {
-    const { agentId } = c.req.valid('json')
-    const success = ctx.agentManager.setActiveAgent(agentId)
-    if (!success) {
-      throw new AppError('AGENT_NOT_FOUND', {
-        message: `无法切换到 Agent: ${agentId}`,
-        data: { agentId },
-      })
-    }
-    // 广播 Agent 切换事件给前端
-    void ctx.gatewayHub.pushStateUpdate({ action: 'agent_changed', agentId })
-
-    return c.json({
-      code: 'OK',
-      message: `已切换到 ${agentId}`,
-      data: { agentId: ctx.agentManager.activeAgentId },
-    })
-  })
+  // AIOS: PUT /api/agents/active 已移除（setActiveAgent 方法已删除）
+  // 不再允许运行时切换全局活跃 Agent，前端窗口级状态由 RuntimeStateService 管理。
 
   // GET /api/agents/:id — 获取单个 Agent 详情 (B6-3)
   router.get('/:id', (c) => {
@@ -130,7 +110,6 @@ export function createAgentRouter(ctx: AppContext) {
         name: agent.name,
         description: agent.description,
         avatarPath: agent.avatarPath,
-        workTraits: agent.workTraits,
         socialTraits: agent.socialTraits,
         useStickers: agent.useStickers,
       },
@@ -259,6 +238,35 @@ export function createAgentRouter(ctx: AppContext) {
       code: 'OK',
       message: '获取成功',
       data: texts,
+    })
+  })
+
+  // GET /api/agents/:id/pet-state — 获取角色实时状态 (mood/vibe/mind + 动态台词)
+  // 前端 Pet3D / Dashboard 启动时拉取，恢复 finish_task 持久化到 pet_states 的状态
+  router.get('/:id/pet-state', async (c) => {
+    const id = c.req.param('id')
+    const state = await ctx.petStateService.get(id)
+    const parse = <T>(text: string | null | undefined, fallback: T): T => {
+      if (!text) return fallback
+      try {
+        return JSON.parse(text) as T
+      } catch {
+        return fallback
+      }
+    }
+    return c.json({
+      code: 'OK',
+      message: '获取成功',
+      data: {
+        agentId: id,
+        mood: state?.mood ?? '开心',
+        vibe: state?.vibe ?? '活泼',
+        mind: state?.mind ?? '正在想主人...',
+        clickMessages: parse<Record<string, string[]>>(state?.clickMessagesJson, {}),
+        idleMessages: parse<string[]>(state?.idleMessagesJson, []),
+        backMessages: parse<string[]>(state?.backMessagesJson, []),
+        updatedAt: state?.updatedAt ?? null,
+      },
     })
   })
 

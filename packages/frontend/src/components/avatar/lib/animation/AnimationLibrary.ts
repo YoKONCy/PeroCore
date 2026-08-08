@@ -7,6 +7,7 @@
  * @module packages/frontend/src/components/avatar/lib/animation/AnimationLibrary
  */
 
+import { logger } from '../../../../lib/logger'
 import type { IAnimationData, IBoneTrack, IKeyframe } from './AnimationTypes'
 
 // ══════ Bedrock 动画 JSON 的原始类型 ══════
@@ -101,7 +102,7 @@ export class AnimationLibrary {
     try {
       const response = await fetch(url)
       if (!response.ok) {
-        console.warn(`[AnimationLibrary] 加载动画失败: ${url}`)
+        logger.warn('AnimationLibrary', `加载动画失败: ${url}`)
         return
       }
       const json = await response.json()
@@ -112,7 +113,7 @@ export class AnimationLibrary {
         }
       }
     } catch (e) {
-      console.error(`[AnimationLibrary] 加载动画出错 (${url}):`, e)
+      logger.error('AnimationLibrary', `加载动画出错: ${url}`, e)
     }
   }
 

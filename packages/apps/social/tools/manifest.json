@@ -1,0 +1,149 @@
+{
+  "id": "social-ops",
+  "name": "社交平台操作",
+  "version": "1.0.0",
+  "author": "PeroCore Team",
+  "description": "跨平台社交操作工具。通过 SocialMessagingProvider 适配不同平台 (QQ/Discord/Telegram)。仅在社交模式下可用。",
+  "type": "tool",
+  "entry": "index.ts",
+  "category": "core",
+  "platforms": ["windows", "darwin", "linux"],
+  "tools": [
+    {
+      "name": "social_send_message",
+      "description": "发送消息到社交平台的指定会话。支持私聊和群聊。需要社交适配器已连接。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "description": "目标会话 ID (用户 ID 或群组 ID)"
+          },
+          "content": {
+            "type": "string",
+            "description": "消息文本内容"
+          },
+          "type": {
+            "type": "string",
+            "description": "消息类型",
+            "enum": ["private", "group"]
+          }
+        },
+        "required": ["target", "content", "type"]
+      }
+    },
+    {
+      "name": "social_get_contacts",
+      "description": "获取当前社交平台的联系人/好友列表。",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "social_get_groups",
+      "description": "获取当前社交平台的群组列表。",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "social_get_contact_info",
+      "description": "查询社交平台上指定用户的详细信息 (昵称、备注等)。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "description": "目标用户 ID"
+          }
+        },
+        "required": ["user_id"]
+      }
+    },
+    {
+      "name": "social_get_group_info",
+      "description": "查询指定群组的详细信息 (群名、成员数等)。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "group_id": {
+            "type": "string",
+            "description": "目标群组 ID"
+          }
+        },
+        "required": ["group_id"]
+      }
+    },
+    {
+      "name": "social_get_group_members",
+      "description": "查询指定群组的成员列表。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "group_id": {
+            "type": "string",
+            "description": "目标群组 ID"
+          }
+        },
+        "required": ["group_id"]
+      }
+    },
+    {
+      "name": "social_handle_request",
+      "description": "处理收到的好友请求 — 接受或拒绝。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "flag": {
+            "type": "string",
+            "description": "好友请求的标识 flag"
+          },
+          "approve": {
+            "type": "boolean",
+            "description": "是否接受 (true=接受, false=拒绝)"
+          },
+          "remark": {
+            "type": "string",
+            "description": "接受后的备注名 (可选)"
+          }
+        },
+        "required": ["flag", "approve"]
+      }
+    },
+    {
+      "name": "social_read_forward_msg",
+      "description": "读取 QQ 转发消息（合并转发）的内部内容。当用户发送了转发消息时，通过此工具读取其中的具体聊天记录。支持嵌套读取：如果转发内容内部还包含转发消息，返回结果会标记 hasNestedForward=true，可再次调用本工具读取嵌套内容。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "forward_id": {
+            "type": "string",
+            "description": "转发消息的 ID（来自消息中的 [转发消息: id=xxx] 标记）"
+          }
+        },
+        "required": ["forward_id"]
+      }
+    },
+    {
+      "name": "social_read_image",
+      "description": "读取指定消息中的图片。当用户发送了图片但你还没看到时，通过此工具按消息 ID 读取图片内容。聊天记录中每条消息都标注了 message_id，传入对应的 message_id 即可读取该消息中的图片。一次最多读取 3 张图片。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "message_ids": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "要读取图片的消息 ID 列表（对应聊天记录中的 message_id）"
+          },
+          "max_images": {
+            "type": "number",
+            "description": "最多读取几张图片（不超过 3，默认 3）"
+          }
+        },
+        "required": ["message_ids"]
+      }
+    }
+  ]
+}
