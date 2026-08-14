@@ -78,11 +78,13 @@ function syncBrowserManifest(relPath: string): void {
   }
 }
 
-/** 同步 JSON 文件中的 version 字段 */
-function syncJsonVersion(relPath: string): void {
+/** 同步 JSON 文件中的 version 字段。仅本地私有嵌套仓库允许缺失。 */
+function syncJsonVersion(relPath: string, required = true): void {
   const fullPath = path.join(ROOT, relPath)
   if (!fs.existsSync(fullPath)) {
-    throw new Error(`[版本同步] 必需文件不存在: ${relPath}`)
+    if (required) throw new Error(`[版本同步] 必需文件不存在: ${relPath}`)
+    console.log(`[版本同步] ⏭️  ${relPath} 本地私有嵌套仓库未检出，跳过`)
+    return
   }
   checkedCount++
   const pkg: PackageJson = JSON.parse(fs.readFileSync(fullPath, 'utf8'))
@@ -98,11 +100,13 @@ function syncJsonVersion(relPath: string): void {
   }
 }
 
-/** 同步 Cargo.toml 中的 version 字段 */
-function syncCargoVersion(relPath: string): void {
+/** 同步 Cargo.toml 中的 version 字段。仅本地私有嵌套仓库允许缺失。 */
+function syncCargoVersion(relPath: string, required = true): void {
   const fullPath = path.join(ROOT, relPath)
   if (!fs.existsSync(fullPath)) {
-    throw new Error(`[版本同步] 必需文件不存在: ${relPath}`)
+    if (required) throw new Error(`[版本同步] 必需文件不存在: ${relPath}`)
+    console.log(`[版本同步] ⏭️  ${relPath} 本地私有嵌套仓库未检出，跳过`)
+    return
   }
   checkedCount++
   const content = fs.readFileSync(fullPath, 'utf8')
@@ -118,9 +122,13 @@ function syncCargoVersion(relPath: string): void {
 }
 
 /** 同步 Cargo.lock 中指定本地 crate 的版本，避免误改第三方依赖。 */
-function syncCargoLockVersion(relPath: string, crateName: string): void {
+function syncCargoLockVersion(relPath: string, crateName: string, required = true): void {
   const fullPath = path.join(ROOT, relPath)
-  if (!fs.existsSync(fullPath)) throw new Error(`[版本同步] 必需文件不存在: ${relPath}`)
+  if (!fs.existsSync(fullPath)) {
+    if (required) throw new Error(`[版本同步] 必需文件不存在: ${relPath}`)
+    console.log(`[版本同步] ⏭️  ${relPath} 本地私有嵌套仓库未检出，跳过`)
+    return
+  }
   checkedCount++
   const content = fs.readFileSync(fullPath, 'utf8')
   const pattern = new RegExp(`(name = "${crateName}"\\r?\\nversion = ")[^"]+(")`)
@@ -183,7 +191,6 @@ const subPackagePaths = [
   'packages/apps/social/package.json',
   'packages/wiki/package.json',
   'packages/native/render-core-runtime/package.json',
-  'packages/native/render-core/package.json',
   'packages/native/nit-runtime/package.json',
   'packages/native/auditor-wasm/package.json',
   'electron/package.json',
@@ -192,6 +199,8 @@ const subPackagePaths = [
 for (const relPath of subPackagePaths) {
   syncJsonVersion(relPath)
 }
+// render-core 是本机私有嵌套仓库：本地存在时严格同步，CI 未检出时允许跳过。
+syncJsonVersion('packages/native/render-core/package.json', false)
 
 console.log('\n── 🧩 应用与扩展清单 ──')
 syncJsonVersion('packages/apps/social/app.manifest.json')
@@ -203,7 +212,6 @@ syncBrowserManifest('packages/browser-extension/manifest.json')
 console.log('\n── 🦀 Cargo.toml ──')
 
 const cargoTomlPaths = [
-  'packages/native/render-core/Cargo.toml',
   'packages/native/nit-runtime/Cargo.toml',
   'packages/native/auditor-wasm/Cargo.toml',
 ]
@@ -211,8 +219,10 @@ const cargoTomlPaths = [
 for (const relPath of cargoTomlPaths) {
   syncCargoVersion(relPath)
 }
+// render-core 是本机私有嵌套仓库：本地存在时严格同步，CI 未检出时允许跳过。
+syncCargoVersion('packages/native/render-core/Cargo.toml', false)
 
-syncCargoLockVersion('packages/native/render-core/Cargo.lock', 'pero-render-core')
+syncCargoLockVersion('packages/native/render-core/Cargo.lock', 'pero-render-core', false)
 syncCargoLockVersion('packages/native/nit-runtime/Cargo.lock', 'nit-runtime')
 syncCargoLockVersion('packages/native/auditor-wasm/Cargo.lock', 'infos-auditor-wasm')
 
