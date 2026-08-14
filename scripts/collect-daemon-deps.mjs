@@ -186,7 +186,7 @@ export function classifyManifestDependencies(pkgJson) {
     ...Object.keys(pkgJson.dependencies ?? {})
       .filter((name) => !optionalNames.has(name))
       .map((name) => ({ name, optional: false })),
-    ...optionalNames.values().map((name) => ({ name, optional: true })),
+    ...Array.from(optionalNames, (name) => ({ name, optional: true })),
   ]
 }
 
