@@ -290,9 +290,7 @@ export function createChatRouter(ctx: AppContext) {
     const thread = await ctx.threadService.getThread(threadId)
     if (!thread) throw new AppError('NOT_FOUND', { message: `Thread 不存在: ${threadId}` })
     const registryTools = ctx.toolRegistry.getDefinitions(thread.channel)
-    const allowed = ctx.capabilityGate.hasConfig(thread.agentId)
-      ? ctx.capabilityGate.resolve(thread.agentId, thread.channel).allowedTools
-      : new Set(registryTools.map((tool) => tool.name))
+    const allowed = ctx.capabilityGate.resolve(thread.agentId, thread.channel).allowedTools
     const disabled = new Set(thread.disabledTools.filter((name) => !isSystemProtocolTool(name)))
     const tools = registryTools
       .filter((tool) => isSystemProtocolTool(tool.name) || allowed.has(tool.name))

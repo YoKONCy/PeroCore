@@ -209,6 +209,9 @@ importers:
       ws:
         specifier: ^8.20.0
         version: 8.20.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
+      xmlbuilder:
+        specifier: 11.0.1
+        version: 11.0.1
       zod:
         specifier: ^3.25.76
         version: 3.25.76
@@ -11437,8 +11440,7 @@ snapshots:
       xmlbuilder: 11.0.1
     optional: true
 
-  xmlbuilder@11.0.1:
-    optional: true
+  xmlbuilder@11.0.1: {}
 
   xmlbuilder@15.1.1: {}
 

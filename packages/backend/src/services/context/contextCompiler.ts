@@ -327,7 +327,7 @@ export class ContextCompiler {
     }
 
     // ── 7. 读取 agent.promptPath 的 system_prompt.md 内容 → persona_definition 变量 ──
-    // 不再追加 companion 补丁，补丁改由 slots/600_mode_patch.md 模板处理
+    // MDP 引擎会递归展开 persona_definition 中的 owner_* 等嵌套变量。
     const personaDefinition = this.loadSystemPrompt(agentId)
 
     // ── 8. 用 mdpEngine.render 渲染 system_core 规则组件 → system_core 变量 ──

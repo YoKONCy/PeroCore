@@ -232,6 +232,7 @@ const WORKSPACE_TEMPLATE = `- **工作区能力**: 你可读写 Principal Worksp
 interface AgentSetup {
   id: string
   systemPrompt?: string
+  ownerAppellation?: string
   channelPatches?: Record<string, string>
   /** capabilities.yaml 内容（不含 agent: 行，由 helper 自动补） */
   capabilities: string
@@ -248,7 +249,10 @@ interface SetupResult {
   mdpEngine: MdpEngine
   capabilityGate: CapabilityGate
   /** 各 agent 的 promptPath 与 channelPatches（供 mock AgentManager 使用） */
-  agentProfiles: Record<string, { promptPath: string; channelPatches: Record<string, string> }>
+  agentProfiles: Record<
+    string,
+    { promptPath: string; ownerAppellation: string; channelPatches: Record<string, string> }
+  >
   cleanup: () => void
 }
 
@@ -309,6 +313,7 @@ function setupEnvironment(opts: SetupOptions): SetupResult {
     )
     agentProfiles[agent.id] = {
       promptPath,
+      ownerAppellation: agent.ownerAppellation ?? '主人',
       channelPatches: agent.channelPatches ?? {},
     }
   }
@@ -475,7 +480,8 @@ describe('ContextCompiler 上下文拼装链路', () => {
         agents: [
           {
             id: 'pero',
-            systemPrompt: '我是 Pero，一只可爱的看板娘。',
+            systemPrompt: '我是 Pero，一只为{{ owner_appellation }}工作的可爱看板娘。',
+            ownerAppellation: '队长',
             channelPatches: { desktop: '' },
             capabilities: `channels:
   desktop:
@@ -538,7 +544,8 @@ describe('ContextCompiler 上下文拼装链路', () => {
       const systemContent = result.messages[0]!.content
 
       // 包含核心组件：人格定义、系统框架、状态、能力片段
-      expect(systemContent).toContain('我是 Pero，一只可爱的看板娘。')
+      expect(systemContent).toContain('我是 Pero，一只为队长工作的可爱看板娘。')
+      expect(systemContent).not.toContain('{{ owner_appellation }}')
       expect(systemContent).toContain('核心系统框架')
       expect(systemContent).toContain('小明') // owner_name 注入
       expect(systemContent).toContain('happy') // mood 注入

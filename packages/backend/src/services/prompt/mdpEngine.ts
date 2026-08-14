@@ -29,6 +29,9 @@ import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('MdpEngine')
 
+/** 模板变量嵌套展开的最大轮数，防止循环引用或动态模板无限渲染。 */
+const MAX_RENDER_DEPTH = 10
+
 // ─────────────────────────────────────────────
 // 类型
 // ─────────────────────────────────────────────
@@ -309,12 +312,7 @@ export class MdpEngine {
    * 暴露给外部直接渲染任意模板文本。
    */
   renderString(template: string, vars: Record<string, unknown> = {}): string {
-    try {
-      return this.nj.renderString(template, vars).trim()
-    } catch (err) {
-      logger.warn(`Nunjucks 渲染失败`, { error: err })
-      return template
-    }
+    return this.renderTemplate(template, this.withOwnerDefaults(vars))
   }
 
   // ─────────────────────────────────────────
@@ -506,13 +504,23 @@ export class MdpEngine {
   // 内部方法: 渲染
   // ─────────────────────────────────────────
 
-  /** Nunjucks 渲染 + 注释剥离 */
+  /** Nunjucks 递归渲染 + 注释剥离 */
   private renderTemplate(template: string, vars: Record<string, unknown>): string {
     try {
-      let result = this.nj.renderString(template, vars)
-      // 剥离 HTML 注释
-      result = result.replace(RE_COMMENT, '')
-      return result.trim()
+      let current = template
+      const seen = new Set<string>([current])
+      for (let depth = 0; depth < MAX_RENDER_DEPTH; depth++) {
+        const rendered = this.nj.renderString(current, vars).replace(RE_COMMENT, '')
+        if (rendered === current) return rendered.trim()
+        if (seen.has(rendered)) {
+          logger.warn(`Nunjucks 递归渲染检测到循环引用`, { depth: depth + 1 })
+          return rendered.trim()
+        }
+        seen.add(rendered)
+        current = rendered
+      }
+      logger.warn(`Nunjucks 递归渲染达到最大深度`, { maxDepth: MAX_RENDER_DEPTH })
+      return current.trim()
     } catch (err) {
       logger.warn(`Nunjucks 渲染失败`, { error: err })
       return template

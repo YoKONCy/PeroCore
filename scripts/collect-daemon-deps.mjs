@@ -87,8 +87,17 @@ function registerNestedNodeModules(pkgDir) {
  * 不再全局丢弃所有 DLL/EXE，避免把原生模块实际运行所需的旁路文件删掉。
  */
 const IGNORED_EXTENSIONS = new Set([
-  '.rlib', '.rmeta', '.pdb', '.o', '.d', '.exp', '.lib',
-  '.timestamp', '.cargo-lock', '.TAG', '.lock',
+  '.rlib',
+  '.rmeta',
+  '.pdb',
+  '.o',
+  '.d',
+  '.exp',
+  '.lib',
+  '.timestamp',
+  '.cargo-lock',
+  '.TAG',
+  '.lock',
 ])
 
 function shouldIgnoreRuntimeFile(sourcePath, packageName) {
@@ -126,17 +135,20 @@ function copyDir(source, target, packageName) {
 }
 
 /** 收集单个包及其依赖树到输出 node_modules */
-function collectPackage(pkgName, visited) {
+function collectPackage(pkgName, visited, optional = false) {
   if (visited.has(pkgName)) return
-  visited.add(pkgName)
   // ripgrep 仅提取当前平台二进制到 dist-daemon/bin，避免把平台包和重复二进制塞入 node_modules。
   if (pkgName === '@vscode/ripgrep' || pkgName.startsWith('@vscode/ripgrep-')) return
 
   const source = resolvePackageDir(pkgName)
   if (!source) {
-    console.warn(`⚠️  未找到依赖包: ${pkgName}（跳过）`)
-    return
+    if (optional) {
+      console.warn(`⚠️  未找到当前平台可选依赖: ${pkgName}（跳过）`)
+      return
+    }
+    throw new Error(`未找到必需运行依赖: ${pkgName}`)
   }
+  visited.add(pkgName)
 
   const target = path.join(OUT_NODE_MODULES, ...pkgName.split('/'))
   if (fs.existsSync(target)) return // 已收集
@@ -146,20 +158,19 @@ function collectPackage(pkgName, visited) {
   registerNestedNodeModules(source)
   console.log(`✅ 已收集: ${pkgName}`)
 
-  // 递归收集该包自身的依赖（含可选依赖）
+  // 必需依赖缺失时直接终止发行构建；仅允许平台不匹配的可选依赖跳过。
   const pkgJsonPath = path.join(source, 'package.json')
   if (fs.existsSync(pkgJsonPath)) {
     try {
       const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'))
-      const deps = {
-        ...(pkgJson.dependencies ?? {}),
-        ...(pkgJson.optionalDependencies ?? {}),
-      }
-      for (const dep of Object.keys(deps)) {
+      for (const dep of Object.keys(pkgJson.dependencies ?? {})) {
         collectPackage(dep, visited)
       }
+      for (const dep of Object.keys(pkgJson.optionalDependencies ?? {})) {
+        collectPackage(dep, visited, true)
+      }
     } catch (err) {
-      console.warn(`⚠️  解析 ${pkgName} 的 package.json 失败: ${err}`)
+      throw new Error(`收集 ${pkgName} 依赖失败: ${err}`)
     }
   }
 }
@@ -215,7 +226,9 @@ function collectBundledRipgrep() {
     const executable = process.platform === 'win32' ? 'rg.exe' : 'rg'
     rgPath = findFileRecursive(packageDir, (candidate) => path.basename(candidate) === executable)
     if (!rgPath) {
-      const platformPackage = resolvePackageDir(`@vscode/ripgrep-${process.platform}-${process.arch}`)
+      const platformPackage = resolvePackageDir(
+        `@vscode/ripgrep-${process.platform}-${process.arch}`,
+      )
       rgPath = platformPackage
         ? findFileRecursive(platformPackage, (candidate) => path.basename(candidate) === executable)
         : null
@@ -241,7 +254,12 @@ function validateNativeRuntime() {
   }
   if (process.platform === 'win32') {
     for (const name of ['conpty.dll', 'OpenConsole.exe']) {
-      if (!findFileRecursive(ptyDir, (file) => path.basename(file).toLowerCase() === name.toLowerCase())) {
+      if (
+        !findFileRecursive(
+          ptyDir,
+          (file) => path.basename(file).toLowerCase() === name.toLowerCase(),
+        )
+      ) {
         throw new Error(`node-pty 缺少 Windows ConPTY 运行文件: ${name}`)
       }
     }

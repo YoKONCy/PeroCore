@@ -349,71 +349,114 @@ function applySchemaFixups(sqlite: Database.Database): void {
   }
 
   // ── M05 Fixup: background_tasks 表（统一任务中心持久实体） ──
+  // 必须先补列、验证，再创建依赖这些列的索引；任一步失败都应阻止带着残缺 Schema 启动。
   try {
-    sqlite.exec(`
-      CREATE TABLE IF NOT EXISTS background_tasks (
-        id TEXT PRIMARY KEY NOT NULL,
-        agent_id TEXT NOT NULL,
-        thread_id TEXT NOT NULL,
-        title TEXT NOT NULL,
-        instruction TEXT NOT NULL,
-        status TEXT DEFAULT 'queued' NOT NULL,
-        progress INTEGER,
-        current_stage TEXT,
-        workspace TEXT,
-        result TEXT,
-        error_message TEXT,
-        tool_call_count INTEGER DEFAULT 0 NOT NULL,
-        priority INTEGER DEFAULT 5 NOT NULL,
-        parent_task_id TEXT,
-        requested_by TEXT DEFAULT 'user' NOT NULL,
-        completion_action TEXT DEFAULT 'notify' NOT NULL,
-        checkpoint_json TEXT,
-        metadata_json TEXT DEFAULT '{}' NOT NULL,
-        created_at TEXT DEFAULT (datetime('now', 'localtime')) NOT NULL,
-        started_at TEXT,
-        completed_at TEXT,
-        updated_at TEXT DEFAULT (datetime('now', 'localtime')) NOT NULL,
-        read_at TEXT
-      );
-      CREATE INDEX IF NOT EXISTS idx_background_tasks_agent_id ON background_tasks(agent_id);
-      CREATE INDEX IF NOT EXISTS idx_background_tasks_status ON background_tasks(status);
-      CREATE INDEX IF NOT EXISTS idx_background_tasks_thread_id ON background_tasks(thread_id);
-      CREATE INDEX IF NOT EXISTS idx_background_tasks_created_at ON background_tasks(created_at);
-    `)
-    const columns = sqlite.prepare('PRAGMA table_info(background_tasks)').all() as Array<{
-      name: string
-    }>
-    const columnNames = new Set(columns.map((column) => column.name))
-    if (!columnNames.has('target_thread_id')) {
-      logger.info('修补: 为 background_tasks 添加 target_thread_id 列')
-      sqlite.exec('ALTER TABLE background_tasks ADD COLUMN target_thread_id TEXT;')
-    }
-    // 0013 迁移只会在全新数据库初始化时执行；旧数据库需在启动阶段幂等补齐任务中心字段。
-    if (!columnNames.has('category')) {
-      logger.info('修补: 为 background_tasks 添加 category 列')
-      sqlite.exec(
-        "ALTER TABLE background_tasks ADD COLUMN category TEXT DEFAULT 'agent_task' NOT NULL;",
+    sqlite.transaction(() => {
+      sqlite.exec(`
+        CREATE TABLE IF NOT EXISTS background_tasks (
+          id TEXT PRIMARY KEY NOT NULL,
+          agent_id TEXT NOT NULL,
+          thread_id TEXT NOT NULL,
+          target_thread_id TEXT,
+          title TEXT NOT NULL,
+          instruction TEXT NOT NULL,
+          status TEXT DEFAULT 'queued' NOT NULL,
+          progress INTEGER,
+          current_stage TEXT,
+          result TEXT,
+          error_message TEXT,
+          tool_call_count INTEGER DEFAULT 0 NOT NULL,
+          priority INTEGER DEFAULT 5 NOT NULL,
+          parent_task_id TEXT,
+          requested_by TEXT DEFAULT 'user' NOT NULL,
+          completion_action TEXT DEFAULT 'notify' NOT NULL,
+          category TEXT DEFAULT 'agent_task' NOT NULL,
+          input_question TEXT,
+          input_context_json TEXT,
+          checkpoint_json TEXT,
+          metadata_json TEXT DEFAULT '{}' NOT NULL,
+          created_at TEXT DEFAULT (datetime('now', 'localtime')) NOT NULL,
+          started_at TEXT,
+          completed_at TEXT,
+          updated_at TEXT DEFAULT (datetime('now', 'localtime')) NOT NULL,
+          read_at TEXT
+        );
+      `)
+
+      const additions: ReadonlyArray<readonly [name: string, definition: string]> = [
+        ['target_thread_id', 'target_thread_id TEXT'],
+        ['progress', 'progress INTEGER'],
+        ['current_stage', 'current_stage TEXT'],
+        ['result', 'result TEXT'],
+        ['error_message', 'error_message TEXT'],
+        ['tool_call_count', 'tool_call_count INTEGER DEFAULT 0 NOT NULL'],
+        ['priority', 'priority INTEGER DEFAULT 5 NOT NULL'],
+        ['parent_task_id', 'parent_task_id TEXT'],
+        ['requested_by', "requested_by TEXT DEFAULT 'user' NOT NULL"],
+        ['completion_action', "completion_action TEXT DEFAULT 'notify' NOT NULL"],
+        ['category', "category TEXT DEFAULT 'agent_task' NOT NULL"],
+        ['input_question', 'input_question TEXT'],
+        ['input_context_json', 'input_context_json TEXT'],
+        ['checkpoint_json', 'checkpoint_json TEXT'],
+        ['metadata_json', "metadata_json TEXT DEFAULT '{}' NOT NULL"],
+        ['created_at', 'created_at TEXT'],
+        ['started_at', 'started_at TEXT'],
+        ['completed_at', 'completed_at TEXT'],
+        ['updated_at', 'updated_at TEXT'],
+        ['read_at', 'read_at TEXT'],
+      ]
+
+      let columnNames = new Set(
+        (
+          sqlite.prepare('PRAGMA table_info(background_tasks)').all() as Array<{ name: string }>
+        ).map((column) => column.name),
       )
-    }
-    if (!columnNames.has('input_question')) {
-      logger.info('修补: 为 background_tasks 添加 input_question 列')
-      sqlite.exec('ALTER TABLE background_tasks ADD COLUMN input_question TEXT;')
-    }
-    if (!columnNames.has('input_context_json')) {
-      logger.info('修补: 为 background_tasks 添加 input_context_json 列')
-      sqlite.exec('ALTER TABLE background_tasks ADD COLUMN input_context_json TEXT;')
-    }
-    if (!columnNames.has('read_at')) {
-      logger.info('修补: 为 background_tasks 添加 read_at 列')
-      sqlite.exec('ALTER TABLE background_tasks ADD COLUMN read_at TEXT;')
-    }
-    sqlite.exec(`
-      CREATE INDEX IF NOT EXISTS idx_background_tasks_target_thread_id ON background_tasks(target_thread_id);
-      CREATE INDEX IF NOT EXISTS idx_background_tasks_category ON background_tasks(category);
-    `)
+      for (const [name, definition] of additions) {
+        if (columnNames.has(name)) continue
+        logger.info(`修补: 为 background_tasks 添加 ${name} 列`)
+        sqlite.exec(`ALTER TABLE background_tasks ADD COLUMN ${definition};`)
+        columnNames.add(name)
+      }
+
+      sqlite.exec(`
+        UPDATE background_tasks
+        SET created_at = COALESCE(created_at, datetime('now', 'localtime')),
+            updated_at = COALESCE(updated_at, datetime('now', 'localtime'));
+      `)
+
+      columnNames = new Set(
+        (
+          sqlite.prepare('PRAGMA table_info(background_tasks)').all() as Array<{ name: string }>
+        ).map((column) => column.name),
+      )
+      const requiredColumns = [
+        'id',
+        'agent_id',
+        'thread_id',
+        'target_thread_id',
+        'title',
+        'instruction',
+        'status',
+        ...additions.map(([name]) => name),
+      ]
+      const missingColumns = requiredColumns.filter((name) => !columnNames.has(name))
+      if (missingColumns.length) {
+        throw new Error(`修补后仍缺少列: ${missingColumns.join(', ')}`)
+      }
+
+      sqlite.exec(`
+        CREATE INDEX IF NOT EXISTS idx_background_tasks_agent_id ON background_tasks(agent_id);
+        CREATE INDEX IF NOT EXISTS idx_background_tasks_status ON background_tasks(status);
+        CREATE INDEX IF NOT EXISTS idx_background_tasks_thread_id ON background_tasks(thread_id);
+        CREATE INDEX IF NOT EXISTS idx_background_tasks_target_thread_id ON background_tasks(target_thread_id);
+        CREATE INDEX IF NOT EXISTS idx_background_tasks_created_at ON background_tasks(created_at);
+        CREATE INDEX IF NOT EXISTS idx_background_tasks_category ON background_tasks(category);
+      `)
+    })()
+    logger.success('修补完成: background_tasks Schema 已验证')
   } catch (err) {
-    logger.warn(`Schema 修补失败 (background_tasks): ${err}`)
+    logger.error(`Schema 修补失败 (background_tasks): ${err}`)
+    throw new Error(`background_tasks 数据库迁移失败: ${err}`)
   }
 
   // ── AIOS Fixup: thread_messages.scorer_status 列 ──

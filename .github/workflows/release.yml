@@ -26,7 +26,7 @@ jobs:
     env:
       ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
       ELECTRON_CACHE: ${{ github.workspace }}\\.electron-cache
-      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}\\.electron-builder-cache
     steps:
       - uses: actions/checkout@v6
 
@@ -39,16 +39,24 @@ jobs:
 
       - uses: actions/cache@v4
         with:
-          path: ${{ env.ELECTRON_CACHE }}
-          key: electron-${{ runner.os }}-40.2.1
+          path: |
+            ${{ env.ELECTRON_CACHE }}
+            ${{ env.ELECTRON_BUILDER_CACHE }}
+          key: electron-builder-${{ runner.os }}-40.2.1-26.8.1
 
       - run: pnpm install --frozen-lockfile
+
+      - name: 安装 WASM Rust target
+        run: rustup target add wasm32-unknown-unknown
 
       - name: 版本号同步
         run: pnpm version:sync
 
       - name: 构建前端 + 后端 + Electron
         run: pnpm build
+
+      - name: 准备内置 Daemon 运行时
+        run: node scripts/build-daemon-bundle.mjs && node scripts/collect-daemon-deps.mjs
 
       - name: 构建 Electron 标准版 (NSIS)
         run: pnpm exec electron-builder --config electron-builder.standard.yml --publish never
@@ -81,7 +89,7 @@ jobs:
     env:
       ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
       ELECTRON_CACHE: ${{ github.workspace }}\\.electron-cache
-      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}\\.electron-builder-cache
     steps:
       - uses: actions/checkout@v6
 
@@ -94,10 +102,15 @@ jobs:
 
       - uses: actions/cache@v4
         with:
-          path: ${{ env.ELECTRON_CACHE }}
-          key: electron-${{ runner.os }}-40.2.1
+          path: |
+            ${{ env.ELECTRON_CACHE }}
+            ${{ env.ELECTRON_BUILDER_CACHE }}
+          key: electron-builder-${{ runner.os }}-40.2.1-26.8.1
 
       - run: pnpm install --frozen-lockfile
+
+      - name: 安装 WASM Rust target
+        run: rustup target add wasm32-unknown-unknown
 
       - name: 版本号同步
         run: pnpm version:sync
@@ -105,10 +118,13 @@ jobs:
       - name: 构建前端 + 后端
         run: pnpm build
 
+      - name: 准备内置 Daemon 运行时
+        run: node scripts/build-daemon-bundle.mjs && node scripts/collect-daemon-deps.mjs
+
       - name: 构建 Electron 便携版
         run: pnpm exec electron-builder --config electron-builder.portable.yml --publish never
         env:
-          INFOS_EDITION: standard
+          INFOS_EDITION: portable
 
       # 验证: 确认便携版不含 Steam 组件
       - name: 验证 Steam 组件已排除
@@ -135,7 +151,7 @@ jobs:
     env:
       ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
       ELECTRON_CACHE: ${{ github.workspace }}\\.electron-cache
-      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}\\.electron-builder-cache
     steps:
       - uses: actions/checkout@v6
 
@@ -148,16 +164,24 @@ jobs:
 
       - uses: actions/cache@v4
         with:
-          path: ${{ env.ELECTRON_CACHE }}
-          key: electron-${{ runner.os }}-40.2.1
+          path: |
+            ${{ env.ELECTRON_CACHE }}
+            ${{ env.ELECTRON_BUILDER_CACHE }}
+          key: electron-builder-${{ runner.os }}-40.2.1-26.8.1
 
       - run: pnpm install --frozen-lockfile
+
+      - name: 安装 WASM Rust target
+        run: rustup target add wasm32-unknown-unknown
 
       - name: 版本号同步
         run: pnpm version:sync
 
       - name: 构建前端 + 后端 + Electron
         run: pnpm build
+
+      - name: 准备内置 Daemon 运行时
+        run: node scripts/build-daemon-bundle.mjs && node scripts/collect-daemon-deps.mjs
 
       - name: 构建 Electron Steam 版
         run: pnpm exec electron-builder --config electron-builder.steam.yml

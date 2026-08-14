@@ -102,6 +102,82 @@ label: 工具列表
       expect(result).toBe('{{Missing: missing/template}}')
     })
 
+    it('renderString 应当递归渲染所有上下文占位符、对象、数组与 owner 默认值', () => {
+      const engine = new MdpEngine(promptDir)
+      const result = engine.renderString('{{ envelope }}', {
+        envelope: '{{ level_two }}',
+        level_two:
+          '{{ current_time }}|{{ mood }}|{{ vibe }}|{{ mind }}|{{ owner_name }}|{{ owner_appellation }}|{{ environment_info }}|{{ user_persona }}|{{ profile.name }}|{{ items | joinlines }}',
+        current_time: '2026年8月15日',
+        mood: 'happy',
+        vibe: 'active',
+        mind: '准备工作',
+        environment_info: 'Windows',
+        user_persona: '程序员',
+        profile: { name: 'Pero' },
+        items: ['读取', '写入'],
+      })
+
+      expect(result).toBe(
+        '2026年8月15日|happy|active|准备工作|用户|主人|Windows|程序员|Pero|读取\n写入',
+      )
+      expect(result).not.toContain('{{')
+    })
+
+    it('render 与 renderSlots 应当递归展开变量值并尊重显式 owner 配置', () => {
+      writeFileSync(join(promptDir, 'nested.md'), '{{ wrapper }}', 'utf-8')
+      const engine = new MdpEngine(promptDir)
+      const vars = {
+        wrapper: '{{ persona }} / {{ owner_name }} / {{ owner_appellation }}',
+        persona: '我是{{ agent.name }}，服务于{{ owner_appellation }}',
+        agent: { name: 'Pero' },
+        owner_name: '小明',
+        owner_appellation: '队长',
+      }
+
+      expect(engine.render('nested', vars)).toBe('我是Pero，服务于队长 / 小明 / 队长')
+      expect(
+        engine.renderSlots(
+          [
+            {
+              id: 'nested-slot',
+              label: '嵌套槽位',
+              role: 'system',
+              position: 1,
+              enabled: true,
+              template: '{{ wrapper }}',
+              group: 'test',
+              editable: true,
+              builtin: false,
+            },
+          ],
+          vars,
+        ),
+      ).toEqual([
+        {
+          role: 'system',
+          content: '我是Pero，服务于队长 / 小明 / 队长',
+          slotId: 'nested-slot',
+        },
+      ])
+    })
+
+    it('递归渲染应安全处理缺失变量、循环引用与最大深度', () => {
+      const engine = new MdpEngine(promptDir)
+      const cycle = engine.renderString('{{ first }}', {
+        first: '{{ second }}',
+        second: '{{ first }}',
+      })
+      const deepVars: Record<string, string> = {}
+      for (let index = 1; index <= 12; index++) {
+        deepVars[`level_${index}`] = index === 12 ? '终点' : `{{ level_${index + 1} }}`
+      }
+
+      expect(engine.renderString('前{{ missing }}后')).toBe('前后')
+      expect(cycle).toMatch(/\{\{ (first|second) \}\}/)
+      expect(engine.renderString('{{ level_1 }}', deepVars)).toContain('{{ level_11 }}')
+    })
+
     it('renderString 应当支持自定义过滤器', () => {
       const engine = new MdpEngine(promptDir)
 

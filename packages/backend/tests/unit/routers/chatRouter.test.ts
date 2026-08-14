@@ -113,6 +113,20 @@ function createCtx() {
     attachmentService: {
       listForMessages: vi.fn(() => Promise.resolve(new Map())),
     },
+    toolRegistry: {
+      getDefinitions: vi.fn(() => []),
+    },
+    capabilityGate: {
+      resolve: vi.fn(() => ({ allowedTools: new Set<string>() })),
+    },
+    flowStateService: {
+      get: vi.fn(),
+      listByThread: vi.fn(),
+      clear: vi.fn(),
+    },
+    backgroundTaskService: {
+      hasActiveWork: vi.fn(() => Promise.resolve(false)),
+    },
     // AIOS: RuntimeStateService 替代旧 TaskManager（按 threadId 索引）
     runtimeStateService: {
       registerTask: vi.fn(),
@@ -127,6 +141,34 @@ function createCtx() {
 }
 
 describe('ChatRouter', () => {
+  it('group 会话工具应严格限制为 Channel 白名单，不得回退注册表全量工具', async () => {
+    const ctx = createCtx()
+    const registryTools = Array.from({ length: 44 }, (_, index) => ({
+      name: index < 6 ? `group_tool_${index}` : `other_tool_${index}`,
+      description: `工具 ${index}`,
+    }))
+    ctx.threadService.getThread.mockResolvedValue({
+      ...createThread(),
+      channel: 'group',
+      disabledTools: [],
+    } as never)
+    ctx.toolRegistry.getDefinitions.mockReturnValue(registryTools)
+    ctx.capabilityGate.resolve.mockReturnValue({
+      allowedTools: new Set(registryTools.slice(0, 6).map((tool) => tool.name)),
+    })
+    const router = createChatRouter(ctx as never)
+
+    const response = await router.request('http://test/threads/t1/tools')
+    const body = (await response.json()) as {
+      data: { tools: Array<{ name: string }> }
+    }
+
+    expect(body.data.tools).toHaveLength(6)
+    expect(body.data.tools.map((tool) => tool.name)).toEqual(
+      registryTools.slice(0, 6).map((tool) => tool.name),
+    )
+  })
+
   it('应当执行非流式对话: 获取 Thread→追加用户消息→编译上下文→对话→追加 Agent 回复', async () => {
     const ctx = createCtx()
     const router = createChatRouter(ctx as never)
