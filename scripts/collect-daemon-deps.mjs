@@ -179,22 +179,15 @@ function collectPackage(pkgName, visited, optional = false) {
 // 收集
 // ─────────────────────────────────────────────
 
-// 清空旧产物，避免残留
-if (fs.existsSync(OUT_NODE_MODULES)) {
-  fs.rmSync(OUT_NODE_MODULES, { recursive: true, force: true })
-}
-fs.mkdirSync(OUT_NODE_MODULES, { recursive: true })
-
-const visited = new Set()
-for (const manifestPath of ENTRY_MANIFESTS) {
-  const pkgJson = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
-  const deps = [
-    ...Object.keys(pkgJson.dependencies ?? {}),
-    ...Object.keys(pkgJson.optionalDependencies ?? {}),
+/** 将清单依赖拆分为必需与可选入口；同名项按 npm 语义由 optionalDependencies 覆盖。 */
+export function classifyManifestDependencies(pkgJson) {
+  const optionalNames = new Set(Object.keys(pkgJson.optionalDependencies ?? {}))
+  return [
+    ...Object.keys(pkgJson.dependencies ?? {})
+      .filter((name) => !optionalNames.has(name))
+      .map((name) => ({ name, optional: false })),
+    ...optionalNames.values().map((name) => ({ name, optional: true })),
   ]
-  for (const dep of deps) {
-    collectPackage(dep, visited)
-  }
 }
 
 function findFileRecursive(directory, predicate) {
@@ -266,12 +259,32 @@ function validateNativeRuntime() {
   }
 }
 
-collectBundledRipgrep()
-validateNativeRuntime()
+function main() {
+  // 清空旧产物，避免残留
+  if (fs.existsSync(OUT_NODE_MODULES)) {
+    fs.rmSync(OUT_NODE_MODULES, { recursive: true, force: true })
+  }
+  fs.mkdirSync(OUT_NODE_MODULES, { recursive: true })
 
-// 汇总
-const count = fs
-  .readdirSync(OUT_NODE_MODULES, { recursive: true, withFileTypes: true })
-  .filter((e) => e.isFile()).length
-const sizeMB = (fs.statSync(OUT_NODE_MODULES).size / 1024 / 1024).toFixed(2)
-console.log(`\n🎉 运行依赖收集完成: ${count} 个文件, ${sizeMB} MB → ${OUT_NODE_MODULES}`)
+  const visited = new Set()
+  for (const manifestPath of ENTRY_MANIFESTS) {
+    const pkgJson = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+    for (const dependency of classifyManifestDependencies(pkgJson)) {
+      collectPackage(dependency.name, visited, dependency.optional)
+    }
+  }
+
+  collectBundledRipgrep()
+  validateNativeRuntime()
+
+  const count = fs
+    .readdirSync(OUT_NODE_MODULES, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile()).length
+  const sizeMB = (fs.statSync(OUT_NODE_MODULES).size / 1024 / 1024).toFixed(2)
+  console.log(`\n🎉 运行依赖收集完成: ${count} 个文件, ${sizeMB} MB → ${OUT_NODE_MODULES}`)
+}
+
+const isDirectExecution = process.argv[1]
+  ? path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+  : false
+if (isDirectExecution) main()
