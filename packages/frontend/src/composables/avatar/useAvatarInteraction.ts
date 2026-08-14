@@ -270,28 +270,29 @@ export function useAvatarInteraction(retargetingManager: RetargetingManager) {
       bodyTarget.rotation.z = THREE.MathUtils.lerp(bodyTarget.rotation.z, swingZ, dragInfluence)
     }
 
-    // 手臂松弛下垂
+    // 手臂被拎起时朝外摊开：左手向左、右手向右，避免双臂向内交叉。
+    // （基岩模型中手臂局部 Z 轴与根一致：左臂 rotation.z 负值外展，右臂正值外展）
     if (armL) {
       armL.rotation.z = THREE.MathUtils.lerp(
         armL.rotation.z,
-        THREE.MathUtils.degToRad(20),
+        THREE.MathUtils.degToRad(-35),
         dragInfluence,
       )
       armL.rotation.x = THREE.MathUtils.lerp(
         armL.rotation.x,
-        THREE.MathUtils.degToRad(10) + swingX,
+        THREE.MathUtils.degToRad(5) + swingX * 0.5,
         dragInfluence,
       )
     }
     if (armR) {
       armR.rotation.z = THREE.MathUtils.lerp(
         armR.rotation.z,
-        THREE.MathUtils.degToRad(-20),
+        THREE.MathUtils.degToRad(35),
         dragInfluence,
       )
       armR.rotation.x = THREE.MathUtils.lerp(
         armR.rotation.x,
-        THREE.MathUtils.degToRad(10) + swingX,
+        THREE.MathUtils.degToRad(5) + swingX * 0.5,
         dragInfluence,
       )
     }

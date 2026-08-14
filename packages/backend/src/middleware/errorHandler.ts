@@ -8,7 +8,7 @@
  */
 
 import type { ErrorHandler } from 'hono'
-import { SERVER_ERROR_CODES, CODE_MESSAGES } from '@perocore/shared'
+import { SERVER_ERROR_CODES, CODE_MESSAGES } from '@infos/shared'
 import { AppError } from '../lib/appError'
 import { createLogger } from '../lib/logger'
 

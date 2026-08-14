@@ -2,7 +2,7 @@
   "id": "bilibili-fetch",
   "name": "B站助手",
   "version": "1.0.1",
-  "author": "PeroCore",
+  "author": "infOS",
   "description": "B站助手。获取 Bilibili 视频信息与 CC 字幕内容。",
   "type": "tool",
   "entry": "index.ts",

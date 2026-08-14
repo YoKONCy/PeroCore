@@ -38,6 +38,11 @@ function getCurrentPlatform(): string {
   return p // darwin 等直接返回
 }
 
+export interface ExtensionScanOptions {
+  /** 跳过由 ToolRegistry 静态注册的内置工具清单。 */
+  skipStaticBuiltinManifests?: boolean
+}
+
 export class ExtensionLoader {
   private currentPlatform: string
 
@@ -50,7 +55,7 @@ export class ExtensionLoader {
    *
    * @param dir - 扩展根目录 (每个子目录是一个扩展)
    */
-  async scanAndLoadAll(dir: string): Promise<LoadResult[]> {
+  async scanAndLoadAll(dir: string, options: ExtensionScanOptions = {}): Promise<LoadResult[]> {
     if (!existsSync(dir)) {
       logger.debug(`扩展目录不存在: ${dir}`)
       return []
@@ -63,7 +68,7 @@ export class ExtensionLoader {
       const extDir = path.join(dir, entry)
       if (!statSync(extDir).isDirectory()) continue
 
-      const result = await this.loadFromDir(extDir)
+      const result = await this.loadFromDir(extDir, options)
       if (result) results.push(result)
     }
 
@@ -73,7 +78,10 @@ export class ExtensionLoader {
   /**
    * 从指定目录加载单个扩展
    */
-  async loadFromDir(extDir: string): Promise<LoadResult | null> {
+  async loadFromDir(
+    extDir: string,
+    options: ExtensionScanOptions = {},
+  ): Promise<LoadResult | null> {
     const manifestPath = path.join(extDir, 'manifest.json')
 
     // 1. 读取 manifest
@@ -85,7 +93,12 @@ export class ExtensionLoader {
     let manifest: ExtensionManifest
     try {
       const raw = readFileSync(manifestPath, 'utf-8')
-      manifest = JSON.parse(raw) as ExtensionManifest
+      const parsed = JSON.parse(raw) as ExtensionManifest & { registration?: string }
+      if (options.skipStaticBuiltinManifests && parsed.registration === 'static') {
+        logger.debug(`跳过静态内置工具清单: ${manifestPath}`)
+        return null
+      }
+      manifest = parsed
       manifest.path = extDir
     } catch (err) {
       const msg = `manifest.json 解析失败: ${extDir}`

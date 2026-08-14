@@ -1,12 +1,12 @@
 <!--
 Description: 据点管家旁白与设施维护任务
-Version: "1.0"
+Version: "1.1"
 Prompt Type: task
-Direct Consumer: 未接入
-Target Service: backend/src/tools/strongholdOps
-Target Function: unbound stronghold_call_butler execute flow
-Injected Via: not currently referenced by backend source
-Model Role: auxiliary
+Direct Consumer: ButlerService（已接入）
+Target Service: backend/src/services/stronghold/butlerService.ts
+Target Function: tryLlmPlan -> execute
+Injected Via: mdpEngine.render('group/butler/narrate_and_maintain', ...)
+Model Role: main（复用主模型）
 -->
 
 # 角色定义

@@ -285,34 +285,8 @@ export function useMemories() {
 
   // ── 故事导入 ──
 
+  /** 共享故事导入弹窗的开关状态。 */
   const isImportOpen = ref(false)
-  const importText = ref('')
-  const isImporting = ref(false)
-
-  async function importStory(): Promise<void> {
-    const content = importText.value.trim()
-    if (!content) return
-
-    isImporting.value = true
-    try {
-      await memoryApi.create({
-        content,
-        agentId: 'pero',
-        type: 'episodic',
-        source: '故事导入',
-        importance: 5,
-      })
-      isImportOpen.value = false
-      importText.value = ''
-      await fetchMemories()
-      notify.toast('故事导入成功', 'success')
-    } catch (e) {
-      error.value = (e as Error).message
-      notify.toast('故事导入失败: ' + (e as Error).message, 'error')
-    } finally {
-      isImporting.value = false
-    }
-  }
 
   // ── 图谱 ──
 
@@ -416,9 +390,6 @@ export function useMemories() {
     triggerReindex,
     // P4: 故事导入
     isImportOpen,
-    importText,
-    isImporting,
-    importStory,
     // 日期筛选
     filterDate,
     // 视图模式

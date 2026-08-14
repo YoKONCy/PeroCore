@@ -10,6 +10,7 @@
 
 import * as THREE from 'three'
 import { logger } from '../../../../lib/logger'
+import { YSM_SCENE_FILTERS } from '@infos/shared/ysm'
 import type { IModelProvider, ParsedModelData, ParsedBone } from './IModelProvider'
 import type { IAvatarManifest } from './IAvatarManifest'
 // Provider 接收到的路径已经是可直接 fetch 的 URL，无需额外转换
@@ -42,6 +43,58 @@ interface ElectronWindow {
   electron?: {
     loadStandardModel?: (data: Uint8Array, filters?: string[]) => Promise<ParsedModelData>
   }
+}
+
+/**
+ * 骨骼过滤：名称模式命中 + 场景摆件子树排除。
+ *
+ * 1. 名称过滤：移除"命中的骨骼本身"（如 GUI/Locator/molang 等辅助骨骼）。
+ *    其子树会挂到根节点继续渲染——这是有意为之：武器本体挂在 Locator 挂点下
+ *    （如星芒雨的发光刀、DeepSeek 的丝带），过滤挂点但不能连武器一起删。
+ * 2. 场景摆件子树排除：仅对 YSM_SCENE_FILTERS（床/花/幽灵/猫等）额外整棵移除
+ *    子树，避免床的满地花、猫的零件因"挂根复活"而残留。
+ */
+function filterBones(
+  bones: ParsedBone[],
+  patterns: string[],
+  subtreePatterns: string[],
+): ParsedBone[] {
+  if (patterns.length === 0) return bones
+
+  const matched = (name: string, list: string[]): boolean =>
+    list.some((p) => name.toLowerCase().includes(p.toLowerCase()))
+
+  // 1. 名称过滤：只移除命中的骨骼本身
+  let result = bones.filter((b) => !matched(b.name, patterns))
+
+  // 2. 场景摆件子树排除：父骨骼已被过滤且父名命中场景模式 → 整棵移除
+  if (subtreePatterns.length > 0) {
+    const boneSet = new Set(result.map((b) => b.name))
+    const removed = new Set<string>()
+    const queue: string[] = []
+
+    for (const bone of result) {
+      if (bone.parent && !boneSet.has(bone.parent) && matched(bone.parent, subtreePatterns)) {
+        removed.add(bone.name)
+        queue.push(bone.name)
+      }
+    }
+    // BFS 收集全部后代，实现整棵子树排除
+    while (queue.length > 0) {
+      const parentName = queue.pop()!
+      for (const bone of result) {
+        if (bone.parent === parentName && !removed.has(bone.name)) {
+          removed.add(bone.name)
+          queue.push(bone.name)
+        }
+      }
+    }
+    if (removed.size > 0) {
+      result = result.filter((b) => !removed.has(b.name))
+    }
+  }
+
+  return result
 }
 
 // ══════ Provider ══════
@@ -79,52 +132,59 @@ export class StandardBedrockProvider implements IModelProvider {
     if (!response.ok) throw new Error(`加载模型文件失败: ${this.config.model}`)
     const arrayBuffer = await response.arrayBuffer()
 
+    let parsed: ParsedModelData | null = null
+
     // 优先尝试 Rust Native 模块解析（高性能路径）
     const electronWin = window as unknown as ElectronWindow
     if (!FORCE_JS_PATH && electronWin.electron?.loadStandardModel) {
       try {
-        const parsedData = await electronWin.electron.loadStandardModel(
+        parsed = await electronWin.electron.loadStandardModel(
           new Uint8Array(arrayBuffer),
           this.boneFilterPatterns,
         )
-        return parsedData
       } catch (e) {
         logger.warn('StandardBedrockProvider', 'Rust 解析失败，回退到 JS 路径', e)
       }
     }
 
     // JS 回退路径：直接解析 Bedrock JSON
-    logger.info('StandardBedrockProvider', '使用 JS 路径解析模型')
-    const jsonStr = new TextDecoder().decode(arrayBuffer)
-    const json = JSON.parse(jsonStr)
+    if (!parsed) {
+      logger.info('StandardBedrockProvider', '使用 JS 路径解析模型')
+      const jsonStr = new TextDecoder().decode(arrayBuffer)
+      const json = JSON.parse(jsonStr)
 
-    const geometry = json['minecraft:geometry']?.[0]
-    if (!geometry) throw new Error('无效的 Bedrock 模型: 缺少 minecraft:geometry')
+      const geometry = json['minecraft:geometry']?.[0]
+      if (!geometry) throw new Error('无效的 Bedrock 模型: 缺少 minecraft:geometry')
 
-    const desc = geometry.description || {}
-    const textureWidth = desc.texture_width || 64
-    const textureHeight = desc.texture_height || 64
+      const desc = geometry.description || {}
+      const textureWidth = desc.texture_width || 64
+      const textureHeight = desc.texture_height || 64
 
+      const rawBones = (geometry.bones || []) as RawBedrockBone[]
+
+      parsed = {
+        textureWidth,
+        textureHeight,
+        bones: rawBones.map((b) => ({
+          name: b.name,
+          parent: b.parent,
+          pivot: (b.pivot || [0, 0, 0]) as [number, number, number],
+          rotation: b.rotation as [number, number, number] | undefined,
+          cubes: (b.cubes || []) as Record<string, unknown>[],
+          // 注意：不提供 vertices/uvs/indices，让 AvatarRenderer 的 JS 回退路径处理
+        })),
+      }
+    }
+
+    // 统一应用骨骼过滤：名称模式命中 + 场景摆件子树排除。
+    // 名称过滤移除辅助/摆件骨骼本身；YSM_SCENE_FILTERS 命中的场景摆件
+    // 再整棵移除子树，避免床的满地花、猫的零件"挂根复活"渲染。
     const filterPatterns = this.boneFilterPatterns || []
-    const rawBones = (geometry.bones || []) as RawBedrockBone[]
+    if (filterPatterns.length > 0) {
+      parsed.bones = filterBones(parsed.bones, filterPatterns, YSM_SCENE_FILTERS)
+    }
 
-    const bones: ParsedBone[] = rawBones
-      .filter((b) => {
-        if (filterPatterns.length === 0) return true
-        return !filterPatterns.some((pattern) =>
-          b.name.toLowerCase().includes(pattern.toLowerCase()),
-        )
-      })
-      .map((b) => ({
-        name: b.name,
-        parent: b.parent,
-        pivot: (b.pivot || [0, 0, 0]) as [number, number, number],
-        rotation: b.rotation as [number, number, number] | undefined,
-        cubes: (b.cubes || []) as Record<string, unknown>[],
-        // 注意：不提供 vertices/uvs/indices，让 AvatarRenderer 的 JS 回退路径处理
-      }))
-
-    return { textureWidth, textureHeight, bones }
+    return parsed
   }
 
   async getTexture(): Promise<THREE.Texture> {

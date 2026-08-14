@@ -14,10 +14,9 @@
  */
 
 import { createConsola, type ConsolaReporter, type LogObject } from 'consola'
-import { LOG_LEVEL } from './env'
+import { LOG_LEVEL, getDataDir } from './env'
 import { LogFileTransport, formatLogLine, type LogFileConfig } from './logFileTransport'
 import path from 'node:path'
-import os from 'node:os'
 
 // ─────────────────────────────────────────────
 // 文件 Transport (全局单例)
@@ -35,9 +34,7 @@ let fileTransport: LogFileTransport | null = null
  * @param config - 日志文件配置 (可选，默认使用 $PERO_DATA_DIR/logs)
  */
 export function initLogFile(config?: Partial<LogFileConfig>): void {
-  const logDir =
-    config?.logDir ??
-    path.join(process.env.PERO_DATA_DIR ?? path.join(os.homedir(), '.perocore'), 'logs')
+  const logDir = config?.logDir ?? path.join(getDataDir(), 'logs')
 
   fileTransport = new LogFileTransport({
     logDir,
@@ -47,7 +44,7 @@ export function initLogFile(config?: Partial<LogFileConfig>): void {
   })
 
   // 用 console.log 而不是 logger 避免循环
-  console.log(`[PeroCore] 日志文件已启用: ${fileTransport.getLogPath()}`)
+  console.log(`[infOS] 日志文件已启用: ${fileTransport.getLogPath()}`)
 }
 
 /** 获取文件 Transport (给外部查询日志路径用) */
@@ -93,6 +90,59 @@ const fileReporter: ConsolaReporter = {
 
 import { sseReporter } from './logBroadcaster'
 
+// ── 动态日志级别管理 ──
+// 初始级别来自 env.ts 的 LOG_LEVEL：
+//   dev 模式默认 debug(4)，release 默认 info(3)，PERO_LOG_LEVEL 环境变量可覆盖。
+// 启动后可调用 setLogLevel() 应用用户配置（system.logLevel），实现动态调整。
+let currentLogLevel = LOG_LEVEL
+
+/** 所有已创建的 consola 实例（setLogLevel 遍历更新 level） */
+const activeLoggers = new Set<{ level: number }>()
+
+/** 日志级别标签 → consola 数字级别 */
+const LEVEL_LABEL_TO_NUM: Record<string, number> = {
+  fatal: 0,
+  error: 1,
+  warn: 2,
+  info: 3,
+  debug: 4,
+  trace: 5,
+}
+
+/**
+ * 解析日志级别标签为 consola 数字级别
+ *
+ * 支持: fatal/error/warn/info/debug/trace（大小写不敏感）
+ *
+ * @param label 日志级别标签（如 "debug"）
+ * @returns 合法级别数字 (0-5)；非法标签返回 null
+ */
+export function parseLogLevel(label: string): number | null {
+  const num = LEVEL_LABEL_TO_NUM[label.trim().toLowerCase()]
+  return num ?? null
+}
+
+/** 获取当前日志级别（consola 数字级别，0=fatal ... 5=trace） */
+export function getLogLevel(): number {
+  return currentLogLevel
+}
+
+/**
+ * 动态设置所有 logger 实例的日志级别
+ *
+ * 使用场景：
+ * - 启动时应用用户配置 system.logLevel（覆盖 dev=debug / release=info 默认行为）
+ * - Dashboard 保存日志级别设置后即时生效（无需重启）
+ *
+ * @param level consola 数字级别 (0=fatal ... 5=trace)
+ */
+export function setLogLevel(level: number): void {
+  currentLogLevel = level
+  for (const instance of activeLoggers) {
+    instance.level = level
+  }
+}
+
 /**
  * 创建带模块标签的 logger 实例
  *
@@ -107,8 +157,11 @@ import { sseReporter } from './logBroadcaster'
  */
 export function createLogger(module: string) {
   const instance = createConsola({
-    level: LOG_LEVEL,
+    level: currentLogLevel,
   }).withTag(module)
+
+  // 注册到活跃实例集合，支持 setLogLevel 动态调整级别
+  activeLoggers.add(instance)
 
   // 追加文件持久化 reporter（不覆盖默认终端输出）
   instance.addReporter(fileReporter)
@@ -120,4 +173,4 @@ export function createLogger(module: string) {
 }
 
 /** 根 logger（不带模块标签） */
-export const logger = createLogger('PeroCore')
+export const logger = createLogger('infOS')

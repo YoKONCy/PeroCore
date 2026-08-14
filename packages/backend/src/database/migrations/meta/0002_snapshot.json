@@ -164,9 +164,7 @@
       "indexes": {
         "uq_ai_model_configs_name": {
           "name": "uq_ai_model_configs_name",
-          "columns": [
-            "name"
-          ],
+          "columns": ["name"],
           "isUnique": true
         }
       },
@@ -331,30 +329,22 @@
       "indexes": {
         "idx_canonical_memories_agent_id": {
           "name": "idx_canonical_memories_agent_id",
-          "columns": [
-            "agent_id"
-          ],
+          "columns": ["agent_id"],
           "isUnique": false
         },
         "idx_canonical_memories_type": {
           "name": "idx_canonical_memories_type",
-          "columns": [
-            "type"
-          ],
+          "columns": ["type"],
           "isUnique": false
         },
         "idx_canonical_memories_status": {
           "name": "idx_canonical_memories_status",
-          "columns": [
-            "status"
-          ],
+          "columns": ["status"],
           "isUnique": false
         },
         "idx_canonical_memories_created_at": {
           "name": "idx_canonical_memories_created_at",
-          "columns": [
-            "created_at"
-          ],
+          "columns": ["created_at"],
           "isUnique": false
         }
       },
@@ -519,30 +509,22 @@
       "indexes": {
         "idx_conversation_logs_session_id": {
           "name": "idx_conversation_logs_session_id",
-          "columns": [
-            "session_id"
-          ],
+          "columns": ["session_id"],
           "isUnique": false
         },
         "idx_conversation_logs_source": {
           "name": "idx_conversation_logs_source",
-          "columns": [
-            "source"
-          ],
+          "columns": ["source"],
           "isUnique": false
         },
         "idx_conversation_logs_pair_id": {
           "name": "idx_conversation_logs_pair_id",
-          "columns": [
-            "pair_id"
-          ],
+          "columns": ["pair_id"],
           "isUnique": false
         },
         "idx_conversation_logs_agent_id": {
           "name": "idx_conversation_logs_agent_id",
-          "columns": [
-            "agent_id"
-          ],
+          "columns": ["agent_id"],
           "isUnique": false
         }
       },
@@ -595,18 +577,12 @@
       "indexes": {
         "idx_entity_cooccurrences_agent_id": {
           "name": "idx_entity_cooccurrences_agent_id",
-          "columns": [
-            "agent_id"
-          ],
+          "columns": ["agent_id"],
           "isUnique": false
         },
         "uq_cooccurrence_pair": {
           "name": "uq_cooccurrence_pair",
-          "columns": [
-            "entity_a_id",
-            "entity_b_id",
-            "agent_id"
-          ],
+          "columns": ["entity_a_id", "entity_b_id", "agent_id"],
           "isUnique": true
         }
       },
@@ -659,16 +635,12 @@
       "indexes": {
         "idx_group_chat_members_room_id": {
           "name": "idx_group_chat_members_room_id",
-          "columns": [
-            "room_id"
-          ],
+          "columns": ["room_id"],
           "isUnique": false
         },
         "idx_group_chat_members_agent_id": {
           "name": "idx_group_chat_members_agent_id",
-          "columns": [
-            "agent_id"
-          ],
+          "columns": ["agent_id"],
           "isUnique": false
         }
       },
@@ -743,16 +715,12 @@
       "indexes": {
         "idx_group_chat_messages_room_id": {
           "name": "idx_group_chat_messages_room_id",
-          "columns": [
-            "room_id"
-          ],
+          "columns": ["room_id"],
           "isUnique": false
         },
         "idx_group_chat_messages_sender_id": {
           "name": "idx_group_chat_messages_sender_id",
-          "columns": [
-            "sender_id"
-          ],
+          "columns": ["sender_id"],
           "isUnique": false
         }
       },
@@ -881,24 +849,17 @@
       "indexes": {
         "idx_inbound_routes_source": {
           "name": "idx_inbound_routes_source",
-          "columns": [
-            "source"
-          ],
+          "columns": ["source"],
           "isUnique": false
         },
         "idx_inbound_routes_agent": {
           "name": "idx_inbound_routes_agent",
-          "columns": [
-            "agent_id"
-          ],
+          "columns": ["agent_id"],
           "isUnique": false
         },
         "uq_inbound_routes_source_identifier": {
           "name": "uq_inbound_routes_source_identifier",
-          "columns": [
-            "source",
-            "identifier"
-          ],
+          "columns": ["source", "identifier"],
           "isUnique": true
         }
       },
@@ -1079,9 +1040,7 @@
       "indexes": {
         "uq_mcp_configs_name": {
           "name": "uq_mcp_configs_name",
-          "columns": [
-            "name"
-          ],
+          "columns": ["name"],
           "isUnique": true
         }
       },
@@ -1191,23 +1150,17 @@
       "indexes": {
         "idx_memory_candidates_agent_id": {
           "name": "idx_memory_candidates_agent_id",
-          "columns": [
-            "agent_id"
-          ],
+          "columns": ["agent_id"],
           "isUnique": false
         },
         "idx_memory_candidates_status": {
           "name": "idx_memory_candidates_status",
-          "columns": [
-            "status"
-          ],
+          "columns": ["status"],
           "isUnique": false
         },
         "idx_memory_candidates_origin_thread": {
           "name": "idx_memory_candidates_origin_thread",
-          "columns": [
-            "origin_thread_id"
-          ],
+          "columns": ["origin_thread_id"],
           "isUnique": false
         }
       },
@@ -1369,23 +1322,17 @@
       "indexes": {
         "idx_memory_nodes_agent_id": {
           "name": "idx_memory_nodes_agent_id",
-          "columns": [
-            "agent_id"
-          ],
+          "columns": ["agent_id"],
           "isUnique": false
         },
         "idx_memory_nodes_timestamp": {
           "name": "idx_memory_nodes_timestamp",
-          "columns": [
-            "timestamp"
-          ],
+          "columns": ["timestamp"],
           "isUnique": false
         },
         "idx_memory_nodes_type": {
           "name": "idx_memory_nodes_type",
-          "columns": [
-            "type"
-          ],
+          "columns": ["type"],
           "isUnique": false
         }
       },
@@ -1454,16 +1401,12 @@
       "indexes": {
         "idx_node_capability_registrations_status": {
           "name": "idx_node_capability_registrations_status",
-          "columns": [
-            "status"
-          ],
+          "columns": ["status"],
           "isUnique": false
         },
         "idx_node_capability_registrations_type": {
           "name": "idx_node_capability_registrations_type",
-          "columns": [
-            "node_type"
-          ],
+          "columns": ["node_type"],
           "isUnique": false
         }
       },
@@ -1550,9 +1493,7 @@
       "indexes": {
         "idx_pet_states_agent_id": {
           "name": "idx_pet_states_agent_id",
-          "columns": [
-            "agent_id"
-          ],
+          "columns": ["agent_id"],
           "isUnique": false
         }
       },
@@ -1620,9 +1561,7 @@
       "indexes": {
         "idx_scheduled_tasks_agent_id": {
           "name": "idx_scheduled_tasks_agent_id",
-          "columns": [
-            "agent_id"
-          ],
+          "columns": ["agent_id"],
           "isUnique": false
         }
       },
@@ -1728,32 +1667,22 @@
       "indexes": {
         "idx_social_messages_channel": {
           "name": "idx_social_messages_channel",
-          "columns": [
-            "channel_id",
-            "channel_type"
-          ],
+          "columns": ["channel_id", "channel_type"],
           "isUnique": false
         },
         "idx_social_messages_agent": {
           "name": "idx_social_messages_agent",
-          "columns": [
-            "agent_id"
-          ],
+          "columns": ["agent_id"],
           "isUnique": false
         },
         "idx_social_messages_timestamp": {
           "name": "idx_social_messages_timestamp",
-          "columns": [
-            "timestamp"
-          ],
+          "columns": ["timestamp"],
           "isUnique": false
         },
         "idx_social_messages_unsummarized": {
           "name": "idx_social_messages_unsummarized",
-          "columns": [
-            "is_summarized",
-            "agent_id"
-          ],
+          "columns": ["is_summarized", "agent_id"],
           "isUnique": false
         }
       },
@@ -1867,9 +1796,7 @@
       "indexes": {
         "idx_stronghold_rooms_facility_id": {
           "name": "idx_stronghold_rooms_facility_id",
-          "columns": [
-            "facility_id"
-          ],
+          "columns": ["facility_id"],
           "isUnique": false
         }
       },
@@ -1995,37 +1922,27 @@
       "indexes": {
         "idx_thread_messages_thread_id": {
           "name": "idx_thread_messages_thread_id",
-          "columns": [
-            "thread_id"
-          ],
+          "columns": ["thread_id"],
           "isUnique": false
         },
         "idx_thread_messages_pair_id": {
           "name": "idx_thread_messages_pair_id",
-          "columns": [
-            "pair_id"
-          ],
+          "columns": ["pair_id"],
           "isUnique": false
         },
         "idx_thread_messages_status": {
           "name": "idx_thread_messages_status",
-          "columns": [
-            "status"
-          ],
+          "columns": ["status"],
           "isUnique": false
         },
         "idx_thread_messages_agent_id": {
           "name": "idx_thread_messages_agent_id",
-          "columns": [
-            "agent_id"
-          ],
+          "columns": ["agent_id"],
           "isUnique": false
         },
         "idx_thread_messages_scorer_status": {
           "name": "idx_thread_messages_scorer_status",
-          "columns": [
-            "scorer_status"
-          ],
+          "columns": ["scorer_status"],
           "isUnique": false
         }
       },
@@ -2094,16 +2011,12 @@
       "indexes": {
         "idx_thread_summaries_thread_id": {
           "name": "idx_thread_summaries_thread_id",
-          "columns": [
-            "thread_id"
-          ],
+          "columns": ["thread_id"],
           "isUnique": false
         },
         "idx_thread_summaries_stale": {
           "name": "idx_thread_summaries_stale",
-          "columns": [
-            "is_stale"
-          ],
+          "columns": ["is_stale"],
           "isUnique": false
         }
       },
@@ -2217,30 +2130,22 @@
       "indexes": {
         "idx_threads_agent_id": {
           "name": "idx_threads_agent_id",
-          "columns": [
-            "agent_id"
-          ],
+          "columns": ["agent_id"],
           "isUnique": false
         },
         "idx_threads_channel": {
           "name": "idx_threads_channel",
-          "columns": [
-            "channel"
-          ],
+          "columns": ["channel"],
           "isUnique": false
         },
         "idx_threads_platform": {
           "name": "idx_threads_platform",
-          "columns": [
-            "platform"
-          ],
+          "columns": ["platform"],
           "isUnique": false
         },
         "idx_threads_status": {
           "name": "idx_threads_status",
-          "columns": [
-            "status"
-          ],
+          "columns": ["status"],
           "isUnique": false
         }
       },
@@ -2347,37 +2252,27 @@
       "indexes": {
         "trivium_sync_tasks_dedupe_key_unique": {
           "name": "trivium_sync_tasks_dedupe_key_unique",
-          "columns": [
-            "dedupe_key"
-          ],
+          "columns": ["dedupe_key"],
           "isUnique": true
         },
         "idx_trivium_sync_tasks_operation": {
           "name": "idx_trivium_sync_tasks_operation",
-          "columns": [
-            "operation"
-          ],
+          "columns": ["operation"],
           "isUnique": false
         },
         "idx_trivium_sync_tasks_status": {
           "name": "idx_trivium_sync_tasks_status",
-          "columns": [
-            "status"
-          ],
+          "columns": ["status"],
           "isUnique": false
         },
         "idx_trivium_sync_tasks_memory_id": {
           "name": "idx_trivium_sync_tasks_memory_id",
-          "columns": [
-            "memory_id"
-          ],
+          "columns": ["memory_id"],
           "isUnique": false
         },
         "idx_trivium_sync_tasks_agent_id": {
           "name": "idx_trivium_sync_tasks_agent_id",
-          "columns": [
-            "agent_id"
-          ],
+          "columns": ["agent_id"],
           "isUnique": false
         }
       },

@@ -14,7 +14,7 @@ import { Registry, collectDefaultMetrics, Counter, Histogram } from 'prom-client
 export const metricsRegistry = new Registry()
 
 /** 指标名前缀，避免与宿主环境或未来 sidecar 指标重名。 */
-const METRIC_PREFIX = 'perocore_'
+const METRIC_PREFIX = 'infos_'
 
 collectDefaultMetrics({
   register: metricsRegistry,
@@ -24,7 +24,7 @@ collectDefaultMetrics({
 /** HTTP 请求总数；按方法、规范化路由和状态码聚合。 */
 export const httpRequestsTotal = new Counter({
   name: `${METRIC_PREFIX}http_requests_total`,
-  help: 'Total number of HTTP requests handled by PeroCore backend.',
+  help: 'Total number of HTTP requests handled by infOS backend.',
   labelNames: ['method', 'route', 'status'] as const,
   registers: [metricsRegistry],
 })
@@ -32,7 +32,7 @@ export const httpRequestsTotal = new Counter({
 /** HTTP 请求耗时；单位为秒，桶覆盖普通 API、LLM/语音慢接口和异常慢请求。 */
 export const httpRequestDurationSeconds = new Histogram({
   name: `${METRIC_PREFIX}http_request_duration_seconds`,
-  help: 'HTTP request duration in seconds for PeroCore backend.',
+  help: 'HTTP request duration in seconds for infOS backend.',
   labelNames: ['method', 'route', 'status'] as const,
   buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30],
   registers: [metricsRegistry],

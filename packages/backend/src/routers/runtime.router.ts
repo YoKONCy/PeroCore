@@ -60,6 +60,7 @@ export function createRuntimeRouter(ctx: AppContext) {
       })
     }
 
+    ctx.runtimeStateService.setActiveAgent(agentId)
     ctx.runtimeStateService.setWindowAgent(windowId, agentId)
 
     return c.json({

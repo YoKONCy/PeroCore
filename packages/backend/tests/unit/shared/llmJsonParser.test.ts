@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseLlmJson, parseLlmJsonStrict } from '@perocore/backend/shared/llmJsonParser'
+import { parseLlmJson, parseLlmJsonStrict } from '@infos/backend/shared/llmJsonParser'
 
 describe('parseLlmJson', () => {
   it('应当直接解析合法的 JSON 字符串', () => {

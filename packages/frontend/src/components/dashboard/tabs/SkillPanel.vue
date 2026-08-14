@@ -53,13 +53,13 @@ function formatParam(key: string | number): string {
     >
       <div class="flex items-center gap-3">
         <div
-          class="w-8 h-8 bg-violet-50 border border-violet-200 flex items-center justify-center flex-shrink-0"
+          class="w-8 h-8 bg-[var(--ui-accent-purple-soft)] border border-[color:var(--ui-accent-purple)] flex items-center justify-center flex-shrink-0"
         >
           <PixelIcon name="sparkle" size="xs" />
         </div>
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2 flex-wrap">
-            <h4 class="text-sm font-black text-slate-800">{{ skill.name }}</h4>
+            <h4 class="text-sm font-black text-[var(--ui-text-primary)]">{{ skill.name }}</h4>
             <span
               class="text-[9px] font-bold text-violet-500 px-1.5 py-0.5 bg-violet-50 border border-violet-200"
             >
@@ -108,7 +108,10 @@ function formatParam(key: string | number): string {
       </div>
 
       <!-- 展开详情 -->
-      <div v-if="expandedSkillId === skill.id" class="mt-3 pt-3 border-t border-slate-100">
+      <div
+        v-if="expandedSkillId === skill.id"
+        class="mt-3 pt-3 border-t border-[var(--ui-border-subtle)]"
+      >
         <!-- 可接收参数 -->
         <div v-if="Object.keys(skill.parameters).length > 0" class="mb-3">
           <h5 class="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2 font-pixel">
@@ -137,7 +140,7 @@ function formatParam(key: string | number): string {
             <span
               v-for="dep in skill.dependsOnSkills"
               :key="dep"
-              class="text-[11px] font-mono font-bold text-violet-600 px-2 py-0.5 bg-violet-50 border border-violet-200"
+              class="text-[11px] font-mono font-bold text-[var(--ui-accent-purple)] px-2 py-0.5 bg-[var(--ui-accent-purple-soft)] border border-[color:var(--ui-accent-purple)]"
             >
               {{ dep }}
             </span>
@@ -182,7 +185,7 @@ function formatParam(key: string | number): string {
 }
 
 .mcp-scrollbar::-webkit-scrollbar-thumb {
-  background: #bae6fd;
+  background: var(--ui-scrollbar-thumb);
   border-radius: 0;
 }
 </style>

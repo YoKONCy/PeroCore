@@ -36,13 +36,15 @@ import { hostname, platform, arch, release, uptime, totalmem } from 'node:os'
 import type { ThreadService, ThreadMessageInfo } from '../thread/threadService'
 import type { AgentManager } from '../agent/agentManager'
 import type { ConfigRepository } from '../../repositories/config.repo'
-import type {
-  MemoryProvider,
-  MemorySearchResultItem,
-} from '../memory/memoryProvider'
+import type { FlowStateService } from '../flow/flowStateService'
+import type { MemoryProvider, MemorySearchResultItem } from '../memory/memoryProvider'
+import { loadMemoryRuntimeConfig } from '../memory/memoryRuntimeConfig'
 import type { ThreadChannel } from '../../repositories/thread.repo'
+import type { CapabilityScope } from '../../capabilities/types'
+import { SYSTEM_PROTOCOL_TOOLS, isSystemProtocolTool } from '../../tools/systemProtocolTools'
 import type { MdpEngine, RenderedMessage } from '../prompt/mdpEngine'
 import type { CapabilityGate } from '../../capabilities/capabilityGate'
+import type { ContentPart } from '../llm/types'
 import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('ContextCompiler')
@@ -54,7 +56,7 @@ const logger = createLogger('ContextCompiler')
 /** LLM 消息 */
 export interface LlmMessage {
   role: 'system' | 'user' | 'assistant' | 'tool'
-  content: string
+  content: string | ContentPart[] | null
 }
 
 /** Channel 上下文策略 */
@@ -105,6 +107,8 @@ export interface ContextManifest {
   memoryHitCount: number
   /** 使用的工具数量 */
   toolCount: number
+  /** 本 Thread 明确禁用的工具名。 */
+  disabledTools: string[]
   /** 是否注入状态 */
   hasStateInjection: boolean
   /** 编译时间 */
@@ -129,15 +133,6 @@ export const DEFAULT_POLICIES: Record<ThreadChannel, ChannelPolicy> = {
     enableStateInjection: true,
     tokenBudget: 0,
   },
-  companion: {
-    messageWindow: 8,
-    enableMemoryRetrieval: true,
-    enableToolDescriptions: false,
-    enableStateInjection: true,
-    tokenBudget: 0,
-  },
-  // social/group 已从 ContextCompiler 剥离，由社交子 Agent 应用独立处理
-  // 保留 fallback 策略以防 Thread.channel 为 social/group 时崩溃
   social: {
     messageWindow: 30,
     enableMemoryRetrieval: false,
@@ -145,11 +140,12 @@ export const DEFAULT_POLICIES: Record<ThreadChannel, ChannelPolicy> = {
     enableStateInjection: false,
     tokenBudget: 0,
   },
+  // group 是 infOS 据点内部多 Agent 群聊，读取主 Agent 记忆并使用据点工具与运行状态。
   group: {
-    messageWindow: 50,
-    enableMemoryRetrieval: false,
-    enableToolDescriptions: false,
-    enableStateInjection: false,
+    messageWindow: 30,
+    enableMemoryRetrieval: true,
+    enableToolDescriptions: true,
+    enableStateInjection: true,
     tokenBudget: 0,
   },
 }
@@ -212,6 +208,14 @@ const STATIC_ENV_INFO = collectEnvironmentInfo()
 // Context Compiler
 // ─────────────────────────────────────────────
 
+/** 群聊等外部历史源可覆盖检索查询，并选择不重复追加空壳 Thread 消息。 */
+export interface ContextCompileOptions {
+  retrievalQuery?: string
+  appendThreadMessages?: boolean
+  /** 请求级能力作用域；只能收窄当前 Channel 的能力。 */
+  capabilityScope?: CapabilityScope
+}
+
 export class ContextCompiler {
   constructor(
     private threadService: ThreadService,
@@ -222,6 +226,8 @@ export class ContextCompiler {
     private mdpEngine: MdpEngine,
     /** CapabilityGate 能力门控：解析 (Agent, Channel) → 能力上下文，填充工具描述/Skill 菜单/能力片段 */
     private capabilityGate: CapabilityGate,
+    /** 当前 Thread 中该 Agent 的私有临时心流。 */
+    private flowStateService: FlowStateService,
   ) {}
 
   /**
@@ -237,7 +243,11 @@ export class ContextCompiler {
    * @param threadId  Thread ID
    * @param agentId   Agent ID（可覆盖 Thread 默认 Agent）
    */
-  async compile(threadId: string, agentId: string): Promise<CompiledContext> {
+  async compile(
+    threadId: string,
+    agentId: string,
+    options: ContextCompileOptions = {},
+  ): Promise<CompiledContext> {
     // ── 1. 获取 Thread 信息 + Channel 策略 ──
     const thread = await this.threadService.getThread(threadId)
     if (!thread) {
@@ -246,23 +256,30 @@ export class ContextCompiler {
 
     const channel = thread.channel as ThreadChannel
 
-    // 社交场景不应走 ContextCompiler，应由社交子 Agent 应用独立处理
-    if (channel === 'social' || channel === 'group') {
-      logger.warn(
-        `社交场景 channel=${channel} 不应由 ContextCompiler 编译，` +
-          `请检查调用方是否应走 SocialBridge 独立路径。将使用 fallback 策略。`,
+    // 外部平台社交必须由 SocialAppRuntime 独立编译，禁止静默退回主 Agent 上下文策略。
+    if (channel === 'social') {
+      throw new Error(
+        `Thread ${threadId} 属于 social channel，必须通过 SocialAppRuntime 处理，禁止进入 ContextCompiler`,
       )
     }
 
-    // 第六阶段 #3: 优先读取 Thread.contextPolicy，未配置时 fallback 到 DEFAULT_POLICIES
-    // contextPolicy 是 JSON 序列化的 ChannelPolicy 字符串，允许 Thread 级别自定义上下文行为
-    const policy = this.resolvePolicy(thread.contextPolicy, channel)
+    // Thread 自定义策略优先；未配置时使用总览页维护的全局 Channel 默认值。
+    const memoryRuntimeConfig = await loadMemoryRuntimeConfig(this.configRepo)
+    const channelMemoryConfig = memoryRuntimeConfig.channels[channel]
+    const fallbackPolicy = {
+      ...(DEFAULT_POLICIES[channel] ?? DEFAULT_POLICIES.desktop),
+      messageWindow:
+        channelMemoryConfig?.contextPairs ??
+        (DEFAULT_POLICIES[channel] ?? DEFAULT_POLICIES.desktop).messageWindow,
+    }
+    const policy = this.resolvePolicy(thread.contextPolicy, fallbackPolicy)
 
     // ── 2. 加载活跃消息（短上下文窗口） ──
-    const messages = await this.threadService.getActiveMessages(threadId, policy.messageWindow)
+    // 按完整 pair 读取最近对话轮次，避免消息行 limit 截断用户/助手半轮。
+    const messages = await this.threadService.getActiveMessagePairs(threadId, policy.messageWindow)
 
     // ── 3. 提取最后一条 user 消息作为检索查询 ──
-    const lastUserMessage = this.extractLastUserMessage(messages)
+    const lastUserMessage = options.retrievalQuery?.trim() || this.extractLastUserMessage(messages)
 
     // ── 4. [可选] RAG 记忆检索 → memory_context 字符串 ──
     let memoryContext = ''
@@ -278,15 +295,28 @@ export class ContextCompiler {
     // 工具描述/Skill 菜单。ContextCompiler 与 ToolExecutor 都通过此方法获取能力。
     // ability_fragments 的渲染需要用到 vars（含 owner_name 等），故此处先取 ResolvedCapability，
     // 具体渲染延迟到 vars 组装完成后进行。
-    const capability = this.capabilityGate.resolve(agentId, channel)
+    const capability = this.capabilityGate.resolve(
+      agentId,
+      channel,
+      undefined,
+      options.capabilityScope,
+    )
+    const disabledTools = new Set(
+      (thread.disabledTools ?? []).filter((name) => !isSystemProtocolTool(name)),
+    )
+    const protocolTools =
+      options.capabilityScope === 'ambient' ? ['finish_task'] : [...SYSTEM_PROTOCOL_TOOLS]
+    const enabledTools = new Set(
+      [...capability.allowedTools, ...protocolTools].filter((name) => !disabledTools.has(name)),
+    )
 
     // 工具描述：改用 CapabilityGate 已按 channel 过滤白名单的版本（替代原 toolRegistry 直取逻辑）
-    // 仅当 channel 策略启用工具描述注入时才注入（如 companion channel 默认不注入）
+    // 仅当 Channel 策略启用时才注入工具描述；请求级 ambient 会进一步收窄工具集。
     let toolsDescription = ''
     let toolCount = 0
     if (policy.enableToolDescriptions) {
-      toolsDescription = capability.toolsDescription
-      toolCount = capability.allowedTools.size
+      toolsDescription = this.capabilityGate.describeTools(enabledTools)
+      toolCount = enabledTools.size
     }
 
     // ── 6. [可选] 状态注入 → 组装状态变量对象 ──
@@ -306,6 +336,9 @@ export class ContextCompiler {
       agent_id: agentId,
     })
 
+    const flowState = await this.flowStateService.get(threadId, agentId)
+    const draftFlowInstructions = this.flowStateService.formatForPrompt(flowState)
+
     // ── 9. 组装 vars 对象，调用 MdpEngine 渲染 slots 模板 ──
     const vars: Record<string, unknown> = {
       // Agent 标识（用于模板覆盖解析）
@@ -313,6 +346,8 @@ export class ContextCompiler {
       // 人格与规则
       system_core: systemCore,
       persona_definition: personaDefinition,
+      // 当前 Thread × Agent 私有临时心流
+      draft_flow_instructions: draftFlowInstructions,
       // 状态变量（来自 buildStateSection）
       ...stateVars,
       // 记忆上下文（RAG 检索结果）
@@ -361,7 +396,7 @@ export class ContextCompiler {
     // ── 11 + 12. 转换 RenderedMessage[] → LlmMessage[]，追加 Thread 活跃消息 ──
     const llmMessages = this.assembleMessages({
       slotMessages: validSlotMessages,
-      messages,
+      messages: options.appendThreadMessages === false ? [] : messages,
     })
 
     // ── 13. 生成清单 ──
@@ -374,6 +409,7 @@ export class ContextCompiler {
       hasMemoryRetrieval: policy.enableMemoryRetrieval && !!lastUserMessage,
       memoryHitCount,
       toolCount,
+      disabledTools: [...disabledTools],
       hasStateInjection: policy.enableStateInjection,
       compiledAt: new Date().toISOString(),
     }
@@ -407,11 +443,11 @@ export class ContextCompiler {
    * 加载 Agent 人格
    *
    * 读取 system_prompt.md 内容作为 persona_definition 变量返回。
-   * 不再追加 companion 补丁（补丁改由 slots/600_channel_patch.md 模板处理，
-   * 若需要可后续扩展 channel_patch 变量）。
+   * Channel 差异统一由 slots/600_channel_patch.md 模板处理。
+   * 若需要可后续扩展 channel_patch 变量。
    *
-   * 注：social/group 的 persona 补丁由社交子 Agent 应用独立管理，
-   * ContextCompiler 不再处理。
+   * 注：social 的 persona 补丁由社交子 Agent 应用独立管理；
+   * group 是内部据点，由 ContextCompiler 正常处理 channel patch。
    */
   private loadSystemPrompt(agentId: string): string {
     const agent = this.agentManager.getAgent(agentId)
@@ -456,12 +492,16 @@ export class ContextCompiler {
     if (!query.trim()) return []
 
     try {
+      const memoryRuntimeConfig = await loadMemoryRuntimeConfig(this.configRepo)
+      const channelMemoryConfig =
+        channel === 'social' ? undefined : memoryRuntimeConfig.channels[channel]
       // channel 是 ThreadChannel 字符串，直接传给 MemoryProvider
       const results = await this.memoryProvider.search({
         query,
         agentId,
         channel,
-        limit: 10,
+        limit: channelMemoryConfig?.retrievalLimit ?? 0,
+        minScore: memoryRuntimeConfig.retrievalMinScore,
       })
 
       return results
@@ -508,7 +548,8 @@ export class ContextCompiler {
    * - mood:             Agent 心情
    * - vibe:             Agent 氛围
    * - mind:             Agent 心理活动
-   * - owner_name:       主人名
+   * - owner_name:       用户名字
+   * - owner_appellation: 用户称呼（如 主人/哥哥/老师，来自 agent.json 的 owner_appellation，默认 主人）
    * - environment_info: 环境信息（静态 + 运行时长）
    * - user_persona:     用户画像（可选，来自 owner.persona）
    */
@@ -525,7 +566,9 @@ export class ContextCompiler {
     const mood = (await this.configRepo.get(`agent.${agentId}.mood`)) ?? 'happy'
     const vibe = (await this.configRepo.get(`agent.${agentId}.vibe`)) ?? 'active'
     const mind = (await this.configRepo.get(`agent.${agentId}.mind`)) ?? '...'
-    const ownerName = (await this.configRepo.get('owner.name')) ?? '主人'
+    const ownerName = (await this.configRepo.get('owner.name')) ?? '用户'
+    // 称呼：AI 对用户的亲密称谓，各角色独立配置（来自 agent.json 的 owner_appellation，未配置时兜底"主人"）
+    const ownerAppellation = this.agentManager.getAgent(agentId)?.ownerAppellation ?? '主人'
 
     // 用户画像（可选，来自 owner.persona 配置）
     const userPersona = (await this.configRepo.get('owner.persona')) ?? ''
@@ -540,6 +583,7 @@ export class ContextCompiler {
       vibe,
       mind,
       owner_name: ownerName,
+      owner_appellation: ownerAppellation,
       environment_info: environmentInfo,
       user_persona: userPersona,
     }
@@ -578,10 +622,18 @@ export class ContextCompiler {
     // 活跃消息（user/assistant 原生角色，时间正序）
     for (const msg of messages) {
       if (msg.role === 'user' || msg.role === 'assistant') {
-        llmMessages.push({
-          role: msg.role,
-          content: msg.content,
-        })
+        llmMessages.push({ role: msg.role, content: msg.content })
+        continue
+      }
+      if (msg.role === 'system') {
+        try {
+          const metadata = JSON.parse(msg.metadataJson) as { kind?: string }
+          if (metadata.kind === 'image_transcription') {
+            llmMessages.push({ role: 'system', content: msg.content })
+          }
+        } catch {
+          // 普通系统消息不进入 LLM 历史；这里只恢复受控的图片文字档案。
+        }
       }
     }
 
@@ -598,18 +650,16 @@ export class ContextCompiler {
    */
   private resolvePolicy(
     contextPolicyJson: string | null | undefined,
-    channel: ThreadChannel,
+    fallback: ChannelPolicy,
   ): ChannelPolicy {
-    if (!contextPolicyJson) {
-      return DEFAULT_POLICIES[channel] ?? DEFAULT_POLICIES.desktop
-    }
+    if (!contextPolicyJson) return fallback
     try {
       const parsed = JSON.parse(contextPolicyJson) as Partial<ChannelPolicy>
-      const fallback = DEFAULT_POLICIES[channel] ?? DEFAULT_POLICIES.desktop
       // 合并默认策略：parsed 中存在的字段覆盖默认值，缺失字段用默认值兜底
       // 避免解析出的对象缺字段导致运行时崩溃
       return {
-        messageWindow: typeof parsed.messageWindow === 'number' ? parsed.messageWindow : fallback.messageWindow,
+        messageWindow:
+          typeof parsed.messageWindow === 'number' ? parsed.messageWindow : fallback.messageWindow,
         enableMemoryRetrieval:
           typeof parsed.enableMemoryRetrieval === 'boolean'
             ? parsed.enableMemoryRetrieval
@@ -622,13 +672,12 @@ export class ContextCompiler {
           typeof parsed.enableStateInjection === 'boolean'
             ? parsed.enableStateInjection
             : fallback.enableStateInjection,
-        tokenBudget: typeof parsed.tokenBudget === 'number' ? parsed.tokenBudget : fallback.tokenBudget,
+        tokenBudget:
+          typeof parsed.tokenBudget === 'number' ? parsed.tokenBudget : fallback.tokenBudget,
       }
     } catch (err) {
-      logger.warn(
-        `Thread ContextPolicy JSON 解析失败，回退到默认策略: ${err}`,
-      )
-      return DEFAULT_POLICIES[channel] ?? DEFAULT_POLICIES.desktop
+      logger.warn(`Thread ContextPolicy JSON 解析失败，回退到默认策略: ${err}`)
+      return fallback
     }
   }
 

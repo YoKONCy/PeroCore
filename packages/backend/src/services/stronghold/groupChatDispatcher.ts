@@ -7,6 +7,7 @@
  *
  * Layer 1: 规则预筛 (零 LLM 开销)
  *   - 被 @mention 的 Agent → 必定回复
+ *   - @全体成员 (@all) → 返回哨兵 agentId='@all'，由路由层展开为随机顺序串行回复
  *   - 连续 3+ 条 Agent 发言 → 冷却期
  *   - 用户短回复 ("嗯", "好") → 降低触发概率
  *
@@ -16,6 +17,7 @@
  *
  * 调度结果:
  *   - 返回 agent_id → 由调用方执行 AgentService.chat()
+ *   - 返回 '@all' → 由调用方按随机顺序执行所有在场 Agent
  *   - 返回 null → 无人接话
  *
  * @module packages/backend/src/services/stronghold/groupChatDispatcher
@@ -34,7 +36,7 @@ type MessageRow = {
 
 /** 调度结果 */
 export interface DispatchResult {
-  /** 下一个发言的 Agent ID (null = 无人接话) */
+  /** 下一个发言的 Agent ID (null = 无人接话；'@all' = 全体成员依次回复) */
   agentId: string | null
   /** 调度理由 */
   reason: string
@@ -70,14 +72,9 @@ export class GroupChatDispatcher {
     const mentionResult = this.checkMentions(lastMsg, candidates)
     if (mentionResult) return mentionResult
 
-    // 规则 B: 用户发言 → 必须有人回复
+    // 规则 B: 用户发言 → 只要房间内有候选 Agent，就必须有人回复。
+    // 短消息（如“你好”“在吗”）同样是明确互动，不应随机静默。
     if (lastMsg.senderId === 'user') {
-      // 短回复降低概率
-      if (this.isShortReply(lastMsg.content)) {
-        if (Math.random() < 0.5) {
-          return { agentId: null, reason: '用户短回复，50% 概率跳过' }
-        }
-      }
       return {
         agentId: this.pickRandom(candidates),
         reason: '用户发言，随机选择 Agent 回复',
@@ -120,6 +117,11 @@ export class GroupChatDispatcher {
     try {
       const mentions: string[] = msg.mentionsJson ? JSON.parse(msg.mentionsJson) : []
 
+      // @全体成员：召唤房间内所有候选 Agent（agentId 使用哨兵值 '@all'，由路由层展开执行）
+      if (mentions.includes('@all') && candidates.length > 0) {
+        return { agentId: '@all', reason: '被 @mention: 全体成员' }
+      }
+
       const validMentions = mentions.filter((m) => candidates.includes(m))
       if (validMentions.length > 0) {
         return {
@@ -144,15 +146,6 @@ export class GroupChatDispatcher {
       }
     }
     return streak
-  }
-
-  /** 判断是否为短回复 */
-  private isShortReply(content: string): boolean {
-    const trimmed = content.trim()
-    if (trimmed.length <= 3) return true
-
-    const shortReplies = ['嗯', '好', '哦', '好的', '嗯嗯', 'ok', 'OK', '行', '了解', '知道了']
-    return shortReplies.includes(trimmed)
   }
 
   /** 随机选择 */

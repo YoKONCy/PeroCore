@@ -250,6 +250,33 @@ export class SocialSessionManager {
   }
 
   /**
+   * 标记回复生成失败 → 恢复会话到非活跃期 (observing)
+   *
+   * 使用场景：executeReply 中 generateReply/sendReply 抛出异常
+   * （如 LLM 网络错误 fetch failed）。此时 session 仍停留在 summoned 状态，
+   * 下次被 @ 时 handleInbound 的 `if (session.state !== 'summoned')` 分支
+   * 无法进入，不会启动新的累积计时器 → 会话永久失聪、无法再被唤醒。
+   *
+   * 与 markPass 相同的恢复动作（state→observing + 清理 isMentioned/timer），
+   * 区别仅在于日志语义（失败恢复 vs 主动 PASS）。
+   *
+   * @param session 当前会话
+   * @param err     失败原因（可选，写入日志便于排查）
+   */
+  markReplyFailed(session: SocialSession, err?: unknown): void {
+    session.state = 'observing'
+    session.isMentioned = false
+    this.clearTimer(session)
+    // 5 分钟后允许调度器再次扫描，避免网络故障时立即重试造成反复报错
+    session.nextScanTime = Date.now() + 5 * 60 * 1000
+    const reason = err instanceof Error ? err.message : err != null ? String(err) : ''
+    logger.warn(
+      `[${session.channelId}] 回复生成失败，会话已恢复为非活跃期 (observing)，` +
+        `5 分钟后可再次扫描${reason ? `，原因: ${reason}` : ''}`,
+    )
+  }
+
+  /**
    * 检查活跃状态是否过期 → 回退到 observing
    */
   checkActiveExpiry(session: SocialSession): void {

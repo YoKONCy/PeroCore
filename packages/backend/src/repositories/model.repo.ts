@@ -9,6 +9,7 @@
 
 import { eq } from 'drizzle-orm'
 import { aiModelConfigs } from '../database/schema'
+import type { ReasoningEffort } from '../services/llm/types'
 import type { DrizzleDb } from '../database'
 
 // ─────────────────────────────────────────────
@@ -22,11 +23,13 @@ export interface CreateModelInput {
   modelId: string
   apiKey: string
   apiBase?: string
-  temperature?: number
-  topP?: number
-  maxTokens?: number
+  temperature?: number | null
+  topP?: number | null
+  maxTokens?: number | null
+  reasoningEffort?: ReasoningEffort | null
   providerType?: string
   enableVision?: boolean
+  enableAudioInput?: boolean
 }
 
 /** 更新模型配置输入 (所有字段可选) */
@@ -36,9 +39,10 @@ export interface UpdateModelInput {
   modelId?: string
   apiKey?: string
   apiBase?: string
-  temperature?: number
-  topP?: number
-  maxTokens?: number
+  temperature?: number | null
+  topP?: number | null
+  maxTokens?: number | null
+  reasoningEffort?: ReasoningEffort | null
   providerType?: string
   enableVision?: boolean
 }
@@ -74,11 +78,13 @@ export class ModelRepository {
         modelId: data.modelId,
         apiKey: data.apiKey,
         apiBase: data.apiBase,
-        temperature: data.temperature ?? 0.7,
-        topP: data.topP,
-        maxTokens: data.maxTokens,
+        temperature: data.temperature ?? null,
+        topP: data.topP ?? null,
+        maxTokens: data.maxTokens ?? null,
+        reasoningEffort: data.reasoningEffort ?? null,
         providerType: data.providerType ?? 'global',
         enableVision: data.enableVision ?? false,
+        enableAudioInput: data.enableAudioInput ?? false,
         createdAt: now,
         updatedAt: now,
       })
@@ -99,6 +105,7 @@ export class ModelRepository {
     if (data.temperature !== undefined) updates.temperature = data.temperature
     if (data.topP !== undefined) updates.topP = data.topP
     if (data.maxTokens !== undefined) updates.maxTokens = data.maxTokens
+    if (data.reasoningEffort !== undefined) updates.reasoningEffort = data.reasoningEffort
     if (data.providerType !== undefined) updates.providerType = data.providerType
     if (data.enableVision !== undefined) updates.enableVision = data.enableVision
 

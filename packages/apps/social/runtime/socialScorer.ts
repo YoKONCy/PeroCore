@@ -41,8 +41,6 @@ export interface SocialScorerConfig {
   charThreshold: number
   /** 每次拉取的最大消息数 */
   batchLimit: number
-  /** LLM 温度 */
-  temperature: number
   /** 最大重试次数 */
   maxRetries: number
   /** TriviumDB 向量维度 (使用零向量占位) */
@@ -53,7 +51,6 @@ const DEFAULT_CONFIG: SocialScorerConfig = {
   messageThreshold: 200,
   charThreshold: 50_000,
   batchLimit: 200,
-  temperature: 0.3,
   maxRetries: 3,
   vectorDim: 1536,
 }
@@ -126,6 +123,8 @@ export class SocialScorerService {
     private llmService: LlmService,
     private getModelConfig: () => Promise<ModelConfig | null>,
     private mdpEngine: MdpEngine,
+    /** Agent 管理器（可选注入，用于按 agentId 读取该角色的称呼） */
+    private agentManager?: { getOwnerAppellation(agentId: string): string },
     config?: Partial<SocialScorerConfig>,
   ) {
     this.config = { ...DEFAULT_CONFIG, ...config }
@@ -200,12 +199,15 @@ export class SocialScorerService {
     }
 
     try {
+      // 用户称呼：取该 Agent 的 agent.json owner_appellation（兜底"主人"），注入模板生成带称呼的示例/摘要
+      const ownerAppellation = this.agentManager?.getOwnerAppellation(agentId) ?? '主人'
       // 渲染 MDP 模板（AIOS 第八阶段：模板已迁移到 apps/social/prompts/）
       const prompt = this.mdpEngine.render('apps/social/tasks/social_segment_summarizer', {
         session_type: channelType,
         session_name: sessionName,
         chat_text: chatText,
         agent_name: agentId,
+        owner_appellation: ownerAppellation,
       })
 
       // LLM 调用
@@ -331,7 +333,6 @@ export class SocialScorerService {
           modelConfig,
           [{ role: 'user', content: prompt }],
           {
-            temperature: this.config.temperature,
             responseFormat: { type: 'json_object' },
           },
         )

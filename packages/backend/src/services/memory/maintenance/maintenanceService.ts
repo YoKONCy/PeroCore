@@ -11,7 +11,7 @@ interface MaintenanceServiceDeps {
 interface MaintenanceTaskDto {
   name: string
   running: boolean
-  lastRunAt: string
+  lastRunAt: string | null
   intervalDesc: string
   stats: unknown
 }
@@ -44,7 +44,7 @@ export class MaintenanceService {
       tasks: maintenanceTasks.map((t) => ({
         name: t.name,
         running: t.running,
-        lastRunAt: new Date(t.lastRunAt).toISOString(),
+        lastRunAt: t.lastFinishedAt === null ? null : new Date(t.lastFinishedAt).toISOString(),
         intervalDesc: this.formatInterval(t.intervalMs),
         stats: t.stats,
       })),

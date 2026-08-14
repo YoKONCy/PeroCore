@@ -20,33 +20,58 @@ export interface Facility {
 }
 
 export interface Room {
-  id: number
+  id: string
   facilityId?: number
   name: string
   description?: string
-  environment_json?: string
-  /** 后端附带的 Agent 列表 */
-  agents?: RoomAgent[]
+  environmentJson?: string
+  /** 后端附带的 Agent ID 列表 */
+  agents?: string[]
 }
 
-export interface RoomAgent {
+export interface RoomMember {
   agentId: string
   role?: string
 }
 
 export interface AgentLocation {
   agentId: string
-  roomId: number
+  roomId: string
   roomName?: string
 }
+
+export type GroupMessageRole = 'user' | 'assistant' | 'system'
 
 export interface GroupMessage {
   id: number
   roomId: string
   senderId: string
   content: string
-  role: 'user' | 'assistant' | 'system'
-  createdAt?: string
+  role: GroupMessageRole
+  timestamp?: string
+}
+
+export interface SendStrongholdMessageOptions {
+  senderId?: string
+  role: GroupMessageRole
+  /** 被 @ 的 Agent ID 列表；'@all' 表示 @全体成员。 */
+  mentions?: string[]
+}
+
+/** 据点消息提交后的调度结果。 */
+export interface StrongholdMessageDispatch {
+  message: GroupMessage
+  replyQueued: boolean
+  agentId?: string
+  /** @全体成员 时返回的打乱后的回复顺序（agentId='@all' 时存在）。 */
+  allAgentIds?: string[]
+  reason: string
+}
+
+/** 据点消息级联删除结果。 */
+export interface StrongholdMessageDeleteResult {
+  deletedCount: number
+  deletedMessageIds: number[]
 }
 
 export interface ButlerConfig {
@@ -55,6 +80,35 @@ export interface ButlerConfig {
   enabled: boolean
   persona?: string
 }
+
+export interface ButlerCommandResult {
+  action:
+    | 'status'
+    | 'inspect_environment'
+    | 'summon_all'
+    | 'move_agent'
+    | 'create_room'
+    | 'update_environment'
+  message: string
+  data?: unknown
+}
+
+export type ButlerAction =
+  | { type: 'status' }
+  | { type: 'inspect_environment' }
+  | { type: 'summon_all' }
+  | { type: 'move_agent'; agentId: string; targetRoomId?: string }
+  | {
+      type: 'create_room'
+      room: {
+        facilityId: number
+        name: string
+        description?: string
+        allowedAgents?: string[]
+        environment?: Record<string, unknown>
+      }
+    }
+  | { type: 'update_environment'; key: string; value: unknown; targetRoomId?: string }
 
 // ── API ──
 
@@ -88,7 +142,7 @@ export const strongholdApi = {
   // ═══ Agent 位置 ═══
 
   /** 移动 Agent 到指定房间 */
-  moveAgent: (agentId: string, roomId: number) =>
+  moveAgent: (agentId: string, roomId: string) =>
     apiClient.post<AgentLocation>('/stronghold/locations/move', { agentId, roomId }),
 
   /** 获取 Agent 当前位置 */
@@ -101,22 +155,45 @@ export const strongholdApi = {
   getMessages: (roomId: string, limit = 50) =>
     apiClient.get<GroupMessage[]>(`/stronghold/rooms/${roomId}/messages?limit=${limit}`),
 
+  /** 获取房间消息总数（对话日志列表展示用，轻量计数）。 */
+  getMessageCount: (roomId: string) =>
+    apiClient.get<{ count: number }>(`/stronghold/rooms/${roomId}/message-count`),
+
   /** 发送消息 */
-  sendMessage: (roomId: string, content: string, senderId = 'user') =>
-    apiClient.post<GroupMessage>(`/stronghold/rooms/${roomId}/messages`, {
+  sendMessage: (
+    roomId: string,
+    content: string,
+    { senderId = 'user', role, mentions }: SendStrongholdMessageOptions = { role: 'user' },
+  ) =>
+    apiClient.post<StrongholdMessageDispatch>(`/stronghold/rooms/${roomId}/messages`, {
       content,
       senderId,
+      role,
+      mentions,
     }),
+
+  /** 级联删除本轮群聊消息（用户发言与全部关联回复）。 */
+  deleteMessage: (roomId: string, messageId: number) =>
+    apiClient.delete<StrongholdMessageDeleteResult>(
+      `/stronghold/rooms/${roomId}/messages/${messageId}`,
+    ),
 
   /** 获取房间成员 */
   getRoomMembers: (roomId: string) =>
-    apiClient.get<RoomAgent[]>(`/stronghold/rooms/${roomId}/members`),
+    apiClient.get<RoomMember[]>(`/stronghold/rooms/${roomId}/members`),
 
   /** 添加成员到房间 */
   addMember: (roomId: string, agentId: string, role?: string) =>
     apiClient.post<void>(`/stronghold/rooms/${roomId}/members`, { agentId, role }),
 
   // ═══ 管家 ═══
+
+  /** 执行管家命令 */
+  callButler: (roomId: string, command: string, action?: ButlerAction) =>
+    apiClient.post<ButlerCommandResult>(`/stronghold/rooms/${roomId}/butler-command`, {
+      command,
+      action,
+    }),
 
   /** 获取管家配置 */
   getButlerConfig: () => apiClient.get<ButlerConfig>('/stronghold/butler'),

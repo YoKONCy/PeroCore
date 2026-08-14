@@ -52,6 +52,8 @@ interface TaskState {
   agentId?: string
   /** 超时定时器 */
   timeoutTimer: ReturnType<typeof setTimeout> | null
+  /** 取消在飞请求的控制器 */
+  abortController: AbortController
 }
 
 /** 任务信息（给 API 返回） */
@@ -88,7 +90,10 @@ export class RuntimeStateService {
   // ── LLM 调用状态（按 threadId 索引） ──
   private tasks = new Map<string, TaskState>()
 
-  // ── 窗口级活跃 Agent（前端窗口 → AgentId） ──
+  // ── 全局活跃 Agent（后端唯一权威） ──
+  private activeAgentId: string | null = null
+
+  // ── 窗口级活跃 Agent（兼容现有窗口映射） ──
   private windowAgents = new Map<string, string>()
 
   // ── Thread 运行时状态（按 threadId 索引） ──
@@ -130,6 +135,7 @@ export class RuntimeStateService {
       currentTurn: 0,
       agentId,
       timeoutTimer: null,
+      abortController: new AbortController(),
     }
 
     // 设置超时定时器
@@ -233,6 +239,7 @@ export class RuntimeStateService {
     if (!state) return false
     state.cancelled = true
     state.paused = false // 如果在暂停中则释放
+    state.abortController.abort()
     logger.info(`取消: thread=${threadId}`)
     this.broadcastProgress(threadId, 'cancelled', '任务已取消')
     return true
@@ -241,6 +248,11 @@ export class RuntimeStateService {
   /** 检查是否已取消 */
   isCancelled(threadId: string): boolean {
     return this.tasks.get(threadId)?.cancelled ?? false
+  }
+
+  /** 获取任务取消信号 */
+  getAbortSignal(threadId: string): AbortSignal | undefined {
+    return this.tasks.get(threadId)?.abortController.signal
   }
 
   /** 获取活跃任务数 */
@@ -279,8 +291,19 @@ export class RuntimeStateService {
     }
   }
 
+  /** 设置全局活跃 Agent，作为所有前端入口读取的唯一权威状态。 */
+  setActiveAgent(agentId: string): void {
+    this.activeAgentId = agentId
+    logger.info(`全局活跃 Agent 已切换: ${agentId}`)
+  }
+
+  /** 获取全局活跃 Agent；未设置时由调用方回退默认角色。 */
+  getActiveAgent(): string | null {
+    return this.activeAgentId
+  }
+
   // ─────────────────────────────────────────
-  // 2. 窗口级活跃 Agent（替代全局 activeAgentId）
+  // 3. 窗口级 Agent 映射（兼容）
   // ─────────────────────────────────────────
 
   /**
@@ -382,6 +405,7 @@ export class RuntimeStateService {
     logger.warn(`任务超时: thread=${threadId} (${this.timeoutMs / 1000}s)`)
     state.cancelled = true
     state.paused = false
+    state.abortController.abort()
     this.setThreadTyping(threadId, false)
     this.broadcastProgress(threadId, 'error', `任务超时 (${this.timeoutMs / 1000}s)`)
   }

@@ -8,6 +8,15 @@
 import { PixelIcon, PButton, PCard, PEmpty } from '../../pixel'
 import type { McpServerView } from '../../../composables/dashboard/useMcpConfig'
 
+/** MCP 未声明用户标题时，将协议工具标识转换为可读名称。 */
+function toolLabel(name: string): string {
+  return name
+    .split(/[_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+}
+
 const props = defineProps<{
   servers: McpServerView[]
   isLoading: boolean
@@ -62,7 +71,7 @@ function getStatusMeta(status: string) {
         <div :class="['w-2 h-2 flex-shrink-0 rounded-full', getStatusMeta(srv.status).dotClass]" />
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2">
-            <h4 class="text-sm font-black text-slate-800">{{ srv.name }}</h4>
+            <h4 class="text-sm font-black text-[var(--ui-text-primary)]">{{ srv.name }}</h4>
             <span
               :class="[
                 'text-[9px] font-bold px-1.5 py-0.5 border',
@@ -78,7 +87,7 @@ function getStatusMeta(status: string) {
             </span>
             <span
               v-if="!srv.enabled"
-              class="text-[9px] font-bold text-orange-400 px-1.5 py-0.5 bg-orange-50 border border-orange-200"
+              class="text-[9px] font-bold text-[var(--ui-warning)] px-1.5 py-0.5 bg-[var(--ui-warning-soft)] border border-[color:var(--ui-warning)]"
             >
               已禁用
             </span>
@@ -120,7 +129,7 @@ function getStatusMeta(status: string) {
       <!-- 工具列表 (展开) -->
       <div
         v-if="expandedId === srv.id && srv.tools.length > 0"
-        class="mt-3 pt-3 border-t border-slate-100"
+        class="mt-3 pt-3 border-t border-[var(--ui-border-subtle)]"
       >
         <h5 class="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2 font-pixel">
           可用工具 ({{ srv.tools.length }})
@@ -130,7 +139,7 @@ function getStatusMeta(status: string) {
           :key="tool.name"
           class="flex justify-between items-center px-2 py-1.5 border border-slate-200 mb-1"
         >
-          <span class="text-xs font-bold text-sky-600 font-mono">{{ tool.name }}</span>
+          <span class="text-xs font-bold text-sky-600">{{ toolLabel(tool.name) }}</span>
           <span class="text-[11px] text-slate-400 truncate ml-3">{{ tool.description }}</span>
         </div>
       </div>
@@ -153,7 +162,7 @@ function getStatusMeta(status: string) {
 }
 
 .mcp-scrollbar::-webkit-scrollbar-thumb {
-  background: #bae6fd;
+  background: var(--ui-scrollbar-thumb);
   border-radius: 0;
 }
 </style>

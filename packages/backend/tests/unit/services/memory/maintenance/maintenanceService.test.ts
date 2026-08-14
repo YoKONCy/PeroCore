@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { MaintenanceService } from '@perocore/backend/services/memory/maintenance/maintenanceService'
+import { MaintenanceService } from '@infos/backend/services/memory/maintenance/maintenanceService'
 
 type SchedulerMock = {
   isStarted: boolean
@@ -44,21 +44,21 @@ describe('MaintenanceService', () => {
         {
           name: 'memory-scorer',
           running: false,
-          lastRunAt: 1710000000000,
+          lastFinishedAt: 1710000000000,
           intervalMs: 30_000,
           stats: { ok: true },
         },
         {
           name: 'daily-diary',
           running: true,
-          lastRunAt: 1710003600000,
+          lastFinishedAt: 1710003600000,
           intervalMs: 120_000,
           stats: { count: 2 },
         },
         {
           name: 'chat-cleanup',
           running: false,
-          lastRunAt: 1710007200000,
+          lastFinishedAt: 1710007200000,
           intervalMs: 7200_000,
           stats: {},
         },
@@ -96,7 +96,7 @@ describe('MaintenanceService', () => {
         {
           name: 'reflection-worker',
           running: false,
-          lastRunAt: 1710000000000,
+          lastFinishedAt: 1710000000000,
           intervalMs: 3600_000,
           stats: null,
         },

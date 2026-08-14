@@ -1,8 +1,8 @@
 ---
-description: PeroCore-TS 项目的完整工程规范与架构设计，覆盖命名、API、架构、记忆系统、扩展系统等全部设计决策。在为 PeroCore-TS 编写任何代码之前必须阅读本技能。
+description: infOS-TS 项目的完整工程规范与架构设计，覆盖命名、API、架构、记忆系统、扩展系统等全部设计决策。在为 infOS-TS 编写任何代码之前必须阅读本技能。
 ---
 
-# PeroCore-TS 工程规范 Skill
+# infOS-TS 工程规范 Skill
 
 > **本文件是对 `_docs_/` 下 15 份规范文档的高密度摘要。**
 > 目标读者：AI 编码助手（包括你自己的后续会话）。
@@ -13,18 +13,18 @@ description: PeroCore-TS 项目的完整工程规范与架构设计，覆盖命�
 
 ## 0. 项目概况
 
-PeroCore-TS 是 PeroCore (Python) 的 TypeScript 全栈重写。核心卖点：**庞大的 AI 角色记忆系统**。
+infOS-TS 是 infOS (Python) 的 TypeScript 全栈重写。核心卖点：**庞大的 AI 角色记忆系统**。
 
 ### 产品命名体系
 
 | 名称 | 含义 | 使用场景 |
 |---|---|---|
-| **PeroCore** | 后端引擎内核 | 代码仓库名、`packages/backend`、技术文档、Docker 镜像名 |
+| **infOS** | 后端引擎内核 | 代码仓库名、`packages/backend`、技术文档、Docker 镜像名 |
 | **萌动链接：PeroperoChat** | 完整 Electron 桌面应用 | Steam 商店页、用户可见的产品名、窗口标题 |
 | **PeroperoChat** | 上述产品的简称 | 日常口语、非正式场合 |
-| **PeroCore-TS** | 整个 TS 重构仓库 | 仅开发期使用，区分 Python 版 PeroCore |
+| **infOS-TS** | 整个 TS 重构仓库 | 仅开发期使用，区分 Python 版 infOS |
 
-> PeroCore 是引擎，PeroperoChat 是产品。关系类似 Unreal Engine 和用它做的游戏。
+> infOS 是引擎，PeroperoChat 是产品。关系类似 Unreal Engine 和用它做的游戏。
 
 ### 技术栈
 
@@ -32,13 +32,13 @@ PeroCore-TS 是 PeroCore (Python) 的 TypeScript 全栈重写。核心卖点：*
 - **后端**: Hono + Drizzle + better-sqlite3 + TriviumDB (自研 Rust 向量引擎)
 - **前端**: Vue 3 + Pinia + Vue Router
 - **壳层**: Electron (桌面版) / Docker (服务器版)
-- **Rust N-API**: `@perocore/render-core`, `@perocore/nit-runtime`, `@perocore/auditor-wasm`
+- **Rust N-API**: `@infos/render-core`, `@infos/nit-runtime`, `@infos/auditor-wasm`
 
 **包依赖关系**:
 ```
-@perocore/shared ← 无内部依赖
-@perocore/backend ← shared + nit-runtime + auditor-wasm
-@perocore/frontend ← shared
+@infos/shared ← 无内部依赖
+@infos/backend ← shared + nit-runtime + auditor-wasm
+@infos/frontend ← shared
 electron ← frontend + render-core
 ```
 
@@ -132,7 +132,7 @@ Repository 层 (repositories/)
 
 ## 6. 记忆系统架构 (核心!)
 
-这是 PeroCore 最重要的子系统，基于 PEDSA (Pipeline for Embedded Directed Semantic Analysis)。
+这是 infOS 最重要的子系统，基于 PEDSA (Pipeline for Embedded Directed Semantic Analysis)。
 
 ### 四层存储
 
@@ -233,7 +233,7 @@ NIT 解释器封装为标准 FC 工具 `run_script`，LLM 通过 Function Callin
 
 ## 快速 Checklist
 
-在为 PeroCore-TS 编写代码时, 对照以下检查项:
+在为 infOS-TS 编写代码时, 对照以下检查项:
 
 1. [ ] 文件名用 camelCase? Vue 组件用 PascalCase?
 2. [ ] 注释和日志是中文?

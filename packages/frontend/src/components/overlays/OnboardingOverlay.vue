@@ -9,7 +9,7 @@
  * @props steps - 引导步骤
  * @emits finish - 引导完成
  */
-import { ref, computed, watch, onUnmounted } from 'vue'
+import { ref, computed, watch, onUnmounted, nextTick } from 'vue'
 import { PixelIcon, PButton } from '../pixel'
 import SpotlightMask from './SpotlightMask.vue'
 import { logger } from '../../lib/logger'
@@ -19,6 +19,12 @@ export interface OnboardingStep {
   speaker?: string
   /** 对话文本 */
   text: string
+  /** 辅助标签 */
+  eyebrow?: string
+  /** 步骤标题 */
+  title?: string
+  /** 进入该步骤前需要展示的 Launcher Tab */
+  tab?: string
   /** 表情标识 (用于立绘切换): 'normal' | 'proud' | 'none' */
   expression?: string
   /** 聚焦元素 CSS 选择器 */
@@ -37,6 +43,7 @@ const emit = defineEmits<{
   finish: []
   'update:visible': [val: boolean]
   choice: [value: string]
+  step: [step: OnboardingStep, index: number]
 }>()
 
 const currentIndex = ref(0)
@@ -136,6 +143,16 @@ function startTyping() {
   }, 35)
 }
 
+function startStep() {
+  const step = currentStep.value
+  if (!step) return
+  emit('step', step, currentIndex.value)
+  void nextTick(() => {
+    window.dispatchEvent(new Event('onboarding-layout-change'))
+    startTyping()
+  })
+}
+
 /** 跳到完整文本 / 下一步 */
 function handleNext() {
   if (!isTypingDone.value) {
@@ -152,7 +169,7 @@ function handleNext() {
 function advance() {
   if (currentIndex.value < props.steps.length - 1) {
     currentIndex.value++
-    startTyping()
+    startStep()
   } else {
     isAppearing.value = false
     setTimeout(() => {
@@ -177,7 +194,7 @@ watch(
       currentIndex.value = 0
       setTimeout(() => {
         isAppearing.value = true
-        startTyping()
+        startStep()
       }, 200)
     } else {
       isAppearing.value = false
@@ -197,178 +214,282 @@ onUnmounted(() => {
     <Transition name="onb-fade">
       <div
         v-if="visible"
-        :class="[
-          'fixed inset-0 z-[10000] flex flex-col items-center justify-end p-12 transition-all duration-[600ms] pointer-events-none',
-          isAppearing ? 'opacity-100' : 'opacity-0',
-          hasSpotlight ? 'bg-transparent' : 'bg-black/40 backdrop-blur-[12px]',
-        ]"
-        @click.self="handleNext"
+        class="onb-overlay"
+        :class="{ 'is-visible': isAppearing, 'has-spotlight': hasSpotlight }"
       >
-        <!-- 聚光灯 -->
         <SpotlightMask :selector="currentStep?.focusSelector ?? null" />
 
-        <!-- Pero 的 2D 立绘 (还原 v1) -->
         <div
           v-if="currentStep?.expression !== 'none'"
-          :class="[
-            'absolute bottom-0 left-1/2 z-10 transition-all duration-1000 ease-out',
-            isAppearing
-              ? '-translate-x-1/2 translate-y-0 opacity-100'
-              : '-translate-x-1/2 translate-y-10 opacity-0',
-          ]"
+          class="onb-character"
+          :class="{ ready: isAppearing }"
         >
-          <div class="relative group">
-            <!-- 发光效果 -->
-            <div class="absolute inset-0 bg-sky-400/15 blur-[120px] rounded-full onb-glow-pulse" />
+          <div class="onb-character__glow" />
+          <img
+            v-if="isImageReady"
+            :key="currentExpressionImage!"
+            :src="currentExpressionImage!"
+            :alt="currentExpressionLabel"
+          />
+          <div v-else class="onb-character__fallback">
+            <PixelIcon :name="currentExpressionIcon" size="3xl" />
+            <strong>{{ currentExpressionLabel }}</strong>
+          </div>
+        </div>
 
-            <!-- 立绘容器 -->
-            <div class="w-[500px] h-[700px] flex items-end justify-center relative">
-              <!-- 立绘图片 (带淡入淡出) -->
-              <Transition name="fade">
-                <img
-                  v-if="isImageReady"
-                  :key="currentExpressionImage!"
-                  :src="currentExpressionImage!"
-                  :alt="currentExpressionLabel"
-                  class="max-w-full max-h-full object-contain z-10 drop-shadow-[0_20px_50px_rgba(14,165,233,0.3)]"
-                />
-              </Transition>
-
-              <!-- 占位符 (立绘未加载) -->
-              <div
-                v-if="!isImageReady"
-                class="w-[450px] h-[650px] flex items-center justify-center border-2 border-sky-400 bg-white/5 backdrop-blur-[20px] relative overflow-hidden"
-              >
-                <div class="flex flex-col items-center gap-8 onb-float">
-                  <div
-                    class="p-10 bg-white/10 border-2 border-sky-400 text-sky-400 shadow-[8px_8px_0_0_rgba(14,165,233,0.2)]"
-                  >
-                    <PixelIcon :name="currentExpressionIcon" size="3xl" />
-                  </div>
-                  <div
-                    class="px-8 py-3 bg-white border-2 border-sky-400 text-sky-400 font-black text-2xl shadow-[8px_8px_0_0_rgba(14,165,233,0.2)]"
-                  >
-                    {{ currentExpressionLabel }}
-                  </div>
-                </div>
-              </div>
+        <article class="onb-dialog" :class="{ ready: isAppearing }" @click="handleNext">
+          <header>
+            <div class="onb-speaker">
+              <PixelIcon name="cat" size="xs" />
+              {{ currentStep?.speaker ?? 'Pero' }}
             </div>
-          </div>
-        </div>
-
-        <!-- 对话框 -->
-        <div
-          :class="[
-            'w-full max-w-[800px] p-10 bg-white border-2 border-sky-500 shadow-[0_30px_60px_rgba(14,165,233,0.15)] relative z-20 cursor-pointer pointer-events-auto transition-all duration-500',
-            isAppearing ? 'translate-y-0 opacity-100' : 'translate-y-5 opacity-0',
-          ]"
-          @click="handleNext"
-        >
-          <!-- 名称标签 -->
-          <div
-            class="absolute -top-5 left-6 px-6 py-2 bg-sky-500 text-white font-black text-base tracking-[0.15em] border-2 border-sky-600"
-          >
-            {{ currentStep?.speaker ?? 'Pero' }}
-          </div>
-
-          <!-- 文本 -->
-          <div class="text-lg font-bold text-slate-800 leading-[1.8] min-h-[80px]">
-            <span>{{ displayedText }}</span>
-            <span v-if="isTypingDone" class="inline-block ml-2 text-sky-300 onb-bounce">▼</span>
-          </div>
-
-          <!-- 选择按钮 -->
-          <div v-if="currentStep?.choices && isTypingDone" class="flex gap-4 mt-6">
-            <PButton
-              v-for="choice in currentStep.choices"
-              :key="choice.value"
-              variant="primary"
-              @click.stop="handleChoice(choice.value)"
-            >
-              {{ choice.label }}
-            </PButton>
-          </div>
-
-          <!-- 继续提示 -->
-          <div
-            v-if="!currentStep?.choices && isTypingDone"
-            class="absolute bottom-4 right-6 text-[11px] font-bold text-slate-400 uppercase tracking-[0.3em] onb-hint-pulse"
-          >
-            点击此处继续喵...
-          </div>
-        </div>
+            <span>
+              {{ String(currentIndex + 1).padStart(2, '0') }} /
+              {{ String(steps.length).padStart(2, '0') }}
+            </span>
+          </header>
+          <section>
+            <small>{{ currentStep?.eyebrow ?? 'INFOS GUIDE' }}</small>
+            <h2>{{ currentStep?.title ?? '新手引导' }}</h2>
+            <p>
+              {{ displayedText }}
+              <i v-if="!isTypingDone" />
+            </p>
+          </section>
+          <footer>
+            <div class="onb-progress">
+              <i :style="{ width: `${((currentIndex + 1) / steps.length) * 100}%` }" />
+            </div>
+            <div v-if="currentStep?.choices && isTypingDone" class="onb-choices">
+              <PButton
+                v-for="choice in currentStep.choices"
+                :key="choice.value"
+                variant="primary"
+                @click.stop="handleChoice(choice.value)"
+              >
+                {{ choice.label }}
+              </PButton>
+            </div>
+            <span v-else>
+              {{
+                isTypingDone
+                  ? currentIndex === steps.length - 1
+                    ? '完成引导'
+                    : '点击继续'
+                  : '正在介绍…'
+              }}
+              <PixelIcon name="arrow-right" size="xs" />
+            </span>
+          </footer>
+        </article>
       </div>
     </Transition>
   </Teleport>
 </template>
 
 <style scoped>
-/* 过渡动画 */
+.onb-overlay {
+  position: fixed;
+  z-index: 10000;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  background: rgba(15, 23, 42, 0.58);
+  backdrop-filter: blur(8px);
+  transition: opacity 0.35s ease;
+}
+.onb-overlay.is-visible {
+  opacity: 1;
+}
+.onb-overlay.has-spotlight {
+  background: transparent;
+  backdrop-filter: none;
+}
+.onb-character {
+  position: absolute;
+  z-index: 10;
+  right: 8%;
+  bottom: 0;
+  width: min(330px, 30vw);
+  height: 72vh;
+  opacity: 0;
+  transform: translateY(30px);
+  transition:
+    opacity 0.45s ease,
+    transform 0.7s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.onb-character.ready {
+  opacity: 1;
+  transform: translateY(0);
+}
+.onb-character img {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center bottom;
+  filter: drop-shadow(0 18px 30px rgba(14, 165, 233, 0.25));
+}
+.onb-character__glow {
+  position: absolute;
+  right: 10%;
+  bottom: 2%;
+  width: 80%;
+  height: 55%;
+  border-radius: 50%;
+  background: rgba(244, 114, 182, 0.18);
+  filter: blur(70px);
+}
+.onb-character__fallback {
+  position: absolute;
+  right: 15%;
+  bottom: 14%;
+  display: grid;
+  width: 180px;
+  height: 210px;
+  place-items: center;
+  border: 1px solid var(--ui-accent-primary);
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--ui-accent-primary);
+  box-shadow: 7px 7px 0 rgba(236, 72, 153, 0.18);
+}
+.onb-character__fallback strong {
+  font: 800 13px var(--ui-font-pixel);
+}
+.onb-dialog {
+  position: absolute;
+  z-index: 20;
+  bottom: 34px;
+  left: 50%;
+  width: min(620px, calc(100vw - 64px));
+  overflow: hidden;
+  border: 1px solid var(--ui-border-default);
+  border-top: 3px solid var(--ui-accent-primary);
+  border-radius: var(--ui-radius-md);
+  opacity: 0;
+  background: var(--ui-bg-elevated);
+  box-shadow:
+    var(--ui-shadow-lg),
+    7px 7px 0 color-mix(in srgb, var(--ui-accent-primary) 18%, transparent);
+  pointer-events: auto;
+  cursor: pointer;
+  transform: translate(-50%, 18px);
+  transition:
+    opacity 0.35s ease,
+    transform 0.45s ease;
+}
+.onb-dialog.ready {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+.onb-dialog > header {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--ui-border-subtle);
+  background: var(--ui-bg-surface-soft);
+}
+.onb-speaker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ui-accent-primary);
+  font: 900 10px var(--ui-font-pixel);
+}
+.onb-dialog > header > span {
+  color: var(--ui-text-disabled);
+  font: 800 9px var(--ui-font-mono);
+}
+.onb-dialog section {
+  padding: 16px 18px 13px;
+}
+.onb-dialog section small {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--ui-accent-sky);
+  font: 900 8px var(--ui-font-mono);
+  letter-spacing: 0.13em;
+}
+.onb-dialog h2 {
+  margin: 0;
+  color: var(--ui-text-primary);
+  font: 700 19px/1.4 var(--ui-font-sans);
+}
+.onb-dialog p {
+  min-height: 48px;
+  margin: 8px 0 0;
+  color: var(--ui-text-secondary);
+  font: 500 13px/1.75 var(--ui-font-sans);
+}
+.onb-dialog p i {
+  display: inline-block;
+  width: 5px;
+  height: 13px;
+  margin-left: 3px;
+  background: var(--ui-accent-primary);
+  animation: onb-caret 0.8s steps(2, end) infinite;
+}
+.onb-dialog footer {
+  position: relative;
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 15px;
+  border-top: 1px solid var(--ui-border-subtle);
+  background: var(--ui-bg-surface-soft);
+}
+.onb-dialog footer > span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ui-text-tertiary);
+  font: 800 9px var(--ui-font-mono);
+}
+.onb-progress {
+  position: absolute;
+  top: -1px;
+  right: 0;
+  left: 0;
+  height: 2px;
+  background: var(--ui-border-subtle);
+}
+.onb-progress i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--ui-accent-primary), var(--ui-accent-sky));
+  transition: width 0.3s ease;
+}
+.onb-choices {
+  display: flex;
+  gap: 7px;
+  padding: 6px 0;
+}
+@keyframes onb-caret {
+  50% {
+    opacity: 0;
+  }
+}
 .onb-fade-enter-active,
 .onb-fade-leave-active {
-  transition: opacity 0.5s;
+  transition: opacity 0.3s;
 }
-
 .onb-fade-enter-from,
 .onb-fade-leave-to {
   opacity: 0;
 }
-
-/* 立绘淡入淡出 */
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.5s ease;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
-
-/* 关键帧动画 — Tailwind 无法表达 */
-@keyframes onb-bounce {
-  0%,
-  100% {
-    transform: translateY(0);
+@media (max-width: 800px) {
+  .onb-character {
+    right: 2%;
+    width: 42vw;
+    opacity: 0.45;
   }
-  50% {
-    transform: translateY(4px);
+  .onb-dialog {
+    bottom: 20px;
+    width: calc(100vw - 32px);
   }
-}
-
-.onb-bounce {
-  animation: onb-bounce 1s infinite;
-}
-
-@keyframes onb-pulse {
-  0%,
-  100% {
-    opacity: 0.4;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-
-.onb-hint-pulse {
-  animation: onb-pulse 2s infinite;
-}
-
-.onb-glow-pulse {
-  animation: onb-pulse 3s ease-in-out infinite;
-}
-
-@keyframes onb-float {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-8px);
-  }
-}
-
-.onb-float {
-  animation: onb-float 3s ease-in-out infinite;
 }
 </style>

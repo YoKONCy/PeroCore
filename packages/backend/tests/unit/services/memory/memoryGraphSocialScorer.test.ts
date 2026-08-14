@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { MemoryGraphService } from '@perocore/backend/services/memory/graph/memoryGraph'
-import { SocialScorerService } from '@perocore/backend/services/memory/socialScorer'
+import { MemoryGraphService } from '@infos/backend/services/memory/graph/memoryGraph'
+import { SocialScorerService } from '@infos/backend/services/memory/socialScorer'
 
 function createMemory(id: number, overrides: Record<string, unknown> = {}) {
   return {
@@ -202,6 +202,7 @@ describe('SocialScorerService', () => {
       deps.llmService as never,
       deps.getModelConfig as never,
       deps.mdpEngine as never,
+      undefined, // configRepo（可选注入，此处测试不依赖自定义称呼配置）
       { messageThreshold: 2, charThreshold: 20, batchLimit: 10, vectorDim: 3, maxRetries: 1 },
     )
     return { service, deps, store }
@@ -239,7 +240,7 @@ describe('SocialScorerService', () => {
     expect(deps.llmService.chat).toHaveBeenCalledWith(
       expect.any(Object),
       [{ role: 'user', content: '总结提示词' }],
-      { temperature: 0.3, responseFormat: { type: 'json_object' } },
+      { responseFormat: { type: 'json_object' } },
     )
     expect(store.insertWithId).toHaveBeenCalledWith(
       expect.any(Number),

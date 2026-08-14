@@ -44,7 +44,7 @@ withDefaults(defineProps<Props>(), {
   font-family: var(--font-pixel), monospace;
   font-weight: 600;
   cursor: pointer;
-  border: 2px solid var(--color-border);
+  border: 2px solid var(--ui-border-default);
   transition:
     transform 0.1s,
     box-shadow 0.1s;
@@ -74,12 +74,12 @@ withDefaults(defineProps<Props>(), {
 }
 
 .p-btn-secondary {
-  background: var(--color-bg-secondary);
-  color: var(--color-text-primary);
-  border-color: var(--color-border);
+  background: var(--dash-panel-soft);
+  color: var(--ui-text-primary);
+  border-color: var(--ui-border-default);
 }
 .p-btn-secondary:hover:not(:disabled) {
-  background: var(--color-bg-hover);
+  background: var(--ui-bg-hover);
 }
 
 .p-btn-danger {
@@ -93,12 +93,12 @@ withDefaults(defineProps<Props>(), {
 
 .p-btn-ghost {
   background: transparent;
-  color: var(--color-text-primary);
+  color: var(--ui-text-primary);
   border-color: transparent;
   box-shadow: none;
 }
 .p-btn-ghost:hover:not(:disabled) {
-  background: var(--color-bg-hover);
+  background: var(--ui-bg-hover);
 }
 .p-btn-ghost:active:not(:disabled) {
   transform: none;

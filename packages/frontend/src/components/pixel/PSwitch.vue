@@ -64,7 +64,7 @@ function toggle() {
   transform: scale(0.95);
 }
 .p-switch-disabled {
-  opacity: 0.5;
+  color: var(--ui-text-disabled);
   cursor: not-allowed;
 }
 
@@ -72,13 +72,13 @@ function toggle() {
   position: relative;
   width: 44px;
   height: 24px;
-  background: var(--color-bg-hover);
-  border: 2px solid var(--color-border);
+  background: var(--ui-bg-hover);
+  border: 2px solid var(--ui-border-strong);
   transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
-.p-switch-on {
-  background: var(--color-sky-hover);
-  border-color: var(--color-sky-500);
+.p-switch-track.p-switch-on {
+  background: var(--ui-accent-sky-soft);
+  border-color: var(--ui-accent-sky);
 }
 
 .p-switch-thumb {
@@ -87,20 +87,20 @@ function toggle() {
   top: 2px;
   width: 16px;
   height: 16px;
-  background: white;
-  border: 1px solid var(--color-border);
+  background: var(--ui-bg-surface);
+  border: 1px solid var(--ui-border-strong);
   display: flex;
   align-items: center;
   justify-content: center;
   transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
-  box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.1);
+  box-shadow: var(--ui-shadow-xs);
 }
 .p-switch-thumb-on {
   transform: translateX(20px);
 }
 
 .p-switch-thumb-icon {
-  color: var(--color-sky-hover);
+  color: var(--ui-accent-sky);
   transition: all 0.5s;
   animation: pixel-pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
@@ -108,7 +108,7 @@ function toggle() {
 .p-switch-label {
   font-size: 13px;
   font-weight: 700;
-  color: var(--color-text-secondary);
+  color: var(--ui-text-secondary);
   display: flex;
   align-items: center;
   gap: 4px;

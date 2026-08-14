@@ -5,7 +5,7 @@
  *
  *   1. @data/custom/prompts/{path}  — 用户自定义 (最高优先)
  *   2. @workshop/{path}             — Workshop 订阅 (如有)
- *   3. @app/prompts/{path}          — 官方内置 (兜底)
+ *   3. @app/backend/src/services/mdp/prompts/{path} — 官方内置 (兜底)
  *
  * 与 PathResolver 配合，两种部署形态自动适配。
  *
@@ -42,9 +42,10 @@ export class PromptTemplateLoader {
       return readFile(customPath, 'utf-8')
     }
 
-    // 2. Workshop (如有)
-    if (this.pathResolver.isAvailable('@workshop')) {
-      const workshopPath = this.pathResolver.resolve(`@workshop/prompts/${templatePath}`)
+    // 2. Workshop：按订阅顺序查找各 item 的 prompts/；后出现的 item 优先。
+    const workshopRoots = this.pathResolver.getRoots('@workshop')
+    for (let index = workshopRoots.length - 1; index >= 0; index -= 1) {
+      const workshopPath = path.resolve(workshopRoots[index]!, 'prompts', templatePath)
       if (existsSync(workshopPath)) {
         logger.debug(`加载 Workshop 提示词: ${templatePath}`)
         return readFile(workshopPath, 'utf-8')
@@ -52,7 +53,9 @@ export class PromptTemplateLoader {
     }
 
     // 3. 官方内置 (兜底)
-    const officialPath = this.pathResolver.resolve(`@app/prompts/${templatePath}`)
+    const officialPath = this.pathResolver.resolve(
+      `@app/backend/src/services/mdp/prompts/${templatePath}`,
+    )
     if (existsSync(officialPath)) {
       return readFile(officialPath, 'utf-8')
     }
@@ -77,12 +80,15 @@ export class PromptTemplateLoader {
     const customPath = this.pathResolver.resolve(`@data/custom/prompts/${templatePath}`)
     if (existsSync(customPath)) return 'custom'
 
-    if (this.pathResolver.isAvailable('@workshop')) {
-      const workshopPath = this.pathResolver.resolve(`@workshop/prompts/${templatePath}`)
+    const workshopRoots = this.pathResolver.getRoots('@workshop')
+    for (let index = workshopRoots.length - 1; index >= 0; index -= 1) {
+      const workshopPath = path.resolve(workshopRoots[index]!, 'prompts', templatePath)
       if (existsSync(workshopPath)) return 'workshop'
     }
 
-    const officialPath = this.pathResolver.resolve(`@app/prompts/${templatePath}`)
+    const officialPath = this.pathResolver.resolve(
+      `@app/backend/src/services/mdp/prompts/${templatePath}`,
+    )
     if (existsSync(officialPath)) return 'official'
 
     return 'missing'
@@ -97,7 +103,9 @@ export class PromptTemplateLoader {
    * @returns 导出后的绝对路径
    */
   async exportToCustom(templatePath: string): Promise<string> {
-    const officialPath = this.pathResolver.resolve(`@app/prompts/${templatePath}`)
+    const officialPath = this.pathResolver.resolve(
+      `@app/backend/src/services/mdp/prompts/${templatePath}`,
+    )
     const customPath = this.pathResolver.resolve(`@data/custom/prompts/${templatePath}`)
 
     if (!existsSync(officialPath)) {

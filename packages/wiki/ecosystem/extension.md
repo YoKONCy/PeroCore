@@ -7,7 +7,7 @@ Pero 浏览器插件是一个关键的生态组件，它充当了 AI 助手与�
 浏览器插件采用 **WebSocket** 协议与 Pero 后端（`BrowserBridgeService`）进行双向实时通信。
 
 - **前端 (Extension)**: 运行在 Chrome/Edge 浏览器中，负责网页内容的提取和模拟操作。
-- **后端 (PeroCore)**: 负责发送指令并接收网页分析结果。
+- **后端 (infOS)**: 负责发送指令并接收网页分析结果。
 
 ```mermaid
 graph LR

@@ -2,7 +2,7 @@
   "id": "web-fetch",
   "name": "网页抓取",
   "version": "1.0.0",
-  "author": "PeroCore Team",
+  "author": "infOS Team",
   "description": "轻量级 HTTP 网页文本抓取。使用 Node.js 原生 fetch，完全跨平台。",
   "type": "tool",
   "entry": "index.ts",
@@ -12,6 +12,7 @@
   "toolDefinition": {
     "name": "web_fetch",
     "description": "获取网页的文本内容。用于快速阅读文章、查看文档、获取静态页面信息。",
+    "display": { "label": "抓取网页", "icon": "globe", "color": "sky", "style": "web" },
     "parameters": {
       "type": "object",
       "properties": {

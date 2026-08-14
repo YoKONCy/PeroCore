@@ -14,10 +14,7 @@
  */
 
 import type { NodeCapabilityRepository } from '../repositories/nodeCapability.repo'
-import type {
-  NodeCapabilityRegistration,
-  NodeType,
-} from '../repositories/nodeCapability.repo'
+import type { NodeCapabilityRegistration, NodeType } from '../repositories/nodeCapability.repo'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('CapabilityRegistry')

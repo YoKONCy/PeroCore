@@ -10,7 +10,7 @@
  */
 import { ref, shallowRef, computed, onMounted } from 'vue'
 import { modelApi } from '../../api/modules/modelApi'
-import type { ModelConfigItem } from '../../api/modules/modelApi'
+import type { ModelConfigItem, ReasoningEffort } from '../../api/modules/modelApi'
 import { configApi } from '../../api/modules/configApi'
 import { useNotificationStore } from '../../stores/useNotificationStore'
 import { logger } from '../../lib/logger'
@@ -23,24 +23,41 @@ export interface LlmModel {
   provider: string
   modelId: string
   maxTokens: number | null
+  reasoningEffort: ReasoningEffort | null
   enableVision: boolean
-  temperature: number
-  topP: number
+  enableAudioInput: boolean
+  temperature: number | null
+  topP: number | null
   apiBase?: string
   apiKey?: string
   /** 自定义 provider 的协议格式 (openai/anthropic/gemini) */
   providerType: string
 }
 
-export type ModelTab = 'llm' | 'vector'
+export type ModelTab = 'llm' | 'vector' | 'multimodal'
 
 /** 任务槽元数据（供前端 UI 使用） */
 export const TASK_SLOTS = [
-  { key: 'scorer', label: '记忆提炼', description: 'Scorer、Importer — 结构化输出，低温', icon: 'brain' },
-  { key: 'reflection', label: '记忆反思', description: 'Tagger/Consolidator/Auditor/Gardener/Dreamer — 最低温', icon: 'brain' },
-  { key: 'social_reply', label: '社交回复生成', description: '对外人格表现，需创意 — 默认用主模型', icon: 'chat' },
-  { key: 'social_scheduler', label: '社交决策', description: '思考状态机 — 决策类低温', icon: 'brain' },
-  { key: 'social_scorer', label: '社交记忆炼化', description: '结构化输出，低温', icon: 'brain' },
+  { key: 'scorer', label: '记忆提炼', description: 'Scorer、Importer — 结构化输出', icon: 'brain' },
+  {
+    key: 'reflection',
+    label: '记忆反思',
+    description: 'Tagger/Consolidator/Auditor/Gardener/Dreamer',
+    icon: 'brain',
+  },
+  {
+    key: 'social_reply',
+    label: '社交回复生成',
+    description: '对外人格表现 — 默认用主模型',
+    icon: 'chat',
+  },
+  {
+    key: 'social_scheduler',
+    label: '社交决策',
+    description: '思考状态机 — 决策任务',
+    icon: 'brain',
+  },
+  { key: 'social_scorer', label: '社交记忆炼化', description: '结构化输出', icon: 'brain' },
 ] as const
 
 // ── 辅助函数 ──
@@ -52,13 +69,15 @@ function toLlmModel(item: ModelConfigItem): LlmModel {
     name: item.name,
     provider: item.provider,
     modelId: item.modelId,
-    maxTokens: null,
+    maxTokens: item.maxTokens,
+    reasoningEffort: item.reasoningEffort,
     enableVision: item.enableVision ?? false,
-    temperature: 0.7,
-    topP: 1,
+    enableAudioInput: item.enableAudioInput ?? false,
+    temperature: item.temperature,
+    topP: item.topP,
     apiBase: item.apiBase,
     apiKey: item.apiKey, // 后端已遮蔽
-    providerType: ('providerType' in item ? String(item.providerType) : undefined) ?? 'openai',
+    providerType: item.providerType ?? 'openai',
   }
 }
 
@@ -87,9 +106,11 @@ export function useModelConfig() {
     provider: 'openai',
     modelId: '',
     maxTokens: null,
+    reasoningEffort: null,
     enableVision: false,
-    temperature: 0.7,
-    topP: 1,
+    enableAudioInput: false,
+    temperature: null,
+    topP: null,
     apiBase: '',
     apiKey: '',
     providerType: 'openai',
@@ -129,6 +150,13 @@ export function useModelConfig() {
   const rerankerApiBase = ref('')
   const rerankerApiKey = ref('')
   const isSavingVector = ref(false)
+
+  // ── 多模态转述配置 ──
+  const relayEnabled = ref(false)
+  const relayModelConfigId = ref<string>('')
+  const relayDetail = ref<'brief' | 'standard' | 'detailed'>('standard')
+  const isSavingRelay = ref(false)
+  const visionModels = computed(() => models.value.filter((model) => model.enableVision))
 
   // ── 计算属性 ──
   const providerOptions = computed(() => [
@@ -313,9 +341,11 @@ export function useModelConfig() {
         provider: 'openai',
         modelId: '',
         maxTokens: null,
+        reasoningEffort: null,
         enableVision: false,
-        temperature: 0.7,
-        topP: 1,
+        enableAudioInput: false,
+        temperature: null,
+        topP: null,
         apiBase: '',
         apiKey: '',
         providerType: 'openai',
@@ -338,7 +368,12 @@ export function useModelConfig() {
           modelId: form.modelId,
           apiKey: form.apiKey || undefined,
           apiBase: form.apiBase || undefined,
+          temperature: form.temperature,
+          topP: form.topP,
+          maxTokens: form.maxTokens,
+          reasoningEffort: form.reasoningEffort,
           enableVision: form.enableVision,
+          enableAudioInput: form.enableAudioInput,
         })
         notify.toast(`模型 "${form.name}" 已更新`, 'success')
       } else {
@@ -349,7 +384,12 @@ export function useModelConfig() {
           modelId: form.modelId,
           apiKey: form.apiKey || '',
           apiBase: form.apiBase || undefined,
+          temperature: form.temperature,
+          topP: form.topP,
+          maxTokens: form.maxTokens,
+          reasoningEffort: form.reasoningEffort,
           enableVision: form.enableVision,
+          enableAudioInput: form.enableAudioInput,
         })
         notify.toast(`模型 "${form.name}" 已添加`, 'success')
       }
@@ -384,6 +424,24 @@ export function useModelConfig() {
     } catch (e) {
       error.value = (e as Error).message
       notify.toast('删除模型失败: ' + (e as Error).message, 'error')
+    }
+  }
+
+  /** 从模型卡片直接切换输入模态能力，失败时保持原值。 */
+  async function setInputCapability(
+    model: LlmModel,
+    capability: 'enableVision' | 'enableAudioInput',
+    enabled: boolean,
+  ): Promise<void> {
+    try {
+      await modelApi.update(model.id, { [capability]: enabled })
+      models.value = models.value.map((item) =>
+        item.id === model.id ? { ...item, [capability]: enabled } : item,
+      )
+      const label = capability === 'enableVision' ? '图片输入' : '音频输入'
+      notify.toast(`${label}已${enabled ? '启用' : '关闭'}`, enabled ? 'success' : 'info')
+    } catch (e) {
+      notify.toast('模型能力保存失败: ' + (e as Error).message, 'error')
     }
   }
 
@@ -493,6 +551,48 @@ export function useModelConfig() {
     }
   }
 
+  /** 加载多模态转述配置。 */
+  async function loadRelayConfig(): Promise<void> {
+    try {
+      const res = await configApi.batch([
+        'multimodalRelay.enabled',
+        'multimodalRelay.modelConfigId',
+        'multimodalRelay.detail',
+      ])
+      const data = res.data ?? {}
+      relayEnabled.value = data['multimodalRelay.enabled'] === 'true'
+      relayModelConfigId.value = data['multimodalRelay.modelConfigId'] || ''
+      const detail = data['multimodalRelay.detail']
+      relayDetail.value = detail === 'brief' || detail === 'detailed' ? detail : 'standard'
+    } catch {
+      // 首次使用时保留默认配置。
+    }
+  }
+
+  /** 保存多模态转述配置，只允许引用已声明视觉能力的模型。 */
+  async function saveRelayConfig(): Promise<void> {
+    if (
+      relayEnabled.value &&
+      !visionModels.value.some((model) => model.id === relayModelConfigId.value)
+    ) {
+      notify.toast('请选择已启用图片视觉能力的转述模型', 'warning')
+      return
+    }
+    isSavingRelay.value = true
+    try {
+      await configApi.batchSet([
+        { key: 'multimodalRelay.enabled', value: String(relayEnabled.value) },
+        { key: 'multimodalRelay.modelConfigId', value: relayModelConfigId.value ?? '' },
+        { key: 'multimodalRelay.detail', value: relayDetail.value },
+      ])
+      notify.toast('多模态转述配置已保存', 'success')
+    } catch (e) {
+      notify.toast('多模态转述配置保存失败: ' + (e as Error).message, 'error')
+    } finally {
+      isSavingRelay.value = false
+    }
+  }
+
   /** 从后端加载全局服务商配置 */
   async function loadGlobalConfig(): Promise<void> {
     try {
@@ -575,6 +675,7 @@ export function useModelConfig() {
       fetchTaskAssignments(),
       loadGlobalConfig(),
       loadVectorConfig(),
+      loadRelayConfig(),
     ])
   })
 
@@ -595,6 +696,7 @@ export function useModelConfig() {
     openEditor,
     saveModel,
     deleteModel,
+    setInputCapability,
     setMainModel,
     setTaskAssignment,
     fetchMainModel,
@@ -611,6 +713,13 @@ export function useModelConfig() {
     isGlobalOpen,
     globalConfig,
     saveGlobalConfig,
+    // 多模态转述
+    relayEnabled,
+    relayModelConfigId,
+    relayDetail,
+    isSavingRelay,
+    visionModels,
+    saveRelayConfig,
     // 向量
     embeddingProvider,
     embeddingModelId,

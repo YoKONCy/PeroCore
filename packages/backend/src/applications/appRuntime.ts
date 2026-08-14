@@ -21,6 +21,8 @@ import type {
   AppCheckpoint,
   AppEvent,
   AppSessionPolicy,
+  AppCommandRequest,
+  AppCommandResult,
 } from './types'
 import type { GrantRegistry } from './grantRegistry'
 import type { LlmService, ModelConfig } from '../services/llm/llmService'
@@ -71,6 +73,13 @@ export interface AppRuntimeContext {
   grantRegistry: GrantRegistry
   /** 事件发射器（应用向外部发布事件，由 AppManager 转发到统一 EventBus） */
   emitEvent(event: AppEvent): void
+  /** 向宿主 Agent 发起临时通信；请求与回复不写入主 Thread。 */
+  communicateWithHost(request: {
+    correlationId: string
+    mode: 'consult' | 'verify' | 'approval' | 'request_resource' | 'report' | 'clarify' | 'complete'
+    summary: string
+    context?: Record<string, unknown>
+  }): Promise<Record<string, unknown>>
   /** 日志器 */
   logger: AppLogger
   /** 请求主 Agent 审批（requiresApproval 工具调用时使用） */
@@ -92,6 +101,10 @@ export interface AppRuntimeContext {
    * 应用自己的上下文记忆应通过 storeRegistry 访问独立图谱（如 social.tdb）。
    */
   memoryProvider: MemoryProvider
+  /** Thread 服务：需要持久会话状态的应用按 Channel 建立真实 Thread。 */
+  threadService: import('../services/thread/threadService').ThreadService
+  /** 心流服务：应用 Compiler 只读取当前 Thread × Agent 的私有临时状态。 */
+  flowStateService: import('../services/flow/flowStateService').FlowStateService
   /** Agent 管理器（读取主 Agent 人格投影，受 GrantRegistry 授权约束） */
   agentManager: AgentManager
   /**
@@ -239,10 +252,7 @@ export interface AgentAppRuntime {
    *
    * @returns 会话 ID
    */
-  createSession(params?: {
-    title?: string
-    policy?: AppSessionPolicy
-  }): Promise<string>
+  createSession(params?: { title?: string; policy?: AppSessionPolicy }): Promise<string>
 
   /** 列出应用内会话 */
   listSessions(): Promise<Array<{ id: string; title: string; status: string }>>
@@ -264,12 +274,12 @@ export interface AgentAppRuntime {
    * 应用内部有自己的事件流。
    * 返回取消订阅函数。
    */
-  subscribeSession(
-    sessionId: string,
-    handler: (event: AppEvent) => void,
-  ): () => void
+  subscribeSession(sessionId: string, handler: (event: AppEvent) => void): () => void
 
   // ── 记忆回流（可选）──
+
+  /** 执行主 Agent 委派的一次性高层动作；内部推理不持久化，真实副作用由应用自行审计。 */
+  executeCommand?(request: AppCommandRequest): Promise<AppCommandResult>
 
   /**
    * 获取应用在某日产生的记忆摘要列表

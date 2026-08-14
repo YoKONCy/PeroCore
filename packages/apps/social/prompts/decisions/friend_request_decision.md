@@ -1,6 +1,6 @@
 <!--
 Description: 好友申请决策任务
-Version: "1.0"
+Version: "1.1"
 Prompt Type: task
 Direct Consumer: 未接入（预留，未来好友申请自动审批使用）
 Target Service: packages/apps/social/runtime/
@@ -13,8 +13,16 @@ Model Role: social_scheduler
 申请人QQ: {{ user_id }}
 申请备注: "{{ comment }}"
 
-**你的核心人设**:
-{{ custom_persona }}
+<System_Context>
+{{ system_core }}
+
+{{ persona_definition }}
+</System_Context>
+
+{% if social_patch %}
+**社交频道补丁**:
+{{ social_patch }}
+{% endif %}
 
 **严格筛选标准 (默认拒绝)**:
 
@@ -32,6 +40,6 @@ Model Role: social_scheduler
 {
 "decision": "APPROVE" 或 "REJECT" 或 "HOLD",
 "reason": "简短的理由",
-"notify_master": "发送给主人的通知消息内容。",
+"notify_master": "发送给用户的提醒消息内容。",
 "greeting_message": "如果通过，第一句招呼。否则留空。"
 }

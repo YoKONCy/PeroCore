@@ -1,7 +1,7 @@
 {
-  "name": "@perocore/wiki",
-  "version": "0.9.1-hotfix.2",
-  "description": "PeroCore Wiki — VitePress 文档站点",
+  "name": "@infos/wiki",
+  "version": "0.9.2-rc1",
+  "description": "infOS Wiki — VitePress 文档站点",
   "private": true,
   "scripts": {
     "dev": "vitepress dev --port 6657",

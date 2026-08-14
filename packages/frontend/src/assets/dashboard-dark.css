@@ -1,0 +1,316 @@
+/**
+ * Dashboard 深色主题
+ *
+ * 这里只保留动态 Tab 的历史 Tailwind 安全兜底、SocialTab 专属暗色样式，
+ * 以及 Teleport 浮层的最低必要兜底。已迁移组件由 --ui-* / --dash-* 令牌负责。
+ */
+
+/* ── Dashboard 动态 Tab：历史 Tailwind 文字安全兜底 ── */
+[data-theme='dark'] .dashboard-tab-content [class*='text-slate-900'],
+[data-theme='dark'] .dashboard-tab-content [class*='text-slate-800'],
+[data-theme='dark'] .dashboard-tab-content [class*='text-neutral-900'] {
+  color: #edf2f8 !important;
+}
+
+[data-theme='dark'] .dashboard-tab-content [class*='text-slate-700'],
+[data-theme='dark'] .dashboard-tab-content [class*='text-slate-600'],
+[data-theme='dark'] .dashboard-tab-content [class*='text-neutral-700'] {
+  color: #b5c0cf !important;
+}
+
+[data-theme='dark'] .dashboard-tab-content [class*='text-slate-500'],
+[data-theme='dark'] .dashboard-tab-content [class*='text-neutral-500'] {
+  color: #8995a8 !important;
+}
+
+[data-theme='dark'] .dashboard-tab-content [class*='text-slate-400'],
+[data-theme='dark'] .dashboard-tab-content [class*='text-neutral-400'] {
+  color: #738095 !important;
+}
+
+[data-theme='dark'] .dashboard-tab-content [class*='text-slate-300'] {
+  color: #667287 !important;
+}
+
+/* ── Dashboard 动态 Tab：历史 Tailwind 浅色背景安全兜底 ── */
+[data-theme='dark'] .dashboard-tab-content [class~='bg-white'],
+[data-theme='dark'] .dashboard-tab-content [class*='bg-white/'] {
+  background-color: #181c27 !important;
+}
+
+[data-theme='dark'] .dashboard-tab-content [class*='bg-slate-50'],
+[data-theme='dark'] .dashboard-tab-content [class*='bg-neutral-50'],
+[data-theme='dark'] .dashboard-tab-content [class*='bg-stone-50'] {
+  background-color: #151923 !important;
+}
+
+[data-theme='dark'] .dashboard-tab-content [class*='bg-slate-100'],
+[data-theme='dark'] .dashboard-tab-content [class*='bg-neutral-100'],
+[data-theme='dark'] .dashboard-tab-content [class*='bg-stone-100'] {
+  background-color: #1d2230 !important;
+}
+
+[data-theme='dark'] .dashboard-tab-content [class*='bg-sky-50'],
+[data-theme='dark'] .dashboard-tab-content [class*='bg-purple-50'],
+[data-theme='dark'] .dashboard-tab-content [class*='bg-pink-50'],
+[data-theme='dark'] .dashboard-tab-content [class*='bg-indigo-50'],
+[data-theme='dark'] .dashboard-tab-content [class*='bg-violet-50'] {
+  background-color: rgba(56, 189, 248, 0.055) !important;
+}
+
+[data-theme='dark'] .dashboard-tab-content [class*='bg-amber-50'],
+[data-theme='dark'] .dashboard-tab-content [class*='bg-orange-50'] {
+  background-color: rgba(251, 191, 36, 0.07) !important;
+}
+
+[data-theme='dark'] .dashboard-tab-content [class*='bg-green-50'],
+[data-theme='dark'] .dashboard-tab-content [class*='bg-emerald-50'] {
+  background-color: rgba(52, 211, 153, 0.07) !important;
+}
+
+[data-theme='dark'] .dashboard-tab-content [class*='bg-rose-50'],
+[data-theme='dark'] .dashboard-tab-content [class*='bg-red-50'] {
+  background-color: rgba(248, 113, 113, 0.07) !important;
+}
+
+[data-theme='dark'] .dashboard-tab-content [class*='bg-purple-100'],
+[data-theme='dark'] .dashboard-tab-content [class*='bg-indigo-100'],
+[data-theme='dark'] .dashboard-tab-content [class*='bg-violet-100'] {
+  background-color: rgba(167, 139, 250, 0.13) !important;
+}
+
+[data-theme='dark'] .dashboard-tab-content [class*='bg-sky-100'] {
+  background-color: rgba(56, 189, 248, 0.13) !important;
+}
+
+[data-theme='dark'] .dashboard-tab-content [class*='bg-orange-100'],
+[data-theme='dark'] .dashboard-tab-content [class*='bg-amber-100'] {
+  background-color: rgba(251, 146, 60, 0.13) !important;
+}
+
+[data-theme='dark'] .dashboard-tab-content [class*='bg-green-100'],
+[data-theme='dark'] .dashboard-tab-content [class*='bg-emerald-100'] {
+  background-color: rgba(52, 211, 153, 0.13) !important;
+}
+
+[data-theme='dark'] .dashboard-tab-content [class*='bg-pink-100'],
+[data-theme='dark'] .dashboard-tab-content [class*='bg-rose-100'],
+[data-theme='dark'] .dashboard-tab-content [class*='bg-red-100'] {
+  background-color: rgba(248, 113, 113, 0.13) !important;
+}
+
+/* ── Dashboard 动态 Tab：历史 Tailwind 边框与分隔线安全兜底 ── */
+[data-theme='dark'] .dashboard-tab-content [class*='border-slate-'],
+[data-theme='dark'] .dashboard-tab-content [class*='border-neutral-'],
+[data-theme='dark'] .dashboard-tab-content [class*='border-stone-'] {
+  border-color: rgba(148, 163, 184, 0.18) !important;
+}
+
+[data-theme='dark'] .dashboard-tab-content [class*='divide-'] > :not([hidden]) ~ :not([hidden]) {
+  border-color: rgba(148, 163, 184, 0.14) !important;
+}
+
+/* ── SocialTab：专属暗色规则 ── */
+[data-theme='dark'] .social-panel {
+  color: #edf2f8 !important;
+  background: #0f131c !important;
+}
+
+[data-theme='dark'] .social-panel .sp-header {
+  background: #131721 !important;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14) !important;
+}
+
+[data-theme='dark'] .social-panel .sp-config,
+[data-theme='dark'] .social-panel .sp-owner-body,
+[data-theme='dark'] .social-panel .sp-block-body {
+  background: transparent !important;
+}
+
+[data-theme='dark'] .social-panel .sp-config-row {
+  gap: 12px;
+}
+
+[data-theme='dark'] .social-panel .sp-hint {
+  border-top-color: rgba(148, 163, 184, 0.13) !important;
+}
+
+[data-theme='dark'] .social-panel .sp-title-text {
+  color: #e7edf6 !important;
+}
+
+[data-theme='dark'] .social-panel .sp-title-icon,
+[data-theme='dark'] .social-panel .sp-block-header .pixel-icon {
+  color: #38bdf8 !important;
+}
+
+[data-theme='dark'] .social-panel .sp-badge {
+  color: #7dd3fc !important;
+  background: rgba(56, 189, 248, 0.1) !important;
+  border-color: rgba(56, 189, 248, 0.2) !important;
+}
+
+[data-theme='dark'] .social-panel .sp-card {
+  color: #aab4c3 !important;
+  background: #151923 !important;
+  border-color: rgba(148, 163, 184, 0.16) !important;
+  box-shadow: none !important;
+}
+
+[data-theme='dark'] .social-panel .sp-card:hover:not(.sp-card-disabled) {
+  background: #1a202c !important;
+  border-color: rgba(56, 189, 248, 0.34) !important;
+  box-shadow: none !important;
+}
+
+[data-theme='dark'] .social-panel .sp-card-active {
+  background: linear-gradient(
+    135deg,
+    rgba(56, 189, 248, 0.13),
+    rgba(167, 139, 250, 0.06)
+  ) !important;
+  border-color: #38bdf8 !important;
+  box-shadow: inset 3px 0 #38bdf8 !important;
+}
+
+[data-theme='dark'] .social-panel .sp-card-icon {
+  color: #7dd3fc !important;
+  background: rgba(56, 189, 248, 0.08) !important;
+  border-color: rgba(56, 189, 248, 0.17) !important;
+}
+
+[data-theme='dark'] .social-panel .sp-card-active .sp-card-icon {
+  color: #fff !important;
+  background: #0ea5e9 !important;
+  border-color: #38bdf8 !important;
+}
+
+[data-theme='dark'] .social-panel .sp-card-name {
+  color: #dce4ef !important;
+}
+
+[data-theme='dark'] .social-panel .sp-card-desc,
+[data-theme='dark'] .social-panel .sp-card-tag,
+[data-theme='dark'] .social-panel .sp-hint,
+[data-theme='dark'] .social-panel .sp-label {
+  color: #7d899d !important;
+}
+
+[data-theme='dark'] .social-panel .sp-card-tag {
+  background: #1b202c !important;
+  border-color: rgba(148, 163, 184, 0.16) !important;
+}
+
+[data-theme='dark'] .social-panel .sp-owner-config,
+[data-theme='dark'] .social-panel .sp-config-block {
+  background: #151923 !important;
+  border: 1px solid rgba(148, 163, 184, 0.17) !important;
+}
+
+[data-theme='dark'] .social-panel .sp-block-header {
+  color: #b5c0cf !important;
+  background: #1a1f2b !important;
+  border-color: rgba(148, 163, 184, 0.14) !important;
+}
+
+[data-theme='dark'] .social-panel .sp-owner-input,
+[data-theme='dark'] .social-panel .sp-mono {
+  color: #dce4ef !important;
+  background: #0e121a !important;
+  border-color: rgba(148, 163, 184, 0.18) !important;
+}
+
+[data-theme='dark'] .social-panel .sp-value {
+  color: #cbd5e1 !important;
+}
+
+[data-theme='dark'] .social-panel .sp-ok {
+  color: #34d399 !important;
+}
+
+[data-theme='dark'] .social-panel .sp-na {
+  color: #fb7185 !important;
+}
+
+[data-theme='dark'] .social-panel .sp-terminal {
+  margin: 0 24px 16px;
+  border: 1px solid rgba(148, 163, 184, 0.18) !important;
+  background: #090c12 !important;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.24);
+}
+
+[data-theme='dark'] .social-panel .sa-terminal {
+  --sa-bg: #090c12;
+  --sa-bg-header: #121721;
+  --sa-border: rgba(148, 163, 184, 0.13);
+  --sa-border-subtle: rgba(148, 163, 184, 0.2);
+  --sa-text: #bac5d4;
+  --sa-text-bright: #edf2f8;
+  --sa-text-dim: #6f7c90;
+  --sa-text-subtle: #566276;
+}
+
+[data-theme='dark'] .social-panel .sa-header {
+  background: #121721 !important;
+  border-bottom-color: rgba(148, 163, 184, 0.13) !important;
+}
+
+[data-theme='dark'] .social-panel .sa-title,
+[data-theme='dark'] .social-panel .sa-adapter-name {
+  color: #cbd5e1 !important;
+}
+
+[data-theme='dark'] .social-panel .sa-adapter-chip {
+  background: rgba(148, 163, 184, 0.045) !important;
+  border-color: rgba(148, 163, 184, 0.15) !important;
+}
+
+[data-theme='dark'] .social-panel .sa-body {
+  background: #090c12 !important;
+}
+
+[data-theme='dark'] .social-panel .sa-empty {
+  color: #667287 !important;
+}
+
+[data-theme='dark'] .social-panel .sa-input-area {
+  background: #0d1119 !important;
+  border-top-color: rgba(148, 163, 184, 0.13) !important;
+}
+
+[data-theme='dark'] .social-panel .sa-input-box,
+[data-theme='dark'] .social-panel .sa-input {
+  color: #dce4ef !important;
+  background: #090c12 !important;
+  border-color: rgba(148, 163, 184, 0.16) !important;
+}
+
+/* ── Teleport 浮层：仅兜底容器背景与主要文字 ── */
+[data-theme='dark'] .p-dialog-overlay {
+  background: rgba(3, 6, 13, 0.76) !important;
+}
+
+[data-theme='dark'] .p-dialog {
+  color: #edf2f8 !important;
+  background: #1b202c !important;
+}
+
+[data-theme='dark'] .p-select-dropdown {
+  color: #e7edf6 !important;
+  background: #202532 !important;
+}
+
+[data-theme='dark'] .p-context-menu {
+  color: #dce4ef !important;
+  background: #1b202c !important;
+}
+
+[data-theme='dark'] .p-tooltip {
+  color: #edf2f8 !important;
+  background: #070a10 !important;
+}
+
+[data-theme='dark'] .p-datepicker {
+  color: #b5c0cf !important;
+  background: #1b202c !important;
+}

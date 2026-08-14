@@ -12,6 +12,9 @@
  * @module packages/backend/src/services/pipeline/types
  */
 
+import type { ContentPart } from '../llm/types'
+import type { ToolDisplayMeta } from '@infos/shared/types/extension.types'
+
 // ─────────────────────────────────────────────
 // 消息与工具类型（活跃）
 // ─────────────────────────────────────────────
@@ -19,7 +22,7 @@
 /** 聊天消息 (OpenAI 格式兼容) */
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool'
-  content: string | MultimodalContent[] | null
+  content: string | ContentPart[] | null
   name?: string
   /** 工具结果消息 (role:'tool') 关联的调用 ID，与 LLM 层 camelCase 命名保持一致 */
   toolCallId?: string
@@ -47,6 +50,8 @@ export interface ToolDefinition {
   name: string
   description: string
   parameters: Record<string, unknown>
+  /** 工具显示元数据（前端 ReAct 轨迹区渲染用，可选） */
+  display?: ToolDisplayMeta
 }
 
 /** 工具调用记录 */
@@ -55,4 +60,6 @@ export interface ToolCallRecord {
   args: Record<string, unknown>
   result: string
   durationMs: number
+  isError: boolean
+  callId: string
 }

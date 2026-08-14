@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { VectorWriteHelper } from '@perocore/backend/shared/vectorWriteHelper'
+import { VectorWriteHelper } from '@infos/backend/shared/vectorWriteHelper'
 
 type VectorRepoMock = {
   upsert: ReturnType<typeof vi.fn>

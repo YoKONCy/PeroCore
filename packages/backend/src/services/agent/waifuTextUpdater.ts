@@ -30,21 +30,13 @@ const logger = createLogger('WaifuTextUpdater')
 // 台词字段定义
 // ─────────────────────────────────────────────
 
-/** 需要生成的台词类型及说明 */
-const TARGET_FIELDS: Record<string, string> = {
-  visibilityBack: '主人切回窗口时的欢迎语 (简短可爱)',
-  idleMessages: '挂机时的随机闲聊 (数组，3-5句)',
-  welcome_timeRanges_morningEarly: '清晨 (4:00-7:00) 问候',
-  welcome_timeRanges_morning: '上午 (7:00-11:00) 问候',
-  welcome_timeRanges_noon: '中午 (11:00-13:00) 问候',
-  welcome_timeRanges_afternoon: '下午 (13:00-17:00) 问候',
-  welcome_timeRanges_eveningSunset: '傍晚 (17:00-19:00) 问候',
-  welcome_timeRanges_night: '晚上 (19:00-22:00) 问候',
-  welcome_timeRanges_lateNight: '深夜 (22:00-24:00) 问候 (可以是数组)',
-  welcome_timeRanges_midnight: '凌晨 (0:00-4:00) 问候',
-  randTexturesNoClothes: '换装失败/没衣服时的吐槽',
-  randTexturesSuccess: '换装成功时的撒娇',
-}
+/** 需要生成的台词结构及说明；键名与 Agent.waifuTexts / Pet3D 消费结构完全一致。 */
+const TARGET_FIELDS = `
+- \`visibilityBack\`: 用户切回窗口时的欢迎语（字符串，简短可爱）
+- \`idleMessages\`: 挂机时的随机闲聊（字符串数组，3-5 句）
+- \`welcome\`: 分时段问候对象，可包含 morningEarly / morning / noon / afternoon / eveningSunset / night / midnight
+- \`randTextures\`: 换装台词对象，可包含 noClothes / success
+`.trim()
 
 // ─────────────────────────────────────────────
 // 依赖
@@ -116,14 +108,17 @@ export class WaifuTextUpdater {
     } catch {
       logger.warn(`读取人设文件失败: ${agent.promptPath}`)
     }
+    // 称呼/名字：称呼取该 Agent 的 agent.json owner_appellation（兜底"主人"），名字仍读全局 owner.name
+    const ownerName = (await this.deps.configRepo.get('owner.name')) ?? '用户'
+    const ownerAppellation = agent.ownerAppellation
     const systemPrompt = this.deps.mdpEngine.render('tasks/agent/waifu_text_updater', {
       agent_name: agent.name,
+      owner_name: ownerName,
+      owner_appellation: ownerAppellation,
       persona_definition: personaDefinition,
       context_text: contextText,
       current_texts: JSON.stringify(currentTexts, null, 2),
-      target_fields: Object.entries(TARGET_FIELDS)
-        .map(([key, desc]) => `- \`${key}\`: ${desc}`)
-        .join('\n'),
+      target_fields: TARGET_FIELDS,
     })
 
     // 5. 调用 LLM 生成新台词
@@ -135,7 +130,6 @@ export class WaifuTextUpdater {
           { role: 'user', content: '请根据上述记忆和要求，生成更新后的台词 JSON。' },
         ],
         {
-          temperature: 0.7,
           responseFormat: { type: 'json_object' },
         },
       )

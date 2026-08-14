@@ -2,7 +2,7 @@
   "id": "finish-task",
   "name": "任务完成",
   "version": "2.0.0",
-  "author": "PeroCore Team",
+  "author": "infOS Team",
   "description": "结束当前任务并可选地更新角色状态（情绪、动作、文案等），始终允许调用的生命周期工具",
   "type": "tool",
   "entry": "index.ts",
@@ -10,11 +10,19 @@
   "platforms": ["windows", "linux", "darwin", "docker"],
   "toolDefinition": {
     "name": "finish_task",
-    "description": "结束当前任务，并可选地更新角色状态（情绪、动作、文案等）。当你完成了用户的请求，或确认无需进一步操作时调用。",
+    "description": "结束当前任务并把最终回复交付给用户，可选更新角色状态（情绪、动作、文案等）。当你完成了用户的请求、或确认无需进一步操作时调用。请把「要交给用户看的最终回复」写在 reply 字段中，不要在调用本工具前单独输出正文，回复以 reply 为准。",
+    "display": { "label": "完成任务", "icon": "check", "color": "green", "style": "task" },
     "parameters": {
       "type": "object",
       "properties": {
-        "summary": { "type": "string", "description": "任务完成总结" },
+        "reply": {
+          "type": "string",
+          "description": "【必填】完成任务后交给用户的最终回复正文。这是用户实际看到的回复，请用完整、自然的口吻说明做了什么、结果如何，语气贴合当前角色。"
+        },
+        "summary": {
+          "type": "string",
+          "description": "可选：任务完成总结（供任务中心/日志展示），可与 reply 相同。"
+        },
         "status": {
           "type": "string",
           "description": "完成状态",
@@ -29,7 +37,7 @@
         "idle_msgs": { "type": "string", "description": "闲置时的自言自语" },
         "back_msgs": { "type": "string", "description": "主人回来时的欢迎语" }
       },
-      "required": ["summary"]
+      "required": ["reply"]
     }
   }
 }

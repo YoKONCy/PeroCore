@@ -5,27 +5,29 @@
  * 对标 v1 全部功能模块：
  * 1. 统计卡片 (3 列 variant+glow)
  * 2. 当前状态面板 (心情/氛围/想法 + Agent 切换)
- * 3. 功能开关组 (轻量/陪伴模式)
+ * 3. 陪伴模式开关
  * 4. 记忆系统配置 (三模式 Slider)
  * 5. 最近对话时间线
  */
 import { ref, computed, onMounted, watch } from 'vue'
 import { useDashboardContext } from '../../../composables/dashboard'
-import { PixelIcon, PCard, PButton, PSwitch, PSlider, PDialog } from '../../pixel'
+import { PixelIcon, PCard, PButton, PSwitch, PSlider } from '../../pixel'
 import { systemApi } from '../../../api/modules/systemApi'
 import { memoryApi } from '../../../api/modules/memoryApi'
 import { schedulerApi } from '../../../api/modules/schedulerApi'
 import { threadsApi } from '../../../api/modules/threadsApi'
-import { agentApi, type AgentListItem } from '../../../api/modules/agentApi'
-import { configApi } from '../../../api/modules/configApi'
+import { agentApi } from '../../../api/modules/agentApi'
+import { maintenanceApi, type MemoryRuntimeConfig } from '../../../api/modules/maintenanceApi'
 import { useGateway } from '../../../composables/dashboard'
 import { getApiBaseUrl } from '../../../api/transport'
 import { logger } from '../../../lib/logger'
-import { useNotificationStore } from '../../../stores'
+import { useNotificationStore, useAgentStore, usePetStateStore } from '../../../stores'
 
 // ══════ DashboardContext 接入 ══════
 const ctx = useDashboardContext()
 const notif = useNotificationStore()
+const agentStore = useAgentStore()
+const petStateStore = usePetStateStore()
 
 const isLoading = ref(true)
 
@@ -37,8 +39,8 @@ const stats = ref({
 })
 
 // ══════ Agent 管理 ══════
-const agents = ref<AgentListItem[]>([])
-const activeAgent = ref<AgentListItem | null>(null)
+const agents = computed(() => agentStore.agents)
+const activeAgent = computed(() => agentStore.currentAgent)
 const isSwitchingAgent = ref(false)
 const showAgentDropdown = ref(false)
 
@@ -46,13 +48,9 @@ async function switchAgent(id: string) {
   if (isSwitchingAgent.value || id === activeAgent.value?.id) return
   isSwitchingAgent.value = true
   try {
-    // AIOS: 后端不再维护全局活跃 Agent，仅更新本地窗口级状态
-    // TODO: 待 RuntimeStateService 前端 API 就绪后，通过 WS 设置窗口级 Agent
-    activeAgent.value = agents.value.find((a) => a.id === id) ?? null
-    // 同步到全局 Context
-    ctx.activeAgentId.value = id
-    // 切换 Agent 后重新加载其角色状态 (mood/vibe/mind)
-    await loadPetState()
+    await agentStore.switchAgent(id)
+    ctx.activeAgentId.value = agentStore.activeAgentId
+    await Promise.allSettled([loadPetState(), loadCompanionState()])
   } catch (e) {
     logger.error('OverviewTab', '切换 Agent 失败', e)
   } finally {
@@ -67,113 +65,102 @@ function selectAgent(id: string) {
 }
 
 // ══════ 宠物状态 (心情/氛围/想法) ══════
-// 直接显示 LLM 设置的原文，不做任何翻译，与 Pet3DView 保持一致
-const petState = ref({
-  mood: '开心',
-  vibe: '轻松',
-  mind: '发呆',
-})
+// 三状态唯一由 PetStateStore 管理；总览与 Pet3DView 读取同一响应式数据。
+const petState = computed(() => petStateStore.stateFor(agentStore.activeAgentId))
 
-/** 从 pet_states 表加载角色状态 */
+/** 从 pet_states 表刷新当前角色的权威状态快照。 */
 async function loadPetState() {
-  try {
-    const active = await agentApi.getActive()
-    const agentId = active?.data?.agentId ?? ctx.activeAgentId.value ?? 'pero'
-    const res = await agentApi.getPetState(agentId)
-    if (res.data) {
-      petState.value.mood = res.data.mood
-      petState.value.vibe = res.data.vibe
-      petState.value.mind = res.data.mind
-    }
-  } catch {
-    // 静默，使用默认值
-  }
+  await petStateStore.load(agentStore.activeAgentId)
 }
 
-// ── Gateway 实时推送: 监听 state_update 同步宠物状态 (mood/vibe/mind) ──
+// ── Gateway 实时推送：统一写入 PetStateStore ──
 const { onPush: onOverviewPush } = useGateway()
 onOverviewPush('state_update', (payload) => {
-  // 仅接受当前活跃 agent 的状态更新 (广播带 agentId，缺省时兼容旧逻辑放行)
   const updateAgentId = payload.agentId
   const currentId = activeAgent.value?.id ?? ctx.activeAgentId.value
   if (typeof updateAgentId === 'string' && currentId && updateAgentId !== currentId) return
-  if (payload.mood !== undefined) petState.value.mood = payload.mood as string
-  if (payload.vibe !== undefined) petState.value.vibe = payload.vibe as string
-  if (payload.mind !== undefined) petState.value.mind = payload.mind as string
+  petStateStore.apply(currentId, {
+    mood: typeof payload.mood === 'string' ? payload.mood : undefined,
+    vibe: typeof payload.vibe === 'string' ? payload.vibe : undefined,
+    mind: typeof payload.mind === 'string' ? payload.mind : undefined,
+  })
+  void petStateStore.load(currentId)
 })
 
-// ══════ 功能开关 (Profile) ══════
-const currentProfile = ref<'default' | 'lightweight' | 'companion'>('default')
-const isTogglingProfile = ref(false)
+// ══════ 陪伴模式 ══════
+const isCompanionEnabled = ref(false)
+const isTogglingCompanion = ref(false)
 
-const isLightweightEnabled = computed(
-  () => currentProfile.value === 'lightweight' || currentProfile.value === 'companion',
-)
-const isCompanionEnabled = computed(() => currentProfile.value === 'companion')
-
-async function toggleLightweight(val: boolean) {
-  if (isTogglingProfile.value) return
-  isTogglingProfile.value = true
+/** 从后端陪伴调度器读取当前角色的真实运行状态。 */
+async function loadCompanionState() {
+  const agentId = agentStore.activeAgentId
+  if (!agentId) {
+    isCompanionEnabled.value = false
+    return
+  }
   try {
-    const target = val ? 'lightweight' : 'default'
-    // TODO: 后端 Thread 架构下 Profile 切换接口待补齐，暂仅更新本地状态
-    currentProfile.value = target
-  } catch (e) {
-    logger.error('OverviewTab', '切换轻量模式失败', e)
-  } finally {
-    isTogglingProfile.value = false
+    const response = await agentApi.getCompanionState(agentId)
+    isCompanionEnabled.value = response.data?.enabled ?? false
+  } catch (error) {
+    isCompanionEnabled.value = false
+    logger.error('OverviewTab', '读取陪伴模式状态失败', error)
   }
 }
 
-async function toggleCompanion(val: boolean) {
-  if (isTogglingProfile.value) return
-  isTogglingProfile.value = true
+/** 启用或关闭当前角色的主动陪伴调度，以后端返回状态为准。 */
+async function toggleCompanion(enabled: boolean) {
+  if (isTogglingCompanion.value) return
+  const agentId = agentStore.activeAgentId
+  if (!agentId) return
+  isTogglingCompanion.value = true
   try {
-    const target = val ? 'companion' : 'lightweight'
-    // TODO: 后端 Thread 架构下 Profile 切换接口待补齐，暂仅更新本地状态
-    currentProfile.value = target
-  } catch (e) {
-    logger.error('OverviewTab', '切换陪伴模式失败', e)
+    const response = await agentApi.setCompanionState(agentId, enabled)
+    isCompanionEnabled.value = response.data?.enabled ?? false
+    notif.toast(isCompanionEnabled.value ? '陪伴模式已启用' : '陪伴模式已关闭', {
+      type: 'success',
+      title: '陪伴模式',
+    })
+  } catch (error) {
+    logger.error('OverviewTab', '切换陪伴模式失败', error)
+    notif.toast('切换失败，请稍后重试', { type: 'error', title: '陪伴模式' })
+    await loadCompanionState()
   } finally {
-    isTogglingProfile.value = false
+    isTogglingCompanion.value = false
   }
 }
 
 // ══════ 记忆配置 ══════
-const activeMemoryTab = ref<'desktop' | 'work' | 'social'>('desktop')
+type MemoryChannel = 'desktop' | 'group'
+const activeMemoryTab = ref<MemoryChannel>('desktop')
 const isSavingMemoryConfig = ref(false)
 
-const memoryConfig = ref({
-  modes: {
-    desktop: { context_limit: 15, rag_limit: 10 },
-    work: { context_limit: 30, rag_limit: 15 },
-    social: { context_limit: 50, rag_limit: 10 },
+const memoryConfig = ref<MemoryRuntimeConfig>({
+  channels: {
+    desktop: { contextPairs: 20, retrievalLimit: 8 },
+    group: { contextPairs: 20, retrievalLimit: 3 },
   },
+  scorerBatchSize: 8,
+  retrievalMinScore: 0.3,
 })
 
+/** 从专用接口读取经过后端校验的运行配置。 */
 async function loadMemoryConfig() {
   try {
-    // 使用单个 KV key 存整个 JSON (与 v1 /configs/memory 对齐)
-    const res = await configApi.get<{ key: string; value: string }>('memory.config')
-    if (res.data?.value) {
-      const parsed = JSON.parse(res.data.value)
-      if (parsed?.modes) {
-        memoryConfig.value = { ...memoryConfig.value, ...parsed }
-      }
-    }
-  } catch {
-    // KV key 不存在或解析失败，使用默认值
+    const response = await maintenanceApi.getMemoryConfig()
+    if (response.data) memoryConfig.value = response.data
+  } catch (error) {
+    logger.error('OverviewTab', '读取记忆运行配置失败', error)
   }
 }
 
 async function saveMemoryConfig() {
   isSavingMemoryConfig.value = true
   try {
-    // 将整个配置对象序列化为 JSON string 存入单个 KV key
-    await configApi.set('memory.config', JSON.stringify(memoryConfig.value))
-    notif.toast('记忆配置已保存', { type: 'success', title: '记忆配置' })
-  } catch (e) {
-    logger.error('OverviewTab', '保存记忆配置失败', e)
+    const response = await maintenanceApi.setMemoryConfig(memoryConfig.value)
+    if (response.data) memoryConfig.value = response.data
+    notif.toast('记忆配置已保存并生效', { type: 'success', title: '记忆配置' })
+  } catch (error) {
+    logger.error('OverviewTab', '保存记忆配置失败', error)
     notif.toast('保存失败，请稍后重试', { type: 'error', title: '记忆配置' })
   } finally {
     isSavingMemoryConfig.value = false
@@ -199,13 +186,14 @@ const systemHealth = ref({
 async function loadOverview() {
   isLoading.value = true
   try {
-    const [sysRes, memRes, taskRes, sessRes, agentsRes] = await Promise.allSettled([
+    const [sysRes, memRes, taskRes, sessRes] = await Promise.allSettled([
       systemApi.info(),
       memoryApi.list({ page: 1, pageSize: 1 }),
       schedulerApi.reminders(),
       threadsApi.list({ pageSize: 5 }),
-      agentApi.list(),
     ])
+    await agentStore.fetchAgents()
+    ctx.activeAgentId.value = agentStore.activeAgentId
 
     // 系统信息
     if (sysRes.status === 'fulfilled' && sysRes.value.data) {
@@ -234,13 +222,10 @@ async function loadOverview() {
     // totalChats 统计真实消息总数（各 Thread messageCount 之和），而非 Thread 数
     if (sessRes.status === 'fulfilled' && sessRes.value.data) {
       const threadItems = sessRes.value.data.items
-      stats.value.totalChats = threadItems.reduce(
-        (sum, t) => sum + (t.messageCount ?? 0),
-        0,
-      )
+      stats.value.totalChats = threadItems.reduce((sum, t) => sum + (t.messageCount ?? 0), 0)
       recentChats.value = threadItems.map((s, i) => ({
         id: i,
-        summary: s.title || '新对话',
+        summary: s.title || '未命名会话',
         agent: s.agentId || 'Pero',
         time: new Date(s.updatedAt || s.createdAt).toLocaleString('zh-CN', {
           month: 'short',
@@ -252,14 +237,8 @@ async function loadOverview() {
       }))
     }
 
-    // Agent 列表
-    if (agentsRes.status === 'fulfilled' && agentsRes.value.data) {
-      agents.value = agentsRes.value.data
-      activeAgent.value = agents.value.find((a) => a.isActive) ?? agents.value[0] ?? null
-    }
-
     // 加载宠物状态和记忆配置
-    await Promise.allSettled([loadPetState(), loadMemoryConfig()])
+    await Promise.allSettled([loadPetState(), loadCompanionState(), loadMemoryConfig()])
   } catch (err) {
     logger.error('OverviewTab', '加载总览数据失败', err)
   } finally {
@@ -273,37 +252,27 @@ function formatTokens(n: number): string {
 
 // 记忆 Tab 列表
 const memoryTabs = [
-  { id: 'desktop' as const, label: '桌面模式', icon: 'desktop' },
-  { id: 'work' as const, label: '工作模式', icon: 'settings' },
-  { id: 'social' as const, label: '社交模式', icon: 'chat' },
+  { id: 'desktop' as const, label: '桌面对话', icon: 'desktop' },
+  { id: 'group' as const, label: '据点群聊', icon: 'chat' },
+]
+
+const scorerOptions = [
+  { value: 4 as const, label: '积极', help: '每 4 轮整理一次' },
+  { value: 8 as const, label: '均衡', help: '每 8 轮整理一次' },
+  { value: 16 as const, label: '节省', help: '每 16 轮整理一次' },
+]
+const retrievalOptions = [
+  { value: 0.2 as const, label: '广泛联想', help: '允许更多弱相关记忆参与回答' },
+  { value: 0.3 as const, label: '均衡', help: '兼顾召回数量与相关性' },
+  { value: 0.45 as const, label: '精准', help: '只注入高度相关的记忆' },
 ]
 
 // ══════ 故事导入 ══════
 const showImportStory = ref(false)
-const importStoryText = ref('')
-const isImportingStory = ref(false)
 
-async function handleImportStory() {
-  if (!importStoryText.value.trim()) return
-  isImportingStory.value = true
-  try {
-    const res = await memoryApi.importStory({
-      text: importStoryText.value,
-      agentId: activeAgent.value?.id ?? 'pero',
-    })
-    if (res.data) {
-      // 导入成功，刷新统计
-      stats.value.totalMemories += res.data.imported
-      importStoryText.value = ''
-      notif.toast(`已导入 ${res.data.imported} 条记忆`, { type: 'success', title: '故事导入' })
-      showImportStory.value = false
-    }
-  } catch (e) {
-    logger.error('OverviewTab', '故事导入失败', e)
-    notif.toast('导入失败，请稍后重试', { type: 'error', title: '故事导入' })
-  } finally {
-    isImportingStory.value = false
-  }
+/** 统一故事导入完成后刷新总览统计。 */
+function handleStoryImported(imported: number): void {
+  stats.value.totalMemories += imported
 }
 
 // 监听全局刷新
@@ -316,7 +285,7 @@ onMounted(loadOverview)
 </script>
 
 <template>
-  <div class="p-6 space-y-6 overflow-y-auto h-full custom-scrollbar">
+  <div class="overview-tab p-6 space-y-6 overflow-y-auto h-full custom-scrollbar">
     <!-- 加载中 -->
     <div
       v-if="isLoading"
@@ -330,7 +299,7 @@ onMounted(loadOverview)
       <!-- ═══ 统计卡片 (3 列彩色) ═══ -->
       <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
         <!-- 核心记忆 -->
-        <PCard pixel hoverable variant="purple" glow class="group">
+        <PCard pixel hoverable class="group overview-stat overview-stat--purple">
           <div class="flex items-center gap-4 relative">
             <div
               class="p-4 bg-purple-100 pixel-border-pink text-purple-500 group-hover:scale-110 group-hover:rotate-6 transition-transform duration-500"
@@ -368,7 +337,7 @@ onMounted(loadOverview)
         </PCard>
 
         <!-- 近期对话 -->
-        <PCard pixel hoverable variant="sky" glow class="group">
+        <PCard pixel hoverable class="group overview-stat overview-stat--sky">
           <div class="flex items-center gap-4 relative">
             <div
               class="p-4 bg-sky-100 pixel-border-sky text-sky-500 group-hover:scale-110 group-hover:-rotate-6 transition-transform duration-500"
@@ -394,7 +363,7 @@ onMounted(loadOverview)
         </PCard>
 
         <!-- 待办任务 -->
-        <PCard pixel hoverable variant="orange" glow class="group">
+        <PCard pixel hoverable class="group overview-stat overview-stat--orange">
           <div class="flex items-center gap-4 relative">
             <div
               class="p-4 bg-orange-100 pixel-border-orange text-orange-500 group-hover:scale-110 group-hover:rotate-6 transition-transform duration-500"
@@ -403,7 +372,7 @@ onMounted(loadOverview)
             </div>
             <div class="relative z-10">
               <h3 class="text-base font-bold text-slate-600 flex items-center gap-1.5">
-                待办提醒
+                任务中心
                 <span class="text-xs text-orange-400 font-mono">Reminders</span>
               </h3>
               <div class="text-3xl font-black text-slate-800">
@@ -439,7 +408,7 @@ onMounted(loadOverview)
               </label>
               <div class="relative group/agent">
                 <button
-                  class="w-full flex items-center justify-between px-4 py-2.5 bg-white hover:bg-sky-50 pixel-border-sky text-sm transition-all press-effect group/btn"
+                  class="agent-trigger w-full flex items-center justify-between px-4 py-2.5 pixel-border-sky text-sm transition-all press-effect group/btn"
                   :class="isSwitchingAgent ? 'opacity-50 cursor-not-allowed' : ''"
                   @click="showAgentDropdown = !showAgentDropdown"
                 >
@@ -481,7 +450,7 @@ onMounted(loadOverview)
                 <!-- 下拉菜单 -->
                 <div
                   v-if="showAgentDropdown"
-                  class="absolute right-0 top-full mt-2 w-full py-2 bg-white/90 backdrop-blur-xl border border-sky-100 shadow-2xl z-50"
+                  class="agent-dropdown absolute right-0 top-full mt-2 w-full py-2 backdrop-blur-xl z-50"
                 >
                   <div class="px-3 py-1.5 mb-1 border-b border-sky-50">
                     <span
@@ -544,7 +513,7 @@ onMounted(loadOverview)
         <!-- 心情 / 氛围 / 想法 -->
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div
-            class="bg-sky-50/40 pixel-border-sky p-5 transition-all hover:bg-white hover:pixel-border-pink group relative"
+            class="status-card pixel-border-sky p-5 transition-all hover:pixel-border-pink group relative"
           >
             <div
               class="text-sm text-slate-500 font-bold uppercase tracking-wider mb-3 flex items-center justify-between relative z-10"
@@ -564,7 +533,7 @@ onMounted(loadOverview)
             </div>
             <div class="h-1.5 bg-sky-100/50 overflow-hidden relative z-10">
               <div
-                class="h-full bg-gradient-to-r from-sky-400 to-sky-300 transition-all duration-1000 group-hover:shadow-[0_0_12px_rgba(14,165,233,0.3)]"
+                class="status-progress h-full bg-gradient-to-r from-sky-400 to-sky-300 transition-all duration-1000"
                 style="width: 80%"
               ></div>
             </div>
@@ -577,7 +546,7 @@ onMounted(loadOverview)
           </div>
 
           <div
-            class="bg-sky-50/40 pixel-border-sky p-5 transition-all hover:bg-white hover:pixel-border-pink group relative"
+            class="status-card pixel-border-sky p-5 transition-all hover:pixel-border-pink group relative"
           >
             <div
               class="text-sm text-slate-500 font-bold uppercase tracking-wider mb-3 flex items-center justify-between relative z-10"
@@ -597,7 +566,7 @@ onMounted(loadOverview)
             </div>
             <div class="h-1.5 bg-sky-100/50 overflow-hidden relative z-10">
               <div
-                class="h-full bg-gradient-to-r from-sky-400 to-sky-300 transition-all duration-1000 group-hover:shadow-[0_0_12px_rgba(14,165,233,0.3)]"
+                class="status-progress h-full bg-gradient-to-r from-sky-400 to-sky-300 transition-all duration-1000"
                 style="width: 60%"
               ></div>
             </div>
@@ -609,7 +578,7 @@ onMounted(loadOverview)
           </div>
 
           <div
-            class="bg-sky-50/40 pixel-border-sky p-5 transition-all hover:bg-white hover:pixel-border-pink group relative"
+            class="status-card pixel-border-sky p-5 transition-all hover:pixel-border-pink group relative"
           >
             <div
               class="text-sm text-slate-500 font-bold uppercase tracking-wider mb-3 flex items-center justify-between relative z-10"
@@ -629,7 +598,7 @@ onMounted(loadOverview)
             </div>
             <div class="h-1.5 bg-sky-100/50 overflow-hidden relative z-10">
               <div
-                class="h-full bg-gradient-to-r from-sky-400 to-sky-300 transition-all duration-1000 group-hover:shadow-[0_0_12px_rgba(14,165,233,0.3)]"
+                class="status-progress h-full bg-gradient-to-r from-sky-400 to-sky-300 transition-all duration-1000"
                 style="width: 90%"
               ></div>
             </div>
@@ -642,39 +611,9 @@ onMounted(loadOverview)
         </div>
       </PCard>
 
-      <!-- ═══ 功能开关组 ═══ -->
+      <!-- ═══ 陪伴模式 ═══ -->
       <div class="space-y-4">
-        <!-- 轻量模式 -->
         <PCard pixel class="group/switch">
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-4">
-              <div class="text-2xl group-hover/switch:scale-110 transition-transform duration-300">
-                <PixelIcon name="leaf" size="lg" />
-              </div>
-              <div>
-                <div class="font-bold text-slate-800 flex items-center gap-2 text-lg">
-                  轻量聊天模式
-                  <span class="text-xs text-sky-400/60 font-mono font-normal">Lightweight</span>
-                </div>
-                <div class="text-sm text-slate-500 mt-1 leading-relaxed">
-                  开启后，将禁用大部分高级工具以节省资源。仅保留视觉感知、记忆管理和基础管理功能。
-                </div>
-              </div>
-            </div>
-            <PSwitch
-              :model-value="isLightweightEnabled"
-              :loading="isTogglingProfile"
-              @update:model-value="toggleLightweight"
-            />
-          </div>
-        </PCard>
-
-        <!-- 陪伴模式 -->
-        <PCard
-          pixel
-          class="group/switch"
-          :class="{ 'opacity-50 pointer-events-none': !isLightweightEnabled }"
-        >
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-4">
               <div class="text-2xl group-hover/switch:scale-110 transition-transform duration-300">
@@ -686,18 +625,13 @@ onMounted(loadOverview)
                   <span class="text-xs text-sky-400/60 font-mono font-normal">Companion</span>
                 </div>
                 <div class="text-sm text-slate-500 mt-1 leading-relaxed">
-                  {{ activeAgent?.name || 'Pero' }}
-                  将自动观察你的屏幕动态并进行互动。
-                  <span v-if="!isLightweightEnabled" class="text-rose-500 font-bold ml-2 text-xs">
-                    (需要先开启"轻量模式")
-                  </span>
+                  开启后，{{ activeAgent?.name || '助手' }} 会在你空闲时通过陪伴频道主动发起互动。
                 </div>
               </div>
             </div>
             <PSwitch
               :model-value="isCompanionEnabled"
-              :loading="isTogglingProfile"
-              :disabled="!isLightweightEnabled"
+              :loading="isTogglingCompanion"
               @update:model-value="toggleCompanion"
             />
           </div>
@@ -721,7 +655,7 @@ onMounted(loadOverview)
                   </span>
                 </div>
                 <div class="text-sm text-slate-500 font-medium flex items-center gap-1.5">
-                  配置不同模式下的记忆召回与上下文长度
+                  配置桌面对话、轻量陪伴与据点群聊的上下文和长期记忆预算
                   <PixelIcon name="paw" size="xs" />
                 </div>
               </div>
@@ -770,7 +704,7 @@ onMounted(loadOverview)
           <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
             <!-- 短期记忆上下文 -->
             <div
-              class="bg-sky-50/50 p-6 pixel-border-sky transition-all duration-300 group/mconfig hover:pixel-border-pink"
+              class="memory-config-block p-6 pixel-border-sky transition-all duration-300 group/mconfig hover:pixel-border-pink"
             >
               <div class="flex justify-between items-center mb-4">
                 <label class="text-base font-bold text-slate-700 flex items-center gap-2">
@@ -783,22 +717,20 @@ onMounted(loadOverview)
                 <span
                   class="px-2 py-0.5 bg-sky-100 text-sky-600 text-xs font-mono font-bold border border-sky-200"
                 >
-                  {{ memoryConfig.modes[activeMemoryTab].context_limit }}
+                  {{ memoryConfig.channels[activeMemoryTab].contextPairs }} 轮
                 </span>
               </div>
               <PSlider
-                v-model="memoryConfig.modes[activeMemoryTab].context_limit"
-                :min="activeMemoryTab === 'social' ? 20 : 5"
-                :max="activeMemoryTab === 'work' ? 100 : activeMemoryTab === 'social' ? 200 : 50"
+                v-model="memoryConfig.channels[activeMemoryTab].contextPairs"
+                :min="4"
+                :max="activeMemoryTab === 'group' ? 60 : 100"
               />
-              <div
-                class="mt-4 text-xs text-slate-500 font-medium flex items-start gap-2 bg-sky-100/30 p-3 border border-sky-100/50"
-              >
+              <div class="memory-config-note mt-4 text-xs font-medium flex items-start gap-2 p-3">
                 <span class="text-base group-hover/mconfig:rotate-12 transition-transform">
                   <PixelIcon name="thought" size="sm" />
                 </span>
                 <p class="leading-relaxed">
-                  最近对话的条数，用于维持对话连贯性。
+                  最近完整对话轮数。桌面与陪伴的一轮包含一次提问和一次回复；据点群聊的一轮包含一条发言及其关联回复。
                   <PixelIcon name="sparkle" size="xs" />
                 </p>
               </div>
@@ -806,7 +738,7 @@ onMounted(loadOverview)
 
             <!-- RAG 召回数量 -->
             <div
-              class="bg-sky-50/50 p-6 pixel-border-sky transition-all duration-300 group/mconfig hover:pixel-border-pink"
+              class="memory-config-block p-6 pixel-border-sky transition-all duration-300 group/mconfig hover:pixel-border-pink"
             >
               <div class="flex justify-between items-center mb-4">
                 <label class="text-base font-bold text-slate-700 flex items-center gap-2">
@@ -817,13 +749,13 @@ onMounted(loadOverview)
                   <span class="text-[11px] text-slate-400 font-bold">Retrieval</span>
                 </label>
                 <span class="px-2 py-0.5 bg-sky-500/10 text-sky-400 text-xs font-mono font-bold">
-                  {{ memoryConfig.modes[activeMemoryTab].rag_limit }}
+                  {{ memoryConfig.channels[activeMemoryTab].retrievalLimit }}
                 </span>
               </div>
               <PSlider
-                v-model="memoryConfig.modes[activeMemoryTab].rag_limit"
+                v-model="memoryConfig.channels[activeMemoryTab].retrievalLimit"
                 :min="0"
-                :max="activeMemoryTab === 'work' ? 50 : 30"
+                :max="30"
               />
               <div
                 class="mt-4 text-xs text-slate-500 flex items-start gap-2 bg-sky-50/50 p-3 border border-sky-100/50"
@@ -835,6 +767,54 @@ onMounted(loadOverview)
                   从长期记忆库中检索的相关记忆条数。
                   <PixelIcon name="paw" size="xs" />
                 </p>
+              </div>
+            </div>
+          </div>
+
+          <!-- 全局记忆策略 -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div class="memory-config-block p-6 pixel-border-sky">
+              <div class="mb-4">
+                <b class="text-base text-slate-700">记忆整理频率</b>
+                <p class="text-xs text-slate-500 mt-1">控制对话积累多少轮后提炼长期记忆。</p>
+              </div>
+              <div class="grid grid-cols-3 gap-2">
+                <button
+                  v-for="option in scorerOptions"
+                  :key="option.value"
+                  class="p-3 border text-left transition-colors"
+                  :class="
+                    memoryConfig.scorerBatchSize === option.value
+                      ? 'border-sky-500 bg-sky-50 text-sky-700'
+                      : 'border-slate-200 text-slate-500 hover:border-sky-300'
+                  "
+                  @click="memoryConfig.scorerBatchSize = option.value"
+                >
+                  <b class="block text-sm">{{ option.label }}</b>
+                  <small class="block mt-1 text-[10px]">{{ option.help }}</small>
+                </button>
+              </div>
+            </div>
+            <div class="memory-config-block p-6 pixel-border-sky">
+              <div class="mb-4">
+                <b class="text-base text-slate-700">召回精度</b>
+                <p class="text-xs text-slate-500 mt-1">控制长期记忆进入上下文所需的最低相关度。</p>
+              </div>
+              <div class="grid grid-cols-3 gap-2">
+                <button
+                  v-for="option in retrievalOptions"
+                  :key="option.value"
+                  class="p-3 border text-left transition-colors"
+                  :class="
+                    memoryConfig.retrievalMinScore === option.value
+                      ? 'border-sky-500 bg-sky-50 text-sky-700'
+                      : 'border-slate-200 text-slate-500 hover:border-sky-300'
+                  "
+                  @click="memoryConfig.retrievalMinScore = option.value"
+                >
+                  <b class="block text-sm">{{ option.label }}</b>
+                  <small class="block mt-1 text-[10px]">{{ option.help }}</small>
+                </button>
               </div>
             </div>
           </div>
@@ -945,52 +925,83 @@ onMounted(loadOverview)
       </div>
     </template>
 
-    <!-- ═══ 故事导入弹窗 ═══ -->
-    <PDialog v-model="showImportStory" title="导入故事生成记忆" width="600px">
-      <div class="space-y-4">
-        <div class="text-sm text-slate-600 leading-relaxed space-y-1.5">
-          <p>你可以将小说设定、人物背景、日记或长篇回忆录粘贴在这里。</p>
-          <p>
-            {{ activeAgent?.name || 'Pero' }}
-            将会阅读这些内容，并将其拆解为一系列关键记忆节点存入数据库， 作为它的“长期记忆”。
-          </p>
-          <p
-            class="mt-2 text-amber-600 text-xs font-bold flex items-center gap-1.5 bg-amber-50 px-3 py-2 border border-amber-200"
-          >
-            <PixelIcon name="alert" size="xs" />
-            注意：这是一个耗时操作，且会消耗较多 Token。
-          </p>
-        </div>
-        <textarea
-          v-model="importStoryText"
-          rows="10"
-          placeholder="在此粘贴长文本..."
-          class="w-full px-4 py-3 bg-sky-50/50 border-2 border-sky-100 focus:border-sky-300 text-sm leading-relaxed text-slate-700 resize-none outline-none transition-all duration-300 placeholder:text-slate-300"
-        />
-      </div>
-      <template #footer>
-        <PButton variant="secondary" size="sm" @click="showImportStory = false">取消</PButton>
-        <PButton
-          variant="primary"
-          size="sm"
-          :loading="isImportingStory"
-          :disabled="!importStoryText.trim()"
-          @click="handleImportStory"
-        >
-          开始生成
-        </PButton>
-      </template>
-    </PDialog>
+    <!-- 共享故事导入弹窗：与核心记忆页使用同一表现和后端导入链路 -->
+    <StoryImportDialog
+      v-model="showImportStory"
+      :agent-id="activeAgent?.id ?? 'pero'"
+      @imported="handleStoryImported"
+    />
   </div>
 </template>
 
 <style scoped>
+/* 页面语义色统一承接亮暗主题，保留语义色作为强调。 */
+.overview-tab {
+  color: var(--ui-text-primary);
+}
+.overview-tab :is(.text-slate-800, .text-slate-700, .text-slate-600) {
+  color: var(--ui-text-primary);
+}
+.overview-tab :is(.text-slate-500, .text-slate-400) {
+  color: var(--ui-text-secondary);
+}
+.overview-stat {
+  border-left: 4px solid var(--stat-accent);
+  background: var(--dash-panel-bg);
+}
+.overview-stat--purple {
+  --stat-accent: var(--ui-accent-purple);
+}
+.overview-stat--sky {
+  --stat-accent: var(--ui-accent-sky);
+}
+.overview-stat--orange {
+  --stat-accent: var(--ui-warning);
+}
+.agent-trigger,
+.status-card,
+.memory-config-block {
+  background: var(--dash-panel-soft);
+  color: var(--ui-text-primary);
+}
+.agent-trigger:hover,
+.status-card:hover {
+  background: var(--ui-bg-hover);
+}
+.status-card:hover .status-progress {
+  box-shadow: var(--ui-glow-sky);
+}
+.agent-dropdown {
+  border: 1px solid var(--dash-panel-border);
+  background: var(--dash-panel-elevated);
+  box-shadow: var(--ui-shadow-lg);
+}
+.memory-config-note {
+  border: 1px solid var(--ui-border-subtle);
+  background: var(--ui-bg-hover);
+  color: var(--ui-text-secondary);
+}
+.story-copy {
+  color: var(--ui-text-secondary);
+}
+.story-input {
+  border-color: var(--dash-input-border);
+  background: var(--dash-input-bg);
+  color: var(--ui-text-primary);
+}
+.story-input:focus {
+  border-color: var(--ui-accent-sky);
+}
+.story-input::placeholder {
+  color: var(--ui-text-disabled);
+}
+
 /* 像素风滚动条 */
 .custom-scrollbar::-webkit-scrollbar {
   width: 4px;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: #bae6fd;
+  background: var(--ui-scrollbar-thumb);
   border-radius: 0;
 }
 </style>

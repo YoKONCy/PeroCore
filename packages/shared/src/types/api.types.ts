@@ -1,7 +1,7 @@
 /**
  * @file API 响应类型定义
  * @description统一信封规范
- * @module @perocore/shared/types/api
+ * @module @infos/shared/types/api
  */
 
 // ─────────────────────────────────────────────

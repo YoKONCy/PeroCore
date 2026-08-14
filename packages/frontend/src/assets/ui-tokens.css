@@ -1,0 +1,281 @@
+/**
+ * 现代 UI 设计令牌 (Modern UI Design Tokens)
+ *
+ * 与 tokens.css 的关系:
+ * - tokens.css 保留像素与品牌色系（如 --color-sky-face、--color-moe-pink），用于像素组件与品牌细节
+ * - 本文件提供 ui 前缀语义令牌，用于现代框架、卡片、文字、边框和主题切换
+ * - 迁移期允许新旧令牌共存，新 MainView 和新组件必须优先使用 ui 前缀令牌
+ *
+ * @see .docs/S06_UI_UX_DESIGN_SPEC.md §4
+ */
+
+:root,
+[data-theme='light'] {
+  /* ── 环境 ── */
+  --ui-bg-canvas: #f6f7fb;
+  --ui-bg-sidebar: rgba(244, 245, 249, 0.92);
+  --ui-bg-surface: #ffffff;
+  --ui-bg-surface-soft: #fafbfc;
+  --ui-bg-elevated: rgba(255, 255, 255, 0.94);
+  --ui-bg-hover: rgba(15, 23, 42, 0.045);
+  --ui-bg-active: rgba(244, 114, 182, 0.1);
+
+  /* ── 文字 ── */
+  --ui-text-primary: #171923;
+  --ui-text-secondary: #596174;
+  --ui-text-tertiary: #8b93a7;
+  --ui-text-disabled: #b7bdc9;
+  --ui-text-inverse: #ffffff;
+
+  /* ── 边框 ── */
+  --ui-border-subtle: rgba(15, 23, 42, 0.07);
+  --ui-border-default: rgba(15, 23, 42, 0.11);
+  --ui-border-strong: rgba(15, 23, 42, 0.2);
+
+  /* ── 品牌与语义 ── */
+  --ui-accent-primary: #ec4899;
+  --ui-accent-primary-soft: rgba(236, 72, 153, 0.11);
+  --ui-accent-sky: #0ea5e9;
+  --ui-accent-sky-soft: rgba(14, 165, 233, 0.11);
+  --ui-accent-purple: #8b5cf6;
+  --ui-accent-purple-soft: rgba(139, 92, 246, 0.11);
+  --ui-success: #059669;
+  --ui-success-soft: rgba(5, 150, 105, 0.11);
+  --ui-warning: #d97706;
+  --ui-warning-soft: rgba(217, 119, 6, 0.11);
+  --ui-danger: #dc2626;
+  --ui-danger-soft: rgba(220, 38, 38, 0.11);
+
+  /* ── 阴影 ── */
+  --ui-shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --ui-shadow-sm: 0 2px 8px rgba(15, 23, 42, 0.055);
+  --ui-shadow-md: 0 8px 24px rgba(15, 23, 42, 0.085);
+  --ui-shadow-lg: 0 18px 48px rgba(15, 23, 42, 0.14);
+  --ui-shadow-panel: -12px 0 40px rgba(15, 23, 42, 0.16);
+  --ui-glow-pink: 0 0 24px rgba(236, 72, 153, 0.16);
+  --ui-glow-sky: 0 0 24px rgba(14, 165, 233, 0.15);
+  --ui-glow-purple: 0 0 24px rgba(139, 92, 246, 0.16);
+
+  /* ── 遮罩 ── */
+  --ui-overlay-backdrop: rgba(15, 23, 42, 0.38);
+  --ui-overlay-blur: 8px;
+
+  /* ── 滚动条 ── */
+  --ui-scrollbar-track: #f1f5f9;
+  --ui-scrollbar-thumb: #cbd5e1;
+  --ui-scrollbar-thumb-hover: #94a3b8;
+
+  /* Dashboard 面板语义层 */
+  --dash-panel-bg: #ffffff;
+  --dash-panel-elevated: rgba(255, 255, 255, 0.96);
+  --dash-panel-soft: #f8fafc;
+  --dash-panel-border: rgba(15, 23, 42, 0.1);
+  --dash-panel-shadow: 0 10px 30px rgba(15, 23, 42, 0.07);
+  --dash-input-bg: #ffffff;
+  --dash-input-border: rgba(15, 23, 42, 0.14);
+  --dash-table-header: rgba(14, 165, 233, 0.08);
+  --dash-table-stripe: rgba(15, 23, 42, 0.025);
+  --dash-empty-bg: rgba(148, 163, 184, 0.08);
+  --dash-tooltip-bg: #0f172a;
+
+  /* ── 底板纹理与渐变 ── */
+  /* 浅色：深灰点阵 + 顶部向下微亮渐变 */
+  --canvas-dot-color: rgba(15, 23, 42, 0.045);
+  --canvas-dot-size: 1px;
+  --canvas-dot-spacing: 24px;
+  --canvas-grad-top: rgba(255, 255, 255, 0.1);
+  --canvas-grad-bottom: rgba(255, 255, 255, 0);
+
+  /* ── 对话区纸面 + 气流（浅色） ── */
+  --convo-paper-tint: var(--ui-bg-surface-soft);
+  --convo-air-top: rgba(236, 72, 153, 0.028);
+  --convo-air-bottom: rgba(14, 165, 233, 0.018);
+  --convo-edge-glow: rgba(15, 23, 42, 0.05);
+
+  /* ── 据点量子点阵 + 流场线（浅色） ── */
+  --sh-dot-color: rgba(15, 23, 42, 0.035);
+  --sh-dot-size: 1.2px;
+  --sh-dot-spacing: 8px;
+  --sh-flow-top: rgba(236, 72, 153, 0.08);
+  --sh-flow-bottom: rgba(14, 165, 233, 0.06);
+  --sh-radar-tint: var(--ui-bg-surface-soft);
+}
+
+[data-theme='dark'] {
+  /* ── 环境 ── */
+  --ui-bg-canvas: #0e1016;
+  --ui-bg-sidebar: rgba(18, 20, 29, 0.94);
+  --ui-bg-surface: #181b24;
+  --ui-bg-surface-soft: #141720;
+  --ui-bg-elevated: rgba(28, 31, 42, 0.96);
+  --ui-bg-hover: rgba(255, 255, 255, 0.055);
+  --ui-bg-active: rgba(244, 114, 182, 0.14);
+
+  /* ── 文字 ── */
+  --ui-text-primary: #f2f3f7;
+  --ui-text-secondary: #a9afbd;
+  --ui-text-tertiary: #737b8d;
+  --ui-text-disabled: #525968;
+  --ui-text-inverse: #11131a;
+
+  /* ── 边框 ── */
+  --ui-border-subtle: rgba(255, 255, 255, 0.065);
+  --ui-border-default: rgba(255, 255, 255, 0.11);
+  --ui-border-strong: rgba(255, 255, 255, 0.2);
+
+  /* ── 品牌与语义 ── */
+  --ui-accent-primary: #f472b6;
+  --ui-accent-primary-soft: rgba(244, 114, 182, 0.15);
+  --ui-accent-sky: #38bdf8;
+  --ui-accent-sky-soft: rgba(56, 189, 248, 0.14);
+  --ui-accent-purple: #a78bfa;
+  --ui-accent-purple-soft: rgba(167, 139, 250, 0.15);
+  --ui-success: #34d399;
+  --ui-success-soft: rgba(52, 211, 153, 0.14);
+  --ui-warning: #fbbf24;
+  --ui-warning-soft: rgba(251, 191, 36, 0.14);
+  --ui-danger: #f87171;
+  --ui-danger-soft: rgba(248, 113, 113, 0.14);
+
+  /* ── 阴影 ── */
+  --ui-shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --ui-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --ui-shadow-md: 0 8px 24px rgba(0, 0, 0, 0.4);
+  --ui-shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.5);
+  --ui-shadow-panel: -12px 0 40px rgba(0, 0, 0, 0.45);
+  --ui-glow-pink: 0 0 24px rgba(244, 114, 182, 0.2);
+  --ui-glow-sky: 0 0 24px rgba(56, 189, 248, 0.18);
+  --ui-glow-purple: 0 0 24px rgba(167, 139, 250, 0.18);
+
+  /* ── 遮罩 ── */
+  --ui-overlay-backdrop: rgba(0, 0, 0, 0.56);
+  --ui-overlay-blur: 8px;
+
+  /* ── 滚动条 ── */
+  --ui-scrollbar-track: #1e293b;
+  --ui-scrollbar-thumb: #475569;
+  --ui-scrollbar-thumb-hover: #64748b;
+
+  /* Dashboard 面板语义层 */
+  --dash-panel-bg: #181b24;
+  --dash-panel-elevated: rgba(28, 31, 42, 0.96);
+  --dash-panel-soft: #141720;
+  --dash-panel-border: rgba(255, 255, 255, 0.1);
+  --dash-panel-shadow: 0 12px 34px rgba(0, 0, 0, 0.36);
+  --dash-input-bg: #11141d;
+  --dash-input-border: rgba(255, 255, 255, 0.13);
+  --dash-table-header: rgba(56, 189, 248, 0.12);
+  --dash-table-stripe: rgba(255, 255, 255, 0.035);
+  --dash-empty-bg: rgba(148, 163, 184, 0.08);
+  --dash-tooltip-bg: #020617;
+
+  /* ── 底板纹理与渐变 ── */
+  /* 深色：冷白点阵 + 顶部向下微暗渐变 */
+  --canvas-dot-color: rgba(255, 255, 255, 0.055);
+  --canvas-dot-size: 1px;
+  --canvas-dot-spacing: 24px;
+  --canvas-grad-top: rgba(0, 0, 0, 0.08);
+  --canvas-grad-bottom: rgba(0, 0, 0, 0);
+}
+
+/* ── 字体 ── */
+:root {
+  --ui-font-sans: Inter, 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', system-ui, sans-serif;
+  --ui-font-pixel: 'Zpix', 'DotGothic16', monospace;
+  --ui-font-mono: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+
+  /* ── 圆角 ── */
+  --ui-radius-xs: 4px;
+  --ui-radius-sm: 7px;
+  --ui-radius-md: 10px;
+  --ui-radius-lg: 14px;
+  --ui-radius-xl: 18px;
+  --ui-radius-full: 9999px;
+
+  /* ── 间距(4px 基础网格) ── */
+  --ui-space-1: 4px;
+  --ui-space-2: 8px;
+  --ui-space-3: 12px;
+  --ui-space-4: 16px;
+  --ui-space-5: 20px;
+  --ui-space-6: 24px;
+  --ui-space-8: 32px;
+  --ui-space-10: 40px;
+  --ui-space-12: 48px;
+
+  /* ── 动效 ── */
+  --ui-duration-instant: 90ms;
+  --ui-duration-fast: 150ms;
+  --ui-duration-normal: 220ms;
+  --ui-duration-panel: 320ms;
+  --ui-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ui-ease-emphasized: cubic-bezier(0.32, 0.72, 0, 1);
+  --ui-ease-bouncy: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ui-motion-distance-sm: 4px;
+  --ui-motion-distance-md: 10px;
+  --ui-motion-scale-press: 0.985;
+  --ui-motion-spark-opacity: 1;
+
+  /* ── 层级 ── */
+  --ui-z-dropdown: 100;
+  --ui-z-sticky: 200;
+  --ui-z-overlay: 300;
+  --ui-z-modal: 400;
+  --ui-z-toast: 500;
+  --ui-z-tooltip: 600;
+
+  /* ── 悬浮面板尺寸 ── */
+  --ui-panel-width-sm: 420px;
+  --ui-panel-width-md: 520px;
+  --ui-panel-width-lg: 720px;
+
+  /* ── 导航尺寸 ── */
+  --ui-nav-width: 240px;
+  --ui-nav-collapsed-width: 68px;
+}
+
+/* ── 用户动效偏好 ── */
+[data-motion='reduced'] {
+  --ui-duration-instant: 60ms;
+  --ui-duration-fast: 100ms;
+  --ui-duration-normal: 140ms;
+  --ui-duration-panel: 180ms;
+  --ui-motion-distance-sm: 2px;
+  --ui-motion-distance-md: 4px;
+  --ui-motion-scale-press: 0.99;
+  --ui-motion-spark-opacity: 0;
+}
+
+[data-motion='off'] {
+  --ui-duration-instant: 0ms;
+  --ui-duration-fast: 0ms;
+  --ui-duration-normal: 0ms;
+  --ui-duration-panel: 0ms;
+  --ui-motion-distance-sm: 0px;
+  --ui-motion-distance-md: 0px;
+  --ui-motion-scale-press: 1;
+  --ui-motion-spark-opacity: 0;
+}
+
+[data-motion='reduced'] *,
+[data-motion='off'] * {
+  animation-iteration-count: 1 !important;
+}
+
+[data-motion='off'] *,
+[data-motion='off'] *::before,
+[data-motion='off'] *::after {
+  animation-duration: 0ms !important;
+  transition-duration: 0ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* ── 减少动画偏好 ── */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --ui-duration-instant: 0ms;
+    --ui-duration-fast: 0ms;
+    --ui-duration-normal: 0ms;
+    --ui-duration-panel: 0ms;
+  }
+}

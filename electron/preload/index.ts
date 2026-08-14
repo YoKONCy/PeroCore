@@ -40,4 +40,12 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.removeListener(channel, wrapped)
     }
   },
+
+  // ── Native 渲染核心桥接（3D 加密模型解密 / 模型解析）──
+  // 前端 Provider 直接以方法调用形式访问，这里转发到主进程注册的 IPC 通道。
+  loadPeroModel: (data: Uint8Array, filters?: string[]) =>
+    ipcRenderer.invoke('native-load-pero-model', data, filters),
+  loadStandardModel: (data: Uint8Array, filters?: string[]) =>
+    ipcRenderer.invoke('native-load-standard-model', data, filters),
+  loadPeroContainer: (data: Uint8Array) => ipcRenderer.invoke('native-load-pero-container', data),
 })

@@ -2,7 +2,7 @@
   "id": "social-ops",
   "name": "社交平台操作",
   "version": "1.0.0",
-  "author": "PeroCore Team",
+  "author": "infOS Team",
   "description": "跨平台社交操作工具。通过 SocialMessagingProvider 适配不同平台 (QQ/Discord/Telegram)。仅在社交模式下可用。",
   "type": "tool",
   "entry": "index.ts",
@@ -143,6 +143,36 @@
           }
         },
         "required": ["message_ids"]
+      }
+    },
+    {
+      "name": "social_remember_contact_impression",
+      "description": "选择性保存或更新当前角色对指定用户的简短主观印象，以及对其身份的了解。仅在形成了值得跨会话保留的稳定认识时调用，不要为普通寒暄频繁写入。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "user_id": { "type": "string", "description": "目标用户 ID" },
+          "display_name": { "type": "string", "description": "目标用户当前显示名（可选）" },
+          "identity": { "type": "string", "description": "不超过 500 字的身份描述，如年龄、职业、与主人的关系等客观身份信息（可选）" },
+          "impression": { "type": "string", "description": "不超过 500 字的简短印象描述；新内容会覆盖旧印象" },
+          "source_channel_id": { "type": "string", "description": "形成此印象的会话或群组 ID（可选）" }
+        },
+        "required": ["user_id", "impression"]
+      }
+    },
+    {
+      "name": "social_get_contact_history",
+      "description": "按需回顾指定用户与当前角色的互动：返回双方最近私聊、共同出现过的群，以及当前角色在这些群中的最近发言；提供 group_id 时还会返回该用户在指定群中的发言。适合处理‘你刚才在群里说错了’等跨会话指代。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "user_id": { "type": "string", "description": "目标用户 ID" },
+          "group_id": { "type": "string", "description": "可选群组 ID；提供后同时返回该用户在此群中的发言" },
+          "private_limit": { "type": "number", "description": "私聊记录条数，默认 20，最大 50" },
+          "group_limit": { "type": "number", "description": "群内发言条数，默认 30，最大 80" },
+          "self_message_limit": { "type": "number", "description": "每个共同群返回当前角色自身最近发言的条数，默认 5，最大 20" }
+        },
+        "required": ["user_id"]
       }
     }
   ]

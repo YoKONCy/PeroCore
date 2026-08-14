@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { ClusterRouter } from '@perocore/backend/services/retrieval/clusterRouter'
-import { ContextualRetriever } from '@perocore/backend/services/retrieval/contextualRetriever'
+import { ClusterRouter } from '@infos/backend/services/retrieval/clusterRouter'
+import { ContextualRetriever } from '@infos/backend/services/retrieval/contextualRetriever'
 
 function createClusterRouter(overrides: Record<string, unknown> = {}) {
   const store = {

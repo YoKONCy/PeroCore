@@ -2,10 +2,10 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { SkillLoader } from '@perocore/backend/capabilities/skillLoader'
-import { AppError } from '@perocore/backend/lib/appError'
+import { SkillLoader } from '@infos/backend/capabilities/skillLoader'
+import { AppError } from '@infos/backend/lib/appError'
 
-vi.mock('@perocore/backend/lib/logger', () => ({
+vi.mock('@infos/backend/lib/logger', () => ({
   createLogger: () => ({
     debug: vi.fn(),
     info: vi.fn(),
@@ -20,7 +20,7 @@ describe('SkillLoader', () => {
   let userDir: string
 
   beforeEach(() => {
-    rootDir = join(tmpdir(), `perocore-skill-${Date.now()}-${Math.random()}`)
+    rootDir = join(tmpdir(), `infos-skill-${Date.now()}-${Math.random()}`)
     builtinDir = join(rootDir, 'builtin')
     extensionDir = join(rootDir, 'extension')
     userDir = join(rootDir, 'user')

@@ -26,7 +26,7 @@ const logger = createLogger('SchedulerService')
 // ── 类型 ──
 
 /** 提醒任务类型 */
-export type ScheduledTaskType = 'reminder' | 'topic' | 'reaction'
+export type ScheduledTaskType = 'reminder' | 'topic' | 'reaction' | 'agent_task'
 
 /** 创建提醒参数 */
 export interface CreateReminderParams {
@@ -67,6 +67,8 @@ export class SchedulerService {
   constructor(
     private db: DrizzleDb,
     private gatewayHub: GatewayHub,
+    /** Agent 管理器（可选注入，用于按 agentId 读取该角色的称呼） */
+    private agentManager?: { getOwnerAppellation(agentId: string): string },
   ) {
     logger.info('初始化完成')
   }
@@ -142,6 +144,9 @@ export class SchedulerService {
     const now = new Date().toISOString()
     const results: TriggerResult[] = []
 
+    // 读取该 Agent 的角色级称呼（来自 agent.json，未配置时兜底"主人"）
+    const ownerAppellation = this.agentManager?.getOwnerAppellation(agentId) ?? '主人'
+
     // 查询所有未触发且已到期的任务
     const dueTasks = await this.db
       .select()
@@ -172,7 +177,7 @@ export class SchedulerService {
       results.push({
         type: 'reminder',
         tasks: [this.toDto(task)],
-        instruction: `【管理系统提醒：你与主人的约定时间已到，请主动提醒主人。约定内容：${task.content}】`,
+        instruction: `【管理系统提醒：你与${ownerAppellation}的约定时间已到，请主动提醒${ownerAppellation}。约定内容：${task.content}】`,
       })
       logger.info(`提醒触发: "${task.content}"`)
     }
@@ -187,7 +192,7 @@ export class SchedulerService {
       results.push({
         type: 'topic',
         tasks: topics.map((t) => this.toDto(t)),
-        instruction: `【管理系统提醒：以下是你之前想找主人聊的话题（已汇总）：\n${topicList}\n\n请将这些话题自然地融合在一起，作为一次主动的聊天开场。】`,
+        instruction: `【管理系统提醒：以下是你之前想找${ownerAppellation}聊的话题（已汇总）：\n${topicList}\n\n请将这些话题自然地融合在一起，作为一次主动的聊天开场。】`,
       })
       logger.info(`话题触发: ${topics.length} 项`)
     }
@@ -202,6 +207,18 @@ export class SchedulerService {
         instruction: `【管理系统提醒：你之前决定：'${task.content}'。现在触发时间已到，请立刻执行该行为。】`,
       })
       logger.info(`反应触发: "${task.content}"`)
+    }
+
+    // ── 定时 Agent 任务（逐个显式派发） ──
+    const agentTasks = byType.get('agent_task') ?? []
+    for (const task of agentTasks) {
+      await this.markTriggered(task.id)
+      results.push({
+        type: 'agent_task',
+        tasks: [this.toDto(task)],
+        instruction: task.content,
+      })
+      logger.info(`定时 Agent 任务到期: agent=${task.agentId}, "${task.content}"`)
     }
 
     return results

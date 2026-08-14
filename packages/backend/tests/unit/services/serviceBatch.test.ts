@@ -5,10 +5,10 @@ import {
   cleanCQCodes,
   extractAttachments,
   toOneBotSegments,
-} from '@perocore/backend/extensions/adapters/napcat/napcatParser'
-import { ModelService } from '@perocore/backend/services/model/modelService'
-import { SchedulerService } from '@perocore/backend/services/scheduler/schedulerService'
-import { BackgroundScheduler } from '@perocore/backend/services/scheduler/backgroundScheduler'
+} from '@infos/backend/extensions/adapters/napcat/napcatParser'
+import { ModelService } from '@infos/backend/services/model/modelService'
+import { SchedulerService } from '@infos/backend/services/scheduler/schedulerService'
+import { BackgroundScheduler } from '@infos/backend/services/scheduler/backgroundScheduler'
 
 function createModel(overrides: Record<string, unknown> = {}) {
   return {
@@ -183,9 +183,9 @@ describe('ModelService', () => {
     await expect(service.update(99, {} as never)).rejects.toMatchObject({ code: 'MODEL_NOT_FOUND' })
     await expect(service.delete(99)).rejects.toMatchObject({ code: 'MODEL_NOT_FOUND' })
     // listRemoteModels 未对远程调用失败做封装，原始错误会原样向上抛出
-    await expect(
-      service.listRemoteModels({ provider: 'openai', apiKey: 'key' }),
-    ).rejects.toThrow('网络失败')
+    await expect(service.listRemoteModels({ provider: 'openai', apiKey: 'key' })).rejects.toThrow(
+      '网络失败',
+    )
   })
 
   it('应当列出远程模型并测试模型连通性', async () => {
@@ -316,7 +316,26 @@ describe('BackgroundScheduler', () => {
     const scheduler = new BackgroundScheduler()
     const handler = vi.fn().mockResolvedValue(undefined)
 
-    scheduler.register('flush', 1000, handler)
+    scheduler.register({
+      name: 'flush',
+      displayName: '刷新任务',
+      description: '测试刷新任务',
+      intervalMs: 1000,
+      handler,
+    })
+    const initial = scheduler.getStatus()[0]!
+    expect(initial).toMatchObject({
+      name: 'flush',
+      displayName: '刷新任务',
+      description: '测试刷新任务',
+      lastStartedAt: null,
+      lastFinishedAt: null,
+      lastSuccessAt: null,
+      lastFailureAt: null,
+      lastOutcome: null,
+      nextDueAt: Date.parse('2026-01-01T00:00:01.000Z'),
+    })
+
     scheduler.start()
     const triggered = await scheduler.triggerNow('flush')
     scheduler.stop()
@@ -327,6 +346,12 @@ describe('BackgroundScheduler', () => {
     expect(scheduler.getTaskNames()).toEqual(['flush'])
     expect(scheduler.getStatus()[0]).toMatchObject({
       name: 'flush',
+      lastStartedAt: Date.parse('2026-01-01T00:00:00.000Z'),
+      lastFinishedAt: Date.parse('2026-01-01T00:00:00.000Z'),
+      lastSuccessAt: Date.parse('2026-01-01T00:00:00.000Z'),
+      lastFailureAt: null,
+      lastOutcome: 'success',
+      nextDueAt: Date.parse('2026-01-01T00:00:01.000Z'),
       stats: { totalRuns: 1, successCount: 1, errorCount: 0 },
     })
   })
@@ -340,8 +365,20 @@ describe('BackgroundScheduler', () => {
     const failing = vi.fn().mockRejectedValue(new Error('失败'))
     const slow = vi.fn(() => running)
 
-    scheduler.register('fail', 1000, failing)
-    scheduler.register('slow', 1000, slow)
+    scheduler.register({
+      name: 'fail',
+      displayName: '失败任务',
+      description: '测试失败任务',
+      intervalMs: 1000,
+      handler: failing,
+    })
+    scheduler.register({
+      name: 'slow',
+      displayName: '慢任务',
+      description: '测试防重入',
+      intervalMs: 1000,
+      handler: slow,
+    })
     await scheduler.triggerNow('fail')
     const firstSlow = scheduler.triggerNow('slow')
     const secondSlow = await scheduler.triggerNow('slow')
@@ -350,11 +387,31 @@ describe('BackgroundScheduler', () => {
 
     expect(await scheduler.triggerNow('missing')).toBe(false)
     expect(secondSlow).toBe(false)
-    expect(scheduler.getStatus().find((item) => item.name === 'fail')!.stats).toMatchObject({
-      totalRuns: 1,
-      successCount: 0,
-      errorCount: 1,
-      lastError: 'Error: 失败',
+    const failedStatus = scheduler.getStatus().find((item) => item.name === 'fail')
+    expect(failedStatus).toMatchObject({
+      lastOutcome: 'error',
+      lastFailureAt: Date.parse('2026-01-01T00:00:00.000Z'),
+      lastFinishedAt: Date.parse('2026-01-01T00:00:00.000Z'),
+      stats: {
+        totalRuns: 1,
+        successCount: 0,
+        errorCount: 1,
+        lastError: 'Error: 失败',
+      },
+    })
+
+    failing.mockResolvedValueOnce(undefined)
+    await scheduler.triggerNow('fail')
+    expect(scheduler.getStatus().find((item) => item.name === 'fail')).toMatchObject({
+      lastOutcome: 'success',
+      lastSuccessAt: Date.parse('2026-01-01T00:00:00.000Z'),
+      lastFailureAt: Date.parse('2026-01-01T00:00:00.000Z'),
+      stats: {
+        totalRuns: 2,
+        successCount: 1,
+        errorCount: 1,
+        lastError: 'Error: 失败',
+      },
     })
   })
 })

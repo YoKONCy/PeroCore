@@ -35,6 +35,7 @@ export interface ModelConfigDto {
   temperature: number | null
   topP: number | null
   maxTokens: number | null
+  reasoningEffort: string | null
   createdAt: string | null
   updatedAt: string | null
   [key: string]: unknown

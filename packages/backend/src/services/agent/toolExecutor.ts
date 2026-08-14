@@ -21,9 +21,14 @@
  */
 
 import type { ToolExecutor, ToolExecutionResult } from './reactLoop'
-import type { ToolRegistry, ToolContext } from './toolRegistry'
+import type { ToolRegistry, ToolContext, ToolHandler, ToolHandlerResult } from './toolRegistry'
 import type { CapabilityGate } from '../../capabilities/capabilityGate'
+import type { CapabilityScope } from '../../capabilities/types'
 import type { SkillLoader } from '../../capabilities/skillLoader'
+import { isSystemProtocolTool } from '../../tools/systemProtocolTools'
+import { isStructuredToolResult } from '../execution/toolResult'
+import type { ApprovalService } from '../execution/approvalService'
+import type { PolicyEngine } from '../execution/policyEngine'
 import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('ToolExecutor')
@@ -146,6 +151,8 @@ export class RegistryToolExecutor implements ToolExecutor {
      * 用于转发平台工具调用到 CapabilityBridge（Daemon 模式下注入，旧模式为 null）
      */
     private capabilityBridge: CapabilityBridgeLike | null = null,
+    private policyEngine: PolicyEngine | null = null,
+    private approvalService: ApprovalService | null = null,
   ) {}
 
   /**
@@ -157,6 +164,11 @@ export class RegistryToolExecutor implements ToolExecutor {
    * 2. container 创建完 ctx 后创建 CapabilityBridge
    * 3. container 调用此方法注入 bridge 到 toolExecutor
    */
+  setPolicyRuntime(policyEngine: PolicyEngine, approvalService: ApprovalService): void {
+    this.policyEngine = policyEngine
+    this.approvalService = approvalService
+  }
+
   setCapabilityBridge(bridge: CapabilityBridgeLike): void {
     this.capabilityBridge = bridge
     logger.info('CapabilityBridge 已注入 ToolExecutor')
@@ -166,7 +178,18 @@ export class RegistryToolExecutor implements ToolExecutor {
     name: string,
     args: Record<string, unknown>,
     source: string,
-    runtimeContext?: { threadId?: string; channel?: string; agentId?: string; sessionId?: string },
+    runtimeContext?: {
+      threadId?: string
+      channel?: string
+      agentId?: string
+      sessionId?: string
+      signal?: AbortSignal
+      taskId?: string
+      pairId?: string
+      toolCallId?: string
+      disabledTools?: string[]
+      capabilityScope?: CapabilityScope
+    },
   ): Promise<ToolExecutionResult> {
     const startTime = Date.now()
     // 第七阶段修复（批次 B1）：agentId 必须从 runtimeContext 传入
@@ -188,6 +211,17 @@ export class RegistryToolExecutor implements ToolExecutor {
     // AIOS: threadId 优先使用 runtimeContext.threadId，回退到 sessionId（向后兼容）
     const threadId = runtimeContext?.threadId ?? sessionId
 
+    // Thread 工具策略是 Channel 白名单之上的减法层；必须先于内置工具捷径执行。
+    if (runtimeContext?.disabledTools?.includes(name) && !isSystemProtocolTool(name)) {
+      logger.warn(`工具 ${name} 被 Thread 策略禁用 (thread=${threadId}, channel=${channel})`)
+      return {
+        output: `工具“${name}”已在本会话中禁用。请由用户在 CHAR OPS 工具管理中重新启用。`,
+        durationMs: Date.now() - startTime,
+        isError: true,
+        shouldTerminate: false,
+      }
+    }
+
     // ── 内置: finish_task (始终可用, CapabilityGate 豁免) ──
     // 必须走真正的工具实现 (finishTaskTool.execute) 才能更新角色状态 (mood/vibe/mind 等)
     // 并广播 state_update 到前端；绝不能在此短路返回，否则状态更新逻辑会被整体跳过。
@@ -205,25 +239,57 @@ export class RegistryToolExecutor implements ToolExecutor {
         }
       }
       try {
-        const context: ToolContext = { source, agentId, sessionId, threadId, channel }
-        const output = await this.executeWithTimeout(handler, args, context, name)
+        const context: ToolContext = {
+          source,
+          agentId,
+          sessionId,
+          threadId,
+          channel,
+          signal: runtimeContext?.signal,
+          taskId: runtimeContext?.taskId,
+          pairId: runtimeContext?.pairId,
+          toolCallId: runtimeContext?.toolCallId,
+        }
+        const result = await this.executeWithTimeout(handler, args, context, name)
+        const failed =
+          typeof result !== 'string' &&
+          (isStructuredToolResult(result) ? !result.ok : result.isError)
+        if (failed) {
+          logger.error(
+            `finish_task 执行失败: ${typeof result === 'string' ? result : result.output}`,
+          )
+          return {
+            output: typeof result === 'string' ? result : result.output,
+            durationMs: Date.now() - startTime,
+            isError: true,
+            shouldTerminate: false,
+          }
+        }
+        const output = typeof result === 'string' ? result : result.output
         logger.info(`工具 finish_task 执行完成 (${Date.now() - startTime}ms)`)
         return { output, durationMs: Date.now() - startTime, isError: false, shouldTerminate: true }
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err)
         logger.error(`finish_task 执行失败: ${errMsg}`)
-        // 即便失败也要终止循环，避免 Agent 无限继续
         return {
-          output: (args.summary as string) ?? '任务完成',
+          output: `执行失败: ${errMsg}`,
           durationMs: Date.now() - startTime,
-          isError: false,
-          shouldTerminate: true,
+          isError: true,
+          shouldTerminate: false,
         }
       }
     }
 
-    // ── 内置: load_skill (始终可用, 加载 Skill 详情) ──
+    // ── 内置: load_skill（ambient 作用域禁止动态解锁能力） ──
     if (name === 'load_skill') {
+      if (runtimeContext?.capabilityScope === 'ambient') {
+        return {
+          output: '当前低权限环境不允许动态加载技能。',
+          durationMs: Date.now() - startTime,
+          isError: true,
+          shouldTerminate: false,
+        }
+      }
       return this.handleLoadSkill(args, sessionId, startTime)
     }
 
@@ -232,7 +298,13 @@ export class RegistryToolExecutor implements ToolExecutor {
     // 原实现在 CapabilityGate 之前返回，导致社交/群聊等通道可绕过白名单调用截图等敏感工具
     // 现在所有非内置工具（含平台能力工具）统一受白名单约束
     if (this.capabilityGate) {
-      const allowed = this.capabilityGate.isToolAllowed(agentId, channel, name, sessionId)
+      const allowed = this.capabilityGate.isToolAllowed(
+        agentId,
+        channel,
+        name,
+        sessionId,
+        runtimeContext?.capabilityScope,
+      )
       if (!allowed) {
         logger.warn(`工具 ${name} 被 CapabilityGate 拒绝 (agent=${agentId}, channel=${channel})`)
         return {
@@ -297,14 +369,156 @@ export class RegistryToolExecutor implements ToolExecutor {
       }
     }
 
+    // Hook 可能修改路径参数；修改后的最终参数必须再次经过 ResourceScope 校验。
+    if (this.capabilityGate) {
+      const pathViolation = this.checkPathAllowed(name, args, agentId, channel)
+      if (pathViolation) {
+        return {
+          output: `工具 "${name}" 修改后的路径参数被资源范围策略拒绝: ${pathViolation}`,
+          durationMs: Date.now() - startTime,
+          isError: true,
+          shouldTerminate: false,
+        }
+      }
+    }
+
+    // 参数与审批策略必须基于 Hook 修改后的最终参数执行。
+    let approvalObservation: { decision: string; userMessage?: string } | undefined
+    if (this.policyEngine) {
+      const permission = this.capabilityGate?.getToolPermission(agentId, channel, name)
+      const decision = this.policyEngine.evaluate({
+        agentId,
+        channel,
+        sessionId,
+        threadId,
+        taskId: runtimeContext?.taskId,
+        toolName: name,
+        args,
+        permission,
+      })
+      if (decision.action === 'deny') {
+        return {
+          output: JSON.stringify({ code: decision.code, message: decision.reason }),
+          durationMs: Date.now() - startTime,
+          isError: true,
+          shouldTerminate: false,
+        }
+      }
+      if (decision.action === 'require_approval' && this.approvalService) {
+        const deniedOnceMessage = this.approvalService.consumeDeniedOnce({
+          agentId,
+          sessionId,
+          toolName: name,
+          args,
+        })
+        if (deniedOnceMessage) {
+          return {
+            output: JSON.stringify({
+              code: 'APPROVAL_DENIED',
+              message: '用户拒绝了本次工具调用',
+              userMessage: deniedOnceMessage,
+              suggestedAction: '根据用户附言调整方案，不要原样重试。',
+            }),
+            durationMs: Date.now() - startTime,
+            isError: true,
+            shouldTerminate: false,
+          }
+        }
+        const authorization = this.approvalService.authorize({
+          agentId,
+          sessionId,
+          toolName: name,
+          args,
+        })
+        if (authorization === 'deny') {
+          // 若用户留过拒绝附言，把理由一并回传给 Agent，避免原样盲目重试。
+          const userMessage = this.approvalService.findDeniedMessage({
+            agentId,
+            sessionId,
+            toolName: name,
+            args,
+          })
+          return {
+            output: JSON.stringify({
+              code: 'APPROVAL_DENIED',
+              message: '该工具调用已被用户拒绝',
+              ...(userMessage
+                ? { userMessage, suggestedAction: '根据用户附言调整方案，不要原样重试。' }
+                : {}),
+            }),
+            durationMs: Date.now() - startTime,
+            isError: true,
+            shouldTerminate: false,
+          }
+        }
+        if (authorization !== 'allow') {
+          const approval = this.approvalService.create({
+            agentId,
+            channel,
+            sessionId,
+            threadId,
+            taskId: runtimeContext?.taskId,
+            toolName: name,
+            args,
+            reason: decision.reason,
+          })
+          const resolved = await this.approvalService.waitForResolution(
+            approval.id,
+            runtimeContext?.signal,
+          )
+          if (resolved.status !== 'approved' || !resolved.decision?.startsWith('allow_')) {
+            return {
+              output: JSON.stringify({
+                code: resolved.status === 'expired' ? 'APPROVAL_EXPIRED' : 'APPROVAL_DENIED',
+                message:
+                  resolved.status === 'expired' ? '工具审批已过期' : '用户拒绝了本次工具调用',
+                ...(resolved.resolutionMessage
+                  ? {
+                      userMessage: resolved.resolutionMessage,
+                      suggestedAction: '根据用户附言调整方案，不要原样重试。',
+                    }
+                  : {}),
+              }),
+              durationMs: Date.now() - startTime,
+              isError: true,
+              shouldTerminate: false,
+            }
+          }
+          // waitForResolution 已确认本次原调用，因此直接续行；allow_once 在此消费。
+          if (resolved.decision === 'allow_once') {
+            this.approvalService.authorize({ agentId, sessionId, toolName: name, args })
+          }
+          approvalObservation = {
+            decision: resolved.decision,
+            userMessage: resolved.resolutionMessage,
+          }
+        }
+      }
+    }
+
     // ── 执行 (带超时保护) ──
     try {
       // AIOS: 透传 threadId + channel 给工具处理函数
-      const context: ToolContext = { source, agentId, sessionId, threadId, channel }
+      const context: ToolContext = {
+        source,
+        agentId,
+        sessionId,
+        threadId,
+        channel,
+        signal: runtimeContext?.signal,
+        taskId: runtimeContext?.taskId,
+        pairId: runtimeContext?.pairId,
+        toolCallId: runtimeContext?.toolCallId,
+      }
 
-      const rawOutput = await this.executeWithTimeout(handler, args, context, name)
+      const rawResult = await this.executeWithTimeout(handler, args, context, name)
       const durationMs = Date.now() - startTime
-      logger.info(`工具 ${name} 执行完成 (${durationMs}ms)`)
+      const structuredResult = typeof rawResult === 'string' ? null : rawResult
+      const rawOutput = typeof rawResult === 'string' ? rawResult : rawResult.output
+      const isError = isStructuredToolResult(structuredResult)
+        ? !structuredResult.ok
+        : (structuredResult?.isError ?? false)
+      logger.info(`工具 ${name} 执行完成 (${durationMs}ms, error=${isError})`)
 
       // 截图等需要下游解析的工具输出不能截断：
       // take_screenshot 返回的完整 base64 必须交给 reactLoop 解析后转成 image_url 内容块，
@@ -320,7 +534,7 @@ export class RegistryToolExecutor implements ToolExecutor {
             args,
             output,
             durationMs,
-            isError: false,
+            isError,
           })
         } catch {
           // after Hook 失败不影响结果
@@ -330,8 +544,14 @@ export class RegistryToolExecutor implements ToolExecutor {
       return {
         output,
         durationMs,
-        isError: false,
-        shouldTerminate: false,
+        isError,
+        shouldTerminate:
+          structuredResult && 'shouldTerminate' in structuredResult
+            ? structuredResult.shouldTerminate
+            : false,
+        approvalObservation: approvalObservation
+          ? `【用户审批】决策：${approvalObservation.decision}${approvalObservation.userMessage ? `；附言：${approvalObservation.userMessage}` : ''}`
+          : undefined,
       }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err)
@@ -456,12 +676,12 @@ export class RegistryToolExecutor implements ToolExecutor {
   // ── 工具超时保护 ──
 
   private executeWithTimeout(
-    handler: (args: Record<string, unknown>, ctx: ToolContext) => Promise<string>,
+    handler: ToolHandler,
     args: Record<string, unknown>,
     ctx: ToolContext,
     toolName: string,
-  ): Promise<string> {
-    return new Promise<string>((resolve, reject) => {
+  ): Promise<ToolHandlerResult> {
+    return new Promise<ToolHandlerResult>((resolve, reject) => {
       const timer = setTimeout(() => {
         reject(new Error(`工具 ${toolName} 执行超时 (${this.toolTimeoutMs}ms)`))
       }, this.toolTimeoutMs)

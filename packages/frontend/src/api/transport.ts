@@ -9,7 +9,7 @@
  *
  */
 
-import type { ApiResponse } from '@perocore/shared'
+import type { ApiResponse } from '@infos/shared'
 
 /**
  * Electron 模式下后端服务根地址。
@@ -54,12 +54,13 @@ class HttpTransport implements Transport {
   constructor(private baseUrl: string) {}
 
   async request<T>(endpoint: string, options?: RequestInit): Promise<ApiResponse<T>> {
+    const headers: HeadersInit =
+      options?.body instanceof FormData
+        ? { ...options?.headers }
+        : { 'Content-Type': 'application/json', ...options?.headers }
     const res = await fetch(`${this.baseUrl}/api${endpoint}`, {
       ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...options?.headers,
-      },
+      headers,
     })
 
     if (!res.ok) {
@@ -92,13 +93,14 @@ class HttpTransport implements Transport {
 
 class ElectronTransport implements Transport {
   async request<T>(endpoint: string, options?: RequestInit): Promise<ApiResponse<T>> {
+    const headers: HeadersInit =
+      options?.body instanceof FormData
+        ? { ...options?.headers }
+        : { 'Content-Type': 'application/json', ...options?.headers }
     // 业务 API 照样走 HTTP (localhost:9120)
     const res = await fetch(`${ELECTRON_BACKEND_ORIGIN}/api${endpoint}`, {
       ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...options?.headers,
-      },
+      headers,
     })
 
     if (!res.ok) {

@@ -10,7 +10,7 @@ function setWindow(overrides: Record<string, unknown>) {
 
 async function importTransport() {
   vi.resetModules()
-  return import('@perocore/frontend/api/transport')
+  return import('@infos/frontend/api/transport')
 }
 
 describe('transport runtime helpers', () => {
@@ -63,14 +63,14 @@ describe('transport singleton', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
     setWindow({
-      location: { origin: 'http://localhost:5173', protocol: 'http:', host: 'localhost:5173' },
+      location: { origin: 'http://localhost:7359', protocol: 'http:', host: 'localhost:7359' },
     })
 
     const { transport } = await importTransport()
     const result = await transport.request('/agents', { headers: { 'X-Test': '1' } })
 
     expect(result).toEqual({ code: 'OK', message: '成功', data: { id: 1 } })
-    expect(fetchMock).toHaveBeenCalledWith('http://localhost:5173/api/agents', {
+    expect(fetchMock).toHaveBeenCalledWith('http://localhost:7359/api/agents', {
       headers: { 'Content-Type': 'application/json', 'X-Test': '1' },
     })
   })
@@ -88,7 +88,7 @@ describe('transport singleton', () => {
       ),
     )
     setWindow({
-      location: { origin: 'http://localhost:5173', protocol: 'http:', host: 'localhost:5173' },
+      location: { origin: 'http://localhost:7359', protocol: 'http:', host: 'localhost:7359' },
     })
 
     const { transport } = await importTransport()
@@ -112,7 +112,7 @@ describe('transport singleton', () => {
       ),
     )
     setWindow({
-      location: { origin: 'http://localhost:5173', protocol: 'http:', host: 'localhost:5173' },
+      location: { origin: 'http://localhost:7359', protocol: 'http:', host: 'localhost:7359' },
     })
 
     const { transport } = await importTransport()
@@ -131,14 +131,14 @@ describe('transport singleton', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
     setWindow({
-      location: { origin: 'http://localhost:5173', protocol: 'http:', host: 'localhost:5173' },
+      location: { origin: 'http://localhost:7359', protocol: 'http:', host: 'localhost:7359' },
     })
 
     const { transport } = await importTransport()
     const result = await transport.invoke('dialog:open', 'workspace')
 
     expect(result).toEqual({ path: 'C:/Pero' })
-    expect(fetchMock).toHaveBeenCalledWith('http://localhost:5173/api/ipc/dialog:open', {
+    expect(fetchMock).toHaveBeenCalledWith('http://localhost:7359/api/ipc/dialog:open', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(['workspace']),

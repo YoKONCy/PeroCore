@@ -15,8 +15,11 @@ export default defineConfig({
     // 默认测试环境（后端用 node，前端各包覆盖为 happy-dom）
     environment: 'node',
 
-    // 文件匹配
-    include: ['packages/*/tests/**/*.{test,spec}.{ts,tsx}'],
+    // 文件匹配（除 tests/ 目录外，也支持源码内的 __tests__ 同位目录）
+    include: [
+      'packages/*/tests/**/*.{test,spec}.{ts,tsx}',
+      'packages/*/src/**/__tests__/**/*.{test,spec}.{ts,tsx}',
+    ],
     exclude: ['**/node_modules/**', '**/dist/**'],
 
     // 覆盖率配置
@@ -43,9 +46,10 @@ export default defineConfig({
 
     // 路径别名（与 tsconfig 对齐）
     alias: {
-      '@perocore/shared': resolve(__dirname, 'packages/shared/src'),
-      '@perocore/backend': resolve(__dirname, 'packages/backend/src'),
-      '@perocore/frontend': resolve(__dirname, 'packages/frontend/src'),
+      '@infos/shared': resolve(__dirname, 'packages/shared/src'),
+      '@infos/backend': resolve(__dirname, 'packages/backend/src'),
+      '@infos/frontend': resolve(__dirname, 'packages/frontend/src'),
+      '@infos/social': resolve(__dirname, 'packages/apps/social'),
     },
   },
 })

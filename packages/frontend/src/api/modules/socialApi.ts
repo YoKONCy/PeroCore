@@ -23,6 +23,18 @@ export interface SocialStatusData {
   adapters: AdapterStatus[]
 }
 
+export interface SocialModeConfig {
+  proactiveGroupEnabled: boolean
+  minMessagesForReview: number
+  nightSilenceEnabled: boolean
+  nightSilenceStart: number
+  nightSilenceEnd: number
+  strangerPolicy: 'allow' | 'ignore'
+  groupWhitelist: string[]
+  groupBlacklist: string[]
+  userBlacklist: string[]
+}
+
 /** 社交配置（存储在 configs 表的 'social' key，JSON 字符串） */
 export interface SocialConfig {
   /** 主人的 QQ 号（用于权限识别 + prompt 注入） */
@@ -33,7 +45,24 @@ export interface SocialConfig {
     accountId: string
     agentId: string
   }>
+  mode?: Partial<SocialModeConfig>
 }
+
+export interface SocialContactImpression {
+  userId: string
+  displayName: string
+  identity?: string
+  impression: string
+  sourceChannelId?: string | null
+  updatedAt: string
+}
+
+export type SocialClearScope =
+  | 'channel'
+  | 'contact_impression'
+  | 'all_messages'
+  | 'long_memory'
+  | 'all_social_data'
 
 export const socialApi = {
   /** 获取所有适配器连接状态 */
@@ -41,6 +70,27 @@ export const socialApi = {
 
   /** 发送调试消息 */
   send: (content: string) => apiClient.post('/social/send', { content }),
+
+  getModeConfig: () => apiClient.get<SocialModeConfig>('/social/mode-config'),
+  saveModeConfig: (config: SocialModeConfig) =>
+    apiClient.put<SocialModeConfig>('/social/mode-config', config),
+
+  getContacts: (agentId: string) =>
+    apiClient.get<{ contacts: SocialContactImpression[] }>(
+      `/social/contacts/${encodeURIComponent(agentId)}`,
+    ),
+
+  syncHistory: (platform = 'qq') =>
+    apiClient.post(`/social/history-sync/${encodeURIComponent(platform)}`),
+
+  clearData: (input: {
+    agentId: string
+    scope: SocialClearScope
+    channelType?: 'private' | 'group'
+    channelId?: string
+    userId?: string
+    confirmAgentName?: string
+  }) => apiClient.post('/social/data/clear', input),
 
   /**
    * 读取社交配置
@@ -69,4 +119,3 @@ export const socialApi = {
     await configApi.set('social', JSON.stringify(config))
   },
 }
-

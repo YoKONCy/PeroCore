@@ -36,15 +36,19 @@ const createModelSchema = z.object({
   /** API 基址 (可选，留空使用默认) */
   apiBase: z.string().optional(),
   /** 温度 0-2 */
-  temperature: z.number().min(0).max(2).optional(),
+  temperature: z.number().min(0).max(2).nullable().optional(),
   /** Top P 0-1 */
-  topP: z.number().min(0).max(1).optional(),
-  /** 最大 Token 数 */
-  maxTokens: z.number().int().min(1).optional(),
+  topP: z.number().min(0).max(1).nullable().optional(),
+  /** 最大输出 Token 数 */
+  maxTokens: z.number().int().min(1).nullable().optional(),
+  /** 模型推理强度；null 表示不传 */
+  reasoningEffort: z.enum(['off', 'low', 'medium', 'high', 'xhigh', 'max']).nullable().optional(),
   /** Provider 类型 / 用途 (global/chat/scorer/reflection/task) */
   providerType: z.string().default('global'),
   /** 启用视觉能力 (多模态) */
   enableVision: z.boolean().optional(),
+  /** 声明模型支持原生音频输入（非 ASR） */
+  enableAudioInput: z.boolean().optional(),
 })
 
 const updateModelSchema = createModelSchema.partial().extend({

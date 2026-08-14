@@ -13,15 +13,21 @@
  */
 
 import type { ToolRegistry } from '../services/agent/toolRegistry'
+import type { ToolExecutionResult } from '../services/agent/reactLoop'
+import type { StructuredToolResult } from '../services/execution/toolResult'
 import type { ToolDefinition } from '../services/pipeline/types'
+import type { ToolDisplayMeta } from '@infos/shared/types/extension.types'
 import { createLogger } from '../lib/logger'
 
+import hostCommunicationManifest from './hostCommunication/manifest.json'
+import appInteractionManifest from './appInteraction/manifest.json'
 import browserControlManifest from './browserControl/manifest.json'
 import codeSearcherManifest from './codeSearcher/manifest.json'
 import desktopAutomationManifest from './desktopAutomation/manifest.json'
 import diarySearchManifest from './diarySearch/manifest.json'
 import fileOpsManifest from './fileOps/manifest.json'
 import fileSearchManifest from './fileSearch/manifest.json'
+import flowStateManifest from './flowState/manifest.json'
 import finishTaskManifest from './finishTask/manifest.json'
 import loadSkillManifest from './loadSkill/manifest.json'
 import runScriptManifest from './runScript/manifest.json'
@@ -31,7 +37,9 @@ import socialOpsManifest from './socialOps/manifest.json'
 import strongholdOpsManifest from './strongholdOps/manifest.json'
 import systemInfoManifest from './systemInfo/manifest.json'
 import terminalExecutorManifest from './terminalExecutor/manifest.json'
+import terminalSessionManifest from './terminalSession/manifest.json'
 import webFetchManifest from './webFetch/manifest.json'
+import workspaceProductivityManifest from './workspaceProductivity/manifest.json'
 
 const logger = createLogger('BuiltinTools')
 
@@ -55,8 +63,11 @@ export interface BuiltinTool {
       threadId: string
       /** AIOS: 对话通道 */
       channel: string
+      signal?: AbortSignal
+      taskId?: string
+      pairId?: string
     },
-  ): Promise<string>
+  ): Promise<string | StructuredToolResult>
   /** 可选：初始化 */
   onLoad?(): Promise<void>
   /**
@@ -71,16 +82,26 @@ export interface BuiltinTool {
         name: string,
         args: Record<string, unknown>,
         source: string,
-        runtimeContext?: { threadId?: string; channel?: string },
-      ) => Promise<string>)
+        runtimeContext?: {
+          threadId?: string
+          channel?: string
+          agentId?: string
+          sessionId?: string
+        },
+      ) => Promise<ToolExecutionResult>)
     | null
   bindToolExecutor?(
     executor: (
       name: string,
       args: Record<string, unknown>,
       source: string,
-      runtimeContext?: { threadId?: string; channel?: string },
-    ) => Promise<string>,
+      runtimeContext?: {
+        threadId?: string
+        channel?: string
+        agentId?: string
+        sessionId?: string
+      },
+    ) => Promise<ToolExecutionResult>,
   ): void
 }
 
@@ -88,10 +109,25 @@ export interface BuiltinTool {
 // 静态导入所有内置工具
 // ─────────────────────────────────────────────
 
+import { communicateWithHostTool } from './hostCommunication'
+import { interactWithAppTool } from './appInteraction'
+import { updateFlowStateTool } from './flowState'
 import { finishTaskTool } from './finishTask'
 import { loadSkillTool } from './loadSkill'
 import { readFileTool, writeFileTool, fileInfoTool, listDirectoryTool } from './fileOps'
 import { terminalExecutorTool } from './terminalExecutor'
+import {
+  terminalCreateTool,
+  terminalListTool,
+  terminalGetTool,
+  terminalReadTool,
+  terminalWaitTool,
+  terminalWriteTool,
+  terminalResizeTool,
+  terminalInterruptTool,
+  terminalKillTool,
+  terminalCloseTool,
+} from './terminalSession'
 import { codeSearcherTool } from './codeSearcher'
 import { fileSearchTool } from './fileSearch'
 import { setReminderTool, listRemindersTool, cancelReminderTool } from './scheduler'
@@ -122,12 +158,16 @@ import {
   strongholdCallButlerTool,
 } from './strongholdOps'
 import { searchDiaryTool } from './diarySearch'
+import { readFileRangeTool, globFilesTool, editFileTool } from './workspaceProductivity'
 
 /** 全部内置工具列表 */
 const ALL_BUILTIN_TOOLS: BuiltinTool[] = [
   // ── 生命周期 (始终允许) ──
   finishTaskTool,
   loadSkillTool,
+  updateFlowStateTool,
+  interactWithAppTool,
+  communicateWithHostTool,
 
   // ── 文件系统 ──
   readFileTool,
@@ -135,9 +175,22 @@ const ALL_BUILTIN_TOOLS: BuiltinTool[] = [
   fileInfoTool,
   listDirectoryTool,
   fileSearchTool,
+  readFileRangeTool,
+  globFilesTool,
+  editFileTool,
 
   // ── 终端 & 搜索 ──
   terminalExecutorTool,
+  terminalCreateTool,
+  terminalListTool,
+  terminalGetTool,
+  terminalReadTool,
+  terminalWaitTool,
+  terminalWriteTool,
+  terminalResizeTool,
+  terminalInterruptTool,
+  terminalKillTool,
+  terminalCloseTool,
   codeSearcherTool,
 
   // ── 提醒 & 日程 ──
@@ -192,6 +245,8 @@ interface ManifestToolDefinition {
   name: string
   description: string
   parameters?: Record<string, unknown>
+  /** 工具显示元数据（图标/名称/配色/轨迹样式，社区工具同样适用） */
+  display?: ToolDisplayMeta
 }
 
 interface ToolManifest {
@@ -209,6 +264,7 @@ function toToolDefinition(definition: ManifestToolDefinition): ToolDefinition {
       type: 'object',
       properties: {},
     },
+    display: definition.display,
   }
 }
 
@@ -218,12 +274,15 @@ function collectManifestDefinitions(manifest: ToolManifest): ToolDefinition[] {
 }
 
 for (const manifest of [
+  hostCommunicationManifest,
+  appInteractionManifest,
   browserControlManifest,
   codeSearcherManifest,
   desktopAutomationManifest,
   diarySearchManifest,
   fileOpsManifest,
   fileSearchManifest,
+  flowStateManifest,
   finishTaskManifest,
   loadSkillManifest,
   runScriptManifest,
@@ -233,7 +292,9 @@ for (const manifest of [
   strongholdOpsManifest,
   systemInfoManifest,
   terminalExecutorManifest,
+  terminalSessionManifest,
   webFetchManifest,
+  workspaceProductivityManifest,
 ] satisfies ToolManifest[]) {
   for (const definition of collectManifestDefinitions(manifest)) {
     MANIFEST_DEFINITIONS.set(definition.name, definition)
@@ -269,6 +330,8 @@ export function getBuiltinToolDefinitions(): ToolDefinition[] {
 // Re-export: 工具依赖设置函数 (供 container.ts 使用)
 // ─────────────────────────────────────────────
 
+export { setAppInteractionManager } from './appInteraction'
+export { setFlowStateService } from './flowState'
 export { setScreenshotProvider } from './screenVision'
 export type { ScreenshotProvider } from './screenVision'
 export { setWindowProvider } from './systemInfo'
@@ -286,7 +349,8 @@ export { setDiarySearchDeps } from './diarySearch'
 // AIOS(Phase4): WorkspaceService 注入
 // - fileOps 自带 setter（核心逻辑锁定不改）
 // - terminalExecutor / runScript / fileSearch / codeSearcher 共用 workspaceServiceHolder 的 setter
-export { setWorkspaceService } from './fileOps'
+export { setWorkspaceService, setWorkspaceCheckpointService } from './fileOps'
+export { setWorkspaceProductivityCheckpointService } from './workspaceProductivity'
 export { setWorkspaceService as setSharedWorkspaceService } from './workspaceServiceHolder'
 export type { WorkspaceService } from '../services/workspace/workspaceService'
 // 第六阶段 #7: CapabilityGate 共享持有器（run_script 用于 ResourceScope 校验）

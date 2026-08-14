@@ -16,11 +16,31 @@
  */
 
 import { Hono } from 'hono'
+import { zValidator } from '@hono/zod-validator'
 import { AppError } from '../lib/appError'
 import type { AppContext } from '../container'
+import {
+  MEMORY_RUNTIME_CONFIG_KEY,
+  loadMemoryRuntimeConfig,
+  memoryRuntimeConfigSchema,
+} from '../services/memory/memoryRuntimeConfig'
 
 export function createMaintenanceRouter(ctx: AppContext) {
   const router = new Hono()
+
+  // GET /api/maintenance/memory-config — 获取经过校验的主 Agent 记忆运行配置
+  router.get('/memory-config', async (c) => {
+    const config = await loadMemoryRuntimeConfig(ctx.configRepo)
+    return c.json({ code: 'OK', message: '获取成功', data: config })
+  })
+
+  // PUT /api/maintenance/memory-config — 保存主 Agent 记忆运行配置
+  router.put('/memory-config', zValidator('json', memoryRuntimeConfigSchema), async (c) => {
+    const config = c.req.valid('json')
+    await ctx.configRepo.setJson(MEMORY_RUNTIME_CONFIG_KEY, config)
+    ctx.scorerService.updateBatchSize(config.scorerBatchSize)
+    return c.json({ code: 'OK', message: '记忆运行配置已更新', data: config })
+  })
 
   // GET /api/maintenance/status — 维护系统状态
   router.get('/status', async (c) => {

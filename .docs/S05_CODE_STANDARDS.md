@@ -1,6 +1,6 @@
 # 代码质量标准
 
-> **适用范围**：PeroCore-TS 全项目
+> **适用范围**：infOS-TS 全项目
 > **最后更新**：2026-04-22
 
 ---
@@ -44,10 +44,10 @@ Repository 层 →  仅负责：数据访问（SQLite / TriviumDB）
 
 ```typescript
 // ❌ 禁止
-const dbPath = 'C:\\Users\\pero\\data\\perocore.db'
+const dbPath = 'C:\\Users\\pero\\data\\infos.db'
 
 // ✅ 正确
-const dbPath = env.PERO_DATABASE_PATH ?? path.join(getDataDir(), 'perocore.db')
+const dbPath = env.PERO_DATABASE_PATH ?? path.join(getDataDir(), 'infos.db')
 ```
 
 路径操作必须使用 `node:path`（`path.join`, `path.resolve`），不手动拼接分隔符。
@@ -106,4 +106,4 @@ const dbPath = env.PERO_DATABASE_PATH ?? path.join(getDataDir(), 'perocore.db')
 
 ---
 
-*本文档由 Carola 整理，适用于 PeroCore-TS 代码质量标准。*
+*本文档由 Carola 整理，适用于 infOS-TS 代码质量标准。*

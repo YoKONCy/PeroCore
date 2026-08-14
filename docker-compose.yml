@@ -1,5 +1,5 @@
 # ===================================================================
-# PeroCore-TS Docker Compose 编排
+# infOS-TS Docker Compose 编排
 #
 # 启动: docker compose up -d
 # 停止: docker compose down
@@ -7,7 +7,7 @@
 #
 # 环境变量:
 #   PERO_PORT           后端端口 (默认 9120)
-#   PEROCORE_AUTH_TOKEN  鉴权令牌 (可选，不设则首次自动生成)
+#   INFOS_AUTH_TOKEN  鉴权令牌 (可选，不设则首次自动生成)
 #
 # @see _docs_/07_DUAL_DEPLOYMENT.md §6, §8
 # @see _docs_/15_DEVOPS_OPERATIONS.md §5.2
@@ -19,7 +19,7 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.backend
-    container_name: perocore-backend
+    container_name: infos-backend
     restart: unless-stopped
     ports:
       - '${PERO_PORT:-9120}:9120'
@@ -30,12 +30,12 @@ services:
       - PERO_PORT=9120
       - PERO_HOST=0.0.0.0
       - PERO_DATA_DIR=/app/data
-      - PERO_DATABASE_PATH=/app/data/perocore.db
+      - PERO_DATABASE_PATH=/app/data/infos.db
       - PERO_LOG_LEVEL=3
-      - PEROCORE_DOCKER=1
+      - INFOS_DOCKER=1
       # 鉴权 (D34, 07_DUAL_DEPLOYMENT.md §8)
       # 不设则首次启动自动生成随机 Token
-      - PEROCORE_AUTH_TOKEN=${PEROCORE_AUTH_TOKEN:-}
+      - INFOS_AUTH_TOKEN=${INFOS_AUTH_TOKEN:-}
     # 健康检查 (15_DEVOPS_OPERATIONS.md §5.2)
     healthcheck:
       test: ['CMD', 'curl', '-f', 'http://localhost:9120/api/health']
@@ -49,7 +49,7 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.frontend
-    container_name: perocore-frontend
+    container_name: infos-frontend
     restart: unless-stopped
     ports:
       - '3000:80'

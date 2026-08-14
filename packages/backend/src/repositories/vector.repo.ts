@@ -119,7 +119,7 @@ export class VectorRepository {
     const store = this.storeRegistry.getStoreBySource(agentId, source)
     try {
       store.delete(memoryId)
-    } catch (err) {
+    } catch {
       // 节点不存在时静默处理
       logger.debug(`向量节点 ${memoryId} 不存在，跳过删除`)
     }
@@ -136,10 +136,7 @@ export class VectorRepository {
     store.indexText(memoryId, text)
     // AIOS 第八阶段：标记脏，等下次 searchHybrid 时懒编译
     this.storeRegistry.markTextIndexDirty(
-      this.storeRegistry.resolveAgentStorePath(
-        agentId,
-        ['social', 'group', 'group_chat'].includes(source) ? 'social' : 'main',
-      ),
+      this.storeRegistry.resolveAgentStorePath(agentId, source === 'social' ? 'social' : 'main'),
     )
   }
 
@@ -200,7 +197,11 @@ export class VectorRepository {
    *
    * AIOS(Phase5): 新增 agentId 参数
    */
-  async searchDiary(queryVector: number[], agentId: string, topK: number = 5): Promise<JsSearchHit[]> {
+  async searchDiary(
+    queryVector: number[],
+    agentId: string,
+    topK: number = 5,
+  ): Promise<JsSearchHit[]> {
     const store = this.storeRegistry.getDiaryStore(agentId)
     return store.search(queryVector, topK, 1, 0.3)
   }

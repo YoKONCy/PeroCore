@@ -10,9 +10,9 @@
  */
 
 import type { MemoryRepository } from '../../repositories/memory.repo'
-import type { JsTrainingSample } from '@perocore/nit-runtime'
+import type { TrainingSample } from '@infos/nit-runtime'
 import type { ContextRnn } from './contextRnn'
-import { minGruTrain } from '@perocore/nit-runtime'
+import { minGruTrain } from '@infos/nit-runtime'
 import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('RetrievalFeedback')
@@ -76,7 +76,7 @@ export class RetrievalFeedback {
   private contextRnn: ContextRnn | null
 
   /** 累积训练样本 (等待 batch 触发) */
-  private trainingSamples: JsTrainingSample[] = []
+  private trainingSamples: TrainingSample[] = []
 
   /** 历史反馈统计 */
   private stats = {

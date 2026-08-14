@@ -2,7 +2,7 @@
  * Capability 协议共享类型定义
  *
  * 第七阶段修复（批次 E2）：把 Daemon 与 Electron 之间的 IPC 消息类型和能力返回格式
- * 提取到 @perocore/shared，避免两端各写一套导致不一致（P0-2/P0-3 的根因）。
+ * 提取到 @infos/shared，避免两端各写一套导致不一致（P0-2/P0-3 的根因）。
  *
  * Daemon (capabilityBridge.ts) 和 Electron (capabilityProvider.ts) 都应 import 此模块。
  *

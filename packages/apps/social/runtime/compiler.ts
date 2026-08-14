@@ -23,7 +23,12 @@
 import type { GrantRegistry } from '../../../backend/src/applications/grantRegistry'
 import type { ResourceRef } from '../../../backend/src/applications/types'
 import type { LlmService, ModelConfig } from '../../../backend/src/services/llm/llmService'
-import type { ContentPart, ChatMessage, ToolDefinition, ToolCall } from '../../../backend/src/services/llm/types'
+import type {
+  ContentPart,
+  ChatMessage,
+  ToolDefinition,
+  ToolCall,
+} from '../../../backend/src/services/llm/types'
 import type { MdpEngine } from '../../../backend/src/services/prompt/mdpEngine'
 import type { AgentManager } from '../../../backend/src/services/agent/agentManager'
 import type { MemoryStoreRegistry } from '../../../backend/src/repositories/storeRegistry'
@@ -59,44 +64,23 @@ function extractImagesFromToolResult(result: string): string[] {
 }
 
 /**
- * 过滤 LLM 回复中的 Thinking/Monologue 块
+ * 过滤 LLM 回复中的思考块
  *
- * 多重匹配过滤机制，防止【】内的思考内容外泄到社交平台：
- * 支持三种括号格式：
- *   【Thinking...】  [Thinking...]  (Thinking...)
- *   【Monologue...】 [Monologue...] (Monologue...)
- *
- * 非贪婪匹配，删除从开始标记到闭合括号的全部内容（含括号本身）。
- * 未闭合的块（只有开始没有结束）也会被过滤（防止 LLM 输出格式错误）。
+ * 思考块统一使用 XML 标签格式：`<think>...</think>`。
+ * 过滤规则（多层兜底，防止思考内容外泄到社交平台）：
+ * - 标准闭合：`<think>...</think>`（含标签内多行、嵌套文本）
+ * - 变体标签：thinking / Think / THINK（大小写不敏感）
+ * - 未闭合的块（只有 <think> 没有 </think>）整体删除（防止 LLM 输出格式错误）
  */
 function stripThinkingBlocks(text: string): string {
-  // 多重匹配：三种括号 × 两种标签 = 6 种组合
-  // 非贪婪匹配 + 全局替换
-  const patterns = [
-    /【Thinking[\s\S]*?】/g,
-    /\[Thinking[\s\S]*?\]/g,
-    /\(Thinking[\s\S]*?\)/g,
-    /【Monologue[\s\S]*?】/g,
-    /\[Monologue[\s\S]*?\]/g,
-    /\(Monologue[\s\S]*?\)/g,
-  ]
   let result = text
-  for (const pattern of patterns) {
-    result = result.replace(pattern, '')
-  }
-  // 处理未闭合的块（只有开始标记没有结束标记）
-  // 从开始标记到字符串末尾全部删除
-  const unclosedPatterns = [
-    /【Thinking[\s\S]*$/g,
-    /\[Thinking[\s\S]*$/g,
-    /\(Thinking[\s\S]*$/g,
-    /【Monologue[\s\S]*$/g,
-    /\[Monologue[\s\S]*$/g,
-    /\(Monologue[\s\S]*$/g,
-  ]
-  for (const pattern of unclosedPatterns) {
-    result = result.replace(pattern, '')
-  }
+
+  // 1. 标准闭合块：<think>...</think>（非贪婪匹配，忽略大小写，可跨行）
+  result = result.replace(/<think[\s\S]*?<\/think>/gi, '')
+
+  // 2. 未闭合块：只有 <think> 开始标签，没有 </think> → 删除到末尾
+  result = result.replace(/<think[\s\S]*$/gi, '')
+
   // 清理首尾多余空白
   return result.trim()
 }
@@ -172,6 +156,14 @@ function stripToolCallTags(text: string): string {
     .trim()
 }
 
+function escapeXmlText(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+function escapeXmlAttribute(value: string): string {
+  return escapeXmlText(value).replace(/"/g, '&quot;').replace(/'/g, '&apos;')
+}
+
 // ─────────────────────────────────────────────
 // 类型定义
 // ─────────────────────────────────────────────
@@ -238,10 +230,10 @@ export class SocialAppCompiler {
     channelType: 'private' | 'group'
     ownerQq?: string
     isOwner?: boolean
+    /** 当前 Social Thread 的心流协议与状态，由主内核 FlowStateService 格式化。 */
+    flowStatePrompt?: string
     /** 表情包关键词列表（逗号分隔，由 StickerService.loadAgentStickers 提供） */
     stickerList?: string
-    /** 可用工具描述文本（由 SocialAppRuntime 从 tools/manifest.json 格式化） */
-    toolsDesc?: string
     /**
      * 跨会话上下文（群聊被 @ 时，触发者与 Agent 的最近私聊记录摘要）
      *
@@ -249,6 +241,12 @@ export class SocialAppCompiler {
      * 注入到 system prompt 的独立区块，让 Agent 记得与该用户的历史互动
      */
     crossSessionContext?: string
+    /** 当前主要交互对象的持久联系人印象。 */
+    contactImpression?: {
+      userId: string
+      displayName?: string
+      impression: string
+    }
     /** 触发者 senderId（用于跨会话上下文标注） */
     triggerSenderId?: string
     /**
@@ -271,17 +269,36 @@ export class SocialAppCompiler {
      * 注入到 <session_context> 中，让 Agent 知道自己在平台上的昵称。
      */
     botNickname?: string
+    /**
+     * 用户自定义称呼（如 主人/哥哥/老师），默认"主人"
+     *
+     * 用于渲染社交规则与身份提示中的称呼占位符，与主提示词人格框架保持一致。
+     */
+    ownerAppellation?: string
+    /**
+     * 主人在主 app 中登记的名称（owner.name），默认"用户"
+     *
+     * 与 ownerAppellation 语义不同：
+     * - ownerName：主人的名字，用于客观/中性指代
+     * - ownerAppellation：角色对主人的亲密称呼，用于直接对话/呼叫
+     * 社交规则模板中会同时注入两者并明确区分，避免 Agent 混淆。
+     */
+    ownerName?: string
   }): Promise<CompiledSocialContext> {
     const { instanceId, hostAgentId, history, userMessage, channelType } = params
     const ownerQq = params.ownerQq
     const isOwner = params.isOwner ?? false
     const stickerList = params.stickerList
-    const toolsDesc = params.toolsDesc
     const crossSessionContext = params.crossSessionContext
+    const contactImpression = params.contactImpression
     const triggerSenderId = params.triggerSenderId
     const images = params.images ?? []
     const botSelfId = params.botSelfId
     const botNickname = params.botNickname
+    // 用户自定义称呼（如 主人/哥哥/老师），默认"主人"
+    const ownerAppellation = params.ownerAppellation ?? '主人'
+    // 主人在主 app 中登记的名称，默认"用户"（与称呼区分，用于客观/中性指代）
+    const ownerName = params.ownerName ?? '用户'
 
     // 1. 查询 persona 授权（只查 persona，不查 memory — subagent 不直接读主 Agent 记忆）
     const grants = await this.grantRegistry.queryGrants({
@@ -322,18 +339,19 @@ export class SocialAppCompiler {
     //     不再注入 current_mode 字段：被召唤并非"必须回复"，LLM 可经双重思考后选择 PASS 跳过
     const rules = this.mdpEngine.render('apps/social/social_rules', {
       owner_qq: ownerQq || '未配置',
-      available_tools_desc: toolsDesc || '（暂无可用工具）',
+      owner_appellation: ownerAppellation,
+      owner_name: ownerName,
     })
 
     // 4c. 当前对话身份提示（运行时动态信息，模板中无此变量）
-    //     isOwner 由适配器层识别，提示 Agent 当前对话对象是否为主人
+    //     isOwner 由适配器层识别，提示 Agent 当前对话对象是否为用户（称呼可配置）
     //     同时注入 channelType 场景信息（私聊/群聊）
     let ownerHint = ''
     if (ownerQq) {
       const scene = channelType === 'private' ? '私聊' : '群聊'
       ownerHint = isOwner
-        ? `你的主人正在${scene}中和你说话，可以执行主人请求的任何操作。`
-        : `当前${scene}对象不是你的主人，拒绝敏感指令。`
+        ? `你的${ownerAppellation}正在${scene}中和你说话，可以执行${ownerAppellation}请求的任何操作。`
+        : `当前${scene}对象不是你的${ownerAppellation}，拒绝敏感指令。`
     }
 
     // 5. 用 XML 标签嵌套组装 system prompt
@@ -341,9 +359,8 @@ export class SocialAppCompiler {
     //    1. <long_term_memory> 长期社交记忆（最前，跨会话炼化的图谱摘要）
     //    2. <chat_history> 聊天记录（本会话历史 + 跨会话私聊补充）
     //    3. <persona> 人格投影（system_prompt.md + 表情包能力）
-    //    4. <abilities> 可用工具能力
-    //    5. <social_rules> 社交规则（交互模式/安全指令/回复原则/思考决策）
-    //    6. <session_context> 会话上下文（当前身份/频道类型）
+    //    4. <social_rules> 社交规则（交互模式/安全指令/回复原则/思考决策）
+    //    5. <session_context> 会话上下文（当前身份/频道类型）
 
     const sections: string[] = []
 
@@ -356,6 +373,25 @@ export class SocialAppCompiler {
     //    历史消息交替拼成 XML 标签合在一起，不再用多轮 user/assistant messages
     //    注意：history 已由调用方 (index.ts) 按 DB 加载量截断，此处直接使用，不再二次切片
     const historyLines: string[] = []
+    if (contactImpression) {
+      const displayName = escapeXmlAttribute(
+        contactImpression.displayName || contactImpression.userId,
+      )
+      const identity = contactImpression.identity
+        ? `\n<identity>${escapeXmlText(contactImpression.identity)}</identity>`
+        : ''
+      historyLines.push(
+        `<contact_context user_id="${escapeXmlAttribute(contactImpression.userId)}" display_name="${displayName}">${identity}\n<impression>${escapeXmlText(contactImpression.impression)}</impression>\n</contact_context>`,
+      )
+    }
+    // 跨会话私聊记录放在最前面（群聊消息之前）：
+    // 群聊被 @ 时，先给 Agent 补充"触发者与 Agent 的最近私聊"作为背景，
+    // 再展示当前群聊的聊天记录，让 Agent 先回忆起与该用户的私交，再处理群聊话题
+    if (crossSessionContext && triggerSenderId) {
+      historyLines.push(
+        `<cross_session_private_chat trigger_sender="${triggerSenderId}">\n${crossSessionContext}\n</cross_session_private_chat>`,
+      )
+    }
     for (const msg of history) {
       if (msg.role === 'user') {
         const sender = msg.senderName || '用户'
@@ -365,12 +401,6 @@ export class SocialAppCompiler {
         historyLines.push(`<assistant sender="self">${msg.content}</assistant>`)
       }
     }
-    // 跨会话私聊记录（群聊被 @ 时，触发者与 Agent 的最近私聊）
-    if (crossSessionContext && triggerSenderId) {
-      historyLines.push(
-        `<cross_session_private_chat trigger_sender="${triggerSenderId}">\n${crossSessionContext}\n</cross_session_private_chat>`,
-      )
-    }
     if (historyLines.length > 0) {
       sections.push(`<chat_history>\n${historyLines.join('\n')}\n</chat_history>`)
     }
@@ -379,9 +409,11 @@ export class SocialAppCompiler {
     const personaBlock = `<persona name="${agentName}">\n${systemPrompt}\n\n${stickerExpression}\n</persona>`
     sections.push(personaBlock)
 
-    // ── 4. 可用工具能力 ──
-    if (toolsDesc) {
-      sections.push(`<abilities>\n${toolsDesc}\n</abilities>`)
+    // ── 4. 心流：Social 独立 Compiler 读取统一状态，但不复用主 ContextCompiler ──
+    if (params.flowStatePrompt) {
+      sections.push(
+        `<private_flow_protocol>\n${params.flowStatePrompt}\n调用 update_flow_state 主动维护变化后的当前目标或私有事实；无变化时不要重复调用，也不要主动向用户泄露私有事实。\n</private_flow_protocol>`,
+      )
     }
 
     // ── 5. 社交规则（含思考决策指南）──
@@ -389,9 +421,7 @@ export class SocialAppCompiler {
 
     // ── 6. 会话上下文（当前身份/频道类型/Bot 自身信息）──
     //     不再注入"交互模式: SUMMONED"提示：被召唤≠必须回复，LLM 可经双重思考后 PASS
-    const sessionParts: string[] = [
-      `当前频道类型: ${channelType === 'private' ? '私聊' : '群聊'}`,
-    ]
+    const sessionParts: string[] = [`当前频道类型: ${channelType === 'private' ? '私聊' : '群聊'}`]
     // Bot 自身 QQ 号和昵称（常驻上下文，让 Agent 知道自己是谁）
     if (botSelfId) {
       sessionParts.push(`你的 QQ 号: ${botSelfId}`)
@@ -400,6 +430,9 @@ export class SocialAppCompiler {
       sessionParts.push(`你的昵称: ${botNickname}`)
     }
     if (ownerQq) {
+      // 名称与称呼分开展示，避免 Agent 把"主人名字"和"你对主人的称呼"混为一谈
+      sessionParts.push(`主人名称: ${ownerName}`)
+      sessionParts.push(`你对主人的称呼: ${ownerAppellation}`)
       sessionParts.push(`主人 QQ: ${ownerQq}`)
     }
     if (ownerHint) {
@@ -572,7 +605,6 @@ export class SocialAppCompiler {
 
     // ── 第一轮 LLM 调用（传入 tools 让 LLM 能发起 FC）──
     const completion = await this.llmService.chat(model, llmMessages, {
-      temperature: 0.7,
       tools: tools?.length ? tools : undefined,
     })
 
@@ -584,6 +616,10 @@ export class SocialAppCompiler {
 
     const assistantMsg = choice.message
     const toolCalls: ToolCall[] | undefined = assistantMsg.toolCalls
+
+    // 打印第一轮 LLM 原始回复（含 <think> 思考块），供终端调试查看内部思考过程
+    // 过滤后的最终回复在下方 [Social LLM回复] 日志打印
+    logger.info(`[Social LLM原始回复] ${truncate(assistantMsg.content ?? '', 4000)}`)
 
     // ── 无 API 级工具调用 → 检查文本格式兜底 ──
     // 某些模型（如 Qwen 系列）不支持 API 级 FC，会在回复文本中输出 <tool_call> 标签。
@@ -619,9 +655,7 @@ export class SocialAppCompiler {
           const imgUrls = extractImagesFromToolResult(result)
           if (imgUrls.length > 0) {
             textCollectedImages.push(...imgUrls)
-            logger.info(
-              `[Social Tool] ${tc.name} 返回 ${imgUrls.length} 张图片，将注入多模态输入`,
-            )
+            logger.info(`[Social Tool] ${tc.name} 返回 ${imgUrls.length} 张图片，将注入多模态输入`)
           }
 
           llmMessages.push({
@@ -645,10 +679,11 @@ export class SocialAppCompiler {
         }
 
         // 二次调用 LLM 生成最终回复（不传 tools，强制直接回复）
-        const completion2 = await this.llmService.chat(model, llmMessages, {
-          temperature: 0.7,
-        })
-        const reply = stripThinkingBlocks(completion2.choices[0]?.message?.content ?? '')
+        const completion2 = await this.llmService.chat(model, llmMessages, {})
+        const rawReply2 = completion2.choices[0]?.message?.content ?? ''
+        const reply = stripThinkingBlocks(rawReply2)
+        // 先打印原始回复（含 <think> 思考块），再打印过滤后的最终回复
+        logger.info(`[Social LLM原始回复] ${truncate(rawReply2, 4000)}`)
         logger.info(`[Social LLM回复] ${truncate(reply, 4000)}`)
         return reply
       }
@@ -657,6 +692,8 @@ export class SocialAppCompiler {
     // ── 无工具调用（API 级 + 文本格式都没有）→ 直接返回文本 ──
     if (!toolCalls?.length || !toolExecutor) {
       const reply = stripThinkingBlocks(assistantMsg.content ?? '')
+      // 原始回复已在第一轮调用后统一打印（[Social LLM原始回复]），
+      // 这里只打印过滤后的最终回复，避免相同内容重复输出
       logger.info(`[Social LLM回复] ${truncate(reply, 4000)}`)
       return reply
     }
@@ -677,7 +714,9 @@ export class SocialAppCompiler {
     let currentToolCalls: ToolCall[] | undefined = toolCalls
 
     for (let turn = 1; turn <= MAX_REACT_TURNS; turn++) {
-      logger.info(`[Social ReAct] 第 ${turn}/${MAX_REACT_TURNS} 轮: 执行 ${currentToolCalls!.length} 个工具`)
+      logger.info(
+        `[Social ReAct] 第 ${turn}/${MAX_REACT_TURNS} 轮: 执行 ${currentToolCalls!.length} 个工具`,
+      )
 
       // 逐个执行工具，将结果作为 tool 消息加入 messages
       // 同时收集工具返回的图片（social_read_image 工具会返回 images 字段）
@@ -691,9 +730,7 @@ export class SocialAppCompiler {
         } catch {
           args = {}
         }
-        logger.info(
-          `[Social Tool] 执行: ${toolName}, args=${truncate(JSON.stringify(args), 200)}`,
-        )
+        logger.info(`[Social Tool] 执行: ${toolName}, args=${truncate(JSON.stringify(args), 200)}`)
         const result = await toolExecutor(toolName, args)
         logger.info(`[Social Tool] 结果: ${truncate(result, 2000)}`)
 
@@ -731,9 +768,8 @@ export class SocialAppCompiler {
       // 调用 LLM（最后一轮不传 tools，强制直接回复；非最后一轮继续传 tools）
       const isLastTurn = turn === MAX_REACT_TURNS
       const turnCompletion = await this.llmService.chat(model, llmMessages, {
-        temperature: 0.7,
         // 最后一轮不传 tools，强制 LLM 直接回复
-        tools: isLastTurn ? undefined : (tools?.length ? tools : undefined),
+        tools: isLastTurn ? undefined : tools?.length ? tools : undefined,
       })
 
       const turnMsg = turnCompletion.choices[0]?.message
@@ -742,6 +778,9 @@ export class SocialAppCompiler {
         return ''
       }
 
+      // 打印本轮 LLM 原始回复（含 <think> 思考块），供终端调试查看思考过程
+      logger.info(`[Social ReAct] 第 ${turn} 轮原始回复: ${truncate(turnMsg.content ?? '', 4000)}`)
+
       // 检查是否还有工具调用
       const nextToolCalls: ToolCall[] | undefined = turnMsg.toolCalls
 
@@ -749,7 +788,7 @@ export class SocialAppCompiler {
         // 没有更多工具调用，或已到最大轮次 → 返回最终回复
         const reply = stripThinkingBlocks(turnMsg.content ?? '')
         logger.info(
-          `[Social ReAct] 循环结束（第 ${turn} 轮），最终回复: ${truncate(reply, 4000)}`,
+          `[Social ReAct] 第 ${turn} 轮最终回复（已过滤思考块）: ${truncate(reply, 4000)}`,
         )
         return reply
       }

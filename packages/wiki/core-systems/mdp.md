@@ -1,6 +1,6 @@
 # MDP 系统 (Modular Dynamic Prompt)
 
-MDP (Modular Dynamic Prompt) 是 PeroCore 的核心提示词管理系统。它通过模块化、动态渲染和基于角色的覆盖机制，解决了长上下文遗忘、多角色管理复杂以及提示词难以维护的问题。
+MDP (Modular Dynamic Prompt) 是 infOS 的核心提示词管理系统。它通过模块化、动态渲染和基于角色的覆盖机制，解决了长上下文遗忘、多角色管理复杂以及提示词难以维护的问题。
 
 ## 1. 核心设计理念
 
@@ -12,7 +12,7 @@ MDP (Modular Dynamic Prompt) 是 PeroCore 的核心提示词管理系统。它�
 
 ## 2. 系统架构
 
-MDP 由 [manager.py](file:///c:/Users/Administrator/OneDrive/桌面/PeroCore/backend/services/mdp/manager.py) 中的 `MDPManager` 统一管理。
+MDP 由 [manager.py](file:///c:/Users/Administrator/OneDrive/桌面/infOS/backend/services/mdp/manager.py) 中的 `MDPManager` 统一管理。
 
 <MDPGraph />
 

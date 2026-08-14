@@ -19,12 +19,14 @@
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": false,
     "paths": {
-      "@perocore/shared": ["./packages/shared/src"],
-      "@perocore/shared/*": ["./packages/shared/src/*"],
-      "@perocore/backend": ["./packages/backend/src"],
-      "@perocore/backend/*": ["./packages/backend/src/*"],
-      "@perocore/frontend": ["./packages/frontend/src"],
-      "@perocore/frontend/*": ["./packages/frontend/src/*"]
+      "@infos/shared": ["./packages/shared/src"],
+      "@infos/shared/*": ["./packages/shared/src/*"],
+      "@infos/backend": ["./packages/backend/src"],
+      "@infos/backend/*": ["./packages/backend/src/*"],
+      "@infos/frontend": ["./packages/frontend/src"],
+      "@infos/frontend/*": ["./packages/frontend/src/*"],
+      "@infos/social": ["./packages/apps/social"],
+      "@infos/social/*": ["./packages/apps/social/*"]
     }
   },
   "exclude": ["node_modules", "dist", "dist-electron"]

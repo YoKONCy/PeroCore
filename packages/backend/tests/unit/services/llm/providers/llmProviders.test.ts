@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { OpenAiProvider } from '@perocore/backend/services/llm/providers/openaiProvider'
-import { GeminiProvider } from '@perocore/backend/services/llm/providers/geminiProvider'
-import { AnthropicProvider } from '@perocore/backend/services/llm/providers/anthropicProvider'
-import type { ChatMessage, ChatOptions, ProviderConfig } from '@perocore/backend/services/llm/types'
+import { OpenAiProvider } from '@infos/backend/services/llm/providers/openaiProvider'
+import { GeminiProvider } from '@infos/backend/services/llm/providers/geminiProvider'
+import { AnthropicProvider } from '@infos/backend/services/llm/providers/anthropicProvider'
+import type { ChatMessage, ChatOptions, ProviderConfig } from '@infos/backend/services/llm/types'
 
 const baseConfig: ProviderConfig = {
   apiKey: 'test-key',
@@ -102,6 +102,7 @@ describe('OpenAiProvider', () => {
       temperature: 0.2,
       topP: 0.9,
       maxTokens: 128,
+      reasoningEffort: 'high',
       toolChoice: 'auto',
       responseFormat: { type: 'json_object' },
       stop: ['END'],
@@ -134,10 +135,11 @@ describe('OpenAiProvider', () => {
           },
           { role: 'tool', content: '结果', tool_call_id: 'call-old' },
         ],
-        temperature: 0.2,
         stream: false,
+        temperature: 0.2,
         top_p: 0.9,
         max_tokens: 128,
+        reasoning_effort: 'high',
         tools: opts.tools,
         tool_choice: 'auto',
         response_format: { type: 'json_object' },
@@ -164,6 +166,18 @@ describe('OpenAiProvider', () => {
       ],
       usage: { promptTokens: 2, completionTokens: 3, totalTokens: 5 },
     })
+  })
+
+  it('未配置生成参数时不应向 OpenAI 请求体传入', async () => {
+    vi.mocked(fetch).mockResolvedValue(jsonResponse({ choices: [] }))
+    const provider = new OpenAiProvider(baseConfig)
+
+    await provider.chat([{ role: 'user', content: 'hi' }], {})
+
+    const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body))
+    expect(body).not.toHaveProperty('temperature')
+    expect(body).not.toHaveProperty('top_p')
+    expect(body).not.toHaveProperty('max_tokens')
   })
 
   it('应当解析 SSE 文本、工具调用和 usage 增量', async () => {
@@ -429,6 +443,7 @@ describe('AnthropicProvider', () => {
       {
         temperature: 0.3,
         topP: 0.7,
+        maxTokens: 128,
         stop: ['END'],
         toolChoice: { type: 'function', function: { name: 'lookup' } },
         tools: [
@@ -450,7 +465,7 @@ describe('AnthropicProvider', () => {
     })
     expect(body).toMatchObject({
       model: 'test-model',
-      max_tokens: 256,
+      max_tokens: 128,
       temperature: 0.3,
       stream: false,
       system: '系统',
@@ -492,6 +507,34 @@ describe('AnthropicProvider', () => {
       ],
       usage: { promptTokens: 4, completionTokens: 5, totalTokens: 9 },
     })
+  })
+
+  it('未配置可选生成参数时 Anthropic 仅保留必填最大输出 Token', async () => {
+    vi.mocked(fetch).mockResolvedValue(jsonResponse({ content: [], stop_reason: 'end_turn' }))
+    const provider = new AnthropicProvider(baseConfig)
+
+    await provider.chat([{ role: 'user', content: 'hi' }], {})
+
+    const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body))
+    expect(body.max_tokens).toBe(4096)
+    expect(body).not.toHaveProperty('temperature')
+    expect(body).not.toHaveProperty('top_p')
+  })
+
+  it('应当将 Anthropic 推理强度映射为思考预算', async () => {
+    vi.mocked(fetch).mockResolvedValue(jsonResponse({ content: [], stop_reason: 'end_turn' }))
+    const provider = new AnthropicProvider(baseConfig)
+
+    await provider.chat([{ role: 'user', content: 'hi' }], {
+      reasoningEffort: 'high',
+      temperature: 0.2,
+      maxTokens: 2048,
+    })
+
+    const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body))
+    expect(body.thinking).toEqual({ type: 'enabled', budget_tokens: 8192 })
+    expect(body.max_tokens).toBe(8193)
+    expect(body).not.toHaveProperty('temperature')
   })
 
   it('应当解析 Anthropic SSE 事件', async () => {

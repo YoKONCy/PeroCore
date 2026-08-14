@@ -1,11 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  RegistryToolExecutor,
-  type HookEmitter,
-} from '@perocore/backend/services/agent/toolExecutor'
-import { ToolRegistry } from '@perocore/backend/services/agent/toolRegistry'
-import type { CapabilityGate } from '@perocore/backend/capabilities/capabilityGate'
-import type { SkillLoader } from '@perocore/backend/capabilities/skillLoader'
+import { RegistryToolExecutor, type HookEmitter } from '@infos/backend/services/agent/toolExecutor'
+import { ToolRegistry } from '@infos/backend/services/agent/toolRegistry'
+import type { CapabilityGate } from '@infos/backend/capabilities/capabilityGate'
+import type { SkillLoader } from '@infos/backend/capabilities/skillLoader'
+import { PolicyEngine } from '@infos/backend/services/execution/policyEngine'
+import { ApprovalService } from '@infos/backend/services/execution/approvalService'
 
 function createRegistry() {
   const registry = new ToolRegistry()
@@ -60,7 +59,51 @@ describe('RegistryToolExecutor', () => {
     expect(result.output).toContain('没有权限')
   })
 
-  it('应当通过 Hook 修改参数并在成功后触发 after Hook', async () => {
+  it('即使旧 Thread 禁用列表含系统协议工具也应继续执行', async () => {
+    const registry = new ToolRegistry()
+    const finishHandler = vi.fn(async () => JSON.stringify({ success: true }))
+    registry.register(
+      { name: 'finish_task', description: '完成任务', parameters: {} },
+      finishHandler,
+    )
+    const capabilityGate = {
+      isToolAllowed: vi.fn().mockReturnValue(true),
+    } as unknown as CapabilityGate
+    const executor = new RegistryToolExecutor(registry, capabilityGate)
+
+    const result = await executor.execute('finish_task', { reply: '完成' }, 'desktop', {
+      agentId: 'pero',
+      threadId: 'thread-1',
+      channel: 'desktop',
+      disabledTools: ['finish_task', 'load_skill'],
+    })
+
+    expect(finishHandler).toHaveBeenCalledOnce()
+    expect(result.isError).toBe(false)
+    expect(result.shouldTerminate).toBe(true)
+  })
+
+  it('应当在任何内置捷径和 CapabilityGate 之前拒绝本会话禁用工具', async () => {
+    const { registry, handler } = createRegistry()
+    const capabilityGate = {
+      isToolAllowed: vi.fn().mockReturnValue(true),
+    } as unknown as CapabilityGate
+    const executor = new RegistryToolExecutor(registry, capabilityGate)
+
+    const result = await executor.execute('demo.run', {}, 'desktop', {
+      agentId: 'pero',
+      threadId: 'thread-1',
+      channel: 'desktop',
+      disabledTools: ['demo.run'],
+    })
+
+    expect(capabilityGate.isToolAllowed).not.toHaveBeenCalled()
+    expect(handler).not.toHaveBeenCalled()
+    expect(result).toMatchObject({ isError: true, shouldTerminate: false })
+    expect(result.output).toContain('已在本会话中禁用')
+  })
+
+  it('应当允许会话未禁用且 CapabilityGate 授权的工具', async () => {
     const { registry, handler } = createRegistry()
     const capabilityGate = {
       isToolAllowed: vi.fn().mockReturnValue(true),
@@ -97,6 +140,39 @@ describe('RegistryToolExecutor', () => {
       isError: false,
     })
     expect(result).toMatchObject({ output: '执行结果', isError: false, shouldTerminate: false })
+  })
+
+  it('审批允许后恢复原工具调用并向 Agent 回传附言', async () => {
+    const { registry, handler } = createRegistry()
+    const capabilityGate = {
+      isToolAllowed: vi.fn().mockReturnValue(true),
+      getToolPermission: vi.fn().mockReturnValue({
+        toolName: 'demo.run',
+        resourceScope: { scope: 'system', allowedRoots: [], deniedPaths: [] },
+        requiresApproval: true,
+      }),
+    } as unknown as CapabilityGate
+    const approvals = new ApprovalService()
+    const executor = new RegistryToolExecutor(registry, capabilityGate, null, null, {
+      agentId: 'pero',
+      channel: 'desktop',
+      sessionId: 'approval-thread',
+    })
+    executor.setPolicyRuntime(new PolicyEngine(), approvals)
+
+    const execution = executor.execute('demo.run', { value: 1 }, 'desktop')
+    await vi.waitFor(() => expect(approvals.list({ status: 'pending' })).toHaveLength(1))
+    const request = approvals.list({ status: 'pending' })[0]!
+    approvals.resolve(request.id, 'allow_once', '请谨慎执行')
+    const result = await execution
+
+    expect(handler).toHaveBeenCalledTimes(1)
+    expect(result).toMatchObject({
+      output: '执行结果',
+      isError: false,
+      approvalObservation: '【用户审批】决策：allow_once；附言：请谨慎执行',
+    })
+    expect(approvals.get(request.id)?.status).toBe('consumed')
   })
 
   it('应当处理未知工具、执行异常与长输出截断', async () => {

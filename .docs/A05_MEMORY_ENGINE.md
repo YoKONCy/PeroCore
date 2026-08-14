@@ -73,6 +73,16 @@ store.enableAutoCompaction(300);
 ### 6.2 Entity (TDB Feature)
 存储知识节点：`name`, `type(person/topic/location)`, `synonyms`.
 
+## 7. AIOS 记忆边界与来源追溯
+
+完整的 Candidate / Gate / CanonicalMemory 模型见 [A09_AIOS_ARCHITECTURE](./A09_AIOS_ARCHITECTURE.md#5-long-term-memory候选门控与来源)。PEDSA 管线必须遵守以下约束：
+
+1. 长期记忆归属 `agentId`，不归属 Session 或 Thread；Thread 仅提供可追溯来源。
+2. Scorer 必须至少按 `agentId + threadId + channel` 分批，禁止混合不同 Thread 的原始消息进行提炼。
+3. MemoryCandidate 先经过去重、冲突/时间关系判断和重要性门控，再写入 CanonicalMemory；低价值信息保留在 Thread 事实流。
+4. CanonicalMemory 必须保留 `originThreadId`、来源消息、channel、平台和创建方式等 Provenance。
+5. `main`、`social`、`diary` TriviumDB Store 按 Agent 隔离；Mmap 模式同步时须将 `.tdb/.vec/.flush_ok` 视作一致性组，同时保留 WAL 恢复能力。
+
 ---
 
-*本文档由 Carola 整理，适用于 PeroCore-TS 记忆引擎架构规范。*
+*本文档由 Carola 整理，适用于 infOS-TS 记忆引擎架构规范。*

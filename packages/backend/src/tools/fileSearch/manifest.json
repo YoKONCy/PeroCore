@@ -2,7 +2,7 @@
   "id": "file-search",
   "name": "文件搜索",
   "version": "1.0.0",
-  "author": "PeroCore Team",
+  "author": "infOS Team",
   "description": "按文件名搜索文件。Windows 优先使用 Everything (es.exe)，跨平台降级到 fd 或 Node.js 递归搜索。",
   "type": "tool",
   "entry": "index.ts",
@@ -12,11 +12,15 @@
   "toolDefinition": {
     "name": "search_files",
     "description": "按文件名搜索文件。在整台计算机上查找文件位置。(要搜索文件内容，请用 code_search)",
+    "display": { "label": "搜索文件", "icon": "search", "color": "purple", "style": "search" },
     "parameters": {
       "type": "object",
       "properties": {
         "query": { "type": "string", "description": "文件名关键词 (支持通配符)" },
-        "directory": { "type": "string", "description": "搜索目录 (可选，默认 workspace；仅 desktop 通道可指定其他目录)" },
+        "directory": {
+          "type": "string",
+          "description": "搜索目录 (可选，默认用户主目录；可指定本机任意现有目录)"
+        },
         "limit": { "type": "number", "description": "返回最大结果数 (默认 50)" }
       },
       "required": ["query"]

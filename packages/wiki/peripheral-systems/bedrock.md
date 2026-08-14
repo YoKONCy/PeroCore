@@ -1,10 +1,10 @@
 # Bedrock 3D 渲染引擎 (Bedrock 3D Engine)
 
-PeroCore 使用了一套自研的、基于 **Three.js** 的高性能 3D 渲染引擎，专门用于解析和驱动 **Minecraft Bedrock (基岩版)** 格式的模型与动画。
+infOS 使用了一套自研的、基于 **Three.js** 的高性能 3D 渲染引擎，专门用于解析和驱动 **Minecraft Bedrock (基岩版)** 格式的模型与动画。
 
 ## 🎮 3D 视窗演示 (Interactive Demo)
 
-这是一个运行在浏览器中的 **PeroCore 3D 渲染引擎** 的实时演示。
+这是一个运行在浏览器中的 **infOS 3D 渲染引擎** 的实时演示。
 
 <ClientOnly>
   <BedrockDemo />
@@ -22,7 +22,7 @@ PeroCore 使用了一套自研的、基于 **Three.js** 的高性能 3D 渲染�
 
 ## 🕹️ 桌面端操作指南 (Desktop Usage)
 
-在 PeroCore 桌面端 中，Pet3DView 是用户与 AI 交互的主要窗口。
+在 infOS 桌面端 中，Pet3DView 是用户与 AI 交互的主要窗口。
 
 ### 1. UI 组件概览
 
@@ -50,7 +50,7 @@ PeroCore 使用了一套自研的、基于 **Three.js** 的高性能 3D 渲染�
 
 ### 3. 语音交互 (Voice Interaction)
 
-PeroCore 支持两种语音模式：
+infOS 支持两种语音模式：
 
 1.  **VAD (自动感应)**: 自动检测环境音量，当你说话时自动录音，说完自动发送。
 2.  **PTT (按住说话)**: 屏幕上会出现一个悬浮的麦克风图标，按住说话，松开发送。
@@ -61,7 +61,7 @@ PeroCore 支持两种语音模式：
 
 ### 1. 模型格式与安全性
 
-为了保护创作者的版权并提高加载性能，PeroCore 采用了自研的 **`.Pero` 加密模型格式**。
+为了保护创作者的版权并提高加载性能，infOS 采用了自研的 **`.Pero` 加密模型格式**。
 
 - **`.Pero` 格式**: 这是一个经过加密和压缩的容器格式，内部封装了几何数据、纹理和私有元数据。
 - **原生闭源模块 (Rust Native)**: 模型解密与核心解析逻辑运行在 **Rust 编写的闭源原生模块** 中。

@@ -7,14 +7,14 @@ hero:
   tagline: '官方Wiki文档'
   image:
     src: /hero.png
-    alt: PeroCore
+    alt: infOS
   actions:
     - theme: brand
       text: '快速开始'
       link: /guide/usage
     - theme: alt
       text: '了解更多'
-      link: https://github.com/YoKONCy/PeroCore
+      link: https://github.com/YoKONCy/infOS
 
 features:
   - title: ⚡ Electron + Python

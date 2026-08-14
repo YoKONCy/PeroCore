@@ -11,10 +11,13 @@
 import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import type { AppContext } from '../container'
+import path from 'node:path'
+import { mkdir } from 'node:fs/promises'
+import { getDatabasePath } from '../lib/env'
 import { addLogListener, getLogHistory } from '../lib/logBroadcaster'
 
 /** 应用版本号 (由 scripts/sync-version.ts 自动同步) */
-const APP_VERSION = '0.9.1-hotfix.2'
+const APP_VERSION = '0.9.2-rc1'
 
 export function createSystemRouter(ctx: AppContext) {
   const router = new Hono()
@@ -71,6 +74,23 @@ export function createSystemRouter(ctx: AppContext) {
         },
       },
     })
+  })
+
+  // POST /api/system/storage/sqlite-snapshot — 为云存档生成一致性 SQLite 快照
+  router.post('/storage/sqlite-snapshot', async (c) => {
+    const databasePath = getDatabasePath()
+    const snapshotPath = path.join(path.dirname(databasePath), 'cloud-cache', 'infos.db')
+    await mkdir(path.dirname(snapshotPath), { recursive: true })
+
+    // Drizzle better-sqlite3 暴露 $client；backup() 会在 WAL 模式下生成事务一致的单文件快照。
+    const client = (
+      ctx.db as unknown as { $client?: { backup: (target: string) => Promise<unknown> } }
+    ).$client
+    if (!client?.backup) {
+      return c.json({ code: 'ERROR', message: '当前数据库驱动不支持安全快照' }, 500)
+    }
+    await client.backup(snapshotPath)
+    return c.json({ code: 'OK', message: '数据库快照已生成', data: { path: snapshotPath } })
   })
 
   // POST /api/system/open-path — 通过系统打开路径 (P2-13)

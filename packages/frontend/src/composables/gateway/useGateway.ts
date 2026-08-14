@@ -24,6 +24,14 @@ export interface GatewayMessage {
   payload: Record<string, unknown>
 }
 
+const sharedGateway = createGatewayClient()
+
+export function useGateway(events: GatewayEvents = {}) {
+  const unsubscribeEvents = sharedGateway.subscribeEvents(events)
+  onUnmounted(unsubscribeEvents)
+  return { ...sharedGateway, disconnect: unsubscribeEvents }
+}
+
 export interface GatewayEnvelope extends GatewayMessage {
   id?: string
   sourceId?: string
@@ -87,7 +95,19 @@ const DEFAULT_RECONNECT: ReconnectConfig = {
   maxDelay: 30000,
 }
 
-export function useGateway(events: GatewayEvents = {}) {
+function createGatewayClient() {
+  const eventSubscribers = new Set<GatewayEvents>()
+  const events: GatewayEvents = {
+    onNotification: (data) => eventSubscribers.forEach((item) => item.onNotification?.(data)),
+    onTaskProgress: (data) => eventSubscribers.forEach((item) => item.onTaskProgress?.(data)),
+    onStreamEnd: (data) => eventSubscribers.forEach((item) => item.onStreamEnd?.(data)),
+    onStreamDelta: (data) => eventSubscribers.forEach((item) => item.onStreamDelta?.(data)),
+    onStateUpdate: (data) => eventSubscribers.forEach((item) => item.onStateUpdate?.(data)),
+    onToolStatus: (data) => eventSubscribers.forEach((item) => item.onToolStatus?.(data)),
+    onAudioChunk: (data) => eventSubscribers.forEach((item) => item.onAudioChunk?.(data)),
+    onVoiceState: (data) => eventSubscribers.forEach((item) => item.onVoiceState?.(data)),
+    onHeartbeat: () => eventSubscribers.forEach((item) => item.onHeartbeat?.()),
+  }
   const state = ref<GatewayState>('disconnected')
   const retryCount = ref(0)
   const lastError = ref<string | null>(null)
@@ -460,10 +480,13 @@ export function useGateway(events: GatewayEvents = {}) {
     }
   }
 
-  // ═══ 生命周期 ═══
-  onUnmounted(disconnect)
+  // 应用级共享客户端由应用生命周期管理，不随单个组件卸载而断开。
 
   return {
+    subscribeEvents(events: GatewayEvents): () => void {
+      eventSubscribers.add(events)
+      return () => eventSubscribers.delete(events)
+    },
     /** 连接状态 */
     state,
     /** WS 是否已连接 */

@@ -17,7 +17,7 @@ module.exports = {
   apps: [
     {
       // ── 后端服务 ──
-      name: 'perocore-backend',
+      name: 'infos-backend',
       script: 'packages/backend/dist/main.js',
 
       // 进程管理
@@ -30,8 +30,8 @@ module.exports = {
 
       // 日志（对齐 08_LOGGING_SPEC.md: 按天轮转 + 14 天清理）
       log_date_format: 'YYYY-MM-DD HH:mm:ss.SSS',
-      error_file: 'logs/perocore-error.log',
-      out_file: 'logs/perocore-out.log',
+      error_file: 'logs/infos-error.log',
+      out_file: 'logs/infos-out.log',
       merge_logs: true,
       log_type: 'json',
 

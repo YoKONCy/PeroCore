@@ -70,11 +70,14 @@ export function useAvatarScene(options: SceneOptions = {}): UseAvatarSceneReturn
     scene.value = s
 
     // 相机 — 使用较窄 FOV 以获得 2D 外观 (30-45)
+    // near/far 需贴近实际观察范围：模型约 47 单位高、相机约 90 单位远，
+    // 0.1/1000 的比例会让深度缓冲精度被大量浪费在无用区间，导致面部多层
+    // Mesh（眼睛/嘴/睫毛）出现 z-fighting 闪烁。
     const c = new THREE.PerspectiveCamera(
       fov,
       containerEl.clientWidth / containerEl.clientHeight,
-      0.1,
-      1000,
+      1,
+      200,
     )
     c.position.set(...cameraPosition)
     camera.value = c
@@ -85,7 +88,10 @@ export function useAvatarScene(options: SceneOptions = {}): UseAvatarSceneReturn
     // 限制最大 2 倍像素比，平衡清晰度与性能
     r.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     r.shadowMap.enabled = true
-    r.shadowMap.type = THREE.PCFSoftShadowMap
+    // 像素风体素模型用硬阴影（PCFShadowMap）而非软阴影（PCFSoftShadowMap）：
+    // 软阴影的 Poisson 采样核在发卡这类亚像素薄片（约 10 个阴影纹素）上会跨越
+    // 薄片两侧采样，产生随摆动抽搐的噪点条纹。硬阴影采样更小更稳定，也贴合像素风硬边。
+    r.shadowMap.type = THREE.PCFShadowMap
     canvasEl.appendChild(r.domElement)
     renderer.value = r
 
@@ -125,11 +131,31 @@ export function useAvatarScene(options: SceneOptions = {}): UseAvatarSceneReturn
     const dirLight = new THREE.DirectionalLight(0xffffff, 1.5)
     dirLight.position.set(20, 50, 30) // 更高的角度以获得更好的阴影
     dirLight.castShadow = true
-    dirLight.shadow.mapSize.width = 2048
-    dirLight.shadow.mapSize.height = 2048
-    dirLight.shadow.bias = -0.0001
+    // 分辨率提到 4096：发卡、裙摆内侧等小物件几何尺寸小，2048 的每个阴影纹素
+    // 相对它们太粗糙，容易产生自阴影条纹抽搐。
+    dirLight.shadow.mapSize.width = 4096
+    dirLight.shadow.mapSize.height = 4096
+    // DirectionalLight 的阴影相机默认只覆盖 ±5 的正交范围，而模型高约 47、宽约 30，
+    // 超出部分会被阴影贴图错误采样/裁剪，在衣服内侧等复杂区域形成“花屏错乱影子”。
+    // 这里按模型实际尺寸设置阴影相机范围，让 shadow map 精度集中在角色本体。
+    dirLight.shadow.camera.left = -40
+    dirLight.shadow.camera.right = 40
+    dirLight.shadow.camera.top = 40
+    dirLight.shadow.camera.bottom = -40
+    // 阴影相机的 near/far 需贴合模型到光源的实际深度（约 18~79）：
+    // 拉成 1/200 会把深度精度浪费在空白区间，导致小物件自阴影 acne；
+    // near 必须小于模型最近点，否则靠近光源的部分会被阴影相机裁掉。
+    dirLight.shadow.camera.near = 10
+    dirLight.shadow.camera.far = 90
+    dirLight.target.position.set(0, 0, 0)
+    // 负 bias 会把阴影采样拉向光源，加剧面部等自阴影区域的 shadow acne（闪烁）；
+    // 这里改为 0，并靠 normalBias 消除偏移伪影。
+    // normalBias 不能过大：发卡这类亚像素薄片（约 0.2 单位）会被 0.2 的偏移
+    // 直接把阴影“顶”到薄片另一侧，摆动时看起来像影子在发卡上抽搐。0.05 ≈ 2~3 个阴影纹素，够用且不会脱离。
+    dirLight.shadow.bias = 0
     dirLight.shadow.normalBias = 0.05 // 减少阴影伪影
     s.add(dirLight)
+    s.add(dirLight.target)
 
     // 补光灯（柔化刺眼的阴影）
     const fillLight = new THREE.DirectionalLight(0xffeedd, 0.5) // 暖色补光

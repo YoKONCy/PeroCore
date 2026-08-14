@@ -196,7 +196,7 @@ export class MemoryImporter {
         { role: 'system', content: systemPrompt },
         { role: 'user', content: chunk },
       ],
-      { temperature: 0.3, responseFormat: { type: 'json_object' } },
+      { responseFormat: { type: 'json_object' } },
     )
 
     const raw = completion.choices[0]?.message?.content

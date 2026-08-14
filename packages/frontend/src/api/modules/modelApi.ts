@@ -5,6 +5,8 @@
 
 import { apiClient } from '../client'
 
+export type ReasoningEffort = 'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
 /** 模型配置项 */
 export interface ModelConfigItem {
   id: string
@@ -13,7 +15,14 @@ export interface ModelConfigItem {
   modelId: string
   apiKey: string
   apiBase?: string
+  temperature: number | null
+  topP: number | null
+  maxTokens: number | null
+  reasoningEffort: ReasoningEffort | null
+  providerType?: string
   enableVision?: boolean
+  /** 声明模型支持原生音频输入（非 ASR） */
+  enableAudioInput?: boolean
   isDefault?: boolean
 }
 

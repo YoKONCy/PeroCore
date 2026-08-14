@@ -1,7 +1,7 @@
 /**
  * Extension Manager — 统一扩展管理器
  *
- * PeroCore 扩展系统的大脑。
+ * infOS 扩展系统的大脑。
  * 统一管理 Tool / Hook / Service 三种扩展类型。
  *
  * 职责：
@@ -80,7 +80,10 @@ export class ExtensionManager {
     this.discoveredSkillDirs = []
 
     // 1. 加载内置 Tool
-    const builtinResults = await this.loader.scanAndLoadAll(config.builtinToolsDir)
+    // 静态 ToolRegistry 清单与动态扩展同处 src/tools；显式跳过前者，避免重复注册和误报。
+    const builtinResults = await this.loader.scanAndLoadAll(config.builtinToolsDir, {
+      skipStaticBuiltinManifests: true,
+    })
     for (const result of builtinResults) {
       await this.registerLoadResult(result)
     }

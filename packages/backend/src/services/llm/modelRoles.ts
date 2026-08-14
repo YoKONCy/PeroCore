@@ -70,22 +70,6 @@ const TASK_CONFIG_KEYS: Record<ModelTaskSlot, string> = {
   social_scorer: 'model.task.social_scorer',
 }
 
-/**
- * 各任务槽的默认温度
- *
- * main/social_reply 需要创意表现力 → 较高温度
- * scorer/social_scorer/social_scheduler 需要结构化输出/决策 → 较低温度
- * reflection 需要稳定分析 → 最低温度
- */
-const TASK_DEFAULT_TEMPERATURE: Record<ModelTaskSlot, number> = {
-  main: 0.7,
-  scorer: 0.3,
-  reflection: 0.2,
-  social_reply: 0.7, // 社交回复是对外人格表现，需要创意
-  social_scheduler: 0.3, // 决策类，低温
-  social_scorer: 0.3, // 结构化输出，低温
-}
-
 // ─────────────────────────────────────────────
 // Resolver
 // ─────────────────────────────────────────────
@@ -107,10 +91,7 @@ export class ModelRoleResolver {
       const taskConfig = await this.loadFromDb(TASK_CONFIG_KEYS[task])
       if (taskConfig) {
         logger.debug(`使用 ${task} 任务模型: ${taskConfig.modelId}`)
-        return {
-          ...taskConfig,
-          temperature: taskConfig.temperature ?? TASK_DEFAULT_TEMPERATURE[task],
-        }
+        return taskConfig
       }
     }
 
@@ -120,20 +101,14 @@ export class ModelRoleResolver {
       if (task !== 'main') {
         logger.debug(`${task} 未配置专用模型, 回退到主模型: ${mainConfig.modelId}`)
       }
-      return {
-        ...mainConfig,
-        temperature: mainConfig.temperature ?? TASK_DEFAULT_TEMPERATURE[task],
-      }
+      return mainConfig
     }
 
     // 3. 环境变量兜底
     const envConfig = this.loadFromEnv()
     if (envConfig) {
       logger.debug(`${task} 从环境变量加载: ${envConfig.modelId}`)
-      return {
-        ...envConfig,
-        temperature: TASK_DEFAULT_TEMPERATURE[task],
-      }
+      return envConfig
     }
 
     logger.warn(`${task} 无可用模型配置`)
@@ -202,8 +177,11 @@ export class ModelRoleResolver {
         apiKey,
         apiBase,
         temperature: row.temperature ?? undefined,
+        topP: row.topP ?? undefined,
         maxTokens: row.maxTokens ?? undefined,
+        reasoningEffort: (row.reasoningEffort as ModelConfig['reasoningEffort']) ?? undefined,
         enableVision: row.enableVision ?? false,
+        enableAudioInput: row.enableAudioInput ?? false,
       }
     } catch (err) {
       logger.warn(`加载模型配置失败 (key=${configKey}): ${err}`)
@@ -223,6 +201,7 @@ export class ModelRoleResolver {
       apiKey,
       apiBase: process.env.PERO_LLM_API_BASE,
       enableVision: false,
+      enableAudioInput: false,
     }
   }
 }

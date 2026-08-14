@@ -101,11 +101,11 @@ function hide() {
   padding: 4px 10px;
   font-size: 12px;
   font-weight: 700;
-  font-family: var(--font-pixel), monospace;
-  color: var(--color-text-primary);
-  background: var(--color-bg-primary);
-  border: 2px solid var(--color-sky-hover);
-  box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.1);
+  font-family: var(--ui-font-pixel);
+  color: var(--ui-text-primary);
+  background: var(--dash-panel-elevated);
+  border: 2px solid var(--ui-accent-sky);
+  box-shadow: var(--ui-shadow-md);
   pointer-events: none;
   user-select: none;
   white-space: nowrap;

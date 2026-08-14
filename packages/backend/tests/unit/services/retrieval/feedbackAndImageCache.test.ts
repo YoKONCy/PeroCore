@@ -3,13 +3,13 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('@perocore/nit-runtime', () => ({
+vi.mock('@infos/nit-runtime', () => ({
   minGruTrain: vi.fn(() => 0.1234),
 }))
 
-import { RetrievalFeedback } from '@perocore/backend/services/retrieval/retrievalFeedback'
-import { ImageCacheManager } from '@perocore/backend/services/social/imageCacheManager'
-import { minGruTrain } from '@perocore/nit-runtime'
+import { RetrievalFeedback } from '@infos/backend/services/retrieval/retrievalFeedback'
+import { ImageCacheManager } from '@infos/social/runtime/imageCacheManager'
+import { minGruTrain } from '@infos/nit-runtime'
 
 describe('RetrievalFeedback', () => {
   it('应当根据记忆和回复的 Jaccard 相似度生成正负反馈信号', () => {
@@ -145,7 +145,7 @@ describe('ImageCacheManager', () => {
   const originalFetch = globalThis.fetch
 
   beforeEach(() => {
-    root = join(tmpdir(), `perocore-image-cache-${Date.now()}-${Math.random()}`)
+    root = join(tmpdir(), `infos-image-cache-${Date.now()}-${Math.random()}`)
   })
 
   afterEach(() => {

@@ -14,6 +14,7 @@
  */
 
 import type { BuiltinTool } from '../index'
+import { toolFailure, toolSuccess } from '../../services/execution/toolResult'
 import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('FinishTask')
@@ -23,7 +24,7 @@ const logger = createLogger('FinishTask')
 // ─────────────────────────────────────────────
 
 interface PetStateUpdater {
-  update(agentId: string, data: PetStateUpdateData): Promise<void>
+  update(agentId: string, data: PetStateUpdateData): Promise<string | null>
 }
 
 interface PetStateUpdateData {
@@ -82,7 +83,19 @@ export const finishTaskTool: BuiltinTool = {
   name: 'finish_task',
 
   async execute(args, ctx) {
-    const summary = (args.summary as string) ?? '任务已完成'
+    // reply 是「完成任务后交给用户的最终回复正文」，必填。
+    // 缺失时返回失败并提示模型补全，ReAct 会把它作为工具错误反馈给模型重试。
+    const reply = typeof args.reply === 'string' ? args.reply.trim() : ''
+    if (!reply) {
+      logger.warn(`finish_task 缺少必填参数 reply (agent=${ctx.agentId})`)
+      return toolFailure(
+        'FINISH_TASK_NO_REPLY',
+        'finish_task 必须携带 reply 参数：即完成任务后要交给用户的最终回复正文。' +
+          '请把回复内容完整写入 reply 后重新调用，不要留空。',
+      )
+    }
+
+    const summary = (args.summary as string) ?? reply
     const status = (args.status as string) ?? 'done'
 
     // ── 角色状态更新 ──
@@ -111,7 +124,7 @@ export const finishTaskTool: BuiltinTool = {
 
     if (hasStateUpdate && _petStateUpdater) {
       try {
-        await _petStateUpdater.update(ctx.agentId, {
+        const textExpiresAt = await _petStateUpdater.update(ctx.agentId, {
           mood,
           vibe,
           mind,
@@ -133,6 +146,7 @@ export const finishTaskTool: BuiltinTool = {
           if (Object.keys(clickMessages).length > 0) payload.click_messages = clickMessages
           if (idleMsgs) payload.idle_messages = idleMsgs
           if (backMsgs) payload.back_messages = backMsgs
+          if (textExpiresAt) payload.text_expires_at = textExpiresAt
 
           await _gatewayBroadcast('state_update', payload).catch((err) => {
             logger.warn(`state_update 广播失败: ${err}`)
@@ -148,6 +162,7 @@ export const finishTaskTool: BuiltinTool = {
     }
 
     // finish_task 的实际终止效果由 ReAct Loop 层处理 (检测到此工具调用后停止循环)
-    return JSON.stringify({ finished: true, status, summary })
+    // reply 为交付给用户的最终回复，随结果一起返回供日志/调试追踪。
+    return toolSuccess(JSON.stringify({ finished: true, status, summary, reply }))
   },
 }

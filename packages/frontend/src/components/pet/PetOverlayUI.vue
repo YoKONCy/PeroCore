@@ -17,6 +17,11 @@
  */
 import { ref, computed, onMounted, onUnmounted, watch, type ComponentPublicInstance } from 'vue'
 import { invoke } from '../../utils/ipcAdapter'
+import {
+  AVATAR_MODEL_STORAGE_KEY,
+  DEFAULT_AVATAR_MANIFEST_PATH,
+  DEFAULT_AVATAR_NAME,
+} from '../avatar/lib/avatarDefaults'
 import PixelIcon from '../pixel/PixelIcon.vue'
 
 interface Props {
@@ -27,7 +32,7 @@ interface Props {
   isThinking?: boolean
   voiceMode?: 'off' | 'vad' | 'ptt'
   isRecording?: boolean
-  audioLevel?: number
+  displayMode?: 'bubble' | 'lyric'
   /** BedrockAvatar 组件引用 (用于外观菜单) */
   avatarRef?: ComponentPublicInstance | null
 }
@@ -40,7 +45,7 @@ const props = withDefaults(defineProps<Props>(), {
   isThinking: false,
   voiceMode: 'off',
   isRecording: false,
-  audioLevel: 0,
+  displayMode: 'bubble',
   avatarRef: null,
 })
 
@@ -51,7 +56,11 @@ const emit = defineEmits<{
   (e: 'voice-mode', mode: 'off' | 'vad' | 'ptt'): void
   (e: 'ptt-down'): void
   (e: 'ptt-up'): void
-  (e: 'model-change', manifestPath: string): void
+  (
+    e: 'model-change',
+    manifestPath: string,
+    complete: (success: boolean, message?: string) => void,
+  ): void
   (e: 'display-mode-change', mode: 'bubble' | 'lyric'): void
 }>()
 
@@ -136,10 +145,6 @@ function reloadPet() {
   window.location.reload()
 }
 
-function openChatWindow() {
-  invoke('open-chat-window').catch(() => {})
-}
-
 function openDashboard() {
   // 注意：IPC 通道是 open-dashboard-window 不是 open-dashboard
   invoke('open-dashboard-window').catch(() => {})
@@ -168,15 +173,9 @@ function cycleVoiceMode() {
   emit('voice-mode', modes[(idx + 1) % modes.length] ?? 'off')
 }
 
-// ── 显示模式 (气泡/歌词) + localStorage 持久化 ──
-const displayMode = ref(
-  (typeof localStorage !== 'undefined' && localStorage.getItem('ppc.display_mode')) || 'bubble',
-)
-
+// ── 显示模式 (气泡/歌词) ──
 function toggleDisplayMode() {
-  displayMode.value = displayMode.value === 'bubble' ? 'lyric' : 'bubble'
-  localStorage.setItem('ppc.display_mode', displayMode.value)
-  emit('display-mode-change', displayMode.value as 'bubble' | 'lyric')
+  emit('display-mode-change', props.displayMode === 'bubble' ? 'lyric' : 'bubble')
 }
 
 // ── 外观菜单: 获取 avatar 数据 ──
@@ -209,6 +208,20 @@ function updateAvatarClothing() {
   }
 }
 
+/** 显式切换单个服装部件开关：优先走组件暴露的 setter，确保写入模型状态并持久化。 */
+function toggleClothingPart(id: string, checked: boolean): void {
+  const av = props.avatarRef as Record<string, unknown> | null
+  const setter = av?.setClothingPart as ((partId: string, value: boolean) => void) | undefined
+  if (typeof setter === 'function') {
+    setter(id, checked)
+    return
+  }
+  // 兜底：直接写暴露的响应式状态，再手动应用。
+  const state = av?.clothingState as Record<string, boolean> | undefined
+  if (state) state[id] = checked
+  updateAvatarClothing()
+}
+
 // ── 角色选择网格 (v1: scan-3d-models IPC) ──
 interface ModelInfo {
   name: string
@@ -217,8 +230,10 @@ interface ModelInfo {
 }
 
 const availableModels = ref<ModelInfo[]>([])
-const currentModelName = ref('')
+const currentModelName = ref(DEFAULT_AVATAR_NAME)
+const switchingModelName = ref('')
 const isLoadingModels = ref(false)
+const modelSwitchError = ref('')
 
 /** 扫描可用 3D 模型 */
 async function scanModels() {
@@ -228,25 +243,42 @@ async function scanModels() {
     const models = (await invoke('scan-3d-models')) as ModelInfo[]
     if (Array.isArray(models)) {
       availableModels.value = models
+      const selectedPath =
+        localStorage.getItem(AVATAR_MODEL_STORAGE_KEY) || DEFAULT_AVATAR_MANIFEST_PATH
+      const selectedModel = models.find((model) => model.path === selectedPath)
+      currentModelName.value = selectedModel?.name || DEFAULT_AVATAR_NAME
+      modelSwitchError.value = ''
     }
   } catch {
-    // 扫描失败不影响核心功能
+    modelSwitchError.value = '模型列表扫描失败，请重新扫描'
   } finally {
     isLoadingModels.value = false
   }
 }
 
 /** 选择模型 */
-async function selectModel(model: ModelInfo) {
-  try {
-    const loadPath = (await invoke('get-model-load-path', model)) as string
-    if (loadPath) {
-      currentModelName.value = model.name
-      emit('model-change', loadPath)
-    }
-  } catch {
-    // 模型加载失败
+function selectModel(model: ModelInfo) {
+  if (switchingModelName.value) return
+
+  // scan-3d-models 已返回可直接 fetch 的最终入口 URL，无需再次绕行 IPC。
+  const loadPath = model.path || DEFAULT_AVATAR_MANIFEST_PATH
+  if (!loadPath) {
+    modelSwitchError.value = '该模型没有可用的加载入口'
+    return
   }
+
+  modelSwitchError.value = ''
+  switchingModelName.value = model.name
+  emit('model-change', loadPath, (success, message) => {
+    switchingModelName.value = ''
+    if (!success) {
+      modelSwitchError.value = message || `${model.name} 加载失败`
+      return
+    }
+
+    currentModelName.value = model.name
+    localStorage.setItem(AVATAR_MODEL_STORAGE_KEY, loadPath)
+  })
 }
 
 // 外观菜单打开时扫描模型
@@ -255,9 +287,6 @@ watch(showAppearanceMenu, (v: boolean) => {
     scanModels()
   }
 })
-
-// ── 暴露给父组件 ──
-defineExpose({ displayMode })
 </script>
 
 <template>
@@ -363,11 +392,8 @@ defineExpose({ displayMode })
         >
           <PixelIcon :name="displayMode === 'bubble' ? 'sparkle' : 'quote'" size="sm" />
         </button>
-        <button class="tool-btn" title="聊天" @click.stop="openChatWindow">
-          <PixelIcon name="chat" size="sm" />
-        </button>
-        <button class="tool-btn" title="面板" @click.stop="openDashboard">
-          <PixelIcon name="settings" size="sm" />
+        <button class="tool-btn" title="打开综合面板" @click.stop="openDashboard">
+          <PixelIcon name="layout" size="sm" />
         </button>
         <button class="tool-btn" title="最小化到托盘" @click.stop="minimizeToTray">
           <PixelIcon name="minus" size="sm" />
@@ -407,6 +433,7 @@ defineExpose({ displayMode })
         <div
           v-if="showAppearanceMenu && showUI"
           class="appearance-menu"
+          style="-webkit-app-region: no-drag"
           @mouseenter="emit('ui-enter')"
         >
           <div class="menu-header">
@@ -417,14 +444,19 @@ defineExpose({ displayMode })
           <!-- 角色选择网格 (v1 还原: scan-3d-models) -->
           <div v-if="availableModels.length > 0" class="menu-section">
             <div class="menu-label">角色选择</div>
+            <div v-if="modelSwitchError" class="model-switch-error">{{ modelSwitchError }}</div>
             <div class="model-grid">
               <button
                 v-for="model in availableModels"
                 :key="model.name"
                 class="model-card"
-                :class="{ active: currentModelName === model.name }"
+                :class="{
+                  active: currentModelName === model.name,
+                  loading: switchingModelName === model.name,
+                }"
+                :disabled="!!switchingModelName"
                 :title="model.name"
-                @click="selectModel(model)"
+                @click.stop="selectModel(model)"
               >
                 <div class="model-thumb">
                   <img
@@ -435,7 +467,9 @@ defineExpose({ displayMode })
                   />
                   <span v-else class="model-thumb-icon"><PixelIcon name="user" size="xl" /></span>
                 </div>
-                <span class="model-name">{{ model.name }}</span>
+                <span class="model-name">
+                  {{ switchingModelName === model.name ? '加载中…' : model.name }}
+                </span>
               </button>
             </div>
             <button
@@ -460,9 +494,9 @@ defineExpose({ displayMode })
             <div class="menu-label">服装部件</div>
             <label v-for="btn in avatarFeatureButtons" :key="btn.id" class="voxel-checkbox">
               <input
-                v-model="avatarClothingState[btn.id]"
                 type="checkbox"
-                @change="updateAvatarClothing"
+                :checked="avatarClothingState[btn.id] === true"
+                @change="toggleClothingPart(btn.id, ($event.target as HTMLInputElement).checked)"
               />
               <span class="checkmark" />
               {{ btn.label }}
@@ -945,6 +979,16 @@ defineExpose({ displayMode })
   text-transform: uppercase;
 }
 
+.model-switch-error {
+  margin-bottom: 6px;
+  padding: 5px 7px;
+  color: #ffb4b4;
+  background: rgba(155, 40, 40, 0.3);
+  border: 1px solid rgba(255, 120, 120, 0.45);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 /* 体素复选框 */
 .voxel-checkbox {
   display: flex;
@@ -1047,6 +1091,17 @@ defineExpose({ displayMode })
   border-color: #ff88aa;
   background: rgba(255, 136, 170, 0.15);
   color: #ff88aa;
+}
+
+.model-card.loading {
+  border-color: #88ccff;
+  color: #cceeff;
+  cursor: wait;
+}
+
+.model-card:disabled:not(.loading) {
+  opacity: 0.55;
+  cursor: wait;
 }
 
 .model-thumb {

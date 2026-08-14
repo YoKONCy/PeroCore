@@ -11,7 +11,7 @@
 import { apiClient } from '../client'
 
 /** Thread 频道类型 */
-export type ThreadChannel = 'desktop' | 'companion'
+export type ThreadChannel = 'desktop' | 'group' | 'social'
 
 /** Thread 摘要信息 */
 export interface ThreadInfo {
@@ -34,8 +34,23 @@ export interface ThreadInfo {
    * null 表示使用 DEFAULT_POLICIES 中该 channel 的默认策略
    */
   contextPolicy: string | null
+  /** 本会话明确禁用的工具名。 */
+  disabledTools: string[]
   createdAt: string
   updatedAt: string
+}
+
+/** 消息附件 */
+export interface ThreadAttachmentInfo {
+  id: string
+  threadId: string
+  messageId: number | null
+  kind: 'image' | 'text'
+  originalName: string
+  mimeType: string
+  sizeBytes: number
+  contextPolicy: 'once'
+  status: string
 }
 
 /** Thread 内单条消息 */
@@ -61,6 +76,7 @@ export interface ThreadMessageInfo {
   metadataJson: string
   /** 消息时间戳（ISO 字符串，后端字段名为 timestamp） */
   timestamp: string
+  attachments?: ThreadAttachmentInfo[]
 }
 
 /** Thread 列表分页数据 */
@@ -76,6 +92,32 @@ export interface ThreadDetailData {
   thread: ThreadInfo
   messages: ThreadMessageInfo[]
   total: number
+}
+
+export interface ThreadToolSetting {
+  name: string
+  label: string
+  description: string
+  display?: { label?: string; icon?: string; color?: string; style?: string }
+  enabled: boolean
+  /** 系统协议工具固定启用，用户不可关闭。 */
+  locked?: boolean
+}
+
+export interface ThreadToolsData {
+  threadId: string
+  channel: ThreadChannel
+  tools: ThreadToolSetting[]
+  disabledTools?: string[]
+}
+
+export interface FlowStateInfo {
+  threadId: string
+  agentId: string
+  currentGoal: string
+  privateFacts: string
+  revision: number
+  updatedAt: string | null
 }
 
 /** 创建 Thread 请求体 */
@@ -95,12 +137,7 @@ export interface GetLatestThreadRequest {
 
 export const threadsApi = {
   /** 分页获取 Thread 列表 */
-  list: (params?: {
-    agentId?: string
-    channel?: string
-    page?: number
-    pageSize?: number
-  }) => {
+  list: (params?: { agentId?: string; channel?: string; page?: number; pageSize?: number }) => {
     const query = new URLSearchParams()
     if (params?.agentId) query.set('agentId', params.agentId)
     if (params?.channel) query.set('channel', params.channel)
@@ -122,6 +159,40 @@ export const threadsApi = {
   /** 创建新 Thread */
   create: (data: CreateThreadRequest) =>
     apiClient.post<{ thread: ThreadInfo }>('/chat/threads', data),
+
+  /** 修改会话标题；空字符串在界面中显示为“未命名会话”。 */
+  rename: (threadId: string, title: string) =>
+    apiClient.patch<void>(`/chat/threads/${encodeURIComponent(threadId)}`, { title }),
+
+  /** 软删除整条 Thread；长期记忆和定时任务不会被删除。 */
+  delete: (threadId: string) =>
+    apiClient.delete<void>(`/chat/threads/${encodeURIComponent(threadId)}`),
+
+  /** 获取当前会话心流；group 可返回多个 Agent。 */
+  getFlowState: (threadId: string, agentId?: string) => {
+    const query = agentId ? `?agentId=${encodeURIComponent(agentId)}` : ''
+    return apiClient.get<FlowStateInfo[]>(
+      `/chat/threads/${encodeURIComponent(threadId)}/flow-state${query}`,
+    )
+  },
+
+  /** 清空当前会话中指定 Agent 的心流。 */
+  clearFlowState: (threadId: string, agentId?: string) => {
+    const query = agentId ? `?agentId=${encodeURIComponent(agentId)}` : ''
+    return apiClient.delete<FlowStateInfo>(
+      `/chat/threads/${encodeURIComponent(threadId)}/flow-state${query}`,
+    )
+  },
+
+  /** 获取当前 Channel 可配置工具及本会话启用状态。 */
+  getTools: (threadId: string) =>
+    apiClient.get<ThreadToolsData>(`/chat/threads/${encodeURIComponent(threadId)}/tools`),
+
+  /** 持久化本会话禁用工具集合；后端会再次校验 Channel 白名单。 */
+  updateTools: (threadId: string, disabledTools: string[]) =>
+    apiClient.put<ThreadToolsData>(`/chat/threads/${encodeURIComponent(threadId)}/tools`, {
+      disabledTools,
+    }),
 
   /** 获取指定 Agent/Channel 的最新 Thread */
   getLatest: (data: GetLatestThreadRequest) =>

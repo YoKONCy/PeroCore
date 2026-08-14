@@ -64,6 +64,8 @@ export interface ShyPartConfig {
  * 部件定义、重定向映射和资源路径。
  */
 export interface IAvatarManifest {
+  /** 模型来源；YSM 模型启用自动包围盒归一化。 */
+  source?: 'ysm' | string
   /** 模型元数据 */
   metadata: AvatarMetadata
   /** 功能按钮列表 */
@@ -91,4 +93,10 @@ export interface IAvatarManifest {
   shyTriggerParts?: string[]
   /** 动画控制器路径 */
   animation_controllers?: string | string[]
+  /** 统一缩放系数（尺度归一化，不同模型文件尺寸差异巨大时自动校正） */
+  scale?: number
+  /** 骨骼映射健康度（标准骨骼是否命中，供上层 UI 降级交互能力） */
+  mappingHealth?: Record<string, boolean>
+  /** YSM 控制器脚本 URL 列表 */
+  ysmFunctions?: string[]
 }

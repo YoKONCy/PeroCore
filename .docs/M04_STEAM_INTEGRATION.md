@@ -8,7 +8,7 @@
 
 ## 1. 概述
 
-PeroCore 同时支持 **Electron 桌面版（Steam 上架）** 和 **Docker 后端版**。Steam 相关功能（Workshop、Cloud Sync、成就、Overlay）仅存在于 Electron 版，Docker 版完全不涉及 Steam。
+infOS 同时支持 **Electron 桌面版（Steam 上架）** 和 **Docker 后端版**。Steam 相关功能（Workshop、Cloud Sync、成就、Overlay）仅存在于 Electron 版，Docker 版完全不涉及 Steam。
 
 ---
 
@@ -56,8 +56,8 @@ packages/backend/src/core/
 | 前缀 | 含义 | 可写 | Electron 映射 | Docker 映射 |
 |---|---|---|---|---|
 | `@app/` | 程序安装根目录 | ❌ 只读 | `resources/` 或项目根 | 容器内应用目录 |
-| `@data/` | 用户可写数据 | ✅ | `%APPDATA%/PeroCore/` | `PERO_DATA_DIR` |
-| `@workshop/` | Steam Workshop | ❌ 只读 | `steamapps/workshop/content/4457100/` | ❌ 不可用 |
+| `@data/` | 用户可写数据 | ✅ | 统一应用数据目录 | `PERO_DATA_DIR` |
+| `@workshop/` | Steam Workshop | ❌ 只读，多订阅根 | 由 `steamApi.workshop.installInfo()` 发现 | ❌ 不可用 |
 | `@temp/` | 运行时临时 | ✅ | 系统 temp | 系统 temp |
 
 ### 3.2 Workshop 路径传递
@@ -95,7 +95,7 @@ Docker 版不设此环境变量，`@workshop` 自然为空。
 
 | scope | 来源 | 示例 |
 |---|---|---|
-| `com.perocore` | 官方内置 | `com.perocore.persona.pero` |
+| `com.infos` | 官方内置 | `com.infos.persona.pero` |
 | `com.workshop` | 创意工坊 | `com.workshop.model.123456` |
 | `com.user` | 用户自定义 | `com.user.plugin.my_tool` |
 
@@ -204,8 +204,8 @@ App ID 硬编码 `4457100`，无需提取为配置。
 ## 7. 打包后目录结构
 
 ```
-PeroCore/                          (安装根目录 = @app/)
-├── PeroCore.exe
+infOS/                          (安装根目录 = @app/)
+├── infOS.exe
 ├── steam_api64.dll
 ├── resources/
 │   ├── app.asar                   ← 前端 + 主进程代码（只读）
@@ -217,9 +217,9 @@ PeroCore/                          (安装根目录 = @app/)
 │   └── assets/
 │       └── 3d/                    ← 官方 3D 模型（只读）
 
-%APPDATA%/PeroCore/                 (@data/ = 用户可写)
+%APPDATA%/infOS/                 (@data/ = 用户可写)
 ├── db/
-│   ├── perocore.db
+│   ├── infos.db
 │   └── social_storage.db
 ├── memory/
 │   ├── memory.tdb
@@ -238,4 +238,4 @@ PeroCore/                          (安装根目录 = @app/)
 
 ---
 
-*本文档由 Carola 整理，适用于 PeroCore Steam 集成与资产管理规范。*
+*本文档由 Carola 整理，适用于 infOS Steam 集成与资产管理规范。*

@@ -87,8 +87,14 @@ export class AvatarRenderer {
       map: texture,
       alphaTest: 0.5,
       side: THREE.DoubleSide, // 双面渲染，解决法线反向问题
-      roughness: 0.4,
-      metalness: 0.1,
+      // 像素风体素模型不应有 PBR 镜面高光：多个强光源下 roughness=0.4 会在
+      // 面部皮肤/眼睛处产生随视角闪烁的高光点。粗糙度拉满 + 零金属度退化为纯漫反射。
+      roughness: 1.0,
+      metalness: 0,
+      // 体素模型必须用平面着色：computeVertexNormals 会做平滑法线，导致薄片
+      // （发卡/裙摆）的法线被相邻面平均，光照在表面产生类似“影子抽搐”的明暗条纹。
+      // flatShading 让每个面用独立面法线，光照均匀，符合像素风硬边。
+      flatShading: true,
       emissive: 0x000000,
       emissiveIntensity: 0,
     })
@@ -462,8 +468,13 @@ export class AvatarRenderer {
     }
 
     const mesh = new THREE.Mesh(geometry, material)
-    mesh.castShadow = true
-    mesh.receiveShadow = true
+    // 亚像素薄片（最小边 < 1 单位，如发卡/丝带这类被缩小的装饰 cube）不参与阴影：
+    // 它们在 shadow map 里只有几个纹素宽，投射/接收阴影必然产生随摆动抽搐的噪点，
+    // 且体积极小，关闭阴影对画面几乎没有影响。
+    const minSize = Math.min(size[0], size[1], size[2])
+    const isThinDecal = minSize < 1.0
+    mesh.castShadow = !isThinDecal
+    mesh.receiveShadow = !isThinDecal
     mesh.name = 'Cube'
 
     // 计算 Cube 相对于 Bone 的位置

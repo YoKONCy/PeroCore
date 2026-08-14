@@ -29,10 +29,7 @@ export function getSocialNapcatAdapter(): NapcatAdapter | null {
  *
  * 将运行时特定的 WebSocket 实例包装为统一的 WsSender 接口。
  */
-export function createWsSender(ws: {
-  send: (data: string) => void
-  close: () => void
-}) {
+export function createWsSender(ws: { send: (data: string) => void; close: () => void }) {
   return {
     send: (data: string) => ws.send(data),
     close: () => ws.close(),

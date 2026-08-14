@@ -30,7 +30,9 @@ export interface RuntimeEnv {
   dataDir: string
   /** 运行时临时目录 */
   tempDir: string
-  /** Steam Workshop 目录 (Docker 版为空字符串) */
+  /** Steam Workshop 物品根目录列表（每个订阅物品一个只读根） */
+  workshopDirs?: string[]
+  /** 旧版单 Workshop 根目录，保留用于环境配置兼容 */
   workshopDir?: string
 }
 
@@ -56,13 +58,23 @@ export const ALL_PREFIXES: readonly LogicalPrefix[] = [
 
 export class PathResolver {
   private roots: Map<string, string>
+  private workshopRoots: string[]
 
   constructor(env: RuntimeEnv) {
+    const configuredWorkshopRoots = [
+      ...(env.workshopDirs ?? []),
+      ...(env.workshopDir ? [env.workshopDir] : []),
+    ]
+    this.workshopRoots = [
+      ...new Set(configuredWorkshopRoots.filter(Boolean).map((dir) => path.resolve(dir))),
+    ]
+
     this.roots = new Map<string, string>([
-      ['@app', env.appRoot],
-      ['@data', env.dataDir],
-      ['@temp', env.tempDir],
-      ['@workshop', env.workshopDir ?? ''],
+      ['@app', path.resolve(env.appRoot)],
+      ['@data', path.resolve(env.dataDir)],
+      ['@temp', path.resolve(env.tempDir)],
+      // @workshop 的单路径解析仅用于兼容；联邦扫描必须使用 getRoots('@workshop')。
+      ['@workshop', this.workshopRoots[0] ?? ''],
     ])
 
     // 确保可写目录存在 (只创建 @data 和 @temp，@app 和 @workshop 为只读)
@@ -73,7 +85,7 @@ export class PathResolver {
       '@app': env.appRoot,
       '@data': env.dataDir,
       '@temp': env.tempDir,
-      '@workshop': env.workshopDir ?? '(不可用)',
+      '@workshop': this.workshopRoots.length > 0 ? this.workshopRoots : '(不可用)',
     })
   }
 
@@ -83,10 +95,10 @@ export class PathResolver {
    * @example
    * ```ts
    * resolver.resolve('@app/prompts/scorer/summary.md')
-   * // → 'C:/PeroCore/resources/prompts/scorer/summary.md'
+   * // → 'C:/infOS/resources/prompts/scorer/summary.md'
    *
    * resolver.resolve('@data/custom/prompts/scorer/summary.md')
-   * // → '%APPDATA%/PeroCore/custom/prompts/scorer/summary.md'
+   * // → '%APPDATA%/infOS/custom/prompts/scorer/summary.md'
    * ```
    */
   resolve(logicalPath: string): string {
@@ -100,8 +112,9 @@ export class PathResolver {
     // 匹配逻辑前缀
     for (const [prefix, rootPath] of this.roots) {
       if (normalized.startsWith(prefix + '/')) {
+        if (!rootPath) throw new Error(`${prefix} 根目录不可用`)
         const relativePart = normalized.slice(prefix.length + 1)
-        return path.resolve(rootPath, relativePart)
+        return this.resolveWithin(rootPath, relativePart, prefix)
       }
 
       if (normalized === prefix) {
@@ -127,16 +140,26 @@ export class PathResolver {
     return !!root && existsSync(root)
   }
 
-  /** 获取指定前缀的根路径 */
+  /** 获取指定前缀的根路径（单根兼容接口） */
   getRoot(prefix: string): string | undefined {
     return this.roots.get(prefix)
+  }
+
+  /**
+   * 获取指定前缀的全部根路径。
+   * Workshop 天然是多个订阅物品目录；其他逻辑前缀只返回单个根。
+   */
+  getRoots(prefix: string): string[] {
+    if (prefix === '@workshop') return [...this.workshopRoots]
+    const root = this.roots.get(prefix)
+    return root ? [root] : []
   }
 
   /**
    * 解析 @principal 前缀路径
    *
    * @principal 是 Agent 的个人工作区前缀，解析到：
-   *   @data/agents/{agentId}/workspace/{relativePath}
+   *   @data/principals/{agentId}/workspace/{relativePath}
    *
    * 与 resolve() 不同，此方法需要 agentId 上下文，
    * 因为 @principal 的物理位置依赖 Agent。
@@ -150,12 +173,23 @@ export class PathResolver {
     if (!dataRoot) {
       throw new Error('@data 根目录未配置，无法解析 @principal')
     }
-    return path.resolve(dataRoot, 'agents', agentId, 'workspace', relativePath)
+    return path.resolve(dataRoot, 'principals', agentId, 'workspace', relativePath)
   }
 
   /** 获取 Agent 的 workspace 根目录 */
   getWorkspaceRoot(agentId: string): string {
     return this.resolvePrincipal(agentId, '.')
+  }
+
+  /** 安全解析根目录内的相对路径，拒绝 `..` 和绝对路径逃逸。 */
+  private resolveWithin(rootPath: string, relativePath: string, prefix: string): string {
+    const root = path.resolve(rootPath)
+    const resolved = path.resolve(root, relativePath)
+    const relative = path.relative(root, resolved)
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
+      throw new Error(`路径越界: ${prefix}/${relativePath}`)
+    }
+    return resolved
   }
 
   /** 确保目录存在 */

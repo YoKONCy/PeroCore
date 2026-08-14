@@ -1,7 +1,7 @@
 /**
  * @file Electron 主进程入口
  * @description 遵循 07_DUAL_DEPLOYMENT.md — Electron 壳层仅做窗口/IPC/系统能力
- *              所有业务逻辑在 @perocore/backend 中，通过 HTTP :9120 通信
+ *              所有业务逻辑在 @infos/backend 中，通过 HTTP :9120 通信
  *
  *              职责:
  *              1. 应用生命周期管理 (单实例锁, 退出清理)
@@ -21,10 +21,18 @@ import { windowManager } from './windows/manager'
 import { registerIpcHandlers } from './ipcBridge'
 import { initSteam } from './services/steam'
 
+/** 向所有存活渲染窗口广播可见的系统错误，日志仍保留作诊断。 */
+function notifyRendererError(title: string, message: string): void {
+  BrowserWindow.getAllWindows().forEach((win) => {
+    if (!win.isDestroyed()) win.webContents.send('system-error', { title, message })
+  })
+}
+
 // ─── 全局错误捕获 ─────────────────────────────────────
 process.on('uncaughtException', (error) => {
   const msg = `未捕获的异常: ${error.message}\n${error.stack}`
   logger.error('Main', msg)
+  notifyRendererError('桌面应用异常', error.message)
   try {
     dialog.showErrorBox('应用启动错误', msg)
   } catch {
@@ -33,7 +41,9 @@ process.on('uncaughtException', (error) => {
 })
 
 process.on('unhandledRejection', (reason) => {
-  logger.error('Main', `未处理的 Promise 拒绝: ${reason}`)
+  const message = reason instanceof Error ? reason.message : String(reason)
+  logger.error('Main', `未处理的 Promise 拒绝: ${message}`)
+  notifyRendererError('桌面服务异常', message)
 })
 
 // ─── 协议注册 (必须在 app.ready 之前) ──────────────────
@@ -93,18 +103,27 @@ registerIpcHandlers()
 // ─── App Ready ────────────────────────────────────────
 app.whenReady().then(async () => {
   try {
-    // 注册 asset:// 协议
-    const { registerAssetProtocol } = await import('./services/assets')
+    // 注册 asset:// 协议并预扫描资产。外部模型 URL 会持久化到 localStorage，
+    // 因此必须在创建渲染窗口前恢复虚拟 URL → 物理目录映射。
+    const { registerAssetProtocol, scan3DModels } = await import('./services/assets')
     registerAssetProtocol()
+    await scan3DModels()
 
     // 创建 Launcher 窗口
     windowManager.createLauncherWindow()
+
+    // 便携模式：用 exe 自带 Node 运行时拉起内置 Daemon（注入 PERO_DATA_DIR），
+    // 确保数据目录 = exe 同级 data/；非便携模式不拉起进程，直接等待外部 Daemon。
+    const { ensurePortableDaemon } = await import('./services/portableDaemon')
+    await ensurePortableDaemon()
 
     // 第七阶段：Electron 不再 spawn 后端，改为连接 Daemon 并注册平台能力
     // Daemon 必须独立运行（pnpm dev:daemon 或系统服务），Electron 只作为能力节点
     const { capabilityProvider } = await import('./services/capabilityProvider')
     capabilityProvider.start().catch((e) => {
-      logger.error('Main', `CapabilityProvider 启动失败（Daemon 是否已运行？）: ${e}`)
+      const message = `CapabilityProvider 启动失败（Daemon 是否已运行？）: ${String(e)}`
+      logger.error('Main', message)
+      notifyRendererError('桌面能力连接失败', '无法连接 Daemon，截图、剪贴板等桌面工具暂不可用。')
     })
 
     // 启动系统服务
@@ -145,6 +164,10 @@ app.on('before-quit', async (event) => {
     // 2. 停止能力提供者（断开与 Daemon 的连接，注销能力）
     const { capabilityProvider } = await import('./services/capabilityProvider')
     capabilityProvider.stop()
+
+    // 2.1 回收便携模式拉起的内置 Daemon（标准版/Steam 无此进程，幂等）
+    const { stopPortableDaemon } = await import('./services/portableDaemon')
+    stopPortableDaemon()
 
     // 3. 停止 NapCat
     const { stopNapCat } = await import('./services/napcat')

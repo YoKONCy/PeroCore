@@ -44,7 +44,7 @@ function getLogStream(): fs.WriteStream | null {
     currentDate = today
     ensureLogDir()
     try {
-      const logFile = path.join(paths.logs, `perocore-${today}.log`)
+      const logFile = path.join(paths.logs, `infos-${today}.log`)
       logStream = fs.createWriteStream(logFile, { flags: 'a' })
     } catch {
       logStream = null

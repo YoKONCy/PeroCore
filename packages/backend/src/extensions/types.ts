@@ -1,7 +1,7 @@
 /**
  * 扩展系统 — 运行时类型
  *
- * 补充 @perocore/shared 中的接口定义，
+ * 补充 @infos/shared 中的接口定义，
  * 添加后端运行时专用的类型。
  *
  * @module packages/backend/src/extensions/types
@@ -26,7 +26,7 @@ export type {
   InboundMessage,
   InboundEvent,
   ExtensionInfo,
-} from '@perocore/shared'
+} from '@infos/shared'
 
 /** 扩展状态 */
 export type ExtensionStatus = 'loaded' | 'error' | 'disabled' | 'starting' | 'stopped'
@@ -34,7 +34,7 @@ export type ExtensionStatus = 'loaded' | 'error' | 'disabled' | 'starting' | 'st
 /** 已加载扩展的运行时记录 */
 export interface LoadedExtension {
   /** 清单信息 */
-  manifest: import('@perocore/shared').ExtensionManifest
+  manifest: import('@infos/shared').ExtensionManifest
   /** 加载路径 */
   dirPath: string
   /** 运行时状态 */

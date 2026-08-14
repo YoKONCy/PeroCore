@@ -19,9 +19,29 @@ import { zValidator } from '@hono/zod-validator'
 import { setConfigSchema, batchGetConfigSchema } from '../schemas/config.schema'
 import { z } from 'zod'
 import type { AppContext } from '../container'
-import { createLogger } from '../lib/logger'
+import { createLogger, setLogLevel, parseLogLevel } from '../lib/logger'
 
 const logger = createLogger('ConfigRouter')
+
+/**
+ * 日志级别热更新：检测 system.logLevel 配置变更，动态调整所有 logger 实例
+ *
+ * Dashboard 设置面板保存日志级别后，无需重启服务即可生效。
+ * 非法值不改变当前级别（仅告警）。
+ *
+ * @param key   配置 key
+ * @param value 配置值（日志级别标签，如 "debug"）
+ */
+function applyLogLevelHotReload(key: string, value: string): void {
+  if (key !== 'system.logLevel') return
+  const num = parseLogLevel(value)
+  if (num != null) {
+    setLogLevel(num)
+    logger.info(`日志级别已热更新: ${value} (level=${num})`)
+  } else {
+    logger.warn(`无效的日志级别: "${value}"，忽略变更（保持当前级别）`)
+  }
+}
 
 /** 配置 key 前缀到热更新方法的映射 */
 const HOT_RELOAD_MAP: Array<{
@@ -95,6 +115,9 @@ export function createConfigRouter(ctx: AppContext) {
     const { key, value } = c.req.valid('json')
     await ctx.configRepo.set(key, value)
 
+    // 日志级别热更新（system.logLevel 配置变更时立即生效）
+    applyLogLevelHotReload(key, value)
+
     // 检测是否需要触发服务热更新
     for (const { prefix, method } of HOT_RELOAD_MAP) {
       if (key.startsWith(prefix)) {
@@ -134,6 +157,8 @@ export function createConfigRouter(ctx: AppContext) {
     const pendingReloads = new Set<string>()
     for (const item of items) {
       await ctx.configRepo.set(item.key, item.value)
+      // 日志级别热更新（批量保存时同样生效）
+      applyLogLevelHotReload(item.key, item.value)
       for (const { prefix, method } of HOT_RELOAD_MAP) {
         if (item.key.startsWith(prefix)) {
           pendingReloads.add(method)
@@ -188,6 +213,8 @@ export function createConfigRouter(ctx: AppContext) {
         }
       }
       await ctx.configRepo.set(key, value)
+      // 日志级别热更新（导入配置时同样生效）
+      applyLogLevelHotReload(key, value)
       imported++
     }
 

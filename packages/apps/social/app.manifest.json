@@ -2,11 +2,35 @@
   "id": "social",
   "name": "Social Bridge",
   "description": "对外社交平台桥接应用（QQ/Discord 等），管理社交会话、缓冲、调度与回复。独立编译上下文，不依赖主 Agent 的 chat pipeline。",
-  "version": "1.0.0",
-  "author": "PeroCore",
+  "version": "0.9.2-rc1",
+  "author": "infOS",
   "icon": "icon.png",
   "runtimeEntry": "./runtime/index.ts",
   "frontendEntry": "./frontend/index.js",
+  "actions": [
+    {
+      "name": "chat_in_group",
+      "description": "读取指定 QQ 群近期上下文，由社交 Agent 单次判断并自然参与聊天。",
+      "mode": "command",
+      "defaultCommunicationBudget": 8,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "group_id": {
+            "type": "string",
+            "description": "目标 QQ 群号"
+          },
+          "intent": {
+            "type": "string",
+            "description": "参与意图与边界"
+          }
+        },
+        "required": [
+          "group_id"
+        ]
+      }
+    }
+  ],
   "providesTools": [
     {
       "name": "send_message",
@@ -14,11 +38,28 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "target": { "type": "string", "description": "目标会话 ID" },
-          "content": { "type": "string", "description": "消息内容" },
-          "type": { "type": "string", "enum": ["private", "group"], "description": "会话类型" }
+          "target": {
+            "type": "string",
+            "description": "目标会话 ID"
+          },
+          "content": {
+            "type": "string",
+            "description": "消息内容"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "private",
+              "group"
+            ],
+            "description": "会话类型"
+          }
         },
-        "required": ["target", "content", "type"]
+        "required": [
+          "target",
+          "content",
+          "type"
+        ]
       }
     },
     {
@@ -34,8 +75,14 @@
       "description": "查询用户详情",
       "parameters": {
         "type": "object",
-        "properties": { "user_id": { "type": "string" } },
-        "required": ["user_id"]
+        "properties": {
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id"
+        ]
       }
     },
     {
@@ -43,8 +90,14 @@
       "description": "查询群组详情",
       "parameters": {
         "type": "object",
-        "properties": { "group_id": { "type": "string" } },
-        "required": ["group_id"]
+        "properties": {
+          "group_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "group_id"
+        ]
       }
     },
     {
@@ -52,8 +105,14 @@
       "description": "查询群组成员列表",
       "parameters": {
         "type": "object",
-        "properties": { "group_id": { "type": "string" } },
-        "required": ["group_id"]
+        "properties": {
+          "group_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "group_id"
+        ]
       }
     },
     {
@@ -63,11 +122,20 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "flag": { "type": "string" },
-          "approve": { "type": "boolean" },
-          "remark": { "type": "string" }
+          "flag": {
+            "type": "string"
+          },
+          "approve": {
+            "type": "boolean"
+          },
+          "remark": {
+            "type": "string"
+          }
         },
-        "required": ["flag", "approve"]
+        "required": [
+          "flag",
+          "approve"
+        ]
       }
     },
     {
@@ -76,8 +144,14 @@
       "requiresApproval": true,
       "parameters": {
         "type": "object",
-        "properties": { "user_id": { "type": "string" } },
-        "required": ["user_id"]
+        "properties": {
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id"
+        ]
       }
     }
   ],
@@ -89,23 +163,62 @@
     "cancel_reminder"
   ],
   "requiredPermissions": [
-    { "type": "memory.read", "description": "读取主 Agent 记忆以理解社交背景与用户偏好", "required": true },
-    { "type": "memory.write", "description": "提交社交记忆候选（经主 Agent MemoryGate 审核）", "required": true },
-    { "type": "network.access", "description": "连接 QQ/Discord 等社交平台", "required": true }
+    {
+      "type": "memory.read",
+      "description": "读取主 Agent 记忆以理解社交背景与用户偏好",
+      "required": true
+    },
+    {
+      "type": "memory.write",
+      "description": "提交社交记忆候选（经主 Agent MemoryGate 审核）",
+      "required": true
+    },
+    {
+      "type": "network.access",
+      "description": "连接 QQ/Discord 等社交平台",
+      "required": true
+    }
   ],
   "supportedAgentRoles": [],
   "minAiosVersion": "1.0.0",
   "contextRequirements": [
-    { "type": "persona", "required": true, "description": "继承主 Agent 人格投影" },
-    { "type": "memory", "required": true, "description": "社交相关记忆" },
-    { "type": "user_profile", "required": false, "description": "用户社交偏好" }
+    {
+      "type": "persona",
+      "required": true,
+      "description": "继承主 Agent 人格投影"
+    },
+    {
+      "type": "memory",
+      "required": true,
+      "description": "社交相关记忆"
+    },
+    {
+      "type": "user_profile",
+      "required": false,
+      "description": "用户社交偏好"
+    }
   ],
   "workspaceMode": "none",
   "checkpointSchema": {
     "fields": [
-      { "name": "connectedPlatforms", "type": "string[]", "description": "已连接的平台列表", "required": true },
-      { "name": "activeSessions", "type": "number", "description": "活跃社交会话数", "required": true },
-      { "name": "messagesProcessed", "type": "number", "description": "已处理消息总数", "required": true }
+      {
+        "name": "connectedPlatforms",
+        "type": "string[]",
+        "description": "已连接的平台列表",
+        "required": true
+      },
+      {
+        "name": "activeSessions",
+        "type": "number",
+        "description": "活跃社交会话数",
+        "required": true
+      },
+      {
+        "name": "messagesProcessed",
+        "type": "number",
+        "description": "已处理消息总数",
+        "required": true
+      }
     ]
   },
   "supportsMultipleSessions": false,

@@ -2,11 +2,11 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 
-import PBadge from '@perocore/frontend/components/pixel/PBadge.vue'
-import PButton from '@perocore/frontend/components/pixel/PButton.vue'
-import PCard from '@perocore/frontend/components/pixel/PCard.vue'
-import PEmpty from '@perocore/frontend/components/pixel/PEmpty.vue'
-import PixelIcon from '@perocore/frontend/components/pixel/PixelIcon.vue'
+import PBadge from '@infos/frontend/components/pixel/PBadge.vue'
+import PButton from '@infos/frontend/components/pixel/PButton.vue'
+import PCard from '@infos/frontend/components/pixel/PCard.vue'
+import PEmpty from '@infos/frontend/components/pixel/PEmpty.vue'
+import PixelIcon from '@infos/frontend/components/pixel/PixelIcon.vue'
 
 describe('基础像素展示组件', () => {
   describe('PButton', () => {

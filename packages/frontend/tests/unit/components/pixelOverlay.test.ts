@@ -2,9 +2,9 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 
-import PDialog from '@perocore/frontend/components/pixel/PDialog.vue'
-import PSelect from '@perocore/frontend/components/pixel/PSelect.vue'
-import PTooltip from '@perocore/frontend/components/pixel/PTooltip.vue'
+import PDialog from '@infos/frontend/components/pixel/PDialog.vue'
+import PSelect from '@infos/frontend/components/pixel/PSelect.vue'
+import PTooltip from '@infos/frontend/components/pixel/PTooltip.vue'
 
 type SelectOption = {
   label: string

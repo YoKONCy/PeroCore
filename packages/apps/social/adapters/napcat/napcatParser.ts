@@ -24,6 +24,12 @@ export interface OneBotMessageEvent {
   post_type: 'message' | 'meta_event' | 'notice' | 'request'
   message_type?: 'private' | 'group'
   message_id?: number
+  /** NapCat 会话内消息序号 */
+  message_seq?: number | string
+  messageSeq?: number | string
+  msg_seq?: number | string
+  /** Unix 秒时间戳 */
+  time?: number
   self_id?: number | string
   user_id?: number | string
   group_id?: number | string

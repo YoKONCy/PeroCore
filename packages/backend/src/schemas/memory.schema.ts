@@ -6,8 +6,8 @@
 
 import { z } from 'zod'
 
-/** 有效的记忆来源（AIOS 第八阶段：清理 work 残留，work 模式已废弃） */
-const memorySources = ['desktop', 'social', 'group_chat', 'mobile', 'scheduler'] as const
+/** 有效的记忆来源：social 为外部平台；group/group_chat 为内部据点（后者兼容旧名称） */
+const memorySources = ['desktop', 'social', 'group', 'group_chat', 'mobile', 'scheduler'] as const
 
 /** 有效的记忆类型 */
 const memoryTypes = ['event', 'fact', 'preference', 'promise', 'reflection', 'summary'] as const

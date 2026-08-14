@@ -13,7 +13,7 @@
  * @module packages/backend/src/tools/fileSearch
  */
 
-import { exec } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { readdirSync, statSync } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
@@ -30,15 +30,12 @@ export const fileSearchTool: BuiltinTool = {
     const query = args.query as string
     const limit = (args.limit as number) ?? MAX_RESULTS
 
-    // AIOS(Phase4): 按 channel 分级计算搜索目录
-    // - desktop 通道可授权使用 args.directory（已存在的目录），否则回退 workspace root
-    // - 其他通道强制使用 workspace root，忽略 args.directory
+    // 纯只读搜索默认从用户主目录开始；用户可显式指定任意本机现有目录。
     const workspaceService = getWorkspaceService()
     const searchDir =
-      workspaceService?.resolveTerminalCwd(
+      workspaceService?.resolveDeviceReadPath(
         ctx.agentId,
-        args.directory as string | undefined,
-        ctx.channel,
+        args.directory ? String(args.directory) : os.homedir(),
       ) ?? os.homedir()
 
     // Windows: 尝试 Everything (es.exe)
@@ -64,20 +61,27 @@ async function tryEverythingSearch(
   limit: number,
 ): Promise<string[] | null> {
   return new Promise((resolve) => {
-    // AIOS(Phase4): 通过 -path 限制搜索范围到 searchDir（containment 约束）
-    const cmd = `es "${query}" -path "${searchDir}" -n ${limit} -utf8`
-    exec(cmd, { timeout: SEARCH_TIMEOUT_MS, maxBuffer: 2 * 1024 * 1024 }, (error, stdout) => {
-      if (error) {
-        resolve(null) // es.exe 不可用，降级
-        return
-      }
-      const results = stdout
-        .trim()
-        .split('\n')
-        .map((l) => l.trim())
-        .filter(Boolean)
-      resolve(results.slice(0, limit))
-    })
+    execFile(
+      'es',
+      [query, '-path', searchDir, '-n', String(limit), '-utf8'],
+      {
+        timeout: SEARCH_TIMEOUT_MS,
+        maxBuffer: 2 * 1024 * 1024,
+        windowsHide: true,
+      },
+      (error, stdout) => {
+        if (error) {
+          resolve(null) // es.exe 不可用，降级
+          return
+        }
+        const results = stdout
+          .trim()
+          .split('\n')
+          .map((l) => l.trim())
+          .filter(Boolean)
+        resolve(results.slice(0, limit))
+      },
+    )
   })
 }
 
@@ -88,20 +92,27 @@ async function tryFdSearch(
   limit: number,
 ): Promise<string[] | null> {
   return new Promise((resolve) => {
-    // AIOS(Phase4): 将 searchDir 作为 fd 的搜索路径参数（containment 约束）
-    const cmd = `fd "${query}" "${searchDir}" --max-results ${limit} --no-ignore`
-    exec(cmd, { timeout: SEARCH_TIMEOUT_MS, maxBuffer: 2 * 1024 * 1024 }, (error, stdout) => {
-      if (error) {
-        resolve(null)
-        return
-      }
-      const results = stdout
-        .trim()
-        .split('\n')
-        .map((l) => l.trim())
-        .filter(Boolean)
-      resolve(results.slice(0, limit))
-    })
+    execFile(
+      'fd',
+      [query, searchDir, '--max-results', String(limit), '--no-ignore'],
+      {
+        timeout: SEARCH_TIMEOUT_MS,
+        maxBuffer: 2 * 1024 * 1024,
+        windowsHide: true,
+      },
+      (error, stdout) => {
+        if (error) {
+          resolve(null)
+          return
+        }
+        const results = stdout
+          .trim()
+          .split('\n')
+          .map((l) => l.trim())
+          .filter(Boolean)
+        resolve(results.slice(0, limit))
+      },
+    )
   })
 }
 

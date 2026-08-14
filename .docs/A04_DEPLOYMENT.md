@@ -1,23 +1,23 @@
 # 多目标部署架构
 
 > **版本**：0.2.0 · **更新时间**：2026-04-22
-> **适用范围**：PeroCore 全项目部署策略
+> **适用范围**：infOS 全项目部署策略
 > **依赖规范**：[A07_CROSS_PLATFORM](./A07_CROSS_PLATFORM.md)、[A08_DEVOPS](./A08_DEVOPS.md)
 
 ---
 
-## 1. 两种部署形态
+## 1. 部署形态与 AIOS 运行时边界
 
-PeroCore 采用**前后端全解耦**架构，支持两种共生的部署形态：
+infOS 的核心后端是纯 Node Daemon；Electron 是业务客户端和桌面能力提供者。详细职责见 [A09_AIOS_ARCHITECTURE](./A09_AIOS_ARCHITECTURE.md#7-daemon节点与能力提供者)。
 
-| | Electron 桌面版 | Docker 后端版 |
-|---|---|---|
-| **运行环境** | Windows (Electron + Node.js) | Docker (Bun 优先 / Node.js 兜底) |
-| **后端** | 作为子进程嵌入 Electron | 独立容器运行 |
-| **前端** | Electron BrowserWindow 加载 | Nginx / 静态文件服务 |
-| **IPC 能力** | ✅ 窗口管理、托盘、文件对话框 | ❌ 无 Electron，走 HTTP 替代 |
-| **鉴权** | 跳过 (本地可信) | JWT + Token |
-| **用户** | 桌面端用户 | 服务器 / NAS / 远程访问用户 |
+| 形态 | Daemon 生命周期 | Electron / 客户端职责 | 适用场景 |
+|---|---|---|---|
+| Electron 标准版、Steam 版、便携版 | 打包后由 Electron 启动内置 daemon bundle，并注入统一 `@data` 根 | GUI、3D、Steam、平台注册能力 | 普通桌面用户 |
+| 开发环境 | 可由开发脚本独立启动或统一编排 | 连接 HTTP/SSE/WS 服务 | 本地开发 |
+| Docker / 服务器 | 独立运行 | Web/CLI 等客户端连接 | 长时间运行与远程访问 |
+| 未来纯客户端 | 连接已有本地/远程 Daemon | GUI 与能力 Provider | 多节点接入 |
+
+**强制边界**：`packages/backend`、`packages/frontend`、`packages/shared` 均不得 import Electron；业务数据一律走 HTTP/SSE/WS，IPC 仅用于 Electron 专属能力与能力 Provider 通道。
 
 ---
 
@@ -43,29 +43,21 @@ PeroCore 采用**前后端全解耦**架构，支持两种共生的部署形态�
 
 ### 3.1 Electron 桌面版
 
+```text
+Electron Main
+  ├─ 启动打包内置 Daemon（开发环境可由开发脚本编排）
+  ├─ 注入 PERO_DATA_DIR、PERO_APP_ROOT、PERO_WORKSHOP_DIRS
+  ├─ 注册 asset:// 只读资产协议
+  ├─ 提供窗口、托盘、Steam 与桌面能力
+  └─ Renderer 通过 HTTP/SSE/WS 访问 Daemon
+
+Daemon
+  ├─ 初始化 SQLite、TriviumDB、Agent、Scheduler
+  ├─ 维护后端持久资源权威
+  └─ 通过 Capability Provider 向 Electron 请求平台能力
 ```
-┌─────────────────────────────────────────────────┐
-│ Electron 主进程                                  │
-│                                                 │
-│  ┌──────────┐     ┌─────────────────────┐       │
-│  │ IPC 桥接 │     │ 后端进程管理         │       │
-│  │ (窗口/   │     │ (启动 @perocore/    │       │
-│  │  托盘/   │     │  backend 进程)      │       │
-│  │  文件)   │     └─────────┬───────────┘       │
-│  └────┬─────┘               │                   │
-│       │                     │ HTTP :9120         │
-└───────┼─────────────────────┼───────────────────┘
-        │ IPC                 │
-┌───────▼─────────────────────▼───────────────────┐
-│ Renderer 进程                                    │
-│                                                 │
-│  Transport 层                                   │
-│  ├─ 业务 API → HTTP (localhost:9120) ──→ 后端   │
-│  ├─ Gateway  → WS   (localhost:9120) ──→ 后端   │
-│  └─ 系统能力 → IPC ──→ Electron 主进程           │
-│                                                 │
-└─────────────────────────────────────────────────┘
-```
+
+Electron 启动 Daemon 是桌面全包发行的进程编排方式，不改变 Daemon 的纯 Node 边界；Daemon 必须能在 Docker/服务器形态独立运行。
 
 ### 3.2 Docker 后端版
 
@@ -73,7 +65,7 @@ PeroCore 采用**前后端全解耦**架构，支持两种共生的部署形态�
 ┌─────────────────────────┐     ┌──────────────────┐
 │ 前端容器 (Nginx)         │     │ 后端容器 (Bun)   │
 │                         │     │                  │
-│ 静态文件                │     │ @perocore/backend│
+│ 静态文件                │     │ @infos/backend│
 │ Vue SPA                 │────→│ HTTP :9120       │
 │                         │     │ WS   :9120       │
 │ Transport: HttpTransport│     │                  │
@@ -160,7 +152,7 @@ export const features = {
 
 ```typescript
 // edition.ts
-export const EDITION = (process.env.PEROCORE_EDITION ?? 'standard') as 'steam' | 'standard'
+export const EDITION = (process.env.INFOS_EDITION ?? 'standard') as 'steam' | 'standard'
 export const IS_STEAM = EDITION === 'steam'
 ```
 
@@ -184,9 +176,9 @@ electron/
   "scripts": {
     // ── 当前主力 ──
     "electron:build":          "electron-builder --config electron-builder.standard.yml",
-    "electron:build:steam":    "cross-env PEROCORE_EDITION=steam electron-builder --config electron-builder.steam.yml",
+    "electron:build:steam":    "cross-env INFOS_EDITION=steam electron-builder --config electron-builder.steam.yml",
     "electron:build:portable": "electron-builder --config electron-builder.portable.yml",
-    "build:docker":            "docker build -t perocore-backend .",
+    "build:docker":            "docker build -t infos-backend .",
 
     // ── 待实现 ──
     "electron:build:linux":    "electron-builder --linux --config electron-builder.standard.yml",
@@ -223,8 +215,8 @@ export function getDataDir(): string {
 
 | Addon | win-x64 | linux-x64 | mac-arm64 | Docker |
 |---|---|---|---|---|
-| `@perocore/render-core` | ✅ prebuild | ✅ prebuild | ✅ prebuild | ❌ 不需要 |
-| `@perocore/nit-runtime` | ✅ prebuild | ✅ prebuild | ✅ prebuild | ✅ prebuild |
+| `@infos/render-core` | ✅ prebuild | ✅ prebuild | ✅ prebuild | ❌ 不需要 |
+| `@infos/nit-runtime` | ✅ prebuild | ✅ prebuild | ✅ prebuild | ✅ prebuild |
 | `steamworks.js` | ✅ 仅 steam 版 | ❌ | ❌ | ❌ |
 | `better-sqlite3` | ✅ prebuild | ✅ prebuild | ✅ prebuild | ✅ prebuild |
 
@@ -249,9 +241,9 @@ services:
     environment:
       - PERO_PORT=9120
       - PERO_DATA_DIR=/app/data
-      - PERO_DATABASE_PATH=/app/data/perocore.db
+      - PERO_DATABASE_PATH=/app/data/infos.db
       # 鉴权（可选，不设则首次启动自动生成）
-      - PEROCORE_AUTH_TOKEN=your_custom_password
+      - INFOS_AUTH_TOKEN=your_custom_password
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9120/health"]
       interval: 30s
@@ -298,7 +290,7 @@ volumes:
 
 ```
 优先级：
-1. 环境变量 PEROCORE_AUTH_TOKEN（用户预设）
+1. 环境变量 INFOS_AUTH_TOKEN（用户预设）
 2. data/auth.json 中保存的 bcrypt 哈希（用户在控制面板修改的密码）
 3. 首次启动自动生成随机 Token → 打印到日志 + 写入 data/auth.json
 ```
@@ -347,7 +339,7 @@ volumes:
 ```
 桌面 Electron (纯壳 + 3D 渲染)           服务器 Docker (唯一后端)
 ┌───────────────────────┐               ┌───────────────────────┐
-│ Vue 前端               │               │ PeroCore 后端          │
+│ Vue 前端               │               │ infOS 后端          │
 │ Three.js 3D 渲染      │ ──HTTP/WS──→  │ :9120                  │
 │ 音频 VAD/PTT          │               │ SQLite (唯一真理源)     │
 │                       │               │ TriviumDB (唯一真理源)  │
@@ -367,7 +359,7 @@ type ConnectionMode =
 
 ### 9.4 为什么不做双向实时同步
 
-1. **PeroCore 没有离线场景**——依赖外部 LLM API，断网 = 无法使用
+1. **infOS 没有离线场景**——依赖外部 LLM API，断网 = 无法使用
 2. **SQLite + TriviumDB 双向同步极其复杂**——需改全部表结构、改引擎、处理冲突
 3. **远程直连零成本解决问题**——改一个 URL 配置，现有架构完美支持
 
@@ -384,7 +376,7 @@ type ConnectionMode =
 | 前缀 | 含义 | Electron 映射 | Docker 映射 |
 |---|---|---|---|
 | `@app/` | 安装程序目录 (只读) | `resources/` | `/app` |
-| `@data/` | 用户可写数据 | `%APPDATA%/PeroCore/` | `$PERO_DATA_DIR` |
+| `@data/` | 用户可写数据 | `%APPDATA%/infOS/` | `$PERO_DATA_DIR` |
 | `@workshop/` | Steam 创意工坊 | `steamapps/workshop/...` | ❌ 不支持 |
 | `@temp/` | 运行时临时文件 | 系统 TEMP | 系统 TEMP |
 
@@ -396,4 +388,4 @@ type ConnectionMode =
 
 ---
 
-*本文档由 Carola 整理，适用于 PeroCore 多目标部署方案。*
+*本文档由 Carola 整理，适用于 infOS 多目标部署方案。*

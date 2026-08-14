@@ -26,11 +26,11 @@ vi.mock('triviumdb', () => ({
   TriviumDB: MockTriviumDB,
 }))
 
-import { HookRegistry } from '@perocore/backend/extensions/hookRegistry'
-import { PromptTemplateLoader } from '@perocore/backend/core/promptTemplateLoader'
-import { LogFileTransport, formatLogLine } from '@perocore/backend/lib/logFileTransport'
-import { MemoryStoreRegistry } from '@perocore/backend/repositories/storeRegistry'
-import type { PathResolver } from '@perocore/backend/core/pathResolver'
+import { HookRegistry } from '@infos/backend/extensions/hookRegistry'
+import { PromptTemplateLoader } from '@infos/backend/core/promptTemplateLoader'
+import { LogFileTransport, formatLogLine } from '@infos/backend/lib/logFileTransport'
+import { MemoryStoreRegistry } from '@infos/backend/repositories/storeRegistry'
+import type { PathResolver } from '@infos/backend/core/pathResolver'
 
 function createResolver(root: string, workshop = true): PathResolver {
   return {
@@ -45,6 +45,10 @@ function createResolver(root: string, workshop = true): PathResolver {
       ),
     ),
     isAvailable: vi.fn((alias: string) => alias === '@workshop' && workshop),
+    // Workshop 多根支持（PromptTemplateLoader 依赖）
+    getRoots: vi.fn((prefix: string) =>
+      prefix === '@workshop' && workshop ? [join(root, 'workshop')] : [],
+    ),
   } as unknown as PathResolver
 }
 
@@ -115,7 +119,7 @@ describe('PromptTemplateLoader', () => {
   let root: string
 
   beforeEach(() => {
-    root = join(tmpdir(), `perocore-template-${Date.now()}-${Math.random()}`)
+    root = join(tmpdir(), `infos-template-${Date.now()}-${Math.random()}`)
   })
 
   afterEach(() => {
@@ -125,10 +129,12 @@ describe('PromptTemplateLoader', () => {
   it('应当按 custom、workshop、official 优先级加载模板并判断来源', async () => {
     const resolver = createResolver(root)
     const loader = new PromptTemplateLoader(resolver)
-    mkdirSync(join(root, 'app', 'prompts', 'tasks'), { recursive: true })
+    // 官方路径与 promptTemplateLoader 当前实现对齐
+    const officialDir = join(root, 'app', 'backend', 'src', 'services', 'mdp', 'prompts', 'tasks')
+    mkdirSync(officialDir, { recursive: true })
     mkdirSync(join(root, 'workshop', 'prompts', 'tasks'), { recursive: true })
     mkdirSync(join(root, 'data', 'custom', 'prompts', 'tasks'), { recursive: true })
-    writeFileSync(join(root, 'app', 'prompts', 'tasks', 'demo.md'), 'official')
+    writeFileSync(join(officialDir, 'demo.md'), 'official')
     writeFileSync(join(root, 'workshop', 'prompts', 'tasks', 'demo.md'), 'workshop')
     writeFileSync(join(root, 'data', 'custom', 'prompts', 'tasks', 'demo.md'), 'custom')
 
@@ -148,8 +154,10 @@ describe('PromptTemplateLoader', () => {
   it('应当在模板缺失时返回空字符串，并支持导出和恢复官方模板', async () => {
     const resolver = createResolver(root, false)
     const loader = new PromptTemplateLoader(resolver)
-    mkdirSync(join(root, 'app', 'prompts', 'tasks'), { recursive: true })
-    writeFileSync(join(root, 'app', 'prompts', 'tasks', 'demo.md'), 'official')
+    // 官方路径与 promptTemplateLoader 当前实现对齐
+    const officialDir = join(root, 'app', 'backend', 'src', 'services', 'mdp', 'prompts', 'tasks')
+    mkdirSync(officialDir, { recursive: true })
+    writeFileSync(join(officialDir, 'demo.md'), 'official')
 
     await expect(loader.load('missing.md')).resolves.toBe('')
     expect(loader.getSource('missing.md')).toBe('missing')
@@ -167,7 +175,7 @@ describe('LogFileTransport', () => {
   let root: string
 
   beforeEach(() => {
-    root = join(tmpdir(), `perocore-log-${Date.now()}-${Math.random()}`)
+    root = join(tmpdir(), `infos-log-${Date.now()}-${Math.random()}`)
   })
 
   afterEach(() => {
@@ -222,7 +230,7 @@ describe('MemoryStoreRegistry', () => {
   let root: string
 
   beforeEach(() => {
-    root = join(tmpdir(), `perocore-store-${Date.now()}-${Math.random()}`)
+    root = join(tmpdir(), `infos-store-${Date.now()}-${Math.random()}`)
     triviumInstances.length = 0
   })
 
@@ -235,10 +243,14 @@ describe('MemoryStoreRegistry', () => {
 
     const main = registry.getAgentStore('pero', 'main')
     const sameMain = registry.getStoreBySource('pero', 'desktop')
-    const social = registry.getStoreBySource('pero', 'group_chat')
-    const diary = registry.getDiaryStore()
+    const group = registry.getStoreBySource('pero', 'group')
+    const legacyGroup = registry.getStoreBySource('pero', 'group_chat')
+    const social = registry.getStoreBySource('pero', 'social')
+    const diary = registry.getDiaryStore('pero')
 
     expect(main).toBe(sameMain)
+    expect(group).toBe(main)
+    expect(legacyGroup).toBe(main)
     expect(social).not.toBe(main)
     expect(diary).not.toBe(main)
     expect(registry.resolveAgentStorePath('pero', 'main')).toContain('main.tdb')

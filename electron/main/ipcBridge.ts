@@ -11,8 +11,14 @@
  * @module electron/main/ipcBridge
  */
 
-import { ipcMain, BrowserWindow, shell, screen, Notification } from 'electron'
+import { ipcMain, BrowserWindow, shell, screen, Notification, nativeTheme, app } from 'electron'
+import os from 'node:os'
+import fs from 'node:fs'
+import path from 'node:path'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { windowManager } from './windows/manager'
+import { paths, isDev, isPackaged, isPortable } from './utils/env'
 import { logger } from './utils/logger'
 
 // ─── 延迟导入的服务 (避免循环引用) ─────────────────────
@@ -23,6 +29,51 @@ const getNativeLoader = () => import('./services/nativeLoader')
 const getAssetService = () => import('./services/assets')
 const getDesktopAwareness = () => import('./services/desktopAwareness')
 const getSystemService = () => import('./services/system')
+const getUpdaterService = () => import('./services/updater')
+const execFileAsync = promisify(execFile)
+
+const CLIENT_AGENT_FILE = path.join(paths.userData, 'client-default-agent.txt')
+
+function readClientDefaultAgent(): string | null {
+  try {
+    const agentId = fs.readFileSync(CLIENT_AGENT_FILE, 'utf8').trim()
+    return agentId || null
+  } catch {
+    return null
+  }
+}
+
+function writeClientDefaultAgent(agentId: string): void {
+  fs.mkdirSync(path.dirname(CLIENT_AGENT_FILE), { recursive: true })
+  fs.writeFileSync(CLIENT_AGENT_FILE, agentId, 'utf8')
+}
+
+function broadcastClientAgent(agentId: string): void {
+  BrowserWindow.getAllWindows().forEach((win) => {
+    if (!win.isDestroyed()) win.webContents.send('client-agent-changed', { agentId })
+  })
+}
+
+async function getDevelopmentInfo(): Promise<Record<string, unknown>> {
+  if (!isDev) return { available: false }
+  try {
+    const [branch, commit, status] = await Promise.all([
+      execFileAsync('git', ['branch', '--show-current'], { cwd: paths.app }),
+      execFileAsync('git', ['rev-parse', '--short', 'HEAD'], { cwd: paths.app }),
+      execFileAsync('git', ['status', '--porcelain'], { cwd: paths.app }),
+    ])
+    return {
+      available: true,
+      branch: branch.stdout.trim(),
+      commit: commit.stdout.trim(),
+      dirty: Boolean(status.stdout.trim()),
+      projectPath: paths.app,
+      updateCommand: 'git pull --rebase; pnpm install',
+    }
+  } catch (error) {
+    return { available: false, error: String(error), projectPath: paths.app }
+  }
+}
 
 /** 注册所有 IPC 通道 */
 export function registerIpcHandlers(): void {
@@ -122,6 +173,13 @@ function registerWindowHandlers(): void {
   ipcMain.handle('set-fix-window-topmost', (event) => {
     BrowserWindow.fromWebContents(event.sender)?.setAlwaysOnTop(true, 'screen-saver')
   })
+
+  // 同步 app 深浅色到系统原生主题（影响原生标题栏/滚动条/右键菜单等）
+  ipcMain.handle('set-native-theme', (_event, mode: unknown) => {
+    if (mode === 'dark' || mode === 'light' || mode === 'system') {
+      nativeTheme.themeSource = mode
+    }
+  })
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -192,13 +250,97 @@ function registerBackendHandlers(): void {
 // 系统能力
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function registerSystemHandlers(): void {
-  ipcMain.handle('get-app-version', () => {
-    const { app } = require('electron')
-    return app.getVersion()
+  ipcMain.handle('get-app-version', () => app.getVersion())
+
+  ipcMain.handle('get-client-info', async () => {
+    const stats = await getSystemService().then((service) => service.getSystemStats())
+    const edition = isDev
+      ? 'development'
+      : isPortable
+        ? 'portable'
+        : process.env.INFOS_EDITION === 'steam'
+          ? 'steam'
+          : 'release'
+    return {
+      version: app.getVersion(),
+      edition,
+      isPackaged,
+      platform: process.platform,
+      architecture: process.arch,
+      osVersion: os.release(),
+      osName: os.type(),
+      hostname: os.hostname(),
+      cpuModel: os.cpus()[0]?.model ?? '未知',
+      cpuCores: os.cpus().length,
+      memoryUsed: stats.memoryUsed,
+      memoryTotal: stats.memoryTotal,
+      uptime: stats.uptime,
+      electronVersion: process.versions.electron,
+      chromiumVersion: process.versions.chrome,
+      nodeVersion: process.versions.node,
+      dataPath: paths.data,
+      logsPath: paths.logs,
+      appPath: paths.app,
+      windows: {
+        launcher: Boolean(windowManager.launcherWin && !windowManager.launcherWin.isDestroyed()),
+        dashboard: Boolean(windowManager.dashboardWin && !windowManager.dashboardWin.isDestroyed()),
+        pet: Boolean(windowManager.petWin && !windowManager.petWin.isDestroyed()),
+      },
+      development: await getDevelopmentInfo(),
+    }
+  })
+
+  ipcMain.handle('get-client-default-agent', () => readClientDefaultAgent())
+  ipcMain.handle('set-client-default-agent', (_event, input: unknown) => {
+    const agentId =
+      typeof input === 'string'
+        ? input
+        : typeof input === 'object' && input !== null
+          ? String((input as { agentId?: unknown }).agentId ?? '')
+          : ''
+    if (!agentId) throw new Error('缺少 Agent ID')
+    writeClientDefaultAgent(agentId)
+    broadcastClientAgent(agentId)
+    return { agentId }
+  })
+
+  ipcMain.handle('get-update-state', async () => (await getUpdaterService()).getUpdateState())
+  ipcMain.handle('check-client-update', async () => (await getUpdaterService()).checkForUpdates())
+  ipcMain.handle('download-client-update', async () => (await getUpdaterService()).downloadUpdate())
+  ipcMain.handle('install-client-update', async () => (await getUpdaterService()).installUpdate())
+  ipcMain.handle('get-latest-release', async () => (await getUpdaterService()).getLatestRelease())
+
+  ipcMain.handle('open-external-url', async (_event, input: unknown) => {
+    const url =
+      typeof input === 'string'
+        ? input
+        : typeof input === 'object' && input !== null
+          ? String((input as { url?: unknown }).url ?? '')
+          : ''
+    if (!/^https:\/\//.test(url)) throw new Error('仅允许打开 HTTPS 链接')
+    await shell.openExternal(url)
+    return true
+  })
+
+  ipcMain.handle('open-client-path', async (_event, key: unknown) => {
+    const target = key === 'logs' ? paths.logs : key === 'app' ? paths.app : paths.data
+    const errorMessage = await shell.openPath(target)
+    if (errorMessage) throw new Error(errorMessage)
+    return true
   })
 
   ipcMain.handle('open-root-folder', () => {
-    shell.openPath(process.cwd())
+    return shell.openPath(process.cwd())
+  })
+
+  /** 在 Electron 所属桌面会话中打开由 Daemon 安全解析出的绝对目录。 */
+  ipcMain.handle('open-local-path', async (_event, targetPath: unknown) => {
+    if (typeof targetPath !== 'string' || !targetPath.trim()) {
+      throw new Error('缺少要打开的目录路径')
+    }
+    const errorMessage = await shell.openPath(targetPath)
+    if (errorMessage) throw new Error(errorMessage)
+    return true
   })
 
   ipcMain.handle('quit-app', () => {
@@ -339,6 +481,15 @@ function registerSteamHandlers(): void {
     try {
       const { getSubscribedItems } = await import('./services/steam')
       return getSubscribedItems()
+    } catch {
+      return []
+    }
+  })
+
+  ipcMain.handle('steam-workshop-get-installations', async () => {
+    try {
+      const { getWorkshopInstallations } = await import('./services/steam')
+      return getWorkshopInstallations()
     } catch {
       return []
     }

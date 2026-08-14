@@ -9,6 +9,7 @@
  */
 import { computed, watch, onMounted } from 'vue'
 import { PixelIcon, PInput, PButton, PSelect, PDialog, PEmpty, PCard } from '../../pixel'
+import StoryImportDialog from '../StoryImportDialog.vue'
 import PDatePicker from '../../pixel/PDatePicker.vue'
 import { useMemories } from '../../../composables/dashboard/useMemories'
 import { useDashboardContext } from '../../../composables/dashboard'
@@ -61,9 +62,6 @@ const {
   triggerReindex,
   // 故事导入
   isImportOpen,
-  importText,
-  isImporting,
-  importStory,
   // 操作
   fetchMemories,
 } = useMemories()
@@ -125,14 +123,14 @@ const chartOption = computed<EChartsOption>(() => {
     label: {
       show: Number(node.value ?? 0) > 5,
       fontSize: 10,
-      color: 'var(--color-text-muted)',
+      color: 'var(--ui-text-tertiary)',
     },
     tooltip: {
       formatter: () => {
         const content = String(node.full_content ?? '').substring(0, 80)
         return `<div style="max-width:260px;padding:4px;">
           <div style="font-weight:800;margin-bottom:4px;font-size:13px;">记忆 #${node.id}</div>
-          <div style="font-size:12px;color:#64748b;line-height:1.5;">${content}${content.length >= 80 ? '...' : ''}</div>
+          <div style="font-size:12px;color:var(--ui-text-secondary);line-height:1.5;">${content}${content.length >= 80 ? '...' : ''}</div>
         </div>`
       },
     },
@@ -167,7 +165,7 @@ const chartOption = computed<EChartsOption>(() => {
       borderColor: 'var(--color-border)',
       borderWidth: 1,
       textStyle: { color: 'var(--color-text-primary)', fontSize: 12 },
-      extraCssText: 'box-shadow:0 4px 12px rgba(0,0,0,0.15);',
+      extraCssText: 'box-shadow:var(--ui-shadow-md);',
     },
     legend: {
       data: categories.map((c) => c.name),
@@ -283,7 +281,9 @@ const chartOption = computed<EChartsOption>(() => {
         class="flex-1 flex flex-col items-center cursor-pointer"
         @click="filterType = filterType === 'episodic' ? 'all' : 'episodic'"
       >
-        <span class="text-xl font-black text-slate-800 font-pixel">{{ stats.episodic }}</span>
+        <span class="text-xl font-black text-[var(--ui-text-primary)] font-pixel">
+          {{ stats.episodic }}
+        </span>
         <span class="text-[10px] font-bold text-slate-400 uppercase font-pixel">情景</span>
       </PCard>
       <PCard
@@ -319,11 +319,11 @@ const chartOption = computed<EChartsOption>(() => {
       <PDatePicker v-model="filterDate" placeholder="日期筛选" class="w-[150px]" />
 
       <!-- 视图切换 -->
-      <div class="flex border-2 border-slate-200 overflow-hidden">
+      <div class="flex border-2 border-[var(--ui-border-default)] overflow-hidden">
         <button
           :class="[
-            'flex items-center justify-center w-9 h-8 bg-white text-slate-400 border-none cursor-pointer transition-all hover:bg-slate-50 hover:text-sky-500',
-            viewMode === 'list' ? 'bg-sky-50 text-sky-600' : '',
+            'flex items-center justify-center w-9 h-8 bg-[var(--dash-panel-bg)] text-[var(--ui-text-tertiary)] border-none cursor-pointer transition-all hover:bg-[var(--ui-bg-hover)] hover:text-[var(--ui-accent-sky)]',
+            viewMode === 'list' ? 'bg-[var(--ui-accent-sky-soft)] text-[var(--ui-accent-sky)]' : '',
           ]"
           title="列表视图"
           @click="switchView('list')"
@@ -332,8 +332,10 @@ const chartOption = computed<EChartsOption>(() => {
         </button>
         <button
           :class="[
-            'flex items-center justify-center w-9 h-8 bg-white text-slate-400 border-none border-l border-slate-200 cursor-pointer transition-all hover:bg-slate-50 hover:text-sky-500',
-            viewMode === 'graph' ? 'bg-sky-50 text-sky-600' : '',
+            'flex items-center justify-center w-9 h-8 bg-[var(--dash-panel-bg)] text-[var(--ui-text-tertiary)] border-none border-l border-[var(--ui-border-default)] cursor-pointer transition-all hover:bg-[var(--ui-bg-hover)] hover:text-[var(--ui-accent-sky)]',
+            viewMode === 'graph'
+              ? 'bg-[var(--ui-accent-sky-soft)] text-[var(--ui-accent-sky)]'
+              : '',
           ]"
           title="图谱视图"
           @click="switchView('graph')"
@@ -440,7 +442,7 @@ const chartOption = computed<EChartsOption>(() => {
               </span>
               <span
                 v-if="mem.tags.length > 3"
-                class="text-[10px] font-bold text-sky-500 px-1.5 py-0.5 bg-slate-50 border border-slate-200"
+                class="text-[10px] font-bold text-[var(--ui-accent-sky)] px-1.5 py-0.5 bg-[var(--dash-panel-soft)] border border-[var(--ui-border-default)]"
               >
                 +{{ mem.tags.length - 3 }}
               </span>
@@ -470,7 +472,7 @@ const chartOption = computed<EChartsOption>(() => {
         <PCard
           pixel
           padding="none"
-          class="flex-1 border-2 border-slate-200 bg-slate-50 overflow-hidden relative"
+          class="flex-1 border-2 border-[var(--dash-panel-border)] bg-[var(--dash-panel-soft)] overflow-hidden relative"
         >
           <VChart :option="chartOption" autoresize class="w-full h-full min-h-[400px]" />
         </PCard>
@@ -544,7 +546,7 @@ const chartOption = computed<EChartsOption>(() => {
     <!-- 详情弹窗 -->
     <PDialog v-model="isDetailOpen" title="记忆详情" width="520px">
       <template v-if="selectedMemory">
-        <div class="flex flex-col gap-4">
+        <div class="mem-dialog-body flex flex-col gap-4">
           <div class="flex items-center gap-3 flex-wrap">
             <span :class="['text-[10px] font-bold px-2 py-0.5', typeColors[selectedMemory.type]]">
               {{ typeLabels[selectedMemory.type] }}
@@ -605,58 +607,53 @@ const chartOption = computed<EChartsOption>(() => {
       </template>
     </PDialog>
 
-    <!-- 故事导入弹窗 (P4) -->
-    <PDialog v-model="isImportOpen" title="导入故事" width="560px">
-      <div class="flex flex-col gap-3">
-        <p class="text-xs text-slate-400 leading-relaxed">
-          将一段故事、设定或职事粘贴到下方，它会作为情景记忆导入到 Pero 的记忆库中。
-        </p>
-        <textarea
-          v-model="importText"
-          class="w-full p-3 border-2 border-slate-200 bg-slate-50 text-slate-800 text-[13px] leading-relaxed resize-y outline-none focus:border-sky-300 font-sans"
-          rows="10"
-          placeholder="粘贴故事内容..."
-        />
-      </div>
-      <template #footer>
-        <PButton variant="ghost" @click="isImportOpen = false">取消</PButton>
-        <PButton
-          variant="primary"
-          :disabled="!importText.trim() || isImporting"
-          @click="importStory"
-        >
-          <PixelIcon name="plus" size="xs" />
-          {{ isImporting ? '导入中...' : '导入' }}
-        </PButton>
-      </template>
-    </PDialog>
+    <!-- 共享故事导入弹窗：与总览页使用同一表现和后端导入链路 -->
+    <StoryImportDialog
+      v-model="isImportOpen"
+      :agent-id="ctx.activeAgentId.value || 'pero'"
+      @imported="fetchMemories"
+    />
   </div>
 </template>
 
 <style scoped>
+/* 弹窗内容（Teleport 到 body）语义兜底，双主题兼容 */
+.mem-dialog-body :is(.text-slate-800, .text-slate-700, .text-slate-600) {
+  color: var(--ui-text-primary);
+}
+.mem-dialog-body :is(.text-slate-500, .text-slate-400) {
+  color: var(--ui-text-secondary);
+}
+.mem-dialog-body [class*='bg-slate-'] {
+  background: var(--dash-panel-soft);
+}
+.mem-dialog-body [class*='border-slate-'] {
+  border-color: var(--ui-border-default);
+}
+
 /* 类型 badge 颜色 — 通过 typeColors 动态绑定 */
 .type-core {
-  color: #0284c7;
-  background: rgba(56, 189, 248, 0.1);
-  border: 1px solid rgba(56, 189, 248, 0.3);
+  color: var(--ui-accent-sky);
+  background: var(--ui-accent-sky-soft);
+  border: 1px solid var(--ui-accent-sky);
 }
 
 .type-episodic {
-  color: #16a34a;
-  background: rgba(34, 197, 94, 0.1);
-  border: 1px solid rgba(34, 197, 94, 0.3);
+  color: var(--ui-success);
+  background: var(--ui-success-soft);
+  border: 1px solid var(--ui-success);
 }
 
 .type-diary {
-  color: #d97706;
-  background: rgba(234, 179, 8, 0.1);
-  border: 1px solid rgba(234, 179, 8, 0.3);
+  color: var(--ui-warning);
+  background: var(--ui-warning-soft);
+  border: 1px solid var(--ui-warning);
 }
 
 .type-reflection {
-  color: #db2777;
-  background: rgba(236, 72, 153, 0.1);
-  border: 1px solid rgba(236, 72, 153, 0.3);
+  color: var(--ui-accent-primary);
+  background: var(--ui-accent-primary-soft);
+  border: 1px solid var(--ui-accent-primary);
 }
 
 /* 情感标记呼吸动画 */
@@ -708,7 +705,7 @@ const chartOption = computed<EChartsOption>(() => {
 }
 
 .mem-scrollbar::-webkit-scrollbar-thumb {
-  background: #bae6fd;
+  background: var(--ui-scrollbar-thumb);
   border-radius: 0;
 }
 </style>

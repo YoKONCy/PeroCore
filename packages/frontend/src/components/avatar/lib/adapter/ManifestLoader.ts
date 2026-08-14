@@ -9,7 +9,7 @@
 
 import { logger } from '../../../../lib/logger'
 import type { IAvatarManifest } from './IAvatarManifest'
-// Provider 接收到的路径已经是可直接 fetch 的 URL，无需额外转换
+import { resolveAvatarAssetUrl, resolveAvatarManifestUrls } from '../avatarAssetUrl'
 
 /**
  * Manifest 加载器
@@ -25,13 +25,12 @@ export class ManifestLoader {
    * @throws {Error} 网络请求失败或数据校验不通过时抛出
    */
   static async fromJson(path: string): Promise<IAvatarManifest> {
-    const url = path
-    const response = await fetch(url)
+    const response = await fetch(resolveAvatarAssetUrl(path))
     if (!response.ok) {
       throw new Error(`加载 Manifest 失败: ${path}`)
     }
     const manifest = await response.json()
-    return ManifestLoader.validate(manifest)
+    return resolveAvatarManifestUrls(ManifestLoader.validate(manifest))
   }
 
   /**

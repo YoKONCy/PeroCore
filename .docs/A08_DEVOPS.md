@@ -225,13 +225,13 @@ Docker 版可接入 OpenTelemetry：
 // 仅 Docker 版启用，Electron 版跳过
 if (isDocker && process.env.OTEL_ENDPOINT) {
   initOpenTelemetry({
-    serviceName: 'perocore-backend',
+    serviceName: 'infos-backend',
     endpoint: process.env.OTEL_ENDPOINT,
   })
 }
 ```
 
-**当前不需要实现**，PeroCore 是单用户应用，日志 + 健康检查已足够。
+**当前不需要实现**，infOS 是单用户应用，日志 + 健康检查已足够。
 
 ---
 
@@ -275,4 +275,4 @@ app.get('/docs', swaggerUI({ url: '/openapi.json' }))
 
 ---
 
-*本文档由 Carola 整理，适用于 PeroCore 运维与 DevOps 规范。*
+*本文档由 Carola 整理，适用于 infOS 运维与 DevOps 规范。*

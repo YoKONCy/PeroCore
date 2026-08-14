@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createAgentRouter } from '@perocore/backend/routers/agent.router'
-import { createMemoryRouter } from '@perocore/backend/routers/memory.router'
-import { createMcpRouter } from '@perocore/backend/routers/mcp.router'
-import { createVoiceRouter } from '@perocore/backend/routers/voice.router'
+import { createAgentRouter } from '@infos/backend/routers/agent.router'
+import { createMemoryRouter } from '@infos/backend/routers/memory.router'
+import { createMcpRouter } from '@infos/backend/routers/mcp.router'
+import { createVoiceRouter } from '@infos/backend/routers/voice.router'
+import { createSchedulerRouter } from '@infos/backend/routers/scheduler.router'
 
 async function readJson(response: Response) {
   return response.json() as Promise<Record<string, unknown>>
@@ -23,6 +24,10 @@ describe('AgentRouter', () => {
   function createCtx() {
     const agent = createAgent()
     return {
+      runtimeStateService: {
+        // AIOS: 不再有后端全局活跃 Agent；getActiveAgent 返回 null 时回退 defaultAgentId
+        getActiveAgent: vi.fn(() => null),
+      },
       agentManager: {
         // AIOS 架构迁移：activeAgentId 已重命名为 defaultAgentId
         defaultAgentId: 'pero',
@@ -34,7 +39,30 @@ describe('AgentRouter', () => {
         })),
         // setActiveAgent 已废弃：PUT /api/agents/active 路由已移除，不再支持运行时切换全局活跃 Agent
         getAgent: vi.fn((id: string) => (id === 'pero' ? agent : null)),
+        // B6-3: GET /:id 返回完整可编辑详情（四页签字段）
+        getAgentDetail: vi.fn((id: string) =>
+          id === 'pero'
+            ? {
+                ...agent,
+                ownerAppellation: '主人',
+                systemPrompt: '我是 Pero。',
+                channelPatches: {},
+                socialBinding: {},
+                toolPolicies: {},
+                waifuTexts: {},
+                useStickers: true,
+                isUser: false,
+                isEnabled: true,
+                isActive: true,
+              }
+            : null,
+        ),
         createAgent: vi.fn((body: Record<string, unknown>) => body),
+        updateAgent: vi.fn((id: string, patch: Record<string, unknown>) => ({
+          ...agent,
+          ...patch,
+          id,
+        })),
         deleteAgent: vi.fn(),
         enableAgent: vi.fn((id: string) => id === 'pero'),
         disableAgent: vi.fn((id: string) => id === 'pero'),
@@ -42,10 +70,30 @@ describe('AgentRouter', () => {
         getWaifuTexts: vi.fn((id: string) =>
           Promise.resolve(id === 'pero' ? { idle: ['喵'] } : null),
         ),
+        getWritableCapabilitiesPath: vi.fn(() => '/tmp/pero-capabilities.yaml'),
+      },
+      strongholdService: {
+        ensureAgentLocation: vi.fn(() => Promise.resolve({ agentId: 'pero', roomId: 'living' })),
       },
       capabilityGate: {
         getAgentModes: vi.fn(() => ['chat']),
         getAgentSkills: vi.fn(() => ['memory']),
+        // B6-3: 能力矩阵结构化读取（前端高级页表单化编辑）
+        getChannels: vi.fn(() => ({
+          desktop: { tools: [], skills: [], promptFragments: [] },
+        })),
+        writeChannels: vi.fn(),
+        reloadAll: vi.fn(),
+      },
+      skillLoader: {
+        getAllManifests: vi.fn(() => [
+          { id: 'memory', name: '记忆管理', description: '管理长期记忆' },
+        ]),
+      },
+      companionSchedulerService: {
+        isRunning: vi.fn(() => false),
+        start: vi.fn(),
+        stop: vi.fn(() => Promise.resolve()),
       },
     }
   }
@@ -75,7 +123,11 @@ describe('AgentRouter', () => {
     })
     expect(await readJson(capabilities)).toMatchObject({
       code: 'OK',
-      data: { agentId: 'pero', modes: ['chat'], skills: ['memory'] },
+      data: {
+        agentId: 'pero',
+        channels: { desktop: { tools: [], skills: [], promptFragments: [] } },
+        skills: [{ id: 'memory', name: '记忆管理', description: '管理长期记忆' }],
+      },
     })
     expect(await readJson(texts)).toMatchObject({ code: 'OK', data: { idle: ['喵'] } })
   })
@@ -99,7 +151,9 @@ describe('AgentRouter', () => {
       code: 'CREATED',
       data: { id: 'neko', name: 'Neko' },
     })
-    expect(await readJson(deleted)).toEqual({ code: 'OK', message: 'Agent "neko" 已删除' })
+    expect(ctx.strongholdService.ensureAgentLocation).toHaveBeenCalledWith('neko')
+    expect(ctx.strongholdService.ensureAgentLocation).toHaveBeenCalledWith('pero')
+    expect(await readJson(deleted)).toEqual({ code: 'OK', message: `Agent "neko" 已删除` })
     expect(await readJson(enabled)).toEqual({ code: 'OK', message: 'Agent pero 已启用' })
     expect(await readJson(disabled)).toEqual({ code: 'OK', message: 'Agent pero 已禁用' })
     expect(await readJson(reloaded)).toMatchObject({ code: 'OK', data: [{ id: 'pero' }] })
@@ -120,6 +174,53 @@ describe('AgentRouter', () => {
     expect(avatar.status).toBe(404)
     expect(await readJson(avatar)).toEqual({ code: 'NOT_FOUND', message: '该 Agent 没有头像' })
     expect(invalid.status).toBe(400)
+  })
+})
+
+describe('SchedulerRouter', () => {
+  it('应当返回调度器时间基准、运行状态和任务元数据', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
+    const task = {
+      name: 'cleanup',
+      displayName: '临时文件清理',
+      description: '清理过期缓存、上传文件与临时资源',
+      intervalMs: 3_600_000,
+      running: false,
+      nextDueAt: Date.now() + 3_600_000,
+      lastStartedAt: null,
+      lastFinishedAt: null,
+      lastSuccessAt: null,
+      lastFailureAt: null,
+      lastOutcome: null,
+      stats: { totalRuns: 0, successCount: 0, errorCount: 0, averageDurationMs: 0 },
+    }
+    const ctx = {
+      scheduler: {
+        isStarted: true,
+        getStatus: vi.fn(() => [task]),
+        triggerNow: vi.fn(),
+      },
+    }
+    const router = createSchedulerRouter(ctx as never)
+
+    const status = await readJson(await router.request('http://test/status'))
+    const tasks = await readJson(await router.request('http://test/tasks'))
+
+    expect(status).toMatchObject({
+      code: 'OK',
+      data: { schedulerRunning: true, serverNow: Date.now(), taskCount: 1, activeTasks: 0 },
+    })
+    expect(tasks).toMatchObject({
+      code: 'OK',
+      data: {
+        schedulerRunning: true,
+        serverNow: Date.now(),
+        total: 1,
+        items: [{ ...task, intervalDesc: '1.0小时' }],
+      },
+    })
+    vi.useRealTimers()
   })
 })
 

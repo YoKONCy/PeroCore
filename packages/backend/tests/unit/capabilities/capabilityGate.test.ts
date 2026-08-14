@@ -2,10 +2,10 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { CapabilityGate } from '@perocore/backend/capabilities/capabilityGate'
-import type { SkillManifest } from '@perocore/backend/capabilities/types'
+import { CapabilityGate } from '@infos/backend/capabilities/capabilityGate'
+import type { SkillManifest } from '@infos/backend/capabilities/types'
 
-vi.mock('@perocore/backend/lib/logger', () => ({
+vi.mock('@infos/backend/lib/logger', () => ({
   createLogger: () => ({
     debug: vi.fn(),
     info: vi.fn(),
@@ -40,7 +40,7 @@ describe('CapabilityGate', () => {
   let toolRegistry: ToolRegistryMock
 
   beforeEach(() => {
-    rootDir = join(tmpdir(), `perocore-capability-${Date.now()}-${Math.random()}`)
+    rootDir = join(tmpdir(), `infos-capability-${Date.now()}-${Math.random()}`)
     mkdirSync(join(rootDir, 'pero'), { recursive: true })
     writeFileSync(
       join(rootDir, 'pero', 'capabilities.yaml'),

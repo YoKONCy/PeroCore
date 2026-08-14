@@ -19,10 +19,11 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),
+      '@infos/shared': resolve(__dirname, '../shared/src'),
     },
   },
   server: {
-    port: 5173,
+    port: 7359,
     // 开发时代理后端 API
     proxy: {
       '/api': {

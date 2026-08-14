@@ -2,9 +2,9 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { SocialSessionManager } from '@perocore/backend/services/social/socialSessionManager'
-import type { InboundMessage } from '@perocore/backend/services/social/types'
-import { StickerService } from '@perocore/backend/services/social/stickerService'
+import { SocialSessionManager } from '@infos/social/runtime/socialSessionManager'
+import type { InboundMessage } from '@infos/social/runtime/types'
+import { StickerService } from '@infos/social/runtime/stickerService'
 
 function createMessage(partial: Partial<InboundMessage> = {}): InboundMessage {
   return {
@@ -130,7 +130,7 @@ describe('StickerService', () => {
   let root: string
 
   beforeEach(() => {
-    root = join(tmpdir(), `perocore-stickers-${Date.now()}-${Math.random()}`)
+    root = join(tmpdir(), `infos-stickers-${Date.now()}-${Math.random()}`)
     mkdirSync(join(root, 'pero', 'stickers'), { recursive: true })
     writeFileSync(join(root, 'pero', 'stickers', '开心.jpg'), 'jpg')
     writeFileSync(join(root, 'pero', 'stickers', 'Wave.PNG'), 'png')

@@ -11,7 +11,7 @@ interface Props {
 }
 
 withDefaults(defineProps<Props>(), {
-  name: 'Pero',
+  name: '助手',
 })
 </script>
 

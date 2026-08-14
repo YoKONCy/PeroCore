@@ -2,7 +2,7 @@
   "id": "terminal-executor",
   "name": "终端执行",
   "version": "1.0.0",
-  "author": "PeroCore Team",
+  "author": "infOS Team",
   "description": "在系统 shell 中执行命令并返回输出。完全跨平台 (Windows: PowerShell, Linux/Mac: sh)。",
   "type": "tool",
   "entry": "index.ts",
@@ -11,12 +11,16 @@
 
   "toolDefinition": {
     "name": "terminal_execute",
-    "description": "在系统终端中执行命令并获取输出。支持任意 shell 命令。注意：请谨慎执行有副作用的命令。",
+    "description": "在当前 Agent 的执行会话工作区内运行短命令并获取输出。命令默认直接在 workspace 根目录执行；相对 cwd 也以该根目录为基准，不要填写后端工程路径。支持任意 shell 命令，请谨慎执行有副作用的命令。",
+    "display": { "label": "执行命令", "icon": "terminal", "color": "green", "style": "terminal" },
     "parameters": {
       "type": "object",
       "properties": {
         "command": { "type": "string", "description": "要执行的命令" },
-        "cwd": { "type": "string", "description": "工作目录 (可选，默认用户主目录)" },
+        "cwd": {
+          "type": "string",
+          "description": "工作目录（可选）。缺省或填写 . 表示当前 Agent workspace 根目录；相对路径以该根目录为基准，例如 src。不要添加 workspace/ 前缀。"
+        },
         "timeout": { "type": "number", "description": "超时时间(毫秒)，默认 30000" }
       },
       "required": ["command"]

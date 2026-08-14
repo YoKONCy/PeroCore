@@ -22,16 +22,16 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ContextCompiler, DEFAULT_POLICIES } from '@perocore/backend/services/context/contextCompiler'
-import { MdpEngine } from '@perocore/backend/services/prompt/mdpEngine'
-import { CapabilityGate } from '@perocore/backend/capabilities/capabilityGate'
-import type { SkillManifest } from '@perocore/backend/capabilities/types'
-import type { ThreadChannel } from '@perocore/backend/repositories/thread.repo'
-import type { MemorySearchResultItem } from '@perocore/backend/services/memory/memoryProvider'
-import { MemoryGate } from '@perocore/backend/services/memory/memoryGate'
+import { ContextCompiler, DEFAULT_POLICIES } from '@infos/backend/services/context/contextCompiler'
+import { MdpEngine } from '@infos/backend/services/prompt/mdpEngine'
+import { CapabilityGate } from '@infos/backend/capabilities/capabilityGate'
+import type { SkillManifest } from '@infos/backend/capabilities/types'
+import type { ThreadChannel } from '@infos/backend/repositories/thread.repo'
+import type { MemorySearchResultItem } from '@infos/backend/services/memory/memoryProvider'
+import { MemoryGate } from '@infos/backend/services/memory/memoryGate'
 
 // 屏蔽日志噪音
-vi.mock('@perocore/backend/lib/logger', () => ({
+vi.mock('@infos/backend/lib/logger', () => ({
   createLogger: () => ({
     debug: vi.fn(),
     info: vi.fn(),
@@ -263,7 +263,7 @@ interface SetupResult {
  *   <rootDir>/agents/<agentId>/{system_prompt.md, capabilities.yaml}
  */
 function setupEnvironment(opts: SetupOptions): SetupResult {
-  const rootDir = join(tmpdir(), `perocore-ctx-${Date.now()}-${Math.random()}`)
+  const rootDir = join(tmpdir(), `infos-ctx-${Date.now()}-${Math.random()}`)
   const promptDir = join(rootDir, 'prompts')
   const agentsDir = join(rootDir, 'agents')
 
@@ -277,10 +277,22 @@ function setupEnvironment(opts: SetupOptions): SetupResult {
   mkdirSync(join(promptDir, 'components', 'rules'), { recursive: true })
   mkdirSync(join(promptDir, 'components', 'output'), { recursive: true })
   mkdirSync(join(promptDir, 'components', 'abilities'), { recursive: true })
-  writeFileSync(join(promptDir, 'components', 'rules', 'system_core.md'), SYSTEM_CORE_TEMPLATE, 'utf-8')
-  writeFileSync(join(promptDir, 'components', 'output', 'output_constraint.md'), OUTPUT_CONSTRAINT_TEMPLATE, 'utf-8')
+  writeFileSync(
+    join(promptDir, 'components', 'rules', 'system_core.md'),
+    SYSTEM_CORE_TEMPLATE,
+    'utf-8',
+  )
+  writeFileSync(
+    join(promptDir, 'components', 'output', 'output_constraint.md'),
+    OUTPUT_CONSTRAINT_TEMPLATE,
+    'utf-8',
+  )
   writeFileSync(join(promptDir, 'components', 'abilities', 'vision.md'), VISION_TEMPLATE, 'utf-8')
-  writeFileSync(join(promptDir, 'components', 'abilities', 'workspace.md'), WORKSPACE_TEMPLATE, 'utf-8')
+  writeFileSync(
+    join(promptDir, 'components', 'abilities', 'workspace.md'),
+    WORKSPACE_TEMPLATE,
+    'utf-8',
+  )
 
   // 写入 agent 目录
   const agentProfiles: SetupResult['agentProfiles'] = {}
@@ -290,7 +302,11 @@ function setupEnvironment(opts: SetupOptions): SetupResult {
     const promptPath = join(agentDir, 'system_prompt.md')
     writeFileSync(promptPath, agent.systemPrompt ?? `我是 ${agent.id} 人格定义`, 'utf-8')
     // capabilities.yaml 必须以 agent: <id> 开头
-    writeFileSync(join(agentDir, 'capabilities.yaml'), `agent: ${agent.id}\n${agent.capabilities}`, 'utf-8')
+    writeFileSync(
+      join(agentDir, 'capabilities.yaml'),
+      `agent: ${agent.id}\n${agent.capabilities}`,
+      'utf-8',
+    )
     agentProfiles[agent.id] = {
       promptPath,
       channelPatches: agent.channelPatches ?? {},
@@ -360,9 +376,9 @@ function createMockDeps(opts: DepsOptions) {
       createdAt: '',
       updatedAt: '',
     })),
-    getActiveMessages: vi.fn(async (_threadId: string, limit: number) =>
-      // 截断逻辑由 mock 模拟：只返回最近 limit 条
-      opts.messages.slice(-limit).map((m, i) => ({
+    getActiveMessagePairs: vi.fn(async (_threadId: string, limit: number) =>
+      // 截断逻辑由 mock 模拟：每个消息对包含 2 条消息
+      opts.messages.slice(-limit * 2).map((m, i) => ({
         id: i + 1,
         threadId: opts.thread.id,
         role: m.role,
@@ -403,6 +419,20 @@ function createCompiler(env: SetupResult, deps: ReturnType<typeof createMockDeps
     deps.memoryProvider as never,
     env.mdpEngine,
     env.capabilityGate,
+    {
+      get: vi.fn(async (threadId: string, agentId: string) => ({
+        threadId,
+        agentId,
+        currentGoal: '',
+        privateFacts: '',
+        revision: 0,
+        updatedAt: null,
+      })),
+      formatForPrompt: vi.fn(
+        () =>
+          '<Flow_State>\n<Current_Goal>暂无明确的持续目标。</Current_Goal>\n<Private_Facts>暂无需要私下持续记住的事实。</Private_Facts>\n</Flow_State>',
+      ),
+    } as never,
   )
 }
 
@@ -428,6 +458,14 @@ describe('ContextCompiler 上下文拼装链路', () => {
 
   afterEach(() => {
     if (cleanup) cleanup()
+  })
+
+  it('group 通道应启用主 Agent 记忆、据点工具描述和状态注入', () => {
+    expect(DEFAULT_POLICIES.group).toMatchObject({
+      enableMemoryRetrieval: true,
+      enableToolDescriptions: true,
+      enableStateInjection: true,
+    })
   })
 
   // ── 场景 1：基础场景 desktop channel 正常拼装 ──
@@ -523,7 +561,7 @@ describe('ContextCompiler 上下文拼装链路', () => {
         loadedMessageCount: 3,
         hasMemoryRetrieval: true,
         hasStateInjection: true,
-        toolCount: 4,
+        toolCount: 6,
       })
     })
   })
@@ -567,42 +605,15 @@ describe('ContextCompiler 上下文拼装链路', () => {
       cleanup = env.cleanup
     })
 
-    it('social channel 应禁用工具描述/记忆/状态注入（fallback 策略），且不含危险工具', async () => {
+    it('social channel 应拒绝进入主 Agent ContextCompiler', async () => {
       const deps = createMockDeps({
         thread: { id: 't2', agentId: 'pero', channel: 'social' },
         messages: [{ role: 'user', content: '在吗' }],
         agentProfiles: env.agentProfiles,
-        // 配置 mood/owner，验证状态注入关闭时这些值不应出现
-        config: {
-          'owner.name': '小明',
-          'agent.pero.mood': 'happy',
-          'agent.pero.vibe': 'active',
-          'agent.pero.mind': '想聊天',
-        },
       })
       const compiler = createCompiler(env, deps)
 
-      const result = await compiler.compile('t2', 'pero')
-
-      const systemContent = result.messages[0]?.content ?? ''
-
-      // social 的 DEFAULT_POLICIES：工具描述/记忆/状态全部关闭
-      expect(DEFAULT_POLICIES.social.enableToolDescriptions).toBe(false)
-      expect(DEFAULT_POLICIES.social.enableMemoryRetrieval).toBe(false)
-      expect(DEFAULT_POLICIES.social.enableStateInjection).toBe(false)
-
-      // 拼装结果不应包含工具列表与危险工具名
-      expect(systemContent).not.toContain('<Available_Tools>')
-      expect(systemContent).not.toContain('terminal_execute')
-      expect(systemContent).not.toContain('write_file')
-      // 状态注入关闭：buildStateSection 未调用，mood/owner 配置值不应渲染进上下文
-      expect(systemContent).not.toContain('happy')
-      expect(systemContent).not.toContain('小明')
-
-      // 清单：工具数为 0（策略关闭工具描述），无记忆检索，无状态注入
-      expect(result.manifest.toolCount).toBe(0)
-      expect(result.manifest.hasMemoryRetrieval).toBe(false)
-      expect(result.manifest.hasStateInjection).toBe(false)
+      await expect(compiler.compile('t2', 'pero')).rejects.toThrow('必须通过 SocialAppRuntime 处理')
     })
 
     it('CapabilityGate 层应确保 social channel 只暴露最小工具白名单', () => {
@@ -622,65 +633,64 @@ describe('ContextCompiler 上下文拼装链路', () => {
     })
   })
 
-  // ── 场景 3：陪伴场景 companion channel 极简上下文 ──
-  describe('场景 3：companion channel 极简上下文', () => {
+  // ── 场景 3：Desktop Thread 的 ambient 请求级能力收窄 ──
+  describe('场景 3：ambient 请求级能力收窄', () => {
     beforeEach(() => {
       env = setupEnvironment({
         agents: [
           {
             id: 'pero',
             systemPrompt: '我是 Pero 看板娘。',
-            channelPatches: {
-              companion: '在陪伴场景下，你应更活泼可爱，多用语气词，主动陪伴主人。',
-            },
             capabilities: `channels:
-  companion:
+  desktop:
     tools:
       - finish_task
       - take_screenshot
       - set_reminder
-    skills: []
+      - terminal_execute
+    skills:
+      - code_assistance
     prompt_fragments:
-      - components/abilities/vision`,
+      - components/abilities/vision
+      - components/abilities/workspace`,
           },
         ],
         tools: [
           { name: 'finish_task', description: '完成任务' },
           { name: 'take_screenshot', description: '截屏' },
           { name: 'set_reminder', description: '设置提醒' },
+          { name: 'terminal_execute', description: '执行终端命令' },
         ],
       })
       cleanup = env.cleanup
     })
 
-    it('companion channel 应使用小窗口(8)、禁用工具描述、注入陪伴补丁与状态', async () => {
+    it('应保留 Desktop 历史与策略，并只暴露 ambient 允许的能力', async () => {
       const deps = createMockDeps({
-        thread: { id: 't3', agentId: 'pero', channel: 'companion' },
+        thread: { id: 't3', agentId: 'pero', channel: 'desktop' },
         messages: [{ role: 'user', content: '陪我聊聊天嘛' }],
         agentProfiles: env.agentProfiles,
         config: { 'owner.name': '主人' },
       })
       const compiler = createCompiler(env, deps)
 
-      const result = await compiler.compile('t3', 'pero')
+      const result = await compiler.compile('t3', 'pero', { capabilityScope: 'ambient' })
+      const ambient = env.capabilityGate.resolve('pero', 'desktop', undefined, 'ambient')
 
-      // companion 策略：窗口 8、禁用工具描述、启用状态注入
-      expect(DEFAULT_POLICIES.companion.messageWindow).toBe(8)
-      expect(DEFAULT_POLICIES.companion.enableToolDescriptions).toBe(false)
-      expect(DEFAULT_POLICIES.companion.enableStateInjection).toBe(true)
-
-      expect(result.manifest.messageWindow).toBe(8)
-      expect(result.manifest.toolCount).toBe(0)
+      expect(result.manifest.messageWindow).toBe(DEFAULT_POLICIES.desktop.messageWindow)
+      expect(ambient.allowedTools.has('take_screenshot')).toBe(true)
+      expect(ambient.allowedTools.has('set_reminder')).toBe(true)
+      expect(ambient.allowedTools.has('terminal_execute')).toBe(false)
+      expect(ambient.enabledSkills).toHaveLength(0)
+      expect(ambient.promptFragments).toEqual(['components/abilities/vision'])
+      expect(result.manifest.toolCount).toBe(3)
 
       const systemContent = result.messages[0]!.content
-      // 不含工具列表（极简）
-      expect(systemContent).not.toContain('<Available_Tools>')
-      // 含陪伴补丁
-      expect(systemContent).toContain('活泼可爱')
-      // 含状态注入
-      expect(systemContent).toContain('<Current_Status>')
-      // 含视觉能力片段（companion 配置了 vision）
+      expect(systemContent).toContain('take_screenshot')
+      expect(systemContent).not.toContain('terminal_execute')
       expect(systemContent).toContain('视觉能力')
+      expect(systemContent).not.toContain('工作区')
+      expect(systemContent).toContain('<Current_Status>')
     })
   })
 
@@ -741,7 +751,8 @@ describe('ContextCompiler 上下文拼装链路', () => {
         query: '我的宠物是什么',
         agentId: 'pero',
         channel: 'desktop',
-        limit: 10,
+        limit: 8,
+        minScore: 0.3,
       })
     })
 
@@ -791,7 +802,7 @@ describe('ContextCompiler 上下文拼装链路', () => {
         messages.push({ role: 'user', content: `第${i}条用户消息` })
         messages.push({ role: 'assistant', content: `第${i}条回复` })
       }
-      // 共 50 条，超过 desktop 窗口 20
+      // 共 25 轮（50 条消息），超过 desktop 窗口 20 轮
       const deps = createMockDeps({
         thread: { id: 't5', agentId: 'pero', channel: 'desktop' },
         messages,
@@ -801,9 +812,9 @@ describe('ContextCompiler 上下文拼装链路', () => {
 
       const result = await compiler.compile('t5', 'pero')
 
-      // mock 的 getActiveMessages 按 limit 截断
-      expect(result.manifest.loadedMessageCount).toBe(20)
-      // 验证只保留最近 20 条（mock 实现为 slice(-20)）
+      // mock 的 getActiveMessagePairs 按 20 个完整问答对截断
+      expect(result.manifest.loadedMessageCount).toBe(40)
+      // 验证只保留最近 20 轮（40 条消息）
       // 末尾消息应为最后一条
       const lastMsg = result.messages[result.messages.length - 1]
       expect(lastMsg?.content).toBe('第25条回复')
@@ -839,12 +850,10 @@ describe('ContextCompiler 上下文拼装链路', () => {
 
       // 自定义窗口 3
       expect(result.manifest.messageWindow).toBe(3)
-      expect(result.manifest.loadedMessageCount).toBe(3)
-      // 只保留最近 3 条：slice(-3) = [消息B, 回复B, 消息C]，其中 user 消息为 消息B/消息C
+      expect(result.manifest.loadedMessageCount).toBe(5)
+      // 当前测试数据只有 2 个完整轮次加一条未配对消息，3 轮窗口会完整保留。
       const userMessages = result.messages.filter((m) => m.role === 'user').map((m) => m.content)
-      expect(userMessages).toEqual(['消息B', '消息C'])
-      // 最早的消息A已被截断，不应出现
-      expect(result.messages.some((m) => m.content === '消息A')).toBe(false)
+      expect(userMessages).toEqual(['消息A', '消息B', '消息C'])
     })
   })
 
@@ -965,7 +974,7 @@ describe('ContextCompiler 上下文拼装链路', () => {
       expect(resolved.toolsDescription).toBe('')
     })
 
-    it('ContextCompiler 拼装未配置 channel 时 toolCount 应为 0 且无工具描述', async () => {
+    it('ContextCompiler 拼装未配置 channel 时应只保留系统协议工具', async () => {
       // 使用自定义 contextPolicy 启用工具描述，但 channel 未配置 → 仍 fail-closed
       const customPolicy = JSON.stringify({
         messageWindow: 5,
@@ -976,7 +985,12 @@ describe('ContextCompiler 上下文拼装链路', () => {
       })
       const deps = createMockDeps({
         // channel='mobile' 未在 capabilities.yaml 配置
-        thread: { id: 't7', agentId: 'pero', channel: 'mobile' as ThreadChannel, contextPolicy: customPolicy },
+        thread: {
+          id: 't7',
+          agentId: 'pero',
+          channel: 'mobile' as ThreadChannel,
+          contextPolicy: customPolicy,
+        },
         messages: [{ role: 'user', content: '测试' }],
         agentProfiles: env.agentProfiles,
       })
@@ -984,8 +998,8 @@ describe('ContextCompiler 上下文拼装链路', () => {
 
       const result = await compiler.compile('t7', 'pero')
 
-      // fail-closed：无工具可用
-      expect(result.manifest.toolCount).toBe(0)
+      // fail-closed：无业务工具可用，但心流等系统协议工具必须保留。
+      expect(result.manifest.toolCount).toBe(3)
       const systemContent = result.messages[0]!.content
       expect(systemContent).not.toContain('<Available_Tools>')
       expect(systemContent).not.toContain('read_file')
@@ -1034,7 +1048,7 @@ describe('ContextCompiler 上下文拼装链路', () => {
       cleanup = env.cleanup
     })
 
-    it('同一 desktop channel 下 pero 有 4 个工具，nana 只有 2 个', async () => {
+    it('同一 desktop channel 下保持业务能力隔离，并统一追加系统协议工具', async () => {
       // pero：4 个工具
       const depsPero = createMockDeps({
         thread: { id: 't8a', agentId: 'pero', channel: 'desktop' },
@@ -1044,11 +1058,12 @@ describe('ContextCompiler 上下文拼装链路', () => {
       const compilerPero = createCompiler(env, depsPero)
       const resultPero = await compilerPero.compile('t8a', 'pero')
 
-      expect(resultPero.manifest.toolCount).toBe(4)
-      expect(resultPero.messages[0]!.content).toContain('terminal_execute')
-      expect(resultPero.messages[0]!.content).toContain('write_file')
+      // 工具定义经原生 tools 字段注入（不再出现在 System Prompt 文本，与场景 1 一致），
+      // 能力差异通过 manifest.toolCount 与下方 CapabilityGate 断言体现
+      expect(resultPero.manifest.toolCount).toBe(6)
+      expect(resultPero.messages[0]!.content).not.toContain('<Available_Tools>')
 
-      // nana：2 个工具，无危险工具
+      // nana：2 个业务工具 + 2 个系统协议工具，无危险工具
       const depsNana = createMockDeps({
         thread: { id: 't8b', agentId: 'nana', channel: 'desktop' },
         messages: [{ role: 'user', content: '帮我执行命令' }],
@@ -1057,11 +1072,8 @@ describe('ContextCompiler 上下文拼装链路', () => {
       const compilerNana = createCompiler(env, depsNana)
       const resultNana = await compilerNana.compile('t8b', 'nana')
 
-      expect(resultNana.manifest.toolCount).toBe(2)
-      expect(resultNana.messages[0]!.content).not.toContain('terminal_execute')
-      expect(resultNana.messages[0]!.content).not.toContain('write_file')
-      // nana 仍可读文件
-      expect(resultNana.messages[0]!.content).toContain('read_file')
+      expect(resultNana.manifest.toolCount).toBe(4)
+      expect(resultNana.messages[0]!.content).not.toContain('<Available_Tools>')
     })
 
     it('CapabilityGate 层应体现 (agentId, channel) 二维隔离', () => {

@@ -8,6 +8,7 @@
  * @props confirmation - 待确认的指令信息
  * @emits respond - 用户批准或拒绝
  */
+import { ref, watch } from 'vue'
 import PixelIcon from '../pixel/PixelIcon.vue'
 
 export interface PendingConfirmation {
@@ -18,21 +19,43 @@ export interface PendingConfirmation {
     reason?: string
     highlight?: string[]
   }
+  /** M05-B3: 可选附言（同意/拒绝附带给 agent 的理由说明） */
+  rationale?: string
 }
 
 interface Props {
   confirmation: PendingConfirmation | null
   /** Agent 名称 */
   agentName?: string
+  /** 外部接管的附言值（v-model） */
+  rationaleText?: string
 }
 
-withDefaults(defineProps<Props>(), {
-  agentName: 'Pero',
+const props = withDefaults(defineProps<Props>(), {
+  agentName: '助手',
+  rationaleText: '',
 })
 
 const emit = defineEmits<{
-  respond: [approved: boolean]
+  respond: [approved: boolean, rationale?: string]
 }>()
+
+/** M05-B3: 附言本地状态（审批卡片共用，初始值可由外部接管） */
+const rationaleInput = ref(props.rationaleText)
+
+// 每次弹出新的确认时重置附言，避免残留上一次理由
+watch(
+  () => props.confirmation,
+  () => {
+    rationaleInput.value = props.rationaleText
+  },
+)
+
+/** 响应确认：附言去空白后随结果一并上报（空则不下发） */
+function respond(approved: boolean) {
+  const rationale = rationaleInput.value.trim()
+  emit('respond', approved, rationale || undefined)
+}
 
 /** 风险等级标签 */
 function getRiskLabel(level?: number): string {
@@ -110,18 +133,23 @@ function getRiskColor(level?: number): string {
           </p>
         </div>
 
+        <!-- M05-B3: 附言（可选，同意/拒绝均可附带给 Agent 的理由） -->
+        <div class="confirm-rationale">
+          <textarea
+            v-model="rationaleInput"
+            class="confirm-rationale-input pixel-border-moe"
+            rows="2"
+            maxlength="200"
+            placeholder="附言（可选）：告诉对方为什么批准/拒绝，将随决定一并反馈"
+          ></textarea>
+        </div>
+
         <!-- 操作按钮 -->
         <div class="confirm-actions">
-          <button
-            class="confirm-btn confirm-reject pixel-border-moe"
-            @click="emit('respond', false)"
-          >
+          <button class="confirm-btn confirm-reject pixel-border-moe" @click="respond(false)">
             拒绝执行
           </button>
-          <button
-            class="confirm-btn confirm-approve pixel-border-moe"
-            @click="emit('respond', true)"
-          >
+          <button class="confirm-btn confirm-approve pixel-border-moe" @click="respond(true)">
             <PixelIcon name="check" size="xs" />
             <span>
               {{
@@ -260,6 +288,32 @@ function getRiskColor(level?: number): string {
   color: rgba(45, 27, 30, 0.44);
   font-size: 12px;
   font-weight: 700;
+}
+
+/* M05-B3: 附言输入区 */
+.confirm-rationale {
+  padding: 0 24px 4px;
+}
+
+.confirm-rationale-input {
+  width: 100%;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.68);
+  color: var(--color-moe-cocoa);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
+  resize: none;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.confirm-rationale-input::placeholder {
+  color: rgba(45, 27, 30, 0.36);
+}
+
+.confirm-rationale-input:focus {
+  background: rgba(249, 168, 212, 0.06);
 }
 
 .confirm-actions {

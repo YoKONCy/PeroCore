@@ -2,7 +2,7 @@
   "id": "browser-control",
   "name": "浏览器控制",
   "version": "1.0.0",
-  "author": "PeroCore Team",
+  "author": "infOS Team",
   "description": "浏览器交互控制。通过 BrowserBridge 抽象层与浏览器通信，支持打开URL、点击、输入、滚动等操作。",
   "type": "tool",
   "entry": "index.ts",
@@ -13,6 +13,7 @@
     {
       "name": "browser_open_url",
       "description": "在浏览器中打开指定的 URL。",
+      "display": { "label": "打开网页", "icon": "globe", "color": "sky", "style": "browser" },
       "parameters": {
         "type": "object",
         "properties": {
@@ -24,6 +25,7 @@
     {
       "name": "browser_click",
       "description": "点击当前页面上的元素（按钮、链接等）。",
+      "display": { "label": "点击元素", "icon": "map-pin", "color": "sky", "style": "browser" },
       "parameters": {
         "type": "object",
         "properties": {
@@ -35,6 +37,7 @@
     {
       "name": "browser_type",
       "description": "在输入框中输入文本。",
+      "display": { "label": "输入文本", "icon": "pencil", "color": "sky", "style": "browser" },
       "parameters": {
         "type": "object",
         "properties": {
@@ -47,6 +50,12 @@
     {
       "name": "browser_scroll",
       "description": "向上或向下滚动当前页面。",
+      "display": {
+        "label": "滚动页面",
+        "icon": "chevron-down",
+        "color": "sky",
+        "style": "browser"
+      },
       "parameters": {
         "type": "object",
         "properties": {
@@ -57,11 +66,13 @@
     {
       "name": "browser_back",
       "description": "返回浏览器历史记录中的上一页。",
+      "display": { "label": "返回上一页", "icon": "door-open", "color": "sky", "style": "browser" },
       "parameters": { "type": "object", "properties": {} }
     },
     {
       "name": "browser_get_content",
       "description": "获取当前浏览器页面的文本内容 (Markdown 格式)。",
+      "display": { "label": "读取页面", "icon": "file", "color": "sky", "style": "read" },
       "parameters": { "type": "object", "properties": {} }
     }
   ]

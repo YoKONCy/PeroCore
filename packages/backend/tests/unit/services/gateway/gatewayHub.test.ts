@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { GatewayHub } from '@perocore/backend/services/gateway/gatewayHub'
-import type { GatewayEnvelope } from '@perocore/backend/services/gateway/types'
+import { GatewayHub } from '@infos/backend/services/gateway/gatewayHub'
+import type { GatewayEnvelope } from '@infos/backend/services/gateway/types'
 
 type SendMock = ReturnType<typeof vi.fn<(data: string) => void>>
 
-vi.mock('@perocore/backend/lib/logger', () => ({
+vi.mock('@infos/backend/lib/logger', () => ({
   createLogger: () => ({
     debug: vi.fn(),
     info: vi.fn(),

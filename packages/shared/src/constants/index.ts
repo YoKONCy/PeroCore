@@ -1,6 +1,6 @@
 /**
  * @file 常量汇总导出
- * @module @perocore/shared/constants
+ * @module @infos/shared/constants
  */
 
 export {

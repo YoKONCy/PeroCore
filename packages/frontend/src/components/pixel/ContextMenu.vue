@@ -77,15 +77,15 @@ useEventListener(window, 'keydown', ((e: KeyboardEvent) => {
   position: fixed;
   z-index: 9999;
   min-width: 160px;
-  background: var(--color-bg-primary);
-  border: 2px solid var(--color-border);
-  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.12);
+  background: var(--dash-panel-elevated);
+  border: 2px solid var(--ui-border-strong);
+  box-shadow: var(--ui-shadow-md);
   padding: 4px 0;
 }
 
 .p-ctx-separator {
   height: 2px;
-  background: var(--color-border);
+  background: var(--ui-border-default);
   margin: 4px 8px;
 }
 
@@ -99,28 +99,28 @@ useEventListener(window, 'keydown', ((e: KeyboardEvent) => {
   font-weight: 700;
   background: none;
   border: none;
-  color: var(--color-text-primary);
+  color: var(--ui-text-primary);
   cursor: pointer;
   text-align: left;
   transition: all 0.1s;
 }
 .p-ctx-item:hover:not(:disabled) {
-  background: var(--color-sky-500);
-  color: white;
+  background: var(--ui-accent-sky-soft);
+  color: var(--ui-accent-sky);
 }
 .p-ctx-item-disabled {
-  opacity: 0.5;
+  color: var(--ui-text-disabled);
   cursor: not-allowed;
 }
 
 .p-ctx-shortcut {
   font-size: 10px;
-  font-family: var(--font-pixel), monospace;
-  color: var(--color-text-muted);
+  font-family: var(--ui-font-pixel);
+  color: var(--ui-text-tertiary);
   margin-left: 16px;
 }
 .p-ctx-item:hover .p-ctx-shortcut {
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--ui-accent-sky);
 }
 
 /* 动画 */

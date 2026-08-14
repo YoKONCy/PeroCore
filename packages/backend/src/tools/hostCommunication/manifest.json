@@ -1,0 +1,26 @@
+{
+  "toolDefinition": {
+    "name": "communicate_with_host",
+    "description": "AgentApplication 内的 SubAgent 与宿主主 Agent 建立一次临时通信。用于咨询、核验、审批、请求资源、汇报、澄清或提交结果；通信内容不会写入主 Thread。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "consult",
+            "verify",
+            "approval",
+            "request_resource",
+            "report",
+            "clarify",
+            "complete"
+          ]
+        },
+        "summary": { "type": "string", "description": "需要宿主处理的简洁请求" },
+        "context": { "type": "object", "description": "最小必要辅助上下文" }
+      },
+      "required": ["mode", "summary"]
+    }
+  }
+}

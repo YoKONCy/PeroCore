@@ -19,6 +19,7 @@ import type { LlmService, ModelConfig } from '../llm/llmService'
 import type { MdpEngine } from '../prompt/mdpEngine'
 import type { VectorRepository } from '../../repositories/vector.repo'
 import type { EmbeddingProvider } from '../embedding/embeddingService'
+import type { ConfigRepository } from '../../repositories/config.repo'
 import type { MemoryType } from './memoryProvider'
 import { parseLlmJson } from '../../shared/llmJsonParser'
 import { createLogger } from '../../lib/logger'
@@ -50,8 +51,6 @@ export interface ScorerConfig {
   maxRetries: number
   /** 最大批次字符数 (防止 Token 溢出) */
   maxBatchChars: number
-  /** LLM 温度 (Scorer 需要相对客观) */
-  temperature: number
   /** 余弦去重阈值: 与 buffer 中已有对话比较，超过此阈值跳过 */
   dedupThreshold: number
 }
@@ -61,7 +60,6 @@ const DEFAULT_CONFIG: ScorerConfig = {
   maxWaitMs: 30 * 60 * 1000, // 30 分钟
   maxRetries: 3,
   maxBatchChars: 20000,
-  temperature: 0.3,
   dedupThreshold: 0.92,
 }
 
@@ -111,8 +109,16 @@ export class ScorerService {
     _vectorRepo?: VectorRepository,
     private embeddingService?: EmbeddingProvider,
     config?: Partial<ScorerConfig>,
+    private configRepo?: ConfigRepository,
+    /** Agent 管理器（可选注入，用于按 agentId 读取该角色的称呼） */
+    private agentManager?: { getOwnerAppellation(agentId: string): string },
   ) {
     this.config = { ...DEFAULT_CONFIG, ...config }
+  }
+
+  /** 热更新记忆整理批次大小；取值已由 API Schema 校验。 */
+  updateBatchSize(batchSize: number): void {
+    this.config.batchSize = batchSize
   }
 
   /**
@@ -125,11 +131,7 @@ export class ScorerService {
    * - 传入 threadId 时只处理该 Thread 的对话
    * - 传入 channel 时只处理该 channel 的对话
    */
-  async checkAndProcess(
-    agentId: string,
-    threadId?: string,
-    channel?: string,
-  ): Promise<void> {
+  async checkAndProcess(agentId: string, threadId?: string, channel?: string): Promise<void> {
     const channelTyped = channel as ThreadChannel | undefined
     const pending = await this.threadRepo.getPendingForScorer(
       agentId,
@@ -138,14 +140,22 @@ export class ScorerService {
       channelTyped,
     )
 
-    if (pending.length < this.config.batchSize) {
+    const pendingChars = this.countPairChars(pending)
+    const reachedBatchSize = pending.length >= this.config.batchSize
+    const reachedCharacterBudget = pendingChars >= this.config.maxBatchChars
+
+    if (!reachedBatchSize && !reachedCharacterBudget) {
       logger.debug(
-        `待处理对话 ${pending.length}/${this.config.batchSize}，未达到攒批阈值 ` +
-          `(threadId=${threadId ?? 'all'}, channel=${channel ?? 'all'})`,
+        `待处理对话 ${pending.length}/${this.config.batchSize}，字符 ${pendingChars}/${this.config.maxBatchChars}，` +
+          `未达到攒批阈值 (threadId=${threadId ?? 'all'}, channel=${channel ?? 'all'})`,
       )
       return
     }
 
+    logger.debug(
+      `触发记忆整理: ${reachedBatchSize ? '达到轮次阈值' : '达到字符预算'} ` +
+        `(pairs=${pending.length}, chars=${pendingChars})`,
+    )
     await this.processBatch(agentId, threadId, channel)
   }
 
@@ -163,11 +173,7 @@ export class ScorerService {
    *
    * AIOS(Phase5): 新增 threadId + channel 参数，支持按 Thread 分批。
    */
-  async processBatch(
-    agentId: string,
-    threadId?: string,
-    channel?: string,
-  ): Promise<void> {
+  async processBatch(agentId: string, threadId?: string, channel?: string): Promise<void> {
     const channelTyped = channel as ThreadChannel | undefined
     const pending = await this.threadRepo.getPendingForScorer(
       agentId,
@@ -186,7 +192,9 @@ export class ScorerService {
     // Token 预检：每对按 user + assistant 两条消息累计字符
     const totalChars = pending.reduce(
       (sum, pair) =>
-        sum + (pair.userMessage.content?.length ?? 0) + (pair.assistantMessage.content?.length ?? 0),
+        sum +
+        (pair.userMessage.content?.length ?? 0) +
+        (pair.assistantMessage.content?.length ?? 0),
       0,
     )
     if (totalChars > this.config.maxBatchChars && pending.length > 1) {
@@ -207,10 +215,8 @@ export class ScorerService {
 
     // 拼接对话上下文（每对先 user 后 assistant，按 user 消息 id 排序保持时序）
     const contextLines: string[] = []
-    for (const pair of [...dedupedPending].sort(
-      (a, b) => a.userMessage.id - b.userMessage.id,
-    )) {
-      contextLines.push(`主人: ${this.cleanText(pair.userMessage.content)}`)
+    for (const pair of [...dedupedPending].sort((a, b) => a.userMessage.id - b.userMessage.id)) {
+      contextLines.push(`用户: ${this.cleanText(pair.userMessage.content)}`)
       contextLines.push(`AI: ${this.cleanText(pair.assistantMessage.content)}`)
     }
 
@@ -295,15 +301,30 @@ export class ScorerService {
   }
 
   /**
+   * 按 Thread 刷新某个 Agent 的全部待整理对话。
+   *
+   * 定时和启动恢复必须调用此方法，避免不同 Channel/Thread 的原始对话混入同一提炼批次。
+   */
+  async flushPendingByThread(agentId: string): Promise<void> {
+    let page = 1
+    const pageSize = 100
+    let hasMore = true
+    while (hasMore) {
+      const { items, total } = await this.threadRepo.listThreads({ agentId, page, pageSize })
+      for (const thread of items) {
+        await this.processBatch(agentId, thread.id, thread.channel)
+      }
+      hasMore = page * pageSize < total && items.length > 0
+      page += 1
+    }
+  }
+
+  /**
    * 恢复未完成的任务 (启动时调用)
    *
    * AIOS(Phase5): 新增 threadId + channel 参数，支持恢复指定 Thread 的未完成任务。
    */
-  async recoverPendingTasks(
-    agentId: string,
-    threadId?: string,
-    channel?: string,
-  ): Promise<void> {
+  async recoverPendingTasks(agentId: string, threadId?: string, channel?: string): Promise<void> {
     logger.info(
       `正在检查未完成的记忆任务 (agentId=${agentId}, ` +
         `threadId=${threadId ?? 'all'}, channel=${channel ?? 'all'})...`,
@@ -326,6 +347,17 @@ export class ScorerService {
   }
 
   // ── 内部方法 ──
+
+  /** 计算一批问答对的字符预算，用于在轮次不足时提前触发整理。 */
+  private countPairChars(pairs: ScorerPendingPair[]): number {
+    return pairs.reduce(
+      (sum, pair) =>
+        sum +
+        (pair.userMessage.content?.length ?? 0) +
+        (pair.assistantMessage.content?.length ?? 0),
+      0,
+    )
+  }
 
   /**
    * 余弦去重
@@ -390,10 +422,13 @@ export class ScorerService {
     _messageCount: number,
     _agentId: string,
   ): Promise<ScorerOutput | null> {
-    // 使用 MDP 模板渲染系统提示词
+    // 使用 MDP 模板渲染系统提示词（称呼取该 Agent 的 agent.json owner_appellation，未配置时兜底"主人"）
+    const ownerName = (await this.configRepo?.get('owner.name')) ?? '用户'
+    const ownerAppellation = this.agentManager?.getOwnerAppellation(_agentId) ?? '主人'
     const systemPrompt = this.mdpEngine.render('tasks/memory/scorer/summary', {
       agent_name: 'AI',
-      owner_name: '主人',
+      owner_name: ownerName,
+      owner_appellation: ownerAppellation,
     })
 
     const completion = await this.llmService.chat(
@@ -403,7 +438,6 @@ export class ScorerService {
         { role: 'user', content: context },
       ],
       {
-        temperature: this.config.temperature,
         responseFormat: { type: 'json_object' },
       },
     )

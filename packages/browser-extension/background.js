@@ -1,7 +1,7 @@
 /**
  * Background Service Worker — 浏览器桥接后台服务
  *
- * 通过 WebSocket 与 PeroCore 后端通信，实现 Agent 对浏览器的远程控制。
+ * 通过 WebSocket 与 infOS 后端通信，实现 Agent 对浏览器的远程控制。
  *
  * 职责:
  * 1. 维护与后端的 WS 长连接 (含指数退避重连 + 心跳)

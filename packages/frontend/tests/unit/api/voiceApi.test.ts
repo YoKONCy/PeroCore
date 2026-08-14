@@ -1,21 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  getBaseUrl: vi.fn(() => 'http://localhost:5173'),
+  getBaseUrl: vi.fn(() => 'http://localhost:7359'),
   apiGet: vi.fn(),
 }))
 
-vi.mock('@perocore/frontend/api/transportUtils', () => ({
+vi.mock('@infos/frontend/api/transportUtils', () => ({
   getBaseUrl: mocks.getBaseUrl,
 }))
 
-vi.mock('@perocore/frontend/api/client', () => ({
+vi.mock('@infos/frontend/api/client', () => ({
   apiClient: {
     get: mocks.apiGet,
   },
 }))
 
-import { voiceApi } from '@perocore/frontend/api/modules/voiceApi'
+import { voiceApi } from '@infos/frontend/api/modules/voiceApi'
 
 describe('voiceApi', () => {
   beforeEach(() => {
@@ -44,7 +44,7 @@ describe('voiceApi', () => {
     })
 
     expect(result).toBe(audio)
-    expect(fetchMock).toHaveBeenCalledWith('http://localhost:5173/api/voice/tts', {
+    expect(fetchMock).toHaveBeenCalledWith('http://localhost:7359/api/voice/tts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text: '你好', voice: 'pero', speed: 1.2, format: 'mp3' }),
@@ -94,7 +94,7 @@ describe('voiceApi', () => {
     const result = await voiceApi.recognize(audio, 'audio/wav')
 
     expect(result).toEqual({ text: '你好主人', confidence: 0.98 })
-    expect(fetchMock).toHaveBeenCalledWith('http://localhost:5173/api/voice/asr', {
+    expect(fetchMock).toHaveBeenCalledWith('http://localhost:7359/api/voice/asr', {
       method: 'POST',
       headers: { 'Content-Type': 'audio/wav' },
       body: audio,

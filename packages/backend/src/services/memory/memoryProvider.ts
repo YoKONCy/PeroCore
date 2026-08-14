@@ -117,6 +117,8 @@ export interface MemorySearchParams {
   agentId: string
   channel: string
   limit?: number
+  /** 最低检索相关度。 */
+  minScore?: number
   /** 最低重要性阈值（默认 0） */
   minImportance?: number
 }

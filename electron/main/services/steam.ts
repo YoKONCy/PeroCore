@@ -134,14 +134,55 @@ export function getSteamUser(): { name: string; steamId: string } | null {
   }
 }
 
-/** 获取已订阅的 Workshop 物品 */
-export function getSubscribedItems(): number[] {
+/** Workshop 已安装物品信息 */
+export interface WorkshopInstallation {
+  itemId: string
+  folder: string
+  sizeOnDisk: string
+  timestamp: number
+}
+
+/** 获取已订阅的 Workshop 物品 ID（使用字符串避免 bigint 穿越 IPC 时失败） */
+export function getSubscribedItems(): string[] {
   if (!steamApi) return []
   try {
-    return steamApi.workshop.getSubscribedItems() ?? []
+    const items = steamApi.workshop.getSubscribedItems() ?? []
+    return items.map((itemId: bigint | number | string) => itemId.toString())
   } catch {
     return []
   }
+}
+
+/**
+ * 获取已下载完成的 Workshop 物品安装目录。
+ * Steam 负责下载、更新和删除这些只读目录；应用只消费 installInfo 返回的真实路径，
+ * 不猜测 steamapps 的磁盘位置，从而兼容多库、多磁盘和跨平台安装。
+ */
+export function getWorkshopInstallations(): WorkshopInstallation[] {
+  if (!steamApi) return []
+
+  const installations: WorkshopInstallation[] = []
+  try {
+    const items = steamApi.workshop.getSubscribedItems() ?? []
+    for (const itemId of items as Array<bigint>) {
+      const info = steamApi.workshop.installInfo(itemId)
+      if (!info?.folder || !fs.existsSync(info.folder)) continue
+      installations.push({
+        itemId: itemId.toString(),
+        folder: path.resolve(info.folder),
+        sizeOnDisk: info.sizeOnDisk?.toString?.() ?? '0',
+        timestamp: Number(info.timestamp ?? 0),
+      })
+    }
+  } catch (e) {
+    logger.warn('Steam', `获取 Workshop 安装目录失败: ${e}`)
+  }
+  return installations
+}
+
+/** 获取已初始化的 Steam Cloud API，仅供主进程服务复用。 */
+export function getSteamCloudApi(): any | null {
+  return steamApi?.cloud ?? null
 }
 
 /** 云存档状态 */

@@ -1,12 +1,12 @@
 <!--
 Description: 据点管家人设片段
-Version: "1.0"
+Version: "1.1"
 Prompt Type: persona
-Direct Consumer: group/butler/narrate_and_maintain.md
-Target Service: backend/src/tools/strongholdOps
-Target Function: unbound stronghold_call_butler execute flow
-Injected Via: persona variable -> group/butler/narrate_and_maintain, but parent prompt is not currently referenced
-Model Role: auxiliary
+Direct Consumer: group/butler/narrate_and_maintain.md（已接入）
+Target Service: backend/src/services/stronghold/butlerService.ts
+Target Function: tryLlmPlan（persona 变量注入）
+Injected Via: mdpEngine.render('group/butler/persona', ...) -> persona 变量 -> narrate_and_maintain
+Model Role: main（复用主模型）
 -->
 
 # 管家身份定义

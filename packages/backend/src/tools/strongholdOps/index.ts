@@ -10,13 +10,14 @@
  *
  * 工具层通过注入的 StrongholdService 操作数据，
  * StrongholdService 已由 container.ts DI 注入。
- * 这些工具在 group_chat 模式下可用 (CapabilityGate)。
+ * 这些工具仅在 group 通道下通过 CapabilityGate 开放。
  *
  * @module packages/backend/src/tools/strongholdOps
  */
 
 import type { BuiltinTool } from '../index'
 import type { StrongholdService } from '../../services/stronghold/strongholdService'
+import type { ButlerService } from '../../services/stronghold/butlerService'
 import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('StrongholdOps')
@@ -27,10 +28,16 @@ const logger = createLogger('StrongholdOps')
 
 /** 模块引用 */
 let _strongholdService: StrongholdService | null = null
+let _butlerService: ButlerService | null = null
 
 /** 设置据点服务 */
 export function setStrongholdService(service: StrongholdService | null): void {
   _strongholdService = service
+}
+
+/** 设置管家执行服务 */
+export function setButlerService(service: ButlerService | null): void {
+  _butlerService = service
 }
 
 /** 辅助: 检查 Service 可用性 */
@@ -231,32 +238,21 @@ export const strongholdCallButlerTool: BuiltinTool = {
   async execute(args, ctx) {
     const service = requireService()
     if (typeof service === 'string') return service
+    if (!_butlerService) return JSON.stringify({ error: '管家服务未初始化。' })
 
     const request = args.request as string
 
     try {
-      const butlerConfig = await service.getButlerConfig()
-
-      if (!butlerConfig.enabled) {
-        return JSON.stringify({
-          error: '管家服务当前已关闭。',
-        })
-      }
-
       const room = await service.getAgentLocation(ctx.agentId)
-      const roomName = room?.name ?? '(未知)'
+      if (!room) return JSON.stringify({ error: '调用 Agent 当前没有所在房间。' })
 
-      // 管家请求记录 — 实际处理由 GroupChatDispatcher 调度
-      // 管家本身也是一个 Agent，请求会转为对管家 Agent 的一次 chat 调用
-      logger.info(`[Butler] 收到来自 ${ctx.agentId} 的请求 (房间: ${roomName}): ${request}`)
-
-      return JSON.stringify({
-        success: true,
-        message: `已呼叫管家。请求: "${request}"`,
-        butler: butlerConfig.name,
-        location: roomName,
-        note: '管家会在后台处理你的请求。',
+      logger.info(`管家收到来自 ${ctx.agentId} 的请求（房间: ${room.name}）: ${request}`)
+      const result = await _butlerService.execute({
+        roomId: room.id,
+        command: request,
+        requesterId: ctx.agentId,
       })
+      return JSON.stringify({ success: true, ...result })
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err)
       return JSON.stringify({ error: `呼叫管家失败: ${errMsg}` })

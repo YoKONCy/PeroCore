@@ -1,14 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const baseUrlMock = vi.hoisted(() => ({
-  getBaseUrl: vi.fn(() => 'http://localhost:5173'),
+  getBaseUrl: vi.fn(() => 'http://localhost:7359'),
 }))
 
-vi.mock('@perocore/frontend/api/transportUtils', () => ({
+vi.mock('@infos/frontend/api/transportUtils', () => ({
   getBaseUrl: baseUrlMock.getBaseUrl,
 }))
 
-import { streamRequest } from '@perocore/frontend/api/stream'
+import { streamRequest } from '@infos/frontend/api/stream'
 
 function createStream(chunks: string[]) {
   const encoder = new TextEncoder()
@@ -61,7 +61,7 @@ describe('streamRequest', () => {
     await flushStream()
 
     expect(controller).toBeInstanceOf(AbortController)
-    expect(fetchMock).toHaveBeenCalledWith('http://localhost:5173/api/chat/stream', {
+    expect(fetchMock).toHaveBeenCalledWith('http://localhost:7359/api/chat/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message: '你好' }),

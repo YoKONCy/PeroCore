@@ -3,9 +3,9 @@ Description: 据点环境展示片段
 Version: "1.0"
 Prompt Type: component
 Direct Consumer: 未接入
-Target Service: backend/services/prompt/promptService.ts
-Target Function: PromptService.buildPromptMessages()
-Injected Via: superseded by services/mdp/presets/group.yaml mode_patch slot override
+Target Service: 据点运行时
+Target Function: 待接入
+Injected Via: 当前未接入
 Model Role: main
 -->
 

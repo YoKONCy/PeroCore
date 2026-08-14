@@ -4,7 +4,7 @@
  * 第六阶段 #8: 给本机 HTTP 路由加 token 鉴权层。
  *
  * 设计要点：
- * - 通过 PEROCORE_API_TOKEN 环境变量配置鉴权 token
+ * - 通过 INFOS_API_TOKEN 环境变量配置鉴权 token
  * - 未配置 token 时中间件不生效（开发环境默认开放）
  * - 公共路径（健康检查、Prometheus 指标、登录鉴权等）跳过鉴权
  * - 客户端通过 `Authorization: Bearer <token>` 请求头传递 token
@@ -30,11 +30,7 @@ export interface AuthMiddlewareOptions {
 }
 
 /** 默认公共路径（健康检查、Prometheus 指标、登录） */
-export const DEFAULT_PUBLIC_PATHS = [
-  '/api/health',
-  '/metrics',
-  '/api/auth/login',
-]
+export const DEFAULT_PUBLIC_PATHS = ['/api/health', '/metrics', '/api/auth/login']
 
 /**
  * 创建 Token 鉴权中间件
@@ -42,7 +38,7 @@ export const DEFAULT_PUBLIC_PATHS = [
  * 用法：
  * ```ts
  * app.use('*', createAuthMiddleware({
- *   token: process.env.PEROCORE_API_TOKEN ?? '',
+ *   token: process.env.INFOS_API_TOKEN ?? '',
  * }))
  * ```
  *

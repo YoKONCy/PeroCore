@@ -17,7 +17,7 @@
  */
 
 import { createLogger } from '../../lib/logger'
-import { CompanionScheduler } from './companionScheduler'
+import type { CompanionScheduler } from './companionScheduler'
 
 const logger = createLogger('CompanionSchedulerService')
 
@@ -87,6 +87,18 @@ export class CompanionSchedulerService {
     const scheduler = this.schedulers.get(agentId)
     if (!scheduler) return
     scheduler.notifyActivity()
+  }
+
+  /**
+   * 批量读取指定 Agent 的陪伴调度状态。
+   *
+   * 该接口只暴露只读运行状态，不会隐式创建或启动调度器，供任务中心统一展示。
+   */
+  listStates(agentIds: string[]): Array<{ agentId: string; enabled: boolean }> {
+    return agentIds.map((agentId) => ({
+      agentId,
+      enabled: this.isRunning(agentId),
+    }))
   }
 
   /**

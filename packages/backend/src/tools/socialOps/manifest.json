@@ -2,7 +2,7 @@
   "id": "social-ops",
   "name": "社交平台操作",
   "version": "1.0.0",
-  "author": "PeroCore Team",
+  "author": "infOS Team",
   "description": "跨平台社交操作工具。通过 SocialMessagingProvider 适配不同平台 (QQ/Discord/Telegram)。仅在社交模式下可用。",
   "type": "tool",
   "entry": "index.ts",
@@ -12,6 +12,7 @@
     {
       "name": "social_send_message",
       "description": "发送消息到社交平台的指定会话。支持私聊和群聊。需要社交适配器已连接。",
+      "display": { "label": "发送消息", "icon": "chat", "color": "green", "style": "social" },
       "parameters": {
         "type": "object",
         "properties": {
@@ -35,6 +36,7 @@
     {
       "name": "social_get_contacts",
       "description": "获取当前社交平台的联系人/好友列表。",
+      "display": { "label": "联系人列表", "icon": "users", "color": "green", "style": "social" },
       "parameters": {
         "type": "object",
         "properties": {}
@@ -43,6 +45,7 @@
     {
       "name": "social_get_groups",
       "description": "获取当前社交平台的群组列表。",
+      "display": { "label": "群组列表", "icon": "users", "color": "green", "style": "social" },
       "parameters": {
         "type": "object",
         "properties": {}
@@ -51,6 +54,7 @@
     {
       "name": "social_get_contact_info",
       "description": "查询社交平台上指定用户的详细信息 (昵称、备注等)。",
+      "display": { "label": "联系人信息", "icon": "user", "color": "green", "style": "social" },
       "parameters": {
         "type": "object",
         "properties": {
@@ -65,6 +69,7 @@
     {
       "name": "social_get_group_info",
       "description": "查询指定群组的详细信息 (群名、成员数等)。",
+      "display": { "label": "群组信息", "icon": "info", "color": "green", "style": "social" },
       "parameters": {
         "type": "object",
         "properties": {
@@ -79,6 +84,7 @@
     {
       "name": "social_get_group_members",
       "description": "查询指定群组的成员列表。",
+      "display": { "label": "群组成员", "icon": "users", "color": "green", "style": "social" },
       "parameters": {
         "type": "object",
         "properties": {
@@ -93,6 +99,7 @@
     {
       "name": "social_handle_request",
       "description": "处理收到的好友请求 — 接受或拒绝。",
+      "display": { "label": "处理好友请求", "icon": "check", "color": "green", "style": "social" },
       "parameters": {
         "type": "object",
         "properties": {
@@ -115,6 +122,7 @@
     {
       "name": "social_notify_owner",
       "description": "向主人报告重要的社交事件或信息。消息会通过社交平台或系统通知渠道发送给主人。",
+      "display": { "label": "通知主人", "icon": "chat", "color": "pink", "style": "social" },
       "parameters": {
         "type": "object",
         "properties": {

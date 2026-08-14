@@ -26,7 +26,7 @@ export interface LogFileConfig {
   maxFileSize?: number
   /** 保留天数 (默认 14 天) */
   retentionDays?: number
-  /** 日志文件前缀 (默认 "perocore") */
+  /** 日志文件前缀 (默认 "infos") */
   prefix?: string
 }
 
@@ -38,8 +38,8 @@ export interface LogFileConfig {
  * 日志文件写入器
  *
  * 策略：
- * - 按天创建日志文件: `perocore-2026-04-20.log`
- * - 单文件超过 maxFileSize 后自动轮转: `perocore-2026-04-20.1.log`
+ * - 按天创建日志文件: `infos-2026-04-20.log`
+ * - 单文件超过 maxFileSize 后自动轮转: `infos-2026-04-20.1.log`
  * - 启动时自动清理超过 retentionDays 的旧日志
  */
 export class LogFileTransport {
@@ -55,7 +55,7 @@ export class LogFileTransport {
     this.logDir = config.logDir
     this.maxFileSize = config.maxFileSize ?? 5 * 1024 * 1024 // 5MB
     this.retentionDays = config.retentionDays ?? 14
-    this.prefix = config.prefix ?? 'perocore'
+    this.prefix = config.prefix ?? 'infos'
 
     // 确保目录存在
     if (!existsSync(this.logDir)) {

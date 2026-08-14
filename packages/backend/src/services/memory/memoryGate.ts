@@ -10,11 +10,7 @@
  * @module packages/backend/src/services/memory/memoryGate
  */
 
-import type {
-  MemoryCandidate,
-  CanonicalMemory,
-  GateResult,
-} from './memoryProvider'
+import type { MemoryCandidate, CanonicalMemory, GateResult } from './memoryProvider'
 import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('MemoryGate')

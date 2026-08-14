@@ -1,6 +1,6 @@
 /**
  * @file 窗口管理器
- * @description 管理 PeroCore 的 5 种窗口类型，提供创建/销毁/切换等操作
+ * @description 管理 infOS 的 5 种窗口类型，提供创建/销毁/切换等操作
  *              遵循 07_DUAL_DEPLOYMENT.md 的 Electron 壳层规范
  *
  *              窗口类型:
@@ -34,8 +34,8 @@ interface WindowConfig {
 const WINDOW_CONFIGS: Record<string, WindowConfig> = {
   launcher: {
     route: '/launcher',
-    width: 900,
-    height: 600,
+    width: 1080,
+    height: 720,
     transparent: true,
     alwaysOnTop: false,
     skipTaskbar: false,
@@ -53,7 +53,8 @@ const WINDOW_CONFIGS: Record<string, WindowConfig> = {
     hasShadow: false,
   },
   dashboard: {
-    route: '/dashboard',
+    // 综合面板已统一承载 Dashboard/Chat/Stronghold/Workspace 功能
+    route: '/app',
     width: 1280,
     height: 800,
     transparent: true,
@@ -63,7 +64,8 @@ const WINDOW_CONFIGS: Record<string, WindowConfig> = {
     hasShadow: true,
   },
   stronghold: {
-    route: '/stronghold',
+    // 保留独立窗口 IPC 兼容性，实际统一打开 MainView
+    route: '/app',
     width: 1200,
     height: 800,
     transparent: true,
@@ -73,7 +75,8 @@ const WINDOW_CONFIGS: Record<string, WindowConfig> = {
     hasShadow: true,
   },
   chat: {
-    route: '/chat',
+    // 保留独立窗口 IPC 兼容性，实际统一打开 MainView
+    route: '/app',
     width: 1100,
     height: 760,
     transparent: true,
@@ -83,7 +86,8 @@ const WINDOW_CONFIGS: Record<string, WindowConfig> = {
     hasShadow: true,
   },
   ide: {
-    route: '/work',
+    // WorkView 已废弃，保留 IPC 兼容性并统一打开 MainView
+    route: '/app',
     width: 1400,
     height: 900,
     transparent: true,
@@ -333,7 +337,15 @@ export class WindowManager {
     return this.petWin
   }
 
+  /** 打开唯一的综合面板窗口；所有 App 功能入口都复用它。 */
   public createDashboardWindow(): BrowserWindow {
+    // 兼容热更新前已打开的旧独立窗口：统一关闭，避免与综合面板并存。
+    for (const legacyWindow of [this.strongholdWin, this.chatWin, this.ideWin]) {
+      if (legacyWindow && !legacyWindow.isDestroyed()) legacyWindow.close()
+    }
+    this.strongholdWin = null
+    this.chatWin = null
+    this.ideWin = null
     this.dashboardWin = this.createOrFocus(this.dashboardWin, 'dashboard')
     this.dashboardWin.on('closed', () => {
       this.dashboardWin = null
@@ -341,28 +353,19 @@ export class WindowManager {
     return this.dashboardWin
   }
 
+  /** 据点已迁入综合面板，禁止再创建第二个 App 窗口。 */
   public createStrongholdWindow(): BrowserWindow {
-    this.strongholdWin = this.createOrFocus(this.strongholdWin, 'stronghold')
-    this.strongholdWin.on('closed', () => {
-      this.strongholdWin = null
-    })
-    return this.strongholdWin
+    return this.createDashboardWindow()
   }
 
+  /** 聊天已迁入综合面板，禁止再创建第二个 App 窗口。 */
   public createChatWindow(): BrowserWindow {
-    this.chatWin = this.createOrFocus(this.chatWin, 'chat')
-    this.chatWin.on('closed', () => {
-      this.chatWin = null
-    })
-    return this.chatWin
+    return this.createDashboardWindow()
   }
 
+  /** 工作台已迁入综合面板，禁止再创建第二个 App 窗口。 */
   public createIDEWindow(): BrowserWindow {
-    this.ideWin = this.createOrFocus(this.ideWin, 'ide')
-    this.ideWin.on('closed', () => {
-      this.ideWin = null
-    })
-    return this.ideWin
+    return this.createDashboardWindow()
   }
 
   // ─── Pet 鼠标追踪 ─────────────────────────────────

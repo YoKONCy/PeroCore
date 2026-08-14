@@ -33,6 +33,24 @@ const logger = createLogger('AnthropicProvider')
 /** Anthropic 默认 API 基址 */
 const ANTHROPIC_DEFAULT_BASE = 'https://api.anthropic.com'
 
+const RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504])
+
+const THINKING_BUDGETS = {
+  low: 1024,
+  medium: 4096,
+  high: 8192,
+  xhigh: 16384,
+  max: 32768,
+} as const
+
+function parseRetryAfterMs(value: string | null): number | undefined {
+  if (!value) return undefined
+  const seconds = Number(value)
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000)
+  const dateMs = Date.parse(value)
+  return Number.isNaN(dateMs) ? undefined : Math.max(0, dateMs - Date.now())
+}
+
 /** Anthropic SSE 事件类型 */
 type AnthropicEventType =
   | 'message_start'
@@ -54,7 +72,7 @@ export class AnthropicProvider implements LlmProvider {
     const url = `${this.getBase()}/v1/messages`
     const body = this.buildBody(systemPrompt, anthropicMessages, opts, false)
 
-    const response = await this.fetchWithTimeout(url, body, opts.timeout ?? 300_000)
+    const response = await this.fetchWithTimeout(url, body, opts.timeout ?? 300_000, opts.signal)
 
     if (!response.ok) {
       await this.handleError(response, 'chat')
@@ -80,7 +98,7 @@ export class AnthropicProvider implements LlmProvider {
     const url = `${this.getBase()}/v1/messages`
     const body = this.buildBody(systemPrompt, anthropicMessages, opts, true)
 
-    const response = await this.fetchWithTimeout(url, body, opts.timeout ?? 120_000)
+    const response = await this.fetchWithTimeout(url, body, opts.timeout ?? 120_000, opts.signal)
 
     if (!response.ok) {
       await this.handleError(response, 'chatStream')
@@ -288,16 +306,24 @@ export class AnthropicProvider implements LlmProvider {
     opts: ChatOptions,
     stream: boolean,
   ): Record<string, unknown> {
+    const thinkingBudget =
+      opts.reasoningEffort && opts.reasoningEffort !== 'off'
+        ? THINKING_BUDGETS[opts.reasoningEffort]
+        : undefined
+    const maxTokens = opts.maxTokens ?? this.config.maxTokens ?? 4096
     const body: Record<string, unknown> = {
       model: this.config.modelId,
       messages,
-      max_tokens: this.config.maxTokens ?? opts.maxTokens ?? 4096,
-      temperature: opts.temperature ?? 0.7,
+      max_tokens: thinkingBudget ? Math.max(maxTokens, thinkingBudget + 1) : maxTokens,
       stream,
     }
 
     if (systemPrompt) body.system = systemPrompt
-    if (opts.topP !== undefined) body.top_p = opts.topP
+    if (!thinkingBudget && typeof opts.temperature === 'number') body.temperature = opts.temperature
+    if (!thinkingBudget && typeof opts.topP === 'number') body.top_p = opts.topP
+    if (thinkingBudget) {
+      body.thinking = { type: 'enabled', budget_tokens: thinkingBudget }
+    }
     if (opts.stop?.length) body.stop_sequences = opts.stop
 
     // 工具定义 → Anthropic tools 格式
@@ -512,24 +538,28 @@ export class AnthropicProvider implements LlmProvider {
     url: string,
     payload: Record<string, unknown>,
     timeoutMs: number,
+    signal?: AbortSignal,
   ): Promise<Response> {
     try {
       return await fetch(url, {
         method: 'POST',
         headers: this.buildHeaders(),
         body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
+          : AbortSignal.timeout(timeoutMs),
       })
     } catch (err) {
       if (err instanceof DOMException && err.name === 'TimeoutError') {
         throw new AppError('LLM_TIMEOUT', {
           message: `Anthropic 请求超时 (${Math.round(timeoutMs / 1000)}s)`,
-          data: { provider: 'anthropic', model: this.config.modelId },
+          data: { provider: 'anthropic', model: this.config.modelId, retryable: true },
         })
       }
+      if (signal?.aborted) throw err
       throw new AppError('LLM_ERROR', {
         message: `Anthropic 网络错误: ${err instanceof Error ? err.message : String(err)}`,
-        data: { provider: 'anthropic', model: this.config.modelId },
+        data: { provider: 'anthropic', model: this.config.modelId, retryable: true },
       })
     }
   }
@@ -540,8 +570,7 @@ export class AnthropicProvider implements LlmProvider {
     const code = response.status === 429 ? 'LLM_RATE_LIMITED' : 'LLM_ERROR'
 
     // 尝试解析 retry-after
-    const retryAfter = response.headers.get('retry-after')
-    const retryMs = retryAfter ? parseInt(retryAfter, 10) * 1000 : undefined
+    const retryMs = parseRetryAfterMs(response.headers.get('retry-after'))
 
     logger.error(`Anthropic ${method} 失败`, {
       status: response.status,
@@ -555,6 +584,7 @@ export class AnthropicProvider implements LlmProvider {
         provider: 'anthropic',
         model: this.config.modelId,
         status: response.status,
+        retryable: RETRYABLE_STATUSES.has(response.status),
         retryAfter: retryMs,
       },
     })

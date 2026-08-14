@@ -145,9 +145,12 @@ export class ModelRegistry {
       modelId: row.modelId,
       apiKey: row.apiKey ?? '',
       apiBase: row.apiBase ?? undefined,
-      temperature: row.temperature ?? 0.7,
+      temperature: row.temperature ?? undefined,
       topP: row.topP ?? undefined,
       maxTokens: row.maxTokens ?? undefined,
+      reasoningEffort: (row.reasoningEffort as ModelConfig['reasoningEffort']) ?? undefined,
+      enableVision: row.enableVision ?? false,
+      enableAudioInput: row.enableAudioInput ?? false,
     }
   }
 

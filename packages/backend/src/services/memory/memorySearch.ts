@@ -152,15 +152,6 @@ export interface AdvancedSearchParams extends SearchParams {
   config?: JsSearchConfig
 }
 
-/** 按模式的 RAG 限制（AIOS 第八阶段：清理 work 残留） */
-const RAG_LIMITS: Record<string, { memories: number; flashback: number }> = {
-  desktop: { memories: 8, flashback: 3 },
-  social: { memories: 0, flashback: 0 },
-  group_chat: { memories: 3, flashback: 1 },
-  mobile: { memories: 5, flashback: 2 },
-  scheduler: { memories: 3, flashback: 0 },
-}
-
 // ─────────────────────────────────────────────
 // Service
 // ─────────────────────────────────────────────
@@ -187,22 +178,15 @@ export class MemorySearchService {
    * - 使用 RRF 融合向量召回与 Pattern 召回结果
    */
   async search(params: SearchParams): Promise<MemorySearchResult[]> {
-    const {
-      query,
-      agentId,
-      source = 'desktop',
-      benchmarkMode = false,
-    } = params
+    const { query, agentId, source = 'desktop', benchmarkMode = false } = params
 
     // 基准测试模式：expandDepth=0 禁用图谱扩散，minScore=0 不过滤
     const topK = params.topK ?? (benchmarkMode ? 10 : 5)
     const expandDepth = params.expandDepth ?? (benchmarkMode ? 0 : 2)
     const minScore = params.minScore ?? (benchmarkMode ? 0 : 0.3)
 
-    // 生产模式才按 RAG_LIMITS 限制；基准测试模式放行大 topK
-    const effectiveTopK = benchmarkMode
-      ? topK
-      : Math.min(topK, (RAG_LIMITS[source] ?? RAG_LIMITS.desktop!).memories)
+    // 生产检索数量已由经过校验的 MemoryRuntimeConfig 控制；基准模式同样直接使用请求值。
+    const effectiveTopK = topK
     if (effectiveTopK <= 0) return []
 
     // AIOS 第八阶段：embedding 不可用时优雅降级
@@ -295,12 +279,7 @@ export class MemorySearchService {
    * - 三路 RRF 融合：向量 + BM25 + Pattern
    */
   async searchHybrid(params: SearchParams): Promise<MemorySearchResult[]> {
-    const {
-      query,
-      agentId,
-      source = 'desktop',
-      benchmarkMode = false,
-    } = params
+    const { query, agentId, source = 'desktop', benchmarkMode = false } = params
 
     const topK = params.topK ?? (benchmarkMode ? 10 : 5)
     const expandDepth = params.expandDepth ?? (benchmarkMode ? 0 : 2)
@@ -412,10 +391,7 @@ export class MemorySearchService {
    * AIOS(Phase5): 按 agentId 防御性过滤，确保不返回其他 Agent 的记忆。
    * 向量检索已物理隔离（不同 Agent 用不同 tdb），此处为双重保险。
    */
-  private async enrichResults(
-    hits: JsSearchHit[],
-    agentId: string,
-  ): Promise<MemorySearchResult[]> {
+  private async enrichResults(hits: JsSearchHit[], agentId: string): Promise<MemorySearchResult[]> {
     if (hits.length === 0) return []
 
     const ids = hits.map((h) => h.id)

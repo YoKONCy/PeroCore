@@ -1,6 +1,6 @@
 # 命名与注释规范
 
-> **适用范围**：PeroCore-TS 全项目
+> **适用范围**：infOS-TS 全项目
 > **最后更新**：2026-04-21
 
 ---
@@ -184,7 +184,7 @@ import { Hono } from 'hono'
 import { eq } from 'drizzle-orm'
 
 // 3. Workspace 内部包
-import type { ApiResponse } from '@perocore/shared'
+import type { ApiResponse } from '@infos/shared'
 
 // 4. 项目内部模块（相对路径）
 import { MemoryRepository } from '../repositories/memory.repo'
@@ -193,4 +193,4 @@ import { VectorWriteHelper } from '../shared/vectorWriteHelper'
 
 ---
 
-*本文档由 Carola 整理，适用于 PeroCore-TS 全项目命名规范。*
+*本文档由 Carola 整理，适用于 infOS-TS 全项目命名规范。*

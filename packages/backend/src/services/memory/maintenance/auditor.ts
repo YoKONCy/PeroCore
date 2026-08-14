@@ -122,7 +122,7 @@ export class Auditor {
 
     let cleaned = 0
 
-    for (const [_fingerprint, duplicates] of contentMap) {
+    for (const duplicates of contentMap.values()) {
       if (duplicates.length < 2) continue
 
       // 保留 importance 最高的 (相同则保留 ID 最大的 = 最新的)
@@ -182,7 +182,7 @@ export class Auditor {
           { role: 'system', content: systemPrompt },
           { role: 'user', content: JSON.stringify(memData, null, 2) },
         ],
-        { temperature: 0.2, responseFormat: { type: 'json_object' } },
+        { responseFormat: { type: 'json_object' } },
       )
 
       const raw = completion.choices[0]?.message?.content

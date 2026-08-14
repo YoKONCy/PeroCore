@@ -1,0 +1,64 @@
+{
+  "id": "workspace-productivity",
+  "name": "workspace_productivity",
+  "version": "1.0.0",
+  "displayName": "工作区生产力工具",
+  "description": "范围读取、Glob 与带版本保护的精确原子编辑",
+  "type": "tool",
+  "entry": "index.ts",
+  "category": "workspace",
+  "platforms": ["windows", "linux", "darwin", "docker"],
+  "registration": "static",
+  "permissions": ["filesystem:read", "filesystem:write"],
+  "tools": [
+    {
+      "name": "read_file_range",
+      "description": "按字符范围、行范围或尾部行读取文本文件，并返回哈希、截断信息与文件总行数",
+      "display": { "label": "读取文件", "icon": "file", "color": "sky", "style": "read" },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "offset": { "type": "number" },
+          "limit": { "type": "number" },
+          "line_start": { "type": "number" },
+          "line_end": { "type": "number" },
+          "tail_lines": { "type": "number" }
+        },
+        "required": ["path"]
+      }
+    },
+    {
+      "name": "glob_files",
+      "description": "在设备文件系统中按 Glob 模式查找文件；相对目录仍以当前工作区为基准",
+      "display": { "label": "查找文件", "icon": "search", "color": "purple", "style": "search" },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pattern": { "type": "string" },
+          "cwd": { "type": "string" },
+          "max_depth": { "type": "number" },
+          "limit": { "type": "number" },
+          "include_hidden": { "type": "boolean" }
+        },
+        "required": ["pattern"]
+      }
+    },
+    {
+      "name": "edit_file",
+      "description": "使用唯一 old_text 匹配精确编辑文本文件，支持 expected_hash 并发保护和原子替换",
+      "display": { "label": "编辑文件", "icon": "edit", "color": "pink", "style": "edit" },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "old_text": { "type": "string" },
+          "new_text": { "type": "string" },
+          "expected_hash": { "type": "string" }
+        },
+        "required": ["path", "old_text", "new_text"]
+      }
+    }
+  ],
+  "compatibility": { "platforms": ["windows", "linux", "darwin", "docker"] }
+}

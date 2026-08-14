@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AgentListItem } from '@perocore/frontend/api/modules/agentApi'
-import type { Notification } from '@perocore/frontend/stores/useNotificationStore'
-import type { ChatMessage, GenerationState } from '@perocore/frontend/stores/useThreadStore'
+import type { AgentListItem } from '@infos/frontend/api/modules/agentApi'
+import type { Notification } from '@infos/frontend/stores/useNotificationStore'
+import type { ChatMessage, GenerationState } from '@infos/frontend/stores/useThreadStore'
 
 type RefValue<T> = { value: T }
 
@@ -55,6 +55,8 @@ const vueState = vi.hoisted(() => ({
 
 const apiMocks = vi.hoisted(() => ({
   agentList: vi.fn(),
+  // 后端权威活跃 Agent（fetchAgents 用它同步 activeAgentId）
+  agentActive: vi.fn(),
   // 第七阶段修复（批次 C）：agentApi.setActive 已删除，改用 runtimeApi.setWindowAgent
   runtimeSetWindowAgent: vi.fn(),
   configGet: vi.fn(),
@@ -106,21 +108,22 @@ vi.mock('pinia', () => ({
   },
 }))
 
-vi.mock('@perocore/frontend/api/modules/agentApi', () => ({
+vi.mock('@infos/frontend/api/modules/agentApi', () => ({
   agentApi: {
     list: apiMocks.agentList,
+    getActive: apiMocks.agentActive,
     // 第七阶段修复（批次 C）：setActive 已删除，不再 mock
   },
 }))
 
 // 第七阶段修复（批次 C）：新增 runtimeApi mock
-vi.mock('@perocore/frontend/api/modules/runtimeApi', () => ({
+vi.mock('@infos/frontend/api/modules/runtimeApi', () => ({
   runtimeApi: {
     setWindowAgent: apiMocks.runtimeSetWindowAgent,
   },
 }))
 
-vi.mock('@perocore/frontend/api/modules/configApi', () => ({
+vi.mock('@infos/frontend/api/modules/configApi', () => ({
   configApi: {
     get: apiMocks.configGet,
     set: apiMocks.configSet,
@@ -128,7 +131,7 @@ vi.mock('@perocore/frontend/api/modules/configApi', () => ({
   },
 }))
 
-vi.mock('@perocore/frontend/api/modules/chatApi', () => ({
+vi.mock('@infos/frontend/api/modules/chatApi', () => ({
   chatApi: {
     editMessage: apiMocks.chatEditMessage,
     deleteMessage: apiMocks.chatDeleteMessage,
@@ -136,7 +139,7 @@ vi.mock('@perocore/frontend/api/modules/chatApi', () => ({
 }))
 
 // 屏蔽 threadsApi 以避免 transport.ts 在 node 测试环境引用 window
-vi.mock('@perocore/frontend/api/modules/threadsApi', () => ({
+vi.mock('@infos/frontend/api/modules/threadsApi', () => ({
   threadsApi: {
     list: vi.fn(),
     get: vi.fn(),
@@ -145,16 +148,16 @@ vi.mock('@perocore/frontend/api/modules/threadsApi', () => ({
   },
 }))
 
-vi.mock('@perocore/frontend/lib/logger', () => ({
+vi.mock('@infos/frontend/lib/logger', () => ({
   logger: {
     error: apiMocks.loggerError,
   },
 }))
 
-import { useAgentStore } from '@perocore/frontend/stores/useAgentStore'
-import { useConfigStore } from '@perocore/frontend/stores/useConfigStore'
-import { useNotificationStore } from '@perocore/frontend/stores/useNotificationStore'
-import { useThreadStore } from '@perocore/frontend/stores/useThreadStore'
+import { useAgentStore } from '@infos/frontend/stores/useAgentStore'
+import { useConfigStore } from '@infos/frontend/stores/useConfigStore'
+import { useNotificationStore } from '@infos/frontend/stores/useNotificationStore'
+import { useThreadStore } from '@infos/frontend/stores/useThreadStore'
 
 describe('useNotificationStore', () => {
   beforeEach(() => {
@@ -264,6 +267,8 @@ describe('useAgentStore', () => {
   beforeEach(() => {
     vueState.stores.clear()
     vi.clearAllMocks()
+    // fetchAgents 会调用 agentApi.getActive 同步活跃角色，默认 mock 为 assistant
+    apiMocks.agentActive.mockResolvedValue({ data: { id: 'assistant', name: 'Assistant' } })
   })
 
   it('应当拉取 Agent 列表并同步活跃 Agent', async () => {

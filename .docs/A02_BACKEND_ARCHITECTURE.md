@@ -233,6 +233,31 @@ app.onError((err, c) => {
 })
 ```
 
+## 9. AIOS 领域架构约束
+
+后端以 [A09_AIOS_ARCHITECTURE](./A09_AIOS_ARCHITECTURE.md) 为资源边界基线。三层架构之上，所有领域模块必须遵守以下分工：
+
+| 领域 | 后端权威对象 | 不承担的职责 |
+|---|---|---|
+| PrincipalAgent | 身份、人格定义、长期资源关联 | 不维护窗口级活跃 Agent |
+| Thread | 对话边界、消息事实、channel 与 policy | 不持有长期记忆或工具权限 |
+| Context Runtime | 只读编译 LLM 输入与 Manifest | 不写消息、记忆、人格或文件 |
+| Memory | Candidate、Gate、CanonicalMemory、Provenance | 不将原始 Thread 当作长期记忆 |
+| Workspace | Agent 私有文件根与 containment | 不写安装/Workshop 只读资产 |
+| Tool Capability | `(agentId, channel)` 权限与资源范围 | 不允许默认 Agent 或 channel 回退 |
+
+### 9.1 请求上下文
+
+进入 Service/Tool 执行链的运行时上下文必须明确包含 `agentId`、`threadId` 和 `channel`。后端不允许根据“当前活跃角色”推断这些值；外部入站消息由 `InboundRoute` 决定归属，后台任务由任务本身的 `agentId` 决定。
+
+### 9.2 Context Compiler
+
+聊天入口只接收当前输入与 `threadId`。后端从 Thread 读取 active 消息、策略与 Agent，并由 Compiler 只读组装原生 `user/assistant` 消息；禁止客户端上传完整历史，禁止 XML 形式的历史重复注入。
+
+### 9.3 Daemon 与能力提供者
+
+`packages/backend` 保持纯 Node 运行时，不 import Electron。平台能力通过 Capability Provider 委托给 Electron、移动端等节点；无 Provider 时返回可解释的不可用结果。Provider 调用也必须先经过 CapabilityGate。
+
 ---
 
-*本文档由 Carola 整理，适用于 PeroCore-TS 后端架构规范。*
+*本文档由 Carola 整理，适用于 infOS-TS 后端架构规范。*

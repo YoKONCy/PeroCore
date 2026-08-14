@@ -123,23 +123,21 @@ export class NitStreamFilter {
 /**
  * Thinking 块流式过滤器
  *
- * 隐藏 LLM 输出中的 【Thinking/Monologue】块。
+ * 隐藏 LLM 输出中的 `<think>...</think>` 块。
+ *
+ * 流式处理要点：
+ * - `<think>` 开始标签可能在 chunk 中间被截断，用"保留末尾"策略防止误判
+ * - 进入块内后丢弃所有内容，直到找到 `</think>`
+ * - 未闭合的块（流结束仍未遇到 `</think>`）整体丢弃（flush 处理）
  */
 export class ThinkingStreamFilter {
   private buffer = ''
   private inBlock = false
-  private currentCloser = ''
 
-  /** 开始模式: 【Thinking or [Thinking or (Thinking */
-  private readonly startPatterns = [
-    '【Thinking',
-    '[Thinking',
-    '(Thinking',
-    '【Monologue',
-    '[Monologue',
-    '(Monologue',
-  ]
-  private readonly closerMap: Record<string, string> = { '【': '】', '[': ']', '(': ')' }
+  /** 开始标签（匹配 <think，兼容大小写与可能的属性/空格） */
+  private readonly START_TAG = '<think'
+  /** 结束标签（匹配 </think>，兼容大小写） */
+  private readonly END_TAG = '</think>'
 
   filter(chunk: string): string {
     this.buffer += chunk
@@ -147,20 +145,12 @@ export class ThinkingStreamFilter {
 
     while (this.buffer.length > 0) {
       if (!this.inBlock) {
-        // 查找任何开始标记
-        let foundIdx = -1
-        let opener = ''
-        for (const pattern of this.startPatterns) {
-          const idx = this.buffer.indexOf(pattern)
-          if (idx !== -1 && (foundIdx === -1 || idx < foundIdx)) {
-            foundIdx = idx
-            opener = pattern[0]!
-          }
-        }
+        // 查找开始标签（大小写不敏感）
+        const startIdx = this.buffer.toLowerCase().indexOf(this.START_TAG)
 
-        if (foundIdx === -1) {
-          // 保留末尾以防截断
-          const safeLen = this.buffer.length - 15
+        if (startIdx === -1) {
+          // 没有开始标签 → 输出安全部分（保留末尾以防 <think 被截断）
+          const safeLen = this.buffer.length - this.START_TAG.length
           if (safeLen > 0) {
             output += this.buffer.slice(0, safeLen)
             this.buffer = this.buffer.slice(safeLen)
@@ -168,17 +158,20 @@ export class ThinkingStreamFilter {
           return output
         }
 
-        output += this.buffer.slice(0, foundIdx)
-        this.buffer = this.buffer.slice(foundIdx)
+        // 输出开始标签之前的文本
+        output += this.buffer.slice(0, startIdx)
+        // 跳过开始标签（含 <think 后的内容，直到 >；若 > 尚未到达则仍视作块内）
+        this.buffer = this.buffer.slice(startIdx)
         this.inBlock = true
-        this.currentCloser = this.closerMap[opener] ?? '】'
       } else {
-        const closerIdx = this.buffer.indexOf(this.currentCloser)
-        if (closerIdx !== -1) {
-          this.buffer = this.buffer.slice(closerIdx + this.currentCloser.length)
+        // 块内：查找 </think>（大小写不敏感）
+        const endIdx = this.buffer.toLowerCase().indexOf(this.END_TAG)
+        if (endIdx !== -1) {
+          // 丢弃 </think> 及其之前的所有块内容，从 </think> 之后继续
+          this.buffer = this.buffer.slice(endIdx + this.END_TAG.length)
           this.inBlock = false
-          this.currentCloser = ''
         } else {
+          // 块内还没遇到结束标签 → 不输出任何内容，等待更多 chunk
           return output
         }
       }
@@ -188,8 +181,10 @@ export class ThinkingStreamFilter {
   }
 
   flush(): string {
+    // 块未闭合 → 丢弃块内残留；不在块内 → 输出剩余缓冲区
     const result = this.inBlock ? '' : this.buffer
     this.buffer = ''
+    this.inBlock = false
     return result
   }
 }

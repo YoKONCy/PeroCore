@@ -49,13 +49,16 @@ interface ElectronWindow {
 export class PeroContainerProvider implements IModelProvider {
   private containerUrl: string
   private boneFilterPatterns?: string[]
+  /** 外部明文贴图 URL（可选）：贴图不在加密容器内时，从该 URL 直接加载。 */
+  private externalTextureUrl?: string
   /** 容器内文件映射 (Key = 小写规范化路径) */
   private files = new Map<string, Uint8Array>()
   private loaded = false
   private textureCache = new Map<string, THREE.Texture>()
 
-  constructor(containerUrl: string, boneFilterPatterns?: string[]) {
+  constructor(containerUrl: string, textureUrl?: string, boneFilterPatterns?: string[]) {
     this.containerUrl = containerUrl
+    this.externalTextureUrl = textureUrl
     this.boneFilterPatterns = boneFilterPatterns
   }
 
@@ -121,6 +124,29 @@ export class PeroContainerProvider implements IModelProvider {
 
   async getTexture(): Promise<THREE.Texture> {
     await this.ensureLoaded()
+
+    // 外部明文贴图优先：贴图不加密，从普通 URL 直接加载，绕开容器内 Blob 加载。
+    if (this.externalTextureUrl) {
+      const cacheKey = this.externalTextureUrl
+      if (this.textureCache.has(cacheKey)) {
+        return this.textureCache.get(cacheKey)!
+      }
+      return new Promise((resolve, reject) => {
+        new THREE.TextureLoader().load(
+          this.externalTextureUrl!,
+          (texture) => {
+            texture.magFilter = THREE.NearestFilter
+            texture.minFilter = THREE.NearestFilter
+            texture.generateMipmaps = false // 像素风禁用 Mipmaps
+            texture.colorSpace = THREE.SRGBColorSpace
+            this.textureCache.set(cacheKey, texture)
+            resolve(texture)
+          },
+          undefined,
+          reject,
+        )
+      })
+    }
 
     // 查找纹理文件
     const textureData = this.findFile([

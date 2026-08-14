@@ -15,16 +15,19 @@
  * @module packages/backend/src/capabilities/capabilityGate
  */
 
-import { readFileSync, readdirSync, existsSync } from 'node:fs'
+import { readFileSync, readdirSync, existsSync, writeFileSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
 import type {
   AgentCapabilityConfig,
+  ChannelCapability,
   ResolvedCapability,
   SkillManifest,
   ToolPermission,
+  CapabilityScope,
 } from './types'
 import type { SkillLoader } from './skillLoader'
 import type { ToolRegistry } from '../services/agent/toolRegistry'
+import { isSystemProtocolTool } from '../tools/systemProtocolTools'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('CapabilityGate')
@@ -39,6 +42,15 @@ const EMPTY_CAPABILITY: ResolvedCapability = {
   toolPermissions: new Map(),
 }
 
+const AMBIENT_ALLOWED_TOOLS = new Set([
+  'finish_task',
+  'take_screenshot',
+  'set_reminder',
+  'list_reminders',
+  'cancel_reminder',
+  'search_diary',
+])
+
 export class CapabilityGate {
   /** Agent 能力配置 (agentId → config) */
   private configs = new Map<string, AgentCapabilityConfig>()
@@ -52,6 +64,11 @@ export class CapabilityGate {
     private toolRegistry: ToolRegistry,
   ) {
     this.reloadAll()
+  }
+
+  /** 为指定工具集合生成提示词描述，供 Thread 级减法过滤复用。 */
+  describeTools(toolNames: Iterable<string>): string {
+    return this.buildToolsDescription(new Set(toolNames))
   }
 
   /** 扫描所有 Agent 目录的 capabilities.yaml */
@@ -93,7 +110,7 @@ export class CapabilityGate {
    */
   validateChannelConfig(): void {
     /** 期望所有 Agent 都配置的 channel 列表（见 00-overview.md §4） */
-    const EXPECTED_CHANNELS = ['desktop', 'companion', 'social', 'group'] as const
+    const EXPECTED_CHANNELS = ['desktop', 'social', 'group'] as const
 
     for (const [agentId, config] of this.configs) {
       const missing: string[] = []
@@ -118,10 +135,15 @@ export class CapabilityGate {
    * ContextCompiler 和 ToolExecutor 都通过此方法获取能力。
    *
    * @param agentId    Agent ID
-   * @param channel    Thread channel（desktop/companion 等）
+   * @param channel    Thread channel（desktop/social/group）
    * @param sessionId  可选，会话级临时解锁工具（如 load_skill 解锁）
    */
-  resolve(agentId: string, channel: string, sessionId?: string): ResolvedCapability {
+  resolve(
+    agentId: string,
+    channel: string,
+    sessionId?: string,
+    scope: CapabilityScope = 'default',
+  ): ResolvedCapability {
     const config = this.configs.get(agentId)
     // 第七阶段修复（批次 B3）：fail-closed
     // 原实现 `config?.channels[channel] ?? config?.channels['desktop']` 会回退到 desktop，
@@ -151,9 +173,17 @@ export class CapabilityGate {
       }
     }
 
+    // 请求级作用域只能在 Channel 权限基础上做交集，禁止借由作用域扩权。
+    if (scope === 'ambient') {
+      for (const tool of allowedTools) {
+        if (!AMBIENT_ALLOWED_TOOLS.has(tool)) allowedTools.delete(tool)
+      }
+    }
+
     // 2. Skill 清单 (只加载 manifest，不加载完整内容)
     const enabledSkills: SkillManifest[] = []
-    for (const skillId of channelConfig.skills) {
+    const enabledSkillIds = scope === 'ambient' ? [] : channelConfig.skills
+    for (const skillId of enabledSkillIds) {
       const manifest = this.skillLoader.getManifest(skillId)
       if (manifest) {
         enabledSkills.push(manifest)
@@ -174,7 +204,10 @@ export class CapabilityGate {
     return {
       allowedTools,
       enabledSkills,
-      promptFragments: channelConfig.prompt_fragments,
+      promptFragments:
+        scope === 'ambient'
+          ? channelConfig.prompt_fragments.filter((fragment) => fragment.includes('/vision'))
+          : channelConfig.prompt_fragments,
       toolsDescription,
       skillMenuText,
       // 第六阶段 #6: 透传 tool_permissions 配置（Resource Scope）
@@ -192,13 +225,19 @@ export class CapabilityGate {
    * @param toolName   待校验的工具名
    * @param sessionId  可选，会话级临时解锁
    */
-  isToolAllowed(agentId: string, channel: string, toolName: string, sessionId?: string): boolean {
-    // finish_task 和 load_skill 永远允许
-    if (toolName === 'finish_task' || toolName === 'load_skill') {
-      return true
+  isToolAllowed(
+    agentId: string,
+    channel: string,
+    toolName: string,
+    sessionId?: string,
+    scope: CapabilityScope = 'default',
+  ): boolean {
+    // 默认作用域保留系统协议工具；ambient 仅允许结束本轮，禁止动态解锁能力。
+    if (isSystemProtocolTool(toolName)) {
+      return scope === 'default' || toolName === 'finish_task'
     }
 
-    const resolved = this.resolve(agentId, channel, sessionId)
+    const resolved = this.resolve(agentId, channel, sessionId, scope)
     return resolved.allowedTools.has(toolName)
   }
 
@@ -235,12 +274,7 @@ export class CapabilityGate {
    * @param toolName  工具名
    * @param inputPath 待校验的路径参数（可能是相对路径或绝对路径）
    */
-  isPathAllowed(
-    agentId: string,
-    channel: string,
-    toolName: string,
-    inputPath: string,
-  ): boolean {
+  isPathAllowed(agentId: string, channel: string, toolName: string, inputPath: string): boolean {
     const perm = this.getToolPermission(agentId, channel, toolName)
     // 未配置权限 → 默认允许（仍受 CapabilityGate 白名单约束）
     if (!perm) return true
@@ -324,6 +358,170 @@ export class CapabilityGate {
       }
     }
     return result
+  }
+
+  /**
+   * 获取 Agent 的完整结构化能力矩阵（供角色管理"高级"页编辑）
+   *
+   * 相比 getAgentModes，额外包含 promptFragments，便于前端表单化编辑。
+   */
+  getChannels(
+    agentId: string,
+  ): Record<string, { tools: string[]; skills: string[]; promptFragments: string[] }> {
+    const config = this.configs.get(agentId)
+    if (!config) return {}
+    const result: Record<string, { tools: string[]; skills: string[]; promptFragments: string[] }> =
+      {}
+    for (const [channel, channelConfig] of Object.entries(config.channels)) {
+      result[channel] = {
+        tools: channelConfig.tools,
+        skills: channelConfig.skills,
+        promptFragments: channelConfig.prompt_fragments,
+      }
+    }
+    return result
+  }
+
+  /**
+   * 更新 Agent 的能力矩阵并写回 capabilities.yaml
+   *
+   * 仅更新 tools / skills / prompt_fragments；已有 tool_permissions（Resource Scope）
+   * 会被保留，避免覆盖用户在文件里手工配置的路径白名单。
+   *
+   * @param agentId    Agent ID
+   * @param channels   各 channel 的新工具/技能/提示词片段配置
+   * @param targetPath 目标文件路径（内置角色请先通过 AgentManager 创建用户副本后传入副本路径）
+   */
+  writeChannels(
+    agentId: string,
+    channels: Record<string, { tools?: string[]; skills?: string[]; promptFragments?: string[] }>,
+    targetPath?: string,
+  ): void {
+    // 保留现有 tool_permissions（解析器读到的内存配置）
+    const existing = this.configs.get(agentId)
+    const existingPerms: Record<string, Record<string, ToolPermission>> = {}
+    if (existing) {
+      for (const [ch, cfg] of Object.entries(existing.channels)) {
+        if (cfg.tool_permissions) existingPerms[ch] = cfg.tool_permissions
+      }
+    }
+
+    // 组装新配置（未提供的字段保留原值或空数组）
+    const finalChannels: Record<string, ChannelCapability> = {}
+    for (const [channel, patch] of Object.entries(channels)) {
+      const old = existing?.channels[channel]
+      finalChannels[channel] = {
+        tools: patch.tools ?? old?.tools ?? [],
+        skills: patch.skills ?? old?.skills ?? [],
+        prompt_fragments: patch.promptFragments ?? old?.prompt_fragments ?? [],
+        tool_permissions: existingPerms[channel],
+      }
+    }
+
+    const yaml = this.buildCapabilitiesYaml(agentId, finalChannels)
+    const filePath = targetPath ?? this.getCapabilityConfigPath(agentId)
+    if (!filePath) {
+      throw new Error(`找不到 Agent "${agentId}" 的 capabilities.yaml`)
+    }
+    mkdirSync(path.dirname(filePath), { recursive: true })
+    writeFileSync(filePath, yaml, 'utf-8')
+    logger.info(`已更新 Agent 能力矩阵: ${agentId} (${Object.keys(finalChannels).length} channels)`)
+  }
+
+  /** 定位 Agent 的 capabilities.yaml 路径（内部扫描目录，找不到返回 null） */
+  private getCapabilityConfigPath(agentId: string): string | null {
+    for (const dir of this.agentsDirs) {
+      const capPath = path.join(dir, agentId, 'capabilities.yaml')
+      if (existsSync(capPath)) return capPath
+    }
+    return null
+  }
+
+  /**
+   * 将结构化能力配置序列化为项目解析器可识别的规范 YAML
+   *
+   * 格式与 parseCapabilityYaml 严格对齐：
+   * - channel 名：2 空格缩进
+   * - 字段名：4 空格缩进
+   * - 列表项：6 空格缩进 "- "
+   * - tool_permissions 块：6 空格工具名 + 8/10/12 空格嵌套
+   */
+  private buildCapabilitiesYaml(
+    agentId: string,
+    channels: Record<string, ChannelCapability>,
+  ): string {
+    const lines: string[] = [
+      `# Agent "${agentId}" 能力矩阵 — CapabilityGate (AIOS)`,
+      '# 单一权威: (Agent, Channel) → 可用工具 + 技能 + 提示词片段',
+      '# 未在此声明的 channel 将 fail-closed（无任何工具可用），请按需补充。',
+      `agent: ${agentId}`,
+      '',
+      'channels:',
+    ]
+
+    for (const [channel, cfg] of Object.entries(channels)) {
+      lines.push(`  ${channel}:`)
+      lines.push(`    tools:`)
+      if (cfg.tools.length === 0) {
+        lines.push(`      []`)
+      } else {
+        for (const tool of cfg.tools) lines.push(`      - ${tool}`)
+      }
+      lines.push(`    skills:`)
+      if (cfg.skills.length === 0) {
+        lines.push(`      []`)
+      } else {
+        for (const skill of cfg.skills) lines.push(`      - ${skill}`)
+      }
+      lines.push(`    prompt_fragments:`)
+      if (cfg.prompt_fragments.length === 0) {
+        lines.push(`      []`)
+      } else {
+        for (const fragment of cfg.prompt_fragments) lines.push(`      - ${fragment}`)
+      }
+      // 保留 tool_permissions（Resource Scope）
+      if (cfg.tool_permissions) {
+        lines.push(`    tool_permissions:`)
+        for (const [toolName, perm] of Object.entries(cfg.tool_permissions)) {
+          lines.push(`      ${toolName}:`)
+          lines.push(`        resource_scope:`)
+          lines.push(`          scope: ${perm.resourceScope.scope}`)
+          lines.push(`          allowed_roots:`)
+          if (perm.resourceScope.allowedRoots.length === 0) {
+            lines.push(`            []`)
+          } else {
+            for (const root of perm.resourceScope.allowedRoots) lines.push(`            - ${root}`)
+          }
+          lines.push(`          denied_paths:`)
+          if (perm.resourceScope.deniedPaths.length === 0) {
+            lines.push(`            []`)
+          } else {
+            for (const denied of perm.resourceScope.deniedPaths)
+              lines.push(`            - ${denied}`)
+          }
+          if (perm.paramPolicy) {
+            lines.push(`        param_policy:`)
+            if (perm.paramPolicy.maxContentLength !== undefined) {
+              lines.push(`          max_content_length: ${perm.paramPolicy.maxContentLength}`)
+            }
+            lines.push(`          allowed_commands:`)
+            if (!perm.paramPolicy.allowedCommands?.length) lines.push(`            []`)
+            else
+              for (const command of perm.paramPolicy.allowedCommands)
+                lines.push(`            - ${command}`)
+            lines.push(`          denied_patterns:`)
+            if (!perm.paramPolicy.deniedPatterns?.length) lines.push(`            []`)
+            else
+              for (const pattern of perm.paramPolicy.deniedPatterns)
+                lines.push(`            - ${JSON.stringify(pattern)}`)
+          }
+          lines.push(`        requires_approval: ${String(perm.requiresApproval)}`)
+        }
+      }
+      lines.push('')
+    }
+
+    return lines.join('\n')
   }
 
   /** 获取 Agent 在所有 channel 中可用的 Skill 列表 */
@@ -467,6 +665,8 @@ export class CapabilityGate {
     // 保存尾部字段
     if (inToolPermissions) flushToolPermissions()
     this.flushField(config, currentChannel, currentField, currentList)
+    // companion 已退役为请求级 ambient 作用域，不再作为持久 Channel 能力配置。
+    delete config.channels.companion
 
     return config
   }
@@ -490,8 +690,14 @@ export class CapabilityGate {
     const result: Record<string, ToolPermission> = {}
     let currentTool: ToolPermission | null = null
     let currentToolName = ''
-    // 当前正在收集的列表字段（在 resource_scope 下）：'allowed_roots' | 'denied_paths' | null
-    let listField: 'allowed_roots' | 'denied_paths' | null = null
+    // 当前正在收集的列表字段。
+    let listField:
+      | 'allowed_roots'
+      | 'denied_paths'
+      | 'allowed_commands'
+      | 'denied_patterns'
+      | null = null
+    let section: 'resource_scope' | 'param_policy' | null = null
 
     const finalizeTool = () => {
       if (currentToolName && currentTool) {
@@ -500,6 +706,7 @@ export class CapabilityGate {
       currentTool = null
       currentToolName = ''
       listField = null
+      section = null
     }
 
     for (const line of lines) {
@@ -528,22 +735,41 @@ export class CapabilityGate {
 
       // resource_scope: 8 空格缩进
       if (/^ {8}resource_scope:\s*$/.test(trimmed)) {
+        section = 'resource_scope'
+        listField = null
+        continue
+      }
+      if (/^ {8}param_policy:\s*$/.test(trimmed)) {
+        section = 'param_policy'
+        currentTool.paramPolicy ??= {}
         listField = null
         continue
       }
 
-      // resource_scope 下的标量字段: 10 空格缩进 + "key: value"
+      // section 下的标量字段: 10 空格缩进 + "key: value"
       const scopeScalarMatch = trimmed.match(/^ {10}(\w+):\s*(.*)$/)
       if (scopeScalarMatch?.[1]) {
         const key = scopeScalarMatch[1]
         const value = (scopeScalarMatch[2] ?? '').trim()
+        if (section === 'param_policy') {
+          currentTool.paramPolicy ??= {}
+          if (key === 'max_content_length') {
+            const parsed = Number(value)
+            if (Number.isFinite(parsed)) currentTool.paramPolicy.maxContentLength = parsed
+            listField = null
+          } else if (key === 'allowed_commands' || key === 'denied_patterns') {
+            const target = key === 'allowed_commands' ? 'allowedCommands' : 'deniedPatterns'
+            currentTool.paramPolicy[target] = []
+            listField = value === '[]' ? null : key
+          }
+          continue
+        }
+        if (section !== 'resource_scope') continue
         if (key === 'scope') {
           // 仅接受合法枚举值，否则回退 system
           const v = value.replace(/['"]/g, '')
           currentTool.resourceScope.scope =
-            v === 'principal_workspace' || v === 'user_authorized' || v === 'system'
-              ? v
-              : 'system'
+            v === 'principal_workspace' || v === 'user_authorized' || v === 'system' ? v : 'system'
           listField = null
         } else if (key === 'allowed_roots' || key === 'denied_paths') {
           // 内联空数组
@@ -564,11 +790,20 @@ export class CapabilityGate {
       // resource_scope 下的列表项: 12 空格缩进 + "- value"
       const scopeListItemMatch = trimmed.match(/^ {12}- (.+)$/)
       if (scopeListItemMatch?.[1] && listField) {
-        const item = scopeListItemMatch[1].trim().replace(/['"]/g, '')
+        const item = scopeListItemMatch[1].trim().replace(/^['"]|['"]$/g, '')
         if (listField === 'allowed_roots') {
           currentTool.resourceScope.allowedRoots.push(item)
-        } else {
+        } else if (listField === 'denied_paths') {
           currentTool.resourceScope.deniedPaths.push(item)
+        } else {
+          currentTool.paramPolicy ??= {}
+          if (listField === 'allowed_commands') {
+            currentTool.paramPolicy.allowedCommands ??= []
+            currentTool.paramPolicy.allowedCommands.push(item)
+          } else {
+            currentTool.paramPolicy.deniedPatterns ??= []
+            currentTool.paramPolicy.deniedPatterns.push(item)
+          }
         }
         continue
       }

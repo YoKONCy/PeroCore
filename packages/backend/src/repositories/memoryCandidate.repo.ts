@@ -10,10 +10,7 @@
 import { eq, desc, and, sql, inArray } from 'drizzle-orm'
 import { memoryCandidates } from '../database/schema'
 import type { DrizzleDb } from '../database'
-import type {
-  MemoryCandidate,
-  MemoryType,
-} from '../services/memory/memoryProvider'
+import type { MemoryCandidate, MemoryType } from '../services/memory/memoryProvider'
 
 // ─────────────────────────────────────────────
 // 类型
@@ -133,19 +130,11 @@ export class MemoryCandidateRepository {
   }
 
   /** 查询某 Agent 的 pending 候选 */
-  async findPendingByAgent(
-    agentId: string,
-    limit = 50,
-  ): Promise<MemoryCandidate[]> {
+  async findPendingByAgent(agentId: string, limit = 50): Promise<MemoryCandidate[]> {
     const rows = await this.db
       .select()
       .from(memoryCandidates)
-      .where(
-        and(
-          eq(memoryCandidates.agentId, agentId),
-          eq(memoryCandidates.status, 'pending'),
-        ),
-      )
+      .where(and(eq(memoryCandidates.agentId, agentId), eq(memoryCandidates.status, 'pending')))
       .orderBy(memoryCandidates.createdAt)
       .limit(limit)
     return rows.map(rowToCandidate)
@@ -183,12 +172,7 @@ export class MemoryCandidateRepository {
     const result = await this.db
       .select({ count: sql<number>`count(*)` })
       .from(memoryCandidates)
-      .where(
-        and(
-          eq(memoryCandidates.agentId, agentId),
-          eq(memoryCandidates.status, 'pending'),
-        ),
-      )
+      .where(and(eq(memoryCandidates.agentId, agentId), eq(memoryCandidates.status, 'pending')))
       .get()
     return result?.count ?? 0
   }

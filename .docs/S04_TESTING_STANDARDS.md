@@ -1,6 +1,6 @@
 # 测试规范
 
-> **适用范围**：PeroCore-TS 全部 packages
+> **适用范围**：infOS-TS 全部 packages
 > **最后更新**：2026-04-21
 > **核心原则**：**每开发一个模块，就必须同步编写对应的单元测试**
 
@@ -143,9 +143,9 @@ const testDb = drizzle(new Database(':memory:'))
 
 | Package | 最低行覆盖率 | 最低分支覆盖率 |
 |---|---|---|
-| `@perocore/shared` | 80% | 70% |
-| `@perocore/backend` | 60% | 50% |
-| `@perocore/frontend` | 50% | 40% |
+| `@infos/shared` | 80% | 70% |
+| `@infos/backend` | 60% | 50% |
+| `@infos/frontend` | 50% | 40% |
 
 ---
 
@@ -161,4 +161,4 @@ const testDb = drizzle(new Database(':memory:'))
 
 ---
 
-*本文档由 Carola 整理，适用于 PeroCore-TS 测试规范。*
+*本文档由 Carola 整理，适用于 infOS-TS 测试规范。*

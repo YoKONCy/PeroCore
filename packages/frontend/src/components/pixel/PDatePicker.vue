@@ -51,36 +51,38 @@ function handleInput(e: Event) {
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  border: 2px solid var(--color-border);
-  background: var(--color-bg-primary);
+  border: 2px solid var(--dash-input-border);
+  background: var(--dash-input-bg);
   transition:
     border-color 0.2s,
     box-shadow 0.2s;
 }
 .p-datepicker:focus-within {
-  border-color: var(--color-sky-hover);
-  box-shadow: 0 0 0 2px var(--color-sky-50);
+  border-color: var(--ui-accent-sky);
+  box-shadow: 0 0 0 2px var(--ui-accent-sky-soft);
 }
 .p-datepicker-disabled {
-  opacity: 0.5;
+  color: var(--ui-text-disabled);
+  background: var(--ui-bg-surface-soft);
   cursor: not-allowed;
 }
 
 .p-datepicker-icon {
-  color: var(--color-text-muted);
+  color: var(--ui-text-tertiary);
   flex-shrink: 0;
   transition: color 0.15s;
 }
 .p-datepicker:focus-within .p-datepicker-icon {
-  color: var(--color-sky-500);
+  color: var(--ui-accent-sky);
 }
 
 .p-datepicker-input {
   flex: 1;
   border: none;
   background: transparent;
-  color: var(--color-text-primary);
-  font-family: var(--font-sans);
+  color: var(--ui-text-primary);
+  color-scheme: light dark;
+  font-family: var(--ui-font-sans);
   font-size: 13px;
   font-weight: 700;
   outline: none;

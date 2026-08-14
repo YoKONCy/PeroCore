@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
-import { NitLexer } from '@perocore/backend/nit/lexer'
-import { NitParser } from '@perocore/backend/nit/parser'
-import { NitRuntime } from '@perocore/backend/nit/runtime'
+import { NitLexer } from '@infos/backend/nit/lexer'
+import { NitParser } from '@infos/backend/nit/parser'
+import { NitRuntime } from '@infos/backend/nit/runtime'
 
 function parseSource(source: string) {
   const tokens = new NitLexer(source).tokenize()
@@ -86,12 +86,12 @@ for item in items {
       const source = `items = ["a", "", "b"]
 items.push("c")
 joined = items.filter().join("|")
-text = "  perocore  ".trim()
+text = "  infos  ".trim()
 return joined + ":" + text.length`
 
       const result = await executeSource(source)
 
-      expect(result.value).toBe('a|b|c:8')
+      expect(result.value).toBe('a|b|c:5')
     })
 
     it('应当执行 merge 内置函数并支持分隔符', async () => {

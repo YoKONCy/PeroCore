@@ -12,7 +12,7 @@ AIOS 改造说明（已废弃）：
 - 新版 ContextCompiler 以原生 user/assistant 角色追加 Thread 活跃消息
 - 不再将历史序列化为文本注入 system 消息（避免历史重复注入）
 - 本槽位已禁用（enabled: false），保留文件作为历史参考
-- 详见 .aios/03-context-runtime.md 第 4.2 节
+- 详见 .docs/archived/03-context-runtime.md 第 4.2 节
 -->
 
 ---

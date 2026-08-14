@@ -1,6 +1,6 @@
 # 记忆系统 (Memory System) - GraphRAG
 
-PeroCore 的记忆系统是一个增强型的 **GraphRAG（基于图的检索增强生成）** 数据库。它在传统向量检索的基础上，引入了 **加权图遍历 (Weighted Graph Traversal)** 机制，让 AI 能够通过逻辑关联检索信息，而不仅仅是关键词匹配。
+infOS 的记忆系统是一个增强型的 **GraphRAG（基于图的检索增强生成）** 数据库。它在传统向量检索的基础上，引入了 **加权图遍历 (Weighted Graph Traversal)** 机制，让 AI 能够通过逻辑关联检索信息，而不仅仅是关键词匹配。
 
 ## 1. 核心架构 (Core Architecture)
 
@@ -45,7 +45,7 @@ Python 层负责存储和业务逻辑，Rust 层作为计算引擎处理向量�
 
 ## 3. 记忆动力学 (Memory Dynamics)
 
-PeroCore 的记忆不是静态存储的，而是具有动态权重，随时间推移和访问频率而变化。
+infOS 的记忆不是静态存储的，而是具有动态权重，随时间推移和访问频率而变化。
 
 ### 3.1. 权重计算公式 (Weight Calculation)
 
@@ -61,7 +61,7 @@ $$ FinalScore = Score*{base} \times (1.0 + \frac{Importance}{10}) \times (0.8 + 
 
 ### 3.2. 记忆强化机制 (Reinforcement Learning)
 
-PeroCore 实现了类似神经元突触强化的机制：
+infOS 实现了类似神经元突触强化的机制：
 
 - **访问计数 (Access Count)**: 每次记忆被成功检索，其 `access_count` 加 1。
 - **重要性强化**: 每次被激活时，其 `base_importance` 会获得微小提升，从而在未来的检索中拥有更高的竞争力，实现“常用的知识更深刻”。

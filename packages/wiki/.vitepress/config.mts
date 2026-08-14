@@ -1,7 +1,7 @@
 /**
  * VitePress 站点配置
  *
- * PeroCore Wiki 萌动像素风文档站
+ * infOS Wiki 萌动像素风文档站
  *
  * @see https://vitepress.dev/reference/site-config
  * @module packages/wiki/.vitepress/config
@@ -13,8 +13,8 @@ import fs from 'fs'
 import path from 'path'
 export default defineConfig({
   title: 'Perofamily Wiki',
-  description: 'Documentation for PeroCore - The AI Desktop Companion',
-  // base: '/PeroCore/', // Deploy to GitHub Pages: https://YoKONCy.github.io/PeroCore/
+  description: 'Documentation for infOS - The AI Desktop Companion',
+  // base: '/infOS/', // Deploy to GitHub Pages: https://YoKONCy.github.io/infOS/
   head: [
     ['link', { rel: 'icon', href: '/Logo.png' }],
     // 引入更柔和的像素字体与平滑回退字体
@@ -92,6 +92,6 @@ export default defineConfig({
       }
     ],
 
-    socialLinks: [{ icon: 'github', link: 'https://github.com/YoKONCy/PeroCore' }]
+    socialLinks: [{ icon: 'github', link: 'https://github.com/YoKONCy/infOS' }]
   }
 })

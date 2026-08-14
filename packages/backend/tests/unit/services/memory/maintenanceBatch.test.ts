@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
-import { Tagger } from '@perocore/backend/services/memory/maintenance/tagger'
-import { RetirementPolicy } from '@perocore/backend/services/memory/maintenance/retirementPolicy'
-import { Consolidator } from '@perocore/backend/services/memory/maintenance/consolidator'
+import { Tagger } from '@infos/backend/services/memory/maintenance/tagger'
+import { RetirementPolicy } from '@infos/backend/services/memory/maintenance/retirementPolicy'
+import { Consolidator } from '@infos/backend/services/memory/maintenance/consolidator'
 
 function createMemory(id: number, overrides: Record<string, unknown> = {}) {
   return {
@@ -100,7 +100,7 @@ describe('Tagger', () => {
     expect(llmService.chat).toHaveBeenCalledWith(
       expect.any(Object),
       expect.arrayContaining([expect.objectContaining({ role: 'system' })]),
-      { temperature: 0.2, responseFormat: { type: 'json_object' } },
+      { responseFormat: { type: 'json_object' } },
     )
   })
 
@@ -276,7 +276,7 @@ describe('Consolidator', () => {
         expect.objectContaining({ role: 'system' }),
         expect.objectContaining({ role: 'user' }),
       ]),
-      { temperature: 0.3, responseFormat: { type: 'json_object' } },
+      { responseFormat: { type: 'json_object' } },
     )
   })
 })

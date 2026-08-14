@@ -7,7 +7,7 @@
  * 投影矩阵使用 Xavier 随机初始化。
  * 隐状态持久化到 data/agent_{id}/rnn_{mode}.bin (1KB)。
  *
- * 依赖 @perocore/nit-runtime 的 minGRU 前向推理 (TS mock 或 Rust N-API)。
+ * 依赖 @infos/nit-runtime 的 minGRU 前向推理 (TS mock 或 Rust N-API)。
  *
  * @module packages/backend/src/services/retrieval/contextRnn
  */
@@ -21,8 +21,8 @@ import {
   xavierInitMinGruWeights,
   trainMinGruStep,
   MIN_GRU_WEIGHT_SIZES,
-} from '@perocore/nit-runtime'
-import type { MinGruWeights } from '@perocore/nit-runtime'
+} from '@infos/nit-runtime'
+import type { MinGruWeights } from '@infos/nit-runtime'
 import type { PathResolver } from '../../core/pathResolver'
 import { createLogger } from '../../lib/logger'
 
@@ -515,9 +515,12 @@ export class ContextRnn {
     const total = MIN_GRU_WEIGHT_SIZES.TOTAL
     const combined = new Float32Array(total)
     let offset = 0
-    combined.set(wZ, offset); offset += wZ.length
-    combined.set(bZ, offset); offset += bZ.length
-    combined.set(wH, offset); offset += wH.length
+    combined.set(wZ, offset)
+    offset += wZ.length
+    combined.set(bZ, offset)
+    offset += bZ.length
+    combined.set(wH, offset)
+    offset += wH.length
     combined.set(bH, offset)
 
     writeFileSync(this.resolveWeightsPath('mingru'), Buffer.from(combined.buffer))

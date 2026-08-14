@@ -30,40 +30,49 @@ export const isPortable = isPackaged && detectPortableMode(app.getPath('exe'))
 // ─── 用户数据根目录 ─────────────────────────────────────
 function resolveUserData(): string {
   if (isPortable) {
-    // 便携模式: exe 同级目录
+    // 便携模式：用户根位于 exe 同级，业务数据写入其 data/ 子目录。
     const dir = path.dirname(app.getPath('exe'))
-    console.log(`[Env] 便携模式，数据目录: ${dir}`)
+    console.log(`[Env] 便携模式，用户根目录: ${dir}`)
     return dir
   }
 
   if (isDev) {
-    // 开发模式: 与后端共享 ~/.perocore 数据目录
-    const devDir = path.join(app.getPath('home'), '.perocore')
+    // 开发模式：Electron 与独立 Daemon 统一使用 ~/.infos。
+    const devDir = path.join(app.getPath('home'), '.infos')
     console.log(`[Env] 开发模式，数据目录: ${devDir}`)
     return devDir
   }
 
-  // 标准发行模式 (Setup / Steam): %APPDATA%/萌动链接：PeroperoChat！/
+  // 标准安装版与 Steam 版使用系统 userData，卸载/更新不会删除业务数据。
   return app.getPath('userData')
 }
 
 const appUserData = resolveUserData()
 
+/**
+ * 业务数据目录必须与后端 PERO_DATA_DIR 完全一致。
+ * 开发模式直接使用 ~/.infos；打包版使用 userData/data；便携版使用 exe/data。
+ */
+const appDataDir = isDev ? appUserData : path.join(appUserData, 'data')
+
 // ─── 统一路径工厂 ───────────────────────────────────────
-// 遵循
 export const paths = {
   /** 用户数据根目录 */
   userData: appUserData,
-  /** Electron 应用路径 */
+  /** Electron 应用路径（asar 内） */
   app: app.getAppPath(),
   /** 可执行文件路径 */
   exe: app.getPath('exe'),
-  /** 资源目录 (生产环境: resources/) */
+  /** 资源目录（生产环境为 resources/） */
   resources: process.resourcesPath,
-  /** 数据目录 */
-  data: path.join(appUserData, 'data'),
+  /** 与后端共享的业务数据目录 */
+  data: appDataDir,
   /** 日志目录 */
-  logs: path.join(appUserData, 'data', 'logs'),
+  logs: path.join(appDataDir, 'logs'),
+  /** 可写模型目录（本地导入/用户资源） */
+  models: path.join(appDataDir, 'models'),
+  /** 运行时缓存目录（可安全清理，不参与云同步） */
+  cache: path.join(appDataDir, 'cache'),
 } as const
 
 /**

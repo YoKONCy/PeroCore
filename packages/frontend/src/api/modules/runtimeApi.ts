@@ -48,8 +48,7 @@ export const runtimeApi = {
     apiClient.delete<void>(`/runtime/window-agent/${windowId}`),
 
   /** 列出所有窗口 Agent 映射 */
-  getAllWindowAgents: () =>
-    apiClient.get<WindowAgentMapping[]>('/runtime/window-agent'),
+  getAllWindowAgents: () => apiClient.get<WindowAgentMapping[]>('/runtime/window-agent'),
 
   /** 获取活跃任务列表 */
   getActiveTasks: () => apiClient.get<RuntimeTask[]>('/runtime/tasks'),

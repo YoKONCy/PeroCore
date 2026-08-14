@@ -32,11 +32,22 @@ const props = withDefaults(defineProps<Props>(), {
   eager: false,
 })
 
+const emit = defineEmits<{
+  (e: 'ui-enter'): void
+  (e: 'ui-leave'): void
+}>()
+
 const visible = ref(false)
 const pos = ref({ x: 0, y: 0 })
 
 // ── 位置持久化 ──
 const STORAGE_KEY = 'ppc.lyric_pos'
+const EDGE_PADDING = 24
+
+function clampPosition() {
+  pos.value.x = Math.min(Math.max(pos.value.x, EDGE_PADDING), window.innerWidth - EDGE_PADDING)
+  pos.value.y = Math.min(Math.max(pos.value.y, EDGE_PADDING), window.innerHeight - EDGE_PADDING)
+}
 
 onMounted(() => {
   const saved = localStorage.getItem(STORAGE_KEY)
@@ -49,6 +60,8 @@ onMounted(() => {
   } else {
     pos.value = { x: window.innerWidth / 2, y: window.innerHeight - 80 }
   }
+  clampPosition()
+  window.addEventListener('resize', clampPosition)
   // eager 模式：挂载时立即根据已有内容决定是否显示（用于切换模式丝滑过渡）
   // 非 eager 模式：组件保持挂载，由 watch 响应 prop 变化来控制显示
   if (props.eager && (props.text || props.isThinking)) {
@@ -99,6 +112,9 @@ watch(
 
 onUnmounted(() => {
   if (fadeTimer) clearTimeout(fadeTimer)
+  document.removeEventListener('mousemove', onMouseMove)
+  document.removeEventListener('mouseup', onMouseUp)
+  window.removeEventListener('resize', clampPosition)
 })
 
 // ── 拖拽 ──
@@ -121,6 +137,7 @@ function onMouseMove(e: MouseEvent) {
   if (!isDragging) return
   pos.value.x = initX + (e.clientX - startX)
   pos.value.y = initY + (e.clientY - startY)
+  clampPosition()
 }
 function onMouseUp() {
   isDragging = false
@@ -137,10 +154,14 @@ function onMouseUp() {
         v-if="visible"
         class="lyric-overlay-container fixed z-[1000] select-none group"
         :style="{ left: pos.x + 'px', top: pos.y + 'px', transform: 'translateX(-50%)' }"
-        @mousedown="onMouseDown"
+        @mouseenter="emit('ui-enter')"
+        @mouseleave="emit('ui-leave')"
       >
         <!-- 拖拽句柄 (平时隐藏, Hover 显示) -->
-        <div class="drag-handle opacity-0 group-hover:opacity-100 transition-opacity">
+        <div
+          class="drag-handle opacity-0 group-hover:opacity-100 transition-opacity"
+          @mousedown.stop="onMouseDown"
+        >
           <PixelIcon name="grip" size="xs" />
         </div>
 

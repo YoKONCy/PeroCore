@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { MemoryGate } from '@perocore/backend/services/memory/memoryGate'
-import type { MemoryCandidate, CanonicalMemory } from '@perocore/backend/services/memory/memoryProvider'
+import { MemoryGate } from '@infos/backend/services/memory/memoryGate'
+import type {
+  MemoryCandidate,
+  CanonicalMemory,
+} from '@infos/backend/services/memory/memoryProvider'
 
 /** 构造 MemoryCandidate 测试桩 */
 function makeCandidate(summary: string, overrides: Partial<MemoryCandidate> = {}): MemoryCandidate {
@@ -22,7 +25,11 @@ function makeCandidate(summary: string, overrides: Partial<MemoryCandidate> = {}
 }
 
 /** 构造 CanonicalMemory 测试桩 */
-function makeExisting(id: string, content: string, status: CanonicalMemory['status'] = 'active'): CanonicalMemory {
+function makeExisting(
+  id: string,
+  content: string,
+  status: CanonicalMemory['status'] = 'active',
+): CanonicalMemory {
   return {
     id,
     agentId: 'pero',
@@ -119,10 +126,7 @@ describe('MemoryGate', () => {
   it('应当接受与已有记忆内容差异较大的候选', () => {
     const gate = new MemoryGate()
     const candidate = makeCandidate('主人今天去了北京旅游')
-    const existing = [
-      makeExisting('m1', '主人喜欢猫'),
-      makeExisting('m2', '主人的工作是程序员'),
-    ]
+    const existing = [makeExisting('m1', '主人喜欢猫'), makeExisting('m2', '主人的工作是程序员')]
 
     const result = gate.review(candidate, existing)
 

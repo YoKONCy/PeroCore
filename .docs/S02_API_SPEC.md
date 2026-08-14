@@ -1,6 +1,6 @@
 # API 响应规范
 
-> **适用范围**：PeroCore-TS 后端所有 REST API
+> **适用范围**：infOS-TS 后端所有 REST API
 > **最后更新**：2026-04-21
 
 ---
@@ -26,10 +26,10 @@ interface ApiResponse<T = unknown> {
 
 ### 2.1 默认 message 注册表
 
-每个 code 在 `@perocore/shared` 中注册默认中文 message：
+每个 code 在 `@infos/shared` 中注册默认中文 message：
 
 ```typescript
-// @perocore/shared/src/constants/responseCodes.ts
+// @infos/shared/src/constants/responseCodes.ts
 export const CODE_MESSAGES: Record<string, string> = {
   OK: '操作成功',
   CREATED: '创建成功',
@@ -160,7 +160,7 @@ throw new AppError('NOT_FOUND', { message: '未找到 ID 为 42 的记忆' })
 
 ```typescript
 // lib/appError.ts
-import { CODE_MESSAGES } from '@perocore/shared'
+import { CODE_MESSAGES } from '@infos/shared'
 
 export class AppError extends Error {
   public httpStatus: number
@@ -247,6 +247,15 @@ event: error
 data: {"code":"LLM_ERROR","message":"AI 服务异常"}
 ```
 
+## 9. AIOS Thread、SSE 与能力契约
+
+交互 API 的领域边界以 [A09_AIOS_ARCHITECTURE](./A09_AIOS_ARCHITECTURE.md#9-api-与流式契约) 为准：后端从 `threadId` 推导 `agentId`、`channel` 和上下文策略，客户端只提交当前输入，不得上传权威历史。
+
+- `ThreadChannel` 包含 `desktop`、`companion`、`social`、`group`；前两个由主 Agent Compiler 处理，后两个由社交/据点运行时处理。
+- SSE 的 `tool_call` / `tool_result` 使用 `callId` 关联，字段统一为 `args`、`result`、`success`。
+- `done` 是成功结束的显式事件，前端收到 EOF 但未收到 `done` 时不得视作成功。
+- Provider 节点的能力协议与 SSE 业务流分离；能力调用消息的类型必须由 shared 包统一定义。
+
 ---
 
-*本文档由 Carola 整理，适用于 PeroCore-TS 后端 API 规范。*
+*本文档由 Carola 整理，适用于 infOS-TS 后端 API 规范。*

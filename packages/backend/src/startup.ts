@@ -22,10 +22,11 @@ import { serve } from '@hono/node-server'
 import { createApp } from './app'
 import { createAppContext, createDefaultConfig, initAppContext } from './container'
 import { runStartupTasks } from './lifecycle'
-import { logger, initLogFile } from './lib/logger'
+import { logger, initLogFile, setLogLevel, parseLogLevel, getLogLevel } from './lib/logger'
 import { SERVER_HOST, SERVER_PORT } from './lib/env'
 import { registerProcessGuards, onShutdown } from './lib/processGuards'
 import { setupGatewayWebSocket } from './services/gateway/wsUpgrade'
+import { initTelemetry, shutdownTelemetry } from './lib/telemetry'
 
 // ─────────────────────────────────────────────
 // 类型定义
@@ -38,7 +39,7 @@ import { setupGatewayWebSocket } from './services/gateway/wsUpgrade'
  * 公共启动流程由 startServer() 统一处理。
  */
 export interface StartServerOptions {
-  /** 进程显示名（用于日志，如 "PeroCore 后端" / "PeroCore Daemon"） */
+  /** 进程显示名（用于日志，如 "infOS 后端" / "infOS Daemon"） */
   processName: string
   /** 启动 Banner 打印函数（在日志文件初始化之前调用，越早越好） */
   printBanner: () => void
@@ -53,7 +54,7 @@ export interface StartServerOptions {
 // ─────────────────────────────────────────────
 
 /**
- * 启动 PeroCore 服务（公共入口）
+ * 启动 infOS 服务（公共入口）
  *
  * 统一 backend 与 daemon 的启动链路：
  * 1. 打印 Banner
@@ -75,6 +76,8 @@ export async function startServer(options: StartServerOptions): Promise<void> {
 
   // 0. 启动 Banner（最早输出，在任何初始化之前）
   printBanner()
+  // Telemetry 必须在创建 HTTP 应用与业务服务之前注册全局 Provider。
+  initTelemetry()
 
   // 1. 初始化日志文件持久化（越早越好）
   initLogFile()
@@ -88,6 +91,20 @@ export async function startServer(options: StartServerOptions): Promise<void> {
 
   // 4. 异步初始化（工具注册 + 扩展加载 + 资产扫描）
   await initAppContext(ctx)
+
+  // 4.1 应用用户配置的日志级别（覆盖 dev=debug / release=info 默认行为）
+  //     初次启动无配置时保持默认；用户后续在 Dashboard 设置中修改后，
+  //     由 config.router 热更新即时生效，此处只需在启动时读取一次。
+  const configuredLogLevel = await ctx.configRepo.get('system.logLevel')
+  if (configuredLogLevel) {
+    const num = parseLogLevel(configuredLogLevel)
+    if (num != null) {
+      setLogLevel(num)
+      logger.info(`已应用配置的日志级别: ${configuredLogLevel} (level=${num})`)
+    } else {
+      logger.warn(`配置的日志级别无效: "${configuredLogLevel}"，保持默认 (level=${getLogLevel()})`)
+    }
+  }
 
   // 5. 启动后任务（调度器启动 + 任务恢复）
   await runStartupTasks(ctx)
@@ -151,6 +168,7 @@ export async function startServer(options: StartServerOptions): Promise<void> {
     if (onExtraShutdown) {
       await onExtraShutdown()
     }
+    await shutdownTelemetry()
     // TODO: ctx.db.close() 等资源清理
     logger.info(`${processName} 资源清理完成`)
   })
@@ -187,11 +205,14 @@ async function autoLaunchSocialApp(ctx: import('./container').AppContext): Promi
     const manifest = await ctx.appManager.getManifest(SOCIAL_APP_ID)
     if (!manifest) {
       // 定位 social app 目录（packages/apps/social）
-      // startup.ts 位于 packages/backend/src/，相对路径 ../../apps/social
+      // 便携/打包环境通过 PERO_APP_ROOT 定位内置应用（bundle 后 import.meta 失效）
       const { fileURLToPath } = await import('node:url')
       const path = await import('node:path')
       const startupDir = path.dirname(fileURLToPath(import.meta.url))
-      const socialAppDir = path.resolve(startupDir, '..', '..', 'apps', 'social')
+      const appRoot = process.env.PERO_APP_ROOT
+      const socialAppDir = appRoot
+        ? path.resolve(appRoot, 'apps', 'social')
+        : path.resolve(startupDir, '..', '..', 'apps', 'social')
 
       logger.info(`正在自动安装内置社交应用: ${socialAppDir}`)
       const { warnings } = await ctx.appManager.install(socialAppDir)

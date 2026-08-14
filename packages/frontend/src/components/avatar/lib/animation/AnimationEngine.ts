@@ -197,13 +197,15 @@ export class AnimationEngine {
   /** 将所有活动动画按权重混合并应用到骨骼 */
   private applyBlendedAnimation(bones: Set<string>): void {
     for (const boneName of bones) {
-      let totalWeight = 0
-
       const finalPos = new THREE.Vector3()
       const finalScale = new THREE.Vector3()
       // 旋转增量累加器（欧拉角，弧度）
       const rotDelta = new THREE.Vector3(0, 0, 0)
 
+      // 各通道独立统计权重：YSM 的并行动画往往只改 scale（部件开关/物理），
+      // 若与 idle 共用一个 totalWeight 平均，scale 会被稀释（如 0/1 → 0.5/0）。
+      let wPos = 0
+      let wScale = 0
       let hasPos = false
       let hasScale = false
       let hasRot = false
@@ -236,69 +238,65 @@ export class AnimationEngine {
           }
         }
 
-        // 位移
+        // 位移（权重独立累加）
         if (tracks.position) {
           const val = this.evaluateTrack(tracks.position, state.time)
           if (val) {
             finalPos.addScaledVector(restPos, effectiveWeight)
             finalPos.addScaledVector(new THREE.Vector3(-val[0], val[1], val[2]), effectiveWeight)
+            wPos += effectiveWeight
             hasPos = true
           }
         }
 
-        // 缩放
+        // 缩放（权重独立累加）
         if (tracks.scale) {
           const val = this.evaluateTrack(tracks.scale, state.time)
           if (val) {
             finalScale.addScaledVector(new THREE.Vector3(val[0], val[1], val[2]), effectiveWeight)
+            wScale += effectiveWeight
             hasScale = true
           }
         }
-
-        totalWeight += effectiveWeight
       }
 
-      // 总权重不足 1.0 时，与休息姿势混合
-      if (totalWeight < 0.999) {
-        const restWeight = 1.0 - totalWeight
-        finalPos.addScaledVector(restPos, restWeight)
-        hasPos = true
-        finalScale.addScaledVector(restScale, restWeight)
-        hasScale = true
-        totalWeight = 1.0
+      // 各通道独立与休息姿势混合（动画权重不足 1 的部分补 rest）
+      if (hasPos && wPos < 0.999) {
+        finalPos.addScaledVector(restPos, 1.0 - wPos)
+      }
+      if (hasScale && wScale < 0.999) {
+        finalScale.addScaledVector(restScale, 1.0 - wScale)
       }
 
-      if (totalWeight > 0) {
-        // 应用旋转：最终旋转 = 初始旋转 + 动画增量
-        if (hasRot) {
-          const resultEuler = new THREE.Euler(
-            initialEuler.x + rotDelta.x,
-            initialEuler.y + rotDelta.y,
-            initialEuler.z + rotDelta.z,
-            'ZXY',
-          )
-          this.retargetingManager.applyRotation(boneName, resultEuler)
-        }
+      // 应用旋转：最终旋转 = 初始旋转 + 动画增量
+      if (hasRot) {
+        const resultEuler = new THREE.Euler(
+          initialEuler.x + rotDelta.x,
+          initialEuler.y + rotDelta.y,
+          initialEuler.z + rotDelta.z,
+          initialEuler.order,
+        )
+        this.retargetingManager.applyRotation(boneName, resultEuler)
+      }
 
-        // 应用位移
-        if (hasPos) {
-          if (Math.abs(totalWeight - 1.0) > 0.01) {
-            finalPos.divideScalar(totalWeight)
-          }
-          if (this.lockRootPosition && boneName === 'Root') {
-            finalPos.x = 0
-            finalPos.z = 0
-          }
-          this.retargetingManager.applyPosition(boneName, finalPos)
+      // 应用位移（按 position 权重归一化）
+      if (hasPos && wPos > 0.001) {
+        if (Math.abs(wPos - 1.0) > 0.01) {
+          finalPos.divideScalar(wPos)
         }
+        if (this.lockRootPosition && boneName === 'Root') {
+          finalPos.x = 0
+          finalPos.z = 0
+        }
+        this.retargetingManager.applyPosition(boneName, finalPos)
+      }
 
-        // 应用缩放
-        if (hasScale) {
-          if (Math.abs(totalWeight - 1.0) > 0.01) {
-            finalScale.divideScalar(totalWeight)
-          }
-          this.retargetingManager.applyScale(boneName, finalScale)
+      // 应用缩放（按 scale 权重归一化）
+      if (hasScale && wScale > 0.001) {
+        if (Math.abs(wScale - 1.0) > 0.01) {
+          finalScale.divideScalar(wScale)
         }
+        this.retargetingManager.applyScale(boneName, finalScale)
       }
     }
   }

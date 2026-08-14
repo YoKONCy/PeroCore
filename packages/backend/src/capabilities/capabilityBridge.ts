@@ -101,7 +101,7 @@ export class CapabilityBridge {
     private capabilityRegistry: CapabilityRegistry,
     /**
      * 第七阶段修复（批次 E3）：WS 鉴权 token
-     * 来自 process.env.PEROCORE_API_TOKEN，未设置时为空字符串（跳过鉴权）
+     * 来自 process.env.INFOS_API_TOKEN，未设置时为空字符串（跳过鉴权）
      */
     private authToken: string = '',
   ) {}
@@ -122,11 +122,11 @@ export class CapabilityBridge {
         // 第七阶段修复（批次 E3）：WS 鉴权握手
         // 连接建立后第一条消息必须是 { type: 'auth', token }
         // 验证通过后标记 _authed=true，后续才允许 register/heartbeat/tool_result
-        // 未配置 PEROCORE_API_TOKEN 时（开发环境）跳过鉴权，打印 warn
+        // 未配置 INFOS_API_TOKEN 时（开发环境）跳过鉴权，打印 warn
         ;(ws as unknown as { _authed: boolean })._authed = !this.authToken
         if (!this.authToken) {
           logger.warn(
-            'CapabilityBridge 未配置鉴权 token（PEROCORE_API_TOKEN 未设置），' +
+            'CapabilityBridge 未配置鉴权 token（INFOS_API_TOKEN 未设置），' +
               '任何本机进程均可注册能力。生产环境必须设置此环境变量。',
           )
         }
@@ -187,10 +187,7 @@ export class CapabilityBridge {
    *
    * @returns 工具调用结果（成功或错误）
    */
-  async invokeTool(
-    toolName: string,
-    args: Record<string, unknown>,
-  ): Promise<ToolCallResult> {
+  async invokeTool(toolName: string, args: Record<string, unknown>): Promise<ToolCallResult> {
     const startTime = Date.now()
 
     // 1. 查找能力提供者
@@ -268,7 +265,10 @@ export class CapabilityBridge {
     if (msg.type === 'auth') {
       const authed = (ws as unknown as { _authed: boolean })._authed
       if (authed) {
-        // 已认证过，忽略重复 auth
+        // 已认证过：幂等回复 authed 回执，避免节点卡在等待握手结果。
+        // 开发环境（INFOS_API_TOKEN 未设置）连接建立即视为已认证，
+        // 但节点（Electron）仍依赖此回执才继续注册能力，必须回复。
+        ws.send(JSON.stringify({ type: 'registered', success: true, message: 'authed' }))
         return
       }
       if (this.authToken && msg.token === this.authToken) {
@@ -327,7 +327,9 @@ export class CapabilityBridge {
       // 在 ws 上标记 nodeId（用于断开时清理）
       ;(ws as unknown as { _nodeId: string })._nodeId = msg.nodeId
 
-      logger.info(`节点注册成功: ${msg.nodeId} (${msg.nodeType}), 能力: [${msg.capabilities.join(', ')}]`)
+      logger.info(
+        `节点注册成功: ${msg.nodeId} (${msg.nodeType}), 能力: [${msg.capabilities.join(', ')}]`,
+      )
 
       // 回复注册成功
       const reply: DaemonMessage = {
@@ -347,9 +349,7 @@ export class CapabilityBridge {
     }
   }
 
-  private async handleHeartbeat(
-    msg: Extract<NodeMessage, { type: 'heartbeat' }>,
-  ): Promise<void> {
+  private async handleHeartbeat(msg: Extract<NodeMessage, { type: 'heartbeat' }>): Promise<void> {
     await this.capabilityRegistry.heartbeat(msg.nodeId)
   }
 
@@ -365,8 +365,7 @@ export class CapabilityBridge {
     // 序列化结果
     let output: string
     try {
-      output =
-        typeof msg.result === 'string' ? msg.result : JSON.stringify(msg.result)
+      output = typeof msg.result === 'string' ? msg.result : JSON.stringify(msg.result)
     } catch {
       output = String(msg.result)
     }

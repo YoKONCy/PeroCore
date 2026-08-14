@@ -1,5 +1,5 @@
 /**
- * socialOps/notifyOwner — 通知主人工具（保留在主 Agent 内核）
+ * socialOps/notifyOwner — 通知用户工具（保留在主 Agent 内核）
  *
  * 社交系统其余工具已迁移到 packages/apps/social/tools/，
  * 仅 social_notify_owner 保留在主 Agent 内核供通用通知使用。
@@ -73,7 +73,7 @@ export interface SocialMessagingProvider {
   removeFriend(userId: string): Promise<void>
 
   // ━━ 通知 ━━
-  /** 向主人发送通知 (走 GatewayHub 或社交平台渠道) */
+  /** 向用户发送通知 (走 GatewayHub 或社交平台渠道) */
   notifyOwner(content: string, importance?: string): Promise<void>
 }
 
@@ -100,7 +100,7 @@ function requireProvider(): SocialMessagingProvider | string {
 }
 
 // ─────────────────────────────────────────────
-// social_notify_owner — 通知主人
+// social_notify_owner — 通知用户
 // ─────────────────────────────────────────────
 
 export const socialNotifyOwnerTool: BuiltinTool = {
@@ -115,11 +115,11 @@ export const socialNotifyOwnerTool: BuiltinTool = {
 
     try {
       await provider.notifyOwner(content, importance)
-      return JSON.stringify({ success: true, message: '已通知主人' })
+      return JSON.stringify({ success: true, message: '已通知用户' })
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err)
-      logger.error(`通知主人失败: ${errMsg}`)
-      return JSON.stringify({ error: `通知主人失败: ${errMsg}` })
+      logger.error(`通知用户失败: ${errMsg}`)
+      return JSON.stringify({ error: `通知用户失败: ${errMsg}` })
     }
   },
 }

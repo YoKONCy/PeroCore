@@ -18,8 +18,9 @@
 import path from 'node:path'
 import os from 'node:os'
 import { createDrizzleConnection, type DrizzleDb } from './database'
+import { MigrationManager, dataMigrations } from './migrations'
 import { PathResolver, AssetRegistry, PromptTemplateLoader, type RuntimeEnv } from './core'
-import { getDatabasePath } from './lib/env'
+import { getDataDir, getDatabasePath, getWorkshopDirs } from './lib/env'
 import { createLogger } from './lib/logger'
 
 // ── Repository ──
@@ -29,7 +30,12 @@ import { VectorSyncRepository } from './repositories/vectorSync.repo'
 // AIOS: ConversationLogRepository 已移除（废弃，Scorer 改用 ThreadRepository）
 import { ConfigRepository } from './repositories/config.repo'
 import { MemoryStoreRegistry } from './repositories/storeRegistry'
+import { FileSnapshotRepository } from './repositories/fileSnapshot.repo'
+import { FlowStateRepository } from './repositories/flowState.repo'
 import { ThreadRepository } from './repositories/thread.repo'
+import { BackgroundTaskRepository } from './repositories/backgroundTask.repo'
+import { ToolApprovalRepository } from './repositories/toolApproval.repo'
+import { AttachmentRepository } from './repositories/attachment.repo'
 // 第五阶段长记忆 Repositories
 import { CanonicalMemoryRepository } from './repositories/canonicalMemory.repo'
 import { MemoryCandidateRepository } from './repositories/memoryCandidate.repo'
@@ -44,6 +50,7 @@ import { MemoryService } from './services/memory/memoryService'
 import { MemorySearchService } from './services/memory/memorySearch'
 // AIOS: ConversationLogService 已移除（废弃，Scorer 改用 ThreadRepository）
 import { ScorerService } from './services/memory/scorerService'
+import { loadMemoryRuntimeConfig } from './services/memory/memoryRuntimeConfig'
 // 第五阶段长记忆 Provider/Gate/TaskRunner
 import { MemoryGate } from './services/memory/memoryGate'
 import { LocalMemoryProvider } from './services/memory/localMemoryProvider'
@@ -57,16 +64,19 @@ import { Auditor } from './services/memory/maintenance/auditor'
 import { RetirementPolicy } from './services/memory/maintenance/retirementPolicy'
 import { ReflectionOrchestrator } from './services/memory/maintenance/reflectionOrchestrator'
 import { MaintenanceService } from './services/memory/maintenance/maintenanceService'
+import { ResetService } from './services/maintenance/resetService'
 // 注意：SocialScorerService 已迁移到 packages/apps/social/runtime/socialScorer.ts
 import { WaifuTextUpdater } from './services/agent/waifuTextUpdater'
 
 // ── Service (Phase 3: Agent 域) ──
+import { FlowStateService } from './services/flow/flowStateService'
 import { AgentManager } from './services/agent/agentManager'
 import { AgentService } from './services/agent/agentService'
 // AIOS: ChatResetService 已废弃，不再实例化（文件已备份为 .bak）
 // AIOS: PromptService / PresetLoader 已废弃，不再实例化（文件已备份为 .bak）
 import { ToolRegistry } from './services/agent/toolRegistry'
 import { RegistryToolExecutor } from './services/agent/toolExecutor'
+import { isSystemProtocolTool } from './tools/systemProtocolTools'
 // AIOS: TaskManager 已移除（被 RuntimeStateService 替代，零调用方）
 import { RuntimeStateService } from './services/runtime/runtimeStateService'
 import { MdpEngine } from './services/prompt/mdpEngine'
@@ -76,7 +86,11 @@ import { CompanionSchedulerService } from './services/companion/companionSchedul
 
 // ── Service (AIOS: Thread + Context 域) ──
 import { ThreadService } from './services/thread/threadService'
+import { BackgroundTaskService } from './services/task/backgroundTaskService'
 import { ContextCompiler } from './services/context/contextCompiler'
+import { ConversationTurnService } from './services/conversation/conversationTurnService'
+import { AttachmentService } from './services/attachment/attachmentService'
+import { ImageUnderstandingService } from './services/attachment/imageUnderstandingService'
 import { DiaryEngine } from './services/memory/diaryEngine'
 import { MemoryImporter } from './services/memory/importer'
 import { DreamAssociator } from './services/memory/maintenance/dreamAssociator'
@@ -103,17 +117,30 @@ import { ExtensionManager } from './extensions/extensionManager'
 import {
   registerBuiltinTools,
   setWorkspaceService,
+  setWorkspaceCheckpointService,
+  setWorkspaceProductivityCheckpointService,
   setSharedWorkspaceService,
   setCapabilityGate,
+  setFlowStateService,
+  setAppInteractionManager,
 } from './tools'
 import { setSchedulerService } from './tools/scheduler'
 import { setDiarySearchDeps } from './tools/diarySearch'
 // AIOS(Phase4): WorkspaceService（Principal Workspace 文件操作 + containment 检查）
+import { WorkspaceCheckpointService } from './services/workspace/workspaceCheckpointService'
 import { LocalWorkspaceService } from './services/workspace/workspaceService'
+import { ExecutionSessionManager } from './services/execution/executionSession'
+import { LocalPolicyRunner } from './services/execution/sandboxRunner'
+import { TerminalManager } from './services/execution/terminalManager'
+import { VirtualWorkspace } from './services/execution/virtualWorkspace'
+import { ApprovalService } from './services/execution/approvalService'
+import { PolicyEngine } from './services/execution/policyEngine'
+import { setProductivityRuntime } from './tools/productivityRuntimeHolder'
 import { runCleanup, runLonelyScan } from './lifecycle/cron'
 import { McpClientManager, bridgeMcpTools } from './services/mcp'
 import { McpConfigRepository } from './repositories/mcp.repo'
 import { StrongholdService } from './services/stronghold/strongholdService'
+import { ButlerService } from './services/stronghold/butlerService'
 import { GroupChatService } from './services/stronghold/groupChatService'
 import { GroupChatDispatcher } from './services/stronghold/groupChatDispatcher'
 import { CompanionScheduler } from './services/companion/companionScheduler'
@@ -126,7 +153,7 @@ import { createDesktopProviders } from './providers/platformProviders'
 import { setScreenshotProvider } from './tools/screenVision'
 import { setWindowProvider } from './tools/systemInfo'
 import { setDesktopAutomationProvider } from './tools/desktopAutomation'
-import { setStrongholdService } from './tools/strongholdOps'
+import { setButlerService, setStrongholdService } from './tools/strongholdOps'
 import { setFinishTaskDeps } from './tools/finishTask'
 import { PetStateService } from './services/agent/petStateService'
 
@@ -185,6 +212,10 @@ export interface AppContext {
   configRepo: ConfigRepository
   storeRegistry: MemoryStoreRegistry
   threadRepo: ThreadRepository
+  attachmentRepo: AttachmentRepository
+  /** M05: 后台任务 Repository（持久实体访问） */
+  backgroundTaskRepo: BackgroundTaskRepository
+  toolApprovalRepo: ToolApprovalRepository
   // 第五阶段长记忆 Repositories
   canonicalMemoryRepo: CanonicalMemoryRepository
   memoryCandidateRepo: MemoryCandidateRepository
@@ -199,6 +230,8 @@ export interface AppContext {
   memoryImporter: MemoryImporter
   diaryEngine: DiaryEngine
   maintenanceService: MaintenanceService
+  /** 危险区域重置服务（清空对话/记忆/恢复出厂）。 */
+  resetService: ResetService
   modelRegistry: ModelRegistry
   modelService: ModelService
   // 第五阶段长记忆 Provider/Gate/TaskRunner
@@ -221,6 +254,9 @@ export interface AppContext {
    * 调用的工具与 FC 工具走同一鉴权链。
    */
   toolExecutor: RegistryToolExecutor
+  /** 工具参数策略与审批状态机。 */
+  approvalService: ApprovalService
+  policyEngine: PolicyEngine
   // AIOS: taskManager 已移除（被 RuntimeStateService 替代，零调用方）
   runtimeStateService: RuntimeStateService
   // AIOS: CompanionSchedulerService 替代 SessionService 的陪伴调度管理
@@ -231,7 +267,12 @@ export interface AppContext {
 
   // ── Service (AIOS: Thread + Context 域) ──
   threadService: ThreadService
+  flowStateService: FlowStateService
   contextCompiler: ContextCompiler
+  conversationTurnService: ConversationTurnService
+  attachmentService: AttachmentService
+  /** M05: 统一任务中心（派发/队列/状态机/恢复） */
+  backgroundTaskService: BackgroundTaskService
 
   // ── Capability Gate (D51) ──
   capabilityGate: CapabilityGate
@@ -264,6 +305,7 @@ export interface AppContext {
 
   // ── 据点/群聊 ──
   strongholdService: StrongholdService
+  butlerService: ButlerService
   groupChatService: GroupChatService
   groupChatDispatcher: GroupChatDispatcher
 
@@ -299,7 +341,7 @@ export interface AppContext {
 
 /** 使用默认路径创建应用配置 */
 export function createDefaultConfig(): AppConfig {
-  const dataDir = process.env.PERO_DATA_DIR ?? path.join(os.homedir(), '.perocore')
+  const dataDir = getDataDir()
 
   return {
     databasePath: getDatabasePath(),
@@ -307,8 +349,8 @@ export function createDefaultConfig(): AppConfig {
     runtimeEnv: {
       appRoot: process.env.PERO_APP_ROOT ?? path.resolve(import.meta.dirname, '..', '..'),
       dataDir,
-      tempDir: process.env.PERO_TEMP_DIR ?? path.join(os.tmpdir(), 'PeroCore'),
-      workshopDir: process.env.PERO_WORKSHOP_DIR ?? '',
+      tempDir: process.env.PERO_TEMP_DIR ?? path.join(os.tmpdir(), 'infOS'),
+      workshopDirs: getWorkshopDirs(),
     },
     embedding: {
       apiBase: process.env.PERO_EMBEDDING_API_BASE ?? 'https://api.openai.com/v1',
@@ -345,11 +387,29 @@ export async function createAppContext(config: AppConfig): Promise<AppContext> {
   const workspaceService = new LocalWorkspaceService(pathResolver)
   setWorkspaceService(workspaceService)
   setSharedWorkspaceService(workspaceService)
-  // 第六阶段 #7: CapabilityGate 共享持有器（run_script 用于 ResourceScope 校验）
-  // capabilityGate 实例稍后创建，此处先占用变量名（在 CapabilityGate 区块实例化后注入）
+
+  // 生产力执行运行时：会话、沙箱进程与多终端共享同一生命周期底座。
+  const executionSessionManager = new ExecutionSessionManager()
+  const sandboxRunner = new LocalPolicyRunner()
+  const terminalManager = new TerminalManager(executionSessionManager, sandboxRunner)
+  const virtualWorkspace = new VirtualWorkspace()
 
   // ── 2. 数据库 ──
   const db = createDrizzleConnection(config.databasePath)
+  const sqlite = (db as unknown as { $client: import('better-sqlite3').Database }).$client
+  await new MigrationManager(config.runtimeEnv.dataDir, sqlite, dataMigrations).runPending()
+  const toolApprovalRepo = new ToolApprovalRepository(db)
+  const approvalService = new ApprovalService(toolApprovalRepo)
+  const policyEngine = new PolicyEngine()
+  setProductivityRuntime({
+    sessions: executionSessionManager,
+    terminals: terminalManager,
+    workspace: workspaceService,
+    virtualWorkspace,
+    approvalService,
+  })
+  // 第六阶段 #7: CapabilityGate 共享持有器（run_script 用于 ResourceScope 校验）
+  // capabilityGate 实例稍后创建，此处先占用变量名（在 CapabilityGate 区块实例化后注入）
 
   // ── 3. Repository ──
   const memoryRepo = new MemoryRepository(db)
@@ -361,9 +421,21 @@ export async function createAppContext(config: AppConfig): Promise<AppContext> {
   const mcpRepo = new McpConfigRepository(db)
   // AIOS: Thread 仓储（替代旧 Session 持久层）
   const threadRepo = new ThreadRepository(db)
+  const flowStateRepo = new FlowStateRepository(db)
+  const fileSnapshotRepo = new FileSnapshotRepository(db)
+  const workspaceCheckpointService = new WorkspaceCheckpointService(
+    fileSnapshotRepo,
+    workspaceService,
+  )
+  setWorkspaceCheckpointService(workspaceCheckpointService)
+  setWorkspaceProductivityCheckpointService(workspaceCheckpointService)
+  const attachmentRepo = new AttachmentRepository(db)
   // 第五阶段长记忆 Repositories（canonical_memories + memory_candidates 表）
   const canonicalMemoryRepo = new CanonicalMemoryRepository(db)
   const memoryCandidateRepo = new MemoryCandidateRepository(db)
+
+  // M05: 统一任务中心 Repository（background_tasks 持久实体）
+  const backgroundTaskRepo = new BackgroundTaskRepository(db)
 
   // ── 4. Shared 工具 ──
 
@@ -398,7 +470,8 @@ export async function createAppContext(config: AppConfig): Promise<AppContext> {
 
   // ── 5. MDP 引擎 (后台任务和 Agent 域都依赖) ──
   const promptDir = pathResolver.resolve('@app/backend/src/services/mdp/prompts')
-  const mdpEngine = new MdpEngine(promptDir)
+  const officialAgentsDir = pathResolver.resolve('@app/backend/src/assets/agents')
+  const mdpEngine = new MdpEngine(promptDir, officialAgentsDir)
 
   // ── 6. Service — Memory 域 ──
   const modelRegistry = new ModelRegistry(db)
@@ -408,9 +481,12 @@ export async function createAppContext(config: AppConfig): Promise<AppContext> {
   const modelRoles = new ModelRoleResolver(configRepo, modelRepo)
   const memoryService = new MemoryService(memoryRepo, vectorRepo, vectorWriteHelper)
   const memorySearchService = new MemorySearchService(vectorRepo, memoryRepo, embeddingService)
+  // Agent 管理器（多 Agent 配置/称呼读取），ScorerService 等依赖它按 agentId 取称呼
+  const agentManager = new AgentManager(pathResolver, configRepo)
   // AIOS: ConversationLogService 已移除（Scorer 改用 ThreadRepository）
   // AIOS: ScorerService 数据源从 ConversationLogService 改为 ThreadRepository
   // 第五阶段：注入 memoryCandidateRepo，Scorer 写候选而非直接写 memory_nodes
+  const initialMemoryRuntimeConfig = await loadMemoryRuntimeConfig(configRepo)
   const scorerService = new ScorerService(
     threadRepo,
     llmService,
@@ -419,6 +495,9 @@ export async function createAppContext(config: AppConfig): Promise<AppContext> {
     memoryCandidateRepo,
     vectorRepo,
     embeddingService,
+    { batchSize: initialMemoryRuntimeConfig.scorerBatchSize },
+    configRepo,
+    agentManager,
   )
   const graphGardener = new GraphGardener({
     memoryRepo,
@@ -472,7 +551,6 @@ export async function createAppContext(config: AppConfig): Promise<AppContext> {
   const companionSchedulerService = new CompanionSchedulerService()
 
   // Prompt
-  const agentManager = new AgentManager(pathResolver, configRepo)
   // PetStateService: pet_states 表 CRUD (mood/vibe/mind + 动态台词)，注入 AgentManager
   // 以便 getWaifuTexts 合并 finish_task 写入的 click/idle/back 台词
   const petStateService = new PetStateService(db)
@@ -491,22 +569,31 @@ export async function createAppContext(config: AppConfig): Promise<AppContext> {
 
   // AIOS: Thread + Context Compiler（新版对话编排，替代旧 Session + Enrichment 流程）
   // - ThreadService 依赖 ThreadRepository（已在 Repository 区块实例化）
-  const threadService = new ThreadService(threadRepo)
+  const threadService = new ThreadService(threadRepo, attachmentRepo, workspaceCheckpointService)
+  const flowStateService = new FlowStateService(flowStateRepo, threadService)
 
   // Tool Registry + Capability Gate
   const toolRegistry = new ToolRegistry()
 
-  // SkillLoader: 先初始化基础目录 (内置 + 用户)
+  // SkillLoader：官方 → Workshop → 用户，后扫描同 ID Skill 覆盖前者。
   const builtinSkillsDir = pathResolver.resolve('@app/backend/src/skills')
   const customSkillsDir = pathResolver.resolve('@data/skills')
-  const skillLoader = new SkillLoader([builtinSkillsDir, customSkillsDir], customSkillsDir)
+  const workshopSkillDirs = pathResolver
+    .getRoots('@workshop')
+    .flatMap((root) => [path.join(root, 'skills'), path.join(root, 'assets', 'skills')])
+  const skillLoader = new SkillLoader(
+    [builtinSkillsDir, ...workshopSkillDirs, customSkillsDir],
+    customSkillsDir,
+  )
 
-  // CapabilityGate: 扫描 agents/*/capabilities.yaml
-  // AIOS: 必须在 ContextCompiler 之前实例化（ContextCompiler 依赖 CapabilityGate 解析能力上下文）
-  const agentBuiltinDir = pathResolver.resolve('@app/backend/src/services/mdp/agents')
+  // CapabilityGate 与 Agent 联邦使用相同优先级：官方 → Workshop → 用户。
+  const agentBuiltinDir = pathResolver.resolve('@app/backend/src/assets/agents')
   const agentUserDir = pathResolver.resolve('@data/agents')
+  const workshopAgentDirs = pathResolver
+    .getRoots('@workshop')
+    .flatMap((root) => [path.join(root, 'agents'), path.join(root, 'assets', 'agents')])
   const capabilityGate = new CapabilityGate(
-    [agentBuiltinDir, agentUserDir],
+    [agentBuiltinDir, ...workshopAgentDirs, agentUserDir],
     skillLoader,
     toolRegistry,
   )
@@ -526,7 +613,7 @@ export async function createAppContext(config: AppConfig): Promise<AppContext> {
   // 第七阶段修复（批次 E3）：传入 authToken 用于 WS 鉴权握手
   const capabilityBridge = new CapabilityBridge(
     capabilityRegistry,
-    process.env.PEROCORE_API_TOKEN ?? '',
+    process.env.INFOS_API_TOKEN ?? '',
   )
   // 第七阶段 #7: 入站路由表 Repository（外部消息按来源+标识查询归属 Agent）
   const inboundRouteRepo = new InboundRouteRepository(db)
@@ -558,6 +645,7 @@ export async function createAppContext(config: AppConfig): Promise<AppContext> {
     localMemoryProvider,
     mdpEngine,
     capabilityGate,
+    flowStateService,
   )
 
   // ── ExtensionManager: 加载扩展 → 发现 Extension skills → 注入 SkillLoader ──
@@ -584,6 +672,37 @@ export async function createAppContext(config: AppConfig): Promise<AppContext> {
   // ctx 又包含 bridge），采用延迟注入：先创建无 bridge 的 toolExecutor，
   // 待 capabilityBridge 实例化后再注入。platform 工具调用靠此桥接转发到节点。
   toolExecutor.setCapabilityBridge(capabilityBridge)
+  toolExecutor.setPolicyRuntime(policyEngine, approvalService)
+  approvalService.onRequested((request) =>
+    gatewayHub.broadcast(createEnvelope('push', { action: 'tool_approval_requested', request })),
+  )
+  approvalService.onResolved(async (request) => {
+    await gatewayHub.broadcast(
+      createEnvelope('push', { action: 'tool_approval_resolved', request }),
+    )
+    const decisionText = request.status === 'approved' ? '批准' : '拒绝'
+    await localMemoryProvider
+      .add({
+        agentId: request.agentId,
+        content: `用户${decisionText}了工具 ${request.toolName} 的执行请求${request.resolutionMessage ? `，附言：${request.resolutionMessage}` : ''}。来源任务=${request.taskId ?? '无'}，Thread=${request.threadId}，Channel=${request.channel}，Origin=tool_approval。`,
+        type: 'event',
+        importance: 2,
+        confidence: 1,
+        tags: [
+          'approval',
+          request.taskId ? `task:${request.taskId}` : 'chat',
+          `channel:${request.channel}`,
+        ],
+        provenance: {
+          originThreadId: request.threadId,
+          originMessageIds: [request.id],
+          originChannel: request.channel,
+          createdFrom: 'manual',
+          createdAt: request.resolvedAt ?? new Date().toISOString(),
+        },
+      })
+      .catch((error) => logger.warn(`审批决策写入长期记忆失败: ${error}`))
+  })
 
   // 注意：socialMessageRepo 已迁移到 packages/apps/social/runtime/socialMessage.repo.ts
 
@@ -597,12 +716,16 @@ export async function createAppContext(config: AppConfig): Promise<AppContext> {
     })
   })
 
+  const imageUnderstandingService = new ImageUnderstandingService(configRepo, modelRepo, llmService)
+
   // AIOS: AgentService — 新版接线（仅依赖新服务）
   const agentService = new AgentService({
     llmService,
     configRepo,
     agentManager,
     scorerService,
+    imageUnderstandingService,
+    threadService,
     toolExecutor,
     /**
      * AIOS: 按 channel 获取工具定义（双过滤）
@@ -614,19 +737,31 @@ export async function createAppContext(config: AppConfig): Promise<AppContext> {
      * 之前 LLM 会看到所有已注册工具，即使 CapabilityGate 不允许调用，
      * 现在工具定义与运行时权限校验使用同一白名单。
      *
-     * @param channel 对话通道（desktop/companion/social/group），等价于旧 source
+     * @param channel 对话通道（desktop/social/group）
      */
-    getToolDefinitions: (channel: string) => {
-      // 1. 按 allowedSources 粗过滤
+    getToolDefinitions: (
+      agentId: string,
+      channel: string,
+      disabledTools: string[] = [],
+      capabilityScope = 'default',
+    ) => {
       const registryTools = toolRegistry.getDefinitions(channel)
-      // 2. 按 CapabilityGate.allowedTools 细过滤
-      //    agentId 缺失时（如启动阶段），退化为只走 registry 过滤
-      const activeAgentId = agentManager.defaultAgentId
-      if (!capabilityGate.hasConfig(activeAgentId)) {
-        return registryTools
+      const disabled = new Set(disabledTools.filter((name) => !isSystemProtocolTool(name)))
+      if (!capabilityGate.hasConfig(agentId)) {
+        return registryTools.filter(
+          (tool) =>
+            (capabilityScope === 'default' || tool.name === 'finish_task') &&
+            (isSystemProtocolTool(tool.name) || !disabled.has(tool.name)),
+        )
       }
-      const resolved = capabilityGate.resolve(activeAgentId, channel)
-      return registryTools.filter((t) => resolved.allowedTools.has(t.name))
+      const resolved = capabilityGate.resolve(agentId, channel, undefined, capabilityScope)
+      return registryTools.filter(
+        (tool) =>
+          (tool.name === 'finish_task' ||
+            (capabilityScope === 'default' && isSystemProtocolTool(tool.name)) ||
+            resolved.allowedTools.has(tool.name)) &&
+          !disabled.has(tool.name),
+      )
     },
     // 取消检测 → RuntimeStateService
     cancelChecker: runtimeStateService,
@@ -663,6 +798,8 @@ export async function createAppContext(config: AppConfig): Promise<AppContext> {
     memoryService,
     vectorSyncRepo,
   })
+  // 危险区域重置服务（复用主库连接，三个分级重置均在此执行）
+  const resetService = new ResetService(db)
 
   // 第五阶段：LocalMemoryTaskRunner（统一管辖长记忆后台任务）
   // 依赖 ScorerService + MemoryGate + Repos + LocalMemoryProvider + MaintenanceService
@@ -674,99 +811,136 @@ export async function createAppContext(config: AppConfig): Promise<AppContext> {
     memoryCandidateRepo,
     localMemoryProvider,
     maintenanceService,
+    threadRepo,
   )
 
   // 注册定时任务: Scorer 超时刷新 (30 分钟)
-  scheduler.register('scorer-flush', 30 * 60 * 1000, async () => {
-    const activeAgent = agentManager.defaultAgentId
-    await scorerService.processBatch(activeAgent)
+  scheduler.register({
+    name: 'scorer-flush',
+    displayName: '对话记忆整理',
+    description: '将待处理对话提炼并整理为长期记忆',
+    intervalMs: 30 * 60 * 1000,
+    handler: async () => {
+      const activeAgent = agentManager.defaultAgentId
+      await scorerService.flushPendingByThread(activeAgent)
+    },
   })
 
   // 注册定时任务: 综合日记生成 (每 30 分钟检查, 23:00 后当日仅触发一次)
   let lastDiaryDate = '' // 记录上次生成日期，防止重复生成
-  scheduler.register('diary-generate', 30 * 60 * 1000, async () => {
-    // 仅在 23:00~23:59 触发
-    const now = new Date()
-    if (now.getHours() !== 23) return
+  scheduler.register({
+    name: 'diary-generate',
+    displayName: '每日记忆日记',
+    description: '每 30 分钟检查一次，23:00 后每日最多生成一次',
+    intervalMs: 30 * 60 * 1000,
+    handler: async () => {
+      // 仅在 23:00~23:59 触发
+      const now = new Date()
+      if (now.getHours() !== 23) return
 
-    const todayStr = now.toISOString().slice(0, 10)
-    if (lastDiaryDate === todayStr) return // 今日已生成
+      const todayStr = now.toISOString().slice(0, 10)
+      if (lastDiaryDate === todayStr) return // 今日已生成
 
-    const activeAgent = agentManager.defaultAgentId
-    const agent = agentManager.getAgent(activeAgent)
-    if (!agent) return
+      const activeAgent = agentManager.defaultAgentId
+      const agent = agentManager.getAgent(activeAgent)
+      if (!agent) return
 
-    const todaySummaries: string[] = []
+      const todaySummaries: string[] = []
 
-    // 来源 1: memoryNodes (桌面对话记忆)
-    const { data: recentMemories } = await memoryRepo.list({
-      agentId: activeAgent,
-      page: 1,
-      pageSize: 50,
-    })
-    const todayStart = new Date()
-    todayStart.setHours(0, 0, 0, 0)
-    const todayMs = todayStart.getTime()
-    for (const m of recentMemories) {
-      if (m.timestamp >= todayMs) {
-        todaySummaries.push(m.content)
-      }
-    }
-
-    // 来源 2: subagent 应用当日记忆摘要（AIOS 记忆回流通道）
-    // 通过 AppManager.collectDailySummaries 统一收集所有运行中应用的当日记忆，
-    // 不再直接读取 social.tdb（解耦：主 Agent 不感知 subagent 的存储细节）
-    try {
-      const appSummaries = await appManager.collectDailySummaries(activeAgent, todayStr)
-      todaySummaries.push(...appSummaries)
-    } catch (err) {
-      logger.warn(`收集应用记忆摘要失败: ${err}`)
-    }
-
-    if (todaySummaries.length === 0) {
-      logger.debug('日记定时检查: 今日无新记忆，跳过')
-      return
-    }
-
-    try {
-      const entry = await diaryEngine.generate({
-        summaries: todaySummaries,
+      // 来源 1: memoryNodes (桌面对话记忆)
+      const { data: recentMemories } = await memoryRepo.list({
         agentId: activeAgent,
-        agentName: agent.name,
+        page: 1,
+        pageSize: 50,
       })
-      if (entry) {
-        lastDiaryDate = todayStr
-        logger.info(
-          `综合日记生成完成: agent=${activeAgent}, sources=${todaySummaries.length}, ` +
-            `mood=${entry.mood}, highlights=${entry.highlights.length}`,
-        )
+      const todayStart = new Date()
+      todayStart.setHours(0, 0, 0, 0)
+      const todayMs = todayStart.getTime()
+      for (const m of recentMemories) {
+        if (m.timestamp >= todayMs) {
+          todaySummaries.push(m.content)
+        }
       }
-    } catch (err) {
-      logger.warn(`日记生成失败: ${err}`)
-    }
+
+      // 来源 2: subagent 应用当日记忆摘要（AIOS 记忆回流通道）
+      // 通过 AppManager.collectDailySummaries 统一收集所有运行中应用的当日记忆，
+      // 不再直接读取 social.tdb（解耦：主 Agent 不感知 subagent 的存储细节）
+      try {
+        const appSummaries = await appManager.collectDailySummaries(activeAgent, todayStr)
+        todaySummaries.push(...appSummaries)
+      } catch (err) {
+        logger.warn(`收集应用记忆摘要失败: ${err}`)
+      }
+
+      if (todaySummaries.length === 0) {
+        logger.debug('日记定时检查: 今日无新记忆，跳过')
+        return
+      }
+
+      try {
+        const ownerName = (await configRepo.get('owner.name')) ?? '用户'
+        // 称呼：取该 Agent 的 agent.json owner_appellation（兜底"主人"），各角色独立
+        const ownerAppellation = agent.ownerAppellation
+        const entry = await diaryEngine.generate({
+          summaries: todaySummaries,
+          agentId: activeAgent,
+          agentName: agent.name,
+          ownerName,
+          ownerAppellation,
+        })
+        if (entry) {
+          lastDiaryDate = todayStr
+          logger.info(
+            `综合日记生成完成: agent=${activeAgent}, sources=${todaySummaries.length}, ` +
+              `mood=${entry.mood}, highlights=${entry.highlights.length}`,
+          )
+        }
+      } catch (err) {
+        logger.warn(`日记生成失败: ${err}`)
+      }
+    },
   })
 
   // ── 用户提醒系统 ──
-  const schedulerService = new SchedulerService(db, gatewayHub)
+  const schedulerService = new SchedulerService(db, gatewayHub, agentManager)
 
   // 注册定时任务: 提醒触发检查 (每 30 秒)
-  scheduler.register('trigger-check', 30 * 1000, async () => {
-    const activeAgent = agentManager.defaultAgentId
-    const results = await schedulerService.checkDueTasks(activeAgent)
-    for (const result of results) {
-      // 通过 Gateway 广播触发提醒 (前端收到后显示通知 + 播放 Agent 语音)
-      await gatewayHub.pushNotification({
-        title: `提醒触发 (${result.type})`,
-        body: result.instruction,
-      })
-      logger.info(`到期任务已广播: ${result.type} (${result.tasks.length} 项)`)
-    }
+  scheduler.register({
+    name: 'trigger-check',
+    displayName: '定时提醒检查',
+    description: '检查并触发已到期的提醒与计划',
+    intervalMs: 30 * 1000,
+    handler: async () => {
+      const activeAgent = agentManager.defaultAgentId
+      const results = await schedulerService.checkDueTasks(activeAgent)
+      for (const result of results) {
+        if (result.type === 'agent_task') {
+          for (const item of result.tasks) {
+            if (!dispatchScheduledAgentTask) throw new Error('后台任务服务尚未初始化')
+            await dispatchScheduledAgentTask(item.agentId, item.content)
+          }
+          continue
+        }
+        // 通过 Gateway 广播触发提醒 (前端收到后显示通知 + 播放 Agent 语音)
+        await gatewayHub.pushNotification({
+          title: `提醒触发 (${result.type})`,
+          body: result.instruction,
+        })
+        logger.info(`到期任务已广播: ${result.type} (${result.tasks.length} 项)`)
+      }
+    },
   })
 
   // 注册定时任务: 临时文件清理 (每小时)
-  scheduler.register('cleanup', 60 * 60 * 1000, async () => {
-    const tempDir = pathResolver.resolve('@temp')
-    await runCleanup(tempDir)
+  scheduler.register({
+    name: 'cleanup',
+    displayName: '临时文件清理',
+    description: '清理过期缓存、上传文件与临时资源',
+    intervalMs: 60 * 60 * 1000,
+    handler: async () => {
+      const tempDir = pathResolver.resolve('@temp')
+      await runCleanup(tempDir)
+    },
   })
 
   // 注册定时任务: 梦境 + 图谱 + 标注 + 整合 + 审计 + 退役 (统一由 ReflectionOrchestrator 编排)
@@ -799,29 +973,41 @@ export async function createAppContext(config: AppConfig): Promise<AppContext> {
   })
 
   // Reflection 统一定时任务 (6h 间隔, Orchestrator 内置频率限制 + 降本决策)
-  scheduler.register('reflection', 6 * 60 * 60 * 1000, async () => {
-    const agentId = agentManager.defaultAgentId
-    if (!agentId) return
-    try {
-      const result = await reflectionOrchestrator.run([agentId])
-      if (result.agents.length > 0) {
-        const a = result.agents[0]!
-        logger.info(
-          `Reflection 完成: 标${a.tagged} 合${a.consolidated} 审${a.audited} ` +
-            `退${a.retired} 梦${a.dreamLinked} 图${a.graphEdges} 词${a.waifuTextsUpdated} (${result.totalDurationMs}ms)`,
-        )
+  scheduler.register({
+    name: 'reflection',
+    displayName: '深度记忆维护',
+    description: '整合、审计并维护长期记忆系统',
+    intervalMs: 6 * 60 * 60 * 1000,
+    handler: async () => {
+      const agentId = agentManager.defaultAgentId
+      if (!agentId) return
+      try {
+        const result = await reflectionOrchestrator.run([agentId])
+        if (result.agents.length > 0) {
+          const a = result.agents[0]!
+          logger.info(
+            `Reflection 完成: 标${a.tagged} 合${a.consolidated} 审${a.audited} ` +
+              `退${a.retired} 梦${a.dreamLinked} 图${a.graphEdges} 词${a.waifuTextsUpdated} (${result.totalDurationMs}ms)`,
+          )
+        }
+      } catch (err) {
+        logger.error(`Reflection 失败: ${err}`)
       }
-    } catch (err) {
-      logger.error(`Reflection 失败: ${err}`)
-    }
+    },
   })
 
   // 注册定时任务: 孤独记忆扫描 (每小时, 低成本, 独立于 Reflection)
-  scheduler.register('lonely-scan', 60 * 60 * 1000, async () => {
-    await runLonelyScan({
-      memoryRepo,
-      defaultAgentId: agentManager.defaultAgentId,
-    })
+  scheduler.register({
+    name: 'lonely-scan',
+    displayName: '冷门记忆扫描',
+    description: '识别长期未被检索和使用的记忆',
+    intervalMs: 60 * 60 * 1000,
+    handler: async () => {
+      await runLonelyScan({
+        memoryRepo,
+        defaultAgentId: agentManager.defaultAgentId,
+      })
+    },
   })
 
   // 注意：social-scorer 定时任务已迁移到 SocialAppRuntime 内部管理
@@ -852,11 +1038,13 @@ export async function createAppContext(config: AppConfig): Promise<AppContext> {
   )
 
   // ASR: 优先从 DB (Dashboard VoiceTab) 读取, fallback 到默认值
+  const dbAsrEnabled = await configRepo.get('asr.enabled')
   const dbAsrApiBase = await configRepo.get('asr.apiBase')
   const dbAsrApiKey = await configRepo.get('asr.apiKey')
   const dbAsrModel = await configRepo.get('asr.model')
   const dbAsrLanguage = await configRepo.get('asr.language')
   const asrService = new AsrService({
+    enabled: dbAsrEnabled === 'true',
     ...(dbAsrApiBase && { apiBase: dbAsrApiBase }),
     ...(dbAsrApiKey && { apiKey: dbAsrApiKey }),
     ...(dbAsrModel && { model: dbAsrModel }),
@@ -890,8 +1078,87 @@ export async function createAppContext(config: AppConfig): Promise<AppContext> {
     inboundRouteRepo,
     configRepo,
   )
+  appManager.setConversationStateServices(threadService, flowStateService)
   logger.info('Agent 应用层已初始化（GrantRegistry + AppManager，含独立编译依赖）')
   // 内置社交应用 runtime factory 在 initAppContext() 中通过动态 import 注册
+
+  const attachmentService = new AttachmentService(
+    attachmentRepo,
+    threadRepo,
+    pathResolver.resolve('@data/attachments'),
+  )
+  const conversationTurnService = new ConversationTurnService({
+    threadService,
+    contextCompiler,
+    agentService,
+    attachmentService,
+    imageUnderstandingService,
+  })
+  appManager.setHostCommunicator(async (request) => {
+    const thread = await threadService.getOrCreateLatest(
+      request.hostAgentId,
+      'desktop',
+      'conversation',
+    )
+    const result = await conversationTurnService.executeTurn({
+      threadId: thread.id,
+      agentId: request.hostAgentId,
+      content:
+        `【AgentApplication 临时通信】\n应用：${request.appId}\n模式：${request.mode}\n请求：${request.summary}\n` +
+        `辅助上下文：${JSON.stringify(request.context ?? {})}\n请判断后给出简洁、可执行的结构化建议。`,
+      inputPersistence: 'ephemeral',
+      outputPersistence: 'ephemeral',
+    })
+    return { decision: 'responded', content: result.reply, correlationId: request.correlationId }
+  })
+  // M05: 统一任务中心 Service（派发 → 队列 → ConversationTurn 执行）
+  const backgroundTaskService = new BackgroundTaskService(
+    backgroundTaskRepo,
+    threadService,
+    conversationTurnService,
+    approvalService,
+  )
+  const dispatchScheduledAgentTask = async (agentId: string, instruction: string) => {
+    await backgroundTaskService.dispatch({
+      agentId,
+      instruction,
+      title: `定时任务：${instruction.slice(0, 24)}`,
+      requestedBy: 'scheduler',
+    })
+  }
+  for (const agent of agentManager.listAgents()) {
+    const residentId = `resident_memory_${agent.id}`
+    if (!(await backgroundTaskRepo.findById(residentId))) {
+      const residentThread = await threadService.createThread({
+        agentId: agent.id,
+        channel: 'desktop',
+        purpose: 'background_task',
+        title: '[常驻] 记忆运行维护',
+      })
+      await backgroundTaskRepo.ensureResident({
+        id: residentId,
+        agentId: agent.id,
+        threadId: residentThread.id,
+        title: '记忆运行维护',
+        instruction: '常驻维护 Scorer、MemoryGate 与记忆维护运行状态',
+        metadataJson: JSON.stringify({ runtime: 'memory', readOnly: true }),
+      })
+    }
+  }
+  // M05-篇3-1：启动时保留中断任务的 checkpoint（供手动 resumeInterrupted 恢复），
+  // 不自动重启：重启后任务标记 crashed（合并入 failed 语义），误判断决重启闭环在后续版本
+  // 品质续跑依赖用户确认后用 resume-interrupted 接口手动接力
+  backgroundTaskService.recoverInterruptedTasks().catch((err) => {
+    logger.warn(`后台任务中断恢复失败: ${err}`)
+  })
+  const strongholdService = new StrongholdService(db)
+  const groupChatService = new GroupChatService(db)
+  // 管家复用主模型 LLM + mdp 管家提示词；未配置模型时自动退化为规则引擎
+  const butlerService = new ButlerService(strongholdService, groupChatService, agentManager, {
+    mdpEngine,
+    llmService,
+    getModelConfig: modelRoles.bind('main'),
+  })
 
   return {
     db,
@@ -904,7 +1171,9 @@ export async function createAppContext(config: AppConfig): Promise<AppContext> {
     configRepo,
     storeRegistry,
     threadRepo,
-    // 第五阶段长记忆 Repositories
+    attachmentRepo,
+    backgroundTaskRepo,
+    toolApprovalRepo,
     canonicalMemoryRepo,
     memoryCandidateRepo,
     embeddingService,
@@ -916,6 +1185,7 @@ export async function createAppContext(config: AppConfig): Promise<AppContext> {
     memoryImporter,
     diaryEngine,
     maintenanceService,
+    resetService,
     modelRegistry,
     modelService,
     // 第五阶段长记忆 Provider/Gate/TaskRunner
@@ -929,6 +1199,8 @@ export async function createAppContext(config: AppConfig): Promise<AppContext> {
     toolRegistry,
     // 第六阶段 #7: 暴露 toolExecutor 给 run_script 内部闭包统一鉴权
     toolExecutor,
+    approvalService,
+    policyEngine,
     // AIOS: taskManager 已移除（被 RuntimeStateService 替代）
     runtimeStateService,
     // AIOS: sessionService 已移除（被 CompanionSchedulerService 替代）
@@ -938,7 +1210,12 @@ export async function createAppContext(config: AppConfig): Promise<AppContext> {
     schedulerService,
     // AIOS: Thread + Context 域
     threadService,
+    flowStateService,
     contextCompiler,
+    conversationTurnService,
+    attachmentService,
+    // M05: 统一任务中心
+    backgroundTaskService,
     capabilityGate,
     skillLoader,
     // 第七阶段：节点能力注册表
@@ -953,9 +1230,10 @@ export async function createAppContext(config: AppConfig): Promise<AppContext> {
     mcpManager: new McpClientManager(mcpRepo),
     mcpRepo,
     promptTemplateLoader: new PromptTemplateLoader(pathResolver),
-    strongholdService: new StrongholdService(db),
-    groupChatService: new GroupChatService(db),
-    groupChatDispatcher: new GroupChatDispatcher(new GroupChatService(db)),
+    strongholdService,
+    butlerService,
+    groupChatService,
+    groupChatDispatcher: new GroupChatDispatcher(groupChatService),
 
     // 注意：社交桥接（SocialBridge）已迁移到 packages/apps/social/runtime/socialBridge.ts
     // 由 SocialAppRuntime 独立管理，不再通过主 AppContext 暴露
@@ -969,7 +1247,7 @@ export async function createAppContext(config: AppConfig): Promise<AppContext> {
       agentService,
       gatewayHub,
       threadService,
-      contextCompiler,
+      conversationTurnService,
     }),
 
     // ── 系统信息 ──
@@ -1060,7 +1338,15 @@ export async function initAppContext(ctx: AppContext): Promise<void> {
   // 注意：social app 文件不在 backend tsconfig include 范围内，
   // typecheck 会报错，用 Function 构造动态 require 绕过静态分析
   try {
-    const moduleUrl = new URL('../../apps/social/runtime/index.ts', import.meta.url)
+    // 便携/打包环境通过 PERO_APP_ROOT 定位内置应用编译产物（bundle 后 import.meta 失效）；
+    // 开发环境回退到源码树相对定位。
+    const appRoot = process.env.PERO_APP_ROOT
+    const moduleUrl = appRoot
+      ? // Windows 绝对路径需 file:/// 三斜杠前缀
+        new URL(
+          `file:///${path.resolve(appRoot, 'apps', 'social', 'runtime', 'index.js').replace(/\\/g, '/')}`,
+        )
+      : new URL('../../apps/social/runtime/index.ts', import.meta.url)
     const socialModule: any = await import(moduleUrl.href)
     const createSocialRuntime = socialModule.default ?? socialModule.createRuntime
     if (typeof createSocialRuntime === 'function') {
@@ -1074,6 +1360,8 @@ export async function initAppContext(ctx: AppContext): Promise<void> {
 
   // 1. 注册内置工具 (静态 import, 编译时确定)
   await registerBuiltinTools(ctx.toolRegistry)
+  setFlowStateService(ctx.flowStateService)
+  setAppInteractionManager(ctx.appManager)
 
   // 1.1 绑定 run_script 工具的内部执行器 (需要在注册后绑定，因为要访问已注册的工具)
   const { runScriptTool } = await import('./tools/runScript')
@@ -1082,11 +1370,13 @@ export async function initAppContext(ctx: AppContext): Promise<void> {
     // 也走 CapabilityGate 鉴权 + ResourceScope 路径校验。
     // 之前直接调用 ToolRegistry.getHandler 会跳过所有鉴权，存在安全风险。
     const result = await ctx.toolExecutor.execute(name, args, source, {
+      agentId: runtimeContext?.agentId,
+      sessionId: runtimeContext?.sessionId,
       threadId: runtimeContext?.threadId ?? 'nit-script',
       channel: runtimeContext?.channel ?? source,
     })
-    // ToolExecutionResult.output 即工具返回的字符串
-    return result.output
+    // 保留结构化失败结果，供 run_script 将内部工具错误正确升级为自身失败。
+    return result
   })
 
   // 1.5 注入 SchedulerService 到 Scheduler 工具 (避免循环依赖)
@@ -1122,6 +1412,7 @@ export async function initAppContext(ctx: AppContext): Promise<void> {
 
   // 1.8 注入据点服务到工具层 (始终可用，群聊模式由 CapabilityGate 门控)
   setStrongholdService(ctx.strongholdService)
+  setButlerService(ctx.butlerService)
   logger.info('据点工具已注入 (StrongholdService)')
 
   // 1.9 注入日记查找工具依赖 (VectorRepo + EmbeddingService + StoreRegistry)
@@ -1182,38 +1473,33 @@ export async function initAppContext(ctx: AppContext): Promise<void> {
   ctx.companionSchedulerService.setSchedulerFactory((agentId: string) => {
     return new CompanionScheduler({
       agentId,
+      // 用户称呼：读取对应 Agent 的 agent.json owner_appellation（兜底"主人"），替换触发语中的"主人"占位
+      getOwnerAppellation: async () => ctx.agentManager.getOwnerAppellation(agentId),
       onProactiveChat: async (params) => {
-        // AIOS: 通过 Thread + ContextCompiler 生成主动对话（companion channel）
-        // 获取或创建 companion Thread
-        const thread = await ctx.threadService.getOrCreateLatest(params.agentId, 'companion')
+        // 主动行为复用 Agent 最新 Desktop Thread，保持 App 与桌宠对话连续。
+        const thread = await ctx.threadService.getOrCreateLatest(
+          params.agentId,
+          'desktop',
+          'conversation',
+        )
 
-        // 追加系统触发消息（作为 user 消息注入）
         const triggerContent = `(系统触发: 当前时段=${params.timeSlot}，触发指令=${params.trigger}，请主动发起对话)`
-        await ctx.threadService.appendUserMessage(thread.id, triggerContent)
 
-        // 编译上下文
-        const compiled = await ctx.contextCompiler.compile(thread.id, params.agentId)
-
-        // 执行对话
-        const reply = await ctx.agentService.chatWithCompiledMessages({
-          messages: compiled.messages,
-          agentId: params.agentId,
+        const result = await ctx.conversationTurnService.executeTurn({
           threadId: thread.id,
+          agentId: params.agentId,
+          content: triggerContent,
+          capabilityScope: 'ambient',
+          inputPersistence: 'ephemeral',
         })
-
-        // 追加 Agent 回复
-        const pairId = `pair_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-        if (reply) {
-          await ctx.threadService.appendAssistantMessage({
-            threadId: thread.id,
-            content: reply,
-            pairId,
-            agentId: params.agentId,
-          })
-        }
-        return reply || null
+        return result.reply || null
       },
       onPushMessage: async (params) => {
+        const thread = await ctx.threadService.getOrCreateLatest(
+          params.agentId,
+          'desktop',
+          'conversation',
+        )
         // 通过 GatewayHub 推送到前端
         await ctx.gatewayHub.broadcast(
           createEnvelope('push', {
@@ -1221,6 +1507,7 @@ export async function initAppContext(ctx: AppContext): Promise<void> {
             content: params.content,
             agentId: params.agentId,
             timeSlot: params.timeSlot,
+            threadId: thread.id,
           }),
         )
       },
@@ -1235,7 +1522,11 @@ export async function initAppContext(ctx: AppContext): Promise<void> {
 
   // 7. 据点系统初始化
   try {
-    await ctx.strongholdService.ensureDefaults()
+    const enabledAgentIds = ctx.agentManager
+      .listAgents()
+      .filter((agent) => agent.isEnabled)
+      .map((agent) => agent.id)
+    await ctx.strongholdService.ensureDefaults(enabledAgentIds)
   } catch (err) {
     logger.warn(`据点初始化出错 (非致命): ${err}`)
   }

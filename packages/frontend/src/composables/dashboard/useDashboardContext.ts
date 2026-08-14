@@ -1,7 +1,7 @@
 /**
  * useDashboardContext — Dashboard 全局共享状态
  *
- * 通过 provide/inject 在 DashboardView 与所有 Tab 组件之间共享：
+ * 通过 provide/inject 在 MainView 与其 Dashboard Tab 组件之间共享：
  * - isBackendOnline: 后端在线检测 (systemApi.health 轮询)
  * - activeAgentId: 当前活跃 Agent ID
  * - refreshKey: 全局刷新计数器 (Tab watch 此值重新加载数据)
@@ -92,7 +92,7 @@ const HEALTH_CHECK_INTERVAL = 15_000 // 15 秒
 const HEALTH_CHECK_TIMEOUT = 5_000 // 超时 5 秒
 
 /**
- * 创建 Dashboard 共享上下文 (仅在 DashboardView 中调用一次)
+ * 创建 Dashboard 共享上下文 (仅在 MainView 中调用一次)
  *
  * 职责:
  * 1. 启动后端健康检查轮询
@@ -204,7 +204,7 @@ export function createDashboardContext(currentTab: Ref<string>): DashboardContex
   // ── 退出系统 ──
   async function handleQuitApp() {
     try {
-      await openConfirm('退出萌动链接', '确定要关闭 PeroCore 并退出所有相关程序吗？', {
+      await openConfirm('退出萌动链接', '确定要关闭 infOS 并退出所有相关程序吗？', {
         type: 'warning',
       })
       await invoke('quit-app')

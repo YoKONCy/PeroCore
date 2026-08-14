@@ -11,6 +11,20 @@
 // 统一入站消息 (平台 → 后端)
 // ─────────────────────────────────────────────
 
+export interface SocialHistoryMessageRecord {
+  msgId: string
+  /** NapCat 会话内递增序号，用于向更早消息分页。 */
+  messageSeq?: number
+  accountId: string
+  channelId: string
+  channelType: 'private' | 'group'
+  senderId: string
+  senderName: string
+  content: string
+  timestamp: number
+  rawEvent?: unknown
+}
+
 /** 统一入站消息 */
 export interface InboundMessage {
   /** 消息来源平台 */
@@ -52,7 +66,8 @@ export interface InboundMessage {
    * 入站路由表解析出的 channel
    *
    * 由 SocialBridge.handleInbound 在查询 inbound_routes 后填充。
-   * 未命中路由时为 undefined，由 executeReply 按 channelType 推断（private→social, group→group）。
+   * 未命中路由时为 undefined，由 executeReply 统一使用 social。
+   * 私聊与群聊只由 channelType 区分，不占用 infOS 内部 group 通道。
    */
   routeChannel?: string
   /**

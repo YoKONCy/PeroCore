@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { NitLexer } from '@perocore/backend/nit/lexer'
-import { NitParser } from '@perocore/backend/nit/parser'
+import { NitLexer } from '@infos/backend/nit/lexer'
+import { NitParser } from '@infos/backend/nit/parser'
 
 function parseSource(source: string) {
   const tokens = new NitLexer(source).tokenize()

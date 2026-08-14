@@ -7,7 +7,7 @@
  * @module packages/backend/src/lib/appError
  */
 
-import { CODE_MESSAGES, CODE_TO_HTTP, type ResponseCode } from '@perocore/shared'
+import { CODE_MESSAGES, CODE_TO_HTTP, type ResponseCode } from '@infos/shared'
 
 /** 自定义应用错误，携带业务 code 和 HTTP 状态码 */
 export class AppError extends Error {

@@ -1,12 +1,12 @@
 {
-  "name": "@perocore/social",
-  "version": "1.0.0",
+  "name": "@infos/social",
+  "version": "0.9.2-rc1",
   "private": true,
   "type": "module",
   "dependencies": {
     "drizzle-orm": "^0.44.0",
     "hono": "^4.7.0",
-    "triviumdb": "^0.5.1",
+    "triviumdb": "^0.7.3",
     "uuid": "^14.0.0"
   },
   "devDependencies": {

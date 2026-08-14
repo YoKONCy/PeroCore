@@ -82,7 +82,7 @@ function handleInput(e: Event) {
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: var(--color-text-muted);
+  color: var(--ui-text-tertiary);
 }
 
 .p-textarea-container {
@@ -93,11 +93,11 @@ function handleInput(e: Event) {
 .p-textarea {
   width: 100%;
   padding: 10px 14px;
-  background: var(--color-bg-secondary);
-  border: 2px solid var(--color-border);
+  background: var(--dash-input-bg);
+  border: 2px solid var(--dash-input-border);
   border-radius: 0;
-  color: var(--color-text-primary);
-  font-family: var(--font-pixel), monospace;
+  color: var(--ui-text-primary);
+  font-family: var(--ui-font-pixel);
   font-size: 14px;
   line-height: 1.6;
   resize: none;
@@ -109,14 +109,15 @@ function handleInput(e: Event) {
   z-index: 1;
 }
 .p-textarea::placeholder {
-  color: var(--color-text-muted);
+  color: var(--ui-text-tertiary);
 }
 .p-textarea:focus {
-  border-color: var(--color-sky-500);
-  box-shadow: 0 0 0 1px var(--color-sky-500);
+  border-color: var(--ui-accent-sky);
+  box-shadow: 0 0 0 1px var(--ui-accent-sky);
 }
 .p-textarea-disabled {
-  opacity: 0.5;
+  color: var(--ui-text-disabled);
+  background: var(--ui-bg-surface-soft);
   cursor: not-allowed;
 }
 
@@ -124,7 +125,7 @@ function handleInput(e: Event) {
 .p-textarea-glow {
   position: absolute;
   inset: 0;
-  background: var(--color-sky-500);
+  background: var(--ui-accent-sky);
   opacity: 0;
   filter: blur(20px);
   pointer-events: none;
@@ -140,7 +141,7 @@ function handleInput(e: Event) {
   right: 12px;
   bottom: 10px;
   opacity: 0;
-  color: var(--color-text-muted);
+  color: var(--ui-text-tertiary);
   pointer-events: none;
   z-index: 2;
   transition:

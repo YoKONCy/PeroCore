@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Hono } from 'hono'
-import { createAuthMiddleware, DEFAULT_PUBLIC_PATHS } from '@perocore/backend/middleware/auth'
+import { createAuthMiddleware, DEFAULT_PUBLIC_PATHS } from '@infos/backend/middleware/auth'
 
 /**
  * 第六阶段 #8: Token 鉴权中间件测试

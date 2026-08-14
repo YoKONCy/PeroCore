@@ -1,0 +1,168 @@
+# Pero Agent 能力矩阵 — CapabilityGate (AIOS)
+# 单一权威: (Agent, Channel) → 可用工具 + 技能 + 提示词片段
+#
+# AIOS 改造说明：
+# - modes: 改为 channels:（与 Thread.channel 持久属性对齐）
+# - work 模式保留为 channel（未来由 Coding App + SubAgent 替代）
+# - ambient 是请求级能力作用域，在 desktop 白名单基础上只做减法
+#
+# 第七阶段修复（批次 B3/B4）：
+# - social 与 group 已显式配置最小且隔离的工具集
+# - CapabilityGate 已改为 fail-closed：未在此文件声明的 channel 一律返回空工具集
+# - 新增 channel 时必须在此显式配置，否则该通道下 Agent 将无任何工具可用
+#
+# 工具名必须与 ToolRegistry 中注册的 definition.name 完全一致。
+# 已注册工具清单见 packages/backend/src/tools/index.ts
+
+agent: pero
+
+channels:
+  desktop:
+    tools:
+      # 生命周期
+      - finish_task
+      - load_skill
+      # 文件系统
+      - read_file
+      - write_file
+      - get_file_info
+      - list_directory
+      - search_files
+      - code_search
+      # 终端
+      - terminal_execute
+      - terminal_create
+      - terminal_list
+      - terminal_get
+      - terminal_read
+      - terminal_wait
+      - terminal_write
+      - terminal_resize
+      - terminal_interrupt
+      - terminal_kill
+      - terminal_close
+      # 安全工作区生产力
+      - read_file_range
+      - glob_files
+      - edit_file
+      # 视觉感知
+      - take_screenshot
+      # 网页 & 浏览器
+      - web_fetch
+      - browser_open_url
+      - browser_click
+      - browser_type
+      - browser_scroll
+      - browser_back
+      - browser_get_content
+      # 系统 & 桌面
+      - get_system_info
+      - open_application
+      - get_active_windows
+      - activate_window
+      - automation_execute
+      - get_mouse_position
+      # 提醒 & 日程
+      - set_reminder
+      - list_reminders
+      - cancel_reminder
+      # 脚本编排
+      - run_script
+      # 日记查找
+      - search_diary
+    skills:
+      - memory_management
+      - code_assistance
+    prompt_fragments:
+      - components/abilities/vision
+      - components/abilities/workspace
+    # 第六阶段 #6: Resource Scope 示例配置
+    # tool_permissions 描述工具在 (Agent, Channel) 下的资源范围与参数策略
+    # 第一版简化：ParamPolicy 与 requiresApproval 仅加数据结构，不实际生效
+    tool_permissions:
+      read_file:
+        resource_scope:
+          scope: system
+          allowed_roots: []
+          denied_paths: []
+        requires_approval: false
+      write_file:
+        resource_scope:
+          scope: principal_workspace
+          allowed_roots: []
+          denied_paths: []
+        requires_approval: false
+      terminal_execute:
+        resource_scope:
+          scope: system
+          allowed_roots: []
+          denied_paths: []
+        requires_approval: false
+      run_script:
+        resource_scope:
+          scope: system
+          allowed_roots: []
+          denied_paths: []
+        requires_approval: false
+    # AIOS: output_constraint 已移至独立槽位 9100_output_format（近邻用户输入）
+
+  # work channel: 保留供未来 Coding App + SubAgent 使用
+  work:
+    tools:
+      - finish_task
+      - load_skill
+      - read_file
+      - write_file
+      - get_file_info
+      - list_directory
+      - search_files
+      - code_search
+      - terminal_execute
+      - web_fetch
+      - run_script
+    skills:
+      - code_assistance
+    prompt_fragments:
+      - components/abilities/workspace
+    # AIOS: output_constraint 已移至独立槽位 9100_output_format（近邻用户输入）
+
+  # ─────────────────────────────────────────────
+  # 第七阶段修复（批次 B4）：social / group channel 最小配置
+  #
+  # 为什么必须显式配置：
+  # - 原先这两个 channel 没有配置，CapabilityGate 会 fail-open 回退到 desktop，
+  #   导致 QQ 好友可通过聊天诱导 Agent 执行 terminal_execute / write_file / run_script
+  # - 批次 B3 已将 CapabilityGate 改为 fail-closed，未配置的 channel 返回空工具集，
+  #   因此这里必须显式给出社交场景真正需要的最小工具集
+  #
+  # 安全原则：社交通道面向外部不可信用户，绝不放开文件写入、终端执行、脚本编排。
+  # 未来由社交子 Agent 应用接管时可迁移到独立配置。
+  # ─────────────────────────────────────────────
+
+  # social channel: 私聊场景（QQ 私聊 / Discord DM 等）
+  social:
+    tools:
+      # 生命周期（必需）
+      - finish_task
+      - load_skill
+      # 只读信息查询
+      - web_fetch
+      - search_diary
+      # 提醒类（用户主动要求时可用）
+      - set_reminder
+      - list_reminders
+      - cancel_reminder
+    skills: []
+    prompt_fragments: []
+
+  # group channel: infOS 据点内部多 Agent 群聊
+  group:
+    tools:
+      - finish_task
+      - stronghold_move_to_room
+      - stronghold_list_rooms
+      - stronghold_get_room_info
+      - stronghold_set_environment
+      - stronghold_call_butler
+    skills: []
+    prompt_fragments: []

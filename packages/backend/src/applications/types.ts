@@ -66,6 +66,9 @@ export interface AgentAppManifest {
   frontendEntry?: string
 
   // ── 能力声明 ──
+  /** 应用向主 Agent 暴露的高层任务动作。主 Agent 只调用 Action，不直接获得应用内部工具。 */
+  actions?: AppActionDeclaration[]
+
   /**
    * 应用提供的工具能力
    *
@@ -150,6 +153,15 @@ export interface AgentAppManifest {
    * 应用内会话的默认 ContextPolicy。
    */
   defaultSessionPolicy?: AppSessionPolicy
+}
+
+/** 应用向宿主 Agent 暴露的高层任务动作。 */
+export interface AppActionDeclaration {
+  name: string
+  description: string
+  mode: 'command' | 'delegate' | 'both'
+  parameters?: Record<string, unknown>
+  defaultCommunicationBudget?: number
 }
 
 /**
@@ -410,6 +422,22 @@ export interface LaunchAppParams {
 // ─────────────────────────────────────────────
 // 检查点与事件
 // ─────────────────────────────────────────────
+
+export interface AppCommandRequest {
+  correlationId: string
+  action: string
+  input: Record<string, unknown>
+  taskContext?: AppTaskContext
+  communicationBudget: number
+}
+
+export interface AppCommandResult {
+  correlationId: string
+  status: 'completed' | 'failed'
+  summary: string
+  output?: Record<string, unknown>
+  error?: string
+}
 
 /**
  * 应用检查点

@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ApiEmbeddingProvider } from '@perocore/backend/services/embedding/providers/apiProvider'
-import { ApiRerankerProvider } from '@perocore/backend/services/embedding/providers/apiReranker'
+import { ApiEmbeddingProvider } from '@infos/backend/services/embedding/providers/apiProvider'
+import { ApiRerankerProvider } from '@infos/backend/services/embedding/providers/apiReranker'
 import {
   EmbeddingService,
   type EmbeddingConfig,
-} from '@perocore/backend/services/embedding/embeddingService'
+} from '@infos/backend/services/embedding/embeddingService'
 
 const embeddingConfig: EmbeddingConfig = {
   apiBase: 'https://example.test/v1/',

@@ -3,9 +3,9 @@ Description: 据点群聊互动规则片段
 Version: "1.0"
 Prompt Type: rules
 Direct Consumer: 未接入
-Target Service: backend/services/prompt/promptService.ts
-Target Function: PromptService.buildPromptMessages()
-Injected Via: referenced conceptually by services/mdp/presets/group.yaml group_interaction_rules variable, but not currently wired from this file
+Target Service: 据点运行时
+Target Function: 待接入
+Injected Via: 当前未接入
 Model Role: main
 -->
 

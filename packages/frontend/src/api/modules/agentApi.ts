@@ -10,18 +10,114 @@ export interface AgentListItem {
   id: string
   name: string
   description: string
+  ownerAppellation: string
   isActive: boolean
   isEnabled: boolean
+  /** 用户创建的角色；false 为内置角色 */
+  isUser: boolean
   /** 头像 URL (/api/agents/:id/avatar) */
   avatarUrl?: string
+}
+
+export type AgentChannel = 'desktop' | 'social' | 'group'
+
+export interface AgentSocialBinding {
+  enabled: boolean
+  qq_id: string
+  use_stickers: boolean
+}
+
+export interface AgentDetail extends AgentListItem {
+  systemPrompt: string
+  channelPatches: Partial<Record<AgentChannel, string>>
+  waifuTexts: Record<string, unknown> | null
+}
+
+export interface AgentCreatePayload {
+  id: string
+  name: string
+  description?: string
+  ownerAppellation?: string
+  systemPrompt?: string
+}
+
+export type AgentUpdatePayload = Pick<
+  AgentDetail,
+  'name' | 'description' | 'ownerAppellation' | 'systemPrompt' | 'channelPatches' | 'waifuTexts'
+>
+
+/** 工具显示元数据（后端 manifest display 字段透传，前端 ReAct 轨迹区渲染用） */
+export interface AgentToolDisplay {
+  label?: string
+  icon?: string
+  color?: string
+  style?: string
+}
+
+export interface AgentTool {
+  name: string
+  description: string
+  category?: string
+  channels?: AgentChannel[]
+  locked?: boolean
+  display?: AgentToolDisplay
+}
+
+export interface AgentSkillOption {
+  id: string
+  name: string
+  description: string
+}
+
+/** 单个 channel 的能力配置 */
+export interface ChannelCapabilityModel {
+  tools: string[]
+  skills: string[]
+  promptFragments: string[]
+}
+
+export interface AgentCapabilities {
+  channels: Record<string, ChannelCapabilityModel>
+  skills?: AgentSkillOption[]
 }
 
 export const agentApi = {
   /** 获取所有 Agent */
   list: () => apiClient.get<AgentListItem[]>('/agents'),
 
-  /** 获取默认 Agent（AIOS: 后端不再有全局活跃概念，返回默认 Agent） */
-  getActive: () => apiClient.get<{ agentId: string }>('/agents/active'),
+  /** 获取完整 Agent 配置 */
+  get: (agentId: string) => apiClient.get<AgentDetail>(`/agents/${agentId}`),
+
+  /** 创建自定义 Agent */
+  create: (payload: AgentCreatePayload) => apiClient.post<AgentDetail>('/agents', payload),
+
+  /** 更新 Agent 配置 */
+  update: (agentId: string, payload: AgentUpdatePayload) =>
+    apiClient.put<AgentDetail>(`/agents/${agentId}`, payload),
+
+  /** 删除自定义 Agent */
+  remove: (agentId: string) => apiClient.delete<void>(`/agents/${agentId}`),
+
+  /** 上传客户端裁切后的 PNG 头像，由服务端写入 Agent 资源目录。 */
+  uploadAvatar: (agentId: string, avatar: Blob) => {
+    const data = new FormData()
+    data.append('avatar', avatar, 'avatar.png')
+    return apiClient.post<{ avatarUrl: string }>(`/agents/${agentId}/avatar`, data)
+  },
+
+  /** 获取能力矩阵 */
+  getCapabilities: (agentId: string) =>
+    apiClient.get<AgentCapabilities>(`/agents/${agentId}/capabilities`),
+
+  /** 更新能力矩阵 */
+  updateCapabilities: (agentId: string, payload: AgentCapabilities) =>
+    apiClient.put<AgentCapabilities>(`/agents/${agentId}/capabilities`, payload.channels),
+
+  /** 获取可用工具 */
+  listTools: () => apiClient.get<AgentTool[]>('/agents/tools'),
+
+  /** 获取后端权威的全局活跃角色。 */
+  getActive: () => apiClient.get<{ agentId: string; id: string; name: string }>('/agents/active'),
 
   /** 启用 Agent */
   enable: (agentId: string) => apiClient.post<void>(`/agents/${agentId}/enable`),
@@ -37,6 +133,23 @@ export const agentApi = {
 
   /** 获取角色实时状态 (mood/vibe/mind + 动态台词，来自 pet_states 表) */
   getPetState: (agentId: string) => apiClient.get<PetStateResponse>(`/agents/${agentId}/pet-state`),
+
+  /** 批量获取所有角色的陪伴调度只读状态，供任务中心统一展示。 */
+  listCompanionStates: () => apiClient.get<CompanionStateResponse[]>('/agents/companion-states'),
+
+  /** 获取角色陪伴调度的真实运行状态。 */
+  getCompanionState: (agentId: string) =>
+    apiClient.get<CompanionStateResponse>(`/agents/${agentId}/companion`),
+
+  /** 启用或关闭角色的主动陪伴调度。 */
+  setCompanionState: (agentId: string, enabled: boolean) =>
+    apiClient.put<CompanionStateResponse>(`/agents/${agentId}/companion`, { enabled }),
+}
+
+/** 角色陪伴调度状态。 */
+export interface CompanionStateResponse {
+  agentId: string
+  enabled: boolean
 }
 
 /** 角色实时状态响应 (GET /agents/:id/pet-state) */
@@ -48,5 +161,6 @@ export interface PetStateResponse {
   clickMessages: Record<string, string[]>
   idleMessages: string[]
   backMessages: string[]
+  textExpiresAt: string | null
   updatedAt: string | null
 }

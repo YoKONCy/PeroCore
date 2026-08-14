@@ -35,6 +35,7 @@ interface PackageJson {
 const rootPkg: PackageJson = JSON.parse(fs.readFileSync(rootPkgPath, 'utf8'))
 const VERSION = rootPkg.version
 const CARGO_VERSION = toCargoVersion(VERSION)
+const BROWSER_VERSION = toBrowserVersion(VERSION)
 
 console.log(`\n[版本同步] 🎯 唯一事实来源 → package.json: ${VERSION}`)
 console.log('═'.repeat(55))
@@ -45,24 +46,49 @@ let checkedCount = 0
 // ─── 工具函数 ──────────────────────────────────────────
 
 function toCargoVersion(version: string): string {
-  const prereleaseMatch = version.match(/^(\d+)\.(\d+)-(.+)$/)
-  if (prereleaseMatch) {
-    const [, major, minor, prerelease] = prereleaseMatch
-    return `${major}.${minor}.0-${prerelease}`
+  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
+    throw new Error(`[版本同步] 非法 SemVer 版本号: ${version}`)
   }
-
   return version
+}
+
+/** Chrome 扩展 version 仅允许 1-4 段数字；预发布序号映射到第四段。 */
+function toBrowserVersion(version: string): string {
+  const match = version.match(/^(\d+)\.(\d+)\.(\d+)(?:-[A-Za-z]+(\d+))?$/)
+  if (!match) throw new Error(`[版本同步] 无法转换为浏览器扩展版本: ${version}`)
+  const [, major, minor, patch, prerelease] = match
+  return prerelease ? `${major}.${minor}.${patch}.${prerelease}` : `${major}.${minor}.${patch}`
+}
+
+/** 同步浏览器扩展清单：version 为 Chrome 数字格式，version_name 保留完整 SemVer。 */
+function syncBrowserManifest(relPath: string): void {
+  const fullPath = path.join(ROOT, relPath)
+  if (!fs.existsSync(fullPath)) throw new Error(`[版本同步] 必需文件不存在: ${relPath}`)
+  checkedCount++
+  const manifest = JSON.parse(fs.readFileSync(fullPath, 'utf8')) as Record<string, unknown>
+  if (typeof manifest.version !== 'string' || typeof manifest.version_name !== 'string') {
+    throw new Error(`[版本同步] ${relPath} 缺少 version 或 version_name`)
+  }
+  if (manifest.version !== BROWSER_VERSION || manifest.version_name !== VERSION) {
+    manifest.version = BROWSER_VERSION
+    manifest.version_name = VERSION
+    fs.writeFileSync(fullPath, JSON.stringify(manifest, null, 2) + '\n')
+    console.log(`[版本同步] ✅ ${relPath}: ${BROWSER_VERSION} / ${VERSION}`)
+    updatedCount++
+  }
 }
 
 /** 同步 JSON 文件中的 version 字段 */
 function syncJsonVersion(relPath: string): void {
   const fullPath = path.join(ROOT, relPath)
   if (!fs.existsSync(fullPath)) {
-    console.log(`[版本同步] ⏭️  ${relPath} (文件不存在，跳过)`)
-    return
+    throw new Error(`[版本同步] 必需文件不存在: ${relPath}`)
   }
   checkedCount++
   const pkg: PackageJson = JSON.parse(fs.readFileSync(fullPath, 'utf8'))
+  if (typeof pkg.version !== 'string' || !pkg.version) {
+    throw new Error(`[版本同步] ${relPath} 缺少有效 version 字段`)
+  }
   if (pkg.version !== VERSION) {
     const oldVersion = pkg.version
     pkg.version = VERSION
@@ -76,15 +102,35 @@ function syncJsonVersion(relPath: string): void {
 function syncCargoVersion(relPath: string): void {
   const fullPath = path.join(ROOT, relPath)
   if (!fs.existsSync(fullPath)) {
-    console.log(`[版本同步] ⏭️  ${relPath} (文件不存在，跳过)`)
-    return
+    throw new Error(`[版本同步] 必需文件不存在: ${relPath}`)
   }
   checkedCount++
   const content = fs.readFileSync(fullPath, 'utf8')
+  if (!/^version\s*=\s*".*"/m.test(content)) {
+    throw new Error(`[版本同步] ${relPath} 未找到 package.version`)
+  }
   const replaced = content.replace(/^version\s*=\s*".*"/m, `version = "${CARGO_VERSION}"`)
   if (content !== replaced) {
     fs.writeFileSync(fullPath, replaced)
     console.log(`[版本同步] ✅ ${relPath} → ${CARGO_VERSION}`)
+    updatedCount++
+  }
+}
+
+/** 同步 Cargo.lock 中指定本地 crate 的版本，避免误改第三方依赖。 */
+function syncCargoLockVersion(relPath: string, crateName: string): void {
+  const fullPath = path.join(ROOT, relPath)
+  if (!fs.existsSync(fullPath)) throw new Error(`[版本同步] 必需文件不存在: ${relPath}`)
+  checkedCount++
+  const content = fs.readFileSync(fullPath, 'utf8')
+  const pattern = new RegExp(`(name = "${crateName}"\\r?\\nversion = ")[^"]+(")`)
+  if (!pattern.test(content)) {
+    throw new Error(`[版本同步] ${relPath} 未找到本地 crate: ${crateName}`)
+  }
+  const replaced = content.replace(pattern, `$1${CARGO_VERSION}$2`)
+  if (content !== replaced) {
+    fs.writeFileSync(fullPath, replaced)
+    console.log(`[版本同步] ✅ ${relPath} ${crateName} → ${CARGO_VERSION}`)
     updatedCount++
   }
 }
@@ -101,14 +147,20 @@ function syncSourceVersion(
   pattern: RegExp,
   replacement: string,
   label: string,
+  required = true,
 ): void {
   const fullPath = path.join(ROOT, relPath)
   if (!fs.existsSync(fullPath)) {
-    console.log(`[版本同步] ⏭️  ${relPath} (文件不存在，跳过)`)
-    return
+    throw new Error(`[版本同步] 必需文件不存在: ${relPath}`)
   }
   checkedCount++
   const content = fs.readFileSync(fullPath, 'utf8')
+  if (!pattern.test(content)) {
+    if (required) throw new Error(`[版本同步] ${relPath} 未匹配到 ${label}`)
+    console.log(`[版本同步] ⏭️  ${relPath} 当前无 ${label}，跳过可选同步`)
+    return
+  }
+  pattern.lastIndex = 0
   const replaced = content.replace(pattern, replacement)
   if (content !== replaced) {
     fs.writeFileSync(fullPath, replaced)
@@ -126,6 +178,9 @@ const subPackagePaths = [
   'packages/shared/package.json',
   'packages/backend/package.json',
   'packages/frontend/package.json',
+  'packages/daemon/package.json',
+  'packages/browser-extension/package.json',
+  'packages/apps/social/package.json',
   'packages/wiki/package.json',
   'packages/native/render-core-runtime/package.json',
   'packages/native/render-core/package.json',
@@ -138,6 +193,10 @@ for (const relPath of subPackagePaths) {
   syncJsonVersion(relPath)
 }
 
+console.log('\n── 🧩 应用与扩展清单 ──')
+syncJsonVersion('packages/apps/social/app.manifest.json')
+syncBrowserManifest('packages/browser-extension/manifest.json')
+
 // ═══════════════════════════════════════════════════════
 // 2. 同步 Cargo.toml (Rust 原生模块)
 // ═══════════════════════════════════════════════════════
@@ -146,11 +205,16 @@ console.log('\n── 🦀 Cargo.toml ──')
 const cargoTomlPaths = [
   'packages/native/render-core/Cargo.toml',
   'packages/native/nit-runtime/Cargo.toml',
+  'packages/native/auditor-wasm/Cargo.toml',
 ]
 
 for (const relPath of cargoTomlPaths) {
   syncCargoVersion(relPath)
 }
+
+syncCargoLockVersion('packages/native/render-core/Cargo.lock', 'pero-render-core')
+syncCargoLockVersion('packages/native/nit-runtime/Cargo.lock', 'nit-runtime')
+syncCargoLockVersion('packages/native/auditor-wasm/Cargo.lock', 'infos-auditor-wasm')
 
 // ═══════════════════════════════════════════════════════
 // 3. 同步后端源码中的硬编码版本号
@@ -176,8 +240,8 @@ syncSourceVersion(
 // 3c. mcpClientManager.ts — MCP 客户端版本标识
 syncSourceVersion(
   'packages/backend/src/services/mcp/mcpClientManager.ts',
-  /\{\s*name:\s*`perocore-\$\{name\}`,\s*version:\s*'[^']*'\s*\}/,
-  `{ name: \`perocore-\${name}\`, version: '${VERSION}' }`,
+  /\{\s*name:\s*`infos-\$\{name\}`,\s*version:\s*'[^']*'\s*\}/,
+  `{ name: \`infos-\${name}\`, version: '${VERSION}' }`,
   'MCP client version',
 )
 
@@ -188,9 +252,10 @@ console.log('\n── 🐳 Docker ──')
 
 syncSourceVersion(
   'docker-compose.yml',
-  /image:\s*perocore-backend:[\w.-]+/g,
-  `image: perocore-backend:${VERSION}`,
+  /image:\s*infos-backend:[\w.-]+/g,
+  `image: infos-backend:${VERSION}`,
   'image tag',
+  false,
 )
 
 // ═══════════════════════════════════════════════════════

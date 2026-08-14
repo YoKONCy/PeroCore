@@ -4,11 +4,11 @@
 >
 > 传统的向量检索 (Vector Search) 只能找到“长得像”的片段，而加权图遍历 (Weighted Graph Traversal) 能找到“有关系”的逻辑链。
 
-PeroCore 的核心记忆引擎基于 **PEDSA (Parallel Energy-Decay Spreading Activation)** 算法构建。这是一种加权图计算模型，旨在模拟关联检索过程。
+infOS 的核心记忆引擎基于 **PEDSA (Parallel Energy-Decay Spreading Activation)** 算法构建。这是一种加权图计算模型，旨在模拟关联检索过程。
 
 ## 1. 核心原理：PEDSA 算法
 
-PEDSA 全称为 **并行权重衰减传播** 算法，由 PeroCore Team 自研。它是一个模拟权重在图中传播、衰减和汇聚的动力学系统。
+PEDSA 全称为 **并行权重衰减传播** 算法，由 infOS Team 自研。它是一个模拟权重在图中传播、衰减和汇聚的动力学系统。
 v2 引入了 **PPR 回家概率**，进一步强化了图扩散对查询的主题相关性约束。
 
 ### 1.1 传播公式
@@ -46,7 +46,7 @@ PEDSA 通过图结构和权重传播，天然解决了上述问题，实现了 *
 
 ## 2. 向量的生命周期 (Lifecycle of a Vector)
 
-当用户输入一句话时，它在 PeroCore 记忆网络中的流程如下：
+当用户输入一句话时，它在 infOS 记忆网络中的流程如下：
 
 ### 第一阶段：向量化 (Embedding)
 

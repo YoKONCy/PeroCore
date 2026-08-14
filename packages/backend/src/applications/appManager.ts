@@ -31,11 +31,7 @@ import { readFileSync, existsSync } from 'node:fs'
 import path from 'node:path'
 import { eq, and, inArray } from 'drizzle-orm'
 import type { Hono } from 'hono'
-import {
-  appRegistry,
-  appInstances,
-  appCheckpoints,
-} from '../database/schema'
+import { appRegistry, appInstances, appCheckpoints } from '../database/schema'
 import type { DrizzleDb } from '../database'
 import { createLogger } from '../lib/logger'
 import type { ToolRegistry } from '../services/agent/toolRegistry'
@@ -50,20 +46,20 @@ import type { MemoryStoreRegistry } from '../repositories/storeRegistry'
 import type { GatewayHub } from '../services/gateway/gatewayHub'
 import type { InboundRouteRepository } from '../repositories/inboundRoute.repo'
 import type { ConfigRepository } from '../repositories/config.repo'
+import type { FlowStateService } from '../services/flow/flowStateService'
+import type { ThreadService } from '../services/thread/threadService'
 import type {
   AgentAppManifest,
   AppInstance,
   AppInstallStatus,
   AppCheckpoint,
   AppEvent,
+  AppCommandRequest,
+  AppCommandResult,
   LaunchAppParams,
   AppTaskContext,
 } from './types'
-import type {
-  AgentAppRuntime,
-  AppRuntimeContext,
-  AppLogger,
-} from './appRuntime'
+import type { AgentAppRuntime, AppRuntimeContext, AppLogger } from './appRuntime'
 
 const logger = createLogger('AppManager')
 
@@ -148,6 +144,15 @@ export interface AppManager {
     status?: AppInstallStatus
   }): Promise<AppInstance[]>
 
+  executeCommand(params: {
+    appId: string
+    hostAgentId: string
+    action: string
+    input: Record<string, unknown>
+    taskContext?: AppTaskContext
+    communicationBudget?: number
+  }): Promise<AppCommandResult>
+
   // ── 检查点与事件 ──
 
   /**
@@ -164,10 +169,7 @@ export interface AppManager {
    * 应用内部有自己的事件流；主 Agent 订阅应用事件走统一 EventBus。
    * 返回取消订阅函数。
    */
-  subscribe(
-    instanceId: string,
-    handler: (event: AppEvent) => void,
-  ): () => void
+  subscribe(instanceId: string, handler: (event: AppEvent) => void): () => void
 
   // ── 记忆回流 ──
 
@@ -194,6 +196,18 @@ export interface AppManager {
    * HTTP 路由会代理到此实例。必须在 launch 任何需要 HTTP 路由的 sub app 之前调用。
    */
   setHonoApp(app: import('hono').Hono): void
+
+  setHostCommunicator(
+    handler: (input: {
+      hostAgentId: string
+      appId: string
+      instanceId: string
+      correlationId: string
+      mode: string
+      summary: string
+      context?: Record<string, unknown>
+    }) => Promise<Record<string, unknown>>,
+  ): void
 
   /**
    * 注册内置应用 runtime factory
@@ -286,6 +300,32 @@ export class AppManagerImpl implements AppManager {
     private configRepo?: ConfigRepository,
   ) {}
 
+  private threadService?: ThreadService
+  private flowStateService?: FlowStateService
+
+  private hostCommunicator?: (input: {
+    hostAgentId: string
+    appId: string
+    instanceId: string
+    correlationId: string
+    mode: string
+    summary: string
+    context?: Record<string, unknown>
+  }) => Promise<Record<string, unknown>>
+
+  setHostCommunicator(handler: NonNullable<AppManagerImpl['hostCommunicator']>): void {
+    this.hostCommunicator = handler
+  }
+
+  /** 注入需要 Thread 生命周期的会话状态服务，避免扩大应用管理器构造参数。 */
+  setConversationStateServices(
+    threadService: ThreadService,
+    flowStateService: FlowStateService,
+  ): void {
+    this.threadService = threadService
+    this.flowStateService = flowStateService
+  }
+
   /**
    * 注入主 Hono app 实例（由 startup 在 createApp 后调用）
    *
@@ -318,7 +358,11 @@ export class AppManagerImpl implements AppManager {
     // 查询所有"活跃"状态的实例（内存中已不存在 = 孤儿）
     const staleStatuses = ['launching', 'running', 'paused']
     const staleRows = await this.db
-      .select({ instanceId: appInstances.instanceId, appId: appInstances.appId, status: appInstances.status })
+      .select({
+        instanceId: appInstances.instanceId,
+        appId: appInstances.appId,
+        status: appInstances.status,
+      })
       .from(appInstances)
       .where(inArray(appInstances.status, staleStatuses))
       .all()
@@ -415,12 +459,7 @@ export class AppManagerImpl implements AppManager {
     const runningInstances = await this.db
       .select()
       .from(appInstances)
-      .where(
-        and(
-          eq(appInstances.appId, appId),
-          eq(appInstances.status, 'running'),
-        ),
-      )
+      .where(and(eq(appInstances.appId, appId), eq(appInstances.status, 'running')))
 
     if (runningInstances.length > 0) {
       throw new Error(`应用 ${appId} 有运行中的实例，无法卸载`)
@@ -451,10 +490,7 @@ export class AppManagerImpl implements AppManager {
   }
 
   async getManifest(appId: string): Promise<AgentAppManifest | undefined> {
-    const rows = await this.db
-      .select()
-      .from(appRegistry)
-      .where(eq(appRegistry.appId, appId))
+    const rows = await this.db.select().from(appRegistry).where(eq(appRegistry.appId, appId))
     if (rows.length === 0) return undefined
     return JSON.parse(rows[0]!.manifestJson) as AgentAppManifest
   }
@@ -539,8 +575,7 @@ export class AppManagerImpl implements AppManager {
         const runtimePath = path.resolve(installPath, manifest.runtimeEntry)
         if (existsSync(runtimePath)) {
           try {
-            // 运行时由 tsx loader 解析 .ts 扩展名，typecheck 用 @ts-ignore 绕过
-            // @ts-ignore — 动态 import .ts 文件，由 tsx 运行时处理
+            // 运行时由 tsx loader 解析 .ts 扩展名
             const module = await import(runtimePath)
             const factory = module.default ?? module.createRuntime
             if (typeof factory === 'function') {
@@ -564,6 +599,20 @@ export class AppManagerImpl implements AppManager {
         taskContext: params.taskContext,
         grantRegistry: this.grantRegistry,
         emitEvent: (event) => this.emitEvent(instanceId, event),
+        communicateWithHost: async (request) => {
+          if (!this.hostCommunicator) {
+            return { decision: 'host_unavailable', reason: '宿主通信服务尚未初始化' }
+          }
+          return this.hostCommunicator({
+            hostAgentId,
+            appId,
+            instanceId,
+            correlationId: request.correlationId,
+            mode: request.mode,
+            summary: request.summary,
+            context: request.context,
+          })
+        },
         logger: appLogger,
         requestApproval: async (action, reason) => {
           // TODO: 通过消息队列请求主 Agent 审批
@@ -576,6 +625,8 @@ export class AppManagerImpl implements AppManager {
         mdpEngine: this.mdpEngine,
         memoryProvider: this.memoryProvider,
         agentManager: this.agentManager,
+        threadService: this.threadService!,
+        flowStateService: this.flowStateService!,
         getMainModel: this.getMainModel,
         getSocialSchedulerModel: this.getSocialSchedulerModel,
         getSocialScorerModel: this.getSocialScorerModel,
@@ -583,7 +634,7 @@ export class AppManagerImpl implements AppManager {
         db: this.db,
         storeRegistry: this.storeRegistry,
         pathResolver: this.pathResolver,
-        agentBuiltinDir: this.pathResolver.resolve('@app/backend/src/services/mdp/agents'),
+        agentBuiltinDir: this.pathResolver.resolve('@app/backend/src/assets/agents'),
         gatewayHub: this.gatewayHub,
         inboundRouteRepo: this.inboundRouteRepo,
         configRepo: this.configRepo,
@@ -752,11 +803,48 @@ export class AppManagerImpl implements AppManager {
 
     const query =
       conditions.length > 0
-        ? this.db.select().from(appInstances).where(and(...conditions))
+        ? this.db
+            .select()
+            .from(appInstances)
+            .where(and(...conditions))
         : this.db.select().from(appInstances)
 
     const rows = await query
     return rows.map(rowToInstance)
+  }
+
+  async executeCommand(params: {
+    appId: string
+    hostAgentId: string
+    action: string
+    input: Record<string, unknown>
+    taskContext?: AppTaskContext
+    communicationBudget?: number
+  }): Promise<AppCommandResult> {
+    const manifest = await this.getManifest(params.appId)
+    if (!manifest) throw new Error(`应用未安装: ${params.appId}`)
+    const action = manifest.actions?.find((item) => item.name === params.action)
+    if (!action || (action.mode !== 'command' && action.mode !== 'both')) {
+      throw new Error(`应用 ${params.appId} 未声明一次性动作: ${params.action}`)
+    }
+    const instance = [...this.runtimes.entries()].find(
+      ([, entry]) =>
+        entry.manifest.id === params.appId && entry.ctx.hostAgentId === params.hostAgentId,
+    )
+    if (!instance) throw new Error(`应用未运行: ${params.appId}`)
+    const [instanceId, entry] = instance
+    if (!entry.runtime.executeCommand) throw new Error(`应用不支持主 Agent 委派: ${params.appId}`)
+    const request: AppCommandRequest = {
+      correlationId: crypto.randomUUID(),
+      action: params.action,
+      input: params.input,
+      taskContext: params.taskContext,
+      communicationBudget: params.communicationBudget ?? action.defaultCommunicationBudget ?? 8,
+    }
+    logger.info(
+      `执行应用命令: app=${params.appId}, instance=${instanceId}, action=${params.action}, correlation=${request.correlationId}`,
+    )
+    return entry.runtime.executeCommand(request)
   }
 
   // ── 检查点与事件 ──

@@ -9,30 +9,38 @@
 
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import { CODE_MESSAGES, CLIENT_ERROR_CODES } from '@perocore/shared'
+import { CODE_MESSAGES, CLIENT_ERROR_CODES } from '@infos/shared'
 import { errorHandler } from './middleware/errorHandler'
 import { metricsMiddleware } from './middleware/metrics'
 import { requestContextMiddleware } from './middleware/requestContext'
+import { tracingMiddleware } from './middleware/tracing'
 import { requestLogger } from './middleware/requestLogger'
 import { createAuthMiddleware, DEFAULT_PUBLIC_PATHS } from './middleware/auth'
 import { createHealthRouter } from './routers/health.router'
 import { createMetricsRouter } from './routers/metrics.router'
 import type { AppContext } from './container'
+import { initTelemetry } from './lib/telemetry'
 import {
   createChatRouter,
+  createAttachmentRouter,
   createMemoryRouter,
   createConfigRouter,
   createModelRouter,
   createSystemRouter,
   createAgentRouter,
   createRuntimeRouter,
+  createApprovalRouter,
+  createWorkspaceRouter,
+  createTerminalRouter,
   createSchedulerRouter,
   createAssetRouter,
   createGatewayRouter,
   createMaintenanceRouter,
+  createResetRouter,
   // 注意：createSocialRouter 已迁移到 packages/apps/social/runtime/social.router.ts
   // （由 SocialAppRuntime.initialize 通过 ctx.mountRouter 动态挂载）
   createInboundRouteRouter,
+  createBackgroundTaskRouter,
   createVoiceRouter,
   createMcpRouter,
   createStrongholdRouter,
@@ -43,22 +51,25 @@ import {
  * @param ctx - 依赖注入上下文
  */
 export function createApp(ctx: AppContext) {
+  // 测试和嵌入式调用可能绕过 startServer，工厂本身也保证 Provider 已初始化。
+  initTelemetry()
   const app = new Hono()
 
   // ── 全局中间件 ──
   app.use('*', cors())
   // metrics 需要包住后续中间件与路由，才能统计包含日志、业务处理和错误响应在内的完整耗时
   app.use('*', metricsMiddleware)
-  // request context 必须早于 requestLogger 注册，否则 HTTP 日志拿不到 requestId
+  // request context 必须早于 tracing/logger，确保业务日志和 Span 可共享请求字段
   app.use('*', requestContextMiddleware)
+  app.use('*', tracingMiddleware)
   app.use('*', requestLogger)
 
   // 第六阶段 #8: Token 鉴权中间件
-  // - 通过 PEROCORE_API_TOKEN 环境变量配置 token
+  // - 通过 INFOS_API_TOKEN 环境变量配置 token
   // - 未配置时中间件自动放行（开发环境默认开放）
   // - 健康检查、Prometheus 指标、登录接口等公共路径跳过鉴权
   // - 必须在 requestLogger 之后注册，以便 401 响应也能被日志记录
-  const apiToken = process.env.PEROCORE_API_TOKEN ?? ''
+  const apiToken = process.env.INFOS_API_TOKEN ?? ''
   app.use('*', createAuthMiddleware({ token: apiToken, publicPaths: DEFAULT_PUBLIC_PATHS }))
 
   // ── 全局错误处理 ──
@@ -73,18 +84,26 @@ export function createApp(ctx: AppContext) {
   // ── API 路由挂载 ──
   // 资源用复数名词, 路径 2-4 层
   app.route('/api/chat', createChatRouter(ctx))
+  app.route('/api/attachments', createAttachmentRouter(ctx))
   app.route('/api/memories', createMemoryRouter(ctx))
   app.route('/api/configs', createConfigRouter(ctx))
   app.route('/api/models', createModelRouter(ctx))
   app.route('/api/system', createSystemRouter(ctx))
   app.route('/api/agents', createAgentRouter(ctx))
   app.route('/api/runtime', createRuntimeRouter(ctx))
+  app.route('/api/approvals', createApprovalRouter(ctx))
+  app.route('/api/workspace', createWorkspaceRouter(ctx))
+  app.route('/api/terminals', createTerminalRouter(ctx))
   app.route('/api/scheduler', createSchedulerRouter(ctx))
   app.route('/api/assets', createAssetRouter(ctx))
   app.route('/api/maintenance', createMaintenanceRouter(ctx))
+  // 危险区域重置（清空对话/记忆/恢复出厂，均需确认短语）
+  app.route('/api/reset', createResetRouter(ctx))
   // 注意：社交 HTTP 路由已迁移到 packages/apps/social/runtime/social.router.ts
   // （由 SocialAppRuntime 管理，不再通过主 AppContext 挂载）
   app.route('/api/inbound-routes', createInboundRouteRouter(ctx))
+  // M05: 统一任务中心（派发/查询/控制 + Gateway 事件桥接）
+  app.route('/api/background-tasks', createBackgroundTaskRouter(ctx))
   app.route(
     '/api/voice',
     createVoiceRouter({ ttsService: ctx.ttsService, asrService: ctx.asrService }),

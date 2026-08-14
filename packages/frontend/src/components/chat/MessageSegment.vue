@@ -8,8 +8,15 @@
  * - monologue: 内心独白 (可折叠)
  * - tool: 工具调用块 (NIT) (可折叠)
  */
-import { ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import PixelIcon from '../pixel/PixelIcon.vue'
+import ChatRichText from './ChatRichText.vue'
+import {
+  resolveToolDisplay,
+  toolDisplayIcon,
+  toolDisplayLabel,
+} from '../../composables/tools/useToolDisplay'
+import type { AgentToolDisplay } from '../../api/modules/agentApi'
 
 export interface Segment {
   type: 'text' | 'thinking' | 'monologue' | 'tool'
@@ -24,9 +31,21 @@ interface Props {
   segment: Segment
 }
 
-defineProps<Props>()
+const props = defineProps<Props>()
 
 const isCollapsed = ref(true)
+
+/** NIT 工具段显示元数据（按工具名解析，图标/名称与对话轨迹保持一致） */
+const display = ref<AgentToolDisplay | undefined>(undefined)
+
+onMounted(async () => {
+  if (props.segment.type === 'tool' && props.segment.name) {
+    display.value = await resolveToolDisplay(props.segment.name)
+  }
+})
+
+const toolIcon = computed(() => toolDisplayIcon(display.value))
+const toolLabel = computed(() => toolDisplayLabel(props.segment.name ?? 'NIT', display.value))
 
 function toggleCollapse() {
   isCollapsed.value = !isCollapsed.value
@@ -69,8 +88,8 @@ function toggleCollapse() {
   <div v-else-if="segment.type === 'tool'" class="segment-card segment-tool pixel-border-moe">
     <div class="segment-header segment-tool-header" @click="toggleCollapse">
       <div class="segment-title">
-        <PixelIcon name="terminal" size="xs" />
-        <span>NIT: {{ segment.name }}</span>
+        <PixelIcon :name="toolIcon" size="xs" />
+        <span>{{ toolLabel }}</span>
       </div>
       <div class="segment-title">
         <span v-if="segment.id" class="segment-id">{{ segment.id }}</span>
@@ -84,9 +103,7 @@ function toggleCollapse() {
 
   <!-- 普通文本 (Markdown) -->
   <div v-else class="segment-text">
-    <!-- TODO: P4c-1 接入 AsyncMarkdown / useStreamMarkdown -->
-    <!-- FIXME: v-html 必须接入 DOMPurify 净化，防止 XSS -->
-    <div v-if="segment.content" v-html="segment.content" />
+    <ChatRichText :content="segment.content" />
   </div>
 </template>
 

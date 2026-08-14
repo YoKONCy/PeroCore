@@ -13,7 +13,7 @@ import type { IAvatarManifest } from './IAvatarManifest'
 /**
  * 统一的模型数据结构
  *
- * 对应 Rust Native 模块 (`@perocore/render-core`) 输出的 `ParsedModelData`。
+ * 对应 Rust Native 模块 (`@infos/render-core`) 输出的 `ParsedModelData`。
  */
 export interface ParsedModelData {
   /** 纹理图集宽度（像素） */

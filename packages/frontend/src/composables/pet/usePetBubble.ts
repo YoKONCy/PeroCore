@@ -11,7 +11,7 @@
  * @module packages/frontend/src/composables/pet/usePetBubble
  */
 
-import { ref, computed, nextTick } from 'vue'
+import { ref, computed, nextTick, onUnmounted } from 'vue'
 
 export function usePetBubble() {
   /** 当前气泡文本 */
@@ -89,21 +89,23 @@ export function usePetBubble() {
    * @param duration - 持续时间（毫秒），0=永不自动隐藏，undefined=自动计算
    */
   function showBubble(text: string, duration?: number): void {
+    const isUpdatingVisibleBubble =
+      isBubbleVisible.value && bubbleText.value.length > 0 && text.startsWith(bubbleText.value)
+
     // 清除上一个定时器
     if (hideTimer) {
       clearTimeout(hideTimer)
       hideTimer = null
     }
 
-    // 强制重渲染 (v1: bubbleKey 递增)
-    bubbleKey.value++
+    if (!isUpdatingVisibleBubble) {
+      bubbleKey.value++
+      isBubbleExpanded.value = false
+      randomOffset()
+    }
 
     bubbleText.value = text
     isBubbleVisible.value = true
-    isBubbleExpanded.value = false
-
-    // 生成随机偏移
-    randomOffset()
 
     // 检测溢出
     checkOverflow()
@@ -138,8 +140,13 @@ export function usePetBubble() {
 
   /** 气泡容器样式 (含随机偏移) */
   const bubbleStyle = computed(() => ({
-    transform: `translateX(calc(-50% + ${bubbleOffsetX.value}px)) translateY(${bubbleOffsetY.value}px)`,
+    left: `calc(50% + ${bubbleOffsetX.value}px)`,
+    top: `calc(15% + ${bubbleOffsetY.value}px)`,
   }))
+
+  onUnmounted(() => {
+    if (hideTimer) clearTimeout(hideTimer)
+  })
 
   return {
     bubbleText,

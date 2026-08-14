@@ -6,7 +6,7 @@
  * - Hook 事件清单 + 处理函数签名
  * - manifest.json 结构
  *
- * @module @perocore/shared/types/extension
+ * @module @infos/shared/types/extension
  */
 
 // ─────────────────────────────────────────────
@@ -111,6 +111,29 @@ export interface ToolDefinition {
   description: string
   /** 参数 schema */
   parameters: ToolParameterSchema
+  /**
+   * 工具显示元数据（前端 ReAct 轨迹区渲染用，可选）
+   *
+   * 内置工具在 manifest.json 声明；社区扩展工具同样可在此声明，
+   * 前端启动时经 /api/agents/tools 拉取构建映射，实现零前端代码的
+   * 图标 / 名称 / 配色 / 轨迹样式定制。
+   */
+  display?: ToolDisplayMeta
+}
+
+/** 工具显示元数据（前端轨迹区渲染） */
+export interface ToolDisplayMeta {
+  /** 轨迹区显示名，如「编辑文件」；缺省回退工具名 */
+  label?: string
+  /** 图标：PixelIcon 内置名（如 edit/file/search）或自定义 SVG data URI */
+  icon?: string
+  /** 主题色 token 语义名：pink / purple / sky / green / orange；缺省 pink */
+  color?: string
+  /**
+   * 轨迹渲染样式标识，前端按 style 选择格式化渲染器：
+   * edit / read / search / terminal / web / browser / script / screen / reminder / task / generic
+   */
+  style?: string
 }
 
 // ─────────────────────────────────────────────

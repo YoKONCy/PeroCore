@@ -8,7 +8,7 @@
 
 import { transport } from './transport'
 import { ApiError } from './errors'
-import type { ApiResponse } from '@perocore/shared'
+import type { ApiResponse } from '@infos/shared'
 
 /** 成功码集合 (对齐 S02_API_SPEC §5.1) */
 const SUCCESS_CODES = new Set(['OK', 'CREATED', 'ACCEPTED', 'NOT_CONFIGURED'])
@@ -38,7 +38,8 @@ class ApiClient {
   async post<T>(endpoint: string, data?: unknown): Promise<ApiResponse<T>> {
     return this.request<T>(endpoint, {
       method: 'POST',
-      body: data ? JSON.stringify(data) : undefined,
+      // multipart 请求必须保留 FormData 本体，Transport 会据此省略 JSON Content-Type。
+      body: data instanceof FormData ? data : data ? JSON.stringify(data) : undefined,
     })
   }
 

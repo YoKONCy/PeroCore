@@ -42,7 +42,7 @@
 
 ## 3. 性能优化 (P0 级别)
 
-> 本规范继承自 PeroCore 审计及 VCPChat 优化经验。
+> 本规范继承自 infOS 审计及 VCPChat 优化经验。
 
 ### 3.1 `<keep-alive>` 白名单
 
@@ -264,6 +264,17 @@ const Pet3DView = () => import('@/views/Pet3DView.vue') // 3D 组件必须异步
 </style>
 ```
 
+## 7. AIOS 前端状态边界
+
+前端是后端持久资源的视图订阅者，详细模型见 [A09_AIOS_ARCHITECTURE](./A09_AIOS_ARCHITECTURE.md)。
+
+- `activeAgentId`、`activeThreadId` 和窗口布局属于**窗口级 UI 状态**；后端不维护全局活跃 Agent/Thread。
+- Store 可缓存 Agent、Thread、消息等展示数据，但 SQLite/文件系统中的持久资源以 API 返回和事件流为准。
+- 发送聊天请求只提交 `{ threadId, content, attachmentIds? }`；不得将前端消息数组作为上下文上传。
+- 切换 Agent 必须连带选择/创建属于该 Agent 的 Thread，禁止交叉组合。
+- group 日志按据点 `roomId` 聚合展示；按 Agent 划分的 group Thread 仅服务后端隔离上下文，不能作为用户可见的房间分组。
+- SSE 必须以显式 `done` 判定成功结束，工具事件通过 `callId` 关联。
+
 ---
 
-_本文档由 Carola 整理，适用于 PeroCore-TS 前端架构规范。_
+_本文档由 Carola 整理，适用于 infOS-TS 前端架构规范。_

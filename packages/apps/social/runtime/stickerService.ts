@@ -9,7 +9,7 @@
  *    → 发送端按顺序逐条发送，实现类似真人的表情包单独发送效果
  *
  * 目录结构:
- *   services/mdp/agents/{agentId}/stickers/
+ *   assets/agents/{agentId}/stickers/
  *     开心.jpg
  *     难过.png
  *     ...

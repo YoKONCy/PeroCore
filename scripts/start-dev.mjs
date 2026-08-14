@@ -59,6 +59,9 @@ function shutdown(exitCode = 0) {
 }
 
 // ── 启动后端 ──
+// #region debug-point D:backend-spawn
+fetch('http://127.0.0.1:7777/event',{method:'POST',body:JSON.stringify({sessionId:'daemon-start-refused',runId:'pre-fix',hypothesisId:'D',location:'scripts/start-dev.mjs:backend-spawn',msg:'[DEBUG] 准备启动 Backend',data:{cwd:process.cwd(),node:process.version,port:process.env.PERO_CAPABILITY_PORT??'9121'},ts:Date.now()})}).catch(()=>{})
+// #endregion
 backend = spawn('pnpm', ['dev'], {
   cwd: process.cwd(),
   shell: isWin,

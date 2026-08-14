@@ -17,13 +17,59 @@
  */
 
 import type { LlmService, ModelConfig } from '../llm/llmService'
-import type { ChatMessage } from '../pipeline/types'
-import type { ToolCallRecord, ToolDefinition } from '../pipeline/types'
+import type { ChatMessage, ToolCallRecord, ToolDefinition } from '../pipeline/types'
+import type { CapabilityScope } from '../../capabilities/types'
 import type { ChatDelta } from '../llm/types'
 import { ThinkingStreamFilter } from '../../nit/streamFilter'
 import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('ReActLoop')
+
+/** 完整结果仅用于当前 ReAct 的读取类工具；持久化时必须替换为无正文审计摘要。 */
+const EPHEMERAL_READ_TOOLS = new Set(['read_file', 'read_file_range'])
+
+/**
+ * 将工具结果转换为可长期保存的审计结果。
+ * 读取正文只活在当前 ReAct 内存；数据库与 raw transcript 仅记录路径、范围、哈希和规模。
+ */
+export function toolResultForPersistence(
+  name: string,
+  args: Record<string, unknown>,
+  output: string,
+  isError: boolean,
+): string {
+  if (!EPHEMERAL_READ_TOOLS.has(name) || isError) return output
+
+  const filePath = String(args.path ?? args.file_path ?? '')
+  if (name === 'read_file_range') {
+    try {
+      const result = JSON.parse(output) as Record<string, unknown>
+      return JSON.stringify({
+        ephemeral: true,
+        kind: 'file_read_audit',
+        path: filePath,
+        hash: result.hash,
+        totalBytes: result.totalBytes,
+        totalLines: result.totalLines,
+        lineStart: result.lineStart ?? args.line_start,
+        lineEnd: result.lineEnd ?? args.line_end,
+        nextOffset: result.nextOffset,
+        truncated: result.truncated,
+        returnedCharacters: typeof result.content === 'string' ? result.content.length : 0,
+      })
+    } catch {
+      // 非标准返回仍只记录规模，绝不把正文写入审计数据。
+    }
+  }
+
+  return JSON.stringify({
+    ephemeral: true,
+    kind: 'file_read_audit',
+    path: filePath,
+    maxLength: args.max_length,
+    returnedCharacters: output.length,
+  })
+}
 
 /** 截断长文本用于日志输出 */
 function truncate(text: string, maxLen = 4000): string {
@@ -50,8 +96,7 @@ const MODE_MAX_TURNS: Record<string, number> = {
   desktop: 30,
   ide: 30,
   social: 2,
-  group_chat: 2,
-  companion: 1,
+  group: 2,
   scheduler: 1,
 }
 
@@ -94,6 +139,11 @@ export interface ToolExecutor {
       agentId?: string
       /** 会话 ID（Skill 解锁状态按会话隔离） */
       sessionId?: string
+      signal?: AbortSignal
+      taskId?: string
+      pairId?: string
+      toolCallId?: string
+      disabledTools?: string[]
     },
   ): Promise<ToolExecutionResult>
 }
@@ -105,6 +155,8 @@ export interface ToolExecutionResult {
   isError: boolean
   /** finish_task 终止信号 */
   shouldTerminate: boolean
+  /** 用户批准后写给 Agent 的附言；与工具原始输出分离，避免破坏 JSON 工具协议。 */
+  approvalObservation?: string
 }
 
 /** 取消检测器接口 (TaskManager 提供) */
@@ -137,10 +189,30 @@ export async function* runReActLoop(params: {
   /**
    * AIOS: Thread 上下文，透传给 ToolExecutor。
    * - threadId: 当前对话 Thread ID
-   * - channel: 当前对话通道（desktop/companion/social/group）
+   * - channel: 当前对话通道（desktop/social/group）
    */
-  threadContext?: { threadId?: string; channel?: string }
+  threadContext?: {
+    threadId?: string
+    channel?: string
+    taskId?: string
+    pairId?: string
+    disabledTools?: string[]
+    capabilityScope?: CapabilityScope
+  }
   cancelChecker?: CancelChecker
+  signal?: AbortSignal
+  /** 截图转述回调：原始截图仅在内存中传递，不负责持久化。 */
+  transcribeScreenshots?: (
+    dataUris: string[],
+  ) => Promise<{ summary: string; modelId: string } | null>
+  /** 截图文字档案持久化回调。 */
+  onScreenshotTranscription?: (summary: string, modelId: string) => Promise<void>
+  /** 每次工具调用完成后的可恢复检查点；调用方负责持久化。 */
+  onCheckpoint?: (checkpoint: {
+    messages: ChatMessage[]
+    toolCalls: ToolCallRecord[]
+    turn: number
+  }) => Promise<void>
   config?: Partial<ReActConfig>
 }): AsyncGenerator<
   ReActYield,
@@ -157,6 +229,7 @@ export async function* runReActLoop(params: {
     ...params.threadContext,
     agentId: params.agentId,
     sessionId,
+    signal: params.signal,
   }
 
   logger.debug(
@@ -166,13 +239,15 @@ export async function* runReActLoop(params: {
   const allToolCalls: ToolCallRecord[] = []
   let consecutiveErrors = 0
   let currentTools = params.tools
+  /** 是否已经向用户流式输出过可见正文（Thinking 不计入）。 */
+  let hasVisibleReply = false
   // 完整原始转写：保留每一轮未过滤的 LLM 输出 (含 Thinking 块) + 工具调用/返回摘要，
   // 供「对话调试详情」查看内部构造 (区别于给用户看的、已剥离 Thinking 的可见回复)。
   let rawTranscript = ''
 
   for (let turn = 0; turn < maxTurns; turn++) {
     // ── 取消检测 ──
-    if (params.cancelChecker?.isCancelled(sessionId)) {
+    if (params.signal?.aborted || params.cancelChecker?.isCancelled(sessionId)) {
       logger.info('ReAct 循环被用户取消')
       break
     }
@@ -260,6 +335,7 @@ export async function* runReActLoop(params: {
     }))
 
     for await (const delta of llmService.chatStream(modelConfig, llmMessages, {
+      signal: params.signal,
       tools: currentTools
         ? currentTools.map((t) => ({
             type: 'function' as const,
@@ -283,6 +359,7 @@ export async function* runReActLoop(params: {
           if (filtered) leadingStripped = true
         }
         if (filtered) {
+          hasVisibleReply = true
           yield filtered
         }
       }
@@ -316,11 +393,16 @@ export async function* runReActLoop(params: {
       flushed = flushed.replace(/^[\s}\])）】]+/, '')
       if (flushed) leadingStripped = true
     }
-    if (flushed) yield flushed
+    if (flushed) {
+      hasVisibleReply = true
+      yield flushed
+    }
 
-    // 打印 LLM 原始回复文本
+    // 打印 LLM 原始回复文本（含 <think> 思考块，供终端调试查看内部思考过程）
+    // 注意：yield 给前端的内容已被 ThinkingStreamFilter 过滤，这里打印的是未过滤的原始文本
+    // 使用 info 级别：debug 级别在生产环境 (PERO_LOG_LEVEL=3) 会被过滤，导致终端看不到思考内容
     if (turnText) {
-      logger.debug(`[LLM回复] ${truncate(turnText, 4000)}`)
+      logger.info(`[LLM原始回复] ${truncate(turnText, 4000)}`)
       // 累积到原始转写 (保留 Thinking 块，供调试视图查看)
       // 剥离前导空白，避免 Debug View 显示缩进异常
       const cleanText = turnText.replace(/^[\s}\])）】]+/, '')
@@ -382,10 +464,10 @@ export async function* runReActLoop(params: {
       // 而非吞掉错误以空参数调用工具（会导致工具执行异常或无意义结果）
       if (parseError) {
         const errorMsg = `工具 "${fnName}" 参数解析失败：${parseError}\n原始参数: ${truncate(tc.function.arguments || '', 500)}\n请检查参数是否为合法 JSON 格式后重试。`
-        yield { event: 'tool_call', data: { name: fnName, args: {} } }
+        yield { event: 'tool_call', data: { name: fnName, args: {}, callId: tc.id } }
         yield {
           event: 'tool_result',
-          data: { name: fnName, result: errorMsg, isError: true, durationMs: 0 },
+          data: { name: fnName, callId: tc.id, result: errorMsg, isError: true, durationMs: 0 },
         }
         rawTranscript +=
           (rawTranscript ? '\n' : '') +
@@ -400,15 +482,22 @@ export async function* runReActLoop(params: {
           args: {},
           result: errorMsg,
           durationMs: 0,
+          isError: true,
+          callId: tc.id,
         })
         consecutiveErrors++
+        await params.onCheckpoint?.({
+          messages: structuredClone(messages),
+          toolCalls: [...allToolCalls],
+          turn: turn + 1,
+        })
         continue
       }
 
       // 推送 SSE: tool_call
       yield {
         event: 'tool_call',
-        data: { name: fnName, args: fnArgs },
+        data: { name: fnName, args: fnArgs, callId: tc.id },
       }
       yield {
         event: 'status',
@@ -419,16 +508,27 @@ export async function* runReActLoop(params: {
       logger.debug(`[工具调用] ${fnName} 参数: ${truncate(JSON.stringify(fnArgs), 4000)}`)
       // AIOS: 透传 Thread 上下文给工具执行器
       // 第七阶段修复（批次 B1）：使用合并了 agentId/sessionId 的完整运行时上下文
-      const result = await toolExecutor.execute(fnName, fnArgs, source, toolRuntimeContext)
+      const result = await toolExecutor.execute(fnName, fnArgs, source, {
+        ...toolRuntimeContext,
+        toolCallId: tc.id,
+      })
+      const persistentToolResult = toolResultForPersistence(
+        fnName,
+        fnArgs,
+        result.output,
+        result.isError,
+      )
       logger.debug(
-        `[工具返回] ${fnName} (${result.durationMs}ms, error=${result.isError}): ${truncate(result.output, 8000)}`,
+        `[工具返回] ${fnName} (${result.durationMs}ms, error=${result.isError}): ${truncate(persistentToolResult, 8000)}`,
       )
 
       allToolCalls.push({
         name: fnName,
         args: fnArgs,
-        result: result.output,
+        result: persistentToolResult,
         durationMs: result.durationMs,
+        isError: result.isError,
+        callId: tc.id,
       })
 
       // ── 截图工具特殊处理：把 base64 从工具文本里剥离，转为 image_url 内容块 ──
@@ -445,16 +545,27 @@ export async function* runReActLoop(params: {
           const parsed = JSON.parse(result.output)
           const screenshots: Array<{ index: number; dataUri: string }> = parsed?.screenshots
           if (Array.isArray(screenshots) && screenshots.length > 0) {
+            const transcription = params.transcribeScreenshots
+              ? await params.transcribeScreenshots(screenshots.map((s) => s.dataUri))
+              : null
+            if (transcription) {
+              await params.onScreenshotTranscription?.(transcription.summary, transcription.modelId)
+            }
             if (modelConfig.enableVision) {
               screenshotImages = screenshots.map((s) => ({
                 type: 'image_url' as const,
                 image_url: { url: s.dataUri, detail: 'low' as const },
               }))
               // 工具文本只保留摘要，base64 已转入 image_url 块
-              toolResultText = parsed.message || `已获取 ${screenshots.length} 张屏幕截图`
+              toolResultText =
+                (parsed.message || `已获取 ${screenshots.length} 张屏幕截图`) +
+                (transcription ? `\n图片文字转述：${transcription.summary}` : '')
               logger.info(`截图已提取 ${screenshots.length} 张，转为 image_url 注入 user 消息`)
+            } else if (transcription) {
+              toolResultText = `已截取 ${screenshots.length} 张屏幕截图。专用多模态模型转述如下：\n${transcription.summary}`
+              logger.info('当前主模型无视觉能力，已使用多模态转述文字替代截图原图')
             } else {
-              // 模型未启用视觉：剥离 base64 并明确告知，避免把超长 base64 当文本灌给模型
+              // 模型未启用视觉且转述不可用：剥离 base64，避免把超长数据灌给模型
               toolResultText = `已截取 ${screenshots.length} 张屏幕截图，但当前模型未启用视觉能力，无法识别图片内容。请在模型配置中开启「视觉 / 多模态」后重试。`
               logger.warn(
                 'take_screenshot 已执行，但当前模型 enableVision=false，跳过图片注入并剥离 base64',
@@ -471,26 +582,32 @@ export async function* runReActLoop(params: {
         event: 'tool_result',
         data: {
           name: fnName,
+          callId: tc.id,
           result: toolResultText.slice(0, 2000),
           isError: result.isError,
           durationMs: result.durationMs,
         },
       }
 
-      // 累积工具调用/返回摘要到原始转写，供「对话调试详情」查看 (不含 base64)。
+      // 累积工具调用审计到原始转写。读取类工具使用脱敏审计摘要，正文只存在于当前 ReAct 内存。
       // 用 ⟦TOOL⟧…⟦/TOOL⟧ 哨兵包裹：这对符号不会出现在 JSON 参数/返回里，
       // 避免和前端 Thinking/NIT 的方括号正则相互截断。
+      const transcriptResult = EPHEMERAL_READ_TOOLS.has(fnName)
+        ? persistentToolResult
+        : toolResultText
       rawTranscript +=
         (rawTranscript ? '\n' : '') +
         `⟦TOOL⟧${fnName}\n` +
         `参数: ${truncate(JSON.stringify(fnArgs), 2000)}\n` +
-        `返回 (${result.durationMs}ms${result.isError ? ', error' : ''}): ${truncate(toolResultText, 4000)}\n` +
+        `返回 (${result.durationMs}ms${result.isError ? ', error' : ''}): ${truncate(transcriptResult, 4000)}\n` +
         `⟦/TOOL⟧`
 
-      // 1. 工具结果消息（role: tool，文本）
+      // 1. 工具结果消息（role: tool，文本）；审批附言单独注入，避免破坏 JSON 工具结果。
       messages.push({
         role: 'tool',
-        content: toolResultText,
+        content: result.approvalObservation
+          ? `${result.approvalObservation}\n${toolResultText}`
+          : toolResultText,
         toolCallId: tc.id,
       })
 
@@ -516,7 +633,24 @@ export async function* runReActLoop(params: {
         consecutiveErrors = 0
       }
 
+      await params.onCheckpoint?.({
+        messages: structuredClone(messages),
+        toolCalls: [...allToolCalls],
+        turn: turn + 1,
+      })
+
       if (result.shouldTerminate) {
+        // finish_task 的 reply 是「交付给用户的最终回复」：
+        // 若模型此前没有输出可见正文，必须把 reply 作为可见回复交付，避免只剩“仅有内部过程”和工具轨迹。
+        if (fnName === 'finish_task' && !hasVisibleReply) {
+          const reply = typeof fnArgs.reply === 'string' ? fnArgs.reply.trim() : ''
+          if (reply) {
+            hasVisibleReply = true
+            yield reply
+          } else {
+            logger.warn('finish_task 缺少 reply 正文，且模型未输出可见回复，用户可能收不到本次答复')
+          }
+        }
         shouldTerminate = true
         break
       }
@@ -529,9 +663,13 @@ export async function* runReActLoop(params: {
         role: 'system',
         content:
           '【系统紧急干预】监测到你已经连续操作失败多次。' +
-          '请立即停止任何后续的思考与工具调用，放弃当前任务，并主动向主人汇报失败原因。',
+          '请立即停止任何后续的思考与工具调用，放弃当前任务，并主动向用户汇报失败原因。',
       })
       currentTools = undefined // 禁用后续工具调用
+      yield {
+        event: 'status',
+        data: { state: 'tool_failed', message: '工具连续失败，已停止自动调用工具并准备汇报原因' },
+      }
     }
 
     if (shouldTerminate) {

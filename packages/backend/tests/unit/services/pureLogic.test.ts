@@ -2,9 +2,9 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ModelRoleResolver } from '@perocore/backend/services/llm/modelRoles'
-import { AssetRegistry } from '@perocore/backend/core/assetRegistry'
-import type { PathResolver } from '@perocore/backend/core/pathResolver'
+import { ModelRoleResolver } from '@infos/backend/services/llm/modelRoles'
+import { AssetRegistry } from '@infos/backend/core/assetRegistry'
+import type { PathResolver } from '@infos/backend/core/pathResolver'
 
 function createModelDeps(
   configs: Record<string, string | null>,
@@ -27,7 +27,7 @@ describe('ModelRoleResolver', () => {
     vi.clearAllMocks()
   })
 
-  it('应当优先使用角色专用模型并补默认温度', async () => {
+  it('应当优先使用角色专用模型并保留未配置参数', async () => {
     const { configRepo, modelRepo } = createModelDeps(
       { 'model.task.scorer': '2' },
       {
@@ -49,9 +49,11 @@ describe('ModelRoleResolver', () => {
       modelId: 'gpt-secretary',
       apiKey: 'key',
       apiBase: undefined,
-      temperature: 0.3,
+      temperature: undefined,
+      topP: undefined,
       maxTokens: 1000,
       enableVision: false,
+      enableAudioInput: false,
     })
     expect(configRepo.get).toHaveBeenCalledWith('model.task.scorer')
   })
@@ -69,7 +71,7 @@ describe('ModelRoleResolver', () => {
       provider: 'gemini',
       modelId: 'main-model',
       apiKey: 'main-key',
-      temperature: 0.2,
+      temperature: undefined,
     })
   })
 
@@ -117,7 +119,6 @@ describe('ModelRoleResolver', () => {
       provider: 'anthropic',
       modelId: 'env-model',
       apiKey: 'env-key',
-      temperature: 0.2,
     })
     expect(missing).toBeNull()
     expect(modelRepo.findById).not.toHaveBeenCalled()
@@ -145,6 +146,10 @@ function createResolver(root: string, workshop = true): PathResolver {
       ),
     ),
     isAvailable: vi.fn((alias: string) => alias === '@workshop' && workshop),
+    // Workshop 多根支持（AssetRegistry 依赖）
+    getRoots: vi.fn((prefix: string) =>
+      prefix === '@workshop' && workshop ? [join(root, 'workshop')] : [],
+    ),
   } as unknown as PathResolver
 }
 
@@ -157,7 +162,7 @@ describe('AssetRegistry', () => {
   let root: string
 
   beforeEach(() => {
-    root = join(tmpdir(), `perocore-assets-${Date.now()}-${Math.random()}`)
+    root = join(tmpdir(), `infos-assets-${Date.now()}-${Math.random()}`)
   })
 
   afterEach(() => {
@@ -165,19 +170,24 @@ describe('AssetRegistry', () => {
   })
 
   it('应当按官方、工坊、本地优先级扫描资产并允许后扫覆盖', async () => {
-    writeAsset(join(root, 'app', 'agents', 'pero'), 'agent.json', {
-      asset_id: 'pero.persona.default',
-      type: 'persona',
-      display_name: '官方 Pero',
-      version: '1.0.0',
-    })
-    writeAsset(join(root, 'workshop', 'sub'), 'asset.json', {
+    // 目录布局对齐 AssetRegistry 当前实现：官方按打包路径、工坊按分类子目录、本地按 scanAssetRoot 分类
+    writeAsset(
+      join(root, 'app', 'backend', 'src', 'services', 'mdp', 'agents', 'pero'),
+      'agent.json',
+      {
+        asset_id: 'pero.persona.default',
+        type: 'persona',
+        display_name: '官方 Pero',
+        version: '1.0.0',
+      },
+    )
+    writeAsset(join(root, 'workshop', 'agents', 'sub'), 'asset.json', {
       asset_id: 'pero.persona.default',
       type: 'persona',
       title: '工坊 Pero',
       workshopPublishedFileId: '123',
     })
-    writeAsset(join(root, 'data', 'custom', 'local'), 'manifest.json', {
+    writeAsset(join(root, 'data', 'custom', 'prompts', 'local'), 'manifest.json', {
       asset_id: 'local.prompt.demo',
       type: 'prompt',
       displayName: '本地提示词',
@@ -200,11 +210,17 @@ describe('AssetRegistry', () => {
   })
 
   it('应当跳过无效资产并支持重新扫描', async () => {
-    writeAsset(join(root, 'app', 'agents', 'bad'), 'asset.json', { type: 'persona' })
+    writeAsset(
+      join(root, 'app', 'backend', 'src', 'services', 'mdp', 'agents', 'bad'),
+      'asset.json',
+      {
+        type: 'persona',
+      },
+    )
     const registry = new AssetRegistry(createResolver(root, false))
 
     await registry.scanAll()
-    writeAsset(join(root, 'data', 'custom', 'new'), 'description.json', {
+    writeAsset(join(root, 'data', 'custom', 'extensions', 'new'), 'description.json', {
       asset_id: 'new.mod.demo',
       type: 'mod',
       version: '2.0.0',

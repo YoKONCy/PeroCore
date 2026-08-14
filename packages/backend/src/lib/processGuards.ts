@@ -74,7 +74,7 @@ export function registerProcessGuards(): void {
   // ── 进程退出前最后的日志 ──
   process.on('exit', (code) => {
     // 这里只能用同步操作
-    console.log(`[PeroCore] 进程退出 (code: ${code})`)
+    console.log(`[infOS] 进程退出 (code: ${code})`)
   })
 
   logger.debug('进程守护已注册 (uncaughtException / unhandledRejection / SIGINT / SIGTERM)')

@@ -1,0 +1,33 @@
+{
+  "id": "flow-state",
+  "name": "flowState",
+  "displayName": "心流维护",
+  "version": "1.0.0",
+  "description": "维护当前会话的私有临时心流状态。",
+  "type": "tool",
+  "entry": "index.ts",
+  "category": "system",
+  "platforms": ["windows", "linux", "darwin", "docker"],
+  "registration": "static",
+  "tools": [
+    {
+      "name": "update_flow_state",
+      "description": "维护当前会话的私有临时心流。仅当跨轮目标或不应直接告诉用户的关键事实发生变化时调用；没有变化时不要重复调用。省略字段表示保留原值，传空字符串表示清空该字段。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "current_goal": {
+            "type": "string",
+            "description": "当前会话正在持续推进的目标，最多 8000 字。"
+          },
+          "private_facts": {
+            "type": "string",
+            "description": "必须持续记住但不应直接向用户透露的事实，最多 8000 字。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "display": { "label": "更新心流", "icon": "thought", "color": "purple", "style": "system" }
+    }
+  ]
+}

@@ -63,7 +63,7 @@ export class StrongholdService {
    * 2. 默认房间 "客厅"
    * 3. 无房间的 Agent 归位到客厅
    */
-  async ensureDefaults(): Promise<void> {
+  async ensureDefaults(agentIds: string[] = []): Promise<void> {
     logger.info('检查据点默认数据...')
 
     // 1. 确保默认设施
@@ -89,6 +89,10 @@ export class StrongholdService {
       logger.info('已创建默认房间: 客厅')
     }
 
+    for (const agentId of new Set(agentIds)) {
+      await this.ensureAgentLocation(agentId, livingRoom.id)
+    }
+
     logger.info('据点默认数据检查完成')
   }
 
@@ -110,6 +114,14 @@ export class StrongholdService {
     return this.db.select().from(strongholdFacilities).all()
   }
 
+  async getFacility(facilityId: number): Promise<FacilityRow | undefined> {
+    return this.db
+      .select()
+      .from(strongholdFacilities)
+      .where(eq(strongholdFacilities.id, facilityId))
+      .get()
+  }
+
   async getFacilityByName(name: string): Promise<FacilityRow | undefined> {
     return this.db
       .select()
@@ -124,6 +136,9 @@ export class StrongholdService {
    * 创建房间 (同时创建关联的 GroupChatRoom + 默认成员)
    */
   async createRoom(input: CreateRoomInput): Promise<RoomRow> {
+    const facility = await this.getFacility(input.facilityId)
+    if (!facility) throw new Error(`设施 ${input.facilityId} 不存在`)
+
     const roomId = uuidv4()
     const allowedAgents = input.allowedAgents ?? []
 
@@ -233,7 +248,7 @@ export class StrongholdService {
 
   async updateEnvironment(roomId: string, key: string, value: unknown): Promise<void> {
     const room = await this.getRoom(roomId)
-    if (!room) return
+    if (!room) throw new Error(`房间 ${roomId} 不存在`)
 
     const env = JSON.parse(room.environmentJson ?? '{}') as Record<string, unknown>
     env[key] = value
@@ -245,6 +260,35 @@ export class StrongholdService {
   }
 
   // ─── Agent 位置 ───
+
+  async ensureAgentLocation(agentId: string, livingRoomId?: string): Promise<LocationRow> {
+    const existing = await this.db
+      .select()
+      .from(agentLocations)
+      .where(eq(agentLocations.agentId, agentId))
+      .get()
+    if (existing) {
+      await this.ensureRoomMember(existing.roomId, agentId)
+      return existing
+    }
+
+    const livingRoom = livingRoomId
+      ? await this.getRoom(livingRoomId)
+      : await this.getRoomByName('客厅')
+    if (!livingRoom) throw new Error('客厅尚未初始化')
+    return this.moveAgent(agentId, livingRoom.id)
+  }
+
+  private async ensureRoomMember(roomId: string, agentId: string): Promise<void> {
+    const members = await this.db
+      .select()
+      .from(groupChatMembers)
+      .where(eq(groupChatMembers.roomId, roomId))
+      .all()
+    if (!members.some((member) => member.agentId === agentId)) {
+      await this.db.insert(groupChatMembers).values({ roomId, agentId, role: 'member' })
+    }
+  }
 
   async moveAgent(agentId: string, roomId: string): Promise<LocationRow> {
     const room = await this.getRoom(roomId)
@@ -265,6 +309,19 @@ export class StrongholdService {
           updatedAt: sql`(datetime('now', 'localtime'))`,
         })
         .where(eq(agentLocations.agentId, agentId))
+
+      // 角色只能位于一个房间：同步移除旧房间群聊成员，避免调度离场角色。
+      if (existing.roomId !== roomId) {
+        const oldMembers = await this.db
+          .select()
+          .from(groupChatMembers)
+          .where(eq(groupChatMembers.roomId, existing.roomId))
+          .all()
+        const oldMembership = oldMembers.find((member) => member.agentId === agentId)
+        if (oldMembership) {
+          await this.db.delete(groupChatMembers).where(eq(groupChatMembers.id, oldMembership.id))
+        }
+      }
     } else {
       await this.db.insert(agentLocations).values({ agentId, roomId })
     }
@@ -275,16 +332,7 @@ export class StrongholdService {
       .where(eq(agentLocations.agentId, agentId))
       .get()
 
-    // 确保 Agent 是该房间群聊的成员
-    const memberExists = await this.db
-      .select()
-      .from(groupChatMembers)
-      .where(eq(groupChatMembers.roomId, roomId))
-      .all()
-
-    if (!memberExists.some((m) => m.agentId === agentId)) {
-      await this.db.insert(groupChatMembers).values({ roomId, agentId, role: 'member' })
-    }
+    await this.ensureRoomMember(roomId, agentId)
 
     logger.debug(`Agent ${agentId} 移动到房间 ${room.name}`)
     return location!

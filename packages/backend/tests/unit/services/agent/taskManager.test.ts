@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { TaskManager } from '@perocore/backend/services/agent/taskManager'
+import { TaskManager } from '@infos/backend/services/agent/taskManager'
 
-vi.mock('@perocore/backend/lib/logger', () => ({
+vi.mock('@infos/backend/lib/logger', () => ({
   createLogger: () => ({
     debug: vi.fn(),
     info: vi.fn(),

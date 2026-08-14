@@ -23,11 +23,7 @@ import { eq, and, isNull, or, lte, ne } from 'drizzle-orm'
 import { appResourceGrants } from '../database/schema'
 import type { DrizzleDb } from '../database'
 import { createLogger } from '../lib/logger'
-import type {
-  Grant,
-  GrantPermission,
-  ResourceRef,
-} from './types'
+import type { Grant, GrantPermission, ResourceRef } from './types'
 
 const logger = createLogger('GrantRegistry')
 
@@ -235,9 +231,7 @@ export class SqliteGrantRegistry implements GrantRegistry {
       .where(and(...finalConditions))
 
     // 在应用层过滤过期授权（避免 Drizzle 的 or+gt 组合复杂度）
-    const filtered = activeOnly
-      ? rows.filter((r) => !r.expiresAt || r.expiresAt > now)
-      : rows
+    const filtered = activeOnly ? rows.filter((r) => !r.expiresAt || r.expiresAt > now) : rows
 
     return filtered.map(rowToGrant)
   }
@@ -305,9 +299,7 @@ function rowToGrant(row: GrantRow): Grant {
   }
 
   // 解析权限列表
-  const permissions = row.permissions
-    .split(',')
-    .filter(Boolean) as GrantPermission[]
+  const permissions = row.permissions.split(',').filter(Boolean) as GrantPermission[]
 
   return {
     id: row.id,

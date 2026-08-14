@@ -301,7 +301,7 @@ export class DreamAssociator {
       const completion = await this.deps.llmService.chat(
         modelConfig,
         [{ role: 'user', content: prompt }],
-        { temperature: 0.1 },
+        {},
       )
 
       const raw = completion.choices[0]?.message?.content

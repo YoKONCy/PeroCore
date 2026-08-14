@@ -136,7 +136,7 @@ useEventListener(document as unknown as EventTarget, 'click', (e: Event) => {
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: var(--color-text-muted);
+  color: var(--ui-text-tertiary);
 }
 
 .p-select-container {
@@ -149,26 +149,27 @@ useEventListener(document as unknown as EventTarget, 'click', (e: Event) => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: var(--color-bg-secondary);
-  border: 2px solid var(--color-border);
+  background: var(--dash-input-bg);
+  border: 2px solid var(--dash-input-border);
   border-radius: 0;
-  color: var(--color-text-primary);
+  color: var(--ui-text-primary);
   cursor: pointer;
   transition:
     border-color 0.2s,
     box-shadow 0.2s;
-  font-family: var(--font-pixel), monospace;
+  font-family: var(--ui-font-pixel);
 }
 .p-select-trigger:hover:not(:disabled) {
-  border-color: var(--color-sky-hover);
+  border-color: var(--ui-accent-sky);
 }
 .p-select-trigger:disabled {
-  opacity: 0.5;
+  color: var(--ui-text-disabled);
+  background: var(--ui-bg-surface-soft);
   cursor: not-allowed;
 }
 .p-select-open {
-  border-color: var(--color-sky-500);
-  box-shadow: 0 0 0 1px var(--color-sky-500);
+  border-color: var(--ui-accent-sky);
+  box-shadow: 0 0 0 1px var(--ui-accent-sky);
 }
 
 .p-select-sm {
@@ -191,16 +192,16 @@ useEventListener(document as unknown as EventTarget, 'click', (e: Event) => {
   font-weight: 500;
 }
 .p-select-placeholder {
-  color: var(--color-text-muted);
+  color: var(--ui-text-tertiary);
 }
 
 .p-select-arrow {
-  color: var(--color-text-muted);
+  color: var(--ui-text-secondary);
   transition: transform 0.3s;
 }
 .p-select-arrow-open {
   transform: rotate(180deg);
-  color: var(--color-sky-500);
+  color: var(--ui-accent-sky);
 }
 
 .p-select-dropdown {
@@ -208,9 +209,9 @@ useEventListener(document as unknown as EventTarget, 'click', (e: Event) => {
   z-index: 50;
   width: 100%;
   margin-top: 4px;
-  background: var(--color-bg-primary);
-  border: 2px solid var(--color-border);
-  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.1);
+  background: var(--dash-panel-elevated);
+  border: 2px solid var(--ui-border-strong);
+  box-shadow: var(--ui-shadow-md);
   max-height: 240px;
   overflow-y: auto;
 }
@@ -225,15 +226,15 @@ useEventListener(document as unknown as EventTarget, 'click', (e: Event) => {
   transition:
     background 0.15s,
     color 0.15s;
-  color: var(--color-text-secondary);
+  color: var(--ui-text-secondary);
 }
 .p-select-option:hover {
-  background: var(--color-bg-hover);
-  color: var(--color-sky-500);
+  background: var(--ui-bg-hover);
+  color: var(--ui-accent-sky);
 }
 .p-select-option-active {
-  background: var(--color-sky-50, rgba(56, 189, 248, 0.08));
-  color: var(--color-sky-shadow);
+  background: var(--ui-accent-sky-soft);
+  color: var(--ui-accent-sky);
   font-weight: 700;
 }
 .p-select-option-disabled {
@@ -246,7 +247,7 @@ useEventListener(document as unknown as EventTarget, 'click', (e: Event) => {
   gap: 8px;
 }
 .p-select-check {
-  color: var(--color-sky-500);
+  color: var(--ui-accent-sky);
 }
 
 /* 下拉动画 */

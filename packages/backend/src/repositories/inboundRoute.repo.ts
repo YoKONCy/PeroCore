@@ -8,7 +8,7 @@
  * 根据 (source, identifier) 查询此表决定归属 Agent 和 Thread 通道。
  * 未命中路由时，调用方回退到 defaultAgentId。
  *
- * 设计见 .aios/10-node-architecture.md §7
+ * 设计见 .docs/archived/10-node-architecture.md §7
  *
  * @module packages/backend/src/repositories/inboundRoute.repo
  */
@@ -25,7 +25,7 @@ import type { DrizzleDb } from '../database'
 export type InboundSource = 'qq_private' | 'qq_group' | 'discord' | 'webhook' | 'monitor'
 
 /** Thread 通道类型（决定 ContextCompiler 行为） */
-export type InboundChannel = 'desktop' | 'social' | 'group' | 'companion'
+export type InboundChannel = 'desktop' | 'social' | 'group'
 
 /** 入站路由领域对象 */
 export interface InboundRoute {
@@ -128,23 +128,14 @@ export class InboundRouteRepository {
     const rows = await this.db
       .select()
       .from(inboundRoutes)
-      .where(
-        and(
-          eq(inboundRoutes.source, source),
-          eq(inboundRoutes.identifier, identifier),
-        ),
-      )
+      .where(and(eq(inboundRoutes.source, source), eq(inboundRoutes.identifier, identifier)))
       .limit(1)
     return rows[0] ? rowToDomain(rows[0]) : undefined
   }
 
   /** 按 ID 查询路由 */
   async findById(id: string): Promise<InboundRoute | undefined> {
-    const rows = await this.db
-      .select()
-      .from(inboundRoutes)
-      .where(eq(inboundRoutes.id, id))
-      .limit(1)
+    const rows = await this.db.select().from(inboundRoutes).where(eq(inboundRoutes.id, id)).limit(1)
     return rows[0] ? rowToDomain(rows[0]) : undefined
   }
 
@@ -159,10 +150,7 @@ export class InboundRouteRepository {
 
   /** 查询某来源的所有路由 */
   async findBySource(source: string): Promise<InboundRoute[]> {
-    const rows = await this.db
-      .select()
-      .from(inboundRoutes)
-      .where(eq(inboundRoutes.source, source))
+    const rows = await this.db.select().from(inboundRoutes).where(eq(inboundRoutes.source, source))
     return rows.map(rowToDomain)
   }
 
@@ -222,10 +210,7 @@ export class InboundRouteRepository {
    * 查询 (source, identifier) 对应的路由，未命中时返回 null。
    * 调用方应在返回 null 时回退到 defaultAgentId。
    */
-  async resolve(
-    source: string,
-    identifier: string,
-  ): Promise<ResolvedInboundRoute | null> {
+  async resolve(source: string, identifier: string): Promise<ResolvedInboundRoute | null> {
     const route = await this.findBySourceAndIdentifier(source, identifier)
     if (!route) return null
     return {

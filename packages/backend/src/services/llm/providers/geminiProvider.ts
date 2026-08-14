@@ -41,6 +41,25 @@ const SAFETY_SETTINGS = [
   { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
 ]
 
+const RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504])
+
+const THINKING_BUDGETS = {
+  off: 0,
+  low: 1024,
+  medium: 4096,
+  high: 8192,
+  xhigh: 16384,
+  max: 32768,
+} as const
+
+function parseRetryAfterMs(value: string | null): number | undefined {
+  if (!value) return undefined
+  const seconds = Number(value)
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000)
+  const dateMs = Date.parse(value)
+  return Number.isNaN(dateMs) ? undefined : Math.max(0, dateMs - Date.now())
+}
+
 // ── Gemini API 类型 ──
 
 interface GeminiPart {
@@ -75,7 +94,7 @@ export class GeminiProvider implements LlmProvider {
     const url = this.buildUrl('generateContent')
     const body = this.buildBody(systemInstruction, contents, opts)
 
-    const response = await this.fetchWithTimeout(url, body, opts.timeout ?? 300_000)
+    const response = await this.fetchWithTimeout(url, body, opts.timeout ?? 300_000, opts.signal)
 
     if (!response.ok) {
       await this.handleError(response, 'chat')
@@ -93,7 +112,7 @@ export class GeminiProvider implements LlmProvider {
     const url = this.buildUrl('streamGenerateContent', { alt: 'sse' })
     const body = this.buildBody(systemInstruction, contents, opts)
 
-    const response = await this.fetchWithTimeout(url, body, opts.timeout ?? 120_000)
+    const response = await this.fetchWithTimeout(url, body, opts.timeout ?? 120_000, opts.signal)
 
     if (!response.ok) {
       await this.handleError(response, 'chatStream')
@@ -190,9 +209,7 @@ export class GeminiProvider implements LlmProvider {
   ): Record<string, unknown> {
     const body: Record<string, unknown> = {
       contents,
-      generationConfig: {
-        temperature: opts.temperature ?? 0.7,
-      },
+      generationConfig: {},
       safetySettings: SAFETY_SETTINGS,
     }
 
@@ -203,8 +220,12 @@ export class GeminiProvider implements LlmProvider {
 
     // 生成配置
     const genConfig = body.generationConfig as Record<string, unknown>
-    if (opts.topP !== undefined) genConfig.topP = opts.topP
-    if (opts.maxTokens) genConfig.maxOutputTokens = opts.maxTokens
+    if (typeof opts.temperature === 'number') genConfig.temperature = opts.temperature
+    if (typeof opts.topP === 'number') genConfig.topP = opts.topP
+    if (typeof opts.maxTokens === 'number') genConfig.maxOutputTokens = opts.maxTokens
+    if (opts.reasoningEffort) {
+      genConfig.thinkingConfig = { thinkingBudget: THINKING_BUDGETS[opts.reasoningEffort] }
+    }
     if (opts.stop?.length) genConfig.stopSequences = opts.stop
     if (opts.responseFormat) {
       genConfig.responseMimeType = 'application/json'
@@ -472,24 +493,28 @@ export class GeminiProvider implements LlmProvider {
     url: string,
     payload: Record<string, unknown>,
     timeoutMs: number,
+    signal?: AbortSignal,
   ): Promise<Response> {
     try {
       return await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
+          : AbortSignal.timeout(timeoutMs),
       })
     } catch (err) {
       if (err instanceof DOMException && err.name === 'TimeoutError') {
         throw new AppError('LLM_TIMEOUT', {
           message: `Gemini 请求超时 (${Math.round(timeoutMs / 1000)}s)`,
-          data: { provider: 'gemini', model: this.config.modelId },
+          data: { provider: 'gemini', model: this.config.modelId, retryable: true },
         })
       }
+      if (signal?.aborted) throw err
       throw new AppError('LLM_ERROR', {
         message: `Gemini 网络错误: ${err instanceof Error ? err.message : String(err)}`,
-        data: { provider: 'gemini', model: this.config.modelId },
+        data: { provider: 'gemini', model: this.config.modelId, retryable: true },
       })
     }
   }
@@ -497,7 +522,7 @@ export class GeminiProvider implements LlmProvider {
   /** 处理 HTTP 错误响应 → AppError */
   private async handleError(response: Response, method: string): Promise<never> {
     const text = await response.text().catch(() => '(无法读取响应体)')
-    const code = response.status === 429 ? 'LLM_RATE_LIMITED' : 'LLM_ERROR'
+    const retryMs = parseRetryAfterMs(response.headers.get('retry-after'))
 
     logger.error(`Gemini ${method} 失败`, {
       status: response.status,
@@ -505,9 +530,15 @@ export class GeminiProvider implements LlmProvider {
       model: this.config.modelId,
     })
 
-    throw new AppError(code, {
+    throw new AppError(response.status === 429 ? 'LLM_RATE_LIMITED' : 'LLM_ERROR', {
       message: `Gemini API 错误 (${response.status}): ${text.slice(0, 200)}`,
-      data: { provider: 'gemini', model: this.config.modelId, status: response.status },
+      data: {
+        provider: 'gemini',
+        model: this.config.modelId,
+        status: response.status,
+        retryable: RETRYABLE_STATUSES.has(response.status),
+        retryAfter: retryMs,
+      },
     })
   }
 

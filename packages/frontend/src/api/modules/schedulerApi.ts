@@ -19,24 +19,32 @@ export interface TaskStats {
 /** 任务状态 */
 export interface SchedulerTask {
   name: string
+  displayName: string
+  description: string
   intervalMs: number
   intervalDesc: string
   running: boolean
-  lastRunAt: number
-  lastRunAtIso: string
-  nextRunAt: number
+  lastStartedAt: number | null
+  lastFinishedAt: number | null
+  lastSuccessAt: number | null
+  lastFailureAt: number | null
+  lastOutcome: 'success' | 'error' | null
+  nextDueAt: number
   stats: TaskStats
 }
 
 /** 调度器全局状态 */
 export interface SchedulerStatus {
-  running: boolean
+  schedulerRunning: boolean
+  serverNow: number
   taskCount: number
   activeTasks: number
 }
 
 /** 任务列表响应 */
 export interface TaskListData {
+  schedulerRunning: boolean
+  serverNow: number
   items: SchedulerTask[]
   total: number
 }
@@ -44,7 +52,7 @@ export interface TaskListData {
 /** 用户提醒项 (由 Agent 通过 set_reminder 工具创建) */
 export interface ReminderItem {
   id: number
-  type: 'reminder' | 'topic' | 'reaction'
+  type: 'reminder' | 'topic' | 'reaction' | 'agent_task'
   time: string
   content: string
   isTriggered: boolean
@@ -70,6 +78,9 @@ export const schedulerApi = {
     apiClient.get<ReminderListData>(
       '/scheduler/reminders' + (agentId ? `?agentId=${agentId}` : ''),
     ),
+
+  createAgentTask: (data: { agentId: string; time: string; instruction: string }) =>
+    apiClient.post<ReminderItem>('/scheduler/agent-tasks', data),
 
   /** 手动触发任务 */
   trigger: (name: string) => apiClient.post<{ taskName: string }>('/scheduler/trigger/' + name),

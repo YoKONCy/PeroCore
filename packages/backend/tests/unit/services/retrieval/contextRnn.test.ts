@@ -3,13 +3,13 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('@perocore/nit-runtime', () => ({
+vi.mock('@infos/nit-runtime', () => ({
   HIDDEN_DIM: 4,
   // AIOS 第八阶段：minGRU 权重大小（HIDDEN_DIM=4）
   MIN_GRU_WEIGHT_SIZES: {
-    W_Z: 16,  // 4×4
+    W_Z: 16, // 4×4
     B_Z: 4,
-    W_H: 16,  // 4×4
+    W_H: 16, // 4×4
     B_H: 4,
     TOTAL: 40,
   },
@@ -30,9 +30,9 @@ vi.mock('@perocore/nit-runtime', () => ({
   trainMinGruStep: vi.fn(() => 0.5),
 }))
 
-import { ContextRnn } from '@perocore/backend/services/retrieval/contextRnn'
-import { minGruForwardWithWeights, projectInput } from '@perocore/nit-runtime'
-import type { PathResolver } from '@perocore/backend/core/pathResolver'
+import { ContextRnn } from '@infos/backend/services/retrieval/contextRnn'
+import { minGruForwardWithWeights, projectInput } from '@infos/nit-runtime'
+import type { PathResolver } from '@infos/backend/core/pathResolver'
 
 function createResolver(root: string): PathResolver {
   return {
@@ -46,7 +46,7 @@ describe('ContextRnn', () => {
   let root: string
 
   beforeEach(() => {
-    root = join(tmpdir(), `perocore-context-rnn-${Date.now()}-${Math.random()}`)
+    root = join(tmpdir(), `infos-context-rnn-${Date.now()}-${Math.random()}`)
     mkdirSync(root, { recursive: true })
   })
 

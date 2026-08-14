@@ -4,14 +4,14 @@ const { requestMock } = vi.hoisted(() => ({
   requestMock: vi.fn(),
 }))
 
-vi.mock('@perocore/frontend/api/transport', () => ({
+vi.mock('@infos/frontend/api/transport', () => ({
   transport: {
     request: requestMock,
   },
 }))
 
-import { apiClient } from '@perocore/frontend/api/client'
-import type { ApiError } from '@perocore/frontend/api/errors'
+import { apiClient } from '@infos/frontend/api/client'
+import type { ApiError } from '@infos/frontend/api/errors'
 
 describe('apiClient', () => {
   beforeEach(() => {

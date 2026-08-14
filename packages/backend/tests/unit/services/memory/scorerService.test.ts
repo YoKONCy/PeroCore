@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { ScorerService } from '@perocore/backend/services/memory/scorerService'
+import { ScorerService } from '@infos/backend/services/memory/scorerService'
 
 const modelConfig = { provider: 'openai', modelId: 'scorer-model', apiKey: 'key' }
 
@@ -67,6 +67,7 @@ function createService(
   const threadRepo = {
     getPendingForScorer: vi.fn().mockResolvedValue(pending),
     updateScorerStatus: vi.fn().mockResolvedValue(undefined),
+    listThreads: vi.fn().mockResolvedValue({ items: [], total: 0 }),
   }
   const llmService = {
     chat: options.chatReject
@@ -134,6 +135,43 @@ describe('ScorerService', () => {
     expect(llmService.chat).not.toHaveBeenCalled()
   })
 
+  it('应当在轮次不足但字符预算达到上限时提前触发批处理', async () => {
+    const longText = '长对话'.repeat(20)
+    const { service, llmService } = createService({
+      pending: [createPair(1, longText, 2, longText, 'p1')],
+      llmContent: JSON.stringify({
+        content: '长对话摘要',
+        tags: [],
+        importance: 5,
+        sentiment: 'neutral',
+        memory_type: 'event',
+        entities: [],
+        causal_refs: [],
+        topic_keys: [],
+      }),
+    })
+
+    await service.checkAndProcess('pero', 'thread-1', 'desktop')
+
+    expect(llmService.chat).toHaveBeenCalledOnce()
+  })
+
+  it('定时刷新应按 Thread 分批，避免不同 Channel 的原始对话混批', async () => {
+    const { service, threadRepo } = createService({ pending: [] })
+    threadRepo.listThreads.mockResolvedValue({
+      items: [
+        { id: 'desktop-1', channel: 'desktop' },
+        { id: 'group-1', channel: 'group' },
+      ],
+      total: 2,
+    })
+
+    await service.flushPendingByThread('pero')
+
+    expect(threadRepo.getPendingForScorer).toHaveBeenCalledWith('pero', 2, 'desktop-1', 'desktop')
+    expect(threadRepo.getPendingForScorer).toHaveBeenCalledWith('pero', 2, 'group-1', 'group')
+  })
+
   it('应当批量提炼候选、写入 memory_candidates 并标记已分析（第五阶段：不再写 memory_nodes/向量）', async () => {
     const llmContent = JSON.stringify({
       content: '主人喜欢猫猫',
@@ -160,15 +198,16 @@ describe('ScorerService', () => {
 
     expect(mdpEngine.render).toHaveBeenCalledWith('tasks/memory/scorer/summary', {
       agent_name: 'AI',
-      owner_name: '主人',
+      owner_name: '用户',
+      owner_appellation: '主人',
     })
     expect(llmService.chat).toHaveBeenCalledWith(
       modelConfig,
       [
         { role: 'system', content: '评分提示词' },
-        { role: 'user', content: '主人: 主人喜欢猫\nAI: 猫很可爱' },
+        { role: 'user', content: '用户: 主人喜欢猫\nAI: 猫很可爱' },
       ],
-      { temperature: 0.2, responseFormat: { type: 'json_object' } },
+      { responseFormat: { type: 'json_object' } },
     )
     // 第五阶段：Scorer 不再调 memoryService.create，改为调 memoryCandidateRepo.create
     expect(memoryService.create).not.toHaveBeenCalled()
@@ -223,7 +262,7 @@ describe('ScorerService', () => {
     expect(embeddingService.embed).toHaveBeenCalledWith(['重复问题', '重复问题'])
     const userPrompt = (llmService.chat as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]?.[1]
       ?.content as string
-    expect(userPrompt).toContain('主人: 重复问题')
+    expect(userPrompt).toContain('用户: 重复问题')
     expect(userPrompt).toContain('AI: 回答一')
     expect(userPrompt).not.toContain('回答二')
     // AIOS: 即使去重过滤了 p2 的上下文，pairIds 仍取自原始 pending，两者都标记已分析

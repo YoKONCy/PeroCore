@@ -23,7 +23,7 @@ import type { AgentService } from '../agent/agentService'
 import type { GatewayHub } from '../gateway/gatewayHub'
 // AIOS: SessionService 依赖已移除（新版不再使用旧 Session 模型）
 import type { ThreadService } from '../thread/threadService'
-import type { ContextCompiler } from '../context/contextCompiler'
+import type { ConversationTurnService } from '../conversation/conversationTurnService'
 import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('RealtimeSession')
@@ -84,7 +84,7 @@ export interface RealtimeSessionDeps {
   gatewayHub: GatewayHub
   // AIOS: 新增 Thread + ContextCompiler 依赖，替代旧 SessionService
   threadService: ThreadService
-  contextCompiler: ContextCompiler
+  conversationTurnService: ConversationTurnService
 }
 
 // ── Service ──
@@ -238,31 +238,13 @@ export class RealtimeSessionManager {
       })
     }
 
-    // 追加用户消息
-    await this.deps.threadService.appendUserMessage(threadId, text)
-
-    // 编译上下文
-    const compiled = await this.deps.contextCompiler.compile(threadId, agentId)
-
-    // 执行对话
-    const reply = await this.deps.agentService.chatWithCompiledMessages({
-      messages: compiled.messages,
-      agentId,
+    const result = await this.deps.conversationTurnService.executeTurn({
       threadId,
+      agentId,
+      content: text,
     })
 
-    // 追加 Agent 回复
-    const pairId = `pair_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-    if (reply) {
-      await this.deps.threadService.appendAssistantMessage({
-        threadId,
-        content: reply,
-        pairId,
-        agentId,
-      })
-    }
-
-    return reply
+    return result.reply
   }
 
   /** 执行 TTS */

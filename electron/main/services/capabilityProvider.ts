@@ -24,12 +24,7 @@ import { app } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import { logger } from '../utils/logger'
-import {
-  captureScreen,
-  readClipboard,
-  writeClipboard,
-  getActiveWindow,
-} from './desktopAwareness'
+import { captureScreen, readClipboard, writeClipboard, getActiveWindow } from './desktopAwareness'
 
 /** Daemon CapabilityBridge WS 端口 */
 const CAPABILITY_PORT = Number(process.env.PERO_CAPABILITY_PORT ?? 9121)
@@ -58,10 +53,7 @@ const NODE_ID_FILE = 'electron-node-id.txt'
  * 这样 reactLoop 的多模态截图注入逻辑（按 screenshots[].dataUri 提取 image_url 块）
  * 才能正确工作。
  */
-const CAPABILITY_HANDLERS: Record<
-  string,
-  (args: Record<string, unknown>) => Promise<unknown>
-> = {
+const CAPABILITY_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<unknown>> = {
   screen_capture: async (args) => {
     const maxWidth = (args.maxWidth as number) ?? 1280
     const raw = await captureScreen(maxWidth)
@@ -202,11 +194,13 @@ class ElectronCapabilityProvider {
    * 发送鉴权消息（第七阶段修复 E3）
    *
    * 连接建立后必须先发送 auth 消息，Daemon 验证通过后才允许 register。
-   * token 从 PERO_CAPABILITY_TOKEN 环境变量读取（由后端注入或开发者设置）。
-   * 未设置 token 时仍发送 auth（Daemon 在未配置 PEROCORE_API_TOKEN 时会跳过校验放行）。
+   * token 读取优先级：
+   *   1. PERO_CAPABILITY_TOKEN（旧环境变量，兼容保留）
+   *   2. INFOS_API_TOKEN（与 Daemon 鉴权、HTTP API 同一 token，推荐）
+   * 未设置 token 时仍发送 auth（Daemon 在未配置 INFOS_API_TOKEN 时会跳过校验放行）。
    */
   private sendAuth(): void {
-    const token = process.env.PERO_CAPABILITY_TOKEN ?? ''
+    const token = process.env.PERO_CAPABILITY_TOKEN ?? process.env.INFOS_API_TOKEN ?? ''
     const msg: NodeMessage = { type: 'auth', token }
     this.send(msg)
   }
@@ -285,9 +279,7 @@ class ElectronCapabilityProvider {
   }
 
   /** 处理工具调用 */
-  private async handleToolCall(
-    msg: Extract<DaemonMessage, { type: 'tool_call' }>,
-  ): Promise<void> {
+  private async handleToolCall(msg: Extract<DaemonMessage, { type: 'tool_call' }>): Promise<void> {
     const { callId, toolName, args } = msg
     logger.info('CapabilityProvider', `收到工具调用: ${toolName} (callId=${callId})`)
 

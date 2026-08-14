@@ -1,10 +1,14 @@
 export { agentApi } from './agentApi'
+export { backgroundTasksApi } from './backgroundTasksApi'
 export { chatApi } from './chatApi'
 export { configApi } from './configApi'
 export { maintenanceApi } from './maintenanceApi'
 export { mcpApi } from './mcpApi'
 export { memoryApi } from './memoryApi'
 export { modelApi } from './modelApi'
+// 危险区域重置 API（清空对话/记忆/恢复出厂，均需确认短语）
+export { resetApi, RESET_CONFIRM_PHRASES } from './resetApi'
+export type { ResetOperation, ResetResult } from './resetApi'
 // 第七阶段修复（批次 C）：新增 runtimeApi，替代已删除的 agentApi.setActive
 export { runtimeApi } from './runtimeApi'
 export { socialApi } from './socialApi'

@@ -79,13 +79,13 @@ watch(
             <PixelIcon name="terminal" size="sm" />
             <span class="font-pixel">MCP 服务</span>
           </button>
-          <span class="text-slate-200 text-xl font-light">/</span>
+          <span class="text-[var(--ui-border-strong)] text-xl font-light">/</span>
           <button
             :class="[
               'flex items-center gap-2 text-xl font-black bg-none border-none cursor-pointer p-0 transition-all',
               currentSubTab === 'skill'
-                ? 'text-slate-800 scale-[1.02]'
-                : 'text-slate-400 hover:text-slate-500',
+                ? 'text-[var(--ui-text-primary)] scale-[1.02]'
+                : 'text-[var(--ui-text-tertiary)] hover:text-[var(--ui-text-secondary)]',
             ]"
             @click="currentSubTab = 'skill'"
           >
@@ -239,7 +239,7 @@ watch(
         </div>
         <p
           v-if="importError"
-          class="text-[11px] text-red-500 bg-red-50 border border-red-200 px-3 py-2"
+          class="text-[11px] text-[var(--ui-danger)] bg-[var(--ui-danger-soft)] border border-[color:var(--ui-danger)] px-3 py-2"
         >
           ⚠ {{ importError }}
         </p>

@@ -1,11 +1,11 @@
 {
-  "asset_id": "com.perocore.model.rossi",
+  "asset_id": "com.infos.model.rossi",
   "type": "model_3d",
   "source": "official",
   "display_name": "Rossi",
   "version": "1.0.0",
   "description": "Rossi 虚拟形象模型",
-  "author": "PeroCore",
+  "author": "infOS",
   "metadata": {
     "name": "Rossi",
     "version": "1.0.0"

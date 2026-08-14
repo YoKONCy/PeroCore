@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AppError } from '@perocore/backend/lib/appError'
+import type { AppError } from '@infos/backend/lib/appError'
 
 const { spawnMock } = vi.hoisted(() => ({
   spawnMock: vi.fn(),
@@ -9,7 +9,7 @@ vi.mock('node:child_process', () => ({
   spawn: spawnMock,
 }))
 
-import { SystemService } from '@perocore/backend/services/system/systemService'
+import { SystemService } from '@infos/backend/services/system/systemService'
 
 type PathResolverMock = {
   resolve: ReturnType<typeof vi.fn>

@@ -22,7 +22,15 @@ const logger = createLogger('AssetRegistry')
 export type AssetSource = 'official' | 'workshop' | 'local'
 
 /** 资产类型 */
-export type AssetType = 'plugin' | 'persona' | 'model_3d' | 'prompt' | 'mod' | 'unknown'
+export type AssetType =
+  | 'plugin'
+  | 'tool'
+  | 'skill'
+  | 'persona'
+  | 'model_3d'
+  | 'prompt'
+  | 'mod'
+  | 'unknown'
 
 /** 资产元数据 */
 export interface AssetMetadata {
@@ -75,17 +83,22 @@ export class AssetRegistry {
     this.assets.clear()
     this.typeIndex.clear()
 
-    // 1. Official — 总是扫
-    this.scanDir(this.pathResolver.resolve('@app/agents'), 'official')
-    this.scanDir(this.pathResolver.resolve('@app/prompts'), 'official')
+    // 1. Official — 扫描实际打包布局
+    this.scanDir(this.pathResolver.resolve('@app/backend/src/assets/agents'), 'official')
+    this.scanDir(this.pathResolver.resolve('@app/backend/src/services/mdp/prompts'), 'official')
+    this.scanDir(this.pathResolver.resolve('@app/backend/src/tools'), 'official')
+    this.scanDir(this.pathResolver.resolve('@app/backend/src/skills'), 'official')
 
-    // 2. Workshop — 有就扫，没有就跳 (Docker 版无 @workshop)
-    if (this.pathResolver.isAvailable('@workshop')) {
-      this.scanDir(this.pathResolver.resolve('@workshop'), 'workshop')
+    // 2. Workshop — 每个订阅物品都是独立根，支持 item 根和常见分类子目录。
+    for (const workshopRoot of this.pathResolver.getRoots('@workshop')) {
+      this.scanAssetRoot(workshopRoot, 'workshop')
     }
 
-    // 3. Local — 总是扫
-    this.scanDir(this.pathResolver.resolve('@data/custom'), 'local')
+    // 3. Local — 用户覆盖层与可执行扩展/技能目录
+    this.scanAssetRoot(this.pathResolver.resolve('@data/custom'), 'local')
+    this.scanDir(this.pathResolver.resolve('@data/agents'), 'local')
+    this.scanDir(this.pathResolver.resolve('@data/extensions'), 'local')
+    this.scanDir(this.pathResolver.resolve('@data/skills'), 'local')
 
     this.scanned = true
     logger.success(`资产扫描完成，共索引 ${this.assets.size} 个资产`)
@@ -126,6 +139,29 @@ export class AssetRegistry {
   // ─────────────────────────────────────────────
   // 内部方法
   // ─────────────────────────────────────────────
+
+  /**
+   * 扫描一个联邦资产根。
+   * Workshop item 可以本身就是单资产，也可以包含 agents/models/extensions/skills/prompts 分类目录。
+   */
+  private scanAssetRoot(rootPath: string, source: AssetSource): void {
+    if (!existsSync(rootPath)) return
+
+    const rootMeta = this.loadAssetMeta(rootPath, source)
+    if (rootMeta) this.registerAsset(rootMeta)
+
+    const categories = [
+      'agents',
+      'models',
+      'extensions',
+      'tools',
+      'skills',
+      'prompts',
+      path.join('assets', '3d'),
+      path.join('assets', 'agents'),
+    ]
+    for (const category of categories) this.scanDir(path.join(rootPath, category), source)
+  }
 
   /**
    * 扫描指定目录下的资产

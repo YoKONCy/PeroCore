@@ -2,9 +2,9 @@
 # 所有构建变体共享此基础配置
 # ⚠️ Steam 组件严格过滤：base 配置默认排除所有 Steam 相关文件
 #    仅 electron-builder.steam.yml 会覆写此规则
-appId: com.perocore.peroperochat
+appId: com.infos.peroperochat
 productName: '萌动链接：PeroperoChat！'
-copyright: Copyright © 2024-2026 YoKONCy and PeroCore Contributors
+copyright: Copyright © 2024-2026 YoKONCy and infOS Contributors
 
 electronVersion: 40.2.1
 
@@ -56,12 +56,8 @@ extraResources:
     to: backend/backend/src/services/mdp/prompts
     filter:
       - '**/*'
-  - from: packages/backend/src/services/mdp/agents
-    to: backend/backend/src/services/mdp/agents
-    filter:
-      - '**/*'
-  - from: packages/backend/src/services/mdp/presets
-    to: backend/backend/src/services/mdp/presets
+  - from: packages/backend/src/assets/agents
+    to: backend/backend/src/assets/agents
     filter:
       - '**/*'
   - from: packages/backend/src/tools
@@ -74,6 +70,32 @@ extraResources:
       - '**/*'
   - from: public/Logo.png
     to: Logo.png
+  # ── 便携模式自包含运行时（方案 A：exe 自动拉起内置 Daemon）──
+  # daemon 单文件 bundle（由 scripts/build-daemon-bundle.mjs 产出）
+  - from: dist-daemon/daemon.mjs
+    to: daemon/daemon.mjs
+  # daemon 运行所需生产依赖（由 scripts/collect-daemon-deps.mjs 产出）
+  - from: dist-daemon/node_modules
+    to: node_modules
+    filter:
+      - '**/*'
+  # 当前构建平台/架构的内置 ripgrep，由依赖收集脚本生成。
+  - from: dist-daemon/bin
+    to: bin
+    filter:
+      - '**/*'
+  # 内置社交应用资源（prompts / tools manifest / app.manifest）+ 编译产物
+  - from: packages/apps/social
+    to: backend/apps/social
+    filter:
+      - '**/*'
+  - from: dist-daemon/social-runtime.mjs
+    to: backend/apps/social/runtime/index.js
+  # 首次启动建表所需的 SQL 迁移（tsc 不复制 .sql）
+  - from: packages/backend/src/database/migrations
+    to: backend/backend/src/database/migrations
+    filter:
+      - '*.sql'
 
 # 不使用 npm rebuild (pnpm workspace 已经处理好原生模块)
 npmRebuild: false
@@ -84,7 +106,7 @@ afterPack: scripts/electron-after-pack.cjs
 publish:
   - provider: github
     owner: YoKONCy
-    repo: PeroCore
+    repo: infOS
 
 # Windows 通用配置
 win:

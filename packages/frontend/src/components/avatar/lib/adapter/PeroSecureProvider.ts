@@ -1,7 +1,7 @@
 /**
  * 加密模型提供者 (.pero 单文件格式)
  *
- * 通过 Electron IPC 调用 Rust Native 模块 (@perocore/render-core)
+ * 通过 Electron IPC 调用 Rust Native 模块 (@infos/render-core)
  * 解密和解析 .pero 加密模型文件。密钥在 Rust 内部管理，
  * JS 层无法拦截，确保资产安全。
  *

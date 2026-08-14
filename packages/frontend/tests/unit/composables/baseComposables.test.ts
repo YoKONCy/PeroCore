@@ -23,11 +23,11 @@ vi.mock('vue', () => ({
 }))
 
 import { ref } from 'vue'
-import { useDebounceFn, useThrottleFn } from '@perocore/frontend/composables/useThrottle'
-import { useLoading } from '@perocore/frontend/composables/useLoading'
-import { useInterval } from '@perocore/frontend/composables/useInterval'
-import { useEventListener } from '@perocore/frontend/composables/useEventListener'
-import { useChatInput } from '@perocore/frontend/composables/chat/useChatInput'
+import { useDebounceFn, useThrottleFn } from '@infos/frontend/composables/useThrottle'
+import { useLoading } from '@infos/frontend/composables/useLoading'
+import { useInterval } from '@infos/frontend/composables/useInterval'
+import { useEventListener } from '@infos/frontend/composables/useEventListener'
+import { useChatInput } from '@infos/frontend/composables/chat/useChatInput'
 
 function resetLifecycle() {
   lifecycle.mounted.length = 0

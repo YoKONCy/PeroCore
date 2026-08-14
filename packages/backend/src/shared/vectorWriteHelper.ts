@@ -45,9 +45,7 @@ export class VectorWriteHelper {
   }): Promise<void> {
     // AIOS 第八阶段：embedding 不可用时跳过向量写入
     if (!this.embeddingService.isAvailable) {
-      logger.debug(
-        `记忆 ${opts.memoryId} 跳过向量写入（embedding 不可用），仅 SQLite + BM25 可用`,
-      )
+      logger.debug(`记忆 ${opts.memoryId} 跳过向量写入（embedding 不可用），仅 SQLite + BM25 可用`)
       return
     }
 

@@ -142,7 +142,7 @@ export class Tagger {
         { role: 'system', content: systemPrompt },
         { role: 'user', content: memorySummary },
       ],
-      { temperature: 0.2, responseFormat: { type: 'json_object' } },
+      { responseFormat: { type: 'json_object' } },
     )
 
     const raw = completion.choices[0]?.message?.content

@@ -341,7 +341,7 @@ export class NutDesktopAutomationProvider implements DesktopAutomationProvider {
           '$xml = New-Object Windows.Data.Xml.Dom.XmlDocument',
           '$xml.LoadXml($template)',
           '$toast = New-Object Windows.UI.Notifications.ToastNotification $xml',
-          '[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("PeroCore").Show($toast)',
+          '[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("infOS").Show($toast)',
         ].join('; ')
         execSync(`powershell -ExecutionPolicy Bypass -Command "${ps}"`, {
           timeout: 10_000,

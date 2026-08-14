@@ -1,4 +1,4 @@
-# CI 流水线 — PeroCore-TS
+# CI 流水线 — infOS-TS
 # 触发规则: push 到 main/dev 或 PR 到 main
 name: CI
 

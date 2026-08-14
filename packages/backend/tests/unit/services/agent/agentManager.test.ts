@@ -2,8 +2,8 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { AgentManager } from '@perocore/backend/services/agent/agentManager'
-import type { PathResolver } from '@perocore/backend/core/pathResolver'
+import { AgentManager } from '@infos/backend/services/agent/agentManager'
+import type { PathResolver } from '@infos/backend/core/pathResolver'
 
 type ConfigRepositoryMock = {
   get: ReturnType<typeof vi.fn>
@@ -28,7 +28,7 @@ function createAgent(
 function createResolver(appRoot: string, dataRoot: string): PathResolver {
   return {
     resolve: vi.fn((alias: string) => {
-      if (alias === '@app/backend/src/services/mdp/agents') return appRoot
+      if (alias === '@app/backend/src/assets/agents') return appRoot
       if (alias === '@data/agents') return dataRoot
       return alias
     }),
@@ -42,7 +42,7 @@ describe('AgentManager', () => {
   let configRepo: ConfigRepositoryMock
 
   beforeEach(() => {
-    rootDir = join(tmpdir(), `perocore-agent-manager-${Date.now()}-${Math.random()}`)
+    rootDir = join(tmpdir(), `infos-agent-manager-${Date.now()}-${Math.random()}`)
     builtinDir = join(rootDir, 'builtin')
     dataDir = join(rootDir, 'data')
     mkdirSync(builtinDir, { recursive: true })
@@ -160,6 +160,26 @@ describe('AgentManager', () => {
     expect(texts).toEqual({ idle: '动态', work: '工作' })
     expect(manager.getAgent('pero')?.socialBinding).toMatchObject({ enabled: true, qq_id: '456' })
     await expect(manager.getWaifuTexts('missing')).resolves.toBeNull()
+  })
+
+  it('应当兼容旧动态字段并按层级合并静态台词', async () => {
+    createAgent(builtinDir, 'pero', {
+      name: 'Pero',
+      waifu_texts: {
+        welcome: { morning: '默认早安', noon: '默认午安' },
+        randTextures: { noClothes: '默认没衣服', success: '默认换装成功' },
+      },
+    })
+    configRepo.getJson.mockResolvedValue({
+      welcome_timeRanges_morning: '动态早安',
+      randTexturesSuccess: '动态换装成功',
+    })
+    const manager = new AgentManager(createResolver(builtinDir, dataDir), configRepo as never)
+
+    await expect(manager.getWaifuTexts('pero')).resolves.toMatchObject({
+      welcome: { morning: '动态早安', noon: '默认午安' },
+      randTextures: { noClothes: '默认没衣服', success: '动态换装成功' },
+    })
   })
 
   it('应当读取头像数据并识别用户 Agent', () => {

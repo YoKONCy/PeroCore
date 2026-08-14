@@ -58,7 +58,7 @@ withDefaults(defineProps<Props>(), {
   align-items: center;
   justify-content: center;
   padding: 48px 16px;
-  color: var(--color-text-muted);
+  color: var(--ui-text-tertiary);
   cursor: default;
   transition: transform 0.4s;
 }
@@ -73,14 +73,14 @@ withDefaults(defineProps<Props>(), {
 
 .p-empty-icon-box {
   padding: 24px;
-  background: var(--color-bg-hover);
-  border: 2px solid var(--color-border);
+  background: var(--dash-empty-bg);
+  border: 2px solid var(--ui-border-default);
   transition: all 0.5s;
   animation: icon-breathe 3s steps(4) infinite;
 }
 .p-empty:hover .p-empty-icon-box {
-  border-color: var(--color-sky-light);
-  box-shadow: 0 0 20px rgba(56, 189, 248, 0.15);
+  border-color: var(--ui-accent-sky);
+  box-shadow: var(--ui-glow-sky);
   animation:
     icon-breathe 3s steps(4) infinite,
     pempty-icon-jiggle 0.4s steps(3);
@@ -92,7 +92,7 @@ withDefaults(defineProps<Props>(), {
 }
 .p-empty:hover .p-empty-icon {
   opacity: 0.6;
-  color: var(--color-sky-500);
+  color: var(--ui-accent-sky);
   transform: scale(1.1);
 }
 
@@ -125,8 +125,8 @@ withDefaults(defineProps<Props>(), {
 .p-empty-desc {
   font-size: 14px;
   font-weight: 700;
-  font-family: var(--font-pixel), monospace;
-  color: var(--color-text-muted);
+  font-family: var(--ui-font-pixel);
+  color: var(--ui-text-tertiary);
   transition: color 0.5s;
 }
 .p-empty:hover .p-empty-desc {

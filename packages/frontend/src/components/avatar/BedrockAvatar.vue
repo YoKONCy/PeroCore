@@ -39,6 +39,8 @@ import { useAvatarScene } from '../../composables/avatar/useAvatarScene'
 import { useAvatarModel } from '../../composables/avatar/useAvatarModel'
 import { useAvatarInteraction } from '../../composables/avatar/useAvatarInteraction'
 import type { PetEvent } from '../../composables/avatar/useAvatarInteraction'
+import { loadYsmManifestFromUrl } from './lib/ysm/loadYsmManifest'
+import { AVATAR_MODEL_STORAGE_KEY } from './lib/avatarDefaults'
 import { logger } from '../../lib/logger'
 
 const props = defineProps<{
@@ -51,6 +53,8 @@ const emit = defineEmits<{
   (e: 'pet', data: PetEvent): void
   (e: 'hover-start'): void
   (e: 'hover-end'): void
+  (e: 'model-load-success', manifestPath: string): void
+  (e: 'model-load-error', message: string): void
 }>()
 
 // ═══ DOM refs ═══
@@ -97,6 +101,14 @@ function animate(): void {
   model.controllerSystem.update(safeDt)
   model.animationEngine.update(safeDt)
 
+  // 驱动 YSM molang 控制器脚本（20tick/s，set_animation 结果由回调接入动画引擎）
+  if (!isAnimPaused) {
+    const ysmRunner = model.getYsmRunner()
+    if (ysmRunner?.hasScripts) {
+      ysmRunner.update(safeDt)
+    }
+  }
+
   // 程序化动画覆盖（拖拽物理 / LookAt / 表情 / 口型）
   if (sceneCtx.scene.value && !isAnimPaused) {
     interaction.applyProceduralAnimations(
@@ -133,25 +145,40 @@ watch(selectedAnim, (newVal) => {
 })
 
 // ═══ manifest 路径变化时重新加载 ═══
-watch(
-  () => props.manifestPath,
-  async (newPath) => {
-    if (!newPath || !sceneCtx.scene.value) return
-    model.loading.value = true
-    model.errorMsg.value = ''
-    try {
-      const manifest = newPath.endsWith('.pero')
-        ? createPeroManifest(newPath)
+/**
+ * 直接加载模型入口并返回结果。
+ *
+ * 模型切换 UI 通过 expose 主动调用，避免依赖 prop watcher 的异步时序；失败时保留
+ * 当前模型并向上层返回错误，不再静默切回默认模型造成“点击没有反应”的错觉。
+ */
+async function loadManifestPath(newPath: string): Promise<boolean> {
+  if (!newPath || !sceneCtx.scene.value) return false
+
+  model.loading.value = true
+  model.errorMsg.value = ''
+  try {
+    const manifest = newPath.endsWith('.pero')
+      ? createPeroManifest(newPath)
+      : newPath.endsWith('ysm.json')
+        ? await loadYsmManifestFromUrl(newPath)
         : await ManifestLoader.fromJson(newPath)
-      await model.loadAvatar(manifest, sceneCtx.scene.value)
-    } catch (e) {
-      logger.error('BedrockAvatar', '加载新 manifest 失败', e)
-      model.errorMsg.value = `加载模型失败: ${e}`
-    } finally {
-      model.loading.value = false
-    }
-  },
-)
+    await model.loadAvatar(manifest, sceneCtx.scene.value)
+    localStorage.setItem(AVATAR_MODEL_STORAGE_KEY, newPath)
+    emit('model-load-success', newPath)
+    return true
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
+    logger.error('BedrockAvatar', `切换模型失败: ${newPath}`, e)
+    model.errorMsg.value = `切换模型失败: ${message}`
+    emit('model-load-error', message)
+    return false
+  } finally {
+    model.loading.value = false
+  }
+}
+
+// 模型切换由外观菜单通过 loadManifestPath 显式调用；初始模型由 onMounted 加载。
+// 不再同时监听 manifestPath，避免一次点击触发“直接调用 + prop watcher”两次重复加载。
 
 // ═══ 害羞状态联动 ═══
 watch(
@@ -233,6 +260,8 @@ function createPeroManifest(path: string): IAvatarManifest {
 
 // ═══ 暴露给父组件 ═══
 defineExpose({
+  /** 外观菜单使用的显式模型切换入口，返回是否加载成功。 */
+  loadManifestPath,
   playAnimation: (name: string) => {
     const anim = model.animationLibrary.get(name)
     if (anim) model.animationEngine.play(anim, 0.2, true)
@@ -241,6 +270,8 @@ defineExpose({
   clothingState: model.clothingState,
   featureButtons: model.featureButtons,
   updateClothing: model.updateClothing,
+  /** 显式设置单个部件开关（外观菜单使用，保证写入模型状态并持久化） */
+  setClothingPart: (id: string, value: boolean) => model.setClothingPart(id, value),
   animList: model.animList,
   setAnimation: (name: string) => {
     selectedAnim.value = name

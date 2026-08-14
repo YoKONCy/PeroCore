@@ -209,7 +209,9 @@ onMounted(loadVoiceConfig)
       <div
         class="absolute -right-20 -top-10 w-40 h-40 bg-purple-400/5 blur-[60px] rounded-full pointer-events-none group-hover/header:bg-purple-400/15 transition-all duration-1000"
       />
-      <h2 class="flex items-center gap-3 text-2xl font-black text-slate-800 font-pixel">
+      <h2
+        class="flex items-center gap-3 text-2xl font-black text-[var(--ui-text-primary)] font-pixel"
+      >
         <span
           class="group-hover/header:scale-110 group-hover/header:rotate-6 transition-transform duration-500"
         >
@@ -238,8 +240,10 @@ onMounted(loadVoiceConfig)
               <PixelIcon name="mic" size="sm" />
             </div>
             <div>
-              <h3 class="text-base font-black text-slate-800 font-pixel">语音合成 TTS</h3>
-              <p class="text-xs text-slate-400 mt-0.5">让 Pero 用声音回复你</p>
+              <h3 class="text-base font-black text-[var(--ui-text-primary)] font-pixel">
+                语音合成 TTS
+              </h3>
+              <p class="text-xs text-slate-400 mt-0.5">让助手用声音回复你</p>
             </div>
           </div>
           <PSwitch v-model="ttsEnabled" />
@@ -339,7 +343,7 @@ onMounted(loadVoiceConfig)
             </div>
             <div>
               <h3 class="text-base font-black text-slate-800 font-pixel">语音识别 ASR</h3>
-              <p class="text-xs text-slate-400 mt-0.5">用语音与 Pero 对话</p>
+              <p class="text-xs text-slate-400 mt-0.5">用语音与助手对话</p>
             </div>
           </div>
           <PSwitch v-model="asrEnabled" />
@@ -425,9 +429,9 @@ onMounted(loadVoiceConfig)
 
         <div
           v-if="!asrEnabled"
-          class="p-4 bg-slate-50 border border-slate-200 text-center text-[13px] text-slate-400"
+          class="p-4 bg-[var(--dash-panel-soft)] border border-[var(--dash-panel-border)] text-center text-[13px] text-[var(--ui-text-tertiary)]"
         >
-          <p>语音识别已关闭。开启后可以用声音与 Pero 对话喵~</p>
+          <p>语音识别已关闭。开启后即可用声音与助手对话。</p>
         </div>
       </PCard>
     </div>
@@ -441,7 +445,7 @@ onMounted(loadVoiceConfig)
 }
 
 .voice-scrollbar::-webkit-scrollbar-thumb {
-  background: #bae6fd;
+  background: var(--ui-scrollbar-thumb);
   border-radius: 0;
 }
 </style>

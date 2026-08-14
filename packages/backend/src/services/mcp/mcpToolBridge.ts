@@ -11,6 +11,7 @@
  */
 
 import type { ToolDefinition } from '../pipeline/types'
+import type { ToolExecutionResult } from '../agent/reactLoop'
 import type { McpClientManager, McpToolInfo } from './mcpClientManager'
 import { createLogger } from '../../lib/logger'
 
@@ -18,7 +19,7 @@ const logger = createLogger('MCPToolBridge')
 
 export interface BridgedMcpTool {
   definition: ToolDefinition
-  execute(args: Record<string, unknown>): Promise<string>
+  execute(args: Record<string, unknown>): Promise<string | ToolExecutionResult>
 }
 
 /**
@@ -59,21 +60,32 @@ function createBridgedTool(manager: McpClientManager, tool: McpToolInfo): Bridge
         // MCP 返回的是 CallToolResult，提取 content
         const mcpResult = result as {
           content?: Array<{ type: string; text?: string }>
+          isError?: boolean
         }
 
-        // 拼接所有 text 类型的 content
-        if (mcpResult.content && Array.isArray(mcpResult.content)) {
-          const texts = mcpResult.content
-            .filter((c) => c.type === 'text' && c.text)
-            .map((c) => c.text!)
-          return texts.join('\n') || JSON.stringify(result)
+        const texts = (mcpResult.content ?? [])
+          .filter((c) => c.type === 'text' && c.text)
+          .map((c) => c.text!)
+        if (mcpResult.isError) {
+          return {
+            output: texts.join('\n') || 'MCP 工具返回业务失败',
+            durationMs: 0,
+            isError: true,
+            shouldTerminate: false,
+          }
         }
 
+        if (texts.length > 0) return texts.join('\n')
         return JSON.stringify(result)
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err)
         logger.error(`MCP 工具执行失败: ${qualifiedName} — ${errorMsg}`)
-        return JSON.stringify({ error: errorMsg })
+        return {
+          output: `MCP 工具执行失败: ${errorMsg}`,
+          durationMs: 0,
+          isError: true,
+          shouldTerminate: false,
+        }
       }
     },
   }

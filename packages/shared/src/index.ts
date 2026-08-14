@@ -1,5 +1,5 @@
 /**
- * @perocore/shared 包入口
+ * @infos/shared 包入口
  *
  * 共享类型、常量和工具函数的统一导出。
  *
@@ -67,6 +67,18 @@ export {
 
 // 常量导出（类型）
 export type { ResponseCode } from './constants'
+
+// 类型导出 — YSM 模型适配
+export { YsmManifestGenerator, BASE_HEIGHT, BONE_ALIASES } from './ysm'
+export type {
+  YsmConfig,
+  YsmConfigForm,
+  YsmExtraButton,
+  YsmTextureItem,
+  YsmFeatureButton,
+  YsmGeneratedManifest,
+  MappingHealth,
+} from './ysm'
 
 // 类型导出 — Gateway WS 协议
 export type {

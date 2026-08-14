@@ -214,7 +214,7 @@ export class GraphGardener {
 
     let edgesBuilt = 0
 
-    for (const [_tag, memIds] of tagToMemories) {
+    for (const memIds of tagToMemories.values()) {
       if (memIds.length < 2 || memIds.length > this.config.maxTagMemories) continue
 
       for (let i = 0; i < memIds.length; i++) {
@@ -268,7 +268,7 @@ export class GraphGardener {
 
     let edgesBuilt = 0
 
-    for (const [_cluster, memIds] of clusterToMemories) {
+    for (const memIds of clusterToMemories.values()) {
       // cluster 通常比 tag 更广汇聚，上限放宽
       if (memIds.length < 2 || memIds.length > 20) continue
 
@@ -336,7 +336,7 @@ export class GraphGardener {
           { role: 'system', content: prompt },
           { role: 'user', content: '请分析上述事件并输出实体和关系。' },
         ],
-        { temperature: 0.2, responseFormat: { type: 'json_object' } },
+        { responseFormat: { type: 'json_object' } },
       )
 
       const raw = completion.choices[0]?.message?.content

@@ -38,7 +38,22 @@ export class SystemService {
 
   async openPath(targetPath: string): Promise<void> {
     const normalizedPath = this.normalizeOpenTarget(targetPath)
+    this.launchPath(normalizedPath)
+  }
 
+  /**
+   * 打开已经由上游安全边界验证过的绝对路径。
+   * 仅供 ExecutionSession workspaceRoot 等可信内部路径使用，禁止直接接收 HTTP 用户输入。
+   */
+  async openTrustedPath(targetPath: string): Promise<void> {
+    const normalizedPath = this.resolveOpenPath(targetPath)
+    if (!path.isAbsolute(normalizedPath) && !this.isWindowsAbsolutePath(normalizedPath)) {
+      throw new AppError('FORBIDDEN', { message: '可信路径必须是绝对路径' })
+    }
+    this.launchPath(normalizedPath)
+  }
+
+  private launchPath(normalizedPath: string): void {
     const platform = process.platform
     const command =
       platform === 'win32' ? 'explorer.exe' : platform === 'darwin' ? 'open' : 'xdg-open'

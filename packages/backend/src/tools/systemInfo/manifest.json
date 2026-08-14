@@ -2,7 +2,7 @@
   "id": "system-info",
   "name": "系统信息",
   "version": "1.0.0",
-  "author": "PeroCore Team",
+  "author": "infOS Team",
   "description": "系统信息查询与应用启动。包含系统状态、窗口管理、应用启动等能力。跨平台降级到 shell 命令。",
   "type": "tool",
   "entry": "index.ts",
@@ -13,11 +13,13 @@
     {
       "name": "get_system_info",
       "description": "获取系统信息: 操作系统、版本、CPU、内存等。",
+      "display": { "label": "系统信息", "icon": "cpu", "color": "purple", "style": "system" },
       "parameters": { "type": "object", "properties": {} }
     },
     {
       "name": "open_application",
       "description": "打开一个应用程序。跨平台支持。",
+      "display": { "label": "打开应用", "icon": "desktop", "color": "purple", "style": "system" },
       "parameters": {
         "type": "object",
         "properties": {
@@ -29,11 +31,13 @@
     {
       "name": "get_active_windows",
       "description": "列出当前所有可见的窗口及其进程名。",
+      "display": { "label": "活动窗口", "icon": "layout", "color": "purple", "style": "system" },
       "parameters": { "type": "object", "properties": {} }
     },
     {
       "name": "activate_window",
       "description": "切换并置顶指定的窗口。",
+      "display": { "label": "激活窗口", "icon": "eye", "color": "purple", "style": "system" },
       "parameters": {
         "type": "object",
         "properties": {

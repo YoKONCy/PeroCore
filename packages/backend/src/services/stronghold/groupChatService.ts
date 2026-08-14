@@ -12,7 +12,7 @@
  * @module packages/backend/src/services/stronghold/groupChatService
  */
 
-import { eq, desc } from 'drizzle-orm'
+import { eq, desc, asc, and, or, inArray, isNull, sql } from 'drizzle-orm'
 import { groupChatRooms, groupChatMembers, groupChatMessages } from '../../database/schema'
 import type { DrizzleDb } from '../../database'
 
@@ -29,6 +29,14 @@ export interface SendMessageInput {
   content: string
   role: 'user' | 'assistant' | 'system'
   mentions?: string[]
+  /** 本轮对话关联键：用户消息与其所有回复共用。 */
+  pairId?: string
+}
+
+/** 据点消息级联删除结果。 */
+export interface DeleteMessagePairResult {
+  deletedCount: number
+  deletedMessageIds: number[]
 }
 
 /** 视角转换后的消息 (给 LLM) */
@@ -98,10 +106,21 @@ export class GroupChatService {
         content: input.content,
         role: input.role,
         mentionsJson: JSON.stringify(input.mentions ?? []),
+        pairId: input.pairId,
       })
       .returning()
 
     return rows[0]!
+  }
+
+  /** 获取房间消息总数（对话日志列表展示用，避免拉取全量）。 */
+  async countMessages(roomId: string): Promise<number> {
+    const row = await this.db
+      .select({ count: sql<number>`count(*)` })
+      .from(groupChatMessages)
+      .where(eq(groupChatMessages.roomId, roomId))
+      .get()
+    return row?.count ?? 0
   }
 
   /** 获取房间历史消息 (最新 N 条，按时间正序) */
@@ -116,6 +135,88 @@ export class GroupChatService {
 
     // 反转为时间正序
     return msgs.reverse()
+  }
+
+  /** 获取最近 N 个完整群聊回合；一个 pair 包含用户发言及本轮全部回复。 */
+  async getHistoryPairs(roomId: string, pairLimit = 20): Promise<MessageRow[]> {
+    const normalizedLimit = Math.max(1, pairLimit)
+    const pairKey = sql<string>`coalesce(${groupChatMessages.pairId}, '__message__:' || ${groupChatMessages.id})`
+    const latestId = sql<number>`max(${groupChatMessages.id})`
+    const recentPairs = await this.db
+      .select({ pairKey, latestId })
+      .from(groupChatMessages)
+      .where(eq(groupChatMessages.roomId, roomId))
+      .groupBy(pairKey)
+      .orderBy(desc(latestId))
+      .limit(normalizedLimit)
+      .all()
+
+    if (recentPairs.length === 0) return []
+    const pairIds = recentPairs
+      .map((row) => row.pairKey)
+      .filter((key) => !key.startsWith('__message__:'))
+    const legacyMessageIds = recentPairs
+      .map((row) => row.pairKey)
+      .filter((key) => key.startsWith('__message__:'))
+      .map((key) => Number(key.slice('__message__:'.length)))
+      .filter(Number.isInteger)
+    const selectors = []
+    if (pairIds.length > 0) selectors.push(inArray(groupChatMessages.pairId, pairIds))
+    if (legacyMessageIds.length > 0) {
+      selectors.push(
+        and(isNull(groupChatMessages.pairId), inArray(groupChatMessages.id, legacyMessageIds))!,
+      )
+    }
+
+    return this.db
+      .select()
+      .from(groupChatMessages)
+      .where(
+        and(
+          eq(groupChatMessages.roomId, roomId),
+          selectors.length === 1 ? selectors[0] : or(...selectors),
+        ),
+      )
+      .orderBy(asc(groupChatMessages.id))
+      .all()
+  }
+
+  /**
+   * 级联删除一轮据点对话。
+   *
+   * 新消息通过 pairId 精确删除用户发言和本轮全部 Agent/system 回复；
+   * 旧消息没有 pairId 时保守地只删除目标消息，避免群聊中按相邻记录误删。
+   */
+  async deleteMessagePair(roomId: string, messageId: number): Promise<DeleteMessagePairResult> {
+    const target = await this.db
+      .select()
+      .from(groupChatMessages)
+      .where(and(eq(groupChatMessages.id, messageId), eq(groupChatMessages.roomId, roomId)))
+      .get()
+
+    if (!target) {
+      throw new Error(`消息 ${messageId} 不存在或不属于房间 ${roomId}`)
+    }
+
+    const condition = target.pairId
+      ? and(eq(groupChatMessages.roomId, roomId), eq(groupChatMessages.pairId, target.pairId))
+      : and(eq(groupChatMessages.id, messageId), eq(groupChatMessages.roomId, roomId))
+    const rows = await this.db.delete(groupChatMessages).where(condition).returning()
+
+    return {
+      deletedCount: rows.length,
+      deletedMessageIds: rows.map((row) => row.id),
+    }
+  }
+
+  /** 判断本轮用户消息仍存在，防止删除后异步 Agent 回复迟到写回。 */
+  async isPairActive(roomId: string, pairId: string): Promise<boolean> {
+    const message = await this.db
+      .select({ id: groupChatMessages.id })
+      .from(groupChatMessages)
+      .where(and(eq(groupChatMessages.roomId, roomId), eq(groupChatMessages.pairId, pairId)))
+      .get()
+    return Boolean(message)
   }
 
   // ─── 视角转换 ───

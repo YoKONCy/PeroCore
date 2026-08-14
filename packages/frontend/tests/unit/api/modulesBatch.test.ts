@@ -7,17 +7,18 @@ const clientMock = vi.hoisted(() => ({
   delete: vi.fn(),
 }))
 
-vi.mock('@perocore/frontend/api/client', () => ({
+vi.mock('@infos/frontend/api/client', () => ({
   apiClient: clientMock,
 }))
 
-import { agentApi } from '@perocore/frontend/api/modules/agentApi'
-import { configApi } from '@perocore/frontend/api/modules/configApi'
-import { maintenanceApi } from '@perocore/frontend/api/modules/maintenanceApi'
-import { memoryApi } from '@perocore/frontend/api/modules/memoryApi'
-import { modelApi } from '@perocore/frontend/api/modules/modelApi'
-import { schedulerApi } from '@perocore/frontend/api/modules/schedulerApi'
-import { systemApi } from '@perocore/frontend/api/modules/systemApi'
+import { agentApi } from '@infos/frontend/api/modules/agentApi'
+import { configApi } from '@infos/frontend/api/modules/configApi'
+import { maintenanceApi } from '@infos/frontend/api/modules/maintenanceApi'
+import { memoryApi } from '@infos/frontend/api/modules/memoryApi'
+import { modelApi } from '@infos/frontend/api/modules/modelApi'
+import { schedulerApi } from '@infos/frontend/api/modules/schedulerApi'
+import { strongholdApi } from '@infos/frontend/api/modules/strongholdApi'
+import { systemApi } from '@infos/frontend/api/modules/systemApi'
 
 describe('基础 API modules', () => {
   beforeEach(() => {
@@ -60,6 +61,19 @@ describe('基础 API modules', () => {
     expect(clientMock.post).toHaveBeenCalledWith('/configs/import', {
       data: { theme: 'dark' },
       overwrite: false,
+    })
+  })
+
+  it('strongholdApi 应当向据点消息端点发送明确角色', () => {
+    strongholdApi.sendMessage('room-uuid', '检查环境', {
+      senderId: 'Butler',
+      role: 'system',
+    })
+
+    expect(clientMock.post).toHaveBeenCalledWith('/stronghold/rooms/room-uuid/messages', {
+      content: '检查环境',
+      senderId: 'Butler',
+      role: 'system',
     })
   })
 

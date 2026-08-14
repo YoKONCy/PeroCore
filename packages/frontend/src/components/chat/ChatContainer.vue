@@ -12,16 +12,18 @@ import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import MessageBubble from './MessageBubble.vue'
 import InputBar from './InputBar.vue'
 import CommandOverlay from './CommandOverlay.vue'
-import ConfirmOverlay from './ConfirmOverlay.vue'
+import AgentWorkBadge from './AgentWorkBadge.vue'
+import ConversationRewindDialog from './ConversationRewindDialog.vue'
 import PixelIcon from '../pixel/PixelIcon.vue'
 import type { ChatMessage as BubbleMessage } from './MessageBubble.vue'
 import type { ActiveCommand } from './CommandOverlay.vue'
-import type { PendingConfirmation } from './ConfirmOverlay.vue'
 import { useChatScroll, useMessageVisibility } from '../../composables'
 import { useChat } from '../../composables/chat/useChat'
+import { useConversationRewind } from '../../composables/chat/useConversationRewind'
 import { useStreamMarkdown } from '../../composables/chat/useStreamMarkdown'
-import { useThreadStore, useNotificationStore } from '../../stores'
-import { Marked } from 'marked'
+import { renderChatRichText } from '../../lib/chatRichRenderer'
+import { useThreadStore, useNotificationStore, useApprovalStore } from '../../stores'
+import { ApprovalCard } from '../approval'
 import { logger } from '../../lib/logger'
 import { chatApi } from '../../api/modules/chatApi'
 
@@ -30,11 +32,28 @@ export interface Props {
   agentId: string
   /** Agent 名称 */
   agentName?: string
+  /** 当前选中 Thread；变化时加载该会话而非最新会话。 */
+  threadId?: string
+  /** Agent 头像 URL。 */
+  agentAvatarUrl?: string
+  /** 工作区窄栏模式：输入台根据容器宽度自动压缩。 */
+  compactInput?: boolean
+  /** 工作区模式：向发送内容附加当前文件/终端上下文。 */
+  workspaceContext?: { filePath?: string; terminalId?: string }
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  agentName: 'Pero',
+  agentName: '助手',
+  threadId: '',
+  agentAvatarUrl: '',
+  compactInput: false,
+  workspaceContext: undefined,
 })
+
+const emit = defineEmits<{
+  /** 当前对话完成，供外层刷新会话列表。 */
+  completed: []
+}>()
 
 const containerRef = ref<HTMLElement | null>(null)
 
@@ -46,15 +65,31 @@ const {
   historyError,
   sendMessage: chatSend,
   stopGeneration,
-  loadLatestHistory,
 } = useChat({ channel: 'desktop' })
 
 const threadStore = useThreadStore()
 const notif = useNotificationStore()
+const rewind = useConversationRewind()
+const approvalStore = useApprovalStore()
+const pendingApprovals = computed(() =>
+  approvalStore.forThread(props.agentId, threadStore.threadId || props.threadId),
+)
 
-// ── Markdown 渲染器 ──
-const marked = new Marked({ breaks: true, gfm: true })
-const renderMd = (md: string): string => marked.parse(md) as string
+// ── 安全语义富文本渲染器 ──
+const renderMd = renderChatRichText
+
+/** 提取模型原始转写中的 Thinking 标签块，仅供用户主动展开。 */
+function extractThinking(rawContent?: string | null): string | undefined {
+  if (!rawContent) return undefined
+  const blocks: string[] = []
+  const pattern = /<(?:think|thinking)>\s*([\s\S]*?)\s*<\/(?:think|thinking)>/gi
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(rawContent)) !== null) {
+    const content = match[1]?.trim()
+    if (content) blocks.push(content)
+  }
+  return blocks.length > 0 ? blocks.join('\n\n') : undefined
+}
 
 // ── 流式 Markdown 增量渲染 ──
 const streamMd = useStreamMarkdown(renderMd)
@@ -79,6 +114,7 @@ watch(
 watch(isGenerating, (generating, wasGenerating) => {
   if (!generating && wasGenerating) {
     streamMd.finish()
+    emit('completed')
   }
 })
 
@@ -98,7 +134,6 @@ watch(
 // ── 指令遮罩状态 ──
 
 const activeCommand = ref<ActiveCommand | null>(null)
-const pendingConfirmation = ref<PendingConfirmation | null>(null)
 
 // ── 消息列表 ──
 
@@ -110,7 +145,7 @@ const messages = computed<BubbleMessage[]>(() => {
 
     // 流式消息用 useStreamMarkdown 的输出，历史消息用全量渲染
     let renderedHtml: string | undefined
-    if (m.role === 'assistant' && m.content) {
+    if (m.content) {
       if (isStreamingMsg) {
         renderedHtml = streamMd.stableHtml.value + streamMd.tailHtml.value
       } else {
@@ -122,12 +157,15 @@ const messages = computed<BubbleMessage[]>(() => {
       id: m.id,
       role: m.role as 'user' | 'assistant',
       content: m.content ?? '',
+      thinkingContent: m.role === 'assistant' ? extractThinking(m.rawContent) : undefined,
       timestamp: m.timestamp ? new Date(m.timestamp).getTime() : undefined,
       senderId: m.senderId,
       images: m.images,
+      attachments: m.attachments,
       segments: undefined,
       renderedHtml,
       toolCalls: m.toolCalls,
+      imageTranscription: m.imageTranscription,
     }
   })
 })
@@ -162,10 +200,28 @@ function onBubbleUnmounted(event: unknown) {
 
 // ── 发送消息 ──
 
-async function handleSend(text: string, _images: string[]) {
-  await chatSend(text)
+async function handleSend(
+  text: string,
+  _mentions: string[],
+  attachmentIds: string[],
+  imageMode: 'auto' | 'native' | 'relay',
+  complete: (success: boolean) => void,
+) {
+  // 工作区上下文作为隐式请求字段发送，不拼进用户正文，避免 <workspace_context> 泄漏到气泡和历史消息。
+  const workspaceContext = props.workspaceContext
+    ? {
+        filePath: props.workspaceContext.filePath,
+        terminalId: props.workspaceContext.terminalId,
+      }
+    : undefined
+  const success = await chatSend(text, attachmentIds, imageMode, workspaceContext)
+  complete(success)
   await nextTick()
   scrollToBottom()
+}
+
+async function handleNewThread() {
+  await threadStore.createNewThread(props.agentId, 'desktop')
 }
 
 /** 停止生成 */
@@ -176,14 +232,6 @@ async function handleStop() {
 /** 跳过指令等待 */
 function handleSkipCommand() {
   activeCommand.value = null
-}
-
-/** 响应指令确认 */
-function handleConfirmResponse(approved: boolean) {
-  pendingConfirmation.value = null
-  if (approved) {
-    logger.info('ChatContainer', '用户批准指令执行')
-  }
 }
 
 // ── 消息编辑/删除 ──
@@ -198,12 +246,24 @@ function handleEdit(msg: BubbleMessage) {
   editText.value = msg.content
 }
 
-/** 保存编辑 */
-function saveEdit() {
-  if (!editingMessage.value) return
-  threadStore.editMessage(editingMessage.value.id, editText.value)
-  editingMessage.value = null
-  editText.value = ''
+/** 保存编辑：后端确认后再更新本地，避免持久化失败造成界面与服务端不一致。 */
+async function saveEdit() {
+  if (!editingMessage.value || !threadStore.threadId) return
+  const target = editingMessage.value
+  const nextContent = editText.value.trim()
+  if (!nextContent) return
+  try {
+    await chatApi.editMessage(threadStore.threadId, target.id, nextContent)
+    threadStore.messages = threadStore.messages.map((message) =>
+      message.id === target.id ? { ...message, content: nextContent } : message,
+    )
+    editingMessage.value = null
+    editText.value = ''
+    notif.toast('消息已保存', { type: 'success' })
+  } catch (err) {
+    logger.error('ChatContainer', '消息编辑保存失败', err)
+    notif.toast('消息保存失败，已保留原内容', { type: 'error' })
+  }
 }
 
 /** 取消编辑 */
@@ -212,32 +272,44 @@ function cancelEdit() {
   editText.value = ''
 }
 
-/** 级联删除对话对 (用户+助手) */
-function handleDeletePair(id: string) {
-  // 本地: 找到相邻的对话对并删除 (user 和紧跟其后的 assistant)
-  const idx = threadStore.messages.findIndex((m) => m.id === id)
-  if (idx >= 0) {
-    const msg = threadStore.messages[idx]!
-    const pairIds = [id]
+/**
+ * 级联删除对话对，并在后端确认后精确更新本地 UI。
+ * 临时 msg_* ID 表示消息尚未完成服务端回灌，删除前先刷新并定位真实数据库 ID。
+ */
+async function handleDeletePair(id: string) {
+  let target = threadStore.messages.find((message) => message.id === id)
+  if (!target || !threadStore.threadId) return
 
-    if (msg.role === 'user' && idx + 1 < threadStore.messages.length) {
-      // 用户消息: 也删紧跟其后的助手回复
-      const next = threadStore.messages[idx + 1]!
-      if (next.role === 'assistant') pairIds.push(next.id)
-    } else if (msg.role === 'assistant' && idx - 1 >= 0) {
-      // 助手消息: 也删其前的用户消息
-      const prev = threadStore.messages[idx - 1]!
-      if (prev.role === 'user') pairIds.push(prev.id)
+  try {
+    if (!/^\d+$/.test(target.id)) {
+      const snapshot = target
+      await threadStore.refreshCurrentThread(props.agentId)
+      const candidates = threadStore.messages.filter((message) => message.role === snapshot.role)
+      target =
+        candidates.find((message) => message.content === snapshot.content) ?? candidates.at(-1)
+      if (!target || !/^\d+$/.test(target.id)) {
+        throw new Error('消息尚未完成服务端同步，请稍后重试')
+      }
     }
 
-    threadStore.messages = threadStore.messages.filter((m) => !pairIds.includes(m.id))
-  }
-
-  // 后端同步 (异步，不阻塞 UI) — 需要传 threadId 和 msgId
-  if (threadStore.threadId && id) {
-    chatApi.deleteMessagePair(threadStore.threadId, id).catch((err) => {
-      logger.error('ChatContainer', '对话对删除同步失败', err)
+    await rewind.open({
+      threadId: threadStore.threadId,
+      messageId: Number(target.id),
+      onSuccess: async (result) => {
+        const deletedIds = new Set(result.deletedMessageIds.map(String))
+        threadStore.messages = threadStore.messages.filter((message) => !deletedIds.has(message.id))
+        await threadStore.loadThreadMessages(threadStore.threadId, props.agentId)
+        window.dispatchEvent(
+          new CustomEvent('infos:workspace-rewound', {
+            detail: { threadId: threadStore.threadId, files: result.preview.files },
+          }),
+        )
+        notif.toast(`已回滚 ${result.preview.pairCount} 轮对话`, { type: 'success' })
+      },
     })
+  } catch (err) {
+    logger.error('ChatContainer', '删除对话对失败', err)
+    notif.toast(err instanceof Error ? err.message : '删除失败，请稍后重试', { type: 'error' })
   }
 }
 
@@ -254,9 +326,14 @@ async function handleCopy(content: string) {
 }
 
 watch(
-  () => props.agentId,
-  async (agentId) => {
-    await loadLatestHistory(agentId)
+  () => [props.agentId, props.threadId] as const,
+  async ([agentId, threadId]) => {
+    // props 在角色切换时可能短暂出现“新 Agent + 旧 Thread”；只加载归属已一致的会话。
+    if (threadId && threadStore.agentId === agentId) {
+      await threadStore.loadThreadMessages(threadId, agentId)
+    } else {
+      await threadStore.ensureLatestThread(agentId, 'desktop')
+    }
     await nextTick()
     scrollToBottom(false)
   },
@@ -274,24 +351,22 @@ onUnmounted(() => {
 
 <template>
   <div class="chat-container">
+    <!-- M05-B1: 角色工作状态徽章（后台任务进行中提示，点击跳转任务中心） -->
+    <div class="chat-work-badge">
+      <AgentWorkBadge :agent-id="agentId" />
+    </div>
+
     <!-- 指令执行遮罩 -->
     <CommandOverlay :command="activeCommand" @skip="handleSkipCommand" />
 
-    <!-- 指令确认遮罩 -->
-    <ConfirmOverlay
-      :confirmation="pendingConfirmation"
-      :agent-name="agentName"
-      @respond="handleConfirmResponse"
-    />
-
     <!-- 消息列表 -->
     <div ref="containerRef" class="chat-messages">
-      <div v-if="isLoadingHistory" class="chat-history-state pixel-border-moe">
+      <div v-if="isLoadingHistory" class="chat-history-state">
         <PixelIcon name="refresh" size="sm" animation="spin" />
         <span>正在同步历史聊天记录...</span>
       </div>
 
-      <div v-else-if="historyError" class="chat-history-state chat-history-error pixel-border-moe">
+      <div v-else-if="historyError" class="chat-history-state chat-history-error">
         <PixelIcon name="alert" size="sm" />
         <span>历史记录同步失败：{{ historyError }}</span>
       </div>
@@ -301,6 +376,7 @@ onUnmounted(() => {
         :key="msg.id"
         :message="msg"
         :agent-name="agentName"
+        :agent-avatar-url="agentAvatarUrl"
         :is-streaming="
           isGenerating && msg === messages[messages.length - 1] && msg.role === 'assistant'
         "
@@ -309,6 +385,18 @@ onUnmounted(() => {
         @copy="handleCopy"
         @vue:mounted="onBubbleMounted"
         @vue:unmounted="onBubbleUnmounted"
+      />
+    </div>
+
+    <!-- 当前 Thread 待审批工具调用：作为对话中的系统交互卡片。 -->
+    <div v-if="pendingApprovals.length" class="chat-approvals">
+      <ApprovalCard
+        v-for="request in pendingApprovals"
+        :key="request.id"
+        :request="request"
+        :loading="approvalStore.isResolving[request.id]"
+        compact
+        @resolve="(decision, message) => approvalStore.resolve(request.id, decision, message)"
       />
     </div>
 
@@ -321,7 +409,13 @@ onUnmounted(() => {
 
     <!-- 输入框 -->
     <div class="chat-input-area">
-      <InputBar :is-sending="isGenerating" @send="handleSend" @stop="handleStop" />
+      <InputBar
+        :compact="compactInput"
+        :is-sending="isGenerating"
+        @send="handleSend"
+        @stop="handleStop"
+        @new-thread="handleNewThread"
+      />
     </div>
 
     <!-- 编辑对话框 -->
@@ -340,6 +434,12 @@ onUnmounted(() => {
         </div>
       </div>
     </Teleport>
+    <ConversationRewindDialog
+      v-model="rewind.visible.value"
+      :preview="rewind.preview.value"
+      :loading="rewind.loading.value"
+      @confirm="rewind.confirm"
+    />
   </div>
 </template>
 
@@ -350,13 +450,21 @@ onUnmounted(() => {
   height: 100%;
   position: relative;
   overflow: hidden;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 252, 249, 0.24));
+  background: transparent;
+}
+
+/* M05-B1: 工作徽章悬浮于消息区右上角，不占布局 */
+.chat-work-badge {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  z-index: 10;
 }
 
 .chat-messages {
   flex: 1;
   overflow-y: auto;
-  padding: 28px 30px 24px;
+  padding: 24px 28px 20px;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -370,12 +478,13 @@ onUnmounted(() => {
   background: transparent;
 }
 .chat-messages::-webkit-scrollbar-thumb {
-  background: rgba(249, 168, 212, 0.72);
+  background: var(--ui-scrollbar-thumb);
+  border-radius: var(--ui-radius-full);
 }
 
 .chat-input-area {
   flex-shrink: 0;
-  padding: 0 30px 28px;
+  padding: 0 28px 24px;
 }
 
 .chat-history-state {
@@ -384,43 +493,45 @@ onUnmounted(() => {
   align-items: center;
   gap: 8px;
   margin: 8px 0 16px;
-  padding: 8px 12px;
-  background: rgba(255, 252, 249, 0.82);
-  color: rgba(45, 27, 30, 0.62);
+  padding: 8px 16px;
+  background: var(--ui-bg-surface-soft);
+  color: var(--ui-text-secondary);
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 600;
+  border-radius: var(--ui-radius-full);
+  border: 1px solid var(--ui-border-subtle);
 }
 
 .chat-history-error {
-  background: rgba(254, 226, 226, 0.78);
-  color: var(--color-red-outline);
+  background: var(--ui-accent-red-soft);
+  color: var(--ui-danger);
+  border-color: var(--ui-danger);
 }
 
 /* 回到底部按钮 */
 .chat-scroll-down {
   position: absolute;
-  bottom: 124px;
+  bottom: 120px;
   left: 50%;
   transform: translateX(-50%);
-  width: 38px;
-  height: 38px;
+  width: 36px;
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 252, 249, 0.92);
-  color: var(--color-moe-pink);
+  background: var(--ui-bg-surface);
+  color: var(--ui-accent-primary);
   cursor: pointer;
-  box-shadow:
-    -2px 0 0 0 var(--color-moe-cocoa),
-    2px 0 0 0 var(--color-moe-cocoa),
-    0 -2px 0 0 var(--color-moe-cocoa),
-    0 2px 0 0 var(--color-moe-cocoa),
-    0 10px 26px rgba(249, 168, 212, 0.2);
-  transition: all 0.2s;
+  border: 1px solid var(--ui-border-default);
+  border-radius: var(--ui-radius-full);
+  box-shadow: var(--ui-shadow-md);
+  transition: all var(--ui-duration-fast);
   z-index: 10;
 }
 .chat-scroll-down:hover {
-  background: rgba(249, 168, 212, 0.16);
+  background: var(--ui-accent-primary);
+  color: white;
+  box-shadow: var(--ui-glow-pink);
   transform: translateX(-50%) translateY(-2px);
 }
 
@@ -436,10 +547,9 @@ onUnmounted(() => {
   transform: translateX(-50%) translateY(12px);
 }
 
-/* ── 不可见消息暂停 CSS ── */
+/* 不可见消息只暂停动画和媒体，不启用 content-visibility 高度占位。 */
 :deep(.msg-paused) {
-  content-visibility: auto;
-  /* contain-intrinsic-size 由 JS 动态设置 */
+  content-visibility: visible;
 }
 
 :deep(.msg-paused) video,
@@ -447,19 +557,16 @@ onUnmounted(() => {
   visibility: hidden;
 }
 
-/* 暂停 CSS 动画 */
 :deep(.msg-paused) * {
   animation-play-state: paused !important;
 }
 
 /* ── 流式渲染区域 ── */
 :deep(.stream-stable) {
-  /* 已闭合区域不再变化，允许浏览器优化渲染 */
   contain: content;
 }
 
 :deep(.stream-tail) {
-  /* 尾部每帧更新，不启用 contain — 保持正常渲染流 */
   contain: none;
 }
 </style>
@@ -469,28 +576,26 @@ onUnmounted(() => {
 .chat-edit-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 9999;
-  animation: fadeIn 0.15s;
+  z-index: var(--ui-z-modal);
+  animation: fadeIn var(--ui-duration-fast);
 }
 
 .chat-edit-dialog {
   width: 480px;
   max-width: 90vw;
-  background: rgba(255, 252, 249, 0.94);
+  background: var(--ui-bg-elevated);
+  border: 1px solid var(--ui-border-default);
+  border-radius: var(--ui-radius-lg);
   display: flex;
   flex-direction: column;
   gap: 12px;
   padding: 20px;
-  box-shadow:
-    -2px 0 0 0 var(--color-moe-cocoa),
-    2px 0 0 0 var(--color-moe-cocoa),
-    0 -2px 0 0 var(--color-moe-cocoa),
-    0 2px 0 0 var(--color-moe-cocoa),
-    0 24px 64px rgba(249, 168, 212, 0.24);
+  box-shadow: var(--ui-shadow-lg);
 }
 
 .chat-edit-header {
@@ -498,26 +603,29 @@ onUnmounted(() => {
   align-items: center;
   gap: 8px;
   font-size: 14px;
-  font-weight: 900;
-  color: var(--color-moe-cocoa);
+  font-weight: 800;
+  color: var(--ui-text-primary);
 }
 
 .chat-edit-textarea {
   width: 100%;
   min-height: 100px;
-  padding: 10px;
-  border: 2px solid rgba(45, 27, 30, 0.14);
-  background: rgba(255, 255, 255, 0.68);
-  color: var(--color-moe-cocoa);
-  font-family: inherit;
+  padding: 12px;
+  border: 1px solid var(--ui-border-default);
+  background: var(--ui-bg-surface);
+  color: var(--ui-text-primary);
+  font-family: var(--font-sans);
   font-size: 13px;
   line-height: 1.5;
   resize: vertical;
   outline: none;
+  border-radius: var(--ui-radius-sm);
+  transition: border-color var(--ui-duration-fast);
 }
 
 .chat-edit-textarea:focus {
-  border-color: rgba(249, 168, 212, 0.56);
+  border-color: var(--ui-accent-primary);
+  box-shadow: 0 0 0 2px var(--ui-accent-primary-soft);
 }
 
 .chat-edit-actions {
@@ -527,32 +635,33 @@ onUnmounted(() => {
 }
 
 .chat-edit-btn {
-  padding: 6px 16px;
+  padding: 8px 16px;
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
-  border: 2px solid transparent;
-  transition: all 0.15s;
+  border: 1px solid var(--ui-border-default);
+  border-radius: var(--ui-radius-sm);
+  transition: all var(--ui-duration-fast);
 }
 
 .chat-edit-cancel {
-  background: rgba(255, 255, 255, 0.62);
-  color: rgba(45, 27, 30, 0.62);
-  border-color: rgba(45, 27, 30, 0.12);
+  background: var(--ui-bg-surface);
+  color: var(--ui-text-secondary);
 }
 
 .chat-edit-cancel:hover {
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--ui-bg-hover);
 }
 
 .chat-edit-save {
-  background: var(--color-moe-pink);
+  background: var(--ui-accent-primary);
   color: white;
-  border-color: var(--color-moe-cocoa);
+  border-color: var(--ui-accent-primary);
 }
 
 .chat-edit-save:hover {
-  background: #f472b6;
+  background: #db2777;
+  box-shadow: var(--ui-glow-pink);
 }
 
 @keyframes fadeIn {

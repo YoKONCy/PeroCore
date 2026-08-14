@@ -1,0 +1,22 @@
+{
+  "toolDefinition": {
+    "name": "interact_with_app",
+    "description": "与已安装的 AgentApplication 通信。可发现应用能力，或委派一次性 command。应用内部工具不会直接暴露给主 Agent。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["discover", "command"],
+          "description": "discover 查看能力；command 执行一次性任务"
+        },
+        "app_id": { "type": "string", "description": "应用 ID" },
+        "action": { "type": "string", "description": "command 模式下的高层动作名" },
+        "input": { "type": "object", "description": "动作输入参数" },
+        "task_description": { "type": "string", "description": "可选任务描述" },
+        "success_criteria": { "type": "string", "description": "可选成功标准" }
+      },
+      "required": ["mode", "app_id"]
+    }
+  }
+}

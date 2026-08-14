@@ -2,13 +2,10 @@
 /**
  * Pet3DView — 宠物互动页面 (双模式)
  *
- * 通过 route prop `standalone` 支持两种布局:
- * - `standalone=false` (默认): 面板模式，带侧边栏状态/动作面板
- * - `standalone=true` (/pet-3d): 独立窗口模式，全屏透明 + 悬浮 UI
+ * 作为 Electron 独立透明桌宠窗口使用。
  *
  * 按 S05 §1 规范拆分:
  * - View 层: 模板 + composable 组装 (~120 行 script)
- * - usePetState.ts: 状态管理
  * - usePetBubble.ts: 对话气泡
  * - usePetTexts.ts: 台词系统 + 空闲消息 + 分时段欢迎
  * - usePetInteraction.ts: 点击/悬停/动作交互
@@ -21,7 +18,6 @@
  * @module packages/frontend/src/views/Pet3DView
  */
 import { ref, watch, computed, onMounted, onUnmounted } from 'vue'
-import { useRoute } from 'vue-router'
 import BedrockAvatar from '../components/avatar/BedrockAvatar.vue'
 import PetOverlayUI from '../components/pet/PetOverlayUI.vue'
 import { LyricOverlay } from '../components/overlays'
@@ -34,12 +30,12 @@ import { usePetTexts } from '../composables/pet/usePetTexts'
 import { usePetInteraction } from '../composables/pet/usePetInteraction'
 import { voiceApi } from '../api/modules/voiceApi'
 import { useNotificationStore } from '../stores'
+import {
+  AVATAR_MODEL_STORAGE_KEY,
+  DEFAULT_AVATAR_MANIFEST_PATH,
+} from '../components/avatar/lib/avatarDefaults'
 
 defineOptions({ name: 'Pet3DView' })
-
-// ═══ 模式判定 ═══
-const route = useRoute()
-const isStandalone = computed(() => !!route.meta.standalone)
 
 // ═══ 组装 composables ═══
 const {
@@ -99,7 +95,6 @@ const {
   pttDown,
   pttUp,
   isRecording,
-  audioLevel,
 } = usePetVoice(sendVoiceToAsr, isSpeaking)
 
 // ── 语音配置前置检查 ──
@@ -202,8 +197,39 @@ function onOverlaySendMessage(text: string) {
   startIdleTimer()
 }
 
-// ── PetOverlayUI 引用 (外观菜单/模型切换) ──
-const overlayUIRef = ref<InstanceType<typeof PetOverlayUI> | null>(null)
+// ── 当前模型加载路径；优先恢复用户选择，否则使用全局默认模型 ──
+const currentManifestPath = ref(
+  typeof localStorage !== 'undefined'
+    ? localStorage.getItem(AVATAR_MODEL_STORAGE_KEY) || DEFAULT_AVATAR_MANIFEST_PATH
+    : DEFAULT_AVATAR_MANIFEST_PATH,
+)
+
+/**
+ * 显式调用 BedrockAvatar 切换模型，并通过 complete 把真实结果返回外观菜单。
+ * 不再依赖 prop watcher，避免点击事件更新了路径但加载时序未触发。
+ */
+async function onModelChange(
+  manifestPath: string,
+  complete: (success: boolean, message?: string) => void,
+): Promise<void> {
+  const avatar = avatarRef.value as
+    | (InstanceType<typeof BedrockAvatar> & {
+        loadManifestPath?: (path: string) => Promise<boolean>
+      })
+    | null
+  if (!avatar?.loadManifestPath) {
+    complete(false, '模型渲染器尚未就绪')
+    return
+  }
+
+  try {
+    const success = await avatar.loadManifestPath(manifestPath)
+    if (success) currentManifestPath.value = manifestPath
+    complete(success, success ? undefined : '模型解析或渲染失败')
+  } catch (error) {
+    complete(false, error instanceof Error ? error.message : String(error))
+  }
+}
 const displayMode = ref<'bubble' | 'lyric'>(
   ((typeof localStorage !== 'undefined' && localStorage.getItem('ppc.display_mode')) ||
     'bubble') as 'bubble' | 'lyric',
@@ -211,6 +237,7 @@ const displayMode = ref<'bubble' | 'lyric'>(
 
 function onDisplayModeChange(mode: 'bubble' | 'lyric') {
   displayMode.value = mode
+  localStorage.setItem('ppc.display_mode', mode)
 }
 
 // ── 歌词模式: 追踪上一次可见内容 (切换模式时丝滑过渡) ──
@@ -246,12 +273,13 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div :class="['pet-view', { 'pet-view--standalone': isStandalone }]">
+  <div class="pet-view">
     <!-- 渲染区 -->
-    <div :class="['pet-canvas-area', { 'pet-canvas-area--standalone': isStandalone }]">
+    <div class="pet-canvas-area">
       <BedrockAvatar
         ref="avatarRef"
         :is-dragging="isDragging"
+        :manifest-path="currentManifestPath"
         @pet="onPet"
         @hover-start="onHoverStart"
         @hover-end="onHoverEnd"
@@ -287,8 +315,6 @@ onUnmounted(() => {
 
     <!-- 独立模式: 悬浮 UI -->
     <PetOverlayUI
-      v-if="isStandalone"
-      ref="overlayUIRef"
       :pet-name="petName"
       :mood-text="chatState.mood"
       :vibe-text="chatState.vibe"
@@ -296,7 +322,7 @@ onUnmounted(() => {
       :is-thinking="chatState.isThinking"
       :voice-mode="voiceMode"
       :is-recording="isRecording"
-      :audio-level="audioLevel"
+      :display-mode="displayMode"
       :avatar-ref="avatarRef as any"
       @send-message="onOverlaySendMessage"
       @ui-enter="onInteractableEnter"
@@ -304,16 +330,19 @@ onUnmounted(() => {
       @voice-mode="handleSetVoiceMode"
       @ptt-down="handlePttDown"
       @ptt-up="pttUp"
+      @model-change="onModelChange"
       @display-mode-change="onDisplayModeChange"
     />
 
     <!-- 歌词模式浮层 (独立模式 + displayMode=lyric) -->
     <LyricOverlay
-      v-if="isStandalone && displayMode === 'lyric'"
+      v-if="displayMode === 'lyric'"
       :text="lastLyricText || (chatState.isThinking ? '' : filteredLyricText)"
       :is-thinking="chatState.isThinking"
       :thinking-message="chatState.thinkingMessage"
       :eager="!!lastLyricText"
+      @ui-enter="onInteractableEnter"
+      @ui-leave="onInteractableLeave"
     />
   </div>
 </template>
@@ -325,11 +354,8 @@ onUnmounted(() => {
   width: 100vw;
   height: 100vh;
   overflow: hidden;
-  font-family: 'Consolas', 'Monaco', monospace;
-}
-
-.pet-view--standalone {
   background: transparent;
+  font-family: 'Consolas', 'Monaco', monospace;
 }
 
 /* ═══ 渲染区 ═══ */
@@ -338,10 +364,6 @@ onUnmounted(() => {
   position: relative;
   background: transparent;
   overflow: hidden;
-}
-
-.pet-canvas-area--standalone {
-  background: transparent;
 }
 
 /* ═══ 对话气泡 (v1 体素风) ═══ */

@@ -15,8 +15,8 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import path from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { PathResolver, type RuntimeEnv } from '@perocore/backend/core/pathResolver'
-import { LocalWorkspaceService } from '@perocore/backend/services/workspace/workspaceService'
+import { PathResolver, type RuntimeEnv } from '@infos/backend/core/pathResolver'
+import { LocalWorkspaceService } from '@infos/backend/services/workspace/workspaceService'
 
 const AGENT_ID = 'pero'
 
@@ -28,7 +28,7 @@ describe('LocalWorkspaceService', () => {
   let service: LocalWorkspaceService
 
   beforeEach(() => {
-    rootDir = path.join(tmpdir(), `perocore-ws-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+    rootDir = path.join(tmpdir(), `infos-ws-${Date.now()}-${Math.random().toString(36).slice(2)}`)
     dataDir = path.join(rootDir, 'data')
     appDir = path.join(rootDir, 'app')
     tempDir = path.join(rootDir, 'temp')
@@ -52,33 +52,22 @@ describe('LocalWorkspaceService', () => {
 
   // ── getWorkspaceRoot ──
 
-  it('getWorkspaceRoot 应当返回 @data/agents/{agentId}/workspace', () => {
+  it('getWorkspaceRoot 应当返回 @data/principals/{agentId}/workspace', () => {
     const root = service.getWorkspaceRoot(AGENT_ID)
-    expect(root).toBe(path.resolve(dataDir, 'agents', AGENT_ID, 'workspace'))
+    expect(root).toBe(path.resolve(dataDir, 'principals', AGENT_ID, 'workspace'))
   })
 
   // ── ensureWorkspace ──
 
-  it('ensureWorkspace 应当创建 workspace 根目录及全部子目录骨架', async () => {
+  it('ensureWorkspace 应当只创建 workspace 根目录，业务子目录按需懒创建', async () => {
     const root = service.getWorkspaceRoot(AGENT_ID)
     expect(existsSync(root)).toBe(false)
 
     await service.ensureWorkspace(AGENT_ID)
 
     expect(existsSync(root)).toBe(true)
-    const expectedSubdirs = [
-      'inbox',
-      'notes',
-      'diary',
-      'drafts',
-      'plans',
-      'documents',
-      'attachments',
-      'exports',
-      'archive',
-    ]
-    for (const subdir of expectedSubdirs) {
-      expect(existsSync(path.join(root, subdir))).toBe(true)
+    for (const subdir of ['inbox', 'notes', 'diary', 'drafts']) {
+      expect(existsSync(path.join(root, subdir))).toBe(false)
     }
   })
 
@@ -94,7 +83,7 @@ describe('LocalWorkspaceService', () => {
       await service.ensureWorkspace(AGENT_ID)
     })
 
-        it('desktop channel + read 应当全局允许（含 workspace 外路径）', () => {
+    it('desktop channel + read 应当全局允许（含 workspace 外路径）', () => {
       const outsidePath = path.join(rootDir, 'outside-file.txt')
       writeFileSync(outsidePath, 'x', 'utf-8')
       const result = service.validatePath(AGENT_ID, outsidePath, 'read', 'desktop')

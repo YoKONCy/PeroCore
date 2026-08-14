@@ -35,12 +35,7 @@ export type {
 export { SqliteGrantRegistry, type GrantRegistry } from './grantRegistry'
 
 // AppRuntime
-export type {
-  AppRuntimeContext,
-  AppLogger,
-  AgentAppRuntime,
-  AppRuntimeFactory,
-} from './appRuntime'
+export type { AppRuntimeContext, AppLogger, AgentAppRuntime, AppRuntimeFactory } from './appRuntime'
 
 // AppManager
 export { AppManagerImpl, type AppManager } from './appManager'

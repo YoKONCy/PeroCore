@@ -50,6 +50,9 @@ export interface ToolDefinition {
 // 调用选项
 // ─────────────────────────────────────────────
 
+/** 模型推理强度；undefined 表示完全不向 Provider 传参。 */
+export type ReasoningEffort = 'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
 export interface ChatOptions {
   /** 温度 (0-2) */
   temperature?: number
@@ -57,6 +60,8 @@ export interface ChatOptions {
   topP?: number
   /** 最大生成 Token 数 */
   maxTokens?: number
+  /** 模型推理强度 */
+  reasoningEffort?: ReasoningEffort
   /** 工具定义列表 */
   tools?: ToolDefinition[]
   /** 响应格式 (如 json_object) */
@@ -67,6 +72,8 @@ export interface ChatOptions {
   toolChoice?: 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } }
   /** 停止序列 */
   stop?: string[]
+  /** 取消在飞请求的信号 */
+  signal?: AbortSignal
 }
 
 // ─────────────────────────────────────────────

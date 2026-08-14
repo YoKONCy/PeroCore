@@ -2,9 +2,9 @@
 
 ## Supported Versions / 支持的版本
 
-PeroCore is currently in **Beta** development stage (v0.9.x).
+infOS is currently in **Beta** development stage (v0.9.x).
 
-PeroCore 目前处于 **Beta** 开发阶段 (v0.9.x)。
+infOS 目前处于 **Beta** 开发阶段 (v0.9.x)。
 
 | Version / 版本 | Supported / 支持状态 | Notes / 说明 |
 |:---|:---|:---|
@@ -43,9 +43,9 @@ If the vulnerability involves sensitive information (such as API key leaks, auth
 
 ## Security Considerations / 安全注意事项
 
-PeroCore handles the following sensitive data. Contributors should be especially careful with these areas:
+infOS handles the following sensitive data. Contributors should be especially careful with these areas:
 
-PeroCore 处理以下敏感数据，贡献者应特别注意这些领域：
+infOS 处理以下敏感数据，贡献者应特别注意这些领域：
 
 | Area / 领域 | Details / 详情 |
 |:---|:---|
@@ -61,9 +61,9 @@ PeroCore 处理以下敏感数据，贡献者应特别注意这些领域：
 
   永远不要将 API 密钥或机密信息提交到代码仓库。
 
-- All sensitive configurations should be stored in `~/.perocore/` (user data directory), never in the project directory.
+- All sensitive configurations should be stored in `~/.infos/` (user data directory), never in the project directory.
 
-  所有敏感配置应存储在 `~/.perocore/`（用户数据目录），而非项目目录。
+  所有敏感配置应存储在 `~/.infos/`（用户数据目录），而非项目目录。
 
 - The backend binds to `127.0.0.1` by default — do not expose it to `0.0.0.0` without authentication.
 
@@ -71,6 +71,6 @@ PeroCore 处理以下敏感数据，贡献者应特别注意这些领域：
 
 ---
 
-Thank you for helping keep PeroCore safe! 🛡️
+Thank you for helping keep infOS safe! 🛡️
 
-感谢您帮助保障 PeroCore 的安全！🛡️
+感谢您帮助保障 infOS 的安全！🛡️

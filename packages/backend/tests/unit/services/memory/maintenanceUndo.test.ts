@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { MaintenanceUndoService } from '@perocore/backend/services/memory/maintenance/maintenanceUndo'
+import { MaintenanceUndoService } from '@infos/backend/services/memory/maintenance/maintenanceUndo'
 
 function createDb(
   record: Record<string, unknown> | null,

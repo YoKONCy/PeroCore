@@ -1,6 +1,6 @@
 /**
  * @file Native 渲染核心懒加载
- * @description 延迟加载 @perocore/render-core-runtime (.node 文件)
+ * @description 延迟加载 @infos/render-core-runtime (.node 文件)
  *              关键安全改动: 不在模块顶层 require .node 文件，
  *              原生模块的 segfault 无法被 try/catch 捕获，
  *              会直接杀死主进程导致"静默失败"。
@@ -28,9 +28,11 @@ export function loadNativeModule(): any {
 
   try {
     if (isDev) {
-      const runtimePath = path.resolve(process.cwd(), 'packages/native/render-core-runtime')
-      native = require(runtimePath)
-      logger.info('Native', 'Native 核心加载成功 (开发环境)')
+      // 开发环境直接加载 render-core 源码目录（内含已编译的 *.node 与 index.js）；
+      // render-core-runtime 是发布时的运行时产物目录，开发态尚未把 .node 复制过去。
+      const devPath = path.resolve(process.cwd(), 'packages/native/render-core')
+      native = require(devPath)
+      logger.info('Native', `Native 核心加载成功 (开发环境): ${devPath}`)
     } else {
       // 生产环境: 搜索多个候选路径
       const nativePath = path.join(process.resourcesPath, 'native')

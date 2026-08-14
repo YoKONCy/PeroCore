@@ -2,7 +2,7 @@
   "id": "desktop-automation",
   "name": "桌面自动化",
   "version": "1.0.0",
-  "author": "PeroCore Team",
+  "author": "infOS Team",
   "description": "桌面 GUI 自动化操作。通过 DesktopAutomationProvider 适配不同平台。需要桌面环境。",
   "type": "tool",
   "entry": "index.ts",
@@ -42,6 +42,7 @@
     {
       "name": "get_mouse_position",
       "description": "获取当前鼠标的屏幕坐标。",
+      "display": { "label": "鼠标位置", "icon": "map-pin", "color": "purple", "style": "desktop" },
       "parameters": { "type": "object", "properties": {} }
     }
   ]

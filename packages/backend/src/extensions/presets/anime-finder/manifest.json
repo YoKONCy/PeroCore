@@ -2,7 +2,7 @@
   "id": "anime-finder",
   "name": "番剧识别",
   "version": "1.0.1",
-  "author": "PeroCore",
+  "author": "infOS",
   "description": "通过截图识别番剧出处。使用 trace.moe API 进行以图搜番。",
   "type": "tool",
   "entry": "index.ts",

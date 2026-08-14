@@ -21,6 +21,9 @@
 
 /* 2. 设计令牌 (CSS Variables 单一真相源) */
 @import './tokens.css';
+/* 2.1 现代 UI 语义令牌 (MainView 及新组件优先使用) */
+@import './ui-tokens.css';
+@import './dashboard-dark.css';
 
 /*
  * 3. @theme 桥接 — 将 tokens.css 的 --color-* 变量注册为 Tailwind 令牌
@@ -98,6 +101,35 @@
   /* ── 字体 ── */
   --font-sans: var(--font-sans);
   --font-pixel: var(--font-pixel);
+
+  /* ── 现代 UI 语义令牌 (ui-*) ── */
+  --color-ui-bg-canvas: var(--ui-bg-canvas);
+  --color-ui-bg-sidebar: var(--ui-bg-sidebar);
+  --color-ui-bg-surface: var(--ui-bg-surface);
+  --color-ui-bg-surface-soft: var(--ui-bg-surface-soft);
+  --color-ui-bg-elevated: var(--ui-bg-elevated);
+  --color-ui-bg-hover: var(--ui-bg-hover);
+  --color-ui-bg-active: var(--ui-bg-active);
+  --color-ui-text-primary: var(--ui-text-primary);
+  --color-ui-text-secondary: var(--ui-text-secondary);
+  --color-ui-text-tertiary: var(--ui-text-tertiary);
+  --color-ui-text-disabled: var(--ui-text-disabled);
+  --color-ui-text-inverse: var(--ui-text-inverse);
+  --color-ui-border-subtle: var(--ui-border-subtle);
+  --color-ui-border-default: var(--ui-border-default);
+  --color-ui-border-strong: var(--ui-border-strong);
+  --color-ui-accent-primary: var(--ui-accent-primary);
+  --color-ui-accent-primary-soft: var(--ui-accent-primary-soft);
+  --color-ui-accent-sky: var(--ui-accent-sky);
+  --color-ui-accent-sky-soft: var(--ui-accent-sky-soft);
+  --color-ui-accent-purple: var(--ui-accent-purple);
+  --color-ui-accent-purple-soft: var(--ui-accent-purple-soft);
+  --color-ui-success: var(--ui-success);
+  --color-ui-success-soft: var(--ui-success-soft);
+  --color-ui-warning: var(--ui-warning);
+  --color-ui-warning-soft: var(--ui-warning-soft);
+  --color-ui-danger: var(--ui-danger);
+  --color-ui-danger-soft: var(--ui-danger-soft);
 }
 
 /* 2. 轻量 CSS Reset (替代 Tailwind base) */

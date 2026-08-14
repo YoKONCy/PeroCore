@@ -37,10 +37,10 @@ defineEmits<{
 
 <style scoped>
 .p-input {
-  font-family: var(--font-pixel), monospace;
-  background: var(--color-bg-primary);
-  color: var(--color-text-primary);
-  border: 2px solid var(--color-border);
+  font-family: var(--ui-font-pixel);
+  background: var(--dash-input-bg);
+  color: var(--ui-text-primary);
+  border: 2px solid var(--dash-input-border);
   outline: none;
   width: 100%;
   transition: border-color 0.2s;
@@ -49,17 +49,18 @@ defineEmits<{
 }
 
 .p-input:focus {
-  border-color: var(--color-sky-500);
-  box-shadow: 0 0 0 1px var(--color-sky-500);
+  border-color: var(--ui-accent-sky);
+  box-shadow: 0 0 0 1px var(--ui-accent-sky);
 }
 
 .p-input:disabled {
-  opacity: 0.5;
+  color: var(--ui-text-disabled);
+  background: var(--ui-bg-surface-soft);
   cursor: not-allowed;
 }
 
 .p-input::placeholder {
-  color: var(--color-text-muted);
+  color: var(--ui-text-tertiary);
 }
 
 /* 尺寸 */

@@ -171,21 +171,12 @@ export class CanonicalMemoryRepository {
   }
 
   /** 按 content 模糊搜索（简单 LIKE，Gate 去重用） */
-  async searchByContent(
-    agentId: string,
-    keyword: string,
-    limit = 20,
-  ): Promise<CanonicalMemory[]> {
+  async searchByContent(agentId: string, keyword: string, limit = 20): Promise<CanonicalMemory[]> {
     const pattern = `%${keyword}%`
     const rows = await this.db
       .select()
       .from(canonicalMemories)
-      .where(
-        and(
-          eq(canonicalMemories.agentId, agentId),
-          like(canonicalMemories.content, pattern),
-        ),
-      )
+      .where(and(eq(canonicalMemories.agentId, agentId), like(canonicalMemories.content, pattern)))
       .orderBy(desc(canonicalMemories.createdAt))
       .limit(limit)
     return rows.map(rowToMemory)
@@ -221,10 +212,7 @@ export class CanonicalMemoryRepository {
   }
 
   /** 通用更新 */
-  async update(
-    id: string,
-    data: UpdateCanonicalMemoryInput,
-  ): Promise<CanonicalMemory | undefined> {
+  async update(id: string, data: UpdateCanonicalMemoryInput): Promise<CanonicalMemory | undefined> {
     const patch: Record<string, unknown> = {
       updatedAt: data.updatedAt ?? new Date().toISOString(),
     }
@@ -276,9 +264,7 @@ export class CanonicalMemoryRepository {
     }
 
     if (toDelete.length === 0) return 0
-    await this.db
-      .delete(canonicalMemories)
-      .where(inArray(canonicalMemories.id, toDelete))
+    await this.db.delete(canonicalMemories).where(inArray(canonicalMemories.id, toDelete))
     return toDelete.length
   }
 
@@ -287,12 +273,7 @@ export class CanonicalMemoryRepository {
     const rows = await this.db
       .select()
       .from(canonicalMemories)
-      .where(
-        and(
-          eq(canonicalMemories.agentId, agentId),
-          eq(canonicalMemories.status, 'active'),
-        ),
-      )
+      .where(and(eq(canonicalMemories.agentId, agentId), eq(canonicalMemories.status, 'active')))
       .orderBy(desc(canonicalMemories.createdAt))
       .limit(limit)
     return rows.map(rowToMemory)

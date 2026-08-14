@@ -2,9 +2,9 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { MdpEngine, type PromptSlot } from '@perocore/backend/services/prompt/mdpEngine'
+import { MdpEngine, type PromptSlot } from '@infos/backend/services/prompt/mdpEngine'
 
-vi.mock('@perocore/backend/lib/logger', () => ({
+vi.mock('@infos/backend/lib/logger', () => ({
   createLogger: () => ({
     debug: vi.fn(),
     info: vi.fn(),
@@ -18,7 +18,7 @@ describe('MdpEngine', () => {
   let agentsDir: string
 
   beforeEach(() => {
-    rootDir = join(tmpdir(), `perocore-mdp-${Date.now()}-${Math.random()}`)
+    rootDir = join(tmpdir(), `infos-mdp-${Date.now()}-${Math.random()}`)
     promptDir = join(rootDir, 'prompts')
     agentsDir = join(rootDir, 'agents')
     mkdirSync(join(promptDir, 'slots'), { recursive: true })

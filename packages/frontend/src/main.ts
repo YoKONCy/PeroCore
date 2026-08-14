@@ -3,7 +3,7 @@
  *
  * 初始化顺序：样式 → Pinia → Router → 全局错误处理 → 挂载
  *
- * @module @perocore/frontend
+ * @module @infos/frontend
  */
 
 import { createApp } from 'vue'
@@ -13,6 +13,7 @@ import router from './router'
 import { ApiError, ERROR_UI_MAP, ERROR_TITLE_MAP, ErrorSeverity } from './api'
 import { useNotificationStore } from './stores'
 import { logger } from './lib/logger'
+import { uiSound } from './services/ui/uiSound'
 
 // 全局样式 (令牌 → Tailwind → 像素风组件)
 import './assets/style.css'
@@ -28,6 +29,15 @@ app.use(router)
 
 // ── 初始化通知 Store (Pinia 已挂载后可用) ──
 const notificationStore = useNotificationStore()
+
+// Web Audio API 需要由首次用户交互解锁，之后关键事件可在后台安全播放。
+const unlockAudio = () => {
+  uiSound.unlock()
+  window.removeEventListener('pointerdown', unlockAudio)
+  window.removeEventListener('keydown', unlockAudio)
+}
+window.addEventListener('pointerdown', unlockAudio, { once: true })
+window.addEventListener('keydown', unlockAudio, { once: true })
 
 // 仅在开发环境下注入全局便于控制台测试，生产构建时会自动剥离这段代码
 if (import.meta.env.DEV) {

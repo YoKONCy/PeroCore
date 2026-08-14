@@ -34,10 +34,12 @@ function truncate(text: string, maxLen = 4000): string {
 // ─────────────────────────────────────────────
 
 export interface SocialSchedulerConfig {
+  /** 是否允许群聊调度器主动审视并发言 */
+  proactiveGroupEnabled: boolean
   /** 最少缓冲消息数才触发思考状态机审视 */
   minMessagesForReview: number
-  /** 思考状态机 LLM 温度 */
-  thinkingTemperature: number
+  /** 是否启用夜间静音 */
+  nightSilenceEnabled: boolean
   /** 夜间静音开始小时 (0-23) */
   nightSilenceStart: number
   /** 夜间静音结束小时 (0-23) */
@@ -45,8 +47,9 @@ export interface SocialSchedulerConfig {
 }
 
 const DEFAULT_CONFIG: SocialSchedulerConfig = {
+  proactiveGroupEnabled: true,
   minMessagesForReview: 3,
-  thinkingTemperature: 0.3,
+  nightSilenceEnabled: true,
   nightSilenceStart: 0, // 00:00
   nightSilenceEnd: 8, // 08:00
 }
@@ -75,6 +78,17 @@ export interface SocialSchedulerDeps {
   mdpEngine: MdpEngine
   /** 社交决策模型获取器 (由 ModelRoleResolver.bind('social_scheduler') 提供) */
   getSocialSchedulerModel: () => Promise<ModelConfig | null>
+  /** 获取决策所需的主 Agent 身份框架，保持主动决策与正式回复人格一致。 */
+  getDecisionIdentity?: (agentId: string) => Promise<{
+    agentName: string
+    systemCore: string
+    personaDefinition: string
+    socialPatch: string
+    /** 主人在主 app 登记的名称（owner.name），客观/中性指代用 */
+    ownerName: string
+    /** 角色对主人的亲密称呼（agent.json owner_appellation） */
+    ownerAppellation: string
+  }>
   /** 决定回复后的回调 (由 SocialBridge 提供) */
   onDecideReply: (session: SocialSession, messages: InboundMessage[]) => Promise<void>
 }
@@ -97,6 +111,15 @@ export class SocialScheduler {
   constructor(deps: SocialSchedulerDeps, config?: Partial<SocialSchedulerConfig>) {
     this.deps = deps
     this.config = { ...DEFAULT_CONFIG, ...config }
+  }
+
+  getConfig(): SocialSchedulerConfig {
+    return { ...this.config }
+  }
+
+  updateConfig(config: Partial<SocialSchedulerConfig>): SocialSchedulerConfig {
+    this.config = { ...this.config, ...config }
+    return this.getConfig()
   }
 
   // ── 启动 / 停止 ──
@@ -166,6 +189,7 @@ export class SocialScheduler {
    * - 无活跃会话: 10~20min
    */
   private async scanGroupSessions(): Promise<void> {
+    if (!this.config.proactiveGroupEnabled) return
     // 夜间静音检查
     if (this.isNightSilence()) return
 
@@ -316,20 +340,36 @@ export class SocialScheduler {
     const contextLines = messages.map((m) => `[${m.senderName}]: ${m.content.slice(0, 200)}`)
     const context = contextLines.join('\n')
 
-    // 使用已有的社交决策模板（AIOS 第八阶段：模板已迁移到 apps/social/prompts/）
-    const systemPart = this.deps.mdpEngine.render('apps/social/decisions/secretary_decision_group', {
-      agent_name: session.agentId,
-      current_time: new Date().toISOString().replace('T', ' ').slice(0, 19),
-      target_session_name: session.channelId,
-      custom_persona: '', // TODO: 注入 agent 人设（需从 AgentProfile 加载）
-      session_state: 'ACTIVE',
-      recent_history: context,
-    })
+    const identity = (await this.deps.getDecisionIdentity?.(session.agentId)) ?? {
+      agentName: session.agentId,
+      systemCore: '',
+      personaDefinition: '',
+      socialPatch: '',
+      ownerName: '用户',
+      ownerAppellation: '主人',
+    }
+
+    // 决策提示词沿用正式回复的身份框架，仅追加“是否发言”的任务约束。
+    const systemPart = this.deps.mdpEngine.render(
+      'apps/social/decisions/secretary_decision_group',
+      {
+        agent_name: identity.agentName,
+        system_core: identity.systemCore,
+        persona_definition: identity.personaDefinition,
+        social_patch: identity.socialPatch,
+        owner_name: identity.ownerName,
+        owner_appellation: identity.ownerAppellation,
+        current_time: new Date().toISOString().replace('T', ' ').slice(0, 19),
+        target_session_name: session.channelId,
+        session_state: session.state.toUpperCase(),
+        recent_history: context,
+      },
+    )
     const rulesPart = this.deps.mdpEngine.render(
       'apps/social/decisions/secretary_decision_group_rules',
       {
-        agent_name: session.agentId,
-        owner_name: '主人',
+        agent_name: identity.agentName,
+        owner_name: identity.ownerName,
       },
     )
     const systemPrompt = `${systemPart}\n\n${rulesPart}`
@@ -379,7 +419,7 @@ export class SocialScheduler {
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userContent },
         ],
-        { temperature: this.config.thinkingTemperature },
+        {},
       )
 
       const raw = completion.choices[0]?.message?.content
@@ -409,6 +449,7 @@ export class SocialScheduler {
 
   /** 检查当前是否在夜间静音时段 */
   private isNightSilence(): boolean {
+    if (!this.config.nightSilenceEnabled) return false
     const hour = new Date().getHours()
     const { nightSilenceStart, nightSilenceEnd } = this.config
     if (nightSilenceStart <= nightSilenceEnd) {

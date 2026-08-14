@@ -40,7 +40,7 @@ const animeFinder: ToolExtension = {
     try {
       // 1. 下载图片
       const imgResp = await fetch(imageUrl, {
-        headers: { 'User-Agent': 'PeroCore/2.0' },
+        headers: { 'User-Agent': 'infOS/2.0' },
         signal: AbortSignal.timeout(20_000),
       })
       if (!imgResp.ok) {

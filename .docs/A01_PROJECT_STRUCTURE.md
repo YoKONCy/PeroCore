@@ -1,6 +1,6 @@
 # 项目结构与 Monorepo 规范
 
-> **适用范围**：PeroCore-TS 项目整体
+> **适用范围**：infOS-TS 项目整体
 > **最后更新**：2026-04-21
 
 ---
@@ -22,16 +22,16 @@ packages:
 ## 2. 目录结构
 
 ```
-PeroCore-TS/
+infOS-TS/
 ├── packages/
-│   ├── shared/                    # @perocore/shared — 共享类型/常量/工具
+│   ├── shared/                    # @infos/shared — 共享类型/常量/工具
 │   │   └── src/
 │   │       ├── types/             # 共享类型 (api.types.ts, memory.types.ts ...)
 │   │       ├── constants/         # 共享常量 (responseCodes.ts ...)
 │   │       ├── utils/             # 共享工具函数
 │   │       └── index.ts           # 桶导出
 │   │
-│   ├── backend/                   # @perocore/backend — Hono + Drizzle + TriviumDB
+│   ├── backend/                   # @infos/backend — Hono + Drizzle + TriviumDB
 │   │   └── src/
 │   │       ├── app.ts             # Hono 应用入口
 │   │       ├── container.ts       # DI 容器
@@ -43,12 +43,14 @@ PeroCore-TS/
 │   │       ├── gateway/           # WebSocket Gateway (Protobuf)
 │   │       ├── extensions/        # 扩展系统框架
 │   │       ├── tools/             # 内置 Tool (平铺)
-│   │       ├── capabilities/      # CapabilityGate
-│   │       ├── lifecycle/         # 启动/定时任务
-│   │       ├── lib/               # 底层工具库 (logger, env, paths)
-│   │       └── shared/            # 后端共享工具 (llmJsonParser, vectorWriteHelper)
+│   │       ├── applications/       # AgentApplication / SubAgent 应用层与运行时
+│   │       ├── capabilities/       # CapabilityGate、Provider 注册与调用桥接
+│   │       ├── lifecycle/          # 启动、关闭、Scheduler
+│   │       ├── core/               # PathResolver、资产注册表与领域基础设施
+│   │       ├── lib/                # 底层工具库 (logger, env, paths)
+│   │       └── shared/             # 后端共享工具 (llmJsonParser, vectorWriteHelper)
 │   │
-│   ├── frontend/                  # @perocore/frontend — Vue 3 + Pinia
+│   ├── frontend/                  # @infos/frontend — Vue 3 + Pinia
 │   │   └── src/
 │   │       ├── api/               # API 客户端 + Transport 层
 │   │       ├── stores/            # Pinia Stores
@@ -59,9 +61,9 @@ PeroCore-TS/
 │   │       └── config/            # 运行时配置
 │   │
 │   └── native/                    # 🧱 Rust Native 模块
-│       ├── render-core/           # @perocore/render-core — 加密/反调/打包 (N-API)
-│       ├── nit-runtime/           # @perocore/nit-runtime — NIT 解释器 (N-API)
-│       └── auditor-wasm/          # @perocore/auditor-wasm — 终端命令审计 (WASM)
+│       ├── render-core/           # @infos/render-core — 加密/反调/打包 (N-API)
+│       ├── nit-runtime/           # @infos/nit-runtime — NIT 解释器 (N-API)
+│       └── auditor-wasm/          # @infos/auditor-wasm — 终端命令审计 (WASM)
 │
 ├── electron/                      # Electron 壳层
 │   ├── main/                      # 主进程 (index.ts, ipcBridge.ts, services/...)
@@ -80,14 +82,14 @@ PeroCore-TS/
 ## 3. 包依赖关系
 
 ```
-@perocore/shared         ← 无任何内部依赖
-@perocore/render-core    ← 无内部依赖 (Rust N-API)
-@perocore/nit-runtime    ← 无内部依赖 (Rust N-API)
-@perocore/auditor-wasm   ← 无内部依赖 (Rust WASM)
+@infos/shared         ← 无任何内部依赖
+@infos/render-core    ← 无内部依赖 (Rust N-API)
+@infos/nit-runtime    ← 无内部依赖 (Rust N-API)
+@infos/auditor-wasm   ← 无内部依赖 (Rust WASM)
       ↑
-@perocore/backend        ← 依赖 shared + nit-runtime + auditor-wasm
+@infos/backend        ← 依赖 shared + nit-runtime + auditor-wasm
       ↑
-@perocore/frontend       ← 依赖 shared
+@infos/frontend       ← 依赖 shared
 electron                 ← 依赖 frontend + render-core
 ```
 
@@ -136,4 +138,4 @@ pnpm -r --filter './packages/native/*' run build
 
 ---
 
-*本文档由 Carola 整理，适用于 PeroCore-TS 项目结构规范。*
+*本文档由 Carola 整理，适用于 infOS-TS 项目结构规范。*

@@ -15,7 +15,11 @@
 
 import { v4 as uuidv4 } from 'uuid'
 import { AbstractSocialAdapter } from '../ISocialAdapter'
-import type { OutboundMessage, AdapterStatus } from '../../runtime/types'
+import type {
+  OutboundMessage,
+  AdapterStatus,
+  SocialHistoryMessageRecord,
+} from '../../runtime/types'
 import type { OneBotMessageEvent, OneBotSegment } from './napcatParser'
 import {
   cleanCQCodes,
@@ -153,6 +157,60 @@ export class NapcatAdapter extends AbstractSocialAdapter {
       latencyMs,
       accountInfo: firstBotInfo as Record<string, unknown> | undefined,
     }
+  }
+
+  getConnectedAccountIds(): string[] {
+    const ids = [...this.connections.keys()]
+    if (ids.length > 0) return ids
+    return [...this.botInfos.keys()]
+  }
+
+  resolveAgentId(accountId: string): string | undefined {
+    return this.config.qqAgentMap[accountId] ?? this.config.defaultAgentId
+  }
+
+  async getMessageHistory(
+    channelId: string,
+    channelType: 'private' | 'group',
+    limit: number,
+    beforeMessageSeq?: number,
+  ): Promise<SocialHistoryMessageRecord[]> {
+    const action = channelType === 'group' ? 'get_group_msg_history' : 'get_friend_msg_history'
+    const idKey = channelType === 'group' ? 'group_id' : 'user_id'
+    const params: Record<string, unknown> = {
+      [idKey]: Number(channelId),
+      count: limit,
+      reverseOrder: false,
+    }
+    if (beforeMessageSeq !== undefined) params.message_seq = beforeMessageSeq
+    const resp = (await this.callApi(action, params, 15000)) as Record<string, unknown> | null
+    if (!resp || resp.status !== 'ok') return []
+    const data = resp.data as Record<string, unknown> | undefined
+    const messages = (
+      Array.isArray(data?.messages) ? data.messages : Array.isArray(data) ? data : []
+    ) as OneBotMessageEvent[]
+    const accountId = String(messages[0]?.self_id ?? this.getConnectedAccountIds()[0] ?? '')
+    return messages
+      .map((event) => {
+        const messageType = event.message_type === 'group' ? 'group' : 'private'
+        const senderId = String(event.user_id ?? event.sender?.user_id ?? '')
+        const rawContent = event.raw_message ?? segmentsToCQString(event.message ?? [])
+        return {
+          msgId: String(event.message_id ?? ''),
+          messageSeq:
+            Number(event.message_seq ?? event.messageSeq ?? event.msg_seq ?? 0) || undefined,
+          accountId,
+          channelId: messageType === 'group' ? String(event.group_id ?? channelId) : channelId,
+          channelType: messageType,
+          senderId: senderId === accountId ? 'self' : senderId,
+          senderName: event.sender?.card ?? event.sender?.nickname ?? senderId,
+          content: cleanCQCodes(rawContent),
+          timestamp: Number(event.time ?? 0),
+          rawEvent: event,
+        } satisfies SocialHistoryMessageRecord
+      })
+      .filter((message) => message.msgId && message.timestamp > 0)
+      .sort((a, b) => a.timestamp - b.timestamp)
   }
 
   // ── 连接管理 (由 socialRouter WS 端点调用) ──
@@ -551,9 +609,7 @@ export class NapcatAdapter extends AbstractSocialAdapter {
    *
    * @param forwardId 转发消息 ID（resId）
    */
-  async getForwardMsg(
-    forwardId: string,
-  ): Promise<
+  async getForwardMsg(forwardId: string): Promise<
     Array<{
       senderName: string
       senderId: string

@@ -60,33 +60,71 @@ export function usePetTexts(opts: UsePetTextsOptions) {
 
   // ── 空闲消息定时器 ──
   let idleTimer: ReturnType<typeof setTimeout> | null = null
+  let temporaryTextTimer: ReturnType<typeof setTimeout> | null = null
   let unlistenAgentChanged: (() => void) | null = null
   let textLoadSeq = 0
 
   // ── Gateway: 监听 state_update 实时热更新台词 (finish_task 写入 pet_states 后即时生效) ──
   const { connect: gwConnect, disconnect: gwDisconnect, onPush, offPush } = useGateway()
 
-  /** 将 state_update 广播里的 click/idle/back 台词热更新到本地台词库 */
+  function scheduleTemporaryTextExpiry(expiresAtValue: unknown): void {
+    if (temporaryTextTimer) {
+      clearTimeout(temporaryTextTimer)
+      temporaryTextTimer = null
+    }
+    if (typeof expiresAtValue !== 'string') return
+    const expiresAt = Date.parse(expiresAtValue)
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return
+    temporaryTextTimer = setTimeout(
+      () => {
+        temporaryTextTimer = null
+        void loadDynamicTexts({ agentId: activeAgentId.value, showWelcome: false })
+      },
+      Math.max(0, expiresAt - Date.now()),
+    )
+  }
+
+  /** 将 state_update 广播里的临时台词追加到本地台词池。 */
   function applyStateTexts(payload: Record<string, unknown>): void {
     // 仅接受当前活跃 agent 的台词更新 (广播带 agentId，缺省时兼容旧逻辑放行)
     const updateAgentId = payload.agentId
     if (typeof updateAgentId === 'string' && updateAgentId !== activeAgentId.value) return
+    const expiresAt =
+      typeof payload.text_expires_at === 'string' ? Date.parse(payload.text_expires_at) : Number.NaN
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return
+    scheduleTemporaryTextExpiry(payload.text_expires_at)
     const click = payload.click_messages as Record<string, unknown> | undefined
     if (click && typeof click === 'object') {
       for (const [part, lines] of Object.entries(click)) {
         if (Array.isArray(lines) && lines.length > 0) {
-          localTexts.value[`click_${part}_01`] = String(lines[0])
-          localTexts.value[`click_${part}_all`] = JSON.stringify(lines)
+          let current: string[] = []
+          try {
+            current = JSON.parse(localTexts.value[`click_${part}_all`] ?? '[]') as string[]
+          } catch {
+            const fallback = localTexts.value[`click_${part}_01`]
+            current = fallback ? [fallback] : []
+          }
+          const merged = [...new Set([...current, ...lines.map(String)])]
+          localTexts.value[`click_${part}_01`] = merged[0] ?? ''
+          localTexts.value[`click_${part}_all`] = JSON.stringify(merged)
         }
       }
     }
     const idle = payload.idle_messages
     if (Array.isArray(idle) && idle.length > 0) {
-      idleMessages.value = idle.map(String)
+      idleMessages.value = [...new Set([...idleMessages.value, ...idle.map(String)])]
     }
     const back = payload.back_messages
     if (Array.isArray(back) && back.length > 0) {
-      localTexts.value['visibilityBack_all'] = JSON.stringify(back)
+      let current: string[] = []
+      try {
+        current = JSON.parse(localTexts.value['visibilityBack_all'] ?? '[]') as string[]
+      } catch {
+        current = []
+      }
+      localTexts.value['visibilityBack_all'] = JSON.stringify([
+        ...new Set([...current, ...back.map(String)]),
+      ])
     }
   }
 
@@ -171,6 +209,14 @@ export function usePetTexts(opts: UsePetTextsOptions) {
       if (currentSeq !== textLoadSeq) return
       const texts = result?.data as Record<string, unknown> | undefined
       if (!texts || typeof texts !== 'object') return
+
+      try {
+        const petState = await agentApi.getPetState(agentId)
+        if (currentSeq !== textLoadSeq) return
+        scheduleTemporaryTextExpiry(petState.data?.textExpiresAt)
+      } catch {
+        scheduleTemporaryTextExpiry(null)
+      }
 
       const click = texts.click as Record<string, unknown> | undefined
       if (click) {
@@ -269,6 +315,7 @@ export function usePetTexts(opts: UsePetTextsOptions) {
 
   onUnmounted(() => {
     if (idleTimer) clearTimeout(idleTimer)
+    if (temporaryTextTimer) clearTimeout(temporaryTextTimer)
     unlistenAgentChanged?.()
     unlistenAgentChanged = null
     document.removeEventListener('visibilitychange', handleVisibilityChange)

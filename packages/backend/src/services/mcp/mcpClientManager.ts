@@ -126,7 +126,7 @@ export class McpClientManager {
 
       // 创建 Client
       const client = new Client(
-        { name: `perocore-${name}`, version: '0.9.1-hotfix.2' },
+        { name: `infos-${name}`, version: '0.9.2-rc1' },
         { capabilities: {} },
       )
 

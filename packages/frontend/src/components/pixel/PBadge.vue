@@ -28,7 +28,7 @@ withDefaults(defineProps<Props>(), {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-family: var(--font-pixel), monospace;
+  font-family: var(--ui-font-pixel);
   font-weight: 600;
   border: 1px solid;
   border-radius: 0;
@@ -48,29 +48,29 @@ withDefaults(defineProps<Props>(), {
 
 /* 变体 */
 .p-badge-default {
-  background: var(--color-bg-hover);
-  color: var(--color-text-secondary);
-  border-color: var(--color-border);
+  background: var(--ui-bg-hover);
+  color: var(--ui-text-secondary);
+  border-color: var(--ui-border-default);
 }
 .p-badge-primary {
-  background: var(--color-sky-100);
-  color: var(--color-sky-shadow);
-  border-color: var(--color-sky-light);
+  background: var(--ui-accent-sky-soft);
+  color: var(--ui-accent-sky);
+  border-color: var(--ui-accent-sky);
 }
 .p-badge-success {
-  background: var(--color-green-100);
-  color: var(--color-emerald-shadow);
-  border-color: var(--color-green-300);
+  background: var(--ui-success-soft);
+  color: var(--ui-success);
+  border-color: var(--ui-success);
 }
 .p-badge-warning {
-  background: var(--color-yellow-100);
-  color: var(--color-yellow-600);
-  border-color: var(--color-yellow-300);
+  background: var(--ui-warning-soft);
+  color: var(--ui-warning);
+  border-color: var(--ui-warning);
 }
 .p-badge-danger {
-  background: var(--color-red-100);
-  color: var(--color-red-shadow);
-  border-color: var(--color-red-300);
+  background: var(--ui-danger-soft);
+  color: var(--ui-danger);
+  border-color: var(--ui-danger);
 }
 
 /* 点标记 */

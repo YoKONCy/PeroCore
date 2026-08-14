@@ -4,10 +4,10 @@
     "outDir": "./dist",
     "types": ["node"],
     "paths": {
-      "@perocore/shared": ["../shared/src"],
-      "@perocore/shared/*": ["../shared/src/*"],
-      "@perocore/backend": ["../backend/src"],
-      "@perocore/backend/*": ["../backend/src/*"]
+      "@infos/shared": ["../shared/src"],
+      "@infos/shared/*": ["../shared/src/*"],
+      "@infos/backend": ["../backend/src"],
+      "@infos/backend/*": ["../backend/src/*"]
     }
   },
   "include": ["src/**/*.ts"],

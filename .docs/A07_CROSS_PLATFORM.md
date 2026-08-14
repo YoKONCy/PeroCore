@@ -1,7 +1,7 @@
 # 跨平台与路径规范
 
 > **版本**：0.2.0 · **更新时间**：2026-04-22
-> **适用范围**：PeroCore 全项目（后端 / 前端 / Electron / Rust 模块）
+> **适用范围**：infOS 全项目（后端 / 前端 / Electron / Rust 模块）
 > **依赖规范**：[A04_DEPLOYMENT](./A04_DEPLOYMENT.md)
 
 ---
@@ -14,15 +14,15 @@
 
 ```typescript
 // ❌ 禁止！硬编码路径
-const dbPath = 'C:\\Users\\pero\\data\\perocore.db'
-const dataDir = '/opt/perocore/data'
+const dbPath = 'C:\\Users\\pero\\data\\infos.db'
+const dataDir = '/opt/infos/data'
 
 // ✅ 从环境变量/配置获取
-const dbPath = env.PERO_DATABASE_PATH ?? path.join(getDataDir(), 'perocore.db')
+const dbPath = env.PERO_DATABASE_PATH ?? path.join(getDataDir(), 'infos.db')
 
 // ✅ 运行时计算
 const dataDir = app.getPath('userData')  // Electron
-const dataDir = env.PERO_DATA_DIR ?? path.join(os.homedir(), '.perocore')  // Docker/CLI
+const dataDir = env.PERO_DATA_DIR ?? path.join(os.homedir(), '.infos')  // Docker/CLI
 ```
 
 ### 1.2 路径操作必须使用 `node:path`
@@ -63,18 +63,18 @@ import os from 'node:os'
 /** 应用数据根目录 */
 export function getDataDir(): string {
   return process.env.PERO_DATA_DIR
-    ?? path.join(os.homedir(), '.perocore')
+    ?? path.join(os.homedir(), '.infos')
 }
 
 /** 数据库文件路径 */
 export function getDatabasePath(): string {
   return process.env.PERO_DATABASE_PATH
-    ?? path.join(getDataDir(), 'perocore.db')
+    ?? path.join(getDataDir(), 'infos.db')
 }
 
 /** Agent 工作区目录 */
 export function getAgentWorkspace(agentId: string): string {
-  return path.join(getDataDir(), 'agents', agentId, 'workspace')
+  return path.join(getDataDir(), 'principals', agentId, 'workspace')
 }
 
 /** TriviumDB 存储目录 */
@@ -241,6 +241,20 @@ Electron 专有代码 **全部** 在 `electron/` 目录中，后端/前端通过
 | 字体渲染 | 需验证中文字体 | ✅ 原生良好 |
 | GPU (Three.js) | 需测试 Mesa/Vulkan | ✅ Metal |
 
+## 7. AIOS 运行时路径与只读资产边界
+
+除跨平台规则外，所有路径还必须遵守 [A09_AIOS_ARCHITECTURE](./A09_AIOS_ARCHITECTURE.md#6-workspace-与-tool-capability) 的资源边界：
+
+| 逻辑空间 | 读写规则 | 典型用途 |
+|---|---|---|
+| `@app` | 只读 | 官方程序与内置资产 |
+| `@workshop` | 只读，可多根 | Steam 订阅资源 |
+| `@data` | 用户持久可写 | DB、Agent runtime、用户资产 |
+| `@data/principals/{agentId}/workspace` | Agent 私有可写 | Principal Workspace |
+| `@temp` | 临时可写 | 可再生成中间文件 |
+
+路径解析与云同步均必须执行 containment 检查，拒绝绝对路径和 `..` 逃逸。官方/Workshop 模型需要运行时 manifest 时，只能在内存或受限虚拟协议中提供，绝不可回写只读资源目录。
+
 ---
 
-*本文档由 Carola 整理，适用于 PeroCore 跨平台开发规范。*
+*本文档由 Carola 整理，适用于 infOS 跨平台开发规范。*

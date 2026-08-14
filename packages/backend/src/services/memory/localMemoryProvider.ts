@@ -45,9 +45,7 @@ const VALID_MEMORY_TYPES: ReadonlySet<string> = new Set([
  * id 转字符串以符合 MemorySearchResultItem 类型；type 校验后回退为 'event'。
  */
 function toResultItem(r: MemorySearchResult): MemorySearchResultItem {
-  const type: MemoryType = VALID_MEMORY_TYPES.has(r.type)
-    ? (r.type as MemoryType)
-    : 'event'
+  const type: MemoryType = VALID_MEMORY_TYPES.has(r.type) ? (r.type as MemoryType) : 'event'
   return {
     id: String(r.id),
     content: r.content,
@@ -78,15 +76,15 @@ export class LocalMemoryProvider implements MemoryProvider {
    * 语义检索记忆
    *
    * 走 MemorySearchService（向量检索 → enrichResults 通过 memory_nodes 数字 id 查内容）。
-   * channel 映射为 source（desktop/companion → desktop；social/group → social）。
+   * channel 映射为 source（desktop/companion → desktop；social → social；group → group）。
    */
   async search(params: MemorySearchParams): Promise<MemorySearchResultItem[]> {
-    const { query, agentId, channel, limit } = params
-    if (!query.trim()) return []
+    const { query, agentId, channel, limit, minScore } = params
+    if (!query.trim() || limit === 0) return []
 
     try {
-      // channel 映射到 MemorySource（与 ContextCompiler 旧逻辑保持一致）
-      const source = channel === 'social' || channel === 'group' ? 'social' : 'desktop'
+      // desktop/companion/group 共享主记忆池；Social 使用自己的应用级记忆系统，不走此 Provider。
+      const source = channel === 'social' ? 'social' : 'desktop'
       const topK = limit ?? 10
 
       const results = await this.memorySearchService.search({
@@ -94,6 +92,7 @@ export class LocalMemoryProvider implements MemoryProvider {
         agentId,
         source,
         topK,
+        minScore,
       })
 
       // 过滤 Entity 节点（结构节点，不适合注入上下文）
@@ -122,8 +121,8 @@ export class LocalMemoryProvider implements MemoryProvider {
       tags: input.tags?.join(','),
       importance: input.importance,
       type: input.type,
-      // source 用 provenance.originChannel，让向量检索时能按 channel 过滤
-      source: input.provenance.originChannel || 'desktop',
+      // 主 Agent 的 desktop/companion/group 共用 main 记忆池；真实来源保留在 CanonicalMemory.provenance。
+      source: input.provenance.originChannel === 'social' ? 'social' : 'desktop',
     })
 
     // 2. 写 canonical_memories（携带 provenance，vectorId 关联 memory_nodes 数字 id）

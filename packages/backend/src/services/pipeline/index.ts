@@ -11,9 +11,4 @@
  * @module packages/backend/src/services/pipeline
  */
 
-export type {
-  ChatMessage,
-  MultimodalContent,
-  ToolDefinition,
-  ToolCallRecord,
-} from './types'
+export type { ChatMessage, MultimodalContent, ToolDefinition, ToolCallRecord } from './types'

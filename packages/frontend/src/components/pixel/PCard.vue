@@ -96,9 +96,9 @@ withDefaults(defineProps<Props>(), {
 .p-card {
   position: relative;
   border-radius: 24px;
-  color: var(--color-text-primary);
-  background: var(--color-bg-primary);
-  border: 1px solid var(--color-sky-light);
+  color: var(--ui-text-primary);
+  background: var(--dash-panel-bg);
+  border: 1px solid var(--dash-panel-border);
   overflow: hidden;
   transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
@@ -110,74 +110,73 @@ withDefaults(defineProps<Props>(), {
 /* ── pixel 模式 ── */
 .p-card-pixel {
   border-radius: 0;
-  border: 3px solid var(--color-border);
-  box-shadow: 4px 4px 0 var(--color-shadow);
-  background: var(--color-bg-secondary);
+  border: 3px solid var(--ui-border-strong);
+  box-shadow: 4px 4px 0 var(--ui-border-default);
+  background: var(--dash-panel-bg);
 }
 
 .p-card-pixel.p-card-hoverable:hover {
   transform: translate(-2px, -2px);
-  box-shadow: 6px 6px 0 var(--color-shadow);
+  box-shadow: 6px 6px 0 var(--ui-border-default);
 }
 
 .p-card-pixel.p-card-hoverable:active {
   transform: translate(0, 0);
-  box-shadow: 4px 4px 0 var(--color-shadow);
+  box-shadow: 4px 4px 0 var(--ui-border-default);
 }
 
 .p-card-pixel.p-card-active {
-  background: var(--color-sky-50);
+  border-color: var(--ui-accent-sky);
+  box-shadow: 4px 4px 0 var(--ui-accent-sky-soft);
 }
 
 /* ── glass 模式 ── */
 .p-card-glass {
-  background: var(--color-bg-secondary);
+  background: var(--dash-panel-elevated);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border: 1px solid var(--color-sky-100);
+  border: 1px solid var(--ui-border-default);
 }
 
 /* ── 阴影 ── */
 .p-card-shadow {
-  box-shadow:
-    0 4px 16px var(--color-sky-50),
-    0 2px 6px var(--color-shadow);
+  box-shadow: var(--dash-panel-shadow);
 }
 
 /* ── bordered ── */
 .p-card-bordered {
   border-width: 2px;
-  border-color: var(--color-border);
+  border-color: var(--ui-border-strong);
 }
 
 /* ── active ── */
 .p-card-active:not(.p-card-pixel) {
   box-shadow:
-    0 0 0 4px var(--color-sky-100),
-    0 4px 16px var(--color-sky-50);
-  background: var(--color-sky-50);
+    0 0 0 4px var(--ui-accent-sky-soft),
+    var(--ui-shadow-md);
+  background: color-mix(in srgb, var(--ui-accent-sky) 8%, var(--dash-panel-bg));
 }
 
-/* ── variant 色系 (颜色引用 tokens.css) ── */
+/* ── variant 色系 ── */
 .p-card-variant-purple {
-  background: color-mix(in srgb, var(--color-purple-light) 30%, white);
-  border-color: var(--color-purple-light);
+  background: color-mix(in srgb, var(--ui-accent-purple) 8%, var(--dash-panel-bg));
+  border-color: var(--ui-accent-purple);
 }
 .p-card-variant-pink {
-  background: color-mix(in srgb, var(--color-pink-light) 30%, white);
-  border-color: var(--color-pink-light);
+  background: color-mix(in srgb, var(--ui-accent-primary) 8%, var(--dash-panel-bg));
+  border-color: var(--ui-accent-primary);
 }
 .p-card-variant-orange {
-  background: color-mix(in srgb, var(--color-orange-light) 30%, white);
-  border-color: var(--color-orange-light);
+  background: color-mix(in srgb, var(--ui-warning) 8%, var(--dash-panel-bg));
+  border-color: var(--ui-warning);
 }
 .p-card-variant-green {
-  background: color-mix(in srgb, var(--color-emerald-light) 30%, white);
-  border-color: var(--color-emerald-light);
+  background: color-mix(in srgb, var(--ui-success) 8%, var(--dash-panel-bg));
+  border-color: var(--ui-success);
 }
 .p-card-variant-sky {
-  background: color-mix(in srgb, var(--color-sky-light) 30%, white);
-  border-color: var(--color-sky-light);
+  background: color-mix(in srgb, var(--ui-accent-sky) 8%, var(--dash-panel-bg));
+  border-color: var(--ui-accent-sky);
 }
 
 /* ── glow 外发光 (颜色引用 tokens.css) ── */
@@ -205,10 +204,8 @@ withDefaults(defineProps<Props>(), {
 
 .p-card-hoverable:not(.p-card-pixel):hover {
   transform: translateY(-6px);
-  box-shadow:
-    0 12px 32px var(--color-sky-100),
-    0 4px 12px var(--color-shadow);
-  background: var(--color-bg-primary);
+  box-shadow: var(--ui-shadow-lg);
+  background: var(--dash-panel-elevated);
 }
 
 .p-card-hoverable:not(.p-card-pixel):active {
@@ -242,7 +239,7 @@ withDefaults(defineProps<Props>(), {
   width: 80px;
   height: 80px;
   border-radius: 50%;
-  background: var(--color-sky-50);
+  background: var(--ui-accent-sky-soft);
   filter: blur(40px);
   pointer-events: none;
   transition: background 0.3s;

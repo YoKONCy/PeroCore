@@ -57,10 +57,9 @@ export interface ResourceScope {
 }
 
 /**
- * 参数策略（简化版，暂不实现完整逻辑）
+ * 参数策略。
  *
- * 预留字段，后续用于校验工具参数（如命令白名单、内容长度上限）。
- * 第一版仅加数据结构，不实际生效。
+ * PolicyEngine 在 Hook 修改参数后执行这些规则，避免扩展通过改写参数绕过策略。
  */
 export interface ParamPolicy {
   /** 内容最大长度（字符数） */
@@ -74,8 +73,7 @@ export interface ParamPolicy {
 /**
  * 工具权限
  *
- * 描述单个工具在特定 (Agent, Channel) 下的资源范围与参数策略。
- * 第一版简化：仅 ResourceScope 生效，ParamPolicy 与 requiresApproval 仅加数据结构。
+ * 描述单个工具在特定 (Agent, Channel) 下的资源范围、参数策略与审批要求。
  */
 export interface ToolPermission {
   /** 工具名（与 ToolRegistry definition.name 一致） */
@@ -107,6 +105,9 @@ export interface SkillManifest {
   /** 依赖的子 Skill ID 列表 (嵌套调用) */
   dependsOnSkills: string[]
 }
+
+/** 请求级能力作用域；只能在 Channel 权限基础上继续收窄，不能扩权。 */
+export type CapabilityScope = 'default' | 'ambient'
 
 /** 解析后的完整能力上下文 (Gate 输出) */
 export interface ResolvedCapability {

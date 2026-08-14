@@ -305,7 +305,7 @@ export class RetargetingManager {
       }
       if (bone) {
         bone.position.copy(init.pos)
-        // 使用欧拉角重置以保持正确的旋转顺序 (ZXY)
+        // 使用欧拉角重置，保持骨骼构建时设定的原始旋转顺序（如 ZYX）
         bone.rotation.copy(init.euler)
         bone.scale.copy(init.scale)
       }

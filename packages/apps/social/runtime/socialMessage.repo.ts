@@ -8,7 +8,12 @@
  */
 
 import { desc, eq, and, sql, count as drizzleCount } from 'drizzle-orm'
-import { socialMessages } from '../../../backend/src/database/schema'
+import {
+  socialContactImpressions,
+  socialHistoryTombstones,
+  socialMessages,
+  socialSyncCursors,
+} from '../../../backend/src/database/schema'
 import type { DrizzleDb } from '../../../backend/src/database'
 
 export class SocialMessageRepository {
@@ -20,6 +25,7 @@ export class SocialMessageRepository {
   async insert(msg: {
     msgId: string
     platform: string
+    accountId?: string
     channelId: string
     channelType: string
     senderId: string
@@ -27,24 +33,31 @@ export class SocialMessageRepository {
     content: string
     agentId: string
     rawEventJson?: string
+    timestamp?: string
   }): Promise<void> {
-    await this.db.insert(socialMessages).values({
-      msgId: msg.msgId,
-      platform: msg.platform,
-      channelId: msg.channelId,
-      channelType: msg.channelType,
-      senderId: msg.senderId,
-      senderName: msg.senderName,
-      content: msg.content,
-      agentId: msg.agentId,
-      rawEventJson: msg.rawEventJson ?? '{}',
-    })
+    await this.db
+      .insert(socialMessages)
+      .values({
+        msgId: msg.msgId,
+        platform: msg.platform,
+        accountId: msg.accountId ?? '',
+        channelId: msg.channelId,
+        channelType: msg.channelType,
+        senderId: msg.senderId,
+        senderName: msg.senderName,
+        content: msg.content,
+        agentId: msg.agentId,
+        rawEventJson: msg.rawEventJson ?? '{}',
+        timestamp: msg.timestamp,
+      })
+      .onConflictDoNothing()
   }
 
   /**
    * 查询最近消息 (用于社交上下文构建)
    */
   async getRecent(
+    agentId: string,
     channelId: string,
     channelType: string,
     limit = 20,
@@ -53,7 +66,11 @@ export class SocialMessageRepository {
       .select()
       .from(socialMessages)
       .where(
-        and(eq(socialMessages.channelId, channelId), eq(socialMessages.channelType, channelType)),
+        and(
+          eq(socialMessages.agentId, agentId),
+          eq(socialMessages.channelId, channelId),
+          eq(socialMessages.channelType, channelType),
+        ),
       )
       .orderBy(desc(socialMessages.id))
       .limit(limit)
@@ -110,13 +127,20 @@ export class SocialMessageRepository {
    * @param limit     拉取条数（默认 10）
    */
   async getRecentPrivateBySender(
+    agentId: string,
     senderId: string,
     limit = 10,
   ): Promise<Array<typeof socialMessages.$inferSelect>> {
     return this.db
       .select()
       .from(socialMessages)
-      .where(and(eq(socialMessages.channelType, 'private'), eq(socialMessages.channelId, senderId)))
+      .where(
+        and(
+          eq(socialMessages.agentId, agentId),
+          eq(socialMessages.channelType, 'private'),
+          eq(socialMessages.channelId, senderId),
+        ),
+      )
       .orderBy(desc(socialMessages.id))
       .limit(limit)
       .then((rows) => rows.reverse()) // 返回时间正序
@@ -134,13 +158,14 @@ export class SocialMessageRepository {
    * @param limit     回溯条数（默认 20）
    */
   async getRecentBySender(
+    agentId: string,
     senderId: string,
     limit = 20,
   ): Promise<Array<typeof socialMessages.$inferSelect>> {
     return this.db
       .select()
       .from(socialMessages)
-      .where(eq(socialMessages.senderId, senderId))
+      .where(and(eq(socialMessages.agentId, agentId), eq(socialMessages.senderId, senderId)))
       .orderBy(desc(socialMessages.id))
       .limit(limit)
       .then((rows) => rows.reverse()) // 返回时间正序
@@ -154,13 +179,382 @@ export class SocialMessageRepository {
    *
    * @param msgId 消息 ID（对应 OneBot 事件的 message_id）
    */
-  async getByMsgId(msgId: string): Promise<typeof socialMessages.$inferSelect | null> {
+  async getByMsgId(
+    agentId: string,
+    msgId: string,
+  ): Promise<typeof socialMessages.$inferSelect | null> {
     const [row] = await this.db
       .select()
       .from(socialMessages)
-      .where(eq(socialMessages.msgId, msgId))
+      .where(and(eq(socialMessages.agentId, agentId), eq(socialMessages.msgId, msgId)))
       .limit(1)
     return row ?? null
+  }
+
+  async getRecentGroupsByContact(
+    agentId: string,
+    userId: string,
+    groupLimit = 5,
+  ): Promise<string[]> {
+    const rows = await this.db
+      .select({ channelId: socialMessages.channelId })
+      .from(socialMessages)
+      .where(
+        and(
+          eq(socialMessages.agentId, agentId),
+          eq(socialMessages.channelType, 'group'),
+          eq(socialMessages.senderId, userId),
+        ),
+      )
+      .orderBy(desc(socialMessages.id))
+      .limit(groupLimit * 20)
+
+    return [...new Set(rows.map((row) => row.channelId))].slice(0, groupLimit)
+  }
+
+  async getRecentSelfGroupMessages(
+    agentId: string,
+    groupId: string,
+    limit = 5,
+  ): Promise<Array<typeof socialMessages.$inferSelect>> {
+    return this.db
+      .select()
+      .from(socialMessages)
+      .where(
+        and(
+          eq(socialMessages.agentId, agentId),
+          eq(socialMessages.channelType, 'group'),
+          eq(socialMessages.channelId, groupId),
+          eq(socialMessages.senderId, 'self'),
+        ),
+      )
+      .orderBy(desc(socialMessages.id))
+      .limit(limit)
+      .then((rows) => rows.reverse())
+  }
+
+  async getContactGroupMessages(
+    agentId: string,
+    senderId: string,
+    groupId: string,
+    limit = 30,
+  ): Promise<Array<typeof socialMessages.$inferSelect>> {
+    return this.db
+      .select()
+      .from(socialMessages)
+      .where(
+        and(
+          eq(socialMessages.agentId, agentId),
+          eq(socialMessages.channelType, 'group'),
+          eq(socialMessages.channelId, groupId),
+          eq(socialMessages.senderId, senderId),
+        ),
+      )
+      .orderBy(desc(socialMessages.id))
+      .limit(limit)
+      .then((rows) => rows.reverse())
+  }
+
+  async getContactImpression(agentId: string, platform: string, userId: string) {
+    const [row] = await this.db
+      .select()
+      .from(socialContactImpressions)
+      .where(
+        and(
+          eq(socialContactImpressions.agentId, agentId),
+          eq(socialContactImpressions.platform, platform),
+          eq(socialContactImpressions.userId, userId),
+        ),
+      )
+      .limit(1)
+    return row ?? null
+  }
+
+  async upsertContactImpression(input: {
+    agentId: string
+    platform: string
+    userId: string
+    displayName?: string
+    identity?: string
+    impression: string
+    sourceChannelId?: string
+  }): Promise<void> {
+    await this.db
+      .insert(socialContactImpressions)
+      .values({
+        agentId: input.agentId,
+        platform: input.platform,
+        userId: input.userId,
+        displayName: input.displayName ?? '',
+        identity: input.identity ?? '',
+        impression: input.impression,
+        sourceChannelId: input.sourceChannelId,
+        updatedAt: sql`(datetime('now', 'localtime'))`,
+      })
+      .onConflictDoUpdate({
+        target: [
+          socialContactImpressions.agentId,
+          socialContactImpressions.platform,
+          socialContactImpressions.userId,
+        ],
+        set: {
+          displayName: input.displayName ?? '',
+          // identity 为空时保留旧值，避免只更新印象时清空已记录的身份
+          identity: sql`CASE WHEN ${input.identity} IS NULL OR ${input.identity} = '' THEN ${socialContactImpressions.identity} ELSE ${input.identity} END`,
+          impression: input.impression,
+          sourceChannelId: input.sourceChannelId,
+          updatedAt: sql`(datetime('now', 'localtime'))`,
+        },
+      })
+  }
+
+  async listContactImpressions(agentId: string) {
+    return this.db
+      .select()
+      .from(socialContactImpressions)
+      .where(eq(socialContactImpressions.agentId, agentId))
+      .orderBy(desc(socialContactImpressions.updatedAt))
+  }
+
+  async countChannelMessages(
+    agentId: string,
+    channelType: string,
+    channelId: string,
+  ): Promise<number> {
+    const [row] = await this.db
+      .select({ total: drizzleCount(socialMessages.id) })
+      .from(socialMessages)
+      .where(
+        and(
+          eq(socialMessages.agentId, agentId),
+          eq(socialMessages.channelType, channelType),
+          eq(socialMessages.channelId, channelId),
+        ),
+      )
+    return Number(row?.total ?? 0)
+  }
+
+  async deleteChannelMessages(
+    agentId: string,
+    channelType: string,
+    channelId: string,
+  ): Promise<number> {
+    const count = await this.countChannelMessages(agentId, channelType, channelId)
+    await this.db
+      .delete(socialMessages)
+      .where(
+        and(
+          eq(socialMessages.agentId, agentId),
+          eq(socialMessages.channelType, channelType),
+          eq(socialMessages.channelId, channelId),
+        ),
+      )
+    return count
+  }
+
+  async deleteAllMessages(agentId: string): Promise<number> {
+    const [row] = await this.db
+      .select({ total: drizzleCount(socialMessages.id) })
+      .from(socialMessages)
+      .where(eq(socialMessages.agentId, agentId))
+    await this.db.delete(socialMessages).where(eq(socialMessages.agentId, agentId))
+    return Number(row?.total ?? 0)
+  }
+
+  async deleteContactImpression(agentId: string, platform: string, userId: string): Promise<void> {
+    await this.db
+      .delete(socialContactImpressions)
+      .where(
+        and(
+          eq(socialContactImpressions.agentId, agentId),
+          eq(socialContactImpressions.platform, platform),
+          eq(socialContactImpressions.userId, userId),
+        ),
+      )
+  }
+
+  async deleteAllContactImpressions(agentId: string): Promise<number> {
+    const [row] = await this.db
+      .select({ total: drizzleCount(socialContactImpressions.id) })
+      .from(socialContactImpressions)
+      .where(eq(socialContactImpressions.agentId, agentId))
+    await this.db
+      .delete(socialContactImpressions)
+      .where(eq(socialContactImpressions.agentId, agentId))
+    return Number(row?.total ?? 0)
+  }
+
+  async isDeletedByTombstone(input: {
+    agentId: string
+    platform: string
+    accountId: string
+    channelType: string
+    channelId: string
+    timestamp: number
+  }): Promise<boolean> {
+    const rows = await this.db
+      .select()
+      .from(socialHistoryTombstones)
+      .where(
+        and(
+          eq(socialHistoryTombstones.agentId, input.agentId),
+          eq(socialHistoryTombstones.platform, input.platform),
+        ),
+      )
+    return rows.some(
+      (row) =>
+        (row.accountId === '' || row.accountId === input.accountId) &&
+        (row.channelType === '*' || row.channelType === input.channelType) &&
+        (row.channelId === '*' || row.channelId === input.channelId) &&
+        input.timestamp <= row.deletedBefore,
+    )
+  }
+
+  async upsertTombstone(input: {
+    agentId: string
+    platform: string
+    accountId?: string
+    channelType?: string
+    channelId?: string
+    deletedBefore: number
+  }): Promise<void> {
+    await this.db
+      .insert(socialHistoryTombstones)
+      .values({
+        agentId: input.agentId,
+        platform: input.platform,
+        accountId: input.accountId ?? '',
+        channelType: input.channelType ?? '*',
+        channelId: input.channelId ?? '*',
+        deletedBefore: input.deletedBefore,
+      })
+      .onConflictDoUpdate({
+        target: [
+          socialHistoryTombstones.agentId,
+          socialHistoryTombstones.platform,
+          socialHistoryTombstones.accountId,
+          socialHistoryTombstones.channelType,
+          socialHistoryTombstones.channelId,
+        ],
+        set: { deletedBefore: input.deletedBefore, createdAt: sql`(datetime('now', 'localtime'))` },
+      })
+  }
+
+  async getSyncCursor(agentId: string, platform: string, accountId: string) {
+    const [row] = await this.db
+      .select()
+      .from(socialSyncCursors)
+      .where(
+        and(
+          eq(socialSyncCursors.agentId, agentId),
+          eq(socialSyncCursors.platform, platform),
+          eq(socialSyncCursors.accountId, accountId),
+        ),
+      )
+      .limit(1)
+    return row ?? null
+  }
+
+  async markSyncStarted(
+    agentId: string,
+    platform: string,
+    accountId: string,
+    startedAt: number,
+  ): Promise<void> {
+    await this.db
+      .insert(socialSyncCursors)
+      .values({
+        agentId,
+        platform,
+        accountId,
+        syncStartedAt: startedAt,
+        status: 'running',
+        lastError: null,
+      })
+      .onConflictDoUpdate({
+        target: [
+          socialSyncCursors.agentId,
+          socialSyncCursors.platform,
+          socialSyncCursors.accountId,
+        ],
+        set: {
+          syncStartedAt: startedAt,
+          status: 'running',
+          lastError: null,
+          updatedAt: sql`(datetime('now', 'localtime'))`,
+        },
+      })
+  }
+
+  async markSyncCompleted(
+    agentId: string,
+    platform: string,
+    accountId: string,
+    completedThrough: number,
+  ): Promise<void> {
+    await this.db
+      .insert(socialSyncCursors)
+      .values({
+        agentId,
+        platform,
+        accountId,
+        lastSuccessfulSyncAt: completedThrough,
+        status: 'idle',
+        lastError: null,
+      })
+      .onConflictDoUpdate({
+        target: [
+          socialSyncCursors.agentId,
+          socialSyncCursors.platform,
+          socialSyncCursors.accountId,
+        ],
+        set: {
+          lastSuccessfulSyncAt: completedThrough,
+          syncStartedAt: null,
+          status: 'idle',
+          lastError: null,
+          updatedAt: sql`(datetime('now', 'localtime'))`,
+        },
+      })
+  }
+
+  async markSyncFailed(
+    agentId: string,
+    platform: string,
+    accountId: string,
+    error: string,
+  ): Promise<void> {
+    await this.db
+      .update(socialSyncCursors)
+      .set({
+        status: 'failed',
+        lastError: error,
+        updatedAt: sql`(datetime('now', 'localtime'))`,
+      })
+      .where(
+        and(
+          eq(socialSyncCursors.agentId, agentId),
+          eq(socialSyncCursors.platform, platform),
+          eq(socialSyncCursors.accountId, accountId),
+        ),
+      )
+  }
+
+  async getRecentChannelsForPlatform(
+    platform: string,
+    limit = 100,
+  ): Promise<Array<{ agentId: string; channelId: string; channelType: string }>> {
+    return this.db
+      .select({
+        agentId: socialMessages.agentId,
+        channelId: socialMessages.channelId,
+        channelType: socialMessages.channelType,
+      })
+      .from(socialMessages)
+      .where(eq(socialMessages.platform, platform))
+      .groupBy(socialMessages.agentId, socialMessages.channelId, socialMessages.channelType)
+      .orderBy(desc(sql`MAX(${socialMessages.timestamp})`))
+      .limit(limit)
   }
 
   // ── 社交 Scorer 动态门控查询 ──

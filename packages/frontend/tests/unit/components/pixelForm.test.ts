@@ -2,12 +2,12 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 
-import PCheckbox from '@perocore/frontend/components/pixel/PCheckbox.vue'
-import PInput from '@perocore/frontend/components/pixel/PInput.vue'
-import PInputNumber from '@perocore/frontend/components/pixel/PInputNumber.vue'
-import PSlider from '@perocore/frontend/components/pixel/PSlider.vue'
-import PSwitch from '@perocore/frontend/components/pixel/PSwitch.vue'
-import PTextarea from '@perocore/frontend/components/pixel/PTextarea.vue'
+import PCheckbox from '@infos/frontend/components/pixel/PCheckbox.vue'
+import PInput from '@infos/frontend/components/pixel/PInput.vue'
+import PInputNumber from '@infos/frontend/components/pixel/PInputNumber.vue'
+import PSlider from '@infos/frontend/components/pixel/PSlider.vue'
+import PSwitch from '@infos/frontend/components/pixel/PSwitch.vue'
+import PTextarea from '@infos/frontend/components/pixel/PTextarea.vue'
 
 describe('基础像素表单组件', () => {
   describe('PInput', () => {
@@ -180,7 +180,7 @@ describe('基础像素表单组件', () => {
       expect(wrapper.emitted('update:modelValue')).toEqual([[0]])
     })
 
-    it('应当把空输入按零值处理并接受有效数字', async () => {
+    it('应当把空输入按 null 处理并接受有效数字', async () => {
       const wrapper = mount(PInputNumber, {
         props: {
           modelValue: null,
@@ -193,7 +193,7 @@ describe('基础像素表单组件', () => {
       await input.setValue('')
       await input.setValue('7')
 
-      expect(wrapper.emitted('update:modelValue')).toEqual([[0], [7]])
+      expect(wrapper.emitted('update:modelValue')).toEqual([[null], [7]])
     })
   })
 

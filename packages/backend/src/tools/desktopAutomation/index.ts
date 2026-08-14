@@ -124,7 +124,7 @@ export const automationExecuteTool: BuiltinTool = {
 
         case 'notification': {
           const title = text ?? 'Pero 提醒'
-          const body = message ?? '主人，我有事情要告诉你哦！'
+          const body = message ?? '我有事情要告诉你哦！'
           await _automationProvider.sendNotification(title, body)
           return JSON.stringify({ success: true, message: `已发送通知: ${title}` })
         }

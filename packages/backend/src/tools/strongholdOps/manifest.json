@@ -2,8 +2,8 @@
   "id": "stronghold-ops",
   "name": "据点操作",
   "version": "1.0.0",
-  "author": "PeroCore Team",
-  "description": "据点/群聊空间管理工具。支持房间移动、环境调整、呼叫管家等。仅在 group_chat 模式下可用。",
+  "author": "infOS Team",
+  "description": "据点内部群聊空间管理工具。支持房间移动、环境调整、呼叫管家等。仅在 group 通道下开放。",
   "type": "tool",
   "entry": "index.ts",
   "category": "core",
@@ -12,6 +12,12 @@
     {
       "name": "stronghold_move_to_room",
       "description": "移动到据点内的另一个房间。移动后你会进入该房间的群聊上下文。",
+      "display": {
+        "label": "移动房间",
+        "icon": "door-open",
+        "color": "purple",
+        "style": "stronghold"
+      },
       "parameters": {
         "type": "object",
         "properties": {
@@ -26,6 +32,7 @@
     {
       "name": "stronghold_list_rooms",
       "description": "列出据点内的所有可用房间及其简要信息。",
+      "display": { "label": "房间列表", "icon": "list", "color": "purple", "style": "stronghold" },
       "parameters": {
         "type": "object",
         "properties": {}
@@ -34,6 +41,7 @@
     {
       "name": "stronghold_get_room_info",
       "description": "查看某个房间的详细信息，包括环境变量 (灯光/温度/音乐等) 和在场的角色。",
+      "display": { "label": "房间信息", "icon": "info", "color": "purple", "style": "stronghold" },
       "parameters": {
         "type": "object",
         "properties": {
@@ -47,6 +55,12 @@
     {
       "name": "stronghold_set_environment",
       "description": "调整当前所在房间的环境变量。例如调节灯光亮度、温度、播放音乐等。",
+      "display": {
+        "label": "设置环境",
+        "icon": "sparkle",
+        "color": "purple",
+        "style": "stronghold"
+      },
       "parameters": {
         "type": "object",
         "properties": {
@@ -64,7 +78,8 @@
     },
     {
       "name": "stronghold_call_butler",
-      "description": "呼叫据点管家。管家可以帮你管理设施和房间，如打扫卫生、调整布局、维修设备等。管家会根据请求自动执行相应操作。",
+      "description": "调用据点管家执行状态查询、环境检查、召唤 Agent 等操作。",
+      "display": { "label": "呼叫管家", "icon": "user", "color": "purple", "style": "stronghold" },
       "parameters": {
         "type": "object",
         "properties": {

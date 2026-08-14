@@ -29,6 +29,13 @@ const logger = createLogger('Startup')
 export async function runStartupTasks(ctx: AppContext): Promise<void> {
   logger.info('正在执行启动后任务...')
 
+  // 退役 companion 持久通道：旧会话按产品决策统一软删除。
+  try {
+    await ctx.threadService.deleteThreadsByChannel('companion')
+  } catch (err) {
+    logger.warn(`旧陪伴会话清理失败: ${err}`)
+  }
+
   // ── 1. 启动后台调度器 ──
   ctx.scheduler.start()
   logger.success('后台调度器已启动')
@@ -36,7 +43,7 @@ export async function runStartupTasks(ctx: AppContext): Promise<void> {
   // ── 2. 恢复 Scorer 待处理任务 ──
   try {
     const activeAgent = ctx.agentManager.defaultAgentId
-    await ctx.scorerService.processBatch(activeAgent)
+    await ctx.scorerService.flushPendingByThread(activeAgent)
     logger.info('Scorer 启动恢复处理完成')
   } catch (err) {
     logger.warn(`Scorer 恢复失败: ${err}`)
@@ -65,8 +72,8 @@ export async function runStartupTasks(ctx: AppContext): Promise<void> {
   // ── 6. 注册 abort 事件处理 (前端中断对话) ──
   // AIOS: 改用 RuntimeStateService 按 threadId 取消任务
   ctx.gatewayHub.on('abort', (envelope: GatewayEnvelope) => {
-    const threadId = (envelope.payload?.threadId as string) ||
-      (envelope.payload?.sessionId as string) || 'default'
+    const threadId =
+      (envelope.payload?.threadId as string) || (envelope.payload?.sessionId as string) || 'default'
     ctx.runtimeStateService.cancelTask(threadId)
     logger.info(`对话已中断: thread=${threadId}`)
   })
@@ -87,7 +94,10 @@ function registerVoicePipelineHandler(ctx: AppContext): void {
   ctx.gatewayHub.on('action:voice_pipeline', async (envelope: GatewayEnvelope) => {
     const payload = envelope.payload as Record<string, unknown>
     const audioBase64 = payload.audio as string | undefined
-    const agentId = (payload.agentId as string) || 'pero'
+    const agentId =
+      (payload.agentId as string) ||
+      ctx.runtimeStateService.getActiveAgent() ||
+      ctx.agentManager.defaultAgentId
     const sessionId = (payload.sessionId as string) || `voice_${Date.now()}`
 
     if (!audioBase64) {
@@ -170,11 +180,11 @@ function registerVoicePipelineHandler(ctx: AppContext): void {
  * 处理流程：
  * 1. 获取或创建 desktop Thread（若 payload 未带 threadId）
  * 2. 追加用户消息到 Thread
- * 3. ContextCompiler 编译上下文（从 Thread 加载历史 + 人格 + 记忆 + 工具）
+ * 3. ConversationTurnService 写入消息并编译上下文
  * 4. RuntimeStateService 注册任务（替代旧 TaskManager）
- * 5. AgentService.chatStreamWithCompiledMessages() 执行流式对话
+ * 5. ConversationTurnService.streamTurn() 执行流式对话并统一持久化消息对
  * 6. 将每个 delta 通过 pushStreamDelta 推送到前端
- * 7. 追加 Agent 回复到 Thread
+ * 7. 结束流并发送 RPC 响应
  * 8. 对话完成后发送 stream_end + RPC response 回送
  * 9. 异步合成 TTS 并推送音频
  */
@@ -215,13 +225,16 @@ async function synthesizeAndPushTts(
 function registerChatHandler(ctx: AppContext): void {
   ctx.gatewayHub.on('action:chat', async (envelope: GatewayEnvelope) => {
     const payload = envelope.payload as Record<string, unknown>
-    const agentId = (payload.agentId as string) || 'pero'
+    const agentId =
+      (payload.agentId as string) ||
+      ctx.runtimeStateService.getActiveAgent() ||
+      ctx.agentManager.defaultAgentId
     const requestId = envelope.id
     const sourceNodeId = envelope.sourceId ?? ''
 
     // AIOS: 优先使用 threadId；兼容旧版 sessionId 字段
-    const threadId = (payload.threadId as string) ||
-      (payload.sessionId as string) || ''
+    const threadId = (payload.threadId as string) || (payload.sessionId as string) || ''
+    const capabilityScope = payload.capabilityScope === 'ambient' ? 'ambient' : 'default'
 
     // AIOS: 优先使用 content；兼容旧版 messages 数组（取最后一条 user 消息）
     let content = (payload.content as string) || ''
@@ -247,7 +260,7 @@ function registerChatHandler(ctx: AppContext): void {
       let threadIdResolved = threadId
       if (!threadIdResolved) {
         // 未指定 threadId 时，获取或创建 Agent 的最新 desktop Thread
-        const thread = await ctx.threadService.getOrCreateLatest(agentId, 'desktop')
+        const thread = await ctx.threadService.getOrCreateLatest(agentId, 'desktop', 'conversation')
         threadIdResolved = thread.id
       } else {
         // 校验 Thread 是否存在
@@ -262,35 +275,19 @@ function registerChatHandler(ctx: AppContext): void {
         }
       }
 
-      // ── 2. 追加用户消息到 Thread ──
-      // 提前生成 pairId，使 user 消息与后续 assistant 回复通过相同 pairId 关联，
-      // 便于对话对级联删除（softDeletePair 按 pairId 匹配）
-      const pairId = `pair_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-      await ctx.threadService.appendUserMessage(threadIdResolved, content, pairId)
-
-      // ── 3. 陪伴活动通知（AIOS: 改用 CompanionSchedulerService） ──
-      // AIOS: 移除 incrementMessageCount（ThreadService 自维护计数）
+      // ── 2. 陪伴活动通知（AIOS: 改用 CompanionSchedulerService） ──
       ctx.companionSchedulerService.notifyActivity(agentId)
 
-      // ── 4. ContextCompiler 编译上下文 ──
-      const compiled = await ctx.contextCompiler.compile(threadIdResolved, agentId)
-
-      // ── 5. RuntimeStateService 注册任务（替代旧 TaskManager） ──
+      // ── 3. RuntimeStateService 注册任务（替代旧 TaskManager） ──
       ctx.runtimeStateService.registerTask(threadIdResolved, agentId)
 
-      // ── 6. 流式对话 ──
-      // rawContent 保存含 Thinking/Monologue/NIT 等调试块的完整原始转写，
-      // 供「对话调试详情」查看（区别于给用户看的、已剥离 Thinking 的可见回复 fullReply）
-      let rawContent = ''
-      const gen = ctx.agentService.chatStreamWithCompiledMessages({
-        messages: compiled.messages,
-        agentId,
+      // ── 4. 统一流式对话 ──
+      const gen = ctx.conversationTurnService.streamTurn({
         threadId: threadIdResolved,
-        onRawText: (rawText) => {
-          rawContent = rawText
-        },
+        agentId,
+        content,
+        capabilityScope,
       })
-
       let fullReply = ''
 
       for await (const chunk of gen) {
@@ -319,23 +316,7 @@ function registerChatHandler(ctx: AppContext): void {
         }
       }
 
-      // ── 7. 追加 Agent 回复到 Thread ──
-      // 复用步骤 2 生成的 pairId，使 user + assistant 消息通过相同 pairId 关联
-      // rawContent 传入完整原始转写（含调试块），供对话日志调试视图查看
-      //
-      // 边界情况：模型可能只调用了工具（无正文输出）或内容全在【Thinking】块里
-      // （剥离后 fullReply 为空）。此时仍需追加 assistant 消息以保证对话对完整，
-      // 避免对话日志出现缺失 pair。用占位文本说明无可见回复。
-      const assistantContent = fullReply || '(本次回复无可见正文，详情请查看调试视图)'
-      await ctx.threadService.appendAssistantMessage({
-        threadId: threadIdResolved,
-        content: assistantContent,
-        rawContent: rawContent || undefined,
-        pairId,
-        agentId,
-      })
-
-      // ── 8. 流结束 + RPC 响应回送 ──
+      // ── 5. 流结束 + RPC 响应回送 ──
       await ctx.gatewayHub.pushStreamEnd(threadIdResolved)
 
       if (requestId && sourceNodeId) {

@@ -17,8 +17,9 @@ export type MemoryType =
 export type MemorySource =
   | 'desktop' // 桌面端日常对话
   | 'work' // 工作模式（隔离会话）
-  | 'social' // 社交适配器（QQ 等外部平台接入）
-  | 'group_chat' // 群聊模式（多 Agent 对话）
+  | 'social' // 所有外部平台社交接入
+  | 'group' // infOS 内部据点多 Agent 群聊
+  | 'group_chat' // 旧内部据点名称兼容
   | 'mobile' // 移动端
   | 'scheduler' // 定时任务触发（记忆秘书等）
 

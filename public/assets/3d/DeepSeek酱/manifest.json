@@ -1,0 +1,104 @@
+{
+  "asset_id": "com.infos.model.ysm.DeepSeek酱",
+  "type": "model_3d",
+  "source": "ysm",
+  "display_name": "DeepSeek酱",
+  "metadata": {
+    "name": "DeepSeek酱",
+    "version": "1.0.0",
+    "author": "羊毛",
+    "description": "DeepSeek酱模型"
+  },
+  "resources": {
+    "model": "/assets/3d/DeepSeek%E9%85%B1/DeepSeek%E9%85%B1.pero",
+    "texture": "/assets/3d/DeepSeek%E9%85%B1/textures/default.png",
+    "animations": []
+  },
+  "featureButtons": [
+    {
+      "id": "v.roaming.eyeBand",
+      "label": "眼罩",
+      "group": "设置",
+      "defaultValue": true
+    },
+    {
+      "id": "v.roaming.eyeGlow",
+      "label": "发光眼睛",
+      "group": "设置",
+      "defaultValue": true
+    },
+    {
+      "id": "v.roaming.Tail",
+      "label": "尾巴",
+      "group": "设置",
+      "defaultValue": true
+    }
+  ],
+  "retargetingMap": {
+    "mapping": {
+      "Root": "Root",
+      "Body": "UpBody",
+      "Head": "Head",
+      "LeftArm": "LeftArm",
+      "RightArm": "RightArm",
+      "LeftLeg": "LeftLeg",
+      "RightLeg": "RightLeg",
+      "EyeBrow": "Eyebrow",
+      "Eyes": "Eyes",
+      "Eyelid": "Eyelid",
+      "Tail": "Tail",
+      "Arm": "Arm",
+      "Leg": "Leg"
+    }
+  },
+  "mappingHealth": {
+    "Root": true,
+    "Body": true,
+    "Head": true,
+    "LeftArm": true,
+    "RightArm": true,
+    "LeftLeg": true,
+    "RightLeg": true,
+    "Mouth": false,
+    "EyeBrow": true,
+    "LeftEye": false,
+    "RightEye": false,
+    "Eyes": true,
+    "Eyelid": true,
+    "Tail": true,
+    "Arm": true,
+    "Leg": true
+  },
+  "scale": 0.9285714285714287,
+  "boneFilterPatterns": [
+    "GUI",
+    "Hud",
+    "Panel",
+    "Button",
+    "Text",
+    "Start",
+    "End",
+    "background",
+    "molang",
+    "Locator",
+    "Sheath",
+    "Blade",
+    "Rifle",
+    "Elytra",
+    "wazi",
+    "bed",
+    "ghost",
+    "catwj",
+    "Hordflower",
+    "ysmGlowlx",
+    "ysmGlowstxwq"
+  ],
+  "ysmFunctions": [
+    "functions/@player_init.molang",
+    "functions/更随机的眨眼@player_ctrl_pre_parallel_1.molang",
+    "functions/碰墙抬手@player_ctrl_parallel_5.molang",
+    "functions/碰墙抬手初始化@player_init.molang",
+    "functions/简单倒走动画@player_ctrl_main.molang",
+    "functions/随机眨眼初始化@player_init.molang"
+  ]
+}

@@ -14,12 +14,18 @@
  */
 
 import type { ToolDefinition } from '../pipeline/types'
+import type { ToolExecutionResult } from './reactLoop'
+import type { StructuredToolResult } from '../execution/toolResult'
 import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('ToolRegistry')
 
 /** 工具处理函数 */
-export type ToolHandler = (args: Record<string, unknown>, context: ToolContext) => Promise<string>
+export type ToolHandlerResult = string | ToolExecutionResult | StructuredToolResult
+export type ToolHandler = (
+  args: Record<string, unknown>,
+  context: ToolContext,
+) => Promise<ToolHandlerResult>
 
 /**
  * 工具执行上下文
@@ -40,6 +46,14 @@ export interface ToolContext {
   threadId: string
   /** AIOS: 对话通道（desktop/companion/social/group） */
   channel: string
+  /** 当前对话轮次 ID，文件变更快照按此绑定。 */
+  pairId?: string
+  /** 当前函数调用 ID，用于审计轮内具体工具操作。 */
+  toolCallId?: string
+  /** 当前 ReAct/任务的取消信号，长时工具必须主动监听。 */
+  signal?: AbortSignal
+  /** 后台任务 ID；普通对话为空。 */
+  taskId?: string
 }
 
 /** 注册的工具 */
@@ -83,11 +97,7 @@ export class ToolRegistry {
    * @param definition  工具定义（name 不含前缀）
    * @param handler     工具处理函数
    */
-  registerAppTool(
-    appId: string,
-    definition: ToolDefinition,
-    handler: ToolHandler,
-  ): void {
+  registerAppTool(appId: string, definition: ToolDefinition, handler: ToolHandler): void {
     const prefixedName = `${appId}.${definition.name}`
     this.tools.set(prefixedName, {
       definition: { ...definition, name: prefixedName },
@@ -224,6 +234,8 @@ export class ToolRegistry {
           name: def.name,
           description: def.description,
           parameters: def.parameters as Record<string, unknown>,
+          // 社区扩展工具可在 definition/display 声明前端轨迹区元数据，原样透传
+          display: (def as { display?: ToolDefinition['display'] }).display,
         },
         handler,
       )

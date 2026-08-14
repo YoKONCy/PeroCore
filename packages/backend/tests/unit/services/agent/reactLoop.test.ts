@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
-import { runReActLoop } from '@perocore/backend/services/agent/reactLoop'
-import type { ChatDelta } from '@perocore/backend/services/llm/types'
-import type { ModelConfig } from '@perocore/backend/services/llm/llmService'
+import { runReActLoop, toolResultForPersistence } from '@infos/backend/services/agent/reactLoop'
+import type { ChatDelta } from '@infos/backend/services/llm/types'
+import type { ModelConfig } from '@infos/backend/services/llm/llmService'
 
 const modelConfig: ModelConfig = {
   provider: 'openai',
@@ -27,16 +27,67 @@ async function collectLoop(params: Parameters<typeof runReActLoop>[0]) {
 }
 
 describe('runReActLoop', () => {
+  it('读取工具持久化时只保留审计摘要，不保存文件正文', () => {
+    const plain = toolResultForPersistence(
+      'read_file',
+      { file_path: 'notes/private.md', max_length: 10000 },
+      '这是只应存在于当前 ReAct 内存中的私密正文',
+      false,
+    )
+    expect(plain).not.toContain('私密正文')
+    expect(JSON.parse(plain)).toEqual({
+      ephemeral: true,
+      kind: 'file_read_audit',
+      path: 'notes/private.md',
+      maxLength: 10000,
+      returnedCharacters: 24,
+    })
+
+    const ranged = toolResultForPersistence(
+      'read_file_range',
+      { path: 'src/a.ts', line_start: 3, line_end: 5 },
+      JSON.stringify({
+        content: 'const secret = 1',
+        hash: 'abc',
+        totalBytes: 99,
+        totalLines: 10,
+        lineStart: 3,
+        lineEnd: 5,
+        truncated: true,
+      }),
+      false,
+    )
+    expect(ranged).not.toContain('const secret')
+    expect(JSON.parse(ranged)).toMatchObject({
+      ephemeral: true,
+      path: 'src/a.ts',
+      hash: 'abc',
+      totalLines: 10,
+      lineStart: 3,
+      lineEnd: 5,
+      returnedCharacters: 16,
+    })
+  })
+
+  it('非读取工具与错误结果保持原样，避免破坏工具审计', () => {
+    expect(toolResultForPersistence('edit_file', { path: 'a.ts' }, '{"success":true}', false)).toBe(
+      '{"success":true}',
+    )
+    expect(
+      toolResultForPersistence('read_file', { file_path: 'missing' }, '文件不存在', true),
+    ).toBe('文件不存在')
+  })
+
   it('应当流式输出文本并过滤 Thinking 内容', async () => {
     const llmService = {
-      chatStream: vi
-        .fn()
-        .mockReturnValue(
-          streamFrom([
-            { choices: [{ delta: { content: '你好' }, finishReason: null }] },
-            { choices: [{ delta: { content: '【Thinking: 隐藏】世界' }, finishReason: null }] },
-          ]),
-        ),
+      chatStream: vi.fn().mockReturnValue(
+        streamFrom([
+          { choices: [{ delta: { content: '你好' }, finishReason: null }] },
+          {
+            choices: [{ delta: { content: '<think>隐藏思考</think>世界' }, finishReason: null }],
+          },
+        ]),
+      ),
     }
 
     const { yields, result } = await collectLoop({
@@ -129,11 +180,17 @@ describe('runReActLoop', () => {
     expect(yields).toEqual([
       { event: 'status', data: { state: 'thinking', message: '正在思考...', turn: 1 } },
       '需要查找',
-      { event: 'tool_call', data: { name: 'lookup', args: { q: '猫' } } },
+      { event: 'tool_call', data: { name: 'lookup', args: { q: '猫' }, callId: 'call-1' } },
       { event: 'status', data: { state: 'calling', message: '正在调用工具: lookup', turn: 1 } },
       {
         event: 'tool_result',
-        data: { name: 'lookup', result: '工具结果', isError: false, durationMs: 12 },
+        data: {
+          name: 'lookup',
+          callId: 'call-1',
+          result: '工具结果',
+          isError: false,
+          durationMs: 12,
+        },
       },
       { event: 'status', data: { state: 'thinking', message: '正在思考...', turn: 2 } },
       '完成',
@@ -157,7 +214,14 @@ describe('runReActLoop', () => {
     ])
     // 返回值已改为对象结构，工具调用列表在 result.toolCalls 字段
     expect(result.toolCalls).toEqual([
-      { name: 'lookup', args: { q: '猫' }, result: '工具结果', durationMs: 12 },
+      {
+        name: 'lookup',
+        args: { q: '猫' },
+        result: '工具结果',
+        durationMs: 12,
+        isError: false,
+        callId: 'call-1',
+      },
     ])
   })
 
@@ -290,7 +354,16 @@ describe('runReActLoop', () => {
       tools: undefined,
     })
     expect(messages[messages.length - 1]).toMatchObject({ role: 'system' })
-    expect(result.toolCalls).toEqual([{ name: 'broken', args: {}, result: '失败', durationMs: 5 }])
+    expect(result.toolCalls).toEqual([
+      {
+        name: 'broken',
+        args: {},
+        result: '失败',
+        durationMs: 5,
+        isError: true,
+        callId: 'call-1',
+      },
+    ])
   })
 
   // 第七阶段 #8: 参数解析失败时，错误作为 tool_result 反馈给 LLM 而非吞掉
@@ -379,7 +452,8 @@ describe('runReActLoop', () => {
 
     // 关键断言2: 第一轮产出的 tool_result 是错误消息（包含解析失败原因）
     const toolResultEvents = yields.filter(
-      (y) => typeof y === 'object' && y !== null && (y as { event?: string }).event === 'tool_result',
+      (y) =>
+        typeof y === 'object' && y !== null && (y as { event?: string }).event === 'tool_result',
     )
     expect(toolResultEvents).toHaveLength(2)
     const firstResult = toolResultEvents[0] as {
@@ -406,12 +480,16 @@ describe('runReActLoop', () => {
         args: {},
         result: expect.stringContaining('参数解析失败'),
         durationMs: 0,
+        isError: true,
+        callId: 'call-1',
       },
       {
         name: 'lookup',
         args: { q: '修正后的查询' },
         result: '查询结果',
         durationMs: 8,
+        isError: false,
+        callId: 'call-2',
       },
     ])
   })
@@ -461,7 +539,14 @@ describe('runReActLoop', () => {
 
     expect(llmService.chatStream).toHaveBeenCalledTimes(1)
     expect(result.toolCalls).toEqual([
-      { name: 'finish_task', args: { summary: '完成' }, result: '完成', durationMs: 1 },
+      {
+        name: 'finish_task',
+        args: { summary: '完成' },
+        result: '完成',
+        durationMs: 1,
+        isError: false,
+        callId: 'call-1',
+      },
     ])
   })
 })

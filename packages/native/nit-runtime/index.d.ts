@@ -5,50 +5,36 @@
 
 /** minGRU 隐状态维度 */
 export const HIDDEN_DIM: number
-
-/** minGRU 内部权重各分量大小 */
-export const MIN_GRU_WEIGHT_SIZES: {
-  readonly W_Z: number
-  readonly B_Z: number
-  readonly W_H: number
-  readonly B_H: number
-  readonly TOTAL: number
+/** minGRU 权重各分量大小（AIOS 第八阶段新增，供 TS 侧验证 buffer 长度） */
+export declare function MIN_GRU_WEIGHT_SIZES(): WeightSizes
+/** 权重大小信息（AIOS 第八阶段新增） */
+export interface WeightSizes {
+  /** 门控权重 W_z 大小 (HIDDEN_DIM × HIDDEN_DIM) */
+  wZ: number
+  /** 门控偏置 b_z 大小 (HIDDEN_DIM) */
+  bZ: number
+  /** 候选状态权重 W_h 大小 (HIDDEN_DIM × HIDDEN_DIM) */
+  wH: number
+  /** 候选状态偏置 b_h 大小 (HIDDEN_DIM) */
+  bH: number
+  /** 总元素数 */
+  total: number
 }
-
-/** minGRU 权重包（TS 侧管理，可持久化） */
-export interface MinGruWeights {
+/** minGRU 权重包（AIOS 第八阶段新增，TS 侧管理，可持久化） */
+export interface MinGruWeightsJs {
+  /** 门控权重 W_z (HIDDEN_DIM × HIDDEN_DIM) */
   wZ: Float32Array
+  /** 门控偏置 b_z (HIDDEN_DIM) */
   bZ: Float32Array
+  /** 候选状态权重 W_h (HIDDEN_DIM × HIDDEN_DIM) */
   wH: Float32Array
+  /** 候选状态偏置 b_h (HIDDEN_DIM) */
   bH: Float32Array
 }
-
-/** 初始化 minGRU 权重包（Xavier 初始化 + 偏置 0.1） */
-export declare function xavierInitMinGruWeights(hiddenDim?: number): MinGruWeights
-
-/** minGRU 带权重前向推理（正规 GRU 实现） */
-export declare function minGruForwardWithWeights(
-  hidden: Float32Array,
-  input: Float32Array,
-  weights: MinGruWeights,
-): Float32Array
-
-/** minGRU 单步 SGD 训练（原地更新权重，返回损失值） */
-export declare function trainMinGruStep(
-  hidden: Float32Array,
-  input: Float32Array,
-  weights: MinGruWeights,
-  label: number,
-  learningRate?: number,
-): number
 /**
- * minGRU 前向推理
+ * minGRU 前向推理（旧版，使用全局单例权重，向后兼容保留）
  *
- * 更新隐状态 h_t → h_{t+1}
- *
- * @param hidden  当前隐状态 (256 维 Float32Array)
- * @param input   投影后的查询向量 (256 维 Float32Array)
- * @returns 更新后的隐状态 (256 维 Float32Array)
+ * @deprecated AIOS 第八阶段起改用 minGruForwardWithWeights
  */
 export declare function minGruForward(hidden: Float32Array, input: Float32Array): Float32Array
 /**
@@ -76,6 +62,40 @@ export interface JsTrainingSample {
  * @returns 平均训练损失
  */
 export declare function minGruTrain(samples: Array<JsTrainingSample>, learningRate?: number | undefined | null): number
+/**
+ * Xavier 初始化 minGRU 权重包
+ *
+ * W_z/W_h: Xavier 均匀分布初始化
+ * b_z/b_h: 初始化为 0.1（确保 sigmoid 门控初始开度合理，σ(0.1)≈0.525）
+ *
+ * @param hiddenDim 隐状态维度（可选，默认 256）
+ * @returns minGRU 权重包
+ */
+export declare function xavierInitMinGruWeights(hiddenDim?: number | undefined | null): MinGruWeightsJs
+/**
+ * 带外部权重的 minGRU 前向推理
+ *
+ * AIOS 第八阶段：权重由 TS 侧管理并持久化，不再依赖 Rust 全局单例。
+ *
+ * @param hidden  当前隐状态 (HIDDEN_DIM 维 Float32Array)
+ * @param input   投影后的查询向量 (HIDDEN_DIM 维 Float32Array)
+ * @param weights minGRU 权重包
+ * @returns 更新后的隐状态 (HIDDEN_DIM 维 Float32Array)
+ */
+export declare function minGruForwardWithWeights(hidden: Float32Array, input: Float32Array, weights: MinGruWeightsJs): Float32Array
+/**
+ * 带外部权重的 minGRU 单步 SGD 训练
+ *
+ * AIOS 第八阶段：权重原地更新（mutate in-place），返回训练损失值。
+ *
+ * @param hidden      该轮对话的隐状态 h_t
+ * @param input       投影后的查询向量 x_t
+ * @param weights     minGRU 权重包（会被原地更新）
+ * @param label       反馈标签 (1.0 = 正面/相关, 0.0 = 负面/不相关)
+ * @param learningRate 学习率 (默认 0.001)
+ * @returns 训练损失值
+ */
+export declare function trainMinGruStep(hidden: Float32Array, input: Float32Array, weights: MinGruWeightsJs, label: number, learningRate?: number | undefined | null): number
 /** 聚类结果 */
 export interface JsClusterResult {
   /** 节点 ID → cluster ID 映射 (平铺数组: [nodeId1, clusterId1, nodeId2, clusterId2, ...]) */

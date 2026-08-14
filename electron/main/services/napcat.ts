@@ -25,6 +25,7 @@ import { paths } from '../utils/env'
 
 let napCatProcess: ChildProcess | null = null
 let napCatLogs: string[] = []
+let accountDiscoveryTimer: ReturnType<typeof setInterval> | null = null
 const MAX_LOG_LINES = 500
 
 // ─────────────────────────────────────────────
@@ -60,7 +61,7 @@ const BACKEND_PORT = Number(process.env.PERO_PORT ?? 9120)
 const REVERSE_WS_URL = `ws://127.0.0.1:${BACKEND_PORT}/api/social/ws`
 
 /** 我们在 NapCat 配置中使用的连接名称 (用于标识是我们自动注入的) */
-const WS_CLIENT_NAME = 'PeroCore'
+const WS_CLIENT_NAME = 'infOS'
 
 /** 获取 NapCat 安装目录 */
 function getNapCatDir(): string {
@@ -79,6 +80,52 @@ function getNapCatDir(): string {
  */
 function getNapCatConfigDir(): string {
   return path.join(getNapCatDir(), 'napcat', 'config')
+}
+
+/** 保存最近一次成功登录的账号，用于后续启动时自动传入快速登录参数。 */
+function getQuickLoginAccountPath(): string {
+  return path.join(getNapCatDir(), '.infos-quick-login-account')
+}
+
+function readQuickLoginAccount(): string | undefined {
+  try {
+    const account = fs.readFileSync(getQuickLoginAccountPath(), 'utf-8').trim()
+    return /^\d{5,12}$/.test(account) ? account : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function saveQuickLoginAccount(account: string): void {
+  if (!/^\d{5,12}$/.test(account) || account === readQuickLoginAccount()) return
+  fs.writeFileSync(getQuickLoginAccountPath(), account, 'utf-8')
+  logger.info('NapCat', `已记录 QQ ${account}，下次启动将自动使用快速登录`)
+  broadcastNapCatLog(`[系统] 已为 QQ ${account} 启用下次启动快速登录`)
+}
+
+/** 从 NapCat 生成的账号配置中识别扫码成功的账号，并完成 WS 与快速登录配置。 */
+function discoverLoggedInAccounts(): string[] {
+  const accounts = ensureNapCatConfig()
+  const currentAccount = readQuickLoginAccount()
+  if (!currentAccount && accounts[0]) saveQuickLoginAccount(accounts[0])
+  return accounts
+}
+
+function stopAccountDiscovery(): void {
+  if (!accountDiscoveryTimer) return
+  clearInterval(accountDiscoveryTimer)
+  accountDiscoveryTimer = null
+}
+
+function startAccountDiscovery(): void {
+  stopAccountDiscovery()
+  const knownAccount = readQuickLoginAccount()
+  accountDiscoveryTimer = setInterval(() => {
+    const accounts = discoverLoggedInAccounts()
+    if (accounts.length > 0 && (!knownAccount || accounts.includes(knownAccount))) {
+      stopAccountDiscovery()
+    }
+  }, 1500)
 }
 
 /** 从注册表/默认路径查找 QQ.exe */
@@ -156,7 +203,10 @@ export function checkNapCat(): boolean {
 }
 
 /** 解析启动命令和参数 */
-async function resolveEntryPoint(napCatDir: string): Promise<{
+async function resolveEntryPoint(
+  napCatDir: string,
+  quickLoginAccount?: string,
+): Promise<{
   cmd: string
   args: string[]
   env: Record<string, string | undefined>
@@ -180,6 +230,7 @@ async function resolveEntryPoint(napCatDir: string): Promise<{
 
   if (fs.existsSync(shellExe)) {
     const args = qqPath ? ['-q', qqPath] : []
+    if (quickLoginAccount) args.push('--qq', quickLoginAccount)
     return { cmd: shellExe, args, env }
   }
 
@@ -189,7 +240,9 @@ async function resolveEntryPoint(napCatDir: string): Promise<{
     env.NAPCAT_QQ_PACKAGE_INFO_PATH = path.join(napCatDir, 'package.json')
     env.NAPCAT_QQ_VERSION_CONFIG_PATH = path.join(napCatDir, 'config.json')
     env.NAPCAT_DISABLE_PIPE = '1'
-    return { cmd: 'node', args: ['napcat.mjs'], env }
+    const args = ['napcat.mjs']
+    if (quickLoginAccount) args.push('--qq', quickLoginAccount)
+    return { cmd: 'node', args, env }
   }
 
   if (fs.existsSync(napcatBat) && qqPath) {
@@ -216,7 +269,7 @@ async function resolveEntryPoint(napCatDir: string): Promise<{
  *
  * 逻辑:
  * - 扫描 config/ 目录下所有 onebot11_*.json
- * - 如果已有 name='PeroCore' 的连接 → 确保 url 和 enable 正确
+ * - 如果已有 name='infOS' 的连接 → 确保 url 和 enable 正确
  * - 如果没有 → 追加一条新连接
  * - 如果 config/ 目录不存在或没有配置文件 → 跳过 (等用户扫码登录后再说)
  *
@@ -265,7 +318,7 @@ export function ensureNapCatConfig(): string[] {
       }
       const clients = network.websocketClients as Array<Record<string, unknown>>
 
-      // 查找是否已有 PeroCore 连接
+      // 查找是否已有 infOS 连接
       const existing = clients.find((c) => c.name === WS_CLIENT_NAME)
 
       if (existing) {
@@ -305,7 +358,9 @@ export function ensureNapCatConfig(): string[] {
     }
   }
 
-  broadcastNapCatLog(`[系统] 已自动配置 ${configuredAccounts.length} 个账号的反向 WS 连接`)
+  if (configuredAccounts.length > 0) {
+    broadcastNapCatLog(`[系统] 已自动配置 ${configuredAccounts.length} 个账号的反向 WS 连接`)
+  }
   return configuredAccounts
 }
 
@@ -325,13 +380,19 @@ export async function startNapCat(): Promise<void> {
     throw new Error('NapCat 未安装，请先执行安装')
   }
 
-  // 启动前自动配置反向 WS (零配置体验)
-  const configured = ensureNapCatConfig()
+  // 启动前自动配置反向 WS，并恢复最近登录账号。
+  const configured = discoverLoggedInAccounts()
   if (configured.length > 0) {
     broadcastNapCatLog(`[系统] 已预配置 ${configured.length} 个账号: ${configured.join(', ')}`)
   }
 
-  const { cmd, args, env } = await resolveEntryPoint(napCatDir)
+  const quickLoginAccount = readQuickLoginAccount()
+  const { cmd, args, env } = await resolveEntryPoint(napCatDir, quickLoginAccount)
+  if (quickLoginAccount) {
+    broadcastNapCatLog(`[系统] 将使用 QQ ${quickLoginAccount} 尝试快速登录`)
+  } else {
+    broadcastNapCatLog('[系统] 首次登录成功后将自动启用快速登录')
+  }
   logger.info('NapCat', `启动: ${cmd} ${args.join(' ')} (cwd: ${napCatDir})`)
   broadcastNapCatLog('[系统] 正在启动 NapCat...')
 
@@ -341,6 +402,7 @@ export async function startNapCat(): Promise<void> {
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true,
   })
+  startAccountDiscovery()
 
   napCatProcess.stdout?.on('data', (data: Buffer) => {
     const lines = data.toString().split('\n').filter(Boolean)
@@ -361,12 +423,14 @@ export async function startNapCat(): Promise<void> {
   })
 
   napCatProcess.on('exit', (code) => {
+    stopAccountDiscovery()
     logger.info('NapCat', `NapCat 进程退出: code=${code}`)
     broadcastNapCatLog(`[系统] NapCat 已退出 (code=${code})`)
     napCatProcess = null
   })
 
   napCatProcess.on('error', (err) => {
+    stopAccountDiscovery()
     logger.error('NapCat', `NapCat 启动失败: ${err.message}`)
     broadcastNapCatLog(`[错误] NapCat 启动失败: ${err.message}`)
     napCatProcess = null
@@ -382,6 +446,7 @@ export function stopNapCat(): Promise<void> {
     }
 
     logger.info('NapCat', '正在停止 NapCat...')
+    stopAccountDiscovery()
 
     napCatProcess.on('close', () => {
       napCatProcess = null

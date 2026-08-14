@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { LocalMemoryProvider } from '@perocore/backend/services/memory/localMemoryProvider'
-import type { AddMemoryInput } from '@perocore/backend/services/memory/memoryProvider'
+import { LocalMemoryProvider } from '@infos/backend/services/memory/localMemoryProvider'
+import type { AddMemoryInput } from '@infos/backend/services/memory/memoryProvider'
 
 /** 构造 LocalMemoryProvider + mock 依赖 */
 function createProvider(options: { searchResults?: unknown[]; memoryNode?: { id: number } } = {}) {
@@ -51,8 +51,26 @@ function createProvider(options: { searchResults?: unknown[]; memoryNode?: { id:
   const memorySearchService = {
     search: vi.fn().mockResolvedValue(
       options.searchResults ?? [
-        { id: 10, content: '命中1', score: 0.9, tags: '', importance: 8, source: 'desktop', type: 'event', timestamp: 0 },
-        { id: 11, content: '命中2', score: 0.8, tags: '', importance: 5, source: 'desktop', type: 'entity', timestamp: 0 },
+        {
+          id: 10,
+          content: '命中1',
+          score: 0.9,
+          tags: '',
+          importance: 8,
+          source: 'desktop',
+          type: 'event',
+          timestamp: 0,
+        },
+        {
+          id: 11,
+          content: '命中2',
+          score: 0.8,
+          tags: '',
+          importance: 5,
+          source: 'desktop',
+          type: 'entity',
+          timestamp: 0,
+        },
       ],
     ),
   }
@@ -97,17 +115,27 @@ describe('LocalMemoryProvider', () => {
       expect(results[0]!.summary).toBe('')
     })
 
-    it('应当把 social/group channel 映射为 social source', async () => {
+    it('应当让 group 共享 desktop 主记忆池，social 保持独立来源', async () => {
       const { provider, memorySearchService } = createProvider({ searchResults: [] })
 
       await provider.search({
-        query: '群聊',
+        query: '外部社交',
+        agentId: 'pero',
+        channel: 'social',
+      })
+      await provider.search({
+        query: '据点群聊',
         agentId: 'pero',
         channel: 'group',
       })
 
-      expect(memorySearchService.search).toHaveBeenCalledWith(
+      expect(memorySearchService.search).toHaveBeenNthCalledWith(
+        1,
         expect.objectContaining({ source: 'social' }),
+      )
+      expect(memorySearchService.search).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ source: 'desktop' }),
       )
     })
 

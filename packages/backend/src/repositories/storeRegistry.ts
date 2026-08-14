@@ -24,7 +24,7 @@
  */
 
 import path from 'node:path'
-import { mkdirSync, existsSync } from 'node:fs'
+import { mkdirSync, existsSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
 const _require = createRequire(import.meta.url)
 // triviumdb 是 NAPI CJS 模块 (module.exports = { TriviumDB })，ESM 只能通过 require 加载
@@ -85,11 +85,10 @@ export class MemoryStoreRegistry {
   /**
    * 根据来源自动选择 Store
    *
-   * AIOS(Phase5): 修复 Social Memory 路由——
-   * - 'social' / 'group' / 'group_chat' → social.tdb（社交记忆隔离）
-   * - 其他（desktop/companion）→ main.tdb（主记忆）
-   *
-   * 之前 'group' 不匹配 'group_chat'，会错误地写入 main.tdb 污染主记忆。
+   * 仅外部平台社交来源写入独立社交记忆：
+   * - 'social' → social.tdb
+   * - 'group' / 'group_chat' → main.tdb（infOS 内部据点多 Agent 群聊）
+   * - 其他（desktop/companion）→ main.tdb
    *
    * @param agentId Agent ID
    * @param source  记忆来源（channel 或旧版 MemorySource）
@@ -97,8 +96,6 @@ export class MemoryStoreRegistry {
   getStoreBySource(agentId: string, source: string): TriviumDBType {
     switch (source) {
       case 'social':
-      case 'group':
-      case 'group_chat':
         return this.getAgentStore(agentId, 'social')
       default:
         return this.getAgentStore(agentId, 'main')
@@ -181,8 +178,6 @@ export class MemoryStoreRegistry {
   private resolveStorePathBySource(agentId: string, source: string): string {
     switch (source) {
       case 'social':
-      case 'group':
-      case 'group_chat':
         return this.resolveAgentStorePath(agentId, 'social')
       default:
         return this.resolveAgentStorePath(agentId, 'main')
@@ -208,6 +203,21 @@ export class MemoryStoreRegistry {
       }
     }
     return stats
+  }
+
+  /** 清空指定 Agent 的物理 Store；关闭缓存实例后删除文件，下次访问会创建空库。 */
+  resetAgentStore(agentId: string, mode: StoreMode): void {
+    const tdbPath = this.resolveAgentStorePath(agentId, mode)
+    const store = this.stores.get(tdbPath)
+    if (store) {
+      store.close()
+      this.stores.delete(tdbPath)
+    }
+    this.textIndexDirty.delete(tdbPath)
+    rmSync(tdbPath, { force: true })
+    rmSync(`${tdbPath}-wal`, { force: true })
+    rmSync(`${tdbPath}-shm`, { force: true })
+    logger.info(`Agent Store 已清空: agent=${agentId}, mode=${mode}`)
   }
 
   /** 获取或创建 TriviumDB 实例 */

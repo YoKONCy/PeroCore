@@ -1,120 +1,60 @@
 /**
  * Vue Router 配置
  *
- * Electron 模式: 各页面独立路由（窗口管理体系）
- * Docker/浏览器模式: WebShellView 外壳 + 嵌套子路由（单标签页）
+ * 统一单页路由: Electron 和 Docker/浏览器共用 MainView 综合面板。
+ * LauncherView 和 Pet3DView 保持独立路由。
  *
- * 路由采用懒加载 + keep-alive 白名单控制。
+ * 路由结构:
+ * - /           → /app (MainView,默认对话 Tab)
+ * - /app        → MainView
+ * - /launcher   → LauncherView
+ * - /pet-3d     → Pet3DView (仅 Electron 可访问)
  *
+ * @module packages/frontend/src/router
  */
 
 import { createRouter, createWebHashHistory, type RouteRecordRaw } from 'vue-router'
 import { isElectron } from '../utils/ipcAdapter'
 
-// ── Electron 模式路由（保持不变） ──
+// ── 统一路由 ──
 
-const electronRoutes: RouteRecordRaw[] = [
-  {
-    path: '/',
-    redirect: '/launcher',
-  },
-  {
-    path: '/chat',
-    name: 'Chat',
-    component: () => import('@/views/ChatView.vue'),
-    meta: { title: '对话' },
-  },
-  {
-    path: '/dashboard',
-    name: 'DashboardView',
-    component: () => import('@/views/DashboardView.vue'),
-    meta: { title: '仪表盘' },
-  },
-  {
-    path: '/work',
-    name: 'Work',
-    component: () => import('@/views/WorkView.vue'),
-    meta: { title: '工作模式' },
-  },
-  {
-    path: '/launcher',
-    name: 'Launcher',
-    component: () => import('@/views/LauncherView.vue'),
-    meta: { title: '启动器' },
-  },
-  {
-    path: '/pet-3d',
-    name: 'PetStandalone',
-    component: () => import('@/views/Pet3DView.vue'),
-    meta: { title: '桌宠', standalone: true },
-  },
-  {
-    path: '/stronghold',
-    name: 'Stronghold',
-    component: () => import('@/views/StrongholdView.vue'),
-    meta: { title: '据点' },
-  },
-]
-
-// ── Docker/浏览器模式路由 ──
-// WebShellView 作为外壳，所有功能页面嵌套在 /app 下。
-// /pet-3d 仅保留为 Electron HMR/开发态兜底，浏览器常规导航不展示透明桌宠窗口。
-
-const dockerRoutes: RouteRecordRaw[] = [
-  {
-    path: '/launcher',
-    name: 'Launcher',
-    component: () => import('@/views/LauncherView.vue'),
-    meta: { title: '启动器' },
-  },
-  {
-    path: '/app',
-    name: 'WebShell',
-    component: () => import('@/views/WebShellView.vue'),
-    children: [
-      {
-        path: '',
-        name: 'Chat',
-        component: () => import('@/views/ChatView.vue'),
-        meta: { title: '对话' },
-      },
-      {
-        path: 'work',
-        name: 'Work',
-        component: () => import('@/views/WorkView.vue'),
-        meta: { title: '工作模式' },
-      },
-      {
-        path: 'stronghold',
-        name: 'Stronghold',
-        component: () => import('@/views/StrongholdView.vue'),
-        meta: { title: '据点' },
-      },
-      {
-        path: 'dashboard',
-        name: 'DashboardView',
-        component: () => import('@/views/DashboardView.vue'),
-        meta: { title: '仪表盘' },
-      },
-    ],
-  },
-  // 根路径重定向到 /app (对话)
+const routes: RouteRecordRaw[] = [
   {
     path: '/',
     redirect: '/app',
   },
-  // 兜底: pet-3d 在 Docker 中不需要但 Electron HMR 时可能触发
   {
-    path: '/pet-3d',
-    name: 'PetFallback',
-    component: () => import('@/views/Pet3DView.vue'),
-    meta: { title: '桌宠', standalone: true },
+    path: '/app',
+    name: 'Main',
+    component: () => import('@/views/MainView.vue'),
+    meta: { title: 'PeroperoChat' },
   },
+  isElectron()
+    ? {
+        path: '/launcher',
+        name: 'Launcher',
+        component: () => import('@/views/LauncherView.vue'),
+        meta: { title: '启动器' },
+      }
+    : {
+        path: '/launcher',
+        redirect: '/app',
+      },
+  isElectron()
+    ? {
+        path: '/pet-3d',
+        name: 'PetStandalone',
+        component: () => import('@/views/Pet3DView.vue'),
+        meta: { title: '桌宠', standalone: true },
+      }
+    : {
+        // 浏览器/Docker 模式不支持透明桌宠窗口
+        path: '/pet-3d',
+        redirect: '/app',
+      },
 ]
 
 // ── 创建路由实例 ──
-
-const routes = isElectron() ? electronRoutes : dockerRoutes
 
 const router = createRouter({
   history: createWebHashHistory(),

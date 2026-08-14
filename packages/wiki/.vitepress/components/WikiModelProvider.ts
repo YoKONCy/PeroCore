@@ -4,7 +4,7 @@ import * as THREE from 'three'
  * Wiki 演示用的模型数据接口
  *
  * 从 frontend 的 IModelProvider 简化而来，
- * 避免 wiki 包直接依赖 @perocore/frontend。
+ * 避免 wiki 包直接依赖 @infos/frontend。
  */
 export interface ParsedModelData {
   textureWidth: number

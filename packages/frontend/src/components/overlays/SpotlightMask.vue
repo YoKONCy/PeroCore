@@ -8,7 +8,7 @@
  * @props selector - CSS 选择器 (null 时不显示)
  * @props padding - 高亮区域内边距 (px)
  */
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
 
 interface Props {
   selector: string | null
@@ -43,21 +43,30 @@ function updateRect() {
   }
 }
 
-watch(() => props.selector, updateRect)
+function handleLayoutChange() {
+  void nextTick(updateRect)
+  window.setTimeout(updateRect, 80)
+}
+
+watch(() => props.selector, handleLayoutChange)
 
 onMounted(() => {
   updateRect()
   window.addEventListener('resize', updateRect)
+  window.addEventListener('scroll', updateRect, true)
+  window.addEventListener('onboarding-layout-change', handleLayoutChange)
 })
 onUnmounted(() => {
   window.removeEventListener('resize', updateRect)
+  window.removeEventListener('scroll', updateRect, true)
+  window.removeEventListener('onboarding-layout-change', handleLayoutChange)
 })
 
 defineExpose({ rect, updateRect })
 </script>
 
 <template>
-  <svg v-if="rect" class="absolute inset-0 w-full h-full pointer-events-none z-0">
+  <svg v-if="rect" class="spotlight-svg">
     <defs>
       <mask id="spot-cutout">
         <rect width="100%" height="100%" fill="white" />
@@ -66,22 +75,43 @@ defineExpose({ rect, updateRect })
           :y="rect.y - padding"
           :width="rect.width + padding * 2"
           :height="rect.height + padding * 2"
+          rx="8"
           fill="black"
         />
       </mask>
     </defs>
-    <!-- 半透明背景带切口 -->
-    <rect width="100%" height="100%" fill="rgba(0,0,0,0.45)" mask="url(#spot-cutout)" />
-    <!-- 虚线高亮框 -->
+    <rect width="100%" height="100%" fill="rgba(15,23,42,0.58)" mask="url(#spot-cutout)" />
     <rect
       :x="rect.x - padding - 2"
       :y="rect.y - padding - 2"
       :width="rect.width + padding * 2 + 4"
       :height="rect.height + padding * 2 + 4"
+      rx="9"
       fill="none"
-      stroke="var(--color-sky-500)"
+      stroke="var(--ui-accent-primary)"
       stroke-width="2"
-      stroke-dasharray="6 4"
+    />
+    <rect
+      :x="rect.x - padding + 3"
+      :y="rect.y - padding + 3"
+      :width="rect.width + padding * 2 - 6"
+      :height="rect.height + padding * 2 - 6"
+      rx="5"
+      fill="none"
+      stroke="var(--ui-accent-sky)"
+      stroke-width="1"
+      stroke-dasharray="3 5"
     />
   </svg>
 </template>
+
+<style scoped>
+.spotlight-svg {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+</style>

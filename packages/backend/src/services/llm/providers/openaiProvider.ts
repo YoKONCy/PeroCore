@@ -34,6 +34,16 @@ const STATUS_TO_CODE: Record<number, 'LLM_ERROR' | 'LLM_RATE_LIMITED' | 'LLM_TIM
   504: 'LLM_TIMEOUT',
 }
 
+const RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504])
+
+function parseRetryAfterMs(value: string | null): number | undefined {
+  if (!value) return undefined
+  const seconds = Number(value)
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000)
+  const dateMs = Date.parse(value)
+  return Number.isNaN(dateMs) ? undefined : Math.max(0, dateMs - Date.now())
+}
+
 export class OpenAiProvider implements LlmProvider {
   constructor(private config: ProviderConfig) {}
 
@@ -47,7 +57,7 @@ export class OpenAiProvider implements LlmProvider {
     const url = this.buildUrl('/chat/completions')
     const payload = this.buildPayload(messages, opts, false)
 
-    const response = await this.fetchWithTimeout(url, payload, opts.timeout ?? 300_000)
+    const response = await this.fetchWithTimeout(url, payload, opts.timeout ?? 300_000, opts.signal)
 
     if (!response.ok) {
       await this.handleError(response, 'chat')
@@ -67,7 +77,7 @@ export class OpenAiProvider implements LlmProvider {
     const url = this.buildUrl('/chat/completions')
     const payload = this.buildPayload(messages, opts, true)
 
-    const response = await this.fetchWithTimeout(url, payload, opts.timeout ?? 120_000)
+    const response = await this.fetchWithTimeout(url, payload, opts.timeout ?? 120_000, opts.signal)
 
     if (!response.ok) {
       await this.handleError(response, 'chatStream')
@@ -208,12 +218,15 @@ export class OpenAiProvider implements LlmProvider {
     const payload: Record<string, unknown> = {
       model: this.config.modelId,
       messages: this.serializeMessages(messages),
-      temperature: opts.temperature ?? 0.7,
       stream,
     }
 
-    if (opts.topP !== undefined) payload.top_p = opts.topP
-    if (opts.maxTokens) payload.max_tokens = opts.maxTokens
+    if (typeof opts.temperature === 'number') payload.temperature = opts.temperature
+    if (typeof opts.topP === 'number') payload.top_p = opts.topP
+    if (typeof opts.maxTokens === 'number') payload.max_tokens = opts.maxTokens
+    if (opts.reasoningEffort) {
+      payload.reasoning_effort = opts.reasoningEffort === 'off' ? 'none' : opts.reasoningEffort
+    }
     if (opts.tools?.length) payload.tools = opts.tools
     if (opts.toolChoice !== undefined) payload.tool_choice = opts.toolChoice
     if (opts.responseFormat) payload.response_format = opts.responseFormat
@@ -338,25 +351,29 @@ export class OpenAiProvider implements LlmProvider {
     url: string,
     payload: Record<string, unknown>,
     timeoutMs: number,
+    signal?: AbortSignal,
   ): Promise<Response> {
     try {
       return await fetch(url, {
         method: 'POST',
         headers: this.buildHeaders(),
         body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
+          : AbortSignal.timeout(timeoutMs),
       })
     } catch (err) {
       // 超时或网络错误
       if (err instanceof DOMException && err.name === 'TimeoutError') {
         throw new AppError('LLM_TIMEOUT', {
           message: `OpenAI 请求超时 (${Math.round(timeoutMs / 1000)}s)`,
-          data: { provider: 'openai', model: this.config.modelId },
+          data: { provider: 'openai', model: this.config.modelId, retryable: true },
         })
       }
+      if (signal?.aborted) throw err
       throw new AppError('LLM_ERROR', {
         message: `OpenAI 网络错误: ${err instanceof Error ? err.message : String(err)}`,
-        data: { provider: 'openai', model: this.config.modelId },
+        data: { provider: 'openai', model: this.config.modelId, retryable: true },
       })
     }
   }
@@ -367,8 +384,7 @@ export class OpenAiProvider implements LlmProvider {
     const code = STATUS_TO_CODE[response.status] ?? 'LLM_ERROR'
 
     // 尝试解析 retryAfter (429 场景)
-    const retryAfter = response.headers.get('retry-after')
-    const retryMs = retryAfter ? parseInt(retryAfter, 10) * 1000 : undefined
+    const retryMs = parseRetryAfterMs(response.headers.get('retry-after'))
 
     logger.error(`OpenAI ${method} 失败`, {
       status: response.status,
@@ -382,6 +398,7 @@ export class OpenAiProvider implements LlmProvider {
         provider: 'openai',
         model: this.config.modelId,
         status: response.status,
+        retryable: RETRYABLE_STATUSES.has(response.status),
         retryAfter: retryMs,
       },
     })

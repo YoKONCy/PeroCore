@@ -13,6 +13,6 @@ export default defineConfig({
   out: './src/database/migrations',
   dialect: 'sqlite',
   dbCredentials: {
-    url: process.env.PERO_DATABASE_PATH ?? './data/perocore.db',
+    url: process.env.PERO_DATABASE_PATH ?? './data/infos.db',
   },
 })

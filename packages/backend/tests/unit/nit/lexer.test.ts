@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { NitLexer } from '@perocore/backend/nit/lexer'
-import { TokenType } from '@perocore/backend/nit/types'
+import { NitLexer } from '@infos/backend/nit/lexer'
+import { TokenType } from '@infos/backend/nit/types'
 
 describe('NitLexer', () => {
   describe('tokenize', () => {

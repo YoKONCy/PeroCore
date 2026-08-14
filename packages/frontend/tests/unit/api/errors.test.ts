@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ApiError, ErrorSeverity, ERROR_UI_MAP, NetworkError } from '@perocore/frontend/api/errors'
+import { ApiError, ErrorSeverity, ERROR_UI_MAP, NetworkError } from '@infos/frontend/api/errors'
 
 describe('ApiError', () => {
   it('应当保留错误码、消息和附加数据', () => {

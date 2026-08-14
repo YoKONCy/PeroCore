@@ -31,11 +31,12 @@ export interface AiModelConfigDto {
   modelId: string
   provider: string
   providerType: 'global' | 'custom'
-  temperature: number
+  temperature: number | null
   topP: number | null
   maxTokens: number | null
   stream: boolean
   enableVision: boolean
+  enableAudioInput: boolean
   enableVoice: boolean
   enableVideo: boolean
 }

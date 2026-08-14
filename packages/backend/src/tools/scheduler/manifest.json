@@ -2,7 +2,7 @@
   "id": "scheduler",
   "name": "提醒日程",
   "version": "1.0.0",
-  "author": "PeroCore Team",
+  "author": "infOS Team",
   "description": "为主人设置提醒、话题和预设反应。支持创建、查看、取消三种操作。",
   "type": "tool",
   "entry": "index.ts",
@@ -12,6 +12,7 @@
     {
       "name": "set_reminder",
       "description": "为主人设置一个提醒、话题或预设反应。当主人说\"帮我设个提醒\"、\"XX点提醒我\"等场景时使用。",
+      "display": { "label": "设置提醒", "icon": "clock", "color": "orange", "style": "reminder" },
       "parameters": {
         "type": "object",
         "properties": {
@@ -35,6 +36,12 @@
     {
       "name": "list_reminders",
       "description": "查看当前所有待触发的提醒、话题和反应。当主人问\"我设了什么提醒\"、\"有什么待办\"等场景时使用。",
+      "display": {
+        "label": "提醒列表",
+        "icon": "calendar",
+        "color": "orange",
+        "style": "reminder"
+      },
       "parameters": {
         "type": "object",
         "properties": {}
@@ -43,6 +50,7 @@
     {
       "name": "cancel_reminder",
       "description": "取消一个待触发的提醒。当主人说\"取消那个提醒\"、\"不用提醒我了\"等场景时使用。需要先用 list_reminders 获取 ID。",
+      "display": { "label": "取消提醒", "icon": "close", "color": "orange", "style": "reminder" },
       "parameters": {
         "type": "object",
         "properties": {

@@ -1,4 +1,4 @@
-# 发布流水线 — PeroCore
+# 发布流水线 — infOS
 # 触发: 推送任意 tag
 name: Release
 
@@ -53,7 +53,7 @@ jobs:
       - name: 构建 Electron 标准版 (NSIS)
         run: pnpm exec electron-builder --config electron-builder.standard.yml --publish never
         env:
-          PEROCORE_EDITION: standard
+          INFOS_EDITION: standard
 
       # 验证: 确认标准版不含 Steam 组件
       - name: 验证 Steam 组件已排除
@@ -108,7 +108,7 @@ jobs:
       - name: 构建 Electron 便携版
         run: pnpm exec electron-builder --config electron-builder.portable.yml --publish never
         env:
-          PEROCORE_EDITION: standard
+          INFOS_EDITION: standard
 
       # 验证: 确认便携版不含 Steam 组件
       - name: 验证 Steam 组件已排除
@@ -162,7 +162,7 @@ jobs:
       - name: 构建 Electron Steam 版
         run: pnpm exec electron-builder --config electron-builder.steam.yml
         env:
-          PEROCORE_EDITION: steam
+          INFOS_EDITION: steam
 
       # 验证: 确认 Steam 版包含必要的 Steam 组件
       - name: 验证 Steam 组件已包含
@@ -215,8 +215,8 @@ jobs:
           file: docker/Dockerfile.backend
           push: true
           tags: |
-            ${{ env.DOCKERHUB_USERNAME }}/perocore-backend:latest
-            ${{ env.DOCKERHUB_USERNAME }}/perocore-backend:${{ steps.meta.outputs.version }}
+            ${{ env.DOCKERHUB_USERNAME }}/infos-backend:latest
+            ${{ env.DOCKERHUB_USERNAME }}/infos-backend:${{ steps.meta.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -228,8 +228,8 @@ jobs:
           file: docker/Dockerfile.frontend
           push: true
           tags: |
-            ${{ env.DOCKERHUB_USERNAME }}/perocore-frontend:latest
-            ${{ env.DOCKERHUB_USERNAME }}/perocore-frontend:${{ steps.meta.outputs.version }}
+            ${{ env.DOCKERHUB_USERNAME }}/infos-frontend:latest
+            ${{ env.DOCKERHUB_USERNAME }}/infos-frontend:${{ steps.meta.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -330,8 +330,8 @@ jobs:
             ### 🐳 Docker 用户
 
             ```bash
-            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/perocore-backend:${{ github.ref_name }}
-            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/perocore-frontend:${{ github.ref_name }}
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/infos-backend:${{ github.ref_name }}
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/infos-frontend:${{ github.ref_name }}
             ```
 
             ---

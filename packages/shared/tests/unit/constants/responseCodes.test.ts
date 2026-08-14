@@ -5,7 +5,7 @@ import {
   CODE_TO_HTTP,
   SERVER_ERROR_CODES,
   SUCCESS_CODES,
-} from '@perocore/shared'
+} from '@infos/shared'
 
 describe('responseCodes', () => {
   describe('成功码契约', () => {

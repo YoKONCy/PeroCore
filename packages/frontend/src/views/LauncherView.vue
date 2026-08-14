@@ -1,30 +1,90 @@
 <script setup lang="ts">
-/**
- * LauncherView — 启动器控制面板 (忠实还原 v1 的完整布局)
- *
- * 布局: 侧边栏导航 + 多标签内容区
- * 标签: Home (系统监控+启动) | Agents (角色管理)
- */
-import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+/** Electron 客户端专属启动与维护中心。 */
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { PixelIcon } from '../components/pixel'
+import AsyncMarkdown from '../components/markdown/AsyncMarkdown.vue'
 import { OnboardingOverlay } from '../components/overlays'
 import CustomTitleBar from '../components/layout/CustomTitleBar.vue'
-import { LauncherHomeTab, LauncherAgentsTab } from '../components/launcher'
 import { useLauncher } from '../composables/launcher/useLauncher'
 import { launcherSteps } from '../composables/launcher/onboardingScripts'
-import { useAgentStore } from '../stores'
-import { isElectron } from '../utils/ipcAdapter'
+import { useAgentStore, useNotificationStore } from '../stores'
 import { getApiBaseUrl } from '../api/transport'
+import { invoke, listen } from '../utils/ipcAdapter'
 
-defineOptions({ name: 'LauncherView' })
+interface ClientInfo {
+  version: string
+  edition: 'development' | 'portable' | 'steam' | 'release'
+  isPackaged: boolean
+  platform: string
+  architecture: string
+  osVersion: string
+  osName: string
+  hostname: string
+  cpuModel: string
+  cpuCores: number
+  memoryUsed: number
+  memoryTotal: number
+  uptime: number
+  electronVersion: string
+  chromiumVersion: string
+  nodeVersion: string
+  dataPath: string
+  logsPath: string
+  appPath: string
+  windows: { launcher: boolean; dashboard: boolean; pet: boolean }
+  development: {
+    available: boolean
+    branch?: string
+    commit?: string
+    dirty?: boolean
+    projectPath?: string
+    updateCommand?: string
+    error?: string
+  }
+}
 
+interface UpdateState {
+  phase: 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'up-to-date' | 'error'
+  currentVersion: string
+  latestVersion?: string
+  progress: number
+  message: string
+  checkedAt?: string
+}
+
+interface ReleaseNotice {
+  tagName: string
+  name: string
+  body: string
+  publishedAt: string
+  htmlUrl: string
+  prerelease: boolean
+  cached: boolean
+}
+
+const tabs = [
+  { id: 'launch', code: '01', label: '启动', icon: 'power' },
+  { id: 'environment', code: '02', label: '运行环境', icon: 'cpu' },
+  { id: 'updates', code: '03', label: '版本公告', icon: 'download' },
+  { id: 'about', code: '04', label: '关于', icon: 'info' },
+] as const
+
+type TabId = (typeof tabs)[number]['id']
 const appVersion = __APP_VERSION__
-const router = useRouter()
+const activeTab = ref<TabId>('launch')
 const agentStore = useAgentStore()
+const notification = useNotificationStore()
+const clientInfo = ref<ClientInfo | null>(null)
+const updateState = ref<UpdateState | null>(null)
+const release = ref<ReleaseNotice | null>(null)
+const loadingInfo = ref(false)
+const loadingRelease = ref(false)
+const switchingAgent = ref('')
+let stopUpdateListener: (() => void) | null = null
 
 const {
   phase,
+  checks,
   startLaunch,
   enterApp,
   enteringText,
@@ -37,487 +97,1883 @@ const {
   triggerOnboarding,
 } = useLauncher()
 
-// ── 侧边栏状态 ──
-const activeTab = ref('home')
-const isSidebarCollapsed = ref(false)
-const isRunning = ref(false)
-const isStarting = ref(false)
+const editionName = computed(
+  () =>
+    ({
+      development: '开发版',
+      portable: '便携版',
+      steam: 'Steam 版',
+      release: '正式版',
+    })[clientInfo.value?.edition ?? 'development'],
+)
 
-/** 缩放因子 (Electron 窗口适配) */
-const scale = ref(1)
+const checkFriendlyLabel: Record<string, string> = {
+  backend: '后台服务',
+  database: '数据存储',
+  model: 'AI 模型',
+  memory: '记忆系统',
+  extension: '伙伴配置',
+}
 
-const navItems = [
-  { id: 'home', name: '控制面板', icon: 'home' },
-  { id: 'agents', name: '角色配置', icon: 'users' },
-]
+const healthyChecks = computed(() => checks.value.filter((item) => item.status === 'ok').length)
+const totalChecks = computed(() => checks.value.length)
+const environmentWarning = computed(() =>
+  checks.value.some((item) => item.status === 'error' || item.status === 'warn'),
+)
+const hasUpdate = computed(
+  () => updateState.value?.phase === 'available' || updateState.value?.phase === 'downloaded',
+)
 
-onMounted(() => {
-  startLaunch()
-  // 立即加载 Agent 列表，确保看板娘头像等 UI 不需要等到点角色配置 tab
-  agentStore.fetchAgents()
+function formatBytes(bytes: number): string {
+  if (!bytes) return '—'
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`
+}
+
+function formatDate(value: string): string {
+  return value ? new Date(value).toLocaleString('zh-CN') : '未知'
+}
+
+async function refreshClientInfo(): Promise<void> {
+  loadingInfo.value = true
+  try {
+    clientInfo.value = (await invoke('get-client-info')) as ClientInfo
+    updateState.value = (await invoke('get-update-state')) as UpdateState
+  } catch (error) {
+    notification.toast(
+      `客户端环境检测失败：${error instanceof Error ? error.message : String(error)}`,
+      'error',
+    )
+  } finally {
+    loadingInfo.value = false
+  }
+}
+
+async function loadRelease(): Promise<void> {
+  loadingRelease.value = true
+  try {
+    release.value = (await invoke('get-latest-release')) as ReleaseNotice
+  } catch (error) {
+    notification.toast(
+      `版本公告获取失败：${error instanceof Error ? error.message : String(error)}`,
+      'warning',
+    )
+  } finally {
+    loadingRelease.value = false
+  }
+}
+
+async function selectAgent(agentId: string): Promise<void> {
+  if (switchingAgent.value || agentId === agentStore.activeAgentId) return
+  switchingAgent.value = agentId
+  try {
+    await agentStore.switchAgent(agentId)
+  } catch (error) {
+    notification.toast(
+      `切换角色失败：${error instanceof Error ? error.message : String(error)}`,
+      'error',
+    )
+  } finally {
+    switchingAgent.value = ''
+  }
+}
+
+async function enterDesktop(): Promise<void> {
+  await enterApp()
+  await refreshClientInfo()
+}
+
+async function openDashboard(): Promise<void> {
+  await invoke('open-dashboard-window')
+  await refreshClientInfo()
+}
+
+async function checkUpdate(): Promise<void> {
+  updateState.value = (await invoke('check-client-update')) as UpdateState
+}
+
+async function downloadUpdate(): Promise<void> {
+  updateState.value = (await invoke('download-client-update')) as UpdateState
+}
+
+async function installUpdate(): Promise<void> {
+  await invoke('install-client-update')
+}
+
+async function copyUpdateCommand(): Promise<void> {
+  const command = clientInfo.value?.development.updateCommand
+  if (!command) return
+  await navigator.clipboard.writeText(command)
+  notification.toast('开发更新命令已复制', 'success')
+}
+
+function handleOnboardingStep(step: { tab?: string }): void {
+  if (step.tab && tabs.some((tab) => tab.id === step.tab)) activeTab.value = step.tab as TabId
+}
+
+onMounted(async () => {
+  await Promise.all([agentStore.fetchAgents(), refreshClientInfo(), startLaunch()])
+  void loadRelease()
+  stopUpdateListener = await listen('client-update-state', (payload) => {
+    updateState.value = payload as UpdateState
+  })
 })
 
-/** 启动/停止 */
-async function toggleLaunch() {
-  if (isRunning.value) {
-    isRunning.value = false
-    return
-  }
-  isStarting.value = true
-  const target = await enterApp()
-  if (target === 'browser') {
-    router.push('/app')
-  }
-  isStarting.value = false
-  isRunning.value = true
-}
-
-/** 导航条目激活时的颜色 class (还原 v1 精确样式) */
-function getNavActiveClass(id: string): string {
-  if (id === 'home') return 'bg-sky-500 text-white pixel-border-sky shadow-[4px_4px_0_0_#0ea5e940]'
-  if (id === 'agents')
-    return 'bg-emerald-500 text-white pixel-border-emerald shadow-[4px_4px_0_0_#10b98140]'
-  if (id === 'plugins')
-    return 'bg-amber-500 text-white pixel-border-amber shadow-[4px_4px_0_0_#f59e0b40]'
-  return 'bg-indigo-500 text-white pixel-border-indigo shadow-[4px_4px_0_0_#6366f140]'
-}
+onUnmounted(() => stopUpdateListener?.())
 </script>
 
 <template>
-  <!-- ═══ 背景纹理 (v1: 独立 fixed 层) ═══ -->
-  <div
-    class="fixed inset-0 opacity-[0.03] pointer-events-none z-0 animate-pixel-bg-float"
-    style="background-image: url('https://www.transparenttextures.com/patterns/cubes.png')"
-  />
+  <div class="launcher-shell">
+    <CustomTitleBar :transparent="true" />
 
-  <!-- ═══ 像素装饰贴纸 (v1: 独立 fixed 层, 11个图标 + 12星星 + 15气泡) ═══ -->
-  <div class="fixed inset-0 pointer-events-none z-10 overflow-hidden select-none">
-    <div
-      class="absolute top-[15%] right-[5%] text-pink-300/40 animate-pixel-float pixel-hover-lift"
-      style="animation-delay: 0.5s"
-    >
-      <PixelIcon name="heart" class="w-8 h-8" />
-    </div>
-    <div
-      class="absolute bottom-[25%] left-[18%] text-amber-300/30 animate-pixel-bounce pixel-hover-lift"
-      style="animation-delay: 1.2s"
-    >
-      <PixelIcon name="star" class="w-6 h-6" />
-    </div>
-    <div
-      class="absolute top-[40%] left-[2%] text-indigo-300/20 animate-pixel-float pixel-hover-lift"
-      style="animation-delay: 2s"
-    >
-      <PixelIcon name="mood-happy" class="w-10 h-10" />
-    </div>
-    <div
-      class="absolute bottom-[10%] right-[12%] text-emerald-300/40 animate-pixel-bounce pixel-hover-lift"
-      style="animation-delay: 0.8s"
-    >
-      <PixelIcon name="heart" class="w-5 h-5" />
-    </div>
-    <div
-      class="absolute top-[8%] left-[25%] text-sky-300/30 animate-pixel-float pixel-hover-lift"
-      style="animation-delay: 1.5s"
-    >
-      <PixelIcon name="sparkle" class="w-7 h-7" />
-    </div>
-    <div
-      class="absolute bottom-[40%] right-[3%] text-amber-200/20 animate-pixel-bounce pixel-hover-lift"
-      style="animation-delay: 2.5s"
-    >
-      <PixelIcon name="star" class="w-9 h-9" />
-    </div>
-    <div
-      class="absolute top-[60%] right-[8%] text-pink-200/30 animate-pixel-float pixel-hover-lift"
-      style="animation-delay: 3s"
-    >
-      <PixelIcon name="cat" class="w-12 h-12" />
-    </div>
-    <div
-      class="absolute top-[25%] left-[10%] text-sky-200/20 animate-pixel-bounce pixel-hover-lift"
-      style="animation-delay: 3.5s"
-    >
-      <PixelIcon name="cat" class="w-8 h-8" />
-    </div>
-    <div
-      class="absolute bottom-[15%] left-[5%] text-emerald-300/30 animate-pixel-float pixel-hover-lift"
-      style="animation-delay: 4s"
-    >
-      <PixelIcon name="circle" class="w-4 h-4" />
-    </div>
-    <div
-      class="absolute top-[5%] right-[20%] text-yellow-200/40 animate-pixel-bounce pixel-hover-lift"
-      style="animation-delay: 2.2s"
-    >
-      <PixelIcon name="sparkle" class="w-6 h-6" />
-    </div>
-    <div
-      class="absolute bottom-[5%] left-[30%] text-pink-300/20 animate-pixel-float pixel-hover-lift"
-      style="animation-delay: 1.5s"
-    >
-      <PixelIcon name="heart" class="w-6 h-6" />
-    </div>
-    <!-- 超大猫娘水印 -->
-    <div
-      class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-sky-200/5 opacity-[0.05] rotate-12 pointer-events-none"
-    >
-      <PixelIcon name="cat" class="w-[600px] h-[600px]" />
-    </div>
-
-    <!-- 动态星星 -->
-    <div
-      v-for="i in 12"
-      :key="'star-' + i"
-      class="absolute animate-pixel-star text-amber-200/30 pointer-events-none"
-      :style="{
-        top: ((i * 8.3) % 100) + '%',
-        left: ((i * 7.7 + 15) % 100) + '%',
-        animationDelay: i * 0.25 + 's',
-      }"
-    >
-      <PixelIcon
-        name="star"
-        :style="{ width: 8 + (i % 4) * 3 + 'px', height: 8 + (i % 4) * 3 + 'px' }"
-      />
-    </div>
-    <!-- 动态气泡 -->
-    <div
-      v-for="i in 15"
-      :key="'bubble-' + i"
-      class="absolute animate-pixel-bubble text-sky-200/20 pointer-events-none"
-      :style="{
-        bottom: '-20px',
-        left: ((i * 6.7) % 100) + '%',
-        animationDelay: i * 0.33 + 's',
-      }"
-    >
-      <PixelIcon
-        name="circle"
-        :style="{ width: 4 + (i % 3) * 3 + 'px', height: 4 + (i % 3) * 3 + 'px' }"
-      />
-    </div>
-  </div>
-
-  <!-- ═══ 主容器 (v1 精确还原) ═══ -->
-  <div
-    class="h-screen w-screen overflow-hidden text-slate-800 font-sans select-text relative pixel-grid-overlay"
-    style="background-color: var(--launcher-bg, #f0f9ff)"
-  >
-    <!-- 自定义标题栏 (Electron frameless 窗口) -->
-    <CustomTitleBar v-if="isElectron()" :transparent="true" />
-
-    <!-- 新手引导 -->
     <OnboardingOverlay
       :visible="showOnboarding"
       :steps="launcherSteps"
       @finish="finishOnboarding"
+      @step="handleOnboardingStep"
       @update:visible="
-        (v: boolean) => {
-          if (!v) finishOnboarding()
+        (visible: boolean) => {
+          if (!visible) finishOnboarding()
         }
       "
     />
 
-    <!-- ═══ 主体布局: 侧边栏 + 内容区 ═══ -->
-    <div
-      class="flex h-full w-full pixel-grid-overlay"
-      :style="{
-        zoom: scale,
-        paddingTop: isElectron() ? `${32 / scale}px` : '0px',
-      }"
-    >
-      <!-- ── 侧边导航栏 ── -->
-      <aside
-        id="nav-sidebar"
-        :class="[
-          'bg-white pixel-border-sky flex flex-col transition-all duration-300 relative z-20 select-none',
-          isSidebarCollapsed ? 'w-20' : 'w-64',
-        ]"
+    <header class="launcher-head">
+      <div class="launcher-brand">
+        <div class="brand-mark"><img src="/icon.png" alt="PeroperoChat" /></div>
+        <div>
+          <strong>PeroperoChat</strong>
+          <span>启动器</span>
+        </div>
+      </div>
+      <div class="global-signals">
+        <span class="signal">
+          <i :class="phase === 'ready' ? 'ok' : 'pending'" />
+          {{ phase === 'ready' ? '服务在线' : '正在连接' }}
+        </span>
+        <span class="badge">{{ editionName }}</span>
+        <span class="ver">v{{ clientInfo?.version ?? appVersion }}</span>
+      </div>
+    </header>
+
+    <nav id="launcher-tabs" class="launcher-tabs" aria-label="启动器页面">
+      <button
+        v-for="tab in tabs"
+        :key="tab.id"
+        :class="{ active: activeTab === tab.id }"
+        @click="activeTab = tab.id"
       >
-        <div class="p-6 mb-6 flex items-center justify-between">
-          <div v-if="!isSidebarCollapsed" class="flex items-center gap-3">
-            <div
-              class="w-8 h-8 pixel-border-sky bg-sky-500 flex items-center justify-center text-white pixel-hover-lift overflow-hidden"
-            >
-              <PixelIcon name="cat" size="sm" />
-            </div>
-            <span class="font-bold tracking-tight text-lg text-sky-600">启动器</span>
-          </div>
-          <button
-            class="p-2 hover:bg-sky-50 text-slate-500 hover:text-sky-500 transition-all duration-200 mx-auto"
-            @click="isSidebarCollapsed = !isSidebarCollapsed"
-          >
-            <PixelIcon name="menu" size="md" />
-          </button>
-        </div>
+        <span class="tab-code">{{ tab.code }}</span>
+        <PixelIcon :name="tab.icon" size="sm" />
+        <strong>{{ tab.label }}</strong>
+        <i v-if="tab.id === 'environment' && environmentWarning" class="tab-signal warn" />
+        <i v-if="tab.id === 'updates' && hasUpdate" class="tab-signal update" />
+      </button>
+    </nav>
 
-        <nav class="flex-1 px-4 space-y-2">
-          <button
-            v-for="item in navItems"
-            :id="'nav-' + item.id"
-            :key="item.id"
-            :class="[
-              'w-full flex items-center gap-4 px-4 py-3.5 transition-all duration-300 group relative overflow-hidden pixel-hover-lift press-effect',
-              activeTab === item.id
-                ? getNavActiveClass(item.id)
-                : 'text-slate-500 hover:bg-sky-50 hover:text-sky-600',
-            ]"
-            @click="activeTab = item.id"
-          >
-            <PixelIcon
-              :name="item.icon"
-              size="md"
-              :class="
-                activeTab === item.id
-                  ? 'text-white'
-                  : 'group-hover:scale-110 transition-transform duration-300'
-              "
-            />
-            <span v-if="!isSidebarCollapsed" class="font-bold text-sm z-10 tracking-wide">
-              {{ item.name }}
-            </span>
-            <div
-              v-if="activeTab === item.id && !isSidebarCollapsed"
-              class="ml-auto text-white/50 animate-pixel-float"
-            >
-              <PixelIcon name="heart" size="sm" />
-            </div>
-          </button>
-        </nav>
-
-        <!-- 侧边栏底部：像素看板娘 -->
-        <div class="mt-auto p-4 flex flex-col items-center border-t-2 border-sky-100/50">
-          <div
-            class="w-12 h-12 pixel-border-sky flex items-center justify-center mb-2 group cursor-pointer transition-colors duration-300 relative overflow-hidden"
-            :class="[
-              isRunning
-                ? 'bg-emerald-100 text-emerald-500 animate-pixel-bounce'
-                : 'bg-sky-100 text-sky-500 animate-pixel-float',
-            ]"
-          >
-            <!-- 有头像时显示 active agent 头像 -->
-            <img
-              v-if="agentStore.currentAgent?.avatarUrl"
-              :src="`${getApiBaseUrl()}${agentStore.currentAgent.avatarUrl}`"
-              :alt="agentStore.currentAgent.name"
-              class="w-full h-full object-cover"
-            />
-            <!-- 无头像回退猫图标 -->
-            <PixelIcon v-else name="cat" size="lg" />
-            <!-- 情绪气泡 -->
-            <div
-              class="absolute -top-6 -right-4 bg-white pixel-border-sm px-2 py-0.5 text-[8px] font-bold animate-pixel-float whitespace-nowrap"
-              :class="isRunning ? 'text-emerald-500' : 'text-sky-500'"
-            >
-              {{ isRunning ? '加油中！' : '在发呆...' }}
-            </div>
-          </div>
-          <div
-            v-if="!isSidebarCollapsed"
-            class="text-[10px] font-bold text-sky-400 font-mono tracking-widest uppercase flex items-center gap-1"
-          >
-            <PixelIcon name="sparkle" class="w-2 h-2 text-amber-400" />
-            {{ agentStore.currentAgent?.name ?? 'Mascot' }}
-            <PixelIcon name="sparkle" class="w-2 h-2 text-amber-400" />
-          </div>
-        </div>
-      </aside>
-
-      <!-- ── 主内容区 ── -->
-      <div class="flex-1 flex flex-col relative overflow-hidden bg-transparent">
-        <!-- 顶部标题栏 -->
-        <header
-          class="h-20 flex items-center justify-between px-10 border-b-2 border-sky-600 bg-white z-10 select-none"
-        >
+    <main class="launcher-content">
+      <!-- 启动 -->
+      <section v-if="activeTab === 'launch'" class="page launch-page">
+        <div class="page-head">
           <div>
-            <h1 class="text-2xl font-bold text-slate-800 tracking-tight">PeroperoChat Launcher</h1>
-            <p class="text-xs text-slate-400 mt-1 font-mono tracking-wider flex items-center gap-2">
-              <PixelIcon name="mood-happy" class="w-2.5 h-2.5 text-sky-500 animate-pixel-float" />
-              版本 {{ appVersion }} · 系统就绪
-            </p>
+            <span class="page-eyebrow">今天和谁一起</span>
+            <h1>选择你的伙伴</h1>
+            <p>选中的伙伴会出现在主界面和桌面，下次启动也会记住哦。</p>
           </div>
-          <div class="flex items-center gap-6">
-            <div class="flex items-center gap-4 bg-white px-5 py-2.5 pixel-border-sky">
-              <div class="flex items-center gap-2 group cursor-help">
-                <div
-                  :class="[
-                    'w-3 h-3 pixel-border-mint transition-colors duration-500 animate-pixel-float',
-                    phase === 'ready' || isRunning
-                      ? 'bg-emerald-500'
-                      : phase === 'checking'
-                        ? 'bg-amber-400'
-                        : 'bg-slate-300',
-                  ]"
-                />
-                <span
-                  class="text-xs font-medium text-slate-500 uppercase tracking-tight group-hover:text-emerald-500 transition-colors"
-                >
-                  核心服务
+          <div class="check-score">
+            <strong>{{ healthyChecks }}/{{ totalChecks }}</strong>
+            <span>启动检查通过</span>
+          </div>
+        </div>
+
+        <div id="launcher-agent-stage" class="agent-stage">
+          <article class="active-agent-card">
+            <div class="active-avatar">
+              <img
+                v-if="agentStore.currentAgent?.avatarUrl"
+                :src="`${getApiBaseUrl()}${agentStore.currentAgent.avatarUrl}`"
+                :alt="agentStore.currentAgent.name"
+              />
+              <span v-else>{{ agentStore.currentAgent?.name?.[0] ?? '?' }}</span>
+            </div>
+            <div class="active-copy">
+              <small>当前伙伴</small>
+              <h2>{{ agentStore.currentAgent?.name ?? '还没选伙伴' }}</h2>
+              <p>
+                {{
+                  agentStore.currentAgent?.description ||
+                  '点右侧选一个伙伴，它就会在桌面和主界面陪伴你。'
+                }}
+              </p>
+              <div class="active-meta">
+                <span>
+                  <i class="ok" />
+                  已连接到客户端
                 </span>
+                <span class="mono">{{ agentStore.activeAgentId }}</span>
               </div>
             </div>
-            <!-- 重新触发 EULA / 引导 -->
+          </article>
+
+          <div class="agent-picker">
             <button
-              class="w-8 h-8 pixel-border-pink flex items-center justify-center bg-pink-50 text-pink-400 hover:bg-pink-100 hover:text-pink-600 transition-all duration-200 hover:scale-110 active:scale-95"
-              title="重新查看用户协议"
-              @click="triggerEula"
+              v-for="agent in agentStore.agents"
+              :key="agent.id"
+              :class="{ active: agent.id === agentStore.activeAgentId }"
+              :disabled="switchingAgent === agent.id"
+              @click="selectAgent(agent.id)"
             >
-              <PixelIcon name="shield" size="sm" />
-            </button>
-            <button
-              class="w-8 h-8 pixel-border-sky flex items-center justify-center bg-sky-50 text-sky-400 hover:bg-sky-100 hover:text-sky-600 transition-all duration-200 hover:scale-110 active:scale-95"
-              title="重新开始新手引导"
-              @click="triggerOnboarding"
-            >
-              <PixelIcon name="book" size="sm" />
-            </button>
-          </div>
-        </header>
-
-        <!-- 内容区域 -->
-        <main class="flex-1 overflow-hidden p-8">
-          <LauncherHomeTab
-            v-if="activeTab === 'home'"
-            :is-starting="isStarting"
-            :is-running="isRunning"
-            :phase="phase"
-            :entering-text="enteringText"
-            :app-version="appVersion"
-            @launch="toggleLaunch"
-          />
-          <LauncherAgentsTab v-if="activeTab === 'agents'" />
-        </main>
-      </div>
-    </div>
-  </div>
-
-  <!-- ═══ EULA 弹窗 ═══ -->
-  <Teleport to="body">
-    <Transition name="eula-fade">
-      <div
-        v-if="showEula"
-        class="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm"
-      >
-        <div
-          class="w-[540px] bg-white pixel-border-pink p-10 flex flex-col gap-6 relative overflow-hidden animate-eula-appear"
-        >
-          <div
-            class="absolute -top-4 -right-4 text-pink-100 opacity-30 rotate-12 pointer-events-none"
-          >
-            <PixelIcon name="heart" size="3xl" />
-          </div>
-
-          <div class="flex items-center gap-4 relative z-10">
-            <div
-              class="w-14 h-14 flex items-center justify-center bg-pink-500 pixel-border-pink text-white animate-pixel-float"
-            >
-              <PixelIcon name="shield" size="xl" />
-            </div>
-            <div>
-              <h2 class="text-2xl font-extrabold text-slate-800 flex items-center gap-2.5">
-                用户许可协议
-                <span
-                  class="text-[9px] font-extrabold bg-pink-50 text-pink-500 px-2 py-0.5 pixel-border-pink"
-                >
-                  REQUIRED
-                </span>
-              </h2>
-              <p class="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] mt-1">
-                End User License Agreement
-              </p>
-            </div>
-          </div>
-
-          <div class="max-h-80 overflow-y-auto p-5 bg-pink-50/30 pixel-border-pink relative z-10">
-            <div class="flex flex-col gap-3">
-              <p
-                class="text-[13px] font-bold text-pink-600 flex items-center gap-1.5 leading-relaxed"
-              >
-                <PixelIcon name="heart" size="xs" />
-                欢迎使用 萌动链接：PeroperoChat！ (以下简称"本软件")。
-              </p>
-              <p class="text-[13px] text-slate-500 leading-relaxed">
-                在使用本软件之前，请您务必仔细阅读并理解《最终用户许可协议》。
-              </p>
-              <h4 class="text-[13px] font-extrabold text-slate-800 mt-3 flex items-center gap-2">
-                <span class="w-1.5 h-1.5 bg-pink-400 shrink-0" />
-                1. 开源许可与分发
-              </h4>
-              <p
-                class="text-[13px] text-slate-400 pl-3.5 border-l-2 border-pink-100 leading-relaxed"
-              >
-                本软件基于开源协议发布，您可以自由查看、修改和分发源代码，但须遵守对应的开源许可条款。
-              </p>
-              <h4 class="text-[13px] font-extrabold text-slate-800 mt-3 flex items-center gap-2">
-                <span class="w-1.5 h-1.5 bg-pink-400 shrink-0" />
-                2. AI 生成内容免责声明
-              </h4>
-              <p
-                class="text-[13px] text-slate-400 pl-3.5 border-l-2 border-pink-100 leading-relaxed"
-              >
-                所有由 AI 生成的内容均由模型自动产出，不代表开发者观点。
-              </p>
-              <h4 class="text-[13px] font-extrabold text-slate-800 mt-3 flex items-center gap-2">
-                <span class="w-1.5 h-1.5 bg-pink-400 shrink-0" />
-                3. 隐私与数据安全
-              </h4>
-              <p
-                class="text-[13px] text-slate-400 pl-3.5 border-l-2 border-pink-100 leading-relaxed"
-              >
-                您的数据默认仅存储在本地设备上，不会被上传至开发者服务器。
-              </p>
-              <p
-                class="text-[11px] text-slate-400 pt-4 border-t-2 border-pink-100 flex items-center gap-1.5"
-              >
-                <PixelIcon name="sparkle" size="xs" />
-                点击"同意并继续"即表示您已阅读并同意上述所有条款喵~
-              </p>
-            </div>
-          </div>
-
-          <div class="flex gap-3 relative z-10">
-            <button
-              class="flex-1 py-3 px-6 bg-slate-50 border-3 border-slate-200 text-slate-400 font-extrabold text-xs tracking-[0.1em] cursor-pointer transition-all hover:bg-slate-100 hover:text-slate-500 press-effect"
-              @click="declineEula"
-            >
-              拒绝并退出
-            </button>
-            <button
-              class="flex-[2] py-3 px-6 pixel-btn-pink text-white font-extrabold text-sm tracking-[0.15em] cursor-pointer flex items-center justify-center gap-2 pixel-hover-lift press-effect"
-              @click="acceptEula"
-            >
-              <PixelIcon name="check" size="xs" />
-              同意并继续
-              <PixelIcon name="chevron-right" size="xs" />
+              <span class="picker-avatar">
+                <img
+                  v-if="agent.avatarUrl"
+                  :src="`${getApiBaseUrl()}${agent.avatarUrl}`"
+                  :alt="agent.name"
+                />
+                <i v-else>{{ agent.name?.[0] ?? '?' }}</i>
+              </span>
+              <strong>{{ agent.name }}</strong>
+              <small class="mono">{{ agent.id }}</small>
+              <PixelIcon v-if="agent.id === agentStore.activeAgentId" name="check" size="xs" />
             </button>
           </div>
         </div>
+
+        <div class="launch-bottom">
+          <div id="launcher-readiness" class="check-list">
+            <div v-for="item in checks" :key="item.id">
+              <i :class="item.status" />
+              <span>{{ checkFriendlyLabel[item.id] ?? item.label }}</span>
+              <strong>{{ item.message ?? '等待检测' }}</strong>
+            </div>
+          </div>
+          <div class="launch-actions">
+            <button class="ghost-action" @click="openDashboard">
+              <PixelIcon name="layout" size="sm" />
+              打开主界面
+            </button>
+            <button
+              id="launcher-primary-action"
+              class="primary-action"
+              :disabled="phase === 'entering'"
+              @click="enterDesktop"
+            >
+              <PixelIcon name="power" size="md" />
+              <span>
+                <strong>{{ clientInfo?.windows.pet ? '显示伙伴' : '召唤伙伴' }}</strong>
+                <small>{{ phase === 'entering' ? enteringText : '进入桌面陪伴模式' }}</small>
+              </span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 运行环境 -->
+      <section
+        v-else-if="activeTab === 'environment'"
+        id="launcher-environment-content"
+        class="page"
+      >
+        <div class="page-head">
+          <div>
+            <span class="page-eyebrow">这台电脑的情况</span>
+            <h1>运行环境</h1>
+            <p>看看客户端的运行状态，出问题时也能更快定位。</p>
+          </div>
+          <button class="ghost-action" :disabled="loadingInfo" @click="refreshClientInfo">
+            <PixelIcon name="refresh" size="xs" />
+            重新检测
+          </button>
+        </div>
+
+        <div class="diagnostic-grid">
+          <article class="env-card">
+            <header>
+              <PixelIcon name="desktop" size="sm" />
+              <div>
+                <strong>客户端</strong>
+                <span class="mono">APP</span>
+              </div>
+            </header>
+            <dl>
+              <div>
+                <dt>版本</dt>
+                <dd class="mono">{{ clientInfo?.version }}</dd>
+              </div>
+              <div>
+                <dt>渠道</dt>
+                <dd>{{ editionName }}</dd>
+              </div>
+              <div>
+                <dt>形式</dt>
+                <dd>{{ clientInfo?.isPackaged ? '安装包' : '源码运行' }}</dd>
+              </div>
+              <div>
+                <dt>设备名</dt>
+                <dd class="mono">{{ clientInfo?.hostname }}</dd>
+              </div>
+            </dl>
+          </article>
+          <article class="env-card">
+            <header>
+              <PixelIcon name="cpu" size="sm" />
+              <div>
+                <strong>电脑</strong>
+                <span class="mono">SYSTEM</span>
+              </div>
+            </header>
+            <dl>
+              <div>
+                <dt>系统</dt>
+                <dd>{{ clientInfo?.osName }} {{ clientInfo?.osVersion }}</dd>
+              </div>
+              <div>
+                <dt>架构</dt>
+                <dd class="mono">{{ clientInfo?.architecture }}</dd>
+              </div>
+              <div>
+                <dt>处理器</dt>
+                <dd>{{ clientInfo?.cpuModel }}</dd>
+              </div>
+              <div>
+                <dt>内存</dt>
+                <dd class="mono">
+                  {{ formatBytes(clientInfo?.memoryUsed ?? 0) }} /
+                  {{ formatBytes(clientInfo?.memoryTotal ?? 0) }}
+                </dd>
+              </div>
+            </dl>
+          </article>
+          <article class="env-card">
+            <header>
+              <PixelIcon name="code" size="sm" />
+              <div>
+                <strong>运行时</strong>
+                <span class="mono">RUNTIME</span>
+              </div>
+            </header>
+            <dl>
+              <div>
+                <dt>Electron</dt>
+                <dd class="mono">{{ clientInfo?.electronVersion }}</dd>
+              </div>
+              <div>
+                <dt>Chromium</dt>
+                <dd class="mono">{{ clientInfo?.chromiumVersion }}</dd>
+              </div>
+              <div>
+                <dt>Node.js</dt>
+                <dd class="mono">{{ clientInfo?.nodeVersion }}</dd>
+              </div>
+              <div>
+                <dt>后台服务</dt>
+                <dd :class="phase === 'ready' ? 'ok-text' : 'warn-text'">
+                  {{ phase === 'ready' ? '已连接' : '连接中' }}
+                </dd>
+              </div>
+            </dl>
+          </article>
+          <article class="env-card">
+            <header>
+              <PixelIcon name="layout" size="sm" />
+              <div>
+                <strong>窗口</strong>
+                <span class="mono">WINDOWS</span>
+              </div>
+            </header>
+            <dl>
+              <div>
+                <dt>启动器</dt>
+                <dd>已打开</dd>
+              </div>
+              <div>
+                <dt>主界面</dt>
+                <dd>{{ clientInfo?.windows.dashboard ? '已打开' : '未打开' }}</dd>
+              </div>
+              <div>
+                <dt>桌宠</dt>
+                <dd>{{ clientInfo?.windows.pet ? '已打开' : '未打开' }}</dd>
+              </div>
+              <div>
+                <dt>桌面能力</dt>
+                <dd>{{ phase === 'ready' ? '可用' : '等待服务' }}</dd>
+              </div>
+            </dl>
+          </article>
+        </div>
+      </section>
+
+      <!-- 版本公告 -->
+      <section v-else-if="activeTab === 'updates'" class="page updates-page">
+        <div class="page-head update-head">
+          <div>
+            <span class="page-eyebrow">新版本有什么变化</span>
+            <h1>版本公告</h1>
+            <p>先看看这次更新了什么，再决定要不要升级。</p>
+          </div>
+          <div class="release-identity">
+            <span>{{ release?.tagName || 'LATEST' }}</span>
+            <strong>{{ release ? formatDate(release.publishedAt) : '正在连接 GitHub…' }}</strong>
+          </div>
+        </div>
+
+        <div class="release-workspace">
+          <article id="launcher-release-notice" class="release-notice">
+            <header class="release-notice__head">
+              <div class="release-symbol"><PixelIcon name="sparkle" size="md" /></div>
+              <div>
+                <small>最新版本公告</small>
+                <h2>{{ release?.name ?? '正在获取版本公告…' }}</h2>
+                <p v-if="release">
+                  发布于 {{ formatDate(release.publishedAt) }}
+                  <em v-if="release.cached">离线缓存</em>
+                </p>
+              </div>
+              <button :disabled="loadingRelease" title="刷新公告" @click="loadRelease">
+                <PixelIcon name="refresh" size="xs" />
+              </button>
+            </header>
+            <div class="release-notice__body">
+              <AsyncMarkdown v-if="release?.body" :content="release.body" />
+              <div v-else class="release-empty">
+                <PixelIcon name="download" size="lg" />
+                <span>正在读取 GitHub Release…</span>
+              </div>
+            </div>
+            <footer v-if="release">
+              <span>内容来自项目的 GitHub Release</span>
+              <button @click="invoke('open-external-url', { url: release.htmlUrl })">
+                在网页里看
+                <PixelIcon name="external-link" size="xs" />
+              </button>
+            </footer>
+          </article>
+
+          <aside class="update-console">
+            <header>
+              <div>
+                <span class="mono">CLIENT UPDATE</span>
+                <strong>客户端更新</strong>
+              </div>
+              <b>{{ editionName }}</b>
+            </header>
+            <div class="version-stack">
+              <div>
+                <small>当前版本</small>
+                <strong class="mono">v{{ clientInfo?.version }}</strong>
+              </div>
+              <PixelIcon name="arrow-right" size="sm" />
+              <div>
+                <small>最新版本</small>
+                <strong class="mono">
+                  {{
+                    updateState?.latestVersion
+                      ? `v${updateState.latestVersion}`
+                      : release?.tagName || '—'
+                  }}
+                </strong>
+              </div>
+            </div>
+            <div class="update-state-line">
+              <i :class="updateState?.phase" />
+              <div>
+                <strong>{{ updateState?.message ?? '正在读取更新状态' }}</strong>
+                <span>当前是{{ editionName }}</span>
+              </div>
+            </div>
+            <div v-if="updateState?.phase === 'downloading'" class="progress-track">
+              <i :style="{ width: `${updateState.progress}%` }" />
+              <span>{{ updateState.progress }}%</span>
+            </div>
+
+            <div v-if="clientInfo?.edition === 'development'" class="development-box">
+              <header>
+                <PixelIcon name="code" size="xs" />
+                <strong>开发工作区</strong>
+              </header>
+              <dl>
+                <div>
+                  <dt>分支</dt>
+                  <dd class="mono">{{ clientInfo.development.branch ?? '未知' }}</dd>
+                </div>
+                <div>
+                  <dt>提交</dt>
+                  <dd class="mono">{{ clientInfo.development.commit ?? '未知' }}</dd>
+                </div>
+                <div>
+                  <dt>状态</dt>
+                  <dd :class="clientInfo.development.dirty ? 'warn-text' : 'ok-text'">
+                    {{ clientInfo.development.dirty ? '有本地修改' : '工作区干净' }}
+                  </dd>
+                </div>
+              </dl>
+              <p>为了保护你的代码，启动器不会自动改仓库，只告诉你安全的手动更新方式。</p>
+            </div>
+
+            <div class="update-actions">
+              <template v-if="clientInfo?.edition === 'development'">
+                <button class="ghost-action" @click="invoke('open-client-path', 'app')">
+                  打开目录
+                </button>
+                <button class="primary-small" @click="copyUpdateCommand">复制更新命令</button>
+              </template>
+              <template v-else-if="clientInfo?.edition === 'steam'">
+                <button class="ghost-action" disabled>由 Steam 管理更新</button>
+              </template>
+              <template v-else>
+                <button
+                  class="ghost-action"
+                  :disabled="updateState?.phase === 'checking'"
+                  @click="checkUpdate"
+                >
+                  检查更新
+                </button>
+                <button
+                  v-if="updateState?.phase === 'available'"
+                  class="primary-small"
+                  @click="downloadUpdate"
+                >
+                  下载更新
+                </button>
+                <button
+                  v-if="updateState?.phase === 'downloaded'"
+                  class="primary-small"
+                  @click="installUpdate"
+                >
+                  安装并重启
+                </button>
+              </template>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <!-- 关于 -->
+      <section v-else class="page about-page">
+        <div class="page-head">
+          <div>
+            <span class="page-eyebrow">关于这个伙伴</span>
+            <h1>关于客户端</h1>
+            <p>项目入口、数据位置和客户端协议都在这里。</p>
+          </div>
+        </div>
+        <div class="about-hero">
+          <div class="about-logo"><img src="/icon.png" alt="萌动链接：PeroperoChat！" /></div>
+          <div>
+            <span class="mono">INFRASTRUCTURE · INFOMORPH · INFINITY</span>
+            <h2>萌动链接：PeroperoChat！</h2>
+            <p>Your Warm, and Infinite Companion</p>
+          </div>
+          <strong class="mono">v{{ clientInfo?.version ?? appVersion }}</strong>
+        </div>
+        <div class="about-grid">
+          <button @click="invoke('open-external-url', { url: 'https://github.com/YoKONCy/infOS' })">
+            <PixelIcon name="code" size="sm" />
+            <span>
+              <strong>项目主页</strong>
+              <small>GitHub Repository</small>
+            </span>
+          </button>
+          <button
+            @click="invoke('open-external-url', { url: 'https://github.com/YoKONCy/infOS/issues' })"
+          >
+            <PixelIcon name="chat" size="sm" />
+            <span>
+              <strong>问题反馈</strong>
+              <small>Issues & Feedback</small>
+            </span>
+          </button>
+          <button @click="invoke('open-client-path', 'data')">
+            <PixelIcon name="database" size="sm" />
+            <span>
+              <strong>数据目录</strong>
+              <small class="mono">{{ clientInfo?.dataPath }}</small>
+            </span>
+          </button>
+          <button @click="invoke('open-client-path', 'logs')">
+            <PixelIcon name="file" size="sm" />
+            <span>
+              <strong>日志目录</strong>
+              <small class="mono">{{ clientInfo?.logsPath }}</small>
+            </span>
+          </button>
+          <button @click="triggerEula">
+            <PixelIcon name="shield" size="sm" />
+            <span>
+              <strong>用户协议</strong>
+              <small>重新查看 EULA</small>
+            </span>
+          </button>
+          <button @click="triggerOnboarding">
+            <PixelIcon name="book" size="sm" />
+            <span>
+              <strong>新手引导</strong>
+              <small>重新看一遍引导</small>
+            </span>
+          </button>
+        </div>
+      </section>
+    </main>
+
+    <Teleport to="body">
+      <div v-if="showEula" class="eula-mask">
+        <div class="eula-dialog">
+          <header class="eula-head">
+            <div class="eula-icon"><PixelIcon name="shield" size="lg" /></div>
+            <div>
+              <h2>
+                用户许可协议
+                <em>REQUIRED</em>
+              </h2>
+              <span class="mono">END USER LICENSE AGREEMENT</span>
+            </div>
+          </header>
+
+          <div class="eula-body">
+            <p class="eula-welcome">
+              <PixelIcon name="heart" size="xs" />
+              欢迎使用 萌动链接：PeroperoChat！（以下简称“本软件”）。
+            </p>
+            <p>
+              在使用本软件之前，请您务必仔细阅读并理解《最终用户许可协议》（以下简称“本协议”）。本软件是一个开源项目，我们鼓励社区共建与共享。
+            </p>
+
+            <h4>1. 开源许可与分发</h4>
+            <p>
+              本软件基于开源协议发布，您可以自由地查看、修改和分发源代码，但须遵守对应的开源许可条款。再分发时请保留原始版权声明与许可信息。
+            </p>
+
+            <h4>2. AI 生成内容免责声明</h4>
+            <p>
+              本软件作为工具平台，集成并调用第三方大语言模型（LLM）服务。所有由 AI
+              生成的文字、图像及其他内容均由模型自动产出，不代表开发者的观点或立场。开发者不对 AI
+              生成内容的准确性、合法性或适用性承担任何责任。您应自行甄别并审慎使用 AI
+              生成的内容，因使用 AI 输出内容所产生的一切后果由用户自行承担。
+            </p>
+
+            <h4>3. 隐私与数据安全</h4>
+            <p>
+              本软件高度重视您的隐私。您的对话记录、角色配置和个人数据默认仅存储在本地设备上，不会被上传至开发者的服务器。若您配置了第三方
+              API（如 LLM 接口），相关数据将依据该第三方服务的隐私政策进行处理，请知悉。
+            </p>
+
+            <h4>4. 使用规范</h4>
+            <p>
+              您不得利用本软件从事任何违反所在地区法律法规的活动，包括但不限于生成和传播违法有害信息。请遵守社区公约，共同维护友善、健康的使用环境。
+            </p>
+
+            <h4>5. 免责与风险提示</h4>
+            <p>
+              本软件按“原样”提供，不附带任何形式的明示或暗示担保。开发者不对因使用或无法使用本软件而导致的任何直接或间接损失承担责任。本软件可能集成第三方组件，其稳定性与安全性由各自维护者负责。
+            </p>
+
+            <p class="eula-note">
+              <PixelIcon name="check" size="xs" />
+              点击“同意并继续”即表示您已阅读并同意上述所有条款喵~
+            </p>
+          </div>
+
+          <footer class="eula-foot">
+            <button class="eula-button eula-decline" @click="declineEula">拒绝并退出</button>
+            <button class="eula-button eula-accept" @click="acceptEula">
+              <PixelIcon name="check" size="xs" />
+              <span>同意并继续</span>
+            </button>
+          </footer>
+        </div>
       </div>
-    </Transition>
-  </Teleport>
+    </Teleport>
+  </div>
 </template>
 
 <style scoped>
-.eula-fade-enter-active,
-.eula-fade-leave-active {
-  transition: opacity 0.3s;
+.launcher-shell {
+  --px: 2px;
+  --cocoa: var(--color-moe-cocoa);
+  --cocoa-soft: rgba(45, 27, 30, 0.18);
+  --pink: var(--color-pink-face);
+  --pink-deep: var(--color-pink-shadow);
+  --sky: var(--color-sky-face);
+  --sky-deep: var(--color-sky-shadow);
+  --purple: var(--color-purple-face);
+  position: relative;
+  height: 100vh;
+  padding-top: 32px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 12% 16%, rgba(249, 168, 212, 0.2), transparent 30%),
+    radial-gradient(circle at 88% 84%, rgba(167, 216, 240, 0.26), transparent 34%),
+    linear-gradient(135deg, #fff5fb 0%, #f2faff 55%, #faf7ff 100%);
+  color: var(--ui-text-primary);
+  font-family: var(--ui-font-sans);
 }
-.eula-fade-enter-from,
-.eula-fade-leave-to {
-  opacity: 0;
+
+/* ── 顶部品牌栏 ── */
+.launcher-head {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 66px;
+  padding: 0 26px;
+  border-bottom: 2px solid var(--cocoa);
+  background: rgba(255, 255, 255, 0.9);
 }
-@keyframes eula-appear {
-  from {
-    opacity: 0;
-    transform: scale(0.95);
+.launcher-brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+.brand-mark {
+  width: 40px;
+  height: 40px;
+  overflow: hidden;
+  border: 2px solid var(--cocoa);
+  background: #fff;
+  box-shadow: 3px 3px 0 0 var(--cocoa-soft);
+}
+.brand-mark img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.launcher-brand div:last-child {
+  display: flex;
+  flex-direction: column;
+}
+.launcher-brand strong {
+  font: 800 17px var(--ui-font-pixel);
+  letter-spacing: 0.02em;
+}
+.launcher-brand span {
+  margin-top: 1px;
+  color: var(--ui-text-secondary);
+  font: 800 10px var(--ui-font-pixel);
+  letter-spacing: 0.2em;
+}
+
+.global-signals {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.signal,
+.badge,
+.ver {
+  display: flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 10px;
+  border: 2px solid var(--cocoa);
+  border-radius: 4px;
+  background: #fff;
+  font: 800 11px var(--ui-font-pixel);
+  box-shadow: 2px 2px 0 0 var(--cocoa-soft);
+}
+.signal {
+  gap: 6px;
+}
+.signal i,
+.active-meta i {
+  width: 8px;
+  height: 8px;
+  background: var(--color-amber-face);
+}
+.signal i.ok,
+.active-meta i.ok {
+  background: var(--color-emerald-face);
+}
+.badge {
+  background: var(--sky);
+  color: #fff;
+}
+.ver {
+  color: var(--ui-text-secondary);
+  font-family: var(--ui-font-mono);
+}
+
+/* ── 顶部 Tab ── */
+.launcher-tabs {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  height: 58px;
+  padding: 8px 26px;
+  border-bottom: 2px solid var(--cocoa);
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(8px);
+}
+.launcher-tabs button {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 156px;
+  padding: 0 14px;
+  border: 2px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ui-text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    transform 0.12s ease,
+    background 0.12s ease;
+}
+.launcher-tabs button:hover {
+  background: rgba(249, 168, 212, 0.12);
+  transform: translateY(-1px);
+}
+.launcher-tabs button.active {
+  border-color: var(--cocoa);
+  background: linear-gradient(180deg, #ffe4f2, #ffd1ea);
+  color: #831843;
+  box-shadow: 3px 3px 0 0 var(--cocoa-soft);
+  transform: translateY(-1px);
+}
+.launcher-tabs button.active::after {
+  position: absolute;
+  right: 6px;
+  bottom: -6px;
+  left: 6px;
+  height: 3px;
+  background: linear-gradient(90deg, var(--pink-deep), var(--sky-deep));
+  content: '';
+}
+.tab-code {
+  font: 800 11px var(--ui-font-mono);
+  color: var(--ui-text-tertiary);
+}
+.launcher-tabs button.active .tab-code {
+  color: #831843;
+}
+.launcher-tabs button strong {
+  font: 800 13px var(--ui-font-pixel);
+  letter-spacing: 0.02em;
+}
+.tab-signal {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 8px;
+  height: 8px;
+}
+.tab-signal.warn {
+  background: var(--color-amber-face);
+}
+.tab-signal.update {
+  background: var(--sky);
+}
+
+/* ── 内容区 ── */
+.launcher-content {
+  position: relative;
+  z-index: 1;
+  height: calc(100vh - 156px);
+  overflow: hidden;
+}
+.page {
+  width: min(1380px, 100%);
+  height: 100%;
+  margin: 0 auto;
+  padding: 24px 32px 40px;
+  overflow: auto;
+}
+
+.page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+.page-eyebrow {
+  color: var(--pink-deep);
+  font: 900 11px var(--ui-font-mono);
+  letter-spacing: 0.12em;
+}
+.page-head h1 {
+  margin: 5px 0 4px;
+  color: var(--ui-text-primary);
+  font-size: 24px;
+  letter-spacing: -0.01em;
+}
+.page-head p {
+  margin: 0;
+  color: var(--ui-text-secondary);
+  font-size: 13px;
+}
+.check-score {
+  padding: 8px 13px;
+  border: 2px solid var(--cocoa);
+  background: #fff;
+  box-shadow: 3px 3px 0 0 var(--cocoa-soft);
+  text-align: right;
+}
+.check-score strong {
+  display: block;
+  color: var(--sky-deep);
+  font: 800 22px var(--ui-font-pixel);
+}
+.check-score span {
+  color: var(--ui-text-secondary);
+  font-size: 11px;
+}
+
+/* ── 启动页 ── */
+.agent-stage {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.9fr) 1.4fr;
+  gap: 16px;
+}
+.active-agent-card {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  min-height: 158px;
+  padding: 18px;
+  border: 2px solid var(--cocoa);
+  background: linear-gradient(135deg, #fff, #ffeef8);
+  box-shadow: 5px 5px 0 0 var(--cocoa-soft);
+}
+.active-avatar {
+  position: relative;
+  width: 100px;
+  height: 100px;
+  flex-shrink: 0;
+  overflow: hidden;
+  border: 2px solid var(--cocoa);
+  background: var(--pink);
+  box-shadow:
+    inset 0 0 0 4px #fff,
+    3px 3px 0 0 var(--cocoa-soft);
+}
+.active-avatar img,
+.picker-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.active-avatar span {
+  display: grid;
+  height: 100%;
+  place-items: center;
+  color: #fff;
+  font-size: 40px;
+  font-weight: 900;
+}
+.active-copy {
+  min-width: 0;
+}
+.active-copy small {
+  color: var(--pink-deep);
+  font: 900 10px var(--ui-font-pixel);
+  letter-spacing: 0.1em;
+}
+.active-copy h2 {
+  margin: 6px 0;
+  font-size: 26px;
+}
+.active-copy p {
+  margin: 0;
+  color: var(--ui-text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.active-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 13px;
+  color: var(--ui-text-secondary);
+  font-size: 11px;
+}
+.active-meta span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.active-meta .mono,
+.mono {
+  font-family: var(--ui-font-mono);
+}
+
+.agent-picker {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(120px, 1fr));
+  gap: 10px;
+  align-content: start;
+}
+.agent-picker button {
+  position: relative;
+  display: grid;
+  grid-template-columns: 46px 1fr auto;
+  grid-template-rows: 1fr 1fr;
+  align-items: center;
+  column-gap: 10px;
+  min-height: 76px;
+  padding: 10px;
+  border: 2px solid var(--cocoa);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 3px 3px 0 0 var(--cocoa-soft);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform 0.12s ease,
+    background 0.12s ease;
+}
+.agent-picker button:hover {
+  background: #fef2f9;
+  transform: translateY(-2px);
+}
+.agent-picker button.active {
+  background: #ffe4f2;
+  box-shadow: 4px 4px 0 0 var(--pink-deep);
+}
+.agent-picker button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.picker-avatar {
+  grid-row: 1 / 3;
+  width: 44px;
+  height: 44px;
+  overflow: hidden;
+  border: 2px solid var(--cocoa);
+  background: var(--sky);
+}
+.picker-avatar i {
+  display: grid;
+  height: 100%;
+  place-items: center;
+  color: #fff;
+  font-style: normal;
+  font-weight: 900;
+}
+.agent-picker strong {
+  align-self: end;
+  font-size: 13px;
+}
+.agent-picker small {
+  align-self: start;
+  overflow: hidden;
+  color: var(--ui-text-tertiary);
+  font: 10px var(--ui-font-mono);
+  text-overflow: ellipsis;
+}
+
+.launch-bottom {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 18px;
+  margin-top: 18px;
+}
+.check-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(150px, 1fr));
+  flex: 1;
+  gap: 8px;
+}
+.check-list div {
+  display: grid;
+  grid-template-columns: 9px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 2px solid var(--cocoa);
+  background: #fff;
+  box-shadow: 2px 2px 0 0 var(--cocoa-soft);
+  font-size: 12px;
+}
+.check-list i {
+  width: 9px;
+  height: 9px;
+  background: var(--ui-text-disabled);
+}
+.check-list i.ok {
+  background: var(--color-emerald-face);
+}
+.check-list i.warn,
+.check-list i.running {
+  background: var(--color-amber-face);
+}
+.check-list i.error {
+  background: var(--color-red-face);
+}
+.check-list strong {
+  color: var(--ui-text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.launch-actions {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.primary-action,
+.ghost-action,
+.primary-small {
+  border: 2px solid var(--cocoa);
+  border-radius: 4px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.primary-action {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 210px;
+  padding: 12px 17px;
+  background: linear-gradient(135deg, var(--pink-deep), #be185d);
+  color: #fff;
+  box-shadow: 4px 4px 0 0 #831843;
+  transition:
+    transform 0.1s ease,
+    box-shadow 0.1s ease;
+}
+.primary-action:active {
+  transform: translate(3px, 3px);
+  box-shadow: 1px 1px 0 0 #831843;
+}
+.primary-action span {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+.primary-action strong {
+  font-size: 13px;
+}
+.primary-action small {
+  font-size: 10px;
+  opacity: 0.85;
+}
+.ghost-action {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 13px;
+  background: #fff;
+  color: var(--ui-text-primary);
+  font-size: 12px;
+  box-shadow: 3px 3px 0 0 var(--cocoa-soft);
+  transition:
+    transform 0.1s ease,
+    box-shadow 0.1s ease;
+}
+.ghost-action:active {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0 0 var(--cocoa-soft);
+}
+.ghost-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.primary-small {
+  padding: 10px 14px;
+  background: var(--pink-deep);
+  color: #fff;
+  font-size: 12px;
+  box-shadow: 3px 3px 0 0 #831843;
+}
+
+/* ── 运行环境页 ── */
+.diagnostic-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+}
+.env-card {
+  padding: 16px;
+  border: 2px solid var(--cocoa);
+  background: #fff;
+  box-shadow: 4px 4px 0 0 var(--cocoa-soft);
+}
+.env-card header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 12px;
+  border-bottom: 2px solid var(--cocoa-soft);
+  color: var(--sky-deep);
+}
+.env-card header div {
+  display: flex;
+  flex-direction: column;
+}
+.env-card header strong {
+  color: var(--ui-text-primary);
+  font-size: 15px;
+}
+.env-card header span {
+  color: var(--ui-text-tertiary);
+  font: 800 10px var(--ui-font-mono);
+  letter-spacing: 0.1em;
+}
+.env-card dl {
+  margin: 10px 0 0;
+}
+.env-card dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 8px 2px;
+  border-bottom: 1px dashed var(--ui-border-default);
+  font-size: 13px;
+}
+.env-card dt {
+  color: var(--ui-text-tertiary);
+}
+.env-card dd {
+  max-width: 72%;
+  margin: 0;
+  color: var(--ui-text-primary);
+  font-size: 12px;
+  text-align: right;
+}
+.env-card dd.mono {
+  font-family: var(--ui-font-mono);
+}
+.ok-text {
+  color: var(--color-emerald-shadow) !important;
+}
+.warn-text {
+  color: var(--color-amber-shadow) !important;
+}
+
+/* ── 版本公告页 ── */
+.update-head {
+  align-items: flex-start;
+}
+.release-identity {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+.release-identity span {
+  padding: 4px 9px;
+  border: 2px solid var(--cocoa);
+  background: #ffe4f2;
+  color: #831843;
+  font: 800 10px var(--ui-font-mono);
+  box-shadow: 2px 2px 0 0 var(--cocoa-soft);
+}
+.release-identity strong {
+  color: var(--ui-text-tertiary);
+  font: 600 11px var(--ui-font-mono);
+}
+
+.release-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 16px;
+  height: calc(100vh - 240px);
+  min-height: 380px;
+}
+.release-notice,
+.update-console {
+  overflow: hidden;
+  border: 2px solid var(--cocoa);
+  background: #fff;
+  box-shadow: 5px 5px 0 0 var(--cocoa-soft);
+}
+.release-notice {
+  display: flex;
+  min-width: 0;
+  height: 100%;
+  flex-direction: column;
+  border-top: 4px solid var(--pink-deep);
+}
+.release-notice__head {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 30px;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 2px solid var(--cocoa-soft);
+  background: linear-gradient(100deg, #ffeef8, #fff);
+}
+.release-symbol {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border: 2px solid var(--cocoa);
+  background: #fff;
+  color: var(--pink-deep);
+  box-shadow: 3px 3px 0 0 var(--cocoa-soft);
+}
+.release-notice__head small {
+  color: var(--pink-deep);
+  font: 900 10px var(--ui-font-pixel);
+  letter-spacing: 0.08em;
+}
+.release-notice__head h2 {
+  margin: 3px 0;
+  color: var(--ui-text-primary);
+  font-size: 18px;
+}
+.release-notice__head p {
+  margin: 0;
+  color: var(--ui-text-tertiary);
+  font-size: 11px;
+}
+.release-notice__head em {
+  margin-left: 8px;
+  padding: 2px 6px;
+  background: var(--color-amber-light);
+  color: #78350f;
+  font-style: normal;
+}
+.release-notice__head > button {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 2px solid var(--cocoa);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--ui-text-secondary);
+  cursor: pointer;
+}
+.release-notice__body {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 14px 22px 20px;
+  background: #fff;
+}
+.release-notice__body :deep(.async-markdown) {
+  min-height: 100%;
+}
+.release-notice__body :deep(.md-body) {
+  color: var(--ui-text-secondary);
+  font: 400 14px/1.75 var(--ui-font-sans);
+}
+.release-notice__body :deep(.md-body h1) {
+  padding-bottom: 8px;
+  border-bottom: 2px solid var(--cocoa-soft);
+  color: var(--ui-text-primary);
+  font-size: 22px;
+}
+.release-notice__body :deep(.md-body h2) {
+  margin-top: 1.2em;
+  color: var(--pink-deep);
+  font-size: 17px;
+}
+.release-notice__body :deep(.md-body h3) {
+  color: var(--ui-text-primary);
+  font-size: 15px;
+}
+.release-notice__body :deep(.md-body code) {
+  border: 1px solid var(--ui-border-default);
+  border-radius: 3px;
+  background: #fafbfc;
+  color: var(--ui-accent-purple);
+  font-family: var(--ui-font-mono);
+}
+.release-notice__body :deep(.md-body pre) {
+  border: 2px solid var(--cocoa);
+  border-radius: 4px;
+  background: #1e293b;
+}
+.release-notice__body :deep(.md-body pre code) {
+  background: none;
+  border: 0;
+  color: #e2e8f0;
+}
+.release-notice__body :deep(.md-body th) {
+  background: rgba(167, 216, 240, 0.35);
+}
+.release-notice__body :deep(.md-body blockquote) {
+  border-left: 4px solid var(--pink-deep);
+  border-radius: 0;
+  background: #ffeef8;
+}
+.release-notice > footer {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  border-top: 2px solid var(--cocoa-soft);
+  background: #fafbfc;
+  color: var(--ui-text-tertiary);
+  font-size: 11px;
+}
+.release-notice > footer button {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  background: transparent;
+  color: var(--sky-deep);
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.release-empty {
+  display: flex;
+  height: 100%;
+  min-height: 220px;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  color: var(--ui-text-tertiary);
+  font-size: 13px;
+}
+
+.update-console {
+  align-self: stretch;
+  padding: 16px;
+}
+.update-console > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 12px;
+  border-bottom: 2px solid var(--cocoa-soft);
+}
+.update-console > header div {
+  display: flex;
+  flex-direction: column;
+}
+.update-console > header span {
+  color: var(--ui-text-tertiary);
+  font: 800 10px var(--ui-font-mono);
+  letter-spacing: 0.08em;
+}
+.update-console > header strong {
+  margin-top: 2px;
+  font-size: 15px;
+}
+.update-console > header b {
+  padding: 4px 8px;
+  border: 2px solid var(--cocoa);
+  background: var(--sky);
+  color: #fff;
+  font: 800 11px var(--ui-font-pixel);
+}
+.version-stack {
+  display: grid;
+  grid-template-columns: 1fr 18px 1fr;
+  align-items: center;
+  gap: 6px;
+  padding: 16px 0;
+}
+.version-stack div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+.version-stack small {
+  color: var(--ui-text-tertiary);
+  font-size: 11px;
+}
+.version-stack strong {
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--ui-text-primary);
+  font: 800 14px var(--ui-font-mono);
+  text-overflow: ellipsis;
+}
+.update-state-line {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px;
+  border: 2px solid var(--cocoa-soft);
+  background: #fafbfc;
+}
+.update-state-line > i {
+  width: 9px;
+  height: 9px;
+  background: var(--ui-text-disabled);
+}
+.update-state-line > i.available,
+.update-state-line > i.downloaded {
+  background: var(--pink-deep);
+  box-shadow: 0 0 0 3px rgba(219, 39, 119, 0.14);
+}
+.update-state-line > i.error {
+  background: var(--color-red-face);
+}
+.update-state-line div {
+  display: flex;
+  flex-direction: column;
+}
+.update-state-line strong {
+  font-size: 12px;
+}
+.update-state-line span {
+  margin-top: 2px;
+  color: var(--ui-text-tertiary);
+  font-size: 11px;
+}
+.progress-track {
+  position: relative;
+  height: 12px;
+  margin-top: 10px;
+  border: 2px solid var(--cocoa);
+  background: #fff;
+}
+.progress-track i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--pink-deep), var(--sky-deep));
+}
+.progress-track span {
+  position: absolute;
+  top: -4px;
+  right: 6px;
+  color: var(--ui-text-primary);
+  font: 800 10px var(--ui-font-mono);
+}
+.development-box {
+  margin-top: 12px;
+  padding: 11px;
+  border: 2px solid var(--color-amber-shadow);
+  background: #fff7e0;
+}
+.development-box > header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #78350f;
+}
+.development-box > header strong {
+  font-size: 12px;
+}
+.development-box dl {
+  margin: 8px 0;
+}
+.development-box dl div {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  border-bottom: 1px dashed rgba(217, 119, 6, 0.3);
+  font-size: 12px;
+}
+.development-box dt {
+  color: #92400e;
+}
+.development-box dd {
+  margin: 0;
+  font-family: var(--ui-font-mono);
+}
+.development-box p {
+  margin: 7px 0 0;
+  color: #92400e;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.update-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+/* ── 关于页 ── */
+.about-hero {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 22px;
+  border: 2px solid var(--cocoa);
+  background: linear-gradient(120deg, #fff, #ffeef8);
+  box-shadow: 5px 5px 0 0 var(--cocoa-soft);
+}
+.about-logo {
+  display: grid;
+  width: 76px;
+  height: 76px;
+  overflow: hidden;
+  place-items: center;
+  border: 2px solid var(--cocoa);
+  background: #fff;
+  box-shadow: 3px 3px 0 0 var(--cocoa-soft);
+}
+.about-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.about-hero div:nth-child(2) {
+  flex: 1;
+}
+.about-hero span {
+  color: var(--pink-deep);
+  font: 800 10px var(--ui-font-mono);
+  letter-spacing: 0.08em;
+}
+.about-hero h2 {
+  margin: 5px 0;
+  font-size: 28px;
+}
+.about-hero p {
+  margin: 0;
+  color: var(--ui-text-secondary);
+  font-size: 13px;
+}
+.about-hero > strong {
+  color: var(--pink-deep);
+  font: 800 18px var(--ui-font-mono);
+}
+.about-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-top: 18px;
+}
+.about-grid button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 15px;
+  border: 2px solid var(--cocoa);
+  background: #fff;
+  color: var(--sky-deep);
+  box-shadow: 3px 3px 0 0 var(--cocoa-soft);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform 0.12s ease,
+    background 0.12s ease;
+}
+.about-grid button:hover {
+  background: #fef2f9;
+  transform: translateY(-2px);
+}
+.about-grid button span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+.about-grid strong {
+  color: var(--ui-text-primary);
+  font-size: 13px;
+}
+.about-grid small {
+  overflow: hidden;
+  color: var(--ui-text-tertiary);
+  font: 11px var(--ui-font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── EULA ── */
+.eula-mask {
+  --cocoa: var(--color-moe-cocoa);
+  --cocoa-soft: rgba(45, 27, 30, 0.18);
+  --pink-deep: var(--color-pink-shadow);
+  position: fixed;
+  z-index: 300;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(45, 27, 30, 0.6);
+  backdrop-filter: blur(4px);
+}
+.eula-dialog {
+  display: flex;
+  width: min(720px, calc(100vw - 48px));
+  height: min(680px, calc(100vh - 48px));
+  max-height: none;
+  flex-direction: column;
+  overflow: hidden;
+  border: 2px solid var(--cocoa);
+  background: #fff;
+  box-shadow: 9px 9px 0 0 var(--cocoa-soft);
+}
+.eula-head {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 14px;
+  min-height: 88px;
+  padding: 16px 20px;
+  border-bottom: 2px solid var(--cocoa);
+  background: linear-gradient(100deg, #ffeef8, #fff);
+}
+.eula-icon {
+  display: grid;
+  width: 54px;
+  height: 54px;
+  flex-shrink: 0;
+  place-items: center;
+  border: 2px solid var(--cocoa);
+  background: var(--pink-deep);
+  color: #fff;
+  box-shadow: 3px 3px 0 0 var(--cocoa-soft);
+}
+.eula-head h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--ui-text-primary);
+  font-size: 20px;
+}
+.eula-head h2 em {
+  padding: 2px 7px;
+  border: 2px solid var(--cocoa);
+  background: #ffe4f2;
+  color: #831843;
+  font-style: normal;
+  font: 800 10px var(--ui-font-pixel);
+}
+.eula-head span {
+  display: block;
+  margin-top: 3px;
+  color: var(--ui-text-tertiary);
+  font: 800 10px var(--ui-font-mono);
+  letter-spacing: 0.1em;
+}
+.eula-body {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 18px 24px 20px;
+  color: var(--ui-text-secondary);
+  font-size: 14px;
+  line-height: 1.8;
+}
+.eula-body .eula-welcome {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--pink-deep);
+  font-weight: 700;
+}
+.eula-body h4 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 18px 0 8px;
+  color: var(--ui-text-primary);
+  font-size: 15px;
+}
+.eula-body h4::before {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  background: var(--pink-deep);
+  box-shadow: 2px 2px 0 0 var(--cocoa-soft);
+  content: '';
+}
+.eula-body p {
+  margin: 0 0 8px;
+}
+.eula-body .eula-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 2px solid var(--cocoa-soft);
+  color: var(--ui-text-tertiary);
+  font-size: 13px;
+}
+.eula-foot {
+  display: flex;
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  gap: 10px;
+  min-height: 72px;
+  padding: 14px 20px;
+  border-top: 2px solid var(--cocoa);
+  background: #fafbfc;
+}
+.eula-button {
+  display: inline-flex;
+  min-width: 138px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 42px;
+  padding: 0 18px;
+  border: 2px solid var(--cocoa);
+  border-radius: 4px;
+  font: 800 13px var(--ui-font-sans);
+  cursor: pointer;
+}
+.eula-button:active {
+  transform: translate(2px, 2px);
+}
+.eula-decline {
+  background: #fff;
+  color: var(--ui-text-secondary);
+  box-shadow: 3px 3px 0 0 var(--cocoa-soft);
+}
+.eula-decline:hover {
+  background: #fff4f8;
+  color: var(--pink-deep);
+}
+.eula-accept {
+  min-width: 174px;
+  background: var(--pink-deep);
+  color: #fff;
+  box-shadow: 3px 3px 0 0 #831843;
+}
+.eula-accept:hover {
+  background: #be185d;
+}
+@media (max-width: 600px) {
+  .eula-dialog {
+    width: calc(100vw - 24px);
+    height: calc(100vh - 24px);
   }
-  to {
-    opacity: 1;
-    transform: scale(1);
+  .eula-head {
+    padding: 12px 14px;
+  }
+  .eula-body {
+    padding: 14px 16px;
+    font-size: 13px;
+  }
+  .eula-foot {
+    padding: 10px 14px;
+  }
+  .eula-button {
+    min-width: 0;
+    flex: 1;
   }
 }
-.animate-eula-appear {
-  animation: eula-appear 0.3s ease;
+
+@media (max-width: 820px) {
+  .launcher-tabs button {
+    min-width: 0;
+    flex: 1;
+    padding: 0 10px;
+  }
+  .launcher-tabs button .tab-code {
+    display: none;
+  }
+  .agent-stage,
+  .release-workspace {
+    grid-template-columns: 1fr;
+  }
+  .release-workspace {
+    height: auto;
+  }
+  .release-notice {
+    height: 420px;
+  }
+  .diagnostic-grid {
+    grid-template-columns: 1fr;
+  }
+  .about-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .check-list {
+    grid-template-columns: 1fr;
+  }
+  .global-signals .signal {
+    display: none;
+  }
 }
 </style>

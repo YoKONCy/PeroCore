@@ -62,6 +62,7 @@ export type PushMessageFn = (params: {
   content: string
   agentId: string
   timeSlot: TimeSlot
+  threadId?: string
 }) => Promise<void>
 
 /** 停止时总结回调 */
@@ -79,6 +80,9 @@ export class CompanionScheduler {
   /** 当前绑定的 Agent */
   private agentId: string
 
+  /** 获取用户称呼的回调（可配置，如 主人/哥哥/老师，未配置时用默认"主人"） */
+  private getOwnerAppellation: (() => Promise<string>) | undefined
+
   /** 回调 */
   private onProactiveChat: ProactiveChatFn
   private onPushMessage: PushMessageFn
@@ -87,12 +91,15 @@ export class CompanionScheduler {
   constructor(params: {
     agentId: string
     config?: Partial<CompanionConfig>
+    /** 获取用户称呼的回调（可配置，如 主人/哥哥/老师） */
+    getOwnerAppellation?: () => Promise<string>
     onProactiveChat: ProactiveChatFn
     onPushMessage: PushMessageFn
     onSummarize: SummarizeFn
   }) {
     this.agentId = params.agentId
     this.config = { ...DEFAULT_CONFIG, ...params.config }
+    this.getOwnerAppellation = params.getOwnerAppellation
     this.onProactiveChat = params.onProactiveChat
     this.onPushMessage = params.onPushMessage
     this.onSummarize = params.onSummarize
@@ -186,7 +193,7 @@ export class CompanionScheduler {
     }
 
     // 生成触发语
-    const trigger = this.generateTrigger(timeSlot)
+    const trigger = await this.generateTrigger(timeSlot)
 
     logger.info(`触发主动对话: agent=${this.agentId}, timeSlot=${timeSlot}, trigger=${trigger}`)
 
@@ -227,8 +234,8 @@ export class CompanionScheduler {
     return 'late_night'
   }
 
-  /** 根据时段生成触发指令 */
-  private generateTrigger(timeSlot: TimeSlot): string {
+  /** 根据时段生成触发指令（用自定义称呼替换"主人"占位，未配置时保持默认） */
+  private async generateTrigger(timeSlot: TimeSlot): Promise<string> {
     const triggers: Record<TimeSlot, string[]> = {
       morning: [
         '观察到主人已经在线一段时间了，可以问问主人今天有什么计划。',
@@ -252,7 +259,13 @@ export class CompanionScheduler {
       ],
     }
 
+    // 读取用户自定义称呼（如 哥哥/老师），未配置则保留默认"主人"
+    const appellation = this.getOwnerAppellation
+      ? ((await this.getOwnerAppellation()) ?? '主人')
+      : '主人'
+
     const pool = triggers[timeSlot]
-    return pool[Math.floor(Math.random() * pool.length)]!
+    const trigger = pool[Math.floor(Math.random() * pool.length)]!
+    return trigger.replaceAll('主人', appellation)
   }
 }

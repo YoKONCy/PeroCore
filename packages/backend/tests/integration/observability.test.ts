@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createApp } from '@perocore/backend/app'
+import { createApp } from '@infos/backend/app'
 
 /**
  * 观测性集成测试。
@@ -33,8 +33,8 @@ function createAppContext() {
 async function createIsolatedApp() {
   vi.resetModules()
   const [{ createApp: createIsolatedAppInstance }, { resetMetricsForTest }] = await Promise.all([
-    import('@perocore/backend/app'),
-    import('@perocore/backend/lib/metrics'),
+    import('@infos/backend/app'),
+    import('@infos/backend/lib/metrics'),
   ])
   resetMetricsForTest()
   return createIsolatedAppInstance(createAppContext() as never)
@@ -68,11 +68,20 @@ describe('观测性集成', () => {
     expect(requestId).toMatch(/^req_/)
   })
 
+  it('应当在 HTTP 响应中返回有效的 OpenTelemetry traceId', async () => {
+    const app = createApp(createAppContext() as never)
+
+    const response = await app.request('/api/health')
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('x-trace-id')).toMatch(/^[a-f0-9]{32}$/)
+  })
+
   it('应当在请求上下文中读取 requestId 并注入文本日志行', async () => {
     // 与 formatLogLine 使用同一轮动态 import，避免 resetModules 后出现两个 AsyncLocalStorage 实例
     const [{ formatLogLine }, { getRequestId, runWithRequestContext }] = await Promise.all([
-      import('@perocore/backend/lib/logFileTransport'),
-      import('@perocore/backend/lib/requestContext'),
+      import('@infos/backend/lib/logFileTransport'),
+      import('@infos/backend/lib/requestContext'),
     ])
     const line = runWithRequestContext({ requestId: 'req_log' }, () => {
       expect(getRequestId()).toBe('req_log')
@@ -92,8 +101,8 @@ describe('观测性集成', () => {
     vi.resetModules()
 
     const [{ formatLogLine }, { runWithRequestContext: runIsolatedContext }] = await Promise.all([
-      import('@perocore/backend/lib/logFileTransport'),
-      import('@perocore/backend/lib/requestContext'),
+      import('@infos/backend/lib/logFileTransport'),
+      import('@infos/backend/lib/requestContext'),
     ])
 
     const line = runIsolatedContext(
@@ -131,9 +140,9 @@ describe('观测性集成', () => {
 
     expect(response.status).toBe(200)
     expect(response.headers.get('content-type')).toContain('text/plain')
-    expect(body).toContain('# HELP perocore_http_requests_total')
-    expect(body).toContain('# HELP perocore_http_request_duration_seconds')
-    expect(body).toContain('perocore_process_cpu_user_seconds_total')
+    expect(body).toContain('# HELP infos_http_requests_total')
+    expect(body).toContain('# HELP infos_http_request_duration_seconds')
+    expect(body).toContain('infos_process_cpu_user_seconds_total')
   })
 
   it('应当记录 HTTP 请求计数和耗时指标', async () => {
@@ -144,10 +153,10 @@ describe('观测性集成', () => {
     const body = await response.text()
 
     expect(body).toContain(
-      'perocore_http_requests_total{method="GET",route="/api/health",status="200"} 1',
+      'infos_http_requests_total{method="GET",route="/api/health",status="200"} 1',
     )
     expect(body).toContain(
-      'perocore_http_request_duration_seconds_count{method="GET",route="/api/health",status="200"} 1',
+      'infos_http_request_duration_seconds_count{method="GET",route="/api/health",status="200"} 1',
     )
   })
 })

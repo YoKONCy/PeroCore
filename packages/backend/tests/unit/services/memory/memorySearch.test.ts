@@ -4,13 +4,13 @@ const { warnMock } = vi.hoisted(() => ({
   warnMock: vi.fn(),
 }))
 
-vi.mock('@perocore/backend/lib/logger', () => ({
+vi.mock('@infos/backend/lib/logger', () => ({
   createLogger: () => ({
     warn: warnMock,
   }),
 }))
 
-import { MemorySearchService } from '@perocore/backend/services/memory/memorySearch'
+import { MemorySearchService } from '@infos/backend/services/memory/memorySearch'
 
 type VectorRepoMock = {
   search: ReturnType<typeof vi.fn>
@@ -59,18 +59,7 @@ describe('MemorySearchService', () => {
   })
 
   describe('search', () => {
-    it('应当按模式限制 topK，并关联 SQLite 元数据', async () => {
-      // social 模式被配置为 memories = 0，应直接短路，不触发向量化。
-      const socialResult = await service.search({
-        query: '你好',
-        agentId: 'pero',
-        source: 'social',
-      })
-
-      expect(socialResult).toEqual([])
-      expect(embeddingService.embedOne).not.toHaveBeenCalled()
-
-      // desktop 模式会把 topK 限制在 8 以内，并把检索结果映射到完整结构。
+    it('应当使用调用方提供的 topK，并关联 SQLite 元数据', async () => {
       embeddingService.embedOne.mockResolvedValue([0.1, 0.2])
       vectorRepo.search.mockResolvedValue([
         { id: 2, score: 0.92 },
@@ -98,7 +87,7 @@ describe('MemorySearchService', () => {
         minScore: 0.5,
       })
 
-      expect(vectorRepo.search).toHaveBeenCalledWith([0.1, 0.2], 'pero', 'desktop', 8, 4, 0.5)
+      expect(vectorRepo.search).toHaveBeenCalledWith([0.1, 0.2], 'pero', 'desktop', 99, 4, 0.5)
       expect(result).toEqual([
         {
           id: 2,
@@ -111,6 +100,25 @@ describe('MemorySearchService', () => {
           timestamp: 1710000000,
         },
       ])
+    })
+
+    it('group 与旧 group_chat 应启用内部据点记忆检索', async () => {
+      embeddingService.embedOne.mockResolvedValue([0.1, 0.2])
+      vectorRepo.search.mockResolvedValue([])
+
+      await service.search({ query: '据点近况', agentId: 'pero', source: 'group' })
+      await service.search({ query: '旧据点近况', agentId: 'pero', source: 'group_chat' })
+
+      expect(vectorRepo.search).toHaveBeenNthCalledWith(1, [0.1, 0.2], 'pero', 'group', 5, 2, 0.3)
+      expect(vectorRepo.search).toHaveBeenNthCalledWith(
+        2,
+        [0.1, 0.2],
+        'pero',
+        'group_chat',
+        5,
+        2,
+        0.3,
+      )
     })
 
     it('embedding 为空时应当返回空结果并记录警告', async () => {

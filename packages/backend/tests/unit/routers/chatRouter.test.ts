@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createChatRouter } from '@perocore/backend/routers/chat.router'
+import { createChatRouter } from '@infos/backend/routers/chat.router'
 
 async function readJson(response: Response) {
   return response.json() as Promise<Record<string, unknown>>
@@ -65,6 +65,10 @@ function createCtx() {
       chatWithCompiledMessages: vi.fn(() => Promise.resolve('回复')),
       chatStreamWithCompiledMessages: vi.fn(),
     },
+    agentManager: {
+      getAgent: vi.fn((agentId: string) => (agentId === 'pero' ? { id: 'pero' } : undefined)),
+      listAgents: vi.fn(() => [{ id: 'pero' }]),
+    },
     // AIOS: ThreadService 替代旧 SessionService + LogService
     threadService: {
       getThread: vi.fn(() => Promise.resolve(thread)),
@@ -77,6 +81,13 @@ function createCtx() {
       editMessage: vi.fn(() => Promise.resolve(true)),
       deleteMessage: vi.fn(() => Promise.resolve(true)),
       deleteMessagePair: vi.fn(() => Promise.resolve(2)),
+      rewindMessage: vi.fn(() =>
+        Promise.resolve({
+          deletedMessageIds: [1, 2],
+          preview: { pairCount: 1, messageCount: 2, affectedPaths: [] },
+        }),
+      ),
+      deleteThread: vi.fn(() => Promise.resolve(true)),
     },
     // AIOS: ContextCompiler 编译上下文
     contextCompiler: {
@@ -87,12 +98,27 @@ function createCtx() {
         }),
       ),
     },
+    conversationTurnService: {
+      executeTurn: vi.fn(() =>
+        Promise.resolve({
+          reply: '回复',
+          rawContent: '回复',
+          toolCalls: [],
+          threadId: 't1',
+          agentId: 'pero',
+        }),
+      ),
+      streamTurn: vi.fn(),
+    },
+    attachmentService: {
+      listForMessages: vi.fn(() => Promise.resolve(new Map())),
+    },
     // AIOS: RuntimeStateService 替代旧 TaskManager（按 threadId 索引）
     runtimeStateService: {
       registerTask: vi.fn(),
       unregisterTask: vi.fn(),
       cancelTask: vi.fn(() => true),
-      listActiveTasks: vi.fn(() => [{ threadId: 't1', state: 'running' }]),
+      listActiveTasks: vi.fn(() => []),
       pauseTask: vi.fn((threadId: string) => threadId === 't1'),
       resumeTask: vi.fn((threadId: string) => threadId === 't1'),
       injectInstruction: vi.fn((threadId: string) => threadId === 't1'),
@@ -117,21 +143,12 @@ describe('ChatRouter', () => {
       message: '对话完成',
       data: { reply: '回复', threadId: 't1', agentId: 'pero' },
     })
-    expect(ctx.threadService.getThread).toHaveBeenCalledWith('t1')
-    expect(ctx.threadService.appendUserMessage).toHaveBeenCalledWith('t1', '你好')
-    expect(ctx.contextCompiler.compile).toHaveBeenCalledWith('t1', 'pero')
-    expect(ctx.agentService.chatWithCompiledMessages).toHaveBeenCalledWith({
-      messages: [{ role: 'system', content: 'system prompt' }],
-      agentId: 'pero',
+    expect(ctx.conversationTurnService.executeTurn).toHaveBeenCalledWith({
       threadId: 't1',
+      agentId: undefined,
+      content: '你好',
+      attachmentIds: undefined,
     })
-    expect(ctx.threadService.appendAssistantMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        threadId: 't1',
-        content: '回复',
-        agentId: 'pero',
-      }),
-    )
   })
 
   it('应当停止生成、创建 Thread 并获取最新 Thread', async () => {
@@ -173,7 +190,11 @@ describe('ChatRouter', () => {
       message: '获取成功',
       data: { thread: { id: 't1', agentId: 'pero' } },
     })
-    expect(ctx.threadService.getOrCreateLatest).toHaveBeenCalledWith('pero', 'desktop')
+    expect(ctx.threadService.getOrCreateLatest).toHaveBeenCalledWith(
+      'pero',
+      'desktop',
+      'conversation',
+    )
   })
 
   it('应当查询 Thread 列表和 Thread 详情(含消息列表)', async () => {
@@ -192,9 +213,13 @@ describe('ChatRouter', () => {
     })
     expect(ctx.threadService.listThreads).toHaveBeenCalledWith({
       agentId: 'pero',
+      agentIds: undefined,
       channel: 'desktop',
+      excludeChannels: ['social'],
       page: 1,
       pageSize: 10,
+      // M05 §8.3: 普通聊天列表默认 conversation purpose（排除后台任务 Thread）
+      purpose: 'conversation',
     })
     // 详情: messages 为 items（倒序，最新在前），total 为消息总数
     expect(await readJson(detail)).toMatchObject({
@@ -238,13 +263,16 @@ describe('ChatRouter', () => {
       code: 'OK',
       data: { deletedCount: 2 },
     })
-    expect(ctx.threadService.deleteMessagePair).toHaveBeenCalledWith(1)
+    expect(ctx.threadService.rewindMessage).toHaveBeenCalledWith('t1', 1)
   })
 
   it('应当管理活跃任务: 列出/暂停/恢复/注入', async () => {
     const ctx = createCtx()
     const router = createChatRouter(ctx as never)
 
+    ctx.runtimeStateService.listActiveTasks.mockReturnValueOnce([
+      { threadId: 't1', state: 'running' },
+    ])
     const tasks = await router.request('http://test/tasks')
     const paused = await router.request('http://test/tasks/pause', {
       method: 'POST',
@@ -283,7 +311,7 @@ describe('ChatRouter', () => {
     // 让 service 返回失败值，触发 AppError NOT_FOUND
     ctx.threadService.editMessage.mockResolvedValueOnce(false)
     ctx.threadService.deleteMessage.mockResolvedValueOnce(false)
-    ctx.threadService.deleteMessagePair.mockResolvedValueOnce(0)
+    ctx.threadService.rewindMessage.mockRejectedValueOnce(new Error('消息不存在'))
     const router = createChatRouter(ctx as never)
 
     // 非法对话: 缺 threadId 和 content → zValidator 400

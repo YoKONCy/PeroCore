@@ -16,6 +16,7 @@ import type { ScorerService } from './scorerService'
 import type { MemoryGate } from './memoryGate'
 import type { CanonicalMemoryRepository } from '../../repositories/canonicalMemory.repo'
 import type { MemoryCandidateRepository } from '../../repositories/memoryCandidate.repo'
+import type { ThreadRepository } from '../../repositories/thread.repo'
 import type { LocalMemoryProvider } from './localMemoryProvider'
 import type { MaintenanceService } from './maintenance/maintenanceService'
 import type {
@@ -55,6 +56,7 @@ export class LocalMemoryTaskRunner implements MemoryTaskRunner {
     private memoryCandidateRepo: MemoryCandidateRepository,
     private memoryProvider: LocalMemoryProvider,
     private maintenanceService: MaintenanceService,
+    private threadRepo: ThreadRepository,
   ) {}
 
   /**
@@ -164,11 +166,13 @@ export class LocalMemoryTaskRunner implements MemoryTaskRunner {
           if (decision.decision === 'accept') {
             try {
               // 构造 AddMemoryInput，provenance 从候选反推
+              const originThread = candidate.originThreadId
+                ? await this.threadRepo.getThread(candidate.originThreadId)
+                : undefined
               const provenance: MemoryProvenance = {
                 originThreadId: candidate.originThreadId,
                 originMessageIds: candidate.originMessageIds,
-                // candidate.source 不等同于 channel；默认 desktop
-                originChannel: 'desktop',
+                originChannel: originThread?.channel ?? 'desktop',
                 createdFrom: 'gate',
                 createdAt: candidate.createdAt,
               }
@@ -189,9 +193,7 @@ export class LocalMemoryTaskRunner implements MemoryTaskRunner {
               existingMemories.push(canonical)
 
               await this.memoryCandidateRepo.updateStatus(candidate.id, 'accepted')
-              logger.debug(
-                `候选 ${candidate.id} 已接受 → CanonicalMemory ${canonical.id}`,
-              )
+              logger.debug(`候选 ${candidate.id} 已接受 → CanonicalMemory ${canonical.id}`)
             } catch (err) {
               logger.error(`候选 ${candidate.id} 接受失败: ${err}`)
               await this.memoryCandidateRepo.updateStatus(candidate.id, 'rejected')
@@ -248,14 +250,7 @@ export class LocalMemoryTaskRunner implements MemoryTaskRunner {
     } catch (err) {
       logger.error(`维护任务失败: ${err}`)
       this.status.maintenance = 'failed'
-      return this.buildResult(
-        'maintenance',
-        'failed',
-        0,
-        0,
-        startTime,
-        String(err),
-      )
+      return this.buildResult('maintenance', 'failed', 0, 0, startTime, String(err))
     }
   }
 

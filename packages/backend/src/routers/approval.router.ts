@@ -1,0 +1,60 @@
+import { Hono } from 'hono'
+import { zValidator } from '@hono/zod-validator'
+import { z } from 'zod'
+import type { AppContext } from '../container'
+import { AppError } from '../lib/appError'
+
+const resolveSchema = z.object({
+  decision: z.enum(['allow_once', 'allow_session', 'allow_always', 'deny_once', 'deny_always']),
+  /** 决策附言：同意/拒绝时写给 Agent 的理由（可选，最长 2000 字） */
+  message: z.string().max(2000).optional(),
+})
+
+/** 工具审批 API；前端后续可直接消费此契约。 */
+export function createApprovalRouter(ctx: AppContext) {
+  const router = new Hono()
+
+  router.get('/', (c) => {
+    const status = c.req.query('status') as
+      | 'pending'
+      | 'approved'
+      | 'denied'
+      | 'expired'
+      | 'consumed'
+      | undefined
+    const requests = ctx.approvalService.list({
+      status,
+      agentId: c.req.query('agentId'),
+      sessionId: c.req.query('sessionId'),
+    })
+    return c.json({ code: 'OK', data: { requests, total: requests.length } })
+  })
+
+  router.get('/audit', (c) => {
+    const records = ctx.approvalService.listAudit({
+      approvalId: c.req.query('approvalId'),
+      sessionId: c.req.query('sessionId'),
+    })
+    return c.json({ code: 'OK', data: { records, total: records.length } })
+  })
+
+  router.get('/:id', (c) => {
+    const request = ctx.approvalService.get(c.req.param('id'))
+    if (!request) throw new AppError('NOT_FOUND', { message: '审批请求不存在' })
+    return c.json({ code: 'OK', data: request })
+  })
+
+  router.post('/:id/resolve', zValidator('json', resolveSchema), (c) => {
+    try {
+      const input = c.req.valid('json')
+      const request = ctx.approvalService.resolve(c.req.param('id'), input.decision, input.message)
+      return c.json({ code: 'OK', data: request })
+    } catch (error) {
+      throw new AppError('VALIDATION_ERROR', {
+        message: error instanceof Error ? error.message : String(error),
+      })
+    }
+  })
+
+  return router
+}

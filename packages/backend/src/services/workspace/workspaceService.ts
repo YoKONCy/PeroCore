@@ -67,6 +67,8 @@ export interface FileStat {
 
 /** 读取文件选项 */
 export interface ReadOptions {
+  /** 仅供白名单内纯只读工具显式请求设备级路径。 */
+  deviceScope?: boolean
   /** 最大读取字节数（默认 10MB） */
   maxLength?: number
 }
@@ -86,7 +88,7 @@ export interface WriteOptions {
  *
  * 按 channel 分级控制文件工具的访问范围：
  * - desktop：read 全局可读（帮用户看代码），write 限 workspace，terminal cwd 可授权指定
- * - companion/social/group：读写都限 workspace，terminal cwd 限 workspace
+ * - social/group：读写都限 workspace，terminal cwd 限 workspace
  */
 export interface ChannelFilePolicy {
   /** 读操作范围：workspace=仅 workspace，global=全局可读 */
@@ -104,12 +106,6 @@ export const CHANNEL_FILE_POLICIES: Record<string, ChannelFilePolicy> = {
     readScope: 'global',
     writeScope: 'workspace',
     terminalCwd: 'authorized',
-  },
-  /** 陪伴模式：全部限 workspace */
-  companion: {
-    readScope: 'workspace',
-    writeScope: 'workspace',
-    terminalCwd: 'workspace',
   },
   /** 社交模式：全部限 workspace */
   social: {
@@ -131,11 +127,13 @@ export const CHANNEL_FILE_POLICIES: Record<string, ChannelFilePolicy> = {
  * 未知 channel 回退到最严格策略（全部限 workspace）。
  */
 export function getChannelFilePolicy(channel: string): ChannelFilePolicy {
-  return CHANNEL_FILE_POLICIES[channel] ?? {
-    readScope: 'workspace',
-    writeScope: 'workspace',
-    terminalCwd: 'workspace',
-  }
+  return (
+    CHANNEL_FILE_POLICIES[channel] ?? {
+      readScope: 'workspace',
+      writeScope: 'workspace',
+      terminalCwd: 'workspace',
+    }
+  )
 }
 
 // ─────────────────────────────────────────────
@@ -190,10 +188,23 @@ export interface WorkspaceService {
   ): Promise<void>
 
   /** 列出目录 */
-  list(agentId: string, dirPath: string, channel: string): Promise<DirEntry[]>
+  list(
+    agentId: string,
+    dirPath: string,
+    channel: string,
+    options?: { deviceScope?: boolean },
+  ): Promise<DirEntry[]>
 
   /** 获取文件/目录信息 */
-  stat(agentId: string, targetPath: string, channel: string): Promise<FileStat>
+  stat(
+    agentId: string,
+    targetPath: string,
+    channel: string,
+    options?: { deviceScope?: boolean },
+  ): Promise<FileStat>
+
+  /** 解析纯只读工具的设备路径；相对路径仍基于 Workspace。 */
+  resolveDeviceReadPath(agentId: string, requestedPath?: string): string
 
   /**
    * 解析 terminal cwd
@@ -208,19 +219,6 @@ export interface WorkspaceService {
 // LocalWorkspaceService 实现
 // ─────────────────────────────────────────────
 
-/** workspace 子目录骨架 */
-const WORKSPACE_SUBDIRS = [
-  'inbox',
-  'notes',
-  'diary',
-  'drafts',
-  'plans',
-  'documents',
-  'attachments',
-  'exports',
-  'archive',
-] as const
-
 /** 单文件最大读取字节 (10MB) */
 const MAX_READ_SIZE = 10 * 1024 * 1024
 
@@ -228,23 +226,17 @@ export class LocalWorkspaceService implements WorkspaceService {
   constructor(private pathResolver: PathResolver) {}
 
   getWorkspaceRoot(agentId: string): string {
-    // @principal → @data/agents/{agentId}/workspace/
+    // @principal → @data/principals/{agentId}/workspace/
     const dataRoot = this.pathResolver.getRoot('@data')!
-    return path.resolve(dataRoot, 'agents', agentId, 'workspace')
+    return path.resolve(dataRoot, 'principals', agentId, 'workspace')
   }
 
+  /** 确保 workspace 根目录存在（子目录按需懒创建，不再预置空骨架）。 */
   async ensureWorkspace(agentId: string): Promise<void> {
     const root = this.getWorkspaceRoot(agentId)
     if (!existsSync(root)) {
       mkdirSync(root, { recursive: true })
       logger.info(`创建 workspace: ${root}`)
-    }
-    // 确保子目录骨架存在
-    for (const subdir of WORKSPACE_SUBDIRS) {
-      const dirPath = path.join(root, subdir)
-      if (!existsSync(dirPath)) {
-        mkdirSync(dirPath, { recursive: true })
-      }
     }
   }
 
@@ -332,7 +324,9 @@ export class LocalWorkspaceService implements WorkspaceService {
     channel: string,
     options?: ReadOptions,
   ): Promise<string> {
-    const check = this.validatePath(agentId, filePath, 'read', channel)
+    const check = options?.deviceScope
+      ? { allowed: true, resolvedPath: this.resolveDeviceReadPath(agentId, filePath) }
+      : this.validatePath(agentId, filePath, 'read', channel)
     if (!check.allowed) {
       throw new Error(check.reason)
     }
@@ -389,8 +383,15 @@ export class LocalWorkspaceService implements WorkspaceService {
     }
   }
 
-  async list(agentId: string, dirPath: string, channel: string): Promise<DirEntry[]> {
-    const check = this.validatePath(agentId, dirPath, 'read', channel)
+  async list(
+    agentId: string,
+    dirPath: string,
+    channel: string,
+    options?: { deviceScope?: boolean },
+  ): Promise<DirEntry[]> {
+    const check: ContainmentResult = options?.deviceScope
+      ? { allowed: true, resolvedPath: this.resolveDeviceReadPath(agentId, dirPath) }
+      : this.validatePath(agentId, dirPath, 'read', channel)
     if (!check.allowed) {
       throw new Error(check.reason)
     }
@@ -417,8 +418,15 @@ export class LocalWorkspaceService implements WorkspaceService {
     })
   }
 
-  async stat(agentId: string, targetPath: string, channel: string): Promise<FileStat> {
-    const check = this.validatePath(agentId, targetPath, 'read', channel)
+  async stat(
+    agentId: string,
+    targetPath: string,
+    channel: string,
+    options?: { deviceScope?: boolean },
+  ): Promise<FileStat> {
+    const check = options?.deviceScope
+      ? { allowed: true, resolvedPath: this.resolveDeviceReadPath(agentId, targetPath) }
+      : this.validatePath(agentId, targetPath, 'read', channel)
     if (!check.allowed) {
       throw new Error(check.reason)
     }
@@ -443,11 +451,16 @@ export class LocalWorkspaceService implements WorkspaceService {
     }
   }
 
-  resolveTerminalCwd(
-    agentId: string,
-    requestedCwd: string | undefined,
-    channel: string,
-  ): string {
+  resolveDeviceReadPath(agentId: string, requestedPath?: string): string {
+    const workspaceRoot = this.getWorkspaceRoot(agentId)
+    return requestedPath
+      ? path.isAbsolute(requestedPath)
+        ? path.resolve(requestedPath)
+        : path.resolve(workspaceRoot, requestedPath)
+      : workspaceRoot
+  }
+
+  resolveTerminalCwd(agentId: string, requestedCwd: string | undefined, channel: string): string {
     const policy = getChannelFilePolicy(channel)
     const workspaceRoot = this.getWorkspaceRoot(agentId)
 

@@ -85,6 +85,7 @@ interface FlashbackMemory {
 const RAG_LIMITS: Record<string, number> = {
   desktop: 8,
   social: 0,
+  group: 3,
   group_chat: 3,
   mobile: 5,
   scheduler: 3,
@@ -155,7 +156,8 @@ export class ContextualRetriever {
     }
 
     // ── Step 2: ContextRNN 更新 ──
-    const mode = source === 'social' || source === 'group_chat' ? 'social' : 'main'
+    // 只有外部平台社交使用独立 social RNN；内部据点群聊沿用主 Agent 状态
+    const mode = source === 'social' ? 'social' : 'main'
     this.deps.contextRnn.update(agentId, mode, queryVector)
 
     // ── Step 3: Cluster 路由 ──

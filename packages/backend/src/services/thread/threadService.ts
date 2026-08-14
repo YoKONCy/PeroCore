@@ -19,8 +19,15 @@
  * @module packages/backend/src/services/thread/threadService
  */
 
-import { ThreadRepository, type ThreadChannel } from '../../repositories/thread.repo'
+import type { ThreadRepository } from '../../repositories/thread.repo'
+import { type ThreadChannel, type ThreadPurpose } from '../../repositories/thread.repo'
+import type { AttachmentRepository } from '../../repositories/attachment.repo'
+import type {
+  WorkspaceCheckpointService,
+  RewindPreview,
+} from '../workspace/workspaceCheckpointService'
 import { createLogger } from '../../lib/logger'
+import { AppError } from '../../lib/appError'
 
 const logger = createLogger('ThreadService')
 
@@ -45,6 +52,10 @@ export interface ThreadInfo {
    * null 表示使用 DEFAULT_POLICIES 中该 channel 的默认策略
    */
   contextPolicy: string | null
+  /** 当前 Thread 明确禁用的工具名；仅作为 Channel 白名单的减法层。 */
+  disabledTools: string[]
+  /** M05: Thread 用途（conversation / background_task / companion） */
+  purpose: string
   createdAt: string
   updatedAt: string
 }
@@ -70,7 +81,11 @@ export interface ThreadMessageInfo {
 // ─────────────────────────────────────────────
 
 export class ThreadService {
-  constructor(private threadRepo: ThreadRepository) {}
+  constructor(
+    private threadRepo: ThreadRepository,
+    private attachmentRepo?: AttachmentRepository,
+    private checkpointService?: WorkspaceCheckpointService,
+  ) {}
 
   /** 创建新 Thread */
   async createThread(params: {
@@ -86,6 +101,8 @@ export class ThreadService {
      * 不传则使用 DEFAULT_POLICIES 默认策略
      */
     contextPolicy?: string | null
+    /** Thread 用途，默认 conversation；后台任务传 background_task */
+    purpose?: ThreadPurpose
   }): Promise<ThreadInfo> {
     const id = params.id ?? `thread_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
     const row = await this.threadRepo.createThread({
@@ -96,6 +113,7 @@ export class ThreadService {
       platformIdentifier: params.platformIdentifier,
       title: params.title,
       contextPolicy: params.contextPolicy ?? null,
+      purpose: params.purpose,
     })
     logger.info(`Thread 已创建: id=${id}, agent=${params.agentId}, channel=${params.channel}`)
     return this.toThreadInfo(row)
@@ -107,10 +125,7 @@ export class ThreadService {
    * @param threadId       Thread ID
    * @param contextPolicy  JSON 序列化的 ChannelPolicy 字符串；null 表示恢复默认策略
    */
-  async updateContextPolicy(
-    threadId: string,
-    contextPolicy: string | null,
-  ): Promise<boolean> {
+  async updateContextPolicy(threadId: string, contextPolicy: string | null): Promise<boolean> {
     const success = await this.threadRepo.updateContextPolicy(threadId, contextPolicy)
     if (success) {
       logger.info(
@@ -120,12 +135,20 @@ export class ThreadService {
     return success
   }
 
+  /** 持久化 Thread 禁用工具列表；调用方必须先完成 Channel 白名单校验。 */
+  async updateDisabledTools(threadId: string, disabledTools: string[]): Promise<void> {
+    const unique = [...new Set(disabledTools)].sort()
+    const success = await this.threadRepo.updateDisabledTools(threadId, JSON.stringify(unique))
+    if (!success) throw new AppError('NOT_FOUND', { message: `Thread 不存在: ${threadId}` })
+  }
+
   /** 获取或创建 Agent 的最新 Thread */
   async getOrCreateLatest(
     agentId: string,
     channel: ThreadChannel = 'desktop',
+    purpose: import('../../repositories/thread.repo').ThreadPurpose = 'conversation',
   ): Promise<ThreadInfo> {
-    const row = await this.threadRepo.getOrCreateLatestThread(agentId, channel)
+    const row = await this.threadRepo.getOrCreateLatestThread(agentId, channel, purpose)
     return this.toThreadInfo(row)
   }
 
@@ -135,10 +158,15 @@ export class ThreadService {
     return row ? this.toThreadInfo(row) : null
   }
 
-  /** 查询 Agent 的 Thread 列表 */
+  /** 查询 Thread 列表；agentIds 用于“全部角色”时排除已不存在的孤儿角色数据。 */
   async listThreads(params: {
-    agentId: string
+    agentId?: string
+    agentIds?: string[]
     channel?: string
+    /** 排除独立应用内部使用的 Channel。 */
+    excludeChannels?: string[]
+    /** M05: 按用途过滤；不传时返回全部用途 */
+    purpose?: import('../../repositories/thread.repo').ThreadPurpose
     page?: number
     pageSize?: number
   }): Promise<{ items: ThreadInfo[]; total: number }> {
@@ -163,13 +191,18 @@ export class ThreadService {
     threadId: string,
     content: string,
     pairId?: string,
+    metadataJson?: string,
   ): Promise<ThreadMessageInfo> {
     const row = await this.threadRepo.appendMessage({
       threadId,
       role: 'user',
       content,
       pairId,
+      metadataJson,
     })
+
+    // 用户消息同样计入消息总数，保持与 syncThreadStats 的统计口径一致
+    await this.threadRepo.updateMessageCount(threadId, 0)
 
     // 首次对话自动设置标题：取消息内容前 20 字（去除换行）
     const thread = await this.threadRepo.getThread(threadId)
@@ -197,6 +230,8 @@ export class ThreadService {
     pairId: string
     agentId: string
     metadataJson?: string
+    scorerStatus?: 'pending' | 'analyzed' | 'failed' | 'skipped'
+    status?: 'active' | 'failed' | 'interrupted'
   }): Promise<ThreadMessageInfo> {
     const row = await this.threadRepo.appendMessage({
       threadId: params.threadId,
@@ -206,12 +241,31 @@ export class ThreadService {
       pairId: params.pairId,
       agentId: params.agentId,
       metadataJson: params.metadataJson,
+      scorerStatus: params.scorerStatus,
+      status: params.status,
     })
 
     // 更新 Thread 计数
     await this.threadRepo.updateMessageCount(params.threadId, 1)
 
     logger.debug(`Agent 回复已追加: thread=${params.threadId}, msgId=${row.id}`)
+    return this.toMessageInfo(row)
+  }
+
+  /** 追加系统消息并更新 Thread 消息计数 */
+  async appendSystemMessage(params: {
+    threadId: string
+    content: string
+    metadataJson?: string
+  }): Promise<ThreadMessageInfo> {
+    const row = await this.threadRepo.appendMessage({
+      threadId: params.threadId,
+      role: 'system',
+      content: params.content,
+      metadataJson: params.metadataJson,
+    })
+    await this.threadRepo.updateMessageCount(params.threadId, 0)
+    logger.debug(`系统消息已追加: thread=${params.threadId}, msgId=${row.id}`)
     return this.toMessageInfo(row)
   }
 
@@ -254,6 +308,15 @@ export class ThreadService {
   }
 
   /**
+   * 查询最近 N 个完整对话轮次（供 Context Compiler 使用）。
+   * 每轮包含共享 pairId 的全部消息，保证不会从半轮中间截断。
+   */
+  async getActiveMessagePairs(threadId: string, pairLimit = 20): Promise<ThreadMessageInfo[]> {
+    const rows = await this.threadRepo.queryActiveMessagePairs(threadId, pairLimit)
+    return rows.map((row) => this.toMessageInfo(row))
+  }
+
+  /**
    * 分页查询活跃消息（供前端历史加载）
    *
    * 倒序返回（最新在前），前端可按需反转。
@@ -270,10 +333,78 @@ export class ThreadService {
     }
   }
 
+  /** 修改用户可见的 Thread 标题。空白标题统一保存为空，由前端显示“未命名会话”。 */
+  async renameThread(threadId: string, title: string): Promise<void> {
+    const thread = await this.threadRepo.getThread(threadId)
+    if (!thread || thread.status === 'deleted') {
+      throw new AppError('NOT_FOUND', { message: '会话不存在' })
+    }
+    await this.threadRepo.updateTitle(threadId, title.trim())
+    logger.info(`Thread 已改名: thread=${threadId}`)
+  }
+
+  /** 获取删除某轮的链式 rewind 预检：目标轮次及所有后续轮次。 */
+  async previewMessageRewind(threadId: string, messageId: number): Promise<RewindPreview> {
+    const preview = await this.checkpointService?.previewPair(threadId, messageId)
+    if (!preview) throw new AppError('NOT_FOUND', { message: '消息不存在、已删除或不属于当前会话' })
+    return preview
+  }
+
+  /** 获取删除整条 Thread 的 rewind 预检。 */
+  async previewThreadRewind(threadId: string): Promise<RewindPreview> {
+    const preview = await this.checkpointService?.previewThread(threadId)
+    if (!preview) throw new AppError('NOT_FOUND', { message: '会话不存在或已删除' })
+    return preview
+  }
+
+  /**
+   * 执行链式 rewind：先回滚文件，再删除目标轮次及全部后续轮次。
+   * 产品已确认 force 语义，因此不会因文件后续修改而跳过恢复。
+   */
+  async rewindMessage(threadId: string, messageId: number, deletedBy = 'user') {
+    const preview = await this.previewMessageRewind(threadId, messageId)
+    await this.checkpointService!.rollback(preview)
+    const messageIds = await this.checkpointService!.deletePairs(preview, deletedBy)
+    await this.attachmentRepo?.softDeleteByMessageIds(messageIds)
+    await this.threadRepo.syncThreadStats(threadId)
+    logger.info(
+      `对话已链式回滚: thread=${threadId}, pairs=${preview.pairCount}, messages=${messageIds.length}`,
+    )
+    return { preview, deletedMessageIds: messageIds }
+  }
+
+  /** 删除整条 Thread 前回滚该会话全部文件检查点。 */
+  async rewindThread(threadId: string) {
+    const preview = await this.previewThreadRewind(threadId)
+    await this.checkpointService!.rollback(preview)
+    const result = await this.threadRepo.softDeleteThread(threadId)
+    if (!result.deleted) throw new AppError('NOT_FOUND', { message: '会话不存在或已删除' })
+    await this.attachmentRepo?.softDeleteByMessageIds(result.messageIds)
+    logger.info(`Thread 已回滚并软删除: thread=${threadId}, pairs=${preview.pairCount}`)
+    return { preview, deletedMessageIds: result.messageIds }
+  }
+
+  /** 软删除已退役 Channel 的全部 Thread 与消息。 */
+  async deleteThreadsByChannel(channel: string): Promise<number> {
+    const count = await this.threadRepo.softDeleteByChannel(channel)
+    if (count > 0) logger.info(`已软删除退役 Channel 会话: channel=${channel}, count=${count}`)
+    return count
+  }
+
+  /** 软删除整条 Thread；不会删除由该 Thread 提炼出的长期记忆。 */
+  async deleteThread(threadId: string): Promise<boolean> {
+    const result = await this.threadRepo.softDeleteThread(threadId)
+    if (!result.deleted) return false
+    await this.attachmentRepo?.softDeleteByMessageIds(result.messageIds)
+    logger.info(`Thread 已软删除: thread=${threadId}, messages=${result.messageIds.length}`)
+    return true
+  }
+
   /** 软删除单条消息 */
   async deleteMessage(messageId: number, deletedBy = 'user'): Promise<boolean> {
     const success = await this.threadRepo.softDeleteMessage(messageId, deletedBy)
     if (success) {
+      await this.attachmentRepo?.softDeleteByMessageIds([messageId])
       logger.info(`消息已软删除: msgId=${messageId}`)
     }
     return success
@@ -281,8 +412,10 @@ export class ThreadService {
 
   /** 软删除整对消息 */
   async deleteMessagePair(messageId: number, deletedBy = 'user'): Promise<number> {
+    const messageIds = await this.threadRepo.getPairMessageIds(messageId)
     const count = await this.threadRepo.softDeletePair(messageId, deletedBy)
     if (count > 0) {
+      await this.attachmentRepo?.softDeleteByMessageIds(messageIds)
       logger.info(`对话对已软删除: msgId=${messageId}, count=${count}`)
     }
     return count
@@ -297,7 +430,7 @@ export class ThreadService {
     return success
   }
 
-  // ── 摘要（已废弃，见 .aios/03-context-runtime.md 第 0 节决策） ──
+  // ── 摘要（已废弃，见 .docs/archived/03-context-runtime.md 第 0 节决策） ──
   // 超出上下文窗口的早期消息由长记忆系统兜底，不再生成滚动摘要。
 
   /** @deprecated 已废弃，超窗口消息由长记忆系统兜底 */
@@ -307,7 +440,11 @@ export class ThreadService {
   }
 
   /** @deprecated 已废弃，超窗口消息由长记忆系统兜底 */
-  async upsertSummary(threadId: string, content: string, coversMessageIds: string[]): Promise<void> {
+  async upsertSummary(
+    threadId: string,
+    content: string,
+    coversMessageIds: string[],
+  ): Promise<void> {
     await this.threadRepo.upsertSummary({ threadId, content, coversMessageIds })
     logger.info(`摘要已更新: thread=${threadId}, covers=${coversMessageIds.length} 条消息`)
   }
@@ -328,8 +465,22 @@ export class ThreadService {
       lastMessageAt: (r.lastMessageAt as string) ?? null,
       status: (r.status as string) ?? 'active',
       contextPolicy: (r.contextPolicy as string) ?? null,
+      disabledTools: this.parseDisabledTools(r.disabledToolsJson),
+      purpose: (r.purpose as string) ?? 'conversation',
       createdAt: (r.createdAt as string) ?? '',
       updatedAt: (r.updatedAt as string) ?? '',
+    }
+  }
+
+  private parseDisabledTools(raw: unknown): string[] {
+    if (typeof raw !== 'string') return []
+    try {
+      const parsed = JSON.parse(raw) as unknown
+      return Array.isArray(parsed)
+        ? parsed.filter((item): item is string => typeof item === 'string')
+        : []
+    } catch {
+      return []
     }
   }
 

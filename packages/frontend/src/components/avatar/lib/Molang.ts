@@ -58,6 +58,8 @@ interface MolangMathLib {
   floor: (x: number) => number
   mod: (a: number, b: number) => number
   random: (min: number, max: number) => number
+  /** YSM 常用：整数随机 */
+  random_integer: (min: number, max: number) => number
   die_roll: (num: number, low: number, high: number) => number
   die_roll_integer: (num: number, low: number, high: number) => number
 }
@@ -150,6 +152,7 @@ export const molangContext: MolangContext = {
     ceil: Math.ceil,
     floor: Math.floor,
     mod: (a: number, b: number) => a % b,
+    random_integer: (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min,
 
     // 随机
     random: (min: number, max: number) => Math.random() * (max - min) + min,
@@ -202,6 +205,12 @@ export class Molang {
 
     // 移除 return 关键字（Molang 使用隐式返回）
     jsExpr = jsExpr.replace(/\breturn\s+/g, '')
+
+    // 将 Molang 的 v./variable. 点号链扁平化为方括号访问：
+    // v.roaming.eyeBand → v["roaming.eyeBand"]（YSM roaming 变量为多段命名空间，
+    // 运行时存储为扁平 key，避免 variable.roaming 被 Proxy 解析成 0 导致取不到值）
+    jsExpr = jsExpr.replace(/\bv\.([A-Za-z_][A-Za-z0-9_.]*)/g, 'v["$1"]')
+    jsExpr = jsExpr.replace(/\bvariable\.([A-Za-z_][A-Za-z0-9_.]*)/g, 'variable["$1"]')
 
     // 多语句用逗号运算符连接（最后一个表达式作为返回值）
     if (jsExpr.includes(';')) {

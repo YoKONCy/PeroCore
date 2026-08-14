@@ -11,6 +11,7 @@ interface Props {
   step?: number
   disabled?: boolean
   label?: string
+  placeholder?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -19,6 +20,7 @@ const props = withDefaults(defineProps<Props>(), {
   step: 1,
   disabled: false,
   label: '',
+  placeholder: '',
 })
 
 const emit = defineEmits<{
@@ -42,6 +44,10 @@ function decrement() {
 
 function handleInput(e: Event) {
   const target = e.target as HTMLInputElement
+  if (target.value === '') {
+    emit('update:modelValue', null)
+    return
+  }
   const val = Number(target.value)
   if (!isNaN(val)) clampAndEmit(val)
 }
@@ -58,6 +64,7 @@ function handleInput(e: Event) {
         :min="min"
         :max="max"
         :step="step"
+        :placeholder="placeholder"
         :disabled="disabled"
         class="p-input-number-input"
         @input="handleInput"
@@ -79,16 +86,16 @@ function handleInput(e: Event) {
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: var(--color-text-muted);
+  color: var(--ui-text-tertiary);
 }
 
 .p-input-number {
   display: flex;
-  border: 2px solid var(--color-border);
+  border: 2px solid var(--dash-input-border);
   overflow: hidden;
 }
 .p-input-number-disabled {
-  opacity: 0.5;
+  color: var(--ui-text-disabled);
   pointer-events: none;
 }
 
@@ -97,9 +104,9 @@ function handleInput(e: Event) {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--color-bg-hover);
+  background: var(--ui-bg-hover);
   border: none;
-  color: var(--color-text-primary);
+  color: var(--ui-text-primary);
   font-weight: 700;
   font-size: 14px;
   cursor: pointer;
@@ -107,11 +114,11 @@ function handleInput(e: Event) {
   user-select: none;
 }
 .p-input-number-btn:hover:not(:disabled) {
-  background: var(--color-sky-100);
-  color: var(--color-sky-shadow);
+  background: var(--ui-accent-sky-soft);
+  color: var(--ui-accent-sky);
 }
 .p-input-number-btn:active:not(:disabled) {
-  background: var(--color-sky-light);
+  background: var(--ui-bg-active);
 }
 
 .p-input-number-input {
@@ -119,11 +126,11 @@ function handleInput(e: Event) {
   min-width: 0;
   text-align: center;
   border: none;
-  border-left: 1px solid var(--color-border);
-  border-right: 1px solid var(--color-border);
-  background: var(--color-bg-primary);
-  color: var(--color-text-primary);
-  font-family: var(--font-pixel), monospace;
+  border-left: 1px solid var(--dash-input-border);
+  border-right: 1px solid var(--dash-input-border);
+  background: var(--dash-input-bg);
+  color: var(--ui-text-primary);
+  font-family: var(--ui-font-pixel);
   font-size: 13px;
   padding: 4px;
   outline: none;

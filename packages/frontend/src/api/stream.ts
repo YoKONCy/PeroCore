@@ -43,7 +43,8 @@ export interface SseToolResultEvent {
 /** status 事件：状态变更 */
 export interface SseStatusEvent {
   type: 'status'
-  state: 'thinking' | 'calling' | 'generating'
+  state: 'thinking' | 'calling' | 'generating' | 'tool_failed'
+  message?: string
 }
 
 /** done 事件：对话完成 */
@@ -83,9 +84,17 @@ export interface SseEvents {
   /** 工具调用开始 (含 callId) */
   onToolCall?: (data: { name: string; args: string; callId: string }) => void
   /** 工具结果 (含 callId，与 tool_call 关联) */
-  onToolResult?: (data: { callId: string; result: string; isError: boolean }) => void
+  onToolResult?: (data: {
+    callId: string
+    result: string
+    isError: boolean
+    durationMs?: number
+  }) => void
   /** 状态变更 */
-  onStatus?: (data: { state: 'thinking' | 'calling' | 'generating' }) => void
+  onStatus?: (data: {
+    state: 'thinking' | 'calling' | 'generating' | 'tool_failed'
+    message?: string
+  }) => void
   /** 完成 (含 usage) */
   onDone?: (data: {
     usage: { promptTokens: number; completionTokens: number }
@@ -113,6 +122,9 @@ export function streamRequest(endpoint: string, body: unknown, events: SseEvents
   void (async () => {
     /** 是否已收到 done 事件（用于检测流截断） */
     let doneReceived = false
+
+    /** 是否收到服务端明确的 error 终态（避免再误报流截断）。 */
+    let terminalErrorReceived = false
 
     try {
       // 直接用 fetch (Transport 没有 SSE 接口，这里是允许的二进制/流式例外)
@@ -146,21 +158,35 @@ export function streamRequest(endpoint: string, body: unknown, events: SseEvents
         buffer = parts.pop() ?? ''
 
         for (const part of parts) {
-          parseSseEvent(part, events, () => {
-            doneReceived = true
-          })
+          parseSseEvent(
+            part,
+            events,
+            () => {
+              doneReceived = true
+            },
+            () => {
+              terminalErrorReceived = true
+            },
+          )
         }
       }
 
       // 处理最后残余
       if (buffer.trim()) {
-        parseSseEvent(buffer, events, () => {
-          doneReceived = true
-        })
+        parseSseEvent(
+          buffer,
+          events,
+          () => {
+            doneReceived = true
+          },
+          () => {
+            terminalErrorReceived = true
+          },
+        )
       }
 
-      // 流自然结束但未收到 done 事件 → 合成 STREAM_TRUNCATED 错误
-      if (!doneReceived) {
+      // 流自然结束但未收到 done 或正式 error 事件时，才判定为意外截断。
+      if (!doneReceived && !terminalErrorReceived) {
         events.onError?.({
           code: 'STREAM_TRUNCATED',
           message: '流式响应被截断：未收到 done 事件',
@@ -183,6 +209,7 @@ function parseSseEvent(
   raw: string,
   events: SseEvents,
   markDone: () => void,
+  markTerminalError: () => void,
 ): void {
   let eventType = 'delta'
   let data = ''
@@ -217,6 +244,7 @@ function parseSseEvent(
         events.onDone?.(parsed)
         break
       case 'error':
+        markTerminalError()
         events.onError?.(parsed)
         break
     }

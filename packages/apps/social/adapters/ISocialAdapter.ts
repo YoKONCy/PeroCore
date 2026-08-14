@@ -13,6 +13,7 @@ import type {
   OutboundMessage,
   InboundEvent,
   AdapterStatus,
+  SocialHistoryMessageRecord,
 } from '../runtime/types'
 import type { SocialContact, SocialGroup } from '../tools'
 
@@ -68,6 +69,26 @@ export abstract class AbstractSocialAdapter extends EventEmitter {
   /** 获取当前连接状态 */
   abstract getStatus(): Promise<AdapterStatus>
 
+  /** 拉取某个会话的历史消息；不支持的平台返回空数组。 */
+  async getMessageHistory(
+    _channelId: string,
+    _channelType: 'private' | 'group',
+    _limit: number,
+    _beforeMessageSeq?: number,
+  ): Promise<SocialHistoryMessageRecord[]> {
+    return []
+  }
+
+  /** 获取已连接的平台账号 ID。 */
+  getConnectedAccountIds(): string[] {
+    return []
+  }
+
+  /** 将平台账号解析为绑定 Agent；未知时返回空。 */
+  resolveAgentId(_accountId: string): string | undefined {
+    return undefined
+  }
+
   // ━━ 联系人 & 群组查询 (社交工具层使用) ━━
 
   /** 获取联系人列表 */
@@ -103,7 +124,9 @@ export abstract class AbstractSocialAdapter extends EventEmitter {
    */
   abstract getForwardMsg(
     forwardId: string,
-  ): Promise<Array<{ senderName: string; senderId: string; content: string; hasNestedForward: boolean }>>
+  ): Promise<
+    Array<{ senderName: string; senderId: string; content: string; hasNestedForward: boolean }>
+  >
 
   // ── 类型安全的 emit 辅助 ──
 

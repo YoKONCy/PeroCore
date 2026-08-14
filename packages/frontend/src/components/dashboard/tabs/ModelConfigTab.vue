@@ -13,13 +13,14 @@ import {
   PInput,
   PSelect,
   PInputNumber,
+  PSlider,
   PSwitch,
   PTooltip,
   PDialog,
   PCheckbox,
   PCard,
 } from '../../pixel'
-import { watch, type Ref } from 'vue'
+import { watch, computed, type Ref } from 'vue'
 import { useModelConfig, TASK_SLOTS } from '../../../composables/dashboard/useModelConfig'
 import { useDashboardContext } from '../../../composables/dashboard'
 
@@ -38,6 +39,7 @@ const {
   openEditor,
   saveModel,
   deleteModel,
+  setInputCapability,
   setMainModel,
   setTaskAssignment,
   isGlobalOpen,
@@ -69,10 +71,65 @@ const {
   remoteRerankerModels,
   isFetchingReranker,
   fetchRemoteRerankerModels,
+  relayEnabled,
+  relayModelConfigId,
+  relayDetail,
+  isSavingRelay,
+  visionModels,
+  saveRelayConfig,
 } = useModelConfig()
 
 /** 将 globalConfig 转为 Record<string,...> 供弹窗模板遍历使用，避免 TS 索引类型报错 */
 const globalConfigRecord = globalConfig as Ref<Record<string, { apiBase: string; apiKey: string }>>
+
+/** 参数是否应写入 Provider 请求；关闭时统一保存为 null，即完全不传。 */
+const sendTemperature = computed({
+  get: () => editorForm.value.temperature !== null,
+  set: (enabled: boolean) => {
+    editorForm.value.temperature = enabled ? 1 : null
+  },
+})
+const sendTopP = computed({
+  get: () => editorForm.value.topP !== null,
+  set: (enabled: boolean) => {
+    editorForm.value.topP = enabled ? 1 : null
+  },
+})
+const sendMaxTokens = computed({
+  get: () => editorForm.value.maxTokens !== null,
+  set: (enabled: boolean) => {
+    editorForm.value.maxTokens = enabled ? 4096 : null
+  },
+})
+const temperatureValue = computed({
+  get: () => editorForm.value.temperature ?? 1,
+  set: (value: number) => {
+    editorForm.value.temperature = value
+  },
+})
+const topPValue = computed({
+  get: () => editorForm.value.topP ?? 1,
+  set: (value: number) => {
+    editorForm.value.topP = value
+  },
+})
+const reasoningEffortOptions = [
+  { label: '默认（不传）', value: '' },
+  { label: '关闭', value: 'off' },
+  { label: 'Low', value: 'low' },
+  { label: 'Medium', value: 'medium' },
+  { label: 'High', value: 'high' },
+  { label: 'XHigh', value: 'xhigh' },
+  { label: 'Max', value: 'max' },
+]
+const reasoningEffortValue = computed({
+  get: () => editorForm.value.reasoningEffort ?? '',
+  set: (value: string) => {
+    editorForm.value.reasoningEffort = value
+      ? (value as NonNullable<typeof editorForm.value.reasoningEffort>)
+      : null
+  },
+})
 
 // 监听全局刷新
 watch(
@@ -87,7 +144,7 @@ async function handleSaveGlobal() {
 }
 
 function formatTokens(tokens: number | null): string {
-  if (!tokens) return '自动'
+  if (!tokens) return '不传'
   if (tokens >= 1000000) return (tokens / 1000000).toFixed(1) + 'M'
   return (tokens / 1000).toFixed(0) + 'K'
 }
@@ -179,9 +236,28 @@ void providerDefaults
             <PixelIcon name="brain" size="sm" />
             <span class="font-pixel">向量模型</span>
           </button>
+          <span class="text-slate-200 text-xl font-light">/</span>
+          <button
+            :class="[
+              'flex items-center gap-2 text-xl font-black bg-none border-none cursor-pointer p-0 transition-all',
+              currentTab === 'multimodal'
+                ? 'text-slate-800 scale-[1.02]'
+                : 'text-slate-400 hover:text-slate-500',
+            ]"
+            @click="currentTab = 'multimodal'"
+          >
+            <PixelIcon name="image" size="sm" />
+            <span class="font-pixel">多模态转述</span>
+          </button>
         </div>
         <p class="text-[10px] font-bold uppercase tracking-[0.15em] text-slate-400 ml-7 font-pixel">
-          {{ currentTab === 'llm' ? 'LLM MODEL MANAGEMENT' : 'VECTOR CONFIGURATION' }}
+          {{
+            currentTab === 'llm'
+              ? 'LLM MODEL MANAGEMENT'
+              : currentTab === 'vector'
+                ? 'VECTOR CONFIGURATION'
+                : 'MULTIMODAL RELAY'
+          }}
         </p>
       </div>
       <div class="flex gap-2 items-center">
@@ -237,6 +313,13 @@ void providerDefaults
               <PixelIcon name="eye" size="xs" />
               <span>VISION</span>
             </div>
+            <div
+              v-if="model.enableAudioInput"
+              class="flex items-center gap-1 px-2 py-0.5 text-[9px] font-bold text-violet-500 bg-violet-50 border border-violet-200"
+            >
+              <PixelIcon name="volume" size="xs" />
+              <span>AUDIO IN</span>
+            </div>
           </div>
         </div>
 
@@ -249,9 +332,15 @@ void providerDefaults
             </span>
           </div>
           <div class="flex justify-between items-center">
-            <span class="text-[11px] text-slate-400">上下文窗口</span>
+            <span class="text-[11px] text-slate-400">最大输出 Token</span>
             <span class="text-[11px] font-bold text-slate-500 font-mono">
               {{ formatTokens(model.maxTokens) }}
+            </span>
+          </div>
+          <div class="flex justify-between items-center">
+            <span class="text-[11px] text-slate-400">思考等级</span>
+            <span class="text-[11px] font-bold text-slate-500 font-mono uppercase">
+              {{ model.reasoningEffort ?? '不传' }}
             </span>
           </div>
           <div class="flex justify-between items-center">
@@ -262,15 +351,41 @@ void providerDefaults
           </div>
         </div>
 
+        <!-- 输入模态能力：直接在模型卡片启用，不必进入编辑弹窗。 -->
+        <div class="grid grid-cols-2 gap-2 rounded border border-slate-200 bg-slate-50/70 p-2">
+          <label class="model-capability-toggle">
+            <span>
+              <strong>图片输入</strong>
+              <small>VISION</small>
+            </span>
+            <PSwitch
+              :model-value="model.enableVision"
+              @update:model-value="
+                (enabled: boolean) => setInputCapability(model, 'enableVision', enabled)
+              "
+            />
+          </label>
+          <label class="model-capability-toggle model-capability-toggle-audio">
+            <span>
+              <strong>音频输入</strong>
+              <small>AUDIO IN</small>
+            </span>
+            <PSwitch
+              :model-value="model.enableAudioInput"
+              @update:model-value="
+                (enabled: boolean) => setInputCapability(model, 'enableAudioInput', enabled)
+              "
+            />
+          </label>
+        </div>
+
         <!-- 操作按钮 -->
         <div class="flex justify-between items-center pt-3 border-t border-slate-100 mt-auto">
           <!-- 主模型按钮（像素风立体感：3px偏移阴影，按下位移+阴影缩小） -->
           <button
             :class="[
-              'flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold font-pixel border-2 cursor-pointer select-none transition-all duration-100',
-              mainModelId === model.id
-                ? 'bg-sky-500 text-white border-sky-600 shadow-[3px_3px_0_#0369a1] hover:bg-sky-600 active:translate-x-[2px] active:translate-y-[2px] active:shadow-[1px_1px_0_#0369a1]'
-                : 'bg-sky-50 text-sky-600 border-sky-300 shadow-[3px_3px_0_#bae6fd] hover:bg-sky-100 hover:border-sky-400 hover:shadow-[3px_3px_0_#7dd3fc] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[1px_1px_0_#7dd3fc]',
+              'main-model-button flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold font-pixel border-2 cursor-pointer select-none transition-all duration-100',
+              mainModelId === model.id ? 'main-model-button--active' : '',
             ]"
             @click="setMainModel(model.id)"
           >
@@ -295,6 +410,72 @@ void providerDefaults
               </button>
             </PTooltip>
           </div>
+        </div>
+      </PCard>
+    </div>
+
+    <!-- 多模态转述配置 -->
+    <div v-else-if="currentTab === 'multimodal'" class="flex-1 overflow-y-auto flex flex-col gap-6">
+      <PCard pixel padding="lg" overflow-visible>
+        <div class="flex items-center gap-4 mb-6">
+          <div
+            class="w-12 h-12 flex items-center justify-center bg-violet-500 text-white flex-shrink-0"
+          >
+            <PixelIcon name="image" size="sm" />
+          </div>
+          <div class="flex-1">
+            <h4 class="text-base font-black text-slate-800 font-pixel">多模态转述</h4>
+            <p class="text-xs text-slate-400 mt-0.5">
+              用专用视觉模型将图片转为文字，帮助无视觉模型理解并保存长期上下文
+            </p>
+          </div>
+          <PSwitch v-model="relayEnabled" />
+        </div>
+        <div class="grid grid-cols-2 gap-4" :class="{ 'opacity-60': !relayEnabled }">
+          <div class="flex flex-col gap-1.5 col-span-2">
+            <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
+              转述模型
+            </label>
+            <PSelect
+              v-model="relayModelConfigId"
+              :disabled="!relayEnabled"
+              :options="
+                visionModels.map((model) => ({
+                  label: `${model.name} · ${model.modelId}`,
+                  value: model.id,
+                }))
+              "
+              placeholder="选择已启用图片视觉能力的模型"
+            />
+            <p v-if="!visionModels.length" class="text-xs text-amber-600">
+              请先在模型配置中为至少一个模型开启“图片输入”。
+            </p>
+          </div>
+          <div class="flex flex-col gap-1.5 col-span-2">
+            <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
+              转述详细度
+            </label>
+            <PSelect
+              v-model="relayDetail"
+              :disabled="!relayEnabled"
+              :options="[
+                { label: '简洁 · 快速概括', value: 'brief' },
+                { label: '标准 · 主体、状态与可见文字', value: 'standard' },
+                { label: '详细 · 布局、对象关系与 OCR', value: 'detailed' },
+              ]"
+            />
+          </div>
+        </div>
+        <div class="flex justify-end mt-6">
+          <PButton :loading="isSavingRelay" @click="saveRelayConfig">保存转述配置</PButton>
+        </div>
+      </PCard>
+      <PCard pixel padding="lg">
+        <h4 class="text-sm font-black text-slate-800 font-pixel mb-3">运行规则</h4>
+        <div class="text-xs leading-6 text-slate-500">
+          <p>· 原图只进入当前一次 ReAct 对话，不会在后续上下文中重复发送。</p>
+          <p>· 转述文字作为图片理解记录永久保存，后续对话只读取文字。</p>
+          <p>· 未配置转述模型时，支持视觉的主模型仍可原生识图，但不会生成文字档案。</p>
         </div>
       </PCard>
     </div>
@@ -464,7 +645,7 @@ void providerDefaults
 
     <!-- 模型编辑弹窗 -->
     <PDialog v-model="isEditorOpen" :title="editingModel ? '编辑模型' : '添加模型'" width="560px">
-      <div class="flex flex-col gap-4">
+      <div class="model-dialog-body flex flex-col gap-4">
         <div class="flex flex-col gap-1.5">
           <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
             模型名称
@@ -531,28 +712,79 @@ void providerDefaults
           />
           <PInput v-else v-model="editorForm.modelId" placeholder="例如: gpt-4o" />
         </div>
-        <div class="grid grid-cols-2 gap-4">
-          <div class="flex flex-col gap-1.5">
-            <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
-              温度
-            </label>
-            <PInputNumber v-model="editorForm.temperature" :min="0" :max="2" :step="0.1" />
+        <!-- 请求参数：每项先决定是否传参，再显示匹配的编辑控件。 -->
+        <div class="model-params flex flex-col gap-3 rounded border-2 p-3">
+          <div class="flex items-center justify-between border-b border-slate-200 pb-2">
+            <div>
+              <h4 class="text-[11px] font-bold text-slate-700 font-pixel">请求参数</h4>
+              <p class="mt-0.5 text-[10px] text-slate-400">
+                关闭项目时不会向 Provider 发送该字段。
+              </p>
+            </div>
+            <span class="text-[9px] text-slate-400 font-mono">OPTIONAL</span>
           </div>
-          <div class="flex flex-col gap-1.5">
-            <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
-              Top P
-            </label>
-            <PInputNumber v-model="editorForm.topP" :min="0" :max="1" :step="0.1" />
+
+          <div class="model-param-row">
+            <div class="model-param-heading">
+              <span class="text-xs font-bold text-slate-700">思考等级</span>
+              <span class="text-[10px] text-slate-400">按 Provider 协议映射推理强度</span>
+            </div>
+            <span class="text-[9px] text-slate-400 font-mono">REASONING</span>
+            <div class="model-param-control">
+              <PSelect v-model="reasoningEffortValue" :options="reasoningEffortOptions" />
+            </div>
+          </div>
+
+          <div class="model-param-row">
+            <div class="model-param-heading">
+              <span class="text-xs font-bold text-slate-700">温度 Temperature</span>
+              <span class="text-[10px] text-slate-400">控制回复随机性，范围 0–2</span>
+            </div>
+            <PSwitch v-model="sendTemperature" />
+            <div v-if="sendTemperature" class="model-param-control">
+              <PSlider v-model="temperatureValue" :min="0" :max="2" :step="0.1" show-input />
+            </div>
+            <span v-else class="model-param-off">不传</span>
+          </div>
+
+          <div class="model-param-row">
+            <div class="model-param-heading">
+              <span class="text-xs font-bold text-slate-700">Top P</span>
+              <span class="text-[10px] text-slate-400">核采样概率阈值，范围 0–1</span>
+            </div>
+            <PSwitch v-model="sendTopP" />
+            <div v-if="sendTopP" class="model-param-control">
+              <PSlider v-model="topPValue" :min="0" :max="1" :step="0.05" show-input />
+            </div>
+            <span v-else class="model-param-off">不传</span>
+          </div>
+
+          <div class="model-param-row">
+            <div class="model-param-heading">
+              <span class="text-xs font-bold text-slate-700">最大输出 Token</span>
+              <span class="text-[10px] text-slate-400">限制单次回复长度，不是上下文窗口</span>
+            </div>
+            <PSwitch v-model="sendMaxTokens" />
+            <div v-if="sendMaxTokens" class="model-param-control">
+              <PInputNumber v-model="editorForm.maxTokens" :min="1" :max="2000000" :step="256" />
+            </div>
+            <span v-else class="model-param-off">不传</span>
           </div>
         </div>
-        <div class="flex flex-col gap-1.5">
-          <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
-            最大 Token 数
-          </label>
-          <PInputNumber v-model="editorForm.maxTokens" :min="1024" :max="2000000" :step="1024" />
-        </div>
-        <div class="pt-1">
-          <PCheckbox v-model="editorForm.enableVision" label="启用视觉能力 (Vision)" />
+
+        <div class="grid grid-cols-2 gap-3 pt-1">
+          <div class="capability-editor rounded border p-3">
+            <PCheckbox v-model="editorForm.enableVision" label="图片视觉 (Vision)" />
+            <p class="mt-1 text-[10px] leading-relaxed text-slate-400">
+              允许聊天将图片作为多模态输入。
+            </p>
+          </div>
+          <div class="capability-editor rounded border p-3">
+            <PCheckbox v-model="editorForm.enableAudioInput" label="音频输入 (Audio)" />
+            <p class="mt-1 text-[10px] leading-relaxed text-slate-400">
+              允许聊天将音频作为多模态输入。
+            </p>
+          </div>
         </div>
       </div>
       <template #footer>
@@ -563,7 +795,7 @@ void providerDefaults
 
     <!-- 全局服务商弹窗 -->
     <PDialog v-model="isGlobalOpen" title="全局服务商配置" width="640px">
-      <div class="flex flex-col gap-6 max-h-[60vh] overflow-y-auto pr-1">
+      <div class="model-dialog-body flex flex-col gap-6 max-h-[60vh] overflow-y-auto pr-1">
         <p class="text-xs text-slate-400 -mb-2">
           为各供应商预置全局 API Key。添加模型时若不填写单独 Key，则将使用这里的配置。
         </p>
@@ -605,7 +837,7 @@ void providerDefaults
 
     <!-- 任务指派弹窗 -->
     <PDialog v-model="isTaskAssignOpen" title="任务指派" width="560px">
-      <div class="flex flex-col gap-4">
+      <div class="model-dialog-body flex flex-col gap-4">
         <p class="text-xs text-slate-400">为系统内的各项任务指派模型。未指派的任务将使用主模型。</p>
         <div
           v-for="slot in TASK_SLOTS"
@@ -637,13 +869,145 @@ void providerDefaults
 </template>
 
 <style scoped>
+/* 模型配置业务区使用主题语义色，语义色仅承担状态强调。 */
+.model-config-tab {
+  color: var(--ui-text-primary);
+}
+.model-config-tab :is(.text-slate-800, .text-slate-700, .text-slate-600) {
+  color: var(--ui-text-primary);
+}
+/* 弹窗内容（Teleport 到 body，不受 .model-config-tab 祖先兜底影响） */
+.model-dialog-body :is(.text-slate-800, .text-slate-700, .text-slate-600) {
+  color: var(--ui-text-primary);
+}
+.model-dialog-body :is(.text-slate-500, .text-slate-400) {
+  color: var(--ui-text-secondary);
+}
+.model-dialog-body :is(.text-slate-300) {
+  color: var(--ui-text-tertiary);
+}
+.model-dialog-body [class*='border-slate-'] {
+  border-color: var(--ui-border-default);
+}
+.model-config-tab :is(.text-slate-500, .text-slate-400) {
+  color: var(--ui-text-secondary);
+}
+.capability-group,
+.model-params,
+.capability-editor,
+.reranker-disabled {
+  border-color: var(--ui-border-default);
+  background: var(--dash-panel-soft);
+  color: var(--ui-text-secondary);
+}
+.main-model-badge {
+  border: 2px solid var(--ui-accent-sky);
+  background: var(--ui-accent-sky-soft);
+  color: var(--ui-accent-sky);
+  box-shadow: 1px 1px 0 var(--ui-accent-sky);
+}
+.main-model-button {
+  border-color: var(--ui-accent-sky);
+  background: var(--dash-panel-soft);
+  color: var(--ui-accent-sky);
+  box-shadow: 3px 3px 0 var(--ui-border-strong);
+}
+.main-model-button:hover {
+  background: var(--ui-accent-sky-soft);
+}
+.main-model-button--active {
+  background: var(--ui-accent-sky);
+  color: var(--ui-text-inverse);
+  box-shadow: 3px 3px 0 var(--ui-border-strong);
+}
+.main-model-button:active {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0 var(--ui-border-strong);
+}
+
+/* 模型卡片内的输入模态开关，确保能力配置始终直接可见。 */
+.model-capability-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+  padding: 5px 6px;
+  border: 1px solid var(--ui-accent-sky);
+  background: var(--ui-bg-hover);
+}
+
+.model-capability-toggle > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.model-capability-toggle strong {
+  color: var(--ui-text-primary);
+  font-family: var(--font-pixel), monospace;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.model-capability-toggle small {
+  color: var(--ui-accent-sky);
+  font-family: monospace;
+  font-size: 8px;
+}
+
+.model-capability-toggle-audio {
+  border-color: var(--ui-accent-purple);
+  background: var(--ui-accent-purple-soft);
+}
+
+.model-capability-toggle-audio small {
+  color: var(--ui-accent-purple);
+}
+
+/* 模型参数卡：开关决定字段是否进入请求，控件仅在启用后可见。 */
+.model-param-row {
+  display: grid;
+  grid-template-columns: minmax(144px, 1fr) auto minmax(220px, 1.6fr);
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+}
+
+.model-param-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.model-param-control {
+  min-width: 0;
+}
+
+.model-param-off {
+  justify-self: end;
+  color: var(--ui-text-tertiary);
+  font-family: var(--font-pixel), monospace;
+  font-size: 10px;
+}
+
+@media (max-width: 620px) {
+  .model-param-row {
+    grid-template-columns: 1fr auto;
+  }
+
+  .model-param-control {
+    grid-column: 1 / -1;
+  }
+}
+
 /* 像素风滚动条 */
 .model-scrollbar::-webkit-scrollbar {
   width: 4px;
 }
 
 .model-scrollbar::-webkit-scrollbar-thumb {
-  background: #bae6fd;
+  background: var(--ui-scrollbar-thumb);
   border-radius: 0;
 }
 </style>

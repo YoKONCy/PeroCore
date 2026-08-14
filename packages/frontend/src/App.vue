@@ -3,14 +3,13 @@
  * @file 根组件
  * @description
  *
- * Electron 模式: 顶层 keep-alive 缓存 DashboardView
- * Docker 模式: keep-alive 由 WebShellView 自己管理，顶层不需要额外缓存
+ * Electron 与 Docker/浏览器模式均由 MainView 承载综合面板，
+ * 顶层缓存 MainView 以保留 Tab 状态和 Dashboard 上下文。
  */
 import PToast from './components/notification/PToast.vue'
 import PModal from './components/notification/PModal.vue'
-import { isElectron } from './utils/ipcAdapter'
 
-const keepAliveInclude = isElectron() ? ['DashboardView'] : ['WebShellView']
+const keepAliveInclude = ['MainView']
 </script>
 
 <template>

@@ -134,7 +134,7 @@ dependencies = [
 
 [[package]]
 name = "nit-runtime"
-version = "0.9.1-hotfix.2"
+version = "0.9.2-rc1"
 dependencies = [
  "napi",
  "napi-build",

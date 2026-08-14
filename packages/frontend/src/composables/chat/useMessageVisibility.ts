@@ -72,12 +72,15 @@ export function useMessageVisibility(chatContainer: Ref<HTMLElement | null>) {
       }
     })
 
-    // 固化高度供 content-visibility 使用
-    el.style.containIntrinsicSize = `auto ${el.offsetHeight}px`
+    // 不再固化消息高度。聊天内容可能因流式 Markdown、公式字体和折叠面板持续变高，
+    // contain-intrinsic-size 会让短消息在恢复可见后保留过大的历史占位。
   }
 
   function resumeMessage(el: HTMLElement) {
     el.classList.remove('msg-paused')
+    // 消息内容可能在不可见期间因流式渲染、公式字体加载而改变高度；
+    // 恢复时必须清除旧固化尺寸，避免浏览器继续保留异常的大块占位。
+    el.style.removeProperty('contain-intrinsic-size')
 
     // 恢复 Web Animations
     try {

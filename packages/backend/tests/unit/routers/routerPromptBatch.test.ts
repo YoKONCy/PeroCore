@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { createModelRouter } from '@perocore/backend/routers/model.router'
-import { createAssetRouter } from '@perocore/backend/routers/asset.router'
-import { createSystemRouter } from '@perocore/backend/routers/system.router'
+import { createModelRouter } from '@infos/backend/routers/model.router'
+import { createAssetRouter } from '@infos/backend/routers/asset.router'
+import { createSystemRouter } from '@infos/backend/routers/system.router'
 // AIOS: PromptService 已废弃移除（死代码清理），相关测试块一并移除
 
 const appVersion = (
@@ -70,7 +70,7 @@ describe('ModelRouter', () => {
     })
     const updated = await router.request('http://test/1', {
       method: 'PUT',
-      body: JSON.stringify({ temperature: 0.2 }),
+      body: JSON.stringify({ temperature: null, topP: null, maxTokens: null }),
       headers: { 'content-type': 'application/json' },
     })
     const deleted = await router.request('http://test/1', { method: 'DELETE' })
@@ -88,7 +88,10 @@ describe('ModelRouter', () => {
       code: 'CREATED',
       data: { id: 2, name: '新模型' },
     })
-    expect(await readJson(updated)).toMatchObject({ code: 'OK', data: { id: 1, temperature: 0.2 } })
+    expect(await readJson(updated)).toMatchObject({
+      code: 'OK',
+      data: { id: 1, temperature: null, topP: null, maxTokens: null },
+    })
     expect(await readJson(deleted)).toEqual({ code: 'OK', message: '模型配置已删除' })
     expect(await readJson(remote)).toMatchObject({ code: 'OK', data: ['gpt-4o', 'gpt-4.1'] })
     expect(await readJson(tested)).toMatchObject({ code: 'OK', data: { success: true } })

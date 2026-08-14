@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { NitStreamFilter, ThinkingStreamFilter } from '@perocore/backend/nit/streamFilter'
+import { NitStreamFilter, ThinkingStreamFilter } from '@infos/backend/nit/streamFilter'
 
 describe('NitStreamFilter', () => {
   describe('filter', () => {
@@ -53,42 +53,48 @@ describe('NitStreamFilter', () => {
 
 describe('ThinkingStreamFilter', () => {
   describe('filter', () => {
-    it('应当隐藏中文方括号 Thinking 块', () => {
+    it('应当隐藏完整 <think> 块', () => {
       const filter = new ThinkingStreamFilter()
 
-      const output = filter.filter('你好【Thinking 私密思考】世界') + filter.flush()
+      const output = filter.filter('你好<think>私密思考</think>世界') + filter.flush()
 
       expect(output).toBe('你好世界')
     })
 
-    it('应当隐藏英文方括号和圆括号 Monologue 块', () => {
-      const square = new ThinkingStreamFilter()
-      const round = new ThinkingStreamFilter()
+    it('应当隐藏多行 <think> 块并保留尾部文本', () => {
+      const filter = new ThinkingStreamFilter()
 
-      const squareOutput = square.filter('A[Monologue secret]B') + square.flush()
-      const roundOutput = round.filter('A(Thinking secret)B') + round.flush()
+      const output = filter.filter('开头<think>第一行\n第二行</think>结尾') + filter.flush()
 
-      expect(squareOutput).toBe('AB')
-      expect(roundOutput).toBe('AB')
+      expect(output).toBe('开头结尾')
     })
 
-    it('应当处理跨 chunk 的 Thinking 块并保留安全尾部', () => {
+    it('应当隐藏大小写变体 <THINK> 块', () => {
+      const filter = new ThinkingStreamFilter()
+
+      const output = filter.filter('A<THINK>secret</THINK>B') + filter.flush()
+
+      expect(output).toBe('AB')
+    })
+
+    it('应当处理跨 chunk 拆分的开始标签', () => {
       const filter = new ThinkingStreamFilter()
 
       const output = [
-        filter.filter('前缀【Think'),
-        filter.filter('ing 隐藏'),
-        filter.filter('内容】后缀'),
+        filter.filter('前缀<th'),
+        filter.filter('ink>隐藏'),
+        filter.filter('内容</th'),
+        filter.filter('ink>后缀'),
         filter.flush(),
       ].join('')
 
       expect(output).toBe('前缀后缀')
     })
 
-    it('流结束时未闭合 Thinking 块应当丢弃块内容', () => {
+    it('流结束时未闭合 <think> 块应当丢弃块内容', () => {
       const filter = new ThinkingStreamFilter()
 
-      const output = filter.filter('可见【Thinking 未闭合') + filter.flush()
+      const output = filter.filter('可见<think>未闭合') + filter.flush()
 
       expect(output).toBe('可见')
     })

@@ -21,12 +21,14 @@ import type {
   ChatCompletion,
   ChatDelta,
   UsageInfo,
+  ReasoningEffort,
 } from './types'
 import { OpenAiProvider } from './providers/openaiProvider'
 import { GeminiProvider } from './providers/geminiProvider'
 import { AnthropicProvider } from './providers/anthropicProvider'
 import { AppError } from '../../lib/appError'
 import { createLogger } from '../../lib/logger'
+import { finishLlmSpan, startLlmSpan } from '../../lib/telemetry'
 
 const logger = createLogger('LlmService')
 
@@ -71,8 +73,12 @@ export interface ModelConfig {
   topP?: number
   /** 最大 token 数 */
   maxTokens?: number
+  /** 推理强度；未配置时不向 Provider 发送 */
+  reasoningEffort?: ReasoningEffort
   /** 是否启用视觉能力 (多模态) */
   enableVision?: boolean
+  /** 是否声明支持原生音频输入（不代表 Provider 已接入协议） */
+  enableAudioInput?: boolean
 }
 
 // ─────────────────────────────────────────────
@@ -95,8 +101,8 @@ const DEFAULT_RETRY: RetryConfig = {
   maxDelayMs: 10_000,
 }
 
-/** 可重试的错误码 */
-const RETRYABLE_CODES = new Set(['LLM_RATE_LIMITED', 'LLM_TIMEOUT'])
+/** 明确标记为可重试的临时 HTTP 状态码。 */
+const RETRYABLE_HTTP_STATUSES = new Set([408, 429, 500, 502, 503, 504])
 
 // ─────────────────────────────────────────────
 // Token 用量追踪
@@ -145,7 +151,7 @@ export class LlmService {
           apiKey: config.apiKey,
           apiBase,
           modelId: config.modelId,
-          maxTokens: config.maxTokens ?? 4096,
+          maxTokens: config.maxTokens,
         })
 
       default:
@@ -171,24 +177,34 @@ export class LlmService {
   ): Promise<ChatCompletion> {
     const startTime = Date.now()
     const finalOpts = this.mergeOpts(config, opts)
+    const span = startLlmSpan({ config, messages, options: finalOpts, streaming: false })
 
-    const result = await this.withRetry(async () => {
-      const provider = this.createProvider(config)
-      return provider.chat(messages, finalOpts)
-    }, config)
+    try {
+      const result = await this.withRetry(async () => {
+        const provider = this.createProvider(config)
+        return provider.chat(messages, finalOpts)
+      }, config)
 
-    // 追踪 Token 用量
-    this.trackUsage(result.usage)
+      // 追踪 Token 用量
+      this.trackUsage(result.usage)
 
-    const durationMs = Date.now() - startTime
-    logger.debug(`LLM chat 完成`, {
-      model: config.modelId,
-      durationMs,
-      promptTokens: result.usage?.promptTokens,
-      completionTokens: result.usage?.completionTokens,
-    })
-
-    return result
+      const durationMs = Date.now() - startTime
+      logger.debug(`LLM chat 完成`, {
+        model: config.modelId,
+        durationMs,
+        promptTokens: result.usage?.promptTokens,
+        completionTokens: result.usage?.completionTokens,
+      })
+      finishLlmSpan(span, {
+        usage: result.usage,
+        finishReason: result.choices[0]?.finishReason,
+        output: result.choices[0]?.message.content ?? '',
+      })
+      return result
+    } catch (error) {
+      finishLlmSpan(span, { error })
+      throw error
+    }
   }
 
   /**
@@ -204,16 +220,44 @@ export class LlmService {
   ): AsyncIterable<ChatDelta> {
     const startTime = Date.now()
     const finalOpts = this.mergeOpts(config, opts)
-    const provider = this.createProvider(config)
+    const span = startLlmSpan({ config, messages, options: finalOpts, streaming: true })
 
     let lastUsage: UsageInfo | undefined
+    let visibleDeltaProduced = false
+    let output = ''
+    let finishReason: string | null | undefined
+    let firstTokenMs: number | undefined
+    let streamError: unknown
 
     try {
-      for await (const delta of provider.chatStream(messages, finalOpts)) {
-        // 捕获最后一个含 usage 的 chunk
-        if (delta.usage) lastUsage = delta.usage
-        yield delta
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const provider = this.createProvider(config)
+        try {
+          for await (const delta of provider.chatStream(messages, finalOpts)) {
+            if (delta.usage) lastUsage = delta.usage
+            const content = delta.choices.map((choice) => choice.delta.content ?? '').join('')
+            if (content) {
+              if (!visibleDeltaProduced) firstTokenMs = Date.now() - startTime
+              visibleDeltaProduced = true
+              output += content
+            }
+            finishReason =
+              delta.choices.find((choice) => choice.finishReason)?.finishReason ?? finishReason
+            yield delta
+          }
+          break
+        } catch (err) {
+          const retryable = err instanceof AppError && this.isRetryable(err)
+          if (attempt === 0 && !visibleDeltaProduced && retryable) {
+            logger.warn('流式 LLM 在产生可见文本前失败，准备重试一次', { model: config.modelId })
+            continue
+          }
+          throw err
+        }
       }
+    } catch (error) {
+      streamError = error
+      throw error
     } finally {
       // 追踪 Token 用量
       this.trackUsage(lastUsage)
@@ -224,6 +268,13 @@ export class LlmService {
         durationMs,
         promptTokens: lastUsage?.promptTokens,
         completionTokens: lastUsage?.completionTokens,
+      })
+      finishLlmSpan(span, {
+        usage: lastUsage,
+        finishReason,
+        output,
+        firstTokenMs,
+        error: streamError,
       })
     }
   }
@@ -272,10 +323,11 @@ export class LlmService {
    */
   private mergeOpts(config: ModelConfig, opts?: ChatOptions): ChatOptions {
     return {
+      ...opts,
       temperature: opts?.temperature ?? config.temperature,
       topP: opts?.topP ?? config.topP,
       maxTokens: opts?.maxTokens ?? config.maxTokens,
-      ...opts,
+      reasoningEffort: opts?.reasoningEffort ?? config.reasoningEffort,
     }
   }
 
@@ -300,7 +352,7 @@ export class LlmService {
 
         // 判断是否可重试
         const isRetryable =
-          err instanceof AppError && RETRYABLE_CODES.has(err.code) && attempt < retry.maxRetries
+          err instanceof AppError && this.isRetryable(err) && attempt < retry.maxRetries
 
         if (!isRetryable) throw err
 
@@ -351,6 +403,12 @@ export class LlmService {
       return userBase.trim().replace(/\/$/, '')
     }
     return DEFAULT_API_BASES[provider] ?? DEFAULT_API_BASES.openai!
+  }
+
+  private isRetryable(err: AppError): boolean {
+    const data = err.data as { retryable?: unknown; status?: unknown } | undefined
+    if (data?.retryable === true) return true
+    return typeof data?.status === 'number' && RETRYABLE_HTTP_STATUSES.has(data.status)
   }
 
   /** 延迟 */

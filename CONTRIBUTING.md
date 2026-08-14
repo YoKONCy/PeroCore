@@ -1,8 +1,8 @@
 # Contributing Guide / 贡献指南
 
-Thank you for your interest in contributing to PeroCore! 🎉
+Thank you for your interest in contributing to infOS! 🎉
 
-感谢您对 PeroCore 项目的关注与贡献意愿！🎉
+感谢您对 infOS 项目的关注与贡献意愿！🎉
 
 ## Table of Contents / 目录
 
@@ -28,8 +28,8 @@ Thank you for your interest in contributing to PeroCore! 🎉
 
 ```bash
 # 克隆仓库
-git clone https://github.com/YoKONCy/PeroCore.git
-cd PeroCore
+git clone https://github.com/YoKONCy/infOS.git
+cd infOS
 
 # 安装依赖
 pnpm install
@@ -55,12 +55,12 @@ pnpm start
 | Service / 服务 | Port / 端口 | Description / 说明                                            |
 | :------------- | :---------- | :------------------------------------------------------------ |
 | Backend API    | 9120        | Hono HTTP + WebSocket server.<br>Hono HTTP + WebSocket 服务。 |
-| Frontend Dev   | 5173        | Vite HMR dev server.<br>Vite 热更新开发服务。                 |
+| Frontend Dev   | 7359        | Vite HMR dev server.<br>Vite 热更新开发服务。                 |
 
 ## Project Structure / 项目结构
 
 ```
-PeroCore/
+infOS/
 ├── electron/                 # Electron 主进程
 │   ├── main/                 # 主进程代码
 │   └── preload/              # 预加载脚本
@@ -203,9 +203,9 @@ chore(electron): update preload script path
 
 ## Extension Development / 扩展开发
 
-PeroCore supports three types of extensions:
+infOS supports three types of extensions:
 
-PeroCore 支持三种扩展类型：
+infOS 支持三种扩展类型：
 
 | Type / 类型 | Description / 说明                                                                           |
 | :---------- | :------------------------------------------------------------------------------------------- |
@@ -240,6 +240,6 @@ PeroCore 支持三种扩展类型：
 
 ---
 
-Thank you for contributing! Every improvement makes PeroCore better. 💖
+Thank you for contributing! Every improvement makes infOS better. 💖
 
-感谢您的贡献！每一个改进都让 PeroCore 变得更好。💖
+感谢您的贡献！每一个改进都让 infOS 变得更好。💖

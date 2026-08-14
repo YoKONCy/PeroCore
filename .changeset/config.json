@@ -2,12 +2,12 @@
   "$schema": "https://unpkg.com/@changesets/config@3.1.1/schema.json",
   "changelog": [
     "@changesets/changelog-github",
-    { "repo": "YoKONCy/PeroCore" }
+    { "repo": "YoKONCy/infOS" }
   ],
   "commit": false,
   "fixed": [],
   "linked": [
-    ["@perocore/backend", "@perocore/frontend", "@perocore/shared"]
+    ["@infos/backend", "@infos/frontend", "@infos/shared"]
   ],
   "access": "public",
   "baseBranch": "main",

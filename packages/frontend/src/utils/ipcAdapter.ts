@@ -64,6 +64,20 @@ export async function invoke(cmd: string, args?: unknown): Promise<unknown> {
     return null
   }
 
+  // Launcher 客户端维护能力仅存在于 Electron。
+  if (
+    cmd.startsWith('get-client-') ||
+    cmd.startsWith('set-client-') ||
+    cmd.startsWith('check-client-') ||
+    cmd.startsWith('download-client-') ||
+    cmd.startsWith('install-client-') ||
+    cmd === 'get-latest-release' ||
+    cmd === 'open-client-path' ||
+    cmd === 'open-external-url'
+  ) {
+    return null
+  }
+
   // 获取版本号: 返回 Web 标识
   if (cmd === 'get-app-version') {
     return 'web'

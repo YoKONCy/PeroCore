@@ -2,15 +2,15 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createConfigRouter } from '@perocore/backend/routers/config.router'
-import type { AppContext } from '@perocore/backend/container'
+import { createConfigRouter } from '@infos/backend/routers/config.router'
+import type { AppContext } from '@infos/backend/container'
 
 const appVersion = (
   JSON.parse(readFileSync(resolve(process.cwd(), 'package.json'), 'utf8')) as { version: string }
 ).version
 const logTransportState: { transport: unknown } = { transport: null }
 
-vi.mock('@perocore/backend/lib/logger', () => ({
+vi.mock('@infos/backend/lib/logger', () => ({
   createLogger: () => ({
     info: vi.fn(),
     warn: vi.fn(),
@@ -20,7 +20,7 @@ vi.mock('@perocore/backend/lib/logger', () => ({
   getLogFileTransport: () => logTransportState.transport,
 }))
 
-import { createHealthRouter } from '@perocore/backend/routers/health.router'
+import { createHealthRouter } from '@infos/backend/routers/health.router'
 
 function createConfigContext(initial: Record<string, string> = {}) {
   const store = new Map(Object.entries(initial))
@@ -186,7 +186,7 @@ describe('createHealthRouter', () => {
   let root: string
 
   beforeEach(() => {
-    root = join(tmpdir(), `perocore-health-${Date.now()}-${Math.random()}`)
+    root = join(tmpdir(), `infos-health-${Date.now()}-${Math.random()}`)
     mkdirSync(root, { recursive: true })
     logTransportState.transport = null
   })

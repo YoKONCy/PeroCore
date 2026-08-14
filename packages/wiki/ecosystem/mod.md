@@ -1,4 +1,4 @@
-# PeroCore MOD 系统开发指南
+# infOS MOD 系统开发指南
 
 > 三层扩展体系完整教程：EventBus Hook / 管道注册 / 外部插件
 
@@ -23,7 +23,7 @@
 
 ### 1.1 什么是 MOD 系统？
 
-PeroCore MOD 系统是一个基于 Python 的三层扩展框架，允许开发者在**不修改核心代码**的前提下定制系统行为。所有 MOD 共享同一进程空间，由 `ModManager` 在启动时统一加载。
+infOS MOD 系统是一个基于 Python 的三层扩展框架，允许开发者在**不修改核心代码**的前提下定制系统行为。所有 MOD 共享同一进程空间，由 `ModManager` 在启动时统一加载。
 
 ### 1.2 三层扩展体系
 
@@ -45,7 +45,7 @@ PeroCore MOD 系统是一个基于 Python 的三层扩展框架，允许开发�
 
 ```text
 ┌──────────────────────────────────────────────────────────────┐
-│                    PeroCore 主进程                            │
+│                    infOS 主进程                            │
 │                                                              │
 │  ┌────────────────────────────────────────────────────────┐  │
 │  │  Bootstrap (core/bootstrap.py)                         │  │
@@ -149,7 +149,7 @@ def init():
     print("[MyFirstMod] ✔ 已注册 memory.save.pre Hook")
 ```
 
-#### Step 3: 重启 PeroCore
+#### Step 3: 重启 infOS
 
 MOD 会在启动时自动加载。查看控制台输出确认：
 
@@ -175,7 +175,7 @@ MOD 会在启动时自动加载。查看控制台输出确认：
 # backend/mods/my_first_mod/mod.toml
 
 [mod]
-asset_id = "com.perocore.mod.my_first_mod"
+asset_id = "com.infos.mod.my_first_mod"
 type = "mod"
 display_name = "我的第一个 MOD"
 version = "1.0.0"
@@ -196,12 +196,12 @@ external = false
 
 ```toml
 [mod]
-asset_id = "com.perocore.mod.memory_tagger"   # 资产联邦 ID（全局唯一）
+asset_id = "com.infos.mod.memory_tagger"   # 资产联邦 ID（全局唯一）
 type = "mod"                                   # 固定值
 display_name = "记忆标注器"                      # 显示名称
 version = "1.0.0"                              # 语义化版本号
 description = "自动为记忆添加时间标签"             # 描述
-author = "PeroCore Community"                  # 作者
+author = "infOS Community"                  # 作者
 
 [layers]
 eventbus = true         # 是否使用 EventBus Hook
@@ -214,7 +214,7 @@ external_url = "http://localhost:9527"  # 外部插件地址
 
 | 字段           | 必填 | 类型  | 说明                                        |
 | -------------- | ---- | ----- | ------------------------------------------- |
-| `asset_id`     | 推荐 | `str` | 全局唯一标识符，格式 `com.perocore.mod.xxx` |
+| `asset_id`     | 推荐 | `str` | 全局唯一标识符，格式 `com.infos.mod.xxx` |
 | `type`         | 推荐 | `str` | 固定值 `"mod"`                              |
 | `display_name` | 否   | `str` | 在管理界面中显示的名称                      |
 | `version`      | 否   | `str` | 语义化版本号 (SemVer)                       |
@@ -673,13 +673,13 @@ def init():
 
 ## 第六章：第三层 — 外部插件
 
-外部插件是独立运行的 HTTP 服务进程，通过 Webhook 回调与 PeroCore 通信。适合需要独立部署、独立生命周期的功能。
+外部插件是独立运行的 HTTP 服务进程，通过 Webhook 回调与 infOS 通信。适合需要独立部署、独立生命周期的功能。
 
 ### 6.1 架构概览
 
 ```text
 ┌─────────────────────┐         ┌──────────────────────┐
-│   PeroCore 主进程    │         │  外部插件进程          │
+│   infOS 主进程    │         │  外部插件进程          │
 │                     │         │  (FastAPI/Flask/etc.) │
 │  ExternalPlugin     │  HTTP   │                      │
 │  Registry           │◄───────►│  /hook/{event}       │
@@ -695,10 +695,10 @@ def init():
 
 ```text
 1. 外部插件进程启动
-2. 向 PeroCore POST /api/plugins/register 注册
-3. PeroCore 为插件创建 EventBus 代理
-4. PeroCore 定期 GET /health 心跳检测（默认 30s）
-5. 事件发生时 PeroCore 通过 HTTP 调用插件
+2. 向 infOS POST /api/plugins/register 注册
+3. infOS 为插件创建 EventBus 代理
+4. infOS 定期 GET /health 心跳检测（默认 30s）
+5. 事件发生时 infOS 通过 HTTP 调用插件
 6. 插件停止时调用 DELETE /api/plugins/unregister/{id}
    （或心跳失败后自动标记为离线）
 ```
@@ -786,11 +786,11 @@ async def health():
     return {"status": "ok"}
 ```
 
-- PeroCore 每 30 秒调用一次（超时 3 秒）
+- infOS 每 30 秒调用一次（超时 3 秒）
 - 返回 HTTP 200 表示在线，否则标记为离线
 - 离线插件的 Hook 和 Event 代理会被跳过
 
-### 6.5 PeroCore 侧 API
+### 6.5 infOS 侧 API
 
 | 端点                           | 方法   | 用途           | 说明                           |
 | :----------------------------- | :----- | :------------- | :----------------------------- |
@@ -826,7 +826,7 @@ sync_log: List[Dict] = []
 
 @app.on_event("startup")
 async def register_to_pero():
-    """启动时向 PeroCore 注册"""
+    """启动时向 infOS 注册"""
     async with httpx.AsyncClient(timeout=5.0) as client:
         try:
             resp = await client.post(
@@ -842,11 +842,11 @@ async def register_to_pero():
                 },
             )
             if resp.status_code == 200:
-                print(f"✔ 已向 PeroCore 注册")
+                print(f"✔ 已向 infOS 注册")
             else:
                 print(f"✖ 注册失败: {resp.status_code}")
         except Exception as e:
-            print(f"✖ 无法连接 PeroCore: {e}")
+            print(f"✖ 无法连接 infOS: {e}")
 
 # ─── 事件端点 ───
 
@@ -912,8 +912,8 @@ async def _try_register_external():
 ### 6.8 启动顺序
 
 ```bash
-# 1. 先启动 PeroCore 主进程
-cd PeroCore-electron && npm run dev
+# 1. 先启动 infOS 主进程
+cd infOS-electron && npm run dev
 
 # 2. 再独立启动外部插件
 python backend/mods/my_mod/external/server.py
@@ -1151,7 +1151,7 @@ EventBus.subscribe("custom.my_event", on_custom_event)
 
 ### 9.6 热重载
 
-外部插件支持热重载 — 使用相同 `plugin_id` 重新注册会自动先注销旧的。In-process MOD 目前不支持热重载，需要重启 PeroCore。
+外部插件支持热重载 — 使用相同 `plugin_id` 重新注册会自动先注销旧的。In-process MOD 目前不支持热重载，需要重启 infOS。
 
 ---
 
@@ -1263,11 +1263,11 @@ my_mod/
 
 ### Q: 外部插件离线后会怎样？
 
-PeroCore 每 30 秒通过 `/health` 心跳检测。如果连接失败，插件被标记为 `online=False`，其 Hook 和 Event 代理会被跳过（不报错、不阻塞）。恢复后自动重新标记为在线。
+infOS 每 30 秒通过 `/health` 心跳检测。如果连接失败，插件被标记为 `online=False`，其 Hook 和 Event 代理会被跳过（不报错、不阻塞）。恢复后自动重新标记为在线。
 
 ### Q: 能否在 MOD 中导入第三方库？
 
-可以，但需要确保该库已安装在 PeroCore 的 Python 环境中。建议在 `init()` 中用 try-except 包裹导入：
+可以，但需要确保该库已安装在 infOS 的 Python 环境中。建议在 `init()` 中用 try-except 包裹导入：
 
 ```python
 def init():

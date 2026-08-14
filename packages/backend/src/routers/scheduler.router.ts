@@ -13,6 +13,8 @@
 
 import { Hono } from 'hono'
 import { AppError } from '../lib/appError'
+import { zValidator } from '@hono/zod-validator'
+import { z } from 'zod'
 import type { AppContext } from '../container'
 
 export function createSchedulerRouter(ctx: AppContext) {
@@ -25,7 +27,8 @@ export function createSchedulerRouter(ctx: AppContext) {
       code: 'OK',
       message: '获取成功',
       data: {
-        running: ctx.scheduler.isStarted,
+        schedulerRunning: ctx.scheduler.isStarted,
+        serverNow: Date.now(),
         taskCount: tasks.length,
         activeTasks: tasks.filter((t) => t.running).length,
       },
@@ -39,17 +42,11 @@ export function createSchedulerRouter(ctx: AppContext) {
       code: 'OK',
       message: '获取成功',
       data: {
+        schedulerRunning: ctx.scheduler.isStarted,
+        serverNow: Date.now(),
         items: tasks.map((t) => ({
-          name: t.name,
-          intervalMs: t.intervalMs,
-          /** 格式化的间隔描述 */
+          ...t,
           intervalDesc: formatInterval(t.intervalMs),
-          running: t.running,
-          lastRunAt: t.lastRunAt,
-          lastRunAtIso: new Date(t.lastRunAt).toISOString(),
-          /** 下次预计执行时间 (估算) */
-          nextRunAt: t.lastRunAt + t.intervalMs,
-          stats: t.stats,
         })),
         total: tasks.length,
       },
@@ -69,6 +66,31 @@ export function createSchedulerRouter(ctx: AppContext) {
       },
     })
   })
+
+  router.post(
+    '/agent-tasks',
+    zValidator(
+      'json',
+      z.object({
+        agentId: z.string().min(1).max(64),
+        time: z.string().min(1),
+        instruction: z.string().min(1).max(4000),
+      }),
+    ),
+    async (c) => {
+      const body = c.req.valid('json')
+      if (!ctx.agentManager.getAgent(body.agentId)) {
+        throw new AppError('NOT_FOUND', { message: `角色不存在: ${body.agentId}` })
+      }
+      const item = await ctx.schedulerService.create({
+        type: 'agent_task',
+        agentId: body.agentId,
+        time: body.time,
+        content: body.instruction,
+      })
+      return c.json({ code: 'OK', data: item }, 201)
+    },
+  )
 
   // POST /api/scheduler/trigger/:name — 手动触发
   router.post('/trigger/:name', async (c) => {

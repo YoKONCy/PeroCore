@@ -2,10 +2,10 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 
-import ContextMenu from '@perocore/frontend/components/pixel/ContextMenu.vue'
-import PDatePicker from '@perocore/frontend/components/pixel/PDatePicker.vue'
-import PImageViewer from '@perocore/frontend/components/pixel/PImageViewer.vue'
-import PixelIcon from '@perocore/frontend/components/pixel/PixelIcon.vue'
+import ContextMenu from '@infos/frontend/components/pixel/ContextMenu.vue'
+import PDatePicker from '@infos/frontend/components/pixel/PDatePicker.vue'
+import PImageViewer from '@infos/frontend/components/pixel/PImageViewer.vue'
+import PixelIcon from '@infos/frontend/components/pixel/PixelIcon.vue'
 
 type ContextMenuItem =
   | {

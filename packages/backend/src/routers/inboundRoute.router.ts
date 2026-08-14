@@ -29,7 +29,7 @@ import type { AppContext } from '../container'
 const SOURCE_VALUES = ['qq_private', 'qq_group', 'discord', 'webhook', 'monitor'] as const
 
 /** 合法的通道类型 */
-const CHANNEL_VALUES = ['desktop', 'social', 'group', 'companion'] as const
+const CHANNEL_VALUES = ['desktop', 'social', 'group'] as const
 
 /** 创建路由的请求体 Schema */
 const createRouteSchema = z.object({
@@ -100,10 +100,7 @@ export function createInboundRouteRouter(ctx: AppContext) {
         threadId: body.threadId ?? null,
         config: body.config,
       })
-      return c.json(
-        { code: 'CREATED', message: '路由创建成功', data: route },
-        201,
-      )
+      return c.json({ code: 'CREATED', message: '路由创建成功', data: route }, 201)
     } catch (err) {
       // 唯一索引冲突（source + identifier 已存在）
       const msg = err instanceof Error ? err.message : String(err)

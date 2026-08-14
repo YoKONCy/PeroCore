@@ -1,4 +1,4 @@
-//! @perocore/nit-runtime — Rust N-API 高性能计算模块
+//! @infos/nit-runtime — Rust N-API 高性能计算模块
 //!
 //! 通过 napi-rs 将 Rust 原生算法暴露给 Node.js:
 //! - minGRU 前向推理 (<2ms CPU)

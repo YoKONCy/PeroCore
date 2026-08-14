@@ -62,6 +62,8 @@ export interface DiaryInput {
   agentName: string
   /** 主人名字 */
   ownerName?: string
+  /** 用户称呼（AI 对用户的亲密称谓，如 主人/哥哥/老师，来自角色 agent.json 的 owner_appellation） */
+  ownerAppellation?: string
   /** Agent 人设定义 (完整人设文本) */
   personaDefinition?: string
   /** 附加上下文 (如工作模式的任务名) */
@@ -88,7 +90,15 @@ export class DiaryEngine {
    * 单次调用统一编排 Scorer + GraphGardener + DiaryGenerator。
    */
   async generate(input: DiaryInput): Promise<DiaryEntry | null> {
-    const { summaries, agentId, agentName, ownerName, personaDefinition, extraContext } = input
+    const {
+      summaries,
+      agentId,
+      agentName,
+      ownerName,
+      ownerAppellation,
+      personaDefinition,
+      extraContext,
+    } = input
 
     if (summaries.length === 0) {
       logger.info(`无摘要可生成日记: agent=${agentId}`)
@@ -102,12 +112,14 @@ export class DiaryEngine {
     }
 
     const today = new Date().toISOString().slice(0, 10)
-    const owner = ownerName ?? '主人'
+    const owner = ownerName ?? '用户'
+    const appellation = ownerAppellation ?? '主人'
 
     // 通过 MDP 模板渲染 Prompt
     const systemPrompt = this.mdpEngine.render('tasks/diary/diary', {
       agent_name: agentName,
       owner_name: owner,
+      owner_appellation: appellation,
       persona_definition: personaDefinition ?? '',
       extra_context: extraContext ?? '',
       date_str: today,
@@ -123,7 +135,6 @@ export class DiaryEngine {
           { role: 'user', content: userContent },
         ],
         {
-          temperature: 0.7,
           responseFormat: { type: 'json_object' },
         },
       )
@@ -194,16 +205,21 @@ export class DiaryEngine {
       }
 
       // AIOS(Phase5): 日记按 Agent 隔离，upsertDiary 需要 agentId 路由到 agent_{id}/diary.tdb
-      await this.vectorRepo.upsertDiary(nodeId, vector, {
-        type: 'diary',
-        date: entry.date,
-        agentId: entry.agentId,
-        diary: entry.diary,
-        mood: entry.mood,
-        highlights: entry.highlights,
-        entities: entry.entities,
-        relations: entry.relations,
-      }, entry.agentId)
+      await this.vectorRepo.upsertDiary(
+        nodeId,
+        vector,
+        {
+          type: 'diary',
+          date: entry.date,
+          agentId: entry.agentId,
+          diary: entry.diary,
+          mood: entry.mood,
+          highlights: entry.highlights,
+          entities: entry.entities,
+          relations: entry.relations,
+        },
+        entry.agentId,
+      )
 
       // 建立图谱边
       for (const rel of entry.relations) {

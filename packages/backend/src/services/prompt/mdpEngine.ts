@@ -195,8 +195,11 @@ export class MdpEngine {
    */
   private additionalRoots: Array<{ dir: string; prefix?: string }> = []
 
-  constructor(private promptDir: string) {
-    this.agentsDir = path.join(path.dirname(promptDir), 'agents')
+  constructor(
+    private promptDir: string,
+    agentsDir?: string,
+  ) {
+    this.agentsDir = agentsDir ?? path.join(path.dirname(promptDir), 'agents')
 
     // 创建 Nunjucks 环境 (不自动转义, 允许未定义变量)
     this.nj = new nunjucks.Environment(null, {
@@ -255,9 +258,7 @@ export class MdpEngine {
    */
   addTemplateRoot(dir: string, prefix?: string): void {
     // 去重：如果已注册相同 dir + prefix，跳过
-    const exists = this.additionalRoots.some(
-      (r) => r.dir === dir && r.prefix === prefix,
-    )
+    const exists = this.additionalRoots.some((r) => r.dir === dir && r.prefix === prefix)
     if (exists) {
       logger.warn(`模板根目录已注册，跳过: ${dir} (prefix=${prefix ?? '无'})`)
       return
@@ -299,7 +300,7 @@ export class MdpEngine {
       logger.warn(`模板未找到: ${templateKey}`)
       return `{{Missing: ${templateKey}}}`
     }
-    return this.renderTemplate(prompt.content, vars)
+    return this.renderTemplate(prompt.content, this.withOwnerDefaults(vars))
   }
 
   /**
@@ -432,12 +433,15 @@ export class MdpEngine {
 
     const messages: RenderedMessage[] = []
 
+    // 渲染变量统一合并称呼/名字兜底，调用方显式传入的值优先
+    const mergedVars = this.withOwnerDefaults(vars)
+
     for (const slot of slots) {
       if (!slot.enabled) continue
 
       // 优先用户覆盖，否则用默认模板
       const template = slot.userOverride ?? slot.template
-      const rendered = this.renderTemplate(template, vars)
+      const rendered = this.renderTemplate(template, mergedVars)
 
       if (skipEmpty && !rendered.trim()) continue
 
@@ -512,6 +516,24 @@ export class MdpEngine {
     } catch (err) {
       logger.warn(`Nunjucks 渲染失败`, { error: err })
       return template
+    }
+  }
+
+  /**
+   * 合并称呼/名字默认兜底变量
+   *
+   * 所有模板统一可安全引用：
+   * - owner_name:       用户名字（默认 用户）
+   * - owner_appellation: 用户称呼（默认 主人）
+   *
+   * 调用方（如 ContextCompiler）显式传入配置值时会覆盖默认值，
+   * 避免未注入变量导致模板渲染出空串。
+   */
+  private withOwnerDefaults(vars: Record<string, unknown>): Record<string, unknown> {
+    return {
+      owner_name: '用户',
+      owner_appellation: '主人',
+      ...vars,
     }
   }
 

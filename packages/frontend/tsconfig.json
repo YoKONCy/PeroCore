@@ -7,8 +7,8 @@
     "jsxImportSource": "vue",
     "types": ["vite/client"],
     "paths": {
-      "@perocore/shared": ["../shared/src"],
-      "@perocore/shared/*": ["../shared/src/*"],
+      "@infos/shared": ["../shared/src"],
+      "@infos/shared/*": ["../shared/src/*"],
       "@/*": ["./src/*"]
     }
   },

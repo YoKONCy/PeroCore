@@ -25,7 +25,7 @@ import type { SocialMessageRepository } from './socialMessage.repo'
 import type { Attachment, InboundMessage, OutboundMessage } from './types'
 import type { InboundRouteRepository } from '../../../backend/src/repositories/inboundRoute.repo'
 import { SocialSessionManager, type SocialSession } from './socialSessionManager'
-import { SocialScheduler } from './socialScheduler'
+import { SocialScheduler, type SocialSchedulerConfig } from './socialScheduler'
 import type { ImageCacheManager } from './imageCacheManager'
 import type { StickerService } from './stickerService'
 import { createEnvelope } from '../../../backend/src/services/gateway/types'
@@ -50,6 +50,19 @@ export interface SocialBridgeDeps {
   stickerService?: StickerService
   /** 入站路由表 Repository (可选，第七阶段 #7：外部消息按来源+标识查询归属 Agent) */
   inboundRouteRepo?: InboundRouteRepository
+  /** 获取社交决策使用的主 Agent 身份框架。 */
+  getDecisionIdentity?: (agentId: string) => Promise<{
+    agentName: string
+    systemCore: string
+    personaDefinition: string
+    socialPatch: string
+    /** 主人在主 app 登记的名称（owner.name），客观/中性指代用 */
+    ownerName: string
+    /** 角色对主人的亲密称呼（agent.json owner_appellation） */
+    ownerAppellation: string
+  }>
+  /** 入站策略过滤；返回 false 时不持久化、不缓冲、不回复。 */
+  shouldAcceptInbound?: (message: InboundMessage) => boolean
   /** 回复生成回调（方案 B：由 SocialAppRuntime 提供，使用应用自己的 Compiler + LLM） */
   generateReply: (params: {
     agentId: string
@@ -123,6 +136,8 @@ export class SocialBridge {
   private imageCache: ImageCacheManager | null
   /** 表情包服务 */
   private stickerService: StickerService | null
+  /** 同一平台只允许一个历史同步任务，避免重连风暴重复补拉。 */
+  private historySyncs = new Map<string, Promise<void>>()
   /** 调度器 */
   private scheduler: SocialScheduler
 
@@ -142,10 +157,19 @@ export class SocialBridge {
       llmService: deps.llmService,
       mdpEngine: deps.mdpEngine,
       getSocialSchedulerModel: deps.getSocialSchedulerModel,
+      getDecisionIdentity: deps.getDecisionIdentity,
       onDecideReply: async (session, messages) => {
         await this.executeReply(session, messages)
       },
     })
+  }
+
+  getSchedulerConfig(): SocialSchedulerConfig {
+    return this.scheduler.getConfig()
+  }
+
+  updateSchedulerConfig(config: Partial<SocialSchedulerConfig>): SocialSchedulerConfig {
+    return this.scheduler.updateConfig(config)
   }
 
   // ── 适配器管理 ──
@@ -170,6 +194,13 @@ export class SocialBridge {
     adapter.on('connected', () => {
       logger.info(`社交适配器已连接: ${platform}`)
       this.notifyFrontend('social_adapter_connected', { platform })
+      // 注册连接事件早于 Bot 信息查询，稍后启动补拉以等待账号信息就绪。
+      setTimeout(() => {
+        if (this.running)
+          this.syncOfflineHistory(platform).catch((err) =>
+            logger.warn(`离线历史补拉失败 [${platform}]: ${err}`),
+          )
+      }, 800)
     })
 
     adapter.on('disconnected', (reason?: string) => {
@@ -197,6 +228,117 @@ export class SocialBridge {
   /** 获取适配器 */
   getAdapter(platform: string): AbstractSocialAdapter | undefined {
     return this.adapters.get(platform)
+  }
+
+  async syncOfflineHistory(platform: string): Promise<void> {
+    const existing = this.historySyncs.get(platform)
+    if (existing) return existing
+    const task = this.performOfflineHistorySync(platform).finally(() =>
+      this.historySyncs.delete(platform),
+    )
+    this.historySyncs.set(platform, task)
+    return task
+  }
+
+  private async performOfflineHistorySync(platform: string): Promise<void> {
+    const adapter = this.adapters.get(platform)
+    if (!adapter) return
+    const accountIds = adapter.getConnectedAccountIds()
+    if (accountIds.length === 0) return
+    const channels = await this.deps.socialMessageRepo.getRecentChannelsForPlatform(platform, 100)
+    if (channels.length === 0) return
+
+    for (const accountId of accountIds) {
+      const agentId = adapter.resolveAgentId(accountId)
+      if (!agentId) {
+        logger.warn(`无法确定平台账号 ${accountId} 对应的 Agent，跳过历史补拉`)
+        continue
+      }
+      const accountChannels = channels.filter((channel) => channel.agentId === agentId)
+      if (accountChannels.length === 0) continue
+      const startedAt = Math.floor(Date.now() / 1000)
+      const cursor = await this.deps.socialMessageRepo.getSyncCursor(agentId, platform, accountId)
+      // 首次启用只建立游标，不导入账号既有历史；后续仅补断开窗口。
+      if (!cursor) {
+        await this.deps.socialMessageRepo.markSyncCompleted(agentId, platform, accountId, startedAt)
+        continue
+      }
+      await this.deps.socialMessageRepo.markSyncStarted(agentId, platform, accountId, startedAt)
+      try {
+        for (const channel of accountChannels.filter((item) => item.agentId === agentId)) {
+          let beforeMessageSeq: number | undefined
+          const seenPageStarts = new Set<number>()
+          while (this.running) {
+            const history = await adapter.getMessageHistory(
+              channel.channelId,
+              channel.channelType as 'private' | 'group',
+              100,
+              beforeMessageSeq,
+            )
+            if (history.length === 0) break
+            for (const message of history) {
+              if (message.timestamp <= cursor.lastSuccessfulSyncAt || message.timestamp > startedAt)
+                continue
+              if (
+                await this.deps.socialMessageRepo.isDeletedByTombstone({
+                  agentId,
+                  platform,
+                  accountId,
+                  channelType: message.channelType,
+                  channelId: message.channelId,
+                  timestamp: message.timestamp,
+                })
+              )
+                continue
+              await this.deps.socialMessageRepo.insert({
+                msgId: message.msgId,
+                platform,
+                accountId,
+                channelId: message.channelId,
+                channelType: message.channelType,
+                senderId: message.senderId,
+                senderName: message.senderName,
+                content: message.content,
+                agentId,
+                rawEventJson: JSON.stringify({
+                  ...((message.rawEvent as object) ?? {}),
+                  _historySync: true,
+                }),
+                timestamp: new Date(message.timestamp * 1000).toISOString(),
+              })
+            }
+
+            const oldestTimestamp = Math.min(...history.map((message) => message.timestamp))
+            if (oldestTimestamp <= cursor.lastSuccessfulSyncAt || history.length < 100) break
+            const sequences = history
+              .map((message) => message.messageSeq)
+              .filter(
+                (value): value is number => typeof value === 'number' && Number.isFinite(value),
+              )
+            if (sequences.length === 0) {
+              throw new Error(
+                `NapCat 未返回 message_seq，无法继续分页补拉 ${channel.channelType}:${channel.channelId}`,
+              )
+            }
+            const oldestSequence = Math.min(...sequences)
+            if (seenPageStarts.has(oldestSequence) || oldestSequence === beforeMessageSeq) {
+              throw new Error(
+                `NapCat 历史分页游标未前进: ${channel.channelType}:${channel.channelId}`,
+              )
+            }
+            seenPageStarts.add(oldestSequence)
+            // NapCat 会将 message_seq 对应消息包含在下一页，唯一索引负责消除页间重叠。
+            beforeMessageSeq = oldestSequence
+          }
+          if (!this.running) throw new Error('社交应用停止，历史同步将在下次启动时继续')
+        }
+        // 所有频道成功后一次推进游标；中途断电不会丢消息，重启会依靠唯一索引安全重放。
+        await this.deps.socialMessageRepo.markSyncCompleted(agentId, platform, accountId, startedAt)
+      } catch (err) {
+        await this.deps.socialMessageRepo.markSyncFailed(agentId, platform, accountId, String(err))
+        throw err
+      }
+    }
   }
 
   // ── 启动 / 停止 ──
@@ -242,6 +384,12 @@ export class SocialBridge {
    */
   private async handleInbound(inbound: InboundMessage): Promise<void> {
     if (!this.running) return
+    if (this.deps.shouldAcceptInbound && !this.deps.shouldAcceptInbound(inbound)) {
+      logger.debug(
+        `入站消息被社交名单策略忽略: channel=${inbound.channelId}, sender=${inbound.senderId}`,
+      )
+      return
+    }
 
     const { channelId, channelType, senderName, platform, content } = inbound
     logger.info(
@@ -258,10 +406,8 @@ export class SocialBridge {
       if (resolved) {
         inbound.agentId = resolved.agentId
         logger.info(`入站路由命中: ${routeSource}/${channelId} → agent=${resolved.agentId}`)
-        // 第七阶段修复（批次 D）：透传路由解析出的 channel 和 threadId
-        // - channel 决定工具白名单（social vs group），未配置时按 channelType 推断
-        // - threadId 决定 Thread 上下文复用，未配置时 executeReply 会用临时 sessionId
-        inbound.routeChannel = resolved.channel ?? (channelType === 'private' ? 'social' : 'group')
+        // 外部平台私聊与群聊统一使用 social，具体会话形态由 channelType 区分。
+        inbound.routeChannel = 'social'
         inbound.routeThreadId = resolved.threadId ?? undefined
       }
     }
@@ -359,11 +505,9 @@ export class SocialBridge {
     if (messages.length === 0) return
 
     const { channelId, channelType, agentId } = session
-    // 第七阶段修复（批次 D）：从入站消息取出路由解析结果
-    // - routeChannel: 决定工具白名单（social/group/group_chat）
-    // - routeThreadId: 决定 Thread 上下文复用
+    // 外部平台会话始终使用 social；routeThreadId 仅决定上下文复用。
     const firstMsg = messages[0]!
-    const routeChannel = firstMsg.routeChannel ?? (channelType === 'private' ? 'social' : 'group')
+    const routeChannel = 'social'
     const routeThreadId = firstMsg.routeThreadId
 
     // 构建合并的用户消息
@@ -512,9 +656,21 @@ export class SocialBridge {
           direction: 'outbound',
           content: reply.slice(0, 100),
         })
+      } else {
+        // generateReply 返回空（LLM 无回复 / 应用未就绪）时同样恢复会话到非活跃期，
+        // 否则 session 会像异常路径一样卡死在 summoned，导致后续无法被唤醒
+        this.sessionManager.markReplyFailed(
+          session,
+          new Error('generateReply 返回空回复（LLM 无回复或应用未就绪）'),
+        )
       }
     } catch (err) {
       logger.error(`回复生成失败: ${err}`)
+      // 关键修复：失败时必须恢复会话状态到非活跃期 (observing)。
+      // 否则 session 会卡死在 summoned 状态，下次被 @ 时 handleInbound
+      // 无法启动新的累积计时器（`if (session.state !== 'summoned')` 分支进不去），
+      // 导致会话永久失聪、无法再被唤醒（如 LLM 网络错误 fetch failed）。
+      this.sessionManager.markReplyFailed(session, err)
     }
   }
 
@@ -633,11 +789,21 @@ export class SocialBridge {
         return defaultPlatform
       },
 
-      async sendMessage(target, content, type) {
+      async sendMessage(agentId, target, content, type) {
         await bridge.sendReply(defaultPlatform, {
           channelId: target,
           channelType: type,
           content,
+        })
+        await bridge.deps.socialMessageRepo.insert({
+          msgId: `agent_tool_${Date.now()}`,
+          platform: defaultPlatform,
+          channelId: target,
+          channelType: type,
+          senderId: 'self',
+          senderName: agentId,
+          content,
+          agentId,
         })
       },
 

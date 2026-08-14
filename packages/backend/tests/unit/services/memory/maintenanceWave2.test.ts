@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import { Auditor } from '@perocore/backend/services/memory/maintenance/auditor'
-import { DreamAssociator } from '@perocore/backend/services/memory/maintenance/dreamAssociator'
-import { GraphGardener } from '@perocore/backend/services/memory/maintenance/graphGardener'
-import { ReflectionOrchestrator } from '@perocore/backend/services/memory/maintenance/reflectionOrchestrator'
+import { Auditor } from '@infos/backend/services/memory/maintenance/auditor'
+import { DreamAssociator } from '@infos/backend/services/memory/maintenance/dreamAssociator'
+import { GraphGardener } from '@infos/backend/services/memory/maintenance/graphGardener'
+import { ReflectionOrchestrator } from '@infos/backend/services/memory/maintenance/reflectionOrchestrator'
 
 function createMemory(id: number, overrides: Record<string, unknown> = {}) {
   return {
@@ -56,7 +56,6 @@ describe('Auditor', () => {
     expect(deps.vectorWriteHelper.deleteWithFallback).toHaveBeenCalledWith(1, 'pero', 'desktop')
     expect(deps.vectorWriteHelper.deleteWithFallback).toHaveBeenCalledWith(3, 'pero', 'social')
     expect(deps.llmService.chat).toHaveBeenCalledWith(expect.any(Object), expect.any(Array), {
-      temperature: 0.2,
       responseFormat: { type: 'json_object' },
     })
   })

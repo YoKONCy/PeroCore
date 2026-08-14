@@ -126,24 +126,29 @@ function close() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(2px);
+  background: var(--ui-overlay-backdrop);
+  backdrop-filter: blur(var(--ui-overlay-blur));
 }
 
 .p-dialog {
   min-width: 340px;
   max-width: 560px;
-  background: var(--color-bg-primary);
-  border: 3px solid var(--color-border);
-  box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.15);
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: var(--ui-text-primary);
+  background: var(--dash-panel-bg);
+  border: 3px solid var(--ui-border-strong);
+  box-shadow: var(--ui-shadow-lg);
 }
 
 .p-dialog-header {
   padding: 12px 16px;
-  border-bottom: 2px solid var(--color-border);
+  border-bottom: 2px solid var(--ui-border-default);
   font-weight: 700;
   font-size: 15px;
-  color: var(--color-text-primary);
+  color: var(--ui-text-primary);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -153,42 +158,48 @@ function close() {
   background: none;
   border: none;
   cursor: pointer;
-  color: var(--color-text-muted);
+  color: var(--ui-text-tertiary);
   font-size: 14px;
   padding: 2px 6px;
   transition: color 0.15s;
 }
 .p-dialog-close:hover {
-  color: var(--color-text-primary);
+  color: var(--ui-text-primary);
 }
 
 .p-dialog-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 16px;
 }
 .p-dialog-message {
   font-size: 14px;
   line-height: 1.6;
-  color: var(--color-text-secondary);
+  color: var(--ui-text-secondary);
   margin-bottom: 12px;
 }
 
 .p-dialog-input {
   width: 100%;
   padding: 6px 12px;
-  border: 2px solid var(--color-border);
-  background: var(--color-bg-secondary);
-  color: var(--color-text-primary);
-  font-family: var(--font-pixel), monospace;
+  border: 2px solid var(--dash-input-border);
+  background: var(--dash-input-bg);
+  color: var(--ui-text-primary);
+  font-family: var(--ui-font-pixel);
   font-size: 14px;
   outline: none;
 }
+.p-dialog-input::placeholder {
+  color: var(--ui-text-tertiary);
+}
 .p-dialog-input:focus {
-  border-color: var(--color-sky-500);
+  border-color: var(--ui-accent-sky);
 }
 
 .p-dialog-footer {
   padding: 12px 16px;
-  border-top: 2px solid var(--color-border);
+  border-top: 2px solid var(--ui-border-default);
   display: flex;
   justify-content: flex-end;
   gap: 8px;

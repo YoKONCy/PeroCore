@@ -1,5 +1,5 @@
 /**
- * @perocore/nit-runtime — 自动加载器
+ * @infos/nit-runtime — 自动加载器
  *
  * 优先加载 Rust N-API 编译产物 (.node)，失败时 fallback 到 TS mock。
  *
@@ -7,7 +7,7 @@
  * 1. 同目录的 index.win32-x64-msvc.node (或对应平台)
  * 2. 内置的 TS fallback 实现
  *
- * @module @perocore/nit-runtime
+ * @module @infos/nit-runtime
  */
 
 import { join } from 'node:path'

@@ -8,7 +8,7 @@ description: render-core 私有源码 submodule 管理 (备份/发布流程)
 - `src/` — Rust 源码（**私有**，不推送到公开仓库）
 - `*.node` / `index.js` / `index.d.ts` — 编译产物（**公开**）
 
-主仓库（PeroCore-TS）只记录 submodule 的 commit hash，不直接跟踪源码文件。
+主仓库（infOS-TS）只记录 submodule 的 commit hash，不直接跟踪源码文件。
 
 ---
 
@@ -28,7 +28,7 @@ git push origin master
 然后更新主仓库指向最新 submodule 版本：
 
 ```powershell
-cd ../../../   # 回到 PeroCore-TS 根目录
+cd ../../../   # 回到 infOS-TS 根目录
 git add packages/native/render-core
 git commit -m "chore: 更新 render-core submodule"
 ```
@@ -80,7 +80,7 @@ git checkout master
 其他人（有私有仓库权限）clone 完整项目：
 
 ```bash
-git clone <PeroCore-TS 仓库>
+git clone <infOS-TS 仓库>
 git submodule update --init --recursive
 ```
 

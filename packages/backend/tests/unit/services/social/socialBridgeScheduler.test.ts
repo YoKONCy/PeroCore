@@ -1,8 +1,8 @@
 import { EventEmitter } from 'node:events'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { SocialBridge } from '@perocore/backend/services/social/socialBridge'
-import { SocialScheduler } from '@perocore/backend/services/social/socialScheduler'
-import type { InboundMessage } from '@perocore/backend/services/social/types'
+import { SocialBridge } from '@infos/social/runtime/socialBridge'
+import { SocialScheduler } from '@infos/social/runtime/socialScheduler'
+import type { InboundMessage } from '@infos/social/runtime/types'
 
 class FakeAdapter extends EventEmitter {
   platform = 'napcat'
@@ -146,9 +146,15 @@ describe('SocialBridge', () => {
       agentId: 'pero',
       channelType: 'group',
       channelId: 'group-1',
-      combinedMessage: '[主人]: 第一条\n[主人]: 第二条',
-      routeChannel: 'group',
+      combinedMessage: '[主人] [msg:123]: 第一条\n[主人] [msg:123]: 第二条',
+      routeChannel: 'social',
       routeThreadId: undefined,
+      isOwner: false,
+      triggerSenderId: 'u1',
+      flushMsgIds: ['123', '123'],
+      images: undefined,
+      botSelfId: undefined,
+      botNickname: undefined,
     })
     expect(adapter.sendMessage).toHaveBeenCalledWith({
       channelId: 'group-1',
@@ -268,7 +274,7 @@ describe('SocialScheduler', () => {
         expect.objectContaining({ role: 'system' }),
         expect.objectContaining({ role: 'user' }),
       ]),
-      { temperature: 0.3 },
+      {},
     )
     expect(deps.onDecideReply).toHaveBeenCalledWith(
       session,

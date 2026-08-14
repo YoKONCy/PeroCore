@@ -55,11 +55,11 @@ export default defineConfig({
     resolve: {
       alias: {
         '@': resolve(__dirname, 'packages/frontend/src'),
-        '@perocore/shared': resolve(__dirname, 'packages/shared/src'),
+        '@infos/shared': resolve(__dirname, 'packages/shared/src'),
       },
     },
     server: {
-      port: 5173,
+      port: 7359,
       proxy: {
         '/api': { target: 'http://localhost:9120', changeOrigin: true },
         '/ws': { target: 'ws://localhost:9120', ws: true },

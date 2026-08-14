@@ -112,17 +112,17 @@ function handleInput(e: Event) {
 .p-slider-track {
   width: 100%;
   height: 10px;
-  background: var(--color-bg-hover);
-  border: 1px solid var(--color-border);
+  background: var(--ui-bg-hover);
+  border: 1px solid var(--ui-border-strong);
   overflow: hidden;
 }
 
 .p-slider-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--color-sky-light), var(--color-sky-hover));
+  background: var(--ui-accent-sky);
   position: relative;
   transition: width 0.15s;
-  box-shadow: 0 0 10px rgba(56, 189, 248, 0.2);
+  box-shadow: var(--ui-glow-sky);
 }
 
 .p-slider-stripes {
@@ -152,8 +152,9 @@ function handleInput(e: Event) {
   position: absolute;
   width: 20px;
   height: 20px;
-  background: white;
-  border: 2px solid var(--color-sky-hover);
+  background: var(--ui-bg-surface);
+  border: 2px solid var(--ui-accent-sky);
+  color: var(--ui-accent-sky);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -162,7 +163,7 @@ function handleInput(e: Event) {
   transition:
     left 0.15s,
     transform 0.2s;
-  box-shadow: 0 2px 8px rgba(56, 189, 248, 0.2);
+  box-shadow: var(--ui-shadow-sm);
 }
 .p-slider-wrapper:hover .p-slider-thumb {
   transform: scale(1.1);
@@ -174,7 +175,7 @@ function handleInput(e: Event) {
 .p-slider-thumb-dot {
   width: 8px;
   height: 8px;
-  background: var(--color-sky-hover);
+  background: var(--ui-accent-sky);
   animation: pulse 1.5s ease-in-out infinite;
 }
 
@@ -187,7 +188,7 @@ function handleInput(e: Event) {
   opacity: 0;
   transition: all 0.3s;
   pointer-events: none;
-  color: var(--color-sky-hover);
+  color: var(--ui-accent-sky);
 }
 .p-slider-wrapper:hover .p-slider-paw {
   opacity: 1;
@@ -199,17 +200,17 @@ function handleInput(e: Event) {
 }
 .p-slider-input {
   width: 100%;
-  background: var(--color-bg-secondary);
-  border: 2px solid var(--color-border);
+  background: var(--dash-input-bg);
+  border: 2px solid var(--dash-input-border);
   padding: 4px 8px;
   font-size: 12px;
   text-align: center;
-  color: var(--color-text-primary);
-  font-family: var(--font-pixel), monospace;
+  color: var(--ui-text-primary);
+  font-family: var(--ui-font-pixel);
   outline: none;
 }
 .p-slider-input:focus {
-  border-color: var(--color-sky-500);
+  border-color: var(--ui-accent-sky);
 }
 
 @keyframes stripe-scroll {

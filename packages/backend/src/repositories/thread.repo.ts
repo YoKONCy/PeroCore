@@ -7,7 +7,7 @@
  * @module packages/backend/src/repositories/thread.repo
  */
 
-import { eq, desc, sql, and, inArray } from 'drizzle-orm'
+import { eq, desc, asc, sql, and, or, inArray, notInArray, isNull } from 'drizzle-orm'
 import { threads, threadMessages, threadSummaries } from '../database/schema'
 import type { DrizzleDb } from '../database'
 
@@ -18,10 +18,13 @@ import type { DrizzleDb } from '../database'
 /**
  * Thread Channel 类型
  *
- * - desktop/companion: 主 Agent 场景，由 ContextCompiler 编译
- * - social/group: 预留，由社交子 Agent 应用独立处理（不走 ContextCompiler）
+ * - desktop/group: 主 Agent 场景，由 ContextCompiler 编译
+ * - social: 外部平台社交，由 Social App 独立处理
  */
-export type ThreadChannel = 'desktop' | 'social' | 'group' | 'companion'
+export type ThreadChannel = 'desktop' | 'social' | 'group'
+
+/** Thread 用途 — 普通对话 / 后台任务 / 应用内部状态 */
+export type ThreadPurpose = 'conversation' | 'background_task' | 'app_internal'
 
 /** Thread 创建输入 */
 export interface CreateThreadInput {
@@ -37,6 +40,8 @@ export interface CreateThreadInput {
    * 传入时覆盖默认策略，允许 Thread 级别自定义上下文窗口/记忆检索等行为
    */
   contextPolicy?: string | null
+  /** M05: Thread 用途，默认 conversation；后台任务传 background_task 与聊天历史隔离 */
+  purpose?: ThreadPurpose
 }
 
 /** Thread 消息创建输入 */
@@ -49,6 +54,8 @@ export interface CreateThreadMessageInput {
   senderId?: string
   agentId?: string
   metadataJson?: string
+  scorerStatus?: 'pending' | 'analyzed' | 'failed' | 'skipped'
+  status?: 'active' | 'failed' | 'interrupted'
 }
 
 /** 查询活跃消息参数 */
@@ -91,6 +98,7 @@ export class ThreadRepository {
         platformIdentifier: data.platformIdentifier,
         title: data.title ?? '',
         contextPolicy: data.contextPolicy ?? null,
+        purpose: data.purpose ?? 'conversation',
       })
       .returning()
     return rows[0]!
@@ -98,14 +106,23 @@ export class ThreadRepository {
 
   /** 根据 ID 查询 Thread */
   async getThread(id: string): Promise<ThreadRow | undefined> {
-    const rows = await this.db.select().from(threads).where(eq(threads.id, id)).limit(1)
+    const rows = await this.db
+      .select()
+      .from(threads)
+      .where(and(eq(threads.id, id), eq(threads.status, 'active')))
+      .limit(1)
     return rows[0]
   }
 
-  /** 查询 Agent 的 Thread 列表 */
+  /** 查询 Thread 列表；未传 agentId 时不按单一角色过滤。 */
   async listThreads(params: {
-    agentId: string
+    agentId?: string
+    agentIds?: string[]
     channel?: string
+    /** 排除指定 Channel；用于主应用列表隔离独立应用的内部 Thread。 */
+    excludeChannels?: string[]
+    /** M05: 按用途过滤；不传时保持向后兼容（返回全部用途） */
+    purpose?: ThreadPurpose
     page?: number
     pageSize?: number
   }): Promise<{ items: ThreadRow[]; total: number }> {
@@ -113,15 +130,28 @@ export class ThreadRepository {
     const pageSize = Math.min(100, Math.max(1, params.pageSize ?? 20))
     const offset = (page - 1) * pageSize
 
-    const conditions = [eq(threads.agentId, params.agentId)]
+    const conditions = [eq(threads.status, 'active')]
+    if (params.agentId) {
+      conditions.push(eq(threads.agentId, params.agentId))
+    } else if (params.agentIds) {
+      if (params.agentIds.length === 0) return { items: [], total: 0 }
+      conditions.push(inArray(threads.agentId, params.agentIds))
+    }
     if (params.channel) {
       conditions.push(eq(threads.channel, params.channel))
     }
+    if (params.excludeChannels?.length) {
+      conditions.push(notInArray(threads.channel, params.excludeChannels))
+    }
+    if (params.purpose) {
+      conditions.push(eq(threads.purpose, params.purpose))
+    }
+    const whereClause = and(...conditions)
 
     const items = await this.db
       .select()
       .from(threads)
-      .where(and(...conditions))
+      .where(whereClause)
       .orderBy(desc(threads.lastMessageAt), desc(threads.createdAt))
       .limit(pageSize)
       .offset(offset)
@@ -129,7 +159,7 @@ export class ThreadRepository {
     const countResult = await this.db
       .select({ count: sql<number>`count(*)` })
       .from(threads)
-      .where(and(...conditions))
+      .where(whereClause)
     const total = countResult[0]?.count ?? 0
 
     return { items, total }
@@ -139,12 +169,20 @@ export class ThreadRepository {
   async getOrCreateLatestThread(
     agentId: string,
     channel: ThreadChannel,
+    purpose: ThreadPurpose = 'conversation',
   ): Promise<ThreadRow> {
     // 查找最新的活跃 Thread
     const existing = await this.db
       .select()
       .from(threads)
-      .where(and(eq(threads.agentId, agentId), eq(threads.channel, channel), eq(threads.status, 'active')))
+      .where(
+        and(
+          eq(threads.agentId, agentId),
+          eq(threads.channel, channel),
+          eq(threads.purpose, purpose),
+          eq(threads.status, 'active'),
+        ),
+      )
       .orderBy(desc(threads.lastMessageAt), desc(threads.createdAt))
       .limit(1)
 
@@ -157,15 +195,93 @@ export class ThreadRepository {
       id: `thread_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       agentId,
       channel,
+      purpose,
     })
   }
 
-  /** 更新 Thread 的消息计数 */
-  async updateMessageCount(threadId: string, pairCount: number): Promise<void> {
+  /** 标记指定 Channel 的全部旧 Thread 与消息为已删除，用于移除持久通道时清理历史数据。 */
+  async softDeleteByChannel(channel: string): Promise<number> {
+    await this.db
+      .update(threadMessages)
+      .set({
+        status: 'deleted',
+        deletedAt: sql`(datetime('now', 'localtime'))`,
+        deletedBy: 'migration',
+      })
+      .where(
+        and(
+          eq(threadMessages.status, 'active'),
+          inArray(
+            threadMessages.threadId,
+            this.db.select({ id: threads.id }).from(threads).where(eq(threads.channel, channel)),
+          ),
+        ),
+      )
+    const result = await this.db
+      .update(threads)
+      .set({
+        status: 'deleted',
+        updatedAt: sql`(datetime('now', 'localtime'))`,
+      })
+      .where(and(eq(threads.channel, channel), eq(threads.status, 'active')))
+    return result.changes
+  }
+
+  /** 软删除整条 Thread 及其活跃消息，保留记录供审计恢复。 */
+  async softDeleteThread(threadId: string): Promise<{ deleted: boolean; messageIds: number[] }> {
+    const activeThread = await this.db
+      .select({ id: threads.id })
+      .from(threads)
+      .where(and(eq(threads.id, threadId), eq(threads.status, 'active')))
+      .limit(1)
+    if (!activeThread[0]) return { deleted: false, messageIds: [] }
+
+    const messageRows = await this.db
+      .select({ id: threadMessages.id })
+      .from(threadMessages)
+      .where(and(eq(threadMessages.threadId, threadId), eq(threadMessages.status, 'active')))
+    const messageIds = messageRows.map((row) => row.id)
+
+    if (messageIds.length > 0) {
+      await this.db
+        .update(threadMessages)
+        .set({
+          status: 'deleted',
+          deletedAt: sql`(datetime('now', 'localtime'))`,
+          deletedBy: 'user',
+        })
+        .where(inArray(threadMessages.id, messageIds))
+    }
+
+    const result = await this.db
+      .update(threads)
+      .set({
+        status: 'deleted',
+        updatedAt: sql`(datetime('now', 'localtime'))`,
+      })
+      .where(and(eq(threads.id, threadId), eq(threads.status, 'active')))
+
+    return { deleted: result.changes > 0, messageIds }
+  }
+
+  /**
+   * 更新 Thread 的消息计数。
+   *
+   * @param pairCount      本轮新增的对话对数（assistant 消息数）
+   * @param messageCountDelta 本轮新增的消息条数（默认 1）
+   *
+   * messageCount 统一统计「所有消息」（user + assistant + system），
+   * 与 syncThreadStats 的重算口径保持一致。
+   */
+  async updateMessageCount(
+    threadId: string,
+    pairCount: number,
+    messageCountDelta = 1,
+  ): Promise<void> {
     await this.db
       .update(threads)
       .set({
-        messageCount: sql`message_count + 1`,
+        messageCount: sql`message_count + ${messageCountDelta}`,
         pairCount: sql`pair_count + ${pairCount}`,
         lastMessageAt: sql`(datetime('now', 'localtime'))`,
         updatedAt: sql`(datetime('now', 'localtime'))`,
@@ -197,10 +313,16 @@ export class ThreadRepository {
     const result = await this.db
       .select({ count: sql<number>`count(*)` })
       .from(threadMessages)
-      .where(
-        and(eq(threadMessages.threadId, threadId), eq(threadMessages.status, 'active')),
-      )
+      .where(and(eq(threadMessages.threadId, threadId), eq(threadMessages.status, 'active')))
     return result[0]?.count ?? 0
+  }
+
+  async updateDisabledTools(threadId: string, disabledToolsJson: string): Promise<boolean> {
+    const result = await this.db
+      .update(threads)
+      .set({ disabledToolsJson, updatedAt: sql`(datetime('now', 'localtime'))` })
+      .where(and(eq(threads.id, threadId), eq(threads.status, 'active')))
+    return result.changes > 0
   }
 
   /**
@@ -209,10 +331,7 @@ export class ThreadRepository {
    * @param threadId       Thread ID
    * @param contextPolicy  JSON 序列化的 ChannelPolicy 字符串；null 表示恢复使用默认策略
    */
-  async updateContextPolicy(
-    threadId: string,
-    contextPolicy: string | null,
-  ): Promise<boolean> {
+  async updateContextPolicy(threadId: string, contextPolicy: string | null): Promise<boolean> {
     const result = await this.db
       .update(threads)
       .set({
@@ -238,6 +357,8 @@ export class ThreadRepository {
         senderId: data.senderId,
         agentId: data.agentId,
         metadataJson: data.metadataJson ?? '{}',
+        scorerStatus: data.scorerStatus ?? 'pending',
+        status: data.status ?? 'active',
       })
       .returning()
     return rows[0]!
@@ -268,8 +389,8 @@ export class ThreadRepository {
       agentId: params.agentId,
     })
 
-    // 更新 Thread 计数
-    await this.updateMessageCount(params.threadId, 1)
+    // 更新 Thread 计数：本对写入 2 条消息（user + assistant），对话对增加 1
+    await this.updateMessageCount(params.threadId, 1, 2)
 
     return { userMessage, assistantMessage }
   }
@@ -294,6 +415,50 @@ export class ThreadRepository {
     return recent.reverse()
   }
 
+  /** 查询最近 N 个完整对话轮次，旧消息缺少 pairId 时按单条独立轮次处理。 */
+  async queryActiveMessagePairs(threadId: string, pairLimit = 20): Promise<ThreadMessageRow[]> {
+    const normalizedLimit = Math.max(1, pairLimit)
+    const pairKey = sql<string>`coalesce(${threadMessages.pairId}, '__message__:' || ${threadMessages.id})`
+    const latestId = sql<number>`max(${threadMessages.id})`
+    const recentPairs = await this.db
+      .select({ pairKey, latestId })
+      .from(threadMessages)
+      .where(and(eq(threadMessages.threadId, threadId), eq(threadMessages.status, 'active')))
+      .groupBy(pairKey)
+      .orderBy(desc(latestId))
+      .limit(normalizedLimit)
+
+    if (recentPairs.length === 0) return []
+    const pairIds = recentPairs
+      .map((row) => row.pairKey)
+      .filter((key) => !key.startsWith('__message__:'))
+    const legacyMessageIds = recentPairs
+      .map((row) => row.pairKey)
+      .filter((key) => key.startsWith('__message__:'))
+      .map((key) => Number(key.slice('__message__:'.length)))
+      .filter(Number.isInteger)
+
+    const selectors = []
+    if (pairIds.length > 0) selectors.push(inArray(threadMessages.pairId, pairIds))
+    if (legacyMessageIds.length > 0) {
+      selectors.push(
+        and(isNull(threadMessages.pairId), inArray(threadMessages.id, legacyMessageIds))!,
+      )
+    }
+
+    return this.db
+      .select()
+      .from(threadMessages)
+      .where(
+        and(
+          eq(threadMessages.threadId, threadId),
+          eq(threadMessages.status, 'active'),
+          selectors.length === 1 ? selectors[0] : or(...selectors),
+        ),
+      )
+      .orderBy(asc(threadMessages.timestamp), asc(threadMessages.id))
+  }
+
   /** 查询 Thread 的全部活跃消息（分页，用于前端历史加载） */
   async listActiveMessages(params: {
     threadId: string
@@ -306,7 +471,7 @@ export class ThreadRepository {
 
     const conditions = [
       eq(threadMessages.threadId, params.threadId),
-      eq(threadMessages.status, 'active'),
+      inArray(threadMessages.status, ['active', 'failed', 'interrupted']),
     ]
 
     // 倒序查询（最新在前）
@@ -325,6 +490,22 @@ export class ThreadRepository {
     const total = countResult[0]?.count ?? 0
 
     return { items, total }
+  }
+
+  async getPairMessageIds(messageId: number): Promise<number[]> {
+    const current = (
+      await this.db.select().from(threadMessages).where(eq(threadMessages.id, messageId)).limit(1)
+    )[0]
+    if (!current) return []
+    if (current.pairId) {
+      return (
+        await this.db
+          .select({ id: threadMessages.id })
+          .from(threadMessages)
+          .where(eq(threadMessages.pairId, current.pairId))
+      ).map((row) => row.id)
+    }
+    return [messageId]
   }
 
   /** 软删除单条消息 */
@@ -456,9 +637,7 @@ export class ThreadRepository {
         ),
       )
       .orderBy(
-        isUser
-          ? sql`${threadMessages.timestamp} asc`
-          : sql`${threadMessages.timestamp} desc`,
+        isUser ? sql`${threadMessages.timestamp} asc` : sql`${threadMessages.timestamp} desc`,
       )
       .limit(1)
 
@@ -496,7 +675,7 @@ export class ThreadRepository {
     return result.changes > 0
   }
 
-  // ── 摘要操作（已废弃，见 .aios/03-context-runtime.md 第 0 节决策） ──
+  // ── 摘要操作（已废弃，见 .docs/archived/03-context-runtime.md 第 0 节决策） ──
   // 超出上下文窗口的早期消息由长记忆系统兜底，不再生成滚动摘要。
   // 以下方法保留仅为兼容已有数据，运行时不应再调用。
 
@@ -575,7 +754,9 @@ export class ThreadRepository {
     batchSize: number,
     threadId?: string,
     channel?: ThreadChannel,
-  ): Promise<Array<{ userMessage: ThreadMessageRow; assistantMessage: ThreadMessageRow; pairId: string }>> {
+  ): Promise<
+    Array<{ userMessage: ThreadMessageRow; assistantMessage: ThreadMessageRow; pairId: string }>
+  > {
     // AIOS(Phase5): 按 threadId 过滤，避免跨 Thread 混批
     const assistantConditions = [
       eq(threadMessages.agentId, agentId),
@@ -590,7 +771,10 @@ export class ThreadRepository {
     // AIOS(Phase5): 按 channel 过滤——先查该 channel 的所有 threadId，再用 inArray 过滤
     // 不用 JOIN 是因为 JOIN 会让返回类型变成合并行，破坏 ThreadMessageRow 类型
     if (channel) {
-      const threadRows = await this.db.select({ id: threads.id }).from(threads).where(eq(threads.channel, channel))
+      const threadRows = await this.db
+        .select({ id: threads.id })
+        .from(threads)
+        .where(eq(threads.channel, channel))
       const threadIds = threadRows.map((r) => r.id)
       if (threadIds.length === 0) return []
       assistantConditions.push(inArray(threadMessages.threadId, threadIds))
@@ -629,7 +813,11 @@ export class ThreadRepository {
     }
 
     // 配对返回
-    const result: Array<{ userMessage: ThreadMessageRow; assistantMessage: ThreadMessageRow; pairId: string }> = []
+    const result: Array<{
+      userMessage: ThreadMessageRow
+      assistantMessage: ThreadMessageRow
+      pairId: string
+    }> = []
     for (const a of pendingAssistant) {
       if (!a.pairId) continue
       const u = userMap.get(a.pairId)

@@ -90,7 +90,7 @@ export const threads = sqliteTable(
     id: text('id').primaryKey(),
     /** 归属的主 Agent */
     agentId: text('agent_id').notNull(),
-    /** 对话场景：desktop / social / group / companion */
+    /** 对话场景：desktop / social / group */
     channel: text('channel').notNull().default('desktop'),
     /** 外部平台标识（social/group 专用）：qq / discord / webhook */
     platform: text('platform'),
@@ -112,6 +112,13 @@ export const threads = sqliteTable(
      * 非空时覆盖默认策略，允许 Thread 级别自定义上下文窗口/记忆检索等行为
      */
     contextPolicy: text('context_policy'),
+    /** Thread 级禁用工具列表（JSON 字符串）；只能屏蔽 Channel 已允许工具，不能扩权。 */
+    disabledToolsJson: text('disabled_tools_json').default('[]').notNull(),
+    /**
+     * M05 §3.2: Thread 用途：conversation / background_task
+     * 普通聊天为 conversation；后台任务使用 background_task 与聊天历史隔离
+     */
+    purpose: text('purpose').default('conversation'),
     /** 创建时间 */
     createdAt: text('created_at').default(sql`(datetime('now', 'localtime'))`),
     /** 更新时间 */
@@ -122,6 +129,129 @@ export const threads = sqliteTable(
     index('idx_threads_channel').on(table.channel),
     index('idx_threads_platform').on(table.platform),
     index('idx_threads_status').on(table.status),
+    index('idx_threads_purpose').on(table.purpose),
+  ],
+)
+
+export const flowStates = sqliteTable(
+  'flow_states',
+  {
+    threadId: text('thread_id').notNull(),
+    agentId: text('agent_id').notNull(),
+    currentGoal: text('current_goal').default('').notNull(),
+    privateFacts: text('private_facts').default('').notNull(),
+    revision: integer('revision').default(1).notNull(),
+    updatedByPairId: text('updated_by_pair_id'),
+    updatedAt: text('updated_at')
+      .default(sql`(datetime('now', 'localtime'))`)
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex('idx_flow_states_thread_agent').on(table.threadId, table.agentId),
+    index('idx_flow_states_thread_id').on(table.threadId),
+  ],
+)
+
+/** 心流修订记录：用于对话回滚时恢复 Agent 当时的私有临时状态。 */
+export const flowStateRevisions = sqliteTable(
+  'flow_state_revisions',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    threadId: text('thread_id').notNull(),
+    agentId: text('agent_id').notNull(),
+    pairId: text('pair_id'),
+    beforeCurrentGoal: text('before_current_goal').default('').notNull(),
+    beforePrivateFacts: text('before_private_facts').default('').notNull(),
+    afterCurrentGoal: text('after_current_goal').default('').notNull(),
+    afterPrivateFacts: text('after_private_facts').default('').notNull(),
+    createdAt: text('created_at')
+      .default(sql`(datetime('now', 'localtime'))`)
+      .notNull(),
+  },
+  (table) => [
+    index('idx_flow_revisions_thread_id').on(table.threadId),
+    index('idx_flow_revisions_pair_id').on(table.pairId),
+  ],
+)
+
+// ─────────────────────────────────────────────
+// M05 统一任务中心
+// ─────────────────────────────────────────────
+
+/**
+ * 后台任务表 — 持久业务实体（区别于 RuntimeStateService 的短生命周期 TaskState）
+ *
+ * 生命周期遵循 M05 §4 状态机：
+ * queued → running ⇄ paused / waiting_input → completed / failed / cancelled
+ *
+ * 每个任务显式绑定 agentId + 独立 background_task Thread，
+ * 不随前台 activeAgentId 变化（M05 §1 核心原则）。
+ */
+export const backgroundTasks = sqliteTable(
+  'background_tasks',
+  {
+    id: text('id').primaryKey(),
+    /** 任务执行者（显式指定，不读取全局 activeAgent） */
+    agentId: text('agent_id').notNull(),
+    /** 任务专属 Thread（purpose='background_task'） */
+    threadId: text('thread_id').notNull(),
+    /** send_to_chat 时的原聊天 Thread */
+    targetThreadId: text('target_thread_id'),
+    /** 任务标题（用户可读） */
+    title: text('title').notNull(),
+    /** 派发给 Agent 的原始指令 */
+    instruction: text('instruction').notNull(),
+    /** 任务状态：queued/running/paused/waiting_input/completed/failed/cancelled */
+    status: text('status').default('queued').notNull(),
+    /** 进度百分比 0-100（Agent 主动上报，null 表示未知） */
+    progress: integer('progress'),
+    /** 当前阶段描述（如"检索资料中"） */
+    currentStage: text('current_stage'),
+    /** 最终结果摘要 */
+    result: text('result'),
+    /** 失败原因 */
+    errorMessage: text('error_message'),
+    /** 工具调用次数（冗余计数） */
+    toolCallCount: integer('tool_call_count').default(0).notNull(),
+    /** 优先级 1-10（越小越优先，默认 5） */
+    priority: integer('priority').default(5).notNull(),
+    /** 父任务 ID（子任务关系，首版暂不使用） */
+    parentTaskId: text('parent_task_id'),
+    /** 任务来源：user / agent / scheduler / runtime */
+    requestedBy: text('requested_by').default('user').notNull(),
+    /** 完成后行为：notify / open_result / send_to_chat */
+    completionAction: text('completion_action').default('notify').notNull(),
+    /** 任务类别：agent_task / resident；resident 仅供任务中心只读展示。 */
+    category: text('category').default('agent_task').notNull(),
+    /** 待用户输入的问题。 */
+    inputQuestion: text('input_question'),
+    /** 待用户输入上下文（JSON）。 */
+    inputContextJson: text('input_context_json'),
+    /** M05-A2: ReAct 中断存档（JSON，续跑时重放已成功步骤） */
+    checkpointJson: text('checkpoint_json'),
+    /** 扩展元数据 */
+    metadataJson: text('metadata_json').default('{}').notNull(),
+    /** 创建时间 */
+    createdAt: text('created_at')
+      .default(sql`(datetime('now', 'localtime'))`)
+      .notNull(),
+    /** 开始执行时间 */
+    startedAt: text('started_at'),
+    /** 完成/失败/取消时间 */
+    completedAt: text('completed_at'),
+    /** 更新时间 */
+    updatedAt: text('updated_at')
+      .default(sql`(datetime('now', 'localtime'))`)
+      .notNull(),
+    /** 历史记录阅读时间；null 表示未读。 */
+    readAt: text('read_at'),
+  },
+  (table) => [
+    index('idx_background_tasks_agent_id').on(table.agentId),
+    index('idx_background_tasks_status').on(table.status),
+    index('idx_background_tasks_thread_id').on(table.threadId),
+    index('idx_background_tasks_target_thread_id').on(table.targetThreadId),
+    index('idx_background_tasks_created_at').on(table.createdAt),
   ],
 )
 
@@ -183,11 +313,84 @@ export const threadMessages = sqliteTable(
 )
 
 /**
+ * 文件变更快照表
+ *
+ * 按 pairId（对话轮次）和 filePath 合并同一轮对同一文件的多次修改：
+ * originalContent/originalSha256 始终保留该轮首次修改前的状态，
+ * finalSha256 与 callId 随后续工具调用持续更新。
+ * operation 预留 modify/create/delete/rename，renameTargetPath 用于重命名目标。
+ */
+export const fileChangeSnapshots = sqliteTable(
+  'file_change_snapshots',
+  {
+    id: text('id').primaryKey(),
+    /** 所属 Thread */
+    threadId: text('thread_id').notNull(),
+    /** 对话轮次 ID */
+    pairId: text('pair_id').notNull(),
+    /** 最近一次更新该快照的工具调用 ID */
+    callId: text('call_id').notNull(),
+    /** 文件路径（同一轮内作为合并键） */
+    filePath: text('file_path').notNull(),
+    /** 操作类型：modify/create/delete/rename */
+    operation: text('operation').notNull().default('modify'),
+    /** 重命名后的目标路径，仅 operation=rename 时使用 */
+    renameTargetPath: text('rename_target_path'),
+    /** 该轮首次修改前的文件内容；创建文件时为 null */
+    originalContent: text('original_content'),
+    /** 该轮首次修改前的内容哈希；创建文件时为 null */
+    originalSha256: text('original_sha256'),
+    /** 当前最终内容哈希；删除文件时为 null */
+    finalSha256: text('final_sha256'),
+    createdAt: text('created_at')
+      .default(sql`(datetime('now', 'localtime'))`)
+      .notNull(),
+    updatedAt: text('updated_at')
+      .default(sql`(datetime('now', 'localtime'))`)
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex('uq_file_change_snapshots_pair_file').on(table.pairId, table.filePath),
+    index('idx_file_change_snapshots_thread_id').on(table.threadId),
+    index('idx_file_change_snapshots_pair_id').on(table.pairId),
+    index('idx_file_change_snapshots_call_id').on(table.callId),
+  ],
+)
+
+export const messageAttachments = sqliteTable(
+  'message_attachments',
+  {
+    id: text('id').primaryKey(),
+    threadId: text('thread_id').notNull(),
+    messageId: integer('message_id'),
+    kind: text('kind').notNull(),
+    originalName: text('original_name').notNull(),
+    mimeType: text('mime_type').notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    sha256: text('sha256').notNull(),
+    storageKey: text('storage_key').notNull(),
+    contextPolicy: text('context_policy').notNull().default('once'),
+    status: text('status').notNull().default('uploaded'),
+    extractedText: text('extracted_text'),
+    tokenEstimate: integer('token_estimate'),
+    metadataJson: text('metadata_json').notNull().default('{}'),
+    createdAt: text('created_at').default(sql`(datetime('now', 'localtime'))`),
+    boundAt: text('bound_at'),
+    deletedAt: text('deleted_at'),
+  },
+  (table) => [
+    index('idx_message_attachments_message_id').on(table.messageId),
+    index('idx_message_attachments_thread_id').on(table.threadId),
+    index('idx_message_attachments_status').on(table.status),
+  ],
+)
+
+/**
  * Thread 摘要表 — 滚动摘要
  *
  * @deprecated 已废弃（2026-08-05 决策）。超出上下文窗口的早期消息由长记忆系统兜底，
  * 不再生成滚动摘要。保留 schema 仅为兼容已有数据库迁移，运行时不再读写。
- * 决策详见 .aios/03-context-runtime.md 第 0 节。
+ * 决策详见 .docs/archived/03-context-runtime.md 第 0 节。
  */
 export const threadSummaries = sqliteTable(
   'thread_summaries',
@@ -260,10 +463,12 @@ export const petStates = sqliteTable(
     agentId: text('agent_id').notNull().default('pero'),
     mood: text('mood').default('开心'),
     vibe: text('vibe').default('活泼'),
-    mind: text('mind').default('正在想主人...'),
+    mind: text('mind').default('正在发呆...'),
     clickMessagesJson: text('click_messages_json').default('{}'),
     idleMessagesJson: text('idle_messages_json').default('[]'),
     backMessagesJson: text('back_messages_json').default('[]'),
+    /** finish_task 追加的临时台词过期时间；为空表示没有有效临时台词。 */
+    textExpiresAt: text('text_expires_at'),
     updatedAt: text('updated_at').default(sql`(datetime('now', 'localtime'))`),
   },
   (table) => [index('idx_pet_states_agent_id').on(table.agentId)],
@@ -284,11 +489,13 @@ export const aiModelConfigs = sqliteTable(
     providerType: text('provider_type').default('global'),
     apiKey: text('api_key'),
     apiBase: text('api_base'),
-    temperature: real('temperature').default(0.7),
+    temperature: real('temperature'),
     topP: real('top_p'),
     maxTokens: integer('max_tokens'),
+    reasoningEffort: text('reasoning_effort'),
     stream: integer('stream', { mode: 'boolean' }).default(true),
     enableVision: integer('enable_vision', { mode: 'boolean' }).default(false),
+    enableAudioInput: integer('enable_audio_input', { mode: 'boolean' }).default(false),
     enableVoice: integer('enable_voice', { mode: 'boolean' }).default(false),
     enableVideo: integer('enable_video', { mode: 'boolean' }).default(false),
     createdAt: text('created_at').default(sql`(datetime('now', 'localtime'))`),
@@ -339,11 +546,14 @@ export const groupChatMessages = sqliteTable(
     role: text('role').notNull(),
     timestamp: text('timestamp').default(sql`(datetime('now', 'localtime'))`),
     mentionsJson: text('mentions_json').default('[]'),
+    /** pairId：用户本轮发言与其全部 Agent/system 回复共享同一关联键。 */
+    pairId: text('pair_id'),
     updatedAt: text('updated_at').default(sql`(datetime('now', 'localtime'))`),
   },
   (table) => [
     index('idx_group_chat_messages_room_id').on(table.roomId),
     index('idx_group_chat_messages_sender_id').on(table.senderId),
+    index('idx_group_chat_messages_pair_id').on(table.pairId),
   ],
 )
 
@@ -414,6 +624,8 @@ export const socialMessages = sqliteTable(
     msgId: text('msg_id').notNull(),
     /** 平台名称 (qq / discord / ...) */
     platform: text('platform').notNull().default('qq'),
+    /** 平台账号 ID（多账号同步与去重使用） */
+    accountId: text('account_id').notNull().default(''),
     /** 会话 ID (群号 / 用户 QQ 号) */
     channelId: text('channel_id').notNull(),
     /** 会话类型 */
@@ -438,6 +650,82 @@ export const socialMessages = sqliteTable(
     index('idx_social_messages_agent').on(table.agentId),
     index('idx_social_messages_timestamp').on(table.timestamp),
     index('idx_social_messages_unsummarized').on(table.isSummarized, table.agentId),
+    uniqueIndex('idx_social_messages_platform_message').on(
+      table.agentId,
+      table.platform,
+      table.accountId,
+      table.msgId,
+    ),
+  ],
+)
+
+export const socialContactImpressions = sqliteTable(
+  'social_contact_impressions',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    agentId: text('agent_id').notNull(),
+    platform: text('platform').notNull().default('qq'),
+    userId: text('user_id').notNull(),
+    displayName: text('display_name').default('').notNull(),
+    identity: text('identity').default('').notNull(),
+    impression: text('impression').notNull(),
+    sourceChannelId: text('source_channel_id'),
+    updatedAt: text('updated_at')
+      .default(sql`(datetime('now', 'localtime'))`)
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex('idx_social_contact_impressions_scope').on(
+      table.agentId,
+      table.platform,
+      table.userId,
+    ),
+    index('idx_social_contact_impressions_user').on(table.userId),
+  ],
+)
+
+export const socialHistoryTombstones = sqliteTable(
+  'social_history_tombstones',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    agentId: text('agent_id').notNull(),
+    platform: text('platform').notNull(),
+    accountId: text('account_id').notNull().default(''),
+    channelType: text('channel_type').notNull().default('*'),
+    channelId: text('channel_id').notNull().default('*'),
+    deletedBefore: integer('deleted_before').notNull(),
+    createdAt: text('created_at')
+      .default(sql`(datetime('now', 'localtime'))`)
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex('idx_social_history_tombstone_scope').on(
+      table.agentId,
+      table.platform,
+      table.accountId,
+      table.channelType,
+      table.channelId,
+    ),
+  ],
+)
+
+export const socialSyncCursors = sqliteTable(
+  'social_sync_cursors',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    agentId: text('agent_id').notNull(),
+    platform: text('platform').notNull(),
+    accountId: text('account_id').notNull(),
+    lastSuccessfulSyncAt: integer('last_successful_sync_at').notNull().default(0),
+    syncStartedAt: integer('sync_started_at'),
+    status: text('status').notNull().default('idle'),
+    lastError: text('last_error'),
+    updatedAt: text('updated_at')
+      .default(sql`(datetime('now', 'localtime'))`)
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex('idx_social_sync_cursor_scope').on(table.agentId, table.platform, table.accountId),
   ],
 )
 
@@ -631,7 +919,7 @@ export const memoryCandidates = sqliteTable(
  *
  * 节点离线时 status 标记为 offline，能力变为 unavailable。
  *
- * 设计见 .aios/10-node-architecture.md §3
+ * 设计见 .docs/archived/10-node-architecture.md §3
  */
 export const nodeCapabilityRegistrations = sqliteTable(
   'node_capability_registrations',
@@ -663,7 +951,7 @@ export const nodeCapabilityRegistrations = sqliteTable(
  * 替代"全局活跃 Agent"对外部消息的决定作用。
  * 外部消息（QQ/Discord/Webhook）进来时查此表，找到归属 Agent 和 channel。
  *
- * 设计见 .aios/10-node-architecture.md §7
+ * 设计见 .docs/archived/10-node-architecture.md §7
  */
 export const inboundRoutes = sqliteTable(
   'inbound_routes',
@@ -704,25 +992,22 @@ export const inboundRoutes = sqliteTable(
  * 记录所有已安装的 Agent 应用（官方自带 + 社区应用）。
  * 安装时扫描应用目录，读取 app.manifest.json，注册到此表。
  */
-export const appRegistry = sqliteTable(
-  'app_registry',
-  {
-    /** 应用 ID（主键，如 'coding' / 'research'） */
-    appId: text('app_id').primaryKey(),
-    /** 显示名称 */
-    name: text('name').notNull(),
-    /** 版本号 */
-    version: text('version').notNull(),
-    /** 应用文件目录（绝对路径） */
-    installPath: text('install_path').notNull(),
-    /** 完整 Manifest 的 JSON 序列化 */
-    manifestJson: text('manifest_json').notNull(),
-    /** 安装时间 */
-    installedAt: text('installed_at').default(sql`(datetime('now', 'localtime'))`),
-    /** 更新时间 */
-    updatedAt: text('updated_at').default(sql`(datetime('now', 'localtime'))`),
-  },
-)
+export const appRegistry = sqliteTable('app_registry', {
+  /** 应用 ID（主键，如 'coding' / 'research'） */
+  appId: text('app_id').primaryKey(),
+  /** 显示名称 */
+  name: text('name').notNull(),
+  /** 版本号 */
+  version: text('version').notNull(),
+  /** 应用文件目录（绝对路径） */
+  installPath: text('install_path').notNull(),
+  /** 完整 Manifest 的 JSON 序列化 */
+  manifestJson: text('manifest_json').notNull(),
+  /** 安装时间 */
+  installedAt: text('installed_at').default(sql`(datetime('now', 'localtime'))`),
+  /** 更新时间 */
+  updatedAt: text('updated_at').default(sql`(datetime('now', 'localtime'))`),
+})
 
 /**
  * 应用实例表
@@ -766,28 +1051,72 @@ export const appInstances = sqliteTable(
  * 每个实例最新检查点（一对一）。
  * 主 Agent 通过此表读取应用任务状态，不需要读取应用内部的所有消息。
  */
-export const appCheckpoints = sqliteTable(
-  'app_checkpoints',
+export const appCheckpoints = sqliteTable('app_checkpoints', {
+  /** 实例 ID（主键，与 app_instances 一对一） */
+  instanceId: text('instance_id').primaryKey(),
+  /** 任务状态：running/waiting/completed/failed */
+  status: text('status').notNull(),
+  /** 摘要（人类可读） */
+  summary: text('summary').notNull(),
+  /** 完成进度（0-1） */
+  progress: real('progress').default(0),
+  /** 检查点字段（JSON，按 Manifest.checkpointSchema） */
+  fieldsJson: text('fields_json').notNull(),
+  /** 修改的产出物列表（JSON 数组） */
+  changedArtifactsJson: text('changed_artifacts_json'),
+  /** 阻塞问题（JSON 数组） */
+  blockersJson: text('blockers_json'),
+  /** 下一步行动（JSON 数组） */
+  nextActionsJson: text('next_actions_json'),
+  /** 更新时间 */
+  updatedAt: text('updated_at').default(sql`(datetime('now', 'localtime'))`),
+})
+
+export const toolApprovalRequests = sqliteTable(
+  'tool_approval_requests',
   {
-    /** 实例 ID（主键，与 app_instances 一对一） */
-    instanceId: text('instance_id').primaryKey(),
-    /** 任务状态：running/waiting/completed/failed */
+    id: text('id').primaryKey(),
+    agentId: text('agent_id').notNull(),
+    channel: text('channel').notNull(),
+    sessionId: text('session_id').notNull(),
+    threadId: text('thread_id').notNull(),
+    taskId: text('task_id'),
+    toolName: text('tool_name').notNull(),
+    argsSummaryJson: text('args_summary_json').notNull(),
+    argsFingerprint: text('args_fingerprint').notNull(),
+    reason: text('reason').notNull(),
     status: text('status').notNull(),
-    /** 摘要（人类可读） */
-    summary: text('summary').notNull(),
-    /** 完成进度（0-1） */
-    progress: real('progress').default(0),
-    /** 检查点字段（JSON，按 Manifest.checkpointSchema） */
-    fieldsJson: text('fields_json').notNull(),
-    /** 修改的产出物列表（JSON 数组） */
-    changedArtifactsJson: text('changed_artifacts_json'),
-    /** 阻塞问题（JSON 数组） */
-    blockersJson: text('blockers_json'),
-    /** 下一步行动（JSON 数组） */
-    nextActionsJson: text('next_actions_json'),
-    /** 更新时间 */
-    updatedAt: text('updated_at').default(sql`(datetime('now', 'localtime'))`),
+    decision: text('decision'),
+    /** 用户决策附言（告知 Agent 同意/拒绝的理由，可选） */
+    resolutionMessage: text('resolution_message'),
+    createdAt: text('created_at').notNull(),
+    expiresAt: text('expires_at').notNull(),
+    resolvedAt: text('resolved_at'),
   },
+  (table) => [
+    index('idx_tool_approval_status').on(table.status, table.expiresAt),
+    index('idx_tool_approval_session').on(table.sessionId, table.toolName),
+    index('idx_tool_approval_agent').on(table.agentId, table.toolName),
+  ],
+)
+
+/** 工具审批审计事件只追加、不更新，用于追踪完整授权生命周期。 */
+export const toolApprovalAuditLogs = sqliteTable(
+  'tool_approval_audit_logs',
+  {
+    id: text('id').primaryKey(),
+    approvalId: text('approval_id'),
+    event: text('event').notNull(),
+    agentId: text('agent_id').notNull(),
+    sessionId: text('session_id').notNull(),
+    toolName: text('tool_name').notNull(),
+    detailJson: text('detail_json').default('{}').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [
+    index('idx_tool_approval_audit_approval').on(table.approvalId),
+    index('idx_tool_approval_audit_session').on(table.sessionId, table.createdAt),
+  ],
 )
 
 /**

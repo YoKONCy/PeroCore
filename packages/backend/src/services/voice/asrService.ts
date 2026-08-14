@@ -40,6 +40,8 @@ export interface AsrResult {
 
 /** ASR 配置 (模型无关，仅需 API 地址/Key/模型名) */
 export interface AsrConfig {
+  /** 是否启用 ASR */
+  enabled: boolean
   /** API 基址 (OpenAI 兼容的 /audio/transcriptions) */
   apiBase: string
   /** API 密钥 */
@@ -53,6 +55,7 @@ export interface AsrConfig {
 // ── 默认配置 ──
 
 const DEFAULT_CONFIG: AsrConfig = {
+  enabled: false,
   apiBase: 'https://api.openai.com/v1',
   apiKey: '',
   language: 'zh',
@@ -71,7 +74,7 @@ export class AsrService {
 
   /** 返回当前 ASR 配置是否有效可用 */
   get isAvailable(): boolean {
-    return !!this.config.apiKey
+    return this.config.enabled && !!this.config.apiKey
   }
 
   /** 更新配置 */

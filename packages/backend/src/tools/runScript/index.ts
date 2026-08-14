@@ -29,6 +29,7 @@
  */
 
 import type { BuiltinTool } from '../index'
+import type { ToolExecutionResult } from '../../services/agent/reactLoop'
 import { executeNit } from '../../nit'
 import { createLogger } from '../../lib/logger'
 import { getWorkspaceService } from '../workspaceServiceHolder'
@@ -45,7 +46,7 @@ export const runScriptTool: BuiltinTool = {
   async execute(args, ctx) {
     const code = args.code as string
     if (!code?.trim()) {
-      return JSON.stringify({ error: '脚本内容为空' })
+      throw new Error('脚本内容为空')
     }
 
     // AIOS(Phase4): 按 channel 分级计算 cwd（同 terminalExecutor 逻辑）
@@ -70,19 +71,12 @@ export const runScriptTool: BuiltinTool = {
     if (cwd) {
       const capabilityGate = getCapabilityGate()
       if (capabilityGate) {
-        const allowed = capabilityGate.isPathAllowed(
-          ctx.agentId,
-          ctx.channel,
-          'run_script',
-          cwd,
-        )
+        const allowed = capabilityGate.isPathAllowed(ctx.agentId, ctx.channel, 'run_script', cwd)
         if (!allowed) {
           logger.warn(
             `run_script cwd 被 ResourceScope 拒绝: cwd=${cwd} (agent=${ctx.agentId}, channel=${ctx.channel})`,
           )
-          return JSON.stringify({
-            error: `脚本工作目录被资源范围策略拒绝: ${cwd}`,
-          })
+          throw new Error(`脚本工作目录被资源范围策略拒绝: ${cwd}`)
         }
       }
     }
@@ -102,8 +96,13 @@ export const runScriptTool: BuiltinTool = {
         const result = await runScriptTool._toolExecutor!(name, toolArgs, ctx.source, {
           threadId: ctx.threadId,
           channel: ctx.channel,
+          agentId: ctx.agentId,
+          sessionId: ctx.sessionId,
         })
-        return result
+        if (result.isError) {
+          throw new Error(result.output)
+        }
+        return result.output
       })
 
       const timeoutPromise = new Promise<never>((_, reject) => {
@@ -132,7 +131,7 @@ export const runScriptTool: BuiltinTool = {
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err)
       logger.error(`NIT 脚本执行失败: ${errMsg}`)
-      return JSON.stringify({ error: errMsg })
+      throw new Error(`NIT 脚本执行失败: ${errMsg}`)
     }
   },
 
@@ -148,8 +147,13 @@ export const runScriptTool: BuiltinTool = {
         name: string,
         args: Record<string, unknown>,
         source: string,
-        runtimeContext?: { threadId?: string; channel?: string },
-      ) => Promise<string>)
+        runtimeContext?: {
+          threadId?: string
+          channel?: string
+          agentId?: string
+          sessionId?: string
+        },
+      ) => Promise<ToolExecutionResult>)
     | null,
 
   /**
@@ -162,8 +166,13 @@ export const runScriptTool: BuiltinTool = {
       name: string,
       args: Record<string, unknown>,
       source: string,
-      runtimeContext?: { threadId?: string; channel?: string },
-    ) => Promise<string>,
+      runtimeContext?: {
+        threadId?: string
+        channel?: string
+        agentId?: string
+        sessionId?: string
+      },
+    ) => Promise<ToolExecutionResult>,
   ) {
     runScriptTool._toolExecutor = executor
   },

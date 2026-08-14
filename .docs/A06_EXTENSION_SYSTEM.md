@@ -7,7 +7,7 @@
 
 ## 1. 扩展分类
 
-PeroCore 扩展分为三种类型：
+infOS 扩展分为三种类型：
 
 | 类型 | 说明 | 实现方式 |
 |---|---|---|
@@ -69,7 +69,7 @@ dependsOnSkills:
 
 Agent 调用 `load_skill` 时可传入 `params` 参数：
 ```json
-{ "skill_id": "weekly_report", "params": { "project_name": "PeroCore", "date_range": "2026-04-20~2026-04-26" } }
+{ "skill_id": "weekly_report", "params": { "project_name": "infOS", "date_range": "2026-04-20~2026-04-26" } }
 ```
 SkillLoader 会将 SKILL.md body 中的 `{{project_name}}` 替换为实际值。
 
@@ -122,6 +122,15 @@ interface ExtensionTool {
 - `filesystem`: 读写权限范围（限 `@data/workspace/`）。
 - `vision`: 访问屏捕内容。
 
+## 7. AIOS 权限与运行时边界
+
+扩展、Skill 与 Tool 是 Tool Capability 的受控资源，完整模型见 [A09_AIOS_ARCHITECTURE](./A09_AIOS_ARCHITECTURE.md#6-workspace-与-tool-capability)。
+
+- 能力解析维度是 `(agentId, channel)`，不是全局 mode；未知或未配置 channel 必须 fail-closed。
+- 工具描述注入和实际 Handler 执行必须复用同一 CapabilityGate 判定；`run_script`、平台能力和扩展快捷路径均不得绕过门控。
+- 文件权限必须以资源根和 containment 为单位配置，默认仅限 Principal/App Workspace，禁止把安装目录、Workshop 目录或 Runtime Data Space 当作通用可写目录。
+- AgentApplication/SubAgent 是未来应用层：其工具权限为应用白名单与子任务 scope 的交集，记忆通过 Checkpoint 交给宿主 Agent 的 MemoryGate，而非直接写入主记忆。
+
 ---
 
-*本文档由 Carola 整理，适用于 PeroCore-TS 扩展系统规范。*
+*本文档由 Carola 整理，适用于 infOS-TS 扩展系统规范。*
