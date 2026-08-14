@@ -625,6 +625,14 @@ onBeforeUnmount(() => {
                 />
               </button>
               <div v-if="isApprovalQueueExpanded" class="approval-queue__body">
+                <button
+                  class="approval-queue__collapse"
+                  title="收起待审批队列"
+                  @click="isApprovalQueueExpanded = false"
+                >
+                  <PixelIcon name="chevron-up" size="xs" />
+                  收起待审批队列
+                </button>
                 <ApprovalCard
                   v-for="request in pendingApprovals"
                   :key="request.id"
@@ -1401,7 +1409,31 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 8px;
   overflow-y: auto;
-  padding: 0 8px 8px;
+  padding: 8px;
+}
+.approval-queue__collapse {
+  display: flex;
+  width: 100%;
+  min-height: 28px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px solid color-mix(in srgb, var(--ui-warning) 32%, var(--ui-border-default));
+  border-radius: var(--ui-radius-sm);
+  background: color-mix(in srgb, var(--ui-bg-surface) 72%, var(--ui-warning-soft));
+  color: var(--ui-warning);
+  font: 700 9px var(--ui-font-mono);
+  letter-spacing: 0.03em;
+  cursor: pointer;
+}
+.approval-queue__collapse:hover {
+  border-color: var(--ui-warning);
+  background: var(--ui-warning-soft);
+}
+.approval-queue__collapse:focus-visible {
+  outline: 2px solid var(--ui-accent-primary);
+  outline-offset: 2px;
 }
 .copilot-chat {
   min-height: 0;

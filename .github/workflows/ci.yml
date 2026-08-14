@@ -90,6 +90,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: 安装 WASM Rust target
+        run: rustup target add wasm32-unknown-unknown
+
       - name: 版本号同步
         run: pnpm version:sync
 

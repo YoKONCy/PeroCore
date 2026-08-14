@@ -1048,9 +1048,14 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
           <strong>私有临时心流</strong>
           <span>当前会话 · Agent 自维护</span>
         </div>
-        <button title="刷新心流" :disabled="flowLoading" @click="loadFlowState">
-          <PixelIcon name="refresh" size="xs" :animation="flowLoading ? 'spin' : undefined" />
-        </button>
+        <div class="flow-panel__actions">
+          <button title="刷新心流" :disabled="flowLoading" @click="loadFlowState">
+            <PixelIcon name="refresh" size="xs" :animation="flowLoading ? 'spin' : undefined" />
+          </button>
+          <button title="收起心流" @click="flowOpen = false">
+            <PixelIcon name="chevron-down" size="xs" />
+          </button>
+        </div>
       </header>
       <div v-if="flowLoading && !flowStates.length" class="flow-panel__empty">
         <PixelIcon name="refresh" size="xs" animation="spin" />
@@ -1574,15 +1579,33 @@ button {
   color: var(--ui-text-tertiary);
   font: 800 8px var(--ui-font-mono);
 }
-.flow-panel__head > button {
+.flow-panel__actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.flow-panel__actions > button {
   display: grid;
   width: 28px;
   height: 28px;
   place-items: center;
   border: 1px solid var(--ui-border-default);
+  border-radius: var(--ui-radius-sm);
   background: var(--ui-bg-surface);
   color: var(--ui-accent-purple);
   cursor: pointer;
+}
+.flow-panel__actions > button:hover:not(:disabled) {
+  border-color: var(--ui-accent-purple);
+  background: var(--ui-accent-purple-soft);
+}
+.flow-panel__actions > button:focus-visible {
+  outline: 2px solid var(--ui-accent-primary);
+  outline-offset: 2px;
+}
+.flow-panel__actions > button:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 .flow-panel__empty {
   display: flex;
