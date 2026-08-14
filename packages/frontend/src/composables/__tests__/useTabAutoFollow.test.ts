@@ -1,9 +1,9 @@
-/* @vitest-environment jsdom */
+/* @vitest-environment happy-dom */
 
 /**
  * useTabAutoFollow 单元测试
  *
- * jsdom 不提供真实布局，scrollHeight / clientHeight 恒为 0，
+ * happy-dom 不提供真实布局，scrollHeight / clientHeight 恒为 0，
  * 这里通过 Object.defineProperty 注入假布局值以驱动跟随状态判定。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'

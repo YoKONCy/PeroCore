@@ -561,7 +561,7 @@ describe('ContextCompiler 上下文拼装链路', () => {
         loadedMessageCount: 3,
         hasMemoryRetrieval: true,
         hasStateInjection: true,
-        toolCount: 6,
+        toolCount: 8,
       })
     })
   })
@@ -998,8 +998,8 @@ describe('ContextCompiler 上下文拼装链路', () => {
 
       const result = await compiler.compile('t7', 'pero')
 
-      // fail-closed：无业务工具可用，但心流等系统协议工具必须保留。
-      expect(result.manifest.toolCount).toBe(3)
+      // fail-closed：无业务工具可用，但 5 个系统协议工具必须保留。
+      expect(result.manifest.toolCount).toBe(5)
       const systemContent = result.messages[0]!.content
       expect(systemContent).not.toContain('<Available_Tools>')
       expect(systemContent).not.toContain('read_file')
@@ -1060,10 +1060,10 @@ describe('ContextCompiler 上下文拼装链路', () => {
 
       // 工具定义经原生 tools 字段注入（不再出现在 System Prompt 文本，与场景 1 一致），
       // 能力差异通过 manifest.toolCount 与下方 CapabilityGate 断言体现
-      expect(resultPero.manifest.toolCount).toBe(6)
+      expect(resultPero.manifest.toolCount).toBe(8)
       expect(resultPero.messages[0]!.content).not.toContain('<Available_Tools>')
 
-      // nana：2 个业务工具 + 2 个系统协议工具，无危险工具
+      // nana：1 个普通业务工具 + finish_task（与系统协议集合重合）+ 其余 4 个系统协议工具
       const depsNana = createMockDeps({
         thread: { id: 't8b', agentId: 'nana', channel: 'desktop' },
         messages: [{ role: 'user', content: '帮我执行命令' }],
@@ -1072,7 +1072,7 @@ describe('ContextCompiler 上下文拼装链路', () => {
       const compilerNana = createCompiler(env, depsNana)
       const resultNana = await compilerNana.compile('t8b', 'nana')
 
-      expect(resultNana.manifest.toolCount).toBe(4)
+      expect(resultNana.manifest.toolCount).toBe(6)
       expect(resultNana.messages[0]!.content).not.toContain('<Available_Tools>')
     })
 

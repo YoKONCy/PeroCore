@@ -86,7 +86,7 @@ describe('AgentService', () => {
       messages: [{ role: 'user', content: '你好' }],
     })
 
-    expect(deps.getToolDefinitions).toHaveBeenCalledWith('nana', 'group', undefined)
+    expect(deps.getToolDefinitions).toHaveBeenCalledWith('nana', 'group', undefined, undefined)
   })
 
   it('应当支持流式输出并在 finish_task 后广播结束事件', async () => {
@@ -204,8 +204,18 @@ describe('AgentService', () => {
       expect(event).toBeDefined()
     }
 
-    expect(nonStreamDeps.getToolDefinitions).toHaveBeenCalledWith('nana', 'desktop', ['write_file'])
-    expect(streamDeps.getToolDefinitions).toHaveBeenCalledWith('nana', 'desktop', ['write_file'])
+    expect(nonStreamDeps.getToolDefinitions).toHaveBeenCalledWith(
+      'nana',
+      'desktop',
+      ['write_file'],
+      undefined,
+    )
+    expect(streamDeps.getToolDefinitions).toHaveBeenCalledWith(
+      'nana',
+      'desktop',
+      ['write_file'],
+      undefined,
+    )
     expect(nonStreamDeps.llmService.chatStream).toHaveBeenCalledWith(
       modelConfig,
       expect.any(Array),

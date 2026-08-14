@@ -137,7 +137,7 @@ describe('SocialBridge', () => {
       }
     ).executeReply(session, messages)
     const provider = bridge.createMessagingProvider()!
-    await provider.sendMessage('group-2', '工具消息', 'group')
+    await provider.sendMessage('pero', 'group-2', '工具消息', 'group')
     await provider.notifyOwner('提醒主人', 'high')
 
     // 方案 B 迁移后：SocialBridge 不再调用 agentService.chat，
@@ -363,10 +363,15 @@ describe('SocialScheduler', () => {
     const { scheduler, deps } = createScheduler([session])
     ;(
       scheduler as unknown as {
-        config: { nightSilenceStart: number; nightSilenceEnd: number }
+        config: {
+          nightSilenceEnabled: boolean
+          nightSilenceStart: number
+          nightSilenceEnd: number
+        }
         nextGroupThoughtTime: number
       }
     ).config = {
+      nightSilenceEnabled: true,
       nightSilenceStart: 0,
       nightSilenceEnd: 23,
     }

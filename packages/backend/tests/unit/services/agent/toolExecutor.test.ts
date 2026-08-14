@@ -53,6 +53,7 @@ describe('RegistryToolExecutor', () => {
       'desktop',
       'demo.run',
       'session-1',
+      undefined,
     )
     expect(handler).not.toHaveBeenCalled()
     expect(result).toMatchObject({ isError: true, shouldTerminate: false })
