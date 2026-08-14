@@ -221,6 +221,23 @@ PeroperoChat 不仅仅是一个桌宠应用，它是 **Pero** 的"灵魂容器"�
 - **🗂️ 存档与创意工坊**：角色、模型、扩展都能通过 Steam 云存档和创意工坊保存、订阅、分享，来源分成「官方 / 工坊 / 本地」三档，装上即用，换设备也不丢。
 - **🎨 Pixel + Glass 设计语言**：像素风图标 + 毛玻璃质感，再配柔和的阴影和微动效，看起来轻盈又有呼吸感。整套界面由自研组件库（PButton、PCard、PModal 等）统一风格。
 
+<div align="center">
+  <table>
+    <tr>
+      <td align="center" width="50%">
+        <img src=".github/assets/dark.png" alt="infOS 深色主题应用体验" />
+      </td>
+      <td align="center" width="50%">
+        <img src=".github/assets/light.png" alt="infOS 浅色主题应用体验" />
+      </td>
+    </tr>
+    <tr>
+      <td align="center"><sub>深色主题 · PeroperoChat 工作台</sub></td>
+      <td align="center"><sub>浅色主题 · Agent 角色管理</sub></td>
+    </tr>
+  </table>
+</div>
+
 ### 🧰 内核能力（infOS）
 
 > 面向开发者——这是引擎底层"凭什么能做到"的部分，术语会多一些，但都配了白话解释。
