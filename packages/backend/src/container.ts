@@ -416,30 +416,10 @@ export async function createAppContext(config: AppConfig): Promise<AppContext> {
   const vectorSyncRepo = new VectorSyncRepository(db)
   // AIOS: logRepo 实例化已移除（ConversationLogRepository 废弃）
   const configRepo = new ConfigRepository(db)
-  const storeRegistry = new MemoryStoreRegistry(pathResolver)
-  const vectorRepo = new VectorRepository(storeRegistry)
-  const mcpRepo = new McpConfigRepository(db)
-  // AIOS: Thread 仓储（替代旧 Session 持久层）
-  const threadRepo = new ThreadRepository(db)
-  const flowStateRepo = new FlowStateRepository(db)
-  const fileSnapshotRepo = new FileSnapshotRepository(db)
-  const workspaceCheckpointService = new WorkspaceCheckpointService(
-    fileSnapshotRepo,
-    workspaceService,
-  )
-  setWorkspaceCheckpointService(workspaceCheckpointService)
-  setWorkspaceProductivityCheckpointService(workspaceCheckpointService)
-  const attachmentRepo = new AttachmentRepository(db)
-  // 第五阶段长记忆 Repositories（canonical_memories + memory_candidates 表）
-  const canonicalMemoryRepo = new CanonicalMemoryRepository(db)
-  const memoryCandidateRepo = new MemoryCandidateRepository(db)
-
-  // M05: 统一任务中心 Repository（background_tasks 持久实体）
-  const backgroundTaskRepo = new BackgroundTaskRepository(db)
-
-  // ── 4. Shared 工具 ──
 
   // Embedding/Reranker: 优先从 DB (Dashboard 配置) 读取, fallback 到环境变量默认值
+  // 必须在 StoreRegistry 之前解析：向量库维度需与 embedding 配置联动，
+  // 否则更换 embedding 模型（维度≠默认 1536）会导致向量写入/检索维度不匹配。
   const dbEmbeddingApiBase = await configRepo.get('embedding.apiBase')
   const dbEmbeddingApiKey = await configRepo.get('embedding.apiKey')
   const dbEmbeddingModel = await configRepo.get('embedding.model')
@@ -464,6 +444,29 @@ export async function createAppContext(config: AppConfig): Promise<AppContext> {
   logger.info(
     `Embedding 配置: model=${embeddingConfig.model}, dim=${embeddingConfig.dimension} (来源: ${dbEmbeddingModel ? 'DB' : 'ENV'})`,
   )
+
+  const storeRegistry = new MemoryStoreRegistry(pathResolver, embeddingConfig.dimension)
+  const vectorRepo = new VectorRepository(storeRegistry)
+  const mcpRepo = new McpConfigRepository(db)
+  // AIOS: Thread 仓储（替代旧 Session 持久层）
+  const threadRepo = new ThreadRepository(db)
+  const flowStateRepo = new FlowStateRepository(db)
+  const fileSnapshotRepo = new FileSnapshotRepository(db)
+  const workspaceCheckpointService = new WorkspaceCheckpointService(
+    fileSnapshotRepo,
+    workspaceService,
+  )
+  setWorkspaceCheckpointService(workspaceCheckpointService)
+  setWorkspaceProductivityCheckpointService(workspaceCheckpointService)
+  const attachmentRepo = new AttachmentRepository(db)
+  // 第五阶段长记忆 Repositories（canonical_memories + memory_candidates 表）
+  const canonicalMemoryRepo = new CanonicalMemoryRepository(db)
+  const memoryCandidateRepo = new MemoryCandidateRepository(db)
+
+  // M05: 统一任务中心 Repository（background_tasks 持久实体）
+  const backgroundTaskRepo = new BackgroundTaskRepository(db)
+
+  // ── 4. Shared 工具 ──
 
   const embeddingService = new EmbeddingService(embeddingConfig)
   const vectorWriteHelper = new VectorWriteHelper(vectorRepo, vectorSyncRepo, embeddingService)
