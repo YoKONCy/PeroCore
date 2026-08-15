@@ -38,6 +38,18 @@ const HIGH_RISK_COMMAND_PATTERNS = [
 
 const TERMINAL_TOOLS = new Set(['terminal_execute', 'terminal_create'])
 
+/**
+ * 本地执行器目前只能约束终端 cwd，不能在操作系统层隔离 Shell 对全盘文件的访问。
+ * 因此任意命令执行必须逐次审批，不能仅依赖命令文本审计或路径参数检查。
+ */
+export const ALWAYS_APPROVE_EACH_CALL_TOOLS = new Set([
+  'terminal_execute',
+  'terminal_create',
+  'terminal_write',
+  'open_application',
+  'activate_window',
+])
+
 /** 工具参数与审批策略引擎。 */
 export class PolicyEngine {
   evaluate(context: ToolPolicyContext): PolicyDecision {
@@ -107,6 +119,12 @@ export class PolicyEngine {
       HIGH_RISK_COMMAND_PATTERNS.some((pattern) => pattern.test(command))
     ) {
       return { action: 'require_approval', reason: '终端命令包含高风险或破坏性操作，需要用户确认' }
+    }
+    if (ALWAYS_APPROVE_EACH_CALL_TOOLS.has(context.toolName)) {
+      return {
+        action: 'require_approval',
+        reason: `工具 ${context.toolName} 可执行或注入任意系统命令，必须逐次由用户确认`,
+      }
     }
     if (context.permission?.requiresApproval) {
       return {

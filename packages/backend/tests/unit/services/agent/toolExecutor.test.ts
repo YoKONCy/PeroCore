@@ -176,6 +176,78 @@ describe('RegistryToolExecutor', () => {
     expect(approvals.get(request.id)?.status).toBe('consumed')
   })
 
+  it('敏感命令工具在审批运行时不可用时应失败关闭', async () => {
+    const registry = new ToolRegistry()
+    const handler = vi.fn().mockResolvedValue('不应执行')
+    registry.register(
+      { name: 'terminal_execute', description: '执行命令', parameters: { type: 'object' } },
+      handler,
+    )
+    const capabilityGate = {
+      isToolAllowed: vi.fn().mockReturnValue(true),
+      isPathAllowed: vi.fn().mockReturnValue(true),
+    } as unknown as CapabilityGate
+    const executor = new RegistryToolExecutor(registry, capabilityGate)
+
+    const result = await executor.execute(
+      'terminal_execute',
+      { command: 'move C:\\outside\\a.txt C:\\outside\\b.txt' },
+      'desktop',
+    )
+
+    expect(result.isError).toBe(true)
+    expect(result.output).toContain('APPROVAL_UNAVAILABLE')
+    expect(handler).not.toHaveBeenCalled()
+  })
+
+  it('终端命令即使曾被始终允许也必须逐次重新审批', async () => {
+    const registry = new ToolRegistry()
+    const handler = vi.fn().mockResolvedValue('命令完成')
+    registry.register(
+      { name: 'terminal_execute', description: '执行命令', parameters: { type: 'object' } },
+      handler,
+    )
+    const capabilityGate = {
+      isToolAllowed: vi.fn().mockReturnValue(true),
+      isPathAllowed: vi.fn().mockReturnValue(true),
+      getToolPermission: vi.fn().mockReturnValue({
+        toolName: 'terminal_execute',
+        resourceScope: {
+          scope: 'principal_workspace',
+          allowedRoots: ['C:/workspace'],
+          deniedPaths: [],
+        },
+        requiresApproval: false,
+      }),
+    } as unknown as CapabilityGate
+    const approvals = new ApprovalService()
+    const executor = new RegistryToolExecutor(registry, capabilityGate, null, null, {
+      agentId: 'pero',
+      channel: 'desktop',
+      sessionId: 'terminal-thread',
+    })
+    executor.setPolicyRuntime(new PolicyEngine(), approvals)
+    const args = { command: 'move C:\\outside\\a.txt C:\\outside\\b.txt' }
+
+    const firstExecution = executor.execute('terminal_execute', args, 'desktop')
+    await vi.waitFor(() => expect(approvals.list({ status: 'pending' })).toHaveLength(1))
+    expect(handler).not.toHaveBeenCalled()
+    approvals.resolve(approvals.list({ status: 'pending' })[0]!.id, 'allow_always')
+    expect((await firstExecution).isError).toBe(false)
+    expect(handler).toHaveBeenCalledWith(
+      args,
+      expect.objectContaining({ approvedSensitiveAction: true }),
+    )
+    expect(handler).toHaveBeenCalledTimes(1)
+
+    const secondExecution = executor.execute('terminal_execute', args, 'desktop')
+    await vi.waitFor(() => expect(approvals.list({ status: 'pending' })).toHaveLength(1))
+    expect(handler).toHaveBeenCalledTimes(1)
+    approvals.resolve(approvals.list({ status: 'pending' })[0]!.id, 'deny_once')
+    expect((await secondExecution).isError).toBe(true)
+    expect(handler).toHaveBeenCalledTimes(1)
+  })
+
   it('工作区外路径必须审批后才执行，并仅向本次工具上下文授予越界能力', async () => {
     const { registry, handler } = createRegistry()
     const capabilityGate = {

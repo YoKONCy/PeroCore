@@ -10,6 +10,7 @@ async function withSession(ctx: Parameters<BuiltinTool['execute']>[1]) {
 export const terminalCreateTool: BuiltinTool = {
   name: 'terminal_create',
   async execute(args, ctx) {
+    if (!ctx.approvedSensitiveAction) throw new Error('创建终端缺少本次用户审批凭证')
     const command = String(args.command ?? '').trim()
     if (!command) throw new Error('command 不能为空')
     const { runtime, session } = await withSession(ctx)
@@ -73,6 +74,7 @@ export const terminalWaitTool: BuiltinTool = {
 export const terminalWriteTool: BuiltinTool = {
   name: 'terminal_write',
   async execute(args, ctx) {
+    if (!ctx.approvedSensitiveAction) throw new Error('终端输入缺少本次用户审批凭证')
     const { runtime, session } = await withSession(ctx)
     runtime.terminals.write(String(args.terminal_id), session.id, String(args.data ?? ''))
     return toolSuccess('已写入终端')

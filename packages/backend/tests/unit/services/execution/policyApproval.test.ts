@@ -53,6 +53,19 @@ describe('PolicyEngine', () => {
     ).toMatchObject({ action: 'deny', code: 'PARAM_PATTERN_DENIED' })
   })
 
+  it('所有任意命令执行与终端输入工具都强制要求审批', () => {
+    const engine = new PolicyEngine()
+    for (const [toolName, args] of [
+      ['terminal_execute', { command: 'echo ok' }],
+      ['terminal_create', { command: 'pnpm dev' }],
+      ['terminal_write', { terminal_id: 'terminal-1', data: 'echo ok' }],
+    ] as const) {
+      expect(engine.evaluate({ ...base, toolName, args })).toMatchObject({
+        action: 'require_approval',
+      })
+    }
+  })
+
   it('高风险命令即使未显式配置也要求审批', () => {
     const engine = new PolicyEngine()
     const result = engine.evaluate({ ...base, args: { command: 'git reset --hard' } })

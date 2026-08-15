@@ -28,7 +28,7 @@ import type { SkillLoader } from '../../capabilities/skillLoader'
 import { isSystemProtocolTool } from '../../tools/systemProtocolTools'
 import { isStructuredToolResult } from '../execution/toolResult'
 import type { ApprovalService } from '../execution/approvalService'
-import type { PolicyEngine } from '../execution/policyEngine'
+import { ALWAYS_APPROVE_EACH_CALL_TOOLS, type PolicyEngine } from '../execution/policyEngine'
 import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('ToolExecutor')
@@ -370,12 +370,14 @@ export class RegistryToolExecutor implements ToolExecutor {
 
     // 参数与审批策略必须基于 Hook 修改后的最终参数执行。
     let approvalObservation: { decision: string; userMessage?: string } | undefined
+    let approvedSensitiveAction = false
     let approvedOutsideWorkspace = false
-    if (pathViolation && !this.policyEngine) {
+    const forceApprovalEachCall = pathViolation !== null || ALWAYS_APPROVE_EACH_CALL_TOOLS.has(name)
+    if (forceApprovalEachCall && !this.policyEngine) {
       return {
         output: JSON.stringify({
           code: 'APPROVAL_UNAVAILABLE',
-          message: '工作区外路径必须经过用户审批，但策略引擎当前不可用',
+          message: '该敏感工具调用必须经过用户审批，但策略引擎当前不可用',
         }),
         durationMs: Date.now() - startTime,
         isError: true,
@@ -446,7 +448,7 @@ export class RegistryToolExecutor implements ToolExecutor {
           args,
         })
         const authorization =
-          pathViolation && storedAuthorization === 'allow' ? 'none' : storedAuthorization
+          forceApprovalEachCall && storedAuthorization === 'allow' ? 'none' : storedAuthorization
         if (authorization === 'deny') {
           // 若用户留过拒绝附言，把理由一并回传给 Agent，避免原样盲目重试。
           const userMessage = this.approvalService.findDeniedMessage({
@@ -509,6 +511,7 @@ export class RegistryToolExecutor implements ToolExecutor {
             decision: resolved.decision,
             userMessage: resolved.resolutionMessage,
           }
+          approvedSensitiveAction = ALWAYS_APPROVE_EACH_CALL_TOOLS.has(name)
           approvedOutsideWorkspace = pathViolation !== null
         }
       }
@@ -527,6 +530,7 @@ export class RegistryToolExecutor implements ToolExecutor {
         taskId: runtimeContext?.taskId,
         pairId: runtimeContext?.pairId,
         toolCallId: runtimeContext?.toolCallId,
+        ...(approvedSensitiveAction ? { approvedSensitiveAction: true } : {}),
         ...(approvedOutsideWorkspace ? { approvedOutsideWorkspace: true } : {}),
       }
 

@@ -54,6 +54,8 @@ export interface ToolContext {
   signal?: AbortSignal
   /** 后台任务 ID；普通对话为空。 */
   taskId?: string
+  /** 本次敏感调用已经用户逐次审批；不得跨调用持久化或复用。 */
+  approvedSensitiveAction?: boolean
   /** 本次调用已经用户审批，可访问 ResourceScope 外的路径；不得跨调用持久化。 */
   approvedOutsideWorkspace?: boolean
 }

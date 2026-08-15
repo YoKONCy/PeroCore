@@ -15,6 +15,7 @@ export const terminalExecutorTool: BuiltinTool = {
   name: 'terminal_execute',
 
   async execute(args, ctx) {
+    if (!ctx.approvedSensitiveAction) throw new Error('终端命令缺少本次用户审批凭证')
     const command = String(args.command ?? '').trim()
     if (!command) throw new Error('command 不能为空')
     const timeout = Math.max(100, Math.min(Number(args.timeout ?? DEFAULT_TIMEOUT_MS), 10 * 60_000))

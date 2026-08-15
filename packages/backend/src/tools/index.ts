@@ -66,6 +66,8 @@ export interface BuiltinTool {
       signal?: AbortSignal
       taskId?: string
       pairId?: string
+      /** 本次敏感调用已经用户逐次审批。 */
+      approvedSensitiveAction?: boolean
       /** 本次调用已获用户审批，可访问工作区外路径。 */
       approvedOutsideWorkspace?: boolean
     },
