@@ -45,21 +45,15 @@ exports.default = async function afterPack(context) {
   const appOutDir = context.appOutDir
   const resourcesDir = path.join(appOutDir, 'resources')
 
-  // 仅 portable 构建在 exe 同级生成标记；标准版与 Steam 版不生成。
+  // 所有桌面发行版都携带内置 Daemon；仅便携版在 exe 同级生成便携标记。
   if (process.env.INFOS_EDITION === 'portable') {
     await fs.writeFile(path.join(appOutDir, '.portable'), '')
-    await validatePortableRuntime(resourcesDir)
   } else {
     await removePath(path.join(appOutDir, '.portable'))
-    // 非便携版：内置 Daemon 自包含运行时无用（Daemon 独立部署），裁剪避免体积膨胀
-    await Promise.all([
-      removePath(path.join(resourcesDir, 'daemon')),
-      removePath(path.join(resourcesDir, 'node_modules')),
-      removePath(path.join(resourcesDir, 'bin')),
-      removePath(path.join(resourcesDir, 'backend', 'apps', 'social')),
-      removePath(path.join(resourcesDir, 'backend', 'backend', 'src', 'database', 'migrations')),
-    ])
   }
+
+  // 标准版、Steam 版和便携版都必须具备完整的自包含运行时。
+  await validatePortableRuntime(resourcesDir)
 
   if (process.env.INFOS_EDITION === 'steam') return
 
