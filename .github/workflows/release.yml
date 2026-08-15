@@ -56,7 +56,7 @@ jobs:
         run: pnpm build
 
       - name: 准备内置 Daemon 运行时
-        run: node scripts/build-daemon-bundle.mjs && node scripts/collect-daemon-deps.mjs
+        run: node scripts/build-daemon-bundle.mjs && node scripts/collect-daemon-deps.mjs && pnpm rebuild:daemon-native
 
       - name: 构建 Electron 标准版 (NSIS)
         run: pnpm exec electron-builder --config electron-builder.standard.yml --publish never
@@ -119,7 +119,7 @@ jobs:
         run: pnpm build
 
       - name: 准备内置 Daemon 运行时
-        run: node scripts/build-daemon-bundle.mjs && node scripts/collect-daemon-deps.mjs
+        run: node scripts/build-daemon-bundle.mjs && node scripts/collect-daemon-deps.mjs && pnpm rebuild:daemon-native
 
       - name: 构建 Electron 便携版
         run: pnpm exec electron-builder --config electron-builder.portable.yml --publish never
@@ -181,7 +181,7 @@ jobs:
         run: pnpm build
 
       - name: 准备内置 Daemon 运行时
-        run: node scripts/build-daemon-bundle.mjs && node scripts/collect-daemon-deps.mjs
+        run: node scripts/build-daemon-bundle.mjs && node scripts/collect-daemon-deps.mjs && pnpm rebuild:daemon-native
 
       - name: 构建 Electron Steam 版
         run: pnpm exec electron-builder --config electron-builder.steam.yml

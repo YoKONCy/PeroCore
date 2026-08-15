@@ -445,7 +445,8 @@ export class RegistryToolExecutor implements ToolExecutor {
           toolName: name,
           args,
         })
-        const authorization = pathViolation && storedAuthorization === 'allow' ? 'none' : storedAuthorization
+        const authorization =
+          pathViolation && storedAuthorization === 'allow' ? 'none' : storedAuthorization
         if (authorization === 'deny') {
           // 若用户留过拒绝附言，把理由一并回传给 Agent，避免原样盲目重试。
           const userMessage = this.approvalService.findDeniedMessage({

@@ -27,15 +27,34 @@ async function findFile(directory, predicate) {
 
 async function validatePortableRuntime(resourcesDir) {
   const platformArch = `${process.platform}-${process.arch}`
-  const rgPath = path.join(resourcesDir, 'bin', platformArch, process.platform === 'win32' ? 'rg.exe' : 'rg')
+  const rgPath = path.join(
+    resourcesDir,
+    'bin',
+    platformArch,
+    process.platform === 'win32' ? 'rg.exe' : 'rg',
+  )
   await assertFile(rgPath, '内置 ripgrep')
 
   const ptyDir = path.join(resourcesDir, 'node_modules', 'node-pty')
-  const native = await findFile(ptyDir, (file) => path.extname(file).toLowerCase() === '.node')
+  const native = await findFile(
+    ptyDir,
+    (file) => path.extname(file).toLowerCase() === '.node',
+  )
   if (!native) throw new Error(`发行产物 node-pty 缺少原生 .node: ${ptyDir}`)
+
+  const sqliteDir = path.join(resourcesDir, 'node_modules', 'better-sqlite3')
+  const sqliteNative = await findFile(
+    sqliteDir,
+    (file) => path.basename(file).toLowerCase() === 'better_sqlite3.node',
+  )
+  if (!sqliteNative) throw new Error(`发行产物 better-sqlite3 缺少原生模块: ${sqliteDir}`)
+
   if (process.platform === 'win32') {
     for (const name of ['conpty.dll', 'OpenConsole.exe']) {
-      const found = await findFile(ptyDir, (file) => path.basename(file).toLowerCase() === name.toLowerCase())
+      const found = await findFile(
+        ptyDir,
+        (file) => path.basename(file).toLowerCase() === name.toLowerCase(),
+      )
       if (!found) throw new Error(`发行产物 node-pty 缺少 ${name}: ${ptyDir}`)
     }
   }

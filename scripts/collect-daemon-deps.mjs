@@ -277,6 +277,25 @@ function main() {
   collectBundledRipgrep()
   validateNativeRuntime()
 
+  // electron-rebuild 需要目标 node_modules 的父目录存在依赖清单，
+  // 才能按 Electron ABI 重编译复制后的原生模块。
+  const nativeRuntimeManifest = {
+    private: true,
+    dependencies: Object.fromEntries(
+      ['better-sqlite3', 'node-pty'].map((name) => {
+        const manifest = JSON.parse(
+          fs.readFileSync(path.join(OUT_NODE_MODULES, name, 'package.json'), 'utf8'),
+        )
+        return [name, manifest.version]
+      }),
+    ),
+  }
+  fs.writeFileSync(
+    path.join(root, 'dist-daemon', 'package.json'),
+    JSON.stringify(nativeRuntimeManifest, null, 2),
+    'utf8',
+  )
+
   const count = fs
     .readdirSync(OUT_NODE_MODULES, { recursive: true, withFileTypes: true })
     .filter((entry) => entry.isFile()).length

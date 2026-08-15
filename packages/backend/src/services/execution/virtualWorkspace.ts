@@ -520,10 +520,11 @@ export class VirtualWorkspace {
     }
     const resolved = path.resolve(inputPath)
     let probe = resolved
-    while (true) {
+    let foundExistingParent = false
+    while (!foundExistingParent) {
       try {
         await realpath(probe)
-        return resolved
+        foundExistingParent = true
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
         const parent = path.dirname(probe)
@@ -531,6 +532,7 @@ export class VirtualWorkspace {
         probe = parent
       }
     }
+    return resolved
   }
 
   private async resolvePath(

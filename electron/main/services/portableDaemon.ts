@@ -116,6 +116,12 @@ export async function ensurePortableDaemon(): Promise<boolean> {
   logger.info('PortableDaemon', `  后端根:   ${backendRoot}`)
   logger.info('PortableDaemon', `  Workshop: ${workshopDirs.length} 个订阅目录`)
 
+  // Daemon 在窗口隐藏模式下运行，必须持久化 stdout/stderr，否则启动早期异常会完全丢失。
+  fs.mkdirSync(paths.logs, { recursive: true })
+  const daemonLogPath = path.join(paths.logs, 'daemon-bootstrap.log')
+  const daemonLog = fs.createWriteStream(daemonLogPath, { flags: 'a' })
+  daemonLog.write(`\n[${new Date().toISOString()}] 启动内置 Daemon\n`)
+
   daemonChild = spawn(process.execPath, [bundlePath], {
     env: {
       ...process.env,
@@ -130,15 +136,22 @@ export async function ensurePortableDaemon(): Promise<boolean> {
       PERO_WORKSHOP_DIRS: JSON.stringify(workshopDirs),
     },
     cwd: path.dirname(app.getPath('exe')),
-    stdio: 'ignore',
+    stdio: ['ignore', daemonLog, daemonLog],
     windowsHide: true,
   })
 
+  daemonLog.on('error', (err) => {
+    logger.warn('PortableDaemon', `Daemon 启动日志写入失败: ${err.message}`)
+  })
   daemonChild.on('error', (err) => {
     logger.error('PortableDaemon', `内置 Daemon 启动失败: ${err.message}`)
   })
   daemonChild.on('exit', (code, signal) => {
-    logger.warn('PortableDaemon', `内置 Daemon 退出: code=${code}, signal=${signal}`)
+    daemonLog.end()
+    logger.warn(
+      'PortableDaemon',
+      `内置 Daemon 退出: code=${code}, signal=${signal}；启动日志: ${daemonLogPath}`,
+    )
     daemonChild = null
   })
 

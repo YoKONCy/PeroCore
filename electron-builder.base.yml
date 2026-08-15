@@ -10,7 +10,8 @@ electronVersion: 40.2.1
 
 extraMetadata:
   main: main/index.js
-  dependencies: {}
+  dependencies:
+    electron-updater: 6.8.3
   optionalDependencies: {}
 
 directories:
@@ -22,6 +23,70 @@ files:
     to: .
     filter:
       - package.json
+  - from: node_modules/electron-updater
+    to: node_modules/electron-updater
+    filter:
+      - '**/*'
+  - from: node_modules/builder-util-runtime
+    to: node_modules/builder-util-runtime
+    filter:
+      - '**/*'
+  - from: node_modules/fs-extra
+    to: node_modules/fs-extra
+    filter:
+      - '**/*'
+  - from: node_modules/js-yaml
+    to: node_modules/js-yaml
+    filter:
+      - '**/*'
+  - from: node_modules/lazy-val
+    to: node_modules/lazy-val
+    filter:
+      - '**/*'
+  - from: node_modules/lodash.escaperegexp
+    to: node_modules/lodash.escaperegexp
+    filter:
+      - '**/*'
+  - from: node_modules/lodash.isequal
+    to: node_modules/lodash.isequal
+    filter:
+      - '**/*'
+  - from: node_modules/semver
+    to: node_modules/semver
+    filter:
+      - '**/*'
+  - from: node_modules/tiny-typed-emitter
+    to: node_modules/tiny-typed-emitter
+    filter:
+      - '**/*'
+  - from: node_modules/graceful-fs
+    to: node_modules/graceful-fs
+    filter:
+      - '**/*'
+  - from: node_modules/jsonfile
+    to: node_modules/jsonfile
+    filter:
+      - '**/*'
+  - from: node_modules/universalify
+    to: node_modules/universalify
+    filter:
+      - '**/*'
+  - from: node_modules/debug
+    to: node_modules/debug
+    filter:
+      - '**/*'
+  - from: node_modules/ms
+    to: node_modules/ms
+    filter:
+      - '**/*'
+  - from: node_modules/sax
+    to: node_modules/sax
+    filter:
+      - '**/*'
+  - from: node_modules/argparse
+    to: node_modules/argparse
+    filter:
+      - '**/*'
   - from: dist-electron/main
     to: main
     filter:
