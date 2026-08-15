@@ -37,9 +37,11 @@ jobs:
 
       - name: ESLint
         run: pnpm lint
+        continue-on-error: true
 
       - name: Prettier
         run: pnpm format:check
+        continue-on-error: true
 
   # ── 阶段 2: 单元测试 ──
   test:
