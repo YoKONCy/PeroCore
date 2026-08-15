@@ -8,6 +8,7 @@ import type {
 import type { ToolContext } from '../agent/toolRegistry'
 import type { LocalWorkspaceService } from '../workspace/workspaceService'
 import { createLogger } from '../../lib/logger'
+import { AppError } from '../../lib/appError'
 
 const logger = createLogger('WorkspaceCheckpoint')
 
@@ -78,7 +79,7 @@ export class WorkspaceCheckpointService {
       'write',
       context.channel ?? 'desktop',
     )
-    if (!check.allowed) throw new Error(check.reason ?? `文件路径不允许写入: ${filePath}`)
+    if (!check.allowed) throw new AppError('FORBIDDEN', { message: check.reason ?? `文件路径不允许写入: ${filePath}` })
     const resolved = check.resolvedPath
     const info = await stat(resolved).catch(() => null)
     if (!info) {
@@ -90,7 +91,7 @@ export class WorkspaceCheckpointService {
         originalSha256: undefined,
       }
     }
-    if (!info.isFile()) throw new Error(`快照目标不是普通文件: ${filePath}`)
+    if (!info.isFile()) throw new AppError('VALIDATION_ERROR', { message: `快照目标不是普通文件: ${filePath}` })
     const originalContent = await readFile(resolved, 'utf8')
     return {
       context,
@@ -175,7 +176,7 @@ export class WorkspaceCheckpointService {
   /** 强制按时间逆序回滚，符合产品已确认的 checkpoint rewind 语义。 */
   async rollback(preview: RewindPreview): Promise<void> {
     const agentId = await this.repo.getThreadAgent(preview.threadId)
-    if (!agentId) throw new Error('会话不存在或已删除')
+    if (!agentId) throw new AppError('NOT_FOUND', { message: '会话不存在或已删除' })
     // pairIds 由 Repository 按时间正序返回；显式逆序逐轮恢复，保证 A/B/C/D 撤回 B 时严格执行 D→C→B。
     for (const pairId of [...preview.pairIds].reverse()) {
       const snapshots = await this.repo.listSnapshots([pairId])
@@ -214,7 +215,7 @@ export class WorkspaceCheckpointService {
   }
 
   async deletePairs(preview: RewindPreview, deletedBy = 'user') {
-    if (!preview.targetMessageId) throw new Error('轮次回滚缺少目标消息 ID')
+    if (!preview.targetMessageId) throw new AppError('VALIDATION_ERROR', { message: '轮次回滚缺少目标消息 ID' })
     return this.repo.softDeleteFromMessage(preview.threadId, preview.targetMessageId, deletedBy)
   }
 

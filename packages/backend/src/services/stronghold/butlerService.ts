@@ -27,6 +27,7 @@ import type { LlmService, ModelConfig } from '../llm/llmService'
 import type { MdpEngine } from '../prompt/mdpEngine'
 import { parseLlmJson } from '../../shared/llmJsonParser'
 import { createLogger } from '../../lib/logger'
+import { AppError } from '../../lib/appError'
 
 const logger = createLogger('ButlerService')
 
@@ -86,13 +87,13 @@ export class ButlerService {
 
   async execute(input: ButlerCommandInput): Promise<ButlerCommandResult> {
     const room = await this.strongholdService.getRoom(input.roomId)
-    if (!room) throw new Error(`房间 ${input.roomId} 不存在`)
+    if (!room) throw new AppError('NOT_FOUND', { message: `房间 ${input.roomId} 不存在` })
 
     const config = await this.strongholdService.getButlerConfig()
-    if (!config.enabled) throw new Error('管家服务当前已关闭')
+    if (!config.enabled) throw new AppError('PRECONDITION_FAILED', { message: '管家服务当前已关闭' })
 
     const requestText = input.command?.trim() || this.describeAction(input.action)
-    if (!requestText) throw new Error('command 或 action 为必填字段')
+    if (!requestText) throw new AppError('VALIDATION_ERROR', { message: 'command 或 action 为必填字段' })
 
     // 1. 用户请求落库为可见的 system 消息
     await this.groupChatService.sendMessage({
@@ -366,7 +367,7 @@ export class ButlerService {
     const summon = normalized.match(/^把\s*(.+?)\s*叫到(这里|当前房间)(来)?$/i)
     if (summon?.[1]) return { type: 'move_agent', agentId: summon[1].trim() }
 
-    throw new Error('无法识别该管家指令，请使用快捷指令或更具体的描述')
+    throw new AppError('BAD_REQUEST', { message: '无法识别该管家指令，请使用快捷指令或更具体的描述' })
   }
 
   // ─────────────────────────────────────────
@@ -424,7 +425,7 @@ export class ButlerService {
       case 'create_room': {
         // 双重校验：mapper 已查重，结构化路径在此兜底
         if (await this.strongholdService.getRoomByName(action.room.name)) {
-          throw new Error(`房间「${action.room.name}」已存在`)
+          throw new AppError('ALREADY_EXISTS', { message: `房间「${action.room.name}」已存在` })
         }
         const created = await this.strongholdService.createRoom(action.room)
         return {
@@ -437,7 +438,7 @@ export class ButlerService {
         const targetRoomId = action.targetRoomId ?? roomId
         const targetRoom = await this.requireRoom(targetRoomId)
         if (!action.key || String(action.value ?? '').length > 40) {
-          throw new Error('环境变量参数不合法')
+          throw new AppError('VALIDATION_ERROR', { message: '环境变量参数不合法' })
         }
         await this.strongholdService.updateEnvironment(targetRoomId, action.key, action.value)
         const updated = await this.requireRoom(targetRoomId)
@@ -450,7 +451,7 @@ export class ButlerService {
       case 'delete_room': {
         const target = await this.requireRoom(action.roomId)
         // 硬性安全红线：客厅绝不允许删除
-        if (target.name === '客厅') throw new Error('客厅不能被删除')
+        if (target.name === '客厅') throw new AppError('CONFLICT', { message: '客厅不能被删除' })
         await this.strongholdService.deleteRoom(action.roomId)
         return {
           action: action.type,
@@ -470,14 +471,14 @@ export class ButlerService {
           candidate.id.toLocaleLowerCase() === normalized ||
           candidate.name.toLocaleLowerCase() === normalized,
       )
-    if (!agent) throw new Error(`Agent ${identifier} 不存在`)
-    if (!agent.isEnabled) throw new Error(`Agent ${agent.name} 未启用`)
+    if (!agent) throw new AppError('AGENT_NOT_FOUND', { message: `Agent ${identifier} 不存在` })
+    if (!agent.isEnabled) throw new AppError('FORBIDDEN', { message: `Agent ${agent.name} 未启用` })
     return agent
   }
 
   private async requireRoom(roomId: string) {
     const room = await this.strongholdService.getRoom(roomId)
-    if (!room) throw new Error(`房间 ${roomId} 不存在`)
+    if (!room) throw new AppError('NOT_FOUND', { message: `房间 ${roomId} 不存在` })
     return room
   }
 

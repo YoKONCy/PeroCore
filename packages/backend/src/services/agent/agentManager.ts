@@ -29,6 +29,7 @@ import type { PathResolver } from '../../core/pathResolver'
 import type { ConfigRepository } from '../../repositories/config.repo'
 import type { PetStateService } from './petStateService'
 import { createLogger } from '../../lib/logger'
+import { AppError } from '../../lib/appError'
 
 const logger = createLogger('AgentManager')
 
@@ -323,7 +324,7 @@ export class AgentManager {
     const id = agentId.toLowerCase()
     const profile = this.agents.get(id)
     if (!profile) {
-      throw new Error(`Agent "${id}" 不存在`)
+      throw new AppError('AGENT_NOT_FOUND', { message: `Agent "${id}" 不存在` })
     }
 
     // 确保可写副本（内置角色第一次编辑时自动复制到用户数据目录）
@@ -335,7 +336,7 @@ export class AgentManager {
     try {
       config = JSON.parse(readFileSync(configPath, 'utf-8')) as Record<string, unknown>
     } catch (err) {
-      throw new Error(`读取 Agent 配置失败: ${String(err)}`)
+      throw new AppError('CONFIG_ERROR', { message: `读取 Agent 配置失败: ${String(err)}` })
     }
 
     // 白名单字段逐个写回（patch 未提供时保留原值）
@@ -379,7 +380,7 @@ export class AgentManager {
     const id = agentId.toLowerCase()
     const profile = this.agents.get(id)
     if (!profile) {
-      throw new Error(`Agent "${id}" 不存在`)
+      throw new AppError('AGENT_NOT_FOUND', { message: `Agent "${id}" 不存在` })
     }
 
     const userAgentsDir = this.pathResolver.resolve('@data/agents')
@@ -615,7 +616,7 @@ export class AgentManager {
 
     // 检查重复
     if (this.agents.has(agentId)) {
-      throw new Error(`Agent "${agentId}" 已存在`)
+      throw new AppError('ALREADY_EXISTS', { message: `Agent "${agentId}" 已存在` })
     }
 
     // 创建目录
@@ -674,19 +675,19 @@ export class AgentManager {
     const id = agentId.toLowerCase()
     const profile = this.agents.get(id)
     if (!profile) {
-      throw new Error(`Agent "${id}" 不存在`)
+      throw new AppError('AGENT_NOT_FOUND', { message: `Agent "${id}" 不存在` })
     }
 
     // 禁止删除当前活跃角色
     if (id === this.defaultAgentId) {
-      throw new Error(`不能删除当前活跃的 Agent: ${id}`)
+      throw new AppError('CONFLICT', { message: `不能删除当前活跃的 Agent: ${id}` })
     }
 
     // 禁止删除内置 Agent (判断路径是否在 @data/ 下)
     const userAgentsDir = this.pathResolver.resolve('@data/agents')
     const isUserAgent = profile.configPath.startsWith(userAgentsDir)
     if (!isUserAgent) {
-      throw new Error(`不能删除内置 Agent: ${id}`)
+      throw new AppError('CONFLICT', { message: `不能删除内置 Agent: ${id}` })
     }
 
     // 删除目录
@@ -863,7 +864,7 @@ export class AgentManager {
    * 内置角色会先创建用户副本，保证安装资源不被直接改写。
    */
   saveAvatar(agentId: string, image: Buffer): void {
-    if (image.length === 0) throw new Error('头像文件为空')
+    if (image.length === 0) throw new AppError('VALIDATION_ERROR', { message: '头像文件为空' })
     const agentDir = this.ensureUserCopy(agentId)
     const avatarPath = path.join(agentDir, 'avatar.png')
     writeFileSync(avatarPath, image)

@@ -15,6 +15,7 @@
 import { eq, desc, asc, and, or, inArray, isNull, sql } from 'drizzle-orm'
 import { groupChatRooms, groupChatMembers, groupChatMessages } from '../../database/schema'
 import type { DrizzleDb } from '../../database'
+import { AppError } from '../../lib/appError'
 
 // ── 类型 ──
 
@@ -195,7 +196,7 @@ export class GroupChatService {
       .get()
 
     if (!target) {
-      throw new Error(`消息 ${messageId} 不存在或不属于房间 ${roomId}`)
+      throw new AppError('NOT_FOUND', { message: `消息 ${messageId} 不存在或不属于房间 ${roomId}` })
     }
 
     const condition = target.pairId

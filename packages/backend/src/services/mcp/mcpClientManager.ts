@@ -16,6 +16,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import type { McpConfigRepository } from '../../repositories/mcp.repo'
 import { createLogger } from '../../lib/logger'
+import { AppError } from '../../lib/appError'
 
 const logger = createLogger('MCPClient')
 
@@ -227,7 +228,7 @@ export class McpClientManager {
   ): Promise<unknown> {
     const conn = this.connections.get(serverName)
     if (!conn || conn.status !== 'connected') {
-      throw new Error(`MCP 服务器 "${serverName}" 未连接`)
+      throw new AppError('MCP_ERROR', { message: `MCP 服务器 "${serverName}" 未连接` })
     }
 
     logger.debug(`调用 MCP 工具: ${serverName}/${toolName}`)
@@ -252,7 +253,7 @@ export class McpClientManager {
         return this.callTool(conn.name, toolName, args)
       }
     }
-    throw new Error(`未找到 MCP 工具: ${toolName}`)
+    throw new AppError('MCP_ERROR', { message: `未找到 MCP 工具: ${toolName}` })
   }
 
   /**
@@ -305,7 +306,7 @@ export class McpClientManager {
 
     // stdio (默认)
     if (!config.command) {
-      throw new Error('stdio 类型的 MCP 配置必须指定 command')
+      throw new AppError('CONFIG_ERROR', { message: 'stdio 类型的 MCP 配置必须指定 command' })
     }
 
     const args = config.args ? (JSON.parse(config.args) as string[]) : []

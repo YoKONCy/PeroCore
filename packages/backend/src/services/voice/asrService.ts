@@ -11,6 +11,7 @@
  */
 
 import { createLogger } from '../../lib/logger'
+import { AppError } from '../../lib/appError'
 
 const logger = createLogger('AsrService')
 
@@ -95,7 +96,7 @@ export class AsrService {
     const apiKey = this.config.apiKey
 
     if (!apiKey) {
-      throw new Error('ASR 需要 API Key，请在语音配置中填写')
+      throw new AppError('CONFIG_ERROR', { message: 'ASR 需要 API Key，请在语音配置中填写' })
     }
 
     const language = request.language ?? this.config.language
@@ -139,7 +140,7 @@ export class AsrService {
     if (!response.ok) {
       const body = await response.text()
       logger.error(`ASR API 失败: ${response.status} — ${body}`)
-      throw new Error(`ASR API 调用失败: ${response.status}`)
+      throw new AppError('EXTERNAL_ERROR', { message: `ASR API 调用失败: ${response.status}` })
     }
 
     const result = (await response.json()) as { text: string }

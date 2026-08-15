@@ -392,7 +392,7 @@ export async function executeAgentTurn(
     }
 
     const room = await ctx.strongholdService.getRoom(roomId)
-    if (!room) throw new Error(`房间 ${roomId} 不存在`)
+    if (!room) throw new AppError('NOT_FOUND', { message: `房间 ${roomId} 不存在` })
 
     const memoryConfig = ctx.configRepo
       ? await loadMemoryRuntimeConfig(ctx.configRepo)
@@ -448,7 +448,7 @@ export async function executeAgentTurn(
     })
 
     if (!reply?.trim()) {
-      throw new Error('角色本轮没有生成可见回复')
+      throw new AppError('UNPROCESSABLE', { message: '角色本轮没有生成可见回复' })
     }
 
     // 发送期间用户可能删除了整轮对话；此时不允许迟到回复重新写回历史。

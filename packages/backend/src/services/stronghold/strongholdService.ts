@@ -25,6 +25,7 @@ import {
 } from '../../database/schema'
 import type { DrizzleDb } from '../../database'
 import { createLogger } from '../../lib/logger'
+import { AppError } from '../../lib/appError'
 
 const logger = createLogger('StrongholdService')
 
@@ -137,7 +138,7 @@ export class StrongholdService {
    */
   async createRoom(input: CreateRoomInput): Promise<RoomRow> {
     const facility = await this.getFacility(input.facilityId)
-    if (!facility) throw new Error(`设施 ${input.facilityId} 不存在`)
+    if (!facility) throw new AppError('NOT_FOUND', { message: `设施 ${input.facilityId} 不存在` })
 
     const roomId = uuidv4()
     const allowedAgents = input.allowedAgents ?? []
@@ -225,8 +226,8 @@ export class StrongholdService {
    */
   async deleteRoom(roomId: string): Promise<void> {
     const room = await this.getRoom(roomId)
-    if (!room) throw new Error(`房间 ${roomId} 不存在`)
-    if (room.name === '客厅') throw new Error('客厅不能被删除')
+    if (!room) throw new AppError('NOT_FOUND', { message: `房间 ${roomId} 不存在` })
+    if (room.name === '客厅') throw new AppError('CONFLICT', { message: '客厅不能被删除' })
 
     // 将该房间内的 Agent 移到客厅
     const livingRoom = await this.getRoomByName('客厅')
@@ -248,7 +249,7 @@ export class StrongholdService {
 
   async updateEnvironment(roomId: string, key: string, value: unknown): Promise<void> {
     const room = await this.getRoom(roomId)
-    if (!room) throw new Error(`房间 ${roomId} 不存在`)
+    if (!room) throw new AppError('NOT_FOUND', { message: `房间 ${roomId} 不存在` })
 
     const env = JSON.parse(room.environmentJson ?? '{}') as Record<string, unknown>
     env[key] = value
@@ -275,7 +276,7 @@ export class StrongholdService {
     const livingRoom = livingRoomId
       ? await this.getRoom(livingRoomId)
       : await this.getRoomByName('客厅')
-    if (!livingRoom) throw new Error('客厅尚未初始化')
+    if (!livingRoom) throw new AppError('PRECONDITION_FAILED', { message: '客厅尚未初始化' })
     return this.moveAgent(agentId, livingRoom.id)
   }
 
@@ -292,7 +293,7 @@ export class StrongholdService {
 
   async moveAgent(agentId: string, roomId: string): Promise<LocationRow> {
     const room = await this.getRoom(roomId)
-    if (!room) throw new Error(`房间 ${roomId} 不存在`)
+    if (!room) throw new AppError('NOT_FOUND', { message: `房间 ${roomId} 不存在` })
 
     // Upsert
     const existing = await this.db

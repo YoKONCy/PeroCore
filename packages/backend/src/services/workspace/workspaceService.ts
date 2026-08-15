@@ -28,6 +28,7 @@ import {
 } from 'node:fs'
 import type { PathResolver } from '../../core/pathResolver'
 import { createLogger } from '../../lib/logger'
+import { AppError } from '../../lib/appError'
 
 const logger = createLogger('WorkspaceService')
 
@@ -333,19 +334,19 @@ export class LocalWorkspaceService implements WorkspaceService {
       ? { allowed: true, resolvedPath: this.resolveDeviceReadPath(agentId, filePath) }
       : this.validatePath(agentId, filePath, 'read', channel)
     if (!check.allowed) {
-      throw new Error(check.reason)
+      throw new AppError('FORBIDDEN', { message: check.reason })
     }
 
     if (!existsSync(check.resolvedPath)) {
-      throw new Error(`文件不存在: ${filePath}`)
+      throw new AppError('NOT_FOUND', { message: `文件不存在: ${filePath}` })
     }
 
     const stat = statSync(check.resolvedPath)
     if (!stat.isFile()) {
-      throw new Error(`路径不是文件: ${filePath}`)
+      throw new AppError('VALIDATION_ERROR', { message: `路径不是文件: ${filePath}` })
     }
     if (stat.size > MAX_READ_SIZE) {
-      throw new Error(`文件过大 (${stat.size} bytes)，上限 10MB`)
+      throw new AppError('PAYLOAD_TOO_LARGE', { message: `文件过大 (${stat.size} bytes)，上限 10MB` })
     }
 
     // 尝试 UTF-8，失败后尝试 latin1
@@ -381,7 +382,7 @@ export class LocalWorkspaceService implements WorkspaceService {
       ? { allowed: true, resolvedPath: this.resolveDeviceReadPath(agentId, filePath) }
       : this.validatePath(agentId, filePath, 'write', channel)
     if (!check.allowed) {
-      throw new Error(check.reason)
+      throw new AppError('FORBIDDEN', { message: check.reason })
     }
 
     // 确保父目录存在
@@ -407,16 +408,16 @@ export class LocalWorkspaceService implements WorkspaceService {
       ? { allowed: true, resolvedPath: this.resolveDeviceReadPath(agentId, dirPath) }
       : this.validatePath(agentId, dirPath, 'read', channel)
     if (!check.allowed) {
-      throw new Error(check.reason)
+      throw new AppError('FORBIDDEN', { message: check.reason })
     }
 
     if (!existsSync(check.resolvedPath)) {
-      throw new Error(`目录不存在: ${dirPath}`)
+      throw new AppError('NOT_FOUND', { message: `目录不存在: ${dirPath}` })
     }
 
     const stat = statSync(check.resolvedPath)
     if (!stat.isDirectory()) {
-      throw new Error(`路径不是目录: ${dirPath}`)
+      throw new AppError('VALIDATION_ERROR', { message: `路径不是目录: ${dirPath}` })
     }
 
     const entries = readdirSync(check.resolvedPath)
@@ -442,7 +443,7 @@ export class LocalWorkspaceService implements WorkspaceService {
       ? { allowed: true, resolvedPath: this.resolveDeviceReadPath(agentId, targetPath) }
       : this.validatePath(agentId, targetPath, 'read', channel)
     if (!check.allowed) {
-      throw new Error(check.reason)
+      throw new AppError('FORBIDDEN', { message: check.reason })
     }
 
     if (!existsSync(check.resolvedPath)) {

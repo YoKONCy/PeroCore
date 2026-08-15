@@ -60,6 +60,7 @@ import type {
   AppTaskContext,
 } from './types'
 import type { AgentAppRuntime, AppRuntimeContext, AppLogger } from './appRuntime'
+import { AppError } from '../lib/appError'
 
 const logger = createLogger('AppManager')
 
@@ -390,7 +391,7 @@ export class AppManagerImpl implements AppManager {
     // 1. 读取 app.manifest.json
     const manifestPath = path.join(appDir, 'app.manifest.json')
     if (!existsSync(manifestPath)) {
-      throw new Error(`应用清单文件不存在: ${manifestPath}`)
+      throw new AppError('CONFIG_ERROR', { message: `应用清单文件不存在: ${manifestPath}` })
     }
 
     let manifest: AgentAppManifest
@@ -398,12 +399,12 @@ export class AppManagerImpl implements AppManager {
       const raw = readFileSync(manifestPath, 'utf-8')
       manifest = JSON.parse(raw) as AgentAppManifest
     } catch (err) {
-      throw new Error(`应用清单解析失败: ${err}`)
+      throw new AppError('CONFIG_ERROR', { message: `应用清单解析失败: ${err}` })
     }
 
     // 2. 校验 Manifest 必填字段
     if (!manifest.id || !manifest.name || !manifest.version) {
-      throw new Error('应用清单缺少必填字段: id/name/version')
+      throw new AppError('VALIDATION_ERROR', { message: '应用清单缺少必填字段: id/name/version' })
     }
 
     // 3. 检查 minAiosVersion（简单版本检查）
@@ -462,7 +463,7 @@ export class AppManagerImpl implements AppManager {
       .where(and(eq(appInstances.appId, appId), eq(appInstances.status, 'running')))
 
     if (runningInstances.length > 0) {
-      throw new Error(`应用 ${appId} 有运行中的实例，无法卸载`)
+      throw new AppError('CONFLICT', { message: `应用 ${appId} 有运行中的实例，无法卸载` })
     }
 
     // 删除注册记录
@@ -503,7 +504,7 @@ export class AppManagerImpl implements AppManager {
     // 1. 获取 Manifest
     const manifest = await this.getManifest(appId)
     if (!manifest) {
-      throw new Error(`应用未安装: ${appId}`)
+      throw new AppError('NOT_FOUND', { message: `应用未安装: ${appId}` })
     }
 
     // 2. 校验 supportedAgentRoles
@@ -512,14 +513,15 @@ export class AppManagerImpl implements AppManager {
       manifest.supportedAgentRoles.length > 0 &&
       !manifest.supportedAgentRoles.includes(hostAgentId)
     ) {
-      throw new Error(
-        `应用 ${appId} 不支持 Agent: ${hostAgentId}（仅支持 ${manifest.supportedAgentRoles.join(', ')}）`,
+      throw new AppError(
+        'UNPROCESSABLE',
+        { message: `应用 ${appId} 不支持 Agent: ${hostAgentId}（仅支持 ${manifest.supportedAgentRoles.join(', ')}）` },
       )
     }
 
     // 3. 校验工作区模式
     if (manifest.workspaceMode === 'dynamic' && !params.workspacePath) {
-      throw new Error(`应用 ${appId} 需要 dynamic 工作区，必须提供 workspacePath`)
+      throw new AppError('VALIDATION_ERROR', { message: `应用 ${appId} 需要 dynamic 工作区，必须提供 workspacePath` })
     }
 
     // 4. 确定工作区路径
@@ -662,7 +664,7 @@ export class AppManagerImpl implements AppManager {
       }
       const result = await runtime.initialize(ctx)
       if (!result.success) {
-        throw new Error(`应用初始化失败: ${result.error ?? '未知错误'}`)
+        throw new AppError('CONFIG_ERROR', { message: `应用初始化失败: ${result.error ?? '未知错误'}` })
       }
       this.runtimes.set(instanceId, { runtime, manifest, ctx })
 
@@ -822,18 +824,18 @@ export class AppManagerImpl implements AppManager {
     communicationBudget?: number
   }): Promise<AppCommandResult> {
     const manifest = await this.getManifest(params.appId)
-    if (!manifest) throw new Error(`应用未安装: ${params.appId}`)
+    if (!manifest) throw new AppError('NOT_FOUND', { message: `应用未安装: ${params.appId}` })
     const action = manifest.actions?.find((item) => item.name === params.action)
     if (!action || (action.mode !== 'command' && action.mode !== 'both')) {
-      throw new Error(`应用 ${params.appId} 未声明一次性动作: ${params.action}`)
+      throw new AppError('NOT_FOUND', { message: `应用 ${params.appId} 未声明一次性动作: ${params.action}` })
     }
     const instance = [...this.runtimes.entries()].find(
       ([, entry]) =>
         entry.manifest.id === params.appId && entry.ctx.hostAgentId === params.hostAgentId,
     )
-    if (!instance) throw new Error(`应用未运行: ${params.appId}`)
+    if (!instance) throw new AppError('CONFLICT', { message: `应用未运行: ${params.appId}` })
     const [instanceId, entry] = instance
-    if (!entry.runtime.executeCommand) throw new Error(`应用不支持主 Agent 委派: ${params.appId}`)
+    if (!entry.runtime.executeCommand) throw new AppError('UNPROCESSABLE', { message: `应用不支持主 Agent 委派: ${params.appId}` })
     const request: AppCommandRequest = {
       correlationId: crypto.randomUUID(),
       action: params.action,
@@ -920,7 +922,7 @@ export class AppManagerImpl implements AppManager {
       .from(appRegistry)
       .where(eq(appRegistry.appId, appId))
     if (rows.length === 0) {
-      throw new Error(`应用未安装: ${appId}`)
+      throw new AppError('NOT_FOUND', { message: `应用未安装: ${appId}` })
     }
     return rows[0]!.installPath
   }

@@ -46,6 +46,7 @@ import type { MdpEngine, RenderedMessage } from '../prompt/mdpEngine'
 import type { CapabilityGate } from '../../capabilities/capabilityGate'
 import type { ContentPart } from '../llm/types'
 import { createLogger } from '../../lib/logger'
+import { AppError } from '../../lib/appError'
 
 const logger = createLogger('ContextCompiler')
 
@@ -251,15 +252,16 @@ export class ContextCompiler {
     // ── 1. 获取 Thread 信息 + Channel 策略 ──
     const thread = await this.threadService.getThread(threadId)
     if (!thread) {
-      throw new Error(`Thread 不存在: ${threadId}`)
+      throw new AppError('NOT_FOUND', { message: `Thread 不存在: ${threadId}` })
     }
 
     const channel = thread.channel as ThreadChannel
 
     // 外部平台社交必须由 SocialAppRuntime 独立编译，禁止静默退回主 Agent 上下文策略。
     if (channel === 'social') {
-      throw new Error(
-        `Thread ${threadId} 属于 social channel，必须通过 SocialAppRuntime 处理，禁止进入 ContextCompiler`,
+      throw new AppError(
+        'UNPROCESSABLE',
+        { message: `Thread ${threadId} 属于 social channel，必须通过 SocialAppRuntime 处理，禁止进入 ContextCompiler` },
       )
     }
 

@@ -15,6 +15,7 @@ import type {
 import type { VectorWriteHelper } from '../../shared/vectorWriteHelper'
 import type { VectorRepository } from '../../repositories/vector.repo'
 import { createLogger } from '../../lib/logger'
+import { AppError } from '../../lib/appError'
 
 const logger = createLogger('MemoryService')
 
@@ -121,7 +122,7 @@ export class MemoryService {
   /** 更新记忆内容 (同步更新向量) */
   async update(id: number, data: UpdateMemoryInput, agentId: string): Promise<MemoryRow> {
     const updated = await this.memoryRepo.update(id, data)
-    if (!updated) throw new Error(`记忆 ${id} 不存在`)
+    if (!updated) throw new AppError('MEMORY_NOT_FOUND', { message: `记忆 ${id} 不存在` })
 
     // 如果内容变更，需要重新生成向量
     if (data.content) {
