@@ -27,7 +27,7 @@
     "@opentelemetry/sdk-trace-node": "^2.10.0",
     "@opentelemetry/semantic-conventions": "^1.43.0",
     "@types/ws": "^8.18.1",
-    "better-sqlite3": "^11.9.0",
+    "better-sqlite3": "12.11.1",
     "consola": "^3.4.2",
     "drizzle-orm": "^0.44.0",
     "hono": "^4.7.0",
