@@ -99,7 +99,8 @@ try {
   }
   const abi = abiMap[`${platform}-${arch}`]
   if (abi) {
-    const nodePath = join(__dirname, `index.${abi}.node`)
+    const packageDir = __dirname.endsWith(`${join('', 'dist')}`) ? join(__dirname, '..') : __dirname
+    const nodePath = join(packageDir, `index.${abi}.node`)
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     native = require(nodePath) as NativeModule
     usingNative = true

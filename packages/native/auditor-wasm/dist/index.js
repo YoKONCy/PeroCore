@@ -76,7 +76,8 @@ function loadAuditor() {
     if (exportsCache !== undefined)
         return exportsCache;
     const packageDir = dirname(fileURLToPath(import.meta.url));
-    const wasmPath = join(packageDir, 'dist', 'auditor.wasm');
+    const directWasm = join(packageDir, 'auditor.wasm');
+    const wasmPath = existsSync(directWasm) ? directWasm : join(packageDir, 'dist', 'auditor.wasm');
     if (!existsSync(wasmPath)) {
         exportsCache = null;
         return null;
