@@ -178,7 +178,8 @@ CREATE TABLE `pet_states` (
 	`click_messages_json` text DEFAULT '{}',
 	`idle_messages_json` text DEFAULT '[]',
 	`back_messages_json` text DEFAULT '[]',
-	`updated_at` text DEFAULT (datetime('now', 'localtime'))
+	`updated_at` text DEFAULT (datetime('now', 'localtime')),
+	`text_expires_at` text
 );
 --> statement-breakpoint
 CREATE INDEX `idx_pet_states_agent_id` ON `pet_states` (`agent_id`);--> statement-breakpoint
@@ -205,7 +206,8 @@ CREATE TABLE `social_messages` (
 	`agent_id` text DEFAULT 'pero' NOT NULL,
 	`raw_event_json` text DEFAULT '{}',
 	`timestamp` text DEFAULT (datetime('now', 'localtime')),
-	`is_summarized` integer DEFAULT false
+	`is_summarized` integer DEFAULT false,
+	`account_id` text DEFAULT '' NOT NULL
 );
 --> statement-breakpoint
 CREATE INDEX `idx_social_messages_channel` ON `social_messages` (`channel_id`,`channel_type`);--> statement-breakpoint

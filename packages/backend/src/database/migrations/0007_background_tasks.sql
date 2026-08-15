@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS `background_tasks` (
   `created_at` text DEFAULT (datetime('now', 'localtime')) NOT NULL,
   `started_at` text,
   `completed_at` text,
-  `updated_at` text DEFAULT (datetime('now', 'localtime')) NOT NULL
+  `updated_at` text DEFAULT (datetime('now', 'localtime')) NOT NULL,
+  `read_at` text
 );
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS `idx_background_tasks_agent_id` ON `background_tasks` (`agent_id`);

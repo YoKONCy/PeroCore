@@ -89,7 +89,7 @@ export class ConversationTurnService {
 
   async prepareTurn(params: PrepareTurnParams): Promise<PreparedTurn> {
     const thread = await this.deps.threadService.getThread(params.threadId)
-    if (!thread) throw new Error(`Thread 不存在: ${params.threadId}`)
+    if (!thread) throw new AppError('NOT_FOUND', { message: `Thread 不存在: ${params.threadId}` })
 
     const agentId = params.agentId ?? thread.agentId
     if (thread.channel !== 'group' && agentId !== thread.agentId) {
