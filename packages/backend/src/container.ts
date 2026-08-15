@@ -823,6 +823,9 @@ export async function createAppContext(config: AppConfig): Promise<AppContext> {
     handler: async () => {
       const activeAgent = agentManager.defaultAgentId
       await scorerService.flushPendingByThread(activeAgent)
+      // Gate 审核：将 pending 记忆候选写入长期记忆（canonical_memories + memory_nodes）。
+      // 此前 runGate 无任何调度/业务触发，候选永远停留在 pending，长记忆功能实际失效。
+      await localMemoryTaskRunner.runGate(activeAgent)
     },
   })
 
