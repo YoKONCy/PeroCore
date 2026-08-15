@@ -274,11 +274,25 @@ export function useLauncher() {
     if (isElectron()) {
       const backendReady = await waitForBackend(30000)
       if (!backendReady) {
-        errorMessage.value = '后端服务启动超时，请重启应用或查看日志'
+        let detail = '后端服务启动超时'
+        try {
+          const status = (await invoke('get-backend-logs')) as {
+            error?: string
+            logTail?: string
+            logPath?: string
+          }
+          const logTail = status.logTail?.trim()
+          detail = [status.error, logTail, status.logPath ? `日志：${status.logPath}` : undefined]
+            .filter(Boolean)
+            .join('\n')
+        } catch {
+          // 主进程诊断不可用时保留超时提示。
+        }
+        errorMessage.value = detail
         const backendCheck = checks.value.find((c) => c.id === 'backend')
         if (backendCheck) {
           backendCheck.status = 'error'
-          backendCheck.message = '后端服务启动超时'
+          backendCheck.message = detail
         }
         phase.value = 'checking'
         return

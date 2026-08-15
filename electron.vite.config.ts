@@ -20,7 +20,8 @@ const APP_VERSION: string = rootPkg.version
 export default defineConfig({
   // ── 主进程 ──────────────────────────────────────────────
   main: {
-    plugins: [externalizeDepsPlugin()],
+    // updater 必须内联进 app.asar；pnpm 的符号链接依赖不能依靠 electron-builder files 复制。
+    plugins: [externalizeDepsPlugin({ exclude: ['electron-updater'] })],
     build: {
       outDir: 'dist-electron/main',
       rollupOptions: {
@@ -28,7 +29,7 @@ export default defineConfig({
         // bufferutil / utf-8-validate 是 ws 的可选原生依赖
         // 在 Electron 环境经常无法编译，ws 内部已 try/catch 容错
         // 标记为 external 避免 Rollup 尝试解析它们
-        external: ['winreg', 'steamworks.js', 'electron-updater', 'bufferutil', 'utf-8-validate'],
+        external: ['winreg', 'steamworks.js', 'bufferutil', 'utf-8-validate'],
       },
     },
   },

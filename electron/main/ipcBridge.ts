@@ -241,8 +241,8 @@ function registerBackendHandlers(): void {
   })
 
   ipcMain.handle('get-backend-logs', async () => {
-    logger.info('IPC', 'get-backend-logs 已废弃：请通过 Daemon HTTP API /api/maintenance 获取日志')
-    return []
+    const { getPortableDaemonStatus } = await import('./services/portableDaemon')
+    return getPortableDaemonStatus()
   })
 }
 

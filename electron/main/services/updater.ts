@@ -4,6 +4,7 @@
  * 统一维护更新状态，并向 Launcher 暴露检查、下载、安装和 GitHub Release 公告。
  */
 import { app, BrowserWindow } from 'electron'
+import { autoUpdater } from 'electron-updater'
 import { logger } from '../utils/logger'
 
 export type UpdatePhase =
@@ -66,7 +67,7 @@ function initUpdater(): any {
   }
 
   try {
-    updater = require('electron-updater').autoUpdater
+    updater = autoUpdater
     updater.logger = {
       info: (message: string) => logger.info('Updater', message),
       warn: (message: string) => logger.warn('Updater', message),

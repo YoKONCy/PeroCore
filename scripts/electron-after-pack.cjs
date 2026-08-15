@@ -1,5 +1,7 @@
 const fs = require('node:fs/promises')
 const path = require('node:path')
+const { spawn } = require('node:child_process')
+const http = require('node:http')
 
 async function removePath(targetPath) {
   await fs.rm(targetPath, { recursive: true, force: true })
@@ -36,10 +38,7 @@ async function validatePortableRuntime(resourcesDir) {
   await assertFile(rgPath, '内置 ripgrep')
 
   const ptyDir = path.join(resourcesDir, 'node_modules', 'node-pty')
-  const native = await findFile(
-    ptyDir,
-    (file) => path.extname(file).toLowerCase() === '.node',
-  )
+  const native = await findFile(ptyDir, (file) => path.extname(file).toLowerCase() === '.node')
   if (!native) throw new Error(`发行产物 node-pty 缺少原生 .node: ${ptyDir}`)
 
   const sqliteDir = path.join(resourcesDir, 'node_modules', 'better-sqlite3')
@@ -60,6 +59,73 @@ async function validatePortableRuntime(resourcesDir) {
   }
 }
 
+function probeHealth(port) {
+  return new Promise((resolve) => {
+    const request = http.get(
+      { host: '127.0.0.1', port, path: '/api/health', timeout: 1000 },
+      (response) => {
+        let body = ''
+        response.on('data', (chunk) => (body += chunk.toString()))
+        response.on('end', () => resolve(response.statusCode === 200 && body.includes('"ok"')))
+      },
+    )
+    request.once('timeout', () => {
+      request.destroy()
+      resolve(false)
+    })
+    request.once('error', () => resolve(false))
+  })
+}
+
+/** 使用打包后的 Electron Node 运行时执行 Daemon，验证真实发行环境可启动。 */
+async function validateDaemonBoot(appOutDir, resourcesDir, executableName) {
+  if (process.platform !== 'win32') return
+  const executable = path.join(
+    appOutDir,
+    process.platform === 'win32' && !executableName.endsWith('.exe')
+      ? `${executableName}.exe`
+      : executableName,
+  )
+  const bundle = path.join(resourcesDir, 'daemon', 'daemon.mjs')
+  await assertFile(executable, '应用可执行文件')
+  await assertFile(bundle, '内置 Daemon bundle')
+
+  const dataDir = path.join(appOutDir, '.daemon-smoke-data')
+  await fs.mkdir(dataDir, { recursive: true })
+  let output = ''
+  const child = spawn(executable, [bundle], {
+    cwd: appOutDir,
+    env: {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: '1',
+      PERO_PORT: '19120',
+      PERO_DATA_DIR: dataDir,
+      PERO_APP_ROOT: path.join(resourcesDir, 'backend'),
+      INFOS_RESOURCES_ROOT: resourcesDir,
+      PERO_WORKSHOP_DIRS: '[]',
+    },
+    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  child.stdout.on('data', (chunk) => (output += chunk.toString()))
+  child.stderr.on('data', (chunk) => (output += chunk.toString()))
+
+  try {
+    const deadline = Date.now() + 30_000
+    while (Date.now() < deadline) {
+      if (await probeHealth(19120)) return
+      if (child.exitCode !== null) {
+        throw new Error(`Daemon 提前退出，exitCode=${child.exitCode}\n${output}`)
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500))
+    }
+    throw new Error(`Daemon 启动验证超时\n${output}`)
+  } finally {
+    child.kill()
+    await fs.rm(dataDir, { recursive: true, force: true })
+  }
+}
+
 exports.default = async function afterPack(context) {
   const appOutDir = context.appOutDir
   const resourcesDir = path.join(appOutDir, 'resources')
@@ -71,8 +137,9 @@ exports.default = async function afterPack(context) {
     await removePath(path.join(appOutDir, '.portable'))
   }
 
-  // 标准版、Steam 版和便携版都必须具备完整的自包含运行时。
+  // 标准版、Steam 版和便携版都必须具备完整且可实际启动的自包含运行时。
   await validatePortableRuntime(resourcesDir)
+  await validateDaemonBoot(appOutDir, resourcesDir, context.packager.appInfo.productFilename)
 
   if (process.env.INFOS_EDITION === 'steam') return
 

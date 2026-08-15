@@ -35,6 +35,36 @@ const DAEMON_BUNDLE_RELPATH = path.join('daemon', 'daemon.mjs')
 /** 由本模块拉起的 Daemon 子进程（用于退出时回收） */
 let daemonChild: ChildProcess | null = null
 
+export interface DaemonStartupStatus {
+  ready: boolean
+  running: boolean
+  attempted: boolean
+  logPath: string
+  error?: string
+  logTail?: string
+}
+
+let startupStatus: DaemonStartupStatus = {
+  ready: false,
+  running: false,
+  attempted: false,
+  logPath: '',
+}
+
+/** 返回启动状态与日志尾部，供 Launcher 直接展示真实错误。 */
+export function getPortableDaemonStatus(): DaemonStartupStatus {
+  const status = { ...startupStatus }
+  if (status.logPath && fs.existsSync(status.logPath)) {
+    try {
+      const content = fs.readFileSync(status.logPath, 'utf8')
+      status.logTail = content.slice(-4000)
+    } catch {
+      // 日志可能正被子进程占用，保留已有状态。
+    }
+  }
+  return status
+}
+
 /** 是否已尝试拉起（避免重复） */
 let ensureStarted = false
 
@@ -55,7 +85,10 @@ function probePort(port: number): Promise<boolean> {
 async function waitForBusinessReady(timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
-    if (await probePort(BUSINESS_PORT)) return true
+    if (await probePort(BUSINESS_PORT)) {
+      startupStatus = { ...startupStatus, ready: true, running: true }
+      return true
+    }
     await new Promise((resolve) => setTimeout(resolve, READY_POLL_INTERVAL_MS))
   }
   return false
@@ -80,7 +113,10 @@ export function stopPortableDaemon(): void {
  */
 export async function ensurePortableDaemon(): Promise<boolean> {
   // 已在运行（或外部 Daemon）：直接确认就绪
-  if (await probePort(BUSINESS_PORT)) return true
+  if (await probePort(BUSINESS_PORT)) {
+    startupStatus = { ...startupStatus, ready: true, running: true }
+    return true
+  }
 
   // 开发模式继续使用独立 dev:daemon，避免热开发时 Electron 重复拉起打包 bundle。
   if (isDev) {
@@ -97,10 +133,13 @@ export async function ensurePortableDaemon(): Promise<boolean> {
     return waitForBusinessReady(READY_TIMEOUT_MS)
   }
   ensureStarted = true
+  startupStatus = { ...startupStatus, attempted: true }
 
   const bundlePath = path.join(process.resourcesPath, DAEMON_BUNDLE_RELPATH)
   if (!fs.existsSync(bundlePath)) {
-    logger.warn('PortableDaemon', `未找到内置 Daemon bundle: ${bundlePath}，桌面能力将不可用`)
+    const error = `未找到内置 Daemon bundle: ${bundlePath}`
+    startupStatus = { ...startupStatus, error }
+    logger.warn('PortableDaemon', `${error}，桌面能力将不可用`)
     return false
   }
 
@@ -119,6 +158,7 @@ export async function ensurePortableDaemon(): Promise<boolean> {
   // Daemon 在窗口隐藏模式下运行，必须持久化 stdout/stderr，否则启动早期异常会完全丢失。
   fs.mkdirSync(paths.logs, { recursive: true })
   const daemonLogPath = path.join(paths.logs, 'daemon-bootstrap.log')
+  startupStatus = { ...startupStatus, logPath: daemonLogPath, running: true, error: undefined }
   const daemonLog = fs.createWriteStream(daemonLogPath, { flags: 'a' })
   daemonLog.write(`\n[${new Date().toISOString()}] 启动内置 Daemon\n`)
 
@@ -144,10 +184,16 @@ export async function ensurePortableDaemon(): Promise<boolean> {
     logger.warn('PortableDaemon', `Daemon 启动日志写入失败: ${err.message}`)
   })
   daemonChild.on('error', (err) => {
+    startupStatus = { ...startupStatus, running: false, error: `进程启动失败: ${err.message}` }
     logger.error('PortableDaemon', `内置 Daemon 启动失败: ${err.message}`)
   })
   daemonChild.on('exit', (code, signal) => {
     daemonLog.end()
+    startupStatus = {
+      ...startupStatus,
+      running: false,
+      error: startupStatus.ready ? undefined : `Daemon 提前退出：code=${code}, signal=${signal}`,
+    }
     logger.warn(
       'PortableDaemon',
       `内置 Daemon 退出: code=${code}, signal=${signal}；启动日志: ${daemonLogPath}`,
@@ -158,8 +204,14 @@ export async function ensurePortableDaemon(): Promise<boolean> {
   // 等待业务端口就绪（最多 30s），失败不阻塞主流程（capabilityProvider 重连兜底）
   const ready = await waitForBusinessReady(READY_TIMEOUT_MS)
   if (ready) {
+    startupStatus = { ...startupStatus, ready: true, running: true, error: undefined }
     logger.info('PortableDaemon', `内置 Daemon 已就绪 → :${BUSINESS_PORT}`)
   } else {
+    startupStatus = {
+      ...startupStatus,
+      ready: false,
+      error: startupStatus.error ?? `Daemon 启动超时（:${BUSINESS_PORT}）`,
+    }
     logger.warn('PortableDaemon', `内置 Daemon 启动超时（:${BUSINESS_PORT}），桌面能力可能暂不可用`)
   }
   return ready
