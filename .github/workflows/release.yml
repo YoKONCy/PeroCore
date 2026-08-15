@@ -21,9 +21,10 @@ jobs:
   # ── 2. Electron 标准版 (NSIS 安装包) ──
   build-standard:
     name: Build Standard (Windows)
-    runs-on: windows-latest
+    runs-on: windows-2022
     needs: ci
     env:
+      npm_config_msvs_version: 2022
       ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
       ELECTRON_CACHE: ${{ github.workspace }}\\.electron-cache
       ELECTRON_BUILDER_CACHE: ${{ github.workspace }}\\.electron-builder-cache
@@ -45,6 +46,11 @@ jobs:
           key: electron-builder-${{ runner.os }}-40.2.1-26.8.1
 
       - run: pnpm install --frozen-lockfile
+
+      - name: 初始化 Visual Studio C++ 构建环境
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
 
       - name: 安装 WASM Rust target
         run: rustup target add wasm32-unknown-unknown
@@ -84,9 +90,10 @@ jobs:
   # ── 3. Electron 便携版 (ZIP 解压即用) ──
   build-portable:
     name: Build Portable (Windows)
-    runs-on: windows-latest
+    runs-on: windows-2022
     needs: ci
     env:
+      npm_config_msvs_version: 2022
       ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
       ELECTRON_CACHE: ${{ github.workspace }}\\.electron-cache
       ELECTRON_BUILDER_CACHE: ${{ github.workspace }}\\.electron-builder-cache
@@ -108,6 +115,11 @@ jobs:
           key: electron-builder-${{ runner.os }}-40.2.1-26.8.1
 
       - run: pnpm install --frozen-lockfile
+
+      - name: 初始化 Visual Studio C++ 构建环境
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
 
       - name: 安装 WASM Rust target
         run: rustup target add wasm32-unknown-unknown
@@ -146,9 +158,10 @@ jobs:
   # ── 4. Electron Steam 版 (仅限 release 分支或手动触发) ──
   build-steam:
     name: Build Steam (Windows)
-    runs-on: windows-latest
+    runs-on: windows-2022
     needs: ci
     env:
+      npm_config_msvs_version: 2022
       ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
       ELECTRON_CACHE: ${{ github.workspace }}\\.electron-cache
       ELECTRON_BUILDER_CACHE: ${{ github.workspace }}\\.electron-builder-cache
@@ -170,6 +183,11 @@ jobs:
           key: electron-builder-${{ runner.os }}-40.2.1-26.8.1
 
       - run: pnpm install --frozen-lockfile
+
+      - name: 初始化 Visual Studio C++ 构建环境
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
 
       - name: 安装 WASM Rust target
         run: rustup target add wasm32-unknown-unknown
