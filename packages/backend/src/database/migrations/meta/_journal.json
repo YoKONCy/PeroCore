@@ -5,29 +5,8 @@
     {
       "idx": 0,
       "version": "6",
-      "when": 1776746279134,
-      "tag": "0000_grey_alex_wilder",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1777208524234,
-      "tag": "0001_dazzling_rictor",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1786107534987,
-      "tag": "0002_grey_rictor",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "6",
-      "when": 1786123000000,
-      "tag": "0003_agent_applications",
+      "when": 1786837779249,
+      "tag": "0000_baseline",
       "breakpoints": true
     }
   ]
