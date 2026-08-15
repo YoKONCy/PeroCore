@@ -218,18 +218,35 @@ export class VirtualWorkspace {
       }
     }
     if (options.lineStart !== undefined || options.lineEnd !== undefined) {
-      const start = Math.max(1, options.lineStart ?? 1)
-      const end = Math.min(lines.length, options.lineEnd ?? start + 499)
-      if (end < start) throw new Error('line_end 不能小于 line_start')
+      const requestedStart = Math.max(1, Math.trunc(options.lineStart ?? 1))
+      const requestedEnd = Math.max(1, Math.trunc(options.lineEnd ?? requestedStart + 499))
+      if (requestedEnd < requestedStart) throw new Error('line_end 不能小于 line_start')
+
+      // 超出文件尾部时返回空窗口，而不是构造 end < start 的矛盾范围。
+      if (requestedStart > totalLines) {
+        return {
+          content: '',
+          encoding: 'utf-8',
+          eol,
+          totalBytes: buffer.length,
+          totalLines,
+          hash,
+          truncated: totalLines > 0,
+          lineStart: requestedStart,
+          lineEnd: requestedStart - 1,
+        }
+      }
+
+      const end = Math.min(totalLines, requestedEnd)
       return {
-        content: lines.slice(start - 1, end).join('\n'),
+        content: lines.slice(requestedStart - 1, end).join('\n'),
         encoding: 'utf-8',
         eol,
         totalBytes: buffer.length,
         totalLines,
         hash,
-        truncated: start > 1 || end < lines.length,
-        lineStart: start,
+        truncated: requestedStart > 1 || end < totalLines,
+        lineStart: requestedStart,
         lineEnd: end,
       }
     }
@@ -324,7 +341,13 @@ export class VirtualWorkspace {
 
   async edit(
     session: ExecutionSession,
-    input: { path: string; oldText: string; newText: string; expectedHash?: string },
+    input: {
+      path: string
+      oldText: string
+      newText: string
+      expectedHash?: string
+      deviceScope?: boolean
+    },
   ) {
     if (!input.oldText) {
       throw new WorkspaceError(WS_ERROR.EDIT_EMPTY_OLD_TEXT, 'old_text 不能为空')
@@ -335,7 +358,9 @@ export class VirtualWorkspace {
         'old_text 与 new_text 完全相同，文件不会产生任何变化；请提供真正需要替换的新内容',
       )
     }
-    const filePath = await this.resolvePath(session, input.path, 'write')
+    const filePath = input.deviceScope
+      ? await this.resolveApprovedWritePath(input.path)
+      : await this.resolvePath(session, input.path, 'write')
     let buffer: Buffer
     try {
       buffer = await readFile(filePath)
@@ -486,6 +511,26 @@ export class VirtualWorkspace {
     if (!info.isFile() && !info.isDirectory())
       throw new Error(`目标不是普通文件或目录: ${inputPath}`)
     return actual
+  }
+
+  /** 已审批写路径：仅接受绝对路径，并校验最近存在父目录的真实位置。 */
+  private async resolveApprovedWritePath(inputPath: string): Promise<string> {
+    if (!path.isAbsolute(inputPath)) {
+      throw new WorkspaceError(WS_ERROR.PATH_OUT_OF_SCOPE, '工作区外审批写入必须使用绝对路径')
+    }
+    const resolved = path.resolve(inputPath)
+    let probe = resolved
+    while (true) {
+      try {
+        await realpath(probe)
+        return resolved
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        const parent = path.dirname(probe)
+        if (parent === probe) throw error
+        probe = parent
+      }
+    }
   }
 
   private async resolvePath(

@@ -69,7 +69,7 @@ export interface FileStat {
 export interface ReadOptions {
   /** 仅供白名单内纯只读工具显式请求设备级路径。 */
   deviceScope?: boolean
-  /** 最大读取字节数（默认 10MB） */
+  /** 显式指定最大读取字符数；未指定时默认读取前 800 行。 */
   maxLength?: number
 }
 
@@ -77,6 +77,8 @@ export interface ReadOptions {
 export interface WriteOptions {
   /** 是否追加（默认 false） */
   append?: boolean
+  /** 仅限已经逐次审批的工具调用写入设备路径。 */
+  deviceScope?: boolean
 }
 
 // ─────────────────────────────────────────────
@@ -219,6 +221,9 @@ export interface WorkspaceService {
 // LocalWorkspaceService 实现
 // ─────────────────────────────────────────────
 
+/** full 读取默认最多返回的行数。 */
+const DEFAULT_READ_LINES = 800
+
 /** 单文件最大读取字节 (10MB) */
 const MAX_READ_SIZE = 10 * 1024 * 1024
 
@@ -351,9 +356,16 @@ export class LocalWorkspaceService implements WorkspaceService {
       content = readFileSync(check.resolvedPath, 'latin1')
     }
 
-    const maxLength = options?.maxLength ?? 10_000
-    if (content.length > maxLength) {
-      return content.slice(0, maxLength) + '\n...[内容已截断]...'
+    if (options?.maxLength !== undefined) {
+      if (content.length > options.maxLength) {
+        return content.slice(0, options.maxLength) + '\n...[内容已截断]...'
+      }
+      return content
+    }
+
+    const lines = content.split(/\r?\n/)
+    if (lines.length > DEFAULT_READ_LINES) {
+      return lines.slice(0, DEFAULT_READ_LINES).join('\n') + '\n...[内容已截断]...'
     }
     return content
   }
@@ -365,7 +377,9 @@ export class LocalWorkspaceService implements WorkspaceService {
     channel: string,
     options?: WriteOptions,
   ): Promise<void> {
-    const check = this.validatePath(agentId, filePath, 'write', channel)
+    const check = options?.deviceScope
+      ? { allowed: true, resolvedPath: this.resolveDeviceReadPath(agentId, filePath) }
+      : this.validatePath(agentId, filePath, 'write', channel)
     if (!check.allowed) {
       throw new Error(check.reason)
     }

@@ -252,7 +252,20 @@ describe('LocalWorkspaceService', () => {
       ).rejects.toThrow('逃逸')
     })
 
-    it('read 应当截断超长内容', async () => {
+    it('read 默认按 800 行截断 full 内容', async () => {
+      const longContent = Array.from({ length: 805 }, (_, index) => `第 ${index + 1} 行`).join('\n')
+      await service.write(AGENT_ID, 'notes/long-lines.txt', longContent, 'desktop')
+
+      const read = await service.read(AGENT_ID, 'notes/long-lines.txt', 'desktop')
+      const returnedLines = read.split('\n')
+      expect(returnedLines).toHaveLength(801)
+      expect(returnedLines[0]).toBe('第 1 行')
+      expect(returnedLines[799]).toBe('第 800 行')
+      expect(returnedLines[800]).toBe('...[内容已截断]...')
+      expect(read).not.toContain('第 801 行')
+    })
+
+    it('read 显式 maxLength 时仍按字符数截断', async () => {
       const longContent = 'x'.repeat(20_000)
       await service.write(AGENT_ID, 'notes/long.txt', longContent, 'desktop')
 

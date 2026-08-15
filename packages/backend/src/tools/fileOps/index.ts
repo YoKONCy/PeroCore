@@ -126,7 +126,7 @@ export const readFileTool: BuiltinTool = {
 
   async execute(args, ctx) {
     const filePath = args.file_path as string
-    const maxLength = (args.max_length as number) ?? 10_000
+    const maxLength = args.max_length === undefined ? undefined : Number(args.max_length)
 
     try {
       const service = requireWorkspaceService()
@@ -151,18 +151,28 @@ export const writeFileTool: BuiltinTool = {
 
     try {
       const service = requireWorkspaceService()
-      const captured = await checkpointService?.captureToolMutation(ctx, filePath)
+      const captured = ctx.approvedOutsideWorkspace
+        ? null
+        : await checkpointService?.captureToolMutation(ctx, filePath)
       // 写入前先读取元信息，向前端明确报告 create/overwrite/append，便于工作区自动打开新文件。
-      const before = await service.stat(ctx.agentId, filePath, ctx.channel)
+      const before = await service.stat(ctx.agentId, filePath, ctx.channel, {
+        deviceScope: ctx.approvedOutsideWorkspace,
+      })
       // 写入前读取旧正文用于计算 UI Diff；旧正文仅在本次工具执行内存中存在。
       // 无法读取（新文件/超大文件/编码问题）时降级为空文本，不阻断真实写入。
       const oldContent = before.exists
         ? await service
-            .read(ctx.agentId, filePath, ctx.channel, { maxLength: 10_000_000 })
+            .read(ctx.agentId, filePath, ctx.channel, {
+              maxLength: 10_000_000,
+              deviceScope: ctx.approvedOutsideWorkspace,
+            })
             .catch(() => '')
         : ''
       // AIOS(Phase4): write 始终走 containment 检查（所有 channel 都限 workspace）
-      await service.write(ctx.agentId, filePath, content, ctx.channel, { append })
+      await service.write(ctx.agentId, filePath, content, ctx.channel, {
+        append,
+        deviceScope: ctx.approvedOutsideWorkspace,
+      })
       await checkpointService?.commitFromDisk(captured ?? null)
       const operation = append ? 'append' : before.exists ? 'overwrite' : 'create'
       const finalContent = append ? `${oldContent}${content}` : content

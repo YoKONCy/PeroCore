@@ -21,7 +21,7 @@
             "type": "string",
             "description": "文件路径。优先使用相对于当前 Agent workspace 根目录的路径，例如 notes/today.md；不要添加 workspace/ 前缀。"
           },
-          "max_length": { "type": "number", "description": "最大读取字符数 (默认 10000)" }
+          "max_length": { "type": "number", "description": "可选的最大读取字符数；不指定时默认返回前 800 行" }
         },
         "required": ["file_path"]
       }

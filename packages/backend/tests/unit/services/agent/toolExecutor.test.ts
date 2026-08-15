@@ -176,6 +176,57 @@ describe('RegistryToolExecutor', () => {
     expect(approvals.get(request.id)?.status).toBe('consumed')
   })
 
+  it('工作区外路径必须审批后才执行，并仅向本次工具上下文授予越界能力', async () => {
+    const { registry, handler } = createRegistry()
+    const capabilityGate = {
+      isToolAllowed: vi.fn().mockReturnValue(true),
+      isPathAllowed: vi.fn().mockReturnValue(false),
+      getToolPermission: vi.fn().mockReturnValue({
+        toolName: 'demo.run',
+        resourceScope: {
+          scope: 'principal_workspace',
+          allowedRoots: ['C:/workspace'],
+          deniedPaths: [],
+        },
+        requiresApproval: false,
+      }),
+    } as unknown as CapabilityGate
+    const approvals = new ApprovalService()
+    const executor = new RegistryToolExecutor(registry, capabilityGate, null, null, {
+      agentId: 'pero',
+      channel: 'desktop',
+      sessionId: 'outside-thread',
+    })
+    executor.setPolicyRuntime(new PolicyEngine(), approvals)
+
+    const execution = executor.execute('demo.run', { path: 'C:/outside/file.txt' }, 'desktop')
+    await vi.waitFor(() => expect(approvals.list({ status: 'pending' })).toHaveLength(1))
+    expect(handler).not.toHaveBeenCalled()
+    const request = approvals.list({ status: 'pending' })[0]!
+    expect(request.reason).toContain('资源范围外路径')
+
+    approvals.resolve(request.id, 'allow_always')
+    const result = await execution
+
+    expect(result.isError).toBe(false)
+    expect(handler).toHaveBeenCalledWith(
+      { path: 'C:/outside/file.txt' },
+      expect.objectContaining({ approvedOutsideWorkspace: true }),
+    )
+
+    const secondExecution = executor.execute(
+      'demo.run',
+      { path: 'C:/outside/another.txt' },
+      'desktop',
+    )
+    await vi.waitFor(() => expect(approvals.list({ status: 'pending' })).toHaveLength(1))
+    expect(handler).toHaveBeenCalledTimes(1)
+    approvals.resolve(approvals.list({ status: 'pending' })[0]!.id, 'deny_once')
+    const denied = await secondExecution
+    expect(denied.isError).toBe(true)
+    expect(handler).toHaveBeenCalledTimes(1)
+  })
+
   it('应当处理未知工具、执行异常与长输出截断', async () => {
     const registry = new ToolRegistry()
     registry.register(

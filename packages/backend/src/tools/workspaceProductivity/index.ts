@@ -23,6 +23,7 @@ export const readFileRangeTool: BuiltinTool = {
       session,
       String(args.path),
       {
+        deviceScope: true,
         offset: args.offset === undefined ? undefined : Number(args.offset),
         limit: args.limit === undefined ? undefined : Number(args.limit),
         lineStart: args.line_start === undefined ? undefined : Number(args.line_start),
@@ -55,12 +56,15 @@ export const editFileTool: BuiltinTool = {
   async execute(args, ctx) {
     const session = await resolveExecutionSession(ctx)
     try {
-      const captured = await checkpointService?.captureToolMutation(ctx, String(args.path))
+      const captured = ctx.approvedOutsideWorkspace
+        ? null
+        : await checkpointService?.captureToolMutation(ctx, String(args.path))
       const result = await getProductivityRuntime().virtualWorkspace.edit(session, {
         path: String(args.path),
         oldText: String(args.old_text),
         newText: String(args.new_text),
         expectedHash: args.expected_hash ? String(args.expected_hash) : undefined,
+        deviceScope: ctx.approvedOutsideWorkspace,
       })
       await checkpointService?.commitFromDisk(captured ?? null)
       return toolSuccess(JSON.stringify(result), result)

@@ -53,6 +53,35 @@ describe('VirtualWorkspace', () => {
     }
   })
 
+  it('审批后的单次编辑可访问工作区外绝对路径，未授权调用仍被拒绝', async () => {
+    const externalRoot = await mkdtemp(path.join(tmpdir(), 'infos-approved-write-'))
+    const externalFile = path.join(externalRoot, 'outside.txt')
+    await writeFile(externalFile, '修改前', 'utf8')
+    const workspace = new VirtualWorkspace()
+    try {
+      await expect(
+        workspace.edit(session, {
+          path: externalFile,
+          oldText: '修改前',
+          newText: '修改后',
+        }),
+      ).rejects.toThrow('超出可写范围')
+
+      const result = await workspace.edit(session, {
+        path: externalFile,
+        oldText: '修改前',
+        newText: '修改后',
+        deviceScope: true,
+      })
+      expect(result.success).toBe(true)
+      expect((await workspace.read(session, externalFile, { deviceScope: true })).content).toBe(
+        '修改后',
+      )
+    } finally {
+      await rm(externalRoot, { recursive: true, force: true })
+    }
+  })
+
   it('支持按行与尾部读取并返回哈希', async () => {
     await writeFile(path.join(root, 'sample.txt'), '第一行\n第二行\n第三行\n第四行', 'utf8')
     const workspace = new VirtualWorkspace()
@@ -66,6 +95,19 @@ describe('VirtualWorkspace', () => {
     const tail = await workspace.read(session, 'sample.txt', { tailLines: 2 })
     expect(tail.content).toBe('第三行\n第四行')
     expect(tail.totalLines).toBe(4)
+
+    const beyondEnd = await workspace.read(session, 'sample.txt', {
+      lineStart: 10,
+      lineEnd: 20,
+    })
+    expect(beyondEnd.content).toBe('')
+    expect(beyondEnd.totalLines).toBe(4)
+    expect(beyondEnd.lineStart).toBe(10)
+    expect(beyondEnd.lineEnd).toBe(9)
+
+    await expect(
+      workspace.read(session, 'sample.txt', { lineStart: 3, lineEnd: 2 }),
+    ).rejects.toThrow('line_end 不能小于 line_start')
   })
 
   it('Glob 支持双星号并限制在工作区', async () => {

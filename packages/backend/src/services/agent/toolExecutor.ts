@@ -315,20 +315,8 @@ export class RegistryToolExecutor implements ToolExecutor {
         }
       }
 
-      // 第六阶段 #6: ResourceScope 路径校验
-      // 对涉及文件操作的工具，提取 args 中的路径参数，校验是否落在 allowedRoots 内
-      const pathViolation = this.checkPathAllowed(name, args, agentId, channel)
-      if (pathViolation) {
-        logger.warn(
-          `工具 ${name} 路径被 ResourceScope 拒绝: ${pathViolation} (agent=${agentId}, channel=${channel})`,
-        )
-        return {
-          output: `工具 "${name}" 的路径参数被资源范围策略拒绝: ${pathViolation}`,
-          durationMs: Date.now() - startTime,
-          isError: true,
-          shouldTerminate: false,
-        }
-      }
+      // ResourceScope 路径越界不在这里直接拒绝；Hook 可能修改参数，最终参数会在
+      // Hook 后进入强制审批。工具白名单本身仍然保持 fail-closed。
     }
 
     // ── 从 Registry 查找 ──
@@ -369,24 +357,34 @@ export class RegistryToolExecutor implements ToolExecutor {
       }
     }
 
-    // Hook 可能修改路径参数；修改后的最终参数必须再次经过 ResourceScope 校验。
-    if (this.capabilityGate) {
-      const pathViolation = this.checkPathAllowed(name, args, agentId, channel)
-      if (pathViolation) {
-        return {
-          output: `工具 "${name}" 修改后的路径参数被资源范围策略拒绝: ${pathViolation}`,
-          durationMs: Date.now() - startTime,
-          isError: true,
-          shouldTerminate: false,
-        }
-      }
+    // Hook 可能修改路径参数；对最终参数执行 ResourceScope 校验。
+    // 越界路径必须逐次审批，不能被工具级“本会话/始终允许”授权绕过。
+    const pathViolation = this.capabilityGate
+      ? this.checkPathAllowed(name, args, agentId, channel)
+      : null
+    if (pathViolation) {
+      logger.warn(
+        `工具 ${name} 请求 ResourceScope 外路径，转入强制审批: ${pathViolation} (agent=${agentId}, channel=${channel})`,
+      )
     }
 
     // 参数与审批策略必须基于 Hook 修改后的最终参数执行。
     let approvalObservation: { decision: string; userMessage?: string } | undefined
+    let approvedOutsideWorkspace = false
+    if (pathViolation && !this.policyEngine) {
+      return {
+        output: JSON.stringify({
+          code: 'APPROVAL_UNAVAILABLE',
+          message: '工作区外路径必须经过用户审批，但策略引擎当前不可用',
+        }),
+        durationMs: Date.now() - startTime,
+        isError: true,
+        shouldTerminate: false,
+      }
+    }
     if (this.policyEngine) {
       const permission = this.capabilityGate?.getToolPermission(agentId, channel, name)
-      const decision = this.policyEngine.evaluate({
+      const policyDecision = this.policyEngine.evaluate({
         agentId,
         channel,
         sessionId,
@@ -396,6 +394,12 @@ export class RegistryToolExecutor implements ToolExecutor {
         args,
         permission,
       })
+      const decision = pathViolation
+        ? {
+            action: 'require_approval' as const,
+            reason: `工具 ${name} 请求访问工作区或资源范围外路径：${pathViolation}`,
+          }
+        : policyDecision
       if (decision.action === 'deny') {
         return {
           output: JSON.stringify({ code: decision.code, message: decision.reason }),
@@ -404,7 +408,18 @@ export class RegistryToolExecutor implements ToolExecutor {
           shouldTerminate: false,
         }
       }
-      if (decision.action === 'require_approval' && this.approvalService) {
+      if (decision.action === 'require_approval') {
+        if (!this.approvalService) {
+          return {
+            output: JSON.stringify({
+              code: 'APPROVAL_UNAVAILABLE',
+              message: '该工具调用需要用户审批，但审批服务当前不可用',
+            }),
+            durationMs: Date.now() - startTime,
+            isError: true,
+            shouldTerminate: false,
+          }
+        }
         const deniedOnceMessage = this.approvalService.consumeDeniedOnce({
           agentId,
           sessionId,
@@ -424,12 +439,13 @@ export class RegistryToolExecutor implements ToolExecutor {
             shouldTerminate: false,
           }
         }
-        const authorization = this.approvalService.authorize({
+        const storedAuthorization = this.approvalService.authorize({
           agentId,
           sessionId,
           toolName: name,
           args,
         })
+        const authorization = pathViolation && storedAuthorization === 'allow' ? 'none' : storedAuthorization
         if (authorization === 'deny') {
           // 若用户留过拒绝附言，把理由一并回传给 Agent，避免原样盲目重试。
           const userMessage = this.approvalService.findDeniedMessage({
@@ -492,6 +508,7 @@ export class RegistryToolExecutor implements ToolExecutor {
             decision: resolved.decision,
             userMessage: resolved.resolutionMessage,
           }
+          approvedOutsideWorkspace = pathViolation !== null
         }
       }
     }
@@ -509,6 +526,7 @@ export class RegistryToolExecutor implements ToolExecutor {
         taskId: runtimeContext?.taskId,
         pairId: runtimeContext?.pairId,
         toolCallId: runtimeContext?.toolCallId,
+        ...(approvedOutsideWorkspace ? { approvedOutsideWorkspace: true } : {}),
       }
 
       const rawResult = await this.executeWithTimeout(handler, args, context, name)
