@@ -71,7 +71,9 @@ export const runScriptTool: BuiltinTool = {
     if (cwd) {
       const capabilityGate = getCapabilityGate()
       if (capabilityGate) {
-        const allowed = capabilityGate.isPathAllowed(ctx.agentId, ctx.channel, 'run_script', cwd)
+        const allowed =
+          ctx.approvedOutsideWorkspace ||
+          capabilityGate.isPathAllowed(ctx.agentId, ctx.channel, 'run_script', cwd)
         if (!allowed) {
           logger.warn(
             `run_script cwd 被 ResourceScope 拒绝: cwd=${cwd} (agent=${ctx.agentId}, channel=${ctx.channel})`,

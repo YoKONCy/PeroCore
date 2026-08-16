@@ -131,7 +131,10 @@ export const readFileTool: BuiltinTool = {
     try {
       const service = requireWorkspaceService()
       // AIOS(Phase4): 按 channel 分级 containment 检查
-      const content = await service.read(ctx.agentId, filePath, ctx.channel, { maxLength })
+      const content = await service.read(ctx.agentId, filePath, ctx.channel, {
+        maxLength,
+        deviceScope: ctx.approvedOutsideWorkspace,
+      })
       return content
     } catch (err) {
       return JSON.stringify({
@@ -201,7 +204,9 @@ export const fileInfoTool: BuiltinTool = {
     try {
       const service = requireWorkspaceService()
       // AIOS(Phase4): stat 走 read 权限（info 不修改文件）
-      const stat = await service.stat(ctx.agentId, filePath, ctx.channel)
+      const stat = await service.stat(ctx.agentId, filePath, ctx.channel, {
+        deviceScope: ctx.approvedOutsideWorkspace,
+      })
 
       if (!stat.exists) {
         return JSON.stringify({ error: `路径不存在: ${filePath}` })
@@ -229,7 +234,9 @@ export const listDirectoryTool: BuiltinTool = {
     try {
       const service = requireWorkspaceService()
       // AIOS(Phase4): list 走 read 权限
-      const entries = await service.list(ctx.agentId, dirPath, ctx.channel, { deviceScope: true })
+      const entries = await service.list(ctx.agentId, dirPath, ctx.channel, {
+        deviceScope: ctx.approvedOutsideWorkspace,
+      })
 
       const items = entries.map((e) => ({
         name: e.name,

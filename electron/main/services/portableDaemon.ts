@@ -159,36 +159,42 @@ export async function ensurePortableDaemon(): Promise<boolean> {
   fs.mkdirSync(paths.logs, { recursive: true })
   const daemonLogPath = path.join(paths.logs, 'daemon-bootstrap.log')
   startupStatus = { ...startupStatus, logPath: daemonLogPath, running: true, error: undefined }
-  const daemonLog = fs.createWriteStream(daemonLogPath, { flags: 'a' })
-  daemonLog.write(`\n[${new Date().toISOString()}] 启动内置 Daemon\n`)
+  let daemonLogFd: number | null = null
+  try {
+    daemonLogFd = fs.openSync(daemonLogPath, 'a')
+    fs.writeSync(daemonLogFd, `\n[${new Date().toISOString()}] 启动内置 Daemon\n`)
+    daemonChild = spawn(process.execPath, [bundlePath], {
+      env: {
+        ...process.env,
+        // 用 exe 自带的 Node 运行时执行 daemon（无需额外安装 node）
+        ELECTRON_RUN_AS_NODE: '1',
+        // 数据目录一锤定音，确保数据库、Agent、Workspace、扩展和 Skills 全部同根。
+        PERO_DATA_DIR: dataDir,
+        // 后端根目录（内置角色/提示词/预设资源位置）。
+        PERO_APP_ROOT: backendRoot,
+        INFOS_RESOURCES_ROOT: process.resourcesPath,
+        // 多个 Workshop item 根以 JSON 传递，避免 Windows 路径分隔与盘符歧义。
+        PERO_WORKSHOP_DIRS: JSON.stringify(workshopDirs),
+      },
+      cwd: path.dirname(app.getPath('exe')),
+      stdio: ['ignore', daemonLogFd, daemonLogFd],
+      windowsHide: true,
+    })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    startupStatus = { ...startupStatus, running: false, error: `进程启动失败: ${message}` }
+    logger.error('PortableDaemon', `内置 Daemon 启动失败: ${message}`)
+    return false
+  } finally {
+    // spawn 已为子进程复制日志句柄，父进程必须立即释放自己的描述符。
+    if (daemonLogFd !== null) fs.closeSync(daemonLogFd)
+  }
 
-  daemonChild = spawn(process.execPath, [bundlePath], {
-    env: {
-      ...process.env,
-      // 用 exe 自带的 Node 运行时执行 daemon（无需额外安装 node）
-      ELECTRON_RUN_AS_NODE: '1',
-      // 数据目录一锤定音，确保数据库、Agent、Workspace、扩展和 Skills 全部同根。
-      PERO_DATA_DIR: dataDir,
-      // 后端根目录（内置角色/提示词/预设资源位置）。
-      PERO_APP_ROOT: backendRoot,
-      INFOS_RESOURCES_ROOT: process.resourcesPath,
-      // 多个 Workshop item 根以 JSON 传递，避免 Windows 路径分隔与盘符歧义。
-      PERO_WORKSHOP_DIRS: JSON.stringify(workshopDirs),
-    },
-    cwd: path.dirname(app.getPath('exe')),
-    stdio: ['ignore', daemonLog, daemonLog],
-    windowsHide: true,
-  })
-
-  daemonLog.on('error', (err) => {
-    logger.warn('PortableDaemon', `Daemon 启动日志写入失败: ${err.message}`)
-  })
   daemonChild.on('error', (err) => {
     startupStatus = { ...startupStatus, running: false, error: `进程启动失败: ${err.message}` }
     logger.error('PortableDaemon', `内置 Daemon 启动失败: ${err.message}`)
   })
   daemonChild.on('exit', (code, signal) => {
-    daemonLog.end()
     startupStatus = {
       ...startupStatus,
       running: false,

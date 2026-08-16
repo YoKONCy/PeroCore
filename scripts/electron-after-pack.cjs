@@ -1,4 +1,5 @@
 const fs = require('node:fs/promises')
+const fsSync = require('node:fs')
 const path = require('node:path')
 const { spawn } = require('node:child_process')
 const http = require('node:http')
@@ -104,38 +105,50 @@ async function validateDaemonBoot(appOutDir, resourcesDir, executableName) {
   await assertFile(bundle, '内置 Daemon bundle')
 
   const dataDir = path.join(appOutDir, '.daemon-smoke-data')
+  const logPath = path.join(appOutDir, '.daemon-smoke.log')
   await fs.mkdir(dataDir, { recursive: true })
-  let output = ''
-  const child = spawn(executable, [bundle], {
-    cwd: appOutDir,
-    env: {
-      ...process.env,
-      ELECTRON_RUN_AS_NODE: '1',
-      PERO_PORT: '19120',
-      PERO_DATA_DIR: dataDir,
-      PERO_APP_ROOT: path.join(resourcesDir, 'backend'),
-      INFOS_RESOURCES_ROOT: resourcesDir,
-      PERO_WORKSHOP_DIRS: '[]',
-    },
-    windowsHide: true,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  })
-  child.stdout.on('data', (chunk) => (output += chunk.toString()))
-  child.stderr.on('data', (chunk) => (output += chunk.toString()))
+  const logFd = fsSync.openSync(logPath, 'a')
+  let child
+  try {
+    child = spawn(executable, [bundle], {
+      cwd: appOutDir,
+      env: {
+        ...process.env,
+        ELECTRON_RUN_AS_NODE: '1',
+        PERO_PORT: '19120',
+        PERO_DATA_DIR: dataDir,
+        PERO_APP_ROOT: path.join(resourcesDir, 'backend'),
+        INFOS_RESOURCES_ROOT: resourcesDir,
+        PERO_WORKSHOP_DIRS: '[]',
+      },
+      windowsHide: true,
+      // 与正式 PortableDaemon 完全一致：使用已经打开的同步文件描述符。
+      stdio: ['ignore', logFd, logFd],
+    })
+  } finally {
+    fsSync.closeSync(logFd)
+  }
 
   try {
+    const readOutput = async () => {
+      try {
+        return await fs.readFile(logPath, 'utf8')
+      } catch {
+        return ''
+      }
+    }
     const deadline = Date.now() + 30_000
     while (Date.now() < deadline) {
       if (await probeHealth(19120)) return
       if (child.exitCode !== null) {
-        throw new Error(`Daemon 提前退出，exitCode=${child.exitCode}\n${output}`)
+        throw new Error(`Daemon 提前退出，exitCode=${child.exitCode}\n${await readOutput()}`)
       }
       await new Promise((resolve) => setTimeout(resolve, 500))
     }
-    throw new Error(`Daemon 启动验证超时\n${output}`)
+    throw new Error(`Daemon 启动验证超时\n${await readOutput()}`)
   } finally {
     await stopChild(child)
-    await removePath(dataDir)
+    await Promise.all([removePath(dataDir), removePath(logPath)])
   }
 }
 

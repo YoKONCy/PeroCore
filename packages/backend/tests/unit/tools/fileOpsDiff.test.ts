@@ -1,5 +1,12 @@
-import { describe, expect, it } from 'vitest'
-import { buildToolDiff } from '@infos/backend/tools/fileOps'
+import { describe, expect, it, vi } from 'vitest'
+import {
+  buildToolDiff,
+  fileInfoTool,
+  listDirectoryTool,
+  readFileTool,
+  setWorkspaceService,
+} from '@infos/backend/tools/fileOps'
+import type { WorkspaceService } from '@infos/backend/services/workspace/workspaceService'
 
 describe('write_file 工具 Diff 预览', () => {
   it('新建 Markdown 文件应按实际行数统计为纯新增', () => {
@@ -38,5 +45,61 @@ describe('write_file 工具 Diff 预览', () => {
     expect(result.diffPreview).toHaveLength(80)
     expect(result.diffPreview[0]!.text.length).toBe(501)
     expect(result.diffTruncated).toBe(true)
+  })
+})
+
+describe('文件工具越界审批凭证', () => {
+  const context = {
+    agentId: 'pero',
+    sessionId: 'thread-1',
+    source: 'desktop',
+    threadId: 'thread-1',
+    channel: 'desktop',
+    approvedOutsideWorkspace: true,
+  }
+
+  it('读取与元信息工具应将审批凭证传给 WorkspaceService', async () => {
+    const service = {
+      read: vi.fn().mockResolvedValue('内容'),
+      stat: vi.fn().mockResolvedValue({
+        exists: true,
+        isFile: true,
+        isDirectory: false,
+        size: 2,
+        modifiedAt: null,
+      }),
+    } as unknown as WorkspaceService
+    setWorkspaceService(service)
+
+    await readFileTool.execute({ file_path: 'C:/outside/a.txt' }, context)
+    await fileInfoTool.execute({ file_path: 'C:/outside/a.txt' }, context)
+
+    expect(service.read).toHaveBeenCalledWith(
+      'pero',
+      'C:/outside/a.txt',
+      'desktop',
+      expect.objectContaining({ deviceScope: true }),
+    )
+    expect(service.stat).toHaveBeenCalledWith('pero', 'C:/outside/a.txt', 'desktop', {
+      deviceScope: true,
+    })
+  })
+
+  it('目录工具仅在已审批时启用设备范围', async () => {
+    const service = { list: vi.fn().mockResolvedValue([]) } as unknown as WorkspaceService
+    setWorkspaceService(service)
+
+    await listDirectoryTool.execute(
+      { dir_path: 'C:/outside' },
+      { ...context, approvedOutsideWorkspace: undefined },
+    )
+    await listDirectoryTool.execute({ dir_path: 'C:/outside' }, context)
+
+    expect(service.list).toHaveBeenNthCalledWith(1, 'pero', 'C:/outside', 'desktop', {
+      deviceScope: undefined,
+    })
+    expect(service.list).toHaveBeenNthCalledWith(2, 'pero', 'C:/outside', 'desktop', {
+      deviceScope: true,
+    })
   })
 })
