@@ -1,0 +1,12 @@
+# 评测产生的数据与索引
+artifacts/*
+!artifacts/.gitkeep
+
+# Python虚拟环境与缓存
+.venv/
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/

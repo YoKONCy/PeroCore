@@ -4,7 +4,20 @@ const { spawn } = require('node:child_process')
 const http = require('node:http')
 
 async function removePath(targetPath) {
-  await fs.rm(targetPath, { recursive: true, force: true })
+  await fs.rm(targetPath, { recursive: true, force: true, maxRetries: 12, retryDelay: 250 })
+}
+
+/** 等待子进程完全退出，确保 Windows 已释放 SQLite WAL/SHM 文件句柄。 */
+async function stopChild(child) {
+  if (child.exitCode !== null || child.signalCode !== null) return
+  const exited = new Promise((resolve) => child.once('exit', resolve))
+  child.kill()
+  await Promise.race([
+    exited,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Daemon 烟雾测试进程退出超时')), 10_000),
+    ),
+  ])
 }
 
 async function assertFile(targetPath, label) {
@@ -121,8 +134,8 @@ async function validateDaemonBoot(appOutDir, resourcesDir, executableName) {
     }
     throw new Error(`Daemon 启动验证超时\n${output}`)
   } finally {
-    child.kill()
-    await fs.rm(dataDir, { recursive: true, force: true })
+    await stopChild(child)
+    await removePath(dataDir)
   }
 }
 

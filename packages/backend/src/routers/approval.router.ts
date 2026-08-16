@@ -5,7 +5,7 @@ import type { AppContext } from '../container'
 import { AppError } from '../lib/appError'
 
 const resolveSchema = z.object({
-  decision: z.enum(['allow_once', 'allow_session', 'allow_always', 'deny_once', 'deny_always']),
+  decision: z.enum(['allow_once', 'allow_session', 'deny_once']),
   /** 决策附言：同意/拒绝时写给 Agent 的理由（可选，最长 2000 字） */
   message: z.string().max(2000).optional(),
 })

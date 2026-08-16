@@ -38,6 +38,8 @@ export interface Props {
   agentAvatarUrl?: string
   /** 工作区窄栏模式：输入台根据容器宽度自动压缩。 */
   compactInput?: boolean
+  /** 是否在对话容器内展示审批浮层；工作区使用自己的审批队列。 */
+  showApprovals?: boolean
   /** 工作区模式：向发送内容附加当前文件/终端上下文。 */
   workspaceContext?: { filePath?: string; terminalId?: string }
 }
@@ -47,6 +49,7 @@ const props = withDefaults(defineProps<Props>(), {
   threadId: '',
   agentAvatarUrl: '',
   compactInput: false,
+  showApprovals: true,
   workspaceContext: undefined,
 })
 
@@ -389,7 +392,7 @@ onUnmounted(() => {
     </div>
 
     <!-- 当前 Thread 待审批工具调用：作为对话中的系统交互卡片。 -->
-    <div v-if="pendingApprovals.length" class="chat-approvals">
+    <div v-if="showApprovals && pendingApprovals.length" class="chat-approvals">
       <ApprovalCard
         v-for="request in pendingApprovals"
         :key="request.id"
@@ -480,6 +483,18 @@ onUnmounted(() => {
 .chat-messages::-webkit-scrollbar-thumb {
   background: var(--ui-scrollbar-thumb);
   border-radius: var(--ui-radius-full);
+}
+
+.chat-approvals {
+  position: absolute;
+  right: 28px;
+  bottom: 112px;
+  z-index: 24;
+  display: grid;
+  width: min(560px, calc(100% - 56px));
+  max-height: min(62vh, 480px);
+  overflow-y: auto;
+  filter: drop-shadow(5px 6px 0 color-mix(in srgb, var(--ui-text-primary) 16%, transparent));
 }
 
 .chat-input-area {

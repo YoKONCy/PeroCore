@@ -62,7 +62,7 @@ const statusEnum = z.enum([
 const resumeInterruptedSchema = z.object({})
 
 const inputSchema = z.object({
-  decision: z.enum(['allow_once', 'allow_session', 'allow_always', 'deny_once', 'deny_always']),
+  decision: z.enum(['allow_once', 'allow_session', 'deny_once']),
   message: z.string().max(2000).optional(),
 })
 

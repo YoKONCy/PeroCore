@@ -52,17 +52,13 @@ describe('ApprovalService SQLite', () => {
     sqlite.close()
   })
 
-  it('Daemon 重启后恢复永久授权和永久拒绝', () => {
+  it('Daemon 重启后不会保留本轮对话授权', () => {
     const { sqlite, repository } = createRepository()
-    const allowService = new ApprovalService(repository)
-    const allowed = allowService.create(input)
-    allowService.resolve(allowed.id, 'allow_always')
-    expect(new ApprovalService(repository).authorize(input)).toBe('allow')
-
-    const deniedInput = { ...input, toolName: 'terminal_create' }
-    const denied = allowService.create(deniedInput)
-    allowService.resolve(denied.id, 'deny_always')
-    expect(new ApprovalService(repository).authorize(deniedInput)).toBe('deny')
+    const service = new ApprovalService(repository)
+    const request = service.create(input)
+    service.resolve(request.id, 'allow_session')
+    expect(service.authorize(input)).toBe('allow')
+    expect(new ApprovalService(repository).authorize(input)).toBe('none')
     sqlite.close()
   })
 })

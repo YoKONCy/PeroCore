@@ -126,6 +126,7 @@ function itemClasses(item: MainNavItem): string[] {
             <span
               v-if="approvalStore.pendingCount && item.id === 'chat'"
               class="main-nav-approval-badge"
+              :class="{ 'main-nav-approval-badge--collapsed': isNavCollapsed }"
             >
               {{ approvalStore.pendingCount }}
             </span>
@@ -155,18 +156,29 @@ function itemClasses(item: MainNavItem): string[] {
 
 <style scoped>
 .main-nav-approval-badge {
+  position: absolute;
+  top: 4px;
+  right: 7px;
+  z-index: 2;
   display: grid;
-  min-width: 17px;
-  height: 17px;
-  margin-left: auto;
-  padding: 0 4px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
   place-items: center;
+  border: 2px solid var(--ui-bg-surface, #fff);
   border-radius: 9px;
   background: #f43f5e;
   color: white;
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 800;
-  box-shadow: 0 0 0 2px rgba(244, 63, 94, 0.14);
+  line-height: 1;
+  box-shadow: 0 2px 6px rgba(244, 63, 94, 0.32);
+  pointer-events: none;
+}
+
+.main-nav-approval-badge--collapsed {
+  top: 2px;
+  right: 2px;
 }
 
 /* ═══════════════════════════════════════════════════════════════

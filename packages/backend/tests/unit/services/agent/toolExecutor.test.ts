@@ -21,6 +21,33 @@ describe('RegistryToolExecutor', () => {
     vi.useRealTimers()
   })
 
+  it('应将旧工具的 JSON 错误结果归一化为失败状态', async () => {
+    const registry = new ToolRegistry()
+    registry.register(
+      { name: 'legacy.read', description: '旧读取工具', parameters: { type: 'object' } },
+      vi.fn().mockResolvedValue(JSON.stringify({ error: '文件不存在' })),
+    )
+    const executor = new RegistryToolExecutor(registry)
+
+    await expect(executor.execute('legacy.read', {}, 'desktop')).resolves.toMatchObject({
+      isError: true,
+      output: expect.stringContaining('文件不存在'),
+    })
+  })
+
+  it('应将旧工具的 success=false 结果归一化为失败状态', async () => {
+    const registry = new ToolRegistry()
+    registry.register(
+      { name: 'legacy.edit', description: '旧编辑工具', parameters: { type: 'object' } },
+      vi.fn().mockResolvedValue(JSON.stringify({ success: false, error: '编辑失败' })),
+    )
+    const executor = new RegistryToolExecutor(registry)
+
+    await expect(executor.execute('legacy.edit', {}, 'desktop')).resolves.toMatchObject({
+      isError: true,
+    })
+  })
+
   it('应当直接执行 finish_task 并返回终止信号', async () => {
     const { registry } = createRegistry()
     const executor = new RegistryToolExecutor(registry)
@@ -232,7 +259,7 @@ describe('RegistryToolExecutor', () => {
     const firstExecution = executor.execute('terminal_execute', args, 'desktop')
     await vi.waitFor(() => expect(approvals.list({ status: 'pending' })).toHaveLength(1))
     expect(handler).not.toHaveBeenCalled()
-    approvals.resolve(approvals.list({ status: 'pending' })[0]!.id, 'allow_always')
+    approvals.resolve(approvals.list({ status: 'pending' })[0]!.id, 'allow_once')
     expect((await firstExecution).isError).toBe(false)
     expect(handler).toHaveBeenCalledWith(
       args,
@@ -277,7 +304,7 @@ describe('RegistryToolExecutor', () => {
     const request = approvals.list({ status: 'pending' })[0]!
     expect(request.reason).toContain('资源范围外路径')
 
-    approvals.resolve(request.id, 'allow_always')
+    approvals.resolve(request.id, 'allow_once')
     const result = await execution
 
     expect(result.isError).toBe(false)

@@ -134,7 +134,7 @@ export const backgroundTasksApi = {
   input: (
     id: string,
     data: {
-      decision: 'allow_once' | 'allow_session' | 'allow_always' | 'deny_once' | 'deny_always'
+      decision: 'allow_once' | 'allow_session' | 'deny_once'
       message?: string
     },
   ) => apiClient.post<BackgroundTaskInfo>(`/background-tasks/${id}/input`, data),

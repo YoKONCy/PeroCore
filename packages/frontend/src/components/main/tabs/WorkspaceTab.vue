@@ -653,6 +653,7 @@ onBeforeUnmount(() => {
                 :agent-avatar-url="agentAvatarUrl"
                 :thread-id="threadStore.threadId"
                 compact-input
+                :show-approvals="false"
                 :workspace-context="{
                   filePath: activePath || undefined,
                   terminalId: activeTerminalId || undefined,

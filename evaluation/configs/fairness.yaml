@@ -1,0 +1,10 @@
+fairness:
+  shared_document_embeddings: true
+  shared_query_embeddings: true
+  shared_corpus: true
+  shared_qrels: true
+  shared_final_top_k: true
+  reset_state_per_query: true
+  test_set_tuning_forbidden: true
+  graph_qrel_leakage_forbidden: true
+  failed_queries_count_as_failures: true

@@ -123,24 +123,6 @@ export class ToolApprovalRepository {
     return row ? this.fromRow(row) : undefined
   }
 
-  listEffectiveDecisions(): ApprovalRequest[] {
-    return this.db
-      .select()
-      .from(toolApprovalRequests)
-      .all()
-      .map((row) => this.fromRow(row))
-      .filter(
-        (request) =>
-          (request.status === 'approved' && request.decision === 'allow_always') ||
-          (request.status === 'denied' && request.decision === 'deny_always'),
-      )
-      .sort(
-        (left, right) =>
-          Date.parse(left.resolvedAt ?? left.createdAt) -
-          Date.parse(right.resolvedAt ?? right.createdAt),
-      )
-  }
-
   expirePending(nowIso: string): ApprovalRequest[] {
     const expired = this.db
       .select()

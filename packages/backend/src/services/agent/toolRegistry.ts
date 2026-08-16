@@ -15,7 +15,7 @@
 
 import type { ToolDefinition } from '../pipeline/types'
 import type { ToolExecutionResult } from './reactLoop'
-import type { StructuredToolResult } from '../execution/toolResult'
+import { toolFailure, type StructuredToolResult } from '../execution/toolResult'
 import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('ToolRegistry')
@@ -228,7 +228,7 @@ export class ToolRegistry {
         const result = await tool.execute!(args, ctx)
         // ToolResult → string 适配
         if (!result.success) {
-          return result.error ?? '工具执行失败'
+          return toolFailure('EXTENSION_TOOL_FAILED', result.error ?? '工具执行失败')
         }
         return typeof result.data === 'string' ? result.data : JSON.stringify(result.data ?? '')
       }

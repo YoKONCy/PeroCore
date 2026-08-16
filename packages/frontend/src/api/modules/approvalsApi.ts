@@ -6,12 +6,7 @@
 
 import { apiClient } from '../client'
 
-export type ApprovalDecision =
-  | 'allow_once'
-  | 'allow_session'
-  | 'allow_always'
-  | 'deny_once'
-  | 'deny_always'
+export type ApprovalDecision = 'allow_once' | 'allow_session' | 'deny_once'
 
 export type ApprovalStatus = 'pending' | 'approved' | 'denied' | 'expired' | 'consumed'
 

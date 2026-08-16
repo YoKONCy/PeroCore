@@ -45,6 +45,23 @@ const MAX_OUTPUT_LENGTH = 8000
  */
 const SKIP_TRUNCATE_TOOLS = new Set<string>(['take_screenshot'])
 
+/** 兼容尚未迁移到 StructuredToolResult 的旧工具错误返回。 */
+export function isLegacyToolErrorOutput(output: string): boolean {
+  const value = output.trim()
+  if (!value.startsWith('{')) return false
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>
+    return (
+      parsed.success === false ||
+      parsed.ok === false ||
+      (typeof parsed.error === 'string' && parsed.error.trim().length > 0) ||
+      (typeof parsed.error === 'object' && parsed.error !== null)
+    )
+  } catch {
+    return false
+  }
+}
+
 /** 默认工具执行超时 (ms) */
 const DEFAULT_TOOL_TIMEOUT_MS = 30_000
 
@@ -540,7 +557,7 @@ export class RegistryToolExecutor implements ToolExecutor {
       const rawOutput = typeof rawResult === 'string' ? rawResult : rawResult.output
       const isError = isStructuredToolResult(structuredResult)
         ? !structuredResult.ok
-        : (structuredResult?.isError ?? false)
+        : (structuredResult?.isError ?? isLegacyToolErrorOutput(rawOutput))
       logger.info(`工具 ${name} 执行完成 (${durationMs}ms, error=${isError})`)
 
       // 截图等需要下游解析的工具输出不能截断：

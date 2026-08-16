@@ -1,12 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import type { ToolApprovalRepository } from '../../repositories/toolApproval.repo'
 
-export type ApprovalDecision =
-  | 'allow_once'
-  | 'allow_session'
-  | 'allow_always'
-  | 'deny_once'
-  | 'deny_always'
+export type ApprovalDecision = 'allow_once' | 'allow_session' | 'deny_once'
 
 export type ApprovalStatus = 'pending' | 'approved' | 'denied' | 'expired' | 'consumed'
 
@@ -48,25 +43,12 @@ export type ApprovalEventListener = (request: ApprovalRequest) => void | Promise
 export class ApprovalService {
   private readonly requests = new Map<string, ApprovalRequest>()
   private readonly sessionGrants = new Set<string>()
-  private readonly permanentGrants = new Set<string>()
-  private readonly permanentDenials = new Set<string>()
   private readonly listeners = new Set<ApprovalEventListener>()
   private readonly resolvedListeners = new Set<ApprovalEventListener>()
   private readonly resolutionWaiters = new Map<string, Set<(request: ApprovalRequest) => void>>()
 
   constructor(private readonly repository?: ToolApprovalRepository) {
     for (const request of repository?.list() ?? []) this.requests.set(request.id, request)
-    for (const request of repository?.listEffectiveDecisions() ?? []) {
-      const key = this.grantKey(request.agentId, request.toolName)
-      if (request.decision === 'allow_always') {
-        this.permanentGrants.add(key)
-        this.permanentDenials.delete(key)
-      }
-      if (request.decision === 'deny_always') {
-        this.permanentDenials.add(key)
-        this.permanentGrants.delete(key)
-      }
-    }
     this.expirePending()
   }
 
@@ -137,17 +119,8 @@ export class ApprovalService {
     request.resolvedAt = new Date().toISOString()
     request.status = decision.startsWith('allow_') ? 'approved' : 'denied'
 
-    const key = this.grantKey(request.agentId, request.toolName)
     if (decision === 'allow_session')
       this.sessionGrants.add(this.sessionKey(request.sessionId, request.toolName))
-    if (decision === 'allow_always') {
-      this.permanentGrants.add(key)
-      this.permanentDenials.delete(key)
-    }
-    if (decision === 'deny_always') {
-      this.permanentDenials.add(key)
-      this.permanentGrants.delete(key)
-    }
     this.persist(request)
     this.audit(request, 'resolved', { decision, message: request.resolutionMessage })
     for (const listener of this.resolvedListeners) void listener(request)
@@ -228,8 +201,8 @@ export class ApprovalService {
       .filter(
         (request) =>
           request.toolName === input.toolName &&
-          (request.decision === 'deny_always' ||
-            (request.sessionId === input.sessionId && request.argsFingerprint === fingerprint)),
+          request.sessionId === input.sessionId &&
+          request.argsFingerprint === fingerprint,
       )
       .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))[0]
       ?.resolutionMessage
@@ -273,9 +246,6 @@ export class ApprovalService {
     args: Record<string, unknown>
   }): 'allow' | 'deny' | 'none' {
     this.expirePending()
-    const permanentKey = this.grantKey(input.agentId, input.toolName)
-    if (this.permanentDenials.has(permanentKey)) return 'deny'
-    if (this.permanentGrants.has(permanentKey)) return 'allow'
     if (this.sessionGrants.has(this.sessionKey(input.sessionId, input.toolName))) return 'allow'
     const fingerprint = this.fingerprint(input.args)
     let request = input.approvalId ? this.get(input.approvalId) : undefined
@@ -409,8 +379,5 @@ export class ApprovalService {
 
   private sessionKey(sessionId: string, toolName: string): string {
     return `${sessionId}:${toolName}`
-  }
-  private grantKey(agentId: string, toolName: string): string {
-    return `${agentId}:${toolName}`
   }
 }
