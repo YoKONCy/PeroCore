@@ -2,7 +2,7 @@
 
 > **适用范围**：`packages/backend/` 全部代码
 > **技术栈**：Hono + Drizzle + better-sqlite3 + TriviumDB
-> **最后更新**：2026-06-11
+> **最后更新**：2026-08-19
 
 ---
 
@@ -43,7 +43,7 @@ export function createMemoryRouter(ctx: AppContext) {
     return c.json({ code: 'OK', message: '获取成功', data: result })
   })
 
-  router.post('/', zValidator('json', createMemorySchema), async (c) => {
+  router.post('/', validate('json', createMemorySchema), async (c) => {
     const body = c.req.valid('json')
     const memory = await ctx.memoryService.create(body)
     return c.json({ code: 'CREATED', message: '记忆已创建', data: memory }, 201)
@@ -145,7 +145,7 @@ export function createAppContext(config: AppConfig): AppContext {
   const memoryRepo = new MemoryRepository(db)
   const vectorRepo = new VectorRepository(storeRegistry)
   // ... 按依赖顺序初始化
-  return { db, memoryRepo, vectorRepo, /* ... */ }
+  return { db, memoryRepo, vectorRepo /* ... */ }
 }
 ```
 
@@ -168,9 +168,12 @@ export interface LlmProvider {
 export class LlmService {
   private createProvider(config: ModelConfig): LlmProvider {
     switch (config.provider) {
-      case 'gemini':    return new GeminiProvider(config)
-      case 'anthropic': return new AnthropicProvider(config)
-      default:          return new OpenAiProvider(config)
+      case 'gemini':
+        return new GeminiProvider(config)
+      case 'anthropic':
+        return new AnthropicProvider(config)
+      default:
+        return new OpenAiProvider(config)
     }
   }
 }
@@ -183,30 +186,29 @@ export class LlmService {
 ### 7.1 架构
 
 - **端口**：与 HTTP 共用 `:9120`
-- **协议**：WebSocket + Protobuf Envelope
-- **鉴权**：Hello 消息携带 JWT（Docker 模式验证，Electron 模式跳过）
+- **协议**：WebSocket + 版本化 JSON Envelope；消息进入路由前必须通过 Shared Schema 校验与协议版本协商
+- **鉴权**：Hello 消息携带 Token；远程 Node 使用 TLS/mTLS 与持久 Trust，未配置凭据时仅允许受限本机部署
 
 ### 7.2 文件组织
 
 ```
-gateway/
-├── gatewayHub.ts           # WS Hub，管理连接和消息路由
-├── gatewayClient.ts        # 后端 Service 调用的薄代理
-├── gatewayRouter.ts        # Hono WS 升级路由 (/ws/gateway)
-├── envelopeHandler.ts      # Protobuf Envelope 解码/分发
-└── types.ts                # GatewayNode, GatewayEvent
+services/gateway/
+├── gatewayHub.ts           # WS Hub，管理连接、心跳和版本协商
+├── index.ts                # Gateway公开入口
+├── types.ts                # GatewayEnvelope与连接事件
+└── wsUpgrade.ts            # Hono WebSocket升级与JSON消息入口
 ```
 
 ### 7.3 Service 集成
 
-后端 Service 通过 DI 注入 `GatewayHub`，直接调用广播方法（零 WS 开销）：
+后端 Service 通过 DI 注入受限 Event/Surface Port，不直接把 `GatewayHub` 传播给 Application、Router 或 Repository。Gateway 只负责连接与消息路由，不访问数据库。
 
 ```typescript
 export class AgentService {
-  constructor(private gatewayHub: GatewayHub) {}
+  constructor(private events: ConversationEventPort) {}
 
   async onLlmResponse(response: string) {
-    await this.gatewayHub.broadcastTextResponse(response)
+    await this.events.publish('conversation.response', { response })
   }
 }
 ```
@@ -220,16 +222,10 @@ export class AgentService {
 ```typescript
 app.onError((err, c) => {
   if (err instanceof AppError) {
-    return c.json(
-      { code: err.code, message: err.message, data: err.data },
-      err.httpStatus,
-    )
+    return c.json({ code: err.code, message: err.message, data: err.data }, err.httpStatus)
   }
   logger.error('未捕获异常', { error: err.message, stack: err.stack })
-  return c.json(
-    { code: 'INTERNAL_ERROR', message: '服务内部错误，请稍后再试' },
-    500,
-  )
+  return c.json({ code: 'INTERNAL_ERROR', message: '服务内部错误，请稍后再试' }, 500)
 })
 ```
 
@@ -237,14 +233,15 @@ app.onError((err, c) => {
 
 后端以 [A09_AIOS_ARCHITECTURE](./A09_AIOS_ARCHITECTURE.md) 为资源边界基线。三层架构之上，所有领域模块必须遵守以下分工：
 
-| 领域 | 后端权威对象 | 不承担的职责 |
-|---|---|---|
-| PrincipalAgent | 身份、人格定义、长期资源关联 | 不维护窗口级活跃 Agent |
-| Thread | 对话边界、消息事实、channel 与 policy | 不持有长期记忆或工具权限 |
-| Context Runtime | 只读编译 LLM 输入与 Manifest | 不写消息、记忆、人格或文件 |
-| Memory | Candidate、Gate、CanonicalMemory、Provenance | 不将原始 Thread 当作长期记忆 |
-| Workspace | Agent 私有文件根与 containment | 不写安装/Workshop 只读资产 |
-| Tool Capability | `(agentId, channel)` 权限与资源范围 | 不允许默认 Agent 或 channel 回退 |
+| 领域            | 后端权威对象                                 | 不承担的职责                     |
+| --------------- | -------------------------------------------- | -------------------------------- |
+| PrincipalAgent  | 身份、人格定义、长期资源关联                 | 不维护窗口级活跃 Agent           |
+| Thread          | 对话边界、消息事实、channel 与 policy        | 不持有长期记忆或工具权限         |
+| Context Runtime | 只读编译 LLM 输入与 Manifest                 | 不写消息、记忆、人格或文件       |
+| Memory          | Candidate、Gate、CanonicalMemory、Provenance | 不将原始 Thread 当作长期记忆     |
+| Workspace       | Agent 私有文件根与 containment               | 不写安装/Workshop 只读资产       |
+| Tool Capability | `(agentId, channel)` 权限与资源范围          | 不允许默认 Agent 或 channel 回退 |
+| Application Integration | Application协议、Adapter、Endpoint与Capability Port | 不注入AppContext、Repository或目标应用内部实例 |
 
 ### 9.1 请求上下文
 
@@ -258,6 +255,10 @@ app.onError((err, c) => {
 
 `packages/backend` 保持纯 Node 运行时，不 import Electron。平台能力通过 Capability Provider 委托给 Electron、移动端等节点；无 Provider 时返回可解释的不可用结果。Provider 调用也必须先经过 CapabilityGate。
 
+### 9.4 第三方 Application
+
+第三方 Application 不以内置 `AgentAppRuntime` 方式加载到 Backend。Backend 只承载通用 Application Integration Foundation 和贡献者的隔离 Backend Adapter；目标应用通过独立进程、Node Host、远程 Node 或应用内部 Plugin 连接。Adapter 使用公开 Port 和 Kernel Envelope，不得接触主数据库、Repository、DI Container、主 Agent Thread 或 Credential 明文。协议与 Arca 参考实现见 [A11_APPLICATION_INTEGRATION](./A11_APPLICATION_INTEGRATION.md)。
+
 ---
 
-*本文档由 Carola 整理，适用于 infOS-TS 后端架构规范。*
+_本文档由 Carola 整理，适用于 infOS-TS 后端架构规范。_

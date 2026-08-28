@@ -1,5 +1,7 @@
 # Context Runtime 模型
 
+> **归档警示**：本文记录历史设计与迁移背景，不代表当前架构。现行规范以[A01文档索引](../A01_PROJECT_STRUCTURE.md#6-规范文档与归档)及其列出的A02–A09/S系列文档为准；旧Channel、API、Package或Application表述不得用于新实现。
+
 > Context Runtime 是主 Agent 的上下文编译系统，从各一等资源只读消费，编译为 LLM 输入。
 
 ---
@@ -26,14 +28,14 @@
 
 原设计中 ContextCompiler 支持 `social`/`group` channel，但社交场景与桌面对话存在根本差异：
 
-| 维度 | 桌面对话 | 社交场景 |
-|---|---|---|
-| 消息来源 | 单一用户 | 多用户（群聊各种人发言） |
-| 消息节奏 | 一问一答 | 消息轰炸（短时大量消息） |
-| 消息格式 | `role: user/assistant` | `[senderId, senderName, content]` |
-| 存储方式 | `thread_messages` | `social_messages` 表（按 channelId） |
-| 记忆系统 | RAG 向量检索 | `social.tdb` 图谱（BM25 + 图谱扩散，零向量） |
-| 状态机 | 无 | 看群频率、水群意愿、社交心情等 |
+| 维度     | 桌面对话               | 社交场景                                     |
+| -------- | ---------------------- | -------------------------------------------- |
+| 消息来源 | 单一用户               | 多用户（群聊各种人发言）                     |
+| 消息节奏 | 一问一答               | 消息轰炸（短时大量消息）                     |
+| 消息格式 | `role: user/assistant` | `[senderId, senderName, content]`            |
+| 存储方式 | `thread_messages`      | `social_messages` 表（按 channelId）         |
+| 记忆系统 | RAG 向量检索           | `social.tdb` 图谱（BM25 + 图谱扩散，零向量） |
+| 状态机   | 无                     | 看群频率、水群意愿、社交心情等               |
 
 **决策**：将社交场景从 ContextCompiler 中剥离，作为后续**子 Agent 应用**设计。
 
@@ -47,11 +49,11 @@
 
 ### 0.3 三层上下文机制
 
-| 层级 | 内容 | LLM 介入 | 触发方式 |
-|---|---|---|---|
-| **短上下文**（窗口内） | 最近 N 条原文消息 | 否 | Compiler 直接读取 |
-| **长记忆**（窗口外） | Scorer 提炼的结构化记忆 | 是（后台异步） | RAG 检索 / Agent 主动调用 |
-| **即时检索** | Agent 调用记忆工具 | 是（按需） | Agent 决策 |
+| 层级                   | 内容                    | LLM 介入       | 触发方式                  |
+| ---------------------- | ----------------------- | -------------- | ------------------------- |
+| **短上下文**（窗口内） | 最近 N 条原文消息       | 否             | Compiler 直接读取         |
+| **长记忆**（窗口外）   | Scorer 提炼的结构化记忆 | 是（后台异步） | RAG 检索 / Agent 主动调用 |
+| **即时检索**           | Agent 调用记忆工具      | 是（按需）     | Agent 决策                |
 
 > 注：此机制仅适用于主 Agent（desktop/companion）。社交场景将作为子 Agent 应用独立设计。
 
@@ -75,6 +77,7 @@ Context Runtime 是 PrincipalAgent 的一个一等资源，负责：
 - 管理 Token 预算和裁剪策略
 
 Context Runtime **不负责**：
+
 - 记忆的写入和提炼（那是 Memory 的事）
 - 人格的定义和修改（那是 Identity 的事）
 - 消息的持久化（那是 Thread 的事）
@@ -162,6 +165,7 @@ ContextManifest
 ### 3.5 只读原则
 
 Compiler **不反向修改任何资源**：
+
 - 不写入记忆
 - 不修改人格
 - 不持久化消息
@@ -190,14 +194,14 @@ Compiler **不反向修改任何资源**：
 
 ### 4.1 与现有 MDP 的区别
 
-| 现有 MDP | 新 Compiler |
-|---|---|
-| 13 个全 system 槽位合并成一条 | 槽位按语义分组，合理排列 |
-| 历史序列化成 XML 放 system | 消息保留原生 user/assistant 角色 |
-| Preset ID 不匹配导致失效 | 槽位由 Compiler 直接控制 |
-| 无 Token 预算 | 按层分配预算 |
-| Footer 在合并 system 末尾 | Footer 独立处理 |
-| `extraVars` 可覆盖核心变量 | 核心变量不可被客户端覆盖 |
+| 现有 MDP                      | 新 Compiler                      |
+| ----------------------------- | -------------------------------- |
+| 13 个全 system 槽位合并成一条 | 槽位按语义分组，合理排列         |
+| 历史序列化成 XML 放 system    | 消息保留原生 user/assistant 角色 |
+| Preset ID 不匹配导致失效      | 槽位由 Compiler 直接控制         |
+| 无 Token 预算                 | 按层分配预算                     |
+| Footer 在合并 system 末尾     | Footer 独立处理                  |
+| `extraVars` 可覆盖核心变量    | 核心变量不可被客户端覆盖         |
 
 ### 4.2 消息原生保留
 
@@ -345,10 +349,10 @@ ContextPolicy
 
 不同 channel 的默认策略：
 
-| Channel | messageWindow | memoryRetrieval | toolDescription |
-|---|---|---|---|
-| desktop | 20 | true | true |
-| companion | 8 | true | false |
+| Channel   | messageWindow | memoryRetrieval | toolDescription |
+| --------- | ------------- | --------------- | --------------- |
+| desktop   | 20            | true            | true            |
+| companion | 8             | true            | false           |
 
 > 注：`social`/`group` channel 已从 ContextCompiler 中剥离，作为子 Agent 应用独立设计。
 > 见 [0.2 节](#02-社交场景从-contextcompiler-剥离)。
@@ -433,19 +437,19 @@ Manifest:
 
 ## 10. 与现有代码的对应
 
-| 现有模块 | 新架构角色 | 处理方式 |
-|---|---|---|
-| `PromptService` | Compiler 的一部分 | 重构，移除 XML 历史注入 |
-| `MdpEngine` | Compiler 的渲染后端 | 保留渲染能力，不再承担上下文组织 |
-| `HistoryEnricher` | Compiler 的消息加载 | 移除 XML 序列化，改为原生消息 |
-| `MemoryEnricher` | Compiler 的记忆检索 | 保留，接入新 Memory 模型 |
-| `StateEnricher` | 暂时移除 | Agent 状态未来重新设计 |
-| `SocialEnricher` | Compiler 的社交上下文 | 按 channel 读取，不再按 source |
-| `EnrichmentRunner` | Compiler 的编排 | 简化为线性编译流程 |
-| `PresetLoader` | 移除 | Channel 补丁直接由 Compiler 读取 |
-| `extraVars` | 移除 | 核心变量不可被客户端覆盖 |
-| 无 Token Budget | TokenBudget | 新增 |
-| 无 Manifest | ContextManifest | 新增 |
+| 现有模块           | 新架构角色            | 处理方式                         |
+| ------------------ | --------------------- | -------------------------------- |
+| `PromptService`    | Compiler 的一部分     | 重构，移除 XML 历史注入          |
+| `MdpEngine`        | Compiler 的渲染后端   | 保留渲染能力，不再承担上下文组织 |
+| `HistoryEnricher`  | Compiler 的消息加载   | 移除 XML 序列化，改为原生消息    |
+| `MemoryEnricher`   | Compiler 的记忆检索   | 保留，接入新 Memory 模型         |
+| `StateEnricher`    | 暂时移除              | Agent 状态未来重新设计           |
+| `SocialEnricher`   | Compiler 的社交上下文 | 按 channel 读取，不再按 source   |
+| `EnrichmentRunner` | Compiler 的编排       | 简化为线性编译流程               |
+| `PresetLoader`     | 移除                  | Channel 补丁直接由 Compiler 读取 |
+| `extraVars`        | 移除                  | 核心变量不可被客户端覆盖         |
+| 无 Token Budget    | TokenBudget           | 新增                             |
+| 无 Manifest        | ContextManifest       | 新增                             |
 
 ---
 

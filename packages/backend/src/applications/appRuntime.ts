@@ -1,11 +1,8 @@
 /**
  * AgentAppRuntime — 应用运行时接口
  *
- * 每个应用通过实现此接口接入 AIOS。
- * AIOS 的 AppManager 在 launch 时加载应用的 runtimeEntry，
- * 并调用此接口的生命周期方法。
- *
- * 内置应用可直接在代码中实现，社区应用通过 runtimeEntry 动态加载。
+ * 内置Social兼容Runtime通过实现此接口接入 AIOS。
+ * 自治Application必须通过Application Integration Protocol接入。
  *
  * 设计原则：
  * - 应用自带工具 + 可申请主 Agent 工具
@@ -16,6 +13,7 @@
  * @module packages/backend/src/applications/appRuntime
  */
 
+import type { ApplicationRealm } from './applicationRealm'
 import type {
   AgentAppManifest,
   AppCheckpoint,
@@ -27,12 +25,25 @@ import type {
 import type { GrantRegistry } from './grantRegistry'
 import type { LlmService, ModelConfig } from '../services/llm/llmService'
 import type { MdpEngine } from '../services/prompt/mdpEngine'
-import type { MemoryProvider } from '../services/memory/memoryProvider'
 import type { AgentManager } from '../services/agent/agentManager'
+import type { SocialEventPort, SocialExecutionPort, SocialStoragePort } from './socialPorts'
 
 // ─────────────────────────────────────────────
 // 应用运行时上下文
 // ─────────────────────────────────────────────
+
+export interface HostDiaryReaderPort {
+  list(agentId: string, limit: number): Promise<Array<{ date: string; parts: number }>>
+  read(
+    agentId: string,
+    date?: string,
+  ): Promise<{
+    date: string
+    parts: number
+    content: string
+    truncated: boolean
+  } | null>
+}
 
 /**
  * 应用运行时上下文
@@ -47,9 +58,9 @@ import type { AgentManager } from '../services/agent/agentManager'
  * - storeRegistry：访问应用自己的记忆图谱（如 social.tdb），不访问主 Agent 的 RAG
  *
  * AIOS 资源隔离原则：
- * - 应用不直接读主 Agent 的 CanonicalMemory / RAG
- * - 应用产生记忆通过 Checkpoint.memoryCandidates 提交，主 Agent MemoryGate 审核后并入
- * - memoryProvider 字段仅供需要候选交换的应用使用（非 Compiler 直接检索）
+ * - 应用不直接读取主 Agent 的 EventMemory 或自动 RAG
+ * - 应用通过 getDailySummaries 向 DailyNotesService 提供当日摘要
+ * - memoryProvider 字段仅供应用私有记忆访问（非 Compiler 直接检索）
  */
 export interface AppRuntimeContext {
   /** 实例 ID */
@@ -60,6 +71,8 @@ export interface AppRuntimeContext {
   hostAgentId: string
   /** 应用 Manifest */
   manifest: AgentAppManifest
+  /** Kernel签发的隔离Application Realm。 */
+  realm: ApplicationRealm
   /** 工作区路径（dynamic/fixed 模式有值，none 模式为 undefined） */
   workspacePath?: string
   /** 任务上下文（主 Agent 委派时提供） */
@@ -85,52 +98,33 @@ export interface AppRuntimeContext {
   /** 请求主 Agent 审批（requiresApproval 工具调用时使用） */
   requestApproval(action: string, reason: string): Promise<boolean>
 
-  // ── 方案 B：独立编译所需依赖 ──
+  // ── Builtin Compatibility Ports ──
+  // 仅受信任的内置Social Realm在迁移期使用；社区Application不得获得这些Kernel Service。
+  // 后续必须按Social真实需求逐项收敛为领域Port，不得向该区域添加新依赖。
 
   /** LLM 服务（应用 Compiler 编译后调用 LLM 生成回复） */
   llmService: LlmService
   /** MDP 模板引擎（复用主 Agent 的模板渲染，纯渲染器无状态） */
   mdpEngine: MdpEngine
-  /**
-   * 记忆服务（⚠️ AIOS 隔离约束：应用 Compiler 不应直接调用此接口检索主 Agent 记忆）
-   *
-   * 此字段仅供以下场景使用：
-   * - 应用向主 Agent 提交记忆候选（Checkpoint.memoryCandidates 交换流程）
-   * - MemoryGate 审核通过后由主 Agent 侧调用写入
-   *
-   * 应用自己的上下文记忆应通过 storeRegistry 访问独立图谱（如 social.tdb）。
-   */
-  memoryProvider: MemoryProvider
   /** Thread 服务：需要持久会话状态的应用按 Channel 建立真实 Thread。 */
   threadService: import('../services/thread/threadService').ThreadService
   /** 心流服务：应用 Compiler 只读取当前 Thread × Agent 的私有临时状态。 */
   flowStateService: import('../services/flow/flowStateService').FlowStateService
   /** Agent 管理器（读取主 Agent 人格投影，受 GrantRegistry 授权约束） */
   agentManager: AgentManager
-  /**
-   * 主模型获取器（Agent 对话、日记生成等创意任务使用）
-   *
-   * 社交应用用此模型生成回复（社交回复是对外人格表现，需创意表现力）。
-   */
-  getMainModel?: () => Promise<ModelConfig | null>
-  /**
-   * 社交决策模型获取器（思考状态机使用，决策类低温）
-   *
-   * ⚠️ 特例：社交应用任务槽统一在主配置页配置。
-   * 其他 subagent 应用绝对不能这样做，必须在应用自己的 manifest/config 中声明模型需求。
-   */
-  getSocialSchedulerModel?: () => Promise<ModelConfig | null>
-  /**
-   * 社交记忆炼化模型获取器（结构化输出，低温）
-   *
-   * ⚠️ 特例：同 getSocialSchedulerModel
-   */
+  /** 按角色获取表达模型，未指派时回退主模型。 */
+  getAgentModel?: (agentId: string) => Promise<ModelConfig | null>
+  /** 社交记忆整理使用的模型。 */
   getSocialScorerModel?: () => Promise<ModelConfig | null>
 
   // ── 社交应用等需要直接访问内核资源的可选依赖 ──
 
-  /** 数据库实例（社交应用等需要直接 DB 访问的应用使用） */
-  db?: import('../database').DrizzleDb
+  /** 内置Social Realm的收窄领域Port；社区应用不会获得。 */
+  socialStorage?: SocialStoragePort
+  socialEvents?: SocialEventPort
+  socialExecutions?: SocialExecutionPort
+  /** 只允许读取宿主 Agent 的 Workspace 日记，不暴露通用文件系统能力。 */
+  hostDiaryReader?: HostDiaryReaderPort
   /**
    * 记忆存储注册表（访问应用自己的记忆图谱，如 social.tdb）
    *
@@ -142,8 +136,6 @@ export interface AppRuntimeContext {
   pathResolver?: import('../core/pathResolver').PathResolver
   /** Agent 内置目录（表情包服务使用） */
   agentBuiltinDir?: string
-  /** GatewayHub（社交前端通知使用） */
-  gatewayHub?: import('../services/gateway/gatewayHub').GatewayHub
   /** 入站路由表 Repository（社交路由使用） */
   inboundRouteRepo?: import('../repositories/inboundRoute.repo').InboundRouteRepository
   /** 配置仓库（读取社交绑定配置） */
@@ -284,9 +276,9 @@ export interface AgentAppRuntime {
   /**
    * 获取应用在某日产生的记忆摘要列表
    *
-   * AIOS 记忆回流通道：应用实现此方法后，主 Agent 的 DiaryEngine
+   * AIOS 记忆回流通道：应用实现此方法后，主 Agent 的 DailyNotesService
    * 会在每日生成日记时调用此接口，聚合所有应用的当日记忆摘要，
-   * 与主 Agent 自己的桌面对话摘要合并后统一生成带向量的日记节点。
+   * 与 EventNote 和已审阅原始互动统一生成 Workspace Markdown 日记。
    *
    * 设计目的：
    * - 解耦主 Agent 与 subagent 的记忆存储（主 Agent 不直接读 social.tdb 等）
@@ -300,21 +292,12 @@ export interface AgentAppRuntime {
 }
 
 // ─────────────────────────────────────────────
-// 应用运行时工厂（用于动态加载社区应用）
+// 内置兼容应用运行时工厂
 // ─────────────────────────────────────────────
 
 /**
  * 应用运行时工厂函数类型
  *
- * 社区应用通过 runtimeEntry 导出此类型的默认导出。
- * AIOS 通过动态 import 加载社区应用的 runtimeEntry，
- * 调用此工厂函数创建 AgentAppRuntime 实例。
- *
- * 示例（社区应用的 runtime/index.ts）：
- * ```typescript
- * export default function createRuntime(): AgentAppRuntime {
- *   return new MyCodingApp()
- * }
- * ```
+ * 仅由Backend显式注册的受信任内置应用使用。
  */
 export type AppRuntimeFactory = () => AgentAppRuntime

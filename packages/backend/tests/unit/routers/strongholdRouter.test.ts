@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createStrongholdRouter, executeAgentTurn } from '@infos/backend/routers/stronghold.router'
+import { createStrongholdRouter } from '@infos/backend/routers/stronghold.router'
+import { StrongholdTurnService } from '@infos/backend/services/stronghold/strongholdTurnService'
 import { StrongholdService } from '@infos/backend/services/stronghold/strongholdService'
+import { GroupChatService } from '@infos/backend/services/stronghold/groupChatService'
+import { createDrizzleConnection, closeDrizzleConnection } from '@infos/backend/database'
 import { GroupChatDispatcher } from '@infos/backend/services/stronghold/groupChatDispatcher'
 import { agentLocations, strongholdRooms, groupChatMembers } from '@infos/backend/database/schema'
 
@@ -12,7 +15,7 @@ function createCtx() {
   const facility = { id: 1, name: '我的据点' }
   const room = { id: 'room-1', facilityId: 1, name: '客厅' }
   const message = { id: 1, roomId: 'room-1', senderId: 'user', content: '你好', role: 'user' }
-  return {
+  const ctx = {
     strongholdService: {
       getFacility: vi.fn(() => Promise.resolve(facility)),
       listFacilities: vi.fn(() => Promise.resolve([facility])),
@@ -43,10 +46,38 @@ function createCtx() {
         { id: 'pero', name: 'Pero', isEnabled: true },
         { id: 'nana', name: 'Nana', isEnabled: false },
       ]),
+      getAgent: vi.fn((id: string) => {
+        if (id === 'pero') {
+          return {
+            id: 'pero',
+            name: 'Pero',
+            description: '猫猫助手',
+            publicProfile: {
+              gender: '女',
+              identity: '据点助手',
+            },
+          }
+        }
+        if (id === 'nana') {
+          return {
+            id: 'nana',
+            name: 'Nana & <伙伴>',
+            description: '傲娇伙伴',
+            publicProfile: {
+              appearance: '紫发 & 紫瞳',
+              personality: '自信 <傲娇>',
+            },
+          }
+        }
+        return undefined
+      }),
+      enabledAgents: new Set(['pero']),
     },
     groupChatService: {
       getHistory: vi.fn(() => Promise.resolve([message])),
       getHistoryPairs: vi.fn(() => Promise.resolve([message])),
+      getVisibleHistoryPairs: vi.fn(() => Promise.resolve([message])),
+      recordPairVisibility: vi.fn(() => Promise.resolve()),
       sendMessage: vi.fn((body: Record<string, unknown>) => Promise.resolve({ id: 2, ...body })),
       deleteMessagePair: vi.fn(() =>
         Promise.resolve({ deletedCount: 2, deletedMessageIds: [1, 2] }),
@@ -57,10 +88,15 @@ function createCtx() {
       convertPerspective: vi.fn(() => [{ role: 'user', content: '历史' }]),
     },
     groupChatDispatcher: {
-      decideNextTurn: vi.fn(() => Promise.resolve({ agentId: null, reason: '无需接话' })),
+      decideNextTurn: vi.fn(() => Promise.resolve({ agentIds: [], reason: '无需接话' })),
     },
     agentService: {
-      chatWithCompiledMessages: vi.fn(() => Promise.resolve('猫猫回复')),
+      chatStreamWithCompiledMessages: vi.fn(async function* () {
+        yield {
+          event: 'narration_delta' as const,
+          data: { blockId: 'reply', turn: 1, delta: '猫猫回复' },
+        }
+      }),
     },
     threadService: {
       getThread: vi.fn(() => Promise.resolve(null)),
@@ -73,11 +109,164 @@ function createCtx() {
     contextCompiler: {
       compile: vi.fn(() => Promise.resolve({ messages: [{ role: 'system', content: '人设' }] })),
     },
+    strongholdTurnService: undefined as unknown as StrongholdTurnService,
     gatewayHub: {
       broadcast: vi.fn(() => Promise.resolve()),
     },
   }
+  ctx.strongholdTurnService = createTurnService(ctx)
+  return ctx
 }
+
+function createTurnService(ctx: ReturnType<typeof createCtx>) {
+  return new StrongholdTurnService(
+    ctx.strongholdService as never,
+    ctx.groupChatService as never,
+    ctx.threadService as never,
+    ctx.contextCompiler as never,
+    ctx.agentService as never,
+    ctx.memoryTaskRunner as never,
+    undefined as never,
+    ctx.gatewayHub as never,
+    ctx.agentManager as never,
+  )
+}
+
+describe('据点角色可见回合状态机', () => {
+  it('应跨房间携带离场前历史，并隔离离场后的旧房间消息', async () => {
+    const db = createDrizzleConnection(':memory:')
+    const chat = new GroupChatService(db, () => true)
+    try {
+      const first = await chat.sendMessage({
+        roomId: 'living',
+        senderId: 'user',
+        content: '客厅共同消息',
+        role: 'user',
+        pairId: 'pair-before-move',
+      })
+      await chat.recordPairVisibility('living', 'pair-before-move', ['pero', 'nana'])
+      await chat.sendMessage({
+        roomId: 'living',
+        senderId: 'user',
+        content: 'Pero离开后的客厅消息',
+        role: 'user',
+        pairId: 'pair-after-move',
+      })
+      await chat.recordPairVisibility('living', 'pair-after-move', ['nana'])
+      await chat.sendMessage({
+        roomId: 'bedroom',
+        senderId: 'user',
+        content: '卧室新消息',
+        role: 'user',
+        pairId: 'pair-bedroom',
+      })
+      await chat.recordPairVisibility('bedroom', 'pair-bedroom', ['pero'])
+
+      const peroHistory = await chat.getVisibleHistoryPairs('pero', 20)
+      const nanaHistory = await chat.getVisibleHistoryPairs('nana', 20)
+      expect(first.id).toBeGreaterThan(0)
+      expect(peroHistory.map((item) => item.content)).toEqual(['客厅共同消息', '卧室新消息'])
+      expect(nanaHistory.map((item) => item.content)).toEqual([
+        '客厅共同消息',
+        'Pero离开后的客厅消息',
+      ])
+    } finally {
+      closeDrizzleConnection(db)
+    }
+  })
+
+  it('应在多角色连续回合中显式保留每条消息的真实发言者', async () => {
+    const db = createDrizzleConnection(':memory:')
+    const chat = new GroupChatService(db, () => true)
+    try {
+      const messages = [
+        await chat.sendMessage({
+          roomId: 'living',
+          senderId: 'user',
+          content: '@nana 你怎么看？',
+          role: 'user',
+          pairId: 'pair-1',
+        }),
+        await chat.sendMessage({
+          roomId: 'living',
+          senderId: 'nana',
+          content: '我觉得很好。',
+          role: 'assistant',
+          pairId: 'pair-1',
+        }),
+        await chat.sendMessage({
+          roomId: 'living',
+          senderId: 'pero',
+          content: '我也赞同。',
+          role: 'assistant',
+          pairId: 'pair-1',
+        }),
+        await chat.sendMessage({
+          roomId: 'living',
+          senderId: 'user',
+          content: '@nana 再详细说说。',
+          role: 'user',
+          pairId: 'pair-2',
+        }),
+      ]
+
+      expect(chat.convertPerspective(messages, 'nana', '秋月佑空')).toEqual([
+        {
+          role: 'user',
+          content: '<秋月佑空>@nana 你怎么看？</秋月佑空>',
+        },
+        {
+          role: 'assistant',
+          content: expect.stringMatching(/^<nana, time=[^>]+>我觉得很好。<\/nana>$/),
+        },
+        {
+          role: 'user',
+          content: expect.stringMatching(/^<pero, time=[^>]+>我也赞同。<\/pero>$/),
+        },
+        {
+          role: 'user',
+          content: '<秋月佑空>@nana 再详细说说。</秋月佑空>',
+        },
+      ])
+    } finally {
+      closeDrizzleConnection(db)
+    }
+  })
+
+  it('应按完整回合窗口截取角色最近亲历记录', async () => {
+    const db = createDrizzleConnection(':memory:')
+    const chat = new GroupChatService(db, () => true)
+    try {
+      for (const index of [1, 2, 3]) {
+        const pairId = `pair-${index}`
+        await chat.sendMessage({
+          roomId: 'room',
+          senderId: 'user',
+          content: `问题${index}`,
+          role: 'user',
+          pairId,
+        })
+        await chat.sendMessage({
+          roomId: 'room',
+          senderId: 'pero',
+          content: `回答${index}`,
+          role: 'assistant',
+          pairId,
+        })
+        await chat.recordPairVisibility('room', pairId, ['pero'])
+      }
+
+      expect((await chat.getVisibleHistoryPairs('pero', 2)).map((item) => item.content)).toEqual([
+        '问题2',
+        '回答2',
+        '问题3',
+        '回答3',
+      ])
+    } finally {
+      closeDrizzleConnection(db)
+    }
+  })
+})
 
 describe('StrongholdService 默认出生', () => {
   function createService(existingLocation?: { agentId: string; roomId: string }) {
@@ -114,7 +303,11 @@ describe('StrongholdService 默认出生', () => {
         }),
       })),
     }
-    return { service: new StrongholdService(db as never), locations, members }
+    return {
+      service: new StrongholdService(db as never, (agentId) => ['pero', 'nana'].includes(agentId)),
+      locations,
+      members,
+    }
   }
 
   it('应将未定位 Agent 放入客厅并加入群聊成员', async () => {
@@ -124,6 +317,38 @@ describe('StrongholdService 默认出生', () => {
 
     expect(locations.get('pero')).toEqual({ agentId: 'pero', roomId: 'living-room' })
     expect(members).toContainEqual({ roomId: 'living-room', agentId: 'pero', role: 'member' })
+  })
+
+  it('应按房间白名单判断角色准入', () => {
+    const { service } = createService()
+    const publicRoom = {
+      id: 'public',
+      facilityId: 1,
+      name: '公共房间',
+      description: null,
+      allowedAgentsJson: '[]',
+      environmentJson: '{}',
+      createdAt: null,
+    }
+    const privateRoom = { ...publicRoom, id: 'private', allowedAgentsJson: '["pero"]' }
+
+    expect(service.canAgentEnterRoom(publicRoom as never, 'nana')).toBe(true)
+    expect(service.canAgentEnterRoom(privateRoom as never, 'pero')).toBe(true)
+    expect(service.canAgentEnterRoom(privateRoom as never, 'nana')).toBe(false)
+    expect(
+      service.canAgentEnterRoom({ ...privateRoom, allowedAgentsJson: 'invalid' } as never, 'pero'),
+    ).toBe(false)
+  })
+
+  it('应拒绝为未注册ID创建据点位置', async () => {
+    const { service, locations, members } = createService()
+
+    await expect(service.ensureAgentLocation('bot', 'living-room')).rejects.toThrow(
+      'Agent bot 不存在',
+    )
+
+    expect(locations.has('bot')).toBe(false)
+    expect(members.some((member) => member.agentId === 'bot')).toBe(false)
   })
 
   it('不应覆盖已有明确位置', async () => {
@@ -151,7 +376,28 @@ describe('GroupChatDispatcher 用户消息语义', () => {
       },
     ])
 
-    expect(result).toEqual({ agentId: 'pero', reason: '用户发言，随机选择 Agent 回复' })
+    expect(result).toEqual({ agentIds: ['pero'], reason: '用户发言，随机选择 Agent 回复' })
+  })
+
+  it('多个@mention应去重并严格保持出现顺序', async () => {
+    const chatService = {
+      getCandidateAgents: vi.fn(() => Promise.resolve(['pero', 'nana', 'mika'])),
+    }
+    const dispatcher = new GroupChatDispatcher(chatService as never)
+
+    const result = await dispatcher.decideNextTurn('living-room', [
+      {
+        senderId: 'user',
+        content: '@Nana @佩罗 请依次回答',
+        role: 'user',
+        mentionsJson: '["nana","pero","nana"]',
+      },
+    ])
+
+    expect(result).toEqual({
+      agentIds: ['nana', 'pero'],
+      reason: '被 @mention: nana、pero',
+    })
   })
 
   it('@全体成员 应返回哨兵 agentId=@all', async () => {
@@ -169,7 +415,7 @@ describe('GroupChatDispatcher 用户消息语义', () => {
       },
     ])
 
-    expect(result).toEqual({ agentId: '@all', reason: '被 @mention: 全体成员' })
+    expect(result).toEqual({ agentIds: ['@all'], reason: '被 @mention: 全体成员' })
   })
 })
 
@@ -238,6 +484,26 @@ describe('StrongholdRouter', () => {
     expect(await readJson(deleted)).toEqual({ code: 'OK', message: '房间已删除' })
   })
 
+  it('成员接口应拒绝未知或未启用角色', async () => {
+    const ctx = createCtx()
+    const router = createStrongholdRouter(ctx as never)
+
+    const unknown = await router.request('http://test/rooms/room-1/members', {
+      method: 'POST',
+      body: JSON.stringify({ agentId: 'bot' }),
+      headers: { 'content-type': 'application/json' },
+    })
+    const disabled = await router.request('http://test/rooms/room-1/members', {
+      method: 'POST',
+      body: JSON.stringify({ agentId: 'nana' }),
+      headers: { 'content-type': 'application/json' },
+    })
+
+    expect(unknown.ok).toBe(false)
+    expect(disabled.ok).toBe(false)
+    expect(ctx.groupChatService.addMember).not.toHaveBeenCalled()
+  })
+
   it('应当管理群聊消息、成员和管家配置', async () => {
     const ctx = createCtx()
     const router = createStrongholdRouter(ctx as never)
@@ -274,14 +540,20 @@ describe('StrongholdRouter', () => {
     expect(await readJson(history)).toMatchObject({ code: 'OK', data: [{ content: '你好' }] })
     expect(ctx.groupChatService.getHistory).toHaveBeenCalledWith('room-1', 5)
     expect(sent.status).toBe(201)
-    expect(await readJson(sent)).toMatchObject({
+    const sentData = await readJson(sent)
+    expect(sentData).toMatchObject({
       code: 'CREATED',
       data: {
         message: { content: '你好', mentions: ['pero'] },
         replyQueued: true,
-        agentId: 'pero',
+        agentIds: ['pero'],
       },
     })
+    expect(ctx.groupChatService.recordPairVisibility).toHaveBeenCalledWith(
+      'room-1',
+      expect.any(String),
+      ['pero'],
+    )
     expect(systemSent.status).toBe(201)
     expect(await readJson(members)).toMatchObject({ code: 'OK', data: [{ agentId: 'pero' }] })
     expect(await readJson(added)).toEqual({ code: 'OK', message: '成员已添加' })
@@ -304,10 +576,28 @@ describe('StrongholdRouter', () => {
     expect(ctx.strongholdService.updateButlerEnabled).toHaveBeenCalledWith(false)
   })
 
+  it('空房间应在保存前拒绝用户消息', async () => {
+    const ctx = createCtx()
+    ctx.strongholdService.getRoomAgents.mockResolvedValueOnce([])
+    const router = createStrongholdRouter(ctx as never)
+
+    const response = await router.request('http://test/rooms/room-1/messages', {
+      method: 'POST',
+      body: JSON.stringify({ content: '有人吗', senderId: 'user', role: 'user' }),
+      headers: { 'content-type': 'application/json' },
+    })
+
+    expect(response.ok).toBe(false)
+    expect(response.status).toBe(500)
+    expect(await response.text()).toContain('Internal Server Error')
+    expect(ctx.groupChatService.sendMessage).not.toHaveBeenCalled()
+    expect(ctx.groupChatDispatcher.decideNextTurn).not.toHaveBeenCalled()
+  })
+
   it('用户消息应返回明确的回复排队状态', async () => {
     const ctx = createCtx()
     ctx.groupChatDispatcher.decideNextTurn.mockResolvedValueOnce({
-      agentId: 'pero',
+      agentIds: ['pero'],
       reason: '用户发言，选择在场角色回复',
     })
     const router = createStrongholdRouter(ctx as never)
@@ -330,10 +620,100 @@ describe('StrongholdRouter', () => {
     })
   })
 
+  it('多个@成员应按mention顺序串行发言', async () => {
+    const ctx = createCtx()
+    ctx.strongholdService.getRoomAgents.mockResolvedValue(['nana', 'pero'])
+    ctx.agentManager.listAgents.mockReturnValue([
+      { id: 'pero', name: 'Pero', isEnabled: true },
+      { id: 'nana', name: 'Nana', isEnabled: true },
+    ])
+    ctx.groupChatDispatcher.decideNextTurn.mockResolvedValueOnce({
+      agentIds: ['nana', 'pero'],
+      reason: '被 @mention: nana、pero',
+    })
+    const order: string[] = []
+    ctx.agentService.chatStreamWithCompiledMessages.mockImplementation(async function* (input: {
+      agentId: string
+    }) {
+      order.push(input.agentId)
+      yield {
+        event: 'narration_delta' as const,
+        data: { blockId: 'reply', turn: 1, delta: `${input.agentId}回复` },
+      }
+    })
+    const router = createStrongholdRouter(ctx as never)
+
+    const response = await router.request('http://test/rooms/room-1/messages', {
+      method: 'POST',
+      body: JSON.stringify({
+        content: '@Nana @佩罗 请依次回答',
+        senderId: 'user',
+        role: 'user',
+        mentions: ['nana', 'pero'],
+      }),
+      headers: { 'content-type': 'application/json' },
+    })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    expect(response.status).toBe(201)
+    expect(order).toEqual(['nana', 'pero'])
+    expect((await readJson(response)).data).toMatchObject({
+      agentId: 'nana',
+      agentIds: ['nana', 'pero'],
+    })
+  })
+
+  it('首位Agent传唤其他成员后应追加执行且禁止递归传唤', async () => {
+    const ctx = createCtx()
+    ctx.strongholdService.getRoomAgents.mockResolvedValue(['pero', 'nana'])
+    ctx.agentManager.listAgents.mockReturnValue([
+      { id: 'pero', name: 'Pero', isEnabled: true },
+      { id: 'nana', name: 'Nana', isEnabled: true },
+    ])
+    ctx.groupChatDispatcher.decideNextTurn
+      .mockResolvedValueOnce({ agentIds: ['pero'], reason: '用户发言' })
+      .mockResolvedValueOnce({ agentIds: [], reason: '无需自动接话' })
+    const runs: Array<{ agentId: string; disabledTools?: string[] }> = []
+    ctx.agentService.chatStreamWithCompiledMessages.mockImplementation(async function* (input: {
+      agentId: string
+      disabledTools?: string[]
+      onToolCalls?: (calls: unknown[]) => void
+    }) {
+      runs.push({ agentId: input.agentId, disabledTools: input.disabledTools })
+      if (input.agentId === 'pero') {
+        input.onToolCalls?.([
+          {
+            name: 'stronghold_summon_agents',
+            args: { agent_ids: ['nana'], reason: '请补充意见' },
+            result: JSON.stringify({ success: true, queued_agent_ids: ['nana'] }),
+            durationMs: 1,
+            isError: false,
+            callId: 'summon-1',
+          },
+        ])
+      }
+      yield {
+        event: 'narration_delta' as const,
+        data: { blockId: 'reply', turn: 1, delta: `${input.agentId}回复` },
+      }
+    })
+    const router = createStrongholdRouter(ctx as never)
+
+    await router.request('http://test/rooms/room-1/messages', {
+      method: 'POST',
+      body: JSON.stringify({ content: '你们怎么看', senderId: 'user', role: 'user' }),
+      headers: { 'content-type': 'application/json' },
+    })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    expect(runs.map((run) => run.agentId)).toEqual(['pero', 'nana'])
+    expect(runs[1]?.disabledTools).toContain('stronghold_summon_agents')
+  })
+
   it('@全体成员 时应按随机顺序依次让所有在场成员回复', async () => {
     const ctx = createCtx()
     ctx.groupChatDispatcher.decideNextTurn.mockResolvedValueOnce({
-      agentId: '@all',
+      agentIds: ['@all'],
       reason: '被 @mention: 全体成员',
     })
     const router = createStrongholdRouter(ctx as never)
@@ -354,19 +734,22 @@ describe('StrongholdRouter', () => {
     const body = await readJson(response)
     const data = body.data as Record<string, unknown>
     expect(data.replyQueued).toBe(true)
-    expect(data.agentId).toBe('@all')
+    expect(data.agentId).toBe('pero')
     // 房间内启用的成员都会进入回复队列（随机顺序）
     expect(data.allAgentIds).toEqual(['pero'])
-    expect(ctx.agentService.chatWithCompiledMessages).toHaveBeenCalledTimes(1)
+    expect(ctx.agentService.chatStreamWithCompiledMessages).toHaveBeenCalledTimes(1)
   })
 
   it('异步 Agent 回复失败时应写入用户可见的系统消息', async () => {
     const ctx = createCtx()
     ctx.groupChatDispatcher.decideNextTurn.mockResolvedValueOnce({
-      agentId: 'pero',
+      agentIds: ['pero'],
       reason: '测试',
     })
-    ctx.agentService.chatWithCompiledMessages.mockRejectedValueOnce(new Error('模型暂不可用'))
+    ctx.agentService.chatStreamWithCompiledMessages.mockImplementationOnce(async function* () {
+      yield* [] as string[]
+      throw new Error('模型暂不可用')
+    })
     const router = createStrongholdRouter(ctx as never)
 
     await router.request('http://test/rooms/room-1/messages', {
@@ -426,9 +809,9 @@ describe('StrongholdRouter', () => {
   it('据点回合应使用隔离的 group Thread，并将视角问答写入 Thread 供记忆提炼', async () => {
     const ctx = createCtx()
 
-    await executeAgentTurn(ctx as never, 'room-1', 'pero')
+    await createTurnService(ctx).execute('room-1', 'pero')
 
-    expect(ctx.groupChatService.getHistoryPairs).toHaveBeenCalledWith('room-1', 20)
+    expect(ctx.groupChatService.getVisibleHistoryPairs).toHaveBeenCalledWith('pero', 20)
 
     expect(ctx.threadService.createThread).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -454,23 +837,80 @@ describe('StrongholdRouter', () => {
       'pero',
       'group',
     )
-    expect(ctx.agentService.chatWithCompiledMessages).toHaveBeenCalledWith(
+    expect(ctx.agentService.chatStreamWithCompiledMessages).toHaveBeenCalledWith(
       expect.objectContaining({
         agentId: 'pero',
         channel: 'group',
         threadId: 'stronghold_room-1_pero',
       }),
     )
+    const runArgs = ctx.agentService.chatStreamWithCompiledMessages.mock.calls[0]?.[0] as {
+      messages: Array<{ role: string; content: string }>
+    }
+    expect(runArgs.messages.some((item) => item.content.includes('当前在场角色ID列表：pero'))).toBe(
+      true,
+    )
+    expect(
+      runArgs.messages.some((item) => item.content.includes('新房间上下文从下一回合开始生效')),
+    ).toBe(true)
     expect(ctx.groupChatService.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({ roomId: 'room-1', senderId: 'pero', role: 'assistant' }),
     )
+  })
+
+  it('据点回合应只注入其他在场角色的公开档案并转义 XML', async () => {
+    const ctx = createCtx()
+    ctx.strongholdService.getRoomAgents.mockResolvedValue(['pero', 'nana'])
+
+    await createTurnService(ctx).execute('room-1', 'pero')
+
+    const runArgs = ctx.agentService.chatStreamWithCompiledMessages.mock.calls[0]?.[0] as {
+      messages: Array<{ role: string; content: string }>
+    }
+    const profileMessage = runArgs.messages.find((item) =>
+      item.content.includes('<room_member_profiles observer="pero">'),
+    )?.content
+
+    expect(profileMessage).toContain(
+      '<member id="nana" name="Nana &amp; &lt;伙伴&gt;"><appearance>紫发 &amp; 紫瞳</appearance><personality>自信 &lt;傲娇&gt;</personality></member>',
+    )
+    expect(profileMessage).not.toContain('<member id="pero"')
+    expect(profileMessage).not.toContain('猫猫助手')
+  })
+
+  it('据点回合应在公开档案为空时回退到角色简介', async () => {
+    const ctx = createCtx()
+    ctx.strongholdService.getRoomAgents.mockResolvedValue(['pero', 'nana'])
+    ctx.agentManager.getAgent.mockImplementation((id: string) =>
+      id === 'nana'
+        ? {
+            id: 'nana',
+            name: 'Nana',
+            description: '公开简介',
+            publicProfile: {},
+          }
+        : undefined,
+    )
+
+    await createTurnService(ctx).execute('room-1', 'pero')
+
+    const runArgs = ctx.agentService.chatStreamWithCompiledMessages.mock.calls[0]?.[0] as {
+      messages: Array<{ role: string; content: string }>
+    }
+    expect(
+      runArgs.messages.some((item) =>
+        item.content.includes(
+          '<member id="nana" name="Nana"><description>公开简介</description></member>',
+        ),
+      ),
+    ).toBe(true)
   })
 
   it('已删除的据点对话不应被迟到的 Agent 回复重新写回', async () => {
     const ctx = createCtx()
     ctx.groupChatService.isPairActive.mockResolvedValueOnce(false)
 
-    await executeAgentTurn(ctx as never, 'room-1', 'pero', 'deleted-pair')
+    await createTurnService(ctx).execute('room-1', 'pero', 'deleted-pair')
 
     expect(ctx.groupChatService.isPairActive).toHaveBeenCalledWith('room-1', 'deleted-pair')
     expect(ctx.groupChatService.sendMessage).not.toHaveBeenCalled()
@@ -482,8 +922,9 @@ describe('StrongholdRouter', () => {
       Promise.resolve({ id: roomId, name: roomId, environmentJson: '{}' }),
     )
 
-    await executeAgentTurn(ctx as never, 'room-a', 'pero')
-    await executeAgentTurn(ctx as never, 'room-b', 'nana')
+    const service = createTurnService(ctx)
+    await service.execute('room-a', 'pero')
+    await service.execute('room-b', 'nana')
 
     expect(ctx.threadService.createThread).toHaveBeenNthCalledWith(
       1,
@@ -493,8 +934,8 @@ describe('StrongholdRouter', () => {
       2,
       expect.objectContaining({ id: 'stronghold_room-b_nana' }),
     )
-    expect(ctx.groupChatService.getHistoryPairs).toHaveBeenCalledWith('room-a', 20)
-    expect(ctx.groupChatService.getHistoryPairs).toHaveBeenCalledWith('room-b', 20)
+    expect(ctx.groupChatService.getVisibleHistoryPairs).toHaveBeenCalledWith('pero', 20)
+    expect(ctx.groupChatService.getVisibleHistoryPairs).toHaveBeenCalledWith('nana', 20)
   })
 
   it('应当处理空位置和房间未找到分支', async () => {

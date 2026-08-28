@@ -8,8 +8,7 @@
  * @module packages/frontend/src/components/avatar/lib/ysm/loadYsmManifest
  */
 
-import { YsmManifestGenerator } from '@infos/shared/ysm'
-import type { YsmGeneratedManifest } from '@infos/shared/ysm'
+import { YsmManifestGenerator, type YsmGeneratedManifest } from '@infos/avatar-assets'
 import { resolveAvatarAssetUrl, resolveAvatarManifestUrls } from '../avatarAssetUrl'
 
 /** 从模型 Bedrock JSON 提取骨骼名与可见包围盒高度 */

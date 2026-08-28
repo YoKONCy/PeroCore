@@ -22,8 +22,24 @@
  * @module packages/backend/src/services/gateway/gatewayHub
  */
 
+import {
+  GATEWAY_ACTION_CATALOG,
+  negotiateKernelProtocol,
+  validateVersionedMessage,
+} from '@infos/shared'
+import type {
+  CataloguedGatewayAction,
+  DeliveryAudience,
+  KernelInputSeat,
+  KernelNodeDescriptor,
+  KernelNodeId,
+  KernelNodeSessionId,
+} from '@infos/shared'
+import type { NodeRegistry } from '../../kernel/nodeRegistry'
+import type { DurableNotificationRepository } from '../../repositories/durableNotification.repo'
 import type { GatewayEnvelope } from './types'
 import { createEnvelope } from './types'
+import { DurableGatewayStream } from './durableGatewayStream'
 import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('GatewayHub')
@@ -43,7 +59,14 @@ const STALE_TIMEOUT_MS = 90_000
 
 /** 已连接的客户端节点 */
 interface GatewayNode {
+  /** Transport 连接标识，握手后不可作为业务 Node Identity。 */
   id: string
+  stableNodeId?: KernelNodeId
+  sessionId?: KernelNodeSessionId
+  generation?: number
+  principalId?: string
+  subscriptions: Set<string>
+  authenticated: boolean
   /** 发送 JSON 文本的函数 (由 WS 升级时注入) */
   send: (data: string) => void | Promise<void>
   /** 最后一次活跃时间 (心跳/消息) */
@@ -71,6 +94,12 @@ export class GatewayHub {
 
   /** 心跳定时器 */
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null
+  private readonly durableStreams = new DurableGatewayStream()
+
+  constructor(
+    private readonly nodeRegistry?: NodeRegistry,
+    private readonly notifications?: DurableNotificationRepository,
+  ) {}
 
   /** 已连接节点数 */
   get connectedCount(): number {
@@ -112,6 +141,7 @@ export class GatewayHub {
 
     for (const nodeId of staleIds) {
       logger.warn(`清理 stale 连接: ${nodeId} (超过 ${STALE_TIMEOUT_MS / 1000}s 无响应)`)
+      this.disconnectNodeSession(this.nodes.get(nodeId))
       this.nodes.delete(nodeId)
     }
 
@@ -164,14 +194,21 @@ export class GatewayHub {
       id: nodeId,
       send: sendFn,
       lastActiveAt: Date.now(),
+      subscriptions: new Set(),
+      authenticated: !this.nodeRegistry,
     })
     logger.info(`节点已注册: ${nodeId} (在线: ${this.nodes.size})`)
   }
 
   /** 注销节点 */
   unregisterNode(nodeId: string): void {
+    this.disconnectNodeSession(this.nodes.get(nodeId))
     this.nodes.delete(nodeId)
     logger.info(`节点已断开: ${nodeId} (在线: ${this.nodes.size})`)
+  }
+
+  private disconnectNodeSession(node?: GatewayNode): void {
+    if (node?.sessionId) this.nodeRegistry?.disconnect(node.sessionId)
   }
 
   /**
@@ -189,8 +226,20 @@ export class GatewayHub {
     let envelope: GatewayEnvelope
     try {
       envelope = JSON.parse(raw) as GatewayEnvelope
-    } catch {
-      logger.warn(`无效 JSON 消息: ${raw.slice(0, 100)}`)
+      validateVersionedMessage(envelope)
+      if (
+        !envelope.id ||
+        !envelope.type ||
+        !envelope.sourceId ||
+        !envelope.targetId ||
+        !Number.isFinite(envelope.timestamp) ||
+        !envelope.payload ||
+        typeof envelope.payload !== 'object'
+      ) {
+        throw new Error('GATEWAY_ENVELOPE_INVALID')
+      }
+    } catch (error) {
+      logger.warn(`无效Gateway消息: ${error instanceof Error ? error.message : String(error)}`)
       return
     }
 
@@ -202,8 +251,27 @@ export class GatewayHub {
         await this.handleHeartbeat(nodeId)
         break
       case 'request':
-        // 注入发送者 nodeId (用于 RPC 响应回送)
-        envelope.sourceId = nodeId
+        if (!node?.authenticated) {
+          await this.sendTransportError(envelope.id, nodeId, 'GATEWAY_HELLO_REQUIRED')
+          break
+        }
+        envelope.sourceId = node.stableNodeId ?? nodeId
+        if (envelope.payload.action === 'gateway.subscribe') {
+          await this.handleSubscribe(envelope, node)
+          break
+        }
+        if (envelope.payload.action === 'input_seat.acquire') {
+          await this.handleInputSeatAcquire(envelope, node)
+          break
+        }
+        if (envelope.payload.action === 'input_seat.renew') {
+          await this.handleInputSeatRenew(envelope, node)
+          break
+        }
+        if (envelope.payload.action === 'input_seat.release') {
+          await this.handleInputSeatRelease(envelope, node)
+          break
+        }
         this.emit('request', envelope)
         this.emit(`action:${envelope.payload.action as string}`, envelope)
         // 路由: 无 targetId 或 targetId=backend → 仅触发事件 (由后端 Service 处理)
@@ -248,6 +316,35 @@ export class GatewayHub {
     }
   }
 
+  /** 按 Audience 投递业务消息。 */
+  async deliver(envelope: GatewayEnvelope): Promise<void> {
+    const data = JSON.stringify(envelope)
+    for (const node of this.nodes.values()) {
+      if (!node.authenticated || !this.matchesAudience(node, envelope.audience)) continue
+      try {
+        await node.send(data)
+      } catch (err) {
+        logger.warn(`发送至 ${node.stableNodeId ?? node.id} 失败`, { error: err })
+      }
+    }
+  }
+
+  private matchesAudience(node: GatewayNode, audience?: DeliveryAudience): boolean {
+    if (!audience) return false
+    if (!this.nodeRegistry) return true
+    if (audience.type === 'specific_node') return node.stableNodeId === audience.nodeId
+    if (audience.type === 'active_input_seat') {
+      const seat = this.nodeRegistry?.getInputSeat(audience.principalId)
+      return Boolean(seat && seat.nodeId === node.stableNodeId && seat.sessionId === node.sessionId)
+    }
+    if (audience.type === 'all_principal_clients') return node.principalId === audience.principalId
+    const streamId =
+      audience.type === 'thread_subscribers'
+        ? `thread:${audience.threadId}`
+        : `execution:${audience.executionId}`
+    return node.subscriptions.has(streamId)
+  }
+
   /** 单播 */
   async unicast(envelope: GatewayEnvelope): Promise<void> {
     const node = this.nodes.get(envelope.targetId)
@@ -262,6 +359,27 @@ export class GatewayHub {
     }
   }
 
+  async pushBusiness(
+    action: CataloguedGatewayAction,
+    payload: Record<string, unknown>,
+    audience: DeliveryAudience,
+    streamId?: string,
+  ): Promise<GatewayEnvelope> {
+    const policy = GATEWAY_ACTION_CATALOG[action]
+    let envelope = createEnvelope(
+      'push',
+      { action, ...payload },
+      audience.type === 'specific_node' ? audience.nodeId : 'audience',
+      { audience, durability: policy.durability, streamId },
+    )
+    if (policy.durability === 'durable') {
+      if (!streamId) throw new Error(`GATEWAY_DURABLE_STREAM_REQUIRED: ${action}`)
+      envelope = this.durableStreams.append(streamId, envelope)
+    }
+    await this.deliver(envelope)
+    return envelope
+  }
+
   // ── 便捷广播方法 ──
 
   /** 推送 PetState 更新 */
@@ -269,41 +387,9 @@ export class GatewayHub {
     await this.broadcast(createEnvelope('push', { action: 'state_update', ...state }))
   }
 
-  /** 推送流式增量 */
-  async pushStreamDelta(content: string, sessionId: string): Promise<void> {
-    await this.broadcast(
-      createEnvelope('push', {
-        action: 'stream_delta',
-        content,
-        sessionId,
-      }),
-    )
-  }
-
-  /** 推送流式结束 */
-  async pushStreamEnd(sessionId: string): Promise<void> {
-    await this.broadcast(
-      createEnvelope('push', {
-        action: 'stream_end',
-        sessionId,
-      }),
-    )
-  }
-
-  /** 推送工具状态 (B6-4) */
-  async pushToolStatus(params: {
-    name: string
-    state: 'calling' | 'completed' | 'error'
-    sessionId: string
-    result?: string
-    durationMs?: number
-  }): Promise<void> {
-    await this.broadcast(
-      createEnvelope('push', {
-        action: 'tool_status',
-        ...params,
-      }),
-    )
+  /** 推送统一 Internal Surface 帧。 */
+  async pushSurface(frame: import('@infos/shared').SurfaceFrame): Promise<void> {
+    await this.broadcast(createEnvelope('push', { action: 'surface', frame }))
   }
 
   /** 推送任务进度 (B6-4) */
@@ -321,33 +407,55 @@ export class GatewayHub {
     )
   }
 
-  /** 推送通知 */
+  /** 推送通知；默认只投递当前 Input Seat，重要通知使用 Durable Stream。 */
   async pushNotification(params: {
     title: string
     body?: string
     level?: 'info' | 'success' | 'warning' | 'error'
     duration?: number
     source?: string
+    principalId?: string
+    important?: boolean
+    notificationId?: string
   }): Promise<void> {
-    await this.broadcast(
-      createEnvelope('push', {
-        action: 'notification',
-        ...params,
-      }),
+    const principalId = params.principalId ?? 'pero'
+    const notificationId = params.notificationId ?? crypto.randomUUID()
+    if (!this.nodeRegistry) {
+      await this.broadcast(
+        createEnvelope('push', { action: 'notification', ...params, notificationId }),
+      )
+      return
+    }
+    if (params.important) {
+      this.notifications?.create({
+        notificationId,
+        principalId,
+        audience: { type: 'all_principal_clients', principalId },
+        title: params.title,
+        body: params.body,
+        level: params.level ?? 'info',
+        status: 'unread',
+        revision: 1,
+        createdAt: new Date().toISOString(),
+      })
+      await this.pushBusiness(
+        'durable_notification',
+        { ...params, notificationId, important: true },
+        { type: 'all_principal_clients', principalId },
+        `notification:${principalId}`,
+      )
+      return
+    }
+    await this.pushBusiness(
+      'notification',
+      { ...params, notificationId, important: false },
+      { type: 'active_input_seat', principalId },
     )
   }
 
-  /** 推送 TTS 音频 chunk (base64 编码) */
-  async pushAudioChunk(audioData: ArrayBuffer, sessionId: string): Promise<void> {
-    // 将 ArrayBuffer 转为 base64 字符串，通过 JSON 推送
-    const base64 = Buffer.from(audioData).toString('base64')
-    await this.broadcast(
-      createEnvelope('push', {
-        action: 'audio_chunk',
-        audio: base64,
-        sessionId,
-      }),
-    )
+  /** 旧 Gateway 音频广播已退役；音频必须通过 Audio Asset 与 audio.output Capability 定向播放。 */
+  async pushAudioChunk(_audioData: ArrayBuffer, _sessionId: string): Promise<void> {
+    throw new Error('AUDIO_CHUNK_RETIRED: 请使用 AudioDeliveryService 定向播放')
   }
 
   /** 推送语音管道状态变更 */
@@ -404,28 +512,177 @@ export class GatewayHub {
 
   // ── 握手 / 心跳 ──
 
-  private async handleHello(envelope: GatewayEnvelope, nodeId: string): Promise<void> {
-    const token = envelope.payload.token as string
+  private async handleHello(envelope: GatewayEnvelope, connectionId: string): Promise<void> {
+    const node = this.nodes.get(connectionId)
+    if (!node) return
+    const token = String(envelope.payload.token ?? '')
     if (this.authToken && token !== this.authToken) {
-      logger.warn(`节点 ${nodeId} Token 不匹配`)
+      logger.warn(`连接 ${connectionId} Token 不匹配`)
+      await this.sendTransportError(envelope.id, connectionId, 'GATEWAY_UNAUTHORIZED')
+      return
     }
 
-    // 记录设备名
-    const node = this.nodes.get(nodeId)
-    if (node) {
-      node.deviceName = (envelope.payload.deviceName as string) ?? undefined
+    const stableNodeId = String(envelope.payload.nodeId ?? '').trim() as KernelNodeId
+    const principalId = String(envelope.payload.principalId ?? 'pero').trim()
+    if (this.nodeRegistry) {
+      if (!stableNodeId) {
+        await this.sendTransportError(envelope.id, connectionId, 'GATEWAY_NODE_ID_REQUIRED')
+        return
+      }
+      const descriptor = this.toClientDescriptor(stableNodeId, envelope.payload)
+      this.nodeRegistry.registerNode(descriptor)
+      const session = this.nodeRegistry.connect({
+        nodeId: stableNodeId,
+        connectionId,
+        carrier: 'websocket',
+        leaseMs: STALE_TIMEOUT_MS,
+      })
+      node.stableNodeId = stableNodeId
+      node.sessionId = session.sessionId
+      node.generation = session.generation
+      node.principalId = principalId
+    } else {
+      node.stableNodeId = stableNodeId || (connectionId as KernelNodeId)
+      node.principalId = principalId
     }
+    node.authenticated = true
+    node.deviceName = String(envelope.payload.deviceName ?? '') || undefined
 
-    // 回复 hello_ack
-    const ack = createEnvelope('hello_ack', { nodeId }, nodeId)
-    await this.unicast(ack)
+    const supportedVersions = Array.isArray(envelope.payload.supportedVersions)
+      ? envelope.payload.supportedVersions.map(Number)
+      : [envelope.protocolVersion]
+    const agreedVersion = negotiateKernelProtocol(supportedVersions)
+    const ack = createEnvelope(
+      'hello_ack',
+      {
+        nodeId: node.stableNodeId,
+        sessionId: node.sessionId,
+        generation: node.generation,
+        agreedVersion,
+        features: ['surface-v1', 'audience-v1', 'cursor-v1', 'input-seat-v1'],
+      },
+      connectionId,
+    )
+    await node.send(JSON.stringify(ack))
+  }
+
+  private toClientDescriptor(
+    nodeId: KernelNodeId,
+    payload: Record<string, unknown>,
+  ): KernelNodeDescriptor {
+    const platform = (payload.platform ?? {}) as Record<string, unknown>
+    const os = String(platform.os ?? 'web')
+    const runtime = String(platform.runtime ?? 'browser')
+    return {
+      nodeId,
+      displayName: String(payload.deviceName ?? 'Client Node'),
+      facets: ['client', 'device'],
+      trust: this.authToken ? 'paired' : 'local',
+      platform: {
+        os: ['windows', 'linux', 'macos', 'android', 'ios', 'web'].includes(os)
+          ? (os as KernelNodeDescriptor['platform']['os'])
+          : 'unknown',
+        runtime: ['node', 'bun', 'electron', 'tauri', 'browser', 'native'].includes(runtime)
+          ? (runtime as KernelNodeDescriptor['platform']['runtime'])
+          : 'unknown',
+        arch: typeof platform.arch === 'string' ? platform.arch : undefined,
+      },
+      protocolVersion: 1,
+      registeredAt: new Date().toISOString(),
+    }
+  }
+
+  private async handleSubscribe(envelope: GatewayEnvelope, node: GatewayNode): Promise<void> {
+    const streamId = String(envelope.payload.streamId ?? '').trim()
+    const lastSequence = Number(envelope.payload.lastSequence ?? 0)
+    if (!streamId || !Number.isInteger(lastSequence) || lastSequence < 0) {
+      await this.sendTransportError(envelope.id, node.id, 'GATEWAY_SUBSCRIPTION_INVALID')
+      return
+    }
+    node.subscriptions.add(streamId)
+    const recovery = this.durableStreams.read(streamId, lastSequence)
+    const response = createEnvelope('response', { streamId, ...recovery }, node.id)
+    response.id = envelope.id
+    await node.send(JSON.stringify(response))
+  }
+
+  private async handleInputSeatAcquire(
+    envelope: GatewayEnvelope,
+    node: GatewayNode,
+  ): Promise<void> {
+    if (!node.sessionId || !this.nodeRegistry) return
+    try {
+      const principalId = String(envelope.payload.principalId ?? node.principalId ?? 'pero')
+      const seat = this.nodeRegistry.issueInputSeat({
+        sessionId: node.sessionId,
+        principalId,
+        windowId: String(envelope.payload.windowId ?? 'main'),
+        leaseMs: Number(envelope.payload.leaseMs ?? 60_000),
+        capabilities: ['surface', 'approval', 'input', 'audio-output'],
+      })
+      await this.sendRpcValue(envelope.id, node.id, { seat })
+    } catch (error) {
+      await this.sendTransportError(envelope.id, node.id, (error as Error).message)
+    }
+  }
+
+  private async handleInputSeatRenew(envelope: GatewayEnvelope, node: GatewayNode): Promise<void> {
+    if (!this.nodeRegistry) return
+    try {
+      const seat = this.nodeRegistry.renewInputSeat(
+        String(envelope.payload.seatId) as KernelInputSeat['seatId'],
+        Number(envelope.payload.leaseMs ?? 60_000),
+      )
+      if (seat.sessionId !== node.sessionId) throw new Error('INPUT_SEAT_IDENTITY_MISMATCH')
+      await this.sendRpcValue(envelope.id, node.id, { seat })
+    } catch (error) {
+      await this.sendTransportError(envelope.id, node.id, (error as Error).message)
+    }
+  }
+
+  private async handleInputSeatRelease(
+    envelope: GatewayEnvelope,
+    node: GatewayNode,
+  ): Promise<void> {
+    if (!this.nodeRegistry) return
+    const seatId = String(envelope.payload.seatId) as KernelInputSeat['seatId']
+    const seat = this.nodeRegistry.listInputSeats().find((value) => value.seatId === seatId)
+    if (!seat || seat.sessionId !== node.sessionId) {
+      await this.sendTransportError(envelope.id, node.id, 'INPUT_SEAT_IDENTITY_MISMATCH')
+      return
+    }
+    await this.sendRpcValue(envelope.id, node.id, {
+      released: this.nodeRegistry.revokeInputSeat(seatId),
+    })
+  }
+
+  private async sendRpcValue(
+    requestId: string,
+    targetId: string,
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    const response = createEnvelope('response', payload, targetId)
+    response.id = requestId
+    const node = this.nodes.get(targetId)
+    if (node) await node.send(JSON.stringify(response))
+  }
+
+  private async sendTransportError(
+    requestId: string,
+    targetId: string,
+    code: string,
+  ): Promise<void> {
+    const error = createEnvelope('error', { code, message: code }, targetId)
+    error.id = requestId
+    const node = this.nodes.get(targetId)
+    if (node) await node.send(JSON.stringify(error))
   }
 
   private async handleHeartbeat(nodeId: string): Promise<void> {
     const node = this.nodes.get(nodeId)
     if (!node) return
-    // 更新活跃时间 (已在 handleMessage 中做了，这里确保)
     node.lastActiveAt = Date.now()
+    if (node.sessionId) this.nodeRegistry?.heartbeat(node.sessionId, STALE_TIMEOUT_MS)
     const ack = createEnvelope('heartbeat_ack', {}, nodeId)
     ack.targetId = nodeId
     try {

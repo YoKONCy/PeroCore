@@ -1,5 +1,7 @@
 # AIOS 架构总则与重构路线图
 
+> **归档警示**：本文记录历史设计与迁移背景，不代表当前架构。现行规范以[A01文档索引](../A01_PROJECT_STRUCTURE.md#6-规范文档与归档)及其列出的A02–A09/S系列文档为准；旧Channel、API、Package或Application表述不得用于新实现。
+
 > 本文档是 PeroCore AIOS 重构的顶层基准。所有后续设计文档均以此为准绳。
 
 ---
@@ -20,20 +22,21 @@
 
 主 Agent 拥有六个平级一等资源，不存在谁包含谁：
 
-| 资源 | 职责 | 生命周期 |
-|---|---|---|
-| **Identity** | 人格、表达风格、行为边界 | 随 Agent 长期存在 |
-| **Long-term Memory** | 跨会话的提炼记忆 | 随 Agent 长期存在 |
-| **Principal Workspace** | 个人文件空间 | 随 Agent 长期存在 |
-| **Context Runtime** | 上下文编译 | 每次调用时临时编译 |
-| **Thread** | 交互线程与消息存储 | 用户显式创建/关闭 |
-| **Tool Capability** | 工具注册与资源级权限 | 随 Agent 配置存在 |
+| 资源                    | 职责                     | 生命周期           |
+| ----------------------- | ------------------------ | ------------------ |
+| **Identity**            | 人格、表达风格、行为边界 | 随 Agent 长期存在  |
+| **Long-term Memory**    | 跨会话的提炼记忆         | 随 Agent 长期存在  |
+| **Principal Workspace** | 个人文件空间             | 随 Agent 长期存在  |
+| **Context Runtime**     | 上下文编译               | 每次调用时临时编译 |
+| **Thread**              | 交互线程与消息存储       | 用户显式创建/关闭  |
+| **Tool Capability**     | 工具注册与资源级权限     | 随 Agent 配置存在  |
 
 ### 2.3 持久状态与运行时状态分离
 
 系统的所有状态必须明确区分为持久状态或运行时状态，不可混淆。
 
 **持久状态**（数据库/文件，跨重启保留）：
+
 - Agent 配置、人格文件
 - Thread 记录（含 channel、policies）
 - Thread 消息（含 status、pairId、revision）
@@ -42,6 +45,7 @@
 - ToolCapability 配置
 
 **运行时状态**（内存，重启后重建）：
+
 - 活跃 Agent / 活跃 Thread（**前端窗口级**，不是后端全局状态）
 - LLM 调用状态（单次调用，用完丢弃）
 - Context Bundle / Manifest（单次编译产物）
@@ -108,21 +112,21 @@ SubAgent（次 Agent，暂不实现）
 
 当前 `Session` 承载了过多含义。重构后用 `Thread` 替代：
 
-| 概念 | 当前 Session | 新 Thread |
-|---|---|---|
-| 身份 | 聊天 ID + Agent 当前指针 | 交互线程，只负责对话边界 |
-| 上下文 | 前端全量提交 + 后端 XML 注入 | 后端 Compiler 统一加载 |
-| Profile | 绑定 Session | Context Policy 独立配置 |
-| 权威 | 前后端多份并行 | 后端单一权威 |
+| 概念    | 当前 Session                 | 新 Thread                |
+| ------- | ---------------------------- | ------------------------ |
+| 身份    | 聊天 ID + Agent 当前指针     | 交互线程，只负责对话边界 |
+| 上下文  | 前端全量提交 + 后端 XML 注入 | 后端 Compiler 统一加载   |
+| Profile | 绑定 Session                 | Context Policy 独立配置  |
+| 权威    | 前后端多份并行               | 后端单一权威             |
 
 Thread 的 channel 属性定义对话场景，channel 是 Thread 的**持久属性**，创建时确定，不随 Agent 切换或单次调用变化：
 
-| Channel | 场景 | 由主 Agent 编译 | 记忆写入 |
-|---|---|---|---|
-| `desktop` | 桌面聊天 | ✅ 是 | 写入主记忆 |
-| `companion` | 陪伴模式 | ✅ 是 | 写入主记忆 |
-| `social` | 社交平台私聊 | ❌ 否（子 Agent 应用） | 社交子 Agent 独立管理 |
-| `group` | 群聊 | ❌ 否（子 Agent 应用） | 社交子 Agent 独立管理 |
+| Channel     | 场景         | 由主 Agent 编译        | 记忆写入              |
+| ----------- | ------------ | ---------------------- | --------------------- |
+| `desktop`   | 桌面聊天     | ✅ 是                  | 写入主记忆            |
+| `companion` | 陪伴模式     | ✅ 是                  | 写入主记忆            |
+| `social`    | 社交平台私聊 | ❌ 否（子 Agent 应用） | 社交子 Agent 独立管理 |
+| `group`     | 群聊         | ❌ 否（子 Agent 应用） | 社交子 Agent 独立管理 |
 
 > `social`/`group` 场景将从主 Agent 剥离，作为独立的社交子 Agent 应用设计。
 > 当前社交继续走现有 SocialBridge + SocialEnricher 独立路径。
@@ -138,14 +142,14 @@ Thread 的 channel 属性定义对话场景，channel 是 Thread 的**持久属�
 
 ## 5. 模式清理
 
-| 当前模式 | 重构后处理 |
-|---|---|
-| `default` | 保留，变为 `channel=desktop` |
-| `work` | **移除**，留给未来 Coding App + SubAgent |
-| `social` | 社交子 Agent 应用（待重构） |
-| `group_chat` | 社交子 Agent 应用（待重构） |
-| `companion` | 保留，变为 `channel=companion` |
-| `lightweight` | 变为 Context Policy 配置项，不是模式 |
+| 当前模式      | 重构后处理                               |
+| ------------- | ---------------------------------------- |
+| `default`     | 保留，变为 `channel=desktop`             |
+| `work`        | **移除**，留给未来 Coding App + SubAgent |
+| `social`      | 社交子 Agent 应用（待重构）              |
+| `group_chat`  | 社交子 Agent 应用（待重构）              |
+| `companion`   | 保留，变为 `channel=companion`           |
+| `lightweight` | 变为 Context Policy 配置项，不是模式     |
 
 ---
 
@@ -153,31 +157,31 @@ Thread 的 channel 属性定义对话场景，channel 是 Thread 的**持久属�
 
 ### 6.1 持久状态（数据库/文件，跨重启保留）
 
-| 状态 | 存储位置 | 归属 |
-|---|---|---|
-| Agent 配置 | SQLite + 文件系统 | 全局 |
-| Thread 记录 | SQLite | PrincipalAgent |
-| Thread 消息 | SQLite | Thread |
-| Thread 摘要 | SQLite | Thread |
-| CanonicalMemory | SQLite + TriviumDB | PrincipalAgent |
-| MemoryCandidate | SQLite | PrincipalAgent |
-| Workspace 文件 | 文件系统 | PrincipalAgent |
-| ToolCapability 配置 | 配置文件 | PrincipalAgent + channel |
-| 群聊成员关系 | SQLite | Thread |
-| 日记 | SQLite + TriviumDB | PrincipalAgent |
+| 状态                | 存储位置           | 归属                     |
+| ------------------- | ------------------ | ------------------------ |
+| Agent 配置          | SQLite + 文件系统  | 全局                     |
+| Thread 记录         | SQLite             | PrincipalAgent           |
+| Thread 消息         | SQLite             | Thread                   |
+| Thread 摘要         | SQLite             | Thread                   |
+| CanonicalMemory     | SQLite + TriviumDB | PrincipalAgent           |
+| MemoryCandidate     | SQLite             | PrincipalAgent           |
+| Workspace 文件      | 文件系统           | PrincipalAgent           |
+| ToolCapability 配置 | 配置文件           | PrincipalAgent + channel |
+| 群聊成员关系        | SQLite             | Thread                   |
+| 日记                | SQLite + TriviumDB | PrincipalAgent           |
 
 ### 6.2 运行时状态（内存，重启后重建）
 
-| 状态 | 归属 | 生命周期 |
-|---|---|---|
-| 活跃 Agent / 活跃 Thread | **前端窗口** | 窗口级 |
-| LLM 调用状态 | Thread | 单次调用 |
-| Context Bundle / Manifest | Thread | 单次调用，用完丢弃 |
-| SSE 连接 | 前端窗口 | 连接级 |
-| 平台适配器连接 | Thread | 连接级 |
-| Agent 情绪状态 | PrincipalAgent | 运行时（可定期快照） |
-| Scheduler 运行状态 | 后端进程 | 进程级 |
-| AbortController | Thread | 单次调用 |
+| 状态                      | 归属           | 生命周期             |
+| ------------------------- | -------------- | -------------------- |
+| 活跃 Agent / 活跃 Thread  | **前端窗口**   | 窗口级               |
+| LLM 调用状态              | Thread         | 单次调用             |
+| Context Bundle / Manifest | Thread         | 单次调用，用完丢弃   |
+| SSE 连接                  | 前端窗口       | 连接级               |
+| 平台适配器连接            | Thread         | 连接级               |
+| Agent 情绪状态            | PrincipalAgent | 运行时（可定期快照） |
+| Scheduler 运行状态        | 后端进程       | 进程级               |
+| AbortController           | Thread         | 单次调用             |
 
 ### 6.3 关键规则
 
@@ -247,39 +251,39 @@ Thread 的 channel 属性定义对话场景，channel 是 Thread 的**持久属�
 
 ## 8. 文档索引
 
-| 文档 | 内容 |
-|---|---|
-| [00-overview.md](00-overview.md) | 架构总则与重构路线图（本文档） |
-| [01-principal-agent.md](01-principal-agent.md) | PrincipalAgent 模型 |
-| [02-thread.md](02-thread.md) | Thread 模型 |
-| [03-context-runtime.md](03-context-runtime.md) | Context Runtime 模型 |
-| [04-memory.md](04-memory.md) | Memory 模型 |
-| [05-workspace.md](05-workspace.md) | Workspace 模型 |
-| [06-tool-capability.md](06-tool-capability.md) | Tool Capability 模型 |
-| [07-channel-isolation.md](07-channel-isolation.md) | Channel 隔离策略 |
-| [08-api-contract.md](08-api-contract.md) | API 契约草案 |
-| [09-migration.md](09-migration.md) | 迁移策略 |
-| [10-node-architecture.md](10-node-architecture.md) | 节点架构与能力提供者 |
+| 文档                                               | 内容                           |
+| -------------------------------------------------- | ------------------------------ |
+| [00-overview.md](00-overview.md)                   | 架构总则与重构路线图（本文档） |
+| [01-principal-agent.md](01-principal-agent.md)     | PrincipalAgent 模型            |
+| [02-thread.md](02-thread.md)                       | Thread 模型                    |
+| [03-context-runtime.md](03-context-runtime.md)     | Context Runtime 模型           |
+| [04-memory.md](04-memory.md)                       | Memory 模型                    |
+| [05-workspace.md](05-workspace.md)                 | Workspace 模型                 |
+| [06-tool-capability.md](06-tool-capability.md)     | Tool Capability 模型           |
+| [07-channel-isolation.md](07-channel-isolation.md) | Channel 隔离策略               |
+| [08-api-contract.md](08-api-contract.md)           | API 契约草案                   |
+| [09-migration.md](09-migration.md)                 | 迁移策略                       |
+| [10-node-architecture.md](10-node-architecture.md) | 节点架构与能力提供者           |
 
 ---
 
 ## 9. 术语表
 
-| 术语 | 定义 |
-|---|---|
-| PrincipalAgent | 主 Agent，拥有完整人格和长期记忆的数字生命主体 |
-| Thread | 交互线程，主 Agent 与用户或外部平台的一次对话边界 |
-| Context Runtime | 上下文运行时，含 Compiler、Bundle、Manifest |
-| Context Compiler | 只读编译器，从各资源编译 LLM 输入 |
-| Context Bundle | 一次编译的上下文包 |
-| Context Manifest | 编译清单，记录使用了哪些资源、版本和裁剪策略 |
-| Principal Workspace | 主 Agent 的个人文件空间 |
-| Memory Candidate | 待确认的记忆候选 |
-| Canonical Memory | 已由 Memory Gate 确认的长期记忆 |
-| Memory Gate | 记忆审核与合并机制 |
-| Channel | Thread 的对话场景类型 |
-| NodeEndpoint | 后端节点连接信息 |
-| RuntimeStateService | 后端持久资源权威服务（不含全局活跃 Agent） |
-| Daemon | PeroCore 后端独立运行时，纯 Node 进程 |
-| Tool Provider | 平台能力提供者机制，Daemon 委托节点执行平台特有操作 |
-| InboundRoute | 入站路由表，外部消息查找归属 Agent 的机制 |
+| 术语                | 定义                                                |
+| ------------------- | --------------------------------------------------- |
+| PrincipalAgent      | 主 Agent，拥有完整人格和长期记忆的数字生命主体      |
+| Thread              | 交互线程，主 Agent 与用户或外部平台的一次对话边界   |
+| Context Runtime     | 上下文运行时，含 Compiler、Bundle、Manifest         |
+| Context Compiler    | 只读编译器，从各资源编译 LLM 输入                   |
+| Context Bundle      | 一次编译的上下文包                                  |
+| Context Manifest    | 编译清单，记录使用了哪些资源、版本和裁剪策略        |
+| Principal Workspace | 主 Agent 的个人文件空间                             |
+| Memory Candidate    | 待确认的记忆候选                                    |
+| Canonical Memory    | 已由 Memory Gate 确认的长期记忆                     |
+| Memory Gate         | 记忆审核与合并机制                                  |
+| Channel             | Thread 的对话场景类型                               |
+| NodeEndpoint        | 后端节点连接信息                                    |
+| RuntimeStateService | 后端持久资源权威服务（不含全局活跃 Agent）          |
+| Daemon              | PeroCore 后端独立运行时，纯 Node 进程               |
+| Tool Provider       | 平台能力提供者机制，Daemon 委托节点执行平台特有操作 |
+| InboundRoute        | 入站路由表，外部消息查找归属 Agent 的机制           |

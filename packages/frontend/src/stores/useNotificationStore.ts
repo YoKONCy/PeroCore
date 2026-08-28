@@ -70,6 +70,21 @@ export const useNotificationStore = defineStore('notification', () => {
     }
   }
 
+  /** 已展示的远程通知 ID，避免重连补发导致重复弹出。 */
+  const remoteNotificationIds = new Set<string>()
+
+  /** 远程通知只按稳定 notificationId 展示一次；本地反馈 Toast 不进入远程协议。 */
+  function toastRemote(id: string, message: string, options: ToastOptions = {}) {
+    if (id && remoteNotificationIds.has(id)) return
+    if (id) {
+      remoteNotificationIds.add(id)
+      if (remoteNotificationIds.size > 2_000) {
+        remoteNotificationIds.delete(remoteNotificationIds.values().next().value!)
+      }
+    }
+    toast(message, options)
+  }
+
   /** 显示模态通知（阻断） */
   function showModal(message: string, title?: string, type: NotificationType = 'error') {
     modal.value = {
@@ -114,6 +129,7 @@ export const useNotificationStore = defineStore('notification', () => {
     toasts,
     modal,
     toast,
+    toastRemote,
     showModal,
     closeModal,
     removeToast,

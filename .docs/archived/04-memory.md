@@ -1,5 +1,7 @@
 # Memory 模型
 
+> **归档警示**：本文记录历史设计与迁移背景，不代表当前架构。现行规范以[A01文档索引](../A01_PROJECT_STRUCTURE.md#6-规范文档与归档)及其列出的A02–A09/S系列文档为准；旧Channel、API、Package或Application表述不得用于新实现。
+
 > 长期记忆归属于 PrincipalAgent，不归属 Session/Thread。只有主 Agent 拥有长期记忆。
 
 ---
@@ -14,6 +16,7 @@ Memory 是 PrincipalAgent 的一个一等资源，负责：
 - 来源追溯（Provenance）
 
 Memory **不负责**：
+
 - 原始消息存储（那是 Thread 的事）
 - 上下文编译（那是 Context Runtime 的事）
 - 日记生成（那是 Scheduler 的独立任务）
@@ -123,6 +126,7 @@ MemoryCandidate
 ### 5.1 职责
 
 Memory Gate 决定：
+
 - 候选是否值得长期记忆
 - 是否与已有记忆重复
 - 是否与已有记忆冲突
@@ -175,21 +179,21 @@ shared/diary.tdb              ← 日记（需改为按 agent 隔离）
 
 Context Compiler 按 Thread 的 MemoryPolicy 决定检索范围：
 
-| Channel | 检索 Main Memory | 检索 Social Memory |
-|---|---|---|
-| desktop | 是 | 否 |
-| social | 否 | 是（可选） |
-| group | 否 | 是（可选） |
-| companion | 是 | 否 |
+| Channel   | 检索 Main Memory | 检索 Social Memory |
+| --------- | ---------------- | ------------------ |
+| desktop   | 是               | 否                 |
+| social    | 否               | 是（可选）         |
+| group     | 否               | 是（可选）         |
+| companion | 是               | 否                 |
 
 ### 6.3 写入隔离
 
-| Channel | 写入 Main | 写入 Social | 写入 Event Log |
-|---|---|---|---|
-| desktop | 是 | 否 | 是 |
-| social | 否 | 可选 | 是 |
-| group | 否 | 否 | 是 |
-| companion | 是 | 否 | 是 |
+| Channel   | 写入 Main | 写入 Social | 写入 Event Log |
+| --------- | --------- | ----------- | -------------- |
+| desktop   | 是        | 否          | 是             |
+| social    | 否        | 可选        | 是             |
+| group     | 否        | 否          | 是             |
+| companion | 是        | 否          | 是             |
 
 ### 6.4 跨记忆提升
 
@@ -227,6 +231,7 @@ MemoryProvenance
 ```
 
 好处：
+
 - 可以追溯记忆来源
 - 可以按 Thread 删除相关记忆
 - 可以判断记忆可靠性
@@ -287,6 +292,7 @@ social.tdb                    ← 社交记忆向量库
 ```
 
 需修复：
+
 - 日记 Store 从 `shared/diary.tdb` 改为 `agent_{agentId}/diary.tdb`
 - 语义检索必须按 `agentId` 过滤
 
@@ -294,18 +300,18 @@ social.tdb                    ← 社交记忆向量库
 
 ## 9. 与现有代码的对应
 
-| 现有模块 | 新架构角色 | 处理方式 |
-|---|---|---|
-| `MemoryService` | CanonicalMemory 管理 | 重构，加 Provenance |
-| `MemorySearchService` | MemoryRetrieval | 保留，接入 Policy |
-| `MemoryScorer` | MemoryGate 的一部分 | 重构，按 Thread 分批 |
-| `conversation_logs` | Activity Log | 迁移为 Thread Message |
-| 无 MemoryCandidate | 新增 | 新建表和服务 |
-| 无 MemoryGate | 新增 | 新建审核流程 |
-| 无 Provenance | 新增 | 在记忆节点上加来源字段 |
-| Social Memory 未注入 | 修复 | Social Memory 按策略注入 |
-| Diary 共享 Store | 修复 | 改为按 Agent 隔离 |
-| Scorer 不分批 | 修复 | 按 Thread + Channel 分批 |
+| 现有模块              | 新架构角色           | 处理方式                 |
+| --------------------- | -------------------- | ------------------------ |
+| `MemoryService`       | CanonicalMemory 管理 | 重构，加 Provenance      |
+| `MemorySearchService` | MemoryRetrieval      | 保留，接入 Policy        |
+| `MemoryScorer`        | MemoryGate 的一部分  | 重构，按 Thread 分批     |
+| `conversation_logs`   | Activity Log         | 迁移为 Thread Message    |
+| 无 MemoryCandidate    | 新增                 | 新建表和服务             |
+| 无 MemoryGate         | 新增                 | 新建审核流程             |
+| 无 Provenance         | 新增                 | 在记忆节点上加来源字段   |
+| Social Memory 未注入  | 修复                 | Social Memory 按策略注入 |
+| Diary 共享 Store      | 修复                 | 改为按 Agent 隔离        |
+| Scorer 不分批         | 修复                 | 按 Thread + Channel 分批 |
 
 ---
 

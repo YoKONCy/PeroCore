@@ -8,8 +8,9 @@
  * - 孵化联动：任务完成/失败时推 TaskToast（M05-A5 决策，系统级通知在篇3 接入）
  *
  * 数据边界：
- * - 进行中视图以 Gateway 实时事件为主，REST 轮询兜底
- * - 历史视图纯 REST 分页查询
+ * - Gateway事件仅作为Projection失效通知，不携带业务权威状态
+ * - 任务事实与Surface统一从REST Projection读取
+ * - 历史视图纯REST分页查询
  *
  * @module packages/frontend/src/stores/taskCenterStore
  */
@@ -25,6 +26,7 @@ import type {
 import { useTaskToastStore } from './taskToastStore'
 import { useAgentStore } from './useAgentStore'
 import { useThreadStore } from './useThreadStore'
+import { useCompositorStore } from './useCompositorStore'
 import { getApiBaseUrl } from '../api/transport'
 import { invoke, isElectron } from '../utils/ipcAdapter'
 import { logger } from '../lib/logger'
@@ -253,9 +255,18 @@ export const useTaskCenterStore = defineStore('taskCenter', () => {
     activeCountByAgent.value = map
   }
 
-  /** 处理 Gateway 推送的后台任务事件 */
-  function handleGatewayEvent(action: string, task: BackgroundTaskInfo): void {
+  /** Gateway只负责通知Projection失效，业务事实必须重新读取。 */
+  async function handleGatewayEvent(action: string, taskId: string): Promise<void> {
+    const [detail, projection] = await Promise.all([
+      backgroundTasksApi.detail(taskId),
+      backgroundTasksApi.projection(taskId),
+    ])
+    const task = detail.data
+    if (!task) return
     upsertActive(task)
+    if (projection.data) {
+      useCompositorStore().replaceScope(`background-task:${taskId}`, projection.data.surfaces)
+    }
 
     // M05-A5: 孵化联动 —— 完成/失败时推任务专属 Toast
     if (action === 'background_task_completed') {
@@ -327,9 +338,16 @@ export const useTaskCenterStore = defineStore('taskCenter', () => {
 
     const handler = (payload: Record<string, unknown>) => {
       const action = payload.action as string | undefined
-      const task = payload.task as BackgroundTaskInfo | undefined
-      if (!action || !task || !action.startsWith('background_task_')) return
-      handleGatewayEvent(action, task)
+      const taskId =
+        typeof payload.taskId === 'string'
+          ? payload.taskId
+          : typeof (payload.task as { id?: unknown } | undefined)?.id === 'string'
+            ? String((payload.task as { id: string }).id)
+            : undefined
+      if (!action || !taskId || !action.startsWith('background_task_')) return
+      void handleGatewayEvent(action, taskId).catch((error) => {
+        logger.warn('TaskCenter', `刷新任务Projection失败: ${error}`)
+      })
     }
 
     gateway.onPush('*', handler)

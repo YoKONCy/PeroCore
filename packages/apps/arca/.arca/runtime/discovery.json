@@ -1,0 +1,11 @@
+{
+  "protocolVersion": 1,
+  "applicationId": "infos.arca",
+  "instanceId": "235d5644-3004-4f46-899d-cc623771a6a2",
+  "nodeId": "infos-node-7ea4717bba388cadfeeac69b",
+  "pid": 25508,
+  "generation": 1,
+  "carrier": "websocket",
+  "endpoint": "ws://127.0.0.1:54289",
+  "startedAt": "2026-08-19T03:25:54.104Z"
+}

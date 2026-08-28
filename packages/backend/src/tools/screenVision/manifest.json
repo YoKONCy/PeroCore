@@ -12,7 +12,13 @@
   "toolDefinition": {
     "name": "take_screenshot",
     "description": "截取当前屏幕画面。当主人请求\"看看\"、\"看一下屏幕\"时使用。返回屏幕截图的 base64 数据，可直接进行视觉分析。",
-    "display": { "label": "屏幕截图", "icon": "image", "color": "pink", "style": "screen" },
+    "display": {
+      "label": "截取屏幕画面",
+      "description": "截取当前电脑屏幕，供视觉模型查看。",
+      "icon": "image",
+      "color": "pink",
+      "style": "screen"
+    },
     "parameters": {
       "type": "object",
       "properties": {

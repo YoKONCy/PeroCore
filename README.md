@@ -356,11 +356,6 @@ infOS/
 │   │       ├── components/        # 🧱 UI 组件库 (Chat / Avatar / Stronghold / pixel/)
 │   │       ├── stores/            # 📦 Pinia 全局状态
 │   │       └── api/               # 📡 Transport 层 (IPC / REST 自动切换)
-│   ├── native/                    # 🦀 Rust Native 模块
-│   │   ├── render-core/           # 加密/反调/打包源码子模块 (N-API)
-│   │   ├── render-core-runtime/   # 渲染核心运行时产物 (.node)
-│   │   ├── nit-runtime/           # NIT 解释器加速 (N-API)
-│   │   └── auditor-wasm/          # 终端命令审计 (WASM)
 │   └── wiki/                      # 📖 VitePress 文档站
 │
 ├── electron/                      # 🖥️ Electron 壳层 (主进程/预加载)
@@ -387,7 +382,7 @@ infOS/
 
 ## 🧠 记忆系统深度解析
 
-> **"记忆并非关键词匹配，它关乎关联与推理。"**
+> **"记忆并非关键词匹配，它关乎联想与推理。"**
 
 > 💡 本节是**面向开发者的技术深度解析**，普通用户可以直接跳到 [快速开始](#-快速开始)。
 
@@ -397,37 +392,30 @@ PeroperoChat 的陪伴体验，建立在 infOS 的记忆引擎之上——这是
 
 ### 记忆的一生
 
-```
-                                        ┌─────────────────────────────┐
-                                        │     Reflection Service      │
-                                        │  (合并/清理/偏好提取/日记)  │
-                                        └──────────┬──────────────────┘
-                                                   │ 定时维护
-                                                   ▼
-  用户对话 ──→ Scorer ──→ save_memory() ──→ SQLite + TriviumDB
-                 │           │                     │
-                 │           ├─ Embedding           │
-                 │           ├─ 时间链表            │
-                 │           └─ TriviumDB.link()   │
-                 │             (双层图谱：时间+实体) ▼
-                 │                        get_relevant_memories()
+```text
+  用户对话 ──→ EventNote 提取/主动记事 ──→ SQLite + TriviumDB
+                                                │
+                              ┌─────────────────┴──────────────────┐
+                              │                                    │
+                              ▼                                    ▼
+                    自动 RAG（Prompt 注入）              主动 query_event_notes
+                              │                                    │
+                 ┌────────────┴────────────┐                       │
+                 ▼                         ▼                       ▼
+        基础混合召回（默认）       SA-PPR 高级管线（可选）      确定性 BFS 图查询
+        向量 + BM25               searchAdvanced()              方向/边类型/深度/节点数/
+                                  ├─ SA-PPR 图扩散              Token 预算严格受控
+                                  ├─ FISTA 残差寻隐
+                                  ├─ DPP 多样性采样
+                                  ├─ ContextRNN 扩散偏置
+                                  ├─ Leiden 社区加权
+                                  └─ 检索反馈在线学习
                  │                         │
-                 │     ┌───────────────────┤
-                 │     ▼                   ▼
-                 │  向量检索           图扩散传播 (PEDSA)
-                 │  (TriviumDB)       (TriviumDB 内置图谱)
-                 │     │                   │
-                 │     └───────┬───────────┘
-                 │             ▼
-                 │      TriviumDB search_advanced 管线
-                 │      ├─ NMF 语义分解 (L3~L6 深度流形)
-                 │      ├─ FISTA 稀疏编码 (残差发现)
-                 │      ├─ 共现增益
-                 │      └─ DPP 多样性采样
-                 │             │
-                 │             ▼
-                 │     RAGPreprocessor 注入 Prompt
-                 └──────────── ▲
+                 └────────────┬────────────┘
+                              ▼
+                  补时间轴末尾 + 命中事件直接前驱
+                              ▼
+                         注入 LLM Prompt
 ```
 
 ### 1. 写入层：从对话到记忆
@@ -444,26 +432,33 @@ PeroperoChat 的陪伴体验，建立在 infOS 的记忆引擎之上——这是
 2. 维护一条时间链（用 `prev_id` / `next_id` 记录前后顺序），把记忆按时间先后串起来
 3. 用 GraphGardener 提取实体和它们之间的关系（因果、关联、包含等），搭出一张"概念之间的网"（认知图谱）
 
-### 2. 检索层：PEDSA 管线
+### 2. 检索层：双模式 RAG
 
-当用户发送新消息时，检索管线分六阶段工作。简单说就是：先粗找、再顺着关联扩散、再深挖语义、再补漏、再调权重、最后去重：
+infOS 将“系统自动想起记忆”和“Agent 主动查图”拆成两条合同不同的路径，避免概率式扩散破坏主动工具的可控性。
 
-| 阶段             | 算法                   | 作用（白话）                                                       | 实现                               |
-| :--------------- | :--------------------- | :----------------------------------------------------------------- | :--------------------------------- |
-| ① 向量召回       | Cosine          | 先把"意思相近"的记忆快速捞出来                                     | TriviumDB（`search_advanced`）     |
-| ② 图扩散传播     | PEDSA + PPR            | 顺着记忆之间的关系，找到"看似不相关、其实有关联"的远端记忆         | TriviumDB 内置双层图谱             |
-| ③ NMF 语义分析   | Lee & Seung, 1999      | 把候选拆成隐含主题，判断这次提问的语义深度和角度                   | TriviumDB L3~L6 深度流形           |
-| ④ FISTA 残差发现 | Beck & Teboulle, 2009  | 找出"现有候选解释不了"的遗漏，触发二次检索补弱信号                 | TriviumDB（`enable_sparse_residual`） |
-| ⑤ 共现增益       | 统计关联               | 经常一起出现的概念，给相关记忆加权                                 | GraphGardener                      |
-| ⑥ DPP 多样性采样 | Kulesza & Taskar, 2012 | 从候选中挑出"质量最高、彼此最不重复"的最终结果                     | TriviumDB（`enable_dpp`）          |
+| 模式 | 入口 | 检索方式 | 关键保证 |
+| :--- | :--- | :--- | :--- |
+| **自动 RAG** | 每轮上下文编译 | 默认向量 + BM25；可在总览页启用 SA-PPR 高级管线 | 固定补充物理时间轴末尾与每个命中事件的直接前驱，均不占 `top_k` |
+| **主动图查询** | `query_event_notes` 工具 | 确定性 BFS | 严格遵守方向、边标签、最大深度、最大节点数与返回 Token 预算；不受 SA-PPR 开关影响 |
 
-### PEDSA 三大核心构件
+自动 RAG 的高级模式调用 TriviumDB `searchAdvanced()`。`启用 SA-PPR 高级管线` 是总开关；关闭后 FISTA、DPP、ContextRNN、Leiden 和反馈闭环会被前后端共同强制关闭。
+
+| 模块 | 作用 | 配置关系 |
+| :--- | :--- | :--- |
+| SA-PPR | 从向量锚点沿事件关系图扩散，召回语义距离较远但图上相关的事件 | 高级管线总开关，可配置扩散深度、回跳概率和最低分数 |
+| FISTA | 从基础候选未解释的残差中补充弱信号 | 依赖 SA-PPR，可独立开关 |
+| DPP | 降低最终候选之间的语义重复 | 依赖 SA-PPR，可独立开关 |
+| ContextRNN | 根据当前对话轨迹生成与 Embedding 同维度的 `diffusionBias` | 依赖 SA-PPR，可独立开关 |
+| Leiden | 发现事件社区，并按 Query 或 ContextRNN 方向计算社区加权 | 依赖 SA-PPR，可独立开关 |
+| 反馈闭环 | 在回复成功持久化后，根据命中记忆是否被回答引用在线训练 minGRU 和输出权重 | 依赖 SA-PPR，可独立开关 |
+
+### 高级自动 RAG 的三个认知构件
 
 这三个构件各管一件事：**ContextRNN** 感知"现在在聊什么"，**Leiden 聚类** 自动把记忆分主题，**反馈闭环** 负责事后纠错。
 
 #### A. ContextRNN — 对话轨迹感知 (minGRU)
 
-它像一个一直在更新的"对话方向感知器"，让检索系统知道你们正在聊什么方向。每轮对话都会实时更新一个轻量级 **minGRU** 隐状态（256 维，约 1.6MB 参数，纯 CPU 推理不到 2ms）：
+它像一个持续更新的“对话方向感知器”。启用 SA-PPR 与 ContextRNN 后，每轮自动 RAG 会使用 Query Embedding 更新轻量级 **minGRU** 隐状态（256 维），再投影成与当前 Embedding 配置相同维度的扩散偏置：
 
 ```
   z_t = σ(W_z @ x_t)                    门控
@@ -471,39 +466,36 @@ PeroperoChat 的陪伴体验，建立在 infOS 的记忆引擎之上——这是
   h_{t+1} = (1 - z_t) ⊙ h_t + z_t ⊙ h̃_t   状态更新
 ```
 
-- **调制候选打分**：`finalScore = α × vecSim + β × contextAffinity`
-- **调制图谱边权**：让扩散沿语境方向走
-- **隐状态持久化**：256 × f32 = 1KB 写入磁盘，跨对话保留
-- **实现**：`@infos/nit-runtime` (Rust N-API) + `ContextRnn` (TypeScript)
+- **生成扩散偏置**：`diffusionBias = W_out × h_t`，交给 TriviumDB 调制 SA-PPR 扩散方向
+- **动态输入维度**：投影矩阵跟随当前 Memory Store 的 Embedding 维度，不再固定为 1536
+- **隐状态持久化**：每分钟 checkpoint，并在系统关闭时保存状态和在线学习权重
+- **实现**：Retrieval 域纯 TypeScript minGRU + `ContextRnn`
 
 #### B. Leiden 聚类 — 自动社区发现
 
-自动把记忆分成一个个主题（"料理"、"工作"、"感情"等），检索时按主题来找。它是在记忆图谱上运行 Leiden 算法实现的，带来四重收益：
-
-- **检索多样性**：先选 top-3 相关 clusters → 各 cluster 内取 top_k/3
-- **与 ContextRNN 联动**：`cluster_affinities = softmax(h_t @ centroids)` → RNN 隐状态选择活跃社区
-- **日记按主题组织**：周报按 cluster 统计
-- **可解释性**：检索结果附带 cluster 标签
+自动 RAG 可调用 TriviumDB `leidenCluster()` 发现事件社区，并计算 Query/ContextRNN 方向与各社区质心的亲和度，将其作为高级候选排序加权。ContextRNN 关闭时，Leiden 仍可使用 Query Embedding 独立工作。
 
 #### C. 检索反馈闭环 — 隐式信号采集
 
-事后看 AI 有没有真的用上这些记忆——用上了就加分，没用上就减分，下次检索就会更准。LLM 回复后，通过 Jaccard/共现词匹配（不额外消耗 Token）判断注入的记忆是否被实际使用：
+反馈只针对当前 Pair 的高级自动 RAG 命中，Trace 以 Pair ID 隔离，避免并发 Thread 相互覆盖。Assistant 回复成功持久化后，系统通过事件 topics/participants 是否出现在回复中生成隐式正负反馈，并在线更新 minGRU 与输出矩阵；临时回合不训练，训练失败也不会影响已经完成的回复。
 
-- **positive**：记忆关键内容出现在 LLM 回复中 → `retrieval_quality += 0.1`
-- **negative**：完全未被引用 → `retrieval_quality -= 0.05`
-- **积累后触发 minGRU 在线训练**：SGD 更新权重，让 RNN 下次更准地偏向有用方向
+#### 高级自动 RAG 实时流程
 
-#### 统一管线：PEDSA 7 步实时流程
-
+```text
+  用户输入 ──→ Query Embedding
+               ├─ 可选 ContextRNN 更新并生成 diffusionBias
+               ├─ TriviumDB searchAdvanced
+               │  ├─ 向量/文本锚定
+               │  ├─ 可选 FISTA
+               │  ├─ SA-PPR 图扩散
+               │  └─ 可选 DPP
+               ├─ 可选 Leiden 社区加权
+               ├─ 截取 top_k
+               ├─ 补时间轴末尾与直接前驱
+               └─ 注入 Prompt → LLM → 可选 Pair 级反馈训练
 ```
-  用户输入 ──→  Step 1: ContextRNN 更新 h_{t+1}
-               Step 2: Cluster 路由 → top-3 活跃社区
-               Step 3: Cluster 内向量召回 (超召回 3x)
-               Step 4: Context-aware 重排 (vecSim + rnnAffinity + centrality + quality)
-               Step 5: 图谱扩散 (边权受 h_t 调制)
-               Step 6: DPP 去冗余 → 最终 top_k
-               Step 7: 注入 prompt → LLM → 反馈采集
-```
+
+> 这条流程只属于自动 RAG。`query_event_notes` 始终走确定性 BFS，不经过 ContextRNN、SA-PPR、Leiden、FISTA、DPP 或反馈训练。
 
 ### 3. TriviumDB 引擎层
 
@@ -641,7 +633,6 @@ docker compose logs -f backend
 | :---------- | :----------- | :------------------------------------- |
 | **Node.js** | ≥20.0.0      | 后端+前端运行时                        |
 | **pnpm**    | ≥9.0.0       | 包管理 (`packageManager: pnpm@9.15.9`) |
-| **Rust**    | stable 1.75+ | 编译 `packages/native/*` (可选)        |
 
 #### Step 1：克隆仓库
 

@@ -1,0 +1,22 @@
+{
+	"format_version": "1.8.0",
+	"animations": {
+		"parallel0": {
+			"loop": true,
+			"bones": {
+				"Outcoat": {
+					"scale": "1 - v.roaming.outterClothe"
+				},
+				"Outcoat3": {
+					"scale": "1 - v.roaming.outterClothe"
+				},
+				"Outcoat2": {
+					"scale": "1 - v.roaming.outterClothe"
+				},
+				"Outcoat4": {
+					"scale": "1 - v.roaming.outterClothe"
+				}
+			}
+		}
+	}
+}

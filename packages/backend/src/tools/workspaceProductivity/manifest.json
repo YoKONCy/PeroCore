@@ -8,12 +8,23 @@
   "entry": "index.ts",
   "category": "workspace",
   "platforms": ["windows", "linux", "darwin", "docker"],
+  "userCopy": {
+    "read_file_range": {
+      "label": "读取文件片段",
+      "description": "只读取文件中的指定部分，适合查看大文件。"
+    },
+    "glob_files": {
+      "label": "按名称查找文件",
+      "description": "根据文件名或路径规则批量查找文件。"
+    },
+    "edit_file": { "label": "编辑文件", "description": "精确修改文件中的一段内容。" }
+  },
   "registration": "static",
   "permissions": ["filesystem:read", "filesystem:write"],
   "tools": [
     {
       "name": "read_file_range",
-      "description": "按字符范围、行范围或尾部行读取文本文件，并返回哈希、截断信息与文件总行数",
+      "description": "按字符范围、行范围或尾部行读取文本文件；行级读取单次最多800行，并返回哈希、截断信息与文件总行数",
       "display": { "label": "读取文件", "icon": "file", "color": "sky", "style": "read" },
       "parameters": {
         "type": "object",
@@ -21,9 +32,18 @@
           "path": { "type": "string" },
           "offset": { "type": "number" },
           "limit": { "type": "number" },
-          "line_start": { "type": "number" },
-          "line_end": { "type": "number" },
-          "tail_lines": { "type": "number" }
+          "line_start": { "type": "number", "minimum": 1, "description": "起始行号，从1开始" },
+          "line_end": {
+            "type": "number",
+            "minimum": 1,
+            "description": "结束行号（包含）；省略时默认读取800行，超出800行的请求会截断"
+          },
+          "tail_lines": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 800,
+            "description": "读取文件尾部行数，最多800行"
+          }
         },
         "required": ["path"]
       }

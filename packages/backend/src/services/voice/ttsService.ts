@@ -16,6 +16,7 @@
  */
 
 import { createLogger } from '../../lib/logger'
+import { AppError } from '../../lib/appError'
 
 const logger = createLogger('TtsService')
 
@@ -128,9 +129,9 @@ export class TtsService {
       case 'openai':
         return this.synthesizeOpenAI(request)
       case 'azure':
-        throw new Error('Azure TTS 尚未实现')
+        throw new AppError('CONFIG_ERROR', { message: 'Azure TTS尚未实现' })
       case 'local':
-        throw new Error('本地 TTS 尚未实现')
+        throw new AppError('CONFIG_ERROR', { message: '本地TTS尚未实现' })
       default:
         // 未知 Provider → 回退到 Edge
         logger.warn(`未知 Provider "${provider}"，回退到 Edge TTS`)
@@ -159,7 +160,9 @@ export class TtsService {
       MsEdgeTTS = msedge.MsEdgeTTS
       OUTPUT_FORMAT = msedge.OUTPUT_FORMAT
     } catch {
-      throw new Error('msedge-tts 包未安装，请运行: pnpm add msedge-tts')
+      throw new AppError('CONFIG_ERROR', {
+        message: 'msedge-tts包未安装，请运行: pnpm add msedge-tts',
+      })
     }
 
     const voice = (request.voice as string) ?? this.config.voice
@@ -203,7 +206,9 @@ export class TtsService {
     const apiKey = this.config.apiKey
 
     if (!apiKey) {
-      throw new Error('OpenAI TTS 需要 API Key，请在 VoiceTab 中配置')
+      throw new AppError('CONFIG_ERROR', {
+        message: 'OpenAI TTS需要API Key，请在VoiceTab中配置',
+      })
     }
 
     // 对齐 v1: 如果 speed 是 Edge 格式 ("+25%")，自动转换为 OpenAI 格式 (1.25)
@@ -253,7 +258,10 @@ export class TtsService {
     if (!response.ok) {
       const body = await response.text()
       logger.error(`OpenAI TTS API 失败: ${response.status} — ${body}`)
-      throw new Error(`TTS API 调用失败: ${response.status}`)
+      throw new AppError('EXTERNAL_ERROR', {
+        message: `TTS API调用失败: ${response.status}`,
+        data: { status: response.status },
+      })
     }
 
     const audio = await response.arrayBuffer()

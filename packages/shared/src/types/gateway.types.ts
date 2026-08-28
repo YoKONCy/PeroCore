@@ -9,6 +9,84 @@
  */
 
 // ─────────────────────────────────────────────
+// Push Action 目录
+// ─────────────────────────────────────────────
+
+import type { DeliveryAudience, KernelEventDurability } from './kernel.types'
+
+export const GATEWAY_ACTION_CATALOG = {
+  state_update: {
+    durability: 'ephemeral',
+    audience: 'all_principal_clients',
+    recovery: 'pet-state-projection',
+  },
+  surface: {
+    durability: 'ephemeral',
+    audience: 'thread_subscribers',
+    recovery: 'conversation-projection',
+  },
+  task_progress: {
+    durability: 'ephemeral',
+    audience: 'execution_subscribers',
+    recovery: 'execution-projection',
+  },
+  notification: { durability: 'ephemeral', audience: 'active_input_seat', recovery: 'none' },
+  durable_notification: {
+    durability: 'durable',
+    audience: 'all_principal_clients',
+    recovery: 'notification-projection',
+  },
+  system_error: { durability: 'ephemeral', audience: 'active_input_seat', recovery: 'none' },
+  tool_approval_requested: {
+    durability: 'durable',
+    audience: 'active_input_seat',
+    recovery: 'approval-projection',
+  },
+  tool_approval_resolved: {
+    durability: 'durable',
+    audience: 'all_principal_clients',
+    recovery: 'approval-projection',
+  },
+  agent_input_requested: {
+    durability: 'durable',
+    audience: 'active_input_seat',
+    recovery: 'agent-input-projection',
+  },
+  agent_input_resolved: {
+    durability: 'durable',
+    audience: 'all_principal_clients',
+    recovery: 'agent-input-projection',
+  },
+  proactive_message: {
+    durability: 'durable',
+    audience: 'thread_subscribers',
+    recovery: 'conversation-projection',
+  },
+  audio_chunk: { durability: 'ephemeral', audience: 'specific_node', recovery: 'audio-asset' },
+  voice_state: { durability: 'ephemeral', audience: 'specific_node', recovery: 'none' },
+  voice_error: { durability: 'ephemeral', audience: 'specific_node', recovery: 'none' },
+  voice_transcript: {
+    durability: 'ephemeral',
+    audience: 'thread_subscribers',
+    recovery: 'conversation-projection',
+  },
+} as const satisfies Record<
+  string,
+  {
+    durability: KernelEventDurability
+    audience: DeliveryAudience['type']
+    recovery: string
+  }
+>
+
+export type CataloguedGatewayAction = keyof typeof GATEWAY_ACTION_CATALOG
+
+/** 新增业务 Push 必须通过该函数取得显式分类，未登记 Action 会在编译期失败。 */
+export function gatewayActionPolicy(action: CataloguedGatewayAction) {
+  return GATEWAY_ACTION_CATALOG[action]
+}
+
+// ─────────────────────────────────────────────
 // 信封 (Envelope)
 // ─────────────────────────────────────────────
 
@@ -30,14 +108,22 @@ export type GatewayMessageType =
 
 /** WS 消息信封 (类 JSON-RPC) */
 export interface GatewayEnvelope<T = GatewayPayload> {
+  /** 协议版本 */
+  protocolVersion?: 1
   /** 消息 ID (UUID) */
   id: string
   /** 消息类型 */
   type: GatewayMessageType
   /** 发送方 ID */
   sourceId: string
-  /** 目标 ID ("broadcast" = 广播) */
+  /** 目标 ID；旧 "broadcast" 仅作 Transport 兼容，不表示业务 Audience。 */
   targetId: string
+  /** 业务 Push 的投递受众。 */
+  audience?: DeliveryAudience
+  /** 事件恢复语义。 */
+  durability?: KernelEventDurability
+  /** Durable Stream 内序号。 */
+  sequence?: number
   /** 时间戳 (ms) */
   timestamp: number
   /** 负载 */
@@ -51,9 +137,6 @@ export interface GatewayEnvelope<T = GatewayPayload> {
 /** 所有 Push 推送 Payload 的联合类型 */
 export type GatewayPayload =
   | StateUpdatePayload
-  | StreamDeltaPayload
-  | StreamEndPayload
-  | ToolStatusPayload
   | TaskProgressPayload
   | NotificationPayload
   | SystemErrorPayload
@@ -81,29 +164,8 @@ export interface StateUpdatePayload {
   idle_messages?: string[]
   /** 回归台词热更新 */
   back_messages?: string[]
-}
-
-/** 流式增量推送 */
-export interface StreamDeltaPayload {
-  action: 'stream_delta'
-  content: string
-  sessionId: string
-}
-
-/** 流式结束推送 */
-export interface StreamEndPayload {
-  action: 'stream_end'
-  sessionId: string
-}
-
-/** 工具执行状态推送 */
-export interface ToolStatusPayload {
-  action: 'tool_status'
-  name: string
-  state: 'calling' | 'completed' | 'error'
-  sessionId: string
-  result?: string
-  durationMs?: number
+  /** 临时台词过期时间 */
+  text_expires_at?: string
 }
 
 /** 任务进度推送 */
@@ -169,15 +231,8 @@ export interface GenericPayload {
 // Push Action 枚举 (用于 switch/case)
 // ─────────────────────────────────────────────
 
-/** Push 推送的 action 名 */
-export type PushAction =
-  | 'state_update'
-  | 'stream_delta'
-  | 'stream_end'
-  | 'tool_status'
-  | 'task_progress'
-  | 'notification'
-  | 'system_error'
+/** Push 推送的 action 名；新增业务 Push 必须先进入 Action Catalog。 */
+export type PushAction = CataloguedGatewayAction
 
 /** Request 请求的 action 名 */
 export type RequestAction =

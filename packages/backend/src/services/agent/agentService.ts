@@ -14,7 +14,6 @@
  */
 
 import type { LlmService, ModelConfig } from '../llm/llmService'
-import type { ScorerService } from '../memory/scorerService'
 import type { ConfigRepository } from '../../repositories/config.repo'
 import type { AgentManager } from './agentManager'
 import type { ToolExecutor, CancelChecker, ReActYield } from './reactLoop'
@@ -37,7 +36,6 @@ export interface AgentServiceDeps {
   llmService: LlmService
   configRepo: ConfigRepository
   agentManager: AgentManager
-  scorerService?: ScorerService
   imageUnderstandingService?: ImageUnderstandingService
   threadService?: ThreadService
   /** 工具执行器（可选，无则跳过 ReAct） */
@@ -48,13 +46,27 @@ export interface AgentServiceDeps {
     channel: string,
     disabledTools?: string[],
     capabilityScope?: CapabilityScope,
+    realmId?: string,
+    capabilitySessionId?: string,
   ) => ToolDefinition[]
+  clearDynamicCapabilities?: (scopeId: string) => void
   /** 取消检测器（RuntimeStateService） */
   cancelChecker?: CancelChecker
   /** Gateway 广播（finish_task 通知） */
-  gatewayBroadcast?: (action: string, payload: Record<string, unknown>) => Promise<void>
   /** 主模型配置获取器（ModelRoleResolver.bind('main')） */
+  /** 按角色获取对话模型；未指派角色时由解析器回退主模型。 */
+  getAgentModelConfig?: (agentId: string) => Promise<ModelConfig | null>
   getModelConfig: () => Promise<ModelConfig | null>
+  getModelConfigById?: (id: number) => Promise<ModelConfig | null>
+  /** 客户端当前是否在线提供指定桌面 Capability。 */
+  isDesktopOperationAvailable?: (
+    operation:
+      | 'screenCapture'
+      | 'applicationLaunch'
+      | 'mouseAction'
+      | 'keyboardAction'
+      | 'mousePosition',
+  ) => boolean
 }
 
 export interface CompiledRunParams {
@@ -67,19 +79,39 @@ export interface CompiledRunParams {
   channel?: string
   onRawText?: (rawText: string) => void
   onToolCalls?: (toolCalls: ToolCallRecord[]) => void
+  onContentBlocks?: (blocks: import('@infos/shared').ConversationContentBlock[]) => void
   signal?: AbortSignal
   taskId?: string
+  realmId?: string
+  modelConfigId?: number
+  onModelResolved?: (config: ModelConfig) => void | Promise<void>
+  executionId?: import('@infos/shared').KernelExecutionId
+  processId?: import('@infos/shared').KernelProcessId
+  deadline?: string
   onCheckpoint?: (checkpoint: {
     messages: ChatMessage[]
     toolCalls: ToolCallRecord[]
     turn: number
   }) => Promise<void>
+  onUsage?: (usage: {
+    llmCalls?: number
+    inputTokens?: number
+    outputTokens?: number
+    toolCalls?: number
+  }) => void
+  beginIo?: () => () => void
   disabledTools?: string[]
+  autoExecuteTools?: boolean
   capabilityScope?: CapabilityScope
   pairId?: string
 }
 
-type CompiledRunResult = { toolCalls: ToolCallRecord[]; messages: ChatMessage[]; rawText: string }
+type CompiledRunResult = {
+  toolCalls: ToolCallRecord[]
+  messages: ChatMessage[]
+  rawText: string
+  contentBlocks: import('@infos/shared').ConversationContentBlock[]
+}
 
 interface CompiledRun {
   params: CompiledRunParams
@@ -110,15 +142,17 @@ export class AgentService {
     let text = ''
     let next = await run.events.next()
 
-    while (!next.done) {
-      if (typeof next.value === 'string') {
-        text += next.value
+    try {
+      while (!next.done) {
+        if (next.value.event === 'narration_delta') text += next.value.data.delta
+        next = await run.events.next()
       }
-      next = await run.events.next()
-    }
 
-    await this.finalizeCompiledRun(run, next.value, text)
-    return text
+      await this.finalizeCompiledRun(run, next.value, text)
+      return text
+    } finally {
+      this.deps.clearDynamicCapabilities?.(params.executionId ?? params.threadId)
+    }
   }
 
   /**
@@ -132,15 +166,17 @@ export class AgentService {
     let text = ''
     let next = await run.events.next()
 
-    while (!next.done) {
-      if (typeof next.value === 'string') {
-        text += next.value
+    try {
+      while (!next.done) {
+        if (next.value.event === 'narration_delta') text += next.value.data.delta
+        yield next.value
+        next = await run.events.next()
       }
-      yield next.value
-      next = await run.events.next()
-    }
 
-    await this.finalizeCompiledRun(run, next.value, text)
+      await this.finalizeCompiledRun(run, next.value, text)
+    } finally {
+      this.deps.clearDynamicCapabilities?.(params.executionId ?? params.threadId)
+    }
   }
 
   // ─────────────────────────────────────────
@@ -159,13 +195,59 @@ export class AgentService {
       role: message.role,
       content: message.content,
     }))
-    const modelConfig = await this.resolveModelConfig(params.agentId)
+    const modelConfig = await this.resolveModelConfig(params.agentId, params.modelConfigId)
+    await params.onModelResolved?.(modelConfig)
     this.ensureVisionSupport(messages, modelConfig)
+    const relayAvailable =
+      (await this.deps.imageUnderstandingService?.getConfig())?.available === true
+    const nativeVisionEnabled = modelConfig.enableVision === true
+    const visionUsable = nativeVisionEnabled || relayAvailable
+    const operationAvailable = this.deps.isDesktopOperationAvailable
+    const screenScreenshotUsable = visionUsable && operationAvailable?.('screenCapture') === true
+    const applicationLaunchUsable = operationAvailable?.('applicationLaunch') === true
+    const automationUsable =
+      nativeVisionEnabled &&
+      operationAvailable?.('mouseAction') === true &&
+      operationAvailable('keyboardAction') === true
+    const mousePositionUsable =
+      nativeVisionEnabled && operationAvailable?.('mousePosition') === true
+    const dynamicallyDisabledTools = [...new Set(params.disabledTools ?? [])]
+    if (!screenScreenshotUsable) dynamicallyDisabledTools.push('take_screenshot')
+    if (!applicationLaunchUsable) dynamicallyDisabledTools.push('open_application')
+    if (!automationUsable) dynamicallyDisabledTools.push('automation_execute')
+    if (!mousePositionUsable) dynamicallyDisabledTools.push('get_mouse_position')
+    if (!visionUsable) {
+      dynamicallyDisabledTools.push('browser_screenshot', 'browser_page_image')
+      for (const message of messages) {
+        if (message.role !== 'system' || typeof message.content !== 'string') continue
+        message.content = message.content
+          .split('\n')
+          .filter(
+            (line) =>
+              !/take_screenshot|browser_screenshot|browser_page_image|automation_execute|get_mouse_position|屏幕截图|浏览器截图|视觉模态能力|视觉能力|桌面自动化|鼠标|键盘/.test(
+                line,
+              ),
+          )
+          .join('\n')
+          .trim()
+      }
+      const notice: ChatMessage = {
+        role: 'system',
+        content:
+          '【视觉能力状态】当前会话没有可用的屏幕视觉能力。你不能查看、截图、描述或操作用户当前屏幕，也不能调用桌面鼠标键盘自动化及鼠标位置工具；不要声称已经看到或操作屏幕。请让用户用文字提供必要信息。',
+      }
+      const firstConversationMessage = messages.findIndex((message) => message.role !== 'system')
+      if (firstConversationMessage === -1) messages.push(notice)
+      else messages.splice(firstConversationMessage, 0, notice)
+    }
+    const capabilitySessionId = params.executionId ?? params.threadId
     const tools = this.deps.getToolDefinitions?.(
       params.agentId,
       channel,
-      params.disabledTools,
+      dynamicallyDisabledTools,
       params.capabilityScope,
+      params.realmId,
+      capabilitySessionId,
     )
 
     const events = runReActLoop({
@@ -173,6 +255,17 @@ export class AgentService {
       modelConfig,
       messages,
       tools,
+      refreshToolDefinitions: () =>
+        this.deps.getToolDefinitions?.(
+          params.agentId,
+          channel,
+          dynamicallyDisabledTools,
+          params.capabilityScope,
+          params.realmId,
+          capabilitySessionId,
+        ) ?? [],
+      clearDynamicCapabilities: () =>
+        this.deps.clearDynamicCapabilities?.(params.executionId ?? params.threadId),
       toolExecutor: this.deps.toolExecutor,
       source: channel,
       sessionId: params.threadId,
@@ -181,16 +274,24 @@ export class AgentService {
         threadId: params.threadId,
         channel,
         taskId: params.taskId,
+        realmId: params.realmId,
+        executionId: params.executionId,
+        processId: params.processId,
+        deadline: params.deadline,
         pairId: params.pairId,
-        disabledTools: params.disabledTools,
+        disabledTools: dynamicallyDisabledTools,
+        autoExecuteTools: params.autoExecuteTools,
         capabilityScope: params.capabilityScope,
       },
       cancelChecker: this.deps.cancelChecker,
       signal: params.signal,
       onCheckpoint: params.onCheckpoint,
-      transcribeScreenshots: this.deps.imageUnderstandingService
-        ? (dataUris) => this.transcribeScreenshots(dataUris)
-        : undefined,
+      onUsage: params.onUsage,
+      beginIo: params.beginIo,
+      transcribeScreenshots:
+        visionUsable && relayAvailable && this.deps.imageUnderstandingService
+          ? (dataUris) => this.transcribeScreenshots(dataUris)
+          : undefined,
       onScreenshotTranscription: this.deps.threadService
         ? async (summary, modelId) => {
             await this.deps.threadService!.appendSystemMessage({
@@ -216,26 +317,14 @@ export class AgentService {
     result: CompiledRunResult,
     text: string,
   ): Promise<void> {
-    const { params, channel, startedAt } = run
+    const { params, startedAt } = run
     const rawText = result.rawText || text
 
     if (params.onRawText && rawText) {
       params.onRawText(rawText)
     }
     params.onToolCalls?.(result.toolCalls)
-
-    this.deps.scorerService
-      ?.checkAndProcess(params.agentId, params.threadId, channel)
-      .catch((err) => {
-        logger.warn('Scorer 触发失败', { error: err })
-      })
-
-    if (
-      this.deps.gatewayBroadcast &&
-      result.toolCalls.some((toolCall) => toolCall.name === 'finish_task')
-    ) {
-      this.deps.gatewayBroadcast('stream_end', { sessionId: params.threadId }).catch(() => {})
-    }
+    params.onContentBlocks?.(result.contentBlocks)
 
     const elapsed = Date.now() - startedAt
     logger.info(
@@ -269,12 +358,23 @@ export class AgentService {
   /**
    * 解析 LLM 模型配置
    *
-   * 统一使用 ModelRoleResolver（和 DiaryEngine/ScorerService 等保持一致）。
+   * 统一使用 ModelRoleResolver，与后台事件提炼、Reflection 和日记生成共享任务槽解析。
    * 回退链: ModelRoleResolver(DB) → 环境变量兜底
    */
-  private async resolveModelConfig(_agentId: string): Promise<ModelConfig> {
-    // 通过 ModelRoleResolver 获取主模型配置
-    const config = await this.deps.getModelConfig()
+  private async resolveModelConfig(agentId: string, modelConfigId?: number): Promise<ModelConfig> {
+    if (modelConfigId !== undefined && this.deps.getModelConfigById) {
+      const selected = await this.deps.getModelConfigById(modelConfigId)
+      if (!selected) {
+        throw new AppError('CONFIG_ERROR', {
+          message: `Realm指定的模型配置不存在: ${modelConfigId}`,
+        })
+      }
+      return selected
+    }
+    // 角色指派优先，未指派时由 ModelRoleResolver 回退主模型。
+    const config = this.deps.getAgentModelConfig
+      ? await this.deps.getAgentModelConfig(agentId)
+      : await this.deps.getModelConfig()
     if (config) return config
 
     // 环境变量兜底

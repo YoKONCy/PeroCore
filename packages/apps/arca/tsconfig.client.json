@@ -1,0 +1,23 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./client/dist-types",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["vite/client"],
+    "paths": {
+      "@infos/shared": ["../../shared/src"],
+      "@infos/node-sdk": ["../../node-sdk/src"],
+      "@infos/node-sdk/*": ["../../node-sdk/src/*"],
+      "@infos/document-engine": ["../../document-engine/src"],
+      "@infos/document-engine/*": ["../../document-engine/src/*"],
+      "@arca/client/*": ["./client/src/*"]
+    }
+  },
+  "include": [
+    "client/src/**/*.ts",
+    "client/src/**/*.vue",
+    "client/tests/**/*.ts",
+    "client/vite.config.ts"
+  ],
+  "exclude": ["node_modules", "dist", "client/dist", "client/dist-types"]
+}

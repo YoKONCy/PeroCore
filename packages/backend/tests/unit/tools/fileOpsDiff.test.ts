@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   buildToolDiff,
+  deleteFileTool,
   fileInfoTool,
   listDirectoryTool,
   readFileTool,
@@ -55,6 +56,7 @@ describe('文件工具越界审批凭证', () => {
     source: 'desktop',
     threadId: 'thread-1',
     channel: 'desktop',
+    deviceReadScope: true,
     approvedOutsideWorkspace: true,
   }
 
@@ -85,20 +87,35 @@ describe('文件工具越界审批凭证', () => {
     })
   })
 
-  it('目录工具仅在已审批时启用设备范围', async () => {
+  it('删除工具必须校验审批凭证并传递越界范围', async () => {
+    const service = {
+      deleteFile: vi.fn().mockResolvedValue(undefined),
+    } as unknown as WorkspaceService
+    setWorkspaceService(service)
+
+    await expect(
+      deleteFileTool.execute(
+        { file_path: 'C:/outside/a.txt' },
+        { ...context, approvedSensitiveAction: undefined },
+      ),
+    ).rejects.toThrow('审批凭证')
+
+    await deleteFileTool.execute(
+      { file_path: 'C:/outside/a.txt' },
+      { ...context, approvedSensitiveAction: true },
+    )
+    expect(service.deleteFile).toHaveBeenCalledWith('pero', 'C:/outside/a.txt', 'desktop', {
+      deviceScope: true,
+    })
+  })
+
+  it('目录读取应使用统一设备只读范围，不依赖越界审批凭证', async () => {
     const service = { list: vi.fn().mockResolvedValue([]) } as unknown as WorkspaceService
     setWorkspaceService(service)
 
-    await listDirectoryTool.execute(
-      { dir_path: 'C:/outside' },
-      { ...context, approvedOutsideWorkspace: undefined },
-    )
     await listDirectoryTool.execute({ dir_path: 'C:/outside' }, context)
 
-    expect(service.list).toHaveBeenNthCalledWith(1, 'pero', 'C:/outside', 'desktop', {
-      deviceScope: undefined,
-    })
-    expect(service.list).toHaveBeenNthCalledWith(2, 'pero', 'C:/outside', 'desktop', {
+    expect(service.list).toHaveBeenCalledWith('pero', 'C:/outside', 'desktop', {
       deviceScope: true,
     })
   })

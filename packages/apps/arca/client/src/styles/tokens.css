@@ -1,0 +1,123 @@
+/**
+ * Arca UI/UX V4设计令牌 — 依据S06与A11 §29.27.13“精密星页终端”
+ *
+ * 色板：主APP色阶降饱和推导；普通形态全部直角，仅Modal/Popover允许4px抗锯齿圆角。
+ * 材质：柔光为暖灰工作台+现代绢纸，夜航为石墨台+墨紫绢布。
+ * 字体：Zpix像素短标签 / Inter正文 / JetBrains Mono代码。
+ */
+:root {
+  color-scheme: light;
+
+  /* ── 环境: 柔光书桌 (A11 §29.4 冷灰紫基准) ── */
+  --arca-canvas: #f4f3f8;
+  --arca-canvas-deep: #eceaf3;
+  --arca-surface: #ffffff;
+  --arca-surface-soft: #faf9fc;
+  --arca-document: #fffdfc; /* 文稿温白 */
+  --arca-text: #171923;
+  --arca-text-soft: #596174;
+  --arca-text-faint: #8b93a7;
+  --arca-line: rgba(23, 25, 35, 0.09);
+  --arca-line-strong: rgba(23, 25, 35, 0.18);
+  --arca-selection: rgba(232, 139, 176, 0.1); /* 樱粉Selection Tint */
+
+  /* ── 品牌色: 降饱和子集,高饱和只用于状态点/1-2px边缘/焦点/光标 ── */
+  --arca-mist: #8b78dc; /* 星雾紫: Agent/ChangeSet/语义 */
+  --arca-mint: #5bb5c9; /* 薄荷青: 连接/引用/导航 */
+  --arca-sakura: #e88bb0; /* 樱粉: Human输入/Selection/关键创建 */
+  --arca-verdant: #5aa884; /* 翠绿: 保存/提交成功 */
+  --arca-amber: #d3a04f; /* 琥珀: 冲突/待审/离线 */
+  --arca-coral: #d97373; /* 珊瑚红: 拒绝/危险/Authority错误 */
+
+  /* 兼容别名(过渡期) */
+  --arca-purple: var(--arca-mist);
+  --arca-blue: var(--arca-mint);
+  --arca-pink: var(--arca-sakura);
+  --arca-green: var(--arca-verdant);
+  --arca-red: var(--arca-coral);
+
+  --arca-shadow-xs: 0 1px 2px rgba(23, 25, 35, 0.05);
+  --arca-shadow-sm: 0 2px 8px rgba(23, 25, 35, 0.06);
+  --arca-shadow-md: 0 6px 20px rgba(23, 25, 35, 0.09);
+  --arca-shadow-lg: 0 14px 40px rgba(23, 25, 35, 0.13);
+  /* 像素硬阴影: 仅主按钮/确认操作/关键强调 (S06 §2.2) */
+  --arca-pixel-shadow: 3px 3px 0 rgba(139, 120, 220, 0.22);
+  --arca-pixel-shadow-danger: 3px 3px 0 rgba(217, 115, 115, 0.28);
+
+  /* ── 圆角令牌 (A11 §29.27.8) ── */
+  --arca-radius-page: 0px;
+  --arca-radius-panel: 0px;
+  --arca-radius-float: 4px;
+  --arca-radius-btn: 0px;
+  --arca-radius-ctrl: 0px;
+  --arca-radius-text: 0px;
+
+  /* V4材质：暖灰磨砂工作台+现代绢纸 */
+  --arca-desk: #d8d0c5;
+  --arca-desk-deep: #c9bfb2;
+  --arca-desk-highlight: rgba(255, 250, 240, 0.2);
+  --arca-desk-pit: rgba(78, 62, 52, 0.11);
+  --arca-paper: #f1e5cf;
+  --arca-paper-deep: #e7d8bb;
+  --arca-paper-light: rgba(255, 252, 238, 0.18);
+  --arca-paper-fiber: rgba(108, 79, 54, 0.105);
+  --arca-paper-cross-fiber: rgba(154, 122, 82, 0.065);
+  --arca-paper-knot: rgba(112, 78, 50, 0.038);
+  --arca-paper-shadow: rgba(73, 56, 46, 0.2);
+
+  /* ── 字体 (S06 §7) ── */
+  --arca-font-ui: Inter, 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', system-ui, sans-serif;
+  --arca-font-pixel: 'Zpix', 'DotGothic16', monospace; /* 仅Logo/短标签/状态码 */
+  --arca-font-code: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+
+  /* ── 动效 (S06 §10 + A11 §29.27.8: 抽屉160–180ms) ── */
+  --arca-dur-fast: 150ms;
+  --arca-dur-drawer: 170ms;
+  --arca-dur-panel: 320ms;
+  --arca-ease: cubic-bezier(0.2, 0, 0, 1);
+  --arca-ease-pixel: steps(3);
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --arca-canvas: #14151d;
+  --arca-canvas-deep: #0f1017;
+  --arca-surface: #1c1d28;
+  --arca-surface-soft: #191a24;
+  --arca-document: #1e1f27; /* 深色文稿保持实色温感,不用玻璃 */
+  --arca-text: #eceaf2;
+  --arca-text-soft: #a9afbd;
+  --arca-text-faint: #737b8d;
+  --arca-line: rgba(236, 234, 242, 0.08);
+  --arca-line-strong: rgba(236, 234, 242, 0.17);
+  --arca-selection: rgba(242, 166, 195, 0.14);
+
+  /* 深色: 提亮+维持低饱和 */
+  --arca-mist: #a79ae8;
+  --arca-mint: #7ccadb;
+  --arca-sakura: #f2a6c3;
+  --arca-verdant: #7cc3a0;
+  --arca-amber: #e0b268;
+  --arca-coral: #e88f8f;
+
+  --arca-shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --arca-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.34);
+  --arca-shadow-md: 0 6px 20px rgba(0, 0, 0, 0.4);
+  --arca-shadow-lg: 0 14px 40px rgba(0, 0, 0, 0.5);
+  --arca-pixel-shadow: 3px 3px 0 rgba(167, 154, 232, 0.26);
+  --arca-pixel-shadow-danger: 3px 3px 0 rgba(232, 143, 143, 0.3);
+
+  /* V4材质：石墨磨砂台+墨紫绢布 */
+  --arca-desk: #17181d;
+  --arca-desk-deep: #0e0f13;
+  --arca-desk-highlight: rgba(190, 196, 212, 0.045);
+  --arca-desk-pit: rgba(0, 0, 0, 0.3);
+  --arca-paper: #28232d;
+  --arca-paper-deep: #201c25;
+  --arca-paper-light: rgba(205, 188, 216, 0.045);
+  --arca-paper-fiber: rgba(210, 190, 220, 0.075);
+  --arca-paper-cross-fiber: rgba(151, 128, 165, 0.055);
+  --arca-paper-knot: rgba(193, 170, 205, 0.045);
+  --arca-paper-shadow: rgba(0, 0, 0, 0.48);
+}

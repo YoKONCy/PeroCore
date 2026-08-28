@@ -14,6 +14,7 @@ vi.mock('@infos/backend/lib/logger', () => ({
 
 function createEnvelope(type: GatewayEnvelope['type'], payload: Record<string, unknown> = {}) {
   return {
+    protocolVersion: 1 as const,
     id: `${type}-id`,
     type,
     sourceId: 'client',
@@ -50,7 +51,11 @@ describe('GatewayHub', () => {
   describe('handleMessage', () => {
     it('收到 hello 时应当记录设备名并回送 hello_ack', async () => {
       hub.registerNode('node-a', sendA)
-      const envelope = createEnvelope('hello', { token: 'token-a', deviceName: '主人的浏览器' })
+      const envelope = createEnvelope('hello', {
+        token: 'token-a',
+        deviceName: '主人的浏览器',
+        supportedVersions: [1],
+      })
 
       await hub.handleMessage(JSON.stringify(envelope), 'node-a')
 
@@ -58,7 +63,7 @@ describe('GatewayHub', () => {
       expect(JSON.parse(sendA.mock.calls[0]?.[0] ?? '{}')).toMatchObject({
         type: 'hello_ack',
         targetId: 'node-a',
-        payload: { nodeId: 'node-a' },
+        payload: { nodeId: 'node-a', agreedVersion: 1 },
       })
     })
 
@@ -152,7 +157,7 @@ describe('GatewayHub', () => {
       hub.registerNode('node-a', sendA)
       hub.registerNode('node-b', sendB)
 
-      await hub.pushStreamDelta('你好', 'session-1')
+      await hub.pushNotification({ title: '你好', body: '通知正文' })
 
       expect(sendA).toHaveBeenCalledOnce()
       expect(sendB).toHaveBeenCalledOnce()
@@ -162,27 +167,49 @@ describe('GatewayHub', () => {
         type: 'push',
         targetId: 'broadcast',
         payload: {
-          action: 'stream_delta',
-          content: '你好',
-          sessionId: 'session-1',
+          action: 'notification',
+          title: '你好',
+          body: '通知正文',
         },
       })
     })
 
-    it('pushAudioChunk 应当把 ArrayBuffer 编码为 base64 后广播', async () => {
+    it('应当原样广播 Internal SurfaceFrame', async () => {
       hub.registerNode('node-a', sendA)
-      const buffer = Uint8Array.from([1, 2, 3]).buffer
-
-      await hub.pushAudioChunk(buffer, 'session-1')
+      await hub.pushSurface({
+        protocolVersion: 1,
+        surfaceId: 'surface-1' as import('@infos/shared').SurfaceId,
+        generation: 'generation-1',
+        revision: 1,
+        sequence: 1,
+        operationId: 'operation-1',
+        operation: {
+          type: 'surface.open',
+          threadId: 'thread-1',
+          principalId: 'pero',
+        },
+      })
 
       expect(JSON.parse(sendA.mock.calls[0]?.[0] ?? '{}')).toMatchObject({
         type: 'push',
         payload: {
-          action: 'audio_chunk',
-          audio: 'AQID',
-          sessionId: 'session-1',
+          action: 'surface',
+          frame: {
+            surfaceId: 'surface-1',
+            generation: 'generation-1',
+            sequence: 1,
+            operation: { type: 'surface.open', threadId: 'thread-1' },
+          },
         },
       })
+    })
+
+    it('旧 audio_chunk 广播应 fail-closed', async () => {
+      hub.registerNode('node-a', sendA)
+      const buffer = Uint8Array.from([1, 2, 3]).buffer
+
+      await expect(hub.pushAudioChunk(buffer, 'session-1')).rejects.toThrow('AUDIO_CHUNK_RETIRED')
+      expect(sendA).not.toHaveBeenCalled()
     })
 
     it('sendResponse 和 sendError 应当保持原请求 ID 并单播给目标节点', async () => {

@@ -1,17 +1,11 @@
 /**
- * Background Scheduler — 后台定时任务调度器
+ * 已废弃的周期调度兼容层。
  *
- * 负责定时触发:
- * 1. Scorer 攒批超时刷新 (maxWaitMs)
- * 2. DiaryEngine 日记生成 (每日)
- * 3. Reflection 周期性维护 (6h 间隔)
- * 4. VectorSync 补偿队列消费
- *
- * 统一调度器管理所有后台任务。
- *
- * @module packages/backend/src/services/scheduler/backgroundScheduler
+ * 周期计划现由 KernelScheduler 统一管理；BackgroundScheduler 名称专属于 Agent 后台任务。
  */
 
+import type { KernelExecutionId } from '@infos/shared'
+import type { KernelScheduler } from '../../kernel/kernelScheduler'
 import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('Scheduler')
@@ -40,6 +34,8 @@ interface ScheduledTask extends ScheduledTaskDefinition {
   nextDueAt: number
   /** 是否正在运行 */
   running: boolean
+  /** 当前Kernel Execution。 */
+  executionId?: KernelExecutionId
   /** 运行时间与结果 */
   execution: TaskExecutionState
   /** 历史执行统计 */
@@ -80,11 +76,13 @@ export interface TaskStatus extends TaskExecutionState {
 // Service
 // ─────────────────────────────────────────────
 
-export class BackgroundScheduler {
+export class LegacyPeriodicScheduler {
   private tasks = new Map<string, ScheduledTask>()
   private timer: ReturnType<typeof setInterval> | null = null
   private tickIntervalMs = 10_000 // 每 10 秒检查一轮
   private started = false
+
+  constructor(private readonly kernelScheduler: KernelScheduler) {}
 
   /**
    * 注册定时任务
@@ -207,7 +205,23 @@ export class BackgroundScheduler {
     task.stats.totalRuns++
 
     try {
-      await task.handler()
+      const terminal = await this.kernelScheduler.submitAndWait({
+        principalId: 'system',
+        taskId: `maintenance:${task.name}:${startedAt}`,
+        class: 'maintenance',
+        priority: 5,
+        resourceKey: `maintenance:${task.name}`,
+        budget: { maxDurationMs: Math.max(task.intervalMs, 60_000), maxConcurrentIo: 8 },
+        run: async () => task.handler(),
+      })
+      task.executionId = terminal.descriptor.executionId
+      if (terminal.state !== 'completed') {
+        throw new Error(
+          terminal.state === 'failed'
+            ? 'Kernel维护Execution执行失败'
+            : `Kernel维护Execution终止: ${terminal.state}`,
+        )
+      }
       const finishedAt = Date.now()
       task.stats.successCount++
       task.execution.lastSuccessAt = finishedAt
@@ -222,11 +236,11 @@ export class BackgroundScheduler {
     } finally {
       const finishedAt = Date.now()
       task.running = false
+      task.executionId = undefined
       task.execution.lastFinishedAt = finishedAt
       const durationMs = finishedAt - startedAt
       task.stats.lastDurationMs = durationMs
 
-      // 滑动平均耗时
       const prevAvg = task.stats.averageDurationMs
       const runs = task.stats.totalRuns
       task.stats.averageDurationMs = prevAvg + (durationMs - prevAvg) / runs

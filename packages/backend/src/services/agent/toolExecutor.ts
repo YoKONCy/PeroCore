@@ -5,9 +5,8 @@
  * 内置 finish_task + 动态注册表查询 + CapabilityGate 权限校验。
  *
  * B6 升级:
- * - 工具执行超时保护 (默认 30s)
  * - Hook 事件触发 (before_tool_call / after_tool_call)
- * - ExtensionManager 集成
+ * - Package Hook Bus 事件触发
  *
  * 执行流程:
  * 1. finish_task / load_skill → 直接执行 (CapabilityGate 永远放行)
@@ -21,7 +20,8 @@
  */
 
 import type { ToolExecutor, ToolExecutionResult } from './reactLoop'
-import type { ToolRegistry, ToolContext, ToolHandler, ToolHandlerResult } from './toolRegistry'
+import type { ToolRegistry, ToolContext } from './toolRegistry'
+import type { ApplicationRealmManager } from '../../applications/applicationRealm'
 import type { CapabilityGate } from '../../capabilities/capabilityGate'
 import type { CapabilityScope } from '../../capabilities/types'
 import type { SkillLoader } from '../../capabilities/skillLoader'
@@ -43,7 +43,11 @@ const MAX_OUTPUT_LENGTH = 8000
  * 一旦被 truncate 砍断就会导致 JSON 解析失败 / base64 残片污染上下文。
  * reactLoop 会负责提取并剥离其中的 base64，因此放行完整输出是安全的。
  */
-const SKIP_TRUNCATE_TOOLS = new Set<string>(['take_screenshot'])
+const SKIP_TRUNCATE_TOOLS = new Set<string>([
+  'take_screenshot',
+  'browser_screenshot',
+  'browser_page_image',
+])
 
 /** 兼容尚未迁移到 StructuredToolResult 的旧工具错误返回。 */
 export function isLegacyToolErrorOutput(output: string): boolean {
@@ -61,9 +65,6 @@ export function isLegacyToolErrorOutput(output: string): boolean {
     return false
   }
 }
-
-/** 默认工具执行超时 (ms) */
-const DEFAULT_TOOL_TIMEOUT_MS = 30_000
 
 /**
  * 第七阶段 #5: 平台能力工具名单
@@ -89,14 +90,29 @@ const PLATFORM_CAPABILITY_TOOLS = new Set<string>([
  * - LLM 调用 `take_screenshot`（screenVision 工具集的真实注册名）
  * - 但 Electron 在 CapabilityProvider 里注册的能力名是 `screen_capture`
  *
- * 没有这层映射时，invokeTool('take_screenshot', args) 会让 CapabilityBridge
+ * 没有这层映射时，调用 `take_screenshot` 会让 CapabilityBridge
  * 找不到提供 `take_screenshot` 的节点，导致截图永远失败。
  *
  * 此映射表只在"工具名 → 能力名"方向做转换，不影响工具调用的日志、SSE、
  * 权限校验（权限校验仍用原始工具名，因为 capabilities.yaml 里配置的是工具名）。
  */
-const TOOL_NAME_TO_CAPABILITY: Record<string, string> = {
-  take_screenshot: 'screen_capture',
+const TOOL_NAME_TO_DESKTOP_OPERATION: Record<
+  string,
+  | 'screenCapture'
+  | 'clipboardRead'
+  | 'clipboardWrite'
+  | 'activeWindow'
+  | 'listWindows'
+  | 'activateWindow'
+  | 'mousePosition'
+  | 'mouseAction'
+  | 'keyboardAction'
+> = {
+  take_screenshot: 'screenCapture',
+  screen_capture: 'screenCapture',
+  clipboard_read: 'clipboardRead',
+  clipboard_write: 'clipboardWrite',
+  get_active_window: 'activeWindow',
 }
 
 /**
@@ -105,15 +121,22 @@ const TOOL_NAME_TO_CAPABILITY: Record<string, string> = {
  * ToolExecutor 通过此接口转发平台工具调用到 CapabilityBridge。
  * 使用接口而非直接 import CapabilityBridge，避免循环依赖。
  */
-export interface CapabilityBridgeLike {
-  invokeTool(
-    toolName: string,
-    args: Record<string, unknown>,
-  ): Promise<{
-    output: string
-    isError: boolean
-    durationMs: number
-  }>
+export interface DesktopCapabilityPort {
+  invoke(
+    operation:
+      | 'screenCapture'
+      | 'clipboardRead'
+      | 'clipboardWrite'
+      | 'activeWindow'
+      | 'listWindows'
+      | 'activateWindow'
+      | 'applicationLaunch'
+      | 'mousePosition'
+      | 'mouseAction'
+      | 'keyboardAction',
+    input: unknown,
+    context: import('@infos/shared').KernelCallContext,
+  ): Promise<unknown>
 }
 
 /**
@@ -138,7 +161,21 @@ const PATH_PARAM_NAMES = new Set<string>([
   'outputPath',
 ])
 
-/** Hook 触发器接口 (避免硬依赖 ExtensionManager) */
+const DEVICE_READ_TOOLS = new Set([
+  'read_file',
+  'read_file_range',
+  'get_file_info',
+  'list_directory',
+  'search_files',
+  'glob_files',
+  'code_search',
+])
+
+const TERMINAL_APPROVAL_TOOLS = new Set(['terminal_execute', 'terminal_create', 'terminal_write'])
+
+const isRemoteTerminalTool = (name: string) => name.startsWith('remote_terminal_')
+
+/** Package Hook Bus 接口。 */
 export interface HookEmitter {
   emitHook<T>(event: string, data: T): Promise<T>
 }
@@ -162,12 +199,11 @@ export class RegistryToolExecutor implements ToolExecutor {
     private skillLoader: SkillLoader | null = null,
     private hookEmitter: HookEmitter | null = null,
     private defaultContext: Partial<ToolContext> & { channel?: string } = {},
-    private toolTimeoutMs: number = DEFAULT_TOOL_TIMEOUT_MS,
     /**
      * 第七阶段 #5: 能力调用桥接
      * 用于转发平台工具调用到 CapabilityBridge（Daemon 模式下注入，旧模式为 null）
      */
-    private capabilityBridge: CapabilityBridgeLike | null = null,
+    private desktopCapabilities: DesktopCapabilityPort | null = null,
     private policyEngine: PolicyEngine | null = null,
     private approvalService: ApprovalService | null = null,
   ) {}
@@ -181,14 +217,30 @@ export class RegistryToolExecutor implements ToolExecutor {
    * 2. container 创建完 ctx 后创建 CapabilityBridge
    * 3. container 调用此方法注入 bridge 到 toolExecutor
    */
+  private pathBoundaryChecker:
+    | ((agentId: string, channel: string, inputPath: string) => boolean)
+    | null = null
+
+  setPathBoundaryChecker(
+    checker: (agentId: string, channel: string, inputPath: string) => boolean,
+  ): void {
+    this.pathBoundaryChecker = checker
+  }
+
   setPolicyRuntime(policyEngine: PolicyEngine, approvalService: ApprovalService): void {
     this.policyEngine = policyEngine
     this.approvalService = approvalService
   }
 
-  setCapabilityBridge(bridge: CapabilityBridgeLike): void {
-    this.capabilityBridge = bridge
-    logger.info('CapabilityBridge 已注入 ToolExecutor')
+  private applicationRealms: ApplicationRealmManager | null = null
+
+  setApplicationRealmManager(manager: ApplicationRealmManager): void {
+    this.applicationRealms = manager
+  }
+
+  setDesktopCapabilities(port: DesktopCapabilityPort): void {
+    this.desktopCapabilities = port
+    logger.info('Desktop Capability Port 已注入 ToolExecutor')
   }
 
   async execute(
@@ -202,9 +254,14 @@ export class RegistryToolExecutor implements ToolExecutor {
       sessionId?: string
       signal?: AbortSignal
       taskId?: string
+      realmId?: string
+      executionId?: import('@infos/shared').KernelExecutionId
+      processId?: import('@infos/shared').KernelProcessId
+      deadline?: string
       pairId?: string
       toolCallId?: string
       disabledTools?: string[]
+      autoExecuteTools?: boolean
       capabilityScope?: CapabilityScope
     },
   ): Promise<ToolExecutionResult> {
@@ -228,7 +285,44 @@ export class RegistryToolExecutor implements ToolExecutor {
     // AIOS: threadId 优先使用 runtimeContext.threadId，回退到 sessionId（向后兼容）
     const threadId = runtimeContext?.threadId ?? sessionId
 
-    // Thread 工具策略是 Channel 白名单之上的减法层；必须先于内置工具捷径执行。
+    // ToolRegistry通道约束既用于工具定义注入，也必须在执行时再次校验，防止手工FC绕过。
+    if (!this.registry.isAllowedInSource(name, channel)) {
+      logger.warn(`工具 ${name} 不允许在通道 ${channel} 执行`)
+      return {
+        output: `工具“${name}”不允许在当前通道 (${channel}) 使用。`,
+        durationMs: Date.now() - startTime,
+        isError: true,
+        shouldTerminate: false,
+      }
+    }
+
+    if (name !== 'finish_task' && this.applicationRealms) {
+      const realmId = runtimeContext?.realmId
+      const realmTool = this.applicationRealms.ownsTool(name)
+      const hostProjection = this.applicationRealms.isHostProjection(name)
+      if (
+        (realmId && !this.applicationRealms.allowsTool(realmId, name)) ||
+        (!realmId && realmTool && !hostProjection)
+      ) {
+        logger.warn(`工具 ${name} 被Application Realm拒绝 (realm=${realmId ?? 'none'})`)
+        return {
+          output: `工具“${name}”不属于当前Application Realm。`,
+          durationMs: Date.now() - startTime,
+          isError: true,
+          shouldTerminate: false,
+        }
+      }
+      if (realmId && !realmTool) {
+        return {
+          output: `当前Application Realm不允许调用主应用工具“${name}”。`,
+          durationMs: Date.now() - startTime,
+          isError: true,
+          shouldTerminate: false,
+        }
+      }
+    }
+
+    // Thread工具策略是 Channel 白名单之上的减法层；必须先于内置工具捷径执行。
     if (runtimeContext?.disabledTools?.includes(name) && !isSystemProtocolTool(name)) {
       logger.warn(`工具 ${name} 被 Thread 策略禁用 (thread=${threadId}, channel=${channel})`)
       return {
@@ -264,10 +358,13 @@ export class RegistryToolExecutor implements ToolExecutor {
           channel,
           signal: runtimeContext?.signal,
           taskId: runtimeContext?.taskId,
+          executionId: runtimeContext?.executionId,
+          processId: runtimeContext?.processId,
+          deadline: runtimeContext?.deadline,
           pairId: runtimeContext?.pairId,
           toolCallId: runtimeContext?.toolCallId,
         }
-        const result = await this.executeWithTimeout(handler, args, context, name)
+        const result = await handler(args, context)
         const failed =
           typeof result !== 'string' &&
           (isStructuredToolResult(result) ? !result.ok : result.isError)
@@ -307,14 +404,14 @@ export class RegistryToolExecutor implements ToolExecutor {
           shouldTerminate: false,
         }
       }
-      return this.handleLoadSkill(args, sessionId, startTime)
+      return await this.handleLoadSkill(args, sessionId, startTime)
     }
 
     // ── CapabilityGate 权限校验 ──
     // 第七阶段修复（批次 B5）：平台能力工具（如 take_screenshot）必须先过 CapabilityGate 白名单
     // 原实现在 CapabilityGate 之前返回，导致社交/群聊等通道可绕过白名单调用截图等敏感工具
     // 现在所有非内置工具（含平台能力工具）统一受白名单约束
-    if (this.capabilityGate) {
+    if (this.capabilityGate && !runtimeContext?.realmId) {
       const allowed = this.capabilityGate.isToolAllowed(
         agentId,
         channel,
@@ -340,7 +437,13 @@ export class RegistryToolExecutor implements ToolExecutor {
     // 第七阶段修复（批次 B5）：平台工具路由已移到 CapabilityGate 校验之后
     // 只有通过白名单校验的平台工具才会走到这里
     if (PLATFORM_CAPABILITY_TOOLS.has(name)) {
-      return this.handlePlatformCapability(name, args, startTime)
+      return this.handlePlatformCapability(name, args, startTime, {
+        principalId: agentId,
+        correlationId: runtimeContext?.toolCallId ?? `platform-tool:${name}:${Date.now()}`,
+        executionId: runtimeContext?.executionId,
+        processId: runtimeContext?.processId,
+        deadline: runtimeContext?.deadline,
+      })
     }
 
     const handler = this.registry.getHandler(name)
@@ -374,11 +477,16 @@ export class RegistryToolExecutor implements ToolExecutor {
       }
     }
 
-    // Hook 可能修改路径参数；对最终参数执行 ResourceScope 校验。
-    // 越界路径必须逐次审批，不能被工具级“本会话/始终允许”授权绕过。
-    const pathViolation = this.capabilityGate
-      ? this.checkPathAllowed(name, args, agentId, channel)
-      : null
+    const remoteTerminalTool = isRemoteTerminalTool(name)
+    const isDeviceReadTool = DEVICE_READ_TOOLS.has(name)
+    const isSkillTool =
+      typeof this.capabilityGate?.isSkillUnlockedTool === 'function' &&
+      this.capabilityGate.isSkillUnlockedTool(sessionId, name)
+    // 远程节点路径由节点侧解释，不能拿 Server Workspace 边界误判。
+    const pathViolation =
+      !remoteTerminalTool && !isDeviceReadTool
+        ? this.checkPathAllowed(name, args, agentId, channel)
+        : null
     if (pathViolation) {
       logger.warn(
         `工具 ${name} 请求 ResourceScope 外路径，转入强制审批: ${pathViolation} (agent=${agentId}, channel=${channel})`,
@@ -389,7 +497,15 @@ export class RegistryToolExecutor implements ToolExecutor {
     let approvalObservation: { decision: string; userMessage?: string } | undefined
     let approvedSensitiveAction = false
     let approvedOutsideWorkspace = false
-    const forceApprovalEachCall = pathViolation !== null || ALWAYS_APPROVE_EACH_CALL_TOOLS.has(name)
+    const autoExecuteTools = runtimeContext?.autoExecuteTools === true
+    const pathRequiresApproval =
+      pathViolation !== null && (!autoExecuteTools || name === 'delete_file')
+    const forceApprovalEachCall =
+      (!autoExecuteTools && remoteTerminalTool) ||
+      (!remoteTerminalTool &&
+        (pathRequiresApproval ||
+          TERMINAL_APPROVAL_TOOLS.has(name) ||
+          (!autoExecuteTools && ALWAYS_APPROVE_EACH_CALL_TOOLS.has(name))))
     if (forceApprovalEachCall && !this.policyEngine) {
       return {
         output: JSON.stringify({
@@ -403,7 +519,19 @@ export class RegistryToolExecutor implements ToolExecutor {
     }
     if (this.policyEngine) {
       const permission = this.capabilityGate?.getToolPermission(agentId, channel, name)
-      const policyDecision = this.policyEngine.evaluate({
+      const declaredPermission = this.registry.getDefinition(name)?.requiresApproval
+        ? {
+            toolName: name,
+            resourceScope: permission?.resourceScope ?? {
+              allowedRoots: [],
+              deniedPaths: [],
+              scope: 'system' as const,
+            },
+            paramPolicy: permission?.paramPolicy,
+            requiresApproval: true,
+          }
+        : permission
+      const basePolicyDecision = this.policyEngine.evaluate({
         agentId,
         channel,
         sessionId,
@@ -411,12 +539,33 @@ export class RegistryToolExecutor implements ToolExecutor {
         taskId: runtimeContext?.taskId,
         toolName: name,
         args,
-        permission,
+        permission: declaredPermission,
       })
-      const decision = pathViolation
+      const policyDecision = remoteTerminalTool
+        ? autoExecuteTools
+          ? { action: 'allow' as const }
+          : {
+              action: 'require_approval' as const,
+              reason: `远程能力节点工具 ${name} 在非自动执行模式下必须逐次审批`,
+              riskLevel: 'high' as const,
+            }
+        : runtimeContext?.autoExecuteTools &&
+            basePolicyDecision.action === 'require_approval' &&
+            !TERMINAL_APPROVAL_TOOLS.has(name) &&
+            !(name === 'delete_file' && pathViolation !== null)
+          ? { action: 'allow' as const }
+          : isSkillTool && basePolicyDecision.action === 'allow'
+            ? {
+                action: 'require_approval' as const,
+                reason: `工具 ${name} 由Skill临时解锁，首次执行需要用户确认`,
+                riskLevel: 'medium' as const,
+              }
+            : basePolicyDecision
+      const decision = pathRequiresApproval
         ? {
             action: 'require_approval' as const,
             reason: `工具 ${name} 请求访问工作区或资源范围外路径：${pathViolation}`,
+            riskLevel: 'high' as const,
           }
         : policyDecision
       if (decision.action === 'deny') {
@@ -497,6 +646,7 @@ export class RegistryToolExecutor implements ToolExecutor {
             toolName: name,
             args,
             reason: decision.reason,
+            riskLevel: decision.riskLevel,
           })
           const resolved = await this.approvalService.waitForResolution(
             approval.id,
@@ -505,9 +655,8 @@ export class RegistryToolExecutor implements ToolExecutor {
           if (resolved.status !== 'approved' || !resolved.decision?.startsWith('allow_')) {
             return {
               output: JSON.stringify({
-                code: resolved.status === 'expired' ? 'APPROVAL_EXPIRED' : 'APPROVAL_DENIED',
-                message:
-                  resolved.status === 'expired' ? '工具审批已过期' : '用户拒绝了本次工具调用',
+                code: 'APPROVAL_DENIED',
+                message: '用户拒绝了本次工具调用',
                 ...(resolved.resolutionMessage
                   ? {
                       userMessage: resolved.resolutionMessage,
@@ -528,13 +677,23 @@ export class RegistryToolExecutor implements ToolExecutor {
             decision: resolved.decision,
             userMessage: resolved.resolutionMessage,
           }
-          approvedSensitiveAction = ALWAYS_APPROVE_EACH_CALL_TOOLS.has(name)
+          approvedSensitiveAction = remoteTerminalTool || ALWAYS_APPROVE_EACH_CALL_TOOLS.has(name)
           approvedOutsideWorkspace = pathViolation !== null
         }
       }
     }
 
-    // ── 执行 (带超时保护) ──
+    if (autoExecuteTools && remoteTerminalTool) {
+      approvedSensitiveAction = true
+    }
+    if (autoExecuteTools && name === 'delete_file' && pathViolation === null) {
+      approvedSensitiveAction = true
+    }
+    if (autoExecuteTools && pathViolation !== null && name !== 'delete_file') {
+      approvedOutsideWorkspace = true
+    }
+
+    // 工具只受调用方取消信号和各工具自身契约控制；全局执行器不设置超时。
     try {
       // AIOS: 透传 threadId + channel 给工具处理函数
       const context: ToolContext = {
@@ -545,13 +704,17 @@ export class RegistryToolExecutor implements ToolExecutor {
         channel,
         signal: runtimeContext?.signal,
         taskId: runtimeContext?.taskId,
+        executionId: runtimeContext?.executionId,
+        processId: runtimeContext?.processId,
+        deadline: runtimeContext?.deadline,
         pairId: runtimeContext?.pairId,
         toolCallId: runtimeContext?.toolCallId,
         ...(approvedSensitiveAction ? { approvedSensitiveAction: true } : {}),
+        ...(isDeviceReadTool ? { deviceReadScope: true } : {}),
         ...(approvedOutsideWorkspace ? { approvedOutsideWorkspace: true } : {}),
       }
 
-      const rawResult = await this.executeWithTimeout(handler, args, context, name)
+      const rawResult = await handler(args, context)
       const durationMs = Date.now() - startTime
       const structuredResult = typeof rawResult === 'string' ? null : rawResult
       const rawOutput = typeof rawResult === 'string' ? rawResult : rawResult.output
@@ -639,34 +802,32 @@ export class RegistryToolExecutor implements ToolExecutor {
     toolName: string,
     args: Record<string, unknown>,
     startTime: number,
+    context: import('@infos/shared').KernelCallContext,
   ): Promise<ToolExecutionResult> {
-    // capabilityBridge 未注入（如旧 backend/main.ts 模式或测试环境）
-    if (!this.capabilityBridge) {
-      logger.warn(
-        `平台能力工具 ${toolName} 被调用，但 CapabilityBridge 未配置（可能是非 Daemon 模式）`,
-      )
+    if (!this.desktopCapabilities) {
       return {
-        output: `工具 "${toolName}" 在当前运行模式下不可用。请使用 Daemon 模式启动并确保相关客户端已连接。`,
+        output: `工具 "${toolName}" 在当前运行环境不可用，请连接 Electron Client。`,
         durationMs: Date.now() - startTime,
         isError: true,
         shouldTerminate: false,
       }
     }
-
-    logger.info(`平台能力工具调用: ${toolName} → CapabilityBridge`)
-    try {
-      // 第七阶段修复（批次 A2）：工具名 → 能力名映射
-      // LLM 调用的工具名（如 take_screenshot）可能和节点注册的能力名（如 screen_capture）不同
-      // CapabilityBridge 按能力名查找提供者节点，所以这里必须转换
-      const capabilityName = TOOL_NAME_TO_CAPABILITY[toolName] ?? toolName
-      const result = await this.capabilityBridge.invokeTool(capabilityName, args)
-      logger.info(
-        `平台能力工具 ${toolName} → ${capabilityName} 完成 (${result.durationMs}ms, error=${result.isError})`,
-      )
+    const operation = TOOL_NAME_TO_DESKTOP_OPERATION[toolName]
+    if (!operation) {
       return {
-        output: result.output,
+        output: `工具 "${toolName}" 没有对应的 Desktop Capability Operation。`,
         durationMs: Date.now() - startTime,
-        isError: result.isError,
+        isError: true,
+        shouldTerminate: false,
+      }
+    }
+    logger.info(`平台能力工具调用: ${toolName} → desktop.environment/${operation}`)
+    try {
+      const output = await this.desktopCapabilities.invoke(operation, args, context)
+      return {
+        output: typeof output === 'string' ? output : JSON.stringify(output),
+        durationMs: Date.now() - startTime,
+        isError: false,
         shouldTerminate: false,
       }
     } catch (err) {
@@ -697,54 +858,27 @@ export class RegistryToolExecutor implements ToolExecutor {
     agentId: string,
     channel: string,
   ): string | null {
-    if (!this.capabilityGate) return null
-
-    // 工具未配置 ToolPermission 时 isPathAllowed 直接返回 true，
-    // 此处无需提前 getToolPermission 判空，避免遗漏 system 级配置
     for (const [key, value] of Object.entries(args)) {
       if (!PATH_PARAM_NAMES.has(key)) continue
       if (typeof value !== 'string' || value.length === 0) continue
 
-      const allowed = this.capabilityGate.isPathAllowed(agentId, channel, toolName, value)
-      if (!allowed) {
+      const withinWorkspace = this.pathBoundaryChecker?.(agentId, channel, value) ?? true
+      const withinResourceScope =
+        this.capabilityGate?.isPathAllowed(agentId, channel, toolName, value) ?? true
+      if (!withinWorkspace || !withinResourceScope) {
         return `${key}=${value}`
       }
     }
     return null
   }
 
-  // ── 工具超时保护 ──
-
-  private executeWithTimeout(
-    handler: ToolHandler,
-    args: Record<string, unknown>,
-    ctx: ToolContext,
-    toolName: string,
-  ): Promise<ToolHandlerResult> {
-    return new Promise<ToolHandlerResult>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        reject(new Error(`工具 ${toolName} 执行超时 (${this.toolTimeoutMs}ms)`))
-      }, this.toolTimeoutMs)
-
-      handler(args, ctx)
-        .then((result) => {
-          clearTimeout(timer)
-          resolve(result)
-        })
-        .catch((err) => {
-          clearTimeout(timer)
-          reject(err)
-        })
-    })
-  }
-
   // ── 内置工具: load_skill ──
 
-  private handleLoadSkill(
+  private async handleLoadSkill(
     args: Record<string, unknown>,
     sessionId: string,
     startTime: number,
-  ): ToolExecutionResult {
+  ): Promise<ToolExecutionResult> {
     const skillId = (args.skill_id as string) ?? (args.skillId as string)
     if (!skillId) {
       return {
@@ -764,34 +898,41 @@ export class RegistryToolExecutor implements ToolExecutor {
       }
     }
 
-    // 提取可选参数
-    const params = (args.params as Record<string, string>) ?? undefined
+    try {
+      const params = (args.params as Record<string, string>) ?? undefined
+      const fullContent = this.skillLoader.loadSkillContentWithParams(skillId, params)
+      if (!fullContent) {
+        return {
+          output: `Skill "${skillId}" 不存在或加载失败`,
+          durationMs: Date.now() - startTime,
+          isError: true,
+          shouldTerminate: false,
+        }
+      }
 
-    // 加载 Skill 内容 (支持模板变量替换)
-    const fullContent = this.skillLoader.loadSkillContentWithParams(skillId, params)
-    if (!fullContent) {
+      if (this.capabilityGate) {
+        this.unlockSkillToolsRecursive(sessionId, skillId, new Set())
+      }
+
+      const paramKeys = params ? Object.keys(params) : []
+      const paramInfo = paramKeys.length > 0 ? ` (已注入参数: ${paramKeys.join(', ')})` : ''
+      logger.info(`Skill ${skillId} 已加载${paramInfo} (session=${sessionId})`)
+
       return {
-        output: `Skill "${skillId}" 不存在或加载失败`,
+        output: fullContent,
+        durationMs: Date.now() - startTime,
+        isError: false,
+        shouldTerminate: false,
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      logger.warn(`Skill ${skillId} 加载异常: ${message}`)
+      return {
+        output: `Skill "${skillId}" 加载失败: ${message}`,
         durationMs: Date.now() - startTime,
         isError: true,
         shouldTerminate: false,
       }
-    }
-
-    // 临时解锁 Skill 关联的工具 + 递归解锁子 Skill 的工具
-    if (this.capabilityGate) {
-      this.unlockSkillToolsRecursive(sessionId, skillId, new Set())
-    }
-
-    const paramKeys = params ? Object.keys(params) : []
-    const paramInfo = paramKeys.length > 0 ? ` (已注入参数: ${paramKeys.join(', ')})` : ''
-    logger.info(`Skill ${skillId} 已加载${paramInfo} (session=${sessionId})`)
-
-    return {
-      output: fullContent,
-      durationMs: Date.now() - startTime,
-      isError: false,
-      shouldTerminate: false,
     }
   }
 

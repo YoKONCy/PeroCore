@@ -4,5 +4,5 @@
  * @module packages/backend/src/database
  */
 
-export { createDrizzleConnection, type DrizzleDb } from './connection'
+export { createDrizzleConnection, closeDrizzleConnection, type DrizzleDb } from './connection'
 export * as schema from './schema'

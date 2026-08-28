@@ -2,10 +2,9 @@
   "id": "social",
   "name": "Social Bridge",
   "description": "对外社交平台桥接应用（QQ/Discord 等），管理社交会话、缓冲、调度与回复。独立编译上下文，不依赖主 Agent 的 chat pipeline。",
-  "version": "0.9.2-rc1",
+  "version": "0.9.3",
   "author": "infOS",
   "icon": "icon.png",
-  "runtimeEntry": "./runtime/index.ts",
   "frontendEntry": "./frontend/index.js",
   "actions": [
     {
@@ -157,7 +156,7 @@
   ],
   "requiresTools": [
     "web_fetch",
-    "search_diary",
+    "query_event_notes",
     "set_reminder",
     "list_reminders",
     "cancel_reminder"

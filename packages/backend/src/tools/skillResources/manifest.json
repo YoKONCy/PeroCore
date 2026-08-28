@@ -1,0 +1,40 @@
+{
+  "id": "skill-resources",
+  "name": "Skill资源",
+  "version": "1.0.0",
+  "description": "列出和读取已安装Skill的捆绑资源。",
+  "type": "tool",
+  "entry": "index.ts",
+  "category": "core",
+  "platforms": ["windows", "linux", "darwin", "docker"],
+  "tools": [
+    {
+      "name": "skill_list_resources",
+      "description": "列出指定已安装Skill中的references、assets、scripts等捆绑文件。",
+      "display": {
+        "label": "查看Skill资源",
+        "icon": "folder",
+        "color": "purple",
+        "style": "skill"
+      },
+      "parameters": {
+        "type": "object",
+        "properties": { "skill_id": { "type": "string", "description": "已加载Skill ID" } },
+        "required": ["skill_id"]
+      }
+    },
+    {
+      "name": "skill_read_resource",
+      "description": "安全读取指定Skill目录内的文本资源，禁止路径逃逸且限制为256KB。",
+      "display": { "label": "读取Skill资源", "icon": "file", "color": "purple", "style": "skill" },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "skill_id": { "type": "string" },
+          "path": { "type": "string", "description": "相对于Skill根目录的资源路径" }
+        },
+        "required": ["skill_id", "path"]
+      }
+    }
+  ]
+}

@@ -3,50 +3,34 @@ import type { AppManager } from '../../applications/appManager'
 
 let appManager: AppManager | null = null
 
-export function setAppInteractionManager(manager: AppManager): void {
+export function setSocialInteractionManager(manager: AppManager): void {
   appManager = manager
 }
 
-export const interactWithAppTool: BuiltinTool = {
-  name: 'interact_with_app',
+export const interactWithSocialTool: BuiltinTool = {
+  name: 'interact_with_social',
   async execute(args, context) {
-    if (!appManager) return JSON.stringify({ success: false, error: '应用通信内核尚未初始化' })
-    const appId = String(args.app_id ?? '').trim()
-    const mode = String(args.mode ?? '')
-    if (!appId) return JSON.stringify({ success: false, error: 'app_id 不能为空' })
+    if (!appManager) return JSON.stringify({ success: false, error: '社交通信内核尚未初始化' })
+    const groupId = String(args.group_id ?? '').trim()
+    if (!groupId) return JSON.stringify({ success: false, error: 'group_id 不能为空' })
 
-    if (mode === 'discover') {
-      const manifest = await appManager.getManifest(appId)
-      if (!manifest) return JSON.stringify({ success: false, error: `应用未安装: ${appId}` })
-      return JSON.stringify({
-        success: true,
-        app: { id: manifest.id, name: manifest.name, description: manifest.description },
-        actions: manifest.actions ?? [],
-      })
-    }
-    if (mode !== 'command') {
-      return JSON.stringify({ success: false, error: `首版暂不支持应用通信模式: ${mode}` })
-    }
-    const action = String(args.action ?? '').trim()
-    if (!action) return JSON.stringify({ success: false, error: 'command 模式必须提供 action' })
     try {
       const result = await appManager.executeCommand({
-        appId,
+        appId: 'social',
         hostAgentId: context.agentId,
-        action,
-        input:
-          args.input && typeof args.input === 'object' && !Array.isArray(args.input)
-            ? (args.input as Record<string, unknown>)
-            : {},
+        action: 'chat_in_group',
+        input: {
+          group_id: groupId,
+          ...(typeof args.intent === 'string' && args.intent.trim()
+            ? { intent: args.intent.trim() }
+            : {}),
+        },
         taskContext:
-          typeof args.task_description === 'string'
+          typeof args.intent === 'string' && args.intent.trim()
             ? {
-                description: args.task_description,
-                inputs: [],
-                successCriteria:
-                  typeof args.success_criteria === 'string'
-                    ? args.success_criteria
-                    : '完成指定动作',
+                description: args.intent.trim(),
+                inputs: [groupId],
+                successCriteria: '社交Agent已读取目标群聊并完成本次参与判断',
               }
             : undefined,
       })

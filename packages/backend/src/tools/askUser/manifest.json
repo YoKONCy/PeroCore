@@ -1,0 +1,62 @@
+{
+  "id": "ask-user",
+  "name": "askUser",
+  "displayName": "向用户求助",
+  "version": "1.0.0",
+  "description": "在缺少必要信息时向用户提问，并等待用户回答后继续当前工作。",
+  "type": "tool",
+  "entry": "index.ts",
+  "category": "system",
+  "platforms": ["windows", "linux", "darwin", "docker"],
+  "registration": "static",
+  "tools": [
+    {
+      "name": "ask_user",
+      "description": "仅在缺少继续工作所必需的信息、需要用户选择，或无法安全推断用户意图时调用。调用后当前执行会等待用户回答。不要用于普通确认、汇报进度或可以自行合理判断的问题。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string",
+            "description": "需要用户回答的明确问题，最多2000字。"
+          },
+          "context": {
+            "type": "string",
+            "description": "为什么需要这项信息，最多2000字。"
+          },
+          "options": {
+            "type": "array",
+            "maxItems": 4,
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string" },
+                "label": { "type": "string" },
+                "description": { "type": "string" }
+              },
+              "required": ["id", "label"],
+              "additionalProperties": false
+            }
+          },
+          "allow_free_text": {
+            "type": "boolean",
+            "description": "是否允许用户自由填写回答，默认允许。"
+          },
+          "required": {
+            "type": "boolean",
+            "description": "是否禁止用户跳过，默认允许跳过。"
+          }
+        },
+        "required": ["question"],
+        "additionalProperties": false
+      },
+      "display": {
+        "label": "向你提问",
+        "description": "助手需要你的回答才能继续当前工作。",
+        "icon": "chat",
+        "color": "blue",
+        "style": "system"
+      }
+    }
+  ]
+}

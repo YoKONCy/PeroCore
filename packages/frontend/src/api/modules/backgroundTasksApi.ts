@@ -9,6 +9,7 @@
  * @module packages/frontend/src/api/modules/backgroundTasksApi
  */
 
+import type { BackgroundTaskProjectionSnapshot, KernelExecutionSnapshot } from '@infos/shared'
 import { apiClient } from '../client'
 
 /** 任务状态机（与后端一致） */
@@ -41,6 +42,7 @@ export interface BackgroundTaskInfo {
   category: 'agent_task' | 'resident'
   inputQuestion: string | null
   inputContext: Record<string, unknown> | null
+  execution: KernelExecutionSnapshot | null
   checkpoint: {
     messages: Array<{ role: string; content: unknown; toolCalls?: unknown[]; toolCallId?: string }>
     toolCalls: Array<{
@@ -117,6 +119,10 @@ export const backgroundTasksApi = {
 
   /** 各 Agent 活跃任务数（任务中心概览 + 聊天徽章） */
   activeCount: () => apiClient.get<AgentActiveCount[]>('/background-tasks/active-count'),
+
+  /** 任务摘要、交互节点和专属 Thread Surface。 */
+  projection: (id: string) =>
+    apiClient.get<BackgroundTaskProjectionSnapshot>(`/background-tasks/${id}/projection`),
 
   /** 任务详情 */
   detail: (id: string) => apiClient.get<BackgroundTaskInfo>(`/background-tasks/${id}`),

@@ -19,7 +19,7 @@
  */
 
 import { Hono } from 'hono'
-import { zValidator } from '@hono/zod-validator'
+import { validate as zValidator } from '../lib/validation'
 import { z } from 'zod'
 import type { AppContext } from '../container'
 import { AppError } from '../lib/appError'
@@ -126,7 +126,7 @@ export function createBackgroundTaskRouter(ctx: AppContext) {
       requestedBy: 'user',
       completionAction: body.completionAction,
     })
-    return c.json({ code: 'OK', data: task }, 201)
+    return c.json({ code: 'CREATED', message: '任务已创建', data: task }, 201)
   })
 
   /** GET /api/background-tasks — 分页查询 */
@@ -152,6 +152,18 @@ export function createBackgroundTaskRouter(ctx: AppContext) {
   router.post('/:id/read', async (c) => {
     await requireService().markRead(c.req.param('id'))
     return c.json({ code: 'OK' })
+  })
+
+  /** GET /api/background-tasks/:id/projection — 任务与专属 Thread 的权威 Surface。 */
+  router.get('/:id/projection', async (c) => {
+    try {
+      const projection = await ctx.backgroundTaskProjection.getSnapshot(c.req.param('id'))
+      return c.json({ code: 'OK', data: projection })
+    } catch (error) {
+      throw new AppError('NOT_FOUND', {
+        message: error instanceof Error ? error.message : '任务 Projection 不存在',
+      })
+    }
   })
 
   /** GET /api/background-tasks/:id — 任务详情 */
@@ -186,7 +198,7 @@ export function createBackgroundTaskRouter(ctx: AppContext) {
 
   router.post('/:id/retry', async (c) => {
     const task = await requireService().retry(c.req.param('id'))
-    return c.json({ code: 'OK', data: task }, 201)
+    return c.json({ code: 'CREATED', message: '任务已重新派发', data: task }, 201)
   })
 
   /** POST /api/background-tasks/:id/cancel — 取消 */

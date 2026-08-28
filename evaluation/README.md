@@ -298,10 +298,10 @@ oracle 回答"算没算对"，消融矩阵回答"值不值、参数怎么调"。
 # 1. 常规 IR 自检（无需外部数据）
 infos-eval synthetic
 
-# 2. SA-PPR 图扩散正确性（需 triviumdb==0.7.4）
+# 2. SA-PPR 图扩散正确性（需 triviumdb==0.8.1）
 infos-eval oracle
 
-# 3. 图扩散价值消融矩阵（需 triviumdb==0.7.4）
+# 3. 图扩散价值消融矩阵（需 triviumdb==0.8.1）
 infos-eval ablate
 ```
 

@@ -252,6 +252,23 @@ describe('LocalWorkspaceService', () => {
       ).rejects.toThrow('逃逸')
     })
 
+    it('deleteFile 只删除普通文件并拒绝目录', async () => {
+      await service.write(AGENT_ID, 'notes/remove-me.txt', '内容', 'desktop')
+      await service.deleteFile(AGENT_ID, 'notes/remove-me.txt', 'desktop')
+      expect(
+        existsSync(path.join(service.getWorkspaceRoot(AGENT_ID), 'notes', 'remove-me.txt')),
+      ).toBe(false)
+      await expect(service.deleteFile(AGENT_ID, 'notes', 'desktop')).rejects.toThrow('普通文件')
+    })
+
+    it('deleteFile 工作区外路径必须携带设备范围凭证', async () => {
+      const outside = path.join(rootDir, 'outside-delete.txt')
+      writeFileSync(outside, '内容', 'utf-8')
+      await expect(service.deleteFile(AGENT_ID, outside, 'desktop')).rejects.toThrow('逃逸')
+      await service.deleteFile(AGENT_ID, outside, 'desktop', { deviceScope: true })
+      expect(existsSync(outside)).toBe(false)
+    })
+
     it('read 默认按 800 行截断 full 内容', async () => {
       const longContent = Array.from({ length: 805 }, (_, index) => `第 ${index + 1} 行`).join('\n')
       await service.write(AGENT_ID, 'notes/long-lines.txt', longContent, 'desktop')

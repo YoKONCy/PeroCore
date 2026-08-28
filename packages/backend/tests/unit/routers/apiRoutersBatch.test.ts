@@ -197,9 +197,9 @@ describe('SchedulerRouter', () => {
     }
     const ctx = {
       scheduler: {
-        isStarted: true,
-        getStatus: vi.fn(() => [task]),
-        triggerNow: vi.fn(),
+        isPeriodicStarted: true,
+        getPeriodicScheduleStatus: vi.fn(() => [task]),
+        triggerPeriodicNow: vi.fn(),
       },
     }
     const router = createSchedulerRouter(ctx as never)
@@ -225,107 +225,207 @@ describe('SchedulerRouter', () => {
 })
 
 describe('MemoryRouter', () => {
+  const first = {
+    id: 'event-1',
+    agentId: 'pero',
+    narrative: '我和用户确认了新版事件记忆。',
+    eventAt: '2026-08-27T10:00:00.000Z',
+    createdAt: '2026-08-27T10:01:00.000Z',
+    importance: 8,
+    affect: { tones: ['认真'], valence: 7, arousal: 6 },
+    participants: ['用户'],
+    places: [],
+    objects: [],
+    topics: ['事件记忆'],
+    origin: {
+      mode: 'active',
+      threadId: 'thread-1',
+      pairIds: ['pair-1'],
+      messageIds: ['1', '2'],
+      channel: 'desktop',
+    },
+    status: 'active',
+  }
+
+  function archiveResult() {
+    return {
+      items: [first],
+      page: 1,
+      pageSize: 30,
+      total: 1,
+      pageCount: 1,
+      facets: {
+        channels: [{ value: 'desktop', count: 1 }],
+        statuses: [{ value: 'active', count: 1 }],
+        modes: [{ value: 'active', count: 1 }],
+        tones: [{ value: '认真', count: 1 }],
+        participants: [{ value: '用户', count: 1 }],
+        places: [],
+        objects: [],
+        topics: [{ value: '事件记忆', count: 1 }],
+      },
+      stats: { active: 1, archived: 0, averageImportance: 8, topicCount: 1 },
+    }
+  }
+
   function createCtx() {
     return {
-      memoryService: {
-        list: vi.fn(() => Promise.resolve({ items: [{ id: 1, content: '记忆' }], total: 1 })),
-        create: vi.fn((body: Record<string, unknown>) => Promise.resolve({ id: 2, ...body })),
-        getGraph: vi.fn(() => Promise.resolve({ nodes: [], edges: [] })),
-        delete: vi.fn(() => Promise.resolve()),
+      eventMemoryService: {
+        archiveQuery: vi.fn(() => Promise.resolve(archiveResult())),
+        graphSnapshot: vi.fn(() =>
+          Promise.resolve({
+            nodes: [first],
+            edges: [{ sourceId: first.id, targetId: 'event-2', relation: 'same_topic', weight: 1 }],
+            truncated: false,
+          }),
+        ),
+        detail: vi.fn((id: string) =>
+          Promise.resolve(
+            id === first.id
+              ? {
+                  ...first,
+                  relations: [
+                    { sourceId: first.id, targetId: 'event-2', relation: 'same_topic', weight: 1 },
+                  ],
+                }
+              : undefined,
+          ),
+        ),
       },
-      memoryImporter: {
-        importStory: vi.fn(() => Promise.resolve({ imported: 2 })),
-      },
-      memorySearchService: {
-        search: vi.fn(() => Promise.resolve([{ id: 1, score: 0.9 }])),
+      threadRepo: {
+        findMessagesByPairIds: vi.fn(() =>
+          Promise.resolve([
+            {
+              id: 1,
+              role: 'user',
+              content: '原始消息',
+              timestamp: first.eventAt,
+              pairId: 'pair-1',
+            },
+          ]),
+        ),
       },
     }
   }
 
-  it('应当提供记忆列表、创建、导入、搜索、图谱和删除', async () => {
+  it('应将档案过滤参数解析为组合过滤并返回分页与facets', async () => {
     const ctx = createCtx()
     const router = createMemoryRouter(ctx as never)
 
-    const list = await router.request('http://test/?agentId=pero&page=2&pageSize=5')
-    const created = await router.request('http://test/', {
-      method: 'POST',
-      body: JSON.stringify({ content: '新记忆', agentId: 'pero' }),
-      headers: { 'content-type': 'application/json' },
-    })
-    const imported = await router.request('http://test/import', {
-      method: 'POST',
-      body: JSON.stringify({ story: '很长的故事', source: 'story' }),
-      headers: { 'content-type': 'application/json' },
-    })
-    const searched = await router.request('http://test/search', {
-      method: 'POST',
-      body: JSON.stringify({ query: '猫咪', agentId: 'pero', topK: 3 }),
-      headers: { 'content-type': 'application/json' },
-    })
-    const graph = await router.request('http://test/graph?agentId=pero&limit=10')
-    const deleted = await router.request('http://test/1?agentId=pero&source=desktop', {
-      method: 'DELETE',
-    })
+    const list = await readJson(
+      await router.request(
+        'http://test/?agentId=pero&query=%E4%BA%8B%E4%BB%B6&channels=desktop&statuses=active&topics=%E4%BA%8B%E4%BB%B6%E8%AE%B0%E5%BF%86&importanceMin=6&importanceMax=9&sort=eventAt&order=desc&page=2&pageSize=20',
+      ),
+    )
 
-    expect(await readJson(list)).toMatchObject({ code: 'OK', data: { total: 1 } })
-    expect(ctx.memoryService.list).toHaveBeenCalledWith({ agentId: 'pero', page: 2, pageSize: 5 })
-    expect(created.status).toBe(201)
-    expect(await readJson(created)).toMatchObject({
-      code: 'CREATED',
+    expect(list).toMatchObject({
+      code: 'OK',
       data: {
-        content: '新记忆',
-        importance: 5,
-        sentiment: 'neutral',
-        type: 'event',
-        source: 'desktop',
+        items: [{ id: 'event-1' }],
+        page: 1,
+        total: 1,
+        pageCount: 1,
+        facets: { channels: [{ value: 'desktop', count: 1 }] },
+        stats: { active: 1, averageImportance: 8 },
       },
     })
-    expect(await readJson(imported)).toMatchObject({ code: 'OK', message: '导入完成: 2 条记忆' })
-    expect(await readJson(searched)).toMatchObject({ code: 'OK', data: [{ score: 0.9 }] })
-    expect(ctx.memorySearchService.search).toHaveBeenCalledWith({
-      query: '猫咪',
+    expect(ctx.eventMemoryService.archiveQuery).toHaveBeenCalledWith({
       agentId: 'pero',
-      source: 'desktop',
-      topK: 3,
-      minScore: undefined,
+      query: '事件',
+      channels: ['desktop'],
+      statuses: ['active'],
+      modes: undefined,
+      tones: undefined,
+      participants: undefined,
+      places: undefined,
+      objects: undefined,
+      topics: ['事件记忆'],
+      importanceMin: 6,
+      importanceMax: 9,
+      eventAtFrom: undefined,
+      eventAtTo: undefined,
+      createdAtFrom: undefined,
+      createdAtTo: undefined,
+      sort: 'eventAt',
+      order: 'desc',
+      page: 2,
+      pageSize: 20,
     })
-    expect(await readJson(graph)).toMatchObject({ code: 'OK', data: { nodes: [], edges: [] } })
-    expect(await readJson(deleted)).toEqual({ code: 'OK', message: '记忆已删除' })
-    expect(ctx.memoryService.delete).toHaveBeenCalledWith(1, 'pero', 'desktop')
   })
 
-  it('应当拒绝空导入和非法删除 ID', async () => {
-    const router = createMemoryRouter(createCtx() as never)
+  it('includeArchived兼容参数应映射为状态白名单', async () => {
+    const ctx = createCtx()
+    const router = createMemoryRouter(ctx as never)
 
-    const emptyImport = await router.request('http://test/import', {
-      method: 'POST',
-      body: JSON.stringify({ text: '   ' }),
-      headers: { 'content-type': 'application/json' },
+    await router.request('http://test/?agentId=pero&includeArchived=true')
+
+    expect(ctx.eventMemoryService.archiveQuery).toHaveBeenCalledWith(
+      expect.objectContaining({ statuses: ['active', 'archived'] }),
+    )
+  })
+
+  it('详情、来源和图谱快照应正常返回', async () => {
+    const ctx = createCtx()
+    const router = createMemoryRouter(ctx as never)
+
+    const detail = await readJson(await router.request('http://test/event-1'))
+    const source = await readJson(await router.request('http://test/event-1/source'))
+    const graph = await readJson(
+      await router.request('http://test/graph?agentId=pero&includeArchived=true&limit=120'),
+    )
+
+    expect(detail).toMatchObject({ code: 'OK', data: { id: 'event-1' } })
+    expect(source).toMatchObject({
+      code: 'OK',
+      data: { available: true, messages: [{ content: '原始消息' }] },
     })
-    const invalidDelete = await router.request('http://test/not-number', { method: 'DELETE' })
+    expect(graph).toMatchObject({
+      code: 'OK',
+      data: {
+        nodes: [{ id: 'event-1' }],
+        edges: [{ sourceId: 'event-1', relation: 'same_topic' }],
+        truncated: false,
+      },
+    })
+    expect(ctx.eventMemoryService.graphSnapshot).toHaveBeenCalledWith('pero', {
+      includeArchived: true,
+      limit: 120,
+    })
+  })
 
-    expect(emptyImport.status).toBe(400)
-    expect(await readJson(emptyImport)).toMatchObject({ code: 'MISSING_FIELD' })
-    expect(invalidDelete.status).toBe(400)
-    expect(await readJson(invalidDelete)).toMatchObject({ code: 'INVALID_PARAMETER' })
+  it('来源消息已删除时应返回available=false且不返回原文', async () => {
+    const ctx = createCtx()
+    ctx.threadRepo.findMessagesByPairIds.mockResolvedValueOnce([])
+    const router = createMemoryRouter(ctx as never)
+
+    const source = await readJson(await router.request('http://test/event-1/source'))
+
+    expect(source).toMatchObject({ code: 'OK', data: { available: false, messages: [] } })
+  })
+
+  it('不存在事件返回404，旧写入、搜索、导入和删除API均不可达', async () => {
+    const router = createMemoryRouter(createCtx() as never)
+    expect((await router.request('http://test/missing')).status).toBe(404)
+    expect((await router.request('http://test/', { method: 'POST' })).status).toBe(404)
+    expect((await router.request('http://test/import', { method: 'POST' })).status).toBe(404)
+    expect((await router.request('http://test/search', { method: 'POST' })).status).toBe(404)
+    expect((await router.request('http://test/event-1', { method: 'DELETE' })).status).toBe(404)
   })
 })
 
 describe('McpRouter', () => {
   function createCtx(hasManager = true) {
     return {
-      mcpRepo: {
-        findAll: vi.fn(() =>
-          Promise.resolve([{ id: 1, name: 'fs', args: '["--root"]', env: '{"A":"B"}' }]),
+      mcpConfigService: {
+        list: vi.fn(() =>
+          Promise.resolve([{ id: 1, name: 'fs', args: ['--root'], env: { A: 'B' } }]),
         ),
-        findByName: vi.fn(() => Promise.resolve(null)),
         create: vi.fn((body: Record<string, unknown>) => Promise.resolve({ id: 2, ...body })),
         update: vi.fn((id: number, body: Record<string, unknown>) =>
           Promise.resolve({ id, ...body }),
         ),
-        findById: vi.fn(() => Promise.resolve({ id: 1, name: 'fs' })),
-        delete: vi.fn(() => Promise.resolve(true)),
-        toggleEnabled: vi.fn((id: number) => Promise.resolve({ id, enabled: false })),
+        delete: vi.fn(() => Promise.resolve()),
+        toggle: vi.fn((id: number) => Promise.resolve({ id, enabled: false })),
       },
       mcpManager: hasManager
         ? {
@@ -348,6 +448,9 @@ describe('McpRouter', () => {
             getAllTools: vi.fn(() => [{ name: 'read' }]),
           }
         : undefined,
+      mcpRegistrySynchronizer: {
+        sync: vi.fn(),
+      },
       skillLoader: {
         getAllManifests: vi.fn(() => [{ id: 'skill-a' }]),
         loadSkillContent: vi.fn((id: string) => (id === 'skill-a' ? '内容' : null)),
@@ -399,7 +502,7 @@ describe('McpRouter', () => {
     expect(await readJson(status)).toMatchObject({ code: 'OK', data: { connectedServers: 1 } })
     expect(await readJson(tools)).toMatchObject({ code: 'OK', data: [{ name: 'read' }] })
     expect(await readJson(deleted)).toMatchObject({ code: 'OK', data: { deleted: true } })
-    expect(ctx.mcpManager!.disconnectOne).toHaveBeenCalledWith('fs')
+    expect(ctx.mcpConfigService.delete).toHaveBeenCalledWith(1)
   })
 
   it('应当管理 Skill 内容、重载、导入和删除', async () => {

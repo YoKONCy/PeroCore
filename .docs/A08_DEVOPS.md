@@ -1,8 +1,11 @@
 # DevOps 与运维规范
 
-> **版本**：0.2.0 · **更新时间**：2026-04-22
+> **版本**：0.9.2-rc1 · **更新时间**：2026-08-28
 > **适用范围**：CI/CD、数据库迁移、版本发布、安全、可观测性、API 文档
 > **依赖规范**：[A04_DEPLOYMENT](./A04_DEPLOYMENT.md)、[S04_TESTING_STANDARDS](./S04_TESTING_STANDARDS.md)
+> **实施路线**：[TEMP_MULTI_NODE_DELIVERY_PLAN](./TEMP-todo/TEMP_MULTI_NODE_DELIVERY_PLAN.md)
+>
+> **当前事实**：普通 CI 执行 lint、测试和全包构建；Tag Release 构建 Windows 标准版、便携版、Steam 版，并在 Docker Hub 凭据存在时构建推送前后端镜像。Dockerfile、Compose、镜像黑盒验收和多架构发布仍需按实施路线完成生产校准。
 
 ---
 
@@ -31,7 +34,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - run: pnpm install --frozen-lockfile
-      - run: pnpm lint          # ESLint + Prettier 检查
+      - run: pnpm lint # ESLint + Prettier 检查
 
   test:
     runs-on: ubuntu-latest
@@ -40,8 +43,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - run: pnpm install --frozen-lockfile
-      - run: pnpm test          # Vitest 全量测试
-      - run: pnpm coverage      # 覆盖率报告（需满足红线）
+      - run: pnpm test # Vitest 全量测试
+      - run: pnpm coverage # 覆盖率报告（需满足红线）
 
   build:
     runs-on: ubuntu-latest
@@ -50,7 +53,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - run: pnpm install --frozen-lockfile
-      - run: pnpm build         # 全包构建验证
+      - run: pnpm build # 全包构建验证
 
   # 可选：Electron 打包（仅 main/release 分支）
   electron-build:
@@ -70,12 +73,12 @@ jobs:
 
 ### 1.3 分支策略
 
-| 分支 | 用途 | CI 触发 |
-|---|---|---|
-| `main` | 稳定版本 | lint → test → build → Electron 打包 |
-| `dev` | 开发主线 | lint → test → build |
-| `feature/*` | 功能分支 | PR 时触发 lint + test |
-| `release/*` | 发布准备 | 全量 CI + Steam 构建 |
+| 分支        | 用途     | CI 触发                             |
+| ----------- | -------- | ----------------------------------- |
+| `main`      | 稳定版本 | lint → test → build → Electron 打包 |
+| `dev`       | 开发主线 | lint → test → build                 |
+| `feature/*` | 功能分支 | PR 时触发 lint + test               |
+| `release/*` | 发布准备 | 全量 CI + Steam 构建                |
 
 ---
 
@@ -121,12 +124,12 @@ packages/backend/src/db/
 
 采用 **SemVer**（语义化版本）：`MAJOR.MINOR.PATCH`
 
-| 类型 | 含义 | 示例 |
-|---|---|---|
-| MAJOR | 不兼容的 API / 数据格式变更 | `2.0.0` |
-| MINOR | 新功能（向后兼容） | `1.1.0` |
-| PATCH | Bug 修复 | `1.0.1` |
-| 预发布 | Alpha / Beta / RC | `1.0.0-alpha.1` |
+| 类型   | 含义                        | 示例            |
+| ------ | --------------------------- | --------------- |
+| MAJOR  | 不兼容的 API / 数据格式变更 | `2.0.0`         |
+| MINOR  | 新功能（向后兼容）          | `1.1.0`         |
+| PATCH  | Bug 修复                    | `1.0.1`         |
+| 预发布 | Alpha / Beta / RC           | `1.0.0-alpha.1` |
 
 所有子包版本号通过 `pnpm version:sync` 统一同步。
 
@@ -145,11 +148,11 @@ pnpm changeset publish
 
 ### 3.3 发布渠道
 
-| 渠道 | 触发条件 | 产物 |
-|---|---|---|
-| GitHub Release | `release/*` 分支合并到 `main` | `.exe` 安装包 + 发布说明 |
-| Steam | 手动触发 SteamPipe 上传 | Depot 更新 |
-| Docker Hub | `main` 分支 CI | Docker 镜像 |
+| 渠道           | 触发条件                               | 产物                                  |
+| -------------- | -------------------------------------- | ------------------------------------- |
+| GitHub Release | 推送版本 Tag                           | `.exe` 安装包 + 便携版 + 发布说明     |
+| Steam          | Tag Release 构建，SteamPipe 另行发布   | Depot 构建产物                        |
+| Docker Hub     | 推送版本 Tag 且配置 Registry 凭据      | Backend/Frontend 版本镜像             |
 
 ---
 
@@ -160,11 +163,14 @@ pnpm changeset publish
 后端已通过 Hono + Zod 在 Router 层做 schema 验证：
 
 ```typescript
-// 所有用户输入通过 Zod schema 验证
-app.post('/api/chat', zValidator('json', chatSchema), handler)
+// 所有用户输入使用项目级validate()包装器
+app.post('/api/chat', validate('json', chatSchema), handler)
 ```
 
 **补充要点**：
+
+- **校验信封**：Zod失败统一返回HTTP 400、`VALIDATION_ERROR`和`data.fields`，Router只能使用项目级`validate()`包装器
+- **响应契约**：业务码必须注册；HTTP 201绑定`CREATED`，HTTP 202绑定`ACCEPTED`
 - **路径遍历防护**：PathResolver 的 `resolve()` 必须检查解析后的路径不超出 roots 边界
 - **SQL 注入**：Drizzle ORM 的参数化查询天然防注入
 - **XSS**：Vue 的模板自动转义 + CSP 头（Electron 版由 `webPreferences` 控制）
@@ -181,11 +187,11 @@ pnpm audit
 
 ### 4.3 敏感信息管理
 
-| 信息类型 | 存储位置 | 注意事项 |
-|---|---|---|
-| LLM API Key | `config.json`（@data/） | 不上传 Steam Cloud，不提交 Git |
-| Gateway Token | `gateway_token.json` | 排除在 Cloud Sync 之外 |
-| Steam App ID | 代码硬编码 `4457100` | 公开信息，无需保护 |
+| 信息类型      | 存储位置                | 注意事项                       |
+| ------------- | ----------------------- | ------------------------------ |
+| LLM API Key   | `config.json`（@data/） | 不提交 Git；进入手动完整同步包时必须使用同步会话密钥加密，并由目标 Server 主密钥重新封装 |
+| Gateway Token | `gateway_token.json`    | 机器身份凭据，不进入同步包；目标 Server 保留自己的 Token |
+| Steam App ID  | 代码硬编码 `4457100`    | 公开信息，无需保护             |
 
 ---
 
@@ -235,6 +241,22 @@ if (isDocker && process.env.OTEL_ENDPOINT) {
 
 ---
 
+### 5.4 Execution与系统性能预算
+
+架构变更必须同时记录正确性、安全性与性能结果，至少覆盖：
+
+- 用户提交到接收确认、首Token与首Surface延迟；
+- 流式帧率、最长主线程阻塞和长消息DOM变更量；
+- 每个Execution的内存、Token、LLM、工具与并发I/O用量；
+- 前台任务受后台负载影响的P95延迟；
+- Provider超时、取消、stale-handle和重复消息比率；
+- 重启后Task、Surface、Outbox与Checkpoint恢复成功率；
+- 数据迁移、WAL checkpoint、备份与回滚成功率。
+
+Scheduler必须保证交互优先、同Agent与跨Agent公平、模型与Provider并发预算、Backpressure、Deadline、暂停恢复和饥饿保护。后台状态必须向用户解释WaitReason、资源占用与取消结果。
+
+---
+
 ## 6. API 文档
 
 ### 6.1 方案
@@ -262,17 +284,47 @@ app.get('/docs', swaggerUI({ url: '/openapi.json' }))
 
 ---
 
-## 7. 里程碑对照表
+## 7. 安全与验证基线
 
-| 里程碑 | 需落地的运维项 |
-|---|---|
-| 首个模块开发完成 | CI/CD 流水线（§1） |
-| 数据库模块开发 | Drizzle 迁移配置（§2） |
-| 后端 Hono 搭建 | 健康检查（§5.2）、Dependabot（§4.2） |
-| 首批 Router 完成 | API 文档生成（§6） |
-| 首个 Alpha 发布 | 版本策略 + Changelog（§3） |
-| Docker 版上线 | APM 评估（§5.3） |
+### 7.1 信任层级
+
+```text
+Kernel Core
+> Built-in System Service
+> Signed/Official Application
+> User-installed Application
+> External MCP/Provider
+> Model-generated Code / Web Content
+```
+
+不同层级必须拥有不同默认Capability、隔离和审批要求。Markdown不执行脚本；Programmable Surface、Web Application和Document Island必须使用独立沙箱，不能共享主前端全局对象。截图、剪贴板、Cookie、网络拦截与原生输入属于高风险能力。Audit记录能力决策与副作用，不默认记录敏感明文；Snapshot进入模型前必须脱敏，Capability Handle不得进入Prompt或普通日志。
+
+### 7.2 强制验证矩阵
+
+- **协议契约**：Shared序列化、版本协商、Correlation/Causation、Generation、Cancellation、Deadline与Capability不可扩权；
+- **状态机**：Execution、Task、Application、Surface与Capability的非法跃迁、重复请求和崩溃恢复；
+- **故障注入**：SSE断开、Provider掉线、Tool超时、Approval跨重启、SQLite提交后Surface未送达、TDB flush中断、Application崩溃、Kernel短时断线、主Agent Execution取消、旧Generation与重复Idempotency Key；
+- **性能回归**：Surface、Scheduler和IPC变更必须与基线比较，不接受只验证功能正确。
+
+第三方 Application Adapter 还必须验证配对与身份冒充、协议降级、应用版本不兼容、Capability过期/撤销、任务重复提交、断线重连、Adapter崩溃重启和主Agent取消后的任务独立性。默认测试环境使用Mock Kernel，不允许生态贡献者测试依赖真实用户Credential或私有数据。
+
+### 7.3 数据与兼容策略
+
+领域表与TriviumDB继续持有业务权威；同一事务写入Outbox并异步产生Durable Event，不采用全面事件溯源。迁移使用Strangler Adapter，兼容层必须注明移除条件，禁止无限期双写与双协议。用户能力和持久数据优先兼容，内部重复协议在迁移完成后应果断删除。
 
 ---
 
-*本文档由 Carola 整理，适用于 infOS 运维与 DevOps 规范。*
+## 8. 里程碑对照表
+
+| 里程碑           | 需落地的运维项                       |
+| ---------------- | ------------------------------------ |
+| 首个模块开发完成 | CI/CD 流水线（§1）                   |
+| 数据库模块开发   | Drizzle 迁移配置（§2）               |
+| 后端 Hono 搭建   | 健康检查（§5.2）、Dependabot（§4.2） |
+| 首批 Router 完成 | API 文档生成（§6）                   |
+| 首个 Alpha 发布  | 版本策略 + Changelog（§3）           |
+| Docker 版上线    | APM 评估（§5.3）                     |
+
+---
+
+_本文档由 Carola 整理，适用于 infOS 运维与 DevOps 规范。_

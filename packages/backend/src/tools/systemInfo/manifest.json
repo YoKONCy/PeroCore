@@ -8,6 +8,18 @@
   "entry": "index.ts",
   "category": "core",
   "platforms": ["windows", "linux", "darwin"],
+  "userCopy": {
+    "get_system_info": {
+      "label": "查看系统信息",
+      "description": "查看操作系统、设备和运行环境信息。"
+    },
+    "open_application": { "label": "打开应用", "description": "打开电脑中已安装的应用。" },
+    "get_active_windows": {
+      "label": "查看已打开窗口",
+      "description": "查看当前打开了哪些应用窗口。"
+    },
+    "activate_window": { "label": "切换应用窗口", "description": "把指定应用窗口切换到最前面。" }
+  },
 
   "tools": [
     {
@@ -18,12 +30,15 @@
     },
     {
       "name": "open_application",
-      "description": "打开一个应用程序。跨平台支持。",
+      "description": "在用户的Electron客户端中打开已安装应用。优先激活已有窗口；按名称匹配开始菜单应用，歧义时返回候选而不盲目启动。",
       "display": { "label": "打开应用", "icon": "desktop", "color": "purple", "style": "system" },
       "parameters": {
         "type": "object",
         "properties": {
-          "app_name": { "type": "string", "description": "应用程序名称或路径" }
+          "app_name": {
+            "type": "string",
+            "description": "应用显示名、开始菜单AppID或明确的绝对路径。名称不明确时工具会返回候选"
+          }
         },
         "required": ["app_name"]
       }

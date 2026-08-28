@@ -16,7 +16,7 @@
  */
 
 import { Hono } from 'hono'
-import { zValidator } from '@hono/zod-validator'
+import { validate as zValidator } from '../lib/validation'
 import { z } from 'zod'
 import type { AppContext } from '../container'
 
@@ -41,8 +41,16 @@ const createModelSchema = z.object({
   topP: z.number().min(0).max(1).nullable().optional(),
   /** 最大输出 Token 数 */
   maxTokens: z.number().int().min(1).nullable().optional(),
+  /** 模型完整上下文窗口 */
+  contextWindowTokens: z.number().int().min(1).nullable().optional(),
   /** 模型推理强度；null 表示不传 */
   reasoningEffort: z.enum(['off', 'low', 'medium', 'high', 'xhigh', 'max']).nullable().optional(),
+  /** 是否请求并展示Provider原生思考摘要。 */
+  returnNativeReasoning: z.boolean().optional(),
+  wireApi: z.enum(['chat_completions', 'responses']).optional(),
+  reasoningDialect: z.enum(['auto', 'openai', 'deepseek', 'openrouter', 'generic']).optional(),
+  /** 是否使用Provider流式接口 */
+  stream: z.boolean().optional(),
   /** Provider 类型 / 用途 (global/chat/scorer/reflection/task) */
   providerType: z.string().default('global'),
   /** 启用视觉能力 (多模态) */

@@ -15,11 +15,23 @@
  */
 import { ref, computed } from 'vue'
 import { PixelIcon, PButton, PDialog } from '../../pixel'
+import HistoryExportDialog from '../../chat/HistoryExportDialog.vue'
 import StrongholdChat from '../../stronghold/StrongholdChat.vue'
 import { useStronghold } from '../../../composables/useStronghold'
 import type { Room } from '../../../api/modules/strongholdApi'
+import { strongholdApi } from '../../../api/modules/strongholdApi'
+import {
+  buildStrongholdMarkdown,
+  downloadMarkdown,
+  type HistoryExportOptions,
+} from '../../../utils/historyExport'
+import { useNotificationStore } from '../../../stores/useNotificationStore'
 
 defineOptions({ name: 'StrongholdTab' })
+
+const notification = useNotificationStore()
+const showHistoryExport = ref(false)
+const isExportingHistory = ref(false)
 
 const {
   facilities,
@@ -34,6 +46,7 @@ const {
   isLoadingMessages,
   isSendingMessage,
   isAwaitingReply,
+  activeRound,
   replyStatus,
   selectFacility,
   selectRoom,
@@ -41,6 +54,35 @@ const {
   deleteMessage,
   callButler,
 } = useStronghold()
+
+async function exportCurrentHistory(_options: HistoryExportOptions): Promise<void> {
+  if (!currentRoom.value) return
+  isExportingHistory.value = true
+  try {
+    const response = await strongholdApi.getProjection(currentRoom.value.id, 1000)
+    if (!response.data) throw new Error('服务端未返回据点房间历史')
+    const participantNames = Object.fromEntries(
+      [...agentProfiles.value].map(([agentId, profile]) => [agentId, profile.name]),
+    )
+    const title = `${currentRoom.value.name}-据点历史`
+    downloadMarkdown(
+      title,
+      buildStrongholdMarkdown({
+        title,
+        participantNames,
+        messages: response.data.messages,
+      }),
+    )
+    showHistoryExport.value = false
+    notification.toast('据点房间历史已导出到客户端', { type: 'success' })
+  } catch (error) {
+    notification.toast(error instanceof Error ? error.message : '历史记录导出失败', {
+      type: 'error',
+    })
+  } finally {
+    isExportingHistory.value = false
+  }
+}
 
 // ── 侧边栏收起状态 ──
 
@@ -388,6 +430,16 @@ async function submitButler(): Promise<void> {
             </div>
 
             <div class="sh-main-aside">
+              <PButton
+                variant="ghost"
+                size="sm"
+                :disabled="messages.length === 0"
+                title="导出当前房间历史"
+                @click="showHistoryExport = true"
+              >
+                <PixelIcon name="download" size="xs" />
+                导出
+              </PButton>
               <!-- 环境状态 chips -->
               <div v-if="roomEnvChips.length > 0" class="sh-env-chips">
                 <span
@@ -429,6 +481,7 @@ async function submitButler(): Promise<void> {
               :is-loading="isLoadingMessages"
               :is-sending="isSendingMessage"
               :is-awaiting-reply="isAwaitingReply"
+              :round-state="activeRound"
               :reply-status="replyStatus"
               :participant-count="currentRoomAgents.length"
               :room-name="currentRoom.name"
@@ -545,6 +598,13 @@ async function submitButler(): Promise<void> {
         </template>
       </aside>
     </div>
+
+    <HistoryExportDialog
+      v-model="showHistoryExport"
+      :allow-structured-content="false"
+      :disabled="isExportingHistory"
+      @confirm="exportCurrentHistory"
+    />
 
     <!-- ═══ 管家弹窗 ═══ -->
     <PDialog v-model="showButler" title="呼叫管家">

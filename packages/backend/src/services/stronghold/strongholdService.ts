@@ -15,6 +15,7 @@
 
 import { eq, sql } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
+import { AppError } from '../../lib/appError'
 import {
   strongholdFacilities,
   strongholdRooms,
@@ -52,7 +53,10 @@ export interface CreateRoomInput {
 // ── Service ──
 
 export class StrongholdService {
-  constructor(private db: DrizzleDb) {}
+  constructor(
+    private db: DrizzleDb,
+    private isRegisteredAgent: (agentId: string) => boolean,
+  ) {}
 
   // ─── 初始化 ───
 
@@ -89,11 +93,33 @@ export class StrongholdService {
       logger.info('已创建默认房间: 客厅')
     }
 
+    await this.removeUnknownAgentRecords()
     for (const agentId of new Set(agentIds)) {
       await this.ensureAgentLocation(agentId, livingRoom.id)
     }
 
     logger.info('据点默认数据检查完成')
+  }
+
+  private async removeUnknownAgentRecords(): Promise<void> {
+    const locations = await this.db.select().from(agentLocations).all()
+    const invalidIds = locations
+      .map((location) => location.agentId)
+      .filter((agentId) => !this.isRegisteredAgent(agentId))
+    for (const agentId of invalidIds) {
+      await this.db.delete(agentLocations).where(eq(agentLocations.agentId, agentId))
+    }
+
+    const memberships = await this.db.select().from(groupChatMembers).all()
+    for (const member of memberships) {
+      if (member.agentId === 'system' || member.agentId === 'user') continue
+      if (!this.isRegisteredAgent(member.agentId)) {
+        await this.db.delete(groupChatMembers).where(eq(groupChatMembers.id, member.id))
+      }
+    }
+    if (invalidIds.length > 0) {
+      logger.warn(`已清理未知据点角色记录: ${invalidIds.join('、')}`)
+    }
   }
 
   // ─── 设施管理 ───
@@ -137,10 +163,18 @@ export class StrongholdService {
    */
   async createRoom(input: CreateRoomInput): Promise<RoomRow> {
     const facility = await this.getFacility(input.facilityId)
-    if (!facility) throw new Error(`设施 ${input.facilityId} 不存在`)
+    if (!facility) {
+      throw new AppError('NOT_FOUND', { message: `设施 ${input.facilityId} 不存在` })
+    }
 
     const roomId = uuidv4()
-    const allowedAgents = input.allowedAgents ?? []
+    const allowedAgents = [...new Set(input.allowedAgents ?? [])]
+    const invalidAgents = allowedAgents.filter((agentId) => !this.isRegisteredAgent(agentId))
+    if (invalidAgents.length > 0) {
+      throw new AppError('VALIDATION_ERROR', {
+        message: `房间成员只能使用已注册角色：${invalidAgents.join('、')}`,
+      })
+    }
 
     // 1. 创建据点房间
     await this.db.insert(strongholdRooms).values({
@@ -225,8 +259,10 @@ export class StrongholdService {
    */
   async deleteRoom(roomId: string): Promise<void> {
     const room = await this.getRoom(roomId)
-    if (!room) throw new Error(`房间 ${roomId} 不存在`)
-    if (room.name === '客厅') throw new Error('客厅不能被删除')
+    if (!room) throw new AppError('NOT_FOUND', { message: `房间 ${roomId} 不存在` })
+    if (room.name === '客厅') {
+      throw new AppError('FORBIDDEN', { message: '客厅不能被删除' })
+    }
 
     // 将该房间内的 Agent 移到客厅
     const livingRoom = await this.getRoomByName('客厅')
@@ -248,7 +284,7 @@ export class StrongholdService {
 
   async updateEnvironment(roomId: string, key: string, value: unknown): Promise<void> {
     const room = await this.getRoom(roomId)
-    if (!room) throw new Error(`房间 ${roomId} 不存在`)
+    if (!room) throw new AppError('NOT_FOUND', { message: `房间 ${roomId} 不存在` })
 
     const env = JSON.parse(room.environmentJson ?? '{}') as Record<string, unknown>
     env[key] = value
@@ -262,6 +298,7 @@ export class StrongholdService {
   // ─── Agent 位置 ───
 
   async ensureAgentLocation(agentId: string, livingRoomId?: string): Promise<LocationRow> {
+    this.requireRegisteredAgent(agentId)
     const existing = await this.db
       .select()
       .from(agentLocations)
@@ -275,7 +312,9 @@ export class StrongholdService {
     const livingRoom = livingRoomId
       ? await this.getRoom(livingRoomId)
       : await this.getRoomByName('客厅')
-    if (!livingRoom) throw new Error('客厅尚未初始化')
+    if (!livingRoom) {
+      throw new AppError('CONFIG_ERROR', { message: '客厅尚未初始化' })
+    }
     return this.moveAgent(agentId, livingRoom.id)
   }
 
@@ -290,9 +329,29 @@ export class StrongholdService {
     }
   }
 
+  /** 判断角色是否允许进入房间；空白名单表示全部已注册角色可进入。 */
+  canAgentEnterRoom(room: RoomRow, agentId: string): boolean {
+    try {
+      const allowedAgents = JSON.parse(room.allowedAgentsJson ?? '[]') as unknown
+      return (
+        Array.isArray(allowedAgents) &&
+        (allowedAgents.length === 0 || allowedAgents.includes(agentId))
+      )
+    } catch {
+      logger.warn(`房间 ${room.id} 的角色白名单格式无效，已按禁止进入处理`)
+      return false
+    }
+  }
+
   async moveAgent(agentId: string, roomId: string): Promise<LocationRow> {
+    this.requireRegisteredAgent(agentId)
     const room = await this.getRoom(roomId)
-    if (!room) throw new Error(`房间 ${roomId} 不存在`)
+    if (!room) throw new AppError('NOT_FOUND', { message: `房间 ${roomId} 不存在` })
+    if (!this.canAgentEnterRoom(room, agentId)) {
+      throw new AppError('FORBIDDEN', {
+        message: `Agent ${agentId} 不允许进入房间「${room.name}」`,
+      })
+    }
 
     // Upsert
     const existing = await this.db
@@ -356,6 +415,14 @@ export class StrongholdService {
       .where(eq(agentLocations.roomId, roomId))
       .all()
     return locations.map((l) => l.agentId)
+  }
+
+  private requireRegisteredAgent(agentId: string): void {
+    if (!this.isRegisteredAgent(agentId)) {
+      throw new AppError('VALIDATION_ERROR', {
+        message: `Agent ${agentId} 不存在，禁止创建据点位置或成员记录`,
+      })
+    }
   }
 
   // ─── 管家配置 ───

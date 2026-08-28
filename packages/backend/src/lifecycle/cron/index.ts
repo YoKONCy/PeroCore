@@ -8,4 +8,3 @@
 
 export { runCleanup, type CleanupResult } from './cleanup'
 export { runDreamCheck, type DreamCheckResult, type DreamCheckDeps } from './dream'
-export { runLonelyScan, type LonelyScanResult, type LonelyScanDeps } from './lonelyScan'

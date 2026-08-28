@@ -58,7 +58,7 @@ function toggleCollapse() {
     <div class="segment-header segment-thinking-header" @click="toggleCollapse">
       <div class="segment-title">
         <PixelIcon name="brain" size="xs" />
-        <span>思考过程</span>
+        <span>碎碎念</span>
       </div>
       <span :class="['segment-chevron', { 'rotate-180': !isCollapsed }]">▼</span>
     </div>

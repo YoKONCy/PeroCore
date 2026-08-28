@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { ApplicationRealmManager } from '@infos/backend/applications/applicationRealm'
 import { RegistryToolExecutor, type HookEmitter } from '@infos/backend/services/agent/toolExecutor'
 import { ToolRegistry } from '@infos/backend/services/agent/toolRegistry'
 import type { CapabilityGate } from '@infos/backend/capabilities/capabilityGate'
@@ -21,7 +22,114 @@ describe('RegistryToolExecutor', () => {
     vi.useRealTimers()
   })
 
-  it('应将旧工具的 JSON 错误结果归一化为失败状态', async () => {
+  it('工具执行超过原30秒边界仍保持挂起，直到工具自身完成', async () => {
+    vi.useFakeTimers()
+    const registry = new ToolRegistry()
+    let finish: ((value: string) => void) | undefined
+    registry.register(
+      { name: 'wait.forever', description: '等待外部输入', parameters: { type: 'object' } },
+      () =>
+        new Promise<string>((resolve) => {
+          finish = resolve
+        }),
+    )
+    const executor = new RegistryToolExecutor(registry)
+    let settled = false
+    const execution = executor.execute('wait.forever', {}, 'desktop').finally(() => {
+      settled = true
+    })
+
+    await vi.advanceTimersByTimeAsync(31_000)
+    expect(settled).toBe(false)
+
+    finish?.('用户已回复')
+    await expect(execution).resolves.toMatchObject({
+      output: '用户已回复',
+      isError: false,
+    })
+  })
+
+  it('Application Realm工具不得被主应用或其他Realm调用', async () => {
+    const registry = new ToolRegistry()
+    const realms = new ApplicationRealmManager(registry)
+    const arca = realms.register({
+      realmId: 'infos.arca',
+      appId: 'infos.arca',
+      principalId: 'application:infos.arca',
+      instanceId: 'managed',
+    })
+    const handler = vi.fn().mockResolvedValue('已提交')
+    arca.registerTool(
+      { name: 'arca_changeset_propose', description: '提交变更', parameters: { type: 'object' } },
+      handler,
+    )
+    const executor = new RegistryToolExecutor(registry)
+    executor.setApplicationRealmManager(realms)
+
+    await expect(executor.execute('arca_changeset_propose', {}, 'desktop')).resolves.toMatchObject({
+      isError: true,
+    })
+    await expect(
+      executor.execute('arca_changeset_propose', {}, 'desktop', { realmId: 'infos.social' }),
+    ).resolves.toMatchObject({ isError: true })
+    await expect(
+      executor.execute('arca_changeset_propose', {}, 'desktop', { realmId: 'infos.arca' }),
+    ).resolves.toMatchObject({ isError: false, output: '已提交' })
+    expect(handler).toHaveBeenCalledTimes(1)
+  })
+
+  it('据点group通道应只注入并执行据点工具与固定协议工具', async () => {
+    const registry = new ToolRegistry()
+    const strongholdHandler = vi.fn().mockResolvedValue('已移动')
+    const terminalHandler = vi.fn().mockResolvedValue('不应执行')
+    registry.register(
+      { name: 'stronghold_move_to_room', description: '移动房间', parameters: {} },
+      strongholdHandler,
+      ['group'],
+    )
+    registry.register(
+      { name: 'terminal_execute', description: '执行终端命令', parameters: {} },
+      terminalHandler,
+    )
+    registry.register(
+      { name: 'finish_task', description: '结束任务', parameters: {} },
+      vi.fn().mockResolvedValue('已结束'),
+    )
+    const executor = new RegistryToolExecutor(registry)
+
+    expect(registry.getDefinitions('group').map((tool) => tool.name)).toEqual([
+      'stronghold_move_to_room',
+      'finish_task',
+    ])
+    await expect(
+      executor.execute('terminal_execute', { command: 'pwd' }, 'group'),
+    ).resolves.toMatchObject({ isError: true, output: expect.stringContaining('不允许') })
+    expect(terminalHandler).not.toHaveBeenCalled()
+  })
+
+  it('工具定义通道限制应同时阻止执行，避免手工FC绕过', async () => {
+    const registry = new ToolRegistry()
+    const handler = vi.fn().mockResolvedValue('已移动')
+    registry.register(
+      { name: 'stronghold_move_to_room', description: '移动房间', parameters: {} },
+      handler,
+      ['group'],
+    )
+    const executor = new RegistryToolExecutor(registry)
+
+    expect(registry.getDefinitions('desktop').map((tool) => tool.name)).not.toContain(
+      'stronghold_move_to_room',
+    )
+    expect(registry.getDefinitions('group').map((tool) => tool.name)).toContain(
+      'stronghold_move_to_room',
+    )
+    await expect(
+      executor.execute('stronghold_move_to_room', { room_name: '卧室' }, 'desktop'),
+    ).resolves.toMatchObject({ isError: true, output: expect.stringContaining('不允许') })
+    expect(handler).not.toHaveBeenCalled()
+  })
+
+  it('应将旧工具的JSON错误结果归一化为失败状态', async () => {
     const registry = new ToolRegistry()
     registry.register(
       { name: 'legacy.read', description: '旧读取工具', parameters: { type: 'object' } },
@@ -254,7 +362,7 @@ describe('RegistryToolExecutor', () => {
       sessionId: 'terminal-thread',
     })
     executor.setPolicyRuntime(new PolicyEngine(), approvals)
-    const args = { command: 'move C:\\outside\\a.txt C:\\outside\\b.txt' }
+    const args = { command: 'Write-Output "hello"' }
 
     const firstExecution = executor.execute('terminal_execute', args, 'desktop')
     await vi.waitFor(() => expect(approvals.list({ status: 'pending' })).toHaveLength(1))
@@ -273,6 +381,162 @@ describe('RegistryToolExecutor', () => {
     approvals.resolve(approvals.list({ status: 'pending' })[0]!.id, 'deny_once')
     expect((await secondExecution).isError).toBe(true)
     expect(handler).toHaveBeenCalledTimes(1)
+  })
+
+  it('自动执行模式仅保留终端与工作区外删除审批', async () => {
+    const registry = new ToolRegistry()
+    const browserHandler = vi.fn().mockResolvedValue('完成')
+    const terminalHandler = vi.fn().mockResolvedValue('命令完成')
+    const deleteHandler = vi.fn().mockResolvedValue('已删除')
+    registry.register(
+      { name: 'browser_type', description: '输入', parameters: { type: 'object' } },
+      browserHandler,
+    )
+    registry.register(
+      { name: 'terminal_execute', description: '终端', parameters: { type: 'object' } },
+      terminalHandler,
+    )
+    registry.register(
+      { name: 'delete_file', description: '删除', parameters: { type: 'object' } },
+      deleteHandler,
+    )
+    const capabilityGate = {
+      isToolAllowed: vi.fn().mockReturnValue(true),
+      isPathAllowed: vi.fn().mockReturnValue(true),
+      getToolPermission: vi.fn(),
+    } as unknown as CapabilityGate
+    const approvals = new ApprovalService()
+    const executor = new RegistryToolExecutor(registry, capabilityGate, null, null, {
+      agentId: 'pero',
+      channel: 'desktop',
+      sessionId: 'auto-thread',
+    })
+    executor.setPathBoundaryChecker(
+      (_agentId, _channel, inputPath) => !inputPath.includes('outside'),
+    )
+    executor.setPolicyRuntime(new PolicyEngine(), approvals)
+
+    await expect(
+      executor.execute('browser_type', { text: 'hello' }, 'desktop', {
+        autoExecuteTools: true,
+      }),
+    ).resolves.toMatchObject({ isError: false })
+    expect(browserHandler).toHaveBeenCalledTimes(1)
+
+    const terminal = executor.execute('terminal_execute', { command: 'echo ok' }, 'desktop', {
+      autoExecuteTools: true,
+    })
+    await vi.waitFor(() => expect(approvals.list({ status: 'pending' })).toHaveLength(1))
+    approvals.resolve(approvals.list({ status: 'pending' })[0]!.id, 'deny_once')
+    expect((await terminal).isError).toBe(true)
+    expect(terminalHandler).not.toHaveBeenCalled()
+
+    const outsideDelete = executor.execute(
+      'delete_file',
+      { file_path: 'C:/outside/old.txt' },
+      'desktop',
+      { autoExecuteTools: true },
+    )
+    await vi.waitFor(() => expect(approvals.list({ status: 'pending' })).toHaveLength(1))
+    approvals.resolve(approvals.list({ status: 'pending' })[0]!.id, 'deny_once')
+    expect((await outsideDelete).isError).toBe(true)
+    expect(deleteHandler).not.toHaveBeenCalled()
+
+    await expect(
+      executor.execute('delete_file', { file_path: 'notes/old.txt' }, 'desktop', {
+        autoExecuteTools: true,
+      }),
+    ).resolves.toMatchObject({ isError: false })
+    expect(deleteHandler).toHaveBeenCalledWith(
+      { file_path: 'notes/old.txt' },
+      expect.objectContaining({ approvedSensitiveAction: true }),
+    )
+  })
+
+  it('远程终端只按自动执行开关决定是否逐次审批', async () => {
+    const registry = new ToolRegistry()
+    const handler = vi.fn().mockResolvedValue('远程终端完成')
+    registry.register(
+      { name: 'remote_terminal_read', description: '读取远程终端', parameters: { type: 'object' } },
+      handler,
+    )
+    const capabilityGate = {
+      isToolAllowed: vi.fn().mockReturnValue(true),
+      isPathAllowed: vi.fn().mockReturnValue(true),
+      getToolPermission: vi.fn(),
+    } as unknown as CapabilityGate
+    const approvals = new ApprovalService()
+    const executor = new RegistryToolExecutor(registry, capabilityGate, null, null, {
+      agentId: 'pero',
+      channel: 'desktop',
+      sessionId: 'remote-shell-thread',
+    })
+    executor.setPolicyRuntime(new PolicyEngine(), approvals)
+
+    const guarded = executor.execute(
+      'remote_terminal_read',
+      { node_id: 'gpu-1', terminal_id: 'term-1' },
+      'desktop',
+      { autoExecuteTools: false },
+    )
+    await vi.waitFor(() => expect(approvals.list({ status: 'pending' })).toHaveLength(1))
+    approvals.resolve(approvals.list({ status: 'pending' })[0]!.id, 'allow_always')
+    await expect(guarded).resolves.toMatchObject({ isError: false })
+    expect(handler).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({ approvedSensitiveAction: true }),
+    )
+
+    approvals.clearSession('remote-shell-thread')
+    handler.mockClear()
+    await expect(
+      executor.execute(
+        'remote_terminal_read',
+        { node_id: 'gpu-1', terminal_id: 'term-1' },
+        'desktop',
+        { autoExecuteTools: true },
+      ),
+    ).resolves.toMatchObject({ isError: false })
+    expect(approvals.list({ status: 'pending' })).toHaveLength(0)
+    expect(handler).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ approvedSensitiveAction: true }),
+    )
+  })
+
+  it('纯读取工具应获得设备只读范围且不触发越界审批', async () => {
+    const registry = new ToolRegistry()
+    const handler = vi.fn().mockResolvedValue('内容')
+    registry.register(
+      { name: 'read_file_range', description: '范围读取', parameters: { type: 'object' } },
+      handler,
+    )
+    const capabilityGate = {
+      isToolAllowed: vi.fn().mockReturnValue(true),
+      isPathAllowed: vi.fn().mockReturnValue(false),
+      getToolPermission: vi.fn(),
+    } as unknown as CapabilityGate
+    const approvals = new ApprovalService()
+    const executor = new RegistryToolExecutor(registry, capabilityGate, null, null, {
+      agentId: 'pero',
+      channel: 'desktop',
+      sessionId: 'read-thread',
+    })
+    executor.setPathBoundaryChecker(() => false)
+    executor.setPolicyRuntime(new PolicyEngine(), approvals)
+
+    const result = await executor.execute(
+      'read_file_range',
+      { path: 'C:/outside/file.txt', line_start: 1, line_end: 10 },
+      'desktop',
+    )
+
+    expect(result.isError).toBe(false)
+    expect(approvals.list({ status: 'pending' })).toHaveLength(0)
+    expect(handler).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'C:/outside/file.txt' }),
+      expect.objectContaining({ deviceReadScope: true }),
+    )
   })
 
   it('工作区外路径必须审批后才执行，并仅向本次工具上下文授予越界能力', async () => {
@@ -296,6 +560,7 @@ describe('RegistryToolExecutor', () => {
       channel: 'desktop',
       sessionId: 'outside-thread',
     })
+    executor.setPathBoundaryChecker(() => false)
     executor.setPolicyRuntime(new PolicyEngine(), approvals)
 
     const execution = executor.execute('demo.run', { path: 'C:/outside/file.txt' }, 'desktop')
@@ -384,6 +649,34 @@ describe('RegistryToolExecutor', () => {
     expect(result).toMatchObject({ output: '技能内容', isError: false, shouldTerminate: false })
   })
 
+  it('Skill临时解锁工具首次调用应审批且会话允许后可复用', async () => {
+    const { registry, handler } = createRegistry()
+    const capabilityGate = {
+      isToolAllowed: vi.fn().mockReturnValue(true),
+      isSkillUnlockedTool: vi.fn().mockReturnValue(true),
+      isPathAllowed: vi.fn().mockReturnValue(true),
+      getToolPermission: vi.fn(),
+    } as unknown as CapabilityGate
+    const approvals = new ApprovalService()
+    const executor = new RegistryToolExecutor(registry, capabilityGate, null, null, {
+      agentId: 'pero',
+      channel: 'desktop',
+      sessionId: 'skill-thread',
+    })
+    executor.setPolicyRuntime(new PolicyEngine(), approvals)
+
+    const first = executor.execute('demo.run', { value: 1 }, 'desktop')
+    await vi.waitFor(() => expect(approvals.list({ status: 'pending' })).toHaveLength(1))
+    expect(handler).not.toHaveBeenCalled()
+    approvals.resolve(approvals.list({ status: 'pending' })[0]!.id, 'allow_session')
+    expect((await first).isError).toBe(false)
+
+    const second = await executor.execute('demo.run', { value: 2 }, 'desktop')
+    expect(second.isError).toBe(false)
+    expect(approvals.list({ status: 'pending' })).toHaveLength(0)
+    expect(handler).toHaveBeenCalledTimes(2)
+  })
+
   it('应当处理 load_skill 参数缺失、系统未初始化与内容缺失', async () => {
     const { registry } = createRegistry()
     const executorWithoutLoader = new RegistryToolExecutor(registry)
@@ -407,61 +700,48 @@ describe('RegistryToolExecutor', () => {
 
   // ── 第七阶段修复（批次 A2）：平台能力工具名 → 能力名映射 ──
   describe('平台能力工具路由', () => {
-    it('take_screenshot 调用应当被映射为 screen_capture 能力名传给 CapabilityBridge', async () => {
+    it('take_screenshot调用应映射为screenCapture Desktop Port操作', async () => {
       const { registry } = createRegistry()
-      // mock CapabilityBridge：捕获实际被调用的能力名
-      // 必须包成 { invokeTool } 对象以符合 CapabilityBridgeLike 接口
-      const invokeTool = vi.fn().mockResolvedValue({
-        output: JSON.stringify({
-          success: true,
-          screenshots: [{ index: 0, dataUri: 'data:image/png;base64,xxx' }],
-          message: '已截取屏幕',
-        }),
-        isError: false,
-        durationMs: 50,
+      const invoke = vi.fn().mockResolvedValue({
+        success: true,
+        screenshots: [{ index: 0, dataUri: 'data:image/png;base64,xxx' }],
+        message: '已截取屏幕',
       })
       const executor = new RegistryToolExecutor(registry)
-      executor.setCapabilityBridge({ invokeTool })
+      executor.setDesktopCapabilities({ invoke })
 
       const result = await executor.execute('take_screenshot', {}, 'desktop')
 
-      // 关键断言：传给 CapabilityBridge 的应是映射后的 screen_capture
-      expect(invokeTool).toHaveBeenCalledTimes(1)
-      expect(invokeTool).toHaveBeenCalledWith('screen_capture', {})
-      // 返回值应正常透传
+      expect(invoke).toHaveBeenCalledTimes(1)
+      expect(invoke).toHaveBeenCalledWith(
+        'screenCapture',
+        {},
+        expect.objectContaining({ principalId: 'pero' }),
+      )
       expect(result.isError).toBe(false)
       expect(result.output).toContain('screenshots')
     })
 
-    it('screen_capture 工具名应当直接透传，不做映射', async () => {
+    it('screen_capture工具名映射到同一screenCapture操作', async () => {
       const { registry } = createRegistry()
-      const invokeTool = vi.fn().mockResolvedValue({
-        output: JSON.stringify({ success: true, screenshots: [] }),
-        isError: false,
-        durationMs: 10,
-      })
+      const invoke = vi.fn().mockResolvedValue({ success: true, screenshots: [] })
       const executor = new RegistryToolExecutor(registry)
-      executor.setCapabilityBridge({ invokeTool })
+      executor.setDesktopCapabilities({ invoke })
 
       await executor.execute('screen_capture', {}, 'desktop')
 
-      // 没有映射项时，原工具名直接透传
-      expect(invokeTool).toHaveBeenCalledWith('screen_capture', {})
+      expect(invoke).toHaveBeenCalledWith('screenCapture', {}, expect.any(Object))
     })
 
     it('clipboard_read 等其他平台工具应当直接透传', async () => {
       const { registry } = createRegistry()
-      const invokeTool = vi.fn().mockResolvedValue({
-        output: JSON.stringify({ text: '剪贴板内容' }),
-        isError: false,
-        durationMs: 5,
-      })
+      const invoke = vi.fn().mockResolvedValue({ text: '剪贴板内容' })
       const executor = new RegistryToolExecutor(registry)
-      executor.setCapabilityBridge({ invokeTool })
+      executor.setDesktopCapabilities({ invoke })
 
       await executor.execute('clipboard_read', {}, 'desktop')
 
-      expect(invokeTool).toHaveBeenCalledWith('clipboard_read', {})
+      expect(invoke).toHaveBeenCalledWith('clipboardRead', {}, expect.any(Object))
     })
 
     it('CapabilityBridge 未注入时应当返回友好错误', async () => {
@@ -476,11 +756,11 @@ describe('RegistryToolExecutor', () => {
       expect(result.shouldTerminate).toBe(false)
     })
 
-    it('CapabilityBridge 抛错时应当返回错误信息', async () => {
+    it('Desktop Capability Port抛错时应返回错误信息', async () => {
       const { registry } = createRegistry()
-      const invokeTool = vi.fn().mockRejectedValue(new Error('节点无响应'))
+      const invoke = vi.fn().mockRejectedValue(new Error('节点无响应'))
       const executor = new RegistryToolExecutor(registry)
-      executor.setCapabilityBridge({ invokeTool })
+      executor.setDesktopCapabilities({ invoke })
 
       const result = await executor.execute('take_screenshot', {}, 'desktop')
 

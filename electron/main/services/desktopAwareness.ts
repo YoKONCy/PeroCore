@@ -12,19 +12,28 @@
  * @module electron/main/services/desktopAwareness
  */
 
-import { desktopCapturer, clipboard, nativeImage } from 'electron'
+import { desktopCapturer, clipboard, nativeImage, screen } from 'electron'
 import { exec } from 'node:child_process'
 import { logger } from '../utils/logger'
+import type { DesktopRect } from './desktopCoordinates'
 
 // ── 屏幕截图 ──
 
 export interface ScreenshotResult {
   /** Base64 编码的 PNG 数据 */
   dataUrl: string
-  /** 原始宽度 */
+  /** 实际截图宽度 */
   width: number
-  /** 原始高度 */
+  /** 实际截图高度 */
   height: number
+  /** Electron 显示器 ID */
+  displayId: string
+  /** 显示器在桌面 DIP 坐标系中的边界 */
+  bounds: DesktopRect
+  /** 显示器可用工作区 */
+  workArea: DesktopRect
+  /** 显示器 DPI 缩放因子 */
+  scaleFactor: number
   /** 截图时间戳 */
   timestamp: number
 }
@@ -36,9 +45,18 @@ export interface ScreenshotResult {
  */
 export async function captureScreen(maxWidth = 1280): Promise<ScreenshotResult | null> {
   try {
+    if (!Number.isFinite(maxWidth) || maxWidth <= 0) {
+      throw new Error('SCREEN_CAPTURE_SIZE_INVALID: maxWidth必须大于0')
+    }
+    const display = screen.getPrimaryDisplay()
+    const targetWidth = Math.max(1, Math.min(Math.round(maxWidth), display.bounds.width))
+    const targetHeight = Math.max(
+      1,
+      Math.round((targetWidth * display.bounds.height) / display.bounds.width),
+    )
     const sources = await desktopCapturer.getSources({
       types: ['screen'],
-      thumbnailSize: { width: maxWidth, height: Math.round(maxWidth * 0.5625) },
+      thumbnailSize: { width: targetWidth, height: targetHeight },
     })
 
     if (sources.length === 0) {
@@ -46,18 +64,26 @@ export async function captureScreen(maxWidth = 1280): Promise<ScreenshotResult |
       return null
     }
 
-    const primary = sources[0]
+    const primary =
+      sources.find((source) => String(source.display_id) === String(display.id)) ?? sources[0]
     if (!primary) {
-      logger.warn('DesktopAwareness', '未找到可截取的屏幕')
+      logger.warn('DesktopAwareness', '未找到主显示器截图源')
       return null
     }
     const thumbnail = primary.thumbnail
     const size = thumbnail.getSize()
+    if (size.width <= 0 || size.height <= 0 || thumbnail.isEmpty()) {
+      throw new Error('SCREEN_CAPTURE_EMPTY: 截图结果为空')
+    }
 
     return {
       dataUrl: thumbnail.toDataURL(),
       width: size.width,
       height: size.height,
+      displayId: String(display.id),
+      bounds: { ...display.bounds },
+      workArea: { ...display.workArea },
+      scaleFactor: display.scaleFactor,
       timestamp: Date.now(),
     }
   } catch (err) {

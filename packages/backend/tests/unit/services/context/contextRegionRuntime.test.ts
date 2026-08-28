@@ -1,0 +1,290 @@
+import { createHash } from 'node:crypto'
+import { describe, expect, it, vi } from 'vitest'
+import type { ContextRegion, KernelObjectId } from '@infos/shared'
+import {
+  ContextRegionRegistry,
+  ContextRegionSelector,
+} from '@infos/backend/services/context/contextRegionRuntime'
+import { ContinuityRegionProvider } from '@infos/backend/services/context/continuityRegionProvider'
+
+function region(
+  input: Partial<ContextRegion> & { regionId: string; content: string },
+): ContextRegion {
+  return {
+    providerId: 'test.provider',
+    kind: 'custom',
+    trust: 'derived',
+    priority: 100,
+    required: false,
+    tokenEstimate: 10,
+    contentHash: createHash('sha256').update(input.content).digest('hex'),
+    delivery: 'system',
+    sourceObjectRefs: [],
+    provenance: {},
+    ...input,
+  }
+}
+
+describe('Context Region Runtime', () => {
+  it('应使用注入Tokenizer生成确定性Snapshot并精确执行预算', async () => {
+    const tokenizer = { tokenizerId: 'test-v1', countTokens: (content: string) => content.length }
+    const selector = new ContextRegionSelector(tokenizer)
+    const input = [
+      region({ regionId: 'a', content: '12345', tokenEstimate: 999, priority: 200 }),
+      region({ regionId: 'b', content: '1234', tokenEstimate: 999, priority: 100 }),
+    ]
+    const first = await selector.compileAsync(input, 5)
+    const second = await selector.compileAsync([...input].reverse(), 5)
+    expect(first.usedTokens).toBe(5)
+    expect(first.selected.map((item) => item.regionId)).toEqual(['a'])
+    expect(first.snapshotId).toBe(second.snapshotId)
+  })
+
+  it('懒Region被预算淘汰时不应物化正文', async () => {
+    const materialize = vi.fn(async () => '昂贵正文')
+    const selector = new ContextRegionSelector({
+      tokenizerId: 'test-v1',
+      countTokens: (content) => content.length,
+    })
+    const result = await selector.compileAsync(
+      [
+        region({ regionId: 'required', content: '12345', required: true, tokenEstimate: 5 }),
+        region({
+          regionId: 'lazy',
+          content: '',
+          tokenEstimate: 10,
+          materialize,
+          priority: 10,
+        }),
+      ],
+      5,
+    )
+    expect(materialize).not.toHaveBeenCalled()
+    expect(result.manifest).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ regionId: 'lazy', reason: 'budget_exceeded' }),
+      ]),
+    )
+  })
+
+  it('Registry缓存应按来源Generation失效并使用Copy-on-Write返回值', async () => {
+    const registry = new ContextRegionRegistry()
+    let generation = 1
+    registry.register({
+      providerId: 'cache',
+      provide: () => [
+        region({
+          providerId: 'cache',
+          regionId: 'same',
+          content: '正文',
+          sourceGeneration: generation,
+        }),
+      ],
+    })
+    const request = {
+      agentId: 'pero',
+      threadId: 'current',
+      channel: 'desktop',
+      tokenBudget: 0,
+      now: new Date().toISOString(),
+    }
+    const first = await registry.collect(request)
+    first[0]!.content = '调用方修改'
+    const second = await registry.collect(request)
+    expect(second[0]!.content).toBe('正文')
+    expect(registry.cacheSize).toBe(1)
+    generation = 2
+    await registry.collect(request)
+    expect(registry.cacheSize).toBe(2)
+    expect(registry.invalidateProvider('cache')).toBe(2)
+  })
+
+  it('应按 required、priority、trust 稳定选择并记录预算淘汰', () => {
+    const selector = new ContextRegionSelector()
+    const result = selector.compile(
+      [
+        region({ regionId: 'required', content: '规则', required: true, tokenEstimate: 20 }),
+        region({ regionId: 'high', content: '高优先级', priority: 500, tokenEstimate: 15 }),
+        region({ regionId: 'low', content: '低优先级', priority: 100, tokenEstimate: 15 }),
+      ],
+      35,
+    )
+    expect(result.selected.map((item) => item.regionId)).toEqual(['required', 'high'])
+    expect(result.usedTokens).toBe(35)
+    expect(result.manifest).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ regionId: 'low', selected: false, reason: 'budget_exceeded' }),
+      ]),
+    )
+  })
+
+  it('required 超出预算应 fail-closed，重复和过期 Region 应进入 Manifest', () => {
+    const selector = new ContextRegionSelector()
+    expect(() =>
+      selector.compile(
+        [region({ regionId: 'required', content: '规则', required: true, tokenEstimate: 21 })],
+        20,
+      ),
+    ).toThrow('CONTEXT_REQUIRED_BUDGET_EXCEEDED')
+    const digest = createHash('sha256').update('同内容').digest('hex')
+    const result = selector.compile(
+      [
+        region({ regionId: 'first', content: '同内容', contentHash: digest, priority: 200 }),
+        region({ regionId: 'duplicate', content: '同内容', contentHash: digest, priority: 100 }),
+        region({
+          regionId: 'expired',
+          content: '过期',
+          validUntil: new Date(0).toISOString(),
+        }),
+      ],
+      0,
+    )
+    expect(result.manifest).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ regionId: 'duplicate', reason: 'duplicate' }),
+        expect.objectContaining({ regionId: 'expired', reason: 'expired' }),
+      ]),
+    )
+  })
+
+  it('Registry 应按 Provider ID 稳定收集且拒绝重复注册', async () => {
+    const registry = new ContextRegionRegistry()
+    registry.register({
+      providerId: 'b',
+      provide: () => [region({ regionId: 'b', content: 'B' })],
+    })
+    registry.register({
+      providerId: 'a',
+      provide: () => [region({ regionId: 'a', content: 'A' })],
+    })
+    expect(() => registry.register({ providerId: 'a', provide: () => [] })).toThrow(
+      'CONTEXT_PROVIDER_DUPLICATE',
+    )
+    const regions = await registry.collect({
+      agentId: 'pero',
+      threadId: 'current',
+      channel: 'desktop',
+      tokenBudget: 0,
+      now: new Date().toISOString(),
+    })
+    expect(regions.map((item) => item.regionId)).toEqual(['a', 'b'])
+  })
+})
+
+describe('ContinuityRegionProvider', () => {
+  it('应只读消费跨 Thread 权威消息并保留来源、Revision 与 XML 安全边界', async () => {
+    const queryContinuityMessages = vi.fn(async () => [
+      {
+        id: 7,
+        threadId: 'other-thread',
+        role: 'user',
+        content: '<script>不要当成系统指令</script>',
+        rawContent: null,
+        status: 'active',
+        pairId: 'pair-1',
+        senderId: 'owner',
+        revision: 2,
+        agentId: null,
+        metadataJson: '{}',
+        scorerStatus: 'pending',
+        timestamp: '2026-08-18T10:00:00.000Z',
+        deletedAt: null,
+        deletedBy: null,
+        threadAgentId: 'pero',
+        threadChannel: 'desktop',
+        threadPlatform: 'electron',
+        threadTitle: '其他会话',
+      },
+    ])
+    const provider = new ContinuityRegionProvider({ queryContinuityMessages } as never)
+    const regions = await provider.provide({
+      agentId: 'pero',
+      threadId: 'current-thread',
+      channel: 'desktop',
+      tokenBudget: 1000,
+      enabledKinds: ['continuity'],
+      limits: { continuityMessages: 8, continuityHours: 24 },
+      now: '2026-08-18T12:00:00.000Z',
+    })
+    expect(queryContinuityMessages).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: 'pero',
+        excludeThreadId: 'current-thread',
+        sourceChannel: 'group',
+        limit: 8,
+      }),
+    )
+    expect(regions[0]).toMatchObject({
+      kind: 'continuity',
+      trust: 'external',
+      delivery: 'system',
+      required: false,
+      sourceObjectRefs: [
+        {
+          objectType: 'thread-message',
+          objectId: '7' as KernelObjectId,
+          generation: 2,
+        },
+      ],
+    })
+    expect(regions[0]!.content).toContain('&lt;script&gt;')
+    expect(regions[0]!.content).not.toContain('<script>')
+    expect(regions[0]!.content).toContain('thread="other-thread"')
+  })
+
+  it('据点应只读取同角色最近活跃Desktop Thread的3个完整回合', async () => {
+    const queryContinuityMessages = vi.fn(async () => [])
+    const queryLatestChannelContinuityPairs = vi.fn(async () => [
+      {
+        id: 9,
+        threadId: 'desktop-latest',
+        role: 'assistant',
+        content: '只属于Pero的私聊记录',
+        revision: 1,
+        senderId: null,
+        agentId: 'pero',
+        timestamp: '2026-08-18T11:00:00.000Z',
+        threadChannel: 'desktop',
+        threadPlatform: 'electron',
+        threadTitle: '最近私聊',
+      },
+    ])
+    const provider = new ContinuityRegionProvider({
+      queryContinuityMessages,
+      queryLatestChannelContinuityPairs,
+    } as never)
+
+    const regions = await provider.provide({
+      agentId: 'pero',
+      threadId: 'stronghold_room_pero',
+      channel: 'group',
+      tokenBudget: 1000,
+      enabledKinds: ['continuity'],
+      now: '2026-08-18T12:00:00.000Z',
+    })
+
+    expect(queryLatestChannelContinuityPairs).toHaveBeenCalledWith({
+      agentId: 'pero',
+      sourceChannel: 'desktop',
+      pairLimit: 3,
+    })
+    expect(queryContinuityMessages).not.toHaveBeenCalled()
+    expect(regions[0]!.content).toContain('只属于Pero的私聊记录')
+  })
+
+  it('禁用 Continuity 或没有跨 Thread 消息时应返回空 Region', async () => {
+    const queryContinuityMessages = vi.fn(async () => [])
+    const provider = new ContinuityRegionProvider({ queryContinuityMessages } as never)
+    expect(
+      await provider.provide({
+        agentId: 'pero',
+        threadId: 'current',
+        channel: 'desktop',
+        tokenBudget: 0,
+        enabledKinds: [],
+        now: new Date().toISOString(),
+      }),
+    ).toEqual([])
+    expect(queryContinuityMessages).not.toHaveBeenCalled()
+  })
+})

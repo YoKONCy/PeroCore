@@ -4,12 +4,14 @@
  *
  * 卡片负责决策内容；对话流、工作区、任务详情只负责选择展示容器。
  */
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed } from 'vue'
 import { PixelIcon, PButton } from '../pixel'
+import AgentRequestIdentity from '../agent/AgentRequestIdentity.vue'
 import type {
   ApprovalDecision,
   ApprovalRequest,
   ApprovalAuditRecord,
+  ApprovalRiskLevel,
 } from '../../api/modules/approvalsApi'
 import { approvalsApi } from '../../api/modules/approvalsApi'
 
@@ -33,15 +35,17 @@ const message = ref('')
 const expanded = ref(false)
 const auditLoading = ref(false)
 const auditRecords = ref<ApprovalAuditRecord[]>([])
-const now = ref(Date.now())
-let countdownTimer: ReturnType<typeof setInterval> | null = null
-const secondsLeft = computed(() =>
-  Math.max(0, Math.ceil((Date.parse(props.request.expiresAt) - now.value) / 1000)),
-)
 const command = computed(() => {
-  const value = props.request.argsSummary.command
+  const value = props.request.argsSummary.command ?? props.request.argsSummary.data
   return typeof value === 'string' ? value : null
 })
+const riskMeta: Record<ApprovalRiskLevel, { label: string; hint: string }> = {
+  low: { label: '轻度提醒', hint: '请核对参数后决定是否继续。' },
+  medium: { label: '需要留意', hint: '此操作会改变应用或系统状态。' },
+  high: { label: '高风险', hint: '此操作可能造成明显副作用，请仔细确认。' },
+  critical: { label: '严重风险', hint: '此操作可能造成不可逆影响，请逐项核对。' },
+}
+const risk = computed(() => riskMeta[props.request.riskLevel])
 
 function submit(decision: ApprovalDecision): void {
   const note = message.value.trim()
@@ -63,29 +67,36 @@ async function toggleDetails(): Promise<void> {
 function formatAuditTime(value: string): string {
   return new Date(value).toLocaleString('zh-CN', { hour12: false })
 }
-
-onMounted(() => {
-  countdownTimer = setInterval(() => {
-    now.value = Date.now()
-  }, 1_000)
-})
-onUnmounted(() => {
-  if (countdownTimer) clearInterval(countdownTimer)
-})
 </script>
 
 <template>
-  <article class="approval-card" :class="{ 'approval-card--compact': compact }">
+  <article
+    class="approval-card"
+    :class="[`approval-card--${request.riskLevel}`, { 'approval-card--compact': compact }]"
+  >
     <header class="approval-card__header">
-      <span class="approval-card__icon"><PixelIcon name="shield" size="xs" /></span>
-      <strong>等待许可</strong>
-      <span class="approval-card__tool">{{ request.toolName }}</span>
-      <span class="approval-card__timer">{{ secondsLeft }}s</span>
+      <AgentRequestIdentity
+        :agent-id="request.agentId"
+        subtitle="确认前不会执行这项操作"
+        tone="approval"
+      >
+        <template #title>请求执行一项操作</template>
+      </AgentRequestIdentity>
+      <span class="approval-card__risk">
+        <i />
+        {{ risk.label }}
+      </span>
+      <span class="approval-card__timer">等待操作</span>
     </header>
 
     <div class="approval-card__body">
       <p class="approval-card__reason">{{ request.reason }}</p>
+      <p class="approval-card__hint">{{ risk.hint }}</p>
       <pre v-if="command" class="approval-card__command">{{ command }}</pre>
+      <div class="approval-card__tool-row">
+        <span>TOOL</span>
+        <code>{{ request.toolName }}</code>
+      </div>
 
       <button class="approval-card__details-toggle" type="button" @click="toggleDetails">
         <PixelIcon :name="expanded ? 'chevron-up' : 'chevron-down'" size="xs" />
@@ -104,21 +115,32 @@ onUnmounted(() => {
         </div>
       </template>
 
-      <input
+      <textarea
         v-model="message"
         maxlength="2000"
+        rows="2"
         class="approval-card__message"
-        placeholder="附言（可选）：告诉 Agent 同意或拒绝的理由"
+        placeholder="可以补充要求，例如“只执行这一步，不要改动其他内容”"
       />
     </div>
 
     <footer class="approval-card__actions">
-      <PButton size="sm" :disabled="loading" @click="submit('allow_once')">允许一次</PButton>
-      <PButton size="sm" variant="secondary" :disabled="loading" @click="submit('allow_session')">
+      <PButton size="sm" :disabled="loading" @click="submit('allow_once')">允许本次</PButton>
+      <PButton
+        v-if="
+          !['terminal_execute', 'terminal_create', 'terminal_write', 'delete_file'].includes(
+            request.toolName,
+          )
+        "
+        size="sm"
+        variant="secondary"
+        :disabled="loading"
+        @click="submit('allow_session')"
+      >
         本轮对话允许
       </PButton>
       <PButton size="sm" variant="danger" :disabled="loading" @click="submit('deny_once')">
-        拒绝一次
+        拒绝
       </PButton>
     </footer>
   </article>
@@ -126,33 +148,67 @@ onUnmounted(() => {
 
 <style scoped>
 .approval-card {
+  --approval-tone: var(--ui-accent-primary, #db2777);
+  --approval-soft: color-mix(in srgb, var(--approval-tone) 9%, var(--ui-bg-elevated, #fff));
   box-sizing: border-box;
-  width: min(100%, 480px);
+  width: min(100%, 500px);
   margin: 4px 0 4px auto;
   overflow: hidden;
-  border: 1px solid
-    color-mix(in srgb, var(--ui-accent-primary, #db2777) 48%, var(--ui-border-subtle));
-  border-left: 3px solid var(--ui-accent-primary, #db2777);
-  border-radius: 2px;
+  border: 1px solid color-mix(in srgb, var(--approval-tone) 52%, var(--ui-border-subtle));
+  border-left: 3px solid var(--approval-tone);
+  border-radius: 3px;
   background: var(--ui-bg-elevated, #fff);
   color: var(--ui-text-primary, #1e293b);
-  box-shadow: 4px 4px 0 color-mix(in srgb, var(--ui-text-primary, #0f172a) 14%, transparent);
+  box-shadow:
+    3px 3px 0 color-mix(in srgb, var(--approval-tone) 18%, transparent),
+    6px 6px 0 color-mix(in srgb, var(--ui-text-primary, #0f172a) 7%, transparent);
+  transition:
+    transform 0.12s steps(2, end),
+    box-shadow 0.12s steps(2, end);
+}
+
+.approval-card--low {
+  --approval-tone: var(--ui-accent-sky, #0ea5e9);
+}
+
+.approval-card--medium {
+  --approval-tone: #d97706;
+}
+
+.approval-card--high {
+  --approval-tone: #ea580c;
+}
+
+.approval-card--critical {
+  --approval-tone: #dc2626;
 }
 
 .approval-card__header {
   display: flex;
-  min-height: 34px;
+  min-height: 42px;
   align-items: center;
-  gap: 7px;
-  padding: 5px 9px;
-  border-bottom: 1px solid var(--ui-border-subtle, #e2e8f0);
-  background: color-mix(in srgb, var(--ui-accent-primary, #db2777) 7%, var(--ui-bg-elevated, #fff));
+  gap: 8px;
+  padding: 6px 9px;
+  border-bottom: 1px solid color-mix(in srgb, var(--approval-tone) 24%, var(--ui-border-subtle));
+  background: var(--approval-soft);
   font-size: 11px;
 }
 
-.approval-card__header strong {
-  flex-shrink: 0;
+.approval-card__heading {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.approval-card__heading strong {
   font-size: 12px;
+  line-height: 1.2;
+}
+
+.approval-card__heading span {
+  color: var(--ui-text-tertiary, #64748b);
+  font-size: 9px;
+  line-height: 1.2;
 }
 
 .approval-card__icon {
@@ -162,11 +218,64 @@ onUnmounted(() => {
   flex-shrink: 0;
   place-items: center;
   border-radius: 1px;
-  background: color-mix(in srgb, var(--ui-accent-primary, #db2777) 14%, transparent);
-  color: var(--ui-accent-primary, #db2777);
+  background: color-mix(in srgb, var(--approval-tone) 15%, transparent);
+  color: var(--approval-tone);
 }
 
-.approval-card__tool {
+.approval-card__risk {
+  display: inline-flex;
+  margin-left: auto;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 6px;
+  border: 1px solid color-mix(in srgb, var(--approval-tone) 50%, transparent);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--approval-tone) 10%, transparent);
+  color: var(--approval-tone);
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.approval-card__risk i {
+  width: 5px;
+  height: 5px;
+  background: currentColor;
+  box-shadow: 1px 1px 0 color-mix(in srgb, currentColor 35%, transparent);
+  animation: approval-blink 1.4s steps(2, end) infinite;
+}
+
+.approval-card__timer {
+  flex-shrink: 0;
+  min-width: 30px;
+  color: var(--ui-text-tertiary, #94a3b8);
+  font: 10px/1 monospace;
+  text-align: right;
+}
+
+.approval-card__body {
+  padding: 9px 10px 6px;
+}
+
+.approval-card__tool-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 7px;
+}
+
+.approval-card__tool-row span {
+  padding: 2px 4px;
+  background: var(--approval-tone);
+  color: #fff;
+  font:
+    700 8px/1 'Cascadia Code',
+    monospace;
+  letter-spacing: 0.06em;
+}
+
+.approval-card__tool-row code {
   min-width: 0;
   overflow: hidden;
   color: var(--ui-text-secondary, #64748b);
@@ -177,22 +286,19 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
-.approval-card__timer {
-  margin-left: auto;
-  flex-shrink: 0;
-  color: var(--ui-text-tertiary, #94a3b8);
-  font: 10px/1 monospace;
-}
-
-.approval-card__body {
-  padding: 8px 10px 6px;
-}
-
 .approval-card__reason {
-  margin: 0 0 6px;
-  color: var(--ui-text-secondary, #475569);
+  margin: 0 0 3px;
+  color: var(--ui-text-primary, #334155);
   font-size: 11px;
+  font-weight: 600;
   line-height: 1.45;
+}
+
+.approval-card__hint {
+  margin: 0 0 7px;
+  color: var(--ui-text-tertiary, #64748b);
+  font-size: 10px;
+  line-height: 1.4;
 }
 
 .approval-card__command,
@@ -214,7 +320,8 @@ onUnmounted(() => {
 }
 
 .approval-card__command {
-  border-left: 2px solid var(--ui-accent-sky, #0ea5e9);
+  border-left: 3px solid var(--approval-tone);
+  background: color-mix(in srgb, var(--approval-tone) 4%, var(--ui-bg-primary, #f8fafc));
 }
 
 .approval-card__details-toggle {
@@ -232,9 +339,11 @@ onUnmounted(() => {
 .approval-card__message {
   box-sizing: border-box;
   width: 100%;
-  height: 30px;
-  margin-top: 6px;
-  padding: 5px 8px;
+  height: auto;
+  min-height: 46px;
+  margin-top: 8px;
+  padding: 7px 9px;
+  resize: vertical;
   border: 1px solid var(--ui-border-subtle, #cbd5e1);
   border-radius: 5px;
   outline: none;
@@ -285,22 +394,44 @@ onUnmounted(() => {
 }
 
 [data-theme='dark'] .approval-card {
-  border-color: color-mix(in srgb, var(--ui-accent-primary, #f472b6) 42%, var(--ui-border-subtle));
+  --approval-soft: color-mix(in srgb, var(--approval-tone) 13%, var(--ui-bg-elevated, #1e1b2e));
+  border-color: color-mix(in srgb, var(--approval-tone) 55%, var(--ui-border-subtle));
+  border-left-color: var(--approval-tone);
   background: var(--ui-bg-elevated, #1e1b2e);
-  box-shadow: 5px 5px 0 rgba(0, 0, 0, 0.32);
+  box-shadow:
+    3px 3px 0 color-mix(in srgb, var(--approval-tone) 22%, transparent),
+    6px 6px 0 rgba(0, 0, 0, 0.32);
 }
 
 [data-theme='dark'] .approval-card__header {
-  background: color-mix(
-    in srgb,
-    var(--ui-accent-primary, #f472b6) 10%,
-    var(--ui-bg-elevated, #1e1b2e)
-  );
+  background: var(--approval-soft);
+}
+
+[data-theme='dark'] .approval-card__reason {
+  color: var(--ui-text-primary, #f1f5f9);
 }
 
 [data-theme='dark'] .approval-card__command,
 [data-theme='dark'] .approval-card__details,
 [data-theme='dark'] .approval-card__message {
   background: color-mix(in srgb, var(--ui-bg-primary, #11121c) 88%, #000 12%);
+}
+
+[data-theme='dark'] .approval-card__command {
+  background: color-mix(in srgb, var(--approval-tone) 7%, var(--ui-bg-primary, #11121c));
+}
+
+@keyframes approval-blink {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .approval-card,
+  .approval-card__risk i {
+    animation: none;
+    transition: none;
+  }
 }
 </style>

@@ -56,6 +56,7 @@ function requireService(): StrongholdService | string {
 
 export const strongholdMoveToRoomTool: BuiltinTool = {
   name: 'stronghold_move_to_room',
+  allowedSources: ['group'],
 
   async execute(args, ctx) {
     const service = requireService()
@@ -107,6 +108,7 @@ export const strongholdMoveToRoomTool: BuiltinTool = {
 
 export const strongholdListRoomsTool: BuiltinTool = {
   name: 'stronghold_list_rooms',
+  allowedSources: ['group'],
 
   async execute(_args, ctx) {
     const service = requireService()
@@ -115,12 +117,13 @@ export const strongholdListRoomsTool: BuiltinTool = {
     try {
       const rooms = await service.listRooms()
       const agentId = ctx.agentId
+      const accessibleRooms = rooms.filter((room) => service.canAgentEnterRoom(room, agentId))
 
       // 获取当前位置
       const currentRoom = await service.getAgentLocation(agentId)
 
       const roomList = await Promise.all(
-        rooms.map(async (r) => {
+        accessibleRooms.map(async (r) => {
           const agents = await service.getRoomAgents(r.id)
           return {
             name: r.name,
@@ -150,6 +153,7 @@ export const strongholdListRoomsTool: BuiltinTool = {
 
 export const strongholdGetRoomInfoTool: BuiltinTool = {
   name: 'stronghold_get_room_info',
+  allowedSources: ['group'],
 
   async execute(args, ctx) {
     const service = requireService()
@@ -196,6 +200,7 @@ export const strongholdGetRoomInfoTool: BuiltinTool = {
 
 export const strongholdSetEnvironmentTool: BuiltinTool = {
   name: 'stronghold_set_environment',
+  allowedSources: ['group'],
 
   async execute(args, ctx) {
     const service = requireService()
@@ -232,8 +237,48 @@ export const strongholdSetEnvironmentTool: BuiltinTool = {
 // stronghold_call_butler — 呼叫管家
 // ─────────────────────────────────────────────
 
+export const strongholdSummonAgentsTool: BuiltinTool = {
+  name: 'stronghold_summon_agents',
+  allowedSources: ['group'],
+
+  async execute(args, ctx) {
+    const service = requireService()
+    if (typeof service === 'string') return service
+    if (ctx.channel !== 'group') return JSON.stringify({ error: '该工具仅能在据点群聊中使用。' })
+
+    const requested = Array.isArray(args.agent_ids) ? args.agent_ids : []
+    const room = await service.getAgentLocation(ctx.agentId)
+    if (!room) return JSON.stringify({ error: '调用角色当前不在任何据点房间中。' })
+    const present = new Set(await service.getRoomAgents(room.id))
+    const accepted = [
+      ...new Set(
+        requested.filter(
+          (id): id is string => typeof id === 'string' && id !== ctx.agentId && present.has(id),
+        ),
+      ),
+    ].slice(0, 5)
+    const rejected = requested.filter(
+      (id) => typeof id !== 'string' || id === ctx.agentId || !present.has(id),
+    )
+    if (accepted.length === 0) {
+      return JSON.stringify({
+        error: '没有可传唤的有效角色。只能传唤当前房间内的其他角色。',
+        present_agents: [...present],
+        rejected,
+      })
+    }
+    return JSON.stringify({
+      success: true,
+      queued_agent_ids: accepted,
+      rejected,
+      message: `已请求${accepted.join('、')}在当前角色发言后依次接话。`,
+    })
+  },
+}
+
 export const strongholdCallButlerTool: BuiltinTool = {
   name: 'stronghold_call_butler',
+  allowedSources: ['group'],
 
   async execute(args, ctx) {
     const service = requireService()

@@ -2,12 +2,14 @@
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
 import type { GroupMessage, Room } from '@infos/frontend/api/modules/strongholdApi'
 
 const apiMocks = vi.hoisted(() => ({
   listFacilities: vi.fn(),
   listRooms: vi.fn(),
   getMessages: vi.fn(),
+  getProjection: vi.fn(),
   sendMessage: vi.fn(),
   deleteMessage: vi.fn(),
   callButler: vi.fn(),
@@ -63,6 +65,7 @@ function deferred<T>() {
 
 describe('据点聊天数据链路', () => {
   beforeEach(() => {
+    setActivePinia(createPinia())
     vi.clearAllMocks()
     apiMocks.sendMessage.mockResolvedValue({
       data: {
@@ -79,6 +82,29 @@ describe('据点聊天数据链路', () => {
     })
     apiMocks.callButler.mockResolvedValue({ data: undefined })
     apiMocks.listRooms.mockResolvedValue({ data: [] })
+    apiMocks.getProjection.mockImplementation(async (roomId: string) => {
+      const response = await apiMocks.getMessages(roomId)
+      const items = response.data as GroupMessage[]
+      return {
+        data: {
+          roomId,
+          roomName: roomId,
+          members: [],
+          messages: items.map((item) => ({
+            messageId: String(item.id),
+            roomId: item.roomId,
+            senderId: item.senderId,
+            role: item.role,
+            content: item.content,
+            timestamp: item.timestamp,
+            surfaceId: `stronghold-message:${item.id}`,
+          })),
+          surfaces: [],
+          revision: items.length,
+          generatedAt: new Date().toISOString(),
+        },
+      }
+    })
     agentApiMocks.list.mockResolvedValue({ data: [] })
   })
 
@@ -123,6 +149,18 @@ describe('据点聊天数据链路', () => {
     expect(apiMocks.callButler).toHaveBeenCalledWith(target.id, '检查环境')
   })
 
+  it('空房间应在前端阻止消息请求', async () => {
+    apiMocks.getMessages.mockResolvedValue({ data: [] })
+    const stronghold = useStronghold()
+    const emptyRoom = { ...room('44444444-4444-4444-8444-444444444444', '空房间'), agents: [] }
+    await stronghold.selectRoom(emptyRoom)
+
+    const sent = await stronghold.sendMessage('有人吗')
+
+    expect(sent).toBe(false)
+    expect(apiMocks.sendMessage).not.toHaveBeenCalled()
+  })
+
   it('发送消息时应把 @ 提及透传给后端', async () => {
     apiMocks.getMessages.mockResolvedValue({ data: [] })
     const stronghold = useStronghold()
@@ -150,8 +188,9 @@ describe('据点聊天数据链路', () => {
           content: '@全体成员 集合！',
         },
         replyQueued: true,
-        agentId: '@all',
-        allAgentIds: ['pero', 'nana'],
+        roundId: 'round-all',
+        agentId: 'pero',
+        agentIds: ['pero', 'nana'],
         reason: '全体成员已召唤，随机顺序依次回复',
       },
     })
@@ -168,7 +207,11 @@ describe('据点聊天数据链路', () => {
     })
     // 进入等待态（等待 2 位成员回复），并显示全体成员的等待文案
     expect(stronghold.isAwaitingReply.value).toBe(true)
-    expect(stronghold.replyStatus.value).toContain('所有成员')
+    expect(stronghold.replyStatus.value).toContain('2 位角色')
+    expect(stronghold.activeRound.value?.agents.map((agent) => agent.agentId)).toEqual([
+      'pero',
+      'nana',
+    ])
 
     // 切换房间会取消等待轮询，避免 1 秒拉取循环跨测试残留
     await stronghold.selectRoom(room('55555555-5555-4555-8555-555555555555', '撤离'))
@@ -180,14 +223,27 @@ describe('据点聊天数据链路', () => {
     const files = await Promise.all([
       readFile(resolve(root, 'components/main/tabs/StrongholdTab.vue'), 'utf8'),
       readFile(resolve(root, 'components/stronghold/StrongholdChat.vue'), 'utf8'),
+      readFile(resolve(root, 'components/chat/MessageBubble.vue'), 'utf8'),
+      readFile(resolve(root, 'components/chat/InputBar.vue'), 'utf8'),
       readFile(resolve(root, 'composables/useStronghold.ts'), 'utf8'),
     ])
     const source = files.join('\n')
     const adapter = files[1]!
+    const bubble = files[2]!
+    const inputBar = files[3]!
 
+    expect(inputBar).toContain('if (isGroupChannel.value)')
+    expect(inputBar).not.toContain('<span>会话工具</span>')
+    expect(bubble).toContain("systemVariant?: 'default' | 'narration'")
+    expect(bubble).toContain('class="msg-narration-card"')
+    expect(bubble).toContain('font-style: italic')
+    expect(bubble).toContain('@media (prefers-reduced-motion: reduce)')
+    expect(adapter).toContain(':system-variant="message.systemVariant"')
+    expect(adapter).toContain("systemVariant: butler ? 'narration' : 'default'")
+    expect(adapter).toContain("butler ? '管家旁白' : '系统'")
     expect(source).not.toContain('ChatContainer')
     expect(source).not.toContain('useChat')
-    expect(source).not.toContain('useThreadStore')
+    expect(adapter).not.toContain('useThreadStore')
     expect(adapter).toContain("import MessageBubble from '../chat/MessageBubble.vue'")
     expect(adapter).toContain(
       "import InputBar, { type MentionCandidate } from '../chat/InputBar.vue'",
@@ -196,13 +252,17 @@ describe('据点聊天数据链路', () => {
   })
 
   it('删除消息成功后应从本地列表移除整个级联对话', async () => {
-    apiMocks.getMessages.mockResolvedValue({
-      data: [
-        { ...message(5, '33333333-3333-4333-8333-333333333333', '用户提问'), role: 'user' },
-        message(6, '33333333-3333-4333-8333-333333333333', '角色回复'),
-        message(7, '33333333-3333-4333-8333-333333333333', '其他轮次'),
-      ],
-    })
+    apiMocks.getMessages
+      .mockResolvedValueOnce({
+        data: [
+          { ...message(5, '33333333-3333-4333-8333-333333333333', '用户提问'), role: 'user' },
+          message(6, '33333333-3333-4333-8333-333333333333', '角色回复'),
+          message(7, '33333333-3333-4333-8333-333333333333', '其他轮次'),
+        ],
+      })
+      .mockResolvedValueOnce({
+        data: [message(7, '33333333-3333-4333-8333-333333333333', '其他轮次')],
+      })
     apiMocks.deleteMessage.mockResolvedValue({
       data: { deletedCount: 2, deletedMessageIds: [5, 6] },
     })

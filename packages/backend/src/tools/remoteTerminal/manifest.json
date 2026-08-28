@@ -1,0 +1,207 @@
+{
+  "id": "remote-terminal-session",
+  "name": "remote_terminal_session",
+  "version": "1.0.0",
+  "displayName": "远程节点终端",
+  "description": "在已配对能力节点上创建和管理长时 Shell 会话",
+  "type": "tool",
+  "entry": "index.ts",
+  "category": "terminal",
+  "platforms": ["windows", "linux", "darwin", "docker"],
+  "registration": "static",
+  "permissions": ["node:invoke"],
+  "userCopy": {
+    "remote_terminal_nodes": {
+      "label": "查看远程节点",
+      "description": "查看当前在线且提供 Shell 的能力节点。"
+    },
+    "remote_terminal_create": {
+      "label": "新建远程终端",
+      "description": "在指定能力节点上启动 Bash 或命令行任务。"
+    },
+    "remote_terminal_list": {
+      "label": "查看远程终端",
+      "description": "查看指定节点上的终端会话。"
+    },
+    "remote_terminal_get": {
+      "label": "查看远程终端状态",
+      "description": "查看指定远程终端的运行状态。"
+    },
+    "remote_terminal_read": { "label": "读取远程终端", "description": "增量读取远程终端输出。" },
+    "remote_terminal_wait": { "label": "等待远程终端", "description": "等待远程终端输出或结束。" },
+    "remote_terminal_write": {
+      "label": "写入远程终端",
+      "description": "向远程终端标准输入写入文本。"
+    },
+    "remote_terminal_interrupt": { "label": "中断远程任务", "description": "请求远程进程停止。" },
+    "remote_terminal_kill": { "label": "终止远程任务", "description": "强制终止远程进程。" },
+    "remote_terminal_close": { "label": "关闭远程终端", "description": "关闭并清理远程终端。" }
+  },
+  "tools": [
+    {
+      "name": "remote_terminal_nodes",
+      "description": "列出当前在线、已配对且发布 system.shell 能力的远程节点；调用其他远程终端工具前先用此工具取得 node_id",
+      "display": {
+        "label": "远程 Shell 节点",
+        "icon": "server",
+        "color": "purple",
+        "style": "terminal"
+      },
+      "parameters": { "type": "object", "properties": {} }
+    },
+    {
+      "name": "remote_terminal_create",
+      "description": "在指定的已配对能力节点上创建长时 Shell 会话并返回终端 ID；Linux 节点默认使用 Bash",
+      "display": {
+        "label": "创建远程终端",
+        "icon": "terminal",
+        "color": "purple",
+        "style": "terminal"
+      },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "node_id": { "type": "string", "description": "目标能力节点 ID，必须显式提供" },
+          "command": { "type": "string" },
+          "cwd": { "type": "string", "description": "目标节点上的绝对或 Shell 可解析工作目录" }
+        },
+        "required": ["node_id", "command"]
+      }
+    },
+    {
+      "name": "remote_terminal_list",
+      "description": "列出指定能力节点上的远程终端",
+      "display": {
+        "label": "远程终端列表",
+        "icon": "list",
+        "color": "purple",
+        "style": "terminal"
+      },
+      "parameters": {
+        "type": "object",
+        "properties": { "node_id": { "type": "string" } },
+        "required": ["node_id"]
+      }
+    },
+    {
+      "name": "remote_terminal_get",
+      "description": "获取指定远程终端状态",
+      "display": {
+        "label": "远程终端状态",
+        "icon": "info",
+        "color": "purple",
+        "style": "terminal"
+      },
+      "parameters": {
+        "type": "object",
+        "properties": { "node_id": { "type": "string" }, "terminal_id": { "type": "string" } },
+        "required": ["node_id", "terminal_id"]
+      }
+    },
+    {
+      "name": "remote_terminal_read",
+      "description": "按游标读取指定远程终端输出",
+      "display": {
+        "label": "读取远程输出",
+        "icon": "file",
+        "color": "purple",
+        "style": "terminal"
+      },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "node_id": { "type": "string" },
+          "terminal_id": { "type": "string" },
+          "cursor": { "type": "number" },
+          "limit": { "type": "number" }
+        },
+        "required": ["node_id", "terminal_id"]
+      }
+    },
+    {
+      "name": "remote_terminal_wait",
+      "description": "等待指定远程终端出现输出、文本或退出",
+      "display": {
+        "label": "等待远程输出",
+        "icon": "hourglass",
+        "color": "purple",
+        "style": "terminal"
+      },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "node_id": { "type": "string" },
+          "terminal_id": { "type": "string" },
+          "cursor": { "type": "number" },
+          "pattern": { "type": "string" },
+          "timeout_ms": { "type": "number" }
+        },
+        "required": ["node_id", "terminal_id"]
+      }
+    },
+    {
+      "name": "remote_terminal_write",
+      "description": "向指定远程终端标准输入写入文本",
+      "display": {
+        "label": "写入远程终端",
+        "icon": "pencil",
+        "color": "purple",
+        "style": "terminal"
+      },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "node_id": { "type": "string" },
+          "terminal_id": { "type": "string" },
+          "data": { "type": "string" }
+        },
+        "required": ["node_id", "terminal_id", "data"]
+      }
+    },
+    {
+      "name": "remote_terminal_interrupt",
+      "description": "中断指定远程终端进程",
+      "display": {
+        "label": "中断远程进程",
+        "icon": "close",
+        "color": "orange",
+        "style": "terminal"
+      },
+      "parameters": {
+        "type": "object",
+        "properties": { "node_id": { "type": "string" }, "terminal_id": { "type": "string" } },
+        "required": ["node_id", "terminal_id"]
+      }
+    },
+    {
+      "name": "remote_terminal_kill",
+      "description": "强制终止指定远程终端进程",
+      "display": {
+        "label": "终止远程进程",
+        "icon": "power",
+        "color": "orange",
+        "style": "terminal"
+      },
+      "parameters": {
+        "type": "object",
+        "properties": { "node_id": { "type": "string" }, "terminal_id": { "type": "string" } },
+        "required": ["node_id", "terminal_id"]
+      }
+    },
+    {
+      "name": "remote_terminal_close",
+      "description": "关闭并清理指定远程终端",
+      "display": {
+        "label": "关闭远程终端",
+        "icon": "door-closed",
+        "color": "purple",
+        "style": "terminal"
+      },
+      "parameters": {
+        "type": "object",
+        "properties": { "node_id": { "type": "string" }, "terminal_id": { "type": "string" } },
+        "required": ["node_id", "terminal_id"]
+      }
+    }
+  ]
+}

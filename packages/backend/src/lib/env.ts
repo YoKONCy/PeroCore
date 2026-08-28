@@ -57,15 +57,28 @@ export function getPortableRoot(): string | undefined {
 // 路径工厂
 // ─────────────────────────────────────────────
 
+function normalizePhysicalDirectory(value: string, variableName: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) throw new Error(`${variableName} 不能为空`)
+  if (/^@(app|data|temp|workshop|principal)(?:[\\/]|$)/i.test(trimmed)) {
+    throw new Error(`${variableName} 必须是物理路径，不能使用逻辑路径别名: ${trimmed}`)
+  }
+  return path.resolve(trimmed)
+}
+
 /**
  * 应用数据根目录。
  * 优先级：PERO_DATA_DIR > 便携版根目录/data > ~/.infos。
  */
 export function getDataDir(): string {
-  if (process.env.PERO_DATA_DIR) return process.env.PERO_DATA_DIR
+  if (process.env.PERO_DATA_DIR) {
+    return normalizePhysicalDirectory(process.env.PERO_DATA_DIR, 'PERO_DATA_DIR')
+  }
 
   const portableRoot = getPortableRoot()
-  return portableRoot ? path.join(portableRoot, 'data') : path.join(os.homedir(), '.infos')
+  return path.resolve(
+    portableRoot ? path.join(portableRoot, 'data') : path.join(os.homedir(), '.infos'),
+  )
 }
 
 /** 数据库文件路径 */
@@ -78,9 +91,11 @@ export function getTriviumDir(): string {
   return path.join(getDataDir(), 'trivium')
 }
 
-/** 扩展目录 */
-export function getExtensionsDir(): string {
-  return process.env.PERO_EXTENSIONS_DIR ?? path.join(getDataDir(), 'extensions')
+/** Package 安装目录。 */
+export function getPackagesDir(): string {
+  return process.env.PERO_PACKAGES_DIR
+    ? normalizePhysicalDirectory(process.env.PERO_PACKAGES_DIR, 'PERO_PACKAGES_DIR')
+    : path.join(getDataDir(), 'packages')
 }
 
 /**

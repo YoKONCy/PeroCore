@@ -23,7 +23,12 @@ export interface LlmModel {
   provider: string
   modelId: string
   maxTokens: number | null
+  contextWindowTokens: number | null
   reasoningEffort: ReasoningEffort | null
+  returnNativeReasoning: boolean
+  wireApi: 'chat_completions' | 'responses'
+  reasoningDialect: 'auto' | 'openai' | 'deepseek' | 'openrouter' | 'generic'
+  stream: boolean
   enableVision: boolean
   enableAudioInput: boolean
   temperature: number | null
@@ -38,26 +43,30 @@ export type ModelTab = 'llm' | 'vector' | 'multimodal'
 
 /** 任务槽元数据（供前端 UI 使用） */
 export const TASK_SLOTS = [
-  { key: 'scorer', label: '记忆提炼', description: 'Scorer、Importer — 结构化输出', icon: 'brain' },
   {
-    key: 'reflection',
-    label: '记忆反思',
-    description: 'Tagger/Consolidator/Auditor/Gardener/Dreamer',
+    key: 'scorer',
+    label: '整理长期记忆',
+    description: '从对话中找出以后仍值得记住的内容',
     icon: 'brain',
   },
   {
-    key: 'social_reply',
-    label: '社交回复生成',
-    description: '对外人格表现 — 默认用主模型',
+    key: 'reflection',
+    label: '整理记忆关系',
+    description: '关联相近经历、修正内容并减少重复记忆',
+    icon: 'link',
+  },
+  {
+    key: 'social_scorer',
+    label: '整理社交记忆',
+    description: '从社交互动中保留重要的人物印象与经历',
     icon: 'chat',
   },
   {
-    key: 'social_scheduler',
-    label: '社交决策',
-    description: '思考状态机 — 决策任务',
-    icon: 'brain',
+    key: 'butler',
+    label: '据点管家',
+    description: '理解房间管理请求，并协助安排角色与环境',
+    icon: 'home',
   },
-  { key: 'social_scorer', label: '社交记忆炼化', description: '结构化输出', icon: 'brain' },
 ] as const
 
 // ── 辅助函数 ──
@@ -70,7 +79,12 @@ function toLlmModel(item: ModelConfigItem): LlmModel {
     provider: item.provider,
     modelId: item.modelId,
     maxTokens: item.maxTokens,
+    contextWindowTokens: item.contextWindowTokens,
     reasoningEffort: item.reasoningEffort,
+    returnNativeReasoning: item.returnNativeReasoning ?? false,
+    wireApi: item.wireApi ?? 'chat_completions',
+    reasoningDialect: item.reasoningDialect ?? 'auto',
+    stream: item.stream ?? true,
     enableVision: item.enableVision ?? false,
     enableAudioInput: item.enableAudioInput ?? false,
     temperature: item.temperature,
@@ -94,8 +108,10 @@ export function useModelConfig() {
   // ── 主模型 + 任务指派 ──
   const mainModelId = ref<string | null>(null)
   const taskAssignments = ref<Record<string, string | null>>({})
-  // 任务指派弹窗
+  const agentAssignments = ref<Record<string, string | null>>({})
+  // 指派弹窗
   const isTaskAssignOpen = ref(false)
+  const isAgentAssignOpen = ref(false)
 
   // ── 编辑弹窗 ──
   const isEditorOpen = ref(false)
@@ -106,7 +122,12 @@ export function useModelConfig() {
     provider: 'openai',
     modelId: '',
     maxTokens: null,
+    contextWindowTokens: null,
     reasoningEffort: null,
+    returnNativeReasoning: false,
+    wireApi: 'chat_completions',
+    reasoningDialect: 'auto',
+    stream: true,
     enableVision: false,
     enableAudioInput: false,
     temperature: null,
@@ -150,6 +171,11 @@ export function useModelConfig() {
   const rerankerApiBase = ref('')
   const rerankerApiKey = ref('')
   const isSavingVector = ref(false)
+  const embeddingActivationResult = ref<{
+    status: 'success' | 'error'
+    message: string
+    durationMs?: number
+  } | null>(null)
 
   // ── 多模态转述配置 ──
   const relayEnabled = ref(false)
@@ -329,10 +355,39 @@ export function useModelConfig() {
     }
   }
 
-  function openEditor(model: LlmModel | null) {
+  /** 按当前角色列表加载角色模型指派。 */
+  async function fetchAgentAssignments(agentIds: string[]): Promise<void> {
+    const uniqueIds = [...new Set(agentIds.map((id) => id.trim().toLowerCase()).filter(Boolean))]
+    if (uniqueIds.length === 0) {
+      agentAssignments.value = {}
+      return
+    }
+    try {
+      const keys = uniqueIds.map((id) => `model.agent.${id}`)
+      const res = await configApi.batch(keys)
+      const data = res.data ?? {}
+      agentAssignments.value = Object.fromEntries(
+        uniqueIds.map((id) => [id, (data[`model.agent.${id}`] as string) || null]),
+      )
+    } catch {
+      agentAssignments.value = Object.fromEntries(uniqueIds.map((id) => [id, null]))
+    }
+  }
+
+  async function openEditor(model: LlmModel | null): Promise<void> {
     if (model) {
       editingModel.value = model
-      editorForm.value = { ...model }
+      isLoading.value = true
+      try {
+        const response = await modelApi.getById(model.id)
+        editorForm.value = toLlmModel(response.data ?? (model as ModelConfigItem))
+      } catch (e) {
+        error.value = (e as Error).message
+        notify.toast('加载模型完整配置失败: ' + (e as Error).message, 'error')
+        return
+      } finally {
+        isLoading.value = false
+      }
     } else {
       editingModel.value = null
       editorForm.value = {
@@ -341,7 +396,12 @@ export function useModelConfig() {
         provider: 'openai',
         modelId: '',
         maxTokens: null,
+        contextWindowTokens: null,
         reasoningEffort: null,
+        returnNativeReasoning: false,
+        wireApi: 'chat_completions',
+        reasoningDialect: 'auto',
+        stream: true,
         enableVision: false,
         enableAudioInput: false,
         temperature: null,
@@ -366,12 +426,18 @@ export function useModelConfig() {
           name: form.name,
           provider: form.provider,
           modelId: form.modelId,
-          apiKey: form.apiKey || undefined,
+          apiKey:
+            form.apiKey && form.apiKey !== editingModel.value.apiKey ? form.apiKey : undefined,
           apiBase: form.apiBase || undefined,
           temperature: form.temperature,
           topP: form.topP,
           maxTokens: form.maxTokens,
+          contextWindowTokens: form.contextWindowTokens,
           reasoningEffort: form.reasoningEffort,
+          returnNativeReasoning: form.returnNativeReasoning,
+          wireApi: form.wireApi,
+          reasoningDialect: form.reasoningDialect,
+          stream: form.stream,
           enableVision: form.enableVision,
           enableAudioInput: form.enableAudioInput,
         })
@@ -387,7 +453,12 @@ export function useModelConfig() {
           temperature: form.temperature,
           topP: form.topP,
           maxTokens: form.maxTokens,
+          contextWindowTokens: form.contextWindowTokens,
           reasoningEffort: form.reasoningEffort,
+          returnNativeReasoning: form.returnNativeReasoning,
+          wireApi: form.wireApi,
+          reasoningDialect: form.reasoningDialect,
+          stream: form.stream,
           enableVision: form.enableVision,
           enableAudioInput: form.enableAudioInput,
         })
@@ -395,6 +466,7 @@ export function useModelConfig() {
       }
       isEditorOpen.value = false
       await fetchModels()
+      window.dispatchEvent(new CustomEvent('infos:model-capabilities-changed'))
     } catch (e) {
       error.value = (e as Error).message
       notify.toast('保存模型失败: ' + (e as Error).message, 'error')
@@ -413,11 +485,17 @@ export function useModelConfig() {
         mainModelId.value = null
         await configApi.set('model.main', '')
       }
-      // 清理任务指派引用
+      // 清理任务与角色指派引用
       for (const slot of TASK_SLOTS) {
         if (taskAssignments.value[slot.key] === id) {
           taskAssignments.value[slot.key] = null
           await configApi.set(`model.task.${slot.key}`, '')
+        }
+      }
+      for (const [agentId, assignedModelId] of Object.entries(agentAssignments.value)) {
+        if (assignedModelId === id) {
+          agentAssignments.value[agentId] = null
+          await configApi.set(`model.agent.${agentId}`, '')
         }
       }
       notify.toast('模型已删除', 'success')
@@ -427,21 +505,22 @@ export function useModelConfig() {
     }
   }
 
-  /** 从模型卡片直接切换输入模态能力，失败时保持原值。 */
-  async function setInputCapability(
+  /** 从模型卡片直接切换布尔配置，失败时保持原值。 */
+  async function setModelToggle(
     model: LlmModel,
-    capability: 'enableVision' | 'enableAudioInput',
+    field: 'stream' | 'enableVision' | 'enableAudioInput',
     enabled: boolean,
   ): Promise<void> {
     try {
-      await modelApi.update(model.id, { [capability]: enabled })
+      await modelApi.update(model.id, { [field]: enabled })
       models.value = models.value.map((item) =>
-        item.id === model.id ? { ...item, [capability]: enabled } : item,
+        item.id === model.id ? { ...item, [field]: enabled } : item,
       )
-      const label = capability === 'enableVision' ? '图片输入' : '音频输入'
+      const label =
+        field === 'stream' ? '流式输出' : field === 'enableVision' ? '图片输入' : '音频输入'
       notify.toast(`${label}已${enabled ? '启用' : '关闭'}`, enabled ? 'success' : 'info')
     } catch (e) {
-      notify.toast('模型能力保存失败: ' + (e as Error).message, 'error')
+      notify.toast('模型配置保存失败: ' + (e as Error).message, 'error')
     }
   }
 
@@ -464,6 +543,21 @@ export function useModelConfig() {
       notify.toast(modelId ? '已指派任务模型' : '已取消任务指派', modelId ? 'success' : 'info')
     } catch (e) {
       notify.toast('任务指派失败: ' + (e as Error).message, 'error')
+    }
+  }
+
+  /** 设置角色指派。 */
+  async function setAgentAssignment(agentId: string, modelId: string | null): Promise<void> {
+    const normalizedAgentId = agentId.trim().toLowerCase()
+    if (!normalizedAgentId) return
+    const previous = agentAssignments.value[normalizedAgentId] ?? null
+    agentAssignments.value[normalizedAgentId] = modelId
+    try {
+      await configApi.set(`model.agent.${normalizedAgentId}`, modelId ?? '')
+      notify.toast(modelId ? '已指派角色模型' : '已恢复主模型', modelId ? 'success' : 'info')
+    } catch (e) {
+      agentAssignments.value[normalizedAgentId] = previous
+      notify.toast('角色指派失败: ' + (e as Error).message, 'error')
     }
   }
 
@@ -530,22 +624,46 @@ export function useModelConfig() {
     }
   }
 
-  /** 保存向量配置 */
+  /** 真实激活候选Embedding模型，向量与配置维度一致后才由后端保存。 */
   async function saveVectorConfig(): Promise<void> {
+    if (embeddingProvider.value !== 'api') {
+      embeddingActivationResult.value = { status: 'error', message: '当前仅支持在线 API Embedding' }
+      return
+    }
+    if (!embeddingModelId.value.trim()) {
+      embeddingActivationResult.value = { status: 'error', message: '请填写 Embedding 模型 ID' }
+      return
+    }
     isSavingVector.value = true
+    embeddingActivationResult.value = null
+    error.value = null
     try {
-      // 批量写入向量相关配置
-      await configApi.set('embedding.provider', embeddingProvider.value)
-      await configApi.set('embedding.model', embeddingModelId.value)
-      await configApi.set('embedding.dimension', String(embeddingDimension.value))
-      if (embeddingApiBase.value) await configApi.set('embedding.apiBase', embeddingApiBase.value)
-      if (embeddingApiKey.value) await configApi.set('embedding.apiKey', embeddingApiKey.value)
-      await configApi.set('reranker.enabled', String(rerankerEnabled.value))
-      if (rerankerModelId.value) await configApi.set('reranker.model', rerankerModelId.value)
-      notify.toast('向量模型配置已保存', 'success')
+      const response = await configApi.activateEmbedding({
+        provider: 'api',
+        model: embeddingModelId.value.trim(),
+        dimension: embeddingDimension.value,
+        apiBase: embeddingApiBase.value.trim() || undefined,
+        apiKey: embeddingApiKey.value.trim() || undefined,
+        reranker: {
+          enabled: rerankerEnabled.value,
+          model: rerankerModelId.value.trim() || undefined,
+          apiBase: rerankerApiBase.value.trim() || undefined,
+          apiKey: rerankerApiKey.value.trim() || undefined,
+        },
+      })
+      const result = response.data
+      if (!result) throw new Error('后端未返回Embedding激活结果')
+      embeddingActivationResult.value = {
+        status: 'success',
+        durationMs: result.durationMs,
+        message: `激活成功：${result.dimension} 维，调用耗时 ${result.durationMs} ms`,
+      }
+      notify.toast(embeddingActivationResult.value.message, 'success')
     } catch (e) {
-      error.value = (e as Error).message
-      notify.toast('向量配置保存失败: ' + (e as Error).message, 'error')
+      const message = (e as Error).message || 'Embedding 模型激活失败'
+      error.value = message
+      embeddingActivationResult.value = { status: 'error', message }
+      notify.toast('Embedding 模型激活失败：' + message, 'error')
     } finally {
       isSavingVector.value = false
     }
@@ -585,6 +703,7 @@ export function useModelConfig() {
         { key: 'multimodalRelay.modelConfigId', value: relayModelConfigId.value ?? '' },
         { key: 'multimodalRelay.detail', value: relayDetail.value },
       ])
+      window.dispatchEvent(new CustomEvent('infos:model-capabilities-changed'))
       notify.toast('多模态转述配置已保存', 'success')
     } catch (e) {
       notify.toast('多模态转述配置保存失败: ' + (e as Error).message, 'error')
@@ -687,7 +806,9 @@ export function useModelConfig() {
     error,
     mainModelId,
     taskAssignments,
+    agentAssignments,
     isTaskAssignOpen,
+    isAgentAssignOpen,
     providerOptions,
     // 编辑器
     isEditorOpen,
@@ -696,11 +817,13 @@ export function useModelConfig() {
     openEditor,
     saveModel,
     deleteModel,
-    setInputCapability,
+    setModelToggle,
     setMainModel,
     setTaskAssignment,
+    setAgentAssignment,
     fetchMainModel,
     fetchTaskAssignments,
+    fetchAgentAssignments,
     fetchModels,
     // 远程模型列表
     remoteModels,
@@ -731,6 +854,7 @@ export function useModelConfig() {
     rerankerApiBase,
     rerankerApiKey,
     isSavingVector,
+    embeddingActivationResult,
     saveVectorConfig,
     // 向量远程模型列表
     remoteEmbeddingModels,

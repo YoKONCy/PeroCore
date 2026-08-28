@@ -198,7 +198,16 @@ export class AnthropicProvider implements LlmProvider {
                 const delta = data.delta as Record<string, unknown>
                 if (!delta) break
 
-                if (delta.type === 'text_delta' && delta.text) {
+                if (delta.type === 'thinking_delta' && delta.thinking) {
+                  yield {
+                    choices: [
+                      {
+                        delta: { reasoningContent: delta.thinking as string },
+                        finishReason: null,
+                      },
+                    ],
+                  }
+                } else if (delta.type === 'text_delta' && delta.text) {
                   yield {
                     choices: [
                       {
@@ -323,6 +332,9 @@ export class AnthropicProvider implements LlmProvider {
     if (!thinkingBudget && typeof opts.topP === 'number') body.top_p = opts.topP
     if (thinkingBudget) {
       body.thinking = { type: 'enabled', budget_tokens: thinkingBudget }
+      if (opts.returnNativeReasoning) {
+        ;(body.thinking as Record<string, unknown>).display = 'summarized'
+      }
     }
     if (opts.stop?.length) body.stop_sequences = opts.stop
 
@@ -471,10 +483,13 @@ export class AnthropicProvider implements LlmProvider {
   private toCompletion(data: Record<string, unknown>): ChatCompletion {
     const contentBlocks = (data.content ?? []) as Array<Record<string, unknown>>
     let textContent = ''
+    let reasoningContent = ''
     const toolCalls: ToolCall[] = []
 
     for (const block of contentBlocks) {
-      if (block.type === 'text') {
+      if (block.type === 'thinking' && typeof block.thinking === 'string') {
+        reasoningContent += block.thinking
+      } else if (block.type === 'text') {
         textContent += (block.text as string) ?? ''
       } else if (block.type === 'tool_use') {
         toolCalls.push({
@@ -491,6 +506,7 @@ export class AnthropicProvider implements LlmProvider {
     const message: ChatCompletion['choices'][0]['message'] = {
       role: 'assistant',
       content: textContent || null,
+      reasoningContent: reasoningContent || undefined,
     }
     if (toolCalls.length) message.toolCalls = toolCalls
 

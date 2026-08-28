@@ -24,14 +24,16 @@
  */
 
 import { Hono } from 'hono'
-import { zValidator } from '@hono/zod-validator'
+import { validate as zValidator } from '../lib/validation'
 import { z } from 'zod'
 import { streamSSE } from 'hono/streaming'
+import { ConversationSurfaceSession } from '../projections/conversationSurfaceSession'
 import type { AppContext } from '../container'
 import { AppError } from '../lib/appError'
-import { resolveToolUserLabel } from '../tools/toolUserLabels'
+import { resolveToolUserDescription, resolveToolUserLabel } from '../tools/toolUserLabels'
+import { isAdvancedTool } from '../tools/advancedTools'
 import { isSystemProtocolTool } from '../tools/systemProtocolTools'
-import type { ThreadChannel } from '../repositories/thread.repo'
+import type { ThreadChannel } from '@infos/shared'
 
 // ─────────────────────────────────────────────
 // Zod Schema
@@ -77,6 +79,10 @@ const renameThreadSchema = z.object({
 /** 编辑消息请求 */
 const threadToolsSchema = z.object({
   disabledTools: z.array(z.string().min(1)).max(500),
+})
+
+const threadExecutionModeSchema = z.object({
+  autoExecuteTools: z.boolean(),
 })
 
 const rewindSchema = z
@@ -125,10 +131,22 @@ export function createChatRouter(ctx: AppContext) {
       imageMode: body.imageMode,
     })
 
+    const messageId = result.assistantMessage?.id
+    if (!messageId) throw new Error('非流式对话完成后缺少持久消息身份')
+    ctx.conversationProjection.invalidate(threadId)
+    const projection = await ctx.conversationProjection.getSnapshot(threadId)
+    const surface = projection.surfaces.find((item) => item.messageId === String(messageId))
+    if (!surface) throw new Error(`Conversation Surface 不存在: message=${messageId}`)
+
     return c.json({
       code: 'OK',
       message: '对话完成',
-      data: { reply: result.reply, threadId: result.threadId, agentId: result.agentId },
+      data: {
+        executionId: result.execution?.executionId,
+        threadId: result.threadId,
+        messageId: String(messageId),
+        surface,
+      },
     })
   })
 
@@ -154,8 +172,15 @@ export function createChatRouter(ctx: AppContext) {
 
     return streamSSE(c, async (stream) => {
       const startTime = Date.now()
-      let tokenCount = 0
       let toolCallCount = 0
+      let fullContent = ''
+      let mode: 'stream' | 'non_stream' = 'stream'
+      let firstTokenMs: number | undefined
+      let firstTokenAt: number | undefined
+      const surfaceRef: { current: ConversationSurfaceSession | null } = { current: null }
+      const writeSurface = async (frame: import('@infos/shared').SurfaceFrame) => {
+        await stream.writeSSE({ event: 'surface', data: JSON.stringify(frame) })
+      }
       try {
         // 统一流式对话：创建 Pair、编译上下文、保存原始文本与工具调用都由服务处理。
         const gen = ctx.conversationTurnService.streamTurn({
@@ -166,40 +191,175 @@ export function createChatRouter(ctx: AppContext) {
           imageMode: body.imageMode,
           workspaceContext: body.workspaceContext,
           signal,
+          onRagProgress: async (progress) => {
+            await stream.writeSSE({
+              event: 'rag_progress',
+              data: JSON.stringify(progress),
+            })
+          },
+          onExecutionStarted: async (execution) => {
+            surfaceRef.current = new ConversationSurfaceSession(
+              threadId,
+              agentId,
+              execution.executionId,
+            )
+            await writeSurface(surfaceRef.current.open())
+          },
+          onModelResolved: async (config) => {
+            mode = config.stream === false ? 'non_stream' : 'stream'
+            if (surfaceRef.current) {
+              await writeSurface(
+                surfaceRef.current.status(
+                  'thinking',
+                  mode === 'stream' ? '流式模式 · 等待首字' : '非流式模式 · 等待完整响应',
+                  { mode },
+                ),
+              )
+            }
+          },
         })
 
-        for await (const chunk of gen) {
-          if (typeof chunk === 'string') {
-            // delta 事件: 文本增量
-            tokenCount += chunk.length
-            await stream.writeSSE({
-              event: 'delta',
-              data: JSON.stringify({ content: chunk }),
-            })
-          } else if (chunk && typeof chunk === 'object' && 'event' in chunk) {
-            const sseEvent = chunk as { event: string; data: unknown }
-            if (sseEvent.event === 'tool_call') {
-              toolCallCount++
+        let next = await gen.next()
+        while (!next.done) {
+          const chunk = next.value
+          if (chunk.event === 'thinking_start') {
+            const data = chunk.data
+            if (surfaceRef.current)
+              await writeSurface(surfaceRef.current.startThinking(data.blockId))
+          } else if (chunk.event === 'thinking_delta') {
+            const data = chunk.data
+            if (surfaceRef.current)
+              await writeSurface(surfaceRef.current.appendThinking(data.blockId, data.delta))
+          } else if (chunk.event === 'thinking_end') {
+            const data = chunk.data
+            if (surfaceRef.current)
+              await writeSurface(surfaceRef.current.completeThinking(data.blockId, data.durationMs))
+          } else if (chunk.event === 'native_reasoning_start') {
+            const data = chunk.data
+            if (surfaceRef.current)
+              await writeSurface(surfaceRef.current.startNativeReasoning(data.blockId, data.mode))
+          } else if (chunk.event === 'native_reasoning_delta') {
+            const data = chunk.data
+            if (surfaceRef.current)
+              await writeSurface(surfaceRef.current.appendNativeReasoning(data.blockId, data.delta))
+          } else if (chunk.event === 'native_reasoning_end') {
+            const data = chunk.data
+            if (surfaceRef.current)
+              await writeSurface(
+                surfaceRef.current.completeNativeReasoning(data.blockId, data.durationMs),
+              )
+          } else if (chunk.event === 'tool_call_start') {
+            const data = chunk.data
+            if (surfaceRef.current)
+              await writeSurface(surfaceRef.current.startToolDraft(data.draftId))
+          } else if (chunk.event === 'tool_call_delta') {
+            const data = chunk.data
+            if (surfaceRef.current) {
+              await writeSurface(
+                surfaceRef.current.appendToolDraft(
+                  data.draftId,
+                  data.nameDelta,
+                  data.argumentsDelta,
+                  data.receivedChars,
+                ),
+              )
             }
-            await stream.writeSSE({
-              event: sseEvent.event,
-              data: JSON.stringify(sseEvent.data),
-            })
+          } else if (chunk.event === 'tool_call_ready') {
+            toolCallCount++
+            const data = chunk.data
+            if (surfaceRef.current) await writeSurface(surfaceRef.current.finalizeToolDraft(data))
+          } else if (chunk.event === 'narration_start') {
+            const data = chunk.data
+            if (surfaceRef.current)
+              await writeSurface(surfaceRef.current.startNarration(data.blockId))
+          } else if (chunk.event === 'narration_delta') {
+            const data = chunk.data
+            const now = Date.now()
+            if (firstTokenMs === undefined) {
+              firstTokenMs = now - startTime
+              firstTokenAt = now
+              if (surfaceRef.current) {
+                await writeSurface(
+                  surfaceRef.current.status(
+                    'generating',
+                    mode === 'stream' ? '正在流式输出' : '完整响应已返回',
+                    { mode, firstTokenMs },
+                  ),
+                )
+              }
+            }
+            fullContent += data.delta
+            if (surfaceRef.current)
+              await writeSurface(surfaceRef.current.appendText(data.blockId, data.delta))
+          } else if (chunk.event === 'narration_end') {
+            // 块结束语义已进入持久Timeline，实时节点无需额外操作。
+          } else {
+            if (chunk.event === 'tool_call') {
+              // 兼容事件：正式节点已由tool_call_ready在原草稿节点上完成。
+            } else if (chunk.event === 'tool_result') {
+              const data = chunk.data as {
+                callId: string
+                result: string
+                isError: boolean
+                durationMs?: number
+              }
+              if (surfaceRef.current) {
+                for (const frame of surfaceRef.current.toolResult(data)) await writeSurface(frame)
+              }
+            } else if (chunk.event === 'status') {
+              const data = chunk.data as {
+                state: 'thinking' | 'calling' | 'generating' | 'tool_failed'
+                message?: string
+              }
+              if (surfaceRef.current) {
+                await writeSurface(surfaceRef.current.status(data.state, data.message))
+              }
+            }
           }
+          next = await gen.next()
         }
 
-        // streamTurn 已在生成器自然结束后持久化 assistant 消息。
+        const turnResult = next.value
+        // streamTurn 自然结束时消息已持久化；最终 Surface 必须来自统一 Projection。
+        const messageId = turnResult?.assistantMessage?.id
+        if (!messageId) throw new Error('流式对话完成后缺少持久消息身份')
+        ctx.conversationProjection.invalidate(threadId)
+        const projection = await ctx.conversationProjection.getSnapshot(threadId)
+        const committedMessage = projection.messages.find(
+          (message) => message.messageId === String(messageId),
+        )
+        const committedSurface = projection.surfaces.find(
+          (surface) => surface.messageId === String(messageId),
+        )
+        if (!committedMessage || !committedSurface) {
+          throw new Error(`Conversation Projection 不完整: message=${messageId}`)
+        }
+        const completedAt = Date.now()
+        const durationMs = completedAt - startTime
+        const outputDurationMs = firstTokenAt ? completedAt - firstTokenAt : 0
+        if (surfaceRef.current) {
+          await writeSurface(
+            surfaceRef.current.commit(projection, committedMessage, committedSurface, {
+              mode,
+              firstTokenMs,
+              outputDurationMs,
+              totalDurationMs: durationMs,
+            }),
+          )
+        }
 
-        // done 事件
-        const durationMs = Date.now() - startTime
+        // 完成遥测与done事件
         await stream.writeSSE({
           event: 'done',
           data: JSON.stringify({
             usage: {
-              promptTokens: 0,
-              completionTokens: tokenCount,
+              promptTokens: ctx.tokenCounter.countMessages(turnResult.initialPromptMessages),
+              completionTokens: ctx.tokenCounter.countTokens(fullContent),
             },
             toolCallCount,
+            mode,
+            firstTokenMs,
+            outputDurationMs,
             durationMs,
             threadId,
             agentId,
@@ -207,11 +367,16 @@ export function createChatRouter(ctx: AppContext) {
         })
       } catch (err) {
         const appError = err instanceof AppError ? err : null
+        const code = appError?.code ?? 'INTERNAL_ERROR'
+        const message = appError?.message ?? (err instanceof Error ? err.message : String(err))
+        if (surfaceRef.current) {
+          await writeSurface(surfaceRef.current.fail(code, message, fullContent))
+        }
         await stream.writeSSE({
           event: 'error',
           data: JSON.stringify({
-            code: appError?.code ?? 'INTERNAL_ERROR',
-            message: appError?.message ?? (err instanceof Error ? err.message : String(err)),
+            code,
+            message,
             data: appError?.data,
           }),
         })
@@ -289,21 +454,39 @@ export function createChatRouter(ctx: AppContext) {
   async function resolveThreadTools(threadId: string) {
     const thread = await ctx.threadService.getThread(threadId)
     if (!thread) throw new AppError('NOT_FOUND', { message: `Thread 不存在: ${threadId}` })
-    const registryTools = ctx.toolRegistry.getDefinitions(thread.channel)
+    const registryTools = ctx.toolRegistry
+      .getDefinitions(thread.channel)
+      .filter((tool) => !ctx.applicationRealms.isPrivateTool(tool.name))
     const allowed = ctx.capabilityGate.resolve(thread.agentId, thread.channel).allowedTools
     const disabled = new Set(thread.disabledTools.filter((name) => !isSystemProtocolTool(name)))
     const tools = registryTools
-      .filter((tool) => isSystemProtocolTool(tool.name) || allowed.has(tool.name))
+      .filter(
+        (tool) =>
+          !isAdvancedTool(tool.name) && (isSystemProtocolTool(tool.name) || allowed.has(tool.name)),
+      )
       .map((tool) => ({
         name: tool.name,
         label: resolveToolUserLabel(tool.name, tool.display?.label),
-        description: tool.description,
+        description: resolveToolUserDescription(
+          tool.name,
+          tool.display?.description,
+          tool.description,
+        ),
         display: tool.display ?? undefined,
         enabled: isSystemProtocolTool(tool.name) || !disabled.has(tool.name),
         locked: isSystemProtocolTool(tool.name),
       }))
     return { thread, tools }
   }
+
+  /** GET /threads/:id/projection — 从领域表重建 Conversation 权威读模型。 */
+  router.get('/threads/:id/projection', async (c) => {
+    const threadId = c.req.param('id')
+    const thread = await ctx.threadService.getThread(threadId)
+    if (!thread) throw new AppError('NOT_FOUND', { message: `Thread 不存在: ${threadId}` })
+    const data = await ctx.conversationProjection.getSnapshot(threadId)
+    return c.json({ code: 'OK', message: '获取成功', data })
+  })
 
   /** GET /threads/:id/flow-state — 查看当前 Thread 的心流；group 返回全部 Agent。 */
   router.get('/threads/:id/flow-state', async (c) => {
@@ -329,15 +512,46 @@ export function createChatRouter(ctx: AppContext) {
     return c.json({ code: 'OK', message: '心流已清空', data })
   })
 
+  /** DELETE /threads/:id/work-context — 用户清空指定 Agent 的工作上下文。 */
+  router.delete('/threads/:id/work-context', async (c) => {
+    const threadId = c.req.param('id')
+    const thread = await ctx.threadService.getThread(threadId)
+    if (!thread) throw new AppError('NOT_FOUND', { message: '会话不存在' })
+    const agentId = c.req.query('agentId') ?? thread.agentId
+    const data = await ctx.flowStateService.clearWorkContext(threadId, agentId)
+    return c.json({ code: 'OK', message: '工作上下文已清空', data })
+  })
+
   /** GET /threads/:id/tools — 仅返回当前 Channel 合法且可由会话控制的工具。 */
   router.get('/threads/:id/tools', async (c) => {
     const { thread, tools } = await resolveThreadTools(c.req.param('id'))
     return c.json({
       code: 'OK',
       message: '获取成功',
-      data: { threadId: thread.id, channel: thread.channel, tools },
+      data: {
+        threadId: thread.id,
+        channel: thread.channel,
+        autoExecuteTools: thread.autoExecuteTools,
+        tools,
+      },
     })
   })
+
+  router.put(
+    '/threads/:id/execution-mode',
+    zValidator('json', threadExecutionModeSchema),
+    async (c) => {
+      const threadId = c.req.param('id')
+      await assertThreadMutable(threadId)
+      const { autoExecuteTools } = c.req.valid('json')
+      await ctx.threadService.updateAutoExecuteTools(threadId, autoExecuteTools)
+      return c.json({
+        code: 'OK',
+        message: autoExecuteTools ? '自动执行模式已开启' : '自动执行模式已关闭',
+        data: { threadId, autoExecuteTools },
+      })
+    },
+  )
 
   /** PUT /threads/:id/tools — 持久化禁用集合；禁止提交 Channel 白名单之外的工具。 */
   router.put('/threads/:id/tools', zValidator('json', threadToolsSchema), async (c) => {
@@ -348,6 +562,12 @@ export function createChatRouter(ctx: AppContext) {
     const { tools } = await resolveThreadTools(threadId)
     const configurable = new Set(tools.map((tool) => tool.name))
     const requestedDisabled = [...new Set(c.req.valid('json').disabledTools)]
+    const advancedTools = requestedDisabled.filter(isAdvancedTool)
+    if (advancedTools.length) {
+      throw new AppError('INVALID_PARAMETER', {
+        message: `高级工具由系统统一管理，不可单独禁用: ${advancedTools.join(', ')}`,
+      })
+    }
     const protocolTools = requestedDisabled.filter(isSystemProtocolTool)
     if (protocolTools.length) {
       throw new AppError('INVALID_PARAMETER', {
@@ -367,6 +587,7 @@ export function createChatRouter(ctx: AppContext) {
       message: '本会话工具配置已保存',
       data: {
         disabledTools,
+        autoExecuteTools: (await ctx.threadService.getThread(threadId))?.autoExecuteTools ?? false,
         tools: tools.map((tool) => ({ ...tool, enabled: !disabledTools.includes(tool.name) })),
       },
     })
@@ -480,7 +701,18 @@ export function createChatRouter(ctx: AppContext) {
       const laterPairIds = preview.pairIds.slice(1)
       if (laterPairIds.length) await ctx.flowStateService.rollbackPairs(threadId, laterPairIds)
     }
-    return c.json({ code: 'OK', message: '对话、工作区与心流已回滚', data: result })
+    let projection
+    if (!body.wholeThread) {
+      ctx.conversationProjection.invalidate(threadId)
+      projection = await ctx.conversationProjection.getSnapshot(threadId)
+    } else {
+      ctx.conversationProjection.invalidate(threadId)
+    }
+    return c.json({
+      code: 'OK',
+      message: '对话、工作区与心流已回滚',
+      data: { ...result, ...(projection ? { projection } : {}) },
+    })
   })
 
   /** DELETE /api/threads/:id — 兼容旧客户端：删除时同样回滚整条会话。 */
@@ -512,7 +744,9 @@ export function createChatRouter(ctx: AppContext) {
     if (!success) {
       throw new AppError('NOT_FOUND', { message: '消息不存在' })
     }
-    return c.json({ code: 'OK', message: '消息已更新' })
+    ctx.conversationProjection.invalidate(c.req.param('id'))
+    const data = await ctx.conversationProjection.getSnapshot(c.req.param('id'))
+    return c.json({ code: 'OK', message: '消息已更新', data })
   })
 
   /**
@@ -530,7 +764,9 @@ export function createChatRouter(ctx: AppContext) {
     if (!success) {
       throw new AppError('NOT_FOUND', { message: '消息不存在' })
     }
-    return c.json({ code: 'OK', message: '消息已删除' })
+    ctx.conversationProjection.invalidate(c.req.param('id'))
+    const data = await ctx.conversationProjection.getSnapshot(c.req.param('id'))
+    return c.json({ code: 'OK', message: '消息已删除', data })
   })
 
   /**
@@ -547,10 +783,17 @@ export function createChatRouter(ctx: AppContext) {
     const threadId = c.req.param('id')
     await assertThreadMutable(threadId)
     const result = await ctx.threadService.rewindMessage(threadId, msgId)
+    ctx.conversationProjection.invalidate(threadId)
+    const projection = await ctx.conversationProjection.getSnapshot(threadId)
     return c.json({
       code: 'OK',
       message: `已回滚 ${result.preview.pairCount} 轮对话及关联文件`,
-      data: { deletedCount: result.deletedMessageIds.length, preview: result.preview },
+      data: {
+        deletedCount: result.deletedMessageIds.length,
+        preview: result.preview,
+        deletedMessageIds: result.deletedMessageIds,
+        projection,
+      },
     })
   })
 

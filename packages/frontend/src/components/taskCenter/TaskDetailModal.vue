@@ -8,18 +8,17 @@
  * @props task — 任务信息；为 null 时不渲染
  * @emits close
  */
+import type { BackgroundTaskProjectionSnapshot, KernelExecutionWaitReason } from '@infos/shared'
+import type { CompositorSurface } from '../../stores'
 import { PButton } from '../pixel'
 import PDialog from '../pixel/PDialog.vue'
 import PixelIcon from '../pixel/PixelIcon.vue'
 import TaskStatusBadge from './TaskStatusBadge.vue'
-import ToolCallCard from '../tools/ToolCallCard.vue'
+import ConversationSurface from '../compositor/ConversationSurface.vue'
 import type { BackgroundTaskInfo } from '../../api/modules/backgroundTasksApi'
 import { backgroundTasksApi } from '../../api/modules/backgroundTasksApi'
-import { computed, ref, watch } from 'vue'
-import { ApprovalCard } from '../approval'
-import { useApprovalStore } from '../../stores'
-import { threadsApi } from '../../api/modules/threadsApi'
-import { logger } from '../../lib/logger'
+import { computed, watch } from 'vue'
+import { useCompositorStore } from '../../stores'
 
 const props = defineProps<{
   task: BackgroundTaskInfo | null
@@ -29,18 +28,41 @@ const props = defineProps<{
   agentName?: string | null
 }>()
 
-const approvalStore = useApprovalStore()
-const taskApprovals = computed(() =>
+const compositor = useCompositorStore()
+const projection = computed<
+  (Omit<BackgroundTaskProjectionSnapshot, 'surfaces'> & { surfaces: CompositorSurface[] }) | null
+>(() =>
   props.task
-    ? approvalStore
-        .forAgent(props.task.agentId)
-        .filter((request) => request.taskId === props.task?.id)
-    : [],
+    ? {
+        protocolVersion: 1,
+        taskId: props.task.id,
+        threadId: props.task.threadId,
+        principalId: props.task.agentId,
+        revision: 0,
+        generatedAt: '',
+        surfaces: [...compositor.surfaces.values()].filter(
+          (surface) => surface.scopeId === `background-task:${props.task?.id}`,
+        ),
+      }
+    : null,
 )
 
 const emit = defineEmits<{
   close: []
 }>()
+
+function waitReasonLabel(reason?: KernelExecutionWaitReason): string {
+  const labels: Record<string, string> = {
+    scheduler_capacity: '等待系统执行容量',
+    class_capacity: '等待同类任务容量',
+    resource_locked: '等待Agent资源释放',
+    backpressure: '系统负载保护',
+    io: '等待I/O',
+    approval: '等待批准',
+    paused: '已暂停',
+  }
+  return reason ? (labels[reason] ?? reason) : '—'
+}
 
 /** 格式化时间 */
 function fmt(iso: string | null | undefined): string {
@@ -49,88 +71,16 @@ function fmt(iso: string | null | undefined): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
 }
 
-// ── 工具轨迹（复用对话轨迹的 ToolCallCard，数据源为任务 Thread 消息的 toolCalls 元数据） ──
-
-const inputMessage = ref('')
-const inputSubmitting = ref(false)
-
-async function submitTaskInput(decision: 'allow_once' | 'deny_once'): Promise<void> {
-  if (!props.task) return
-  inputSubmitting.value = true
-  try {
-    await backgroundTasksApi.input(props.task.id, {
-      decision,
-      message: inputMessage.value.trim() || undefined,
-    })
-    inputMessage.value = ''
-  } finally {
-    inputSubmitting.value = false
-  }
-}
-
-interface TrailToolCall {
-  name: string
-  args: string
-  result?: string
-  isError?: boolean
-  durationMs?: number
-}
-
-/** 从消息 metadataJson 解析工具调用轨迹 */
-function parseToolCalls(metadataJson: string): TrailToolCall[] {
-  try {
-    const parsed = JSON.parse(metadataJson) as {
-      toolCalls?: Array<{
-        name?: unknown
-        args?: unknown
-        result?: unknown
-        durationMs?: unknown
-        isError?: unknown
-      }>
-    }
-    if (!Array.isArray(parsed.toolCalls)) return []
-    return parsed.toolCalls
-      .filter((call) => typeof call.name === 'string')
-      .map((call) => ({
-        name: call.name as string,
-        args: typeof call.args === 'string' ? call.args : JSON.stringify(call.args ?? {}),
-        result: typeof call.result === 'string' ? call.result : String(call.result ?? ''),
-        isError: typeof call.isError === 'boolean' ? call.isError : undefined,
-        durationMs: typeof call.durationMs === 'number' ? call.durationMs : undefined,
-      }))
-  } catch {
-    return []
-  }
-}
-
-/** 平铺后的任务工具轨迹（按消息顺序） */
-const trail = ref<TrailToolCall[]>([])
-
-const rounds = computed(() => {
-  const calls = props.task?.checkpoint?.toolCalls ?? trail.value
-  return calls.map((call, index) => ({ turn: index + 1, calls: [call] }))
-})
-
-/** 任务 Thread 存在且未完成时，拉取消息提取工具轨迹 */
-async function loadToolTrail(threadId: string): Promise<void> {
-  trail.value = []
-  try {
-    const detail = (await threadsApi.get(threadId, { pageSize: 50 })).data
-    const calls: TrailToolCall[] = []
-    for (const msg of detail?.messages ?? []) {
-      if (msg.role !== 'assistant' || !msg.metadataJson) continue
-      calls.push(...parseToolCalls(msg.metadataJson))
-    }
-    trail.value = calls
-  } catch (error) {
-    logger.warn('TaskDetailModal', '拉取任务工具轨迹失败', error)
-  }
-}
-
 watch(
-  () => props.task?.threadId,
-  (threadId) => {
-    if (threadId) void loadToolTrail(threadId)
+  () => [props.task?.id, props.task?.updatedAt] as const,
+  async ([taskId], previous) => {
+    const previousTaskId = previous?.[0]
+    if (previousTaskId) compositor.disposeScope(`background-task:${previousTaskId}`)
+    if (!taskId) return
+    const response = await backgroundTasksApi.projection(taskId)
+    if (response.data) {
+      compositor.replaceScope(`background-task:${taskId}`, response.data.surfaces)
+    }
   },
   { immediate: true },
 )
@@ -172,78 +122,13 @@ watch(
         </div>
       </div>
 
-      <!-- 与此任务绑定的工具审批（全局审批状态在任务详情中的投影） -->
-      <div v-if="taskApprovals.length" class="detail-section">
-        <h4 class="detail-title">
-          <PixelIcon name="shield" size="xs" />
-          等待许可
-        </h4>
-        <ApprovalCard
-          v-for="request in taskApprovals"
-          :key="request.id"
-          :request="request"
-          :loading="approvalStore.isResolving[request.id]"
-          compact
-          @resolve="(decision, message) => approvalStore.resolve(request.id, decision, message)"
+      <!-- 后台任务与专属 Thread 的全部可见内容统一由 Projection Surface 渲染。 -->
+      <div v-if="projection?.surfaces.length" class="detail-section task-surfaces">
+        <ConversationSurface
+          v-for="surface in projection.surfaces"
+          :key="surface.surfaceId"
+          :surface="surface"
         />
-      </div>
-
-      <div v-if="task.status === 'waiting_input'" class="detail-section">
-        <h4 class="detail-title">
-          <PixelIcon name="chat" size="xs" />
-          等待你的决定
-        </h4>
-        <p class="detail-instruction">
-          {{ task.inputQuestion ?? 'Agent 需要你的确认后才能继续。' }}
-        </p>
-        <textarea
-          v-model="inputMessage"
-          class="detail-input"
-          rows="2"
-          maxlength="2000"
-          placeholder="附言（可选）：告诉 Agent 批准或拒绝的理由"
-        />
-        <div class="detail-input-actions">
-          <PButton
-            variant="danger"
-            size="sm"
-            :loading="inputSubmitting"
-            @click="submitTaskInput('deny_once')"
-          >
-            拒绝
-          </PButton>
-          <PButton
-            variant="primary"
-            size="sm"
-            :loading="inputSubmitting"
-            @click="submitTaskInput('allow_once')"
-          >
-            批准并继续
-          </PButton>
-        </div>
-      </div>
-
-      <!-- 指令 -->
-      <div class="detail-section">
-        <h4 class="detail-title">
-          <PixelIcon name="edit" size="xs" />
-          指令
-        </h4>
-        <p class="detail-instruction">{{ task.instruction }}</p>
-      </div>
-
-      <!-- 进度 -->
-      <div v-if="task.progress != null" class="detail-section">
-        <h4 class="detail-title">
-          <PixelIcon name="activity" size="xs" />
-          进度
-        </h4>
-        <div class="detail-progress">
-          <div class="progress-track">
-            <div class="progress-bar" :style="{ width: `${task.progress}%` }"></div>
-          </div>
-          <span class="progress-text">{{ task.progress }}%</span>
-        </div>
       </div>
 
       <!-- 时间统计 -->
@@ -280,62 +165,41 @@ watch(
           <span class="detail-label">工具调用</span>
           <span class="detail-value">×{{ task.toolCallCount }}</span>
         </div>
+        <template v-if="task.execution">
+          <div class="detail-row">
+            <span class="detail-label">Execution状态</span>
+            <span class="detail-value">{{ task.execution.state }}</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-label">等待原因</span>
+            <span class="detail-value">{{ waitReasonLabel(task.execution.waitReason) }}</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-label">LLM / Tool</span>
+            <span class="detail-value">
+              {{ task.execution.usage.llmCalls }} / {{ task.execution.usage.toolCalls }}
+            </span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-label">Token输入 / 输出</span>
+            <span class="detail-value">
+              {{ task.execution.usage.inputTokens }} / {{ task.execution.usage.outputTokens }}
+            </span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-label">Execution ID</span>
+            <span class="detail-value detail-mono" :title="task.execution.descriptor.executionId">
+              {{ task.execution.descriptor.executionId }}
+            </span>
+          </div>
+        </template>
         <div class="detail-row">
           <span class="detail-label">Thread ID</span>
           <span class="detail-value detail-mono" :title="task.threadId">{{ task.threadId }}</span>
         </div>
       </div>
 
-      <!-- 工具轨迹（按工具 display 元数据格式化渲染，与对话轨迹一致） -->
-      <div v-if="trail.length" class="detail-section">
-        <h4 class="detail-title">
-          <PixelIcon name="activity" size="xs" />
-          工具轨迹
-        </h4>
-        <div class="trail-list">
-          <ToolCallCard v-for="(call, idx) in trail" :key="idx" :tool="call" />
-        </div>
-      </div>
-
-      <!-- ReAct 轮次时间线：只展示公开阶段、工具调用和结果摘要，不展示隐藏思维链。 -->
-      <div v-if="rounds.length" class="detail-section">
-        <h4 class="detail-title">
-          <PixelIcon name="activity" size="xs" />
-          ReAct 轮次
-        </h4>
-        <div v-for="round in rounds" :key="round.turn" class="react-round">
-          <strong>第 {{ round.turn }} 轮</strong>
-          <ToolCallCard
-            v-for="call in round.calls"
-            :key="`${round.turn}-${call.name}`"
-            :tool="{
-              ...call,
-              args: typeof call.args === 'string' ? call.args : JSON.stringify(call.args),
-            }"
-          />
-        </div>
-      </div>
-
-      <!-- 结果 / 错误 -->
-      <div v-if="task.result" class="detail-section">
-        <h4 class="detail-title">
-          <PixelIcon name="check" size="xs" />
-          结果
-        </h4>
-        <p class="detail-result">{{ task.result }}</p>
-      </div>
-
-      <div v-if="task.errorMessage" class="detail-section">
-        <h4 class="detail-title">
-          <PixelIcon name="alert" size="xs" />
-          错误信息
-        </h4>
-        <p class="detail-error">{{ task.errorMessage }}</p>
-      </div>
-
-      <!-- 待补时间点（篇后 4 使能） -->
-      <!-- 后续实装：
-        <TaskTimeline :task-id="task.id" … 展示 ReAct 组数时间线 -->
+      <!-- 结果与工具轨迹均已包含在 Projection Surfaces 中。 -->
     </div>
 
     <!-- 底部操作 -->

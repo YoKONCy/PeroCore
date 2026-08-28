@@ -1,0 +1,147 @@
+{
+  "id": "event-memory",
+  "name": "事件记忆",
+  "version": "1.0.0",
+  "author": "infOS Team",
+  "description": "主动记录、修订和查询Agent的长期事件记忆",
+  "type": "tool",
+  "entry": "index.ts",
+  "category": "memory",
+  "platforms": ["windows", "linux", "darwin", "docker"],
+  "tools": [
+    {
+      "name": "write_event_note",
+      "description": "把当前对话提炼为长期事件记忆。只记录对未来理解用户、关系或后续行动仍有价值的真实互动，如稳定偏好与重要事实、承诺与决定、关系变化、共同经历及明显情绪转折；忽略寒暄、临时操作、重复信息、未发生设想和普通问答。使用Agent第一人称，以自然完整句写清事件、参与者、结果或意义，不照抄、夸大、推测或虚构。一个可独立回忆且具有单一核心结果的事件写一条；同一目标、连续因果或同一结果合并，无关目标或独立结果才拆分，避免碎片化。重要度0到3通常不应记录，4到6为有持续价值，7到8为长期重要，9到10仅用于罕见关键转折。工具只创建草稿，回复成功保存后才正式提交。",
+      "display": {
+        "label": "记录事件",
+        "description": "记录值得长期记住的互动。",
+        "icon": "book",
+        "color": "orange",
+        "style": "edit"
+      },
+      "parameters": {
+        "type": "object",
+        "required": ["narrative", "importance", "affect"],
+        "properties": {
+          "narrative": { "type": "string", "description": "第一人称主观事件记叙" },
+          "importance": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10,
+            "description": "长期价值：0到3通常不记录，4到6有持续价值，7到8长期重要，9到10仅限罕见关键转折"
+          },
+          "affect": {
+            "type": "object",
+            "required": ["tones", "valence", "arousal"],
+            "properties": {
+              "tones": { "type": "array", "items": { "type": "string" } },
+              "valence": { "type": "integer", "minimum": 0, "maximum": 10 },
+              "arousal": { "type": "integer", "minimum": 0, "maximum": 10 }
+            }
+          },
+          "participants": { "type": "array", "items": { "type": "string" } },
+          "places": { "type": "array", "items": { "type": "string" } },
+          "objects": { "type": "array", "items": { "type": "string" } },
+          "topics": { "type": "array", "items": { "type": "string" } },
+          "scope": { "type": "string", "enum": ["current_pair", "current_uncovered_segment"] }
+        }
+      }
+    },
+    {
+      "name": "revise_event_note",
+      "description": "修订指定EventNote。工具只创建替换草稿，回复成功保存后才原子替换旧节点。",
+      "display": {
+        "label": "修订事件",
+        "description": "修订已有长期事件记忆。",
+        "icon": "edit",
+        "color": "orange",
+        "style": "edit"
+      },
+      "parameters": {
+        "type": "object",
+        "required": ["targetId", "narrative", "importance", "affect"],
+        "properties": {
+          "targetId": { "type": "string", "description": "待修订EventNote ID" },
+          "narrative": {
+            "type": "string",
+            "description": "Agent第一人称的简洁完整事件叙事，写清发生的事情、参与者以及结果或长期意义；不得照抄对话、推测或虚构"
+          },
+          "importance": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10,
+            "description": "长期价值：0到3通常不记录，4到6有持续价值，7到8长期重要，9到10仅限罕见关键转折"
+          },
+          "affect": {
+            "type": "object",
+            "required": ["tones", "valence", "arousal"],
+            "properties": {
+              "tones": { "type": "array", "items": { "type": "string" } },
+              "valence": { "type": "integer", "minimum": 0, "maximum": 10 },
+              "arousal": { "type": "integer", "minimum": 0, "maximum": 10 }
+            }
+          },
+          "participants": { "type": "array", "items": { "type": "string" } },
+          "places": { "type": "array", "items": { "type": "string" } },
+          "objects": { "type": "array", "items": { "type": "string" } },
+          "topics": { "type": "array", "items": { "type": "string" } },
+          "scope": { "type": "string", "enum": ["current_pair", "current_uncovered_segment"] }
+        }
+      }
+    },
+    {
+      "name": "query_event_notes",
+      "description": "主动查询自己的长期事件记忆；默认隐藏归档事件。",
+      "display": {
+        "label": "查询事件",
+        "description": "查询长期事件记忆。",
+        "icon": "search",
+        "color": "orange",
+        "style": "search"
+      },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string" },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "recent",
+              "time_range",
+              "semantic",
+              "same_event",
+              "entity",
+              "logical",
+              "affective",
+              "mixed"
+            ]
+          },
+          "from": { "type": "string" },
+          "to": { "type": "string" },
+          "includeArchived": { "type": "boolean" },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 100 },
+          "maxDepth": { "type": "integer", "minimum": 0, "maximum": 6 },
+          "maxNodes": { "type": "integer", "minimum": 1, "maximum": 100 },
+          "maxReturnTokens": { "type": "integer", "minimum": 1, "maximum": 32000 },
+          "edgeLabels": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "temporal_next",
+                "temporal_prev",
+                "caused_by",
+                "same_event",
+                "same_topic",
+                "involves_person",
+                "involves_place",
+                "involves_object"
+              ]
+            }
+          },
+          "direction": { "type": "string", "enum": ["outgoing", "incoming", "both"] }
+        }
+      }
+    }
+  ]
+}

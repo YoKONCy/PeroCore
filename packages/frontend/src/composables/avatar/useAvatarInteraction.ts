@@ -24,16 +24,45 @@ export interface PetEvent {
   rawPart: string
 }
 
-/** 身体部位判定关键字映射 */
-const PART_KEYWORDS: Record<string, string[]> = {
-  head: ['Head', 'Hair', 'Hat', 'Ribbon', 'Face', 'Eye'],
-  arm: ['Arm', 'Hand', 'Sleeve'],
-  leg: ['Leg', 'Foot', 'Shoe', 'Boot', 'Sock'],
-  body: ['Chest', 'Waist', 'Body', 'Dress', 'Skirt', 'Cloth', 'Apron', 'Breast'],
+/** 身体部位判定关键字映射；全部使用小写，兼容不同模型的骨骼命名风格。 */
+const PART_KEYWORDS: Record<PetEvent['type'], string[]> = {
+  head: ['head', 'hair', 'hat', 'ribbon', 'face', 'eye'],
+  arm: ['arm', 'hand', 'sleeve'],
+  leg: ['leg', 'thigh', 'knee', 'calf', 'foot', 'feet', 'shoe', 'boot', 'sock'],
+  body: ['chest', 'waist', 'body', 'dress', 'skirt', 'cloth', 'apron', 'breast', 'torso'],
 }
 
-/** 所有可点击的骨骼关键字 */
-const ALL_CLICKABLE_KEYWORDS = Object.values(PART_KEYWORDS).flat()
+/** 根据命中对象的骨骼链识别部位；命名不可识别时按模型内高度兜底。 */
+export function resolvePetPart(
+  hitObject: THREE.Object3D,
+  hitPoint: THREE.Vector3,
+  characterModel: THREE.Object3D,
+): PetEvent {
+  let current: THREE.Object3D | null = hitObject
+  let rawPart = hitObject.name || 'unknown'
+  for (let depth = 0; depth < 12 && current && current !== characterModel.parent; depth++) {
+    const normalizedName = current.name.toLowerCase()
+    for (const [type, keywords] of Object.entries(PART_KEYWORDS) as Array<
+      [PetEvent['type'], string[]]
+    >) {
+      if (keywords.some((keyword) => normalizedName.includes(keyword))) {
+        return { type, rawPart: current.name || rawPart }
+      }
+    }
+    if (current.name) rawPart = current.name
+    if (current === characterModel) break
+    current = current.parent
+  }
+
+  const bounds = new THREE.Box3().setFromObject(characterModel)
+  if (!bounds.isEmpty()) {
+    const height = Math.max(bounds.max.y - bounds.min.y, Number.EPSILON)
+    const ratio = (hitPoint.y - bounds.min.y) / height
+    if (ratio <= 0.48) return { type: 'leg', rawPart }
+    if (ratio >= 0.8) return { type: 'head', rawPart }
+  }
+  return { type: 'body', rawPart }
+}
 
 export function useAvatarInteraction(retargetingManager: RetargetingManager) {
   // ═══ 响应式状态 ═══
@@ -97,32 +126,8 @@ export function useAvatarInteraction(retargetingManager: RetargetingManager) {
 
     if (intersects.length === 0) return null
 
-    // 向上遍历查找可识别骨骼
-    let currentObj: THREE.Object3D | null = intersects[0]!.object
-    let partName = ''
-
-    for (let i = 0; i < 5 && currentObj; i++) {
-      if (currentObj.name && ALL_CLICKABLE_KEYWORDS.some((kw) => currentObj!.name.includes(kw))) {
-        partName = currentObj.name
-        break
-      }
-      currentObj = currentObj.parent
-    }
-
-    if (!partName) return null
-
     isPetting = true
-
-    // 判定身体部位类型
-    let type: PetEvent['type'] = 'body'
-    for (const [partType, keywords] of Object.entries(PART_KEYWORDS)) {
-      if (keywords.some((kw) => partName.includes(kw))) {
-        type = partType as PetEvent['type']
-        break
-      }
-    }
-
-    return { type, rawPart: partName }
+    return resolvePetPart(intersects[0]!.object, intersects[0]!.point, characterModel)
   }
 
   /** 处理鼠标释放 */

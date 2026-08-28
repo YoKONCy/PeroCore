@@ -1,80 +1,53 @@
-# ===================================================================
-# PeroCore-TS 后端 Docker 镜像
-#
-# 多阶段构建: 依赖安装 → 编译 → 生产镜像
-# 运行时: Node.js (统一，见 Bun 讨论结论)
-# 进程守护: PM2
-#
-# 构建: docker build -f docker/Dockerfile.backend -t perocore-backend .
-# 运行: docker run -p 9120:9120 -v pero-data:/app/data perocore-backend
-#
-# @see _docs_/07_DUAL_DEPLOYMENT.md §6
-# @see _docs_/15_DEVOPS_OPERATIONS.md §5.2
-# ===================================================================
+# syntax=docker/dockerfile:1.7
 
-# ── Stage 1: 依赖安装 + 编译 ──
-FROM node:22-slim AS builder
+FROM node:22-bookworm-slim AS builder
 
-# 安装 pnpm
-RUN corepack enable && corepack prepare pnpm@latest --activate
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 
 WORKDIR /build
 
-# 先复制依赖声明（利用 Docker 缓存层）
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
-COPY packages/shared/package.json packages/shared/
-COPY packages/backend/package.json packages/backend/
+COPY packages/ ./packages/
+COPY scripts/build-daemon-bundle.mjs scripts/collect-daemon-deps.mjs ./scripts/
 
-# 安装依赖（仅 shared + backend）
-RUN pnpm install --frozen-lockfile --filter @perocore/shared --filter @perocore/backend
+RUN pnpm install --frozen-lockfile
+RUN node scripts/build-daemon-bundle.mjs && node scripts/collect-daemon-deps.mjs
 
-# 复制源码
-COPY packages/shared/ packages/shared/
-COPY packages/backend/ packages/backend/
+FROM node:22-bookworm-slim AS production
 
-# 编译 TypeScript
-RUN pnpm --filter @perocore/backend build
-
-
-# ── Stage 2: 生产镜像 ──
-FROM node:22-slim AS production
-
-# 安装 PM2 (进程守护) + curl (健康检查)
-RUN npm install -g pm2 && apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+ENV NODE_ENV=production \
+    PERO_PORT=9120 \
+    PERO_CAPABILITY_PORT=9121 \
+    PERO_HOST=0.0.0.0 \
+    PERO_DATA_DIR=/app/data \
+    PERO_DATABASE_PATH=/app/data/infos.db \
+    PERO_APP_ROOT=/app/backend \
+    PERO_TEMP_DIR=/app/temp \
+    PERO_LOG_LEVEL=3 \
+    INFOS_DOCKER=1
 
 WORKDIR /app
 
-# 从 builder 复制编译产物和依赖
-COPY --from=builder /build/packages/backend/dist/ ./packages/backend/dist/
-COPY --from=builder /build/packages/shared/ ./packages/shared/
-COPY --from=builder /build/node_modules/ ./node_modules/
-COPY --from=builder /build/packages/backend/node_modules/ ./packages/backend/node_modules/
+COPY --from=builder --chown=node:node /build/dist-daemon/daemon.mjs ./backend/daemon.mjs
+COPY --from=builder --chown=node:node /build/dist-daemon/social-runtime.mjs ./backend/apps/social/runtime/index.js
+COPY --from=builder --chown=node:node /build/dist-daemon/node_modules/ ./node_modules/
+COPY --from=builder --chown=node:node /build/dist-daemon/bin/ ./bin/
+COPY --from=builder --chown=node:node /build/packages/backend/src/assets/ ./backend/backend/src/assets/
+COPY --from=builder --chown=node:node /build/packages/backend/src/services/mdp/prompts/ ./backend/backend/src/services/mdp/prompts/
+COPY --from=builder --chown=node:node /build/packages/backend/src/tools/ ./backend/backend/src/tools/
+COPY --from=builder --chown=node:node /build/packages/backend/src/skills/ ./backend/backend/src/skills/
+COPY --from=builder --chown=node:node /build/packages/apps/social/ ./backend/apps/social/
 
-# 复制 PM2 配置
-COPY ecosystem.config.cjs ./
+RUN mkdir -p /app/data /app/workspaces /app/temp && chown -R node:node /app
 
-# 复制静态资源（提示词模板等）
-COPY packages/backend/src/assets/ ./packages/backend/dist/assets/
+USER node
 
-# ── 环境变量 (对齐 lib/env.ts) ──
-ENV NODE_ENV=production
-ENV PERO_PORT=9120
-ENV PERO_HOST=0.0.0.0
-ENV PERO_DATA_DIR=/app/data
-ENV PERO_DATABASE_PATH=/app/data/perocore.db
-ENV PERO_LOG_LEVEL=3
-# Docker 标识 (07_DUAL_DEPLOYMENT.md §9.4)
-ENV PEROCORE_DOCKER=1
+VOLUME ["/app/data", "/app/workspaces"]
+EXPOSE 9120 9121
 
-# 数据持久化卷
-VOLUME /app/data
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD ["node", "-e", "fetch('http://127.0.0.1:9120/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
 
-# 暴露端口 (HTTP + WS 同端口, D32)
-EXPOSE 9120
-
-# 健康检查 (15_DEVOPS_OPERATIONS.md §5.2)
-HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-  CMD curl -f http://localhost:9120/api/health || exit 1
-
-# PM2 以 production 模式启动
-CMD ["pm2-runtime", "start", "ecosystem.config.cjs", "--env", "production"]
+CMD ["node", "/app/backend/daemon.mjs"]

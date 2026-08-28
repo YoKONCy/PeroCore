@@ -8,6 +8,31 @@
   "entry": "index.ts",
   "category": "core",
   "platforms": ["windows", "darwin", "linux"],
+  "userCopy": {
+    "social_send_message": { "label": "发送消息", "description": "向指定联系人或群组发送消息。" },
+    "social_get_contacts": { "label": "查看联系人", "description": "查看已连接社交平台的联系人。" },
+    "social_get_groups": { "label": "查看群组", "description": "查看已连接社交平台的群组。" },
+    "social_get_contact_info": {
+      "label": "查看联系人信息",
+      "description": "查看指定联系人的昵称和备注等信息。"
+    },
+    "social_get_group_info": {
+      "label": "查看群组信息",
+      "description": "查看指定群组的名称和成员数量。"
+    },
+    "social_get_group_members": {
+      "label": "查看群组成员",
+      "description": "查看指定群组中的成员。"
+    },
+    "social_handle_request": {
+      "label": "处理好友请求",
+      "description": "接受或拒绝收到的好友请求。"
+    },
+    "social_notify_owner": {
+      "label": "通知主人",
+      "description": "通过已连接的社交渠道向主人发送通知。"
+    }
+  },
   "tools": [
     {
       "name": "social_send_message",

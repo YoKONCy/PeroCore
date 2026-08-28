@@ -1,6 +1,5 @@
 # infOS-TS Monorepo — pnpm workspace 配置
 packages:
   - 'packages/*'
-  - 'packages/native/*'
   - 'packages/apps/*'
   - 'electron'

@@ -157,11 +157,9 @@ async function loadManifestPath(newPath: string): Promise<boolean> {
   model.loading.value = true
   model.errorMsg.value = ''
   try {
-    const manifest = newPath.endsWith('.pero')
-      ? createPeroManifest(newPath)
-      : newPath.endsWith('ysm.json')
-        ? await loadYsmManifestFromUrl(newPath)
-        : await ManifestLoader.fromJson(newPath)
+    const manifest = newPath.endsWith('ysm.json')
+      ? await loadYsmManifestFromUrl(newPath)
+      : await ManifestLoader.fromJson(newPath)
     await model.loadAvatar(manifest, sceneCtx.scene.value)
     localStorage.setItem(AVATAR_MODEL_STORAGE_KEY, newPath)
     emit('model-load-success', newPath)
@@ -245,18 +243,6 @@ onUnmounted(() => {
 })
 
 // ═══ 辅助函数 ═══
-function createPeroManifest(path: string): IAvatarManifest {
-  return {
-    metadata: {
-      name: path.split('/').pop()?.replace('.pero', '') || 'Unknown',
-      version: '1.0.0',
-    },
-    resources: { model: path, texture: path, animations: [] },
-    featureButtons: [],
-    parts: [],
-    retargetingMap: { mapping: {} },
-  }
-}
 
 // ═══ 暴露给父组件 ═══
 defineExpose({

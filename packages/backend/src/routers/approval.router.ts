@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { zValidator } from '@hono/zod-validator'
+import { validate as zValidator } from '../lib/validation'
 import { z } from 'zod'
 import type { AppContext } from '../container'
 import { AppError } from '../lib/appError'
@@ -19,7 +19,6 @@ export function createApprovalRouter(ctx: AppContext) {
       | 'pending'
       | 'approved'
       | 'denied'
-      | 'expired'
       | 'consumed'
       | undefined
     const requests = ctx.approvalService.list({
@@ -45,15 +44,9 @@ export function createApprovalRouter(ctx: AppContext) {
   })
 
   router.post('/:id/resolve', zValidator('json', resolveSchema), (c) => {
-    try {
-      const input = c.req.valid('json')
-      const request = ctx.approvalService.resolve(c.req.param('id'), input.decision, input.message)
-      return c.json({ code: 'OK', data: request })
-    } catch (error) {
-      throw new AppError('VALIDATION_ERROR', {
-        message: error instanceof Error ? error.message : String(error),
-      })
-    }
+    const input = c.req.valid('json')
+    const request = ctx.approvalService.resolve(c.req.param('id'), input.decision, input.message)
+    return c.json({ code: 'OK', data: request })
   })
 
   return router

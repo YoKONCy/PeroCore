@@ -15,6 +15,8 @@ describe('FlowStateRepository 对话检查点回退', () => {
         agent_id TEXT NOT NULL,
         current_goal TEXT DEFAULT '' NOT NULL,
         private_facts TEXT DEFAULT '' NOT NULL,
+        work_context TEXT DEFAULT '' NOT NULL,
+        work_context_updated_at_pair_count INTEGER DEFAULT 0 NOT NULL,
         revision INTEGER DEFAULT 1 NOT NULL,
         updated_by_pair_id TEXT,
         updated_at TEXT DEFAULT (datetime('now', 'localtime')) NOT NULL
@@ -29,6 +31,10 @@ describe('FlowStateRepository 对话检查点回退', () => {
         before_private_facts TEXT DEFAULT '' NOT NULL,
         after_current_goal TEXT DEFAULT '' NOT NULL,
         after_private_facts TEXT DEFAULT '' NOT NULL,
+        before_work_context TEXT DEFAULT '' NOT NULL,
+        before_work_context_updated_at_pair_count INTEGER DEFAULT 0 NOT NULL,
+        after_work_context TEXT DEFAULT '' NOT NULL,
+        after_work_context_updated_at_pair_count INTEGER DEFAULT 0 NOT NULL,
         created_at TEXT DEFAULT (datetime('now', 'localtime')) NOT NULL
       );
     `)

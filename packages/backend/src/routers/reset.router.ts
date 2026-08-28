@@ -12,7 +12,7 @@
  */
 
 import { Hono } from 'hono'
-import { zValidator } from '@hono/zod-validator'
+import { validate as zValidator } from '../lib/validation'
 import { z } from 'zod'
 import { AppError } from '../lib/appError'
 import type { AppContext } from '../container'

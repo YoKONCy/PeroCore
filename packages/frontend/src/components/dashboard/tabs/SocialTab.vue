@@ -13,10 +13,9 @@ defineOptions({ name: 'SocialTab' })
  *
  * @module packages/frontend/src/components/dashboard/tabs/SocialTab
  */
-import { ref, onMounted, watch, computed } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { PixelIcon, PButton, PSwitch, PInputNumber, PDialog } from '../../pixel'
-import { useDashboardContext } from '../../../composables/dashboard'
-import { useAgentStore, useNotificationStore } from '../../../stores'
+import { useAgentStore, useCompositorStore, useNotificationStore } from '../../../stores'
 import { invoke, isElectron } from '../../../utils/ipcAdapter'
 import {
   socialApi,
@@ -27,9 +26,9 @@ import {
 import { logger } from '../../../lib/logger'
 import SocialAdapterTerminal from '../../terminal/SocialAdapterTerminal.vue'
 
-const ctx = useDashboardContext()
 const agentStore = useAgentStore()
 const notification = useNotificationStore()
+const compositor = useCompositorStore()
 const contacts = ref<SocialContactImpression[]>([])
 const dataScope = ref<SocialClearScope>('channel')
 const dataChannelType = ref<'private' | 'group'>('private')
@@ -49,6 +48,7 @@ const modeConfig = ref<SocialModeConfig>({
   groupWhitelist: [],
   groupBlacklist: [],
   userBlacklist: [],
+  ownerPrivateOnlyAgentIds: [],
 })
 const groupWhitelistText = ref('')
 const groupBlacklistText = ref('')
@@ -123,6 +123,9 @@ const canManageProcess = isElectron()
 
 /** 主人 QQ 输入框绑定值 */
 const ownerQqInput = ref('')
+/** 当前单实例 Social 绑定的角色 */
+const socialAgentId = ref('')
+const agentSaving = ref(false)
 /** 配置加载中 */
 const configLoading = ref(false)
 /** 配置保存中 */
@@ -200,8 +203,12 @@ async function stopNapCat(): Promise<void> {
 async function loadSocialConfig(): Promise<void> {
   configLoading.value = true
   try {
-    const cfg = await socialApi.getConfig()
+    const [cfg, agentConfig] = await Promise.all([
+      socialApi.getConfig(),
+      socialApi.getAgentConfig(),
+    ])
     ownerQqInput.value = cfg.ownerQq ?? ''
+    socialAgentId.value = agentConfig.data?.agentId ?? cfg.agentId ?? 'pero'
   } catch (e) {
     logger.error('SocialTab', '加载社交配置失败', e)
   } finally {
@@ -219,6 +226,22 @@ async function loadSocialConfig(): Promise<void> {
  * 因为 SocialAppRuntime 在 initialize 时读取配置。prompt 注入也会在下次
  * generateReply 时生效（每次 compile 都从 this.ownerQq 读取）。
  */
+async function saveSocialAgent(): Promise<void> {
+  if (!socialAgentId.value) return
+  agentSaving.value = true
+  try {
+    const response = await socialApi.saveAgentConfig(socialAgentId.value)
+    socialAgentId.value = response.data?.agentId ?? socialAgentId.value
+    await loadContacts()
+    notification.toast('社交角色已切换并立即生效', { type: 'success', title: '保存成功' })
+  } catch (error) {
+    logger.error('SocialTab', '切换社交角色失败', error)
+    notification.toast('社交角色切换失败', { type: 'error', title: '保存失败' })
+  } finally {
+    agentSaving.value = false
+  }
+}
+
 async function saveOwnerQq(): Promise<void> {
   configSaving.value = true
   configSaved.value = false
@@ -289,11 +312,15 @@ function openClearDialog(scope: SocialClearScope, targetId = ''): void {
 }
 
 async function loadContacts(): Promise<void> {
-  const agentId = ctx.activeAgentId.value
+  const agentId = socialAgentId.value
   if (!agentId) return
   try {
-    const response = await socialApi.getContacts(agentId)
+    const [response, projection] = await Promise.all([
+      socialApi.getContacts(agentId),
+      socialApi.getProjection(agentId),
+    ])
     contacts.value = response.data?.contacts ?? []
+    if (projection.data) compositor.replaceProjection(projection.data)
     if (
       !selectedContactId.value ||
       !contacts.value.some((item) => item.userId === selectedContactId.value)
@@ -306,7 +333,7 @@ async function loadContacts(): Promise<void> {
 }
 
 async function clearSocialData(): Promise<void> {
-  const agentId = ctx.activeAgentId.value
+  const agentId = socialAgentId.value
   if (!agentId) return
   dataBusy.value = true
   try {
@@ -329,11 +356,11 @@ async function clearSocialData(): Promise<void> {
   }
 }
 
-watch(() => ctx.activeAgentId.value, loadContacts)
-
 // ── 初始化 ──
 
 onMounted(async () => {
+  if (!agentStore.agents.length) await agentStore.fetchAgents()
+
   // 并行加载适配器状态和社交配置
   const tasks: Promise<void>[] = []
 
@@ -414,13 +441,36 @@ onMounted(async () => {
           <span v-else class="sp-card-tag">待实现</span>
         </button>
       </div>
-      <!-- 主人 QQ 配置区（权限控制核心） -->
+      <!-- Social 单实例角色与主人身份配置 -->
       <div class="sp-owner-config">
         <div class="sp-block-header">
           <PixelIcon name="user" size="xs" />
-          <span>主人 QQ</span>
+          <span>社交身份</span>
         </div>
         <div class="sp-owner-body">
+          <div class="sp-owner-row">
+            <select
+              v-model="socialAgentId"
+              class="sp-owner-input"
+              :disabled="configLoading || agentSaving"
+            >
+              <option v-for="agent in agentStore.enabledAgents" :key="agent.id" :value="agent.id">
+                {{ agent.name }}（{{ agent.id }}）
+              </option>
+            </select>
+            <PButton
+              size="sm"
+              variant="primary"
+              :disabled="configLoading || agentSaving || !socialAgentId"
+              @click="saveSocialAgent"
+            >
+              <PixelIcon name="save" size="xs" />
+              {{ agentSaving ? '切换中...' : '切换角色' }}
+            </PButton>
+          </div>
+          <div class="sp-hint">
+            单实例 Social 的消息、人格、记忆、工具和回复全部归属该角色，切换后立即生效。
+          </div>
           <div class="sp-owner-row">
             <input
               v-model="ownerQqInput"

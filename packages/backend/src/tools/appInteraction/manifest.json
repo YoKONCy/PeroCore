@@ -1,22 +1,22 @@
 {
   "toolDefinition": {
-    "name": "interact_with_app",
-    "description": "与已安装的 AgentApplication 通信。可发现应用能力，或委派一次性 command。应用内部工具不会直接暴露给主 Agent。",
+    "name": "interact_with_social",
+    "description": "让正在运行的社交Agent读取指定群聊上下文，并根据给定意图自主判断是否参与本次聊天。",
+    "display": {
+      "label": "联系社交助手",
+      "description": "让社交助手查看指定群聊并参与互动。",
+      "icon": "chat",
+      "color": "pink",
+      "style": "social"
+    },
     "parameters": {
       "type": "object",
       "properties": {
-        "mode": {
-          "type": "string",
-          "enum": ["discover", "command"],
-          "description": "discover 查看能力；command 执行一次性任务"
-        },
-        "app_id": { "type": "string", "description": "应用 ID" },
-        "action": { "type": "string", "description": "command 模式下的高层动作名" },
-        "input": { "type": "object", "description": "动作输入参数" },
-        "task_description": { "type": "string", "description": "可选任务描述" },
-        "success_criteria": { "type": "string", "description": "可选成功标准" }
+        "group_id": { "type": "string", "description": "目标群聊ID" },
+        "intent": { "type": "string", "description": "本次参与意图、希望关注的内容和行为边界" }
       },
-      "required": ["mode", "app_id"]
+      "required": ["group_id"],
+      "additionalProperties": false
     }
   }
 }

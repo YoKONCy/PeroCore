@@ -13,7 +13,12 @@
  */
 
 import { eq, desc, asc, and, or, inArray, isNull, sql } from 'drizzle-orm'
-import { groupChatRooms, groupChatMembers, groupChatMessages } from '../../database/schema'
+import {
+  groupChatRooms,
+  groupChatMembers,
+  groupChatMessages,
+  strongholdAgentPairVisibility,
+} from '../../database/schema'
 import type { DrizzleDb } from '../../database'
 
 // ── 类型 ──
@@ -48,7 +53,10 @@ export interface PerspectiveMessage {
 // ── Service ──
 
 export class GroupChatService {
-  constructor(private db: DrizzleDb) {}
+  constructor(
+    private db: DrizzleDb,
+    private isEnabledAgent: (agentId: string) => boolean,
+  ) {}
 
   // ─── 房间 ───
 
@@ -67,6 +75,11 @@ export class GroupChatService {
   }
 
   async addMember(roomId: string, agentId: string, role = 'member'): Promise<void> {
+    if (!this.isEnabledAgent(agentId)) {
+      throw new Error(`Agent ${agentId} 不存在或未启用，禁止加入据点房间`)
+    }
+    const room = await this.getRoom(roomId)
+    if (!room) throw new Error(`房间 ${roomId} 不存在`)
     const existing = await this.db
       .select()
       .from(groupChatMembers)
@@ -135,6 +148,46 @@ export class GroupChatService {
 
     // 反转为时间正序
     return msgs.reverse()
+  }
+
+  /** 在新回合创建时快照当前在场角色；同轮后续移动不会改变这份可见集合。 */
+  async recordPairVisibility(roomId: string, pairId: string, agentIds: string[]): Promise<void> {
+    const uniqueAgentIds = [...new Set(agentIds)]
+    if (uniqueAgentIds.length === 0) return
+    await this.db
+      .insert(strongholdAgentPairVisibility)
+      .values(
+        uniqueAgentIds.map((agentId) => ({
+          agentId,
+          roomId,
+          pairId,
+        })),
+      )
+      .onConflictDoNothing()
+  }
+
+  /** 获取角色亲历的最近N个完整回合；只消费新状态机记录，不推断旧历史。 */
+  async getVisibleHistoryPairs(agentId: string, pairLimit = 20): Promise<MessageRow[]> {
+    const normalizedLimit = Math.max(1, pairLimit)
+    const recentPairs = await this.db
+      .select({
+        pairId: strongholdAgentPairVisibility.pairId,
+        observedAt: strongholdAgentPairVisibility.observedAt,
+        id: strongholdAgentPairVisibility.id,
+      })
+      .from(strongholdAgentPairVisibility)
+      .where(eq(strongholdAgentPairVisibility.agentId, agentId))
+      .orderBy(desc(strongholdAgentPairVisibility.id))
+      .limit(normalizedLimit)
+      .all()
+    if (recentPairs.length === 0) return []
+    const pairIds = recentPairs.map((row) => row.pairId)
+    return this.db
+      .select()
+      .from(groupChatMessages)
+      .where(inArray(groupChatMessages.pairId, pairIds))
+      .orderBy(asc(groupChatMessages.id))
+      .all()
   }
 
   /** 获取最近 N 个完整群聊回合；一个 pair 包含用户发言及本轮全部回复。 */
@@ -222,34 +275,53 @@ export class GroupChatService {
   // ─── 视角转换 ───
 
   /**
-   * 将群聊历史转换为特定 Agent 的 LLM 消息视角
+   * 将群聊历史转换为特定 Agent 的 LLM 消息视角。
    *
-   * 规则:
-   * - sender_id === agentId → role: "assistant"
-   * - sender_id === "user" → role: "user"
-   * - sender_id === 其他Agent → role: "user", 内容加前缀 "[{name}]: "
-   * - sender_id === "system"/"Butler" → role: "system"
+   * 每条消息都保留显式sender标签，避免多个来源共用user角色后让模型误判说话者。
+   * 当前Agent自己的历史仍使用assistant角色，其他参与者使用user角色。
    */
-  convertPerspective(messages: MessageRow[], agentId: string): PerspectiveMessage[] {
+  convertPerspective(
+    messages: MessageRow[],
+    agentId: string,
+    ownerName = '用户',
+  ): PerspectiveMessage[] {
     return messages.map((msg) => {
-      if (msg.senderId === agentId) {
-        return { role: 'assistant' as const, content: msg.content }
+      const senderId = msg.senderId || 'unknown'
+      const tag = this.normalizeMessageTag(senderId === 'user' ? ownerName : senderId)
+      const time =
+        senderId !== 'user' && msg.timestamp ? `, time=${this.escapeAttribute(msg.timestamp)}` : ''
+      const taggedContent = `<${tag}${time}>${this.escapeContent(msg.content)}</${tag}>`
+      if (senderId === agentId) {
+        return { role: 'assistant' as const, content: taggedContent }
       }
-
-      if (msg.senderId === 'user') {
-        return { role: 'user' as const, content: msg.content }
+      if (
+        msg.role === 'system' ||
+        senderId === 'Butler' ||
+        senderId === 'butler' ||
+        senderId === 'system'
+      ) {
+        return { role: 'system' as const, content: taggedContent }
       }
-
-      if (msg.role === 'system' || msg.senderId === 'Butler' || msg.senderId === 'system') {
-        return { role: 'system' as const, content: msg.content }
-      }
-
-      // 其他 Agent 的发言
-      return {
-        role: 'user' as const,
-        content: `[${msg.senderId}]: ${msg.content}`,
-      }
+      return { role: 'user' as const, content: taggedContent }
     })
+  }
+
+  private normalizeMessageTag(value: string): string {
+    const normalized = value.trim().replace(/[^\p{L}\p{N}_-]/gu, '_')
+    return normalized || 'unknown'
+  }
+
+  private escapeContent(value: string): string {
+    return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+  }
+
+  private escapeAttribute(value: string): string {
+    return value
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&apos;')
   }
 
   /**

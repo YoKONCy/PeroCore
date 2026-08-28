@@ -2,7 +2,7 @@
  * 模型注册表
  *
  * 从 SQLite aiModelConfigs 表读取模型配置，按用途查询。
- * 供 LlmService / AgentService / ScorerService 等获取活跃模型。
+ * 供 LlmService、AgentService 和后台模型任务获取活跃模型。
  *
  * @module packages/backend/src/services/llm/modelRegistry
  */
@@ -148,7 +148,12 @@ export class ModelRegistry {
       temperature: row.temperature ?? undefined,
       topP: row.topP ?? undefined,
       maxTokens: row.maxTokens ?? undefined,
+      contextWindowTokens: row.contextWindowTokens ?? undefined,
       reasoningEffort: (row.reasoningEffort as ModelConfig['reasoningEffort']) ?? undefined,
+      returnNativeReasoning: row.returnNativeReasoning ?? false,
+      wireApi: (row.wireApi as ModelConfig['wireApi']) ?? 'chat_completions',
+      reasoningDialect: (row.reasoningDialect as ModelConfig['reasoningDialect']) ?? 'auto',
+      stream: row.stream ?? true,
       enableVision: row.enableVision ?? false,
       enableAudioInput: row.enableAudioInput ?? false,
     }

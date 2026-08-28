@@ -1,169 +1,228 @@
-/**
- * browserControl — 浏览器交互控制工具
- *
- * 的浏览器交互部分:
- * - browser_open_url → 打开 URL
- * - browser_click → 点击元素
- * - browser_type → 输入文本
- * - browser_scroll → 滚动页面
- * - browser_back → 返回上一页
- * - browser_get_content → 获取页面内容
- *
- * - 通过 BrowserBridge 抽象层与实际浏览器通信
- * - Electron 环境: 通过浏览器插件 WebSocket 桥接 (继承 v1)
- * - 其他环境: 可替换为 Playwright / Puppeteer 适配器
- *
- * @module packages/backend/src/tools/browserControl
- */
+import { WEB_PAGE_OPERATIONS } from '@infos/shared'
+import { BrowserActionCoordinator } from '../../applications/browserActionCoordinator'
+import { BrowserInteractionRuntime } from '../../applications/browserInteractionRuntime'
+import type { BoundCapabilityPort } from '../../kernel/capabilityDirectory'
+import type { ToolContext, ToolHandler } from '../../services/agent/toolRegistry'
+import type { ToolDefinition } from '../../services/pipeline/types'
+import manifest from './manifest.json'
 
-import type { BuiltinTool } from '../index'
-import { createLogger } from '../../lib/logger'
-
-const logger = createLogger('BrowserControl')
-
-// ── 浏览器桥接抽象 ──
-
-/** 浏览器桥接接口 (由 container.ts 注入) */
-export interface BrowserBridge {
-  /** 发送命令给浏览器 */
-  sendCommand(command: string, params?: Record<string, unknown>): Promise<BrowserCommandResult>
-  /** 获取当前页面的 Markdown 内容 */
-  getPageContent(): Promise<string>
-  /** 是否已连接 */
-  readonly isConnected: boolean
+interface BrowserToolContribution {
+  definition: ToolDefinition
+  handler: ToolHandler
 }
 
-export interface BrowserCommandResult {
-  status: 'success' | 'error'
-  error?: string
-  data?: unknown
+export interface BrowserToolObservation {
+  operation: string
+  result: unknown
+  context: ToolContext
 }
 
-/** 模块引用 */
-let _browserBridge: BrowserBridge | null = null
-
-/** 设置浏览器桥接 */
-export function setBrowserBridge(bridge: BrowserBridge | null): void {
-  _browserBridge = bridge
-}
-
-/** 辅助: 执行命令并附加页面内容 */
-async function execWithContent(command: string, params?: Record<string, unknown>): Promise<string> {
-  if (!_browserBridge) {
-    return JSON.stringify({ error: '浏览器桥接未初始化。请确保浏览器插件已连接。' })
+/** Browser Package 拥有的 Tool ABI 工厂，不使用模块级全局 Port。 */
+export function createBrowserToolContributions(
+  port: BoundCapabilityPort,
+  operationsOrObserver:
+    | readonly string[]
+    | ((observation: BrowserToolObservation) => void | Promise<void>) = port.offer?.operations ??
+    WEB_PAGE_OPERATIONS,
+  observer?: (observation: BrowserToolObservation) => void | Promise<void>,
+): BrowserToolContribution[] {
+  const availableOperations =
+    typeof operationsOrObserver === 'function' ? WEB_PAGE_OPERATIONS : operationsOrObserver
+  const onObservation = typeof operationsOrObserver === 'function' ? operationsOrObserver : observer
+  const actions = new BrowserActionCoordinator(port)
+  const interactions = new BrowserInteractionRuntime(port, port.offer?.placement?.providerNodeId)
+  const invoke = async (
+    operation: string,
+    args: Record<string, unknown>,
+    context: ToolContext,
+  ): Promise<string> => {
+    try {
+      const callContext = {
+        principalId: context.agentId,
+        correlationId: context.toolCallId ?? `${operation}:${Date.now()}`,
+        executionId: context.executionId,
+        processId: context.processId,
+        deadline: context.deadline,
+      }
+      const observed = await interactions.invoke(operation, args, callContext)
+      const result = observed.result
+      await onObservation?.({ operation, result, context })
+      if (operation === 'screenshot' || operation === 'elementScreenshot') {
+        const runtime = result as {
+          base64?: string
+          mimeType?: string
+          output?: { result?: { base64?: string; mimeType?: string } }
+        }
+        const image = runtime.base64 ? runtime : runtime.output?.result
+        if (image?.base64) {
+          return JSON.stringify({
+            success: true,
+            message: '已截取当前网页',
+            screenshots: [
+              {
+                index: 0,
+                dataUri: `data:${image.mimeType ?? 'image/png'};base64,${image.base64}`,
+              },
+            ],
+          })
+        }
+      }
+      return JSON.stringify({
+        success: true,
+        result,
+        scene: observed.scene,
+        receipt: observed.receipt,
+      })
+    } catch (error) {
+      throw error instanceof Error ? error : new Error(String(error))
+    }
   }
 
-  if (!_browserBridge.isConnected) {
-    return JSON.stringify({ error: '浏览器未连接。请确保浏览器插件已启动并连接。' })
+  const handlers: Record<string, ToolHandler> = {
+    browser_open_url: async (args, context) => {
+      let url = String(args.url ?? '').trim()
+      if (!url) return JSON.stringify({ error: '请提供 URL' })
+      if (!/^https?:\/\//i.test(url)) url = `https://${url}`
+      return invoke('open', { url }, context)
+    },
+    browser_click: async (args, context) => {
+      const target = String(args.handle ?? args.target ?? '').trim()
+      if (!target) return JSON.stringify({ error: '请提供元素句柄或目标' })
+      return invoke('click', { ...args, target }, context)
+    },
+    browser_type: async (args, context) => {
+      const target = String(args.handle ?? args.target ?? '').trim()
+      if (!target || typeof args.text !== 'string') {
+        return JSON.stringify({ error: '请提供元素句柄和输入文本' })
+      }
+      return invoke('type', { ...args, target }, context)
+    },
+    browser_scroll: (args, context) => invoke('scroll', args, context),
+    browser_back: (args, context) => invoke('back', args, context),
+    browser_get_content: (args, context) => invoke('extract', args, context),
+    browser_search: (args, context) => {
+      const query = String(args.query ?? '').trim()
+      if (!query && !Array.isArray(args.queries)) {
+        return Promise.resolve(JSON.stringify({ error: '请提供搜索关键词或queries数组' }))
+      }
+      return invoke('search', args, context)
+    },
+    browser_screenshot: (args, context) => invoke('screenshot', args, context),
+    browser_page_image: (args, context) => invoke('elementScreenshot', args, context),
+    browser_wait: (args, context) => invoke('wait', args, context),
+    browser_tabs: (args, context) => {
+      const action = String(args.action ?? 'list')
+      const operations: Record<string, string> = {
+        list: 'listTargets',
+        create: 'createTarget',
+        switch: 'switchTarget',
+        close: 'closeTarget',
+      }
+      return invoke(operations[action] ?? 'listTargets', args, context)
+    },
+    browser_interact: async (args, context) => {
+      const action = String(args.action ?? '')
+      const operations: Record<string, string> = {
+        hover: 'hover',
+        click: 'nativeClick',
+        send_keys: 'sendKeys',
+        set_value: 'setValue',
+        select: 'selectOption',
+        check: 'check',
+      }
+      if (!operations[action])
+        return Promise.resolve(JSON.stringify({ error: '不支持的浏览器交互动作' }))
+      if (action === 'hover' || action === 'click') {
+        try {
+          const result = await actions.execute(
+            {
+              action,
+              target: typeof args.target === 'string' ? args.target : undefined,
+              handle: typeof args.handle === 'string' ? args.handle : undefined,
+              allowOccluded: args.allowOccluded === true,
+            },
+            {
+              principalId: context.agentId,
+              correlationId: context.toolCallId ?? `browser:${operations[action]}:${Date.now()}`,
+            },
+          )
+          await onObservation?.({ operation: operations[action], result, context })
+          return JSON.stringify({ success: true, result })
+        } catch (error) {
+          return JSON.stringify({ error: error instanceof Error ? error.message : String(error) })
+        }
+      }
+      return invoke(operations[action], args, context)
+    },
+    browser_query_dom: (args, context) => {
+      const operation =
+        args.action === 'source'
+          ? 'sourceSearch'
+          : args.action === 'frame'
+            ? 'frameQuery'
+            : 'domQuery'
+      return invoke(operation, args, context)
+    },
+    browser_dialog: (args, context) => invoke('handleDialog', args, context),
+    browser_network: (args, context) => {
+      const operation =
+        args.action === 'body'
+          ? 'networkBody'
+          : args.action === 'configure'
+            ? 'networkConfigure'
+            : 'networkQuery'
+      return invoke(operation, args, context)
+    },
+    browser_upload: (args, context) => invoke('uploadFile', args, context),
+    browser_download: (args, context) => invoke('downloadConfigure', args, context),
+    browser_storage: (args, context) => invoke('storage', args, context),
+    browser_emulate: (args, context) => invoke('emulate', args, context),
+    browser_evaluate: (args, context) => invoke('evaluate', args, context),
+    browser_status: (args, context) => invoke('runtimeStatus', args, context),
   }
 
-  const result = await _browserBridge.sendCommand(command, params)
-  const content = await _browserBridge.getPageContent()
+  const requiredOperations: Record<string, string[]> = {
+    browser_open_url: ['open'],
+    browser_click: ['click'],
+    browser_type: ['type'],
+    browser_scroll: ['scroll'],
+    browser_back: ['back'],
+    browser_get_content: ['extract'],
+    browser_search: ['search'],
+    browser_screenshot: ['screenshot'],
+    browser_page_image: ['elementScreenshot'],
+    browser_wait: ['wait'],
+    browser_tabs: ['listTargets', 'createTarget', 'switchTarget', 'closeTarget'],
+    browser_interact: ['hover', 'nativeClick', 'sendKeys', 'setValue', 'selectOption', 'check'],
+    browser_query_dom: ['domQuery', 'sourceSearch', 'frameQuery'],
+    browser_dialog: ['handleDialog'],
+    browser_network: ['networkQuery', 'networkBody', 'networkConfigure'],
+    browser_upload: ['uploadFile'],
+    browser_download: ['downloadConfigure'],
+    browser_storage: ['storage'],
+    browser_emulate: ['emulate'],
+    browser_evaluate: ['evaluate'],
+    browser_status: ['runtimeStatus'],
+  }
 
-  const status =
-    result.status === 'success' ? '✅ 执行成功' : `❌ 执行失败: ${result.error ?? '未知错误'}`
-
-  return JSON.stringify({
-    success: result.status === 'success',
-    message: status,
-    pageContent: content.slice(0, 15000),
-    truncated: content.length > 15000,
-  })
-}
-
-// ── browser_open_url ──
-
-export const browserOpenUrlTool: BuiltinTool = {
-  name: 'browser_open_url',
-
-  async execute(args) {
-    let url = args.url as string
-    if (!url?.trim()) {
-      return JSON.stringify({ error: '请提供 URL' })
-    }
-    if (!url.startsWith('http')) url = 'https://' + url
-
-    logger.info(`打开 URL: ${url}`)
-    return execWithContent('open_url', { url })
-  },
-}
-
-// ── browser_click ──
-
-export const browserClickTool: BuiltinTool = {
-  name: 'browser_click',
-
-  async execute(args) {
-    const target = args.target as string
-    if (!target?.trim()) {
-      return JSON.stringify({ error: '请提供目标元素' })
-    }
-
-    logger.info(`点击元素: ${target}`)
-    return execWithContent('click', { target })
-  },
-}
-
-// ── browser_type ──
-
-export const browserTypeTool: BuiltinTool = {
-  name: 'browser_type',
-
-  async execute(args) {
-    const target = args.target as string
-    const text = args.text as string
-    if (!target?.trim() || !text) {
-      return JSON.stringify({ error: '请提供目标元素和输入文本' })
-    }
-
-    logger.info(`输入文本: ${target} ← "${text.slice(0, 50)}"`)
-    return execWithContent('type', { target, text })
-  },
-}
-
-// ── browser_scroll ──
-
-export const browserScrollTool: BuiltinTool = {
-  name: 'browser_scroll',
-
-  async execute(args) {
-    const direction = (args.direction as string) ?? 'down'
-    logger.info(`滚动页面: ${direction}`)
-    return execWithContent('scroll', { text: direction })
-  },
-}
-
-// ── browser_back ──
-
-export const browserBackTool: BuiltinTool = {
-  name: 'browser_back',
-
-  async execute() {
-    logger.info('返回上一页')
-    return execWithContent('back')
-  },
-}
-
-// ── browser_get_content ──
-
-export const browserGetContentTool: BuiltinTool = {
-  name: 'browser_get_content',
-
-  async execute() {
-    if (!_browserBridge) {
-      return JSON.stringify({ error: '浏览器桥接未初始化' })
-    }
-    if (!_browserBridge.isConnected) {
-      return JSON.stringify({ error: '浏览器未连接' })
-    }
-
-    const content = await _browserBridge.getPageContent()
-    logger.info(`获取页面内容: ${content.length} 字符`)
-
-    return JSON.stringify({
-      success: true,
-      content: content.slice(0, 20000),
-      truncated: content.length > 20000,
-    })
-  },
+  return manifest.tools
+    .map((definition) => ({
+      ...definition,
+      display: {
+        ...definition.display,
+        ...(manifest.userCopy as Record<string, { label: string; description: string }>)[
+          definition.name
+        ],
+      },
+    }))
+    .filter((definition) => handlers[definition.name])
+    .filter((definition) =>
+      (requiredOperations[definition.name] ?? []).every((operation) =>
+        availableOperations.includes(operation),
+      ),
+    )
+    .map((definition) => ({
+      definition: definition as ToolDefinition,
+      handler: handlers[definition.name]!,
+    }))
 }

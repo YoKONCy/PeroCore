@@ -1,5 +1,5 @@
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentManager } from '@infos/backend/services/agent/agentManager'
@@ -30,8 +30,12 @@ function createResolver(appRoot: string, dataRoot: string): PathResolver {
     resolve: vi.fn((alias: string) => {
       if (alias === '@app/backend/src/assets/agents') return appRoot
       if (alias === '@data/agents') return dataRoot
-      return alias
+      if (alias === '@data/principals') return join(dataRoot, 'principals')
+      throw new Error(`测试 PathResolver未处理逻辑路径: ${alias}`)
     }),
+    getWorkspaceRoot: vi.fn((agentId: string) =>
+      join(dataRoot, 'principals', agentId, 'workspace'),
+    ),
   } as unknown as PathResolver
 }
 
@@ -55,6 +59,23 @@ describe('AgentManager', () => {
 
   afterEach(() => {
     rmSync(rootDir, { recursive: true, force: true })
+  })
+
+  it('PathResolver残留逻辑别名时不得向仓库写入 Workspace', () => {
+    createAgent(builtinDir, 'broken-agent', { name: '损坏路径测试' })
+    const leakedPath = resolve('@data', 'principals', 'broken-agent', 'workspace')
+    const invalidResolver = {
+      resolve: vi.fn((alias: string) => {
+        if (alias === '@app/backend/src/assets/agents') return builtinDir
+        if (alias === '@data/agents') return dataDir
+        if (alias === '@data/principals') return '@data/principals'
+        throw new Error(`测试 PathResolver未处理逻辑路径: ${alias}`)
+      }),
+    } as unknown as PathResolver
+
+    const manager = new AgentManager(invalidResolver, configRepo as never)
+    expect(manager.getAgent('broken-agent')).toBeDefined()
+    expect(existsSync(leakedPath)).toBe(false)
   })
 
   it('应当扫描内置与用户 Agent 并加载人设、头像和台词', () => {
@@ -97,6 +118,103 @@ describe('AgentManager', () => {
     expect(agents.map((agent) => agent.id).sort()).toEqual(['custom', 'pero'])
     expect(manager.enabledAgents).toEqual(new Set(['pero', 'custom']))
     expect(manager.getDefaultAgent()?.id).toBe('pero')
+  })
+
+  it('应读取、标准化并保存角色公开档案', () => {
+    createAgent(builtinDir, 'pero', {
+      name: 'Pero',
+      public_profile: {
+        gender: ' 女 ',
+        identity: '据点助手',
+        appearance: 123,
+        personality: '',
+        private_note: '不得公开',
+      },
+    })
+    const manager = new AgentManager(createResolver(builtinDir, dataDir))
+
+    expect(manager.getAgentDetail('pero')?.publicProfile).toEqual({
+      gender: '女',
+      identity: '据点助手',
+    })
+
+    manager.updateAgent('pero', {
+      publicProfile: {
+        appearance: '蓝色短发',
+        personality: '活泼可靠',
+      },
+    })
+
+    expect(manager.getAgent('pero')?.publicProfile).toEqual({
+      appearance: '蓝色短发',
+      personality: '活泼可靠',
+    })
+    const saved = JSON.parse(readFileSync(join(dataDir, 'pero', 'agent.json'), 'utf-8')) as Record<
+      string,
+      unknown
+    >
+    expect(saved.public_profile).toEqual({
+      appearance: '蓝色短发',
+      personality: '活泼可靠',
+    })
+  })
+
+  it('旧角色缺少公开档案时应回退为空对象', () => {
+    createAgent(dataDir, 'custom', { name: 'Custom' })
+    const manager = new AgentManager(createResolver(builtinDir, dataDir))
+
+    expect(manager.getAgentDetail('custom')?.publicProfile).toEqual({})
+  })
+
+  it('应导出官方和用户角色的静态资源并排除运行期工作区', () => {
+    createAgent(
+      builtinDir,
+      'pero',
+      { name: 'Pero' },
+      { 'system_prompt.md': '官方人格', 'avatar.png': 'avatar' },
+    )
+    createAgent(dataDir, 'custom', { name: 'Custom' }, { 'system_prompt.md': '用户人格' })
+    mkdirSync(join(builtinDir, 'pero', 'workspace'), { recursive: true })
+    writeFileSync(join(builtinDir, 'pero', 'workspace', 'secret.txt'), '运行期数据', 'utf8')
+    const manager = new AgentManager(createResolver(builtinDir, dataDir))
+
+    const builtinPackage = manager.exportAgentPackage('pero')
+    const userPackage = manager.exportAgentPackage('custom')
+
+    expect(builtinPackage).toMatchObject({
+      format: 'infos.agent-package',
+      version: 1,
+      agentId: 'pero',
+      fileName: 'pero.infos-agent.zip',
+    })
+    expect(builtinPackage.files.map((file) => file.path)).toEqual([
+      'agent.json',
+      'avatar.png',
+      'system_prompt.md',
+    ])
+    expect(userPackage.files.some((file) => file.path === 'agent.json')).toBe(true)
+    expect(() => manager.exportAgentPackage('missing')).toThrow('不存在')
+  })
+
+  it('保存内置角色时应修复缺少清单的残留用户副本目录', () => {
+    createAgent(
+      builtinDir,
+      'nana',
+      { name: 'Nana', description: '原始描述' },
+      { 'system_prompt.md': '原始人格', 'capabilities.yaml': 'agent: nana' },
+    )
+    mkdirSync(join(dataDir, 'nana'), { recursive: true })
+    const manager = new AgentManager(createResolver(builtinDir, dataDir))
+
+    const updated = manager.updateAgent('nana', {
+      description: '更新后的描述',
+      systemPrompt: '更新后的人格',
+    })
+
+    expect(updated.description).toBe('更新后的描述')
+    expect(existsSync(join(dataDir, 'nana', 'agent.json'))).toBe(true)
+    expect(existsSync(join(dataDir, 'nana', 'capabilities.yaml'))).toBe(true)
+    expect(updated.configPath).toBe(join(dataDir, 'nana', 'agent.json'))
   })
 
   it('应当启用与禁用 Agent 并拒绝非法状态', () => {

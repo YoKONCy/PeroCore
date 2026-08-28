@@ -4,10 +4,12 @@
     "outDir": "./dist",
     "types": ["node"],
     "paths": {
+      "@infos/arca": ["../apps/arca/src"],
       "@infos/shared": ["../shared/src"],
-      "@infos/shared/*": ["../shared/src/*"],
       "@infos/backend": ["../backend/src"],
-      "@infos/backend/*": ["../backend/src/*"]
+      "@infos/backend/*": ["../backend/src/*"],
+      "@infos/node-sdk": ["../node-sdk/src"],
+      "@infos/node-sdk/*": ["../node-sdk/src/*"]
     }
   },
   "include": ["src/**/*.ts"],

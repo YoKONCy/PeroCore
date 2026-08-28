@@ -8,6 +8,22 @@
   "entry": "index.ts",
   "category": "core",
   "platforms": ["windows", "linux", "darwin", "docker"],
+  "userCopy": {
+    "read_file": { "label": "读取文件", "description": "查看电脑中指定文件的内容。" },
+    "write_file": {
+      "label": "写入文件",
+      "description": "把内容保存到文件；文件不存在时可以新建。"
+    },
+    "delete_file": {
+      "label": "删除文件",
+      "description": "删除服务端指定的普通文件；不会删除文件夹。"
+    },
+    "get_file_info": {
+      "label": "查看文件信息",
+      "description": "查看文件大小、类型、修改时间等基本信息。"
+    },
+    "list_directory": { "label": "浏览文件夹", "description": "查看文件夹中有哪些文件和子文件夹。" }
+  },
 
   "tools": [
     {
@@ -21,7 +37,10 @@
             "type": "string",
             "description": "文件路径。优先使用相对于当前 Agent workspace 根目录的路径，例如 notes/today.md；不要添加 workspace/ 前缀。"
           },
-          "max_length": { "type": "number", "description": "可选的最大读取字符数；不指定时默认返回前 800 行" }
+          "max_length": {
+            "type": "number",
+            "description": "可选的最大读取字符数；不指定时默认返回前 800 行"
+          }
         },
         "required": ["file_path"]
       }
@@ -41,6 +60,21 @@
           "append": { "type": "boolean", "description": "是否追加模式 (默认 false，覆写)" }
         },
         "required": ["file_path", "content"]
+      }
+    },
+    {
+      "name": "delete_file",
+      "description": "删除服务端指定的普通文件。该操作不会删除目录，也不会递归删除。",
+      "display": { "label": "删除文件", "icon": "trash", "color": "red", "style": "edit" },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "要删除的普通文件路径。相对路径以当前 Agent workspace 根目录为基准；工作区外必须使用绝对路径。"
+          }
+        },
+        "required": ["file_path"]
       }
     },
     {

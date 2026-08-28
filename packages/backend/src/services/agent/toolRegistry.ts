@@ -2,11 +2,9 @@
  * Tool Registry — 工具注册表
  *
  * 统一管理所有可供 Agent 调用的工具。
- * B6 升级: 与 ExtensionManager 双向桥接。
- *
  * 工具注册两条路径:
  * 1. 静态注册: registerBuiltinTools() (src/tools/index.ts)
- * 2. 动态注册: syncFromExtensionManager() (用户扩展)
+ * 2. Package Tool Contribution: PackageRuntime 激活时注册
  *
  * 两者注册后均可通过 CapabilityGate 白名单过滤。
  *
@@ -15,8 +13,9 @@
 
 import type { ToolDefinition } from '../pipeline/types'
 import type { ToolExecutionResult } from './reactLoop'
-import { toolFailure, type StructuredToolResult } from '../execution/toolResult'
+import type { StructuredToolResult } from '../execution/toolResult'
 import { createLogger } from '../../lib/logger'
+import { isStrongholdChannelTool } from '../../tools/systemProtocolTools'
 
 const logger = createLogger('ToolRegistry')
 
@@ -54,8 +53,14 @@ export interface ToolContext {
   signal?: AbortSignal
   /** 后台任务 ID；普通对话为空。 */
   taskId?: string
+  /** 当前 Kernel Execution，用于副作用、Receipt和跨 Node调用的统一因果链。 */
+  executionId?: import('@infos/shared').KernelExecutionId
+  processId?: import('@infos/shared').KernelProcessId
+  deadline?: string
   /** 本次敏感调用已经用户逐次审批；不得跨调用持久化或复用。 */
   approvedSensitiveAction?: boolean
+  /** 纯读取/搜索工具可访问设备路径；不表示用户批准过写入越界。 */
+  deviceReadScope?: boolean
   /** 本次调用已经用户审批，可访问 ResourceScope 外的路径；不得跨调用持久化。 */
   approvedOutsideWorkspace?: boolean
 }
@@ -89,6 +94,11 @@ export class ToolRegistry {
       allowedSources,
     })
     logger.debug(`工具已注册: ${definition.name}`)
+  }
+
+  /** 注销普通工具；仅移除当前注册项。 */
+  unregister(name: string): boolean {
+    return this.tools.delete(name)
   }
 
   /**
@@ -187,80 +197,29 @@ export class ToolRegistry {
     }
   }
 
-  /**
-   * 从 ExtensionManager 同步 Tool 扩展
-   *
-   * 将 ExtensionManager 中所有 ToolExtension 桥接注册到 ToolRegistry。
-   * 已存在的同名工具不会被覆盖 (静态内置工具优先)。
-   */
-  syncFromExtensionManager(extensionManager: {
-    getAllToolDefinitions(): Array<{ name: string; description: string; parameters?: unknown }>
-    getTool(name: string):
-      | {
-          execute?(
-            args: Record<string, unknown>,
-            ctx: unknown,
-          ): Promise<{ success: boolean; data?: unknown; error?: string }>
-        }
-      | undefined
-  }): number {
-    const definitions = extensionManager.getAllToolDefinitions()
-    let synced = 0
-
-    for (const def of definitions) {
-      if (!def?.name) continue // 防御性跳过无效定义
-
-      // 静态内置工具优先，不覆盖
-      if (this.tools.has(def.name)) {
-        logger.debug(`跳过已注册工具: ${def.name} (内置优先)`)
-        continue
-      }
-
-      const tool = extensionManager.getTool(def.name)
-      if (!tool?.execute) {
-        logger.debug(
-          `ExtensionManager Tool ${def.name} 无顶层 execute (可能是多工具模块，已通过内置注册)`,
-        )
-        continue
-      }
-
-      const handler: ToolHandler = async (args, ctx) => {
-        const result = await tool.execute!(args, ctx)
-        // ToolResult → string 适配
-        if (!result.success) {
-          return toolFailure('EXTENSION_TOOL_FAILED', result.error ?? '工具执行失败')
-        }
-        return typeof result.data === 'string' ? result.data : JSON.stringify(result.data ?? '')
-      }
-
-      this.register(
-        {
-          name: def.name,
-          description: def.description,
-          parameters: def.parameters as Record<string, unknown>,
-          // 社区扩展工具可在 definition/display 声明前端轨迹区元数据，原样透传
-          display: (def as { display?: ToolDefinition['display'] }).display,
-        },
-        handler,
-      )
-      synced++
-    }
-
-    if (synced > 0) {
-      logger.info(`从 ExtensionManager 同步 ${synced} 个工具`)
-    }
-    return synced
-  }
-
   /** 获取工具处理函数 */
   getHandler(name: string): ToolHandler | undefined {
     return this.tools.get(name)?.handler
   }
 
-  /** 获取允许在指定 source 下使用的工具定义列表 */
+  /** 检查工具是否允许在指定来源通道使用。 */
+  isAllowedInSource(name: string, source: string): boolean {
+    const tool = this.tools.get(name)
+    if (!tool) return true
+    if (source === 'group' && !isStrongholdChannelTool(name)) return false
+    return !tool.allowedSources?.length || tool.allowedSources.includes(source)
+  }
+
+  /** 获取工具定义。 */
+  getDefinition(name: string): ToolDefinition | undefined {
+    return this.tools.get(name)?.definition
+  }
+
+  /** 获取允许在指定 source 下使用的工具定义列表。group额外采用据点上游白名单。 */
   getDefinitions(source?: string): ToolDefinition[] {
     const result: ToolDefinition[] = []
     for (const tool of this.tools.values()) {
+      if (source === 'group' && !isStrongholdChannelTool(tool.definition.name)) continue
       if (source && tool.allowedSources?.length) {
         if (!tool.allowedSources.includes(source)) continue
       }

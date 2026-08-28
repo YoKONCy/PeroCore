@@ -5,7 +5,6 @@
  */
 
 export { ContextRnn, type ContextRnnConfig } from './contextRnn'
-export { ClusterRouter, type ClusterRouterConfig, type ActiveCluster } from './clusterRouter'
 export {
   contextAwareRerank,
   diversityFilter,
@@ -13,15 +12,3 @@ export {
   type RankedCandidate,
   type RerankConfig,
 } from './dpDiversity'
-export {
-  RetrievalFeedback,
-  type FeedbackSignal,
-  type FeedbackConfig,
-  type InjectedMemory,
-} from './retrievalFeedback'
-export {
-  ContextualRetriever,
-  type ContextualRetrieverDeps,
-  type CognitiveSearchRequest,
-  type CognitiveSearchResult,
-} from './contextualRetriever'

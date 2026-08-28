@@ -1,4 +1,12 @@
+/**
+ * tabRegistry — 前端领域模块
+ *
+ * 集中管理该领域的数据转换、状态边界与外部交互。
+ * 调用方依赖这里的稳定契约，不直接耦合底层传输或运行时实现。
+ */
 import type { Component } from 'vue'
+import { arcaManifest } from '@infos/arca/manifest'
+import { applicationSurfaceRegistry, defineApplicationSurface } from '../../applications'
 
 export type TabModule = { default: Component }
 export type TabLoader = () => Promise<TabModule>
@@ -9,6 +17,7 @@ const loaders: Record<string, TabLoader> = {
   overview: () => import('../../components/dashboard/tabs/OverviewTab.vue'),
   logs: () => import('../../components/dashboard/tabs/LogsTab.vue'),
   memories: () => import('../../components/dashboard/tabs/MemoriesTab.vue'),
+  knowledge: () => import('../../components/dashboard/tabs/KnowledgeTab.vue'),
   tasks: () => import('../../components/dashboard/tabs/TasksTab.vue'),
   stronghold: () => import('../../components/main/tabs/StrongholdTab.vue'),
   agent_config: () => import('../../components/dashboard/tabs/AgentConfigTab.vue'),
@@ -16,9 +25,24 @@ const loaders: Record<string, TabLoader> = {
   model_config: () => import('../../components/dashboard/tabs/ModelConfigTab.vue'),
   voice_config: () => import('../../components/dashboard/tabs/VoiceTab.vue'),
   mcp_config: () => import('../../components/dashboard/tabs/McpTab.vue'),
+  distributed: () => import('../../components/dashboard/tabs/DistributedTab.vue'),
   social: () => import('../../components/dashboard/tabs/SocialTab.vue'),
   terminal: () => import('../../components/dashboard/tabs/TerminalTab.vue'),
   system_reset: () => import('../../components/dashboard/tabs/ResetTab.vue'),
+}
+
+applicationSurfaceRegistry.register(
+  defineApplicationSurface({
+    manifest: arcaManifest,
+    surfaceId: 'workbench',
+    load: () => import('../../components/dashboard/tabs/ArcaTab.vue'),
+  }),
+)
+
+for (const surface of applicationSurfaceRegistry.list('main.tab')) {
+  loaders[
+    surface.appId === 'infos.arca' ? 'arca' : `${surface.appId}:${surface.declaration.surfaceId}`
+  ] = surface.load as TabLoader
 }
 
 const pending = new Map<string, Promise<TabModule>>()

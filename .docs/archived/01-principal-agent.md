@@ -1,5 +1,7 @@
 # PrincipalAgent 模型
 
+> **归档警示**：本文记录历史设计与迁移背景，不代表当前架构。现行规范以[A01文档索引](../A01_PROJECT_STRUCTURE.md#6-规范文档与归档)及其列出的A02–A09/S系列文档为准；旧Channel、API、Package或Application表述不得用于新实现。
+
 > 主 Agent 是拥有完整人格、长期记忆和个人工作区的数字生命主体。
 
 ---
@@ -9,6 +11,7 @@
 PrincipalAgent 是 PeroCore AIOS 的顶层身份实体。每个 PrincipalAgent（如 Pero、Nana）是一个独立的、长期存在的角色，拥有自己的人格、记忆和工作区。
 
 PrincipalAgent **不是**：
+
 - 不是一次会话（那是 Thread）
 - 不是一次上下文编译（那是 Context Runtime 的产物）
 - 不是一组工具权限（那是 Tool Capability）
@@ -71,6 +74,7 @@ activeAgentId = 当前窗口默认由谁响应用户
 它只回答："用户没有明确指定时，由哪个 Agent 响应？"
 
 它**不**回答：
+
 - 当前上下文属于谁（那是 Thread 的事）
 - 当前窗口显示什么会话（那是前端的事）
 - 哪个 Agent 在执行后台任务（那是 Scheduler 的事）
@@ -86,12 +90,12 @@ activeAgentId = 当前窗口默认由谁响应用户
 
 ### 3.2 与现有实现的区别
 
-| 现有 | 新架构 |
-|---|---|
-| `AgentManager.activeAgentId` 后端全局唯一 | 前端窗口级状态 |
-| active Agent 影响整个后端状态 | 后端无此全局状态 |
-| 切换 Agent 不保证原子切换 Thread | 切换 Agent 必须原子切换或创建 Thread |
-| 后端只有一个活跃 Agent | 后端可同时处理多 Agent 请求 |
+| 现有                                      | 新架构                               |
+| ----------------------------------------- | ------------------------------------ |
+| `AgentManager.activeAgentId` 后端全局唯一 | 前端窗口级状态                       |
+| active Agent 影响整个后端状态             | 后端无此全局状态                     |
+| 切换 Agent 不保证原子切换 Thread          | 切换 Agent 必须原子切换或创建 Thread |
+| 后端只有一个活跃 Agent                    | 后端可同时处理多 Agent 请求          |
 
 ---
 
@@ -128,12 +132,12 @@ Identity
 
 ### 4.3 与现有实现的区别
 
-| 现有 | 新架构 |
-|---|---|
+| 现有                           | 新架构                     |
+| ------------------------------ | -------------------------- |
 | `agent.json` + `personas/*.md` | 结构化为 Identity 领域对象 |
-| `source` 触发 preset 切换 | `channel` 属性触发补丁读取 |
-| preset 实际未生效（ID 不匹配） | 补丁直接由 Compiler 读取 |
-| `extraVars` 可覆盖人格变量 | 人格变量不可被客户端覆盖 |
+| `source` 触发 preset 切换      | `channel` 属性触发补丁读取 |
+| preset 实际未生效（ID 不匹配） | 补丁直接由 Compiler 读取   |
+| `extraVars` 可覆盖人格变量     | 人格变量不可被客户端覆盖   |
 
 ---
 
@@ -153,6 +157,7 @@ PrincipalAgent (id="pero")
 ```
 
 每个资源独立管理自己的：
+
 - 存储
 - 生命周期
 - 配置
@@ -242,15 +247,15 @@ shared/diary.tdb             ← 日记向量库（需改为按 agent 隔离）
 
 ## 9. 与现有代码的对应
 
-| 现有模块 | 新架构角色 | 处理方式 |
-|---|---|---|
-| `AgentManager` | PrincipalAgent 管理 | 重构为 `PrincipalAgentService` |
-| `AgentManager.activeAgentId` | 活跃 Agent 路由 | 移入 `RuntimeStateService` |
-| `agent.json` + `system_prompt.md` | Identity | 结构化读取，不再散落 |
-| `personas/*.md` | Identity.channelPatches | 由 Compiler 按 channel 读取 |
-| `capabilities.yaml` | ToolCapability | 重构为 Resource Scope 模型 |
-| `SessionService` | Thread | 整体替换 |
-| `ConversationLogService` | Thread 消息存储 | 迁移为 Thread Message |
+| 现有模块                          | 新架构角色              | 处理方式                       |
+| --------------------------------- | ----------------------- | ------------------------------ |
+| `AgentManager`                    | PrincipalAgent 管理     | 重构为 `PrincipalAgentService` |
+| `AgentManager.activeAgentId`      | 活跃 Agent 路由         | 移入 `RuntimeStateService`     |
+| `agent.json` + `system_prompt.md` | Identity                | 结构化读取，不再散落           |
+| `personas/*.md`                   | Identity.channelPatches | 由 Compiler 按 channel 读取    |
+| `capabilities.yaml`               | ToolCapability          | 重构为 Resource Scope 模型     |
+| `SessionService`                  | Thread                  | 整体替换                       |
+| `ConversationLogService`          | Thread 消息存储         | 迁移为 Thread Message          |
 
 ---
 

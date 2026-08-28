@@ -10,7 +10,6 @@ import { createReadStream, existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { readdir, stat } from 'node:fs/promises'
 import path from 'node:path'
-import os from 'node:os'
 import readline from 'node:readline'
 import type { BuiltinTool } from '../index'
 import { getWorkspaceService } from '../workspaceServiceHolder'
@@ -22,7 +21,7 @@ const MAX_FILE_BYTES = 2 * 1024 * 1024
 const require = createRequire(import.meta.url)
 
 /** 单条匹配：文件路径 + 行号 + 列号（1-based）+ 该行内容 */
-interface CodeMatch {
+export interface CodeMatch {
   file: string
   line: number
   column?: number
@@ -41,7 +40,7 @@ export const codeSearcherTool: BuiltinTool = {
     if (!workspaceService) throw new Error('WorkspaceService 尚未初始化')
     const searchPath = workspaceService.resolveDeviceReadPath(
       ctx.agentId,
-      args.path ? String(args.path) : os.homedir(),
+      args.path ? String(args.path) : undefined,
     )
 
     const rg = await searchWithRipgrep({ query, isRegex, fileType, searchPath, signal: ctx.signal })

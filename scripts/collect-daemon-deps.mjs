@@ -157,14 +157,8 @@ function preservePeerDependency(packageName, peerName) {
 /** 收集单个包及其依赖树到输出 node_modules */
 function collectPackage(pkgName, visited, optional = false) {
   if (visited.has(pkgName)) return
-  // 工作区源码已由 esbuild 内联；仅两个包含 WASM/N-API 运行文件的包保持 external。
-  if (
-    pkgName.startsWith('@infos/') &&
-    pkgName !== '@infos/auditor-wasm' &&
-    pkgName !== '@infos/nit-runtime'
-  ) {
-    return
-  }
+  // 工作区源码已由esbuild内联。
+  if (pkgName.startsWith('@infos/')) return
   // ripgrep 仅提取当前平台二进制到 dist-daemon/bin，避免把平台包和重复二进制塞入 node_modules。
   if (pkgName === '@vscode/ripgrep' || pkgName.startsWith('@vscode/ripgrep-')) return
 
@@ -182,18 +176,6 @@ function collectPackage(pkgName, visited, optional = false) {
   if (fs.existsSync(target)) return // 已收集
 
   copyDir(source, target, pkgName)
-  if (pkgName === '@infos/auditor-wasm' || pkgName === '@infos/nit-runtime') {
-    const compiledEntry = path.join(target, 'dist', 'index.js')
-    if (!fs.existsSync(compiledEntry)) {
-      throw new Error(`发行依赖 ${pkgName} 缺少编译入口: ${compiledEntry}`)
-    }
-    const releaseManifestPath = path.join(target, 'package.json')
-    const releaseManifest = JSON.parse(fs.readFileSync(releaseManifestPath, 'utf8'))
-    releaseManifest.main = 'dist/index.js'
-    releaseManifest.types = 'dist/index.d.ts'
-    if (pkgName === '@infos/nit-runtime') releaseManifest.type = 'commonjs'
-    fs.writeFileSync(releaseManifestPath, JSON.stringify(releaseManifest, null, 2), 'utf8')
-  }
   // 该包自身的 node_modules 可能含嵌套依赖链接，加入候选基目录
   registerNestedNodeModules(source)
   console.log(`✅ 已收集: ${pkgName}`)
@@ -204,11 +186,7 @@ function collectPackage(pkgName, visited, optional = false) {
     try {
       const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'))
       for (const entry of [pkgJson.main, pkgJson.module].filter(Boolean)) {
-        if (
-          /\.(?:ts|tsx|mts|cts)$/.test(entry) &&
-          pkgName !== '@infos/auditor-wasm' &&
-          pkgName !== '@infos/nit-runtime'
-        ) {
+        if (/\.(?:ts|tsx|mts|cts)$/.test(entry)) {
           throw new Error(`发行依赖 ${pkgName} 的运行入口仍指向 TypeScript 源码: ${entry}`)
         }
       }
@@ -294,19 +272,6 @@ function validateNativeRuntime() {
   if (!findFileRecursive(ptyDir, (file) => path.extname(file).toLowerCase() === '.node')) {
     throw new Error('node-pty 缺少原生 .node 模块')
   }
-  const workspaceRuntimePackages = ['@infos/auditor-wasm', '@infos/nit-runtime']
-  for (const name of workspaceRuntimePackages) {
-    const packageDir = path.join(OUT_NODE_MODULES, ...name.split('/'))
-    const manifest = JSON.parse(fs.readFileSync(path.join(packageDir, 'package.json'), 'utf8'))
-    const entry = path.join(packageDir, manifest.main)
-    if (!fs.existsSync(entry) || path.extname(entry) !== '.js') {
-      throw new Error(`发行依赖 ${name} 缺少编译后的 JavaScript 入口: ${entry}`)
-    }
-  }
-
-  const auditorWasm = path.join(OUT_NODE_MODULES, '@infos', 'auditor-wasm', 'dist', 'auditor.wasm')
-  if (!fs.existsSync(auditorWasm)) throw new Error('发行依赖缺少命令审计 WASM')
-
   if (process.platform === 'win32') {
     for (const name of ['conpty.dll', 'OpenConsole.exe']) {
       if (

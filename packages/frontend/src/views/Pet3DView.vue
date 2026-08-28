@@ -20,6 +20,7 @@
 import { ref, watch, computed, onMounted, onUnmounted } from 'vue'
 import BedrockAvatar from '../components/avatar/BedrockAvatar.vue'
 import PetOverlayUI from '../components/pet/PetOverlayUI.vue'
+import PetBubbleSurface from '../components/pet/PetBubbleSurface.vue'
 import { LyricOverlay } from '../components/overlays'
 import { usePetBubble } from '../composables/pet/usePetBubble'
 import { usePetWindow } from '../composables/pet/usePetWindow'
@@ -46,22 +47,21 @@ const {
   isBubbleOverflow,
   bubbleStyle,
   bubbleContentRef,
-  showBubble,
+  showBubble: showLocalBubbleText,
   toggleExpand,
 } = usePetBubble()
+const localBubbleOverride = ref(false)
+function showBubble(text: string, duration?: number): void {
+  localBubbleOverride.value = true
+  showLocalBubbleText(text, duration)
+}
 
-// ── 气泡文本（纯文本，不做 Markdown 解析，保留换行） ──
+// ── 当前气泡来源：最近触发的本地互动台词可临时覆盖 AI Surface。 ──
+const showLocalBubble = computed(() => localBubbleOverride.value || !activeSurface.value)
+
+// ── 歌词文本来自与气泡相同的 AI Surface；本地台词仅作无 AI 内容时的回退。 ──
 const filteredLyricText = computed(() =>
-  bubbleText.value
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/`([^`]+)`/g, '$1')
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-    .replace(/^#{1,6}\s+/gm, '')
-    .replace(/[>*_~]/g, ' ')
-    .replace(/\n{2,}/g, '\n')
-    .replace(/[ \t]{2,}/g, ' ')
-    .trim(),
+  showLocalBubble.value ? bubbleText.value : surfaceText.value || bubbleText.value,
 )
 
 // ts-plugin 对 Vue 模板 ref 的误报修复：显式读取一次以消除 "declared but never read" warning
@@ -70,10 +70,19 @@ void bubbleContentRef
 const { globalMouse, isDragging, onInteractableEnter, onInteractableLeave } = usePetWindow()
 
 // ── TTS 音频播放 + 唇同步 ──
-const { isPlaying: isSpeaking, mouthOpen, receiveAudioChunk } = usePetAudio()
+const {
+  isPlaying: isSpeaking,
+  mouthOpen,
+  receiveAudioChunk,
+  playAsset,
+  stopAll: stopAudioOutput,
+} = usePetAudio()
+const cancelledAudioPlaybacks = new Set<string>()
+let removeAudioPlayListener: (() => void) | undefined
+let removeAudioStopListener: (() => void) | undefined
 
-// ── Gateway 对话同步 ──
-const { chatState, sendChat } = usePetGateway({
+// ── Gateway 对话同步；AI 正文由统一 Surface 提供 ──
+const { chatState, activeSurface, surfaceText, sendChat } = usePetGateway({
   onAudioChunk: (data) => receiveAudioChunk(data),
 })
 
@@ -157,22 +166,20 @@ const { onPet, onHoverStart, onHoverEnd } = usePetInteraction({
   onInteractableLeave,
 })
 
-// ── Gateway 流式回复 → 气泡 ──
-watch(
-  () => chatState.value.currentText,
-  (text) => {
-    if (text && !chatState.value.isThinking) {
-      showBubble(text, 0)
-    }
-  },
-)
+watch(isBubbleVisible, (visible) => {
+  if (!visible && localBubbleOverride.value && activeSurface.value) {
+    localBubbleOverride.value = false
+    isBubbleVisible.value = true
+  }
+})
 
-watch(
-  () => [chatState.value.isThinking, chatState.value.thinkingMessage] as const,
-  ([thinking, message]) => {
-    if (thinking && message) showBubble(message, 0)
-  },
-)
+// ── Gateway Surface → 气泡可见性；正文不再复制到 usePetBubble。 ──
+watch(activeSurface, (surface) => {
+  if (surface) {
+    localBubbleOverride.value = false
+    isBubbleVisible.value = true
+  }
+})
 
 // ── 唇同步 → 角色嘴巴 ──
 watch(mouthOpen, (val) => {
@@ -264,9 +271,32 @@ function handleGlobalKeydown(e: KeyboardEvent) {
 
 onMounted(() => {
   document.addEventListener('keydown', handleGlobalKeydown)
+  removeAudioPlayListener = window.electron?.on('audio-output:play', (...args: unknown[]) => {
+    const payload = args[0] as { playbackId?: unknown; assetUrl?: unknown }
+    const playbackId = String(payload.playbackId ?? '')
+    const assetUrl = String(payload.assetUrl ?? '')
+    if (!playbackId || !assetUrl.startsWith('/api/assets/audio/')) return
+    void playAsset(playbackId, assetUrl)
+      .then(() => {
+        window.electron?.send('audio-output:receipt', { playbackId, state: 'completed' })
+      })
+      .catch(() => {
+        window.electron?.send('audio-output:receipt', { playbackId, state: 'cancelled' })
+      })
+  })
+  removeAudioStopListener = window.electron?.on('audio-output:stop', (...args: unknown[]) => {
+    const payload = args[0] as { playbackId?: unknown }
+    const playbackId = String(payload.playbackId ?? '')
+    if (!playbackId) return
+    cancelledAudioPlaybacks.add(playbackId)
+    stopAudioOutput()
+    window.electron?.send('audio-output:receipt', { playbackId, state: 'cancelled' })
+  })
 })
 onUnmounted(() => {
   document.removeEventListener('keydown', handleGlobalKeydown)
+  removeAudioPlayListener?.()
+  removeAudioStopListener?.()
 })
 
 // 初始气泡已由 usePetTexts.showTimeBasedWelcome() 自动显示
@@ -299,7 +329,8 @@ onUnmounted(() => {
             class="pet-bubble-content"
             :class="{ 'pet-bubble-content--expanded': isBubbleExpanded }"
           >
-            {{ bubbleText }}
+            <template v-if="showLocalBubble">{{ bubbleText }}</template>
+            <PetBubbleSurface v-else-if="activeSurface" :surface="activeSurface" />
           </div>
           <button
             v-if="isBubbleOverflow || isBubbleExpanded"

@@ -15,6 +15,10 @@
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool'
   content: string | ContentPart[] | null
+  /** 推理模型返回的内部思考字段，仅向兼容 Provider 回传。 */
+  reasoningContent?: string
+  /** Provider原生推理结构，用于跨工具轮无损重放。 */
+  nativeReasoning?: NativeReasoningPayload[]
   name?: string
   toolCallId?: string
   toolCalls?: ToolCall[]
@@ -52,6 +56,14 @@ export interface ToolDefinition {
 
 /** 模型推理强度；undefined 表示完全不向 Provider 传参。 */
 export type ReasoningEffort = 'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+export type LlmWireApi = 'chat_completions' | 'responses'
+export type ReasoningDialect = 'auto' | 'openai' | 'deepseek' | 'openrouter' | 'generic'
+
+export interface NativeReasoningPayload {
+  format: 'reasoning_content' | 'reasoning_details' | 'responses_reasoning'
+  text?: string
+  opaque?: unknown
+}
 
 export interface ChatOptions {
   /** 温度 (0-2) */
@@ -62,6 +74,8 @@ export interface ChatOptions {
   maxTokens?: number
   /** 模型推理强度 */
   reasoningEffort?: ReasoningEffort
+  /** 是否请求Provider返回可展示的原生思考摘要。 */
+  returnNativeReasoning?: boolean
   /** 工具定义列表 */
   tools?: ToolDefinition[]
   /** 响应格式 (如 json_object) */
@@ -97,6 +111,8 @@ export interface ChatCompletion {
       role: 'assistant'
       content: string | null
       toolCalls?: ToolCall[]
+      reasoningContent?: string
+      nativeReasoning?: NativeReasoningPayload[]
     }
     finishReason?: string
   }>
@@ -126,6 +142,8 @@ export interface ChatDelta {
       role?: string
       content?: string
       toolCalls?: StreamToolCallDelta[]
+      reasoningContent?: string
+      nativeReasoning?: NativeReasoningPayload[]
     }
     finishReason?: string | null
   }>
@@ -157,4 +175,6 @@ export interface ProviderConfig {
   modelId: string
   /** 最大 Token 数 (Anthropic 必填) */
   maxTokens?: number
+  wireApi?: LlmWireApi
+  reasoningDialect?: ReasoningDialect
 }

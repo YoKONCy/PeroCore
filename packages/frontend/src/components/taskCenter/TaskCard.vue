@@ -57,8 +57,22 @@ const elapsed = computed(() => {
   return `${s}s`
 })
 
-/** 是否可暂停（仅 queued） */
-const canPause = computed(() => props.task.status === 'queued')
+/** 是否可暂停（排队或运行中） */
+const canPause = computed(() => ['queued', 'running'].includes(props.task.status))
+const waitReason = computed(() => {
+  const reason = props.task.execution?.waitReason
+  if (!reason) return ''
+  const labels: Record<string, string> = {
+    scheduler_capacity: '等待系统容量',
+    class_capacity: '等待后台任务容量',
+    resource_locked: '等待Agent资源',
+    backpressure: '系统负载保护',
+    io: '等待I/O',
+    approval: '等待批准',
+    paused: '已暂停',
+  }
+  return labels[reason] ?? reason
+})
 /** 是否可恢复（paused） */
 const canResume = computed(() => props.task.status === 'paused')
 /** 是否可取消（活跃态） */
@@ -111,6 +125,7 @@ const canResumeInterrupted = computed(
       <p class="task-card__meta">
         <span v-if="agentName" class="task-card__agent">{{ agentName }}</span>
         <span v-if="task.currentStage" class="task-card__stage">{{ task.currentStage }}</span>
+        <span v-if="waitReason" class="task-card__stage">{{ waitReason }}</span>
         <span v-if="elapsed">{{ elapsed }}</span>
         <span class="task-card__tools">工具 ×{{ task.toolCallCount }}</span>
       </p>

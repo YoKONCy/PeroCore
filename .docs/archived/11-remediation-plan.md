@@ -1,5 +1,7 @@
 # 11. AIOS 重构收尾修复计划
 
+> **归档警示**：本文记录历史设计与迁移背景，不代表当前架构。现行规范以[A01文档索引](../A01_PROJECT_STRUCTURE.md#6-规范文档与归档)及其列出的A02–A09/S系列文档为准；旧Channel、API、Package或Application表述不得用于新实现。
+
 > 基于 2026-08-07 全面审计的结论制定。
 > 范围：修复 P0/P1 级缺陷、补齐未完成项、清理技术债。
 > 不涉及新特性开发（分布式多节点、AgentApplication 等不在本计划内）。
@@ -16,14 +18,14 @@
 
 ## 1. 修复批次总览
 
-| 批次 | 内容 | 优先级 | 依赖 |
-|---|---|---|---|
-| 批次 A | 启动链路与能力桥接修复（P0-1/2/3） | P0 | 无 |
-| 批次 B | 权限隔离修复（P0-4 + P1-1/2） | P0 | 无 |
-| 批次 C | 前端 runtimeApi 接入 + 失败测试修复（P1-3） | P1 | 无 |
-| 批次 D | 入站路由补全（P1-4） | P1 | 批次 B |
-| 批次 E | 架构加固（fail-closed / 协议提取 / WS 鉴权 / 注销语义） | P1 | 批次 A/B |
-| 批次 F | 技术债清理（.bak / work 残留 / 注释） | P2 | 批次 A-E |
+| 批次   | 内容                                                    | 优先级 | 依赖     |
+| ------ | ------------------------------------------------------- | ------ | -------- |
+| 批次 A | 启动链路与能力桥接修复（P0-1/2/3）                      | P0     | 无       |
+| 批次 B | 权限隔离修复（P0-4 + P1-1/2）                           | P0     | 无       |
+| 批次 C | 前端 runtimeApi 接入 + 失败测试修复（P1-3）             | P1     | 无       |
+| 批次 D | 入站路由补全（P1-4）                                    | P1     | 批次 B   |
+| 批次 E | 架构加固（fail-closed / 协议提取 / WS 鉴权 / 注销语义） | P1     | 批次 A/B |
+| 批次 F | 技术债清理（.bak / work 残留 / 注释）                   | P2     | 批次 A-E |
 
 每批独立可验证，建议顺序 A → B → C → D → E → F。
 
@@ -32,6 +34,7 @@
 ## 2. 批次 A：启动链路与能力桥接修复
 
 ### 目标
+
 让 `pnpm start` 后，Electron 能成功注册能力、截图工具能真正执行、多模态截图能正确注入。
 
 ### A1. 修复启动链路断开（P0-1）
@@ -41,6 +44,7 @@
 **方案**：让 `backend/main.ts` 也启动 CapabilityBridge，与 `daemon/main.ts` 复用同一套启动逻辑。
 
 **改动**：
+
 1. 在 `backend/src/main.ts` 的启动流程中，于 HTTP 服务启动后追加：
    - 实例化 `CapabilityBridge`（复用 `ctx.capabilityBridge`）
    - 调用 `capabilityBridge.start(port)` 监听 :9121
@@ -49,6 +53,7 @@
 3. 在 `backend/main.ts` 启动日志中打印 CapabilityBridge 端口
 
 **验证**：
+
 - `pnpm start` 后日志显示 "CapabilityBridge listening on :9121"
 - Electron CapabilityProvider 日志显示 "registered success"
 - `curl http://localhost:9120/api/health` 仍正常
@@ -58,6 +63,7 @@
 ### A2. 修复工具名不匹配（P0-2）
 
 **问题**：
+
 - 真实工具名：`take_screenshot`
 - toolExecutor 平台名单：`screen_capture` + `take_screenshot`
 - Electron handler 注册：只有 `screen_capture`
@@ -67,6 +73,7 @@ LLM 调 `take_screenshot` 时，`findProvider('take_screenshot')` 返回 null。
 **方案**：在 toolExecutor 的平台工具路由层加一个**能力名映射表**，把工具名映射到能力名。
 
 **改动**：
+
 1. 在 `toolExecutor.ts` 的平台工具名单附近新增映射：
    ```typescript
    /** 工具名 → 能力名映射（同一能力可被多个工具名调用） */
@@ -78,17 +85,20 @@ LLM 调 `take_screenshot` 时，`findProvider('take_screenshot')` 返回 null。
 3. 同步在 Electron `CAPABILITY_HANDLERS` 注释里标注 `screen_capture` 会被 `take_screenshot` 工具调用
 
 **验证**：
+
 - LLM 调 `take_screenshot` → toolExecutor 路由到 `screen_capture` 能力 → Electron handler 执行 → 返回结果
 
 ### A3. 修复返回格式不匹配（P0-3）
 
 **问题**：
+
 - reactLoop 期望：`{ success, screenshots: [{ index, dataUri }], message }`
 - Electron `captureScreen()` 返回：`{ dataUrl, width, height, timestamp }`
 
 **方案**：在 Electron 的 `screen_capture` handler 内做格式适配，返回 reactLoop 期望的结构。
 
 **改动**：
+
 1. 修改 `capabilityProvider.ts` 的 `screen_capture` handler：
    ```typescript
    screen_capture: async (args) => {
@@ -106,6 +116,7 @@ LLM 调 `take_screenshot` 时，`findProvider('take_screenshot')` 返回 null。
 3. 不改 reactLoop 的解析逻辑（保持多模态注入逻辑稳定）
 
 **验证**：
+
 - LLM 调 `take_screenshot` → 收到 `{ success, screenshots: [{ index, dataUri }] }` 格式
 - 多模态模型能"看到"截图（reactLoop 正确提取 image_url 块）
 
@@ -120,11 +131,13 @@ LLM 调 `take_screenshot` 时，`findProvider('take_screenshot')` 返回 null。
 ## 3. 批次 B：权限隔离修复
 
 ### 目标
+
 修复多 Agent 权限隔离失效、社交场景工具集过宽、平台工具绕过权限校验三个安全漏洞。
 
 ### B1. 修复 ToolExecutor agentId 硬编码（P0-4）
 
 **问题**：
+
 - `toolExecutor.ts:155` `const agentId = this.defaultContext.agentId ?? 'pero'`
 - `container.ts` 创建 ToolExecutor 时根本没传 `defaultContext`
 - `runtimeContext` 只传 threadId/channel，不传 agentId
@@ -133,6 +146,7 @@ LLM 调 `take_screenshot` 时，`findProvider('take_screenshot')` 返回 null。
 **方案**：把 `agentId` 提升为 `execute()` 的必填 runtimeContext 字段，删除 `defaultContext` 兜底。
 
 **改动**：
+
 1. 修改 `ToolExecutor` 接口（`reactLoop.ts` 中定义）：
    ```typescript
    export interface ToolExecutor {
@@ -143,7 +157,7 @@ LLM 调 `take_screenshot` 时，`findProvider('take_screenshot')` 返回 null。
        context?: {
          threadId?: string
          channel?: string
-         agentId?: string  // 新增：必填，工具权限校验依赖
+         agentId?: string // 新增：必填，工具权限校验依赖
        },
      ): Promise<ToolExecutionResult>
    }
@@ -157,17 +171,20 @@ LLM 调 `take_screenshot` 时，`findProvider('take_screenshot')` 返回 null。
 5. 修改所有 `runReActLoop` 调用方：传入正确的 agentId
 
 **影响面排查**：
+
 - `agentService.ts` 的 `chat()` / `chatStreamWithCompiled()` 需要透传 agentId 到 reactLoop
 - `socialBridge.ts` 的 `agentService.chat()` 已传 agentId，需要 chat() 不再丢弃它
 - `companionScheduler.ts` 同理
 
 **验证**：
+
 - 新增测试：两个不同 agentId 调用同一工具，验证走各自的 capabilities.yaml
 - Nana 调用 Pero 独有的工具 → 被拒绝
 
 ### B2. 修复 agentService.chat() 丢弃 source（P1-1）
 
 **问题**：
+
 - `agentService.ts:218` 硬编码 `runChat(..., 'desktop')`
 - socialBridge 传的 `source: 'social'` 被丢弃
 - 社交场景拿到 desktop 工具集（含 terminal_execute 等）
@@ -175,6 +192,7 @@ LLM 调 `take_screenshot` 时，`findProvider('take_screenshot')` 返回 null。
 **方案**：移除 `chat()` 兼容层的硬编码，透传 source 到 `chatWithCompiledMessages()`。
 
 **改动**：
+
 1. 修改 `agentService.ts` 的 `chat()` 方法：
    - 删除 `const source = 'desktop'`（第218行附近）
    - 改为 `const source = params.source ?? 'desktop'`
@@ -187,6 +205,7 @@ LLM 调 `take_screenshot` 时，`findProvider('take_screenshot')` 返回 null。
    - `companionScheduler.ts` → 检查并补传 `source: 'companion'`
 
 **验证**：
+
 - 社交场景日志显示 `source=social`
 - MODE_MAX_TURNS 按社交配置（2轮而非30轮）
 - 工具集按 social channel 过滤
@@ -194,6 +213,7 @@ LLM 调 `take_screenshot` 时，`findProvider('take_screenshot')` 返回 null。
 ### B3. 修复 CapabilityGate fail-open（P1-1）
 
 **问题**：
+
 - `capabilityGate.ts:93` 未配置 channel 回退 desktop
 - 当前 capabilities.yaml 没有 social/group 配置
 - fail-open 等于"忘记配置=全开放"
@@ -201,6 +221,7 @@ LLM 调 `take_screenshot` 时，`findProvider('take_screenshot')` 返回 null。
 **方案**：改为 fail-closed——未配置 channel 返回空能力集。
 
 **改动**：
+
 1. 修改 `capabilityGate.ts` 的 `resolveChannelConfig()`：
    ```typescript
    const channelConfig = config?.channels[channel]
@@ -214,6 +235,7 @@ LLM 调 `take_screenshot` 时，`findProvider('take_screenshot')` 返回 null。
 **注意**：此改动需要在 B4 补充 social/group channel 配置后才能真正生效，否则社交场景会完全没有工具可用（过渡期可接受——空集比全开放安全）。
 
 **验证**：
+
 - 未配置的 channel 调用任何工具 → 被拒绝
 - 日志打印 warn 提示配置缺失
 
@@ -224,6 +246,7 @@ LLM 调 `take_screenshot` 时，`findProvider('take_screenshot')` 返回 null。
 **方案**：在 Pero 和 Nana 的 `capabilities.yaml` 中补充 social/group channel 的最小配置。
 
 **改动**：
+
 1. `packages/backend/src/services/mdp/agents/pero/capabilities.yaml` 新增：
    ```yaml
    social:
@@ -252,6 +275,7 @@ LLM 调 `take_screenshot` 时，`findProvider('take_screenshot')` 返回 null。
 3. 注释说明这是"第一版最小配置"，未来由社交子 Agent 应用独立管理
 
 **验证**：
+
 - social channel 调用 `terminal_execute` → 被拒绝
 - social channel 调用 `take_screenshot` → 允许
 - group channel 调用 `take_screenshot` → 被拒绝
@@ -259,12 +283,14 @@ LLM 调 `take_screenshot` 时，`findProvider('take_screenshot')` 返回 null。
 ### B5. 修复平台工具绕过权限校验（P1-2）
 
 **问题**：
+
 - `toolExecutor.ts:203` 平台能力路由在 CapabilityGate 校验**之前**返回
 - 截图/剪贴板等工具不受白名单约束
 
 **方案**：把平台工具路由移到 CapabilityGate 校验之后，或在校验前先做一次白名单检查。
 
 **改动**：
+
 1. 重构 `toolExecutor.ts` 的 `execute()` 流程：
    ```
    1. 解析 agentId/channel（来自 runtimeContext）
@@ -276,6 +302,7 @@ LLM 调 `take_screenshot` 时，`findProvider('take_screenshot')` 返回 null。
 3. 注意：`take_screenshot` 在 B4 配置中已加入 social channel 白名单，所以不会因 fail-closed 被误拒
 
 **验证**：
+
 - social channel 调用 `take_screenshot` → 通过校验 → 路由到 CapabilityBridge
 - group channel 调用 `take_screenshot` → 被 CapabilityGate 拒绝（不在白名单）
 - social channel 调用 `terminal_execute` → 被拒绝（不进入平台路由）
@@ -293,12 +320,15 @@ LLM 调 `take_screenshot` 时，`findProvider('take_screenshot')` 返回 null。
 ## 4. 批次 C：前端 runtimeApi 接入
 
 ### 目标
+
 让前端真正消费后端 `/api/runtime/window-agent` 接口，修复失败测试。
 
 ### C1. 新建 frontend runtimeApi 模块
 
 **改动**：
+
 1. 新建 `packages/frontend/src/api/modules/runtimeApi.ts`：
+
    ```typescript
    import { http } from '../transport'
 
@@ -308,16 +338,13 @@ LLM 调 `take_screenshot` 时，`findProvider('take_screenshot')` 返回 null。
        http.post(`/api/runtime/window-agent`, { windowId, agentId }),
 
      /** 获取窗口级 Agent */
-     getWindowAgent: (windowId: string) =>
-       http.get(`/api/runtime/window-agent/${windowId}`),
+     getWindowAgent: (windowId: string) => http.get(`/api/runtime/window-agent/${windowId}`),
 
      /** 清除窗口级 Agent */
-     clearWindowAgent: (windowId: string) =>
-       http.delete(`/api/runtime/window-agent/${windowId}`),
+     clearWindowAgent: (windowId: string) => http.delete(`/api/runtime/window-agent/${windowId}`),
 
      /** 获取所有窗口 Agent 映射 */
-     getAllWindowAgents: () =>
-       http.get(`/api/runtime/window-agent`),
+     getAllWindowAgents: () => http.get(`/api/runtime/window-agent`),
    }
    ```
 
@@ -326,6 +353,7 @@ LLM 调 `take_screenshot` 时，`findProvider('take_screenshot')` 返回 null。
 ### C2. 改造 useAgentStore
 
 **改动**：
+
 1. 修改 `useAgentStore.ts` 的 `switchAgent()`：
    - 删除对 `agentApi.setActive()` 的调用（API 已删除）
    - 改为调用 `runtimeApi.setWindowAgent(windowId, agentId)`
@@ -335,12 +363,14 @@ LLM 调 `take_screenshot` 时，`findProvider('take_screenshot')` 返回 null。
 ### C3. 修复失败的 coreStores 测试
 
 **改动**：
+
 1. 修改 `packages/frontend/tests/unit/stores/coreStores.test.ts`：
    - 删除对 `agentApi.agentSetActive` 的 mock 和断言
    - 改为 mock `runtimeApi.setWindowAgent`
    - 断言 `switchAgent` 调用了 `runtimeApi.setWindowAgent`
 
 **验证**：
+
 - `pnpm test:run` 全绿（447/447 通过）
 
 ### C 批次测试
@@ -353,6 +383,7 @@ LLM 调 `take_screenshot` 时，`findProvider('take_screenshot')` 返回 null。
 ## 5. 批次 D：入站路由补全
 
 ### 目标
+
 让入站路由的 `channel` / `threadId` 真正被使用，社交路径接入 Thread 模型。
 
 ### D1. socialBridge 使用路由的 channel
@@ -362,6 +393,7 @@ LLM 调 `take_screenshot` 时，`findProvider('take_screenshot')` 返回 null。
 **方案**：把路由解析出的 channel 和 threadId 透传到 agentService.chat()。
 
 **改动**：
+
 1. 修改 `socialBridge.ts` 的 `handleInbound()`：
    ```typescript
    if (resolved) {
@@ -382,6 +414,7 @@ LLM 调 `take_screenshot` 时，`findProvider('take_screenshot')` 返回 null。
 **方案**：第一版最小实现——若路由指定了 threadId 则复用，否则按 (agentId, platform, channelId) 查找或创建 Thread。
 
 **改动**：
+
 1. 在 `socialBridge.ts` 注入 `ThreadRepository`（container.ts 已有）
 2. 在 `executeReply()` 中：
    ```typescript
@@ -414,6 +447,7 @@ LLM 调 `take_screenshot` 时，`findProvider('take_screenshot')` 返回 null。
 **说明**：B3 已将 fail-closed 作为修复的一部分。此处独立列出是为了强调它也是架构加固——未来新增 channel 必须显式配置，不能再依赖回退。
 
 **额外改动**：
+
 1. 在 `capabilityGate.ts` 新增 `validateChannelConfig()` 方法：启动时检查所有 Agent 的 capabilities.yaml 是否覆盖了所有支持的 channel
 2. 在 `agentManager.ts` 的 Agent 加载流程中调用此校验
 3. 缺失 channel 配置时打印 warn（不阻断启动）
@@ -425,7 +459,9 @@ LLM 调 `take_screenshot` 时，`findProvider('take_screenshot')` 返回 null。
 **方案**：把 IPC 消息类型和能力返回格式提到 `@perocore/shared`。
 
 **改动**：
+
 1. 新建 `packages/shared/src/types/capability.types.ts`：
+
    ```typescript
    /** Daemon → 节点消息 */
    export type DaemonToNodeMessage =
@@ -445,6 +481,7 @@ LLM 调 `take_screenshot` 时，`findProvider('take_screenshot')` 返回 null。
      message: string
    }
    ```
+
 2. 在 `packages/shared/src/types/index.ts` 中导出
 3. `capabilityBridge.ts` 和 `capabilityProvider.ts` 改为 import 共享类型
 
@@ -455,6 +492,7 @@ LLM 调 `take_screenshot` 时，`findProvider('take_screenshot')` 返回 null。
 **方案**：复用 `PEROCORE_API_TOKEN` 机制。
 
 **改动**：
+
 1. 在 `capabilityBridge.ts` 的 `handleConnection()` 中：
    - 等待第一条消息，必须是 `{ type: 'auth', token: '...' }`
    - 验证 token 与 `process.env.PEROCORE_API_TOKEN` 一致
@@ -471,6 +509,7 @@ LLM 调 `take_screenshot` 时，`findProvider('take_screenshot')` 返回 null。
 ### E4. 代码小瑕疵修复
 
 **改动**：
+
 1. `capabilityBridge.ts:228` 删除无意义的 `void resolve`
 2. `capabilityBridge.ts:321` 在 `invokeTool` 中正确计算 `durationMs` 并透传
 3. `electron/main/index.ts:11` 更新头部注释（删除"启动后端子进程"）
@@ -478,12 +517,14 @@ LLM 调 `take_screenshot` 时，`findProvider('take_screenshot')` 返回 null。
 ### E5. 修复 CapabilityRegistry 注销语义不一致
 
 **问题**：`capabilityRegistry.ts` 的 `unregister()` 调用 `repo.delete(nodeId)` 物理删除节点记录，但 `markStaleOffline()` 只标记 `status='offline'`。两种离线路径语义不一致：
+
 - 主动断连 → 物理删除（重连后历史丢失，nodeId 重新生成）
 - 心跳超时 → 标记 offline（重连后可恢复，nodeId 保持）
 
 **方案**：统一为"标记 offline"，保留节点历史记录。
 
 **改动**：
+
 1. 修改 `capabilityRegistry.ts` 的 `unregister()`：
    - 改为调用 `repo.markOffline(nodeId)` 而非 `repo.delete(nodeId)`
    - 保留节点记录，便于重连时复用 nodeId 和历史能力配置
@@ -491,6 +532,7 @@ LLM 调 `take_screenshot` 时，`findProvider('take_screenshot')` 返回 null。
 3. 新增 `cleanupStaleNodes(daysOld: number)` 方法：清理超过 N 天未活跃的节点（可选）
 
 **验证**：
+
 - 节点断连后查询 `findOnline()` → 不包含该节点
 - 节点断连后查询 `findById(nodeId)` → 仍存在，status=offline
 - 节点重连后 `upsert()` → status 恢复 online，nodeId 保持不变
@@ -504,6 +546,7 @@ LLM 调 `take_screenshot` 时，`findProvider('take_screenshot')` 返回 null。
 **清单**：21 个 `.bak` 文件（backend 19 + frontend 2 + electron 1）
 
 **改动**：
+
 1. 用 `git log` 确认每个 .bak 的原始文件已稳定（无未迁移的改动）
 2. 逐个删除（用户偏好保留备份，但这些是重构完成后的残留，应清理）
 3. 若用户要求保留，移到 `.archive/` 目录统一存放
@@ -513,6 +556,7 @@ LLM 调 `take_screenshot` 时，`findProvider('take_screenshot')` 返回 null。
 ### F2. 清理 work 模式残留
 
 **清单**：5 处残留
+
 - `packages/shared/src/types/memory.types.ts`
 - `packages/shared/src/types/extension.types.ts`
 - `packages/backend/src/schemas/memory.schema.ts`
@@ -520,6 +564,7 @@ LLM 调 `take_screenshot` 时，`findProvider('take_screenshot')` 返回 null。
 - `packages/backend/src/services/agent/reactLoop.ts`（MODE_MAX_TURNS）
 
 **改动**：
+
 1. 评估每处 `work` 的实际用途：
    - 若是历史遗留且无消费者 → 删除
    - 若仍有逻辑依赖 → 保留并标注"待社交子 Agent 应用迁移"
@@ -575,12 +620,12 @@ LLM 调 `take_screenshot` 时，`findProvider('take_screenshot')` 返回 null。
 
 ### 9.1 高风险改动
 
-| 改动 | 风险 | 缓解 |
-|---|---|---|
+| 改动                   | 风险                         | 缓解                                     |
+| ---------------------- | ---------------------------- | ---------------------------------------- |
 | B1 删除 defaultContext | 影响 ToolExecutor 所有调用方 | 分两步：先加 agentId 参数+兜底，再删兜底 |
-| B3 fail-closed | 社交场景可能短暂无工具 | 与 B4 同时发布 |
-| B5 平台工具路由后移 | 截图可能在配置错误时被拒 | 确保 B4 白名单包含 take_screenshot |
-| D2 社交接入 Thread | 影响现有社交消息流 | 拆为 D2a/D2b，先透传再自动创建 |
+| B3 fail-closed         | 社交场景可能短暂无工具       | 与 B4 同时发布                           |
+| B5 平台工具路由后移    | 截图可能在配置错误时被拒     | 确保 B4 白名单包含 take_screenshot       |
+| D2 社交接入 Thread     | 影响现有社交消息流           | 拆为 D2a/D2b，先透传再自动创建           |
 
 ### 9.2 回滚策略
 

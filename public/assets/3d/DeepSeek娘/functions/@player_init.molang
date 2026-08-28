@@ -1,0 +1,9 @@
+v.roaming.Initialized == 0 ? {
+    v.roaming.Initialized = 1;
+    v.roaming.Size = 1.2;
+    v.roaming.HeadSize = 1;
+    v.roaming.glasses = 1;
+    v.roaming.outCoat = 1;
+    v.roaming.display = 1;
+    v.roaming.catEar = 1;
+};

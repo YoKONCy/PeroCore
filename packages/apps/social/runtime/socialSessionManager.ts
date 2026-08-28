@@ -1,326 +1,359 @@
 /**
- * SocialSessionManager — 社交会话缓冲管理 (Layer 1)
+ * SocialSessionManager — 平台无关的社交回合与消息批次管理。
  *
- * 管理每个社交会话的消息缓冲区和状态机。
- * 完全平台无关 — 只处理 InboundMessage。
- *
- * - observing: 默认旁观模式 (群聊) / 正常模式 (私聊)
- * - summoned: 被 @/唤醒, 启动 accumulation timer
- * - active:   主动发言后保持活跃 (续订窗口内的消息也计入)
- * - dive:     潜水模式 (不主动发言)
- *
- * 缓冲策略:
- * - summoned: 固定 timer (私聊 7s / 群聊 15s), 不被后续消息重置
- * - active:   后续消息重置 20s 非活跃 timer
- * - buffer_full: 超过 maxBufferSize 立即 flush
- *
- * @module packages/apps/social/runtime/socialSessionManager
+ * 程序只管理节奏、批次和可靠性；是否回复始终由当前角色自己的 Agent 决定。
  */
-
 import type { InboundMessage } from './types'
-import { createLogger } from '../../../backend/src/lib/logger'
+import { createLogger } from '@infos/backend/applicationHostAbi'
 
 const logger = createLogger('SocialSessionManager')
 
-// ─────────────────────────────────────────────
-// 会话状态
-// ─────────────────────────────────────────────
+export type ParticipationState = 'idle' | 'listening' | 'engaged'
+export type ProcessingPhase = 'ready' | 'collecting' | 'running' | 'cooldown' | 'retrying'
 
-/** 会话状态枚举 */
-export type SessionState = 'observing' | 'summoned' | 'active' | 'dive'
-
-/** 内存中的社交会话 */
-export interface SocialSession {
-  /** 会话 ID (channelId) */
-  channelId: string
-  /** 会话类型 */
-  channelType: 'private' | 'group'
-  /** 关联的 Agent ID */
-  agentId: string
-  /** 当前状态 */
-  state: SessionState
-  /** 消息缓冲区 */
-  buffer: InboundMessage[]
-  /** 最后活跃时间 */
-  lastActiveTime: number
-  /** 最后消息时间 */
-  lastMessageTime: number
-  /** 被 @ 状态 */
-  isMentioned: boolean
-  /** flush 计时器 */
-  flushTimer: ReturnType<typeof setTimeout> | null
-  /** 下次扫描时间 (动态调整) */
-  nextScanTime: number
+export interface SocialWaitRequest {
+  reason: 'continuation_expected' | 'missing_context' | 'conversation_unsettled'
+  duration: 'short' | 'normal' | 'long'
 }
 
-/** flush 触发原因 */
-export type FlushReason =
-  | 'summon_timeout' // 被召唤后累积超时
-  | 'buffer_timeout' // 缓冲区非活跃超时
-  | 'buffer_full' // 缓冲区满
+export interface DeferredSocialIntent {
+  intention: string
+  timing: 'soon' | 'later' | 'much_later'
+  expires: 'one_hour' | 'today' | 'one_day'
+  condition?: string
+  notBefore: number
+  expiresAt: number
+  sourceMessages: InboundMessage[]
+}
 
-/** flush 回调 */
+export type SocialTurnOutcome =
+  | { type: 'reply'; content: string }
+  | { type: 'pass' }
+  | { type: 'wait'; wait: SocialWaitRequest }
+  | {
+      type: 'defer'
+      intent: Omit<DeferredSocialIntent, 'notBefore' | 'expiresAt' | 'sourceMessages'>
+    }
+
+export interface SocialSession {
+  channelId: string
+  channelType: 'private' | 'group'
+  agentId: string
+  participation: ParticipationState
+  phase: ProcessingPhase
+  pendingMessages: InboundMessage[]
+  inFlightMessages: InboundMessage[]
+  lastActiveTime: number
+  lastMessageTime: number
+  isMentioned: boolean
+  flushTimer: ReturnType<typeof setTimeout> | null
+  nextScanTime: number
+  collectionStartedAt: number
+  waitCount: number
+  deferredIntent?: DeferredSocialIntent
+}
+
+export type FlushReason =
+  | 'direct_timeout'
+  | 'buffer_timeout'
+  | 'buffer_full'
+  | 'proactive_review'
+  | 'intent_due'
+
 export type FlushCallback = (
   session: SocialSession,
   messages: InboundMessage[],
   reason: FlushReason,
-) => Promise<void>
-
-// ─────────────────────────────────────────────
-// 配置
-// ─────────────────────────────────────────────
+) => Promise<SocialTurnOutcome>
 
 export interface SessionManagerConfig {
-  /** 私聊被召唤后的累积等待 (秒) */
-  privateSummonTimeout: number
-  /** 群聊被召唤后的累积等待 (秒) */
-  groupSummonTimeout: number
-  /** 非活跃缓冲超时 (秒) */
+  privateCollectTimeout: number
+  groupCollectTimeout: number
   bufferTimeout: number
-  /** 缓冲区最大消息数 */
   maxBufferSize: number
-  /** 活跃状态持续时间 (秒) */
-  activeDuration: number
+  engagedDuration: number
+  maxCollectionDuration: number
+  maxWaitCount: number
 }
 
 const DEFAULT_CONFIG: SessionManagerConfig = {
-  privateSummonTimeout: 7,
-  groupSummonTimeout: 15,
+  privateCollectTimeout: 3,
+  groupCollectTimeout: 6,
   bufferTimeout: 20,
   maxBufferSize: 10,
-  activeDuration: 120,
+  engagedDuration: 120,
+  maxCollectionDuration: 20,
+  maxWaitCount: 2,
 }
-
-// ─────────────────────────────────────────────
-// Manager
-// ─────────────────────────────────────────────
 
 export class SocialSessionManager {
   private sessions = new Map<string, SocialSession>()
   private config: SessionManagerConfig
-  private flushCallback: FlushCallback
 
-  constructor(flushCallback: FlushCallback, config?: Partial<SessionManagerConfig>) {
+  constructor(
+    private readonly flushCallback: FlushCallback,
+    config?: Partial<SessionManagerConfig>,
+  ) {
     this.config = { ...DEFAULT_CONFIG, ...config }
-    this.flushCallback = flushCallback
   }
 
-  // ── 会话管理 ──
-
-  /** 获取或创建会话 (使用 agentId:channelId 复合键) */
   getOrCreate(msg: InboundMessage): SocialSession {
-    const key = `${msg.agentId}:${msg.channelId}`
-
-    if (!this.sessions.has(key)) {
-      const session: SocialSession = {
+    const key = this.sessionKey(msg.agentId, msg.channelType, msg.channelId)
+    let session = this.sessions.get(key)
+    if (!session) {
+      session = {
         channelId: msg.channelId,
         channelType: msg.channelType,
         agentId: msg.agentId,
-        state: 'observing',
-        buffer: [],
+        participation: 'idle',
+        phase: 'ready',
+        pendingMessages: [],
+        inFlightMessages: [],
         lastActiveTime: 0,
         lastMessageTime: Date.now(),
         isMentioned: false,
         flushTimer: null,
-        nextScanTime: Date.now() + 5 * 60 * 1000,
+        nextScanTime: Date.now() + 5 * 60_000,
+        collectionStartedAt: 0,
+        waitCount: 0,
       }
       this.sessions.set(key, session)
     }
-
-    return this.sessions.get(key)!
+    return session
   }
 
-  /** 获取所有活跃会话 */
-  getActiveSessions(channelType?: 'private' | 'group', limit = 5): SocialSession[] {
-    let candidates = [...this.sessions.values()]
+  listSessions(): SocialSession[] {
+    return [...this.sessions.values()].sort((a, b) => b.lastMessageTime - a.lastMessageTime)
+  }
 
-    if (channelType) {
-      candidates = candidates.filter((s) => s.channelType === channelType)
+  closeSession(agentId: string, channelId: string): boolean {
+    const entry = [...this.sessions.entries()].find(
+      ([, session]) => session.agentId === agentId && session.channelId === channelId,
+    )
+    if (!entry) return false
+    this.clearTimer(entry[1])
+    return this.sessions.delete(entry[0])
+  }
+
+  closeSessionsExcept(predicate: (session: SocialSession) => boolean): number {
+    let closed = 0
+    for (const [key, session] of this.sessions) {
+      if (predicate(session)) continue
+      this.clearTimer(session)
+      this.sessions.delete(key)
+      closed++
     }
-
-    return candidates.sort((a, b) => b.lastMessageTime - a.lastMessageTime).slice(0, limit)
+    return closed
   }
 
-  // ── 消息处理 ──
+  getActiveSessions(channelType?: 'private' | 'group', limit = 5): SocialSession[] {
+    return this.listSessions()
+      .filter((session) => !channelType || session.channelType === channelType)
+      .slice(0, limit)
+  }
 
-  /**
-   * 处理入站消息
-   *
-   */
   async handleInbound(msg: InboundMessage): Promise<void> {
     const session = this.getOrCreate(msg)
     const now = Date.now()
-    session.lastMessageTime = now
-
-    // 检查是否被 @
     const rawEvent = msg.rawEvent as Record<string, unknown> | undefined
-    const isMentioned = rawEvent?._isMentioned === true || msg.channelType === 'private' // 私聊始终视为被提及
+    const directlyTriggered = rawEvent?._isMentioned === true || msg.channelType === 'private'
 
-    // 添加到缓冲区
-    session.buffer.push(msg)
-
-    // ── 状态转换 + 计时器逻辑 ──
-
-    if (isMentioned) {
+    session.lastMessageTime = now
+    session.pendingMessages.push(msg)
+    if (directlyTriggered) {
       session.isMentioned = true
-      session.lastActiveTime = now
+      session.participation = session.participation === 'engaged' ? 'engaged' : 'listening'
+    }
 
-      if (session.state !== 'summoned') {
-        // 首次提及 → 进入 summoned, 启动固定累积计时器
-        session.state = 'summoned'
-        const timeout =
-          msg.channelType === 'private'
-            ? this.config.privateSummonTimeout
-            : this.config.groupSummonTimeout
+    // running 期间的新消息只进入下一批，绝不悄悄并入正在推理的上下文。
+    if (session.phase === 'running' || session.phase === 'retrying') return
 
-        logger.info(
-          `[${msg.channelId}] 被提及唤醒 (${msg.channelType}), ` + `启动 ${timeout}s 累积计时器`,
+    const directCollection = directlyTriggered || session.isMentioned
+    const engagedContinuation = session.participation === 'engaged'
+
+    // 普通大群消息只进入有界观察窗口，不按消息数或固定超时直接唤醒 Agent。
+    // 自主观察由 Scheduler 稀疏挑选候选会话，避免高流量群按批次线性调用 LLM。
+    if (!directCollection && !engagedContinuation) {
+      session.phase = 'ready'
+      if (session.pendingMessages.length > this.config.maxBufferSize) {
+        session.pendingMessages.splice(
+          0,
+          session.pendingMessages.length - this.config.maxBufferSize,
         )
-
-        this.clearTimer(session)
-        session.flushTimer = setTimeout(() => {
-          this.triggerFlush(session, 'summon_timeout').catch((err) =>
-            logger.error(`summon_timeout flush 失败: ${err}`),
-          )
-        }, timeout * 1000)
-      } else {
-        // 已是 summoned: 继续累积, 不重置计时器
-        logger.debug(`[${msg.channelId}] summoned 状态下再次被提及, 继续累积`)
       }
-    } else if (session.state === 'active') {
-      // 活跃状态下的普通消息 → 续订活跃
-      session.lastActiveTime = now
-      this.resetBufferTimer(session)
-    } else if (session.state === 'summoned') {
-      // summoned 状态下的普通消息 → 继续累积, 不重置
-    } else if (session.buffer.length >= this.config.maxBufferSize) {
-      // 缓冲区满 → 立即 flush
-      logger.info(`[${msg.channelId}] 缓冲区已满 (${session.buffer.length})`)
-      await this.triggerFlush(session, 'buffer_full')
-    } else {
-      // 普通 observing → 重置非活跃计时器
-      this.resetBufferTimer(session)
+      return
     }
 
-    // 超额检查 (即使在其他状态下, 缓冲区也不能无限增长)
-    if (session.buffer.length >= this.config.maxBufferSize && session.state !== 'summoned') {
-      await this.triggerFlush(session, 'buffer_full')
+    if (session.phase !== 'collecting') {
+      session.phase = 'collecting'
+      session.collectionStartedAt = now
+      session.waitCount = 0
     }
+
+    if (session.pendingMessages.length >= this.config.maxBufferSize) {
+      await this.triggerFlush(session, 'buffer_full')
+      return
+    }
+
+    const timeout = directCollection
+      ? msg.channelType === 'private'
+        ? this.config.privateCollectTimeout
+        : this.config.groupCollectTimeout
+      : this.config.bufferTimeout
+    this.scheduleFlush(session, timeout, directCollection ? 'direct_timeout' : 'buffer_timeout')
   }
 
-  /**
-   * 标记 Agent 已回复 → 进入活跃状态
-   */
+  async review(session: SocialSession, reason: FlushReason = 'proactive_review'): Promise<void> {
+    await this.triggerFlush(session, reason)
+  }
+
+  async retry(session: SocialSession): Promise<void> {
+    if (session.phase !== 'retrying' || session.pendingMessages.length === 0) return
+    session.phase = 'ready'
+    await this.triggerFlush(session, 'buffer_timeout')
+  }
+
   markReplied(session: SocialSession): void {
-    session.state = 'active'
+    session.participation = 'engaged'
+    session.phase = 'cooldown'
     session.lastActiveTime = Date.now()
     session.isMentioned = false
-    logger.debug(`[${session.channelId}] 进入活跃状态`)
+    session.nextScanTime = Date.now() + 2 * 60_000
   }
 
-  /**
-   * 标记 Agent 决定 PASS（跳过回复）→ 直接切换到非活跃期 (observing)
-   *
-   * 使用场景：LLM 在 summoned/active 状态下经过双重思考决策后输出 "PASS"，
-   * 表示本次不打算插嘴。此时必须显式将会话切回 observing，否则：
-   * - 卡在 summoned：下次被 @ 时不会启动新的累积计时器（handleInbound 中
-   *   `if (session.state !== 'summoned')` 分支无法进入），导致响应丢失
-   * - 卡在 active：会继续按 20s 非活跃 timer 续订，无谓地触发后续 flush
-   *
-   * 切换动作：
-   * 1. state → observing（非活跃期，可被后续 @ 重新唤醒）
-   * 2. 清理 isMentioned（避免残留状态影响下次决策）
-   * 3. 清理 flushTimer（PASS 后不应再有挂起的 flush）
-   * 4. 重置 nextScanTime 到一个较短的未来时刻（5 分钟后），
-   *    让调度器在合理时机重新评估该会话，而非立即重新触发
-   *
-   * @param session 当前会话
-   */
-  markPass(session: SocialSession): void {
-    session.state = 'observing'
-    session.isMentioned = false
-    this.clearTimer(session)
-    // 5 分钟后允许调度器再次扫描此会话
-    // 选 5 分钟是为了避免 PASS 后被同一波消息立即重新触发，
-    // 同时不至于让会话"沉睡太久"而错过后续真正相关的对话
-    session.nextScanTime = Date.now() + 5 * 60 * 1000
-    logger.info(
-      `[${session.channelId}] LLM 输出 PASS，会话切换到非活跃期 (observing)，5 分钟后可再次扫描`,
-    )
-  }
-
-  /**
-   * 标记回复生成失败 → 恢复会话到非活跃期 (observing)
-   *
-   * 使用场景：executeReply 中 generateReply/sendReply 抛出异常
-   * （如 LLM 网络错误 fetch failed）。此时 session 仍停留在 summoned 状态，
-   * 下次被 @ 时 handleInbound 的 `if (session.state !== 'summoned')` 分支
-   * 无法进入，不会启动新的累积计时器 → 会话永久失聪、无法再被唤醒。
-   *
-   * 与 markPass 相同的恢复动作（state→observing + 清理 isMentioned/timer），
-   * 区别仅在于日志语义（失败恢复 vs 主动 PASS）。
-   *
-   * @param session 当前会话
-   * @param err     失败原因（可选，写入日志便于排查）
-   */
-  markReplyFailed(session: SocialSession, err?: unknown): void {
-    session.state = 'observing'
-    session.isMentioned = false
-    this.clearTimer(session)
-    // 5 分钟后允许调度器再次扫描，避免网络故障时立即重试造成反复报错
-    session.nextScanTime = Date.now() + 5 * 60 * 1000
-    const reason = err instanceof Error ? err.message : err != null ? String(err) : ''
-    logger.warn(
-      `[${session.channelId}] 回复生成失败，会话已恢复为非活跃期 (observing)，` +
-        `5 分钟后可再次扫描${reason ? `，原因: ${reason}` : ''}`,
-    )
-  }
-
-  /**
-   * 检查活跃状态是否过期 → 回退到 observing
-   */
   checkActiveExpiry(session: SocialSession): void {
-    if (session.state !== 'active') return
-
-    const elapsed = Date.now() - session.lastActiveTime
-    if (elapsed > this.config.activeDuration * 1000) {
-      session.state = 'observing'
-      logger.debug(`[${session.channelId}] 活跃状态过期, 回退到 observing`)
+    if (session.participation !== 'engaged') return
+    if (Date.now() - session.lastActiveTime > this.config.engagedDuration * 1000) {
+      session.participation = 'idle'
+      if (session.phase === 'cooldown') session.phase = 'ready'
     }
   }
 
-  // ── 内部方法 ──
+  dueDeferredIntent(session: SocialSession, now = Date.now()): DeferredSocialIntent | undefined {
+    const intent = session.deferredIntent
+    if (!intent) return undefined
+    if (now >= intent.expiresAt) {
+      session.deferredIntent = undefined
+      return undefined
+    }
+    return now >= intent.notBefore ? intent : undefined
+  }
 
   private async triggerFlush(session: SocialSession, reason: FlushReason): Promise<void> {
     this.clearTimer(session)
+    if (session.phase === 'running' || session.phase === 'retrying') return
 
-    if (session.buffer.length === 0) return
+    if (reason === 'intent_due' && session.deferredIntent) {
+      session.pendingMessages.unshift(...session.deferredIntent.sourceMessages)
+    }
+    if (session.pendingMessages.length === 0) return
 
-    const messages = [...session.buffer]
-    session.buffer = []
-
-    logger.info(`[${session.channelId}] flush: reason=${reason}, msgs=${messages.length}`)
+    const messages = session.pendingMessages.splice(0)
+    session.inFlightMessages = messages
+    session.phase = 'running'
+    logger.info(`[${session.channelId}] 社交批次开始: reason=${reason}, msgs=${messages.length}`)
 
     try {
-      await this.flushCallback(session, messages, reason)
-    } catch (err) {
-      logger.error(`flush 回调失败: ${err}`)
+      const outcome = await this.flushCallback(session, messages, reason)
+      await this.applyOutcome(session, messages, outcome)
+    } catch (error) {
+      // 失败批次回到队首，避免持久化虽成功但实时处理机会丢失。
+      session.pendingMessages.unshift(...messages)
+      session.inFlightMessages = []
+      session.phase = 'retrying'
+      session.nextScanTime = Date.now() + 60_000
+      logger.warn(`[${session.channelId}] 社交批次失败，已保留等待重试: ${String(error)}`)
     }
   }
 
-  private resetBufferTimer(session: SocialSession): void {
+  private async applyOutcome(
+    session: SocialSession,
+    messages: InboundMessage[],
+    outcome: SocialTurnOutcome,
+  ): Promise<void> {
+    session.inFlightMessages = []
+    if (outcome.type === 'reply') {
+      session.deferredIntent = undefined
+      this.markReplied(session)
+      return
+    }
+    if (outcome.type === 'pass') {
+      session.deferredIntent = undefined
+      session.phase = 'ready'
+      session.isMentioned = false
+      session.nextScanTime = Date.now() + 5 * 60_000
+      if (session.participation !== 'engaged') session.participation = 'idle'
+      return
+    }
+    if (outcome.type === 'wait') {
+      session.pendingMessages.unshift(...messages)
+      session.phase = 'collecting'
+      session.waitCount++
+      const elapsed = Date.now() - session.collectionStartedAt
+      const hardRemaining = Math.max(0, this.config.maxCollectionDuration * 1000 - elapsed)
+      if (session.waitCount > this.config.maxWaitCount || hardRemaining === 0) {
+        session.phase = 'ready'
+        session.pendingMessages.splice(0, messages.length)
+        return
+      }
+      const seconds = this.waitSeconds(session.channelType, outcome.wait.duration)
+      this.scheduleFlush(session, Math.min(seconds * 1000, hardRemaining) / 1000, 'direct_timeout')
+      return
+    }
+
+    const now = Date.now()
+    const delay = this.deferDelay(outcome.intent.timing)
+    const lifetime = this.deferLifetime(outcome.intent.expires, now)
+    session.deferredIntent = {
+      ...outcome.intent,
+      notBefore: now + delay,
+      expiresAt: lifetime,
+      sourceMessages: messages,
+    }
+    session.phase = 'ready'
+    session.isMentioned = false
+    session.nextScanTime = now + delay
+  }
+
+  private scheduleFlush(session: SocialSession, seconds: number, reason: FlushReason): void {
     this.clearTimer(session)
-    session.flushTimer = setTimeout(() => {
-      this.triggerFlush(session, 'buffer_timeout').catch((err) =>
-        logger.error(`buffer_timeout flush 失败: ${err}`),
-      )
-    }, this.config.bufferTimeout * 1000)
+    session.flushTimer = setTimeout(
+      () => {
+        this.triggerFlush(session, reason).catch((error) =>
+          logger.error(`[${session.channelId}] 社交计时触发失败: ${String(error)}`),
+        )
+      },
+      Math.max(0, seconds * 1000),
+    )
+  }
+
+  private waitSeconds(type: 'private' | 'group', duration: SocialWaitRequest['duration']): number {
+    const table =
+      type === 'private' ? { short: 2, normal: 5, long: 10 } : { short: 4, normal: 10, long: 20 }
+    return table[duration]
+  }
+
+  private deferDelay(timing: DeferredSocialIntent['timing']): number {
+    const ranges = { soon: [5, 15], later: [30, 90], much_later: [120, 360] } as const
+    const [min, max] = ranges[timing]
+    return (min + Math.floor(Math.random() * (max - min + 1))) * 60_000
+  }
+
+  private deferLifetime(expires: DeferredSocialIntent['expires'], now: number): number {
+    if (expires === 'one_hour') return now + 60 * 60_000
+    if (expires === 'one_day') return now + 24 * 60 * 60_000
+    const end = new Date(now)
+    end.setHours(23, 59, 59, 999)
+    return end.getTime()
+  }
+
+  private sessionKey(agentId: string, channelType: string, channelId: string): string {
+    return `${agentId}:${channelType}:${channelId}`
   }
 
   private clearTimer(session: SocialSession): void {
-    if (session.flushTimer) {
-      clearTimeout(session.flushTimer)
-      session.flushTimer = null
-    }
+    if (!session.flushTimer) return
+    clearTimeout(session.flushTimer)
+    session.flushTimer = null
   }
 }

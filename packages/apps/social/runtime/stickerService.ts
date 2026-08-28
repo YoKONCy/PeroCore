@@ -22,7 +22,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { createLogger } from '../../../backend/src/lib/logger'
+import { createLogger } from '@infos/backend/applicationHostAbi'
 
 const logger = createLogger('StickerService')
 

@@ -130,50 +130,74 @@ export class NitStreamFilter {
  * - 进入块内后丢弃所有内容，直到找到 `</think>`
  * - 未闭合的块（流结束仍未遇到 `</think>`）整体丢弃（flush 处理）
  */
+export type ThinkingStreamEvent =
+  | { type: 'text'; text: string }
+  | { type: 'start' }
+  | { type: 'delta'; delta: string }
+  | { type: 'end' }
+
 export class ThinkingStreamFilter {
   private buffer = ''
-  private inBlock = false
+  private activeTag: 'think' | 'thinking' | 'thought' | null = null
+  private events: ThinkingStreamEvent[] = []
+  private pendingDelta = ''
+  private readonly START_TAG = /<(think|thinking|thought)(?:\s[^>]*)?>/i
+  private readonly PARTIAL_TAG_RESERVE = '<thinking'.length - 1
 
-  /** 开始标签（匹配 <think，兼容大小写与可能的属性/空格） */
-  private readonly START_TAG = '<think'
-  /** 结束标签（匹配 </think>，兼容大小写） */
-  private readonly END_TAG = '</think>'
+  private pushDelta(delta: string, force = false): void {
+    this.pendingDelta += delta
+    if (
+      this.pendingDelta &&
+      (force || this.pendingDelta.length >= 24 || /[。！？!?；;：:\n]$/.test(this.pendingDelta))
+    ) {
+      this.events.push({ type: 'delta', delta: this.pendingDelta })
+      this.pendingDelta = ''
+    }
+  }
+
+  private pushText(text: string): void {
+    if (text) this.events.push({ type: 'text', text })
+  }
 
   filter(chunk: string): string {
     this.buffer += chunk
     let output = ''
 
     while (this.buffer.length > 0) {
-      if (!this.inBlock) {
-        // 查找开始标签（大小写不敏感）
-        const startIdx = this.buffer.toLowerCase().indexOf(this.START_TAG)
-
-        if (startIdx === -1) {
-          // 没有开始标签 → 输出安全部分（保留末尾以防 <think 被截断）
-          const safeLen = this.buffer.length - this.START_TAG.length
+      if (!this.activeTag) {
+        const start = this.START_TAG.exec(this.buffer)
+        if (!start || start.index === undefined) {
+          const safeLen = this.buffer.length - this.PARTIAL_TAG_RESERVE
           if (safeLen > 0) {
-            output += this.buffer.slice(0, safeLen)
+            const text = this.buffer.slice(0, safeLen)
+            output += text
+            this.pushText(text)
             this.buffer = this.buffer.slice(safeLen)
           }
           return output
         }
-
-        // 输出开始标签之前的文本
-        output += this.buffer.slice(0, startIdx)
-        // 跳过开始标签（含 <think 后的内容，直到 >；若 > 尚未到达则仍视作块内）
-        this.buffer = this.buffer.slice(startIdx)
-        this.inBlock = true
+        const prefix = this.buffer.slice(0, start.index)
+        output += prefix
+        this.pushText(prefix)
+        this.buffer = this.buffer.slice(start.index + start[0].length)
+        this.activeTag = start[1]!.toLowerCase() as 'think' | 'thinking' | 'thought'
+        this.events.push({ type: 'start' })
       } else {
-        // 块内：查找 </think>（大小写不敏感）
-        const endIdx = this.buffer.toLowerCase().indexOf(this.END_TAG)
+        const endTag = `</${this.activeTag}>`
+        const endIdx = this.buffer.toLowerCase().indexOf(endTag)
         if (endIdx !== -1) {
-          // 丢弃 </think> 及其之前的所有块内容，从 </think> 之后继续
-          this.buffer = this.buffer.slice(endIdx + this.END_TAG.length)
-          this.inBlock = false
-        } else {
-          // 块内还没遇到结束标签 → 不输出任何内容，等待更多 chunk
-          return output
+          this.pushDelta(this.buffer.slice(0, endIdx), true)
+          this.buffer = this.buffer.slice(endIdx + endTag.length)
+          this.activeTag = null
+          this.events.push({ type: 'end' })
+          continue
         }
+        const safeLen = this.buffer.length - (endTag.length - 1)
+        if (safeLen > 0) {
+          this.pushDelta(this.buffer.slice(0, safeLen))
+          this.buffer = this.buffer.slice(safeLen)
+        }
+        return output
       }
     }
 
@@ -181,10 +205,21 @@ export class ThinkingStreamFilter {
   }
 
   flush(): string {
-    // 块未闭合 → 丢弃块内残留；不在块内 → 输出剩余缓冲区
-    const result = this.inBlock ? '' : this.buffer
+    const result = this.activeTag ? '' : this.buffer
+    if (!this.activeTag) this.pushText(result)
+    else {
+      this.pushDelta(this.buffer, true)
+      this.events.push({ type: 'end' })
+    }
     this.buffer = ''
-    this.inBlock = false
+    this.activeTag = null
+    this.pendingDelta = ''
     return result
+  }
+
+  drainEvents(): ThinkingStreamEvent[] {
+    const events = this.events
+    this.events = []
+    return events
   }
 }

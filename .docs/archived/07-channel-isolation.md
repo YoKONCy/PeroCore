@@ -1,5 +1,7 @@
 # Channel 隔离策略
 
+> **归档警示**：本文记录历史设计与迁移背景，不代表当前架构。现行规范以[A01文档索引](../A01_PROJECT_STRUCTURE.md#6-规范文档与归档)及其列出的A02–A09/S系列文档为准；旧Channel、API、Package或Application表述不得用于新实现。
+
 > Channel 是 Thread 的持久属性，不是 Agent 状态，也不是运行时状态。
 > 主 Agent 通过 Thread channel 实现不同对话场景的上下文、记忆、人格、工具隔离。
 
@@ -9,12 +11,12 @@
 
 本文档描述的 Channel 隔离策略**仅适用于主 Agent（PrincipalAgent）**，即由 ContextCompiler 编译上下文的场景。
 
-| Channel | 是否由主 Agent 编译 | 说明 |
-|---|---|---|
-| `desktop` | ✅ 是 | 桌面聊天（主场景） |
-| `companion` | ✅ 是 | 陪伴模式 |
-| `social` | ❌ 否 | 社交平台私聊（子 Agent 应用，待重构） |
-| `group` | ❌ 否 | 群聊（子 Agent 应用，待重构） |
+| Channel     | 是否由主 Agent 编译 | 说明                                  |
+| ----------- | ------------------- | ------------------------------------- |
+| `desktop`   | ✅ 是               | 桌面聊天（主场景）                    |
+| `companion` | ✅ 是               | 陪伴模式                              |
+| `social`    | ❌ 否               | 社交平台私聊（子 Agent 应用，待重构） |
+| `group`     | ❌ 否               | 群聊（子 Agent 应用，待重构）         |
 
 > `social`/`group` 场景将由独立的社交子 Agent 应用处理，不走 ContextCompiler。
 > 详见 [03-context-runtime.md 第 0.2 节](./03-context-runtime.md#02-社交场景从-contextcompiler-剥离)。
@@ -52,17 +54,17 @@ type ThreadChannel =
 
 ### 2.2 Context Policy 隔离
 
-| Channel | messageWindow | memoryRetrieval | toolDescription | stateInjection |
-|---|---|---|---|---|
-| desktop | 20 | true | true | true |
-| companion | 8 | true | false | true |
+| Channel   | messageWindow | memoryRetrieval | toolDescription | stateInjection |
+| --------- | ------------- | --------------- | --------------- | -------------- |
+| desktop   | 20            | true            | true            | true           |
+| companion | 8             | true            | false           | true           |
 
 ### 2.3 Memory Policy 隔离
 
-| Channel | 写入 Main | 检索 Main |
-|---|---|---|
-| desktop | 是 | 是 |
-| companion | 是 | 是 |
+| Channel   | 写入 Main | 检索 Main |
+| --------- | --------- | --------- |
+| desktop   | 是        | 是        |
+| companion | 是        | 是        |
 
 > 社交记忆（social.tdb）属于社交子 Agent 应用，不在主 Agent 策略范围内。
 
@@ -88,10 +90,10 @@ Identity
 
 ## 4. 工具权限隔离
 
-| Channel | 文件工具 | 终端 | 搜索 | 网络 |
-|---|---|---|---|---|
-| desktop | workspace scope | workspace cwd | 允许 | 允许 |
-| companion | workspace scope | 禁止 | 允许 | 允许 |
+| Channel   | 文件工具        | 终端          | 搜索 | 网络 |
+| --------- | --------------- | ------------- | ---- | ---- |
+| desktop   | workspace scope | workspace cwd | 允许 | 允许 |
+| companion | workspace scope | 禁止          | 允许 | 允许 |
 
 > 社交场景的工具权限由社交子 Agent 应用独立管理。
 
@@ -99,13 +101,13 @@ Identity
 
 ## 5. 模式清理
 
-| 当前模式 | 重构后 |
-|---|---|
-| default | channel=desktop |
-| work | **移除**，留给未来 Coding App |
-| social | 社交子 Agent 应用（待重构） |
-| group_chat | 社交子 Agent 应用（待重构） |
-| companion | channel=companion |
+| 当前模式    | 重构后                          |
+| ----------- | ------------------------------- |
+| default     | channel=desktop                 |
+| work        | **移除**，留给未来 Coding App   |
+| social      | 社交子 Agent 应用（待重构）     |
+| group_chat  | 社交子 Agent 应用（待重构）     |
+| companion   | channel=companion               |
 | lightweight | Context Policy 配置项，不是模式 |
 
 ---

@@ -24,23 +24,28 @@ import {
   type Component,
 } from 'vue'
 import { getTabLoader } from '../composables/main/tabRegistry'
+import { applicationSurfaceRegistry } from '../applications'
 import MainTabLoading from '../components/main/MainTabLoading.vue'
 import { PixelIcon, PDialog } from '../components/pixel'
 import CustomTitleBar from '../components/layout/CustomTitleBar.vue'
 import MainNav from '../components/main/MainNav.vue'
+import UpdateCenterDialog from '../components/main/UpdateCenterDialog.vue'
 import { TaskToastContainer } from '../components/taskCenter'
 import { createDashboardContext, DASHBOARD_CTX_KEY, useGateway } from '../composables/dashboard'
 import { useMainNav } from '../composables/main/useMainNav'
+import { useChatBackground } from '../composables/ui/useChatBackground'
 import { useNotificationStore, useAgentStore, useApprovalStore, useThreadStore } from '../stores'
 import { useTaskCenterStore } from '../stores/taskCenterStore'
 import { isElectron } from '../utils/ipcAdapter'
 import type { ApprovalRequest } from '../api/modules/approvalsApi'
+import { agentInputsApi } from '../api/modules/agentInputsApi'
 import { logger } from '../lib/logger'
 
 defineOptions({ name: 'MainView' })
 
 /** 编译时注入的版本号 */
 const appVersion = __APP_VERSION__
+const showUpdateCenter = ref(false)
 
 // ── Tab 组件异步加载 ──
 
@@ -69,6 +74,7 @@ const tabComponents: Record<string, Component> = Object.fromEntries(
     'overview',
     'logs',
     'memories',
+    'knowledge',
     'tasks',
     'stronghold',
     'agent_config',
@@ -76,27 +82,78 @@ const tabComponents: Record<string, Component> = Object.fromEntries(
     'model_config',
     'voice_config',
     'mcp_config',
+    'distributed',
     'social',
+    'arca',
     'terminal',
     'system_reset',
   ].map((id) => [id, createTabComponent(id)]),
 )
 
+const applicationTabIds = applicationSurfaceRegistry
+  .list('main.tab')
+  .map((surface) =>
+    surface.appId === 'infos.arca' ? 'arca' : `${surface.appId}:${surface.declaration.surfaceId}`,
+  )
+const applicationComponentNames = applicationTabIds.map((id) =>
+  id === 'arca' ? 'ArcaTab' : `ApplicationSurface:${id}`,
+)
+
 /** 不属于 Dashboard 主题作用域的独立页面。 */
 const STANDALONE_TABS = new Set(['chat', 'workspace', 'stronghold'])
 /** 仅高成本重建且需要保持交互现场的页面进入缓存。 */
-const CACHED_TABS = new Set(['chat', 'workspace', 'stronghold', 'social'])
-const cachedTabNames = ['ChatTab', 'WorkspaceTab', 'StrongholdTab', 'SocialTab']
+const CACHED_TABS = new Set(['chat', 'workspace', 'stronghold', 'social', ...applicationTabIds])
+const cachedTabNames = [
+  'ChatTab',
+  'WorkspaceTab',
+  'StrongholdTab',
+  'SocialTab',
+  ...applicationComponentNames,
+]
 
 /** 当前页面是否使用 Dashboard 主题套件。 */
 const isDashboardTab = computed(() => !STANDALONE_TABS.has(currentTab.value))
 
 /** 需要全屏 overflow:hidden 的 Tab */
-const FULL_HEIGHT_TABS = new Set(['chat', 'workspace', 'logs', 'terminal', 'social', 'stronghold'])
+const FULL_HEIGHT_TABS = new Set([
+  'chat',
+  'workspace',
+  'logs',
+  'terminal',
+  'social',
+  ...applicationTabIds,
+  'stronghold',
+])
 
 // ── 导航状态 ──
 
 const { currentTab, currentAmbient } = useMainNav()
+const chatBackground = useChatBackground()
+const showsChatBackground = computed(
+  () =>
+    STANDALONE_TABS.has(currentTab.value) &&
+    chatBackground.settings.value.enabled &&
+    chatBackground.hasImage.value,
+)
+const chatBackgroundStyle = computed(() => {
+  const value = chatBackground.settings.value
+  return {
+    '--chat-background-image': `url("${chatBackground.imageUrl.value}")`,
+    '--chat-background-enabled': '1',
+    '--chat-background-opacity': String(value.opacity),
+    '--chat-background-blur': `${value.blur}px`,
+    '--chat-background-brightness': String(value.brightness),
+    '--chat-background-saturation': String(value.saturation),
+    '--chat-background-contrast': String(value.contrast),
+    '--chat-background-overlay': String(value.overlayOpacity),
+    '--chat-surface-opacity': String(value.surfaceOpacity),
+    '--chat-surface-soft-opacity': String(value.surfaceOpacity * 0.72),
+    '--chat-surface-content-opacity': String(value.surfaceOpacity * 0.2),
+    '--chat-surface-blur': `${value.surfaceBlur}px`,
+    '--chat-background-position': `${value.positionX}% ${value.positionY}%`,
+    '--chat-background-fit': value.fit,
+  }
+})
 
 /** 当前激活 Tab 组件 */
 const activeTabComponent = computed(() => tabComponents[currentTab.value] ?? null)
@@ -135,7 +192,7 @@ async function handleRefresh() {
 
 // ── Gateway WebSocket 接入 ──
 
-const { onPush, offPush } = useGateway()
+const { onPush, offPush, subscribe } = useGateway()
 const notifyStore = useNotificationStore()
 const agentStore = useAgentStore()
 const threadStore = useThreadStore()
@@ -146,6 +203,11 @@ watch(
   () => agentStore.activeAgentId,
   (agentId) => {
     ctx.activeAgentId.value = agentId
+    if (agentId) {
+      void subscribe(`approval:${agentId}`)
+      void subscribe(`agent-input:${agentId}`)
+      void subscribe(`notification:${agentId}`)
+    }
     if (agentId && agentId !== lastSynchronizedAgentId) {
       lastSynchronizedAgentId = agentId
       void threadStore.loadLatestThread(agentId, 'desktop')
@@ -159,7 +221,18 @@ onPush('notification', (payload) => {
   logger.info('MainView', '收到通知', { title: payload.title, body: payload.body })
   const body = (payload.body as string) || (payload.title as string) || '系统通知'
   const level = (payload.level as 'info' | 'success' | 'warning' | 'error') || 'info'
-  notifyStore.toast(body, level)
+  notifyStore.toastRemote(String(payload.notificationId ?? ''), body, {
+    type: level,
+    duration: Number(payload.duration ?? 4000),
+  })
+})
+onPush('durable_notification', (payload) => {
+  const body = (payload.body as string) || (payload.title as string) || '系统通知'
+  const level = (payload.level as 'info' | 'success' | 'warning' | 'error') || 'info'
+  notifyStore.toastRemote(String(payload.notificationId ?? ''), body, {
+    type: level,
+    duration: Number(payload.duration ?? 4000),
+  })
 })
 
 // 监听状态更新 → 触发全局刷新
@@ -194,13 +267,43 @@ const handleApprovalResolved = (payload: Record<string, unknown>) => {
   const request = payload.request as ApprovalRequest | undefined
   if (request) approvalStore.remove(request.id)
 }
+const handleAgentInputRequested = (payload: Record<string, unknown>) => {
+  const request = payload.request as { threadId?: string; agentId?: string } | undefined
+  if (
+    request?.threadId &&
+    request.threadId === threadStore.threadId &&
+    request.agentId === agentStore.activeAgentId
+  ) {
+    void threadStore.refreshCurrentThread(request.agentId)
+  }
+}
+const handleAgentInputResolved = handleAgentInputRequested
+let agentInputPollTimer: ReturnType<typeof setInterval> | null = null
+async function refreshPendingAgentInputs(): Promise<void> {
+  const threadId = threadStore.threadId
+  const agentId = agentStore.activeAgentId
+  if (!threadId || !agentId) return
+  try {
+    const response = await agentInputsApi.list({ status: 'pending', threadId, agentId })
+    if ((response.data?.total ?? 0) > 0 && threadStore.threadId === threadId) {
+      await threadStore.refreshCurrentThread(agentId)
+    }
+  } catch {
+    // Gateway是主链路，轮询只在断线或漏事件时静默兜底。
+  }
+}
 onPush('tool_approval_requested', handleApprovalRequested)
 onPush('tool_approval_resolved', handleApprovalResolved)
+onPush('agent_input_requested', handleAgentInputRequested)
+onPush('agent_input_resolved', handleAgentInputResolved)
 
 onUnmounted(() => {
   approvalStore.stopPolling()
+  if (agentInputPollTimer) clearInterval(agentInputPollTimer)
   offPush('tool_approval_requested', handleApprovalRequested)
   offPush('tool_approval_resolved', handleApprovalResolved)
+  offPush('agent_input_requested', handleAgentInputRequested)
+  offPush('agent_input_resolved', handleAgentInputResolved)
 })
 
 // ── 环境光样式 ──
@@ -245,8 +348,14 @@ function initParticles() {
 
 onMounted(() => {
   initParticles()
+  void chatBackground
+    .load()
+    .catch((error) => logger.warn('MainView', '聊天背景配置加载失败', error))
+
   // 审批属于全局安全基础设施，与当前激活 Tab 无关。
   approvalStore.startPolling()
+  void refreshPendingAgentInputs()
+  agentInputPollTimer = setInterval(() => void refreshPendingAgentInputs(), 4_000)
 })
 </script>
 
@@ -260,7 +369,13 @@ onMounted(() => {
       <MainNav />
 
       <!-- 右侧内容区 -->
-      <main class="main-content" :class="{ 'main-content--full': isFullHeightTab }">
+      <main
+        class="main-content"
+        :class="{
+          'main-content--full': isFullHeightTab,
+        }"
+        :style="showsChatBackground ? chatBackgroundStyle : undefined"
+      >
         <!-- 环境光(仅总览页) -->
         <div v-if="showAmbient" class="main-ambient" :style="ambientStyle" />
 
@@ -319,7 +434,14 @@ onMounted(() => {
         >
           <PixelIcon name="refresh" size="xs" :animation="isRefreshing ? 'spin' : ''" />
         </button>
-        <span class="main-status-version font-pixel">v{{ appVersion }}</span>
+        <button
+          v-if="isElectron()"
+          class="main-status-version font-pixel"
+          title="打开应用更新中心"
+          @click="showUpdateCenter = true"
+        >
+          v{{ appVersion }}
+        </button>
         <button
           v-if="isElectron()"
           class="main-statusbar-btn main-statusbar-btn--danger"
@@ -330,6 +452,12 @@ onMounted(() => {
         </button>
       </div>
     </footer>
+
+    <UpdateCenterDialog
+      v-if="isElectron()"
+      v-model="showUpdateCenter"
+      :current-version="appVersion"
+    />
 
     <!-- M05-B4: 任务中心专属 Toast 容器（右下角，独立于通用通知体系） -->
     <TaskToastContainer />
@@ -553,9 +681,20 @@ onMounted(() => {
 }
 
 .main-status-version {
+  padding: 3px 5px;
   font-size: 10px;
   font-weight: 700;
   color: var(--ui-text-tertiary);
   letter-spacing: 0.05em;
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all var(--ui-duration-fast);
+}
+
+.main-status-version:hover {
+  color: var(--ui-accent-sky);
+  background: var(--ui-bg-hover);
+  border-color: var(--ui-border-default);
 }
 </style>

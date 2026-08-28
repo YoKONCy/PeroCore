@@ -4,16 +4,92 @@
  * @module packages/shared/src/types
  */
 
-export type { ApiResponse, PaginatedData, PaginationParams, SseEventType } from './api.types'
+export * from './social-ports.types'
+export * from './application.types'
+export * from './event-memory.types'
+
 export type {
-  SseDeltaEvent,
-  SseToolCallEvent,
-  SseToolResultEvent,
-  SseStatusEvent,
-  SseDoneEvent,
-  SseErrorEvent,
-  SseEvent,
+  SurfaceId,
+  SurfaceNodeId,
+  SurfaceNodeKind,
+  SurfaceNodeLifecycle,
+  SurfaceNode,
+  MarkdownSurfaceProps,
+  NativeReasoningSurfaceProps,
+  ThinkingSurfaceProps,
+  ToolCallSurfaceProps,
+  ToolResultSurfaceProps,
+  StatusSurfaceProps,
+  ErrorSurfaceProps,
+  AttachmentSurfaceProps,
+  ProgressSurfaceProps,
+  InputSurfaceProps,
+  ApprovalSurfaceProps,
+  SurfaceDescriptor,
+  SurfaceProjectionSnapshot,
+  PanelSurfaceProps,
+  TableSurfaceProps,
+  NotificationSurfaceProps,
+  DocumentSurfaceProps,
+  ProgrammableIslandSurfaceProps,
+  ConversationSurfaceDescriptor,
+  SurfaceOperation,
+  SurfaceFrame,
+  ConversationContentBlock,
+  ConversationMessageProjection,
+  ConversationProjectionSnapshot,
+  SurfaceInput,
+  BackgroundTaskProjectionSnapshot,
+  StrongholdMessageProjection,
+  StrongholdProjectionSnapshot,
+} from './surface.types'
+
+export type {
+  KernelId,
+  KernelObjectId,
+  KernelExecutionId,
+  KernelProcessId,
+  KernelEventId,
+  KernelCapabilityId,
+  KernelObjectRef,
+  KernelExecutionClass,
+  KernelExecutionState,
+  KernelExecutionWaitReason,
+  KernelExecutionUsage,
+  KernelExecutionSnapshot,
+  KernelExecutionBudget,
+  KernelExecutionDescriptor,
+  KernelExitStatus,
+  KernelCapabilityRisk,
+  KernelCapabilityOperationDefinition,
+  KernelCapabilityDefinition,
+  KernelCapabilityOffer,
+  KernelCapabilityRequirement,
+  KernelCapabilityHandle,
+  KernelEventDurability,
+  KernelCarrier,
+  DeliveryAudience,
+  DurableStreamCursor,
+  DurableStreamSnapshot,
+  DurableStreamDescriptor,
+  KernelCallContext,
+  KernelError,
+  KernelEnvelope,
+  KernelEventEnvelope,
+  KernelExecutionEvent,
+  ConversationKernelEvent,
+  KernelEvent,
+  KernelOutboxEventInput,
+} from './kernel.types'
+
+export type {
+  ApiResponse,
+  PaginatedData,
+  PaginationParams,
+  SseEventType,
+  ThreadChannel,
 } from './api.types'
+export type { SseDoneEvent, SseErrorEvent, SseEvent } from './api.types'
 
 export type {
   MemoryType,
@@ -28,6 +104,7 @@ export type {
   ModeCapability,
   SkillManifest,
   ResolvedCapability,
+  AgentPublicProfile,
   AgentProfileDto,
   PetStateDto,
   UpdatePetStateDto,
@@ -36,10 +113,12 @@ export type {
 export type { ChatRole, ConversationLogDto, AnalysisStatus, AiModelConfigDto } from './chat.types'
 
 // 第七阶段修复（批次 E2）：能力协议共享类型
+export { WEB_PAGE_OPERATIONS, webPageCapabilityName } from './capability.types'
 export type {
+  WebPageOperation,
   DaemonToNodeMessage,
   NodeToDaemonMessage,
-  DaemonMessage,
+  CapabilityTransportMessage,
   ScreenCaptureResult,
   ClipboardReadResult,
   ClipboardWriteResult,
@@ -47,33 +126,103 @@ export type {
 } from './capability.types'
 
 export type {
-  ExtensionType,
-  ExtensionCategory,
-  ExtensionPermission,
-  ExtensionManifest,
-  ToolDefinition,
-  ToolParameterSchema,
-  ToolContext,
-  ToolResult,
-  ToolExtension,
-  HookEvent,
-  HookContext,
-  HookHandler,
-  HookExtension,
-  ServiceExtension,
-  InboundMessage,
-  InboundEvent,
-  ExtensionInfo,
-} from './extension.types'
+  PackagePermission,
+  PackageTrustLevel,
+  PackageContributionKind,
+  PackageContribution,
+  PackageCapabilityRequirement,
+  PackageSignature,
+  PackageManifest,
+  ToolDisplayMeta,
+  ToolVisualSignatureMeta,
+  PlatformId,
+} from './package.types'
+
+export type {
+  ContextRegionKind,
+  ContextRegionTrust,
+  ContextRegionDelivery,
+  ContextTokenizer,
+  ContextRegionMaterializer,
+  ContextRegion,
+  ContextRegionRequest,
+  ContextRegionProvider,
+  ContextRegionManifestEntry,
+  ContextRegionCompilation,
+} from './context.types'
+
+export type {
+  KernelNodeId,
+  KernelNodeSessionId,
+  KernelInputSeatId,
+  KernelNodeFacet,
+  KernelNodeTrust,
+  KernelNodeHealth,
+  KernelExecutionPlacement,
+  KernelDataResidency,
+  KernelNodePlatform,
+  KernelNodeDescriptor,
+  NodeDescriptor,
+  KernelNodeSession,
+  NodeSession,
+  KernelNodePlacement,
+  KernelPlacementRequirement,
+  KernelInputSeat,
+  InputSeatLease,
+  KernelResourceAuthority,
+  KernelNodeRoute,
+} from './node.types'
+
+export type {
+  WebEvidenceKind,
+  WebTrustLevel,
+  WebSideEffectClass,
+  WebInteractionHandle,
+  WebSceneEvidence,
+  WebSceneAffordance,
+  WebSceneObject,
+  WebInjectionFinding,
+  WebInteractionScene,
+  WebExpectedEffect,
+  WebObservedEffect,
+  WebActionIntent,
+  WebActionReceipt,
+  WebSiteModel,
+  WebTaskCheckpoint,
+} from './web-agent.types'
+
+export type {
+  KernelAssetId,
+  KernelFileHandleId,
+  KernelTransferId,
+  KernelCredentialId,
+  KernelCredentialHandleId,
+  KernelAssetObject,
+  KernelFileOperation,
+  KernelFileHandle,
+  KernelTransferDirection,
+  KernelTransferState,
+  KernelTransferObject,
+  KernelRuntimeEvent,
+  KernelCredentialObject,
+  KernelCredentialHandle,
+} from './resource.types'
+export { createResourceObjectRef } from './resource.types'
+
+export type {
+  RuntimeIdentity,
+  RuntimeStableHandle,
+  RuntimeSnapshot,
+  RuntimeAdapterRequest,
+  RuntimeAdapterResult,
+  RuntimeAdapter,
+} from './runtime.types'
 
 export type {
   GatewayMessageType,
   GatewayEnvelope,
   GatewayPayload,
   StateUpdatePayload,
-  StreamDeltaPayload,
-  StreamEndPayload,
-  ToolStatusPayload,
   TaskProgressPayload,
   NotificationPayload,
   SystemErrorPayload,
@@ -84,4 +233,6 @@ export type {
   GenericPayload,
   PushAction,
   RequestAction,
+  CataloguedGatewayAction,
 } from './gateway.types'
+export { GATEWAY_ACTION_CATALOG, gatewayActionPolicy } from './gateway.types'

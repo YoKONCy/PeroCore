@@ -7,4 +7,4 @@
  */
 
 export { runStartupTasks } from './startup'
-export { runCleanup, runDreamCheck, runLonelyScan } from './cron'
+export { runCleanup, runDreamCheck } from './cron'

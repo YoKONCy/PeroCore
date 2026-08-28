@@ -1,5 +1,11 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+/**
+ * AgentConfigTab.vue — 界面组件
+ *
+ * 负责组织该界面的响应式状态、用户交互与领域数据展示。
+ * 副作用在组件生命周期内建立并清理，避免跨页面残留监听器或异步状态。
+ */
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { PButton, PCheckbox, PDialog, PEmpty, PInput, PTextarea, PixelIcon } from '../../pixel'
 import {
   agentApi,
@@ -10,7 +16,9 @@ import {
   type AgentTool,
 } from '../../../api/modules/agentApi'
 import { getApiBaseUrl } from '../../../api/transport'
+import { invoke, isElectron } from '../../../utils/ipcAdapter'
 import { useNotificationStore } from '../../../stores'
+import { systemApi } from '../../../api/modules/systemApi'
 
 /** 角色图鉴采用用户能理解的五区协议，不暴露底层文件结构。 */
 type AtlasSection = 'identity' | 'persona' | 'reactions' | 'capability' | 'runtime'
@@ -29,6 +37,7 @@ const loadingList = ref(false)
 const loadingDetail = ref(false)
 const saving = ref(false)
 const deleting = ref(false)
+const exporting = ref(false)
 const createDialog = ref(false)
 const deleteDialog = ref(false)
 const newAgentId = ref('')
@@ -76,11 +85,6 @@ const welcomeSlots = [
   { key: 'welcome.night', label: '夜晚', range: '19:00–24:00' },
 ]
 const fragmentCatalog = [
-  {
-    id: 'components/abilities/vision',
-    name: '视觉感知',
-    description: '让角色常驻感知并理解屏幕视觉能力。',
-  },
   {
     id: 'components/abilities/workspace',
     name: '工作区操作',
@@ -267,6 +271,10 @@ const profileCompletion = computed(() => {
     form.value.description,
     form.value.ownerAppellation,
     form.value.systemPrompt,
+    form.value.publicProfile.gender,
+    form.value.publicProfile.identity,
+    form.value.publicProfile.appearance,
+    form.value.publicProfile.personality,
     avatarSrc.value,
   ]
   return Math.round((checks.filter(Boolean).length / checks.length) * 100)
@@ -275,14 +283,38 @@ const activeSectionMeta = computed(
   () => sections.find((item) => item.id === activeSection.value) ?? sections[0]!,
 )
 const isDirty = computed(() => Boolean(form.value) && serializeState() !== cleanSnapshot.value)
+const promptTokenCount = ref(0)
+let promptTokenTimer: ReturnType<typeof setTimeout> | undefined
+let promptTokenRequest = 0
 const promptStats = computed(() => {
   const chars = form.value?.systemPrompt.length ?? 0
   return {
     chars,
-    tokens: Math.ceil(chars / 2.5),
+    tokens: promptTokenCount.value,
     lines: form.value?.systemPrompt.split('\n').length ?? 0,
   }
 })
+
+watch(
+  () => form.value?.systemPrompt ?? '',
+  (text) => {
+    window.clearTimeout(promptTokenTimer)
+    const request = ++promptTokenRequest
+    if (!text) {
+      promptTokenCount.value = 0
+      return
+    }
+    promptTokenTimer = window.setTimeout(async () => {
+      try {
+        const response = await systemApi.countTokens(text)
+        if (request === promptTokenRequest) promptTokenCount.value = response.data?.tokens ?? 0
+      } catch {
+        if (request === promptTokenRequest) promptTokenCount.value = 0
+      }
+    }, 180)
+  },
+  { immediate: true },
+)
 /** 只读空能力集合，避免 computed 求值时写回 capabilities 造成“假未同步”。 */
 const EMPTY_CAPABILITY: { tools: string[]; skills: string[]; promptFragments: string[] } = {
   tools: [],
@@ -304,6 +336,8 @@ function getOrCreateChannelCapability(key: ManagedChannel) {
 const activeCompatibleTools = computed(() =>
   tools.value.filter((tool) => tool.channels?.includes(activeChannel.value)),
 )
+/** 后端 Registry 标记为 locked 的工具即当前权威系统执行协议，不在前端维护静态副本。 */
+const systemProtocolTools = computed(() => tools.value.filter((tool) => tool.locked))
 const groupedTools = computed(() => {
   const groups = Object.fromEntries(categoryOrder.map((name) => [name, [] as AgentTool[]]))
   for (const tool of activeCompatibleTools.value) groups[classifyTool(tool)]!.push(tool)
@@ -444,14 +478,21 @@ function removeArrayItem(pathValue: string, index: number): void {
 }
 
 function isToolEnabled(tool: AgentTool): boolean {
-  return Boolean(tool.locked) || activeCapability.value.tools.includes(tool.name)
+  return (
+    Boolean(tool.locked) ||
+    activeCapability.value.tools.includes('*') ||
+    activeCapability.value.tools.includes(tool.name)
+  )
 }
 function setToolEnabled(tool: AgentTool, enabled: boolean): void {
   if (tool.locked) return
   const target = getOrCreateChannelCapability(activeChannel.value)
+  const currentTools = target.tools.includes('*')
+    ? activeCompatibleTools.value.map((item) => item.name)
+    : target.tools
   target.tools = enabled
-    ? [...new Set([...target.tools, tool.name])]
-    : target.tools.filter((name) => name !== tool.name)
+    ? [...new Set([...currentTools, tool.name])]
+    : currentTools.filter((name) => name !== tool.name)
 }
 function toggleSkill(skillId: string, enabled: boolean): void {
   const target = getOrCreateChannelCapability(activeChannel.value)
@@ -493,8 +534,14 @@ async function loadAgent(id: string): Promise<void> {
     ])
     selectedId.value = id
     form.value = detailResponse.data ?? null
+    if (form.value && !form.value.publicProfile) form.value.publicProfile = {}
     if (form.value && !form.value.waifuTexts) form.value.waifuTexts = {}
     capabilities.value = capabilityResponse.data ?? { channels: {} }
+    for (const channel of Object.values(capabilities.value.channels)) {
+      channel.promptFragments = channel.promptFragments.filter(
+        (fragment) => fragment !== 'components/abilities/vision',
+      )
+    }
     skillOptions.value = capabilities.value.skills ?? []
     activeSection.value = 'identity'
     // 旧档案自动迁移（清理 lateNight/randTextures 等历史字段）属静默数据修复：
@@ -550,6 +597,7 @@ async function saveAgent(): Promise<void> {
       agentApi.update(form.value.id, {
         name: form.value.name,
         description: form.value.description,
+        publicProfile: form.value.publicProfile,
         ownerAppellation: form.value.ownerAppellation,
         systemPrompt: form.value.systemPrompt,
         channelPatches: form.value.channelPatches,
@@ -593,6 +641,32 @@ async function createAgent(id?: string): Promise<void> {
   }
 }
 
+async function exportAgent(): Promise<void> {
+  if (!form.value || exporting.value) return
+  if (!isElectron()) {
+    notif.toast('角色包目录导出仅支持桌面客户端', 'warning')
+    return
+  }
+  if (isDirty.value) {
+    notif.toast('请先同步当前修改，再导出角色包', 'warning')
+    return
+  }
+  exporting.value = true
+  try {
+    const response = await agentApi.exportPackage(form.value.id)
+    if (!response.data) throw new Error('服务端没有返回角色包')
+    const result = (await invoke('export-agent-package', response.data)) as {
+      canceled: boolean
+      path?: string
+    } | null
+    if (result && !result.canceled) notif.toast(`角色包已导出到：${result.path}`, 'success')
+  } catch (error) {
+    notif.toast(`导出失败：${error instanceof Error ? error.message : '未知错误'}`, 'error')
+  } finally {
+    exporting.value = false
+  }
+}
+
 async function deleteAgent(): Promise<void> {
   if (!form.value?.isUser) return
   deleting.value = true
@@ -618,7 +692,10 @@ async function initialize(): Promise<void> {
 }
 
 onMounted(initialize)
-onBeforeUnmount(releaseAvatarCropSource)
+onBeforeUnmount(() => {
+  window.clearTimeout(promptTokenTimer)
+  releaseAvatarCropSource()
+})
 </script>
 
 <template>
@@ -769,6 +846,43 @@ onBeforeUnmount(releaseAvatarCropSource)
                 </label>
               </div>
             </div>
+            <div class="subsection-head public-profile-head">
+              <div>
+                <h3>对外公开档案</h3>
+                <p>仅供据点中同房间的其他 Agent 读取；不会公开下方完整人格、私聊、记忆或思考。</p>
+              </div>
+            </div>
+            <div class="data-fields public-profile-fields">
+              <label>
+                <span>性别 / GENDER</span>
+                <PInput v-model="form.publicProfile.gender" placeholder="可留空，例如：女" />
+              </label>
+              <label>
+                <span>公开身份 / IDENTITY</span>
+                <PInput
+                  v-model="form.publicProfile.identity"
+                  placeholder="例如：AI数字生命体，主人的助手"
+                />
+              </label>
+              <label class="wide">
+                <span>外貌 / APPEARANCE</span>
+                <PTextarea
+                  :model-value="form.publicProfile.appearance ?? ''"
+                  :rows="3"
+                  placeholder="其他角色可以观察到的稳定外貌特征"
+                  @update:model-value="form.publicProfile.appearance = $event ?? ''"
+                />
+              </label>
+              <label class="wide">
+                <span>基本性格 / PERSONALITY</span>
+                <PTextarea
+                  :model-value="form.publicProfile.personality ?? ''"
+                  :rows="3"
+                  placeholder="对外可见的基本性格，不要填写私密设定"
+                  @update:model-value="form.publicProfile.personality = $event ?? ''"
+                />
+              </label>
+            </div>
           </section>
 
           <section v-else-if="activeSection === 'persona'" class="protocol-page">
@@ -783,10 +897,8 @@ onBeforeUnmount(releaseAvatarCropSource)
               <header>
                 <b>PERSONA DEFINITION</b>
                 <span>
-                  {{ promptStats.lines }} LINES / {{ promptStats.chars }} CHARS / ~{{
-                    promptStats.tokens
-                  }}
-                  TOKENS
+                  {{ promptStats.lines }} LINES / {{ promptStats.chars }} CHARS /
+                  {{ promptStats.tokens }} TOKENS
                 </span>
               </header>
               <textarea
@@ -944,9 +1056,18 @@ onBeforeUnmount(releaseAvatarCropSource)
               <span>SYS</span>
               <div>
                 <b>系统执行协议</b>
-                <p>“完成任务”和“加载技能”属于 ReAct 执行协议，固定启用且不可撤销。</p>
+                <p v-if="systemProtocolTools.length">
+                  <span
+                    v-for="tool in systemProtocolTools"
+                    :key="tool.name"
+                    class="protocol-tool-chip"
+                  >
+                    {{ tool.display?.label || tool.name }}
+                  </span>
+                </p>
+                <p v-else>当前 Registry 尚未注册系统协议工具。</p>
               </div>
-              <strong>LOCKED / 2</strong>
+              <strong>LOCKED / {{ systemProtocolTools.length }}</strong>
             </div>
             <div class="subsection-head">
               <div>
@@ -1181,6 +1302,10 @@ onBeforeUnmount(releaseAvatarCropSource)
         <p>{{ form.isUser ? '可写用户角色档案' : '编辑后创建用户覆盖层' }}</p>
       </section>
 
+      <button class="rail-export" :disabled="exporting || isDirty" @click="exportAgent">
+        <PixelIcon name="download" size="xs" />
+        {{ exporting ? '正在生成角色包…' : '导出角色包' }}
+      </button>
       <button v-if="form.isUser" class="rail-danger" @click="deleteDialog = true">
         <PixelIcon name="trash" size="xs" />
         删除用户档案
@@ -1797,6 +1922,13 @@ onBeforeUnmount(releaseAvatarCropSource)
 .data-fields .wide {
   grid-column: 1/-1;
 }
+.public-profile-head {
+  margin-top: 24px;
+}
+.public-profile-fields {
+  border: 1px solid var(--ui-border-default);
+  background: color-mix(in srgb, var(--ui-bg-surface) 82%, transparent);
+}
 .persona-console {
   border: 1px solid var(--ui-border-default);
   box-shadow: 5px 5px 0 var(--ui-border-subtle);
@@ -2032,9 +2164,19 @@ onBeforeUnmount(releaseAvatarCropSource)
   font-size: 10px;
 }
 .system-protocol p {
-  margin: 2px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 4px 0 0;
   color: var(--ui-text-secondary);
   font-size: 8px;
+}
+.protocol-tool-chip {
+  padding: 2px 5px;
+  border: 1px solid color-mix(in srgb, var(--ui-success) 42%, transparent);
+  background: color-mix(in srgb, var(--ui-success) 8%, transparent);
+  color: var(--ui-text-secondary);
+  line-height: 1.2;
 }
 .system-protocol strong {
   color: var(--ui-success);
@@ -2390,12 +2532,30 @@ onBeforeUnmount(releaseAvatarCropSource)
   color: var(--ui-text-secondary);
   font-size: 8px;
 }
+.rail-export,
 .rail-danger {
   display: flex;
   min-height: 34px;
   align-items: center;
   justify-content: center;
   gap: 6px;
+  font-size: 9px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.rail-export {
+  border: 1px solid var(--ui-accent-sky);
+  background: var(--ui-accent-sky-soft);
+  color: var(--ui-accent-sky);
+}
+.rail-export:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ui-accent-sky) 16%, transparent);
+}
+.rail-export:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.rail-danger {
   border: 1px solid var(--ui-danger);
   background: var(--ui-danger-soft);
   color: var(--ui-danger);

@@ -12,7 +12,13 @@
   "toolDefinition": {
     "name": "terminal_execute",
     "description": "在当前 Agent 的执行会话工作区内运行短命令并获取输出。命令默认直接在 workspace 根目录执行；相对 cwd 也以该根目录为基准，不要填写后端工程路径。支持任意 shell 命令，请谨慎执行有副作用的命令。",
-    "display": { "label": "执行命令", "icon": "terminal", "color": "green", "style": "terminal" },
+    "display": {
+      "label": "执行终端命令",
+      "description": "运行命令行指令，用于构建、测试或管理项目。",
+      "icon": "terminal",
+      "color": "green",
+      "style": "terminal"
+    },
     "parameters": {
       "type": "object",
       "properties": {

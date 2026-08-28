@@ -99,6 +99,19 @@ describe('apiClient', () => {
       })
     })
 
+    it('put 应当原样传递 multipart FormData', async () => {
+      requestMock.mockResolvedValue({ code: 'OK', message: '成功' })
+      const data = new FormData()
+      data.append('background', new Blob(['image'], { type: 'image/webp' }), 'background.webp')
+
+      await apiClient.put('/system/chat-background', data)
+
+      expect(requestMock).toHaveBeenCalledWith('/system/chat-background', {
+        method: 'PUT',
+        body: data,
+      })
+    })
+
     it('delete 应当设置 DELETE 方法', async () => {
       requestMock.mockResolvedValue({ code: 'OK', message: '成功' })
 

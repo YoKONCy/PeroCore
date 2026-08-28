@@ -4,6 +4,8 @@
  * 负责 Thread 消息对、附件绑定、上下文编译、Agent 执行以及调试数据持久化。
  */
 
+import type { KernelExecutionDescriptor } from '@infos/shared'
+import type { ThreadMessageInfo } from '../thread/threadService'
 import type { ThreadChannel } from '../../repositories/thread.repo'
 import type { AgentService } from '../agent/agentService'
 import type { ReActYield } from '../agent/reactLoop'
@@ -18,7 +20,13 @@ import type {
   ImageUnderstandingService,
 } from '../attachment/imageUnderstandingService'
 import type { CapabilityScope } from '../../capabilities/types'
+import { tokenCounter } from '../tokenizer/tokenCounter'
+import type { ExecutionRuntime } from '../../kernel/executionRuntime'
+import type { EventNoteDraftCommitter } from '../memory/eventNoteDraftCommitter'
 import { AppError } from '../../lib/appError'
+import { createLogger } from '../../lib/logger'
+
+const logger = createLogger('ConversationTurnService')
 
 export interface ConversationTurnDeps {
   threadService: ThreadService
@@ -26,6 +34,11 @@ export interface ConversationTurnDeps {
   agentService: AgentService
   attachmentService: AttachmentService
   imageUnderstandingService: ImageUnderstandingService
+  executionRuntime?: ExecutionRuntime
+  eventNoteDraftCommitter?: EventNoteDraftCommitter
+  retrievalFeedback?: {
+    applyRetrievalFeedback(traceId: string, reply: string): Promise<void>
+  }
 }
 
 export interface PrepareTurnParams {
@@ -47,8 +60,20 @@ export interface PrepareTurnParams {
   /** 是否保存 Agent 输出；临时 Agent 通信必须设为 ephemeral。 */
   outputPersistence?: 'persistent' | 'ephemeral'
   signal?: AbortSignal
+  /** 自动 RAG 各阶段进度；发生在模型调用之前。 */
+  onRagProgress?: (
+    progress: import('../memory/eventMemoryService').AutomaticRagProgress,
+  ) => void | Promise<void>
   /** 后台任务 ID，用于创建任务专属执行会话。 */
   taskId?: string
+  /** Application Realm 绑定；存在时工具和上下文必须限制在该 Realm。 */
+  realmId?: string
+  modelConfigId?: number
+  onModelResolved?: (config: import('../llm/llmService').ModelConfig) => void | Promise<void>
+  /** 由Kernel Scheduler或父调用预先建立的Execution；传入后本服务只继承，不写其生命周期。 */
+  execution?: KernelExecutionDescriptor
+  /** Execution 建立后的观察回调，供 Surface 等系统投影绑定因果身份。 */
+  onExecutionStarted?: (execution: KernelExecutionDescriptor) => void | Promise<void>
   /** 从后台任务 checkpoint 恢复的完整 ReAct 消息链。 */
   resumeMessages?: ChatMessage[]
   /** 每次工具完成后的 checkpoint。 */
@@ -57,6 +82,14 @@ export interface PrepareTurnParams {
     toolCalls: ToolCallRecord[]
     turn: number
   }) => Promise<void>
+  /** 向父Scheduler回报实际资源消耗。 */
+  onUsage?: (usage: {
+    llmCalls?: number
+    inputTokens?: number
+    outputTokens?: number
+    toolCalls?: number
+  }) => void
+  beginIo?: () => () => void
 }
 
 export interface PreparedTurn {
@@ -65,8 +98,11 @@ export interface PreparedTurn {
   channel: ThreadChannel
   pairId: string
   disabledTools: string[]
+  autoExecuteTools: boolean
   capabilityScope: CapabilityScope
   inputPersistence: 'persistent' | 'ephemeral'
+  /** 当前 Turn 的 Kernel Execution；未接入 Runtime 的测试兼容场景为空。 */
+  execution?: KernelExecutionDescriptor
   messages: Array<{
     role: 'system' | 'user' | 'assistant' | 'tool'
     content: string | ContentPart[] | null
@@ -82,6 +118,8 @@ export interface CompletedTurn {
   reply: string
   rawContent: string
   toolCalls: ToolCallRecord[]
+  contentBlocks: import('@infos/shared').ConversationContentBlock[]
+  assistantMessage?: ThreadMessageInfo
 }
 
 export class ConversationTurnService {
@@ -104,6 +142,7 @@ export class ConversationTurnService {
         channel: thread.channel,
         pairId: `pair_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         disabledTools: thread.disabledTools,
+        autoExecuteTools: thread.autoExecuteTools,
         capabilityScope: params.capabilityScope ?? 'default',
         inputPersistence: params.inputPersistence ?? 'persistent',
         messages: structuredClone(params.resumeMessages),
@@ -149,7 +188,11 @@ export class ConversationTurnService {
 
     const compiled = await this.deps.contextCompiler.compile(params.threadId, agentId, {
       retrievalQuery: params.content,
+      currentPairId: inputPersistence === 'persistent' ? pairId : undefined,
       capabilityScope: params.capabilityScope,
+      realmExecution: Boolean(params.realmId),
+      appendThreadMessages: params.realmId ? false : undefined,
+      onRagProgress: params.onRagProgress,
     })
     if (inputPersistence === 'ephemeral') {
       compiled.messages.push({ role: 'user', content: params.content })
@@ -195,6 +238,7 @@ export class ConversationTurnService {
       channel: thread.channel,
       pairId,
       disabledTools: compiled.manifest.disabledTools,
+      autoExecuteTools: thread.autoExecuteTools,
       capabilityScope: params.capabilityScope ?? 'default',
       inputPersistence,
       messages: structuredClone(initialPromptMessages),
@@ -204,39 +248,67 @@ export class ConversationTurnService {
 
   async executeTurn(params: PrepareTurnParams): Promise<CompletedTurn & PreparedTurn> {
     const prepared = await this.prepareTurn(params)
+    const execution = await this.startExecution(prepared, params)
+    prepared.execution = execution
     let rawContent = ''
     let toolCalls: ToolCallRecord[] = []
-    const reply = await this.deps.agentService.chatWithCompiledMessages({
-      messages: prepared.messages,
-      agentId: prepared.agentId,
-      threadId: prepared.threadId,
-      channel: prepared.channel,
-      onRawText: (value) => {
-        rawContent = value
-      },
-      onToolCalls: (value) => {
-        toolCalls = value
-      },
-      signal: params.signal,
-      taskId: params.taskId,
-      pairId: prepared.pairId,
-      disabledTools: prepared.disabledTools,
-      capabilityScope: prepared.capabilityScope,
-      onCheckpoint: params.onCheckpoint,
-    })
-    const completed = { reply, rawContent: rawContent || reply, toolCalls }
-    if (params.outputPersistence !== 'ephemeral') {
-      await this.persistAssistant(prepared, completed)
+    let contentBlocks: import('@infos/shared').ConversationContentBlock[] = []
+    try {
+      const reply = await this.deps.agentService.chatWithCompiledMessages({
+        messages: prepared.messages,
+        agentId: prepared.agentId,
+        threadId: prepared.threadId,
+        channel: prepared.channel,
+        onRawText: (value) => {
+          rawContent = value
+        },
+        onToolCalls: (value) => {
+          toolCalls = value
+        },
+        onContentBlocks: (value) => {
+          contentBlocks = value
+        },
+        signal: params.signal,
+        taskId: params.taskId,
+        realmId: params.realmId,
+        modelConfigId: params.modelConfigId,
+        executionId: execution?.executionId,
+        processId: execution?.processId,
+        deadline: execution?.deadline,
+        pairId: prepared.pairId,
+        disabledTools: prepared.disabledTools,
+        autoExecuteTools: prepared.autoExecuteTools,
+        capabilityScope: prepared.capabilityScope,
+        onCheckpoint: params.onCheckpoint,
+        onUsage: params.onUsage,
+        beginIo: params.beginIo,
+      })
+      const completed = { reply, rawContent: rawContent || reply, toolCalls, contentBlocks }
+      let assistantMessage: ThreadMessageInfo | undefined
+      if (params.outputPersistence !== 'ephemeral') {
+        assistantMessage = await this.persistAssistant(prepared, completed)
+        await this.commitEventNoteDrafts(prepared, completed, assistantMessage)
+        await this.submitRetrievalFeedback(prepared, completed)
+      }
+      if (execution && !params.execution) await this.deps.executionRuntime?.complete(execution)
+      return { ...prepared, ...completed, assistantMessage }
+    } catch (error) {
+      if (execution && !params.execution) {
+        await this.deps.executionRuntime?.fail(execution, error, params.signal?.aborted)
+      }
+      throw error
     }
-    return { ...prepared, ...completed }
   }
 
   async *streamTurn(
     params: PrepareTurnParams,
-  ): AsyncGenerator<string | ReActYield, CompletedTurn & PreparedTurn> {
+  ): AsyncGenerator<ReActYield, CompletedTurn & PreparedTurn> {
     const prepared = await this.prepareTurn(params)
+    const execution = await this.startExecution(prepared, params)
+    prepared.execution = execution
     let rawContent = ''
     let toolCalls: ToolCallRecord[] = []
+    let contentBlocks: import('@infos/shared').ConversationContentBlock[] = []
     let reply = ''
     const stream = this.deps.agentService.chatStreamWithCompiledMessages({
       messages: prepared.messages,
@@ -249,28 +321,69 @@ export class ConversationTurnService {
       onToolCalls: (value) => {
         toolCalls = value
       },
+      onContentBlocks: (value) => {
+        contentBlocks = value
+      },
       signal: params.signal,
+      taskId: params.taskId,
+      realmId: params.realmId,
+      modelConfigId: params.modelConfigId,
+      onModelResolved: params.onModelResolved,
+      executionId: execution?.executionId,
+      processId: execution?.processId,
+      deadline: execution?.deadline,
       pairId: prepared.pairId,
       disabledTools: prepared.disabledTools,
+      autoExecuteTools: prepared.autoExecuteTools,
       capabilityScope: prepared.capabilityScope,
+      onUsage: params.onUsage,
+      beginIo: params.beginIo,
     })
     try {
       for await (const chunk of stream) {
-        if (typeof chunk === 'string') reply += chunk
+        if (chunk.event === 'narration_delta') reply += chunk.data.delta
         yield chunk
       }
     } catch (err) {
       await this.persistFailedAssistant(
         prepared,
-        { reply, rawContent, toolCalls },
+        { reply, rawContent, toolCalls, contentBlocks },
         err,
         params.signal?.aborted === true,
       )
+      if (execution && !params.execution) {
+        await this.deps.executionRuntime?.fail(execution, err, params.signal?.aborted)
+      }
       throw err
     }
-    const completed = { reply, rawContent: rawContent || reply, toolCalls }
-    await this.persistAssistant(prepared, completed)
-    return { ...prepared, ...completed }
+    const completed = { reply, rawContent: rawContent || reply, toolCalls, contentBlocks }
+    let assistantMessage: ThreadMessageInfo | undefined
+    if (params.outputPersistence !== 'ephemeral') {
+      assistantMessage = await this.persistAssistant(prepared, completed)
+      await this.commitEventNoteDrafts(prepared, completed, assistantMessage)
+      await this.submitRetrievalFeedback(prepared, completed)
+    }
+    if (execution && !params.execution) await this.deps.executionRuntime?.complete(execution)
+    return { ...prepared, ...completed, assistantMessage }
+  }
+
+  private async startExecution(
+    prepared: PreparedTurn,
+    params: PrepareTurnParams,
+  ): Promise<KernelExecutionDescriptor | undefined> {
+    if (params.execution) return params.execution
+    const runtime = this.deps.executionRuntime
+    if (!runtime) return undefined
+    const descriptor = await runtime.create({
+      principalId: prepared.agentId,
+      taskId: params.taskId,
+      threadId: prepared.threadId,
+      channel: prepared.channel,
+      class: params.taskId ? 'background' : 'interactive',
+    })
+    await runtime.start(descriptor)
+    await params.onExecutionStarted?.(descriptor)
+    return descriptor
   }
 
   private findCurrentUserMessage(messages: PreparedTurn['messages']): number {
@@ -340,6 +453,35 @@ export class ConversationTurnService {
     return parts
   }
 
+  private async commitEventNoteDrafts(
+    prepared: PreparedTurn,
+    completed: CompletedTurn,
+    assistantMessage: ThreadMessageInfo,
+  ): Promise<void> {
+    if (prepared.inputPersistence !== 'persistent') return
+    await this.deps.eventNoteDraftCommitter?.commit({
+      toolCalls: completed.toolCalls,
+      agentId: prepared.agentId,
+      threadId: prepared.threadId,
+      pairId: prepared.pairId,
+      channel: prepared.channel,
+      assistantMessageId: assistantMessage.id,
+      assistantTimestamp: assistantMessage.timestamp,
+    })
+  }
+
+  private async submitRetrievalFeedback(
+    prepared: PreparedTurn,
+    completed: CompletedTurn,
+  ): Promise<void> {
+    if (prepared.inputPersistence !== 'persistent') return
+    try {
+      await this.deps.retrievalFeedback?.applyRetrievalFeedback(prepared.pairId, completed.reply)
+    } catch (error) {
+      logger.warn('检索反馈提交失败，不影响已完成回复', { error })
+    }
+  }
+
   private async persistFailedAssistant(
     prepared: PreparedTurn,
     completed: CompletedTurn,
@@ -356,9 +498,15 @@ export class ConversationTurnService {
       agentId: prepared.agentId,
       scorerStatus: prepared.inputPersistence === 'ephemeral' ? 'skipped' : 'pending',
       status: interrupted ? 'interrupted' : 'failed',
+      execution: prepared.execution,
       metadataJson: JSON.stringify({
         toolCalls: completed.toolCalls,
+        contentBlocks: completed.contentBlocks,
         initialPromptMessages: prepared.initialPromptMessages,
+        tokenUsage: {
+          inputTokens: tokenCounter.countMessages(prepared.initialPromptMessages),
+          outputTokens: tokenCounter.countTokens(completed.reply),
+        },
         failure: {
           code: appError?.code ?? (interrupted ? 'INTERRUPTED' : 'INTERNAL_ERROR'),
           message: failureMessage,
@@ -367,17 +515,26 @@ export class ConversationTurnService {
     })
   }
 
-  private async persistAssistant(prepared: PreparedTurn, completed: CompletedTurn): Promise<void> {
-    await this.deps.threadService.appendAssistantMessage({
+  private async persistAssistant(
+    prepared: PreparedTurn,
+    completed: CompletedTurn,
+  ): Promise<ThreadMessageInfo> {
+    return this.deps.threadService.appendAssistantMessage({
       threadId: prepared.threadId,
       content: completed.reply || '仅有内部过程',
       rawContent: completed.rawContent || undefined,
       pairId: prepared.pairId,
       agentId: prepared.agentId,
       scorerStatus: prepared.inputPersistence === 'ephemeral' ? 'skipped' : 'pending',
+      execution: prepared.execution,
       metadataJson: JSON.stringify({
         toolCalls: completed.toolCalls,
+        contentBlocks: completed.contentBlocks,
         initialPromptMessages: prepared.initialPromptMessages,
+        tokenUsage: {
+          inputTokens: tokenCounter.countMessages(prepared.initialPromptMessages),
+          outputTokens: tokenCounter.countTokens(completed.reply),
+        },
       }),
     })
   }

@@ -13,7 +13,7 @@
  */
 
 import type { ContentPart } from '../llm/types'
-import type { ToolDisplayMeta } from '@infos/shared/types/extension.types'
+import type { ToolDisplayMeta } from '@infos/shared'
 
 // ─────────────────────────────────────────────
 // 消息与工具类型（活跃）
@@ -32,6 +32,9 @@ export interface ChatMessage {
     type: 'function'
     function: { name: string; arguments: string }
   }>
+  /** 推理模型的原生 reasoning_content，回传多轮上下文时必须保留。 */
+  reasoningContent?: string
+  nativeReasoning?: import('../llm/types').NativeReasoningPayload[]
 }
 
 /**
@@ -52,6 +55,8 @@ export interface ToolDefinition {
   parameters: Record<string, unknown>
   /** 工具显示元数据（前端 ReAct 轨迹区渲染用，可选） */
   display?: ToolDisplayMeta
+  /** 工具自身声明每次调用前需要审批。 */
+  requiresApproval?: boolean
 }
 
 /** 工具调用记录 */

@@ -9,6 +9,7 @@
  */
 import { ref, watch, nextTick } from 'vue'
 import { PixelIcon, PButton } from '../pixel'
+import RunPulse from '../chat/RunPulse.vue'
 import { chatApi } from '../../api/modules/chatApi'
 import { logger } from '../../lib/logger'
 
@@ -113,16 +114,13 @@ function labelColor(type: string): string {
 <template>
   <div class="w-full h-full flex flex-col overflow-hidden">
     <!-- 工具栏 (Live 模式) -->
-    <div
-      v-if="isLive"
-      class="px-4 py-3 flex items-center justify-between border-b-2 border-slate-200 flex-shrink-0"
-    >
-      <div class="flex items-center gap-2 text-[13px] font-bold text-slate-500">
-        <span
-          :class="['w-2 h-2', isTaskPaused ? 'bg-amber-500 rv-pulse' : 'bg-emerald-500 rv-pulse']"
-        />
-        <span>{{ isTaskPaused ? '任务已暂停' : '正在思考中...' }}</span>
-      </div>
+    <div v-if="isLive" class="react-viewer-toolbar">
+      <RunPulse
+        :state="isTaskPaused ? 'paused' : 'thinking'"
+        :label="isTaskPaused ? '任务已暂停' : '正在思考中'"
+        :live="!isTaskPaused"
+        compact
+      />
       <PButton :variant="isTaskPaused ? 'primary' : 'ghost'" size="sm" @click="togglePause">
         {{ isTaskPaused ? '继续运行' : '暂停思考' }}
       </PButton>
@@ -194,18 +192,15 @@ function labelColor(type: string): string {
 </template>
 
 <style scoped>
-@keyframes rv-pulse-anim {
-  0%,
-  100% {
-    opacity: 0.4;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-
-.rv-pulse {
-  animation: rv-pulse-anim 2s infinite;
+.react-viewer-toolbar {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--ui-border-default);
+  background: color-mix(in srgb, var(--ui-bg-elevated) 86%, transparent);
 }
 
 .rv-scrollbar::-webkit-scrollbar {

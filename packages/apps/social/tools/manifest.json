@@ -10,6 +10,21 @@
   "platforms": ["windows", "darwin", "linux"],
   "tools": [
     {
+      "name": "social_set_owner_private_only",
+      "description": "切换当前角色的社交激活锁定。启用后，全部群聊和非主人私聊都会在持久化、记忆与状态机之前被忽略，只有主人私聊可以激活角色；禁用后恢复原社交策略。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "true=只允许主人私聊激活，false=恢复正常社交激活"
+          }
+        },
+        "required": ["enabled"],
+        "additionalProperties": false
+      }
+    },
+    {
       "name": "social_send_message",
       "description": "发送消息到社交平台的指定会话。支持私聊和群聊。需要社交适配器已连接。",
       "parameters": {
@@ -146,6 +161,30 @@
       }
     },
     {
+      "name": "social_read_diary",
+      "description": "读取当前角色自己的长期日记。仅主人私聊可用。可列出已有日期，或读取指定日期；不允许访问日记目录之外的 Workspace 文件。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["list", "read"],
+            "description": "list=列出已有日记日期；read=读取指定日期，省略 date 时读取最近一篇"
+          },
+          "date": {
+            "type": "string",
+            "description": "要读取的日期，格式 YYYY-MM-DD；仅 action=read 时使用"
+          },
+          "limit": {
+            "type": "number",
+            "description": "列出日期的数量，默认 14，最大 60；仅 action=list 时使用"
+          }
+        },
+        "required": ["action"],
+        "additionalProperties": false
+      }
+    },
+    {
       "name": "social_remember_contact_impression",
       "description": "选择性保存或更新当前角色对指定用户的简短主观印象，以及对其身份的了解。仅在形成了值得跨会话保留的稳定认识时调用，不要为普通寒暄频繁写入。",
       "parameters": {
@@ -153,9 +192,18 @@
         "properties": {
           "user_id": { "type": "string", "description": "目标用户 ID" },
           "display_name": { "type": "string", "description": "目标用户当前显示名（可选）" },
-          "identity": { "type": "string", "description": "不超过 500 字的身份描述，如年龄、职业、与主人的关系等客观身份信息（可选）" },
-          "impression": { "type": "string", "description": "不超过 500 字的简短印象描述；新内容会覆盖旧印象" },
-          "source_channel_id": { "type": "string", "description": "形成此印象的会话或群组 ID（可选）" }
+          "identity": {
+            "type": "string",
+            "description": "不超过 500 字的身份描述，如年龄、职业、与主人的关系等客观身份信息（可选）"
+          },
+          "impression": {
+            "type": "string",
+            "description": "不超过 500 字的简短印象描述；新内容会覆盖旧印象"
+          },
+          "source_channel_id": {
+            "type": "string",
+            "description": "形成此印象的会话或群组 ID（可选）"
+          }
         },
         "required": ["user_id", "impression"]
       }
@@ -167,10 +215,16 @@
         "type": "object",
         "properties": {
           "user_id": { "type": "string", "description": "目标用户 ID" },
-          "group_id": { "type": "string", "description": "可选群组 ID；提供后同时返回该用户在此群中的发言" },
+          "group_id": {
+            "type": "string",
+            "description": "可选群组 ID；提供后同时返回该用户在此群中的发言"
+          },
           "private_limit": { "type": "number", "description": "私聊记录条数，默认 20，最大 50" },
           "group_limit": { "type": "number", "description": "群内发言条数，默认 30，最大 80" },
-          "self_message_limit": { "type": "number", "description": "每个共同群返回当前角色自身最近发言的条数，默认 5，最大 20" }
+          "self_message_limit": {
+            "type": "number",
+            "description": "每个共同群返回当前角色自身最近发言的条数，默认 5，最大 20"
+          }
         },
         "required": ["user_id"]
       }

@@ -23,7 +23,7 @@ export const readFileRangeTool: BuiltinTool = {
       session,
       String(args.path),
       {
-        deviceScope: ctx.approvedOutsideWorkspace,
+        deviceScope: ctx.deviceReadScope,
         offset: args.offset === undefined ? undefined : Number(args.offset),
         limit: args.limit === undefined ? undefined : Number(args.limit),
         lineStart: args.line_start === undefined ? undefined : Number(args.line_start),
@@ -41,7 +41,7 @@ export const globFilesTool: BuiltinTool = {
     const session = await resolveExecutionSession(ctx)
     const files = await getProductivityRuntime().virtualWorkspace.glob(session, {
       pattern: String(args.pattern),
-      deviceScope: ctx.approvedOutsideWorkspace,
+      deviceScope: ctx.deviceReadScope,
       cwd: args.cwd ? String(args.cwd) : undefined,
       maxDepth: args.max_depth === undefined ? undefined : Number(args.max_depth),
       limit: args.limit === undefined ? undefined : Number(args.limit),

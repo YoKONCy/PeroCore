@@ -28,41 +28,44 @@ describe('全新数据库基线', () => {
 
     const db = createDrizzleConnection(databasePath)
     const sqlite = (db as unknown as { $client: Database.Database }).$client
-    const columnNames = (
-      sqlite.prepare('PRAGMA table_info(background_tasks)').all() as Array<{ name: string }>
-    ).map((column) => column.name)
-
-    const schemaTables = Object.values(currentSchema).filter(
-      (value): value is typeof backgroundTasks =>
-        typeof value === 'object' && value !== null && Symbol.for('drizzle:Name') in value,
-    )
-    expect(schemaTables).toHaveLength(39)
-
-    for (const table of schemaTables) {
-      const config = getTableConfig(table)
-      const actualColumns = (
-        sqlite.prepare(`PRAGMA table_info("${config.name}")`).all() as Array<{ name: string }>
+    try {
+      const columnNames = (
+        sqlite.prepare('PRAGMA table_info(background_tasks)').all() as Array<{ name: string }>
       ).map((column) => column.name)
-      const expectedColumns = config.columns.map((column) => column.name)
-      expect(actualColumns, `${config.name} 基线列与 Drizzle Schema 不一致`).toEqual(
-        expectedColumns,
-      )
-    }
 
-    expect(columnNames).toEqual(
-      expect.arrayContaining([
-        'id',
-        'agent_id',
-        'thread_id',
-        'target_thread_id',
-        'category',
-        'input_question',
-        'input_context_json',
-        'checkpoint_json',
-        'read_at',
-      ]),
-    )
-    expect(db.select().from(backgroundTasks).all()).toEqual([])
-    sqlite.close()
+      const schemaTables = Object.values(currentSchema).filter(
+        (value): value is typeof backgroundTasks =>
+          typeof value === 'object' && value !== null && Symbol.for('drizzle:Name') in value,
+      )
+      expect(schemaTables).toHaveLength(46)
+
+      for (const table of schemaTables) {
+        const config = getTableConfig(table)
+        const actualColumns = (
+          sqlite.prepare(`PRAGMA table_info("${config.name}")`).all() as Array<{ name: string }>
+        ).map((column) => column.name)
+        const expectedColumns = config.columns.map((column) => column.name)
+        expect(actualColumns, `${config.name} 基线列与 Drizzle Schema 不一致`).toEqual(
+          expectedColumns,
+        )
+      }
+
+      expect(columnNames).toEqual(
+        expect.arrayContaining([
+          'id',
+          'agent_id',
+          'thread_id',
+          'target_thread_id',
+          'category',
+          'input_question',
+          'input_context_json',
+          'checkpoint_json',
+          'read_at',
+        ]),
+      )
+      expect(db.select().from(backgroundTasks).all()).toEqual([])
+    } finally {
+      sqlite.close()
+    }
   })
 })

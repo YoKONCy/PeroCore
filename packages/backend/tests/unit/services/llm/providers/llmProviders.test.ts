@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { OpenAiProvider } from '@infos/backend/services/llm/providers/openaiProvider'
+import { OpenAiResponsesProvider } from '@infos/backend/services/llm/providers/openaiResponsesProvider'
 import { GeminiProvider } from '@infos/backend/services/llm/providers/geminiProvider'
 import { AnthropicProvider } from '@infos/backend/services/llm/providers/anthropicProvider'
 import type { ChatMessage, ChatOptions, ProviderConfig } from '@infos/backend/services/llm/types'
@@ -92,6 +93,7 @@ describe('OpenAiProvider', () => {
       {
         role: 'assistant',
         content: null,
+        reasoningContent: '我需要调用旧工具。',
         toolCalls: [
           { id: 'call-old', type: 'function', function: { name: 'old', arguments: '{}' } },
         ],
@@ -109,7 +111,11 @@ describe('OpenAiProvider', () => {
       tools: [
         {
           type: 'function',
-          function: { name: 'lookup', description: '查询', parameters: { type: 'object' } },
+          function: {
+            name: 'lookup',
+            description: '查询',
+            parameters: { type: 'object', properties: {} },
+          },
         },
       ],
     }
@@ -129,6 +135,7 @@ describe('OpenAiProvider', () => {
           {
             role: 'assistant',
             content: null,
+            reasoning_content: '我需要调用旧工具。',
             tool_calls: [
               { id: 'call-old', type: 'function', function: { name: 'old', arguments: '{}' } },
             ],
@@ -168,6 +175,132 @@ describe('OpenAiProvider', () => {
     })
   })
 
+  it('应按DeepSeek与OpenRouter方言映射思考请求并解析reasoning_details', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      jsonResponse({
+        choices: [
+          {
+            message: {
+              content: '答案',
+              reasoning_details: [{ type: 'reasoning.text', text: '分析' }],
+            },
+          },
+        ],
+      }),
+    )
+    const deepseek = new OpenAiProvider({ ...baseConfig, reasoningDialect: 'deepseek' })
+    await deepseek.chat([{ role: 'user', content: '问题' }], {
+      reasoningEffort: 'high',
+      returnNativeReasoning: true,
+    })
+    let body = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body))
+    expect(body).toMatchObject({ reasoning_effort: 'high', thinking: { type: 'enabled' } })
+
+    const openrouter = new OpenAiProvider({ ...baseConfig, reasoningDialect: 'openrouter' })
+    const result = await openrouter.chat([{ role: 'user', content: '问题' }], {
+      reasoningEffort: 'high',
+      returnNativeReasoning: true,
+    })
+    body = JSON.parse(String(vi.mocked(fetch).mock.calls[1]?.[1]?.body))
+    expect(body).toMatchObject({ reasoning: { effort: 'high', exclude: false } })
+    expect(result.choices[0]?.message).toMatchObject({
+      reasoningContent: '分析',
+      nativeReasoning: [{ format: 'reasoning_details', text: '分析' }],
+    })
+  })
+
+  it('仅开启原生思考回传时不应改变DeepSeek兼容请求体', async () => {
+    vi.mocked(fetch).mockResolvedValue(jsonResponse({ choices: [] }))
+    const provider = new OpenAiProvider({ ...baseConfig, reasoningDialect: 'deepseek' })
+
+    await provider.chat([{ role: 'user', content: '问题' }], {
+      returnNativeReasoning: true,
+    })
+
+    const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body))
+    expect(body).not.toHaveProperty('thinking')
+    expect(body).not.toHaveProperty('reasoning')
+    expect(body).not.toHaveProperty('reasoning_effort')
+  })
+
+  it('应序列化工具续轮中的空reasoning_content', async () => {
+    vi.mocked(fetch).mockResolvedValue(jsonResponse({ choices: [] }))
+    const provider = new OpenAiProvider(baseConfig)
+
+    await provider.chat(
+      [
+        {
+          role: 'assistant',
+          content: null,
+          reasoningContent: '',
+          toolCalls: [
+            {
+              id: 'call-list',
+              type: 'function',
+              function: { name: 'list_directory', arguments: '{"path":"."}' },
+            },
+          ],
+        },
+        { role: 'tool', content: '[]', toolCallId: 'call-list' },
+      ],
+      {},
+    )
+
+    const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body))
+    expect(body.messages[0]).toMatchObject({
+      role: 'assistant',
+      reasoning_content: '',
+      tool_calls: [expect.objectContaining({ id: 'call-list' })],
+    })
+  })
+
+  it('Gemini兼容端点应按调用顺序补齐并集中同轮工具响应', async () => {
+    vi.mocked(fetch).mockResolvedValue(jsonResponse({ choices: [] }))
+    const provider = new OpenAiProvider({ ...baseConfig, modelId: 'gemini-3-flash-preview' })
+
+    await provider.chat(
+      [
+        {
+          role: 'assistant',
+          content: null,
+          toolCalls: [
+            {
+              id: 'call-state',
+              type: 'function',
+              function: { name: 'update_state', arguments: '{}' },
+            },
+            {
+              id: 'call-missing',
+              type: 'function',
+              function: { name: 'finish_task', arguments: '{}' },
+            },
+          ],
+        },
+        { role: 'user', content: '工具后的补充上下文' },
+        { role: 'tool', content: '状态已更新', toolCallId: 'call-state' },
+      ],
+      {},
+    )
+
+    const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body))
+    expect(body.messages).toEqual([
+      expect.objectContaining({
+        role: 'assistant',
+        tool_calls: [
+          expect.objectContaining({ id: 'call-state' }),
+          expect.objectContaining({ id: 'call-missing' }),
+        ],
+      }),
+      { role: 'tool', content: '状态已更新', tool_call_id: 'call-state' },
+      {
+        role: 'tool',
+        content: '工具 finish_task 未返回结果。',
+        tool_call_id: 'call-missing',
+      },
+      { role: 'user', content: '工具后的补充上下文' },
+    ])
+  })
+
   it('未配置生成参数时不应向 OpenAI 请求体传入', async () => {
     vi.mocked(fetch).mockResolvedValue(jsonResponse({ choices: [] }))
     const provider = new OpenAiProvider(baseConfig)
@@ -184,6 +317,7 @@ describe('OpenAiProvider', () => {
     vi.mocked(fetch).mockResolvedValue(
       streamResponse(
         [
+          'data: {"choices":[{"delta":{"role":"assistant","reasoning_content":"先查询"},"finish_reason":null}]}',
           'data: {"choices":[{"delta":{"role":"assistant","content":"你"},"finish_reason":null}]}',
           'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"lookup","arguments":"{}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}',
           'data: [DONE]',
@@ -196,6 +330,21 @@ describe('OpenAiProvider', () => {
     const chunks = await collect(provider.chatStream([{ role: 'user', content: 'hi' }], {}))
 
     expect(chunks).toEqual([
+      {
+        choices: [
+          {
+            delta: {
+              role: 'assistant',
+              content: undefined,
+              reasoningContent: '先查询',
+              nativeReasoning: [{ format: 'reasoning_content', text: '先查询' }],
+              toolCalls: undefined,
+            },
+            finishReason: null,
+          },
+        ],
+        usage: undefined,
+      },
       {
         choices: [
           { delta: { role: 'assistant', content: '你', toolCalls: undefined }, finishReason: null },
@@ -248,6 +397,71 @@ describe('OpenAiProvider', () => {
 
     expect(models).toEqual(['a', 'b'])
     expect(fallback).toEqual([])
+  })
+})
+
+describe('OpenAiResponsesProvider', () => {
+  beforeEach(() => vi.stubGlobal('fetch', vi.fn()))
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('应转换Responses非流式正文、思考摘要和工具调用', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      jsonResponse({
+        status: 'completed',
+        output: [
+          { id: 'rs-1', type: 'reasoning', summary: [{ type: 'summary_text', text: '分析摘要' }] },
+          { type: 'message', content: [{ type: 'output_text', text: '答案' }] },
+          { type: 'function_call', call_id: 'call-1', name: 'lookup', arguments: '{"q":"猫"}' },
+        ],
+        usage: { input_tokens: 2, output_tokens: 3, total_tokens: 5 },
+      }),
+    )
+    const provider = new OpenAiResponsesProvider(baseConfig)
+    const result = await provider.chat([{ role: 'user', content: '问题' }], {
+      reasoningEffort: 'high',
+      returnNativeReasoning: true,
+    })
+    const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body))
+    expect(body).toMatchObject({
+      input: [{ role: 'user', content: '问题' }],
+      reasoning: { effort: 'high', summary: 'auto' },
+      stream: false,
+    })
+    expect(result.choices[0]?.message).toMatchObject({
+      content: '答案',
+      reasoningContent: '分析摘要',
+      toolCalls: [{ id: 'call-1', function: { name: 'lookup', arguments: '{"q":"猫"}' } }],
+    })
+  })
+
+  it('应解析Responses流式思考、正文与工具参数事件', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      streamResponse(
+        [
+          'data: {"type":"response.reasoning_summary_text.delta","delta":"分析"}',
+          'data: {"type":"response.output_text.delta","delta":"答案"}',
+          'data: {"type":"response.output_item.added","item":{"id":"fc-1","type":"function_call","call_id":"call-1","name":"lookup","arguments":""}}',
+          'data: {"type":"response.function_call_arguments.delta","item_id":"fc-1","delta":"{}"}',
+          'data: {"type":"response.completed","response":{"usage":{"input_tokens":1,"output_tokens":2,"total_tokens":3}}}',
+          '',
+        ].join('\n'),
+      ),
+    )
+    const provider = new OpenAiResponsesProvider(baseConfig)
+    const chunks = await collect(provider.chatStream([{ role: 'user', content: '问题' }], {}))
+    expect(chunks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          choices: [expect.objectContaining({ delta: { reasoningContent: '分析' } })],
+        }),
+        expect.objectContaining({
+          choices: [expect.objectContaining({ delta: { content: '答案' } })],
+        }),
+        expect.objectContaining({
+          usage: { promptTokens: 1, completionTokens: 2, totalTokens: 3 },
+        }),
+      ]),
+    )
   })
 })
 

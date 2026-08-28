@@ -81,6 +81,10 @@ export class McpClientManager {
    */
   async connectAll(): Promise<void> {
     const configs = await this.mcpRepo.findEnabled()
+    const enabledNames = new Set(configs.map((config) => config.name))
+    for (const name of [...this.connections.keys()]) {
+      if (!enabledNames.has(name)) await this.disconnectOne(name)
+    }
 
     if (configs.length === 0) {
       logger.info('无已启用的 MCP 服务器配置')
@@ -125,10 +129,7 @@ export class McpClientManager {
       const transport = this.createTransport(config)
 
       // 创建 Client
-      const client = new Client(
-        { name: `infos-${name}`, version: '0.9.2-rc1' },
-        { capabilities: {} },
-      )
+      const client = new Client({ name: `infos-${name}`, version: '0.9.3' }, { capabilities: {} })
 
       // 连接
       await client.connect(transport)
@@ -224,6 +225,7 @@ export class McpClientManager {
     serverName: string,
     toolName: string,
     args: Record<string, unknown>,
+    signal?: AbortSignal,
   ): Promise<unknown> {
     const conn = this.connections.get(serverName)
     if (!conn || conn.status !== 'connected') {
@@ -232,10 +234,15 @@ export class McpClientManager {
 
     logger.debug(`调用 MCP 工具: ${serverName}/${toolName}`)
 
-    const result = await conn.client.callTool({
-      name: toolName,
-      arguments: args,
-    })
+    if (signal?.aborted) throw new Error('MCP工具调用已取消')
+    const result = await conn.client.callTool(
+      {
+        name: toolName,
+        arguments: args,
+      },
+      undefined,
+      { signal },
+    )
 
     return result
   }

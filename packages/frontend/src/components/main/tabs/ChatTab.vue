@@ -13,8 +13,9 @@
  */
 import { ref, computed, onMounted, watch } from 'vue'
 import { ChatContainer } from '../../chat'
+import HistoryExportDialog from '../../chat/HistoryExportDialog.vue'
 import ConversationRewindDialog from '../../chat/ConversationRewindDialog.vue'
-import { PixelIcon, PEmpty, PDialog } from '../../pixel'
+import { PixelIcon, PButton, PEmpty, PDialog } from '../../pixel'
 import { useAgentStore, useThreadStore } from '../../../stores'
 import { useTaskCenterStore } from '../../../stores/taskCenterStore'
 import { useNotificationStore } from '../../../stores/useNotificationStore'
@@ -23,6 +24,11 @@ import { threadsApi } from '../../../api/modules/threadsApi'
 import type { ThreadInfo } from '../../../api/modules/threadsApi'
 import { getApiBaseUrl } from '../../../api/transport'
 import { logger } from '../../../lib/logger'
+import {
+  buildConversationMarkdown,
+  downloadMarkdown,
+  type HistoryExportOptions,
+} from '../../../utils/historyExport'
 
 defineOptions({ name: 'ChatTab' })
 
@@ -45,6 +51,38 @@ function handleRewindVisibility(visible: boolean): void {
 const searchQuery = ref('')
 const isLoading = ref(false)
 const isCreatingSession = ref(false)
+const showHistoryExport = ref(false)
+const isExportingHistory = ref(false)
+
+async function exportCurrentHistory(options: HistoryExportOptions): Promise<void> {
+  if (!threadStore.threadId || !activeAgent.value) return
+  isExportingHistory.value = true
+  try {
+    const response = await threadsApi.getProjection(threadStore.threadId)
+    if (!response.data) throw new Error('服务端未返回会话历史')
+    const title = currentThreadTitle.value || '当前会话'
+    downloadMarkdown(
+      title,
+      buildConversationMarkdown(
+        {
+          title,
+          channelLabel: '私聊 · desktop',
+          participantNames: {
+            [activeAgent.value.id]: activeAgent.value.name,
+          },
+          messages: response.data.messages,
+        },
+        options,
+      ),
+    )
+    showHistoryExport.value = false
+    notify.toast('历史记录已导出到客户端', { type: 'success' })
+  } catch (error) {
+    notify.toast(error instanceof Error ? error.message : '历史记录导出失败', { type: 'error' })
+  } finally {
+    isExportingHistory.value = false
+  }
+}
 
 // ── 侧边栏收起状态 ──
 const isSidebarCollapsed = ref(false)
@@ -463,6 +501,17 @@ watch(
           </div>
 
           <div class="chat-main-status">
+            <PButton
+              class="chat-main-export"
+              variant="ghost"
+              size="sm"
+              :disabled="!threadStore.threadId"
+              title="导出当前会话历史"
+              @click="showHistoryExport = true"
+            >
+              <PixelIcon name="download" size="xs" />
+              导出
+            </PButton>
             <span class="chat-main-status-dot" />
             <span class="chat-main-status-text">{{ activeAgent?.name ?? '助手' }} 已就位</span>
           </div>
@@ -501,6 +550,12 @@ watch(
         }
       "
       @confirm="confirmRenameThread"
+    />
+
+    <HistoryExportDialog
+      v-model="showHistoryExport"
+      :disabled="isExportingHistory"
+      @confirm="exportCurrentHistory"
     />
 
     <ConversationRewindDialog
@@ -1371,35 +1426,86 @@ watch(
   margin-top: 1px;
 }
 
-/* 角色化状态标签 */
+/* 像素化会话操作区 */
 .chat-main-status {
-  display: flex;
+  position: relative;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 12px;
-  background: var(--ui-accent-primary-soft);
+  gap: 7px;
+  padding: 4px 10px 4px 4px;
+  background: var(--ui-bg-surface);
   color: var(--ui-accent-primary);
-  border: 1px solid rgba(236, 72, 153, 0.16);
-  border-radius: var(--ui-radius-full);
+  border: 2px solid var(--ui-border-default);
+  border-radius: 3px;
   font-family: var(--font-pixel);
   font-size: 10px;
   letter-spacing: 0.06em;
   font-weight: 800;
-  box-shadow: var(--ui-shadow-xs);
+  box-shadow: 3px 3px 0 rgba(236, 72, 153, 0.22);
+  transition:
+    transform 0.12s steps(2, end),
+    box-shadow 0.12s steps(2, end);
+}
+
+.chat-main-status::before {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: 10px;
+  width: 18px;
+  height: 2px;
+  background: var(--ui-accent-primary);
+}
+
+.chat-main-status::after {
+  content: '';
+  position: absolute;
+  right: -2px;
+  bottom: 7px;
+  width: 2px;
+  height: 8px;
+  background: var(--ui-accent-purple);
+}
+
+.chat-main-status:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 4px 4px 0 rgba(236, 72, 153, 0.28);
+}
+
+.chat-main-status :deep(.chat-main-export) {
+  min-height: 26px;
+  padding: 3px 7px;
+  border-color: transparent;
+  border-radius: 2px;
+  box-shadow: none;
+}
+
+.chat-main-status :deep(.chat-main-export:hover:not(:disabled)) {
+  background: var(--ui-accent-primary-soft);
+  border-color: var(--ui-border-subtle);
 }
 
 [data-theme='dark'] .chat-main-status {
-  background: rgba(139, 92, 246, 0.15);
+  background: var(--ui-bg-surface-soft);
   color: var(--ui-accent-purple);
+  border-color: rgba(167, 139, 250, 0.42);
+  box-shadow: 3px 3px 0 rgba(139, 92, 246, 0.3);
+}
+
+[data-theme='dark'] .chat-main-status:hover {
+  box-shadow: 4px 4px 0 rgba(139, 92, 246, 0.38);
 }
 
 .chat-main-status-dot {
   width: 6px;
   height: 6px;
   background: var(--ui-success);
-  border-radius: 50%;
-  box-shadow: 0 0 4px var(--ui-success);
-  animation: status-pulse 2s ease-in-out infinite;
+  border: 1px solid var(--ui-bg-surface);
+  border-radius: 1px;
+  box-shadow:
+    0 0 0 1px var(--ui-success),
+    2px 2px 0 rgba(16, 185, 129, 0.25);
+  animation: status-pulse 1.8s steps(2, end) infinite;
 }
 
 .chat-main-container {
@@ -1470,6 +1576,10 @@ watch(
 
 /* 减少动画偏好 */
 @media (prefers-reduced-motion: reduce) {
+  .chat-main-status {
+    transition: none;
+  }
+
   .chat-main-status-dot {
     animation: none;
   }

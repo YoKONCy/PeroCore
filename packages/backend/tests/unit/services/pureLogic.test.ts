@@ -3,6 +3,10 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ModelRoleResolver } from '@infos/backend/services/llm/modelRoles'
+import {
+  loadMemoryRuntimeConfig,
+  shouldRunAutoRag,
+} from '@infos/backend/services/memory/memoryRuntimeConfig'
 import { AssetRegistry } from '@infos/backend/core/assetRegistry'
 import type { PathResolver } from '@infos/backend/core/pathResolver'
 
@@ -18,6 +22,76 @@ function createModelDeps(
   }
   return { configRepo, modelRepo }
 }
+
+describe('记忆运行配置', () => {
+  it('应迁移旧字段并将旧retrievalLimit=0转换为关闭自动RAG', async () => {
+    const get = vi.fn().mockResolvedValue(
+      JSON.stringify({
+        channels: {
+          desktop: { contextMessages: 12, retrievalLimit: 0 },
+          group: { contextPairs: 18, retrievalLimit: 5 },
+        },
+        scorerBatchSize: 8,
+        retrievalMinScore: 0.3,
+      }),
+    )
+
+    const config = await loadMemoryRuntimeConfig({ get })
+
+    expect(config).toEqual({
+      channels: {
+        desktop: { contextPairs: 12, enableAutoRag: false, retrievalLimit: 8 },
+        group: { contextPairs: 18, enableAutoRag: true, retrievalLimit: 5 },
+      },
+      advanced: {
+        enableSaPpr: false,
+        expandDepth: 2,
+        teleportAlpha: 0.15,
+        minScore: 0.1,
+        enableFista: false,
+        enableDpp: false,
+        enableContextRnn: false,
+        enableLeiden: false,
+        enableFeedback: false,
+      },
+    })
+    expect(shouldRunAutoRag(true, config.channels.desktop)).toBe(false)
+    expect(shouldRunAutoRag(true, config.channels.group)).toBe(true)
+    expect(shouldRunAutoRag(false, config.channels.group)).toBe(false)
+  })
+
+  it('应深度补全高级配置并在关闭SA-PPR时强制关闭所有子模块', async () => {
+    const get = vi.fn().mockResolvedValue(
+      JSON.stringify({
+        channels: {
+          desktop: { contextPairs: 20, enableAutoRag: true, retrievalLimit: 8 },
+          group: { contextPairs: 20, enableAutoRag: true, retrievalLimit: 3 },
+        },
+        advanced: {
+          enableSaPpr: false,
+          enableFista: true,
+          enableContextRnn: true,
+          enableLeiden: true,
+          enableFeedback: true,
+        },
+      }),
+    )
+
+    const config = await loadMemoryRuntimeConfig({ get })
+
+    expect(config.advanced).toEqual({
+      enableSaPpr: false,
+      expandDepth: 2,
+      teleportAlpha: 0.15,
+      minScore: 0.1,
+      enableFista: false,
+      enableDpp: false,
+      enableContextRnn: false,
+      enableLeiden: false,
+      enableFeedback: false,
+    })
+  })
+})
 
 describe('ModelRoleResolver', () => {
   const oldEnv = { ...process.env }
@@ -52,6 +126,10 @@ describe('ModelRoleResolver', () => {
       temperature: undefined,
       topP: undefined,
       maxTokens: 1000,
+      reasoningEffort: undefined,
+      returnNativeReasoning: false,
+      wireApi: 'chat_completions',
+      reasoningDialect: 'auto',
       enableVision: false,
       enableAudioInput: false,
     })
@@ -122,6 +200,22 @@ describe('ModelRoleResolver', () => {
     })
     expect(missing).toBeNull()
     expect(modelRepo.findById).not.toHaveBeenCalled()
+  })
+
+  it('据点管家任务应读取独立模型槽', async () => {
+    const { configRepo, modelRepo } = createModelDeps(
+      { 'model.task.butler': '3', 'model.main': '1' },
+      {
+        1: { provider: 'openai', modelId: 'main', apiKey: 'main-key' },
+        3: { provider: 'openai', modelId: 'butler', apiKey: 'butler-key' },
+      },
+    )
+    const resolver = new ModelRoleResolver(configRepo as never, modelRepo as never)
+
+    const config = await resolver.resolve('butler')
+
+    expect(config?.modelId).toBe('butler')
+    expect(configRepo.get).toHaveBeenCalledWith('model.task.butler')
   })
 
   it('应当创建绑定到指定角色的 getter', async () => {
@@ -220,7 +314,7 @@ describe('AssetRegistry', () => {
     const registry = new AssetRegistry(createResolver(root, false))
 
     await registry.scanAll()
-    writeAsset(join(root, 'data', 'custom', 'extensions', 'new'), 'description.json', {
+    writeAsset(join(root, 'data', 'custom', 'packages', 'new'), 'description.json', {
       asset_id: 'new.mod.demo',
       type: 'mod',
       version: '2.0.0',

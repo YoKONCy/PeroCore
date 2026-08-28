@@ -8,12 +8,12 @@
 
 ## 1. 强制要求
 
-| 规则 | 说明 |
-|---|---|
-| **模块必须有测试** | Service / Repository / Composable / 工具函数必须有 `*.test.ts` |
-| **PR 不裸奔** | 不允许提交没有测试的业务模块代码（纯类型/常量除外） |
-| **测试伴随代码** | 测试文件放在对应 package 的 `tests/unit` 目录，并保持与 `src` 内模块路径一致 |
-| **测试即文档** | 测试用例描述必须使用中文 |
+| 规则               | 说明                                                                         |
+| ------------------ | ---------------------------------------------------------------------------- |
+| **模块必须有测试** | Service / Repository / Composable / 工具函数必须有 `*.test.ts`               |
+| **PR 不裸奔**      | 不允许提交没有测试的业务模块代码（纯类型/常量除外）                          |
+| **测试伴随代码**   | 测试文件放在对应 package 的 `tests/unit` 目录，并保持与 `src` 内模块路径一致 |
+| **测试即文档**     | 测试用例描述必须使用中文                                                     |
 
 ### 豁免范围
 
@@ -23,13 +23,13 @@
 
 ## 2. 技术栈
 
-| 项目 | 选型 |
-|---|---|
-| 测试框架 | **Vitest** |
-| 断言/Mock | Vitest 内置 (`expect`, `vi.fn`) |
+| 项目         | 选型                                           |
+| ------------ | ---------------------------------------------- |
+| 测试框架     | **Vitest**                                     |
+| 断言/Mock    | Vitest 内置 (`expect`, `vi.fn`)                |
 | 前端组件测试 | **@vue/test-utils** + **@testing-library/vue** |
-| HTTP Mock | **msw** (Mock Service Worker) |
-| 覆盖率 | Vitest 内置 `--coverage` (v8) |
+| HTTP Mock    | **msw** (Mock Service Worker)                  |
+| 覆盖率       | Vitest 内置 `--coverage` (v8)                  |
 
 ---
 
@@ -58,10 +58,10 @@ packages/backend/
 
 ### 命名规则
 
-| 类型 | 模式 |
-|---|---|
-| 单元测试 | `<模块名>.test.ts` |
-| 组件测试 | `<组件名>.test.ts` |
+| 类型     | 模式                           |
+| -------- | ------------------------------ |
+| 单元测试 | `<模块名>.test.ts`             |
+| 组件测试 | `<组件名>.test.ts`             |
 | 集成测试 | `<场景名>.integration.test.ts` |
 
 ---
@@ -120,7 +120,7 @@ vi.mock('../utils/tokenizer', () => ({
 const server = setupServer(
   http.post('https://api.openai.com/v1/chat/completions', () => {
     return HttpResponse.json({ choices: [{ message: { content: '测试' } }] })
-  })
+  }),
 )
 
 // 4. SQLite → 内存模式
@@ -129,23 +129,23 @@ const testDb = drizzle(new Database(':memory:'))
 
 ### 4.4 禁止事项
 
-| 禁止 | 理由 |
-|---|---|
-| 测试间共享可变状态 | 用 `beforeEach` 重置 |
-| 测试依赖执行顺序 | 每个 `it` 独立可运行 |
+| 禁止                | 理由                    |
+| ------------------- | ----------------------- |
+| 测试间共享可变状态  | 用 `beforeEach` 重置    |
+| 测试依赖执行顺序    | 每个 `it` 独立可运行    |
 | 测试中 `setTimeout` | 用 `vi.useFakeTimers()` |
-| 直接测试私有方法 | 通过公开 API 间接验证 |
-| 快照测试滥用 | 仅对 UI 渲染结构使用 |
+| 直接测试私有方法    | 通过公开 API 间接验证   |
+| 快照测试滥用        | 仅对 UI 渲染结构使用    |
 
 ---
 
 ## 5. 覆盖率要求
 
-| Package | 最低行覆盖率 | 最低分支覆盖率 |
-|---|---|---|
-| `@infos/shared` | 80% | 70% |
-| `@infos/backend` | 60% | 50% |
-| `@infos/frontend` | 50% | 40% |
+| Package           | 最低行覆盖率 | 最低分支覆盖率 |
+| ----------------- | ------------ | -------------- |
+| `@infos/shared`   | 80%          | 70%            |
+| `@infos/backend`  | 60%          | 50%            |
+| `@infos/frontend` | 50%          | 40%            |
 
 ---
 
@@ -155,10 +155,10 @@ const testDb = drizzle(new Database(':memory:'))
 {
   "test": "vitest",
   "test:run": "vitest run",
-  "test:coverage": "vitest run --coverage"
+  "test:coverage": "vitest run --coverage",
 }
 ```
 
 ---
 
-*本文档由 Carola 整理，适用于 infOS-TS 测试规范。*
+_本文档由 Carola 整理，适用于 infOS-TS 测试规范。_

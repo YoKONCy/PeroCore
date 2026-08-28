@@ -11,12 +11,15 @@
  * @module packages/frontend/src/composables/useStronghold
  */
 
+import type { StrongholdProjectionSnapshot } from '@infos/shared'
 import { ref, shallowRef, computed, onMounted, onUnmounted } from 'vue'
 import { strongholdApi } from '../api/modules/strongholdApi'
 import type { Facility, Room, ButlerConfig, GroupMessage } from '../api/modules/strongholdApi'
 import { agentApi } from '../api/modules/agentApi'
 import { getApiBaseUrl } from '../api/transport'
 import { useNotificationStore } from '../stores/useNotificationStore'
+import { useCompositorStore } from '../stores/useCompositorStore'
+import { useGateway } from './gateway/useGateway'
 import { logger } from '../lib/logger'
 
 /** Agent 档案 (来自 /api/agents，用于把 agentId 映射为真实名字与头像) */
@@ -40,11 +43,28 @@ export interface AgentDisplayStatus {
   roomId: string
 }
 
+export interface StrongholdRoundAgentState {
+  agentId: string
+  status: 'queued' | 'streaming' | 'tool' | 'completed' | 'failed'
+  draft: string
+  toolName?: string
+  error?: string
+}
+
+export interface StrongholdRoundState {
+  roundId: string
+  roomId: string
+  agents: StrongholdRoundAgentState[]
+  completed: boolean
+}
+
 /** 轮询间隔 (ms) */
 const POLL_INTERVAL_MS = 5000
 
 export function useStronghold() {
   const notify = useNotificationStore()
+  const compositor = useCompositorStore()
+  const gateway = useGateway()
   // ── 状态 ──
 
   const facilities = shallowRef<Facility[]>([])
@@ -61,14 +81,16 @@ export function useStronghold() {
 
   // 群聊消息
   const messages = shallowRef<GroupMessage[]>([])
+  const roomProjection = shallowRef<StrongholdProjectionSnapshot | null>(null)
   const isLoadingMessages = ref(false)
   const isSendingMessage = ref(false)
   /** 已完成调度，正在等待后台 Agent 回写回复。 */
   const isAwaitingReply = ref(false)
+  const activeRound = ref<StrongholdRoundState | null>(null)
   /** 给聊天区展示的可读调度状态。 */
   const replyStatus = ref('')
   let messageRequestId = 0
-  let replyWaitId = 0
+  let roundFallbackTimer: ReturnType<typeof setTimeout> | null = null
 
   /** 错误信息 */
   const error = ref<string | null>(null)
@@ -129,6 +151,7 @@ export function useStronghold() {
   async function selectRoom(room: Room): Promise<void> {
     if (currentRoom.value?.id === room.id) return
     cancelReplyWait()
+    if (currentRoom.value) compositor.disposeScope(`stronghold:${currentRoom.value.id}`)
     currentRoom.value = room
     messages.value = []
     await fetchMessages(room.id)
@@ -175,6 +198,141 @@ export function useStronghold() {
     agentsStatus.value = statusList
   }
 
+  function armRoundFallback(roundId: string, roomId: string): void {
+    if (roundFallbackTimer) clearTimeout(roundFallbackTimer)
+    roundFallbackTimer = setTimeout(async () => {
+      if (activeRound.value?.roundId !== roundId || activeRound.value.completed) return
+      await fetchMessages(roomId)
+      isAwaitingReply.value = false
+      replyStatus.value = ''
+      activeRound.value = null
+      notify.toast('据点实时状态已中断，已通过消息快照完成对账', { type: 'warning' })
+    }, 90_000)
+  }
+
+  function ensureRound(payload: Record<string, unknown>): StrongholdRoundState | null {
+    const roomId = String(payload.roomId ?? '')
+    const roundId = String(payload.roundId ?? '')
+    if (!roomId || !roundId || currentRoom.value?.id !== roomId) return null
+    if (!activeRound.value || activeRound.value.roundId !== roundId) {
+      activeRound.value = { roundId, roomId, agents: [], completed: false }
+    }
+    return activeRound.value
+  }
+
+  function ensureRoundAgent(
+    round: StrongholdRoundState,
+    agentId: string,
+  ): StrongholdRoundAgentState {
+    let agent = round.agents.find((item) => item.agentId === agentId)
+    if (!agent) {
+      agent = { agentId, status: 'queued', draft: '' }
+      round.agents.push(agent)
+    }
+    return agent
+  }
+
+  function onRoundStarted(payload: Record<string, unknown>): void {
+    const round = ensureRound(payload)
+    if (!round) return
+    const agentIds = Array.isArray(payload.agentIds) ? payload.agentIds.map(String) : []
+    round.agents = agentIds.map((agentId) => ({ agentId, status: 'queued', draft: '' }))
+    isAwaitingReply.value = true
+    armRoundFallback(round.roundId, round.roomId)
+    replyStatus.value = `${agentIds.length} 位角色已进入本轮回复队列`
+  }
+
+  function onAgentQueued(payload: Record<string, unknown>): void {
+    const round = ensureRound(payload)
+    const agentId = String(payload.agentId ?? '')
+    if (!round || !agentId) return
+    ensureRoundAgent(round, agentId).status = 'queued'
+    activeRound.value = { ...round, agents: [...round.agents] }
+  }
+
+  function onAgentStarted(payload: Record<string, unknown>): void {
+    const round = ensureRound(payload)
+    const agentId = String(payload.agentId ?? '')
+    if (!round || !agentId) return
+    const agent = ensureRoundAgent(round, agentId)
+    agent.status = 'streaming'
+    agent.toolName = undefined
+    isAwaitingReply.value = true
+    replyStatus.value = `${agentProfiles.value.get(agentId)?.name ?? agentId} 正在回复...`
+    activeRound.value = { ...round, agents: [...round.agents] }
+  }
+
+  function onAgentDelta(payload: Record<string, unknown>): void {
+    const round = ensureRound(payload)
+    const agentId = String(payload.agentId ?? '')
+    if (!round || !agentId) return
+    const agent = ensureRoundAgent(round, agentId)
+    agent.status = 'streaming'
+    agent.draft += String(payload.delta ?? '')
+    activeRound.value = { ...round, agents: [...round.agents] }
+  }
+
+  function onAgentToolStarted(payload: Record<string, unknown>): void {
+    const round = ensureRound(payload)
+    const agentId = String(payload.agentId ?? '')
+    if (!round || !agentId) return
+    const agent = ensureRoundAgent(round, agentId)
+    agent.status = 'tool'
+    agent.toolName = String(payload.toolName ?? '工具')
+    replyStatus.value = `${agentProfiles.value.get(agentId)?.name ?? agentId} 正在调用${agent.toolName}`
+    activeRound.value = { ...round, agents: [...round.agents] }
+  }
+
+  function onAgentToolCompleted(payload: Record<string, unknown>): void {
+    const round = ensureRound(payload)
+    const agentId = String(payload.agentId ?? '')
+    if (!round || !agentId) return
+    const agent = ensureRoundAgent(round, agentId)
+    agent.status = 'streaming'
+    agent.toolName = undefined
+    activeRound.value = { ...round, agents: [...round.agents] }
+  }
+
+  async function onAgentCompleted(payload: Record<string, unknown>): Promise<void> {
+    const round = ensureRound(payload)
+    const agentId = String(payload.agentId ?? '')
+    if (!round || !agentId) return
+    const agent = ensureRoundAgent(round, agentId)
+    agent.status = 'completed'
+    agent.draft = ''
+    agent.toolName = undefined
+    activeRound.value = { ...round, agents: [...round.agents] }
+    await fetchMessages(round.roomId)
+  }
+
+  function onAgentFailed(payload: Record<string, unknown>): void {
+    const round = ensureRound(payload)
+    const agentId = String(payload.agentId ?? '')
+    if (!round || !agentId) return
+    const agent = ensureRoundAgent(round, agentId)
+    agent.status = 'failed'
+    agent.error = String(payload.error ?? '回复失败')
+    activeRound.value = { ...round, agents: [...round.agents] }
+  }
+
+  async function onRoundCompleted(payload: Record<string, unknown>): Promise<void> {
+    const round = ensureRound(payload)
+    if (!round) return
+    round.completed = true
+    activeRound.value = { ...round, agents: [...round.agents] }
+    await fetchMessages(round.roomId)
+    if (roundFallbackTimer) clearTimeout(roundFallbackTimer)
+    roundFallbackTimer = null
+    isAwaitingReply.value = false
+    replyStatus.value = ''
+    window.setTimeout(() => {
+      if (activeRound.value?.roundId === round.roundId) activeRound.value = null
+    }, 650)
+  }
+
+  const onAgentCompletedPush = (payload: Record<string, unknown>) => void onAgentCompleted(payload)
+  const onRoundCompletedPush = (payload: Record<string, unknown>) => void onRoundCompleted(payload)
+
   // ── 群聊消息 ──
 
   /** 加载房间消息，并返回本次服务端快照供回复等待状态机判断。 */
@@ -182,9 +340,23 @@ export function useStronghold() {
     const requestId = ++messageRequestId
     try {
       isLoadingMessages.value = true
-      const res = await strongholdApi.getMessages(roomId, 50)
-      const snapshot = res.data ?? []
+      const res = await strongholdApi.getProjection(roomId, 100)
+      const projection = res.data
+      if (!projection) throw new Error('服务端未返回据点 Projection')
+      const snapshot: GroupMessage[] = projection.messages.map(
+        (message: StrongholdProjectionSnapshot['messages'][number]) => ({
+          id: Number(message.messageId),
+          roomId: message.roomId,
+          senderId: message.senderId,
+          content: message.content,
+          role: message.role,
+          timestamp: message.timestamp ?? undefined,
+          outputTokens: message.outputTokens,
+        }),
+      )
       if (requestId === messageRequestId && currentRoom.value?.id === roomId) {
+        compositor.replaceScope(`stronghold:${roomId}`, projection.surfaces)
+        roomProjection.value = projection
         messages.value = snapshot
       }
       return snapshot
@@ -196,57 +368,12 @@ export function useStronghold() {
     }
   }
 
-  /** 取消当前房间的回复等待，防止切房后旧轮询继续更新状态。 */
   function cancelReplyWait(): void {
-    replyWaitId++
+    if (roundFallbackTimer) clearTimeout(roundFallbackTimer)
+    roundFallbackTimer = null
     isAwaitingReply.value = false
     replyStatus.value = ''
-  }
-
-  /**
-   * 主动等待 Agent 的 assistant 回复或 system 失败消息。
-   * 后端生成是异步的，因此这里以 1 秒间隔快速拉取，避免依赖常规 5 秒轮询。
-   * @param expectedReplies 需要等待的回复条数（@全体成员 时为成员数）。
-   */
-  async function waitForAgentReply(
-    roomId: string,
-    afterMessageId: number,
-    agentId?: string,
-    expectedReplies = 1,
-  ): Promise<void> {
-    const waitId = ++replyWaitId
-    isAwaitingReply.value = true
-    const displayName = agentId
-      ? agentId === '@all'
-        ? '房间里的所有成员'
-        : (agentProfiles.value.get(agentId)?.name ?? agentId)
-      : '房间里的角色'
-    replyStatus.value = `${displayName} 已接到消息，正在准备回复...`
-
-    let foundReplies = 0
-    for (let attempt = 0; attempt < 45; attempt++) {
-      if (waitId !== replyWaitId || currentRoom.value?.id !== roomId) return
-      await new Promise((resolve) => setTimeout(resolve, 1000))
-      const snapshot = await fetchMessages(roomId)
-      foundReplies = snapshot.filter(
-        (message) =>
-          message.id > afterMessageId &&
-          (message.role === 'assistant' || message.role === 'system'),
-      ).length
-      if (foundReplies >= expectedReplies) {
-        if (waitId === replyWaitId) {
-          isAwaitingReply.value = false
-          replyStatus.value = ''
-        }
-        return
-      }
-    }
-
-    if (waitId === replyWaitId) {
-      isAwaitingReply.value = false
-      replyStatus.value = ''
-      notify.toast('角色回复等待超时；消息已保存，可稍后刷新房间查看', { type: 'warning' })
-    }
+    activeRound.value = null
   }
 
   /** 发送消息；complete 用于与共用 CHAR OPS 输入组件握手。 */
@@ -257,7 +384,14 @@ export function useStronghold() {
   ): Promise<boolean> {
     const roomId = currentRoom.value?.id
     const trimmed = content.trim()
-    if (!roomId || !trimmed || isSendingMessage.value || isAwaitingReply.value) {
+    const roomAgentCount = currentRoomAgents.value.length || currentRoom.value?.agents?.length || 0
+    if (
+      !roomId ||
+      roomAgentCount === 0 ||
+      !trimmed ||
+      isSendingMessage.value ||
+      isAwaitingReply.value
+    ) {
       complete?.(false)
       return false
     }
@@ -278,12 +412,22 @@ export function useStronghold() {
       ]
       complete?.(true)
 
-      if (dispatch.replyQueued) {
-        // @全体成员 时等待与成员数一致的回复条数全部落库。
-        const expectedReplies =
-          dispatch.agentId === '@all' ? (dispatch.allAgentIds?.length ?? 1) : 1
-        void waitForAgentReply(roomId, dispatch.message.id, dispatch.agentId, expectedReplies)
-      } else {
+      if (dispatch.replyQueued && dispatch.roundId) {
+        if (!activeRound.value || activeRound.value.roundId !== dispatch.roundId) {
+          activeRound.value = {
+            roundId: dispatch.roundId,
+            roomId,
+            completed: false,
+            agents: (dispatch.agentIds ?? []).map((agentId) => ({
+              agentId,
+              status: 'queued',
+              draft: '',
+            })),
+          }
+        }
+        isAwaitingReply.value = true
+        replyStatus.value = `${dispatch.agentIds?.length ?? 1} 位角色已进入本轮回复队列`
+      } else if (!dispatch.replyQueued) {
         notify.toast(`消息已发送；${dispatch.reason}`, { type: 'info' })
       }
       return true
@@ -307,7 +451,7 @@ export function useStronghold() {
     try {
       const response = await strongholdApi.deleteMessage(roomId, messageId)
       const deleted = new Set(response.data?.deletedMessageIds ?? [messageId])
-      messages.value = messages.value.filter((item) => !deleted.has(item.id))
+      await fetchMessages(roomId)
       const deletedCount = response.data?.deletedCount ?? deleted.size
       notify.toast(deletedCount > 1 ? `已删除 ${deletedCount} 条关联消息` : '消息已删除', {
         type: 'success',
@@ -372,6 +516,15 @@ export function useStronghold() {
   // ── 生命周期 ──
 
   onMounted(async () => {
+    gateway.onPush('stronghold_round_started', onRoundStarted)
+    gateway.onPush('stronghold_agent_queued', onAgentQueued)
+    gateway.onPush('stronghold_agent_started', onAgentStarted)
+    gateway.onPush('stronghold_agent_delta', onAgentDelta)
+    gateway.onPush('stronghold_agent_tool_started', onAgentToolStarted)
+    gateway.onPush('stronghold_agent_tool_completed', onAgentToolCompleted)
+    gateway.onPush('stronghold_agent_completed', onAgentCompletedPush)
+    gateway.onPush('stronghold_agent_failed', onAgentFailed)
+    gateway.onPush('stronghold_round_completed', onRoundCompletedPush)
     // 档案与设施并行加载，互不阻塞；rebuildAgentStatus 会在两者完成后自动合并
     await Promise.all([fetchFacilities(), fetchAgentProfiles()])
     if (currentFacility.value) {
@@ -382,6 +535,15 @@ export function useStronghold() {
   })
 
   onUnmounted(() => {
+    gateway.offPush('stronghold_round_started', onRoundStarted)
+    gateway.offPush('stronghold_agent_queued', onAgentQueued)
+    gateway.offPush('stronghold_agent_started', onAgentStarted)
+    gateway.offPush('stronghold_agent_delta', onAgentDelta)
+    gateway.offPush('stronghold_agent_tool_started', onAgentToolStarted)
+    gateway.offPush('stronghold_agent_tool_completed', onAgentToolCompleted)
+    gateway.offPush('stronghold_agent_completed', onAgentCompletedPush)
+    gateway.offPush('stronghold_agent_failed', onAgentFailed)
+    gateway.offPush('stronghold_round_completed', onRoundCompletedPush)
     messageRequestId++
     cancelReplyWait()
     stopPolling()
@@ -398,9 +560,11 @@ export function useStronghold() {
     agentProfiles,
     butlerConfig,
     messages,
+    roomProjection,
     isLoadingMessages,
     isSendingMessage,
     isAwaitingReply,
+    activeRound,
     replyStatus,
     error,
 

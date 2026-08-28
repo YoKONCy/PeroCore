@@ -102,15 +102,13 @@ export class ButlerService {
       content: `管家请求：${requestText}`,
     })
 
-    const butlerName = config.name || 'Butler'
-
     // 2. 解析维护动作：结构化 action 优先；否则走 LLM 理解，失败回退规则引擎
     let actions: ButlerAction[]
     let narrative = ''
     if (input.action) {
       actions = [input.action]
     } else {
-      const plan = await this.tryLlmPlan(input.roomId, room, requestText, config.persona ?? '')
+      const plan = await this.tryLlmPlan(input.roomId, room, requestText)
       if (plan) {
         narrative = plan.narrative
         actions = await this.mapLlmActions(input.roomId, plan.actions)
@@ -148,7 +146,7 @@ export class ButlerService {
     // 4. 结果回写群聊历史（以管家身份）
     await this.groupChatService.sendMessage({
       roomId: input.roomId,
-      senderId: butlerName,
+      senderId: 'butler',
       role: 'system',
       content: summary,
     })
@@ -172,7 +170,6 @@ export class ButlerService {
     roomId: string,
     room: { name: string; description?: string | null; environmentJson?: string | null },
     requestText: string,
-    configuredPersona: string,
   ): Promise<LlmButlerPlan | null> {
     if (!this.llmDeps) return null
     try {
@@ -182,9 +179,7 @@ export class ButlerService {
         return null
       }
 
-      // 人设：优先使用配置里自定义的 persona，否则渲染 mdp 管家 persona 模板
-      const persona =
-        configuredPersona.trim() || this.llmDeps.mdpEngine.render('group/butler/persona')
+      const persona = this.llmDeps.mdpEngine.render('group/butler/persona')
 
       const rooms = await this.strongholdService.listRooms()
       const agents = this.agentManager.listAgents()
@@ -261,13 +256,11 @@ export class ButlerService {
           params: (item as { params?: Record<string, unknown> }).params ?? {},
         }))
 
-      return {
-        narrative:
-          typeof parsed.narrative === 'string'
-            ? parsed.narrative.trim().slice(0, MAX_NARRATIVE_LENGTH)
-            : '',
-        actions,
-      }
+      const narrative =
+        typeof parsed.narrative === 'string'
+          ? parsed.narrative.trim().slice(0, MAX_NARRATIVE_LENGTH)
+          : ''
+      return { narrative, actions }
     } catch (err) {
       logger.error(`管家 LLM 理解失败，回退规则引擎: ${err}`)
       return null

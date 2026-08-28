@@ -12,8 +12,9 @@ function createRepository() {
       id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, channel TEXT NOT NULL,
       session_id TEXT NOT NULL, thread_id TEXT NOT NULL, task_id TEXT,
       tool_name TEXT NOT NULL, args_summary_json TEXT NOT NULL,
-      args_fingerprint TEXT NOT NULL, reason TEXT NOT NULL, status TEXT NOT NULL,
-      decision TEXT, resolution_message TEXT, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, resolved_at TEXT
+      args_fingerprint TEXT NOT NULL, reason TEXT NOT NULL, risk_level TEXT DEFAULT 'low' NOT NULL,
+      status TEXT NOT NULL, decision TEXT, resolution_message TEXT, created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL, resolved_at TEXT
     );
     CREATE TABLE tool_approval_audit_logs (
       id TEXT PRIMARY KEY, approval_id TEXT, event TEXT NOT NULL, agent_id TEXT NOT NULL,
@@ -48,6 +49,24 @@ describe('ApprovalService SQLite', () => {
       'requested',
       'resolved',
       'consumed',
+    ])
+    sqlite.close()
+  })
+
+  it('Daemon 重启后自动拒绝遗留 pending 审批', () => {
+    const { sqlite, repository } = createRepository()
+    const service = new ApprovalService(repository)
+    const request = service.create(input)
+
+    const restored = new ApprovalService(repository)
+    expect(restored.get(request.id)).toMatchObject({
+      status: 'denied',
+      decision: 'deny_once',
+      resolutionMessage: '服务已重启，旧审批已自动拒绝。',
+    })
+    expect(restored.listAudit({ approvalId: request.id }).map((item) => item.event)).toEqual([
+      'requested',
+      'restart_rejected',
     ])
     sqlite.close()
   })

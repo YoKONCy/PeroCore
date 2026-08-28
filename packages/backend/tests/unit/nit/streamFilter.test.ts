@@ -91,6 +91,38 @@ describe('ThinkingStreamFilter', () => {
       expect(output).toBe('前缀后缀')
     })
 
+    it.each([
+      ['thought', '<thought>另一种思考标签</thought>'],
+      ['thinking', '<thinking>完整名称标签</thinking>'],
+    ])('应当隐藏并采集%s别名块', (_name, block) => {
+      const filter = new ThinkingStreamFilter()
+
+      const output = filter.filter(`前${block}后`) + filter.flush()
+      const events = filter.drainEvents()
+
+      expect(output).toBe('前后')
+      expect(events).toEqual(
+        expect.arrayContaining([
+          { type: 'start' },
+          expect.objectContaining({ type: 'delta' }),
+          { type: 'end' },
+        ]),
+      )
+    })
+
+    it('应当处理跨chunk拆分的thought标签', () => {
+      const filter = new ThinkingStreamFilter()
+
+      const output = [
+        filter.filter('前缀<tho'),
+        filter.filter('ught>隐藏内容</thou'),
+        filter.filter('ght>后缀'),
+        filter.flush(),
+      ].join('')
+
+      expect(output).toBe('前缀后缀')
+    })
+
     it('流结束时未闭合 <think> 块应当丢弃块内容', () => {
       const filter = new ThinkingStreamFilter()
 

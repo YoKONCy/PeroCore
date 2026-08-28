@@ -9,58 +9,99 @@
  * @module packages/shared/src/types/capability.types
  */
 
+import type { KernelCapabilityOffer, KernelEnvelope, KernelError } from './kernel.types'
+import type { KernelNodeDescriptor, KernelNodeId, KernelNodeSessionId } from './node.types'
+
+export const WEB_PAGE_OPERATIONS = [
+  'open',
+  'inspect',
+  'extract',
+  'search',
+  'screenshot',
+  'elementScreenshot',
+  'click',
+  'nativeClick',
+  'hover',
+  'type',
+  'sendKeys',
+  'setValue',
+  'selectOption',
+  'check',
+  'scroll',
+  'back',
+  'wait',
+  'listTargets',
+  'createTarget',
+  'switchTarget',
+  'closeTarget',
+  'domQuery',
+  'frameQuery',
+  'handleDialog',
+  'sourceSearch',
+  'networkQuery',
+  'networkBody',
+  'networkConfigure',
+  'downloadConfigure',
+  'storage',
+  'emulate',
+  'evaluate',
+  'runtimeStatus',
+  'uploadFile',
+] as const
+
+export type WebPageOperation = (typeof WEB_PAGE_OPERATIONS)[number]
+export const webPageCapabilityName = (operation: WebPageOperation): string =>
+  `web.page.${operation}`
+
 // ─────────────────────────────────────────────
 // IPC 消息类型（Daemon ↔ 能力节点）
 // ─────────────────────────────────────────────
 
-/** Daemon → 节点消息 */
-export type DaemonToNodeMessage =
+/** Daemon → Node 的统一调用消息。 */
+export type DaemonToNodeMessage = { protocolVersion: 1 } & (
   | {
-      type: 'tool_call'
-      callId: string
-      /** 能力名（已映射后的，如 screen_capture） */
-      toolName: string
-      args: Record<string, unknown>
+      type: 'capability_invoke'
+      invocationId: string
+      providerId: string
+      envelope: KernelEnvelope<{ operation: string; input: unknown }>
     }
   | {
-      type: 'registered'
-      success: boolean
-      message?: string
+      type: 'capability_cancel'
+      invocationId: string
+      reason: string
     }
   | {
-      type: 'error'
-      message: string
+      type: 'node_accepted'
+      sessionId: KernelNodeSessionId
+      leaseExpiresAt: string
     }
+  | { type: 'authenticated'; deviceToken?: string }
+  | { type: 'error'; message: string }
+)
 
-/** 节点 → Daemon 消息 */
-export type NodeToDaemonMessage =
+/** Node → Daemon 的统一注册、心跳与调用结果消息。 */
+export type NodeToDaemonMessage = { protocolVersion: 1 } & (
   | {
-      type: 'register'
-      nodeId: string
-      nodeType: 'electron' | 'mobile' | 'cli' | 'remote-daemon'
-      capabilities: string[]
-      url?: string
+      type: 'node_hello'
+      descriptor: KernelNodeDescriptor
+      offers: KernelCapabilityOffer[]
     }
   | {
       type: 'heartbeat'
-      nodeId: string
+      nodeId: KernelNodeId
+      sessionId: KernelNodeSessionId
     }
   | {
-      type: 'tool_result'
-      callId: string
-      /** 工具执行结果（任意可序列化对象） */
-      result: unknown
+      type: 'capability_result'
+      invocationId: string
       success: boolean
-      errorMsg?: string
+      output?: unknown
+      error?: KernelError
     }
-  | {
-      /** 第七阶段修复（批次 E3）：WS 鉴权握手 */
-      type: 'auth'
-      token: string
-    }
+  | { type: 'authenticate'; token: string }
+)
 
-/** 通用 Daemon 消息（接收时用） */
-export type DaemonMessage = DaemonToNodeMessage | NodeToDaemonMessage
+export type CapabilityTransportMessage = DaemonToNodeMessage | NodeToDaemonMessage
 
 // ─────────────────────────────────────────────
 // 标准化能力返回格式

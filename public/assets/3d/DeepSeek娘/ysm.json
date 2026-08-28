@@ -1,0 +1,110 @@
+{
+	"spec": 2,
+	"metadata": {
+		"name": "DeepSeek酱",
+		"tips": "DeepSeek酱模型",
+		"license": {
+			"type": "ARR",
+			"desc": "保留最终所有权"
+		},
+		"authors": [
+			{
+				"name": "羊毛",
+				"avatar": "avatar/icon.png",
+				"role": "模型 贴图 动画",
+				"comment": "是羊毛哦~",
+				"contact": {
+					"BiliBili": "https://space.bilibili.com/85335217"
+				}
+			}
+		]
+	},
+	"properties": {
+		"height_scale": 0.65,
+		"width_scale": 0.65,
+		"extra_animation": {
+			"extra1": "#wazi",
+			"extra2": "",
+			"extra3": "",
+			"extra4": "",
+			"extra5": "",
+			"extra6": "",
+			"extra7": "",
+			"extra0": ""
+		},
+		"preview_animation": "MainAnim",
+		"default_texture": "default",
+		"render_layers_first": false,
+		"all_cutout": true,
+		"free": false,
+		"extra_animation_buttons": [
+			{
+				"id": "wazi",
+				"name": "设置",
+				"config_forms": [
+					{
+						"type": "range",
+						"title": "模型大小",
+						"description": "调整模型大小",
+						"value": "v.roaming.Size",
+						"step": 0.1,
+						"min": 0.1,
+						"max": 4
+					},
+					{
+						"type": "range",
+						"title": "头部大小",
+						"description": "头部大小",
+						"value": "v.roaming.HeadSize",
+						"step": 0.05,
+						"min": 0.7,
+						"max": 1.2
+					},
+					{
+						"type": "checkbox",
+						"title": "眼罩",
+						"description": "没有多模态这块喵",
+						"value": "v.roaming.eyeBand"
+					},
+					{
+						"type": "checkbox",
+						"title": "发光眼睛",
+						"description": "DeepSeek支持多模态辣！！",
+						"value": "v.roaming.eyeGlow"
+					},
+					{
+						"type": "checkbox",
+						"title": "尾巴",
+						"description": "鲸鱼的尾巴是水平的哦~",
+						"value": "v.roaming.Tail"
+					}
+				]
+			}
+		],
+		"disable_preview_rotation": true,
+		"gui_no_lighting": false
+	},
+	"files": {
+		"player": {
+			"model": {
+				"main": "models/main.json",
+				"arm": "models/arm.json"
+			},
+			"animation": {
+				"main": "animations/main.animation.json",
+				"arm": "animations/arm.animation.json",
+				"extra": "animations/extra.animation.json",
+				"tac": "animations/tac.animation.json",
+				"carryon": "animations/carryon.animation.json",
+				"parcool": "animations/parcool.animation.json",
+				"swem": "animations/swem.animation.json",
+				"fp_arm": "animations/fp.arm.animation.json"
+			},
+			"texture": [
+				{
+					"uv": "textures/default.png"
+				}
+			]
+		}
+	}
+}

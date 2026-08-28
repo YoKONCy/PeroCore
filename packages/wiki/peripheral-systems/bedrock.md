@@ -59,20 +59,15 @@ infOS 支持两种语音模式：
 
 ## 🛠️ 技术实现细节
 
-### 1. 模型格式与安全性
+### 1. 模型格式
 
-为了保护创作者的版权并提高加载性能，infOS 采用了自研的 **`.Pero` 加密模型格式**。
-
-- **`.Pero` 格式**: 这是一个经过加密和压缩的容器格式，内部封装了几何数据、纹理和私有元数据。
-- **原生闭源模块 (Rust Native)**: 模型解密与核心解析逻辑运行在 **Rust 编写的闭源原生模块** 中。
-  - **安全性**: 密钥管理完全由 Rust 内部处理，JS 层无法拦截解密后的原始几何数据，有效防止模型被非法提取。
-  - **性能**: 利用 Rust 的并发能力进行二进制数据解析，显著优于纯 JS 的处理速度。
+infOS 使用标准 Bedrock JSON、纹理、动画与控制器资源目录。官方、本地与Workshop模型通过Manifest统一发现，前端使用相同的Web加载路径。
 
 ### 2. 渲染管线 (Rendering Pipeline)
 
 - **基座 (Base)**: 使用 `Three.js` 进行底层渲染。
-- **提供者层 (Provider Layer)**: 通过 `PeroSecureProvider` 调用 Native 模块完成数据加载。
-- **解析器 (AvatarRenderer)**: 将 Native 模块返回的骨骼数据转换为 Three.js 的层级树。
+- **提供者层 (Provider Layer)**: `StandardBedrockProvider`读取标准资源并生成统一模型数据。
+- **解析器 (AvatarRenderer)**: 将模型骨骼数据转换为 Three.js 的层级树。
 - **动画引擎 (AnimationEngine)**: 支持多轨道动画混合及 **Molang** 表达式驱动。
 
 ### 3. 性能优化 (Performance)

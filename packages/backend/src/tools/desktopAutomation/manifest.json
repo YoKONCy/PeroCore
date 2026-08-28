@@ -8,6 +8,13 @@
   "entry": "index.ts",
   "category": "core",
   "platforms": ["windows", "darwin"],
+  "userCopy": {
+    "automation_execute": {
+      "label": "操作桌面应用",
+      "description": "使用鼠标和键盘操作桌面应用。"
+    },
+    "get_mouse_position": { "label": "查看鼠标位置", "description": "查看鼠标指针当前所在的位置。" }
+  },
 
   "tools": [
     {
@@ -29,10 +36,40 @@
               "notification"
             ]
           },
-          "x": { "type": "number", "description": "鼠标 X 坐标" },
-          "y": { "type": "number", "description": "鼠标 Y 坐标" },
-          "x2": { "type": "number", "description": "拖拽目标 X 坐标" },
-          "y2": { "type": "number", "description": "拖拽目标 Y 坐标" },
+          "x": {
+            "type": "number",
+            "description": "鼠标 X 坐标。默认采用0到1000归一化坐标"
+          },
+          "y": {
+            "type": "number",
+            "description": "鼠标 Y 坐标。默认采用0到1000归一化坐标"
+          },
+          "x2": {
+            "type": "number",
+            "description": "拖拽目标 X 坐标，与起点使用同一坐标空间"
+          },
+          "y2": {
+            "type": "number",
+            "description": "拖拽目标 Y 坐标，与起点使用同一坐标空间"
+          },
+          "coordinateSpace": {
+            "type": "string",
+            "description": "坐标空间。默认normalized；依据截图点击时使用screenshot并照抄截图返回的上下文",
+            "enum": ["normalized", "screenshot", "desktop"],
+            "default": "normalized"
+          },
+          "displayId": {
+            "type": "string",
+            "description": "目标显示器ID；使用截图坐标时照抄截图返回值"
+          },
+          "screenshotWidth": {
+            "type": "number",
+            "description": "截图实际宽度；coordinateSpace为screenshot时必填"
+          },
+          "screenshotHeight": {
+            "type": "number",
+            "description": "截图实际高度；coordinateSpace为screenshot时必填"
+          },
           "text": { "type": "string", "description": "文本/快捷键/通知标题" },
           "message": { "type": "string", "description": "通知正文" }
         },

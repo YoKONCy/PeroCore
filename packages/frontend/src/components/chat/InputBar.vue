@@ -1,4 +1,10 @@
 <script setup lang="ts">
+/**
+ * InputBar.vue — 界面组件
+ *
+ * 负责组织该界面的响应式状态、用户交互与领域数据展示。
+ * 副作用在组件生命周期内建立并清理，避免跨页面残留监听器或异步状态。
+ */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import PixelIcon from '../pixel/PixelIcon.vue'
 import { attachmentsApi, type AttachmentInfo } from '../../api/modules/attachmentsApi'
@@ -56,6 +62,7 @@ const emit = defineEmits<{
     text: string,
     mentions: string[],
     attachmentIds: string[],
+    attachments: AttachmentInfo[],
     imageMode: 'auto' | 'native' | 'relay',
     complete: (success: boolean) => void,
   ]
@@ -74,6 +81,11 @@ const threadStore = useThreadStore()
 const agentStore = useAgentStore()
 const notify = useNotificationStore()
 const inputText = ref('')
+const INPUT_HISTORY_KEY = 'infos:char-ops-input-history'
+const INPUT_HISTORY_LIMIT = 100
+const inputHistory = ref<string[]>(loadInputHistory())
+const historyIndex = ref(inputHistory.value.length)
+const historyDraft = ref('')
 const pendingAttachments = ref<PendingAttachment[]>([])
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 /** @ 内联 chip 的叠加渲染层（group 模式与 textarea 同尺寸叠放）。 */
@@ -89,6 +101,7 @@ const flowStates = ref<FlowStateInfo[]>([])
 const threadTools = ref<ThreadToolSetting[]>([])
 const toolsLoading = ref(false)
 const toolsSaving = ref(false)
+const autoExecuteTools = ref(false)
 const toolQuery = ref('')
 const imageModeOpen = ref(false)
 const imageMode = ref<'auto' | 'native' | 'relay'>('auto')
@@ -160,6 +173,16 @@ let audioChunks: Blob[] = []
 
 const activeAgent = computed(() => agentStore.currentAgent)
 const isGroupChannel = computed(() => props.channel === 'group')
+const channelLabel = computed(
+  () =>
+    ({
+      desktop: '桌面会话',
+      group: '据点群聊',
+      companion: '陪伴会话',
+      social: '社交会话',
+      work: '工作会话',
+    })[props.channel] ?? '当前会话',
+)
 const successfulAttachments = computed(() =>
   pendingAttachments.value.filter((item) => item.uploadState === 'success'),
 )
@@ -181,6 +204,10 @@ const filteredCommands = computed(() => {
 })
 
 async function loadThreadTools(): Promise<void> {
+  if (isGroupChannel.value) {
+    threadTools.value = []
+    return
+  }
   if (!threadStore.threadId) {
     threadTools.value = []
     return
@@ -189,11 +216,34 @@ async function loadThreadTools(): Promise<void> {
   try {
     const response = await threadsApi.getTools(threadStore.threadId)
     threadTools.value = response.data?.tools ?? []
+    autoExecuteTools.value = response.data?.autoExecuteTools ?? false
   } catch (error) {
     logger.warn('InputBar', '加载本会话工具配置失败', error)
     threadTools.value = []
   } finally {
     toolsLoading.value = false
+  }
+}
+
+async function toggleAutoExecute(): Promise<void> {
+  if (toolsSaving.value || props.isSending || !threadStore.threadId) return
+  const previous = autoExecuteTools.value
+  autoExecuteTools.value = !previous
+  toolsSaving.value = true
+  try {
+    const response = await threadsApi.updateExecutionMode(
+      threadStore.threadId,
+      autoExecuteTools.value,
+    )
+    autoExecuteTools.value = response.data?.autoExecuteTools ?? autoExecuteTools.value
+    notify.toast(autoExecuteTools.value ? '自动执行模式已开启' : '自动执行模式已关闭', {
+      type: autoExecuteTools.value ? 'success' : 'info',
+    })
+  } catch (error) {
+    autoExecuteTools.value = previous
+    notify.toast(error instanceof Error ? error.message : '保存执行模式失败', { type: 'error' })
+  } finally {
+    toolsSaving.value = false
   }
 }
 
@@ -265,6 +315,20 @@ async function clearFlowState(agentId: string): Promise<void> {
   }
 }
 
+async function clearWorkContext(agentId: string): Promise<void> {
+  if (!threadStore.threadId || flowClearing.value) return
+  flowClearing.value = true
+  try {
+    await threadsApi.clearWorkContext(threadStore.threadId, agentId)
+    await loadFlowState()
+    notify.toast('工作上下文已清空', { type: 'success' })
+  } catch (error) {
+    notify.toast(error instanceof Error ? error.message : '清空工作上下文失败', { type: 'error' })
+  } finally {
+    flowClearing.value = false
+  }
+}
+
 watch(
   () => props.isSending,
   (sending, previous) => {
@@ -297,7 +361,7 @@ const commands = computed(() => [
   })),
 ])
 
-async function loadCapabilities() {
+async function loadCapabilities(): Promise<void> {
   // 据点群聊当前仅支持文本，不读取 desktop 模型和语音能力。
   if (isGroupChannel.value) return
   try {
@@ -312,7 +376,11 @@ async function loadCapabilities() {
       Boolean(relayConfig['multimodalRelay.modelConfigId'])
     asrAvailable.value = voiceRes.data?.asr?.available === true
     const mainId = String(mainRes.data?.value ?? '')
-    if (!mainId) return
+    if (!mainId) {
+      enableVision.value = false
+      enableAudioInput.value = false
+      return
+    }
     const model = await modelApi.getById(mainId)
     enableVision.value = model.data?.enableVision === true
     enableAudioInput.value = model.data?.enableAudioInput === true
@@ -322,12 +390,78 @@ async function loadCapabilities() {
 }
 
 watch(() => agentStore.activeAgentId, loadCapabilities, { immediate: true })
+
+function onModelCapabilitiesChanged(): void {
+  void loadCapabilities()
+}
+
 watch(
   () => threadStore.threadId,
   async (_next, previous) => {
     if (previous) await clearPendingAttachments()
   },
 )
+
+function loadInputHistory(): string[] {
+  try {
+    if (typeof localStorage === 'undefined') return []
+    const stored = JSON.parse(localStorage.getItem(INPUT_HISTORY_KEY) ?? '[]') as unknown
+    if (!Array.isArray(stored)) return []
+    return stored
+      .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+      .slice(-INPUT_HISTORY_LIMIT)
+  } catch {
+    return []
+  }
+}
+
+function saveInputHistory(text: string): void {
+  const normalized = text.trim()
+  if (!normalized) return
+  inputHistory.value = [...inputHistory.value, normalized].slice(-INPUT_HISTORY_LIMIT)
+  historyIndex.value = inputHistory.value.length
+  historyDraft.value = ''
+  try {
+    localStorage.setItem(INPUT_HISTORY_KEY, JSON.stringify(inputHistory.value))
+  } catch (error) {
+    logger.warn('InputBar', '保存本地输入历史失败', error)
+  }
+}
+
+function showHistory(direction: -1 | 1): void {
+  const length = inputHistory.value.length
+  if (!length) return
+  if (direction === -1) {
+    if (historyIndex.value === length) historyDraft.value = inputText.value
+    historyIndex.value = Math.max(0, historyIndex.value - 1)
+  } else {
+    if (historyIndex.value >= length) return
+    historyIndex.value += 1
+  }
+  inputText.value =
+    historyIndex.value === length
+      ? historyDraft.value
+      : (inputHistory.value[historyIndex.value] ?? '')
+  mentionOpen.value = false
+  nextTick(() => {
+    const element = textareaRef.value
+    if (!element) return
+    element.focus()
+    element.setSelectionRange(element.value.length, element.value.length)
+    autoResize()
+  })
+}
+
+function canNavigateHistory(event: KeyboardEvent): boolean {
+  if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.isComposing)
+    return false
+  const element = textareaRef.value
+  if (!element || element.selectionStart !== element.selectionEnd) return false
+  const caret = element.selectionStart
+  if (event.key === 'ArrowUp') return !element.value.slice(0, caret).includes('\n')
+  if (event.key === 'ArrowDown') return !element.value.slice(caret).includes('\n')
+  return false
+}
 
 function autoResize() {
   const element = textareaRef.value
@@ -360,6 +494,11 @@ function onKeydown(event: KeyboardEvent) {
       mentionOpen.value = false
       return
     }
+  }
+  if ((event.key === 'ArrowUp' || event.key === 'ArrowDown') && canNavigateHistory(event)) {
+    event.preventDefault()
+    showHistory(event.key === 'ArrowUp' ? -1 : 1)
+    return
   }
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault()
@@ -397,8 +536,20 @@ function validateFile(file: File): 'image' | 'text' | null {
     'text/x-java-source',
     'application/sql',
   ])
-  if (imageTypes.has(file.type)) return 'image'
-  if (textTypes.has(file.type)) return 'text'
+  if (imageTypes.has(file.type)) {
+    if (file.size > 20 * 1024 * 1024) {
+      notify.toast('图片不能超过 20MB', { type: 'warning' })
+      return null
+    }
+    return 'image'
+  }
+  if (textTypes.has(file.type)) {
+    if (file.size > 2 * 1024 * 1024) {
+      notify.toast('文本附件不能超过 2MB', { type: 'warning' })
+      return null
+    }
+    return 'text'
+  }
   notify.toast('暂不支持 PDF 与大文档解析；请选择受支持的图片或 UTF-8 文本文件', {
     type: 'warning',
   })
@@ -408,6 +559,8 @@ function validateFile(file: File): 'image' | 'text' | null {
 async function uploadFile(file: File) {
   const kind = validateFile(file)
   if (!kind) return
+  // 模型配置可能由设置页或其他窗口刚刚更新；上传前复核权威能力，避免使用陈旧快照。
+  if (kind === 'image') await loadCapabilities()
   if (kind === 'image' && !enableVision.value && !relayAvailable.value) {
     notify.toast('主模型不支持视觉，且尚未配置多模态转述模型', { type: 'warning' })
     return
@@ -532,6 +685,8 @@ function escapeHtml(value: string): string {
  * 满足条件则打开成员候选弹窗。
  */
 function onTextInput(event: Event) {
+  historyIndex.value = inputHistory.value.length
+  historyDraft.value = ''
   autoResize()
   if (!isGroupChannel.value) return
   const element = event.target as HTMLTextAreaElement
@@ -647,6 +802,7 @@ function send() {
   const mentions = isGroupChannel.value ? resolveMentions(inputText.value) : []
   const ids = successfulAttachments.value.map((item) => item.id)
   const sentAttachments = [...pendingAttachments.value]
+  saveInputHistory(text)
   // 提交给流式管道后立刻清空本地输入，避免等待模型完整回复才更新指挥台。
   inputText.value = ''
   pendingAttachments.value = []
@@ -654,15 +810,31 @@ function send() {
   nextTick(autoResize)
   const resolvedImageMode =
     imageMode.value === 'auto' ? (enableVision.value ? 'native' : 'relay') : imageMode.value
-  emit('send', text || '请查看本轮附件。', mentions, ids, resolvedImageMode, (success) => {
-    if (!success) {
-      // 请求未被服务端接受时恢复待发送内容，便于用户修正后重试。
-      inputText.value = text
-      pendingAttachments.value = sentAttachments
-      return
-    }
-    sentAttachments.forEach((item) => item.previewUrl && URL.revokeObjectURL(item.previewUrl))
-  })
+  emit(
+    'send',
+    text || '请查看本轮附件。',
+    mentions,
+    ids,
+    sentAttachments.map(
+      ({
+        uploadState: _uploadState,
+        localKey: _localKey,
+        previewUrl: _previewUrl,
+        error: _error,
+        ...item
+      }) => item,
+    ),
+    resolvedImageMode,
+    (success) => {
+      if (!success) {
+        // 请求未被服务端接受时恢复待发送内容，便于用户修正后重试。
+        inputText.value = text
+        pendingAttachments.value = sentAttachments
+        return
+      }
+      sentAttachments.forEach((item) => item.previewUrl && URL.revokeObjectURL(item.previewUrl))
+    },
+  )
 }
 
 async function executeCommand(id: string) {
@@ -751,10 +923,12 @@ function formatSize(bytes: number) {
 onMounted(() => {
   // 监听全局点击，用于识图方式弹层的点击外部关闭。
   document.addEventListener('click', onDocumentClick)
+  window.addEventListener('infos:model-capabilities-changed', onModelCapabilitiesChanged)
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', onDocumentClick)
+  window.removeEventListener('infos:model-capabilities-changed', onModelCapabilitiesChanged)
   cleanupRecorder()
   void clearPendingAttachments()
 })
@@ -808,23 +982,43 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
     </div>
 
     <div v-if="!isGroupChannel && pendingAttachments.length" class="attachment-list">
-      <article v-for="item in pendingAttachments" :key="item.localKey" class="attachment-card">
-        <img v-if="item.previewUrl" :src="item.previewUrl" alt="附件预览" />
-        <PixelIcon v-else name="file" size="md" />
-        <div class="attachment-info">
-          <strong>{{ item.originalName }}</strong>
-          <span>
-            {{ formatSize(item.sizeBytes) }} ·
-            {{
+      <article
+        v-for="item in pendingAttachments"
+        :key="item.localKey"
+        class="attachment-card"
+        :class="{ 'attachment-card--image': item.previewUrl }"
+      >
+        <template v-if="item.previewUrl">
+          <img :src="item.previewUrl" alt="待发送图片" />
+          <span
+            class="attachment-image-state"
+            :class="`attachment-image-state--${item.uploadState}`"
+            :title="
               item.uploadState === 'uploading'
                 ? '上传中'
                 : item.uploadState === 'success'
                   ? '已就绪'
                   : '上传失败'
-            }}
-          </span>
-        </div>
-        <button title="取消附件" @click="removeAttachment(item)">
+            "
+          />
+        </template>
+        <template v-else>
+          <PixelIcon name="file" size="md" />
+          <div class="attachment-info">
+            <strong>{{ item.originalName }}</strong>
+            <span>
+              {{ formatSize(item.sizeBytes) }} ·
+              {{
+                item.uploadState === 'uploading'
+                  ? '上传中'
+                  : item.uploadState === 'success'
+                    ? '已就绪'
+                    : '上传失败'
+              }}
+            </span>
+          </div>
+        </template>
+        <button title="取消附件" aria-label="取消附件" @click="removeAttachment(item)">
           <PixelIcon name="close" size="xs" />
         </button>
       </article>
@@ -996,18 +1190,6 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
           <span class="mention-btn-at">@</span>
           <span>提及</span>
         </button>
-        <button
-          class="mention-btn"
-          :class="{ reserved: toolOpen }"
-          title="管理本会话可用工具"
-          @click="toggleToolManager"
-        >
-          <PixelIcon name="tool" size="xs" />
-          <span>会话工具</span>
-          <span v-if="threadTools.length" class="tool-count">
-            {{ enabledToolCount }}/{{ threadTools.length }}
-          </span>
-        </button>
       </div>
       <button v-if="isSending && !isGroupChannel" class="stop-btn" @click="emit('stop')">
         <PixelIcon name="square" size="xs" />
@@ -1079,6 +1261,20 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
           <small>私有事实</small>
           <p>{{ state.privateFacts || '暂无需要私下持续记住的事实。' }}</p>
         </section>
+        <section class="flow-state-card__work">
+          <small>工作上下文</small>
+          <p>{{ state.workContext || '暂无工作上下文。' }}</p>
+          <div class="flow-work-meta">
+            <span v-if="state.workContext">剩余 {{ state.workContextRemainingPairs }} 轮</span>
+            <button
+              :disabled="flowClearing || !state.workContext"
+              @click="clearWorkContext(state.agentId)"
+            >
+              <PixelIcon name="trash" size="xs" />
+              清空工作上下文
+            </button>
+          </div>
+        </section>
         <footer>
           <time>{{ state.updatedAt ? `更新于 ${state.updatedAt}` : '尚未更新' }}</time>
           <button
@@ -1090,23 +1286,42 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
           </button>
         </footer>
       </article>
-      <p class="flow-panel__notice">心流不会写入聊天记录或长期记忆。展开仅供设备用户查看。</p>
+      <p class="flow-panel__notice">
+        心流与工作上下文都不会写入聊天记录或长期记忆；工作上下文会按配置轮次强制清空。
+      </p>
     </div>
 
     <div v-if="toolOpen" class="deck-popover tool-popover">
       <header class="tool-manager__head">
         <div>
           <strong>本会话工具</strong>
-          <span>{{ props.channel.toUpperCase() }} CHANNEL</span>
+          <span>{{ channelLabel }}</span>
         </div>
         <b>{{ enabledToolCount }}/{{ threadTools.length }} 启用</b>
       </header>
+      <button
+        class="tool-manager__auto"
+        :class="{ 'is-active': autoExecuteTools }"
+        :disabled="toolsSaving || isSending"
+        type="button"
+        @click="toggleAutoExecute"
+      >
+        <span class="tool-manager__auto-icon">
+          <PixelIcon name="flash" size="xs" />
+        </span>
+        <span>
+          <strong>自动执行</strong>
+          <small>普通工具直接运行；三个终端入口与工作区外删除仍需确认</small>
+        </span>
+        <b>{{ autoExecuteTools ? 'ON' : 'OFF' }}</b>
+        <i><em /></i>
+      </button>
       <p class="tool-manager__notice">
-        这里只能控制当前 Channel 已授权的工具，设置会随本会话持久保存。
+        你可以决定本次会话允许助手使用哪些功能。关闭某项功能后，助手在本会话中将无法使用它；带“系统必需”标记的功能不能关闭。
       </p>
       <label class="tool-manager__search">
         <PixelIcon name="search" size="xs" />
-        <input v-model="toolQuery" placeholder="搜索工具或用途…" />
+        <input v-model="toolQuery" placeholder="搜索功能名称或用途…" />
       </label>
       <div class="tool-manager__list">
         <div v-if="toolsLoading" class="tool-manager__empty">
@@ -1133,7 +1348,7 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
               <span>{{ tool.description || '暂无工具介绍' }}</span>
             </span>
           </span>
-          <span v-if="tool.locked" class="tool-manager__protocol">SYS</span>
+          <span v-if="tool.locked" class="tool-manager__protocol">系统必需</span>
           <span
             v-else
             class="tool-manager__switch"
@@ -1143,10 +1358,10 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
           </span>
         </button>
         <div v-if="!toolsLoading && !visibleThreadTools.length" class="tool-manager__empty">
-          当前 Channel 没有匹配的可配置工具。
+          当前会话没有匹配的功能。
         </div>
       </div>
-      <footer v-if="isSending">生成期间工具配置已锁定</footer>
+      <footer v-if="isSending">助手工作期间暂不能修改功能设置</footer>
     </div>
 
     <input
@@ -1338,6 +1553,7 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
   border-bottom: 1px solid var(--ui-border-subtle);
 }
 .attachment-card {
+  position: relative;
   display: grid;
   grid-template-columns: 42px minmax(110px, 180px) 20px;
   align-items: center;
@@ -1347,10 +1563,31 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
   border: 1px solid var(--ui-border-subtle);
   border-radius: 4px;
 }
+.attachment-card--image {
+  display: block;
+  width: 84px;
+  height: 84px;
+  flex: 0 0 84px;
+  padding: 4px;
+  background:
+    linear-gradient(var(--ui-bg-surface), var(--ui-bg-surface)) padding-box,
+    linear-gradient(135deg, var(--ui-accent-sky), var(--ui-accent-purple), var(--ui-accent-primary))
+      border-box;
+  border: 2px solid transparent;
+  border-radius: 12px 5px 12px 5px;
+  box-shadow: 3px 3px 0 color-mix(in srgb, var(--ui-accent-sky) 20%, transparent);
+  transform: rotate(-0.5deg);
+}
 .attachment-card img {
   width: 42px;
   height: 42px;
   object-fit: cover;
+}
+.attachment-card--image img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 8px 3px 8px 3px;
 }
 .attachment-info {
   min-width: 0;
@@ -1377,6 +1614,45 @@ button {
   border: 0;
   background: none;
   color: var(--ui-text-tertiary);
+}
+.attachment-card--image button {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--ui-accent-purple) 42%, var(--ui-border-default));
+  border-radius: 50%;
+  background: var(--ui-bg-elevated);
+  box-shadow: 0 3px 8px color-mix(in srgb, var(--ui-accent-purple) 20%, transparent);
+  color: var(--ui-text-primary);
+}
+.attachment-image-state {
+  position: absolute;
+  right: 7px;
+  bottom: 7px;
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--ui-bg-surface);
+  border-radius: 50%;
+  background: var(--ui-success, #4cc38a);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--ui-text-primary) 25%, transparent);
+}
+.attachment-image-state--uploading {
+  background: var(--ui-accent-sky);
+  animation: attachment-state-pulse 0.9s ease-in-out infinite alternate;
+}
+.attachment-image-state--failed {
+  background: var(--ui-danger, #ef5b72);
+}
+@keyframes attachment-state-pulse {
+  to {
+    opacity: 0.45;
+    transform: scale(0.72);
+  }
 }
 .deck-footer {
   display: flex;
@@ -1533,6 +1809,7 @@ button {
   opacity: 0.4;
 }
 .stop-btn {
+  border-color: var(--ui-danger);
   background: var(--ui-danger);
   color: #fff;
 }
@@ -1660,6 +1937,28 @@ button {
   line-height: 1.55;
   white-space: pre-wrap;
 }
+
+.flow-state-card__work {
+  border-left: 3px solid #8b5cf6;
+  background: color-mix(in srgb, #8b5cf6 7%, var(--ui-bg-elevated));
+}
+
+.flow-work-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 10px;
+  color: var(--ui-text-tertiary);
+}
+
+.flow-work-meta button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ui-accent-purple, #8b5cf6);
+}
 .flow-state-card > footer {
   display: flex;
   align-items: center;
@@ -1784,6 +2083,91 @@ button {
   color: var(--ui-accent-primary);
   font: 800 9px var(--ui-font-mono);
 }
+.tool-manager__auto {
+  display: grid;
+  width: calc(100% - 16px);
+  min-height: 54px;
+  grid-template-columns: 28px minmax(0, 1fr) auto 32px;
+  align-items: center;
+  gap: 8px;
+  margin: 8px;
+  padding: 7px 8px;
+  border: 1px solid var(--ui-border-default);
+  border-left: 3px solid var(--ui-text-disabled);
+  background: var(--ui-bg-surface-soft);
+  color: var(--ui-text-primary);
+  text-align: left;
+  box-shadow: 2px 2px 0 color-mix(in srgb, var(--ui-text-primary) 8%, transparent);
+  cursor: pointer;
+  transition: 0.14s steps(3, end);
+}
+.tool-manager__auto:hover:not(:disabled) {
+  transform: translate(-1px, -1px);
+  box-shadow: 3px 3px 0 color-mix(in srgb, var(--ui-accent-sky) 18%, transparent);
+}
+.tool-manager__auto:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.tool-manager__auto > span:nth-child(2) {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+.tool-manager__auto strong {
+  font-size: 10px;
+}
+.tool-manager__auto small {
+  color: var(--ui-text-tertiary);
+  font-size: 9px;
+  line-height: 1.35;
+}
+.tool-manager__auto-icon {
+  display: grid;
+  width: 25px;
+  height: 25px;
+  place-items: center;
+  border: 1px solid var(--ui-border-strong);
+  color: var(--ui-text-tertiary);
+}
+.tool-manager__auto > b {
+  color: var(--ui-text-tertiary);
+  font: 900 9px var(--ui-font-mono);
+}
+.tool-manager__auto > i {
+  position: relative;
+  width: 30px;
+  height: 16px;
+  border: 1px solid var(--ui-border-strong);
+  background: var(--ui-bg-primary);
+}
+.tool-manager__auto > i em {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  background: var(--ui-text-disabled);
+  transition: transform 0.14s steps(3, end);
+}
+.tool-manager__auto.is-active {
+  border-color: color-mix(in srgb, var(--ui-accent-sky) 55%, var(--ui-border-default));
+  border-left-color: var(--ui-accent-sky);
+  background: color-mix(in srgb, var(--ui-accent-sky) 8%, var(--ui-bg-elevated));
+}
+.tool-manager__auto.is-active .tool-manager__auto-icon,
+.tool-manager__auto.is-active > b {
+  border-color: var(--ui-accent-sky);
+  color: var(--ui-accent-sky);
+}
+.tool-manager__auto.is-active > i {
+  border-color: var(--ui-accent-sky);
+  background: color-mix(in srgb, var(--ui-accent-sky) 15%, var(--ui-bg-primary));
+}
+.tool-manager__auto.is-active > i em {
+  background: var(--ui-accent-sky);
+  transform: translateX(14px);
+}
 .tool-manager__notice {
   margin: 0 !important;
   padding: 8px 10px;
@@ -1904,8 +2288,9 @@ button {
 }
 .tool-manager__protocol {
   display: grid;
-  width: 30px;
-  height: 16px;
+  min-width: 52px;
+  height: 18px;
+  padding: 0 5px;
   place-items: center;
   border: 1px solid var(--ui-success);
   color: var(--ui-success);
@@ -1963,8 +2348,10 @@ button {
   }
 }
 .deck--compact .deck-status {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-start;
   overflow-x: hidden;
   scrollbar-width: none;
 }
@@ -1980,8 +2367,13 @@ button {
 }
 .deck--compact .deck-status .deck-chip {
   min-width: 0;
+  max-width: 132px;
+  flex: 0 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.deck--compact .deck-status .deck-chip:last-child {
+  margin-left: auto;
 }
 .deck--compact .deck-footer {
   align-items: flex-end;

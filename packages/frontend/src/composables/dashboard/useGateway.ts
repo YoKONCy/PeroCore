@@ -18,6 +18,8 @@ export function useGateway() {
     lastError: gateway.lastError,
     onPush: gateway.onPush,
     offPush: gateway.offPush,
+    subscribe: gateway.subscribe,
+    seatProof: gateway.seatProof,
     disconnect: gateway.disconnect,
     reconnect: gateway.reconnect,
   }

@@ -40,19 +40,15 @@ describe('streamRequest', () => {
 
   it('应当发送 POST 请求并解析完整 SSE 事件序列', async () => {
     const events = {
-      onDelta: vi.fn(),
-      onToolCall: vi.fn(),
-      onToolResult: vi.fn(),
-      onStatus: vi.fn(),
+      onSurface: vi.fn(),
+      onRagProgress: vi.fn(),
       onDone: vi.fn(),
       onError: vi.fn(),
     }
     const stream = createStream([
-      'event: delta\ndata: {"content":"你',
-      '好"}\n\nevent: tool_call\ndata: {"name":"search","arguments":"{}"}\n\n',
-      'event: tool_result\ndata: {"name":"search","output":"结果","isError":false}\n\n',
-      'event: status\ndata: {"state":"thinking","message":"思考中","turn":1}\n\n',
-      'event: done\ndata: {"usage":{"tokens":12}}',
+      'event: rag_progress\ndata: {"stage":"embedding","message":"正在生成记忆检索向量"}\n\n',
+      'event: surface\ndata: {"protocolVersion":1,"surfaceId":"s1","generation":"g1","revision":1,"sequence":1,"operationId":"o1","operation":{"type":"surface.open","threadId":"t1","principalId":"pero"}}\n\n',
+      'event: done\ndata: {"usage":{"promptTokens":4,"completionTokens":8},"toolCallCount":0,"durationMs":10,"threadId":"t1"}',
     ])
     const fetchMock = vi.fn(() => Promise.resolve({ ok: true, body: stream }))
     vi.stubGlobal('fetch', fetchMock)
@@ -67,15 +63,22 @@ describe('streamRequest', () => {
       body: JSON.stringify({ message: '你好' }),
       signal: controller.signal,
     })
-    expect(events.onDelta).toHaveBeenCalledWith({ content: '你好' })
-    expect(events.onToolCall).toHaveBeenCalledWith({ name: 'search', arguments: '{}' })
-    expect(events.onToolResult).toHaveBeenCalledWith({
-      name: 'search',
-      output: '结果',
-      isError: false,
+    expect(events.onRagProgress).toHaveBeenCalledWith({
+      stage: 'embedding',
+      message: '正在生成记忆检索向量',
     })
-    expect(events.onStatus).toHaveBeenCalledWith({ state: 'thinking', message: '思考中', turn: 1 })
-    expect(events.onDone).toHaveBeenCalledWith({ usage: { tokens: 12 } })
+    expect(events.onSurface).toHaveBeenCalledWith(
+      expect.objectContaining({
+        surfaceId: 's1',
+        operation: expect.objectContaining({ type: 'surface.open' }),
+      }),
+    )
+    expect(events.onDone).toHaveBeenCalledWith({
+      usage: { promptTokens: 4, completionTokens: 8 },
+      toolCallCount: 0,
+      durationMs: 10,
+      threadId: 't1',
+    })
     expect(events.onError).not.toHaveBeenCalled()
   })
 
@@ -93,9 +96,9 @@ describe('streamRequest', () => {
   })
 
   it('应当忽略无效 JSON 事件并处理 error 事件', async () => {
-    const events = { onDelta: vi.fn(), onError: vi.fn() }
+    const events = { onSurface: vi.fn(), onError: vi.fn() }
     const stream = createStream([
-      'event: delta\ndata: 不是 JSON\n\n',
+      'event: surface\ndata: 不是 JSON\n\n',
       'event: error\ndata: {"code":"LLM_ERROR","message":"模型异常"}\n\n',
     ])
     vi.stubGlobal(
@@ -106,7 +109,7 @@ describe('streamRequest', () => {
     streamRequest('/chat/stream', {}, events)
     await flushStream()
 
-    expect(events.onDelta).not.toHaveBeenCalled()
+    expect(events.onSurface).not.toHaveBeenCalled()
     expect(events.onError).toHaveBeenCalledWith({ code: 'LLM_ERROR', message: '模型异常' })
   })
 

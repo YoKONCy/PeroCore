@@ -34,12 +34,12 @@ logger.error('数据库操作失败', { error: err.message, stack: err.stack })
 
 ### 1.4 日志级别
 
-| 级别 | 用途 |
-|---|---|
-| `error` | 系统异常、需要人工介入 |
-| `warn` | 降级、重试、非致命异常 |
-| `info` | 关键业务节点（创建/删除/配置变更/启动/关闭） |
-| `debug` | 开发调试信息（生产环境默认关闭） |
+| 级别    | 用途                                         |
+| ------- | -------------------------------------------- |
+| `error` | 系统异常、需要人工介入                       |
+| `warn`  | 降级、重试、非致命异常                       |
+| `info`  | 关键业务节点（创建/删除/配置变更/启动/关闭） |
+| `debug` | 开发调试信息（生产环境默认关闭）             |
 
 ### 1.5 日志语言
 
@@ -62,7 +62,7 @@ export const logger = {
   info: (tag: string, message: string, data?: unknown) => {
     console.log(`[${tag}] ${message}`, data ?? '')
     if ((window as any).electron) {
-      (window as any).electron.send('log-from-renderer', `[${tag}] ${message}`)
+      ;(window as any).electron.send('log-from-renderer', `[${tag}] ${message}`)
     }
   },
   warn: (tag: string, message: string, data?: unknown) => {
@@ -101,31 +101,33 @@ app.use('*', async (c, next) => {
 
 日志写入 `$PERO_DATA_DIR/logs/` 目录。
 
-| 维度 | 策略 |
-|---|---|
-| 文件命名 | `infos-2026-04-20.log`（按天） |
-| 大小上限 | 5MB / 文件，超出分片 `.1.log`, `.2.log` |
-| 保留天数 | 14 天，启动时自动清理 |
-| 格式 | `[ISO8601] [LEVEL] [Module] 消息 {结构化数据}` |
+| 维度     | 策略                                           |
+| -------- | ---------------------------------------------- |
+| 文件命名 | `infos-2026-04-20.log`（按天）                 |
+| 大小上限 | 5MB / 文件，超出分片 `.1.log`, `.2.log`        |
+| 保留天数 | 14 天，启动时自动清理                          |
+| 格式     | `[ISO8601] [LEVEL] [Module] 消息 {结构化数据}` |
 
 ---
 
 ## 5. 健康检查
 
 ```typescript
-app.get('/health', (c) => c.json({
-  status: 'ok',
-  uptime: process.uptime(),
-  version: APP_VERSION,
-  memory: process.memoryUsage(),
-}))
+app.get('/health', (c) =>
+  c.json({
+    status: 'ok',
+    uptime: process.uptime(),
+    version: APP_VERSION,
+    memory: process.memoryUsage(),
+  }),
+)
 ```
 
 Docker Compose 中配置 healthcheck：
 
 ```yaml
 healthcheck:
-  test: ["CMD", "curl", "-f", "http://localhost:9120/api/health"]
+  test: ['CMD', 'curl', '-f', 'http://localhost:9120/api/health']
   interval: 30s
   timeout: 5s
   retries: 3
@@ -133,4 +135,4 @@ healthcheck:
 
 ---
 
-*本文档由 Carola 整理，适用于 infOS-TS 日志规范。*
+_本文档由 Carola 整理，适用于 infOS-TS 日志规范。_

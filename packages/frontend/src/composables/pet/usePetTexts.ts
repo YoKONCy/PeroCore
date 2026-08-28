@@ -86,9 +86,9 @@ export function usePetTexts(opts: UsePetTextsOptions) {
 
   /** 将 state_update 广播里的临时台词追加到本地台词池。 */
   function applyStateTexts(payload: Record<string, unknown>): void {
-    // 仅接受当前活跃 agent 的台词更新 (广播带 agentId，缺省时兼容旧逻辑放行)
     const updateAgentId = payload.agentId
     if (typeof updateAgentId === 'string' && updateAgentId !== activeAgentId.value) return
+    const targetAgentId = typeof updateAgentId === 'string' ? updateAgentId : activeAgentId.value
     const expiresAt =
       typeof payload.text_expires_at === 'string' ? Date.parse(payload.text_expires_at) : Number.NaN
     if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return
@@ -126,6 +126,7 @@ export function usePetTexts(opts: UsePetTextsOptions) {
         ...new Set([...current, ...back.map(String)]),
       ])
     }
+    void loadDynamicTexts({ agentId: targetAgentId, showWelcome: false })
   }
 
   function startIdleTimer() {

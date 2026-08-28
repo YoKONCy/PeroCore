@@ -7,21 +7,17 @@
  * @module packages/backend/src/repositories/thread.repo
  */
 
+import type { KernelExecutionDescriptor, KernelObjectId, ThreadChannel } from '@infos/shared'
 import { eq, desc, asc, sql, and, or, inArray, notInArray, isNull } from 'drizzle-orm'
-import { threads, threadMessages, threadSummaries } from '../database/schema'
+import { threads, threadMessages, threadSummaries, kernelOutboxEvents } from '../database/schema'
 import type { DrizzleDb } from '../database'
+import type { KernelOutboxRepository } from '../kernel/kernelOutboxRepository'
 
 // ─────────────────────────────────────────────
 // 类型定义
 // ─────────────────────────────────────────────
 
-/**
- * Thread Channel 类型
- *
- * - desktop/group: 主 Agent 场景，由 ContextCompiler 编译
- * - social: 外部平台社交，由 Social App 独立处理
- */
-export type ThreadChannel = 'desktop' | 'social' | 'group'
+export type { ThreadChannel } from '@infos/shared'
 
 /** Thread 用途 — 普通对话 / 后台任务 / 应用内部状态 */
 export type ThreadPurpose = 'conversation' | 'background_task' | 'app_internal'
@@ -56,6 +52,8 @@ export interface CreateThreadMessageInput {
   metadataJson?: string
   scorerStatus?: 'pending' | 'analyzed' | 'failed' | 'skipped'
   status?: 'active' | 'failed' | 'interrupted'
+  /** 当前消息提交所属的 Kernel Execution；存在时在同一事务写入 Outbox。 */
+  execution?: KernelExecutionDescriptor
 }
 
 /** 查询活跃消息参数 */
@@ -76,13 +74,22 @@ export interface CreateSummaryInput {
 type ThreadRow = typeof threads.$inferSelect
 type ThreadMessageRow = typeof threadMessages.$inferSelect
 type ThreadSummaryRow = typeof threadSummaries.$inferSelect
+export type ContinuityMessageRow = ThreadMessageRow & {
+  threadAgentId: string
+  threadChannel: string
+  threadPlatform: string | null
+  threadTitle: string | null
+}
 
 // ─────────────────────────────────────────────
 // Repository
 // ─────────────────────────────────────────────
 
 export class ThreadRepository {
-  constructor(private db: DrizzleDb) {}
+  constructor(
+    private db: DrizzleDb,
+    private outbox?: KernelOutboxRepository,
+  ) {}
 
   // ── Thread 操作 ──
 
@@ -325,6 +332,14 @@ export class ThreadRepository {
     return result.changes > 0
   }
 
+  async updateAutoExecuteTools(threadId: string, autoExecuteTools: boolean): Promise<boolean> {
+    const result = await this.db
+      .update(threads)
+      .set({ autoExecuteTools, updatedAt: sql`(datetime('now', 'localtime'))` })
+      .where(and(eq(threads.id, threadId), eq(threads.status, 'active')))
+    return result.changes > 0
+  }
+
   /**
    * 更新 Thread 的 ContextPolicy
    *
@@ -344,24 +359,53 @@ export class ThreadRepository {
 
   // ── 消息操作 ──
 
-  /** 追加一条消息 */
+  /** 追加一条消息，并在 Execution 存在时同事务追加 Durable Event。 */
   async appendMessage(data: CreateThreadMessageInput): Promise<ThreadMessageRow> {
-    const rows = await this.db
-      .insert(threadMessages)
-      .values({
-        threadId: data.threadId,
-        role: data.role,
-        content: data.content,
-        rawContent: data.rawContent,
-        pairId: data.pairId,
-        senderId: data.senderId,
-        agentId: data.agentId,
-        metadataJson: data.metadataJson ?? '{}',
-        scorerStatus: data.scorerStatus ?? 'pending',
-        status: data.status ?? 'active',
-      })
-      .returning()
-    return rows[0]!
+    return this.db.transaction((tx) => {
+      const rows = tx
+        .insert(threadMessages)
+        .values({
+          threadId: data.threadId,
+          role: data.role,
+          content: data.content,
+          rawContent: data.rawContent,
+          pairId: data.pairId,
+          senderId: data.senderId,
+          agentId: data.agentId,
+          metadataJson: data.metadataJson ?? '{}',
+          scorerStatus: data.scorerStatus ?? 'pending',
+          status: data.status ?? 'active',
+        })
+        .returning()
+        .all()
+      const row = rows[0]!
+      if (data.execution && this.outbox) {
+        const event = this.outbox.createEvent({
+          protocolVersion: 1,
+          type: 'conversation.message.committed',
+          durability: 'durable',
+          principalId: data.execution.principalId,
+          processId: data.execution.processId,
+          executionId: data.execution.executionId,
+          correlationId: data.execution.executionId,
+          object: {
+            objectType: 'thread-message',
+            objectId: String(row.id) as KernelObjectId,
+            generation: row.revision ?? 1,
+            ownerPrincipalId: data.execution.principalId,
+          },
+          payload: {
+            threadId: data.threadId,
+            messageId: row.id,
+            pairId: data.pairId,
+            role: data.role,
+            status: data.status ?? 'active',
+          },
+        })
+        tx.insert(kernelOutboxEvents).values(this.outbox.toRow(event)).run()
+      }
+      return row
+    })
   }
 
   /** 保存对话对（user + assistant） */
@@ -415,6 +459,25 @@ export class ThreadRepository {
     return recent.reverse()
   }
 
+  async findMessagesByPairIds(threadId: string, pairIds: string[]): Promise<ThreadMessageRow[]> {
+    if (pairIds.length === 0) return []
+    return this.db
+      .select()
+      .from(threadMessages)
+      .where(
+        and(
+          eq(threadMessages.threadId, threadId),
+          inArray(threadMessages.pairId, pairIds),
+          eq(threadMessages.status, 'active'),
+        ),
+      )
+      .orderBy(asc(threadMessages.timestamp), asc(threadMessages.id))
+  }
+
+  async findPair(threadId: string, pairId: string): Promise<ThreadMessageRow[]> {
+    return this.findMessagesByPairIds(threadId, [pairId])
+  }
+
   /** 查询最近 N 个完整对话轮次，旧消息缺少 pairId 时按单条独立轮次处理。 */
   async queryActiveMessagePairs(threadId: string, pairLimit = 20): Promise<ThreadMessageRow[]> {
     const normalizedLimit = Math.max(1, pairLimit)
@@ -459,6 +522,74 @@ export class ThreadRepository {
       .orderBy(asc(threadMessages.timestamp), asc(threadMessages.id))
   }
 
+  /** 查询同一 Agent 最近活跃的指定 Channel Thread，并读取最近N个完整回合。 */
+  async queryLatestChannelContinuityPairs(input: {
+    agentId: string
+    sourceChannel: string
+    pairLimit: number
+  }): Promise<ContinuityMessageRow[]> {
+    const sourceThread = (
+      await this.db
+        .select()
+        .from(threads)
+        .where(
+          and(
+            eq(threads.agentId, input.agentId),
+            eq(threads.channel, input.sourceChannel),
+            eq(threads.purpose, 'conversation'),
+            eq(threads.status, 'active'),
+          ),
+        )
+        .orderBy(desc(threads.lastMessageAt), desc(threads.createdAt))
+        .limit(1)
+    )[0]
+    if (!sourceThread) return []
+    const messages = await this.queryActiveMessagePairs(sourceThread.id, input.pairLimit)
+    return messages
+      .filter((message) => message.role === 'user' || message.role === 'assistant')
+      .map((message) => ({
+        ...message,
+        threadAgentId: sourceThread.agentId,
+        threadChannel: sourceThread.channel,
+        threadPlatform: sourceThread.platform,
+        threadTitle: sourceThread.title,
+      }))
+  }
+
+  /** 查询同一 Agent 指定来源 Channel 的近期权威消息，供跨模式 Continuity 只读消费。 */
+  async queryContinuityMessages(input: {
+    agentId: string
+    excludeThreadId: string
+    sourceChannel: string
+    limit: number
+    since?: string
+  }): Promise<ContinuityMessageRow[]> {
+    const conditions = [
+      eq(threads.agentId, input.agentId),
+      eq(threads.channel, input.sourceChannel),
+      eq(threads.status, 'active'),
+      eq(threads.purpose, 'conversation'),
+      sql`${threads.id} <> ${input.excludeThreadId}`,
+      eq(threadMessages.status, 'active'),
+      inArray(threadMessages.role, ['user', 'assistant']),
+    ]
+    if (input.since) conditions.push(sql`${threadMessages.timestamp} >= ${input.since}`)
+    const rows = await this.db
+      .select({
+        message: threadMessages,
+        threadAgentId: threads.agentId,
+        threadChannel: threads.channel,
+        threadPlatform: threads.platform,
+        threadTitle: threads.title,
+      })
+      .from(threadMessages)
+      .innerJoin(threads, eq(threadMessages.threadId, threads.id))
+      .where(and(...conditions))
+      .orderBy(desc(threadMessages.timestamp), desc(threadMessages.id))
+      .limit(Math.max(0, input.limit))
+    return rows.reverse().map(({ message, ...thread }) => ({ ...message, ...thread }))
+  }
+
   /** 查询 Thread 的全部活跃消息（分页，用于前端历史加载） */
   async listActiveMessages(params: {
     threadId: string
@@ -490,6 +621,24 @@ export class ThreadRepository {
     const total = countResult[0]?.count ?? 0
 
     return { items, total }
+  }
+
+  async getMessageCoverageContext(messageId: number): Promise<
+    | {
+        threadId: string
+        pairId: string | null
+      }
+    | undefined
+  > {
+    const [message] = await this.db
+      .select({
+        threadId: threadMessages.threadId,
+        pairId: threadMessages.pairId,
+      })
+      .from(threadMessages)
+      .where(eq(threadMessages.id, messageId))
+      .limit(1)
+    return message
   }
 
   async getPairMessageIds(messageId: number): Promise<number[]> {
@@ -768,7 +917,7 @@ export class ThreadRepository {
       assistantConditions.push(eq(threadMessages.threadId, threadId))
     }
 
-    // AIOS(Phase5): 按 channel 过滤——先查该 channel 的所有 threadId，再用 inArray 过滤
+    // AIOS(Phase5): 按 channel 过滤；与 threadId 同时提供时取两者交集——先查该 channel 的所有 threadId，再用 inArray 过滤
     // 不用 JOIN 是因为 JOIN 会让返回类型变成合并行，破坏 ThreadMessageRow 类型
     if (channel) {
       const threadRows = await this.db
@@ -794,6 +943,7 @@ export class ThreadRepository {
     const pairIds = [...new Set(pendingAssistant.map((m) => m.pairId).filter(Boolean))] as string[]
     if (pairIds.length === 0) return []
 
+    const pendingThreadIds = [...new Set(pendingAssistant.map((message) => message.threadId))]
     const userMessages = await this.db
       .select()
       .from(threadMessages)
@@ -802,14 +952,15 @@ export class ThreadRepository {
           eq(threadMessages.role, 'user'),
           eq(threadMessages.status, 'active'),
           inArray(threadMessages.pairId, pairIds),
+          inArray(threadMessages.threadId, pendingThreadIds),
         ),
       )
       .orderBy(threadMessages.timestamp)
 
-    // 构建 pairId → userMessage 映射
+    // 使用Thread与pairId复合键，防止异常导入数据中的重复pairId跨Thread配对。
     const userMap = new Map<string, ThreadMessageRow>()
-    for (const u of userMessages) {
-      if (u.pairId) userMap.set(u.pairId, u)
+    for (const user of userMessages) {
+      if (user.pairId) userMap.set(`${user.threadId}:${user.pairId}`, user)
     }
 
     // 配对返回
@@ -820,9 +971,9 @@ export class ThreadRepository {
     }> = []
     for (const a of pendingAssistant) {
       if (!a.pairId) continue
-      const u = userMap.get(a.pairId)
-      if (u) {
-        result.push({ userMessage: u, assistantMessage: a, pairId: a.pairId })
+      const user = userMap.get(`${a.threadId}:${a.pairId}`)
+      if (user) {
+        result.push({ userMessage: user, assistantMessage: a, pairId: a.pairId })
       }
     }
     return result
@@ -839,6 +990,7 @@ export class ThreadRepository {
    * @param metadataPatch  要合并的元数据（如 importance、tags、memoryId 等）
    */
   async updateScorerStatus(
+    threadId: string,
     pairId: string,
     status: 'analyzed' | 'failed' | 'skipped',
     metadataPatch?: Record<string, unknown>,
@@ -847,7 +999,13 @@ export class ThreadRepository {
     const msgs = await this.db
       .select()
       .from(threadMessages)
-      .where(and(eq(threadMessages.pairId, pairId), eq(threadMessages.role, 'assistant')))
+      .where(
+        and(
+          eq(threadMessages.threadId, threadId),
+          eq(threadMessages.pairId, pairId),
+          eq(threadMessages.role, 'assistant'),
+        ),
+      )
       .limit(1)
 
     if (msgs.length === 0) return

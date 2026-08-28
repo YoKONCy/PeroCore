@@ -16,7 +16,10 @@ import type { Ref } from 'vue'
  *
  * @param chatContainer - 聊天容器 Ref (作为 IntersectionObserver 的 root)
  */
-export function useMessageVisibility(chatContainer: Ref<HTMLElement | null>) {
+export function useMessageVisibility(
+  chatContainer: Ref<HTMLElement | null>,
+  onVisibilityChange?: (element: HTMLElement, visible: boolean) => void,
+) {
   const observer = ref<IntersectionObserver | null>(null)
   const pausedMessages = new WeakSet<HTMLElement>()
 
@@ -30,9 +33,11 @@ export function useMessageVisibility(chatContainer: Ref<HTMLElement | null>) {
           if (entry.isIntersecting) {
             resumeMessage(el)
             pausedMessages.delete(el)
+            onVisibilityChange?.(el, true)
           } else {
             pauseMessage(el)
             pausedMessages.add(el)
+            onVisibilityChange?.(el, false)
           }
         }
       },

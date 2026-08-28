@@ -1,3 +1,9 @@
+/**
+ * virtualWorkspace — 领域服务
+ *
+ * 封装本领域的核心职责与外部依赖，向上层提供可预测的调用契约。
+ * 非直观的状态转换、失败恢复与安全边界应在本模块内完成，避免泄漏实现细节。
+ */
 import { createHash, randomUUID } from 'node:crypto'
 import path from 'node:path'
 import {
@@ -70,6 +76,9 @@ export class WorkspaceError extends Error {
 // ─────────────────────────────────────────────
 // 行级 diff 统计（让 Agent 感知"真正生效"的改动）
 // ─────────────────────────────────────────────
+
+/** 单次行级读取最多返回的行数。 */
+const MAX_LINE_READ_LINES = 800
 
 /** 行级 diff LCS 计算的最大格子数（超过则退回块级近似，避免大文件全量写卡死） */
 const MAX_DIFF_CELLS = 250_000
@@ -203,7 +212,7 @@ export class VirtualWorkspace {
     const totalLines = lines.length
 
     if (options.tailLines !== undefined) {
-      const count = Math.max(1, Math.min(options.tailLines, 10_000))
+      const count = Math.max(1, Math.min(Math.trunc(options.tailLines), MAX_LINE_READ_LINES))
       const start = Math.max(0, lines.length - count)
       return {
         content: lines.slice(start).join('\n'),
@@ -219,8 +228,12 @@ export class VirtualWorkspace {
     }
     if (options.lineStart !== undefined || options.lineEnd !== undefined) {
       const requestedStart = Math.max(1, Math.trunc(options.lineStart ?? 1))
-      const requestedEnd = Math.max(1, Math.trunc(options.lineEnd ?? requestedStart + 499))
+      const requestedEnd = Math.max(
+        1,
+        Math.trunc(options.lineEnd ?? requestedStart + MAX_LINE_READ_LINES - 1),
+      )
       if (requestedEnd < requestedStart) throw new Error('line_end 不能小于 line_start')
+      const boundedEnd = Math.min(requestedEnd, requestedStart + MAX_LINE_READ_LINES - 1)
 
       // 超出文件尾部时返回空窗口，而不是构造 end < start 的矛盾范围。
       if (requestedStart > totalLines) {
@@ -237,7 +250,7 @@ export class VirtualWorkspace {
         }
       }
 
-      const end = Math.min(totalLines, requestedEnd)
+      const end = Math.min(totalLines, boundedEnd)
       return {
         content: lines.slice(requestedStart - 1, end).join('\n'),
         encoding: 'utf-8',

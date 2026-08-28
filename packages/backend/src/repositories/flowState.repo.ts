@@ -26,6 +26,8 @@ export class FlowStateRepository {
     agentId: string
     currentGoal: string
     privateFacts: string
+    workContext?: string
+    workContextUpdatedAtPairCount?: number
     pairId?: string | null
   }): Promise<FlowStateRow> {
     const before = await this.get(input.threadId, input.agentId)
@@ -37,6 +39,11 @@ export class FlowStateRepository {
       beforePrivateFacts: before?.privateFacts ?? '',
       afterCurrentGoal: input.currentGoal,
       afterPrivateFacts: input.privateFacts,
+      beforeWorkContext: before?.workContext ?? '',
+      beforeWorkContextUpdatedAtPairCount: before?.workContextUpdatedAtPairCount ?? 0,
+      afterWorkContext: input.workContext ?? before?.workContext ?? '',
+      afterWorkContextUpdatedAtPairCount:
+        input.workContextUpdatedAtPairCount ?? before?.workContextUpdatedAtPairCount ?? 0,
     })
     const rows = await this.db
       .insert(flowStates)
@@ -45,6 +52,9 @@ export class FlowStateRepository {
         agentId: input.agentId,
         currentGoal: input.currentGoal,
         privateFacts: input.privateFacts,
+        workContext: input.workContext ?? before?.workContext ?? '',
+        workContextUpdatedAtPairCount:
+          input.workContextUpdatedAtPairCount ?? before?.workContextUpdatedAtPairCount ?? 0,
         revision: (before?.revision ?? 0) + 1,
         updatedByPairId: input.pairId ?? null,
       })
@@ -53,6 +63,9 @@ export class FlowStateRepository {
         set: {
           currentGoal: input.currentGoal,
           privateFacts: input.privateFacts,
+          workContext: input.workContext ?? before?.workContext ?? '',
+          workContextUpdatedAtPairCount:
+            input.workContextUpdatedAtPairCount ?? before?.workContextUpdatedAtPairCount ?? 0,
           revision: (before?.revision ?? 0) + 1,
           updatedByPairId: input.pairId ?? null,
           updatedAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
@@ -86,6 +99,8 @@ export class FlowStateRepository {
           agentId: revision.agentId,
           currentGoal: revision.beforeCurrentGoal,
           privateFacts: revision.beforePrivateFacts,
+          workContext: revision.beforeWorkContext,
+          workContextUpdatedAtPairCount: revision.beforeWorkContextUpdatedAtPairCount,
           revision: 1,
         })
         .onConflictDoUpdate({
@@ -93,6 +108,8 @@ export class FlowStateRepository {
           set: {
             currentGoal: revision.beforeCurrentGoal,
             privateFacts: revision.beforePrivateFacts,
+            workContext: revision.beforeWorkContext,
+            workContextUpdatedAtPairCount: revision.beforeWorkContextUpdatedAtPairCount,
             updatedByPairId: null,
             updatedAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
           },

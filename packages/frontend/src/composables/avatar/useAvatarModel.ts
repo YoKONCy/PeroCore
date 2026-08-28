@@ -1,7 +1,7 @@
 /**
  * Avatar 模型加载 Composable
  *
- * 负责根据 Manifest 选择正确的 Provider（Standard/Secure/Container），
+ * 负责根据Manifest创建标准模型Provider，
  * 构建 3D 模型、初始化适配器和重定向管理器、加载动画。
  *
  * @module packages/frontend/src/composables/avatar/useAvatarModel
@@ -18,7 +18,6 @@ import type {
 } from '../../components/avatar/lib/adapter/IAvatarManifest'
 import { AvatarRenderer } from '../../components/avatar/lib/AvatarRenderer'
 import { StandardBedrockProvider } from '../../components/avatar/lib/adapter/StandardBedrockProvider'
-import { PeroContainerProvider } from '../../components/avatar/lib/adapter/PeroContainerProvider'
 import { ManifestBasedAdapter } from '../../components/avatar/lib/adapter/ManifestBasedAdapter'
 import { ManifestLoader } from '../../components/avatar/lib/adapter/ManifestLoader'
 import { RetargetingManager } from '../../components/avatar/lib/retargeting/RetargetingManager'
@@ -33,7 +32,7 @@ import { StandardBones } from '../../components/avatar/lib/retargeting/Retargeti
 import { YsmMolangRunner } from '../../components/avatar/lib/ysm/YsmMolangRunner'
 import { molang, molangContext } from '../../components/avatar/lib/Molang'
 import { loadYsmManifestFromUrl } from '../../components/avatar/lib/ysm/loadYsmManifest'
-import { YSM_SCENE_FILTERS } from '@infos/shared/ysm'
+import { YSM_SCENE_FILTERS } from '@infos/avatar-assets'
 import {
   DEFAULT_AVATAR_MANIFEST_PATH,
   DEFAULT_AVATAR_YSM_PATH,
@@ -169,27 +168,6 @@ function mergeSceneFilters(patterns?: string[]): string[] {
     }
   }
   return merged
-}
-
-/**
- * 容器模式脚本路径还原
- *
- * 容器内文件没有独立 URL，ysmFunctions 声明的是容器内相对路径（如 functions/x.molang）。
- * Electron 扫描 manifest 时路径会被重写为 asset://model/{key}/functions/x.molang，
- * 这里还原为容器内相对路径，以便从解密后的内存容器读取。
- */
-function toContainerRelativePath(path: string): string {
-  if (path.startsWith('asset://')) {
-    try {
-      const segments = new URL(path).pathname.split('/').filter(Boolean)
-      segments.shift() // 去掉模型键
-      const relative = segments.join('/')
-      if (relative) return decodeURIComponent(relative)
-    } catch {
-      /* 解析失败时按原路径处理 */
-    }
-  }
-  return path
 }
 
 /**
@@ -474,14 +452,6 @@ export function useAvatarModel() {
   function createProvider(config: ModelConfig, manifest: IAvatarManifest): IModelProvider {
     const boneFilterPatterns = manifest.boneFilterPatterns
 
-    // 模型是 .pero → 容器加密加载器。
-    // 贴图既可以在容器内（texture 也指向 .pero），也可以放外边明文（texture 指向 .png URL），
-    // PeroContainerProvider 会优先使用外部明文贴图。
-    if (config.model.endsWith('.pero')) {
-      logger.info('AvatarModel', `使用容器加载器: ${manifest.metadata.name}`)
-      return new PeroContainerProvider(config.model, config.texture, boneFilterPatterns)
-    }
-
     return new StandardBedrockProvider(config, boneFilterPatterns)
   }
 
@@ -552,43 +522,7 @@ export function useAvatarModel() {
       const provider = createProvider(config, manifest)
       currentProvider = provider
 
-      // 容器格式：合并容器内 manifest
-      let effectiveManifest = manifest
-      // model 是 .pero 即视为容器加密格式（贴图可能容器内、也可能外部明文）
-      const isContainerFormat = config.model.endsWith('.pero')
-
-      if (isContainerFormat) {
-        try {
-          const containerManifest = await provider.getManifest()
-          if (containerManifest && (containerManifest as Record<string, unknown>).featureButtons) {
-            const cm = containerManifest as Record<string, unknown>
-            effectiveManifest = {
-              ...manifest,
-              ...(cm as Partial<IAvatarManifest>),
-              metadata: {
-                ...manifest.metadata,
-                ...((cm.metadata as Record<string, unknown>) || {}),
-              } as IAvatarManifest['metadata'],
-              resources: {
-                ...manifest.resources,
-                ...((cm.resources as Record<string, unknown>) || {}),
-              } as IAvatarManifest['resources'],
-              retargetingMap:
-                (cm.retargetingMap as IAvatarManifest['retargetingMap']) || manifest.retargetingMap,
-              featureButtons: (cm.featureButtons as FeatureButton[]) || [],
-              parts: (cm.parts as IAvatarManifest['parts']) || [],
-              boneFilterPatterns:
-                (cm.boneFilterPatterns as string[]) || manifest.boneFilterPatterns,
-            }
-            logger.info(
-              'AvatarModel',
-              `容器 manifest 加载成功，${effectiveManifest.featureButtons?.length || 0} 个功能按钮`,
-            )
-          }
-        } catch (e) {
-          logger.warn('AvatarModel', '从容器加载 manifest 失败，使用默认配置', e)
-        }
-      }
+      const effectiveManifest = manifest
 
       // 构建 3D 模型
       const avatarRenderer = new AvatarRenderer()
@@ -666,37 +600,30 @@ export function useAvatarModel() {
       // （DeepSeek 等 YSM 模型的眨眼/倒走/碰墙抬手等行为依赖此运行时）
       ysmRunner = null
       const ysmFunctions = (manifest as unknown as { ysmFunctions?: string[] }).ysmFunctions
-      // 容器模式：脚本文件在解密后的内存容器内，从 provider 读取而非 fetch URL
-      const containerProvider =
-        isContainerFormat && currentProvider instanceof PeroContainerProvider
-          ? currentProvider
-          : null
-      const ysmScriptPaths = containerProvider
-        ? (ysmFunctions ?? []).map(toContainerRelativePath)
-        : (ysmFunctions ?? [])
+      const ysmScriptPaths = ysmFunctions ?? []
       if (ysmScriptPaths.length > 0) {
-        try {
-          const scripts = await Promise.all(
-            ysmScriptPaths.map(async (path: string) => {
-              const fileName = decodeURIComponent(path.split('/').pop() || '')
-              if (containerProvider) {
-                const data = await containerProvider.getFile(path)
-                if (!data) throw new Error(`容器内未找到脚本: ${path}`)
-                return { fileName, source: new TextDecoder().decode(data) }
-              }
-              const res = await fetch(path)
-              const source = await res.text()
-              return { fileName, source }
-            }),
-          )
+        const results = await Promise.allSettled(
+          ysmScriptPaths.map(async (scriptPath: string) => {
+            const fileName = decodeURIComponent(scriptPath.split('/').pop() || '')
+            const response = await fetch(scriptPath)
+            if (!response.ok) throw new Error(`${fileName}: HTTP ${response.status}`)
+            return { fileName, source: await response.text() }
+          }),
+        )
+        const scripts = results.flatMap((result) =>
+          result.status === 'fulfilled' ? [result.value] : [],
+        )
+        if (scripts.length > 0) {
           ysmRunner = new YsmMolangRunner(scripts, (name, transition) => {
             const anim = animationLibrary.get(name)
             if (anim) animationEngine.play(anim, transition, true)
           })
           ysmRunner.init()
           logger.info('AvatarModel', `已加载 ${scripts.length} 个 YSM molang 控制器脚本`)
-        } catch (e) {
-          logger.warn('AvatarModel', '加载 YSM molang 控制器脚本失败', e)
+        }
+        const skipped = results.length - scripts.length
+        if (skipped > 0) {
+          logger.info('AvatarModel', `已跳过 ${skipped} 个不可用的 YSM molang 控制器脚本`)
         }
       }
 
@@ -752,11 +679,9 @@ export function useAvatarModel() {
       loading.value = true
       errorMsg.value = ''
       try {
-        const manifest = propManifestPath.endsWith('.pero')
-          ? createPeroManifest(propManifestPath)
-          : propManifestPath.endsWith('ysm.json')
-            ? await loadYsmManifestFromUrl(propManifestPath)
-            : await ManifestLoader.fromJson(propManifestPath)
+        const manifest = propManifestPath.endsWith('ysm.json')
+          ? await loadYsmManifestFromUrl(propManifestPath)
+          : await ManifestLoader.fromJson(propManifestPath)
         await loadAvatar(manifest, scene)
         return
       } catch (e: unknown) {
@@ -766,8 +691,7 @@ export function useAvatarModel() {
       }
     }
 
-    // 自动发现默认模型：统一使用蓝色大肥鱼（DeepSeek酱）。
-    // 优先加载落盘 manifest，失败时直接读取 ysm.json 运行时生成清单。
+    // 自动发现默认模型：优先加载标准 manifest，失败时读取 YSM 配置生成清单。
     try {
       const manifest = await ManifestLoader.fromJson(DEFAULT_AVATAR_MANIFEST_PATH)
       await loadAvatar(manifest, scene)
@@ -783,20 +707,6 @@ export function useAvatarModel() {
       logger.error('AvatarModel', '默认与兜底模型均加载失败', e2)
       errorMsg.value = '加载模型失败: 蓝色大肥鱼模型文件不可用'
       loading.value = false
-    }
-  }
-
-  /** 为 .pero 文件创建临时 Manifest */
-  function createPeroManifest(path: string): IAvatarManifest {
-    return {
-      metadata: {
-        name: path.split('/').pop()?.replace('.pero', '') || 'Unknown',
-        version: '1.0.0',
-      },
-      resources: { model: path, texture: path, animations: [] },
-      featureButtons: [],
-      parts: [],
-      retargetingMap: { mapping: {} },
     }
   }
 

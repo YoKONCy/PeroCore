@@ -3,12 +3,12 @@
  *
  * 提供三种分级重置，全部为物理删除且不可撤销，调用方必须做二次确认：
  * - clearLogs()     清空对话记录（Thread、消息、日志、群聊消息）
- * - resetMemories() 重置全部记忆（记忆节点、图谱、候选、同步任务）
+ * - resetMemories() 重置 EventNote、Coverage、Reflection、DailyNotes 与 Facts 账本
  * - factoryReset()  恢复出厂设置（清空全部用户数据）
  *
  * 说明：
  * - 角色定义（agent.json / mdp 目录）保存在磁盘，不受数据库重置影响。
- * - 向量存储（trivium 文件）不在 SQLite 内，记忆重置后可通过维护任务重建索引。
+ * - TDB 文件由 StoreRegistry 独立重置，本服务只负责 SQLite 完整备份与事务账本。
  *
  * @module packages/backend/src/services/maintenance/resetService
  */
@@ -20,14 +20,20 @@ import {
   threadSummaries,
   conversationLogs,
   groupChatMessages,
-  memoryNodes,
-  canonicalMemories,
-  memoryCandidates,
-  entityCooccurrences,
-  triviumSyncTasks,
-  maintenanceRecords,
   messageAttachments,
   fileChangeSnapshots,
+  eventNotes,
+  eventNoteCoverages,
+  eventMemoryCoverageClaims,
+  eventMemoryOperations,
+  eventMemoryRelations,
+  eventMemoryTimers,
+  eventMemoryDailyNoteTasks,
+  eventMemoryReflectionTasks,
+  eventMemoryQueryAudits,
+  factMemoryOperations,
+  factObjects,
+  factRecords,
 } from '../../database/schema'
 import { createLogger } from '../../lib/logger'
 
@@ -60,12 +66,18 @@ export class ResetService {
   /** 重置全部记忆（对话与配置不受影响）。 */
   async resetMemories(): Promise<ResetResult> {
     const cleared: Record<string, number> = {}
-    cleared.memory_nodes = this.clearTable(memoryNodes)
-    cleared.canonical_memories = this.clearTable(canonicalMemories)
-    cleared.memory_candidates = this.clearTable(memoryCandidates)
-    cleared.entity_cooccurrences = this.clearTable(entityCooccurrences)
-    cleared.trivium_sync_tasks = this.clearTable(triviumSyncTasks)
-    cleared.maintenance_records = this.clearTable(maintenanceRecords)
+    cleared.event_memory_relations = this.clearTable(eventMemoryRelations)
+    cleared.event_memory_coverage_claims = this.clearTable(eventMemoryCoverageClaims)
+    cleared.event_note_coverages = this.clearTable(eventNoteCoverages)
+    cleared.event_memory_operations = this.clearTable(eventMemoryOperations)
+    cleared.event_memory_timers = this.clearTable(eventMemoryTimers)
+    cleared.event_memory_daily_note_tasks = this.clearTable(eventMemoryDailyNoteTasks)
+    cleared.event_memory_reflection_tasks = this.clearTable(eventMemoryReflectionTasks)
+    cleared.event_memory_query_audits = this.clearTable(eventMemoryQueryAudits)
+    cleared.event_notes = this.clearTable(eventNotes)
+    cleared.fact_memory_operations = this.clearTable(factMemoryOperations)
+    cleared.fact_records = this.clearTable(factRecords)
+    cleared.fact_objects = this.clearTable(factObjects)
     logger.info(`记忆已重置: ${JSON.stringify(cleared)}`)
     return { operation: 'reset_memories', cleared }
   }
@@ -75,12 +87,18 @@ export class ResetService {
     // 先清空记忆/对话相关，再清空业务数据，最后清空配置与审批审计。
     // 使用显式表名映射，避免依赖 drizzle 内部 symbol 反射。
     const tables: Array<[string, Parameters<DrizzleDb['delete']>[0]]> = [
-      ['memory_nodes', memoryNodes],
-      ['canonical_memories', canonicalMemories],
-      ['memory_candidates', memoryCandidates],
-      ['entity_cooccurrences', entityCooccurrences],
-      ['trivium_sync_tasks', triviumSyncTasks],
-      ['maintenance_records', maintenanceRecords],
+      ['event_memory_relations', eventMemoryRelations],
+      ['event_memory_coverage_claims', eventMemoryCoverageClaims],
+      ['event_note_coverages', eventNoteCoverages],
+      ['event_memory_operations', eventMemoryOperations],
+      ['event_memory_timers', eventMemoryTimers],
+      ['event_memory_daily_note_tasks', eventMemoryDailyNoteTasks],
+      ['event_memory_reflection_tasks', eventMemoryReflectionTasks],
+      ['event_memory_query_audits', eventMemoryQueryAudits],
+      ['event_notes', eventNotes],
+      ['fact_memory_operations', factMemoryOperations],
+      ['fact_records', factRecords],
+      ['fact_objects', factObjects],
       ['threads', threads],
       ['thread_messages', threadMessages],
       ['thread_summaries', threadSummaries],

@@ -97,7 +97,7 @@ export class AssetRegistry {
     // 3. Local — 用户覆盖层与可执行扩展/技能目录
     this.scanAssetRoot(this.pathResolver.resolve('@data/custom'), 'local')
     this.scanDir(this.pathResolver.resolve('@data/agents'), 'local')
-    this.scanDir(this.pathResolver.resolve('@data/extensions'), 'local')
+    this.scanDir(this.pathResolver.resolve('@data/packages'), 'local')
     this.scanDir(this.pathResolver.resolve('@data/skills'), 'local')
 
     this.scanned = true
@@ -153,7 +153,7 @@ export class AssetRegistry {
     const categories = [
       'agents',
       'models',
-      'extensions',
+      'packages',
       'tools',
       'skills',
       'prompts',

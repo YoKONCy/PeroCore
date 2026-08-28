@@ -106,15 +106,41 @@ function createCtx() {
           toolCalls: [],
           threadId: 't1',
           agentId: 'pero',
+          assistantMessage: messages[0],
         }),
       ),
       streamTurn: vi.fn(),
+    },
+    conversationProjection: {
+      invalidate: vi.fn(),
+      getSnapshot: vi.fn(() =>
+        Promise.resolve({
+          threadId: 't1',
+          agentId: 'pero',
+          channel: 'desktop',
+          messages: [],
+          surfaces: [
+            {
+              surfaceId: 'conversation-message:2',
+              messageId: '2',
+              revision: 1,
+              generation: 1,
+              nodes: [],
+            },
+          ],
+          revision: 1,
+          generatedAt: '2026-01-02T00:00:00.000Z',
+        }),
+      ),
     },
     attachmentService: {
       listForMessages: vi.fn(() => Promise.resolve(new Map())),
     },
     toolRegistry: {
       getDefinitions: vi.fn(() => []),
+    },
+    applicationRealms: {
+      isPrivateTool: vi.fn(() => false),
     },
     capabilityGate: {
       resolve: vi.fn(() => ({ allowedTools: new Set<string>() })),
@@ -169,6 +195,34 @@ describe('ChatRouter', () => {
     )
   })
 
+  it('Char Ops应隐藏Realm私有工具并保留显式主Agent投影', async () => {
+    const ctx = createCtx()
+    const registryTools = [
+      { name: 'main_tool', description: '主应用工具' },
+      { name: 'realm_private', description: 'Realm私有工具' },
+      { name: 'arca_document_inspect', description: 'Arca显式投影' },
+    ]
+    ctx.threadService.getThread.mockResolvedValue({
+      ...createThread(),
+      disabledTools: [],
+    } as never)
+    ctx.toolRegistry.getDefinitions.mockReturnValue(registryTools)
+    ctx.applicationRealms.isPrivateTool.mockImplementation(
+      (name: string) => name === 'realm_private',
+    )
+    ctx.capabilityGate.resolve.mockReturnValue({
+      allowedTools: new Set(registryTools.map((tool) => tool.name)),
+    })
+    const router = createChatRouter(ctx as never)
+
+    const response = await router.request('http://test/threads/t1/tools')
+    const body = (await response.json()) as {
+      data: { tools: Array<{ name: string }> }
+    }
+
+    expect(body.data.tools.map((tool) => tool.name)).toEqual(['main_tool', 'arca_document_inspect'])
+  })
+
   it('应当执行非流式对话: 获取 Thread→追加用户消息→编译上下文→对话→追加 Agent 回复', async () => {
     const ctx = createCtx()
     const router = createChatRouter(ctx as never)
@@ -183,13 +237,18 @@ describe('ChatRouter', () => {
     expect(await readJson(response)).toMatchObject({
       code: 'OK',
       message: '对话完成',
-      data: { reply: '回复', threadId: 't1', agentId: 'pero' },
+      data: {
+        threadId: 't1',
+        messageId: '2',
+        surface: expect.objectContaining({ surfaceId: 'conversation-message:2' }),
+      },
     })
     expect(ctx.conversationTurnService.executeTurn).toHaveBeenCalledWith({
       threadId: 't1',
       agentId: undefined,
       content: '你好',
       attachmentIds: undefined,
+      imageMode: undefined,
     })
   })
 
@@ -297,15 +356,21 @@ describe('ChatRouter', () => {
       method: 'DELETE',
     })
 
-    expect(await readJson(patched)).toEqual({ code: 'OK', message: '消息已更新' })
+    expect(await readJson(patched)).toMatchObject({ code: 'OK', message: '消息已更新' })
     expect(ctx.threadService.editMessage).toHaveBeenCalledWith(1, '新内容')
-    expect(await readJson(deleted)).toEqual({ code: 'OK', message: '消息已删除' })
+    expect(await readJson(deleted)).toMatchObject({ code: 'OK', message: '消息已删除' })
     expect(ctx.threadService.deleteMessage).toHaveBeenCalledWith(1)
     expect(await readJson(pairDeleted)).toMatchObject({
       code: 'OK',
-      data: { deletedCount: 2 },
+      data: {
+        deletedCount: 2,
+        deletedMessageIds: [1, 2],
+        projection: { threadId: 't1', messages: [] },
+      },
     })
     expect(ctx.threadService.rewindMessage).toHaveBeenCalledWith('t1', 1)
+    expect(ctx.conversationProjection.invalidate).toHaveBeenCalledWith('t1')
+    expect(ctx.conversationProjection.getSnapshot).toHaveBeenCalledWith('t1')
   })
 
   it('应当管理活跃任务: 列出/暂停/恢复/注入', async () => {

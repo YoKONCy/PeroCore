@@ -14,10 +14,6 @@
  */
 
 import { Hono } from 'hono'
-import {
-  DEFAULT_MEMORY_RUNTIME_CONFIG,
-  loadMemoryRuntimeConfig,
-} from '../services/memory/memoryRuntimeConfig'
 import { randomUUID } from 'node:crypto'
 import type { AppContext } from '../container'
 import { AppError } from '../lib/appError'
@@ -85,14 +81,8 @@ export function createStrongholdRouter(ctx: AppContext) {
   // DELETE /api/stronghold/rooms/:roomId — 删除房间
   router.delete('/rooms/:roomId', async (c) => {
     const roomId = c.req.param('roomId')
-    try {
-      await ctx.strongholdService.deleteRoom(roomId)
-      return c.json({ code: 'OK', message: '房间已删除' })
-    } catch (err) {
-      throw new AppError('VALIDATION_ERROR', {
-        message: err instanceof Error ? err.message : '删除失败',
-      })
-    }
+    await ctx.strongholdService.deleteRoom(roomId)
+    return c.json({ code: 'OK', message: '房间已删除' })
   })
 
   // PUT /api/stronghold/rooms/:roomId/env — 更新环境变量
@@ -132,6 +122,19 @@ export function createStrongholdRouter(ctx: AppContext) {
 
   // ═══ 群聊消息 ═══
 
+  // GET /api/stronghold/rooms/:roomId/projection — 房间、成员与消息 Surface 快照
+  router.get('/rooms/:roomId/projection', async (c) => {
+    try {
+      const limit = Math.min(200, Math.max(1, Number(c.req.query('limit') ?? '100')))
+      const projection = await ctx.strongholdProjection.getSnapshot(c.req.param('roomId'), limit)
+      return c.json({ code: 'OK', message: '获取成功', data: projection })
+    } catch (error) {
+      throw new AppError('NOT_FOUND', {
+        message: error instanceof Error ? error.message : '据点 Projection 不存在',
+      })
+    }
+  })
+
   // GET /api/stronghold/rooms/:roomId/messages — 获取房间消息
   router.get('/rooms/:roomId/messages', async (c) => {
     const roomId = c.req.param('roomId')
@@ -156,6 +159,21 @@ export function createStrongholdRouter(ctx: AppContext) {
       throw new AppError('VALIDATION_ERROR', { message: 'content 为必填字段' })
     }
 
+    // 空房间禁止发言。必须在保存消息前校验，避免绕过前端后留下无人接收的消息。
+    const roomAgentIds = await ctx.strongholdService.getRoomAgents(roomId)
+    const enabledAgentIds = new Set(
+      ctx.agentManager
+        .listAgents()
+        .filter((agent) => agent.isEnabled)
+        .map((agent) => agent.id),
+    )
+    const validRoomAgents = roomAgentIds.filter((agentId) => enabledAgentIds.has(agentId))
+    if (validRoomAgents.length === 0) {
+      throw new AppError('VALIDATION_ERROR', {
+        message: '当前房间没有已启用的角色，无法发送消息',
+      })
+    }
+
     // 1. 保存消息。用户发言创建 pairId，让本轮所有异步回复可被精确级联删除。
     const pairId = (body.role ?? 'user') === 'user' ? randomUUID() : undefined
     const msg = await ctx.groupChatService.sendMessage({
@@ -166,6 +184,9 @@ export function createStrongholdRouter(ctx: AppContext) {
       mentions: body.mentions,
       pairId,
     })
+    if (pairId) {
+      await ctx.groupChatService.recordPairVisibility(roomId, pairId, validRoomAgents)
+    }
 
     // 2. 系统消息不触发 Agent；用户消息同步完成调度决策，生成仍在后台执行。
     if (msg.role === 'system') {
@@ -181,22 +202,17 @@ export function createStrongholdRouter(ctx: AppContext) {
 
     const history = await ctx.groupChatService.getHistory(roomId, 10)
     const dispatch = await ctx.groupChatDispatcher.decideNextTurn(roomId, history)
-    const roomAgentIds = await ctx.strongholdService.getRoomAgents(roomId)
-    const enabledAgentIds = new Set(
-      ctx.agentManager
-        .listAgents()
-        .filter((agent) => agent.isEnabled)
-        .map((agent) => agent.id),
-    )
-    const validRoomAgents = roomAgentIds.filter((agentId) => enabledAgentIds.has(agentId))
 
-    // 调度成员表可能包含历史残留；最终执行必须以物理位置和启用状态为准。
-    let replyAgentId = dispatch.agentId
-    const isAllMention = replyAgentId === '@all'
-    if (!replyAgentId || (!isAllMention && !validRoomAgents.includes(replyAgentId))) {
-      replyAgentId = validRoomAgents[0] ?? null
-    }
-    if (!replyAgentId) {
+    // 统一构造本轮串行队列：多@严格按mention顺序；@全体保持随机顺序。
+    const requested = dispatch.agentIds.includes('@all')
+      ? [...validRoomAgents].sort(() => Math.random() - 0.5)
+      : dispatch.agentIds.filter((agentId) => validRoomAgents.includes(agentId))
+    const queue = [...new Set(requested)]
+    if (queue.length === 0 && validRoomAgents.length > 0) queue.push(validRoomAgents[0]!)
+    const initialQueue = [...queue]
+    const isAllMention = dispatch.agentIds.includes('@all')
+    const allowAutoFollowUp = initialQueue.length === 1 && !isAllMention
+    if (queue.length === 0) {
       const reason = validRoomAgents.length === 0 ? '当前房间没有已启用的角色' : dispatch.reason
       logger.info(`调度决定: 无人接话 (${reason})`)
       return c.json(
@@ -209,18 +225,104 @@ export function createStrongholdRouter(ctx: AppContext) {
       )
     }
 
-    // @全体成员：随机打乱回复顺序，让每个角色都能看到前面角色的发言后依次接话。
-    if (isAllMention) {
-      const shuffled = [...validRoomAgents].sort(() => Math.random() - 0.5)
-      logger.info(`调度决定: @全体成员 -> ${shuffled.join(', ')}`)
-      setImmediate(async () => {
-        for (const agentId of shuffled) {
-          try {
-            await executeAgentTurn(ctx, roomId, agentId, pairId)
-          } catch (err) {
-            const reason = err instanceof Error ? err.message : String(err)
-            logger.error(`Agent ${agentId} 群聊发言失败: ${reason}`)
-            // 单个成员失败不阻断后续成员，失败本身回写为可见的 system 消息。
+    const roundId = pairId ?? randomUUID()
+    const broadcastRound = (action: string, payload: Record<string, unknown> = {}) =>
+      ctx.gatewayHub.broadcast({
+        protocolVersion: 1,
+        type: 'push',
+        id: '',
+        sourceId: 'backend',
+        targetId: 'broadcast',
+        payload: { action, roomId, roundId, pairId, ...payload },
+        timestamp: Date.now(),
+      })
+    await broadcastRound('stronghold_round_started', { agentIds: initialQueue })
+    logger.info(`调度决定: ${queue.join(' -> ')} (${dispatch.reason})`)
+    setImmediate(async () => {
+      const completed = new Set<string>()
+      let allowSummon = allowAutoFollowUp
+      let summonedBy: string | undefined
+      let summonReason: string | undefined
+      let autoFollowUpChecked = false
+      while (queue.length > 0) {
+        if (pairId && !(await ctx.groupChatService.isPairActive(roomId, pairId))) break
+        const agentId = queue.shift()!
+        if (completed.has(agentId)) continue
+        // 每次执行前重新验证物理位置与启用状态，防止排队期间移动或被禁用。
+        const currentRoomAgents = await ctx.strongholdService.getRoomAgents(roomId)
+        const enabled = ctx.agentManager
+          .listAgents()
+          .some((candidate) => candidate.id === agentId && candidate.isEnabled)
+        if (!enabled || !currentRoomAgents.includes(agentId)) continue
+        completed.add(agentId)
+        try {
+          const result = await ctx.strongholdTurnService.execute(roomId, agentId, pairId, {
+            allowSummon,
+            summonedBy,
+            summonReason,
+            roundId,
+          })
+          // 只有初始单回复者可扩展一次队列；被传唤者和多@成员均禁止递归。
+          if (allowSummon && result.summonedAgentIds.length > 0) {
+            summonedBy = agentId
+            summonReason = result.summonReason
+            for (const summonedId of result.summonedAgentIds) {
+              if (
+                !completed.has(summonedId) &&
+                !queue.includes(summonedId) &&
+                validRoomAgents.includes(summonedId)
+              ) {
+                queue.push(summonedId)
+                await broadcastRound('stronghold_agent_queued', { agentId: summonedId })
+              }
+            }
+          }
+
+          // 首位自然回复者完成后，用最新历史重新判定一次是否由其他 Agent 接话。
+          // 该判定最多追加一人，且只执行一次，避免自动接话或传唤形成递归链。
+          if (!autoFollowUpChecked && allowAutoFollowUp) {
+            autoFollowUpChecked = true
+            try {
+              const followUpHistory = await ctx.groupChatService.getHistory(roomId, 10)
+              const followUpDispatch = await ctx.groupChatDispatcher.decideNextTurn(
+                roomId,
+                followUpHistory,
+              )
+              const followUpRoomAgents = await ctx.strongholdService.getRoomAgents(roomId)
+              const currentlyEnabledAgentIds = new Set(
+                ctx.agentManager
+                  .listAgents()
+                  .filter((candidate) => candidate.isEnabled)
+                  .map((candidate) => candidate.id),
+              )
+              const eligibleFollowUpAgents = followUpRoomAgents.filter(
+                (candidateId) =>
+                  currentlyEnabledAgentIds.has(candidateId) &&
+                  !completed.has(candidateId) &&
+                  !queue.includes(candidateId),
+              )
+              const followUpRequested = followUpDispatch.agentIds.includes('@all')
+                ? [...eligibleFollowUpAgents].sort(() => Math.random() - 0.5)
+                : followUpDispatch.agentIds.filter((candidateId) =>
+                    eligibleFollowUpAgents.includes(candidateId),
+                  )
+              const followUpAgentId = [...new Set(followUpRequested)][0]
+              if (followUpAgentId) {
+                queue.push(followUpAgentId)
+                await broadcastRound('stronghold_agent_queued', { agentId: followUpAgentId })
+                logger.info(`自动接话调度: ${followUpAgentId} (${followUpDispatch.reason})`)
+              }
+            } catch (followUpError) {
+              const followUpReason =
+                followUpError instanceof Error ? followUpError.message : String(followUpError)
+              logger.error(`自动接话调度失败: ${followUpReason}`)
+            }
+          }
+        } catch (err) {
+          const reason = err instanceof Error ? err.message : String(err)
+          logger.error(`Agent ${agentId} 群聊发言失败: ${reason}`)
+          await broadcastRound('stronghold_agent_failed', { agentId, error: reason })
+          if (!pairId || (await ctx.groupChatService.isPairActive(roomId, pairId))) {
             await ctx.groupChatService.sendMessage({
               roomId,
               senderId: 'system',
@@ -230,52 +332,25 @@ export function createStrongholdRouter(ctx: AppContext) {
             })
           }
         }
-      })
-
-      return c.json(
-        {
-          code: 'CREATED',
-          message: '消息已发送，成员将依次回复',
-          data: {
-            message: msg,
-            replyQueued: true,
-            agentId: '@all',
-            allAgentIds: shuffled,
-            reason: '全体成员已召唤，随机顺序依次回复',
-          },
-        },
-        201,
-      )
-    }
-
-    logger.info(`调度决定: ${replyAgentId} (${dispatch.reason})`)
-    setImmediate(async () => {
-      try {
-        await executeAgentTurn(ctx, roomId, replyAgentId, pairId)
-      } catch (err) {
-        const reason = err instanceof Error ? err.message : String(err)
-        logger.error(`Agent ${replyAgentId} 群聊发言失败: ${reason}`)
-        // 异步失败必须回写据点历史；若用户已经删除本轮，则不允许失败消息复活。
-        if (!pairId || (await ctx.groupChatService.isPairActive(roomId, pairId))) {
-          await ctx.groupChatService.sendMessage({
-            roomId,
-            senderId: 'system',
-            content: `${replyAgentId} 暂时无法回复：${reason}`,
-            role: 'system',
-            pairId,
-          })
-        }
+        allowSummon = false
       }
+      await broadcastRound('stronghold_round_completed', {
+        completedAgentIds: [...completed],
+      })
     })
 
     return c.json(
       {
         code: 'CREATED',
-        message: '消息已发送，角色正在回复',
+        message:
+          initialQueue.length > 1 ? '消息已发送，成员将依次回复' : '消息已发送，角色正在回复',
         data: {
           message: msg,
+          roundId,
           replyQueued: true,
-          agentId: replyAgentId,
+          agentId: initialQueue[0],
+          agentIds: initialQueue,
+          allAgentIds: dispatch.agentIds.includes('@all') ? initialQueue : undefined,
           reason: dispatch.reason,
         },
       },
@@ -322,7 +397,13 @@ export function createStrongholdRouter(ctx: AppContext) {
     if (!body.agentId) {
       throw new AppError('VALIDATION_ERROR', { message: 'agentId 为必填字段' })
     }
-    await ctx.groupChatService.addMember(roomId, body.agentId, body.role)
+    const agent = ctx.agentManager.getAgent(String(body.agentId))
+    if (!agent || !ctx.agentManager.enabledAgents.has(agent.id)) {
+      throw new AppError('VALIDATION_ERROR', {
+        message: `Agent ${String(body.agentId)} 不存在或未启用，禁止加入据点房间`,
+      })
+    }
+    await ctx.groupChatService.addMember(roomId, agent.id, body.role)
     return c.json({ code: 'OK', message: '成员已添加' })
   })
 
@@ -369,134 +450,3 @@ export function createStrongholdRouter(ctx: AppContext) {
 // ── 局部导入的 logger (避免与模块级 logger 冲突) ──
 import { createLogger as _createLogger } from '../lib/logger'
 const logger = _createLogger('StrongholdRouter')
-
-/**
- * 执行 Agent 在群聊中的发言回合
- *
- * 1. 获取据点权威历史与房间上下文
- * 2. 通过隔离的 group Thread 编译 Agent 人设和能力
- * 3. 调用 AgentService.chatWithCompiledMessages()
- * 4. 保存回复到据点权威消息表并推送
- */
-export async function executeAgentTurn(
-  ctx: AppContext,
-  roomId: string,
-  agentId: string,
-  pairId?: string,
-): Promise<void> {
-  try {
-    // @全体成员串行队列中，前一轮删除后后续角色无需再发起模型请求。
-    if (pairId && !(await ctx.groupChatService.isPairActive(roomId, pairId))) {
-      logger.info(`据点对话已删除，跳过 Agent ${agentId} 的群聊回合: room=${roomId}`)
-      return
-    }
-
-    const room = await ctx.strongholdService.getRoom(roomId)
-    if (!room) throw new Error(`房间 ${roomId} 不存在`)
-
-    const memoryConfig = ctx.configRepo
-      ? await loadMemoryRuntimeConfig(ctx.configRepo)
-      : DEFAULT_MEMORY_RUNTIME_CONFIG
-    const history = await ctx.groupChatService.getHistoryPairs(
-      roomId,
-      memoryConfig.channels.group.contextPairs,
-    )
-    const perspective = ctx.groupChatService.convertPerspective(history, agentId)
-    const threadId = `stronghold_${roomId}_${agentId}`
-    let thread = await ctx.threadService.getThread(threadId)
-    if (!thread) {
-      thread = await ctx.threadService.createThread({
-        id: threadId,
-        agentId,
-        channel: 'group',
-        platform: 'stronghold',
-        platformIdentifier: `${roomId}:${agentId}`,
-        title: `${room.name} - ${agentId}`,
-      })
-    }
-
-    const retrievalQuery =
-      [...perspective].reverse().find((message) => message.role === 'user')?.content ?? ''
-    const compiled = await ctx.contextCompiler.compile(thread.id, agentId, {
-      retrievalQuery,
-      appendThreadMessages: false,
-    })
-    const agents = await ctx.strongholdService.getRoomAgents(roomId)
-    const environment = JSON.parse(room.environmentJson ?? '{}') as Record<string, unknown>
-    const messages = [
-      ...compiled.messages,
-      {
-        role: 'system' as const,
-        content:
-          `当前据点房间：${room.name}\n` +
-          `房间说明：${room.description ?? '无'}\n` +
-          `房间环境：${JSON.stringify(environment)}\n` +
-          `在场成员：${agents.join('、') || '无'}`,
-      },
-      ...perspective,
-      {
-        role: 'user' as const,
-        content: '（系统触发：请根据当前据点群聊上下文发言；保持角色人设，不需要发言时回复空。）',
-      },
-    ]
-
-    const reply = await ctx.agentService.chatWithCompiledMessages({
-      agentId,
-      messages,
-      channel: 'group',
-      threadId,
-    })
-
-    if (!reply?.trim()) {
-      throw new Error('角色本轮没有生成可见回复')
-    }
-
-    // 发送期间用户可能删除了整轮对话；此时不允许迟到回复重新写回历史。
-    if (pairId && !(await ctx.groupChatService.isPairActive(roomId, pairId))) {
-      logger.info(`据点对话已删除，放弃 Agent ${agentId} 的迟到回复: room=${roomId}`)
-      return
-    }
-
-    await ctx.groupChatService.sendMessage({
-      roomId,
-      senderId: agentId,
-      content: reply,
-      role: 'assistant',
-      pairId,
-    })
-
-    // 据点房间历史是展示权威；同时将当前角色视角下的问答对写入 group Thread，供 Scorer 提炼。
-    if (retrievalQuery) {
-      await ctx.threadService.saveMessagePair({
-        threadId,
-        agentId,
-        userContent: retrievalQuery,
-        assistantContent: reply,
-        pairId,
-      })
-      await ctx.memoryTaskRunner.triggerScorer(threadId, agentId, 'group')
-    }
-
-    // 5. 推送到前端
-    await ctx.gatewayHub.broadcast({
-      type: 'push',
-      id: '',
-      sourceId: 'backend',
-      targetId: 'broadcast',
-      payload: {
-        action: 'group_chat_message',
-        roomId,
-        senderId: agentId,
-        content: reply,
-        role: 'assistant',
-      },
-      timestamp: Date.now(),
-    })
-
-    logger.info(`Agent ${agentId} 在房间 ${roomId} 发言: ${reply.slice(0, 50)}...`)
-  } catch (err) {
-    logger.error(`Agent ${agentId} 群聊发言失败: ${err}`)
-    // 上抛给异步调度包装层，由它写入用户可见的 system 消息。
-    throw err
-  }
-}

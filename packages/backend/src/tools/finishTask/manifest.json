@@ -10,14 +10,20 @@
   "platforms": ["windows", "linux", "darwin", "docker"],
   "toolDefinition": {
     "name": "finish_task",
-    "description": "结束当前任务并把最终回复交付给用户，可选更新角色状态（情绪、动作、文案等）。当你完成了用户的请求、或确认无需进一步操作时调用。请把「要交给用户看的最终回复」写在 reply 字段中，不要在调用本工具前单独输出正文，回复以 reply 为准。",
-    "display": { "label": "完成任务", "icon": "check", "color": "green", "style": "task" },
+    "description": "可选的显式任务终止工具。仅在需要提交任务状态、标记部分完成或失败、或同时更新角色状态时调用。如果只是向用户说明工具结果，请直接流式输出自然语言正文并自然结束，不要调用本工具。",
+    "display": {
+      "label": "完成任务",
+      "description": "结束当前任务，并把最终结果回复给你。",
+      "icon": "check",
+      "color": "green",
+      "style": "task"
+    },
     "parameters": {
       "type": "object",
       "properties": {
         "reply": {
           "type": "string",
-          "description": "【必填】完成任务后交给用户的最终回复正文。这是用户实际看到的回复，请用完整、自然的口吻说明做了什么、结果如何，语气贴合当前角色。"
+          "description": "调用本工具时必填的最终回复。普通结果说明应优先直接流式输出正文，不必使用本字段。"
         },
         "summary": {
           "type": "string",
@@ -31,11 +37,44 @@
         "mood": { "type": "string", "description": "当前情绪 (如 happy, sad, angry, excited)" },
         "vibe": { "type": "string", "description": "当前氛围/动作 (如 active, idle, thinking)" },
         "mind": { "type": "string", "description": "内心独白 (简短心理活动)" },
-        "click_head_msgs": { "type": "string", "description": "点击头部时的交互消息" },
-        "click_chest_msgs": { "type": "string", "description": "点击胸部时的交互消息" },
-        "click_body_msgs": { "type": "string", "description": "点击身体时的交互消息" },
-        "idle_msgs": { "type": "string", "description": "闲置时的自言自语" },
-        "back_msgs": { "type": "string", "description": "主人回来时的欢迎语" }
+        "touch_reactions": {
+          "type": "object",
+          "description": "按触碰部位设置临时随机台词；标准部位为head、arm、body、leg。",
+          "additionalProperties": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "click_head_msgs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "点击头部时的交互消息"
+        },
+        "click_arm_msgs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "点击手臂与手部时的交互消息"
+        },
+        "click_body_msgs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "点击身体时的交互消息"
+        },
+        "click_leg_msgs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "点击腿部与鞋袜时的交互消息"
+        },
+        "idle_msgs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "闲置时的自言自语"
+        },
+        "back_msgs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "主人回来时的欢迎语"
+        }
       },
       "required": ["reply"]
     }

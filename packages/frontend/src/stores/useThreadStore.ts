@@ -6,16 +6,19 @@
  * 消息列表使用 shallowRef 以避免深度响应性能问题。
  */
 
+import type { ConversationMessageProjection, SurfaceFrame } from '@infos/shared'
 import { defineStore } from 'pinia'
 import { ref, shallowRef, computed } from 'vue'
 import { chatApi } from '../api/modules/chatApi'
 import { threadsApi } from '../api/modules/threadsApi'
-import type {
-  ThreadMessageInfo,
-  ThreadChannel,
-  ThreadAttachmentInfo,
-} from '../api/modules/threadsApi'
+import type { ThreadChannel, ThreadAttachmentInfo } from '../api/modules/threadsApi'
 import { logger } from '../lib/logger'
+import { useCompositorStore } from './useCompositorStore'
+
+export interface RagFailureTrace {
+  kind: 'embedding' | 'rag'
+  message: string
+}
 
 /** 聊天消息（保持与旧 ChatMessage 接口兼容，避免组件迁移时改动过大） */
 export interface ChatMessage {
@@ -28,6 +31,12 @@ export interface ChatMessage {
   timestamp: string
   /** 对话对 ID，用于精确级联删除。 */
   pairId?: string | null
+  /** 当前流式消息对应的 Internal Surface。 */
+  surfaceId?: string
+  /** 当前回复携带的 RAG 降级轨迹。 */
+  ragFailureTrace?: RagFailureTrace
+  /** Assistant 可见输出的总 Token。 */
+  outputTokens?: number
   /** 是否正在流式生成中 */
   isStreaming?: boolean
   /** 发送者 ID (多 Agent 场景) */
@@ -54,6 +63,7 @@ export interface ChatMessage {
 export type GenerationState = 'idle' | 'thinking' | 'generating' | 'tool_calling'
 
 export const useThreadStore = defineStore('thread', () => {
+  const compositor = useCompositorStore()
   // ── 状态 ──
   /** 当前 Thread ID */
   const threadId = ref<string>('')
@@ -65,6 +75,10 @@ export const useThreadStore = defineStore('thread', () => {
 
   /** 当前生成状态 */
   const generationState = ref<GenerationState>('idle')
+
+  /** 模型调用前自动 RAG 的实时阶段文案。 */
+  const ragProgressMessage = ref<string | null>(null)
+  const ragFailureTrace = ref<RagFailureTrace | null>(null)
 
   /** 用户输入 */
   const inputText = ref('')
@@ -94,73 +108,23 @@ export const useThreadStore = defineStore('thread', () => {
 
   // ── 动作 ──
 
+  function installLocalMessageSurface(
+    localId: string,
+    content: string,
+    attachments: import('../api/modules/attachmentsApi').AttachmentInfo[] = [],
+  ): string {
+    return compositor.installLocalMessage({
+      localId,
+      threadId: threadId.value,
+      principalId: agentId.value,
+      content,
+      attachments,
+    })
+  }
+
   /** 添加消息 (触发 shallowRef 更新) */
   function addMessage(msg: ChatMessage) {
     messages.value = [...messages.value, msg]
-  }
-
-  /** 解析 assistant 消息持久化的工具调用元数据。 */
-  function parseToolCalls(metadataJson: string): ChatMessage['toolCalls'] {
-    try {
-      const parsed = JSON.parse(metadataJson) as {
-        toolCalls?: Array<{
-          name?: unknown
-          args?: unknown
-          result?: unknown
-          durationMs?: unknown
-          isError?: unknown
-          callId?: unknown
-        }>
-      }
-      if (!Array.isArray(parsed.toolCalls)) return undefined
-      return parsed.toolCalls
-        .filter((call) => typeof call.name === 'string')
-        .map((call) => ({
-          name: call.name as string,
-          args: JSON.stringify(call.args ?? {}),
-          result: typeof call.result === 'string' ? call.result : String(call.result ?? ''),
-          durationMs: typeof call.durationMs === 'number' ? call.durationMs : undefined,
-          isError: typeof call.isError === 'boolean' ? call.isError : undefined,
-          callId: typeof call.callId === 'string' ? call.callId : undefined,
-        }))
-    } catch {
-      return undefined
-    }
-  }
-
-  /** 判断消息是否为图片理解文字档案。 */
-  function isImageTranscription(metadataJson: string): boolean {
-    try {
-      return (JSON.parse(metadataJson) as { kind?: string }).kind === 'image_transcription'
-    } catch {
-      return false
-    }
-  }
-
-  /**
-   * 兼容清洗旧版工作区上下文泄漏。
-   * 旧版曾把内部 <workspace_context> 直接拼进用户正文并持久化；这里只在展示层剥离末尾标签块。
-   */
-  function stripLegacyWorkspaceContext(content: string): string {
-    return content.replace(/\s*<workspace_context>[\s\S]*?<\/workspace_context>\s*$/i, '').trimEnd()
-  }
-
-  /** 将服务端历史消息映射成本地消息 */
-  function fromThreadMessage(msg: ThreadMessageInfo, currentAgentId: string): ChatMessage {
-    return {
-      id: String(msg.id),
-      role: msg.role as ChatMessage['role'],
-      content: msg.role === 'user' ? stripLegacyWorkspaceContext(msg.content) : msg.content,
-      rawContent: msg.rawContent,
-      // 后端字段名为 timestamp（不是 createdAt），缺失时回退当前时间避免 UI 显示空白
-      timestamp: msg.timestamp ?? new Date().toISOString(),
-      attachments: msg.attachments,
-      pairId: msg.pairId,
-      senderId: msg.role === 'assistant' ? currentAgentId : undefined,
-      toolCalls: msg.role === 'assistant' ? parseToolCalls(msg.metadataJson) : undefined,
-      imageTranscription: isImageTranscription(msg.metadataJson),
-      isStreaming: false,
-    }
   }
 
   /** 直接替换当前 Thread 消息，用于服务端历史回灌 */
@@ -168,7 +132,83 @@ export const useThreadStore = defineStore('thread', () => {
     messages.value = [...nextMessages]
   }
 
-  /** 从服务端加载指定 Thread 的消息 */
+  /** 将 Projection 消息映射为仅承担布局与业务操作的本地 Shell。 */
+  function fromProjection(message: ConversationMessageProjection): ChatMessage {
+    return {
+      id: message.messageId,
+      role: message.role,
+      content: message.content,
+      rawContent: message.rawContent,
+      timestamp: message.timestamp,
+      pairId: message.pairId,
+      surfaceId: `conversation-message:${message.messageId}`,
+      senderId: message.senderId ?? message.agentId ?? undefined,
+      attachments: message.attachments.map((item) => ({
+        id: item.id,
+        threadId: message.threadId,
+        messageId: Number(message.messageId),
+        kind: item.kind as ThreadAttachmentInfo['kind'],
+        originalName: item.name,
+        mimeType: item.mimeType,
+        sizeBytes: item.sizeBytes,
+        contextPolicy: 'once',
+        status: 'bound',
+      })),
+      imageTranscription: message.imageTranscription,
+      outputTokens: message.outputTokens,
+      isStreaming: false,
+    }
+  }
+
+  function openSurfaceForThread(targetThreadId: string) {
+    return [...compositor.surfaces.values()]
+      .filter((surface) => surface.threadId === targetThreadId && surface.state === 'open')
+      .sort((left, right) => right.sequence - left.sequence)[0]
+  }
+
+  function generationStateFromSurface(
+    surface: ReturnType<typeof openSurfaceForThread>,
+  ): GenerationState {
+    const status = surface?.nodes.find((node) => node.kind === 'status')
+    const state = (status?.props as { state?: string } | undefined)?.state
+    if (state === 'calling') return 'tool_calling'
+    if (state === 'generating') return 'generating'
+    return 'thinking'
+  }
+
+  function restoreStreamingShell(
+    persisted: ChatMessage[],
+    targetThreadId: string,
+    targetAgentId: string,
+  ): ChatMessage[] {
+    const surface = openSurfaceForThread(targetThreadId)
+    const existing = messages.value.find(
+      (message) => message.isStreaming && (!surface || message.surfaceId === surface.surfaceId),
+    )
+    if (!surface && existing && generationState.value !== 'idle') {
+      streamingMessageId.value = existing.id
+      return [...persisted.filter((message) => message.id !== existing.id), existing]
+    }
+    if (!surface) {
+      generationState.value = 'idle'
+      streamingMessageId.value = null
+      return persisted
+    }
+    const shell: ChatMessage = existing ?? {
+      id: `streaming:${surface.executionId ?? surface.surfaceId}`,
+      role: 'assistant',
+      content: '',
+      timestamp: new Date().toISOString(),
+      senderId: targetAgentId,
+      surfaceId: surface.surfaceId,
+      isStreaming: true,
+    }
+    streamingMessageId.value = shell.id
+    generationState.value = generationStateFromSurface(surface)
+    return [...persisted.filter((message) => message.id !== shell.id), shell]
+  }
+
+  /** 从权威 Projection 加载指定 Thread 的消息，并保留当前运行中的 Surface Shell。 */
   async function loadThreadMessages(nextThreadId: string, currentAgentId: string) {
     if (!nextThreadId) return
 
@@ -176,24 +216,28 @@ export const useThreadStore = defineStore('thread', () => {
     isLoadingHistory.value = true
     historyError.value = null
     try {
-      const res = await threadsApi.get(nextThreadId)
-      if (generation !== loadGeneration) return // 已被更新的加载请求取代，丢弃过期响应
-      const data = res.data
-      if (!data) throw new Error('服务端未返回 Thread 详情')
-      if (data.thread.agentId !== currentAgentId) {
+      const [threadResponse, projectionResponse] = await Promise.all([
+        threadsApi.get(nextThreadId, { page: 1, pageSize: 1 }),
+        threadsApi.getProjection(nextThreadId),
+      ])
+      if (generation !== loadGeneration) return
+      const thread = threadResponse.data?.thread
+      const projection = projectionResponse.data
+      if (!thread || !projection) throw new Error('服务端未返回 Conversation Projection')
+      if (thread.agentId !== currentAgentId || projection.principalId !== currentAgentId) {
         throw new Error(
-          `会话归属不匹配：${data.thread.id} 属于 ${data.thread.agentId}，不是 ${currentAgentId}`,
+          `会话归属不匹配：${thread.id} 属于 ${thread.agentId}，不是 ${currentAgentId}`,
         )
       }
-      threadId.value = data.thread.id
-      agentId.value = data.thread.agentId
-      channel.value = data.thread.channel
-      // 服务端分页按最新在前返回；聊天画布必须按实际发生顺序从上到下渲染。
-      messages.value = [...data.messages]
-        .reverse()
-        .map((msg) => fromThreadMessage(msg, currentAgentId))
-      generationState.value = 'idle'
-      streamingMessageId.value = null
+      threadId.value = thread.id
+      agentId.value = thread.agentId
+      channel.value = thread.channel
+      compositor.replaceSnapshot(projection)
+      messages.value = restoreStreamingShell(
+        projection.messages.map(fromProjection),
+        thread.id,
+        thread.agentId,
+      )
     } catch (err) {
       if (generation !== loadGeneration) return // 过期请求的错误也丢弃，避免污染当前状态
       historyError.value = (err as Error).message
@@ -264,14 +308,42 @@ export const useThreadStore = defineStore('thread', () => {
     await loadThreadMessages(threadId.value, currentAgentId)
   }
 
-  /** 更新最后一条消息的内容 (流式追加) */
-  function appendToLast(content: string) {
-    const list = messages.value
-    if (list.length === 0) return
+  function applyProjection(snapshot: import('@infos/shared').ConversationProjectionSnapshot): void {
+    compositor.replaceSnapshot(snapshot)
+    messages.value = snapshot.messages.map(fromProjection)
+  }
 
-    const last = list[list.length - 1]!
-    const updated = { ...last, content: last.content + content }
-    messages.value = [...list.slice(0, -1), updated]
+  /** 应用实时 Surface 帧，并在 commit 时把临时消息原子归一为持久消息 Shell。 */
+  function applySurfaceFrame(frame: SurfaceFrame): void {
+    compositor.enqueue(frame)
+    if (frame.operation.type === 'surface.open') {
+      if (!streamingMessageId.value) return
+      messages.value = messages.value.map((message) =>
+        message.id === streamingMessageId.value
+          ? { ...message, surfaceId: frame.surfaceId }
+          : message,
+      )
+      return
+    }
+    if (frame.operation.type !== 'surface.commit') return
+    compositor.replaceSnapshot(frame.operation.snapshot)
+    messages.value = frame.operation.snapshot.messages.map(fromProjection)
+    const committedMessageId = frame.operation.message.messageId
+    if (ragFailureTrace.value) {
+      const failure = { ...ragFailureTrace.value }
+      messages.value = messages.value.map((message) =>
+        message.id === committedMessageId ? { ...message, ragFailureTrace: failure } : message,
+      )
+    }
+    streamingMessageId.value = committedMessageId
+  }
+
+  function setRagProgress(message: string | null): void {
+    ragProgressMessage.value = message
+  }
+
+  function setRagFailure(trace: RagFailureTrace | null): void {
+    ragFailureTrace.value = trace
   }
 
   /** 完成流式生成 */
@@ -284,6 +356,8 @@ export const useThreadStore = defineStore('thread', () => {
     messages.value = [...list.slice(0, -1), updated]
 
     generationState.value = 'idle'
+    ragProgressMessage.value = null
+    ragFailureTrace.value = null
     streamingMessageId.value = null
   }
 
@@ -292,6 +366,8 @@ export const useThreadStore = defineStore('thread', () => {
     messages.value = []
     threadId.value = ''
     generationState.value = 'idle'
+    ragProgressMessage.value = null
+    ragFailureTrace.value = null
     streamingMessageId.value = null
     inputText.value = ''
     historyError.value = null
@@ -359,14 +435,20 @@ export const useThreadStore = defineStore('thread', () => {
     agentId,
     messages,
     generationState,
+    ragProgressMessage,
+    ragFailureTrace,
     isGenerating,
     inputText,
     streamingMessageId,
     isLoadingHistory,
     historyError,
+    installLocalMessageSurface,
     addMessage,
     setMessages,
-    appendToLast,
+    applyProjection,
+    applySurfaceFrame,
+    setRagProgress,
+    setRagFailure,
     finishStreaming,
     clearThread,
     editMessage,

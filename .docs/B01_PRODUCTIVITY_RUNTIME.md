@@ -71,11 +71,7 @@ interface ExecutionSession {
 ### 3.2 SandboxProfile
 
 ```ts
-type SandboxProfileName =
-  | 'read-only'
-  | 'workspace-write'
-  | 'task-isolated'
-  | 'full-access'
+type SandboxProfileName = 'read-only' | 'workspace-write' | 'task-isolated' | 'full-access'
 
 interface SandboxProfile {
   name: SandboxProfileName
@@ -145,17 +141,17 @@ interface SandboxRunner {
 
 ### 6.1 第一阶段工具
 
-| 工具 | 功能 |
-|---|---|
-| `terminal_create` | 创建后台终端，立即返回 Terminal ID |
-| `terminal_list` | 列出当前执行会话的终端 |
-| `terminal_get` | 获取状态、命令、cwd、PID、退出码 |
-| `terminal_read` | 使用 cursor/limit 读取增量输出 |
-| `terminal_wait` | 等待退出、文本匹配或超时 |
-| `terminal_write` | 向 stdin 写入文本（pipe 模式） |
-| `terminal_interrupt` | 中断当前进程 |
-| `terminal_kill` | 终止进程树 |
-| `terminal_close` | 清理终端及缓冲 |
+| 工具                 | 功能                               |
+| -------------------- | ---------------------------------- |
+| `terminal_create`    | 创建后台终端，立即返回 Terminal ID |
+| `terminal_list`      | 列出当前执行会话的终端             |
+| `terminal_get`       | 获取状态、命令、cwd、PID、退出码   |
+| `terminal_read`      | 使用 cursor/limit 读取增量输出     |
+| `terminal_wait`      | 等待退出、文本匹配或超时           |
+| `terminal_write`     | 向 stdin 写入文本（pipe 模式）     |
+| `terminal_interrupt` | 中断当前进程                       |
+| `terminal_kill`      | 终止进程树                         |
+| `terminal_close`     | 清理终端及缓冲                     |
 
 第一期使用 `child_process.spawn` + pipe，支持多个长时进程但不支持完整 TTY/TUI。第二期用 `node-pty` 替换底层，工具契约不变。
 
@@ -165,6 +161,18 @@ interface SandboxRunner {
 - `terminal_read` 返回 `cursor`、`nextCursor`、`hasMore`、`status`。
 - 不把完整长日志塞入 ReAct 上下文。
 - 终端退出时保留 exitCode、signal 和尾部输出。
+
+### 6.3 远程能力节点终端
+
+GPU/Linux 能力节点发布 `system.shell` Offer 后，主 Agent 可以使用独立的 `remote_terminal_*` 工具包。该工具包与浏览器、Computer Use 一样属于二级高级工具抽屉：默认不向模型发送具体工具定义，Agent 确认任务需要远程节点操作后先调用 `expand_advanced_tools`，下一轮才获得完整远程终端工具。工具契约与本机多终端保持一致，但每次调用必须显式提供 `node_id`，Terminal ID 只在对应节点内有效。
+
+远程终端不使用本机终端的风险分级审批策略，而只服从当前 Thread 的 Char Ops 自动执行开关：
+
+- 自动执行关闭：所有 `remote_terminal_*` 调用逐次强制审批，包括只读、等待、中断和关闭；
+- 自动执行开启：所有 `remote_terminal_*` 调用直接执行，不创建审批；
+- 无论开关如何，CapabilityGate、节点配对、在线 Lease、Handle、Tool 禁用状态和调用审计均不可绕过。
+
+节点侧维持真实长时 Shell Session，Server 只保存 Node ID、远程 Terminal ID 和调用回执；节点断线后不得自动重放可能产生副作用的命令。
 
 ## 7. VirtualWorkspace
 
@@ -198,19 +206,19 @@ interface SandboxRunner {
 
 第一期不做自动 fuzzy apply。
 
-## 8. Channel 与策略映射
+## 8. Execution、Thread Purpose与策略映射
 
-建议新增 `task` Channel，但它只是策略入口：
+Productivity Runtime不新增持久Channel。主应用仍仅使用`desktop | group`；后台任务通过`ThreadPurpose = background_task`、Execution Class和显式Workspace Mount表达隔离：
 
-| 持久 Channel / 请求作用域 | 默认 Profile |
-|---|---|
-| desktop | workspace-write |
-| task | task-isolated |
-| ambient 请求作用域 | read-only；只在所属 Channel 权限上做减法 |
-| social | read-only，无终端 |
-| group | read-only，无终端 |
+| 执行上下文                     | 默认Profile                            |
+| ------------------------------ | -------------------------------------- |
+| desktop conversation           | workspace-write                        |
+| background_task Execution      | task-isolated                          |
+| ambient请求作用域              | read-only；只在所属Channel权限上做减法 |
+| infos.social Application Realm | Social专用Port；无Terminal             |
+| Stronghold group               | read-only；无Terminal                  |
 
-BackgroundTask 必须从 `desktop` 改为 `task`。`task` 执行会话使用：
+后台任务创建`background_task` Purpose的Thread，但其Channel仍为`desktop`。任务Workspace使用：
 
 ```text
 @data/agents/{agentId}/tasks/{taskId}/workspace
@@ -220,7 +228,7 @@ BackgroundTask 必须从 `desktop` 改为 `task`。`task` 执行会话使用：
 
 ## 9. 权限与审批
 
-后端第一期完成 PolicyEngine 接口和审批结果类型，但不实现前端交互。
+Approval Service和前端审批闭环已经存在；Productivity Runtime必须复用统一Policy/Approval/Receipt链路，不得建立第二套确认协议。
 
 ```ts
 type ApprovalDecision =
@@ -318,8 +326,8 @@ terminal_kill/close → 生命周期管理
 - `allow_always` / `deny_always` 在 Daemon 重启后恢复，最后一次永久决策生效。
 - node-pty 已作为可选原生终端后端接入：Windows ConPTY，Unix PTY；不可用时自动降级 pipe。
 - 新增 `terminal_resize`，终端状态返回 backend/cols/rows。
-- `@infos/auditor-wasm` 已接入 PolicyEngine，作为命令风险信号；当前实现仍是 TS 正则 fallback，不是安全边界。
-- `@infos/nit-runtime` 已确认是 minGRU 检索排序/训练加速器，不属于沙箱或命令安全模块。
+- PolicyEngine 使用纯TypeScript命令风险规则作为审批信号；它不是操作系统安全边界。
+- minGRU检索排序与在线训练已内聚到Backend Retrieval域的纯TypeScript实现。
 
 - 发行依赖收集器对 `node-pty` 保留 `.node`、`conpty.dll`、`OpenConsole.exe` 与 winpty 运行文件，其他依赖仍默认过滤非必要 DLL/EXE。
 - `@vscode/ripgrep` 作为可选生产依赖，构建时只提取当前 `platform-arch` 的 rg 到 `resources/bin`。
@@ -329,18 +337,15 @@ terminal_kill/close → 生命周期管理
 
 ### 尚未完成
 
-- 审批前端交互；当前审批请求通过 API/Gateway 暴露，未审批时调用返回 `APPROVAL_REQUIRED`。
-- node-pty 前端 xterm UI 与按键/resize 实时桥接。
 - Windows Restricted Token/Job Object、Linux bubblewrap、macOS Seatbelt。
-- 独立 `task` Channel；当前 taskId 已形成执行会话和目录隔离，但 Thread channel 仍沿用现有值。
-- 随应用打包 rg；当前优先 PATH 中的 rg，并保证 Node fallback 可用。
+- LSP与语义代码工具。
+
+已完成的审批前端、xterm实时桥接、随包rg和任务隔离规则见下方生产状态，不得继续列为待办。
 
 ## 14. 后续优先级
 
-1. 讨论并决定是否新增独立 `task` Channel 与最小权限矩阵。
-2. Windows Restricted Token/Job Object、Linux bubblewrap、macOS Seatbelt。
-3. node-pty 前端 xterm UI 和实时终端事件桥接。
-4. LSP 与语义代码工具。
+1. Windows Restricted Token/Job Object、Linux bubblewrap、macOS Seatbelt。
+2. LSP与语义代码工具。
 
 ## 16. 生产力前端实施状态
 

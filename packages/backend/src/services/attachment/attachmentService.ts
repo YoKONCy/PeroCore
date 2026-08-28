@@ -1,9 +1,16 @@
+/**
+ * attachmentService — 领域服务
+ *
+ * 封装本领域的核心职责与外部依赖，向上层提供可预测的调用契约。
+ * 非直观的状态转换、失败恢复与安全边界应在本模块内完成，避免泄漏实现细节。
+ */
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { AttachmentRepository, AttachmentRow } from '../../repositories/attachment.repo'
 import type { ThreadRepository } from '../../repositories/thread.repo'
 import { AppError } from '../../lib/appError'
+import { tokenCounter } from '../tokenizer/tokenCounter'
 
 const IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
 const TEXT_MIMES = new Set([
@@ -26,7 +33,7 @@ const TEXT_MIMES = new Set([
   'text/x-java-source',
   'application/sql',
 ])
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024
+const MAX_IMAGE_BYTES = 20 * 1024 * 1024
 const MAX_TEXT_BYTES = 2 * 1024 * 1024
 export const MAX_ATTACHMENT_TEXT_CHARS = 120_000
 export const MAX_ATTACHMENT_TEXT_TOKENS = 30_000
@@ -80,7 +87,7 @@ export class AttachmentService {
           message: '文本附件必须是有效 UTF-8，未知二进制内容不受支持',
         })
       }
-      tokenEstimate = Math.ceil(extractedText.length / 4)
+      tokenEstimate = tokenCounter.countTokens(extractedText)
       if (
         extractedText.length > MAX_ATTACHMENT_TEXT_CHARS ||
         tokenEstimate > MAX_ATTACHMENT_TEXT_TOKENS

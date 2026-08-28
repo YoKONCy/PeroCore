@@ -25,7 +25,7 @@ import type {
   UsageInfo,
 } from '../types'
 import { AppError } from '../../../lib/appError'
-import { stripBase64DataUris } from '../sanitize'
+import { sanitizeToolParameters, stripBase64DataUris } from '../sanitize'
 import { createLogger } from '../../../lib/logger'
 
 const logger = createLogger('GeminiProvider')
@@ -64,6 +64,8 @@ function parseRetryAfterMs(value: string | null): number | undefined {
 
 interface GeminiPart {
   text?: string
+  /** 原生思考摘要块。 */
+  thought?: boolean
   /** 多模态图片块 (base64) */
   inlineData?: { mimeType: string; data: string }
   functionCall?: { name: string; args: Record<string, unknown> }
@@ -224,7 +226,12 @@ export class GeminiProvider implements LlmProvider {
     if (typeof opts.topP === 'number') genConfig.topP = opts.topP
     if (typeof opts.maxTokens === 'number') genConfig.maxOutputTokens = opts.maxTokens
     if (opts.reasoningEffort) {
-      genConfig.thinkingConfig = { thinkingBudget: THINKING_BUDGETS[opts.reasoningEffort] }
+      genConfig.thinkingConfig = {
+        thinkingBudget: THINKING_BUDGETS[opts.reasoningEffort],
+        includeThoughts: opts.returnNativeReasoning === true,
+      }
+    } else if (opts.returnNativeReasoning) {
+      genConfig.thinkingConfig = { includeThoughts: true }
     }
     if (opts.stop?.length) genConfig.stopSequences = opts.stop
     if (opts.responseFormat) {
@@ -237,7 +244,7 @@ export class GeminiProvider implements LlmProvider {
         functionDeclarations: opts.tools.map((t) => ({
           name: t.function.name,
           description: t.function.description,
-          parameters: t.function.parameters,
+          parameters: sanitizeToolParameters(t.function.parameters),
         })),
       }
       body.tools = [declarations]
@@ -378,10 +385,12 @@ export class GeminiProvider implements LlmProvider {
     const parts = content?.parts ?? []
 
     let textContent = ''
+    let reasoningContent = ''
     const toolCalls: ToolCall[] = []
 
     for (const part of parts) {
-      if (part.text) textContent += part.text
+      if (part.text && part.thought) reasoningContent += part.text
+      else if (part.text) textContent += part.text
       if (part.functionCall) {
         toolCalls.push({
           id: `call_${Date.now()}_${toolCalls.length}`,
@@ -402,6 +411,7 @@ export class GeminiProvider implements LlmProvider {
           message: {
             role: 'assistant',
             content: textContent || null,
+            reasoningContent: reasoningContent || undefined,
             toolCalls: toolCalls.length ? toolCalls : undefined,
           },
           finishReason,
@@ -422,6 +432,7 @@ export class GeminiProvider implements LlmProvider {
 
     // 提取文本增量
     let text = ''
+    let reasoningContent = ''
     const toolCalls: Array<{
       index: number
       id?: string
@@ -431,7 +442,8 @@ export class GeminiProvider implements LlmProvider {
 
     for (let i = 0; i < parts.length; i++) {
       const part = parts[i]!
-      if (part.text) text += part.text
+      if (part.text && part.thought) reasoningContent += part.text
+      else if (part.text) text += part.text
       if (part.functionCall) {
         toolCalls.push({
           index: i,
@@ -446,13 +458,14 @@ export class GeminiProvider implements LlmProvider {
     }
 
     // 没有文本也没有工具调用，跳过
-    if (!text && !toolCalls.length) return null
+    if (!text && !reasoningContent && !toolCalls.length) return null
 
     return {
       choices: [
         {
           delta: {
             content: text || undefined,
+            reasoningContent: reasoningContent || undefined,
             toolCalls: toolCalls.length ? toolCalls : undefined,
           },
           finishReason: this.mapFinishReason(candidate.finishReason as string | undefined) ?? null,

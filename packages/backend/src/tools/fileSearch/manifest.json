@@ -11,15 +11,21 @@
 
   "toolDefinition": {
     "name": "search_files",
-    "description": "按文件名搜索文件。在整台计算机上查找文件位置。(要搜索文件内容，请用 code_search)",
-    "display": { "label": "搜索文件", "icon": "search", "color": "purple", "style": "search" },
+    "description": "按文件名搜索文件。默认在Agent工作区中查找；可显式指定设备目录。(要搜索文件内容，请用 code_search)",
+    "display": {
+      "label": "搜索文件",
+      "description": "按文件名在电脑中查找文件位置。",
+      "icon": "search",
+      "color": "purple",
+      "style": "search"
+    },
     "parameters": {
       "type": "object",
       "properties": {
         "query": { "type": "string", "description": "文件名关键词 (支持通配符)" },
         "directory": {
           "type": "string",
-          "description": "搜索目录 (可选，默认用户主目录；可指定本机任意现有目录)"
+          "description": "搜索目录（可选）。相对路径以Agent工作区为基准；未提供时默认搜索Agent工作区；可显式传入设备绝对路径。"
         },
         "limit": { "type": "number", "description": "返回最大结果数 (默认 50)" }
       },

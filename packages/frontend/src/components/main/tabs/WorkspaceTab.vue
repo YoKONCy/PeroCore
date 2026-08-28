@@ -11,6 +11,8 @@ import { onBeforeRouteLeave } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { PixelIcon, PButton } from '../../pixel'
 import { ChatContainer } from '../../chat'
+import HistoryExportDialog from '../../chat/HistoryExportDialog.vue'
+import ChatRichText from '../../chat/ChatRichText.vue'
 import { ApprovalCard } from '../../approval'
 import WorkspaceTree from '../../workspace/WorkspaceTree.vue'
 import WorkspaceTerminal from '../../workspace/WorkspaceTerminal.vue'
@@ -22,8 +24,14 @@ import {
   useNotificationStore,
 } from '../../../stores'
 import { workspaceApi, type WorkspaceFileNode } from '../../../api/modules/approvalsApi'
+import { threadsApi } from '../../../api/modules/threadsApi'
 import { getApiBaseUrl, isElectronRuntime } from '../../../api/transport'
 import { invoke } from '../../../utils/ipcAdapter'
+import {
+  buildConversationMarkdown,
+  downloadMarkdown,
+  type HistoryExportOptions,
+} from '../../../utils/historyExport'
 
 interface OpenFile {
   path: string
@@ -50,9 +58,44 @@ const isTerminalCollapsed = ref(false)
 const isTerminalMaximized = ref(false)
 const isApprovalQueueExpanded = ref(true)
 const isSessionDrawerOpen = ref(false)
+const markdownPreviewPaths = ref(new Set<string>())
 const terminalHeight = ref(248)
 const copilotWidth = ref(480)
 const explorerWidth = ref(248)
+const showHistoryExport = ref(false)
+const isExportingHistory = ref(false)
+
+async function exportCurrentHistory(options: HistoryExportOptions): Promise<void> {
+  if (!threadStore.threadId || !currentAgent.value) return
+  isExportingHistory.value = true
+  try {
+    const response = await threadsApi.getProjection(threadStore.threadId)
+    if (!response.data) throw new Error('服务端未返回工作区会话历史')
+    const title = `${currentAgent.value.name}-工作区会话`
+    downloadMarkdown(
+      title,
+      buildConversationMarkdown(
+        {
+          title,
+          channelLabel: '工作区协作 · desktop',
+          participantNames: {
+            [currentAgent.value.id]: currentAgent.value.name,
+          },
+          messages: response.data.messages,
+        },
+        options,
+      ),
+    )
+    showHistoryExport.value = false
+    notification.toast('工作区会话历史已导出到客户端', { type: 'success' })
+  } catch (error) {
+    notification.toast(error instanceof Error ? error.message : '历史记录导出失败', {
+      type: 'error',
+    })
+  } finally {
+    isExportingHistory.value = false
+  }
+}
 
 // 切换 Agent 时按角色保留未保存缓冲，避免异步全局切换直接丢稿。
 const buffersByAgent = new Map<string, { files: OpenFile[]; activePath: string }>()
@@ -74,6 +117,20 @@ const activeFileExtension = computed(() => {
   const extension = name.includes('.') ? name.split('.').pop() : ''
   return extension?.toUpperCase() || 'TEXT'
 })
+
+const isMarkdownFile = computed(() => activeFileExtension.value === 'MD')
+const isMarkdownPreview = computed(() =>
+  Boolean(activeFile.value && markdownPreviewPaths.value.has(activeFile.value.path)),
+)
+
+function setMarkdownPreview(enabled: boolean): void {
+  const file = activeFile.value
+  if (!file || activeFileExtension.value !== 'MD') return
+  const next = new Set(markdownPreviewPaths.value)
+  if (enabled) next.add(file.path)
+  else next.delete(file.path)
+  markdownPreviewPaths.value = next
+}
 
 async function ensureAgent(): Promise<void> {
   if (!agentStore.agents.length) await agentStore.fetchAgents()
@@ -160,6 +217,9 @@ async function save(): Promise<void> {
 
 function close(file: OpenFile): void {
   if (file.dirty && !confirm(`“${file.name}”尚未保存，确定关闭吗？`)) return
+  const nextPreviewPaths = new Set(markdownPreviewPaths.value)
+  nextPreviewPaths.delete(file.path)
+  markdownPreviewPaths.value = nextPreviewPaths
   openFiles.value = openFiles.value.filter((item) => item.path !== file.path)
   if (activePath.value === file.path) activePath.value = openFiles.value.at(-1)?.path ?? ''
 }
@@ -216,7 +276,12 @@ interface WorkspaceRewoundDetail {
   threadId: string
   files: Array<{
     path: string
-    action: 'delete_created' | 'restore_edited' | 'restore_deleted' | 'restore_renamed'
+    action:
+      | 'delete_created'
+      | 'restore_edited'
+      | 'restore_deleted'
+      | 'restore_renamed'
+      | 'preserve_changed'
   }>
 }
 
@@ -226,6 +291,7 @@ async function handleWorkspaceRewound(event: Event): Promise<void> {
   if (detail.threadId !== threadId.value) return
   await workspaceTreeRef.value?.refresh()
   for (const change of detail.files) {
+    if (change.action === 'preserve_changed') continue
     if (change.action === 'delete_created') {
       const file = openFiles.value.find((item) => item.path === change.path)
       if (file?.dirty) {
@@ -450,7 +516,31 @@ onBeforeUnmount(() => {
                 <span v-if="activeFile.truncated" class="editor-warning">
                   文件过大，仅载入前 128K 字符
                 </span>
+                <div
+                  v-if="isMarkdownFile"
+                  class="editor-view-switch"
+                  role="group"
+                  aria-label="Markdown视图"
+                >
+                  <button
+                    type="button"
+                    :class="{ active: !isMarkdownPreview }"
+                    @click="setMarkdownPreview(false)"
+                  >
+                    <PixelIcon name="code" size="xs" />
+                    编辑
+                  </button>
+                  <button
+                    type="button"
+                    :class="{ active: isMarkdownPreview }"
+                    @click="setMarkdownPreview(true)"
+                  >
+                    <PixelIcon name="eye" size="xs" />
+                    浏览
+                  </button>
+                </div>
                 <PButton
+                  v-if="!isMarkdownPreview"
                   size="sm"
                   :disabled="!activeFile.dirty || activeFile.truncated"
                   @click="save"
@@ -458,7 +548,12 @@ onBeforeUnmount(() => {
                   {{ activeFile.truncated ? '只读预览' : '保存' }}
                 </PButton>
               </div>
-              <div class="editor-surface">
+              <div v-if="isMarkdownPreview" class="markdown-preview" aria-label="Markdown浏览器">
+                <article class="markdown-preview__paper">
+                  <ChatRichText :content="activeFile.content" />
+                </article>
+              </div>
+              <div v-else class="editor-surface">
                 <div class="editor-gutter" aria-hidden="true">1</div>
                 <textarea
                   :value="activeFile.content"
@@ -584,6 +679,16 @@ onBeforeUnmount(() => {
                 </div>
                 <PixelIcon name="chevron-down" size="xs" class="copilot-header__switch" />
               </button>
+              <PButton
+                variant="ghost"
+                size="sm"
+                :disabled="!threadStore.threadId"
+                title="导出当前工作区会话历史"
+                @click="showHistoryExport = true"
+              >
+                <PixelIcon name="download" size="xs" />
+                导出
+              </PButton>
               <button
                 class="copilot-header__collapse"
                 title="收起协作栏"
@@ -664,6 +769,12 @@ onBeforeUnmount(() => {
         </aside>
       </div>
     </div>
+
+    <HistoryExportDialog
+      v-model="showHistoryExport"
+      :disabled="isExportingHistory"
+      @confirm="exportCurrentHistory"
+    />
 
     <!-- 会话切换抽屉：由 Header 主体或收起态角色图标触发。 -->
     <WorkspaceSessionDrawer v-model:open="isSessionDrawerOpen" />
@@ -1055,6 +1166,72 @@ onBeforeUnmount(() => {
 .editor-warning {
   color: var(--ui-warning);
   font-size: 9px;
+}
+.editor-view-switch {
+  display: inline-flex;
+  flex-shrink: 0;
+  overflow: hidden;
+  border: 1px solid var(--ui-border-default);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-bg-surface-soft);
+}
+.editor-view-switch button {
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px;
+  border: 0;
+  background: transparent;
+  color: var(--ui-text-tertiary);
+  font-size: 9px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.editor-view-switch button + button {
+  border-left: 1px solid var(--ui-border-default);
+}
+.editor-view-switch button:hover {
+  background: var(--ui-bg-hover);
+  color: var(--ui-text-primary);
+}
+.editor-view-switch button.active {
+  background: var(--ui-accent-sky-soft);
+  color: var(--ui-accent-sky);
+}
+.markdown-preview {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: clamp(20px, 4vw, 48px);
+  background:
+    radial-gradient(
+      circle at top,
+      color-mix(in srgb, var(--ui-accent-sky) 5%, transparent),
+      transparent 45%
+    ),
+    var(--ui-bg-surface-soft);
+}
+.markdown-preview__paper {
+  width: min(860px, 100%);
+  min-height: 100%;
+  margin: 0 auto;
+  padding: clamp(24px, 5vw, 56px);
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-bg-surface);
+  box-shadow: var(--ui-shadow-sm);
+  color: var(--ui-text-primary);
+}
+.markdown-preview__paper :deep(.chat-rich-text) {
+  font-size: 14px;
+  line-height: 1.8;
+}
+.markdown-preview__paper :deep(.chat-rich-text > :first-child) {
+  margin-top: 0;
+}
+.markdown-preview__paper :deep(.chat-rich-text > :last-child) {
+  margin-bottom: 0;
 }
 .editor-surface {
   display: flex;
@@ -1468,6 +1645,20 @@ onBeforeUnmount(() => {
 }
 [data-theme='dark'] .editor-surface textarea {
   background: #151821;
+}
+[data-theme='dark'] .markdown-preview {
+  background:
+    radial-gradient(
+      circle at top,
+      color-mix(in srgb, var(--ui-accent-sky) 7%, transparent),
+      transparent 44%
+    ),
+    #10131b;
+}
+[data-theme='dark'] .markdown-preview__paper {
+  border-color: color-mix(in srgb, var(--ui-border-default) 74%, transparent);
+  background: #171b25;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.32);
 }
 [data-theme='dark'] .editor-gutter {
   background: #12151d;

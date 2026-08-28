@@ -38,14 +38,14 @@ packages/backend/src/core/
 
 ### 2.3 职责边界
 
-| 职责 | Electron | Docker |
-|---|---|---|
-| Steam 初始化 / Overlay | ✅ steamService | ❌ 不存在 |
-| Workshop 管理 | ✅ workshopService | ❌ 不存在 |
-| Cloud 同步 | ✅ steamCloudSync | ❌ 不存在 |
-| 成就解锁 | ✅ achievementService (预留) | ❌ 不存在 |
-| PathResolver | ✅ 含 @workshop | ✅ 无 @workshop |
-| AssetRegistry | ✅ 扫描 3 层 | ✅ 扫描 2 层（无 workshop） |
+| 职责                   | Electron                     | Docker                      |
+| ---------------------- | ---------------------------- | --------------------------- |
+| Steam 初始化 / Overlay | ✅ steamService              | ❌ 不存在                   |
+| Workshop 管理          | ✅ workshopService           | ❌ 不存在                   |
+| Cloud 同步             | ✅ steamCloudSync            | ❌ 不存在                   |
+| 成就解锁               | ✅ achievementService (预留) | ❌ 不存在                   |
+| PathResolver           | ✅ 含 @workshop              | ✅ 无 @workshop             |
+| AssetRegistry          | ✅ 扫描 3 层                 | ✅ 扫描 2 层（无 workshop） |
 
 ---
 
@@ -53,12 +53,12 @@ packages/backend/src/core/
 
 ### 3.1 逻辑前缀定义
 
-| 前缀 | 含义 | 可写 | Electron 映射 | Docker 映射 |
-|---|---|---|---|---|
-| `@app/` | 程序安装根目录 | ❌ 只读 | `resources/` 或项目根 | 容器内应用目录 |
-| `@data/` | 用户可写数据 | ✅ | 统一应用数据目录 | `PERO_DATA_DIR` |
-| `@workshop/` | Steam Workshop | ❌ 只读，多订阅根 | 由 `steamApi.workshop.installInfo()` 发现 | ❌ 不可用 |
-| `@temp/` | 运行时临时 | ✅ | 系统 temp | 系统 temp |
+| 前缀         | 含义           | 可写              | Electron 映射                             | Docker 映射     |
+| ------------ | -------------- | ----------------- | ----------------------------------------- | --------------- |
+| `@app/`      | 程序安装根目录 | ❌ 只读           | `resources/` 或项目根                     | 容器内应用目录  |
+| `@data/`     | 用户可写数据   | ✅                | 统一应用数据目录                          | `PERO_DATA_DIR` |
+| `@workshop/` | Steam Workshop | ❌ 只读，多订阅根 | 由 `steamApi.workshop.installInfo()` 发现 | ❌ 不可用       |
+| `@temp/`     | 运行时临时     | ✅                | 系统 temp                                 | 系统 temp       |
 
 ### 3.2 Workshop 路径传递
 
@@ -66,12 +66,12 @@ Electron 版启动后端进程时，通过环境变量注入：
 
 ```typescript
 // electron/main/services/backendLauncher.ts
-const workshopDir = getWorkshopInstallPath()  // 从 steamworks.js 获取
+const workshopDir = getWorkshopInstallPath() // 从 steamworks.js 获取
 spawn(backendProcess, {
   env: {
     ...process.env,
     PERO_WORKSHOP_DIR: workshopDir ?? '',
-  }
+  },
 })
 ```
 
@@ -93,22 +93,22 @@ Docker 版不设此环境变量，`@workshop` 自然为空。
 
 反向域名格式：`<scope>.<type>.<name>`
 
-| scope | 来源 | 示例 |
-|---|---|---|
-| `com.infos` | 官方内置 | `com.infos.persona.pero` |
-| `com.workshop` | 创意工坊 | `com.workshop.model.123456` |
-| `com.user` | 用户自定义 | `com.user.plugin.my_tool` |
+| scope          | 来源       | 示例                        |
+| -------------- | ---------- | --------------------------- |
+| `com.infos`    | 官方内置   | `com.infos.persona.pero`    |
+| `com.workshop` | 创意工坊   | `com.workshop.model.123456` |
+| `com.user`     | 用户自定义 | `com.user.plugin.my_tool`   |
 
 ### 4.3 资源读取职责
 
-| 资源类型 | 读取者 | 原因 |
-|---|---|---|
-| 提示词 (prompts) | **后端** | LLM 调用在后端 |
-| 人设 (agents) | **后端** | 人设注入 system prompt |
-| 插件 schema | **后端** | Tool calling 在后端 |
-| 3D 模型 (.pero) | **Electron** | Three.js 渲染在渲染进程 |
-| UI 资产 (图片/音频) | **Electron** | 前端展示 |
-| config.json | **后端写，前端只读** | 后端为权威源 |
+| 资源类型            | 读取者               | 原因                    |
+| ------------------- | -------------------- | ----------------------- |
+| 提示词 (prompts)    | **后端**             | LLM 调用在后端          |
+| 人设 (agents)       | **后端**             | 人设注入 system prompt  |
+| 插件 schema         | **后端**             | Tool calling 在后端     |
+| 3D 模型（标准资源） | **前端**             | Three.js 渲染在渲染进程 |
+| UI 资产 (图片/音频) | **Electron**         | 前端展示                |
+| config.json         | **后端写，前端只读** | 后端为权威源            |
 
 ### 4.4 提示词覆盖查找
 
@@ -127,52 +127,75 @@ class PromptTemplateLoader {
 
 ---
 
-## 5. Steam Cloud 多设备同步
+## 5. Steam Cloud 手动完整快照同步
 
-### 5.1 同步策略
+### 5.1 产品语义
 
-**全量覆写**（Steam Cloud 配额 10GB，足够）。
+Steam 版客户端始终与同设备内置 Daemon 死绑定，不允许切换远程 Server。Steam Cloud 不承担实时同步、文件级自动合并、分布式锁或 Authority Fence；它只是手动完整同步包的存储适配器。
 
-### 5.2 同步内容分类
+面向用户只提供：
 
-| 分类 | 内容 | 同步 | 说明 |
-|---|---|---|---|
-| **运行时数据** | SQLite DB、TriviumDB、日记、config | ✅ 同步 | 用户产生、随时变化 |
-| **用户自定义资源** | agents、prompts、plugins、models | ✅ 同步 | 用户创建 |
-| **Workshop 资源** | 创意工坊订阅内容 | ❌ 不同步 | Steam 本身管理 |
-| **官方资源** | @app/ 内的内置资源 | ❌ 不同步 | 随安装包分发 |
-| **临时/敏感** | WAL、gateway_token、模型缓存 | ❌ 排除 | 运行时临时或安全敏感 |
-
-### 5.3 多设备冲突处理
-
-采用**时间戳最新者胜**策略：
-
-```typescript
-interface SyncManifest {
-  lastSyncTime: number
-  deviceId: string
-  version: number
-  files: Record<string, {
-    hash: string
-    modifiedAt: number
-    sizeBytes: number
-  }>
-}
+```text
+“从 Steam Cloud 同步最新数据”
 ```
 
-同步流程：
-1. **启动时**：下载云端 `sync_manifest.json`，与本地比较
-2. **冲突检测**：同一文件双方都有修改 → 取 `modifiedAt` 更新的版本
-3. **旧版本备份**：被覆盖的文件自动备份到 `@data/sync_backup/<timestamp>/`
-4. **退出时**：上传变更文件 + 更新 `sync_manifest.json`
+用户点击后，以 Steam Cloud 中最新的完整同步包为唯一来源，完整覆写当前本机 Server 的全部用户数据。应用启动和退出不自动下载、上传或合并。
 
-### 5.4 同步触发时机
+### 5.2 同步范围
+
+默认同步全部用户数据：
+
+- SQLite、TriviumDB 及各应用 Store 的一致性 Snapshot；
+- Agent、Thread、Message、Memory、Task、Approval、AgentInput、Notification；
+- config、API Key、MCP Credential、TTS/ASR 配置等用户凭据；
+- Applications、插件、Skills、自定义 Prompt、用户模型和头像资源；
+- Workspace、附件、Asset、Social、Arca 及其他用户可写目录；
+- Workshop 订阅和用户配置状态。
+
+只自动排除：
+
+- Server/Client/Capability Node ID、私钥、证书、Gateway Token 和 Trust Session；
+- Session、Lease、Input Seat、临时 Handle、PID、锁文件、Socket、WAL/SHM、缓存、临时文件和日志；
+- 随安装包分发的只读官方资源；
+- Steam Workshop 实际安装文件，由 Steam 根据同步后的订阅状态重新获取。
+
+API Key 等凭据不能以裸明文写入 Steam Cloud。生成同步包时使用同步包密钥加密，目标本机 Daemon 导入后使用本机主密钥重新封装。
+
+### 5.3 完整快照与覆写流程
+
+```text
+1. 本机 Daemon 通过 SQLite Backup/Checkpoint 和各 Store Snapshot 生成一致性视图
+2. 收集全部用户可写目录
+3. 生成 Manifest、App/Schema Version、文件清单和 Checksum
+4. 加密并上传完整同步包
+5. 用户在目标设备点击“从 Steam Cloud 同步最新数据”
+6. 下载到隔离区并完成版本、路径、大小、签名和摘要预检
+7. 自动生成当前本机数据的 pre-sync 回滚快照
+8. 暂停业务写入与 Runtime
+9. 原子切换全部数据库和用户目录
+10. 重封装凭据、执行迁移、重建索引并重启 Runtime
+```
+
+同步失败必须恢复原状态，不能留下部分新数据。同步完成后不会自动反向上传；用户需要时显式生成并上传新的完整快照。
+
+### 5.4 冲突与恢复
+
+不采用文件 `modifiedAt` 最新者胜出，也不逐文件合并。Steam Cloud 快照始终是用户明确选择的唯一来源：
+
+```text
+Cloud Snapshot → 完整覆写当前本机用户数据
+```
+
+当前本机数据在覆写前自动备份，用户可以撤销上次同步。若 App/Schema Version 不兼容、同步包损坏、凭据无法重封装或空间不足，则在切换前 fail-closed。
+
+### 5.5 触发时机
 
 | 事件 | 动作 |
-|---|---|
-| 应用启动 | 异步下载云端数据（不阻塞启动） |
-| 应用退出 | 上传本地变更到云端 |
-| 用户手动 | 前端 UI "立即同步" 按钮 |
+| --- | --- |
+| 应用启动 | 仅检查云端快照元数据并提示，不自动下载或覆写 |
+| 应用退出 | 不自动上传 |
+| 用户手动上传 | 生成并上传当前完整快照 |
+| 用户手动同步 | 下载最新完整快照并原子覆写当前本机数据 |
 
 ---
 
@@ -238,4 +261,4 @@ infOS/                          (安装根目录 = @app/)
 
 ---
 
-*本文档由 Carola 整理，适用于 infOS Steam 集成与资产管理规范。*
+_本文档由 Carola 整理，适用于 infOS Steam 集成与资产管理规范。_

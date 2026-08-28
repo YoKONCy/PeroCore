@@ -6,24 +6,13 @@
  * F3: 支持 v-html Markdown 渲染 + 工具调用展示 + 流式光标。
  */
 import { ref, computed } from 'vue'
+import type { AttachmentSurfaceProps } from '@infos/shared'
 import PixelIcon from '../pixel/PixelIcon.vue'
-import MessageSegment from './MessageSegment.vue'
 import ThinkingIndicator from './ThinkingIndicator.vue'
 import ChatRichText from './ChatRichText.vue'
-import ToolCallCard from '../tools/ToolCallCard.vue'
-import type { Segment } from './MessageSegment.vue'
-import type { ThreadAttachmentInfo } from '../../api/modules/threadsApi'
+import ConversationSurface from '../compositor/ConversationSurface.vue'
 import { attachmentsApi } from '../../api/modules/attachmentsApi'
-
-/** 工具调用信息 */
-export interface ToolCallInfo {
-  name: string
-  args: string
-  result?: string
-  isError?: boolean
-  /** 工具执行耗时（毫秒） */
-  durationMs?: number
-}
+import type { CompositorSurface } from '../../stores'
 
 export interface ChatMessage {
   id: string
@@ -32,16 +21,15 @@ export interface ChatMessage {
   /** 从原始转写中提取的 Thinking 内容。 */
   thinkingContent?: string
   timestamp?: number
+  /** Assistant 可见输出的总 Token。 */
+  outputTokens?: number
   senderId?: string
-  images?: string[]
-  attachments?: ThreadAttachmentInfo[]
-  segments?: Segment[]
-  /** 渲染后的 HTML（由 useStreamMarkdown 提供） */
-  renderedHtml?: string
+  /** 本轮 Embedding / RAG 降级轨迹。 */
+  ragFailureTrace?: { kind: 'embedding' | 'rag'; message: string }
+  /** 消息的唯一系统 Surface。 */
+  surface?: CompositorSurface
   /** 图片理解文字档案。 */
   imageTranscription?: boolean
-  /** 工具调用信息 */
-  toolCalls?: ToolCallInfo[]
 }
 
 interface Props {
@@ -55,7 +43,13 @@ interface Props {
   mutationActions?: Array<'edit' | 'delete'>
   /** 删除按钮的悬浮提示（据点群聊为“删除消息”，桌面为“删除对话对”）。 */
   deleteActionLabel?: string
+  /** 系统消息视觉变体；旁白不复用普通系统提示样式。 */
+  systemVariant?: 'default' | 'narration'
   isStreaming?: boolean
+  /** 模型调用前自动 RAG 的实时阶段文案。 */
+  progressLabel?: string
+  /** 本轮永久展示的 Embedding / RAG 降级轨迹。 */
+  ragFailure?: { kind: 'embedding' | 'rag'; message: string } | null
   /** 当前正在播放 TTS 的消息 ID */
   playingMsgId?: string | null
   /** TTS 音频加载中 */
@@ -68,7 +62,10 @@ const props = withDefaults(defineProps<Props>(), {
   allowMutations: true,
   mutationActions: () => ['edit' as const, 'delete' as const],
   deleteActionLabel: '删除对话对',
+  systemVariant: 'default',
   isStreaming: false,
+  progressLabel: '',
+  ragFailure: null,
   playingMsgId: null,
   isLoadingAudio: false,
 })
@@ -82,8 +79,20 @@ const emit = defineEmits<{
 }>()
 
 const isThinkingExpanded = ref(false)
-const EMPTY_REPLY_PATTERN = /^\(?\s*(?:本次回复无可见正文，详情请查看调试视图|仅有内部过程)\s*\)?$/
-const isInternalOnly = computed(() => EMPTY_REPLY_PATTERN.test(props.message.content.trim()))
+const previewImageUrl = ref<string | null>(null)
+const userImages = computed(
+  () =>
+    props.message.surface?.nodes
+      .filter((node) => node.kind === 'attachment')
+      .map((node) => node.props as AttachmentSurfaceProps)
+      .filter((attachment) => attachment.kind === 'image') ?? [],
+)
+const userHasBubbleContent = computed(
+  () =>
+    props.message.surface?.nodes.some(
+      (node) => node.kind !== 'attachment' || (node.props as { kind?: string }).kind !== 'image',
+    ) ?? Boolean(props.message.content.trim()),
+)
 const thinkingSections = computed(() =>
   (props.message.thinkingContent ?? '')
     .split(/\n\s*\n+/)
@@ -96,65 +105,116 @@ async function copyThinking() {
   await navigator.clipboard.writeText(props.message.thinkingContent)
 }
 
-function formatTime(ts?: number) {
+function formatTime(ts?: number): string {
   if (!ts) return ''
   const d = new Date(ts)
-  return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  const hour = String(d.getHours()).padStart(2, '0')
+  const minute = String(d.getMinutes()).padStart(2, '0')
+  return `${year}-${month}-${day} ${hour}:${minute}`
 }
 </script>
 
 <template>
-  <!-- 系统/管家消息：共享气泡组件中的中性提示形态 -->
-  <div v-if="message.role === 'system'" class="msg-row msg-row-system">
+  <!-- 据点管家旁白：独立于Agent和系统提示的叙事卡片。 -->
+  <div
+    v-if="message.role === 'system' && systemVariant === 'narration'"
+    class="msg-row msg-row-narration"
+    :data-surface-id="message.surface?.surfaceId"
+  >
+    <article class="msg-narration-card">
+      <span class="msg-narration-glow" aria-hidden="true" />
+      <header class="msg-narration-header">
+        <span class="msg-narration-ornament" aria-hidden="true">◇</span>
+        <span>{{ agentName }}</span>
+        <time v-if="message.timestamp">{{ formatTime(message.timestamp) }}</time>
+      </header>
+      <div class="msg-narration-content">
+        <ConversationSurface v-if="message.surface" :surface="message.surface" />
+        <span v-else>消息 Surface 不可用</span>
+      </div>
+      <div class="msg-narration-actions">
+        <button class="msg-action-btn" title="复制" @click="emit('copy', message.content)">
+          <PixelIcon name="copy" size="xs" />
+        </button>
+        <button
+          v-if="allowMutations && mutationActions.includes('delete')"
+          class="msg-action-btn msg-action-btn-danger"
+          :title="deleteActionLabel"
+          @click="emit('deletePair', message.id)"
+        >
+          <PixelIcon name="trash" size="xs" />
+        </button>
+      </div>
+    </article>
+  </div>
+
+  <!-- 普通系统消息：中性提示形态。 -->
+  <div
+    v-else-if="message.role === 'system'"
+    class="msg-row msg-row-system"
+    :data-surface-id="message.surface?.surfaceId"
+  >
     <div :class="['msg-system-pill', { 'msg-image-transcription': message.imageTranscription }]">
       <PixelIcon :name="message.imageTranscription ? 'image' : 'bot'" size="xs" />
       <strong>{{ message.imageTranscription ? '图片理解记录' : agentName }}</strong>
-      <ChatRichText :content="message.content" compact />
+      <ConversationSurface v-if="message.surface" :surface="message.surface" />
+      <span v-else>消息 Surface 不可用</span>
     </div>
   </div>
 
   <!-- 用户消息 -->
-  <div v-else-if="message.role === 'user'" class="msg-row msg-row-user">
+  <div
+    v-else-if="message.role === 'user'"
+    class="msg-row msg-row-user"
+    :data-surface-id="message.surface?.surfaceId"
+  >
     <div class="msg-bubble-container msg-user-container">
-      <!-- 图片 -->
-      <div v-if="message.images?.length" class="msg-images">
-        <img
-          v-for="(img, idx) in message.images"
-          :key="idx"
-          :src="img"
-          class="msg-image"
-          alt="用户图片"
+      <!-- 图片附件挂在气泡下方，正文气泡只承载文字与普通文件。 -->
+      <div v-if="userHasBubbleContent" class="msg-bubble msg-bubble-user">
+        <ConversationSurface
+          v-if="message.surface"
+          :surface="message.surface"
+          display-mode="content"
         />
-      </div>
-
-      <!-- 持久化附件 -->
-      <div v-if="message.attachments?.length" class="msg-attachments">
-        <article
-          v-for="attachment in message.attachments"
-          :key="attachment.id"
-          class="msg-attachment"
-        >
-          <img
-            v-if="attachment.kind === 'image'"
-            :src="attachmentsApi.contentUrl(attachment.id)"
-            :alt="attachment.originalName"
-          />
-          <PixelIcon v-else name="file" size="md" />
-          <div>
-            <strong>{{ attachment.originalName }}</strong>
-            <span>{{ attachment.mimeType }} · {{ Math.ceil(attachment.sizeBytes / 1024) }} KB</span>
-            <small v-if="attachment.kind === 'text'">仅发送当轮参与上下文</small>
-          </div>
-        </article>
-      </div>
-
-      <!-- 文字气泡：使用中性表面与细品牌色轨，保持正文区域克制易读。 -->
-      <div class="msg-bubble msg-bubble-user">
-        <ChatRichText :content="message.content" />
+        <span v-else>消息 Surface 不可用</span>
         <span v-if="message.timestamp" class="msg-user-time">
           {{ formatTime(message.timestamp) }}
         </span>
       </div>
+      <div v-if="userImages.length" class="msg-user-images" aria-label="图片附件">
+        <button
+          v-for="(image, index) in userImages"
+          :key="image.id"
+          type="button"
+          class="msg-user-image-note"
+          :class="`msg-user-image-note--${index % 4}`"
+          aria-label="查看原图"
+          @click="previewImageUrl = attachmentsApi.contentUrl(image.id)"
+        >
+          <img :src="attachmentsApi.contentUrl(image.id)" alt="用户发送的图片" />
+        </button>
+      </div>
+      <span v-if="message.timestamp && !userHasBubbleContent" class="msg-user-image-time">
+        {{ formatTime(message.timestamp) }}
+      </span>
+      <Teleport to="body">
+        <div
+          v-if="previewImageUrl"
+          class="msg-image-preview"
+          role="dialog"
+          aria-modal="true"
+          aria-label="图片预览"
+          @click.self="previewImageUrl = null"
+        >
+          <button type="button" aria-label="关闭图片预览" @click="previewImageUrl = null">
+            <PixelIcon name="close" size="sm" />
+          </button>
+          <img :src="previewImageUrl" alt="用户发送的图片原图" />
+        </div>
+      </Teleport>
 
       <!-- 悬浮操作：hover 时浮在气泡右下，不占布局高度 -->
       <div class="msg-actions msg-user-actions">
@@ -181,7 +241,7 @@ function formatTime(ts?: number) {
   </div>
 
   <!-- 助手消息 -->
-  <div v-else class="msg-row msg-row-assistant">
+  <div v-else class="msg-row msg-row-assistant" :data-surface-id="message.surface?.surfaceId">
     <!-- 头像 -->
     <div class="msg-avatar">
       <img v-if="agentAvatarUrl" :src="agentAvatarUrl" :alt="agentName" class="msg-avatar-image" />
@@ -240,11 +300,11 @@ function formatTime(ts?: number) {
         v-if="message.thinkingContent"
         class="msg-thinking-toggle"
         :class="{ 'msg-thinking-toggle--active': isThinkingExpanded }"
-        :title="isThinkingExpanded ? '收起思考过程' : '展开思考过程'"
+        :title="isThinkingExpanded ? '收起碎碎念' : '展开碎碎念'"
         @click="isThinkingExpanded = !isThinkingExpanded"
       >
         <PixelIcon name="brain" size="xs" />
-        <span>&lt;think&gt;</span>
+        <span>碎碎念</span>
         <PixelIcon :name="isThinkingExpanded ? 'chevron-up' : 'chevron-down'" size="xs" />
       </button>
 
@@ -255,7 +315,7 @@ function formatTime(ts?: number) {
             <span>THINK TRACE</span>
             <small>LOCAL ONLY</small>
           </div>
-          <button type="button" title="复制思考过程" @click="copyThinking">
+          <button type="button" title="复制碎碎念" @click="copyThinking">
             <PixelIcon name="copy" size="xs" />
             复制
           </button>
@@ -274,53 +334,238 @@ function formatTime(ts?: number) {
 
       <!-- 消息体 -->
       <div class="msg-bubble msg-bubble-assistant">
-        <!-- 思考中（无内容时） -->
-        <ThinkingIndicator v-if="isStreaming && !message.content" :name="agentName" />
-
-        <!-- 无可见正文使用独立状态卡，不展示后端技术性兜底文案。 -->
-        <div v-if="isInternalOnly" class="msg-internal-only">
-          <span class="msg-internal-orb" />
-          <div>
-            <strong>仅有内部过程</strong>
-            <small>
-              {{ message.thinkingContent ? '可展开查看思考轨迹' : '本轮没有可显示的正文' }}
-            </small>
-          </div>
-          <button v-if="message.thinkingContent" type="button" @click="isThinkingExpanded = true">
-            展开思考
-          </button>
-        </div>
-
-        <!-- 段落列表 -->
-        <template v-else-if="message.segments?.length">
-          <MessageSegment v-for="(seg, idx) in message.segments" :key="idx" :segment="seg" />
-        </template>
-
-        <!-- Markdown HTML 渲染（优先 renderedHtml） -->
-        <ChatRichText
-          v-else-if="message.renderedHtml"
-          :content="message.content"
-          :rendered-html="message.renderedHtml"
+        <RunPulse
+          v-if="ragFailure"
+          state="failed"
+          :name="agentName"
+          :label="ragFailure.message"
+          :live="false"
+          :show-time="false"
+          compact
+          class="msg-rag-failure"
         />
-
-        <!-- 纯文本回退 -->
-        <div v-else class="msg-plain-text">
-          {{ message.content }}
-        </div>
-
-        <!-- 流式光标 -->
-        <span v-if="isStreaming && message.content" class="msg-streaming-cursor" />
-
-        <!-- 工具调用展示（ToolCallCard 按工具 display 元数据格式化渲染） -->
-        <div v-if="message.toolCalls?.length" class="msg-tools">
-          <ToolCallCard v-for="(tc, idx) in message.toolCalls" :key="idx" :tool="tc" />
-        </div>
+        <!-- Conversation Surface 是助手消息唯一的可见内容来源。 -->
+        <ConversationSurface v-if="message.surface" :surface="message.surface" />
+        <ThinkingIndicator v-else-if="isStreaming" :name="agentName" :label="progressLabel" />
+        <div v-else class="msg-surface-missing">消息 Surface 不可用</div>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
+.msg-row-narration {
+  justify-content: center;
+  margin: 12px 0 20px;
+  padding: 0 4%;
+}
+
+.msg-narration-card {
+  --narration-edge: color-mix(in srgb, var(--ui-accent-purple) 26%, transparent);
+  --narration-glow: color-mix(in srgb, var(--ui-accent-sky) 14%, transparent);
+  position: relative;
+  width: min(92%, 720px);
+  padding: 15px 20px 16px;
+  overflow: hidden;
+  color: var(--ui-text-secondary);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.11), transparent 38%),
+    color-mix(in srgb, var(--ui-bg-surface) 88%, transparent);
+  border: 1px solid var(--narration-edge);
+  border-radius: 12px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    inset 0 -1px 0 rgba(76, 54, 120, 0.08),
+    0 12px 30px rgba(28, 20, 48, 0.11),
+    0 3px 8px rgba(28, 20, 48, 0.08);
+  backdrop-filter: blur(12px) saturate(112%);
+  transform: translateZ(0);
+  animation:
+    narration-arrive 420ms cubic-bezier(0.22, 1, 0.36, 1),
+    narration-float 5.6s ease-in-out 500ms infinite;
+  transition:
+    transform 260ms var(--ui-ease-out),
+    border-color 260ms var(--ui-ease-out),
+    box-shadow 260ms var(--ui-ease-out);
+}
+
+.msg-narration-card::before,
+.msg-narration-card::after {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+}
+
+.msg-narration-card::before {
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(105deg, transparent 20%, rgba(255, 255, 255, 0.12), transparent 64%);
+  transform: translateX(-115%);
+  animation: narration-sheen 7s ease-in-out 1.1s infinite;
+}
+
+.msg-narration-card::after {
+  left: 22px;
+  right: 22px;
+  bottom: -1px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--ui-accent-purple), transparent);
+  opacity: 0.42;
+}
+
+.msg-narration-card:hover {
+  border-color: color-mix(in srgb, var(--ui-accent-purple) 42%, transparent);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 16px 38px rgba(28, 20, 48, 0.15),
+    0 4px 11px rgba(28, 20, 48, 0.1);
+  transform: translateY(-2px) perspective(700px) rotateX(0.35deg);
+}
+
+.msg-narration-glow {
+  position: absolute;
+  top: -48px;
+  left: 18%;
+  width: 64%;
+  height: 80px;
+  border-radius: 50%;
+  background: var(--narration-glow);
+  filter: blur(24px);
+  pointer-events: none;
+}
+
+.msg-narration-header {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: color-mix(in srgb, var(--ui-accent-purple) 76%, var(--ui-text-secondary));
+  font-family: ui-serif, Georgia, 'Times New Roman', 'Noto Serif SC', serif;
+  font-size: 10px;
+  font-style: italic;
+  font-weight: 650;
+  letter-spacing: 0.13em;
+}
+
+.msg-narration-header time {
+  margin-left: auto;
+  color: var(--ui-text-tertiary);
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+}
+
+.msg-narration-ornament {
+  color: var(--ui-accent-purple);
+  font-size: 13px;
+  animation: narration-orbit 4.8s ease-in-out infinite;
+}
+
+.msg-narration-content {
+  position: relative;
+  z-index: 1;
+  font-family: ui-serif, Georgia, 'Times New Roman', 'Noto Serif SC', serif;
+  font-size: 13px;
+  font-style: italic;
+  font-weight: 480;
+  line-height: 1.85;
+  letter-spacing: 0.018em;
+  text-wrap: pretty;
+}
+
+.msg-narration-content :deep(*) {
+  font-style: italic;
+}
+
+.msg-narration-actions {
+  position: absolute;
+  z-index: 3;
+  right: 10px;
+  bottom: 8px;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: all 180ms var(--ui-ease-out);
+}
+
+.msg-narration-card:hover .msg-narration-actions,
+.msg-narration-card:focus-within .msg-narration-actions {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@keyframes narration-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+    filter: blur(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes narration-float {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  50% {
+    translate: 0 -2px;
+  }
+}
+
+@keyframes narration-sheen {
+  0%,
+  76%,
+  100% {
+    transform: translateX(-115%);
+    opacity: 0;
+  }
+  84% {
+    opacity: 0.7;
+  }
+  94% {
+    transform: translateX(115%);
+    opacity: 0;
+  }
+}
+
+@keyframes narration-orbit {
+  0%,
+  100% {
+    transform: rotate(0deg) scale(1);
+    opacity: 0.75;
+  }
+  50% {
+    transform: rotate(45deg) scale(1.08);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .msg-narration-card,
+  .msg-narration-card::before,
+  .msg-narration-ornament {
+    animation: none;
+  }
+}
+
+[data-theme='dark'] .msg-narration-card {
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.055), transparent 42%), rgba(28, 24, 40, 0.84);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.22),
+    0 15px 34px rgba(4, 3, 9, 0.3),
+    0 0 24px rgba(139, 92, 246, 0.055);
+}
+
 .msg-row-system {
   justify-content: center;
   margin: 6px 0 14px;
@@ -359,8 +604,113 @@ function formatTime(ts?: number) {
 }
 .msg-user-container {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
   align-self: flex-start;
   height: fit-content;
+}
+.msg-user-images {
+  display: flex;
+  max-width: 520px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 2px;
+  margin-top: 5px;
+  padding: 3px 4px 5px;
+}
+.msg-user-image-note {
+  position: relative;
+  width: 112px;
+  height: 88px;
+  flex: 0 0 112px;
+  padding: 4px 4px 9px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--ui-accent-purple) 42%, var(--ui-border-default));
+  border-radius: 7px 3px 7px 3px;
+  background: var(--ui-bg-elevated);
+  box-shadow: 3px 4px 0 color-mix(in srgb, var(--ui-accent-sky) 18%, transparent);
+  cursor: zoom-in;
+  transition:
+    transform 160ms var(--ui-ease-out),
+    box-shadow 160ms var(--ui-ease-out);
+}
+.msg-user-image-note img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 4px 2px 4px 2px;
+}
+.msg-user-image-note--0 {
+  transform: rotate(-2.6deg) translateY(2px);
+}
+.msg-user-image-note--1 {
+  transform: rotate(1.8deg) translateY(-1px);
+}
+.msg-user-image-note--2 {
+  transform: rotate(-1.1deg) translateY(4px);
+}
+.msg-user-image-note--3 {
+  transform: rotate(2.8deg) translateY(1px);
+}
+.msg-user-image-note:hover {
+  z-index: 2;
+  transform: translateY(-4px) rotate(0deg) scale(1.04);
+  box-shadow: 4px 7px 14px color-mix(in srgb, var(--ui-accent-purple) 22%, transparent);
+}
+.msg-image-preview {
+  position: fixed;
+  z-index: 10000;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 48px;
+  background: color-mix(in srgb, #100c1c 82%, transparent);
+  backdrop-filter: blur(10px);
+}
+.msg-image-preview > img {
+  display: block;
+  max-width: min(92vw, 1400px);
+  max-height: 88vh;
+  object-fit: contain;
+  border: 5px solid var(--ui-bg-elevated);
+  border-radius: 18px 7px 18px 7px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.48);
+}
+.msg-image-preview > button {
+  position: fixed;
+  top: 22px;
+  right: 24px;
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--ui-border-default);
+  border-radius: 10px;
+  background: var(--ui-bg-elevated);
+  color: var(--ui-text-primary);
+  cursor: pointer;
+}
+@media (max-width: 720px) {
+  .msg-user-image-note {
+    width: 96px;
+    height: 76px;
+    flex-basis: 96px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .msg-user-image-note {
+    transition: none;
+  }
+}
+.msg-user-image-time {
+  margin: -4px 8px 0 0;
+  color: var(--user-bubble-time);
+  font-size: 8px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 .msg-row-assistant {
   justify-content: flex-start;
@@ -443,6 +793,11 @@ function formatTime(ts?: number) {
   --user-bubble-time: #aaa2b2;
   --user-bubble-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
   --user-bubble-shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.28);
+}
+
+.msg-rag-failure {
+  align-self: flex-start;
+  max-width: 100%;
 }
 
 /* 助手气泡: 角色化证据卡，左侧色轨体现当前伙伴 */
@@ -766,6 +1121,14 @@ function formatTime(ts?: number) {
 }
 
 /* 通用 */
+.msg-token-usage {
+  color: var(--ui-text-tertiary);
+  font-family: var(--ui-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  opacity: 0.72;
+}
+
 .msg-time {
   font-size: 10px;
   font-weight: 600;

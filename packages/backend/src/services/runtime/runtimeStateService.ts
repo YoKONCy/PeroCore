@@ -212,6 +212,7 @@ export class RuntimeStateService {
     if (!state) return false
     state.paused = true
     logger.info(`暂停: thread=${threadId}`)
+    this.broadcastProgress(threadId, 'paused', '任务已暂停')
     return true
   }
 
@@ -221,6 +222,7 @@ export class RuntimeStateService {
     if (!state) return false
     state.paused = false
     logger.info(`恢复: thread=${threadId}`)
+    this.broadcastProgress(threadId, 'running', '任务已恢复')
     return true
   }
 

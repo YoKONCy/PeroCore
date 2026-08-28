@@ -10,8 +10,6 @@ electronVersion: 40.2.1
 
 extraMetadata:
   main: main/index.js
-  dependencies:
-    electron-updater: 6.8.3
   optionalDependencies: {}
 
 directories:
@@ -41,14 +39,9 @@ asar: true
 asarUnpack:
   - '**/*.node'
   - '**/*.dll'
-  - '**/*.wasm'
 
 # 后端构建产物 + 运行时资源
 extraResources:
-  - from: packages/native/render-core-runtime
-    to: native
-    filter:
-      - '**/*'
   - from: packages/backend/dist
     to: backend
     filter:
@@ -85,6 +78,11 @@ extraResources:
     to: bin
     filter:
       - '**/*'
+  # 官方应用发行资源（Host、UI与完整性清单）
+  - from: dist-applications
+    to: applications
+    filter:
+      - '**/*'
   # 内置社交应用资源（prompts / tools manifest / app.manifest）+ 编译产物
   - from: packages/apps/social
     to: backend/apps/social
@@ -103,7 +101,7 @@ npmRebuild: false
 
 afterPack: scripts/electron-after-pack.cjs
 
-# 发布到 GitHub Releases (electron-updater 拉取更新)
+# GitHub Releases 发布目标
 publish:
   - provider: github
     owner: YoKONCy

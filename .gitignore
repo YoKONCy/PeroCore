@@ -6,19 +6,13 @@ node_modules/
 
 # 构建产物
 dist/
-# Rust 命令审计模块由运行时直接加载，需随源码和安装包分发。
-!packages/native/auditor-wasm/dist/
-!packages/native/auditor-wasm/dist/auditor.wasm
 dist-electron/
 dist_electron/
 dist-daemon/
+dist-applications/
 release-electron/
 
-# Rust 构建
-target/
-packages/native/*/pkg/
 *.node
-!packages/native/render-core-runtime/*.node
 
 # 环境与配置
 .env
@@ -48,6 +42,10 @@ main.log
 
 # 运行时数据
 data/
+@data/
+
+# 临时文档
+.docs/TEMP-todo/
 
 # 缓存
 .ruff_cache/

@@ -161,11 +161,24 @@ app.on('before-quit', async (event) => {
     // 1. 销毁所有窗口
     windowManager.destroyAll()
 
-    // 2. 停止能力提供者（断开与 Daemon 的连接，注销能力）
-    const { capabilityProvider } = await import('./services/capabilityProvider')
-    capabilityProvider.stop()
+    // 2.停止当前Kernel托管的Arca Host；外部adopted实例不会被终止。
+    try {
+      const token = process.env.INFOS_API_TOKEN ?? ''
+      const response = await fetch('http://127.0.0.1:9120/api/applications/arca/shutdown-managed', {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        signal: AbortSignal.timeout(7_000),
+      })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    } catch (error) {
+      logger.warn('Main', `停止托管Arca失败，继续退出清理: ${String(error)}`)
+    }
 
-    // 2.1 回收便携模式拉起的内置 Daemon（标准版/Steam 无此进程，幂等）
+    // 3.停止能力提供者（断开与 Daemon 的连接，注销能力）
+    const { capabilityProvider } = await import('./services/capabilityProvider')
+    await capabilityProvider.stop()
+
+    // 4.回收便携模式拉起的内置Daemon（标准版/Steam无此进程，幂等）
     const { stopPortableDaemon } = await import('./services/portableDaemon')
     stopPortableDaemon()
 

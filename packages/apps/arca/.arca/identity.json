@@ -1,0 +1,19 @@
+{
+  "descriptor": {
+    "displayName": "Arca",
+    "facets": ["application", "capability", "storage"],
+    "trust": "untrusted",
+    "platform": {
+      "os": "windows",
+      "arch": "x64",
+      "runtime": "node",
+      "version": "v22.22.2"
+    },
+    "protocolVersion": 1,
+    "registeredAt": "2026-08-18T19:17:48.672Z",
+    "nodeId": "infos-node-7ea4717bba388cadfeeac69b",
+    "publicKeyFingerprint": "7ea4717bba388cadfeeac69bd9dd31965f439fb70587d45e981e15fe41c8267a"
+  },
+  "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAcprWqlM7bKwKfjCsFOKUBkNnxDMwy/Boy3asiy+Xa6E=\n-----END PUBLIC KEY-----\n",
+  "privateKeyPem": "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIPrF0dlQKfF3cd5yL5ga6HyLrToOFPkqvd3WivoBtBAZ\n-----END PRIVATE KEY-----\n"
+}

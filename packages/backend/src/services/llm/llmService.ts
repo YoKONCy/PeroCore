@@ -14,6 +14,7 @@
  * @module packages/backend/src/services/llm/llmService
  */
 
+import { performanceLatencySeconds } from '../../lib/metrics'
 import type {
   LlmProvider,
   ChatMessage,
@@ -22,13 +23,17 @@ import type {
   ChatDelta,
   UsageInfo,
   ReasoningEffort,
+  LlmWireApi,
+  ReasoningDialect,
 } from './types'
 import { OpenAiProvider } from './providers/openaiProvider'
+import { OpenAiResponsesProvider } from './providers/openaiResponsesProvider'
 import { GeminiProvider } from './providers/geminiProvider'
 import { AnthropicProvider } from './providers/anthropicProvider'
 import { AppError } from '../../lib/appError'
 import { createLogger } from '../../lib/logger'
 import { finishLlmSpan, startLlmSpan } from '../../lib/telemetry'
+import { consumeCurrentKernelExecution } from '../../kernel/executionContext'
 
 const logger = createLogger('LlmService')
 
@@ -71,10 +76,18 @@ export interface ModelConfig {
   temperature?: number
   /** Top P */
   topP?: number
-  /** 最大 token 数 */
+  /** 最大输出 token 数 */
   maxTokens?: number
+  /** 模型完整上下文窗口，不等同于最大输出 token 数。 */
+  contextWindowTokens?: number
   /** 推理强度；未配置时不向 Provider 发送 */
   reasoningEffort?: ReasoningEffort
+  /** 是否请求并展示Provider原生思考摘要。 */
+  returnNativeReasoning?: boolean
+  wireApi?: LlmWireApi
+  reasoningDialect?: ReasoningDialect
+  /** 是否使用Provider流式接口；默认启用 */
+  stream?: boolean
   /** 是否启用视觉能力 (多模态) */
   enableVision?: boolean
   /** 是否声明支持原生音频输入（不代表 Provider 已接入协议） */
@@ -155,11 +168,22 @@ export class LlmService {
         })
 
       default:
-        // 所有 OpenAI 兼容的厂商统一走 OpenAiProvider
+        if (config.wireApi === 'responses') {
+          return new OpenAiResponsesProvider({
+            apiKey: config.apiKey,
+            apiBase,
+            modelId: config.modelId,
+            wireApi: config.wireApi,
+            reasoningDialect: config.reasoningDialect,
+          })
+        }
+        // 所有 OpenAI 兼容的厂商统一走Chat Completions协议
         return new OpenAiProvider({
           apiKey: config.apiKey,
           apiBase,
           modelId: config.modelId,
+          wireApi: config.wireApi,
+          reasoningDialect: config.reasoningDialect,
         })
     }
   }
@@ -175,6 +199,7 @@ export class LlmService {
     messages: ChatMessage[],
     opts?: ChatOptions,
   ): Promise<ChatCompletion> {
+    consumeCurrentKernelExecution({ llmCalls: 1 })
     const startTime = Date.now()
     const finalOpts = this.mergeOpts(config, opts)
     const span = startLlmSpan({ config, messages, options: finalOpts, streaming: false })
@@ -187,8 +212,13 @@ export class LlmService {
 
       // 追踪 Token 用量
       this.trackUsage(result.usage)
+      this.consumeKernelTokens(result.usage)
 
       const durationMs = Date.now() - startTime
+      performanceLatencySeconds.observe(
+        { metric: 'llm_provider_total', provider: config.provider },
+        durationMs / 1000,
+      )
       logger.debug(`LLM chat 完成`, {
         model: config.modelId,
         durationMs,
@@ -218,6 +248,7 @@ export class LlmService {
     messages: ChatMessage[],
     opts?: ChatOptions,
   ): AsyncIterable<ChatDelta> {
+    consumeCurrentKernelExecution({ llmCalls: 1 })
     const startTime = Date.now()
     const finalOpts = this.mergeOpts(config, opts)
     const span = startLlmSpan({ config, messages, options: finalOpts, streaming: true })
@@ -237,7 +268,13 @@ export class LlmService {
             if (delta.usage) lastUsage = delta.usage
             const content = delta.choices.map((choice) => choice.delta.content ?? '').join('')
             if (content) {
-              if (!visibleDeltaProduced) firstTokenMs = Date.now() - startTime
+              if (!visibleDeltaProduced) {
+                firstTokenMs = Date.now() - startTime
+                performanceLatencySeconds.observe(
+                  { metric: 'llm_first_token', provider: config.provider },
+                  firstTokenMs / 1000,
+                )
+              }
               visibleDeltaProduced = true
               output += content
             }
@@ -261,8 +298,13 @@ export class LlmService {
     } finally {
       // 追踪 Token 用量
       this.trackUsage(lastUsage)
+      this.consumeKernelTokens(lastUsage)
 
       const durationMs = Date.now() - startTime
+      performanceLatencySeconds.observe(
+        { metric: 'llm_provider_stream_total', provider: config.provider },
+        durationMs / 1000,
+      )
       logger.debug(`LLM chatStream 完成`, {
         model: config.modelId,
         durationMs,
@@ -276,6 +318,37 @@ export class LlmService {
         firstTokenMs,
         error: streamError,
       })
+    }
+  }
+
+  /** 按模型配置选择Provider流式或非流式调用，并统一输出Delta。 */
+  async *chatConfigured(
+    config: ModelConfig,
+    messages: ChatMessage[],
+    opts?: ChatOptions,
+  ): AsyncIterable<ChatDelta> {
+    if (config.stream !== false) {
+      yield* this.chatStream(config, messages, opts)
+      return
+    }
+    const completion = await this.chat(config, messages, opts)
+    yield {
+      choices: completion.choices.map((choice) => ({
+        delta: {
+          role: choice.message.role,
+          content: choice.message.content ?? undefined,
+          reasoningContent: choice.message.reasoningContent,
+          nativeReasoning: choice.message.nativeReasoning,
+          toolCalls: choice.message.toolCalls?.map((call, index) => ({
+            index,
+            id: call.id,
+            type: call.type,
+            function: call.function,
+          })),
+        },
+        finishReason: choice.finishReason,
+      })),
+      usage: completion.usage,
     }
   }
 
@@ -328,7 +401,16 @@ export class LlmService {
       topP: opts?.topP ?? config.topP,
       maxTokens: opts?.maxTokens ?? config.maxTokens,
       reasoningEffort: opts?.reasoningEffort ?? config.reasoningEffort,
+      returnNativeReasoning: opts?.returnNativeReasoning ?? config.returnNativeReasoning,
     }
+  }
+
+  private consumeKernelTokens(usage?: UsageInfo): void {
+    if (!usage) return
+    consumeCurrentKernelExecution({
+      inputTokens: usage.promptTokens,
+      outputTokens: usage.completionTokens,
+    })
   }
 
   /**

@@ -1,6 +1,0 @@
-[submodule "packages/native/render-core"]
-	path = packages/native/render-core
-	# 设计约定：render-core 是仅供本机开发与构建使用的私有嵌套仓库，刻意不配置远程，也不单独推送。
-	# 发布前应先在该目录提交源码/生成绑定，再由主仓库记录新的 gitlink；不得要求配置子仓库 remote。
-	# 平台相关 *.node 构建产物由本机构建生成，不纳入子仓库提交。
-	url = file://C:/Users/Administrator/OneDrive/桌面/workspace/infOS/packages/native/render-core

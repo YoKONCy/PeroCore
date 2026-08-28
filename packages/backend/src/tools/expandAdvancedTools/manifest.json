@@ -1,0 +1,23 @@
+{
+  "id": "expand-advanced-tools",
+  "name": "高级工具列表",
+  "version": "1.0.0",
+  "author": "infOS Team",
+  "description": "在当前ReAct运行中展开浏览器、Computer Use 与远程能力节点终端工具包。",
+  "type": "tool",
+  "entry": "index.ts",
+  "category": "system",
+  "platforms": ["windows", "linux", "darwin"],
+  "toolDefinition": {
+    "name": "expand_advanced_tools",
+    "description": "展开当前任务可用的高级工具包。当任务需要操作内置浏览器、使用鼠标键盘执行 Computer Use，或操作已配对 GPU/Linux 能力节点的远程终端时调用。调用后，相关工具会从下一轮开始出现，并持续到本次ReAct结束。此工具不会授予新权限。",
+    "display": {
+      "label": "展开高级工具列表",
+      "description": "在当前任务中启用浏览器、Computer Use 和远程节点终端功能。",
+      "icon": "tool",
+      "color": "purple",
+      "style": "system"
+    },
+    "parameters": { "type": "object", "properties": {} }
+  }
+}

@@ -17,6 +17,8 @@
  * @module packages/backend/src/services/voice/realtimeSessionManager
  */
 
+import type { KernelExecutionId } from '@infos/shared'
+import type { KernelScheduledExecutionContext, KernelScheduler } from '../../kernel/kernelScheduler'
 import type { TtsService, TtsResult } from './ttsService'
 import type { AsrService, AsrResult } from './asrService'
 import type { AgentService } from '../agent/agentService'
@@ -85,6 +87,7 @@ export interface RealtimeSessionDeps {
   // AIOS: 新增 Thread + ContextCompiler 依赖，替代旧 SessionService
   threadService: ThreadService
   conversationTurnService: ConversationTurnService
+  kernelScheduler: KernelScheduler
 }
 
 // ── Service ──
@@ -110,11 +113,45 @@ export class RealtimeSessionManager {
     sessionId: string,
     config?: VoiceSessionConfig,
   ): Promise<VoicePipelineResult> {
+    let result: VoicePipelineResult | undefined
+    const terminal = await this.deps.kernelScheduler.submitAndWait({
+      principalId: agentId,
+      taskId: `voice:${sessionId}`,
+      class: 'realtime',
+      priority: 10,
+      resourceKey: `voice:${sessionId}`,
+      budget: {
+        maxDurationMs: (config?.timeoutSec ?? 120) * 1_000,
+        maxLlmCalls: 12,
+        maxToolCalls: 24,
+        maxConcurrentIo: 2,
+      },
+      run: async (scheduled) => {
+        result = await this.runVoicePipeline(audioData, agentId, sessionId, scheduled, config)
+      },
+    })
+    if (terminal.state !== 'completed' || !result) {
+      throw new Error(`VOICE_EXECUTION_${terminal.state.toUpperCase()}`)
+    }
+    return result
+  }
+
+  private async runVoicePipeline(
+    audioData: ArrayBuffer,
+    agentId: string,
+    sessionId: string,
+    scheduled: KernelScheduledExecutionContext,
+    config?: VoiceSessionConfig,
+  ): Promise<VoicePipelineResult> {
     const startMs = Date.now()
     const enableFilter = config?.enableReActFilter !== false
 
     // 注册活跃会话
-    const session: ActiveVoiceSession = { state: 'listening', startedAt: startMs }
+    const session: ActiveVoiceSession = {
+      state: 'listening',
+      startedAt: startMs,
+      executionId: scheduled.descriptor.executionId,
+    }
     this.activeSessions.set(sessionId, session)
 
     try {
@@ -123,7 +160,13 @@ export class RealtimeSessionManager {
       session.state = 'recognizing'
 
       const asrStartMs = Date.now()
-      const asrResult = await this.runAsr(audioData, config?.language)
+      const endAsrIo = scheduled.beginIo()
+      let asrResult: AsrResult
+      try {
+        asrResult = await this.runAsr(audioData, config?.language)
+      } finally {
+        endAsrIo()
+      }
       const asrMs = Date.now() - asrStartMs
 
       logger.info(`ASR 完成: "${asrResult.text}" (${asrMs}ms)`)
@@ -139,7 +182,7 @@ export class RealtimeSessionManager {
       session.state = 'thinking'
 
       const agentStartMs = Date.now()
-      const reply = await this.runAgent(asrResult.text, agentId, sessionId)
+      const reply = await this.runAgent(asrResult.text, agentId, sessionId, scheduled)
       const agentMs = Date.now() - agentStartMs
 
       logger.info(`Agent 回复: "${reply.slice(0, 50)}..." (${agentMs}ms)`)
@@ -157,7 +200,12 @@ export class RealtimeSessionManager {
       if (ttsText.trim()) {
         const ttsStartMs = Date.now()
         const voiceParams = detectVoiceParams(ttsText)
-        audio = await this.runTts(ttsText, config?.voice, voiceParams)
+        const endTtsIo = scheduled.beginIo()
+        try {
+          audio = await this.runTts(ttsText, config?.voice, voiceParams)
+        } finally {
+          endTtsIo()
+        }
         ttsMs = Date.now() - ttsStartMs
         logger.info(`TTS 完成: ${ttsMs}ms`)
       }
@@ -202,8 +250,8 @@ export class RealtimeSessionManager {
     if (!session) return false
 
     session.state = 'idle'
-    this.activeSessions.delete(sessionId)
-    logger.info(`语音会话已取消: ${sessionId}`)
+    void this.deps.kernelScheduler.cancel(session.executionId)
+    logger.info(`语音会话取消请求已提交: ${sessionId}`)
     return true
   }
 
@@ -224,7 +272,12 @@ export class RealtimeSessionManager {
    * 4. AgentService 执行对话（chatWithCompiledMessages）
    * 5. 追加 assistant 回复
    */
-  private async runAgent(text: string, agentId: string, sessionId: string): Promise<string> {
+  private async runAgent(
+    text: string,
+    agentId: string,
+    sessionId: string,
+    scheduled: KernelScheduledExecutionContext,
+  ): Promise<string> {
     const threadId = sessionId
 
     // 获取或创建 Thread（语音复用 sessionId 作为 threadId）
@@ -242,6 +295,10 @@ export class RealtimeSessionManager {
       threadId,
       agentId,
       content: text,
+      signal: scheduled.signal,
+      execution: scheduled.descriptor,
+      onUsage: scheduled.consume,
+      beginIo: scheduled.beginIo,
     })
 
     return result.reply
@@ -275,6 +332,7 @@ export class RealtimeSessionManager {
 interface ActiveVoiceSession {
   state: SessionState
   startedAt: number
+  executionId: KernelExecutionId
 }
 
 // ── ReAct 文本清洗 ──

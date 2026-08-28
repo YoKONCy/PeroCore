@@ -1,711 +1,390 @@
 <script setup lang="ts">
 /**
- * MemoriesTab — 核心记忆 Tab (F1-2)
+ * MemoriesTab — 核心记忆 Tab
  *
- * 记忆节点列表 + 搜索 + 类型筛选 + 日期筛选 + 情感标记
- * + 图谱视图 (vue-echarts) + 详情弹窗 + 维护操作
- *
- * 图谱 / 日期 / 情感三大 UI 增强
+ * 档案工作台布局：统计头 + 过滤工作台 + (列表|图谱) × 常驻详情检查器。
+ * 数据全部走后端 archiveQuery / graphSnapshot，前端不做全量拉取。
  */
-import { computed, watch, onMounted } from 'vue'
-import { PixelIcon, PInput, PButton, PSelect, PDialog, PEmpty, PCard } from '../../pixel'
-import StoryImportDialog from '../StoryImportDialog.vue'
-import PDatePicker from '../../pixel/PDatePicker.vue'
-import { useMemories } from '../../../composables/dashboard/useMemories'
+import { computed, onMounted, watch } from 'vue'
+import type { EventNote } from '@infos/shared'
+import { PixelIcon, PButton, PCard } from '../../pixel'
 import { useDashboardContext } from '../../../composables/dashboard'
-import { useAgentStore } from '../../../stores'
-import { getApiBaseUrl } from '../../../api/transport'
-import { VChart } from '../../../lib/echarts'
-import type { ComposeOption } from 'echarts/core'
-import type { GraphSeriesOption } from 'echarts/charts'
-import type {
-  TitleComponentOption,
-  TooltipComponentOption,
-  LegendComponentOption,
-} from 'echarts/components'
+import { useMemoryArchive } from '../../../composables/dashboard/useMemoryArchive'
+import { useNotificationStore } from '../../../stores/useNotificationStore'
+import { useAgentStore } from '../../../stores/useAgentStore'
+import MemoryFilterBar from '../memories/MemoryFilterBar.vue'
+import MemoryList from '../memories/MemoryList.vue'
+import MemoryInspector from '../memories/MemoryInspector.vue'
+import MemoryGraphView from '../memories/MemoryGraphView.vue'
 
-type EChartsOption = ComposeOption<
-  GraphSeriesOption | TitleComponentOption | TooltipComponentOption | LegendComponentOption
->
-
-const {
-  searchQuery,
-  filterType,
-  filterDate,
-  typeOptions,
-  typeLabels,
-  typeColors,
-  filteredMemories,
-  stats,
-  selectedMemory,
-  isDetailOpen,
-  openDetail,
-  deleteMemory,
-  formatDate,
-  // 视图模式
-  viewMode,
-  graphData,
-  isLoadingGraph,
-  fetchGraph,
-  // 情感
-  getSentimentEmoji,
-  getSentimentLabel,
-  getSentimentColor,
-  // 标签 + 维护
-  selectedTags,
-  topTags,
-  toggleTag,
-  isRunningMaintenance,
-  isScanningLonely,
-  triggerMaintenance,
-  triggerScanLonely,
-  triggerReindex,
-  // 故事导入
-  isImportOpen,
-  // 操作
-  fetchMemories,
-} = useMemories()
-
-// ══════ DashboardContext 接入 ══════
 const ctx = useDashboardContext()
+const notif = useNotificationStore()
+const agentStore = useAgentStore()
+const view = ref<'list' | 'graph'>('list')
 
-// 监听全局刷新
+const archive = useMemoryArchive(
+  () => ctx.activeAgentId.value || 'pero',
+  () => agentStore.enabledAgents.map((agent) => agent.id),
+)
+const agentOptions = computed(() => [
+  { label: '全部角色', value: 'all' },
+  ...agentStore.enabledAgents.map((agent) => ({ label: agent.name || agent.id, value: agent.id })),
+])
+
+const graphIncludeArchived = computed(() => archive.status.value !== 'active')
+
+async function loadArchive(): Promise<void> {
+  try {
+    await archive.fetchArchive()
+  } catch (error) {
+    notif.toast('记忆档案加载失败：' + (error as Error).message, 'error')
+  }
+}
+
+async function loadGraph(): Promise<void> {
+  await archive.fetchGraph(graphIncludeArchived.value)
+}
+
+/** 搜索防抖 */
+let searchTimer: ReturnType<typeof setTimeout> | undefined
 watch(
-  () => ctx.refreshKey.value,
-  () => fetchMemories(),
+  () => archive.searchQuery.value,
+  () => {
+    clearTimeout(searchTimer)
+    searchTimer = setTimeout(loadArchive, 300)
+  },
 )
 
-// ── 当前激活角色 ──
-const agentStore = useAgentStore()
-const activeAgentName = computed(() => {
-  return agentStore.currentAgent?.name || ctx.activeAgentId.value || '未知'
+/** 除搜索外的全部过滤 + 分页变化 → 立即重载 */
+watch(
+  () => [
+    archive.agent.value,
+    archive.channel.value,
+    archive.status.value,
+    archive.mode.value,
+    archive.importanceMin.value,
+    archive.importanceMax.value,
+    archive.tones.value,
+    archive.participants.value,
+    archive.places.value,
+    archive.objects.value,
+    archive.topics.value,
+    archive.eventAtFrom.value,
+    archive.eventAtTo.value,
+    archive.createdAtFrom.value,
+    archive.createdAtTo.value,
+    archive.sort.value,
+    archive.order.value,
+    archive.page.value,
+  ],
+  loadArchive,
+)
+
+/** 角色或全局刷新 → 列表与图谱一起重置 */
+watch(
+  () => [ctx.activeAgentId.value, ctx.refreshKey.value],
+  () => {
+    archive.clearFilters()
+    archive.page.value = 1
+    void loadArchive()
+    if (view.value === 'graph') void loadGraph()
+  },
+)
+
+watch(
+  () => [archive.agent.value, archive.status.value],
+  () => {
+    if (view.value === 'graph') void loadGraph()
+  },
+)
+
+watch(view, (next) => {
+  if (next === 'graph' && !archive.graph.value.nodes.length) void loadGraph()
 })
 
-onMounted(() => {
-  if (!agentStore.agents.length) agentStore.fetchAgents()
-})
+onMounted(loadArchive)
 
-function importanceDots(n: number): string {
-  const filled = Math.min(n, 10)
-  return '★'.repeat(Math.round(filled / 2)) + '☆'.repeat(5 - Math.round(filled / 2))
+function onSelectNote(note: EventNote): void {
+  void archive.selectNote(note)
 }
 
-/** 切换视图模式 */
-function switchView(mode: 'list' | 'graph') {
-  viewMode.value = mode
-  if (mode === 'graph') fetchGraph()
-}
-
-/** 日期变更 → 重新请求 */
-watch(filterDate, () => {
-  fetchMemories()
-})
-
-// ── ECharts 图谱配置 ──
-
-const chartOption = computed<EChartsOption>(() => {
-  const raw = graphData.value
-  if (!raw.nodes.length) return {}
-
-  const nodes = (raw.nodes as Array<Record<string, unknown>>).map((node) => ({
-    id: String(node.id),
-    name: String(node.id),
-    value: Number(node.value ?? 5),
-    category: String(node.category ?? 'event'),
-    symbolSize: Math.min(Math.max(Number(node.value ?? 5) * 5, 15), 40),
-    itemStyle: {
-      color: getSentimentColor(node.sentiment as string),
-      borderColor: 'var(--color-bg-primary)',
-      borderWidth: 2,
-      shadowBlur: 12,
-      shadowColor: getSentimentColor(node.sentiment as string),
-    },
-    label: {
-      show: Number(node.value ?? 0) > 5,
-      fontSize: 10,
-      color: 'var(--ui-text-tertiary)',
-    },
-    tooltip: {
-      formatter: () => {
-        const content = String(node.full_content ?? '').substring(0, 80)
-        return `<div style="max-width:260px;padding:4px;">
-          <div style="font-weight:800;margin-bottom:4px;font-size:13px;">记忆 #${node.id}</div>
-          <div style="font-size:12px;color:var(--ui-text-secondary);line-height:1.5;">${content}${content.length >= 80 ? '...' : ''}</div>
-        </div>`
-      },
-    },
-  }))
-
-  const links = (raw.edges as Array<Record<string, unknown>>).map((edge) => ({
-    source: String(edge.source),
-    target: String(edge.target),
-    value: Number(edge.value ?? 1),
-    lineStyle: {
-      width: Math.max(Number(edge.value ?? 1) * 0.8, 1),
-      curveness: 0.2,
-      color: 'var(--color-border)',
-    },
-  }))
-
-  const categories = [...new Set(nodes.map((n) => n.category))].map((c) => ({ name: c }))
-
-  return {
-    backgroundColor: 'transparent',
-    title: {
-      text: '✨ 核心记忆星云',
-      subtext: 'Core Memory Nebula',
-      top: '3%',
-      left: 'center',
-      textStyle: { color: 'var(--color-sky-500)', fontSize: 16, fontWeight: 'bolder' },
-      subtextStyle: { color: 'var(--color-text-muted)', fontSize: 10 },
-    },
-    tooltip: {
-      trigger: 'item',
-      backgroundColor: 'var(--color-bg-primary)',
-      borderColor: 'var(--color-border)',
-      borderWidth: 1,
-      textStyle: { color: 'var(--color-text-primary)', fontSize: 12 },
-      extraCssText: 'box-shadow:var(--ui-shadow-md);',
-    },
-    legend: {
-      data: categories.map((c) => c.name),
-      bottom: '3%',
-      left: 'center',
-      icon: 'circle',
-      itemWidth: 8,
-      itemHeight: 8,
-      textStyle: { color: 'var(--color-text-muted)', fontSize: 10 },
-    },
-    series: [
-      {
-        type: 'graph',
-        layout: 'force',
-        data: nodes,
-        links,
-        categories,
-        roam: true,
-        draggable: true,
-        label: {
-          show: true,
-          position: 'bottom',
-          formatter: '{b}',
-          color: 'var(--color-text-muted)',
-          fontSize: 9,
-        },
-        force: {
-          repulsion: 250,
-          gravity: 0.08,
-          edgeLength: [60, 150],
-          layoutAnimation: true,
-          friction: 0.6,
-        },
-        emphasis: {
-          focus: 'adjacency' as const,
-          scale: true,
-        },
-      },
-    ],
-  } as EChartsOption
-})
+const statBadges = computed(() => [
+  { label: '活跃', value: archive.stats.value.active, tone: 'sky' },
+  { label: '归档', value: archive.stats.value.archived, tone: 'slate' },
+  { label: '平均重要度', value: archive.stats.value.averageImportance, tone: 'violet' },
+  { label: '主题', value: archive.stats.value.topicCount, tone: 'emerald' },
+])
 </script>
 
 <template>
-  <div class="p-8 h-full flex flex-col overflow-hidden">
-    <div class="mb-4 flex-shrink-0 relative group/header">
-      <!-- 背景氛围光晕 -->
-      <div
-        class="absolute -right-20 -top-10 w-40 h-40 bg-pink-400/5 blur-[60px] rounded-full pointer-events-none group-hover/header:bg-pink-400/15 transition-all duration-1000"
-      />
-      <h2 class="flex items-center gap-3 text-2xl font-black text-slate-800 font-pixel">
-        <span
-          class="group-hover/header:scale-110 group-hover/header:rotate-6 transition-transform duration-500"
-        >
-          <PixelIcon name="brain" size="md" />
-        </span>
-        <span>核心记忆</span>
-        <span class="text-sm font-bold text-sky-500 bg-sky-50 px-2.5 py-0.5 pixel-border-sm">
-          {{ stats.total }}
-        </span>
-        <span class="opacity-0 group-hover/header:opacity-100 transition-opacity duration-500">
-          <PixelIcon name="sparkle" size="xs" />
-        </span>
+  <div class="memories-page">
+    <!-- 档案头 -->
+    <header class="archive-head">
+      <div class="archive-title-wrap">
+        <h2 class="archive-title font-pixel">
+          <PixelIcon name="brain" size="md" class="archive-title-icon" />
+          核心记忆
+        </h2>
+        <p class="archive-subtitle">长期记忆档案 · LONG-TERM MEMORY ARCHIVE</p>
+      </div>
 
-        <!-- 当前角色头像徽标 -->
-        <div class="ml-auto flex items-center">
-          <div
-            class="relative flex items-center gap-2 px-3 py-1.5 bg-sky-50/60 pixel-border-sky group/avatar cursor-default hover:bg-sky-50 transition-all"
-          >
-            <div
-              class="w-8 h-8 pixel-border-sky overflow-hidden flex items-center justify-center bg-sky-100 group-hover/avatar:scale-110 transition-transform"
-            >
-              <img
-                v-if="agentStore.currentAgent?.avatarUrl"
-                :src="`${getApiBaseUrl()}${agentStore.currentAgent.avatarUrl}`"
-                :alt="activeAgentName"
-                class="w-full h-full object-cover"
-              />
-              <PixelIcon v-else name="cat" size="sm" class="text-sky-500" />
-            </div>
-            <span
-              class="text-sm font-bold text-sky-600 group-hover/avatar:text-sky-700 transition-colors"
-            >
-              {{ activeAgentName }}
-            </span>
-            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-sm" />
-          </div>
+      <div class="archive-stats">
+        <div
+          v-for="badge in statBadges"
+          :key="badge.label"
+          :class="['stat-badge', `stat-${badge.tone}`]"
+        >
+          <span class="stat-value font-pixel">{{ badge.value }}</span>
+          <span class="stat-label">{{ badge.label }}</span>
         </div>
-      </h2>
-      <p
-        class="text-[10px] font-bold uppercase tracking-[0.15em] text-slate-400 mt-1 ml-9 font-pixel"
-      >
-        CORE MEMORIES
-      </p>
-    </div>
+      </div>
 
-    <!-- 统计小卡片 -->
-    <div class="flex gap-3 mb-4 flex-shrink-0">
-      <PCard
-        pixel
-        hoverable
-        padding="sm"
-        class="flex-1 flex flex-col items-center cursor-pointer"
-        @click="filterType = filterType === 'core' ? 'all' : 'core'"
-      >
-        <span class="text-xl font-black text-slate-800 font-pixel">{{ stats.core }}</span>
-        <span class="text-[10px] font-bold text-slate-400 uppercase font-pixel">核心</span>
-      </PCard>
-      <PCard
-        pixel
-        hoverable
-        padding="sm"
-        class="flex-1 flex flex-col items-center cursor-pointer"
-        @click="filterType = filterType === 'episodic' ? 'all' : 'episodic'"
-      >
-        <span class="text-xl font-black text-[var(--ui-text-primary)] font-pixel">
-          {{ stats.episodic }}
-        </span>
-        <span class="text-[10px] font-bold text-slate-400 uppercase font-pixel">情景</span>
-      </PCard>
-      <PCard
-        pixel
-        hoverable
-        padding="sm"
-        class="flex-1 flex flex-col items-center cursor-pointer"
-        @click="filterType = filterType === 'diary' ? 'all' : 'diary'"
-      >
-        <span class="text-xl font-black text-slate-800 font-pixel">{{ stats.diary }}</span>
-        <span class="text-[10px] font-bold text-slate-400 uppercase font-pixel">日记</span>
-      </PCard>
-      <PCard
-        pixel
-        hoverable
-        padding="sm"
-        class="flex-1 flex flex-col items-center cursor-pointer"
-        @click="filterType = filterType === 'reflection' ? 'all' : 'reflection'"
-      >
-        <span class="text-xl font-black text-slate-800 font-pixel">{{ stats.reflection }}</span>
-        <span class="text-[10px] font-bold text-slate-400 uppercase font-pixel">反思</span>
-      </PCard>
-    </div>
-
-    <!-- 工具栏 -->
-    <div class="flex gap-2 mb-4 items-center flex-wrap flex-shrink-0">
-      <PInput
-        v-model="searchQuery"
-        placeholder="搜索记忆内容 / 标签..."
-        class="flex-1 min-w-[180px] max-w-[300px]"
-      />
-      <PSelect v-model="filterType" :options="typeOptions" class="w-[140px]" />
-      <PDatePicker v-model="filterDate" placeholder="日期筛选" class="w-[150px]" />
-
-      <!-- 视图切换 -->
-      <div class="flex border-2 border-[var(--ui-border-default)] overflow-hidden">
-        <button
-          :class="[
-            'flex items-center justify-center w-9 h-8 bg-[var(--dash-panel-bg)] text-[var(--ui-text-tertiary)] border-none cursor-pointer transition-all hover:bg-[var(--ui-bg-hover)] hover:text-[var(--ui-accent-sky)]',
-            viewMode === 'list' ? 'bg-[var(--ui-accent-sky-soft)] text-[var(--ui-accent-sky)]' : '',
-          ]"
-          title="列表视图"
-          @click="switchView('list')"
-        >
+      <div class="archive-view-switch">
+        <PButton size="sm" :variant="view === 'list' ? 'primary' : 'ghost'" @click="view = 'list'">
           <PixelIcon name="list" size="xs" />
-        </button>
-        <button
-          :class="[
-            'flex items-center justify-center w-9 h-8 bg-[var(--dash-panel-bg)] text-[var(--ui-text-tertiary)] border-none border-l border-[var(--ui-border-default)] cursor-pointer transition-all hover:bg-[var(--ui-bg-hover)] hover:text-[var(--ui-accent-sky)]',
-            viewMode === 'graph'
-              ? 'bg-[var(--ui-accent-sky-soft)] text-[var(--ui-accent-sky)]'
-              : '',
-          ]"
-          title="图谱视图"
-          @click="switchView('graph')"
-        >
-          <PixelIcon name="chart" size="xs" />
-        </button>
-      </div>
-
-      <PButton variant="primary" @click="isImportOpen = true">导入故事</PButton>
-    </div>
-
-    <!-- 维护操作栏 -->
-    <div class="flex gap-1.5 mb-3 flex-wrap flex-shrink-0">
-      <PButton variant="ghost" size="sm" :disabled="isScanningLonely" @click="triggerScanLonely">
-        <PixelIcon name="search" size="xs" />
-        <span>扫描孤立</span>
-      </PButton>
-      <PButton
-        variant="ghost"
-        size="sm"
-        :disabled="isRunningMaintenance"
-        @click="triggerMaintenance"
-      >
-        <PixelIcon name="settings" size="xs" />
-        <span>维护 / 梦境</span>
-      </PButton>
-      <PButton variant="ghost" size="sm" @click="triggerReindex">
-        <PixelIcon name="refresh" size="xs" />
-        <span>重建索引</span>
-      </PButton>
-    </div>
-
-    <!-- 热门标签 -->
-    <div
-      v-if="topTags.length > 0"
-      class="flex gap-1.5 items-center mb-3 overflow-x-auto flex-shrink-0"
-    >
-      <span class="text-[10px] font-bold text-slate-400 whitespace-nowrap uppercase font-pixel">
-        热门标签:
-      </span>
-      <button
-        v-for="{ tag, count } in topTags"
-        :key="tag"
-        :class="[
-          'text-[10px] font-bold text-slate-400 px-2 py-0.5 border border-slate-200 bg-slate-50 cursor-pointer transition-all whitespace-nowrap hover:border-sky-300 hover:text-sky-500',
-          selectedTags.includes(tag) ? 'bg-sky-50 border-sky-300 text-sky-600' : '',
-        ]"
-        @click="toggleTag(tag)"
-      >
-        #{{ tag }}
-        <span v-if="count > 1" class="text-[9px] opacity-50 ml-0.5">({{ count }})</span>
-      </button>
-    </div>
-
-    <!-- ═══ 列表模式 ═══ -->
-    <template v-if="viewMode === 'list'">
-      <div v-if="filteredMemories.length === 0" class="flex-1 flex items-center justify-center">
-        <PEmpty description="没有匹配的记忆节点" />
-      </div>
-      <div v-else class="flex-1 overflow-y-auto flex flex-col gap-2 mem-scrollbar">
-        <PCard
-          v-for="mem in filteredMemories"
-          :key="mem.id"
-          pixel
-          hoverable
-          padding="sm"
-          class="cursor-pointer flex flex-col gap-2"
-          @click="openDetail(mem)"
-        >
-          <div class="flex justify-between items-center">
-            <div class="flex gap-1.5 items-center flex-wrap">
-              <span :class="['text-[10px] font-bold px-2 py-0.5', typeColors[mem.type]]">
-                {{ typeLabels[mem.type] }}
-              </span>
-              <!-- 情感标记 -->
-              <span
-                v-if="mem.sentiment && mem.sentiment !== 'neutral'"
-                class="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold border bg-slate-50 sentiment-glow"
-                :style="{ borderColor: getSentimentColor(mem.sentiment) }"
-              >
-                <PixelIcon
-                  :name="getSentimentEmoji(mem.sentiment)"
-                  size="xs"
-                  :style="{ color: getSentimentColor(mem.sentiment) }"
-                />
-                <span :style="{ color: getSentimentColor(mem.sentiment) }">
-                  {{ getSentimentLabel(mem.sentiment) }}
-                </span>
-              </span>
-            </div>
-            <span class="text-xs text-yellow-500 tracking-widest">
-              {{ importanceDots(mem.importance) }}
-            </span>
-          </div>
-          <p class="text-[13px] text-slate-500 leading-relaxed line-clamp-2">{{ mem.content }}</p>
-          <div class="flex justify-between items-center">
-            <div class="flex gap-1 flex-wrap">
-              <span
-                v-for="tag in mem.tags.slice(0, 3)"
-                :key="tag"
-                class="text-[10px] font-bold text-slate-400 px-1.5 py-0.5 bg-slate-50 border border-slate-200"
-              >
-                #{{ tag }}
-              </span>
-              <span
-                v-if="mem.tags.length > 3"
-                class="text-[10px] font-bold text-[var(--ui-accent-sky)] px-1.5 py-0.5 bg-[var(--dash-panel-soft)] border border-[var(--ui-border-default)]"
-              >
-                +{{ mem.tags.length - 3 }}
-              </span>
-            </div>
-            <span class="text-[10px] text-slate-400 whitespace-nowrap font-pixel">
-              {{ formatDate(mem.createdAt) }}
-            </span>
-          </div>
-        </PCard>
-      </div>
-    </template>
-
-    <!-- ═══ 图谱模式 ═══ -->
-    <template v-else>
-      <div
-        v-if="isLoadingGraph"
-        class="flex-1 flex flex-col items-center justify-center gap-3 text-slate-400 text-sm"
-      >
-        <PixelIcon name="loader" size="md" />
-        <span class="font-pixel">加载图谱中...</span>
-      </div>
-      <div v-else-if="graphData.nodes.length === 0" class="flex-1 flex items-center justify-center">
-        <PEmpty description="暂无关联数据或数据量过少" />
-      </div>
-      <div v-else class="flex-1 flex gap-3 overflow-hidden">
-        <!-- 图谱画布 -->
-        <PCard
-          pixel
-          padding="none"
-          class="flex-1 border-2 border-[var(--dash-panel-border)] bg-[var(--dash-panel-soft)] overflow-hidden relative"
-        >
-          <VChart :option="chartOption" autoresize class="w-full h-full min-h-[400px]" />
-        </PCard>
-
-        <!-- 图例面板 -->
-        <PCard pixel padding="sm" class="w-56 flex-shrink-0 overflow-y-auto flex flex-col gap-4">
-          <h4 class="flex items-center gap-1.5 text-[13px] font-black text-slate-800 font-pixel">
-            <PixelIcon name="chart" size="xs" />
-            图谱图例
-          </h4>
-
-          <div class="flex flex-col gap-1">
-            <div class="flex items-center gap-1.5">
-              <span class="w-2 h-2 rounded-full bg-sky-400 legend-pulse" />
-              <span class="text-[11px] font-bold text-slate-500">节点 (Node)</span>
-            </div>
-            <p class="text-[10px] text-slate-400 leading-relaxed">
-              代表独立的记忆片段。颜色代表情感，大小代表重要度。
-            </p>
-          </div>
-
-          <div class="flex flex-col gap-1">
-            <div class="flex items-center gap-1.5">
-              <span class="w-5 h-0.5 bg-sky-300" />
-              <span class="text-[11px] font-bold text-slate-500">连线 (Edge)</span>
-            </div>
-            <p class="text-[10px] text-slate-400 leading-relaxed">
-              代表记忆之间的逻辑关联。线越粗关联越强。
-            </p>
-          </div>
-
-          <div class="flex flex-col gap-1">
-            <span class="text-[11px] font-bold text-slate-500">情感 (Sentiment)</span>
-            <div class="flex gap-1 flex-wrap mt-1">
-              <span
-                class="text-[10px] font-bold px-2 py-0.5 border bg-sky-400/15 text-sky-400 border-sky-400/30"
-              >
-                正面 😊
-              </span>
-              <span
-                class="text-[10px] font-bold px-2 py-0.5 border bg-rose-400/15 text-rose-400 border-rose-400/30"
-              >
-                负面 😟
-              </span>
-              <span
-                class="text-[10px] font-bold px-2 py-0.5 border bg-slate-400/15 text-slate-400 border-slate-400/30"
-              >
-                中性 😐
-              </span>
-            </div>
-          </div>
-
-          <div class="pt-3 border-t border-slate-200 flex flex-col gap-1">
-            <div class="flex justify-between text-[10px] text-slate-400">
-              <span>当前节点</span>
-              <span class="font-bold text-slate-500 tabular-nums">
-                {{ graphData.nodes.length }}
-              </span>
-            </div>
-            <div class="flex justify-between text-[10px] text-slate-400">
-              <span>当前连线</span>
-              <span class="font-bold text-slate-500 tabular-nums">
-                {{ graphData.edges.length }}
-              </span>
-            </div>
-          </div>
-        </PCard>
-      </div>
-    </template>
-
-    <!-- 详情弹窗 -->
-    <PDialog v-model="isDetailOpen" title="记忆详情" width="520px">
-      <template v-if="selectedMemory">
-        <div class="mem-dialog-body flex flex-col gap-4">
-          <div class="flex items-center gap-3 flex-wrap">
-            <span :class="['text-[10px] font-bold px-2 py-0.5', typeColors[selectedMemory.type]]">
-              {{ typeLabels[selectedMemory.type] }}
-            </span>
-            <span class="text-xs text-yellow-500 tracking-widest">
-              重要度: {{ selectedMemory.importance }}/10
-            </span>
-            <span
-              v-if="selectedMemory.sentiment && selectedMemory.sentiment !== 'neutral'"
-              class="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold border bg-slate-50"
-              :style="{ borderColor: getSentimentColor(selectedMemory.sentiment) }"
-            >
-              <PixelIcon
-                :name="getSentimentEmoji(selectedMemory.sentiment)"
-                size="xs"
-                :style="{ color: getSentimentColor(selectedMemory.sentiment) }"
-              />
-              <span :style="{ color: getSentimentColor(selectedMemory.sentiment) }">
-                {{ getSentimentLabel(selectedMemory.sentiment) }}
-              </span>
-            </span>
-          </div>
-          <p class="text-sm leading-loose text-slate-800 p-4 bg-slate-50 border border-slate-200">
-            {{ selectedMemory.content }}
-          </p>
-          <div class="flex flex-col gap-2">
-            <div class="flex items-center gap-2">
-              <span class="text-[11px] font-bold text-slate-400 min-w-[60px] font-pixel">来源</span>
-              <span class="text-xs text-slate-500">{{ selectedMemory.source }}</span>
-            </div>
-            <div class="flex items-center gap-2">
-              <span class="text-[11px] font-bold text-slate-400 min-w-[60px] font-pixel">
-                创建时间
-              </span>
-              <span class="text-xs text-slate-500">{{ formatDate(selectedMemory.createdAt) }}</span>
-            </div>
-            <div class="flex items-center gap-2">
-              <span class="text-[11px] font-bold text-slate-400 min-w-[60px] font-pixel">标签</span>
-              <div class="flex gap-1 flex-wrap">
-                <span
-                  v-for="tag in selectedMemory.tags"
-                  :key="tag"
-                  class="text-[10px] font-bold text-slate-400 px-1.5 py-0.5 bg-slate-50 border border-slate-200"
-                >
-                  #{{ tag }}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </template>
-      <template #footer>
-        <PButton variant="ghost" @click="isDetailOpen = false">关闭</PButton>
-        <PButton variant="danger" @click="deleteMemory(selectedMemory!.id)">
-          <PixelIcon name="trash" size="xs" />
-          删除
+          档案列表
         </PButton>
-      </template>
-    </PDialog>
+        <PButton
+          size="sm"
+          :variant="view === 'graph' ? 'primary' : 'ghost'"
+          @click="view = 'graph'"
+        >
+          <PixelIcon name="link" size="xs" />
+          关系图谱
+        </PButton>
+      </div>
+    </header>
 
-    <!-- 共享故事导入弹窗：与总览页使用同一表现和后端导入链路 -->
-    <StoryImportDialog
-      v-model="isImportOpen"
-      :agent-id="ctx.activeAgentId.value || 'pero'"
-      @imported="fetchMemories"
-    />
+    <!-- 过滤工作台 -->
+    <PCard pixel padding="sm" overflow-visible class="archive-filter-card">
+      <MemoryFilterBar
+        v-model:search-query="archive.searchQuery.value"
+        v-model:agent="archive.agent.value"
+        v-model:channel="archive.channel.value"
+        v-model:status="archive.status.value"
+        v-model:mode="archive.mode.value"
+        v-model:importance-min="archive.importanceMin.value"
+        v-model:importance-max="archive.importanceMax.value"
+        v-model:tones="archive.tones.value"
+        v-model:participants="archive.participants.value"
+        v-model:places="archive.places.value"
+        v-model:objects="archive.objects.value"
+        v-model:topics="archive.topics.value"
+        v-model:event-at-from="archive.eventAtFrom.value"
+        v-model:event-at-to="archive.eventAtTo.value"
+        v-model:created-at-from="archive.createdAtFrom.value"
+        v-model:created-at-to="archive.createdAtTo.value"
+        v-model:sort="archive.sort.value"
+        v-model:order="archive.order.value"
+        :facets="archive.facets.value"
+        :agent-options="agentOptions"
+        :chips="archive.chips.value"
+        :total="archive.total.value"
+        :is-loading="archive.isLoading.value"
+        @refresh="loadArchive"
+        @clear="archive.clearFilters()"
+      />
+    </PCard>
+
+    <!-- 主区域：左内容 + 右检查器 -->
+    <div class="archive-main">
+      <div class="archive-content">
+        <MemoryList
+          v-if="view === 'list'"
+          :items="archive.items.value"
+          :selected-id="archive.selectedId.value"
+          :is-loading="archive.isLoading.value"
+          :page="archive.page.value"
+          :page-count="archive.pageCount.value"
+          :page-size="archive.pageSize.value"
+          :total="archive.total.value"
+          @select="onSelectNote"
+          @page="archive.goToPage"
+        />
+        <MemoryGraphView
+          v-else
+          :nodes="archive.graph.value.nodes"
+          :edges="archive.graph.value.edges"
+          :selected-id="archive.selectedId.value"
+          :loading="archive.graphLoading.value"
+          :error="archive.graphError.value"
+          :truncated="archive.graph.value.truncated"
+          @select="onSelectNote"
+        />
+      </div>
+
+      <aside class="archive-inspector">
+        <MemoryInspector
+          :selected="archive.selected.value"
+          :detail-loading="archive.detailLoading.value"
+          :detail-error="archive.detailError.value"
+          :source="archive.source.value"
+          :source-loading="archive.sourceLoading.value"
+          :source-error="archive.sourceError.value"
+          @load-source="archive.loadSource"
+          @select="onSelectNote"
+        />
+      </aside>
+    </div>
   </div>
 </template>
 
+<script lang="ts">
+import { ref } from 'vue'
+export default { name: 'MemoriesTab' }
+</script>
+
 <style scoped>
-/* 弹窗内容（Teleport 到 body）语义兜底，双主题兼容 */
-.mem-dialog-body :is(.text-slate-800, .text-slate-700, .text-slate-600) {
+.memories-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  padding: 24px;
+  gap: 14px;
+  overflow: hidden;
   color: var(--ui-text-primary);
 }
-.mem-dialog-body :is(.text-slate-500, .text-slate-400) {
-  color: var(--ui-text-secondary);
-}
-.mem-dialog-body [class*='bg-slate-'] {
-  background: var(--dash-panel-soft);
-}
-.mem-dialog-body [class*='border-slate-'] {
-  border-color: var(--ui-border-default);
+
+/* ── 头部 ── */
+.archive-head {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-shrink: 0;
 }
 
-/* 类型 badge 颜色 — 通过 typeColors 动态绑定 */
-.type-core {
-  color: var(--ui-accent-sky);
-  background: var(--ui-accent-sky-soft);
-  border: 1px solid var(--ui-accent-sky);
+.archive-title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
 
-.type-episodic {
-  color: var(--ui-success);
-  background: var(--ui-success-soft);
-  border: 1px solid var(--ui-success);
+.archive-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: 22px;
+  font-weight: 900;
+  color: var(--ui-text-primary);
 }
 
-.type-diary {
-  color: var(--ui-warning);
-  background: var(--ui-warning-soft);
-  border: 1px solid var(--ui-warning);
+.archive-title-icon {
+  color: var(--ui-accent-purple, #8b5cf6);
 }
 
-.type-reflection {
-  color: var(--ui-accent-primary);
-  background: var(--ui-accent-primary-soft);
-  border: 1px solid var(--ui-accent-primary);
+.archive-subtitle {
+  margin: 0 0 0 2px;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--ui-text-tertiary);
 }
 
-/* 情感标记呼吸动画 */
-@keyframes sentiment-glow {
-  0%,
-  100% {
-    opacity: 0.85;
+.archive-stats {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.stat-badge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 64px;
+  padding: 6px 10px;
+  border: 1px solid var(--ui-border-default);
+  background: var(--ui-bg-elevated);
+}
+
+.stat-value {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.stat-label {
+  font-size: 9px;
+  color: var(--ui-text-tertiary);
+}
+
+.stat-sky .stat-value {
+  color: #0284c7;
+}
+.stat-slate .stat-value {
+  color: #64748b;
+}
+.stat-violet .stat-value {
+  color: #7c3aed;
+}
+.stat-emerald .stat-value {
+  color: #059669;
+}
+
+.archive-view-switch {
+  display: flex;
+  gap: 6px;
+}
+
+/* ── 过滤卡片 ── */
+.archive-filter-card {
+  position: relative;
+  z-index: 100;
+  flex-shrink: 0;
+  overflow: visible;
+}
+
+.archive-filter-card :deep(.p-card-body) {
+  overflow: visible;
+}
+
+/* ── 主区域 ── */
+.archive-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 14px;
+  flex: 1;
+  min-height: 0;
+}
+
+.archive-content {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 14px;
+  background: var(--ui-bg-primary);
+  border: 1px solid var(--ui-border-default);
+}
+
+.archive-inspector {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 14px;
+  background: var(--ui-bg-primary);
+  border: 1px solid var(--ui-border-default);
+  border-top: 3px solid var(--ui-accent-purple, #8b5cf6);
+}
+
+@media (max-width: 1100px) {
+  .archive-main {
+    grid-template-columns: 1fr;
   }
-
-  50% {
-    opacity: 1;
+  .archive-inspector {
+    max-height: 320px;
   }
 }
 
-.sentiment-glow {
-  animation: sentiment-glow 3s ease-in-out infinite;
-}
-
-/* 图例节点脉冲 */
-@keyframes legend-pulse {
-  0%,
-  100% {
-    opacity: 0.6;
-    transform: scale(1);
+@media (max-width: 760px) {
+  .memories-page {
+    padding: 14px;
   }
-
-  50% {
-    opacity: 1;
-    transform: scale(1.2);
+  .archive-head {
+    flex-wrap: wrap;
   }
-}
-
-.legend-pulse {
-  animation: legend-pulse 2s ease-in-out infinite;
-}
-
-/* 多行截断 */
-.line-clamp-2 {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  line-clamp: 2;
-  overflow: hidden;
-}
-
-/* 像素风滚动条 */
-.mem-scrollbar::-webkit-scrollbar {
-  width: 4px;
-}
-
-.mem-scrollbar::-webkit-scrollbar-thumb {
-  background: var(--ui-scrollbar-thumb);
-  border-radius: 0;
+  .archive-stats {
+    margin-left: 0;
+  }
 }
 </style>

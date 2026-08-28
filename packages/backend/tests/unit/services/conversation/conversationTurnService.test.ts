@@ -56,12 +56,241 @@ describe('ConversationTurnService 初始提示词快照', () => {
     const saved = appendAssistantMessage.mock.calls[0]![0]
     const metadata = JSON.parse(saved.metadataJson) as {
       initialPromptMessages: typeof initialMessages
+      tokenUsage: { inputTokens: number; outputTokens: number }
     }
     expect(metadata.initialPromptMessages).toEqual(initialMessages)
     expect(metadata.initialPromptMessages.some((message) => message.role === 'tool')).toBe(false)
+    expect(metadata.tokenUsage.inputTokens).toBeGreaterThan(0)
+    expect(metadata.tokenUsage.outputTokens).toBeGreaterThan(0)
   })
 
-  it('拒绝用其他 Agent 身份向普通 Thread 写入消息', async () => {
+  it('应为每次 Turn 建立 Execution，并将同一因果身份传给 assistant 提交', async () => {
+    const descriptor = {
+      executionId: 'execution-1',
+      processId: 'process-1',
+      principalId: 'nana',
+      threadId: 'thread-1',
+      channel: 'desktop',
+      class: 'interactive',
+      priority: 5,
+      budget: {},
+    }
+    const create = vi.fn().mockResolvedValue(descriptor)
+    const start = vi.fn().mockResolvedValue(undefined)
+    const complete = vi.fn().mockResolvedValue(undefined)
+    const appendAssistantMessage = vi.fn().mockResolvedValue({ id: 2 })
+    const service = new ConversationTurnService({
+      threadService: {
+        getThread: vi.fn().mockResolvedValue({
+          id: 'thread-1',
+          agentId: 'nana',
+          channel: 'desktop',
+          disabledTools: [],
+        }),
+        appendUserMessage: vi.fn().mockResolvedValue({ id: 1 }),
+        appendAssistantMessage,
+      },
+      contextCompiler: {
+        compile: vi.fn().mockResolvedValue({
+          messages: [{ role: 'user', content: '执行任务' }],
+          manifest: { disabledTools: [] },
+        }),
+      },
+      agentService: { chatWithCompiledMessages: vi.fn().mockResolvedValue('完成') },
+      attachmentService: { validateForBinding: vi.fn().mockResolvedValue([]) },
+      imageUnderstandingService: { transcribe: vi.fn() },
+      executionRuntime: { create, start, complete, fail: vi.fn() },
+    } as never)
+
+    const result = await service.executeTurn({ threadId: 'thread-1', content: '执行任务' })
+
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        principalId: 'nana',
+        threadId: 'thread-1',
+        channel: 'desktop',
+        class: 'interactive',
+      }),
+    )
+    expect(start).toHaveBeenCalledWith(descriptor)
+    expect(appendAssistantMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ execution: descriptor }),
+    )
+    expect(complete).toHaveBeenCalledWith(descriptor)
+    expect(result.execution).toBe(descriptor)
+  })
+
+  it('Realm任务使用最小上下文且不写入主应用Thread', async () => {
+    const appendUserMessage = vi.fn()
+    const appendAssistantMessage = vi.fn()
+    const compile = vi.fn().mockResolvedValue({
+      messages: [{ role: 'system', content: '最小人格上下文' }],
+      manifest: { disabledTools: [] },
+    })
+    const chatWithCompiledMessages = vi.fn().mockResolvedValue('Realm结果')
+    const service = new ConversationTurnService({
+      threadService: {
+        getThread: vi.fn().mockResolvedValue({
+          id: 'task-thread',
+          agentId: 'pero',
+          channel: 'desktop',
+          disabledTools: [],
+        }),
+        appendUserMessage,
+        appendAssistantMessage,
+      },
+      contextCompiler: { compile },
+      agentService: { chatWithCompiledMessages },
+      attachmentService: { validateForBinding: vi.fn().mockResolvedValue([]) },
+      imageUnderstandingService: { transcribe: vi.fn() },
+    } as never)
+
+    await service.executeTurn({
+      threadId: 'task-thread',
+      content: '编辑文档',
+      realmId: 'infos.arca',
+      inputPersistence: 'ephemeral',
+      outputPersistence: 'ephemeral',
+    })
+
+    expect(compile).toHaveBeenCalledWith(
+      'task-thread',
+      'pero',
+      expect.objectContaining({ realmExecution: true, appendThreadMessages: false }),
+    )
+    expect(chatWithCompiledMessages).toHaveBeenCalledWith(
+      expect.objectContaining({ realmId: 'infos.arca' }),
+    )
+    expect(appendUserMessage).not.toHaveBeenCalled()
+    expect(appendAssistantMessage).not.toHaveBeenCalled()
+  })
+
+  it('回复成功持久化后才提交事件记忆草稿', async () => {
+    const order: string[] = []
+    const commit = vi.fn().mockImplementation(async () => {
+      order.push('commit')
+    })
+    const service = new ConversationTurnService({
+      threadService: {
+        getThread: vi.fn().mockResolvedValue({
+          id: 'thread-1',
+          agentId: 'nana',
+          channel: 'desktop',
+          disabledTools: [],
+        }),
+        appendUserMessage: vi.fn().mockResolvedValue({ id: 1 }),
+        appendAssistantMessage: vi.fn().mockImplementation(async () => {
+          order.push('persist')
+          return { id: 2, timestamp: '2026-08-27T12:00:00.000Z' }
+        }),
+      },
+      contextCompiler: {
+        compile: vi.fn().mockResolvedValue({
+          messages: [{ role: 'user', content: '记住这件事' }],
+          manifest: { disabledTools: [] },
+        }),
+      },
+      agentService: {
+        chatWithCompiledMessages: vi.fn().mockImplementation(async (params) => {
+          params.onToolCalls?.([
+            {
+              name: 'write_event_note',
+              args: { narrative: '我记住了这件事' },
+              result: '已接受',
+              durationMs: 1,
+              isError: false,
+              callId: 'call-memory',
+            },
+          ])
+          return '好的'
+        }),
+      },
+      attachmentService: { validateForBinding: vi.fn().mockResolvedValue([]) },
+      imageUnderstandingService: { transcribe: vi.fn() },
+      eventNoteDraftCommitter: { commit },
+    } as never)
+
+    await service.executeTurn({ threadId: 'thread-1', content: '记住这件事' })
+
+    expect(order).toEqual(['persist', 'commit'])
+    expect(commit).toHaveBeenCalledWith(expect.objectContaining({ assistantMessageId: 2 }))
+  })
+
+  it('回复持久化失败或临时回合时不提交事件记忆草稿', async () => {
+    const commit = vi.fn()
+    const common = {
+      threadService: {
+        getThread: vi.fn().mockResolvedValue({
+          id: 'thread-1',
+          agentId: 'nana',
+          channel: 'desktop',
+          disabledTools: [],
+        }),
+        appendUserMessage: vi.fn().mockResolvedValue({ id: 1 }),
+        appendAssistantMessage: vi.fn().mockRejectedValue(new Error('写入失败')),
+      },
+      contextCompiler: {
+        compile: vi.fn().mockResolvedValue({
+          messages: [{ role: 'user', content: '内容' }],
+          manifest: { disabledTools: [] },
+        }),
+      },
+      agentService: { chatWithCompiledMessages: vi.fn().mockResolvedValue('回复') },
+      attachmentService: { validateForBinding: vi.fn().mockResolvedValue([]) },
+      imageUnderstandingService: { transcribe: vi.fn() },
+      eventNoteDraftCommitter: { commit },
+    }
+    const failed = new ConversationTurnService(common as never)
+    await expect(failed.executeTurn({ threadId: 'thread-1', content: '内容' })).rejects.toThrow(
+      '写入失败',
+    )
+    expect(commit).not.toHaveBeenCalled()
+
+    const ephemeral = new ConversationTurnService({
+      ...common,
+      threadService: { ...common.threadService, appendAssistantMessage: vi.fn() },
+    } as never)
+    await ephemeral.executeTurn({
+      threadId: 'thread-1',
+      content: '内容',
+      inputPersistence: 'ephemeral',
+      outputPersistence: 'ephemeral',
+    })
+    expect(commit).not.toHaveBeenCalled()
+  })
+
+  it('仅在持久化回复后按Pair提交反馈，且反馈失败不影响回复', async () => {
+    const feedback = vi.fn().mockRejectedValue(new Error('反馈训练失败'))
+    const service = new ConversationTurnService({
+      threadService: {
+        getThread: vi.fn().mockResolvedValue({
+          id: 'thread-1',
+          agentId: 'nana',
+          channel: 'desktop',
+          disabledTools: [],
+        }),
+        appendUserMessage: vi.fn().mockResolvedValue({ id: 1 }),
+        appendAssistantMessage: vi.fn().mockResolvedValue({ id: 2 }),
+      },
+      contextCompiler: {
+        compile: vi.fn().mockResolvedValue({
+          messages: [{ role: 'user', content: '调用记忆' }],
+          manifest: { disabledTools: [] },
+        }),
+      },
+      agentService: { chatWithCompiledMessages: vi.fn().mockResolvedValue('已使用记忆') },
+      attachmentService: { validateForBinding: vi.fn().mockResolvedValue([]) },
+      imageUnderstandingService: { transcribe: vi.fn() },
+      retrievalFeedback: { applyRetrievalFeedback: feedback },
+    } as never)
+
+    const result = await service.executeTurn({ threadId: 'thread-1', content: '调用记忆' })
+
+    expect(result.reply).toBe('已使用记忆')
+    expect(feedback).toHaveBeenCalledWith(result.pairId, '已使用记忆')
+  })
+
+  it('拒绝用其他Agent身份向普通Thread写入消息', async () => {
     const appendUserMessage = vi.fn()
     const service = new ConversationTurnService({
       threadService: {

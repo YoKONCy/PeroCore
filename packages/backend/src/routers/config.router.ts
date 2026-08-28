@@ -15,11 +15,13 @@
  */
 
 import { Hono } from 'hono'
-import { zValidator } from '@hono/zod-validator'
+import { validate as zValidator } from '../lib/validation'
 import { setConfigSchema, batchGetConfigSchema } from '../schemas/config.schema'
 import { z } from 'zod'
 import type { AppContext } from '../container'
 import { createLogger, setLogLevel, parseLogLevel } from '../lib/logger'
+import { AppError } from '../lib/appError'
+import { EmbeddingService } from '../services/embedding/embeddingService'
 
 const logger = createLogger('ConfigRouter')
 
@@ -68,6 +70,20 @@ const batchSetConfigSchema = z.object({
     .max(100),
 })
 
+const activateEmbeddingSchema = z.object({
+  provider: z.literal('api'),
+  model: z.string().trim().min(1),
+  dimension: z.number().int().min(1).max(4096),
+  apiBase: z.string().trim().optional(),
+  apiKey: z.string().trim().optional(),
+  reranker: z.object({
+    enabled: z.boolean(),
+    model: z.string().trim().optional(),
+    apiBase: z.string().trim().optional(),
+    apiKey: z.string().trim().optional(),
+  }),
+})
+
 const importConfigSchema = z.object({
   data: z.record(z.string()),
   /** 是否覆盖已有 key (默认 true) */
@@ -83,6 +99,63 @@ const importConfigSchema = z.object({
  */
 export function createConfigRouter(ctx: AppContext) {
   const router = new Hono()
+
+  // POST /api/configs/embedding/activate — 真实验证候选Embedding配置，成功后才持久化。
+  router.post('/embedding/activate', zValidator('json', activateEmbeddingSchema), async (c) => {
+    const input = c.req.valid('json')
+    const current = ctx.embeddingService.getConfig()
+    const apiBase = input.apiBase || current.apiBase
+    const apiKey = input.apiKey || current.apiKey
+    if (!apiBase) throw new AppError('CONFIG_ERROR', { message: 'Embedding API Base 不能为空' })
+    if (!apiKey) throw new AppError('CONFIG_ERROR', { message: 'Embedding API Key 不能为空' })
+
+    const candidate = new EmbeddingService({
+      apiBase,
+      apiKey,
+      model: input.model,
+      dimension: input.dimension,
+      reranker: current.reranker,
+    })
+    const startedAt = performance.now()
+    const vector = await candidate.embedOne('infOS Embedding 模型激活与维度校验')
+    const durationMs = Math.max(0, Math.round(performance.now() - startedAt))
+    if (!vector.length) {
+      throw new AppError('EMBEDDING_ERROR', { message: 'Embedding 模型返回了空向量' })
+    }
+    if (vector.some((value) => !Number.isFinite(value))) {
+      throw new AppError('EMBEDDING_ERROR', { message: 'Embedding 模型返回了非法数值' })
+    }
+    if (vector.length !== input.dimension) {
+      throw new AppError('EMBEDDING_ERROR', {
+        message: `Embedding 维度不匹配：配置 ${input.dimension} 维，实际返回 ${vector.length} 维`,
+        data: { expectedDimension: input.dimension, actualDimension: vector.length, durationMs },
+      })
+    }
+
+    const items = [
+      ['embedding.provider', input.provider],
+      ['embedding.model', input.model],
+      ['embedding.dimension', String(input.dimension)],
+      ['reranker.enabled', String(input.reranker.enabled)],
+    ] as const
+    for (const [key, value] of items) await ctx.configRepo.set(key, value)
+    if (input.apiBase) await ctx.configRepo.set('embedding.apiBase', input.apiBase)
+    if (input.apiKey) await ctx.configRepo.set('embedding.apiKey', input.apiKey)
+    if (input.reranker.model) await ctx.configRepo.set('reranker.model', input.reranker.model)
+    if (input.reranker.apiBase) await ctx.configRepo.set('reranker.apiBase', input.reranker.apiBase)
+    if (input.reranker.apiKey) await ctx.configRepo.set('reranker.apiKey', input.reranker.apiKey)
+    await ctx.reloadEmbeddingConfig()
+
+    return c.json({
+      code: 'OK',
+      message: 'Embedding 模型已激活并保存',
+      data: {
+        model: input.model,
+        dimension: vector.length,
+        durationMs,
+      },
+    })
+  })
 
   // GET /api/configs — 列出所有配置 (B6-3)
   router.get('/', async (c) => {

@@ -17,6 +17,7 @@ import type {
 } from '../../api/modules/mcpApi'
 import { useNotificationStore } from '../../stores/useNotificationStore'
 import { logger } from '../../lib/logger'
+import { invoke, isElectron } from '../../utils/ipcAdapter'
 
 // ── 运行时类型 ──
 
@@ -337,9 +338,31 @@ export function useMcpConfig() {
 
   const isImportOpen = ref(false)
   const importPath = ref('')
+  const importName = ref('')
   const importError = ref('')
 
-  /** 导入本地 Skill 文件夹 */
+  /** 打开客户端资源浏览器选择 Skill 文件夹 */
+  async function selectSkillDirectory() {
+    importError.value = ''
+    if (!isElectron()) {
+      importError.value = '本地文件夹导入仅支持 Electron 客户端'
+      return
+    }
+    try {
+      const result = (await invoke('select-skill-directory')) as {
+        canceled?: boolean
+        path?: string
+        name?: string
+      } | null
+      if (!result || result.canceled || !result.path) return
+      importPath.value = result.path
+      importName.value = result.name || result.path.split(/[\\/]/).filter(Boolean).at(-1) || ''
+    } catch (err) {
+      importError.value = (err as Error).message || '选择 Skill 文件夹失败'
+    }
+  }
+
+  /** 导入客户端选中的 Skill 文件夹 */
   async function importSkill() {
     const sourcePath = importPath.value.trim()
     if (!sourcePath) return
@@ -415,7 +438,9 @@ export function useMcpConfig() {
     // Skill 导入/删除
     isImportOpen,
     importPath,
+    importName,
     importError,
+    selectSkillDirectory,
     importSkill,
     deleteSkill,
   }

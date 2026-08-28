@@ -12,7 +12,13 @@
   "toolDefinition": {
     "name": "web_fetch",
     "description": "获取网页的文本内容。用于快速阅读文章、查看文档、获取静态页面信息。",
-    "display": { "label": "抓取网页", "icon": "globe", "color": "sky", "style": "web" },
+    "display": {
+      "label": "读取网页",
+      "description": "读取指定网页的主要文字内容。",
+      "icon": "globe",
+      "color": "sky",
+      "style": "web"
+    },
     "parameters": {
       "type": "object",
       "properties": {

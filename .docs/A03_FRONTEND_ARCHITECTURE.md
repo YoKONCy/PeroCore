@@ -2,7 +2,7 @@
 
 > **适用范围**：`packages/frontend/` 全部代码
 > **技术栈**：Vue 3 + Vite + Pinia + TailwindCSS 4 + logic composables
-> **最后更新**：2026-04-22
+> **最后更新**：2026-08-19
 
 ---
 
@@ -42,7 +42,7 @@
 
 ## 3. 性能优化 (P0 级别)
 
-> 本规范继承自 infOS 审计及 VCPChat 优化经验。
+> 本规范基于 infOS 现有渲染审计和流式性能优化经验。
 
 ### 3.1 `<keep-alive>` 白名单
 
@@ -274,6 +274,50 @@ const Pet3DView = () => import('@/views/Pet3DView.vue') // 3D 组件必须异步
 - 切换 Agent 必须连带选择/创建属于该 Agent 的 Thread，禁止交叉组合。
 - group 日志按据点 `roomId` 聚合展示；按 Agent 划分的 group Thread 仅服务后端隔离上下文，不能作为用户可见的房间分组。
 - SSE 必须以显式 `done` 判定成功结束，工具事件通过 `callId` 关联。
+
+---
+
+## 8. Surface Protocol与Compositor
+
+### 8.1 权威边界
+
+Surface是领域事实的语义视觉投影，不是业务真相。后端持有业务事实、Execution状态、Projection与可恢复的最终Surface Commit；客户端Compositor持有窗口级Surface Tree、布局、可见性、动画、输入焦点与Stable Block/Active Tail。Renderer崩溃、DOM销毁或窗口关闭不得改变权威状态，断线后必须可由领域事实和Projection Snapshot重建。
+
+Internal Surface Protocol仅供infOS系统组件、Projection、Shell与Compositor使用。第三方Application通过第二层Frontend Adapter接入Tab、任务、会话、状态和授权UI；未受信任的远程内容只能使用External Presentation Protocol或隔离WebView/iframe，不得向主Renderer提交Vue组件、HTML、JavaScript或DOM Patch。Frontend Adapter只能通过类型化IPC访问自己的Backend Adapter，不持有远程Credential、Kernel Service或任意本地端口权限。
+
+### 8.2 语义节点与操作
+
+核心节点包括`text`、`markdown`、`code`、`tool-call`、`tool-result`、`status`、`approval`、`progress`、`image`、`chart`、`document`与`app`。节点必须具有稳定`nodeId`和递增`revision`。
+
+协议操作固定为：
+
+```text
+create_surface
+attach_node
+patch_node
+replace_range
+commit_surface
+freeze_surface
+resume_surface
+destroy_surface
+```
+
+聊天HTML始终作为源码展示；可执行内容只能进入独立沙箱Surface。流式Frame不进入持久日志，网络delta只做帧合并，不得人为拆词减速。
+
+### 8.3 Compositor职责
+
+- 管理Surface Tree、Revision和稳定Node ID；
+- 将Surface安排到聊天、窗口、通知、桌宠或任务中心；
+- 路由键盘、鼠标、触控和辅助功能输入；
+- 根据可见性冻结动画、Canvas、视频与重型组件；
+- 支持增量Commit、回放、重连和最终权威渲染；
+- 阻止不可信内容越过沙箱与Presentation边界。
+
+流式渲染采用稳定区与活动尾部：已完成复杂子树保持稳定身份，快速流与最终完整渲染分离；Mermaid、KaTeX、代码和工具卡拥有独立生命周期。非当前视图继续推进Projection，但停止无意义DOM更新。
+
+### 8.4 性能与UX不变量
+
+必须监测首Surface时间、流式帧率、最长主线程阻塞、长消息DOM变更量、不可见Surface CPU/GPU占用和重连恢复成功率。工具卡、审批卡和复杂节点在流式过程中不得闪烁或丢失展开状态；未收到`commit/done`的流必须标记为截断，不能伪装成功。
 
 ---
 

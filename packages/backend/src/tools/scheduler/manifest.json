@@ -8,6 +8,11 @@
   "entry": "index.ts",
   "category": "core",
   "platforms": ["windows", "linux", "darwin", "docker"],
+  "userCopy": {
+    "set_reminder": { "label": "创建提醒", "description": "按指定时间创建提醒。" },
+    "list_reminders": { "label": "查看提醒", "description": "查看当前已有的提醒。" },
+    "cancel_reminder": { "label": "取消提醒", "description": "删除不再需要的提醒。" }
+  },
   "tools": [
     {
       "name": "set_reminder",

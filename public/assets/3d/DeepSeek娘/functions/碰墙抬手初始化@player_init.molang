@@ -1,0 +1,5 @@
+v.n = true;
+v.s = true;
+v.w = true;
+v.e = true;
+v.twoBlocks = true;

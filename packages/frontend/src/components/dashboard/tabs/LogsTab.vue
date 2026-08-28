@@ -43,8 +43,10 @@ interface LogMessage {
   agentId?: string | null
   /** Agent 回复的原始内容（含调试块），仅 assistant 可能有值。 */
   rawContent?: string | null
-  /** 包含进入 ReAct 前的初始提示词快照。 */
+  /** 包含进入 ReAct 前的初始提示词快照与 Token 使用量。 */
   metadataJson?: string
+  /** Assistant 可见输出的总 Token。 */
+  outputTokens?: number
   timestamp?: string
 }
 
@@ -248,14 +250,14 @@ async function toggleExpand(id: string): Promise<void> {
     try {
       let roomMessages: LogMessage[] | undefined
       if (log.roomId) {
-        const response = await strongholdApi.getMessages(log.roomId, 100)
+        const response = await strongholdApi.getProjection(log.roomId, 100)
         roomMessages =
-          response.data?.map((message) => ({
-            id: String(message.id),
+          response.data?.messages.map((message) => ({
+            id: message.messageId,
             role: message.role,
             content: message.content,
             agentId: message.senderId,
-            timestamp: message.timestamp,
+            timestamp: message.timestamp ?? undefined,
           })) ?? []
       }
 
@@ -446,6 +448,15 @@ async function handleDeletePair(log: LogEntry, id: string) {
             : item,
         )
         window.dispatchEvent(
+          new CustomEvent('infos:conversation-rewound', {
+            detail: {
+              threadId: log.threadId,
+              deletedMessageIds: result.deletedMessageIds.map(String),
+              projection: result.projection,
+            },
+          }),
+        )
+        window.dispatchEvent(
           new CustomEvent('infos:workspace-rewound', {
             detail: { threadId: log.threadId, files: result.preview.files },
           }),
@@ -492,6 +503,17 @@ function getInitialPromptMessages(msg: LogMessage): InitialPromptMessage[] {
   }
 }
 
+function getInputTokenCount(msg: LogMessage): number | undefined {
+  if (!msg.metadataJson) return undefined
+  try {
+    const parsed = JSON.parse(msg.metadataJson) as { tokenUsage?: { inputTokens?: unknown } }
+    const value = parsed.tokenUsage?.inputTokens
+    return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+  } catch {
+    return undefined
+  }
+}
+
 function formatPromptContent(content: unknown): string {
   if (typeof content === 'string') return content
   if (content === null || content === undefined) return ''
@@ -515,8 +537,15 @@ function handleConversationCompleted(): void {
   void fetchSessions()
 }
 
+function handleConversationRewound(event: Event): void {
+  const detail = (event as CustomEvent<{ threadId?: string }>).detail
+  if (!detail?.threadId) return
+  void fetchSessions()
+}
+
 onMounted(async () => {
   window.addEventListener('infos:conversation-completed', handleConversationCompleted)
+  window.addEventListener('infos:conversation-rewound', handleConversationRewound)
   // Dashboard 窗口可能独立于 Launcher 打开，需要先拿到完整 Agent 列表再渲染筛选项和显示名
   if (!agentStore.agents.length) await agentStore.fetchAgents()
   await fetchSessions()
@@ -524,6 +553,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener('infos:conversation-completed', handleConversationCompleted)
+  window.removeEventListener('infos:conversation-rewound', handleConversationRewound)
 })
 </script>
 
@@ -872,6 +902,12 @@ onUnmounted(() => {
                     <span v-if="msg.timestamp" class="opacity-40 font-mono text-[9px]">
                       {{ formatMsgTime(msg.timestamp) }}
                     </span>
+                    <span
+                      v-if="msg.role !== 'user' && msg.outputTokens !== undefined"
+                      class="opacity-50 font-mono text-[9px]"
+                    >
+                      {{ msg.outputTokens.toLocaleString('zh-CN') }} Token
+                    </span>
                   </div>
 
                   <!-- 气泡主体 -->
@@ -1015,6 +1051,12 @@ onUnmounted(() => {
             "
           >
             {{ currentDebugMsg.role }}
+          </span>
+        </div>
+        <div v-if="debugViewMode === 'prompt'" class="flex items-center gap-1.5">
+          <span class="opacity-50 uppercase">输入 Token:</span>
+          <span class="font-bold font-mono">
+            {{ getInputTokenCount(currentDebugMsg)?.toLocaleString('zh-CN') ?? '历史记录无统计' }}
           </span>
         </div>
         <div class="flex items-center gap-1.5 ml-auto">

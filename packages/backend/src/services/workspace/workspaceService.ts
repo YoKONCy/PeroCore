@@ -20,11 +20,13 @@ import {
   readFileSync,
   writeFileSync,
   statSync,
+  lstatSync,
   existsSync,
   mkdirSync,
   readdirSync,
   realpathSync,
   appendFileSync,
+  rmSync,
 } from 'node:fs'
 import type { PathResolver } from '../../core/pathResolver'
 import { createLogger } from '../../lib/logger'
@@ -187,6 +189,14 @@ export interface WorkspaceService {
     content: string,
     channel: string,
     options?: WriteOptions,
+  ): Promise<void>
+
+  /** 删除普通文件；不递归删除目录。 */
+  deleteFile(
+    agentId: string,
+    filePath: string,
+    channel: string,
+    options?: { deviceScope?: boolean },
   ): Promise<void>
 
   /** 列出目录 */
@@ -395,6 +405,26 @@ export class LocalWorkspaceService implements WorkspaceService {
     } else {
       writeFileSync(check.resolvedPath, content, 'utf-8')
     }
+  }
+
+  async deleteFile(
+    agentId: string,
+    filePath: string,
+    channel: string,
+    options?: { deviceScope?: boolean },
+  ): Promise<void> {
+    const check = options?.deviceScope
+      ? { allowed: true, resolvedPath: this.resolveDeviceReadPath(agentId, filePath) }
+      : this.validatePath(agentId, filePath, 'write', channel)
+    if (!check.allowed) throw new Error(check.reason)
+    if (!existsSync(check.resolvedPath)) throw new Error(`文件不存在: ${filePath}`)
+    const lexicalStat = lstatSync(check.resolvedPath)
+    if (lexicalStat.isSymbolicLink()) throw new Error(`不允许删除符号链接或 Junction: ${filePath}`)
+
+    const actual = realpathSync(check.resolvedPath)
+    const stat = statSync(actual)
+    if (!stat.isFile()) throw new Error(`路径不是普通文件: ${filePath}`)
+    rmSync(actual)
   }
 
   async list(

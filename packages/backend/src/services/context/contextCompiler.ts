@@ -31,21 +31,34 @@
  * @module packages/backend/src/services/context/contextCompiler
  */
 
+import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
+import type {
+  ContextRegion,
+  ContextRegionKind,
+  ContextRegionManifestEntry,
+  ContextRegionTrust,
+  KernelObjectId,
+} from '@infos/shared'
+import { ContextRegionRegistry, ContextRegionSelector } from './contextRegionRuntime'
 import { hostname, platform, arch, release, uptime, totalmem } from 'node:os'
 import type { ThreadService, ThreadMessageInfo } from '../thread/threadService'
 import type { AgentManager } from '../agent/agentManager'
 import type { ConfigRepository } from '../../repositories/config.repo'
 import type { FlowStateService } from '../flow/flowStateService'
-import type { MemoryProvider, MemorySearchResultItem } from '../memory/memoryProvider'
-import { loadMemoryRuntimeConfig } from '../memory/memoryRuntimeConfig'
+import { AutomaticRagStageError, type EventMemoryService } from '../memory/eventMemoryService'
+import type { EventNote } from '@infos/shared'
+import { loadMemoryRuntimeConfig, shouldRunAutoRag } from '../memory/memoryRuntimeConfig'
 import type { ThreadChannel } from '../../repositories/thread.repo'
 import type { CapabilityScope } from '../../capabilities/types'
+import { isAdvancedTool } from '../../tools/advancedTools'
 import { SYSTEM_PROTOCOL_TOOLS, isSystemProtocolTool } from '../../tools/systemProtocolTools'
 import type { MdpEngine, RenderedMessage } from '../prompt/mdpEngine'
 import type { CapabilityGate } from '../../capabilities/capabilityGate'
 import type { ContentPart } from '../llm/types'
 import { createLogger } from '../../lib/logger'
+import { AppError } from '../../lib/appError'
+import { tokenCounter } from '../tokenizer/tokenCounter'
 
 const logger = createLogger('ContextCompiler')
 
@@ -71,6 +84,14 @@ export interface ChannelPolicy {
   enableStateInjection: boolean
   /** Token 预算（0 = 不限制） */
   tokenBudget: number
+  /** 是否允许派生Observer State进入上下文；默认关闭。 */
+  enableObserver: boolean
+  /** 是否加入同一 Agent 的其他 conversation Thread 连续上下文。 */
+  enableContinuity: boolean
+  /** Continuity 最多读取的消息数。 */
+  continuityMessages: number
+  /** Continuity 时间范围（小时）。 */
+  continuityHours: number
 }
 
 /**
@@ -111,6 +132,10 @@ export interface ContextManifest {
   disabledTools: string[]
   /** 是否注入状态 */
   hasStateInjection: boolean
+  /** Region 选择和淘汰清单。 */
+  regions: ContextRegionManifestEntry[]
+  /** Region 预算使用量（粗估 Token）。 */
+  regionTokenUsage: number
   /** 编译时间 */
   compiledAt: string
 }
@@ -132,26 +157,27 @@ export const DEFAULT_POLICIES: Record<ThreadChannel, ChannelPolicy> = {
     enableToolDescriptions: true,
     enableStateInjection: true,
     tokenBudget: 0,
+    enableObserver: false,
+    enableContinuity: true,
+    continuityMessages: 12,
+    continuityHours: 72,
   },
-  social: {
-    messageWindow: 30,
-    enableMemoryRetrieval: false,
-    enableToolDescriptions: false,
-    enableStateInjection: false,
-    tokenBudget: 0,
-  },
-  // group 是 infOS 据点内部多 Agent 群聊，读取主 Agent 记忆并使用据点工具与运行状态。
+  // group是infOS主应用Stronghold内部多Agent群聊。
   group: {
     messageWindow: 30,
     enableMemoryRetrieval: true,
     enableToolDescriptions: true,
     enableStateInjection: true,
     tokenBudget: 0,
+    enableObserver: false,
+    enableContinuity: true,
+    continuityMessages: 12,
+    continuityHours: 72,
   },
 }
 
 // ─────────────────────────────────────────────
-// 静态环境信息（启动时采集一次）
+//静态环境信息（启动时采集一次）
 // ─────────────────────────────────────────────
 
 /** 平台名称映射 */
@@ -202,6 +228,14 @@ function collectEnvironmentInfo(): string {
   ].join('\n')
 }
 
+function escapeConversationXml(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+function escapeConversationXmlAttribute(value: string): string {
+  return escapeConversationXml(value).replace(/"/g, '&quot;').replace(/'/g, '&apos;')
+}
+
 const STATIC_ENV_INFO = collectEnvironmentInfo()
 
 // ─────────────────────────────────────────────
@@ -212,8 +246,18 @@ const STATIC_ENV_INFO = collectEnvironmentInfo()
 export interface ContextCompileOptions {
   retrievalQuery?: string
   appendThreadMessages?: boolean
+  /** 当前触发轮次；该pair只保留user原生API消息，不进入XML历史。 */
+  currentPairId?: string
+  /** 请求级关闭跨Thread连续性；用于已有独立视角状态机的场景。 */
+  disableContinuity?: boolean
+  /** Realm执行使用最小主应用上下文，不继承Desktop历史、记忆、心流或Continuity。 */
+  realmExecution?: boolean
   /** 请求级能力作用域；只能收窄当前 Channel 的能力。 */
   capabilityScope?: CapabilityScope
+  /** 自动 RAG 各阶段的真实进度，只用于当前请求的实时界面。 */
+  onRagProgress?: (
+    progress: import('../memory/eventMemoryService').AutomaticRagProgress,
+  ) => void | Promise<void>
 }
 
 export class ContextCompiler {
@@ -221,14 +265,22 @@ export class ContextCompiler {
     private threadService: ThreadService,
     private agentManager: AgentManager,
     private configRepo: ConfigRepository,
-    private memoryProvider: MemoryProvider,
     /** MdpEngine 模板引擎，用于渲染 slots 槽位模板 */
     private mdpEngine: MdpEngine,
     /** CapabilityGate 能力门控：解析 (Agent, Channel) → 能力上下文，填充工具描述/Skill 菜单/能力片段 */
     private capabilityGate: CapabilityGate,
     /** 当前 Thread 中该 Agent 的私有临时心流。 */
     private flowStateService: FlowStateService,
+    /** 可插拔只读 Region Provider；缺省时保持既有编译行为。 */
+    private regionRegistry?: ContextRegionRegistry,
+    private regionSelector = new ContextRegionSelector(),
   ) {}
+
+  setEventMemoryService(service: EventMemoryService): void {
+    this.eventMemory = service
+  }
+
+  private eventMemory?: EventMemoryService
 
   /**
    * 编译上下文
@@ -251,19 +303,17 @@ export class ContextCompiler {
     // ── 1. 获取 Thread 信息 + Channel 策略 ──
     const thread = await this.threadService.getThread(threadId)
     if (!thread) {
-      throw new Error(`Thread 不存在: ${threadId}`)
+      throw new AppError('NOT_FOUND', { message: `Thread 不存在: ${threadId}` })
     }
 
+    if (String(thread.channel) === 'social') {
+      throw new AppError('FORBIDDEN', {
+        message: 'social channel必须通过 SocialAppRuntime 处理，禁止进入主 Agent ContextCompiler',
+      })
+    }
     const channel = thread.channel as ThreadChannel
 
-    // 外部平台社交必须由 SocialAppRuntime 独立编译，禁止静默退回主 Agent 上下文策略。
-    if (channel === 'social') {
-      throw new Error(
-        `Thread ${threadId} 属于 social channel，必须通过 SocialAppRuntime 处理，禁止进入 ContextCompiler`,
-      )
-    }
-
-    // Thread 自定义策略优先；未配置时使用总览页维护的全局 Channel 默认值。
+    // Thread自定义策略优先；未配置时使用全局Channel默认值。
     const memoryRuntimeConfig = await loadMemoryRuntimeConfig(this.configRepo)
     const channelMemoryConfig = memoryRuntimeConfig.channels[channel]
     const fallbackPolicy = {
@@ -272,11 +322,30 @@ export class ContextCompiler {
         channelMemoryConfig?.contextPairs ??
         (DEFAULT_POLICIES[channel] ?? DEFAULT_POLICIES.desktop).messageWindow,
     }
-    const policy = this.resolvePolicy(thread.contextPolicy, fallbackPolicy)
+    const policy = options.realmExecution
+      ? {
+          ...fallbackPolicy,
+          messageWindow: 0,
+          enableMemoryRetrieval: false,
+          enableToolDescriptions: false,
+          enableStateInjection: false,
+          tokenBudget: 0,
+          enableObserver: false,
+          enableContinuity: false,
+          continuityMessages: 0,
+          continuityHours: 0,
+        }
+      : this.resolvePolicy(thread.contextPolicy, fallbackPolicy)
 
     // ── 2. 加载活跃消息（短上下文窗口） ──
     // 按完整 pair 读取最近对话轮次，避免消息行 limit 截断用户/助手半轮。
     const messages = await this.threadService.getActiveMessagePairs(threadId, policy.messageWindow)
+    const currentMessage = this.resolveCurrentUserMessage(messages, options.currentPairId)
+    const historyMessages = currentMessage
+      ? messages.filter((message) => message.id !== currentMessage.id)
+      : messages
+    const ownerName = (await this.configRepo.get('owner.name')) ?? '用户'
+    const conversationHistory = this.formatConversationHistory(historyMessages, ownerName, agentId)
 
     // ── 3. 提取最后一条 user 消息作为检索查询 ──
     const lastUserMessage = options.retrievalQuery?.trim() || this.extractLastUserMessage(messages)
@@ -284,10 +353,42 @@ export class ContextCompiler {
     // ── 4. [可选] RAG 记忆检索 → memory_context 字符串 ──
     let memoryContext = ''
     let memoryHitCount = 0
-    if (policy.enableMemoryRetrieval && lastUserMessage) {
-      const results = await this.retrieveMemory(lastUserMessage, agentId, channel)
-      memoryContext = this.formatMemoryResults(results)
-      memoryHitCount = results.length
+    if (shouldRunAutoRag(policy.enableMemoryRetrieval, channelMemoryConfig) && lastUserMessage) {
+      try {
+        const eventNotes = this.eventMemory
+          ? await this.eventMemory.automaticRag(
+              agentId,
+              lastUserMessage,
+              channelMemoryConfig?.retrievalLimit ?? 10,
+              channel,
+              options.currentPairId,
+              options.onRagProgress,
+            )
+          : []
+        if (eventNotes.length) {
+          memoryContext = this.formatEventNotes(eventNotes)
+          memoryHitCount = eventNotes.length
+        }
+      } catch (error) {
+        const failureKind = error instanceof AutomaticRagStageError ? error.failureKind : 'rag'
+        const message =
+          failureKind === 'embedding'
+            ? 'Embedding 生成失败，已跳过记忆检索并继续对话'
+            : 'RAG 检索失败，已跳过记忆注入并继续对话'
+        logger.warn(`${message}: ${error instanceof Error ? error.message : String(error)}`)
+        try {
+          await options.onRagProgress?.({
+            stage: failureKind === 'embedding' ? 'embedding' : 'retrieval',
+            status: 'failed',
+            failureKind,
+            message,
+          })
+        } catch (progressError) {
+          logger.warn(
+            `发送 RAG 失败轨迹失败: ${progressError instanceof Error ? progressError.message : String(progressError)}`,
+          )
+        }
+      }
     }
 
     // ── 5. 能力门控解析：(Agent, Channel) → 能力上下文 ──
@@ -315,8 +416,10 @@ export class ContextCompiler {
     let toolsDescription = ''
     let toolCount = 0
     if (policy.enableToolDescriptions) {
-      toolsDescription = this.capabilityGate.describeTools(enabledTools)
-      toolCount = enabledTools.size
+      toolsDescription = this.capabilityGate.describeTools(
+        new Set([...enabledTools].filter((name) => !isAdvancedTool(name))),
+      )
+      toolCount = [...enabledTools].filter((name) => !isAdvancedTool(name)).length
     }
 
     // ── 6. [可选] 状态注入 → 组装状态变量对象 ──
@@ -338,6 +441,7 @@ export class ContextCompiler {
 
     const flowState = await this.flowStateService.get(threadId, agentId)
     const draftFlowInstructions = this.flowStateService.formatForPrompt(flowState)
+    const workContextInstructions = this.flowStateService.formatWorkContextForPrompt(flowState)
 
     // ── 9. 组装 vars 对象，调用 MdpEngine 渲染 slots 模板 ──
     const vars: Record<string, unknown> = {
@@ -348,10 +452,13 @@ export class ContextCompiler {
       persona_definition: personaDefinition,
       // 当前 Thread × Agent 私有临时心流
       draft_flow_instructions: draftFlowInstructions,
+      work_context_instructions: workContextInstructions,
       // 状态变量（来自 buildStateSection）
       ...stateVars,
       // 记忆上下文（RAG 检索结果）
       memory_context: memoryContext,
+      // 已完成历史轮次以XML嵌套在750号Slot；当前触发消息仍是唯一原生user。
+      conversation_history: conversationHistory,
       // 图谱记忆上下文（预留，暂不注入）
       graph_context: '',
       // 工具描述（来自 CapabilityGate，已按 channel 过滤白名单）
@@ -393,11 +500,56 @@ export class ContextCompiler {
       (m) => m.role === 'system' && m.content.trim().length > 0,
     )
 
-    // ── 11 + 12. 转换 RenderedMessage[] → LlmMessage[]，追加 Thread 活跃消息 ──
-    const llmMessages = this.assembleMessages({
+    // ── 11 + 12. 将既有来源与动态 Provider 收敛为 Region，再组装最终消息 ──
+    const builtInRegions = this.createBuiltInRegions({
+      agentId,
+      threadId,
+      personaDefinition,
+      systemCore,
+      stateVars,
+      memoryContext,
+      toolsDescription,
+      flowInstructions: draftFlowInstructions,
       slotMessages: validSlotMessages,
-      messages: options.appendThreadMessages === false ? [] : messages,
+      messages: currentMessage ? [currentMessage] : [],
     })
+    const providedRegions = this.regionRegistry
+      ? await this.regionRegistry.collect({
+          agentId,
+          threadId,
+          channel,
+          tokenBudget: policy.tokenBudget,
+          retrievalQuery: lastUserMessage,
+          enabledKinds: [
+            ...(policy.enableContinuity && !options.disableContinuity
+              ? (['continuity'] as const)
+              : []),
+            ...(policy.enableObserver ? (['observer'] as const) : []),
+          ],
+          limits: {
+            continuityMessages: policy.continuityMessages,
+            continuityHours: policy.continuityHours,
+          },
+          now: new Date().toISOString(),
+        })
+      : []
+    const regionCompilation = await this.regionSelector.compileAsync(
+      [...builtInRegions, ...providedRegions],
+      policy.tokenBudget,
+    )
+    const regionMessages: LlmMessage[] = regionCompilation.selected
+      .filter((region) => region.delivery === 'system')
+      .map((region) => ({ role: 'system', content: region.content }))
+    const llmMessages = [
+      ...this.assembleMessages({
+        slotMessages: validSlotMessages,
+        messages: [],
+      }),
+      ...regionMessages,
+      ...(options.appendThreadMessages === false || !currentMessage
+        ? []
+        : this.assembleMessages({ slotMessages: [], messages: [currentMessage] })),
+    ]
 
     // ── 13. 生成清单 ──
     const manifest: ContextManifest = {
@@ -411,6 +563,11 @@ export class ContextCompiler {
       toolCount,
       disabledTools: [...disabledTools],
       hasStateInjection: policy.enableStateInjection,
+      regions: regionCompilation.manifest.map((entry) => ({
+        ...entry,
+        sourceObjectRefs: entry.sourceObjectRefs.map((ref) => ({ ...ref })),
+      })),
+      regionTokenUsage: regionCompilation.usedTokens,
       compiledAt: new Date().toISOString(),
     }
 
@@ -478,49 +635,14 @@ export class ContextCompiler {
     return ''
   }
 
-  /**
-   * RAG 记忆检索
-   *
-   * 通过 MemoryProvider 抽象检索记忆，消费层不依赖具体实现。
-   * channel 直接传给 Provider（LocalMemoryProvider 内部映射为 source）。
-   */
-  private async retrieveMemory(
-    query: string,
-    agentId: string,
-    channel: ThreadChannel,
-  ): Promise<MemorySearchResultItem[]> {
-    if (!query.trim()) return []
-
-    try {
-      const memoryRuntimeConfig = await loadMemoryRuntimeConfig(this.configRepo)
-      const channelMemoryConfig =
-        channel === 'social' ? undefined : memoryRuntimeConfig.channels[channel]
-      // channel 是 ThreadChannel 字符串，直接传给 MemoryProvider
-      const results = await this.memoryProvider.search({
-        query,
-        agentId,
-        channel,
-        limit: channelMemoryConfig?.retrievalLimit ?? 0,
-        minScore: memoryRuntimeConfig.retrievalMinScore,
-      })
-
-      return results
-    } catch (err) {
-      logger.warn('记忆检索失败', { error: err })
-      return []
-    }
-  }
-
-  /** 格式化记忆检索结果为注入文本 */
-  private formatMemoryResults(results: MemorySearchResultItem[]): string {
-    if (results.length === 0) return ''
-
-    const lines: string[] = ['<memory_context>']
-    for (const r of results) {
+  private formatEventNotes(notes: EventNote[]): string {
+    if (!notes.length) return ''
+    const lines = ['<memory_context kind="event_notes">']
+    for (const note of notes) {
       lines.push(
-        `<memory id="${r.id}" type="${r.type}" importance="${r.importance}" score="${r.score.toFixed(3)}">` +
-          r.content +
-          '</memory>',
+        `<event_note id="${note.id}" event_at="${note.eventAt}">` +
+          note.narrative +
+          '</event_note>',
       )
     }
     lines.push('</memory_context>')
@@ -587,6 +709,140 @@ export class ContextCompiler {
       environment_info: environmentInfo,
       user_persona: userPersona,
     }
+  }
+
+  private createBuiltInRegions(input: {
+    agentId: string
+    threadId: string
+    personaDefinition: string
+    systemCore: string
+    stateVars: Record<string, string>
+    memoryContext: string
+    toolsDescription: string
+    flowInstructions: string
+    slotMessages: RenderedMessage[]
+    messages: ThreadMessageInfo[]
+  }): ContextRegion[] {
+    const source = (
+      kind: ContextRegionKind,
+      content: string,
+      trust: ContextRegionTrust,
+      priority: number,
+    ): ContextRegion =>
+      this.region({
+        regionId: `${kind}:${input.agentId}:${input.threadId}`,
+        kind,
+        content,
+        trust,
+        priority,
+        required: false,
+        delivery: 'manifest-only',
+        tokenEstimate: 0,
+        sourceObjectRefs: [],
+      })
+    const renderedSystem = input.slotMessages.map((message) => message.content).join('\n\n')
+    const threadContent = input.messages
+      .filter((message) => message.role === 'user' || message.role === 'assistant')
+      .map((message) => `${message.role}:${message.content}`)
+      .join('\n')
+    return [
+      source('identity', input.personaDefinition, 'principal', 900),
+      source('rules', input.systemCore, 'system', 1000),
+      source('state', JSON.stringify(input.stateVars), 'authority', 700),
+      source('memory', input.memoryContext, 'derived', 500),
+      source('capability', input.toolsDescription, 'authority', 800),
+      source('flow', input.flowInstructions, 'authority', 650),
+      this.region({
+        regionId: `rendered-system:${input.agentId}:${input.threadId}`,
+        kind: 'rules',
+        content: renderedSystem,
+        trust: 'system',
+        priority: 1000,
+        required: true,
+        delivery: 'manifest-only',
+        tokenEstimate: this.estimateTokens(renderedSystem),
+        sourceObjectRefs: [],
+      }),
+      this.region({
+        regionId: `thread:${input.threadId}`,
+        kind: 'thread',
+        content: threadContent,
+        trust: 'authority',
+        priority: 950,
+        required: true,
+        delivery: 'conversation',
+        tokenEstimate: this.estimateTokens(threadContent),
+        sourceObjectRefs: input.messages.map((message) => ({
+          objectType: 'thread-message',
+          objectId: String(message.id) as KernelObjectId,
+          generation: message.revision,
+          ownerPrincipalId: input.agentId,
+        })),
+      }),
+    ]
+  }
+
+  private region(
+    input: Omit<ContextRegion, 'providerId' | 'contentHash' | 'provenance'>,
+  ): ContextRegion {
+    return {
+      ...input,
+      providerId: 'infos.context.builtin',
+      contentHash: createHash('sha256').update(input.content).digest('hex'),
+      provenance: { compiler: 'ContextCompiler' },
+      deduplicationKey: input.deduplicationKey ?? input.regionId,
+    }
+  }
+
+  private estimateTokens(value: string): number {
+    return tokenCounter.countTokens(value)
+  }
+
+  private resolveCurrentUserMessage(
+    messages: ThreadMessageInfo[],
+    currentPairId?: string,
+  ): ThreadMessageInfo | undefined {
+    for (let index = messages.length - 1; index >= 0; index--) {
+      const message = messages[index]!
+      if (message.role === 'user' && (!currentPairId || message.pairId === currentPairId)) {
+        return message
+      }
+    }
+    return undefined
+  }
+
+  private formatConversationHistory(
+    messages: ThreadMessageInfo[],
+    ownerName: string,
+    fallbackAgentId: string,
+  ): string {
+    return messages
+      .flatMap((message) => {
+        let tag: string | null = null
+        if (message.role === 'user') tag = ownerName
+        else if (message.role === 'assistant') tag = message.agentId || fallbackAgentId
+        else if (message.role === 'system') {
+          try {
+            const metadata = JSON.parse(message.metadataJson) as { kind?: string }
+            if (metadata.kind === 'image_transcription') tag = 'image_transcription'
+          } catch {
+            // 非受控System消息不进入对话历史。
+          }
+        }
+        if (!tag) return []
+        const safeTag = this.normalizeConversationTag(tag)
+        const time =
+          message.role !== 'user' && message.timestamp
+            ? `, time=${escapeConversationXmlAttribute(message.timestamp)}`
+            : ''
+        return [`<${safeTag}${time}>${escapeConversationXml(message.content)}</${safeTag}>`]
+      })
+      .join('\n')
+  }
+
+  private normalizeConversationTag(value: string): string {
+    const normalized = value.trim().replace(/[^\p{L}\p{N}_-]/gu, '_')
+    return normalized || 'unknown'
   }
 
   // ─────────────────────────────────────────
@@ -674,6 +930,22 @@ export class ContextCompiler {
             : fallback.enableStateInjection,
         tokenBudget:
           typeof parsed.tokenBudget === 'number' ? parsed.tokenBudget : fallback.tokenBudget,
+        enableObserver:
+          typeof parsed.enableObserver === 'boolean'
+            ? parsed.enableObserver
+            : fallback.enableObserver,
+        enableContinuity:
+          typeof parsed.enableContinuity === 'boolean'
+            ? parsed.enableContinuity
+            : fallback.enableContinuity,
+        continuityMessages:
+          typeof parsed.continuityMessages === 'number'
+            ? Math.max(0, Math.min(100, Math.floor(parsed.continuityMessages)))
+            : fallback.continuityMessages,
+        continuityHours:
+          typeof parsed.continuityHours === 'number'
+            ? Math.max(0, Math.min(24 * 30, Math.floor(parsed.continuityHours)))
+            : fallback.continuityHours,
       }
     } catch (err) {
       logger.warn(`Thread ContextPolicy JSON 解析失败，回退到默认策略: ${err}`)

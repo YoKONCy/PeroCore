@@ -14,20 +14,12 @@ import { AppError } from '../lib/appError'
 
 export function createMcpRouter(ctx: AppContext) {
   const router = new Hono()
-  const mcpRepo = ctx.mcpRepo
+  const service = ctx.mcpConfigService
 
   // ── GET /api/mcp/configs — 获取所有 MCP 配置 ──
   router.get('/configs', async (c) => {
-    const configs = await mcpRepo.findAll()
-
-    // 解析 JSON 字段
-    const parsed = configs.map((cfg) => ({
-      ...cfg,
-      args: cfg.args ? JSON.parse(cfg.args) : [],
-      env: cfg.env ? JSON.parse(cfg.env) : {},
-    }))
-
-    return c.json({ code: 'OK', message: '获取成功', data: parsed })
+    const configs = await service.list()
+    return c.json({ code: 'OK', message: '获取成功', data: configs })
   })
 
   // ── POST /api/mcp/configs — 创建 MCP 配置 ──
@@ -38,15 +30,9 @@ export function createMcpRouter(ctx: AppContext) {
       throw new AppError('VALIDATION_ERROR', { message: 'name 为必填字段' })
     }
 
-    // 检查重名
-    const existing = await mcpRepo.findByName(body.name)
-    if (existing) {
-      throw new AppError('VALIDATION_ERROR', {
-        message: `MCP 配置 "${body.name}" 已存在`,
-      })
-    }
-
-    const config = await mcpRepo.create(body)
+    const config = await service.create(body)
+    await ctx.mcpManager.connectAll()
+    ctx.mcpRegistrySynchronizer.sync()
     return c.json({ code: 'CREATED', message: 'MCP 配置已创建', data: config }, 201)
   })
 
@@ -55,10 +41,9 @@ export function createMcpRouter(ctx: AppContext) {
     const id = Number(c.req.param('id'))
     const body = await c.req.json()
 
-    const updated = await mcpRepo.update(id, body)
-    if (!updated) {
-      throw new AppError('NOT_FOUND', { message: `MCP 配置 #${id} 不存在` })
-    }
+    const updated = await service.update(id, body)
+    await ctx.mcpManager.connectAll()
+    ctx.mcpRegistrySynchronizer.sync()
 
     return c.json({ code: 'OK', message: 'MCP 配置已更新', data: updated })
   })
@@ -67,16 +52,9 @@ export function createMcpRouter(ctx: AppContext) {
   router.delete('/configs/:id', async (c) => {
     const id = Number(c.req.param('id'))
 
-    // 先断开连接 (如果有)
-    const config = await mcpRepo.findById(id)
-    if (config && ctx.mcpManager) {
-      await ctx.mcpManager.disconnectOne(config.name)
-    }
-
-    const deleted = await mcpRepo.delete(id)
-    if (!deleted) {
-      throw new AppError('NOT_FOUND', { message: `MCP 配置 #${id} 不存在` })
-    }
+    await service.delete(id)
+    await ctx.mcpManager.connectAll()
+    ctx.mcpRegistrySynchronizer.sync()
 
     return c.json({ code: 'OK', message: 'MCP 配置已删除', data: { deleted: true } })
   })
@@ -84,10 +62,9 @@ export function createMcpRouter(ctx: AppContext) {
   // ── POST /api/mcp/configs/:id/toggle — 切换启用状态 ──
   router.post('/configs/:id/toggle', async (c) => {
     const id = Number(c.req.param('id'))
-    const updated = await mcpRepo.toggleEnabled(id)
-    if (!updated) {
-      throw new AppError('NOT_FOUND', { message: `MCP 配置 #${id} 不存在` })
-    }
+    const updated = await service.toggle(id)
+    await ctx.mcpManager.connectAll()
+    ctx.mcpRegistrySynchronizer.sync()
     return c.json({ code: 'OK', message: '启用状态已切换', data: updated })
   })
 
@@ -97,6 +74,7 @@ export function createMcpRouter(ctx: AppContext) {
       throw new AppError('SERVICE_UNAVAILABLE', { message: 'MCP Manager 未初始化' })
     }
     await ctx.mcpManager.connectAll()
+    ctx.mcpRegistrySynchronizer.sync()
     return c.json({ code: 'OK', message: 'MCP 连接已完成', data: ctx.mcpManager.getStatus() })
   })
 
@@ -107,6 +85,7 @@ export function createMcpRouter(ctx: AppContext) {
       throw new AppError('SERVICE_UNAVAILABLE', { message: 'MCP Manager 未初始化' })
     }
     const conn = await ctx.mcpManager.reconnectOne(name)
+    ctx.mcpRegistrySynchronizer.sync()
     if (!conn) {
       throw new AppError('NOT_FOUND', { message: `MCP 配置 "${name}" 不存在` })
     }
@@ -147,6 +126,14 @@ export function createMcpRouter(ctx: AppContext) {
   router.get('/skills', async (c) => {
     const manifests = ctx.skillLoader.getAllManifests()
     return c.json({ code: 'OK', message: '获取成功', data: manifests })
+  })
+
+  router.get('/skills/:id/compatibility', async (c) => {
+    const skillId = c.req.param('id')
+    const availableTools = new Set(ctx.toolRegistry.getAllDefinitions().map((tool) => tool.name))
+    const report = ctx.skillLoader.getCompatibilityReport(skillId, availableTools)
+    if (!report) throw new AppError('NOT_FOUND', { message: `Skill "${skillId}" 不存在` })
+    return c.json({ code: 'OK', message: '获取成功', data: report })
   })
 
   // ── GET /api/mcp/skills/:id/content — 获取 Skill 的完整内容 (L2) ──

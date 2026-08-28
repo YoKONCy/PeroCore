@@ -127,14 +127,13 @@ async function minimize() {
 }
 
 async function toggleMaximize() {
-  isMaximized.value = !isMaximized.value
   try {
     const result = await invoke('window-maximize')
     if (result !== null && result !== undefined) {
       isMaximized.value = result as boolean
     }
   } catch {
-    isMaximized.value = !isMaximized.value
+    // 非 Electron 环境或窗口状态暂不可用。
   }
 }
 

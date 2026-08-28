@@ -11,13 +11,24 @@
  * @module electron/main/ipcBridge
  */
 
-import { ipcMain, BrowserWindow, shell, screen, Notification, nativeTheme, app } from 'electron'
+import {
+  ipcMain,
+  BrowserWindow,
+  shell,
+  screen,
+  Notification,
+  nativeTheme,
+  app,
+  dialog,
+} from 'electron'
+import AdmZip from 'adm-zip'
 import os from 'node:os'
 import fs from 'node:fs'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { windowManager } from './windows/manager'
+import { toggleWindowMaximized } from './windows/windowState'
 import { paths, isDev, isPackaged, isPortable } from './utils/env'
 import { logger } from './utils/logger'
 
@@ -25,7 +36,6 @@ import { logger } from './utils/logger'
 // 使用函数包装，在调用时才 import
 // 第七阶段：backendProcess 已移除（Daemon 独立运行）
 const getNapCatService = () => import('./services/napcat')
-const getNativeLoader = () => import('./services/nativeLoader')
 const getAssetService = () => import('./services/assets')
 const getDesktopAwareness = () => import('./services/desktopAwareness')
 const getSystemService = () => import('./services/system')
@@ -83,14 +93,29 @@ export function registerIpcHandlers(): void {
   registerNavigationHandlers()
   registerBackendHandlers()
   registerSystemHandlers()
-  registerNativeHandlers()
+  registerSkillHandlers()
+  registerExportHandlers()
+  registerAssetHandlers()
   registerNapCatHandlers()
   registerSteamHandlers()
   registerDragHandlers()
   registerDesktopAwarenessHandlers()
   registerSystemMonitorHandlers()
+  registerAudioOutputHandlers()
 
   logger.info('IPC', 'IPC 通道注册完成')
+}
+
+function registerAudioOutputHandlers(): void {
+  ipcMain.on('audio-output:receipt', (_event, input: unknown) => {
+    const payload = input as { playbackId?: unknown; state?: unknown }
+    const playbackId = String(payload.playbackId ?? '')
+    const state = payload.state === 'completed' ? 'completed' : 'cancelled'
+    if (!playbackId) return
+    void import('./services/capabilityProvider').then(({ capabilityProvider }) => {
+      capabilityProvider.completePlayback(playbackId, state)
+    })
+  })
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -99,30 +124,14 @@ export function registerIpcHandlers(): void {
 function registerWindowHandlers(): void {
   ipcMain.handle('window-minimize', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
-    if (!win) return
-
-    // Windows + transparent + frameless 窗口的已知 bug:
-    // 最大化状态下 minimize() 无效。
-    // 解决: 先 unmaximize()，等 DWM 更新后再 minimize()。
-    if (process.platform === 'win32' && win.isMaximized()) {
-      win.unmaximize()
-      setTimeout(() => {
-        if (!win.isDestroyed()) win.minimize()
-      }, 100)
-    } else {
-      win.minimize()
-    }
+    if (!win || win.isDestroyed() || win.isMinimized()) return
+    win.minimize()
   })
 
   ipcMain.handle('window-maximize', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (!win) return false
-    if (win.isMaximized()) {
-      win.unmaximize()
-      return false
-    }
-    win.maximize()
-    return true
+    return toggleWindowMaximized(win)
   })
 
   ipcMain.handle('window-close', (event) => {
@@ -203,6 +212,24 @@ function registerNavigationHandlers(): void {
     windowManager.dashboardWin?.close()
   })
 
+  ipcMain.handle('open-arca-window', (_event, input: unknown) => {
+    const requestedUrl =
+      typeof input === 'object' && input !== null
+        ? String((input as { url?: unknown }).url ?? '')
+        : String(input ?? '')
+    const backendOrigin = `http://127.0.0.1:${Number(process.env.PERO_PORT ?? 9120)}`
+    const url = new URL(requestedUrl, backendOrigin).toString()
+    windowManager.createArcaWindow(url)
+    return windowManager.getArcaWindowState()
+  })
+
+  ipcMain.handle('close-arca-window', () => {
+    windowManager.closeArcaWindow()
+    return windowManager.getArcaWindowState()
+  })
+
+  ipcMain.handle('get-arca-window-state', () => windowManager.getArcaWindowState())
+
   ipcMain.handle('open-stronghold-window', () => {
     windowManager.createStrongholdWindow()
   })
@@ -246,11 +273,112 @@ function registerBackendHandlers(): void {
   })
 }
 
+function registerSkillHandlers(): void {
+  ipcMain.handle('select-skill-directory', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const options = {
+      title: '选择 Skill 文件夹',
+      buttonLabel: '选择此文件夹',
+      properties: ['openDirectory'] as Array<'openDirectory'>,
+    }
+    const result = win
+      ? await dialog.showOpenDialog(win, options)
+      : await dialog.showOpenDialog(options)
+    const selectedPath = result.filePaths[0]
+    if (result.canceled || !selectedPath) return { canceled: true }
+    if (!fs.existsSync(path.join(selectedPath, 'SKILL.md'))) {
+      throw new Error('所选文件夹内没有 SKILL.md，不是有效的 Skill')
+    }
+    return {
+      canceled: false,
+      path: selectedPath,
+      name: path.basename(selectedPath),
+    }
+  })
+}
+
+function registerExportHandlers(): void {
+  ipcMain.handle('export-agent-package', async (event, input: unknown) => {
+    const payload = input as {
+      format?: unknown
+      version?: unknown
+      agentId?: unknown
+      fileName?: unknown
+      files?: unknown
+    }
+    if (payload?.format !== 'infos.agent-package' || payload.version !== 1) {
+      throw new Error('角色包格式不受支持')
+    }
+    if (typeof payload.agentId !== 'string' || !/^[a-z0-9_-]+$/.test(payload.agentId)) {
+      throw new Error('角色包ID无效')
+    }
+    if (!Array.isArray(payload.files) || payload.files.length === 0) {
+      throw new Error('角色包没有可导出的资源')
+    }
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const dialogOptions = {
+      title: '选择角色包导出目录',
+      properties: ['openDirectory', 'createDirectory'] as Array<
+        'openDirectory' | 'createDirectory'
+      >,
+    }
+    const selected = win
+      ? await dialog.showOpenDialog(win, dialogOptions)
+      : await dialog.showOpenDialog(dialogOptions)
+    const directory = selected.filePaths[0]
+    if (selected.canceled || !directory) return { canceled: true }
+
+    const requestedName = typeof payload.fileName === 'string' ? payload.fileName : ''
+    const fileName = /^[a-z0-9_-]+\.infos-agent\.zip$/i.test(requestedName)
+      ? requestedName
+      : `${payload.agentId}.infos-agent.zip`
+    const target = path.join(directory, fileName)
+    const zip = new AdmZip()
+    for (const value of payload.files) {
+      if (!value || typeof value !== 'object') throw new Error('角色包资源无效')
+      const file = value as { path?: unknown; contentBase64?: unknown }
+      const relative = typeof file.path === 'string' ? file.path.replaceAll('\\', '/') : ''
+      if (
+        !relative ||
+        relative.startsWith('/') ||
+        relative.split('/').some((segment) => !segment || segment === '..') ||
+        typeof file.contentBase64 !== 'string'
+      ) {
+        throw new Error(`角色包资源路径无效: ${relative}`)
+      }
+      zip.addFile(relative, Buffer.from(file.contentBase64, 'base64'))
+    }
+    zip.addFile(
+      'package.json',
+      Buffer.from(
+        JSON.stringify(
+          {
+            format: 'infos.agent-package',
+            version: 1,
+            agentId: payload.agentId,
+            exportedAt: new Date().toISOString(),
+          },
+          null,
+          2,
+        ),
+        'utf8',
+      ),
+    )
+    zip.writeZip(target)
+    return { canceled: false, path: target, fileName }
+  })
+}
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 系统能力
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function registerSystemHandlers(): void {
   ipcMain.handle('get-app-version', () => app.getVersion())
+
+  ipcMain.handle('get-capability-node-id', async () => {
+    const { capabilityProvider } = await import('./services/capabilityProvider')
+    return capabilityProvider.getNodeId()
+  })
 
   ipcMain.handle('get-client-info', async () => {
     const stats = await getSystemService().then((service) => service.getSystemStats())
@@ -305,8 +433,19 @@ function registerSystemHandlers(): void {
   })
 
   ipcMain.handle('get-update-state', async () => (await getUpdaterService()).getUpdateState())
+  ipcMain.handle('get-client-update-releases', async () =>
+    (await getUpdaterService()).getCachedReleases(),
+  )
   ipcMain.handle('check-client-update', async () => (await getUpdaterService()).checkForUpdates())
-  ipcMain.handle('download-client-update', async () => (await getUpdaterService()).downloadUpdate())
+  ipcMain.handle('download-client-update', async (_event, input: unknown) => {
+    const tagName =
+      typeof input === 'string'
+        ? input
+        : typeof input === 'object' && input !== null
+          ? String((input as { tagName?: unknown }).tagName ?? '')
+          : ''
+    return (await getUpdaterService()).downloadUpdate(tagName || undefined)
+  })
   ipcMain.handle('install-client-update', async () => (await getUpdaterService()).installUpdate())
   ipcMain.handle('get-latest-release', async () => (await getUpdaterService()).getLatestRelease())
 
@@ -374,44 +513,12 @@ function registerSystemHandlers(): void {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Native 渲染核心 (render-core)
+// 3D模型资源
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-function registerNativeHandlers(): void {
-  ipcMain.handle(
-    'native-load-pero-model',
-    async (_event, buffer: Buffer, filterPatterns?: string[]) => {
-      const { loadNativeModule } = await getNativeLoader()
-      const native = loadNativeModule()
-      if (!native) throw new Error('Native 渲染核心不可用')
-      return native.loadPeroModel(buffer, filterPatterns)
-    },
-  )
-
-  ipcMain.handle(
-    'native-load-standard-model',
-    async (_event, buffer: Buffer, filterPatterns?: string[]) => {
-      const { loadNativeModule } = await getNativeLoader()
-      const native = loadNativeModule()
-      if (!native) throw new Error('Native 渲染核心不可用')
-      return native.loadStandardModel(buffer, filterPatterns)
-    },
-  )
-
-  ipcMain.handle('native-load-pero-container', async (_event, buffer: Buffer) => {
-    const { loadNativeModule } = await getNativeLoader()
-    const native = loadNativeModule()
-    if (!native) throw new Error('Native 渲染核心不可用')
-    return native.loadPeroContainer(buffer)
-  })
-
+function registerAssetHandlers(): void {
   ipcMain.handle('scan-3d-models', async () => {
     const { scan3DModels } = await getAssetService()
     return scan3DModels()
-  })
-
-  ipcMain.handle('get-model-load-path', async (_event, model) => {
-    const { getModelLoadPath } = await getAssetService()
-    return getModelLoadPath(model)
   })
 }
 
@@ -507,8 +614,8 @@ function registerSteamHandlers(): void {
 
   ipcMain.handle('steam-cloud-upload', async () => {
     try {
-      const { uploadToCloud } = await import('./services/steam')
-      return uploadToCloud()
+      const { cloudSyncService } = await import('./services/cloudSync')
+      return cloudSyncService.uploadFullSnapshot()
     } catch {
       return { success: false, errors: ['Steam 不可用'] }
     }
@@ -516,8 +623,8 @@ function registerSteamHandlers(): void {
 
   ipcMain.handle('steam-cloud-download', async () => {
     try {
-      const { downloadFromCloud } = await import('./services/steam')
-      return downloadFromCloud()
+      const { cloudSyncService } = await import('./services/cloudSync')
+      return cloudSyncService.downloadFullSnapshot()
     } catch {
       return { success: false, errors: ['Steam 不可用'] }
     }

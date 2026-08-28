@@ -1,5 +1,7 @@
 # 12. AgentApplication / SubAgent 架构设计（草案）
 
+> **归档警示**：本文记录历史设计与迁移背景，不代表当前架构。现行规范以[A01文档索引](../A01_PROJECT_STRUCTURE.md#6-规范文档与归档)及其列出的A02–A09/S系列文档为准；旧Channel、API、Package或Application表述不得用于新实现。
+
 > 基于 AIOS 第七阶段完成后的架构延伸设计。
 > 本文档整理设计讨论的先验信息、约束条件和初步构想，供后续深入细化使用。
 
@@ -21,6 +23,7 @@ AIOS 七个阶段已全部完成，核心架构稳固：
 ### 0.2 现有架构的边界
 
 根据 [01-principal-agent.md](01-principal-agent.md) 第 10 节，PrincipalAgent 内核**不包含**：
+
 - SubAgent Instance
 - Agent Application（Coding/Research/Office）
 - 应用工作区
@@ -34,6 +37,7 @@ AIOS 七个阶段已全部完成，核心架构稳固：
 ### 0.3 本文档的目标
 
 设计 AgentApplication + SubAgent 的完整架构，包含：
+
 - 接口定义
 - 资源隔离边界
 - 检查点机制
@@ -47,11 +51,11 @@ AIOS 七个阶段已全部完成，核心架构稳固：
 
 主人确认的三个关键决策：
 
-| 决策点 | 选择 | 说明 |
-|---|---|---|
-| **首要目标** | 全部一起讨论 | 完整设计 AgentApplication + SubAgent 体系 |
-| **运行形态** | 同进程沙箱级 | 同进程但独立工作区 + 独立工具权限 + 独立上下文编译，通过消息队列通信 |
-| **资源隔离** | 工作区 + 工具 + 记忆隔离 | SubAgent 有独立工作区、工具、记忆候选池，人格继承主 Agent |
+| 决策点       | 选择                     | 说明                                                                 |
+| ------------ | ------------------------ | -------------------------------------------------------------------- |
+| **首要目标** | 全部一起讨论             | 完整设计 AgentApplication + SubAgent 体系                            |
+| **运行形态** | 同进程沙箱级             | 同进程但独立工作区 + 独立工具权限 + 独立上下文编译，通过消息队列通信 |
+| **资源隔离** | 工作区 + 工具 + 记忆隔离 | SubAgent 有独立工作区、工具、记忆候选池，人格继承主 Agent            |
 
 ### 1.1 "上下文持有"架构
 
@@ -60,6 +64,7 @@ AIOS 七个阶段已全部完成，核心架构稳固：
 核心思想：SubAgent 持有自己的上下文（独立编译、独立历史、独立工具权限），而非由主 Agent 代为编译。主 Agent 只负责委派任务和接收结果。
 
 与"上下文委派"的区别：
+
 - **上下文委派**（被否决）：主 Agent 编译好上下文后传给 SubAgent，SubAgent 不持有上下文
 - **上下文持有**（采用）：SubAgent 独立编译自己的上下文，主 Agent 只提供任务描述和资源访问权限
 
@@ -143,14 +148,14 @@ SubAgent
 
 ### 3.1 隔离矩阵
 
-| 资源 | 主 Agent | AgentApplication | SubAgent | 隔离方式 |
-|---|---|---|---|---|
-| **Identity（人格）** | 持有完整人格 | 只读投影 | 只读投影 | SubAgent 继承主 Agent 人格，但不可修改 |
-| **Workspace** | Principal Workspace | AppWorkspace | SubAgentWorkspace（AppWorkspace 子目录） | 物理目录隔离 |
-| **Tools** | ToolCapability（channel 矩阵） | AppToolCapability | 受 AppToolCapability 约束的子集 | 白名单交集 |
-| **Memory** | CanonicalMemory + Candidates | AppMemoryStore（独立候选池） | Checkpoint.memoryCandidates | 候选池隔离，检查点交换 |
-| **Context** | ContextCompiler（13步+12槽位） | AppContextCompiler | SubAgentContext（独立编译） | 独立编译，不共享上下文 |
-| **Thread** | 持有多个 Thread | 无 Thread（任务驱动） | 无 Thread（任务驱动） | SubAgent 不写入主 Agent 的 Thread |
+| 资源                 | 主 Agent                       | AgentApplication             | SubAgent                                 | 隔离方式                               |
+| -------------------- | ------------------------------ | ---------------------------- | ---------------------------------------- | -------------------------------------- |
+| **Identity（人格）** | 持有完整人格                   | 只读投影                     | 只读投影                                 | SubAgent 继承主 Agent 人格，但不可修改 |
+| **Workspace**        | Principal Workspace            | AppWorkspace                 | SubAgentWorkspace（AppWorkspace 子目录） | 物理目录隔离                           |
+| **Tools**            | ToolCapability（channel 矩阵） | AppToolCapability            | 受 AppToolCapability 约束的子集          | 白名单交集                             |
+| **Memory**           | CanonicalMemory + Candidates   | AppMemoryStore（独立候选池） | Checkpoint.memoryCandidates              | 候选池隔离，检查点交换                 |
+| **Context**          | ContextCompiler（13步+12槽位） | AppContextCompiler           | SubAgentContext（独立编译）              | 独立编译，不共享上下文                 |
+| **Thread**           | 持有多个 Thread                | 无 Thread（任务驱动）        | 无 Thread（任务驱动）                    | SubAgent 不写入主 Agent 的 Thread      |
 
 ### 3.2 关键隔离规则
 
@@ -206,14 +211,14 @@ SubAgent 执行 ReAct 循环
 
 ### 4.2 与"上下文委派"的区别
 
-| 维度 | 上下文委派（被否决） | 上下文持有（采用） |
-|---|---|---|
-| 上下文编译 | 主 Agent 编译后传给 SubAgent | SubAgent 独立编译 |
-| 历史管理 | 共享主 Agent 历史 | 独立历史 |
-| 工具权限 | 主 Agent 代为校验 | SubAgent 独立校验 |
-| 隔离强度 | 弱（共享上下文） | 强（独立上下文） |
-| 通信开销 | 低（直接传上下文） | 中（通过消息队列） |
-| 适用场景 | 简单任务委派 | 复杂任务独立执行 |
+| 维度       | 上下文委派（被否决）         | 上下文持有（采用） |
+| ---------- | ---------------------------- | ------------------ |
+| 上下文编译 | 主 Agent 编译后传给 SubAgent | SubAgent 独立编译  |
+| 历史管理   | 共享主 Agent 历史            | 独立历史           |
+| 工具权限   | 主 Agent 代为校验            | SubAgent 独立校验  |
+| 隔离强度   | 弱（共享上下文）             | 强（独立上下文）   |
+| 通信开销   | 低（直接传上下文）           | 中（通过消息队列） |
+| 适用场景   | 简单任务委派                 | 复杂任务独立执行   |
 
 ---
 
@@ -264,6 +269,7 @@ CheckpointExchange
 ### 6.1 不改动的内核模块
 
 以下模块**不需要改动**，SubAgent 体系作为插件层叠加：
+
 - PrincipalAgent 及其六个一等资源
 - ContextCompiler（主 Agent 的编译器）
 - Thread 模型
@@ -273,23 +279,23 @@ CheckpointExchange
 
 ### 6.2 需要新增的模块
 
-| 模块 | 位置 | 职责 |
-|---|---|---|
-| AgentApplicationRegistry | packages/backend/src/applications/ | 应用注册与管理 |
-| SubAgentRunner | packages/backend/src/applications/subAgentRunner.ts | SubAgent 生命周期管理 |
-| AppContextCompiler | packages/backend/src/applications/appContextCompiler.ts | 应用上下文编译器 |
-| AppMemoryStore | packages/backend/src/applications/appMemoryStore.ts | 应用记忆存储 |
-| CheckpointExchange | packages/backend/src/applications/checkpointExchange.ts | 检查点交换机制 |
-| MessageQueue | packages/backend/src/applications/messageQueue.ts | 主↔Sub 通信 |
+| 模块                     | 位置                                                    | 职责                  |
+| ------------------------ | ------------------------------------------------------- | --------------------- |
+| AgentApplicationRegistry | packages/backend/src/applications/                      | 应用注册与管理        |
+| SubAgentRunner           | packages/backend/src/applications/subAgentRunner.ts     | SubAgent 生命周期管理 |
+| AppContextCompiler       | packages/backend/src/applications/appContextCompiler.ts | 应用上下文编译器      |
+| AppMemoryStore           | packages/backend/src/applications/appMemoryStore.ts     | 应用记忆存储          |
+| CheckpointExchange       | packages/backend/src/applications/checkpointExchange.ts | 检查点交换机制        |
+| MessageQueue             | packages/backend/src/applications/messageQueue.ts       | 主↔Sub 通信           |
 
 ### 6.3 需要扩展的模块
 
-| 模块 | 扩展内容 |
-|---|---|
-| ToolExecutor | 支持按 (appId, subAgentId) 路由工具调用，受 AppToolCapability 约束 |
-| container.ts | 注册 AgentApplication 相关服务 |
-| WorkspaceService | 支持 AppWorkspace 和 SubAgentWorkspace 的创建与管理 |
-| PathResolver | 支持 `@app/{appId}/` 和 `@subagent/{subAgentId}/` 路径别名 |
+| 模块             | 扩展内容                                                           |
+| ---------------- | ------------------------------------------------------------------ |
+| ToolExecutor     | 支持按 (appId, subAgentId) 路由工具调用，受 AppToolCapability 约束 |
+| container.ts     | 注册 AgentApplication 相关服务                                     |
+| WorkspaceService | 支持 AppWorkspace 和 SubAgentWorkspace 的创建与管理                |
+| PathResolver     | 支持 `@app/{appId}/` 和 `@subagent/{subAgentId}/` 路径别名         |
 
 ---
 
@@ -353,6 +359,7 @@ app_memory_candidates (
 ## 9. 建议的实现路线图
 
 ### Phase 1: 基础架构（预计 2-3 个迭代）
+
 - 实现 AgentApplicationRegistry
 - 实现 SubAgentRunner（基础生命周期）
 - 实现 MessageQueue
@@ -360,17 +367,20 @@ app_memory_candidates (
 - 扩展 ToolExecutor 支持 SubAgent 路由
 
 ### Phase 2: 上下文与记忆
+
 - 实现 AppContextCompiler
 - 实现 AppMemoryStore
 - 实现 CheckpointExchange
 - 集成 MemoryGate 审核机制
 
 ### Phase 3: Coding App 第一版
+
 - 实现具体 Coding 应用
 - 文件编辑 + 终端执行 + 测试运行
 - Dashboard 任务进度展示
 
 ### Phase 4: 社交子 Agent 剥离
+
 - 将 social/group channel 迁移到独立 AgentApplication
 - 主 Agent 不再处理社交场景
 - 社交记忆独立管理
@@ -379,14 +389,14 @@ app_memory_candidates (
 
 ## 10. 相关文档索引
 
-| 文档 | 内容 |
-|---|---|
-| [00-overview.md](00-overview.md) | AIOS 架构总则（§3 Agent 分层模型） |
-| [01-principal-agent.md](01-principal-agent.md) | PrincipalAgent 模型（§10 不包含 SubAgent） |
-| [03-context-runtime.md](03-context-runtime.md) | Context Runtime 模型 |
-| [06-tool-capability.md](06-tool-capability.md) | Tool Capability 模型 |
-| [10-node-architecture.md](10-node-architecture.md) | 节点架构与能力提供者 |
-| [11-remediation-plan.md](11-remediation-plan.md) | 第七阶段修复计划（已完成） |
+| 文档                                               | 内容                                       |
+| -------------------------------------------------- | ------------------------------------------ |
+| [00-overview.md](00-overview.md)                   | AIOS 架构总则（§3 Agent 分层模型）         |
+| [01-principal-agent.md](01-principal-agent.md)     | PrincipalAgent 模型（§10 不包含 SubAgent） |
+| [03-context-runtime.md](03-context-runtime.md)     | Context Runtime 模型                       |
+| [06-tool-capability.md](06-tool-capability.md)     | Tool Capability 模型                       |
+| [10-node-architecture.md](10-node-architecture.md) | 节点架构与能力提供者                       |
+| [11-remediation-plan.md](11-remediation-plan.md)   | 第七阶段修复计划（已完成）                 |
 
 ---
 
@@ -416,26 +426,26 @@ app_memory_candidates (
 8. 渲染 system_core
 9. 组装 vars + 渲染槽位（按 position 排序）
 10. 过滤空内容
-11-12. 转换为 LLM Messages + 追加历史
-13. 生成 manifest
+    11-12. 转换为 LLM Messages + 追加历史
+11. 生成 manifest
 
 ### 槽位顺序（12 个）
 
-| position | slotId | 作用 |
-|---|---|---|
-| 100 | system_persona | system_core + persona_definition |
-| 150 | cot_guidance | 思维链引导 |
-| 200 | abilities | 能力片段（vision/workspace 等） |
-| 250 | draft_flow | 草稿心流（已禁用） |
-| 300 | tools | 工具描述 + 技能菜单 |
-| 400 | rules | 硬规则/安全协议 |
-| 500 | knowledge | 可用技能清单 |
-| 600 | channel_patch | channel 特定人格补丁 |
-| 700 | memory_context | RAG 检索记忆 |
-| 800 | pet_state | 当前状态（时间/情绪/环境） |
-| 900 | user_persona | 主人信息 |
-| 9100 | output_format | 输出约束 |
-| 9500 | footer | 尾部提醒 |
+| position | slotId         | 作用                             |
+| -------- | -------------- | -------------------------------- |
+| 100      | system_persona | system_core + persona_definition |
+| 150      | cot_guidance   | 思维链引导                       |
+| 200      | abilities      | 能力片段（vision/workspace 等）  |
+| 250      | draft_flow     | 草稿心流（已禁用）               |
+| 300      | tools          | 工具描述 + 技能菜单              |
+| 400      | rules          | 硬规则/安全协议                  |
+| 500      | knowledge      | 可用技能清单                     |
+| 600      | channel_patch  | channel 特定人格补丁             |
+| 700      | memory_context | RAG 检索记忆                     |
+| 800      | pet_state      | 当前状态（时间/情绪/环境）       |
+| 900      | user_persona   | 主人信息                         |
+| 9100     | output_format  | 输出约束                         |
+| 9500     | footer         | 尾部提醒                         |
 
 ### 测试覆盖
 
@@ -444,4 +454,4 @@ app_memory_candidates (
 
 ---
 
-*本文档为设计草案，待后续讨论细化后更新。*
+_本文档为设计草案，待后续讨论细化后更新。_

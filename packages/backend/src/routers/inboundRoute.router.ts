@@ -16,7 +16,7 @@
  */
 
 import { Hono } from 'hono'
-import { zValidator } from '@hono/zod-validator'
+import { validate as zValidator } from '../lib/validation'
 import { z } from 'zod'
 import { AppError } from '../lib/appError'
 import type { AppContext } from '../container'
@@ -67,7 +67,7 @@ export function createInboundRouteRouter(ctx: AppContext) {
 
   // GET /api/inbound-routes — 列出所有路由
   router.get('/', async (c) => {
-    const routes = await ctx.inboundRouteRepo.list()
+    const routes = await ctx.inboundRouteService.list()
     return c.json({ code: 'OK', message: '获取成功', data: routes })
   })
 
@@ -81,61 +81,36 @@ export function createInboundRouteRouter(ctx: AppContext) {
         message: '缺少参数 source 或 identifier',
       })
     }
-    const resolved = await ctx.inboundRouteRepo.resolve(source, identifier)
-    if (!resolved) {
-      return c.json({ code: 'NOT_FOUND', message: '未匹配到路由', data: null }, 404)
-    }
+    const resolved = await ctx.inboundRouteService.resolve(source, identifier)
     return c.json({ code: 'OK', message: '路由命中', data: resolved })
   })
 
   // POST /api/inbound-routes — 创建路由
   router.post('/', zValidator('json', createRouteSchema), async (c) => {
     const body = c.req.valid('json')
-    try {
-      const route = await ctx.inboundRouteRepo.create({
-        source: body.source,
-        identifier: body.identifier,
-        agentId: body.agentId,
-        channel: body.channel,
-        threadId: body.threadId ?? null,
-        config: body.config,
-      })
-      return c.json({ code: 'CREATED', message: '路由创建成功', data: route }, 201)
-    } catch (err) {
-      // 唯一索引冲突（source + identifier 已存在）
-      const msg = err instanceof Error ? err.message : String(err)
-      throw new AppError('ALREADY_EXISTS', {
-        message: `路由已存在: ${body.source}/${body.identifier}`,
-        data: { source: body.source, identifier: body.identifier, detail: msg },
-      })
-    }
+    const route = await ctx.inboundRouteService.create({
+      source: body.source,
+      identifier: body.identifier,
+      agentId: body.agentId,
+      channel: body.channel,
+      threadId: body.threadId ?? null,
+      config: body.config,
+    })
+    return c.json({ code: 'CREATED', message: '路由创建成功', data: route }, 201)
   })
 
   // PUT /api/inbound-routes/:id — 更新路由
   router.put('/:id', zValidator('json', updateRouteSchema), async (c) => {
     const id = c.req.param('id')
     const body = c.req.valid('json')
-    const updated = await ctx.inboundRouteRepo.update(id, body)
-    if (!updated) {
-      throw new AppError('NOT_FOUND', {
-        message: `路由 "${id}" 不存在`,
-        data: { id },
-      })
-    }
+    const updated = await ctx.inboundRouteService.update(id, body)
     return c.json({ code: 'OK', message: '路由更新成功', data: updated })
   })
 
   // DELETE /api/inbound-routes/:id — 删除路由
   router.delete('/:id', async (c) => {
     const id = c.req.param('id')
-    const existing = await ctx.inboundRouteRepo.findById(id)
-    if (!existing) {
-      throw new AppError('NOT_FOUND', {
-        message: `路由 "${id}" 不存在`,
-        data: { id },
-      })
-    }
-    await ctx.inboundRouteRepo.delete(id)
+    await ctx.inboundRouteService.delete(id)
     return c.json({ code: 'OK', message: `路由 "${id}" 已删除` })
   })
 

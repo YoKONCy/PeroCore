@@ -1,30 +1,21 @@
 /**
- * 记忆 Store 注册表 — 三层隔离架构
+ * 记忆 Store 注册表
  *
- * 管理 TriviumDB 实例的物理隔离。
- * 每个 Agent 拥有独立的 main.tdb / social.tdb，
- * 共享日记 Store 已废弃，日记改为按 Agent 隔离。
+ * 管理 Agent 私有 EventNote Store 与全局共享 Facts Store。
  *
  * 文件结构:
  * ```
  * data/
- * ├── agent_pero/
- * │   ├── main.tdb          ← 主模式事件记忆
- * │   ├── social.tdb        ← 社交模式事件记忆
- * │   ├── diary.tdb         ← Agent 专属日记（AIOS Phase5 隔离）
- * │   ├── rnn_main.bin      ← ContextRNN 隐状态
- * │   └── rnn_social.bin
- * ├── agent_neko/
- * │   ├── main.tdb
- * │   └── diary.tdb
+ * ├── agent_pero/memory.tdb
+ * ├── agent_neko/memory.tdb
+ * └── knowledge/facts.tdb
  * ```
- * （shared/diary.tdb 已废弃，保留向后兼容但不再使用）
  *
  * @module packages/backend/src/repositories/storeRegistry
  */
 
 import path from 'node:path'
-import { mkdirSync, existsSync, rmSync } from 'node:fs'
+import { mkdirSync, existsSync, rmSync, readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 const _require = createRequire(import.meta.url)
 // triviumdb 是 NAPI CJS 模块 (module.exports = { TriviumDB })，ESM 只能通过 require 加载
@@ -40,6 +31,7 @@ const logger = createLogger('StoreRegistry')
 
 /** Store 模式 */
 export type StoreMode = 'main' | 'social'
+export type SharedStoreKind = 'facts'
 
 /** 向量维度配置 (与 EmbeddingService 对齐) */
 const DEFAULT_DIM = 1536
@@ -69,17 +61,13 @@ export class MemoryStoreRegistry {
     return this.getOrCreate(tdbPath)
   }
 
-  /**
-   * Agent 专属日记 Store（按 Agent 隔离）
-   *
-   * AIOS(Phase5): 日记从 shared/diary.tdb 改为 agent_{agentId}/diary.tdb，
-   * 避免不同 Agent 的日记互相污染。
-   *
-   * @returns data/agent_{agentId}/diary.tdb
-   */
-  getDiaryStore(agentId: string): TriviumDBType {
-    const tdbPath = this.pathResolver.resolve(`@data/agent_${agentId}/diary.tdb`)
-    return this.getOrCreate(tdbPath)
+  /** 全 Agent 共享的事实库。 */
+  getSharedStore(kind: SharedStoreKind): TriviumDBType {
+    return this.getOrCreate(this.resolveSharedStorePath(kind))
+  }
+
+  resolveSharedStorePath(kind: SharedStoreKind): string {
+    return this.pathResolver.resolve(`@data/knowledge/${kind}.tdb`)
   }
 
   /**
@@ -102,9 +90,66 @@ export class MemoryStoreRegistry {
     }
   }
 
+  /** 当前Store维度；热更新时由重建流程统一切换。 */
+  getDimension(): number {
+    return this.dim
+  }
+
+  removeLegacyStores(): void {
+    const dataRoot = this.pathResolver.resolve('@data')
+    if (!existsSync(dataRoot)) return
+    this.removeStoresRecursively(dataRoot, true)
+  }
+
+  /** 关闭并删除所有旧维度Store，切换后由调用方从SQLite重建索引。 */
+  resetAllForDimension(dimension: number): void {
+    if (!Number.isInteger(dimension) || dimension <= 0) throw new Error('Embedding维度必须为正整数')
+    for (const store of this.stores.values()) store.close()
+    this.stores.clear()
+    this.textIndexDirty.clear()
+    const dataRoot = this.pathResolver.resolve('@data')
+    if (existsSync(dataRoot)) this.removeStoresRecursively(dataRoot, false)
+    this.dim = dimension
+    logger.info(`向量Store维度已切换: ${dimension}`)
+  }
+
+  /** 安全关闭所有 Store，先落盘再释放文件锁。 */
+  closeAll(): void {
+    for (const [tdbPath, store] of this.stores) {
+      try {
+        store.close()
+        logger.debug(`Store 已关闭: ${tdbPath}`)
+      } catch (err) {
+        logger.warn(`Store 关闭失败: ${tdbPath}`, { error: err })
+      }
+    }
+    this.stores.clear()
+    this.textIndexDirty.clear()
+  }
+
+  /** Store旁保存维度元数据，用于升级时识别旧索引。 */
+  private dimensionPath(tdbPath: string): string {
+    return `${tdbPath}.dimension`
+  }
+
+  private removeStoresRecursively(directory: string, legacyOnly: boolean): void {
+    for (const entry of _require('node:fs').readdirSync(directory, { withFileTypes: true })) {
+      const target = path.join(directory, entry.name)
+      if (entry.isDirectory()) {
+        this.removeStoresRecursively(target, legacyOnly)
+        continue
+      }
+      const filePattern = legacyOnly
+        ? /(?:^|[\\/])(main|diary)\.tdb(?:\.(?:vec|wal|lock|flush_ok|quiver|quiver\.meta|text|text\.meta|dimension))?$/
+        : /(?:^|[\\/])(memory|social|facts)\.tdb(?:\.(?:vec|wal|lock|flush_ok|quiver|quiver\.meta|text|text\.meta|dimension))?$/
+      if (filePattern.test(target)) rmSync(target, { force: true })
+    }
+  }
+
   /** 获取指定 Agent Store 的文件路径 */
   resolveAgentStorePath(agentId: string, mode: StoreMode): string {
-    return this.pathResolver.resolve(`@data/agent_${agentId}/${mode}.tdb`)
+    const fileName = mode === 'main' ? 'memory.tdb' : 'social.tdb'
+    return this.pathResolver.resolve(`@data/agent_${agentId}/${fileName}`)
   }
 
   /** 安全关闭所有 Store，强制落盘 */
@@ -123,7 +168,7 @@ export class MemoryStoreRegistry {
    * 重编译所有 Store 的 BM25 文本索引
    *
    * TriviumDB 的 indexText() 是增量追加，必须调 buildTextIndex() 才能生效。
-   * 应由 BackgroundScheduler 定期触发。
+   * 应由 KernelScheduler 周期计划定期触发。
    */
   rebuildAllTextIndexes(): void {
     for (const [tdbPath, store] of this.stores) {
@@ -205,6 +250,27 @@ export class MemoryStoreRegistry {
     return stats
   }
 
+  /** 统计现有物理 Store 的节点总数，不为缺失的 Store 创建空文件。 */
+  countExistingNodes(agentIds: string[]): number {
+    const paths = new Set<string>([this.resolveSharedStorePath('facts')])
+    for (const agentId of agentIds) {
+      paths.add(this.resolveAgentStorePath(agentId, 'main'))
+      paths.add(this.resolveAgentStorePath(agentId, 'social'))
+    }
+
+    let total = 0
+    for (const tdbPath of paths) {
+      const openedStore = this.stores.get(tdbPath)
+      if (!openedStore && !existsSync(tdbPath)) continue
+      try {
+        total += (openedStore ?? this.getOrCreate(tdbPath)).nodeCount()
+      } catch (error) {
+        logger.warn(`Store 节点统计失败: ${tdbPath}`, { error })
+      }
+    }
+    return total
+  }
+
   /** 清空指定 Agent 的物理 Store；关闭缓存实例后删除文件，下次访问会创建空库。 */
   resetAgentStore(agentId: string, mode: StoreMode): void {
     const tdbPath = this.resolveAgentStorePath(agentId, mode)
@@ -214,10 +280,47 @@ export class MemoryStoreRegistry {
       this.stores.delete(tdbPath)
     }
     this.textIndexDirty.delete(tdbPath)
-    rmSync(tdbPath, { force: true })
-    rmSync(`${tdbPath}-wal`, { force: true })
-    rmSync(`${tdbPath}-shm`, { force: true })
+    for (const suffix of [
+      '',
+      '.vec',
+      '.wal',
+      '.lock',
+      '.flush_ok',
+      '.quiver',
+      '.quiver.meta',
+      '.text',
+      '.text.meta',
+      '.dimension',
+    ]) {
+      rmSync(`${tdbPath}${suffix}`, { force: true })
+    }
     logger.info(`Agent Store 已清空: agent=${agentId}, mode=${mode}`)
+  }
+
+  /** 清空共享 Store；下次访问时创建空库。 */
+  resetSharedStore(kind: SharedStoreKind): void {
+    const tdbPath = this.resolveSharedStorePath(kind)
+    const store = this.stores.get(tdbPath)
+    if (store) {
+      store.close()
+      this.stores.delete(tdbPath)
+    }
+    this.textIndexDirty.delete(tdbPath)
+    for (const suffix of [
+      '',
+      '.vec',
+      '.wal',
+      '.lock',
+      '.flush_ok',
+      '.quiver',
+      '.quiver.meta',
+      '.text',
+      '.text.meta',
+      '.dimension',
+    ]) {
+      rmSync(`${tdbPath}${suffix}`, { force: true })
+    }
+    logger.info(`共享 Store 已清空: kind=${kind}`)
   }
 
   /** 获取或创建 TriviumDB 实例 */
@@ -231,12 +334,28 @@ export class MemoryStoreRegistry {
       mkdirSync(dir, { recursive: true })
     }
 
+    const dimensionPath = this.dimensionPath(tdbPath)
+    if (existsSync(tdbPath) && existsSync(dimensionPath)) {
+      const storedDimension = Number(readFileSync(dimensionPath, 'utf8'))
+      if (storedDimension !== this.dim) {
+        throw new Error(`向量Store维度不匹配: store=${storedDimension}, config=${this.dim}`)
+      }
+    }
     logger.info(`打开 TriviumDB Store: ${tdbPath}`)
-    store = new TriviumDB(tdbPath, this.dim, 'f32', 'normal')
+    store = new TriviumDB(tdbPath, {
+      dim: this.dim,
+      dtype: 'f32',
+      syncMode: 'normal',
+      storageMode: 'mmap',
+      autoBuildQuiver: true,
+      memoryLimitMb: 512,
+      accessMode: 'readWrite',
+      missingIndexPolicy: 'fallback',
+    })
+    writeFileSync(dimensionPath, String(this.dim), 'utf8')
 
-    // 性能与安全配置 (TriviumDB 最佳实践)
+    // 定时压缩仍由引擎托管；内存预算已在打开前传入，避免初始化峰值越界。
     store.enableAutoCompaction(300) // 每 5 分钟自动压缩落盘
-    store.setMemoryLimit(512) // 内存上限 512MB，防止 OOM
     this.stores.set(tdbPath, store)
     return store
   }

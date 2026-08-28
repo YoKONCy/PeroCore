@@ -9,14 +9,16 @@
  * @module packages/frontend/src/composables/chat/useChat
  */
 
+import type { ConversationMessageProjection } from '@infos/shared'
 import { computed } from 'vue'
-import { useThreadStore } from '../../stores'
+import { useCompositorStore, useThreadStore } from '../../stores'
 import { useAgentStore } from '../../stores'
 import { useTaskToastStore } from '../../stores/taskToastStore'
 import { chatApi } from '../../api/modules/chatApi'
 import { logger } from '../../lib/logger'
 import type { ChatRequest } from '../../api/modules/chatApi'
 import type { ThreadChannel } from '../../api/modules/threadsApi'
+import type { AttachmentInfo } from '../../api/modules/attachmentsApi'
 
 /** useChat 配置 */
 export interface UseChatOptions {
@@ -28,6 +30,7 @@ export function useChat(options: UseChatOptions = {}) {
   const { channel = 'desktop' } = options
 
   const threadStore = useThreadStore()
+  const compositor = useCompositorStore()
   const agentStore = useAgentStore()
   // M05-B4: 对话 tab 的 llm_error / 工具失败统一迁移到 TaskToast 体系
   const taskToast = useTaskToastStore()
@@ -50,6 +53,34 @@ export function useChat(options: UseChatOptions = {}) {
   /** 当前 AbortController（用于取消流） */
   let currentAbort: AbortController | null = null
 
+  function publishWorkspaceChanges(
+    message: ConversationMessageProjection,
+    requestAgentId: string,
+    requestThreadId: string,
+  ): void {
+    for (const call of message.toolCalls) {
+      if (call.isError || !call.result || !['write_file', 'edit_file'].includes(call.name)) continue
+      try {
+        const args = JSON.parse(call.args) as Record<string, unknown>
+        const result = JSON.parse(call.result) as Record<string, unknown>
+        const path = String(result.path ?? args.path ?? args.file_path ?? '')
+        if (!path || result.error) continue
+        window.dispatchEvent(
+          new CustomEvent('infos:workspace-file-changed', {
+            detail: {
+              agentId: requestAgentId,
+              threadId: requestThreadId,
+              path,
+              operation: result.operation ?? (call.name === 'write_file' ? 'write' : 'edit'),
+            },
+          }),
+        )
+      } catch (error) {
+        logger.warn('useChat', '无法解析文件工具结果，跳过工作区自动刷新', error)
+      }
+    }
+  }
+
   /**
    * 发送消息（流式）
    *
@@ -62,6 +93,7 @@ export function useChat(options: UseChatOptions = {}) {
   async function sendMessage(
     text: string,
     attachmentIds: string[] = [],
+    attachments: AttachmentInfo[] = [],
     imageMode: 'auto' | 'native' | 'relay' = 'auto',
     workspaceContext?: { filePath?: string; terminalId?: string },
   ): Promise<boolean> {
@@ -102,6 +134,18 @@ export function useChat(options: UseChatOptions = {}) {
 
     // 1. 添加用户消息
     const userMsg = createMessage('user', trimmed)
+    userMsg.attachments = attachments.map((attachment) => ({
+      id: attachment.id,
+      threadId: requestThreadId,
+      messageId: null,
+      kind: attachment.kind,
+      originalName: attachment.originalName,
+      mimeType: attachment.mimeType,
+      sizeBytes: attachment.sizeBytes,
+      contextPolicy: attachment.contextPolicy,
+      status: attachment.status,
+    }))
+    userMsg.surfaceId = threadStore.installLocalMessageSurface(userMsg.id, trimmed, attachments)
     threadStore.addMessage(userMsg)
     threadStore.inputText = ''
 
@@ -110,6 +154,8 @@ export function useChat(options: UseChatOptions = {}) {
     threadStore.addMessage(assistantMsg)
     threadStore.streamingMessageId = assistantMsg.id
     threadStore.generationState = 'thinking'
+    threadStore.setRagFailure(null)
+    threadStore.setRagProgress('正在编译对话上下文')
 
     // 3. 构建请求 — Thread 模式：threadId + content + agentId
     const request: ChatRequest = {
@@ -124,104 +170,37 @@ export function useChat(options: UseChatOptions = {}) {
     const ownsRequestView = () =>
       threadStore.threadId === requestThreadId && threadStore.agentId === requestAgentId
 
-    // 4. 发起 SSE 流，并在服务端确认完成后返回发送结果
+    // 4. 发起唯一 Surface SSE 流；消息正文、工具与状态不再写入 ThreadStore。
     return await new Promise<boolean>((resolve) => {
       currentAbort = chatApi.stream(request, {
-        onDelta: (data) => {
+        onRagProgress: (progress) => {
           if (!ownsRequestView()) return
-          // 首次 delta 时切换到 generating 状态
-          if (threadStore.generationState === 'thinking') {
-            threadStore.generationState = 'generating'
-          }
-          threadStore.appendToLast(data.content)
-        },
-
-        onStatus: (data) => {
-          if (data.state === 'thinking') {
-            threadStore.generationState = 'thinking'
-          } else if (data.state === 'calling') {
-            threadStore.generationState = 'tool_calling'
-          } else if (data.state === 'generating') {
-            threadStore.generationState = 'generating'
-          } else if (data.state === 'tool_failed') {
-            threadStore.generationState = 'generating'
-            // M05-B4: 工具连续失败同样走 TaskToast（warning 语义近似 task_failed 预警）
-            taskToast.push({
-              type: 'task_failed',
-              agentId: agentStore.activeAgentId,
-              title: '工具调用告警',
-              message: data.message || '工具连续失败，角色将改为说明原因',
+          threadStore.setRagProgress(progress.message)
+          if (progress.status === 'failed') {
+            threadStore.setRagFailure({
+              kind: progress.failureKind ?? 'rag',
+              message: progress.message,
             })
           }
         },
-
-        onToolCall: (data) => {
-          threadStore.generationState = 'tool_calling'
-          // 追加工具调用信息到最后一条消息（带 callId，用于与 tool_result 关联）
-          const list = threadStore.messages
-          if (list.length === 0) return
-          const last = list[list.length - 1]!
-          const toolCalls = [
-            ...(last.toolCalls || []),
-            {
-              name: data.name,
-              args: typeof data.args === 'string' ? data.args : JSON.stringify(data.args),
-              callId: data.callId,
-            },
-          ]
-          const updated = { ...last, toolCalls }
-          threadStore.messages = [...list.slice(0, -1), updated]
-        },
-
-        onToolResult: (data) => {
+        onSurface: (frame) => {
           if (!ownsRequestView()) return
-          // 通过 callId 精确匹配对应的 tool_call，回填 result
-          const list = threadStore.messages
-          if (list.length === 0) return
-          const last = list[list.length - 1]!
-          if (!last.toolCalls) return
-
-          const completedCall = last.toolCalls.find((tc) => tc.callId === data.callId)
-          const toolCalls = last.toolCalls.map((tc) =>
-            tc.callId === data.callId && tc.result === undefined
-              ? { ...tc, result: data.result, isError: data.isError, durationMs: data.durationMs }
-              : tc,
-          )
-          const updated = { ...last, toolCalls }
-          threadStore.messages = [...list.slice(0, -1), updated]
-
-          // 文件写入/编辑成功后发布工作区变更事件。
-          // WorkspaceTab 仅在当前挂载时消费：刷新资源树；新建文件额外自动打开。
-          if (
-            completedCall &&
-            !data.isError &&
-            ['write_file', 'edit_file'].includes(completedCall.name)
-          ) {
-            try {
-              const args = JSON.parse(completedCall.args) as Record<string, unknown>
-              const result = JSON.parse(data.result) as Record<string, unknown>
-              const path = String(result.path ?? args.path ?? args.file_path ?? '')
-              if (path && !result.error) {
-                window.dispatchEvent(
-                  new CustomEvent('infos:workspace-file-changed', {
-                    detail: {
-                      agentId: requestAgentId,
-                      threadId: requestThreadId,
-                      path,
-                      operation:
-                        result.operation ??
-                        (completedCall.name === 'write_file' ? 'write' : 'edit'),
-                    },
-                  }),
-                )
-              }
-            } catch (error) {
-              logger.warn('useChat', '无法解析文件工具结果，跳过工作区自动刷新', error)
-            }
+          threadStore.applySurfaceFrame(frame)
+          if (frame.operation.type === 'surface.open') {
+            threadStore.setRagProgress(null)
           }
-
-          // 工具执行完毕，回到 generating
-          threadStore.generationState = 'generating'
+          if (
+            frame.operation.type === 'surface.upsert-node' &&
+            frame.operation.node.kind === 'status'
+          ) {
+            const state = (frame.operation.node.props as { state?: string }).state
+            if (state === 'thinking') threadStore.generationState = 'thinking'
+            else if (state === 'calling') threadStore.generationState = 'tool_calling'
+            else if (state === 'generating') threadStore.generationState = 'generating'
+          }
+          if (frame.operation.type === 'surface.commit') {
+            publishWorkspaceChanges(frame.operation.message, requestAgentId, requestThreadId)
+          }
         },
 
         onDone: () => {
@@ -233,12 +212,7 @@ export function useChat(options: UseChatOptions = {}) {
               detail: { agentId: requestAgentId, threadId: requestThreadId },
             }),
           )
-          setTimeout(() => {
-            if (!ownsRequestView()) return
-            threadStore.loadThreadMessages(requestThreadId, requestAgentId).catch((err) => {
-              logger.error('useChat', '对话完成后刷新历史失败', err)
-            })
-          }, 250)
+          // surface.commit已经携带权威Projection和真实消息ID，无需再次回灌覆盖本轮遥测。
         },
 
         onError: (data) => {
@@ -249,12 +223,7 @@ export function useChat(options: UseChatOptions = {}) {
           resolve(false)
           if (ownsRequestView()) {
             void threadStore.loadThreadMessages(requestThreadId, requestAgentId).catch((err) => {
-              logger.error('useChat', '失败回复回灌失败', err)
-              const tail =
-                data.code === 'STREAM_TRUNCATED'
-                  ? `\n\n⚠️ [截断] ${data.message}`
-                  : `\n\n⚠️ ${data.message}`
-              threadStore.appendToLast(tail)
+              logger.error('useChat', '失败 Projection 回灌失败', err)
             })
           }
           // M05-B4: 对话生成失败走 TaskToast（附带出错角色，任务中心可回溯）
@@ -269,8 +238,17 @@ export function useChat(options: UseChatOptions = {}) {
     })
   }
 
+  function freezeRunningSurfaces(): void {
+    const threadId = threadStore.threadId
+    const openSurfaces = [...compositor.surfaces.values()].filter(
+      (surface) => surface.threadId === threadId && surface.state === 'open',
+    )
+    for (const surface of openSurfaces) compositor.terminateThinking(surface.surfaceId)
+  }
+
   /** 停止当前生成 */
   async function stopGeneration(): Promise<void> {
+    freezeRunningSurfaces()
     // 客户端中断 SSE 流
     if (currentAbort) {
       currentAbort.abort()
@@ -316,7 +294,11 @@ export function useChat(options: UseChatOptions = {}) {
   }
 
   /** 创建消息对象 */
-  function createMessage(role: 'user' | 'assistant', content: string, isStreaming = false) {
+  function createMessage(
+    role: 'user' | 'assistant',
+    content: string,
+    isStreaming = false,
+  ): import('../../stores').ChatMessage {
     return {
       id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       role,

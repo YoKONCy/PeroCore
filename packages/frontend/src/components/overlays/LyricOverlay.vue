@@ -14,6 +14,7 @@
  */
 import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { PixelIcon } from '../pixel'
+import RunPulse from '../chat/RunPulse.vue'
 
 interface Props {
   text: string
@@ -167,16 +168,13 @@ function onMouseUp() {
 
         <div class="lyric-bar">
           <!-- 思考状态 -->
-          <div v-if="isThinking" class="lyric-thinking flex items-center gap-3 px-2">
-            <div class="thinking-dots">
-              <div class="dot" />
-              <div class="dot" />
-              <div class="dot" />
-            </div>
-            <span class="text-xs font-bold text-white/90 tracking-widest">
-              {{ thinkingMessage }}
-            </span>
-          </div>
+          <RunPulse
+            v-if="isThinking"
+            state="thinking"
+            :label="thinkingMessage"
+            compact
+            class="lyric-thinking-pulse"
+          />
 
           <!-- 文字内容 -->
           <div v-else class="lyric-text-container">
@@ -255,37 +253,10 @@ function onMouseUp() {
   cursor: grabbing;
 }
 
-/* 思考点动画 (粉色) */
-.thinking-dots {
-  display: flex;
-  gap: 4px;
-}
-
-.dot {
-  width: 6px;
-  height: 6px;
-  background: #f9a8d4;
-  border-radius: 50%;
-  animation: dot-wave 1.5s infinite ease-in-out;
-}
-
-.dot:nth-child(2) {
-  animation-delay: 0.2s;
-}
-.dot:nth-child(3) {
-  animation-delay: 0.4s;
-}
-
-@keyframes dot-wave {
-  0%,
-  100% {
-    transform: translateY(0);
-    opacity: 0.4;
-  }
-  50% {
-    transform: translateY(-4px);
-    opacity: 1;
-  }
+.lyric-thinking-pulse {
+  box-shadow:
+    0 10px 30px color-mix(in srgb, var(--ui-accent-purple) 18%, transparent),
+    0 2px 8px rgba(0, 0, 0, 0.18);
 }
 
 /* 进场轻快, 退场缓慢平滑淡出 (歌词韵味) */

@@ -1,0 +1,18 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "types": ["node"],
+    "paths": {
+      "@infos/shared": ["../../shared/src"],
+      "@infos/node-sdk": ["../../node-sdk/src"],
+      "@infos/node-sdk/*": ["../../node-sdk/src/*"],
+      "@infos/node-host": ["../../node-host/src"],
+      "@infos/node-host/*": ["../../node-host/src/*"],
+      "@infos/document-engine": ["../../document-engine/src"],
+      "@infos/document-engine/*": ["../../document-engine/src/*"]
+    }
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "client", "**/*.test.ts"]
+}

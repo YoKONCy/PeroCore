@@ -7,6 +7,7 @@
  * @module packages/frontend/src/api/modules/socialApi
  */
 
+import type { SurfaceProjectionSnapshot } from '@infos/shared'
 import { apiClient } from '../client'
 import { configApi } from './configApi'
 
@@ -33,10 +34,13 @@ export interface SocialModeConfig {
   groupWhitelist: string[]
   groupBlacklist: string[]
   userBlacklist: string[]
+  ownerPrivateOnlyAgentIds: string[]
 }
 
 /** 社交配置（存储在 configs 表的 'social' key，JSON 字符串） */
 export interface SocialConfig {
+  /** 单实例 Social 负责自主社交的角色 */
+  agentId?: string
   /** 主人的 QQ 号（用于权限识别 + prompt 注入） */
   ownerQq?: string
   /** QQ Bot 账号 → Agent 映射 */
@@ -75,10 +79,16 @@ export const socialApi = {
   saveModeConfig: (config: SocialModeConfig) =>
     apiClient.put<SocialModeConfig>('/social/mode-config', config),
 
+  getAgentConfig: () => apiClient.get<{ agentId: string }>('/social/agent-config'),
+  saveAgentConfig: (agentId: string) =>
+    apiClient.put<{ agentId: string; closedSessions: number }>('/social/agent-config', { agentId }),
+
   getContacts: (agentId: string) =>
     apiClient.get<{ contacts: SocialContactImpression[] }>(
       `/social/contacts/${encodeURIComponent(agentId)}`,
     ),
+  getProjection: (agentId: string) =>
+    apiClient.get<SurfaceProjectionSnapshot>(`/social/projection/${encodeURIComponent(agentId)}`),
 
   syncHistory: (platform = 'qq') =>
     apiClient.post(`/social/history-sync/${encodeURIComponent(platform)}`),

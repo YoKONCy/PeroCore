@@ -6,9 +6,6 @@ dist_electron/
 
 # Electron 和桌面专属（Docker 不需要）
 electron/
-packages/native/render-core/src/
-packages/native/render-core/target/
-packages/native/render-core/Cargo.*
 
 # 开发工具和文档
 _docs_/
@@ -16,6 +13,10 @@ _docs_/
 .vscode/
 *.md
 !packages/wiki/**/*.md
+!packages/backend/src/assets/**/*.md
+!packages/backend/src/services/mdp/prompts/**/*.md
+!packages/backend/src/skills/**/*.md
+!packages/apps/social/prompts/**/*.md
 
 # 系统文件
 .DS_Store

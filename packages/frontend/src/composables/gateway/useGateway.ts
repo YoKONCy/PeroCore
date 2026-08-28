@@ -12,6 +12,13 @@
  */
 
 import { ref, computed, onUnmounted } from 'vue'
+import {
+  validateSurfaceFrame,
+  validateVersionedMessage,
+  type GatewayEnvelope as SharedGatewayEnvelope,
+  type KernelInputSeat,
+  type SurfaceFrame,
+} from '@infos/shared'
 import { getGatewayWsUrl } from '../../api/transport'
 import { logger } from '../../lib/logger'
 
@@ -33,9 +40,12 @@ export function useGateway(events: GatewayEvents = {}) {
 }
 
 export interface GatewayEnvelope extends GatewayMessage {
+  protocolVersion: 1
   id?: string
   sourceId?: string
   targetId?: string
+  streamId?: string
+  sequence?: number
   timestamp?: number
 }
 
@@ -60,10 +70,8 @@ export interface TaskProgress {
 export interface GatewayEvents {
   onNotification?: (data: GatewayNotification) => void
   onTaskProgress?: (data: TaskProgress) => void
-  onStreamEnd?: (data: { sessionId: string }) => void
-  onStreamDelta?: (data: { content: string; sessionId: string }) => void
+  onSurface?: (frame: SurfaceFrame) => void
   onStateUpdate?: (data: Record<string, unknown>) => void
-  onToolStatus?: (data: { name: string; state: string; result?: string }) => void
   onAudioChunk?: (data: ArrayBuffer) => void
   onVoiceState?: (data: { sessionId: string; state: string }) => void
   onHeartbeat?: () => void
@@ -95,15 +103,40 @@ const DEFAULT_RECONNECT: ReconnectConfig = {
   maxDelay: 30000,
 }
 
+const CLIENT_NODE_KEY = 'infos.clientNodeId'
+function getOrCreateStableNodeId(): string {
+  try {
+    const existing = localStorage.getItem(CLIENT_NODE_KEY)
+    if (existing) return existing
+    const nodeId = `client-${crypto.randomUUID()}`
+    localStorage.setItem(CLIENT_NODE_KEY, nodeId)
+    return nodeId
+  } catch {
+    return `client-${crypto.randomUUID()}`
+  }
+}
+
+function isElectronClient(): boolean {
+  return typeof window !== 'undefined' && 'electron' in window
+}
+
+function detectClientOs(): 'windows' | 'linux' | 'macos' | 'android' | 'ios' | 'web' {
+  const platform = navigator.userAgent.toLowerCase()
+  if (platform.includes('windows')) return 'windows'
+  if (platform.includes('android')) return 'android'
+  if (platform.includes('iphone') || platform.includes('ipad')) return 'ios'
+  if (platform.includes('mac')) return 'macos'
+  if (platform.includes('linux')) return 'linux'
+  return 'web'
+}
+
 function createGatewayClient() {
   const eventSubscribers = new Set<GatewayEvents>()
   const events: GatewayEvents = {
     onNotification: (data) => eventSubscribers.forEach((item) => item.onNotification?.(data)),
     onTaskProgress: (data) => eventSubscribers.forEach((item) => item.onTaskProgress?.(data)),
-    onStreamEnd: (data) => eventSubscribers.forEach((item) => item.onStreamEnd?.(data)),
-    onStreamDelta: (data) => eventSubscribers.forEach((item) => item.onStreamDelta?.(data)),
+    onSurface: (frame) => eventSubscribers.forEach((item) => item.onSurface?.(frame)),
     onStateUpdate: (data) => eventSubscribers.forEach((item) => item.onStateUpdate?.(data)),
-    onToolStatus: (data) => eventSubscribers.forEach((item) => item.onToolStatus?.(data)),
     onAudioChunk: (data) => eventSubscribers.forEach((item) => item.onAudioChunk?.(data)),
     onVoiceState: (data) => eventSubscribers.forEach((item) => item.onVoiceState?.(data)),
     onHeartbeat: () => eventSubscribers.forEach((item) => item.onHeartbeat?.()),
@@ -112,10 +145,18 @@ function createGatewayClient() {
   const retryCount = ref(0)
   const lastError = ref<string | null>(null)
   const isConnected = computed(() => state.value === 'connected')
+  const stableNodeId = getOrCreateStableNodeId()
+  const sessionId = ref<string | null>(null)
+  const sessionGeneration = ref(0)
+  const inputSeat = ref<KernelInputSeat | null>(null)
+  const subscriptions = new Map<string, number>()
+  const seenMessageIds = new Set<string>()
 
   let ws: WebSocket | null = null
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null
+  let seatRenewTimer: ReturnType<typeof setInterval> | null = null
+  let seatRecovery: Promise<void> | null = null
   let isManualClose = false
 
   /** RPC 请求/响应配对 Map */
@@ -131,6 +172,7 @@ function createGatewayClient() {
     targetId = 'backend',
   ): GatewayEnvelope {
     return {
+      protocolVersion: 1,
       id: crypto.randomUUID(),
       type,
       sourceId: 'frontend',
@@ -194,7 +236,19 @@ function createGatewayClient() {
       state.value = 'connected'
       retryCount.value = 0
       lastError.value = null
-      sendEnvelope(createEnvelope('hello', { deviceName: 'Frontend' }))
+      sendEnvelope(
+        createEnvelope('hello', {
+          nodeId: stableNodeId,
+          principalId: 'pero',
+          deviceName: isElectronClient() ? 'Electron Client' : 'Web Client',
+          platform: {
+            os: detectClientOs(),
+            runtime: isElectronClient() ? 'electron' : 'browser',
+          },
+          supportedVersions: [1],
+          features: ['surface-v1', 'audience-v1', 'cursor-v1', 'input-seat-v1', 'audio-output-v1'],
+        }),
+      )
       startHeartbeat()
       logger.info('Gateway', 'WS 已连接')
     }
@@ -215,6 +269,9 @@ function createGatewayClient() {
     ws.onclose = () => {
       state.value = 'disconnected'
       stopHeartbeat()
+      stopSeatRenewal()
+      inputSeat.value = null
+      sessionId.value = null
 
       if (!isManualClose) {
         scheduleReconnect()
@@ -240,6 +297,9 @@ function createGatewayClient() {
     isManualClose = true
     clearReconnectTimer()
     stopHeartbeat()
+    stopSeatRenewal()
+    inputSeat.value = null
+    sessionId.value = null
 
     // 清理等待中的 RPC 请求
     for (const [id, pending] of pendingRequests) {
@@ -303,6 +363,107 @@ function createGatewayClient() {
     })
   }
 
+  async function subscribe(streamId: string): Promise<void> {
+    if (!subscriptions.has(streamId)) subscriptions.set(streamId, 0)
+    if (!ws || ws.readyState !== WebSocket.OPEN || !sessionId.value) return
+    const result = await request('gateway.subscribe', {
+      streamId,
+      lastSequence: subscriptions.get(streamId) ?? 0,
+    })
+    subscriptions.set(streamId, Number(result.latestSequence ?? 0))
+    if (result.snapshotRequired === true) {
+      window.dispatchEvent(
+        new CustomEvent('infos:gateway-snapshot-required', { detail: { streamId } }),
+      )
+      return
+    }
+    for (const event of (result.events ?? []) as SharedGatewayEnvelope[]) {
+      handleMessage(JSON.stringify(event))
+    }
+  }
+
+  async function restoreSubscriptions(): Promise<void> {
+    await Promise.all([...subscriptions.keys()].map((streamId) => subscribe(streamId)))
+  }
+
+  async function acquireInputSeat(): Promise<void> {
+    const response = await request('input_seat.acquire', {
+      principalId: 'pero',
+      windowId: stableNodeId,
+      leaseMs: 60_000,
+    })
+    inputSeat.value = response.seat as unknown as KernelInputSeat
+    startSeatRenewal()
+  }
+
+  function recoverInputSeat(): Promise<void> {
+    if (seatRecovery) return seatRecovery
+    if (!document.hasFocus()) return Promise.resolve()
+    inputSeat.value = null
+    seatRecovery = acquireInputSeat().finally(() => {
+      seatRecovery = null
+    })
+    return seatRecovery
+  }
+
+  function handleWindowFocus(): void {
+    if (sessionId.value) {
+      void recoverInputSeat().catch((error) => {
+        logger.warn('Gateway', `聚焦窗口获取 Input Seat 失败: ${(error as Error).message}`)
+      })
+    }
+  }
+
+  function handleWindowBlur(): void {
+    stopSeatRenewal()
+    inputSeat.value = null
+  }
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('focus', handleWindowFocus)
+    window.addEventListener('blur', handleWindowBlur)
+  }
+
+  function startSeatRenewal(): void {
+    stopSeatRenewal()
+    seatRenewTimer = setInterval(() => {
+      const seat = inputSeat.value
+      if (!seat) return
+      void request('input_seat.renew', { seatId: seat.seatId, leaseMs: 60_000 })
+        .then((response) => {
+          inputSeat.value = response.seat as unknown as KernelInputSeat
+        })
+        .catch((error: Error & { code?: string }) => {
+          if (
+            error.code === 'INPUT_SEAT_EXPIRED' ||
+            error.code === 'INPUT_SEAT_IDENTITY_MISMATCH'
+          ) {
+            void recoverInputSeat().catch((recoveryError) => {
+              logger.warn('Gateway', `Input Seat 重新获取失败: ${(recoveryError as Error).message}`)
+            })
+            return
+          }
+          logger.warn('Gateway', `Input Seat 续租失败: ${error.message}`)
+        })
+    }, 30_000)
+  }
+
+  function stopSeatRenewal(): void {
+    if (seatRenewTimer) clearInterval(seatRenewTimer)
+    seatRenewTimer = null
+  }
+
+  function seatProof(): NonNullable<import('@infos/shared').SurfaceInput['seat']> | undefined {
+    const seat = inputSeat.value
+    if (!seat) return undefined
+    return {
+      seatId: seat.seatId,
+      sessionId: seat.sessionId,
+      windowId: seat.windowId,
+      epoch: seat.epoch,
+    }
+  }
+
   /**
    * 发送二进制音频流 sendStream()
    *
@@ -352,6 +513,32 @@ function createGatewayClient() {
       const msg = JSON.parse(raw) as GatewayEnvelope & {
         payload: Record<string, unknown>
       }
+      validateVersionedMessage(msg)
+      if (msg.type === 'hello_ack') {
+        if (msg.payload.agreedVersion !== 1) throw new Error('KERNEL_PROTOCOL_AGREEMENT_REQUIRED')
+        sessionId.value = typeof msg.payload.sessionId === 'string' ? msg.payload.sessionId : null
+        sessionGeneration.value = Number(msg.payload.generation ?? 0)
+        if (document.hasFocus()) {
+          void acquireInputSeat().catch((error) => {
+            logger.error('Gateway', 'Input Seat 获取失败', error)
+          })
+        }
+        void restoreSubscriptions().catch((error) => {
+          logger.error('Gateway', 'Durable Stream 恢复失败', error)
+        })
+      }
+      if (msg.id && msg.type === 'push') {
+        if (seenMessageIds.has(msg.id)) return
+        seenMessageIds.add(msg.id)
+        if (seenMessageIds.size > 2_000)
+          seenMessageIds.delete(seenMessageIds.values().next().value!)
+      }
+      if (msg.streamId && Number.isInteger(msg.sequence)) {
+        subscriptions.set(
+          msg.streamId,
+          Math.max(subscriptions.get(msg.streamId) ?? 0, msg.sequence ?? 0),
+        )
+      }
       // 后端推送通常把业务动作放在 payload.action；没有 action 时退回使用 envelope.type。
       const action = msg.payload?.action as string | undefined
 
@@ -391,19 +578,16 @@ function createGatewayClient() {
         case 'task_progress':
           events.onTaskProgress?.(msg.payload as unknown as TaskProgress)
           break
-        case 'stream_delta':
-          events.onStreamDelta?.(msg.payload as unknown as { content: string; sessionId: string })
+        case 'surface': {
+          const frame = msg.payload.frame as SurfaceFrame | undefined
+          if (frame) {
+            validateSurfaceFrame(frame)
+            events.onSurface?.(frame)
+          }
           break
-        case 'stream_end':
-          events.onStreamEnd?.(msg.payload as unknown as { sessionId: string })
-          break
+        }
         case 'state_update':
           events.onStateUpdate?.(msg.payload)
-          break
-        case 'tool_status':
-          events.onToolStatus?.(
-            msg.payload as unknown as { name: string; state: string; result?: string },
-          )
           break
         case 'audio_chunk': {
           // base64 编码的音频 chunk → ArrayBuffer
@@ -509,6 +693,14 @@ function createGatewayClient() {
     send,
     /** RPC 请求/响应 */
     request,
+    /** 订阅 Durable Stream 并从 Cursor 恢复 */
+    subscribe,
+    /** 当前稳定 Client Node ID */
+    stableNodeId,
+    sessionId,
+    sessionGeneration,
+    inputSeat,
+    seatProof,
     /** 发送二进制音频流 */
     sendStream,
   }

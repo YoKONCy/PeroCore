@@ -1,140 +1,48 @@
-/**
- * Memory API 模块
- *
- * 对齐后端 memory.router.ts + memory.schema.ts 的完整端点。
- *
- */
-
+import type {
+  EventMemoryGraphSnapshot,
+  EventNoteArchiveFilter,
+  EventNoteArchiveResult,
+  EventNoteDetail,
+} from '@infos/shared'
 import { apiClient } from '../client'
 
-/** 记忆 DTO — 与后端 返回结构对齐 */
-export interface MemoryDto {
-  id: number
-  content: string
-  tags: string
-  importance: number
-  type: string
-  source: string
-  timestamp: number
-  /** 情感标记 (对齐 v1) */
-  sentiment?: string
+export interface EventMemorySource {
+  available: boolean
+  messages: Array<{
+    id: number
+    role: string
+    content: string
+    timestamp: string | null
+    pairId: string | null
+  }>
 }
 
-/** 分页数据 */
-export interface PaginatedData<T> {
-  data: T[]
-  total: number
-  page: number
-  pageSize: number
-}
-
-/** 检索结果 */
-export interface MemorySearchResult {
-  id: number
-  content: string
-  score: number
-  tags: string
-  importance: number
-}
-
-/** 图谱节点 */
-export interface MemoryGraphNode {
-  id: number
-  name: string
-  value: number
-  category: string
-  sentiment: string
-  full_content: string
-}
-
-/** 图谱连线 */
-export interface MemoryGraphEdge {
-  source: number
-  target: number
-  value: number
-  relation_type: string
-}
-
-/** 图谱数据 */
-export interface MemoryGraphData {
-  nodes: MemoryGraphNode[]
-  edges: MemoryGraphEdge[]
-}
-
-/** 列表查询参数 — 对齐后端 listMemorySchema */
-export interface ListMemoryParams {
-  page?: number
-  pageSize?: number
-  agentId?: string
-  type?: string
-  source?: string
-  /** 日期筛选 */
-  dateStart?: string
-}
-
-/** 搜索参数 — 对齐后端 searchMemorySchema */
-export interface SearchMemoryParams {
-  query: string
-  agentId?: string
-  source?: string
-  topK?: number
-  minScore?: number
-}
-
-/** 创建参数 — 对齐后端 createMemorySchema */
-export interface CreateMemoryParams {
-  content: string
-  agentId?: string
-  tags?: string
-  importance?: number
-  source?: string
-  type?: string
-  sentiment?: string
-}
-
-/** 故事导入参数 — 对齐后端 MemoryImporter */
-export interface ImportStoryParams {
-  text: string
-  agentId?: string
-  source?: string
-}
-
-/** 故事导入结果 — 对齐后端 ImportResult */
-export interface ImportResult {
-  imported: number
-  skipped: number
-  details: Array<{ content: string; tags: string; importance: number }>
+/** 过滤参数 → querystring（数组以逗号拼接，与后端 csv 解析对齐） */
+function toSearchParams(filter: Partial<EventNoteArchiveFilter>): string {
+  const params = new URLSearchParams()
+  for (const [key, value] of Object.entries(filter)) {
+    if (value === undefined || value === null || value === '') continue
+    const serialized = Array.isArray(value) ? value.join(',') : String(value)
+    if (serialized) params.set(key, serialized)
+  }
+  return params.toString()
 }
 
 export const memoryApi = {
-  /** 分页列表 */
-  list: (params?: ListMemoryParams) => {
-    const query = new URLSearchParams()
-    if (params?.page) query.set('page', String(params.page))
-    if (params?.pageSize) query.set('pageSize', String(params.pageSize))
-    if (params?.agentId) query.set('agentId', params.agentId)
-    if (params?.type) query.set('type', params.type)
-    if (params?.source) query.set('source', params.source)
-    if (params?.dateStart) query.set('dateStart', params.dateStart)
-    const qs = query.toString()
-    return apiClient.get<PaginatedData<MemoryDto>>(`/memories${qs ? `?${qs}` : ''}`)
-  },
+  /** 核心记忆档案：组合过滤 + 分页 + facets + stats */
+  archive: (filter: Partial<EventNoteArchiveFilter>) =>
+    apiClient.get<EventNoteArchiveResult>(`/memories?${toSearchParams(filter)}`),
 
-  /** 创建记忆 */
-  create: (data: CreateMemoryParams) => apiClient.post<MemoryDto>('/memories', data),
+  /** 事件详情（含前后事件与关系） */
+  detail: (id: string) => apiClient.get<EventNoteDetail>(`/memories/${encodeURIComponent(id)}`),
 
-  /** 语义检索 */
-  search: (data: SearchMemoryParams) =>
-    apiClient.post<MemorySearchResult[]>('/memories/search', data),
+  /** 事件来源原始对话 */
+  source: (id: string) =>
+    apiClient.get<EventMemorySource>(`/memories/${encodeURIComponent(id)}/source`),
 
-  /** 图谱数据 */
-  graph: (agentId = 'pero', limit = 100) =>
-    apiClient.get<MemoryGraphData>(`/memories/graph?agentId=${agentId}&limit=${limit}`),
-
-  /** 删除记忆（后端还需 agentId/source query） */
-  remove: (id: number, agentId = 'pero', source = 'desktop') =>
-    apiClient.delete(`/memories/${id}?agentId=${agentId}&source=${source}`),
-
-  /** 故事/文本批量导入 */
-  importStory: (data: ImportStoryParams) => apiClient.post<ImportResult>('/memories/import', data),
+  /** 记忆图谱快照（TDB 批量读取） */
+  graph: (agentId: string, includeArchived = false, limit = 300) =>
+    apiClient.get<EventMemoryGraphSnapshot>(
+      `/memories/graph?agentId=${encodeURIComponent(agentId)}&includeArchived=${includeArchived}&limit=${limit}`,
+    ),
 }

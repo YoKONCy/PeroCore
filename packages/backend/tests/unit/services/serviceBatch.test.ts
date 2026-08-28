@@ -5,10 +5,10 @@ import {
   cleanCQCodes,
   extractAttachments,
   toOneBotSegments,
-} from '@infos/backend/extensions/adapters/napcat/napcatParser'
+} from '@infos/social/adapters/napcat/napcatParser'
 import { ModelService } from '@infos/backend/services/model/modelService'
 import { SchedulerService } from '@infos/backend/services/scheduler/schedulerService'
-import { BackgroundScheduler } from '@infos/backend/services/scheduler/backgroundScheduler'
+import { KernelScheduler } from '@infos/backend/kernel/kernelScheduler'
 
 function createModel(overrides: Record<string, unknown> = {}) {
   return {
@@ -147,14 +147,17 @@ describe('NapCat 消息解析器', () => {
 })
 
 describe('ModelService', () => {
-  it('应当列出与获取模型并遮蔽 API Key', async () => {
+  it('列表遮蔽API Key，单项详情返回编辑所需暗文', async () => {
     const { service } = createModelService([createModel(), createModel({ id: 2, apiKey: 'short' })])
 
     await expect(service.list()).resolves.toEqual([
       expect.objectContaining({ id: 1, apiKey: 'sk-1****7890' }),
       expect.objectContaining({ id: 2, apiKey: '****' }),
     ])
-    await expect(service.getById(1)).resolves.toMatchObject({ id: 1, apiKey: 'sk-1****7890' })
+    await expect(service.getById(1)).resolves.toMatchObject({
+      id: 1,
+      apiKey: 'sk-1234567890',
+    })
   })
 
   it('应当在创建、更新和删除模型后失效缓存', async () => {
@@ -302,7 +305,26 @@ describe('SchedulerService', () => {
   })
 })
 
-describe('BackgroundScheduler', () => {
+function schedulerRuntime() {
+  return {
+    create: vi.fn(async (input) => ({
+      executionId: `execution-${Date.now()}-${Math.random()}`,
+      processId: `process-${Date.now()}`,
+      principalId: input.principalId,
+      taskId: input.taskId,
+      class: input.class,
+      priority: input.priority ?? 5,
+      budget: input.budget ?? {},
+    })),
+    start: vi.fn(),
+    stateChanged: vi.fn().mockResolvedValue(undefined),
+    complete: vi.fn(),
+    timeout: vi.fn(),
+    fail: vi.fn(),
+  }
+}
+
+describe('KernelScheduler周期计划', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
@@ -313,17 +335,17 @@ describe('BackgroundScheduler', () => {
   })
 
   it('应当注册、启动、停止并手动触发任务', async () => {
-    const scheduler = new BackgroundScheduler()
+    const scheduler = new KernelScheduler(schedulerRuntime() as never)
     const handler = vi.fn().mockResolvedValue(undefined)
 
-    scheduler.register({
+    scheduler.registerPeriodic({
       name: 'flush',
       displayName: '刷新任务',
       description: '测试刷新任务',
       intervalMs: 1000,
       handler,
     })
-    const initial = scheduler.getStatus()[0]!
+    const initial = scheduler.getPeriodicScheduleStatus()[0]!
     expect(initial).toMatchObject({
       name: 'flush',
       displayName: '刷新任务',
@@ -336,15 +358,15 @@ describe('BackgroundScheduler', () => {
       nextDueAt: Date.parse('2026-01-01T00:00:01.000Z'),
     })
 
-    scheduler.start()
-    const triggered = await scheduler.triggerNow('flush')
-    scheduler.stop()
+    scheduler.startPeriodic()
+    const triggered = await scheduler.triggerPeriodicNow('flush')
+    scheduler.stopPeriodic()
 
     expect(triggered).toBe(true)
-    expect(scheduler.isStarted).toBe(false)
+    expect(scheduler.isPeriodicStarted).toBe(false)
     expect(handler).toHaveBeenCalledTimes(1)
-    expect(scheduler.getTaskNames()).toEqual(['flush'])
-    expect(scheduler.getStatus()[0]).toMatchObject({
+    expect(scheduler.getPeriodicScheduleNames()).toEqual(['flush'])
+    expect(scheduler.getPeriodicScheduleStatus()[0]).toMatchObject({
       name: 'flush',
       lastStartedAt: Date.parse('2026-01-01T00:00:00.000Z'),
       lastFinishedAt: Date.parse('2026-01-01T00:00:00.000Z'),
@@ -361,33 +383,33 @@ describe('BackgroundScheduler', () => {
     const running = new Promise<void>((resolve) => {
       release = resolve
     })
-    const scheduler = new BackgroundScheduler()
+    const scheduler = new KernelScheduler(schedulerRuntime() as never)
     const failing = vi.fn().mockRejectedValue(new Error('失败'))
     const slow = vi.fn(() => running)
 
-    scheduler.register({
+    scheduler.registerPeriodic({
       name: 'fail',
       displayName: '失败任务',
       description: '测试失败任务',
       intervalMs: 1000,
       handler: failing,
     })
-    scheduler.register({
+    scheduler.registerPeriodic({
       name: 'slow',
       displayName: '慢任务',
       description: '测试防重入',
       intervalMs: 1000,
       handler: slow,
     })
-    await scheduler.triggerNow('fail')
-    const firstSlow = scheduler.triggerNow('slow')
-    const secondSlow = await scheduler.triggerNow('slow')
+    await scheduler.triggerPeriodicNow('fail')
+    const firstSlow = scheduler.triggerPeriodicNow('slow')
+    const secondSlow = await scheduler.triggerPeriodicNow('slow')
     release()
     await firstSlow
 
-    expect(await scheduler.triggerNow('missing')).toBe(false)
+    expect(await scheduler.triggerPeriodicNow('missing')).toBe(false)
     expect(secondSlow).toBe(false)
-    const failedStatus = scheduler.getStatus().find((item) => item.name === 'fail')
+    const failedStatus = scheduler.getPeriodicScheduleStatus().find((item) => item.name === 'fail')
     expect(failedStatus).toMatchObject({
       lastOutcome: 'error',
       lastFailureAt: Date.parse('2026-01-01T00:00:00.000Z'),
@@ -396,13 +418,15 @@ describe('BackgroundScheduler', () => {
         totalRuns: 1,
         successCount: 0,
         errorCount: 1,
-        lastError: 'Error: 失败',
+        lastError: 'Error: KERNEL_PERIODIC_FAILED',
       },
     })
 
     failing.mockResolvedValueOnce(undefined)
-    await scheduler.triggerNow('fail')
-    expect(scheduler.getStatus().find((item) => item.name === 'fail')).toMatchObject({
+    await scheduler.triggerPeriodicNow('fail')
+    expect(
+      scheduler.getPeriodicScheduleStatus().find((item) => item.name === 'fail'),
+    ).toMatchObject({
       lastOutcome: 'success',
       lastSuccessAt: Date.parse('2026-01-01T00:00:00.000Z'),
       lastFailureAt: Date.parse('2026-01-01T00:00:00.000Z'),
@@ -410,7 +434,7 @@ describe('BackgroundScheduler', () => {
         totalRuns: 2,
         successCount: 1,
         errorCount: 1,
-        lastError: 'Error: 失败',
+        lastError: 'Error: KERNEL_PERIODIC_FAILED',
       },
     })
   })

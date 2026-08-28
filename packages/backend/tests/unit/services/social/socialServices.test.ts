@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SocialSessionManager } from '@infos/social/runtime/socialSessionManager'
 import type { InboundMessage } from '@infos/social/runtime/types'
 import { StickerService } from '@infos/social/runtime/stickerService'
+import { setSocialDiaryReaderProvider, socialReadDiaryTool } from '@infos/social/tools'
 
 function createMessage(partial: Partial<InboundMessage> = {}): InboundMessage {
   return {
@@ -20,6 +21,65 @@ function createMessage(partial: Partial<InboundMessage> = {}): InboundMessage {
   }
 }
 
+describe('社交日记读取工具', () => {
+  afterEach(() => {
+    setSocialDiaryReaderProvider(null)
+  })
+
+  it('应按当前角色列出日记，并限制数量上限', async () => {
+    const list = vi.fn().mockResolvedValue([{ date: '2026-08-27', parts: 2 }])
+    setSocialDiaryReaderProvider({ list, read: vi.fn() })
+
+    const output = await socialReadDiaryTool.execute(
+      { action: 'list', limit: 999 },
+      {
+        agentId: 'nana',
+        sessionId: 'social-realm',
+        source: 'application',
+        threadId: 'social-realm',
+        channel: 'application',
+      },
+    )
+
+    expect(list).toHaveBeenCalledWith('nana', 60)
+    expect(JSON.parse(String(output))).toEqual({
+      success: true,
+      entries: [{ date: '2026-08-27', parts: 2 }],
+      total: 1,
+    })
+  })
+
+  it('应读取指定日期并拒绝非法日期', async () => {
+    const read = vi.fn().mockResolvedValue({
+      date: '2026-08-27',
+      parts: 2,
+      content: '# 2026-08-27\n\n日记正文',
+      truncated: false,
+    })
+    setSocialDiaryReaderProvider({ list: vi.fn(), read })
+    const context = {
+      agentId: 'pero',
+      sessionId: 'social-realm',
+      source: 'application',
+      threadId: 'social-realm',
+      channel: 'application',
+    }
+
+    const output = await socialReadDiaryTool.execute(
+      { action: 'read', date: '2026-08-27' },
+      context,
+    )
+    const invalid = await socialReadDiaryTool.execute(
+      { action: 'read', date: '../secret' },
+      context,
+    )
+
+    expect(read).toHaveBeenCalledWith('pero', '2026-08-27')
+    expect(JSON.parse(String(output))).toMatchObject({ success: true, parts: 2 })
+    expect(JSON.parse(String(invalid))).toEqual({ error: 'date 必须使用 YYYY-MM-DD 格式' })
+  })
+})
+
 describe('SocialSessionManager', () => {
   afterEach(() => {
     vi.useRealTimers()
@@ -27,7 +87,7 @@ describe('SocialSessionManager', () => {
 
   it('应当创建会话并按最近消息时间排序返回活跃会话', async () => {
     vi.useFakeTimers()
-    const callback = vi.fn().mockResolvedValue(undefined)
+    const callback = vi.fn().mockResolvedValue({ type: 'pass' })
     const manager = new SocialSessionManager(callback)
 
     await manager.handleInbound(createMessage({ channelId: 'old' }))
@@ -40,10 +100,10 @@ describe('SocialSessionManager', () => {
     expect(manager.getOrCreate(createMessage({ channelId: 'new' }))).toBe(sessions[0])
   })
 
-  it('应当在群聊被提及时进入 summoned 并在固定超时后 flush', async () => {
+  it('群聊被提及时进入 listening/collecting，并在收集结束后处理批次', async () => {
     vi.useFakeTimers()
-    const callback = vi.fn().mockResolvedValue(undefined)
-    const manager = new SocialSessionManager(callback, { groupSummonTimeout: 2 })
+    const callback = vi.fn().mockResolvedValue({ type: 'pass' })
+    const manager = new SocialSessionManager(callback, { groupCollectTimeout: 2 })
 
     await manager.handleInbound(
       createMessage({ rawEvent: { _isMentioned: true }, content: '@pero 第一条' }),
@@ -51,78 +111,74 @@ describe('SocialSessionManager', () => {
     await manager.handleInbound(createMessage({ content: '第二条' }))
     const session = manager.getActiveSessions('group')[0]!
 
-    expect(session.state).toBe('summoned')
-    expect(session.buffer).toHaveLength(2)
+    expect(session).toMatchObject({ participation: 'listening', phase: 'collecting' })
+    expect(session.pendingMessages).toHaveLength(2)
 
     await vi.advanceTimersByTimeAsync(2000)
 
     expect(callback).toHaveBeenCalledWith(
       session,
       expect.arrayContaining([expect.objectContaining({ content: '@pero 第一条' })]),
-      'summon_timeout',
+      'direct_timeout',
     )
-    expect(session.buffer).toEqual([])
+    expect(session.pendingMessages).toEqual([])
   })
 
-  it('应当把私聊始终视为被提及并使用私聊超时', async () => {
+  it('私聊始终直接触发，并使用私聊收集时长', async () => {
     vi.useFakeTimers()
-    const callback = vi.fn().mockResolvedValue(undefined)
-    const manager = new SocialSessionManager(callback, { privateSummonTimeout: 1 })
+    const callback = vi.fn().mockResolvedValue({ type: 'pass' })
+    const manager = new SocialSessionManager(callback, { privateCollectTimeout: 1 })
 
     await manager.handleInbound(createMessage({ channelType: 'private', channelId: 'dm-1' }))
     const session = manager.getActiveSessions('private')[0]!
 
-    expect(session.state).toBe('summoned')
+    expect(session).toMatchObject({ participation: 'listening', phase: 'collecting' })
     await vi.advanceTimersByTimeAsync(1000)
-    expect(callback).toHaveBeenCalledWith(session, expect.any(Array), 'summon_timeout')
+    expect(callback).toHaveBeenCalledWith(session, expect.any(Array), 'direct_timeout')
   })
 
-  it('应当在 observing 缓冲超时或缓冲区满时 flush', async () => {
+  it('普通群消息只进入观察窗口，不会按超时或消息数直接唤醒 Agent', async () => {
     vi.useFakeTimers()
-    const callback = vi.fn().mockResolvedValue(undefined)
-    const timeoutManager = new SocialSessionManager(callback, { bufferTimeout: 1 })
+    const callback = vi.fn().mockResolvedValue({ type: 'pass' })
+    const manager = new SocialSessionManager(callback, { bufferTimeout: 1, maxBufferSize: 2 })
 
-    await timeoutManager.handleInbound(createMessage({ channelId: 'g1' }))
-    const timeoutSession = timeoutManager.getActiveSessions('group')[0]!
-    await vi.advanceTimersByTimeAsync(1000)
+    await manager.handleInbound(createMessage({ channelId: 'g1', content: '一' }))
+    await manager.handleInbound(createMessage({ channelId: 'g1', content: '二' }))
+    await manager.handleInbound(createMessage({ channelId: 'g1', content: '三' }))
+    await vi.advanceTimersByTimeAsync(2000)
 
-    expect(callback).toHaveBeenCalledWith(timeoutSession, expect.any(Array), 'buffer_timeout')
-
-    const fullCallback = vi.fn().mockResolvedValue(undefined)
-    const fullManager = new SocialSessionManager(fullCallback, { maxBufferSize: 2 })
-    await fullManager.handleInbound(createMessage({ channelId: 'g2', content: '一' }))
-    await fullManager.handleInbound(createMessage({ channelId: 'g2', content: '二' }))
-
-    expect(fullCallback).toHaveBeenCalledWith(
-      expect.objectContaining({ channelId: 'g2' }),
-      expect.any(Array),
-      'buffer_full',
-    )
+    const session = manager.getActiveSessions('group')[0]!
+    expect(callback).not.toHaveBeenCalled()
+    expect(session.phase).toBe('ready')
+    expect(session.pendingMessages.map((item) => item.content)).toEqual(['二', '三'])
   })
 
-  it('应当标记回复进入 active，并在过期后回到 observing', () => {
+  it('回复后进入 engaged/cooldown，并在过期后回到 idle/ready', () => {
     vi.useFakeTimers()
-    const manager = new SocialSessionManager(vi.fn(), { activeDuration: 1 })
+    const manager = new SocialSessionManager(vi.fn(), { engagedDuration: 1 })
     const session = manager.getOrCreate(createMessage())
 
     manager.markReplied(session)
-    expect(session.state).toBe('active')
+    expect(session).toMatchObject({ participation: 'engaged', phase: 'cooldown' })
     vi.advanceTimersByTime(1001)
     manager.checkActiveExpiry(session)
 
-    expect(session.state).toBe('observing')
+    expect(session).toMatchObject({ participation: 'idle', phase: 'ready' })
   })
 
-  it('应当吞掉 flush 回调失败并清空缓冲', async () => {
+  it('flush 回调失败时保留批次并进入 retrying', async () => {
     vi.useFakeTimers()
     const callback = vi.fn().mockRejectedValue(new Error('失败'))
     const manager = new SocialSessionManager(callback, { maxBufferSize: 1 })
 
-    await manager.handleInbound(createMessage({ channelId: 'g3' }))
+    await manager.handleInbound(
+      createMessage({ channelId: 'g3', rawEvent: { _isMentioned: true } }),
+    )
     const session = manager.getActiveSessions('group')[0]!
 
     expect(callback).toHaveBeenCalled()
-    expect(session.buffer).toEqual([])
+    expect(session.phase).toBe('retrying')
+    expect(session.pendingMessages).toHaveLength(1)
   })
 })
 

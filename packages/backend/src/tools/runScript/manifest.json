@@ -12,7 +12,13 @@
   "toolDefinition": {
     "name": "run_script",
     "description": "执行 NIT 脚本，用于需要条件判断、循环、并行执行等复杂编排的场景。脚本中可以调用所有其他可用工具。",
-    "display": { "label": "运行脚本", "icon": "code", "color": "purple", "style": "script" },
+    "display": {
+      "label": "运行脚本",
+      "description": "运行已有脚本来完成一组自动化操作。",
+      "icon": "code",
+      "color": "purple",
+      "style": "script"
+    },
     "parameters": {
       "type": "object",
       "properties": {

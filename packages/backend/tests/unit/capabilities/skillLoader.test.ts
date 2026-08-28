@@ -30,7 +30,7 @@ describe('SkillLoader', () => {
     writeFileSync(
       join(builtinDir, 'diary', 'SKILL.md'),
       `---
-name: 日记技能
+name: diary
 description: 记录每日总结
 requiredTools:
   - memory.write
@@ -50,7 +50,7 @@ dependsOnSkills:
     writeFileSync(
       join(builtinDir, 'brief', 'SKILL.md'),
       `---
-name: Brief
+name: brief
 description: 简报
 requiredTools: search, summarize
 tags: report, brief
@@ -71,15 +71,17 @@ tags: report, brief
       const manifest = loader.getManifest('diary')
       const all = loader.getAllManifests()
 
-      expect(manifest).toEqual({
+      expect(manifest).toMatchObject({
         id: 'diary',
-        name: '日记技能',
+        name: 'diary',
         description: '记录每日总结',
         requiredTools: ['memory.write', 'file.write'],
         category: 'memory',
         tags: ['diary', 'memory'],
         parameters: { topic: '主题' },
         dependsOnSkills: ['summarize'],
+        metadata: {},
+        allowedTools: [],
       })
       expect(all.map((item) => item.id).sort()).toEqual(['brief', 'diary'])
     })
@@ -91,12 +93,22 @@ tags: report, brief
 
       expect(manifest).toMatchObject({
         id: 'brief',
-        name: 'Brief',
+        name: 'brief',
         description: '简报',
         requiredTools: ['search', 'summarize'],
         category: 'general',
         tags: ['report', 'brief'],
       })
+    })
+
+    it('应解析标准多行YAML、元数据并安全读取资源', () => {
+      const loader = new SkillLoader([builtinDir], userDir)
+      const manifest = loader.getManifest('diary')
+
+      expect(manifest?.rootPath).toBe(join(builtinDir, 'diary'))
+      expect(loader.listResources('diary')).toEqual(['references/guide.md'])
+      expect(loader.readResource('diary', 'references/guide.md')).toBe('参考资料')
+      expect(loader.readResource('diary', '../brief/SKILL.md')).toBeNull()
     })
 
     it('loadSkillContent 应当返回 frontmatter 之后的正文并命中缓存', () => {
@@ -137,7 +149,7 @@ tags: report, brief
       writeFileSync(
         join(extensionDir, 'paint', 'SKILL.md'),
         `---
-name: 绘画
+name: paint
 description: 生成图像
 ---
 画图`,
@@ -149,7 +161,7 @@ description: 生成图像
 
       expect(loader.getManifest('paint')).toMatchObject({
         id: 'paint',
-        name: '绘画',
+        name: 'paint',
         description: '生成图像',
       })
     })
@@ -174,7 +186,7 @@ description: 生成图像
       writeFileSync(
         join(sourceDir, 'SKILL.md'),
         `---
-name: 用户技能
+name: source-skill
 description: 用户导入
 ---
 内容`,
@@ -186,7 +198,7 @@ description: 用户导入
 
       expect(folderName).toBe('source-skill')
       expect(loader.getManifest('source-skill')).toMatchObject({
-        name: '用户技能',
+        name: 'source-skill',
         description: '用户导入',
       })
     })
@@ -210,7 +222,11 @@ description: 用户导入
     it('importFromPath 目标已存在时应当抛出重复错误', () => {
       const sourceDir = join(rootDir, 'diary')
       mkdirSync(sourceDir, { recursive: true })
-      writeFileSync(join(sourceDir, 'SKILL.md'), '---\nname: 重复\n---\n内容', 'utf-8')
+      writeFileSync(
+        join(sourceDir, 'SKILL.md'),
+        '---\nname: diary\ndescription: 重复Skill\n---\n内容',
+        'utf-8',
+      )
       mkdirSync(join(userDir, 'diary'), { recursive: true })
       const loader = new SkillLoader([builtinDir, userDir], userDir)
 
@@ -225,7 +241,11 @@ description: 用户导入
     it('deleteById 应当只删除用户目录中的 Skill 并重新扫描', () => {
       const userSkillDir = join(userDir, 'custom')
       mkdirSync(userSkillDir, { recursive: true })
-      writeFileSync(join(userSkillDir, 'SKILL.md'), '---\nname: 自定义\n---\n内容', 'utf-8')
+      writeFileSync(
+        join(userSkillDir, 'SKILL.md'),
+        '---\nname: custom\ndescription: 自定义Skill\n---\n内容',
+        'utf-8',
+      )
       const loader = new SkillLoader([builtinDir, userDir], userDir)
       expect(loader.getManifest('custom')).toBeDefined()
 

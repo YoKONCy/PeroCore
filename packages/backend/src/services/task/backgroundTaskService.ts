@@ -1,5 +1,5 @@
 /**
- * BackgroundTaskService — 统一任务中心业务逻辑（M05 §4.2）
+ * BackgroundScheduler — Agent 后台任务调度器（M05 §4.2）
  *
  * 职责：
  * - 创建任务：显式绑定 agentId + 创建独立 background_task Thread
@@ -11,11 +11,14 @@
  *
  * 不负责：
  * - Gateway 事件广播（由 router/篇2-3 订阅 onEvent 回调注入）
- * - 记忆写入（Scorer/MemoryGate 按 Thread 独立处理）
+ * - 长期记忆写入（由统一 EventMemory 后台兜底按 Thread 处理）
  *
  * @module packages/backend/src/services/task/backgroundTaskService
  */
 
+import type { KernelExecutionId, KernelExecutionSnapshot } from '@infos/shared'
+import type { KernelScheduledExecutionContext, KernelScheduler } from '../../kernel/kernelScheduler'
+import type { ThreadChannel } from '../../repositories/thread.repo'
 import type {
   BackgroundTaskRepository,
   BackgroundTaskRow,
@@ -38,7 +41,7 @@ import { createLogger } from '../../lib/logger'
 import { AppError } from '../../lib/appError'
 import { disposeTaskExecution } from '../../tools/productivityRuntimeHolder'
 
-const logger = createLogger('BackgroundTaskService')
+const logger = createLogger('BackgroundScheduler')
 
 // ─────────────────────────────────────────────
 // 类型定义
@@ -53,6 +56,10 @@ export interface DispatchTaskInput {
   priority?: number
   requestedBy?: BackgroundTaskSource
   completionAction?: CompletionAction
+  channel?: ThreadChannel
+  metadata?: Record<string, unknown>
+  realmId?: string
+  appId?: string
 }
 
 /** 返回给前端的任务信息 */
@@ -75,6 +82,8 @@ export interface BackgroundTaskInfo {
   category: 'agent_task' | 'resident'
   inputQuestion: string | null
   inputContext: Record<string, unknown> | null
+  metadata: Record<string, unknown>
+  execution: KernelExecutionSnapshot | null
   checkpoint: { messages: ChatMessage[]; toolCalls: ToolCallRecord[]; turn: number } | null
   createdAt: string
   startedAt: string | null
@@ -105,17 +114,17 @@ export type BackgroundTaskListener = (event: BackgroundTaskEvent) => void
 // Service
 // ─────────────────────────────────────────────
 
-export class BackgroundTaskService {
+export class BackgroundScheduler {
   /** 事件订阅者（篇2-3 router 注册，用于 Gateway 广播） */
   private listeners: BackgroundTaskListener[] = []
 
-  /**
-   * 每个 Agent 的串行执行链（M05 §4.4：同 Agent 串行、跨 Agent 并行）
-   * key = agentId，value = 当前执行 Promise（无任务时为 null）
-   */
-  private agentChains = new Map<string, Promise<void>>()
+  /** 后台任务与Kernel Execution的绑定。 */
+  private readonly taskExecutions = new Map<string, KernelExecutionId>()
 
-  /** 运行中任务的 AbortController（取消/安全暂停用） */
+  /** Scheduler快照广播按任务合并，避免高频Usage更新淹没Gateway。 */
+  private readonly pendingSchedulerEvents = new Set<string>()
+
+  /** 运行中任务的 AbortController（迁移期保留，用于审批工具链兼容） */
   private runningAborts = new Map<string, AbortController>()
   private pauseRequests = new Set<string>()
 
@@ -123,10 +132,14 @@ export class BackgroundTaskService {
     private readonly repo: BackgroundTaskRepository,
     private readonly threadService: ThreadService,
     private readonly conversationTurnService: ConversationTurnService,
+    private readonly scheduler: KernelScheduler,
     private readonly approvalService?: ApprovalService,
   ) {
     this.approvalService?.onRequested((request) => void this.handleApprovalRequested(request))
     this.approvalService?.onResolved((request) => void this.handleApprovalResolved(request))
+    this.scheduler.subscribe((snapshot) => {
+      if (snapshot.descriptor.taskId) this.queueSchedulerEvent(snapshot.descriptor.taskId)
+    })
   }
 
   /** 订阅任务事件 */
@@ -135,6 +148,17 @@ export class BackgroundTaskService {
     return () => {
       this.listeners = this.listeners.filter((l) => l !== listener)
     }
+  }
+
+  private queueSchedulerEvent(taskId: string): void {
+    if (this.pendingSchedulerEvents.has(taskId)) return
+    this.pendingSchedulerEvents.add(taskId)
+    queueMicrotask(() => {
+      this.pendingSchedulerEvents.delete(taskId)
+      void this.repo.findById(taskId).then((task) => {
+        if (task) this.emit('background_task_progress', task)
+      })
+    })
   }
 
   /** 广播事件给所有订阅者 */
@@ -176,7 +200,7 @@ export class BackgroundTaskService {
     //    channel 用 desktop：复用主 Agent 的桌面通道能力矩阵与上下文策略
     const thread = await this.threadService.createThread({
       agentId: input.agentId,
-      channel: 'desktop',
+      channel: input.channel ?? 'desktop',
       title: `[任务] ${title}`,
       purpose: 'background_task',
     })
@@ -193,13 +217,18 @@ export class BackgroundTaskService {
       priority: input.priority,
       requestedBy: input.requestedBy ?? 'user',
       completionAction,
+      metadataJson: JSON.stringify({
+        ...(input.metadata ?? {}),
+        ...(input.realmId ? { realmId: input.realmId } : {}),
+        ...(input.appId ? { appId: input.appId } : {}),
+      }),
     })
 
     logger.info(`后台任务已派发: id=${taskId}, agent=${input.agentId}, title="${title}"`)
     this.emit('background_task_created', task)
 
-    // 3. 触发执行链（不阻塞调用方，queued 任务排队执行）
-    void this.pumpAgent(input.agentId)
+    // 3. 提交统一Kernel Scheduler；同一Agent通过resourceKey保持串行。
+    void this.scheduleTask(taskId, input.agentId, input.priority ?? 5)
 
     return this.toInfo(task)
   }
@@ -237,41 +266,42 @@ export class BackgroundTaskService {
 
   // ── 执行队列 ──
 
-  /**
-   * 驱动某 Agent 的执行链：取下一个 queued 任务执行，直到队列耗尽。
-   * 并发保护：同一 Agent 同时只有一条链在跑。
-   */
-  private async pumpAgent(agentId: string): Promise<void> {
-    const existing = this.agentChains.get(agentId)
-    if (existing) return // 已有执行链在跑，新任务会在链尾被自然捡起
-
-    const chain = (async () => {
-      try {
-        for (;;) {
-          const queue = await this.repo.listQueueByAgent(agentId)
-          const next = queue.find((t) => t.status === 'queued')
-          if (!next) break
-          await this.runTask(next.id)
-        }
-      } finally {
-        this.agentChains.delete(agentId)
-      }
-    })()
-
-    this.agentChains.set(agentId, chain)
-    // 链的异常在 runTask 内部已兜底，这里仅防止未处理拒绝
-    chain.catch((err) => logger.error(`Agent ${agentId} 任务执行链异常: ${err}`))
+  /** 将持久任务绑定到唯一Kernel Execution并提交统一调度。 */
+  private async scheduleTask(taskId: string, agentId: string, priority: number): Promise<void> {
+    try {
+      const snapshot = await this.scheduler.submit({
+        principalId: agentId,
+        taskId,
+        class: 'background',
+        priority,
+        resourceKey: `agent:${agentId}`,
+        budget: {
+          maxDurationMs: 30 * 60_000,
+          maxLlmCalls: 24,
+          maxToolCalls: 96,
+          maxConcurrentIo: 8,
+        },
+        run: (context) => this.runTask(taskId, context),
+      })
+      this.taskExecutions.set(taskId, snapshot.descriptor.executionId)
+    } catch (error) {
+      logger.error(`后台任务提交Kernel Scheduler失败: id=${taskId}, 原因=${error}`)
+      await this.repo.transition(taskId, 'queued', 'failed', {
+        completedAt: this.localNow(),
+        errorMessage: error instanceof Error ? error.message : String(error),
+      })
+      const failed = await this.repo.findById(taskId)
+      if (failed) this.emit('background_task_failed', failed)
+    }
   }
 
   /**
-   * 执行单个任务：queued → running → completed/failed
-   *
-   * 通过 ConversationTurnService 执行，显式传 agentId（M05 §4.3）；
-   * TODO(M05-篇3): 接入 ReAct 级 checkpoint，支持中断半程续跑与运行中暂停
+   * 执行单个任务：queued → running → completed/failed。
+   * Execution身份、取消、Deadline和资源预算由Kernel Scheduler统一管理。
    */
-  private async runTask(taskId: string): Promise<void> {
+  private async runTask(taskId: string, scheduled: KernelScheduledExecutionContext): Promise<void> {
     const task = await this.repo.findById(taskId)
-    if (!task || task.status !== 'queued') return
+    if (!task || !['queued', 'paused'].includes(task.status)) return
 
     const now = this.localNow()
     // 1. 原子迁移 queued → running（允许从 paused/failed 中断图中恢复）
@@ -283,8 +313,14 @@ export class BackgroundTaskService {
     task.startedAt = now
     this.emit('background_task_started', task)
 
-    // 2. 准备取消控制器
+    // 2. 将Scheduler取消/暂停信号桥接到现有Conversation与工具调用链。
     const abort = new AbortController()
+    if (scheduled.signal.aborted) abort.abort(scheduled.signal.reason)
+    else {
+      scheduled.signal.addEventListener('abort', () => abort.abort(scheduled.signal.reason), {
+        once: true,
+      })
+    }
     this.runningAborts.set(taskId, abort)
 
     try {
@@ -317,13 +353,24 @@ export class BackgroundTaskService {
       }
 
       // 执行任务：使用 ConversationTurn（内部持有完整消息链，含 checkpoint 恢复后的 messages）
+      const metadata = this.parseJson<Record<string, unknown>>(task.metadataJson) ?? {}
+      const realmId = typeof metadata.realmId === 'string' ? metadata.realmId : undefined
+      const modelConfigId =
+        typeof metadata.modelConfigId === 'number' ? metadata.modelConfigId : undefined
       const turn = await this.conversationTurnService.executeTurn({
         threadId: task.threadId,
         agentId: task.agentId,
         content: task.instruction,
         signal: abort.signal,
         taskId,
+        realmId,
+        modelConfigId,
+        inputPersistence: realmId ? 'ephemeral' : 'persistent',
+        outputPersistence: realmId ? 'ephemeral' : 'persistent',
         resumeMessages: initialMessages,
+        execution: scheduled.descriptor,
+        onUsage: scheduled.consume,
+        beginIo: scheduled.beginIo,
         onCheckpoint: async (checkpoint) => {
           await this.saveCheckpoint(taskId, checkpoint)
         },
@@ -400,6 +447,7 @@ export class BackgroundTaskService {
         logger.error(`后台任务失败: id=${taskId}, 原因: ${message}`)
         const failed = await this.repo.findById(taskId)
         if (failed) this.emit('background_task_failed', failed)
+        throw err
       }
     } finally {
       this.runningAborts.delete(taskId)
@@ -419,7 +467,7 @@ export class BackgroundTaskService {
     })
     if (!ok) throw new AppError('INVALID_PARAMETER', { message: '只有中断失败的任务可以续跑' })
     logger.info(`中断任务 ${taskId} 已重新入队恢复`)
-    void this.pumpAgent(task.agentId)
+    void this.scheduleTask(taskId, task.agentId, task.priority ?? 5)
     return this.mustGet(taskId)
   }
 
@@ -523,9 +571,13 @@ export class BackgroundTaskService {
     if (!task) throw new AppError('NOT_FOUND', { message: '任务不存在' })
     if (task.status === 'running') {
       this.pauseRequests.add(id)
-      this.runningAborts.get(id)?.abort()
+      const executionId = this.taskExecutions.get(id)
+      if (executionId) this.scheduler.pause(executionId)
+      else this.runningAborts.get(id)?.abort()
       return this.mustGet(id)
     }
+    const executionId = this.taskExecutions.get(id)
+    if (executionId) this.scheduler.pause(executionId)
     const ok = await this.repo.transition(id, 'queued', 'paused')
     if (!ok) {
       throw new AppError('INVALID_PARAMETER', { message: '只有排队中或运行中的任务可以暂停' })
@@ -543,7 +595,9 @@ export class BackgroundTaskService {
       throw new AppError('INVALID_PARAMETER', { message: '只有已暂停的任务可以恢复' })
     }
     const task = await this.mustGet(id)
-    void this.pumpAgent(task.agentId)
+    const executionId = this.taskExecutions.get(id)
+    if (executionId) this.scheduler.resume(executionId)
+    else void this.scheduleTask(id, task.agentId, task.priority ?? 5)
     logger.info(`后台任务已恢复: id=${id}`)
     return task
   }
@@ -553,9 +607,11 @@ export class BackgroundTaskService {
     const task = await this.repo.findById(id)
     if (!task) throw new AppError('NOT_FOUND', { message: '任务不存在' })
 
+    const executionId = this.taskExecutions.get(id)
+    if (executionId) await this.scheduler.cancel(executionId)
     if (task.status === 'running') {
-      // 运行中：发中断信号，状态迁移由 runTask 的异常分支完成
-      this.runningAborts.get(id)?.abort()
+      // 运行中：Scheduler传播中断，状态迁移由runTask异常分支完成。
+      if (!executionId) this.runningAborts.get(id)?.abort()
     } else {
       const ok = await this.repo.transition(id, ['queued', 'paused'], 'cancelled', {
         completedAt: this.localNow(),
@@ -578,6 +634,7 @@ export class BackgroundTaskService {
       throw new AppError('INVALID_PARAMETER', { message: '运行中的任务不可删除，请先取消' })
     }
     await this.repo.delete(id)
+    this.taskExecutions.delete(id)
     logger.info(`后台任务已删除: id=${id}`)
   }
 
@@ -619,6 +676,11 @@ export class BackgroundTaskService {
     }
   }
 
+  private executionForTask(taskId: string): KernelExecutionSnapshot | null {
+    const executionId = this.taskExecutions.get(taskId)
+    return executionId ? this.scheduler.get(executionId) : null
+  }
+
   /** 本地时间（与 schema 默认格式一致） */
   private localNow(): string {
     return new Date().toISOString().replace('T', ' ').slice(0, 19)
@@ -645,6 +707,8 @@ export class BackgroundTaskService {
       category: (row.category ?? 'agent_task') as 'agent_task' | 'resident',
       inputQuestion: row.inputQuestion,
       inputContext: this.parseJson<Record<string, unknown>>(row.inputContextJson),
+      metadata: this.parseJson<Record<string, unknown>>(row.metadataJson) ?? {},
+      execution: this.executionForTask(row.id),
       checkpoint: this.parseJson<{
         messages: ChatMessage[]
         toolCalls: ToolCallRecord[]
@@ -658,3 +722,5 @@ export class BackgroundTaskService {
     }
   }
 }
+
+export { BackgroundScheduler as BackgroundTaskService }

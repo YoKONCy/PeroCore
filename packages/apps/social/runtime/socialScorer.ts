@@ -15,18 +15,20 @@
  *
  * 动态门控 (D50):
  * - 默认 200 条未总结消息触发
- * - 总字符数 >= 50k 时提前触发 (应对长消息场景)
+ * - 未总结正文达到 50k Token 时提前触发（应对长消息场景）
  *
  * @module packages/apps/social/runtime/socialScorer
  */
 
 import type { TriviumDB } from 'triviumdb'
-import type { SocialMessageRepository } from './socialMessage.repo'
-import type { MemoryStoreRegistry } from '../../../backend/src/repositories/storeRegistry'
-import type { LlmService, ModelConfig } from '../../../backend/src/services/llm/llmService'
-import type { MdpEngine } from '../../../backend/src/services/prompt/mdpEngine'
-import { parseLlmJson } from '../../../backend/src/shared/llmJsonParser'
-import { createLogger } from '../../../backend/src/lib/logger'
+import type { SocialStoragePort } from '@infos/shared'
+import type {
+  LlmService,
+  MdpEngine,
+  MemoryStoreRegistry,
+  ModelConfig,
+} from '@infos/backend/applicationHostAbi'
+import { createLogger, parseLlmJson, tokenCounter } from '@infos/backend/applicationHostAbi'
 
 const logger = createLogger('SocialScorer')
 
@@ -37,7 +39,7 @@ const logger = createLogger('SocialScorer')
 export interface SocialScorerConfig {
   /** 默认消息数触发阈值 */
   messageThreshold: number
-  /** 字符数触发阈值 (1 中文字 ≈ 1 token) */
+  /** Token 触发阈值；保留旧字段名兼容现有配置。 */
   charThreshold: number
   /** 每次拉取的最大消息数 */
   batchLimit: number
@@ -118,7 +120,7 @@ export class SocialScorerService {
   private zeroVector: number[]
 
   constructor(
-    private socialMessageRepo: SocialMessageRepository,
+    private socialMessageRepo: SocialStoragePort,
     private storeRegistry: MemoryStoreRegistry,
     private llmService: LlmService,
     private getModelConfig: () => Promise<ModelConfig | null>,
@@ -136,25 +138,31 @@ export class SocialScorerService {
    *
    * 条件 (OR):
    * - 消息数 >= messageThreshold (默认 200)
-   * - 总字符数 >= charThreshold (默认 50k)
+   * - 未总结正文 Token >= charThreshold（默认 50k）
    */
   async checkAndProcess(agentId: string): Promise<void> {
     const stats = await this.socialMessageRepo.getUnsummarizedStats(agentId)
+    if (stats.count === 0) return
+
+    const messages = await this.socialMessageRepo.getUnsummarized(agentId, this.config.batchLimit)
+    const totalTokens = tokenCounter.countMessages(
+      messages.map((message) => ({ role: 'user', content: message.content })),
+    )
 
     const messageTriggered = stats.count >= this.config.messageThreshold
-    const tokenTriggered = stats.totalChars >= this.config.charThreshold
+    const tokenTriggered = totalTokens >= this.config.charThreshold
 
     if (!messageTriggered && !tokenTriggered) {
       logger.debug(
         `[${agentId}] 社交记忆未达门控: ` +
           `${stats.count}/${this.config.messageThreshold} 条, ` +
-          `${stats.totalChars}/${this.config.charThreshold} 字符`,
+          `${totalTokens}/${this.config.charThreshold} Token`,
       )
       return
     }
 
     const reason = tokenTriggered
-      ? `字符数溢出 (${stats.totalChars} >= ${this.config.charThreshold})`
+      ? `Token 溢出 (${totalTokens} >= ${this.config.charThreshold})`
       : `消息数达标 (${stats.count} >= ${this.config.messageThreshold})`
 
     logger.info(`[${agentId}] 触发社交记忆炼化: ${reason}`)

@@ -15,10 +15,25 @@ import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('ScreenVision')
 
+export interface ScreenshotCoordinateContext {
+  displayId: string
+  coordinateSpace: 'screenshot'
+  screenshotWidth: number
+  screenshotHeight: number
+  bounds: { x: number; y: number; width: number; height: number }
+  workArea: { x: number; y: number; width: number; height: number }
+  scaleFactor: number
+}
+
+export interface ScreenshotCapture {
+  base64: string
+  coordinateContext?: ScreenshotCoordinateContext
+}
+
 /** 截图提供者接口 */
 export interface ScreenshotProvider {
-  /** 截取当前屏幕，返回 base64 编码的 PNG 数据 */
-  capture(): Promise<string | null>
+  /** 截取当前屏幕，返回 PNG 与坐标上下文 */
+  capture(): Promise<ScreenshotCapture | null>
 }
 
 /** 模块引用 */
@@ -44,12 +59,12 @@ export const takeScreenshotTool: BuiltinTool = {
     const count = Math.min(Math.max(1, (args.count as number) ?? 1), 3)
 
     try {
-      const screenshots: string[] = []
+      const screenshots: ScreenshotCapture[] = []
 
       for (let i = 0; i < count; i++) {
-        const base64 = await _screenshotProvider.capture()
-        if (base64) {
-          screenshots.push(base64)
+        const capture = await _screenshotProvider.capture()
+        if (capture) {
+          screenshots.push(capture)
         } else {
           logger.warn(`第 ${i + 1} 张截图获取失败`)
         }
@@ -68,9 +83,10 @@ export const takeScreenshotTool: BuiltinTool = {
 
       return JSON.stringify({
         success: true,
-        screenshots: screenshots.map((data, i) => ({
+        screenshots: screenshots.map((capture, i) => ({
           index: i,
-          dataUri: `data:image/png;base64,${data}`,
+          dataUri: `data:image/png;base64,${capture.base64}`,
+          ...(capture.coordinateContext ? { coordinateContext: capture.coordinateContext } : {}),
         })),
         message: `已获取 ${screenshots.length} 张屏幕截图`,
       })

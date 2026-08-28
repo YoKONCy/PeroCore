@@ -23,7 +23,7 @@ import type {
   UsageInfo,
 } from '../types'
 import { AppError } from '../../../lib/appError'
-import { stripBase64DataUris } from '../sanitize'
+import { sanitizeToolParameters, stripBase64DataUris } from '../sanitize'
 import { createLogger } from '../../../lib/logger'
 
 const logger = createLogger('OpenAiProvider')
@@ -215,6 +215,7 @@ export class OpenAiProvider implements LlmProvider {
     opts: ChatOptions,
     stream: boolean,
   ): Record<string, unknown> {
+    const dialect = this.resolveReasoningDialect()
     const payload: Record<string, unknown> = {
       model: this.config.modelId,
       messages: this.serializeMessages(messages),
@@ -225,9 +226,28 @@ export class OpenAiProvider implements LlmProvider {
     if (typeof opts.topP === 'number') payload.top_p = opts.topP
     if (typeof opts.maxTokens === 'number') payload.max_tokens = opts.maxTokens
     if (opts.reasoningEffort) {
-      payload.reasoning_effort = opts.reasoningEffort === 'off' ? 'none' : opts.reasoningEffort
+      const effort = opts.reasoningEffort === 'off' ? 'none' : opts.reasoningEffort
+      payload.reasoning_effort = effort
+      if (dialect === 'deepseek') {
+        payload.thinking = { type: opts.reasoningEffort === 'off' ? 'disabled' : 'enabled' }
+      } else if (dialect === 'openrouter') {
+        payload.reasoning = {
+          effort,
+          exclude: opts.returnNativeReasoning !== true,
+        }
+      }
     }
-    if (opts.tools?.length) payload.tools = opts.tools
+    // returnNativeReasoning只控制响应中的原生思考是否向上层展示，不能单独改变请求模式。
+    // 部分OpenAI兼容网关会把未知thinking/reasoning参数错误报告为API Key无效。
+    if (opts.tools?.length) {
+      payload.tools = opts.tools.map((tool) => ({
+        ...tool,
+        function: {
+          ...tool.function,
+          parameters: sanitizeToolParameters(tool.function.parameters),
+        },
+      }))
+    }
     if (opts.toolChoice !== undefined) payload.tool_choice = opts.toolChoice
     if (opts.responseFormat) payload.response_format = opts.responseFormat
     if (opts.stop?.length) payload.stop = opts.stop
@@ -246,32 +266,81 @@ export class OpenAiProvider implements LlmProvider {
    * 将内部 camelCase 的 toolCalls / toolCallId 转为 snake_case。
    */
   private serializeMessages(messages: ChatMessage[]): Array<Record<string, unknown>> {
-    return messages.map((msg) => {
-      // 兜底防御：tool 返回的字符串内容若混入 base64 data URI (如截图泄漏)，统一剥离避免爆 token。
-      // 合法图片以 image_url 数组块形式存在 (非字符串)，不受影响。
-      const content =
-        msg.role === 'tool' && typeof msg.content === 'string'
-          ? stripBase64DataUris(msg.content)
-          : msg.content
+    const serialized: Array<Record<string, unknown>> = []
+    for (let index = 0; index < messages.length; index++) {
+      const message = messages[index]!
+      serialized.push(this.serializeMessage(message))
+      if (message.role !== 'assistant' || !message.toolCalls?.length) continue
 
-      const serialized: Record<string, unknown> = {
-        role: msg.role,
-        content,
+      // Gemini的OpenAI兼容层严格要求同一assistant工具轮中的每个function call
+      // 都在紧随其后的响应轮中拥有且仅拥有一个function response。
+      const segment: ChatMessage[] = []
+      let cursor = index + 1
+      while (cursor < messages.length && messages[cursor]!.role !== 'assistant') {
+        segment.push(messages[cursor]!)
+        cursor++
       }
-
-      if (msg.name) serialized.name = msg.name
-      if (msg.toolCallId) serialized.tool_call_id = msg.toolCallId
-
-      if (msg.toolCalls?.length) {
-        serialized.tool_calls = msg.toolCalls.map((tc) => ({
-          id: tc.id,
-          type: tc.type,
-          function: tc.function,
-        }))
+      const responses = new Map<string, ChatMessage>()
+      for (const candidate of segment) {
+        if (
+          candidate.role === 'tool' &&
+          candidate.toolCallId &&
+          !responses.has(candidate.toolCallId)
+        ) {
+          responses.set(candidate.toolCallId, candidate)
+        }
       }
+      for (const call of message.toolCalls) {
+        const response = responses.get(call.id)
+        serialized.push(
+          this.serializeMessage(
+            response ?? {
+              role: 'tool',
+              toolCallId: call.id,
+              content: `工具 ${call.function.name} 未返回结果。`,
+            },
+          ),
+        )
+      }
+      // 截图等补充user/system消息必须放在完整工具响应组之后，不能拆开函数调用轮。
+      for (const candidate of segment) {
+        if (candidate.role !== 'tool') serialized.push(this.serializeMessage(candidate))
+      }
+      index = cursor - 1
+    }
+    return serialized
+  }
 
-      return serialized
-    })
+  private serializeMessage(msg: ChatMessage): Record<string, unknown> {
+    // 兜底防御：tool 返回的字符串内容若混入 base64 data URI (如截图泄漏)，统一剥离避免爆 token。
+    // 合法图片以 image_url 数组块形式存在 (非字符串)，不受影响。
+    const content =
+      msg.role === 'tool' && typeof msg.content === 'string'
+        ? stripBase64DataUris(msg.content)
+        : msg.content
+
+    const serialized: Record<string, unknown> = {
+      role: msg.role,
+      content,
+    }
+
+    if (msg.name) serialized.name = msg.name
+    if (msg.reasoningContent !== undefined) {
+      serialized.reasoning_content = msg.reasoningContent
+    }
+    const details = msg.nativeReasoning?.find((item) => item.format === 'reasoning_details')?.opaque
+    if (details) serialized.reasoning_details = details
+    if (msg.toolCallId) serialized.tool_call_id = msg.toolCallId
+
+    if (msg.toolCalls?.length) {
+      serialized.tool_calls = msg.toolCalls.map((tc) => ({
+        id: tc.id,
+        type: tc.type,
+        function: tc.function,
+      }))
+    }
+
+    return serialized
   }
 
   // ── 内部方法: 响应规范化 ──
@@ -286,10 +355,13 @@ export class OpenAiProvider implements LlmProvider {
         const rawMsg = choice.message as Record<string, unknown>
         const rawToolCalls = rawMsg?.tool_calls as Array<Record<string, unknown>> | undefined
 
+        const reasoning = this.extractReasoning(rawMsg)
         return {
           message: {
             role: 'assistant' as const,
             content: (rawMsg?.content as string | null) ?? null,
+            reasoningContent: reasoning.text || undefined,
+            nativeReasoning: reasoning.payloads.length ? reasoning.payloads : undefined,
             toolCalls: rawToolCalls?.map((tc) => ({
               id: tc.id as string,
               type: 'function' as const,
@@ -313,10 +385,13 @@ export class OpenAiProvider implements LlmProvider {
         const rawDelta = (choice.delta ?? {}) as Record<string, unknown>
         const rawToolCalls = rawDelta.tool_calls as Array<Record<string, unknown>> | undefined
 
+        const reasoning = this.extractReasoning(rawDelta)
         return {
           delta: {
             role: rawDelta.role as string | undefined,
             content: rawDelta.content as string | undefined,
+            ...(reasoning.text ? { reasoningContent: reasoning.text } : {}),
+            ...(reasoning.payloads.length ? { nativeReasoning: reasoning.payloads } : {}),
             // 流式 Function Calling 会把同一个工具调用拆成多段 delta，上层按 index 继续拼接参数字符串。
             // 部分厂商在 streaming delta 中可能不返回 id，通过 index 匹配。
             toolCalls: rawToolCalls?.map((tc) => ({
@@ -333,6 +408,51 @@ export class OpenAiProvider implements LlmProvider {
       }),
       usage: rawUsage ? this.normalizeUsage(rawUsage) : undefined,
     }
+  }
+
+  private resolveReasoningDialect(): 'openai' | 'deepseek' | 'openrouter' | 'generic' {
+    const configured = this.config.reasoningDialect
+    if (configured && configured !== 'auto') return configured
+    const base = this.config.apiBase.toLowerCase()
+    if (base.includes('deepseek')) return 'deepseek'
+    if (base.includes('openrouter')) return 'openrouter'
+    if (base.includes('openai.com')) return 'openai'
+    return 'generic'
+  }
+
+  private extractReasoning(source: Record<string, unknown>): {
+    text: string
+    payloads: NonNullable<ChatCompletion['choices'][number]['message']['nativeReasoning']>
+  } {
+    const payloads: NonNullable<ChatCompletion['choices'][number]['message']['nativeReasoning']> =
+      []
+    let text = ''
+    if (typeof source.reasoning_content === 'string') {
+      text += source.reasoning_content
+      payloads.push({ format: 'reasoning_content', text: source.reasoning_content })
+    }
+    if (typeof source.reasoning === 'string') text += source.reasoning
+    if (Array.isArray(source.reasoning_details)) {
+      for (const detail of source.reasoning_details) {
+        if (!detail || typeof detail !== 'object') continue
+        const item = detail as Record<string, unknown>
+        const detailText =
+          typeof item.text === 'string'
+            ? item.text
+            : typeof item.summary === 'string'
+              ? item.summary
+              : ''
+        text += detailText
+      }
+      payloads.push({
+        format: 'reasoning_details',
+        text: text || undefined,
+        opaque: source.reasoning_details,
+      })
+    } else if (typeof source.reasoning === 'string') {
+      payloads.push({ format: 'reasoning_details', text: source.reasoning })
+    }
+    return { text, payloads }
   }
 
   /** 规范化 Usage 信息 (snake_case → camelCase) */

@@ -5,10 +5,8 @@
  * lifespan() 中的初始化逻辑。
  *
  * 包含:
- * 1. Scorer 待处理任务恢复
- * 2. VectorSync 补偿任务恢复
- * 3. BackgroundScheduler 启动
- * 4. Gateway 语音管道事件注册
+ * 1. KernelScheduler 周期计划启动
+ * 2. Gateway 语音与对话事件注册
  *
  * @module packages/backend/src/lifecycle/startup
  */
@@ -18,6 +16,7 @@ import type { GatewayEnvelope } from '../services/gateway/types'
 import { createEnvelope } from '../services/gateway/types'
 import { cleanTextForTts } from '../services/voice'
 import { createLogger } from '../lib/logger'
+import { ConversationSurfaceSession } from '../projections/conversationSurfaceSession'
 
 const logger = createLogger('Startup')
 
@@ -37,31 +36,21 @@ export async function runStartupTasks(ctx: AppContext): Promise<void> {
   }
 
   // ── 1. 启动后台调度器 ──
-  ctx.scheduler.start()
+  ctx.scheduler.startPeriodic()
   logger.success('后台调度器已启动')
 
-  // ── 2. 恢复 Scorer 待处理任务 ──
+  // ── 2. 执行 Outbox 保留清理；死信始终保留供审计和人工重放 ──
   try {
-    const activeAgent = ctx.agentManager.defaultAgentId
-    await ctx.scorerService.flushPendingByThread(activeAgent)
-    logger.info('Scorer 启动恢复处理完成')
+    const result = await ctx.outboxLifecycle.maintain()
+    const diagnostics = await ctx.outboxLifecycle.diagnostics()
+    logger.info(
+      `Outbox生命周期维护完成: kernelDeleted=${result.outboxDeleted}, kernelDead=${diagnostics.kernel.dead_letter ?? 0}`,
+    )
   } catch (err) {
-    logger.warn(`Scorer 恢复失败: ${err}`)
+    logger.warn(`Outbox生命周期维护失败: ${err}`)
   }
 
-  // ── 3. 恢复 VectorSync 补偿任务 ──
-  try {
-    const pending = await ctx.vectorSyncRepo.getPending(50)
-    if (pending.length > 0) {
-      logger.info(`VectorSync 待补偿任务: ${pending.length} 条 (将在后续 cron 中处理)`)
-    } else {
-      logger.debug('VectorSync 无待补偿任务')
-    }
-  } catch (err) {
-    logger.warn(`VectorSync 补偿检查失败: ${err}`)
-  }
-
-  // ── 4. 注册 Gateway 语音管道事件处理 ──
+  // ── 5. 注册 Gateway 语音管道事件处理 ──
   registerVoicePipelineHandler(ctx)
   logger.success('语音管道 Gateway 触发已注册')
 
@@ -141,18 +130,52 @@ function registerVoicePipelineHandler(ctx: AppContext): void {
         }),
       )
 
-      // 推送 Agent 回复文本
-      await ctx.gatewayHub.broadcast(
-        createEnvelope('push', {
-          action: 'stream_end',
-          sessionId,
-          content: result.reply,
-        }),
-      )
+      // Voice回复通过统一 Surface投影。
+      await ctx.gatewayHub.pushSurface({
+        protocolVersion: 1,
+        surfaceId: `voice:${sessionId}` as import('@infos/shared').SurfaceId,
+        generation: sessionId,
+        revision: 1,
+        sequence: 1,
+        operationId: `voice:${sessionId}:reply`,
+        operation: {
+          type: 'surface.open',
+          threadId: sessionId,
+          principalId: agentId,
+          nodes: [
+            {
+              nodeId: `voice:${sessionId}:reply` as import('@infos/shared').SurfaceNodeId,
+              kind: 'markdown',
+              revision: 1,
+              lifecycle: 'stable',
+              props: { source: result.reply, phase: 'committed' },
+            },
+            {
+              nodeId: `voice:${sessionId}:status` as import('@infos/shared').SurfaceNodeId,
+              kind: 'status',
+              revision: 1,
+              lifecycle: 'transient',
+              props: { state: 'completed' },
+            },
+          ],
+        },
+      })
 
-      // 推送 TTS 音频 (由 pushAudioChunk 内部转 base64)
+      // 通过 active Input Seat 定向到目标 Audio Output Node。
       if (result.audio) {
-        await ctx.gatewayHub.pushAudioChunk(result.audio.audio, sessionId)
+        const principalId = String(payload.principalId ?? 'pero')
+        const seat = ctx.nodeRegistry.getInputSeat(principalId, 'audio-output')
+        if (!seat) throw new Error('AUDIO_OUTPUT_SEAT_UNAVAILABLE: 当前没有可用音频输出 Seat')
+        await ctx.audioDeliveryService.deliver(
+          result.audio,
+          {
+            principalId,
+            correlationId: sessionId,
+            targetNodeId: seat.nodeId,
+            idempotencyKey: `voice:${sessionId}`,
+          },
+          seat.nodeId,
+        )
       }
 
       logger.info(
@@ -183,21 +206,21 @@ function registerVoicePipelineHandler(ctx: AppContext): void {
  * 3. ConversationTurnService 写入消息并编译上下文
  * 4. RuntimeStateService 注册任务（替代旧 TaskManager）
  * 5. ConversationTurnService.streamTurn() 执行流式对话并统一持久化消息对
- * 6. 将每个 delta 通过 pushStreamDelta 推送到前端
+ * 6. 将 Execution 事件转换为统一 SurfaceFrame 并通过 Gateway 推送
  * 7. 结束流并发送 RPC 响应
- * 8. 对话完成后发送 stream_end + RPC response 回送
- * 9. 异步合成 TTS 并推送音频
+ * 8. 对话完成后提交权威 Projection与 Surface
+ * 9. 异步合成 TTS 并定向播放
  */
 /**
- * 合成 TTS 并推送音频到前端 (异步，失败不影响对话)
+ * 合成 TTS，并通过 Audio Asset 与 active Input Seat 定向播放。
  *
- * desktop 文本对话路径默认走 TTS，与语音管道保持一致的「听得到声音」体验。
- * 前端通过 Gateway 的 audio_chunk 事件接收并播放。
+ * desktop 文本对话路径默认走 TTS；无有效 Seat 或 Provider 时安全跳过。
  */
-async function synthesizeAndPushTts(
+async function synthesizeAndDeliverTts(
   ctx: AppContext,
   reply: string,
   sessionId: string,
+  principalId: string,
 ): Promise<void> {
   try {
     if (!ctx.ttsService.isAvailable) {
@@ -205,7 +228,6 @@ async function synthesizeAndPushTts(
       return
     }
 
-    // 清洗朗读文本 (移除 ReAct 推理块/代码块/Markdown 等)
     const ttsText = cleanTextForTts(reply)
     if (!ttsText.trim()) {
       logger.debug('TTS 文本清洗后为空，跳过合成')
@@ -213,9 +235,23 @@ async function synthesizeAndPushTts(
     }
 
     const audio = await ctx.ttsService.synthesize({ text: ttsText })
-    await ctx.gatewayHub.pushAudioChunk(audio.audio, sessionId)
+    const seat = ctx.nodeRegistry.getInputSeat(principalId, 'audio-output')
+    if (!seat) {
+      logger.debug(`当前没有可用音频输出 Seat，跳过 TTS 播放: principal=${principalId}`)
+      return
+    }
+    const receipt = await ctx.audioDeliveryService.deliver(
+      audio,
+      {
+        principalId,
+        correlationId: sessionId,
+        targetNodeId: seat.nodeId,
+        idempotencyKey: `chat:${sessionId}:${ttsText}`,
+      },
+      seat.nodeId,
+    )
     logger.info(
-      `桌面对话 TTS 已推送: ${(audio.audio.byteLength / 1024).toFixed(1)}KB, session=${sessionId}`,
+      `桌面对话 TTS 已定向播放: ${(audio.audio.byteLength / 1024).toFixed(1)}KB, session=${sessionId}, node=${receipt.targetNodeId}, state=${receipt.state}`,
     )
   } catch (err) {
     logger.warn(`桌面对话 TTS 失败: ${err}`)
@@ -255,9 +291,10 @@ function registerChatHandler(ctx: AppContext): void {
       return
     }
 
+    let threadIdResolved = threadId
+    const surfaceRef: { current: ConversationSurfaceSession | null } = { current: null }
     try {
       // ── 1. 获取或创建 Thread ──
-      let threadIdResolved = threadId
       if (!threadIdResolved) {
         // 未指定 threadId 时，获取或创建 Agent 的最新 desktop Thread
         const thread = await ctx.threadService.getOrCreateLatest(agentId, 'desktop', 'conversation')
@@ -281,44 +318,127 @@ function registerChatHandler(ctx: AppContext): void {
       // ── 3. RuntimeStateService 注册任务（替代旧 TaskManager） ──
       ctx.runtimeStateService.registerTask(threadIdResolved, agentId)
 
-      // ── 4. 统一流式对话 ──
+      // ── 4. 统一流式对话与 Surface 输出 ──
       const gen = ctx.conversationTurnService.streamTurn({
         threadId: threadIdResolved,
         agentId,
         content,
         capabilityScope,
+        onExecutionStarted: async (execution) => {
+          surfaceRef.current = new ConversationSurfaceSession(
+            threadIdResolved,
+            agentId,
+            execution.executionId,
+          )
+          await ctx.gatewayHub.pushSurface(surfaceRef.current.open())
+        },
       })
       let fullReply = ''
+      let next = await gen.next()
 
-      for await (const chunk of gen) {
-        if (typeof chunk === 'string') {
-          // delta 文本 → 推送流式增量到前端
-          fullReply += chunk
-          await ctx.gatewayHub.pushStreamDelta(chunk, threadIdResolved)
-        } else if (chunk && typeof chunk === 'object' && 'event' in chunk) {
-          // 工具调用/状态等结构化事件
-          const sseEvent = chunk as { event: string; data: unknown }
-          if (sseEvent.event === 'tool_call') {
-            const toolData = sseEvent.data as { name?: string }
-            await ctx.gatewayHub.pushToolStatus({
-              name: toolData?.name ?? 'unknown',
-              state: 'calling',
-              sessionId: threadIdResolved,
-            })
-          } else if (sseEvent.event === 'tool_result') {
-            const toolData = sseEvent.data as { name?: string }
-            await ctx.gatewayHub.pushToolStatus({
-              name: toolData?.name ?? 'unknown',
-              state: 'completed',
-              sessionId: threadIdResolved,
-            })
+      while (!next.done) {
+        const chunk = next.value
+        if (chunk.event === 'thinking_start') {
+          const data = chunk.data
+          if (surfaceRef.current) {
+            await ctx.gatewayHub.pushSurface(surfaceRef.current.startThinking(data.blockId))
           }
+        } else if (chunk.event === 'thinking_delta') {
+          const data = chunk.data
+          if (surfaceRef.current) {
+            await ctx.gatewayHub.pushSurface(
+              surfaceRef.current.appendThinking(data.blockId, data.delta),
+            )
+          }
+        } else if (chunk.event === 'thinking_end') {
+          const data = chunk.data
+          if (surfaceRef.current) {
+            await ctx.gatewayHub.pushSurface(
+              surfaceRef.current.completeThinking(data.blockId, data.durationMs),
+            )
+          }
+        } else if (chunk.event === 'native_reasoning_start') {
+          const data = chunk.data
+          if (surfaceRef.current) {
+            await ctx.gatewayHub.pushSurface(
+              surfaceRef.current.startNativeReasoning(data.blockId, data.mode),
+            )
+          }
+        } else if (chunk.event === 'native_reasoning_delta') {
+          const data = chunk.data
+          if (surfaceRef.current) {
+            await ctx.gatewayHub.pushSurface(
+              surfaceRef.current.appendNativeReasoning(data.blockId, data.delta),
+            )
+          }
+        } else if (chunk.event === 'native_reasoning_end') {
+          const data = chunk.data
+          if (surfaceRef.current) {
+            await ctx.gatewayHub.pushSurface(
+              surfaceRef.current.completeNativeReasoning(data.blockId, data.durationMs),
+            )
+          }
+        } else if (chunk.event === 'narration_start') {
+          const data = chunk.data
+          if (surfaceRef.current) {
+            await ctx.gatewayHub.pushSurface(surfaceRef.current.startNarration(data.blockId))
+          }
+        } else if (chunk.event === 'narration_delta') {
+          const data = chunk.data
+          fullReply += data.delta
+          if (surfaceRef.current) {
+            await ctx.gatewayHub.pushSurface(
+              surfaceRef.current.appendText(data.blockId, data.delta),
+            )
+          }
+        } else if (chunk.event === 'tool_call_start' && surfaceRef.current) {
+          await ctx.gatewayHub.pushSurface(surfaceRef.current.startToolDraft(chunk.data.draftId))
+        } else if (chunk.event === 'tool_call_delta' && surfaceRef.current) {
+          await ctx.gatewayHub.pushSurface(
+            surfaceRef.current.appendToolDraft(
+              chunk.data.draftId,
+              chunk.data.nameDelta,
+              chunk.data.argumentsDelta,
+              chunk.data.receivedChars,
+            ),
+          )
+        } else if (chunk.event === 'tool_call_ready' && surfaceRef.current) {
+          await ctx.gatewayHub.pushSurface(surfaceRef.current.finalizeToolDraft(chunk.data))
+        } else if (chunk.event === 'tool_call') {
+          // 兼容事件：正式节点已由tool_call_ready在原草稿节点上完成。
+        } else if (chunk.event === 'tool_result' && surfaceRef.current) {
+          const data = chunk.data as {
+            callId: string
+            result: string
+            isError: boolean
+            durationMs?: number
+          }
+          for (const frame of surfaceRef.current.toolResult(data)) {
+            await ctx.gatewayHub.pushSurface(frame)
+          }
+        } else if (chunk.event === 'status' && surfaceRef.current) {
+          const data = chunk.data as {
+            state: 'thinking' | 'calling' | 'generating' | 'tool_failed'
+            message?: string
+          }
+          await ctx.gatewayHub.pushSurface(surfaceRef.current.status(data.state, data.message))
         }
+        next = await gen.next()
       }
 
-      // ── 5. 流结束 + RPC 响应回送 ──
-      await ctx.gatewayHub.pushStreamEnd(threadIdResolved)
+      const turnResult = next.value
+      const messageId = turnResult.assistantMessage?.id
+      if (!messageId) throw new Error('桌宠对话完成后缺少持久消息身份')
+      ctx.conversationProjection.invalidate(threadIdResolved)
+      const projection = await ctx.conversationProjection.getSnapshot(threadIdResolved)
+      const message = projection.messages.find((item) => item.messageId === String(messageId))
+      const surface = projection.surfaces.find((item) => item.messageId === String(messageId))
+      if (!message || !surface) throw new Error(`桌宠 Conversation Projection 不完整: ${messageId}`)
+      if (surfaceRef.current) {
+        await ctx.gatewayHub.pushSurface(surfaceRef.current.commit(projection, message, surface))
+      }
 
+      // ── 5. RPC 响应回送 ──
       if (requestId && sourceNodeId) {
         await ctx.gatewayHub.sendResponse(requestId, sourceNodeId, {
           success: true,
@@ -327,15 +447,16 @@ function registerChatHandler(ctx: AppContext): void {
         })
       }
 
-      // ── 9. desktop 对话 TTS: 异步合成并推送音频 ──
-      void synthesizeAndPushTts(ctx, fullReply, threadIdResolved)
+      // ── 9. desktop 对话 TTS: 异步合成并定向到 active Input Seat ──
+      void synthesizeAndDeliverTts(ctx, fullReply, threadIdResolved, 'pero')
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err)
       logger.error(`Gateway chat 失败: ${errMsg}`)
 
-      // 推送错误到前端
-      const threadIdResolved = threadId || 'default'
-      await ctx.gatewayHub.pushStreamEnd(threadIdResolved)
+      // 推送结构化错误到前端
+      if (surfaceRef.current) {
+        await ctx.gatewayHub.pushSurface(surfaceRef.current.fail('GATEWAY_CHAT_ERROR', errMsg))
+      }
 
       // RPC 错误回送
       if (requestId && sourceNodeId) {
@@ -343,8 +464,7 @@ function registerChatHandler(ctx: AppContext): void {
       }
     } finally {
       // AIOS: 注销任务（按 threadId）
-      const threadIdResolved = threadId || 'default'
-      ctx.runtimeStateService.unregisterTask(threadIdResolved)
+      ctx.runtimeStateService.unregisterTask(threadIdResolved || 'default')
     }
   })
 }

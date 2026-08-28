@@ -26,9 +26,7 @@
  * 应用的自描述文件，类比 OS 应用的 package.json + Info.plist。
  * 声明应用的身份、能力、权限、前端入口、上下文需求。
  *
- * 位置：每个应用根目录下的 app.manifest.json
- * 内置应用：packages/apps/{appId}/app.manifest.json
- * 社区应用：@data/apps/installed/{appId}/app.manifest.json
+ * 仅供内置Social兼容Runtime使用，自治Application使用ApplicationAdapterManifest。
  */
 export interface AgentAppManifest {
   // ── 身份信息 ──
@@ -47,21 +45,11 @@ export interface AgentAppManifest {
   /** 应用图标路径（相对应用根目录） */
   icon?: string
 
-  // ── 运行时入口 ──
-  /**
-   * 后端运行时入口
-   *
-   * 相对应用根目录的路径，指向一个 JS 文件。
-   * 该文件应 export default 一个 AgentAppRuntime 实现。
-   * 内置应用可省略，由 AIOS 直接装配。
-   */
-  runtimeEntry?: string
+  // ── 内置兼容入口 ──
   /**
    * 前端入口
    *
-   * 相对应用根目录的路径，指向前端模块。
-   * 前端通过此入口动态加载应用的 UI 模块。
-   * 省略表示无独立前端（仅主 Agent 调用）。
+   * 仅供内置Social兼容界面保留，自治Application使用Surface Manifest。
    */
   frontendEntry?: string
 
@@ -268,6 +256,7 @@ export type ResourceRef =
   | WorkspaceResourceRef
   | PersonaResourceRef
   | TaskResourceRef
+  | ModelResourceRef
 
 /** 记忆资源引用：授权访问特定主 Agent 记忆 */
 export interface MemoryResourceRef {
@@ -320,6 +309,11 @@ export interface TaskResourceRef {
   taskInputs: string[]
   successCriteria: string
   deadline?: string
+}
+
+export interface ModelResourceRef {
+  kind: 'model'
+  modelConfigId?: number
 }
 
 /**
@@ -425,6 +419,8 @@ export interface LaunchAppParams {
 
 export interface AppCommandRequest {
   correlationId: string
+  executionId?: import('@infos/shared').KernelExecutionId
+  processId?: import('@infos/shared').KernelProcessId
   action: string
   input: Record<string, unknown>
   taskContext?: AppTaskContext

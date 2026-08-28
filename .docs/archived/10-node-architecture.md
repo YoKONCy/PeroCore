@@ -1,5 +1,7 @@
 # 节点架构与能力提供者
 
+> **归档警示**：本文记录历史设计与迁移背景，不代表当前架构。现行规范以[A01文档索引](../A01_PROJECT_STRUCTURE.md#6-规范文档与归档)及其列出的A02–A09/S系列文档为准；旧Channel、API、Package或Application表述不得用于新实现。
+
 > 后端 Daemon 是大脑，Electron 壳是带特殊器官的身体。身体可以离开大脑独立存在（本地任务），大脑也可以接其他身体（多节点）。
 
 ---
@@ -173,11 +175,13 @@ desktop_notify 不可用
 ### 5.2 Electron 壳职责简化
 
 Electron **不再负责**：
+
 - 启动后端进程（Daemon 自己启动）
 - 管理后端生命周期
 - 充当后端的健康检查代理
 
 Electron **只负责**：
+
 - GUI 渲染
 - 窗口、托盘、快捷键
 - 注册和执行平台能力
@@ -292,15 +296,15 @@ NapCat 收到 QQ 私聊消息
 
 ### 8.1 各场景对照
 
-| 场景 | 决定方式 |
-|---|---|
-| 桌面聊天 | Thread 自带 agentId |
-| QQ 私聊 | 入站路由表决定 |
-| QQ 群聊 | 入站路由表 + 运行时 @覆盖 |
-| 日记生成 | Scheduler 任务自带 agentId |
-| 记忆提炼 | Scorer 按任务 agentId 分批 |
+| 场景     | 决定方式                    |
+| -------- | --------------------------- |
+| 桌面聊天 | Thread 自带 agentId         |
+| QQ 私聊  | 入站路由表决定              |
+| QQ 群聊  | 入站路由表 + 运行时 @覆盖   |
+| 日记生成 | Scheduler 任务自带 agentId  |
+| 记忆提炼 | Scorer 按任务 agentId 分批  |
 | 运维告警 | 入站路由表或 Scheduler 任务 |
-| 后台反思 | Scheduler 任务自带 agentId |
+| 后台反思 | Scheduler 任务自带 agentId  |
 
 ### 8.2 UI 默认 Agent
 

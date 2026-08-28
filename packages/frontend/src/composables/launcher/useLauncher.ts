@@ -194,7 +194,7 @@ export function useLauncher() {
   /** 检查记忆系统（通过尝试查询） */
   async function checkMemory(item: CheckItem): Promise<void> {
     try {
-      await memoryApi.list({ page: 1, pageSize: 1 })
+      await memoryApi.archive({ pageSize: 1 })
       item.status = 'ok'
       item.message = '正常'
     } catch {

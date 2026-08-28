@@ -38,6 +38,29 @@ export const httpRequestDurationSeconds = new Histogram({
   registers: [metricsRegistry],
 })
 
+export const performanceLatencySeconds = new Histogram({
+  name: `${METRIC_PREFIX}performance_latency_seconds`,
+  help: 'Latency baseline for first token, first surface, providers, scheduler and recovery.',
+  labelNames: ['metric', 'provider'] as const,
+  buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60],
+  registers: [metricsRegistry],
+})
+
+export const performanceEventsTotal = new Counter({
+  name: `${METRIC_PREFIX}performance_events_total`,
+  help: 'Performance events including surface frames, dropped frames and node recovery outcomes.',
+  labelNames: ['metric', 'outcome'] as const,
+  registers: [metricsRegistry],
+})
+
+export const ipcPayloadBytes = new Histogram({
+  name: `${METRIC_PREFIX}ipc_payload_bytes`,
+  help: 'Serialized IPC and transport payload size in bytes.',
+  labelNames: ['carrier', 'direction'] as const,
+  buckets: [256, 1024, 4096, 16384, 65536, 262144, 1048576, 4194304, 8388608],
+  registers: [metricsRegistry],
+})
+
 /** 获取 Prometheus 文本格式的 content-type。 */
 export function getMetricsContentType(): string {
   return metricsRegistry.contentType

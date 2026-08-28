@@ -1,53 +1,13 @@
 /**
- * SSE 流式客户端
+ * Internal Surface SSE 客户端。
  *
- * 对接后端 chat/stream 端点，处理 SSE 事件格式：
- * - event: delta       → 增量内容
- * - event: tool_call   → 工具调用开始 (含 callId)
- * - event: tool_result → 工具执行结果 (含 callId，与 tool_call 关联)
- * - event: status      → 状态变更 (thinking/calling/generating)
- * - event: done        → 完成 (含 usage/agentId/threadId)
- * - event: error       → 错误 (LLM_ERROR/INTERNAL_ERROR)
- *
- * 此外，前端会在流被异常截断（未收到 done）时合成 STREAM_TRUNCATED 错误事件。
+ * 对外只接收 Surface Frame、执行完成和执行错误；文本、工具与状态不再暴露为并行 UI 事件。
  */
 
+import type { SurfaceFrame } from '@infos/shared'
 import { getBaseUrl } from './transportUtils'
 
-// ── SSE 事件 discriminated union ──
-
-/** delta 事件：文本增量 */
-export interface SseDeltaEvent {
-  type: 'delta'
-  content: string
-}
-
-/** tool_call 事件：工具调用开始 */
-export interface SseToolCallEvent {
-  type: 'tool_call'
-  name: string
-  args: string
-  /** 工具调用 ID，用于与 tool_result 关联 */
-  callId: string
-}
-
-/** tool_result 事件：工具执行结果 */
-export interface SseToolResultEvent {
-  type: 'tool_result'
-  /** 对应的 tool_call ID */
-  callId: string
-  result: string
-  isError: boolean
-}
-
-/** status 事件：状态变更 */
-export interface SseStatusEvent {
-  type: 'status'
-  state: 'thinking' | 'calling' | 'generating' | 'tool_failed'
-  message?: string
-}
-
-/** done 事件：对话完成 */
+/** 执行完成事件。 */
 export interface SseDoneEvent {
   type: 'done'
   usage: {
@@ -68,43 +28,23 @@ export interface SseErrorEvent {
   message: string
 }
 
-/** 所有 SSE 事件的 discriminated union */
-export type SseEvent =
-  | SseDeltaEvent
-  | SseToolCallEvent
-  | SseToolResultEvent
-  | SseStatusEvent
-  | SseDoneEvent
-  | SseErrorEvent
+export type SseEvent = SurfaceFrame | SseDoneEvent | SseErrorEvent
+
+export interface RagProgressEvent {
+  stage: 'embedding' | 'retrieval' | 'reranking' | 'timeline' | 'completed'
+  status?: 'running' | 'completed' | 'failed'
+  failureKind?: 'embedding' | 'rag'
+  message: string
+  candidateCount?: number
+  resultCount?: number
+}
 
 /** SSE 事件回调集合 */
 export interface SseEvents {
-  /** 增量内容 */
-  onDelta?: (data: { content: string }) => void
-  /** 工具调用开始 (含 callId) */
-  onToolCall?: (data: { name: string; args: string; callId: string }) => void
-  /** 工具结果 (含 callId，与 tool_call 关联) */
-  onToolResult?: (data: {
-    callId: string
-    result: string
-    isError: boolean
-    durationMs?: number
-  }) => void
-  /** 状态变更 */
-  onStatus?: (data: {
-    state: 'thinking' | 'calling' | 'generating' | 'tool_failed'
-    message?: string
-  }) => void
-  /** 完成 (含 usage) */
-  onDone?: (data: {
-    usage: { promptTokens: number; completionTokens: number }
-    toolCallCount: number
-    durationMs: number
-    threadId: string
-    agentId?: string
-  }) => void
-  /** 错误 */
-  onError?: (data: { code: string; message: string }) => void
+  onSurface?: (data: SurfaceFrame) => void
+  onRagProgress?: (data: RagProgressEvent) => void
+  onDone?: (data: Omit<SseDoneEvent, 'type'>) => void
+  onError?: (data: Omit<SseErrorEvent, 'type'>) => void
 }
 
 /**
@@ -227,17 +167,11 @@ function parseSseEvent(
   try {
     const parsed = JSON.parse(data)
     switch (eventType) {
-      case 'delta':
-        events.onDelta?.(parsed)
+      case 'surface':
+        events.onSurface?.(parsed as SurfaceFrame)
         break
-      case 'tool_call':
-        events.onToolCall?.(parsed)
-        break
-      case 'tool_result':
-        events.onToolResult?.(parsed)
-        break
-      case 'status':
-        events.onStatus?.(parsed)
+      case 'rag_progress':
+        events.onRagProgress?.(parsed as RagProgressEvent)
         break
       case 'done':
         markDone()

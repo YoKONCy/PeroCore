@@ -1,19 +1,13 @@
 <script setup lang="ts">
 /**
- * ToolCallCard — ReAct 工具轨迹卡片（对话/任务中心通用）
+ * ToolCallCard.vue — 界面组件
  *
- * 视觉设计（对齐 Cursor / Copilot 类 IDE 的工具调用展示）：
- * - 左侧 3px 主题色条作为分类视觉锚点
- * - 图标置于「软底圆角 chip」中，非裸图标
- * - 状态徽章带语义色 + 圆点指示（执行中/完成/失败）
- * - 展开区按 display.style 选择专属渲染器（edit 显示 +N/-M、search 显示匹配统计等）
- * - 全部走 ui-tokens，浅色/深色主题自适应
- *
- * 显示元数据来源：后端 /api/agents/tools（官方 manifest 声明 / 社区工具声明），
- * 前端 useToolDisplay 拉取并缓存。
+ * 负责组织该界面的响应式状态、用户交互与领域数据展示。
+ * 副作用在组件生命周期内建立并清理，避免跨页面残留监听器或异步状态。
  */
-import { computed, onMounted, ref, watch } from 'vue'
-import PixelIcon from '../pixel/PixelIcon.vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import ToolArchetypeSignature from './ToolArchetypeSignature.vue'
+import ToolTechnicalDrawer from './ToolTechnicalDrawer.vue'
 import {
   resolveToolDisplay,
   toolDisplayColor,
@@ -23,6 +17,7 @@ import {
 } from '../../composables/tools/useToolDisplay'
 import type { AgentToolDisplay } from '../../api/modules/agentApi'
 import { getToolStyleRenderer } from './toolRenderers'
+import { resolveToolSignature } from './toolSignatures'
 
 interface Props {
   tool: {
@@ -31,75 +26,42 @@ interface Props {
     result?: string
     isError?: boolean
     durationMs?: number
+    receivedChars?: number
+    assembling?: boolean
   }
-  /** 外部控制展开状态（可选；不传则由组件内部管理） */
-  expanded?: boolean
+  expanded?: boolean | null
+  chainStart?: boolean
+  chainEnd?: boolean
 }
-
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  expanded: null,
+  chainStart: true,
+  chainEnd: true,
+})
 const emit = defineEmits<{ 'update:expanded': [value: boolean] }>()
-
-/** 显示元数据（异步加载） */
-const display = ref<AgentToolDisplay | undefined>(undefined)
-const loading = ref(true)
+const display = ref<AgentToolDisplay>()
+const detailsRef = ref<HTMLDetailsElement>()
+const internalExpanded = ref(props.tool.result === undefined)
+const drawerOpen = ref(false)
+const userLocked = ref(false)
+let collapseTimer: number | undefined
 
 onMounted(async () => {
-  try {
-    display.value = await resolveToolDisplay(props.tool.name)
-  } finally {
-    loading.value = false
-  }
+  display.value = await resolveToolDisplay(props.tool.name)
+  await nextTick()
+  syncOpen()
 })
+onBeforeUnmount(() => window.clearTimeout(collapseTimer))
 
-/**
- * 展开状态：使用原生 details/open 作为真实状态源。
- * 原生 disclosure 不依赖 click 事件切换，避免外层消息气泡的拖拽、选择或冒泡处理吞掉点击。
- */
-const internalExpanded = ref(false)
-const isExpanded = computed(() => props.expanded ?? internalExpanded.value)
-const detailsRef = ref<HTMLDetailsElement | null>(null)
-
-/** 原生 toggle 事件是展开状态的唯一入口，同时同步可选的 v-model。 */
-function handleNativeToggle(event: Event) {
-  const open = (event.currentTarget as HTMLDetailsElement).open
-  internalExpanded.value = open
-  emit('update:expanded', open)
-}
-
-/** 外部受控时，把 expanded 同步回原生 details.open。 */
-watch(
-  () => props.expanded,
-  (value) => {
-    if (value !== undefined && detailsRef.value && detailsRef.value.open !== value) {
-      detailsRef.value.open = value
-    }
-  },
+const state = computed<'running' | 'error' | 'ok'>(() =>
+  props.tool.result === undefined ? 'running' : props.tool.isError ? 'error' : 'ok',
 )
-
-/** 状态判定：result 未回填=执行中；isError=失败；否则=完成 */
-const state = computed<'running' | 'error' | 'ok'>(() => {
-  if (props.tool.result === undefined) return 'running'
-  return props.tool.isError ? 'error' : 'ok'
-})
-
-const badgeText = computed(() => {
-  if (state.value === 'running') return '执行中'
-  if (state.value === 'error') return '失败'
-  return '完成'
-})
-
-/** 耗时格式化 */
-const durationText = computed(() => {
-  const ms = props.tool.durationMs
-  if (ms === undefined) return ''
-  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`
-})
-
-/** 轨迹渲染器组件（按 style 选择） */
+const signature = computed(() =>
+  resolveToolSignature(props.tool.name, display.value?.signature as never),
+)
 const renderer = computed(() => getToolStyleRenderer(display.value?.style))
-const styleName = computed(() => display.value?.style || 'generic')
-
-/** 安全解析调用参数，用于折叠态展示关键目标（路径/命令/查询词/URL），而不是千篇一律只显示名称。 */
+const label = computed(() => toolDisplayLabel(props.tool.name, display.value))
+const icon = computed(() => toolDisplayIcon(display.value))
 const argsObj = computed<Record<string, unknown>>(() => {
   try {
     return JSON.parse(props.tool.args) as Record<string, unknown>
@@ -107,280 +69,399 @@ const argsObj = computed<Record<string, unknown>>(() => {
     return {}
   }
 })
-
-/** 不同工具风格的折叠态摘要（IDE 活动时间线语义） */
-const targetSummary = computed(() => {
-  const args = argsObj.value
-  if (styleName.value === 'edit' || styleName.value === 'read' || styleName.value === 'file') {
-    return String(args.path ?? args.file_path ?? args.dir_path ?? '')
+const draftSummary = computed(() => {
+  if (!props.tool.assembling) return ''
+  const safeFields = [
+    'file_path',
+    'dir_path',
+    'path',
+    'query',
+    'url',
+    'command',
+    'target',
+    'selector',
+    'room_name',
+  ]
+  for (const field of safeFields) {
+    const match = props.tool.args.match(new RegExp(`"${field}"\\s*:\\s*"([^"\\n]{1,160})`))
+    if (match?.[1]) return `${field.replaceAll('_', ' ')} · ${match[1]}`
   }
-  if (styleName.value === 'search') {
-    return String(args.query ?? args.pattern ?? '')
+  const agentIds = props.tool.args.match(/"agent_ids"\s*:\s*\[([^\]]*)/)
+  if (agentIds?.[1]) {
+    const ids = [...agentIds[1].matchAll(/"([^"\n]+)"/g)].map((match) => match[1])
+    if (ids.length) return `成员 · ${ids.join(' → ')}`
   }
-  if (styleName.value === 'terminal') {
-    return String(args.command ?? args.title ?? args.terminal_id ?? '')
-  }
-  if (styleName.value === 'web' || styleName.value === 'browser') {
-    return String(args.url ?? args.target ?? '')
-  }
-  if (styleName.value === 'reminder') {
-    return String(args.content ?? args.time ?? '')
-  }
-  if (styleName.value === 'skill') return String(args.skill_id ?? '')
-  if (styleName.value === 'task') return String(args.summary ?? '')
   return ''
 })
-
-/** 注入给卡片的主题色（CSS 变量，供子元素与渲染器使用） */
+const summary = computed(() => {
+  for (const field of signature.value.summaryFields) {
+    const value = argsObj.value[field]
+    if (Array.isArray(value) && value.length) return value.join(' → ')
+    if (typeof value === 'string' && value.trim()) return value.trim()
+    if (typeof value === 'number') return String(value)
+  }
+  if (state.value === 'running') {
+    if (draftSummary.value) return draftSummary.value
+    return props.tool.assembling
+      ? `正在组装参数 · ${props.tool.receivedChars ?? 0}字符`
+      : '动作正在进行'
+  }
+  if (state.value === 'error') return '动作未能完成'
+  return '动作已完成'
+})
+const durationText = computed(() => {
+  const ms = props.tool.durationMs
+  return ms === undefined ? '' : ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`
+})
 const accentVars = computed(() => ({
-  '--tc-accent': toolDisplayColor(display.value),
-  '--tc-accent-soft': toolDisplayColorSoft(display.value),
+  '--ta-accent': toolDisplayColor(display.value),
+  '--ta-accent-soft': toolDisplayColorSoft(display.value),
 }))
+const open = computed(() =>
+  typeof props.expanded === 'boolean' ? props.expanded : internalExpanded.value,
+)
+
+function syncOpen(): void {
+  if (detailsRef.value && detailsRef.value.open !== open.value) detailsRef.value.open = open.value
+}
+function setOpen(value: boolean, user = false): void {
+  internalExpanded.value = value
+  if (user) userLocked.value = value
+  emit('update:expanded', value)
+  nextTick(syncOpen)
+}
+function handleSummaryClick(): void {
+  window.clearTimeout(collapseTimer)
+  setOpen(!open.value, true)
+}
+function openDrawer(event: Event): void {
+  event.preventDefault()
+  event.stopPropagation()
+  drawerOpen.value = true
+  setOpen(true, true)
+}
+
+watch(() => props.expanded, syncOpen)
+watch(
+  () => props.tool.result,
+  (result, previous) => {
+    window.clearTimeout(collapseTimer)
+    if (result === undefined) {
+      userLocked.value = false
+      setOpen(true)
+      return
+    }
+    if (previous === undefined && !userLocked.value && !drawerOpen.value) {
+      collapseTimer = window.setTimeout(() => setOpen(false), signature.value.collapseDelayMs)
+    }
+  },
+)
+watch(drawerOpen, (value) => {
+  if (!value && props.tool.result !== undefined) {
+    userLocked.value = false
+    collapseTimer = window.setTimeout(() => setOpen(false), 180)
+  }
+})
 </script>
 
 <template>
   <details
     ref="detailsRef"
-    class="tc-card"
-    :class="[`tc-state-${state}`, `tc-style-${styleName}`, { 'tc-is-open': isExpanded }]"
+    class="ta-node"
+    :class="[
+      `ta-${signature.archetype}`,
+      `ta-${signature.variant}`,
+      `ta-state-${state}`,
+      { 'is-open': open, 'chain-start': chainStart, 'chain-end': chainEnd },
+    ]"
+    :open="open"
+    :data-chain="signature.chain"
     :style="accentVars"
-    @toggle="handleNativeToggle"
   >
-    <!-- Header：使用原生 summary，鼠标与键盘均可可靠展开，不依赖 Vue click 切换。 -->
-    <summary class="tc-header" @click.stop>
-      <span class="tc-icon-chip">
-        <PixelIcon :name="loading ? 'loader' : toolDisplayIcon(display)" size="xs" />
+    <summary class="ta-summary" @click.prevent="handleSummaryClick">
+      <ToolArchetypeSignature
+        :signature="signature"
+        :icon="icon"
+        :label="label"
+        :summary="summary"
+        :state="state"
+      />
+      <span class="ta-copy">
+        <strong>{{ label }}</strong>
+        <small :title="summary">{{ summary }}</small>
       </span>
-
-      <div class="tc-meta">
-        <span class="tc-name">{{ toolDisplayLabel(tool.name, display) }}</span>
-        <span v-if="targetSummary" class="tc-target" :title="targetSummary">
-          {{ targetSummary }}
+      <span class="ta-progress" aria-hidden="true"><i /></span>
+      <span class="ta-meta">
+        <span
+          class="ta-state-dot"
+          :title="state === 'running' ? '进行中' : state === 'error' ? '未完成' : '已完成'"
+          :aria-label="state === 'running' ? '进行中' : state === 'error' ? '未完成' : '已完成'"
+        >
+          <span class="ta-state-text">
+            {{ state === 'running' ? '进行中' : state === 'error' ? '未完成' : '已完成' }}
+          </span>
         </span>
-      </div>
-
-      <span v-if="durationText" class="tc-duration">{{ durationText }}</span>
-      <span class="tc-status" :data-state="state">
-        <i />
-        {{ badgeText }}
-      </span>
-
-      <span class="tc-chevron">
-        <PixelIcon :name="isExpanded ? 'chevron-up' : 'chevron-down'" size="xs" />
+        <time v-if="durationText">{{ durationText }}</time>
+        <button class="ta-data-port" type="button" title="查看技术详情" @click="openDrawer">
+          详情
+        </button>
       </span>
     </summary>
-
-    <!-- Body：按 style 选择渲染器；details 自身控制可见性，避免状态不同步。 -->
-    <component
-      :is="renderer"
-      class="tc-body"
-      :args="tool.args"
-      :result="tool.result"
-      :is-error="tool.isError"
-    />
+    <div class="ta-result-stage">
+      <component :is="renderer" :args="tool.args" :result="tool.result" :is-error="tool.isError" />
+    </div>
+    <Teleport to="body">
+      <ToolTechnicalDrawer
+        v-if="drawerOpen"
+        :name="tool.name"
+        :args="tool.args"
+        :result="tool.result"
+        :is-error="tool.isError"
+        :duration-ms="tool.durationMs"
+        @close="drawerOpen = false"
+      />
+    </Teleport>
   </details>
 </template>
 
 <style scoped>
-.tc-card {
+.ta-node {
+  --ta-face: color-mix(in srgb, var(--ui-bg-elevated) 94%, var(--ta-accent-soft));
+  --ta-face-raised: color-mix(in srgb, var(--ui-bg-surface) 82%, var(--ta-accent-soft));
+  --ta-edge: color-mix(in srgb, var(--ta-accent) 42%, var(--ui-border-default));
+  --ta-highlight: color-mix(in srgb, var(--ui-text-inverse) 28%, transparent);
+  --ta-shadow: color-mix(in srgb, var(--ta-accent) 18%, transparent);
   position: relative;
-  overflow: visible;
-  border: 0;
-  background: transparent;
-  pointer-events: auto;
+  min-width: 0;
+  color: var(--ui-text-primary);
 }
-.tc-header::-webkit-details-marker {
-  display: none;
-}
-.tc-header::marker {
-  content: '';
-}
-/* infOS 工具总线：细轨道连接方形端口，不使用漂浮卡片或胶囊。 */
-.tc-card::before {
-  content: '';
+.ta-node::before {
   position: absolute;
-  z-index: 0;
-  top: 28px;
-  bottom: -5px;
-  left: 21px;
-  width: 1px;
-  background: var(--ui-border-default);
+  top: -7px;
+  bottom: calc(100% - 4px);
+  left: 19px;
+  width: 2px;
+  background: repeating-linear-gradient(to bottom, var(--ta-accent) 0 3px, transparent 3px 5px);
+  content: '';
+  opacity: 0.45;
 }
-.tc-card:last-child::before,
-.tc-card.tc-is-open::before {
+.ta-node.chain-start::before {
   display: none;
 }
-.tc-state-error {
-  --tc-accent: var(--ui-danger) !important;
-  --tc-accent-soft: var(--ui-danger-soft) !important;
-}
-.tc-header {
+.ta-summary {
   position: relative;
   display: grid;
-  min-height: 34px;
-  grid-template-columns: 24px minmax(0, 1fr) auto auto 22px;
+  min-height: 39px;
+  grid-template-columns: 40px minmax(0, 1fr) minmax(24px, 90px) auto;
   align-items: center;
-  gap: 8px;
-  padding: 2px 3px 2px 9px;
-  outline: 0;
+  gap: 7px;
+  padding: 3px 5px 3px 1px;
   cursor: pointer;
+  list-style: none;
   user-select: none;
 }
-.tc-header::after {
-  content: '';
+.ta-summary::-webkit-details-marker {
+  display: none;
+}
+.ta-summary::after {
   position: absolute;
-  inset: 0;
-  z-index: -1;
-  border-left: 2px solid transparent;
-  background: transparent;
-  transition:
-    background var(--ui-duration-fast),
-    border-color var(--ui-duration-fast);
+  right: 2px;
+  bottom: 1px;
+  left: 42px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--ta-edge), transparent 72%);
+  content: '';
+  opacity: 0.42;
 }
-.tc-header:hover::after,
-.tc-header:focus-visible::after {
-  border-left-color: var(--tc-accent);
-  background: var(--ui-bg-hover);
+.ta-summary:hover .ta-data-port,
+.ta-summary:focus-visible .ta-data-port {
+  opacity: 1;
+  transform: translateX(0);
 }
-.tc-is-open .tc-header::after {
-  border-left-color: var(--tc-accent);
-  background: color-mix(in srgb, var(--tc-accent-soft) 48%, transparent);
-}
-.tc-icon-chip {
-  position: relative;
-  z-index: 1;
+.ta-copy {
   display: grid;
-  width: 22px;
-  height: 22px;
-  place-items: center;
-  border: 1px solid color-mix(in srgb, var(--tc-accent) 45%, var(--ui-border-default));
-  border-radius: 0;
-  background: var(--ui-bg-surface);
-  color: var(--tc-accent);
-  box-shadow:
-    inset 0 0 0 2px var(--ui-bg-surface),
-    inset 0 0 0 3px color-mix(in srgb, var(--tc-accent) 14%, transparent);
-}
-.tc-icon-chip::after {
-  content: '';
-  position: absolute;
-  right: -3px;
-  bottom: -3px;
-  width: 4px;
-  height: 4px;
-  background: var(--tc-accent);
-}
-.tc-style-terminal .tc-icon-chip,
-.tc-style-search .tc-icon-chip,
-.tc-style-web .tc-icon-chip,
-.tc-style-browser .tc-icon-chip,
-.tc-style-edit .tc-icon-chip {
-  border-radius: 0;
-  transform: none;
-}
-.tc-style-terminal .tc-icon-chip :deep(.pixel-icon) {
-  transform: none;
-}
-.tc-meta {
-  display: flex;
   min-width: 0;
-  align-items: baseline;
-  gap: 8px;
+  gap: 1px;
 }
-.tc-name {
-  flex-shrink: 0;
-  color: var(--ui-text-primary);
+.ta-copy strong {
   font-size: 11px;
-  font-weight: 750;
-  white-space: nowrap;
+  font-weight: 800;
+  letter-spacing: 0.02em;
 }
-.tc-target {
+.ta-copy small {
   overflow: hidden;
-  min-width: 0;
-  color: var(--ui-text-tertiary);
-  font: 9px var(--ui-font-mono);
+  color: var(--ui-text-muted);
+  font:
+    8px var(--font-mono),
+    monospace;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.tc-duration {
-  color: var(--ui-text-disabled);
-  font: 8px var(--ui-font-mono);
-}
-.tc-status {
-  display: inline-flex;
-  height: 20px;
-  align-items: center;
-  gap: 6px;
-  padding: 0 7px;
-  border-left: 1px solid var(--ui-border-default);
-  color: var(--ui-text-tertiary);
-  font: 800 8px var(--ui-font-mono);
-  letter-spacing: 0.06em;
-}
-.tc-status i {
-  width: 5px;
-  height: 5px;
-  background: currentColor;
-}
-.tc-status[data-state='running'] {
-  color: var(--ui-accent-sky);
-}
-.tc-status[data-state='ok'] {
-  color: var(--ui-success);
-}
-.tc-status[data-state='error'] {
-  color: var(--ui-danger);
-}
-.tc-status[data-state='running'] i {
-  animation: tc-blink 1s steps(1, end) infinite;
-}
-.tc-chevron {
-  display: grid;
-  width: 22px;
-  height: 22px;
-  place-items: center;
-  border-left: 1px solid transparent;
-  color: var(--ui-text-disabled);
-}
-.tc-header:hover .tc-chevron {
-  color: var(--tc-accent);
-}
-/* 展开区为切角检查舱；结构依靠边线和轨道，不依赖圆角/阴影。 */
-.tc-body {
+.ta-progress {
   position: relative;
-  margin: 4px 4px 9px 42px;
+  height: 3px;
   overflow: hidden;
-  border: 1px solid var(--ui-border-default);
-  border-radius: 0;
-  background: var(--ui-bg-surface);
-  box-shadow: 4px 4px 0 color-mix(in srgb, var(--tc-accent) 8%, transparent);
-  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
+  background: color-mix(in srgb, var(--ta-edge) 30%, transparent);
 }
-.tc-body::after {
-  content: '';
+.ta-progress i {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--ta-accent);
+  transform-origin: left;
+}
+.ta-state-running .ta-progress i {
+  animation: ta-progress 1.15s ease-in-out infinite;
+}
+.ta-state-ok .ta-progress i {
+  transform: scaleX(1);
+}
+.ta-state-error .ta-progress i {
+  background: var(--ui-danger);
+  clip-path: polygon(0 0, 18% 0, 22% 100%, 42% 100%, 46% 0, 67% 0, 72% 100%, 100% 100%, 100% 0);
+}
+.ta-meta {
+  display: grid;
+  grid-template-columns: 7px minmax(30px, auto) 44px;
+  align-items: center;
+  gap: 7px;
+  min-width: 95px;
+}
+.ta-summary time {
+  color: var(--ui-text-muted);
+  font:
+    8px var(--font-mono),
+    monospace;
+  text-align: right;
+  white-space: nowrap;
+}
+.ta-state-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ta-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ta-accent) 18%, transparent);
+}
+.ta-state-text {
   position: absolute;
-  top: 0;
-  right: 0;
-  width: 10px;
-  height: 10px;
-  border-left: 1px solid var(--ui-border-default);
-  background: var(--ui-bg-canvas);
-  transform: skew(45deg) translateX(5px);
-  pointer-events: none;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
-@keyframes tc-blink {
-  0%,
-  45% {
-    opacity: 1;
+.ta-state-running .ta-state-dot {
+  animation: ta-state-pulse 1.15s ease-in-out infinite;
+}
+.ta-state-error .ta-state-dot {
+  background: var(--ui-danger);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ui-danger) 18%, transparent);
+}
+.ta-data-port {
+  width: 44px;
+  height: 24px;
+  border: 1px solid var(--ta-edge);
+  border-radius: 4px;
+  background: var(--ta-face-raised);
+  box-shadow: 2px 2px 0 var(--ta-shadow);
+  color: var(--ta-accent);
+  font-size: 9px;
+  font-weight: 800;
+  cursor: pointer;
+  opacity: 0.72;
+  transform: none;
+  transition:
+    opacity 120ms ease,
+    background 120ms ease,
+    box-shadow 120ms ease;
+}
+.ta-data-port:hover,
+.ta-data-port:focus-visible {
+  opacity: 1;
+  background: var(--ta-face);
+  box-shadow: 3px 3px 0 var(--ta-shadow);
+  outline: none;
+}
+.ta-result-stage {
+  margin: 2px 0 7px 41px;
+  overflow: hidden;
+  border-left: 1px dashed var(--ta-edge);
+  background: var(--ta-face);
+  box-shadow: 2px 2px 0 var(--ta-shadow);
+  clip-path: polygon(
+    0 0,
+    100% 0,
+    100% calc(100% - 6px),
+    calc(100% - 6px) calc(100% - 6px),
+    calc(100% - 6px) 100%,
+    0 100%
+  );
+}
+.ta-node:not([open]) .ta-result-stage {
+  display: none;
+}
+.ta-state-error {
+  --ta-edge: color-mix(in srgb, var(--ui-danger) 52%, var(--ui-border-default));
+}
+.ta-state-error .ta-summary {
+  transform: rotate(-0.25deg);
+}
+.ta-system-module .ta-summary::after {
+  background: linear-gradient(90deg, var(--ta-accent), transparent 45%);
+}
+.ta-stronghold-scene .ta-summary::after {
+  background: repeating-linear-gradient(90deg, var(--ta-accent) 0 8px, transparent 8px 12px);
+}
+.ta-terminal-tape .ta-summary::after {
+  height: 2px;
+  background: repeating-linear-gradient(90deg, var(--ta-edge) 0 3px, transparent 3px 6px);
+}
+.ta-search-radar .ta-summary::after {
+  background: radial-gradient(circle, var(--ta-accent) 0 1px, transparent 2px) 0 0 / 7px 3px;
+}
+.ta-time-ticket .ta-summary::after {
+  background: repeating-linear-gradient(90deg, var(--ta-edge) 0 5px, transparent 5px 8px);
+}
+@keyframes ta-progress {
+  0% {
+    transform: translateX(-100%) scaleX(0.32);
   }
-  46%,
+  55% {
+    transform: translateX(15%) scaleX(0.55);
+  }
   100% {
-    opacity: 0.2;
+    transform: translateX(100%) scaleX(0.2);
   }
 }
+@keyframes ta-state-pulse {
+  50% {
+    opacity: 0.45;
+    transform: scale(0.72);
+  }
+}
+@media (max-width: 700px) {
+  .ta-summary {
+    grid-template-columns: 40px minmax(0, 1fr) auto;
+  }
+  .ta-progress {
+    display: none;
+  }
+  .ta-meta {
+    grid-template-columns: 7px auto 40px;
+    gap: 5px;
+    min-width: 86px;
+  }
+  .ta-data-port {
+    width: 40px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .tc-status[data-state='running'] i {
-    animation: none;
+  .ta-node *,
+  .ta-node *::before,
+  .ta-node *::after {
+    animation: none !important;
+    transition: none !important;
   }
 }
 </style>

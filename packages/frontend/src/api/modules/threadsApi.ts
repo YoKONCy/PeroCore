@@ -8,6 +8,7 @@
  * 早期版本误用 /threads 前缀导致 404，已修正。
  */
 
+import type { ConversationProjectionSnapshot } from '@infos/shared'
 import { apiClient } from '../client'
 
 /** Thread 频道类型 */
@@ -36,6 +37,8 @@ export interface ThreadInfo {
   contextPolicy: string | null
   /** 本会话明确禁用的工具名。 */
   disabledTools: string[]
+  /** 本会话开启后，普通工具调用不再逐次请求审批。 */
+  autoExecuteTools: boolean
   createdAt: string
   updatedAt: string
 }
@@ -109,6 +112,7 @@ export interface ThreadToolsData {
   channel: ThreadChannel
   tools: ThreadToolSetting[]
   disabledTools?: string[]
+  autoExecuteTools: boolean
 }
 
 export interface FlowStateInfo {
@@ -116,6 +120,8 @@ export interface FlowStateInfo {
   agentId: string
   currentGoal: string
   privateFacts: string
+  workContext: string
+  workContextRemainingPairs: number
   revision: number
   updatedAt: string | null
 }
@@ -156,6 +162,12 @@ export const threadsApi = {
     return apiClient.get<ThreadDetailData>(`/chat/threads/${threadId}${qs ? `?${qs}` : ''}`)
   },
 
+  /** 获取 Conversation 权威 Projection 与 committed Surfaces。 */
+  getProjection: (threadId: string) =>
+    apiClient.get<ConversationProjectionSnapshot>(
+      `/chat/threads/${encodeURIComponent(threadId)}/projection`,
+    ),
+
   /** 创建新 Thread */
   create: (data: CreateThreadRequest) =>
     apiClient.post<{ thread: ThreadInfo }>('/chat/threads', data),
@@ -184,6 +196,14 @@ export const threadsApi = {
     )
   },
 
+  /** 清空当前会话中指定角色的工作上下文。 */
+  clearWorkContext: (threadId: string, agentId?: string) => {
+    const query = agentId ? `?agentId=${encodeURIComponent(agentId)}` : ''
+    return apiClient.delete<FlowStateInfo>(
+      `/chat/threads/${encodeURIComponent(threadId)}/work-context${query}`,
+    )
+  },
+
   /** 获取当前 Channel 可配置工具及本会话启用状态。 */
   getTools: (threadId: string) =>
     apiClient.get<ThreadToolsData>(`/chat/threads/${encodeURIComponent(threadId)}/tools`),
@@ -193,6 +213,12 @@ export const threadsApi = {
     apiClient.put<ThreadToolsData>(`/chat/threads/${encodeURIComponent(threadId)}/tools`, {
       disabledTools,
     }),
+
+  updateExecutionMode: (threadId: string, autoExecuteTools: boolean) =>
+    apiClient.put<{ threadId: string; autoExecuteTools: boolean }>(
+      `/chat/threads/${encodeURIComponent(threadId)}/execution-mode`,
+      { autoExecuteTools },
+    ),
 
   /** 获取指定 Agent/Channel 的最新 Thread */
   getLatest: (data: GetLatestThreadRequest) =>

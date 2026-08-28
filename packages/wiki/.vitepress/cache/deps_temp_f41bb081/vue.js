@@ -169,8 +169,8 @@ import {
   withKeys,
   withMemo,
   withModifiers,
-  withScopeId
-} from "./chunk-SSE2PQUB.js";
+  withScopeId,
+} from './chunk-SSE2PQUB.js'
 export {
   BaseTransition,
   BaseTransitionPropsValidators,
@@ -342,6 +342,6 @@ export {
   withKeys,
   withMemo,
   withModifiers,
-  withScopeId
-};
+  withScopeId,
+}
 //# sourceMappingURL=vue.js.map

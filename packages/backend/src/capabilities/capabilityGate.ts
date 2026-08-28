@@ -32,6 +32,8 @@ import { createLogger } from '../lib/logger'
 
 const logger = createLogger('CapabilityGate')
 
+const DEPRECATED_ROLE_FRAGMENTS = new Set(['components/abilities/vision'])
+
 /** 空能力 (所有字段为空) */
 const EMPTY_CAPABILITY: ResolvedCapability = {
   allowedTools: new Set(),
@@ -48,7 +50,15 @@ const AMBIENT_ALLOWED_TOOLS = new Set([
   'set_reminder',
   'list_reminders',
   'cancel_reminder',
-  'search_diary',
+  'write_event_note',
+  'revise_event_note',
+  'query_event_notes',
+  'query_facts',
+  'write_fact',
+  'supersede_fact',
+  'delete_fact',
+  'add_fact_object_alias',
+  'remove_fact_object_alias',
 ])
 
 export class CapabilityGate {
@@ -83,6 +93,22 @@ export class CapabilityGate {
 
         try {
           const config = this.parseCapabilityYaml(entry, capPath)
+          const needsMigration = Object.values(config.channels).some((channel) =>
+            channel.prompt_fragments.some((fragment) => DEPRECATED_ROLE_FRAGMENTS.has(fragment)),
+          )
+          if (needsMigration) {
+            for (const channel of Object.values(config.channels)) {
+              channel.prompt_fragments = channel.prompt_fragments.filter(
+                (fragment) => !DEPRECATED_ROLE_FRAGMENTS.has(fragment),
+              )
+            }
+            writeFileSync(
+              capPath,
+              this.buildCapabilitiesYaml(config.agent, config.channels),
+              'utf-8',
+            )
+            logger.info(`已迁移角色能力配置中的废弃视觉提示: ${config.agent}`)
+          }
           this.configs.set(config.agent, config)
           logger.debug(`能力配置已加载: ${config.agent}`)
         } catch (err) {
@@ -110,7 +136,7 @@ export class CapabilityGate {
    */
   validateChannelConfig(): void {
     /** 期望所有 Agent 都配置的 channel 列表（见 00-overview.md §4） */
-    const EXPECTED_CHANNELS = ['desktop', 'social', 'group'] as const
+    const EXPECTED_CHANNELS = ['desktop', 'group'] as const
 
     for (const [agentId, config] of this.configs) {
       const missing: string[] = []
@@ -160,15 +186,32 @@ export class CapabilityGate {
       return { ...EMPTY_CAPABILITY, allowedTools: new Set() }
     }
 
-    // 1. 工具白名单 (基础 + 会话临时解锁)
-    const allowedTools = new Set(channelConfig.tools)
+    const roleToolFilter = new Set(channelConfig.tools)
+    const allowUpstreamTools = roleToolFilter.delete('*')
+    const channelTools = new Set(
+      this.toolRegistry.getDefinitions(channel).map((definition) => definition.name),
+    )
+    const allowedTools = new Set<string>()
+    if (allowUpstreamTools) {
+      for (const tool of channelTools) allowedTools.add(tool)
+    }
+    for (const tool of roleToolFilter) {
+      if (channelTools.has(tool)) allowedTools.add(tool)
+    }
+
+    const allowAllMcpTools = allowedTools.delete('mcp:*')
+    if (allowAllMcpTools && scope !== 'ambient') {
+      for (const tool of channelTools) {
+        if (tool.startsWith('mcp_')) allowedTools.add(tool)
+      }
+    }
 
     // 合并 Skill 临时解锁的工具
     if (sessionId) {
       const overrides = this.sessionOverrides.get(sessionId)
       if (overrides) {
         for (const tool of overrides) {
-          allowedTools.add(tool)
+          if (channelTools.has(tool)) allowedTools.add(tool)
         }
       }
     }
@@ -183,7 +226,11 @@ export class CapabilityGate {
     // 2. Skill 清单 (只加载 manifest，不加载完整内容)
     const enabledSkills: SkillManifest[] = []
     const enabledSkillIds = scope === 'ambient' ? [] : channelConfig.skills
-    for (const skillId of enabledSkillIds) {
+    const discoverAllSkills = enabledSkillIds.includes('*')
+    const skillIds = discoverAllSkills
+      ? this.skillLoader.getAllManifests().map((skill) => skill.id)
+      : enabledSkillIds
+    for (const skillId of skillIds) {
       const manifest = this.skillLoader.getManifest(skillId)
       if (manifest) {
         enabledSkills.push(manifest)
@@ -204,10 +251,11 @@ export class CapabilityGate {
     return {
       allowedTools,
       enabledSkills,
-      promptFragments:
-        scope === 'ambient'
-          ? channelConfig.prompt_fragments.filter((fragment) => fragment.includes('/vision'))
-          : channelConfig.prompt_fragments,
+      promptFragments: channelConfig.prompt_fragments.filter(
+        (fragment) =>
+          !DEPRECATED_ROLE_FRAGMENTS.has(fragment) &&
+          (scope !== 'ambient' || fragment.includes('/vision')),
+      ),
       toolsDescription,
       skillMenuText,
       // 第六阶段 #6: 透传 tool_permissions 配置（Resource Scope）
@@ -315,7 +363,9 @@ export class CapabilityGate {
    */
   unlockSkillTools(sessionId: string, skillId: string): void {
     const manifest = this.skillLoader.getManifest(skillId)
-    if (!manifest?.requiredTools.length) return
+    if (!manifest) return
+    const tools = [...new Set([...manifest.requiredTools, ...manifest.allowedTools])]
+    if (!tools.length) return
 
     let overrides = this.sessionOverrides.get(sessionId)
     if (!overrides) {
@@ -323,13 +373,15 @@ export class CapabilityGate {
       this.sessionOverrides.set(sessionId, overrides)
     }
 
-    for (const tool of manifest.requiredTools) {
+    for (const tool of tools) {
       overrides.add(tool)
     }
 
-    logger.info(
-      `Skill ${skillId} 临时解锁工具: [${manifest.requiredTools.join(', ')}] (session=${sessionId})`,
-    )
+    logger.info(`Skill ${skillId} 临时解锁工具: [${tools.join(', ')}] (session=${sessionId})`)
+  }
+
+  isSkillUnlockedTool(sessionId: string, toolName: string): boolean {
+    return this.sessionOverrides.get(sessionId)?.has(toolName) === true
   }
 
   /** 清除会话临时权限 */
@@ -376,7 +428,9 @@ export class CapabilityGate {
       result[channel] = {
         tools: channelConfig.tools,
         skills: channelConfig.skills,
-        promptFragments: channelConfig.prompt_fragments,
+        promptFragments: channelConfig.prompt_fragments.filter(
+          (fragment) => !DEPRECATED_ROLE_FRAGMENTS.has(fragment),
+        ),
       }
     }
     return result
@@ -413,7 +467,9 @@ export class CapabilityGate {
       finalChannels[channel] = {
         tools: patch.tools ?? old?.tools ?? [],
         skills: patch.skills ?? old?.skills ?? [],
-        prompt_fragments: patch.promptFragments ?? old?.prompt_fragments ?? [],
+        prompt_fragments: (patch.promptFragments ?? old?.prompt_fragments ?? []).filter(
+          (fragment) => !DEPRECATED_ROLE_FRAGMENTS.has(fragment),
+        ),
         tool_permissions: existingPerms[channel],
       }
     }
@@ -658,7 +714,7 @@ export class CapabilityGate {
       // 列表项: 6空格缩进 + "- "（tools/skills/prompt_fragments）
       const itemMatch = trimmed.match(/^ {6}- (.+)$/)
       if (itemMatch?.[1] && currentField) {
-        currentList.push(itemMatch[1].trim())
+        currentList.push(itemMatch[1].trim().replace(/^(['"])(.*)\1$/, '$2'))
       }
     }
 

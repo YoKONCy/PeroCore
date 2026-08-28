@@ -198,6 +198,7 @@ describe('SystemRouter', () => {
         openPath: vi.fn(() => Promise.resolve()),
       },
       gatewayHub: { connectedCount: 2 },
+      storeRegistry: { countExistingNodes: vi.fn(() => 27) },
     }
     const router = createSystemRouter(ctx as never)
 
@@ -215,7 +216,7 @@ describe('SystemRouter', () => {
       data: {
         version: appVersion,
         runtime: { memoryUsage: { rss: 100, heapUsed: 50 }, cpuPercent: 12, totalMemoryMB: 16000 },
-        storage: { sqliteSizeMB: 3, triviumSizeMB: 4 },
+        storage: { sqliteSizeMB: 3, triviumSizeMB: 4, triviumNodeCount: 27 },
         agents: { total: 2, enabled: 1, activeId: 'pero' },
         gateway: { connectedNodes: 2 },
       },

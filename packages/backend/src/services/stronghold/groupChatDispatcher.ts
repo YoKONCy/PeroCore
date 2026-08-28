@@ -36,8 +36,8 @@ type MessageRow = {
 
 /** 调度结果 */
 export interface DispatchResult {
-  /** 下一个发言的 Agent ID (null = 无人接话；'@all' = 全体成员依次回复) */
-  agentId: string | null
+  /** 下一批发言Agent ID；@全体时由调用方展开全部成员。 */
+  agentIds: string[]
   /** 调度理由 */
   reason: string
 }
@@ -55,13 +55,13 @@ export class GroupChatDispatcher {
    */
   async decideNextTurn(roomId: string, history: MessageRow[]): Promise<DispatchResult> {
     if (history.length === 0) {
-      return { agentId: null, reason: '没有消息历史' }
+      return { agentIds: [], reason: '没有消息历史' }
     }
 
     // 获取房间内的候选 Agent
     const candidates = await this.chatService.getCandidateAgents(roomId)
     if (candidates.length === 0) {
-      return { agentId: null, reason: '房间内没有可用 Agent' }
+      return { agentIds: [], reason: '房间内没有可用 Agent' }
     }
 
     const lastMsg = history[history.length - 1]!
@@ -76,7 +76,7 @@ export class GroupChatDispatcher {
     // 短消息（如“你好”“在吗”）同样是明确互动，不应随机静默。
     if (lastMsg.senderId === 'user') {
       return {
-        agentId: this.pickRandom(candidates),
+        agentIds: [this.pickRandom(candidates)],
         reason: '用户发言，随机选择 Agent 回复',
       }
     }
@@ -84,7 +84,7 @@ export class GroupChatDispatcher {
     // 规则 C: Agent 连续发言冷却
     const streak = this.countAgentStreak(history, candidates)
     if (streak >= 3) {
-      return { agentId: null, reason: `Agent 已连续发言 ${streak} 次，冷却中` }
+      return { agentIds: [], reason: `Agent 已连续发言 ${streak} 次，冷却中` }
     }
 
     // ─── Layer 2: 轻量判定 ───
@@ -95,7 +95,7 @@ export class GroupChatDispatcher {
         const others = candidates.filter((a) => a !== lastMsg.senderId)
         if (others.length > 0) {
           return {
-            agentId: this.pickRandom(others),
+            agentIds: [this.pickRandom(others)],
             reason: '30% 概率触发其他 Agent 接话',
           }
         }
@@ -104,10 +104,10 @@ export class GroupChatDispatcher {
 
     // 系统消息后不触发
     if (lastMsg.role === 'system') {
-      return { agentId: null, reason: '系统消息后不自动触发' }
+      return { agentIds: [], reason: '系统消息后不自动触发' }
     }
 
-    return { agentId: null, reason: '未满足触发条件' }
+    return { agentIds: [], reason: '未满足触发条件' }
   }
 
   // ── 内部方法 ──
@@ -119,14 +119,14 @@ export class GroupChatDispatcher {
 
       // @全体成员：召唤房间内所有候选 Agent（agentId 使用哨兵值 '@all'，由路由层展开执行）
       if (mentions.includes('@all') && candidates.length > 0) {
-        return { agentId: '@all', reason: '被 @mention: 全体成员' }
+        return { agentIds: ['@all'], reason: '被 @mention: 全体成员' }
       }
 
-      const validMentions = mentions.filter((m) => candidates.includes(m))
+      const validMentions = [...new Set(mentions.filter((mention) => candidates.includes(mention)))]
       if (validMentions.length > 0) {
         return {
-          agentId: validMentions[0] ?? null,
-          reason: `被 @mention: ${validMentions[0] ?? ''}`,
+          agentIds: validMentions,
+          reason: `被 @mention: ${validMentions.join('、')}`,
         }
       }
     } catch {

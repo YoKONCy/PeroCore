@@ -3,11 +3,85 @@
   "name": "浏览器控制",
   "version": "1.0.0",
   "author": "infOS Team",
-  "description": "浏览器交互控制。通过 BrowserBridge 抽象层与浏览器通信，支持打开URL、点击、输入、滚动等操作。",
+  "description": "infOS 原生 Web Agent Tool ABI，通过细粒度 Capability 操作浏览器运行时。",
   "type": "tool",
   "entry": "index.ts",
   "category": "core",
   "platforms": ["windows", "linux", "darwin"],
+  "userCopy": {
+    "browser_open_url": { "label": "打开网页", "description": "在内置浏览器中打开指定网址。" },
+    "browser_click": {
+      "label": "点击网页元素",
+      "description": "点击网页中的按钮、链接或其他控件。"
+    },
+    "browser_type": { "label": "在网页中输入", "description": "在网页输入框中填写文字。" },
+    "browser_scroll": { "label": "滚动网页", "description": "上下或左右滚动网页，查看其他区域。" },
+    "browser_back": { "label": "返回上一页", "description": "让内置浏览器返回上一个页面。" },
+    "browser_get_content": {
+      "label": "读取网页内容",
+      "description": "读取当前网页的正文和可操作内容。"
+    },
+    "browser_search": {
+      "label": "搜索互联网",
+      "description": "使用搜索引擎查找资料，并整理搜索结果。"
+    },
+    "browser_screenshot": {
+      "label": "截取浏览器画面",
+      "description": "截取内置浏览器当前画面，供视觉模型查看。"
+    },
+    "browser_page_image": {
+      "label": "查看网页图片",
+      "description": "单独查看网页中的某张图片或视频画面。"
+    },
+    "browser_wait": {
+      "label": "等待网页变化",
+      "description": "等待网页加载完成，或等待指定内容出现。"
+    },
+    "browser_tabs": {
+      "label": "管理浏览器页面",
+      "description": "查看、新建、切换或关闭内置浏览器页面。"
+    },
+    "browser_interact": {
+      "label": "操作网页控件",
+      "description": "操作下拉框、复选框、键盘等网页控件。"
+    },
+    "browser_query_dom": {
+      "label": "检查网页结构",
+      "description": "检查网页结构或在页面源码中查找内容。"
+    },
+    "browser_dialog": {
+      "label": "处理网页弹窗",
+      "description": "接受、拒绝或填写网页弹出的提示框。"
+    },
+    "browser_network": {
+      "label": "查看网页请求",
+      "description": "查看网页加载时发送和接收的网络请求。"
+    },
+    "browser_download": {
+      "label": "管理网页下载",
+      "description": "允许并查看内置浏览器产生的下载任务。"
+    },
+    "browser_upload": {
+      "label": "向网页上传文件",
+      "description": "把已授权的文件上传到当前网页。"
+    },
+    "browser_storage": {
+      "label": "管理网站数据",
+      "description": "查看或清理当前网站保存在浏览器中的数据。"
+    },
+    "browser_emulate": {
+      "label": "模拟浏览环境",
+      "description": "调整浏览器尺寸、语言或地区，模拟不同设备环境。"
+    },
+    "browser_evaluate": {
+      "label": "运行网页脚本",
+      "description": "在当前网页中运行自定义脚本；执行前可能需要确认。"
+    },
+    "browser_status": {
+      "label": "查看浏览器状态",
+      "description": "查看内置浏览器是否正常、当前页面和资源使用情况。"
+    }
+  },
 
   "tools": [
     {
@@ -59,7 +133,15 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "direction": { "type": "string", "description": "滚动方向", "enum": ["up", "down"] }
+          "direction": {
+            "type": "string",
+            "description": "滚动方向",
+            "enum": ["up", "down", "left", "right", "top", "bottom", "page_up", "page_down", "to"]
+          },
+          "amount": { "type": "number", "description": "滚动像素；未提供时按视口80%" },
+          "target": { "type": "string", "description": "可选的可滚动元素选择器或句柄" },
+          "x": { "type": "number" },
+          "y": { "type": "number" }
         }
       }
     },
@@ -73,6 +155,226 @@
       "name": "browser_get_content",
       "description": "获取当前浏览器页面的文本内容 (Markdown 格式)。",
       "display": { "label": "读取页面", "icon": "file", "color": "sky", "style": "read" },
+      "parameters": { "type": "object", "properties": {} }
+    },
+    {
+      "name": "browser_search",
+      "description": "使用浏览器搜索网页并返回渲染后的页面快照。",
+      "display": { "label": "浏览器搜索", "icon": "search", "color": "sky", "style": "browser" },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "description": "单个搜索关键词" },
+          "queries": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "批量搜索关键词，最多10个"
+          },
+          "engine": {
+            "type": "string",
+            "enum": ["auto", "google", "baidu", "bing_cn", "bing_global"]
+          },
+          "market": { "type": "string", "description": "区域，例如zh-CN或en-US" },
+          "safeSearch": { "type": "string", "enum": ["strict", "moderate", "off"] },
+          "maxResults": { "type": "number", "description": "最大结果数，1-30" },
+          "timeRange": { "type": "string", "description": "搜索时间范围参数" },
+          "bypassCache": { "type": "boolean", "description": "是否绕过短期缓存" }
+        }
+      }
+    },
+    {
+      "name": "browser_screenshot",
+      "description": "仅截取内置浏览器窗口内容。仅在当前模型具备视觉能力或可用视觉转述模型时注册。",
+      "display": { "label": "浏览器截图", "icon": "camera", "color": "sky", "style": "browser" },
+      "parameters": { "type": "object", "properties": {} }
+    },
+    {
+      "name": "browser_page_image",
+      "description": "按Grounded页面视图中的IMG短ID或元素句柄截取单个正文图片/视频画面。受视觉模型能力门控。",
+      "display": { "label": "读取网页图片", "icon": "image", "color": "sky", "style": "browser" },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "imageId": { "type": "string", "description": "例如IMG1" },
+          "handle": { "type": "string", "description": "元素句柄" }
+        }
+      }
+    },
+    {
+      "name": "browser_wait",
+      "description": "等待页面完成异步加载后重新检查页面。",
+      "display": { "label": "等待网页", "icon": "clock", "color": "sky", "style": "browser" },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "condition": {
+            "type": "string",
+            "enum": ["delay", "element", "visible", "hidden", "text", "url", "value", "dom_stable"]
+          },
+          "target": { "type": "string" },
+          "text": { "type": "string" },
+          "url": { "type": "string" },
+          "value": { "type": "string" },
+          "ms": { "type": "number", "description": "固定等待毫秒数" },
+          "timeoutMs": { "type": "number", "description": "条件等待超时，最大30000" },
+          "pollMs": { "type": "number" },
+          "stableMs": { "type": "number" }
+        }
+      }
+    },
+    {
+      "name": "browser_tabs",
+      "description": "列出、创建、切换或关闭浏览器标签页。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": { "type": "string", "enum": ["list", "create", "switch", "close"] },
+          "targetId": { "type": "string" },
+          "url": { "type": "string" }
+        },
+        "required": ["action"]
+      }
+    },
+    {
+      "name": "browser_interact",
+      "description": "执行可信原生鼠标键盘、表单选择和勾选操作，并返回验证结果。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["hover", "click", "send_keys", "set_value", "select", "check"]
+          },
+          "target": { "type": "string" },
+          "handle": { "type": "string" },
+          "keys": { "type": "string" },
+          "value": { "type": "string" },
+          "text": { "type": "string" },
+          "index": { "type": "number" },
+          "checked": { "type": "boolean" }
+        },
+        "required": ["action"]
+      }
+    },
+    {
+      "name": "browser_query_dom",
+      "description": "通过 CDP 查询 DOM、Shadow DOM 节点及布局信息。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": { "type": "string", "enum": ["dom", "source", "frame"] },
+          "selector": { "type": "string" },
+          "frameId": { "type": "string" },
+          "query": { "type": "string" },
+          "regex": { "type": "boolean" },
+          "caseSensitive": { "type": "boolean" },
+          "maxResults": { "type": "number" },
+          "scope": { "type": "string", "description": "dom,inline_script,style,codeblock" }
+        }
+      }
+    },
+    {
+      "name": "browser_dialog",
+      "description": "接受或拒绝当前 JavaScript Dialog，可为 prompt 提供受审计文本。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "accept": { "type": "boolean" },
+          "promptText": { "type": "string" }
+        },
+        "required": ["accept"]
+      }
+    },
+    {
+      "name": "browser_network",
+      "description": "查询页面网络请求或读取指定响应体。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": { "type": "string", "enum": ["query", "body", "configure"] },
+          "pattern": { "type": "string" },
+          "requestId": { "type": "string" },
+          "limit": { "type": "number" },
+          "headers": { "type": "object" },
+          "userAgent": { "type": "string" },
+          "credentialHandleId": { "type": "string" },
+          "origin": { "type": "string" }
+        },
+        "required": ["action"]
+      }
+    },
+    {
+      "name": "browser_upload",
+      "description": "使用由可信文件选择器签发的一次性 File Handle 上传文件，不接受本地绝对路径。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "target": { "type": "string" },
+          "handle": { "type": "string" },
+          "fileHandleId": { "type": "string" }
+        },
+        "required": ["fileHandleId"]
+      }
+    },
+    {
+      "name": "browser_download",
+      "description": "配置当前 Browser Runtime 的受控下载目录和下载权限，需要审批。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "allow": { "type": "boolean" },
+          "downloadPath": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "browser_storage",
+      "description": "读取或修改站点 Cookie、localStorage 和 sessionStorage。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "area": { "type": "string", "enum": ["cookies", "local", "session"] },
+          "action": { "type": "string", "enum": ["get", "set", "remove", "clear"] },
+          "key": { "type": "string" },
+          "value": { "type": "string" },
+          "origin": { "type": "string" }
+        },
+        "required": ["area", "action"]
+      }
+    },
+    {
+      "name": "browser_emulate",
+      "description": "设置 User-Agent、语言、时区、区域和设备视口。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "userAgent": { "type": "string" },
+          "acceptLanguage": { "type": "string" },
+          "platform": { "type": "string" },
+          "timezone": { "type": "string" },
+          "locale": { "type": "string" },
+          "width": { "type": "number" },
+          "height": { "type": "number" },
+          "deviceScaleFactor": { "type": "number" },
+          "mobile": { "type": "boolean" }
+        }
+      }
+    },
+    {
+      "name": "browser_evaluate",
+      "description": "在当前页面主世界执行高风险 JavaScript 表达式，需要用户审批。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "expression": { "type": "string" },
+          "world": { "type": "string", "enum": ["isolated", "main"] }
+        },
+        "required": ["expression"]
+      }
+    },
+    {
+      "name": "browser_status",
+      "description": "读取 Electron Browser Runtime、隔离 Profile 和标签页状态。",
       "parameters": { "type": "object", "properties": {} }
     }
   ]

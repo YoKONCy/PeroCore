@@ -2,7 +2,7 @@
  * 版本号同步脚本 (TypeScript)
  *
  * 唯一事实来源: 根 package.json 的 version 字段。
- * 本脚本将该版本号同步到所有子包 package.json、Cargo.toml、
+ * 本脚本将该版本号同步到所有子包 package.json，
  * 以及前后端源码中的硬编码版本号。
  *
  * 用法: pnpm version:sync
@@ -34,7 +34,6 @@ interface PackageJson {
 
 const rootPkg: PackageJson = JSON.parse(fs.readFileSync(rootPkgPath, 'utf8'))
 const VERSION = rootPkg.version
-const CARGO_VERSION = toCargoVersion(VERSION)
 const BROWSER_VERSION = toBrowserVersion(VERSION)
 
 console.log(`\n[版本同步] 🎯 唯一事实来源 → package.json: ${VERSION}`)
@@ -45,13 +44,6 @@ let checkedCount = 0
 
 // ─── 工具函数 ──────────────────────────────────────────
 
-function toCargoVersion(version: string): string {
-  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
-    throw new Error(`[版本同步] 非法 SemVer 版本号: ${version}`)
-  }
-  return version
-}
-
 /** Chrome 扩展 version 仅允许 1-4 段数字；预发布序号映射到第四段。 */
 function toBrowserVersion(version: string): string {
   const match = version.match(/^(\d+)\.(\d+)\.(\d+)(?:-[A-Za-z]+(\d+))?$/)
@@ -61,9 +53,13 @@ function toBrowserVersion(version: string): string {
 }
 
 /** 同步浏览器扩展清单：version 为 Chrome 数字格式，version_name 保留完整 SemVer。 */
-function syncBrowserManifest(relPath: string): void {
+function syncBrowserManifest(relPath: string, required = true): void {
   const fullPath = path.join(ROOT, relPath)
-  if (!fs.existsSync(fullPath)) throw new Error(`[版本同步] 必需文件不存在: ${relPath}`)
+  if (!fs.existsSync(fullPath)) {
+    if (required) throw new Error(`[版本同步] 必需文件不存在: ${relPath}`)
+    console.log(`[版本同步] ⏭️  ${relPath} 不存在，跳过可选同步`)
+    return
+  }
   checkedCount++
   const manifest = JSON.parse(fs.readFileSync(fullPath, 'utf8')) as Record<string, unknown>
   if (typeof manifest.version !== 'string' || typeof manifest.version_name !== 'string') {
@@ -96,49 +92,6 @@ function syncJsonVersion(relPath: string, required = true): void {
     pkg.version = VERSION
     fs.writeFileSync(fullPath, JSON.stringify(pkg, null, 2) + '\n')
     console.log(`[版本同步] ✅ ${relPath}: ${oldVersion} → ${VERSION}`)
-    updatedCount++
-  }
-}
-
-/** 同步 Cargo.toml 中的 version 字段。仅本地私有嵌套仓库允许缺失。 */
-function syncCargoVersion(relPath: string, required = true): void {
-  const fullPath = path.join(ROOT, relPath)
-  if (!fs.existsSync(fullPath)) {
-    if (required) throw new Error(`[版本同步] 必需文件不存在: ${relPath}`)
-    console.log(`[版本同步] ⏭️  ${relPath} 本地私有嵌套仓库未检出，跳过`)
-    return
-  }
-  checkedCount++
-  const content = fs.readFileSync(fullPath, 'utf8')
-  if (!/^version\s*=\s*".*"/m.test(content)) {
-    throw new Error(`[版本同步] ${relPath} 未找到 package.version`)
-  }
-  const replaced = content.replace(/^version\s*=\s*".*"/m, `version = "${CARGO_VERSION}"`)
-  if (content !== replaced) {
-    fs.writeFileSync(fullPath, replaced)
-    console.log(`[版本同步] ✅ ${relPath} → ${CARGO_VERSION}`)
-    updatedCount++
-  }
-}
-
-/** 同步 Cargo.lock 中指定本地 crate 的版本，避免误改第三方依赖。 */
-function syncCargoLockVersion(relPath: string, crateName: string, required = true): void {
-  const fullPath = path.join(ROOT, relPath)
-  if (!fs.existsSync(fullPath)) {
-    if (required) throw new Error(`[版本同步] 必需文件不存在: ${relPath}`)
-    console.log(`[版本同步] ⏭️  ${relPath} 本地私有嵌套仓库未检出，跳过`)
-    return
-  }
-  checkedCount++
-  const content = fs.readFileSync(fullPath, 'utf8')
-  const pattern = new RegExp(`(name = "${crateName}"\\r?\\nversion = ")[^"]+(")`)
-  if (!pattern.test(content)) {
-    throw new Error(`[版本同步] ${relPath} 未找到本地 crate: ${crateName}`)
-  }
-  const replaced = content.replace(pattern, `$1${CARGO_VERSION}$2`)
-  if (content !== replaced) {
-    fs.writeFileSync(fullPath, replaced)
-    console.log(`[版本同步] ✅ ${relPath} ${crateName} → ${CARGO_VERSION}`)
     updatedCount++
   }
 }
@@ -187,44 +140,23 @@ const subPackagePaths = [
   'packages/backend/package.json',
   'packages/frontend/package.json',
   'packages/daemon/package.json',
-  'packages/browser-extension/package.json',
   'packages/apps/social/package.json',
+  'packages/apps/arca/package.json',
+  'packages/avatar-assets/package.json',
+  'packages/document-engine/package.json',
+  'packages/node-sdk/package.json',
+  'packages/node-host/package.json',
   'packages/wiki/package.json',
-  'packages/native/render-core-runtime/package.json',
-  'packages/native/nit-runtime/package.json',
-  'packages/native/auditor-wasm/package.json',
   'electron/package.json',
 ]
 
 for (const relPath of subPackagePaths) {
   syncJsonVersion(relPath)
 }
-// render-core 是本机私有嵌套仓库：本地存在时严格同步，CI 未检出时允许跳过。
-syncJsonVersion('packages/native/render-core/package.json', false)
 
 console.log('\n── 🧩 应用与扩展清单 ──')
 syncJsonVersion('packages/apps/social/app.manifest.json')
-syncBrowserManifest('packages/browser-extension/manifest.json')
-
-// ═══════════════════════════════════════════════════════
-// 2. 同步 Cargo.toml (Rust 原生模块)
-// ═══════════════════════════════════════════════════════
-console.log('\n── 🦀 Cargo.toml ──')
-
-const cargoTomlPaths = [
-  'packages/native/nit-runtime/Cargo.toml',
-  'packages/native/auditor-wasm/Cargo.toml',
-]
-
-for (const relPath of cargoTomlPaths) {
-  syncCargoVersion(relPath)
-}
-// render-core 是本机私有嵌套仓库：本地存在时严格同步，CI 未检出时允许跳过。
-syncCargoVersion('packages/native/render-core/Cargo.toml', false)
-
-syncCargoLockVersion('packages/native/render-core/Cargo.lock', 'pero-render-core', false)
-syncCargoLockVersion('packages/native/nit-runtime/Cargo.lock', 'nit-runtime')
-syncCargoLockVersion('packages/native/auditor-wasm/Cargo.lock', 'infos-auditor-wasm')
+syncBrowserManifest('packages/browser-extension/manifest.json', false)
 
 // ═══════════════════════════════════════════════════════
 // 3. 同步后端源码中的硬编码版本号
@@ -253,6 +185,34 @@ syncSourceVersion(
   /\{\s*name:\s*`infos-\$\{name\}`,\s*version:\s*'[^']*'\s*\}/,
   `{ name: \`infos-\${name}\`, version: '${VERSION}' }`,
   'MCP client version',
+)
+
+syncSourceVersion(
+  'packages/backend/src/services/distributed/distributedSyncService.ts',
+  /const APP_VERSION\s*=\s*'[^']*'/,
+  `const APP_VERSION = '${VERSION}'`,
+  'distributed APP_VERSION',
+)
+
+syncSourceVersion(
+  'packages/apps/arca/src/applicationHost.ts',
+  /appVersion:\s*'[^']*'/,
+  `appVersion: '${VERSION}'`,
+  'Arca host appVersion',
+)
+
+syncSourceVersion(
+  'packages/apps/arca/src/manifest.ts',
+  /versions:\s*'[^']*'/,
+  `versions: '>=${VERSION} <1.0.0'`,
+  'Arca host version range',
+)
+
+syncSourceVersion(
+  'packages/backend/tests/unit/capabilities/arcaApplicationController.test.ts',
+  /appVersion:\s*'[^']*'/,
+  `appVersion: '${VERSION}'`,
+  'Arca controller fixture appVersion',
 )
 
 // ═══════════════════════════════════════════════════════

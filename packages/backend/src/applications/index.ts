@@ -21,6 +21,7 @@ export type {
   WorkspaceResourceRef,
   PersonaResourceRef,
   TaskResourceRef,
+  ModelResourceRef,
   GrantPermission,
   Grant,
   AppInstallStatus,
@@ -39,3 +40,23 @@ export type { AppRuntimeContext, AppLogger, AgentAppRuntime, AppRuntimeFactory }
 
 // AppManager
 export { AppManagerImpl, type AppManager } from './appManager'
+export {
+  ApplicationRealmManager,
+  ApplicationRealm,
+  type ApplicationRealmDescriptor,
+} from './applicationRealm'
+export { BrowserInteractionRuntime } from './browserInteractionRuntime'
+export { BrowserActionLedger } from './browserActionLedger'
+export { BrowserFormPlanner } from './browserFormPlanner'
+export { WebCapabilityCompiler } from './webCapabilityCompiler'
+export { WebSiteModelRegistry } from './webSiteModelRegistry'
+export { ApplicationCapabilityClient } from './applicationCapabilityClient'
+export { ApplicationResourceAccessService } from './applicationResourceAccessService'
+export {
+  ApplicationIntegrationService,
+  type ApplicationRuntimeIdentity,
+} from './applicationIntegrationService'
+export {
+  createAgentApplicationTaskPort,
+  type AgentApplicationTaskInput,
+} from './applicationTaskPort'

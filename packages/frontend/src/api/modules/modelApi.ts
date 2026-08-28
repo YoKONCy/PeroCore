@@ -18,7 +18,12 @@ export interface ModelConfigItem {
   temperature: number | null
   topP: number | null
   maxTokens: number | null
+  contextWindowTokens: number | null
   reasoningEffort: ReasoningEffort | null
+  returnNativeReasoning: boolean
+  wireApi: 'chat_completions' | 'responses'
+  reasoningDialect: 'auto' | 'openai' | 'deepseek' | 'openrouter' | 'generic'
+  stream: boolean
   providerType?: string
   enableVision?: boolean
   /** 声明模型支持原生音频输入（非 ASR） */

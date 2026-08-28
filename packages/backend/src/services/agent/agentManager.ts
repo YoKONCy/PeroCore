@@ -26,6 +26,7 @@ import {
   copyFileSync,
 } from 'node:fs'
 import type { PathResolver } from '../../core/pathResolver'
+import type { AgentPublicProfile } from '@infos/shared'
 import type { ConfigRepository } from '../../repositories/config.repo'
 import type { PetStateService } from './petStateService'
 import { createLogger } from '../../lib/logger'
@@ -46,16 +47,9 @@ agent: __AGENT_ID__
 channels:
   desktop:
     tools:
-      - finish_task
-      - load_skill
-      - web_fetch
-      - search_diary
-      - set_reminder
-      - list_reminders
-      - cancel_reminder
+      - '*'
     skills: []
-    prompt_fragments:
-      - components/abilities/vision
+    prompt_fragments: []
 `
 
 /** 安全解析 JSON，失败时返回兜底值 */
@@ -106,11 +100,23 @@ function normalizeDynamicWaifuTexts(texts: Record<string, unknown>): Record<stri
 // ─────────────────────────────────────────────
 // ─────────────────────────────────────────────
 
+export interface AgentPackageExport {
+  format: 'infos.agent-package'
+  version: 1
+  agentId: string
+  name: string
+  fileName: string
+  exportedAt: string
+  files: Array<{ path: string; contentBase64: string }>
+}
+
 /** Agent 配置 (从 config.json 加载) */
 export interface AgentProfile {
   id: string
   name: string
   description: string
+  /** 允许其他 Agent 读取的结构化公开档案，不包含完整人格与私有记忆。 */
+  publicProfile: AgentPublicProfile
   /**
    * 用户称呼（AI 对用户的亲密称谓，如 主人/哥哥/老师）
    *
@@ -229,6 +235,39 @@ export class AgentManager {
     logger.info(`已加载 ${this.agents.size} 个 Agent`)
   }
 
+  /** 将当前生效的官方或用户角色导出为客户端可落盘的版本化资源包。 */
+  exportAgentPackage(agentId: string): AgentPackageExport {
+    const profile = this.agents.get(agentId.toLowerCase())
+    if (!profile) throw new Error(`Agent "${agentId}" 不存在`)
+    const sourceDir = path.dirname(profile.configPath)
+    const files: AgentPackageExport['files'] = []
+    const collect = (directory: string, prefix = ''): void => {
+      for (const entry of readdirSync(directory, { withFileTypes: true })) {
+        if (entry.name === 'workspace') continue
+        const absolute = path.join(directory, entry.name)
+        const relative = path.posix.join(prefix, entry.name)
+        if (entry.isDirectory()) collect(absolute, relative)
+        else if (entry.isFile()) {
+          files.push({ path: relative, contentBase64: readFileSync(absolute).toString('base64') })
+        }
+      }
+    }
+    collect(sourceDir)
+    files.sort((left, right) => left.path.localeCompare(right.path))
+    if (!files.some((item) => item.path === 'agent.json' || item.path === 'config.json')) {
+      throw new Error(`Agent "${agentId}" 缺少角色清单`)
+    }
+    return {
+      format: 'infos.agent-package',
+      version: 1,
+      agentId: profile.id,
+      name: profile.name,
+      fileName: `${profile.id}.infos-agent.zip`,
+      exportedAt: new Date().toISOString(),
+      files,
+    }
+  }
+
   /** 获取 Agent */
   getAgent(agentId: string): AgentProfile | undefined {
     return this.agents.get(agentId.toLowerCase())
@@ -264,6 +303,7 @@ export class AgentManager {
     id: string
     name: string
     description: string
+    publicProfile: AgentPublicProfile
     ownerAppellation: string
     systemPrompt: string
     channelPatches: Record<string, string>
@@ -287,6 +327,7 @@ export class AgentManager {
       id: profile.id,
       name: profile.name,
       description: profile.description,
+      publicProfile: profile.publicProfile,
       ownerAppellation: profile.ownerAppellation,
       systemPrompt,
       channelPatches: profile.channelPatches,
@@ -311,6 +352,7 @@ export class AgentManager {
     patch: {
       name?: string
       description?: string
+      publicProfile?: AgentPublicProfile
       ownerAppellation?: string
       channelPatches?: Record<string, string>
       socialBinding?: Record<string, unknown>
@@ -341,6 +383,7 @@ export class AgentManager {
     // 白名单字段逐个写回（patch 未提供时保留原值）
     if (patch.name !== undefined) config.name = patch.name
     if (patch.description !== undefined) config.description = patch.description
+    if (patch.publicProfile !== undefined) config.public_profile = patch.publicProfile
     if (patch.ownerAppellation !== undefined) config.owner_appellation = patch.ownerAppellation
     if (patch.channelPatches !== undefined) config.channel_patches = patch.channelPatches
     if (patch.toolPolicies !== undefined) config.tool_policies = patch.toolPolicies
@@ -388,17 +431,21 @@ export class AgentManager {
       return path.dirname(profile.configPath)
     }
 
-    // 复制内置角色包到用户目录（幂等：副本已存在则跳过复制）
+    // 复制内置角色包到用户目录。目录可能由并发保存或上次中断提前创建，
+    // 因此不能只判断目录是否存在，必须确认角色清单已经完整落盘。
     const sourceDir = path.dirname(profile.configPath)
     const targetDir = path.join(userAgentsDir, id)
-    if (!existsSync(targetDir)) {
+    const targetConfigPath = path.join(targetDir, path.basename(profile.configPath))
+    if (!existsSync(targetConfigPath)) {
       mkdirSync(targetDir, { recursive: true })
       this.copyDir(sourceDir, targetDir)
       logger.info(`内置角色已创建用户副本: ${id} → ${targetDir}`)
     }
 
     // 将内存中该 Agent 的读写路径切换到副本并重新加载
-    const configPath = path.join(targetDir, 'agent.json')
+    const configPath = existsSync(path.join(targetDir, 'agent.json'))
+      ? path.join(targetDir, 'agent.json')
+      : path.join(targetDir, 'config.json')
     const updated = this.loadAgentConfig(id, targetDir, configPath)
     this.agents.set(id, updated)
 
@@ -628,6 +675,7 @@ export class AgentManager {
     const config = {
       name: opts.name,
       description: opts.description ?? '',
+      public_profile: {},
       // 角色级称呼：AI 对该用户的亲密称谓，渲染提示词/台词时按此占位
       owner_appellation: opts.ownerAppellation ?? '主人',
       traits: {
@@ -804,6 +852,12 @@ export class AgentManager {
     const workspaceRoot =
       resolver.getWorkspaceRoot?.(agentId) ??
       path.join(this.pathResolver.resolve('@data/principals'), agentId, 'workspace')
+    if (
+      !path.isAbsolute(workspaceRoot) ||
+      /^@(app|data|temp|workshop|principal)(?:[\\/]|$)/i.test(workspaceRoot)
+    ) {
+      throw new Error(`Agent Workspace必须解析为绝对物理路径: ${workspaceRoot}`)
+    }
     if (!existsSync(workspaceRoot)) {
       mkdirSync(workspaceRoot, { recursive: true })
     }
@@ -830,6 +884,7 @@ export class AgentManager {
       id: agentId,
       name: (config.name as string) ?? agentId,
       description: (config.description as string) ?? '',
+      publicProfile: this.normalizePublicProfile(config.public_profile),
       // 用户称呼（AI 对用户的亲密称谓），来自 agent.json 的 owner_appellation，未配置时兜底"主人"
       ownerAppellation: (config.owner_appellation as string) ?? '主人',
       socialTraits,
@@ -843,6 +898,17 @@ export class AgentManager {
       useStickers: (socialBinding.use_stickers as boolean) ?? false,
       waifuTexts: config.waifu_texts as Record<string, unknown>,
     }
+  }
+
+  private normalizePublicProfile(value: unknown): AgentPublicProfile {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+    const source = value as Record<string, unknown>
+    const profile: AgentPublicProfile = {}
+    for (const key of ['gender', 'identity', 'appearance', 'personality'] as const) {
+      const field = source[key]
+      if (typeof field === 'string' && field.trim()) profile[key] = field.trim()
+    }
+    return profile
   }
 
   // AIOS: loadPersonaFile 已移除（workPersona/socialPersona 废弃，人设统一由 system_prompt.md 管理）

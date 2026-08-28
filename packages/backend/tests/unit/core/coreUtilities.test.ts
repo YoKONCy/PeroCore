@@ -3,22 +3,19 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const triviumInstances: MockTriviumDB[] = []
-
 class MockTriviumDB {
   path: string
-  dim: number
+  options: Record<string, unknown>
   flush = vi.fn()
+  close = vi.fn()
   buildTextIndex = vi.fn()
   nodeCount = vi.fn(() => 3)
   estimatedMemory = vi.fn(() => 2 * 1024 * 1024)
   enableAutoCompaction = vi.fn()
-  setMemoryLimit = vi.fn()
 
-  constructor(path: string, dim: number) {
+  constructor(path: string, options: Record<string, unknown>) {
     this.path = path
-    this.dim = dim
-    triviumInstances.push(this)
+    this.options = options
   }
 }
 
@@ -26,7 +23,7 @@ vi.mock('triviumdb', () => ({
   TriviumDB: MockTriviumDB,
 }))
 
-import { HookRegistry } from '@infos/backend/extensions/hookRegistry'
+import { PackageHookBus } from '@infos/backend/packages'
 import { PromptTemplateLoader } from '@infos/backend/core/promptTemplateLoader'
 import { LogFileTransport, formatLogLine } from '@infos/backend/lib/logFileTransport'
 import { MemoryStoreRegistry } from '@infos/backend/repositories/storeRegistry'
@@ -52,66 +49,31 @@ function createResolver(root: string, workshop = true): PathResolver {
   } as unknown as PathResolver
 }
 
-describe('HookRegistry', () => {
-  afterEach(() => {
-    vi.useRealTimers()
+describe('PackageHookBus', () => {
+  it('应当按注册顺序串行执行 Interceptor 并传递修改后的数据', async () => {
+    const bus = new PackageHookBus()
+    const first = vi.fn(async (data: { value: number }) => ({ value: data.value + 1 }))
+    const second = vi.fn(async (data: { value: number }) => ({ value: data.value * 2 }))
+
+    const removeFirst = bus.register('package-a', 'chat:beforeSend', first)
+    bus.register('package-b', 'chat:beforeSend', second)
+    await expect(bus.emitHook('chat:beforeSend', { value: 2 })).resolves.toEqual({ value: 6 })
+
+    removeFirst()
+    await expect(bus.emitHook('chat:beforeSend', { value: 2 })).resolves.toEqual({ value: 4 })
   })
 
-  it('应当按注册顺序串行执行 hook 并传递修改后的数据', async () => {
-    const registry = new HookRegistry()
-    const first = vi.fn((data: { value: number }) => ({ value: data.value + 1 }))
-    const second = vi.fn((data: { value: number }) => ({ value: data.value * 2 }))
-
-    registry.register('beforeChat' as never, 'ext-a', first as never)
-    registry.register('beforeChat' as never, 'ext-b', second as never)
-    const result = await registry.emit('beforeChat' as never, { value: 2 })
-
-    expect(result).toEqual({ value: 6 })
-    expect(first).toHaveBeenCalledWith({ value: 2 }, expect.any(Object))
-    expect(second).toHaveBeenCalledWith({ value: 3 }, expect.any(Object))
-    expect(registry.count).toBe(2)
-    expect(registry.listHooks('beforeChat' as never)).toEqual(['ext-a', 'ext-b'])
-  })
-
-  it('应当支持 abort 中断后续 hook', async () => {
-    const registry = new HookRegistry()
+  it('应当支持 abort 中断后续 Interceptor', async () => {
+    const bus = new PackageHookBus()
     const skipped = vi.fn()
-
-    registry.register('beforeChat' as never, 'ext-a', ((
-      _data: unknown,
-      ctx: { abort: (reason: string) => void },
-    ) => {
-      ctx.abort('停止')
+    bus.register('package-a', 'chat:beforeSend', async (_data, context) => {
+      context.abort('停止')
       return { value: 9 }
-    }) as never)
-    registry.register('beforeChat' as never, 'ext-b', skipped as never)
+    })
+    bus.register('package-b', 'chat:beforeSend', skipped)
 
-    await expect(registry.emit('beforeChat' as never, { value: 1 })).resolves.toEqual({ value: 9 })
+    await expect(bus.emitHook('chat:beforeSend', { value: 1 })).resolves.toEqual({ value: 9 })
     expect(skipped).not.toHaveBeenCalled()
-  })
-
-  it('应当吞掉单个 hook 异常并继续执行后续 hook', async () => {
-    const registry = new HookRegistry()
-    registry.register('beforeChat' as never, 'bad', (() => {
-      throw new Error('失败')
-    }) as never)
-    registry.register('beforeChat' as never, 'good', (() => ({ ok: true })) as never)
-
-    await expect(registry.emit('beforeChat' as never, { ok: false })).resolves.toEqual({ ok: true })
-  })
-
-  it('应当支持按扩展移除 hook 和清空全部 hook', () => {
-    const registry = new HookRegistry()
-    registry.register('beforeChat' as never, 'a', vi.fn() as never)
-    registry.register('afterChat' as never, 'a', vi.fn() as never)
-    registry.register('afterChat' as never, 'b', vi.fn() as never)
-
-    registry.removeByExtension('a')
-    expect(registry.count).toBe(1)
-    expect(registry.listHooks('afterChat' as never)).toEqual(['b'])
-
-    registry.clear()
-    expect(registry.count).toBe(0)
   })
 })
 
@@ -231,30 +193,40 @@ describe('MemoryStoreRegistry', () => {
 
   beforeEach(() => {
     root = join(tmpdir(), `infos-store-${Date.now()}-${Math.random()}`)
-    triviumInstances.length = 0
   })
 
   afterEach(() => {
     rmSync(root, { recursive: true, force: true })
   })
 
-  it('应当按 agent、source 和 diary 创建并复用 TriviumDB store', () => {
+  it('应当按 Agent 与来源创建并复用新版 TriviumDB Store', () => {
     const registry = new MemoryStoreRegistry(createResolver(root), 12)
 
     const main = registry.getAgentStore('pero', 'main')
     const sameMain = registry.getStoreBySource('pero', 'desktop')
     const group = registry.getStoreBySource('pero', 'group')
-    const legacyGroup = registry.getStoreBySource('pero', 'group_chat')
     const social = registry.getStoreBySource('pero', 'social')
-    const diary = registry.getDiaryStore('pero')
 
     expect(main).toBe(sameMain)
     expect(group).toBe(main)
-    expect(legacyGroup).toBe(main)
     expect(social).not.toBe(main)
-    expect(diary).not.toBe(main)
-    expect(registry.resolveAgentStorePath('pero', 'main')).toContain('main.tdb')
+    expect(registry.resolveAgentStorePath('pero', 'main')).toContain('memory.tdb')
     expect(registry.resolveAgentStorePath('pero', 'social')).toContain('social.tdb')
+    registry.closeAll()
+  })
+
+  it('应当递归删除旧 main/diary Store 且保留新版 Store', () => {
+    const resolver = createResolver(root)
+    const agentDir = join(resolver.resolve('@data'), 'agent_pero')
+    mkdirSync(agentDir, { recursive: true })
+    for (const name of ['main.tdb', 'main.tdb.wal', 'diary.tdb', 'memory.tdb']) {
+      writeFileSync(join(agentDir, name), name)
+    }
+
+    const registry = new MemoryStoreRegistry(resolver, 12)
+    registry.removeLegacyStores()
+
+    expect(readdirSync(agentDir).sort()).toEqual(['memory.tdb'])
   })
 
   it('应当 flush、重建文本索引并返回 store 统计', () => {
@@ -267,7 +239,7 @@ describe('MemoryStoreRegistry', () => {
     const stats = registry.getStoreStats()
 
     expect(stats).toEqual([
-      { path: expect.stringContaining('main.tdb'), nodeCount: 0, memoryMB: 0 },
+      { path: expect.stringContaining('memory.tdb'), nodeCount: 0, memoryMB: 0 },
       { path: expect.stringContaining('social.tdb'), nodeCount: 0, memoryMB: 0 },
     ])
   })

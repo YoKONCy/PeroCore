@@ -1,0 +1,5 @@
+{
+  "manifestVersion": 1,
+  "id": "infos.arca",
+  "source": "./src/adapterManifest.ts"
+}

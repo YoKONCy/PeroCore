@@ -16,11 +16,12 @@
  */
 
 import { Hono } from 'hono'
-import { zValidator } from '@hono/zod-validator'
+import { validate as zValidator } from '../lib/validation'
 import { z } from 'zod'
 import { AppError } from '../lib/appError'
 import type { AppContext } from '../container'
-import { resolveToolUserLabel } from '../tools/toolUserLabels'
+import { resolveToolUserDescription, resolveToolUserLabel } from '../tools/toolUserLabels'
+import { isAdvancedTool } from '../tools/advancedTools'
 import { isSystemProtocolTool } from '../tools/systemProtocolTools'
 
 // ─────────────────────────────────────────────
@@ -43,10 +44,18 @@ const createAgentSchema = z.object({
   systemPrompt: z.string().optional(),
 })
 
+const publicProfileSchema = z.object({
+  gender: z.string().max(50).optional(),
+  identity: z.string().max(500).optional(),
+  appearance: z.string().max(1000).optional(),
+  personality: z.string().max(1000).optional(),
+})
+
 /** 更新 Agent 的字段（全部可选，按需覆盖） */
 const updateAgentSchema = z.object({
   name: z.string().min(1).max(50).optional(),
   description: z.string().max(200).optional(),
+  publicProfile: publicProfileSchema.optional(),
   ownerAppellation: z.string().max(20).optional(),
   systemPrompt: z.string().optional(),
   channelPatches: z.record(z.string()).optional(),
@@ -106,15 +115,18 @@ export function createAgentRouter(ctx: AppContext) {
   // 必须注册在 /:id 之前，避免被参数路由吞掉
   router.get('/tools', (c) => {
     const channelNames = ['desktop', 'group'] as const
-    const tools = ctx.toolRegistry.getDefinitions().map((d) => ({
-      name: d.name,
-      description: d.description,
-      channels: channelNames.filter((channel) =>
-        ctx.toolRegistry.getDefinitions(channel).some((item) => item.name === d.name),
-      ),
-      locked: isSystemProtocolTool(d.name),
-      display: { ...d.display, label: resolveToolUserLabel(d.name, d.display?.label) },
-    }))
+    const tools = ctx.toolRegistry
+      .getDefinitions()
+      .filter((definition) => !isAdvancedTool(definition.name))
+      .map((d) => ({
+        name: d.name,
+        description: resolveToolUserDescription(d.name, d.display?.description, d.description),
+        channels: channelNames.filter((channel) =>
+          ctx.toolRegistry.getDefinitions(channel).some((item) => item.name === d.name),
+        ),
+        locked: isSystemProtocolTool(d.name),
+        display: { ...d.display, label: resolveToolUserLabel(d.name, d.display?.label) },
+      }))
     return c.json({ code: 'OK', message: '获取成功', data: tools })
   })
 
@@ -127,6 +139,23 @@ export function createAgentRouter(ctx: AppContext) {
       message: '获取成功',
       data: ctx.companionSchedulerService.listStates(agentIds),
     })
+  })
+
+  // GET /api/agents/:id/export — 生成客户端可落盘的角色资源包描述。
+  router.get('/:id/export', (c) => {
+    const id = c.req.param('id')
+    try {
+      return c.json({
+        code: 'OK',
+        message: '角色包已生成',
+        data: ctx.agentManager.exportAgentPackage(id),
+      })
+    } catch (error) {
+      throw new AppError('AGENT_NOT_FOUND', {
+        message: error instanceof Error ? error.message : String(error),
+        data: { agentId: id },
+      })
+    }
   })
 
   // GET /api/agents/:id/avatar — 获取 Agent 头像图片

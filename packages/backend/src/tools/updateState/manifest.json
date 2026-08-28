@@ -1,0 +1,68 @@
+{
+  "id": "update-state",
+  "name": "角色状态更新",
+  "version": "1.0.0",
+  "author": "infOS Team",
+  "description": "更新角色情绪、动作、内心和临时交互台词，不结束当前ReAct。",
+  "type": "tool",
+  "entry": "index.ts",
+  "category": "core",
+  "platforms": ["windows", "linux", "darwin", "docker"],
+  "toolDefinition": {
+    "name": "update_state",
+    "description": "更新你当前的情绪、动作、内心独白或桌宠临时交互台词。本工具不会结束任务，也不用于回复用户；更新后请继续当前工作或直接自然输出回复。",
+    "display": {
+      "label": "更新角色状态",
+      "description": "更新角色当前状态和临时交互台词。",
+      "icon": "thought",
+      "color": "pink",
+      "style": "system"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "mood": { "type": "string", "description": "当前情绪，例如开心、担心、兴奋。" },
+        "vibe": { "type": "string", "description": "当前动作或氛围，例如活跃、待机、思考。" },
+        "mind": { "type": "string", "description": "简短内心独白。" },
+        "touch_reactions": {
+          "type": "object",
+          "description": "按触碰部位设置临时随机台词；当前标准部位为head、arm、body、leg，也允许未来新增部位。",
+          "additionalProperties": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "click_head_msgs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "触碰头部时的临时台词。"
+        },
+        "click_arm_msgs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "触碰手臂与手部时的临时台词。"
+        },
+        "click_body_msgs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "触碰身体与服装主体时的临时台词。"
+        },
+        "click_leg_msgs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "触碰腿部与鞋袜时的临时台词。"
+        },
+        "idle_msgs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "闲置时的临时自言自语。"
+        },
+        "back_msgs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "主人回来时的临时欢迎语。"
+        }
+      }
+    }
+  }
+}

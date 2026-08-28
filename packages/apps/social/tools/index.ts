@@ -1,5 +1,5 @@
-import type { BuiltinTool } from '../../../backend/src/tools/index'
-import { createLogger } from '../../../backend/src/lib/logger'
+import type { BuiltinTool } from '@infos/backend/applicationHostAbi'
+import { createLogger } from '@infos/backend/applicationHostAbi'
 
 const logger = createLogger('SocialOps')
 
@@ -66,9 +66,34 @@ export interface SocialContactMemoryProvider {
   }): Promise<Record<string, unknown>>
 }
 
+export interface SocialDiaryReaderProvider {
+  list(agentId: string, limit: number): Promise<Array<{ date: string; parts: number }>>
+  read(
+    agentId: string,
+    date?: string,
+  ): Promise<{
+    date: string
+    parts: number
+    content: string
+    truncated: boolean
+  } | null>
+}
+
+export interface SocialModeControlProvider {
+  setOwnerPrivateOnly(
+    agentId: string,
+    enabled: boolean,
+  ): Promise<{
+    enabled: boolean
+    closedSessions: number
+  }>
+}
+
 let messagingProvider: SocialMessagingProvider | null = null
 let imageReaderProvider: SocialImageReaderProvider | null = null
 let contactMemoryProvider: SocialContactMemoryProvider | null = null
+let diaryReaderProvider: SocialDiaryReaderProvider | null = null
+let modeControlProvider: SocialModeControlProvider | null = null
 
 export function setSocialMessagingProvider(provider: SocialMessagingProvider | null): void {
   messagingProvider = provider
@@ -82,11 +107,43 @@ export function setSocialContactMemoryProvider(provider: SocialContactMemoryProv
   contactMemoryProvider = provider
 }
 
+export function setSocialDiaryReaderProvider(provider: SocialDiaryReaderProvider | null): void {
+  diaryReaderProvider = provider
+}
+
+export function setSocialModeControlProvider(provider: SocialModeControlProvider | null): void {
+  modeControlProvider = provider
+}
+
 function requireMessagingProvider(): SocialMessagingProvider | string {
   return (
     messagingProvider ??
     JSON.stringify({ error: '社交服务未初始化。当前环境可能无社交适配器连接。' })
   )
+}
+
+export const socialSetOwnerPrivateOnlyTool: BuiltinTool = {
+  name: 'social_set_owner_private_only',
+  async execute(args, context) {
+    if (!modeControlProvider) return JSON.stringify({ error: '社交模式控制服务未初始化' })
+    const enabled = args.enabled
+    if (typeof enabled !== 'boolean') return JSON.stringify({ error: 'enabled 必须是布尔值' })
+    try {
+      const result = await modeControlProvider.setOwnerPrivateOnly(context.agentId, enabled)
+      return JSON.stringify({
+        success: true,
+        enabled: result.enabled,
+        closed_sessions: result.closedSessions,
+        message: enabled
+          ? '已切换为仅主人私聊可激活；陌生人私聊与全部群聊不会再进入状态机'
+          : '已恢复正常社交激活策略',
+      })
+    } catch (error) {
+      return JSON.stringify({
+        error: `切换社交激活策略失败: ${error instanceof Error ? error.message : String(error)}`,
+      })
+    }
+  },
 }
 
 export const socialSendMessageTool: BuiltinTool = {
@@ -285,6 +342,28 @@ export const socialReadImageTool: BuiltinTool = {
         error: `读取图片失败: ${err instanceof Error ? err.message : String(err)}`,
       })
     }
+  },
+}
+
+export const socialReadDiaryTool: BuiltinTool = {
+  name: 'social_read_diary',
+  async execute(args, context) {
+    if (!diaryReaderProvider) return JSON.stringify({ error: '宿主日记读取服务未初始化' })
+    const action = String(args.action ?? 'read')
+    if (action === 'list') {
+      const limit =
+        typeof args.limit === 'number' ? Math.min(Math.max(Math.floor(args.limit), 1), 60) : 14
+      const entries = await diaryReaderProvider.list(context.agentId, limit)
+      return JSON.stringify({ success: true, entries, total: entries.length })
+    }
+    if (action !== 'read') return JSON.stringify({ error: 'action 只能是 list 或 read' })
+    const date = typeof args.date === 'string' ? args.date.trim() : undefined
+    if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return JSON.stringify({ error: 'date 必须使用 YYYY-MM-DD 格式' })
+    }
+    const diary = await diaryReaderProvider.read(context.agentId, date)
+    if (!diary) return JSON.stringify({ success: false, error: '没有找到可读取的日记' })
+    return JSON.stringify({ success: true, ...diary })
   },
 }
 

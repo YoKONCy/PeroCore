@@ -10,7 +10,20 @@ import { z } from 'zod'
 const memorySources = ['desktop', 'social', 'group', 'group_chat', 'mobile', 'scheduler'] as const
 
 /** 有效的记忆类型 */
-const memoryTypes = ['event', 'fact', 'preference', 'promise', 'reflection', 'summary'] as const
+const memoryTypes = [
+  'experience',
+  'preference',
+  'knowledge',
+  'relationship',
+  'event',
+  'fact',
+  'promise',
+  'reflection',
+  'summary',
+  'core',
+  'episodic',
+  'diary',
+] as const
 
 /** 创建记忆 */
 export const createMemorySchema = z.object({

@@ -1,9 +1,16 @@
+/**
+ * terminal.router — HTTP 路由适配层
+ *
+ * 负责定义该模块的稳定入口、数据边界与错误语义。
+ * 调用方通过这里访问领域能力，避免绕过校验直接耦合内部状态。
+ */
+import path from 'node:path'
 import { Hono } from 'hono'
-import { zValidator } from '@hono/zod-validator'
+import { validate as zValidator } from '../lib/validation'
 import { z } from 'zod'
 import type { AppContext } from '../container'
 import { AppError } from '../lib/appError'
-import { getProductivityRuntime, resolveExecutionSession } from '../tools/productivityRuntimeHolder'
+import type { ProductivityRuntime } from '../tools/productivityRuntimeHolder'
 
 const sessionQuery = z.object({
   agentId: z.string().min(1),
@@ -27,19 +34,24 @@ const resizeSchema = z.object({
 })
 
 /** 多终端 HTTP API：前端轮询读取（cursor 增量），输入/控制走 POST。 */
-export function createTerminalRouter(_ctx: AppContext) {
+export function createTerminalRouter(ctx: AppContext) {
   const router = new Hono()
+  const runtime = ctx.productivityRuntime
 
   router.get('/', zValidator('query', sessionQuery), async (c) => {
-    const session = await prepare(c.req.valid('query').agentId, c.req.valid('query').threadId)
-    return c.json({ code: 'OK', data: { terminals: terminals().list(session.id) } })
+    const session = await prepare(
+      runtime,
+      c.req.valid('query').agentId,
+      c.req.valid('query').threadId,
+    )
+    return c.json({ code: 'OK', data: { terminals: runtime.terminals.list(session.id) } })
   })
 
   router.post('/', zValidator('json', createSchema), async (c) => {
     const input = c.req.valid('json')
-    const session = await prepare(input.agentId, input.threadId, input.taskId)
+    const session = await prepare(runtime, input.agentId, input.threadId, input.taskId)
     try {
-      const terminal = await terminals().create({
+      const terminal = await runtime.terminals.create({
         executionSessionId: session.id,
         command: input.command,
         cwd: input.cwd,
@@ -65,9 +77,9 @@ export function createTerminalRouter(_ctx: AppContext) {
     ),
     async (c) => {
       const query = c.req.valid('query')
-      const session = await prepare(query.agentId, query.threadId)
+      const session = await prepare(runtime, query.agentId, query.threadId)
       try {
-        const result = terminals().read(
+        const result = runtime.terminals.read(
           c.req.param('id'),
           session.id,
           query.cursor ?? 0,
@@ -85,9 +97,9 @@ export function createTerminalRouter(_ctx: AppContext) {
     zValidator('json', writeSchema.extend(sessionQuery.shape)),
     async (c) => {
       const input = c.req.valid('json')
-      const session = await prepare(input.agentId, input.threadId)
+      const session = await prepare(runtime, input.agentId, input.threadId)
       try {
-        terminals().write(c.req.param('id'), session.id, input.data)
+        runtime.terminals.write(c.req.param('id'), session.id, input.data)
         return c.json({ code: 'OK', data: { written: true } })
       } catch (error) {
         throw validation(error)
@@ -100,9 +112,9 @@ export function createTerminalRouter(_ctx: AppContext) {
     zValidator('json', resizeSchema.extend(sessionQuery.shape)),
     async (c) => {
       const input = c.req.valid('json')
-      const session = await prepare(input.agentId, input.threadId)
+      const session = await prepare(runtime, input.agentId, input.threadId)
       try {
-        terminals().resize(c.req.param('id'), session.id, input.cols, input.rows)
+        runtime.terminals.resize(c.req.param('id'), session.id, input.cols, input.rows)
         return c.json({ code: 'OK', data: { resized: true } })
       } catch (error) {
         throw validation(error)
@@ -113,9 +125,9 @@ export function createTerminalRouter(_ctx: AppContext) {
   for (const action of ['interrupt', 'kill', 'close'] as const) {
     router.post(`/:id/${action}`, zValidator('json', sessionQuery), async (c) => {
       const input = c.req.valid('json')
-      const session = await prepare(input.agentId, input.threadId)
+      const session = await prepare(runtime, input.agentId, input.threadId)
       try {
-        await terminals()[action](c.req.param('id'), session.id)
+        await runtime.terminals[action](c.req.param('id'), session.id)
         return c.json({ code: 'OK', data: { [action]: true } })
       } catch (error) {
         throw validation(error)
@@ -126,12 +138,23 @@ export function createTerminalRouter(_ctx: AppContext) {
   return router
 }
 
-function terminals() {
-  return getProductivityRuntime().terminals
-}
-
-async function prepare(agentId: string, threadId: string, taskId?: string) {
-  return resolveExecutionSession({ agentId, threadId, channel: 'desktop', taskId })
+async function prepare(
+  runtime: ProductivityRuntime,
+  agentId: string,
+  threadId: string,
+  taskId?: string,
+) {
+  const principalRoot = runtime.workspace.getWorkspaceRoot(agentId)
+  const workspaceRoot = taskId
+    ? path.join(path.dirname(principalRoot), 'tasks', taskId, 'workspace')
+    : principalRoot
+  return runtime.sessions.getOrCreate({
+    ownerAgentId: agentId,
+    threadId,
+    taskId,
+    channel: 'desktop',
+    workspaceRoot,
+  })
 }
 
 function validation(error: unknown): AppError {

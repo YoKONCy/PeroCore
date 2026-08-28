@@ -36,6 +36,10 @@ export interface ModelConfigDto {
   topP: number | null
   maxTokens: number | null
   reasoningEffort: string | null
+  returnNativeReasoning: boolean
+  wireApi: string
+  reasoningDialect: string
+  stream: boolean
   createdAt: string | null
   updatedAt: string | null
   [key: string]: unknown
@@ -71,13 +75,27 @@ export class ModelService {
     private modelRegistry: ModelRegistry,
   ) {}
 
+  /** 将数据库可空默认值归一为API契约。 */
+  private toDto(
+    model: NonNullable<Awaited<ReturnType<ModelRepository['findById']>>>,
+  ): ModelConfigDto {
+    return {
+      ...model,
+      returnNativeReasoning: model.returnNativeReasoning ?? false,
+      wireApi: model.wireApi ?? 'chat_completions',
+      reasoningDialect: model.reasoningDialect ?? 'auto',
+      stream: model.stream ?? true,
+      apiKey: maskKey(model.apiKey),
+    }
+  }
+
   /** 列出所有模型配置 (API Key 遮蔽) */
   async list(): Promise<ModelConfigDto[]> {
     const models = await this.modelRepo.findAll()
-    return models.map((m) => ({ ...m, apiKey: maskKey(m.apiKey) }))
+    return models.map((model) => this.toDto(model))
   }
 
-  /** 获取单个模型配置 */
+  /** 获取单个模型配置；编辑页需要回填完整密钥，列表接口仍保持遮蔽。 */
   async getById(id: number): Promise<ModelConfigDto> {
     const model = await this.modelRepo.findById(id)
     if (!model) {
@@ -86,7 +104,10 @@ export class ModelService {
         data: { modelId: id },
       })
     }
-    return { ...model, apiKey: maskKey(model.apiKey) }
+    return {
+      ...this.toDto(model),
+      apiKey: model.apiKey ?? '',
+    }
   }
 
   /** 创建模型配置 */
@@ -94,7 +115,7 @@ export class ModelService {
     const model = await this.modelRepo.create(data)
     this.modelRegistry.invalidateCache()
     logger.info(`模型配置已创建: ${model.name} (${model.id})`)
-    return { ...model, apiKey: maskKey(model.apiKey) }
+    return this.toDto(model)
   }
 
   /** 更新模型配置 */
@@ -111,7 +132,7 @@ export class ModelService {
     const updated = await this.modelRepo.update(id, data)
     this.modelRegistry.invalidateCache()
     logger.info(`模型配置已更新: ${id}`)
-    return { ...updated!, apiKey: maskKey(updated!.apiKey) }
+    return this.toDto(updated!)
   }
 
   /** 删除模型配置 */

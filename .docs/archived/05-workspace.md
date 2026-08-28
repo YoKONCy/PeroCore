@@ -1,5 +1,7 @@
 # Workspace 模型
 
+> **归档警示**：本文记录历史设计与迁移背景，不代表当前架构。现行规范以[A01文档索引](../A01_PROJECT_STRUCTURE.md#6-规范文档与归档)及其列出的A02–A09/S系列文档为准；旧Channel、API、Package或Application表述不得用于新实现。
+
 > Principal Workspace 是主 Agent 的个人文件空间，独立于应用工作区和 PeroCore 数据目录。
 
 ---
@@ -13,6 +15,7 @@ Principal Workspace 是 PrincipalAgent 的一个一等资源，负责：
 - 文件操作的资源级权限边界
 
 Workspace **不负责**：
+
 - 应用项目文件（那是未来 Application Workspace 的事）
 - 数据库和配置（那是 Runtime Data Space 的事）
 - 上下文编译（那是 Context Runtime 的事）
@@ -21,11 +24,11 @@ Workspace **不负责**：
 
 ## 2. 三种 Workspace 的区别
 
-| 类型 | 所属 | 目的 | 权限主体 |
-|---|---|---|---|
-| **Principal Workspace** | 主 Agent | 日常事务、日记、草稿 | 主 Agent |
+| 类型                      | 所属             | 目的                 | 权限主体          |
+| ------------------------- | ---------------- | -------------------- | ----------------- |
+| **Principal Workspace**   | 主 Agent         | 日常事务、日记、草稿 | 主 Agent          |
 | **Application Workspace** | 应用（暂不实现） | 项目文件、代码、产物 | 应用实例/次 Agent |
-| **Runtime Data Space** | PeroCore Runtime | DB、配置、向量索引 | 系统服务 |
+| **Runtime Data Space**    | PeroCore Runtime | DB、配置、向量索引   | 系统服务          |
 
 另外存在 `pnpm workspace`，它只属于构建系统，与运行时无关。
 
@@ -96,16 +99,16 @@ PrincipalWorkspace
 
 ## 6. 与现有代码的对应
 
-| 现有 | 新架构 | 处理方式 |
-|---|---|---|
-| 提示词虚设的 workspace 工具 | 真实实现 | 新建 workspace 文件工具 |
-| `write_workspace_file` 等 | 真实实现 | 新建 handler 和 manifest |
-| `PathResolver` 无 `@principal` | 新增 | 增加 `@principal` 前缀 |
-| 通用 `read_file/write_file` | 加 scope 边界 | 默认限制在 workspace |
-| `terminal_execute` 无限制 | 加 cwd 限制 | 默认 cwd 为 workspace |
-| Agent 创建不建 workspace | 自动创建 | 创建 Agent 时创建 workspace 目录 |
-| 无配额管理 | 新增 | 实现 WorkspaceQuota |
-| 无 containment 检查 | 新增 | 实现 realpath + relative 检查 |
+| 现有                           | 新架构        | 处理方式                         |
+| ------------------------------ | ------------- | -------------------------------- |
+| 提示词虚设的 workspace 工具    | 真实实现      | 新建 workspace 文件工具          |
+| `write_workspace_file` 等      | 真实实现      | 新建 handler 和 manifest         |
+| `PathResolver` 无 `@principal` | 新增          | 增加 `@principal` 前缀           |
+| 通用 `read_file/write_file`    | 加 scope 边界 | 默认限制在 workspace             |
+| `terminal_execute` 无限制      | 加 cwd 限制   | 默认 cwd 为 workspace            |
+| Agent 创建不建 workspace       | 自动创建      | 创建 Agent 时创建 workspace 目录 |
+| 无配额管理                     | 新增          | 实现 WorkspaceQuota              |
+| 无 containment 检查            | 新增          | 实现 realpath + relative 检查    |
 
 ---
 

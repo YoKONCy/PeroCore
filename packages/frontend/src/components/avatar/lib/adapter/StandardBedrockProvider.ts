@@ -2,15 +2,14 @@
  * 标准 Bedrock JSON 模型提供者
  *
  * 负责加载普通的 .json Bedrock 模型文件、纹理和动画。
- * 优先尝试 Rust Native 模块进行高性能解析，
- * 失败时回退到纯 JavaScript 解析路径。
+ * 使用纯JavaScript解析Bedrock模型。
  *
  * @module packages/frontend/src/components/avatar/lib/adapter/StandardBedrockProvider
  */
 
 import * as THREE from 'three'
 import { logger } from '../../../../lib/logger'
-import { YSM_SCENE_FILTERS } from '@infos/shared/ysm'
+import { YSM_SCENE_FILTERS } from '@infos/avatar-assets'
 import type { IModelProvider, ParsedModelData, ParsedBone } from './IModelProvider'
 import type { IAvatarManifest } from './IAvatarManifest'
 // Provider 接收到的路径已经是可直接 fetch 的 URL，无需额外转换
@@ -36,13 +35,6 @@ interface RawBedrockBone {
   pivot?: number[]
   rotation?: number[]
   cubes?: Record<string, unknown>[]
-}
-
-/** Electron 窗口扩展（render-core native API） */
-interface ElectronWindow {
-  electron?: {
-    loadStandardModel?: (data: Uint8Array, filters?: string[]) => Promise<ParsedModelData>
-  }
 }
 
 /**
@@ -124,56 +116,34 @@ export class StandardBedrockProvider implements IModelProvider {
   }
 
   async getModelData(): Promise<ParsedModelData> {
-    // [调试开关] 设为 true 强制走 JS 路径（跳过 Rust），用于排查渲染问题
-    const FORCE_JS_PATH = false
-
     const url = this.config.model
     const response = await fetch(url)
     if (!response.ok) throw new Error(`加载模型文件失败: ${this.config.model}`)
     const arrayBuffer = await response.arrayBuffer()
 
-    let parsed: ParsedModelData | null = null
+    logger.info('StandardBedrockProvider', '使用JavaScript解析模型')
+    const jsonStr = new TextDecoder().decode(arrayBuffer)
+    const json = JSON.parse(jsonStr)
 
-    // 优先尝试 Rust Native 模块解析（高性能路径）
-    const electronWin = window as unknown as ElectronWindow
-    if (!FORCE_JS_PATH && electronWin.electron?.loadStandardModel) {
-      try {
-        parsed = await electronWin.electron.loadStandardModel(
-          new Uint8Array(arrayBuffer),
-          this.boneFilterPatterns,
-        )
-      } catch (e) {
-        logger.warn('StandardBedrockProvider', 'Rust 解析失败，回退到 JS 路径', e)
-      }
-    }
+    const geometry = json['minecraft:geometry']?.[0]
+    if (!geometry) throw new Error('无效的 Bedrock 模型: 缺少 minecraft:geometry')
 
-    // JS 回退路径：直接解析 Bedrock JSON
-    if (!parsed) {
-      logger.info('StandardBedrockProvider', '使用 JS 路径解析模型')
-      const jsonStr = new TextDecoder().decode(arrayBuffer)
-      const json = JSON.parse(jsonStr)
+    const desc = geometry.description || {}
+    const textureWidth = desc.texture_width || 64
+    const textureHeight = desc.texture_height || 64
 
-      const geometry = json['minecraft:geometry']?.[0]
-      if (!geometry) throw new Error('无效的 Bedrock 模型: 缺少 minecraft:geometry')
+    const rawBones = (geometry.bones || []) as RawBedrockBone[]
 
-      const desc = geometry.description || {}
-      const textureWidth = desc.texture_width || 64
-      const textureHeight = desc.texture_height || 64
-
-      const rawBones = (geometry.bones || []) as RawBedrockBone[]
-
-      parsed = {
-        textureWidth,
-        textureHeight,
-        bones: rawBones.map((b) => ({
-          name: b.name,
-          parent: b.parent,
-          pivot: (b.pivot || [0, 0, 0]) as [number, number, number],
-          rotation: b.rotation as [number, number, number] | undefined,
-          cubes: (b.cubes || []) as Record<string, unknown>[],
-          // 注意：不提供 vertices/uvs/indices，让 AvatarRenderer 的 JS 回退路径处理
-        })),
-      }
+    const parsed: ParsedModelData = {
+      textureWidth,
+      textureHeight,
+      bones: rawBones.map((b) => ({
+        name: b.name,
+        parent: b.parent,
+        pivot: (b.pivot || [0, 0, 0]) as [number, number, number],
+        rotation: b.rotation as [number, number, number] | undefined,
+        cubes: (b.cubes || []) as Record<string, unknown>[],
+      })),
     }
 
     // 统一应用骨骼过滤：名称模式命中 + 场景摆件子树排除。

@@ -26,7 +26,12 @@ export interface CreateModelInput {
   temperature?: number | null
   topP?: number | null
   maxTokens?: number | null
+  contextWindowTokens?: number | null
   reasoningEffort?: ReasoningEffort | null
+  returnNativeReasoning?: boolean
+  wireApi?: import('../services/llm/types').LlmWireApi
+  reasoningDialect?: import('../services/llm/types').ReasoningDialect
+  stream?: boolean
   providerType?: string
   enableVision?: boolean
   enableAudioInput?: boolean
@@ -42,7 +47,12 @@ export interface UpdateModelInput {
   temperature?: number | null
   topP?: number | null
   maxTokens?: number | null
+  contextWindowTokens?: number | null
   reasoningEffort?: ReasoningEffort | null
+  returnNativeReasoning?: boolean
+  wireApi?: import('../services/llm/types').LlmWireApi
+  reasoningDialect?: import('../services/llm/types').ReasoningDialect
+  stream?: boolean
   providerType?: string
   enableVision?: boolean
 }
@@ -81,7 +91,12 @@ export class ModelRepository {
         temperature: data.temperature ?? null,
         topP: data.topP ?? null,
         maxTokens: data.maxTokens ?? null,
+        contextWindowTokens: data.contextWindowTokens ?? null,
         reasoningEffort: data.reasoningEffort ?? null,
+        returnNativeReasoning: data.returnNativeReasoning ?? false,
+        wireApi: data.wireApi ?? 'chat_completions',
+        reasoningDialect: data.reasoningDialect ?? 'auto',
+        stream: data.stream ?? true,
         providerType: data.providerType ?? 'global',
         enableVision: data.enableVision ?? false,
         enableAudioInput: data.enableAudioInput ?? false,
@@ -105,7 +120,14 @@ export class ModelRepository {
     if (data.temperature !== undefined) updates.temperature = data.temperature
     if (data.topP !== undefined) updates.topP = data.topP
     if (data.maxTokens !== undefined) updates.maxTokens = data.maxTokens
+    if (data.contextWindowTokens !== undefined)
+      updates.contextWindowTokens = data.contextWindowTokens
     if (data.reasoningEffort !== undefined) updates.reasoningEffort = data.reasoningEffort
+    if (data.returnNativeReasoning !== undefined)
+      updates.returnNativeReasoning = data.returnNativeReasoning
+    if (data.wireApi !== undefined) updates.wireApi = data.wireApi
+    if (data.reasoningDialect !== undefined) updates.reasoningDialect = data.reasoningDialect
+    if (data.stream !== undefined) updates.stream = data.stream
     if (data.providerType !== undefined) updates.providerType = data.providerType
     if (data.enableVision !== undefined) updates.enableVision = data.enableVision
 

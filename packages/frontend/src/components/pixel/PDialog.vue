@@ -47,6 +47,7 @@ import PButton from './PButton.vue'
 
 const slots = useSlots()
 const inputValue = ref(props.defaultValue)
+const overlayPointerDown = ref(false)
 
 watch(
   () => props.modelValue,
@@ -69,7 +70,19 @@ function handleCancel() {
   emit('update:modelValue', false)
 }
 
-/** 允许 v-model 用法 */
+/** 仅在按下和松开都发生于遮罩时关闭，避免从输入框拖选文字后误关闭。 */
+function handleOverlayPointerDown(event: PointerEvent): void {
+  overlayPointerDown.value = event.target === event.currentTarget
+}
+
+function handleOverlayClick(event: MouseEvent): void {
+  const shouldClose =
+    event.target === event.currentTarget && (overlayPointerDown.value || event.detail === 0)
+  overlayPointerDown.value = false
+  if (shouldClose) handleCancel()
+}
+
+/** 关闭按钮只关闭窗口，取消按钮和遮罩点击才触发取消业务。 */
 function close() {
   emit('update:modelValue', false)
 }
@@ -78,7 +91,12 @@ function close() {
 <template>
   <Teleport to="body">
     <Transition name="dialog">
-      <div v-if="modelValue" class="p-dialog-overlay" @click.self="handleCancel">
+      <div
+        v-if="modelValue"
+        class="p-dialog-overlay"
+        @pointerdown="handleOverlayPointerDown"
+        @click="handleOverlayClick"
+      >
         <div class="p-dialog" :style="width ? { minWidth: width, maxWidth: width } : {}">
           <div class="p-dialog-header">
             <span>{{ title }}</span>

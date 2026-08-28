@@ -1,0 +1,41 @@
+{
+  "id": "work-context",
+  "name": "workContext",
+  "displayName": "工作上下文维护",
+  "version": "1.0.0",
+  "description": "维护当前会话中由角色主动总结的工作上下文。",
+  "type": "tool",
+  "entry": "index.ts",
+  "category": "system",
+  "platforms": ["windows", "linux", "darwin", "docker"],
+  "registration": "static",
+  "tools": [
+    {
+      "name": "manage_work_context",
+      "description": "维护当前会话的工作上下文。update 必须提交合并、总结并压缩后的完整内容；clear 一键清空。没有实质变化时不要重复调用。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["update", "clear"],
+            "description": "update 整体覆盖工作上下文；clear 一键清空。"
+          },
+          "content": {
+            "type": "string",
+            "description": "update 时必填：合并新旧信息、自我总结并压缩后的完整工作上下文，最多 8000 字。"
+          }
+        },
+        "required": ["action"],
+        "additionalProperties": false
+      },
+      "display": {
+        "label": "维护工作上下文",
+        "description": "整理或清空最近几轮仍需使用的临时信息。",
+        "icon": "thought",
+        "color": "sky",
+        "style": "system"
+      }
+    }
+  ]
+}

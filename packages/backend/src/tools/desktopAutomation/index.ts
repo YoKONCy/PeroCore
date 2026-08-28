@@ -30,18 +30,31 @@ export type AutomationAction =
   | 'hotkey'
   | 'notification'
 
+export type DesktopCoordinateSpace = 'normalized' | 'screenshot' | 'desktop'
+
+export interface DesktopCoordinateOptions {
+  coordinateSpace: DesktopCoordinateSpace
+  displayId?: string
+  screenshotWidth?: number
+  screenshotHeight?: number
+}
+
 /** 桌面自动化提供者接口 (由 container.ts 注入) */
 export interface DesktopAutomationProvider {
-  /** 移动鼠标到指定坐标 */
-  moveTo(x: number, y: number): Promise<void>
   /** 点击 */
-  click(x?: number, y?: number): Promise<void>
+  click(x: number, y: number, options: DesktopCoordinateOptions): Promise<void>
   /** 双击 */
-  doubleClick(x?: number, y?: number): Promise<void>
+  doubleClick(x: number, y: number, options: DesktopCoordinateOptions): Promise<void>
   /** 右键点击 */
-  rightClick(x?: number, y?: number): Promise<void>
+  rightClick(x: number, y: number, options: DesktopCoordinateOptions): Promise<void>
   /** 拖拽 */
-  drag(x1: number, y1: number, x2: number, y2: number): Promise<void>
+  drag(
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    options: DesktopCoordinateOptions,
+  ): Promise<void>
   /** 输入文本 (粘贴模式，免疫输入法) */
   typeText(text: string): Promise<void>
   /** 执行快捷键 */
@@ -60,6 +73,33 @@ export function setDesktopAutomationProvider(provider: DesktopAutomationProvider
   _automationProvider = provider
 }
 
+function errorResult(code: string, message: string): string {
+  return JSON.stringify({ success: false, error: { code, message } })
+}
+
+function readCoordinate(value: unknown, name: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new Error(`DESKTOP_COORDINATE_INVALID: ${name}必须是有限数字`)
+  }
+  return value
+}
+
+function readCoordinateOptions(args: Record<string, unknown>): DesktopCoordinateOptions {
+  const coordinateSpace = String(args.coordinateSpace ?? 'normalized')
+  if (!['normalized', 'screenshot', 'desktop'].includes(coordinateSpace)) {
+    throw new Error(`DESKTOP_COORDINATE_SPACE_INVALID: ${coordinateSpace}`)
+  }
+  const options: DesktopCoordinateOptions = {
+    coordinateSpace: coordinateSpace as DesktopCoordinateSpace,
+  }
+  if (args.displayId != null) options.displayId = String(args.displayId)
+  if (coordinateSpace === 'screenshot') {
+    options.screenshotWidth = readCoordinate(args.screenshotWidth, 'screenshotWidth')
+    options.screenshotHeight = readCoordinate(args.screenshotHeight, 'screenshotHeight')
+  }
+  return options
+}
+
 // ── automation_execute ──
 
 export const automationExecuteTool: BuiltinTool = {
@@ -67,55 +107,58 @@ export const automationExecuteTool: BuiltinTool = {
 
   async execute(args) {
     if (!_automationProvider) {
-      return JSON.stringify({
-        error: '桌面自动化服务未初始化。当前环境可能不支持 GUI 操作。',
-      })
+      return errorResult(
+        'DESKTOP_AUTOMATION_UNAVAILABLE',
+        '桌面自动化服务未初始化。当前环境可能不支持 GUI 操作。',
+      )
     }
 
     const action = args.action as AutomationAction
-    const x = args.x as number | undefined
-    const y = args.y as number | undefined
-    const x2 = args.x2 as number | undefined
-    const y2 = args.y2 as number | undefined
     const text = args.text as string | undefined
     const message = args.message as string | undefined
 
-    logger.info(`执行自动化: ${action} (x=${x}, y=${y})`)
+    logger.info(`执行自动化: ${action}`)
 
     try {
       switch (action) {
         case 'click':
-          await _automationProvider.click(x, y)
-          return JSON.stringify({ success: true, message: `已在 (${x}, ${y}) 执行点击` })
-
         case 'double_click':
-          await _automationProvider.doubleClick(x, y)
-          return JSON.stringify({ success: true, message: `已在 (${x}, ${y}) 执行双击` })
+        case 'right_click': {
+          const x = readCoordinate(args.x, 'x')
+          const y = readCoordinate(args.y, 'y')
+          const options = readCoordinateOptions(args)
+          if (action === 'click') await _automationProvider.click(x, y, options)
+          else if (action === 'double_click') await _automationProvider.doubleClick(x, y, options)
+          else await _automationProvider.rightClick(x, y, options)
+          return JSON.stringify({
+            success: true,
+            message: `已在 (${x}, ${y}) 执行${action === 'click' ? '点击' : action === 'double_click' ? '双击' : '右键点击'}`,
+          })
+        }
 
-        case 'right_click':
-          await _automationProvider.rightClick(x, y)
-          return JSON.stringify({ success: true, message: `已在 (${x}, ${y}) 执行右键点击` })
-
-        case 'drag':
-          if (x == null || y == null || x2 == null || y2 == null) {
-            return JSON.stringify({ error: '拖拽操作需要起始坐标 (x, y) 和目标坐标 (x2, y2)' })
-          }
-          await _automationProvider.drag(x, y, x2, y2)
+        case 'drag': {
+          const x = readCoordinate(args.x, 'x')
+          const y = readCoordinate(args.y, 'y')
+          const x2 = readCoordinate(args.x2, 'x2')
+          const y2 = readCoordinate(args.y2, 'y2')
+          const options = readCoordinateOptions(args)
+          await _automationProvider.drag(x, y, x2, y2, options)
           return JSON.stringify({
             success: true,
             message: `已从 (${x}, ${y}) 拖拽到 (${x2}, ${y2})`,
           })
+        }
 
         case 'type':
           if (!text) {
-            return JSON.stringify({ error: '请提供要输入的文本 (text)' })
+            return errorResult('DESKTOP_TEXT_REQUIRED', '请提供要输入的文本 (text)')
           }
           await _automationProvider.typeText(text)
           return JSON.stringify({ success: true, message: `已输入文本: "${text.slice(0, 50)}"` })
 
         case 'hotkey': {
           if (!text) {
-            return JSON.stringify({ error: '请提供快捷键组合 (text), 如 "ctrl+c"' })
+            return errorResult('DESKTOP_HOTKEY_REQUIRED', '请提供快捷键组合 (text), 如 "ctrl+c"')
           }
           const keys = text.replace(/\s/g, '').split('+')
           await _automationProvider.hotkey(keys)
@@ -130,12 +173,15 @@ export const automationExecuteTool: BuiltinTool = {
         }
 
         default:
-          return JSON.stringify({ error: `未知的自动化动作: ${action}` })
+          return errorResult('DESKTOP_ACTION_UNSUPPORTED', `未知的自动化动作: ${action}`)
       }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err)
+      const separator = errMsg.indexOf(':')
+      const code = separator > 0 ? errMsg.slice(0, separator) : 'DESKTOP_AUTOMATION_FAILED'
+      const detail = separator > 0 ? errMsg.slice(separator + 1).trim() : errMsg
       logger.error(`自动化操作失败: ${errMsg}`)
-      return JSON.stringify({ error: `自动化操作失败: ${errMsg}` })
+      return errorResult(code, detail)
     }
   },
 }
@@ -147,11 +193,14 @@ export const getMousePositionTool: BuiltinTool = {
 
   async execute() {
     if (!_automationProvider) {
-      return JSON.stringify({ error: '桌面自动化服务未初始化' })
+      return errorResult('DESKTOP_AUTOMATION_UNAVAILABLE', '桌面自动化服务未初始化')
     }
 
     try {
       const pos = await _automationProvider.getMousePosition()
+      if (!Number.isFinite(pos.x) || !Number.isFinite(pos.y)) {
+        return errorResult('DESKTOP_COORDINATE_INVALID', '客户端返回了无效鼠标坐标')
+      }
       return JSON.stringify({
         success: true,
         position: pos,
@@ -159,7 +208,11 @@ export const getMousePositionTool: BuiltinTool = {
       })
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err)
-      return JSON.stringify({ error: `获取鼠标位置失败: ${errMsg}` })
+      const separator = errMsg.indexOf(':')
+      return errorResult(
+        separator > 0 ? errMsg.slice(0, separator) : 'DESKTOP_MOUSE_POSITION_FAILED',
+        separator > 0 ? errMsg.slice(separator + 1).trim() : errMsg,
+      )
     }
   },
 }

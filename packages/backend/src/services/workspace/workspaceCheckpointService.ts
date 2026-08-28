@@ -1,3 +1,9 @@
+/**
+ * workspaceCheckpointService — 领域服务
+ *
+ * 封装本领域的核心职责与外部依赖，向上层提供可预测的调用契约。
+ * 非直观的状态转换、失败恢复与安全边界应在本模块内完成，避免泄漏实现细节。
+ */
 import { createHash, randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { readFile, rm, stat } from 'node:fs/promises'
@@ -22,7 +28,12 @@ export interface SnapshotContext {
 
 export interface RewindFilePreview {
   path: string
-  action: 'delete_created' | 'restore_edited' | 'restore_deleted' | 'restore_renamed'
+  action:
+    | 'delete_created'
+    | 'restore_edited'
+    | 'restore_deleted'
+    | 'restore_renamed'
+    | 'preserve_changed'
 }
 
 export interface RewindPreview {
@@ -33,8 +44,15 @@ export interface RewindPreview {
   pairCount: number
   createdCount: number
   editedCount: number
+  preservedCount: number
   files: RewindFilePreview[]
   forceWarning: boolean
+}
+
+export interface RewindRollbackResult {
+  files: RewindFilePreview[]
+  rolledBackCount: number
+  preservedCount: number
 }
 
 /**
@@ -172,14 +190,29 @@ export class WorkspaceCheckpointService {
     return this.buildPreview(threadId, pairIds, true)
   }
 
-  /** 强制按时间逆序回滚，符合产品已确认的 checkpoint rewind 语义。 */
-  async rollback(preview: RewindPreview): Promise<void> {
+  /**
+   * 按时间逆序回滚；如果文件已偏离 Agent 最终写入状态，则保留当前内容并跳过该路径的整条回滚链。
+   */
+  async rollback(preview: RewindPreview): Promise<RewindRollbackResult> {
     const agentId = await this.repo.getThreadAgent(preview.threadId)
     if (!agentId) throw new Error('会话不存在或已删除')
+
+    const allSnapshots = await this.repo.listSnapshots(preview.pairIds)
+    const latestByPath = new Map<string, (typeof allSnapshots)[number]>()
+    for (const snapshot of allSnapshots) {
+      if (!latestByPath.has(snapshot.filePath)) latestByPath.set(snapshot.filePath, snapshot)
+    }
+
+    const preservedPaths = new Set<string>()
+    for (const [filePath, snapshot] of latestByPath) {
+      if (!(await this.matchesAgentFinalState(agentId, snapshot))) preservedPaths.add(filePath)
+    }
+
     // pairIds 由 Repository 按时间正序返回；显式逆序逐轮恢复，保证 A/B/C/D 撤回 B 时严格执行 D→C→B。
     for (const pairId of [...preview.pairIds].reverse()) {
       const snapshots = await this.repo.listSnapshots([pairId])
       for (const snapshot of snapshots) {
+        if (preservedPaths.has(snapshot.filePath)) continue
         const target = this.workspace.resolve(agentId, snapshot.filePath)
         switch (snapshot.operation) {
           case 'create':
@@ -211,6 +244,13 @@ export class WorkspaceCheckpointService {
         }
       }
     }
+
+    const files = await this.describeFiles(agentId, allSnapshots, preservedPaths)
+    return {
+      files,
+      rolledBackCount: files.filter((file) => file.action !== 'preserve_changed').length,
+      preservedCount: preservedPaths.size,
+    }
   }
 
   async deletePairs(preview: RewindPreview, deletedBy = 'user') {
@@ -226,9 +266,60 @@ export class WorkspaceCheckpointService {
     pairCountOverride?: number,
   ): Promise<RewindPreview> {
     const snapshots = await this.repo.listSnapshots(pairIds)
-    // 同一文件跨轮次多次修改时，预览只显示一次，但实际回滚仍按快照逆序执行。
+    const agentId = await this.repo.getThreadAgent(threadId)
+    const latestByPath = new Map<string, (typeof snapshots)[number]>()
+    for (const snapshot of snapshots) {
+      if (!latestByPath.has(snapshot.filePath)) latestByPath.set(snapshot.filePath, snapshot)
+    }
+    const preservedPaths = new Set<string>()
+    if (agentId) {
+      for (const [filePath, snapshot] of latestByPath) {
+        if (!(await this.matchesAgentFinalState(agentId, snapshot))) preservedPaths.add(filePath)
+      }
+    }
+    const list = await this.describeFiles(agentId, snapshots, preservedPaths)
+    return {
+      threadId,
+      wholeThread,
+      targetMessageId,
+      pairIds,
+      pairCount: pairCountOverride ?? pairIds.length,
+      createdCount: list.filter((file) => file.action === 'delete_created').length,
+      editedCount: list.filter(
+        (file) => file.action !== 'delete_created' && file.action !== 'preserve_changed',
+      ).length,
+      preservedCount: list.filter((file) => file.action === 'preserve_changed').length,
+      files: list,
+      forceWarning: list.some((file) => file.action !== 'preserve_changed'),
+    }
+  }
+
+  private async matchesAgentFinalState(
+    agentId: string,
+    snapshot: { filePath: string; operation: string; finalSha256: string | null },
+  ): Promise<boolean> {
+    const resolved = this.workspace.resolve(agentId, snapshot.filePath)
+    const info = await stat(resolved).catch(() => null)
+    // 删除快照的 Agent 最终状态就是文件不存在。
+    if (snapshot.operation === 'delete') return info === null
+    if (!snapshot.finalSha256 || !info?.isFile()) return false
+    const content = await readFile(resolved, 'utf8').catch(() => null)
+    return content !== null && this.sha256(content) === snapshot.finalSha256
+  }
+
+  private async describeFiles(
+    _agentId: string | null,
+    snapshots: Array<{ filePath: string; operation: string }>,
+    preservedPaths: Set<string>,
+  ): Promise<RewindFilePreview[]> {
+    // 同一文件跨轮次多次修改时只显示一次；listSnapshots 已按最新快照优先排序。
     const files = new Map<string, RewindFilePreview>()
     for (const snapshot of snapshots) {
+      if (files.has(snapshot.filePath)) continue
+      if (preservedPaths.has(snapshot.filePath)) {
+        files.set(snapshot.filePath, { path: snapshot.filePath, action: 'preserve_changed' })
+        continue
+      }
       const action: RewindFilePreview['action'] =
         snapshot.operation === 'create'
           ? 'delete_created'
@@ -239,18 +330,7 @@ export class WorkspaceCheckpointService {
               : 'restore_edited'
       files.set(snapshot.filePath, { path: snapshot.filePath, action })
     }
-    const list = [...files.values()]
-    return {
-      threadId,
-      wholeThread,
-      targetMessageId,
-      pairIds,
-      pairCount: pairCountOverride ?? pairIds.length,
-      createdCount: list.filter((file) => file.action === 'delete_created').length,
-      editedCount: list.filter((file) => file.action !== 'delete_created').length,
-      files: list,
-      forceWarning: list.length > 0,
-    }
+    return [...files.values()]
   }
 
   private normalizeRelative(agentId: string, resolved: string): string {

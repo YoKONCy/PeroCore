@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createConfigRouter } from '@infos/backend/routers/config.router'
+import { errorHandler } from '@infos/backend/middleware/errorHandler'
 import type { AppContext } from '@infos/backend/container'
 
 const appVersion = (
@@ -21,6 +22,7 @@ vi.mock('@infos/backend/lib/logger', () => ({
 }))
 
 import { createHealthRouter } from '@infos/backend/routers/health.router'
+import { LogQueryService } from '@infos/backend/services/system/logQueryService'
 
 function createConfigContext(initial: Record<string, string> = {}) {
   const store = new Map(Object.entries(initial))
@@ -43,6 +45,14 @@ function createConfigContext(initial: Record<string, string> = {}) {
         return Promise.resolve()
       }),
     },
+    embeddingService: {
+      getConfig: vi.fn(() => ({
+        apiBase: initial['embedding.apiBase'] ?? '',
+        apiKey: initial['embedding.apiKey'] ?? '',
+        model: initial['embedding.model'] ?? '',
+        dimension: Number(initial['embedding.dimension'] ?? 1536),
+      })),
+    },
     reloadEmbeddingConfig: vi.fn().mockResolvedValue(undefined),
     reloadTtsConfig: vi.fn().mockResolvedValue(undefined),
     reloadAsrConfig: vi.fn().mockResolvedValue(undefined),
@@ -55,6 +65,129 @@ async function readJson(response: Response) {
 }
 
 describe('createConfigRouter', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('应当真实激活候选Embedding并在维度一致后保存', async () => {
+    const ctx = createConfigContext()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ data: [{ embedding: [0.1, 0.2, 0.3, 0.4], index: 0 }] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      ),
+    )
+    const router = createConfigRouter(ctx)
+    router.onError(errorHandler)
+
+    const response = await router.request('/embedding/activate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        provider: 'api',
+        model: 'embedding-test',
+        dimension: 4,
+        apiBase: 'https://embedding.test/v1',
+        apiKey: 'candidate-key',
+        reranker: { enabled: false },
+      }),
+    })
+    const body = await readJson(response)
+
+    expect(response.status).toBe(200)
+    expect(body).toMatchObject({
+      code: 'OK',
+      message: 'Embedding 模型已激活并保存',
+      data: { model: 'embedding-test', dimension: 4 },
+    })
+    expect((body.data as { durationMs: number }).durationMs).toEqual(expect.any(Number))
+    expect(fetch).toHaveBeenCalledWith(
+      'https://embedding.test/v1/embeddings',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          input: ['infOS Embedding 模型激活与维度校验'],
+          model: 'embedding-test',
+          dimensions: 4,
+        }),
+      }),
+    )
+    expect(ctx.configRepo.set).toHaveBeenCalledWith('embedding.model', 'embedding-test')
+    expect(ctx.configRepo.set).toHaveBeenCalledWith('embedding.dimension', '4')
+    expect(ctx.reloadEmbeddingConfig).toHaveBeenCalledTimes(1)
+  })
+
+  it('应当在Embedding实际维度不匹配时拒绝保存', async () => {
+    const ctx = createConfigContext()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ data: [{ embedding: [0.1, 0.2, 0.3], index: 0 }] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      ),
+    )
+    const router = createConfigRouter(ctx)
+    router.onError(errorHandler)
+
+    const response = await router.request('/embedding/activate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        provider: 'api',
+        model: 'embedding-test',
+        dimension: 4,
+        apiBase: 'https://embedding.test/v1',
+        apiKey: 'candidate-key',
+        reranker: { enabled: false },
+      }),
+    })
+
+    expect(response.status).toBe(502)
+    expect(await readJson(response)).toMatchObject({
+      code: 'EMBEDDING_ERROR',
+      message: 'Embedding 维度不匹配：配置 4 维，实际返回 3 维',
+      data: { expectedDimension: 4, actualDimension: 3 },
+    })
+    expect(ctx.configRepo.set).not.toHaveBeenCalled()
+    expect(ctx.reloadEmbeddingConfig).not.toHaveBeenCalled()
+  })
+
+  it('应当透传Embedding API错误且不保存候选配置', async () => {
+    const ctx = createConfigContext()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response('无效的 API Key', { status: 401 })),
+    )
+    const router = createConfigRouter(ctx)
+    router.onError(errorHandler)
+
+    const response = await router.request('/embedding/activate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        provider: 'api',
+        model: 'embedding-test',
+        dimension: 4,
+        apiBase: 'https://embedding.test/v1',
+        apiKey: 'bad-key',
+        reranker: { enabled: false },
+      }),
+    })
+
+    expect(response.status).toBe(502)
+    expect(await readJson(response)).toMatchObject({
+      code: 'EMBEDDING_ERROR',
+      message: 'Embedding API 错误 (401): 无效的 API Key',
+    })
+    expect(ctx.configRepo.set).not.toHaveBeenCalled()
+    expect(ctx.reloadEmbeddingConfig).not.toHaveBeenCalled()
+  })
+
   it('应当列出配置并按前缀过滤', async () => {
     const ctx = createConfigContext({ 'embedding.model': 'a', 'tts.voice': 'b' })
     const router = createConfigRouter(ctx)
@@ -197,7 +330,7 @@ describe('createHealthRouter', () => {
   })
 
   it('应当返回健康状态与运行时信息', async () => {
-    const router = createHealthRouter()
+    const router = createHealthRouter(new LogQueryService())
 
     const response = await router.request('/')
     const body = await readJson(response)
@@ -213,7 +346,7 @@ describe('createHealthRouter', () => {
   })
 
   it('应当在未启用日志文件持久化时返回前置条件失败', async () => {
-    const router = createHealthRouter()
+    const router = createHealthRouter(new LogQueryService())
 
     const list = await router.request('/logs')
     const content = await router.request('/logs/app.log')
@@ -238,7 +371,7 @@ describe('createHealthRouter', () => {
       getLogDir: () => root,
       getLogPath: () => join(root, 'app.log'),
     }
-    const router = createHealthRouter()
+    const router = createHealthRouter(new LogQueryService())
 
     const list = await router.request('/logs')
     const content = await router.request('/logs/app.log?lines=2')
@@ -260,7 +393,7 @@ describe('createHealthRouter', () => {
       getLogDir: () => root,
       getLogPath: () => join(root, 'app.log'),
     }
-    const router = createHealthRouter()
+    const router = createHealthRouter(new LogQueryService())
 
     const illegal = await router.request('/logs/..%2Fsecret.log')
     const missing = await router.request('/logs/missing.log')

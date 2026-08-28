@@ -8,7 +8,9 @@ import { apiClient } from '../client'
 
 export type ApprovalDecision = 'allow_once' | 'allow_session' | 'deny_once'
 
-export type ApprovalStatus = 'pending' | 'approved' | 'denied' | 'expired' | 'consumed'
+export type ApprovalStatus = 'pending' | 'approved' | 'denied' | 'consumed'
+
+export type ApprovalRiskLevel = 'low' | 'medium' | 'high' | 'critical'
 
 export interface ApprovalRequest {
   id: string
@@ -20,19 +22,25 @@ export interface ApprovalRequest {
   toolName: string
   argsSummary: Record<string, unknown>
   reason: string
+  riskLevel: ApprovalRiskLevel
   status: ApprovalStatus
   decision?: ApprovalDecision
   /** 用户决策附言（后端 0010 起持久化） */
   resolutionMessage?: string
   createdAt: string
-  expiresAt: string
   resolvedAt?: string
 }
 
 export interface ApprovalAuditRecord {
   id: string
   approvalId: string | null
-  event: 'requested' | 'resolved' | 'consumed' | 'expired' | 'session_cleared'
+  event:
+    | 'requested'
+    | 'resolved'
+    | 'consumed'
+    | 'session_cleared'
+    | 'restart_rejected'
+    | 'shutdown_rejected'
   agentId: string
   sessionId: string
   toolName: string

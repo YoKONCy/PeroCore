@@ -195,18 +195,18 @@ export function getCloudStatus(): { enabled: boolean } {
   }
 }
 
-/** 上传到云存档 */
+/** 手动上传完整快照到云存档。 */
 export async function uploadToCloud(): Promise<{ success: boolean; errors: string[] }> {
   if (!steamApi) return { success: false, errors: ['Steam 不可用'] }
   const { cloudSyncService } = await import('./cloudSync')
-  const result = await cloudSyncService.uploadToCloud()
+  const result = await cloudSyncService.uploadFullSnapshot()
   return { success: result.success, errors: result.errors }
 }
 
-/** 从云存档下载 */
+/** 手动从云存档下载完整快照。 */
 export async function downloadFromCloud(): Promise<{ success: boolean; errors: string[] }> {
   if (!steamApi) return { success: false, errors: ['Steam 不可用'] }
   const { cloudSyncService } = await import('./cloudSync')
-  const result = await cloudSyncService.downloadFromCloud()
+  const result = await cloudSyncService.downloadFullSnapshot()
   return { success: result.success, errors: result.errors }
 }

@@ -1,389 +1,493 @@
-/**
- * CapabilityBridge — Daemon 侧能力调用 WebSocket 服务端
- *
- * 第七阶段核心组件：在 :9121 端口监听 WS 连接，实现：
- * 1. 节点注册：Electron/Mobile 等节点连接后发送 register 消息注册能力
- * 2. 心跳维护：节点定期发送 heartbeat，超时标记离线
- * 3. 工具调用转发：ToolExecutor 调用平台工具时，通过此 Bridge 转发到提供者节点
- * 4. 结果回传：节点执行完工具后，通过 WS 返回结果
- *
- * 消息协议（JSON）：
- * - 节点 → Daemon:
- *   { type: 'register', nodeId, nodeType, capabilities: string[], url? }
- *   { type: 'heartbeat', nodeId }
- *   { type: 'tool_result', callId, result, success, errorMsg? }
- * - Daemon → 节点:
- *   { type: 'tool_call', callId, toolName, args }
- *   { type: 'registered', success, message? }
- *
- * @module packages/backend/src/capabilities/capabilityBridge
- */
-
-import { WebSocketServer, WebSocket } from 'ws'
-import type { CapabilityRegistry } from './capabilityRegistry'
-import type { NodeCapabilityRegistration } from '../repositories/nodeCapability.repo'
+import { randomBytes, randomUUID } from 'node:crypto'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import path from 'node:path'
+import { WebSocket, WebSocketServer } from 'ws'
+import { ipcPayloadBytes, performanceEventsTotal } from '../lib/metrics'
+import { validateKernelEnvelope, validateVersionedMessage } from '@infos/shared'
+import type {
+  DaemonToNodeMessage,
+  KernelCapabilityHandle,
+  KernelCapabilityOffer,
+  KernelEnvelope,
+  KernelError,
+  KernelNodeId,
+  KernelNodeSessionId,
+  NodeToDaemonMessage,
+} from '@infos/shared'
+import type { CapabilityDirectory } from '../kernel/capabilityDirectory'
+import type { CapabilityHandleRegistry } from '../kernel/capabilityHandleRegistry'
+import { LifecycleScope } from '../kernel/lifecycleScope'
+import type { NodeRegistry } from '../kernel/nodeRegistry'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('CapabilityBridge')
+const CALL_TIMEOUT_MS = 30_000
+const NODE_LEASE_MS = 60_000
+const LEASE_CHECK_MS = 30_000
 
-/**
- * 工具调用超时（ms）
- *
- * 节点收到 tool_call 后应在此时间内返回 tool_result。
- * 超时后 Bridge 返回错误给调用方（ToolExecutor）。
- */
-const TOOL_CALL_TIMEOUT_MS = 30_000
+interface ConnectionState {
+  authenticated: boolean
+  paired: boolean
+  nodeId?: KernelNodeId
+  sessionId?: KernelNodeSessionId
+  scope?: LifecycleScope
+}
 
-/**
- * 心跳清理间隔（ms）
- *
- * 每 30 秒清理一次超时节点。
- */
-const HEARTBEAT_CLEANUP_INTERVAL_MS = 30_000
-
-/** 节点 → Daemon 消息类型 */
-type NodeMessage =
-  | { type: 'register'; nodeId: string; nodeType: string; capabilities: string[]; url?: string }
-  | { type: 'heartbeat'; nodeId: string }
-  | {
-      type: 'tool_result'
-      callId: string
-      result: unknown
-      success: boolean
-      errorMsg?: string
-    }
-  // 第七阶段修复（批次 E3）：鉴权握手消息
-  | { type: 'auth'; token: string }
-
-/** Daemon → 节点消息类型 */
-type DaemonMessage =
-  | { type: 'tool_call'; callId: string; toolName: string; args: Record<string, unknown> }
-  | { type: 'registered'; success: boolean; message?: string }
-  // 第七阶段修复（批次 E3）：错误消息（含鉴权失败）
-  | { type: 'error'; message: string }
-
-/** 待处理的工具调用（等待节点返回结果） */
 interface PendingCall {
-  resolve: (result: ToolCallResult) => void
+  resolve: (value: unknown) => void
+  reject: (error: Error) => void
   timer: NodeJS.Timeout
-  /** 第七阶段修复（批次 E4）：记录调用发起时间，用于计算真实 durationMs */
-  startTime: number
+  startedAt: number
+  socket: WebSocket
+  providerId: string
+  idempotencyKey?: string
 }
 
-/** 工具调用结果 */
-export interface ToolCallResult {
-  /** 工具输出（字符串化后的结果） */
-  output: string
-  /** 是否出错 */
-  isError: boolean
-  /** 耗时 ms */
-  durationMs: number
-}
-
-/**
- * CapabilityBridge — 能力调用 WebSocket 服务端
- *
- * 单例，由 Daemon 启动时创建。ToolExecutor 通过此实例转发平台工具调用。
- *
- * 注意：构造函数只依赖 CapabilityRegistry（避免与 AppContext 循环依赖）。
- * WS 服务端的启动由 Daemon 包调用 start() 触发。
- */
+/** 将 Electron WebSocket Node 接入统一 NodeRegistry 与 CapabilityDirectory。 */
 export class CapabilityBridge {
-  private wss: WebSocketServer | null = null
-  /** nodeId → WebSocket 连接映射 */
-  private nodeConnections = new Map<string, WebSocket>()
-  /** callId → 待处理调用 */
-  private pendingCalls = new Map<string, PendingCall>()
-  /** 心跳清理定时器 */
-  private cleanupTimer: NodeJS.Timeout | null = null
+  private server: WebSocketServer | null = null
+  private leaseTimer: NodeJS.Timeout | null = null
+  private readonly connections = new Map<KernelNodeId, WebSocket>()
+  private readonly states = new WeakMap<WebSocket, ConnectionState>()
+  private readonly pending = new Map<string, PendingCall>()
+  private readonly idempotentResults = new Map<string, { value: unknown; expiresAt: number }>()
+  private readonly pairingCodes = new Map<string, number>()
+  private readonly deviceTokens = new Set<string>()
+  private readonly deviceTokensFile: string
+  private deviceTokensLoaded = false
 
   constructor(
-    private capabilityRegistry: CapabilityRegistry,
-    /**
-     * 第七阶段修复（批次 E3）：WS 鉴权 token
-     * 来自 process.env.INFOS_API_TOKEN，未设置时为空字符串（跳过鉴权）
-     */
-    private authToken: string = '',
-  ) {}
+    private readonly directory: CapabilityDirectory,
+    private readonly handles: CapabilityHandleRegistry,
+    private readonly nodes: NodeRegistry,
+    private readonly authToken = '',
+    dataDir = '',
+  ) {
+    this.deviceTokensFile = dataDir
+      ? path.join(dataDir, 'kernel', 'capability-device-tokens.json')
+      : ''
+  }
 
-  /**
-   * 启动 WS 服务端
-   *
-   * @param port 能力通道端口（默认 9121）
-   */
   async start(port: number): Promise<void> {
-    return new Promise((resolve) => {
-      this.wss = new WebSocketServer({ port })
-
-      this.wss.on('connection', (ws, req) => {
-        const clientAddr = req.socket.remoteAddress ?? 'unknown'
-        logger.info(`能力节点连接: ${clientAddr}`)
-
-        // 第七阶段修复（批次 E3）：WS 鉴权握手
-        // 连接建立后第一条消息必须是 { type: 'auth', token }
-        // 验证通过后标记 _authed=true，后续才允许 register/heartbeat/tool_result
-        // 未配置 INFOS_API_TOKEN 时（开发环境）跳过鉴权，打印 warn
-        ;(ws as unknown as { _authed: boolean })._authed = !this.authToken
-        if (!this.authToken) {
-          logger.warn(
-            'CapabilityBridge 未配置鉴权 token（INFOS_API_TOKEN 未设置），' +
-              '任何本机进程均可注册能力。生产环境必须设置此环境变量。',
-          )
-        }
-
-        ws.on('message', (data) => this.handleMessage(ws, data.toString()))
-        ws.on('close', () => this.handleDisconnect(ws))
-        ws.on('error', (err) => logger.warn(`节点连接错误: ${err.message}`))
+    if (this.server) return
+    await this.loadDeviceTokens()
+    await new Promise<void>((resolve, reject) => {
+      const host = this.authToken ? (process.env.PERO_CAPABILITY_HOST ?? '0.0.0.0') : '127.0.0.1'
+      const server = new WebSocketServer({ port, host })
+      const onError = (error: Error) => reject(error)
+      server.once('error', onError)
+      server.once('listening', () => {
+        server.off('error', onError)
+        this.server = server
+        resolve()
       })
-
-      // 启动心跳清理定时器
-      this.cleanupTimer = setInterval(() => {
-        this.capabilityRegistry.cleanupStaleNodes().catch((err) => {
-          logger.warn(`心跳清理失败: ${err}`)
-        })
-      }, HEARTBEAT_CLEANUP_INTERVAL_MS)
-
-      logger.info(`CapabilityBridge WS 服务端已启动 → ws://127.0.0.1:${port}`)
-      resolve()
+      server.on('connection', (socket, request) =>
+        this.accept(socket, request.socket.remoteAddress),
+      )
     })
+    this.leaseTimer = setInterval(() => this.expireLeases(), LEASE_CHECK_MS)
+    this.leaseTimer.unref?.()
+    if (!this.authToken) {
+      logger.info('Capability Transport 使用本机信任模式，仅监听 127.0.0.1')
+    }
+    logger.info(
+      `Capability Transport 已启动 → ws://${this.authToken ? (process.env.PERO_CAPABILITY_HOST ?? '0.0.0.0') : '127.0.0.1'}:${port}`,
+    )
   }
 
-  /** 关闭 Bridge */
   async stop(): Promise<void> {
-    if (this.cleanupTimer) {
-      clearInterval(this.cleanupTimer)
-      this.cleanupTimer = null
+    if (this.leaseTimer) clearInterval(this.leaseTimer)
+    this.leaseTimer = null
+    for (const [id, call] of this.pending) {
+      clearTimeout(call.timer)
+      call.reject(new Error('CAPABILITY_TRANSPORT_STOPPED: 能力 Transport 已关闭'))
+      this.pending.delete(id)
     }
-    // 拒绝所有待处理调用
-    for (const [callId, pending] of this.pendingCalls) {
-      clearTimeout(pending.timer)
-      pending.resolve({
-        output: 'CapabilityBridge 已关闭，工具调用被中断',
-        isError: true,
-        durationMs: 0,
-      })
-      this.pendingCalls.delete(callId)
+    for (const socket of this.connections.values()) socket.close()
+    this.connections.clear()
+    if (this.server) {
+      const server = this.server
+      this.server = null
+      await new Promise<void>((resolve) => server.close(() => resolve()))
     }
-    // 关闭所有连接
-    for (const ws of this.nodeConnections.values()) {
-      ws.close()
-    }
-    this.nodeConnections.clear()
-    // 关闭 WS 服务端
-    if (this.wss) {
-      await new Promise<void>((resolve) => {
-        this.wss!.close(() => resolve())
-      })
-      this.wss = null
-    }
-    logger.info('CapabilityBridge 已停止')
+    logger.info('Capability Transport 已停止')
   }
 
-  /**
-   * 调用平台工具（由 ToolExecutor 调用）
-   *
-   * 查找能提供 toolName 的在线节点，通过 WS 转发调用请求，
-   * 等待节点返回 tool_result。
-   *
-   * @returns 工具调用结果（成功或错误）
-   */
-  async invokeTool(toolName: string, args: Record<string, unknown>): Promise<ToolCallResult> {
-    const startTime = Date.now()
-
-    // 1. 查找能力提供者
-    const provider = await this.capabilityRegistry.findProvider(toolName)
-    if (!provider) {
-      return {
-        output: `工具 "${toolName}" 当前没有可用的能力节点。请检查相关客户端（如 Electron 桌面端）是否已启动。`,
-        isError: true,
-        durationMs: Date.now() - startTime,
-      }
+  private accept(socket: WebSocket, remoteAddress?: string): void {
+    const loopback =
+      !remoteAddress ||
+      remoteAddress === '127.0.0.1' ||
+      remoteAddress === '::1' ||
+      remoteAddress === '::ffff:127.0.0.1'
+    if (!this.authToken && !loopback) {
+      logger.warn(`拒绝未认证的外部Capability连接: ${remoteAddress}`)
+      socket.close(4003, 'Remote capability transport requires authentication')
+      return
     }
+    this.states.set(socket, { authenticated: !this.authToken, paired: false })
+    logger.info(`能力 Node 连接: ${remoteAddress ?? 'unknown'}`)
+    socket.on('message', (data) => void this.handleMessage(socket, data.toString()))
+    socket.on('close', () => void this.disconnect(socket))
+    socket.on('error', (error) => logger.warn(`能力 Node 连接错误: ${error.message}`))
+  }
 
-    // 2. 找到节点的 WS 连接
-    const ws = this.nodeConnections.get(provider.nodeId)
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      // 连接断开，标记节点离线
-      await this.capabilityRegistry.unregister(provider.nodeId)
-      return {
-        output: `工具 "${toolName}" 的提供节点 ${provider.nodeId} 已断开连接`,
-        isError: true,
-        durationMs: Date.now() - startTime,
-      }
+  private async handleMessage(socket: WebSocket, raw: string): Promise<void> {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      this.send(socket, { type: 'error', message: 'CAPABILITY_MESSAGE_INVALID: 消息不是合法JSON' })
+      return
     }
-
-    // 3. 发送 tool_call 消息，等待 tool_result
-    const callId = `tc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-    const message: DaemonMessage = {
-      type: 'tool_call',
-      callId,
-      toolName,
-      args,
+    let message: NodeToDaemonMessage
+    try {
+      validateVersionedMessage(parsed)
+      message = parsed as NodeToDaemonMessage
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      this.send(socket, { type: 'error', message: `CAPABILITY_PROTOCOL_INVALID: ${reason}` })
+      return
     }
-
-    return new Promise<ToolCallResult>((resolve) => {
-      const timer = setTimeout(() => {
-        this.pendingCalls.delete(callId)
-        resolve({
-          output: `工具 "${toolName}" 调用超时（节点 ${provider.nodeId} 未在 ${TOOL_CALL_TIMEOUT_MS}ms 内响应）`,
-          isError: true,
-          durationMs: Date.now() - startTime,
-        })
-      }, TOOL_CALL_TIMEOUT_MS)
-
-      this.pendingCalls.set(callId, { resolve, timer, startTime })
-
-      ws.send(JSON.stringify(message), (err) => {
-        if (err) {
-          clearTimeout(timer)
-          this.pendingCalls.delete(callId)
-          resolve({
-            output: `工具 "${toolName}" 调用发送失败: ${err.message}`,
-            isError: true,
-            durationMs: Date.now() - startTime,
-          })
+    const state = this.states.get(socket)!
+    if (message.type === 'authenticate') {
+      const pairingExpiresAt = this.pairingCodes.get(message.token)
+      const pairingAccepted = Boolean(pairingExpiresAt && pairingExpiresAt > Date.now())
+      const deviceAccepted = this.deviceTokens.has(message.token)
+      if (
+        !this.authToken ||
+        message.token === this.authToken ||
+        pairingAccepted ||
+        deviceAccepted
+      ) {
+        let deviceToken: string | undefined
+        if (pairingAccepted) {
+          this.pairingCodes.delete(message.token)
+          deviceToken = randomBytes(32).toString('base64url')
+          this.deviceTokens.add(deviceToken)
+          await this.saveDeviceTokens()
         }
-      })
-
-      // 当 tool_result 返回时，handleMessage 会调用 pending.resolve 并清除 timer
-      // 注意：ws.send 的回调仅处理发送错误，正常发送后 resolve 由 handleMessage 触发
-    })
-  }
-
-  // ── 内部：消息处理 ──
-
-  private async handleMessage(ws: WebSocket, raw: string): Promise<void> {
-    let msg: NodeMessage
-    try {
-      msg = JSON.parse(raw) as NodeMessage
-    } catch {
-      logger.warn(`收到非法 JSON 消息: ${raw.slice(0, 200)}`)
-      return
-    }
-
-    // 第七阶段修复（批次 E3）：auth 握手
-    if (msg.type === 'auth') {
-      const authed = (ws as unknown as { _authed: boolean })._authed
-      if (authed) {
-        // 已认证过：幂等回复 authed 回执，避免节点卡在等待握手结果。
-        // 开发环境（INFOS_API_TOKEN 未设置）连接建立即视为已认证，
-        // 但节点（Electron）仍依赖此回执才继续注册能力，必须回复。
-        ws.send(JSON.stringify({ type: 'registered', success: true, message: 'authed' }))
-        return
-      }
-      if (this.authToken && msg.token === this.authToken) {
-        ;(ws as unknown as { _authed: boolean })._authed = true
-        logger.info('能力节点鉴权成功')
-        ws.send(JSON.stringify({ type: 'registered', success: true, message: 'authed' }))
+        state.authenticated = true
+        state.paired = pairingAccepted || deviceAccepted
+        this.send(socket, { type: 'authenticated', deviceToken })
       } else {
-        logger.warn('能力节点鉴权失败：token 不匹配')
-        ws.send(
-          JSON.stringify({
-            type: 'error',
-            message: '鉴权失败：token 不匹配',
-          }),
-        )
-        ws.close()
+        this.send(socket, { type: 'error', message: 'CAPABILITY_AUTH_FAILED: Token不匹配' })
+        socket.close()
       }
       return
     }
-
-    // 未认证时拒绝所有其他消息
-    const authed = (ws as unknown as { _authed: boolean })._authed
-    if (!authed) {
-      logger.warn(`未鉴权的节点发送了 ${msg.type} 消息，已忽略`)
-      ws.send(JSON.stringify({ type: 'error', message: '未鉴权，请先发送 auth 消息' }))
+    if (!state.authenticated) {
+      this.send(socket, { type: 'error', message: 'CAPABILITY_AUTH_REQUIRED: 请先认证' })
       return
     }
-
-    switch (msg.type) {
-      case 'register':
-        await this.handleRegister(ws, msg)
-        break
-      case 'heartbeat':
-        await this.handleHeartbeat(msg)
-        break
-      case 'tool_result':
-        this.handleToolResult(msg)
-        break
-      default:
-        logger.warn(`未知消息类型: ${(msg as { type: string }).type}`)
+    try {
+      if (message.type === 'node_hello') await this.hello(socket, state, message)
+      else if (message.type === 'heartbeat') this.heartbeat(state, message)
+      else if (message.type === 'capability_result') this.complete(socket, message)
+    } catch (error) {
+      const text = error instanceof Error ? error.message : String(error)
+      logger.warn(`能力消息处理失败: ${text}`)
+      this.send(socket, { type: 'error', message: text })
     }
   }
 
-  private async handleRegister(
-    ws: WebSocket,
-    msg: Extract<NodeMessage, { type: 'register' }>,
+  private async hello(
+    socket: WebSocket,
+    state: ConnectionState,
+    message: Extract<NodeToDaemonMessage, { type: 'node_hello' }>,
   ): Promise<void> {
-    try {
-      const reg: NodeCapabilityRegistration = await this.capabilityRegistry.register(
-        msg.nodeId,
-        msg.nodeType as NodeCapabilityRegistration['nodeType'],
-        msg.capabilities,
-        msg.url ?? null,
-      )
-      // 绑定 nodeId → WebSocket
-      this.nodeConnections.set(msg.nodeId, ws)
-      // 在 ws 上标记 nodeId（用于断开时清理）
-      ;(ws as unknown as { _nodeId: string })._nodeId = msg.nodeId
-
-      logger.info(
-        `节点注册成功: ${msg.nodeId} (${msg.nodeType}), 能力: [${msg.capabilities.join(', ')}]`,
-      )
-
-      // 回复注册成功
-      const reply: DaemonMessage = {
-        type: 'registered',
-        success: true,
-        message: `已注册 ${reg.capabilities.length} 个能力`,
+    await state.scope?.dispose()
+    if (state.sessionId) this.nodes.disconnect(state.sessionId)
+    this.nodes.registerNode({
+      ...message.descriptor,
+      trust: state.paired ? 'paired' : message.descriptor.trust,
+    })
+    const session = this.nodes.connect({
+      nodeId: message.descriptor.nodeId,
+      carrier: 'websocket',
+      leaseMs: NODE_LEASE_MS,
+    })
+    if (message.descriptor.facets.includes('client')) {
+      this.nodes.issueInputSeat({
+        sessionId: session.sessionId,
+        principalId: 'system',
+        capabilities: ['input'],
+        leaseMs: NODE_LEASE_MS,
+      })
+    }
+    const scope = new LifecycleScope(`node:${message.descriptor.nodeId}:${session.sessionId}`)
+    state.nodeId = message.descriptor.nodeId
+    state.sessionId = session.sessionId
+    state.scope = scope
+    this.connections.set(message.descriptor.nodeId, socket)
+    performanceEventsTotal.inc({ metric: 'node_recovery', outcome: 'accepted' })
+    scope.defer(() => {
+      if (this.connections.get(message.descriptor.nodeId) === socket) {
+        this.connections.delete(message.descriptor.nodeId)
       }
-      ws.send(JSON.stringify(reply))
-    } catch (err) {
-      logger.error(`节点注册失败: ${err}`)
-      const reply: DaemonMessage = {
-        type: 'registered',
-        success: false,
-        message: String(err),
-      }
-      ws.send(JSON.stringify(reply))
+    })
+    for (const offer of message.offers)
+      this.registerOffer(
+        socket,
+        message.descriptor.nodeId,
+        {
+          ...offer,
+          leaseExpiresAt: session.leaseExpiresAt,
+        },
+        scope,
+      )
+    this.send(socket, {
+      type: 'node_accepted',
+      sessionId: session.sessionId,
+      leaseExpiresAt: session.leaseExpiresAt,
+    })
+    logger.info(
+      `Node已接入: ${message.descriptor.nodeId}, Offer=[${message.offers.map((item) => item.offerId).join(', ')}]`,
+    )
+  }
+
+  private registerOffer(
+    socket: WebSocket,
+    nodeId: KernelNodeId,
+    offer: KernelCapabilityOffer,
+    scope: LifecycleScope,
+  ): void {
+    if (!offer.placement || offer.placement.providerNodeId !== nodeId) {
+      throw new Error(`NODE_OFFER_PLACEMENT_INVALID: ${offer.offerId}`)
+    }
+    if (offer.provider.authorityNodeId !== nodeId) {
+      throw new Error(`NODE_OFFER_AUTHORITY_INVALID: ${offer.offerId}`)
+    }
+    scope.defer(
+      this.directory.registerRemoteProvider(offer, (envelope) =>
+        this.invokeRemote(socket, offer.offerId, envelope),
+      ),
+    )
+  }
+
+  private heartbeat(
+    state: ConnectionState,
+    message: Extract<NodeToDaemonMessage, { type: 'heartbeat' }>,
+  ): void {
+    if (state.nodeId !== message.nodeId || state.sessionId !== message.sessionId) {
+      throw new Error('NODE_SESSION_MISMATCH: 心跳身份不匹配')
+    }
+    const session = this.nodes.heartbeat(message.sessionId, NODE_LEASE_MS)
+    this.directory.renewNodeOffers(message.nodeId, session.leaseExpiresAt)
+    if (this.nodes.getNode(message.nodeId)?.facets.includes('client')) {
+      this.nodes.issueInputSeat({
+        sessionId: message.sessionId,
+        principalId: 'system',
+        capabilities: ['input'],
+        leaseMs: NODE_LEASE_MS,
+      })
     }
   }
 
-  private async handleHeartbeat(msg: Extract<NodeMessage, { type: 'heartbeat' }>): Promise<void> {
-    await this.capabilityRegistry.heartbeat(msg.nodeId)
-  }
-
-  private handleToolResult(msg: Extract<NodeMessage, { type: 'tool_result' }>): void {
-    const pending = this.pendingCalls.get(msg.callId)
-    if (!pending) {
-      logger.warn(`收到未匹配的 tool_result: callId=${msg.callId}`)
-      return
+  private invokeRemote(
+    socket: WebSocket,
+    providerId: string,
+    envelope: KernelEnvelope<{ operation: string; input: unknown }>,
+  ): Promise<unknown> {
+    if (socket.readyState !== WebSocket.OPEN) {
+      throw new Error('CAPABILITY_PROVIDER_UNAVAILABLE: Node连接已断开')
     }
-    clearTimeout(pending.timer)
-    this.pendingCalls.delete(msg.callId)
-
-    // 序列化结果
-    let output: string
-    try {
-      output = typeof msg.result === 'string' ? msg.result : JSON.stringify(msg.result)
-    } catch {
-      output = String(msg.result)
+    const invocationId = randomUUID()
+    const deadlineAt = envelope.deadline ? Date.parse(envelope.deadline) : undefined
+    if (deadlineAt !== undefined && deadlineAt <= Date.now()) {
+      throw new Error('CAPABILITY_DEADLINE_EXCEEDED: 调用在发送前已过期')
     }
-
-    pending.resolve({
-      output,
-      isError: !msg.success,
-      // 第七阶段修复（批次 E4）：用 pending.startTime 计算真实耗时，而非返回 0
-      durationMs: Date.now() - pending.startTime,
+    const idempotencyKey = envelope.idempotencyKey
+    if (idempotencyKey) {
+      const cacheKey = `${providerId}:${idempotencyKey}`
+      const cached = this.idempotentResults.get(cacheKey)
+      if (cached?.expiresAt && cached.expiresAt <= Date.now()) {
+        this.idempotentResults.delete(cacheKey)
+      } else if (cached) {
+        return Promise.resolve(structuredClone(cached.value))
+      }
+    }
+    return new Promise((resolve, reject) => {
+      const defaultTimeout =
+        envelope.operation === 'audio.output/play' || envelope.operation === 'system.shell/wait'
+          ? 5 * 60_000
+          : CALL_TIMEOUT_MS
+      const timeout = deadlineAt
+        ? Math.min(defaultTimeout, deadlineAt - Date.now())
+        : defaultTimeout
+      const timer = setTimeout(() => {
+        this.pending.delete(invocationId)
+        this.send(socket, {
+          type: 'capability_cancel',
+          invocationId,
+          reason: 'deadline_exceeded',
+        })
+        reject(new Error(`CAPABILITY_TIMEOUT: ${providerId}/${envelope.payload.operation}`))
+      }, timeout)
+      this.pending.set(invocationId, {
+        resolve,
+        reject,
+        timer,
+        startedAt: Date.now(),
+        socket,
+        providerId,
+        idempotencyKey,
+      })
+      validateKernelEnvelope(envelope)
+      this.send(socket, { type: 'capability_invoke', invocationId, providerId, envelope })
     })
   }
 
-  private async handleDisconnect(ws: WebSocket): Promise<void> {
-    const nodeId = (ws as unknown as { _nodeId?: string })._nodeId
-    if (!nodeId) return
-
-    this.nodeConnections.delete(nodeId)
-    await this.capabilityRegistry.unregister(nodeId)
-    logger.info(`节点断开连接: ${nodeId}`)
+  private complete(
+    socket: WebSocket,
+    message: Extract<NodeToDaemonMessage, { type: 'capability_result' }>,
+  ): void {
+    const call = this.pending.get(message.invocationId)
+    if (!call) {
+      logger.warn(`收到未匹配的 Capability结果: ${message.invocationId}`)
+      return
+    }
+    if (call.socket !== socket) {
+      logger.warn(`拒绝非调用 Provider 返回的 Capability结果: ${message.invocationId}`)
+      return
+    }
+    clearTimeout(call.timer)
+    this.pending.delete(message.invocationId)
+    if (message.success) {
+      if (call.idempotencyKey) {
+        this.idempotentResults.set(`${call.providerId}:${call.idempotencyKey}`, {
+          value: structuredClone(message.output),
+          expiresAt: Date.now() + 5 * 60_000,
+        })
+      }
+      call.resolve(message.output)
+      return
+    }
+    const error = message.error ?? {
+      code: 'CAPABILITY_PROVIDER_ERROR',
+      message: 'Provider调用失败',
+      retryable: false,
+    }
+    const result = new Error(`${error.code}: ${error.message}`)
+    Object.assign(result, { kernelError: error, durationMs: Date.now() - call.startedAt })
+    call.reject(result)
   }
+
+  private async disconnect(socket: WebSocket): Promise<void> {
+    const state = this.states.get(socket)
+    if (!state) return
+    for (const [invocationId, call] of this.pending) {
+      if (call.socket !== socket) continue
+      clearTimeout(call.timer)
+      call.reject(new Error('CAPABILITY_PROVIDER_DISCONNECTED: Provider 连接已断开'))
+      this.pending.delete(invocationId)
+    }
+    if (state.sessionId) this.nodes.disconnect(state.sessionId)
+    await state.scope?.dispose().catch((error) => logger.warn(`释放 Node Offer失败: ${error}`))
+    if (state.nodeId) this.handles.revokeSubject(`node:${state.nodeId}`)
+    logger.info(`能力 Node 已离线: ${state.nodeId ?? '未注册'}`)
+  }
+
+  private expireLeases(): void {
+    this.nodes.expireLeases()
+    const now = Date.now()
+    for (const [key, result] of this.idempotentResults) {
+      if (result.expiresAt <= now) this.idempotentResults.delete(key)
+    }
+    for (const [code, expiresAt] of this.pairingCodes) {
+      if (expiresAt <= now) this.pairingCodes.delete(code)
+    }
+    for (const [nodeId, socket] of this.connections) {
+      if (!this.nodes.getActiveSession(nodeId)) socket.close()
+    }
+  }
+
+  private async loadDeviceTokens(): Promise<void> {
+    if (this.deviceTokensLoaded) return
+    this.deviceTokensLoaded = true
+    if (!this.deviceTokensFile) return
+    try {
+      const parsed = JSON.parse(await readFile(this.deviceTokensFile, 'utf8')) as {
+        version?: number
+        tokens?: unknown
+      }
+      if (parsed.version !== 1 || !Array.isArray(parsed.tokens)) return
+      for (const token of parsed.tokens) {
+        if (typeof token === 'string' && token.length >= 32) this.deviceTokens.add(token)
+      }
+    } catch {
+      // 首次启动时还没有设备凭据文件。
+    }
+  }
+
+  private async saveDeviceTokens(): Promise<void> {
+    if (!this.deviceTokensFile) return
+    await mkdir(path.dirname(this.deviceTokensFile), { recursive: true })
+    await writeFile(
+      this.deviceTokensFile,
+      JSON.stringify({ version: 1, tokens: [...this.deviceTokens] }, null, 2),
+      { mode: 0o600 },
+    )
+  }
+
+  createPairingInvite(
+    endpoint: string,
+    ttlMs = 5 * 60_000,
+  ): {
+    endpoint: string
+    pairingCode: string
+    expiresAt: string
+  } {
+    const pairingCode = randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase()
+    const expiresAt = Date.now() + ttlMs
+    this.pairingCodes.set(pairingCode, expiresAt)
+    return { endpoint, pairingCode, expiresAt: new Date(expiresAt).toISOString() }
+  }
+
+  diagnostics(): {
+    listening: boolean
+    connectedNodes: number
+    pendingInvocations: number
+    offers: KernelCapabilityOffer[]
+  } {
+    return {
+      listening: Boolean(this.server),
+      connectedNodes: this.connections.size,
+      pendingInvocations: this.pending.size,
+      offers: this.directory.listOffers(),
+    }
+  }
+
+  private send(
+    socket: WebSocket,
+    message: DaemonToNodeMessage extends infer Message
+      ? Message extends DaemonToNodeMessage
+        ? Omit<Message, 'protocolVersion'>
+        : never
+      : never,
+  ): void {
+    if (socket.readyState === WebSocket.OPEN) {
+      const serialized = JSON.stringify({ protocolVersion: 1, ...message })
+      ipcPayloadBytes.observe(
+        { carrier: 'capability-websocket', direction: 'outbound' },
+        Buffer.byteLength(serialized),
+      )
+      socket.send(serialized)
+    }
+  }
+}
+
+/** 将异常统一为跨 Node 结构化错误。 */
+export function toCapabilityError(error: unknown): KernelError {
+  const message = error instanceof Error ? error.message : String(error)
+  const separator = message.indexOf(':')
+  return {
+    code: separator > 0 ? message.slice(0, separator) : 'CAPABILITY_PROVIDER_ERROR',
+    message: separator > 0 ? message.slice(separator + 1).trim() : message,
+    retryable: /TIMEOUT|UNAVAILABLE|DISCONNECTED/.test(message),
+  }
+}
+
+export type IssuedCapabilityBinding = {
+  handle: KernelCapabilityHandle
+  dispose(): Promise<void>
 }

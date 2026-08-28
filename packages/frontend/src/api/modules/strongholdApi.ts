@@ -7,6 +7,7 @@
  * @module packages/frontend/src/api/modules/strongholdApi
  */
 
+import type { StrongholdProjectionSnapshot } from '@infos/shared'
 import { apiClient } from '../client'
 
 // ── 类型定义 ──
@@ -49,6 +50,8 @@ export interface GroupMessage {
   content: string
   role: GroupMessageRole
   timestamp?: string
+  /** Agent 可见输出的总 Token。 */
+  outputTokens?: number
 }
 
 export interface SendStrongholdMessageOptions {
@@ -62,7 +65,9 @@ export interface SendStrongholdMessageOptions {
 export interface StrongholdMessageDispatch {
   message: GroupMessage
   replyQueued: boolean
+  roundId?: string
   agentId?: string
+  agentIds?: string[]
   /** @全体成员 时返回的打乱后的回复顺序（agentId='@all' 时存在）。 */
   allAgentIds?: string[]
   reason: string
@@ -150,6 +155,12 @@ export const strongholdApi = {
     apiClient.get<Room | null>(`/stronghold/locations/${agentId}`),
 
   // ═══ 群聊消息 ═══
+
+  /** 获取房间成员、消息 Shell 与 committed Surfaces。 */
+  getProjection: (roomId: string, limit = 100) =>
+    apiClient.get<StrongholdProjectionSnapshot>(
+      `/stronghold/rooms/${roomId}/projection?limit=${limit}`,
+    ),
 
   /** 获取房间消息历史 */
   getMessages: (roomId: string, limit = 50) =>

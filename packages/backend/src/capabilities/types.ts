@@ -104,6 +104,11 @@ export interface SkillManifest {
   parameters: Record<string, string>
   /** 依赖的子 Skill ID 列表 (嵌套调用) */
   dependsOnSkills: string[]
+  license?: string
+  compatibility?: string
+  metadata: Record<string, string>
+  allowedTools: string[]
+  rootPath: string
 }
 
 /** 请求级能力作用域；只能在 Channel 权限基础上继续收窄，不能扩权。 */

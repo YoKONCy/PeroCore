@@ -7,69 +7,143 @@
  * @module packages/backend/src/database/schema
  */
 
-import { sqliteTable, text, integer, real, index, uniqueIndex } from 'drizzle-orm/sqlite-core'
+import {
+  sqliteTable,
+  text,
+  integer,
+  real,
+  index,
+  uniqueIndex,
+  primaryKey,
+} from 'drizzle-orm/sqlite-core'
 import { sql } from 'drizzle-orm'
 
 // ─────────────────────────────────────────────
-// 记忆系统
+// Observer Service与Agent State派生资源
 // ─────────────────────────────────────────────
 
-/** 记忆节点表 */
-export const memoryNodes = sqliteTable(
-  'memory_nodes',
+export const observerProcessedEvents = sqliteTable('observer_processed_events', {
+  eventId: text('event_id').primaryKey(),
+  processedAt: text('processed_at').notNull(),
+})
+
+export const agentStateMeasurements = sqliteTable(
+  'agent_state_measurements',
   {
-    id: integer('id').primaryKey({ autoIncrement: true }),
-    content: text('content').notNull(),
-    tags: text('tags').default(''),
-    clusters: text('clusters'),
-
-    // 权重与情感
-    importance: integer('importance').default(1),
-    baseImportance: real('base_importance').default(1.0),
-    accessCount: integer('access_count').default(0),
-    lastAccessed: text('last_accessed').default(sql`(datetime('now', 'localtime'))`),
-    sentiment: text('sentiment').default('neutral'),
-
-    // 时间主轴 (链表)
-    timestamp: real('timestamp')
-      .notNull()
-      .default(sql`(unixepoch('now') * 1000)`),
-    realTime: text('real_time').default(''),
-    prevId: integer('prev_id'),
-    nextId: integer('next_id'),
-
-    // 元数据
-    msgTimestamp: text('msg_timestamp'),
-    source: text('source').default('desktop'),
-    type: text('type').default('event'),
-    agentId: text('agent_id').notNull().default('pero'),
-
-    // 向量 (JSON 字符串)
-    embeddingJson: text('embedding_json').default('[]'),
-
-    // PEDSA 检索反馈
-    retrievalQuality: real('retrieval_quality').default(0.0),
+    id: text('id').primaryKey(),
+    agentId: text('agent_id').notNull(),
+    metric: text('metric').notNull(),
+    value: real('value').notNull(),
+    confidence: real('confidence').notNull(),
+    sourceEventId: text('source_event_id').notNull(),
+    sourceEventType: text('source_event_type').notNull(),
+    explanation: text('explanation').notNull(),
+    observedAt: text('observed_at').notNull(),
   },
   (table) => [
-    index('idx_memory_nodes_agent_id').on(table.agentId),
-    index('idx_memory_nodes_timestamp').on(table.timestamp),
-    index('idx_memory_nodes_type').on(table.type),
+    uniqueIndex('uq_agent_state_source_metric').on(table.sourceEventId, table.metric),
+    index('idx_agent_state_agent_observed').on(table.agentId, table.observedAt),
   ],
 )
 
-/** 实体共现统计表 */
-export const entityCooccurrences = sqliteTable(
-  'entity_cooccurrences',
+export const observerPolicies = sqliteTable('observer_policies', {
+  agentId: text('agent_id').primaryKey(),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+  injectContext: integer('inject_context', { mode: 'boolean' }).notNull().default(false),
+  updatedAt: text('updated_at').notNull(),
+})
+
+// ─────────────────────────────────────────────
+// 逻辑微内核事件 Outbox
+// ─────────────────────────────────────────────
+
+/** 领域事务提交后等待发布的 Durable Event。 */
+export const kernelOutboxEvents = sqliteTable(
+  'kernel_outbox_events',
   {
-    id: integer('id').primaryKey({ autoIncrement: true }),
-    entityAId: integer('entity_a_id').notNull(),
-    entityBId: integer('entity_b_id').notNull(),
-    coCount: integer('co_count').default(1),
-    agentId: text('agent_id').notNull().default('pero'),
+    eventId: text('event_id').primaryKey(),
+    eventType: text('event_type').notNull(),
+    durability: text('durability').default('durable').notNull(),
+    principalId: text('principal_id').notNull(),
+    processId: text('process_id'),
+    executionId: text('execution_id'),
+    correlationId: text('correlation_id'),
+    causationId: text('causation_id'),
+    objectType: text('object_type'),
+    objectId: text('object_id'),
+    objectGeneration: integer('object_generation'),
+    payloadJson: text('payload_json').notNull(),
+    occurredAt: text('occurred_at').notNull(),
+    status: text('status').default('pending').notNull(),
+    attempts: integer('attempts').default(0).notNull(),
+    lastError: text('last_error'),
+    nextAttemptAt: text('next_attempt_at'),
+    createdAt: text('created_at')
+      .default(sql`(datetime('now', 'localtime'))`)
+      .notNull(),
+    publishedAt: text('published_at'),
   },
   (table) => [
-    index('idx_entity_cooccurrences_agent_id').on(table.agentId),
-    uniqueIndex('uq_cooccurrence_pair').on(table.entityAId, table.entityBId, table.agentId),
+    index('idx_kernel_outbox_status_created').on(table.status, table.createdAt),
+    index('idx_kernel_outbox_execution').on(table.executionId, table.createdAt),
+    index('idx_kernel_outbox_correlation').on(table.correlationId),
+  ],
+)
+
+// ─────────────────────────────────────────────
+// Resource Foundation
+// ─────────────────────────────────────────────
+
+/** 可审计 Asset 元数据；文件正文保存在专用 Store。 */
+export const kernelAssets = sqliteTable(
+  'kernel_assets',
+  {
+    assetId: text('asset_id').primaryKey(),
+    objectType: text('object_type').default('asset').notNull(),
+    objectGeneration: integer('object_generation').default(1).notNull(),
+    ownerPrincipalId: text('owner_principal_id').notNull(),
+    kind: text('kind').notNull(),
+    mimeType: text('mime_type').notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    sha256: text('sha256').notNull(),
+    source: text('source').notNull(),
+    storageRef: text('storage_ref').notNull(),
+    retention: text('retention').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [
+    index('idx_kernel_assets_owner').on(table.ownerPrincipalId, table.createdAt),
+    index('idx_kernel_assets_sha256').on(table.sha256),
+  ],
+)
+
+/** Transfer Kernel Object 的持久元数据。 */
+export const kernelTransfers = sqliteTable(
+  'kernel_transfers',
+  {
+    transferId: text('transfer_id').primaryKey(),
+    objectGeneration: integer('object_generation').default(1).notNull(),
+    direction: text('direction').notNull(),
+    state: text('state').notNull(),
+    sourceRefJson: text('source_ref_json'),
+    destinationRefJson: text('destination_ref_json'),
+    bytesTotal: integer('bytes_total'),
+    bytesTransferred: integer('bytes_transferred').default(0).notNull(),
+    checksum: text('checksum'),
+    resultAssetRefJson: text('result_asset_ref_json'),
+    principalId: text('principal_id').notNull(),
+    processId: text('process_id'),
+    executionId: text('execution_id'),
+    correlationId: text('correlation_id').notNull(),
+    error: text('error'),
+    createdAt: text('created_at').notNull(),
+    startedAt: text('started_at'),
+    completedAt: text('completed_at'),
+  },
+  (table) => [
+    index('idx_kernel_transfers_principal').on(table.principalId, table.createdAt),
+    index('idx_kernel_transfers_state').on(table.state, table.createdAt),
+    index('idx_kernel_transfers_execution').on(table.executionId, table.createdAt),
   ],
 )
 
@@ -114,6 +188,8 @@ export const threads = sqliteTable(
     contextPolicy: text('context_policy'),
     /** Thread 级禁用工具列表（JSON 字符串）；只能屏蔽 Channel 已允许工具，不能扩权。 */
     disabledToolsJson: text('disabled_tools_json').default('[]').notNull(),
+    /** 自动执行模式仅跳过可审批决策，不跳过拒绝、终端与越界删除审批。 */
+    autoExecuteTools: integer('auto_execute_tools', { mode: 'boolean' }).default(false).notNull(),
     /**
      * M05 §3.2: Thread 用途：conversation / background_task
      * 普通聊天为 conversation；后台任务使用 background_task 与聊天历史隔离
@@ -140,6 +216,10 @@ export const flowStates = sqliteTable(
     agentId: text('agent_id').notNull(),
     currentGoal: text('current_goal').default('').notNull(),
     privateFacts: text('private_facts').default('').notNull(),
+    workContext: text('work_context').default('').notNull(),
+    workContextUpdatedAtPairCount: integer('work_context_updated_at_pair_count')
+      .default(0)
+      .notNull(),
     revision: integer('revision').default(1).notNull(),
     updatedByPairId: text('updated_by_pair_id'),
     updatedAt: text('updated_at')
@@ -164,6 +244,14 @@ export const flowStateRevisions = sqliteTable(
     beforePrivateFacts: text('before_private_facts').default('').notNull(),
     afterCurrentGoal: text('after_current_goal').default('').notNull(),
     afterPrivateFacts: text('after_private_facts').default('').notNull(),
+    beforeWorkContext: text('before_work_context').default('').notNull(),
+    beforeWorkContextUpdatedAtPairCount: integer('before_work_context_updated_at_pair_count')
+      .default(0)
+      .notNull(),
+    afterWorkContext: text('after_work_context').default('').notNull(),
+    afterWorkContextUpdatedAtPairCount: integer('after_work_context_updated_at_pair_count')
+      .default(0)
+      .notNull(),
     createdAt: text('created_at')
       .default(sql`(datetime('now', 'localtime'))`)
       .notNull(),
@@ -492,7 +580,12 @@ export const aiModelConfigs = sqliteTable(
     temperature: real('temperature'),
     topP: real('top_p'),
     maxTokens: integer('max_tokens'),
+    /** 模型完整上下文窗口，用于输入预算计算，不等同于最大输出 Token。 */
+    contextWindowTokens: integer('context_window_tokens'),
     reasoningEffort: text('reasoning_effort'),
+    returnNativeReasoning: integer('return_native_reasoning', { mode: 'boolean' }).default(false),
+    wireApi: text('wire_api').default('chat_completions'),
+    reasoningDialect: text('reasoning_dialect').default('auto'),
     stream: integer('stream', { mode: 'boolean' }).default(true),
     enableVision: integer('enable_vision', { mode: 'boolean' }).default(false),
     enableAudioInput: integer('enable_audio_input', { mode: 'boolean' }).default(false),
@@ -586,6 +679,23 @@ export const strongholdRooms = sqliteTable(
     createdAt: text('created_at').default(sql`(datetime('now', 'localtime'))`),
   },
   (table) => [index('idx_stronghold_rooms_facility_id').on(table.facilityId)],
+)
+
+/** 据点角色对完整群聊回合的亲历关系；仅记录可见性，不复制消息正文。 */
+export const strongholdAgentPairVisibility = sqliteTable(
+  'stronghold_agent_pair_visibility',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    agentId: text('agent_id').notNull(),
+    roomId: text('room_id').notNull(),
+    pairId: text('pair_id').notNull(),
+    observedAt: text('observed_at').default(sql`(datetime('now', 'localtime'))`),
+  },
+  (table) => [
+    uniqueIndex('uq_stronghold_agent_pair_visibility').on(table.agentId, table.pairId),
+    index('idx_stronghold_visibility_agent_observed').on(table.agentId, table.observedAt),
+    index('idx_stronghold_visibility_pair').on(table.pairId),
+  ],
 )
 
 /** Agent 位置表 (当前在哪个房间) */
@@ -755,45 +865,6 @@ export const configs = sqliteTable('configs', {
   updatedAt: text('updated_at').default(sql`(datetime('now', 'localtime'))`),
 })
 
-/** 维护记录表 */
-export const maintenanceRecords = sqliteTable('maintenance_records', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
-  timestamp: text('timestamp').default(sql`(datetime('now', 'localtime'))`),
-  preferencesExtracted: integer('preferences_extracted').default(0),
-  importantTagged: integer('important_tagged').default(0),
-  consolidated: integer('consolidated').default(0),
-  cleanedCount: integer('cleaned_count').default(0),
-  clusteredCount: integer('clustered_count').default(0),
-  createdIds: text('created_ids').default('[]'),
-  deletedData: text('deleted_data').default('[]'),
-  modifiedData: text('modified_data').default('[]'),
-})
-
-/** TriviumDB 补偿同步任务表 */
-export const triviumSyncTasks = sqliteTable(
-  'trivium_sync_tasks',
-  {
-    id: integer('id').primaryKey({ autoIncrement: true }),
-    operation: text('operation').notNull(),
-    memoryId: integer('memory_id'),
-    storeName: text('store_name').default('memory'),
-    dedupeKey: text('dedupe_key').unique(),
-    payloadJson: text('payload_json').default('{}'),
-    status: text('status').default('pending'),
-    retryCount: integer('retry_count').default(0),
-    lastError: text('last_error'),
-    agentId: text('agent_id').notNull().default('pero'),
-    createdAt: text('created_at').default(sql`(datetime('now', 'localtime'))`),
-    updatedAt: text('updated_at').default(sql`(datetime('now', 'localtime'))`),
-  },
-  (table) => [
-    index('idx_trivium_sync_tasks_operation').on(table.operation),
-    index('idx_trivium_sync_tasks_status').on(table.status),
-    index('idx_trivium_sync_tasks_memory_id').on(table.memoryId),
-    index('idx_trivium_sync_tasks_agent_id').on(table.agentId),
-  ],
-)
-
 /** MCP 服务器配置表 */
 export const mcpConfigs = sqliteTable(
   'mcp_configs',
@@ -813,96 +884,212 @@ export const mcpConfigs = sqliteTable(
 )
 
 // ─────────────────────────────────────────────
-// 长记忆系统（第五阶段）
+// 新版事件记忆系统
 // ─────────────────────────────────────────────
 
-/**
- * CanonicalMemory 表 — 已确认的长期记忆
- *
- * 由 MemoryGate 审核通过后从 memory_candidates 转入。
- * 携带 provenance（来源追溯）信息，支持按 Thread 删除。
- * 与 memory_nodes 表共存（向后兼容），新写入走此表。
- */
-export const canonicalMemories = sqliteTable(
-  'canonical_memories',
+export const eventNotes = sqliteTable(
+  'event_notes',
   {
-    /** 主键（UUID） */
     id: text('id').primaryKey(),
-    /** 归属 Agent */
+    tdbId: integer('tdb_id').notNull(),
     agentId: text('agent_id').notNull(),
-    /** 记忆类型：experience/preference/knowledge/relationship/event */
-    type: text('type').notNull(),
-    /** 记忆正文 */
-    content: text('content').notNull(),
-    /** 摘要（可选） */
-    summary: text('summary'),
-    /** 重要性 0-1 */
-    importance: real('importance').default(0.5),
-    /** 置信度 0-1 */
-    confidence: real('confidence').default(0.5),
-    /** 状态：active/archived/superseded */
-    status: text('status').default('active'),
-    /** 来源追溯（JSON 序列化的 MemoryProvenance） */
-    provenance: text('provenance').notNull(),
-    /** 被哪条新记忆取代（status=superseded 时有值） */
-    supersededBy: text('superseded_by'),
-    /** 取代的旧记忆 ID 列表（JSON 数组） */
-    supersedes: text('supersedes'),
-    /** 向量索引 ID（可选，与 TriviumDB 关联） */
-    vectorId: text('vector_id'),
-    /** 创建时间 */
+    narrative: text('narrative').notNull(),
+    eventAt: text('event_at').notNull(),
     createdAt: text('created_at').notNull(),
-    /** 更新时间 */
-    updatedAt: text('updated_at').notNull(),
+    importance: integer('importance').notNull(),
+    affectJson: text('affect_json').notNull(),
+    participantsJson: text('participants_json').notNull().default('[]'),
+    placesJson: text('places_json').notNull().default('[]'),
+    objectsJson: text('objects_json').notNull().default('[]'),
+    topicsJson: text('topics_json').notNull().default('[]'),
+    originJson: text('origin_json').notNull(),
+    status: text('status').notNull().default('active'),
+    replacedBy: text('replaced_by'),
   },
   (table) => [
-    index('idx_canonical_memories_agent_id').on(table.agentId),
-    index('idx_canonical_memories_type').on(table.type),
-    index('idx_canonical_memories_status').on(table.status),
-    index('idx_canonical_memories_created_at').on(table.createdAt),
+    uniqueIndex('uq_event_notes_tdb_id').on(table.tdbId),
+    index('idx_event_notes_agent_event').on(table.agentId, table.eventAt),
+    index('idx_event_notes_agent_status').on(table.agentId, table.status),
   ],
 )
 
-/**
- * MemoryCandidate 表 — 待确认的记忆候选
- *
- * 由 Scorer 提炼后写入，等待 MemoryGate 审核。
- * 审核通过转为 CanonicalMemory，否则标记 rejected/merged。
- */
-export const memoryCandidates = sqliteTable(
-  'memory_candidates',
+export const eventNoteCoverages = sqliteTable(
+  'event_note_coverages',
   {
-    /** 主键（UUID） */
     id: text('id').primaryKey(),
-    /** 归属 Agent */
     agentId: text('agent_id').notNull(),
-    /** 来源：thread/diary/scheduler/manual */
-    source: text('source').notNull(),
-    /** 来源 Thread ID */
-    originThreadId: text('origin_thread_id'),
-    /** 来源消息 ID 列表（JSON 数组） */
-    originMessageIds: text('origin_message_ids'),
-    /** 候选摘要 */
-    summary: text('summary').notNull(),
-    /** 证据引用（JSON 数组） */
-    evidenceRefs: text('evidence_refs'),
-    /** 重要性 0-1 */
-    importance: real('importance').default(0.5),
-    /** 置信度 0-1 */
-    confidence: real('confidence').default(0.5),
-    /** 建议类型 */
-    suggestedType: text('suggested_type').notNull(),
-    /** 状态：pending/accepted/rejected/merged */
-    status: text('status').default('pending'),
-    /** 创建时间 */
-    createdAt: text('created_at').notNull(),
-    /** 处理时间（审核完成后写入） */
-    processedAt: text('processed_at'),
+    threadId: text('thread_id').notNull(),
+    pairIdsJson: text('pair_ids_json').notNull(),
+    messageIdsJson: text('message_ids_json').notNull(),
+    outcome: text('outcome').notNull(),
+    eventNoteIdsJson: text('event_note_ids_json').notNull().default('[]'),
+    mode: text('mode').notNull(),
+    coveredAt: text('covered_at').notNull(),
+    invalidatedAt: text('invalidated_at'),
   },
   (table) => [
-    index('idx_memory_candidates_agent_id').on(table.agentId),
-    index('idx_memory_candidates_status').on(table.status),
-    index('idx_memory_candidates_origin_thread').on(table.originThreadId),
+    index('idx_event_coverages_agent_thread').on(table.agentId, table.threadId),
+    index('idx_event_coverages_thread_active').on(table.threadId, table.invalidatedAt),
+  ],
+)
+
+export const eventMemoryCoverageClaims = sqliteTable(
+  'event_memory_coverage_claims',
+  {
+    agentId: text('agent_id').notNull(),
+    threadId: text('thread_id').notNull(),
+    pairId: text('pair_id').notNull(),
+    ownerId: text('owner_id').notNull(),
+    claimedAt: text('claimed_at').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.agentId, table.threadId, table.pairId] }),
+    index('idx_event_coverage_claim_owner').on(table.ownerId),
+  ],
+)
+
+export const eventMemoryOperations = sqliteTable(
+  'event_memory_operations',
+  {
+    operationId: text('operation_id').primaryKey(),
+    agentId: text('agent_id').notNull(),
+    operation: text('operation').notNull(),
+    payloadJson: text('payload_json').notNull(),
+    status: text('status').notNull().default('pending'),
+    attempts: integer('attempts').notNull().default(0),
+    lastError: text('last_error'),
+    createdAt: text('created_at').notNull(),
+    committedAt: text('committed_at'),
+  },
+  (table) => [index('idx_event_operations_status').on(table.status, table.createdAt)],
+)
+
+export const eventMemoryRelations = sqliteTable(
+  'event_memory_relations',
+  {
+    id: text('id').primaryKey(),
+    agentId: text('agent_id').notNull(),
+    sourceId: text('source_id').notNull(),
+    targetId: text('target_id').notNull(),
+    relation: text('relation').notNull(),
+    weight: real('weight').notNull().default(1),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('uq_event_relation_triple').on(table.sourceId, table.targetId, table.relation),
+    index('idx_event_relations_agent').on(table.agentId, table.relation),
+  ],
+)
+
+export const eventMemoryDailyNoteTasks = sqliteTable(
+  'event_memory_daily_note_tasks',
+  {
+    id: text('id').primaryKey(),
+    agentId: text('agent_id').notNull(),
+    date: text('date').notNull(),
+    status: text('status').notNull().default('pending'),
+    attempts: integer('attempts').notNull().default(0),
+    nextAttemptAt: text('next_attempt_at'),
+    sourceIncomplete: integer('source_incomplete', { mode: 'boolean' }).notNull().default(false),
+    writtenFilesJson: text('written_files_json').notNull().default('[]'),
+    lastError: text('last_error'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('uq_event_daily_note_agent_date').on(table.agentId, table.date),
+    index('idx_event_daily_note_due').on(table.status, table.nextAttemptAt),
+  ],
+)
+
+export const eventMemoryReflectionTasks = sqliteTable(
+  'event_memory_reflection_tasks',
+  {
+    id: text('id').primaryKey(),
+    agentId: text('agent_id').notNull(),
+    eventId: text('event_id').notNull(),
+    status: text('status').notNull().default('pending'),
+    attempts: integer('attempts').notNull().default(0),
+    lastError: text('last_error'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('uq_event_reflection_task_event').on(table.agentId, table.eventId),
+    index('idx_event_reflection_task_status').on(table.status, table.updatedAt),
+  ],
+)
+
+export const eventMemoryQueryAudits = sqliteTable(
+  'event_memory_query_audits',
+  {
+    id: text('id').primaryKey(),
+    agentId: text('agent_id').notNull(),
+    mode: text('mode').notNull(),
+    queryJson: text('query_json').notNull(),
+    resultCount: integer('result_count').notNull(),
+    returnedTokens: integer('returned_tokens').notNull(),
+    truncated: integer('truncated', { mode: 'boolean' }).notNull().default(false),
+    queriedAt: text('queried_at').notNull(),
+  },
+  (table) => [index('idx_event_query_audits_agent_time').on(table.agentId, table.queriedAt)],
+)
+
+export const eventMemoryTimers = sqliteTable('event_memory_timers', {
+  key: text('key').primaryKey(),
+  elapsedSeconds: integer('elapsed_seconds').notNull().default(0),
+  checkpointAt: text('checkpoint_at').notNull(),
+})
+
+export const factMemoryOperations = sqliteTable(
+  'fact_memory_operations',
+  {
+    operationId: text('operation_id').primaryKey(),
+    operation: text('operation').notNull(),
+    payloadJson: text('payload_json').notNull(),
+    status: text('status').notNull().default('pending'),
+    attempts: integer('attempts').notNull().default(0),
+    lastError: text('last_error'),
+    createdAt: text('created_at').notNull(),
+    committedAt: text('committed_at'),
+  },
+  (table) => [index('idx_fact_operations_status').on(table.status, table.createdAt)],
+)
+
+export const factObjects = sqliteTable(
+  'fact_objects',
+  {
+    id: text('id').primaryKey(),
+    tdbId: integer('tdb_id').notNull(),
+    standardName: text('standard_name').notNull(),
+    normalizedName: text('normalized_name').notNull(),
+    aliasesJson: text('aliases_json').notNull().default('[]'),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('uq_fact_objects_tdb_id').on(table.tdbId),
+    uniqueIndex('uq_fact_objects_normalized').on(table.normalizedName),
+  ],
+)
+
+export const factRecords = sqliteTable(
+  'fact_records',
+  {
+    id: text('id').primaryKey(),
+    tdbId: integer('tdb_id').notNull(),
+    objectId: text('object_id').notNull(),
+    statement: text('statement').notNull(),
+    status: text('status').notNull().default('active'),
+    observedAt: text('observed_at').notNull(),
+    createdAt: text('created_at').notNull(),
+    source: text('source'),
+    confidence: real('confidence'),
+    createdByAgentId: text('created_by_agent_id').notNull(),
+    supersededBy: text('superseded_by'),
+  },
+  (table) => [
+    uniqueIndex('uq_fact_records_tdb_id').on(table.tdbId),
+    index('idx_fact_records_object_status').on(table.objectId, table.status),
   ],
 )
 
@@ -1072,6 +1259,67 @@ export const appCheckpoints = sqliteTable('app_checkpoints', {
   updatedAt: text('updated_at').default(sql`(datetime('now', 'localtime'))`),
 })
 
+export const durableNotifications = sqliteTable(
+  'durable_notifications',
+  {
+    notificationId: text('notification_id').primaryKey(),
+    principalId: text('principal_id').notNull(),
+    audienceJson: text('audience_json').notNull(),
+    title: text('title').notNull(),
+    body: text('body'),
+    level: text('level').default('info').notNull(),
+    status: text('status').default('unread').notNull(),
+    revision: integer('revision').default(1).notNull(),
+    createdAt: text('created_at').notNull(),
+    readAt: text('read_at'),
+  },
+  (table) => [
+    index('idx_durable_notifications_principal_status').on(
+      table.principalId,
+      table.status,
+      table.createdAt,
+    ),
+  ],
+)
+
+export const subscriptionCursors = sqliteTable(
+  'subscription_cursors',
+  {
+    streamId: text('stream_id').notNull(),
+    consumerId: text('consumer_id').notNull(),
+    sequence: integer('sequence').default(0).notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.streamId, table.consumerId] })],
+)
+
+export const agentInputRequests = sqliteTable(
+  'agent_input_requests',
+  {
+    id: text('id').primaryKey(),
+    agentId: text('agent_id').notNull(),
+    channel: text('channel').notNull(),
+    sessionId: text('session_id').notNull(),
+    threadId: text('thread_id').notNull(),
+    taskId: text('task_id'),
+    question: text('question').notNull(),
+    context: text('context'),
+    optionsJson: text('options_json').default('[]').notNull(),
+    allowFreeText: integer('allow_free_text', { mode: 'boolean' }).default(true).notNull(),
+    required: integer('required', { mode: 'boolean' }).default(false).notNull(),
+    status: text('status').notNull(),
+    selectedOptionIdsJson: text('selected_option_ids_json').default('[]').notNull(),
+    responseMessage: text('response_message'),
+    createdAt: text('created_at').notNull(),
+    resolvedAt: text('resolved_at'),
+  },
+  (table) => [
+    index('idx_agent_input_status').on(table.status, table.createdAt),
+    index('idx_agent_input_thread').on(table.threadId, table.status),
+    index('idx_agent_input_session').on(table.sessionId, table.status),
+  ],
+)
+
 export const toolApprovalRequests = sqliteTable(
   'tool_approval_requests',
   {
@@ -1085,6 +1333,7 @@ export const toolApprovalRequests = sqliteTable(
     argsSummaryJson: text('args_summary_json').notNull(),
     argsFingerprint: text('args_fingerprint').notNull(),
     reason: text('reason').notNull(),
+    riskLevel: text('risk_level').default('low').notNull(),
     status: text('status').notNull(),
     decision: text('decision'),
     /** 用户决策附言（告知 Agent 同意/拒绝的理由，可选） */

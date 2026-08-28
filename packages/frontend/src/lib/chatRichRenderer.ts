@@ -1,3 +1,9 @@
+/**
+ * chatRichRenderer — 前端领域模块
+ *
+ * 集中管理该领域的数据转换、状态边界与外部交互。
+ * 调用方依赖这里的稳定契约，不直接耦合底层传输或运行时实现。
+ */
 import DOMPurify from 'dompurify'
 import { Marked, Renderer } from 'marked'
 import katex from 'katex'
@@ -51,9 +57,14 @@ renderer.code = ({ text, lang }) => {
   return `<div class="chat-code-block"><div class="chat-code-head"><span>${escapeHtml(language.toUpperCase())}</span><button type="button" data-copy-code>复制</button></div><pre><code class="hljs language-${escapeHtml(language)}">${highlighted}</code></pre></div>`
 }
 
-/** 模型输出中的原始 HTML/XML 一律作为可见源码展示，绝不作为 DOM 执行。 */
+const SAFE_INLINE_HTML =
+  /^<\/?(?:span|mark|small|kbd|sub|sup|u|s|b|i|strong|em)(?:\s[^>]*)?>$|^<br\s*\/?>$/i
+
+/** 安全行内HTML交给DOMPurify净化后渲染；其他HTML/XML继续显示为源码。 */
 renderer.html = ({ text }) =>
-  `<code class="chat-xml-inline">${highlightXml(escapeHtml(text))}</code>`
+  SAFE_INLINE_HTML.test(text.trim())
+    ? text
+    : `<code class="chat-xml-inline">${highlightXml(escapeHtml(text))}</code>`
 
 renderer.link = ({ href, title, tokens }) => {
   const label = renderer.parser.parseInline(tokens)

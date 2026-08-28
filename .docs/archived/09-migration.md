@@ -1,5 +1,7 @@
 # 迁移策略
 
+> **归档警示**：本文记录历史设计与迁移背景，不代表当前架构。现行规范以[A01文档索引](../A01_PROJECT_STRUCTURE.md#6-规范文档与归档)及其列出的A02–A09/S系列文档为准；旧Channel、API、Package或Application表述不得用于新实现。
+
 > 分阶段迁移，每阶段可独立验证，不需要一次性重写全部代码。
 
 ---
@@ -245,14 +247,14 @@
 
 ## 4. 旧接口兼容
 
-| 旧接口 | 兼容期 | 替代接口 |
-|---|---|---|
-| `POST /api/chat/session/new` | 2 个版本 | `POST /api/threads/new` |
-| `POST /api/chat/session/clear` | 2 个版本 | `POST /api/threads/new` |
-| `GET /api/chat/sessions` | 2 个版本 | `GET /api/threads` |
-| `GET /api/chat/sessions/:id` | 2 个版本 | `GET /api/threads/:id` |
-| `POST /api/chat`（含 messages） | 1 个版本 | `POST /api/chat`（仅 threadId + content） |
-| `POST /api/chat/stream`（含 messages） | 1 个版本 | `POST /api/chat`（SSE） |
+| 旧接口                                 | 兼容期   | 替代接口                                  |
+| -------------------------------------- | -------- | ----------------------------------------- |
+| `POST /api/chat/session/new`           | 2 个版本 | `POST /api/threads/new`                   |
+| `POST /api/chat/session/clear`         | 2 个版本 | `POST /api/threads/new`                   |
+| `GET /api/chat/sessions`               | 2 个版本 | `GET /api/threads`                        |
+| `GET /api/chat/sessions/:id`           | 2 个版本 | `GET /api/threads/:id`                    |
+| `POST /api/chat`（含 messages）        | 1 个版本 | `POST /api/chat`（仅 threadId + content） |
+| `POST /api/chat/stream`（含 messages） | 1 个版本 | `POST /api/chat`（SSE）                   |
 
 兼容期内旧接口内部转换为新接口调用，返回新格式数据。
 
@@ -309,13 +311,13 @@
 
 ## 6. 风险与对策
 
-| 风险 | 对策 |
-|---|---|
-| 数据迁移丢失 | 旧表保留备份，迁移脚本可回滚 |
-| 前端改动范围大 | 第三阶段集中改前端，前后端可并行开发 |
-| SSE 契约变更 | shared 类型一次性统一，加契约测试 |
-| 现有用户配置不兼容 | Agent 配置格式保持不变，只改运行时行为 |
-| Scorer 停机期间记忆不提炼 | 安排在低峰期执行第五阶段 |
+| 风险                      | 对策                                   |
+| ------------------------- | -------------------------------------- |
+| 数据迁移丢失              | 旧表保留备份，迁移脚本可回滚           |
+| 前端改动范围大            | 第三阶段集中改前端，前后端可并行开发   |
+| SSE 契约变更              | shared 类型一次性统一，加契约测试      |
+| 现有用户配置不兼容        | Agent 配置格式保持不变，只改运行时行为 |
+| Scorer 停机期间记忆不提炼 | 安排在低峰期执行第五阶段               |
 
 ---
 

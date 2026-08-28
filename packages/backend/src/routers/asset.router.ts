@@ -14,12 +14,33 @@
  */
 
 import { Hono } from 'hono'
+import { readFile } from 'node:fs/promises'
+import type { KernelFileHandleId } from '@infos/shared'
 import type { AppContext } from '../container'
 import type { AssetType, AssetSource } from '../core/assetRegistry'
 import { AppError } from '../lib/appError'
 
 export function createAssetRouter(ctx: AppContext) {
   const router = new Hono()
+
+  router.get('/audio/:handleId', async (c) => {
+    const subjectId = c.req.query('subject') ?? ''
+    const { asset, storagePath } = ctx.assetFileAuthority.consume(
+      c.req.param('handleId') as KernelFileHandleId,
+      subjectId,
+      'read',
+    )
+    const bytes = await readFile(storagePath)
+    return new Response(bytes, {
+      headers: {
+        'Content-Type': asset.mimeType,
+        'Content-Length': String(asset.sizeBytes),
+        'X-Asset-SHA256': asset.sha256,
+        'Cache-Control': 'private, no-store',
+        'X-Content-Type-Options': 'nosniff',
+      },
+    })
+  })
 
   // GET /api/assets — 获取所有已注册资产
   router.get('/', (c) => {

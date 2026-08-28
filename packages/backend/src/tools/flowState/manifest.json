@@ -27,7 +27,13 @@
         },
         "additionalProperties": false
       },
-      "display": { "label": "更新心流", "icon": "thought", "color": "purple", "style": "system" }
+      "display": {
+        "label": "更新心流",
+        "description": "记录当前目标和临时要点，帮助助手保持任务思路。",
+        "icon": "thought",
+        "color": "purple",
+        "style": "system"
+      }
     }
   ]
 }

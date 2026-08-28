@@ -11,6 +11,7 @@
  */
 
 import type { ToolDefinition } from '../pipeline/types'
+import type { ToolContext } from '../agent/toolRegistry'
 import type { ToolExecutionResult } from '../agent/reactLoop'
 import type { McpClientManager, McpToolInfo } from './mcpClientManager'
 import { createLogger } from '../../lib/logger'
@@ -19,7 +20,10 @@ const logger = createLogger('MCPToolBridge')
 
 export interface BridgedMcpTool {
   definition: ToolDefinition
-  execute(args: Record<string, unknown>): Promise<string | ToolExecutionResult>
+  execute(
+    args: Record<string, unknown>,
+    context?: Pick<ToolContext, 'signal'>,
+  ): Promise<string | ToolExecutionResult>
 }
 
 /**
@@ -36,9 +40,17 @@ export function bridgeMcpTools(manager: McpClientManager, tools: McpToolInfo[]):
 /**
  * 创建单个桥接工具
  */
+export function qualifyMcpToolName(serverName: string, toolName: string): string {
+  const normalize = (value: string) =>
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+  return `mcp_${normalize(serverName)}_${normalize(toolName)}`
+}
+
 function createBridgedTool(manager: McpClientManager, tool: McpToolInfo): BridgedMcpTool {
-  // 为避免与内置工具冲突，MCP 工具名加前缀
-  const qualifiedName = `mcp_${tool.serverName}_${tool.name}`
+  const qualifiedName = qualifyMcpToolName(tool.serverName, tool.name)
 
   return {
     definition: {
@@ -47,7 +59,7 @@ function createBridgedTool(manager: McpClientManager, tool: McpToolInfo): Bridge
       parameters: tool.inputSchema,
     },
 
-    async execute(args) {
+    async execute(args, context) {
       logger.debug(`MCP 工具调用: ${qualifiedName}`, { args })
 
       try {
@@ -55,6 +67,7 @@ function createBridgedTool(manager: McpClientManager, tool: McpToolInfo): Bridge
           tool.serverName,
           tool.name,
           args as Record<string, unknown>,
+          context?.signal,
         )
 
         // MCP 返回的是 CallToolResult，提取 content
@@ -95,5 +108,5 @@ function createBridgedTool(manager: McpClientManager, tool: McpToolInfo): Bridge
  * 获取所有 MCP 工具的名称列表 (用于 CapabilityGate 白名单)
  */
 export function getMcpToolNames(tools: McpToolInfo[]): string[] {
-  return tools.map((t) => `mcp_${t.serverName}_${t.name}`)
+  return tools.map((t) => qualifyMcpToolName(t.serverName, t.name))
 }

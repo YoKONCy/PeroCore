@@ -1,6 +1,6 @@
 {
   "name": "@infos/daemon",
-  "version": "0.9.2-rc1",
+  "version": "0.9.3",
   "private": true,
   "type": "module",
   "description": "infOS Daemon — 独立后端进程入口，不依赖 Electron",
@@ -15,6 +15,7 @@
     "clean": "rimraf dist"
   },
   "dependencies": {
+    "@infos/arca": "workspace:*",
     "@infos/backend": "workspace:*",
     "@infos/shared": "workspace:*",
     "@hono/node-server": "^1.14.0",

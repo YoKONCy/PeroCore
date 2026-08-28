@@ -43,7 +43,9 @@ const {
   loadSkills,
   isImportOpen,
   importPath,
+  importName,
   importError,
+  selectSkillDirectory,
   importSkill,
   deleteSkill,
 } = useMcpConfig()
@@ -225,18 +227,39 @@ watch(
     <!-- 导入 Skill 弹窗 -->
     <PDialog v-model="isImportOpen" title="导入本地技能" width="520px">
       <div class="flex flex-col gap-4">
-        <div class="flex flex-col gap-1.5">
-          <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
-            Skill 文件夹路径
-          </label>
-          <PInput
-            v-model="importPath"
-            placeholder="C:\Users\xxx\Downloads\my-skill 或 /home/user/skills/my-skill"
-          />
-          <p class="text-[10px] text-slate-400">
-            文件夹内必须包含 SKILL.md 文件。导入后将复制到用户技能目录。
-          </p>
+        <button
+          type="button"
+          class="flex min-h-28 flex-col items-center justify-center gap-2 border-2 border-dashed border-[var(--ui-border-strong)] bg-[var(--ui-bg-surface-soft)] px-5 py-6 text-[var(--ui-text-secondary)] transition-colors hover:border-[var(--ui-accent-sky)] hover:text-[var(--ui-accent-sky)]"
+          @click="selectSkillDirectory"
+        >
+          <PixelIcon name="folder" size="lg" />
+          <strong class="font-pixel text-sm">
+            {{ importPath ? '重新选择 Skill 文件夹' : '浏览本机 Skill 文件夹' }}
+          </strong>
+          <span class="text-[10px] text-[var(--ui-text-tertiary)]">
+            请选择包含 SKILL.md 的完整文件夹
+          </span>
+        </button>
+
+        <div
+          v-if="importPath"
+          class="flex items-center gap-3 border border-[var(--ui-border-default)] bg-[var(--ui-bg-elevated)] px-3 py-3"
+        >
+          <PixelIcon name="brain" size="sm" class="text-violet-500" />
+          <div class="min-w-0 flex-1">
+            <div class="truncate text-sm font-bold text-[var(--ui-text-primary)]">
+              {{ importName || '已选择 Skill' }}
+            </div>
+            <div class="truncate text-[10px] text-[var(--ui-text-tertiary)]" :title="importPath">
+              {{ importPath }}
+            </div>
+          </div>
+          <PixelIcon name="check" size="sm" class="text-emerald-500" />
         </div>
+
+        <p class="text-[10px] text-slate-400">
+          导入后会将整个文件夹复制到用户技能目录，包括 SKILL.md 和引用的脚本、模板及其他资源。
+        </p>
         <p
           v-if="importError"
           class="text-[11px] text-[var(--ui-danger)] bg-[var(--ui-danger-soft)] border border-[color:var(--ui-danger)] px-3 py-2"
@@ -248,7 +271,7 @@ watch(
         <PButton variant="ghost" @click="isImportOpen = false">取消</PButton>
         <PButton
           variant="primary"
-          :disabled="!importPath.trim() || isSkillLoading"
+          :disabled="!importPath || isSkillLoading"
           :loading="isSkillLoading"
           @click="importSkill"
         >

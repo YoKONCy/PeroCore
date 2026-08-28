@@ -16,7 +16,6 @@
 import { execFile } from 'node:child_process'
 import { readdirSync, statSync } from 'node:fs'
 import path from 'node:path'
-import os from 'node:os'
 import type { BuiltinTool } from '../index'
 import { getWorkspaceService } from '../workspaceServiceHolder'
 
@@ -30,13 +29,13 @@ export const fileSearchTool: BuiltinTool = {
     const query = args.query as string
     const limit = (args.limit as number) ?? MAX_RESULTS
 
-    // 纯只读搜索默认从用户主目录开始；用户可显式指定任意本机现有目录。
+    // 纯只读搜索默认从Agent工作区开始；用户可显式指定任意本机现有目录。
     const workspaceService = getWorkspaceService()
-    const searchDir =
-      workspaceService?.resolveDeviceReadPath(
-        ctx.agentId,
-        args.directory ? String(args.directory) : os.homedir(),
-      ) ?? os.homedir()
+    if (!workspaceService) throw new Error('WorkspaceService 尚未初始化')
+    const searchDir = workspaceService.resolveDeviceReadPath(
+      ctx.agentId,
+      args.directory ? String(args.directory) : undefined,
+    )
 
     // Windows: 尝试 Everything (es.exe)
     if (process.platform === 'win32') {

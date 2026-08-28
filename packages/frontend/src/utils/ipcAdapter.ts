@@ -73,7 +73,8 @@ export async function invoke(cmd: string, args?: unknown): Promise<unknown> {
     cmd.startsWith('install-client-') ||
     cmd === 'get-latest-release' ||
     cmd === 'open-client-path' ||
-    cmd === 'open-external-url'
+    cmd === 'open-external-url' ||
+    cmd === 'select-skill-directory'
   ) {
     return null
   }
@@ -101,9 +102,9 @@ export async function invoke(cmd: string, args?: unknown): Promise<unknown> {
     return null
   }
 
-  // Native 模块: 不可用
-  if (cmd.startsWith('native-') || cmd.startsWith('scan-3d') || cmd === 'get-model-load-path') {
-    logger.warn('ipcAdapter', `Native 功能在浏览器模式不可用: ${cmd}`)
+  // 本机资产扫描: 不可用
+  if (cmd.startsWith('scan-3d')) {
+    logger.warn('ipcAdapter', `本机资产扫描在浏览器模式不可用: ${cmd}`)
     return null
   }
 

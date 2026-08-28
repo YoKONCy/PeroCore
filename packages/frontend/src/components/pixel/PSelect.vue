@@ -6,7 +6,7 @@
  * - useEventListener 管理点击外部关闭
  * - TypeScript strict
  */
-import { ref, computed } from 'vue'
+import { ref, computed, nextTick, onBeforeUnmount } from 'vue'
 import PixelIcon from './PixelIcon.vue'
 import { useEventListener } from '../../composables'
 
@@ -25,6 +25,8 @@ interface Props {
   placeholder?: string
   disabled?: boolean
   size?: 'sm' | 'md' | 'lg'
+  /** 将菜单传送到 body，避免被弹窗或滚动容器裁剪。 */
+  teleport?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -33,6 +35,7 @@ const props = withDefaults(defineProps<Props>(), {
   placeholder: '请选择...',
   disabled: false,
   size: 'md',
+  teleport: false,
 })
 
 const emit = defineEmits<{
@@ -42,12 +45,43 @@ const emit = defineEmits<{
 
 const isOpen = ref(false)
 const containerRef = ref<HTMLElement | null>(null)
+const dropdownRef = ref<HTMLElement | null>(null)
+const dropdownStyle = ref<Record<string, string>>({})
+
+function updateDropdownPosition(): void {
+  if (!props.teleport || !containerRef.value) return
+  const trigger = containerRef.value.querySelector('.p-select-trigger') as HTMLElement | null
+  if (!trigger) return
+  const rect = trigger.getBoundingClientRect()
+  const availableBelow = window.innerHeight - rect.bottom - 12
+  const availableAbove = rect.top - 12
+  const openAbove = availableBelow < 180 && availableAbove > availableBelow
+  const maxHeight = Math.max(120, Math.min(240, openAbove ? availableAbove : availableBelow))
+  dropdownStyle.value = {
+    position: 'fixed',
+    left: `${rect.left}px`,
+    width: `${rect.width}px`,
+    maxHeight: `${maxHeight}px`,
+    ...(openAbove
+      ? { bottom: `${window.innerHeight - rect.top + 4}px`, top: 'auto' }
+      : { top: `${rect.bottom + 4}px`, bottom: 'auto' }),
+  }
+}
+
+function closeDropdown(): void {
+  isOpen.value = false
+}
+
+function handleViewportChange(): void {
+  if (isOpen.value) updateDropdownPosition()
+}
 
 const selectedOption = computed(() => props.options.find((opt) => opt.value === props.modelValue))
 
 function toggleDropdown() {
   if (props.disabled) return
   isOpen.value = !isOpen.value
+  if (isOpen.value && props.teleport) void nextTick(updateDropdownPosition)
 }
 
 function selectOption(option: SelectOption) {
@@ -59,10 +93,18 @@ function selectOption(option: SelectOption) {
 
 // 点击外部关闭
 useEventListener(document as unknown as EventTarget, 'click', (e: Event) => {
-  if (containerRef.value && !containerRef.value.contains(e.target as Node)) {
-    isOpen.value = false
+  const target = e.target as Node
+  if (
+    containerRef.value &&
+    !containerRef.value.contains(target) &&
+    !dropdownRef.value?.contains(target)
+  ) {
+    closeDropdown()
   }
 })
+useEventListener(window, 'resize', handleViewportChange)
+useEventListener(document, 'scroll', handleViewportChange, { capture: true, passive: true })
+onBeforeUnmount(closeDropdown)
 </script>
 
 <template>
@@ -91,33 +133,40 @@ useEventListener(document as unknown as EventTarget, 'click', (e: Event) => {
         />
       </button>
 
-      <Transition name="select-dropdown">
-        <div v-if="isOpen" class="p-select-dropdown">
-          <div class="p-select-options">
-            <div
-              v-for="option in options"
-              :key="option.value"
-              :class="[
-                'p-select-option',
-                { 'p-select-option-active': modelValue === option.value },
-                { 'p-select-option-disabled': option.disabled },
-              ]"
-              @click="selectOption(option)"
-            >
-              <div class="p-select-option-content">
-                <PixelIcon v-if="option.icon" :name="option.icon" size="xs" />
-                {{ option.label }}
+      <Teleport to="body" :disabled="!teleport">
+        <Transition name="select-dropdown">
+          <div
+            v-if="isOpen"
+            ref="dropdownRef"
+            :class="['p-select-dropdown', { 'p-select-dropdown-teleported': teleport }]"
+            :style="teleport ? dropdownStyle : undefined"
+          >
+            <div class="p-select-options">
+              <div
+                v-for="option in options"
+                :key="option.value"
+                :class="[
+                  'p-select-option',
+                  { 'p-select-option-active': modelValue === option.value },
+                  { 'p-select-option-disabled': option.disabled },
+                ]"
+                @click="selectOption(option)"
+              >
+                <div class="p-select-option-content">
+                  <PixelIcon v-if="option.icon" :name="option.icon" size="xs" />
+                  {{ option.label }}
+                </div>
+                <PixelIcon
+                  v-if="modelValue === option.value"
+                  name="check"
+                  size="xs"
+                  class="p-select-check"
+                />
               </div>
-              <PixelIcon
-                v-if="modelValue === option.value"
-                name="check"
-                size="xs"
-                class="p-select-check"
-              />
             </div>
           </div>
-        </div>
-      </Transition>
+        </Transition>
+      </Teleport>
     </div>
   </div>
 </template>
@@ -214,6 +263,11 @@ useEventListener(document as unknown as EventTarget, 'click', (e: Event) => {
   box-shadow: var(--ui-shadow-md);
   max-height: 240px;
   overflow-y: auto;
+}
+
+.p-select-dropdown-teleported {
+  z-index: 10020;
+  margin-top: 0;
 }
 
 .p-select-option {

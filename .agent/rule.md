@@ -32,14 +32,14 @@ infOS-TS 是 infOS (Python) 的 TypeScript 全栈重写。核心卖点：**庞�
 - **后端**: Hono + Drizzle + better-sqlite3 + TriviumDB (自研 Rust 向量引擎)
 - **前端**: Vue 3 + Pinia + Vue Router
 - **壳层**: Electron (桌面版) / Docker (服务器版)
-- **Rust N-API**: `@infos/render-core`, `@infos/nit-runtime`, `@infos/auditor-wasm`
+- **第三方 Native 依赖**: `better-sqlite3`、`node-pty`、Steam版的`steamworks.js`
 
 **包依赖关系**:
 ```
 @infos/shared ← 无内部依赖
-@infos/backend ← shared + nit-runtime + auditor-wasm
+@infos/backend ← shared
 @infos/frontend ← shared
-electron ← frontend + render-core
+electron ← frontend
 ```
 
 **严禁**: backend import frontend/electron; frontend import backend/electron (除 shared 外); shared 无任何内部依赖。

@@ -10,7 +10,7 @@ requires-python = ">=3.11,<3.13"
 dependencies = []
 
 [project.optional-dependencies]
-triviumdb = ["triviumdb==0.7.4"]
+triviumdb = ["triviumdb==0.8.2"]
 dev = [
     "pytest>=8.3",
     "pytest-cov>=6.0",

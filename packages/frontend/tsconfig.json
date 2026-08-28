@@ -7,8 +7,9 @@
     "jsxImportSource": "vue",
     "types": ["vite/client"],
     "paths": {
+      "@infos/avatar-assets": ["../avatar-assets/src"],
       "@infos/shared": ["../shared/src"],
-      "@infos/shared/*": ["../shared/src/*"],
+      "@infos/arca/manifest": ["../apps/arca/src/manifest.ts"],
       "@/*": ["./src/*"]
     }
   },

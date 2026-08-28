@@ -8,6 +8,14 @@
 /** 应用版本号 (构建时由 vite.config.ts 从根 package.json 注入) */
 declare const __APP_VERSION__: string
 
+interface Window {
+  electron?: {
+    invoke(channel: string, ...args: unknown[]): Promise<unknown>
+    send(channel: string, ...args: unknown[]): void
+    on(channel: string, listener: (...args: unknown[]) => void): () => void
+  }
+}
+
 declare module '*.vue' {
   import type { DefineComponent } from 'vue'
 

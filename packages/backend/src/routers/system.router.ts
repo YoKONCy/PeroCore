@@ -9,15 +9,15 @@
  */
 
 import { Hono } from 'hono'
+import { z } from 'zod'
+import { validate as zValidator } from '../lib/validation'
 import { streamSSE } from 'hono/streaming'
 import type { AppContext } from '../container'
-import path from 'node:path'
-import { mkdir } from 'node:fs/promises'
-import { getDatabasePath } from '../lib/env'
 import { addLogListener, getLogHistory } from '../lib/logBroadcaster'
+import { AppError } from '../lib/appError'
 
 /** 应用版本号 (由 scripts/sync-version.ts 自动同步) */
-const APP_VERSION = '0.9.2-rc1'
+const APP_VERSION = '0.9.3'
 
 export function createSystemRouter(ctx: AppContext) {
   const router = new Hono()
@@ -63,6 +63,7 @@ export function createSystemRouter(ctx: AppContext) {
         storage: {
           sqliteSizeMB: snapshot.sqliteSizeMB,
           triviumSizeMB: snapshot.triviumSizeMB,
+          triviumNodeCount: ctx.storeRegistry.countExistingNodes(agents.map((agent) => agent.id)),
         },
         agents: {
           total: agents.length,
@@ -72,25 +73,67 @@ export function createSystemRouter(ctx: AppContext) {
         gateway: {
           connectedNodes: ctx.gatewayHub.connectedCount,
         },
+        multiNode: {
+          nodes: ctx.nodeRegistry.listNodes(),
+          sessions: ctx.nodeRegistry.listSessions(),
+          inputSeats: ctx.nodeRegistry.listInputSeats(),
+          capabilityTransport: ctx.capabilityBridge.diagnostics(),
+        },
       },
     })
   })
 
+  // PUT /api/system/chat-background — 保存客户端已压缩的聊天背景。
+  router.put('/chat-background', async (c) => {
+    const body = await c.req.parseBody()
+    const file = body.background
+    if (!(file instanceof File)) throw new AppError('MISSING_FIELD', { message: '请上传背景图片' })
+    await ctx.chatBackgroundService.save(file)
+    return c.json({
+      code: 'OK',
+      message: '聊天背景已保存',
+      data: { contentUrl: `/system/chat-background/content?v=${Date.now()}` },
+    })
+  })
+
+  router.get('/chat-background/content', async () => {
+    const { bytes, mime } = await ctx.chatBackgroundService.read()
+    return new Response(bytes, {
+      headers: {
+        'Content-Type': mime,
+        'Content-Length': String(bytes.length),
+        'X-Content-Type-Options': 'nosniff',
+        'Cache-Control': 'private, no-cache',
+      },
+    })
+  })
+
+  router.delete('/chat-background', async (c) => {
+    await ctx.chatBackgroundService.remove()
+    return c.json({ code: 'OK', message: '聊天背景已删除' })
+  })
+
+  // POST /api/system/token-count — 为前端编辑器提供后端统一精确计数。
+  router.post(
+    '/token-count',
+    zValidator('json', z.object({ text: z.string().max(1_000_000) })),
+    (c) => {
+      const { text } = c.req.valid('json')
+      return c.json({
+        code: 'OK',
+        message: '计算成功',
+        data: {
+          tokens: ctx.tokenCounter.countTokens(text),
+          tokenizer: ctx.tokenCounter.tokenizerId,
+        },
+      })
+    },
+  )
+
   // POST /api/system/storage/sqlite-snapshot — 为云存档生成一致性 SQLite 快照
   router.post('/storage/sqlite-snapshot', async (c) => {
-    const databasePath = getDatabasePath()
-    const snapshotPath = path.join(path.dirname(databasePath), 'cloud-cache', 'infos.db')
-    await mkdir(path.dirname(snapshotPath), { recursive: true })
-
-    // Drizzle better-sqlite3 暴露 $client；backup() 会在 WAL 模式下生成事务一致的单文件快照。
-    const client = (
-      ctx.db as unknown as { $client?: { backup: (target: string) => Promise<unknown> } }
-    ).$client
-    if (!client?.backup) {
-      return c.json({ code: 'ERROR', message: '当前数据库驱动不支持安全快照' }, 500)
-    }
-    await client.backup(snapshotPath)
-    return c.json({ code: 'OK', message: '数据库快照已生成', data: { path: snapshotPath } })
+    const data = await ctx.databaseSnapshotService.createCloudSnapshot()
+    return c.json({ code: 'OK', message: '数据库快照已生成', data })
   })
 
   // POST /api/system/open-path — 通过系统打开路径 (P2-13)

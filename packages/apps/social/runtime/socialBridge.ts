@@ -7,7 +7,7 @@
  * 1. 监听 adapter.on('message') → SessionManager 缓冲 → Scheduler 审视 → generateReply()
  * 2. 将 AI 回复 → adapter.sendMessage()
  * 3. 持久化社交消息到 socialMessages 表
- * 4. 通过 GatewayHub 推送社交状态到前端
+ * 4. 通过SocialEventPort推送社交状态到前端
  * 5. 管理适配器/调度器生命周期
  *
  * 方案 B：回复生成回调由 SocialAppRuntime 提供，
@@ -17,19 +17,24 @@
  */
 
 import type { AbstractSocialAdapter } from '../adapters/ISocialAdapter'
-import type { GatewayHub } from '../../../backend/src/services/gateway/gatewayHub'
-import type { LlmService, ModelConfig } from '../../../backend/src/services/llm/llmService'
-import type { MdpEngine } from '../../../backend/src/services/prompt/mdpEngine'
-
-import type { SocialMessageRepository } from './socialMessage.repo'
+import type { SocialEventPort, SocialExecutionPort, SocialStoragePort } from '@infos/shared'
+import type { InboundRouteRepository } from '@infos/backend/applicationHostAbi'
 import type { Attachment, InboundMessage, OutboundMessage } from './types'
-import type { InboundRouteRepository } from '../../../backend/src/repositories/inboundRoute.repo'
-import { SocialSessionManager, type SocialSession } from './socialSessionManager'
+import {
+  SocialSessionManager,
+  type FlushReason,
+  type SocialSession,
+  type SocialTurnOutcome,
+} from './socialSessionManager'
 import { SocialScheduler, type SocialSchedulerConfig } from './socialScheduler'
 import type { ImageCacheManager } from './imageCacheManager'
 import type { StickerService } from './stickerService'
-import { createEnvelope } from '../../../backend/src/services/gateway/types'
-import { createLogger } from '../../../backend/src/lib/logger'
+import {
+  expandSocialMessageSegments,
+  socialTypingDelayMs,
+  splitSocialText,
+} from './socialReplySegmenter'
+import { createLogger } from '@infos/backend/applicationHostAbi'
 
 const logger = createLogger('SocialBridge')
 
@@ -38,37 +43,31 @@ const logger = createLogger('SocialBridge')
 // ─────────────────────────────────────────────
 
 export interface SocialBridgeDeps {
-  gatewayHub: GatewayHub
-  llmService: LlmService
-  /** 社交决策模型获取器 (社交思考状态机使用) */
-  getSocialSchedulerModel: () => Promise<ModelConfig | null>
-  socialMessageRepo: SocialMessageRepository
-  mdpEngine: MdpEngine
+  socialEvents: SocialEventPort
+  executions?: SocialExecutionPort
+  socialMessageRepo: SocialStoragePort
   /** 图片缓存管理器 (可选) */
   imageCacheManager?: ImageCacheManager
   /** 表情包服务 (可选) */
   stickerService?: StickerService
   /** 入站路由表 Repository (可选，第七阶段 #7：外部消息按来源+标识查询归属 Agent) */
   inboundRouteRepo?: InboundRouteRepository
-  /** 获取社交决策使用的主 Agent 身份框架。 */
-  getDecisionIdentity?: (agentId: string) => Promise<{
-    agentName: string
-    systemCore: string
-    personaDefinition: string
-    socialPatch: string
-    /** 主人在主 app 登记的名称（owner.name），客观/中性指代用 */
-    ownerName: string
-    /** 角色对主人的亲密称呼（agent.json owner_appellation） */
-    ownerAppellation: string
-  }>
   /** 入站策略过滤；返回 false 时不持久化、不缓冲、不回复。 */
   shouldAcceptInbound?: (message: InboundMessage) => boolean
-  /** 回复生成回调（方案 B：由 SocialAppRuntime 提供，使用应用自己的 Compiler + LLM） */
+  /** 发送前再次核验会话是否仍允许激活，阻止锁定前已启动的并发回复漏发。 */
+  shouldAllowSession?: (
+    session: Pick<SocialSession, 'agentId' | 'channelType' | 'channelId'>,
+  ) => boolean
+  onMessagePersisted?: (agentId: string) => Promise<void>
+  /** 回复生成回调：由 SocialAppRuntime 使用当前角色自己的主模型与 ReAct 执行。 */
   generateReply: (params: {
     agentId: string
     channelType: 'private' | 'group'
     channelId: string
     combinedMessage: string
+    trigger: FlushReason
+    participation: SocialSession['participation']
+    deferredIntent?: SocialSession['deferredIntent']
     routeChannel?: string
     routeThreadId?: string
     /**
@@ -117,7 +116,7 @@ export interface SocialBridgeDeps {
      * 让 Agent 知道自己在 QQ 平台上的昵称。
      */
     botNickname?: string
-  }) => Promise<string | null>
+  }) => Promise<SocialTurnOutcome>
 }
 
 // ─────────────────────────────────────────────
@@ -147,20 +146,14 @@ export class SocialBridge {
     this.stickerService = deps.stickerService ?? null
 
     // 初始化 SessionManager (flush 回调 → generateReply)
-    this.sessionManager = new SocialSessionManager(async (session, messages, reason) => {
-      await this.onFlush(session, messages, reason)
-    })
+    this.sessionManager = new SocialSessionManager((session, messages, reason) =>
+      this.onFlush(session, messages, reason),
+    )
 
-    // 初始化 Scheduler (思考状态机决策 → generateReply)
+    // 初始化 Scheduler：仅做确定性候选排序和到期唤醒，不调用第二个决策模型。
     this.scheduler = new SocialScheduler({
       sessionManager: this.sessionManager,
-      llmService: deps.llmService,
-      mdpEngine: deps.mdpEngine,
-      getSocialSchedulerModel: deps.getSocialSchedulerModel,
-      getDecisionIdentity: deps.getDecisionIdentity,
-      onDecideReply: async (session, messages) => {
-        await this.executeReply(session, messages)
-      },
+      executions: deps.executions,
     })
   }
 
@@ -380,16 +373,10 @@ export class SocialBridge {
   /**
    * 处理入站消息
    *
-   * 流程: adapter → 持久化 → SessionManager 缓冲 → (计时器/秘书) → flush → generateReply
+   * 流程: adapter → 路由归属 → 激活策略 → 持久化 → SessionManager 缓冲 → flush → generateReply
    */
   private async handleInbound(inbound: InboundMessage): Promise<void> {
     if (!this.running) return
-    if (this.deps.shouldAcceptInbound && !this.deps.shouldAcceptInbound(inbound)) {
-      logger.debug(
-        `入站消息被社交名单策略忽略: channel=${inbound.channelId}, sender=${inbound.senderId}`,
-      )
-      return
-    }
 
     const { channelId, channelType, senderName, platform, content } = inbound
     logger.info(
@@ -412,6 +399,13 @@ export class SocialBridge {
       }
     }
 
+    if (this.deps.shouldAcceptInbound && !this.deps.shouldAcceptInbound(inbound)) {
+      logger.debug(
+        `入站消息被社交激活策略忽略: agent=${inbound.agentId}, channel=${channelId}, sender=${inbound.senderId}`,
+      )
+      return
+    }
+
     // 1. 持久化到 social_messages 表
     try {
       await this.deps.socialMessageRepo.insert({
@@ -427,6 +421,12 @@ export class SocialBridge {
       })
     } catch (err) {
       logger.warn(`消息持久化失败 (非致命): ${err}`)
+    }
+
+    if (this.deps.onMessagePersisted) {
+      void this.deps.onMessagePersisted(inbound.agentId).catch((err) => {
+        logger.warn(`社交消息后置任务触发失败: ${err}`)
+      })
     }
 
     // 2. 异步下载图片到本地缓存 (非阻塞)
@@ -490,9 +490,9 @@ export class SocialBridge {
   private async onFlush(
     session: SocialSession,
     messages: InboundMessage[],
-    _reason: string,
-  ): Promise<void> {
-    await this.executeReply(session, messages)
+    reason: FlushReason,
+  ): Promise<SocialTurnOutcome> {
+    return this.executeReply(session, messages, reason)
   }
 
   /**
@@ -501,14 +501,45 @@ export class SocialBridge {
    * 将缓冲消息合并后调用 generateReply 回调，
    * 由 SocialAppRuntime 使用应用自己的 Compiler + LLM 生成回复。
    */
-  private async executeReply(session: SocialSession, messages: InboundMessage[]): Promise<void> {
-    if (messages.length === 0) return
+  private async executeReply(
+    session: SocialSession,
+    messages: InboundMessage[],
+    reason: FlushReason,
+  ): Promise<SocialTurnOutcome> {
+    if (messages.length === 0) return { type: 'pass' }
+    if (!this.deps.executions) return this.executeReplyWork(session, messages, reason)
+    return this.deps.executions.run({
+      taskId: `social-reply:${session.channelId}:${Date.now()}`,
+      class: 'background',
+      priority: session.channelType === 'private' ? 6 : 4,
+      resourceKey: `social-session:${session.agentId}:${session.channelType}:${session.channelId}`,
+      maxDurationMs: 5 * 60_000,
+      run: () => this.executeReplyWork(session, messages, reason),
+    })
+  }
+
+  private async executeReplyWork(
+    session: SocialSession,
+    messages: InboundMessage[],
+    reason: FlushReason,
+  ): Promise<SocialTurnOutcome> {
+    if (messages.length === 0) return { type: 'pass' }
 
     const { channelId, channelType, agentId } = session
     // 外部平台会话始终使用 social；routeThreadId 仅决定上下文复用。
     const firstMsg = messages[0]!
     const routeChannel = 'social'
     const routeThreadId = firstMsg.routeThreadId
+    const directMessage = [...messages].reverse().find((message) => {
+      const raw = message.rawEvent as Record<string, unknown> | undefined
+      return raw?._isMentioned === true
+    })
+    const replyTo =
+      channelType === 'group' && directMessage
+        ? String(
+            (directMessage.rawEvent as Record<string, unknown> | undefined)?.message_id ?? '',
+          ) || undefined
+        : undefined
 
     // 构建合并的用户消息
     // 每条消息带上 message_id，供 AI 调用 social_read_image 工具时引用
@@ -575,11 +606,14 @@ export class SocialBridge {
     }
 
     try {
-      const reply = await this.deps.generateReply({
+      const outcome = await this.deps.generateReply({
         agentId,
         channelType,
         channelId,
         combinedMessage: combined,
+        trigger: reason,
+        participation: session.participation,
+        deferredIntent: reason === 'intent_due' ? session.deferredIntent : undefined,
         routeChannel,
         routeThreadId,
         isOwner,
@@ -590,87 +624,79 @@ export class SocialBridge {
         botNickname,
       })
 
-      if (reply) {
-        // PASS 检测：LLM 决定跳过回复时输出 [PASS]
-        // 不发送、不持久化、不标记活跃 → 直接切换会话到非活跃期 (observing)
-        // 这样下次被 @ 时能正常启动新的累积计时器，避免卡在 summoned 状态
-        if (isPassReply(reply)) {
-          logger.info(`[${channelId}] LLM 输出 PASS，跳过回复并切换会话到非活跃期`)
-          this.sessionManager.markPass(session)
-          return
-        }
+      if (outcome.type !== 'reply') return outcome
+      if (this.deps.shouldAllowSession && !this.deps.shouldAllowSession(session)) {
+        logger.info(`[${channelId}] 社交激活策略已变化，丢弃尚未发送的回复`)
+        return { type: 'pass' }
+      }
+      const reply = outcome.content.trim()
+      if (!reply) throw new Error('角色 Agent 返回了空回复')
 
-        // 分段发送: 文字和表情包分开发
-        if (this.stickerService && this.stickerService.hasStickers(agentId)) {
-          const segments = this.stickerService.splitIntoSegments(reply, agentId)
+      // 先保留表情包位置，再把长文字拆成即时聊天短句。
+      const baseSegments =
+        this.stickerService && this.stickerService.hasStickers(agentId)
+          ? this.stickerService.splitIntoSegments(reply, agentId)
+          : splitSocialText(reply).map((content) => ({ type: 'text' as const, content }))
+      const segments = expandSocialMessageSegments(baseSegments)
 
-          for (const seg of segments) {
-            if (seg.type === 'text') {
-              await this.sendReply(platform, { channelId, channelType, content: seg.content })
-            } else {
-              // 表情包作为 sticker 附件独立发送 (适配器层决定具体格式)
-              await this.sendReply(platform, {
-                channelId,
-                channelType,
-                content: '',
-                attachments: [
-                  {
-                    type: 'sticker',
-                    localPath: seg.filePath,
-                    name: seg.name,
-                  },
-                ],
-              })
-            }
-            // 段间延迟 300ms，避免乱序
-            await new Promise((r) => setTimeout(r, 300))
-          }
-        } else {
-          // 无表情包，直接发送
-          await this.sendReply(platform, { channelId, channelType, content: reply })
-        }
-
-        // 标记会话为活跃
-        this.sessionManager.markReplied(session)
-
-        // 持久化 Agent 回复 (保存原始完整文本)
-        try {
-          await this.deps.socialMessageRepo.insert({
-            msgId: `agent_${Date.now()}`,
-            platform,
+      for (let index = 0; index < segments.length; index++) {
+        const segment = segments[index]!
+        if (segment.type === 'text') {
+          await this.sendReply(platform, {
             channelId,
             channelType,
-            senderId: 'self',
-            senderName: agentId,
-            content: reply,
-            agentId,
+            content: segment.content,
+            // 引用只放在第一条，避免每个短句都重复引用同一消息。
+            replyTo: index === 0 ? replyTo : undefined,
           })
-        } catch (err) {
-          logger.warn(`Agent 回复持久化失败 (非致命): ${err}`)
+        } else {
+          await this.sendReply(platform, {
+            channelId,
+            channelType,
+            content: '',
+            attachments: [
+              {
+                type: 'sticker',
+                localPath: segment.filePath,
+                name: segment.name,
+              },
+            ],
+          })
         }
 
-        // 通知前端
-        this.notifyFrontend('social_message', {
+        const next = segments[index + 1]
+        if (next) {
+          const delayBasis =
+            segment.type === 'text' ? segment.content : next.type === 'text' ? next.content : ''
+          await new Promise((resolve) => setTimeout(resolve, socialTypingDelayMs(delayBasis)))
+        }
+      }
+
+      try {
+        await this.deps.socialMessageRepo.insert({
+          msgId: `agent_${Date.now()}`,
           platform,
           channelId,
-          direction: 'outbound',
-          content: reply.slice(0, 100),
+          channelType,
+          senderId: 'self',
+          senderName: agentId,
+          content: reply,
+          agentId,
         })
-      } else {
-        // generateReply 返回空（LLM 无回复 / 应用未就绪）时同样恢复会话到非活跃期，
-        // 否则 session 会像异常路径一样卡死在 summoned，导致后续无法被唤醒
-        this.sessionManager.markReplyFailed(
-          session,
-          new Error('generateReply 返回空回复（LLM 无回复或应用未就绪）'),
-        )
+      } catch (error) {
+        logger.warn(`Agent 回复持久化失败 (非致命): ${error}`)
       }
-    } catch (err) {
-      logger.error(`回复生成失败: ${err}`)
-      // 关键修复：失败时必须恢复会话状态到非活跃期 (observing)。
-      // 否则 session 会卡死在 summoned 状态，下次被 @ 时 handleInbound
-      // 无法启动新的累积计时器（`if (session.state !== 'summoned')` 分支进不去），
-      // 导致会话永久失聪、无法再被唤醒（如 LLM 网络错误 fetch failed）。
-      this.sessionManager.markReplyFailed(session, err)
+
+      this.notifyFrontend('social_message', {
+        platform,
+        channelId,
+        direction: 'outbound',
+        content: reply.slice(0, 100),
+      })
+      return { type: 'reply', content: reply }
+    } catch (error) {
+      logger.error(`回复生成或发送失败: ${error}`)
+      throw error
     }
   }
 
@@ -680,8 +706,7 @@ export class SocialBridge {
   async sendReply(platform: string, msg: OutboundMessage): Promise<void> {
     const adapter = this.adapters.get(platform)
     if (!adapter) {
-      logger.warn(`无法发送回复: 适配器 ${platform} 未找到`)
-      return
+      throw new Error(`社交适配器 ${platform} 未连接，无法发送到 ${msg.channelId}`)
     }
     await adapter.sendMessage(msg)
     logger.debug(`回复已发送: platform=${platform}, channel=${msg.channelId}`)
@@ -706,7 +731,7 @@ export class SocialBridge {
   // ── 前端通知 ──
 
   private notifyFrontend(action: string, data: Record<string, unknown>): void {
-    this.deps.gatewayHub.broadcast(createEnvelope('push', { action, ...data })).catch(() => {
+    this.deps.socialEvents.publish(action, data).catch(() => {
       /* 忽略广播错误 */
     })
   }
@@ -721,8 +746,10 @@ export class SocialBridge {
    */
   private async reviveSessionsFromDb(): Promise<void> {
     try {
-      // 查最近 20 条活跃频道记录 (所有 Agent，内存去重取前 10)
-      const recentChannels = await this.deps.socialMessageRepo.getRecentChannels('', 20)
+      const recentChannels = await this.deps.socialMessageRepo.getRecentChannelsForPlatform(
+        'qq',
+        20,
+      )
 
       // 为每个频道创建 session
       let revivedCount = 0
@@ -737,12 +764,17 @@ export class SocialBridge {
           senderId: '',
           senderName: '',
           content: '',
-          agentId: '',
+          agentId: ch.agentId,
         })
 
         // 让复活的会话延迟扫描 (5-15 分钟)
         const sessions = this.sessionManager.getActiveSessions(undefined, 50)
-        const session = sessions.find((s) => s.channelId === ch.channelId)
+        const session = sessions.find(
+          (item) =>
+            item.agentId === ch.agentId &&
+            item.channelType === ch.channelType &&
+            item.channelId === ch.channelId,
+        )
         if (session) {
           const delay = 300 + Math.floor(Math.random() * 600) // 5~15 分钟
           session.nextScanTime = Date.now() + delay * 1000
@@ -760,7 +792,19 @@ export class SocialBridge {
     }
   }
 
-  // ── 社交工具 Provider 桥接 ──
+  listSessions() {
+    return this.sessionManager.listSessions()
+  }
+
+  closeSession(agentId: string, channelId: string): boolean {
+    return this.sessionManager.closeSession(agentId, channelId)
+  }
+
+  closeSessionsExcept(predicate: (session: SocialSession) => boolean): number {
+    return this.sessionManager.closeSessionsExcept(predicate)
+  }
+
+  // ── 社交工具Provider桥接 ──
 
   /** 检查是否有已注册的活跃适配器 */
   hasActiveAdapter(): boolean {
@@ -833,7 +877,7 @@ export class SocialBridge {
       },
 
       async notifyOwner(content, importance) {
-        // 通知走 GatewayHub 推送到前端
+        // 通知通过SocialEventPort推送到前端
         bridge.notifyFrontend('social_owner_notification', {
           content,
           importance: importance ?? 'medium',
@@ -872,35 +916,4 @@ function extractTriggerSenderId(messages: InboundMessage[]): string | undefined 
 
   // 兜底：最后一条消息的发送者
   return messages[messages.length - 1]!.senderId
-}
-
-/**
- * 检测 LLM 回复是否为 PASS（决定跳过不回复）
- *
- * 容错匹配各种变体：
- * - [PASS] / [pass] / [Pass]
- * - PASS / pass / Pass
- * - "PASS" / 'PASS' / "pass" / 'pass'（带引号）
- * - [ PASS ] / [  pass  ]（带空格）
- * - 整条消息只有 PASS 相关字符（trim 后完全匹配）
- *
- * 不匹配的情况（视为正常回复）：
- * - "PASS 这个话题" / "[PASS] 但我想说..."（PASS 只是内容的一部分）
- * - "Password" / "compass"（PASS 是单词片段）
- *
- * @param reply LLM 的原始回复文本
- * @returns true 表示这是 PASS，应跳过发送
- */
-function isPassReply(reply: string): boolean {
-  const trimmed = reply.trim()
-  if (!trimmed) return false
-
-  // 去除首尾的方括号、引号、空格后，剩的是否为 pass（大小写不敏感）
-  // 匹配: [PASS] / [pass] / "PASS" / 'pass' / PASS / pass
-  const stripped = trimmed
-    .replace(/^\[|\]$/g, '') // 去首尾方括号
-    .replace(/^["'`]|["'`]$/g, '') // 去首尾引号
-    .trim()
-
-  return stripped.toLowerCase() === 'pass'
 }

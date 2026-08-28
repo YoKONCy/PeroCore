@@ -1,12 +1,14 @@
+/**
+ * workspace.router — HTTP 路由适配层
+ *
+ * 负责定义该模块的稳定入口、数据边界与错误语义。
+ * 调用方通过这里访问领域能力，避免绕过校验直接耦合内部状态。
+ */
 import { Hono } from 'hono'
-import { zValidator } from '@hono/zod-validator'
+import { validate as zValidator } from '../lib/validation'
 import { z } from 'zod'
-import path from 'node:path'
-import { readdir, stat } from 'node:fs/promises'
 import type { AppContext } from '../container'
 import { AppError } from '../lib/appError'
-import { getProductivityRuntime, resolveExecutionSession } from '../tools/productivityRuntimeHolder'
-import { __codeSearchInternals } from '../tools/codeSearcher'
 
 const sessionSchema = z.object({
   agentId: z.string().min(1),
@@ -44,17 +46,12 @@ const searchSchema = sessionSchema.extend({
   path: z.string().optional(),
 })
 
-export interface WorkspaceTreeNode {
-  name: string
-  path: string
-  type: 'file' | 'directory'
-  size?: number
-  modifiedAt?: string
-}
-
-/** Workspace 浏览器 API：严格绑定 Agent 的执行会话根目录，优先使用受控 VirtualWorkspace。 */
+/** Workspace浏览器API：严格绑定Agent的执行会话根目录。 */
 export function createWorkspaceRouter(ctx: AppContext) {
   const router = new Hono()
+  const runtime = ctx.productivityRuntime
+  const resolve = (agentId: string, threadId: string) =>
+    ctx.workspaceBrowserService.session(agentId, threadId)
 
   /** 目录树（单层懒加载，前端点目录再深入） */
   router.get(
@@ -62,33 +59,12 @@ export function createWorkspaceRouter(ctx: AppContext) {
     zValidator('query', sessionSchema.extend({ path: z.string().optional() })),
     async (c) => {
       const query = c.req.valid('query')
-      const session = await resolve(query.agentId, query.threadId)
-      const relative = query.path ?? '.'
-      const directory = await getProductivityRuntime().virtualWorkspace.resolveDirectory(
-        session,
-        relative,
+      const result = await ctx.workspaceBrowserService.tree(
+        query.agentId,
+        query.threadId,
+        query.path ?? '.',
       )
-      const info = await stat(directory).catch(() => null)
-      if (!info?.isDirectory())
-        throw new AppError('NOT_FOUND', { message: `目录不存在: ${relative}` })
-      const entries = await readdir(directory, { withFileTypes: true })
-      const nodes: WorkspaceTreeNode[] = []
-      for (const entry of entries) {
-        if (entry.name === 'node_modules' || entry.name === '.git') continue
-        const absolute = path.join(directory, entry.name)
-        const childInfo = entry.isFile() ? await stat(absolute).catch(() => null) : null
-        nodes.push({
-          name: entry.name,
-          path: path.posix.join(relative.replaceAll('\\', '/').replace(/^\.\/?$/, ''), entry.name),
-          type: entry.isDirectory() ? 'directory' : 'file',
-          size: childInfo?.size,
-          modifiedAt: childInfo?.mtime.toISOString(),
-        })
-      }
-      nodes.sort((a, b) =>
-        a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'directory' ? -1 : 1,
-      )
-      return c.json({ code: 'OK', data: { root: session.workspaceRoot, parent: relative, nodes } })
+      return c.json({ code: 'OK', data: result })
     },
   )
 
@@ -119,7 +95,7 @@ export function createWorkspaceRouter(ctx: AppContext) {
     const input = c.req.valid('json')
     const session = await resolve(input.agentId, input.threadId)
     try {
-      const result = await getProductivityRuntime().virtualWorkspace.read(session, input.path, {
+      const result = await runtime.virtualWorkspace.read(session, input.path, {
         offset: input.offset,
         limit: input.limit,
         lineStart: input.lineStart,
@@ -138,9 +114,9 @@ export function createWorkspaceRouter(ctx: AppContext) {
   router.post('/write', zValidator('json', writeSchema), async (c) => {
     const input = c.req.valid('json')
     const session = await resolve(input.agentId, input.threadId)
-    const runtime = getProductivityRuntime().virtualWorkspace
+    const virtualWorkspace = runtime.virtualWorkspace
     try {
-      const result = await runtime.write(session, {
+      const result = await virtualWorkspace.write(session, {
         path: input.path,
         content: input.content,
         expectedHash: input.expectedHash,
@@ -168,11 +144,7 @@ export function createWorkspaceRouter(ctx: AppContext) {
     const input = c.req.valid('json')
     const session = await resolve(input.agentId, input.threadId)
     try {
-      const result = await getProductivityRuntime().virtualWorkspace.renameFile(
-        session,
-        input.path,
-        input.newName,
-      )
+      const result = await runtime.virtualWorkspace.renameFile(session, input.path, input.newName)
       return c.json({ code: 'OK', data: result })
     } catch (error) {
       throw new AppError('VALIDATION_ERROR', {
@@ -186,7 +158,7 @@ export function createWorkspaceRouter(ctx: AppContext) {
     const input = c.req.valid('json')
     const session = await resolve(input.agentId, input.threadId)
     try {
-      const result = await getProductivityRuntime().virtualWorkspace.deleteFile(session, input.path)
+      const result = await runtime.virtualWorkspace.deleteFile(session, input.path)
       return c.json({ code: 'OK', data: result })
     } catch (error) {
       throw new AppError('VALIDATION_ERROR', {
@@ -198,35 +170,9 @@ export function createWorkspaceRouter(ctx: AppContext) {
   /** rg 搜索（无 rg 自动 Node fallback，目录强制在 workspace 内） */
   router.post('/search', zValidator('json', searchSchema), async (c) => {
     const input = c.req.valid('json')
-    const session = await resolve(input.agentId, input.threadId)
-    const searchPath = input.path
-      ? await getProductivityRuntime().virtualWorkspace.resolveDirectory(session, input.path)
-      : await getProductivityRuntime().virtualWorkspace.resolveDirectory(session, '.')
     try {
-      const rg = await __codeSearchInternals.searchWithRipgrep({
-        query: input.query,
-        isRegex: Boolean(input.isRegex),
-        fileType: input.fileType,
-        searchPath,
-      })
-      // Node fallback 仅在 rg 不可用时执行
-      const node = rg.available
-        ? null
-        : await __codeSearchInternals.searchWithNode({
-            query: input.query,
-            isRegex: Boolean(input.isRegex),
-            fileType: input.fileType,
-            searchPath,
-          })
-      return c.json({
-        code: 'OK',
-        data: {
-          matches: rg.available ? rg.matches : node!.matches,
-          total: rg.available ? rg.matches.length : node!.matches.length,
-          truncated: rg.available ? rg.truncated : node!.truncated,
-          engine: rg.available ? 'ripgrep' : 'node-fallback',
-        },
-      })
+      const result = await ctx.workspaceBrowserService.search(input)
+      return c.json({ code: 'OK', data: result })
     } catch (error) {
       throw new AppError('VALIDATION_ERROR', {
         message: String(error instanceof Error ? error.message : error),
@@ -235,8 +181,4 @@ export function createWorkspaceRouter(ctx: AppContext) {
   })
 
   return router
-}
-
-async function resolve(agentId: string, threadId: string) {
-  return resolveExecutionSession({ agentId, threadId, channel: 'desktop' })
 }

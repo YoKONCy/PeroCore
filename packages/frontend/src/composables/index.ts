@@ -8,10 +8,4 @@ export { useTabAutoFollow } from './useTabAutoFollow'
 export type { UseTabAutoFollowOptions, UseTabAutoFollowReturn } from './useTabAutoFollow'
 
 // 聊天专用 composables
-export {
-  useStreamMarkdown,
-  useMessageVisibility,
-  useChatScroll,
-  useHistoryRenderer,
-  useChatInput,
-} from './chat'
+export { useMessageVisibility, useChatScroll, useHistoryRenderer, useChatInput } from './chat'

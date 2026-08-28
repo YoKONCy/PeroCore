@@ -13,7 +13,7 @@
 
 import { Hono } from 'hono'
 import { AppError } from '../lib/appError'
-import { zValidator } from '@hono/zod-validator'
+import { validate as zValidator } from '../lib/validation'
 import { z } from 'zod'
 import type { AppContext } from '../container'
 
@@ -22,12 +22,12 @@ export function createSchedulerRouter(ctx: AppContext) {
 
   // GET /api/scheduler/status — 获取调度器全局状态
   router.get('/status', (c) => {
-    const tasks = ctx.scheduler.getStatus()
+    const tasks = ctx.scheduler.getPeriodicScheduleStatus()
     return c.json({
       code: 'OK',
       message: '获取成功',
       data: {
-        schedulerRunning: ctx.scheduler.isStarted,
+        schedulerRunning: ctx.scheduler.isPeriodicStarted,
         serverNow: Date.now(),
         taskCount: tasks.length,
         activeTasks: tasks.filter((t) => t.running).length,
@@ -37,12 +37,12 @@ export function createSchedulerRouter(ctx: AppContext) {
 
   // GET /api/scheduler/tasks — 获取全部已注册任务列表
   router.get('/tasks', (c) => {
-    const tasks = ctx.scheduler.getStatus()
+    const tasks = ctx.scheduler.getPeriodicScheduleStatus()
     return c.json({
       code: 'OK',
       message: '获取成功',
       data: {
-        schedulerRunning: ctx.scheduler.isStarted,
+        schedulerRunning: ctx.scheduler.isPeriodicStarted,
         serverNow: Date.now(),
         items: tasks.map((t) => ({
           ...t,
@@ -88,14 +88,14 @@ export function createSchedulerRouter(ctx: AppContext) {
         time: body.time,
         content: body.instruction,
       })
-      return c.json({ code: 'OK', data: item }, 201)
+      return c.json({ code: 'CREATED', message: '提醒已创建', data: item }, 201)
     },
   )
 
   // POST /api/scheduler/trigger/:name — 手动触发
   router.post('/trigger/:name', async (c) => {
     const taskName = c.req.param('name')
-    const success = await ctx.scheduler.triggerNow(taskName)
+    const success = await ctx.scheduler.triggerPeriodicNow(taskName)
     if (!success) {
       throw new AppError('NOT_FOUND', {
         message: `定时任务 "${taskName}" 不存在或正在运行中`,

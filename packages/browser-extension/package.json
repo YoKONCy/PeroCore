@@ -1,9 +1,0 @@
-{
-  "name": "@infos/browser-extension",
-  "version": "0.9.2-rc1",
-  "private": true,
-  "description": "infOS 浏览器桥接插件 — 为 Agent 提供网页交互能力",
-  "scripts": {
-    "lint": "echo 'no lint for static extension'"
-  }
-}

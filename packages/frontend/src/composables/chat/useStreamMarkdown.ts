@@ -1,7 +1,7 @@
 /**
  * useStreamMarkdown — SSE 流式 Markdown 增量渲染
  *
- * 核心策略：稳定区/尾部区分段 (borrowing VCPChat architecture)
+ * 核心策略：稳定区/尾部区分段
  * - stableHtml：已闭合的结构（代码块等），渲染一次后不再变化
  * - tailHtml：正在追加的尾部，每帧更新
  *

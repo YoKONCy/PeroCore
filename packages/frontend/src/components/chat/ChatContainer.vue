@@ -9,6 +9,7 @@
  * @props agentName - Agent 名称
  */
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import ConversationSurface from '../compositor/ConversationSurface.vue'
 import MessageBubble from './MessageBubble.vue'
 import InputBar from './InputBar.vue'
 import CommandOverlay from './CommandOverlay.vue'
@@ -20,12 +21,15 @@ import type { ActiveCommand } from './CommandOverlay.vue'
 import { useChatScroll, useMessageVisibility } from '../../composables'
 import { useChat } from '../../composables/chat/useChat'
 import { useConversationRewind } from '../../composables/chat/useConversationRewind'
-import { useStreamMarkdown } from '../../composables/chat/useStreamMarkdown'
-import { renderChatRichText } from '../../lib/chatRichRenderer'
-import { useThreadStore, useNotificationStore, useApprovalStore } from '../../stores'
-import { ApprovalCard } from '../approval'
+import {
+  useThreadStore,
+  useNotificationStore,
+  useApprovalStore,
+  useCompositorStore,
+} from '../../stores'
 import { logger } from '../../lib/logger'
 import { chatApi } from '../../api/modules/chatApi'
+import type { AttachmentInfo } from '../../api/modules/attachmentsApi'
 
 export interface Props {
   /** 目标 Agent ID */
@@ -71,21 +75,36 @@ const {
 } = useChat({ channel: 'desktop' })
 
 const threadStore = useThreadStore()
+const compositor = useCompositorStore()
 const notif = useNotificationStore()
 const rewind = useConversationRewind()
 const approvalStore = useApprovalStore()
-const pendingApprovals = computed(() =>
-  approvalStore.forThread(props.agentId, threadStore.threadId || props.threadId),
+const interactionSurfaces = computed(() =>
+  [...compositor.surfaces.values()].filter(
+    (surface) =>
+      surface.scopeId === `conversation:${threadStore.threadId || props.threadId}` &&
+      !surface.messageId,
+  ),
 )
 
-// ── 安全语义富文本渲染器 ──
-const renderMd = renderChatRichText
+watch(
+  () =>
+    [...approvalStore.pending.values()]
+      .map((request) => `${request.id}:${request.status}`)
+      .join('|'),
+  () => {
+    if (threadStore.threadId) {
+      void threadStore.loadThreadMessages(threadStore.threadId, props.agentId)
+    }
+  },
+)
 
-/** 提取模型原始转写中的 Thinking 标签块，仅供用户主动展开。 */
+// ── 消息原始转写 ──
 function extractThinking(rawContent?: string | null): string | undefined {
   if (!rawContent) return undefined
   const blocks: string[] = []
-  const pattern = /<(?:think|thinking)>\s*([\s\S]*?)\s*<\/(?:think|thinking)>/gi
+  const pattern =
+    /<(?:think|thinking|thought)(?:\s[^>]*)?>\s*([\s\S]*?)\s*<\/(?:think|thinking|thought)>/gi
   let match: RegExpExecArray | null
   while ((match = pattern.exec(rawContent)) !== null) {
     const content = match[1]?.trim()
@@ -94,45 +113,10 @@ function extractThinking(rawContent?: string | null): string | undefined {
   return blocks.length > 0 ? blocks.join('\n\n') : undefined
 }
 
-// ── 流式 Markdown 增量渲染 ──
-const streamMd = useStreamMarkdown(renderMd)
-
-// 监听流式消息变化，驱动 useStreamMarkdown
-watch(
-  () => {
-    if (!isGenerating.value) return null
-    const list = chatMessages.value
-    if (list.length === 0) return null
-    const last = list[list.length - 1]!
-    return last.isStreaming ? last.content : null
-  },
-  (content) => {
-    if (content !== null) {
-      streamMd.onChunk(content)
-    }
-  },
-)
-
-// 生成结束时 finish
+// 生成结束时通知外层刷新会话列表。
 watch(isGenerating, (generating, wasGenerating) => {
-  if (!generating && wasGenerating) {
-    streamMd.finish()
-    emit('completed')
-  }
+  if (!generating && wasGenerating) emit('completed')
 })
-
-// 新消息开始时 reset
-watch(
-  () => {
-    const list = chatMessages.value
-    return list.length > 0 && list[list.length - 1]?.isStreaming ? list[list.length - 1]!.id : null
-  },
-  (newId, oldId) => {
-    if (newId && newId !== oldId) {
-      streamMd.reset()
-    }
-  },
-)
 
 // ── 指令遮罩状态 ──
 
@@ -140,34 +124,24 @@ const activeCommand = ref<ActiveCommand | null>(null)
 
 // ── 消息列表 ──
 
-/** 映射 store → MessageBubble 格式（含 renderedHtml + toolCalls） */
+/** 映射消息 Shell；所有可见富内容统一从 Compositor Surface 读取。 */
 const messages = computed<BubbleMessage[]>(() => {
-  return chatMessages.value.map((m, idx) => {
-    const isLast = idx === chatMessages.value.length - 1
-    const isStreamingMsg = isGenerating.value && isLast && m.role === 'assistant'
-
-    // 流式消息用 useStreamMarkdown 的输出，历史消息用全量渲染
-    let renderedHtml: string | undefined
-    if (m.content) {
-      if (isStreamingMsg) {
-        renderedHtml = streamMd.stableHtml.value + streamMd.tailHtml.value
-      } else {
-        renderedHtml = renderMd(m.content)
-      }
-    }
-
+  return chatMessages.value.map((m) => {
+    const surface = m.surfaceId ? compositor.get(m.surfaceId) : undefined
+    const hasThinkingSurface = surface?.nodes.some((node) => node.kind === 'thinking') ?? false
     return {
       id: m.id,
-      role: m.role as 'user' | 'assistant',
+      role: m.role as 'user' | 'assistant' | 'system',
       content: m.content ?? '',
-      thinkingContent: m.role === 'assistant' ? extractThinking(m.rawContent) : undefined,
+      thinkingContent:
+        m.role === 'assistant' && !hasThinkingSurface ? extractThinking(m.rawContent) : undefined,
       timestamp: m.timestamp ? new Date(m.timestamp).getTime() : undefined,
+      outputTokens: m.outputTokens,
       senderId: m.senderId,
       images: m.images,
       attachments: m.attachments,
-      segments: undefined,
-      renderedHtml,
-      toolCalls: m.toolCalls,
+      ragFailureTrace: m.ragFailureTrace,
+      surface,
       imageTranscription: m.imageTranscription,
     }
   })
@@ -181,7 +155,10 @@ const { showScrollDown, scrollToBottom } = useChatScroll(containerRef, messageCo
 
 // ── IntersectionObserver 不可见消息暂停 ──
 
-const { observe, unobserve } = useMessageVisibility(containerRef)
+const { observe, unobserve } = useMessageVisibility(containerRef, (element, visible) => {
+  const surfaceId = element.dataset.surfaceId
+  if (surfaceId) compositor.setSuspended(surfaceId, !visible)
+})
 
 function getComponentRootElement(event: unknown): Element | null {
   if (event instanceof Element) return event
@@ -207,6 +184,7 @@ async function handleSend(
   text: string,
   _mentions: string[],
   attachmentIds: string[],
+  attachments: AttachmentInfo[],
   imageMode: 'auto' | 'native' | 'relay',
   complete: (success: boolean) => void,
 ) {
@@ -217,7 +195,7 @@ async function handleSend(
         terminalId: props.workspaceContext.terminalId,
       }
     : undefined
-  const success = await chatSend(text, attachmentIds, imageMode, workspaceContext)
+  const success = await chatSend(text, attachmentIds, attachments, imageMode, workspaceContext)
   complete(success)
   await nextTick()
   scrollToBottom()
@@ -256,10 +234,9 @@ async function saveEdit() {
   const nextContent = editText.value.trim()
   if (!nextContent) return
   try {
-    await chatApi.editMessage(threadStore.threadId, target.id, nextContent)
-    threadStore.messages = threadStore.messages.map((message) =>
-      message.id === target.id ? { ...message, content: nextContent } : message,
-    )
+    const response = await chatApi.editMessage(threadStore.threadId, target.id, nextContent)
+    if (!response.data) throw new Error('服务端未返回更新后的 Conversation Projection')
+    threadStore.applyProjection(response.data)
     editingMessage.value = null
     editText.value = ''
     notif.toast('消息已保存', { type: 'success' })
@@ -286,10 +263,23 @@ async function handleDeletePair(id: string) {
   try {
     if (!/^\d+$/.test(target.id)) {
       const snapshot = target
+      const snapshotIndex = threadStore.messages.findIndex((message) => message.id === snapshot.id)
+      const precedingUser =
+        snapshotIndex > 0
+          ? threadStore.messages
+              .slice(0, snapshotIndex)
+              .reverse()
+              .find((message) => message.role === 'user')
+          : undefined
       await threadStore.refreshCurrentThread(props.agentId)
       const candidates = threadStore.messages.filter((message) => message.role === snapshot.role)
       target =
-        candidates.find((message) => message.content === snapshot.content) ?? candidates.at(-1)
+        candidates.find((message) => message.content === snapshot.content) ??
+        (snapshot.role === 'assistant' && precedingUser
+          ? threadStore.messages.find(
+              (message) => message.role === 'user' && message.content === precedingUser.content,
+            )
+          : undefined)
       if (!target || !/^\d+$/.test(target.id)) {
         throw new Error('消息尚未完成服务端同步，请稍后重试')
       }
@@ -299,9 +289,17 @@ async function handleDeletePair(id: string) {
       threadId: threadStore.threadId,
       messageId: Number(target.id),
       onSuccess: async (result) => {
-        const deletedIds = new Set(result.deletedMessageIds.map(String))
-        threadStore.messages = threadStore.messages.filter((message) => !deletedIds.has(message.id))
-        await threadStore.loadThreadMessages(threadStore.threadId, props.agentId)
+        if (!result.projection) throw new Error('服务端未返回回滚后的Conversation Projection')
+        threadStore.applyProjection(result.projection)
+        window.dispatchEvent(
+          new CustomEvent('infos:conversation-rewound', {
+            detail: {
+              threadId: threadStore.threadId,
+              deletedMessageIds: result.deletedMessageIds.map(String),
+              projection: result.projection,
+            },
+          }),
+        )
         window.dispatchEvent(
           new CustomEvent('infos:workspace-rewound', {
             detail: { threadId: threadStore.threadId, files: result.preview.files },
@@ -330,7 +328,11 @@ async function handleCopy(content: string) {
 
 watch(
   () => [props.agentId, props.threadId] as const,
-  async ([agentId, threadId]) => {
+  async ([agentId, threadId], previous) => {
+    const previousThreadId = previous?.[1]
+    if (previousThreadId && previousThreadId !== threadId) {
+      compositor.disposeScope(`conversation:${previousThreadId}`)
+    }
     // props 在角色切换时可能短暂出现“新 Agent + 旧 Thread”；只加载归属已一致的会话。
     if (threadId && threadStore.agentId === agentId) {
       await threadStore.loadThreadMessages(threadId, agentId)
@@ -343,12 +345,32 @@ watch(
   { immediate: true },
 )
 
+function restoreProjection(): void {
+  if (threadStore.threadId) void threadStore.loadThreadMessages(threadStore.threadId, props.agentId)
+}
+
+function handleConversationRewound(event: Event): void {
+  const detail = (
+    event as CustomEvent<{
+      threadId?: string
+      projection?: import('@infos/shared').ConversationProjectionSnapshot
+    }>
+  ).detail
+  if (!detail?.threadId || detail.threadId !== threadStore.threadId) return
+  if (detail.projection) threadStore.applyProjection(detail.projection)
+  else restoreProjection()
+}
+
 onMounted(() => {
+  window.addEventListener('online', restoreProjection)
+  window.addEventListener('infos:conversation-rewound', handleConversationRewound)
   scrollToBottom(false)
 })
 
 onUnmounted(() => {
-  // 清理（composable 内部已处理 observer disconnect）
+  window.removeEventListener('online', restoreProjection)
+  window.removeEventListener('infos:conversation-rewound', handleConversationRewound)
+  if (threadStore.threadId) compositor.disposeScope(`conversation:${threadStore.threadId}`)
 })
 </script>
 
@@ -363,43 +385,52 @@ onUnmounted(() => {
     <CommandOverlay :command="activeCommand" @skip="handleSkipCommand" />
 
     <!-- 消息列表 -->
-    <div ref="containerRef" class="chat-messages">
-      <div v-if="isLoadingHistory" class="chat-history-state">
-        <PixelIcon name="refresh" size="sm" animation="spin" />
-        <span>正在同步历史聊天记录...</span>
+    <div class="chat-messages-region">
+      <div class="chat-conversation-background" aria-hidden="true">
+        <div class="chat-conversation-background__image" />
+        <div class="chat-conversation-background__overlay" />
       </div>
+      <div ref="containerRef" class="chat-messages">
+        <div v-if="isLoadingHistory" class="chat-history-state">
+          <PixelIcon name="refresh" size="sm" animation="spin" />
+          <span>正在同步历史聊天记录...</span>
+        </div>
 
-      <div v-else-if="historyError" class="chat-history-state chat-history-error">
-        <PixelIcon name="alert" size="sm" />
-        <span>历史记录同步失败：{{ historyError }}</span>
+        <div v-else-if="historyError" class="chat-history-state chat-history-error">
+          <PixelIcon name="alert" size="sm" />
+          <span>历史记录同步失败：{{ historyError }}</span>
+        </div>
+
+        <MessageBubble
+          v-for="msg in messages"
+          :key="msg.id"
+          :message="msg"
+          :agent-name="agentName"
+          :agent-avatar-url="agentAvatarUrl"
+          :progress-label="threadStore.ragProgressMessage ?? ''"
+          :rag-failure="
+            msg.ragFailureTrace ??
+            (isGenerating && msg === messages[messages.length - 1]
+              ? threadStore.ragFailureTrace
+              : null)
+          "
+          :is-streaming="
+            isGenerating && msg === messages[messages.length - 1] && msg.role === 'assistant'
+          "
+          @edit="handleEdit"
+          @delete-pair="handleDeletePair"
+          @copy="handleCopy"
+          @vue:mounted="onBubbleMounted"
+          @vue:unmounted="onBubbleUnmounted"
+        />
       </div>
-
-      <MessageBubble
-        v-for="msg in messages"
-        :key="msg.id"
-        :message="msg"
-        :agent-name="agentName"
-        :agent-avatar-url="agentAvatarUrl"
-        :is-streaming="
-          isGenerating && msg === messages[messages.length - 1] && msg.role === 'assistant'
-        "
-        @edit="handleEdit"
-        @delete-pair="handleDeletePair"
-        @copy="handleCopy"
-        @vue:mounted="onBubbleMounted"
-        @vue:unmounted="onBubbleUnmounted"
-      />
     </div>
 
-    <!-- 当前 Thread 待审批工具调用：作为对话中的系统交互卡片。 -->
-    <div v-if="showApprovals && pendingApprovals.length" class="chat-approvals">
-      <ApprovalCard
-        v-for="request in pendingApprovals"
-        :key="request.id"
-        :request="request"
-        :loading="approvalStore.isResolving[request.id]"
-        compact
-        @resolve="(decision, message) => approvalStore.resolve(request.id, decision, message)"
+    <div v-if="showApprovals && interactionSurfaces.length" class="chat-approvals">
+      <ConversationSurface
+        v-for="surface in interactionSurfaces"
+        :key="surface.surfaceId"
+        :surface="surface"
       />
     </div>
 
@@ -464,8 +495,57 @@ onUnmounted(() => {
   z-index: 10;
 }
 
-.chat-messages {
+.chat-messages-region {
+  position: relative;
   flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.chat-conversation-background {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.chat-conversation-background__image {
+  position: absolute;
+  inset: calc(var(--chat-background-blur, 0px) * -2);
+  background-image: var(--chat-background-image, none);
+  background-size: cover;
+  background-position: var(--chat-background-position, 50% 50%);
+  background-repeat: no-repeat;
+  opacity: var(--chat-background-opacity, 0);
+  filter: blur(var(--chat-background-blur, 0px)) brightness(var(--chat-background-brightness, 1))
+    saturate(var(--chat-background-saturation, 1)) contrast(var(--chat-background-contrast, 1));
+}
+
+.chat-conversation-background__overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(
+    248,
+    250,
+    252,
+    calc(var(--chat-background-enabled, 0) * (0.06 + var(--chat-background-overlay, 0) * 0.94))
+  );
+}
+
+:global([data-theme='dark']) .chat-conversation-background__overlay {
+  background: rgba(
+    5,
+    7,
+    12,
+    calc(var(--chat-background-enabled, 0) * (0.32 + var(--chat-background-overlay, 0) * 0.68))
+  );
+}
+
+.chat-messages {
+  position: relative;
+  z-index: 1;
+  height: 100%;
   overflow-y: auto;
   padding: 24px 28px 20px;
   display: flex;
@@ -497,7 +577,16 @@ onUnmounted(() => {
   filter: drop-shadow(5px 6px 0 color-mix(in srgb, var(--ui-text-primary) 16%, transparent));
 }
 
+.chat-container :deep(.deck--compact) {
+  max-width: 100%;
+  min-width: 0;
+}
+.chat-container :deep(.deck--compact .deck-status) {
+  width: 100%;
+}
+
 .chat-input-area {
+  min-width: 0;
   flex-shrink: 0;
   padding: 0 28px 24px;
 }

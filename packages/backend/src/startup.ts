@@ -22,8 +22,10 @@ import { serve } from '@hono/node-server'
 import { createApp } from './app'
 import { createAppContext, createDefaultConfig, initAppContext } from './container'
 import { runStartupTasks } from './lifecycle'
+import { closeDrizzleConnection } from './database/connection'
 import { logger, initLogFile, setLogLevel, parseLogLevel, getLogLevel } from './lib/logger'
-import { SERVER_HOST, SERVER_PORT } from './lib/env'
+import { SERVER_HOST, SERVER_PORT, getDataDir } from './lib/env'
+import { DistributedSyncService } from './services/distributed/distributedSyncService'
 import { registerProcessGuards, onShutdown } from './lib/processGuards'
 import { setupGatewayWebSocket } from './services/gateway/wsUpgrade'
 import { initTelemetry, shutdownTelemetry } from './lib/telemetry'
@@ -85,7 +87,10 @@ export async function startServer(options: StartServerOptions): Promise<void> {
   // 2. 注册进程守护（日志就绪后立即注册）
   registerProcessGuards()
 
-  // 3. 初始化 DI 容器（同步阶段）
+  // 3. 在数据库打开前应用已校验的完整同步快照。
+  await DistributedSyncService.applyPending(getDataDir())
+
+  // 4. 初始化 DI 容器（同步阶段）
   const config = createDefaultConfig()
   const ctx = await createAppContext(config)
 
@@ -146,9 +151,7 @@ export async function startServer(options: StartServerOptions): Promise<void> {
   ctx.gatewayHub.startHeartbeat()
 
   // 9. 启动 CapabilityBridge WS 服务端（能力通道 :9121）
-  //    接收 Electron / Mobile 等节点的能力注册，转发平台工具调用。
-  //    复用 container 中已实例化的 capabilityBridge（已通过 setCapabilityBridge
-  //    注入到 toolExecutor），确保 WS 服务端与工具调用桥接同一对象。
+  // 9. 启动 Node Capability Transport。
   const capabilityBridgePort = Number(process.env.PERO_CAPABILITY_PORT ?? 9121)
   try {
     await ctx.capabilityBridge.start(capabilityBridgePort)
@@ -161,6 +164,11 @@ export async function startServer(options: StartServerOptions): Promise<void> {
   onShutdown(async () => {
     logger.info(`${processName} 正在关闭资源...`)
     try {
+      await ctx.appManager.shutdown()
+    } catch (err) {
+      logger.warn(`Social宿主关闭失败: ${err}`)
+    }
+    try {
       await ctx.capabilityBridge.stop()
     } catch (err) {
       logger.warn(`CapabilityBridge 关闭失败: ${err}`)
@@ -168,8 +176,22 @@ export async function startServer(options: StartServerOptions): Promise<void> {
     if (onExtraShutdown) {
       await onExtraShutdown()
     }
+    try {
+      await ctx.kernelLifecycle.dispose()
+    } catch (err) {
+      logger.warn(`Kernel 生命周期释放失败: ${err}`)
+    }
     await shutdownTelemetry()
-    // TODO: ctx.db.close() 等资源清理
+    try {
+      ctx.storeRegistry.closeAll()
+    } catch (err) {
+      logger.warn(`TriviumDB Store关闭失败: ${err}`)
+    }
+    try {
+      closeDrizzleConnection(ctx.db)
+    } catch (err) {
+      logger.warn(`数据库关闭失败: ${err}`)
+    }
     logger.info(`${processName} 资源清理完成`)
   })
 }

@@ -1,5 +1,5 @@
 /**
- * 一键启动脚本 — 并行启动后端 + Electron (含前端)
+ * 一键启动脚本 — 并行启动Daemon + Electron（含前端）
  *
  * 特性:
  * - 后端就绪后再启动 Electron（监听 "已就绪" 信号）
@@ -14,9 +14,12 @@
 import { spawn, execSync } from 'node:child_process'
 
 const isWin = process.platform === 'win32'
+const pnpmCli = process.env.npm_execpath
+if (!pnpmCli) throw new Error('无法定位pnpm CLI，请通过pnpm start启动开发环境')
+const spawnPnpm = (args, options) => spawn(process.execPath, [pnpmCli, ...args], options)
 
 // 颜色代码
-const BLUE = '\x1b[34m'
+const CYAN = '\x1b[36m'
 const MAGENTA = '\x1b[35m'
 const RESET = '\x1b[0m'
 const DIM = '\x1b[2m'
@@ -42,8 +45,9 @@ function killTree(proc) {
   }
 }
 
-let backend = null
+let daemon = null
 let electron = null
+let arcaClient = null
 let isShuttingDown = false
 
 function shutdown(exitCode = 0) {
@@ -52,41 +56,53 @@ function shutdown(exitCode = 0) {
 
   console.log(`\n${DIM}正在清理所有进程...${RESET}`)
   killTree(electron)
-  killTree(backend)
+  killTree(arcaClient)
+  killTree(daemon)
 
   // 给一点时间让进程退出
   setTimeout(() => process.exit(exitCode), 500)
 }
 
-// ── 启动后端 ──
-// #region debug-point D:backend-spawn
-fetch('http://127.0.0.1:7777/event',{method:'POST',body:JSON.stringify({sessionId:'daemon-start-refused',runId:'pre-fix',hypothesisId:'D',location:'scripts/start-dev.mjs:backend-spawn',msg:'[DEBUG] 准备启动 Backend',data:{cwd:process.cwd(),node:process.version,port:process.env.PERO_CAPABILITY_PORT??'9121'},ts:Date.now()})}).catch(()=>{})
-// #endregion
-backend = spawn('pnpm', ['dev'], {
+// ── 启动Arca Client开发服务 ──
+arcaClient = spawnPnpm(['--filter', '@infos/arca', 'dev:client'], {
   cwd: process.cwd(),
-  shell: isWin,
+  shell: false,
   stdio: ['ignore', 'pipe', 'pipe'],
   env: { ...process.env, NODE_OPTIONS: '--no-warnings=DEP0040' },
 })
-backend.stdout.on('data', (d) => prefix('backend', BLUE, d))
-backend.stderr.on('data', (d) => prefix('backend', BLUE, d))
-backend.on('exit', (code) => {
-  console.log(`${DIM}[backend] 进程退出 (code: ${code})${RESET}`)
+arcaClient.stdout.on('data', (d) => prefix('arca-ui', MAGENTA, d))
+arcaClient.stderr.on('data', (d) => prefix('arca-ui', MAGENTA, d))
+arcaClient.on('exit', (code) => {
+  console.log(`${DIM}[arca-ui] 进程退出 (code: ${code})${RESET}`)
   if (!isShuttingDown) shutdown(code ?? 1)
 })
 
-// ── 等后端就绪后启动 Electron ──
+// ── 启动Daemon ──
+daemon = spawnPnpm(['dev:daemon'], {
+  cwd: process.cwd(),
+  shell: false,
+  stdio: ['ignore', 'pipe', 'pipe'],
+  env: { ...process.env, NODE_OPTIONS: '--no-warnings=DEP0040' },
+})
+daemon.stdout.on('data', (d) => prefix('daemon', CYAN, d))
+daemon.stderr.on('data', (d) => prefix('daemon', CYAN, d))
+daemon.on('exit', (code) => {
+  console.log(`${DIM}[daemon] 进程退出 (code: ${code})${RESET}`)
+  if (!isShuttingDown) shutdown(code ?? 1)
+})
+
+// ── 等Daemon就绪后启动Electron ──
 let electronStarted = false
 
 function tryStartElectron() {
   if (electronStarted || isShuttingDown) return
   electronStarted = true
 
-  console.log(`\n${MAGENTA}[electron]${RESET} 后端已就绪，正在启动 Electron...\n`)
+  console.log(`\n${MAGENTA}[electron]${RESET} Daemon已就绪，正在启动Electron...\n`)
 
-  electron = spawn('pnpm', ['dev:electron'], {
+  electron = spawnPnpm(['dev:electron'], {
     cwd: process.cwd(),
-    shell: isWin,
+    shell: false,
     stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env, NODE_OPTIONS: '--no-warnings=DEP0040' },
   })
@@ -98,22 +114,23 @@ function tryStartElectron() {
   })
 }
 
-// 监听后端 stdout，等 "已就绪" 信号
+// 监听Daemon stdout，等待业务端口和能力通道均就绪
 const outputChunks = []
-backend.stdout.on('data', (data) => {
+daemon.stdout.on('data', (data) => {
   outputChunks.push(data.toString())
-  if (outputChunks.join('').includes('已就绪')) {
+  const output = outputChunks.join('')
+  if (output.includes('业务 HTTP 已就绪') && output.includes('CapabilityBridge 已启动')) {
     tryStartElectron()
   }
 })
 
-// 超时兜底: 15 秒后强制启动 Electron
+// 超时兜底：30秒后仍不启动Electron，直接结束并保留Daemon日志
 setTimeout(() => {
-  if (!electronStarted) {
-    console.log(`\n${MAGENTA}[electron]${RESET} 等待后端超时，强制启动 Electron...\n`)
-    tryStartElectron()
+  if (!electronStarted && !isShuttingDown) {
+    console.error(`\n${MAGENTA}[electron]${RESET} Daemon启动超时，未检测到HTTP与能力通道同时就绪。`)
+    shutdown(1)
   }
-}, 15000)
+}, 30000)
 
 // ── Ctrl+C / 信号处理 ──
 process.on('SIGINT', () => shutdown(0))

@@ -7,7 +7,7 @@
  * 投影矩阵使用 Xavier 随机初始化。
  * 隐状态持久化到 data/agent_{id}/rnn_{mode}.bin (1KB)。
  *
- * 依赖 @infos/nit-runtime 的 minGRU 前向推理 (TS mock 或 Rust N-API)。
+ * 使用Retrieval域内的纯TypeScript minGRU实现。
  *
  * @module packages/backend/src/services/retrieval/contextRnn
  */
@@ -21,8 +21,8 @@ import {
   xavierInitMinGruWeights,
   trainMinGruStep,
   MIN_GRU_WEIGHT_SIZES,
-} from '@infos/nit-runtime'
-import type { MinGruWeights } from '@infos/nit-runtime'
+} from './minGru'
+import type { MinGruWeights } from './minGru'
 import type { PathResolver } from '../../core/pathResolver'
 import { createLogger } from '../../lib/logger'
 
@@ -32,14 +32,8 @@ const logger = createLogger('ContextRNN')
 // 常量
 // ─────────────────────────────────────────────
 
-/** Embedding 维度 (与 EmbeddingProvider 对齐) */
-const INPUT_DIM = 1536
-
-/** 投影矩阵总元素数 (W_in: INPUT_DIM × HIDDEN_DIM) */
-const PROJ_MATRIX_SIZE = INPUT_DIM * HIDDEN_DIM
-
-/** 输出矩阵总元素数 (W_out: HIDDEN_DIM × INPUT_DIM) — h_t 映射回 embedding 空间 */
-const OUTPUT_MATRIX_SIZE = HIDDEN_DIM * INPUT_DIM
+/** 默认 Embedding 维度；生产实例使用当前 MemoryStoreRegistry 维度覆盖。 */
+const DEFAULT_INPUT_DIM = 1536
 
 // ─────────────────────────────────────────────
 // 类型
@@ -64,7 +58,7 @@ export interface ContextRnnConfig {
 }
 
 const DEFAULT_CONFIG: ContextRnnConfig = {
-  inputDim: INPUT_DIM,
+  inputDim: DEFAULT_INPUT_DIM,
   hiddenDim: HIDDEN_DIM,
 }
 
@@ -118,8 +112,20 @@ export class ContextRnn {
     this.pathResolver = pathResolver
 
     // 尝试加载已持久化的权重，否则 Xavier 初始化
-    this.projMatrix = this.loadOrInitWeights('proj', PROJ_MATRIX_SIZE, INPUT_DIM, HIDDEN_DIM)
-    this.outputMatrix = this.loadOrInitWeights('output', OUTPUT_MATRIX_SIZE, HIDDEN_DIM, INPUT_DIM)
+    const projectionSize = this.config.inputDim * this.config.hiddenDim
+    const outputSize = this.config.hiddenDim * this.config.inputDim
+    this.projMatrix = this.loadOrInitWeights(
+      'proj',
+      projectionSize,
+      this.config.inputDim,
+      this.config.hiddenDim,
+    )
+    this.outputMatrix = this.loadOrInitWeights(
+      'output',
+      outputSize,
+      this.config.hiddenDim,
+      this.config.inputDim,
+    )
 
     // AIOS 第八阶段：加载或初始化 minGRU 内部权重
     this.minGruWeights = this.loadOrInitMinGruWeights()
@@ -169,12 +175,12 @@ export class ContextRnn {
   generateBias(agentId: string, mode: string): Float32Array {
     const h = this.getHiddenState(agentId, mode)
 
-    // W_out @ h_t → 1536 维偏置向量
-    const bias = new Float32Array(INPUT_DIM)
-    for (let i = 0; i < INPUT_DIM; i++) {
+    // W_out @ h_t → 当前 Embedding 维度偏置向量
+    const bias = new Float32Array(this.config.inputDim)
+    for (let i = 0; i < this.config.inputDim; i++) {
       let sum = 0
-      for (let j = 0; j < HIDDEN_DIM; j++) {
-        sum += this.outputMatrix[j * INPUT_DIM + i]! * h[j]!
+      for (let j = 0; j < this.config.hiddenDim; j++) {
+        sum += this.outputMatrix[j * this.config.inputDim + i]! * h[j]!
       }
       bias[i] = sum
     }
@@ -255,12 +261,15 @@ export class ContextRnn {
 
     try {
       const buffer = readFileSync(filePath)
-      if (buffer.length < 12 + HIDDEN_DIM * 4) return false
+      if (buffer.length < 12 + this.config.hiddenDim * 4) return false
 
       const updateCount = buffer.readUInt32LE(0)
       const lastUpdatedAt = buffer.readDoubleBE(4)
       const hidden = new Float32Array(
-        buffer.buffer.slice(buffer.byteOffset + 12, buffer.byteOffset + 12 + HIDDEN_DIM * 4),
+        buffer.buffer.slice(
+          buffer.byteOffset + 12,
+          buffer.byteOffset + 12 + this.config.hiddenDim * 4,
+        ),
       )
 
       const key = `${agentId}:${mode}`
@@ -324,8 +333,8 @@ export class ContextRnn {
    * gradient = -(bias - target) ⊗ h_t  (negative，即推离)
    *
    * @param hiddenState  该轮对话的 h_t (256 维)
-   * @param contextBias  该轮的 diffusion bias = W_out · h_t (1536 维)
-   * @param targetEmbedding  被采纳/拒绝的记忆的 embedding (1536 维)
+   * @param contextBias  该轮的 diffusion bias = W_out · h_t
+   * @param targetEmbedding  被采纳/拒绝记忆的当前维度 Embedding
    * @param isPositive  反馈信号：true = 该方向好，false = 该方向差
    * @param learningRate  学习率 (默认 0.0005，小于 GRU 的 0.001 以保持稳定)
    */
@@ -340,16 +349,16 @@ export class ContextRnn {
 
     // 梯度: 对每个 W_out[j][i]，梯度 = (bias[i] - target[i]) * h[j]
     // positive 时沿梯度下降，negative 时沿梯度上升
-    for (let j = 0; j < HIDDEN_DIM; j++) {
+    for (let j = 0; j < this.config.hiddenDim; j++) {
       const hj = hiddenState[j]!
       if (Math.abs(hj) < 1e-8) continue // 跳过零激活的隐单元
 
-      for (let i = 0; i < INPUT_DIM; i++) {
+      for (let i = 0; i < this.config.inputDim; i++) {
         const diff = contextBias[i]! - targetEmbedding[i]!
         const grad = sign * diff * hj
         // SGD 更新 + 梯度裁剪（防止 Xavier 初始化早期的大梯度）
         const clippedGrad = Math.max(-0.1, Math.min(0.1, grad))
-        this.outputMatrix[j * INPUT_DIM + i]! -= learningRate * clippedGrad
+        this.outputMatrix[j * this.config.inputDim + i]! -= learningRate * clippedGrad
       }
     }
   }
@@ -405,7 +414,7 @@ export class ContextRnn {
 
     // 新建零初始化隐状态
     state = {
-      hidden: new Float32Array(HIDDEN_DIM), // 零初始化
+      hidden: new Float32Array(this.config.hiddenDim), // 零初始化
       lastUpdatedAt: Date.now(),
       updateCount: 0,
     }

@@ -4,15 +4,23 @@
  * @module packages/backend/src/routers
  */
 
+export { createArcaRouter } from './arca.router'
+export { createArcaCollaborationRouter } from './arcaCollaboration.router'
+export { createArcaUiRouter } from './arcaUi.router'
+export { createApplicationsRouter } from './applications.router'
 export { createChatRouter } from './chat.router'
 export { createAttachmentRouter } from './attachment.router'
 export { createMemoryRouter } from './memory.router'
+export { createKnowledgeRouter } from './knowledge.router'
 export { createConfigRouter } from './config.router'
 export { createModelRouter } from './model.router'
 export { createSystemRouter } from './system.router'
+export { createDistributedRouter } from './distributed.router'
 export { createAgentRouter } from './agent.router'
 export { createRuntimeRouter } from './runtime.router'
 export { createApprovalRouter } from './approval.router'
+export { createAgentInputRouter } from './agentInput.router'
+export { createSurfaceRouter } from './surface.router'
 export { createWorkspaceRouter } from './workspace.router'
 export { createTerminalRouter } from './terminal.router'
 export { createSchedulerRouter } from './scheduler.router'

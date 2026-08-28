@@ -52,9 +52,6 @@ jobs:
         with:
           arch: x64
 
-      - name: 安装 WASM Rust target
-        run: rustup target add wasm32-unknown-unknown
-
       - name: 版本号同步
         run: pnpm version:sync
 
@@ -62,7 +59,7 @@ jobs:
         run: pnpm build
 
       - name: 准备内置 Daemon 运行时
-        run: node scripts/build-daemon-bundle.mjs && node scripts/collect-daemon-deps.mjs && pnpm rebuild:daemon-native
+        run: node scripts/build-daemon-bundle.mjs && node scripts/collect-daemon-deps.mjs && pnpm rebuild:daemon-deps
 
       - name: 构建 Electron 标准版 (NSIS)
         run: pnpm exec electron-builder --config electron-builder.standard.yml --publish never
@@ -121,9 +118,6 @@ jobs:
         with:
           arch: x64
 
-      - name: 安装 WASM Rust target
-        run: rustup target add wasm32-unknown-unknown
-
       - name: 版本号同步
         run: pnpm version:sync
 
@@ -131,7 +125,7 @@ jobs:
         run: pnpm build
 
       - name: 准备内置 Daemon 运行时
-        run: node scripts/build-daemon-bundle.mjs && node scripts/collect-daemon-deps.mjs && pnpm rebuild:daemon-native
+        run: node scripts/build-daemon-bundle.mjs && node scripts/collect-daemon-deps.mjs && pnpm rebuild:daemon-deps
 
       - name: 构建 Electron 便携版
         run: pnpm exec electron-builder --config electron-builder.portable.yml --publish never
@@ -155,7 +149,62 @@ jobs:
           name: electron-portable
           path: release-electron/*Portable*.zip
 
-  # ── 4. Electron Steam 版 (仅限 release 分支或手动触发) ──
+  # ── 4. 最终产物黑盒验收 ──
+  accept-standard:
+    name: Accept Standard Installer
+    runs-on: windows-2022
+    needs: build-standard
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: scripts/validate-release-artifact.mjs
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: electron-standard
+          path: acceptance-artifacts/standard
+
+      - name: 安装并启动最终 NSIS 产物
+        run: node scripts/validate-release-artifact.mjs standard acceptance-artifacts/standard acceptance-evidence/standard
+
+      - name: 上传 Standard 验收现场
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: acceptance-standard-evidence
+          path: acceptance-evidence/standard
+          if-no-files-found: warn
+
+  accept-portable:
+    name: Accept Portable Archive
+    runs-on: windows-2022
+    needs: build-portable
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: scripts/validate-release-artifact.mjs
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: electron-portable
+          path: acceptance-artifacts/portable
+
+      - name: 解压并启动最终 Portable ZIP
+        run: node scripts/validate-release-artifact.mjs portable acceptance-artifacts/portable acceptance-evidence/portable
+
+      - name: 上传 Portable 验收现场
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: acceptance-portable-evidence
+          path: acceptance-evidence/portable
+          if-no-files-found: warn
+
+  # ── 5. Electron Steam 版 ──
   build-steam:
     name: Build Steam (Windows)
     runs-on: windows-2022
@@ -189,9 +238,6 @@ jobs:
         with:
           arch: x64
 
-      - name: 安装 WASM Rust target
-        run: rustup target add wasm32-unknown-unknown
-
       - name: 版本号同步
         run: pnpm version:sync
 
@@ -199,7 +245,7 @@ jobs:
         run: pnpm build
 
       - name: 准备内置 Daemon 运行时
-        run: node scripts/build-daemon-bundle.mjs && node scripts/collect-daemon-deps.mjs && pnpm rebuild:daemon-native
+        run: node scripts/build-daemon-bundle.mjs && node scripts/collect-daemon-deps.mjs && pnpm rebuild:daemon-deps
 
       - name: 构建 Electron Steam 版
         run: pnpm exec electron-builder --config electron-builder.steam.yml
@@ -224,7 +270,7 @@ jobs:
           name: electron-steam
           path: release-electron/win-unpacked/**/*
 
-  # ── 5. Docker 镜像构建 ──
+  # ── 6. Docker 镜像构建 ──
   build-docker:
     name: Build Docker Image
     runs-on: ubuntu-latest
@@ -275,11 +321,11 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # ── 6. GitHub Release ──
+  # ── 7. GitHub Release ──
   release:
     name: Create Release
     runs-on: ubuntu-latest
-    needs: [build-standard, build-portable, build-steam, build-docker]
+    needs: [accept-standard, accept-portable, build-steam, build-docker]
     if: startsWith(github.ref, 'refs/tags/')
     steps:
       - uses: actions/checkout@v6
@@ -312,13 +358,23 @@ jobs:
 
       - name: 生成发布元数据
         id: release_meta
-        run: echo "build_time=$(date '+%Y-%m-%dT%H:%M:%S%z')" >> $GITHUB_OUTPUT
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME,,}"
+          echo "build_time=$(date '+%Y-%m-%dT%H:%M:%S%z')" >> "$GITHUB_OUTPUT"
+          if [[ "$TAG" == *-rc* || "$TAG" == *-alpha* || "$TAG" == *-beta* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: 创建 Release
         uses: softprops/action-gh-release@v2
         with:
-          files: release-assets/*
           name: '萌动链接：PeroperoChat！ ${{ github.ref_name }}'
+          prerelease: ${{ steps.release_meta.outputs.prerelease }}
+          make_latest: ${{ steps.release_meta.outputs.prerelease != 'true' }}
+          files: release-assets/*
           body: |
             ## 🎉 ${{ github.ref_name }} 版本更新
 
@@ -342,15 +398,30 @@ jobs:
 
             #### ✨ 新特性
 
-            请查阅本次 Commit 记录了解具体变更。
+            - 新增“知识库”前端工作台：在核心记忆下提供事实库与文档知识库双入口，支持事实对象目录、全文搜索、有效事实详情、来源与置信度按需展开、历史取代链查看，以及文档知识库建设状态展示。
+            - 新增完整的多 Server 手动全量同步能力：以来源服务器为唯一真值，提供加密完整快照、同步前备份、重启边界原子替换、失败回滚、撤销上次同步与 Steam Cloud 完整快照语义。
+            - 新增远程能力节点 Shell：能力节点可主动出站连接 Home Server，Agent 可通过二级展开的远程终端工具包管理 AutoDL、Linux、GPU、ComfyUI 与长时训练任务。
+            - 新增 Browser、Computer Use 与 Remote Terminal 高级工具包的统一二级展开机制，减少默认工具上下文占用，并保持一次 ReAct 生命周期内稳定可用。
+            - 完善聊天图片附件体验：图片上传上限提升至 20MB，消息图片以气泡外轻量便签卡片展示，并支持应用内原图预览。
+            - 完善核心记忆档案浏览、图谱与事实库的共享数据契约，为记忆、事实和外部知识建立清晰分层。
 
             #### 🐛 问题修复
 
-            请查阅本次 Commit 记录了解具体变更。
+            - 修复 Electron 多 Renderer 竞争 Input Seat 导致续租过期的问题；仅由聚焦窗口持有和续租 Seat，并在过期或身份不匹配时自动恢复。
+            - 修复透明 Pet 窗口可能遗漏 `ready-to-show` 并被误判超时的问题，改由首帧与页面加载事件共同判定窗口就绪。
+            - 修复 YSM Molang 控制器中单个第三方脚本失败会拖垮整组模型加载的问题，改为逐文件获取和逐脚本容错。
+            - 修复模型 API Key 持久化、Token 统计、附件边界校验、图片重复渲染和 Electron 外链预览等交互问题。
+            - 清理全仓 ESLint 与 Prettier 错误，并以零 warning 标准通过检查；同时修复空 `catch`、无效正则转义、未使用变量和类型契约问题。
 
             #### 🏗️ 架构优化
 
-            请查阅本次 Commit 记录了解具体变更。
+            - 收敛 P9 分布式语义为面向普通用户的“从此服务器上同步最新数据”，移除自动多主同步、对象级选择与双向合并复杂度；Electron、Steam 与便携版业务入口保持本机 Daemon 绑定。
+            - 重构 Capability Node、Provider Runtime、Capability Offer、Invocation 与 Receipt 链路，加入 Pairing Code、持久设备 Token、自动重连、心跳和长时 Shell Session。
+            - 将事实库建设为 SQLite 与 TriviumDB 协同的共享事实层，支持对象、别名、有效事实、显式取代、幂等操作重放和只读档案 API。
+            - 优化 Conversation Surface、内部 Surface Protocol、任务中心、审批、输入请求、远程工具审批和多节点 Gateway 的边界契约。
+            - 完善版本同步脚本：移除不存在的浏览器扩展硬指向，补齐 Arca、Avatar Assets、Document Engine、Node SDK、Node Host、分布式服务与 Arca Host 版本覆盖。
+
+            > 以下 Commit 记录包含从上一版本到当前版本的完整提交摘要；上方内容为面向用户的重点归纳。
 
             ---
 
@@ -380,6 +451,5 @@ jobs:
 
             *由 GitHub Actions 自动构建发布 · 构建时间：${{ steps.release_meta.outputs.build_time }}*
           draft: false
-          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

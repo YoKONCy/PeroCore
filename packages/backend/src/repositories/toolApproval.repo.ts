@@ -1,4 +1,10 @@
-import { and, asc, eq, lte } from 'drizzle-orm'
+/**
+ * toolApproval.repo — 持久化仓储
+ *
+ * 封装本领域的核心职责与外部依赖，向上层提供可预测的调用契约。
+ * 非直观的状态转换、失败恢复与安全边界应在本模块内完成，避免泄漏实现细节。
+ */
+import { and, asc, eq } from 'drizzle-orm'
 import { randomUUID } from 'node:crypto'
 import type { DrizzleDb } from '../database'
 import { toolApprovalAuditLogs, toolApprovalRequests } from '../database/schema'
@@ -7,13 +13,15 @@ import type {
   ApprovalRequest,
   ApprovalStatus,
 } from '../services/execution/approvalService'
+import type { ApprovalRiskLevel } from '../services/execution/policyEngine'
 
 export type ApprovalAuditEvent =
   | 'requested'
   | 'resolved'
   | 'consumed'
-  | 'expired'
   | 'session_cleared'
+  | 'restart_rejected'
+  | 'shutdown_rejected'
 
 export interface ApprovalAuditRecord {
   id: string
@@ -123,25 +131,6 @@ export class ToolApprovalRepository {
     return row ? this.fromRow(row) : undefined
   }
 
-  expirePending(nowIso: string): ApprovalRequest[] {
-    const expired = this.db
-      .select()
-      .from(toolApprovalRequests)
-      .where(
-        and(
-          eq(toolApprovalRequests.status, 'pending'),
-          lte(toolApprovalRequests.expiresAt, nowIso),
-        ),
-      )
-      .all()
-      .map((row) => this.fromRow(row))
-    for (const request of expired) {
-      request.status = 'expired'
-      this.update(request)
-    }
-    return expired
-  }
-
   appendAudit(input: Omit<ApprovalAuditRecord, 'id' | 'createdAt'>): ApprovalAuditRecord {
     const record: ApprovalAuditRecord = {
       ...input,
@@ -204,11 +193,13 @@ export class ToolApprovalRepository {
       argsSummaryJson: JSON.stringify(request.argsSummary),
       argsFingerprint: request.argsFingerprint,
       reason: request.reason,
+      riskLevel: request.riskLevel,
       status: request.status,
       decision: request.decision ?? null,
       resolutionMessage: request.resolutionMessage ?? null,
       createdAt: request.createdAt,
-      expiresAt: request.expiresAt,
+      // 兼容既有数据库的非空旧列；审批协议本身不再包含过期时间。
+      expiresAt: '',
       resolvedAt: request.resolvedAt ?? null,
     }
   }
@@ -225,11 +216,11 @@ export class ToolApprovalRepository {
       argsSummary: JSON.parse(row.argsSummaryJson) as Record<string, unknown>,
       argsFingerprint: row.argsFingerprint,
       reason: row.reason,
+      riskLevel: row.riskLevel as ApprovalRiskLevel,
       status: row.status as ApprovalStatus,
       decision: row.decision as ApprovalDecision | undefined,
       resolutionMessage: row.resolutionMessage ?? undefined,
       createdAt: row.createdAt,
-      expiresAt: row.expiresAt,
       resolvedAt: row.resolvedAt ?? undefined,
     }
   }

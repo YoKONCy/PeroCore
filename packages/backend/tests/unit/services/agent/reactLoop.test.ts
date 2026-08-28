@@ -20,13 +20,151 @@ async function collectLoop(params: Parameters<typeof runReActLoop>[0]) {
   const yields = []
   let next = await generator.next()
   while (!next.done) {
-    yields.push(next.value)
+    if (next.value.event === 'narration_delta') yields.push(next.value.data.delta)
+    else if (next.value.event !== 'narration_start' && next.value.event !== 'narration_end')
+      yields.push(next.value)
     next = await generator.next()
   }
   return { yields, result: next.value }
 }
 
 describe('runReActLoop', () => {
+  it('应将Provider原生思考作为独立Timeline回传并与正文区分', async () => {
+    const { yields, result } = await collectLoop({
+      llmService: {
+        chatStream: vi
+          .fn()
+          .mockReturnValue(
+            streamFrom([
+              { choices: [{ delta: { reasoningContent: '原生分析' } }] },
+              { choices: [{ delta: { content: '<think>文本思考</think>最终答案' } }] },
+            ]),
+          ),
+      } as never,
+      modelConfig: { ...modelConfig, returnNativeReasoning: true },
+      messages: [{ role: 'user', content: '分析' }],
+      tools: undefined,
+      toolExecutor: undefined,
+      source: 'desktop',
+    })
+
+    expect(yields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ event: 'native_reasoning_start' }),
+        expect.objectContaining({
+          event: 'native_reasoning_delta',
+          data: expect.objectContaining({ delta: '原生分析' }),
+        }),
+        expect.objectContaining({ event: 'native_reasoning_end' }),
+        expect.objectContaining({ event: 'thinking_start' }),
+        expect.objectContaining({
+          event: 'thinking_delta',
+          data: expect.objectContaining({ delta: '文本思考' }),
+        }),
+        expect.objectContaining({ event: 'thinking_end' }),
+        '最终答案',
+      ]),
+    )
+    expect(result.contentBlocks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'thinking', content: '文本思考' }),
+        expect.objectContaining({ kind: 'native_reasoning', content: '原生分析', mode: 'stream' }),
+        expect.objectContaining({ kind: 'narration', content: '最终答案' }),
+      ]),
+    )
+  })
+
+  it('同一轮出现多个think块时应分别流式发布碎碎念', async () => {
+    const { yields, result } = await collectLoop({
+      llmService: {
+        chatStream: vi
+          .fn()
+          .mockReturnValue(
+            streamFrom([
+              { choices: [{ delta: { content: '<thi' } }] },
+              { choices: [{ delta: { content: 'nk>第一段' } }] },
+              { choices: [{ delta: { content: '碎碎念</think>正文' } }] },
+              { choices: [{ delta: { content: '<think>第二段</think>结束' } }] },
+            ]),
+          ),
+      } as never,
+      modelConfig,
+      messages: [{ role: 'user', content: '继续' }],
+      tools: undefined,
+      toolExecutor: undefined,
+      source: 'desktop',
+    })
+
+    expect(
+      yields.filter((item) => typeof item !== 'string' && item.event === 'thinking_start'),
+    ).toHaveLength(2)
+    expect(
+      yields.filter((item) => typeof item !== 'string' && item.event === 'thinking_end'),
+    ).toHaveLength(2)
+    expect(yields).toEqual(expect.arrayContaining(['正文', '结束']))
+    expect(result.contentBlocks.filter((block) => block.kind === 'thinking')).toEqual([
+      expect.objectContaining({ content: '第一段碎碎念' }),
+      expect.objectContaining({ content: '第二段' }),
+    ])
+  })
+
+  it('应向Scheduler报告去重后的Token增量和工具I/O用量', async () => {
+    const llmService = {
+      chatStream: vi.fn().mockReturnValue(
+        streamFrom([
+          {
+            choices: [
+              {
+                delta: {
+                  toolCalls: [
+                    {
+                      index: 0,
+                      id: 'call-usage',
+                      function: { name: 'lookup', arguments: '{}' },
+                    },
+                  ],
+                },
+              },
+            ],
+            usage: { promptTokens: 10, completionTokens: 2, totalTokens: 12 },
+          },
+          {
+            choices: [{ delta: {} }],
+            usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+          },
+        ]),
+      ),
+    }
+    const onUsage = vi.fn()
+    const endIo = vi.fn()
+    await collectLoop({
+      llmService: llmService as never,
+      modelConfig,
+      messages: [{ role: 'user', content: '查找' }],
+      tools: [{ name: 'lookup', description: '查询', parameters: {} }],
+      toolExecutor: {
+        execute: vi.fn().mockResolvedValue({
+          output: '完成',
+          durationMs: 1,
+          isError: false,
+          shouldTerminate: true,
+        }),
+      },
+      source: 'desktop',
+      config: { maxTurns: 1 },
+      onUsage,
+      beginIo: () => endIo,
+    })
+
+    expect(onUsage.mock.calls.map((call) => call[0])).toEqual([
+      { llmCalls: 1 },
+      { inputTokens: 10, outputTokens: 2 },
+      { inputTokens: 0, outputTokens: 3 },
+      { toolCalls: 1 },
+    ])
+    expect(endIo).toHaveBeenCalledOnce()
+  })
+
   it('读取工具持久化时只保留审计摘要，不保存文件正文', () => {
     const plain = toolResultForPersistence(
       'read_file',
@@ -105,6 +243,12 @@ describe('runReActLoop', () => {
     expect(yields).toEqual([
       { event: 'status', data: { state: 'thinking', message: '正在思考...', turn: 1 } },
       '你好',
+      expect.objectContaining({ event: 'thinking_start' }),
+      expect.objectContaining({
+        event: 'thinking_delta',
+        data: expect.objectContaining({ delta: '隐藏思考' }),
+      }),
+      expect.objectContaining({ event: 'thinking_end' }),
       '世界',
     ])
     // 返回值已改为对象结构 { toolCalls, messages, rawText }，无工具调用时 toolCalls 为空数组
@@ -163,7 +307,10 @@ describe('runReActLoop', () => {
       llmService: llmService as never,
       modelConfig,
       messages,
-      tools: [{ name: 'lookup', description: '查询', parameters: { type: 'object' } }],
+      tools: [
+        { name: 'lookup', description: '查询', parameters: { type: 'object' } },
+        { name: 'finish_task', description: '完成', parameters: { type: 'object' } },
+      ],
       toolExecutor,
       source: 'desktop',
       config: { maxTurns: 2 },
@@ -171,6 +318,13 @@ describe('runReActLoop', () => {
 
     // 第七阶段修复（批次 B1）：execute 第 4 个参数现在是 toolRuntimeContext（含 agentId/sessionId）
     // 测试未传 agentId/threadContext，故 agentId 为 undefined，sessionId 默认 'default'
+    const observedTools = llmService.chatStream.mock.calls.map((call) =>
+      (
+        (call[2] as { tools?: Array<{ type: string; function: { name: string } }> })?.tools ?? []
+      ).map((tool) => tool.function.name),
+    )
+    expect(observedTools[0]).not.toContain('finish_task')
+    expect(observedTools[1]).toContain('finish_task')
     expect(toolExecutor.execute).toHaveBeenCalledWith(
       'lookup',
       { q: '猫' },
@@ -179,7 +333,23 @@ describe('runReActLoop', () => {
     )
     expect(yields).toEqual([
       { event: 'status', data: { state: 'thinking', message: '正在思考...', turn: 1 } },
+      {
+        event: 'tool_call_start',
+        data: { draftId: 'tool-draft-1-0', turn: 1, index: 0 },
+      },
+      expect.objectContaining({ event: 'tool_call_delta' }),
+      expect.objectContaining({ event: 'tool_call_delta' }),
       '需要查找',
+      {
+        event: 'tool_call_ready',
+        data: {
+          draftId: 'tool-draft-1-0',
+          callId: 'call-1',
+          turn: 1,
+          name: 'lookup',
+          args: { q: '猫' },
+        },
+      },
       { event: 'tool_call', data: { name: 'lookup', args: { q: '猫' }, callId: 'call-1' } },
       { event: 'status', data: { state: 'calling', message: '正在调用工具: lookup', turn: 1 } },
       {
@@ -200,6 +370,7 @@ describe('runReActLoop', () => {
       {
         role: 'assistant',
         content: '需要查找',
+        reasoningContent: '',
         // assistant 消息现在携带 toolCalls 数组（id/type/function 结构）
         toolCalls: [
           {
@@ -212,6 +383,16 @@ describe('runReActLoop', () => {
       // 工具消息字段从 tool_call_id 改为 toolCallId
       { role: 'tool', content: '工具结果', toolCallId: 'call-1' },
     ])
+    expect(result.contentBlocks.map((block) => [block.kind, block.sequence])).toEqual([
+      ['narration', 1],
+      ['tool', 2],
+      ['narration', 3],
+    ])
+    expect(result.contentBlocks).toMatchObject([
+      { kind: 'narration', phase: 'progress', content: '需要查找' },
+      { kind: 'tool', callId: 'call-1', name: 'lookup', result: '工具结果' },
+      { kind: 'narration', phase: 'final', content: '完成' },
+    ])
     // 返回值已改为对象结构，工具调用列表在 result.toolCalls 字段
     expect(result.toolCalls).toEqual([
       {
@@ -223,6 +404,232 @@ describe('runReActLoop', () => {
         callId: 'call-1',
       },
     ])
+  })
+
+  it('按行读取后应让同轮ReAct后继轮次看到正文和实际行范围', async () => {
+    const rangeResult = JSON.stringify({
+      content: '第101行\n第102行',
+      totalBytes: 1_000,
+      totalLines: 500,
+      hash: 'abc',
+      truncated: true,
+      lineStart: 101,
+      lineEnd: 102,
+    })
+    const llmService = {
+      chatStream: vi
+        .fn()
+        .mockReturnValueOnce(
+          streamFrom([
+            {
+              choices: [
+                {
+                  delta: {
+                    toolCalls: [
+                      {
+                        index: 0,
+                        id: 'call-read-range',
+                        type: 'function',
+                        function: {
+                          name: 'read_file_range',
+                          arguments: '{"path":"src/a.ts","line_start":101,"line_end":102}',
+                        },
+                      },
+                    ],
+                  },
+                  finishReason: 'tool_calls',
+                },
+              ],
+            },
+          ]),
+        )
+        .mockReturnValueOnce(
+          streamFrom([{ choices: [{ delta: { content: '读取完成。' }, finishReason: null }] }]),
+        ),
+    }
+
+    const { result } = await collectLoop({
+      llmService: llmService as never,
+      modelConfig,
+      messages: [{ role: 'user', content: '读取文件' }],
+      tools: [
+        {
+          name: 'read_file_range',
+          description: '按行读取文件',
+          parameters: { type: 'object' },
+        },
+      ],
+      toolExecutor: {
+        execute: vi.fn().mockResolvedValue({
+          output: rangeResult,
+          durationMs: 1,
+          isError: false,
+          shouldTerminate: false,
+        }),
+      },
+      source: 'desktop',
+      config: { maxTurns: 2 },
+    })
+
+    expect(llmService.chatStream).toHaveBeenNthCalledWith(
+      2,
+      modelConfig,
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'tool',
+          toolCallId: 'call-read-range',
+          content: rangeResult,
+        }),
+      ]),
+      expect.any(Object),
+    )
+    expect(result.toolCalls[0]?.result).not.toContain('第101行')
+    expect(JSON.parse(result.toolCalls[0]?.result ?? '{}')).toMatchObject({
+      lineStart: 101,
+      lineEnd: 102,
+      totalLines: 500,
+    })
+  })
+
+  it('未启用原生思考时工具续轮也应显式回传空reasoning_content', async () => {
+    const llmService = {
+      chatStream: vi
+        .fn()
+        .mockReturnValueOnce(
+          streamFrom([
+            {
+              choices: [
+                {
+                  delta: {
+                    toolCalls: [
+                      {
+                        index: 0,
+                        id: 'call-list',
+                        type: 'function',
+                        function: { name: 'list_directory', arguments: '{"path":"."}' },
+                      },
+                    ],
+                  },
+                  finishReason: 'tool_calls',
+                },
+              ],
+            },
+          ]),
+        )
+        .mockReturnValueOnce(
+          streamFrom([{ choices: [{ delta: { content: '目录读取完成。' }, finishReason: null }] }]),
+        ),
+    }
+    const toolExecutor = {
+      execute: vi.fn().mockResolvedValue({
+        output: '[]',
+        durationMs: 1,
+        isError: false,
+        shouldTerminate: false,
+      }),
+    }
+
+    await collectLoop({
+      llmService: llmService as never,
+      modelConfig: { ...modelConfig, returnNativeReasoning: false },
+      messages: [{ role: 'user', content: '列出目录' }],
+      tools: [{ name: 'list_directory', description: '列出目录', parameters: { type: 'object' } }],
+      toolExecutor,
+      source: 'desktop',
+      config: { maxTurns: 2 },
+    })
+
+    expect(llmService.chatStream).toHaveBeenNthCalledWith(
+      2,
+      expect.any(Object),
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'assistant',
+          reasoningContent: '',
+          toolCalls: [expect.objectContaining({ id: 'call-list' })],
+        }),
+      ]),
+      expect.any(Object),
+    )
+  })
+
+  it('工具审批拒绝后应在下一轮原样回传思考内容', async () => {
+    const llmService = {
+      chatStream: vi
+        .fn()
+        .mockReturnValueOnce(
+          streamFrom([
+            {
+              choices: [
+                {
+                  delta: { reasoningContent: '用户要求打开应用，我需要调用工具。' },
+                  finishReason: null,
+                },
+              ],
+            },
+            {
+              choices: [
+                {
+                  delta: {
+                    toolCalls: [
+                      {
+                        index: 0,
+                        id: 'call-open',
+                        type: 'function',
+                        function: { name: 'open_application', arguments: '{"name":"calc"}' },
+                      },
+                    ],
+                  },
+                  finishReason: 'tool_calls',
+                },
+              ],
+            },
+          ]),
+        )
+        .mockReturnValueOnce(
+          streamFrom([
+            { choices: [{ delta: { content: '已取消打开应用。' }, finishReason: null }] },
+          ]),
+        ),
+    }
+    const toolExecutor = {
+      execute: vi.fn().mockResolvedValue({
+        output: JSON.stringify({ code: 'APPROVAL_DENIED', message: '用户拒绝了本次工具调用' }),
+        durationMs: 5,
+        isError: true,
+        shouldTerminate: false,
+      }),
+    }
+
+    await collectLoop({
+      llmService: llmService as never,
+      modelConfig,
+      messages: [{ role: 'user', content: '打开计算器' }],
+      tools: [
+        { name: 'open_application', description: '打开应用', parameters: { type: 'object' } },
+      ],
+      toolExecutor,
+      source: 'desktop',
+      config: { maxTurns: 2 },
+    })
+
+    expect(llmService.chatStream).toHaveBeenNthCalledWith(
+      2,
+      modelConfig,
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'assistant',
+          reasoningContent: '用户要求打开应用，我需要调用工具。',
+          toolCalls: [expect.objectContaining({ id: 'call-open' })],
+        }),
+        expect.objectContaining({
+          role: 'tool',
+          toolCallId: 'call-open',
+          content: expect.stringContaining('APPROVAL_DENIED'),
+        }),
+      ]),
+      expect.any(Object),
+    )
   })
 
   it('应当在首轮无有效内容时提示配置问题', async () => {
@@ -351,7 +758,8 @@ describe('runReActLoop', () => {
       expect.objectContaining({ sessionId: 'default' }),
     )
     expect(llmService.chatStream).toHaveBeenLastCalledWith(modelConfig, expect.any(Array), {
-      tools: undefined,
+      signal: undefined,
+      tools: [],
     })
     expect(messages[messages.length - 1]).toMatchObject({ role: 'system' })
     expect(result.toolCalls).toEqual([
@@ -494,7 +902,245 @@ describe('runReActLoop', () => {
     ])
   })
 
-  it('应当在工具要求终止时结束循环', async () => {
+  it('模型关闭stream时应使用非流式配置入口并保持统一Delta语义', async () => {
+    const llmService = {
+      chatStream: vi.fn(),
+      chatConfigured: vi.fn().mockReturnValue(
+        streamFrom([
+          {
+            choices: [{ delta: { content: '完整回复' }, finishReason: 'stop' }],
+          },
+        ]),
+      ),
+    }
+
+    const { yields, result } = await collectLoop({
+      llmService: llmService as never,
+      modelConfig: { ...modelConfig, stream: false },
+      messages: [{ role: 'user', content: '你好' }],
+      tools: undefined,
+      toolExecutor: undefined,
+      source: 'desktop',
+      config: { maxTurns: 1 },
+    })
+
+    expect(llmService.chatConfigured).toHaveBeenCalledTimes(1)
+    expect(llmService.chatStream).not.toHaveBeenCalled()
+    expect(yields).toContain('完整回复')
+    expect(result.rawText).toContain('完整回复')
+  })
+
+  it('桌面截图应保留坐标上下文并剥离base64', async () => {
+    let turn = 0
+    const observedMessages: unknown[][] = []
+    const llmService = {
+      chatStream: vi.fn((_config, messages) => {
+        observedMessages.push(messages)
+        turn++
+        if (turn === 1) {
+          return streamFrom([
+            {
+              choices: [
+                {
+                  delta: {
+                    toolCalls: [
+                      {
+                        index: 0,
+                        id: 'screenshot-1',
+                        type: 'function',
+                        function: { name: 'take_screenshot', arguments: '{}' },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          ])
+        }
+        return streamFrom([{ choices: [{ delta: { content: '已看到' } }] }])
+      }),
+    }
+    const toolExecutor = {
+      execute: vi.fn().mockResolvedValue({
+        output: JSON.stringify({
+          success: true,
+          screenshots: [
+            {
+              index: 0,
+              dataUri: 'data:image/png;base64,AAAA',
+              coordinateContext: {
+                displayId: '7',
+                coordinateSpace: 'screenshot',
+                screenshotWidth: 1280,
+                screenshotHeight: 720,
+                scaleFactor: 1.5,
+              },
+            },
+          ],
+          message: '已截取屏幕',
+        }),
+        durationMs: 1,
+        isError: false,
+      }),
+    }
+
+    await collectLoop({
+      llmService: llmService as never,
+      modelConfig: { ...modelConfig, enableVision: true },
+      messages: [{ role: 'user', content: '截图' }],
+      tools: [{ name: 'take_screenshot', description: '截图', parameters: {} }],
+      toolExecutor,
+      source: 'desktop',
+      config: { maxTurns: 2 },
+    })
+
+    const secondTurn = JSON.stringify(observedMessages[1])
+    expect(secondTurn).toContain('coordinateSpace=screenshot')
+    expect(secondTurn).toContain('displayId=7')
+    expect(secondTurn).toContain('screenshotWidth=1280')
+    expect(secondTurn).toContain('image_url')
+    expect(secondTurn.match(/AAAA/g)).toHaveLength(1)
+  })
+
+  it('高级工具应在展开前隐藏，并在展开后的后续轮次持续可用', async () => {
+    let call = 0
+    const observedTools: string[][] = []
+    const llmService = {
+      chatStream: vi.fn((_config, _messages, options) => {
+        observedTools.push((options?.tools ?? []).map((tool) => tool.function.name))
+        call++
+        if (call === 1) {
+          return streamFrom([
+            {
+              choices: [
+                {
+                  delta: {
+                    toolCalls: [
+                      {
+                        index: 0,
+                        id: 'expand-1',
+                        type: 'function',
+                        function: { name: 'expand_advanced_tools', arguments: '{}' },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          ])
+        }
+        return streamFrom([{ choices: [{ delta: { content: '已看到高级工具' } }] }])
+      }),
+    }
+    const toolExecutor = {
+      execute: vi.fn().mockResolvedValue({
+        output: '高级工具列表已展开',
+        durationMs: 1,
+        isError: false,
+      }),
+    }
+
+    await collectLoop({
+      llmService: llmService as never,
+      modelConfig,
+      messages: [{ role: 'user', content: '操作网页' }],
+      tools: [
+        { name: 'finish_task', description: '完成', parameters: {} },
+        { name: 'expand_advanced_tools', description: '展开', parameters: {} },
+        { name: 'browser_open_url', description: '打开网页', parameters: {} },
+        { name: 'automation_execute', description: '桌面操作', parameters: {} },
+        { name: 'remote_terminal_nodes', description: '远程节点', parameters: {} },
+        { name: 'remote_terminal_create', description: '远程终端', parameters: {} },
+        { name: 'take_screenshot', description: '截图', parameters: {} },
+        { name: 'web_fetch', description: '读取网页', parameters: {} },
+      ],
+      toolExecutor,
+      source: 'desktop',
+      config: { maxTurns: 3 },
+    })
+
+    expect(observedTools[0]).toEqual(
+      expect.arrayContaining(['expand_advanced_tools', 'take_screenshot', 'web_fetch']),
+    )
+    expect(observedTools[0]).not.toContain('finish_task')
+    expect(observedTools[0]).not.toEqual(
+      expect.arrayContaining([
+        'browser_open_url',
+        'automation_execute',
+        'remote_terminal_nodes',
+        'remote_terminal_create',
+      ]),
+    )
+    expect(observedTools[1]).toEqual(
+      expect.arrayContaining([
+        'browser_open_url',
+        'automation_execute',
+        'remote_terminal_nodes',
+        'remote_terminal_create',
+      ]),
+    )
+    expect(observedTools[1]).not.toContain('finish_task')
+  })
+
+  it('load_skill成功后应刷新下一轮工具定义', async () => {
+    const observedTools: string[][] = []
+    const llmService = {
+      chatStream: vi.fn((_config, _messages, options) => {
+        observedTools.push(
+          (options?.tools ?? []).map((tool: { function: { name: string } }) => tool.function.name),
+        )
+        return observedTools.length === 1
+          ? streamFrom([
+              {
+                choices: [
+                  {
+                    delta: {
+                      content: null,
+                      toolCalls: [
+                        {
+                          index: 0,
+                          id: 'skill-1',
+                          type: 'function',
+                          function: { name: 'load_skill', arguments: '{"skill_id":"demo"}' },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            ])
+          : streamFrom([{ choices: [{ delta: { content: '已加载' } }] }])
+      }),
+    }
+    const toolExecutor = {
+      execute: vi.fn().mockResolvedValue({
+        output: 'Skill内容',
+        durationMs: 1,
+        isError: false,
+        shouldTerminate: false,
+      }),
+    }
+
+    await collectLoop({
+      llmService: llmService as never,
+      modelConfig,
+      messages: [{ role: 'user', content: '加载技能' }],
+      tools: [{ name: 'load_skill', description: '加载', parameters: { type: 'object' } }],
+      refreshToolDefinitions: () => [
+        { name: 'load_skill', description: '加载', parameters: { type: 'object' } },
+        { name: 'new_tool', description: '新工具', parameters: { type: 'object' } },
+      ],
+      toolExecutor: toolExecutor as never,
+      source: 'desktop',
+      sessionId: 's1',
+      agentId: 'pero',
+    })
+
+    expect(observedTools[0]).toEqual(['load_skill'])
+    expect(observedTools[1]).toContain('new_tool')
+  })
+
+  it('首轮幻觉调用finish_task时应拒绝执行并要求自然回复', async () => {
     const llmService = {
       chatStream: vi.fn().mockReturnValue(
         streamFrom([
@@ -537,16 +1183,15 @@ describe('runReActLoop', () => {
       config: { maxTurns: 5 },
     })
 
-    expect(llmService.chatStream).toHaveBeenCalledTimes(1)
+    expect(llmService.chatStream).toHaveBeenCalledTimes(2)
+    expect(toolExecutor.execute).not.toHaveBeenCalled()
     expect(result.toolCalls).toEqual([
-      {
+      expect.objectContaining({
         name: 'finish_task',
-        args: { summary: '完成' },
-        result: '完成',
-        durationMs: 1,
-        isError: false,
-        callId: 'call-1',
-      },
+        args: {},
+        isError: true,
+        result: expect.stringContaining('尚未开放'),
+      }),
     ])
   })
 })

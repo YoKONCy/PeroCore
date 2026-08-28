@@ -25,6 +25,7 @@ const fileActionLabel = {
   restore_edited: '恢复编辑前版本',
   restore_deleted: '恢复已删除文件',
   restore_renamed: '恢复原文件名',
+  preserve_changed: '检测到后续修改，将保留',
 } as const
 
 const dialogTitle = computed(() =>
@@ -54,6 +55,10 @@ const confirmText = computed(() => (props.preview?.wholeThread ? '删除并回�
           <strong>{{ preview.editedCount }}</strong>
           <span>恢复文件</span>
         </div>
+        <div class="is-preserved">
+          <strong>{{ preview.preservedCount }}</strong>
+          <span>保留改动</span>
+        </div>
       </div>
 
       <p class="rewind-dialog__description">
@@ -77,7 +82,16 @@ const confirmText = computed(() => (props.preview?.wholeThread ? '删除并回�
             class="rewind-dialog__file"
           >
             <span class="rewind-dialog__file-icon" :class="`is-${file.action}`">
-              <PixelIcon :name="file.action === 'delete_created' ? 'trash' : 'refresh'" size="xs" />
+              <PixelIcon
+                :name="
+                  file.action === 'delete_created'
+                    ? 'trash'
+                    : file.action === 'preserve_changed'
+                      ? 'shield'
+                      : 'refresh'
+                "
+                size="xs"
+              />
             </span>
             <code :title="file.path">{{ file.path }}</code>
             <small>{{ fileActionLabel[file.action] }}</small>
@@ -90,9 +104,9 @@ const confirmText = computed(() => (props.preview?.wholeThread ? '删除并回�
         <span>本次撤回不会产生文件回滚。</span>
       </div>
 
-      <div v-if="preview.forceWarning" class="rewind-dialog__warning">
-        <PixelIcon name="alert" size="sm" />
-        <span>将强制恢复以上文件，并覆盖这些检查点之后产生的修改。此操作无法撤销。</span>
+      <div v-if="preview.files.length" class="rewind-dialog__warning">
+        <PixelIcon name="shield" size="sm" />
+        <span>会话完成后又发生变化的文件将被保留，不会删除或覆盖。</span>
       </div>
     </div>
 
@@ -120,7 +134,7 @@ const confirmText = computed(() => (props.preview?.wholeThread ? '删除并回�
 }
 .rewind-dialog__summary {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   overflow: hidden;
   border: 1px solid var(--ui-border-subtle);
   border-radius: var(--ui-radius-md);
@@ -208,6 +222,10 @@ const confirmText = computed(() => (props.preview?.wholeThread ? '删除并回�
 .rewind-dialog__file-icon.is-delete_created {
   color: var(--ui-danger);
   background: var(--ui-danger-soft);
+}
+.rewind-dialog__file-icon.is-preserve_changed {
+  color: var(--ui-success);
+  background: var(--ui-success-soft);
 }
 .rewind-dialog__file code {
   overflow: hidden;

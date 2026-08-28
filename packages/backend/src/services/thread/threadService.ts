@@ -19,6 +19,7 @@
  * @module packages/backend/src/services/thread/threadService
  */
 
+import type { KernelExecutionDescriptor } from '@infos/shared'
 import type { ThreadRepository } from '../../repositories/thread.repo'
 import { type ThreadChannel, type ThreadPurpose } from '../../repositories/thread.repo'
 import type { AttachmentRepository } from '../../repositories/attachment.repo'
@@ -54,6 +55,8 @@ export interface ThreadInfo {
   contextPolicy: string | null
   /** 当前 Thread 明确禁用的工具名；仅作为 Channel 白名单的减法层。 */
   disabledTools: string[]
+  /** 是否跳过普通工具的审批请求。 */
+  autoExecuteTools: boolean
   /** M05: Thread 用途（conversation / background_task / companion） */
   purpose: string
   createdAt: string
@@ -80,11 +83,17 @@ export interface ThreadMessageInfo {
 // Service
 // ─────────────────────────────────────────────
 
+export interface ThreadCoverageInvalidator {
+  invalidatePairs(threadId: string, pairIds: string[]): Promise<void>
+  invalidateThread(threadId: string): Promise<void>
+}
+
 export class ThreadService {
   constructor(
     private threadRepo: ThreadRepository,
     private attachmentRepo?: AttachmentRepository,
     private checkpointService?: WorkspaceCheckpointService,
+    private coverageInvalidator?: ThreadCoverageInvalidator,
   ) {}
 
   /** 创建新 Thread */
@@ -142,6 +151,11 @@ export class ThreadService {
     if (!success) throw new AppError('NOT_FOUND', { message: `Thread 不存在: ${threadId}` })
   }
 
+  async updateAutoExecuteTools(threadId: string, autoExecuteTools: boolean): Promise<void> {
+    const success = await this.threadRepo.updateAutoExecuteTools(threadId, autoExecuteTools)
+    if (!success) throw new AppError('NOT_FOUND', { message: `Thread 不存在: ${threadId}` })
+  }
+
   /** 获取或创建 Agent 的最新 Thread */
   async getOrCreateLatest(
     agentId: string,
@@ -192,6 +206,7 @@ export class ThreadService {
     content: string,
     pairId?: string,
     metadataJson?: string,
+    execution?: KernelExecutionDescriptor,
   ): Promise<ThreadMessageInfo> {
     const row = await this.threadRepo.appendMessage({
       threadId,
@@ -199,6 +214,7 @@ export class ThreadService {
       content,
       pairId,
       metadataJson,
+      execution,
     })
 
     // 用户消息同样计入消息总数，保持与 syncThreadStats 的统计口径一致
@@ -232,6 +248,7 @@ export class ThreadService {
     metadataJson?: string
     scorerStatus?: 'pending' | 'analyzed' | 'failed' | 'skipped'
     status?: 'active' | 'failed' | 'interrupted'
+    execution?: KernelExecutionDescriptor
   }): Promise<ThreadMessageInfo> {
     const row = await this.threadRepo.appendMessage({
       threadId: params.threadId,
@@ -243,6 +260,7 @@ export class ThreadService {
       metadataJson: params.metadataJson,
       scorerStatus: params.scorerStatus,
       status: params.status,
+      execution: params.execution,
     })
 
     // 更新 Thread 计数
@@ -358,30 +376,39 @@ export class ThreadService {
   }
 
   /**
-   * 执行链式 rewind：先回滚文件，再删除目标轮次及全部后续轮次。
-   * 产品已确认 force 语义，因此不会因文件后续修改而跳过恢复。
+   * 执行链式 rewind：先安全回滚未发生后续变动的文件，再删除目标轮次及全部后续轮次。
    */
   async rewindMessage(threadId: string, messageId: number, deletedBy = 'user') {
     const preview = await this.previewMessageRewind(threadId, messageId)
-    await this.checkpointService!.rollback(preview)
+    const workspace = await this.checkpointService!.rollback(preview)
     const messageIds = await this.checkpointService!.deletePairs(preview, deletedBy)
     await this.attachmentRepo?.softDeleteByMessageIds(messageIds)
+    await this.coverageInvalidator?.invalidatePairs(threadId, preview.pairIds)
     await this.threadRepo.syncThreadStats(threadId)
     logger.info(
       `对话已链式回滚: thread=${threadId}, pairs=${preview.pairCount}, messages=${messageIds.length}`,
     )
-    return { preview, deletedMessageIds: messageIds }
+    return {
+      preview: { ...preview, files: workspace.files },
+      workspace,
+      deletedMessageIds: messageIds,
+    }
   }
 
-  /** 删除整条 Thread 前回滚该会话全部文件检查点。 */
+  /** 删除整条 Thread 前安全回滚该会话未发生后续变动的文件检查点。 */
   async rewindThread(threadId: string) {
     const preview = await this.previewThreadRewind(threadId)
-    await this.checkpointService!.rollback(preview)
+    const workspace = await this.checkpointService!.rollback(preview)
     const result = await this.threadRepo.softDeleteThread(threadId)
     if (!result.deleted) throw new AppError('NOT_FOUND', { message: '会话不存在或已删除' })
     await this.attachmentRepo?.softDeleteByMessageIds(result.messageIds)
+    await this.coverageInvalidator?.invalidateThread(threadId)
     logger.info(`Thread 已回滚并软删除: thread=${threadId}, pairs=${preview.pairCount}`)
-    return { preview, deletedMessageIds: result.messageIds }
+    return {
+      preview: { ...preview, files: workspace.files },
+      workspace,
+      deletedMessageIds: result.messageIds,
+    }
   }
 
   /** 软删除已退役 Channel 的全部 Thread 与消息。 */
@@ -396,15 +423,20 @@ export class ThreadService {
     const result = await this.threadRepo.softDeleteThread(threadId)
     if (!result.deleted) return false
     await this.attachmentRepo?.softDeleteByMessageIds(result.messageIds)
+    await this.coverageInvalidator?.invalidateThread(threadId)
     logger.info(`Thread 已软删除: thread=${threadId}, messages=${result.messageIds.length}`)
     return true
   }
 
   /** 软删除单条消息 */
   async deleteMessage(messageId: number, deletedBy = 'user'): Promise<boolean> {
+    const context = await this.threadRepo.getMessageCoverageContext(messageId)
     const success = await this.threadRepo.softDeleteMessage(messageId, deletedBy)
     if (success) {
       await this.attachmentRepo?.softDeleteByMessageIds([messageId])
+      if (context?.pairId) {
+        await this.coverageInvalidator?.invalidatePairs(context.threadId, [context.pairId])
+      }
       logger.info(`消息已软删除: msgId=${messageId}`)
     }
     return success
@@ -412,10 +444,14 @@ export class ThreadService {
 
   /** 软删除整对消息 */
   async deleteMessagePair(messageId: number, deletedBy = 'user'): Promise<number> {
+    const context = await this.threadRepo.getMessageCoverageContext(messageId)
     const messageIds = await this.threadRepo.getPairMessageIds(messageId)
     const count = await this.threadRepo.softDeletePair(messageId, deletedBy)
     if (count > 0) {
       await this.attachmentRepo?.softDeleteByMessageIds(messageIds)
+      if (context?.pairId) {
+        await this.coverageInvalidator?.invalidatePairs(context.threadId, [context.pairId])
+      }
       logger.info(`对话对已软删除: msgId=${messageId}, count=${count}`)
     }
     return count
@@ -423,8 +459,12 @@ export class ThreadService {
 
   /** 编辑消息内容 */
   async editMessage(messageId: number, newContent: string): Promise<boolean> {
+    const context = await this.threadRepo.getMessageCoverageContext(messageId)
     const success = await this.threadRepo.editMessage(messageId, newContent)
     if (success) {
+      if (context?.pairId) {
+        await this.coverageInvalidator?.invalidatePairs(context.threadId, [context.pairId])
+      }
       logger.info(`消息已编辑: msgId=${messageId}`)
     }
     return success
@@ -466,6 +506,7 @@ export class ThreadService {
       status: (r.status as string) ?? 'active',
       contextPolicy: (r.contextPolicy as string) ?? null,
       disabledTools: this.parseDisabledTools(r.disabledToolsJson),
+      autoExecuteTools: Boolean(r.autoExecuteTools),
       purpose: (r.purpose as string) ?? 'conversation',
       createdAt: (r.createdAt as string) ?? '',
       updatedAt: (r.updatedAt as string) ?? '',

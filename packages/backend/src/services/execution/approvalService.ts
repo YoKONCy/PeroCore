@@ -1,9 +1,17 @@
+/**
+ * approvalService — 领域服务
+ *
+ * 封装本领域的核心职责与外部依赖，向上层提供可预测的调用契约。
+ * 非直观的状态转换、失败恢复与安全边界应在本模块内完成，避免泄漏实现细节。
+ */
 import { createHash, randomUUID } from 'node:crypto'
 import type { ToolApprovalRepository } from '../../repositories/toolApproval.repo'
+import { AppError } from '../../lib/appError'
+import type { ApprovalRiskLevel } from './policyEngine'
 
 export type ApprovalDecision = 'allow_once' | 'allow_session' | 'deny_once'
 
-export type ApprovalStatus = 'pending' | 'approved' | 'denied' | 'expired' | 'consumed'
+export type ApprovalStatus = 'pending' | 'approved' | 'denied' | 'consumed'
 
 export interface ApprovalRequest {
   id: string
@@ -16,12 +24,12 @@ export interface ApprovalRequest {
   argsSummary: Record<string, unknown>
   argsFingerprint: string
   reason: string
+  riskLevel: ApprovalRiskLevel
   status: ApprovalStatus
   decision?: ApprovalDecision
   /** 用户决策附言（同意/拒绝时写给 Agent 的理由，可选） */
   resolutionMessage?: string
   createdAt: string
-  expiresAt: string
   resolvedAt?: string
 }
 
@@ -34,7 +42,7 @@ export interface CreateApprovalInput {
   toolName: string
   args: Record<string, unknown>
   reason: string
-  ttlMs?: number
+  riskLevel?: ApprovalRiskLevel
 }
 
 export type ApprovalEventListener = (request: ApprovalRequest) => void | Promise<void>
@@ -49,7 +57,7 @@ export class ApprovalService {
 
   constructor(private readonly repository?: ToolApprovalRepository) {
     for (const request of repository?.list() ?? []) this.requests.set(request.id, request)
-    this.expirePending()
+    if (repository) this.rejectPendingAfterRestart()
   }
 
   onRequested(listener: ApprovalEventListener): () => void {
@@ -64,7 +72,6 @@ export class ApprovalService {
   }
 
   create(input: CreateApprovalInput): ApprovalRequest {
-    this.expirePending()
     const fingerprint = this.fingerprint(input.args)
     const existing =
       this.repository?.findPending({
@@ -98,9 +105,9 @@ export class ApprovalService {
       argsSummary: this.sanitizeArgs(input.args),
       argsFingerprint: fingerprint,
       reason: input.reason,
+      riskLevel: input.riskLevel ?? 'low',
       status: 'pending',
       createdAt: new Date(now).toISOString(),
-      expiresAt: new Date(now + Math.max(10_000, input.ttlMs ?? 5 * 60_000)).toISOString(),
     }
     this.requests.set(request.id, request)
     this.repository?.create(request)
@@ -110,10 +117,11 @@ export class ApprovalService {
   }
 
   resolve(id: string, decision: ApprovalDecision, message?: string): ApprovalRequest {
-    this.expirePending()
     const request = this.get(id)
-    if (!request) throw new Error(`审批请求不存在: ${id}`)
-    if (request.status !== 'pending') throw new Error(`审批请求当前不可决策: ${request.status}`)
+    if (!request) throw new AppError('NOT_FOUND', { message: `审批请求不存在: ${id}` })
+    if (request.status !== 'pending') {
+      throw new AppError('CONFLICT', { message: `审批请求当前不可决策: ${request.status}` })
+    }
     request.decision = decision
     request.resolutionMessage = message?.trim() ? message.trim().slice(0, 2_000) : undefined
     request.resolvedAt = new Date().toISOString()
@@ -136,7 +144,6 @@ export class ApprovalService {
     if (current.status !== 'pending') return Promise.resolve(current)
     return new Promise<ApprovalRequest>((resolve, reject) => {
       const cleanup = () => {
-        clearTimeout(timer)
         signal?.removeEventListener('abort', abort)
         this.resolutionWaiters.get(id)?.delete(done)
       }
@@ -151,22 +158,12 @@ export class ApprovalService {
       const waiters = this.resolutionWaiters.get(id) ?? new Set()
       waiters.add(done)
       this.resolutionWaiters.set(id, waiters)
-      const timer = setTimeout(
-        () => {
-          cleanup()
-          const latest = this.get(id)
-          if (latest) resolve(latest)
-          else reject(new Error(`审批请求不存在: ${id}`))
-        },
-        Math.max(1, Date.parse(current.expiresAt) - Date.now() + 50),
-      )
       if (signal?.aborted) abort()
       else signal?.addEventListener('abort', abort, { once: true })
     })
   }
 
   get(id: string): ApprovalRequest | undefined {
-    this.expirePending()
     const request = this.requests.get(id) ?? this.repository?.get(id)
     if (request) this.requests.set(id, request)
     return request
@@ -175,7 +172,6 @@ export class ApprovalService {
   list(
     filter: { status?: ApprovalStatus; agentId?: string; sessionId?: string } = {},
   ): ApprovalRequest[] {
-    this.expirePending()
     if (this.repository) return this.repository.list(filter)
     return [...this.requests.values()].filter(
       (request) =>
@@ -245,7 +241,6 @@ export class ApprovalService {
     toolName: string
     args: Record<string, unknown>
   }): 'allow' | 'deny' | 'none' {
-    this.expirePending()
     if (this.sessionGrants.has(this.sessionKey(input.sessionId, input.toolName))) return 'allow'
     const fingerprint = this.fingerprint(input.args)
     let request = input.approvalId ? this.get(input.approvalId) : undefined
@@ -288,7 +283,10 @@ export class ApprovalService {
       if (key.startsWith(`${sessionId}:`)) this.sessionGrants.delete(key)
     for (const request of this.requests.values()) {
       if (request.sessionId === sessionId && request.status === 'pending') {
-        request.status = 'expired'
+        request.decision = 'deny_once'
+        request.status = 'denied'
+        request.resolutionMessage = '会话已结束，待处理审批已自动拒绝。'
+        request.resolvedAt = new Date().toISOString()
         this.persist(request)
         this.audit(request, 'session_cleared', {})
         for (const waiter of this.resolutionWaiters.get(request.id) ?? []) waiter(request)
@@ -297,20 +295,29 @@ export class ApprovalService {
     }
   }
 
-  private expirePending(): void {
-    if (this.repository) {
-      for (const request of this.repository.expirePending(new Date().toISOString())) {
-        this.requests.set(request.id, request)
-        this.audit(request, 'expired', {})
-        for (const waiter of this.resolutionWaiters.get(request.id) ?? []) waiter(request)
-        this.resolutionWaiters.delete(request.id)
-      }
-      return
+  /** 服务启动时拒绝上个进程遗留的审批，避免恢复流程复用失效调用栈。 */
+  private rejectPendingAfterRestart(): void {
+    for (const request of this.repository?.list({ status: 'pending' }) ?? []) {
+      request.decision = 'deny_once'
+      request.status = 'denied'
+      request.resolutionMessage = '服务已重启，旧审批已自动拒绝。'
+      request.resolvedAt = new Date().toISOString()
+      this.persist(request)
+      this.audit(request, 'restart_rejected', { reason: request.resolutionMessage })
     }
-    const now = Date.now()
-    for (const request of this.requests.values()) {
-      if (request.status === 'pending' && Date.parse(request.expiresAt) <= now)
-        request.status = 'expired'
+  }
+
+  /** 正常关闭时拒绝当前进程仍在等待的全部审批。 */
+  rejectAllPending(message = '服务正在关闭，待处理审批已自动拒绝。'): void {
+    for (const request of this.list({ status: 'pending' })) {
+      request.decision = 'deny_once'
+      request.status = 'denied'
+      request.resolutionMessage = message
+      request.resolvedAt = new Date().toISOString()
+      this.persist(request)
+      this.audit(request, 'shutdown_rejected', { reason: message })
+      for (const waiter of this.resolutionWaiters.get(request.id) ?? []) waiter(request)
+      this.resolutionWaiters.delete(request.id)
     }
   }
 
@@ -321,7 +328,13 @@ export class ApprovalService {
 
   private audit(
     request: ApprovalRequest,
-    event: 'requested' | 'resolved' | 'consumed' | 'expired' | 'session_cleared',
+    event:
+      | 'requested'
+      | 'resolved'
+      | 'consumed'
+      | 'session_cleared'
+      | 'restart_rejected'
+      | 'shutdown_rejected',
     detail: Record<string, unknown>,
   ): void {
     this.repository?.appendAudit({

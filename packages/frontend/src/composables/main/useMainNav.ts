@@ -14,6 +14,7 @@
 import { ref, computed, watch, type Ref } from 'vue'
 import { invoke } from '../../utils/ipcAdapter'
 import { preloadTab } from './tabRegistry'
+import { applicationSurfaceRegistry } from '../../applications'
 
 // ── 常量 ──
 
@@ -56,6 +57,15 @@ const pendingTab = ref<string>('')
 const isNavPinned = ref<boolean>(false)
 const expandedGroups = ref<Set<string>>(new Set(['settings', 'applications', 'advanced']))
 const theme = ref<ThemeMode>('light')
+
+const applicationNavItems: MainNavItem[] = applicationSurfaceRegistry
+  .list('main.tab')
+  .map((surface) => ({
+    id:
+      surface.appId === 'infos.arca' ? 'arca' : `${surface.appId}:${surface.declaration.surfaceId}`,
+    label: surface.declaration.title,
+    icon: surface.declaration.icon ?? 'book',
+  }))
 
 // ── 计算属性 ──
 
@@ -144,6 +154,16 @@ const navGroups: MainNavGroup[] = [
         },
       },
       {
+        id: 'knowledge',
+        label: '知识库',
+        labelEn: 'Knowledge',
+        icon: 'database',
+        ambient: {
+          primary: 'rgba(45, 212, 191, 0.11)',
+          secondary: 'rgba(125, 211, 252, 0.08)',
+        },
+      },
+      {
         id: 'tasks',
         label: '任务中心',
         labelEn: 'Tasks',
@@ -165,13 +185,14 @@ const navGroups: MainNavGroup[] = [
       { id: 'model_config', label: '模型配置', icon: 'settings' },
       { id: 'voice_config', label: '语音功能', icon: 'mic' },
       { id: 'mcp_config', label: 'MCP 配置', icon: 'terminal' },
+      { id: 'distributed', label: '分布式', icon: 'database' },
     ],
   },
   {
     id: 'applications',
     title: '应用',
     collapsible: true,
-    items: [{ id: 'social', label: '社交', icon: 'chat' }],
+    items: [{ id: 'social', label: '社交', icon: 'chat' }, ...applicationNavItems],
   },
   {
     id: 'advanced',

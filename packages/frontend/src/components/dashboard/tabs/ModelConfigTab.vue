@@ -23,15 +23,20 @@ import {
 import { watch, computed, type Ref } from 'vue'
 import { useModelConfig, TASK_SLOTS } from '../../../composables/dashboard/useModelConfig'
 import { useDashboardContext } from '../../../composables/dashboard'
+import { useAgentStore } from '../../../stores/useAgentStore'
+import { getApiBaseUrl } from '../../../api/transport'
 
 const ctx = useDashboardContext()
+const agentStore = useAgentStore()
 
 const {
   models,
   currentTab,
   mainModelId,
   taskAssignments,
+  agentAssignments,
   isTaskAssignOpen,
+  isAgentAssignOpen,
   providerOptions,
   isEditorOpen,
   editingModel,
@@ -39,9 +44,11 @@ const {
   openEditor,
   saveModel,
   deleteModel,
-  setInputCapability,
+  setModelToggle,
   setMainModel,
   setTaskAssignment,
+  setAgentAssignment,
+  fetchAgentAssignments,
   isGlobalOpen,
   globalConfig,
   saveGlobalConfig,
@@ -55,6 +62,7 @@ const {
   rerankerApiBase,
   rerankerApiKey,
   isSavingVector,
+  embeddingActivationResult,
   saveVectorConfig,
   fetchModels,
   // 远程模型列表
@@ -113,6 +121,17 @@ const topPValue = computed({
     editorForm.value.topP = value
   },
 })
+const wireApiOptions = [
+  { label: 'Chat Completions', value: 'chat_completions' },
+  { label: 'Responses', value: 'responses' },
+]
+const reasoningDialectOptions = [
+  { label: '自动识别', value: 'auto' },
+  { label: 'OpenAI官方', value: 'openai' },
+  { label: 'DeepSeek兼容', value: 'deepseek' },
+  { label: 'OpenRouter兼容', value: 'openrouter' },
+  { label: '通用兼容', value: 'generic' },
+]
 const reasoningEffortOptions = [
   { label: '默认（不传）', value: '' },
   { label: '关闭', value: 'off' },
@@ -141,6 +160,22 @@ watch(
 async function handleSaveGlobal() {
   await saveGlobalConfig()
   isGlobalOpen.value = false
+}
+
+function avatarUrlOf(avatarUrl?: string): string {
+  if (!avatarUrl) return ''
+  return /^https?:\/\//i.test(avatarUrl) ? avatarUrl : `${getApiBaseUrl()}${avatarUrl}`
+}
+
+async function openAgentAssignment(): Promise<void> {
+  if (agentStore.agents.length === 0) await agentStore.fetchAgents()
+  await fetchAgentAssignments(agentStore.enabledAgents.map((agent) => agent.id))
+  isAgentAssignOpen.value = true
+}
+
+function assignedModelName(agentId: string): string {
+  const modelId = agentAssignments.value[agentId]
+  return models.value.find((model) => model.id === modelId)?.name ?? '跟随主模型'
 }
 
 function formatTokens(tokens: number | null): string {
@@ -270,14 +305,23 @@ void providerDefaults
             <PixelIcon name="brain" size="xs" />
             <span>任务指派</span>
           </PButton>
+          <PButton variant="ghost" class="agent-assign-trigger" @click="openAgentAssignment">
+            <PixelIcon name="users" size="xs" />
+            <span>角色指派</span>
+          </PButton>
           <PButton variant="primary" @click="openEditor(null)">
             <PixelIcon name="plus" size="xs" />
             <span>添加模型</span>
           </PButton>
         </template>
         <template v-else>
-          <PButton variant="primary" :loading="isSavingVector" @click="saveVectorConfig">
-            保存配置
+          <PButton
+            variant="primary"
+            :loading="isSavingVector"
+            :disabled="isSavingVector"
+            @click="saveVectorConfig"
+          >
+            {{ isSavingVector ? '激活中' : '保存配置' }}
           </PButton>
         </template>
       </div>
@@ -286,9 +330,15 @@ void providerDefaults
     <!-- LLM 模型网格 -->
     <div
       v-if="currentTab === 'llm'"
-      class="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] content-start gap-4 flex-1 overflow-y-auto pr-1 model-scrollbar"
+      class="model-card-grid grid grid-cols-[repeat(auto-fill,minmax(520px,1fr))] content-start gap-5 flex-1 overflow-y-auto pr-1 pt-2 model-scrollbar"
     >
-      <PCard v-for="model in models" :key="model.id" pixel hoverable class="flex flex-col gap-3">
+      <PCard
+        v-for="model in models"
+        :key="model.id"
+        pixel
+        hoverable
+        class="model-config-card flex flex-col gap-4"
+      >
         <!-- 卡片头部 -->
         <div class="flex justify-between items-start">
           <div class="flex flex-col gap-0.5 min-w-0">
@@ -324,7 +374,7 @@ void providerDefaults
         </div>
 
         <!-- 模型详情 -->
-        <div class="flex flex-col gap-1.5">
+        <div class="model-detail-grid">
           <div class="flex justify-between items-center">
             <span class="text-[11px] text-slate-400">模型 ID</span>
             <span class="text-[11px] font-bold text-slate-500 font-mono max-w-[160px] truncate">
@@ -335,6 +385,18 @@ void providerDefaults
             <span class="text-[11px] text-slate-400">最大输出 Token</span>
             <span class="text-[11px] font-bold text-slate-500 font-mono">
               {{ formatTokens(model.maxTokens) }}
+            </span>
+          </div>
+          <div class="flex justify-between items-center">
+            <span class="text-[11px] text-slate-400">Wire API</span>
+            <span class="text-[11px] font-mono text-slate-600">
+              {{ model.wireApi === 'responses' ? 'RESPONSES' : 'CHAT' }}
+            </span>
+          </div>
+          <div class="flex justify-between items-center">
+            <span class="text-[11px] text-slate-400">原生思考</span>
+            <span class="text-[11px] font-mono text-slate-600">
+              {{ model.returnNativeReasoning ? '回传' : '隐藏' }}
             </span>
           </div>
           <div class="flex justify-between items-center">
@@ -351,33 +413,67 @@ void providerDefaults
           </div>
         </div>
 
-        <!-- 输入模态能力：直接在模型卡片启用，不必进入编辑弹窗。 -->
-        <div class="grid grid-cols-2 gap-2 rounded border border-slate-200 bg-slate-50/70 p-2">
-          <label class="model-capability-toggle">
+        <!-- 常用能力：横向像素控制条。 -->
+        <section class="model-capability-panel">
+          <header class="model-capability-panel__header">
             <span>
-              <strong>图片输入</strong>
-              <small>VISION</small>
+              <i />
+              运行与输入能力
             </span>
-            <PSwitch
-              :model-value="model.enableVision"
-              @update:model-value="
-                (enabled: boolean) => setInputCapability(model, 'enableVision', enabled)
-              "
-            />
-          </label>
-          <label class="model-capability-toggle model-capability-toggle-audio">
-            <span>
-              <strong>音频输入</strong>
-              <small>AUDIO IN</small>
-            </span>
-            <PSwitch
-              :model-value="model.enableAudioInput"
-              @update:model-value="
-                (enabled: boolean) => setInputCapability(model, 'enableAudioInput', enabled)
-              "
-            />
-          </label>
-        </div>
+            <small>CAPABILITY BUS / 03</small>
+          </header>
+          <div class="model-capability-list">
+            <label class="model-capability-toggle" :class="{ 'is-enabled': model.stream }">
+              <span class="model-capability-toggle__topline">
+                <em>01 / STREAM</em>
+                <i :class="{ 'is-on': model.stream }" />
+              </span>
+              <span class="model-capability-toggle__copy">
+                <strong>流式输出</strong>
+                <small>{{ model.stream ? '逐字返回' : '完整返回' }}</small>
+              </span>
+              <PSwitch
+                :model-value="model.stream"
+                @update:model-value="(enabled: boolean) => setModelToggle(model, 'stream', enabled)"
+              />
+            </label>
+            <label class="model-capability-toggle" :class="{ 'is-enabled': model.enableVision }">
+              <span class="model-capability-toggle__topline">
+                <em>02 / VISION</em>
+                <i :class="{ 'is-on': model.enableVision }" />
+              </span>
+              <span class="model-capability-toggle__copy">
+                <strong>图片输入</strong>
+                <small>{{ model.enableVision ? '允许识图' : '不接收图片' }}</small>
+              </span>
+              <PSwitch
+                :model-value="model.enableVision"
+                @update:model-value="
+                  (enabled: boolean) => setModelToggle(model, 'enableVision', enabled)
+                "
+              />
+            </label>
+            <label
+              class="model-capability-toggle model-capability-toggle-audio"
+              :class="{ 'is-enabled': model.enableAudioInput }"
+            >
+              <span class="model-capability-toggle__topline">
+                <em>03 / AUDIO</em>
+                <i :class="{ 'is-on': model.enableAudioInput }" />
+              </span>
+              <span class="model-capability-toggle__copy">
+                <strong>音频输入</strong>
+                <small>{{ model.enableAudioInput ? '允许音频' : '不接收音频' }}</small>
+              </span>
+              <PSwitch
+                :model-value="model.enableAudioInput"
+                @update:model-value="
+                  (enabled: boolean) => setModelToggle(model, 'enableAudioInput', enabled)
+                "
+              />
+            </label>
+          </div>
+        </section>
 
         <!-- 操作按钮 -->
         <div class="flex justify-between items-center pt-3 border-t border-slate-100 mt-auto">
@@ -568,6 +664,22 @@ void providerDefaults
             </div>
           </template>
         </div>
+        <div
+          v-if="embeddingActivationResult"
+          :class="[
+            'mt-5 flex items-center gap-2 border-2 px-4 py-3 text-xs font-bold',
+            embeddingActivationResult.status === 'success'
+              ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+              : 'border-rose-300 bg-rose-50 text-rose-700',
+          ]"
+          role="status"
+        >
+          <PixelIcon
+            :name="embeddingActivationResult.status === 'success' ? 'check' : 'alert'"
+            size="xs"
+          />
+          <span>{{ embeddingActivationResult.message }}</span>
+        </div>
       </PCard>
 
       <!-- Reranker -->
@@ -686,7 +798,11 @@ void providerDefaults
           <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
             API Key (可选)
           </label>
-          <PInput v-model="editorForm.apiKey" type="password" placeholder="留空则使用全局配置" />
+          <PInput
+            v-model="editorForm.apiKey"
+            type="password"
+            :placeholder="editingModel?.apiKey ? '已载入保存的密钥' : '留空则使用全局配置'"
+          />
         </div>
         <!-- 模型 ID + 获取列表 -->
         <div class="flex flex-col gap-1.5">
@@ -726,6 +842,58 @@ void providerDefaults
 
           <div class="model-param-row">
             <div class="model-param-heading">
+              <span class="text-xs font-bold text-slate-700">流式输出</span>
+              <span class="text-[10px] text-slate-400">
+                关闭后等待Provider完整响应，再一次性显示正文
+              </span>
+            </div>
+            <span class="text-[9px] text-slate-400 font-mono">STREAM</span>
+            <div class="model-param-control flex justify-end">
+              <PSwitch v-model="editorForm.stream" />
+            </div>
+          </div>
+
+          <div class="model-param-row">
+            <div class="model-param-heading">
+              <span class="text-xs font-bold text-slate-700">Wire API</span>
+              <span class="text-[10px] text-slate-400">
+                选择Chat Completions或Responses传输协议
+              </span>
+            </div>
+            <span class="text-[9px] text-slate-400 font-mono">ENDPOINT</span>
+            <div class="model-param-control">
+              <PSelect v-model="editorForm.wireApi" :options="wireApiOptions" />
+            </div>
+          </div>
+
+          <div v-if="editorForm.wireApi === 'chat_completions'" class="model-param-row">
+            <div class="model-param-heading">
+              <span class="text-xs font-bold text-slate-700">思考协议方言</span>
+              <span class="text-[10px] text-slate-400">
+                控制DeepSeek、OpenRouter等请求字段与跨轮重放
+              </span>
+            </div>
+            <span class="text-[9px] text-slate-400 font-mono">DIALECT</span>
+            <div class="model-param-control">
+              <PSelect v-model="editorForm.reasoningDialect" :options="reasoningDialectOptions" />
+            </div>
+          </div>
+
+          <div class="model-param-row">
+            <div class="model-param-heading">
+              <span class="text-xs font-bold text-slate-700">原生思考回传</span>
+              <span class="text-[10px] text-slate-400">
+                请求并展示Provider原生思考摘要；不同于正文中的&lt;think&gt;
+              </span>
+            </div>
+            <span class="text-[9px] text-slate-400 font-mono">NATIVE</span>
+            <div class="model-param-control flex justify-end">
+              <PSwitch v-model="editorForm.returnNativeReasoning" />
+            </div>
+          </div>
+
+          <div class="model-param-row">
+            <div class="model-param-heading">
               <span class="text-xs font-bold text-slate-700">思考等级</span>
               <span class="text-[10px] text-slate-400">按 Provider 协议映射推理强度</span>
             </div>
@@ -757,6 +925,22 @@ void providerDefaults
               <PSlider v-model="topPValue" :min="0" :max="1" :step="0.05" show-input />
             </div>
             <span v-else class="model-param-off">不传</span>
+          </div>
+
+          <div class="model-param-row">
+            <div class="model-param-heading">
+              <span class="text-xs font-bold text-slate-700">上下文窗口 Token</span>
+              <span class="text-[10px] text-slate-400">用于长记忆后台安全容量计算</span>
+            </div>
+            <span class="text-[9px] text-slate-400 font-mono">CONTEXT</span>
+            <div class="model-param-control">
+              <PInputNumber
+                v-model="editorForm.contextWindowTokens"
+                :min="1"
+                :max="2000000"
+                :step="1024"
+              />
+            </div>
           </div>
 
           <div class="model-param-row">
@@ -838,7 +1022,9 @@ void providerDefaults
     <!-- 任务指派弹窗 -->
     <PDialog v-model="isTaskAssignOpen" title="任务指派" width="560px">
       <div class="model-dialog-body flex flex-col gap-4">
-        <p class="text-xs text-slate-400">为系统内的各项任务指派模型。未指派的任务将使用主模型。</p>
+        <p class="text-xs text-slate-400">
+          为不同的系统工作选择合适模型；未单独选择时会使用主模型。
+        </p>
         <div
           v-for="slot in TASK_SLOTS"
           :key="slot.key"
@@ -863,6 +1049,75 @@ void providerDefaults
       </div>
       <template #footer>
         <PButton variant="primary" @click="isTaskAssignOpen = false">完成</PButton>
+      </template>
+    </PDialog>
+
+    <!-- 角色模型指派弹窗 -->
+    <PDialog v-model="isAgentAssignOpen" title="角色指派" width="680px">
+      <div class="model-dialog-body agent-assignment-dialog">
+        <div class="agent-assignment-intro">
+          <div class="agent-assignment-intro__icon">
+            <PixelIcon name="sparkles" size="sm" />
+          </div>
+          <div>
+            <strong>让每位角色拥有自己的思考引擎</strong>
+            <p>未单独指派的角色会自然跟随主模型，随时可以恢复默认。</p>
+          </div>
+        </div>
+
+        <div v-if="agentStore.enabledAgents.length" class="agent-assignment-list">
+          <article
+            v-for="(agent, index) in agentStore.enabledAgents"
+            :key="agent.id"
+            class="agent-assignment-card"
+            :style="{ '--agent-delay': `${index * 45}ms` }"
+          >
+            <div class="agent-assignment-card__identity">
+              <div class="agent-assignment-avatar">
+                <img
+                  v-if="avatarUrlOf(agent.avatarUrl)"
+                  :src="avatarUrlOf(agent.avatarUrl)"
+                  :alt="agent.name"
+                />
+                <span v-else>{{ (agent.name || agent.id).slice(0, 1).toUpperCase() }}</span>
+                <i class="agent-assignment-avatar__status" />
+              </div>
+              <div class="agent-assignment-card__copy">
+                <div class="agent-assignment-card__title">
+                  <strong>{{ agent.name || agent.id }}</strong>
+                  <span>@{{ agent.id }}</span>
+                </div>
+                <p>{{ assignedModelName(agent.id) }}</p>
+              </div>
+            </div>
+
+            <div class="agent-assignment-card__selector">
+              <span class="agent-assignment-card__label">对话模型</span>
+              <PSelect
+                teleport
+                :model-value="agentAssignments[agent.id] || ''"
+                :options="[
+                  { label: '跟随主模型', value: '' },
+                  ...models.map((model) => ({ label: model.name, value: model.id })),
+                ]"
+                class="w-56"
+                @update:model-value="
+                  (value: string | number) =>
+                    setAgentAssignment(agent.id, value ? String(value) : null)
+                "
+              />
+            </div>
+          </article>
+        </div>
+
+        <div v-else class="agent-assignment-empty">
+          <PixelIcon name="users" size="md" />
+          <strong>还没有可指派的角色</strong>
+          <span>请先在角色配置中启用至少一个角色。</span>
+        </div>
+      </div>
+      <template #footer>
+        <PButton variant="primary" @click="isAgentAssignOpen = false">完成</PButton>
       </template>
     </PDialog>
   </div>
@@ -925,44 +1180,463 @@ void providerDefaults
   box-shadow: 1px 1px 0 var(--ui-border-strong);
 }
 
-/* 模型卡片内的输入模态开关，确保能力配置始终直接可见。 */
-.model-capability-toggle {
+.agent-assign-trigger {
+  position: relative;
+  overflow: hidden;
+}
+.agent-assign-trigger::after {
+  content: '';
+  position: absolute;
+  inset: -40% auto -40% -35%;
+  width: 22%;
+  transform: skewX(-18deg);
+  background: color-mix(in srgb, var(--ui-accent-sky) 22%, transparent);
+  transition: left 360ms ease;
+  pointer-events: none;
+}
+.agent-assign-trigger:hover::after {
+  left: 112%;
+}
+.agent-assignment-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: min(68vh, 620px);
+}
+.agent-assignment-intro {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 14px;
+  border: 2px solid color-mix(in srgb, var(--ui-accent-sky) 46%, var(--ui-border-default));
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--ui-accent-sky-soft) 75%, transparent),
+      transparent 68%
+    ),
+    var(--dash-panel-soft);
+  box-shadow: 3px 3px 0 color-mix(in srgb, var(--ui-border-strong) 72%, transparent);
+}
+.agent-assignment-intro__icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  color: var(--ui-accent-sky);
+  border: 2px solid currentColor;
+  background: var(--ui-bg-surface);
+  animation: agent-sparkle 2.8s ease-in-out infinite;
+}
+.agent-assignment-intro strong {
+  display: block;
+  color: var(--ui-text-primary);
+  font-size: 13px;
+}
+.agent-assignment-intro p {
+  margin: 3px 0 0;
+  color: var(--ui-text-secondary);
+  font-size: 11px;
+}
+.agent-assignment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px 5px 5px 2px;
+}
+.agent-assignment-card {
+  --agent-delay: 0ms;
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
+  gap: 18px;
+  padding: 13px 14px;
+  border: 2px solid var(--ui-border-default);
+  background: var(--ui-bg-surface);
+  box-shadow: 3px 3px 0 color-mix(in srgb, var(--ui-border-strong) 76%, transparent);
+  animation: agent-card-in 320ms steps(4, end) both;
+  animation-delay: var(--agent-delay);
+  transition:
+    transform 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease;
+}
+.agent-assignment-card::before {
+  content: '';
+  position: absolute;
+  left: -2px;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  background: var(--ui-accent-sky);
+  opacity: 0.68;
+}
+.agent-assignment-card:hover {
+  transform: translate(-1px, -2px);
+  border-color: color-mix(in srgb, var(--ui-accent-sky) 58%, var(--ui-border-default));
+  box-shadow: 5px 5px 0 color-mix(in srgb, var(--ui-accent-sky) 24%, var(--ui-border-strong));
+}
+.agent-assignment-card__identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   min-width: 0;
-  padding: 5px 6px;
-  border: 1px solid var(--ui-accent-sky);
-  background: var(--ui-bg-hover);
+}
+.agent-assignment-avatar {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  flex: 0 0 auto;
+  overflow: visible;
+  color: var(--ui-accent-sky);
+  border: 2px solid color-mix(in srgb, var(--ui-accent-sky) 68%, var(--ui-border-strong));
+  background: var(--ui-accent-sky-soft);
+  box-shadow: 2px 2px 0 var(--ui-border-strong);
+}
+.agent-assignment-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  image-rendering: auto;
+}
+.agent-assignment-avatar > span {
+  font-family: var(--font-pixel, monospace);
+  font-weight: 900;
+}
+.agent-assignment-avatar__status {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  width: 11px;
+  height: 11px;
+  border: 2px solid var(--ui-bg-surface);
+  background: var(--ui-accent-mint, #34d399);
+  box-shadow: 1px 1px 0 var(--ui-border-strong);
+}
+.agent-assignment-card__copy {
+  min-width: 0;
+}
+.agent-assignment-card__title {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+.agent-assignment-card__title strong {
+  color: var(--ui-text-primary);
+  font-size: 14px;
+}
+.agent-assignment-card__title span,
+.agent-assignment-card__copy p,
+.agent-assignment-card__label {
+  color: var(--ui-text-secondary);
+  font-size: 10px;
+}
+.agent-assignment-card__copy p {
+  margin: 4px 0 0;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ui-accent-sky);
+  font-weight: 700;
+}
+.agent-assignment-card__selector {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+  flex: 0 0 auto;
+}
+.agent-assignment-card__label {
+  letter-spacing: 0.12em;
+  font-family: var(--font-pixel, monospace);
+}
+.agent-assignment-empty {
+  display: grid;
+  place-items: center;
+  gap: 7px;
+  min-height: 180px;
+  color: var(--ui-text-secondary);
+  border: 2px dashed var(--ui-border-default);
+  background: var(--dash-panel-soft);
+  text-align: center;
+}
+.agent-assignment-empty strong {
+  color: var(--ui-text-primary);
+}
+.agent-assignment-empty span {
+  font-size: 11px;
+}
+@keyframes agent-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes agent-sparkle {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-2px) rotate(3deg);
+  }
+}
+@media (max-width: 720px) {
+  .agent-assignment-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .agent-assignment-card__selector {
+    align-items: stretch;
+  }
+  .agent-assignment-card__selector :deep(.p-select) {
+    width: 100%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-assignment-card,
+  .agent-assignment-intro__icon {
+    animation: none;
+  }
+  .agent-assign-trigger::after {
+    display: none;
+  }
 }
 
-.model-capability-toggle > span {
+/* 横向模型卡：以信息密度和微像素控制条为主。 */
+.model-card-grid {
+  scroll-padding-top: 8px;
+}
+
+.model-config-card {
+  min-height: 0;
+  border-color: color-mix(in srgb, var(--ui-border-strong) 82%, transparent);
+  background:
+    linear-gradient(90deg, var(--ui-accent-sky) 0 34px, transparent 34px) top left / 72px 2px
+      no-repeat,
+    var(--ui-bg-surface);
+  box-shadow:
+    3px 3px 0 color-mix(in srgb, var(--ui-border-strong) 88%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--ui-text-inverse) 5%, transparent);
+}
+
+.model-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px 22px;
+  padding: 9px 10px;
+  border-left: 2px solid var(--ui-border-default);
+  background: color-mix(in srgb, var(--ui-bg-hover) 48%, transparent);
+}
+
+/* 模型卡片内的横向能力总线。 */
+.model-capability-panel {
+  overflow: hidden;
+  border: 1px solid var(--ui-border-strong);
+  border-radius: 0;
+  background: var(--ui-bg-surface);
+  box-shadow: 2px 2px 0 color-mix(in srgb, var(--ui-border-strong) 76%, transparent);
+}
+
+.model-capability-panel__header {
+  display: flex;
+  min-height: 27px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 9px;
+  border-bottom: 1px solid var(--ui-border-strong);
+  background:
+    repeating-linear-gradient(
+      90deg,
+      transparent 0 7px,
+      color-mix(in srgb, var(--ui-border-default) 35%, transparent) 7px 8px
+    ),
+    color-mix(in srgb, var(--ui-bg-hover) 76%, transparent);
+}
+
+.model-capability-panel__header span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ui-text-primary);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.model-capability-panel__header span i {
+  width: 5px;
+  height: 5px;
+  background: var(--ui-accent-sky);
+  box-shadow: 6px 0 0 color-mix(in srgb, var(--ui-accent-sky) 38%, transparent);
+}
+
+.model-capability-panel__header small {
+  color: var(--ui-text-muted);
+  font-family: var(--font-mono), monospace;
+  font-size: 7px;
+  letter-spacing: 0.1em;
+}
+
+.model-capability-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.model-capability-toggle {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto 1fr;
+  gap: 5px 8px;
+  padding: 8px 9px 9px;
+  cursor: pointer;
+  transition:
+    background-color 0.12s steps(2, end),
+    box-shadow 0.12s steps(2, end);
+}
+
+.model-capability-toggle + .model-capability-toggle {
+  border-left: 1px solid var(--ui-border-default);
+}
+
+.model-capability-toggle::after {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: var(--ui-border-default);
+  content: '';
+}
+
+.model-capability-toggle:hover {
+  background: color-mix(in srgb, var(--ui-accent-sky-soft) 38%, transparent);
+}
+
+.model-capability-toggle.is-enabled {
+  background: color-mix(in srgb, var(--ui-accent-sky-soft) 23%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ui-accent-sky) 16%, transparent);
+}
+
+.model-capability-toggle.is-enabled::after {
+  background: var(--ui-accent-sky);
+}
+
+.model-capability-toggle-audio.is-enabled::after {
+  background: var(--ui-accent-purple);
+}
+
+.model-capability-toggle__topline {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.model-capability-toggle__topline em {
+  color: var(--ui-text-muted);
+  font-family: var(--font-mono), monospace;
+  font-size: 7px;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.model-capability-toggle__topline i {
+  width: 5px;
+  height: 5px;
+  border: 1px solid var(--ui-text-muted);
+  background: transparent;
+}
+
+.model-capability-toggle__topline i.is-on {
+  border-color: var(--ui-accent-sky);
+  background: var(--ui-accent-sky);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ui-accent-sky) 18%, transparent);
+}
+
+.model-capability-toggle-audio .model-capability-toggle__topline i.is-on {
+  border-color: var(--ui-accent-purple);
+  background: var(--ui-accent-purple);
+}
+
+.model-capability-toggle__copy {
   display: flex;
   min-width: 0;
   flex-direction: column;
+  gap: 1px;
 }
 
 .model-capability-toggle strong {
+  overflow: hidden;
   color: var(--ui-text-primary);
-  font-family: var(--font-pixel), monospace;
-  font-size: 10px;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.2;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.model-capability-toggle small {
-  color: var(--ui-accent-sky);
-  font-family: monospace;
+.model-capability-toggle__copy small {
+  overflow: hidden;
+  color: var(--ui-text-muted);
   font-size: 8px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.model-capability-toggle-audio {
-  border-color: var(--ui-accent-purple);
-  background: var(--ui-accent-purple-soft);
+.model-capability-toggle :deep(.p-switch-wrapper) {
+  align-self: center;
+  justify-self: end;
 }
 
-.model-capability-toggle-audio small {
-  color: var(--ui-accent-purple);
+.model-capability-toggle :deep(.p-switch-track) {
+  width: 31px;
+  height: 17px;
+  border-width: 1px;
+  border-radius: 0;
+}
+
+.model-capability-toggle :deep(.p-switch-thumb) {
+  width: 11px;
+  height: 11px;
+  border-radius: 0;
+}
+
+.model-capability-toggle :deep(.p-switch-thumb-on) {
+  transform: translateX(14px);
+}
+
+@media (max-width: 900px) {
+  .model-card-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 620px) {
+  .model-detail-grid,
+  .model-capability-list {
+    grid-template-columns: 1fr;
+  }
+
+  .model-capability-toggle + .model-capability-toggle {
+    border-top: 1px solid var(--ui-border-default);
+    border-left: 0;
+  }
 }
 
 /* 模型参数卡：开关决定字段是否进入请求，控件仅在启用后可见。 */

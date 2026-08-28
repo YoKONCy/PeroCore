@@ -5,7 +5,7 @@
  * - 基于距上次活动的时间间隔，周期性触发主动对话
  * - 根据时间段 (早/中/晚/深夜) 调整主动开场话术
  * - 通过 GatewayHub 将 Agent 主动消息推送到前端
- * - 停止时自动总结陪伴期间的对话 → DiaryEngine
+ * - 陪伴对话由统一 EventMemory 后台兜底和 DailyNotes 汇总
  *
  * 生命周期:
  * - SessionService.switchProfile('companion') → start()
@@ -14,7 +14,6 @@
  * 依赖:
  * - AgentService (生成主动对话)
  * - GatewayHub (WebSocket 推送)
- * - DiaryEngine (停止时总结)
  * - ConfigRepository (陪伴配置参数)
  *
  * - 截屏能力由 Electron 侧负责
@@ -24,6 +23,7 @@
  * @module packages/backend/src/services/companion/companionScheduler
  */
 
+import type { KernelScheduler } from '../../kernel/kernelScheduler'
 import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('CompanionScheduler')
@@ -37,15 +37,12 @@ type TimeSlot = 'morning' | 'afternoon' | 'evening' | 'late_night'
 export interface CompanionConfig {
   /** 主动对话间隔 (ms), 默认 3 分钟 */
   intervalMs: number
-  /** 用户空闲多久后触发 (ms), 默认 60 秒 */
-  idleThresholdMs: number
   /** 最大连续主动次数限制, 默认 5 */
   maxConsecutiveProactive: number
 }
 
 const DEFAULT_CONFIG: CompanionConfig = {
   intervalMs: 3 * 60_000, // 3 分钟
-  idleThresholdMs: 60_000, // 1 分钟空闲
   maxConsecutiveProactive: 5, // 连续主动对话上限
 }
 
@@ -87,6 +84,7 @@ export class CompanionScheduler {
   private onProactiveChat: ProactiveChatFn
   private onPushMessage: PushMessageFn
   private onSummarize: SummarizeFn
+  private kernelScheduler: KernelScheduler
 
   constructor(params: {
     agentId: string
@@ -96,6 +94,7 @@ export class CompanionScheduler {
     onProactiveChat: ProactiveChatFn
     onPushMessage: PushMessageFn
     onSummarize: SummarizeFn
+    kernelScheduler: KernelScheduler
   }) {
     this.agentId = params.agentId
     this.config = { ...DEFAULT_CONFIG, ...params.config }
@@ -103,6 +102,7 @@ export class CompanionScheduler {
     this.onProactiveChat = params.onProactiveChat
     this.onPushMessage = params.onPushMessage
     this.onSummarize = params.onSummarize
+    this.kernelScheduler = params.kernelScheduler
   }
 
   /**
@@ -198,27 +198,35 @@ export class CompanionScheduler {
     logger.info(`触发主动对话: agent=${this.agentId}, timeSlot=${timeSlot}, trigger=${trigger}`)
 
     try {
-      // 调用 Agent 生成主动回复
-      const reply = await this.onProactiveChat({
-        agentId: this.agentId,
-        trigger,
-        timeSlot,
+      const terminal = await this.kernelScheduler.submitAndWait({
+        principalId: this.agentId,
+        taskId: `companion:${this.agentId}:${now}`,
+        class: 'resident',
+        priority: 2,
+        resourceKey: `agent:${this.agentId}`,
+        budget: { maxDurationMs: 2 * 60_000, maxLlmCalls: 8, maxToolCalls: 8, maxConcurrentIo: 2 },
+        run: async () => {
+          const reply = await this.onProactiveChat({
+            agentId: this.agentId,
+            trigger,
+            timeSlot,
+          })
+
+          if (reply && reply.trim()) {
+            await this.onPushMessage({
+              type: 'proactive_message',
+              content: reply,
+              agentId: this.agentId,
+              timeSlot,
+            })
+            this.consecutiveCount++
+            logger.info(`主动对话已推送: ${reply.slice(0, 50)}...`)
+          }
+        },
       })
-
-      if (reply && reply.trim()) {
-        // 推送到前端
-        await this.onPushMessage({
-          type: 'proactive_message',
-          content: reply,
-          agentId: this.agentId,
-          timeSlot,
-        })
-
-        this.consecutiveCount++
-        logger.info(`主动对话已推送: ${reply.slice(0, 50)}...`)
+      if (terminal.state !== 'completed') {
+        throw new Error(`主动陪伴Execution终止: ${terminal.state}`)
       }
-
-      // 重置活动时间
       this.lastActivityAt = Date.now()
     } catch (err) {
       logger.error(`主动对话生成失败: ${err}`)

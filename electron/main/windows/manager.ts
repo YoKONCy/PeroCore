@@ -18,6 +18,7 @@ import { BrowserWindow, shell, screen } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import { logger } from '../utils/logger'
+import { resolveWindowBackground } from './windowConfig'
 
 // ─── 窗口配置表 ─────────────────────────────────────────
 interface WindowConfig {
@@ -57,7 +58,7 @@ const WINDOW_CONFIGS: Record<string, WindowConfig> = {
     route: '/app',
     width: 1280,
     height: 800,
-    transparent: true,
+    transparent: false,
     alwaysOnTop: false,
     skipTaskbar: false,
     resizable: true,
@@ -68,7 +69,7 @@ const WINDOW_CONFIGS: Record<string, WindowConfig> = {
     route: '/app',
     width: 1200,
     height: 800,
-    transparent: true,
+    transparent: false,
     alwaysOnTop: false,
     skipTaskbar: false,
     resizable: true,
@@ -79,7 +80,7 @@ const WINDOW_CONFIGS: Record<string, WindowConfig> = {
     route: '/app',
     width: 1100,
     height: 760,
-    transparent: true,
+    transparent: false,
     alwaysOnTop: false,
     skipTaskbar: false,
     resizable: true,
@@ -90,7 +91,7 @@ const WINDOW_CONFIGS: Record<string, WindowConfig> = {
     route: '/app',
     width: 1400,
     height: 900,
-    transparent: true,
+    transparent: false,
     alwaysOnTop: false,
     skipTaskbar: false,
     resizable: true,
@@ -108,6 +109,10 @@ export class WindowManager {
   public strongholdWin: BrowserWindow | null = null
   public chatWin: BrowserWindow | null = null
   public ideWin: BrowserWindow | null = null
+  public arcaWin: BrowserWindow | null = null
+
+  /** 记录窗口当前是否应当可见，避免异步ready事件覆盖主动隐藏。 */
+  private readonly visibilityIntent = new WeakMap<BrowserWindow, boolean>()
 
   /** Pet 窗口鼠标追踪定时器 */
   private mouseTrackInterval: ReturnType<typeof setInterval> | null = null
@@ -205,6 +210,7 @@ export class WindowManager {
   ): BrowserWindow {
     // 如果已存在且未销毁，聚焦并返回
     if (existing && !existing.isDestroyed()) {
+      this.visibilityIntent.set(existing, true)
       // 始终显示并聚焦（调用者明确想要这个窗口）
       if (!existing.isVisible()) existing.show()
       if (existing.isMinimized()) existing.restore()
@@ -231,7 +237,7 @@ export class WindowManager {
       alwaysOnTop: cfg.alwaysOnTop,
       skipTaskbar: cfg.skipTaskbar,
       resizable: cfg.resizable,
-      backgroundColor: '#00000000',
+      backgroundColor: resolveWindowBackground(cfg),
       webPreferences: {
         preload: this.getPreloadPath(),
         nodeIntegration: false,
@@ -247,30 +253,44 @@ export class WindowManager {
       this.trySetAcrylic(win)
     }
 
-    this.loadWindowContent(win, cfg.route)
     this.setupWindowStateListeners(win)
     this.setupExternalLinks(win)
 
-    // ready-to-show 显示
-    win.on('ready-to-show', () => {
-      logger.info('WindowManager', `${configKey} ready-to-show`)
-      win.show()
-    })
+    this.visibilityIntent.set(win, true)
 
-    // 兜底: 超时强制显示
+    let shownAfterLoad = false
+    const showWhenReady = (source: string) => {
+      if (shownAfterLoad || win.isDestroyed() || this.visibilityIntent.get(win) === false) return
+      shownAfterLoad = true
+      logger.info('WindowManager', `${configKey} 已就绪 (${source})`)
+      win.show()
+    }
+
+    // 透明窗口不保证稳定触发 ready-to-show，DOM 完成也可作为可靠显示信号。
+    win.once('ready-to-show', () => showWhenReady('ready-to-show'))
+    win.webContents.once('did-finish-load', () => showWhenReady('did-finish-load'))
+
+    // 只为真正未完成页面加载的窗口保留兜底，避免正常透明窗口产生误告警。
     setTimeout(() => {
-      if (!win.isDestroyed() && !win.isVisible()) {
-        logger.warn('WindowManager', `${configKey} ready-to-show 超时，强制显示`)
-        win.show()
+      if (!win.isDestroyed() && !win.isVisible() && this.visibilityIntent.get(win) !== false) {
+        if (win.webContents.isLoadingMainFrame()) {
+          logger.warn('WindowManager', `${configKey} 页面加载超时，先显示窗口`)
+        } else {
+          logger.info('WindowManager', `${configKey} 首帧事件缺失，显示已加载窗口`)
+        }
+        showWhenReady('timeout-fallback')
       }
-    }, 5000)
+    }, 10_000)
 
     // 加载失败也显示窗口，避免静默失败
     win.webContents.on('did-fail-load', (_e, code, desc, url) => {
       logger.error('WindowManager', `${configKey} 加载失败: ${desc} (${code}), URL: ${url}`)
-      if (!win.isDestroyed() && !win.isVisible()) win.show()
+      if (!win.isDestroyed() && !win.isVisible() && this.visibilityIntent.get(win) !== false) {
+        win.show()
+      }
     })
 
+    this.loadWindowContent(win, cfg.route)
     return win
   }
 
@@ -290,8 +310,19 @@ export class WindowManager {
     }
   }
 
+  public showLauncherWindow(): void {
+    if (!this.launcherWin || this.launcherWin.isDestroyed()) {
+      this.createLauncherWindow()
+      return
+    }
+    this.visibilityIntent.set(this.launcherWin, true)
+    this.launcherWin.show()
+    this.launcherWin.focus()
+  }
+
   public hideLauncherWindow(): void {
     if (this.launcherWin && !this.launcherWin.isDestroyed()) {
+      this.visibilityIntent.set(this.launcherWin, false)
       this.launcherWin.hide()
       logger.info('WindowManager', '已隐藏 Launcher 窗口')
     }
@@ -317,7 +348,7 @@ export class WindowManager {
     this.petWin.webContents.on('render-process-gone', (_e, details) => {
       logger.error('WindowManager', `Pet 渲染进程崩溃: ${details.reason} (${details.exitCode})`)
       if (this.launcherWin && !this.launcherWin.isDestroyed()) {
-        this.launcherWin.show()
+        this.showLauncherWindow()
       }
     })
 
@@ -330,7 +361,7 @@ export class WindowManager {
       )
       if (!hasVisible && this.launcherWin && !this.launcherWin.isDestroyed()) {
         logger.info('WindowManager', 'Pet 关闭且无其他可见窗口，恢复 Launcher')
-        this.launcherWin.show()
+        this.showLauncherWindow()
       }
     })
 
@@ -361,6 +392,59 @@ export class WindowManager {
   /** 聊天已迁入综合面板，禁止再创建第二个 App 窗口。 */
   public createChatWindow(): BrowserWindow {
     return this.createDashboardWindow()
+  }
+
+  public closeArcaWindow(): void {
+    if (this.arcaWin && !this.arcaWin.isDestroyed()) this.arcaWin.close()
+  }
+
+  public getArcaWindowState(): { open: boolean; visible: boolean } {
+    const open = Boolean(this.arcaWin && !this.arcaWin.isDestroyed())
+    return { open, visible: Boolean(open && this.arcaWin?.isVisible()) }
+  }
+
+  public createArcaWindow(url: string): BrowserWindow {
+    if (!/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?(?:\/|$)/i.test(url)) {
+      throw new Error('ARCA_UI_URL_FORBIDDEN: 仅允许加载本机Arca UI')
+    }
+    if (this.arcaWin && !this.arcaWin.isDestroyed()) {
+      if (this.arcaWin.webContents.getURL() !== url) void this.arcaWin.loadURL(url)
+      if (this.arcaWin.isMinimized()) this.arcaWin.restore()
+      this.arcaWin.show()
+      this.arcaWin.focus()
+      return this.arcaWin
+    }
+    const win = new BrowserWindow({
+      title: 'Arca · infOS',
+      icon: this.getIconPath(),
+      width: 1440,
+      height: 920,
+      minWidth: 960,
+      minHeight: 640,
+      show: false,
+      frame: false,
+      center: true,
+      backgroundColor: '#f6f2ff',
+      webPreferences: {
+        preload: this.getPreloadPath(),
+        nodeIntegration: false,
+        contextIsolation: true,
+        sandbox: false,
+        webSecurity: true,
+      },
+    })
+    this.arcaWin = win
+    this.setupWindowStateListeners(win)
+    win.loadURL(url)
+    win.webContents.setWindowOpenHandler(({ url: target }) => {
+      if (/^https:\/\//i.test(target)) void shell.openExternal(target)
+      return { action: 'deny' }
+    })
+    win.once('ready-to-show', () => win.show())
+    win.on('closed', () => {
+      if (this.arcaWin === win) this.arcaWin = null
+    })
+    return win
   }
 
   /** 工作台已迁入综合面板，禁止再创建第二个 App 窗口。 */
@@ -411,6 +495,7 @@ export class WindowManager {
     this.strongholdWin = null
     this.chatWin = null
     this.ideWin = null
+    this.arcaWin = null
   }
 }
 

@@ -20,21 +20,22 @@
  * @module packages/apps/social/runtime/compiler
  */
 
-import type { GrantRegistry } from '../../../backend/src/applications/grantRegistry'
-import type { ResourceRef } from '../../../backend/src/applications/types'
-import type { LlmService, ModelConfig } from '../../../backend/src/services/llm/llmService'
 import type {
-  ContentPart,
+  AgentManager,
   ChatMessage,
-  ToolDefinition,
+  ContentPart,
+  GrantRegistry,
+  LlmService,
+  MdpEngine,
+  MemoryStoreRegistry,
+  ModelConfig,
+  ResourceRef,
   ToolCall,
-} from '../../../backend/src/services/llm/types'
-import type { MdpEngine } from '../../../backend/src/services/prompt/mdpEngine'
-import type { AgentManager } from '../../../backend/src/services/agent/agentManager'
-import type { MemoryStoreRegistry } from '../../../backend/src/repositories/storeRegistry'
+  ToolDefinition,
+} from '@infos/backend/applicationHostAbi'
 import type { TriviumDB } from 'triviumdb'
 import { readFileSync } from 'node:fs'
-import { createLogger } from '../../../backend/src/lib/logger'
+import { createLogger, tokenCounter } from '@infos/backend/applicationHostAbi'
 
 const logger = createLogger('SocialAppCompiler')
 
@@ -61,6 +62,15 @@ function extractImagesFromToolResult(result: string): string[] {
     // 非 JSON 返回值，忽略
   }
   return []
+}
+
+function parseTerminalAcceptance(result: string): boolean {
+  try {
+    const parsed = JSON.parse(result) as { success?: unknown; terminal?: unknown }
+    return parsed.success === true && parsed.terminal === true
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -245,6 +255,7 @@ export class SocialAppCompiler {
     contactImpression?: {
       userId: string
       displayName?: string
+      identity?: string
       impression: string
     }
     /** 触发者 senderId（用于跨会话上下文标注） */
@@ -463,11 +474,10 @@ export class SocialAppCompiler {
       { role: 'user', content: userContent },
     ]
 
-    // 7. 估算 Token（粗略：每 4 字符约 1 token）
-    const tokenEstimate = messages.reduce((sum, m) => sum + Math.ceil(m.content.length / 4), 0)
-
+    // 7. 使用后端统一 o200k_base Tokenizer 计算消息正文。
+    const tokenEstimate = tokenCounter.countMessages(messages)
     logger.debug(
-      `上下文编译完成: instance=${instanceId}, memories=${memoryCount}, history=${history.length}, tokens≈${tokenEstimate}`,
+      `上下文编译完成: instance=${instanceId}, memories=${memoryCount}, history=${history.length}, tokens=${tokenEstimate}`,
     )
 
     return {
@@ -563,6 +573,8 @@ export class SocialAppCompiler {
       tools?: ToolDefinition[]
       /** 工具执行器：根据工具名执行，返回结果 JSON 字符串 */
       toolExecutor?: (name: string, args: Record<string, unknown>) => Promise<string>
+      /** 终局工具提交行为后立即结束本轮，不再要求模型生成文本。 */
+      isTerminalTool?: (name: string) => boolean
     },
   ): Promise<string> {
     // ── 打印完整 prompt 供调试（对齐桌面模式 reactLoop 的 [Prompt] 标签）──
@@ -596,6 +608,7 @@ export class SocialAppCompiler {
 
     const tools = opts?.tools
     const toolExecutor = opts?.toolExecutor
+    const isTerminalTool = opts?.isTerminalTool
 
     // 构建可变的 ChatMessage[]（工具调用循环需要追加 assistant + tool 消息）
     const llmMessages: ChatMessage[] = messages.map((m) => ({
@@ -639,6 +652,12 @@ export class SocialAppCompiler {
         llmMessages.push({
           role: 'assistant',
           content: strippedText || null,
+          ...(assistantMsg.reasoningContent
+            ? { reasoningContent: assistantMsg.reasoningContent }
+            : {}),
+          ...(assistantMsg.nativeReasoning
+            ? { nativeReasoning: assistantMsg.nativeReasoning }
+            : {}),
         })
 
         // 逐个执行工具，将结果作为 user 消息追加（文本格式无 toolCallId，用 user 角色）
@@ -650,6 +669,7 @@ export class SocialAppCompiler {
           )
           const result = await toolExecutor(tc.name, tc.args)
           logger.info(`[Social Tool] 结果: ${truncate(result, 2000)}`)
+          if (isTerminalTool?.(tc.name) && parseTerminalAcceptance(result)) return ''
 
           // 检测工具返回值中是否包含图片 data URL
           const imgUrls = extractImagesFromToolResult(result)
@@ -707,6 +727,8 @@ export class SocialAppCompiler {
     llmMessages.push({
       role: 'assistant',
       content: assistantMsg.content,
+      ...(assistantMsg.reasoningContent ? { reasoningContent: assistantMsg.reasoningContent } : {}),
+      ...(assistantMsg.nativeReasoning ? { nativeReasoning: assistantMsg.nativeReasoning } : {}),
       toolCalls: toolCalls,
     })
 
@@ -733,6 +755,7 @@ export class SocialAppCompiler {
         logger.info(`[Social Tool] 执行: ${toolName}, args=${truncate(JSON.stringify(args), 200)}`)
         const result = await toolExecutor(toolName, args)
         logger.info(`[Social Tool] 结果: ${truncate(result, 2000)}`)
+        if (isTerminalTool?.(toolName) && parseTerminalAcceptance(result)) return ''
 
         // 检测工具返回值中是否包含图片 data URL
         // social_read_image 工具返回 { success, count, images: [...] } 格式
@@ -798,6 +821,8 @@ export class SocialAppCompiler {
       llmMessages.push({
         role: 'assistant',
         content: turnMsg.content,
+        ...(turnMsg.reasoningContent ? { reasoningContent: turnMsg.reasoningContent } : {}),
+        ...(turnMsg.nativeReasoning ? { nativeReasoning: turnMsg.nativeReasoning } : {}),
         toolCalls: nextToolCalls,
       })
       currentToolCalls = nextToolCalls

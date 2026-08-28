@@ -23,7 +23,33 @@ import type { ApiResponse } from '@infos/shared'
 export const ELECTRON_BACKEND_ORIGIN = 'http://localhost:9120'
 
 export function isElectronRuntime(): boolean {
-  return (window as unknown as Record<string, unknown>).electron !== undefined
+  return (
+    typeof window !== 'undefined' &&
+    (window as unknown as Record<string, unknown>).electron !== undefined
+  )
+}
+
+const WEB_SERVER_KEY = 'infos.currentServerOrigin'
+const WEB_SERVER_TOKEN_KEY = 'infos.currentServerToken'
+
+export function getWebServerOrigin(): string {
+  if (typeof window === 'undefined') return ''
+  if (isElectronRuntime()) return ELECTRON_BACKEND_ORIGIN
+  try {
+    return localStorage.getItem(WEB_SERVER_KEY) || window.location.origin
+  } catch {
+    return window.location.origin
+  }
+}
+
+export function setWebServerOrigin(origin: string, token = ''): void {
+  if (isElectronRuntime()) throw new Error('Electron 客户端固定绑定本机 Daemon')
+  const url = new URL(origin)
+  if (!['http:', 'https:'].includes(url.protocol))
+    throw new Error('服务器地址必须使用 HTTP 或 HTTPS')
+  localStorage.setItem(WEB_SERVER_KEY, url.origin)
+  if (token) sessionStorage.setItem(WEB_SERVER_TOKEN_KEY, token)
+  else sessionStorage.removeItem(WEB_SERVER_TOKEN_KEY)
 }
 
 export function getGatewayWsUrl(): string {
@@ -31,8 +57,14 @@ export function getGatewayWsUrl(): string {
     return `${ELECTRON_BACKEND_ORIGIN.replace(/^http/, 'ws')}/ws/gateway`
   }
 
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${protocol}//${window.location.host}/ws/gateway`
+  const origin = getWebServerOrigin()
+  const protocol = origin.startsWith('https:') ? 'wss:' : 'ws:'
+  const token =
+    typeof sessionStorage === 'undefined'
+      ? ''
+      : (sessionStorage.getItem(WEB_SERVER_TOKEN_KEY) ?? '')
+  const query = token ? `?token=${encodeURIComponent(token)}` : ''
+  return `${protocol}//${new URL(origin).host}/ws/gateway${query}`
 }
 
 // ─────────────────────────────────────────────
@@ -54,10 +86,21 @@ class HttpTransport implements Transport {
   constructor(private baseUrl: string) {}
 
   async request<T>(endpoint: string, options?: RequestInit): Promise<ApiResponse<T>> {
+    const configuredToken =
+      !isElectronRuntime() && typeof sessionStorage !== 'undefined'
+        ? sessionStorage.getItem(WEB_SERVER_TOKEN_KEY)
+        : null
     const headers: HeadersInit =
       options?.body instanceof FormData
-        ? { ...options?.headers }
-        : { 'Content-Type': 'application/json', ...options?.headers }
+        ? {
+            ...(configuredToken ? { Authorization: `Bearer ${configuredToken}` } : {}),
+            ...options?.headers,
+          }
+        : {
+            'Content-Type': 'application/json',
+            ...(configuredToken ? { Authorization: `Bearer ${configuredToken}` } : {}),
+            ...options?.headers,
+          }
     const res = await fetch(`${this.baseUrl}/api${endpoint}`, {
       ...options,
       headers,
@@ -132,7 +175,7 @@ class ElectronTransport implements Transport {
 /** 当前 Transport 实例 (单例) */
 export const transport: Transport = isElectronRuntime()
   ? new ElectronTransport()
-  : new HttpTransport(window.location.origin)
+  : new HttpTransport(getWebServerOrigin())
 
 /**
  * 获取 API 根路径 (含 /api 前缀)
@@ -142,5 +185,6 @@ export const transport: Transport = isElectronRuntime()
  * Web:      {window.location.origin}/api
  */
 export function getApiBaseUrl(): string {
-  return isElectronRuntime() ? `${ELECTRON_BACKEND_ORIGIN}/api` : `${window.location.origin}/api`
+  if (isElectronRuntime()) return `${ELECTRON_BACKEND_ORIGIN}/api`
+  return `${getWebServerOrigin()}/api`
 }

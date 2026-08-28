@@ -3,7 +3,7 @@
  *
  * 管理用户通过对话创建的提醒事项、定时话题和预设反应：
  * - CRUD 操作 (增删查)
- * - 到期检测 (被 BackgroundScheduler 的 cron 任务调用)
+ * - 到期检测（被 KernelScheduler 周期计划调用）
  * - 到期后通过 GatewayHub 广播通知前端
  *
  * 的核心能力，
@@ -137,7 +137,7 @@ export class SchedulerService {
   /**
    * 检查到期任务并生成触发指令
    *
-   * 由 BackgroundScheduler 的 cron 任务周期性调用。
+   * 由 KernelScheduler 的周期计划调用。
    * 返回到期任务的 Agent 指令列表 (由调用方决定如何执行)。
    */
   async checkDueTasks(agentId = 'pero'): Promise<TriggerResult[]> {

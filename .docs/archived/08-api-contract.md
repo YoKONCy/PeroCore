@@ -1,5 +1,7 @@
 # API 契约草案
 
+> **归档警示**：本文记录历史设计与迁移背景，不代表当前架构。现行规范以[A01文档索引](../A01_PROJECT_STRUCTURE.md#6-规范文档与归档)及其列出的A02–A09/S系列文档为准；旧Channel、API、Package或Application表述不得用于新实现。
+
 > 后端成为 LLM 输入的唯一组装者，前端只提交当前输入。
 
 ---
@@ -107,6 +109,7 @@ Response: SSE 流
 ```
 
 **关键变化**：
+
 - 不再接受 `messages` 数组，不再接受 `sessionId`。
 - 后端从 `threadId` 解析 channel、policies 和历史。
 - `agentId` 可选：未传时用 Thread 的默认 Agent；传了则覆盖（如群聊中指定 Nana 回复）。
@@ -140,6 +143,7 @@ data: { messageId: string, pairId: string, tokenUsage: TokenUsage }
 ```
 
 **关键修复**：
+
 - 统一使用 `callId` 关联工具调用与结果
 - 工具参数字段统一为 `args`
 - 工具结果字段统一为 `result`
@@ -224,14 +228,14 @@ DELETE /api/agents/{agentId}/workspace/files/{path}
 
 现有三套不兼容的 SSE 类型必须统一：
 
-| 问题 | 现有 | 统一为 |
-|---|---|---|
-| 工具参数 | 后端 `args` / 前端 `arguments` | `args` |
-| 工具结果 | 后端 `result` / 前端 `output` | `result` |
-| 调用关联 | 按工具名 | 按 `callId` |
-| 工具状态 | 后端 `calling` / shared `tool_executing` | `tool_executing` |
-| 错误标记 | 后端 `isError` / shared `success` | `success: boolean` |
-| 流结束 | 前端靠 EOF | 必须发 `done` 事件 |
+| 问题     | 现有                                     | 统一为             |
+| -------- | ---------------------------------------- | ------------------ |
+| 工具参数 | 后端 `args` / 前端 `arguments`           | `args`             |
+| 工具结果 | 后端 `result` / 前端 `output`            | `result`           |
+| 调用关联 | 按工具名                                 | 按 `callId`        |
+| 工具状态 | 后端 `calling` / shared `tool_executing` | `tool_executing`   |
+| 错误标记 | 后端 `isError` / shared `success`        | `success: boolean` |
+| 流结束   | 前端靠 EOF                               | 必须发 `done` 事件 |
 
 所有 SSE 事件类型放入 `@perocore/shared`，前后端导入同一份类型定义。
 

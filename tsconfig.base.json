@@ -19,12 +19,20 @@
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": false,
     "paths": {
+      "@infos/avatar-assets": ["./packages/avatar-assets/src"],
       "@infos/shared": ["./packages/shared/src"],
-      "@infos/shared/*": ["./packages/shared/src/*"],
       "@infos/backend": ["./packages/backend/src"],
       "@infos/backend/*": ["./packages/backend/src/*"],
+      "@infos/document-engine": ["./packages/document-engine/src"],
+      "@infos/document-engine/*": ["./packages/document-engine/src/*"],
+      "@infos/node-sdk": ["./packages/node-sdk/src"],
+      "@infos/node-sdk/*": ["./packages/node-sdk/src/*"],
+      "@infos/node-host": ["./packages/node-host/src"],
+      "@infos/node-host/*": ["./packages/node-host/src/*"],
       "@infos/frontend": ["./packages/frontend/src"],
       "@infos/frontend/*": ["./packages/frontend/src/*"],
+      "@infos/arca": ["./packages/apps/arca/src"],
+      "@infos/arca/*": ["./packages/apps/arca/src/*"],
       "@infos/social": ["./packages/apps/social"],
       "@infos/social/*": ["./packages/apps/social/*"]
     }

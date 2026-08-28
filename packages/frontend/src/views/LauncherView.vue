@@ -45,8 +45,11 @@ interface ClientInfo {
 
 interface UpdateState {
   phase: 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'up-to-date' | 'error'
+  deployment?: 'installed' | 'portable' | 'unsupported'
   currentVersion: string
   latestVersion?: string
+  selectedVersion?: string
+  selectedTag?: string
   progress: number
   message: string
   checkedAt?: string
@@ -54,12 +57,13 @@ interface UpdateState {
 
 interface ReleaseNotice {
   tagName: string
+  version?: string
   name: string
   body: string
   publishedAt: string
   htmlUrl: string
   prerelease: boolean
-  cached: boolean
+  cached?: boolean
 }
 
 const tabs = [
@@ -565,8 +569,8 @@ onUnmounted(() => stopUpdateListener?.())
                 <small>最新版本</small>
                 <strong class="mono">
                   {{
-                    updateState?.latestVersion
-                      ? `v${updateState.latestVersion}`
+                    updateState?.selectedVersion || updateState?.latestVersion
+                      ? `v${updateState.selectedVersion ?? updateState.latestVersion}`
                       : release?.tagName || '—'
                   }}
                 </strong>

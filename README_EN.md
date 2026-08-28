@@ -339,11 +339,6 @@ infOS/
 │   │       ├── components/        # 🧱 UI component library (Chat / Avatar / Stronghold / pixel/)
 │   │       ├── stores/            # 📦 Pinia global state
 │   │       └── api/               # 📡 Transport layer (IPC / REST auto-switch)
-│   ├── native/                    # 🦀 Rust Native modules
-│   │   ├── render-core/           # Private source submodule for encryption/anti-debug/packaging (N-API)
-│   │   ├── render-core-runtime/   # Render core runtime artifacts (.node)
-│   │   ├── nit-runtime/           # NIT interpreter acceleration (N-API)
-│   │   └── auditor-wasm/          # Terminal command auditing (WASM)
 │   └── wiki/                      # 📖 VitePress documentation site
 │
 ├── electron/                      # 🖥️ Electron shell (main process/preload)
@@ -380,37 +375,30 @@ All algorithms and performance are carried by the proprietary **TriviumDB** engi
 
 ### The Life of a Memory
 
-```
-                                        ┌─────────────────────────────┐
-                                        │     Reflection Service      │
-                                        │  (Merge/Clean/Pref/Diary)   │
-                                        └──────────┬──────────────────┘
-                                                   │ Scheduled maintenance
-                                                   ▼
-  User Dialog ──→ Scorer ──→ save_memory() ──→ SQLite + TriviumDB
-                 │           │                     │
-                 │           ├─ Embedding           │
-                 │           ├─ Temporal chain      │
-                 │           └─ TriviumDB.link()   │
-                 │             (Dual-layer graph)    ▼
-                 │                        get_relevant_memories()
-                 │                         │
-                 │     ┌───────────────────┤
-                 │     ▼                   ▼
-                 │  Vector search     Graph diffusion (PEDSA)
-                 │  (TriviumDB)      (TriviumDB built-in graph)
-                 │     │                   │
-                 │     └───────┬───────────┘
-                 │             ▼
-                 │      TriviumDB search_advanced pipeline
-                 │      ├─ NMF semantic decomposition (L3~L6)
-                 │      ├─ FISTA sparse coding (residual discovery)
-                 │      ├─ Co-occurrence boosting
-                 │      └─ DPP diversity sampling
-                 │             │
-                 │             ▼
-                 │     RAGPreprocessor injects into Prompt
-                 └──────────── ▲
+```text
+  User dialog ──→ EventNote extraction/active notes ──→ SQLite + TriviumDB
+                                                           │
+                                      ┌────────────────────┴───────────────────┐
+                                      │                                        │
+                                      ▼                                        ▼
+                            Automatic RAG (Prompt)                 Active query_event_notes
+                                      │                                        │
+                         ┌────────────┴────────────┐                           │
+                         ▼                         ▼                           ▼
+                 Basic hybrid recall       Optional SA-PPR pipeline      Deterministic BFS
+                 Vector + BM25              searchAdvanced()             Direction/edge labels/depth/
+                                            ├─ SA-PPR diffusion          node count/token budget enforced
+                                            ├─ FISTA residual search
+                                            ├─ DPP diversity
+                                            ├─ ContextRNN bias
+                                            ├─ Leiden community boost
+                                            └─ Online feedback learning
+                         │                         │
+                         └────────────┬────────────┘
+                                      ▼
+                       Add timeline tail + direct predecessors
+                                      ▼
+                               Inject into LLM Prompt
 ```
 
 ### 1. Write Layer: From Dialog to Memory
@@ -427,26 +415,33 @@ Three things happen during write:
 2. Maintain a temporal chain (using `prev_id` / `next_id` to record order), stringing memories together by time
 3. Use GraphGardener to extract entities and their relationships (causal, associative, containment, etc.), building a "web of concepts" (a cognitive graph)
 
-### 2. Retrieval Layer: PEDSA Pipeline
+### 2. Retrieval Layer: Dual-Mode RAG
 
-When the user sends a new message, the retrieval pipeline works in six stages — roughly: coarse recall, then association diffusion, then semantic digging, then gap-filling, then re-weighting, then de-duplication:
+infOS separates “automatic memory recall” from “Agent-initiated graph querying” into two paths with different contracts. This prevents probabilistic diffusion from weakening the controllability of the active query tool.
 
-| Stage                      | Algorithm               | Purpose (in plain terms)                                                                                      | Implementation                      |
-| :------------------------- | :---------------------- | :------------------------------------------------------------------------------------------------------------ | :---------------------------------- |
-| ① Vector recall            | Cosine           | Quickly pull out memories with "similar meaning"                                                              | TriviumDB (`search_advanced`)       |
-| ② Graph diffusion          | PEDSA + PPR             | Follow relationships between memories to find "seemingly unrelated but actually connected" distant memories | TriviumDB built-in dual-layer graph |
-| ③ NMF semantic analysis    | Lee & Seung, 1999       | Break candidates into latent topics to judge the depth and angle of the query                                 | TriviumDB L3~L6 deep manifold       |
-| ④ FISTA residual discovery | Beck & Teboulle, 2009   | Find what existing candidates can't explain, triggering a second retrieval for weak signals                   | TriviumDB (`enable_sparse_residual`) |
-| ⑤ Co-occurrence boost      | Statistical association | Concepts that frequently appear together get their related memories weighted up                               | GraphGardener                       |
-| ⑥ DPP diversity sampling   | Kulesza & Taskar, 2012  | Pick the final results with the "highest quality and least redundancy"                                       | TriviumDB (`enable_dpp`)            |
+| Mode | Entry | Retrieval | Guarantee |
+| :--- | :--- | :--- | :--- |
+| **Automatic RAG** | Context compilation for each turn | Vector + BM25 by default; optional SA-PPR advanced pipeline in Overview settings | Always adds the physical timeline tail and each hit's direct predecessor without consuming `top_k` |
+| **Active graph query** | `query_event_notes` tool | Deterministic BFS | Strict direction, edge-label, maximum-depth, maximum-node, and return-token budgets; unaffected by the SA-PPR switch |
 
-### PEDSA Three Core Components
+Advanced automatic RAG calls TriviumDB `searchAdvanced()`. `Enable SA-PPR advanced pipeline` is the master switch. When it is off, both frontend and backend force FISTA, DPP, ContextRNN, Leiden, and the feedback loop off.
+
+| Module | Purpose | Configuration relationship |
+| :--- | :--- | :--- |
+| SA-PPR | Diffuse from vector anchors through event relations to recall graph-related but semantically distant events | Master switch; diffusion depth, teleport probability, and minimum score are configurable |
+| FISTA | Recover weak residual signals unexplained by the base candidates | Depends on SA-PPR; independently switchable |
+| DPP | Reduce semantic redundancy among final candidates | Depends on SA-PPR; independently switchable |
+| ContextRNN | Generate an Embedding-sized `diffusionBias` from the current dialog trajectory | Depends on SA-PPR; independently switchable |
+| Leiden | Discover event communities and boost them using the Query or ContextRNN direction | Depends on SA-PPR; independently switchable |
+| Feedback loop | After a reply is successfully persisted, train minGRU and output weights from implicit memory-use signals | Depends on SA-PPR; independently switchable |
+
+### Three Cognitive Components of Advanced Automatic RAG
 
 Each component handles one thing: **ContextRNN** senses "what we're talking about now", **Leiden clustering** automatically groups memories by topic, and the **feedback loop** corrects itself afterward.
 
 #### A. ContextRNN — Dialog Trajectory Awareness (minGRU)
 
-It's like a continuously-updating "conversation-direction sensor", letting the retrieval system know what direction the conversation is heading. Each round updates a lightweight **minGRU** hidden state in real time (256-dim, ~1.6MB params, <2ms pure-CPU inference):
+It acts as a continuously updated dialog-direction sensor. When SA-PPR and ContextRNN are enabled, each automatic RAG query updates a lightweight **minGRU** hidden state (256 dimensions), then projects it into a diffusion bias matching the current Embedding dimension:
 
 ```
   z_t = σ(W_z @ x_t)                    Gate
@@ -454,39 +449,36 @@ It's like a continuously-updating "conversation-direction sensor", letting the r
   h_{t+1} = (1 - z_t) ⊙ h_t + z_t ⊙ h̃_t   State update
 ```
 
-- **Modulate candidate scoring**: `finalScore = α × vecSim + β × contextAffinity`
-- **Modulate graph edge weights**: Guide diffusion along context direction
-- **Hidden state persistence**: 256 × f32 = 1KB written to disk, preserved across conversations
-- **Implementation**: `@infos/nit-runtime` (Rust N-API) + `ContextRnn` (TypeScript)
+- **Generate diffusion bias**: `diffusionBias = W_out × h_t`, passed to TriviumDB to steer SA-PPR diffusion
+- **Dynamic input dimension**: Projection matrices follow the current Memory Store Embedding dimension instead of assuming 1536
+- **State persistence**: Checkpoint every minute and save hidden states plus online-learned weights on shutdown
+- **Implementation**: Retrieval-domain TypeScript minGRU + `ContextRnn`
 
 #### B. Leiden Clustering — Automatic Community Discovery
 
-Automatically groups memories into topics ("cooking", "work", "emotions", etc.) and retrieves by topic. It's implemented by running the Leiden algorithm on the memory graph, with four benefits:
-
-- **Retrieval diversity**: Select top-3 relevant clusters → take top_k/3 from each cluster
-- **ContextRNN synergy**: `cluster_affinities = softmax(h_t @ centroids)` → RNN hidden state selects active communities
-- **Diary organization by topic**: Weekly reports organized by cluster
-- **Explainability**: Retrieval results carry cluster labels
+Automatic RAG can call TriviumDB `leidenCluster()` to discover event communities. It measures each centroid against the Query/ContextRNN direction and uses that affinity as an advanced-candidate ranking boost. When ContextRNN is disabled, Leiden still works independently with the Query Embedding.
 
 #### C. Retrieval Feedback Loop — Implicit Signal Collection
 
-After the fact, check whether the AI actually used those memories — reward it if it did, penalize it if not, so the next retrieval is more accurate. After the LLM responds, Jaccard/co-occurrence word matching (no extra token cost) determines whether injected memories were actually used:
+Feedback applies only to advanced automatic-RAG hits for the current Pair. Traces are isolated by Pair ID so concurrent Threads cannot overwrite each other. After the Assistant reply is successfully persisted, the system derives implicit positive or negative feedback from whether event topics/participants appear in the reply, then updates minGRU and the output matrix online. Ephemeral turns do not train, and training failures never fail an already completed reply.
 
-- **positive**: Memory key content appears in LLM response → `retrieval_quality += 0.1`
-- **negative**: Completely unreferenced → `retrieval_quality -= 0.05`
-- **Accumulated triggers minGRU online training**: SGD weight updates, letting the RNN better bias toward useful directions next time
+#### Advanced Automatic-RAG Real-time Flow
 
-#### Unified Pipeline: PEDSA 7-Step Real-time Flow
-
+```text
+  User input ──→ Query Embedding
+                 ├─ Optional ContextRNN update and diffusionBias
+                 ├─ TriviumDB searchAdvanced
+                 │  ├─ Vector/text anchoring
+                 │  ├─ Optional FISTA
+                 │  ├─ SA-PPR graph diffusion
+                 │  └─ Optional DPP
+                 ├─ Optional Leiden community boost
+                 ├─ Select top_k
+                 ├─ Add timeline tail and direct predecessors
+                 └─ Prompt injection → LLM → optional Pair-level feedback training
 ```
-  User Input ──→  Step 1: ContextRNN updates h_{t+1}
-               Step 2: Cluster routing → top-3 active communities
-               Step 3: Intra-cluster vector recall (3x over-recall)
-               Step 4: Context-aware re-ranking (vecSim + rnnAffinity + centrality + quality)
-               Step 5: Graph diffusion (edge weights modulated by h_t)
-               Step 6: DPP de-duplication → final top_k
-               Step 7: Inject into prompt → LLM → feedback collection
-```
+
+> This flow belongs only to automatic RAG. `query_event_notes` always uses deterministic BFS and never passes through ContextRNN, SA-PPR, Leiden, FISTA, DPP, or feedback training.
 
 ### 3. TriviumDB Engine Layer
 
@@ -622,7 +614,6 @@ Data is persisted to Docker Volume `pero-data`. Authentication can be configured
 | :---------- | :----------- | :---------------------------------------------- |
 | **Node.js** | ≥20.0.0      | Backend + frontend runtime                      |
 | **pnpm**    | ≥9.0.0       | Package manager (`packageManager: pnpm@9.15.9`) |
-| **Rust**    | stable 1.75+ | Compile `packages/native/*` (optional)          |
 
 #### Step 1: Clone the repository
 

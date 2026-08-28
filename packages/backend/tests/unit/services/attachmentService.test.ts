@@ -1,7 +1,10 @@
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { AttachmentService } from '@infos/backend/services/attachment/attachmentService'
 
-function createService() {
+function createService(rootDir = 'C:\\safe\\attachments') {
   const repo = {
     create: vi.fn(),
     findById: vi.fn(),
@@ -12,7 +15,7 @@ function createService() {
   }
   const threadRepo = { getThread: vi.fn(() => Promise.resolve({ id: 'thread-1' })) }
   return {
-    service: new AttachmentService(repo as never, threadRepo as never, 'C:\\safe\\attachments'),
+    service: new AttachmentService(repo as never, threadRepo as never, rootDir),
     repo,
   }
 }
@@ -25,6 +28,39 @@ describe('AttachmentService', () => {
       code: 'UNSUPPORTED_MEDIA_TYPE',
       httpStatus: 415,
     })
+  })
+
+  it('允许 20MB 图片并拒绝超过 20MB 的图片', async () => {
+    const rootDir = await mkdtemp(path.join(tmpdir(), 'infos-attachments-'))
+    const { service, repo } = createService(rootDir)
+    repo.create.mockImplementation(async (value) => ({
+      ...value,
+      messageId: null,
+      contextPolicy: 'once',
+      status: 'uploaded',
+      createdAt: null,
+      boundAt: null,
+    }))
+
+    try {
+      const accepted = new File([new Uint8Array(20 * 1024 * 1024)], '边界.png', {
+        type: 'image/png',
+      })
+      await expect(service.upload(accepted, 'thread-1')).resolves.toMatchObject({
+        kind: 'image',
+        sizeBytes: 20 * 1024 * 1024,
+      })
+
+      const oversized = new File([new Uint8Array(20 * 1024 * 1024 + 1)], '超限.png', {
+        type: 'image/png',
+      })
+      await expect(service.upload(oversized, 'thread-1')).rejects.toMatchObject({
+        code: 'BAD_REQUEST',
+        httpStatus: 400,
+      })
+    } finally {
+      await rm(rootDir, { recursive: true, force: true })
+    }
   })
 
   it('拒绝越界 storageKey', () => {

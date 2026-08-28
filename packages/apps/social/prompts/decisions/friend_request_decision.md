@@ -6,7 +6,7 @@ Direct Consumer: 未接入（预留，未来好友申请自动审批使用）
 Target Service: packages/apps/social/runtime/
 Target Function: unbound friend request decision flow
 Injected Via: not currently referenced by backend source
-Model Role: social_scheduler
+Model Role: 当前角色主模型
 -->
 
 [系统通知: 收到新的好友申请]

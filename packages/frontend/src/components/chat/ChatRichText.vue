@@ -5,13 +5,19 @@
  * 统一承载 Markdown、引号、XML、LaTeX 和代码高亮，并代理代码复制操作。
  */
 import { computed } from 'vue'
+import EmbeddedWebPreview from './EmbeddedWebPreview.vue'
+import { segmentChatContent } from '../../lib/embeddedWebPreview'
 import { renderChatRichText } from '../../lib/chatRichRenderer'
 import { useNotificationStore } from '../../stores/useNotificationStore'
 
-const props = defineProps<{ content: string; renderedHtml?: string; compact?: boolean }>()
+const props = defineProps<{ content: string; compact?: boolean }>()
 const notify = useNotificationStore()
-/** 流式消息可直接复用上游 30fps 渲染结果，历史消息则在本组件完整渲染。 */
-const html = computed(() => props.renderedHtml ?? renderChatRichText(props.content))
+const segments = computed(() =>
+  segmentChatContent(props.content).map((segment) => ({
+    ...segment,
+    html: segment.type === 'rich-text' ? renderChatRichText(segment.source) : '',
+  })),
+)
 
 async function handleClick(event: MouseEvent) {
   const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-copy-code]')
@@ -27,13 +33,17 @@ async function handleClick(event: MouseEvent) {
 </script>
 
 <template>
-  <!-- HTML 已在 chatRichRenderer 中经过 DOMPurify 净化。 -->
-  <!-- eslint-disable-next-line vue/no-v-html -->
-  <div
-    :class="['chat-rich-text', { 'chat-rich-text--compact': compact }]"
-    @click="handleClick"
-    v-html="html"
-  />
+  <template v-for="(segment, index) in segments" :key="`${segment.type}-${index}`">
+    <EmbeddedWebPreview v-if="segment.type === 'web-preview'" :source="segment.source" />
+    <!-- HTML已在chatRichRenderer中经过DOMPurify净化。 -->
+    <!-- eslint-disable-next-line vue/no-v-html -->
+    <div
+      v-else
+      :class="['chat-rich-text', { 'chat-rich-text--compact': compact }]"
+      @click="handleClick"
+      v-html="segment.html"
+    />
+  </template>
 </template>
 
 <style src="katex/dist/katex.min.css"></style>
@@ -92,7 +102,16 @@ async function handleClick(event: MouseEvent) {
   margin-bottom: 0;
 }
 .chat-rich-text p {
-  margin: 0.45em 0;
+  margin: 0.52em 0;
+}
+/* 不同块级语义相邻时稍微拉开节奏，段内行距保持不变。 */
+.chat-rich-text
+  > :is(h1, h2, h3, h4, h5, h6, blockquote, ul, ol, table, .chat-code-block, .chat-math-block)
+  + :is(p, h1, h2, h3, h4, h5, h6, blockquote, ul, ol, table, .chat-code-block, .chat-math-block),
+.chat-rich-text
+  > p
+  + :is(h1, h2, h3, h4, h5, h6, blockquote, ul, ol, table, .chat-code-block, .chat-math-block) {
+  margin-top: 0.72em;
 }
 .chat-rich-text h1,
 .chat-rich-text h2,

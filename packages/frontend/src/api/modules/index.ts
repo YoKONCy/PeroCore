@@ -1,3 +1,5 @@
+export { arcaApi } from './arcaApi'
+export type { ArcaApplicationStatus, ArcaDiscoveryStatus } from './arcaApi'
 export { agentApi } from './agentApi'
 export { backgroundTasksApi } from './backgroundTasksApi'
 export { chatApi } from './chatApi'

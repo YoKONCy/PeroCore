@@ -7,7 +7,31 @@
 
 import { apiClient } from '../client'
 
+export interface ActivateEmbeddingRequest {
+  provider: 'api'
+  model: string
+  dimension: number
+  apiBase?: string
+  apiKey?: string
+  reranker: {
+    enabled: boolean
+    model?: string
+    apiBase?: string
+    apiKey?: string
+  }
+}
+
+export interface ActivateEmbeddingResult {
+  model: string
+  dimension: number
+  durationMs: number
+}
+
 export const configApi = {
+  /** 真实调用候选Embedding模型，校验成功后由后端原子语义保存并热更新。 */
+  activateEmbedding: (data: ActivateEmbeddingRequest) =>
+    apiClient.post<ActivateEmbeddingResult>('/configs/embedding/activate', data),
+
   /** 获取单个配置 */
   get: <T = { key: string; value: string }>(key: string) => apiClient.get<T>(`/configs/${key}`),
 

@@ -41,7 +41,16 @@ describe('基础 API modules', () => {
     expect(clientMock.get).toHaveBeenCalledWith('/agents/pero/texts')
   })
 
-  it('configApi 应当转发单项、批量、导入导出配置端点', () => {
+  it('configApi 应当转发单项、批量、导入导出和Embedding激活端点', () => {
+    const activation = {
+      provider: 'api' as const,
+      model: 'embedding-test',
+      dimension: 4,
+      apiBase: 'https://embedding.test/v1',
+      apiKey: 'key',
+      reranker: { enabled: false },
+    }
+    configApi.activateEmbedding(activation)
     configApi.get('theme')
     configApi.set('theme', 'dark')
     configApi.remove('theme')
@@ -50,6 +59,7 @@ describe('基础 API modules', () => {
     configApi.exportAll()
     configApi.importAll({ theme: 'dark' }, false)
 
+    expect(clientMock.post).toHaveBeenCalledWith('/configs/embedding/activate', activation)
     expect(clientMock.get).toHaveBeenCalledWith('/configs/theme')
     expect(clientMock.put).toHaveBeenCalledWith('/configs', { key: 'theme', value: 'dark' })
     expect(clientMock.delete).toHaveBeenCalledWith('/configs/theme')
@@ -95,38 +105,30 @@ describe('基础 API modules', () => {
     expect(clientMock.post).toHaveBeenCalledWith('/maintenance/reindex', { agentId: 'assistant' })
   })
 
-  it('memoryApi 应当正确拼接查询参数和请求体', () => {
-    memoryApi.list({
-      page: 2,
-      pageSize: 20,
+  it('memoryApi 应当拼接档案过滤查询与图谱快照参数', () => {
+    memoryApi.archive({
       agentId: 'pero',
-      type: 'fact',
-      source: 'chat',
-      dateStart: '2026-04-27',
+      query: '关键词',
+      statuses: ['active', 'archived'],
+      topics: ['RAG', '记忆'],
+      importanceMin: 6,
+      sort: 'eventAt',
+      order: 'desc',
+      page: 2,
+      pageSize: 30,
     })
-    memoryApi.list()
-    memoryApi.create({ content: '记忆', agentId: 'pero' })
-    memoryApi.search({ query: '关键词', topK: 5 })
-    memoryApi.graph()
-    memoryApi.graph('assistant', 50)
-    memoryApi.remove(12)
-    memoryApi.remove(13, 'assistant', 'web')
-    memoryApi.importStory({ text: '故事', agentId: 'pero' })
+    memoryApi.detail('note-1')
+    memoryApi.source('note-1')
+    memoryApi.graph('pero', true, 120)
 
     expect(clientMock.get).toHaveBeenCalledWith(
-      '/memories?page=2&pageSize=20&agentId=pero&type=fact&source=chat&dateStart=2026-04-27',
+      '/memories?agentId=pero&query=%E5%85%B3%E9%94%AE%E8%AF%8D&statuses=active%2Carchived&topics=RAG%2C%E8%AE%B0%E5%BF%86&importanceMin=6&sort=eventAt&order=desc&page=2&pageSize=30',
     )
-    expect(clientMock.get).toHaveBeenCalledWith('/memories')
-    expect(clientMock.post).toHaveBeenCalledWith('/memories', { content: '记忆', agentId: 'pero' })
-    expect(clientMock.post).toHaveBeenCalledWith('/memories/search', { query: '关键词', topK: 5 })
-    expect(clientMock.get).toHaveBeenCalledWith('/memories/graph?agentId=pero&limit=100')
-    expect(clientMock.get).toHaveBeenCalledWith('/memories/graph?agentId=assistant&limit=50')
-    expect(clientMock.delete).toHaveBeenCalledWith('/memories/12?agentId=pero&source=desktop')
-    expect(clientMock.delete).toHaveBeenCalledWith('/memories/13?agentId=assistant&source=web')
-    expect(clientMock.post).toHaveBeenCalledWith('/memories/import', {
-      text: '故事',
-      agentId: 'pero',
-    })
+    expect(clientMock.get).toHaveBeenCalledWith('/memories/note-1')
+    expect(clientMock.get).toHaveBeenCalledWith('/memories/note-1/source')
+    expect(clientMock.get).toHaveBeenCalledWith(
+      '/memories/graph?agentId=pero&includeArchived=true&limit=120',
+    )
   })
 
   it('modelApi 应当转发模型配置端点', () => {

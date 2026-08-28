@@ -34,6 +34,10 @@ export interface AiModelConfigDto {
   temperature: number | null
   topP: number | null
   maxTokens: number | null
+  contextWindowTokens: number | null
+  returnNativeReasoning: boolean
+  wireApi: 'chat_completions' | 'responses'
+  reasoningDialect: 'auto' | 'openai' | 'deepseek' | 'openrouter' | 'generic'
   stream: boolean
   enableVision: boolean
   enableAudioInput: boolean

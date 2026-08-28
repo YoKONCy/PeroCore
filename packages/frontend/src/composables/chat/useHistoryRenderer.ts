@@ -1,7 +1,7 @@
 /**
  * useHistoryRenderer — 分批渲染历史消息
  *
- * 策略 (borrowed from VCPChat)：
+ * 策略：
  * 1. 先渲染最新 N 条 → 用户立刻看到最近内容
  * 2. requestIdleCallback 分批插入旧消息
  * 3. 每批间隔 80ms 避免卡顿

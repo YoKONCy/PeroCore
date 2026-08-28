@@ -29,7 +29,7 @@ import {
   buildSendParams,
   segmentsToCQString,
 } from './napcatParser'
-import { createLogger } from '../../../../backend/src/lib/logger'
+import { createLogger } from '@infos/backend/applicationHostAbi'
 
 const logger = createLogger('NapcatAdapter')
 
@@ -39,10 +39,8 @@ const logger = createLogger('NapcatAdapter')
 
 /** NapCat 适配器配置 */
 export interface NapcatConfig {
-  /** QQ 号 → Agent ID 映射 */
-  qqAgentMap: Record<string, string>
-  /** 默认 Agent ID (未映射的连接使用) */
-  defaultAgentId?: string
+  /** 单实例 Social 当前绑定的 Agent ID */
+  defaultAgentId: string
   /** 好友请求自动接受 */
   autoAcceptFriend?: boolean
   /**
@@ -92,7 +90,7 @@ export class NapcatAdapter extends AbstractSocialAdapter {
   constructor(config: NapcatConfig) {
     super()
     this.config = config
-    logger.info(`NapcatAdapter 已创建, 映射: ${JSON.stringify(config.qqAgentMap)}`)
+    logger.info(`NapcatAdapter 已创建, Social Agent: ${config.defaultAgentId}`)
   }
 
   // ── Layer 2 接口实现 ──
@@ -165,8 +163,12 @@ export class NapcatAdapter extends AbstractSocialAdapter {
     return [...this.botInfos.keys()]
   }
 
-  resolveAgentId(accountId: string): string | undefined {
-    return this.config.qqAgentMap[accountId] ?? this.config.defaultAgentId
+  resolveAgentId(_accountId: string): string {
+    return this.config.defaultAgentId
+  }
+
+  setAgentId(agentId: string): void {
+    this.config.defaultAgentId = agentId
   }
 
   async getMessageHistory(
@@ -224,14 +226,7 @@ export class NapcatAdapter extends AbstractSocialAdapter {
   registerConnection(selfId: string | undefined, sender: WsSender): void {
     if (selfId) {
       this.connections.set(String(selfId), sender)
-      const agentId = this.config.qqAgentMap[String(selfId)]
-      if (agentId) {
-        logger.info(`已注册 QQ 连接: ${selfId} → Agent ${agentId}`)
-      } else {
-        // 未在 bindings 中配置映射时，使用 defaultAgentId 兜底（见 handleMessageEvent 路由逻辑）
-        const fallback = this.config.defaultAgentId ?? 'pero'
-        logger.info(`已注册 QQ 连接: ${selfId} (未配置映射，使用默认 Agent: ${fallback})`)
-      }
+      logger.info(`已注册 QQ 连接: ${selfId} → Social Agent ${this.config.defaultAgentId}`)
     } else {
       this.defaultConnection = sender
       logger.info('已注册默认 QQ 连接 (无 X-Self-ID)')
@@ -373,8 +368,8 @@ export class NapcatAdapter extends AbstractSocialAdapter {
     }
     const userId = String(event.user_id ?? '')
 
-    // 确定 Agent
-    const agentId = this.config.qqAgentMap[selfId] ?? this.config.defaultAgentId ?? 'pero'
+    // 单实例 Social 的所有入站消息统一归属当前配置角色
+    const agentId = this.config.defaultAgentId
 
     // 忽略自己发的消息
     if (userId === selfId) return

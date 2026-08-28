@@ -36,14 +36,15 @@ import type { DrizzleDb } from '../database'
 import { createLogger } from '../lib/logger'
 import type { ToolRegistry } from '../services/agent/toolRegistry'
 import type { PathResolver } from '../core/pathResolver'
+import type { ApplicationRealm, ApplicationRealmManager } from './applicationRealm'
 import type { GrantRegistry } from './grantRegistry'
 import type { LlmService } from '../services/llm/llmService'
 import type { MdpEngine } from '../services/prompt/mdpEngine'
-import type { MemoryProvider } from '../services/memory/memoryProvider'
 import type { AgentManager } from '../services/agent/agentManager'
 import type { ModelConfig } from '../services/llm/llmService'
 import type { MemoryStoreRegistry } from '../repositories/storeRegistry'
-import type { GatewayHub } from '../services/gateway/gatewayHub'
+import type { SocialEventPort, SocialStoragePort } from './socialPorts'
+import type { KernelScheduler } from '../kernel/kernelScheduler'
 import type { InboundRouteRepository } from '../repositories/inboundRoute.repo'
 import type { ConfigRepository } from '../repositories/config.repo'
 import type { FlowStateService } from '../services/flow/flowStateService'
@@ -59,7 +60,12 @@ import type {
   LaunchAppParams,
   AppTaskContext,
 } from './types'
-import type { AgentAppRuntime, AppRuntimeContext, AppLogger } from './appRuntime'
+import type {
+  AgentAppRuntime,
+  AppRuntimeContext,
+  AppLogger,
+  HostDiaryReaderPort,
+} from './appRuntime'
 
 const logger = createLogger('AppManager')
 
@@ -108,7 +114,7 @@ export interface AppManager {
    * 3. 校验 requiredPermissions 已被授予
    * 4. 创建 AppInstance 记录
    * 5. 注册应用工具到 ToolRegistry（带 appId 前缀隔离）
-   * 6. 加载应用 runtimeEntry（如果有）
+   * 6. 加载显式注册的内置Runtime
    * 7. 主 Agent 通过 GrantRegistry 授权资源（如果有 taskContext）
    * 8. 调用 runtime.initialize()
    * 9. 状态变为 running
@@ -176,7 +182,7 @@ export interface AppManager {
   /**
    * 收集指定主 Agent 下所有运行中应用的当日记忆摘要
    *
-   * AIOS 记忆回流通道：DiaryEngine 在每日生成日记时调用此方法，
+   * AIOS 记忆回流通道：DailyNotesService 在每日生成日记时调用此方法，
    * 聚合所有应用的 getDailySummaries() 输出。
    *
    * - 仅遍历 status='running' 且 hostAgentId 匹配的实例
@@ -212,7 +218,7 @@ export interface AppManager {
   /**
    * 注册内置应用 runtime factory
    *
-   * 内置应用（如 social）不走动态 import runtimeEntry，直接注册 factory。
+   * 内置应用（如 social）由Backend直接注册factory。
    * 这样在 dev 模式下无需编译 .ts → .js，生产环境也可用同一份代码。
    *
    * @param appId 应用 ID
@@ -230,6 +236,7 @@ export interface AppManager {
    * 会误判旧实例仍在运行，跳过 launch。
    */
   cleanupStaleInstances(): Promise<void>
+  shutdown(): Promise<void>
 }
 
 // ─────────────────────────────────────────────
@@ -264,7 +271,7 @@ export class AppManagerImpl implements AppManager {
   /**
    * 内置应用 runtime factory 注册表
    *
-   * 内置应用（如 social）不走动态 import runtimeEntry，直接注册 factory。
+   * 内置应用（如 social）由Backend直接注册factory。
    * key: appId, value: 创建 AgentAppRuntime 实例的工厂函数
    */
   private builtinRuntimes = new Map<string, () => AgentAppRuntime>()
@@ -273,31 +280,28 @@ export class AppManagerImpl implements AppManager {
     private db: DrizzleDb,
     private toolRegistry: ToolRegistry,
     private pathResolver: PathResolver,
+    private applicationRealms: ApplicationRealmManager,
     private grantRegistry: GrantRegistry,
     /** 方案 B：独立编译所需依赖 */
     private llmService: LlmService,
     private mdpEngine: MdpEngine,
-    private memoryProvider: MemoryProvider,
     private agentManager: AgentManager,
-    /**
-     * 主模型获取器（社交回复生成等创意任务用）
-     *
-     * ⚠️ 特例：社交应用任务槽统一在主配置页配置。
-     * 其他 subagent 应用绝对不能这样做，必须在应用自己的 manifest/config 中声明模型需求。
-     */
-    private getMainModel?: () => Promise<ModelConfig | null>,
-    /** 社交决策模型获取器（思考状态机用） */
-    private getSocialSchedulerModel?: () => Promise<ModelConfig | null>,
-    /** 社交记忆炼化模型获取器 */
+    /** 按角色获取表达模型，未指派时回退主模型。 */
+    private getAgentModel?: (agentId: string) => Promise<ModelConfig | null>,
+    /** 社交记忆整理使用的模型。 */
     private getSocialScorerModel?: () => Promise<ModelConfig | null>,
     /** 记忆存储注册表（社交 Scorer 使用，可选） */
     private storeRegistry?: MemoryStoreRegistry,
-    /** GatewayHub（社交前端通知使用，可选） */
-    private gatewayHub?: GatewayHub,
+    /** 内置Social Realm收窄Port。 */
+    private socialStorage?: SocialStoragePort,
+    private socialEvents?: SocialEventPort,
+    private kernelScheduler?: KernelScheduler,
     /** 入站路由表 Repository（社交路由使用，可选） */
     private inboundRouteRepo?: InboundRouteRepository,
     /** 配置仓库（读取社交绑定配置，可选） */
     private configRepo?: ConfigRepository,
+    /** 内置 Social 可用的宿主日记只读端口。 */
+    private hostDiaryReader?: HostDiaryReaderPort,
   ) {}
 
   private threadService?: ThreadService
@@ -339,7 +343,7 @@ export class AppManagerImpl implements AppManager {
   /**
    * 注册内置应用 runtime factory
    *
-   * 内置应用（如 social）不走动态 import runtimeEntry，直接注册 factory。
+   * 内置应用（如 social）由Backend直接注册factory。
    * 这样在 dev 模式下无需编译 .ts → .js，生产环境也可用同一份代码。
    */
   registerBuiltinRuntime(appId: string, factory: () => AgentAppRuntime): void {
@@ -399,6 +403,18 @@ export class AppManagerImpl implements AppManager {
       manifest = JSON.parse(raw) as AgentAppManifest
     } catch (err) {
       throw new Error(`应用清单解析失败: ${err}`)
+    }
+
+    if (['stronghold', 'infos.stronghold'].includes(manifest.id)) {
+      throw new Error('STRONGHOLD_REALM_FORBIDDEN: Stronghold永久属于主应用内部模块')
+    }
+    if (!this.builtinRuntimes.has(manifest.id)) {
+      throw new Error(`APPLICATION_RUNTIME_UNAVAILABLE: 未注册受信任运行时 ${manifest.id}`)
+    }
+    const normalizedDir = path.resolve(appDir)
+    const trustedBuiltinDir = path.resolve(this.pathResolver.resolve(`@app/apps/${manifest.id}`))
+    if (normalizedDir !== trustedBuiltinDir) {
+      throw new Error(`APPLICATION_SOURCE_INVALID: ${normalizedDir}`)
     }
 
     // 2. 校验 Manifest 必填字段
@@ -499,6 +515,12 @@ export class AppManagerImpl implements AppManager {
 
   async launch(params: LaunchAppParams): Promise<string> {
     const { appId, hostAgentId } = params
+    if (['stronghold', 'infos.stronghold'].includes(appId)) {
+      throw new Error('STRONGHOLD_REALM_FORBIDDEN: Stronghold永久属于主应用内部模块')
+    }
+    if (!this.builtinRuntimes.has(appId)) {
+      throw new Error(`APPLICATION_RUNTIME_UNAVAILABLE: 未注册受信任运行时 ${appId}`)
+    }
 
     // 1. 获取 Manifest
     const manifest = await this.getManifest(appId)
@@ -548,53 +570,40 @@ export class AppManagerImpl implements AppManager {
       error: null,
     })
 
+    let realm: ApplicationRealm | undefined
     try {
-      // 6. 注册应用工具到 ToolRegistry（点号前缀隔离）
+      // 6.记录应用工具声明；具体Handler由内置Realm Runtime初始化时注册。
       if (manifest.providesTools) {
         for (const tool of manifest.providesTools) {
-          // TODO: 应用工具的 handler 需要从 runtimeEntry 加载
-          // 当前阶段仅注册工具定义，handler 由应用 runtime 在 initialize 时注册
           logger.debug(`应用工具声明: ${appId}.${tool.name}`)
         }
       }
 
-      // 7. 加载应用 runtime
-      // 优先级：内置 factory > 动态 import runtimeEntry
+      // 7.加载受信任的Builtin Realm Runtime；禁止从安装目录动态import代码。
       let runtime: AgentAppRuntime | undefined
       if (this.builtinRuntimes.has(appId)) {
-        // 内置应用：直接使用注册的 factory（dev/生产通用，无需编译 .ts）
         try {
           runtime = this.builtinRuntimes.get(appId)!()
-          logger.info(`应用运行时已加载(内置): ${appId}`)
+          logger.info(`系统应用运行时已加载: ${appId}`)
         } catch (err) {
-          logger.warn(`内置应用运行时加载失败: ${appId}, ${err}`)
-        }
-      } else if (manifest.runtimeEntry) {
-        // 社区应用：动态 import runtimeEntry
-        const installPath = await this.getInstallPath(appId)
-        const runtimePath = path.resolve(installPath, manifest.runtimeEntry)
-        if (existsSync(runtimePath)) {
-          try {
-            // 运行时由 tsx loader 解析 .ts 扩展名
-            const module = await import(runtimePath)
-            const factory = module.default ?? module.createRuntime
-            if (typeof factory === 'function') {
-              runtime = factory()
-              logger.info(`应用运行时已加载: ${appId} from ${runtimePath}`)
-            }
-          } catch (err) {
-            logger.warn(`应用运行时加载失败: ${appId}, ${err}`)
-          }
+          logger.warn(`系统应用运行时加载失败: ${appId}, ${err}`)
         }
       }
 
-      // 8. 构造运行时上下文
+      realm = this.applicationRealms.register({
+        realmId: `${appId}:${instanceId}`,
+        appId,
+        principalId: `application:${appId}`,
+        instanceId,
+      })
+      // 8.构造运行时上下文
       const appLogger = createAppLogger(appId, instanceId)
       const ctx: AppRuntimeContext = {
         instanceId,
         appId,
         hostAgentId,
         manifest,
+        realm,
         workspacePath,
         taskContext: params.taskContext,
         grantRegistry: this.grantRegistry,
@@ -615,29 +624,77 @@ export class AppManagerImpl implements AppManager {
         },
         logger: appLogger,
         requestApproval: async (action, reason) => {
-          // TODO: 通过消息队列请求主 Agent 审批
-          // 当前阶段默认批准
-          appLogger.warn(`审批请求（当前自动批准）: action=${action}, reason=${reason}`)
-          return true
+          appLogger.warn(`应用审批被拒绝: action=${action}, reason=${reason}`)
+          return false
         },
         // 方案 B：独立编译所需依赖
         llmService: this.llmService,
         mdpEngine: this.mdpEngine,
-        memoryProvider: this.memoryProvider,
         agentManager: this.agentManager,
         threadService: this.threadService!,
         flowStateService: this.flowStateService!,
-        getMainModel: this.getMainModel,
-        getSocialSchedulerModel: this.getSocialSchedulerModel,
+        getAgentModel: this.getAgentModel,
         getSocialScorerModel: this.getSocialScorerModel,
         // 社交应用等需要直接访问内核资源的可选依赖
-        db: this.db,
+        socialStorage: this.socialStorage,
+        socialEvents: this.socialEvents,
+        socialExecutions: this.kernelScheduler
+          ? {
+              run: async <T>(input: {
+                taskId: string
+                class: 'background' | 'resident'
+                priority?: number
+                resourceKey?: string
+                maxDurationMs: number
+                run(context: {
+                  signal: AbortSignal
+                  executionId: string
+                  processId: string
+                  consume(usage: {
+                    llmCalls?: number
+                    inputTokens?: number
+                    outputTokens?: number
+                    toolCalls?: number
+                  }): void
+                  beginIo(): () => void
+                }): Promise<T>
+              }) => {
+                let output: T | undefined
+                const terminal = await this.kernelScheduler!.submitAndWait({
+                  principalId: hostAgentId,
+                  taskId: `app:${appId}:${instanceId}:${input.taskId}`,
+                  class: input.class,
+                  priority: input.priority ?? 3,
+                  resourceKey: input.resourceKey ?? `app-instance:${instanceId}`,
+                  budget: {
+                    maxDurationMs: input.maxDurationMs,
+                    maxLlmCalls: 32,
+                    maxToolCalls: 64,
+                    maxConcurrentIo: 8,
+                  },
+                  run: async (scheduled) => {
+                    output = await input.run({
+                      signal: scheduled.signal,
+                      executionId: scheduled.descriptor.executionId,
+                      processId: scheduled.descriptor.processId,
+                      consume: scheduled.consume,
+                      beginIo: scheduled.beginIo,
+                    })
+                  },
+                })
+                if (terminal.state !== 'completed') {
+                  throw new Error(`SOCIAL_EXECUTION_${terminal.state.toUpperCase()}`)
+                }
+                return output as T
+              },
+            }
+          : undefined,
         storeRegistry: this.storeRegistry,
         pathResolver: this.pathResolver,
         agentBuiltinDir: this.pathResolver.resolve('@app/backend/src/assets/agents'),
-        gatewayHub: this.gatewayHub,
         inboundRouteRepo: this.inboundRouteRepo,
         configRepo: this.configRepo,
+        hostDiaryReader: appId === 'social' ? this.hostDiaryReader : undefined,
         // 动态路由挂载：sub app 通过此方法注册 HTTP 端点到主 app
         // 代理到主 Hono 实例的 app.route(prefix, router)
         mountRouter: (prefix: string, router: Hono) => {
@@ -654,11 +711,7 @@ export class AppManagerImpl implements AppManager {
 
       // 9. 初始化运行时
       if (!runtime) {
-        // runtime 加载失败（既无内置 factory，动态 import 也失败/未找到）
-        // 不能静默继续，否则状态会被标记为 running 但 initialize/mountRouter 从未执行
-        throw new Error(
-          `应用运行时加载失败: appId=${appId}（内置 factory 未注册且 runtimeEntry 动态 import 失败）`,
-        )
+        throw new Error(`应用运行时加载失败: appId=${appId}（未注册受信任内置Runtime）`)
       }
       const result = await runtime.initialize(ctx)
       if (!result.success) {
@@ -677,7 +730,10 @@ export class AppManagerImpl implements AppManager {
       )
       return instanceId
     } catch (err) {
-      // 启动失败：更新状态为 error
+      await realm
+        ?.dispose()
+        .catch((error) => logger.warn(`释放启动失败的Application Realm失败: ${error}`))
+      //启动失败：更新状态为error
       await this.db
         .update(appInstances)
         .set({ status: 'error', error: String(err) })
@@ -747,6 +803,7 @@ export class AppManagerImpl implements AppManager {
       // 3. 注销应用工具（清理 ToolRegistry 中的应用工具）
       if (entry) {
         this.toolRegistry.unregisterAppTools(entry.manifest.id)
+        await entry.ctx.realm.dispose()
       }
 
       // 4. 更新状态为 stopped
@@ -764,6 +821,9 @@ export class AppManagerImpl implements AppManager {
       logger.info(`应用实例已停止: ${instanceId}`)
       return true
     } catch (err) {
+      await entry?.ctx.realm
+        .dispose()
+        .catch((error) => logger.warn(`释放异常停止的Application Realm失败: ${error}`))
       logger.error(`停止应用实例失败: ${instanceId}, ${err}`)
       // 即使失败也标记为 stopped
       await this.db
@@ -783,6 +843,19 @@ export class AppManagerImpl implements AppManager {
       .where(eq(appInstances.instanceId, instanceId))
     if (rows.length === 0) return undefined
     return rowToInstance(rows[0]!)
+  }
+
+  async shutdown(): Promise<void> {
+    const instanceIds = [...this.runtimes.keys()]
+    for (const instanceId of instanceIds.reverse()) {
+      try {
+        await this.stop(instanceId)
+      } catch (error) {
+        logger.error(`停止Application Realm实例失败: instanceId=${instanceId}, error=${error}`)
+      }
+    }
+    this.subscribers.clear()
+    logger.info(`Application Realm宿主已停止，共关闭${instanceIds.length}个实例`)
   }
 
   async listInstances(params: {
@@ -834,17 +907,39 @@ export class AppManagerImpl implements AppManager {
     if (!instance) throw new Error(`应用未运行: ${params.appId}`)
     const [instanceId, entry] = instance
     if (!entry.runtime.executeCommand) throw new Error(`应用不支持主 Agent 委派: ${params.appId}`)
-    const request: AppCommandRequest = {
-      correlationId: crypto.randomUUID(),
-      action: params.action,
-      input: params.input,
-      taskContext: params.taskContext,
-      communicationBudget: params.communicationBudget ?? action.defaultCommunicationBudget ?? 8,
+    const invoke = async (
+      execution?: import('@infos/shared').KernelExecutionDescriptor,
+    ): Promise<AppCommandResult> => {
+      const request: AppCommandRequest = {
+        correlationId: execution?.executionId ?? crypto.randomUUID(),
+        executionId: execution?.executionId,
+        processId: execution?.processId,
+        action: params.action,
+        input: params.input,
+        taskContext: params.taskContext,
+        communicationBudget: params.communicationBudget ?? action.defaultCommunicationBudget ?? 8,
+      }
+      logger.info(
+        `执行应用命令: app=${params.appId}, instance=${instanceId}, action=${params.action}, correlation=${request.correlationId}`,
+      )
+      return entry.runtime.executeCommand!(request)
     }
-    logger.info(
-      `执行应用命令: app=${params.appId}, instance=${instanceId}, action=${params.action}, correlation=${request.correlationId}`,
-    )
-    return entry.runtime.executeCommand(request)
+    if (!this.kernelScheduler) return invoke()
+    let result: AppCommandResult | undefined
+    const terminal = await this.kernelScheduler.submitAndWait({
+      principalId: params.hostAgentId,
+      taskId: `app-command:${params.appId}:${params.action}`,
+      class: 'foreground',
+      priority: 7,
+      resourceKey: `app-instance:${instanceId}`,
+      budget: { maxDurationMs: 10 * 60_000, maxLlmCalls: 24, maxToolCalls: 64, maxConcurrentIo: 8 },
+      run: async ({ descriptor }) => {
+        result = await invoke(descriptor)
+        if (result.status === 'failed') throw new Error(result.error ?? result.summary)
+      },
+    })
+    if (!result) throw new Error(`应用命令未返回结果: ${terminal.state}`)
+    return result
   }
 
   // ── 检查点与事件 ──
@@ -912,18 +1007,6 @@ export class AppManagerImpl implements AppManager {
   }
 
   // ── 内部方法 ──
-
-  /** 获取应用安装路径 */
-  private async getInstallPath(appId: string): Promise<string> {
-    const rows = await this.db
-      .select({ installPath: appRegistry.installPath })
-      .from(appRegistry)
-      .where(eq(appRegistry.appId, appId))
-    if (rows.length === 0) {
-      throw new Error(`应用未安装: ${appId}`)
-    }
-    return rows[0]!.installPath
-  }
 
   /** 内部事件发射（转发给订阅者） */
   private emitEvent(instanceId: string, event: AppEvent): void {

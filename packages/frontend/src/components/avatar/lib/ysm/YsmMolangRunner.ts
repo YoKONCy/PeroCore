@@ -61,6 +61,8 @@ interface YsmCtrlContext {
 interface CompiledScript {
   /** 是否为 init 脚本 */
   isInit: boolean
+  /** 来源文件名。 */
+  fileName: string
   /** 编译后的执行函数 */
   run: (
     variable: Record<string, number>,
@@ -121,6 +123,7 @@ function compileScript(script: YsmMolangScript): CompiledScript {
 
   return {
     isInit: isInitScript(script.fileName),
+    fileName: script.fileName,
     run: (variable, query, ctrl) => compiled(variable, query, molangContext.math, ctrl),
   }
 }
@@ -154,11 +157,15 @@ export class YsmMolangRunner {
     private readonly onPlayAnim: (name: string, transition: number) => void,
   ) {
     for (const script of scripts) {
-      const compiled = compileScript(script)
-      if (compiled.isInit) {
-        this.initScripts.push(compiled)
-      } else {
-        this.frameScripts.push(compiled)
+      try {
+        const compiled = compileScript(script)
+        if (compiled.isInit) {
+          this.initScripts.push(compiled)
+        } else {
+          this.frameScripts.push(compiled)
+        }
+      } catch {
+        // 单个第三方控制器语法不兼容时跳过，不能让整个模型加载失败。
       }
     }
   }

@@ -1,0 +1,115 @@
+{
+  "id": "facts",
+  "name": "共享事实库",
+  "version": "1.0.0",
+  "type": "tool",
+  "entry": "index.ts",
+  "category": "memory",
+  "userCopy": {
+    "query_facts": {
+      "label": "查询共享事实",
+      "description": "按对象名称或别名查询全 Agent 共享事实。"
+    },
+    "write_fact": { "label": "记录共享事实", "description": "向共享事实对象写入一条新事实。" },
+    "supersede_fact": {
+      "label": "更新共享事实",
+      "description": "用新事实取代已经发生变化的旧事实。"
+    },
+    "delete_fact": {
+      "label": "删除错误事实",
+      "description": "物理删除明确错误、垃圾或误写的共享事实。"
+    },
+    "add_fact_object_alias": {
+      "label": "添加事实别名",
+      "description": "为共享事实对象添加可用于查询的别名。"
+    },
+    "remove_fact_object_alias": {
+      "label": "移除事实别名",
+      "description": "移除共享事实对象不再适用的别名。"
+    }
+  },
+  "tools": [
+    {
+      "name": "query_facts",
+      "description": "按对象标准名或别名查询共享事实库。写入前必须先查询；返回精确匹配或最多5个文本候选、active事实与确定性图路径，由你显式选择。",
+      "parameters": {
+        "type": "object",
+        "required": ["object"],
+        "properties": { "object": { "type": "string" } }
+      }
+    },
+    {
+      "name": "write_fact",
+      "description": "向已选择对象写入新事实；零候选时可显式提交standardName和aliases创建对象。不能自造objectId。",
+      "parameters": {
+        "type": "object",
+        "required": ["fact"],
+        "properties": {
+          "objectId": { "type": "string" },
+          "standardName": { "type": "string" },
+          "aliases": { "type": "array", "items": { "type": "string" } },
+          "fact": { "type": "string" },
+          "observedAt": { "type": "string" },
+          "source": { "type": "string" },
+          "confidence": { "type": "number" },
+          "operationId": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "supersede_fact",
+      "description": "现实情况变化或事实冲突时，显式用新事实取代仍为active的旧事实。",
+      "parameters": {
+        "type": "object",
+        "required": ["objectId", "oldFactId", "newFact"],
+        "properties": {
+          "objectId": { "type": "string" },
+          "oldFactId": { "type": "string" },
+          "newFact": { "type": "string" },
+          "observedAt": { "type": "string" },
+          "source": { "type": "string" },
+          "confidence": { "type": "number" },
+          "operationId": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "delete_fact",
+      "description": "仅物理删除明确错误、垃圾或误写事实；现实变化应使用supersede_fact。",
+      "parameters": {
+        "type": "object",
+        "required": ["factId"],
+        "properties": {
+          "factId": { "type": "string" },
+          "operationId": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "add_fact_object_alias",
+      "description": "为事实对象追加别名。",
+      "parameters": {
+        "type": "object",
+        "required": ["objectId", "alias"],
+        "properties": {
+          "objectId": { "type": "string" },
+          "alias": { "type": "string" },
+          "operationId": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "remove_fact_object_alias",
+      "description": "移除事实对象别名。",
+      "parameters": {
+        "type": "object",
+        "required": ["objectId", "alias"],
+        "properties": {
+          "objectId": { "type": "string" },
+          "alias": { "type": "string" },
+          "operationId": { "type": "string" }
+        }
+      }
+    }
+  ]
+}

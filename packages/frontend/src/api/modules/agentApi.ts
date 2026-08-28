@@ -3,6 +3,7 @@
  *
  */
 
+import type { AgentPublicProfile } from '@infos/shared'
 import { apiClient } from '../client'
 
 /** Agent 列表项 */
@@ -28,6 +29,7 @@ export interface AgentSocialBinding {
 }
 
 export interface AgentDetail extends AgentListItem {
+  publicProfile: AgentPublicProfile
   systemPrompt: string
   channelPatches: Partial<Record<AgentChannel, string>>
   waifuTexts: Record<string, unknown> | null
@@ -43,7 +45,13 @@ export interface AgentCreatePayload {
 
 export type AgentUpdatePayload = Pick<
   AgentDetail,
-  'name' | 'description' | 'ownerAppellation' | 'systemPrompt' | 'channelPatches' | 'waifuTexts'
+  | 'name'
+  | 'description'
+  | 'publicProfile'
+  | 'ownerAppellation'
+  | 'systemPrompt'
+  | 'channelPatches'
+  | 'waifuTexts'
 >
 
 /** 工具显示元数据（后端 manifest display 字段透传，前端 ReAct 轨迹区渲染用） */
@@ -52,6 +60,7 @@ export interface AgentToolDisplay {
   icon?: string
   color?: string
   style?: string
+  signature?: import('@infos/shared').ToolVisualSignatureMeta
 }
 
 export interface AgentTool {
@@ -81,6 +90,16 @@ export interface AgentCapabilities {
   skills?: AgentSkillOption[]
 }
 
+export interface AgentPackageExport {
+  format: 'infos.agent-package'
+  version: 1
+  agentId: string
+  name: string
+  fileName: string
+  exportedAt: string
+  files: Array<{ path: string; contentBase64: string }>
+}
+
 export const agentApi = {
   /** 获取所有 Agent */
   list: () => apiClient.get<AgentListItem[]>('/agents'),
@@ -97,6 +116,10 @@ export const agentApi = {
 
   /** 删除自定义 Agent */
   remove: (agentId: string) => apiClient.delete<void>(`/agents/${agentId}`),
+
+  /** 获取服务端生成的版本化角色资源包。 */
+  exportPackage: (agentId: string) =>
+    apiClient.get<AgentPackageExport>(`/agents/${agentId}/export`),
 
   /** 上传客户端裁切后的 PNG 头像，由服务端写入 Agent 资源目录。 */
   uploadAvatar: (agentId: string, avatar: Blob) => {

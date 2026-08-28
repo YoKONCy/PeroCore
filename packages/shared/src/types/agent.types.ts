@@ -31,6 +31,14 @@ export interface ResolvedCapability {
   skillMenuText: string
 }
 
+/** 允许其他 Agent 在据点等多人场景读取的稳定公开档案。 */
+export interface AgentPublicProfile {
+  gender?: string
+  identity?: string
+  appearance?: string
+  personality?: string
+}
+
 /** Agent 配置数据传输对象 */
 export interface AgentProfileDto {
   id: number

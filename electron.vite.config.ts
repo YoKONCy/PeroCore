@@ -20,8 +20,13 @@ const APP_VERSION: string = rootPkg.version
 export default defineConfig({
   // ── 主进程 ──────────────────────────────────────────────
   main: {
-    // updater 必须内联进 app.asar；pnpm 的符号链接依赖不能依靠 electron-builder files 复制。
-    plugins: [externalizeDepsPlugin({ exclude: ['electron-updater'] })],
+    // 纯 TS Workspace 头像适配包必须内联进 app.asar；运行时不能依赖 pnpm 工作区链接。
+    plugins: [externalizeDepsPlugin({ exclude: ['@infos/avatar-assets'] })],
+    resolve: {
+      alias: {
+        '@infos/avatar-assets': resolve(__dirname, 'packages/avatar-assets/src'),
+      },
+    },
     build: {
       outDir: 'dist-electron/main',
       rollupOptions: {
@@ -56,6 +61,8 @@ export default defineConfig({
     resolve: {
       alias: {
         '@': resolve(__dirname, 'packages/frontend/src'),
+        '@infos/avatar-assets': resolve(__dirname, 'packages/avatar-assets/src'),
+        '@infos/arca/manifest': resolve(__dirname, 'packages/apps/arca/src/manifest.ts'),
         '@infos/shared': resolve(__dirname, 'packages/shared/src'),
       },
     },

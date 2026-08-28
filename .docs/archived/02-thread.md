@@ -1,5 +1,7 @@
 # Thread 模型
 
+> **归档警示**：本文记录历史设计与迁移背景，不代表当前架构。现行规范以[A01文档索引](../A01_PROJECT_STRUCTURE.md#6-规范文档与归档)及其列出的A02–A09/S系列文档为准；旧Channel、API、Package或Application表述不得用于新实现。
+
 > Thread 是主 Agent 与用户（或外部平台）的一次交互线程，只负责对话边界和消息存储。
 
 ---
@@ -13,6 +15,7 @@ Thread 替代当前的 `Session` 概念。它是主 Agent 的一个一等资源�
 - 上下文窗口策略
 
 Thread **不负责**：
+
 - 长期记忆（那是 Memory 的事）
 - 人格定义（那是 Identity 的事）
 - 工具权限（那是 Tool Capability 的事）
@@ -32,12 +35,12 @@ Channel 是 Thread 创建时确定的持久属性，不是 Agent 状态，也不
 
 Thread 模型当前仅服务主 Agent 的对话场景：
 
-| Channel | 用途 | 是否由 ContextCompiler 编译 |
-|---|---|---|
-| `desktop` | 桌面聊天（主场景） | ✅ 是 |
-| `companion` | 陪伴模式 | ✅ 是 |
-| `social` | 社交平台私聊 | ❌ 否（子 Agent 应用） |
-| `group` | 群聊 | ❌ 否（子 Agent 应用） |
+| Channel     | 用途               | 是否由 ContextCompiler 编译 |
+| ----------- | ------------------ | --------------------------- |
+| `desktop`   | 桌面聊天（主场景） | ✅ 是                       |
+| `companion` | 陪伴模式           | ✅ 是                       |
+| `social`    | 社交平台私聊       | ❌ 否（子 Agent 应用）      |
+| `group`     | 群聊               | ❌ 否（子 Agent 应用）      |
 
 > `social`/`group` 不走 ContextCompiler，将由独立的社交子 Agent 应用处理。
 > 详见 [03-context-runtime.md 第 0.2 节](./03-context-runtime.md#02-社交场景从-contextcompiler-剥离)。
@@ -218,6 +221,7 @@ Pero
 ```
 
 具体行为：
+
 - 创建新的 Thread 记录
 - 清空当前页面的短期消息窗口（前端视图）
 - 不继承旧 Thread 的原始消息和摘要
@@ -337,17 +341,17 @@ LIMIT ?
 
 ## 9. 与现有代码的对应
 
-| 现有 | 新架构 | 处理方式 |
-|---|---|---|
-| `SessionService` | Thread 管理 | 整体替换 |
-| `SessionService.activeSessions` | Thread 列表 | 移除内存指针，改为数据库查询 |
-| `session.{agentId}.current` | Thread 列表最新项 | 移除 ConfigRepo 指针 |
-| `ConversationLogService` | ThreadMessage 存储 | 迁移表结构 |
-| `conversation_logs` 表 | `thread_messages` 表 | 新增 status、pairId、revision 字段 |
-| `source` 字段 | `channel` 字段 | 语义重命名 |
-| `sessionId` 字段 | `threadId` 字段 | 语义重命名 |
-| 前端 `useSessionStore` | `useThreadStore` | 重构为视图订阅者 |
-| 前端全量提交 messages | 只提交 `{ threadId, content }` | 移除前端上下文组装 |
+| 现有                            | 新架构                         | 处理方式                           |
+| ------------------------------- | ------------------------------ | ---------------------------------- |
+| `SessionService`                | Thread 管理                    | 整体替换                           |
+| `SessionService.activeSessions` | Thread 列表                    | 移除内存指针，改为数据库查询       |
+| `session.{agentId}.current`     | Thread 列表最新项              | 移除 ConfigRepo 指针               |
+| `ConversationLogService`        | ThreadMessage 存储             | 迁移表结构                         |
+| `conversation_logs` 表          | `thread_messages` 表           | 新增 status、pairId、revision 字段 |
+| `source` 字段                   | `channel` 字段                 | 语义重命名                         |
+| `sessionId` 字段                | `threadId` 字段                | 语义重命名                         |
+| 前端 `useSessionStore`          | `useThreadStore`               | 重构为视图订阅者                   |
+| 前端全量提交 messages           | 只提交 `{ threadId, content }` | 移除前端上下文组装                 |
 
 ---
 

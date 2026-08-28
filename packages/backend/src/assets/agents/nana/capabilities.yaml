@@ -1,128 +1,26 @@
-# Nana Agent 能力矩阵 — CapabilityGate (AIOS)
-# 单一权威: (Agent, Channel) → 可用工具 + 技能 + 提示词片段
-#
-# AIOS 改造说明：
-# - modes: 改为 channels:（与 Thread.channel 持久属性对齐）
-# - work 模式保留为 channel（未来由 Coding App + SubAgent 替代）
-# - ambient 是请求级能力作用域，在 desktop 白名单基础上只做减法
-#
-# 第七阶段修复（批次 B3/B4）：
-# - social 与 group 已显式配置最小且隔离的工具集
-# - CapabilityGate 已改为 fail-closed：未在此文件声明的 channel 一律返回空工具集
-# - 新增 channel 时必须在此显式配置，否则该通道下 Agent 将无任何工具可用
-#
-# 能力矩阵与 pero 保持一致 (同等权限级别)。
-# 工具名必须与 ToolRegistry 中注册的 definition.name 完全一致。
-
+# Nana Agent 能力矩阵
+# tools中的“*”表示角色层不做减法，最终能力仍受Channel、运行环境、模型和Thread策略约束。
 agent: nana
 
 channels:
   desktop:
     tools:
-      # 生命周期
-      - finish_task
-      - load_skill
-      # 文件系统
-      - read_file
-      - write_file
-      - get_file_info
-      - list_directory
-      - search_files
-      - code_search
-      # 终端
-      - terminal_execute
-      # 视觉感知
-      - take_screenshot
-      # 网页 & 浏览器
-      - web_fetch
-      - browser_open_url
-      - browser_click
-      - browser_type
-      - browser_scroll
-      - browser_back
-      - browser_get_content
-      # 系统 & 桌面
-      - get_system_info
-      - open_application
-      - get_active_windows
-      - activate_window
-      - automation_execute
-      - get_mouse_position
-      # 提醒 & 日程
-      - set_reminder
-      - list_reminders
-      - cancel_reminder
-      # 脚本编排
-      - run_script
-      # 日记查找
-      - search_diary
+      - '*'
     skills:
-      - memory_management
-      - code_assistance
+      - '*'
     prompt_fragments:
-      - components/abilities/vision
       - components/abilities/workspace
-    # AIOS: output_constraint 已移至独立槽位 9100_output_format（近邻用户输入）
 
-  # work channel: 保留供未来 Coding App + SubAgent 使用
   work:
     tools:
-      - finish_task
-      - load_skill
-      - read_file
-      - write_file
-      - get_file_info
-      - list_directory
-      - search_files
-      - code_search
-      - terminal_execute
-      - terminal_create
-      - terminal_list
-      - terminal_get
-      - terminal_read
-      - terminal_wait
-      - terminal_write
-      - terminal_resize
-      - terminal_interrupt
-      - terminal_kill
-      - terminal_close
-      - read_file_range
-      - glob_files
-      - edit_file
-      - web_fetch
-      - run_script
+      - '*'
     skills:
       - code_assistance
     prompt_fragments:
       - components/abilities/workspace
-    # AIOS: output_constraint 已移至独立槽位 9100_output_format（近邻用户输入）
 
-  # ─────────────────────────────────────────────
-  # 第七阶段修复（批次 B4）：social / group channel 最小配置
-  # 安全原则：社交通道面向外部不可信用户，绝不放开文件写入、终端执行、脚本编排。
-  # ─────────────────────────────────────────────
-
-  # social channel: 私聊场景（QQ 私聊 / Discord DM 等）
-  social:
-    tools:
-      - finish_task
-      - load_skill
-      - web_fetch
-      - search_diary
-      - set_reminder
-      - list_reminders
-      - cancel_reminder
-    skills: []
-    prompt_fragments: []
-
-  # group channel: infOS 据点内部多 Agent 群聊
   group:
     tools:
-      - finish_task
-      - stronghold_move_to_room
-      - stronghold_list_rooms
-      - stronghold_get_room_info
-      - stronghold_set_environment
-      - stronghold_call_butler
+      - '*'
     skills: []
     prompt_fragments: []

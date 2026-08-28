@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('@infos/nit-runtime', () => ({
+vi.mock('@infos/backend/services/retrieval/minGru', () => ({
   HIDDEN_DIM: 4,
   // AIOS 第八阶段：minGRU 权重大小（HIDDEN_DIM=4）
   MIN_GRU_WEIGHT_SIZES: {
@@ -31,7 +31,7 @@ vi.mock('@infos/nit-runtime', () => ({
 }))
 
 import { ContextRnn } from '@infos/backend/services/retrieval/contextRnn'
-import { minGruForwardWithWeights, projectInput } from '@infos/nit-runtime'
+import { minGruForwardWithWeights, projectInput } from '@infos/backend/services/retrieval/minGru'
 import type { PathResolver } from '@infos/backend/core/pathResolver'
 
 function createResolver(root: string): PathResolver {
@@ -75,8 +75,8 @@ describe('ContextRnn', () => {
     ])
   })
 
-  it('应当生成 1536 维偏置向量并计算聚类 softmax 亲和度', () => {
-    const rnn = new ContextRnn(createResolver(root))
+  it('应按运行时Embedding维度生成偏置向量并计算聚类softmax亲和度', () => {
+    const rnn = new ContextRnn(createResolver(root), { inputDim: 6 })
     rnn.update('pero', 'desktop', [1, 0])
 
     const bias = rnn.generateBias('pero', 'desktop')
@@ -89,7 +89,7 @@ describe('ContextRnn', () => {
       ]),
     )
 
-    expect(bias).toHaveLength(1536)
+    expect(bias).toHaveLength(6)
     expect(affinities.get(1)! + affinities.get(2)!).toBeCloseTo(1)
     expect(affinities.get(1)).toBeGreaterThan(affinities.get(2)!)
     expect(rnn.computeClusterAffinities('pero', 'desktop', new Map())).toEqual(new Map())

@@ -1,3 +1,9 @@
+/**
+ * attachment.router — HTTP 路由适配层
+ *
+ * 负责定义该模块的稳定入口、数据边界与错误语义。
+ * 调用方通过这里访问领域能力，避免绕过校验直接耦合内部状态。
+ */
 import { Hono } from 'hono'
 import type { AppContext } from '../container'
 import { AppError } from '../lib/appError'
@@ -18,7 +24,7 @@ export function createAttachmentRouter(ctx: AppContext) {
       throw new AppError('BAD_REQUEST', { message: 'multipart 请求必须包含 file 和 threadId' })
     }
     const data = await ctx.attachmentService.upload(fileValue, threadValue)
-    return c.json({ code: 'OK', message: '附件上传成功', data }, 201)
+    return c.json({ code: 'CREATED', message: '附件上传成功', data }, 201)
   })
 
   router.get('/:id/content', async (c) => {

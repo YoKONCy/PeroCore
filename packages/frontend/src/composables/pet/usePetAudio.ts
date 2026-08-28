@@ -206,6 +206,20 @@ export function usePetAudio() {
     }
   }
 
+  async function playAsset(playbackId: string, assetUrl: string): Promise<void> {
+    const response = await fetch(assetUrl)
+    const arrayBuffer = await response.arrayBuffer()
+    const buffer = await getAudioContext().decodeAudioData(arrayBuffer)
+    currentId.value = playbackId
+    isPlaying.value = true
+    try {
+      await playBuffer(buffer)
+    } finally {
+      isPlaying.value = false
+      currentId.value = null
+    }
+  }
+
   // ═══ 控制 ═══
 
   /** 跳过当前正在播放的音频 */
@@ -285,6 +299,8 @@ export function usePetAudio() {
     skip,
     /** 停止并清空 */
     stopAll,
+    /** 播放定向下发的 Audio Asset */
+    playAsset,
     /** 接收 Gateway 推送的音频 chunk */
     receiveAudioChunk,
   }

@@ -1,5 +1,19 @@
-import { auditCommand } from '@infos/auditor-wasm'
+/**
+ * policyEngine — 领域服务
+ *
+ * 封装本领域的核心职责与外部依赖，向上层提供可预测的调用契约。
+ * 非直观的状态转换、失败恢复与安全边界应在本模块内完成，避免泄漏实现细节。
+ */
 import type { ToolPermission } from '../../capabilities/types'
+
+export interface BrowserIntentPolicyInput {
+  summary: string
+  origin: string
+  sideEffect: 'read' | 'local-change' | 'external-change' | 'commit' | 'irreversible'
+  resourceSummary?: string
+  reversible: boolean
+  expectedEffects?: unknown[]
+}
 
 export interface ToolPolicyContext {
   agentId: string
@@ -12,10 +26,12 @@ export interface ToolPolicyContext {
   permission?: ToolPermission
 }
 
+export type ApprovalRiskLevel = 'low' | 'medium' | 'high' | 'critical'
+
 export type PolicyDecision =
   | { action: 'allow' }
   | { action: 'deny'; code: string; reason: string }
-  | { action: 'require_approval'; reason: string }
+  | { action: 'require_approval'; reason: string; riskLevel: ApprovalRiskLevel }
 
 const CONTENT_FIELDS = new Set([
   'content',
@@ -36,7 +52,58 @@ const HIGH_RISK_COMMAND_PATTERNS = [
   /\bgit\s+(?:reset\s+--hard|clean\s+-[^\n]*f)/i,
 ]
 
+function auditCommand(command: string): { allowed: boolean; risk: string; reason: string } {
+  const normalized = command.trim().toLowerCase()
+  const rules: Array<{ pattern: RegExp; risk: string; reason: string }> = [
+    {
+      pattern:
+        /(?:rm\s+-(?:rf|fr)[^\n]*(?:\s\/\s*$)|remove-item[^\n]*(?:\sc:[\\/])[^\n]*(?:-recurse[^\n]*-force|-force[^\n]*-recurse)|remove-item[^\n]*(?:-recurse[^\n]*-force|-force[^\n]*-recurse)[^\n]*\sc:[\\/])/i,
+      risk: 'critical',
+      reason: '检测到递归删除根目录',
+    },
+    { pattern: /\b(?:format|format\.com)\s/i, risk: 'critical', reason: '检测到磁盘格式化' },
+    { pattern: /\bdel\s+\/(?:s\s+\/q|q\s+\/s)\b/i, risk: 'high', reason: '检测到静默批量删除' },
+    {
+      pattern: /\bgit\s+(?:reset\s+--hard|clean\s+-[^\n]*f)/i,
+      risk: 'high',
+      reason: '检测到破坏性Git操作',
+    },
+    {
+      pattern:
+        /\b(?:curl|wget|invoke-webrequest)\b[^\n]*(?:\|\s*(?:sh|bash|zsh|powershell|pwsh)|invoke-expression)/i,
+      risk: 'high',
+      reason: '检测到远程脚本下载后直接执行',
+    },
+    { pattern: /\breg\s+(?:add|delete)\b/i, risk: 'high', reason: '检测到注册表修改' },
+    {
+      pattern: /\b(?:shutdown|reboot|restart-computer)\b/i,
+      risk: 'medium',
+      reason: '检测到系统关机或重启操作',
+    },
+  ]
+  const match = rules.find((rule) => rule.pattern.test(normalized))
+  return match
+    ? { allowed: false, risk: match.risk, reason: match.reason }
+    : { allowed: true, risk: 'safe', reason: '未发现危险模式' }
+}
+
 const TERMINAL_TOOLS = new Set(['terminal_execute', 'terminal_create'])
+const BROWSER_SENSITIVE_TOOLS = new Set([
+  'browser_type',
+  'browser_evaluate',
+  'browser_storage',
+  'browser_emulate',
+  'browser_network',
+  'browser_interact',
+  'browser_tabs',
+  'browser_download',
+  'browser_upload',
+  'browser_dialog',
+  'browser_plan_form',
+  'browser_compile_capability',
+])
+const BROWSER_SENSITIVE_CLICK =
+  /(?:购买|支付|提交|发送|删除|确认|授权|登录|sign\s*in|submit|pay|buy|delete|send)/i
 
 /**
  * 本地执行器目前只能约束终端 cwd，不能在操作系统层隔离 Shell 对全盘文件的访问。
@@ -46,6 +113,7 @@ export const ALWAYS_APPROVE_EACH_CALL_TOOLS = new Set([
   'terminal_execute',
   'terminal_create',
   'terminal_write',
+  'delete_file',
   'open_application',
   'activate_window',
 ])
@@ -105,11 +173,12 @@ export class PolicyEngine {
     }
 
     if (command && TERMINAL_TOOLS.has(context.toolName)) {
-      const audit = auditCommand(command, process.platform === 'win32' ? 'powershell' : 'sh')
+      const audit = auditCommand(command)
       if (!audit.allowed) {
         return {
           action: 'require_approval',
           reason: `命令审计判定为 ${audit.risk} 风险：${audit.reason}`,
+          riskLevel: audit.risk as ApprovalRiskLevel,
         }
       }
     }
@@ -118,18 +187,74 @@ export class PolicyEngine {
       TERMINAL_TOOLS.has(context.toolName) &&
       HIGH_RISK_COMMAND_PATTERNS.some((pattern) => pattern.test(command))
     ) {
-      return { action: 'require_approval', reason: '终端命令包含高风险或破坏性操作，需要用户确认' }
-    }
-    if (ALWAYS_APPROVE_EACH_CALL_TOOLS.has(context.toolName)) {
       return {
         action: 'require_approval',
-        reason: `工具 ${context.toolName} 可执行或注入任意系统命令，必须逐次由用户确认`,
+        reason: '终端命令包含高风险或破坏性操作，需要用户确认',
+        riskLevel: 'high',
+      }
+    }
+    if (ALWAYS_APPROVE_EACH_CALL_TOOLS.has(context.toolName)) {
+      const reason =
+        context.toolName === 'open_application'
+          ? '启动或激活本机应用会改变用户桌面状态，需要用户确认'
+          : context.toolName === 'activate_window'
+            ? '切换本机窗口会改变用户当前桌面焦点，需要用户确认'
+            : context.toolName === 'delete_file'
+              ? '删除文件会永久移除服务端数据，需要用户确认'
+              : `工具 ${context.toolName} 可执行系统操作，必须逐次由用户确认`
+      return {
+        action: 'require_approval',
+        reason,
+        riskLevel: 'medium',
+      }
+    }
+    const browserIntent = context.args.intent as BrowserIntentPolicyInput | undefined
+    if (browserIntent) {
+      if (!/^https?:\/\//i.test(browserIntent.origin)) {
+        return {
+          action: 'deny',
+          code: 'WEB_INTENT_ORIGIN_INVALID',
+          reason: 'Browser Intent 必须绑定有效 Origin',
+        }
+      }
+      if (['external-change', 'commit', 'irreversible'].includes(browserIntent.sideEffect)) {
+        return {
+          action: 'require_approval',
+          reason: [
+            `网页意图：${browserIntent.summary}`,
+            `目标 Origin：${browserIntent.origin}`,
+            `副作用：${browserIntent.sideEffect}`,
+            browserIntent.resourceSummary ? `资源：${browserIntent.resourceSummary}` : '',
+            `可回滚：${browserIntent.reversible ? '是' : '否'}`,
+          ]
+            .filter(Boolean)
+            .join('；'),
+          riskLevel: browserIntent.sideEffect === 'irreversible' ? 'high' : 'medium',
+        }
+      }
+    }
+    if (
+      (context.toolName === 'browser_network' && context.args.action === 'query') ||
+      (context.toolName === 'browser_storage' && context.args.action === 'get')
+    ) {
+      return { action: 'allow' }
+    }
+    if (
+      BROWSER_SENSITIVE_TOOLS.has(context.toolName) ||
+      (context.toolName === 'browser_click' &&
+        BROWSER_SENSITIVE_CLICK.test(String(context.args.target ?? context.args.handle ?? '')))
+    ) {
+      return {
+        action: 'require_approval',
+        reason: `浏览器操作 ${context.toolName} 可能提交数据或产生外部副作用，需要用户确认`,
+        riskLevel: 'medium',
       }
     }
     if (context.permission?.requiresApproval) {
       return {
         action: 'require_approval',
         reason: `工具 ${context.toolName} 的权限策略要求用户审批`,
+        riskLevel: 'low',
       }
     }
     return { action: 'allow' }

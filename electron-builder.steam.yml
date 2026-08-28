@@ -39,7 +39,6 @@ files:
 asarUnpack:
   - '**/*.node'
   - '**/*.dll'
-  - '**/*.wasm'
   - node_modules/steamworks.js/**/*
 
 # Steam SDK 文件放到应用根目录（.exe 同级）
@@ -49,7 +48,7 @@ extraFiles:
   - from: resources/steam/steam_appid.txt
     to: .
 
-# Steam 版不需要 electron-updater，由 Steam 自带更新
+# Steam 版由 Steam 自带更新，不接入 GitHub Release 更新链路
 publish: null
 
 win:

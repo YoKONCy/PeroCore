@@ -11,16 +11,23 @@
 // 信封 (Envelope)
 // ─────────────────────────────────────────────
 
+import type { DeliveryAudience, KernelEventDurability } from '@infos/shared'
+
 /** WS 消息信封 (类 JSON-RPC) */
 export interface GatewayEnvelope {
+  protocolVersion: 1
   /** 消息 ID (UUID) */
   id: string
   /** 消息类型 */
   type: GatewayMessageType
   /** 发送方 ID */
   sourceId: string
-  /** 目标 ID ("broadcast" = 广播) */
+  /** 目标 ID；业务投递范围由 audience 决定。 */
   targetId: string
+  audience?: DeliveryAudience
+  durability?: KernelEventDurability
+  streamId?: string
+  sequence?: number
   /** 时间戳 (ms) */
   timestamp: number
   /** 负载 */
@@ -54,14 +61,11 @@ export type GatewayMessageType =
 export type PushAction =
   | 'state_update' // PetState 更新
   | 'text_response' // LLM 文本响应
-  | 'stream_delta' // 流式增量
-  | 'stream_end' // 流式结束
+  | 'surface' // Internal Surface 帧
   | 'agent_changed' // Agent 切换
-  | 'tool_status' // 工具执行状态
   | 'task_progress' // 任务进度
   | 'notification' // 通知
   | 'system_error' // 系统错误
-  | 'audio_chunk' // TTS 音频推送
 
 /** Request 请求的 action 名 */
 export type RequestAction =
@@ -82,12 +86,21 @@ export function createEnvelope(
   type: GatewayMessageType,
   payload: Record<string, unknown> = {},
   targetId = 'broadcast',
+  delivery?: {
+    audience?: DeliveryAudience
+    durability?: KernelEventDurability
+    streamId?: string
+  },
 ): GatewayEnvelope {
   return {
+    protocolVersion: 1,
     id: crypto.randomUUID(),
     type,
     sourceId: 'backend',
     targetId,
+    audience: delivery?.audience,
+    durability: delivery?.durability,
+    streamId: delivery?.streamId,
     timestamp: Date.now(),
     payload,
   }

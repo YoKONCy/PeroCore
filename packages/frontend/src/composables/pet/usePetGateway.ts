@@ -2,20 +2,20 @@
  * usePetGateway — 桌宠 Gateway 对话同步 composable
  *
  * 将 Gateway WS 事件同步到桌宠交互层:
- * - stream_delta → 实时追加气泡文字 (逐字显示)
- * - stream_end → 标记回复完成
+ * - surface →统一承载回复正文、工具状态与完成状态
  * - state_update → 心情/氛围/想法同步
  * - notification → Agent 通知 → 气泡提示
- * - tool_status → 工具执行状态 → 思考气泡
  * - 音频 chunk → usePetAudio 播放链路
  *
  * @module packages/frontend/src/composables/pet/usePetGateway
  */
 
+import type { SurfaceFrame } from '@infos/shared'
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useGateway } from '../gateway/useGateway'
 import type { GatewayNotification, TaskProgress } from '../gateway/useGateway'
-import { useNotificationStore, usePetStateStore } from '../../stores'
+import { useNotificationStore, usePetStateStore, useCompositorStore } from '../../stores'
+import { threadsApi } from '../../api/modules/threadsApi'
 import { agentApi } from '../../api/modules/agentApi'
 import { listen } from '../../utils/ipcAdapter'
 
@@ -42,39 +42,18 @@ export interface PetGatewayOptions {
   onAudioChunk?: (data: ArrayBuffer) => void
 }
 
-/**
- * 过滤 Thinking/Monologue 等内部推理内容
- *
- * LLM 输出中包含的 <think>...</think> 标签是内部推理过程，
- * 不应作为可见回复显示给用户。
- * 需要同时处理不完整的标签（如流式输出中标签可能被截断）。
- */
-function stripInternalThinking(text: string): { visible: string; hasThinking: boolean } {
-  // 检测是否全是内部推理内容（可能被截断）
-  const trimmed = text.trim()
-  if (!trimmed) return { visible: '', hasThinking: false }
-
-  // <think>...</think>（大小写不敏感，跨行）
-  const thinkFullBlockRegex = /<think[\s\S]*?<\/think>/gi
-  // 只有开标签没有闭标签（流式输出中闭标签尚未输出）
-  const thinkOpenTagOnlyRegex = /^[\s\u3000]*<think[\s\S]*/gi
-  // 只有闭标签
-  const thinkCloseTagOnlyRegex = /^[\s\u3000]*<\/think>[\s\u3000]*$/gi
-
-  // 移除完整块
-  let visible = text.replace(thinkFullBlockRegex, '')
-  // 移除只有开标签的行
-  visible = visible.replace(thinkOpenTagOnlyRegex, '')
-  // 移除只有闭标签的行
-  visible = visible.replace(thinkCloseTagOnlyRegex, '')
-
-  // 判断原文本是否包含 Thinking 内容
-  const hasThinking =
-    thinkFullBlockRegex.test(text) ||
-    thinkOpenTagOnlyRegex.test(text) ||
-    thinkCloseTagOnlyRegex.test(text)
-
-  return { visible: visible.trim(), hasThinking }
+function stripSurfaceMarkdown(source: string): string {
+  return source
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/[>*_~]/g, ' ')
+    .replace(/\n{2,}/g, '\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim()
 }
 
 /**
@@ -101,7 +80,8 @@ const CHAT_ERROR_MESSAGES: Record<string, { title: string; message: string }> = 
 
 export function usePetGateway(options?: PetGatewayOptions) {
   const petStateStore = usePetStateStore()
-  // ── 状态 ──
+  const compositor = useCompositorStore()
+  const activeSurfaceId = ref<string | null>(null)
 
   const chatState = ref<Omit<PetChatState, 'mood' | 'vibe' | 'mind'>>({
     isThinking: false,
@@ -118,8 +98,42 @@ export function usePetGateway(options?: PetGatewayOptions) {
   const activeSessionId = ref<string | null>(null)
   /** 当前活跃的 agentId (用于过滤 state_update，避免非活跃 agent 的更新污染显示) */
   const activeAgentId = ref('pero')
-  /** 是否已收到过真正的可见文本 (非纯 Thinking 内容) */
-  let hasReceivedVisibleText = false
+
+  const activeSurface = computed(() => compositor.get(activeSurfaceId.value ?? undefined))
+  const surfaceText = computed(() => {
+    const node = activeSurface.value?.nodes.find((item) => item.kind === 'markdown')
+    const source = (node?.props as { source?: string } | undefined)?.source ?? ''
+    return stripSurfaceMarkdown(source)
+  })
+
+  function applySurface(frame: SurfaceFrame): void {
+    if (frame.operation.type === 'surface.commit') {
+      compositor.dispose(frame.surfaceId)
+      compositor.replaceScope(
+        `pet-conversation:${frame.operation.snapshot.threadId}`,
+        frame.operation.snapshot.surfaces,
+      )
+      activeSurfaceId.value = frame.operation.surface.surfaceId
+      activeSessionId.value = frame.operation.snapshot.threadId
+      chatState.value.isThinking = false
+      return
+    }
+    if (frame.operation.type === 'surface.open') {
+      if (activeSurfaceId.value && activeSurfaceId.value !== frame.surfaceId) {
+        compositor.dispose(activeSurfaceId.value)
+      }
+      activeSurfaceId.value = frame.surfaceId
+      activeSessionId.value = frame.operation.threadId
+      chatState.value.isThinking = !frame.operation.nodes?.some(
+        (node) =>
+          node.kind === 'status' && (node.props as { state?: string }).state === 'completed',
+      )
+    }
+    compositor.enqueue(frame)
+    if (frame.operation.type === 'surface.fail') {
+      chatState.value.isThinking = false
+    }
+  }
 
   // ── Gateway 连接 ──
 
@@ -132,62 +146,13 @@ export function usePetGateway(options?: PetGatewayOptions) {
     offPush,
     state: wsState,
   } = useGateway({
-    // 流式文字 delta (逐字推送)
-    onStreamDelta: (data) => {
-      // 过滤 Thinking/Monologue 等内部推理内容
-      const { visible, hasThinking } = stripInternalThinking(data.content)
-
-      // 追加过滤后的可见文本到 buffer
-      if (visible) {
-        hasReceivedVisibleText = true
-        chatState.value.currentText += visible
-      }
-
-      // 只有在收到过真正的可见文本后才退出思考状态
-      // 纯 Thinking 内容、工具调用内容等不应触发思考状态结束
-      if (hasReceivedVisibleText && !hasThinking) {
-        chatState.value.isThinking = false
-      }
-
-      activeSessionId.value = data.sessionId
-    },
-
-    // 流结束
-    onStreamEnd: (_data) => {
-      chatState.value.isThinking = false
-      // 没有可见文本时清空内容，避免气泡停留在“思考中”旧状态
-      if (!hasReceivedVisibleText) {
-        chatState.value.currentText = ''
-      }
-      hasReceivedVisibleText = false
-    },
-
-    // 状态更新 (心情/氛围/想法)
-    onStateUpdate: (data) => {
-      // 仅接受当前活跃 agent 的状态更新 (广播带 agentId，缺省时兼容旧逻辑放行)
-      if (data.agentId && data.agentId !== activeAgentId.value) return
-      petStateStore.apply(activeAgentId.value, {
-        mood: typeof data.mood === 'string' ? data.mood : undefined,
-        vibe: typeof data.vibe === 'string' ? data.vibe : undefined,
-        mind: typeof data.mind === 'string' ? data.mind : undefined,
-      })
-      void petStateStore.load(activeAgentId.value)
-    },
+    // 统一 Surface 帧
+    onSurface: applySurface,
 
     // Agent 通知
     onNotification: (notif: GatewayNotification) => {
       chatState.value.currentText = notif.body || notif.title
       chatState.value.isThinking = false
-    },
-
-    // 工具执行状态
-    onToolStatus: (data) => {
-      if (data.state === 'running') {
-        chatState.value.isThinking = true
-        chatState.value.thinkingMessage = `正在使用工具: ${data.name}...`
-      } else if (data.state === 'completed') {
-        chatState.value.thinkingMessage = '努力思考中...'
-      }
     },
 
     // 任务进度
@@ -211,6 +176,17 @@ export function usePetGateway(options?: PetGatewayOptions) {
     },
   })
 
+  function handleStateUpdate(data: Record<string, unknown>): void {
+    const updateAgentId = typeof data.agentId === 'string' ? data.agentId : activeAgentId.value
+    if (updateAgentId !== activeAgentId.value) return
+    petStateStore.apply(updateAgentId, {
+      mood: typeof data.mood === 'string' ? data.mood : undefined,
+      vibe: typeof data.vibe === 'string' ? data.vibe : undefined,
+      mind: typeof data.mind === 'string' ? data.mind : undefined,
+    })
+    void petStateStore.load(updateAgentId)
+  }
+
   // ── 发送消息 ──
 
   /**
@@ -223,7 +199,6 @@ export function usePetGateway(options?: PetGatewayOptions) {
     chatState.value.isThinking = true
     chatState.value.thinkingMessage = '努力思考中...'
     chatState.value.currentText = ''
-    hasReceivedVisibleText = false
 
     try {
       // 每次发送都让后端按当前活跃 Agent 获取最新 Desktop Thread，
@@ -278,8 +253,21 @@ export function usePetGateway(options?: PetGatewayOptions) {
     if (payload.agentId !== activeAgentId.value || typeof payload.content !== 'string') return
     chatState.value.currentText = payload.content
     chatState.value.isThinking = false
-    hasReceivedVisibleText = true
     if (typeof payload.threadId === 'string') activeSessionId.value = payload.threadId
+  }
+
+  /** 恢复当前桌宠 Thread 的权威 committed Surface。 */
+  async function restoreSurface(): Promise<void> {
+    const threadId = activeSessionId.value
+    if (!threadId) return
+    const response = await threadsApi.getProjection(threadId)
+    const snapshot = response.data
+    if (!snapshot) return
+    compositor.replaceScope(`pet-conversation:${threadId}`, snapshot.surfaces)
+    const latest = [...snapshot.surfaces]
+      .reverse()
+      .find((surface) => surface.principalId === activeAgentId.value && surface.messageId)
+    if (latest) activeSurfaceId.value = latest.surfaceId
   }
 
   // ── 生命周期 ──
@@ -288,7 +276,9 @@ export function usePetGateway(options?: PetGatewayOptions) {
   let unlistenAgentChanged: (() => void) | null = null
 
   onMounted(() => {
+    onPush('state_update', handleStateUpdate)
     onPush('proactive_message', handleProactiveMessage)
+    window.addEventListener('online', restoreSurface)
     connect()
     loadPetState()
     // 切换 Agent 时重新拉取对应角色的持久化状态，保证 mood/vibe/mind 跟随切换
@@ -303,7 +293,13 @@ export function usePetGateway(options?: PetGatewayOptions) {
   })
 
   onUnmounted(() => {
+    offPush('state_update', handleStateUpdate)
     offPush('proactive_message', handleProactiveMessage)
+    window.removeEventListener('online', restoreSurface)
+    if (activeSessionId.value) {
+      compositor.disposeScope(`pet-conversation:${activeSessionId.value}`)
+    }
+    if (activeSurfaceId.value) compositor.dispose(activeSurfaceId.value)
     disconnect()
     unlistenAgentChanged?.()
     unlistenAgentChanged = null
@@ -316,6 +312,10 @@ export function usePetGateway(options?: PetGatewayOptions) {
     wsState,
     /** 当前活跃 session */
     activeSessionId,
+    /** 当前桌宠对话 Surface。 */
+    activeSurface,
+    /** 同一 Surface 派生的歌词纯文本。 */
+    surfaceText,
     /** 发送聊天消息 */
     sendChat,
     /** 中断思考 */

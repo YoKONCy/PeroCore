@@ -15,7 +15,7 @@
  */
 
 import type { BuiltinTool } from '../index'
-import { execSync, exec } from 'node:child_process'
+import { execSync } from 'node:child_process'
 import os from 'node:os'
 import { createLogger } from '../../lib/logger'
 
@@ -91,6 +91,24 @@ export const getSystemInfoTool: BuiltinTool = {
   },
 }
 
+export interface ApplicationProvider {
+  launch(appName: string): Promise<{
+    application: string
+    mode: 'activated' | 'launched'
+    targetType: 'window' | 'path' | 'aumid'
+  }>
+}
+
+let _applicationProvider: ApplicationProvider | null = null
+
+export function setApplicationProvider(provider: ApplicationProvider | null): void {
+  _applicationProvider = provider
+}
+
+function errorResult(code: string, message: string): string {
+  return JSON.stringify({ success: false, error: { code, message } })
+}
+
 // ── open_application ──
 
 export const openApplicationTool: BuiltinTool = {
@@ -98,46 +116,34 @@ export const openApplicationTool: BuiltinTool = {
 
   async execute(args) {
     const appName = (args.app_name as string)?.trim()
-    if (!appName) {
-      return JSON.stringify({ error: '请提供应用程序名称' })
+    if (!appName) return errorResult('APPLICATION_NAME_REQUIRED', '请提供应用程序名称')
+    if (!_applicationProvider) {
+      return errorResult(
+        'APPLICATION_LAUNCH_UNAVAILABLE',
+        '应用启动能力不可用，请连接 Electron 客户端',
+      )
     }
 
-    const platform = os.platform()
-    logger.info(`打开应用: ${appName} (平台: ${platform})`)
-
+    logger.info(`请求客户端打开应用: ${appName}`)
     try {
-      let command: string
-
-      switch (platform) {
-        case 'win32':
-          // Windows: 使用 start 命令
-          command = `start "" "${appName}"`
-          break
-        case 'darwin':
-          // macOS: 使用 open 命令
-          command = `open "${appName}"`
-          break
-        default:
-          // Linux: 使用 xdg-open
-          command = `xdg-open "${appName}"`
-          break
-      }
-
-      await new Promise<void>((resolve, reject) => {
-        exec(command, { timeout: 10_000 }, (error) => {
-          if (error) reject(error)
-          else resolve()
-        })
-      })
-
+      const result = await _applicationProvider.launch(appName)
       return JSON.stringify({
         success: true,
-        message: `已打开应用: ${appName}`,
+        application: result.application,
+        mode: result.mode,
+        targetType: result.targetType,
+        message:
+          result.mode === 'activated'
+            ? `已切换到正在运行的应用: ${result.application}`
+            : `已启动应用: ${result.application}`,
       })
     } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err)
-      logger.error(`打开应用失败: ${errMsg}`)
-      return JSON.stringify({ error: `打开应用 "${appName}" 失败: ${errMsg}` })
+      const text = err instanceof Error ? err.message : String(err)
+      const separator = text.indexOf(':')
+      const code = separator > 0 ? text.slice(0, separator) : 'APPLICATION_LAUNCH_FAILED'
+      const message = separator > 0 ? text.slice(separator + 1).trim() : text
+      logger.error(`打开应用失败: ${text}`)
+      return errorResult(code, message)
     }
   },
 }

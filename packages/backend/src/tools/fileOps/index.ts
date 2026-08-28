@@ -133,7 +133,7 @@ export const readFileTool: BuiltinTool = {
       // AIOS(Phase4): 按 channel 分级 containment 检查
       const content = await service.read(ctx.agentId, filePath, ctx.channel, {
         maxLength,
-        deviceScope: ctx.approvedOutsideWorkspace,
+        deviceScope: ctx.deviceReadScope,
       })
       return content
     } catch (err) {
@@ -195,6 +195,22 @@ export const writeFileTool: BuiltinTool = {
   },
 }
 
+export const deleteFileTool: BuiltinTool = {
+  name: 'delete_file',
+
+  async execute(args, ctx) {
+    if (!ctx.approvedSensitiveAction) throw new Error('删除文件缺少本次用户审批凭证')
+    const filePath = String(args.file_path ?? '').trim()
+    if (!filePath) throw new Error('file_path 不能为空')
+
+    const service = requireWorkspaceService()
+    await service.deleteFile(ctx.agentId, filePath, ctx.channel, {
+      deviceScope: ctx.approvedOutsideWorkspace,
+    })
+    return JSON.stringify({ success: true, path: filePath })
+  },
+}
+
 export const fileInfoTool: BuiltinTool = {
   name: 'get_file_info',
 
@@ -205,7 +221,7 @@ export const fileInfoTool: BuiltinTool = {
       const service = requireWorkspaceService()
       // AIOS(Phase4): stat 走 read 权限（info 不修改文件）
       const stat = await service.stat(ctx.agentId, filePath, ctx.channel, {
-        deviceScope: ctx.approvedOutsideWorkspace,
+        deviceScope: ctx.deviceReadScope,
       })
 
       if (!stat.exists) {
@@ -235,7 +251,7 @@ export const listDirectoryTool: BuiltinTool = {
       const service = requireWorkspaceService()
       // AIOS(Phase4): list 走 read 权限
       const entries = await service.list(ctx.agentId, dirPath, ctx.channel, {
-        deviceScope: ctx.approvedOutsideWorkspace,
+        deviceScope: ctx.deviceReadScope,
       })
 
       const items = entries.map((e) => ({

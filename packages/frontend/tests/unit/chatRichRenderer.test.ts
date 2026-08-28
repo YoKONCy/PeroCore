@@ -25,6 +25,29 @@ print("你好")
     expect(root.textContent).not.toContain('%E')
   })
 
+  it('应渲染安全行内HTML并净化危险属性', () => {
+    const html = renderChatRichText(
+      '<span style="color: #8A2BE2; text-shadow: 2px 2px 4px #00000055" onclick="alert(1)">标题</span>',
+    )
+    const root = document.createElement('div')
+    root.innerHTML = html
+    const span = root.querySelector('span')
+
+    expect(span?.textContent).toBe('标题')
+    expect(span?.getAttribute('style')).toContain('color')
+    expect(span?.hasAttribute('onclick')).toBe(false)
+    expect(root.querySelector('.chat-xml-inline')).toBeNull()
+  })
+
+  it('非白名单XML标签仍应显示为源码', () => {
+    const html = renderChatRichText('<user id="1">内容</user>')
+    const root = document.createElement('div')
+    root.innerHTML = html
+
+    expect(root.querySelector('.chat-xml-inline')).not.toBeNull()
+    expect(root.querySelector('user')).toBeNull()
+  })
+
   it('应当只保留无内容的复制标记，不把源码编码写进可见 DOM', () => {
     const html = renderChatRichText('```json\n{"状态":"正常"}\n```')
     const root = document.createElement('div')

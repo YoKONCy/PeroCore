@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -31,6 +31,9 @@ function createManifest(id: string, requiredTools: string[] = []): SkillManifest
     tags: [],
     parameters: {},
     dependsOnSkills: [],
+    metadata: {},
+    allowedTools: [],
+    rootPath: '',
   }
 }
 
@@ -96,7 +99,73 @@ modes:
       expect(resolved.skillMenuText).toContain('- diary 技能: diary 描述')
     })
 
-    it('第七阶段修复（批次 B3）：未配置的 channel 应当 fail-closed 返回空能力集', () => {
+    it('加载旧配置时应自动移除视觉Prompt并写回YAML', () => {
+      const configPath = join(rootDir, 'pero', 'capabilities.yaml')
+      writeFileSync(
+        configPath,
+        `agent: pero
+channels:
+  desktop:
+    tools:
+      - '*'
+    skills: []
+    prompt_fragments:
+      - components/abilities/vision
+      - prompts/base.md
+`,
+        'utf-8',
+      )
+
+      const gate = new CapabilityGate([rootDir], skillLoader as never, toolRegistry as never)
+
+      expect(gate.resolve('pero', 'desktop').promptFragments).toEqual(['prompts/base.md'])
+      expect(readFileSync(configPath, 'utf-8')).not.toContain('components/abilities/vision')
+    })
+
+    it('万能通配符应只展开当前Channel的上游工具', () => {
+      writeFileSync(
+        join(rootDir, 'pero', 'capabilities.yaml'),
+        `agent: pero
+channels:
+  desktop:
+    tools:
+      - '*'
+    skills: []
+    prompt_fragments:
+      - components/abilities/vision
+      - prompts/base.md
+`,
+        'utf-8',
+      )
+      toolRegistry.getDefinitions.mockImplementation((channel?: string) =>
+        channel === 'desktop'
+          ? [
+              { name: 'chat.send', description: '发送聊天消息' },
+              { name: 'memory.search', description: '搜索记忆' },
+            ]
+          : [{ name: 'blocked.tool', description: '其他通道工具' }],
+      )
+      const gate = new CapabilityGate([rootDir], skillLoader as never, toolRegistry as never)
+
+      const resolved = gate.resolve('pero', 'desktop')
+
+      expect([...resolved.allowedTools]).toEqual(['chat.send', 'memory.search'])
+      expect(resolved.promptFragments).toEqual(['prompts/base.md'])
+    })
+
+    it('角色显式工具列表也不能绕过Channel上游工具范围', () => {
+      toolRegistry.getDefinitions.mockImplementation((channel?: string) =>
+        channel === 'desktop' ? [{ name: 'chat.send', description: '发送聊天消息' }] : [],
+      )
+      const gate = new CapabilityGate([rootDir], skillLoader as never, toolRegistry as never)
+
+      const resolved = gate.resolve('pero', 'desktop')
+
+      expect([...resolved.allowedTools]).toEqual(['chat.send'])
+      expect(gate.isToolAllowed('pero', 'desktop', 'memory.search')).toBe(false)
+    })
+
+    it('第七阶段修复（批次 B3）：未配置的 channel 应当 fail-closed返回空能力集', () => {
       const gate = new CapabilityGate([rootDir], skillLoader as never, toolRegistry as never)
 
       // mobile channel 未在 capabilities.yaml 中配置
@@ -145,6 +214,28 @@ modes:
   })
 
   describe('unlockSkillTools', () => {
+    it('Skill工具可绕过角色显式列表但不能绕过Channel上游列表', () => {
+      toolRegistry.getDefinitions.mockImplementation((channel?: string) =>
+        channel === 'desktop'
+          ? [
+              { name: 'chat.send', description: '发送聊天消息' },
+              { name: 'memory.write', description: '写入记忆' },
+            ]
+          : [],
+      )
+      const gate = new CapabilityGate([rootDir], skillLoader as never, toolRegistry as never)
+
+      gate.unlockSkillTools('session-skill', 'diary')
+
+      expect(
+        gate.resolve('pero', 'desktop', 'session-skill').allowedTools.has('memory.write'),
+      ).toBe(true)
+      expect(
+        gate.resolve('pero', 'browser', 'session-skill').allowedTools.has('memory.write'),
+      ).toBe(false)
+      expect(gate.isSkillUnlockedTool('session-skill', 'memory.write')).toBe(true)
+    })
+
     it('应当把 Skill 依赖工具临时加入指定会话白名单，并在清理会话后移除', () => {
       const gate = new CapabilityGate([rootDir], skillLoader as never, toolRegistry as never)
 
@@ -165,6 +256,55 @@ modes:
       const allowed = gate.isToolAllowed('pero', 'desktop', 'memory.write', 'session-2')
 
       expect(allowed).toBe(false)
+    })
+  })
+
+  describe('Facts 工具权限', () => {
+    it('仅在 Channel 白名单声明后允许 Facts 工具，ambient 不得绕过白名单扩权', () => {
+      const configPath = join(rootDir, 'pero', 'capabilities.yaml')
+      writeFileSync(
+        configPath,
+        `agent: pero
+channels:
+  desktop:
+    tools:
+      - query_facts
+      - write_fact
+      - supersede_fact
+      - delete_fact
+      - add_fact_object_alias
+      - remove_fact_object_alias
+    skills: []
+    prompt_fragments: []
+`,
+        'utf-8',
+      )
+      toolRegistry.getDefinitions.mockReturnValue(
+        [
+          'query_facts',
+          'write_fact',
+          'supersede_fact',
+          'delete_fact',
+          'add_fact_object_alias',
+          'remove_fact_object_alias',
+        ].map((name) => ({ name, description: name })),
+      )
+      const gate = new CapabilityGate([rootDir], skillLoader as never, toolRegistry as never)
+
+      for (const tool of [
+        'query_facts',
+        'write_fact',
+        'supersede_fact',
+        'delete_fact',
+        'add_fact_object_alias',
+        'remove_fact_object_alias',
+      ]) {
+        expect(gate.isToolAllowed('pero', 'desktop', tool, undefined, 'ambient')).toBe(true)
+      }
+      expect(gate.isToolAllowed('unknown', 'desktop', 'write_fact', undefined, 'ambient')).toBe(
+        false,
+      )
+      expect(gate.isToolAllowed('pero', 'browser', 'write_fact', undefined, 'ambient')).toBe(false)
     })
   })
 

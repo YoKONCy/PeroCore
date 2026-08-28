@@ -47,7 +47,8 @@ class ApiClient {
   async put<T>(endpoint: string, data: unknown): Promise<ApiResponse<T>> {
     return this.request<T>(endpoint, {
       method: 'PUT',
-      body: JSON.stringify(data),
+      // 与 POST 保持一致：multipart 必须传递 FormData 本体及浏览器生成的 boundary。
+      body: data instanceof FormData ? data : JSON.stringify(data),
     })
   }
 

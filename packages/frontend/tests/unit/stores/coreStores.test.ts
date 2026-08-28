@@ -9,6 +9,11 @@ type NotificationTestStore = {
   toasts: RefValue<Notification[]>
   modal: RefValue<Notification | null>
   toast: (message: string, opts?: { type?: string; title?: string; duration?: number }) => void
+  toastRemote: (
+    id: string,
+    message: string,
+    opts?: { type?: string; title?: string; duration?: number },
+  ) => void
   showModal: (message: string, title?: string, type?: string) => void
   closeModal: () => void
   notifyByCode: (code: string, message: string) => void
@@ -42,11 +47,12 @@ type ThreadTestStore = {
   isGenerating: RefValue<boolean>
   streamingMessageId: RefValue<string | null>
   addMessage: (msg: ChatMessage) => void
-  appendToLast: (content: string) => void
   finishStreaming: () => void
   editMessage: (id: string, newContent: string) => void
   deleteMessage: (id: string) => void
   startThread: (newThreadId: string, newChannel?: string) => void
+  loadThreadMessages: (threadId: string, agentId: string) => Promise<void>
+  applySurfaceFrame: (frame: import('@infos/shared').SurfaceFrame) => void
 }
 
 const vueState = vi.hoisted(() => ({
@@ -64,6 +70,8 @@ const apiMocks = vi.hoisted(() => ({
   configBatch: vi.fn(),
   chatEditMessage: vi.fn(),
   chatDeleteMessage: vi.fn(),
+  threadGet: vi.fn(),
+  threadProjection: vi.fn(),
   loggerError: vi.fn(),
 }))
 
@@ -142,7 +150,8 @@ vi.mock('@infos/frontend/api/modules/chatApi', () => ({
 vi.mock('@infos/frontend/api/modules/threadsApi', () => ({
   threadsApi: {
     list: vi.fn(),
-    get: vi.fn(),
+    get: apiMocks.threadGet,
+    getProjection: apiMocks.threadProjection,
     create: vi.fn(),
     getLatest: vi.fn(),
   },
@@ -187,6 +196,15 @@ describe('useNotificationStore', () => {
     vi.advanceTimersByTime(100)
 
     expect(store.toasts.value).toHaveLength(0)
+  })
+
+  it('远程通知重连补发时应按 notificationId 去重', () => {
+    const store = useNotificationStore() as unknown as NotificationTestStore
+    store.toastRemote('notification-1', '重要通知', { type: 'warning', duration: 0 })
+    store.toastRemote('notification-1', '重要通知', { type: 'warning', duration: 0 })
+    store.toastRemote('notification-2', '另一条通知', { duration: 0 })
+
+    expect(store.toasts.value.map((toast) => toast.message)).toEqual(['重要通知', '另一条通知'])
   })
 
   it('应当显示和关闭模态通知', () => {
@@ -324,7 +342,7 @@ describe('useThreadStore', () => {
     vi.clearAllMocks()
   })
 
-  it('应当添加消息、追加内容并完成流式生成', () => {
+  it('应当添加消息并完成流式生成', () => {
     const store = useThreadStore() as unknown as ThreadTestStore
 
     store.addMessage({
@@ -334,14 +352,47 @@ describe('useThreadStore', () => {
       timestamp: 'now',
       isStreaming: true,
     })
-    store.appendToLast('主人')
     store.generationState.value = 'generating'
     store.streamingMessageId.value = '1'
     store.finishStreaming()
 
-    expect(store.messages.value[0]).toMatchObject({ content: '你好主人', isStreaming: false })
+    expect(store.messages.value[0]).toMatchObject({ content: '你好', isStreaming: false })
     expect(store.generationState.value).toBe('idle')
     expect(store.streamingMessageId.value).toBeNull()
+  })
+
+  it('切屏重载Projection时应保留运行中的流式消息Shell', async () => {
+    const store = useThreadStore() as unknown as ThreadTestStore
+    apiMocks.threadGet.mockResolvedValue({
+      data: { thread: { id: 'thread-1', agentId: 'pero', channel: 'desktop' } },
+    })
+    apiMocks.threadProjection.mockResolvedValue({
+      data: {
+        scopeId: 'conversation:thread-1',
+        threadId: 'thread-1',
+        principalId: 'pero',
+        messages: [],
+        surfaces: [],
+      },
+    })
+    store.startThread('thread-1', 'desktop')
+    store.addMessage({
+      id: 'streaming-1',
+      role: 'assistant',
+      content: '',
+      timestamp: 'now',
+      isStreaming: true,
+    })
+    store.streamingMessageId.value = 'streaming-1'
+    store.generationState.value = 'generating'
+
+    await store.loadThreadMessages('thread-1', 'pero')
+
+    expect(store.messages.value).toEqual([
+      expect.objectContaining({ id: 'streaming-1', isStreaming: true }),
+    ])
+    expect(store.streamingMessageId.value).toBe('streaming-1')
+    expect(store.generationState.value).toBe('generating')
   })
 
   it('应当在 threadId 就绪后编辑和删除消息并同步后端', async () => {

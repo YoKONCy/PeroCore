@@ -11,8 +11,19 @@
  * @module packages/backend/src/capabilities/skillLoader
  */
 
-import { readFileSync, readdirSync, existsSync, statSync, cpSync, mkdirSync, rmSync } from 'node:fs'
+import {
+  readFileSync,
+  readdirSync,
+  existsSync,
+  statSync,
+  lstatSync,
+  realpathSync,
+  cpSync,
+  mkdirSync,
+  rmSync,
+} from 'node:fs'
 import path from 'node:path'
+import { parse as parseYaml } from 'yaml'
 import type { SkillManifest } from './types'
 import { createLogger } from '../lib/logger'
 import { AppError } from '../lib/appError'
@@ -55,9 +66,9 @@ export class SkillLoader {
   }
 
   /**
-   * 运行时追加扫描目录 (Extension 联邦)
+   * 运行时追加扫描目录（Package 联邦）
    *
-   * ExtensionManager 加载完后调用，将发现的 Extension skills 目录注入。
+   * Package Skill Contribution 激活时调用，将 Package 的 Skill Resource 目录注入。
    * 追加后自动扫描新目录中的 SKILL.md。
    */
   addDirs(dirs: string[]): void {
@@ -77,9 +88,83 @@ export class SkillLoader {
     }
   }
 
+  /** 移除运行时扫描目录并重建 Skill 索引。 */
+  removeDirs(dirs: string[]): void {
+    const removed = new Set(dirs)
+    this.skillDirs = this.skillDirs.filter((dir) => !removed.has(dir))
+    this.reloadAll()
+  }
+
   /** 获取 Skill 清单 (L1: 只有 name + description) */
   getManifest(skillId: string): SkillManifest | undefined {
     return this.manifests.get(skillId)
+  }
+
+  getCompatibilityReport(
+    skillId: string,
+    availableTools: Set<string> = new Set(),
+  ): {
+    compatible: boolean
+    missingTools: string[]
+    resources: string[]
+    scripts: string[]
+    warnings: string[]
+  } | null {
+    const manifest = this.manifests.get(skillId)
+    if (!manifest) return null
+    const resources = this.listResources(skillId)
+    const scripts = resources.filter((item) => item.startsWith('scripts/'))
+    const requested = [...new Set([...manifest.requiredTools, ...manifest.allowedTools])]
+    const missingTools = requested.filter(
+      (tool) => availableTools.size > 0 && !availableTools.has(tool),
+    )
+    const warnings: string[] = []
+    if (scripts.length) warnings.push('包含脚本，执行时必须通过现有受控终端工具并遵守审批策略。')
+    if (manifest.compatibility) warnings.push(`环境要求：${manifest.compatibility}`)
+    if (manifest.allowedTools.length)
+      warnings.push('allowed-tools为实验字段，已作为工具依赖提示处理。')
+    return { compatible: missingTools.length === 0, missingTools, resources, scripts, warnings }
+  }
+
+  resolveResource(skillId: string, relativePath: string): string | null {
+    const manifest = this.manifests.get(skillId)
+    if (!manifest || !relativePath || path.isAbsolute(relativePath)) return null
+    const root = path.resolve(manifest.rootPath)
+    const target = path.resolve(root, relativePath)
+    if (target !== root && !target.startsWith(root + path.sep)) return null
+    if (!existsSync(target) || !statSync(target).isFile() || lstatSync(target).isSymbolicLink()) {
+      return null
+    }
+    const realRoot = realpathSync(root)
+    const realTarget = realpathSync(target)
+    if (realTarget !== realRoot && !realTarget.startsWith(realRoot + path.sep)) return null
+    return realTarget
+  }
+
+  listResources(skillId: string): string[] {
+    const manifest = this.manifests.get(skillId)
+    if (!manifest) return []
+    const result: string[] = []
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir)) {
+        const full = path.join(dir, entry)
+        const stat = lstatSync(full)
+        if (stat.isSymbolicLink()) continue
+        if (stat.isDirectory()) walk(full)
+        else if (stat.isFile() && path.basename(full) !== 'SKILL.md') {
+          result.push(path.relative(manifest.rootPath, full).replaceAll('\\', '/'))
+        }
+        if (result.length >= 500) return
+      }
+    }
+    walk(manifest.rootPath)
+    return result
+  }
+
+  readResource(skillId: string, relativePath: string, maxBytes = 256_000): string | null {
+    const target = this.resolveResource(skillId, relativePath)
+    if (!target || statSync(target).size > maxBytes) return null
+    return readFileSync(target, 'utf-8')
   }
 
   /** 获取所有清单 */
@@ -164,6 +249,7 @@ export class SkillLoader {
 
     // 复制到 userSkillsDir/<folder-name>
     const folderName = path.basename(sourcePath)
+    this.parseManifest(folderName, skillMdPath)
     const destPath = path.join(this.userSkillsDir, folderName)
 
     // 检查目标是否已存在
@@ -187,7 +273,7 @@ export class SkillLoader {
   /**
    * 删除用户 Skill
    *
-   * 只允许删除 userSkillsDir 下的 Skill，不允许删内置或 Extension 的。
+   * 只允许删除 userSkillsDir 下的 Skill，不允许删除内置或 Package 提供的 Skill。
    */
   deleteById(skillId: string): void {
     const skillPath = path.join(this.userSkillsDir, skillId)
@@ -235,19 +321,46 @@ export class SkillLoader {
       return null
     }
 
-    const frontmatter = match[1] ?? ''
-    // 简易 YAML 解析 (避免引入完整 yaml 库)
-    const fields = this.parseSimpleYaml(frontmatter)
+    const frontmatter = parseYaml(match[1] ?? '') as Record<string, unknown>
+    const name = String(frontmatter.name ?? '')
+    const description = String(frontmatter.description ?? '')
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name) || name !== skillId) {
+      throw new Error(`name必须与目录一致并使用小写kebab-case: ${skillId}`)
+    }
+    if (!description || description.length > 1024) {
+      throw new Error('description必须为1-1024字符')
+    }
+    const metadata = Object.fromEntries(
+      Object.entries((frontmatter.metadata as Record<string, unknown>) ?? {}).map(
+        ([key, value]) => [key, String(value)],
+      ),
+    )
+    const list = (value: unknown): string[] => {
+      if (Array.isArray(value)) return value.map(String).filter(Boolean)
+      if (typeof value === 'string') return value.split(/[\s,]+/).filter(Boolean)
+      return []
+    }
+    const requiredTools = list(frontmatter.requiredTools ?? metadata['infos.required-tools'])
+    const dependsOnSkills = list(frontmatter.dependsOnSkills ?? metadata['infos.depends-on-skills'])
 
     return {
       id: skillId,
-      name: fields.name ?? skillId,
-      description: fields.description ?? '',
-      requiredTools: this.parseYamlList(fields.requiredTools),
-      category: fields.category ?? 'general',
-      tags: this.parseYamlList(fields.tags),
-      parameters: this.parseYamlMap(fields.parameters),
-      dependsOnSkills: this.parseYamlList(fields.dependsOnSkills),
+      name,
+      description,
+      requiredTools,
+      category: String(frontmatter.category ?? metadata['infos.category'] ?? 'general'),
+      tags: list(frontmatter.tags ?? metadata['infos.tags']),
+      parameters: Object.fromEntries(
+        Object.entries((frontmatter.parameters as Record<string, unknown>) ?? {}).map(
+          ([key, value]) => [key, String(value)],
+        ),
+      ),
+      dependsOnSkills,
+      license: frontmatter.license ? String(frontmatter.license) : undefined,
+      compatibility: frontmatter.compatibility ? String(frontmatter.compatibility) : undefined,
+      metadata,
+      allowedTools: list(frontmatter['allowed-tools']),
+      rootPath: path.dirname(filePath),
     }
   }
 
@@ -270,100 +383,5 @@ export class SkillLoader {
       result = result.replaceAll(`{{${key}}}`, value)
     }
     return result
-  }
-
-  /** 极简 YAML 解析器 (只处理 key: value 和 key:\n  - item 两种) */
-  private parseSimpleYaml(text: string): Record<string, string> {
-    const result: Record<string, string> = {}
-    let currentKey = ''
-    let currentList: string[] | null = null
-
-    for (const line of text.split('\n')) {
-      const trimmed = line.trim()
-      if (!trimmed) continue
-
-      // 检测列表项
-      if (trimmed.startsWith('- ') && currentKey) {
-        if (!currentList) currentList = []
-        currentList.push(trimmed.slice(2).trim())
-        continue
-      }
-
-      // 如果之前在收集列表，先保存
-      if (currentList && currentKey) {
-        result[currentKey] = JSON.stringify(currentList)
-        currentList = null
-      }
-
-      // key: value 格式
-      const colonIdx = trimmed.indexOf(':')
-      if (colonIdx > 0) {
-        currentKey = trimmed.slice(0, colonIdx).trim()
-        const value = trimmed.slice(colonIdx + 1).trim()
-        if (value) {
-          result[currentKey] = value
-          currentKey = '' // 非列表模式
-        }
-        // 如果 value 为空，可能是后面跟列表
-      }
-    }
-
-    // 尾部列表
-    if (currentList && currentKey) {
-      result[currentKey] = JSON.stringify(currentList)
-    }
-
-    return result
-  }
-
-  /** 解析 YAML 列表字段 */
-  private parseYamlList(value?: string): string[] {
-    if (!value) return []
-    try {
-      return JSON.parse(value) as string[]
-    } catch {
-      return value
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean)
-    }
-  }
-
-  /**
-   * 解析 YAML key: value 映射字段
-   *
-   * 支持两种格式:
-   * 1. 内联 JSON: `parameters: {"key": "desc"}`
-   * 2. YAML 列表格式 (被 parseSimpleYaml 解析为逐条 "key: value"):
-   *    parameters:
-   *      - project_name: 项目名称
-   *      - date_range: 日期范围
-   */
-  private parseYamlMap(value?: string): Record<string, string> {
-    if (!value) return {}
-    try {
-      // 尝试 JSON 格式
-      const parsed = JSON.parse(value)
-      if (Array.isArray(parsed)) {
-        // 列表格式: ["project_name: 项目名称", "date_range: 日期范围"]
-        const map: Record<string, string> = {}
-        for (const item of parsed) {
-          const idx = String(item).indexOf(':')
-          if (idx > 0) {
-            map[String(item).slice(0, idx).trim()] = String(item)
-              .slice(idx + 1)
-              .trim()
-          }
-        }
-        return map
-      }
-      // 对象格式: {"project_name": "项目名称"}
-      if (typeof parsed === 'object' && parsed !== null) {
-        return parsed as Record<string, string>
-      }
-    } catch {
-      // 单行 key: value 格式 无法解析
-    }
-    return {}
   }
 }

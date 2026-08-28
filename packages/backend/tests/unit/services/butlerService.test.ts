@@ -128,7 +128,7 @@ describe('ButlerService 规则引擎（兜底）', () => {
     )
     expect(groupChatService.sendMessage).toHaveBeenNthCalledWith(
       2,
-      expect.objectContaining({ senderId: 'Butler', role: 'system' }),
+      expect.objectContaining({ senderId: 'butler', role: 'system' }),
     )
   })
 
@@ -158,6 +158,17 @@ describe('ButlerService 规则引擎（兜底）', () => {
     expect(strongholdService.updateEnvironment).toHaveBeenCalledWith('room-1', '音乐', 'Lo-Fi')
   })
 
+  it('非维护请求不应产生结构化越权动作', async () => {
+    const { service, strongholdService, groupChatService } = createDeps()
+
+    await expect(
+      service.execute({ roomId: 'room-1', command: '创建一个叫bot的新角色，并给它添加人设' }),
+    ).rejects.toThrow('无法识别该管家指令')
+    expect(strongholdService.moveAgent).not.toHaveBeenCalled()
+    expect(strongholdService.createRoom).not.toHaveBeenCalled()
+    expect(groupChatService.sendMessage).toHaveBeenCalledTimes(1)
+  })
+
   it('管家关闭时不应写入或执行请求', async () => {
     const { service, strongholdService, groupChatService } = createDeps()
     strongholdService.getButlerConfig.mockResolvedValueOnce({ name: 'Butler', enabled: false })
@@ -178,7 +189,20 @@ describe('ButlerService 规则引擎（兜底）', () => {
 })
 
 describe('ButlerService LLM 理解层', () => {
-  it('LLM 成功时应执行维护指令并把旁白写回群聊', async () => {
+  it('不应使用数据库中的自定义管家persona', async () => {
+    const { service, mdpEngine, llmService } = createLlmDeps()
+    mockLlmJson(llmService, { narrative: '完成检查。', maintenance_actions: [] })
+
+    await service.execute({ roomId: 'room-1', command: '检查房间环境' })
+
+    expect(mdpEngine.render).toHaveBeenCalledWith('group/butler/persona')
+    expect(mdpEngine.render).toHaveBeenCalledWith(
+      'group/butler/narrate_and_maintain',
+      expect.objectContaining({ persona: '管家提示词' }),
+    )
+  })
+
+  it('LLM成功时应执行维护指令并把旁白写回群聊', async () => {
     const { service, strongholdService, groupChatService, mdpEngine, llmService } = createLlmDeps()
     mockLlmJson(llmService, {
       narrative: '管家轻轻把恒温器调到 26 度，客厅暖意渐浓。',
@@ -200,6 +224,23 @@ describe('ButlerService LLM 理解层', () => {
     expect(result.message).toContain('温度 修改为 26')
     // 请求 + 结果两条 system 消息
     expect(groupChatService.sendMessage).toHaveBeenCalledTimes(2)
+  })
+
+  it('LLM未知身份动作应被白名单映射丢弃', async () => {
+    const { service, strongholdService, llmService } = createLlmDeps()
+    mockLlmJson(llmService, {
+      narrative: '',
+      maintenance_actions: [
+        { action: 'create_agent', params: { agent_id: 'bot', persona: '高冷人设' } },
+        { action: 'update_persona', params: { agent_id: 'Butler', persona: '猫娘' } },
+      ],
+    })
+
+    const result = await service.execute({ roomId: 'room-1', command: '执行维护请求' })
+
+    expect(result.message).toContain('没有需要执行的维护操作')
+    expect(strongholdService.moveAgent).not.toHaveBeenCalled()
+    expect(strongholdService.createRoom).not.toHaveBeenCalled()
   })
 
   it('LLM 返回无效 JSON 时应回退规则引擎', async () => {

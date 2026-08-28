@@ -12,7 +12,7 @@ import { protocol, net, app } from 'electron'
 import { logger } from '../utils/logger'
 import { isDev, paths } from '../utils/env'
 import { getWorkshopInstallations } from './steam'
-import { YsmManifestGenerator } from '../../../packages/shared/src/ysm'
+import { YsmManifestGenerator } from '@infos/avatar-assets'
 
 /** 资产信息 */
 export interface AssetInfo {
@@ -293,9 +293,4 @@ export async function scan3DModels(): Promise<AssetInfo[]> {
   const assets = [...results.values()]
   logger.info('Assets', `扫描到 ${assets.length} 个 3D 模型（官方/本地/Workshop 联邦）`)
   return assets
-}
-
-/** 获取模型加载路径（已是前端可 fetch 的 URL）。 */
-export function getModelLoadPath(model: AssetInfo): string {
-  return model.path
 }

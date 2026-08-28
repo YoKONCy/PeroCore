@@ -10,6 +10,21 @@
   "platforms": ["windows", "linux", "darwin", "docker"],
   "registration": "static",
   "permissions": ["process:spawn"],
+  "userCopy": {
+    "terminal_create": { "label": "新建终端", "description": "开启一个可持续使用的命令行窗口。" },
+    "terminal_list": { "label": "查看终端列表", "description": "查看当前有哪些命令行窗口。" },
+    "terminal_get": { "label": "查看终端状态", "description": "查看某个命令行窗口是否仍在运行。" },
+    "terminal_read": { "label": "读取终端输出", "description": "读取命令行程序输出的内容。" },
+    "terminal_wait": { "label": "等待终端完成", "description": "等待命令行任务运行完成。" },
+    "terminal_write": { "label": "向终端输入", "description": "向正在运行的命令行程序发送输入。" },
+    "terminal_resize": { "label": "调整终端大小", "description": "调整命令行窗口的显示尺寸。" },
+    "terminal_interrupt": {
+      "label": "中断终端任务",
+      "description": "请求正在运行的命令安全停止。"
+    },
+    "terminal_kill": { "label": "终止终端任务", "description": "强制终止没有响应的命令行任务。" },
+    "terminal_close": { "label": "关闭终端", "description": "关闭不再使用的命令行窗口。" }
+  },
   "tools": [
     {
       "name": "terminal_create",

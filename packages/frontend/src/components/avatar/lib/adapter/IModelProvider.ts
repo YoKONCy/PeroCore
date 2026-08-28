@@ -1,7 +1,7 @@
 /**
  * 模型提供者接口
  *
- * 定义从不同数据源（JSON / .pero / Blockbench）获取统一模型数据的抽象层。
+ * 定义从JSON或Blockbench数据源获取统一模型数据的抽象层。
  * 所有 Provider 实现必须将原始格式转换为标准的 ParsedModelData 结构。
  *
  * @module packages/frontend/src/components/avatar/lib/adapter/IModelProvider
@@ -13,7 +13,7 @@ import type { IAvatarManifest } from './IAvatarManifest'
 /**
  * 统一的模型数据结构
  *
- * 对应 Rust Native 模块 (`@infos/render-core`) 输出的 `ParsedModelData`。
+ * 由前端模型Provider生成。
  */
 export interface ParsedModelData {
   /** 纹理图集宽度（像素） */
@@ -34,15 +34,15 @@ export interface ParsedBone {
   pivot: [number, number, number]
   /** 初始旋转 [x, y, z] */
   rotation?: [number, number, number]
-  /** 预计算顶点数据（来自 Rust Native） */
+  /** 预计算顶点数据 */
   vertices?: Float32Array
-  /** 预计算 UV 数据（来自 Rust Native） */
+  /** 预计算UV数据 */
   uvs?: Float32Array
-  /** 预计算索引数据（来自 Rust Native） */
+  /** 预计算索引数据 */
   indices?: Uint16Array
   /** 原始 Cube 数据（用于未预计算几何体的情况） */
   cubes?: Record<string, unknown>[]
-  /** Rust 返回的 JSON 字符串形式的 Cube 数据 */
+  /** JSON字符串形式的Cube数据 */
   cubesJson?: string
 }
 

@@ -1,3 +1,28 @@
+CREATE TABLE `kernel_outbox_events` (
+	`event_id` text PRIMARY KEY NOT NULL,
+	`event_type` text NOT NULL,
+	`durability` text DEFAULT 'durable' NOT NULL,
+	`principal_id` text NOT NULL,
+	`process_id` text,
+	`execution_id` text,
+	`correlation_id` text,
+	`causation_id` text,
+	`object_type` text,
+	`object_id` text,
+	`object_generation` integer,
+	`payload_json` text NOT NULL,
+	`occurred_at` text NOT NULL,
+	`status` text DEFAULT 'pending' NOT NULL,
+	`attempts` integer DEFAULT 0 NOT NULL,
+	`last_error` text,
+	`next_attempt_at` text,
+	`created_at` text DEFAULT (datetime('now', 'localtime')) NOT NULL,
+	`published_at` text
+);
+--> statement-breakpoint
+CREATE INDEX `idx_kernel_outbox_status_created` ON `kernel_outbox_events` (`status`,`created_at`);--> statement-breakpoint
+CREATE INDEX `idx_kernel_outbox_execution` ON `kernel_outbox_events` (`execution_id`,`created_at`);--> statement-breakpoint
+CREATE INDEX `idx_kernel_outbox_correlation` ON `kernel_outbox_events` (`correlation_id`);--> statement-breakpoint
 CREATE TABLE `agent_locations` (
 	`agent_id` text PRIMARY KEY NOT NULL,
 	`room_id` text NOT NULL,
@@ -16,6 +41,9 @@ CREATE TABLE `ai_model_configs` (
 	`top_p` real,
 	`max_tokens` integer,
 	`reasoning_effort` text,
+	`return_native_reasoning` integer DEFAULT false,
+	`wire_api` text DEFAULT 'chat_completions',
+	`reasoning_dialect` text DEFAULT 'auto',
 	`stream` integer DEFAULT true,
 	`enable_vision` integer DEFAULT false,
 	`enable_audio_input` integer DEFAULT false,
@@ -123,27 +151,6 @@ CREATE TABLE `butler_configs` (
 	`updated_at` text DEFAULT (datetime('now', 'localtime'))
 );
 --> statement-breakpoint
-CREATE TABLE `canonical_memories` (
-	`id` text PRIMARY KEY NOT NULL,
-	`agent_id` text NOT NULL,
-	`type` text NOT NULL,
-	`content` text NOT NULL,
-	`summary` text,
-	`importance` real DEFAULT 0.5,
-	`confidence` real DEFAULT 0.5,
-	`status` text DEFAULT 'active',
-	`provenance` text NOT NULL,
-	`superseded_by` text,
-	`supersedes` text,
-	`vector_id` text,
-	`created_at` text NOT NULL,
-	`updated_at` text NOT NULL
-);
---> statement-breakpoint
-CREATE INDEX `idx_canonical_memories_agent_id` ON `canonical_memories` (`agent_id`);--> statement-breakpoint
-CREATE INDEX `idx_canonical_memories_type` ON `canonical_memories` (`type`);--> statement-breakpoint
-CREATE INDEX `idx_canonical_memories_status` ON `canonical_memories` (`status`);--> statement-breakpoint
-CREATE INDEX `idx_canonical_memories_created_at` ON `canonical_memories` (`created_at`);--> statement-breakpoint
 CREATE TABLE `configs` (
 	`key` text PRIMARY KEY NOT NULL,
 	`value` text NOT NULL,
@@ -173,16 +180,6 @@ CREATE INDEX `idx_conversation_logs_session_id` ON `conversation_logs` (`session
 CREATE INDEX `idx_conversation_logs_source` ON `conversation_logs` (`source`);--> statement-breakpoint
 CREATE INDEX `idx_conversation_logs_pair_id` ON `conversation_logs` (`pair_id`);--> statement-breakpoint
 CREATE INDEX `idx_conversation_logs_agent_id` ON `conversation_logs` (`agent_id`);--> statement-breakpoint
-CREATE TABLE `entity_cooccurrences` (
-	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-	`entity_a_id` integer NOT NULL,
-	`entity_b_id` integer NOT NULL,
-	`co_count` integer DEFAULT 1,
-	`agent_id` text DEFAULT 'pero' NOT NULL
-);
---> statement-breakpoint
-CREATE INDEX `idx_entity_cooccurrences_agent_id` ON `entity_cooccurrences` (`agent_id`);--> statement-breakpoint
-CREATE UNIQUE INDEX `uq_cooccurrence_pair` ON `entity_cooccurrences` (`entity_a_id`,`entity_b_id`,`agent_id`);--> statement-breakpoint
 CREATE TABLE `file_change_snapshots` (
 	`id` text PRIMARY KEY NOT NULL,
 	`thread_id` text NOT NULL,
@@ -211,6 +208,10 @@ CREATE TABLE `flow_state_revisions` (
 	`before_private_facts` text DEFAULT '' NOT NULL,
 	`after_current_goal` text DEFAULT '' NOT NULL,
 	`after_private_facts` text DEFAULT '' NOT NULL,
+	`before_work_context` text DEFAULT '' NOT NULL,
+	`before_work_context_updated_at_pair_count` integer DEFAULT 0 NOT NULL,
+	`after_work_context` text DEFAULT '' NOT NULL,
+	`after_work_context_updated_at_pair_count` integer DEFAULT 0 NOT NULL,
 	`created_at` text DEFAULT (datetime('now', 'localtime')) NOT NULL
 );
 --> statement-breakpoint
@@ -221,6 +222,8 @@ CREATE TABLE `flow_states` (
 	`agent_id` text NOT NULL,
 	`current_goal` text DEFAULT '' NOT NULL,
 	`private_facts` text DEFAULT '' NOT NULL,
+	`work_context` text DEFAULT '' NOT NULL,
+	`work_context_updated_at_pair_count` integer DEFAULT 0 NOT NULL,
 	`revision` integer DEFAULT 1 NOT NULL,
 	`updated_by_pair_id` text,
 	`updated_at` text DEFAULT (datetime('now', 'localtime')) NOT NULL
@@ -253,6 +256,17 @@ CREATE TABLE `group_chat_messages` (
 CREATE INDEX `idx_group_chat_messages_room_id` ON `group_chat_messages` (`room_id`);--> statement-breakpoint
 CREATE INDEX `idx_group_chat_messages_sender_id` ON `group_chat_messages` (`sender_id`);--> statement-breakpoint
 CREATE INDEX `idx_group_chat_messages_pair_id` ON `group_chat_messages` (`pair_id`);--> statement-breakpoint
+CREATE TABLE `stronghold_agent_pair_visibility` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`agent_id` text NOT NULL,
+	`room_id` text NOT NULL,
+	`pair_id` text NOT NULL,
+	`observed_at` text DEFAULT (datetime('now', 'localtime'))
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `uq_stronghold_agent_pair_visibility` ON `stronghold_agent_pair_visibility` (`agent_id`,`pair_id`);--> statement-breakpoint
+CREATE INDEX `idx_stronghold_visibility_agent_observed` ON `stronghold_agent_pair_visibility` (`agent_id`,`observed_at`);--> statement-breakpoint
+CREATE INDEX `idx_stronghold_visibility_pair` ON `stronghold_agent_pair_visibility` (`pair_id`);--> statement-breakpoint
 CREATE TABLE `group_chat_rooms` (
 	`id` text PRIMARY KEY NOT NULL,
 	`name` text NOT NULL,
@@ -276,19 +290,6 @@ CREATE TABLE `inbound_routes` (
 CREATE INDEX `idx_inbound_routes_source` ON `inbound_routes` (`source`);--> statement-breakpoint
 CREATE INDEX `idx_inbound_routes_agent` ON `inbound_routes` (`agent_id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `uq_inbound_routes_source_identifier` ON `inbound_routes` (`source`,`identifier`);--> statement-breakpoint
-CREATE TABLE `maintenance_records` (
-	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-	`timestamp` text DEFAULT (datetime('now', 'localtime')),
-	`preferences_extracted` integer DEFAULT 0,
-	`important_tagged` integer DEFAULT 0,
-	`consolidated` integer DEFAULT 0,
-	`cleaned_count` integer DEFAULT 0,
-	`clustered_count` integer DEFAULT 0,
-	`created_ids` text DEFAULT '[]',
-	`deleted_data` text DEFAULT '[]',
-	`modified_data` text DEFAULT '[]'
-);
---> statement-breakpoint
 CREATE TABLE `mcp_configs` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`name` text NOT NULL,
@@ -303,50 +304,6 @@ CREATE TABLE `mcp_configs` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `uq_mcp_configs_name` ON `mcp_configs` (`name`);--> statement-breakpoint
-CREATE TABLE `memory_candidates` (
-	`id` text PRIMARY KEY NOT NULL,
-	`agent_id` text NOT NULL,
-	`source` text NOT NULL,
-	`origin_thread_id` text,
-	`origin_message_ids` text,
-	`summary` text NOT NULL,
-	`evidence_refs` text,
-	`importance` real DEFAULT 0.5,
-	`confidence` real DEFAULT 0.5,
-	`suggested_type` text NOT NULL,
-	`status` text DEFAULT 'pending',
-	`created_at` text NOT NULL,
-	`processed_at` text
-);
---> statement-breakpoint
-CREATE INDEX `idx_memory_candidates_agent_id` ON `memory_candidates` (`agent_id`);--> statement-breakpoint
-CREATE INDEX `idx_memory_candidates_status` ON `memory_candidates` (`status`);--> statement-breakpoint
-CREATE INDEX `idx_memory_candidates_origin_thread` ON `memory_candidates` (`origin_thread_id`);--> statement-breakpoint
-CREATE TABLE `memory_nodes` (
-	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-	`content` text NOT NULL,
-	`tags` text DEFAULT '',
-	`clusters` text,
-	`importance` integer DEFAULT 1,
-	`base_importance` real DEFAULT 1,
-	`access_count` integer DEFAULT 0,
-	`last_accessed` text DEFAULT (datetime('now', 'localtime')),
-	`sentiment` text DEFAULT 'neutral',
-	`timestamp` real DEFAULT (unixepoch('now') * 1000) NOT NULL,
-	`real_time` text DEFAULT '',
-	`prev_id` integer,
-	`next_id` integer,
-	`msg_timestamp` text,
-	`source` text DEFAULT 'desktop',
-	`type` text DEFAULT 'event',
-	`agent_id` text DEFAULT 'pero' NOT NULL,
-	`embedding_json` text DEFAULT '[]',
-	`retrieval_quality` real DEFAULT 0
-);
---> statement-breakpoint
-CREATE INDEX `idx_memory_nodes_agent_id` ON `memory_nodes` (`agent_id`);--> statement-breakpoint
-CREATE INDEX `idx_memory_nodes_timestamp` ON `memory_nodes` (`timestamp`);--> statement-breakpoint
-CREATE INDEX `idx_memory_nodes_type` ON `memory_nodes` (`type`);--> statement-breakpoint
 CREATE TABLE `message_attachments` (
 	`id` text PRIMARY KEY NOT NULL,
 	`thread_id` text NOT NULL,
@@ -534,6 +491,7 @@ CREATE TABLE `threads` (
 	`status` text DEFAULT 'active',
 	`context_policy` text,
 	`disabled_tools_json` text DEFAULT '[]' NOT NULL,
+	`auto_execute_tools` integer DEFAULT false NOT NULL,
 	`purpose` text DEFAULT 'conversation',
 	`created_at` text DEFAULT (datetime('now', 'localtime')),
 	`updated_at` text DEFAULT (datetime('now', 'localtime'))
@@ -544,6 +502,28 @@ CREATE INDEX `idx_threads_channel` ON `threads` (`channel`);--> statement-breakp
 CREATE INDEX `idx_threads_platform` ON `threads` (`platform`);--> statement-breakpoint
 CREATE INDEX `idx_threads_status` ON `threads` (`status`);--> statement-breakpoint
 CREATE INDEX `idx_threads_purpose` ON `threads` (`purpose`);--> statement-breakpoint
+CREATE TABLE `agent_input_requests` (
+	`id` text PRIMARY KEY NOT NULL,
+	`agent_id` text NOT NULL,
+	`channel` text NOT NULL,
+	`session_id` text NOT NULL,
+	`thread_id` text NOT NULL,
+	`task_id` text,
+	`question` text NOT NULL,
+	`context` text,
+	`options_json` text DEFAULT '[]' NOT NULL,
+	`allow_free_text` integer DEFAULT true NOT NULL,
+	`required` integer DEFAULT false NOT NULL,
+	`status` text NOT NULL,
+	`selected_option_ids_json` text DEFAULT '[]' NOT NULL,
+	`response_message` text,
+	`created_at` text NOT NULL,
+	`resolved_at` text
+);
+--> statement-breakpoint
+CREATE INDEX `idx_agent_input_status` ON `agent_input_requests` (`status`,`created_at`);--> statement-breakpoint
+CREATE INDEX `idx_agent_input_thread` ON `agent_input_requests` (`thread_id`,`status`);--> statement-breakpoint
+CREATE INDEX `idx_agent_input_session` ON `agent_input_requests` (`session_id`,`status`);--> statement-breakpoint
 CREATE TABLE `tool_approval_audit_logs` (
 	`id` text PRIMARY KEY NOT NULL,
 	`approval_id` text,
@@ -568,6 +548,7 @@ CREATE TABLE `tool_approval_requests` (
 	`args_summary_json` text NOT NULL,
 	`args_fingerprint` text NOT NULL,
 	`reason` text NOT NULL,
+	`risk_level` text DEFAULT 'low' NOT NULL,
 	`status` text NOT NULL,
 	`decision` text,
 	`resolution_message` text,
@@ -579,23 +560,42 @@ CREATE TABLE `tool_approval_requests` (
 CREATE INDEX `idx_tool_approval_status` ON `tool_approval_requests` (`status`,`expires_at`);--> statement-breakpoint
 CREATE INDEX `idx_tool_approval_session` ON `tool_approval_requests` (`session_id`,`tool_name`);--> statement-breakpoint
 CREATE INDEX `idx_tool_approval_agent` ON `tool_approval_requests` (`agent_id`,`tool_name`);--> statement-breakpoint
-CREATE TABLE `trivium_sync_tasks` (
-	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-	`operation` text NOT NULL,
-	`memory_id` integer,
-	`store_name` text DEFAULT 'memory',
-	`dedupe_key` text,
-	`payload_json` text DEFAULT '{}',
-	`status` text DEFAULT 'pending',
-	`retry_count` integer DEFAULT 0,
-	`last_error` text,
-	`agent_id` text DEFAULT 'pero' NOT NULL,
-	`created_at` text DEFAULT (datetime('now', 'localtime')),
-	`updated_at` text DEFAULT (datetime('now', 'localtime'))
-);
---> statement-breakpoint
-CREATE UNIQUE INDEX `trivium_sync_tasks_dedupe_key_unique` ON `trivium_sync_tasks` (`dedupe_key`);--> statement-breakpoint
-CREATE INDEX `idx_trivium_sync_tasks_operation` ON `trivium_sync_tasks` (`operation`);--> statement-breakpoint
-CREATE INDEX `idx_trivium_sync_tasks_status` ON `trivium_sync_tasks` (`status`);--> statement-breakpoint
-CREATE INDEX `idx_trivium_sync_tasks_memory_id` ON `trivium_sync_tasks` (`memory_id`);--> statement-breakpoint
-CREATE INDEX `idx_trivium_sync_tasks_agent_id` ON `trivium_sync_tasks` (`agent_id`);
+CREATE TABLE `kernel_assets` (
+	`asset_id` text PRIMARY KEY NOT NULL,
+	`object_type` text DEFAULT 'asset' NOT NULL,
+	`object_generation` integer DEFAULT 1 NOT NULL,
+	`owner_principal_id` text NOT NULL,
+	`kind` text NOT NULL,
+	`mime_type` text NOT NULL,
+	`size_bytes` integer NOT NULL,
+	`sha256` text NOT NULL,
+	`source` text NOT NULL,
+	`storage_ref` text NOT NULL,
+	`retention` text NOT NULL,
+	`created_at` text NOT NULL
+);--> statement-breakpoint
+CREATE INDEX `idx_kernel_assets_owner` ON `kernel_assets` (`owner_principal_id`,`created_at`);--> statement-breakpoint
+CREATE INDEX `idx_kernel_assets_sha256` ON `kernel_assets` (`sha256`);--> statement-breakpoint
+CREATE TABLE `kernel_transfers` (
+	`transfer_id` text PRIMARY KEY NOT NULL,
+	`object_generation` integer DEFAULT 1 NOT NULL,
+	`direction` text NOT NULL,
+	`state` text NOT NULL,
+	`source_ref_json` text,
+	`destination_ref_json` text,
+	`bytes_total` integer,
+	`bytes_transferred` integer DEFAULT 0 NOT NULL,
+	`checksum` text,
+	`result_asset_ref_json` text,
+	`principal_id` text NOT NULL,
+	`process_id` text,
+	`execution_id` text,
+	`correlation_id` text NOT NULL,
+	`error` text,
+	`created_at` text NOT NULL,
+	`started_at` text,
+	`completed_at` text
+);--> statement-breakpoint
+CREATE INDEX `idx_kernel_transfers_principal` ON `kernel_transfers` (`principal_id`,`created_at`);--> statement-breakpoint
+CREATE INDEX `idx_kernel_transfers_state` ON `kernel_transfers` (`state`,`created_at`);--> statement-breakpoint
+CREATE INDEX `idx_kernel_transfers_execution` ON `kernel_transfers` (`execution_id`,`created_at`);

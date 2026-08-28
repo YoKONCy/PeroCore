@@ -69,7 +69,6 @@ module.exports = {
         'packages/backend/src/nit/runtime.ts',
         'packages/daemon/src/main.ts',
         'packages/browser-extension/**/*.js',
-        'packages/native/nit-runtime/index.ts',
         'packages/frontend/src/lib/logger.ts',
         'packages/frontend/src/components/terminal/TerminalPanel.vue',
         'electron/main/utils/{env,logger}.ts',
@@ -80,12 +79,5 @@ module.exports = {
       },
     },
   ],
-  ignorePatterns: [
-    'dist',
-    'dist-electron',
-    'release-electron',
-    'node_modules',
-    '*.d.ts',
-    'packages/native/*/pkg',
-  ],
+  ignorePatterns: ['dist', 'dist-electron', 'release-electron', 'node_modules', '*.d.ts'],
 }

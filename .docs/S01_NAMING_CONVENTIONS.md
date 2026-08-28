@@ -7,17 +7,16 @@
 
 ## 1. 文件命名
 
-| 类型 | 规则 | 示例 |
-|---|---|---|
-| TypeScript 文件 | **camelCase** | `memoryService.ts`, `vectorWriteHelper.ts` |
-| Vue 单文件组件 | **PascalCase** | `ChatInterface.vue`, `MessageItem.vue` |
-| 测试文件 | `<模块名>.test.ts` | `memoryService.test.ts` |
-| 集成测试 | `<场景名>.integration.test.ts` | `memoryPipeline.integration.test.ts` |
-| 常量/枚举文件 | camelCase | `responseCodes.ts`, `memoryTypes.ts` |
-| 类型定义文件 | camelCase + `.types.ts` | `api.types.ts`, `memory.types.ts` |
-| 平台特有实现 | 后缀命名 | `activeWindow.win32.ts`, `activeWindow.linux.ts` |
-| Rust Native 模块 | snake_case（Rust 标准） | `nit_runtime`, `render_core` |
-| 配置文件 | 各工具标准 | `tsconfig.json`, `electron-builder.base.yml` |
+| 类型             | 规则                           | 示例                                             |
+| ---------------- | ------------------------------ | ------------------------------------------------ |
+| TypeScript 文件  | **camelCase**                  | `memoryService.ts`, `vectorWriteHelper.ts`       |
+| Vue 单文件组件   | **PascalCase**                 | `ChatInterface.vue`, `MessageItem.vue`           |
+| 测试文件         | `<模块名>.test.ts`             | `memoryService.test.ts`                          |
+| 集成测试         | `<场景名>.integration.test.ts` | `memoryPipeline.integration.test.ts`             |
+| 常量/枚举文件    | camelCase                      | `responseCodes.ts`, `memoryTypes.ts`             |
+| 类型定义文件     | camelCase + `.types.ts`        | `api.types.ts`, `memory.types.ts`                |
+| 平台特有实现     | 后缀命名                       | `activeWindow.win32.ts`, `activeWindow.linux.ts` |
+| 配置文件         | 各工具标准                     | `tsconfig.json`, `electron-builder.base.yml`     |
 
 ---
 
@@ -25,54 +24,54 @@
 
 ### 2.1 TypeScript
 
-| 类型 | 规则 | 示例 |
-|---|---|---|
-| 变量、函数 | **camelCase** | `const pageSize`, `function getMemories()` |
-| 类、接口、类型别名 | **PascalCase** | `class MemoryService`, `interface AppContext` |
-| 枚举名 | **PascalCase** | `enum MemorySource` |
-| 枚举值 | **snake_case 小写** | `MemorySource.desktop`, `MemorySource.group_chat` |
-| 常量 | **UPPER_SNAKE_CASE** | `const MAX_PAGE_SIZE = 100` |
-| 泛型参数 | **单字母大写** | `<T>`, `<K, V>` |
-| 布尔变量 | `is/has/should` 前缀 | `isElectron`, `hasPermission` |
-| 私有属性 | 无下划线前缀 | `private db: DrizzleDb`（TypeScript `private` 已标识） |
+| 类型               | 规则                 | 示例                                                   |
+| ------------------ | -------------------- | ------------------------------------------------------ |
+| 变量、函数         | **camelCase**        | `const pageSize`, `function getMemories()`             |
+| 类、接口、类型别名 | **PascalCase**       | `class MemoryService`, `interface AppContext`          |
+| 枚举名             | **PascalCase**       | `enum MemorySource`                                    |
+| 枚举值             | **snake_case 小写**  | `MemorySource.desktop`, `MemorySource.group_chat`      |
+| 常量               | **UPPER_SNAKE_CASE** | `const MAX_PAGE_SIZE = 100`                            |
+| 泛型参数           | **单字母大写**       | `<T>`, `<K, V>`                                        |
+| 布尔变量           | `is/has/should` 前缀 | `isElectron`, `hasPermission`                          |
+| 私有属性           | 无下划线前缀         | `private db: DrizzleDb`（TypeScript `private` 已标识） |
 
 ### 2.2 Vue 组件
 
-| 类型 | 规则 | 示例 |
-|---|---|---|
-| 组件文件名 | PascalCase | `MessageItem.vue` |
-| 模板中使用 | PascalCase | `<MessageItem />` |
-| Pinia Store | `use + 名词 + Store` | `useAgentStore`, `useConfigStore` |
-| Composable | `use + 动词/名词` | `useChatScroll`, `useEventListener` |
-| 事件名 | **kebab-case** | `@update-config`, `@agent-switch` |
-| CSS 类名 | **kebab-case** | `.message-item`, `.chat-input-bar` |
-| Prop | **camelCase** | `:modelConfig="config"` |
+| 类型        | 规则                 | 示例                                |
+| ----------- | -------------------- | ----------------------------------- |
+| 组件文件名  | PascalCase           | `MessageItem.vue`                   |
+| 模板中使用  | PascalCase           | `<MessageItem />`                   |
+| Pinia Store | `use + 名词 + Store` | `useAgentStore`, `useConfigStore`   |
+| Composable  | `use + 动词/名词`    | `useChatScroll`, `useEventListener` |
+| 事件名      | **kebab-case**       | `@update-config`, `@agent-switch`   |
+| CSS 类名    | **kebab-case**       | `.message-item`, `.chat-input-bar`  |
+| Prop        | **camelCase**        | `:modelConfig="config"`             |
 
 ### 2.3 后端路由
 
-| 类型 | 规则 | 示例 |
-|---|---|---|
-| URL 路径 | **kebab-case 复数** | `/api/memories`, `/api/model-configs` |
-| URL 参数 | **camelCase** | `?pageSize=20&agentId=pero` |
-| 请求体字段 | **camelCase** | `{ "memoryContent": "..." }` |
-| 响应体字段 | **camelCase** | `{ "hasMore": true }` |
+| 类型       | 规则                | 示例                                  |
+| ---------- | ------------------- | ------------------------------------- |
+| URL 路径   | **kebab-case 复数** | `/api/memories`, `/api/model-configs` |
+| URL 参数   | **camelCase**       | `?pageSize=20&agentId=pero`           |
+| 请求体字段 | **camelCase**       | `{ "memoryContent": "..." }`          |
+| 响应体字段 | **camelCase**       | `{ "hasMore": true }`                 |
 
 ### 2.4 数据库
 
-| 类型 | 规则 | 示例 |
-|---|---|---|
-| 表名 | **snake_case 复数** | `memory_nodes`, `conversation_logs` |
-| 列名 | **snake_case** | `agent_id`, `created_at`, `is_deleted` |
-| 索引名 | `idx_<表>_<列>` | `idx_memories_agent_id` |
-| Drizzle 变量 | **camelCase** | `export const memoryNodes = sqliteTable(...)` |
+| 类型         | 规则                | 示例                                          |
+| ------------ | ------------------- | --------------------------------------------- |
+| 表名         | **snake_case 复数** | `memory_nodes`, `conversation_logs`           |
+| 列名         | **snake_case**      | `agent_id`, `created_at`, `is_deleted`        |
+| 索引名       | `idx_<表>_<列>`     | `idx_memories_agent_id`                       |
+| Drizzle 变量 | **camelCase**       | `export const memoryNodes = sqliteTable(...)` |
 
 ### 2.5 API 业务状态码
 
-| 约束 | 说明 |
-|---|---|
-| 命名格式 | **UPPER_SNAKE_CASE** |
-| 只允许使用规范表中的 code | 新增必须更新 `API_SPEC.md` |
-| 示例 | `OK`, `NOT_FOUND`, `LLM_ERROR`, `VALIDATION_ERROR` |
+| 约束                      | 说明                                               |
+| ------------------------- | -------------------------------------------------- |
+| 命名格式                  | **UPPER_SNAKE_CASE**                               |
+| 只允许使用规范表中的 code | 新增必须更新 `API_SPEC.md`                         |
+| 示例                      | `OK`, `NOT_FOUND`, `LLM_ERROR`, `VALIDATION_ERROR` |
 
 ---
 
@@ -132,7 +131,7 @@ async runMaintenance(agentId: string, options?: MaintenanceOptions): Promise<Rep
 await this.scanDir(appDir, 'official')
 
 const enriched = tags
-  ? `${tags} ${tags} ${content}`  // 标签重复两次以增加权重
+  ? `${tags} ${tags} ${content}` // 标签重复两次以增加权重
   : content
 ```
 
@@ -146,13 +145,13 @@ const enriched = tags
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-| 标签 | 含义 |
-|---|---|
-| `@platform WINDOWS` | Windows 专有 |
-| `@platform LINUX` | Linux 专有 |
-| `@platform DARWIN` | macOS 专有 |
-| `@platform ELECTRON` | Electron 专有 |
-| `@platform DOCKER` | Docker/容器专有 |
+| 标签                 | 含义            |
+| -------------------- | --------------- |
+| `@platform WINDOWS`  | Windows 专有    |
+| `@platform LINUX`    | Linux 专有      |
+| `@platform DARWIN`   | macOS 专有      |
+| `@platform ELECTRON` | Electron 专有   |
+| `@platform DOCKER`   | Docker/容器专有 |
 
 ---
 
@@ -193,4 +192,4 @@ import { VectorWriteHelper } from '../shared/vectorWriteHelper'
 
 ---
 
-*本文档由 Carola 整理，适用于 infOS-TS 全项目命名规范。*
+_本文档由 Carola 整理，适用于 infOS-TS 全项目命名规范。_

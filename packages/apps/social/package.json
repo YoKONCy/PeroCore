@@ -1,12 +1,17 @@
 {
   "name": "@infos/social",
-  "version": "0.9.2-rc1",
+  "version": "0.9.3",
   "private": true,
   "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
   "dependencies": {
+    "@infos/backend": "workspace:*",
+    "@infos/shared": "workspace:*",
     "drizzle-orm": "^0.44.0",
     "hono": "^4.7.0",
-    "triviumdb": "^0.7.3",
+    "triviumdb": "0.8.2",
     "uuid": "^14.0.0"
   },
   "devDependencies": {

@@ -8,10 +8,30 @@
   "entry": "index.ts",
   "category": "core",
   "platforms": ["windows", "darwin", "linux"],
+  "userCopy": {
+    "stronghold_move_to_room": { "label": "前往房间", "description": "让角色移动到指定房间。" },
+    "stronghold_list_rooms": {
+      "label": "查看房间列表",
+      "description": "查看据点中可以前往的房间。"
+    },
+    "stronghold_get_room_info": {
+      "label": "查看房间信息",
+      "description": "查看当前房间的成员和环境信息。"
+    },
+    "stronghold_set_environment": {
+      "label": "调整房间环境",
+      "description": "调整房间的灯光、声音或氛围。"
+    },
+    "stronghold_call_butler": { "label": "呼叫管家", "description": "呼叫据点管家协助处理事务。" },
+    "stronghold_summon_agents": {
+      "label": "传唤据点成员",
+      "description": "邀请当前房间内的其他角色在本轮依次接话。"
+    }
+  },
   "tools": [
     {
       "name": "stronghold_move_to_room",
-      "description": "移动到据点内的另一个房间。移动后你会进入该房间的群聊上下文。",
+      "description": "移动到据点内的另一个房间。移动立即更新角色位置，但当前正在生成的回复仍归属于发起回合的原房间；新房间群聊上下文从下一回合生效。",
       "display": {
         "label": "移动房间",
         "icon": "door-open",
@@ -74,6 +94,33 @@
           }
         },
         "required": ["key", "value"]
+      }
+    },
+    {
+      "name": "stronghold_summon_agents",
+      "description": "邀请当前据点房间内的一名或多名其他角色在本轮接着发言。按agent_ids顺序执行；每轮只能由首位自然回复者调用一次，被传唤者不能继续传唤。",
+      "display": {
+        "label": "传唤成员",
+        "icon": "users",
+        "color": "purple",
+        "style": "stronghold"
+      },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "agent_ids": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 1,
+            "maxItems": 5,
+            "description": "按期望发言顺序排列的在场角色ID。不能包含自己。"
+          },
+          "reason": {
+            "type": "string",
+            "description": "希望这些角色接话的原因或问题。"
+          }
+        },
+        "required": ["agent_ids"]
       }
     },
     {

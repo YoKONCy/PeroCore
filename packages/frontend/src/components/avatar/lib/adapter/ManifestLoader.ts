@@ -1,7 +1,7 @@
 /**
  * Manifest 加载器
  *
- * 从不同来源（JSON 文件 / .pero 容器）加载模型配置清单，
+ * 从JSON文件加载模型配置清单，
  * 并对 Manifest 结构进行完整性校验。
  *
  * @module packages/frontend/src/components/avatar/lib/adapter/ManifestLoader
@@ -31,30 +31,6 @@ export class ManifestLoader {
     }
     const manifest = await response.json()
     return resolveAvatarManifestUrls(ManifestLoader.validate(manifest))
-  }
-
-  /**
-   * 从 .pero 文件加载 Manifest
-   *
-   * .pero 文件的元数据段包含 Manifest 信息，需要通过解密器提取。
-   *
-   * @param path - .pero 文件路径
-   * @param decryptor - 解密函数（将原始二进制转为 Manifest 对象）
-   * @returns 解密后的 Manifest 对象
-   * @throws {Error} 未提供解密器时抛出
-   */
-  static async fromPero(
-    path: string,
-    decryptor?: (data: ArrayBuffer) => Promise<IAvatarManifest>,
-  ): Promise<IAvatarManifest> {
-    if (decryptor) {
-      const url = path
-      const response = await fetch(url)
-      const data = await response.arrayBuffer()
-      return decryptor(data)
-    }
-
-    throw new Error('加载 .pero Manifest 需要提供解密器')
   }
 
   /**

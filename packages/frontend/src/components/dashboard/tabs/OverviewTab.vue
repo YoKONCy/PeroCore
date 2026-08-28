@@ -135,13 +135,36 @@ const activeMemoryTab = ref<MemoryChannel>('desktop')
 const isSavingMemoryConfig = ref(false)
 
 const memoryConfig = ref<MemoryRuntimeConfig>({
+  workContextExpirationPairs: 5,
   channels: {
-    desktop: { contextPairs: 20, retrievalLimit: 8 },
-    group: { contextPairs: 20, retrievalLimit: 3 },
+    desktop: { contextPairs: 20, enableAutoRag: true, retrievalLimit: 8 },
+    group: { contextPairs: 20, enableAutoRag: true, retrievalLimit: 3 },
   },
-  scorerBatchSize: 8,
-  retrievalMinScore: 0.3,
+  advanced: {
+    enableSaPpr: false,
+    expandDepth: 2,
+    teleportAlpha: 0.15,
+    minScore: 0.1,
+    enableFista: false,
+    enableDpp: false,
+    enableContextRnn: false,
+    enableLeiden: false,
+    enableFeedback: false,
+  },
 })
+const showAdvancedMemoryConfig = ref(false)
+
+watch(
+  () => memoryConfig.value.advanced.enableSaPpr,
+  (enabled) => {
+    if (enabled) return
+    memoryConfig.value.advanced.enableFista = false
+    memoryConfig.value.advanced.enableDpp = false
+    memoryConfig.value.advanced.enableContextRnn = false
+    memoryConfig.value.advanced.enableLeiden = false
+    memoryConfig.value.advanced.enableFeedback = false
+  },
+)
 
 /** 从专用接口读取经过后端校验的运行配置。 */
 async function loadMemoryConfig() {
@@ -169,7 +192,14 @@ async function saveMemoryConfig() {
 
 // ══════ 最近对话 ══════
 const recentChats = ref<
-  Array<{ id: number; summary: string; agent: string; time: string; tokenCount: number }>
+  Array<{
+    id: string
+    summary: string
+    agent: string
+    time: string
+    messageCount: number
+    pairCount: number
+  }>
 >([])
 
 // ══════ 系统健康 ══════
@@ -188,7 +218,7 @@ async function loadOverview() {
   try {
     const [sysRes, memRes, taskRes, sessRes] = await Promise.allSettled([
       systemApi.info(),
-      memoryApi.list({ page: 1, pageSize: 1 }),
+      memoryApi.archive({ agentId: ctx.activeAgentId.value ?? 'pero', pageSize: 1 }),
       schedulerApi.reminders(),
       threadsApi.list({ pageSize: 5 }),
     ])
@@ -198,19 +228,17 @@ async function loadOverview() {
     // 系统信息
     if (sysRes.status === 'fulfilled' && sysRes.value.data) {
       const info = sysRes.value.data
-      systemHealth.value.memoryUsed = info.runtime.memoryUsage.rss || 0
-      systemHealth.value.memoryTotal = info.runtime.totalMemoryMB || 0
-      systemHealth.value.cpu = info.runtime.cpuPercent || 0
-      if (info.storage) {
-        systemHealth.value.sqliteSize = info.storage.sqliteSizeMB || 0
-        systemHealth.value.triviumSize = info.storage.triviumSizeMB || 0
-      }
+      systemHealth.value.memoryUsed = info.runtime.memoryUsage.rss
+      systemHealth.value.memoryTotal = info.runtime.totalMemoryMB
+      systemHealth.value.cpu = info.runtime.cpuPercent
+      systemHealth.value.sqliteSize = info.storage.sqliteSizeMB
+      systemHealth.value.triviumSize = info.storage.triviumSizeMB
+      systemHealth.value.vectorCount = info.storage.triviumNodeCount
     }
 
-    // 记忆统计
+    // EventNote 数量用于顶部核心记忆统计，TDB 节点总数由系统信息接口提供。
     if (memRes.status === 'fulfilled' && memRes.value.data) {
       stats.value.totalMemories = memRes.value.data.total
-      systemHealth.value.vectorCount = memRes.value.data.total
     }
 
     // 待触发提醒统计 (用户通过 Agent 创建的 reminder/topic/reaction)
@@ -223,17 +251,21 @@ async function loadOverview() {
     if (sessRes.status === 'fulfilled' && sessRes.value.data) {
       const threadItems = sessRes.value.data.items
       stats.value.totalChats = threadItems.reduce((sum, t) => sum + (t.messageCount ?? 0), 0)
-      recentChats.value = threadItems.map((s, i) => ({
-        id: i,
-        summary: s.title || '未命名会话',
-        agent: s.agentId || 'Pero',
-        time: new Date(s.updatedAt || s.createdAt).toLocaleString('zh-CN', {
-          month: 'short',
-          day: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit',
-        }),
-        tokenCount: 0,
+      recentChats.value = threadItems.map((thread) => ({
+        id: thread.id,
+        summary: thread.title || '未命名会话',
+        agent: thread.agentId || 'Pero',
+        time: new Date(thread.lastMessageAt || thread.updatedAt || thread.createdAt).toLocaleString(
+          'zh-CN',
+          {
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+          },
+        ),
+        messageCount: thread.messageCount ?? 0,
+        pairCount: thread.pairCount ?? 0,
       }))
     }
 
@@ -246,34 +278,11 @@ async function loadOverview() {
   }
 }
 
-function formatTokens(n: number): string {
-  return n >= 1000 ? (n / 1000).toFixed(1) + 'K' : String(n)
-}
-
 // 记忆 Tab 列表
 const memoryTabs = [
   { id: 'desktop' as const, label: '桌面对话', icon: 'desktop' },
   { id: 'group' as const, label: '据点群聊', icon: 'chat' },
 ]
-
-const scorerOptions = [
-  { value: 4 as const, label: '积极', help: '每 4 轮整理一次' },
-  { value: 8 as const, label: '均衡', help: '每 8 轮整理一次' },
-  { value: 16 as const, label: '节省', help: '每 16 轮整理一次' },
-]
-const retrievalOptions = [
-  { value: 0.2 as const, label: '广泛联想', help: '允许更多弱相关记忆参与回答' },
-  { value: 0.3 as const, label: '均衡', help: '兼顾召回数量与相关性' },
-  { value: 0.45 as const, label: '精准', help: '只注入高度相关的记忆' },
-]
-
-// ══════ 故事导入 ══════
-const showImportStory = ref(false)
-
-/** 统一故事导入完成后刷新总览统计。 */
-function handleStoryImported(imported: number): void {
-  stats.value.totalMemories += imported
-}
 
 // 监听全局刷新
 watch(
@@ -314,18 +323,6 @@ onMounted(loadOverview)
               <div class="text-3xl font-black text-slate-800">
                 {{ stats.totalMemories }}
               </div>
-              <button
-                class="mt-1.5 text-xs text-purple-500 hover:text-purple-600 font-bold flex items-center gap-1 transition-colors group/btn"
-                @click="showImportStory = true"
-              >
-                <PixelIcon
-                  name="download"
-                  size="xs"
-                  class="rotate-180 group-hover/btn:-translate-y-0.5 transition-transform"
-                />
-                导入故事
-                <PixelIcon name="thought" size="xs" class="ml-0.5" />
-              </button>
             </div>
             <!-- 装饰元素 -->
             <div
@@ -625,7 +622,8 @@ onMounted(loadOverview)
                   <span class="text-xs text-sky-400/60 font-mono font-normal">Companion</span>
                 </div>
                 <div class="text-sm text-slate-500 mt-1 leading-relaxed">
-                  开启后，{{ activeAgent?.name || '助手' }} 会在你空闲时通过陪伴频道主动发起互动。
+                  开启后，{{ activeAgent?.name || '助手' }}
+                  会在你一段时间没有发消息时，在当前桌面对话中主动关心你。
                 </div>
               </div>
             </div>
@@ -699,9 +697,46 @@ onMounted(loadOverview)
           </button>
         </div>
 
-        <!-- Slider 配置区 -->
+        <!-- 记忆配置区 -->
         <div class="space-y-6">
+          <div
+            class="memory-config-block p-6 pixel-border-sky flex items-center justify-between gap-6"
+          >
+            <div>
+              <b class="text-base text-slate-700">自动 RAG</b>
+              <p class="text-xs text-slate-500 mt-1 leading-relaxed">
+                开启后，每次对话会从当前 Agent 的 EventNote
+                中检索相关事件，并补充物理时间轴末尾事件与命中事件的直接前驱。
+              </p>
+            </div>
+            <PSwitch v-model="memoryConfig.channels[activeMemoryTab].enableAutoRag" />
+          </div>
+
           <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div
+              class="memory-config-block p-6 pixel-border-sky transition-all duration-300 group/mconfig hover:pixel-border-pink"
+            >
+              <div class="flex justify-between items-center mb-4">
+                <label class="text-base font-bold text-slate-700 flex items-center gap-2">
+                  <span
+                    class="w-2 h-2 rounded-full bg-violet-500 group-hover/mconfig:animate-pulse"
+                  ></span>
+                  工作上下文保留轮次
+                </label>
+                <span
+                  class="px-2 py-0.5 bg-violet-100 text-violet-600 text-xs font-mono font-bold border border-violet-200"
+                >
+                  {{ memoryConfig.workContextExpirationPairs }} 轮
+                </span>
+              </div>
+              <PSlider v-model="memoryConfig.workContextExpirationPairs" :min="1" :max="50" />
+              <div class="memory-config-note mt-4 text-xs font-medium flex items-start gap-2 p-3">
+                <PixelIcon name="thought" size="sm" />
+                <p class="leading-relaxed">
+                  角色最后一次整理工作上下文后，最多继续保留多少轮完整对话；默认为 5 轮。
+                </p>
+              </div>
+            </div>
             <!-- 短期记忆上下文 -->
             <div
               class="memory-config-block p-6 pixel-border-sky transition-all duration-300 group/mconfig hover:pixel-border-pink"
@@ -739,13 +774,14 @@ onMounted(loadOverview)
             <!-- RAG 召回数量 -->
             <div
               class="memory-config-block p-6 pixel-border-sky transition-all duration-300 group/mconfig hover:pixel-border-pink"
+              :class="{ 'opacity-50': !memoryConfig.channels[activeMemoryTab].enableAutoRag }"
             >
               <div class="flex justify-between items-center mb-4">
                 <label class="text-base font-bold text-slate-700 flex items-center gap-2">
                   <span
                     class="w-2 h-2 rounded-full bg-sky-500 group-hover/mconfig:animate-pulse"
                   ></span>
-                  RAG 召回数量
+                  RAG 相关事件数量
                   <span class="text-[11px] text-slate-400 font-bold">Retrieval</span>
                 </label>
                 <span class="px-2 py-0.5 bg-sky-500/10 text-sky-400 text-xs font-mono font-bold">
@@ -754,8 +790,9 @@ onMounted(loadOverview)
               </div>
               <PSlider
                 v-model="memoryConfig.channels[activeMemoryTab].retrievalLimit"
-                :min="0"
+                :min="1"
                 :max="30"
+                :disabled="!memoryConfig.channels[activeMemoryTab].enableAutoRag"
               />
               <div
                 class="mt-4 text-xs text-slate-500 flex items-start gap-2 bg-sky-50/50 p-3 border border-sky-100/50"
@@ -764,57 +801,127 @@ onMounted(loadOverview)
                   <PixelIcon name="book" size="sm" />
                 </span>
                 <p class="leading-relaxed">
-                  从长期记忆库中检索的相关记忆条数。
+                  控制混合检索返回的相关 EventNote 数量；时间轴末尾事件和直接前驱不占该数量。
                   <PixelIcon name="paw" size="xs" />
                 </p>
               </div>
             </div>
           </div>
 
-          <!-- 全局记忆策略 -->
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <div class="memory-config-block p-6 pixel-border-sky">
-              <div class="mb-4">
-                <b class="text-base text-slate-700">记忆整理频率</b>
-                <p class="text-xs text-slate-500 mt-1">控制对话积累多少轮后提炼长期记忆。</p>
+          <div class="memory-config-block pixel-border-sky overflow-hidden">
+            <button
+              type="button"
+              class="w-full flex items-center justify-between gap-4 p-5 text-left"
+              @click="showAdvancedMemoryConfig = !showAdvancedMemoryConfig"
+            >
+              <div>
+                <b class="text-base text-slate-700 font-pixel">高级配置</b>
+                <p class="text-xs text-slate-500 mt-1">
+                  SA-PPR 认知检索、ContextRNN、Leiden 与反馈学习
+                </p>
               </div>
-              <div class="grid grid-cols-3 gap-2">
-                <button
-                  v-for="option in scorerOptions"
-                  :key="option.value"
-                  class="p-3 border text-left transition-colors"
-                  :class="
-                    memoryConfig.scorerBatchSize === option.value
-                      ? 'border-sky-500 bg-sky-50 text-sky-700'
-                      : 'border-slate-200 text-slate-500 hover:border-sky-300'
-                  "
-                  @click="memoryConfig.scorerBatchSize = option.value"
+              <PixelIcon
+                :name="showAdvancedMemoryConfig ? 'chevron-up' : 'chevron-down'"
+                size="sm"
+              />
+            </button>
+            <div v-if="showAdvancedMemoryConfig" class="p-5 pt-0 space-y-5 border-t border-sky-100">
+              <div class="flex items-center justify-between gap-5 pt-5">
+                <div>
+                  <b class="text-sm text-slate-700">启用 SA-PPR 高级管线</b>
+                  <p class="text-xs text-slate-500 mt-1">
+                    仅代替每次对话的自动 RAG 召回管线；Agent
+                    主动调用工具查询时，继续使用确定性图谱遍历
+                  </p>
+                </div>
+                <PSwitch v-model="memoryConfig.advanced.enableSaPpr" />
+              </div>
+              <div
+                class="grid grid-cols-1 md:grid-cols-3 gap-5"
+                :class="{ 'opacity-50 pointer-events-none': !memoryConfig.advanced.enableSaPpr }"
+              >
+                <div>
+                  <label class="text-xs font-bold text-slate-600">
+                    扩散深度 {{ memoryConfig.advanced.expandDepth }}
+                  </label>
+                  <PSlider v-model="memoryConfig.advanced.expandDepth" :min="1" :max="6" />
+                </div>
+                <div>
+                  <label class="text-xs font-bold text-slate-600">
+                    回跳概率 {{ memoryConfig.advanced.teleportAlpha.toFixed(2) }}
+                  </label>
+                  <PSlider
+                    v-model="memoryConfig.advanced.teleportAlpha"
+                    :min="0"
+                    :max="1"
+                    :step="0.05"
+                  />
+                </div>
+                <div>
+                  <label class="text-xs font-bold text-slate-600">
+                    最低分数 {{ memoryConfig.advanced.minScore.toFixed(2) }}
+                  </label>
+                  <PSlider
+                    v-model="memoryConfig.advanced.minScore"
+                    :min="-1"
+                    :max="1"
+                    :step="0.05"
+                  />
+                </div>
+              </div>
+              <div
+                class="grid grid-cols-1 md:grid-cols-2 gap-3"
+                :class="{ 'opacity-50 pointer-events-none': !memoryConfig.advanced.enableSaPpr }"
+              >
+                <label
+                  class="flex items-center justify-between gap-4 p-4 border border-sky-100 bg-sky-50/40"
                 >
-                  <b class="block text-sm">{{ option.label }}</b>
-                  <small class="block mt-1 text-[10px]">{{ option.help }}</small>
-                </button>
-              </div>
-            </div>
-            <div class="memory-config-block p-6 pixel-border-sky">
-              <div class="mb-4">
-                <b class="text-base text-slate-700">召回精度</b>
-                <p class="text-xs text-slate-500 mt-1">控制长期记忆进入上下文所需的最低相关度。</p>
-              </div>
-              <div class="grid grid-cols-3 gap-2">
-                <button
-                  v-for="option in retrievalOptions"
-                  :key="option.value"
-                  class="p-3 border text-left transition-colors"
-                  :class="
-                    memoryConfig.retrievalMinScore === option.value
-                      ? 'border-sky-500 bg-sky-50 text-sky-700'
-                      : 'border-slate-200 text-slate-500 hover:border-sky-300'
-                  "
-                  @click="memoryConfig.retrievalMinScore = option.value"
+                  <span>
+                    <b class="block text-sm text-slate-700">FISTA 残差寻隐</b>
+                    <small class="text-[10px] text-slate-500">补充基础候选未解释的弱信号。</small>
+                  </span>
+                  <PSwitch v-model="memoryConfig.advanced.enableFista" />
+                </label>
+                <label
+                  class="flex items-center justify-between gap-4 p-4 border border-sky-100 bg-sky-50/40"
                 >
-                  <b class="block text-sm">{{ option.label }}</b>
-                  <small class="block mt-1 text-[10px]">{{ option.help }}</small>
-                </button>
+                  <span>
+                    <b class="block text-sm text-slate-700">DPP 多样性采样</b>
+                    <small class="text-[10px] text-slate-500">降低最终结果之间的语义重复。</small>
+                  </span>
+                  <PSwitch v-model="memoryConfig.advanced.enableDpp" />
+                </label>
+                <label
+                  class="flex items-center justify-between gap-4 p-4 border border-sky-100 bg-sky-50/40"
+                >
+                  <span>
+                    <b class="block text-sm text-slate-700">ContextRNN</b>
+                    <small class="text-[10px] text-slate-500">用对话轨迹生成图扩散方向偏置。</small>
+                  </span>
+                  <PSwitch v-model="memoryConfig.advanced.enableContextRnn" />
+                </label>
+                <label
+                  class="flex items-center justify-between gap-4 p-4 border border-sky-100 bg-sky-50/40"
+                >
+                  <span>
+                    <b class="block text-sm text-slate-700">Leiden 聚类</b>
+                    <small class="text-[10px] text-slate-500">
+                      发现事件社区并用活跃社区辅助检索。
+                    </small>
+                  </span>
+                  <PSwitch v-model="memoryConfig.advanced.enableLeiden" />
+                </label>
+                <label
+                  class="flex items-center justify-between gap-4 p-4 border border-sky-100 bg-sky-50/40"
+                >
+                  <span>
+                    <b class="block text-sm text-slate-700">反馈闭环</b>
+                    <small class="text-[10px] text-slate-500">
+                      根据回答引用情况训练 ContextRNN。
+                    </small>
+                  </span>
+                  <PSwitch v-model="memoryConfig.advanced.enableFeedback" />
+                </label>
               </div>
             </div>
           </div>
@@ -844,7 +951,8 @@ onMounted(loadOverview)
                 </span>
                 <div class="flex gap-2.5 mt-0.5 text-[10px] text-slate-400 font-bold font-pixel">
                   <span>{{ chat.agent }}</span>
-                  <span>{{ formatTokens(chat.tokenCount) }} msgs</span>
+                  <span>{{ chat.pairCount }} 轮</span>
+                  <span>{{ chat.messageCount }} 条</span>
                   <span>{{ chat.time }}</span>
                 </div>
               </div>
@@ -924,13 +1032,6 @@ onMounted(loadOverview)
         </PCard>
       </div>
     </template>
-
-    <!-- 共享故事导入弹窗：与核心记忆页使用同一表现和后端导入链路 -->
-    <StoryImportDialog
-      v-model="showImportStory"
-      :agent-id="activeAgent?.id ?? 'pero'"
-      @imported="handleStoryImported"
-    />
   </div>
 </template>
 

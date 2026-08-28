@@ -16,6 +16,7 @@ describe('FileSnapshotRepository 链式回滚范围', () => {
         agent_id TEXT NOT NULL,
         channel TEXT DEFAULT 'desktop' NOT NULL,
         status TEXT DEFAULT 'active',
+        auto_execute_tools INTEGER DEFAULT false NOT NULL,
         created_at TEXT,
         updated_at TEXT
       );

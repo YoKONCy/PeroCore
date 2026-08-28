@@ -2,6 +2,13 @@
   "toolDefinition": {
     "name": "communicate_with_host",
     "description": "AgentApplication 内的 SubAgent 与宿主主 Agent 建立一次临时通信。用于咨询、核验、审批、请求资源、汇报、澄清或提交结果；通信内容不会写入主 Thread。",
+    "display": {
+      "label": "联系主助手",
+      "description": "让应用中的助手与主助手临时交换任务信息。",
+      "icon": "message",
+      "color": "pink",
+      "style": "default"
+    },
     "parameters": {
       "type": "object",
       "properties": {

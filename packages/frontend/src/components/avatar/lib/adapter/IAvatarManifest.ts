@@ -2,7 +2,7 @@
  * 头像清单接口定义
  *
  * 定义模型的所有配置元数据，包括部件控制、重定向映射、
- * 资源路径等。未来将随模型打包进 .pero 容器。
+ * 资源路径等。
  *
  * @module packages/frontend/src/components/avatar/lib/adapter/IAvatarManifest
  */
@@ -77,7 +77,7 @@ export interface IAvatarManifest {
 
   /** 资源文件路径 */
   resources: {
-    /** 模型文件路径（.json 或 .pero） */
+    /** 模型JSON文件路径 */
     model: string
     /** 纹理文件路径 */
     texture: string

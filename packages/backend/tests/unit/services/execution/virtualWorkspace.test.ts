@@ -110,6 +110,40 @@ describe('VirtualWorkspace', () => {
     ).rejects.toThrow('line_end 不能小于 line_start')
   })
 
+  it('按行读取默认及最大窗口为800行', async () => {
+    const content = Array.from({ length: 1_000 }, (_, index) => `第${index + 1}行`).join('\n')
+    await writeFile(path.join(root, 'large.txt'), content, 'utf8')
+    const workspace = new VirtualWorkspace()
+
+    const defaultWindow = await workspace.read(session, 'large.txt', { lineStart: 1 })
+    expect(defaultWindow.content.split('\n')).toHaveLength(800)
+    expect(defaultWindow.lineStart).toBe(1)
+    expect(defaultWindow.lineEnd).toBe(800)
+    expect(defaultWindow.truncated).toBe(true)
+
+    const exactWindow = await workspace.read(session, 'large.txt', {
+      lineStart: 101,
+      lineEnd: 900,
+    })
+    expect(exactWindow.content.split('\n')).toHaveLength(800)
+    expect(exactWindow.lineStart).toBe(101)
+    expect(exactWindow.lineEnd).toBe(900)
+
+    const oversizedWindow = await workspace.read(session, 'large.txt', {
+      lineStart: 101,
+      lineEnd: 901,
+    })
+    expect(oversizedWindow.content.split('\n')).toHaveLength(800)
+    expect(oversizedWindow.content.endsWith('第900行')).toBe(true)
+    expect(oversizedWindow.lineEnd).toBe(900)
+    expect(oversizedWindow.truncated).toBe(true)
+
+    const oversizedTail = await workspace.read(session, 'large.txt', { tailLines: 801 })
+    expect(oversizedTail.content.split('\n')).toHaveLength(800)
+    expect(oversizedTail.lineStart).toBe(201)
+    expect(oversizedTail.lineEnd).toBe(1_000)
+  })
+
   it('Glob 支持双星号并限制在工作区', async () => {
     const workspace = new VirtualWorkspace()
     await workspace.atomicWrite(path.join(root, 'src', 'a.ts'), 'export const a = 1')
