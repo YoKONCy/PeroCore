@@ -40,6 +40,7 @@ CREATE TABLE `ai_model_configs` (
 	`temperature` real,
 	`top_p` real,
 	`max_tokens` integer,
+	`context_window_tokens` integer,
 	`reasoning_effort` text,
 	`return_native_reasoning` integer DEFAULT false,
 	`wire_api` text DEFAULT 'chat_completions',

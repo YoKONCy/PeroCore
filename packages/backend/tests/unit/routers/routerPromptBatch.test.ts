@@ -198,6 +198,12 @@ describe('SystemRouter', () => {
         openPath: vi.fn(() => Promise.resolve()),
       },
       gatewayHub: { connectedCount: 2 },
+      nodeRegistry: {
+        listNodes: vi.fn(() => []),
+        listSessions: vi.fn(() => []),
+        listInputSeats: vi.fn(() => []),
+      },
+      capabilityBridge: { diagnostics: vi.fn(() => ({ running: true })) },
       storeRegistry: { countExistingNodes: vi.fn(() => 27) },
     }
     const router = createSystemRouter(ctx as never)
@@ -219,6 +225,12 @@ describe('SystemRouter', () => {
         storage: { sqliteSizeMB: 3, triviumSizeMB: 4, triviumNodeCount: 27 },
         agents: { total: 2, enabled: 1, activeId: 'pero' },
         gateway: { connectedNodes: 2 },
+        multiNode: {
+          nodes: [],
+          sessions: [],
+          inputSeats: [],
+          capabilityTransport: { running: true },
+        },
       },
     })
     expect(await readJson(open)).toEqual({ code: 'OK', message: '已请求打开' })

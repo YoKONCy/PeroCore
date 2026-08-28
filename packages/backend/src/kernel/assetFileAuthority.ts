@@ -140,6 +140,16 @@ export class AssetFileAuthority {
     return { asset: record.asset, storagePath: record.storagePath }
   }
 
+  consumeBytes(
+    handleId: KernelFileHandleId,
+    subjectId: string,
+    operation: KernelFileOperation,
+    executionId?: KernelExecutionId,
+  ): { asset: KernelAssetObject; bytes: Buffer } {
+    const { asset, storagePath } = this.consume(handleId, subjectId, operation, executionId)
+    return { asset, bytes: readFileSync(storagePath) }
+  }
+
   revoke(handleId: KernelFileHandleId): boolean {
     const handle = this.handles.get(handleId)
     if (!handle || handle.revokedAt) return false

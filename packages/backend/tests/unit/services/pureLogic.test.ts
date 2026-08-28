@@ -39,6 +39,7 @@ describe('记忆运行配置', () => {
     const config = await loadMemoryRuntimeConfig({ get })
 
     expect(config).toEqual({
+      workContextExpirationPairs: 5,
       channels: {
         desktop: { contextPairs: 12, enableAutoRag: false, retrievalLimit: 8 },
         group: { contextPairs: 18, enableAutoRag: true, retrievalLimit: 5 },

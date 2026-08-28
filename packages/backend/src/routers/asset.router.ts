@@ -14,7 +14,6 @@
  */
 
 import { Hono } from 'hono'
-import { readFile } from 'node:fs/promises'
 import type { KernelFileHandleId } from '@infos/shared'
 import type { AppContext } from '../container'
 import type { AssetType, AssetSource } from '../core/assetRegistry'
@@ -25,12 +24,11 @@ export function createAssetRouter(ctx: AppContext) {
 
   router.get('/audio/:handleId', async (c) => {
     const subjectId = c.req.query('subject') ?? ''
-    const { asset, storagePath } = ctx.assetFileAuthority.consume(
+    const { asset, bytes } = ctx.assetFileAuthority.consumeBytes(
       c.req.param('handleId') as KernelFileHandleId,
       subjectId,
       'read',
     )
-    const bytes = await readFile(storagePath)
     return new Response(bytes, {
       headers: {
         'Content-Type': asset.mimeType,

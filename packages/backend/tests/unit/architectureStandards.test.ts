@@ -1,20 +1,51 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import path from 'node:path'
-import { globSync } from 'tinyglobby'
 import { describe, expect, it } from 'vitest'
 import { CODE_MESSAGES } from '@infos/shared'
 
 const root = process.cwd()
 
+function walk(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    if (entry.isDirectory() && ['node_modules', 'dist'].includes(entry.name)) return []
+    const target = path.join(directory, entry.name)
+    if (entry.isDirectory()) return walk(target)
+    return entry.isFile() ? [target] : []
+  })
+}
+
+function globPattern(pattern: string): RegExp {
+  let source = '^'
+  for (let index = 0; index < pattern.length; index += 1) {
+    const character = pattern[index]!
+    if (character === '*' && pattern[index + 1] === '*') {
+      if (pattern[index + 2] === '/') {
+        source += '(?:.*/)?'
+        index += 2
+      } else {
+        source += '.*'
+        index += 1
+      }
+    } else if (character === '*') {
+      source += '[^/]*'
+    } else {
+      source += /[\\^$+?.()|{}[\]]/.test(character) ? `\\${character}` : character
+    }
+  }
+  return new RegExp(`${source}$`)
+}
+
 function sources(patterns: string[]): Array<{ file: string; content: string }> {
-  return globSync(patterns, {
-    cwd: root,
-    absolute: true,
-    ignore: ['**/node_modules/**', '**/dist/**'],
-  }).map((file) => ({
-    file,
-    content: readFileSync(file, 'utf8'),
-  }))
+  const matchers = patterns.map(globPattern)
+  return walk(path.join(root, 'packages'))
+    .filter((file) => {
+      const relative = path.relative(root, file).replaceAll('\\', '/')
+      return matchers.some((matcher) => matcher.test(relative))
+    })
+    .map((file) => ({
+      file,
+      content: readFileSync(file, 'utf8'),
+    }))
 }
 
 describe('软件工程架构静态门禁', () => {

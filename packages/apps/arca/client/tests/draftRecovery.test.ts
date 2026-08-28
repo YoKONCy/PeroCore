@@ -1,4 +1,4 @@
-// @vitest-environment jsdom
+// @vitest-environment happy-dom
 import { afterEach, describe, expect, it } from 'vitest'
 import type { DocumentId, DocumentNodeId, RevisionId } from '@infos/document-engine'
 import { DocumentDraftStore } from '../src/services/draftStore'

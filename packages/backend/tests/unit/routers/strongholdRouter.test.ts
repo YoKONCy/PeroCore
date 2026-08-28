@@ -103,11 +103,11 @@ function createCtx() {
       createThread: vi.fn((input: Record<string, unknown>) => Promise.resolve(input)),
       saveMessagePair: vi.fn(() => Promise.resolve({ userMessage: {}, assistantMessage: {} })),
     },
-    memoryTaskRunner: {
-      triggerScorer: vi.fn(() => Promise.resolve()),
-    },
     contextCompiler: {
       compile: vi.fn(() => Promise.resolve({ messages: [{ role: 'system', content: '人设' }] })),
+    },
+    configRepo: {
+      get: vi.fn(() => Promise.resolve(null)),
     },
     strongholdTurnService: undefined as unknown as StrongholdTurnService,
     gatewayHub: {
@@ -125,8 +125,7 @@ function createTurnService(ctx: ReturnType<typeof createCtx>) {
     ctx.threadService as never,
     ctx.contextCompiler as never,
     ctx.agentService as never,
-    ctx.memoryTaskRunner as never,
-    undefined as never,
+    ctx.configRepo as never,
     ctx.gatewayHub as never,
     ctx.agentManager as never,
   )
@@ -653,7 +652,9 @@ describe('StrongholdRouter', () => {
       }),
       headers: { 'content-type': 'application/json' },
     })
-    await new Promise((resolve) => setTimeout(resolve, 20))
+    await vi.waitFor(() => {
+      expect(order).toHaveLength(2)
+    })
 
     expect(response.status).toBe(201)
     expect(order).toEqual(['nana', 'pero'])
@@ -704,7 +705,9 @@ describe('StrongholdRouter', () => {
       body: JSON.stringify({ content: '你们怎么看', senderId: 'user', role: 'user' }),
       headers: { 'content-type': 'application/json' },
     })
-    await new Promise((resolve) => setTimeout(resolve, 20))
+    await vi.waitFor(() => {
+      expect(runs).toHaveLength(2)
+    })
 
     expect(runs.map((run) => run.agentId)).toEqual(['pero', 'nana'])
     expect(runs[1]?.disabledTools).toContain('stronghold_summon_agents')
@@ -728,7 +731,9 @@ describe('StrongholdRouter', () => {
       }),
       headers: { 'content-type': 'application/json' },
     })
-    await new Promise((resolve) => setTimeout(resolve, 10))
+    await vi.waitFor(() => {
+      expect(ctx.agentService.chatStreamWithCompiledMessages).toHaveBeenCalledTimes(1)
+    })
 
     expect(response.status).toBe(201)
     const body = await readJson(response)
@@ -757,16 +762,16 @@ describe('StrongholdRouter', () => {
       body: JSON.stringify({ content: '请回复我', senderId: 'user', role: 'user' }),
       headers: { 'content-type': 'application/json' },
     })
-    await new Promise((resolve) => setTimeout(resolve, 10))
-
-    expect(ctx.groupChatService.sendMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        roomId: 'room-1',
-        senderId: 'system',
-        role: 'system',
-        content: expect.stringContaining('模型暂不可用'),
-      }),
-    )
+    await vi.waitFor(() => {
+      expect(ctx.groupChatService.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          roomId: 'room-1',
+          senderId: 'system',
+          role: 'system',
+          content: expect.stringContaining('模型暂不可用'),
+        }),
+      )
+    })
   })
 
   it('应级联删除同一据点对话轮次的全部消息', async () => {
@@ -831,11 +836,6 @@ describe('StrongholdRouter', () => {
         userContent: '历史',
         assistantContent: '猫猫回复',
       }),
-    )
-    expect(ctx.memoryTaskRunner.triggerScorer).toHaveBeenCalledWith(
-      'stronghold_room-1_pero',
-      'pero',
-      'group',
     )
     expect(ctx.agentService.chatStreamWithCompiledMessages).toHaveBeenCalledWith(
       expect.objectContaining({
