@@ -99,9 +99,9 @@ importers:
       '@infos/shared':
         specifier: workspace:*
         version: link:../packages/shared
-      '@nut-tree/nut-js':
-        specifier: ^4.2.0
-        version: 4.2.0(encoding@0.1.13)
+      '@nut-tree-fork/nut-js':
+        specifier: ^4.2.6
+        version: 4.2.6(encoding@0.1.13)
       adm-zip:
         specifier: ^0.5.17
         version: 0.5.17
@@ -1808,50 +1808,46 @@ packages:
     resolution: {integrity: sha512-/xGlezI6xfGO9NwuJlnwz/K14qD1kCSAGtacBHnGzeAIuJGazcp45KP5NuyARXoKb7cwulAGWVsbeSxdG/cb0Q==}
     engines: {node: ^18.17.0 || >=20.5.0}
 
-  '@nut-tree/default-clipboard-provider@4.2.0':
-    resolution: {integrity: sha512-O9EXd7F+iuHcm1XaIT1wNa34WYQDxriKYwUhyofvJpl0fJ0ou3u+nxHITmsr1zoBoERaOhG+PT3MSSNsQ+rTug==}
-    peerDependencies:
-      '@nut-tree/nut-js': ^3
+  '@nut-tree-fork/default-clipboard-provider@4.2.6':
+    resolution: {integrity: sha512-Hzqj57rheIMGtsS4zK4//kOhaX5FxMluOiz+4TVaHXx+idZS/bPhZwd8e6o1w1GT0PVJOUIP+4CdUe//k5VRig==}
 
-  '@nut-tree/libnut-darwin@2.7.1':
-    resolution: {integrity: sha512-yJKwAeWuORi+EN4tWkJj/9L5f/MO6FT7ida0CSeN8AT4KppCAsXdkLcQjirFTuWrCVvbkizVTSE3d/J7rVi0kw==}
+  '@nut-tree-fork/libnut-darwin@2.7.5':
+    resolution: {integrity: sha512-LbqtPtMPTJUcg4XoPP2jsU1wc8flBcGyKTerKsIfK9cD7nBHROnO0QksbrsbSWEpLym8T8fRtuU7XEY83l6Z2Q==}
     engines: {node: '>=10.15.3'}
     cpu: [x64, arm64]
     os: [darwin, linux, win32]
 
-  '@nut-tree/libnut-linux@2.7.1':
-    resolution: {integrity: sha512-ZAGoKL1ugy/2fibseOGhyZkthCdBRuTqf2fgHZgum0DQQAZCCNis+mySiTj4p+Xqeowe5t0L0Pn279embjz4bw==}
+  '@nut-tree-fork/libnut-linux@2.7.5':
+    resolution: {integrity: sha512-uxaXEcRKnFObAljsoR6tLOBUU1dJ2sctloG6gFgCBGN7+k6Jdv6jZfOuNjd/fpdq2C5WPMm0rtn9EE7h5J3Jcg==}
     engines: {node: '>=10.15.3'}
     cpu: [x64, arm64]
     os: [darwin, linux, win32]
 
-  '@nut-tree/libnut-win32@2.7.1':
-    resolution: {integrity: sha512-QmaQt1U7jXNjhqb10x6Ziijbhvqn2o50WgADZMM7mADVc5iDf3Xhd9yA1TmiGbgfqxkRPq9HpuInoYBz0U234g==}
+  '@nut-tree-fork/libnut-win32@2.7.5':
+    resolution: {integrity: sha512-yqC87zvmFcDPwFrRU40DYhN0xmEVM3aSkOuyF0IX+y1x+HWSu/i0PNklATpPBhGid3QVb/TOHuVoaraMrUFCNw==}
     engines: {node: '>=10.15.3'}
     cpu: [x64, arm64]
     os: [darwin, linux, win32]
 
-  '@nut-tree/libnut@4.2.0':
-    resolution: {integrity: sha512-rXrxxFs9TBAIsOHhO699y58J7kYvln/8dlq/BIPc9LcNEVthf/5Yp64acSTaZ/sjlWNboDxIBFHTWapxWHTB6w==}
+  '@nut-tree-fork/libnut@4.2.6':
+    resolution: {integrity: sha512-2FCiTBokMGrMl4eL/trEIO+mtpkXpdPHoVKdTBmW8UBIbhCbrCKmnXb2skWGfVs+U3q7o5EYDjVTNUYaUWbaxQ==}
     engines: {node: '>=10.15.3'}
-    peerDependencies:
-      '@nut-tree/nut-js': ^3
 
-  '@nut-tree/node-mac-permissions@2.2.1':
-    resolution: {integrity: sha512-yoijwCqt2yS9UFTv7THGUwZgy2D2TorN703QpYNOergbTJ6vEmeG379pIZDfBuvf56n24RMzKJVoSqr9WIq/Yw==}
+  '@nut-tree-fork/node-mac-permissions@2.2.1':
+    resolution: {integrity: sha512-iSfOTDiBZ7VDa17PoQje5rUaZSvSAaq+XEyXCmhPuQwV5XuNU02Grv6oFhsdpz89w7+UvB/8KX/cX5IYQ5o2Bw==}
     os: [darwin]
 
-  '@nut-tree/nut-js@4.2.0':
-    resolution: {integrity: sha512-/xXsE7Z6+lOiltZgNWy6uPgiReSabgEYiTJFG2VqA9kRELtoiTyLM8ySds78zpPdTYYaL/Usi05+u54pIXnqQA==}
+  '@nut-tree-fork/nut-js@4.2.6':
+    resolution: {integrity: sha512-aI/WCX7gE1HFGPH3EZP/UWqpNMM1NMoM/EkXqp7pKMgXFCi8e5+o5p+jd/QOYpmALv9bQg7+s69nI7FONbMqDg==}
     engines: {node: '>=16'}
     cpu: [x64, arm64]
     os: [linux, darwin, win32]
 
-  '@nut-tree/provider-interfaces@4.2.0':
-    resolution: {integrity: sha512-hx5Lc9RwkWmP92BxBc+SCL3/hhR4a95xj5QP2xhsvrgnGyUceRGgcr47kJRx8GL8qmrm/e9on0cZAG2SfSD30A==}
+  '@nut-tree-fork/provider-interfaces@4.2.6':
+    resolution: {integrity: sha512-brtRegDkLSV0sa5DUAigjWf6hCoamBNPb/hKK9AQlW+j3BxQ/8djaEdEB2cihqUh1ZjEtgPyXRqpCWSdKCX68A==}
 
-  '@nut-tree/shared@4.2.0':
-    resolution: {integrity: sha512-XAM/Ou2OY+Bp36HBMr31E50jgWZZuImlJQJcevmuXIq+x5ssf76uEewyIT2DyxqT1KUUFY/d+JD6SoY7Ox4zlg==}
+  '@nut-tree-fork/shared@4.2.6':
+    resolution: {integrity: sha512-xZaa0YtJt/DDDq/i1vZkabjq8HOWzfhXieMai61cMbYD11J6VhAfhV23ZtQEM02WG7nc2LKjl4UwRnQCteikwA==}
 
   '@one-ini/wasm@0.1.1':
     resolution: {integrity: sha512-XuySG1E38YScSJoMlqovLru4KTUNSjgVTIjyh7qMX6aNN5HY5Ct5LhRJdxO79JtTzKfzV/bnWpz+zquYrISsvw==}
@@ -7526,62 +7522,60 @@ snapshots:
     dependencies:
       semver: 7.7.4
 
-  '@nut-tree/default-clipboard-provider@4.2.0(@nut-tree/nut-js@4.2.0(encoding@0.1.13))':
+  '@nut-tree-fork/default-clipboard-provider@4.2.6':
     dependencies:
-      '@nut-tree/nut-js': 4.2.0(encoding@0.1.13)
       clipboardy: 2.3.0
 
-  '@nut-tree/libnut-darwin@2.7.1':
+  '@nut-tree-fork/libnut-darwin@2.7.5':
     dependencies:
       bindings: 1.5.0
     optionalDependencies:
-      '@nut-tree/node-mac-permissions': 2.2.1
+      '@nut-tree-fork/node-mac-permissions': 2.2.1
 
-  '@nut-tree/libnut-linux@2.7.1':
+  '@nut-tree-fork/libnut-linux@2.7.5':
     dependencies:
       bindings: 1.5.0
     optionalDependencies:
-      '@nut-tree/node-mac-permissions': 2.2.1
+      '@nut-tree-fork/node-mac-permissions': 2.2.1
 
-  '@nut-tree/libnut-win32@2.7.1':
+  '@nut-tree-fork/libnut-win32@2.7.5':
     dependencies:
       bindings: 1.5.0
     optionalDependencies:
-      '@nut-tree/node-mac-permissions': 2.2.1
+      '@nut-tree-fork/node-mac-permissions': 2.2.1
 
-  '@nut-tree/libnut@4.2.0(@nut-tree/nut-js@4.2.0(encoding@0.1.13))':
+  '@nut-tree-fork/libnut@4.2.6':
     dependencies:
-      '@nut-tree/libnut-darwin': 2.7.1
-      '@nut-tree/libnut-linux': 2.7.1
-      '@nut-tree/libnut-win32': 2.7.1
-      '@nut-tree/nut-js': 4.2.0(encoding@0.1.13)
+      '@nut-tree-fork/libnut-darwin': 2.7.5
+      '@nut-tree-fork/libnut-linux': 2.7.5
+      '@nut-tree-fork/libnut-win32': 2.7.5
 
-  '@nut-tree/node-mac-permissions@2.2.1':
+  '@nut-tree-fork/node-mac-permissions@2.2.1':
     dependencies:
       bindings: 1.5.0
       node-addon-api: 5.0.0
     optional: true
 
-  '@nut-tree/nut-js@4.2.0(encoding@0.1.13)':
+  '@nut-tree-fork/nut-js@4.2.6(encoding@0.1.13)':
     dependencies:
-      '@nut-tree/default-clipboard-provider': 4.2.0(@nut-tree/nut-js@4.2.0(encoding@0.1.13))
-      '@nut-tree/libnut': 4.2.0(@nut-tree/nut-js@4.2.0(encoding@0.1.13))
-      '@nut-tree/provider-interfaces': 4.2.0(encoding@0.1.13)
-      '@nut-tree/shared': 4.2.0(encoding@0.1.13)
+      '@nut-tree-fork/default-clipboard-provider': 4.2.6
+      '@nut-tree-fork/libnut': 4.2.6
+      '@nut-tree-fork/provider-interfaces': 4.2.6(encoding@0.1.13)
+      '@nut-tree-fork/shared': 4.2.6(encoding@0.1.13)
       jimp: 0.22.10(encoding@0.1.13)
       node-abort-controller: 3.1.1
     transitivePeerDependencies:
       - debug
       - encoding
 
-  '@nut-tree/provider-interfaces@4.2.0(encoding@0.1.13)':
+  '@nut-tree-fork/provider-interfaces@4.2.6(encoding@0.1.13)':
     dependencies:
-      '@nut-tree/shared': 4.2.0(encoding@0.1.13)
+      '@nut-tree-fork/shared': 4.2.6(encoding@0.1.13)
     transitivePeerDependencies:
       - debug
       - encoding
 
-  '@nut-tree/shared@4.2.0(encoding@0.1.13)':
+  '@nut-tree-fork/shared@4.2.6(encoding@0.1.13)':
     dependencies:
       jimp: 0.22.10(encoding@0.1.13)
       node-abort-controller: 3.1.1

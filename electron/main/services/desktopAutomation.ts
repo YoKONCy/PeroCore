@@ -33,7 +33,8 @@ async function loadRuntime(): Promise<NutModule> {
   if (runtime) return runtime
   if (runtime === null) throw new Error('DESKTOP_AUTOMATION_UNAVAILABLE: nut-js无法加载')
   try {
-    runtime = (await import('@nut-tree/nut-js')) as unknown as NutModule
+    const packageName = '@nut-tree-fork/nut-js'
+    runtime = (await import(packageName)) as unknown as NutModule
     logger.info('DesktopAutomation', 'nut-js已在 Electron能力进程加载')
     return runtime
   } catch (error) {

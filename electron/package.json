@@ -10,7 +10,7 @@
   "dependencies": {
     "@infos/avatar-assets": "workspace:*",
     "@infos/shared": "workspace:*",
-    "@nut-tree/nut-js": "^4.2.0",
+    "@nut-tree-fork/nut-js": "^4.2.6",
     "adm-zip": "^0.5.17",
     "ws": "^8.20.0"
   },

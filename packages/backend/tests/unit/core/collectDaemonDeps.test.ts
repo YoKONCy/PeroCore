@@ -10,14 +10,14 @@ describe('Daemon 发行依赖分类', () => {
           xmlbuilder: '11.0.1',
         },
         optionalDependencies: {
-          '@nut-tree/nut-js': '^4.2.0',
+          '@nut-tree-fork/nut-js': '^4.2.6',
           'node-pty': '^1.1.0',
         },
       }),
     ).toEqual([
       { name: 'hono', optional: false },
       { name: 'xmlbuilder', optional: false },
-      { name: '@nut-tree/nut-js', optional: true },
+      { name: '@nut-tree-fork/nut-js', optional: true },
       { name: 'node-pty', optional: true },
     ])
   })
