@@ -1370,6 +1370,9 @@ export async function createAppContext(config: AppConfig): Promise<AppContext> {
     imageUnderstandingService,
     executionRuntime,
     eventNoteDraftCommitter,
+    flowStateService,
+    getAgentModelConfig: modelRoles.bindAgent(),
+    getModelConfigById: (id) => modelRoles.resolveById(id),
     retrievalFeedback: eventMemoryService,
   })
   appManager.setHostCommunicator(async (request) => {

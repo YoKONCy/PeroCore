@@ -522,6 +522,19 @@ export function createChatRouter(ctx: AppContext) {
     return c.json({ code: 'OK', message: '工作上下文已清空', data })
   })
 
+  router.post('/threads/:id/token-budget-preview', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as {
+      agentId?: string
+      content?: string
+    }
+    const data = await ctx.conversationTurnService.previewTokenBudget({
+      threadId: c.req.param('id'),
+      agentId: body.agentId,
+      content: body.content,
+    })
+    return c.json({ code: 'OK', message: '预算计算完成', data })
+  })
+
   /** GET /threads/:id/tools — 仅返回当前 Channel 合法且可由会话控制的工具。 */
   router.get('/threads/:id/tools', async (c) => {
     const { thread, tools } = await resolveThreadTools(c.req.param('id'))

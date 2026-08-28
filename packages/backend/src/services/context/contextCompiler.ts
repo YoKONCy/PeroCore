@@ -72,6 +72,34 @@ export interface LlmMessage {
   content: string | ContentPart[] | null
 }
 
+/** 超出模型输入窗口时，仅按时间顺序移除最久远的工作上下文段。 */
+export function trimWorkContextToFit(
+  messages: LlmMessage[],
+  segments: string[],
+  renderedContext: string,
+  maxInputTokens: number,
+): LlmMessage[] {
+  let result = messages
+  let currentContext = renderedContext
+  while (
+    maxInputTokens > 0 &&
+    tokenCounter.countMessages(result) > maxInputTokens &&
+    segments.length > 0
+  ) {
+    segments.shift()
+    const nextContext = segments.join('\n\n') || '暂无工作上下文。'
+    result = result.map((message) => ({
+      ...message,
+      content:
+        typeof message.content === 'string'
+          ? message.content.replace(currentContext, nextContext)
+          : message.content,
+    }))
+    currentContext = nextContext
+  }
+  return result
+}
+
 /** Channel 上下文策略 */
 export interface ChannelPolicy {
   /** 最近消息窗口大小 */
@@ -246,6 +274,8 @@ const STATIC_ENV_INFO = collectEnvironmentInfo()
 export interface ContextCompileOptions {
   retrievalQuery?: string
   appendThreadMessages?: boolean
+  /** 模型可用输入窗口；不足时优先逐轮移除最久远的工作上下文。 */
+  maxInputTokens?: number
   /** 当前触发轮次；该pair只保留user原生API消息，不进入XML历史。 */
   currentPairId?: string
   /** 请求级关闭跨Thread连续性；用于已有独立视角状态机的场景。 */
@@ -441,7 +471,8 @@ export class ContextCompiler {
 
     const flowState = await this.flowStateService.get(threadId, agentId)
     const draftFlowInstructions = this.flowStateService.formatForPrompt(flowState)
-    const workContextInstructions = this.flowStateService.formatWorkContextForPrompt(flowState)
+    const workContextSegments = [...flowState.workContextSegments]
+    let workContextInstructions = workContextSegments.join('\n\n') || '暂无工作上下文。'
 
     // ── 9. 组装 vars 对象，调用 MdpEngine 渲染 slots 模板 ──
     const vars: Record<string, unknown> = {
@@ -540,7 +571,7 @@ export class ContextCompiler {
     const regionMessages: LlmMessage[] = regionCompilation.selected
       .filter((region) => region.delivery === 'system')
       .map((region) => ({ role: 'system', content: region.content }))
-    const llmMessages = [
+    let llmMessages = [
       ...this.assembleMessages({
         slotMessages: validSlotMessages,
         messages: [],
@@ -550,6 +581,13 @@ export class ContextCompiler {
         ? []
         : this.assembleMessages({ slotMessages: [], messages: [currentMessage] })),
     ]
+    const maxInputTokens = Math.max(0, options.maxInputTokens ?? 0)
+    llmMessages = trimWorkContextToFit(
+      llmMessages,
+      workContextSegments,
+      workContextInstructions,
+      maxInputTokens,
+    )
 
     // ── 13. 生成清单 ──
     const manifest: ContextManifest = {

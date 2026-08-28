@@ -32,7 +32,10 @@ describe('SocialScheduler 确定性门控', () => {
       review,
       retry: vi.fn(),
     }
-    const scheduler = new SocialScheduler({ sessionManager: manager as never })
+    const scheduler = new SocialScheduler(
+      { sessionManager: manager as never },
+      { nightSilenceEnabled: false },
+    )
     ;(scheduler as unknown as { nextGroupReviewAt: number }).nextGroupReviewAt = 0
 
     await (scheduler as unknown as { scan: () => Promise<void> }).scan()
@@ -49,7 +52,10 @@ describe('SocialScheduler 确定性门控', () => {
       review: vi.fn().mockResolvedValue(undefined),
       retry: vi.fn(),
     }
-    const scheduler = new SocialScheduler({ sessionManager: manager as never })
+    const scheduler = new SocialScheduler(
+      { sessionManager: manager as never },
+      { nightSilenceEnabled: false },
+    )
 
     await (scheduler as unknown as { scan: () => Promise<void> }).scan()
 
@@ -64,7 +70,10 @@ describe('SocialScheduler 确定性门控', () => {
       review: vi.fn(),
       retry: vi.fn().mockResolvedValue(undefined),
     }
-    const scheduler = new SocialScheduler({ sessionManager: manager as never })
+    const scheduler = new SocialScheduler(
+      { sessionManager: manager as never },
+      { nightSilenceEnabled: false },
+    )
 
     await (scheduler as unknown as { scan: () => Promise<void> }).scan()
 

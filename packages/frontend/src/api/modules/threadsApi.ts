@@ -121,9 +121,17 @@ export interface FlowStateInfo {
   currentGoal: string
   privateFacts: string
   workContext: string
+  workContextSegments: string[]
   workContextRemainingPairs: number
   revision: number
   updatedAt: string | null
+}
+
+export interface TokenBudgetPreview {
+  usedTokens: number
+  contextWindowTokens: number
+  maxInputTokens: number
+  modelId: string
 }
 
 /** 创建 Thread 请求体 */
@@ -203,6 +211,12 @@ export const threadsApi = {
       `/chat/threads/${encodeURIComponent(threadId)}/work-context${query}`,
     )
   },
+
+  previewTokenBudget: (threadId: string, input: { agentId?: string; content?: string }) =>
+    apiClient.post<TokenBudgetPreview>(
+      `/chat/threads/${encodeURIComponent(threadId)}/token-budget-preview`,
+      input,
+    ),
 
   /** 获取当前 Channel 可配置工具及本会话启用状态。 */
   getTools: (threadId: string) =>

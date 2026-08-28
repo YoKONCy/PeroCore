@@ -232,6 +232,18 @@ CREATE TABLE `flow_states` (
 --> statement-breakpoint
 CREATE UNIQUE INDEX `idx_flow_states_thread_agent` ON `flow_states` (`thread_id`,`agent_id`);--> statement-breakpoint
 CREATE INDEX `idx_flow_states_thread_id` ON `flow_states` (`thread_id`);--> statement-breakpoint
+CREATE TABLE `work_context_entries` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`thread_id` text NOT NULL,
+	`agent_id` text NOT NULL,
+	`pair_id` text NOT NULL,
+	`pair_count` integer NOT NULL,
+	`content` text NOT NULL,
+	`created_at` text DEFAULT (datetime('now', 'localtime')) NOT NULL
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `idx_work_context_entries_pair_agent` ON `work_context_entries` (`thread_id`,`agent_id`,`pair_id`);--> statement-breakpoint
+CREATE INDEX `idx_work_context_entries_scope` ON `work_context_entries` (`thread_id`,`agent_id`,`pair_count`);--> statement-breakpoint
 CREATE TABLE `group_chat_members` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`room_id` text NOT NULL,

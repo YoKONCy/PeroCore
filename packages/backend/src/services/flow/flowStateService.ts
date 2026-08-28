@@ -16,6 +16,8 @@ export interface FlowStateInfo {
   currentGoal: string
   privateFacts: string
   workContext: string
+  /** 按生命周期从旧到新排列，供模型窗口不足时逐轮裁剪。 */
+  workContextSegments: string[]
   workContextRemainingPairs: number
   revision: number
   updatedAt: string | null
@@ -59,7 +61,7 @@ export class FlowStateService {
     return this.toInfo(row)
   }
 
-  /** Agent 自我总结并整体覆盖工作上下文，同时从当前完整对话轮重新计数。 */
+  /** Agent 手动压缩全部工作上下文，并从当前对话轮重新计时。 */
   async updateWorkContext(input: {
     threadId: string
     agentId: string
@@ -69,6 +71,7 @@ export class FlowStateService {
     await this.assertScope(input.threadId, input.agentId)
     const before = await this.repo.get(input.threadId, input.agentId)
     const thread = await this.threadService.getThread(input.threadId)
+    await this.repo.clearWorkContextEntries(input.threadId, input.agentId)
     const row = await this.repo.save({
       threadId: input.threadId,
       agentId: input.agentId,
@@ -76,9 +79,38 @@ export class FlowStateService {
       currentGoal: before?.currentGoal ?? '',
       privateFacts: before?.privateFacts ?? '',
       workContext: this.normalize(input.content),
-      workContextUpdatedAtPairCount: thread?.pairCount ?? 0,
+      workContextUpdatedAtPairCount: (thread?.pairCount ?? 0) + (input.pairId ? 1 : 0),
     })
     return this.toInfo(row)
+  }
+
+  /** 将一个完整 ReAct 对话轮的过程文本自动追加到工作上下文。 */
+  async appendAutomaticWorkContext(input: {
+    threadId: string
+    agentId: string
+    pairId: string
+    content: string
+  }): Promise<void> {
+    await this.assertScope(input.threadId, input.agentId)
+    const content = this.normalize(input.content)
+    if (!content) return
+    const thread = await this.threadService.getThread(input.threadId)
+    const before = await this.repo.get(input.threadId, input.agentId)
+    if (!before) {
+      await this.repo.save({
+        threadId: input.threadId,
+        agentId: input.agentId,
+        currentGoal: '',
+        privateFacts: '',
+      })
+    }
+    await this.repo.appendWorkContextEntry({
+      threadId: input.threadId,
+      agentId: input.agentId,
+      pairId: input.pairId,
+      pairCount: thread?.pairCount ?? 0,
+      content,
+    })
   }
 
   async clearWorkContext(
@@ -86,6 +118,7 @@ export class FlowStateService {
     agentId: string,
     pairId?: string | null,
   ): Promise<FlowStateInfo> {
+    await this.repo.clearWorkContextEntries(threadId, agentId)
     return this.updateWorkContext({ threadId, agentId, pairId, content: '' })
   }
 
@@ -167,6 +200,7 @@ export class FlowStateService {
       currentGoal: '',
       privateFacts: '',
       workContext: '',
+      workContextSegments: [],
       workContextRemainingPairs: 0,
       revision: 0,
       updatedAt: null,
@@ -174,7 +208,11 @@ export class FlowStateService {
   }
 
   private toInfoWithoutExpiration(row: Parameters<FlowStateService['toInfo']>[0]): FlowStateInfo {
-    return { ...row, workContextRemainingPairs: 0 }
+    return {
+      ...row,
+      workContextSegments: row.workContext ? [row.workContext] : [],
+      workContextRemainingPairs: 0,
+    }
   }
 
   private async toInfo(row: {
@@ -189,10 +227,20 @@ export class FlowStateService {
   }): Promise<FlowStateInfo> {
     const thread = await this.threadService.getThread(row.threadId)
     const expiration = (await loadMemoryRuntimeConfig(this.configRepo)).workContextExpirationPairs
-    const elapsed = Math.max(0, (thread?.pairCount ?? 0) - row.workContextUpdatedAtPairCount)
-    const remaining = Math.max(0, expiration - elapsed)
-    if (row.workContext && remaining === 0) {
-      const cleared = await this.repo.save({
+    const currentPairCount = thread?.pairCount ?? 0
+    const minimumPairCount = Math.max(0, currentPairCount - expiration)
+    await this.repo.deleteExpiredWorkContextEntries(row.threadId, row.agentId, minimumPairCount)
+    const entries = await this.repo.listWorkContextEntries(
+      row.threadId,
+      row.agentId,
+      minimumPairCount,
+    )
+    const summaryElapsed = Math.max(0, currentPairCount - row.workContextUpdatedAtPairCount)
+    const summaryRemaining = Math.max(0, expiration - summaryElapsed)
+    let summary = row.workContext
+    let currentRow = row
+    if (summary && summaryRemaining === 0) {
+      currentRow = await this.repo.save({
         threadId: row.threadId,
         agentId: row.agentId,
         currentGoal: row.currentGoal,
@@ -200,8 +248,21 @@ export class FlowStateService {
         workContext: '',
         workContextUpdatedAtPairCount: 0,
       })
-      return { ...cleared, workContext: '', workContextRemainingPairs: 0 }
+      summary = ''
     }
-    return { ...row, workContextRemainingPairs: row.workContext ? remaining : 0 }
+    const automatic = entries.map((entry) => entry.content).filter(Boolean)
+    const workContextSegments = [summary, ...automatic].filter(Boolean)
+    const workContext = workContextSegments.join('\n\n')
+    const automaticRemaining = entries.length
+      ? Math.max(0, expiration - (currentPairCount - entries[entries.length - 1]!.pairCount))
+      : 0
+    return {
+      ...currentRow,
+      workContext,
+      workContextSegments,
+      workContextRemainingPairs: workContext
+        ? Math.max(summary ? summaryRemaining : 0, automaticRemaining)
+        : 0,
+    }
   }
 }

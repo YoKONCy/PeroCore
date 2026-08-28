@@ -290,6 +290,84 @@ describe('ConversationTurnService 初始提示词快照', () => {
     expect(feedback).toHaveBeenCalledWith(result.pairId, '已使用记忆')
   })
 
+  it('持久化回复后自动收集 ReAct 过程与工具文本，但排除最终回复', async () => {
+    const appendAutomaticWorkContext = vi.fn().mockResolvedValue(undefined)
+    const service = new ConversationTurnService({
+      threadService: {
+        getThread: vi.fn().mockResolvedValue({
+          id: 'thread-1',
+          agentId: 'pero',
+          channel: 'desktop',
+          disabledTools: [],
+        }),
+        appendUserMessage: vi.fn().mockResolvedValue({ id: 1 }),
+        appendAssistantMessage: vi.fn().mockResolvedValue({ id: 2 }),
+      },
+      contextCompiler: {
+        compile: vi.fn().mockResolvedValue({
+          messages: [{ role: 'user', content: '检查项目' }],
+          manifest: { disabledTools: [] },
+        }),
+      },
+      agentService: {
+        chatWithCompiledMessages: vi.fn().mockImplementation(async (params) => {
+          params.onToolCalls?.([
+            {
+              name: 'list_directory',
+              args: { path: '.' },
+              result: 'src\npackage.json',
+              durationMs: 1,
+              isError: false,
+              callId: 'call-1',
+            },
+          ])
+          params.onContentBlocks?.([
+            {
+              blockId: 'progress',
+              sequence: 1,
+              kind: 'narration',
+              turn: 1,
+              phase: 'progress',
+              content: '我先检查目录。',
+            },
+            {
+              blockId: 'tool-call-1',
+              sequence: 2,
+              kind: 'tool',
+              turn: 1,
+              callId: 'call-1',
+              name: 'list_directory',
+              args: '{}',
+            },
+            {
+              blockId: 'final',
+              sequence: 3,
+              kind: 'narration',
+              turn: 2,
+              phase: 'final',
+              content: '检查完成。',
+            },
+          ])
+          return '检查完成。'
+        }),
+      },
+      attachmentService: { validateForBinding: vi.fn().mockResolvedValue([]) },
+      imageUnderstandingService: { transcribe: vi.fn() },
+      flowStateService: { appendAutomaticWorkContext },
+    } as never)
+
+    const result = await service.executeTurn({ threadId: 'thread-1', content: '检查项目' })
+
+    expect(appendAutomaticWorkContext).toHaveBeenCalledWith({
+      threadId: 'thread-1',
+      agentId: 'pero',
+      pairId: result.pairId,
+      content:
+        '[ReAct 第 1 步]\n我先检查目录。\n\n[工具 list_directory]\n参数：{"path":"."}\n结果：src\npackage.json',
+    })
+    expect(appendAutomaticWorkContext.mock.calls[0]![0].content).not.toContain('检查完成。')
+  })
+
   it('拒绝用其他Agent身份向普通Thread写入消息', async () => {
     const appendUserMessage = vi.fn()
     const service = new ConversationTurnService({

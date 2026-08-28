@@ -16,6 +16,7 @@ import {
   threadsApi,
   type FlowStateInfo,
   type ThreadToolSetting,
+  type TokenBudgetPreview,
 } from '../../api/modules/threadsApi'
 import { toolDisplayColor, toolDisplayIcon } from '../../composables/tools/useToolDisplay'
 import { logger } from '../../lib/logger'
@@ -98,6 +99,9 @@ const flowOpen = ref(false)
 const flowLoading = ref(false)
 const flowClearing = ref(false)
 const flowStates = ref<FlowStateInfo[]>([])
+const tokenBudget = ref<TokenBudgetPreview | null>(null)
+let tokenBudgetTimer: ReturnType<typeof setTimeout> | null = null
+let tokenBudgetRequest = 0
 const threadTools = ref<ThreadToolSetting[]>([])
 const toolsLoading = ref(false)
 const toolsSaving = ref(false)
@@ -190,6 +194,17 @@ const hasUploading = computed(() =>
   pendingAttachments.value.some((item) => item.uploadState === 'uploading'),
 )
 const enabledToolCount = computed(() => threadTools.value.filter((tool) => tool.enabled).length)
+const tokenBudgetRatio = computed(() => {
+  const budget = tokenBudget.value
+  if (!budget?.contextWindowTokens) return 0
+  return Math.min(1, Math.max(0, budget.usedTokens / budget.contextWindowTokens))
+})
+const tokenBudgetDegrees = computed(() => `${tokenBudgetRatio.value * 360}deg`)
+const tokenBudgetLabel = computed(() => {
+  const budget = tokenBudget.value
+  if (!budget) return '— / — Token'
+  return `${formatTokenCount(budget.usedTokens)} / ${formatTokenCount(budget.contextWindowTokens)} Token`
+})
 const visibleThreadTools = computed(() => {
   const query = toolQuery.value.trim().toLowerCase()
   return threadTools.value.filter(
@@ -202,6 +217,35 @@ const filteredCommands = computed(() => {
     (command) => !query || `${command.label} ${command.keywords}`.toLowerCase().includes(query),
   )
 })
+
+function formatTokenCount(tokens: number): string {
+  if (tokens >= 1_000_000) return `${Number((tokens / 1_000_000).toFixed(1))}m`
+  if (tokens >= 1_000) return `${Number((tokens / 1_000).toFixed(1))}k`
+  return String(tokens)
+}
+
+async function refreshTokenBudget(): Promise<void> {
+  if (isGroupChannel.value || !threadStore.threadId) {
+    tokenBudget.value = null
+    return
+  }
+  const request = ++tokenBudgetRequest
+  try {
+    const response = await threadsApi.previewTokenBudget(threadStore.threadId, {
+      agentId: agentStore.activeAgentId || undefined,
+      content: inputText.value,
+    })
+    if (request === tokenBudgetRequest) tokenBudget.value = response.data ?? null
+  } catch (error) {
+    if (request === tokenBudgetRequest) tokenBudget.value = null
+    logger.warn('InputBar', '计算下一轮 Token 预算失败', error)
+  }
+}
+
+function scheduleTokenBudgetRefresh(): void {
+  if (tokenBudgetTimer) clearTimeout(tokenBudgetTimer)
+  tokenBudgetTimer = setTimeout(() => void refreshTokenBudget(), 350)
+}
 
 async function loadThreadTools(): Promise<void> {
   if (isGroupChannel.value) {
@@ -330,8 +374,15 @@ async function clearWorkContext(agentId: string): Promise<void> {
 }
 
 watch(
+  [() => inputText.value, () => threadStore.threadId, () => agentStore.activeAgentId],
+  scheduleTokenBudgetRefresh,
+  { immediate: true },
+)
+
+watch(
   () => props.isSending,
   (sending, previous) => {
+    if (previous && !sending) scheduleTokenBudgetRefresh()
     if (previous && !sending && flowOpen.value) void loadFlowState()
   },
 )
@@ -929,6 +980,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   document.removeEventListener('click', onDocumentClick)
   window.removeEventListener('infos:model-capabilities-changed', onModelCapabilitiesChanged)
+  if (tokenBudgetTimer) clearTimeout(tokenBudgetTimer)
   cleanupRecorder()
   void clearPendingAttachments()
 })
@@ -979,6 +1031,19 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
           心流
         </button>
       </template>
+      <span
+        v-if="!isGroupChannel"
+        class="token-capacitor"
+        :title="`预计下一轮首个 ReAct：${tokenBudgetLabel}`"
+      >
+        <span
+          class="token-capacitor-ring"
+          :style="{ '--token-capacitor-angle': tokenBudgetDegrees }"
+        >
+          <span class="token-capacitor-core" />
+        </span>
+        <span class="token-capacitor-value">{{ tokenBudgetLabel }}</span>
+      </span>
     </div>
 
     <div v-if="!isGroupChannel && pendingAttachments.length" class="attachment-list">
@@ -1407,6 +1472,49 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
   font-weight: 900;
   letter-spacing: 0.1em;
   color: var(--ui-accent-primary);
+}
+.token-capacitor {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 5px;
+  margin-left: auto;
+  padding-left: 10px;
+  color: var(--ui-success);
+  font: 800 9px var(--font-mono);
+}
+.token-capacitor-ring {
+  --token-capacitor-angle: 0deg;
+  position: relative;
+  display: inline-grid;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  place-items: center;
+  border-radius: 50%;
+  background: conic-gradient(
+    var(--ui-success) var(--token-capacitor-angle),
+    color-mix(in srgb, var(--ui-success) 16%, transparent) 0
+  );
+  box-shadow: 0 0 6px color-mix(in srgb, var(--ui-success) 58%, transparent);
+}
+.token-capacitor-ring::before {
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: var(--ui-bg-surface-soft);
+  content: '';
+}
+.token-capacitor-core {
+  position: relative;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--ui-success);
+  box-shadow: 0 0 5px var(--ui-success);
+}
+.token-capacitor-value {
+  font-variant-numeric: tabular-nums;
 }
 .deck-chip {
   display: inline-flex;

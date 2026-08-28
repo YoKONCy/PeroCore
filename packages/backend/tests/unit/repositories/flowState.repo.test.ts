@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { flowStateRevisions, flowStates } from '@infos/backend/database/schema'
+import { flowStateRevisions, flowStates, workContextEntries } from '@infos/backend/database/schema'
 import { FlowStateRepository } from '@infos/backend/repositories/flowState.repo'
 
 let sqlite: Database.Database
@@ -37,13 +37,26 @@ describe('FlowStateRepository 对话检查点回退', () => {
         after_work_context_updated_at_pair_count INTEGER DEFAULT 0 NOT NULL,
         created_at TEXT DEFAULT (datetime('now', 'localtime')) NOT NULL
       );
+      CREATE TABLE work_context_entries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+        thread_id TEXT NOT NULL,
+        agent_id TEXT NOT NULL,
+        pair_id TEXT NOT NULL,
+        pair_count INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now', 'localtime')) NOT NULL
+      );
+      CREATE UNIQUE INDEX idx_work_context_entries_pair_agent
+        ON work_context_entries(thread_id, agent_id, pair_id);
     `)
   })
 
   afterEach(() => sqlite.close())
 
   it('A 与 D 更新心流时，撤销 D 后恢复到 A 完成后的状态', async () => {
-    const db = drizzle(sqlite, { schema: { flowStates, flowStateRevisions } })
+    const db = drizzle(sqlite, {
+      schema: { flowStates, flowStateRevisions, workContextEntries },
+    })
     const repo = new FlowStateRepository(db as never)
 
     await repo.save({
@@ -70,7 +83,9 @@ describe('FlowStateRepository 对话检查点回退', () => {
   })
 
   it('同一待撤销轮次多次更新时恢复到该轮开始前的状态', async () => {
-    const db = drizzle(sqlite, { schema: { flowStates, flowStateRevisions } })
+    const db = drizzle(sqlite, {
+      schema: { flowStates, flowStateRevisions, workContextEntries },
+    })
     const repo = new FlowStateRepository(db as never)
     await repo.save({
       threadId: 'thread-1',

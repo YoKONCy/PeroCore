@@ -370,6 +370,21 @@ function ensureWorkContextSchema(sqlite: Database.Database): void {
     sqlite.exec(
       'ALTER TABLE flow_state_revisions ADD COLUMN after_work_context_updated_at_pair_count INTEGER DEFAULT 0 NOT NULL',
     )
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS work_context_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+      thread_id TEXT NOT NULL,
+      agent_id TEXT NOT NULL,
+      pair_id TEXT NOT NULL,
+      pair_count INTEGER NOT NULL,
+      content TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now', 'localtime')) NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_work_context_entries_pair_agent
+      ON work_context_entries (thread_id, agent_id, pair_id);
+    CREATE INDEX IF NOT EXISTS idx_work_context_entries_scope
+      ON work_context_entries (thread_id, agent_id, pair_count);
+  `)
 }
 
 /** 为既有数据库补齐 Thread 自动执行模式字段。 */

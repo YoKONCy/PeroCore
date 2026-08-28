@@ -1,6 +1,6 @@
-import { and, asc, eq, inArray } from 'drizzle-orm'
+import { and, asc, eq, gte, inArray, lt } from 'drizzle-orm'
 import type { DrizzleDb } from '../database'
-import { flowStateRevisions, flowStates } from '../database/schema'
+import { flowStateRevisions, flowStates, workContextEntries } from '../database/schema'
 
 export type FlowStateRow = typeof flowStates.$inferSelect
 
@@ -75,12 +75,79 @@ export class FlowStateRepository {
     return rows[0]!
   }
 
+  async appendWorkContextEntry(input: {
+    threadId: string
+    agentId: string
+    pairId: string
+    pairCount: number
+    content: string
+  }): Promise<void> {
+    await this.db
+      .insert(workContextEntries)
+      .values(input)
+      .onConflictDoUpdate({
+        target: [
+          workContextEntries.threadId,
+          workContextEntries.agentId,
+          workContextEntries.pairId,
+        ],
+        set: { pairCount: input.pairCount, content: input.content },
+      })
+  }
+
+  async listWorkContextEntries(
+    threadId: string,
+    agentId: string,
+    minimumPairCount: number,
+  ): Promise<Array<typeof workContextEntries.$inferSelect>> {
+    return this.db
+      .select()
+      .from(workContextEntries)
+      .where(
+        and(
+          eq(workContextEntries.threadId, threadId),
+          eq(workContextEntries.agentId, agentId),
+          gte(workContextEntries.pairCount, minimumPairCount),
+        ),
+      )
+      .orderBy(asc(workContextEntries.pairCount), asc(workContextEntries.id))
+  }
+
+  async deleteExpiredWorkContextEntries(
+    threadId: string,
+    agentId: string,
+    minimumPairCount: number,
+  ): Promise<void> {
+    await this.db
+      .delete(workContextEntries)
+      .where(
+        and(
+          eq(workContextEntries.threadId, threadId),
+          eq(workContextEntries.agentId, agentId),
+          lt(workContextEntries.pairCount, minimumPairCount),
+        ),
+      )
+  }
+
+  async clearWorkContextEntries(threadId: string, agentId: string): Promise<void> {
+    await this.db
+      .delete(workContextEntries)
+      .where(
+        and(eq(workContextEntries.threadId, threadId), eq(workContextEntries.agentId, agentId)),
+      )
+  }
+
   async clear(threadId: string, agentId: string, pairId?: string | null): Promise<FlowStateRow> {
     return this.save({ threadId, agentId, currentGoal: '', privateFacts: '', pairId })
   }
 
   async rollbackPairs(threadId: string, pairIds: string[]): Promise<void> {
     if (!pairIds.length) return
+    await this.db
+      .delete(workContextEntries)
+      .where(
+        and(eq(workContextEntries.threadId, threadId), inArray(workContextEntries.pairId, pairIds)),
+      )
     const revisions = await this.db
       .select()
       .from(flowStateRevisions)
@@ -123,6 +190,7 @@ export class FlowStateRepository {
   }
 
   async deleteThread(threadId: string): Promise<void> {
+    await this.db.delete(workContextEntries).where(eq(workContextEntries.threadId, threadId))
     await this.db.delete(flowStateRevisions).where(eq(flowStateRevisions.threadId, threadId))
     await this.db.delete(flowStates).where(eq(flowStates.threadId, threadId))
   }

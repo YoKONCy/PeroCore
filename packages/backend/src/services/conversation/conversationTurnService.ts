@@ -23,6 +23,7 @@ import type { CapabilityScope } from '../../capabilities/types'
 import { tokenCounter } from '../tokenizer/tokenCounter'
 import type { ExecutionRuntime } from '../../kernel/executionRuntime'
 import type { EventNoteDraftCommitter } from '../memory/eventNoteDraftCommitter'
+import type { FlowStateService } from '../flow/flowStateService'
 import { AppError } from '../../lib/appError'
 import { createLogger } from '../../lib/logger'
 
@@ -36,6 +37,13 @@ export interface ConversationTurnDeps {
   imageUnderstandingService: ImageUnderstandingService
   executionRuntime?: ExecutionRuntime
   eventNoteDraftCommitter?: EventNoteDraftCommitter
+  flowStateService?: FlowStateService
+  getAgentModelConfig?: (
+    agentId: string,
+  ) => Promise<import('../llm/llmService').ModelConfig | null>
+  getModelConfigById?: (
+    id: number,
+  ) => Promise<import('../llm/llmService').ModelConfig | null>
   retrievalFeedback?: {
     applyRetrievalFeedback(traceId: string, reply: string): Promise<void>
   }
@@ -69,6 +77,8 @@ export interface PrepareTurnParams {
   /** Application Realm 绑定；存在时工具和上下文必须限制在该 Realm。 */
   realmId?: string
   modelConfigId?: number
+  /** 已解析模型可用于输入的 Token 上限。 */
+  maxInputTokens?: number
   onModelResolved?: (config: import('../llm/llmService').ModelConfig) => void | Promise<void>
   /** 由Kernel Scheduler或父调用预先建立的Execution；传入后本服务只继承，不写其生命周期。 */
   execution?: KernelExecutionDescriptor
@@ -122,8 +132,47 @@ export interface CompletedTurn {
   assistantMessage?: ThreadMessageInfo
 }
 
+export interface TokenBudgetPreview {
+  usedTokens: number
+  contextWindowTokens: number
+  maxInputTokens: number
+  modelId: string
+}
+
 export class ConversationTurnService {
   constructor(private readonly deps: ConversationTurnDeps) {}
+
+  async previewTokenBudget(input: {
+    threadId: string
+    agentId?: string
+    content?: string
+  }): Promise<TokenBudgetPreview> {
+    const thread = await this.deps.threadService.getThread(input.threadId)
+    if (!thread) throw new AppError('NOT_FOUND', { message: '会话不存在' })
+    const agentId = input.agentId ?? thread.agentId
+    const modelConfig = await this.deps.getAgentModelConfig?.(agentId)
+    if (!modelConfig?.contextWindowTokens) {
+      throw new AppError('CONFIG_ERROR', { message: '当前模型未配置上下文窗口' })
+    }
+    const maxInputTokens = Math.max(
+      1,
+      modelConfig.contextWindowTokens - Math.max(0, modelConfig.maxTokens ?? 0),
+    )
+    const compiled = await this.deps.contextCompiler.compile(input.threadId, agentId, {
+      retrievalQuery: input.content ?? '',
+      appendThreadMessages: false,
+      disableContinuity: true,
+      maxInputTokens,
+    })
+    const messages = [...compiled.messages]
+    if (input.content?.trim()) messages.push({ role: 'user', content: input.content.trim() })
+    return {
+      usedTokens: tokenCounter.countMessages(messages),
+      contextWindowTokens: modelConfig.contextWindowTokens,
+      maxInputTokens,
+      modelId: modelConfig.modelId,
+    }
+  }
 
   async prepareTurn(params: PrepareTurnParams): Promise<PreparedTurn> {
     const thread = await this.deps.threadService.getThread(params.threadId)
@@ -135,6 +184,15 @@ export class ConversationTurnService {
         message: `会话归属不匹配：Thread ${params.threadId} 不属于 Agent ${agentId}`,
       })
     }
+    const modelConfig = params.modelConfigId
+      ? await this.deps.getModelConfigById?.(params.modelConfigId)
+      : await this.deps.getAgentModelConfig?.(agentId)
+    const contextWindowTokens = modelConfig?.contextWindowTokens ?? 0
+    const maxInputTokens =
+      params.maxInputTokens ??
+      (contextWindowTokens > 0
+        ? Math.max(1, contextWindowTokens - Math.max(0, modelConfig?.maxTokens ?? 0))
+        : 0)
     if (params.resumeMessages?.length) {
       return {
         threadId: params.threadId,
@@ -188,6 +246,7 @@ export class ConversationTurnService {
 
     const compiled = await this.deps.contextCompiler.compile(params.threadId, agentId, {
       retrievalQuery: params.content,
+      maxInputTokens,
       currentPairId: inputPersistence === 'persistent' ? pairId : undefined,
       capabilityScope: params.capabilityScope,
       realmExecution: Boolean(params.realmId),
@@ -287,6 +346,7 @@ export class ConversationTurnService {
       let assistantMessage: ThreadMessageInfo | undefined
       if (params.outputPersistence !== 'ephemeral') {
         assistantMessage = await this.persistAssistant(prepared, completed)
+        await this.captureWorkContext(prepared, completed)
         await this.commitEventNoteDrafts(prepared, completed, assistantMessage)
         await this.submitRetrievalFeedback(prepared, completed)
       }
@@ -360,6 +420,7 @@ export class ConversationTurnService {
     let assistantMessage: ThreadMessageInfo | undefined
     if (params.outputPersistence !== 'ephemeral') {
       assistantMessage = await this.persistAssistant(prepared, completed)
+      await this.captureWorkContext(prepared, completed)
       await this.commitEventNoteDrafts(prepared, completed, assistantMessage)
       await this.submitRetrievalFeedback(prepared, completed)
     }
@@ -512,6 +573,57 @@ export class ConversationTurnService {
           message: failureMessage,
         },
       }),
+    })
+  }
+
+  private async captureWorkContext(
+    prepared: PreparedTurn,
+    completed: CompletedTurn,
+  ): Promise<void> {
+    const service = this.deps.flowStateService
+    if (!service) return
+    const blocks = completed.contentBlocks
+    let lastFinalNarration = -1
+    for (let index = blocks.length - 1; index >= 0; index -= 1) {
+      const block = blocks[index]!
+      if (block.kind === 'narration' && block.phase === 'final') {
+        lastFinalNarration = index
+        break
+      }
+    }
+    const toolCalls = new Map(completed.toolCalls.map((call) => [call.callId, call]))
+    let captureStart = 0
+    for (let index = blocks.length - 1; index >= 0; index -= 1) {
+      const block = blocks[index]!
+      const call = block.kind === 'tool' ? toolCalls.get(block.callId) : undefined
+      if (call?.name === 'manage_work_context' && !call.isError) {
+        captureStart = index + 1
+        break
+      }
+    }
+    const content = blocks
+      .flatMap((block, index) => {
+        if (index < captureStart) return []
+        if (block.kind === 'narration') {
+          if (index === lastFinalNarration || !block.content.trim()) return []
+          return [`[ReAct 第 ${block.turn} 步]\n${block.content.trim()}`]
+        }
+        if (block.kind !== 'tool') return []
+        const call = toolCalls.get(block.callId)
+        const result = call?.result.trim()
+        return [
+          `[工具 ${block.name}]\n参数：${JSON.stringify(call?.args ?? {})}` +
+            (result ? `\n结果${call?.isError ? '（错误）' : ''}：${result}` : ''),
+        ]
+      })
+      .join('\n\n')
+      .slice(0, 8000)
+    if (!content) return
+    await service.appendAutomaticWorkContext({
+      threadId: prepared.threadId,
+      agentId: prepared.agentId,
+      pairId: prepared.pairId,
+      content,
     })
   }
 

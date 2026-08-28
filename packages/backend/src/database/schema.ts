@@ -232,6 +232,29 @@ export const flowStates = sqliteTable(
   ],
 )
 
+export const workContextEntries = sqliteTable(
+  'work_context_entries',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    threadId: text('thread_id').notNull(),
+    agentId: text('agent_id').notNull(),
+    pairId: text('pair_id').notNull(),
+    pairCount: integer('pair_count').notNull(),
+    content: text('content').notNull(),
+    createdAt: text('created_at')
+      .default(sql`(datetime('now', 'localtime'))`)
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex('idx_work_context_entries_pair_agent').on(
+      table.threadId,
+      table.agentId,
+      table.pairId,
+    ),
+    index('idx_work_context_entries_scope').on(table.threadId, table.agentId, table.pairCount),
+  ],
+)
+
 /** 心流修订记录：用于对话回滚时恢复 Agent 当时的私有临时状态。 */
 export const flowStateRevisions = sqliteTable(
   'flow_state_revisions',

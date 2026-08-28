@@ -1,11 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { FlowStateService } from '@infos/backend/services/flow/flowStateService'
+import { trimWorkContextToFit } from '@infos/backend/services/context/contextCompiler'
 
 describe('FlowStateService', () => {
   const repo = {
     get: vi.fn(),
     listByThread: vi.fn(),
     save: vi.fn(),
+    appendWorkContextEntry: vi.fn(),
+    listWorkContextEntries: vi.fn(),
+    deleteExpiredWorkContextEntries: vi.fn(),
+    clearWorkContextEntries: vi.fn(),
     clear: vi.fn(),
     rollbackPairs: vi.fn(),
     deleteThread: vi.fn(),
@@ -15,6 +20,10 @@ describe('FlowStateService', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    repo.listWorkContextEntries.mockResolvedValue([])
+    repo.deleteExpiredWorkContextEntries.mockResolvedValue(undefined)
+    repo.clearWorkContextEntries.mockResolvedValue(undefined)
+    repo.appendWorkContextEntry.mockResolvedValue(undefined)
     threadService.getThread.mockResolvedValue({
       id: 'thread-1',
       agentId: 'pero',
@@ -72,12 +81,109 @@ describe('FlowStateService', () => {
       currentGoal: '继续游戏',
       privateFacts: '汤底',
       workContext: '',
+      workContextSegments: [],
       workContextRemainingPairs: 0,
       revision: 1,
       updatedAt: null,
     })
     expect(prompt).toContain('<Current_Goal>\n继续游戏')
     expect(prompt).toContain('<Private_Facts>\n汤底')
+  })
+
+  it('自动工作上下文按产生轮次独立保留后续五轮', async () => {
+    threadService.getThread.mockResolvedValue({
+      id: 'thread-1',
+      agentId: 'pero',
+      channel: 'desktop',
+      pairCount: 8,
+    })
+    repo.get.mockResolvedValue({
+      threadId: 'thread-1',
+      agentId: 'pero',
+      currentGoal: '',
+      privateFacts: '',
+      workContext: '',
+      workContextUpdatedAtPairCount: 0,
+      revision: 1,
+      updatedAt: '2026-08-14 12:00:00',
+    })
+    repo.listWorkContextEntries.mockResolvedValue([
+      { id: 2, pairCount: 3, content: '第三轮过程' },
+      { id: 3, pairCount: 7, content: '第七轮过程' },
+    ])
+
+    const result = await service.get('thread-1', 'pero')
+
+    expect(repo.deleteExpiredWorkContextEntries).toHaveBeenCalledWith('thread-1', 'pero', 3)
+    expect(result.workContext).toBe('第三轮过程\n\n第七轮过程')
+    expect(result.workContextSegments).toEqual(['第三轮过程', '第七轮过程'])
+    expect(result.workContextRemainingPairs).toBe(4)
+  })
+
+  it('第 N 轮自动记录从 N+6 轮开始消失', async () => {
+    threadService.getThread.mockResolvedValue({
+      id: 'thread-1',
+      agentId: 'pero',
+      channel: 'desktop',
+      pairCount: 9,
+    })
+    repo.get.mockResolvedValue({
+      threadId: 'thread-1',
+      agentId: 'pero',
+      currentGoal: '',
+      privateFacts: '',
+      workContext: '',
+      workContextUpdatedAtPairCount: 0,
+      revision: 1,
+      updatedAt: '2026-08-14 12:00:00',
+    })
+
+    await service.get('thread-1', 'pero')
+
+    expect(repo.deleteExpiredWorkContextEntries).toHaveBeenCalledWith('thread-1', 'pero', 4)
+  })
+
+  it('手动压缩会清除逐轮记录并从当前轮重新计时', async () => {
+    threadService.getThread.mockResolvedValue({
+      id: 'thread-1',
+      agentId: 'pero',
+      channel: 'desktop',
+      pairCount: 8,
+    })
+    repo.get.mockResolvedValue({ currentGoal: '', privateFacts: '', revision: 1 })
+    repo.save.mockImplementation(async (input) => ({
+      ...input,
+      revision: 2,
+      updatedAt: '2026-08-14 12:01:00',
+    }))
+
+    await service.updateWorkContext({
+      threadId: 'thread-1',
+      agentId: 'pero',
+      pairId: 'pair-9',
+      content: '压缩摘要',
+    })
+
+    expect(repo.clearWorkContextEntries).toHaveBeenCalledWith('thread-1', 'pero')
+    expect(repo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workContext: '压缩摘要',
+        workContextUpdatedAtPairCount: 9,
+      }),
+    )
+  })
+
+  it('模型窗口不足时按轮移除最久远工作上下文', () => {
+    const segments = ['最旧轮'.repeat(50), '较新轮'.repeat(50), '最新轮'.repeat(50)]
+    const rendered = segments.join('\n\n')
+    const messages = [{ role: 'system' as const, content: `<Work_Context>${rendered}</Work_Context>` }]
+
+    const trimmed = trimWorkContextToFit(messages, segments, rendered, 180)
+    const content = String(trimmed[0]?.content)
+
+    expect(content).not.toContain('最旧轮')
+    expect(content).not.toContain('较新轮')
+    expect(content).toContain('最新轮')
   })
 
   it('工作上下文达到配置轮次后强制清空', async () => {
