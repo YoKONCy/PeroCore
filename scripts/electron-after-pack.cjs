@@ -164,7 +164,8 @@ async function validateArcaBoot(appOutDir, resourcesDir, executableName) {
     await waitForFile(discoveryPath, 15_000)
     const discovery = JSON.parse(await fs.readFile(discoveryPath, 'utf8'))
     if (
-      discovery.applicationId !== 'infos.arca' ||
+      discovery.application?.appId !== 'infos.arca' ||
+      discovery.application?.state !== 'ready' ||
       discovery.pid !== child.pid ||
       !/^ws:\/\/127\.0\.0\.1:\d+$/.test(discovery.endpoint)
     ) {

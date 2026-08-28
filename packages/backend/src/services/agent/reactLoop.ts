@@ -1013,7 +1013,7 @@ export async function* runReActLoop(params: {
         },
       }
 
-      toolBlock.result = toolResultText.slice(0, 2000)
+      toolBlock.result = toolResultText.slice(0, 8000)
       toolBlock.isError = result.isError
       toolBlock.durationMs = result.durationMs
 

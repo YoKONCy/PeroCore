@@ -290,7 +290,7 @@ describe('ConversationTurnService 初始提示词快照', () => {
     expect(feedback).toHaveBeenCalledWith(result.pairId, '已使用记忆')
   })
 
-  it('持久化回复后自动收集 ReAct 过程与工具文本，但排除最终回复', async () => {
+  it('持久化回复后只保存工具返回正文，不保存 ReAct 叙述、工具名、参数或最终回复', async () => {
     const appendAutomaticWorkContext = vi.fn().mockResolvedValue(undefined)
     const service = new ConversationTurnService({
       threadService: {
@@ -305,7 +305,7 @@ describe('ConversationTurnService 初始提示词快照', () => {
       },
       contextCompiler: {
         compile: vi.fn().mockResolvedValue({
-          messages: [{ role: 'user', content: '检查项目' }],
+          messages: [{ role: 'user', content: '读取代码' }],
           manifest: { disabledTools: [] },
         }),
       },
@@ -313,42 +313,86 @@ describe('ConversationTurnService 初始提示词快照', () => {
         chatWithCompiledMessages: vi.fn().mockImplementation(async (params) => {
           params.onToolCalls?.([
             {
-              name: 'list_directory',
-              args: { path: '.' },
-              result: 'src\npackage.json',
+              name: 'read_file',
+              args: { file_path: 'src/example.ts' },
+              result:
+                '{"ephemeral":true,"kind":"file_read_audit","path":"src/example.ts"}',
               durationMs: 1,
               isError: false,
-              callId: 'call-1',
+              callId: 'call-read',
+            },
+            {
+              name: 'read_file',
+              args: { file_path: 'src/missing.ts' },
+              result: '读取失败',
+              durationMs: 1,
+              isError: true,
+              callId: 'call-error',
             },
           ])
           params.onContentBlocks?.([
             {
-              blockId: 'progress',
+              blockId: 'tool-stale',
               sequence: 1,
-              kind: 'narration',
+              kind: 'tool',
               turn: 1,
-              phase: 'progress',
-              content: '我先检查目录。',
+              callId: 'call-stale',
+              name: 'code_search',
+              args: '{"query":"旧信息"}',
+              result: '压缩前的旧工具结果',
+              isError: false,
             },
             {
-              blockId: 'tool-call-1',
+              blockId: 'tool-update-context',
               sequence: 2,
               kind: 'tool',
               turn: 1,
-              callId: 'call-1',
-              name: 'list_directory',
-              args: '{}',
+              callId: 'call-update-context',
+              name: 'manage_work_context',
+              args: '{"action":"update"}',
+              result: '工作上下文已更新',
+              isError: false,
+            },
+            {
+              blockId: 'progress',
+              sequence: 3,
+              kind: 'narration',
+              turn: 1,
+              phase: 'progress',
+              content: '我先读取代码。',
+            },
+            {
+              blockId: 'tool-read',
+              sequence: 2,
+              kind: 'tool',
+              turn: 1,
+              callId: 'call-read',
+              name: 'read_file',
+              args: '{"file_path":"src/example.ts"}',
+              result: 'export const value = 1\n',
+              isError: false,
+            },
+            {
+              blockId: 'tool-error',
+              sequence: 3,
+              kind: 'tool',
+              turn: 1,
+              callId: 'call-error',
+              name: 'read_file',
+              args: '{"file_path":"src/missing.ts"}',
+              result: '读取失败',
+              isError: true,
             },
             {
               blockId: 'final',
-              sequence: 3,
+              sequence: 4,
               kind: 'narration',
               turn: 2,
               phase: 'final',
-              content: '检查完成。',
+              content: '读取完成。',
             },
           ])
-          return '检查完成。'
+          return '读取完成。'
         }),
       },
       attachmentService: { validateForBinding: vi.fn().mockResolvedValue([]) },
@@ -356,16 +400,24 @@ describe('ConversationTurnService 初始提示词快照', () => {
       flowStateService: { appendAutomaticWorkContext },
     } as never)
 
-    const result = await service.executeTurn({ threadId: 'thread-1', content: '检查项目' })
+    const result = await service.executeTurn({ threadId: 'thread-1', content: '读取代码' })
 
     expect(appendAutomaticWorkContext).toHaveBeenCalledWith({
       threadId: 'thread-1',
       agentId: 'pero',
       pairId: result.pairId,
-      content:
-        '[ReAct 第 1 步]\n我先检查目录。\n\n[工具 list_directory]\n参数：{"path":"."}\n结果：src\npackage.json',
+      content: 'export const value = 1',
     })
-    expect(appendAutomaticWorkContext.mock.calls[0]![0].content).not.toContain('检查完成。')
+    const captured = appendAutomaticWorkContext.mock.calls[0]![0].content
+    expect(captured).not.toContain('ReAct')
+    expect(captured).not.toContain('我先读取代码')
+    expect(captured).not.toContain('read_file')
+    expect(captured).not.toContain('file_path')
+    expect(captured).not.toContain('file_read_audit')
+    expect(captured).not.toContain('压缩前的旧工具结果')
+    expect(captured).not.toContain('工作上下文已更新')
+    expect(captured).not.toContain('读取失败')
+    expect(captured).not.toContain('读取完成')
   })
 
   it('拒绝用其他Agent身份向普通Thread写入消息', async () => {

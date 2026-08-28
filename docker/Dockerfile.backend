@@ -37,7 +37,6 @@ COPY --from=builder --chown=node:node /build/dist-daemon/bin/ ./bin/
 COPY --from=builder --chown=node:node /build/packages/backend/src/assets/ ./backend/backend/src/assets/
 COPY --from=builder --chown=node:node /build/packages/backend/src/services/mdp/prompts/ ./backend/backend/src/services/mdp/prompts/
 COPY --from=builder --chown=node:node /build/packages/backend/src/tools/ ./backend/backend/src/tools/
-COPY --from=builder --chown=node:node /build/packages/backend/src/skills/ ./backend/backend/src/skills/
 COPY --from=builder --chown=node:node /build/packages/apps/social/ ./backend/apps/social/
 
 RUN mkdir -p /app/data /app/workspaces /app/temp && chown -R node:node /app

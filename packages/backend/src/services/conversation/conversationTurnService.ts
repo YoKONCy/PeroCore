@@ -583,38 +583,25 @@ export class ConversationTurnService {
     const service = this.deps.flowStateService
     if (!service) return
     const blocks = completed.contentBlocks
-    let lastFinalNarration = -1
-    for (let index = blocks.length - 1; index >= 0; index -= 1) {
-      const block = blocks[index]!
-      if (block.kind === 'narration' && block.phase === 'final') {
-        lastFinalNarration = index
-        break
-      }
-    }
-    const toolCalls = new Map(completed.toolCalls.map((call) => [call.callId, call]))
     let captureStart = 0
     for (let index = blocks.length - 1; index >= 0; index -= 1) {
       const block = blocks[index]!
-      const call = block.kind === 'tool' ? toolCalls.get(block.callId) : undefined
-      if (call?.name === 'manage_work_context' && !call.isError) {
+      if (block.kind === 'tool' && block.name === 'manage_work_context' && !block.isError) {
         captureStart = index + 1
         break
       }
     }
     const content = blocks
       .flatMap((block, index) => {
-        if (index < captureStart) return []
-        if (block.kind === 'narration') {
-          if (index === lastFinalNarration || !block.content.trim()) return []
-          return [`[ReAct 第 ${block.turn} 步]\n${block.content.trim()}`]
+        if (
+          index < captureStart ||
+          block.kind !== 'tool' ||
+          block.isError ||
+          !block.result?.trim()
+        ) {
+          return []
         }
-        if (block.kind !== 'tool') return []
-        const call = toolCalls.get(block.callId)
-        const result = call?.result.trim()
-        return [
-          `[工具 ${block.name}]\n参数：${JSON.stringify(call?.args ?? {})}` +
-            (result ? `\n结果${call?.isError ? '（错误）' : ''}：${result}` : ''),
-        ]
+        return [block.result.trim()]
       })
       .join('\n\n')
       .slice(0, 8000)
