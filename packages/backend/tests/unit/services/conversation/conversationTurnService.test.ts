@@ -290,7 +290,7 @@ describe('ConversationTurnService 初始提示词快照', () => {
     expect(feedback).toHaveBeenCalledWith(result.pairId, '已使用记忆')
   })
 
-  it('持久化回复后只保存工具返回正文，不保存 ReAct 叙述、工具名、参数或最终回复', async () => {
+  it('持久化文件正文及来源信息，但不保存 ReAct 叙述、原始参数或最终回复', async () => {
     const appendAutomaticWorkContext = vi.fn().mockResolvedValue(undefined)
     const service = new ConversationTurnService({
       threadService: {
@@ -373,6 +373,23 @@ describe('ConversationTurnService 初始提示词快照', () => {
               isError: false,
             },
             {
+              blockId: 'tool-range',
+              sequence: 5,
+              kind: 'tool',
+              turn: 1,
+              callId: 'call-range',
+              name: 'read_file_range',
+              args: '{"path":"src/app.py","line_start":10,"line_end":11}',
+              result: JSON.stringify({
+                content: 'def run():\n  return True',
+                totalLines: 80,
+                totalBytes: 2048,
+                lineStart: 10,
+                lineEnd: 11,
+              }),
+              isError: false,
+            },
+            {
               blockId: 'tool-error',
               sequence: 3,
               kind: 'tool',
@@ -406,7 +423,10 @@ describe('ConversationTurnService 初始提示词快照', () => {
       threadId: 'thread-1',
       agentId: 'pero',
       pairId: result.pairId,
-      content: 'export const value = 1',
+      content:
+        '- 文件 src/example.ts 的内容（1 行、22 字节）：\nexport const value = 1\n\n' +
+        '- 文件 src/app.py 的内容（80 行、2048 字节，本次读取第 10-11 行）：\n' +
+        'def run():\n  return True',
     })
     const captured = appendAutomaticWorkContext.mock.calls[0]![0].content
     expect(captured).not.toContain('ReAct')

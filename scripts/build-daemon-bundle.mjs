@@ -102,6 +102,21 @@ await esbuild.build({
   logLevel: 'info',
 })
 
+function assertNoWorkspaceImports(outputFile) {
+  const content = fs.readFileSync(outputFile, 'utf8')
+  const matches = [
+    ...content.matchAll(/(?:from\s+|import\s*\()(["'])(@infos\/[^"']+)\1/g),
+  ].map((match) => match[2])
+  if (matches.length) {
+    throw new Error(
+      `Daemon 发行产物仍包含未内联的工作区依赖: ${[...new Set(matches)].join(', ')}`,
+    )
+  }
+}
+
+assertNoWorkspaceImports(OUT_FILE)
+assertNoWorkspaceImports(SOCIAL_OUT_FILE)
+
 // 产物体积提示
 const sizeMB = (fs.statSync(OUT_FILE).size / 1024 / 1024).toFixed(2)
 const socialSizeMB = (fs.statSync(SOCIAL_OUT_FILE).size / 1024 / 1024).toFixed(2)

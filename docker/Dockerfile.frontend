@@ -9,6 +9,7 @@ RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 WORKDIR /build
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages/ ./packages/
+COPY public/ ./public/
 
 RUN pnpm install --frozen-lockfile --filter @infos/frontend...
 RUN pnpm --filter @infos/frontend build

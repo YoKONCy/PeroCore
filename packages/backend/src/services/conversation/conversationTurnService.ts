@@ -4,7 +4,7 @@
  * 负责 Thread 消息对、附件绑定、上下文编译、Agent 执行以及调试数据持久化。
  */
 
-import type { KernelExecutionDescriptor } from '@infos/shared'
+import type { ConversationContentBlock, KernelExecutionDescriptor } from '@infos/shared'
 import type { ThreadMessageInfo } from '../thread/threadService'
 import type { ThreadChannel } from '../../repositories/thread.repo'
 import type { AgentService } from '../agent/agentService'
@@ -576,6 +576,52 @@ export class ConversationTurnService {
     })
   }
 
+  private formatWorkContextToolResult(
+    block: Extract<ConversationContentBlock, { kind: 'tool' }>,
+  ): string | null {
+    const result = block.result?.trim()
+    if (!result) return null
+    if (block.name !== 'read_file' && block.name !== 'read_file_range') return result
+
+    let args: Record<string, unknown> = {}
+    try {
+      args = JSON.parse(block.args) as Record<string, unknown>
+    } catch {
+      return result
+    }
+    const filePath = String(args.file_path ?? args.path ?? '').trim()
+    if (!filePath) return result
+
+    if (block.name === 'read_file_range') {
+      try {
+        const data = JSON.parse(result) as Record<string, unknown>
+        const content = typeof data.content === 'string' ? data.content.trim() : ''
+        if (!content) return null
+        const totalLines = Number(data.totalLines)
+        const totalBytes = Number(data.totalBytes)
+        const lineStart = Number(data.lineStart)
+        const lineEnd = Number(data.lineEnd)
+        const range =
+          Number.isFinite(lineStart) && Number.isFinite(lineEnd)
+            ? `，本次读取第 ${lineStart}-${lineEnd} 行`
+            : ''
+        const size = [
+          Number.isFinite(totalLines) ? `${totalLines} 行` : '',
+          Number.isFinite(totalBytes) ? `${totalBytes} 字节` : '',
+        ]
+          .filter(Boolean)
+          .join('、')
+        return `- 文件 ${filePath} 的内容（${size || '规模未知'}${range}）：\n${content}`
+      } catch {
+        return result
+      }
+    }
+
+    const lineCount = result.split(/\r?\n/).length
+    const byteCount = Buffer.byteLength(result, 'utf8')
+    return `- 文件 ${filePath} 的内容（${lineCount} 行、${byteCount} 字节）：\n${result}`
+  }
+
   private async captureWorkContext(
     prepared: PreparedTurn,
     completed: CompletedTurn,
@@ -601,7 +647,8 @@ export class ConversationTurnService {
         ) {
           return []
         }
-        return [block.result.trim()]
+        const result = this.formatWorkContextToolResult(block)
+        return result ? [result] : []
       })
       .join('\n\n')
       .slice(0, 8000)

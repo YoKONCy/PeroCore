@@ -9,7 +9,11 @@
       "@infos/backend": ["../backend/src"],
       "@infos/backend/*": ["../backend/src/*"],
       "@infos/node-sdk": ["../node-sdk/src"],
-      "@infos/node-sdk/*": ["../node-sdk/src/*"]
+      "@infos/node-sdk/*": ["../node-sdk/src/*"],
+      "@infos/node-host": ["../node-host/src"],
+      "@infos/node-host/*": ["../node-host/src/*"],
+      "@infos/document-engine": ["../document-engine/src"],
+      "@infos/document-engine/*": ["../document-engine/src/*"]
     }
   },
   "include": ["src/**/*.ts"],
