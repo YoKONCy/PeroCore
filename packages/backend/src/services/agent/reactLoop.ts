@@ -590,27 +590,27 @@ export async function* runReActLoop(params: {
           if (nameDelta) target.function.name += nameDelta
           if (argumentsDelta) target.function.arguments += argumentsDelta
           const nextReceivedChars = target.function.arguments.length
-            const previousReceivedChars = nextReceivedChars - argumentsDelta.length
-            const withinPreview = previousReceivedChars < TOOL_ARGUMENT_STREAM_PREVIEW_LIMIT
-            const crossedProgressBoundary =
-              Math.floor(previousReceivedChars / 4096) !== Math.floor(nextReceivedChars / 4096)
-            if (nameDelta || withinPreview || crossedProgressBoundary) {
-              yield {
-                event: 'tool_call_delta',
-                data: {
-                  draftId: target.draftId,
-                  turn: turn + 1,
-                  nameDelta: nameDelta || undefined,
-                  argumentsDelta: withinPreview
-                    ? argumentsDelta.slice(
-                        0,
-                        TOOL_ARGUMENT_STREAM_PREVIEW_LIMIT - previousReceivedChars,
-                      ) || undefined
-                    : undefined,
-                  receivedChars: nextReceivedChars,
-                },
-              }
+          const previousReceivedChars = nextReceivedChars - argumentsDelta.length
+          const withinPreview = previousReceivedChars < TOOL_ARGUMENT_STREAM_PREVIEW_LIMIT
+          const crossedProgressBoundary =
+            Math.floor(previousReceivedChars / 4096) !== Math.floor(nextReceivedChars / 4096)
+          if (nameDelta || withinPreview || crossedProgressBoundary) {
+            yield {
+              event: 'tool_call_delta',
+              data: {
+                draftId: target.draftId,
+                turn: turn + 1,
+                nameDelta: nameDelta || undefined,
+                argumentsDelta: withinPreview
+                  ? argumentsDelta.slice(
+                      0,
+                      TOOL_ARGUMENT_STREAM_PREVIEW_LIMIT - previousReceivedChars,
+                    ) || undefined
+                  : undefined,
+                receivedChars: nextReceivedChars,
+              },
             }
+          }
         }
       }
     }

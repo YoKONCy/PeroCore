@@ -272,6 +272,7 @@ describe('MemoryRouter', () => {
     return {
       eventMemoryService: {
         archiveQuery: vi.fn(() => Promise.resolve(archiveResult())),
+        archive: vi.fn(() => Promise.resolve()),
         graphSnapshot: vi.fn(() =>
           Promise.resolve({
             nodes: [first],
@@ -403,13 +404,15 @@ describe('MemoryRouter', () => {
     expect(source).toMatchObject({ code: 'OK', data: { available: false, messages: [] } })
   })
 
-  it('不存在事件返回404，旧写入、搜索、导入和删除API均不可达', async () => {
-    const router = createMemoryRouter(createCtx() as never)
+  it('不存在事件返回404，旧写入、搜索和导入API不可达，删除API执行归档', async () => {
+    const ctx = createCtx()
+    const router = createMemoryRouter(ctx as never)
     expect((await router.request('http://test/missing')).status).toBe(404)
     expect((await router.request('http://test/', { method: 'POST' })).status).toBe(404)
     expect((await router.request('http://test/import', { method: 'POST' })).status).toBe(404)
     expect((await router.request('http://test/search', { method: 'POST' })).status).toBe(404)
-    expect((await router.request('http://test/event-1', { method: 'DELETE' })).status).toBe(404)
+    expect((await router.request('http://test/event-1', { method: 'DELETE' })).status).toBe(200)
+    expect(ctx.eventMemoryService.archive).toHaveBeenCalledWith('event-1')
   })
 })
 

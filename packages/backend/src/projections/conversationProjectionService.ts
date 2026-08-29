@@ -49,9 +49,7 @@ export class ConversationProjectionService {
     options: { beforeCursor?: string; pageSize?: number } = {},
   ): Promise<ConversationProjectionSnapshot> {
     const pageSize = Math.min(100, Math.max(1, options.pageSize ?? 60))
-    const beforeMessageId = options.beforeCursor
-      ? Number(options.beforeCursor)
-      : undefined
+    const beforeMessageId = options.beforeCursor ? Number(options.beforeCursor) : undefined
     const useCache = beforeMessageId === undefined && pageSize === 60
     const cached = useCache ? this.cache.get(threadId) : undefined
     if (cached && !cached.dirty) return cached.snapshot
