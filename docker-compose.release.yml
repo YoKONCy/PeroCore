@@ -1,0 +1,63 @@
+services:
+  backend:
+    image: ghcr.io/yokoncy/infos-backend:__INFOS_VERSION__
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    ports:
+      - '${INFOS_PORT:-9120}:9120'
+      - '${INFOS_CAPABILITY_PORT:-9121}:9121'
+    volumes:
+      - infos-data:/app/data
+      - infos-workspaces:/app/workspaces
+    environment:
+      NODE_ENV: production
+      PERO_PORT: '9120'
+      PERO_CAPABILITY_PORT: '9121'
+      PERO_HOST: 0.0.0.0
+      PERO_DATA_DIR: /app/data
+      PERO_DATABASE_PATH: /app/data/infos.db
+      PERO_APP_ROOT: /app/backend
+      PERO_TEMP_DIR: /app/temp
+      PERO_LOG_LEVEL: '${INFOS_LOG_LEVEL:-3}'
+      INFOS_DOCKER: '1'
+      INFOS_API_TOKEN: '${INFOS_API_TOKEN:-}'
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:9120/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks:
+      - infos
+
+  frontend:
+    image: ghcr.io/yokoncy/infos-frontend:__INFOS_VERSION__
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 10s
+    ports:
+      - '${INFOS_WEB_PORT:-3000}:8080'
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '--spider', 'http://127.0.0.1:8080/healthz']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - infos
+
+volumes:
+  infos-data:
+  infos-workspaces:
+
+networks:
+  infos:
+    driver: bridge

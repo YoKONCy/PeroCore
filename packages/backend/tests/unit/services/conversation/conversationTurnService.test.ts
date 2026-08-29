@@ -362,6 +362,18 @@ describe('ConversationTurnService 初始提示词快照', () => {
               content: '我先读取代码。',
             },
             {
+              blockId: 'tool-extension-log',
+              sequence: 4,
+              kind: 'tool',
+              turn: 1,
+              callId: 'call-extension-log',
+              name: 'terminal_execute',
+              args: '{"command":"check"}',
+              result:
+                '[11:15:37.185][backend][ERROR] [ExtensionLoader] 入口文件不存在：D:\\pero\\infos-ts\\resources\\backend\\backend\\src\\tools\\fileOps\\index.ts',
+              isError: false,
+            },
+            {
               blockId: 'tool-read',
               sequence: 2,
               kind: 'tool',
@@ -434,6 +446,8 @@ describe('ConversationTurnService 初始提示词快照', () => {
     expect(captured).not.toContain('read_file')
     expect(captured).not.toContain('file_path')
     expect(captured).not.toContain('file_read_audit')
+    expect(captured).not.toContain('ExtensionLoader')
+    expect(captured).not.toContain('[ERROR]')
     expect(captured).not.toContain('压缩前的旧工具结果')
     expect(captured).not.toContain('工作上下文已更新')
     expect(captured).not.toContain('读取失败')

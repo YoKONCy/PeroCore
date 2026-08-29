@@ -592,26 +592,32 @@ Layer 3: 平台适配层（NapcatAdapter / DiscordAdapter / TelegramAdapter）
 
 > **"Always online, always there."**
 
-infOS 通过 Docker Compose 提供 24/7 持久服务：
+infOS 提供由 GHCR 预构建镜像驱动的 Docker Compose 一键部署。无需克隆仓库或本地构建镜像：
 
 ```bash
-# 克隆仓库
-git clone https://github.com/YoKONCy/infOS.git
-cd infOS
+# 下载最新 Release 中的一键部署文件
+curl -LO https://github.com/YoKONCy/infOS/releases/latest/download/docker-compose.yml
 
-# 启动 (Backend + Frontend)
+# 拉取 Backend + Frontend 固定版本镜像并启动
 docker compose up -d
 
 # 查看日志
 docker compose logs -f backend
 ```
 
-| 容器                | 方案               | 端口    |
-| :------------------ | :----------------- | :------ |
-| `infos-backend`  | Bun + PM2 进程守护 | `:9120` |
-| `infos-frontend` | Nginx 静态托管     | `:3000` |
+启动后访问 `http://localhost:3000`。更新镜像并重建容器：
 
-数据持久化至 Docker Volume `pero-data`，支持通过 `INFOS_AUTH_TOKEN` 环境变量配置鉴权。
+```bash
+docker compose pull
+docker compose up -d
+```
+
+| 容器 | 镜像 | 默认端口 |
+| :--- | :--- | :--- |
+| `backend` | `ghcr.io/yokoncy/infos-backend:<版本>` | `:9120`（API）、`:9121`（能力通道） |
+| `frontend` | `ghcr.io/yokoncy/infos-frontend:<版本>` | `:3000`（Web） |
+
+数据持久化至 Docker Volume `infos-data` 与 `infos-workspaces`。可在启动前设置 `INFOS_WEB_PORT`、`INFOS_PORT`、`INFOS_CAPABILITY_PORT`、`INFOS_LOG_LEVEL` 和 `INFOS_API_TOKEN`。仓库根目录的 `docker-compose.yml` 仍用于开发者从源码构建本地镜像。
 
 <br/>
 

@@ -575,26 +575,32 @@ Layer 3: Platform adapters (NapcatAdapter / DiscordAdapter / TelegramAdapter)
 
 > **"Always online, always there."**
 
-infOS provides 24/7 persistent service via Docker Compose:
+infOS provides a one-command Docker Compose deployment backed by prebuilt GHCR images. No repository clone or local image build is required:
 
 ```bash
-# Clone the repository
-git clone https://github.com/YoKONCy/infOS.git
-cd infOS
+# Download the deployment file from the latest Release
+curl -LO https://github.com/YoKONCy/infOS/releases/latest/download/docker-compose.yml
 
-# Start (Backend + Frontend)
+# Pull and start the pinned Backend + Frontend images
 docker compose up -d
 
 # View logs
 docker compose logs -f backend
 ```
 
-| Container           | Solution           | Port    |
-| :------------------ | :----------------- | :------ |
-| `infos-backend`  | Bun + PM2 guardian | `:9120` |
-| `infos-frontend` | Nginx static host  | `:3000` |
+Open `http://localhost:3000` after startup. To pull updated images for the selected release and recreate the containers:
 
-Data is persisted to Docker Volume `pero-data`. Authentication can be configured via the `INFOS_AUTH_TOKEN` environment variable.
+```bash
+docker compose pull
+docker compose up -d
+```
+
+| Container | Image | Default ports |
+| :--- | :--- | :--- |
+| `backend` | `ghcr.io/yokoncy/infos-backend:<version>` | `:9120` (API), `:9121` (capability channel) |
+| `frontend` | `ghcr.io/yokoncy/infos-frontend:<version>` | `:3000` (Web) |
+
+Data is persisted in the `infos-data` and `infos-workspaces` Docker volumes. You may set `INFOS_WEB_PORT`, `INFOS_PORT`, `INFOS_CAPABILITY_PORT`, `INFOS_LOG_LEVEL`, and `INFOS_API_TOKEN` before startup. The repository-root `docker-compose.yml` remains available for developers who want to build local images from source.
 
 <br/>
 

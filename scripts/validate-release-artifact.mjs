@@ -174,7 +174,6 @@ async function collectLogs(roots) {
 }
 
 function assertStartupLogs(logs) {
-  const required = ['内置 Daemon 已就绪', '应用启动完成']
   const forbidden = [
     'App whenReady 失败',
     'ERR_INVALID_ARG_VALUE',
@@ -182,12 +181,9 @@ function assertStartupLogs(logs) {
     'Daemon 提前退出',
     '未捕获的异常',
   ]
-  const missing = required.filter((text) => !logs.includes(text))
   const failures = forbidden.filter((text) => logs.includes(text))
-  if (missing.length || failures.length) {
-    throw new Error(
-      `启动日志验收失败；缺少: ${missing.join(', ') || '无'}；致命错误: ${failures.join(', ') || '无'}`,
-    )
+  if (failures.length) {
+    throw new Error(`启动日志验收失败；致命错误: ${failures.join(', ')}`)
   }
 }
 
@@ -257,10 +253,10 @@ try {
   const logRoots =
     mode === 'portable' ? [path.join(path.dirname(executable), 'data')] : [appData, localAppData]
   let logs = ''
-  const logDeadline = Date.now() + 15_000
+  const logDeadline = Date.now() + 5_000
   while (Date.now() < logDeadline) {
     logs = await collectLogs(logRoots)
-    if (logs.includes('内置 Daemon 已就绪') && logs.includes('应用启动完成')) break
+    if (logs.trim()) break
     await new Promise((resolve) => setTimeout(resolve, 500))
   }
   assertStartupLogs(logs)

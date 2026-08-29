@@ -581,18 +581,25 @@ export class ConversationTurnService {
   ): string | null {
     const result = block.result?.trim()
     if (!result) return null
-    if (block.name !== 'read_file' && block.name !== 'read_file_range') return result
 
     let args: Record<string, unknown> = {}
     try {
       args = JSON.parse(block.args) as Record<string, unknown>
     } catch {
-      return result
+      return null
     }
-    const filePath = String(args.file_path ?? args.path ?? '').trim()
-    if (!filePath) return result
+
+    if (block.name === 'read_file') {
+      const filePath = String(args.file_path ?? '').trim()
+      if (!filePath) return null
+      const lineCount = result.split(/\r?\n/).length
+      const byteCount = Buffer.byteLength(result, 'utf8')
+      return `- 文件 ${filePath} 的内容（${lineCount} 行、${byteCount} 字节）：\n${result}`
+    }
 
     if (block.name === 'read_file_range') {
+      const filePath = String(args.path ?? '').trim()
+      if (!filePath) return null
       try {
         const data = JSON.parse(result) as Record<string, unknown>
         const content = typeof data.content === 'string' ? data.content.trim() : ''
@@ -613,13 +620,53 @@ export class ConversationTurnService {
           .join('、')
         return `- 文件 ${filePath} 的内容（${size || '规模未知'}${range}）：\n${content}`
       } catch {
+        return null
+      }
+    }
+
+    if (block.name === 'code_search') {
+      try {
+        const data = JSON.parse(result) as {
+          matches?: Array<{ file?: unknown; line?: unknown; content?: unknown }>
+        }
+        const matches = (data.matches ?? []).flatMap((match) => {
+          const content = typeof match.content === 'string' ? match.content.trim() : ''
+          if (!content) return []
+          const file = typeof match.file === 'string' ? match.file : '未知文件'
+          const line = Number.isFinite(Number(match.line)) ? `:${Number(match.line)}` : ''
+          return [`${file}${line}：${content}`]
+        })
+        return matches.length ? matches.join('\n') : null
+      } catch {
+        return null
+      }
+    }
+
+    if (block.name === 'web_fetch') {
+      try {
+        const data = JSON.parse(result) as Record<string, unknown>
+        return typeof data.content === 'string' && data.content.trim()
+          ? data.content.trim()
+          : null
+      } catch {
+        return null
+      }
+    }
+
+    if (block.name === 'browser_get_content' || block.name === 'browser_search') {
+      try {
+        const data = JSON.parse(result) as Record<string, unknown>
+        for (const field of ['content', 'text', 'markdown']) {
+          const content = data[field]
+          if (typeof content === 'string' && content.trim()) return content.trim()
+        }
+        return null
+      } catch {
         return result
       }
     }
 
-    const lineCount = result.split(/\r?\n/).length
-    const byteCount = Buffer.byteLength(result, 'utf8')
-    return `- 文件 ${filePath} 的内容（${lineCount} 行、${byteCount} 字节）：\n${result}`
+    return null
   }
 
   private async captureWorkContext(

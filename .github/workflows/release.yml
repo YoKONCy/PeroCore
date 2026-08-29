@@ -353,6 +353,12 @@ jobs:
           name: electron-portable
           path: release-assets/
 
+      - name: 生成 Docker Compose 一键部署包
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          sed "s/__INFOS_VERSION__/${VERSION}/g" docker-compose.release.yml > release-assets/docker-compose.yml
+
       # Steam 版不上传到 GitHub Release（通过 SteamPipe 发布）
 
       - name: 生成 Changelog
@@ -389,6 +395,7 @@ jobs:
           prerelease: ${{ steps.release_meta.outputs.prerelease }}
           make_latest: ${{ steps.release_meta.outputs.prerelease != 'true' }}
           files: release-assets/*
+          overwrite_files: true
           body: |
             ## 🎉 ${{ github.ref_name }} 版本更新
 
@@ -456,9 +463,18 @@ jobs:
 
             ### 🐳 Docker 用户
 
+            下载 Release 附件中的 `docker-compose.yml`，即可使用本版本固定镜像一键启动：
+
             ```bash
-            docker pull ghcr.io/yokoncy/infos-backend:${{ steps.release_meta.outputs.version }}
-            docker pull ghcr.io/yokoncy/infos-frontend:${{ steps.release_meta.outputs.version }}
+            curl -LO https://github.com/YoKONCy/infOS/releases/download/${{ github.ref_name }}/docker-compose.yml
+            docker compose up -d
+            ```
+
+            启动后访问 `http://localhost:3000`。如需更新当前版本镜像，可执行：
+
+            ```bash
+            docker compose pull
+            docker compose up -d
             ```
 
             ---
