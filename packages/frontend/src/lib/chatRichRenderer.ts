@@ -103,10 +103,7 @@ interface ProtectedMath {
 }
 
 /** 渲染聊天富文本，并在最终进入 v-html 前执行白名单净化。 */
-export function renderChatRichText(
-  source: string,
-  options: ChatRichRenderOptions = {},
-): string {
+export function renderChatRichText(source: string, options: ChatRichRenderOptions = {}): string {
   if (!source.trim()) return ''
   const cacheEnabled = options.cache !== false && source.length <= RICH_TEXT_CACHE_MAX_SOURCE_LENGTH
   const cached = cacheEnabled ? readRichTextCache(source) : undefined
@@ -248,9 +245,7 @@ function quoteFragment(text: string): DocumentFragment | null {
     if (match.start > cursor) fragment.append(text.slice(cursor, match.start))
     const span = document.createElement('span')
     const type =
-      match.type === 'en-double' && /[\u3400-\u9fff]/.test(match.value)
-        ? 'cn-double'
-        : match.type
+      match.type === 'en-double' && /[\u3400-\u9fff]/.test(match.value) ? 'cn-double' : match.type
     span.className = `chat-quote chat-quote-${type}`
     span.textContent = match.value
     fragment.append(span)

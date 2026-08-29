@@ -361,7 +361,8 @@ export const useThreadStore = defineStore('thread', () => {
     const firstProjectedId = Number(projected[0]?.id)
     const retainedHistory = Number.isSafeInteger(firstProjectedId)
       ? messages.value.filter(
-          (message) => Number.isSafeInteger(Number(message.id)) && Number(message.id) < firstProjectedId,
+          (message) =>
+            Number.isSafeInteger(Number(message.id)) && Number(message.id) < firstProjectedId,
         )
       : []
     return [...retainedHistory, ...projected]
@@ -371,8 +372,7 @@ export const useThreadStore = defineStore('thread', () => {
     compositor.mergeSnapshot(snapshot)
     messages.value = mergeProjectionMessages(snapshot)
     historyCursor.value = messages.value[0]?.id
-    hasMoreHistory.value =
-      messages.value.length < (snapshot.totalMessages ?? messages.value.length)
+    hasMoreHistory.value = messages.value.length < (snapshot.totalMessages ?? messages.value.length)
   }
 
   /** 应用实时 Surface 帧，并在 commit 时把临时消息原子归一为持久消息 Shell。 */

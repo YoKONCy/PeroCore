@@ -45,8 +45,7 @@ export function segmentStreamMarkdown(
 }
 
 function updateHtmlDepth(line: string, depth: number): number {
-  const blockTags =
-    /<\/?(html|body|main|article|section|div|header|footer|nav|form|svg)\b[^>]*>/gi
+  const blockTags = /<\/?(html|body|main|article|section|div|header|footer|nav|form|svg)\b[^>]*>/gi
   let next = depth
   let match: RegExpExecArray | null
   while ((match = blockTags.exec(line)) !== null) {
@@ -71,7 +70,11 @@ function findStableCutoff(source: string): number {
       }
     } else if (!fence) {
       htmlDepth = updateHtmlDepth(line, htmlDepth)
-      if (htmlDepth === 0 && /\n\s*$/.test(line) && source.slice(0, offset + line.length).endsWith('\n\n')) {
+      if (
+        htmlDepth === 0 &&
+        /\n\s*$/.test(line) &&
+        source.slice(0, offset + line.length).endsWith('\n\n')
+      ) {
         boundaries.push(offset + line.length)
       }
     }
