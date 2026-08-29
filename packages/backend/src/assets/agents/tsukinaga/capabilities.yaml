@@ -1,0 +1,51 @@
+# 月永爱 Agent 能力矩阵
+# tools中的“*”表示角色层不做减法，最终能力仍受Channel、运行环境、模型和Thread策略约束。
+agent: tsukinaga
+
+channels:
+  desktop:
+    tools:
+      - '*'
+    skills:
+      - '*'
+    prompt_fragments:
+      - components/abilities/workspace
+    tool_permissions:
+      read_file:
+        resource_scope:
+          scope: system
+          allowed_roots: []
+          denied_paths: []
+        requires_approval: false
+      write_file:
+        resource_scope:
+          scope: principal_workspace
+          allowed_roots: []
+          denied_paths: []
+        requires_approval: false
+      terminal_execute:
+        resource_scope:
+          scope: system
+          allowed_roots: []
+          denied_paths: []
+        requires_approval: false
+      run_script:
+        resource_scope:
+          scope: system
+          allowed_roots: []
+          denied_paths: []
+        requires_approval: false
+
+  work:
+    tools:
+      - '*'
+    skills:
+      - code_assistance
+    prompt_fragments:
+      - components/abilities/workspace
+
+  group:
+    tools:
+      - '*'
+    skills: []
+    prompt_fragments: []
