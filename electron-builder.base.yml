@@ -50,14 +50,11 @@ extraResources:
     to: backend/backend/src/services/mdp/prompts
     filter:
       - '**/*'
-  - from: packages/backend/src/assets/agents
-    to: backend/backend/src/assets/agents
-    filter:
-      - '**/*'
   - from: packages/backend/src/tools
     to: backend/backend/src/tools
     filter:
       - '**/manifest.json'
+  # src/assets 已包含 agents，统一复制一次，避免 electron-builder 并发写入同一目标文件。
   - from: packages/backend/src/assets
     to: backend/backend/src/assets
     filter:
