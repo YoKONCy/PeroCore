@@ -129,7 +129,7 @@ export class McpClientManager {
       const transport = this.createTransport(config)
 
       // 创建 Client
-      const client = new Client({ name: `infos-${name}`, version: '0.9.3' }, { capabilities: {} })
+      const client = new Client({ name: `infos-${name}`, version: '0.9.3-hotfix1' }, { capabilities: {} })
 
       // 连接
       await client.connect(transport)

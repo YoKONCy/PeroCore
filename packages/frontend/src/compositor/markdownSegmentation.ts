@@ -44,9 +44,22 @@ export function segmentStreamMarkdown(
   return blocks
 }
 
+function updateHtmlDepth(line: string, depth: number): number {
+  const blockTags =
+    /<\/?(html|body|main|article|section|div|header|footer|nav|form|svg)\b[^>]*>/gi
+  let next = depth
+  let match: RegExpExecArray | null
+  while ((match = blockTags.exec(line)) !== null) {
+    if (/^<\//.test(match[0])) next = Math.max(0, next - 1)
+    else if (!/\/>$/.test(match[0])) next += 1
+  }
+  return next
+}
+
 function findStableCutoff(source: string): number {
   const boundaries: number[] = []
   let fence: { marker: string; start: number } | null = null
+  let htmlDepth = 0
   let offset = 0
   for (const line of source.split(/(?<=\n)/)) {
     const marker = line.match(/^[ \t]{0,3}(`{3,}|~{3,})/)
@@ -56,12 +69,11 @@ function findStableCutoff(source: string): number {
         fence = null
         boundaries.push(offset + line.length)
       }
-    } else if (
-      !fence &&
-      /\n\s*$/.test(line) &&
-      source.slice(0, offset + line.length).endsWith('\n\n')
-    ) {
-      boundaries.push(offset + line.length)
+    } else if (!fence) {
+      htmlDepth = updateHtmlDepth(line, htmlDepth)
+      if (htmlDepth === 0 && /\n\s*$/.test(line) && source.slice(0, offset + line.length).endsWith('\n\n')) {
+        boundaries.push(offset + line.length)
+      }
     }
     offset += line.length
   }
@@ -74,6 +86,7 @@ function splitStableRanges(source: string): string[] {
   const ranges: string[] = []
   let cursor = 0
   let fenceStart = -1
+  let htmlDepth = 0
   const lines = source.split(/(?<=\n)/)
   let offset = 0
   for (const line of lines) {
@@ -85,9 +98,12 @@ function splitStableRanges(source: string): string[] {
       ranges.push(source.slice(fenceStart, end))
       cursor = end
       fenceStart = -1
-    } else if (fenceStart === -1 && source.slice(cursor, offset + line.length).endsWith('\n\n')) {
-      ranges.push(source.slice(cursor, offset + line.length))
-      cursor = offset + line.length
+    } else if (fenceStart === -1) {
+      htmlDepth = updateHtmlDepth(line, htmlDepth)
+      if (htmlDepth === 0 && source.slice(cursor, offset + line.length).endsWith('\n\n')) {
+        ranges.push(source.slice(cursor, offset + line.length))
+        cursor = offset + line.length
+      }
     }
     offset += line.length
   }

@@ -379,4 +379,8 @@ export interface ConversationProjectionSnapshot {
   generatedAt: string
   messages: ConversationMessageProjection[]
   surfaces: ConversationSurfaceDescriptor[]
+  totalMessages?: number
+  pageSize?: number
+  hasMoreBefore?: boolean
+  beforeCursor?: string
 }

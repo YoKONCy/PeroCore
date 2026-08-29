@@ -17,7 +17,7 @@ import { addLogListener, getLogHistory } from '../lib/logBroadcaster'
 import { AppError } from '../lib/appError'
 
 /** 应用版本号 (由 scripts/sync-version.ts 自动同步) */
-const APP_VERSION = '0.9.3'
+const APP_VERSION = '0.9.3-hotfix1'
 
 export function createSystemRouter(ctx: AppContext) {
   const router = new Hono()

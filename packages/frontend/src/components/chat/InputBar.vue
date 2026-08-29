@@ -202,7 +202,7 @@ const tokenBudgetRatio = computed(() => {
 const tokenBudgetDegrees = computed(() => `${tokenBudgetRatio.value * 360}deg`)
 const tokenBudgetLabel = computed(() => {
   const budget = tokenBudget.value
-  if (!budget) return '— / — Token'
+  if (!budget?.contextWindowTokens) return '— / — Token'
   return `${formatTokenCount(budget.usedTokens)} / ${formatTokenCount(budget.contextWindowTokens)} Token`
 })
 const visibleThreadTools = computed(() => {
@@ -232,7 +232,6 @@ async function refreshTokenBudget(): Promise<void> {
   const request = ++tokenBudgetRequest
   try {
     const response = await threadsApi.previewTokenBudget(threadStore.threadId, {
-      agentId: agentStore.activeAgentId || undefined,
       content: inputText.value,
     })
     if (request === tokenBudgetRequest) tokenBudget.value = response.data ?? null

@@ -230,7 +230,7 @@ export interface FactRecord {
   objectId: string
   objectName: string
   statement: string
-  status: 'active' | 'superseded'
+  status: 'active' | 'superseded' | 'retracted'
   observedAt: string
   createdAt: string
   source?: string
@@ -248,6 +248,7 @@ export interface FactArchiveObject {
   aliases: string[]
   activeFacts: FactArchiveRecord[]
   historicalFacts: FactArchiveRecord[]
+  retractedFacts: FactArchiveRecord[]
 }
 
 export interface FactArchiveResult {
@@ -257,6 +258,7 @@ export interface FactArchiveResult {
     objectCount: number
     activeFactCount: number
     historicalFactCount: number
+    retractedFactCount: number
   }
 }
 

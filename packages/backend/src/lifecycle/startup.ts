@@ -228,6 +228,16 @@ async function synthesizeAndDeliverTts(
       return
     }
 
+    const seat = ctx.nodeRegistry.getInputSeat(principalId, 'audio-output')
+    if (!seat) {
+      logger.debug(`当前没有可用音频输出 Seat，跳过 TTS 播放: principal=${principalId}`)
+      return
+    }
+    if (!ctx.audioDeliveryService.canDeliverTo(seat.nodeId)) {
+      logger.debug(`音频输出节点尚未就绪，跳过 TTS 播放: node=${seat.nodeId}`)
+      return
+    }
+
     const ttsText = cleanTextForTts(reply)
     if (!ttsText.trim()) {
       logger.debug('TTS 文本清洗后为空，跳过合成')
@@ -235,11 +245,6 @@ async function synthesizeAndDeliverTts(
     }
 
     const audio = await ctx.ttsService.synthesize({ text: ttsText })
-    const seat = ctx.nodeRegistry.getInputSeat(principalId, 'audio-output')
-    if (!seat) {
-      logger.debug(`当前没有可用音频输出 Seat，跳过 TTS 播放: principal=${principalId}`)
-      return
-    }
     const receipt = await ctx.audioDeliveryService.deliver(
       audio,
       {
@@ -394,14 +399,13 @@ function registerChatHandler(ctx: AppContext): void {
         } else if (chunk.event === 'tool_call_start' && surfaceRef.current) {
           await ctx.gatewayHub.pushSurface(surfaceRef.current.startToolDraft(chunk.data.draftId))
         } else if (chunk.event === 'tool_call_delta' && surfaceRef.current) {
-          await ctx.gatewayHub.pushSurface(
-            surfaceRef.current.appendToolDraft(
-              chunk.data.draftId,
-              chunk.data.nameDelta,
-              chunk.data.argumentsDelta,
-              chunk.data.receivedChars,
-            ),
+          const frame = surfaceRef.current.appendToolDraft(
+            chunk.data.draftId,
+            chunk.data.nameDelta,
+            chunk.data.argumentsDelta,
+            chunk.data.receivedChars,
           )
+          if (frame) await ctx.gatewayHub.pushSurface(frame)
         } else if (chunk.event === 'tool_call_ready' && surfaceRef.current) {
           await ctx.gatewayHub.pushSurface(surfaceRef.current.finalizeToolDraft(chunk.data))
         } else if (chunk.event === 'tool_call') {

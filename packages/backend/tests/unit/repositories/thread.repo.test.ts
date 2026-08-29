@@ -133,6 +133,38 @@ describe('ThreadRepository 最近会话用途隔离', () => {
     expect(result.every((message) => message.threadId === 'pero-latest')).toBe(true)
   })
 
+  it('历史消息游标必须稳定返回更早记录且不受新消息插入影响', async () => {
+    sqlite.exec(`
+      INSERT INTO threads (id, agent_id, channel, purpose, status)
+      VALUES ('history', 'pero', 'desktop', 'conversation', 'active');
+      INSERT INTO thread_messages (id, thread_id, role, content, status, timestamp) VALUES
+        (1, 'history', 'user', '消息1', 'active', '2026-08-18T10:00:00.000Z'),
+        (2, 'history', 'assistant', '消息2', 'active', '2026-08-18T10:01:00.000Z'),
+        (3, 'history', 'user', '消息3', 'active', '2026-08-18T10:02:00.000Z'),
+        (4, 'history', 'assistant', '消息4', 'active', '2026-08-18T10:03:00.000Z'),
+        (5, 'history', 'user', '消息5', 'active', '2026-08-18T10:04:00.000Z');
+    `)
+    const repo = new ThreadRepository(
+      drizzle(sqlite, { schema: { threads, threadMessages } }) as never,
+    )
+
+    const latest = await repo.listActiveMessages({ threadId: 'history', pageSize: 2 })
+    expect(latest.items.map((message) => message.id)).toEqual([5, 4])
+    expect(latest.hasMoreBefore).toBe(true)
+
+    sqlite.exec(`
+      INSERT INTO thread_messages (id, thread_id, role, content, status, timestamp)
+      VALUES (6, 'history', 'assistant', '新消息', 'active', '2026-08-18T10:05:00.000Z');
+    `)
+    const older = await repo.listActiveMessages({
+      threadId: 'history',
+      beforeMessageId: 4,
+      pageSize: 2,
+    })
+    expect(older.items.map((message) => message.id)).toEqual([3, 2])
+    expect(older.hasMoreBefore).toBe(true)
+  })
+
   it('只有后台任务 Thread 时必须新建普通 conversation Thread', async () => {
     sqlite.exec(`
       INSERT INTO threads (id, agent_id, channel, purpose, last_message_at)

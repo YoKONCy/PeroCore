@@ -54,6 +54,33 @@ describe('Conversation Surface Session', () => {
     })
   })
 
+  it('大文件编辑参数必须在实时Surface中限长并摘要正文', () => {
+    const session = new ConversationSurfaceSession('thread-1', 'pero', 'execution-1')
+    session.startToolDraft('tool-draft-large')
+    const first = session.appendToolDraft(
+      'tool-draft-large',
+      'write_file',
+      JSON.stringify({ file_path: 'src/large.ts', content: 'a'.repeat(5000) }),
+      5060,
+    )
+    const suppressed = session.appendToolDraft('tool-draft-large', undefined, 'b'.repeat(1000), 6060)
+    const ready = session.finalizeToolDraft({
+      draftId: 'tool-draft-large',
+      callId: 'call-large',
+      name: 'write_file',
+      args: { file_path: 'src/large.ts', content: 'a'.repeat(50_000) },
+    })
+
+    expect(first?.operation.type).toBe('surface.upsert-node')
+    expect(suppressed).toBeNull()
+    if (ready.operation.type !== 'surface.upsert-node') throw new Error('缺少工具节点')
+    const props = ready.operation.node.props as { args: string }
+    expect(props.args.length).toBeLessThanOrEqual(2048)
+    expect(props.args).toContain('src/large.ts')
+    expect(props.args).toContain('[正文 50000 字符]')
+    expect(props.args).not.toContain('a'.repeat(1000))
+  })
+
   it('最终Commit应稳定携带流式模式与耗时遥测', () => {
     const session = new ConversationSurfaceSession('thread-1', 'pero', 'execution-1')
     const surface = {

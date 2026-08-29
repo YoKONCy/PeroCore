@@ -335,19 +335,19 @@ export class ThreadService {
   }
 
   /**
-   * 分页查询活跃消息（供前端历史加载）
-   *
-   * 倒序返回（最新在前），前端可按需反转。
+   * 按稳定消息游标查询活跃消息（最新在前），供前端历史追加。
    */
   async listMessages(params: {
     threadId: string
+    beforeMessageId?: number
     page?: number
     pageSize?: number
-  }): Promise<{ items: ThreadMessageInfo[]; total: number }> {
+  }): Promise<{ items: ThreadMessageInfo[]; total: number; hasMoreBefore: boolean }> {
     const result = await this.threadRepo.listActiveMessages(params)
     return {
       items: result.items.map((r) => this.toMessageInfo(r)),
       total: result.total,
+      hasMoreBefore: result.hasMoreBefore,
     }
   }
 

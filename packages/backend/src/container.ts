@@ -1370,6 +1370,7 @@ export async function createAppContext(config: AppConfig): Promise<AppContext> {
     imageUnderstandingService,
     executionRuntime,
     eventNoteDraftCommitter,
+    eventMemoryFallback,
     flowStateService,
     getAgentModelConfig: modelRoles.bindAgent(),
     getModelConfigById: (id) => modelRoles.resolveById(id),

@@ -30,6 +30,7 @@ const logger = createLogger('ReActLoop')
 
 /** 完整结果仅用于当前 ReAct 的读取类工具；持久化时必须替换为无正文审计摘要。 */
 const EPHEMERAL_READ_TOOLS = new Set(['read_file', 'read_file_range'])
+const TOOL_ARGUMENT_STREAM_PREVIEW_LIMIT = 2048
 
 /**
  * 将工具结果转换为可长期保存的审计结果。
@@ -588,18 +589,28 @@ export async function* runReActLoop(params: {
           if (tcDelta.id) target.id = tcDelta.id
           if (nameDelta) target.function.name += nameDelta
           if (argumentsDelta) target.function.arguments += argumentsDelta
-          if (nameDelta || argumentsDelta) {
-            yield {
-              event: 'tool_call_delta',
-              data: {
-                draftId: target.draftId,
-                turn: turn + 1,
-                nameDelta: nameDelta || undefined,
-                argumentsDelta: argumentsDelta || undefined,
-                receivedChars: target.function.arguments.length,
-              },
+          const nextReceivedChars = target.function.arguments.length
+            const previousReceivedChars = nextReceivedChars - argumentsDelta.length
+            const withinPreview = previousReceivedChars < TOOL_ARGUMENT_STREAM_PREVIEW_LIMIT
+            const crossedProgressBoundary =
+              Math.floor(previousReceivedChars / 4096) !== Math.floor(nextReceivedChars / 4096)
+            if (nameDelta || withinPreview || crossedProgressBoundary) {
+              yield {
+                event: 'tool_call_delta',
+                data: {
+                  draftId: target.draftId,
+                  turn: turn + 1,
+                  nameDelta: nameDelta || undefined,
+                  argumentsDelta: withinPreview
+                    ? argumentsDelta.slice(
+                        0,
+                        TOOL_ARGUMENT_STREAM_PREVIEW_LIMIT - previousReceivedChars,
+                      ) || undefined
+                    : undefined,
+                  receivedChars: nextReceivedChars,
+                },
+              }
             }
-          }
         }
       }
     }

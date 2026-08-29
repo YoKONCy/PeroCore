@@ -535,7 +535,21 @@ describe('EventMemoryService真实双库存储', () => {
       },
       'operation-second',
     )
+    await service.addRelation(first.id, second.id, 'same_topic', 1, 'operation-link')
     await service.archive(first.id, 'operation-archive')
+
+    const firstRow = await service.detail(first.id)
+    const secondRow = await service.detail(second.id)
+    const store = stores.getAgentStore('pero')
+    expect(firstRow?.status).toBe('archived')
+    expect(
+      store
+        .getEdges((await service.detail(first.id))!.tdbId)
+        .some(
+          (edge) =>
+            edge.targetId === secondRow!.tdbId && edge.label === 'same_topic',
+        ),
+    ).toBe(true)
 
     const rag = await service.automaticRag('pero', '第二件互动事件', 1)
     expect(rag.map((note) => note.id)).not.toContain(first.id)

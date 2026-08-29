@@ -74,6 +74,28 @@ renderer.link = ({ href, title, tokens }) => {
 }
 
 const marked = new Marked({ renderer, breaks: true, gfm: true })
+const RICH_TEXT_CACHE_LIMIT = 500
+const RICH_TEXT_CACHE_MAX_SOURCE_LENGTH = 64_000
+const richTextCache = new Map<string, string>()
+
+export interface ChatRichRenderOptions {
+  cache?: boolean
+}
+
+function readRichTextCache(source: string): string | undefined {
+  const cached = richTextCache.get(source)
+  if (cached === undefined) return undefined
+  richTextCache.delete(source)
+  richTextCache.set(source, cached)
+  return cached
+}
+
+function writeRichTextCache(source: string, html: string): void {
+  richTextCache.set(source, html)
+  if (richTextCache.size > RICH_TEXT_CACHE_LIMIT) {
+    richTextCache.delete(richTextCache.keys().next().value!)
+  }
+}
 
 interface ProtectedMath {
   placeholder: string
@@ -81,12 +103,21 @@ interface ProtectedMath {
 }
 
 /** 渲染聊天富文本，并在最终进入 v-html 前执行白名单净化。 */
-export function renderChatRichText(source: string): string {
+export function renderChatRichText(
+  source: string,
+  options: ChatRichRenderOptions = {},
+): string {
   if (!source.trim()) return ''
+  const cacheEnabled = options.cache !== false && source.length <= RICH_TEXT_CACHE_MAX_SOURCE_LENGTH
+  const cached = cacheEnabled ? readRichTextCache(source) : undefined
+  if (cached !== undefined) return cached
   const inlineMath: ProtectedMath[] = []
+  // 兼容清理模型偶发复述的旧版内部历史标签。该标签在名称后使用逗号，
+  // 不是合法 HTML 语法，因此精确移除不会影响 span、details 等正常 HTML 渲染。
+  const visibleSource = stripLeakedConversationMetadata(source)
   // 有些模型会把整份回复包进 ```markdown 围栏；这表示需要渲染的文档而非代码示例。
   // 仅当该围栏覆盖整个回复时解包，嵌入正文的 markdown 代码示例仍按源码展示。
-  const markdownSource = unwrapWholeMarkdownFence(source)
+  const markdownSource = unwrapWholeMarkdownFence(visibleSource)
   // 模型流式输出常会为整段 Markdown 追加缩进；标题行有四个空格时会被 CommonMark 误判为代码。
   // 仅在 fenced code block 外归一化标题行，保留真实代码的原始缩进。
   const normalizedSource = normalizeMarkdownHeadings(markdownSource)
@@ -105,7 +136,16 @@ export function renderChatRichText(source: string): string {
     ADD_ATTR: ['target', 'rel', 'data-copy-code'],
     ADD_TAGS: ['annotation', 'math', 'semantics'],
   })
-  return decorateTextNodes(sanitized)
+  const rendered = decorateTextNodes(sanitized)
+  if (cacheEnabled) writeRichTextCache(source, rendered)
+  return rendered
+}
+
+function stripLeakedConversationMetadata(source: string): string {
+  return source.replace(
+    /<([\p{L}\p{N}_-]+),\s*time=\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?>/gu,
+    '',
+  )
 }
 
 function unwrapWholeMarkdownFence(source: string): string {
@@ -207,7 +247,11 @@ function quoteFragment(text: string): DocumentFragment | null {
   for (const match of matches) {
     if (match.start > cursor) fragment.append(text.slice(cursor, match.start))
     const span = document.createElement('span')
-    span.className = `chat-quote chat-quote-${match.type}`
+    const type =
+      match.type === 'en-double' && /[\u3400-\u9fff]/.test(match.value)
+        ? 'cn-double'
+        : match.type
+    span.className = `chat-quote chat-quote-${type}`
     span.textContent = match.value
     fragment.append(span)
     cursor = match.end

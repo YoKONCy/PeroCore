@@ -591,6 +591,43 @@ describe('RegistryToolExecutor', () => {
     expect(handler).toHaveBeenCalledTimes(1)
   })
 
+  it('文件读取结果应保留工具自身限定的完整行数', async () => {
+    const registry = new ToolRegistry()
+    const fullRead = Array.from({ length: 800 }, (_, index) => `第${index + 1}行内容`).join('\n')
+    const rangeRead = JSON.stringify({
+      content: fullRead,
+      lineStart: 1,
+      lineEnd: 800,
+      totalLines: 2_000,
+      truncated: true,
+    })
+    registry.register(
+      { name: 'read_file', description: '完整读取', parameters: {} },
+      vi.fn().mockResolvedValue(fullRead),
+    )
+    registry.register(
+      { name: 'read_file_range', description: '范围读取', parameters: {} },
+      vi.fn().mockResolvedValue(rangeRead),
+    )
+    const executor = new RegistryToolExecutor(registry)
+
+    const full = await executor.execute('read_file', { file_path: 'large.txt' }, 'desktop')
+    const range = await executor.execute(
+      'read_file_range',
+      { path: 'large.txt', line_start: 1, line_end: 2_000 },
+      'desktop',
+    )
+
+    expect(full.output).toBe(fullRead)
+    expect(JSON.parse(range.output)).toMatchObject({
+      content: fullRead,
+      lineStart: 1,
+      lineEnd: 800,
+    })
+    expect(full.output).not.toContain('truncated by system')
+    expect(range.output).not.toContain('truncated by system')
+  })
+
   it('应当处理未知工具、执行异常与长输出截断', async () => {
     const registry = new ToolRegistry()
     registry.register(

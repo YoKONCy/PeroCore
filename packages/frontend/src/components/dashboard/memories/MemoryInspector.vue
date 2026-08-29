@@ -22,6 +22,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   'load-source': []
   select: [note: EventNote]
+  archive: [note: EventNote]
 }>()
 
 const showSource = ref(false)
@@ -262,6 +263,17 @@ function openSource(): void {
         </div>
       </section>
 
+      <section v-if="selected.status === 'active'" class="panel archive-action">
+        <div>
+          <strong>删除这条核心记忆</strong>
+          <span>记忆将退出检索，但节点和关系边会完整保留。</span>
+        </div>
+        <PButton variant="danger" size="sm" @click="emit('archive', selected)">
+          <PixelIcon name="trash" size="xs" />
+          删除
+        </PButton>
+      </section>
+
       <!-- 原始对话 -->
       <section class="panel">
         <div class="source-head">
@@ -340,6 +352,29 @@ function openSource(): void {
   flex-direction: column;
   gap: 12px;
   padding-right: 4px;
+}
+
+.archive-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-color: color-mix(in srgb, var(--ui-danger, #ef4444) 38%, var(--ui-border-subtle));
+}
+.archive-action div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+.archive-action strong {
+  color: var(--ui-text-primary);
+  font-size: 12px;
+}
+.archive-action span {
+  color: var(--ui-text-tertiary);
+  font-size: 10px;
+  line-height: 1.5;
 }
 
 .panel {

@@ -48,6 +48,32 @@ print("你好")
     expect(root.querySelector('user')).toBeNull()
   })
 
+  it('应清理模型复述的内部时间标签，同时保留正文样式', () => {
+    const html = renderChatRichText(
+      '<nana, time=2026-08-29 19:19:40>（眯到主人这话）“林小姐实在看不下去了”的嫌弃',
+    )
+    const root = document.createElement('div')
+    root.innerHTML = html
+
+    const quote = root.querySelector('.chat-quote-cn-double')
+    expect(quote?.textContent).toBe('“林小姐实在看不下去了”')
+    expect(root.querySelector('a')).toBeNull()
+    expect(root.textContent).not.toContain('<nana, time=')
+    expect(root.textContent).toContain('（眯到主人这话）')
+  })
+
+  it('清理内部时间标签不能影响正常HTML渲染', () => {
+    const html = renderChatRichText(
+      '<span class="speaker">正常HTML</span><br><mark>继续渲染</mark>',
+    )
+    const root = document.createElement('div')
+    root.innerHTML = html
+
+    expect(root.querySelector('span.speaker')?.textContent).toBe('正常HTML')
+    expect(root.querySelector('mark')?.textContent).toBe('继续渲染')
+    expect(root.querySelector('br')).not.toBeNull()
+  })
+
   it('应当只保留无内容的复制标记，不把源码编码写进可见 DOM', () => {
     const html = renderChatRichText('```json\n{"状态":"正常"}\n```')
     const root = document.createElement('div')

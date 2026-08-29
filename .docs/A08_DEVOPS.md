@@ -247,6 +247,8 @@ if (isDocker && process.env.OTEL_ENDPOINT) {
 
 - 用户提交到接收确认、首Token与首Surface延迟；
 - 流式帧率、最长主线程阻塞和长消息DOM变更量；
+- 对话首屏消息数、历史分页响应时间、已挂载消息组件数与占位高度误差；
+- Markdown缓存命中率、富文本解析P95、重型Surface挂载数和Renderer内存；
 - 每个Execution的内存、Token、LLM、工具与并发I/O用量；
 - 前台任务受后台负载影响的P95延迟；
 - Provider超时、取消、stale-handle和重复消息比率；

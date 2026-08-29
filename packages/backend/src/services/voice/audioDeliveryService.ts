@@ -32,6 +32,24 @@ export class AudioDeliveryService {
     private readonly localNodeId: KernelNodeId,
   ) {}
 
+  canDeliverTo(targetNodeId?: KernelNodeId): boolean {
+    return this.directory
+      .listOffers({
+        requirementId: 'audio-output-playback',
+        capabilityType: 'audio.output',
+        contractVersion: '1.0',
+        operations: ['play', 'stop', 'status'],
+        required: true,
+        binding: 'lazy',
+        cardinality: 'one',
+      })
+      .some(
+        (candidate) =>
+          candidate.health === 'available' &&
+          (!targetNodeId || candidate.placement?.providerNodeId === targetNodeId),
+      )
+  }
+
   async deliver(
     audio: TtsResult,
     context: KernelCallContext,

@@ -8,7 +8,15 @@
  * @props agentId - 目标 Agent ID
  * @props agentName - Agent 名称
  */
-import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import {
+  ref,
+  computed,
+  onMounted,
+  onUnmounted,
+  onActivated,
+  nextTick,
+  watch,
+} from 'vue'
 import ConversationSurface from '../compositor/ConversationSurface.vue'
 import MessageBubble from './MessageBubble.vue'
 import InputBar from './InputBar.vue'
@@ -29,6 +37,7 @@ import {
 } from '../../stores'
 import { logger } from '../../lib/logger'
 import { chatApi } from '../../api/modules/chatApi'
+import { voiceApi } from '../../api/modules/voiceApi'
 import type { AttachmentInfo } from '../../api/modules/attachmentsApi'
 
 export interface Props {
@@ -63,6 +72,8 @@ const emit = defineEmits<{
 }>()
 
 const containerRef = ref<HTMLElement | null>(null)
+const bubbleMessageCache = new WeakMap<object, BubbleMessage>()
+let scrollFrame: number | null = null
 
 // ── 对话管道 (F3: 真实 SSE 流) ──
 const {
@@ -79,6 +90,11 @@ const compositor = useCompositorStore()
 const notif = useNotificationStore()
 const rewind = useConversationRewind()
 const approvalStore = useApprovalStore()
+const playingMsgId = ref<string | null>(null)
+const isLoadingAudio = ref(false)
+let messageAudioContext: AudioContext | null = null
+let messageAudioSource: AudioBufferSourceNode | null = null
+let audioRequest = 0
 const interactionSurfaces = computed(() =>
   [...compositor.surfaces.values()].filter(
     (surface) =>
@@ -128,8 +144,10 @@ const activeCommand = ref<ActiveCommand | null>(null)
 const messages = computed<BubbleMessage[]>(() => {
   return chatMessages.value.map((m) => {
     const surface = m.surfaceId ? compositor.get(m.surfaceId) : undefined
+    const cached = bubbleMessageCache.get(m)
+    if (cached && cached.surface === surface) return cached
     const hasThinkingSurface = surface?.nodes.some((node) => node.kind === 'thinking') ?? false
-    return {
+    const mapped: BubbleMessage = {
       id: m.id,
       role: m.role as 'user' | 'assistant' | 'system',
       content: m.content ?? '',
@@ -138,12 +156,12 @@ const messages = computed<BubbleMessage[]>(() => {
       timestamp: m.timestamp ? new Date(m.timestamp).getTime() : undefined,
       outputTokens: m.outputTokens,
       senderId: m.senderId,
-      images: m.images,
-      attachments: m.attachments,
       ragFailureTrace: m.ragFailureTrace,
       surface,
       imageTranscription: m.imageTranscription,
     }
+    bubbleMessageCache.set(m, mapped)
+    return mapped
   })
 })
 
@@ -176,6 +194,32 @@ function onBubbleMounted(event: unknown) {
 
 function onBubbleUnmounted(event: unknown) {
   unobserve(getComponentRootElement(event))
+}
+
+async function loadOlderWithAnchor(): Promise<void> {
+  const container = containerRef.value
+  if (!container || !threadStore.hasMoreHistory || threadStore.isLoadingOlderHistory) return
+  const previousHeight = container.scrollHeight
+  const previousTop = container.scrollTop
+  const added = await threadStore.loadOlderMessages()
+  if (!added) return
+  await nextTick()
+  container.scrollTop = previousTop + container.scrollHeight - previousHeight
+}
+
+function handleMessageScroll(): void {
+  if (scrollFrame !== null) return
+  scrollFrame = requestAnimationFrame(() => {
+    scrollFrame = null
+    const container = containerRef.value
+    if (container?.scrollTop !== undefined && container.scrollTop < 240) {
+      void loadOlderWithAnchor()
+    }
+  })
+}
+
+async function restoreMessageViewport(): Promise<void> {
+  await nextTick()
 }
 
 // ── 发送消息 ──
@@ -314,6 +358,76 @@ async function handleDeletePair(id: string) {
   }
 }
 
+function messageTextForTts(content: string): string {
+  return content
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/^[\s]*#{1,6}\s+/gm, '')
+    .replace(/[*_~`>|]/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+    .slice(0, 4096)
+}
+
+function stopMessageAudio(): void {
+  audioRequest++
+  messageAudioSource?.stop()
+  messageAudioSource = null
+  void messageAudioContext?.close()
+  messageAudioContext = null
+  playingMsgId.value = null
+  isLoadingAudio.value = false
+}
+
+async function handleTtsPlay(message: BubbleMessage): Promise<void> {
+  if (playingMsgId.value === message.id) {
+    stopMessageAudio()
+    return
+  }
+
+  stopMessageAudio()
+  const text = messageTextForTts(message.content)
+  if (!text) {
+    notif.toast('这条消息没有可朗读的文本', { type: 'warning' })
+    return
+  }
+  const request = audioRequest
+  playingMsgId.value = message.id
+  isLoadingAudio.value = true
+  try {
+    const audio = await voiceApi.synthesize({ text })
+    if (request !== audioRequest || playingMsgId.value !== message.id) return
+    const context = new AudioContext()
+    messageAudioContext = context
+    const buffer = await context.decodeAudioData(audio.slice(0))
+    if (request !== audioRequest || playingMsgId.value !== message.id) {
+      await context.close()
+      return
+    }
+    const source = context.createBufferSource()
+    messageAudioSource = source
+    source.buffer = buffer
+    source.connect(context.destination)
+    source.onended = () => {
+      if (messageAudioSource !== source) return
+      messageAudioSource = null
+      messageAudioContext = null
+      playingMsgId.value = null
+      isLoadingAudio.value = false
+      void context.close()
+    }
+    isLoadingAudio.value = false
+    source.start()
+  } catch (error) {
+    if (request !== audioRequest) return
+    stopMessageAudio()
+    logger.error('ChatContainer', '朗读消息失败', error)
+    notif.toast(`朗读消息失败：${(error as Error).message}`, { type: 'error' })
+  }
+}
+
 /** 复制消息内容到剪贴板 */
 async function handleCopy(content: string) {
   try {
@@ -367,7 +481,14 @@ onMounted(() => {
   scrollToBottom(false)
 })
 
+onActivated(() => {
+  void restoreMessageViewport()
+})
+
 onUnmounted(() => {
+  stopMessageAudio()
+  if (scrollFrame !== null) cancelAnimationFrame(scrollFrame)
+  scrollFrame = null
   window.removeEventListener('online', restoreProjection)
   window.removeEventListener('infos:conversation-rewound', handleConversationRewound)
   if (threadStore.threadId) compositor.disposeScope(`conversation:${threadStore.threadId}`)
@@ -390,7 +511,7 @@ onUnmounted(() => {
         <div class="chat-conversation-background__image" />
         <div class="chat-conversation-background__overlay" />
       </div>
-      <div ref="containerRef" class="chat-messages">
+      <div ref="containerRef" class="chat-messages" @scroll.passive="handleMessageScroll">
         <div v-if="isLoadingHistory" class="chat-history-state">
           <PixelIcon name="refresh" size="sm" animation="spin" />
           <span>正在同步历史聊天记录...</span>
@@ -401,9 +522,23 @@ onUnmounted(() => {
           <span>历史记录同步失败：{{ historyError }}</span>
         </div>
 
+        <div v-if="threadStore.isLoadingOlderHistory" class="chat-history-state">
+          <PixelIcon name="refresh" size="sm" animation="spin" />
+          <span>正在加载更早消息...</span>
+        </div>
+
         <MessageBubble
           v-for="msg in messages"
           :key="msg.id"
+          v-memo="[
+            msg,
+            msg.surface?.revision,
+            playingMsgId === msg.id,
+            isLoadingAudio,
+            isGenerating,
+            threadStore.ragProgressMessage,
+            threadStore.ragFailureTrace,
+          ]"
           :message="msg"
           :agent-name="agentName"
           :agent-avatar-url="agentAvatarUrl"
@@ -420,6 +555,7 @@ onUnmounted(() => {
           @edit="handleEdit"
           @delete-pair="handleDeletePair"
           @copy="handleCopy"
+          @tts-play="handleTtsPlay"
           @vue:mounted="onBubbleMounted"
           @vue:unmounted="onBubbleUnmounted"
         />

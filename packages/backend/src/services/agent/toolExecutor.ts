@@ -39,11 +39,13 @@ const MAX_OUTPUT_LENGTH = 8000
 /**
  * 免于截断的工具白名单
  *
- * 这些工具的输出包含需要下游完整解析的大体积数据 (如截图 base64)，
- * 一旦被 truncate 砍断就会导致 JSON 解析失败 / base64 残片污染上下文。
- * reactLoop 会负责提取并剥离其中的 base64，因此放行完整输出是安全的。
+ * 这些工具的输出需要在当前 ReAct 内完整消费：文件读取已经在工具内部按行数或字符数设限，
+ * 截图则需要下游完整解析 base64。再次按统一 8000 字符截断会让合法的 800 行读取只剩几百行，
+ * 或导致截图 JSON/base64 损坏。reactLoop 会对持久化审计另行裁剪，不会把读取正文写入数据库。
  */
 const SKIP_TRUNCATE_TOOLS = new Set<string>([
+  'read_file',
+  'read_file_range',
   'take_screenshot',
   'browser_screenshot',
   'browser_page_image',

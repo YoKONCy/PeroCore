@@ -6,7 +6,14 @@
  * 副作用在组件生命周期内建立并清理，避免跨页面残留监听器或异步状态。
  */
 import { onMounted, ref, watch } from 'vue'
-import mermaid from 'mermaid'
+
+type MermaidModule = typeof import('mermaid')['default']
+let mermaidPromise: Promise<MermaidModule> | null = null
+
+function loadMermaid(): Promise<MermaidModule> {
+  mermaidPromise ??= import('mermaid').then((module) => module.default)
+  return mermaidPromise
+}
 
 const props = withDefaults(defineProps<{ source: string; active?: boolean }>(), { active: true })
 const html = ref('')
@@ -21,6 +28,8 @@ async function render(): Promise<void> {
     return
   }
   try {
+    const mermaid = await loadMermaid()
+    if (generation !== renderGeneration || !props.active) return
     mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'neutral' })
     const result = await mermaid.render(`infos-mermaid-${crypto.randomUUID()}`, props.source)
     if (generation !== renderGeneration) return

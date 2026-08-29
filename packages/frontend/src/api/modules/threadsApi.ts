@@ -171,10 +171,15 @@ export const threadsApi = {
   },
 
   /** 获取 Conversation 权威 Projection 与 committed Surfaces。 */
-  getProjection: (threadId: string) =>
-    apiClient.get<ConversationProjectionSnapshot>(
-      `/chat/threads/${encodeURIComponent(threadId)}/projection`,
-    ),
+  getProjection: (threadId: string, params: { beforeCursor?: string; pageSize?: number } = {}) => {
+    const query = new URLSearchParams()
+    if (params.beforeCursor) query.set('beforeCursor', params.beforeCursor)
+    if (params.pageSize) query.set('pageSize', String(params.pageSize))
+    const suffix = query.toString()
+    return apiClient.get<ConversationProjectionSnapshot>(
+      `/chat/threads/${encodeURIComponent(threadId)}/projection${suffix ? `?${suffix}` : ''}`,
+    )
+  },
 
   /** 创建新 Thread */
   create: (data: CreateThreadRequest) =>

@@ -16,5 +16,10 @@ export function createKnowledgeRouter(ctx: AppContext) {
     return c.json({ code: 'OK', message: '获取成功', data })
   })
 
+  router.delete('/facts/:id', async (c) => {
+    await ctx.factsRepo.retractFact(c.req.param('id'))
+    return c.json({ code: 'OK', message: '事实已撤回' })
+  })
+
   return router
 }

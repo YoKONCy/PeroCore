@@ -64,14 +64,18 @@
 2. **尾部区 (Tail)**：正在追加的文本，使用轻量级流水线渲染。
 3. **调度**：使用 `useThrottleFn` 限制渲染频率为 33ms (30fps)，避免 token 级频繁重渲。
 
-### 3.4 视界优化 (IntersectionObserver)
+### 3.4 对话历史分页与动态窗口化
 
-不使用复杂的虚拟滚动，采用 **"不可见暂停"** 策略：
+对话页不得一次加载并挂载整个 Thread，也不得依赖固定 200 条 Projection 上限掩盖 DOM 增长。采用以下组合策略：
 
-- 监测每条消息是否在视口内。
-- **不可见时**：暂停消息内的 Web Animations、CSS 动效、Video/Audio、Canvas 循环。
-- **可见时**：恢复运行。
-- **优化**：在消息容器上使用 `content-visibility: auto`。
+- 首次只请求最新 60 条消息；滚动到顶部时按游标继续加载更早历史，并保持当前滚动锚点。
+- Renderer 仅挂载视口附近的消息分段；远端分段使用实测高度占位，`ResizeObserver` 持续修正动态高度。
+- 流式消息、当前播放消息和交互 Surface 必须保持真实 DOM，不得被窗口化卸载。
+- 已提交 Markdown 以源码为键使用有界 LRU 缓存；消息与 Surface 按 `messageId + revision` 保持对象身份。
+- 不可见时暂停动画、Video、Audio、Canvas，并卸载 iframe、Mermaid 与 Programmable Surface 等重型运行时；恢复时使用缓存高度避免滚动跳变。
+- Mermaid、KaTeX 等重型渲染依赖按首次实际使用动态加载。
+
+IntersectionObserver 负责可见性和重型节点生命周期，动态消息窗口负责控制 Vue 组件与普通 Markdown DOM 数量；两者职责不可混淆。
 
 ---
 
@@ -314,6 +318,8 @@ destroy_surface
 - 阻止不可信内容越过沙箱与Presentation边界。
 
 流式渲染采用稳定区与活动尾部：已完成复杂子树保持稳定身份，快速流与最终完整渲染分离；Mermaid、KaTeX、代码和工具卡拥有独立生命周期。非当前视图继续推进Projection，但停止无意义DOM更新。
+
+Conversation Projection 必须支持游标窗口，Snapshot 只返回请求窗口内的消息与对应 Surface，并携带`hasMoreBefore/beforeCursor`。前端追加历史时按`messageId + revision`复用已有对象，不得整体替换未变化的消息树；实时 Frame 只更新目标 Surface。工具结果必须按`callId`建立索引，禁止模板渲染阶段反复线性扫描 Surface Node。
 
 ### 8.4 性能与UX不变量
 

@@ -10,12 +10,18 @@ import { segmentChatContent } from '../../lib/embeddedWebPreview'
 import { renderChatRichText } from '../../lib/chatRichRenderer'
 import { useNotificationStore } from '../../stores/useNotificationStore'
 
-const props = defineProps<{ content: string; compact?: boolean }>()
+const props = withDefaults(
+  defineProps<{ content: string; compact?: boolean; active?: boolean; cache?: boolean }>(),
+  { active: true, cache: true },
+)
 const notify = useNotificationStore()
 const segments = computed(() =>
   segmentChatContent(props.content).map((segment) => ({
     ...segment,
-    html: segment.type === 'rich-text' ? renderChatRichText(segment.source) : '',
+    html:
+      segment.type === 'rich-text'
+        ? renderChatRichText(segment.source, { cache: props.cache })
+        : '',
   })),
 )
 
@@ -34,7 +40,11 @@ async function handleClick(event: MouseEvent) {
 
 <template>
   <template v-for="(segment, index) in segments" :key="`${segment.type}-${index}`">
-    <EmbeddedWebPreview v-if="segment.type === 'web-preview'" :source="segment.source" />
+    <EmbeddedWebPreview
+      v-if="segment.type === 'web-preview'"
+      :source="segment.source"
+      :active="active"
+    />
     <!-- HTML已在chatRichRenderer中经过DOMPurify净化。 -->
     <!-- eslint-disable-next-line vue/no-v-html -->
     <div

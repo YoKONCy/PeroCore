@@ -13,7 +13,7 @@ export function createHealthRouter(logQuery?: LogQueryService) {
       message: '成功',
       data: {
         status: 'ok',
-        version: '0.9.3',
+        version: '0.9.3-hotfix1',
         uptime: Math.round(uptime),
         uptimeHuman: formatUptime(uptime),
         port: SERVER_PORT,

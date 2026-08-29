@@ -40,6 +40,9 @@ export const memoryApi = {
   source: (id: string) =>
     apiClient.get<EventMemorySource>(`/memories/${encodeURIComponent(id)}/source`),
 
+  /** 将核心记忆移入归档，保留关系图结构 */
+  archiveNote: (id: string) => apiClient.delete<void>(`/memories/${encodeURIComponent(id)}`),
+
   /** 记忆图谱快照（TDB 批量读取） */
   graph: (agentId: string, includeArchived = false, limit = 300) =>
     apiClient.get<EventMemoryGraphSnapshot>(

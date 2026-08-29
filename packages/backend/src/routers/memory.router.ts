@@ -112,6 +112,11 @@ export function createMemoryRouter(ctx: AppContext) {
     })
   })
 
+  router.delete('/:id', async (c) => {
+    await ctx.eventMemoryService.archive(c.req.param('id'))
+    return c.json({ code: 'OK', message: '核心记忆已移入归档' })
+  })
+
   router.get('/:id', async (c) => {
     const detail = await ctx.eventMemoryService.detail(c.req.param('id'))
     if (!detail) return c.json({ code: 'NOT_FOUND', message: '事件记忆不存在' }, 404)

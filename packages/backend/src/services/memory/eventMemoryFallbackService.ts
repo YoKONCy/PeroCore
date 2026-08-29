@@ -5,8 +5,18 @@ import type { ThreadRepository } from '../../repositories/thread.repo'
 import type { EventMemoryService } from './eventMemoryService'
 import type { ModelConfig } from '../llm/llmService'
 import { tokenCounter } from '../tokenizer/tokenCounter'
+import { createLogger } from '../../lib/logger'
 
-export type BackgroundMemoryReason = 'agent_silence' | 'thread_idle' | 'day_boundary' | 'capacity'
+const logger = createLogger('EventMemoryFallbackService')
+const SCORER_BATCH_SIZE = 8
+
+export type BackgroundMemoryReason =
+  | 'agent_silence'
+  | 'thread_idle'
+  | 'day_boundary'
+  | 'capacity'
+  | 'scorer_batch'
+  | 'context_window'
 
 export interface BackgroundEventExtractor {
   extract(input: {
@@ -43,6 +53,8 @@ const PRIORITY: Record<BackgroundMemoryReason, number> = {
   thread_idle: 2,
   day_boundary: 3,
   capacity: 4,
+  scorer_batch: 5,
+  context_window: 6,
 }
 
 export class EventMemoryFallbackService {
@@ -111,7 +123,9 @@ export class EventMemoryFallbackService {
         )
         let reason: BackgroundMemoryReason | undefined
         if (tokenEstimate >= capacity) reason = 'capacity'
-        else if (boundary && boundary !== this.lastBoundaryDate) reason = 'day_boundary'
+        else if (segments.some((segment) => segment.length >= SCORER_BATCH_SIZE)) {
+          reason = 'scorer_batch'
+        } else if (boundary && boundary !== this.lastBoundaryDate) reason = 'day_boundary'
         else if (idle >= this.options.threadIdleSeconds) reason = 'thread_idle'
         else if (silence >= this.options.agentSilenceSeconds) reason = 'agent_silence'
         if (reason) {
@@ -122,6 +136,37 @@ export class EventMemoryFallbackService {
       }
     }
     if (boundary) this.lastBoundaryDate = boundary
+    await this.drain()
+  }
+
+  async ensureContextWindowCoverage(input: {
+    agentId: string
+    threadId: string
+    channel: string
+    contextPairs: number
+  }): Promise<void> {
+    const messages = await this.threads.queryActiveMessagePairs(input.threadId, 10_000)
+    const pairs = this.orderedPairs(messages)
+    const covered = await this.repo.coveredPairIds(input.agentId, input.threadId)
+    const precedingPairs = pairs.slice(0, -1)
+    const contextPairs = Math.max(1, input.contextPairs)
+    if (precedingPairs.length < contextPairs) return
+
+    const batchPairs = precedingPairs
+      .slice(-contextPairs)
+      .filter((pairId) => !covered.has(pairId))
+    if (!batchPairs.length) return
+
+    const capacity = await this.capacityTokens()
+    for (const pairIds of this.sliceByCapacity(messages, batchPairs, capacity)) {
+      this.enqueue(
+        input.agentId,
+        input.threadId,
+        input.channel,
+        pairIds,
+        'context_window',
+      )
+    }
     await this.drain()
   }
 
@@ -268,6 +313,9 @@ export class EventMemoryFallbackService {
       staleBefore,
     })
     if (!claimed) return
+    logger.info(
+      `开始后台事件提炼: agent=${task.agentId}, thread=${task.threadId}, pairs=${task.pairIds.length}, reason=${task.reason}`,
+    )
     try {
       const messages = await this.threads.findMessagesByPairIds(task.threadId, task.pairIds)
       if (!messages.length) return
@@ -297,6 +345,9 @@ export class EventMemoryFallbackService {
             coveredAt: new Date().toISOString(),
           },
           ownerId,
+        )
+        logger.info(
+          `后台事件提炼完成，未发现长期事件: agent=${task.agentId}, pairs=${task.pairIds.length}`,
         )
         return
       }
@@ -335,6 +386,9 @@ export class EventMemoryFallbackService {
           coveredAt: new Date().toISOString(),
         },
         ownerId,
+      )
+      logger.info(
+        `后台事件提炼完成: agent=${task.agentId}, pairs=${task.pairIds.length}, events=${notes.length}`,
       )
     } finally {
       await this.repo.releaseCoverageClaim(ownerId)

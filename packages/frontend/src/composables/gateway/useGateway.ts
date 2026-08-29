@@ -145,7 +145,7 @@ function createGatewayClient() {
   const retryCount = ref(0)
   const lastError = ref<string | null>(null)
   const isConnected = computed(() => state.value === 'connected')
-  const stableNodeId = getOrCreateStableNodeId()
+  let stableNodeId = getOrCreateStableNodeId()
   const sessionId = ref<string | null>(null)
   const sessionGeneration = ref(0)
   const inputSeat = ref<KernelInputSeat | null>(null)
@@ -215,8 +215,26 @@ function createGatewayClient() {
 
   // ═══ 连接管理 ═══
 
+  /** Electron 渲染层与主进程能力提供者必须共享 Node ID，确保 Input Seat 能定向到 audio.output Offer。 */
+  async function resolveStableNodeId(): Promise<void> {
+    if (!isElectronClient() || !window.electron) return
+    try {
+      const capabilityNodeId = await window.electron.invoke('get-capability-node-id')
+      if (typeof capabilityNodeId === 'string' && capabilityNodeId.trim()) {
+        stableNodeId = capabilityNodeId.trim()
+      }
+    } catch (error) {
+      logger.warn('Gateway', `读取 Electron 能力节点 ID 失败: ${(error as Error).message}`)
+    }
+  }
+
   /** 建立 WebSocket 连接 */
-  function connect(): void {
+  async function connect(): Promise<void> {
+    if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
+      return
+    }
+
+    await resolveStableNodeId()
     if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
       return
     }
@@ -636,7 +654,7 @@ function createGatewayClient() {
 
     reconnectTimer = setTimeout(() => {
       retryCount.value++
-      connect()
+      void connect()
     }, delay)
   }
 

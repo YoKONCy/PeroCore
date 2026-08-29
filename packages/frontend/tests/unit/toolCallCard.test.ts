@@ -31,6 +31,16 @@ describe('ToolCallCard Tool Atelier', () => {
     expect(wrapper.text()).toContain('进行中')
   })
 
+  it('文件编辑执行中应明确显示编辑状态和路径', async () => {
+    const wrapper = mount(ToolCallCard, {
+      props: { tool: { name: 'edit_file', args: '{"path":"src/large.ts"}' } },
+      global: { stubs: { Teleport: true } },
+    })
+
+    expect(wrapper.text()).toContain('正在编辑 · src/large.ts')
+    expect(wrapper.text()).toContain('进行中')
+  })
+
   it('结果到达约600ms后应自动收起', async () => {
     vi.useFakeTimers()
     const wrapper = mount(ToolCallCard, {

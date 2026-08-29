@@ -23,6 +23,16 @@ export interface FlowStateInfo {
   updatedAt: string | null
 }
 
+export interface AutomaticWorkContextItem {
+  sourceKey: string
+  content: string
+}
+
+interface StoredAutomaticWorkContext {
+  version: 1
+  items: AutomaticWorkContextItem[]
+}
+
 /** Thread × Agent 私有临时记忆领域服务。 */
 export class FlowStateService {
   constructor(
@@ -89,11 +99,21 @@ export class FlowStateService {
     threadId: string
     agentId: string
     pairId: string
-    content: string
+    content?: string
+    items?: AutomaticWorkContextItem[]
   }): Promise<void> {
     await this.assertScope(input.threadId, input.agentId)
-    const content = this.normalize(input.content)
-    if (!content) return
+    const items = (input.items ?? [])
+      .map((item) => ({
+        sourceKey: item.sourceKey.trim().toLocaleLowerCase(),
+        content: this.normalize(item.content),
+      }))
+      .filter((item) => item.sourceKey && item.content)
+    const legacyContent = this.normalize(input.content ?? '')
+    if (!items.length && !legacyContent) return
+    const content = items.length
+      ? JSON.stringify({ version: 1, items } satisfies StoredAutomaticWorkContext)
+      : legacyContent
     const thread = await this.threadService.getThread(input.threadId)
     const before = await this.repo.get(input.threadId, input.agentId)
     if (!before) {
@@ -215,6 +235,47 @@ export class FlowStateService {
     }
   }
 
+  private deduplicateAutomaticEntries(
+    entries: Array<{ content: string }>,
+  ): string[] {
+    const seen = new Set<string>()
+    const retained: string[][] = []
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      const parsed = this.parseAutomaticEntry(entries[index]!.content)
+      const items: string[] = []
+      for (let itemIndex = parsed.length - 1; itemIndex >= 0; itemIndex -= 1) {
+        const item = parsed[itemIndex]!
+        if (item.sourceKey && seen.has(item.sourceKey)) continue
+        if (item.sourceKey) seen.add(item.sourceKey)
+        items.unshift(item.content)
+      }
+      if (items.length) retained.unshift(items)
+    }
+    return retained.flat()
+  }
+
+  private parseAutomaticEntry(content: string): AutomaticWorkContextItem[] {
+    try {
+      const parsed = JSON.parse(content) as Partial<StoredAutomaticWorkContext>
+      if (parsed.version === 1 && Array.isArray(parsed.items)) {
+        return parsed.items
+          .filter(
+            (item): item is AutomaticWorkContextItem =>
+              typeof item?.sourceKey === 'string' && typeof item?.content === 'string',
+          )
+          .map((item) => ({
+            sourceKey: item.sourceKey.trim().toLocaleLowerCase(),
+            content: item.content.trim(),
+          }))
+          .filter((item) => item.content)
+      }
+    } catch {
+      // 旧版本逐轮纯文本没有来源键，继续按原有顺序保留。
+    }
+    const normalized = content.trim()
+    return normalized ? [{ sourceKey: '', content: normalized }] : []
+  }
+
   private async toInfo(row: {
     threadId: string
     agentId: string
@@ -250,7 +311,7 @@ export class FlowStateService {
       })
       summary = ''
     }
-    const automatic = entries.map((entry) => entry.content).filter(Boolean)
+    const automatic = this.deduplicateAutomaticEntries(entries)
     const workContextSegments = [summary, ...automatic].filter(Boolean)
     const workContext = workContextSegments.join('\n\n')
     const automaticRemaining = entries.length

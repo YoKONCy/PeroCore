@@ -5,14 +5,16 @@
  * 负责组织该界面的响应式状态、用户交互与领域数据展示。
  * 副作用在组件生命周期内建立并清理，避免跨页面残留监听器或异步状态。
  */
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { buildEmbeddedWebDocument } from '../../lib/embeddedWebPreview'
 
-const props = defineProps<{ source: string }>()
+const props = withDefaults(defineProps<{ source: string; active?: boolean }>(), { active: true })
 const channel = `preview-${crypto.randomUUID()}`
 const height = ref(180)
 const loaded = ref(false)
-const srcdoc = computed(() => buildEmbeddedWebDocument(props.source, channel))
+const srcdoc = computed(() =>
+  props.active ? buildEmbeddedWebDocument(props.source, channel) : undefined,
+)
 
 function handleMessage(event: MessageEvent): void {
   const data = event.data as { type?: string; channel?: string; height?: number }
@@ -22,6 +24,12 @@ function handleMessage(event: MessageEvent): void {
 
 onMounted(() => window.addEventListener('message', handleMessage))
 onBeforeUnmount(() => window.removeEventListener('message', handleMessage))
+watch(
+  () => props.active,
+  (active) => {
+    if (active) loaded.value = false
+  },
+)
 </script>
 
 <template>
@@ -31,6 +39,7 @@ onBeforeUnmount(() => window.removeEventListener('message', handleMessage))
       <span>隔离预览</span>
     </div>
     <iframe
+      v-if="active"
       :srcdoc="srcdoc"
       :style="{ height: `${height}px` }"
       sandbox="allow-scripts"
@@ -38,6 +47,7 @@ onBeforeUnmount(() => window.removeEventListener('message', handleMessage))
       title="隔离的内嵌网页预览"
       @load="loaded = true"
     />
+    <div v-else class="embedded-web-preview__placeholder" :style="{ height: `${height}px` }" />
   </section>
 </template>
 
@@ -77,5 +87,9 @@ onBeforeUnmount(() => window.removeEventListener('message', handleMessage))
   border: 0;
   background: transparent;
   transition: height 0.12s ease-out;
+}
+.embedded-web-preview__placeholder {
+  min-height: 96px;
+  max-height: 720px;
 }
 </style>

@@ -290,6 +290,45 @@ describe('ConversationTurnService 初始提示词快照', () => {
     expect(feedback).toHaveBeenCalledWith(result.pairId, '已使用记忆')
   })
 
+  it('持久对话编译前应按上下文轮次触发长记忆窗口兜底', async () => {
+    const ensureContextWindowCoverage = vi.fn().mockResolvedValue(undefined)
+    const compile = vi.fn().mockResolvedValue({
+      messages: [{ role: 'user', content: '第41轮' }],
+      manifest: { disabledTools: [] },
+    })
+    const service = new ConversationTurnService({
+      threadService: {
+        getThread: vi.fn().mockResolvedValue({
+          id: 'thread-1',
+          agentId: 'pero',
+          channel: 'desktop',
+          disabledTools: [],
+        }),
+        appendUserMessage: vi.fn().mockResolvedValue({ id: 1 }),
+      },
+      contextCompiler: {
+        getMessageWindow: vi.fn().mockResolvedValue(40),
+        compile,
+      },
+      eventMemoryFallback: { ensureContextWindowCoverage },
+      attachmentService: { validateForBinding: vi.fn().mockResolvedValue([]) },
+      imageUnderstandingService: { transcribe: vi.fn() },
+      getAgentModelConfig: vi.fn().mockResolvedValue(null),
+    } as never)
+
+    await service.prepareTurn({ threadId: 'thread-1', content: '第41轮' })
+
+    expect(ensureContextWindowCoverage).toHaveBeenCalledWith({
+      agentId: 'pero',
+      threadId: 'thread-1',
+      channel: 'desktop',
+      contextPairs: 40,
+    })
+    expect(ensureContextWindowCoverage.mock.invocationCallOrder[0]).toBeLessThan(
+      compile.mock.invocationCallOrder[0]!,
+    )
+  })
+
   it('持久化文件正文及来源信息，但不保存 ReAct 叙述、原始参数或最终回复', async () => {
     const appendAutomaticWorkContext = vi.fn().mockResolvedValue(undefined)
     const service = new ConversationTurnService({
@@ -435,12 +474,22 @@ describe('ConversationTurnService 初始提示词快照', () => {
       threadId: 'thread-1',
       agentId: 'pero',
       pairId: result.pairId,
-      content:
-        '- 文件 src/example.ts 的内容（1 行、22 字节）：\nexport const value = 1\n\n' +
-        '- 文件 src/app.py 的内容（80 行、2048 字节，本次读取第 10-11 行）：\n' +
-        'def run():\n  return True',
+      items: [
+        {
+          sourceKey: 'file:src/example.ts',
+          content: '- 文件 src/example.ts 的内容（1 行、22 字节）：\nexport const value = 1',
+        },
+        {
+          sourceKey: 'file:src/app.py',
+          content:
+            '- 文件 src/app.py 的内容（80 行、2048 字节，本次读取第 10-11 行）：\n' +
+            'def run():\n  return True',
+        },
+      ],
     })
-    const captured = appendAutomaticWorkContext.mock.calls[0]![0].content
+    const captured = appendAutomaticWorkContext.mock.calls[0]![0].items
+      .map((item: { content: string }) => item.content)
+      .join('\n\n')
     expect(captured).not.toContain('ReAct')
     expect(captured).not.toContain('我先读取代码')
     expect(captured).not.toContain('read_file')
@@ -452,6 +501,76 @@ describe('ConversationTurnService 初始提示词快照', () => {
     expect(captured).not.toContain('工作上下文已更新')
     expect(captured).not.toContain('读取失败')
     expect(captured).not.toContain('读取完成')
+  })
+
+  it('模型未配置上下文窗口时Token预算返回不可计算状态', async () => {
+    const compile = vi.fn()
+    const service = new ConversationTurnService({
+      threadService: {
+        getThread: vi.fn().mockResolvedValue({
+          id: 'thread-tsukinaga',
+          agentId: 'tsukinaga',
+          channel: 'desktop',
+          disabledTools: [],
+        }),
+      },
+      contextCompiler: { compile },
+      getAgentModelConfig: vi.fn().mockResolvedValue({
+        modelId: 'model-without-window',
+        maxTokens: 8_192,
+      }),
+    } as never)
+
+    await expect(
+      service.previewTokenBudget({
+        threadId: 'thread-tsukinaga',
+        content: '待发送内容',
+      }),
+    ).resolves.toEqual({
+      usedTokens: 0,
+      contextWindowTokens: 0,
+      maxInputTokens: 0,
+      modelId: 'model-without-window',
+    })
+    expect(compile).not.toHaveBeenCalled()
+  })
+
+  it('普通会话的Token预算始终使用Thread所属Agent', async () => {
+    const compile = vi.fn().mockResolvedValue({
+      messages: [{ role: 'system', content: '系统提示词' }],
+      manifest: { disabledTools: [] },
+    })
+    const getAgentModelConfig = vi.fn().mockResolvedValue({
+      modelId: 'model-pero',
+      contextWindowTokens: 262_144,
+      maxTokens: 8_192,
+    })
+    const service = new ConversationTurnService({
+      threadService: {
+        getThread: vi.fn().mockResolvedValue({
+          id: 'thread-pero',
+          agentId: 'pero',
+          channel: 'desktop',
+          disabledTools: [],
+        }),
+      },
+      contextCompiler: { compile },
+      getAgentModelConfig,
+    } as never)
+
+    const result = await service.previewTokenBudget({
+      threadId: 'thread-pero',
+      agentId: 'nana',
+      content: '待发送内容',
+    })
+
+    expect(getAgentModelConfig).toHaveBeenCalledWith('pero')
+    expect(compile).toHaveBeenCalledWith(
+      'thread-pero',
+      'pero',
+      expect.objectContaining({ retrievalQuery: '待发送内容' }),
+    )
+    expect(result.modelId).toBe('model-pero')
   })
 
   it('拒绝用其他Agent身份向普通Thread写入消息', async () => {

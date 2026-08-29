@@ -290,6 +290,38 @@ describe('FactsRepository共享事实库', () => {
     closeDrizzleConnection(db)
   })
 
+  it('用户撤回事实时应退出检索并保留TDB节点与关系边', async () => {
+    const { db, stores, repo } = fixture()
+    const fact = await repo.write({
+      standardName: '保留关系对象',
+      statement: '需要撤回的事实',
+      observedAt: '2026-08-27T10:00:00.000Z',
+      createdByAgentId: 'pero',
+    })
+    const store = stores.getSharedStore('facts')
+    const objectNode = store
+      .allNodeIds()
+      .find((id) => store.get<{ kind?: string; id?: string }>(id)?.payload.id === fact.objectId)!
+    const factNode = store
+      .allNodeIds()
+      .find((id) => store.get<{ kind?: string; id?: string }>(id)?.payload.id === fact.id)!
+
+    await repo.retractFact(fact.id, 'retract-fact')
+
+    expect((await repo.query('保留关系对象')).exactMatch?.activeFacts).toEqual([])
+    expect((await repo.archive()).items[0]?.retractedFacts).toContainEqual(
+      expect.objectContaining({ id: fact.id, status: 'retracted' }),
+    )
+    expect(store.contains(factNode)).toBe(true)
+    expect(store.get<{ status?: string }>(factNode)?.payload.status).toBe('retracted')
+    expect(store.getEdges(objectNode)).toContainEqual(
+      expect.objectContaining({ targetId: factNode, label: 'has_fact' }),
+    )
+
+    stores.closeAll()
+    closeDrizzleConnection(db)
+  })
+
   it('档案浏览应按对象聚合当前与历史事实并支持全文过滤', async () => {
     const { db, stores, repo } = fixture()
     const old = await repo.write({
@@ -310,6 +342,7 @@ describe('FactsRepository共享事实库', () => {
       objectCount: 1,
       activeFactCount: 1,
       historicalFactCount: 1,
+      retractedFactCount: 0,
     })
     expect(archive.items[0]).toMatchObject({
       standardName: '知识对象',

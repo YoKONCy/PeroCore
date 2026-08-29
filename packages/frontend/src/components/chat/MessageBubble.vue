@@ -272,6 +272,9 @@ function formatTime(ts?: number): string {
                     : 'volume-2'
               "
               size="xs"
+              :animation="
+                props.isLoadingAudio && props.playingMsgId === message.id ? 'spin' : undefined
+              "
             />
           </button>
           <button class="msg-action-btn" title="复制" @click="emit('copy', message.content)">

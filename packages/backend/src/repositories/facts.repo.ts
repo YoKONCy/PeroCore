@@ -50,7 +50,7 @@ type FactOperationPayload =
   | FactDeleteOperationPayload
   | FactAliasOperationPayload
 
-type FactOperationKind = 'write' | 'supersede' | 'delete' | 'alias'
+type FactOperationKind = 'write' | 'supersede' | 'delete' | 'retract' | 'alias'
 
 export class FactsRepository {
   private nextTdbId?: number
@@ -164,6 +164,12 @@ export class FactsRepository {
               ...this.toFact(fact, object.standardName),
               supersededBy: fact.supersededBy ?? undefined,
             })),
+          retractedFacts: objectFacts
+            .filter((fact) => fact.status === 'retracted')
+            .map((fact) => ({
+              ...this.toFact(fact, object.standardName),
+              supersededBy: fact.supersededBy ?? undefined,
+            })),
         }
       })
       .filter((object) => {
@@ -173,6 +179,7 @@ export class FactsRepository {
           ...object.aliases,
           ...object.activeFacts.map((fact) => fact.statement),
           ...object.historicalFacts.map((fact) => fact.statement),
+          ...object.retractedFacts.map((fact) => fact.statement),
         ].some((value) => value.toLocaleLowerCase().includes(needle))
       })
       .sort(
@@ -188,6 +195,7 @@ export class FactsRepository {
         objectCount: objects.length,
         activeFactCount: facts.filter((fact) => fact.status === 'active').length,
         historicalFactCount: facts.filter((fact) => fact.status === 'superseded').length,
+        retractedFactCount: facts.filter((fact) => fact.status === 'retracted').length,
       },
     }
   }
@@ -327,6 +335,39 @@ export class FactsRepository {
     })
     await this.applyOperation(operationId, 'supersede', payload)
     return replacement
+  }
+
+  async retractFact(id: string, operationId: string = randomUUID()): Promise<void> {
+    const existing = await this.findOperation(operationId)
+    if (existing) {
+      if (existing.operation !== 'retract') throw new Error('operationId 已用于其他事实操作')
+      await this.applyOperation(operationId, existing.operation, existing.payload)
+      return
+    }
+    const row = await this.factRow(id)
+    if (!row) throw new Error('事实不存在')
+    if (row.status === 'retracted') return
+    const object = await this.findObject(row.objectId)
+    if (!object) throw new Error('事实对象不存在')
+    const record = this.toFact(row, object.standardName)
+    record.status = 'retracted'
+    const payload: FactDeleteOperationPayload = {
+      record,
+      factTdbId: row.tdbId,
+    }
+    this.db.transaction((tx) => {
+      tx.insert(factMemoryOperations)
+        .values({
+          operationId,
+          operation: 'retract',
+          payloadJson: JSON.stringify(payload),
+          status: 'pending',
+          createdAt: new Date().toISOString(),
+        })
+        .run()
+      tx.update(factRecords).set({ status: 'retracted' }).where(eq(factRecords.id, id)).run()
+    })
+    await this.applyOperation(operationId, 'retract', payload)
   }
 
   async deleteFact(id: string, operationId: string = randomUUID()): Promise<void> {
@@ -509,6 +550,15 @@ export class FactsRepository {
       } else if (operation === 'delete') {
         const deletion = payload as FactDeleteOperationPayload
         if (store.contains(deletion.factTdbId)) store.delete(deletion.factTdbId)
+      } else if (operation === 'retract') {
+        const retraction = payload as FactDeleteOperationPayload
+        if (!store.contains(retraction.factTdbId)) throw new Error('待撤回事实的TDB节点不存在')
+        const node = store.get<FactPayload>(retraction.factTdbId)
+        if (!node) throw new Error('待撤回事实的TDB节点不存在')
+        store.updatePayload(retraction.factTdbId, {
+          ...node.payload,
+          status: 'retracted',
+        })
       } else {
         const alias = payload as FactAliasOperationPayload
         if (store.contains(alias.object.tdbId)) {
@@ -675,7 +725,7 @@ export class FactsRepository {
       .filter((item) => item.label === 'has_fact')
       .sort((a, b) => a.targetId - b.targetId)) {
       const fact = store.get<FactPayload>(edge.targetId)?.payload
-      if (fact?.kind !== 'fact') continue
+      if (fact?.kind !== 'fact' || fact.status === 'retracted') continue
       const nodes: FactQueryPath['nodes'] = [
         { id: object.id, kind: 'fact_object', name: object.standardName },
         { id: fact.id, kind: 'fact', name: fact.statement },

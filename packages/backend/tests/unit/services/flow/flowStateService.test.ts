@@ -90,6 +90,58 @@ describe('FlowStateService', () => {
     expect(prompt).toContain('<Private_Facts>\n汤底')
   })
 
+  it('同一来源跨轮重复读取时只保留最新内容', async () => {
+    threadService.getThread.mockResolvedValue({
+      id: 'thread-1',
+      agentId: 'pero',
+      channel: 'desktop',
+      pairCount: 8,
+    })
+    repo.get.mockResolvedValue({
+      threadId: 'thread-1',
+      agentId: 'pero',
+      currentGoal: '',
+      privateFacts: '',
+      workContext: '',
+      workContextUpdatedAtPairCount: 0,
+      revision: 1,
+      updatedAt: '2026-08-14 12:00:00',
+    })
+    repo.listWorkContextEntries.mockResolvedValue([
+      {
+        id: 1,
+        pairCount: 6,
+        content: JSON.stringify({
+          version: 1,
+          items: [
+            { sourceKey: 'file:src/main.ts', content: '旧文件内容' },
+            { sourceKey: 'browser:page-1', content: '旧页面内容' },
+          ],
+        }),
+      },
+      {
+        id: 2,
+        pairCount: 7,
+        content: JSON.stringify({
+          version: 1,
+          items: [
+            { sourceKey: 'FILE:SRC/MAIN.TS', content: '最新文件内容' },
+            { sourceKey: 'file:src/other.ts', content: '其他文件内容' },
+          ],
+        }),
+      },
+    ])
+
+    const result = await service.get('thread-1', 'pero')
+
+    expect(result.workContextSegments).toEqual([
+      '旧页面内容',
+      '最新文件内容',
+      '其他文件内容',
+    ])
+    expect(result.workContext).not.toContain('旧文件内容')
+  })
+
   it('自动工作上下文按产生轮次独立保留后续五轮', async () => {
     threadService.getThread.mockResolvedValue({
       id: 'thread-1',

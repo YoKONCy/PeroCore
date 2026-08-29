@@ -94,6 +94,10 @@ const draftSummary = computed(() => {
   return ''
 })
 const summary = computed(() => {
+  if (state.value === 'running' && ['write_file', 'edit_file'].includes(props.tool.name)) {
+    const path = String(argsObj.value.file_path ?? argsObj.value.path ?? '').trim()
+    return path ? `正在编辑 · ${path}` : '正在编辑文件...'
+  }
   for (const field of signature.value.summaryFields) {
     const value = argsObj.value[field]
     if (Array.isArray(value) && value.length) return value.join(' → ')

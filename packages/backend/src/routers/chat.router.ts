@@ -177,6 +177,7 @@ export function createChatRouter(ctx: AppContext) {
       let mode: 'stream' | 'non_stream' = 'stream'
       let firstTokenMs: number | undefined
       let firstTokenAt: number | undefined
+      let activeToolName = ''
       const surfaceRef: { current: ConversationSurfaceSession | null } = { current: null }
       const writeSurface = async (frame: import('@infos/shared').SurfaceFrame) => {
         await stream.writeSSE({ event: 'surface', data: JSON.stringify(frame) })
@@ -255,19 +256,23 @@ export function createChatRouter(ctx: AppContext) {
           } else if (chunk.event === 'tool_call_delta') {
             const data = chunk.data
             if (surfaceRef.current) {
-              await writeSurface(
-                surfaceRef.current.appendToolDraft(
-                  data.draftId,
-                  data.nameDelta,
-                  data.argumentsDelta,
-                  data.receivedChars,
-                ),
+              const frame = surfaceRef.current.appendToolDraft(
+                data.draftId,
+                data.nameDelta,
+                data.argumentsDelta,
+                data.receivedChars,
               )
+              if (frame) await writeSurface(frame)
             }
           } else if (chunk.event === 'tool_call_ready') {
             toolCallCount++
             const data = chunk.data
-            if (surfaceRef.current) await writeSurface(surfaceRef.current.finalizeToolDraft(data))
+            if (surfaceRef.current) {
+              const label = resolveToolUserLabel(data.name)
+              activeToolName = data.name
+              await writeSurface(surfaceRef.current.finalizeToolDraft(data))
+              await writeSurface(surfaceRef.current.status('calling', `${label}中...`))
+            }
           } else if (chunk.event === 'narration_start') {
             const data = chunk.data
             if (surfaceRef.current)
@@ -305,7 +310,16 @@ export function createChatRouter(ctx: AppContext) {
               }
               if (surfaceRef.current) {
                 for (const frame of surfaceRef.current.toolResult(data)) await writeSurface(frame)
+                await writeSurface(
+                  surfaceRef.current.status(
+                    'thinking',
+                    activeToolName
+                      ? `${resolveToolUserLabel(activeToolName)}完成，继续生成回复...`
+                      : '工具完成，继续生成回复...',
+                  ),
+                )
               }
+              activeToolName = ''
             } else if (chunk.event === 'status') {
               const data = chunk.data as {
                 state: 'thinking' | 'calling' | 'generating' | 'tool_failed'
@@ -484,7 +498,15 @@ export function createChatRouter(ctx: AppContext) {
     const threadId = c.req.param('id')
     const thread = await ctx.threadService.getThread(threadId)
     if (!thread) throw new AppError('NOT_FOUND', { message: `Thread 不存在: ${threadId}` })
-    const data = await ctx.conversationProjection.getSnapshot(threadId)
+    const beforeCursor = c.req.query('beforeCursor')
+    const requestedPageSize = Number(c.req.query('pageSize') ?? 60)
+    const pageSize = Number.isFinite(requestedPageSize)
+      ? Math.min(100, Math.max(1, requestedPageSize))
+      : 60
+    const data = await ctx.conversationProjection.getSnapshot(threadId, {
+      beforeCursor,
+      pageSize,
+    })
     return c.json({ code: 'OK', message: '获取成功', data })
   })
 

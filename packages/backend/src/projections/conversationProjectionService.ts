@@ -44,13 +44,25 @@ export class ConversationProjectionService {
     if (cached) cached.dirty = true
   }
 
-  async getSnapshot(threadId: string): Promise<ConversationProjectionSnapshot> {
-    const cached = this.cache.get(threadId)
+  async getSnapshot(
+    threadId: string,
+    options: { beforeCursor?: string; pageSize?: number } = {},
+  ): Promise<ConversationProjectionSnapshot> {
+    const pageSize = Math.min(100, Math.max(1, options.pageSize ?? 60))
+    const beforeMessageId = options.beforeCursor
+      ? Number(options.beforeCursor)
+      : undefined
+    const useCache = beforeMessageId === undefined && pageSize === 60
+    const cached = useCache ? this.cache.get(threadId) : undefined
     if (cached && !cached.dirty) return cached.snapshot
 
     const thread = await this.threadService.getThread(threadId)
     if (!thread) throw new Error(`Conversation Projection 找不到 Thread: ${threadId}`)
-    const result = await this.threadService.listMessages({ threadId, page: 1, pageSize: 200 })
+    const result = await this.threadService.listMessages({
+      threadId,
+      beforeMessageId: Number.isSafeInteger(beforeMessageId) ? beforeMessageId : undefined,
+      pageSize,
+    })
     const ordered = [...result.items].reverse()
     const attachments = await this.attachmentService.listForMessages(
       ordered.map((message) => message.id),
@@ -163,8 +175,12 @@ export class ConversationProjectionService {
       generatedAt: new Date().toISOString(),
       messages,
       surfaces,
+      totalMessages: result.total,
+      pageSize,
+      hasMoreBefore: result.hasMoreBefore,
+      beforeCursor: messages[0]?.messageId,
     }
-    this.cache.set(threadId, { snapshot, dirty: false })
+    if (useCache) this.cache.set(threadId, { snapshot, dirty: false })
     return snapshot
   }
 

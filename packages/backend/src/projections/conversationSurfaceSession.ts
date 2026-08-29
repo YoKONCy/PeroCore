@@ -19,6 +19,7 @@ export class ConversationSurfaceSession {
   private readonly toolDrafts = new Map<string, ToolCallSurfaceProps>()
   private sequence = 0
   private revision = 0
+  private readonly toolArgumentPreviewLimit = 2048
   private readonly createdAt = performance.now()
   private firstFrameRecorded = false
 
@@ -145,18 +146,26 @@ export class ConversationSurfaceSession {
     nameDelta?: string,
     argumentsDelta?: string,
     receivedChars?: number,
-  ): SurfaceFrame {
+  ): SurfaceFrame | null {
     const nodeId = `${this.surfaceId}:tool:${draftId}` as SurfaceNodeId
     const current = this.toolDrafts.get(draftId)
     if (!current) throw new Error(`工具草稿尚未开始: ${draftId}`)
+    const nextArgs = current.args + (argumentsDelta ?? '')
+    const argsPreview = nextArgs.slice(0, this.toolArgumentPreviewLimit)
     const props: ToolCallSurfaceProps = {
       ...current,
       name: current.name + (nameDelta ?? ''),
-      args: current.args + (argumentsDelta ?? ''),
-      argsPreview: current.args + (argumentsDelta ?? ''),
+      args: argsPreview,
+      argsPreview,
       receivedChars: receivedChars ?? current.receivedChars,
     }
     this.toolDrafts.set(draftId, props)
+    const nameChanged = props.name !== current.name
+    const previewChanged = props.argsPreview !== current.argsPreview
+    const previousChars = current.receivedChars ?? 0
+    const nextChars = props.receivedChars ?? previousChars
+    const progressChanged = Math.floor(previousChars / 4096) !== Math.floor(nextChars / 4096)
+    if (!nameChanged && !previewChanged && !progressChanged) return null
     return this.frame({
       type: 'surface.upsert-node',
       node: this.node<ToolCallSurfaceProps>(nodeId, 'tool-call', 'interactive', props),
@@ -178,7 +187,7 @@ export class ConversationSurfaceSession {
       }),
       callId: input.callId,
       name: input.name,
-      args: typeof input.args === 'string' ? input.args : JSON.stringify(input.args),
+      args: this.toolArgsPreview(input.args),
       state: 'calling',
     }
     this.toolDrafts.set(input.draftId, props)
@@ -195,7 +204,7 @@ export class ConversationSurfaceSession {
       node: this.node<ToolCallSurfaceProps>(nodeId, 'tool-call', 'interactive', {
         callId: input.callId,
         name: input.name,
-        args: typeof input.args === 'string' ? input.args : JSON.stringify(input.args),
+        args: this.toolArgsPreview(input.args),
         state: 'calling',
       }),
     })
@@ -253,6 +262,24 @@ export class ConversationSurfaceSession {
 
   fail(code: string, message: string, content?: string): SurfaceFrame {
     return this.frame({ type: 'surface.fail', code, message, content })
+  }
+
+  private toolArgsPreview(args: unknown): string {
+    if (!args || typeof args !== 'object') {
+      return String(args ?? '').slice(0, this.toolArgumentPreviewLimit)
+    }
+    const record = args as Record<string, unknown>
+    const preview: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(record)) {
+      if (['content', 'new_text', 'old_text'].includes(key) && typeof value === 'string') {
+        preview[key] = `[正文 ${value.length} 字符]`
+      } else if (typeof value === 'string' && value.length > 512) {
+        preview[key] = `${value.slice(0, 512)}…[共 ${value.length} 字符]`
+      } else {
+        preview[key] = value
+      }
+    }
+    return JSON.stringify(preview).slice(0, this.toolArgumentPreviewLimit)
   }
 
   private statusNode(

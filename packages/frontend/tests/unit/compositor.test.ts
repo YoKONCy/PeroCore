@@ -382,6 +382,31 @@ describe('Internal Compositor', () => {
     ).toThrow('COMPOSITOR_INPUT_SEAT_IDENTITY_MISMATCH')
   })
 
+  it('连续HTML内部的空行不应拆成独立Markdown代码块', () => {
+    const source = [
+      '说明文字\n\n',
+      '<div style="padding:20px">\n',
+      '  <div style="font-weight:bold">见习占卜师的报告</div>\n',
+      '\n',
+      '  <div style="display:flex">\n',
+      '    <span>当前目标</span>\n',
+      '    <span>秋月主人的小屁屁惩罚</span>\n',
+      '  </div>\n',
+      '\n',
+      '  <div style="background:white">观察记录</div>\n',
+      '</div>\n\n',
+      '结尾文字',
+    ].join('')
+
+    const streaming = segmentStreamMarkdown(source, 'html-stream' as SurfaceNodeId)
+    expect(streaming.filter((block) => block.source.includes('<div'))).toHaveLength(1)
+    expect(streaming.find((block) => block.source.includes('<div'))?.source).toContain('观察记录')
+
+    const committed = segmentStreamMarkdown(source, 'html-stream' as SurfaceNodeId, true)
+    expect(committed.filter((block) => block.source.includes('<div'))).toHaveLength(1)
+    expect(committed.find((block) => block.source.includes('<div'))?.source).toContain('观察记录')
+  })
+
   it('应当只把闭合且稳定的 Mermaid 块升级为重型节点', () => {
     const source = '说明\n\n```mermaid\ngraph TD\nA-->B\n```\n\n结尾'
     const preview = segmentStreamMarkdown(source, 'markdown' as SurfaceNodeId)

@@ -260,10 +260,6 @@ function escapeConversationXml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
-function escapeConversationXmlAttribute(value: string): string {
-  return escapeConversationXml(value).replace(/"/g, '&quot;').replace(/'/g, '&apos;')
-}
-
 const STATIC_ENV_INFO = collectEnvironmentInfo()
 
 // ─────────────────────────────────────────────
@@ -311,6 +307,20 @@ export class ContextCompiler {
   }
 
   private eventMemory?: EventMemoryService
+
+  async getMessageWindow(threadId: string): Promise<number> {
+    const thread = await this.threadService.getThread(threadId)
+    if (!thread) throw new AppError('NOT_FOUND', { message: `Thread 不存在: ${threadId}` })
+    const channel = thread.channel as ThreadChannel
+    const memoryRuntimeConfig = await loadMemoryRuntimeConfig(this.configRepo)
+    const fallbackPolicy = {
+      ...(DEFAULT_POLICIES[channel] ?? DEFAULT_POLICIES.desktop),
+      messageWindow:
+        memoryRuntimeConfig.channels[channel]?.contextPairs ??
+        (DEFAULT_POLICIES[channel] ?? DEFAULT_POLICIES.desktop).messageWindow,
+    }
+    return this.resolvePolicy(thread.contextPolicy, fallbackPolicy).messageWindow
+  }
 
   /**
    * 编译上下文
@@ -869,11 +879,7 @@ export class ContextCompiler {
         }
         if (!tag) return []
         const safeTag = this.normalizeConversationTag(tag)
-        const time =
-          message.role !== 'user' && message.timestamp
-            ? `, time=${escapeConversationXmlAttribute(message.timestamp)}`
-            : ''
-        return [`<${safeTag}${time}>${escapeConversationXml(message.content)}</${safeTag}>`]
+        return [`<${safeTag}>${escapeConversationXml(message.content)}</${safeTag}>`]
       })
       .join('\n')
   }

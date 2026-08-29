@@ -137,6 +137,22 @@ export const useCompositorStore = defineStore('compositor', () => {
     replaceScope(`conversation:${snapshot.threadId}`, snapshot.surfaces)
   }
 
+  function mergeSnapshot(snapshot: import('@infos/shared').ConversationProjectionSnapshot): void {
+    const scopeId = `conversation:${snapshot.threadId}`
+    const next = new Map(surfaces.value)
+    for (const descriptor of snapshot.surfaces) {
+      const current = next.get(descriptor.surfaceId)
+      if (current?.revision === descriptor.revision) continue
+      next.set(descriptor.surfaceId, {
+        ...descriptor,
+        scopeId,
+        suspended: current?.suspended ?? false,
+        operationIds: current?.operationIds ?? new Set(),
+      })
+    }
+    surfaces.value = next
+  }
+
   function install(surface: import('@infos/shared').ConversationSurfaceDescriptor): void {
     const next = new Map(surfaces.value)
     next.set(surface.surfaceId, { ...surface, operationIds: new Set() })
@@ -333,6 +349,7 @@ export const useCompositorStore = defineStore('compositor', () => {
     replaceScope,
     replaceProjection,
     replaceSnapshot,
+    mergeSnapshot,
     install,
     installLocalMessage,
     terminateThinking,

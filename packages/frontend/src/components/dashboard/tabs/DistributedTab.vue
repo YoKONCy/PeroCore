@@ -180,7 +180,7 @@ onMounted(() => void refresh())
 <template>
   <div class="distributed-tab">
     <header class="distributed-hero">
-      <div class="hero-icon"><PixelIcon name="database" size="xl" /></div>
+      <div class="hero-icon"><PixelIcon name="network" size="xl" /></div>
       <div>
         <h1>分布式</h1>
         <p>连接服务器、配置能力节点，并一键同步完整用户数据。</p>

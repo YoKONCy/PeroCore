@@ -72,6 +72,112 @@ function fixture(extracted: unknown[] = []) {
 }
 
 describe('EventMemoryFallbackService动态兜底', () => {
+  it('第41轮且前40轮完全未覆盖时应一次触发整批炼化', async () => {
+    const { service, repo, extractor } = fixture([])
+    const messages = Array.from({ length: 41 }, (_, index) =>
+      message(index + 1, `pair-${index + 1}`, `第${index + 1}轮`),
+    )
+    const threads = (
+      service as unknown as {
+        threads: {
+          queryActiveMessagePairs: ReturnType<typeof vi.fn>
+          findMessagesByPairIds: ReturnType<typeof vi.fn>
+        }
+      }
+    ).threads
+    threads.queryActiveMessagePairs.mockResolvedValue(messages)
+    threads.findMessagesByPairIds.mockImplementation(async (_threadId: string, pairIds: string[]) =>
+      messages.filter((item) => pairIds.includes(item.pairId)),
+    )
+
+    await service.ensureContextWindowCoverage({
+      agentId: 'pero',
+      threadId: 'thread-1',
+      channel: 'desktop',
+      contextPairs: 40,
+    })
+
+    const expectedPairs = Array.from({ length: 40 }, (_, index) => `pair-${index + 1}`)
+    expect(repo.claimCoverageRange).toHaveBeenCalledTimes(1)
+    expect(repo.claimCoverageRange).toHaveBeenCalledWith(
+      expect.objectContaining({ pairIds: expectedPairs }),
+    )
+    expect(extractor.extract).toHaveBeenCalledTimes(1)
+    expect(extractor.extract).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messages: expect.arrayContaining(
+          expectedPairs.map((pairId) => expect.objectContaining({ pairId })),
+        ),
+      }),
+    )
+    expect(
+      extractor.extract.mock.calls[0]?.[0]?.messages.some(
+        (item: { pairId: string }) => item.pairId === 'pair-41',
+      ),
+    ).toBe(false)
+  })
+
+  it('只有40轮时不应提前触发批量兜底', async () => {
+    const { service, extractor } = fixture([])
+    const messages = Array.from({ length: 40 }, (_, index) =>
+      message(index + 1, `pair-${index + 1}`, `第${index + 1}轮`),
+    )
+    const threads = (
+      service as unknown as {
+        threads: { queryActiveMessagePairs: ReturnType<typeof vi.fn> }
+      }
+    ).threads
+    threads.queryActiveMessagePairs.mockResolvedValue(messages)
+
+    await service.ensureContextWindowCoverage({
+      agentId: 'pero',
+      threadId: 'thread-1',
+      channel: 'desktop',
+      contextPairs: 40,
+    })
+
+    expect(extractor.extract).not.toHaveBeenCalled()
+  })
+
+  it('窗口中部分轮次已有覆盖时应整批提炼其余未覆盖轮次', async () => {
+    const { service, repo, extractor } = fixture([])
+    const messages = Array.from({ length: 41 }, (_, index) =>
+      message(index + 1, `pair-${index + 1}`, `第${index + 1}轮`),
+    )
+    const threads = (
+      service as unknown as {
+        threads: {
+          queryActiveMessagePairs: ReturnType<typeof vi.fn>
+          findMessagesByPairIds: ReturnType<typeof vi.fn>
+        }
+      }
+    ).threads
+    threads.queryActiveMessagePairs.mockResolvedValue(messages)
+    threads.findMessagesByPairIds.mockImplementation(async (_threadId: string, pairIds: string[]) =>
+      messages.filter((item) => pairIds.includes(item.pairId)),
+    )
+    repo.coveredPairIds.mockResolvedValue(new Set(['pair-1']))
+
+    await service.ensureContextWindowCoverage({
+      agentId: 'pero',
+      threadId: 'thread-1',
+      channel: 'desktop',
+      contextPairs: 40,
+    })
+
+    expect(extractor.extract).toHaveBeenCalledTimes(1)
+    const extractedMessages = extractor.extract.mock.calls[0]?.[0]?.messages ?? []
+    expect(extractedMessages.some((item: { pairId: string }) => item.pairId === 'pair-1')).toBe(
+      false,
+    )
+    expect(extractedMessages.some((item: { pairId: string }) => item.pairId === 'pair-40')).toBe(
+      true,
+    )
+    expect(extractedMessages.some((item: { pairId: string }) => item.pairId === 'pair-41')).toBe(
+      false,
+    )
+  })
+
   it('有效运行静默达到阈值后应审阅连续未覆盖区间，并用reviewed_no_event推进Coverage', async () => {
     const { service, extractor, saveCoverage, create } = fixture([])
     await service.tick(['pero'])

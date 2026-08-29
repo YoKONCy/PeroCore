@@ -185,7 +185,7 @@ const navGroups: MainNavGroup[] = [
       { id: 'model_config', label: '模型配置', icon: 'settings' },
       { id: 'voice_config', label: '语音功能', icon: 'mic' },
       { id: 'mcp_config', label: 'MCP 配置', icon: 'terminal' },
-      { id: 'distributed', label: '分布式', icon: 'database' },
+      { id: 'distributed', label: '分布式', icon: 'network' },
     ],
   },
   {

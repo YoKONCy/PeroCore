@@ -13,7 +13,7 @@ export const arcaManifest = {
   adapterVersion: '1.0.0',
   protocolVersion: 1,
   application: {
-    versions: '>=0.9.3 <1.0.0',
+    versions: '>=0.9.3-hotfix1 <1.0.0',
     transports: ['websocket'],
   },
   backend: { entry: '@infos/arca' },

@@ -8,4 +8,8 @@ export const knowledgeApi = {
     const suffix = params.toString()
     return apiClient.get<FactArchiveResult>(`/knowledge/facts${suffix ? `?${suffix}` : ''}`)
   },
+
+  /** 撤回事实，保留节点和历史关系边 */
+  retractFact: (id: string) =>
+    apiClient.delete<void>(`/knowledge/facts/${encodeURIComponent(id)}`),
 }

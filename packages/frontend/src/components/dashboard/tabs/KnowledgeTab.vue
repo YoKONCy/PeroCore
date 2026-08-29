@@ -1,19 +1,24 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import type { FactArchiveObject, FactArchiveRecord, FactArchiveResult } from '@infos/shared'
-import { PixelIcon, PButton } from '../../pixel'
+import { PixelIcon, PButton, PDialog } from '../../pixel'
 import { knowledgeApi } from '../../../api/modules/knowledgeApi'
+import { useNotificationStore } from '../../../stores/useNotificationStore'
 import { logger } from '../../../lib/logger'
 
 const section = ref<'facts' | 'documents'>('facts')
+const notif = useNotificationStore()
+const retractTarget = ref<FactArchiveRecord | null>(null)
+const retracting = ref(false)
 const loading = ref(false)
 const error = ref('')
 const query = ref('')
-const archive = ref<FactArchiveResult>({
+const EMPTY_ARCHIVE: FactArchiveResult = {
   items: [],
   total: 0,
-  stats: { objectCount: 0, activeFactCount: 0, historicalFactCount: 0 },
-})
+  stats: { objectCount: 0, activeFactCount: 0, historicalFactCount: 0, retractedFactCount: 0 },
+}
+const archive = ref<FactArchiveResult>(EMPTY_ARCHIVE)
 const selectedId = ref<string | null>(null)
 const expandedFacts = ref(new Set<string>())
 const historyOpen = ref(false)
@@ -28,7 +33,23 @@ async function loadFacts(): Promise<void> {
   error.value = ''
   try {
     const response = await knowledgeApi.facts(query.value)
-    if (response.data) archive.value = response.data
+    const data = response.data
+    archive.value = data
+      ? {
+          ...data,
+          items: (data.items ?? []).map((item) => ({
+            ...item,
+            aliases: item.aliases ?? [],
+            activeFacts: item.activeFacts ?? [],
+            historicalFacts: item.historicalFacts ?? [],
+            retractedFacts: item.retractedFacts ?? [],
+          })),
+          stats: {
+            ...EMPTY_ARCHIVE.stats,
+            ...(data.stats ?? {}),
+          },
+        }
+      : EMPTY_ARCHIVE
     if (!selected.value) selectedId.value = archive.value.items[0]?.objectId ?? null
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '事实库读取失败'
@@ -67,6 +88,22 @@ function replacementFor(fact: FactArchiveRecord): FactArchiveRecord | undefined 
   return selected.value?.activeFacts.find((item) => item.id === fact.supersededBy)
 }
 
+async function confirmRetract(): Promise<void> {
+  const target = retractTarget.value
+  if (!target || retracting.value) return
+  retracting.value = true
+  try {
+    await knowledgeApi.retractFact(target.id)
+    retractTarget.value = null
+    await loadFacts()
+    notif.toast('事实已撤回，节点和关系边保持不变', 'success')
+  } catch (cause) {
+    notif.toast('删除事实失败：' + (cause as Error).message, 'error')
+  } finally {
+    retracting.value = false
+  }
+}
+
 watch(query, () => {
   if (queryTimer) clearTimeout(queryTimer)
   queryTimer = setTimeout(() => void loadFacts(), 260)
@@ -102,6 +139,10 @@ onMounted(loadFacts)
         <span>
           <b class="font-pixel">{{ archive.stats.historicalFactCount }}</b>
           历史事实
+        </span>
+        <span>
+          <b class="font-pixel">{{ archive.stats.retractedFactCount }}</b>
+          已删除
         </span>
       </div>
     </header>
@@ -195,6 +236,10 @@ onMounted(loadFacts)
                 <button @click="toggleFact(fact.id)">
                   {{ expandedFacts.has(fact.id) ? '收起' : '详情' }}
                 </button>
+                <button class="fact-delete" title="删除这条事实" @click="retractTarget = fact">
+                  <PixelIcon name="trash" size="xs" />
+                  删除
+                </button>
               </footer>
               <dl v-if="expandedFacts.has(fact.id)">
                 <div>
@@ -234,6 +279,20 @@ onMounted(loadFacts)
               </article>
             </div>
           </section>
+
+          <section v-if="selected.retractedFacts.length" class="history-section">
+            <button class="history-toggle" @click="historyOpen = !historyOpen">
+              <PixelIcon name="chevron-down" size="xs" :class="{ open: historyOpen }" />
+              已由用户删除 {{ selected.retractedFacts.length }}
+            </button>
+            <div v-if="historyOpen" class="history-list">
+              <article v-for="fact in selected.retractedFacts" :key="fact.id" class="history-card">
+                <span>已由用户删除</span>
+                <p>{{ fact.statement }}</p>
+                <time>{{ formatDate(fact.observedAt) }}</time>
+              </article>
+            </div>
+          </section>
         </template>
       </main>
     </section>
@@ -265,6 +324,16 @@ onMounted(loadFacts)
         <span>更新与失效管理</span>
       </div>
     </section>
+
+    <PDialog
+      :model-value="Boolean(retractTarget)"
+      title="删除这条事实？"
+      :message="`事实“${retractTarget?.statement ?? ''}”将退出 Agent 检索；节点和所有关系边都会保留。`"
+      confirm-text="删除事实"
+      confirm-variant="danger"
+      @update:model-value="!$event && (retractTarget = null)"
+      @confirm="confirmRetract"
+    />
   </div>
 </template>
 
@@ -517,6 +586,12 @@ export default { name: 'KnowledgeTab' }
   background: none;
   color: var(--ui-accent-sky);
   cursor: pointer;
+}
+.fact-card footer .fact-delete {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--ui-danger, #ef4444);
 }
 .fact-card dl {
   display: grid;

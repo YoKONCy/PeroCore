@@ -37,6 +37,14 @@ export interface ConversationTurnDeps {
   imageUnderstandingService: ImageUnderstandingService
   executionRuntime?: ExecutionRuntime
   eventNoteDraftCommitter?: EventNoteDraftCommitter
+  eventMemoryFallback?: {
+    ensureContextWindowCoverage(input: {
+      agentId: string
+      threadId: string
+      channel: string
+      contextPairs: number
+    }): Promise<void>
+  }
   flowStateService?: FlowStateService
   getAgentModelConfig?: (
     agentId: string,
@@ -149,10 +157,15 @@ export class ConversationTurnService {
   }): Promise<TokenBudgetPreview> {
     const thread = await this.deps.threadService.getThread(input.threadId)
     if (!thread) throw new AppError('NOT_FOUND', { message: '会话不存在' })
-    const agentId = input.agentId ?? thread.agentId
+    const agentId = thread.channel === 'group' ? (input.agentId ?? thread.agentId) : thread.agentId
     const modelConfig = await this.deps.getAgentModelConfig?.(agentId)
     if (!modelConfig?.contextWindowTokens) {
-      throw new AppError('CONFIG_ERROR', { message: '当前模型未配置上下文窗口' })
+      return {
+        usedTokens: 0,
+        contextWindowTokens: 0,
+        maxInputTokens: 0,
+        modelId: modelConfig?.modelId ?? '',
+      }
     }
     const maxInputTokens = Math.max(
       1,
@@ -229,6 +242,16 @@ export class ConversationTurnService {
       if (attachmentIds.length) {
         await this.deps.attachmentService.bind(attachmentIds, params.threadId, userMessage.id)
       }
+    }
+
+    if (inputPersistence === 'persistent' && !params.realmId && this.deps.eventMemoryFallback) {
+      const contextPairs = await this.deps.contextCompiler.getMessageWindow(params.threadId)
+      await this.deps.eventMemoryFallback.ensureContextWindowCoverage({
+        agentId,
+        threadId: params.threadId,
+        channel: thread.channel,
+        contextPairs,
+      })
     }
 
     const imageRows = attachments.filter((row) => row.kind === 'image')
@@ -578,32 +601,37 @@ export class ConversationTurnService {
 
   private formatWorkContextToolResult(
     block: Extract<ConversationContentBlock, { kind: 'tool' }>,
-  ): string | null {
+  ): Array<{ sourceKey: string; content: string }> {
     const result = block.result?.trim()
-    if (!result) return null
+    if (!result) return []
 
     let args: Record<string, unknown> = {}
     try {
       args = JSON.parse(block.args) as Record<string, unknown>
     } catch {
-      return null
+      return []
     }
 
     if (block.name === 'read_file') {
       const filePath = String(args.file_path ?? '').trim()
-      if (!filePath) return null
+      if (!filePath) return []
       const lineCount = result.split(/\r?\n/).length
       const byteCount = Buffer.byteLength(result, 'utf8')
-      return `- 文件 ${filePath} 的内容（${lineCount} 行、${byteCount} 字节）：\n${result}`
+      return [
+        {
+          sourceKey: `file:${filePath}`,
+          content: `- 文件 ${filePath} 的内容（${lineCount} 行、${byteCount} 字节）：\n${result}`,
+        },
+      ]
     }
 
     if (block.name === 'read_file_range') {
       const filePath = String(args.path ?? '').trim()
-      if (!filePath) return null
+      if (!filePath) return []
       try {
         const data = JSON.parse(result) as Record<string, unknown>
         const content = typeof data.content === 'string' ? data.content.trim() : ''
-        if (!content) return null
+        if (!content) return []
         const totalLines = Number(data.totalLines)
         const totalBytes = Number(data.totalBytes)
         const lineStart = Number(data.lineStart)
@@ -618,9 +646,14 @@ export class ConversationTurnService {
         ]
           .filter(Boolean)
           .join('、')
-        return `- 文件 ${filePath} 的内容（${size || '规模未知'}${range}）：\n${content}`
+        return [
+          {
+            sourceKey: `file:${filePath}`,
+            content: `- 文件 ${filePath} 的内容（${size || '规模未知'}${range}）：\n${content}`,
+          },
+        ]
       } catch {
-        return null
+        return []
       }
     }
 
@@ -636,9 +669,14 @@ export class ConversationTurnService {
           const line = Number.isFinite(Number(match.line)) ? `:${Number(match.line)}` : ''
           return [`${file}${line}：${content}`]
         })
-        return matches.length ? matches.join('\n') : null
+        return matches.map((content) => {
+          const separator = content.indexOf('：')
+          const location = separator >= 0 ? content.slice(0, separator) : content
+          const file = location.replace(/:\d+$/, '')
+          return { sourceKey: `file:${file}`, content }
+        })
       } catch {
-        return null
+        return []
       }
     }
 
@@ -646,10 +684,15 @@ export class ConversationTurnService {
       try {
         const data = JSON.parse(result) as Record<string, unknown>
         return typeof data.content === 'string' && data.content.trim()
-          ? data.content.trim()
-          : null
+          ? [
+              {
+                sourceKey: `web:${String(args.url ?? args.uri ?? block.callId)}`,
+                content: data.content.trim(),
+              },
+            ]
+          : []
       } catch {
-        return null
+        return []
       }
     }
 
@@ -658,15 +701,20 @@ export class ConversationTurnService {
         const data = JSON.parse(result) as Record<string, unknown>
         for (const field of ['content', 'text', 'markdown']) {
           const content = data[field]
-          if (typeof content === 'string' && content.trim()) return content.trim()
+          if (typeof content === 'string' && content.trim()) {
+            const instance = String(
+              args.url ?? args.query ?? args.tabId ?? args.pageId ?? args.instanceId ?? block.callId,
+            )
+            return [{ sourceKey: `browser:${instance}`, content: content.trim() }]
+          }
         }
-        return null
+        return []
       } catch {
-        return result
+        return [{ sourceKey: `browser:${block.callId}`, content: result }]
       }
     }
 
-    return null
+    return []
   }
 
   private async captureWorkContext(
@@ -684,27 +732,37 @@ export class ConversationTurnService {
         break
       }
     }
-    const content = blocks
-      .flatMap((block, index) => {
-        if (
-          index < captureStart ||
-          block.kind !== 'tool' ||
-          block.isError ||
-          !block.result?.trim()
-        ) {
-          return []
-        }
-        const result = this.formatWorkContextToolResult(block)
-        return result ? [result] : []
-      })
-      .join('\n\n')
-      .slice(0, 8000)
-    if (!content) return
+    const items = blocks.flatMap((block, index) => {
+      if (
+        index < captureStart ||
+        block.kind !== 'tool' ||
+        block.isError ||
+        !block.result?.trim()
+      ) {
+        return []
+      }
+      return this.formatWorkContextToolResult(block)
+    })
+    const latest = new Map<string, { sourceKey: string; content: string }>()
+    for (const item of items) {
+      latest.delete(item.sourceKey.toLocaleLowerCase())
+      latest.set(item.sourceKey.toLocaleLowerCase(), item)
+    }
+    const retained: Array<{ sourceKey: string; content: string }> = []
+    let size = 0
+    for (const item of latest.values()) {
+      if (size >= 8000) break
+      const content = item.content.slice(0, 8000 - size)
+      if (!content) continue
+      retained.push({ ...item, content })
+      size += content.length
+    }
+    if (!retained.length) return
     await service.appendAutomaticWorkContext({
       threadId: prepared.threadId,
       agentId: prepared.agentId,
       pairId: prepared.pairId,
-      content,
+      items: retained,
     })
   }
 

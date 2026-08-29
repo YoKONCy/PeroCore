@@ -31,6 +31,7 @@ export interface ChatMessage {
   timestamp: string
   /** 对话对 ID，用于精确级联删除。 */
   pairId?: string | null
+  revision?: number
   /** 当前流式消息对应的 Internal Surface。 */
   surfaceId?: string
   /** 当前回复携带的 RAG 降级轨迹。 */
@@ -91,6 +92,10 @@ export const useThreadStore = defineStore('thread', () => {
 
   /** 历史记录加载状态 */
   const isLoadingHistory = ref(false)
+  const isLoadingOlderHistory = ref(false)
+  const hasMoreHistory = ref(false)
+  const historyCursor = ref<string | undefined>(undefined)
+  const HISTORY_PAGE_SIZE = 60
 
   /** 历史记录加载错误 */
   const historyError = ref<string | null>(null)
@@ -141,6 +146,7 @@ export const useThreadStore = defineStore('thread', () => {
       rawContent: message.rawContent,
       timestamp: message.timestamp,
       pairId: message.pairId,
+      revision: message.revision,
       surfaceId: `conversation-message:${message.messageId}`,
       senderId: message.senderId ?? message.agentId ?? undefined,
       attachments: message.attachments.map((item) => ({
@@ -218,7 +224,7 @@ export const useThreadStore = defineStore('thread', () => {
     try {
       const [threadResponse, projectionResponse] = await Promise.all([
         threadsApi.get(nextThreadId, { page: 1, pageSize: 1 }),
-        threadsApi.getProjection(nextThreadId),
+        threadsApi.getProjection(nextThreadId, { pageSize: HISTORY_PAGE_SIZE }),
       ])
       if (generation !== loadGeneration) return
       const thread = threadResponse.data?.thread
@@ -233,17 +239,51 @@ export const useThreadStore = defineStore('thread', () => {
       agentId.value = thread.agentId
       channel.value = thread.channel
       compositor.replaceSnapshot(projection)
-      messages.value = restoreStreamingShell(
-        projection.messages.map(fromProjection),
-        thread.id,
-        thread.agentId,
+      historyCursor.value = projection.beforeCursor
+      hasMoreHistory.value = projection.hasMoreBefore ?? false
+      const existing = new Map<string, ChatMessage>(
+        messages.value.map((message) => [message.id, message]),
       )
+      const persisted = projection.messages.map(fromProjection).map((message) => {
+        const current = existing.get(message.id)
+        return current && current.revision === message.revision ? current : message
+      })
+      messages.value = restoreStreamingShell(persisted, thread.id, thread.agentId)
     } catch (err) {
       if (generation !== loadGeneration) return // 过期请求的错误也丢弃，避免污染当前状态
       historyError.value = (err as Error).message
       logger.error('ThreadStore', 'Thread 消息加载失败', err)
     } finally {
       if (generation === loadGeneration) isLoadingHistory.value = false
+    }
+  }
+
+  async function loadOlderMessages(): Promise<number> {
+    if (!threadId.value || !hasMoreHistory.value || isLoadingOlderHistory.value) return 0
+    isLoadingOlderHistory.value = true
+    try {
+      const response = await threadsApi.getProjection(threadId.value, {
+        beforeCursor: historyCursor.value,
+        pageSize: HISTORY_PAGE_SIZE,
+      })
+      const projection = response.data
+      if (!projection || projection.threadId !== threadId.value) return 0
+      compositor.mergeSnapshot(projection)
+      const existing = new Map(messages.value.map((message) => [message.id, message]))
+      const older = projection.messages.map(fromProjection).map((message) => {
+        const current = existing.get(message.id)
+        return current && current.revision === message.revision ? current : message
+      })
+      const additions = older.filter((message) => !existing.has(message.id))
+      messages.value = [...additions, ...messages.value]
+      historyCursor.value = projection.beforeCursor
+      hasMoreHistory.value = projection.hasMoreBefore ?? false
+      return additions.length
+    } catch (error) {
+      logger.error('ThreadStore', '更早历史加载失败', error)
+      return 0
+    } finally {
+      isLoadingOlderHistory.value = false
     }
   }
 
@@ -308,9 +348,31 @@ export const useThreadStore = defineStore('thread', () => {
     await loadThreadMessages(threadId.value, currentAgentId)
   }
 
+  function mergeProjectionMessages(
+    snapshot: import('@infos/shared').ConversationProjectionSnapshot,
+  ): ChatMessage[] {
+    const existing = new Map<string, ChatMessage>(
+      messages.value.map((message) => [message.id, message]),
+    )
+    const projected = snapshot.messages.map(fromProjection).map((message) => {
+      const current = existing.get(message.id)
+      return current && current.revision === message.revision ? current : message
+    })
+    const firstProjectedId = Number(projected[0]?.id)
+    const retainedHistory = Number.isSafeInteger(firstProjectedId)
+      ? messages.value.filter(
+          (message) => Number.isSafeInteger(Number(message.id)) && Number(message.id) < firstProjectedId,
+        )
+      : []
+    return [...retainedHistory, ...projected]
+  }
+
   function applyProjection(snapshot: import('@infos/shared').ConversationProjectionSnapshot): void {
-    compositor.replaceSnapshot(snapshot)
-    messages.value = snapshot.messages.map(fromProjection)
+    compositor.mergeSnapshot(snapshot)
+    messages.value = mergeProjectionMessages(snapshot)
+    historyCursor.value = messages.value[0]?.id
+    hasMoreHistory.value =
+      messages.value.length < (snapshot.totalMessages ?? messages.value.length)
   }
 
   /** 应用实时 Surface 帧，并在 commit 时把临时消息原子归一为持久消息 Shell。 */
@@ -326,8 +388,8 @@ export const useThreadStore = defineStore('thread', () => {
       return
     }
     if (frame.operation.type !== 'surface.commit') return
-    compositor.replaceSnapshot(frame.operation.snapshot)
-    messages.value = frame.operation.snapshot.messages.map(fromProjection)
+    compositor.mergeSnapshot(frame.operation.snapshot)
+    messages.value = mergeProjectionMessages(frame.operation.snapshot)
     const committedMessageId = frame.operation.message.messageId
     if (ragFailureTrace.value) {
       const failure = { ...ragFailureTrace.value }
@@ -371,6 +433,9 @@ export const useThreadStore = defineStore('thread', () => {
     streamingMessageId.value = null
     inputText.value = ''
     historyError.value = null
+    historyCursor.value = undefined
+    hasMoreHistory.value = false
+    isLoadingOlderHistory.value = false
   }
 
   /**
@@ -441,6 +506,8 @@ export const useThreadStore = defineStore('thread', () => {
     inputText,
     streamingMessageId,
     isLoadingHistory,
+    isLoadingOlderHistory,
+    hasMoreHistory,
     historyError,
     installLocalMessageSurface,
     addMessage,
@@ -458,6 +525,7 @@ export const useThreadStore = defineStore('thread', () => {
     loadLatestThread,
     ensureLatestThread,
     loadThreadMessages,
+    loadOlderMessages,
     refreshCurrentThread,
   }
 })

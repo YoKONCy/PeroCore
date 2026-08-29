@@ -1,7 +1,7 @@
 {
   "name": "infos-ts",
   "private": true,
-  "version": "0.9.3",
+  "version": "0.9.3-hotfix1",
   "description": "infOS-TS — 萌动链接：PeroperoChat！的 TypeScript 全栈引擎",
   "main": "dist-electron/main/index.js",
   "author": "YoKONCy",

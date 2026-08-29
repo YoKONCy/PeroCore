@@ -590,37 +590,71 @@ export class ThreadRepository {
     return rows.reverse().map(({ message, ...thread }) => ({ ...message, ...thread }))
   }
 
-  /** 查询 Thread 的全部活跃消息（分页，用于前端历史加载） */
+  /** 按稳定消息游标查询 Thread 的活跃消息（最新在前）。 */
   async listActiveMessages(params: {
     threadId: string
+    beforeMessageId?: number
     page?: number
     pageSize?: number
-  }): Promise<{ items: ThreadMessageRow[]; total: number }> {
-    const page = Math.max(1, params.page ?? 1)
-    const pageSize = Math.min(200, Math.max(1, params.pageSize ?? 100))
-    const offset = (page - 1) * pageSize
-
+  }): Promise<{ items: ThreadMessageRow[]; total: number; hasMoreBefore: boolean }> {
+    const pageSize = Math.min(100, Math.max(1, params.pageSize ?? 60))
+    const offset = params.beforeMessageId ? 0 : (Math.max(1, params.page ?? 1) - 1) * pageSize
     const conditions = [
       eq(threadMessages.threadId, params.threadId),
       inArray(threadMessages.status, ['active', 'failed', 'interrupted']),
     ]
 
-    // 倒序查询（最新在前）
-    const items = await this.db
+    if (params.beforeMessageId) {
+      const [cursor] = await this.db
+        .select({ id: threadMessages.id, timestamp: threadMessages.timestamp })
+        .from(threadMessages)
+        .where(
+          and(
+            eq(threadMessages.threadId, params.threadId),
+            eq(threadMessages.id, params.beforeMessageId),
+          ),
+        )
+        .limit(1)
+      if (cursor) {
+        const cursorTimestamp = cursor.timestamp
+        conditions.push(
+          cursorTimestamp === null
+            ? sql`${threadMessages.timestamp} is null and ${threadMessages.id} < ${cursor.id}`
+            : or(
+                sql`${threadMessages.timestamp} < ${cursorTimestamp}`,
+                and(
+                  eq(threadMessages.timestamp, cursorTimestamp),
+                  sql`${threadMessages.id} < ${cursor.id}`,
+                ),
+              )!,
+        )
+      }
+    }
+
+    const rows = await this.db
       .select()
       .from(threadMessages)
       .where(and(...conditions))
       .orderBy(desc(threadMessages.timestamp), desc(threadMessages.id))
-      .limit(pageSize)
+      .limit(pageSize + 1)
       .offset(offset)
 
     const countResult = await this.db
       .select({ count: sql<number>`count(*)` })
       .from(threadMessages)
-      .where(and(...conditions))
+      .where(
+        and(
+          eq(threadMessages.threadId, params.threadId),
+          inArray(threadMessages.status, ['active', 'failed', 'interrupted']),
+        ),
+      )
     const total = countResult[0]?.count ?? 0
 
-    return { items, total }
+    return {
+      items: rows.slice(0, pageSize),
+      total,
+      hasMoreBefore: rows.length > pageSize,
+    }
   }
 
   async getMessageCoverageContext(messageId: number): Promise<

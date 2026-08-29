@@ -5,13 +5,14 @@
  * 档案工作台布局：统计头 + 过滤工作台 + (列表|图谱) × 常驻详情检查器。
  * 数据全部走后端 archiveQuery / graphSnapshot，前端不做全量拉取。
  */
-import { computed, onMounted, watch } from 'vue'
+import { computed, onMounted, onUnmounted, watch } from 'vue'
 import type { EventNote } from '@infos/shared'
-import { PixelIcon, PButton, PCard } from '../../pixel'
+import { PixelIcon, PButton, PCard, PDialog } from '../../pixel'
 import { useDashboardContext } from '../../../composables/dashboard'
 import { useMemoryArchive } from '../../../composables/dashboard/useMemoryArchive'
 import { useNotificationStore } from '../../../stores/useNotificationStore'
 import { useAgentStore } from '../../../stores/useAgentStore'
+import { memoryApi } from '../../../api/modules/memoryApi'
 import MemoryFilterBar from '../memories/MemoryFilterBar.vue'
 import MemoryList from '../memories/MemoryList.vue'
 import MemoryInspector from '../memories/MemoryInspector.vue'
@@ -21,6 +22,8 @@ const ctx = useDashboardContext()
 const notif = useNotificationStore()
 const agentStore = useAgentStore()
 const view = ref<'list' | 'graph'>('list')
+const archiveTarget = ref<EventNote | null>(null)
+const archiveSaving = ref(false)
 
 const archive = useMemoryArchive(
   () => ctx.activeAgentId.value || 'pero',
@@ -102,10 +105,41 @@ watch(view, (next) => {
   if (next === 'graph' && !archive.graph.value.nodes.length) void loadGraph()
 })
 
-onMounted(loadArchive)
+function handleConversationCompleted(): void {
+  void loadArchive()
+  if (view.value === 'graph') void loadGraph()
+}
+
+onMounted(() => {
+  void loadArchive()
+  window.addEventListener('infos:conversation-completed', handleConversationCompleted)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('infos:conversation-completed', handleConversationCompleted)
+})
 
 function onSelectNote(note: EventNote): void {
   void archive.selectNote(note)
+}
+
+async function confirmArchive(): Promise<void> {
+  const target = archiveTarget.value
+  if (!target || archiveSaving.value) return
+  archiveSaving.value = true
+  try {
+    await memoryApi.archiveNote(target.id)
+    archiveTarget.value = null
+    archive.selected.value = null
+    archive.selectedId.value = null
+    await loadArchive()
+    if (view.value === 'graph') await loadGraph()
+    notif.toast('核心记忆已移入归档，关系图结构保持不变', 'success')
+  } catch (error) {
+    notif.toast('删除核心记忆失败：' + (error as Error).message, 'error')
+  } finally {
+    archiveSaving.value = false
+  }
 }
 
 const statBadges = computed(() => [
@@ -222,10 +256,22 @@ const statBadges = computed(() => [
           :source-loading="archive.sourceLoading.value"
           :source-error="archive.sourceError.value"
           @load-source="archive.loadSource"
+          @archive="archiveTarget = $event"
           @select="onSelectNote"
         />
       </aside>
     </div>
+
+    <PDialog
+      :model-value="Boolean(archiveTarget)"
+      title="删除这条核心记忆？"
+      :message="`记忆“${archiveTarget?.narrative ?? ''}”将退出 Agent 检索；节点和所有关系边都会保留。`"
+      confirm-text="删除记忆"
+      confirm-variant="danger"
+      :loading="archiveSaving"
+      @update:model-value="!$event && (archiveTarget = null)"
+      @confirm="confirmArchive"
+    />
   </div>
 </template>
 

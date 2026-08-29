@@ -61,7 +61,7 @@ watch(
 )
 
 type RenderItem =
-  | { type: 'node'; id: string; node: SurfaceNode }
+  | { type: 'node'; id: string; node: SurfaceNode; toolResult?: ToolResultSurfaceProps }
   | { type: 'markdown-block'; id: string; block: ReturnType<typeof segmentStreamMarkdown>[number] }
 
 function openAttachmentImage(id: string): void {
@@ -75,9 +75,21 @@ function formatDuration(value?: number): string {
 
 const renderItems = computed<RenderItem[]>(() => {
   const items: RenderItem[] = []
+  const toolResults = new Map<string, ToolResultSurfaceProps>()
+  for (const node of props.surface.nodes) {
+    if (node.kind === 'tool-result') {
+      const result = resultProps(node)
+      toolResults.set(result.callId, result)
+    }
+  }
   for (const node of props.surface.nodes) {
     if (node.kind !== 'markdown') {
-      items.push({ type: 'node', id: node.nodeId, node })
+      items.push({
+        type: 'node',
+        id: node.nodeId,
+        node,
+        toolResult: node.kind === 'tool-call' ? toolResults.get(toolProps(node).callId) : undefined,
+      })
       continue
     }
     const markdown = node.props as MarkdownSurfaceProps
@@ -153,13 +165,6 @@ function toolProps(node: SurfaceNode): ToolCallSurfaceProps {
 
 function resultProps(node: SurfaceNode): ToolResultSurfaceProps {
   return node.props as ToolResultSurfaceProps
-}
-
-function resultFor(callId: string): ToolResultSurfaceProps | undefined {
-  const node = props.surface.nodes.find(
-    (item) => item.kind === 'tool-result' && resultProps(item).callId === callId,
-  )
-  return node ? resultProps(node) : undefined
 }
 
 function statusProps(node: SurfaceNode): StatusSurfaceProps {
@@ -309,14 +314,23 @@ function errorMessage(node: SurfaceNode): string {
 <template>
   <div class="conversation-surface" :data-surface-id="surface.surfaceId">
     <template v-for="(item, itemIndex) in renderItems" :key="item.id">
-      <template v-if="item.type === 'markdown-block'">
+      <div
+        v-if="item.type === 'markdown-block'"
+        class="surface-markdown-block"
+        :class="{ 'surface-markdown-block--stable': item.block.stable }"
+      >
         <MermaidSurfaceNode
           v-if="item.block.kind === 'mermaid'"
           :source="item.block.source"
           :active="!surface.suspended"
         />
-        <ChatRichText v-else :content="item.block.source" />
-      </template>
+        <ChatRichText
+          v-else
+          :content="item.block.source"
+          :active="!surface.suspended"
+          :cache="item.block.stable"
+        />
+      </div>
       <template v-else>
         <details v-if="item.node.kind === 'thinking'" class="surface-thinking" open>
           <summary>
@@ -366,9 +380,9 @@ function errorMessage(node: SurfaceNode): string {
           :tool="{
             name: toolProps(item.node).name || 'assembling_tool',
             args: toolProps(item.node).args || toolProps(item.node).argsPreview || '',
-            result: resultFor(toolProps(item.node).callId)?.result,
-            isError: resultFor(toolProps(item.node).callId)?.isError,
-            durationMs: resultFor(toolProps(item.node).callId)?.durationMs,
+            result: item.toolResult?.result,
+            isError: item.toolResult?.isError,
+            durationMs: item.toolResult?.durationMs,
             receivedChars: toolProps(item.node).receivedChars,
             assembling: toolProps(item.node).state === 'assembling',
           }"

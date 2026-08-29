@@ -105,7 +105,7 @@ function saveQuickLoginAccount(account: string): void {
 
 /** 从 NapCat 生成的账号配置中识别扫码成功的账号，并完成 WS 与快速登录配置。 */
 function discoverLoggedInAccounts(): string[] {
-  const accounts = ensureNapCatConfig()
+  const { accounts } = syncNapCatConfig()
   const currentAccount = readQuickLoginAccount()
   if (!currentAccount && accounts[0]) saveQuickLoginAccount(accounts[0])
   return accounts
@@ -119,12 +119,11 @@ function stopAccountDiscovery(): void {
 
 function startAccountDiscovery(): void {
   stopAccountDiscovery()
-  const knownAccount = readQuickLoginAccount()
+  // NapCat 会在登录、切换账号和运行期保存设置时重写 onebot11 配置。
+  // 因此必须在进程存活期间持续幂等同步，不能因发现旧快速登录账号就提前停止。
+  discoverLoggedInAccounts()
   accountDiscoveryTimer = setInterval(() => {
-    const accounts = discoverLoggedInAccounts()
-    if (accounts.length > 0 && (!knownAccount || accounts.includes(knownAccount))) {
-      stopAccountDiscovery()
-    }
+    discoverLoggedInAccounts()
   }, 1500)
 }
 
@@ -273,15 +272,25 @@ async function resolveEntryPoint(
  * - 如果没有 → 追加一条新连接
  * - 如果 config/ 目录不存在或没有配置文件 → 跳过 (等用户扫码登录后再说)
  *
- * @returns 已配置的 QQ 号列表
+ * @returns 已扫描账号及本轮实际修改的账号
  */
-export function ensureNapCatConfig(): string[] {
+export interface NapCatConfigSyncResult {
+  accounts: string[]
+  changedAccounts: string[]
+}
+
+export function syncNapCatConfig(): NapCatConfigSyncResult {
   const configDir = getNapCatConfigDir()
   const configuredAccounts: string[] = []
+  const changedAccounts: string[] = []
+  const result = (): NapCatConfigSyncResult => ({
+    accounts: configuredAccounts,
+    changedAccounts,
+  })
 
   if (!fs.existsSync(configDir)) {
     logger.info('NapCat', '配置目录不存在，跳过自动配置 (等待首次登录)')
-    return configuredAccounts
+    return result()
   }
 
   // 扫描所有 onebot11_<QQ号>.json
@@ -290,12 +299,12 @@ export function ensureNapCatConfig(): string[] {
     entries = fs.readdirSync(configDir).filter((f) => /^onebot11_\d+\.json$/.test(f))
   } catch {
     logger.warn('NapCat', '读取配置目录失败')
-    return configuredAccounts
+    return result()
   }
 
   if (entries.length === 0) {
     logger.info('NapCat', '未发现已登录账号配置文件，跳过自动配置')
-    return configuredAccounts
+    return result()
   }
 
   for (const filename of entries) {
@@ -305,51 +314,49 @@ export function ensureNapCatConfig(): string[] {
     try {
       const raw = fs.readFileSync(filePath, 'utf-8')
       const config = JSON.parse(raw) as Record<string, unknown>
+      let changed = false
 
       // 确保 network 对象存在
       if (!config.network || typeof config.network !== 'object') {
         config.network = {}
+        changed = true
       }
       const network = config.network as Record<string, unknown>
 
       // 确保 websocketClients 数组存在
       if (!Array.isArray(network.websocketClients)) {
         network.websocketClients = []
+        changed = true
       }
       const clients = network.websocketClients as Array<Record<string, unknown>>
 
       // 查找是否已有 infOS 连接
-      const existing = clients.find((c) => c.name === WS_CLIENT_NAME)
+      const existing = clients.find((client) => client.name === WS_CLIENT_NAME)
+      const expectedClient: Record<string, unknown> = {
+        name: WS_CLIENT_NAME,
+        enable: true,
+        url: REVERSE_WS_URL,
+        messagePostFormat: 'array',
+        reportSelfMessage: false,
+        token: '',
+      }
 
       if (existing) {
-        // 已有 → 确保 url 和 enable 正确
-        let changed = false
-        if (existing.url !== REVERSE_WS_URL) {
-          existing.url = REVERSE_WS_URL
-          changed = true
-        }
-        if (existing.enable !== true) {
-          existing.enable = true
-          changed = true
-        }
-        if (changed) {
-          fs.writeFileSync(filePath, JSON.stringify(config, null, 2), 'utf-8')
-          logger.info('NapCat', `已更新 QQ ${qqNumber} 的反向 WS 配置 → ${REVERSE_WS_URL}`)
-        } else {
-          logger.info('NapCat', `QQ ${qqNumber} 反向 WS 配置已是最新`)
+        for (const [key, value] of Object.entries(expectedClient)) {
+          if (existing[key] !== value) {
+            existing[key] = value
+            changed = true
+          }
         }
       } else {
-        // 没有 → 追加新连接
-        clients.push({
-          name: WS_CLIENT_NAME,
-          enable: true,
-          url: REVERSE_WS_URL,
-          messagePostFormat: 'array',
-          reportSelfMessage: false,
-          token: '',
-        })
+        clients.push(expectedClient)
+        changed = true
+      }
+
+      if (changed) {
         fs.writeFileSync(filePath, JSON.stringify(config, null, 2), 'utf-8')
-        logger.info('NapCat', `已为 QQ ${qqNumber} 注入反向 WS 配置 → ${REVERSE_WS_URL}`)
+        changedAccounts.push(qqNumber)
+        logger.info('NapCat', `已同步 QQ ${qqNumber} 的反向 WS 配置 → ${REVERSE_WS_URL}`)
       }
 
       configuredAccounts.push(qqNumber)
@@ -358,10 +365,15 @@ export function ensureNapCatConfig(): string[] {
     }
   }
 
-  if (configuredAccounts.length > 0) {
-    broadcastNapCatLog(`[系统] 已自动配置 ${configuredAccounts.length} 个账号的反向 WS 连接`)
+  if (changedAccounts.length > 0) {
+    broadcastNapCatLog(`[系统] 已自动同步 ${changedAccounts.length} 个账号的反向 WS 连接`)
   }
-  return configuredAccounts
+  return result()
+}
+
+/** 兼容渲染进程现有 IPC，仅返回已扫描并配置的账号。 */
+export function ensureNapCatConfig(): string[] {
+  return syncNapCatConfig().accounts
 }
 
 // ─────────────────────────────────────────────
