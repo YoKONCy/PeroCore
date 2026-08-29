@@ -4,7 +4,7 @@ import { mkdir, readFile, readdir, rename, rm, writeFile, copyFile } from 'node:
 import path from 'node:path'
 import type { DrizzleDb } from '../../database'
 
-const APP_VERSION = '0.9.3-hotfix1'
+const APP_VERSION = '0.9.3-hotfix2'
 const BUNDLE_VERSION = 1
 const SCHEMA_VERSION = 1
 const MAX_FILE_COUNT = 100_000

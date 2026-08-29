@@ -148,8 +148,30 @@ function versionParts(value: string): Array<number | string> {
   )
 }
 
-/** 只需服务 Release 列表排序与“是否比当前新”，不接受远端自定义比较表达式。 */
+/**
+ * 比较 Release 版本。
+ *
+ * hotfix 是项目发行通道而非普通 SemVer 预发布：同一基础版本下，
+ * hotfixN 必须高于已发布稳定版，否则 0.9.3 永远看不到 0.9.3-hotfix1。
+ * 其他 alpha、beta、rc 仍遵循“稳定版高于预发布”的规则。
+ */
 export function compareVersions(left: string, right: string): number {
+  const leftChannel = classifyReleaseChannel(left)
+  const rightChannel = classifyReleaseChannel(right)
+  const leftBase = versionParts(left).slice(0, 3)
+  const rightBase = versionParts(right).slice(0, 3)
+  const baseLength = Math.max(leftBase.length, rightBase.length)
+  for (let index = 0; index < baseLength; index++) {
+    const av = leftBase[index] ?? 0
+    const bv = rightBase[index] ?? 0
+    if (av === bv) continue
+    return av > bv ? 1 : -1
+  }
+
+  if (leftChannel !== rightChannel && (leftChannel === 'hotfix' || rightChannel === 'hotfix')) {
+    return leftChannel === 'hotfix' ? 1 : -1
+  }
+
   const a = versionParts(left)
   const b = versionParts(right)
   const length = Math.max(a.length, b.length)

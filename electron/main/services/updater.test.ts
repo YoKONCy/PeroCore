@@ -37,12 +37,15 @@ describe('Updater Release版本合同', () => {
     expect(classifyReleaseChannel('v1.2.1-hotfix1')).toBe('hotfix')
   })
 
-  it('稳定版应高于同版本预发布，较新主次补丁版本应正确排序', () => {
+  it('稳定版应高于同版本预发布，Hotfix应高于同基础稳定版', () => {
     expect(compareVersions('1.2.0', '1.2.0-rc1')).toBeGreaterThan(0)
     expect(compareVersions('1.2.0-rc2', '1.2.0-rc1')).toBeGreaterThan(0)
     expect(compareVersions('1.2.0-rc10', '1.2.0-rc2')).toBeGreaterThan(0)
     expect(compareVersions('1.3.0-alpha1', '1.2.9')).toBeGreaterThan(0)
     expect(compareVersions('2.0.0', '1.99.99')).toBeGreaterThan(0)
+    expect(compareVersions('1.2.0-hotfix1', '1.2.0')).toBeGreaterThan(0)
+    expect(compareVersions('1.2.0-hotfix2', '1.2.0-hotfix1')).toBeGreaterThan(0)
+    expect(compareVersions('1.2.1', '1.2.0-hotfix9')).toBeGreaterThan(0)
     expect(compareVersions('1.2.0', 'v1.2.0')).toBe(0)
   })
 })
