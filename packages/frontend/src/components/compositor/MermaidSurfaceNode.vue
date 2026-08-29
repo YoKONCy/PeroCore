@@ -7,7 +7,7 @@
  */
 import { onMounted, ref, watch } from 'vue'
 
-type MermaidModule = typeof import('mermaid')['default']
+type MermaidModule = (typeof import('mermaid'))['default']
 let mermaidPromise: Promise<MermaidModule> | null = null
 
 function loadMermaid(): Promise<MermaidModule> {

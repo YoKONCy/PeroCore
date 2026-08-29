@@ -545,10 +545,7 @@ describe('EventMemoryService真实双库存储', () => {
     expect(
       store
         .getEdges((await service.detail(first.id))!.tdbId)
-        .some(
-          (edge) =>
-            edge.targetId === secondRow!.tdbId && edge.label === 'same_topic',
-        ),
+        .some((edge) => edge.targetId === secondRow!.tdbId && edge.label === 'same_topic'),
     ).toBe(true)
 
     const rag = await service.automaticRag('pero', '第二件互动事件', 1)

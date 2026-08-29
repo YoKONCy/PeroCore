@@ -134,11 +134,7 @@ describe('FlowStateService', () => {
 
     const result = await service.get('thread-1', 'pero')
 
-    expect(result.workContextSegments).toEqual([
-      '旧页面内容',
-      '最新文件内容',
-      '其他文件内容',
-    ])
+    expect(result.workContextSegments).toEqual(['旧页面内容', '最新文件内容', '其他文件内容'])
     expect(result.workContext).not.toContain('旧文件内容')
   })
 
@@ -228,7 +224,9 @@ describe('FlowStateService', () => {
   it('模型窗口不足时按轮移除最久远工作上下文', () => {
     const segments = ['最旧轮'.repeat(50), '较新轮'.repeat(50), '最新轮'.repeat(50)]
     const rendered = segments.join('\n\n')
-    const messages = [{ role: 'system' as const, content: `<Work_Context>${rendered}</Work_Context>` }]
+    const messages = [
+      { role: 'system' as const, content: `<Work_Context>${rendered}</Work_Context>` },
+    ]
 
     const trimmed = trimWorkContextToFit(messages, segments, rendered, 180)
     const content = String(trimmed[0]?.content)

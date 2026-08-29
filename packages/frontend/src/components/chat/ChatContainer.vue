@@ -8,15 +8,7 @@
  * @props agentId - 目标 Agent ID
  * @props agentName - Agent 名称
  */
-import {
-  ref,
-  computed,
-  onMounted,
-  onUnmounted,
-  onActivated,
-  nextTick,
-  watch,
-} from 'vue'
+import { ref, computed, onMounted, onUnmounted, onActivated, nextTick, watch } from 'vue'
 import ConversationSurface from '../compositor/ConversationSurface.vue'
 import MessageBubble from './MessageBubble.vue'
 import InputBar from './InputBar.vue'

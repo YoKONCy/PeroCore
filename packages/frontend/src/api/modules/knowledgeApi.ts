@@ -10,6 +10,5 @@ export const knowledgeApi = {
   },
 
   /** 撤回事实，保留节点和历史关系边 */
-  retractFact: (id: string) =>
-    apiClient.delete<void>(`/knowledge/facts/${encodeURIComponent(id)}`),
+  retractFact: (id: string) => apiClient.delete<void>(`/knowledge/facts/${encodeURIComponent(id)}`),
 }

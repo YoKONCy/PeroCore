@@ -354,8 +354,7 @@ describe('ConversationTurnService 初始提示词快照', () => {
             {
               name: 'read_file',
               args: { file_path: 'src/example.ts' },
-              result:
-                '{"ephemeral":true,"kind":"file_read_audit","path":"src/example.ts"}',
+              result: '{"ephemeral":true,"kind":"file_read_audit","path":"src/example.ts"}',
               durationMs: 1,
               isError: false,
               callId: 'call-read',
@@ -487,9 +486,9 @@ describe('ConversationTurnService 初始提示词快照', () => {
         },
       ],
     })
-    const captured = appendAutomaticWorkContext.mock.calls[0]![0].items
-      .map((item: { content: string }) => item.content)
-      .join('\n\n')
+    const captured = appendAutomaticWorkContext.mock.calls[0]![0].items.map(
+      (item: { content: string }) => item.content,
+    ).join('\n\n')
     expect(captured).not.toContain('ReAct')
     expect(captured).not.toContain('我先读取代码')
     expect(captured).not.toContain('read_file')
