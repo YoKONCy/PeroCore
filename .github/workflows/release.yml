@@ -65,7 +65,22 @@ jobs:
         run: node scripts/build-daemon-bundle.mjs && node scripts/collect-daemon-deps.mjs && pnpm rebuild:daemon-deps
 
       - name: 构建 Electron 标准版 (NSIS)
-        run: pnpm exec electron-builder --config electron-builder.standard.yml --publish never
+        shell: powershell
+        run: |
+          $attempt = 1
+          while ($attempt -le 2) {
+            pnpm exec electron-builder --config electron-builder.standard.yml --publish never
+            if ($LASTEXITCODE -eq 0) {
+              exit 0
+            }
+            if ($attempt -eq 2) {
+              exit $LASTEXITCODE
+            }
+            Write-Warning "Electron Builder 首次失败，清理产物后重试（用于恢复 rcedit 文件锁定）"
+            Start-Sleep -Seconds 5
+            Remove-Item "release-electron" -Recurse -Force -ErrorAction SilentlyContinue
+            $attempt += 1
+          }
         env:
           INFOS_EDITION: standard
 

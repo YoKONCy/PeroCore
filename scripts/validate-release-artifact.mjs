@@ -14,11 +14,11 @@ if (!['standard', 'portable'].includes(mode) || !artifactDirectory || !evidenceD
 }
 
 const port = 9120
-const runRoot = path.join(os.tmpdir(), `infOS 验收 ${mode} ${randomUUID()}`)
+const runRoot = path.join(os.tmpdir(), `infos-acceptance-${mode}-${randomUUID()}`)
 const appData = path.join(runRoot, 'AppData', 'Roaming')
 const localAppData = path.join(runRoot, 'AppData', 'Local')
-const installDirectory = path.join(runRoot, '安装目录')
-const extractDirectory = path.join(runRoot, '便携版 解压目录')
+const installDirectory = path.join(runRoot, 'install')
+const extractDirectory = path.join(runRoot, 'portable')
 const processLogPath = path.join(evidenceDirectory, 'desktop-process.log')
 const summaryPath = path.join(evidenceDirectory, 'acceptance-summary.json')
 
@@ -230,7 +230,9 @@ try {
   } else {
     const archive = await findArtifact('.zip', (name) => name.includes('Portable'))
     await fsp.mkdir(extractDirectory, { recursive: true })
-    run('tar.exe', ['-xf', archive, '-C', extractDirectory], { timeout: 180_000 })
+    const asciiArchive = path.join(runRoot, 'portable.zip')
+    await fsp.copyFile(archive, asciiArchive)
+    run('tar.exe', ['-xf', asciiArchive, '-C', extractDirectory], { timeout: 180_000 })
     executable = await findDesktopExecutable(extractDirectory, true)
   }
 
