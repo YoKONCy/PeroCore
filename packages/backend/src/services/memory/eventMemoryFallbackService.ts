@@ -152,20 +152,12 @@ export class EventMemoryFallbackService {
     const contextPairs = Math.max(1, input.contextPairs)
     if (precedingPairs.length < contextPairs) return
 
-    const batchPairs = precedingPairs
-      .slice(-contextPairs)
-      .filter((pairId) => !covered.has(pairId))
+    const batchPairs = precedingPairs.slice(-contextPairs).filter((pairId) => !covered.has(pairId))
     if (!batchPairs.length) return
 
     const capacity = await this.capacityTokens()
     for (const pairIds of this.sliceByCapacity(messages, batchPairs, capacity)) {
-      this.enqueue(
-        input.agentId,
-        input.threadId,
-        input.channel,
-        pairIds,
-        'context_window',
-      )
+      this.enqueue(input.agentId, input.threadId, input.channel, pairIds, 'context_window')
     }
     await this.drain()
   }

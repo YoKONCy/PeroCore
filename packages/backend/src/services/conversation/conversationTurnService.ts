@@ -46,12 +46,8 @@ export interface ConversationTurnDeps {
     }): Promise<void>
   }
   flowStateService?: FlowStateService
-  getAgentModelConfig?: (
-    agentId: string,
-  ) => Promise<import('../llm/llmService').ModelConfig | null>
-  getModelConfigById?: (
-    id: number,
-  ) => Promise<import('../llm/llmService').ModelConfig | null>
+  getAgentModelConfig?: (agentId: string) => Promise<import('../llm/llmService').ModelConfig | null>
+  getModelConfigById?: (id: number) => Promise<import('../llm/llmService').ModelConfig | null>
   retrievalFeedback?: {
     applyRetrievalFeedback(traceId: string, reply: string): Promise<void>
   }
@@ -703,7 +699,12 @@ export class ConversationTurnService {
           const content = data[field]
           if (typeof content === 'string' && content.trim()) {
             const instance = String(
-              args.url ?? args.query ?? args.tabId ?? args.pageId ?? args.instanceId ?? block.callId,
+              args.url ??
+                args.query ??
+                args.tabId ??
+                args.pageId ??
+                args.instanceId ??
+                block.callId,
             )
             return [{ sourceKey: `browser:${instance}`, content: content.trim() }]
           }
@@ -733,12 +734,7 @@ export class ConversationTurnService {
       }
     }
     const items = blocks.flatMap((block, index) => {
-      if (
-        index < captureStart ||
-        block.kind !== 'tool' ||
-        block.isError ||
-        !block.result?.trim()
-      ) {
+      if (index < captureStart || block.kind !== 'tool' || block.isError || !block.result?.trim()) {
         return []
       }
       return this.formatWorkContextToolResult(block)

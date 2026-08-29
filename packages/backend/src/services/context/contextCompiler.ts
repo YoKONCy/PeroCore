@@ -482,7 +482,7 @@ export class ContextCompiler {
     const flowState = await this.flowStateService.get(threadId, agentId)
     const draftFlowInstructions = this.flowStateService.formatForPrompt(flowState)
     const workContextSegments = [...flowState.workContextSegments]
-    let workContextInstructions = workContextSegments.join('\n\n') || '暂无工作上下文。'
+    const workContextInstructions = workContextSegments.join('\n\n') || '暂无工作上下文。'
 
     // ── 9. 组装 vars 对象，调用 MdpEngine 渲染 slots 模板 ──
     const vars: Record<string, unknown> = {

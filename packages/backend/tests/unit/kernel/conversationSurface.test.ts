@@ -63,7 +63,12 @@ describe('Conversation Surface Session', () => {
       JSON.stringify({ file_path: 'src/large.ts', content: 'a'.repeat(5000) }),
       5060,
     )
-    const suppressed = session.appendToolDraft('tool-draft-large', undefined, 'b'.repeat(1000), 6060)
+    const suppressed = session.appendToolDraft(
+      'tool-draft-large',
+      undefined,
+      'b'.repeat(1000),
+      6060,
+    )
     const ready = session.finalizeToolDraft({
       draftId: 'tool-draft-large',
       callId: 'call-large',

@@ -235,9 +235,7 @@ export class FlowStateService {
     }
   }
 
-  private deduplicateAutomaticEntries(
-    entries: Array<{ content: string }>,
-  ): string[] {
+  private deduplicateAutomaticEntries(entries: Array<{ content: string }>): string[] {
     const seen = new Set<string>()
     const retained: string[][] = []
     for (let index = entries.length - 1; index >= 0; index -= 1) {
