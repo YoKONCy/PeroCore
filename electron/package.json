@@ -11,8 +11,8 @@
     "@infos/avatar-assets": "workspace:*",
     "@infos/shared": "workspace:*",
     "@nut-tree-fork/nut-js": "^4.2.6",
-    "adm-zip": "^0.5.17",
-    "ws": "^8.20.0"
+    "adm-zip": "^0.6.0",
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
