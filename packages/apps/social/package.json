@@ -9,10 +9,10 @@
   "dependencies": {
     "@infos/backend": "workspace:*",
     "@infos/shared": "workspace:*",
-    "drizzle-orm": "^0.44.0",
-    "hono": "^4.7.0",
-    "triviumdb": "0.8.2",
-    "uuid": "^14.0.0"
+    "drizzle-orm": "^0.45.3",
+    "hono": "^4.13.9",
+    "triviumdb": "0.8.8",
+    "uuid": "^14.0.2"
   },
   "devDependencies": {
     "@types/uuid": "^11.0.0"
