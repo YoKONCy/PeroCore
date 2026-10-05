@@ -11,12 +11,12 @@
     "@infos/avatar-assets": "workspace:*",
     "@infos/shared": "workspace:*",
     "@nut-tree-fork/nut-js": "^4.2.6",
-    "adm-zip": "^0.5.17",
-    "ws": "^8.20.0"
+    "adm-zip": "^0.6.1",
+    "ws": "^8.22.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
-    "@types/ws": "^8.18.1",
+    "@types/ws": "^8.18.2",
     "electron": "^40.2.1",
     "electron-vite": "^3.1.0",
     "rimraf": "^6.1.2",
