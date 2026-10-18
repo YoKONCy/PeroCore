@@ -11,6 +11,24 @@ const context = {
 }
 
 describe('Browser Tool ABI', () => {
+  it('等待工具将取消信号交给能力端，取消观察不会继续打开网页', async () => {
+    const parent = new AbortController()
+    const invoke = vi.fn(async () => {
+      parent.abort(new Error('父任务已停止'))
+      throw parent.signal.reason
+    })
+    const tools = createBrowserToolContributions({
+      offer: { operations: ['inspect', 'open'] },
+      invoke,
+    } as unknown as BoundCapabilityPort)
+    const open = tools.find((tool) => tool.definition.name === 'browser_open_url')!
+    await expect(
+      open.handler({ url: 'example.com' }, { ...context, signal: parent.signal }),
+    ).rejects.toThrow('父任务已停止')
+    expect(invoke).toHaveBeenCalledTimes(1)
+    expect(invoke.mock.calls[0]).toEqual(['inspect', {}, expect.any(Object), parent.signal])
+  })
+
   it('应通过 Bound Port 调用并发布观察结果', async () => {
     const invoke = vi.fn().mockResolvedValue({ generation: 2, output: { content: '页面' } })
     const observe = vi.fn()
@@ -24,6 +42,7 @@ describe('Browser Tool ABI', () => {
       'open',
       { url: 'https://example.com' },
       expect.objectContaining({ principalId: 'pero' }),
+      undefined,
     )
     expect(observe).toHaveBeenCalledWith(expect.objectContaining({ operation: 'open', context }))
     expect(result).toContain('success')
@@ -67,14 +86,13 @@ describe('Browser Tool ABI', () => {
         'browser_query_dom',
       ]),
     )
-    expect(names).not.toEqual(
-      expect.arrayContaining([
-        'browser_scene',
-        'browser_plan_form',
-        'browser_receipts',
-        'browser_site_model',
-        'browser_compile_capability',
-      ]),
-    )
+    for (const name of [
+      'browser_scene',
+      'browser_plan_form',
+      'browser_receipts',
+      'browser_site_model',
+      'browser_compile_capability',
+    ])
+      expect(names).not.toContain(name)
   })
 })

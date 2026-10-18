@@ -1,6 +1,19 @@
 node_modules/
+**/node_modules/
+.pnpm-store/
+.pnpm-cache/
+.pnpm-home/
+.env
+.env.*
+data/
+@data/
 dist/
+**/dist/
 dist_electron/
+dist-electron/
+dist-daemon/
+dist-applications/
+release-electron/
 .git/
 .gitmodules
 
@@ -8,7 +21,9 @@ dist_electron/
 electron/
 
 # 开发工具和文档
-_docs_/
+.docs/
+.agents/
+.codex/
 .agent/
 .vscode/
 *.md
@@ -29,3 +44,4 @@ Thumbs.db
 **/*.spec.ts
 vitest.config.ts
 coverage/
+packages/wiki/.vitepress/cache/

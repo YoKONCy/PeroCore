@@ -8,6 +8,9 @@ import { createHash, randomUUID } from 'node:crypto'
 import type { ToolApprovalRepository } from '../../repositories/toolApproval.repo'
 import { AppError } from '../../lib/appError'
 import type { ApprovalRiskLevel } from './policyEngine'
+import { createLogger } from '../../lib/logger'
+
+const logger = createLogger('ApprovalService')
 
 export type ApprovalDecision = 'allow_once' | 'allow_session' | 'deny_once'
 
@@ -54,6 +57,7 @@ export class ApprovalService {
   private readonly listeners = new Set<ApprovalEventListener>()
   private readonly resolvedListeners = new Set<ApprovalEventListener>()
   private readonly resolutionWaiters = new Map<string, Set<(request: ApprovalRequest) => void>>()
+  private waitGuard?: (threadId: string) => () => void
 
   constructor(private readonly repository?: ToolApprovalRepository) {
     for (const request of repository?.list() ?? []) this.requests.set(request.id, request)
@@ -63,6 +67,31 @@ export class ApprovalService {
   onRequested(listener: ApprovalEventListener): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
+  }
+
+  setWaitGuard(guard: (threadId: string) => () => void): void {
+    this.waitGuard = guard
+  }
+
+  /** 通知订阅者失败不能阻断原工具的审批等待与续行。 */
+  private notify(listeners: Set<ApprovalEventListener>, request: ApprovalRequest): void {
+    for (const listener of listeners) {
+      try {
+        void Promise.resolve(listener({ ...request })).catch((error) =>
+          logger.warn('审批状态通知失败', { approvalId: request.id, error }),
+        )
+      } catch (error) {
+        logger.warn('审批状态通知失败', { approvalId: request.id, error })
+      }
+    }
+  }
+
+  private finish(request: ApprovalRequest): void {
+    const waiters = [...(this.resolutionWaiters.get(request.id) ?? [])]
+    this.resolutionWaiters.delete(request.id)
+    // 每个调用接收不可共享变更的决策副本，消费凭证不会改变已交付的决策。
+    for (const waiter of waiters) waiter({ ...request })
+    this.notify(this.resolvedListeners, request)
   }
 
   /** 订阅审批完成事件，供 Gateway 立即同步所有前端。 */
@@ -112,7 +141,7 @@ export class ApprovalService {
     this.requests.set(request.id, request)
     this.repository?.create(request)
     this.audit(request, 'requested', { reason: request.reason, argsSummary: request.argsSummary })
-    for (const listener of this.listeners) void listener(request)
+    this.notify(this.listeners, request)
     return request
   }
 
@@ -131,9 +160,7 @@ export class ApprovalService {
       this.sessionGrants.add(this.sessionKey(request.sessionId, request.toolName))
     this.persist(request)
     this.audit(request, 'resolved', { decision, message: request.resolutionMessage })
-    for (const listener of this.resolvedListeners) void listener(request)
-    for (const waiter of this.resolutionWaiters.get(request.id) ?? []) waiter(request)
-    this.resolutionWaiters.delete(request.id)
+    this.finish(request)
     return request
   }
 
@@ -141,11 +168,15 @@ export class ApprovalService {
   waitForResolution(id: string, signal?: AbortSignal): Promise<ApprovalRequest> {
     const current = this.get(id)
     if (!current) return Promise.reject(new Error(`审批请求不存在: ${id}`))
-    if (current.status !== 'pending') return Promise.resolve(current)
+    if (current.status !== 'pending') return Promise.resolve({ ...current })
     return new Promise<ApprovalRequest>((resolve, reject) => {
+      const releaseGuard = this.waitGuard?.(current.threadId)
       const cleanup = () => {
+        releaseGuard?.()
         signal?.removeEventListener('abort', abort)
-        this.resolutionWaiters.get(id)?.delete(done)
+        const waiters = this.resolutionWaiters.get(id)
+        waiters?.delete(done)
+        if (waiters?.size === 0) this.resolutionWaiters.delete(id)
       }
       const done = (request: ApprovalRequest) => {
         cleanup()
@@ -153,6 +184,7 @@ export class ApprovalService {
       }
       const abort = () => {
         cleanup()
+        this.cancel(id, '当前执行已停止，旧审批已取消，请勿复用。')
         reject(new Error('审批等待已取消'))
       }
       const waiters = this.resolutionWaiters.get(id) ?? new Set()
@@ -161,6 +193,19 @@ export class ApprovalService {
       if (signal?.aborted) abort()
       else signal?.addEventListener('abort', abort, { once: true })
     })
+  }
+
+  /** 原执行取消后同步关闭卡片与凭证，不让后继会话消费旧审批。 */
+  private cancel(id: string, message: string): void {
+    const request = this.get(id)
+    if (!request || !['pending', 'approved'].includes(request.status)) return
+    request.decision = 'deny_once'
+    request.status = 'consumed'
+    request.resolutionMessage = message
+    request.resolvedAt = new Date().toISOString()
+    this.persist(request)
+    this.audit(request, 'cancelled', { message })
+    this.finish(request)
   }
 
   get(id: string): ApprovalRequest | undefined {
@@ -208,6 +253,8 @@ export class ApprovalService {
   consumeDeniedOnce(input: {
     agentId: string
     sessionId: string
+    taskId?: string
+    threadId?: string
     toolName: string
     args: Record<string, unknown>
   }): string | undefined {
@@ -215,11 +262,13 @@ export class ApprovalService {
     const request = this.list({
       status: 'denied',
       agentId: input.agentId,
-      sessionId: input.sessionId,
+      sessionId: input.taskId ? undefined : input.sessionId,
     })
       .filter(
         (candidate) =>
           candidate.decision === 'deny_once' &&
+          (!input.taskId ||
+            (candidate.taskId === input.taskId && candidate.threadId === input.threadId)) &&
           candidate.toolName === input.toolName &&
           candidate.argsFingerprint === fingerprint,
       )
@@ -282,15 +331,14 @@ export class ApprovalService {
     for (const key of this.sessionGrants)
       if (key.startsWith(`${sessionId}:`)) this.sessionGrants.delete(key)
     for (const request of this.requests.values()) {
-      if (request.sessionId === sessionId && request.status === 'pending') {
+      if (request.sessionId === sessionId && ['pending', 'approved'].includes(request.status)) {
         request.decision = 'deny_once'
         request.status = 'denied'
         request.resolutionMessage = '会话已结束，待处理审批已自动拒绝。'
         request.resolvedAt = new Date().toISOString()
         this.persist(request)
         this.audit(request, 'session_cleared', {})
-        for (const waiter of this.resolutionWaiters.get(request.id) ?? []) waiter(request)
-        this.resolutionWaiters.delete(request.id)
+        this.finish(request)
       }
     }
   }
@@ -298,6 +346,7 @@ export class ApprovalService {
   /** 服务启动时拒绝上个进程遗留的审批，避免恢复流程复用失效调用栈。 */
   private rejectPendingAfterRestart(): void {
     for (const request of this.repository?.list({ status: 'pending' }) ?? []) {
+      if (request.taskId) continue
       request.decision = 'deny_once'
       request.status = 'denied'
       request.resolutionMessage = '服务已重启，旧审批已自动拒绝。'
@@ -310,14 +359,14 @@ export class ApprovalService {
   /** 正常关闭时拒绝当前进程仍在等待的全部审批。 */
   rejectAllPending(message = '服务正在关闭，待处理审批已自动拒绝。'): void {
     for (const request of this.list({ status: 'pending' })) {
+      if (request.taskId) continue
       request.decision = 'deny_once'
       request.status = 'denied'
       request.resolutionMessage = message
       request.resolvedAt = new Date().toISOString()
       this.persist(request)
       this.audit(request, 'shutdown_rejected', { reason: message })
-      for (const waiter of this.resolutionWaiters.get(request.id) ?? []) waiter(request)
-      this.resolutionWaiters.delete(request.id)
+      this.finish(request)
     }
   }
 
@@ -334,7 +383,8 @@ export class ApprovalService {
       | 'consumed'
       | 'session_cleared'
       | 'restart_rejected'
-      | 'shutdown_rejected',
+      | 'shutdown_rejected'
+      | 'cancelled',
     detail: Record<string, unknown>,
   ): void {
     this.repository?.appendAudit({

@@ -19,8 +19,11 @@ import { requestContextMiddleware } from './middleware/requestContext'
 import { tracingMiddleware } from './middleware/tracing'
 import { requestLogger } from './middleware/requestLogger'
 import { createAuthMiddleware, DEFAULT_PUBLIC_PATHS } from './middleware/auth'
+import { HtmlPreviewService } from './services/attachment/htmlPreviewService'
+import { createHtmlPreviewRouter } from './routers/htmlPreview.router'
 import { createHealthRouter } from './routers/health.router'
 import { createMetricsRouter } from './routers/metrics.router'
+import { createIntegrationsRouter } from './routers/integrations.router'
 import type { AppContext } from './container'
 import { initTelemetry } from './lib/telemetry'
 import {
@@ -52,10 +55,14 @@ import {
   // （由 SocialAppRuntime.initialize 通过 ctx.mountRouter 动态挂载）
   createInboundRouteRouter,
   createBackgroundTaskRouter,
+  createTaskPlanRouter,
   createVoiceRouter,
   createMcpRouter,
   createStrongholdRouter,
 } from './routers'
+import { createPictoriaRouter } from './routers/pictoria.router'
+import { createPromptRouter } from './routers/prompt.router'
+import { createTarotRouter } from './routers/tarot.router'
 
 /**
  * 创建并配置 Hono 应用实例
@@ -86,7 +93,12 @@ export function createApp(ctx: AppContext) {
     '*',
     createAuthMiddleware({
       token: apiToken,
-      publicPaths: [...DEFAULT_PUBLIC_PATHS, '/applications/arca'],
+      publicPaths: [
+        ...DEFAULT_PUBLIC_PATHS,
+        '/applications/arca',
+        '/applications/pictoria',
+        '/html-previews',
+      ],
     }),
   )
 
@@ -111,14 +123,26 @@ export function createApp(ctx: AppContext) {
   if (ctx.arcaCollaboration) {
     app.route('/api/applications/arca/collaboration', createArcaCollaborationRouter(ctx))
   }
+  app.route('/api/applications/pictoria', createPictoriaRouter(ctx))
+  if (ctx.pictoria)
+    app.route(
+      '/applications/pictoria',
+      createArcaUiRouter(new StaticAssetService(ctx.pictoria.controller.uiRoot), 'pictoria'),
+    )
   app.route('/api/applications', createApplicationsRouter(ctx))
   app.route('/api/chat', createChatRouter(ctx))
-  app.route('/api/attachments', createAttachmentRouter(ctx))
+  const htmlPreviews =
+    ctx.htmlPreviewService ??
+    new HtmlPreviewService(ctx.resourceService, ctx.attachmentService, ctx.threadService)
+  app.route('/html-previews', createHtmlPreviewRouter(htmlPreviews))
+  app.route('/api/attachments', createAttachmentRouter(ctx, htmlPreviews))
   app.route('/api/memories', createMemoryRouter(ctx))
   app.route('/api/knowledge', createKnowledgeRouter(ctx))
   app.route('/api/configs', createConfigRouter(ctx))
   app.route('/api/models', createModelRouter(ctx))
   app.route('/api/system', createSystemRouter(ctx))
+  app.route('/api/tarot', createTarotRouter(ctx))
+  app.route('/api/integrations', createIntegrationsRouter(ctx))
   app.route('/api/distributed', createDistributedRouter(ctx))
   app.route('/api/agents', createAgentRouter(ctx))
   app.route('/api/runtime', createRuntimeRouter(ctx))
@@ -132,6 +156,7 @@ export function createApp(ctx: AppContext) {
   app.route('/api/terminals', createTerminalRouter(ctx))
   app.route('/api/scheduler', createSchedulerRouter(ctx))
   app.route('/api/assets', createAssetRouter(ctx))
+  app.route('/api/prompts', createPromptRouter(ctx))
   app.route('/api/maintenance', createMaintenanceRouter(ctx))
   // 危险区域重置（清空对话/记忆/恢复出厂，均需确认短语）
   app.route('/api/reset', createResetRouter(ctx))
@@ -140,6 +165,7 @@ export function createApp(ctx: AppContext) {
   app.route('/api/inbound-routes', createInboundRouteRouter(ctx))
   // M05: 统一任务中心（派发/查询/控制 + Gateway 事件桥接）
   app.route('/api/background-tasks', createBackgroundTaskRouter(ctx))
+  app.route('/api/task-plans', createTaskPlanRouter(ctx))
   app.route(
     '/api/voice',
     createVoiceRouter({ ttsService: ctx.ttsService, asrService: ctx.asrService }),

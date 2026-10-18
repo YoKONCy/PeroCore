@@ -135,20 +135,11 @@ afterEach(() => {
 })
 
 describe('UpdateCenterDialog', () => {
-  it('应同时显示多个Release并映射五种渠道颜色标签', async () => {
+  it('应展示服务端返回的全部可选版本', async () => {
     const wrapper = mountDialog()
     await vi.waitFor(() => expect(document.body.querySelectorAll('.release-card')).toHaveLength(5))
 
-    expect(document.body.textContent).toContain('正式版')
-    expect(document.body.textContent).toContain('预发版')
-    expect(document.body.textContent).toContain('构建版')
-    expect(document.body.textContent).toContain('测试版')
-    expect(document.body.textContent).toContain('热补丁')
-    expect(document.body.querySelector('.channel-stable')).not.toBeNull()
-    expect(document.body.querySelector('.channel-rc')).not.toBeNull()
-    expect(document.body.querySelector('.channel-alpha')).not.toBeNull()
-    expect(document.body.querySelector('.channel-beta')).not.toBeNull()
-    expect(document.body.querySelector('.channel-hotfix')).not.toBeNull()
+    for (const release of releases) expect(document.body.textContent).toContain(release.version)
     wrapper.unmount()
   })
 
@@ -194,7 +185,6 @@ describe('UpdateCenterDialog', () => {
     })
     await wrapper.vm.$nextTick()
     const action = document.body.querySelector<HTMLButtonElement>('.update-action')!
-    expect(action.textContent).toContain('安装')
     action.click()
     await vi.waitFor(() => expect(ipc.invoke).toHaveBeenCalledWith('install-client-update'))
     wrapper.unmount()

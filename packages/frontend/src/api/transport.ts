@@ -188,3 +188,47 @@ export function getApiBaseUrl(): string {
   if (isElectronRuntime()) return `${ELECTRON_BACKEND_ORIGIN}/api`
   return `${getWebServerOrigin()}/api`
 }
+
+/** 原生媒体元素与 PDF Range 请求使用现有查询参数鉴权。地址仅发往已配置的服务端。 */
+export function getApiResourceUrl(endpoint: string, query: URLSearchParams): string {
+  const params = new URLSearchParams(query)
+  const token =
+    !isElectronRuntime() && typeof sessionStorage !== 'undefined'
+      ? sessionStorage.getItem(WEB_SERVER_TOKEN_KEY)
+      : null
+  if (token) params.set('token', token)
+  return `${getApiBaseUrl()}${endpoint}?${params}`
+}
+
+/** 非 JSON 资源读取仍集中经过通信层，保留取消与鉴权。 */
+export async function requestApiResource(
+  endpoint: string,
+  query: URLSearchParams,
+  signal?: AbortSignal,
+) {
+  const response = await fetch(getApiResourceUrl(endpoint, query), { signal })
+  if (!response.ok) {
+    const body = await response.json().catch(() => null)
+    throw new Error(body?.message || `文件读取失败（HTTP ${response.status}）`)
+  }
+  return response
+}
+
+/** 音频等二进制请求复用当前服务器、鉴权与取消信号。 */
+export async function requestApiBinary(
+  endpoint: string,
+  options: RequestInit,
+): Promise<ArrayBuffer> {
+  const headers = new Headers(options.headers)
+  const token =
+    !isElectronRuntime() && typeof sessionStorage !== 'undefined'
+      ? sessionStorage.getItem(WEB_SERVER_TOKEN_KEY)
+      : null
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  const response = await fetch(`${getApiBaseUrl()}${endpoint}`, { ...options, headers })
+  if (!response.ok) {
+    const body = await response.json().catch(() => null)
+    throw new Error(body?.message || `语音请求失败（HTTP ${response.status}）`)
+  }
+  return response.arrayBuffer()
+}

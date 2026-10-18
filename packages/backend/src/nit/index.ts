@@ -22,7 +22,7 @@ export { TokenType } from './types'
 import { NitLexer } from './lexer'
 import { NitParser } from './parser'
 import { NitRuntime } from './runtime'
-import type { NitToolExecutor, NitResult } from './types'
+import type { NitToolExecutor, NitResult, NitRuntimeOptions } from './types'
 
 /**
  * 一站式执行 NIT 脚本
@@ -42,7 +42,9 @@ import type { NitToolExecutor, NitResult } from './types'
 export async function executeNit(
   script: string,
   toolExecutor: NitToolExecutor,
+  options: NitRuntimeOptions = {},
 ): Promise<NitResult> {
+  options.signal?.throwIfAborted()
   // 1. 词法分析
   const lexer = new NitLexer(script)
   const tokens = lexer.tokenize()
@@ -52,6 +54,6 @@ export async function executeNit(
   const ast = parser.parse()
 
   // 3. 执行
-  const runtime = new NitRuntime(toolExecutor)
+  const runtime = new NitRuntime(toolExecutor, options)
   return runtime.execute(ast)
 }

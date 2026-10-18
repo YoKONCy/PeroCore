@@ -5,9 +5,8 @@
  * @module electron/main/services/tray
  */
 
-import { app, Tray, Menu, nativeImage } from 'electron'
-import path from 'node:path'
-import fs from 'node:fs'
+import { app, Tray, Menu } from 'electron'
+import { loadSystemIcon } from '../utils/appIcon'
 import { windowManager } from '../windows/manager'
 import { logger } from '../utils/logger'
 
@@ -15,29 +14,11 @@ let tray: Tray | null = null
 
 /** 创建系统托盘 */
 export function createTray(): void {
-  const iconName = 'Logo.png'
-  const candidates = [
-    path.join(process.cwd(), 'public', iconName),
-    path.join(process.cwd(), 'resources', iconName),
-    path.join(process.resourcesPath, iconName),
-    path.join(__dirname, '../../public', iconName),
-  ]
-
-  let iconPath = ''
-  for (const p of candidates) {
-    if (fs.existsSync(p)) {
-      iconPath = p
-      break
-    }
-  }
-
-  if (!iconPath) {
-    logger.warn('Tray', '未找到托盘图标，跳过托盘创建')
-    return
-  }
+  if (tray && !tray.isDestroyed()) return
 
   try {
-    const icon = nativeImage.createFromPath(iconPath)
+    const icon = loadSystemIcon(32)
+    if (!icon) return
     tray = new Tray(icon)
 
     const contextMenu = Menu.buildFromTemplate([

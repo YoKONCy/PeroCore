@@ -31,7 +31,8 @@ export const resetApi = {
   clearLogs: (confirm: string) => apiClient.post<ResetResult>('/reset/clear-logs', { confirm }),
 
   /** 重置全部记忆（确认短语：忘掉一切） */
-  resetMemories: (confirm: string) => apiClient.post<ResetResult>('/reset/memories', { confirm }),
+  resetMemories: (confirm: string, includeSocial = true) =>
+    apiClient.post<ResetResult>('/reset/memories', { confirm, includeSocial }),
 
   /** 恢复出厂设置（确认短语：我们还会再见的） */
   factoryReset: (confirm: string) => apiClient.post<ResetResult>('/reset/factory', { confirm }),

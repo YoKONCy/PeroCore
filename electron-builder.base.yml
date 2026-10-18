@@ -42,6 +42,8 @@ asarUnpack:
 
 # 后端构建产物 + 运行时资源
 extraResources:
+  - from: packages/frontend/src/assets/fonts/zpix.ttf
+    to: status-card/zpix.ttf
   - from: packages/backend/dist
     to: backend
     filter:
@@ -61,6 +63,13 @@ extraResources:
       - '**/*'
   - from: public/Logo.png
     to: Logo.png
+  - from: public/icon.ico
+    to: icon.ico
+  - from: public/system-icons
+    to: system-icons
+    filter:
+      - 'pero.png'
+      - 'pero.ico'
   # ── 便携模式自包含运行时（方案 A：exe 自动拉起内置 Daemon）──
   # daemon 单文件 bundle（由 scripts/build-daemon-bundle.mjs 产出）
   - from: dist-daemon/daemon.mjs
@@ -92,6 +101,7 @@ extraResources:
     to: backend/backend/src/database/migrations
     filter:
       - '*.sql'
+      - 'meta/*.json'
 
 # 不使用 npm rebuild (pnpm workspace 已经处理好原生模块)
 npmRebuild: false
@@ -106,7 +116,7 @@ publish:
 
 # Windows 通用配置
 win:
-  icon: public/Logo.png
+  icon: public/system-icons/pero.ico
 
 # NSIS 安装包配置
 nsis:

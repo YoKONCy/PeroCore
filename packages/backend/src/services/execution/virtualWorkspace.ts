@@ -8,6 +8,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import path from 'node:path'
 import {
   mkdir,
+  lstat,
   open,
   readFile,
   readdir,
@@ -192,6 +193,38 @@ export interface GlobOptions {
 
 /** 执行会话内的受控文件系统。 */
 export class VirtualWorkspace {
+  private readonly mutationQueues = new Map<string, Promise<void>>()
+
+  /** 内置写入共享同文件队列；外部程序仍依赖提交前版本核验。 */
+  async withFileMutation<T>(
+    session: ExecutionSession,
+    inputPath: string,
+    approved: boolean | undefined,
+    operation: (filePath: string) => Promise<T>,
+  ): Promise<T> {
+    let filePath = approved
+      ? await this.resolveApprovedWritePath(inputPath)
+      : await this.resolvePath(session, inputPath, 'write')
+    filePath = await realpath(filePath).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== 'ENOENT') throw error
+      return filePath
+    })
+    const key = process.platform === 'win32' ? filePath.toLowerCase() : filePath
+    const previous = this.mutationQueues.get(key) ?? Promise.resolve()
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const current = previous.catch(() => {}).then(() => held)
+    this.mutationQueues.set(key, current)
+    await previous.catch(() => {})
+    try {
+      return await operation(filePath)
+    } finally {
+      release()
+      if (this.mutationQueues.get(key) === current) this.mutationQueues.delete(key)
+    }
+  }
   async read(
     session: ExecutionSession,
     inputPath: string,
@@ -309,9 +342,47 @@ export class VirtualWorkspace {
 
   async write(
     session: ExecutionSession,
-    input: { path: string; content: string; expectedHash?: string },
+    input: {
+      path: string
+      content: string
+      expectedHash?: string
+      append?: boolean
+      deviceScope?: boolean
+      signal?: AbortSignal
+      beforeWrite?: () => Promise<unknown>
+      afterWrite?: (
+        captured: unknown,
+        written: { oldHash?: string; newHash: string },
+      ) => Promise<void>
+    },
   ) {
-    const filePath = await this.resolvePath(session, input.path, 'write')
+    return this.withFileMutation(session, input.path, input.deviceScope, async () => {
+      const captured = await input.beforeWrite?.()
+      const written = await this.writeUnlocked(session, input)
+      let checkpointWarning: string | undefined
+      try {
+        await input.afterWrite?.(captured, written)
+      } catch {
+        checkpointWarning = '文件已写入，但检查点保存失败；请核对文件，不要重复写入。'
+      }
+      return { ...written, checkpointWarning }
+    })
+  }
+
+  private async writeUnlocked(
+    session: ExecutionSession,
+    input: {
+      path: string
+      content: string
+      expectedHash?: string
+      append?: boolean
+      deviceScope?: boolean
+      signal?: AbortSignal
+    },
+  ) {
+    const filePath = input.deviceScope
+      ? await this.resolveApprovedWritePath(input.path)
+      : await this.resolvePath(session, input.path, 'write')
     // 读取旧内容（不存在视为新建），用于计算真实 diff 统计
     let currentHash: string | undefined
     let oldText = ''
@@ -322,7 +393,7 @@ export class VirtualWorkspace {
         throw new WorkspaceError(WS_ERROR.WRITE_BINARY_FILE, '检测到二进制文件，拒绝文本写入')
       }
       currentHash = createHash('sha256').update(buffer).digest('hex')
-      oldText = buffer.toString('utf8').replace(/^\uFEFF/, '')
+      oldText = buffer.toString('utf8')
       existed = true
     } catch (error) {
       if (error instanceof WorkspaceError) throw error
@@ -336,23 +407,50 @@ export class VirtualWorkspace {
         '文件已被外部修改，expected_hash 不匹配，请重新读取',
       )
     }
-    const diff = diffLines(oldText, input.content)
-    await this.atomicWrite(filePath, input.content)
+    const nextContent = input.append ? `${oldText}${input.content}` : input.content
+    const diff = diffLines(oldText, nextContent)
+    let finalHash: string | undefined
+    try {
+      finalHash = createHash('sha256')
+        .update(await readFile(filePath))
+        .digest('hex')
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+    if (finalHash !== currentHash)
+      throw new WorkspaceError(WS_ERROR.WRITE_HASH_MISMATCH, '提交前文件已变化，请重新读取')
+    input.signal?.throwIfAborted()
+    await this.atomicWrite(filePath, nextContent)
     return {
       success: true,
-      operation: existed ? 'overwrite' : 'create',
+      operation: input.append ? 'append' : existed ? 'overwrite' : 'create',
       editRange: existed
         ? { startLine: 1, endLine: oldText.split(/\r?\n/).length }
-        : { startLine: 1, endLine: input.content.split(/\r?\n/).length },
+        : { startLine: 1, endLine: nextContent.split(/\r?\n/).length },
       insertions: diff.insertions,
       deletions: diff.deletions,
       oldHash: currentHash,
-      newHash: createHash('sha256').update(input.content, 'utf8').digest('hex'),
-      bytes: Buffer.byteLength(input.content, 'utf8'),
+      newHash: createHash('sha256').update(nextContent, 'utf8').digest('hex'),
+      bytes: Buffer.byteLength(nextContent, 'utf8'),
     }
   }
 
   async edit(
+    session: ExecutionSession,
+    input: {
+      path: string
+      oldText: string
+      newText: string
+      expectedHash?: string
+      deviceScope?: boolean
+    },
+  ) {
+    return this.withFileMutation(session, input.path, input.deviceScope, () =>
+      this.editUnlocked(session, input),
+    )
+  }
+
+  private async editUnlocked(
     session: ExecutionSession,
     input: {
       path: string
@@ -455,60 +553,172 @@ export class VirtualWorkspace {
   }
 
   /**
-   * 重命名工作区内的普通文件。
+   * 重命名普通文件；工作区页面可显式允许目录操作。
    * 新名称仅允许 basename，目标固定在原目录，且禁止覆盖已有文件。
    */
-  async renameFile(session: ExecutionSession, inputPath: string, newName: string) {
+  async renameFile(
+    session: ExecutionSession,
+    inputPath: string,
+    newName: string,
+    allowDirectory = false,
+  ) {
     const source = await this.resolvePath(session, inputPath, 'write')
     const normalizedName = newName.trim()
     if (
       !normalizedName ||
       path.basename(normalizedName) !== normalizedName ||
       normalizedName === '.' ||
-      normalizedName === '..'
+      normalizedName === '..' ||
+      /[\\/:*?"<>|]/.test(normalizedName)
     ) {
       throw new WorkspaceError(WS_ERROR.PATH_OUT_OF_SCOPE, '新文件名不能包含目录路径')
     }
-    const sourceInfo = await stat(source).catch(() => null)
+    const sourceInfo = await lstat(source).catch(() => null)
     if (!sourceInfo) throw new WorkspaceError(WS_ERROR.FILE_NOT_FOUND, `文件不存在: ${inputPath}`)
-    if (!sourceInfo.isFile())
-      throw new WorkspaceError(WS_ERROR.NOT_A_FILE, '当前仅支持重命名普通文件')
+    if (
+      sourceInfo.isSymbolicLink() ||
+      (!sourceInfo.isFile() && !(allowDirectory && sourceInfo.isDirectory()))
+    )
+      throw new WorkspaceError(WS_ERROR.NOT_A_FILE, '不支持重命名此类型的文件')
+    if (allowDirectory) await this.validateWorkspaceEntry(session, source, sourceInfo.isDirectory())
 
     const target = await this.resolvePath(
       session,
       path.join(path.dirname(inputPath), normalizedName),
       'write',
     )
-    const targetInfo = await stat(target).catch(() => null)
+    const targetInfo = await lstat(target).catch(() => null)
     if (targetInfo)
       throw new WorkspaceError(WS_ERROR.RENAME_TARGET_EXISTS, `同名文件已存在: ${normalizedName}`)
     await rename(source, target)
     return {
-      oldPath: inputPath.replaceAll('\\', '/'),
+      oldPath: path.relative(session.workspaceRoot, source).replaceAll('\\', '/'),
       newPath: path.relative(session.workspaceRoot, target).replaceAll('\\', '/'),
       name: normalizedName,
     }
   }
 
   /** 删除工作区内的普通文件；不递归删除目录，避免误删整个目录树。 */
-  async deleteFile(session: ExecutionSession, inputPath: string) {
-    const target = await this.resolvePath(session, inputPath, 'write')
-    const targetInfo = await stat(target).catch(() => null)
+  async deleteFile(session: ExecutionSession, inputPath: string, deviceScope = false) {
+    const target = deviceScope
+      ? await this.resolveApprovedWritePath(inputPath)
+      : await this.resolvePath(session, inputPath, 'write')
+    const targetInfo = await lstat(target).catch(() => null)
     if (!targetInfo) throw new WorkspaceError(WS_ERROR.FILE_NOT_FOUND, `文件不存在: ${inputPath}`)
-    if (!targetInfo.isFile())
+    if (!targetInfo.isFile() || targetInfo.isSymbolicLink())
       throw new WorkspaceError(WS_ERROR.NOT_A_FILE, '当前仅支持删除普通文件')
     await rm(target)
     return { path: inputPath.replaceAll('\\', '/') }
   }
 
+  /** 用户在文件树确认删除后，可递归删除目录；Agent 的文件删除能力仍沿用原有边界。 */
+  async deleteEntry(session: ExecutionSession, inputPath: string) {
+    const target = await this.resolvePath(session, inputPath, 'write')
+    const info = await lstat(target).catch(() => null)
+    if (!info) throw new WorkspaceError(WS_ERROR.FILE_NOT_FOUND, `文件或文件夹不存在: ${inputPath}`)
+    if (info.isSymbolicLink() || (!info.isFile() && !info.isDirectory()))
+      throw new WorkspaceError(WS_ERROR.NOT_A_FILE, '不支持删除此类型的文件')
+    await this.validateWorkspaceEntry(session, target, info.isDirectory())
+    await rm(target, { recursive: info.isDirectory() })
+    return { path: path.relative(session.workspaceRoot, target).replaceAll('\\', '/') }
+  }
+
+  /** 在递归操作前校验整棵目录树；子项符号链接只处理链接本身，不跟随目标。 */
+  private async validateWorkspaceEntry(
+    session: ExecutionSession,
+    target: string,
+    directory: boolean,
+  ): Promise<void> {
+    const root = path.resolve(session.workspaceRoot)
+    const actualRoot = await realpath(root)
+    const actual = await realpath(target)
+    if (
+      path.relative(root, target) === '' ||
+      !this.isWithin(root, target) ||
+      path.relative(actualRoot, actual) === '' ||
+      !this.isWithin(actualRoot, actual)
+    ) {
+      throw new WorkspaceError(WS_ERROR.PATH_OUT_OF_SCOPE, '只能操作工作区根目录内的文件或文件夹')
+    }
+    await this.resolvePath(session, target, 'write')
+    if (!directory) return
+    for (const entry of await readdir(target, { withFileTypes: true })) {
+      const child = path.join(target, entry.name)
+      if (entry.isSymbolicLink()) {
+        const relative = path.relative(root, child).replaceAll('\\', '/')
+        if (
+          session.sandboxProfile.protectedPaths.some(
+            (part) => relative === part || relative.startsWith(`${part}/`),
+          )
+        )
+          throw new WorkspaceError(WS_ERROR.PATH_PROTECTED, `路径受保护，禁止访问: ${relative}`)
+        continue
+      }
+      await this.validateWorkspaceEntry(session, child, entry.isDirectory())
+    }
+  }
+
   /** 解析并校验真实目录；拒绝 workspace 内符号链接/Junction 指向外部。 */
-  async resolveDirectory(session: ExecutionSession, inputPath: string): Promise<string> {
-    const lexical = await this.resolvePath(session, inputPath, 'read')
+  async resolveDirectory(
+    session: ExecutionSession,
+    inputPath: string,
+    options: { deviceScope?: boolean } = {},
+  ): Promise<string> {
+    const lexical = options.deviceScope
+      ? await this.resolveDeviceReadPath(session, inputPath)
+      : await this.resolvePath(session, inputPath, 'read')
     const actual = await realpath(lexical)
-    await this.assertRealPathAllowed(session, actual, 'read', inputPath)
+    if (!options.deviceScope) await this.assertRealPathAllowed(session, actual, 'read', inputPath)
     const info = await stat(actual)
     if (!info.isDirectory()) throw new Error(`目标不是目录: ${inputPath}`)
     return actual
+  }
+
+  /** 搜索工具使用与普通读取相同的设备只读或工作区路径边界。 */
+  async resolveReadablePath(
+    session: ExecutionSession,
+    inputPath: string,
+    deviceScope = false,
+  ): Promise<string> {
+    const lexical = deviceScope
+      ? this.resolveDeviceReadPath(session, inputPath)
+      : this.resolvePath(session, inputPath, 'read')
+    const actual = await realpath(await lexical)
+    if (!deviceScope) await this.assertRealPathAllowed(session, actual, 'read', inputPath)
+    return actual
+  }
+
+  /** 元信息与正文读取使用相同的路径校验。 */
+  async fileInfo(session: ExecutionSession, inputPath: string, deviceScope = false) {
+    let target: string
+    try {
+      target = deviceScope
+        ? await this.resolveDeviceReadPath(session, inputPath)
+        : await this.resolvePath(session, inputPath, 'read')
+      const info = await stat(target)
+      return {
+        exists: true,
+        isFile: info.isFile(),
+        isDirectory: info.isDirectory(),
+        size: info.size,
+        modifiedAt: info.mtime,
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      return { exists: false, isFile: false, isDirectory: false, size: 0, modifiedAt: null }
+    }
+  }
+
+  /** 列目录只读取条目本身的元信息，不跟随子项符号链接。 */
+  async listDirectory(session: ExecutionSession, inputPath: string, deviceScope = false) {
+    const directory = await this.resolveDirectory(session, inputPath, { deviceScope })
+    const names = await readdir(directory)
+    return Promise.all(
+      names.map(async (name) => {
+        const info = await lstat(path.join(directory, name))
+        return { name, isDirectory: info.isDirectory(), size: info.size, modifiedAt: info.mtime }
+      }),
+    )
   }
 
   /** 设备级只读解析：只接受现有真实路径，绝对路径按设备定位，相对路径仍基于 Workspace。 */
@@ -516,9 +726,10 @@ export class VirtualWorkspace {
     session: ExecutionSession,
     inputPath: string,
   ): Promise<string> {
-    const resolved = path.isAbsolute(inputPath)
-      ? path.resolve(inputPath)
-      : path.resolve(session.workspaceRoot, inputPath)
+    const normalizedPath = this.normalizePrincipalPath(inputPath)
+    const resolved = path.isAbsolute(normalizedPath)
+      ? path.resolve(normalizedPath)
+      : path.resolve(session.workspaceRoot, normalizedPath)
     const actual = await realpath(resolved)
     const info = await stat(actual)
     if (!info.isFile() && !info.isDirectory())
@@ -553,7 +764,7 @@ export class VirtualWorkspace {
     inputPath: string,
     mode: 'read' | 'write',
   ): Promise<string> {
-    const resolved = path.resolve(session.workspaceRoot, inputPath)
+    const resolved = path.resolve(session.workspaceRoot, this.normalizePrincipalPath(inputPath))
     const roots =
       mode === 'read' ? session.sandboxProfile.readableRoots : session.sandboxProfile.writableRoots
     if (
@@ -615,6 +826,10 @@ export class VirtualWorkspace {
   private isWithin(root: string, target: string): boolean {
     const relative = path.relative(path.resolve(root), target)
     return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))
+  }
+
+  private normalizePrincipalPath(inputPath: string): string {
+    return /^@principal[\\/]/i.test(inputPath) ? inputPath.slice('@principal/'.length) : inputPath
   }
 
   private looksBinary(buffer: Buffer): boolean {

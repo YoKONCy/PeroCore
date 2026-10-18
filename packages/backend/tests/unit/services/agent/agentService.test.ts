@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentService } from '@infos/backend/services/agent/agentService'
 import type { AgentServiceDeps } from '@infos/backend/services/agent/agentService'
-import type { ChatDelta } from '@infos/backend/services/llm/types'
+import type { ChatDelta, ChatMessage } from '@infos/backend/services/llm/types'
 
 const modelConfig = { provider: 'openai', modelId: 'test-model', apiKey: 'test-key' }
 
@@ -25,9 +25,6 @@ function createDeps(overrides: Partial<AgentServiceDeps> = {}): AgentServiceDeps
       transcribe: vi.fn().mockResolvedValue(null),
     } as never,
     isDesktopOperationAvailable: vi.fn().mockReturnValue(true),
-    scorerService: {
-      checkAndProcess: vi.fn().mockResolvedValue(undefined),
-    } as never,
     toolExecutor: undefined,
     getToolDefinitions: vi
       .fn()
@@ -40,10 +37,64 @@ function createDeps(overrides: Partial<AgentServiceDeps> = {}): AgentServiceDeps
 
 describe('AgentService', () => {
   afterEach(() => {
-    delete process.env.PERO_LLM_API_KEY
-    delete process.env.PERO_LLM_MODEL
-    delete process.env.PERO_LLM_PROVIDER
-    delete process.env.PERO_LLM_API_BASE
+    vi.unstubAllEnvs()
+  })
+
+  it('工作历史展开后仍续接原请求，不因落盘媒体占位破坏热前缀', async () => {
+    const observed: ChatMessage[][] = []
+    const chatStream = vi.fn((_config, messages) => {
+      observed.push(structuredClone(messages))
+      return streamFrom([{ choices: [{ delta: { content: '回复' } }] }])
+    })
+    const service = new AgentService(createDeps({ llmService: { chatStream } as never }))
+    const system = { role: 'system' as const, content: '固定系统规则' }
+    await service.chatWithCompiledMessages({
+      agentId: 'pero',
+      threadId: 'expanded-replay-integration',
+      interactionMode: 'work',
+      messages: [
+        system,
+        {
+          role: 'user',
+          content: '首轮真实输入',
+          cacheControl: { kind: 'current', currentKeys: ['user-1'] },
+        },
+      ],
+    })
+    await service.chatWithCompiledMessages({
+      agentId: 'pero',
+      threadId: 'expanded-replay-integration',
+      interactionMode: 'work',
+      messages: [
+        system,
+        {
+          role: 'user',
+          content: '落盘恢复占位',
+          cacheControl: {
+            kind: 'history',
+            key: 'user-1:work:input',
+            historySourceKey: 'user-1',
+          },
+        },
+        {
+          role: 'assistant',
+          content: '回复',
+          cacheControl: {
+            kind: 'history',
+            key: 'reply-1:work:0',
+            historySourceKey: 'reply-1',
+          },
+        },
+        {
+          role: 'user',
+          content: '继续',
+          cacheControl: { kind: 'current', currentKeys: ['user-2'] },
+        },
+      ],
+    })
+    expect(observed[1]?.slice(0, observed[0]!.length)).toEqual(observed[0])
+    expect(JSON.stringify(observed[1])).not.toContain('落盘恢复占位')
+    expect(observed[1]?.some((message) => message.content === '继续')).toBe(true)
   })
 
   it('应当完成非流式 ReAct 编排并返回回复', async () => {
@@ -129,7 +180,7 @@ describe('AgentService', () => {
     expect(clearDynamicCapabilities).toHaveBeenCalledWith('execution-1')
   })
 
-  it('主模型和转述模型都无视觉时应禁用全部截图工具并注入无视觉说明', async () => {
+  it('主模型和转述模型都无视觉时应禁用全部截图与自动化工具', async () => {
     const mainVision = false
     const relay = false
     const client = true
@@ -174,15 +225,11 @@ describe('AgentService', () => {
       undefined,
       undefined,
       'vision-gate',
+      'work',
     )
     expect(deps.llmService.chatStream).toHaveBeenCalledWith(
       expect.any(Object),
-      expect.arrayContaining([
-        expect.objectContaining({
-          role: 'system',
-          content: expect.stringContaining('当前会话没有可用的屏幕视觉能力'),
-        }),
-      ]),
+      expect.any(Array),
       expect.objectContaining({ tools: [] }),
     )
   })
@@ -308,12 +355,11 @@ describe('AgentService', () => {
       undefined,
       undefined,
       'native-vision',
+      'work',
     )
     expect(deps.llmService.chatStream).toHaveBeenCalledWith(
       expect.any(Object),
-      expect.not.arrayContaining([
-        expect.objectContaining({ content: expect.stringContaining('没有可用的屏幕视觉能力') }),
-      ]),
+      expect.any(Array),
       expect.objectContaining({
         tools: [
           expect.objectContaining({
@@ -322,21 +368,6 @@ describe('AgentService', () => {
         ],
       }),
     )
-  })
-
-  it('据点回合应等待影子Thread落库后再由据点服务触发Scorer', async () => {
-    const triggerMemoryPipeline = vi.fn().mockResolvedValue(undefined)
-    const deps = createDeps({ triggerMemoryPipeline })
-    const service = new AgentService(deps)
-
-    await service.chatWithCompiledMessages({
-      agentId: 'nana',
-      threadId: 'stronghold_room_nana',
-      channel: 'group',
-      messages: [{ role: 'user', content: '你好' }],
-    })
-
-    expect(triggerMemoryPipeline).not.toHaveBeenCalled()
   })
 
   it('应当按当前 Agent 和通道解析工具定义', async () => {
@@ -357,6 +388,7 @@ describe('AgentService', () => {
       undefined,
       undefined,
       'stronghold_room_nana',
+      'work',
     )
   })
 
@@ -393,60 +425,6 @@ describe('AgentService', () => {
       modelConfig,
       expect.any(Array),
       expect.any(Object),
-    )
-  })
-
-  it('应当支持流式输出并在finish_task后广播结束事件', async () => {
-    const deps = createDeps({
-      llmService: {
-        chatStream: vi.fn().mockReturnValue(
-          streamFrom([
-            { choices: [{ delta: { content: '流式' } }] },
-            {
-              choices: [
-                {
-                  delta: {
-                    toolCalls: [
-                      {
-                        index: 0,
-                        id: 'call-1',
-                        type: 'function',
-                        function: { name: 'finish_task', arguments: '{"summary":"完成"}' },
-                      },
-                    ],
-                  },
-                },
-              ],
-            },
-          ]),
-        ),
-      } as never,
-      toolExecutor: {
-        execute: vi.fn().mockResolvedValue({
-          output: '完成',
-          durationMs: 1,
-          isError: false,
-          shouldTerminate: true,
-        }),
-      },
-    })
-    const service = new AgentService(deps)
-    const chunks = []
-
-    for await (const chunk of service.chatStreamWithCompiledMessages({
-      agentId: 'pero',
-      threadId: 's1',
-      messages: [{ role: 'user', content: '开始' }],
-    })) {
-      chunks.push(chunk)
-    }
-
-    //完成状态由 Conversation Surface提交，不再生产第二套 Gateway结束事件。
-    expect(chunks).toContainEqual(
-      expect.objectContaining({
-        event: 'narration_delta',
-        data: expect.objectContaining({ delta: '流式' }),
-      }),
     )
   })
 
@@ -522,6 +500,7 @@ describe('AgentService', () => {
       undefined,
       undefined,
       'thread-1',
+      'work',
     )
     expect(streamDeps.getToolDefinitions).toHaveBeenCalledWith(
       'nana',
@@ -530,6 +509,7 @@ describe('AgentService', () => {
       undefined,
       undefined,
       'thread-1',
+      'work',
     )
     expect(nonStreamDeps.llmService.chatStream).toHaveBeenCalledWith(
       modelConfig,
@@ -547,7 +527,22 @@ describe('AgentService', () => {
 
     const nonStreamExecution = vi.mocked(nonStreamDeps.toolExecutor!.execute).mock.calls[0]
     const streamExecution = vi.mocked(streamDeps.toolExecutor!.execute).mock.calls[0]
-    expect(streamExecution).toEqual(nonStreamExecution)
+    expect(streamExecution?.slice(0, 3)).toEqual(nonStreamExecution?.slice(0, 3))
+    const {
+      onExecutionStatus: streamStatus,
+      onToolObserved: streamObserved,
+      ...streamContext
+    } = streamExecution![3]!
+    const {
+      onExecutionStatus: nonStreamStatus,
+      onToolObserved: nonStreamObserved,
+      ...nonStreamContext
+    } = nonStreamExecution![3]!
+    expect(streamContext).toEqual(nonStreamContext)
+    expect(streamStatus).toEqual(expect.any(Function))
+    expect(nonStreamStatus).toEqual(expect.any(Function))
+    expect(streamObserved).toEqual(expect.any(Function))
+    expect(nonStreamObserved).toEqual(expect.any(Function))
     expect(nonStreamExecution?.[3]).toMatchObject({
       agentId: 'nana',
       threadId: 'thread-1',
@@ -561,10 +556,10 @@ describe('AgentService', () => {
 
   it('应当在没有模型配置时使用环境变量兜底或抛出配置错误', async () => {
     const envDeps = createDeps({ getModelConfig: vi.fn().mockResolvedValue(null) })
-    process.env.PERO_LLM_API_KEY = 'env-key'
-    process.env.PERO_LLM_MODEL = 'env-model'
-    process.env.PERO_LLM_PROVIDER = 'gemini'
-    process.env.PERO_LLM_API_BASE = 'https://example.test'
+    vi.stubEnv('PERO_LLM_API_KEY', 'env-key')
+    vi.stubEnv('PERO_LLM_MODEL', 'env-model')
+    vi.stubEnv('PERO_LLM_PROVIDER', 'gemini')
+    vi.stubEnv('PERO_LLM_API_BASE', 'https://example.test')
     const envService = new AgentService(envDeps)
 
     await envService.chatWithCompiledMessages({
@@ -585,8 +580,8 @@ describe('AgentService', () => {
       expect.any(Object),
     )
 
-    delete process.env.PERO_LLM_API_KEY
-    delete process.env.PERO_LLM_MODEL
+    vi.stubEnv('PERO_LLM_API_KEY', undefined)
+    vi.stubEnv('PERO_LLM_MODEL', undefined)
     const errorDeps = createDeps({ getModelConfig: vi.fn().mockResolvedValue(null) })
     const errorService = new AgentService(errorDeps)
 
@@ -599,24 +594,30 @@ describe('AgentService', () => {
       }),
     ).rejects.toMatchObject({ code: 'CONFIG_ERROR' })
   })
-
-  it('应当在持久化或 Scorer 失败时不影响主回复', async () => {
+  it('应将模型流式文本作为正文增量传给调用方', async () => {
     const deps = createDeps({
-      logService: { savePair: vi.fn().mockRejectedValue(new Error('保存失败')) } as never,
-      scorerService: {
-        checkAndProcess: vi.fn().mockRejectedValue(new Error('评分失败')),
+      llmService: {
+        chatStream: vi
+          .fn()
+          .mockReturnValue(
+            streamFrom([
+              { choices: [{ delta: { content: '前半' } }] },
+              { choices: [{ delta: { content: '后半' } }] },
+            ]),
+          ),
       } as never,
     })
-    const service = new AgentService(deps)
-
-    const reply = await service.chatWithCompiledMessages({
+    const chunks = []
+    for await (const chunk of new AgentService(deps).chatStreamWithCompiledMessages({
       agentId: 'pero',
-      channel: 'desktop',
       threadId: 's1',
-      messages: [{ role: 'user', content: '你好' }],
-    })
-    await Promise.resolve()
-
-    expect(reply).toBe('回复')
+      messages: [{ role: 'user', content: '开始' }],
+    }))
+      chunks.push(chunk)
+    expect(
+      chunks
+        .flatMap((chunk) => (chunk.event === 'narration_delta' ? [chunk.data.delta] : []))
+        .join(''),
+    ).toBe('前半后半')
   })
 })

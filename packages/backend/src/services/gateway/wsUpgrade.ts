@@ -17,6 +17,8 @@ import { WebSocketServer, type WebSocket } from 'ws'
 import type { GatewayHub } from './gatewayHub'
 import { getSocialNapcatAdapter, createWsSender } from '../../applications/socialWsBridge'
 import { createLogger } from '../../lib/logger'
+import { createArcaBrowserSocket } from '../../applications/arcaBrowserSocket'
+import type { AppContext } from '../../container'
 
 const logger = createLogger('WebSocketUpgrade')
 
@@ -34,15 +36,35 @@ let nodeCounter = 0
  * @param hub - GatewayHub 实例 (DI 注入)
  * @param _ctx - 已废弃（社交适配器现在通过 socialWsBridge 全局注册表获取）
  */
-export function setupGatewayWebSocket(server: Server, hub: GatewayHub, _ctx?: unknown): void {
-  const gatewayWss = new WebSocketServer({ noServer: true })
+export function setupGatewayWebSocket(
+  server: Server,
+  hub: GatewayHub,
+  ctx?: Pick<AppContext, 'arcaApplication'>,
+): void {
+  const gatewayWss = new WebSocketServer({ noServer: true, maxPayload: 8 * 1024 * 1024 })
   const socialWss = new WebSocketServer({ noServer: true })
+  const arca = createArcaBrowserSocket(() => ctx?.arcaApplication.status())
+  server.once('close', () => arca.close())
 
   // 监听 HTTP upgrade 事件 → 按路径分派到对应 WSS
   server.on('upgrade', (request, socket, head) => {
     const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`)
 
+    if (url.pathname === '/api/applications/arca/transport') {
+      arca.upgrade(request, socket, head)
+      return
+    }
+
     if (url.pathname === WS_GATEWAY_PATH) {
+      // 原生客户端使用 Bearer，浏览器使用查询凭据；升级和 hello 共用同一鉴权策略。
+      const authorization = request.headers.authorization
+      const token = authorization
+        ? authorization.replace(/^Bearer\s+/i, '')
+        : (url.searchParams.get('token') ?? '')
+      if (!hub.acceptsToken(token)) {
+        socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n')
+        return
+      }
       gatewayWss.handleUpgrade(request, socket, head, (ws) => {
         gatewayWss.emit('connection', ws, request)
       })
@@ -65,7 +87,16 @@ export function setupGatewayWebSocket(server: Server, hub: GatewayHub, _ctx?: un
     const nodeId = `node-${++nodeCounter}-${Date.now()}`
     logger.info(`Gateway WS 连接建立: ${nodeId}`)
 
-    hub.registerNode(nodeId, (data: string) => ws.send(data))
+    hub.registerNode(
+      nodeId,
+      (data: string) => ws.send(data),
+      () => ws.close(1001, '会话已过期，请重新连接'),
+      !!hub.authToken,
+    )
+    const handshakeDeadline = setTimeout(() => {
+      if (!hub.isAuthenticated(nodeId)) ws.close(1008, '握手超时')
+    }, 10_000)
+    handshakeDeadline.unref()
 
     ws.on('message', (data: Buffer | string) => {
       const text = typeof data === 'string' ? data : data.toString('utf-8')
@@ -75,6 +106,7 @@ export function setupGatewayWebSocket(server: Server, hub: GatewayHub, _ctx?: un
     })
 
     ws.on('close', () => {
+      clearTimeout(handshakeDeadline)
       hub.unregisterNode(nodeId)
       logger.info(`Gateway WS 连接断开: ${nodeId}`)
     })
@@ -90,7 +122,7 @@ export function setupGatewayWebSocket(server: Server, hub: GatewayHub, _ctx?: un
     const adapter = getSocialNapcatAdapter()
     if (!adapter) {
       logger.warn('收到社交 WS 连接但无 NapCat 适配器注册（社交应用未启动），关闭连接')
-      ws.close()
+      ws.close(1013, '社交服务尚未就绪，请稍后重连')
       return
     }
 
@@ -114,7 +146,7 @@ export function setupGatewayWebSocket(server: Server, hub: GatewayHub, _ctx?: un
     })
 
     ws.on('close', () => {
-      adapter.unregisterConnection(selfId)
+      adapter.unregisterConnection(selfId, sender)
       logger.info(`NapCat 反向 WS 连接断开: selfId=${selfId ?? '未知'}`)
     })
 

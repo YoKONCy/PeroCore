@@ -32,7 +32,7 @@ describe('ApplicationTaskPort', () => {
       updatedAt: '2026-08-22 00:00:00',
     } as const
     const scheduler = {
-      dispatch: vi.fn(async () => task),
+      dispatch: vi.fn(async (_input: unknown) => task),
       getTask: vi.fn(async () => task),
       cancel: vi.fn(async () => ({ ...task, status: 'cancelled' as const })),
     }

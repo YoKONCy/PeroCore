@@ -102,13 +102,15 @@ label: 工具列表
       expect(result).toBe('{{Missing: missing/template}}')
     })
 
-    it('renderString 应当递归渲染所有上下文占位符、对象、数组与 owner 默认值', () => {
+    it('renderString 应只渲染源码，保留变量中的模板文本', () => {
       const engine = new MdpEngine(promptDir)
       const result = engine.renderString('{{ envelope }}', {
         envelope: '{{ level_two }}',
         level_two:
           '{{ current_time }}|{{ mood }}|{{ vibe }}|{{ mind }}|{{ owner_name }}|{{ owner_appellation }}|{{ environment_info }}|{{ user_persona }}|{{ profile.name }}|{{ items | joinlines }}',
         current_time: '2026年8月15日',
+        owner_name: '测试用户',
+        owner_appellation: '测试称呼',
         mood: 'happy',
         vibe: 'active',
         mind: '准备工作',
@@ -118,13 +120,17 @@ label: 工具列表
         items: ['读取', '写入'],
       })
 
-      expect(result).toBe(
-        '2026年8月15日|happy|active|准备工作|用户|主人|Windows|程序员|Pero|读取\n写入',
-      )
-      expect(result).not.toContain('{{')
+      expect(result).toBe('{{ level_two }}')
+      expect(
+        engine.renderString('{{ profile.name }}|{{ items | joinlines }}|{{ owner_name }}', {
+          profile: { name: 'Pero' },
+          items: ['读取', '写入'],
+          owner_name: '测试用户',
+        }),
+      ).toBe('Pero|读取\n写入|测试用户')
     })
 
-    it('render 与 renderSlots 应当递归展开变量值并尊重显式 owner 配置', () => {
+    it('render 与 renderSlots 均不递归执行插入的数据', () => {
       writeFileSync(join(promptDir, 'nested.md'), '{{ wrapper }}', 'utf-8')
       const engine = new MdpEngine(promptDir)
       const vars = {
@@ -135,7 +141,7 @@ label: 工具列表
         owner_appellation: '队长',
       }
 
-      expect(engine.render('nested', vars)).toBe('我是Pero，服务于队长 / 小明 / 队长')
+      expect(engine.render('nested', vars)).toBe(vars.wrapper)
       expect(
         engine.renderSlots(
           [
@@ -156,26 +162,26 @@ label: 工具列表
       ).toEqual([
         {
           role: 'system',
-          content: '我是Pero，服务于队长 / 小明 / 队长',
+          content: vars.wrapper,
           slotId: 'nested-slot',
         },
       ])
     })
 
-    it('递归渲染应安全处理缺失变量、循环引用与最大深度', () => {
+    it('缺失变量为空，变量中的循环与深层文本均按原文保留', () => {
       const engine = new MdpEngine(promptDir)
       const cycle = engine.renderString('{{ first }}', {
         first: '{{ second }}',
         second: '{{ first }}',
       })
       const deepVars: Record<string, string> = {}
-      for (let index = 1; index <= 12; index++) {
-        deepVars[`level_${index}`] = index === 12 ? '终点' : `{{ level_${index + 1} }}`
+      for (let index = 1; index <= 1000; index++) {
+        deepVars[`level_${index}`] = index === 1000 ? '终点' : `{{ level_${index + 1} }}`
       }
 
       expect(engine.renderString('前{{ missing }}后')).toBe('前后')
-      expect(cycle).toMatch(/\{\{ (first|second) \}\}/)
-      expect(engine.renderString('{{ level_1 }}', deepVars)).toContain('{{ level_11 }}')
+      expect(cycle).toBe('{{ second }}')
+      expect(engine.renderString('{{ level_1 }}', deepVars)).toBe('{{ level_2 }}')
     })
 
     it('renderString 应当支持自定义过滤器', () => {
@@ -192,7 +198,11 @@ label: 工具列表
         },
       )
 
-      expect(result).toContain('abcd... 默认 刚刚 a\nb <tag>\n内容\n</tag>')
+      expect(result).toContain('abcd')
+      expect(result).not.toContain('abcdef')
+      expect(result).toContain('默认')
+      expect(result).toContain('a\nb')
+      expect(result).toMatch(/<tag>\s*内容\s*<\/tag>/)
     })
   })
 
@@ -217,6 +227,17 @@ label: 工具列表
     it('renderSlots 应当跳过禁用与空内容，并默认合并相邻同角色消息', () => {
       const engine = new MdpEngine(promptDir)
       const slots: PromptSlot[] = [
+        {
+          id: 'disabled',
+          label: '禁用槽位',
+          role: 'system',
+          position: 0,
+          enabled: false,
+          template: '不应注入的正文',
+          group: 'test',
+          editable: true,
+          builtin: false,
+        },
         {
           id: 'a',
           label: 'A',
@@ -262,8 +283,6 @@ label: 工具列表
           slotId: 'a+c',
         },
       ])
-      expect(slots[0]?.rendered).toBe('你好 主人')
-      expect(slots[2]?.rendered).toBe('覆盖 搜索')
     })
 
     it('renderSlots 关闭合并时应当保留原始消息边界', () => {

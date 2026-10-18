@@ -1,0 +1,222 @@
+.user-settings-tab {
+  min-width: 0;
+  overflow-x: hidden;
+  color: var(--ui-text-primary);
+}
+
+.app-background-settings {
+  position: relative;
+  min-width: 0;
+  isolation: isolate;
+}
+.app-background-heading {
+  position: relative;
+  z-index: 1;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+.app-background-heading > div:first-child {
+  min-width: 0;
+}
+.app-background-heading p {
+  margin-top: 4px;
+}
+.app-background-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* 图片和模糊边缘只能绘制在预览框内，不能覆盖设置按钮与后续控件。 */
+.app-background-preview {
+  position: relative;
+  width: min(100%, 900px);
+  min-width: 0;
+  min-height: 240px;
+  aspect-ratio: 16 / 9;
+  align-self: center;
+  overflow: hidden;
+  isolation: isolate;
+  contain: layout paint;
+  border: 2px solid var(--ui-border-default);
+  background: var(--ui-bg-canvas);
+  pointer-events: none;
+  user-select: none;
+}
+.app-background-preview__window {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-height: inherit;
+  grid-template-columns: 23% minmax(0, 1fr);
+  grid-template-rows: 32px minmax(0, 1fr);
+  grid-template-areas: 'titlebar titlebar' 'sidebar conversation';
+  color: var(--ui-text-primary);
+  font-size: 11px;
+}
+.app-background-preview__titlebar {
+  grid-area: titlebar;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--ui-border-default);
+  background: var(--app-shell-fill, var(--ui-bg-surface-soft));
+  backdrop-filter: blur(var(--app-material-blur, 0px));
+}
+.app-background-preview__tab {
+  padding: 4px 10px;
+  border: 1px solid var(--ui-border-default);
+  border-bottom: 2px solid var(--ui-accent-purple);
+  background: var(--app-panel-fill, var(--ui-bg-surface));
+  font-family: var(--ui-font-pixel);
+}
+.app-background-preview__sidebar {
+  grid-area: sidebar;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 16px;
+  border-right: 1px solid var(--ui-border-default);
+  background: var(--app-shell-fill, var(--ui-bg-surface-soft));
+  backdrop-filter: blur(var(--app-material-blur, 0px));
+}
+.app-background-preview__avatar {
+  width: 32px;
+  height: 32px;
+  margin-bottom: 6px;
+  border: 2px solid var(--ui-accent-purple);
+  background: var(--ui-accent-purple-soft);
+}
+.app-background-preview__line {
+  width: 100%;
+  height: 7px;
+  background: var(--ui-border-strong);
+}
+.app-background-preview__line.is-short {
+  width: 65%;
+  background: var(--ui-accent-purple);
+}
+.app-background-preview__conversation {
+  grid-area: conversation;
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+.app-background-preview__header {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--ui-border-default);
+  background: var(--app-shell-fill, var(--ui-bg-surface-soft));
+  backdrop-filter: blur(var(--app-material-blur, 0px));
+  font-weight: 700;
+}
+.app-background-preview__messages {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: 14px;
+  padding: 18px;
+}
+.app-background-preview__bubble {
+  max-width: 85%;
+  padding: 10px 12px;
+  border: 1px solid var(--ui-border-default);
+  background: var(--app-reading-fill, var(--ui-bg-surface));
+  color: var(--ui-text-primary);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.app-background-preview__bubble.is-agent {
+  align-self: flex-start;
+  border-left: 3px solid var(--ui-accent-purple);
+}
+.app-background-preview__bubble.is-user {
+  align-self: flex-end;
+  border-right: 3px solid var(--ui-accent-primary);
+}
+.app-background-preview__input {
+  margin: 0 16px 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--ui-border-default);
+  background: var(--app-reading-fill, var(--ui-bg-surface));
+  color: var(--ui-text-secondary);
+  font-family: var(--ui-font-pixel);
+}
+
+.app-background-presets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.app-background-presets > span {
+  margin-right: 6px;
+  color: var(--ui-text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+.app-background-details {
+  border: 1px solid var(--ui-border-default);
+  background: var(--dash-panel-soft);
+}
+.app-background-details > summary {
+  padding: 12px 14px;
+  color: var(--ui-text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    color var(--ui-duration-fast),
+    background-color var(--ui-duration-fast);
+}
+.app-background-details > summary:hover,
+.app-background-details[open] > summary {
+  background: var(--ui-bg-hover);
+  color: var(--ui-text-primary);
+}
+.app-background-details > summary:focus-visible {
+  outline: 2px solid var(--ui-focus-color);
+  outline-offset: -2px;
+}
+.app-background-controls {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px 24px;
+  padding: 16px;
+  border-top: 1px solid var(--ui-border-subtle);
+}
+.app-background-controls > div {
+  min-width: 0;
+}
+
+@media (max-width: 720px) {
+  .app-background-actions {
+    margin-left: 0;
+  }
+  .app-background-preview {
+    min-height: 220px;
+  }
+  .app-background-preview__window {
+    grid-template-columns: 1fr;
+    grid-template-areas: 'titlebar' 'conversation';
+  }
+  .app-background-preview__sidebar {
+    display: none;
+  }
+  .app-background-controls {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-background-details > summary {
+    transition: none;
+  }
+}

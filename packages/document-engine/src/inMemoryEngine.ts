@@ -45,6 +45,7 @@ import type {
 interface AuthorityState {
   document: SemanticDocument
   nodes: Map<DocumentNodeId, DocumentNode>
+  historyBase?: { document: SemanticDocument; nodes: DocumentNode[] }
   revisions: Map<RevisionId, DocumentRevision>
   journal: DocumentJournalEntry[]
   operationIds: Set<OperationId>
@@ -64,6 +65,7 @@ const TEXT_NODE_TYPES = new Set([
   'code-block',
   'table-cell',
   'citation',
+  'list-item',
 ])
 
 export class InMemoryDocumentEngine implements DocumentEngine {
@@ -145,6 +147,70 @@ export class InMemoryDocumentEngine implements DocumentEngine {
     return this.snapshot(this.requireDocument(documentId))
   }
 
+  snapshotAt(documentId: DocumentId, revisionId: RevisionId): DocumentSnapshot {
+    const state = this.requireDocument(documentId)
+    if (state.document.headRevisionId === revisionId) return this.snapshot(state)
+    const revision = state.revisions.get(revisionId)
+    if (!revision) failDocument('DOCUMENT_NOT_FOUND', '该修订不属于当前文稿')
+    const initial = [...state.revisions.values()].find((item) => item.sequence === 0)
+    if (!initial && !state.historyBase)
+      failDocument('DOCUMENT_HISTORY_UNAVAILABLE', '该旧工程未保留历史基础快照，当前文稿不受影响')
+    const document = cloneValue(state.document)
+    const firstRename = state.journal
+      .flatMap((entry) => entry.receipt.observedEffects)
+      .find((effect) => effect.type === 'document-renamed')
+    if (firstRename?.type === 'document-renamed') document.title = firstRename.previousTitle
+    document.generation = 1
+    document.headRevisionId = initial?.revisionId ?? state.historyBase!.document.headRevisionId
+    document.updatedAt = document.createdAt
+    document.status = 'active'
+    const root: DocumentNode = {
+      nodeId: document.rootNodeId,
+      documentId,
+      parentId: null,
+      type: 'document-root',
+      orderKey: 'root',
+      generation: 1,
+      text: undefined,
+      attributes: {},
+      createdAt: document.createdAt,
+      updatedAt: document.createdAt,
+    }
+    const simulated: SimulatedState = state.historyBase
+      ? {
+          document: cloneValue(state.historyBase.document),
+          nodes: new Map(state.historyBase.nodes.map((node) => [node.nodeId, cloneValue(node)])),
+          effects: [],
+        }
+      : { document, nodes: new Map([[root.nodeId, root]]), effects: [] }
+    const journal: DocumentJournalEntry[] = []
+    for (const entry of state.journal) {
+      if (simulated.document.headRevisionId === revisionId) break
+      if (entry.receipt.previousRevisionId !== simulated.document.headRevisionId) continue
+      for (const operation of entry.operations)
+        this.apply(simulated, operation, entry.revision.committedAt)
+      simulated.document.generation++
+      simulated.document.headRevisionId = entry.revision.revisionId
+      simulated.document.updatedAt = entry.revision.committedAt
+      journal.push(entry)
+    }
+    if (simulated.document.headRevisionId !== revisionId)
+      failDocument(
+        'DOCUMENT_HISTORY_UNAVAILABLE',
+        '此修订属于导入前的来源记录，工程未保留可回放快照；可恢复导入后的修订',
+      )
+    this.validateTree(simulated.document, simulated.nodes)
+    const snapshot = this.snapshot({
+      ...state,
+      document: simulated.document,
+      nodes: simulated.nodes,
+      journal,
+    })
+    if (snapshot.rootHash !== revision.rootHash)
+      failDocument('DOCUMENT_REVISION_CONFLICT', '历史修订回放校验失败，原文未改动')
+    return snapshot
+  }
+
   listDocuments(): SemanticDocument[] {
     return cloneValue(
       [...this.documents.values()]
@@ -206,6 +272,11 @@ export class InMemoryDocumentEngine implements DocumentEngine {
       }
       return cloneValue(known.receipt)
     }
+    if (
+      state.document.status !== 'active' &&
+      request.operations.some((operation) => operation.type !== 'document.set_status')
+    )
+      failDocument('DOCUMENT_NOT_ACTIVE', '文稿已归档或移入回收站，请先恢复后再编辑')
     this.assertHead(state, request.baseRevisionId)
     const operationIds = new Set<OperationId>()
     for (const operation of request.operations) {
@@ -243,7 +314,11 @@ export class InMemoryDocumentEngine implements DocumentEngine {
     const revision: DocumentRevision = {
       revisionId,
       documentId: request.documentId,
-      sequence: state.journal.length + 1,
+      sequence:
+        [...state.revisions.values()].reduce(
+          (maximum, revision) => Math.max(maximum, revision.sequence),
+          0,
+        ) + 1,
       parentRevisionIds: [state.document.headRevisionId],
       operationIds: request.operations.map((operation) => operation.operationId),
       actorPrincipalId: request.actorPrincipalId,
@@ -338,7 +413,11 @@ export class InMemoryDocumentEngine implements DocumentEngine {
     const cached = this.semanticDiffs.get(changeSetId)
     if (cached) return cloneValue(cached)
     const changeSet = this.requireChangeSet(changeSetId)
-    const state = this.requireDocument(changeSet.documentId)
+    const baseline = this.snapshotAt(changeSet.documentId, changeSet.baseRevisionId)
+    const state = {
+      document: baseline.document,
+      nodes: new Map(baseline.nodes.map((node) => [node.nodeId, node])),
+    }
     const simulated: SimulatedState = {
       document: cloneValue(state.document),
       nodes: new Map([...state.nodes].map(([id, node]) => [id, cloneValue(node)])),
@@ -419,7 +498,17 @@ export class InMemoryDocumentEngine implements DocumentEngine {
   createComment(input: CreateCommentInput): DocumentComment {
     const state = this.requireDocument(input.documentId)
     this.assertHead(state, input.revisionId)
-    this.requireNode(state.nodes, input.nodeId)
+    const node = this.requireNode(state.nodes, input.nodeId)
+    const text = node.text ?? String(node.attributes.text ?? '')
+    if (
+      input.range &&
+      (!Number.isInteger(input.range.start) ||
+        !Number.isInteger(input.range.end) ||
+        input.range.start < 0 ||
+        input.range.end <= input.range.start ||
+        input.range.end > text.length)
+    )
+      failDocument('DOCUMENT_INVALID_ATTRIBUTE', '评论选区无效')
     const commentId = input.commentId ?? (randomUUID() as CommentId)
     if (this.comments.has(commentId))
       failDocument('DOCUMENT_NODE_EXISTS', `评论已存在: ${commentId}`)
@@ -431,6 +520,16 @@ export class InMemoryDocumentEngine implements DocumentEngine {
       revisionId: input.revisionId,
       authorPrincipalId: this.nonEmpty(input.authorPrincipalId, '评论作者不能为空'),
       body: this.nonEmpty(input.body, '评论正文不能为空'),
+      ...(input.range
+        ? {
+            anchor: {
+              ...input.range,
+              quote: text.slice(input.range.start, input.range.end),
+              prefix: text.slice(Math.max(0, input.range.start - 24), input.range.start),
+              suffix: text.slice(input.range.end, input.range.end + 24),
+            },
+          }
+        : {}),
       status: 'open',
       createdAt: now,
       updatedAt: now,
@@ -440,7 +539,7 @@ export class InMemoryDocumentEngine implements DocumentEngine {
   }
 
   listComments(documentId: DocumentId, nodeId?: DocumentNodeId): DocumentComment[] {
-    this.requireDocument(documentId)
+    const state = this.requireDocument(documentId)
     return cloneValue(
       [...this.comments.values()]
         .filter(
@@ -450,7 +549,40 @@ export class InMemoryDocumentEngine implements DocumentEngine {
           (left, right) =>
             left.createdAt.localeCompare(right.createdAt) ||
             String(left.commentId).localeCompare(String(right.commentId)),
-        ),
+        )
+        .map((comment) => {
+          const node = state.nodes.get(comment.nodeId)
+          if (!node) return { ...comment, anchorState: 'missing' as const }
+          if (!comment.anchor) return { ...comment, anchorState: 'attached' as const }
+          const text = node.text ?? String(node.attributes.text ?? ''),
+            { quote, prefix, suffix } = comment.anchor
+          const candidates: Array<{ start: number; end: number; score: number }> = []
+          for (
+            let from = 0, at: number;
+            (at = text.indexOf(quote, from)) >= 0;
+            from = at + Math.max(1, quote.length)
+          )
+            candidates.push({
+              start: at,
+              end: at + quote.length,
+              score:
+                Number(!prefix || text.slice(Math.max(0, at - prefix.length), at) === prefix) +
+                Number(
+                  !suffix ||
+                    text.slice(at + quote.length, at + quote.length + suffix.length) === suffix,
+                ),
+            })
+          candidates.sort((a, b) => b.score - a.score)
+          const best = candidates[0]
+          if (!best) return { ...comment, anchorState: 'missing' as const }
+          if (candidates.length > 1 && best.score === candidates[1]!.score)
+            return { ...comment, anchorState: 'ambiguous' as const }
+          return {
+            ...comment,
+            anchorState: 'attached' as const,
+            currentRange: { start: best.start, end: best.end },
+          }
+        }),
     )
   }
 
@@ -599,8 +731,12 @@ export class InMemoryDocumentEngine implements DocumentEngine {
 
   review(input: ReviewChangeSetInput) {
     const changeSet = this.requireChangeSet(input.changeSetId)
-    if (!['validated', 'approved'].includes(changeSet.status)) {
-      failDocument('CHANGESET_STATE_INVALID', '只有 validated ChangeSet 可以审阅')
+    const allowed =
+      input.decision === 'approve'
+        ? ['validated', 'approved']
+        : ['proposed', 'validated', 'approved', 'conflicted', 'failed']
+    if (!allowed.includes(changeSet.status)) {
+      failDocument('CHANGESET_STATE_INVALID', '当前提案状态不允许此审阅操作；批准前必须校验')
     }
     const reviewedAt = this.now()
     if (input.decision === 'approve') changeSet.status = 'approved'
@@ -690,7 +826,10 @@ export class InMemoryDocumentEngine implements DocumentEngine {
             nodeId: node.nodeId,
             type: node.type,
             text: node.text ?? '',
-            level,
+            level:
+              node.type === 'heading'
+                ? Math.max(1, Math.min(6, Number(node.attributes.level) || level))
+                : level,
             children: descendants,
           },
         ]
@@ -704,7 +843,9 @@ export class InMemoryDocumentEngine implements DocumentEngine {
     const lines: string[] = []
     const walk = (parentId: DocumentNodeId): void => {
       for (const node of this.children(state.nodes, parentId)) {
-        if (node.text) lines.push(node.text)
+        const text =
+          node.text ?? (node.type === 'list-item' ? String(node.attributes.text ?? '') : '')
+        if (text) lines.push(text)
         walk(node.nodeId)
       }
     }
@@ -719,6 +860,7 @@ export class InMemoryDocumentEngine implements DocumentEngine {
       authorities: [...this.documents.values()].map((state) => ({
         document: state.document,
         nodes: [...state.nodes.values()],
+        ...(state.historyBase ? { historyBase: state.historyBase } : {}),
         revisions: [...state.revisions.values()],
         journal: state.journal,
         operationIds: [...state.operationIds],
@@ -745,6 +887,19 @@ export class InMemoryDocumentEngine implements DocumentEngine {
     const restoredDocuments = new Map<DocumentId, AuthorityState>()
     const restoredRevisionIndex = new Map<RevisionId, DocumentRevision>()
     for (const authority of checkpoint.authorities) {
+      if (authority.historyBase) {
+        const base = authority.historyBase,
+          revision = authority.revisions.find(
+            (item) => item.revisionId === base.document.headRevisionId,
+          )
+        if (
+          !revision ||
+          base.document.documentId !== authority.document.documentId ||
+          documentRootHash(base.document, base.nodes) !== revision.rootHash
+        )
+          failDocument('DOCUMENT_CHECKPOINT_CORRUPT', '历史基础快照校验失败')
+        this.validateTree(base.document, new Map(base.nodes.map((node) => [node.nodeId, node])))
+      }
       const nodes = new Map(authority.nodes.map((node) => [node.nodeId, cloneValue(node)]))
       this.validateTree(authority.document, nodes)
       const rootHash = documentRootHash(authority.document, nodes.values())
@@ -762,6 +917,19 @@ export class InMemoryDocumentEngine implements DocumentEngine {
       restoredDocuments.set(authority.document.documentId, {
         document: cloneValue(authority.document),
         nodes,
+        ...(authority.historyBase
+          ? { historyBase: cloneValue(authority.historyBase) }
+          : !authority.revisions.some((revision) => revision.sequence === 0) ||
+              authority.revisions.some(
+                (revision) => revision.actorPrincipalId === 'system:arca-package-import',
+              )
+            ? {
+                historyBase: {
+                  document: cloneValue(authority.document),
+                  nodes: cloneValue(authority.nodes),
+                },
+              }
+            : {}),
         revisions,
         journal: cloneValue(authority.journal),
         operationIds: new Set(authority.operationIds),
@@ -897,6 +1065,11 @@ export class InMemoryDocumentEngine implements DocumentEngine {
           failDocument('DOCUMENT_INVALID_NODE_TYPE', `节点类型不支持文本: ${node.type}`)
         }
         node.text = operation.value
+        if (operation.resetFormatting === true) {
+          delete node.attributes.inlineAst
+          delete node.attributes.sourceRange
+          delete node.attributes.runs
+        }
         node.generation += 1
         node.updatedAt = authorityTime
         state.effects.push({ type: 'text-changed', nodeId: node.nodeId })
@@ -917,6 +1090,28 @@ export class InMemoryDocumentEngine implements DocumentEngine {
           type: 'attribute-changed',
           nodeId: node.nodeId,
           key: operation.key,
+        })
+        return
+      }
+      case 'node.retype': {
+        const node = this.requireNode(state.nodes, operation.nodeId)
+        this.assertGeneration(node, operation.expectedGeneration)
+        if (node.type === 'document-root' || operation.nodeType === 'document-root')
+          failDocument('DOCUMENT_ROOT_IMMUTABLE', '不能改变文稿根节点类型')
+        node.type = operation.nodeType
+        node.generation++
+        node.updatedAt = authorityTime
+        state.effects.push({ type: 'attribute-changed', nodeId: node.nodeId, key: 'type' })
+        return
+      }
+      case 'document.set_status': {
+        if (!['active', 'archived', 'deleted'].includes(operation.value))
+          failDocument('DOCUMENT_INVALID_ATTRIBUTE', '文稿状态无效')
+        state.document.status = operation.value
+        state.effects.push({
+          type: 'attribute-changed',
+          nodeId: state.document.rootNodeId,
+          key: 'document.status',
         })
         return
       }
@@ -1002,7 +1197,7 @@ export class InMemoryDocumentEngine implements DocumentEngine {
       failDocument('DOCUMENT_INVALID_PARENT', 'table-row 只能包含 table-cell')
     }
     if (
-      TEXT_NODE_TYPES.has(parent.type) ||
+      (TEXT_NODE_TYPES.has(parent.type) && parent.type !== 'list-item') ||
       parent.type === 'asset' ||
       parent.type === 'programmable-island'
     ) {

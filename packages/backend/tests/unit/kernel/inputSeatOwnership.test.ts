@@ -5,10 +5,10 @@ import type { KernelInputSeatId, KernelNodeDescriptor, KernelNodeId } from '@inf
 function client(nodeId: string): KernelNodeDescriptor {
   return {
     nodeId: nodeId as KernelNodeId,
-    name: nodeId,
+    displayName: nodeId,
+    protocolVersion: 1,
     facets: ['client'],
-    trust: 'trusted',
-    health: 'online',
+    trust: 'paired',
     platform: { os: 'windows', arch: 'x64', runtime: 'electron' },
     publicKeyFingerprint: `fingerprint:${nodeId}`,
     registeredAt: new Date().toISOString(),

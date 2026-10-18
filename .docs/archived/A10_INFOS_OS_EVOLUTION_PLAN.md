@@ -1681,7 +1681,7 @@ LLM 滚动摘要
 - [记忆引擎架构](../A05_MEMORY_ENGINE.md)
 - [扩展系统](../A06_EXTENSION_SYSTEM.md)
 - [CapabilityGate](../M02_CAPABILITY_GATE.md)
-- [任务中心](../M05_TASK_CENTER_TODO.md)
+- [任务中心](M05_TASK_CENTER_TODO.md)
 - [API 响应与流式规范](../S02_API_SPEC.md)
 - [测试规范](../S04_TESTING_STANDARDS.md)
 - [UI/UX 设计规范](../S06_UI_UX_DESIGN_SPEC.md)

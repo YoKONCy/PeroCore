@@ -5,9 +5,9 @@
  *
  * 正确流程:
  *   主进程启动后端 → 等待后端就绪 → EULA → 系统检查 → 就绪 → 新手引导(可选)
- *   → 点击启动 → 隐藏 Launcher → 拉起 Pet3D 桌宠窗口
+ *   → 选择启动方式 → 隐藏 Launcher → 拉起桌宠或主界面
  *
- * Pet3D 桌宠是整个应用的核心入口，Chat/Dashboard 从桌宠或托盘拉起。
+ * 桌宠与主界面共用同一个启动流程。
  *
  * @module packages/frontend/src/composables/launcher/useLauncher
  */
@@ -311,21 +311,23 @@ export function useLauncher() {
   }
 
   /**
-   * 进入应用 — 唤出桌宠入口
+   * 进入应用 — 按用户选择显示桌宠或主界面。
    *
    * Electron: 确认后端可用 → 隐藏 Launcher → 拉起 Pet3D 桌宠窗口。
    * Browser/Docker: 直接跳转到 /app。
    *
-   * @returns 'pet' | 'browser' — 表示启动目标，供 View 层决定后续行为
+   * @returns 是否成功启动
    */
-  async function enterApp(): Promise<'pet' | 'browser'> {
+  async function enterApp(target: 'pet' | 'app' = 'pet'): Promise<boolean> {
+    if (phase.value === 'entering') return false
     phase.value = 'entering'
 
     if (!isElectron()) {
       // Docker/浏览器模式: 后端已经独立运行，直接跳转
       enteringText.value = '正在进入...'
       phase.value = 'done'
-      return 'browser'
+      window.location.hash = '/app'
+      return true
     }
 
     try {
@@ -335,28 +337,22 @@ export function useLauncher() {
         throw new Error('后端服务未就绪')
       }
 
-      // 第 1 步: 先隐藏 Launcher，避免后续窗口事件触发竞争
-      enteringText.value = '正在召唤 Pero 出现在桌面上...'
-      logger.info('Launcher', '先隐藏 Launcher 窗口')
+      enteringText.value = target === 'pet' ? '正在召唤伙伴...' : '正在打开主界面...'
+      // 两种启动方式共用隐藏动作；失败时重新显示启动器，保留重试入口。
       await invoke('hide-launcher')
-
-      // 第 2 步: 拉起 Pet3D 桌宠窗口 (核心入口！)
-      logger.info('Launcher', '正在创建 Pet3D 窗口...')
-      await invoke('open-pet-window')
-
-      // 第 3 步: 短暂等待 Pet3D 渲染就绪
-      await new Promise((r) => setTimeout(r, 500))
+      await invoke(target === 'pet' ? 'open-pet-window' : 'open-dashboard-window')
       enteringText.value = '欢迎回来，主人！'
 
       phase.value = 'done'
-      return 'pet'
+      return true
     } catch (e) {
       logger.error('Launcher', '启动流程出错', e)
       enteringText.value = '启动出错，请重试'
       errorMessage.value = `启动失败: ${e}`
-      // 回退到 ready 状态，允许用户重试
+      // 恢复就绪状态，允许用户重试。
       phase.value = 'ready'
-      return 'pet'
+      await invoke('window-show')
+      return false
     }
   }
 

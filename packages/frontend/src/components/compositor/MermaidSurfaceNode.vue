@@ -5,7 +5,16 @@
  * 负责组织该界面的响应式状态、用户交互与领域数据展示。
  * 副作用在组件生命周期内建立并清理，避免跨页面残留监听器或异步状态。
  */
-import { onMounted, ref, watch } from 'vue'
+import {
+  inject,
+  onMounted,
+  onBeforeUnmount,
+  onActivated,
+  onDeactivated,
+  shallowRef,
+  ref,
+  watch,
+} from 'vue'
 
 type MermaidModule = (typeof import('mermaid'))['default']
 let mermaidPromise: Promise<MermaidModule> | null = null
@@ -19,21 +28,23 @@ const props = withDefaults(defineProps<{ source: string; active?: boolean }>(), 
 const html = ref('')
 const error = ref('')
 let renderGeneration = 0
+let renderedSource = ''
+const mainVisible = inject('infos:main-surface-visible', shallowRef(true))
+const pageActive = ref(true)
 
 async function render(): Promise<void> {
   const generation = ++renderGeneration
-  if (!props.active) {
-    html.value = ''
-    error.value = ''
-    return
-  }
+  if (!props.active || !mainVisible.value || !pageActive.value) return
+  if (html.value && renderedSource === props.source) return
   try {
     const mermaid = await loadMermaid()
-    if (generation !== renderGeneration || !props.active) return
+    if (generation !== renderGeneration || !props.active || !mainVisible.value || !pageActive.value)
+      return
     mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'neutral' })
     const result = await mermaid.render(`infos-mermaid-${crypto.randomUUID()}`, props.source)
     if (generation !== renderGeneration) return
     html.value = result.svg
+    renderedSource = props.source
     error.value = ''
   } catch (cause) {
     if (generation !== renderGeneration) return
@@ -44,9 +55,19 @@ async function render(): Promise<void> {
 
 onMounted(() => void render())
 watch(
-  () => [props.source, props.active] as const,
+  () => [props.source, props.active, mainVisible.value, pageActive.value] as const,
   () => void render(),
 )
+onDeactivated(() => {
+  pageActive.value = false
+  renderGeneration++
+})
+onActivated(() => {
+  pageActive.value = true
+})
+onBeforeUnmount(() => {
+  renderGeneration++
+})
 </script>
 
 <template>

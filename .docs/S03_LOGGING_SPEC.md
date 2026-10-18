@@ -1,7 +1,7 @@
 # 日志与可观测性规范
 
 > **适用范围**：infOS-TS 全项目
-> **最后更新**：2026-04-21
+> **最后更新**：2026-10-17
 
 ---
 
@@ -113,7 +113,7 @@ app.use('*', async (c, next) => {
 ## 5. 健康检查
 
 ```typescript
-app.get('/health', (c) =>
+app.get('/api/health', (c) =>
   c.json({
     status: 'ok',
     uptime: process.uptime(),

@@ -1,25 +1,46 @@
 <script setup lang="ts">
+import './task-pixel.css'
 /**
  * ReminderItem — 用户提醒条目
  *
  * 展示一条由 Agent 创建的提醒（reminder/topic/reaction）：
- * 类型色块 + 内容 + 相对时间，soft-UI 软底条目，全套 ui 语义令牌。
+ * 类型色块 + 内容 + 相对时间，细边框像素条目，全套 ui 语义令牌。
  *
  * @props item — ReminderItem
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import PixelIcon from '../pixel/PixelIcon.vue'
 import type { ReminderItem as ReminderItemData } from '../../api/modules/schedulerApi'
+import { schedulerApi } from '../../api/modules/schedulerApi'
 
 const props = defineProps<{
   item: ReminderItemData
 }>()
+const emit = defineEmits<{ changed: [] }>()
+const busy = ref(false)
+const error = ref('')
+async function act(action: 'cancel' | 'retry') {
+  if (busy.value) return
+  busy.value = true
+  error.value = ''
+  try {
+    if (action === 'cancel') await schedulerApi.cancelReminder(props.item.id, props.item.agentId)
+    else await schedulerApi.retryReminder(props.item.id, props.item.agentId)
+    emit('changed')
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : '操作失败，请重试'
+  } finally {
+    busy.value = false
+  }
+}
 
 /** 类型元数据：标签 / 图标 / 修饰色类名 */
 const TYPE_META: Record<string, { label: string; icon: string; mod: string }> = {
   reminder: { label: '提醒', icon: 'bell', mod: 'reminder' },
   topic: { label: '话题', icon: 'chat', mod: 'topic' },
   reaction: { label: '反应', icon: 'flash', mod: 'reaction' },
+  follow_up: { label: '跟进', icon: 'clock', mod: 'topic' },
+  agent_task: { label: '定时任务', icon: 'clock', mod: 'reaction' },
 }
 
 const meta = computed(
@@ -33,7 +54,7 @@ function formatTime(iso: string): string {
   const dateStr = d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
   const timeStr = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
 
-  if (diffMs < 0) return `${dateStr} ${timeStr} · 已过期`
+  if (diffMs < 0) return `${dateStr} ${timeStr} · 等待处理`
   const hours = Math.floor(diffMs / 3600_000)
   const mins = Math.floor((diffMs % 3600_000) / 60_000)
   if (hours >= 24) return `${dateStr} ${timeStr} · ${Math.floor(hours / 24)}天后`
@@ -46,7 +67,7 @@ const isExpired = computed(() => new Date(props.item.time).getTime() < Date.now(
 </script>
 
 <template>
-  <div class="reminder-item" :class="{ 'reminder-item--expired': isExpired }">
+  <div class="reminder-item task-pixel-surface" :class="{ 'reminder-item--expired': isExpired }">
     <!-- 类型色块图标 -->
     <div class="reminder-item__icon" :class="`reminder-item__icon--${meta.mod}`">
       <PixelIcon :name="meta.icon" size="sm" />
@@ -54,7 +75,9 @@ const isExpired = computed(() => new Date(props.item.time).getTime() < Date.now(
 
     <!-- 内容 + 时间 -->
     <div class="reminder-item__body">
-      <p class="reminder-item__content" :title="item.content">{{ item.content }}</p>
+      <p class="reminder-item__content" :title="item.content">{{ item.reason || item.content }}</p>
+      <p v-if="item.lastError" role="alert" class="reminder-item__error">{{ item.lastError }}</p>
+      <p v-if="error" role="alert" class="reminder-item__error">{{ error }}</p>
       <div class="reminder-item__meta">
         <span class="reminder-item__type" :class="`reminder-item__type--${meta.mod}`">
           {{ meta.label }}
@@ -63,31 +86,99 @@ const isExpired = computed(() => new Date(props.item.time).getTime() < Date.now(
           <PixelIcon name="clock" size="xs" />
           {{ timeText }}
         </span>
+        <span v-if="item.status === 'failed'" class="reminder-item__failed">未能派发</span>
       </div>
+    </div>
+    <div class="reminder-actions">
+      <button
+        v-if="item.status === 'failed'"
+        type="button"
+        class="reminder-actions__retry"
+        :disabled="busy"
+        title="重试派发"
+        @click="act('retry')"
+      >
+        <PixelIcon name="refresh" size="xs" />
+        重试
+      </button>
+      <span v-if="item.status === 'dispatching'">派发中</span>
+      <button
+        v-else
+        type="button"
+        :disabled="busy"
+        title="取消这项计划"
+        aria-label="取消这项计划"
+        @click="act('cancel')"
+      >
+        <PixelIcon name="close" size="xs" />
+      </button>
     </div>
   </div>
 </template>
 
 <style scoped>
+.reminder-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.reminder-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 26px;
+  color: var(--ui-text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 0;
+  padding: 3px 7px;
+  cursor: pointer;
+}
+.reminder-actions button:hover {
+  background: var(--ui-bg-hover);
+  color: var(--ui-text-primary);
+}
+.reminder-actions button.reminder-actions__retry {
+  color: var(--ui-accent-purple);
+  border-color: var(--ui-border-subtle);
+}
+.reminder-item__error {
+  margin: 2px 0 0;
+  color: var(--ui-danger);
+  font-size: 11px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.reminder-item__failed {
+  color: var(--ui-danger);
+  font-size: 10px;
+}
+.reminder-actions button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
 .reminder-item {
   display: flex;
   align-items: flex-start;
   gap: var(--ui-space-3);
   padding: 12px 14px;
-  border-radius: var(--ui-radius-lg);
-  background: var(--ui-bg-surface);
+  border-radius: 0;
+  background: var(--task-fill);
   border: 1px solid var(--ui-border-subtle);
-  box-shadow: var(--ui-shadow-xs);
+  box-shadow: var(--task-raised);
   transition:
-    transform var(--ui-duration-fast) var(--ui-ease-standard),
-    box-shadow var(--ui-duration-fast) var(--ui-ease-standard),
-    border-color var(--ui-duration-fast) var(--ui-ease-standard);
+    transform var(--ui-duration-fast) steps(3, end),
+    box-shadow var(--ui-duration-fast) steps(3, end),
+    border-color var(--ui-duration-fast) steps(3, end);
+  border-color: var(--ui-border-default);
 }
 
 .reminder-item:hover {
-  transform: translateY(-1px);
-  border-color: var(--ui-border-default);
-  box-shadow: var(--ui-shadow-sm);
+  transform: none;
+  border-color: var(--ui-border-strong);
+  box-shadow: var(--task-raised);
 }
 
 /* 已过期：整体降饱和提示 */
@@ -102,10 +193,13 @@ const isExpired = computed(() => new Date(props.item.time).getTime() < Date.now(
   justify-content: center;
   width: 34px;
   height: 34px;
-  border-radius: var(--ui-radius-md);
+  border-radius: 0;
   flex-shrink: 0;
   color: var(--ui-text-tertiary);
   background: var(--ui-bg-hover);
+  border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+  box-shadow: var(--task-control);
+  box-sizing: border-box;
 }
 
 .reminder-item__icon--reminder {
@@ -134,7 +228,7 @@ const isExpired = computed(() => new Date(props.item.time).getTime() < Date.now(
 
 .reminder-item__content {
   margin: 0;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   line-height: 1.5;
   color: var(--ui-text-primary);
@@ -154,11 +248,12 @@ const isExpired = computed(() => new Date(props.item.time).getTime() < Date.now(
 
 .reminder-item__type {
   padding: 1px 7px;
-  border-radius: var(--ui-radius-sm);
-  font-size: 10px;
+  border-radius: 0;
+  font-size: 11px;
   font-weight: 700;
   color: var(--ui-text-tertiary);
   background: var(--ui-bg-hover);
+  border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
 }
 
 .reminder-item__type--reminder {
@@ -180,7 +275,7 @@ const isExpired = computed(() => new Date(props.item.time).getTime() < Date.now(
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--ui-text-tertiary);
 }
 </style>

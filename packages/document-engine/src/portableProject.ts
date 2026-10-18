@@ -7,7 +7,7 @@ import { createStoreZip, readStoreZip, sha256, type ZipEntry } from './zipStore'
 
 export interface ArcaProjectManifest {
   format: 'infos.arca.project'
-  formatVersion: 1
+  formatVersion: 1 | 2
   packageId: string
   project: { projectId: string; title: string; description: string }
   exportedAt: string
@@ -59,7 +59,7 @@ export class ArcaPortableProjectPackage {
     }
     const manifest: ArcaProjectManifest = {
       format: 'infos.arca.project',
-      formatVersion: 1,
+      formatVersion: 2,
       packageId: randomUUID(),
       project: {
         projectId: input.projectId ?? randomUUID(),
@@ -90,7 +90,7 @@ export class ArcaPortableProjectPackage {
   } {
     const entries = readStoreZip(buffer)
     const manifest = this.json<ArcaProjectManifest>(entries, 'manifest.json')
-    if (manifest.format !== 'infos.arca.project' || manifest.formatVersion !== 1) {
+    if (manifest.format !== 'infos.arca.project' || ![1, 2].includes(manifest.formatVersion)) {
       throw new Error('ARCA_PACKAGE_VERSION_UNSUPPORTED')
     }
     for (const expected of manifest.entries) {
@@ -149,6 +149,10 @@ export class ArcaPortableProjectPackage {
         intent: '导入 Portable Project Package副本',
         committedAt: new Date().toISOString(),
       })
+      authority.historyBase = {
+        document: cloneValue(authority.document),
+        nodes: cloneValue(authority.nodes),
+      }
     }
     const merged: DocumentEngineCheckpoint = {
       protocolVersion: 1,
@@ -216,6 +220,7 @@ export class ArcaPortableProjectPackage {
           (revision) => revision.revisionId === authority.document.headRevisionId,
         ),
         journal: [],
+        historyBase: { document: authority.document, nodes: authority.nodes },
         operationIds: [],
         idempotency: [],
       })),
@@ -232,8 +237,15 @@ export class ArcaPortableProjectPackage {
       else if (Array.isArray(value)) value.forEach(visit)
       else if (value && typeof value === 'object') Object.values(value).forEach(visit)
     }
-    checkpoint.authorities.forEach((authority) =>
-      authority.nodes.forEach((node) => visit(node.attributes)),
+    checkpoint.authorities.forEach((authority) => {
+      authority.nodes.forEach((node) => visit(node.attributes))
+      authority.historyBase?.nodes.forEach((node) => visit(node.attributes))
+      authority.journal.forEach((entry) =>
+        entry.operations.forEach((operation) => visit(operation as unknown as JsonValue)),
+      )
+    })
+    checkpoint.changeSets.forEach((changeSet) =>
+      changeSet.operations.forEach((operation) => visit(operation as unknown as JsonValue)),
     )
     return [...ids].sort()
   }

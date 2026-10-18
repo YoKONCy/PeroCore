@@ -22,6 +22,8 @@ interface Props {
   confirmVariant?: 'primary' | 'danger'
   /** 自定义宽度 */
   width?: string
+  loading?: boolean
+  autoClose?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -34,6 +36,8 @@ const props = withDefaults(defineProps<Props>(), {
   defaultValue: '',
   confirmVariant: 'primary',
   width: '',
+  loading: false,
+  autoClose: true,
 })
 
 const emit = defineEmits<{
@@ -57,15 +61,17 @@ watch(
 )
 
 function handleConfirm() {
+  if (props.loading) return
   if (props.mode === 'prompt') {
     emit('confirm', inputValue.value)
   } else {
     emit('confirm')
   }
-  emit('update:modelValue', false)
+  if (props.autoClose) emit('update:modelValue', false)
 }
 
 function handleCancel() {
+  if (props.loading) return
   emit('cancel')
   emit('update:modelValue', false)
 }
@@ -84,6 +90,7 @@ function handleOverlayClick(event: MouseEvent): void {
 
 /** 关闭按钮只关闭窗口，取消按钮和遮罩点击才触发取消业务。 */
 function close() {
+  if (props.loading) return
   emit('update:modelValue', false)
 }
 </script>
@@ -122,11 +129,16 @@ function close() {
               <slot name="footer" />
             </template>
             <template v-else>
-              <PButton variant="secondary" size="sm" @click="handleCancel">
+              <PButton variant="secondary" size="sm" :disabled="loading" @click="handleCancel">
                 {{ cancelText }}
               </PButton>
-              <PButton :variant="confirmVariant" size="sm" @click="handleConfirm">
-                {{ confirmText }}
+              <PButton
+                :variant="confirmVariant"
+                size="sm"
+                :disabled="loading"
+                @click="handleConfirm"
+              >
+                {{ loading ? '处理中…' : confirmText }}
               </PButton>
             </template>
           </div>
@@ -170,19 +182,29 @@ function close() {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
 }
 
 .p-dialog-close {
+  --ui-focus-color: var(--ui-accent-sky);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
   background: none;
   border: none;
   cursor: pointer;
   color: var(--ui-text-tertiary);
   font-size: 14px;
   padding: 2px 6px;
-  transition: color 0.15s;
+  transition:
+    color var(--ui-duration-fast) var(--ui-ease-standard),
+    background-color var(--ui-duration-fast) var(--ui-ease-standard);
 }
 .p-dialog-close:hover {
   color: var(--ui-text-primary);
+  background: var(--ui-bg-hover);
 }
 
 .p-dialog-body {
@@ -207,12 +229,18 @@ function close() {
   font-family: var(--ui-font-pixel);
   font-size: 14px;
   outline: none;
+  caret-color: var(--ui-accent-sky);
+  transition:
+    border-color var(--ui-duration-fast) var(--ui-ease-standard),
+    box-shadow var(--ui-duration-fast) var(--ui-ease-standard);
 }
 .p-dialog-input::placeholder {
   color: var(--ui-text-tertiary);
+  opacity: 1;
 }
 .p-dialog-input:focus {
   border-color: var(--ui-accent-sky);
+  box-shadow: 0 0 0 1px var(--ui-accent-sky);
 }
 
 .p-dialog-footer {
@@ -224,16 +252,23 @@ function close() {
 }
 
 .dialog-enter-active {
-  transition: all 0.2s ease-out;
+  --dialog-duration: var(--ui-duration-normal);
+  transition: opacity var(--dialog-duration) var(--ui-ease-standard);
 }
 .dialog-leave-active {
-  transition: all 0.15s ease-in;
+  --dialog-duration: var(--ui-duration-fast);
+  transition: opacity var(--dialog-duration) var(--ui-ease-standard);
+}
+.dialog-enter-active .p-dialog,
+.dialog-leave-active .p-dialog {
+  transition: transform var(--dialog-duration) var(--ui-ease-standard);
 }
 .dialog-enter-from,
 .dialog-leave-to {
   opacity: 0;
 }
-.dialog-enter-from .p-dialog {
-  transform: scale(0.9);
+.dialog-enter-from .p-dialog,
+.dialog-leave-to .p-dialog {
+  transform: translateY(var(--ui-motion-distance-sm)) scale(0.98);
 }
 </style>

@@ -1,0 +1,348 @@
+.todo-plan {
+  --todo-accent: var(--ui-accent-primary, #a58be5);
+  --todo-complete: var(--ui-success);
+  --todo-wait: var(--ui-warning);
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  color: var(--ui-text-primary);
+  font-family: var(--ui-font-pixel);
+  font-size: 12px;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--todo-accent) 8%, transparent),
+      transparent 65%
+    ),
+    color-mix(in srgb, var(--ui-bg-surface) 82%, transparent);
+  border: 1px solid color-mix(in srgb, var(--todo-accent) 28%, var(--ui-border-subtle));
+  border-radius: 0;
+  box-shadow:
+    inset 0 1px color-mix(in srgb, var(--ui-text-primary) 9%, transparent),
+    inset 0 -1px color-mix(in srgb, var(--ui-text-primary) 5%, transparent),
+    2px 2px 0 color-mix(in srgb, var(--ui-text-primary) 10%, transparent);
+  backdrop-filter: blur(12px);
+  transition:
+    border-color 240ms,
+    background-color 240ms;
+}
+.todo-plan::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: 12px;
+  width: 20px;
+  height: 2px;
+  background: var(--todo-accent);
+  opacity: 0.75;
+}
+.todo-plan--complete {
+  --todo-accent: var(--todo-complete);
+}
+.todo-plan__heading {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.todo-plan button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.todo-plan__toggle {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1;
+  min-width: 0;
+  padding: 11px 12px 9px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+.todo-plan__toggle:hover,
+.todo-plan__dismiss:hover {
+  background: color-mix(in srgb, var(--todo-accent) 7%, transparent);
+}
+.todo-plan button:focus-visible {
+  outline: 1px solid var(--todo-accent);
+  outline-offset: -3px;
+}
+.todo-plan__glyph {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--todo-accent);
+  filter: drop-shadow(0 1px 0 color-mix(in srgb, var(--ui-text-primary) 10%, transparent));
+}
+.todo-plan__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.todo-plan__count {
+  min-width: 34px;
+  color: var(--todo-accent);
+  font: 11px var(--ui-font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.todo-plan__count > span {
+  display: inline-block;
+}
+.todo-plan__chevron {
+  color: var(--ui-text-tertiary);
+  transition: transform 220ms;
+}
+.todo-plan__chevron.is-open {
+  transform: rotate(180deg);
+}
+.todo-plan__dismiss {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-right: 5px;
+  border: 0;
+  background: transparent;
+}
+.todo-plan__track {
+  margin: 0 12px;
+  height: 2px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--todo-accent) 12%, transparent);
+}
+.todo-plan__track > span {
+  display: block;
+  height: 100%;
+  width: 100%;
+  transform-origin: left;
+  background: var(--todo-accent);
+  transition:
+    transform 420ms cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 240ms;
+}
+.todo-plan__body,
+.todo-plan__summary {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+.todo-plan__body-clip,
+.todo-plan__summary > div {
+  min-height: 0;
+  overflow: hidden;
+}
+.todo-plan__steps {
+  position: relative;
+  list-style: none;
+  padding: 7px 8px 8px;
+  margin: 0;
+  max-height: 196px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ui-border-subtle) transparent;
+}
+.todo-plan__step {
+  color: var(--ui-text-secondary);
+  transition:
+    color 240ms,
+    background-color 240ms;
+}
+.todo-plan__row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  width: 100%;
+  padding: 7px 4px;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  box-sizing: border-box;
+}
+button.todo-plan__row:hover {
+  background: color-mix(in srgb, var(--todo-accent) 6%, transparent);
+}
+.todo-plan__step.is-in_progress {
+  color: var(--ui-text-primary);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--todo-accent) 8%, transparent),
+    transparent
+  );
+}
+.todo-plan__step.is-completed {
+  color: var(--ui-text-tertiary);
+}
+.todo-plan__mark {
+  display: inline-grid;
+  place-items: center;
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  color: var(--todo-accent);
+  border: 1px solid color-mix(in srgb, var(--ui-text-secondary) 45%, transparent);
+}
+.todo-plan__mark svg {
+  width: 12px;
+  height: 12px;
+}
+.todo-plan__mark.is-completed {
+  color: var(--todo-complete);
+  border-color: transparent;
+}
+.todo-plan__mark.is-blocked {
+  color: var(--todo-wait);
+  border-color: var(--todo-wait);
+  font: bold 10px var(--ui-font-mono);
+}
+.todo-plan__mark.is-in_progress {
+  border-color: var(--todo-accent);
+}
+.todo-plan__mark.is-in_progress::after {
+  content: '';
+  width: 4px;
+  height: 4px;
+  background: currentColor;
+  animation: todo-breathe 2s ease-in-out infinite;
+}
+.todo-plan__step-title {
+  display: block;
+  flex: 1;
+  min-width: 0;
+}
+.todo-plan__step-title > span {
+  display: block;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+.todo-plan__state {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--ui-text-tertiary);
+}
+.is-in_progress .todo-plan__state {
+  color: var(--todo-accent);
+}
+.is-blocked .todo-plan__state {
+  color: var(--todo-wait);
+}
+.todo-plan__summary > div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.todo-plan__summary > div > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.todo-plan__summary {
+  color: var(--ui-text-tertiary);
+  font-size: 11px;
+}
+.todo-plan__summary > div::before,
+.todo-plan__summary > div::after {
+  content: '';
+  height: 30px;
+  flex-shrink: 0;
+}
+.todo-plan__summary > div::before {
+  width: 5px;
+}
+.todo-plan__summary-dot {
+  width: 3px;
+  height: 3px;
+  flex-shrink: 0;
+  background: var(--todo-accent);
+  opacity: 0.7;
+}
+.todo-detail-enter-active,
+.todo-detail-leave-active {
+  transition:
+    grid-template-rows 240ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 180ms;
+}
+.todo-detail-enter-from,
+.todo-detail-leave-to {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+.todo-item-enter-active,
+.todo-item-leave-active,
+.todo-item-move {
+  transition:
+    transform 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 200ms,
+    color 240ms;
+}
+.todo-item-enter-from,
+.todo-item-leave-to {
+  opacity: 0;
+  transform: translateY(4px);
+}
+.todo-item-leave-active {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  pointer-events: none;
+}
+.todo-mark-enter-active,
+.todo-mark-leave-active {
+  transition:
+    opacity 110ms,
+    transform 160ms;
+}
+.todo-mark-enter-from {
+  opacity: 0;
+  transform: scale(0.7);
+}
+.todo-mark-leave-to {
+  opacity: 0;
+  transform: scale(0.85);
+}
+.todo-count-enter-active,
+.todo-count-leave-active,
+.todo-copy-enter-active,
+.todo-copy-leave-active {
+  transition:
+    opacity 130ms,
+    transform 160ms;
+}
+.todo-count-enter-from,
+.todo-copy-enter-from {
+  opacity: 0;
+  transform: translateY(3px);
+}
+.todo-count-leave-to,
+.todo-copy-leave-to {
+  opacity: 0;
+  transform: translateY(-2px);
+}
+@keyframes todo-breathe {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@supports not (backdrop-filter: blur(1px)) {
+  .todo-plan {
+    background: var(--ui-bg-surface);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .todo-plan,
+  .todo-plan *,
+  .todo-plan *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

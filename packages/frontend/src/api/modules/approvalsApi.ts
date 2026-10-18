@@ -5,6 +5,8 @@
  */
 
 import { apiClient } from '../client'
+import { getApiResourceUrl, requestApiResource } from '../transport'
+import type { WorkspaceFileDescriptor } from '@infos/shared'
 
 export type ApprovalDecision = 'allow_once' | 'allow_session' | 'deny_once'
 
@@ -41,6 +43,7 @@ export interface ApprovalAuditRecord {
     | 'session_cleared'
     | 'restart_rejected'
     | 'shutdown_rejected'
+    | 'cancelled'
   agentId: string
   sessionId: string
   toolName: string
@@ -115,6 +118,27 @@ interface SessionRef {
 }
 
 export const workspaceApi = {
+  describeFile: (session: SessionRef, path: string) =>
+    apiClient.get<WorkspaceFileDescriptor>(
+      `/workspace/file?${new URLSearchParams({ ...session, path })}`,
+    ),
+  contentUrl: (session: SessionRef, path: string, version: string, download = false) =>
+    getApiResourceUrl(
+      '/workspace/content',
+      new URLSearchParams({ ...session, path, version, ...(download ? { download: '1' } : {}) }),
+    ),
+  fileContent: (session: SessionRef, path: string, version: string, signal?: AbortSignal) =>
+    requestApiResource(
+      '/workspace/content',
+      new URLSearchParams({ ...session, path, version }),
+      signal,
+    ),
+  openFile: (session: SessionRef, path: string, openOnNode = false) =>
+    apiClient.post<{ path: string; name: string }>('/workspace/open-file', {
+      ...session,
+      path,
+      openOnNode,
+    }),
   listDir: (session: SessionRef, path?: string) => {
     const params = new URLSearchParams({ agentId: session.agentId, threadId: session.threadId })
     if (path) params.set('path', path)
@@ -180,6 +204,7 @@ export const workspaceApi = {
 export type TerminalStatus = 'running' | 'exited' | 'killed' | 'failed'
 
 export interface TerminalInfo {
+  outputLength?: number
   id: string
   executionSessionId: string
   title: string
@@ -193,6 +218,10 @@ export interface TerminalInfo {
   backend: 'pty' | 'pipe'
   cols: number
   rows: number
+  owner?: 'agent' | 'user'
+  pinned?: boolean
+  archivedAt?: string
+  exitReason?: 'exit' | 'timeout' | 'cancelled' | 'killed'
 }
 
 export interface TerminalReadResult {
@@ -209,7 +238,9 @@ export interface TerminalReadResult {
 export const terminalsApi = {
   list: (session: SessionRef) => {
     const params = new URLSearchParams({ agentId: session.agentId, threadId: session.threadId })
-    return apiClient.get<{ terminals: TerminalInfo[] }>(`/terminals?${params}`)
+    return apiClient.get<{ terminals: TerminalInfo[]; history: TerminalInfo[] }>(
+      `/terminals?${params}`,
+    )
   },
 
   create: (
@@ -236,6 +267,22 @@ export const terminalsApi = {
   write: (session: SessionRef, terminalId: string, data: string) =>
     apiClient.post<{ written: boolean }>(`/terminals/${terminalId}/write`, { ...session, data }),
 
-  action: (session: SessionRef, terminalId: string, action: 'interrupt' | 'kill' | 'close') =>
-    apiClient.post(`/terminals/${terminalId}/${action}`, session),
+  resize: (session: SessionRef, terminalId: string, cols: number, rows: number) =>
+    apiClient.post<{ resized: boolean }>(`/terminals/${terminalId}/resize`, {
+      ...session,
+      cols,
+      rows,
+    }),
+
+  pin: (session: SessionRef, terminalId: string, pinned: boolean) =>
+    apiClient.post<TerminalInfo>(`/terminals/${terminalId}/pin`, { ...session, pinned }),
+
+  cleanup: (session: SessionRef, action: 'archive_completed' | 'stop_agent' | 'close_all') =>
+    apiClient.post('/terminals/cleanup', { ...session, action }),
+
+  action: (
+    session: SessionRef,
+    terminalId: string,
+    action: 'interrupt' | 'kill' | 'close' | 'archive',
+  ) => apiClient.post(`/terminals/${terminalId}/${action}`, session),
 }

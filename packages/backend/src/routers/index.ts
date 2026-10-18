@@ -37,3 +37,4 @@ export { createInboundRouteRouter } from './inboundRoute.router'
 export { createHealthRouter } from './health.router'
 // M05: 统一任务中心 API
 export { createBackgroundTaskRouter } from './backgroundTask.router'
+export { createTaskPlanRouter } from './taskPlan.router'

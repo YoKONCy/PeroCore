@@ -22,7 +22,6 @@
 
 import type {
   AgentManager,
-  ChatMessage,
   ContentPart,
   GrantRegistry,
   LlmService,
@@ -30,19 +29,24 @@ import type {
   MemoryStoreRegistry,
   ModelConfig,
   ResourceRef,
-  ToolCall,
-  ToolDefinition,
 } from '@infos/backend/applicationHostAbi'
 import type { TriviumDB } from 'triviumdb'
+import { runSocialGeneration, type SocialGenerationOptions } from './socialGeneration'
 import { readFileSync } from 'node:fs'
 import { createLogger, tokenCounter } from '@infos/backend/applicationHostAbi'
 
 const logger = createLogger('SocialAppCompiler')
 
-/** 截断长文本用于日志输出（与桌面模式 reactLoop 对齐，避免终端被超长 prompt 刷屏） */
-function truncate(text: string, maxLen = 4000): string {
-  if (text.length <= maxLen) return text
-  return text.slice(0, maxLen) + `... (共${text.length}字符)`
+/** 图片只通过多模态部分传递，避免 base64 同时成为巨量文字输入。 */
+function compactImageToolResult(result: string): string {
+  try {
+    const parsed = JSON.parse(result) as Record<string, unknown>
+    if (!parsed || !Array.isArray(parsed.images)) return result
+    const { images, ...text } = parsed
+    return JSON.stringify({ ...text, imageCount: images.length })
+  } catch {
+    return result
+  }
 }
 
 /**
@@ -180,19 +184,25 @@ function escapeXmlAttribute(value: string): string {
 
 /** 社交会话历史消息（应用内独立存储，不复用 Thread） */
 export interface SocialHistoryMessage {
+  key?: string
   role: 'user' | 'assistant'
   content: string
   /** 发送者名称（role=user 时有值） */
   senderName?: string
+  senderId?: string
   timestamp: string
 }
 
 /** 编译结果 */
 export interface CompiledSocialContext {
+  variableCommit?: import('@infos/shared').PromptVariableCommit
+  currentMessageIndex?: number
+  historyMessageIndices?: number[]
   /** LLM Messages（content 支持多模态：string 或 ContentPart[]） */
-  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string | ContentPart[] }>
+  messages: import('@infos/backend/applicationHostAbi').ChatMessage[]
   /** 编译清单（调试/审计用） */
   manifest: {
+    promptRevision?: string
     personaSource?: string
     memoryCount: number
     historyCount: number
@@ -219,6 +229,7 @@ export class SocialAppCompiler {
     private mdpEngine: MdpEngine,
     /** 记忆存储注册表（用于访问 social.tdb，应用自己的社交图谱） */
     private storeRegistry: MemoryStoreRegistry,
+    private canReadMemory?: (agentId: string) => Promise<boolean>,
   ) {}
 
   /**
@@ -233,6 +244,10 @@ export class SocialAppCompiler {
    * @param isOwner       本次触发回复的消息是否来自主人（权限提示用）
    */
   async compile(params: {
+    variableSessionId?: string
+    modelName?: string
+    modelContextTokens?: number
+    modelOutputTokens?: number
     instanceId: string
     hostAgentId: string
     history: SocialHistoryMessage[]
@@ -240,10 +255,10 @@ export class SocialAppCompiler {
     channelType: 'private' | 'group'
     ownerQq?: string
     isOwner?: boolean
-    /** 当前 Social Thread 的心流协议与状态，由主内核 FlowStateService 格式化。 */
-    flowStatePrompt?: string
-    /** 表情包关键词列表（逗号分隔，由 StickerService.loadAgentStickers 提供） */
-    stickerList?: string
+    /** 当前私有会话的心流数据，协议由共用能力组件渲染。 */
+    flowState?: { currentGoal: string; privateFacts: string }
+    /** 当前社交账号是否可以使用收藏表情。 */
+    stickersAvailable?: boolean
     /**
      * 跨会话上下文（群聊被 @ 时，触发者与 Agent 的最近私聊记录摘要）
      *
@@ -260,6 +275,7 @@ export class SocialAppCompiler {
     }
     /** 触发者 senderId（用于跨会话上下文标注） */
     triggerSenderId?: string
+    triggerSenderName?: string
     /**
      * 触发消息中包含的图片（data URL 格式：data:image/xxx;base64,...）
      *
@@ -267,6 +283,7 @@ export class SocialAppCompiler {
      * compiler 将其组装为多模态 ContentPart[]，让多模态 LLM 能"看到"图片。
      */
     images?: string[]
+    imageSources?: string[]
     /**
      * Bot 自身 QQ 号（从适配器 accountInfo 获取）
      *
@@ -296,13 +313,13 @@ export class SocialAppCompiler {
      */
     ownerName?: string
   }): Promise<CompiledSocialContext> {
+    const promptSnapshot = this.mdpEngine.capturePromptSnapshot?.()
     const { instanceId, hostAgentId, history, userMessage, channelType } = params
     const ownerQq = params.ownerQq
-    const isOwner = params.isOwner ?? false
-    const stickerList = params.stickerList
     const crossSessionContext = params.crossSessionContext
     const contactImpression = params.contactImpression
     const triggerSenderId = params.triggerSenderId
+    const isOwner = Boolean(ownerQq && triggerSenderId && triggerSenderId === ownerQq)
     const images = params.images ?? []
     const botSelfId = params.botSelfId
     const botNickname = params.botNickname
@@ -336,34 +353,36 @@ export class SocialAppCompiler {
 
     // 3. 检索应用自己的社交记忆（social.tdb，BM25 + 关键词，零 Embedding 开销）
     //    AIOS 隔离原则：subagent 不访问主 Agent 的 RAG，只查应用自己的记忆图谱
-    const { memoryContext, memoryCount } = await this.searchSocialMemory(hostAgentId, userMessage)
+    const { memoryContext, memoryCount } =
+      !this.canReadMemory || (await this.canReadMemory(hostAgentId))
+        ? await this.searchSocialMemory(hostAgentId, userMessage)
+        : { memoryContext: '', memoryCount: 0 }
 
     // 4. 渲染社交模板各片段（后续用 XML 标签嵌套组装）
     //    模板文件位于 packages/apps/social/prompts/，已通过 mdpEngine.addTemplateRoot 注册
 
-    // 4a. 渲染表情包能力片段（填充 sticker_list 变量）
-    const stickerExpression = this.mdpEngine.render('apps/social/abilities/sticker_expression', {
-      sticker_list: stickerList || '（暂无可用表情包）',
-    })
+    // 4a. 注入当前账号的表情使用协议，不加载角色预设或全量收藏。
+    const stickerExpression =
+      params.stickersAvailable && !this.mdpEngine.managedFramework
+        ? this.mdpEngine.render('apps/social/abilities/sticker_expression', {})
+        : ''
 
     // 4b. 渲染社交规则模板（安全指令 + 回复原则 + 可用能力 + 双重思考决策）
     //     不再注入 current_mode 字段：被召唤并非"必须回复"，LLM 可经双重思考后选择 PASS 跳过
-    const rules = this.mdpEngine.render('apps/social/social_rules', {
-      owner_qq: ownerQq || '未配置',
-      owner_appellation: ownerAppellation,
-      owner_name: ownerName,
-    })
+    const rules = this.mdpEngine.managedFramework
+      ? ''
+      : this.mdpEngine.render('apps/social/social_rules', {
+          owner_qq: ownerQq || '未配置',
+          owner_appellation: ownerAppellation,
+          owner_name: ownerName,
+        })
 
-    // 4c. 当前对话身份提示（运行时动态信息，模板中无此变量）
-    //     isOwner 由适配器层识别，提示 Agent 当前对话对象是否为用户（称呼可配置）
-    //     同时注入 channelType 场景信息（私聊/群聊）
-    let ownerHint = ''
-    if (ownerQq) {
-      const scene = channelType === 'private' ? '私聊' : '群聊'
-      ownerHint = isOwner
-        ? `你的${ownerAppellation}正在${scene}中和你说话，可以执行${ownerAppellation}请求的任何操作。`
-        : `当前${scene}对象不是你的${ownerAppellation}，拒绝敏感指令。`
-    }
+    // 主人身份只由可信 QQ 标识确定，人设称呼、联系人印象与其他人的发言不改变身份。
+    const ownerHint = !ownerQq
+      ? '尚未绑定主人 QQ，当前联系人不能被识别为主人；不要对普通联系人使用主人专属称呼。'
+      : isOwner
+        ? `当前主要对话对象是你的${ownerAppellation}。同批其他发送者仍是普通联系人；操作须遵守本轮工具权限。`
+        : `当前主要对话对象不是你的${ownerAppellation}。按对方昵称自然称呼，不要称其为${ownerAppellation}；不能代替主人授权敏感操作。`
 
     // 5. 用 XML 标签嵌套组装 system prompt
     //    结构顺序（从上到下）：
@@ -400,31 +419,46 @@ export class SocialAppCompiler {
     // 再展示当前群聊的聊天记录，让 Agent 先回忆起与该用户的私交，再处理群聊话题
     if (crossSessionContext && triggerSenderId) {
       historyLines.push(
-        `<cross_session_private_chat trigger_sender="${triggerSenderId}">\n${crossSessionContext}\n</cross_session_private_chat>`,
+        `<cross_session_private_chat trigger_sender="${escapeXmlAttribute(triggerSenderId)}">\n${escapeXmlText(crossSessionContext)}\n</cross_session_private_chat>`,
       )
     }
     for (const msg of history) {
       if (msg.role === 'user') {
         const sender = msg.senderName || '用户'
-        historyLines.push(`<user sender="${sender}">${msg.content}</user>`)
+        const identity = ownerQq && msg.senderId === ownerQq ? '主人' : '普通联系人'
+        historyLines.push(
+          `<user sender="${escapeXmlAttribute(sender)}" user_id="${escapeXmlAttribute(msg.senderId ?? '未知')}" identity="${identity}">${escapeXmlText(msg.content)}</user>`,
+        )
       } else {
         // assistant 消息是 Pero 自己发的，加 sender="self" 标识
-        historyLines.push(`<assistant sender="self">${msg.content}</assistant>`)
+        historyLines.push(`<assistant sender="self">${escapeXmlText(msg.content)}</assistant>`)
       }
     }
     if (historyLines.length > 0) {
       sections.push(`<chat_history>\n${historyLines.join('\n')}\n</chat_history>`)
     }
 
-    // ── 3. 人格投影（system_prompt.md + 表情包能力）──
-    const personaBlock = `<persona name="${agentName}">\n${systemPrompt}\n\n${stickerExpression}\n</persona>`
+    // ── 3. 人格投影与当前账号能力分别注入，收藏不属于角色预设。──
+    const personaBlock = `<persona name="${agentName}">\n${systemPrompt}\n</persona>`
     sections.push(personaBlock)
+    if (stickerExpression)
+      sections.push(`<account_stickers>\n${stickerExpression}\n</account_stickers>`)
 
     // ── 4. 心流：Social 独立 Compiler 读取统一状态，但不复用主 ContextCompiler ──
-    if (params.flowStatePrompt) {
-      sections.push(
-        `<private_flow_protocol>\n${params.flowStatePrompt}\n调用 update_flow_state 主动维护变化后的当前目标或私有事实；无变化时不要重复调用，也不要主动向用户泄露私有事实。\n</private_flow_protocol>`,
+    if (params.flowState) {
+      const flowProtocol = this.mdpEngine.render(
+        'components/abilities/private_flow_protocol',
+        {
+          agent_id: hostAgentId,
+          agent_name: agentName,
+          channel: 'social',
+          owner_appellation: ownerAppellation,
+          flow_state: params.flowState,
+          append_turn_context: true,
+        },
+        promptSnapshot,
       )
+      if (flowProtocol) sections.push(`<abilities>\n${flowProtocol}\n</abilities>`)
     }
 
     // ── 5. 社交规则（含思考决策指南）──
@@ -433,6 +467,9 @@ export class SocialAppCompiler {
     // ── 6. 会话上下文（当前身份/频道类型/Bot 自身信息）──
     //     不再注入"交互模式: SUMMONED"提示：被召唤≠必须回复，LLM 可经双重思考后 PASS
     const sessionParts: string[] = [`当前频道类型: ${channelType === 'private' ? '私聊' : '群聊'}`]
+    if (triggerSenderId) sessionParts.push(`当前主要对话对象 QQ: ${triggerSenderId}`)
+    if (params.triggerSenderName)
+      sessionParts.push(`当前主要对话对象昵称: ${JSON.stringify(params.triggerSenderName)}`)
     // Bot 自身 QQ 号和昵称（常驻上下文，让 Agent 知道自己是谁）
     if (botSelfId) {
       sessionParts.push(`你的 QQ 号: ${botSelfId}`)
@@ -451,8 +488,10 @@ export class SocialAppCompiler {
     }
     sections.push(`<session_context>\n${sessionParts.join('\n')}\n</session_context>`)
 
-    // 组装最终 system prompt
-    const finalSystemPrompt = sections.join('\n\n')
+    // 独立应用没有受管理框架时，同样只把稳定规则放在 system 前缀。
+    const finalSystemPrompt = sections
+      .filter((section) => !/^<(?:long_term_memory|chat_history|session_context)>/.test(section))
+      .join('\n\n')
 
     // 6. 拼装 LLM Messages（只有 system + user 两条）
     //    所有历史记录已合并到 system prompt 的 <chat_history> 标签内
@@ -462,16 +501,87 @@ export class SocialAppCompiler {
       images.length > 0
         ? [
             { type: 'text' as const, text: userMessage },
-            ...images.map((url) => ({
-              type: 'image_url' as const,
-              image_url: { url },
-            })),
+            ...images.flatMap((url, index) => [
+              {
+                type: 'text' as const,
+                text: `图片 ${index + 1} 来源：${params.imageSources?.[index] ?? '本次消息'}`,
+              },
+              { type: 'image_url' as const, image_url: { url } },
+            ]),
           ]
         : userMessage
 
+    const promptVars = {
+      agent_name: agentName,
+      is_group: channelType === 'group',
+      persona_definition: systemPrompt,
+      owner_name: ownerName,
+      owner_appellation: ownerAppellation,
+      owner_qq: ownerQq || '未配置',
+      memory_context: memoryContext,
+      conversation_history: historyLines.join('\n'),
+      native_history: history.map((message) => ({
+        role: message.role,
+        content:
+          message.role === 'user'
+            ? `[${JSON.stringify(message.senderName ?? '用户')} QQ:${message.senderId ?? '未知'} 身份:${ownerQq && message.senderId === ownerQq ? '主人' : '普通联系人'}]: ${message.content}`
+            : message.content,
+      })),
+      current_message: { role: 'user', content: userContent },
+      generation_type: 'normal',
+      flow_state: params.flowState,
+      stickers_available: Boolean(params.stickersAvailable),
+      social_session: sessionParts.join('\n'),
+      social_context: historyLines
+        .filter((line) => !line.startsWith('<user ') && !line.startsWith('<assistant '))
+        .join('\n'),
+      model: params.modelName ?? '',
+      max_context_tokens: params.modelContextTokens ?? 0,
+      max_response_tokens: params.modelOutputTokens ?? 0,
+      max_prompt: Math.max(0, (params.modelContextTokens ?? 0) - (params.modelOutputTokens ?? 0)),
+    }
+    const managed = await this.mdpEngine.prepareManagedFramework?.(
+      'social',
+      hostAgentId,
+      promptVars,
+      promptSnapshot,
+      params.variableSessionId,
+    )
+    const managedMessages =
+      managed?.messages ??
+      this.mdpEngine.managedFramework?.('social', hostAgentId, promptVars, promptSnapshot)
     const messages: CompiledSocialContext['messages'] = [
-      { role: 'system', content: finalSystemPrompt },
-      { role: 'user', content: userContent },
+      ...(managedMessages?.map((message, index) => ({
+        role: message.role,
+        content: message.nativeContent ?? message.content,
+        ...(message.historyMessage
+          ? {
+              cacheControl: {
+                kind: 'history' as const,
+                key: history[
+                  managedMessages.slice(0, index).filter((entry) => entry.historyMessage).length
+                ]?.key,
+              },
+            }
+          : {}),
+      })) ?? [
+        { role: 'system' as const, content: finalSystemPrompt },
+        ...promptVars.native_history.map((message, index) => ({
+          ...message,
+          cacheControl: { kind: 'history' as const, key: history[index]?.key },
+        })),
+        {
+          role: 'user' as const,
+          content: this.mdpEngine.render(
+            'components/state/turn_context',
+            promptVars,
+            promptSnapshot,
+          ),
+        },
+      ]),
+      ...(managedMessages?.some((message) => message.currentMessage)
+        ? []
+        : [{ role: 'user' as const, content: userContent }]),
     ]
 
     // 7. 使用后端统一 o200k_base Tokenizer 计算消息正文。
@@ -482,7 +592,17 @@ export class SocialAppCompiler {
 
     return {
       messages,
+      variableCommit: managed?.variableCommit,
+      currentMessageIndex: managedMessages?.some((message) => message.currentMessage)
+        ? managedMessages.findIndex((message) => message.currentMessage)
+        : messages.length - 1,
+      historyMessageIndices:
+        managedMessages?.flatMap((message, index) => (message.historyMessage ? [index] : [])) ?? [],
       manifest: {
+        promptRevision:
+          promptSnapshot && typeof promptSnapshot === 'object' && 'id' in promptSnapshot
+            ? String(promptSnapshot.id)
+            : undefined,
         personaSource,
         memoryCount,
         historyCount: history.length,
@@ -498,7 +618,7 @@ export class SocialAppCompiler {
    * - Event 节点：零向量 + 摘要 payload + BM25 文本索引
    * - Feature 节点：关键词 + AC 自动机索引
    *
-   * 检索方式：零向量 + BM25 文本检索（searchHybrid 传零向量，纯靠文本分数）
+   * 检索方式：零向量占位 + BM25/关键词召回 + 图谱扩散，不生成语义向量。
    * 零 Embedding API 开销，适合社交高频场景。
    *
    * @returns memoryContext 格式化后的记忆文本, memoryCount 命中条数
@@ -511,12 +631,11 @@ export class SocialAppCompiler {
       // 获取社交图谱 store（data/agent_{agentId}/social.tdb）
       const store = this.storeRegistry.getAgentStore(agentId, 'social') as TriviumDB
 
-      // 零向量（社交图谱是 PEDSA 架构，所有节点都是零向量）
-      const zeroVector = new Array(1536).fill(0)
+      // 仅作检索接口占位，不调用 Embedding；重建或切换配置后以当前库的实际维度为准。
+      const zeroVector = new Array(store.dim()).fill(0)
 
-      // searchHybrid: 向量分数（零向量→0 分）+ BM25 文本分数
-      // 传入零向量后，检索结果完全由 BM25 文本相关性决定
-      const hits = store.searchHybrid(zeroVector, query, 5, 2, 0.01)
+      // 即使侧重文本召回，searchHybrid 仍会校验占位数组长度，不能传入其他库的维度。
+      const hits = store.searchHybrid(zeroVector, query, 5, 2, 0.01, 0)
 
       if (!hits || hits.length === 0) {
         return { memoryContext: '', memoryCount: 0 }
@@ -565,271 +684,24 @@ export class SocialAppCompiler {
    * @param opts      可选：工具定义列表 + 工具执行器（启用 FC 工具调用循环）
    * @returns LLM 回复文本
    */
+  async commitVariables(change: import('@infos/shared').PromptVariableCommit): Promise<void> {
+    if (!this.mdpEngine.commitPromptVariables) throw new Error('酒馆变量提交服务不可用')
+    await this.mdpEngine.commitPromptVariables(change)
+  }
+
   async generateReply(
     messages: CompiledSocialContext['messages'],
     model: ModelConfig,
-    opts?: {
-      /** 工具定义列表（OpenAI function calling 格式） */
-      tools?: ToolDefinition[]
-      /** 工具执行器：根据工具名执行，返回结果 JSON 字符串 */
-      toolExecutor?: (name: string, args: Record<string, unknown>) => Promise<string>
-      /** 终局工具提交行为后立即结束本轮，不再要求模型生成文本。 */
-      isTerminalTool?: (name: string) => boolean
-    },
+    opts: SocialGenerationOptions = {},
   ): Promise<string> {
-    // ── 打印完整 prompt 供调试（对齐桌面模式 reactLoop 的 [Prompt] 标签）──
-    logger.info(`[Social LLM] 调用模型: ${model.modelId}, messages=${messages.length} 条`)
-    for (const msg of messages) {
-      // 多模态 content（ContentPart[]）摘要显示：图片只展示类型和大小，不打印 base64
-      const content =
-        typeof msg.content === 'string'
-          ? msg.content
-          : msg.content
-              .map((part) => {
-                if (part.type === 'image_url') {
-                  const url = part.image_url.url
-                  // data:image/jpeg;base64,/9j/... → 显示格式和长度
-                  const match = /^data:([^;]+);base64,/.exec(url)
-                  const mime = match?.[1] ?? 'unknown'
-                  return `[image: ${mime}, ${url.length} 字符]`
-                }
-                if (part.type === 'text') return part.text
-                return JSON.stringify(part)
-              })
-              .join('\n')
-      if (msg.role === 'system') {
-        logger.info(`[Social Prompt] System:\n${truncate(content, 8000)}`)
-      } else if (msg.role === 'user') {
-        logger.info(`[Social Prompt] User: ${truncate(content, 4000)}`)
-      } else {
-        logger.info(`[Social Prompt] Assistant: ${truncate(content, 2000)}`)
-      }
-    }
-
-    const tools = opts?.tools
-    const toolExecutor = opts?.toolExecutor
-    const isTerminalTool = opts?.isTerminalTool
-
-    // 构建可变的 ChatMessage[]（工具调用循环需要追加 assistant + tool 消息）
-    const llmMessages: ChatMessage[] = messages.map((m) => ({
-      role: m.role,
-      content: m.content,
-    }))
-
-    // ── 第一轮 LLM 调用（传入 tools 让 LLM 能发起 FC）──
-    const completion = await this.llmService.chat(model, llmMessages, {
-      tools: tools?.length ? tools : undefined,
+    return runSocialGeneration(this.llmService, messages, model, opts, {
+      parseTextToolCalls,
+      stripThinkingBlocks,
+      stripToolCallTags,
+      compactImageToolResult,
+      extractImagesFromToolResult,
+      parseTerminalAcceptance,
     })
-
-    const choice = completion.choices[0]
-    if (!choice) {
-      logger.warn('[Social LLM] 无回复')
-      return ''
-    }
-
-    const assistantMsg = choice.message
-    const toolCalls: ToolCall[] | undefined = assistantMsg.toolCalls
-
-    // 打印第一轮 LLM 原始回复（含 <think> 思考块），供终端调试查看内部思考过程
-    // 过滤后的最终回复在下方 [Social LLM回复] 日志打印
-    logger.info(`[Social LLM原始回复] ${truncate(assistantMsg.content ?? '', 4000)}`)
-
-    // ── 无 API 级工具调用 → 检查文本格式兜底 ──
-    // 某些模型（如 Qwen 系列）不支持 API 级 FC，会在回复文本中输出 <tool_call> 标签。
-    // 此兜底逻辑解析文本格式工具调用，避免标签被当作普通回复发到社交平台。
-    if ((!toolCalls?.length || !toolExecutor) && toolExecutor) {
-      const rawText = assistantMsg.content ?? ''
-      const textToolCalls = parseTextToolCalls(rawText)
-
-      if (textToolCalls.length > 0) {
-        // 检测到文本格式工具调用，走兜底执行流程
-        logger.info(
-          `[Social LLM] 检测到文本格式工具调用（模型未走 API 级 FC）: ${textToolCalls.length} 个`,
-        )
-
-        // 将剥离标签后的文本作为 assistant 消息（可能为空）
-        const strippedText = stripToolCallTags(rawText)
-        llmMessages.push({
-          role: 'assistant',
-          content: strippedText || null,
-          ...(assistantMsg.reasoningContent
-            ? { reasoningContent: assistantMsg.reasoningContent }
-            : {}),
-          ...(assistantMsg.nativeReasoning
-            ? { nativeReasoning: assistantMsg.nativeReasoning }
-            : {}),
-        })
-
-        // 逐个执行工具，将结果作为 user 消息追加（文本格式无 toolCallId，用 user 角色）
-        // 同时收集工具返回的图片（social_read_image 工具会返回 images 字段）
-        const textCollectedImages: string[] = []
-        for (const tc of textToolCalls) {
-          logger.info(
-            `[Social Tool] 执行(文本兜底): ${tc.name}, args=${truncate(JSON.stringify(tc.args), 200)}`,
-          )
-          const result = await toolExecutor(tc.name, tc.args)
-          logger.info(`[Social Tool] 结果: ${truncate(result, 2000)}`)
-          if (isTerminalTool?.(tc.name) && parseTerminalAcceptance(result)) return ''
-
-          // 检测工具返回值中是否包含图片 data URL
-          const imgUrls = extractImagesFromToolResult(result)
-          if (imgUrls.length > 0) {
-            textCollectedImages.push(...imgUrls)
-            logger.info(`[Social Tool] ${tc.name} 返回 ${imgUrls.length} 张图片，将注入多模态输入`)
-          }
-
-          llmMessages.push({
-            role: 'user',
-            content: `[工具结果 ${tc.name}]: ${result}`,
-          })
-        }
-
-        // 如果工具返回了图片，追加一条包含多模态 content 的 user 消息
-        if (textCollectedImages.length > 0) {
-          llmMessages.push({
-            role: 'user',
-            content: [
-              { type: 'text', text: '以下是工具读取到的图片：' },
-              ...textCollectedImages.map((url) => ({
-                type: 'image_url' as const,
-                image_url: { url },
-              })),
-            ],
-          })
-        }
-
-        // 二次调用 LLM 生成最终回复（不传 tools，强制直接回复）
-        const completion2 = await this.llmService.chat(model, llmMessages, {})
-        const rawReply2 = completion2.choices[0]?.message?.content ?? ''
-        const reply = stripThinkingBlocks(rawReply2)
-        // 先打印原始回复（含 <think> 思考块），再打印过滤后的最终回复
-        logger.info(`[Social LLM原始回复] ${truncate(rawReply2, 4000)}`)
-        logger.info(`[Social LLM回复] ${truncate(reply, 4000)}`)
-        return reply
-      }
-    }
-
-    // ── 无工具调用（API 级 + 文本格式都没有）→ 直接返回文本 ──
-    if (!toolCalls?.length || !toolExecutor) {
-      const reply = stripThinkingBlocks(assistantMsg.content ?? '')
-      // 原始回复已在第一轮调用后统一打印（[Social LLM原始回复]），
-      // 这里只打印过滤后的最终回复，避免相同内容重复输出
-      logger.info(`[Social LLM回复] ${truncate(reply, 4000)}`)
-      return reply
-    }
-
-    // ── 有工具调用 → 进入 ReAct 循环（最多 5 轮）──
-    // 每轮：执行工具 → 将结果加入 messages → 调用 LLM → 检查是否还需调用工具
-    logger.info(`[Social LLM] 收到 ${toolCalls.length} 个工具调用请求，进入 ReAct 循环`)
-
-    // 将 assistant 消息（含 toolCalls）加入 messages
-    // 必须携带 toolCalls，否则后续 role:'tool' 消息会成为「孤儿消息」被 API 报错
-    llmMessages.push({
-      role: 'assistant',
-      content: assistantMsg.content,
-      ...(assistantMsg.reasoningContent ? { reasoningContent: assistantMsg.reasoningContent } : {}),
-      ...(assistantMsg.nativeReasoning ? { nativeReasoning: assistantMsg.nativeReasoning } : {}),
-      toolCalls: toolCalls,
-    })
-
-    const MAX_REACT_TURNS = 5
-    let currentToolCalls: ToolCall[] | undefined = toolCalls
-
-    for (let turn = 1; turn <= MAX_REACT_TURNS; turn++) {
-      logger.info(
-        `[Social ReAct] 第 ${turn}/${MAX_REACT_TURNS} 轮: 执行 ${currentToolCalls!.length} 个工具`,
-      )
-
-      // 逐个执行工具，将结果作为 tool 消息加入 messages
-      // 同时收集工具返回的图片（social_read_image 工具会返回 images 字段）
-      const collectedImages: string[] = []
-      for (const tc of currentToolCalls!) {
-        const toolName = tc.function.name
-        // 解析工具参数（LLM 返回的是 JSON 字符串）
-        let args: Record<string, unknown>
-        try {
-          args = JSON.parse(tc.function.arguments || '{}')
-        } catch {
-          args = {}
-        }
-        logger.info(`[Social Tool] 执行: ${toolName}, args=${truncate(JSON.stringify(args), 200)}`)
-        const result = await toolExecutor(toolName, args)
-        logger.info(`[Social Tool] 结果: ${truncate(result, 2000)}`)
-        if (isTerminalTool?.(toolName) && parseTerminalAcceptance(result)) return ''
-
-        // 检测工具返回值中是否包含图片 data URL
-        // social_read_image 工具返回 { success, count, images: [...] } 格式
-        const images = extractImagesFromToolResult(result)
-        if (images.length > 0) {
-          collectedImages.push(...images)
-          logger.info(`[Social Tool] ${toolName} 返回 ${images.length} 张图片，将注入多模态输入`)
-        }
-
-        llmMessages.push({
-          role: 'tool',
-          content: result,
-          toolCallId: tc.id,
-        })
-      }
-
-      // 如果工具返回了图片，追加一条 user 消息包含多模态 content
-      // role:'tool' 消息只能携带字符串 content，图片必须通过 user 消息注入
-      if (collectedImages.length > 0) {
-        const imageContent: ContentPart[] = [
-          { type: 'text', text: '以下是工具读取到的图片：' },
-          ...collectedImages.map((url) => ({
-            type: 'image_url' as const,
-            image_url: { url },
-          })),
-        ]
-        llmMessages.push({
-          role: 'user',
-          content: imageContent,
-        })
-      }
-
-      // 调用 LLM（最后一轮不传 tools，强制直接回复；非最后一轮继续传 tools）
-      const isLastTurn = turn === MAX_REACT_TURNS
-      const turnCompletion = await this.llmService.chat(model, llmMessages, {
-        // 最后一轮不传 tools，强制 LLM 直接回复
-        tools: isLastTurn ? undefined : tools?.length ? tools : undefined,
-      })
-
-      const turnMsg = turnCompletion.choices[0]?.message
-      if (!turnMsg) {
-        logger.warn(`[Social ReAct] 第 ${turn} 轮无回复`)
-        return ''
-      }
-
-      // 打印本轮 LLM 原始回复（含 <think> 思考块），供终端调试查看思考过程
-      logger.info(`[Social ReAct] 第 ${turn} 轮原始回复: ${truncate(turnMsg.content ?? '', 4000)}`)
-
-      // 检查是否还有工具调用
-      const nextToolCalls: ToolCall[] | undefined = turnMsg.toolCalls
-
-      if (!nextToolCalls?.length || isLastTurn) {
-        // 没有更多工具调用，或已到最大轮次 → 返回最终回复
-        const reply = stripThinkingBlocks(turnMsg.content ?? '')
-        logger.info(
-          `[Social ReAct] 第 ${turn} 轮最终回复（已过滤思考块）: ${truncate(reply, 4000)}`,
-        )
-        return reply
-      }
-
-      // 还有工具调用 → 将 assistant 消息（含 toolCalls）加入 messages，继续下一轮
-      logger.info(`[Social ReAct] 第 ${turn} 轮触发 ${nextToolCalls.length} 个新工具调用，继续循环`)
-      llmMessages.push({
-        role: 'assistant',
-        content: turnMsg.content,
-        ...(turnMsg.reasoningContent ? { reasoningContent: turnMsg.reasoningContent } : {}),
-        ...(turnMsg.nativeReasoning ? { nativeReasoning: turnMsg.nativeReasoning } : {}),
-        toolCalls: nextToolCalls,
-      })
-      currentToolCalls = nextToolCalls
-    }
-
-    // 理论上不会走到这里（循环内会 return），但作为安全兜底
-    return ''
   }
 
   // LlmService 通过构造函数注入更合理，这里临时持有

@@ -14,6 +14,8 @@ import type { ModelConfigItem, ReasoningEffort } from '../../api/modules/modelAp
 import { configApi } from '../../api/modules/configApi'
 import { useNotificationStore } from '../../stores/useNotificationStore'
 import { logger } from '../../lib/logger'
+import { EMBEDDING_ENABLED_KEY } from '@infos/shared'
+import { useConfigSwitch } from './useConfigSwitch'
 
 // ── 类型 ──
 
@@ -24,6 +26,7 @@ export interface LlmModel {
   modelId: string
   maxTokens: number | null
   contextWindowTokens: number | null
+  maxReActTurns: number | null
   reasoningEffort: ReasoningEffort | null
   returnNativeReasoning: boolean
   wireApi: 'chat_completions' | 'responses'
@@ -43,6 +46,18 @@ export type ModelTab = 'llm' | 'vector' | 'multimodal'
 
 /** 任务槽元数据（供前端 UI 使用） */
 export const TASK_SLOTS = [
+  {
+    key: 'approval',
+    label: '工具审批',
+    description: '自动审批终端操作与工作区外删除；未指派时跟随主模型',
+    icon: 'check',
+  },
+  {
+    key: 'knowledge',
+    label: '知识整理',
+    description: '整理文档摘要、关键词与内容切片',
+    icon: 'book',
+  },
   {
     key: 'scorer',
     label: '整理长期记忆',
@@ -80,6 +95,7 @@ function toLlmModel(item: ModelConfigItem): LlmModel {
     modelId: item.modelId,
     maxTokens: item.maxTokens,
     contextWindowTokens: item.contextWindowTokens,
+    maxReActTurns: item.maxReActTurns ?? null,
     reasoningEffort: item.reasoningEffort,
     returnNativeReasoning: item.returnNativeReasoning ?? false,
     wireApi: item.wireApi ?? 'chat_completions',
@@ -98,6 +114,12 @@ function toLlmModel(item: ModelConfigItem): LlmModel {
 // ── Composable ──
 
 export function useModelConfig() {
+  const {
+    enabled: embeddingEnabled,
+    ready: embeddingSwitchReady,
+    saving: embeddingSwitchSaving,
+    setEnabled: setEmbeddingEnabled,
+  } = useConfigSwitch(EMBEDDING_ENABLED_KEY, '向量功能')
   const notify = useNotificationStore()
   // ── LLM 模型列表 ──
   const models = shallowRef<LlmModel[]>([])
@@ -123,6 +145,7 @@ export function useModelConfig() {
     modelId: '',
     maxTokens: null,
     contextWindowTokens: null,
+    maxReActTurns: null,
     reasoningEffort: null,
     returnNativeReasoning: false,
     wireApi: 'chat_completions',
@@ -310,6 +333,7 @@ export function useModelConfig() {
     }
 
     isFetchingRemote.value = true
+    remoteModels.value = []
     error.value = null
     try {
       const res = await modelApi.listRemote({ provider: actualProvider, apiKey, apiBase })
@@ -397,6 +421,7 @@ export function useModelConfig() {
         modelId: '',
         maxTokens: null,
         contextWindowTokens: null,
+        maxReActTurns: null,
         reasoningEffort: null,
         returnNativeReasoning: false,
         wireApi: 'chat_completions',
@@ -433,6 +458,7 @@ export function useModelConfig() {
           topP: form.topP,
           maxTokens: form.maxTokens,
           contextWindowTokens: form.contextWindowTokens,
+          maxReActTurns: form.maxReActTurns,
           reasoningEffort: form.reasoningEffort,
           returnNativeReasoning: form.returnNativeReasoning,
           wireApi: form.wireApi,
@@ -454,6 +480,7 @@ export function useModelConfig() {
           topP: form.topP,
           maxTokens: form.maxTokens,
           contextWindowTokens: form.contextWindowTokens,
+          maxReActTurns: form.maxReActTurns,
           reasoningEffort: form.reasoningEffort,
           returnNativeReasoning: form.returnNativeReasoning,
           wireApi: form.wireApi,
@@ -580,11 +607,17 @@ export function useModelConfig() {
       return
     }
     isFetchingEmbedding.value = true
+    remoteEmbeddingModels.value = []
     error.value = null
     try {
       const res = await modelApi.listRemote({ provider: 'openai', apiKey, apiBase })
       remoteEmbeddingModels.value = res.data ?? []
-      notify.toast(`已获取 ${remoteEmbeddingModels.value.length} 个 Embedding 模型`, 'success')
+      notify.toast(
+        remoteEmbeddingModels.value.length
+          ? `已获取 ${remoteEmbeddingModels.value.length} 个 Embedding 模型`
+          : '服务商返回了空模型列表，请手动填写 Embedding 模型名称',
+        remoteEmbeddingModels.value.length ? 'success' : 'warning',
+      )
     } catch (e) {
       error.value = (e as Error).message
       notify.toast('获取 Embedding 模型列表失败: ' + (e as Error).message, 'error')
@@ -611,11 +644,17 @@ export function useModelConfig() {
       return
     }
     isFetchingReranker.value = true
+    remoteRerankerModels.value = []
     error.value = null
     try {
       const res = await modelApi.listRemote({ provider: 'openai', apiKey, apiBase })
       remoteRerankerModels.value = res.data ?? []
-      notify.toast(`已获取 ${remoteRerankerModels.value.length} 个 Reranker 模型`, 'success')
+      notify.toast(
+        remoteRerankerModels.value.length
+          ? `已获取 ${remoteRerankerModels.value.length} 个 Reranker 模型`
+          : '服务商返回了空模型列表，请手动填写 Reranker 模型名称',
+        remoteRerankerModels.value.length ? 'success' : 'warning',
+      )
     } catch (e) {
       error.value = (e as Error).message
       notify.toast('获取 Reranker 模型列表失败: ' + (e as Error).message, 'error')
@@ -626,6 +665,7 @@ export function useModelConfig() {
 
   /** 真实激活候选Embedding模型，向量与配置维度一致后才由后端保存。 */
   async function saveVectorConfig(): Promise<void> {
+    if (!embeddingEnabled.value || embeddingSwitchSaving.value) return
     if (embeddingProvider.value !== 'api') {
       embeddingActivationResult.value = { status: 'error', message: '当前仅支持在线 API Embedding' }
       return
@@ -844,6 +884,10 @@ export function useModelConfig() {
     visionModels,
     saveRelayConfig,
     // 向量
+    embeddingEnabled,
+    embeddingSwitchReady,
+    embeddingSwitchSaving,
+    setEmbeddingEnabled,
     embeddingProvider,
     embeddingModelId,
     embeddingDimension,

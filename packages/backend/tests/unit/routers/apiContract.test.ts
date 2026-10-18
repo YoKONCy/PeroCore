@@ -1,3 +1,4 @@
+import { CODE_MESSAGES } from '@infos/shared'
 import { Hono } from 'hono'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
@@ -20,7 +21,7 @@ describe('REST API契约基础设施', () => {
     expect(response.status).toBe(400)
     await expect(response.json()).resolves.toMatchObject({
       code: 'VALIDATION_ERROR',
-      message: '请求参数校验失败',
+      message: CODE_MESSAGES.VALIDATION_ERROR,
       data: { fields: { name: expect.any(String) } },
     })
   })
@@ -33,13 +34,13 @@ describe('REST API契约基础设施', () => {
     await expect((await app.request('/api/missing-message')).json()).resolves.toEqual({
       code: 'OK',
       data: 1,
-      message: '操作成功',
+      message: CODE_MESSAGES.OK,
     })
     const invalid = await app.request('/api/unknown-code')
     expect(invalid.status).toBe(500)
     await expect(invalid.json()).resolves.toMatchObject({
       code: 'INTERNAL_ERROR',
-      message: '服务内部错误，请稍后再试',
+      message: CODE_MESSAGES.INTERNAL_ERROR,
     })
   })
 })

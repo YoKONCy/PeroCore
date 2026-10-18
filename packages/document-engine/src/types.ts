@@ -130,6 +130,13 @@ export interface DocumentOperationBase {
 }
 
 export type DocumentOperation =
+  | (DocumentOperationBase & { type: 'document.set_status'; value: SemanticDocument['status'] })
+  | (DocumentOperationBase & {
+      type: 'node.retype'
+      nodeId: DocumentNodeId
+      expectedGeneration: number
+      nodeType: DocumentNodeType
+    })
   | (DocumentOperationBase & {
       type: 'node.insert'
       node: NewDocumentNode
@@ -154,6 +161,7 @@ export type DocumentOperation =
       nodeId: DocumentNodeId
       expectedGeneration: number
       value: string
+      resetFormatting?: boolean
     })
   | (DocumentOperationBase & {
       type: 'attribute.set'
@@ -299,6 +307,7 @@ export interface DocumentEngineCheckpoint {
   authorities: Array<{
     document: SemanticDocument
     nodes: DocumentNode[]
+    historyBase?: { document: SemanticDocument; nodes: DocumentNode[] }
     revisions: DocumentRevision[]
     journal: DocumentJournalEntry[]
     operationIds: OperationId[]
@@ -335,6 +344,9 @@ export interface DocumentComment {
   createdAt: string
   updatedAt: string
   resolvedBy?: string
+  anchor?: { start: number; end: number; quote: string; prefix: string; suffix: string }
+  anchorState?: 'attached' | 'missing' | 'ambiguous'
+  currentRange?: { start: number; end: number }
 }
 
 export interface CreateCommentInput {
@@ -344,6 +356,7 @@ export interface CreateCommentInput {
   revisionId: RevisionId
   authorPrincipalId: string
   body: string
+  range?: { start: number; end: number }
 }
 
 export interface PresentationSlide {
@@ -476,6 +489,7 @@ export interface CommitChangeSetInput {
 }
 
 export interface DocumentEngine {
+  snapshotAt(documentId: DocumentId, revisionId: RevisionId): DocumentSnapshot
   createDocument(input: CreateDocumentInput): DocumentSnapshot
   inspect(documentId: DocumentId): DocumentSnapshot
   listDocuments(): SemanticDocument[]

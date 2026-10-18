@@ -39,7 +39,7 @@ function createDocument(engine: SqliteDocumentEngine) {
 function insertParagraph(
   snapshot: ReturnType<SqliteDocumentEngine['inspect']>,
   operationId = 'insert-paragraph',
-): DocumentOperation {
+): Extract<DocumentOperation, { type: 'node.insert' }> {
   return {
     type: 'node.insert',
     operationId: operationId as OperationId,

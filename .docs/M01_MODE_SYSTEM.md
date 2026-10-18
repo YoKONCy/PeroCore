@@ -1,7 +1,7 @@
 # Channel、Thread 与角色路由
 
 > **架构基线**：[A09_AIOS_ARCHITECTURE](./A09_AIOS_ARCHITECTURE.md)
-> **最后更新**：2026-08-19
+> **最后更新**：2026-10-17
 
 ---
 

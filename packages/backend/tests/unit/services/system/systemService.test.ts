@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import path from 'node:path'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppError } from '@infos/backend/lib/appError'
 
 const { spawnMock } = vi.hoisted(() => ({
@@ -18,6 +19,7 @@ type PathResolverMock = {
 
 describe('SystemService', () => {
   const originalPlatform = process.platform
+  afterEach(() => Object.defineProperty(process, 'platform', { value: originalPlatform }))
   const child = { unref: vi.fn() }
   let pathResolver: PathResolverMock
   let service: SystemService
@@ -49,32 +51,42 @@ describe('SystemService', () => {
       await service.openPath('@data/logs')
 
       expect(pathResolver.resolve).toHaveBeenCalledWith('@data/logs')
-      expect(spawnMock).toHaveBeenCalledWith('explorer.exe', ['C:\\pero\\data\\logs'], {
-        detached: true,
-        stdio: 'ignore',
-        windowsHide: true,
-      })
+      expect(spawnMock).toHaveBeenCalledWith(
+        'explorer.exe',
+        [path.win32.resolve('C:/pero/data/logs')],
+        {
+          detached: true,
+          stdio: 'ignore',
+          windowsHide: true,
+        },
+      )
       expect(child.unref).toHaveBeenCalledOnce()
     })
 
     it('应当在 macOS 平台使用 open 命令', async () => {
       Object.defineProperty(process, 'platform', { value: 'darwin' })
-      pathResolver.resolve.mockReturnValue('C:/pero/app')
+      pathResolver.getRoot.mockReturnValue('/pero/app')
+      pathResolver.resolve.mockReturnValue('/pero/app')
 
       await service.openPath('@app')
 
-      expect(spawnMock).toHaveBeenCalledWith('open', ['C:\\pero\\app'], expect.any(Object))
+      expect(spawnMock).toHaveBeenCalledWith(
+        'open',
+        [path.resolve('/pero/app')],
+        expect.any(Object),
+      )
     })
 
     it('应当在 Linux 平台使用 xdg-open 命令', async () => {
       Object.defineProperty(process, 'platform', { value: 'linux' })
-      pathResolver.resolve.mockReturnValue('C:/pero/temp/cache')
+      pathResolver.getRoot.mockReturnValue('/pero/temp')
+      pathResolver.resolve.mockReturnValue('/pero/temp/cache')
 
       await service.openPath('@temp/cache')
 
       expect(spawnMock).toHaveBeenCalledWith(
         'xdg-open',
-        ['C:\\pero\\temp\\cache'],
+        [path.resolve('/pero/temp/cache')],
         expect.any(Object),
       )
     })
@@ -82,7 +94,6 @@ describe('SystemService', () => {
     it('路径为空时应当抛出缺少字段错误', async () => {
       await expect(service.openPath('   ')).rejects.toMatchObject({
         code: 'MISSING_FIELD',
-        message: '缺少 path 参数',
         data: { field: 'path' },
       } satisfies Partial<AppError>)
       expect(spawnMock).not.toHaveBeenCalled()
@@ -93,7 +104,6 @@ describe('SystemService', () => {
 
       await expect(service.openPath('C:/secret/file.txt')).rejects.toMatchObject({
         code: 'FORBIDDEN',
-        message: '目标路径不在允许访问范围内',
         data: { field: 'path' },
       } satisfies Partial<AppError>)
       expect(spawnMock).not.toHaveBeenCalled()

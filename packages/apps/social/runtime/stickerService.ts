@@ -1,223 +1,231 @@
-/**
- * StickerService — 表情包映射服务
- *
- * 负责:
- * 1. 扫描 Agent 目录下 stickers/ 文件夹中的图片文件
- * 2. 构建 name → 绝对路径 的映射表
- * 3. 提供表情包列表字符串 (注入到 LLM prompt)
- * 4. 将 AI 回复拆分为 "文字 + 表情包" 的有序消息段
- *    → 发送端按顺序逐条发送，实现类似真人的表情包单独发送效果
- *
- * 目录结构:
- *   assets/agents/{agentId}/stickers/
- *     开心.jpg
- *     难过.png
- *     ...
- *
- * AI 回复示例: "好的！[sticker:开心] 那我们走吧"
- * 拆分后: ["好的！", {sticker: "开心", path: "/.../开心.jpg"}, "那我们走吧"]
- *
- * @module packages/apps/social/runtime/stickerService
- */
+import type { Attachment } from './types'
+import { AppError } from '@infos/backend/applicationHostAbi'
+import { currentSocialRecovery } from './socialRecovery'
 
-import fs from 'node:fs'
-import path from 'node:path'
-import { createLogger } from '@infos/backend/applicationHostAbi'
+export interface AccountSticker {
+  id: string
+  description: string
+  url: string
+  resourceId: string
+  md5: string
+  emojiId: string
+}
 
-const logger = createLogger('StickerService')
+/** 原生收藏与文件传输由适配器实现，社交层只使用账号和表情标识。 */
+export interface AccountStickerProvider {
+  list(accountId: string): Promise<{ stickers: AccountSticker[]; truncated: boolean }>
+  collect(accountId: string, url: string): Promise<{ md5: string }>
+  describe(accountId: string, sticker: AccountSticker, description: string): Promise<void>
+  remove(accountId: string, sticker: AccountSticker): Promise<void>
+}
 
-/** 支持的图片扩展名 */
-const SUPPORTED_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp'])
-
-/** [sticker:name] 正则 (支持全角冒号、前后空格) */
-const STICKER_TAG_RE = /\[\s*sticker\s*[:：]\s*(.*?)\s*\]/gi
-
-// ─────────────────────────────────────────────
-// 消息段类型
-// ─────────────────────────────────────────────
-
-/** 纯文字段 */
 export interface TextSegment {
   type: 'text'
   content: string
 }
-
-/** 表情包段 */
 export interface StickerSegment {
   type: 'sticker'
-  name: string
-  /** 表情包图片绝对路径 */
-  filePath: string
+  stickerId: string
 }
-
-/** 混合消息段 */
 export type MessageSegment = TextSegment | StickerSegment
 
-// ─────────────────────────────────────────────
-// Service
-// ─────────────────────────────────────────────
+/** 空收藏或无效标识也不向用户泄露内部标记。 */
+export function splitStickerSegments(content: string): MessageSegment[] {
+  const segments: MessageSegment[] = []
+  const pattern = /\[\s*sticker\s*[:：]\s*([^\]\r\n]*)\]/gi
+  let cursor = 0
+  for (const match of content.matchAll(pattern)) {
+    const text = content.slice(cursor, match.index).trim()
+    if (text) segments.push({ type: 'text', content: text })
+    const id = match[1]!.trim()
+    if (/^s_[a-f0-9]{24}$/.test(id)) segments.push({ type: 'sticker', stickerId: id })
+    cursor = match.index! + match[0].length
+  }
+  const tail = content.slice(cursor).trim()
+  if (tail) segments.push({ type: 'text', content: tail })
+  return segments
+}
 
 export class StickerService {
-  /** Agent → (name → 绝对路径) 映射 */
-  private agentStickerMaps = new Map<string, Map<string, string>>()
-  /** MDP agents 根目录 */
-  private agentsBaseDir: string
+  private cache = new Map<string, { at: number; stickers: AccountSticker[]; truncated: boolean }>()
+  private pending = new Map<string, Promise<void>>()
+  private revisions = new Map<string, number>()
 
-  constructor(agentsBaseDir: string) {
-    this.agentsBaseDir = agentsBaseDir
+  constructor(private readonly provider: AccountStickerProvider) {}
+
+  /** 缓存按平台账号隔离，不读取角色资源，也不全量注入收藏。 */
+  private async snapshot(accountId: string, refresh = false) {
+    if (!accountId) throw new AppError('INVALID_PARAMETER', { message: '当前社交账号未确定' })
+    const cached = this.cache.get(accountId)
+    if (!refresh && cached && Date.now() - cached.at < 30_000) return cached
+    const revision = this.revisions.get(accountId) ?? 0
+    const result = await this.provider.list(accountId)
+    const value = { ...result, at: Date.now() }
+    // 写操作期间发出的旧查询，不能在写后重新覆盖缓存。
+    if (revision === (this.revisions.get(accountId) ?? 0)) this.cache.set(accountId, value)
+    return value
   }
 
-  /**
-   * 加载指定 Agent 的表情包映射
-   *
-   * @returns 表情包名称列表 (逗号分隔，用于注入 prompt)
-   */
-  loadAgentStickers(agentId: string): string {
-    if (!agentId) return ''
+  private invalidate(accountId: string) {
+    this.revisions.set(accountId, (this.revisions.get(accountId) ?? 0) + 1)
+    this.cache.delete(accountId)
+  }
 
-    // 缓存命中
-    if (this.agentStickerMaps.has(agentId)) {
-      const map = this.agentStickerMaps.get(agentId)!
-      return [...map.keys()].join(', ')
+  async list(accountId: string, query = '', offset = 0, limit = 20, refresh = false) {
+    if (
+      !Number.isInteger(offset) ||
+      offset < 0 ||
+      !Number.isInteger(limit) ||
+      limit < 1 ||
+      limit > 60
+    )
+      throw new AppError('INVALID_PARAMETER', {
+        message: 'offset 必须是非负整数，limit 必须在 1～60 之间',
+      })
+    const snapshot = await this.snapshot(accountId, refresh)
+    const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)
+    const matches = snapshot.stickers.filter((sticker) =>
+      terms.every((term) =>
+        `${sticker.id} ${sticker.description}`.toLocaleLowerCase().includes(term),
+      ),
+    )
+    return {
+      accountId,
+      stickers: matches.slice(offset, offset + limit),
+      total: matches.length,
+      offset,
+      hasMore: offset + limit < matches.length,
+      truncated: snapshot.truncated,
     }
+  }
 
+  async resolve(accountId: string, id: string): Promise<Attachment> {
+    const sticker = await this.find(accountId, id)
+    return { type: 'sticker', url: sticker.url, name: sticker.description || '表情' }
+  }
+
+  /** 仅代理账号收藏里的图片；控制下载大小并按真实文件头识别动图。 */
+  async read(accountId: string, id: string) {
+    const sticker = await this.find(accountId, id, false)
+    const response = await fetch(sticker.url, {
+      signal: AbortSignal.any([
+        AbortSignal.timeout(15_000),
+        ...(currentSocialRecovery() ? [currentSocialRecovery()!.signal] : []),
+      ]),
+      headers: { 'User-Agent': 'Mozilla/5.0', Referer: 'https://qq.com' },
+    })
+    if (!response.ok || !response.body)
+      throw new AppError('EXTERNAL_ERROR', { message: '收藏图片暂时无法读取，请重新同步' })
+    const maximum = 20 * 1024 * 1024
+    const reader = response.body.getReader()
+    const chunks: Uint8Array[] = []
+    let size = 0
     try {
-      const stickersDir = path.join(this.agentsBaseDir, agentId, 'stickers')
-
-      if (!fs.existsSync(stickersDir)) {
-        logger.debug(`Agent ${agentId} 无表情包目录: ${stickersDir}`)
-        this.agentStickerMaps.set(agentId, new Map())
-        return ''
+      for (;;) {
+        const chunk = await reader.read()
+        if (chunk.done) break
+        size += chunk.value.length
+        if (size > maximum)
+          throw new AppError('PAYLOAD_TOO_LARGE', { message: '收藏图片超过 20 MB，暂不支持预览' })
+        chunks.push(chunk.value)
       }
+    } finally {
+      await reader.cancel().catch(() => {})
+    }
+    const bytes = Buffer.concat(chunks)
+    const mimeType = bytes.subarray(0, 6).toString('ascii').startsWith('GIF8')
+      ? 'image/gif'
+      : bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+        ? 'image/png'
+        : bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255
+          ? 'image/jpeg'
+          : bytes.subarray(0, 4).toString('ascii') === 'RIFF' &&
+              bytes.subarray(8, 12).toString('ascii') === 'WEBP'
+            ? 'image/webp'
+            : ''
+    if (!mimeType)
+      throw new AppError('UNSUPPORTED_MEDIA_TYPE', {
+        message: '收藏图片不是支持的 PNG、JPEG、GIF 或 WebP 格式',
+      })
+    return { bytes, mimeType }
+  }
 
-      const stickerMap = new Map<string, string>()
-      const entries = fs.readdirSync(stickersDir, { withFileTypes: true })
+  private async find(accountId: string, id: string, refresh = true) {
+    const snapshot = await this.snapshot(accountId, refresh)
+    const sticker = snapshot.stickers.find((item) => item.id === id)
+    if (!sticker) throw new AppError('NOT_FOUND', { message: '表情不在当前账号收藏中，请重新查询' })
+    return sticker
+  }
 
-      for (const entry of entries) {
-        if (!entry.isFile()) continue
-
-        const rawExt = path.extname(entry.name)
-        const ext = rawExt.toLowerCase()
-        if (!SUPPORTED_EXTS.has(ext)) continue
-
-        // 名称 = 不含扩展名的文件名
-        const name = path.basename(entry.name, rawExt)
-        const fullPath = path.join(stickersDir, entry.name)
-
-        stickerMap.set(name, fullPath)
-      }
-
-      this.agentStickerMaps.set(agentId, stickerMap)
-
-      if (stickerMap.size > 0) {
-        logger.info(`Agent ${agentId} 已加载 ${stickerMap.size} 个表情包`)
-      }
-
-      return [...stickerMap.keys()].join(', ')
-    } catch (err) {
-      logger.warn(`加载 Agent ${agentId} 表情包失败: ${err}`)
-      this.agentStickerMaps.set(agentId, new Map())
-      return ''
+  /** 同账号写操作串行，避免收藏、描述、删除互相覆盖。 */
+  private async mutate<T>(accountId: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.pending.get(accountId) ?? Promise.resolve()
+    const result = previous.catch(() => {}).then(operation)
+    const tail = result.then(
+      () => {},
+      () => {},
+    )
+    this.pending.set(accountId, tail)
+    try {
+      return await result
+    } finally {
+      if (this.pending.get(accountId) === tail) this.pending.delete(accountId)
     }
   }
 
-  /**
-   * 将 AI 回复拆分为有序消息段
-   *
-   * 输入: "好的！[sticker:开心] 那我们走吧 [sticker:挥手]"
-   * 输出: [
-   *   { type: 'text', content: '好的！' },
-   *   { type: 'sticker', name: '开心', filePath: '/.../开心.jpg' },
-   *   { type: 'text', content: ' 那我们走吧 ' },
-   *   { type: 'sticker', name: '挥手', filePath: '/.../挥手.png' },
-   * ]
-   *
-   * 不存在的表情包标签会被静默丢弃，不会发出去。
-   */
-  splitIntoSegments(content: string, agentId: string): MessageSegment[] {
-    // 确保已加载
-    if (!this.agentStickerMaps.has(agentId)) {
-      this.loadAgentStickers(agentId)
-    }
-
-    const map = this.agentStickerMaps.get(agentId)
-    if (!map || map.size === 0) {
-      // 没有表情包 → 整段作为文字
-      return content.trim() ? [{ type: 'text', content }] : []
-    }
-
-    const segments: MessageSegment[] = []
-    let lastIndex = 0
-
-    // 重置正则状态 (全局正则需要 reset)
-    STICKER_TAG_RE.lastIndex = 0
-
-    let match: RegExpExecArray | null
-    while ((match = STICKER_TAG_RE.exec(content)) !== null) {
-      const stickerName = match[1]!.trim()
-
-      // 匹配前的文字段
-      if (match.index > lastIndex) {
-        const textBefore = content.slice(lastIndex, match.index).trim()
-        if (textBefore) {
-          segments.push({ type: 'text', content: textBefore })
+  async collect(accountId: string, url: string, description?: string) {
+    if (description !== undefined && description.length > 200)
+      throw new AppError('INVALID_PARAMETER', { message: '表情描述最多 200 字' })
+    return this.mutate(accountId, async () => {
+      const collected = await this.provider.collect(accountId, url)
+      this.invalidate(accountId)
+      const snapshot = await this.snapshot(accountId, true)
+      const sticker = snapshot.stickers.find(
+        (item) => item.md5.toLowerCase() === collected.md5.toLowerCase(),
+      )
+      if (!sticker)
+        throw new AppError('CONFLICT', {
+          message: '收藏请求已发送，但尚未在 QQ 收藏中确认；请同步后确认，勿重复收藏',
+        })
+      if (description !== undefined) {
+        try {
+          return { sticker: await this.describeUnlocked(accountId, sticker, description) }
+        } catch (error) {
+          return {
+            sticker,
+            warning: `已收藏，描述未保存：${error instanceof Error ? error.message : String(error)}`,
+          }
         }
       }
-
-      // 查找表情包文件
-      const filepath = this.findSticker(map, stickerName)
-
-      if (filepath) {
-        segments.push({ type: 'sticker', name: stickerName, filePath: filepath })
-      } else {
-        // 未找到的表情包 → 静默丢弃，不发出去
-        logger.warn(`表情包未找到已过滤: '${stickerName}' (Agent: ${agentId})`)
-      }
-
-      lastIndex = match.index + match[0].length
-    }
-
-    // 剩余文字
-    if (lastIndex < content.length) {
-      const remaining = content.slice(lastIndex).trim()
-      if (remaining) {
-        segments.push({ type: 'text', content: remaining })
-      }
-    }
-
-    return segments
+      return { sticker }
+    })
   }
 
-  /** 查找表情包 (精确 + 不区分大小写) */
-  private findSticker(map: Map<string, string>, name: string): string | undefined {
-    // 精确匹配
-    const filepath = map.get(name)
-    if (filepath) return filepath
-
-    // 不区分大小写
-    for (const [key, val] of map) {
-      if (key.toLowerCase() === name.toLowerCase()) {
-        return val
-      }
-    }
-    return undefined
+  private async describeUnlocked(accountId: string, sticker: AccountSticker, description: string) {
+    await this.provider.describe(accountId, sticker, description)
+    this.invalidate(accountId)
+    const updated = await this.find(accountId, sticker.id)
+    if (updated.description !== description)
+      throw new AppError('CONFLICT', { message: 'QQ 尚未确认描述更新，请同步后确认' })
+    return updated
   }
 
-  /** 检查 Agent 是否有表情包 */
-  hasStickers(agentId: string): boolean {
-    if (!this.agentStickerMaps.has(agentId)) {
-      this.loadAgentStickers(agentId)
-    }
-    const map = this.agentStickerMaps.get(agentId)
-    return map !== undefined && map.size > 0
+  async describe(accountId: string, id: string, description: string) {
+    if (description.length > 200)
+      throw new AppError('INVALID_PARAMETER', { message: '表情描述最多 200 字' })
+    return this.mutate(accountId, async () =>
+      this.describeUnlocked(accountId, await this.find(accountId, id), description),
+    )
   }
 
-  /** 清除指定 Agent 的缓存 (用于热更新) */
-  clearCache(agentId?: string): void {
-    if (agentId) {
-      this.agentStickerMaps.delete(agentId)
-    } else {
-      this.agentStickerMaps.clear()
-    }
+  async remove(accountId: string, id: string) {
+    return this.mutate(accountId, async () => {
+      const sticker = await this.find(accountId, id)
+      await this.provider.remove(accountId, sticker)
+      this.invalidate(accountId)
+      if ((await this.snapshot(accountId, true)).stickers.some((item) => item.id === id))
+        throw new AppError('CONFLICT', { message: 'QQ 尚未确认删除，请同步后确认' })
+      return { removed: id }
+    })
   }
 }

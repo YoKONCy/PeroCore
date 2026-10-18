@@ -1,0 +1,283 @@
+.integrations-page {
+  padding: 28px 32px;
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  color: var(--ui-text-primary);
+}
+.integrations-page .integration-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.integrations-page h1 {
+  margin: 0;
+  font-family: var(--ui-font-pixel);
+  font-size: 24px;
+  font-weight: 900;
+}
+.integrations-page .integration-heading p {
+  margin: 4px 0 0;
+  color: var(--ui-text-tertiary);
+  font-family: var(--ui-font-pixel);
+  font-size: 10px;
+  letter-spacing: 0.15em;
+}
+.integrations-page .integration-tabs {
+  display: flex;
+  gap: 22px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--ui-border-default);
+  margin-bottom: 24px;
+}
+.integrations-page .integration-tabs button {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  padding: 0 2px 12px;
+  font-family: var(--ui-font-pixel);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ui-text-secondary);
+  cursor: pointer;
+}
+.integrations-page .integration-tabs button:hover,
+.integrations-page .integration-tabs button.active {
+  color: var(--ui-accent-sky);
+}
+.integrations-page .integration-tabs button.active {
+  border-bottom-color: var(--ui-accent-sky);
+}
+.integrations-page .integration-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 5px 8px 0;
+}
+.integrations-page .integration-section-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.integrations-page h2 {
+  margin: 0;
+  font-family: var(--ui-font-pixel);
+  font-size: 16px;
+  font-weight: 800;
+}
+.integrations-page .integration-section-heading > span {
+  font-size: 11px;
+  color: var(--ui-text-tertiary);
+}
+.integrations-page .integration-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+  gap: 22px;
+  max-width: 1040px;
+}
+.integrations-page .integration-market-card {
+  min-width: 0;
+}
+.integrations-page .integration-card-heading {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.integrations-page h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 800;
+}
+.integrations-page .integration-publisher {
+  display: block;
+  font-size: 10px;
+  color: var(--ui-text-tertiary);
+  margin-top: 5px;
+}
+.integrations-page .integration-description {
+  margin: 18px 0;
+  color: var(--ui-text-secondary);
+  font-size: 12px;
+  line-height: 1.8;
+}
+.integrations-page .integration-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--ui-border-subtle);
+  padding-top: 14px;
+}
+.integrations-page .integration-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ui-text-tertiary);
+  font-size: 11px;
+}
+.integrations-page .integration-state::before {
+  content: '';
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  background: currentColor;
+}
+.integrations-page .integration-state--ready {
+  color: var(--ui-success);
+}
+.integrations-page .integration-page-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+.integrations-page .integration-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.integrations-page .integration-back {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ui-text-secondary);
+  font-family: var(--ui-font-pixel);
+  font-size: 11px;
+  cursor: pointer;
+}
+.integrations-page .integration-back:hover {
+  color: var(--ui-accent-sky);
+}
+.integrations-page .integration-source-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.integrations-page .integration-source-card > .p-card-body {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.integrations-page .integration-source-copy {
+  flex: 1;
+  min-width: min(200px, 100%);
+}
+.integrations-page .integration-source-copy h3 {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 14px;
+}
+.integrations-page .integration-source-copy p {
+  font-size: 11px;
+  color: var(--ui-text-secondary);
+  margin: 5px 0;
+}
+.integrations-page .integration-source-copy small {
+  display: block;
+  color: var(--ui-text-tertiary);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+.integrations-page .integration-selected {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--ui-success);
+  border: 1px solid var(--ui-success-soft);
+  background: var(--ui-success-soft);
+  padding: 1px 5px;
+}
+.integrations-page .integration-source-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.integrations-page .integration-remove {
+  border: 0;
+  background: transparent;
+  color: var(--ui-text-tertiary);
+  padding: 5px;
+  cursor: pointer;
+}
+.integrations-page .integration-remove:hover {
+  color: var(--ui-danger);
+}
+.integrations-page .integration-empty {
+  padding: 36px 12px;
+  border: 1px dashed var(--ui-border-strong);
+  color: var(--ui-text-secondary);
+  text-align: center;
+  font-size: 12px;
+}
+.integrations-page .integration-error {
+  margin: 0 0 16px;
+  color: var(--ui-danger);
+  font-size: 12px;
+}
+/* 弹窗由 PDialog Teleport 到页面外，表单只使用现有主题与表单组件。 */
+.integration-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.integration-form > label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--ui-text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+.integration-form > .integration-switch {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+.integration-dialog-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--ui-border-subtle);
+}
+.integration-dialog-brand strong {
+  color: var(--ui-text-primary);
+  font-size: 14px;
+}
+.integration-dialog-brand p,
+.integration-form-help {
+  color: var(--ui-text-tertiary);
+  font-size: 11px;
+  line-height: 1.7;
+  margin: 5px 0 0;
+}
+.integration-doc-link {
+  color: var(--ui-accent-sky);
+  font-size: 11px;
+  align-self: flex-start;
+}
+@media (max-width: 700px) {
+  .integrations-page {
+    padding: 20px 18px;
+  }
+  .integrations-page .integration-tabs {
+    gap: 16px;
+  }
+  .integrations-page .integration-source-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}

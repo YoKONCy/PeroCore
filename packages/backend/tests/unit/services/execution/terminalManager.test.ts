@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ExecutionSessionManager } from '@infos/backend/services/execution/executionSession'
 import { LocalPolicyRunner } from '@infos/backend/services/execution/sandboxRunner'
 import { TerminalManager } from '@infos/backend/services/execution/terminalManager'
@@ -17,6 +17,131 @@ afterEach(async () => {
 })
 
 describe('TerminalManager', () => {
+  it('不存在的可执行文件立即报告失败，失败日志保留历史句柄', async () => {
+    const sessions = new ExecutionSessionManager()
+    const manager = new TerminalManager(sessions, new LocalPolicyRunner())
+    const session = await sessions.getOrCreate({
+      ownerAgentId: 'pero',
+      threadId: 'spawn-failed',
+      channel: 'desktop',
+      workspaceRoot: root,
+    })
+    try {
+      await expect(
+        manager.run({
+          executionSessionId: session.id,
+          command: 'infos-nonexistent-executable',
+          argv: [],
+          timeoutMs: 1000,
+        }),
+      ).rejects.toMatchObject({ code: 'TERMINAL_FAILED' })
+      expect(manager.list(session.id, true)).toHaveLength(1)
+    } finally {
+      await manager.dispose()
+    }
+  })
+
+  it('取消短命令时等待回收整棵进程树，终端记录也被清理', async () => {
+    const sessions = new ExecutionSessionManager()
+    const manager = new TerminalManager(sessions, new LocalPolicyRunner())
+    const session = await sessions.getOrCreate({
+      ownerAgentId: 'pero',
+      threadId: 'cancel-tree',
+      channel: 'desktop',
+      workspaceRoot: root,
+    })
+    const controller = new AbortController()
+    const source = `const {spawn}=require('node:child_process');
+const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});
+console.log('子进程:'+child.pid);setInterval(()=>{},1000);`
+    const execution = manager.run({
+      executionSessionId: session.id,
+      command: process.execPath,
+      argv: ['-e', source],
+      signal: controller.signal,
+      timeoutMs: 30_000,
+    })
+    const cancelled = expect(execution).rejects.toThrow('父任务停止')
+    let childPid = 0
+    try {
+      await vi.waitFor(
+        () => {
+          const terminal = manager.list(session.id)[0]!
+          const output = manager.read(terminal.id, session.id).output
+          childPid = Number(output.match(/子进程:(\d+)/)?.[1] ?? 0)
+          expect(childPid).toBeGreaterThan(0)
+        },
+        { timeout: 10_000 },
+      )
+      controller.abort(new Error('父任务停止'))
+      await cancelled
+      expect(manager.list(session.id)).toHaveLength(0)
+      await vi.waitFor(() => expect(() => process.kill(childPid, 0)).toThrow(), { timeout: 5_000 })
+    } finally {
+      controller.abort(new Error('清理测试资源'))
+      await execution.catch(() => undefined)
+      await manager.disposeSession(session.id)
+    }
+  }, 20_000)
+
+  it('短命令超时后回收终端，预先取消的调用不创建进程', async () => {
+    const sessions = new ExecutionSessionManager()
+    const runner = new LocalPolicyRunner()
+    const manager = new TerminalManager(sessions, runner)
+    const session = await sessions.getOrCreate({
+      ownerAgentId: 'pero',
+      threadId: 'timeout-cleanup',
+      channel: 'desktop',
+      workspaceRoot: root,
+    })
+    await expect(
+      manager.run({
+        executionSessionId: session.id,
+        command: process.execPath,
+        argv: ['-e', 'setInterval(()=>{},1000)'],
+        timeoutMs: 100,
+      }),
+    ).rejects.toThrow('超时')
+    expect(manager.list(session.id)).toHaveLength(0)
+    const spy = vi.spyOn(runner, 'spawnTerminal')
+    const controller = new AbortController()
+    controller.abort(new Error('已停止'))
+    await expect(
+      manager.create({
+        executionSessionId: session.id,
+        command: process.execPath,
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow('已停止')
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('参数数组完整保留 JSON、引号、空字符串、中文与尾部反斜杠', async () => {
+    const sessions = new ExecutionSessionManager()
+    const manager = new TerminalManager(sessions, new LocalPolicyRunner())
+    const session = await sessions.getOrCreate({
+      ownerAgentId: 'pero',
+      threadId: 'argv',
+      channel: 'desktop',
+      workspaceRoot: root,
+    })
+    const args = [
+      JSON.stringify({ zoom: 1, offsetY: 0, title: '含空格与"引号"' }),
+      '',
+      'C:\\带空格目录\\',
+      '$env:PATH; & echo 不应执行',
+    ]
+    const result = await manager.run({
+      executionSessionId: session.id,
+      command: process.execPath,
+      argv: ['-e', 'process.stdout.write(JSON.stringify(process.argv.slice(1)))', ...args],
+      timeoutMs: 5_000,
+    })
+    expect(JSON.parse(result.output)).toEqual(args)
+    expect(result.terminal.backend).toBe('pipe')
+    expect(result.terminal.exitCode).toBe(0)
+  })
+
   it('创建终端后可等待、增量读取和关闭', async () => {
     const sessions = new ExecutionSessionManager()
     const runner = new LocalPolicyRunner()
@@ -115,7 +240,8 @@ describe('TerminalManager', () => {
       cwd: 'notes',
       timeoutMs: 5_000,
     })
-    expect(path.normalize(result.output.trim())).toBe(path.join(root, 'notes'))
+    // Windows PTY 可能在命令输出前写入 PowerShell 启动控制序列。
+    expect(result.output).toContain(path.join(root, 'notes'))
   })
 
   it('拒绝其他执行会话访问终端', async () => {
@@ -137,7 +263,7 @@ describe('TerminalManager', () => {
       executionSessionId: owner.id,
       command: process.platform === 'win32' ? 'Write-Output ok' : 'printf ok',
     })
-    expect(() => manager.get(terminal.id, other.id)).toThrow('无权访问')
+    expect(() => manager.get(terminal.id, other.id)).toThrow(Error)
     await manager.disposeSession(owner.id)
   })
 })

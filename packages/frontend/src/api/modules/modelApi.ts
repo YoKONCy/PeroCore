@@ -19,6 +19,7 @@ export interface ModelConfigItem {
   topP: number | null
   maxTokens: number | null
   contextWindowTokens: number | null
+  maxReActTurns?: number | null
   reasoningEffort: ReasoningEffort | null
   returnNativeReasoning: boolean
   wireApi: 'chat_completions' | 'responses'

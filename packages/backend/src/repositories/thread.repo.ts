@@ -7,11 +7,18 @@
  * @module packages/backend/src/repositories/thread.repo
  */
 
-import type { KernelExecutionDescriptor, KernelObjectId, ThreadChannel } from '@infos/shared'
-import { eq, desc, asc, sql, and, or, inArray, notInArray, isNull } from 'drizzle-orm'
+import type {
+  InteractionMode,
+  KernelExecutionDescriptor,
+  KernelObjectId,
+  ThreadChannel,
+} from '@infos/shared'
+import { eq, ne, desc, asc, sql, and, or, inArray, notInArray, isNull } from 'drizzle-orm'
 import { threads, threadMessages, threadSummaries, kernelOutboxEvents } from '../database/schema'
+import { editedMessageMetadata } from './messageEdit'
 import type { DrizzleDb } from '../database'
 import type { KernelOutboxRepository } from '../kernel/kernelOutboxRepository'
+import type { ExecutionMode } from '@infos/shared'
 
 // ─────────────────────────────────────────────
 // 类型定义
@@ -38,6 +45,7 @@ export interface CreateThreadInput {
   contextPolicy?: string | null
   /** M05: Thread 用途，默认 conversation；后台任务传 background_task 与聊天历史隔离 */
   purpose?: ThreadPurpose
+  interactionMode?: InteractionMode
 }
 
 /** Thread 消息创建输入 */
@@ -106,6 +114,11 @@ export class ThreadRepository {
         title: data.title ?? '',
         contextPolicy: data.contextPolicy ?? null,
         purpose: data.purpose ?? 'conversation',
+        interactionMode:
+          data.interactionMode ??
+          (data.channel === 'desktop' && (!data.purpose || data.purpose === 'conversation')
+            ? 'chat'
+            : 'work'),
       })
       .returning()
     return rows[0]!
@@ -234,41 +247,47 @@ export class ThreadRepository {
     return result.changes
   }
 
+  /** 只读取活跃轮次标识，用于会话删除统计，不访问文件检查点。 */
+  async activePairIds(threadId: string): Promise<string[]> {
+    const rows = this.db
+      .select({ pairId: threadMessages.pairId })
+      .from(threadMessages)
+      .where(and(eq(threadMessages.threadId, threadId), ne(threadMessages.status, 'deleted')))
+      .orderBy(asc(threadMessages.id))
+      .all()
+    return [...new Set(rows.flatMap((row) => (row.pairId ? [row.pairId] : [])))]
+  }
+
   /** 软删除整条 Thread 及其活跃消息，保留记录供审计恢复。 */
   async softDeleteThread(threadId: string): Promise<{ deleted: boolean; messageIds: number[] }> {
-    const activeThread = await this.db
-      .select({ id: threads.id })
-      .from(threads)
-      .where(and(eq(threads.id, threadId), eq(threads.status, 'active')))
-      .limit(1)
-    if (!activeThread[0]) return { deleted: false, messageIds: [] }
-
-    const messageRows = await this.db
-      .select({ id: threadMessages.id })
-      .from(threadMessages)
-      .where(and(eq(threadMessages.threadId, threadId), eq(threadMessages.status, 'active')))
-    const messageIds = messageRows.map((row) => row.id)
-
-    if (messageIds.length > 0) {
-      await this.db
-        .update(threadMessages)
-        .set({
-          status: 'deleted',
-          deletedAt: sql`(datetime('now', 'localtime'))`,
-          deletedBy: 'user',
-        })
-        .where(inArray(threadMessages.id, messageIds))
-    }
-
-    const result = await this.db
-      .update(threads)
-      .set({
-        status: 'deleted',
-        updatedAt: sql`(datetime('now', 'localtime'))`,
-      })
-      .where(and(eq(threads.id, threadId), eq(threads.status, 'active')))
-
-    return { deleted: result.changes > 0, messageIds }
+    return this.db.transaction((tx) => {
+      const activeThread = tx
+        .select({ id: threads.id })
+        .from(threads)
+        .where(and(eq(threads.id, threadId), eq(threads.status, 'active')))
+        .get()
+      if (!activeThread) return { deleted: false, messageIds: [] }
+      const messageIds = tx
+        .select({ id: threadMessages.id })
+        .from(threadMessages)
+        .where(and(eq(threadMessages.threadId, threadId), ne(threadMessages.status, 'deleted')))
+        .all()
+        .map((row) => row.id)
+      if (messageIds.length > 0)
+        tx.update(threadMessages)
+          .set({
+            status: 'deleted',
+            deletedAt: sql`(datetime('now', 'localtime'))`,
+            deletedBy: 'user',
+          })
+          .where(inArray(threadMessages.id, messageIds))
+          .run()
+      tx.update(threads)
+        .set({ status: 'deleted', updatedAt: sql`(datetime('now', 'localtime'))` })
+        .where(eq(threads.id, threadId))
+        .run()
+      return { deleted: true, messageIds }
+    })
   }
 
   /**
@@ -333,9 +352,28 @@ export class ThreadRepository {
   }
 
   async updateAutoExecuteTools(threadId: string, autoExecuteTools: boolean): Promise<boolean> {
+    return this.updateExecutionMode(threadId, autoExecuteTools ? 'auto' : 'manual')
+  }
+
+  async updateExecutionMode(threadId: string, executionMode: ExecutionMode): Promise<boolean> {
     const result = await this.db
       .update(threads)
-      .set({ autoExecuteTools, updatedAt: sql`(datetime('now', 'localtime'))` })
+      .set({
+        executionMode,
+        autoExecuteTools: executionMode !== 'manual',
+        updatedAt: sql`(datetime('now', 'localtime'))`,
+      })
+      .where(and(eq(threads.id, threadId), eq(threads.status, 'active')))
+    return result.changes > 0
+  }
+
+  async updateInteractionMode(
+    threadId: string,
+    interactionMode: InteractionMode,
+  ): Promise<boolean> {
+    const result = await this.db
+      .update(threads)
+      .set({ interactionMode, updatedAt: sql`(datetime('now', 'localtime'))` })
       .where(and(eq(threads.id, threadId), eq(threads.status, 'active')))
     return result.changes > 0
   }
@@ -479,14 +517,32 @@ export class ThreadRepository {
   }
 
   /** 查询最近 N 个完整对话轮次，旧消息缺少 pairId 时按单条独立轮次处理。 */
-  async queryActiveMessagePairs(threadId: string, pairLimit = 20): Promise<ThreadMessageRow[]> {
+  async queryActiveMessagePairs(
+    threadId: string,
+    pairLimit = 20,
+    options?: {
+      beforeMessageId?: number
+      recoverable?: boolean
+    },
+  ): Promise<ThreadMessageRow[]> {
     const normalizedLimit = Math.max(1, pairLimit)
+    const visible = options?.recoverable
+      ? inArray(threadMessages.status, ['active', 'failed', 'interrupted'])
+      : eq(threadMessages.status, 'active')
     const pairKey = sql<string>`coalesce(${threadMessages.pairId}, '__message__:' || ${threadMessages.id})`
     const latestId = sql<number>`max(${threadMessages.id})`
     const recentPairs = await this.db
       .select({ pairKey, latestId })
       .from(threadMessages)
-      .where(and(eq(threadMessages.threadId, threadId), eq(threadMessages.status, 'active')))
+      .where(
+        and(
+          eq(threadMessages.threadId, threadId),
+          visible,
+          options?.beforeMessageId
+            ? sql`${threadMessages.id} < ${options.beforeMessageId}`
+            : undefined,
+        ),
+      )
       .groupBy(pairKey)
       .orderBy(desc(latestId))
       .limit(normalizedLimit)
@@ -515,7 +571,7 @@ export class ThreadRepository {
       .where(
         and(
           eq(threadMessages.threadId, threadId),
-          eq(threadMessages.status, 'active'),
+          visible,
           selectors.length === 1 ? selectors[0] : or(...selectors),
         ),
       )
@@ -661,6 +717,8 @@ export class ThreadRepository {
     | {
         threadId: string
         pairId: string | null
+        status: string | null
+        role: string
       }
     | undefined
   > {
@@ -668,6 +726,8 @@ export class ThreadRepository {
       .select({
         threadId: threadMessages.threadId,
         pairId: threadMessages.pairId,
+        status: threadMessages.status,
+        role: threadMessages.role,
       })
       .from(threadMessages)
       .where(eq(threadMessages.id, messageId))
@@ -845,15 +905,35 @@ export class ThreadRepository {
   }
 
   /** 编辑消息内容（创建新 revision） */
-  async editMessage(messageId: number, newContent: string): Promise<boolean> {
+  async editMessage(
+    messageId: number,
+    newContent: string,
+    expectedRevision?: number,
+  ): Promise<boolean> {
+    const [current] = await this.db
+      .select()
+      .from(threadMessages)
+      .where(and(eq(threadMessages.id, messageId), ne(threadMessages.status, 'deleted')))
+      .limit(1)
+    if (!current) return false
     // 更新当前消息的内容和 revision
     const result = await this.db
       .update(threadMessages)
       .set({
         content: newContent,
-        revision: sql`revision + 1`,
+        metadataJson: editedMessageMetadata(current.metadataJson, newContent),
+        revision: sql`coalesce(${threadMessages.revision}, 1) + 1`,
       })
-      .where(eq(threadMessages.id, messageId))
+      .where(
+        and(
+          eq(threadMessages.id, messageId),
+          ne(threadMessages.status, 'deleted'),
+          eq(
+            sql`coalesce(${threadMessages.revision}, 1)`,
+            expectedRevision ?? current.revision ?? 1,
+          ),
+        ),
+      )
 
     return result.changes > 0
   }

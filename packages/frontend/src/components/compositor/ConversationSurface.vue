@@ -5,14 +5,17 @@
  * 负责组织该界面的响应式状态、用户交互与领域数据展示。
  * 副作用在组件生命周期内建立并清理，避免跨页面残留监听器或异步状态。
  */
-import { computed, ref, watch } from 'vue'
+import { computed, inject, shallowRef, ref, watch } from 'vue'
+import { resourceFromToolResult } from '@infos/shared'
 import type {
+  AgentInputSubmission,
   ApprovalSurfaceProps,
   AttachmentSurfaceProps,
   BackgroundTaskProjectionSnapshot,
   ConversationProjectionSnapshot,
   InputSurfaceProps,
   MarkdownSurfaceProps,
+  ModelRetrySurfaceProps,
   NativeReasoningSurfaceProps,
   ProgressSurfaceProps,
   ProgrammableIslandSurfaceProps,
@@ -23,20 +26,26 @@ import type {
   ToolResultSurfaceProps,
 } from '@infos/shared'
 import type { CompositorSurface } from '../../stores'
-import { segmentStreamMarkdown } from '../../compositor/markdownSegmentation'
+import {
+  StreamMarkdownSegmenter,
+  type MarkdownRenderBlock,
+} from '../../compositor/markdownSegmentation'
+import StreamMarkdown from './StreamMarkdown.vue'
 import type { ApprovalDecision, ApprovalRequest } from '../../api/modules/approvalsApi'
 import { ApprovalCard } from '../approval'
 import AgentInputCard from '../agent/AgentInputCard.vue'
+import { clearAgentInputDraft } from '../agent/agentInputDraft'
 import { surfacesApi } from '../../api/modules/surfacesApi'
 import { useCompositorStore } from '../../stores'
 import { useGateway } from '../../composables/gateway/useGateway'
-import { attachmentsApi } from '../../api/modules/attachmentsApi'
 import PixelIcon from '../pixel/PixelIcon.vue'
 import ChatRichText from '../chat/ChatRichText.vue'
 import RunPulse from '../chat/RunPulse.vue'
+import ModelRetryRecord from '../chat/ModelRetryRecord.vue'
 import ToolCallCard from '../tools/ToolCallCard.vue'
 import MermaidSurfaceNode from './MermaidSurfaceNode.vue'
 import ProgrammableSurfaceNode from './ProgrammableSurfaceNode.vue'
+import ResourceCard from '../resources/ResourceCard.vue'
 
 interface Props {
   surface: CompositorSurface
@@ -47,26 +56,65 @@ const props = withDefaults(defineProps<Props>(), {
   displayMode: 'all',
 })
 const compositor = useCompositorStore()
-const { seatProof } = useGateway()
+const { withInputSeatFor } = useGateway()
 const inputMessage = ref('')
 const submittingNodeId = ref<string | null>(null)
-const reasoningOpen = ref(props.surface.state === 'open')
-const previewImageUrl = ref<string | null>(null)
+const inputErrors = ref<Record<string, string>>({})
+const reasoningOpen = ref<Record<string, boolean>>({})
+const reasoningPhases = new Map<string, 'preview' | 'committed'>()
+const mainVisible = inject('infos:main-surface-visible', shallowRef(true))
+const segmenters = new Map<string, StreamMarkdownSegmenter>()
+const resourceCache = new WeakMap<
+  SurfaceNode,
+  {
+    result?: ToolResultSurfaceProps
+    resource: ReturnType<typeof resourceFromToolResult>
+  }
+>()
+let previousItems: RenderItem[] = []
+
+function toolResource(node: SurfaceNode, result?: ToolResultSurfaceProps) {
+  const cached = resourceCache.get(node)
+  if (cached && cached.result === result) return cached.resource
+  const resource = !result?.isError
+    ? resourceFromToolResult(toolProps(node).name, result?.result)
+    : null
+  resourceCache.set(node, { result, resource })
+  return resource
+}
 
 watch(
-  () => props.surface.state,
-  (state) => {
-    reasoningOpen.value = state === 'open'
+  [() => props.surface.state, () => props.surface.nodes],
+  () => {
+    const next = { ...reasoningOpen.value }
+    const live = new Set<string>()
+    let changed = false
+    for (const node of props.surface.nodes) {
+      if (node.kind !== 'native-reasoning') continue
+      live.add(node.nodeId)
+      const phase =
+        props.surface.state === 'open' && reasoningProps(node).phase !== 'committed'
+          ? 'preview'
+          : 'committed'
+      if (reasoningPhases.get(node.nodeId) === phase) continue
+      reasoningPhases.set(node.nodeId, phase)
+      next[node.nodeId] = phase === 'preview'
+      changed = true
+    }
+    for (const id of reasoningPhases.keys())
+      if (!live.has(id)) {
+        reasoningPhases.delete(id)
+        delete next[id]
+        changed = true
+      }
+    if (changed) reasoningOpen.value = next
   },
+  { immediate: true },
 )
 
 type RenderItem =
   | { type: 'node'; id: string; node: SurfaceNode; toolResult?: ToolResultSurfaceProps }
-  | { type: 'markdown-block'; id: string; block: ReturnType<typeof segmentStreamMarkdown>[number] }
-
-function openAttachmentImage(id: string): void {
-  previewImageUrl.value = attachmentsApi.contentUrl(id)
-}
+  | { type: 'markdown-block'; id: string; block: MarkdownRenderBlock }
 
 function formatDuration(value?: number): string {
   if (value === undefined) return '—'
@@ -74,6 +122,7 @@ function formatDuration(value?: number): string {
 }
 
 const renderItems = computed<RenderItem[]>(() => {
+  if (props.surface.suspended || !mainVisible.value) return previousItems
   const items: RenderItem[] = []
   const toolResults = new Map<string, ToolResultSurfaceProps>()
   for (const node of props.surface.nodes) {
@@ -93,23 +142,28 @@ const renderItems = computed<RenderItem[]>(() => {
       continue
     }
     const markdown = node.props as MarkdownSurfaceProps
-    for (const block of segmentStreamMarkdown(
-      markdown.source,
-      node.nodeId,
-      markdown.phase === 'committed',
-    )) {
+    let segmenter = segmenters.get(node.nodeId)
+    if (!segmenter) {
+      segmenter = new StreamMarkdownSegmenter(node.nodeId)
+      segmenters.set(node.nodeId, segmenter)
+    }
+    for (const block of segmenter.update(markdown.source, markdown.phase === 'committed')) {
+      if (!block.source.trim()) continue
       items.push({ type: 'markdown-block', id: block.id, block })
     }
   }
+  const liveNodes = new Set(props.surface.nodes.map((node) => node.nodeId))
+  for (const id of segmenters.keys())
+    if (!liveNodes.has(id as SurfaceNode['nodeId'])) segmenters.delete(id)
   if (props.displayMode === 'content') {
-    return items.filter(
+    return (previousItems = items.filter(
       (item) =>
         item.type !== 'node' ||
         item.node.kind !== 'attachment' ||
         attachmentProps(item.node).kind !== 'image',
-    )
+    ))
   }
-  return items
+  return (previousItems = items)
 })
 
 function toolChain(node: SurfaceNode): string {
@@ -171,12 +225,67 @@ function statusProps(node: SurfaceNode): StatusSurfaceProps {
   return node.props as StatusSurfaceProps
 }
 
+const pendingInteraction = computed(() => {
+  if (props.surface.state !== 'open' || props.surface.suspended) return undefined
+  for (const surface of [props.surface, ...compositor.surfaces.values()]) {
+    if (
+      surface.threadId !== props.surface.threadId ||
+      surface.principalId !== props.surface.principalId ||
+      surface.state === 'disposed'
+    )
+      continue
+    const interaction = surface.nodes.find(
+      (node) => node.kind === 'approval' || node.kind === 'input',
+    )
+    if (interaction) return interaction.kind
+  }
+  return undefined
+})
+
+function runState(status: StatusSurfaceProps): StatusSurfaceProps['state'] {
+  if (
+    pendingInteraction.value &&
+    ['thinking', 'assembling', 'calling', 'generating', 'running'].includes(status.state)
+  )
+    return 'waiting_input'
+  return status.state
+}
+
+function runLabel(status: StatusSurfaceProps): string | undefined {
+  if (runState(status) === 'waiting_input' && pendingInteraction.value)
+    return pendingInteraction.value === 'approval' ? '正在等待你的确认……' : '正在等待你的回答……'
+  if (status.state === 'calling' && /自动审批/.test(status.message ?? '')) return status.message
+  // 活动阶段使用统一状态文案，避免旧服务端的阶段描述覆盖真实状态。
+  return ['thinking', 'assembling', 'calling', 'generating'].includes(status.state)
+    ? undefined
+    : status.message
+}
+
+function runLive(status: StatusSurfaceProps): boolean {
+  return (
+    props.surface.state === 'open' &&
+    !props.surface.suspended &&
+    ![
+      'paused',
+      'waiting_input',
+      'waiting',
+      'blocked',
+      'completed',
+      'failed',
+      'tool_failed',
+      'cancelled',
+    ].includes(runState(status))
+  )
+}
+
 function pulseState(state: StatusSurfaceProps['state']) {
+  if (state === 'assembling') return 'assembling' as const
   if (state === 'calling') return 'calling' as const
   if (state === 'generating' || state === 'running') return 'generating' as const
   if (state === 'paused') return 'paused' as const
   if (state === 'cancelled') return 'cancelled' as const
-  if (state === 'waiting_input') return 'waiting' as const
+  if (state === 'waiting_input' || state === 'waiting') return 'waiting' as const
+  if (state === 'blocked') return 'paused' as const
   if (state === 'completed') return 'completed' as const
   if (state === 'failed' || state === 'tool_failed') return 'failed' as const
   return 'thinking' as const
@@ -230,68 +339,93 @@ async function resolveApproval(
   decision: ApprovalDecision,
   message?: string,
 ): Promise<void> {
+  if (submittingNodeId.value) return
+  delete inputErrors.value[node.nodeId]
   const value = node.props as ApprovalSurfaceProps
   submittingNodeId.value = node.nodeId
   try {
-    const response = await surfacesApi.submitInput({
-      surfaceId: props.surface.surfaceId,
-      nodeId: node.nodeId,
-      generation: props.surface.generation,
-      seat: seatProof(),
-      action: 'approval.resolve',
-      payload: {
-        approvalId: value.approvalId,
-        decision,
-        message,
-      },
-    })
+    const response = await withInputSeatFor(
+      value.principalId || props.surface.principalId,
+      (seat) =>
+        surfacesApi.submitInput({
+          surfaceId: props.surface.surfaceId,
+          nodeId: node.nodeId,
+          generation: props.surface.generation,
+          seat,
+          action: 'approval.resolve',
+          payload: {
+            approvalId: value.approvalId,
+            principalId: value.principalId,
+            decision,
+            message,
+          },
+        }),
+    )
     const projection = response.data?.projection
     if (projection) installProjection(projection)
+  } catch (error) {
+    inputErrors.value[node.nodeId] = error instanceof Error ? error.message : '提交失败，请重试'
   } finally {
     submittingNodeId.value = null
   }
 }
 
-async function submitAgentInput(
-  node: SurfaceNode,
-  payload: { selectedOptionIds: string[]; message?: string; skipped?: boolean },
-): Promise<void> {
+async function submitAgentInput(node: SurfaceNode, payload: AgentInputSubmission): Promise<void> {
+  if (submittingNodeId.value) return
   const value = inputProps(node)
+  delete inputErrors.value[node.nodeId]
   submittingNodeId.value = node.nodeId
   try {
-    const response = await surfacesApi.submitInput({
-      surfaceId: props.surface.surfaceId,
-      nodeId: node.nodeId,
-      generation: props.surface.generation,
-      seat: seatProof(),
-      action: 'agent-input.resolve',
-      payload: { inputId: value.inputId, ...payload },
-    })
-    const projection = response.data?.projection as ConversationProjectionSnapshot | undefined
+    const response = await withInputSeatFor(
+      value.principalId || props.surface.principalId,
+      (seat) =>
+        surfacesApi.submitInput({
+          surfaceId: props.surface.surfaceId,
+          nodeId: node.nodeId,
+          generation: props.surface.generation,
+          seat,
+          action: 'agent-input.resolve',
+          payload: { inputId: value.inputId, principalId: value.principalId, ...payload },
+        }),
+    )
+    const projection = response.data?.projection
+    clearAgentInputDraft(value.inputId)
     if (projection) installProjection(projection)
+  } catch (error) {
+    inputErrors.value[node.nodeId] =
+      error instanceof Error ? error.message : '提交失败，回答已保留，请重试'
   } finally {
     submittingNodeId.value = null
   }
 }
 
 async function submitInput(node: SurfaceNode, decision: string): Promise<void> {
+  if (submittingNodeId.value) return
   const value = inputProps(node)
+  delete inputErrors.value[node.nodeId]
   submittingNodeId.value = node.nodeId
   try {
-    const response = await surfacesApi.submitInput({
-      surfaceId: props.surface.surfaceId,
-      nodeId: node.nodeId,
-      generation: props.surface.generation,
-      action: 'background-task.submit-input',
-      payload: {
-        taskId: value.inputId,
-        decision,
-        message: inputMessage.value.trim() || undefined,
-      },
-    })
+    const response = await withInputSeatFor(
+      value.principalId || props.surface.principalId,
+      (seat) =>
+        surfacesApi.submitInput({
+          surfaceId: props.surface.surfaceId,
+          nodeId: node.nodeId,
+          generation: props.surface.generation,
+          seat,
+          action: 'background-task.submit-input',
+          payload: {
+            taskId: value.inputId,
+            decision,
+            message: inputMessage.value.trim() || undefined,
+          },
+        }),
+    )
     const projection = response.data?.projection as BackgroundTaskProjectionSnapshot | undefined
     if (projection) installProjection(projection)
     inputMessage.value = ''
+  } catch (error) {
+    inputErrors.value[node.nodeId] = error instanceof Error ? error.message : '提交失败，请重试'
   } finally {
     submittingNodeId.value = null
   }
@@ -327,12 +461,20 @@ function errorMessage(node: SurfaceNode): string {
         <ChatRichText
           v-else
           :content="item.block.source"
+          :agent-id="surface.principalId"
+          :thread-id="surface.threadId"
           :active="!surface.suspended"
           :cache="item.block.stable"
+          :stable="item.block.stable"
         />
       </div>
       <template v-else>
-        <details v-if="item.node.kind === 'thinking'" class="surface-thinking" open>
+        <ModelRetryRecord
+          v-if="item.node.kind === 'model-retry'"
+          :record="item.node.props as ModelRetrySurfaceProps"
+          :active="surface.state === 'open' && !surface.suspended && mainVisible"
+        />
+        <details v-else-if="item.node.kind === 'thinking'" class="surface-thinking" open>
           <summary>
             <span class="surface-thinking__spark" aria-hidden="true" />
             <strong>碎碎念</strong>
@@ -349,20 +491,30 @@ function errorMessage(node: SurfaceNode): string {
               {{ thinkingProps(item.node).source }}
               <i class="surface-thinking__cursor" />
             </p>
-            <ChatRichText v-else :content="thinkingProps(item.node).source" />
+            <ChatRichText
+              v-else
+              :content="thinkingProps(item.node).source"
+              :active="!surface.suspended"
+              :web-preview="false"
+            />
           </div>
         </details>
         <details
           v-else-if="item.node.kind === 'native-reasoning'"
           class="surface-native-reasoning"
-          :open="reasoningOpen"
-          @toggle="reasoningOpen = ($event.currentTarget as HTMLDetailsElement).open"
+          :open="reasoningOpen[item.node.nodeId]"
+          @toggle="
+            reasoningOpen[item.node.nodeId] = ($event.currentTarget as HTMLDetailsElement).open
+          "
         >
           <summary>
             <span class="surface-native-reasoning__cube" aria-hidden="true" />
             <strong>思考过程</strong>
             <span class="surface-native-reasoning__meta">
               {{ reasoningProps(item.node).mode === 'stream' ? '流式' : '非流式' }}
+              <template v-if="reasoningProps(item.node).turn">
+                · 第 {{ reasoningProps(item.node).turn }} 轮
+              </template>
             </span>
             <time v-if="reasoningProps(item.node).durationMs !== undefined">
               {{ formatDuration(reasoningProps(item.node).durationMs) }}
@@ -370,11 +522,24 @@ function errorMessage(node: SurfaceNode): string {
             <PixelIcon name="chevron-down" size="xs" />
           </summary>
           <div class="surface-native-reasoning__body">
-            <ChatRichText :content="reasoningProps(item.node).source" />
+            <StreamMarkdown
+              v-if="reasoningOpen[item.node.nodeId]"
+              :source="reasoningProps(item.node).source"
+              :node-id="item.node.nodeId"
+              :committed="
+                reasoningProps(item.node).phase === 'committed' || surface.state !== 'open'
+              "
+              :active="!surface.suspended"
+            />
           </div>
         </details>
+        <ResourceCard
+          v-else-if="item.node.kind === 'tool-call' && toolResource(item.node, item.toolResult)"
+          :resource="toolResource(item.node, item.toolResult)!"
+        />
         <ToolCallCard
           v-else-if="item.node.kind === 'tool-call'"
+          :active="!surface.suspended && mainVisible"
           :chain-start="!toolChainEdge(itemIndex, -1)"
           :chain-end="!toolChainEdge(itemIndex, 1)"
           :tool="{
@@ -383,8 +548,12 @@ function errorMessage(node: SurfaceNode): string {
             result: item.toolResult?.result,
             isError: item.toolResult?.isError,
             durationMs: item.toolResult?.durationMs,
+            automaticApproval: item.toolResult?.automaticApproval,
             receivedChars: toolProps(item.node).receivedChars,
             assembling: toolProps(item.node).state === 'assembling',
+            interrupted: toolProps(item.node).state === 'failed' && !item.toolResult,
+            fileBaseline: toolProps(item.node).fileBaseline,
+            previewTruncated: toolProps(item.node).previewTruncated,
           }"
         />
         <div v-else-if="item.node.kind === 'tool-result'" class="surface-tool-result">
@@ -392,21 +561,10 @@ function errorMessage(node: SurfaceNode): string {
         </div>
         <RunPulse
           v-else-if="item.node.kind === 'status'"
-          :state="pulseState(statusProps(item.node).state)"
-          :label="statusProps(item.node).message"
+          :state="pulseState(runState(statusProps(item.node)))"
+          :label="runLabel(statusProps(item.node))"
           :elapsed-ms="pulseDuration(statusProps(item.node))"
-          :live="
-            surface.state === 'open' &&
-            !surface.suspended &&
-            ![
-              'paused',
-              'waiting_input',
-              'completed',
-              'failed',
-              'tool_failed',
-              'cancelled',
-            ].includes(statusProps(item.node).state)
-          "
+          :live="runLive(statusProps(item.node))"
           class="surface-run-pulse"
         />
         <div v-else-if="item.node.kind === 'progress'" class="surface-progress">
@@ -422,7 +580,9 @@ function errorMessage(node: SurfaceNode): string {
           v-else-if="
             item.node.kind === 'input' && inputProps(item.node).inputKind === 'agent_question'
           "
+          :key="inputProps(item.node).inputId"
           :request="inputProps(item.node)"
+          :error="inputErrors[item.node.nodeId]"
           :loading="submittingNodeId === item.node.nodeId"
           @answer="(payload) => submitAgentInput(item.node, payload)"
         />
@@ -430,6 +590,9 @@ function errorMessage(node: SurfaceNode): string {
           <strong>{{ inputProps(item.node).title }}</strong>
           <p>{{ inputProps(item.node).question }}</p>
           <textarea v-model="inputMessage" rows="2" maxlength="2000" placeholder="附言（可选）" />
+          <p v-if="inputErrors[item.node.nodeId]" role="alert">
+            {{ inputErrors[item.node.nodeId] }}
+          </p>
           <div>
             <button
               v-for="action in inputProps(item.node).actions"
@@ -443,34 +606,14 @@ function errorMessage(node: SurfaceNode): string {
             </button>
           </div>
         </div>
-        <button
-          v-else-if="item.node.kind === 'attachment' && attachmentProps(item.node).kind === 'image'"
-          type="button"
-          class="surface-image"
-          aria-label="查看原图"
-          @click="openAttachmentImage(attachmentProps(item.node).id)"
-        >
-          <span class="surface-image__spark surface-image__spark--one" aria-hidden="true">✦</span>
-          <span class="surface-image__spark surface-image__spark--two" aria-hidden="true">◇</span>
-          <img
-            :src="attachmentsApi.contentUrl(attachmentProps(item.node).id)"
-            alt="用户发送的图片"
-          />
-          <i class="surface-image__shine" aria-hidden="true" />
-        </button>
-        <article v-else-if="item.node.kind === 'attachment'" class="surface-attachment">
-          <PixelIcon name="file" size="md" />
-          <div>
-            <strong>{{ attachmentProps(item.node).name }}</strong>
-            <span>
-              {{ attachmentProps(item.node).mimeType }} ·
-              {{ Math.ceil(attachmentProps(item.node).sizeBytes / 1024) }} KB
-            </span>
-          </div>
-        </article>
+        <ResourceCard
+          v-else-if="item.node.kind === 'attachment'"
+          :resource="attachmentProps(item.node)"
+        />
         <ApprovalCard
           v-else-if="item.node.kind === 'approval'"
           :request="approvalRequest(item.node)"
+          :error="inputErrors[item.node.nodeId]"
           :loading="submittingNodeId === item.node.nodeId"
           compact
           @resolve="(decision, message) => resolveApproval(item.node, decision, message)"
@@ -487,21 +630,6 @@ function errorMessage(node: SurfaceNode): string {
       </template>
     </template>
     <span v-if="surface.state === 'open'" class="msg-streaming-cursor" />
-    <Teleport to="body">
-      <div
-        v-if="previewImageUrl"
-        class="surface-image-preview"
-        role="dialog"
-        aria-modal="true"
-        aria-label="图片预览"
-        @click.self="previewImageUrl = null"
-      >
-        <button type="button" aria-label="关闭图片预览" @click="previewImageUrl = null">
-          <PixelIcon name="close" size="sm" />
-        </button>
-        <img :src="previewImageUrl" alt="用户发送的图片原图" />
-      </div>
-    </Teleport>
   </div>
 </template>
 
@@ -536,10 +664,27 @@ function errorMessage(node: SurfaceNode): string {
 .conversation-surface {
   min-width: 0;
 }
+.surface-markdown-block {
+  display: flow-root;
+  margin-block: 0.85em;
+}
+/* 流式稳定段有独立容器，标题的跨容器间距也要显式保留。 */
+.surface-markdown-block:has(> .chat-rich-text > :is(h1, h2, h3, h4, h5, h6):first-child) {
+  margin-block-start: 1.55em;
+}
+.surface-markdown-block:first-child,
+.surface-markdown-block:has(
+    > .chat-rich-text > :is(h1, h2, h3, h4, h5, h6):first-child
+  ):first-child {
+  margin-block-start: 0;
+}
+.surface-markdown-block:last-child {
+  margin-block-end: 0;
+}
 .surface-thinking {
   position: relative;
   width: fit-content;
-  max-width: min(100%, 680px);
+  max-width: min(96%, 640px);
   margin: 8px 4px 10px 2px;
   overflow: visible;
   border: 0;
@@ -696,10 +841,10 @@ function errorMessage(node: SurfaceNode): string {
   );
   color: var(--ui-text-secondary);
   font-size: 11px;
-  line-height: 1.55;
+  line-height: 1.85;
 }
 .surface-thinking__live {
-  min-height: 1.55em;
+  min-height: 1.85em;
   margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -740,7 +885,9 @@ function errorMessage(node: SurfaceNode): string {
 }
 
 .surface-native-reasoning {
-  margin: 8px 0;
+  width: 96%;
+  max-width: 100%;
+  margin: 10px 0;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--ui-accent-purple) 24%, var(--ui-border-default));
   border-radius: 10px;
@@ -800,6 +947,7 @@ function errorMessage(node: SurfaceNode): string {
   padding: 10px 12px 10px 15px;
   border-top: 1px solid color-mix(in srgb, var(--ui-accent-purple) 18%, var(--ui-border-default));
   color: var(--ui-text-secondary);
+  line-height: 1.85;
 }
 .surface-native-reasoning__body::before {
   position: absolute;
@@ -1003,6 +1151,9 @@ function errorMessage(node: SurfaceNode): string {
   cursor: pointer;
 }
 @media (max-width: 720px) {
+  .surface-native-reasoning {
+    width: 100%;
+  }
   .conversation-surface--images {
     max-width: 92vw;
     flex-wrap: wrap;

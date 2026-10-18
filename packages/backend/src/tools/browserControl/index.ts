@@ -5,6 +5,7 @@ import type { BoundCapabilityPort } from '../../kernel/capabilityDirectory'
 import type { ToolContext, ToolHandler } from '../../services/agent/toolRegistry'
 import type { ToolDefinition } from '../../services/pipeline/types'
 import manifest from './manifest.json'
+import { browserNavigationTarget, type BrowserPreviewResolver } from './navigationTarget'
 
 interface BrowserToolContribution {
   definition: ToolDefinition
@@ -25,6 +26,7 @@ export function createBrowserToolContributions(
     | ((observation: BrowserToolObservation) => void | Promise<void>) = port.offer?.operations ??
     WEB_PAGE_OPERATIONS,
   observer?: (observation: BrowserToolObservation) => void | Promise<void>,
+  preview?: BrowserPreviewResolver,
 ): BrowserToolContribution[] {
   const availableOperations =
     typeof operationsOrObserver === 'function' ? WEB_PAGE_OPERATIONS : operationsOrObserver
@@ -44,7 +46,7 @@ export function createBrowserToolContributions(
         processId: context.processId,
         deadline: context.deadline,
       }
-      const observed = await interactions.invoke(operation, args, callContext)
+      const observed = await interactions.invoke(operation, args, callContext, context.signal)
       const result = observed.result
       await onObservation?.({ operation, result, context })
       if (operation === 'screenshot' || operation === 'elementScreenshot') {
@@ -80,9 +82,7 @@ export function createBrowserToolContributions(
 
   const handlers: Record<string, ToolHandler> = {
     browser_open_url: async (args, context) => {
-      let url = String(args.url ?? '').trim()
-      if (!url) return JSON.stringify({ error: '请提供 URL' })
-      if (!/^https?:\/\//i.test(url)) url = `https://${url}`
+      const url = await browserNavigationTarget(String(args.url ?? ''), context, preview)
       return invoke('open', { url }, context)
     },
     browser_click: async (args, context) => {
@@ -144,7 +144,11 @@ export function createBrowserToolContributions(
             {
               principalId: context.agentId,
               correlationId: context.toolCallId ?? `browser:${operations[action]}:${Date.now()}`,
+              executionId: context.executionId,
+              processId: context.processId,
+              deadline: context.deadline,
             },
+            context.signal,
           )
           await onObservation?.({ operation: operations[action], result, context })
           return JSON.stringify({ success: true, result })

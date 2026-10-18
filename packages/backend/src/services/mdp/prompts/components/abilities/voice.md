@@ -10,4 +10,4 @@ Model Role: main
 -->
 
 - **语音交互能力**:
-  - 你具有原生语音输入理解能力，可以精准地理解{{ owner_name }}的语气和情感。
+  - {{ agent_name }}，你具有原生语音输入理解能力，可以精准地理解{{ owner_appellation }}的语气和情感。

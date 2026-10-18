@@ -21,6 +21,7 @@ import { assertKernelDeadline, createKernelEnvelope } from './kernelEnvelope'
 
 export type CapabilityProviderInvoke = (
   envelope: KernelEnvelope<{ operation: string; input: unknown }>,
+  signal?: AbortSignal,
 ) => Promise<unknown>
 
 interface ProviderRegistration {
@@ -37,6 +38,7 @@ export interface BoundCapabilityPort {
     operation: string,
     input: TInput,
     context: KernelCallContext,
+    signal?: AbortSignal,
   ): Promise<TOutput>
   dispose(): Promise<void>
 }
@@ -125,7 +127,12 @@ export class CapabilityDirectory {
     let changed = false
     for (const registration of this.providers.values()) {
       if (registration.offer.placement?.providerNodeId !== nodeId) continue
-      registration.offer = Object.freeze({ ...registration.offer, leaseExpiresAt })
+      // 目录与 Placement 使用同一份续租期限，避免目录仍在线而路由已经判定过期。
+      registration.offer = Object.freeze({
+        ...registration.offer,
+        leaseExpiresAt,
+        placement: { ...registration.offer.placement, leaseExpiresAt },
+      })
       changed = true
     }
     if (changed) this.notify()
@@ -178,7 +185,9 @@ export class CapabilityDirectory {
         operation: string,
         value: TInput,
         context: KernelCallContext,
+        signal?: AbortSignal,
       ): Promise<TOutput> => {
+        signal?.throwIfAborted()
         if (!active) throw new Error('CAPABILITY_PORT_CLOSED: Port 已释放')
         assertKernelDeadline(context)
         const current = this.providers.get(registration.offer.offerId)
@@ -216,7 +225,7 @@ export class CapabilityDirectory {
           payload: { operation, input: value },
           object: registration.offer.provider,
         })
-        return (await registration.invoke(envelope)) as TOutput
+        return (await registration.invoke(envelope, signal)) as TOutput
       },
       dispose,
     })

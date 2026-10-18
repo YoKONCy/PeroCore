@@ -11,6 +11,7 @@ import { z } from 'zod'
 import type { AppContext } from '../container'
 import { AppError } from '../lib/appError'
 import type { ProductivityRuntime } from '../tools/productivityRuntimeHolder'
+import type { ThreadService } from '../services/thread/threadService'
 
 const sessionQuery = z.object({
   agentId: z.string().min(1),
@@ -20,6 +21,7 @@ const sessionQuery = z.object({
 const createSchema = sessionQuery.extend({
   /** 留空时创建当前平台的交互式系统 Shell。 */
   command: z.string().optional(),
+  argv: z.array(z.string().refine((value) => !value.includes('\0'))).optional(),
   cwd: z.string().optional(),
   title: z.string().optional(),
   cols: z.number().int().min(20).max(500).optional(),
@@ -41,23 +43,78 @@ export function createTerminalRouter(ctx: AppContext) {
   router.get('/', zValidator('query', sessionQuery), async (c) => {
     const session = await prepare(
       runtime,
+      ctx.threadService,
       c.req.valid('query').agentId,
       c.req.valid('query').threadId,
     )
-    return c.json({ code: 'OK', data: { terminals: runtime.terminals.list(session.id) } })
+    return c.json({
+      code: 'OK',
+      data: {
+        terminals: runtime.terminals.list(session.id),
+        history: runtime.terminals.list(session.id, true).filter((terminal) => terminal.archivedAt),
+      },
+    })
   })
+
+  router.post(
+    '/cleanup',
+    zValidator(
+      'json',
+      sessionQuery.extend({
+        action: z.enum(['archive_completed', 'stop_agent', 'close_all']),
+      }),
+    ),
+    async (c) => {
+      const input = c.req.valid('json')
+      const session = await prepare(runtime, ctx.threadService, input.agentId, input.threadId)
+      if (input.action === 'archive_completed') runtime.terminals.archiveCompleted(session.id)
+      else if (input.action === 'stop_agent') await runtime.terminals.stopOwned(session.id)
+      else
+        await Promise.all(
+          runtime.terminals
+            .list(session.id)
+            .map((terminal) => runtime.terminals.close(terminal.id, session.id)),
+        )
+      return c.json({ code: 'OK', data: { cleaned: true } })
+    },
+  )
+
+  router.post(
+    '/:id/pin',
+    zValidator('json', sessionQuery.extend({ pinned: z.boolean() })),
+    async (c) => {
+      const input = c.req.valid('json')
+      const session = await prepare(runtime, ctx.threadService, input.agentId, input.threadId)
+      try {
+        return c.json({
+          code: 'OK',
+          data: runtime.terminals.pin(c.req.param('id'), session.id, input.pinned),
+        })
+      } catch (error) {
+        throw validation(error)
+      }
+    },
+  )
 
   router.post('/', zValidator('json', createSchema), async (c) => {
     const input = c.req.valid('json')
-    const session = await prepare(runtime, input.agentId, input.threadId, input.taskId)
+    const session = await prepare(
+      runtime,
+      ctx.threadService,
+      input.agentId,
+      input.threadId,
+      input.taskId,
+    )
     try {
       const terminal = await runtime.terminals.create({
         executionSessionId: session.id,
         command: input.command,
+        argv: input.argv,
         cwd: input.cwd,
         title: input.title,
         cols: input.cols,
         rows: input.rows,
+        owner: 'user',
       })
       return c.json({ code: 'OK', data: terminal })
     } catch (error) {
@@ -77,7 +134,7 @@ export function createTerminalRouter(ctx: AppContext) {
     ),
     async (c) => {
       const query = c.req.valid('query')
-      const session = await prepare(runtime, query.agentId, query.threadId)
+      const session = await prepare(runtime, ctx.threadService, query.agentId, query.threadId)
       try {
         const result = runtime.terminals.read(
           c.req.param('id'),
@@ -97,7 +154,7 @@ export function createTerminalRouter(ctx: AppContext) {
     zValidator('json', writeSchema.extend(sessionQuery.shape)),
     async (c) => {
       const input = c.req.valid('json')
-      const session = await prepare(runtime, input.agentId, input.threadId)
+      const session = await prepare(runtime, ctx.threadService, input.agentId, input.threadId)
       try {
         runtime.terminals.write(c.req.param('id'), session.id, input.data)
         return c.json({ code: 'OK', data: { written: true } })
@@ -112,7 +169,7 @@ export function createTerminalRouter(ctx: AppContext) {
     zValidator('json', resizeSchema.extend(sessionQuery.shape)),
     async (c) => {
       const input = c.req.valid('json')
-      const session = await prepare(runtime, input.agentId, input.threadId)
+      const session = await prepare(runtime, ctx.threadService, input.agentId, input.threadId)
       try {
         runtime.terminals.resize(c.req.param('id'), session.id, input.cols, input.rows)
         return c.json({ code: 'OK', data: { resized: true } })
@@ -122,10 +179,10 @@ export function createTerminalRouter(ctx: AppContext) {
     },
   )
 
-  for (const action of ['interrupt', 'kill', 'close'] as const) {
+  for (const action of ['interrupt', 'kill', 'close', 'archive'] as const) {
     router.post(`/:id/${action}`, zValidator('json', sessionQuery), async (c) => {
       const input = c.req.valid('json')
-      const session = await prepare(runtime, input.agentId, input.threadId)
+      const session = await prepare(runtime, ctx.threadService, input.agentId, input.threadId)
       try {
         await runtime.terminals[action](c.req.param('id'), session.id)
         return c.json({ code: 'OK', data: { [action]: true } })
@@ -140,10 +197,23 @@ export function createTerminalRouter(ctx: AppContext) {
 
 async function prepare(
   runtime: ProductivityRuntime,
+  threads: ThreadService,
   agentId: string,
   threadId: string,
   taskId?: string,
 ) {
+  const thread = await threads.getThread(threadId)
+  if (!thread) throw new AppError('NOT_FOUND', { message: '终端关联的会话已不存在或已回滚' })
+  if (thread.agentId !== agentId)
+    throw new AppError('FORBIDDEN', { message: '终端关联的会话不属于当前角色' })
+  if (thread.channel !== 'desktop')
+    throw new AppError('FORBIDDEN', { message: '工作区终端需要 desktop 会话，请切换回普通对话' })
+  if (taskId || thread.purpose === 'background_task') {
+    const owned = runtime.sessions.findByOwner({ agentId, threadId, taskId, channel: 'desktop' })
+    if (!owned || !owned.taskId)
+      throw new AppError('NOT_FOUND', { message: '任务执行会话尚未建立或已清理' })
+    return owned
+  }
   const principalRoot = runtime.workspace.getWorkspaceRoot(agentId)
   const workspaceRoot = taskId
     ? path.join(path.dirname(principalRoot), 'tasks', taskId, 'workspace')

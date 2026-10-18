@@ -6,24 +6,31 @@
  */
 import { PerformanceBaselineRegistry } from '@infos/shared'
 
-export const frontendPerformance = new PerformanceBaselineRegistry()
-
-let observer: PerformanceObserver | undefined
+export const frontendPerformance = new PerformanceBaselineRegistry(2048)
 
 export function startFrontendPerformanceObserver(): () => void {
-  if (typeof PerformanceObserver === 'undefined') return () => undefined
+  let observer: PerformanceObserver | undefined
+  const timer = setInterval(() => {
+    if (!document.hidden) sampleFrontendMemory()
+  }, 30_000)
   try {
-    observer = new PerformanceObserver((list) => {
-      for (const entry of list.getEntries())
-        frontendPerformance.observe('main_thread_long_task_ms', entry.duration)
-    })
-    observer.observe({ entryTypes: ['longtask'] })
+    if (typeof PerformanceObserver !== 'undefined')
+      observer = new PerformanceObserver((list) => {
+        for (const entry of list.getEntries())
+          frontendPerformance.observe('main_thread_long_task_ms', entry.duration)
+      })
+    observer?.observe({ entryTypes: ['longtask'] })
   } catch {
     observer = undefined
   }
+  const diagnostics = window as Window & {
+    __INFOS_PERFORMANCE__?: () => ReturnType<PerformanceBaselineRegistry['snapshot']>
+  }
+  if (import.meta.env.DEV) diagnostics.__INFOS_PERFORMANCE__ = () => frontendPerformance.snapshot()
   return () => {
+    clearInterval(timer)
     observer?.disconnect()
-    observer = undefined
+    if (import.meta.env.DEV) delete diagnostics.__INFOS_PERFORMANCE__
   }
 }
 

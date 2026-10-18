@@ -5,6 +5,7 @@
  */
 
 import { apiClient } from '../client'
+import type { BackgroundTaskInfo } from './backgroundTasksApi'
 
 /** 任务执行统计 */
 export interface TaskStats {
@@ -52,12 +53,39 @@ export interface TaskListData {
 /** 用户提醒项 (由 Agent 通过 set_reminder 工具创建) */
 export interface ReminderItem {
   id: number
-  type: 'reminder' | 'topic' | 'reaction' | 'agent_task'
+  type: 'reminder' | 'topic' | 'reaction' | 'agent_task' | 'follow_up'
   time: string
   content: string
   isTriggered: boolean
   agentId: string
   createdAt: string | null
+  status: 'pending' | 'dispatching' | 'dispatched' | 'completed' | 'failed' | 'cancelled'
+  threadId: string | null
+  reason: string | null
+  lastError: string | null
+  attempts: number
+  taskId: string | null
+}
+
+export interface ProactiveSuggestion {
+  id: string
+  agentId: string
+  threadId: string
+  title: string
+  instruction: string
+  reason: string
+  status: 'open' | 'accepting' | 'accepted' | 'dismissed'
+  sourceExecutionId: string | null
+  taskId: string | null
+  createdAt: string
+}
+
+export interface CompanionActivity {
+  agentId: string
+  tasks: BackgroundTaskInfo[]
+  recent: BackgroundTaskInfo[]
+  scheduled: ReminderItem[]
+  suggestions: ProactiveSuggestion[]
 }
 
 /** 提醒列表响应 */
@@ -67,6 +95,17 @@ export interface ReminderListData {
 }
 
 export const schedulerApi = {
+  activity: (agentId: string) =>
+    apiClient.get<CompanionActivity>(`/scheduler/activity?agentId=${encodeURIComponent(agentId)}`),
+  cancelReminder: (id: number, agentId: string) =>
+    apiClient.post(`/scheduler/reminders/${id}/cancel`, { agentId }),
+  retryReminder: (id: number, agentId: string) =>
+    apiClient.post(`/scheduler/reminders/${id}/retry`, { agentId }),
+  resolveSuggestion: (id: string, agentId: string, action: 'accept' | 'dismiss') =>
+    apiClient.post<ProactiveSuggestion>(
+      `/scheduler/suggestions/${encodeURIComponent(id)}/${action}`,
+      { agentId },
+    ),
   /** 调度器全局状态 */
   status: () => apiClient.get<SchedulerStatus>('/scheduler/status'),
 

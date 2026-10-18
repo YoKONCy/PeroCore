@@ -1,4 +1,11 @@
 export { NodeHost } from './nodeHost'
+export {
+  ApplicationProcessLifetime,
+  ApplicationDataLease,
+  parseApplicationDesktopGuard,
+  watchApplicationDesktop,
+  type ApplicationDesktopGuard,
+} from './applicationLifetime'
 export { NodeProviderRuntime } from './providerRuntime'
 export { FileNodeIdentityStore, PairingAuthority } from './identity'
 export { PersistentNodeTrustStore, type TrustedNodeRecord } from './trustStore'

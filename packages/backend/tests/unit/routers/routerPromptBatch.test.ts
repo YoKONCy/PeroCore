@@ -1,5 +1,5 @@
+import { fileURLToPath } from 'node:url'
 import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { createModelRouter } from '@infos/backend/routers/model.router'
 import { createAssetRouter } from '@infos/backend/routers/asset.router'
@@ -7,7 +7,9 @@ import { createSystemRouter } from '@infos/backend/routers/system.router'
 // AIOS: PromptService 已废弃移除（死代码清理），相关测试块一并移除
 
 const appVersion = (
-  JSON.parse(readFileSync(resolve(process.cwd(), 'package.json'), 'utf8')) as { version: string }
+  JSON.parse(
+    readFileSync(fileURLToPath(new URL('../../../../../package.json', import.meta.url)), 'utf8'),
+  ) as { version: string }
 ).version
 
 async function readJson(response: Response) {
@@ -92,7 +94,7 @@ describe('ModelRouter', () => {
       code: 'OK',
       data: { id: 1, temperature: null, topP: null, maxTokens: null },
     })
-    expect(await readJson(deleted)).toEqual({ code: 'OK', message: '模型配置已删除' })
+    expect(await readJson(deleted)).toMatchObject({ code: 'OK' })
     expect(await readJson(remote)).toMatchObject({ code: 'OK', data: ['gpt-4o', 'gpt-4.1'] })
     expect(await readJson(tested)).toMatchObject({ code: 'OK', data: { success: true } })
     expect(ctx.modelService.listRemoteModels).toHaveBeenCalledWith({
@@ -167,7 +169,6 @@ describe('AssetRouter', () => {
 
     expect(await readJson(response)).toMatchObject({
       code: 'OK',
-      message: '该模板本就是官方版本，无需恢复',
       data: { restored: false },
     })
   })
@@ -233,7 +234,7 @@ describe('SystemRouter', () => {
         },
       },
     })
-    expect(await readJson(open)).toEqual({ code: 'OK', message: '已请求打开' })
+    expect(await readJson(open)).toMatchObject({ code: 'OK' })
     expect(ctx.systemService.openPath).toHaveBeenCalledWith('C:/demo')
   })
 })

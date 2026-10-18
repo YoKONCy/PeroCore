@@ -48,7 +48,7 @@ function insert(
     attributes?: Record<string, never | string | number | boolean>
     parentGeneration: number
   },
-): DocumentOperation {
+): Extract<DocumentOperation, { type: 'node.insert' }> {
   return {
     operationId: `operation:${input.id}` as OperationId,
     documentId: snapshot.documentId,
@@ -104,7 +104,9 @@ describe('Document Engine 高级领域能力', () => {
 
     const corrupted = Buffer.from(archive)
     const marker = corrupted.indexOf(Buffer.from('project.json'))
-    corrupted[marker + 'project.json'.length + 35] ^= 0xff
+    expect(marker).toBeGreaterThanOrEqual(0)
+    const corruptedOffset = marker + 'project.json'.length + 35
+    corrupted[corruptedOffset] = corrupted[corruptedOffset]! ^ 0xff
     expect(() => importer.importAsCopy(corrupted, asKernelNodeId('node-target'))).toThrow()
     source.close()
     target.close()
@@ -219,7 +221,9 @@ describe('Document Engine 高级领域能力', () => {
       body: '需要补充说明',
     })
     expect(engine.inspect(snapshot.documentId).rootHash).toBe(before)
-    expect(engine.listComments(snapshot.documentId)).toEqual([comment])
+    expect(engine.listComments(snapshot.documentId)).toEqual([
+      { ...comment, anchorState: 'attached' },
+    ])
     expect(engine.resolveComment(comment.commentId, 'human:owner')).toEqual(
       expect.objectContaining({ status: 'resolved', resolvedBy: 'human:owner' }),
     )

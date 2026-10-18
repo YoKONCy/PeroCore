@@ -194,15 +194,33 @@ export class ContextRegionSelector {
 
     let usedTokens = 0
     const selected: ContextRegion[] = []
-    for (const region of candidates) {
-      const fits = normalizedBudget === 0 || usedTokens + region.tokenEstimate <= normalizedBudget
+    for (const candidate of candidates) {
+      let region = candidate
+      let fallback = false
+      let fits = normalizedBudget === 0 || usedTokens + region.tokenEstimate <= normalizedBudget
+      if (!region.required && !fits && region.fallbackContent) {
+        region = this.measure(
+          normalizeRegion({
+            ...region,
+            content: region.fallbackContent,
+            contentHash: '',
+            fallbackContent: undefined,
+          }),
+        )
+        fits = normalizedBudget === 0 || usedTokens + region.tokenEstimate <= normalizedBudget
+        fallback = true
+      }
       if (!region.required && !fits) {
         manifest.push({ ...this.manifest(region), selected: false, reason: 'budget_exceeded' })
         continue
       }
       selected.push(freezeRegion(region))
       usedTokens += region.tokenEstimate
-      manifest.push({ ...this.manifest(region), selected: true, reason: 'selected' })
+      manifest.push({
+        ...this.manifest(region),
+        selected: true,
+        reason: fallback ? 'fallback' : 'selected',
+      })
     }
     const stableManifest = manifest.sort((left, right) =>
       left.regionId.localeCompare(right.regionId),
@@ -217,7 +235,9 @@ export class ContextRegionSelector {
   }
 
   private measure(region: ContextRegion): ContextRegion {
-    return { ...region, tokenEstimate: this.tokenizer.countTokens(region.content) }
+    // 已由必选渲染结果承载的诊断条目只进入清单，避免同一提示词重复计费。
+    const diagnostic = region.delivery === 'manifest-only' && !region.required
+    return { ...region, tokenEstimate: diagnostic ? 0 : this.tokenizer.countTokens(region.content) }
   }
 
   private manifest(region: ContextRegion): Omit<ContextRegionManifestEntry, 'selected' | 'reason'> {

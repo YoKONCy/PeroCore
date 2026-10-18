@@ -145,8 +145,6 @@ export interface AgentProfile {
   configPath: string
   /** system_prompt.md 文件路径 */
   promptPath: string
-  /** 是否使用表情包 */
-  useStickers: boolean
   /** 看板娘动态文案 (合并自 waifu_texts.json) */
   waifuTexts: Record<string, unknown> | null
 }
@@ -171,7 +169,7 @@ export class AgentManager {
   /** 已启用的 Agent ID 集合 */
   enabledAgents = new Set<string>()
 
-  /** 角色状态服务 (pet_states 表)，用于把 finish_task 写入的动态台词合并进看板娘台词 */
+  /** 会话角色状态服务，用于合并当前会话的动态台词。 */
   private petStateService?: PetStateService
 
   constructor(
@@ -411,7 +409,7 @@ export class AgentManager {
    * 确保指定 Agent 存在可写的用户副本
    *
    * 内置 Agent 位于只读安装目录（@app/...），用户首次编辑时把整个角色包
-   * （agent.json / system_prompt.md / capabilities.yaml / avatar / stickers 等）
+   * （agent.json / system_prompt.md / capabilities.yaml / avatar 等）
    * 复制到 @data/agents/{id}，并把内存中该 Agent 的读写路径切换到副本。
    *
    * 已存在于 @data 的自定义角色直接返回原目录。
@@ -484,7 +482,7 @@ export class AgentManager {
    *
    * @returns 合并后的台词对象，agent 不存在时返回 null
    */
-  async getWaifuTexts(agentId: string): Promise<Record<string, unknown> | null> {
+  async getWaifuTexts(agentId: string, threadId?: string): Promise<Record<string, unknown> | null> {
     const agent = this.agents.get(agentId)
     if (!agent) return null
 
@@ -526,11 +524,11 @@ export class AgentManager {
       }
     }
 
-    // 4. pet_states 表合并 (finish_task 写入的动态台词，优先级最高)
+    // 4. 合并当前会话的临时台词，不读取旧全局状态。
     //    click → texts.click (按部位深合并)；idle → texts.idleMessages；back → texts.backMessages
     if (this.petStateService) {
       try {
-        const petState = await this.petStateService.get(agentId)
+        const petState = await this.petStateService.get(agentId, threadId)
         if (petState && this.petStateService.hasActiveTemporaryTexts(petState)) {
           const petClick = safeJsonParse<Record<string, string[]>>(petState.clickMessagesJson, {})
           if (petClick && Object.keys(petClick).length > 0) {
@@ -560,7 +558,7 @@ export class AgentManager {
           }
         }
       } catch (err) {
-        logger.warn(`合并 pet_states 台词失败: ${err}`)
+        logger.warn(`合并会话动态台词失败: ${err}`)
       }
     }
 
@@ -681,7 +679,7 @@ export class AgentManager {
       traits: {
         social: [],
       },
-      social: { enabled: false, qq_id: '', use_stickers: true },
+      social: { enabled: false, qq_id: '' },
       tool_policies: {},
     }
     const configPath = path.join(agentDir, 'agent.json')
@@ -802,7 +800,6 @@ export class AgentManager {
    *
    * 只覆盖 social.enabled 和 social.qq_id —— 这两个是部署/用户特定的，
    * 不应硬编码在静态 agent.json 中。
-   * use_stickers 等静态元数据仍从 agent.json 读取。
    */
   async applySocialOverrides(agentId: string): Promise<void> {
     if (!this.configRepo) return
@@ -875,7 +872,9 @@ export class AgentManager {
     const socialTraits = traits.social ?? (config.social_traits as string[]) ?? []
 
     // 社交绑定
-    const socialBinding = (config.social ?? {}) as Record<string, unknown>
+    const socialBinding = { ...((config.social ?? {}) as Record<string, unknown>) }
+    // 兼容旧角色包，收藏表情已迁移为社交账号能力。
+    delete socialBinding.use_stickers
 
     // 头像
     const avatarPath = this.findAvatar(agentDir)
@@ -895,7 +894,6 @@ export class AgentManager {
       avatarPath,
       configPath,
       promptPath: path.join(agentDir, 'system_prompt.md'),
-      useStickers: (socialBinding.use_stickers as boolean) ?? false,
       waifuTexts: config.waifu_texts as Record<string, unknown>,
     }
   }
@@ -939,12 +937,20 @@ export class AgentManager {
     logger.info(`Agent 头像已保存: ${agentId}`)
   }
 
-  /**
-   * 获取 Agent 头像二进制数据 (供 Router 层使用)
-   *
-   * 返回 { buffer, mime } 或 null (无头像)。
-   * 文件 I/O 封装在 Service 层，Router 不直接操作文件。
-   */
+  /** 只发布实际存在的头像资源，无头像或已删除的角色不返回地址。 */
+  getAvatarUrl(agentId: string): string | undefined {
+    const agent = this.agents.get(agentId.toLowerCase())
+    if (!agent?.avatarPath) return undefined
+    try {
+      return statSync(agent.avatarPath).isFile()
+        ? `/agents/${encodeURIComponent(agent.id)}/avatar`
+        : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  /** 获取头像二进制数据；没有头像时返回 null，文件读取由 Service 负责。 */
   getAvatarData(agentId: string): { buffer: Buffer; mime: string } | null {
     const agent = this.agents.get(agentId.toLowerCase())
     if (!agent?.avatarPath || !existsSync(agent.avatarPath)) return null

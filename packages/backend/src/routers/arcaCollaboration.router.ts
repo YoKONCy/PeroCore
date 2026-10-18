@@ -17,6 +17,16 @@ const createSchema = z.object({
   nodeId: z.string().min(1).optional(),
   agentId: z.string().min(1).max(64),
   requirements: z.string().max(2000).optional(),
+  requestId: z.string().min(1).max(150).optional(),
+  baseRevisionId: z.string().min(1).optional(),
+  originThreadId: z.string().min(1).max(200).optional(),
+  selection: z
+    .object({
+      revisionId: z.string().min(1),
+      anchor: z.object({ nodeId: z.string().min(1), offset: z.number().int().nonnegative() }),
+      focus: z.object({ nodeId: z.string().min(1), offset: z.number().int().nonnegative() }),
+    })
+    .optional(),
 })
 
 /** Arca协作任务控制面，只负责Kernel编排，不进入Document Authority。 */
@@ -31,14 +41,23 @@ export function createArcaCollaborationRouter(ctx: AppContext) {
         agents: ctx.agentManager
           .listAgents()
           .filter((agent) => agent.isEnabled)
-          .map(({ id, name }) => ({ id, name })),
+          .map(({ id, name }) => ({
+            id,
+            name,
+            avatarUrl: ctx.agentManager.getAgent(id)?.avatarPath
+              ? '/api/agents/' + encodeURIComponent(id) + '/avatar'
+              : undefined,
+          })),
       },
     }),
   )
 
   router.post('/', zValidator('json', createSchema), async (c) => {
     const body = c.req.valid('json')
-    if (!ctx.agentManager.getAgent(body.agentId)) {
+    if (
+      !ctx.agentManager.getAgent(body.agentId) ||
+      !ctx.agentManager.enabledAgents.has(body.agentId.toLowerCase())
+    ) {
       throw new AppError('AGENT_NOT_FOUND', { message: `Agent不存在: ${body.agentId}` })
     }
     try {

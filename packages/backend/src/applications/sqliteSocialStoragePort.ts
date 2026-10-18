@@ -1,6 +1,7 @@
 import { currentKernelExecution } from '../kernel/executionContext'
 import type { KernelOutboxRepository } from '../kernel/kernelOutboxRepository'
 import type Database from 'better-sqlite3'
+import type { SocialTurnRecord } from '@infos/shared'
 import type {
   SocialContactImpressionRecord,
   SocialMessageRecord,
@@ -13,10 +14,147 @@ export class SqliteSocialStoragePort implements SocialStoragePort {
   constructor(
     private readonly db: Database.Database,
     private readonly outbox?: KernelOutboxRepository,
+    private readonly purgeMemory?: (agentId: string) => Promise<void>,
+    readonly memoryBackground?: import('@infos/shared').MemoryBackgroundPolicy,
   ) {}
+
+  async getTurn(id: string): Promise<SocialTurnRecord | null> {
+    const row = this.db.prepare('SELECT record_json FROM social_turns WHERE id=?').get(id) as
+      | { record_json: string }
+      | undefined
+    return row ? (JSON.parse(row.record_json) as SocialTurnRecord) : null
+  }
+
+  async saveTurn(record: SocialTurnRecord): Promise<void> {
+    const fence = this.db
+      .prepare(
+        "SELECT max(cleared_at) AS value FROM social_data_fences WHERE agent_id=? AND (channel_type='' OR (channel_type=? AND channel_id=?))",
+      )
+      .get(record.agentId, record.channelType, record.channelId) as { value: number | null }
+    if (fence.value !== null && Date.parse(record.startedAt) <= fence.value)
+      throw new Error('社交数据已清理，已阻止旧任务回写')
+    this.db
+      .prepare(
+        `INSERT INTO social_turns(id,agent_id,account_id,channel_type,channel_id,status,record_json,updated_at)
+      VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,record_json=excluded.record_json,updated_at=excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.agentId,
+        record.accountId,
+        record.channelType,
+        record.channelId,
+        record.status,
+        JSON.stringify(record),
+        record.updatedAt,
+      )
+  }
+
+  async listRecoverableTurns(
+    agentId: string,
+    includeTerminal = false,
+  ): Promise<SocialTurnRecord[]> {
+    const rows = this.db
+      .prepare(
+        "SELECT record_json FROM social_turns WHERE agent_id=? AND status IN ('running','retrying','waiting') ORDER BY updated_at DESC",
+      )
+      .all(agentId) as Array<{ record_json: string }>
+    if (includeTerminal)
+      rows.push(
+        ...(this.db
+          .prepare(
+            "SELECT record_json FROM social_turns WHERE agent_id=? AND status NOT IN ('running','retrying','waiting') ORDER BY updated_at DESC LIMIT 100",
+          )
+          .all(agentId) as Array<{ record_json: string }>),
+      )
+    return rows.map((row) => JSON.parse(row.record_json) as SocialTurnRecord)
+  }
+
+  async deleteTurns(agentId: string, channelType?: string, channelId?: string): Promise<void> {
+    this.clearTurnRows(agentId, channelType, channelId)
+  }
+  private clearTurnRows(agentId: string, channelType?: string, channelId?: string): void {
+    this.db.transaction(() => {
+      const id = JSON.stringify([agentId, channelType ?? '', channelId ?? ''])
+      this.db
+        .prepare(
+          `INSERT INTO social_data_fences(id,agent_id,channel_type,channel_id,version,cleared_at) VALUES(?,?,?,?,1,?)
+        ON CONFLICT(id) DO UPDATE SET version=version+1,cleared_at=excluded.cleared_at`,
+        )
+        .run(id, agentId, channelType ?? '', channelId ?? '', Date.now())
+      if (channelType && channelId) {
+        this.db
+          .prepare(
+            'DELETE FROM social_inbox WHERE agent_id=? AND msg_id IN (SELECT msg_id FROM social_messages WHERE agent_id=? AND channel_type=? AND channel_id=?)',
+          )
+          .run(agentId, agentId, channelType, channelId)
+        this.db
+          .prepare('DELETE FROM social_turns WHERE agent_id=? AND channel_type=? AND channel_id=?')
+          .run(agentId, channelType, channelId)
+      } else {
+        this.db.prepare('DELETE FROM social_inbox WHERE agent_id=?').run(agentId)
+        this.db.prepare('DELETE FROM social_turns WHERE agent_id=?').run(agentId)
+      }
+    })()
+  }
+  async getDataVersion(agentId: string, channelType?: string, channelId?: string): Promise<number> {
+    return (
+      this.db
+        .prepare(
+          `SELECT coalesce(sum(version),0) AS value FROM social_data_fences WHERE agent_id=?
+      ${channelType && channelId ? "AND (channel_type='' OR (channel_type=? AND channel_id=?))" : ''}`,
+        )
+        .get(agentId, ...(channelType && channelId ? [channelType, channelId] : [])) as {
+        value: number
+      }
+    ).value
+  }
+  async queuedMessages(agentId: string): Promise<SocialMessageRecord[]> {
+    return this.db
+      .prepare(
+        `SELECT ${MESSAGE_COLUMNS} FROM social_messages WHERE agent_id=?
+      AND EXISTS(SELECT 1 FROM social_inbox i WHERE i.agent_id=social_messages.agent_id AND i.account_id=social_messages.account_id AND i.msg_id=social_messages.msg_id)
+      AND NOT EXISTS(SELECT 1 FROM social_turns t,json_each(t.record_json,'$.sourceMessageIds') refs
+        WHERE t.agent_id=social_messages.agent_id AND t.account_id=social_messages.account_id
+        AND refs.value=social_messages.msg_id)
+      ORDER BY id LIMIT 1000`,
+      )
+      .all(agentId) as SocialMessageRecord[]
+  }
+  async completeQueuedMessages(
+    agentId: string,
+    accountId: string,
+    msgIds: string[],
+  ): Promise<void> {
+    this.db
+      .prepare(
+        'DELETE FROM social_inbox WHERE agent_id=? AND account_id=? AND msg_id IN (SELECT value FROM json_each(?))',
+      )
+      .run(agentId, accountId, JSON.stringify(msgIds))
+  }
+  async forgetLongMemory(agentId: string): Promise<void> {
+    this.db.transaction(() => {
+      this.clearTurnRows(agentId)
+      this.db.prepare('UPDATE social_messages SET is_summarized=1 WHERE agent_id=?').run(agentId)
+    })()
+  }
+  async deleteLongMemory(agentId: string): Promise<void> {
+    if (!this.purgeMemory) throw new Error('社交记忆清理服务尚未就绪')
+    await this.purgeMemory(agentId)
+  }
+  async memoryAvailable(agentId: string): Promise<boolean> {
+    return !this.db
+      .prepare(
+        `SELECT 1 FROM privacy_deletions p,json_each(p.metadata_json,'$.agents') agents
+      WHERE p.status!='completed' AND (p.kind='social-memory' OR (p.kind='reset-memory' AND json_extract(p.metadata_json,'$.includeSocial')=1))
+      AND agents.value=? LIMIT 1`,
+      )
+      .get(agentId)
+  }
 
   async insert(message: Parameters<SocialStoragePort['insert']>[0]): Promise<void> {
     const transaction = this.db.transaction(() => {
+      this.assertTurnWritable(message.turnId, message.agentId)
       const inserted = this.db
         .prepare(
           `INSERT OR IGNORE INTO social_messages
@@ -37,6 +175,10 @@ export class SqliteSocialStoragePort implements SocialStoragePort {
           message.timestamp ?? null,
         )
       const execution = currentKernelExecution()
+      if (inserted.changes && message.queueForReply)
+        this.db
+          .prepare('INSERT OR IGNORE INTO social_inbox(agent_id,account_id,msg_id) VALUES(?,?,?)')
+          .run(message.agentId, message.accountId ?? '', message.msgId)
       if (!inserted.changes || !execution || !this.outbox) return
       const event = this.outbox.createEvent({
         protocolVersion: 1,
@@ -113,13 +255,19 @@ export class SqliteSocialStoragePort implements SocialStoragePort {
       limit,
     )
   }
-  async getByMsgId(agentId: string, msgId: string): Promise<SocialMessageRecord | null> {
+  async getByMsgId(
+    agentId: string,
+    msgId: string,
+    accountId?: string,
+  ): Promise<SocialMessageRecord | null> {
     return (
       (this.db
         .prepare(
-          `SELECT ${MESSAGE_COLUMNS} FROM social_messages WHERE agent_id=? AND msg_id=? LIMIT 1`,
+          `SELECT ${MESSAGE_COLUMNS} FROM social_messages WHERE agent_id=? AND msg_id=? ${accountId === undefined ? '' : 'AND account_id=?'} LIMIT 1`,
         )
-        .get(agentId, msgId) as SocialMessageRecord | undefined) ?? null
+        .get(agentId, msgId, ...(accountId === undefined ? [] : [accountId])) as
+        | SocialMessageRecord
+        | undefined) ?? null
     )
   }
   async getRecentChannels(agentId: string, limit = 10) {
@@ -165,6 +313,15 @@ export class SqliteSocialStoragePort implements SocialStoragePort {
   async upsertContactImpression(
     input: Parameters<SocialStoragePort['upsertContactImpression']>[0],
   ) {
+    const startedAt = this.assertTurnWritable(input.turnId, input.agentId)
+    const target = JSON.stringify([input.agentId, input.platform, input.userId])
+    const fence = this.db
+      .prepare(
+        "SELECT json_extract(metadata_json,'$.clearedAt') AS value FROM privacy_deletions WHERE kind='social-contact' AND target_id=?",
+      )
+      .get(target) as { value: number } | undefined
+    if (startedAt !== undefined && fence && startedAt <= fence.value)
+      throw new Error('联系人印象已被删除，已阻止旧任务重新写入')
     this.db
       .prepare(
         `INSERT INTO social_contact_impressions
@@ -193,11 +350,26 @@ export class SqliteSocialStoragePort implements SocialStoragePort {
       .all(agentId) as SocialContactImpressionRecord[]
   }
   async deleteContactImpression(agentId: string, platform: string, userId: string) {
-    this.db
-      .prepare(
-        `DELETE FROM social_contact_impressions WHERE agent_id=? AND platform=? AND user_id=?`,
-      )
-      .run(agentId, platform, userId)
+    this.db.transaction(() => {
+      const target = JSON.stringify([agentId, platform, userId])
+      this.db
+        .prepare(
+          `INSERT INTO privacy_deletions(id,kind,target_id,agent_id,metadata_json,status,created_at)
+        VALUES(?,'social-contact',?,?,?,'completed',?) ON CONFLICT(kind,target_id) DO UPDATE SET metadata_json=excluded.metadata_json`,
+        )
+        .run(
+          `social-contact:${target}`,
+          target,
+          agentId,
+          JSON.stringify({ clearedAt: Date.now() }),
+          new Date().toISOString(),
+        )
+      this.db
+        .prepare(
+          `DELETE FROM social_contact_impressions WHERE agent_id=? AND platform=? AND user_id=?`,
+        )
+        .run(agentId, platform, userId)
+    })()
   }
   async deleteAllContactImpressions(agentId: string) {
     return this.db.prepare(`DELETE FROM social_contact_impressions WHERE agent_id=?`).run(agentId)
@@ -347,6 +519,16 @@ export class SqliteSocialStoragePort implements SocialStoragePort {
         )
         .all(...args, limit) as SocialMessageRecord[]
     ).reverse()
+  }
+  private assertTurnWritable(id?: string, agentId?: string): number | undefined {
+    if (!id) return
+    const row = this.db
+      .prepare(
+        "SELECT json_extract(record_json,'$.startedAt') AS startedAt FROM social_turns WHERE id=? AND agent_id=? AND status IN ('running','retrying')",
+      )
+      .get(id, agentId ?? '') as { startedAt: string } | undefined
+    if (!row) throw new Error('社交任务已经取消或数据已经清理，已阻止旧结果回写')
+    return Date.parse(row.startedAt)
   }
 }
 

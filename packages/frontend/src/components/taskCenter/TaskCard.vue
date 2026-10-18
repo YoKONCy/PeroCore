@@ -1,11 +1,12 @@
 <script setup lang="ts">
+import './task-pixel.css'
 /**
  * TaskCard — 后台任务卡片（任务中心重构版）
  *
  * 布局：单行信息流 ——
- *   [头像+状态点] [标题 + 元信息行 + (进度条)] [状态胶囊] [icon 操作]
+ *   [头像+状态块] [标题 + 元信息行 + (进度条)] [状态方块] [icon 操作]
  *
- * 视觉：soft-UI 圆角面板 + ui 语义令牌（双主题安全），
+ * 视觉：细边框像素面板 + ui 语义令牌（双主题安全），
  * 状态色统一交给 TaskStatusBadge，不再内联实现。
  *
  * @props task — BackgroundTaskInfo
@@ -58,7 +59,11 @@ const elapsed = computed(() => {
 })
 
 /** 是否可暂停（排队或运行中） */
-const canPause = computed(() => ['queued', 'running'].includes(props.task.status))
+const canPause = computed(
+  () =>
+    props.task.category !== 'resident' &&
+    ['queued', 'running', 'waiting', 'waiting_input'].includes(props.task.status),
+)
 const waitReason = computed(() => {
   const reason = props.task.execution?.waitReason
   if (!reason) return ''
@@ -74,20 +79,32 @@ const waitReason = computed(() => {
   return labels[reason] ?? reason
 })
 /** 是否可恢复（paused） */
-const canResume = computed(() => props.task.status === 'paused')
+const canResume = computed(
+  () =>
+    ['paused', 'blocked', 'waiting'].includes(props.task.status) &&
+    props.task.category !== 'resident' &&
+    !props.task.lifecycle?.pendingEffect,
+)
 /** 是否可取消（活跃态） */
-const canCancel = computed(() =>
-  ['queued', 'running', 'paused', 'waiting_input'].includes(props.task.status),
+const canCancel = computed(
+  () =>
+    props.task.category !== 'resident' &&
+    ['queued', 'running', 'paused', 'waiting_input', 'waiting', 'blocked'].includes(
+      props.task.status,
+    ),
 )
 /** 是否可断点续跑（failed 且因服务重启中断，checkpoint 仍在） */
 const canResumeInterrupted = computed(
-  () => props.task.status === 'failed' && (props.task.errorMessage ?? '').includes('服务重启'),
+  () =>
+    props.task.category !== 'resident' &&
+    props.task.status === 'failed' &&
+    (props.task.errorMessage ?? '').includes('服务重启'),
 )
 </script>
 
 <template>
   <article
-    class="task-card"
+    class="task-card task-pixel-surface"
     :class="[
       `task-card--${task.status}`,
       {
@@ -185,7 +202,7 @@ const canResumeInterrupted = computed(
         <PixelIcon name="refresh" size="xs" />
       </button>
       <button
-        v-if="history"
+        v-if="history && task.category !== 'resident'"
         type="button"
         class="task-card__action task-card__action--delete"
         title="删除记录"
@@ -212,21 +229,22 @@ const canResumeInterrupted = computed(
   align-items: flex-start;
   gap: var(--ui-space-3);
   padding: 12px 14px;
-  border-radius: var(--ui-radius-lg);
-  background: var(--ui-bg-surface);
-  border: 1px solid var(--ui-border-subtle);
-  box-shadow: var(--ui-shadow-xs);
+  border-radius: 0;
+  background: var(--task-fill);
+  border: 1px solid var(--ui-border-default);
+  box-shadow: var(--task-raised);
   cursor: pointer;
   transition:
-    transform var(--ui-duration-fast) var(--ui-ease-standard),
-    box-shadow var(--ui-duration-fast) var(--ui-ease-standard),
-    border-color var(--ui-duration-fast) var(--ui-ease-standard);
+    transform var(--ui-duration-fast) steps(3, end),
+    box-shadow var(--ui-duration-fast) steps(3, end),
+    border-color var(--ui-duration-fast) steps(3, end);
+  font-family: var(--ui-font-pixel);
 }
 
 .task-card:hover {
-  transform: translateY(-1px);
-  border-color: var(--ui-border-default);
-  box-shadow: var(--ui-shadow-sm);
+  transform: none;
+  border-color: var(--ui-border-strong);
+  box-shadow: var(--task-raised);
 }
 
 .task-card:focus-visible {
@@ -236,23 +254,27 @@ const canResumeInterrupted = computed(
 
 /* 需要用户处理的任务左侧描边提示 */
 .task-card--waiting_input {
-  border-left: 3px solid var(--ui-accent-primary);
+  border-left: 2px solid var(--ui-accent-primary);
 }
 .task-card--failed {
-  border-left: 3px solid var(--ui-danger);
+  border-left: 2px solid var(--ui-danger);
 }
 
 /* ── 头像 ── */
 .task-card__avatar-wrap {
   position: relative;
   flex-shrink: 0;
+  padding: 2px;
+  border: 1px solid var(--ui-border-default);
+  background: var(--task-fill);
+  box-shadow: var(--task-control);
 }
 
 .task-card__avatar,
 .task-card__avatar-fallback {
-  width: 38px;
-  height: 38px;
-  border-radius: var(--ui-radius-md);
+  width: 34px;
+  height: 34px;
+  border-radius: 0;
   object-fit: cover;
 }
 
@@ -268,10 +290,10 @@ const canResumeInterrupted = computed(
   position: absolute;
   right: -2px;
   bottom: -2px;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  border: 2px solid var(--ui-bg-surface);
+  width: 8px;
+  height: 8px;
+  border-radius: 0;
+  border: 1px solid var(--ui-bg-surface);
   background: var(--dot-color, var(--ui-text-disabled));
 }
 
@@ -281,7 +303,7 @@ const canResumeInterrupted = computed(
 }
 .task-card--running .task-card__status-dot {
   --dot-color: var(--ui-accent-sky);
-  animation: task-dot-pulse 1.6s ease-in-out infinite;
+  animation: task-dot-pulse 1.6s steps(3, end) infinite;
 }
 .task-card--paused .task-card__status-dot {
   --dot-color: var(--ui-warning);
@@ -324,20 +346,21 @@ const canResumeInterrupted = computed(
 
 .task-card__title {
   margin: 0;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--ui-text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: 1.6;
 }
 
 .task-card__meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px 8px;
   margin: 4px 0 0;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--ui-text-tertiary);
 }
 
@@ -364,24 +387,30 @@ const canResumeInterrupted = computed(
 
 .task-card__progress-track {
   flex: 1;
-  height: 5px;
-  border-radius: var(--ui-radius-full);
+  height: 6px;
+  border-radius: 0;
   background: var(--ui-bg-hover);
   overflow: hidden;
+  box-shadow: var(--task-inset);
 }
 
 .task-card__progress-bar {
   height: 100%;
-  border-radius: var(--ui-radius-full);
+  border-radius: 0;
   background: var(--ui-accent-sky);
-  transition: width var(--ui-duration-normal) var(--ui-ease-standard);
+  transition: width var(--ui-duration-normal) steps(6, end);
+  background-image: repeating-linear-gradient(
+    90deg,
+    transparent 0 6px,
+    var(--task-highlight) 6px 8px
+  );
 }
 
 .task-card--completed .task-card__progress-bar {
-  background: var(--ui-success);
+  background-color: var(--ui-success);
 }
 .task-card--failed .task-card__progress-bar {
-  background: var(--ui-danger);
+  background-color: var(--ui-danger);
 }
 
 .task-card__progress-text {
@@ -394,22 +423,27 @@ const canResumeInterrupted = computed(
 
 .task-card__error {
   margin: 4px 0 0;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--ui-danger);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: 1.6;
 }
 
 /* 历史记录：未读更醒目，已读统一为安静的蓝色完成态。 */
 .task-card--history:not(.task-card--read) {
-  border-left: 3px solid var(--ui-accent-primary);
-  background: color-mix(in srgb, var(--ui-accent-primary-soft) 52%, var(--ui-bg-surface));
+  border-left: 2px solid var(--ui-accent-primary);
+  background:
+    linear-gradient(var(--task-sheen), transparent 18px),
+    color-mix(in srgb, var(--ui-accent-primary-soft) 20%, var(--task-face));
 }
 .task-card--history.task-card--read,
 .task-card--history.task-card--read.task-card--failed {
-  border-left: 3px solid var(--ui-accent-sky);
-  background: color-mix(in srgb, var(--ui-accent-sky-soft) 42%, var(--ui-bg-surface));
+  border-left: 2px solid var(--ui-accent-sky);
+  background:
+    linear-gradient(var(--task-sheen), transparent 18px),
+    color-mix(in srgb, var(--ui-accent-sky-soft) 20%, var(--task-face));
 }
 .task-card--history.task-card--read .task-card__status-dot,
 .task-card--history.task-card--read.task-card--failed .task-card__status-dot {
@@ -448,19 +482,21 @@ const canResumeInterrupted = computed(
   justify-content: center;
   width: 28px;
   height: 28px;
-  border: none;
-  border-radius: var(--ui-radius-sm);
+  border: 1px solid transparent;
+  border-radius: 0;
   background: transparent;
   color: var(--ui-text-tertiary);
   cursor: pointer;
   transition:
-    background var(--ui-duration-fast) var(--ui-ease-standard),
-    color var(--ui-duration-fast) var(--ui-ease-standard);
+    background var(--ui-duration-fast) steps(3, end),
+    color var(--ui-duration-fast) steps(3, end);
 }
 
 .task-card__action:hover {
   background: var(--ui-accent-sky-soft);
   color: var(--ui-accent-sky);
+  border-color: var(--ui-border-default);
+  box-shadow: var(--task-control);
 }
 
 .task-card__action--danger:hover {
@@ -478,5 +514,17 @@ const canResumeInterrupted = computed(
   .task-card--running .task-card__status-dot {
     animation: none;
   }
+}
+.task-card:active {
+  box-shadow: var(--task-inset);
+}
+.task-card__action:active {
+  box-shadow: var(--task-inset);
+}
+.task-card--waiting {
+  border-left: 2px solid var(--ui-warning);
+}
+.task-card--blocked {
+  border-left: 2px solid var(--ui-accent-primary);
 }
 </style>

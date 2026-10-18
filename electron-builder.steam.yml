@@ -52,7 +52,7 @@ extraFiles:
 publish: null
 
 win:
-  icon: public/Logo.png
+  icon: public/system-icons/pero.ico
   target:
     - nsis
     - dir

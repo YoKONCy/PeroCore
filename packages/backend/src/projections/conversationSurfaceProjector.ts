@@ -1,3 +1,5 @@
+import { resourceFromToolResult } from '@infos/shared'
+import { splitSpokenReply } from '../nit/spokenReplyFilter'
 import type {
   ConversationMessageProjection,
   ConversationSurfaceDescriptor,
@@ -18,32 +20,62 @@ export class ConversationSurfaceProjector {
   ): ConversationSurfaceDescriptor {
     const surfaceId = `conversation-message:${message.messageId}` as SurfaceId
     const nodes: SurfaceNode[] = []
+    const messageContent =
+      message.role === 'assistant' ? splitSpokenReply(message.content).content : message.content
     const contentBlocks = message.contentBlocks ?? []
     if (contentBlocks.length > 0) {
       for (const block of contentBlocks) {
+        if (block.kind === 'model_retry') {
+          nodes.push(
+            this.node(surfaceId, 'model-retry', 'stable', message.revision, block.blockId, {
+              ...block.retry,
+              turn: block.turn,
+            }),
+          )
+          continue
+        }
         if (block.kind === 'thinking') {
           nodes.push(
-            this.node(surfaceId, 'thinking', 'stable', message.revision, block.blockId, {
-              source: block.content,
-              phase: 'committed',
-              durationMs: block.durationMs,
-            }),
+            this.node(
+              surfaceId,
+              'thinking',
+              'stable',
+              message.revision,
+              `${block.blockId}:turn:${block.turn}`,
+              {
+                source: block.content,
+                phase: 'committed',
+                durationMs: block.durationMs,
+                turn: block.turn,
+              },
+            ),
           )
           continue
         }
         if (block.kind === 'native_reasoning') {
           nodes.push(
-            this.node(surfaceId, 'native-reasoning', 'stable', message.revision, block.blockId, {
-              source: block.content,
-              phase: 'committed',
-              mode: block.mode,
-              durationMs: block.durationMs,
-            }),
+            this.node(
+              surfaceId,
+              'native-reasoning',
+              'stable',
+              message.revision,
+              `${block.blockId}:turn:${block.turn}`,
+              {
+                source: block.content,
+                phase: 'committed',
+                mode: block.mode,
+                durationMs: block.durationMs,
+                turn: block.turn,
+              },
+            ),
           )
           continue
         }
         if (block.kind === 'narration') {
-          if (!block.content) continue
+          // 旧正文块中的控制标签只在展示层兼容清理，不改写审计原文。
+          const content =
+            message.role === 'assistant' ? splitSpokenReply(block.content).content : block.content
+          if (!content) continue
           nodes.push(
             this.node<MarkdownSurfaceProps>(
               surfaceId,
@@ -52,7 +84,7 @@ export class ConversationSurfaceProjector {
               message.revision,
               block.blockId,
               {
-                source: block.content,
+                source: content,
                 phase: 'committed',
               },
             ),
@@ -62,7 +94,10 @@ export class ConversationSurfaceProjector {
         nodes.push(...this.projectToolBlock(surfaceId, message.revision, block))
       }
     } else {
-      if (message.content) {
+      const failureOnly =
+        (message.status === 'failed' || message.status === 'interrupted') &&
+        (!message.content || message.content.replace(/^⚠️\s*/, '') === message.failureMessage)
+      if (messageContent && !failureOnly) {
         nodes.push(
           this.node<MarkdownSurfaceProps>(
             surfaceId,
@@ -71,7 +106,7 @@ export class ConversationSurfaceProjector {
             message.revision,
             'markdown',
             {
-              source: message.content,
+              source: messageContent,
               phase: 'committed',
             },
           ),
@@ -92,6 +127,13 @@ export class ConversationSurfaceProjector {
       }
     }
     for (const attachment of message.attachments) {
+      if (
+        nodes.some(
+          (node) =>
+            node.kind === 'attachment' && (node.props as { id: string }).id === attachment.id,
+        )
+      )
+        continue
       nodes.push(
         this.node(
           surfaceId,
@@ -103,7 +145,14 @@ export class ConversationSurfaceProjector {
         ),
       )
     }
-    if (message.status === 'failed' || message.status === 'interrupted') {
+    if (message.executionPause) {
+      nodes.push(
+        this.node(surfaceId, 'status', 'stable', message.revision, 'status', {
+          state: 'paused',
+          message: `桌面操作已暂停：${message.executionPause.message}`,
+        } satisfies import('@infos/shared').StatusSurfaceProps),
+      )
+    } else if (message.status === 'failed' || message.status === 'interrupted') {
       const props: ErrorSurfaceProps = {
         code: message.status === 'interrupted' ? 'INTERRUPTED' : 'EXECUTION_FAILED',
         message: message.failureMessage ?? message.content,
@@ -123,12 +172,15 @@ export class ConversationSurfaceProjector {
       surfaceId,
       generation: `message:${message.messageId}:revision:${message.revision}`,
       messageId: message.messageId,
+      generationStats: message.generationStats,
       threadId: message.threadId,
       principalId,
       revision: message.revision,
       sequence: 0,
       state:
-        message.status === 'failed' || message.status === 'interrupted' ? 'failed' : 'committed',
+        !message.executionPause && (message.status === 'failed' || message.status === 'interrupted')
+          ? 'failed'
+          : 'committed',
       nodes,
     }
   }
@@ -138,6 +190,18 @@ export class ConversationSurfaceProjector {
     revision: number,
     block: Extract<import('@infos/shared').ConversationContentBlock, { kind: 'tool' }>,
   ): SurfaceNode[] {
+    const resource = block.isError ? null : resourceFromToolResult(block.name, block.result)
+    if (resource)
+      return [
+        this.node(
+          surfaceId,
+          'attachment',
+          'interactive',
+          revision,
+          `attachment:${resource.id}`,
+          resource,
+        ),
+      ]
     const nodes: SurfaceNode[] = [
       this.node<ToolCallSurfaceProps>(
         surfaceId,
@@ -166,6 +230,7 @@ export class ConversationSurfaceProjector {
             result: block.result,
             isError: block.isError ?? false,
             durationMs: block.durationMs,
+            automaticApproval: block.automaticApproval,
           },
         ),
       )

@@ -4,19 +4,95 @@ import { OpenAiProvider } from '@infos/backend/services/llm/providers/openaiProv
 import type { ChatMessage } from '@infos/backend/applicationHostAbi'
 
 const model = {
-  provider: 'openai',
+  provider: 'openai' as const,
   modelId: 'deepseek-reasoner',
   apiKey: 'key',
-  reasoningDialect: 'deepseek',
+  reasoningDialect: 'deepseek' as const,
 }
 
 function createCompiler(chat: ReturnType<typeof vi.fn>) {
   const compiler = new SocialAppCompiler({} as never, {} as never, {} as never, {} as never)
-  compiler.setLlmService({ chat } as never)
+  compiler.setLlmService({ chat, estimateInputTokens: vi.fn(() => 100) } as never)
   return compiler
 }
 
 describe('Social严格思考模型ReAct续轮', () => {
+  it('上下文缩减仍保留刚读到的图片，不将图片静默替换成工具文字', async () => {
+    const image = 'data:image/png;base64,aW1hZ2U='
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce({
+        choices: [
+          {
+            message: {
+              role: 'assistant',
+              content: null,
+              toolCalls: [
+                {
+                  id: 'image-call',
+                  type: 'function',
+                  function: {
+                    name: 'social',
+                    arguments: '{"action":"image_read","input":{"message_ids":["22"]}}',
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      })
+      .mockResolvedValueOnce({ choices: [{ message: { role: 'assistant', content: '看到了。' } }] })
+    const compiler = createCompiler(chat)
+    compiler.setLlmService({
+      chat,
+      estimateInputTokens: vi.fn((_model: unknown, messages: ChatMessage[]) =>
+        messages.some(
+          (message) =>
+            message.role === 'tool' &&
+            typeof message.content === 'string' &&
+            message.content.length > 20_000,
+        )
+          ? 200_000
+          : 100,
+      ),
+    } as never)
+    await compiler.generateReply(
+      [
+        { role: 'system', content: '测试人设' },
+        { role: 'user', content: '查看图片' },
+      ],
+      model,
+      {
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'social',
+              description: '查看图片',
+              parameters: { type: 'object' },
+            },
+          },
+        ],
+        toolExecutor: vi.fn().mockResolvedValue(
+          JSON.stringify({
+            success: true,
+            description: '较长的工具说明'.repeat(10_000),
+            images: [image],
+          }),
+        ),
+      },
+    )
+    const observed = chat.mock.calls[1]![1] as ChatMessage[]
+    expect(
+      observed.some(
+        (message) =>
+          Array.isArray(message.content) &&
+          message.content.some((part) => part.type === 'image_url' && part.image_url.url === image),
+      ),
+    ).toBe(true)
+    expect(observed.find((message) => message.role === 'tool')?.content).not.toContain('base64')
+  })
+
   it('首轮工具调用后应原样回放reasoning_content和原生思考结构', async () => {
     const chat = vi
       .fn()

@@ -195,7 +195,15 @@ export interface Token {
 // ── Runtime ──
 
 /** NIT 工具执行器 (复用 ToolExecutor 接口) */
-export type NitToolExecutor = (name: string, args: Record<string, unknown>) => Promise<unknown>
+export type NitToolExecutor = (
+  name: string,
+  args: Record<string, unknown>,
+  signal?: AbortSignal,
+) => Promise<unknown>
+
+export interface NitRuntimeOptions {
+  signal?: AbortSignal
+}
 
 /** NIT 执行结果 */
 export interface NitResult {

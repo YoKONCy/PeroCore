@@ -28,7 +28,7 @@ export interface WindowProvider {
   /** 获取活跃窗口列表 */
   getActiveWindows(): Promise<WindowInfo[]>
   /** 激活/置顶指定窗口 */
-  activateWindow(target: string): Promise<string>
+  activateWindow(target: string, context?: Parameters<BuiltinTool['execute']>[1]): Promise<string>
 }
 
 export interface WindowInfo {
@@ -92,7 +92,10 @@ export const getSystemInfoTool: BuiltinTool = {
 }
 
 export interface ApplicationProvider {
-  launch(appName: string): Promise<{
+  launch(
+    appName: string,
+    context?: Parameters<BuiltinTool['execute']>[1],
+  ): Promise<{
     application: string
     mode: 'activated' | 'launched'
     targetType: 'window' | 'path' | 'aumid'
@@ -114,9 +117,18 @@ function errorResult(code: string, message: string): string {
 export const openApplicationTool: BuiltinTool = {
   name: 'open_application',
 
-  async execute(args) {
+  async execute(args, context) {
     const appName = (args.app_name as string)?.trim()
     if (!appName) return errorResult('APPLICATION_NAME_REQUIRED', '请提供应用程序名称')
+    if (
+      /^(?:resource:)?(?:https?:|file:|workspace:|attachment:)/i.test(appName) ||
+      /\.html?(?:[?#].*)?$/i.test(appName)
+    ) {
+      return errorResult(
+        'BROWSER_TOOL_REQUIRED',
+        '这是网页或文件预览目标，请先直接调用 expand_advanced_tools，下一轮使用 browser_open_url；url 可以传网址、工作区 HTML 相对路径或 workspace: 引用。本工具只负责启动已安装的应用，不用于验证网页效果。',
+      )
+    }
     if (!_applicationProvider) {
       return errorResult(
         'APPLICATION_LAUNCH_UNAVAILABLE',
@@ -126,7 +138,7 @@ export const openApplicationTool: BuiltinTool = {
 
     logger.info(`请求客户端打开应用: ${appName}`)
     try {
-      const result = await _applicationProvider.launch(appName)
+      const result = await _applicationProvider.launch(appName, context)
       return JSON.stringify({
         success: true,
         application: result.application,
@@ -209,7 +221,7 @@ export const getActiveWindowsTool: BuiltinTool = {
 export const activateWindowTool: BuiltinTool = {
   name: 'activate_window',
 
-  async execute(args) {
+  async execute(args, context) {
     const target = (args.target as string)?.trim()
     if (!target) {
       return JSON.stringify({ error: '请提供窗口名称' })
@@ -218,7 +230,7 @@ export const activateWindowTool: BuiltinTool = {
     // 优先使用注入的 WindowProvider
     if (_windowProvider) {
       try {
-        const result = await _windowProvider.activateWindow(target)
+        const result = await _windowProvider.activateWindow(target, context)
         return JSON.stringify({ success: true, message: result })
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err)

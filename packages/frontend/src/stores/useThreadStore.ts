@@ -6,9 +6,16 @@
  * 消息列表使用 shallowRef 以避免深度响应性能问题。
  */
 
-import type { ConversationMessageProjection, SurfaceFrame } from '@infos/shared'
+import type {
+  ConversationMessageProjection,
+  InteractionMode,
+  LiveContextBudget,
+  StatusSurfaceProps,
+  SurfaceFrame,
+} from '@infos/shared'
+import { resolveExecutionMode, type ExecutionMode } from '@infos/shared'
 import { defineStore } from 'pinia'
-import { ref, shallowRef, computed } from 'vue'
+import { ref, shallowRef, computed, onScopeDispose } from 'vue'
 import { chatApi } from '../api/modules/chatApi'
 import { threadsApi } from '../api/modules/threadsApi'
 import type { ThreadChannel, ThreadAttachmentInfo } from '../api/modules/threadsApi'
@@ -22,9 +29,11 @@ export interface RagFailureTrace {
 
 /** 聊天消息（保持与旧 ChatMessage 接口兼容，避免组件迁移时改动过大） */
 export interface ChatMessage {
+  executionPause?: ConversationMessageProjection['executionPause']
   id: string
   role: 'user' | 'assistant' | 'system' | 'tool'
   content: string
+  spokenReply?: string
   /** Assistant 原始转写，用于按需展开 Thinking 标签内容。 */
   rawContent?: string | null
   /** 时间戳 (ISO) */
@@ -61,7 +70,17 @@ export interface ChatMessage {
 }
 
 /** 生成状态 */
-export type GenerationState = 'idle' | 'thinking' | 'generating' | 'tool_calling'
+export type GenerationState =
+  | 'idle'
+  | 'thinking'
+  | 'generating'
+  | 'tool_assembling'
+  | 'tool_calling'
+
+type ThreadLoadResult =
+  | { status: 'loaded'; threadId: string }
+  | { status: 'superseded' }
+  | { status: 'failed'; error: Error }
 
 export const useThreadStore = defineStore('thread', () => {
   const compositor = useCompositorStore()
@@ -70,6 +89,8 @@ export const useThreadStore = defineStore('thread', () => {
   const threadId = ref<string>('')
   /** 当前频道 */
   const channel = ref<ThreadChannel>('desktop')
+  const interactionMode = ref<InteractionMode>('chat')
+  const executionMode = ref<ExecutionMode>('manual')
 
   /** 消息列表 (shallowRef 避免深度代理) */
   const messages = shallowRef<ChatMessage[]>([])
@@ -90,8 +111,27 @@ export const useThreadStore = defineStore('thread', () => {
   /** 当前 Thread 所属 Agent */
   const agentId = ref<string>('pero')
 
+  /** 当前会话每轮模型请求的上下文占用，随 Surface 增量更新，不累计多轮消费。 */
+  const liveContextBudget = computed<LiveContextBudget | null>(() => {
+    let latest: LiveContextBudget | null = null
+    for (const surface of compositor.surfaces.values()) {
+      if (
+        surface.state !== 'open' ||
+        surface.threadId !== threadId.value ||
+        surface.principalId !== agentId.value
+      )
+        continue
+      const status = surface.nodes.find((node) => node.kind === 'status')
+      const budget = (status?.props as StatusSurfaceProps | undefined)?.contextBudget
+      if (budget && (!latest || budget.updatedAt >= latest.updatedAt)) latest = budget
+    }
+    return latest
+  })
+
   /** 历史记录加载状态 */
   const isLoadingHistory = ref(false)
+  /** 仅描述正在切换的目标，普通刷新不触发导航动效。 */
+  const navigationTarget = shallowRef<{ agentId: string; threadId?: string } | null>(null)
   const isLoadingOlderHistory = ref(false)
   const hasMoreHistory = ref(false)
   const historyCursor = ref<string | undefined>(undefined)
@@ -108,8 +148,11 @@ export const useThreadStore = defineStore('thread', () => {
   let loadGeneration = 0
   /** 最新 Thread 查询序号，与具体消息加载分离，避免嵌套加载互相误判过期。 */
   let latestGeneration = 0
-  /** 同一 Agent / Channel 的会话确保操作去重，防止多个视图同时创建空会话。 */
-  const ensuringThreads = new Map<string, Promise<string>>()
+  /** 所有最近会话入口共享请求，主窗口与聊天组件不能互相取消同一目标的初始化。 */
+  const loadingLatestThreads = new Map<
+    string,
+    { generation: number; operation: Promise<ThreadLoadResult> }
+  >()
 
   // ── 动作 ──
 
@@ -143,6 +186,8 @@ export const useThreadStore = defineStore('thread', () => {
       id: message.messageId,
       role: message.role,
       content: message.content,
+      spokenReply: message.spokenReply,
+      executionPause: message.executionPause,
       rawContent: message.rawContent,
       timestamp: message.timestamp,
       pairId: message.pairId,
@@ -168,7 +213,12 @@ export const useThreadStore = defineStore('thread', () => {
 
   function openSurfaceForThread(targetThreadId: string) {
     return [...compositor.surfaces.values()]
-      .filter((surface) => surface.threadId === targetThreadId && surface.state === 'open')
+      .filter(
+        (surface) =>
+          surface.threadId === targetThreadId &&
+          surface.principalId === agentId.value &&
+          surface.state === 'open',
+      )
       .sort((left, right) => right.sequence - left.sequence)[0]
   }
 
@@ -177,6 +227,7 @@ export const useThreadStore = defineStore('thread', () => {
   ): GenerationState {
     const status = surface?.nodes.find((node) => node.kind === 'status')
     const state = (status?.props as { state?: string } | undefined)?.state
+    if (state === 'assembling') return 'tool_assembling'
     if (state === 'calling') return 'tool_calling'
     if (state === 'generating') return 'generating'
     return 'thinking'
@@ -186,11 +237,14 @@ export const useThreadStore = defineStore('thread', () => {
     persisted: ChatMessage[],
     targetThreadId: string,
     targetAgentId: string,
+    sameConversation: boolean,
   ): ChatMessage[] {
     const surface = openSurfaceForThread(targetThreadId)
-    const existing = messages.value.find(
-      (message) => message.isStreaming && (!surface || message.surfaceId === surface.surfaceId),
-    )
+    const existing = sameConversation
+      ? messages.value.find(
+          (message) => message.isStreaming && (!surface || message.surfaceId === surface.surfaceId),
+        )
+      : undefined
     if (!surface && existing && generationState.value !== 'idle') {
       streamingMessageId.value = existing.id
       return [...persisted.filter((message) => message.id !== existing.id), existing]
@@ -214,11 +268,19 @@ export const useThreadStore = defineStore('thread', () => {
     return [...persisted.filter((message) => message.id !== shell.id), shell]
   }
 
-  /** 从权威 Projection 加载指定 Thread 的消息，并保留当前运行中的 Surface Shell。 */
-  async function loadThreadMessages(nextThreadId: string, currentAgentId: string) {
-    if (!nextThreadId) return
+  /** 加载权威 Projection；过期响应、真实失败与成功具有不同结果。 */
+  async function loadThreadProjection(
+    nextThreadId: string,
+    currentAgentId: string,
+  ): Promise<ThreadLoadResult> {
+    if (!nextThreadId) return { status: 'superseded' }
+    const sameConversation = threadId.value === nextThreadId && agentId.value === currentAgentId
 
     const generation = ++loadGeneration
+    navigationTarget.value =
+      threadId.value !== nextThreadId || agentId.value !== currentAgentId
+        ? { agentId: currentAgentId, threadId: nextThreadId }
+        : null
     isLoadingHistory.value = true
     historyError.value = null
     try {
@@ -226,7 +288,7 @@ export const useThreadStore = defineStore('thread', () => {
         threadsApi.get(nextThreadId, { page: 1, pageSize: 1 }),
         threadsApi.getProjection(nextThreadId, { pageSize: HISTORY_PAGE_SIZE }),
       ])
-      if (generation !== loadGeneration) return
+      if (generation !== loadGeneration) return { status: 'superseded' }
       const thread = threadResponse.data?.thread
       const projection = projectionResponse.data
       if (!thread || !projection) throw new Error('服务端未返回 Conversation Projection')
@@ -238,6 +300,8 @@ export const useThreadStore = defineStore('thread', () => {
       threadId.value = thread.id
       agentId.value = thread.agentId
       channel.value = thread.channel
+      interactionMode.value = thread.interactionMode
+      executionMode.value = resolveExecutionMode(thread.executionMode, thread.autoExecuteTools)
       compositor.replaceSnapshot(projection)
       historyCursor.value = projection.beforeCursor
       hasMoreHistory.value = projection.hasMoreBefore ?? false
@@ -248,14 +312,27 @@ export const useThreadStore = defineStore('thread', () => {
         const current = existing.get(message.id)
         return current && current.revision === message.revision ? current : message
       })
-      messages.value = restoreStreamingShell(persisted, thread.id, thread.agentId)
+      messages.value = restoreStreamingShell(persisted, thread.id, thread.agentId, sameConversation)
+      return { status: 'loaded', threadId: thread.id }
     } catch (err) {
-      if (generation !== loadGeneration) return // 过期请求的错误也丢弃，避免污染当前状态
-      historyError.value = (err as Error).message
-      logger.error('ThreadStore', 'Thread 消息加载失败', err)
+      if (generation !== loadGeneration) return { status: 'superseded' }
+      const error = err instanceof Error ? err : new Error(String(err))
+      historyError.value = error.message
+      logger.error('ThreadStore', 'Thread 消息加载失败', error)
+      return { status: 'failed', error }
     } finally {
-      if (generation === loadGeneration) isLoadingHistory.value = false
+      if (generation === loadGeneration) {
+        isLoadingHistory.value = false
+        navigationTarget.value = null
+      }
     }
+  }
+
+  /** 显式选择历史会话时，取消尚未完成的最近会话恢复。 */
+  async function loadThreadMessages(nextThreadId: string, currentAgentId: string) {
+    if (!nextThreadId) return { status: 'superseded' } as const
+    latestGeneration++
+    return loadThreadProjection(nextThreadId, currentAgentId)
   }
 
   async function loadOlderMessages(): Promise<number> {
@@ -288,63 +365,84 @@ export const useThreadStore = defineStore('thread', () => {
   }
 
   /** 加载指定 Agent / Channel 的最新 Thread */
-  async function loadLatestThread(currentAgentId: string, nextChannel: ThreadChannel = 'desktop') {
-    const generation = ++latestGeneration
+  function loadLatestThread(
+    currentAgentId: string,
+    nextChannel: ThreadChannel = 'desktop',
+  ): Promise<ThreadLoadResult> {
+    const key = `${currentAgentId}:${nextChannel}`
+    const pending = loadingLatestThreads.get(key)
+    if (pending?.generation === latestGeneration) return pending.operation
+
     // Agent 切换开始即清除旧 Thread，禁止 UI 在异步窗口内形成“新 Agent + 旧 Thread”。
     clearThread()
+    const generation = latestGeneration
     agentId.value = currentAgentId
+    navigationTarget.value = { agentId: currentAgentId }
     channel.value = nextChannel
     isLoadingHistory.value = true
     historyError.value = null
-    try {
-      const res = await threadsApi.getLatest({ agentId: currentAgentId, channel: nextChannel })
-      if (generation !== latestGeneration) return
-      const latest = res.data?.thread
-      if (!latest) throw new Error('服务端未返回最近会话')
-      if (latest.agentId !== currentAgentId) throw new Error('服务端返回了其他 Agent 的最新会话')
+    const operation = (async (): Promise<ThreadLoadResult> => {
+      try {
+        const res = await threadsApi.getLatest({ agentId: currentAgentId, channel: nextChannel })
+        if (generation !== latestGeneration) return { status: 'superseded' }
+        const latest = res.data?.thread
+        if (!latest) throw new Error('服务端未返回最近会话')
+        if (latest.agentId !== currentAgentId) throw new Error('服务端返回了其他 Agent 的最新会话')
 
-      channel.value = latest.channel || nextChannel
-      await loadThreadMessages(latest.id, currentAgentId)
-    } catch (err) {
-      if (generation !== latestGeneration) return
-      // 加载失败保持安全空状态，绝不恢复旧角色 Thread。
-      clearThread()
-      agentId.value = currentAgentId
-      channel.value = nextChannel
-      historyError.value = (err as Error).message
-      logger.error('ThreadStore', '最新 Thread 加载失败', err)
-    } finally {
-      if (generation === latestGeneration) isLoadingHistory.value = false
-    }
+        channel.value = latest.channel || nextChannel
+        const result = await loadThreadProjection(latest.id, currentAgentId)
+        if (generation !== latestGeneration) return { status: 'superseded' }
+        return result
+      } catch (err) {
+        if (generation !== latestGeneration) return { status: 'superseded' }
+        const error = err instanceof Error ? err : new Error(String(err))
+        historyError.value = error.message
+        logger.error('ThreadStore', '最新 Thread 加载失败', error)
+        return { status: 'failed', error }
+      } finally {
+        if (generation === latestGeneration) {
+          isLoadingHistory.value = false
+          navigationTarget.value = null
+        }
+      }
+    })()
+    const tracked = operation.finally(() => {
+      if (loadingLatestThreads.get(key)?.operation === tracked) loadingLatestThreads.delete(key)
+    })
+    loadingLatestThreads.set(key, { generation, operation: tracked })
+    return tracked
   }
 
   /** 激活指定 Agent 的最近 conversation Thread；后端在不存在时原子创建。 */
   async function ensureLatestThread(
     currentAgentId: string,
     nextChannel: ThreadChannel = 'desktop',
-  ): Promise<string> {
-    const key = `${currentAgentId}:${nextChannel}`
-    const pending = ensuringThreads.get(key)
-    if (pending) return pending
-
-    const operation = (async () => {
-      await loadLatestThread(currentAgentId, nextChannel)
-      if (!threadId.value || agentId.value !== currentAgentId) {
-        throw new Error('最近会话激活失败')
-      }
+  ): Promise<string | null> {
+    // 页面重新激活复用已经加载的会话；显式刷新仍走 loadLatestThread。
+    if (
+      threadId.value &&
+      agentId.value === currentAgentId &&
+      channel.value === nextChannel &&
+      !isLoadingHistory.value &&
+      !historyError.value
+    )
       return threadId.value
-    })()
-    ensuringThreads.set(key, operation)
-    try {
-      return await operation
-    } finally {
-      if (ensuringThreads.get(key) === operation) ensuringThreads.delete(key)
-    }
+    const result = await loadLatestThread(currentAgentId, nextChannel)
+    if (result.status === 'failed') throw result.error
+    if (result.status === 'superseded') return null
+    return result.threadId
   }
 
   /** 刷新当前 Thread 消息，用服务端持久化记录校准本地消息 ID。 */
   async function refreshCurrentThread(currentAgentId = agentId.value) {
-    if (!threadId.value) return
+    // 审批与网络恢复触发的后台刷新不能抢占用户正在选择的会话。
+    if (
+      !threadId.value ||
+      navigationTarget.value ||
+      isLoadingHistory.value ||
+      currentAgentId !== agentId.value
+    )
+      return
     await loadThreadMessages(threadId.value, currentAgentId)
   }
 
@@ -370,6 +468,7 @@ export const useThreadStore = defineStore('thread', () => {
 
   function applyProjection(snapshot: import('@infos/shared').ConversationProjectionSnapshot): void {
     compositor.mergeSnapshot(snapshot)
+    if (snapshot.threadId !== threadId.value || snapshot.principalId !== agentId.value) return
     messages.value = mergeProjectionMessages(snapshot)
     historyCursor.value = messages.value[0]?.id
     hasMoreHistory.value = messages.value.length < (snapshot.totalMessages ?? messages.value.length)
@@ -377,7 +476,14 @@ export const useThreadStore = defineStore('thread', () => {
 
   /** 应用实时 Surface 帧，并在 commit 时把临时消息原子归一为持久消息 Shell。 */
   function applySurfaceFrame(frame: SurfaceFrame): void {
+    const owner =
+      frame.operation.type === 'surface.open'
+        ? frame.operation
+        : frame.operation.type === 'surface.commit'
+          ? frame.operation.snapshot
+          : compositor.get(frame.surfaceId)
     compositor.enqueue(frame)
+    if (!owner || owner.threadId !== threadId.value || owner.principalId !== agentId.value) return
     if (frame.operation.type === 'surface.open') {
       if (!streamingMessageId.value) return
       messages.value = messages.value.map((message) =>
@@ -408,8 +514,41 @@ export const useThreadStore = defineStore('thread', () => {
     ragFailureTrace.value = trace
   }
 
+  /** 没收到失败帧时，也在当前消息上直接显示错误，不依赖历史回灌成功。 */
+  function failStreaming(code: string, message: string): void {
+    compositor.flush()
+    const id = streamingMessageId.value
+    const shell = messages.value.find((item) => item.id === id)
+    if (!shell) return
+    const existing = compositor.get(shell.surfaceId)
+    const surfaceId = (shell.surfaceId ??
+      `local-error:${shell.id}`) as import('@infos/shared').SurfaceId
+    compositor.install({
+      surfaceId,
+      generation: existing?.generation ?? `local:${shell.id}`,
+      threadId: threadId.value,
+      principalId: agentId.value,
+      revision: (existing?.revision ?? 0) + 1,
+      sequence: existing?.sequence ?? 0,
+      state: 'failed',
+      nodes: [
+        ...(existing?.nodes.filter((node) => node.kind !== 'status' && node.kind !== 'error') ??
+          []),
+        {
+          nodeId: `${surfaceId}:error` as import('@infos/shared').SurfaceNodeId,
+          kind: 'error',
+          lifecycle: 'stable',
+          revision: 1,
+          props: { code, message },
+        },
+      ],
+    })
+    messages.value = messages.value.map((item) => (item.id === id ? { ...item, surfaceId } : item))
+  }
+
   /** 完成流式生成 */
   function finishStreaming() {
+    compositor.flush()
     const list = messages.value
     if (list.length === 0) return
 
@@ -425,8 +564,14 @@ export const useThreadStore = defineStore('thread', () => {
 
   /** 清空当前 Thread */
   function clearThread() {
+    latestGeneration++
+    loadGeneration++
+    isLoadingHistory.value = false
+    navigationTarget.value = null
     messages.value = []
     threadId.value = ''
+    interactionMode.value = 'chat'
+    executionMode.value = 'manual'
     generationState.value = 'idle'
     ragProgressMessage.value = null
     ragFailureTrace.value = null
@@ -442,14 +587,65 @@ export const useThreadStore = defineStore('thread', () => {
    * 编辑指定消息内容 (本地 + 后端同步)
    * 后端路由：PATCH /threads/:threadId/messages/:msgId
    */
-  function editMessage(id: string, newContent: string) {
-    messages.value = messages.value.map((m) => (m.id === id ? { ...m, content: newContent } : m))
-    // 后端同步 (异步，不阻塞 UI)
-    if (threadId.value && id) {
-      chatApi.editMessage(threadId.value, id, newContent).catch((err) => {
-        logger.error('ThreadStore', '消息编辑同步失败', err)
+  async function resolvePersistedMessage(
+    id: string,
+    origin?: { message: ChatMessage; occurrenceFromEnd: number },
+  ): Promise<ChatMessage> {
+    const requestThread = threadId.value,
+      requestAgent = agentId.value
+    const snapshot = messages.value.find((message) => message.id === id) ?? origin?.message
+    if (!requestThread || !snapshot) throw new Error('消息已变化，请重新打开编辑')
+    if (/^\d+$/.test(id)) return snapshot
+    const matching = messages.value.filter(
+      (message) => message.role === snapshot.role && message.content === snapshot.content,
+    )
+    const occurrenceFromEnd =
+      origin?.occurrenceFromEnd ?? matching.length - 1 - matching.indexOf(snapshot)
+    await refreshCurrentThread(requestAgent)
+    if (threadId.value !== requestThread || agentId.value !== requestAgent)
+      throw new Error('会话已切换，已保留编辑内容')
+    const candidates = messages.value.filter(
+      (message) => /^\d+$/.test(message.id) && message.role === snapshot.role,
+    )
+    const target =
+      candidates.find(
+        (message) => snapshot.surfaceId && message.surfaceId === snapshot.surfaceId,
+      ) ??
+      candidates.find((message) => snapshot.pairId && message.pairId === snapshot.pairId) ??
+      candidates
+        .filter((message) => message.content === snapshot.content)
+        .at(-1 - occurrenceFromEnd)
+    if (!target) throw new Error('消息尚未完成同步，请稍后重试')
+    return target
+  }
+
+  async function editMessage(
+    id: string,
+    newContent: string,
+    expectedRevision?: number,
+    origin?: { message: ChatMessage; occurrenceFromEnd: number },
+  ) {
+    const requestThread = threadId.value,
+      requestAgent = agentId.value
+    const target = await resolvePersistedMessage(id, origin)
+    if (threadId.value !== requestThread || agentId.value !== requestAgent)
+      throw new Error('会话已切换')
+    const response = await chatApi.editMessage(
+      requestThread,
+      target.id,
+      newContent,
+      expectedRevision ?? target.revision,
+    )
+    if (!response.data) throw new Error('服务端未返回保存后的消息')
+    if (threadId.value === requestThread && agentId.value === requestAgent) {
+      compositor.mergeSnapshot(response.data)
+      const updated = new Map(response.data.messages.map((message) => [message.messageId, message]))
+      messages.value = messages.value.map((message) => {
+        const changed = updated.get(message.id)
+        return changed && changed.revision !== message.revision ? fromProjection(changed) : message
       })
     }
+    return { message: target, threadId: requestThread, projection: response.data }
   }
 
   /**
@@ -483,29 +679,64 @@ export const useThreadStore = defineStore('thread', () => {
     currentAgentId = agentId.value,
     nextChannel: ThreadChannel = 'desktop',
   ) {
-    const res = await threadsApi.create({ agentId: currentAgentId, channel: nextChannel })
-    const nextThread = res.data?.thread
-    if (!nextThread) throw new Error('服务端未返回新 Thread')
-    startThread(nextThread.id, nextThread.channel || nextChannel, currentAgentId)
-    logger.info('ThreadStore', `新 Thread 已创建: ${nextThread.id}`)
-    return nextThread.id
+    const generation = ++latestGeneration
+    loadGeneration++
+    navigationTarget.value = { agentId: currentAgentId }
+    isLoadingHistory.value = true
+    try {
+      const res = await threadsApi.create({ agentId: currentAgentId, channel: nextChannel })
+      const nextThread = res.data?.thread
+      if (!nextThread) throw new Error('服务端未返回新 Thread')
+      // 创建期间若用户选了其他会话，只保留新建结果，不抢回当前页面。
+      if (generation !== latestGeneration) return nextThread.id
+      startThread(nextThread.id, nextThread.channel || nextChannel, currentAgentId)
+      interactionMode.value = nextThread.interactionMode
+      executionMode.value = resolveExecutionMode(
+        nextThread.executionMode,
+        nextThread.autoExecuteTools,
+      )
+      logger.info('ThreadStore', `新 Thread 已创建: ${nextThread.id}`)
+      return nextThread.id
+    } finally {
+      if (generation === latestGeneration) {
+        isLoadingHistory.value = false
+        navigationTarget.value = null
+      }
+    }
   }
 
   /** 是否正在生成 (便捷 getter) */
   const isGenerating = computed(() => generationState.value !== 'idle')
+  const syncOnForeground = () => {
+    compositor.flush()
+    if (document.hidden || isGenerating.value || isLoadingHistory.value || !threadId.value) return
+    void refreshCurrentThread()
+  }
+  if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+    window.addEventListener('focus', syncOnForeground)
+    document.addEventListener('visibilitychange', syncOnForeground)
+    onScopeDispose(() => {
+      window.removeEventListener('focus', syncOnForeground)
+      document.removeEventListener('visibilitychange', syncOnForeground)
+    })
+  }
 
   return {
     threadId,
     channel,
+    interactionMode,
+    executionMode,
     agentId,
     messages,
     generationState,
+    liveContextBudget,
     ragProgressMessage,
     ragFailureTrace,
     isGenerating,
     inputText,
     streamingMessageId,
     isLoadingHistory,
+    navigationTarget,
     isLoadingOlderHistory,
     hasMoreHistory,
     historyError,
@@ -517,8 +748,10 @@ export const useThreadStore = defineStore('thread', () => {
     setRagProgress,
     setRagFailure,
     finishStreaming,
+    failStreaming,
     clearThread,
     editMessage,
+    resolvePersistedMessage,
     deleteMessage,
     startThread,
     createNewThread,

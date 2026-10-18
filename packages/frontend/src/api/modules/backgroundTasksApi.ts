@@ -10,6 +10,7 @@
  */
 
 import type { BackgroundTaskProjectionSnapshot, KernelExecutionSnapshot } from '@infos/shared'
+import type { TaskLifecycle, TaskControlInput } from '@infos/shared'
 import { apiClient } from '../client'
 
 /** 任务状态机（与后端一致） */
@@ -18,13 +19,18 @@ export type BackgroundTaskStatus =
   | 'running'
   | 'paused'
   | 'waiting_input'
+  | 'waiting'
+  | 'blocked'
   | 'completed'
   | 'failed'
   | 'cancelled'
 
 /** 后台任务信息（对齐后端 BackgroundTaskInfo） */
 export interface BackgroundTaskInfo {
+  plan?: import('@infos/shared').TaskPlan | null
   id: string
+  revision?: number
+  lifecycle?: TaskLifecycle
   agentId: string
   threadId: string
   targetThreadId: string | null
@@ -38,6 +44,7 @@ export interface BackgroundTaskInfo {
   toolCallCount: number
   priority: number
   requestedBy: string
+  metadata?: Record<string, unknown>
   completionAction: string
   category: 'agent_task' | 'resident'
   inputQuestion: string | null
@@ -65,6 +72,9 @@ export interface BackgroundTaskInfo {
 
 /** 派发任务请求 */
 export interface DispatchTaskRequest {
+  successCriteria?: string
+  recovery?: 'read_only' | 'confirm'
+  deadline?: string
   agentId: string
   instruction: string
   title?: string
@@ -75,6 +85,7 @@ export interface DispatchTaskRequest {
 
 /** 分页查询参数 */
 export interface BackgroundTaskQueryParams {
+  category?: 'agent_task' | 'resident'
   agentId?: string
   status?: BackgroundTaskStatus
   keyword?: string
@@ -99,6 +110,31 @@ export interface AgentActiveCount {
 }
 
 export const backgroundTasksApi = {
+  resolveDelivery: (taskId: string, id: string, decision: 'sent' | 'retry') =>
+    apiClient.post(`/background-tasks/${taskId}/deliveries/${encodeURIComponent(id)}`, {
+      decision,
+    }),
+  control: (agentId: string, input: TaskControlInput) =>
+    apiClient.post<unknown>('/background-tasks/control', { agentId, ...input }),
+  deliveries: (id: string) =>
+    apiClient.get<
+      Array<{
+        id: string
+        channel: string
+        status: string
+        attempts: number
+        lastError: string | null
+      }>
+    >(`/background-tasks/${id}/deliveries`),
+  submitInput: (
+    id: string,
+    input: {
+      decision: 'allow_once' | 'deny_once'
+      message?: string
+      expectedRevision?: number
+      approvalId?: string
+    },
+  ) => apiClient.post<BackgroundTaskInfo>(`/background-tasks/${id}/input`, input),
   /** 派发后台任务 */
   dispatch: (data: DispatchTaskRequest) =>
     apiClient.post<BackgroundTaskInfo>('/background-tasks', data),
@@ -106,6 +142,7 @@ export const backgroundTasksApi = {
   /** 分页查询任务 */
   list: (params: BackgroundTaskQueryParams = {}) => {
     const query = new URLSearchParams()
+    if (params.category) query.set('category', params.category)
     if (params.agentId) query.set('agentId', params.agentId)
     if (params.status) query.set('status', params.status)
     if (params.keyword) query.set('keyword', params.keyword)

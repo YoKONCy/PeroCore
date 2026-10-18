@@ -17,6 +17,7 @@ describe('FileSnapshotRepository 链式回滚范围', () => {
         channel TEXT DEFAULT 'desktop' NOT NULL,
         status TEXT DEFAULT 'active',
         auto_execute_tools INTEGER DEFAULT false NOT NULL,
+        execution_mode TEXT DEFAULT 'manual' NOT NULL,
         created_at TEXT,
         updated_at TEXT
       );
@@ -48,6 +49,7 @@ describe('FileSnapshotRepository 链式回滚范围', () => {
         original_content TEXT,
         original_sha256 TEXT,
         final_sha256 TEXT,
+        history_continuous INTEGER DEFAULT true,
         created_at TEXT DEFAULT (datetime('now', 'localtime')) NOT NULL,
         updated_at TEXT DEFAULT (datetime('now', 'localtime')) NOT NULL
       );
@@ -237,6 +239,37 @@ describe('FileSnapshotRepository 链式回滚范围', () => {
       originalSha256: 'h0',
       finalSha256: 'h2',
       callId: 'c2',
+      historyContinuous: true,
     })
+  })
+
+  it('同轮夹入外部修改后，后续工具写入不能把历史重新标记为连续', async () => {
+    const db = drizzle(sqlite, { schema: { threads, threadMessages, fileChangeSnapshots } })
+    const repo = new FileSnapshotRepository(db as never)
+    const base = { threadId: 't', pairId: 'A', filePath: 'note.md', operation: 'modify' as const }
+    await repo.upsert({
+      ...base,
+      id: 'first',
+      callId: 'first',
+      originalSha256: 'initial',
+      finalSha256: 'agent-first',
+    })
+    await repo.upsert({
+      ...base,
+      id: 'second',
+      callId: 'second',
+      originalSha256: 'user-edited',
+      finalSha256: 'agent-second',
+    })
+    await repo.upsert({
+      ...base,
+      id: 'third',
+      callId: 'third',
+      originalSha256: 'agent-second',
+      finalSha256: 'agent-third',
+    })
+    const rows = await db.select().from(fileChangeSnapshots).all()
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.historyContinuous).toBe(false)
   })
 })

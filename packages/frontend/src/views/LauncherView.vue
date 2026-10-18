@@ -1,15 +1,17 @@
 <script setup lang="ts">
 /** Electron 客户端专属启动与维护中心。 */
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { PixelIcon } from '../components/pixel'
 import AsyncMarkdown from '../components/markdown/AsyncMarkdown.vue'
 import { OnboardingOverlay } from '../components/overlays'
 import CustomTitleBar from '../components/layout/CustomTitleBar.vue'
+import InfosLogo from '../components/brands/InfosLogo.vue'
 import { useLauncher } from '../composables/launcher/useLauncher'
 import { launcherSteps } from '../composables/launcher/onboardingScripts'
 import { useAgentStore, useNotificationStore } from '../stores'
 import { getApiBaseUrl } from '../api/transport'
 import { invoke, listen } from '../utils/ipcAdapter'
+import { useMainNav } from '../composables/main/useMainNav'
 
 interface ClientInfo {
   version: string
@@ -78,6 +80,66 @@ const appVersion = __APP_VERSION__
 const activeTab = ref<TabId>('launch')
 const agentStore = useAgentStore()
 const notification = useNotificationStore()
+const { theme, toggleTheme } = useMainNav()
+const launchMenuOpen = ref(false)
+const launchTrigger = ref<HTMLButtonElement | null>(null)
+const launchMenu = ref<HTMLElement | null>(null)
+const launchPlacement = ref({ left: '0px', top: '0px' })
+const launchMenuBelow = ref(true)
+
+async function showLaunchMenu() {
+  if (launchMenuOpen.value) {
+    launchMenuOpen.value = false
+    return
+  }
+  const box = launchTrigger.value?.getBoundingClientRect()
+  if (!box) return
+  launchPlacement.value = { left: '0px', top: '0px' }
+  launchMenuOpen.value = true
+  await nextTick()
+  const menu = launchMenu.value
+  if (!menu) return
+  // 使用布局尺寸，避免入场缩放动画影响菜单与按钮的对齐。
+  const width = menu.offsetWidth
+  const height = menu.offsetHeight
+  launchMenuBelow.value = box.bottom + height + 10 <= window.innerHeight - 12
+  launchPlacement.value = {
+    left: `${Math.max(12, Math.min(window.innerWidth - width - 12, box.right - width))}px`,
+    top: `${Math.max(12, launchMenuBelow.value ? box.bottom + 10 : box.top - height - 10)}px`,
+  }
+  menu.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true })
+}
+function dismissLaunchMenu(event?: Event) {
+  if (
+    event &&
+    (launchMenu.value?.contains(event.target as Node) ||
+      launchTrigger.value?.contains(event.target as Node))
+  )
+    return
+  launchMenuOpen.value = false
+}
+function launchMenuKey(event: KeyboardEvent) {
+  if (event.key === 'Tab') {
+    dismissLaunchMenu()
+    return
+  }
+  if (event.key === 'Escape') {
+    dismissLaunchMenu()
+    launchTrigger.value?.focus()
+    return
+  }
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+  event.preventDefault()
+  const buttons = [...(launchMenu.value?.querySelectorAll<HTMLButtonElement>('button') ?? [])]
+  const current = buttons.indexOf(document.activeElement as HTMLButtonElement)
+  const index =
+    event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? buttons.length - 1
+        : (current + (event.key === 'ArrowUp' ? -1 : 1) + buttons.length) % buttons.length
+  buttons[index]?.focus()
+}
 const clientInfo = ref<ClientInfo | null>(null)
 const updateState = ref<UpdateState | null>(null)
 const release = ref<ReleaseNotice | null>(null)
@@ -181,13 +243,10 @@ async function selectAgent(agentId: string): Promise<void> {
   }
 }
 
-async function enterDesktop(): Promise<void> {
-  await enterApp()
-  await refreshClientInfo()
-}
-
-async function openDashboard(): Promise<void> {
-  await invoke('open-dashboard-window')
+async function launch(target: 'pet' | 'app'): Promise<void> {
+  dismissLaunchMenu()
+  const success = await enterApp(target)
+  if (!success) notification.toast('启动失败，请稍后重试', 'error')
   await refreshClientInfo()
 }
 
@@ -215,6 +274,9 @@ function handleOnboardingStep(step: { tab?: string }): void {
 }
 
 onMounted(async () => {
+  document.addEventListener('pointerdown', dismissLaunchMenu)
+  window.addEventListener('resize', dismissLaunchMenu)
+  window.addEventListener('scroll', dismissLaunchMenu, true)
   await Promise.all([agentStore.fetchAgents(), refreshClientInfo(), startLaunch()])
   void loadRelease()
   stopUpdateListener = await listen('client-update-state', (payload) => {
@@ -222,12 +284,17 @@ onMounted(async () => {
   })
 })
 
-onUnmounted(() => stopUpdateListener?.())
+onUnmounted(() => {
+  stopUpdateListener?.()
+  document.removeEventListener('pointerdown', dismissLaunchMenu)
+  window.removeEventListener('resize', dismissLaunchMenu)
+  window.removeEventListener('scroll', dismissLaunchMenu, true)
+})
 </script>
 
 <template>
-  <div class="launcher-shell">
-    <CustomTitleBar :transparent="true" />
+  <div class="launcher-shell" :class="{ 'launcher-dark': theme === 'dark' }">
+    <CustomTitleBar :is-work-mode="theme === 'dark'" />
 
     <OnboardingOverlay
       :visible="showOnboarding"
@@ -243,16 +310,24 @@ onUnmounted(() => stopUpdateListener?.())
 
     <header class="launcher-head">
       <div class="launcher-brand">
-        <div class="brand-mark"><img src="/icon.png" alt="PeroperoChat" /></div>
+        <div class="brand-mark"><InfosLogo variant="mark" /></div>
         <div>
-          <strong>PeroperoChat</strong>
+          <InfosLogo class="launcher-wordmark" variant="wordmark" />
           <span>启动器</span>
         </div>
       </div>
       <div class="global-signals">
+        <button
+          class="ghost-action"
+          type="button"
+          :title="theme === 'dark' ? '切换浅色' : '切换深色'"
+          @click="toggleTheme"
+        >
+          <PixelIcon :name="theme === 'dark' ? 'sun' : 'moon'" size="xs" />
+        </button>
         <span class="signal">
-          <i :class="phase === 'ready' ? 'ok' : 'pending'" />
-          {{ phase === 'ready' ? '服务在线' : '正在连接' }}
+          <i :class="['ready', 'entering', 'done'].includes(phase) ? 'ok' : 'pending'" />
+          {{ ['ready', 'entering', 'done'].includes(phase) ? '服务在线' : '正在连接' }}
         </span>
         <span class="badge">{{ editionName }}</span>
         <span class="ver">v{{ clientInfo?.version ?? appVersion }}</span>
@@ -350,20 +425,25 @@ onUnmounted(() => stopUpdateListener?.())
             </div>
           </div>
           <div class="launch-actions">
-            <button class="ghost-action" @click="openDashboard">
-              <PixelIcon name="layout" size="sm" />
-              打开主界面
-            </button>
             <button
               id="launcher-primary-action"
+              ref="launchTrigger"
               class="primary-action"
-              :disabled="phase === 'entering'"
-              @click="enterDesktop"
+              :class="{ 'is-open': launchMenuOpen }"
+              type="button"
+              aria-haspopup="menu"
+              :aria-expanded="launchMenuOpen"
+              aria-controls="launcher-start-menu"
+              :disabled="!['ready', 'done'].includes(phase)"
+              @click="showLaunchMenu"
+              @keydown.down.prevent="showLaunchMenu"
             >
-              <PixelIcon name="power" size="md" />
-              <span>
-                <strong>{{ clientInfo?.windows.pet ? '显示伙伴' : '召唤伙伴' }}</strong>
-                <small>{{ phase === 'entering' ? enteringText : '进入桌面陪伴模式' }}</small>
+              <span class="launch-power" aria-hidden="true">
+                <PixelIcon name="power" size="sm" />
+              </span>
+              <strong>{{ phase === 'entering' ? enteringText : '启动' }}</strong>
+              <span class="launch-chevron" :class="{ open: launchMenuOpen }">
+                <PixelIcon name="chevron-down" size="xs" />
               </span>
             </button>
           </div>
@@ -660,7 +740,7 @@ onUnmounted(() => stopUpdateListener?.())
           </div>
         </div>
         <div class="about-hero">
-          <div class="about-logo"><img src="/icon.png" alt="萌动链接：PeroperoChat！" /></div>
+          <div class="about-logo"><InfosLogo variant="mark" /></div>
           <div>
             <span class="mono">INFRASTRUCTURE · INFOMORPH · INFINITY</span>
             <h2>萌动链接：PeroperoChat！</h2>
@@ -718,7 +798,7 @@ onUnmounted(() => stopUpdateListener?.())
     </main>
 
     <Teleport to="body">
-      <div v-if="showEula" class="eula-mask">
+      <div v-if="showEula" class="eula-mask" :class="{ 'launcher-dark': theme === 'dark' }">
         <div class="eula-dialog">
           <header class="eula-head">
             <div class="eula-icon"><PixelIcon name="shield" size="lg" /></div>
@@ -785,10 +865,55 @@ onUnmounted(() => stopUpdateListener?.())
         </div>
       </div>
     </Teleport>
+    <Teleport to="body">
+      <Transition name="launch-menu">
+        <div
+          v-if="launchMenuOpen"
+          id="launcher-start-menu"
+          ref="launchMenu"
+          class="launcher-start-menu"
+          :class="{ 'launcher-dark': theme === 'dark', 'opens-below': launchMenuBelow }"
+          :style="launchPlacement"
+          role="menu"
+          @keydown="launchMenuKey"
+        >
+          <button type="button" role="menuitem" @click="launch('pet')">
+            <i class="launch-mode-icon" aria-hidden="true"><PixelIcon name="heart" size="sm" /></i>
+            <span>桌宠模式</span>
+            <PixelIcon name="arrow-right" size="xs" />
+          </button>
+          <button type="button" role="menuitem" @click="launch('app')">
+            <i class="launch-mode-icon is-app" aria-hidden="true">
+              <PixelIcon name="layout" size="sm" />
+            </i>
+            <span>应用模式</span>
+            <PixelIcon name="arrow-right" size="xs" />
+          </button>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 
 <style scoped>
+/* 浅色沿用原有视觉风格，启动操作单独提供两种主题的按钮配色。 */
+.launcher-shell,
+.eula-mask,
+.launcher-start-menu {
+  --launcher-action-top: #ffe1ee;
+  --launcher-action-bottom: #f6bfd8;
+  --launcher-action-text: #73334e;
+  --launcher-action-edge: #be829e;
+  --launcher-action-shadow: rgba(124, 71, 95, 0.2);
+  --launcher-action-highlight: rgba(255, 255, 255, 0.8);
+  --launcher-start-surface: #fffdfd;
+  --launcher-start-edge: var(--color-moe-cocoa);
+  --launcher-start-shadow: rgba(45, 27, 30, 0.2);
+  --launcher-start-tint: #ffe4f2;
+  --launcher-start-hover: #fff3f8;
+  --launcher-start-icon: #b43770;
+  --launcher-start-highlight: #fff;
+}
 .launcher-shell {
   --px: 2px;
   --cocoa: var(--color-moe-cocoa);
@@ -831,22 +956,18 @@ onUnmounted(() => stopUpdateListener?.())
   width: 40px;
   height: 40px;
   overflow: hidden;
-  border: 2px solid var(--cocoa);
-  background: #fff;
-  box-shadow: 3px 3px 0 0 var(--cocoa-soft);
 }
-.brand-mark img {
+.brand-mark .infos-logo {
   width: 100%;
   height: 100%;
-  object-fit: cover;
 }
 .launcher-brand div:last-child {
   display: flex;
   flex-direction: column;
 }
-.launcher-brand strong {
-  font: 800 17px var(--ui-font-pixel);
-  letter-spacing: 0.02em;
+.launcher-wordmark {
+  width: 98px;
+  height: 31px;
 }
 .launcher-brand span {
   margin-top: 1px;
@@ -1225,33 +1346,73 @@ onUnmounted(() => stopUpdateListener?.())
   cursor: pointer;
 }
 .primary-action {
-  display: flex;
+  display: grid;
+  grid-template-columns: 30px 1fr 23px;
   align-items: center;
-  gap: 11px;
-  min-width: 210px;
-  padding: 12px 17px;
-  background: linear-gradient(135deg, var(--pink-deep), #be185d);
-  color: #fff;
-  box-shadow: 4px 4px 0 0 #831843;
+  gap: 13px;
+  min-width: 164px;
+  height: 48px;
+  padding: 7px 10px 7px 7px;
+  border-color: var(--launcher-start-edge);
+  border-radius: 4px;
+  background: var(--launcher-start-surface);
+  color: var(--ui-text-primary);
+  box-shadow:
+    inset 0 1px 0 var(--launcher-start-highlight),
+    3px 3px 0 var(--launcher-start-shadow);
   transition:
-    transform 0.1s ease,
-    box-shadow 0.1s ease;
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    background 160ms ease;
 }
-.primary-action:active {
-  transform: translate(3px, 3px);
-  box-shadow: 1px 1px 0 0 #831843;
+.primary-action:hover:not(:disabled):not(:active):not(.is-open) {
+  background: var(--launcher-start-hover);
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 var(--launcher-start-highlight),
+    3px 4px 0 var(--launcher-start-shadow);
 }
-.primary-action span {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
+.primary-action:active:not(:disabled),
+.primary-action.is-open:not(:disabled) {
+  transform: translate(2px, 2px);
+  background: var(--launcher-start-hover);
+  box-shadow:
+    inset 0 1px 0 var(--launcher-start-highlight),
+    1px 1px 0 var(--launcher-start-shadow);
+}
+.primary-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
 }
 .primary-action strong {
-  font-size: 13px;
+  text-align: left;
+  font: 800 14px var(--ui-font-pixel);
+  letter-spacing: 0.08em;
 }
-.primary-action small {
-  font-size: 10px;
-  opacity: 0.85;
+.launch-power {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid color-mix(in srgb, var(--launcher-start-icon) 22%, transparent);
+  border-radius: 3px;
+  background: var(--launcher-start-tint);
+  color: var(--launcher-start-icon);
+}
+.launch-chevron {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  height: 18px;
+  border-left: 1px solid var(--ui-border-default);
+  color: var(--ui-text-secondary);
+}
+.launch-chevron :deep(svg) {
+  transition: transform 180ms ease;
+}
+.launch-chevron.open :deep(svg) {
+  transform: rotate(180deg);
 }
 .ghost-action {
   display: flex;
@@ -1276,10 +1437,13 @@ onUnmounted(() => stopUpdateListener?.())
 }
 .primary-small {
   padding: 10px 14px;
-  background: var(--pink-deep);
-  color: #fff;
+  border-color: var(--launcher-action-edge);
+  background: linear-gradient(180deg, var(--launcher-action-top), var(--launcher-action-bottom));
+  color: var(--launcher-action-text);
   font-size: 12px;
-  box-shadow: 3px 3px 0 0 #831843;
+  box-shadow:
+    inset 0 1px 0 var(--launcher-action-highlight),
+    0 3px 0 var(--launcher-action-shadow);
 }
 
 /* ── 运行环境页 ── */
@@ -1696,14 +1860,10 @@ onUnmounted(() => stopUpdateListener?.())
   height: 76px;
   overflow: hidden;
   place-items: center;
-  border: 2px solid var(--cocoa);
-  background: #fff;
-  box-shadow: 3px 3px 0 0 var(--cocoa-soft);
 }
-.about-logo img {
+.about-logo .infos-logo {
   width: 100%;
   height: 100%;
-  object-fit: cover;
 }
 .about-hero div:nth-child(2) {
   flex: 1;
@@ -1980,4 +2140,98 @@ onUnmounted(() => stopUpdateListener?.())
     display: none;
   }
 }
+
+/* 启动菜单与按钮使用同一套主题色，角色区和页面布局保持原样。 */
+.launcher-start-menu {
+  position: fixed;
+  z-index: 10000;
+  width: 204px;
+  max-width: calc(100vw - 24px);
+  padding: 6px;
+  border: 2px solid var(--launcher-start-edge);
+  border-radius: 4px;
+  background: var(--launcher-start-surface);
+  color: var(--ui-text-primary);
+  box-shadow:
+    3px 3px 0 var(--launcher-start-shadow),
+    var(--ui-shadow-sm);
+  transform-origin: 80% 100%;
+}
+.launcher-start-menu.opens-below {
+  transform-origin: 80% 0;
+}
+.launcher-start-menu button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 8px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: 600 13px var(--ui-font-sans);
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease;
+}
+.launcher-start-menu button span {
+  flex: 1;
+  text-align: left;
+}
+.launcher-start-menu button:hover,
+.launcher-start-menu button:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--launcher-start-icon) 18%, transparent);
+  background: var(--launcher-start-hover);
+  color: var(--ui-text-primary);
+}
+.launch-mode-icon {
+  display: grid;
+  flex: 0 0 28px;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: 3px;
+  background: var(--launcher-start-tint);
+  color: var(--launcher-start-icon);
+}
+.launch-mode-icon.is-app {
+  background: var(--ui-accent-sky-soft);
+  color: var(--ui-accent-sky);
+}
+.primary-action:focus-visible,
+.launcher-start-menu button:focus-visible {
+  outline: 2px solid var(--ui-focus-color);
+  outline-offset: 3px;
+}
+.launch-menu-enter-active,
+.launch-menu-leave-active {
+  transition:
+    opacity 0.18s ease,
+    transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.launch-menu-enter-from,
+.launch-menu-leave-to {
+  opacity: 0;
+  transform: translateY(5px) scale(0.98);
+}
+.opens-below.launch-menu-enter-from,
+.opens-below.launch-menu-leave-to {
+  transform: translateY(-5px) scale(0.98);
+}
+@media (prefers-reduced-motion: reduce) {
+  .launch-menu-enter-active,
+  .launch-menu-leave-active,
+  .primary-action,
+  .launch-chevron :deep(svg),
+  .launcher-start-menu button {
+    transition: none;
+  }
+}
 </style>
+
+<style scoped src="../assets/launcher-dark.css"></style>

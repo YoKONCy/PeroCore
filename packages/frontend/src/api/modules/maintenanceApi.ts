@@ -7,6 +7,31 @@
 import { apiClient } from '../client'
 import type { TaskStats } from './schedulerApi'
 
+export type IndexScope = 'main' | 'social' | 'facts' | 'knowledge'
+export interface IndexMaintenanceStatus {
+  dimension: number
+  model: string
+  embeddingAvailable: boolean
+  busy: boolean
+  indexes: Array<{
+    scope: IndexScope
+    agentId?: string
+    exists: boolean
+    dimension: number | null
+    nodeCount: number | null
+    error?: string
+  }>
+  jobs: Array<{
+    executionId?: string
+    scope: IndexScope | 'all'
+    agentId?: string
+    state: string
+    completed: number
+    total: number
+    error?: string
+  }>
+}
+
 /** 维护系统状态 */
 export interface MaintenanceStatus {
   schedulerRunning: boolean
@@ -25,7 +50,6 @@ export interface MaintenanceStatus {
 
 /** 主 Agent 全局记忆运行配置。 */
 export interface MemoryRuntimeConfig {
-  workContextExpirationPairs: number
   channels: Record<
     'desktop' | 'group',
     {
@@ -62,6 +86,10 @@ export const maintenanceApi = {
   trigger: (task: string) => apiClient.post<{ taskName: string }>('/maintenance/trigger', { task }),
 
   /** 触发向量重索引 */
-  reindex: (agentId = 'pero') =>
-    apiClient.post<{ agentId: string; pendingCount: number }>('/maintenance/reindex', { agentId }),
+  reindex: (agentId?: string, scope: IndexScope | 'all' = 'main') =>
+    apiClient.post<{ executionId: string; total: number }>('/maintenance/reindex', {
+      agentId,
+      scope,
+    }),
+  indexes: () => apiClient.get<IndexMaintenanceStatus>('/maintenance/indexes'),
 }

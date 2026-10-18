@@ -16,9 +16,11 @@
  */
 
 import { Hono } from 'hono'
+import { DEFAULT_CHARACTER_STATE } from '@infos/shared'
 import { validate as zValidator } from '../lib/validation'
 import { z } from 'zod'
 import { AppError } from '../lib/appError'
+import { disposeExecutionOwner } from '../tools/productivityRuntimeHolder'
 import type { AppContext } from '../container'
 import { resolveToolUserDescription, resolveToolUserLabel } from '../tools/toolUserLabels'
 import { isAdvancedTool } from '../tools/advancedTools'
@@ -83,7 +85,7 @@ export function createAgentRouter(ctx: AppContext) {
   router.get('/', (c) => {
     const agents = ctx.agentManager.listAgents().map((a) => ({
       ...a,
-      avatarUrl: `/agents/${a.id}/avatar`,
+      avatarUrl: ctx.agentManager.getAvatarUrl(a.id),
     }))
     return c.json({ code: 'OK', message: '获取成功', data: agents })
   })
@@ -111,13 +113,16 @@ export function createAgentRouter(ctx: AppContext) {
     })
   })
 
-  // GET /api/agents/tools — 全部已注册工具清单 (供能力矩阵表单勾选 + 前端轨迹区显示元数据)
+  // GET /api/agents/tools — 主应用可见工具清单 (供能力矩阵表单勾选 + 前端轨迹区显示元数据)
   // 必须注册在 /:id 之前，避免被参数路由吞掉
   router.get('/tools', (c) => {
     const channelNames = ['desktop', 'group'] as const
+    // 轨迹展示包含高级工具元数据；能力配置列表仍默认隐藏高级工具。
+    const includeAdvanced = c.req.query('includeAdvanced') === 'true'
     const tools = ctx.toolRegistry
       .getDefinitions()
-      .filter((definition) => !isAdvancedTool(definition.name))
+      .filter((definition) => !ctx.applicationRealms.isPrivateTool(definition.name))
+      .filter((definition) => includeAdvanced || !isAdvancedTool(definition.name))
       .map((d) => ({
         name: d.name,
         description: resolveToolUserDescription(d.name, d.display?.description, d.description),
@@ -269,7 +274,7 @@ export function createAgentRouter(ctx: AppContext) {
       data: {
         ...detail,
         avatarPath: ctx.agentManager.getAgent(id)?.avatarPath ?? null,
-        avatarUrl: `/agents/${id}/avatar`,
+        avatarUrl: ctx.agentManager.getAvatarUrl(id),
       },
     })
   })
@@ -328,11 +333,12 @@ export function createAgentRouter(ctx: AppContext) {
   })
 
   // DELETE /api/agents/:id — 删除自定义 Agent (B6-3)
-  router.delete('/:id', (c) => {
+  router.delete('/:id', async (c) => {
     const id = c.req.param('id')
 
     try {
       ctx.agentManager.deleteAgent(id)
+      await disposeExecutionOwner({ agentId: id }, false, true)
       return c.json({ code: 'OK', message: `Agent "${id}" 已删除` })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -445,7 +451,7 @@ export function createAgentRouter(ctx: AppContext) {
   // GET /api/agents/:id/texts — 获取 Agent 看板娘台词 (静态 + 动态合并)
   router.get('/:id/texts', async (c) => {
     const id = c.req.param('id')
-    const texts = await ctx.agentManager.getWaifuTexts(id)
+    const texts = await ctx.agentManager.getWaifuTexts(id, c.req.query('threadId'))
     if (!texts) {
       throw new AppError('AGENT_NOT_FOUND', {
         message: `Agent "${id}" 不存在`,
@@ -460,10 +466,11 @@ export function createAgentRouter(ctx: AppContext) {
   })
 
   // GET /api/agents/:id/pet-state — 获取角色实时状态 (mood/vibe/mind + 动态台词)
-  // 前端 Pet3D / Dashboard 启动时拉取，恢复 finish_task 持久化到 pet_states 的状态
+  // 前端携带 threadId 拉取；未选择会话时只返回默认状态。
   router.get('/:id/pet-state', async (c) => {
     const id = c.req.param('id')
-    const state = await ctx.petStateService.get(id)
+    const threadId = c.req.query('threadId')
+    const state = await ctx.petStateService.get(id, threadId)
     const parse = <T>(text: string | null | undefined, fallback: T): T => {
       if (!text) return fallback
       try {
@@ -478,9 +485,11 @@ export function createAgentRouter(ctx: AppContext) {
       message: '获取成功',
       data: {
         agentId: id,
-        mood: state?.mood ?? '开心',
-        vibe: state?.vibe ?? '活泼',
-        mind: state?.mind ?? '正在发呆...',
+        threadId: threadId ?? null,
+        revision: state?.revision ?? 0,
+        mood: state?.mood ?? DEFAULT_CHARACTER_STATE.mood,
+        vibe: state?.vibe ?? DEFAULT_CHARACTER_STATE.vibe,
+        mind: state?.mind ?? DEFAULT_CHARACTER_STATE.mind,
         clickMessages: hasActiveTexts
           ? parse<Record<string, string[]>>(state?.clickMessagesJson, {})
           : {},

@@ -1,11 +1,18 @@
-import { describe, expect, it, vi } from 'vitest'
-import { createStrongholdRouter } from '@infos/backend/routers/stronghold.router'
+import { errorHandler } from '@infos/backend/middleware/errorHandler'
+import { AppError } from '@infos/backend/lib/appError'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createStrongholdRouter as rawcreateStrongholdRouter } from '@infos/backend/routers/stronghold.router'
 import { StrongholdTurnService } from '@infos/backend/services/stronghold/strongholdTurnService'
 import { StrongholdService } from '@infos/backend/services/stronghold/strongholdService'
 import { GroupChatService } from '@infos/backend/services/stronghold/groupChatService'
 import { createDrizzleConnection, closeDrizzleConnection } from '@infos/backend/database'
 import { GroupChatDispatcher } from '@infos/backend/services/stronghold/groupChatDispatcher'
-import { agentLocations, strongholdRooms, groupChatMembers } from '@infos/backend/database/schema'
+import {
+  agentLocations,
+  strongholdFacilities,
+  strongholdRooms,
+  groupChatMembers,
+} from '@infos/backend/database/schema'
 
 async function readJson(response: Response) {
   return response.json() as Promise<Record<string, unknown>>
@@ -20,7 +27,7 @@ function createCtx() {
       getFacility: vi.fn(() => Promise.resolve(facility)),
       listFacilities: vi.fn(() => Promise.resolve([facility])),
       createFacility: vi.fn((body: Record<string, unknown>) => Promise.resolve({ id: 2, ...body })),
-      getRoom: vi.fn(() => Promise.resolve({ ...room, environmentJson: '{"温度":24}' })),
+      getRoom: vi.fn((_id: string) => Promise.resolve({ ...room, environmentJson: '{"温度":24}' })),
       listRooms: vi.fn(() => Promise.resolve([room])),
       getRoomAgents: vi.fn(() => Promise.resolve(['pero'])),
       createRoom: vi.fn((body: Record<string, unknown>) =>
@@ -55,7 +62,7 @@ function createCtx() {
             publicProfile: {
               gender: '女',
               identity: '据点助手',
-            },
+            } as Record<string, string>,
           }
         }
         if (id === 'nana') {
@@ -66,7 +73,7 @@ function createCtx() {
             publicProfile: {
               appearance: '紫发 & 紫瞳',
               personality: '自信 <傲娇>',
-            },
+            } as Record<string, string>,
           }
         }
         return undefined
@@ -88,10 +95,17 @@ function createCtx() {
       convertPerspective: vi.fn(() => [{ role: 'user', content: '历史' }]),
     },
     groupChatDispatcher: {
-      decideNextTurn: vi.fn(() => Promise.resolve({ agentIds: [], reason: '无需接话' })),
+      decideNextTurn: vi.fn(() =>
+        Promise.resolve({ agentIds: [] as string[], reason: '无需接话' }),
+      ),
     },
     agentService: {
-      chatStreamWithCompiledMessages: vi.fn(async function* () {
+      chatStreamWithCompiledMessages: vi.fn(async function* (_input: {
+        agentId: string
+        messages: Array<{ role: string; content: unknown }>
+        disabledTools?: string[]
+        onToolCalls?: (calls: unknown[]) => void
+      }) {
         yield {
           event: 'narration_delta' as const,
           data: { blockId: 'reply', turn: 1, delta: '猫猫回复' },
@@ -104,7 +118,9 @@ function createCtx() {
       saveMessagePair: vi.fn(() => Promise.resolve({ userMessage: {}, assistantMessage: {} })),
     },
     contextCompiler: {
-      compile: vi.fn(() => Promise.resolve({ messages: [{ role: 'system', content: '人设' }] })),
+      compile: vi.fn((_input: unknown) =>
+        Promise.resolve({ messages: [{ role: 'system', content: '人设' }] }),
+      ),
     },
     configRepo: {
       get: vi.fn(() => Promise.resolve(null)),
@@ -268,54 +284,38 @@ describe('据点角色可见回合状态机', () => {
 })
 
 describe('StrongholdService 默认出生', () => {
+  const connections: ReturnType<typeof createDrizzleConnection>[] = []
+  afterEach(() => {
+    for (const db of connections.splice(0)) closeDrizzleConnection(db)
+  })
   function createService(existingLocation?: { agentId: string; roomId: string }) {
-    const livingRoom = {
-      id: 'living-room',
-      facilityId: 1,
-      name: '客厅',
-      description: null,
-      allowedAgentsJson: '[]',
-      environmentJson: '{}',
-    }
-    const locations = new Map<string, { agentId: string; roomId: string }>()
-    if (existingLocation) locations.set(existingLocation.agentId, existingLocation)
-    const members: Array<{ roomId: string; agentId: string; role: string }> = []
-
-    const db = {
-      select: vi.fn(() => ({
-        from: vi.fn((table: unknown) => ({
-          where: vi.fn(() => ({
-            get: vi.fn(() => {
-              if (table === agentLocations) return locations.values().next().value
-              if (table === strongholdRooms) return livingRoom
-              return undefined
-            }),
-            all: vi.fn(() => Promise.resolve(table === groupChatMembers ? members : [])),
-          })),
-        })),
-      })),
-      insert: vi.fn(() => ({
-        values: vi.fn((value: { agentId: string; roomId: string; role?: string }) => {
-          if (value.role) members.push({ ...value, role: value.role })
-          else locations.set(value.agentId, { agentId: value.agentId, roomId: value.roomId })
-          return Promise.resolve()
-        }),
-      })),
-    }
+    const db = createDrizzleConnection(':memory:')
+    connections.push(db)
+    db.insert(strongholdFacilities).values({ id: 1, name: '测试据点' }).run()
+    db.insert(strongholdRooms)
+      .values([
+        { id: 'living-room', facilityId: 1, name: '客厅' },
+        { id: 'studio', facilityId: 1, name: '工作室' },
+      ])
+      .run()
+    if (existingLocation) db.insert(agentLocations).values(existingLocation).run()
     return {
-      service: new StrongholdService(db as never, (agentId) => ['pero', 'nana'].includes(agentId)),
-      locations,
-      members,
+      db,
+      service: new StrongholdService(db, (agentId) => ['pero', 'nana'].includes(agentId)),
     }
   }
 
   it('应将未定位 Agent 放入客厅并加入群聊成员', async () => {
-    const { service, locations, members } = createService()
+    const { service, db } = createService()
 
     await service.ensureAgentLocation('pero', 'living-room')
 
-    expect(locations.get('pero')).toEqual({ agentId: 'pero', roomId: 'living-room' })
-    expect(members).toContainEqual({ roomId: 'living-room', agentId: 'pero', role: 'member' })
+    expect(await service.getAgentLocation('pero')).toMatchObject({ id: 'living-room' })
+    expect(db.select().from(groupChatMembers).all()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ roomId: 'living-room', agentId: 'pero', role: 'member' }),
+      ]),
+    )
   })
 
   it('应按房间白名单判断角色准入', () => {
@@ -340,22 +340,36 @@ describe('StrongholdService 默认出生', () => {
   })
 
   it('应拒绝为未注册ID创建据点位置', async () => {
-    const { service, locations, members } = createService()
+    const { service, db } = createService()
 
     await expect(service.ensureAgentLocation('bot', 'living-room')).rejects.toThrow(
-      'Agent bot 不存在',
+      expect.objectContaining({ code: 'VALIDATION_ERROR' }),
     )
 
-    expect(locations.has('bot')).toBe(false)
-    expect(members.some((member) => member.agentId === 'bot')).toBe(false)
+    expect(
+      db
+        .select()
+        .from(agentLocations)
+        .all()
+        .some((row) => row.agentId === 'bot'),
+    ).toBe(false)
+    expect(
+      db
+        .select()
+        .from(groupChatMembers)
+        .all()
+        .some((row) => row.agentId === 'bot'),
+    ).toBe(false)
   })
 
   it('不应覆盖已有明确位置', async () => {
-    const { service, locations } = createService({ agentId: 'nana', roomId: 'studio' })
+    const { service } = createService({ agentId: 'nana', roomId: 'studio' })
 
     await service.ensureAgentLocation('nana', 'living-room')
 
-    expect(locations.get('nana')).toEqual({ agentId: 'nana', roomId: 'studio' })
+    expect(await service.getAgentLocation('nana')).toMatchObject({ id: 'studio' })
+    await service.ensureAgentLocation('pero', 'living-room')
+    expect(await service.getAgentLocation('pero')).toMatchObject({ id: 'living-room' })
   })
 })
 
@@ -375,7 +389,7 @@ describe('GroupChatDispatcher 用户消息语义', () => {
       },
     ])
 
-    expect(result).toEqual({ agentIds: ['pero'], reason: '用户发言，随机选择 Agent 回复' })
+    expect(result.agentIds).toEqual(['pero'])
   })
 
   it('多个@mention应去重并严格保持出现顺序', async () => {
@@ -393,10 +407,7 @@ describe('GroupChatDispatcher 用户消息语义', () => {
       },
     ])
 
-    expect(result).toEqual({
-      agentIds: ['nana', 'pero'],
-      reason: '被 @mention: nana、pero',
-    })
+    expect(result.agentIds).toEqual(['nana', 'pero'])
   })
 
   it('@全体成员 应返回哨兵 agentId=@all', async () => {
@@ -414,7 +425,7 @@ describe('GroupChatDispatcher 用户消息语义', () => {
       },
     ])
 
-    expect(result).toEqual({ agentIds: ['@all'], reason: '被 @mention: 全体成员' })
+    expect(result.agentIds).toEqual(['@all'])
   })
 })
 
@@ -473,14 +484,14 @@ describe('StrongholdRouter', () => {
       code: 'OK',
       data: { id: 'room-1', name: '新客厅' },
     })
-    expect(await readJson(env)).toEqual({ code: 'OK', message: '环境变量已更新' })
+    expect(await readJson(env)).toMatchObject({ code: 'OK' })
     expect(ctx.strongholdService.updateEnvironment).toHaveBeenCalledWith('room-1', '温度', 24)
     expect(await readJson(moved)).toMatchObject({
       code: 'OK',
       data: { agentId: 'pero', roomId: 'room-1' },
     })
     expect(await readJson(location)).toMatchObject({ code: 'OK', data: { id: 'room-1' } })
-    expect(await readJson(deleted)).toEqual({ code: 'OK', message: '房间已删除' })
+    expect(await readJson(deleted)).toMatchObject({ code: 'OK' })
   })
 
   it('成员接口应拒绝未知或未启用角色', async () => {
@@ -555,7 +566,7 @@ describe('StrongholdRouter', () => {
     )
     expect(systemSent.status).toBe(201)
     expect(await readJson(members)).toMatchObject({ code: 'OK', data: [{ agentId: 'pero' }] })
-    expect(await readJson(added)).toEqual({ code: 'OK', message: '成员已添加' })
+    expect(await readJson(added)).toMatchObject({ code: 'OK' })
     expect(ctx.groupChatService.addMember).toHaveBeenCalledWith('room-1', 'pero', 'member')
     expect(await readJson(command)).toMatchObject({
       code: 'OK',
@@ -571,7 +582,7 @@ describe('StrongholdRouter', () => {
       code: 'OK',
       data: { name: 'Butler', enabled: true },
     })
-    expect(await readJson(toggled)).toEqual({ code: 'OK', message: '管家状态已更新' })
+    expect(await readJson(toggled)).toMatchObject({ code: 'OK' })
     expect(ctx.strongholdService.updateButlerEnabled).toHaveBeenCalledWith(false)
   })
 
@@ -587,8 +598,8 @@ describe('StrongholdRouter', () => {
     })
 
     expect(response.ok).toBe(false)
-    expect(response.status).toBe(500)
-    expect(await response.text()).toContain('Internal Server Error')
+    expect(response.status).toBe(400)
+    expect(((await response.json()) as { code: string }).code).toBe('VALIDATION_ERROR')
     expect(ctx.groupChatService.sendMessage).not.toHaveBeenCalled()
     expect(ctx.groupChatDispatcher.decideNextTurn).not.toHaveBeenCalled()
   })
@@ -610,7 +621,6 @@ describe('StrongholdRouter', () => {
     expect(response.status).toBe(201)
     expect(await readJson(response)).toMatchObject({
       code: 'CREATED',
-      message: '消息已发送，角色正在回复',
       data: {
         message: { content: '请回复我' },
         replyQueued: true,
@@ -631,10 +641,15 @@ describe('StrongholdRouter', () => {
       reason: '被 @mention: nana、pero',
     })
     const order: string[] = []
+    let release!: () => void
+    const firstReply = new Promise<void>((resolve) => {
+      release = resolve
+    })
     ctx.agentService.chatStreamWithCompiledMessages.mockImplementation(async function* (input: {
       agentId: string
     }) {
       order.push(input.agentId)
+      if (input.agentId === 'nana') await firstReply
       yield {
         event: 'narration_delta' as const,
         data: { blockId: 'reply', turn: 1, delta: `${input.agentId}回复` },
@@ -652,9 +667,13 @@ describe('StrongholdRouter', () => {
       }),
       headers: { 'content-type': 'application/json' },
     })
-    await vi.waitFor(() => {
-      expect(order).toHaveLength(2)
-    })
+    try {
+      await vi.waitFor(() => expect(order).toEqual(['nana']))
+      expect(ctx.agentService.chatStreamWithCompiledMessages).toHaveBeenCalledTimes(1)
+    } finally {
+      release()
+    }
+    await vi.waitFor(() => expect(order).toHaveLength(2))
 
     expect(response.status).toBe(201)
     expect(order).toEqual(['nana', 'pero'])
@@ -715,6 +734,12 @@ describe('StrongholdRouter', () => {
 
   it('@全体成员 时应按随机顺序依次让所有在场成员回复', async () => {
     const ctx = createCtx()
+    ctx.strongholdService.getRoomAgents.mockResolvedValue(['pero', 'nana'])
+    ctx.agentManager.listAgents.mockReturnValue([
+      { id: 'pero', name: 'Pero', isEnabled: true },
+      { id: 'nana', name: 'Nana', isEnabled: true },
+    ])
+    ctx.agentManager.enabledAgents.add('nana')
     ctx.groupChatDispatcher.decideNextTurn.mockResolvedValueOnce({
       agentIds: ['@all'],
       reason: '被 @mention: 全体成员',
@@ -732,17 +757,22 @@ describe('StrongholdRouter', () => {
       headers: { 'content-type': 'application/json' },
     })
     await vi.waitFor(() => {
-      expect(ctx.agentService.chatStreamWithCompiledMessages).toHaveBeenCalledTimes(1)
+      expect(ctx.agentService.chatStreamWithCompiledMessages).toHaveBeenCalledTimes(2)
     })
 
     expect(response.status).toBe(201)
     const body = await readJson(response)
     const data = body.data as Record<string, unknown>
     expect(data.replyQueued).toBe(true)
-    expect(data.agentId).toBe('pero')
+    expect(['pero', 'nana']).toContain(data.agentId)
     // 房间内启用的成员都会进入回复队列（随机顺序）
-    expect(data.allAgentIds).toEqual(['pero'])
-    expect(ctx.agentService.chatStreamWithCompiledMessages).toHaveBeenCalledTimes(1)
+    expect(new Set(data.allAgentIds as string[])).toEqual(new Set(['pero', 'nana']))
+    expect(ctx.agentService.chatStreamWithCompiledMessages).toHaveBeenCalledTimes(2)
+    expect(
+      new Set(
+        ctx.agentService.chatStreamWithCompiledMessages.mock.calls.map(([run]) => run.agentId),
+      ),
+    ).toEqual(new Set(['pero', 'nana']))
   })
 
   it('异步 Agent 回复失败时应写入用户可见的系统消息', async () => {
@@ -752,7 +782,10 @@ describe('StrongholdRouter', () => {
       reason: '测试',
     })
     ctx.agentService.chatStreamWithCompiledMessages.mockImplementationOnce(async function* () {
-      yield* [] as string[]
+      yield* [] as Array<{
+        event: 'narration_delta'
+        data: { blockId: string; turn: number; delta: string }
+      }>
       throw new Error('模型暂不可用')
     })
     const router = createStrongholdRouter(ctx as never)
@@ -782,9 +815,8 @@ describe('StrongholdRouter', () => {
       method: 'DELETE',
     })
 
-    expect(await readJson(response)).toEqual({
+    expect(await readJson(response)).toMatchObject({
       code: 'OK',
-      message: '已删除 2 条关联消息',
       data: { deletedCount: 2, deletedMessageIds: [1, 2] },
     })
     expect(ctx.groupChatService.deleteMessagePair).toHaveBeenCalledWith('room-1', 1)
@@ -804,9 +836,9 @@ describe('StrongholdRouter', () => {
       method: 'DELETE',
     })
 
-    expect(missing.status).toBe(500)
+    expect(missing.status).toBe(404)
     expect(ctx.groupChatService.deleteMessagePair).toHaveBeenCalledWith('room-1', 999)
-    expect(invalid.status).toBe(500)
+    expect(invalid.status).toBe(400)
     // 非法 ID 不会触碰服务层
     expect(ctx.groupChatService.deleteMessagePair).toHaveBeenCalledTimes(1)
   })
@@ -816,7 +848,7 @@ describe('StrongholdRouter', () => {
 
     await createTurnService(ctx).execute('room-1', 'pero')
 
-    expect(ctx.groupChatService.getVisibleHistoryPairs).toHaveBeenCalledWith('pero', 20)
+    expect(ctx.groupChatService.getVisibleHistoryPairs).toHaveBeenCalledWith('pero', 20, true)
 
     expect(ctx.threadService.createThread).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -919,7 +951,7 @@ describe('StrongholdRouter', () => {
   it('不同房间和 Agent 的群聊回合应使用不同 Thread', async () => {
     const ctx = createCtx()
     ctx.strongholdService.getRoom.mockImplementation((roomId: string) =>
-      Promise.resolve({ id: roomId, name: roomId, environmentJson: '{}' }),
+      Promise.resolve({ id: roomId, facilityId: 1, name: roomId, environmentJson: '{}' }),
     )
 
     const service = createTurnService(ctx)
@@ -934,8 +966,8 @@ describe('StrongholdRouter', () => {
       2,
       expect.objectContaining({ id: 'stronghold_room-b_nana' }),
     )
-    expect(ctx.groupChatService.getVisibleHistoryPairs).toHaveBeenCalledWith('pero', 20)
-    expect(ctx.groupChatService.getVisibleHistoryPairs).toHaveBeenCalledWith('nana', 20)
+    expect(ctx.groupChatService.getVisibleHistoryPairs).toHaveBeenCalledWith('pero', 20, true)
+    expect(ctx.groupChatService.getVisibleHistoryPairs).toHaveBeenCalledWith('nana', 20, true)
   })
 
   it('应当处理空位置和房间未找到分支', async () => {
@@ -951,17 +983,24 @@ describe('StrongholdRouter', () => {
       headers: { 'content-type': 'application/json' },
     })
 
-    expect(await readJson(location)).toEqual({ code: 'OK', message: '获取成功', data: null })
-    expect(missingRoom.status).toBe(500)
+    expect(await readJson(location)).toMatchObject({ code: 'OK', data: null })
+    expect(missingRoom.status).toBe(404)
   })
 
-  it('应当在删除房间失败时转换为错误响应', async () => {
+  it('禁止删除客厅时应返回 FORBIDDEN', async () => {
     const ctx = createCtx()
-    ctx.strongholdService.deleteRoom.mockRejectedValueOnce(new Error('客厅不能被删除'))
+    ctx.strongholdService.deleteRoom.mockRejectedValueOnce(
+      new AppError('FORBIDDEN', { message: '客厅不能被删除' }),
+    )
     const router = createStrongholdRouter(ctx as never)
 
     const response = await router.request('http://test/rooms/living', { method: 'DELETE' })
 
-    expect(response.status).toBe(500)
+    expect(response.status).toBe(403)
+    expect(await readJson(response)).toMatchObject({ code: 'FORBIDDEN' })
   })
 })
+
+function createStrongholdRouter(...args: Parameters<typeof rawcreateStrongholdRouter>) {
+  return rawcreateStrongholdRouter(...args).onError(errorHandler)
+}

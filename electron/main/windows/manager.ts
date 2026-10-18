@@ -14,11 +14,14 @@
  * @module electron/main/windows/manager
  */
 
-import { BrowserWindow, shell, screen } from 'electron'
+import { BrowserWindow, shell, screen, nativeTheme } from 'electron'
 import path from 'node:path'
-import fs from 'node:fs'
+import { loadSystemIcon } from '../utils/appIcon'
+import { applyWindowIdentity, APPLICATION_NAME } from '../utils/appIdentity'
+import { isDevelopmentRuntime } from '../utils/runtimeMode'
 import { logger } from '../utils/logger'
 import { resolveWindowBackground } from './windowConfig'
+import { desktopTabs } from './desktopTabs'
 
 // ─── 窗口配置表 ─────────────────────────────────────────
 interface WindowConfig {
@@ -37,7 +40,7 @@ const WINDOW_CONFIGS: Record<string, WindowConfig> = {
     route: '/launcher',
     width: 1080,
     height: 720,
-    transparent: true,
+    transparent: false,
     alwaysOnTop: false,
     skipTaskbar: false,
     resizable: true,
@@ -109,15 +112,68 @@ export class WindowManager {
   public strongholdWin: BrowserWindow | null = null
   public chatWin: BrowserWindow | null = null
   public ideWin: BrowserWindow | null = null
-  public arcaWin: BrowserWindow | null = null
 
   /** 记录窗口当前是否应当可见，避免异步ready事件覆盖主动隐藏。 */
   private readonly visibilityIntent = new WeakMap<BrowserWindow, boolean>()
 
+  private launcherReleaseTimer: ReturnType<typeof setTimeout> | undefined
+  private destroyingAll = false
+
   /** Pet 窗口鼠标追踪定时器 */
   private mouseTrackInterval: ReturnType<typeof setInterval> | null = null
 
-  private constructor() {}
+  private constructor() {
+    desktopTabs.configure(() => this.createDashboardWindow())
+    let configuredUiOrigin: string | undefined
+    try {
+      const configuredUi =
+        process.env.INFOS_ARCA_UI_URL ?? (isDevelopmentRuntime ? 'http://127.0.0.1:7362' : '')
+      if (configuredUi) configuredUiOrigin = new URL(configuredUi).origin
+    } catch {
+      /* 相对入口由本机 Daemon 的应用路径规则处理。 */
+    }
+    desktopTabs.registerApplication({
+      id: 'infos.arca',
+      title: 'Arca',
+      description: '星页工房 · 文档与创作',
+      icon: 'book',
+      preload: true,
+      acceptsUrl: (url) =>
+        ['http:', 'https:'].includes(url.protocol) &&
+        ['127.0.0.1', 'localhost'].includes(url.hostname) &&
+        ((Number(url.port || (url.protocol === 'https:' ? 443 : 80)) ===
+          Number(process.env.PERO_PORT ?? 9120) &&
+          /^\/applications\/arca(?:\/|$)/.test(url.pathname)) ||
+          url.origin === configuredUiOrigin) &&
+        !url.username &&
+        !url.password,
+    })
+    let pictoriaOrigin: string | undefined
+    try {
+      const configured =
+        process.env.INFOS_PICTORIA_UI_URL ?? (isDevelopmentRuntime ? 'http://127.0.0.1:7363' : '')
+      if (configured) pictoriaOrigin = new URL(configured).origin
+    } catch {
+      /* 相对入口由本机应用路径处理。 */
+    }
+    desktopTabs.registerApplication({
+      id: 'infos.pictoria',
+      title: 'Pictoria',
+      description: '自由画布 · 图像与灵感',
+      icon: 'image',
+      preload: true,
+      waitForSurfaceReady: true,
+      acceptsUrl: (url) =>
+        ['http:', 'https:'].includes(url.protocol) &&
+        ['127.0.0.1', 'localhost'].includes(url.hostname) &&
+        ((Number(url.port || (url.protocol === 'https:' ? 443 : 80)) ===
+          Number(process.env.PERO_PORT ?? 9120) &&
+          /^\/applications\/pictoria(?:\/|$)/.test(url.pathname)) ||
+          url.origin === pictoriaOrigin) &&
+        !url.username &&
+        !url.password,
+    })
+  }
 
   public static getInstance(): WindowManager {
     if (!WindowManager.instance) {
@@ -131,20 +187,6 @@ export class WindowManager {
   private getPreloadPath(): string {
     // electron-vite 编译后: dist-electron/preload/index.js
     return path.join(__dirname, '../preload/index.js')
-  }
-
-  private getIconPath(): string {
-    const iconName = 'Logo.png'
-    const candidates = [
-      path.join(process.cwd(), 'public', iconName),
-      path.join(process.cwd(), 'resources', iconName),
-      path.join(process.resourcesPath, iconName),
-      path.join(__dirname, '../../public', iconName),
-    ]
-    for (const p of candidates) {
-      if (fs.existsSync(p)) return p
-    }
-    return ''
   }
 
   /**
@@ -178,6 +220,15 @@ export class WindowManager {
     win.on('unmaximize', sendState)
     win.on('restore', sendState)
     win.on('resize', sendState)
+    // 原生可见性也用于暂停桌宠和页面动效，不能只依赖 Chromium 的遮挡判断。
+    const sendVisibility = () => {
+      if (!win.isDestroyed() && !win.webContents.isDestroyed())
+        win.webContents.send('window-visibility-changed', win.isVisible() && !win.isMinimized())
+    }
+    win.on('show', sendVisibility)
+    win.on('hide', sendVisibility)
+    win.on('minimize', sendVisibility)
+    win.on('restore', sendVisibility)
   }
 
   /** 尝试为 Windows 窗口启用亚克力效果 */
@@ -225,8 +276,8 @@ export class WindowManager {
     const { webPreferences: extraWebPrefs, ...restExtraOpts } = extraOpts ?? {}
 
     const win = new BrowserWindow({
-      title: '萌动链接：PeroperoChat！',
-      icon: this.getIconPath(),
+      title: APPLICATION_NAME,
+      icon: loadSystemIcon(256),
       width: cfg.width,
       height: cfg.height,
       show: false,
@@ -237,16 +288,18 @@ export class WindowManager {
       alwaysOnTop: cfg.alwaysOnTop,
       skipTaskbar: cfg.skipTaskbar,
       resizable: cfg.resizable,
-      backgroundColor: resolveWindowBackground(cfg),
+      backgroundColor: resolveWindowBackground(cfg, nativeTheme.shouldUseDarkColors),
       webPreferences: {
         preload: this.getPreloadPath(),
         nodeIntegration: false,
         contextIsolation: true,
-        backgroundThrottling: false,
+        backgroundThrottling: true,
         ...extraWebPrefs,
       },
       ...restExtraOpts,
     })
+
+    applyWindowIdentity(win)
 
     // 亚克力效果 (非 Pet 窗口)
     if (cfg.hasShadow) {
@@ -262,8 +315,10 @@ export class WindowManager {
     const showWhenReady = (source: string) => {
       if (shownAfterLoad || win.isDestroyed() || this.visibilityIntent.get(win) === false) return
       shownAfterLoad = true
+      applyWindowIdentity(win)
       logger.info('WindowManager', `${configKey} 已就绪 (${source})`)
-      win.show()
+      if (configKey === 'pet') win.showInactive()
+      else win.show()
     }
 
     // 透明窗口不保证稳定触发 ready-to-show，DOM 完成也可作为可靠显示信号。
@@ -282,8 +337,16 @@ export class WindowManager {
       }
     }, 10_000)
 
-    // 加载失败也显示窗口，避免静默失败
-    win.webContents.on('did-fail-load', (_e, code, desc, url) => {
+    // 子框架取消导航不是窗口加载失败，也不能因此唤醒主动隐藏的窗口。
+    win.webContents.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
+      if (win.isDestroyed() || code === -3) return
+      if (!isMainFrame) {
+        logger.warn(
+          'WindowManager',
+          `${configKey} 内嵌页面加载失败: ${desc} (${code}), URL: ${url}`,
+        )
+        return
+      }
       logger.error('WindowManager', `${configKey} 加载失败: ${desc} (${code}), URL: ${url}`)
       if (!win.isDestroyed() && !win.isVisible() && this.visibilityIntent.get(win) !== false) {
         win.show()
@@ -297,10 +360,16 @@ export class WindowManager {
   // ─── 具体窗口 ──────────────────────────────────────
 
   public createLauncherWindow(): BrowserWindow {
+    clearTimeout(this.launcherReleaseTimer)
+    const previous = this.launcherWin
     this.launcherWin = this.createOrFocus(this.launcherWin, 'launcher')
-    this.launcherWin.on('closed', () => {
-      this.launcherWin = null
-    })
+    if (previous !== this.launcherWin) {
+      const launcher = this.launcherWin
+      launcher.on('closed', () => {
+        clearTimeout(this.launcherReleaseTimer)
+        if (this.launcherWin === launcher) this.launcherWin = null
+      })
+    }
     return this.launcherWin
   }
 
@@ -311,6 +380,7 @@ export class WindowManager {
   }
 
   public showLauncherWindow(): void {
+    clearTimeout(this.launcherReleaseTimer)
     if (!this.launcherWin || this.launcherWin.isDestroyed()) {
       this.createLauncherWindow()
       return
@@ -325,13 +395,48 @@ export class WindowManager {
       this.visibilityIntent.set(this.launcherWin, false)
       this.launcherWin.hide()
       logger.info('WindowManager', '已隐藏 Launcher 窗口')
+      clearTimeout(this.launcherReleaseTimer)
+      const launcher = this.launcherWin
+      // 启动完成后释放闲置页面，需要返回启动器时按已有配置重新创建。
+      this.launcherReleaseTimer = setTimeout(() => {
+        this.launcherReleaseTimer = undefined
+        if (
+          launcher === this.launcherWin &&
+          !launcher.isDestroyed() &&
+          !launcher.isVisible() &&
+          this.visibilityIntent.get(launcher) === false &&
+          [this.petWin, this.dashboardWin, this.strongholdWin, this.chatWin, this.ideWin].some(
+            (win) => win && !win.isDestroyed(),
+          )
+        )
+          launcher.destroy()
+      }, 30_000)
     }
   }
 
   public createPetWindow(): BrowserWindow {
+    const existing = this.petWin
     this.petWin = this.createOrFocus(this.petWin, 'pet', {
-      webPreferences: { webSecurity: false },
+      // 桌宠长期不抢焦点，不能让 Chromium 按后台页面把可见动画压到约 1 帧。
+      webPreferences: { webSecurity: false, backgroundThrottling: false },
     })
+    if (this.petWin !== existing) {
+      const pet = this.petWin
+      const publishVisibility = () => {
+        if (!pet.isDestroyed() && !pet.webContents.isDestroyed()) {
+          const visible = pet.isVisible() && !pet.isMinimized()
+          // 可见时由前端帧预算限速；隐藏时同时启用系统节流与前端主动停绘。
+          pet.webContents.setBackgroundThrottling(!visible)
+          if (visible) this.startMouseTracking()
+          else this.stopMouseTracking()
+          pet.webContents.send('pet-window-visibility-changed', this.getPetWindowState())
+        }
+      }
+      pet.on('show', publishVisibility)
+      pet.on('hide', publishVisibility)
+      pet.on('minimize', publishVisibility)
+      pet.on('restore', publishVisibility)
+    }
 
     // Pet 窗口特殊设置
     this.petWin.setAlwaysOnTop(true, 'screen-saver')
@@ -346,10 +451,9 @@ export class WindowManager {
 
     // 渲染进程崩溃时恢复 Launcher
     this.petWin.webContents.on('render-process-gone', (_e, details) => {
+      if (this.destroyingAll || !this.petWin || this.petWin.isDestroyed()) return
       logger.error('WindowManager', `Pet 渲染进程崩溃: ${details.reason} (${details.exitCode})`)
-      if (this.launcherWin && !this.launcherWin.isDestroyed()) {
-        this.showLauncherWindow()
-      }
+      if (!this.destroyingAll) this.showLauncherWindow()
     })
 
     this.petWin.on('closed', () => {
@@ -359,13 +463,25 @@ export class WindowManager {
       const hasVisible = BrowserWindow.getAllWindows().some(
         (w) => !w.isDestroyed() && w.isVisible(),
       )
-      if (!hasVisible && this.launcherWin && !this.launcherWin.isDestroyed()) {
+      if (!hasVisible && !this.destroyingAll) {
         logger.info('WindowManager', 'Pet 关闭且无其他可见窗口，恢复 Launcher')
         this.showLauncherWindow()
       }
     })
 
     return this.petWin
+  }
+
+  public getPetWindowState(): { visible: boolean } {
+    const pet = this.petWin
+    return { visible: Boolean(pet && !pet.isDestroyed() && pet.isVisible() && !pet.isMinimized()) }
+  }
+
+  public hidePetWindow(): void {
+    if (this.petWin && !this.petWin.isDestroyed()) {
+      this.visibilityIntent.set(this.petWin, false)
+      this.petWin.hide()
+    }
   }
 
   /** 打开唯一的综合面板窗口；所有 App 功能入口都复用它。 */
@@ -377,98 +493,85 @@ export class WindowManager {
     this.strongholdWin = null
     this.chatWin = null
     this.ideWin = null
-    this.dashboardWin = this.createOrFocus(this.dashboardWin, 'dashboard')
-    this.dashboardWin.on('closed', () => {
-      this.dashboardWin = null
+    const previous = this.dashboardWin
+    this.dashboardWin = this.createOrFocus(this.dashboardWin, 'dashboard', {
+      minWidth: 900,
+      minHeight: 600,
     })
+    desktopTabs.attach(this.dashboardWin)
+    if (previous !== this.dashboardWin) {
+      const win = this.dashboardWin
+      win.on('closed', () => {
+        if (this.dashboardWin === win) this.dashboardWin = null
+      })
+    }
     return this.dashboardWin
   }
 
   /** 据点已迁入综合面板，禁止再创建第二个 App 窗口。 */
   public createStrongholdWindow(): BrowserWindow {
-    return this.createDashboardWindow()
+    const win = this.createDashboardWindow()
+    desktopTabs.openHome('stronghold')
+    return win
   }
 
   /** 聊天已迁入综合面板，禁止再创建第二个 App 窗口。 */
   public createChatWindow(): BrowserWindow {
-    return this.createDashboardWindow()
+    const win = this.createDashboardWindow()
+    desktopTabs.openHome('chat')
+    return win
   }
 
-  public closeArcaWindow(): void {
-    if (this.arcaWin && !this.arcaWin.isDestroyed()) this.arcaWin.close()
+  public async closeArcaWindow(): Promise<void> {
+    await desktopTabs.closeApplication('infos.arca')
   }
 
   public getArcaWindowState(): { open: boolean; visible: boolean } {
-    const open = Boolean(this.arcaWin && !this.arcaWin.isDestroyed())
-    return { open, visible: Boolean(open && this.arcaWin?.isVisible()) }
+    return desktopTabs.getApplicationState('infos.arca')
   }
 
   public createArcaWindow(url: string): BrowserWindow {
-    if (!/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?(?:\/|$)/i.test(url)) {
-      throw new Error('ARCA_UI_URL_FORBIDDEN: 仅允许加载本机Arca UI')
-    }
-    if (this.arcaWin && !this.arcaWin.isDestroyed()) {
-      if (this.arcaWin.webContents.getURL() !== url) void this.arcaWin.loadURL(url)
-      if (this.arcaWin.isMinimized()) this.arcaWin.restore()
-      this.arcaWin.show()
-      this.arcaWin.focus()
-      return this.arcaWin
-    }
-    const win = new BrowserWindow({
-      title: 'Arca · infOS',
-      icon: this.getIconPath(),
-      width: 1440,
-      height: 920,
-      minWidth: 960,
-      minHeight: 640,
-      show: false,
-      frame: false,
-      center: true,
-      backgroundColor: '#f6f2ff',
-      webPreferences: {
-        preload: this.getPreloadPath(),
-        nodeIntegration: false,
-        contextIsolation: true,
-        sandbox: false,
-        webSecurity: true,
-      },
-    })
-    this.arcaWin = win
-    this.setupWindowStateListeners(win)
-    win.loadURL(url)
-    win.webContents.setWindowOpenHandler(({ url: target }) => {
-      if (/^https:\/\//i.test(target)) void shell.openExternal(target)
-      return { action: 'deny' }
-    })
-    win.once('ready-to-show', () => win.show())
-    win.on('closed', () => {
-      if (this.arcaWin === win) this.arcaWin = null
-    })
+    // 兼容旧 IPC 名称，实际打开统一主窗口里的应用标签。
+    const win = this.createDashboardWindow()
+    desktopTabs.openApplication('infos.arca', url)
     return win
   }
 
   /** 工作台已迁入综合面板，禁止再创建第二个 App 窗口。 */
   public createIDEWindow(): BrowserWindow {
-    return this.createDashboardWindow()
+    const win = this.createDashboardWindow()
+    desktopTabs.openHome('workspace')
+    return win
   }
 
   // ─── Pet 鼠标追踪 ─────────────────────────────────
 
   private startMouseTracking(): void {
-    if (this.mouseTrackInterval) return
+    if (this.mouseTrackInterval || !this.getPetWindowState().visible) return
 
     // 30fps 鼠标追踪，用于 Pet 视线跟随
+    let previousX: number | undefined
+    let previousY: number | undefined
     this.mouseTrackInterval = setInterval(() => {
-      if (!this.petWin || this.petWin.isDestroyed()) {
+      if (
+        !this.petWin ||
+        !this.getPetWindowState().visible ||
+        this.petWin.webContents.isDestroyed()
+      ) {
         this.stopMouseTracking()
         return
       }
       try {
         const cursor = screen.getCursorScreenPoint()
         const bounds = this.petWin.getBounds()
+        const x = cursor.x - bounds.x
+        const y = cursor.y - bounds.y
+        if (x === previousX && y === previousY) return
+        previousX = x
+        previousY = y
         this.petWin.webContents.send('global-mouse-move', {
-          x: cursor.x - bounds.x,
-          y: cursor.y - bounds.y,
+          x,
+          y,
         })
       } catch {
         // 静默忽略追踪错误
@@ -485,6 +588,8 @@ export class WindowManager {
 
   /** 销毁所有窗口 */
   public destroyAll(): void {
+    this.destroyingAll = true
+    clearTimeout(this.launcherReleaseTimer)
     this.stopMouseTracking()
     BrowserWindow.getAllWindows().forEach((win) => {
       if (!win.isDestroyed()) win.destroy()
@@ -495,7 +600,7 @@ export class WindowManager {
     this.strongholdWin = null
     this.chatWin = null
     this.ideWin = null
-    this.arcaWin = null
+    this.destroyingAll = false
   }
 }
 

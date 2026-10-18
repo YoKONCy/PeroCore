@@ -60,6 +60,7 @@ const FALLBACK_TOOL_STYLE: Record<string, string> = {
   edit_file: 'edit',
   write_file: 'edit',
   read_file: 'read',
+  read_image: 'read',
   read_file_range: 'read',
   browser_get_content: 'read',
   code_search: 'search',
@@ -82,11 +83,14 @@ const FALLBACK_TOOL_STYLE: Record<string, string> = {
   browser_type: 'browser',
   browser_scroll: 'browser',
   browser_back: 'browser',
+  browser_query_dom: 'browser',
   run_script: 'script',
   take_screenshot: 'screen',
   browser_screenshot: 'screen',
   browser_page_image: 'screen',
   set_reminder: 'reminder',
+  schedule_follow_up: 'reminder',
+  suggest_next_step: 'task',
   list_reminders: 'reminder',
   cancel_reminder: 'reminder',
   finish_task: 'task',
@@ -122,7 +126,7 @@ async function ensureLoaded(): Promise<void> {
   if (!loadingPromise) {
     loadingPromise = (async () => {
       try {
-        const tools = (await agentApi.listTools()).data ?? []
+        const tools = (await agentApi.listTools({ includeAdvanced: true })).data ?? []
         for (const tool of tools) {
           if (tool?.name && tool.display) metaByTool.set(tool.name, tool.display)
         }
@@ -158,9 +162,12 @@ export async function resolveToolDisplay(name: string): Promise<AgentToolDisplay
 }
 
 const FALLBACK_TOOL_LABEL: Record<string, string> = {
+  send_file: '发送文件',
+  update_plan: '更新计划',
   edit_file: '编辑文件',
   write_file: '写入文件',
   read_file: '读取文件',
+  read_image: '读取图片',
   read_file_range: '范围读取',
   get_file_info: '查看文件信息',
   list_directory: '浏览目录',
@@ -185,6 +192,8 @@ const FALLBACK_TOOL_LABEL: Record<string, string> = {
   browser_scroll: '滚动网页',
   browser_back: '网页后退',
   browser_get_content: '读取网页内容',
+  browser_query_dom: '检查网页结构',
+  assembling_tool: '准备工具调用',
   run_script: '运行脚本',
   take_screenshot: '屏幕截图',
   browser_screenshot: '浏览器截图',
@@ -196,6 +205,15 @@ const FALLBACK_TOOL_LABEL: Record<string, string> = {
   automation_execute: '桌面自动化',
   get_mouse_position: '鼠标位置',
   set_reminder: '创建提醒',
+  schedule_follow_up: '安排跟进',
+  suggest_next_step: '提出建议',
+  query_facts: '查询事实',
+  search_knowledge: '检索知识',
+  write_fact: '记录事实',
+  supersede_fact: '更新事实',
+  delete_fact: '删除事实',
+  add_fact_object_alias: '添加别名',
+  remove_fact_object_alias: '移除别名',
   list_reminders: '查看提醒',
   cancel_reminder: '取消提醒',
   finish_task: '完成任务',

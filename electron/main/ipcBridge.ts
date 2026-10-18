@@ -29,6 +29,21 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { windowManager } from './windows/manager'
 import { toggleWindowMaximized } from './windows/windowState'
+import { isApplicationFocused } from './services/notificationVisibility'
+import { desktopTabs } from './windows/desktopTabs'
+import { desktopToasts } from './windows/desktopToasts'
+import type {
+  DesktopTabBounds,
+  PetConversationTarget,
+  DesktopToastSnapshot,
+  DesktopToastAction,
+} from '@infos/shared'
+import { petControls } from './services/petControls'
+import { desktopControl } from './services/desktopControl'
+import { completionAlerts } from './services/completionAlerts'
+import { registerPictoriaSurface } from './services/pictoriaSurface'
+import { startDesktopArca } from './services/arcaLifetime'
+import { registerArcaSurface } from './services/arcaSurface'
 import { paths, isDev, isPackaged, isPortable } from './utils/env'
 import { logger } from './utils/logger'
 
@@ -36,6 +51,7 @@ import { logger } from './utils/logger'
 // 使用函数包装，在调用时才 import
 // 第七阶段：backendProcess 已移除（Daemon 独立运行）
 const getNapCatService = () => import('./services/napcat')
+const getNapCatDashboard = () => import('./services/napcatDashboard')
 const getAssetService = () => import('./services/assets')
 const getDesktopAwareness = () => import('./services/desktopAwareness')
 const getSystemService = () => import('./services/system')
@@ -85,11 +101,101 @@ async function getDevelopmentInfo(): Promise<Record<string, unknown>> {
   }
 }
 
-/** 注册所有 IPC 通道 */
+/** 桌宠输入设置仅由第一方窗口访问。 */
+function registerPetControlHandlers(): void {
+  const assertTrusted = (sender: Electron.WebContents, petOnly = false) => {
+    if (sender === windowManager.petWin?.webContents) return
+    if (!petOnly && desktopTabs.isHost(sender)) return
+    throw new Error('仅桌宠与主应用可以管理桌宠输入')
+  }
+  ipcMain.handle('pet-controls:get', (event) => {
+    assertTrusted(event.sender)
+    return petControls.snapshot()
+  })
+  ipcMain.handle('desktop-control:get', (event) => {
+    assertTrusted(event.sender)
+    return { state: desktopControl.snapshot(), settings: desktopControl.configuration() }
+  })
+  ipcMain.handle('desktop-control:pause', (event) => {
+    assertTrusted(event.sender)
+    return desktopControl.pause('你已暂停桌面操作')
+  })
+  ipcMain.handle('desktop-control:resume', (event) => {
+    assertTrusted(event.sender)
+    return desktopControl.resume()
+  })
+  ipcMain.handle('desktop-control:update', (event, patch: unknown) => {
+    assertTrusted(event.sender)
+    if (!patch || typeof patch !== 'object') throw new Error('桌面设置格式不正确')
+    return desktopControl.update(patch)
+  })
+  ipcMain.handle('desktop-control:capture', (event, active: unknown) => {
+    assertTrusted(event.sender)
+    desktopControl.setShortcutCapturing(event.sender, active === true)
+    try {
+      petControls.setCapturing(event.sender, active === true)
+    } catch (error) {
+      desktopControl.setShortcutCapturing(event.sender, false)
+      throw error
+    }
+  })
+  ipcMain.handle('pet-controls:update', (event, patch: unknown) => {
+    assertTrusted(event.sender)
+    return petControls.update(patch)
+  })
+  ipcMain.handle('pet-controls:capture', (event, active: unknown) => {
+    assertTrusted(event.sender)
+    petControls.setCapturing(event.sender, active === true)
+  })
+  ipcMain.handle('pet-controls:arm', (event, ready: unknown) => {
+    assertTrusted(event.sender, true)
+    petControls.setArmed(ready === true)
+  })
+  ipcMain.handle('pet-controls:conversation', (event, target: PetConversationTarget) => {
+    assertTrusted(event.sender, true)
+    petControls.setConversation(target)
+  })
+  ipcMain.handle('pet-controls:open-conversation', (event, target?: PetConversationTarget) => {
+    assertTrusted(event.sender)
+    petControls.openConversation(target)
+  })
+  ipcMain.handle('pet-controls:open-section', (event, section: unknown) => {
+    assertTrusted(event.sender)
+    if (!['tasks', 'voice_config', 'agent_config'].includes(String(section)))
+      throw new Error('不支持的页面')
+    windowManager.createDashboardWindow()
+    desktopTabs.openHome(String(section))
+  })
+}
+
+/** 注册所有 IPC 通道。 */
 export function registerIpcHandlers(): void {
   logger.info('IPC', '正在注册 IPC 通道...')
+  const assertCompletionSettingsSender = (sender: Electron.WebContents) => {
+    if (sender !== windowManager.petWin?.webContents && !desktopTabs.isHost(sender)) {
+      throw new Error('仅主应用与桌宠可以管理完成提醒')
+    }
+  }
+  ipcMain.handle('completion-alerts:get', (event) => {
+    assertCompletionSettingsSender(event.sender)
+    return completionAlerts.snapshot()
+  })
+  ipcMain.handle('completion-alerts:update', (event, patch: unknown) => {
+    assertCompletionSettingsSender(event.sender)
+    const settings = completionAlerts.update(patch)
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('completion-alerts:changed', settings)
+    }
+    return settings
+  })
+  ipcMain.handle('completion-alerts:preview', (event) => {
+    assertCompletionSettingsSender(event.sender)
+    return completionAlerts.preview()
+  })
 
   registerWindowHandlers()
+  registerPetControlHandlers()
+  registerDesktopTabHandlers()
   registerNavigationHandlers()
   registerBackendHandlers()
   registerSystemHandlers()
@@ -134,12 +240,21 @@ function registerWindowHandlers(): void {
     return toggleWindowMaximized(win)
   })
 
-  ipcMain.handle('window-close', (event) => {
-    BrowserWindow.fromWebContents(event.sender)?.close()
+  ipcMain.handle('window-close', async (event) => {
+    if (desktopTabs.isApplication(event.sender)) {
+      await desktopTabs.closeBySender(event.sender)
+      return
+    }
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (win?.webContents === event.sender) win.close()
   })
 
   ipcMain.handle('window-is-maximized', (event) => {
     return BrowserWindow.fromWebContents(event.sender)?.isMaximized() ?? false
+  })
+  ipcMain.handle('window-is-visible', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    return Boolean(win && !win.isDestroyed() && win.isVisible() && !win.isMinimized())
   })
 
   ipcMain.handle('window-show', (event) => {
@@ -187,7 +302,160 @@ function registerWindowHandlers(): void {
   ipcMain.handle('set-native-theme', (_event, mode: unknown) => {
     if (mode === 'dark' || mode === 'light' || mode === 'system') {
       nativeTheme.themeSource = mode
+      if (windowManager.launcherWin && !windowManager.launcherWin.isDestroyed())
+        windowManager.launcherWin.setBackgroundColor(
+          nativeTheme.shouldUseDarkColors ? '#15151d' : '#f6f2ff',
+        )
+      desktopTabs.setTheme(
+        mode === 'system' ? (nativeTheme.shouldUseDarkColors ? 'dark' : 'light') : mode,
+      )
     }
+  })
+}
+
+/** 标签管理仅接受主外壳请求，网页和子应用没有这些通道的权限。 */
+function registerDesktopTabHandlers(): void {
+  registerPictoriaSurface()
+  registerArcaSurface()
+  ipcMain.handle('arca:host-start', async (event) => {
+    desktopTabs.assertHost(event.sender)
+    return startDesktopArca()
+  })
+  const browser = async () => (await import('./services/browserRuntime')).browserRuntime
+  // Arca 只访问自身控制面的固定操作，系统凭据不交给子应用页面。
+  ipcMain.handle('arca-host:control', async (event, action: unknown) => {
+    if (!desktopTabs.isApplication(event.sender, 'infos.arca'))
+      throw new Error('仅 Arca 应用可以调用自己的运行控制接口')
+    if (typeof action !== 'string' || !['status', 'start', 'stop', 'reconnect'].includes(action)) {
+      throw new Error('不支持此 Arca 控制操作')
+    }
+    if (action === 'start') return startDesktopArca()
+    const origin = `http://127.0.0.1:${Number(process.env.PERO_PORT ?? 9120)}`
+    const token = process.env.INFOS_API_TOKEN
+    const response = await fetch(`${origin}/api/applications/arca/${action}`, {
+      method: action === 'status' ? 'GET' : 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      signal: AbortSignal.timeout(30_000),
+    })
+    const body = (await response.json()) as { code: string; data?: unknown; message?: string }
+    if (!response.ok || body.code !== 'OK')
+      throw new Error(body.message ?? `Arca 控制请求失败：HTTP ${response.status}`)
+    return body.data
+  })
+  ipcMain.on('desktop-tabs:unsaved-changes', (event, dirty: unknown) => {
+    if (desktopTabs.isApplication(event.sender))
+      desktopTabs.setUnsavedChanges(event.sender, dirty === true)
+  })
+  ipcMain.on('desktop-tabs:surface-state', (event, value: unknown) => {
+    if (desktopTabs.isApplication(event.sender)) desktopTabs.setSurfaceState(event.sender, value)
+  })
+  ipcMain.handle('desktop-tabs:get-state', (event) => {
+    desktopTabs.assertHost(event.sender)
+    return desktopTabs.snapshot()
+  })
+  ipcMain.handle('desktop-toasts:update', (event, snapshot: DesktopToastSnapshot) =>
+    desktopToasts.update(event.sender, snapshot),
+  )
+  ipcMain.handle('desktop-toasts:get-state', (event) => desktopToasts.state(event.sender))
+  ipcMain.on('desktop-toasts:pointer', (event, over: boolean) => {
+    try {
+      desktopToasts.pointer(event.sender, over)
+    } catch {
+      /* 忽略不属于通知层的消息。 */
+    }
+  })
+  ipcMain.on('desktop-toasts:action', (event, action: DesktopToastAction) => {
+    try {
+      desktopToasts.action(event.sender, action)
+    } catch {
+      /* 关闭窗口后的在途消息无需处理。 */
+    }
+  })
+  ipcMain.handle('desktop-tabs:create', (event) => {
+    desktopTabs.assertHost(event.sender)
+    return desktopTabs.createNew()
+  })
+  ipcMain.handle('desktop-tabs:open-tarot', (event, input?: { replaceId?: string }) => {
+    desktopTabs.assertHost(event.sender)
+    return desktopTabs.openTarot(input?.replaceId)
+  })
+  ipcMain.handle('desktop-tabs:activate', async (event, id: string) => {
+    desktopTabs.assertHost(event.sender)
+    const tab = desktopTabs.snapshot().tabs.find((candidate) => candidate.id === id)
+    if (tab?.targetId) (await browser()).retainTarget(tab.targetId)
+    desktopTabs.assertHost(event.sender)
+    return desktopTabs.activate(id)
+  })
+  ipcMain.handle('desktop-tabs:close', async (event, id: string) => {
+    desktopTabs.assertHost(event.sender)
+    await desktopTabs.close(id)
+    return desktopTabs.snapshot()
+  })
+  ipcMain.handle(
+    'desktop-tabs:open-browser',
+    async (event, input: { url: string; replaceId?: string }) => {
+      desktopTabs.assertHost(event.sender)
+      const runtime = await browser()
+      desktopTabs.assertHost(event.sender)
+      await runtime.openUserTab(String(input?.url ?? ''), input?.replaceId)
+      return desktopTabs.snapshot()
+    },
+  )
+  ipcMain.handle(
+    'desktop-tabs:open-application',
+    async (
+      event,
+      input: { appId: string; url?: string; replaceId?: string; navigateExisting?: boolean },
+    ) => {
+      desktopTabs.assertHost(event.sender)
+      if (input?.appId === 'infos.napcat') {
+        const dashboard = await getNapCatDashboard()
+        desktopTabs.assertHost(event.sender)
+        return dashboard.startNapCatWithDashboard(input.replaceId)
+      }
+      return desktopTabs.openApplication(
+        String(input?.appId ?? ''),
+        input?.url,
+        input?.replaceId,
+        input?.navigateExisting === true,
+      )
+    },
+  )
+  ipcMain.handle(
+    'desktop-tabs:navigate',
+    async (event, input: { targetId: string; url: string }) => {
+      desktopTabs.assertHost(event.sender)
+      const runtime = await browser()
+      desktopTabs.assertHost(event.sender)
+      await runtime.navigateUserTarget(String(input?.targetId ?? ''), String(input?.url ?? ''))
+    },
+  )
+  ipcMain.handle(
+    'desktop-tabs:browser-action',
+    async (event, input: { targetId: string; action: string }) => {
+      desktopTabs.assertHost(event.sender)
+      const runtime = await browser()
+      desktopTabs.assertHost(event.sender)
+      runtime.userAction(String(input?.targetId ?? ''), String(input?.action ?? ''))
+    },
+  )
+  ipcMain.handle('desktop-tabs:set-bounds', (event, bounds: DesktopTabBounds) => {
+    desktopTabs.assertHost(event.sender)
+    if (bounds) desktopTabs.setBounds(bounds)
+  })
+  ipcMain.handle('desktop-tabs:set-obscured', (event, value: boolean) => {
+    desktopTabs.assertHost(event.sender)
+    desktopTabs.setObscured(value === true)
+  })
+  ipcMain.handle('desktop-tabs:get-theme', (event) => {
+    if (!desktopTabs.isHost(event.sender) && !desktopTabs.isApplication(event.sender)) {
+      throw new Error('该界面无权读取桌面主题')
+    }
+    return desktopTabs.getTheme()
+  })
+  ipcMain.handle('desktop-tabs:set-motion', (event, level: unknown) => {
+    desktopTabs.assertHost(event.sender)
+    desktopTabs.setMotionLevel(level)
   })
 }
 
@@ -201,11 +469,17 @@ function registerNavigationHandlers(): void {
   })
 
   ipcMain.handle('hide-pet-window', () => {
-    windowManager.petWin?.hide()
+    windowManager.hidePetWindow()
+  })
+
+  ipcMain.handle('get-pet-window-state', (event) => {
+    if (event.sender !== windowManager.petWin?.webContents) return { visible: false }
+    return windowManager.getPetWindowState()
   })
 
   ipcMain.handle('open-dashboard-window', () => {
     windowManager.createDashboardWindow()
+    desktopTabs.openHome()
   })
 
   ipcMain.handle('close-dashboard', () => {
@@ -223,8 +497,8 @@ function registerNavigationHandlers(): void {
     return windowManager.getArcaWindowState()
   })
 
-  ipcMain.handle('close-arca-window', () => {
-    windowManager.closeArcaWindow()
+  ipcMain.handle('close-arca-window', async () => {
+    await windowManager.closeArcaWindow()
     return windowManager.getArcaWindowState()
   })
 
@@ -498,6 +772,7 @@ function registerSystemHandlers(): void {
 
   // 系统通知
   ipcMain.on('show-notification', (_event, { title, body }) => {
+    if (isApplicationFocused()) return
     new Notification({ title, body }).show()
   })
 
@@ -526,14 +801,24 @@ function registerAssetHandlers(): void {
 // NapCat QQ 机器人
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function registerNapCatHandlers(): void {
-  ipcMain.handle('start-napcat', async () => {
-    const { startNapCat } = await getNapCatService()
-    await startNapCat()
+  void getNapCatDashboard()
+    .then(({ initializeNapCatDashboard }) => initializeNapCatDashboard())
+    .catch(() => logger.warn('NapCat', '管理页入口初始化失败'))
+  ipcMain.handle('start-napcat', async (event) => {
+    desktopTabs.assertHost(event.sender)
+    const { startNapCatWithDashboard } = await getNapCatDashboard()
+    return startNapCatWithDashboard()
+  })
+  ipcMain.handle('open-napcat-dashboard', async (event) => {
+    desktopTabs.assertHost(event.sender)
+    const { openNapCatDashboard } = await getNapCatDashboard()
+    return openNapCatDashboard()
   })
 
-  ipcMain.handle('stop-napcat', async () => {
+  ipcMain.handle('stop-napcat', async (event) => {
+    desktopTabs.assertHost(event.sender)
     const { stopNapCat } = await getNapCatService()
-    stopNapCat()
+    await stopNapCat()
   })
 
   ipcMain.handle('get-napcat-logs', async () => {
@@ -552,14 +837,19 @@ function registerNapCatHandlers(): void {
     return installNapCat()
   })
 
+  ipcMain.handle('update-napcat', async () => {
+    const { installNapCat } = await getNapCatService()
+    return installNapCat(true)
+  })
+
   ipcMain.handle('check-napcat', async () => {
     const { checkNapCat } = await getNapCatService()
     return checkNapCat()
   })
 
   ipcMain.handle('napcat-status', async () => {
-    const { getNapCatStatus } = await getNapCatService()
-    return getNapCatStatus()
+    const { getNapCatDashboardStatus } = await getNapCatDashboard()
+    return getNapCatDashboardStatus()
   })
 
   ipcMain.handle('ensure-napcat-config', async () => {

@@ -331,6 +331,11 @@ export const socialReadImageTool: BuiltinTool = {
     try {
       const maxImages = typeof args.max_images === 'number' ? Math.min(args.max_images, 3) : 3
       const images = await imageReaderProvider.readImages(context.agentId, messageIds, maxImages)
+      if (!images.length)
+        return JSON.stringify({
+          success: false,
+          error: '没有读到可用图片，请勿根据图片占位文本推测内容',
+        })
       return JSON.stringify({
         success: true,
         count: images.length,

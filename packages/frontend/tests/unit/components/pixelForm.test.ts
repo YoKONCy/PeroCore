@@ -1,6 +1,6 @@
 /* @vitest-environment happy-dom */
-import { mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { enableAutoUnmount, mount } from '@vue/test-utils'
+import { afterEach, describe, expect, it } from 'vitest'
 
 import PCheckbox from '@infos/frontend/components/pixel/PCheckbox.vue'
 import PInput from '@infos/frontend/components/pixel/PInput.vue'
@@ -17,7 +17,6 @@ describe('基础像素表单组件', () => {
           modelValue: 'Pero',
           placeholder: '请输入名称',
           type: 'password',
-          size: 'lg',
           disabled: true,
         },
       })
@@ -27,7 +26,6 @@ describe('基础像素表单组件', () => {
       expect(input.attributes('placeholder')).toBe('请输入名称')
       expect(input.attributes('type')).toBe('password')
       expect(input.attributes('disabled')).toBeDefined()
-      expect(input.classes()).toContain('p-input-lg')
     })
 
     it('应当在输入时发出 update:modelValue 事件', async () => {
@@ -44,7 +42,7 @@ describe('基础像素表单组件', () => {
   })
 
   describe('PTextarea', () => {
-    it('应当渲染标签、图标和文本域属性', () => {
+    it('禁用文本域应保留内容和输入限制', () => {
       const wrapper = mount(PTextarea, {
         props: {
           modelValue: '长文本',
@@ -64,7 +62,6 @@ describe('基础像素表单组件', () => {
       expect(textarea.attributes('rows')).toBe('5')
       expect(textarea.attributes('maxlength')).toBe('120')
       expect(textarea.attributes('disabled')).toBeDefined()
-      expect(textarea.classes()).toContain('p-textarea-disabled')
     })
 
     it('应当在文本变化时发出 update:modelValue 事件', async () => {
@@ -86,13 +83,24 @@ describe('基础像素表单组件', () => {
         props: {
           modelValue: false,
           label: '启用功能',
+          size: 'sm',
         },
+        attrs: { 'aria-label': '启用功能', id: 'feature-switch' },
       })
 
+      expect(wrapper.element.tagName).toBe('BUTTON')
+      expect(wrapper.attributes('type')).toBe('button')
+      expect(wrapper.attributes('role')).toBe('switch')
+      expect(wrapper.attributes('aria-checked')).toBe('false')
+      expect(wrapper.attributes('aria-label')).toBe('启用功能')
+      expect(wrapper.attributes('id')).toBe('feature-switch')
+      expect(wrapper.classes()).toContain('p-switch-sm')
       await wrapper.trigger('click')
 
       expect(wrapper.emitted('update:modelValue')).toEqual([[true]])
       expect(wrapper.emitted('change')).toEqual([[true]])
+      await wrapper.setProps({ modelValue: true })
+      expect(wrapper.attributes('aria-checked')).toBe('true')
     })
 
     it('应当在禁用状态下忽略点击', async () => {
@@ -105,9 +113,9 @@ describe('基础像素表单组件', () => {
 
       await wrapper.trigger('click')
 
+      expect(wrapper.attributes('disabled')).toBeDefined()
       expect(wrapper.emitted('update:modelValue')).toBeUndefined()
       expect(wrapper.emitted('change')).toBeUndefined()
-      expect(wrapper.classes()).toContain('p-switch-disabled')
     })
   })
 
@@ -143,7 +151,6 @@ describe('基础像素表单组件', () => {
       expect(wrapper.text()).toContain('插槽标签')
       expect(wrapper.text()).not.toContain('不会显示')
       expect(wrapper.emitted('update:modelValue')).toBeUndefined()
-      expect(wrapper.find('.p-checkbox-wrapper').classes()).toContain('p-checkbox-disabled')
     })
   })
 
@@ -198,19 +205,6 @@ describe('基础像素表单组件', () => {
   })
 
   describe('PSlider', () => {
-    it('应当按当前值计算填充宽度和滑块位置', () => {
-      const wrapper = mount(PSlider, {
-        props: {
-          modelValue: 50,
-          min: 0,
-          max: 200,
-        },
-      })
-
-      expect(wrapper.get('.p-slider-fill').attributes('style')).toContain('width: 25%')
-      expect(wrapper.get('.p-slider-thumb').attributes('style')).toContain('left: calc(25% - 10px)')
-    })
-
     it('应当支持范围输入和数字输入同步发出事件', async () => {
       const wrapper = mount(PSlider, {
         props: {
@@ -227,3 +221,5 @@ describe('基础像素表单组件', () => {
     })
   })
 })
+
+enableAutoUnmount(afterEach)

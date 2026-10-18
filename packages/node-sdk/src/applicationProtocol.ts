@@ -88,6 +88,16 @@ export function validateApplicationDiscovery(
   if (!['127.0.0.1', 'localhost', '::1'].includes(endpoint.hostname)) {
     throw new Error('APPLICATION_DISCOVERY_ENDPOINT_FORBIDDEN')
   }
+  if (value.httpEndpoint) {
+    const http = new URL(value.httpEndpoint)
+    if (
+      http.protocol !== 'http:' ||
+      !['127.0.0.1', 'localhost', '[::1]'].includes(http.hostname) ||
+      http.username ||
+      http.password
+    )
+      throw new Error('APPLICATION_DISCOVERY_HTTP_ENDPOINT_FORBIDDEN')
+  }
   return value
 }
 

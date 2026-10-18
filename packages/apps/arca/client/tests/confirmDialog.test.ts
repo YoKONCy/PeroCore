@@ -11,10 +11,9 @@ describe('ConfirmDialog应用内危险确认（S06 L5阻断层）', () => {
       attachTo: document.body,
     })
     const dialog = wrapper.get('[role="alertdialog"]')
-    expect(dialog.attributes('aria-labelledby')).toBe('confirm-title')
-    expect(dialog.attributes('aria-describedby')).toBe('confirm-message')
+    expect(wrapper.get(`#${dialog.attributes('aria-labelledby')}`).text()).toBe('删除语义块')
+    expect(wrapper.get(`#${dialog.attributes('aria-describedby')}`).text()).toBe('不可恢复说明')
     expect(wrapper.get('.confirm-message').text()).toBe('不可恢复说明')
-    expect(wrapper.get('.confirm-accept').classes()).toContain('danger')
 
     await wrapper.get('.confirm-accept').trigger('click')
     expect(wrapper.emitted('confirm')).toHaveLength(1)

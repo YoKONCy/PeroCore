@@ -1,0 +1,113 @@
+import { createHash } from 'node:crypto'
+import { AppError } from '@infos/backend/applicationHostAbi'
+import type { AccountSticker, AccountStickerProvider } from '../../runtime/stickerService'
+
+type CallApi = (
+  action: string,
+  params: Record<string, unknown>,
+  timeoutMs?: number,
+  accountId?: string,
+) => Promise<unknown>
+const MAX_STICKERS = 4096
+
+/** 下载在 NapCat 一侧执行，支持与 infOS 分机部署。 */
+export class NapcatStickers implements AccountStickerProvider {
+  constructor(private readonly callApi: CallApi) {}
+
+  private async invoke(
+    accountId: string,
+    action: string,
+    params: Record<string, unknown>,
+    timeout = 15_000,
+  ) {
+    const raw = (await this.callApi(action, params, timeout, accountId).catch((error: unknown) => {
+      if (error instanceof AppError) throw error
+      throw new AppError('EXTERNAL_ERROR', {
+        message: error instanceof Error ? error.message : 'NapCat 表情接口暂不可用',
+      })
+    })) as {
+      status?: string
+      retcode?: number
+      message?: string
+      wording?: string
+      data?: unknown
+    }
+    if (raw?.status !== 'ok' || raw.retcode !== 0)
+      throw new AppError('EXTERNAL_ERROR', {
+        message: raw?.message || raw?.wording || 'NapCat 表情接口暂不可用',
+      })
+    const native = raw.data
+    if (typeof native === 'number' && native !== 0)
+      throw new AppError('EXTERNAL_ERROR', { message: 'QQ 拒绝了表情操作' })
+    if (
+      native &&
+      typeof native === 'object' &&
+      'result' in native &&
+      typeof native.result === 'number' &&
+      native.result !== 0
+    )
+      throw new AppError('EXTERNAL_ERROR', {
+        message: 'errMsg' in native ? String(native.errMsg) : 'QQ 拒绝了表情操作',
+      })
+    return raw.data
+  }
+
+  async list(accountId: string) {
+    const raw = await this.invoke(accountId, 'fetch_custom_face_detail', { count: MAX_STICKERS })
+    if (!Array.isArray(raw))
+      throw new AppError('EXTERNAL_ERROR', { message: 'NapCat 返回的收藏表情列表格式异常' })
+    const stickers: AccountSticker[] = []
+    const seen = new Set<string>()
+    for (const entry of raw.slice(0, MAX_STICKERS)) {
+      if (!entry || typeof entry !== 'object') continue
+      const item = entry as Record<string, unknown>
+      const resourceId = String(item.resId ?? '')
+      const url = String(item.url ?? '')
+      if (!resourceId || !/^https?:\/\//i.test(url)) continue
+      const id = `s_${createHash('sha256').update(resourceId).digest('hex').slice(0, 24)}`
+      if (seen.has(id)) continue
+      seen.add(id)
+      stickers.push({
+        id,
+        resourceId,
+        url,
+        md5: String(item.md5 ?? ''),
+        emojiId: String(item.emoId ?? item.emojiId ?? '0'),
+        description: String(item.desc ?? '').slice(0, 200),
+      })
+    }
+    return { stickers, truncated: raw.length >= MAX_STICKERS }
+  }
+
+  async collect(accountId: string, url: string) {
+    if (!/^https?:\/\//i.test(url))
+      throw new AppError('INVALID_PARAMETER', { message: '收藏图片必须来自有效的消息图片链接' })
+    const downloaded = (await this.invoke(
+      accountId,
+      'download_file',
+      { url, headers: ['User-Agent=Mozilla/5.0', 'Referer=https://qq.com'] },
+      60_000,
+    )) as { file?: string }
+    // download_file 未指定 name 时，NapCat 使用内容 MD5 作为文件名。
+    const md5 = downloaded?.file?.split(/[\\/]/).at(-1)?.toLowerCase()
+    if (!md5 || !/^[a-f0-9]{32}$/.test(md5))
+      throw new AppError('EXTERNAL_ERROR', { message: 'NapCat 下载结果未提供可确认的图片 MD5' })
+    const existing = await this.list(accountId)
+    if (!existing.stickers.some((item) => item.md5.toLowerCase() === md5))
+      await this.invoke(accountId, 'add_custom_face', { file: downloaded.file, md5 }, 60_000)
+    return { md5 }
+  }
+
+  async describe(accountId: string, sticker: AccountSticker, description: string) {
+    await this.invoke(accountId, 'set_custom_face_desc', {
+      emoji_id: sticker.emojiId,
+      res_id: sticker.resourceId,
+      md5: sticker.md5,
+      desc: description,
+    })
+  }
+
+  async remove(accountId: string, sticker: AccountSticker) {
+    await this.invoke(accountId, 'delete_custom_face', { res_id: sticker.resourceId })
+  }
+}

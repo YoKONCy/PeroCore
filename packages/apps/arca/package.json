@@ -1,6 +1,6 @@
 {
   "name": "@infos/arca",
-  "version": "0.9.3-hotfix2",
+  "version": "0.9.4",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
@@ -14,13 +14,14 @@
   "scripts": {
     "dev": "pnpm dev:host",
     "dev:host": "tsx src/main.ts",
+    "dev:standalone": "tsx src/main.ts --standalone --dev-ui",
     "dev:client": "vite --config client/vite.config.ts",
     "build": "pnpm build:host && pnpm build:client",
     "build:host": "tsc -p tsconfig.host.json",
     "build:client": "vite build --config client/vite.config.ts",
     "typecheck": "pnpm typecheck:host && pnpm typecheck:client",
     "typecheck:host": "tsc -p tsconfig.host.json --noEmit",
-    "typecheck:client": "vue-tsc -p tsconfig.client.json --noEmit",
+    "typecheck:client": "node ../../../scripts/check-vue-templates.mjs client/src && vue-tsc -p tsconfig.client.json --noEmit",
     "clean": "rimraf dist client/dist"
   },
   "dependencies": {

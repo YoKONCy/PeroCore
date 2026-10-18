@@ -12,16 +12,18 @@ describe('createArcaUiRouter', () => {
 
   beforeEach(() => {
     root = join(tmpdir(), `infos-arca-ui-${Date.now()}-${Math.random()}`)
-    mkdirSync(join(root, 'assets'), { recursive: true })
-    writeFileSync(join(root, 'index.html'), '<!doctype html><title>Arca</title>')
-    writeFileSync(join(root, 'assets', 'app.js'), 'console.log("Arca")')
+    mkdirSync(root, { recursive: true })
+    writeFileSync(join(root, 'host.mjs'), '不能泄漏的宿主源码')
+    mkdirSync(join(root, 'ui', 'assets'), { recursive: true })
+    writeFileSync(join(root, 'ui', 'index.html'), '<!doctype html><title>Arca</title>')
+    writeFileSync(join(root, 'ui', 'assets', 'app.js'), 'console.log("Arca")')
     app = new Hono()
-    app.route('/applications/arca', createArcaUiRouter(new StaticAssetService(root)))
+    app.route('/applications/arca', createArcaUiRouter(new StaticAssetService(join(root, 'ui'))))
   })
 
   afterEach(() => rmSync(root, { recursive: true, force: true }))
 
-  it('应提供入口与带长期缓存的哈希资源', async () => {
+  it('应提供入口与带长期缓存的静态资源', async () => {
     const index = await app.request('/applications/arca/')
     const asset = await app.request('/applications/arca/assets/app.js')
 
@@ -35,8 +37,9 @@ describe('createArcaUiRouter', () => {
   })
 
   it('不得暴露UI目录以外的文件', async () => {
-    const response = await app.request('/applications/arca/%2e%2e/host.mjs')
+    const response = await app.request('/applications/arca/%2e%2e%2fhost.mjs')
     expect([403, 404]).toContain(response.status)
+    expect(await response.text()).not.toContain('不能泄漏的宿主源码')
   })
 
   it('资源不存在时应返回404', async () => {

@@ -15,12 +15,15 @@ import {
   type ApprovalDecision,
 } from '../api/modules/approvalsApi'
 import { uiSound } from '../services/ui/uiSound'
+import { useCompositorStore } from './useCompositorStore'
 
 const POLL_INTERVAL_MS = 4_000
 
 export const useApprovalStore = defineStore('approval', () => {
   const pending = ref<Map<string, ApprovalRequest>>(new Map())
   const isResolving = ref<Record<string, boolean>>({})
+  const resolvedIds = new Set<string>()
+  let stateRevision = 0
   let pollTimer: ReturnType<typeof setInterval> | null = null
 
   /** 未完成审批数量（全局角标） */
@@ -42,9 +45,15 @@ export const useApprovalStore = defineStore('approval', () => {
 
   /** 刷新 pending 集合（与后端状态对齐） */
   async function refresh(): Promise<void> {
+    const revision = stateRevision
     try {
       const res = await approvalsApi.list({ status: 'pending' })
-      pending.value = new Map((res.data?.requests ?? []).map((request) => [request.id, request]))
+      if (revision !== stateRevision) return
+      pending.value = new Map(
+        (res.data?.requests ?? [])
+          .filter((request) => request.status === 'pending' && !resolvedIds.has(request.id))
+          .map((request) => [request.id, request]),
+      )
     } catch {
       // 后端未就绪时静默，等待下一轮
     }
@@ -56,9 +65,7 @@ export const useApprovalStore = defineStore('approval', () => {
     isResolving.value = { ...isResolving.value, [id]: true }
     try {
       await approvalsApi.resolve(id, decision, message)
-      const map = new Map(pending.value)
-      map.delete(id)
-      pending.value = map
+      remove(id)
     } finally {
       isResolving.value = { ...isResolving.value, [id]: false }
     }
@@ -66,7 +73,8 @@ export const useApprovalStore = defineStore('approval', () => {
 
   /** 接收 Gateway 新审批，轮询只作为断线兜底。 */
   function receive(request: ApprovalRequest): void {
-    if (request.status !== 'pending') return
+    if (request.status !== 'pending' || resolvedIds.has(request.id)) return
+    stateRevision++
     const isNew = !pending.value.has(request.id)
     const map = new Map(pending.value)
     map.set(request.id, request)
@@ -76,9 +84,14 @@ export const useApprovalStore = defineStore('approval', () => {
 
   /** 接收 Gateway 审批完成事件并即时移除。 */
   function remove(id: string): void {
+    stateRevision++
+    // 已完成决策不能被较早发出的轮询响应或迟到推送重新放回队列。
+    resolvedIds.add(id)
+    if (resolvedIds.size > 2048) resolvedIds.delete(resolvedIds.values().next().value!)
     const map = new Map(pending.value)
     map.delete(id)
     pending.value = map
+    useCompositorStore().dispose(`conversation-approval:${id}`)
   }
 
   /** 启动全局轮询（在 MainView 挂载时调用一次） */

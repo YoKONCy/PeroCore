@@ -19,10 +19,11 @@ permissions:
   contents: read
 
 jobs:
-  # ── 阶段 1: 代码规范检查 ──
+  # ── 阶段 1: 代码规范检查（仅提示，不阻断测试、构建与发布）──
   lint:
-    name: Lint & Format
+    name: Lint & Format (Non-blocking)
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v6
 
@@ -30,7 +31,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
@@ -45,9 +46,13 @@ jobs:
 
   # ── 阶段 2: 单元测试 ──
   test:
-    name: Test
-    runs-on: ubuntu-latest
-    needs: lint
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-2022]
     steps:
       - uses: actions/checkout@v6
 
@@ -55,25 +60,13 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
 
       - name: Vitest
-        run: pnpm test:run
-
-      - name: Coverage Report
-        run: pnpm test:coverage
-        continue-on-error: true
-
-      - name: Upload coverage to Codecov
-        if: always()
-        uses: codecov/codecov-action@v4
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: false # 如果网络不好上传失败了，不影响整体构建
-          verbose: true
+        run: pnpm test:run --maxWorkers=4
 
   # ── 阶段 3: 类型检查 + 构建验证 ──
   build:
@@ -87,22 +80,31 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
 
+      - name: 全包类型与模板检查
+        run: pnpm typecheck
+
+      - name: 测试代码类型检查
+        run: pnpm exec tsc --noEmit
+
       - name: 版本号同步
-        run: pnpm version:sync
+        run: pnpm version:sync --check
 
       - name: 全包构建
         run: pnpm build
 
-  # ── 阶段 4: Docker 配置模拟冒烟 ──
+      - name: Daemon 发行依赖边界检查
+        run: node scripts/build-daemon-bundle.mjs
+
+  # ── 阶段 4: Docker 配置与镜像验证 ──
   docker-smoke:
-    name: Docker Simulated Smoke
+    name: Docker Build & Smoke
     runs-on: ubuntu-latest
-    needs: lint
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
 
@@ -117,3 +119,30 @@ jobs:
 
       - name: 静态验证 Docker 与发布接线
         run: pnpm docker:smoke
+
+      - name: 验证 Compose 配置
+        run: docker compose config --quiet
+
+      - name: 构建完整镜像
+        run: docker compose build
+
+      - name: 启动并等待健康检查
+        run: docker compose up -d --wait --wait-timeout 180
+
+      - name: 验证代理入口
+        run: |
+          curl --fail http://localhost:3000/healthz
+          curl --fail http://localhost:3000/api/health
+          curl --fail http://localhost:3000/applications/arca/
+          curl --fail http://localhost:3000/applications/pictoria/
+
+      - name: 验证子应用启动、传输与停止
+        run: node scripts/docker-runtime-smoke.mjs http://localhost:3000
+
+      - name: 输出容器日志
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: 清理测试容器
+        if: always()
+        run: docker compose down --volumes

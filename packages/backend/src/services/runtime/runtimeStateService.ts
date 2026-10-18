@@ -29,8 +29,9 @@ import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('RuntimeStateService')
 
-/** 默认任务超时（ms）— 5 分钟 */
-const DEFAULT_TASK_TIMEOUT_MS = 5 * 60 * 1000
+/** 默认整轮任务执行时限（ms）— 6 小时。 */
+// 整轮对话的安全上限；单次模型请求由独立的空闲超时管理。
+const DEFAULT_TASK_TIMEOUT_MS = 6 * 60 * 60 * 1000
 
 // ─────────────────────────────────────────────
 // 类型定义
@@ -87,6 +88,11 @@ interface ThreadRuntimeState {
 // ─────────────────────────────────────────────
 
 export class RuntimeStateService {
+  private readonly timeoutDeadlines = new WeakMap<TaskState, number>()
+  private readonly timeoutSuspensions = new WeakMap<
+    TaskState,
+    { count: number; remaining: number }
+  >()
   // ── LLM 调用状态（按 threadId 索引） ──
   private tasks = new Map<string, TaskState>()
 
@@ -139,6 +145,7 @@ export class RuntimeStateService {
     }
 
     // 设置超时定时器
+    this.timeoutDeadlines.set(state, Date.now() + this.timeoutMs)
     state.timeoutTimer = setTimeout(() => {
       this.handleTimeout(threadId)
     }, this.timeoutMs)
@@ -172,6 +179,38 @@ export class RuntimeStateService {
 
     // 取消 Thread 打字状态
     this.setThreadTyping(threadId, false)
+  }
+
+  /** 等待用户期间暂停执行超时，结束等待后恢复原有剩余预算。 */
+  suspendTimeout(threadId: string): () => void {
+    const state = this.tasks.get(threadId)
+    if (!state || state.cancelled) return () => {}
+    let suspension = this.timeoutSuspensions.get(state)
+    if (!suspension) {
+      if (!state.timeoutTimer) return () => {}
+      suspension = {
+        count: 0,
+        remaining: Math.max(0, (this.timeoutDeadlines.get(state) ?? Date.now()) - Date.now()),
+      }
+      this.timeoutSuspensions.set(state, suspension)
+      clearTimeout(state.timeoutTimer)
+      state.timeoutTimer = null
+    }
+    const activeSuspension = suspension
+    activeSuspension.count++
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      if (--activeSuspension.count > 0) return
+      this.timeoutSuspensions.delete(state)
+      if (this.tasks.get(threadId) !== state || state.cancelled) return
+      this.timeoutDeadlines.set(state, Date.now() + activeSuspension.remaining)
+      state.timeoutTimer = setTimeout(
+        () => this.handleTimeout(threadId),
+        activeSuspension.remaining,
+      )
+    }
   }
 
   /** 更新当前轮次 */
@@ -295,6 +334,7 @@ export class RuntimeStateService {
 
   /** 设置全局活跃 Agent，作为所有前端入口读取的唯一权威状态。 */
   setActiveAgent(agentId: string): void {
+    if (this.activeAgentId === agentId) return
     this.activeAgentId = agentId
     logger.info(`全局活跃 Agent 已切换: ${agentId}`)
   }
@@ -407,7 +447,11 @@ export class RuntimeStateService {
     logger.warn(`任务超时: thread=${threadId} (${this.timeoutMs / 1000}s)`)
     state.cancelled = true
     state.paused = false
-    state.abortController.abort()
+    state.abortController.abort(
+      new Error(
+        `本轮任务已达到 ${Math.round(this.timeoutMs / 60_000)} 分钟执行时限，请继续任务或拆分处理`,
+      ),
+    )
     this.setThreadTyping(threadId, false)
     this.broadcastProgress(threadId, 'error', `任务超时 (${this.timeoutMs / 1000}s)`)
   }

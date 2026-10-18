@@ -9,6 +9,10 @@ import { validate as zValidator } from '../lib/validation'
 import { z } from 'zod'
 import type { AppContext } from '../container'
 import { AppError } from '../lib/appError'
+import { formatAgentInputAnswers } from '@infos/shared'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('SurfaceInput')
 
 const inputSchema = z.object({
   surfaceId: z.string().min(1),
@@ -32,27 +36,43 @@ export function createSurfaceRouter(ctx: AppContext) {
 
   router.post('/input', zValidator('json', inputSchema), async (c) => {
     const input = c.req.valid('json')
-    if (
-      (input.action === 'approval.resolve' || input.action === 'agent-input.resolve') &&
-      ctx.nodeRegistry.listSessions().some((session) => session.carrier === 'websocket')
-    ) {
+    const validateSeat = (principalId: string) => {
+      if (!ctx.nodeRegistry.listSessions().some((session) => session.carrier === 'websocket'))
+        return
       if (!input.seat) {
-        throw new AppError('VALIDATION_ERROR', { message: '当前操作需要有效 Input Seat' })
+        throw new AppError('CONFLICT', {
+          message: '交互连接尚未就绪，请稍后重试',
+          data: { reason: 'INPUT_SEAT_REQUIRED' },
+        })
       }
-      const principalId = String(input.payload.principalId ?? input.payload.agentId ?? 'pero')
-      ctx.nodeRegistry.validateInputSeat({
-        seatId: input.seat.seatId as import('@infos/shared').KernelInputSeatId,
-        sessionId: input.seat.sessionId as import('@infos/shared').KernelNodeSessionId,
-        principalId,
-        windowId: input.seat.windowId,
-        epoch: input.seat.epoch,
-        capability: input.action === 'approval.resolve' ? 'approval' : 'input',
-      })
+      if (input.payload.principalId !== undefined && input.payload.principalId !== principalId)
+        throw new AppError('VALIDATION_ERROR', { message: '操作角色与请求身份不匹配' })
+      try {
+        ctx.nodeRegistry.validateInputSeat({
+          seatId: input.seat.seatId as import('@infos/shared').KernelInputSeatId,
+          sessionId: input.seat.sessionId as import('@infos/shared').KernelNodeSessionId,
+          principalId,
+          windowId: input.seat.windowId,
+          epoch: input.seat.epoch,
+          capability: input.action === 'approval.resolve' ? 'approval' : 'input',
+        })
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : ''
+        if (['INPUT_SEAT_EXPIRED', 'INPUT_SEAT_IDENTITY_MISMATCH'].includes(reason))
+          throw new AppError('CONFLICT', {
+            message: '交互连接已更新，请重试；你的选择已保留',
+            data: { reason },
+          })
+        if (reason === 'INPUT_SEAT_CAPABILITY_DENIED')
+          throw new AppError('FORBIDDEN', { message: '当前窗口没有处理此请求的权限' })
+        throw error
+      }
     }
     if (input.action === 'approval.resolve') {
       const approvalId = String(input.payload.approvalId ?? '')
       const request = ctx.approvalService.get(approvalId)
       if (!request) throw new AppError('NOT_FOUND', { message: '审批请求不存在' })
+      validateSeat(request.agentId)
       const expectedSurfaceId = request.taskId
         ? `background-task:${request.taskId}`
         : `conversation:${request.threadId}:${request.sessionId}`
@@ -89,6 +109,7 @@ export function createSurfaceRouter(ctx: AppContext) {
       const inputId = String(input.payload.inputId ?? '')
       const request = ctx.agentInputService.get(inputId)
       if (!request) throw new AppError('NOT_FOUND', { message: '求助请求不存在' })
+      validateSeat(request.agentId)
       const expectedSurfaceId = request.taskId
         ? `background-task:${request.taskId}`
         : `conversation-input:${inputId}`
@@ -98,13 +119,44 @@ export function createSurfaceRouter(ctx: AppContext) {
       if (input.surfaceId !== expectedSurfaceId || input.generation !== expectedGeneration) {
         throw new AppError('VALIDATION_ERROR', { message: '求助 Surface 版本已失效，请刷新后重试' })
       }
+      const resumeConversation =
+        !request.taskId && request.required && !ctx.agentInputService.hasActiveWaiter(inputId)
+      if (
+        resumeConversation &&
+        ctx.runtimeStateService.listActiveTasks().some((task) => task.threadId === request.threadId)
+      ) {
+        throw new AppError('CONFLICT', { message: '当前会话仍在执行，请稍后再提交回答' })
+      }
+      const submittedAnswers = input.payload.answers
+      if (submittedAnswers !== undefined && !Array.isArray(submittedAnswers))
+        throw new AppError('VALIDATION_ERROR', { message: '回答列表格式无效' })
       const resolved = ctx.agentInputService.resolve(inputId, {
+        answers: submittedAnswers as import('@infos/shared').AgentInputAnswer[] | undefined,
         skipped: input.payload.skipped === true,
         selectedOptionIds: Array.isArray(input.payload.selectedOptionIds)
           ? input.payload.selectedOptionIds.map(String)
           : [],
         message: typeof input.payload.message === 'string' ? input.payload.message : undefined,
       })
+      if (resumeConversation && resolved.status === 'answered') {
+        // 原等待已在超时或重启时释放，沿原 Thread 和当前权限继续，不派生后台任务。
+        const answer = formatAgentInputAnswers(resolved)
+        ctx.runtimeStateService.registerTask(resolved.threadId, resolved.agentId)
+        void ctx.conversationTurnService
+          .executeTurn({
+            threadId: resolved.threadId,
+            agentId: resolved.agentId,
+            content: `针对刚才的问题，我的回答是：\n${answer}\n请结合原会话继续。`,
+            signal: ctx.runtimeStateService.getAbortSignal(resolved.threadId),
+          })
+          .catch((error) => {
+            logger.error('收到迟到回答后继续会话失败', { threadId: resolved.threadId, error })
+          })
+          .finally(() => {
+            ctx.runtimeStateService.unregisterTask(resolved.threadId)
+            ctx.conversationProjection.invalidate(resolved.threadId)
+          })
+      }
       ctx.conversationProjection.invalidate(resolved.threadId)
       const projection = resolved.taskId
         ? await ctx.backgroundTaskProjection.getSnapshot(resolved.taskId)
@@ -114,6 +166,7 @@ export function createSurfaceRouter(ctx: AppContext) {
 
     const taskId = String(input.payload.taskId ?? '')
     const current = await ctx.backgroundTaskProjection.getSnapshot(taskId)
+    validateSeat(current.principalId)
     if (
       input.surfaceId !== `background-task:${taskId}` ||
       input.generation !== current.surfaces[0]?.generation

@@ -50,6 +50,8 @@ export interface KernelPeriodicScheduleDefinition {
   priority?: number
   resourceKey?: string
   budget?: KernelExecutionBudget
+  /** 派发前的轻量条件；不满足时不创建 Execution，也不计入执行次数。 */
+  shouldRun?: () => boolean
   handler(context: KernelScheduledExecutionContext): Promise<void>
 }
 
@@ -113,8 +115,8 @@ export class KernelScheduler {
   private pumping = false
   private lastPersistenceError: string | null = null
   private readonly periodicSchedules = new Map<string, KernelPeriodicScheduleRecord>()
-  private periodicTimer: ReturnType<typeof setInterval> | null = null
-  private readonly periodicTickIntervalMs = 10_000
+  private periodicTimer: ReturnType<typeof setTimeout> | null = null
+  private periodicStarted = false
 
   constructor(
     private readonly executions: ExecutionRuntime,
@@ -162,22 +164,40 @@ export class KernelScheduler {
         },
       },
     })
+    this.schedulePeriodicTick()
   }
 
   startPeriodic(): void {
-    if (this.periodicTimer) return
-    this.periodicTimer = setInterval(() => void this.tickPeriodic(), this.periodicTickIntervalMs)
-    this.periodicTimer.unref?.()
+    if (this.periodicStarted) return
+    this.periodicStarted = true
+    this.schedulePeriodicTick()
   }
 
   stopPeriodic(): void {
-    if (!this.periodicTimer) return
-    clearInterval(this.periodicTimer)
+    this.periodicStarted = false
+    if (this.periodicTimer) clearTimeout(this.periodicTimer)
     this.periodicTimer = null
   }
 
   get isPeriodicStarted(): boolean {
-    return this.periodicTimer !== null
+    return this.periodicStarted
+  }
+
+  /** 按最近到期时间唤醒，短周期不会被固定轮询间隔推迟。 */
+  private schedulePeriodicTick(): void {
+    if (this.periodicTimer) clearTimeout(this.periodicTimer)
+    this.periodicTimer = null
+    if (!this.periodicStarted) return
+    const due = [...this.periodicSchedules.values()]
+      .filter((record) => !record.running)
+      .map((record) => record.nextDueAt)
+    if (!due.length) return
+    const delay = Math.min(2_147_483_647, Math.max(1, Math.min(...due) - Date.now()))
+    this.periodicTimer = setTimeout(() => {
+      this.periodicTimer = null
+      void this.tickPeriodic()
+    }, delay)
+    this.periodicTimer.unref?.()
   }
 
   getPeriodicScheduleNames(): string[] {
@@ -339,12 +359,31 @@ export class KernelScheduler {
   private async tickPeriodic(): Promise<void> {
     const now = Date.now()
     for (const record of this.periodicSchedules.values()) {
-      if (!record.running && now >= record.nextDueAt) void this.runPeriodic(record)
+      if (!record.running && now >= record.nextDueAt) {
+        void this.runPeriodic(record).catch((error) => {
+          // 准入判断异常也要推进期限，避免形成连续的立即重试。
+          const failedAt = Date.now()
+          record.nextDueAt = failedAt + record.intervalMs
+          record.status.nextDueAt = record.nextDueAt
+          record.status.lastFailureAt = failedAt
+          record.status.lastOutcome = 'error'
+          record.status.stats.totalRuns += 1
+          record.status.stats.errorCount += 1
+          record.status.stats.lastError = String(error)
+          this.schedulePeriodicTick()
+        })
+      }
     }
+    this.schedulePeriodicTick()
   }
 
   private async runPeriodic(record: KernelPeriodicScheduleRecord): Promise<void> {
     const startedAt = Date.now()
+    if (record.shouldRun && !record.shouldRun()) {
+      record.nextDueAt = startedAt + record.intervalMs
+      record.status.nextDueAt = record.nextDueAt
+      return
+    }
     record.running = true
     record.nextDueAt = startedAt + record.intervalMs
     record.status.running = true
@@ -386,6 +425,7 @@ export class KernelScheduler {
       const runs = record.status.stats.totalRuns
       const previous = record.status.stats.averageDurationMs
       record.status.stats.averageDurationMs = previous + (durationMs - previous) / runs
+      this.schedulePeriodicTick()
     }
   }
 

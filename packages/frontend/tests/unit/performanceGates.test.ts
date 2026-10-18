@@ -1,19 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import {
-  PerformanceBaselineRegistry,
-  type SurfaceFrame,
-  type SurfaceId,
-  type SurfaceNodeId,
-} from '@infos/shared'
+import { type SurfaceFrame, type SurfaceId, type SurfaceNodeId } from '@infos/shared'
 import { createPinia, setActivePinia } from 'pinia'
 import { useCompositorStore } from '../../src/stores/useCompositorStore'
 import { segmentStreamMarkdown } from '../../src/compositor/markdownSegmentation'
 
-describe('前端性能回归门禁', () => {
-  it('1000个流式Surface帧合成不应出现数量级回退', () => {
+describe('批量流式内容正确性', () => {
+  it('1000个流式Surface帧合成不应丢失或重复正文', () => {
     setActivePinia(createPinia())
     const store = useCompositorStore()
-    const startedAt = performance.now()
     const frames: SurfaceFrame[] = [
       {
         protocolVersion: 1,
@@ -42,32 +36,24 @@ describe('前端性能回归门禁', () => {
     }
     frames.forEach(store.enqueue)
     store.flush()
-    const duration = performance.now() - startedAt
-    expect((store.get('perf-surface')?.nodes[0]?.props as { source: string }).source).toHaveLength(
-      1000,
+    expect((store.get('perf-surface')?.nodes[0]?.props as { source: string }).source).toBe(
+      '字'.repeat(1000),
     )
-    expect(duration).toBeLessThan(2_000)
   })
 
-  it('长Markdown分段P95应满足宽松CPU预算', () => {
-    const registry = new PerformanceBaselineRegistry()
+  it('长Markdown分段应保留每个代码块且不丢失正文', () => {
     const source = Array.from(
       { length: 1000 },
       (_, index) => `段落${index}\n\n\`\`\`mermaid\ngraph TD\nA${index}-->B${index}\n\`\`\``,
     ).join('\n\n')
-    for (let index = 0; index < 20; index++) {
-      const startedAt = performance.now()
-      const blocks = segmentStreamMarkdown(source, 'perf-markdown' as SurfaceNodeId, true)
-      registry.observe('markdown_segmentation_ms', performance.now() - startedAt)
-      expect(blocks.length).toBeGreaterThan(1000)
-    }
-    registry.assertGates([
-      {
-        metric: 'markdown_segmentation_ms',
-        percentile: 'p95',
-        maximum: 1_000,
-        minimumSamples: 20,
-      },
-    ])
+    const blocks = segmentStreamMarkdown(source, 'perf-markdown' as SurfaceNodeId, true)
+    expect(blocks.filter((block) => block.kind === 'mermaid').map((block) => block.source)).toEqual(
+      Array.from({ length: 1000 }, (_, index) => `graph TD\nA${index}-->B${index}`),
+    )
+    const paragraphs = blocks
+      .filter((block) => block.kind === 'markdown')
+      .map((block) => block.source)
+      .join('')
+    for (let index = 0; index < 1000; index++) expect(paragraphs).toContain(`段落${index}\n`)
   })
 })

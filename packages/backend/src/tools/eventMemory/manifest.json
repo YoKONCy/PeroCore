@@ -11,7 +11,7 @@
   "tools": [
     {
       "name": "write_event_note",
-      "description": "把当前对话提炼为长期事件记忆。只记录对未来理解用户、关系或后续行动仍有价值的真实互动，如稳定偏好与重要事实、承诺与决定、关系变化、共同经历及明显情绪转折；忽略寒暄、临时操作、重复信息、未发生设想和普通问答。使用Agent第一人称，以自然完整句写清事件、参与者、结果或意义，不照抄、夸大、推测或虚构。一个可独立回忆且具有单一核心结果的事件写一条；同一目标、连续因果或同一结果合并，无关目标或独立结果才拆分，避免碎片化。重要度0到3通常不应记录，4到6为有持续价值，7到8为长期重要，9到10仅用于罕见关键转折。工具只创建草稿，回复成功保存后才正式提交。",
+      "description": "记录值得长期保留的真实互动，忽略寒暄和临时操作。同一目标或连续因果合为一条，无关事件分开；草稿在回复保存成功后提交。",
       "display": {
         "label": "记录事件",
         "description": "记录值得长期记住的互动。",
@@ -23,7 +23,10 @@
         "type": "object",
         "required": ["narrative", "importance", "affect"],
         "properties": {
-          "narrative": { "type": "string", "description": "第一人称主观事件记叙" },
+          "narrative": {
+            "type": "string",
+            "description": "以第一人称概述事件、参与者和结果，不照抄对话或推测"
+          },
           "importance": {
             "type": "integer",
             "minimum": 0,
@@ -49,7 +52,7 @@
     },
     {
       "name": "revise_event_note",
-      "description": "修订指定EventNote。工具只创建替换草稿，回复成功保存后才原子替换旧节点。",
+      "description": "修订已有事件记忆；替换草稿在回复保存成功后提交。",
       "display": {
         "label": "修订事件",
         "description": "修订已有长期事件记忆。",
@@ -64,7 +67,7 @@
           "targetId": { "type": "string", "description": "待修订EventNote ID" },
           "narrative": {
             "type": "string",
-            "description": "Agent第一人称的简洁完整事件叙事，写清发生的事情、参与者以及结果或长期意义；不得照抄对话、推测或虚构"
+            "description": "以第一人称概述事件、参与者和结果，不照抄对话或推测"
           },
           "importance": {
             "type": "integer",

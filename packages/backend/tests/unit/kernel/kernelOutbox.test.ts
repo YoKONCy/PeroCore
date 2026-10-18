@@ -19,7 +19,7 @@ function createDb() {
       id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, channel TEXT NOT NULL,
       title TEXT DEFAULT '', message_count INTEGER DEFAULT 0, pair_count INTEGER DEFAULT 0,
       status TEXT DEFAULT 'active', disabled_tools_json TEXT DEFAULT '[]',
-      auto_execute_tools INTEGER DEFAULT false NOT NULL, purpose TEXT DEFAULT 'conversation'
+      auto_execute_tools INTEGER DEFAULT false NOT NULL, execution_mode TEXT DEFAULT 'manual' NOT NULL, purpose TEXT DEFAULT 'conversation'
     );
     CREATE TABLE thread_messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT, thread_id TEXT NOT NULL, role TEXT NOT NULL,
@@ -147,7 +147,9 @@ describe('消息事务 Outbox', () => {
       principalId: 'nana',
       payload: {},
     })
-    await db.insert(kernelOutboxEvents).values(outbox.toRow(fixed))
+    await (db as unknown as ReturnType<typeof drizzle>)
+      .insert(kernelOutboxEvents)
+      .values(outbox.toRow(fixed))
     createEvent.mockReturnValue(fixed)
 
     await expect(
@@ -250,6 +252,14 @@ describe('消息事务 Outbox', () => {
       principalId: 'pero',
       payload: {},
     })
+    const dead = await outbox.enqueue({
+      protocolVersion: 1,
+      type: 'kernel.dead',
+      durability: 'durable',
+      principalId: 'pero',
+      payload: {},
+    })
+    await outbox.markFailed(dead.eventId, '测试失败', new Date(), 1)
     await outbox.markPublished(published.eventId)
     sqlite!
       .prepare(
@@ -257,10 +267,10 @@ describe('消息事务 Outbox', () => {
       )
       .run(published.eventId)
     expect(await outbox.cleanupPublished(new Date('2021-01-01T00:00:00.000Z'))).toBe(1)
-    expect(await outbox.countByStatus()).toEqual({ pending: 1 })
+    expect(await outbox.countByStatus()).toEqual({ pending: 1, dead_letter: 1 })
   })
 
-  it('Dispatcher 应发布事件并标记完成，失败则保留重试信息', async () => {
+  it('Dispatcher 应发布事件并标记完成', async () => {
     const db = createDb()
     const outbox = new KernelOutboxRepository(db)
     await outbox.enqueue({
@@ -271,7 +281,9 @@ describe('消息事务 Outbox', () => {
       payload: { ok: true },
     })
     const received: string[] = []
-    const dispatcher = new KernelOutboxDispatcher(outbox, (event) => received.push(event.type))
+    const dispatcher = new KernelOutboxDispatcher(outbox, (event) => {
+      received.push(event.type)
+    })
 
     await expect(dispatcher.dispatchPending()).resolves.toEqual({
       published: 1,

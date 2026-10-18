@@ -13,6 +13,9 @@
  * @module packages/backend/src/services/llm/providers/geminiProvider
  */
 
+import { normalizeTokenUsage, tokenCount } from '../usage'
+import { combinedOutputLimit, fetchLlmResponse } from '../requestPolicy'
+import { geminiReasoningEffort, geminiThinkingConfig } from '../geminiThinking'
 import type {
   LlmProvider,
   ChatMessage,
@@ -42,15 +45,6 @@ const SAFETY_SETTINGS = [
 ]
 
 const RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504])
-
-const THINKING_BUDGETS = {
-  off: 0,
-  low: 1024,
-  medium: 4096,
-  high: 8192,
-  xhigh: 16384,
-  max: 32768,
-} as const
 
 function parseRetryAfterMs(value: string | null): number | undefined {
   if (!value) return undefined
@@ -88,6 +82,12 @@ interface GeminiToolDeclaration {
 export class GeminiProvider implements LlmProvider {
   constructor(private config: ProviderConfig) {}
 
+  getInputTokenPayload(messages: ChatMessage[], opts: ChatOptions): Record<string, unknown> {
+    const { systemInstruction, contents } = this.convertMessages(messages)
+    const body = this.buildBody(systemInstruction, contents, opts)
+    return { systemInstruction: body.systemInstruction, contents: body.contents, tools: body.tools }
+  }
+
   /**
    * 非流式调用
    */
@@ -96,7 +96,7 @@ export class GeminiProvider implements LlmProvider {
     const url = this.buildUrl('generateContent')
     const body = this.buildBody(systemInstruction, contents, opts)
 
-    const response = await this.fetchWithTimeout(url, body, opts.timeout ?? 300_000, opts.signal)
+    const response = await this.fetchWithTimeout(url, body, opts.timeout ?? 600_000, opts.signal)
 
     if (!response.ok) {
       await this.handleError(response, 'chat')
@@ -114,7 +114,7 @@ export class GeminiProvider implements LlmProvider {
     const url = this.buildUrl('streamGenerateContent', { alt: 'sse' })
     const body = this.buildBody(systemInstruction, contents, opts)
 
-    const response = await this.fetchWithTimeout(url, body, opts.timeout ?? 120_000, opts.signal)
+    const response = await this.fetchWithTimeout(url, body, opts.timeout ?? 600_000, opts.signal)
 
     if (!response.ok) {
       await this.handleError(response, 'chatStream')
@@ -155,6 +155,7 @@ export class GeminiProvider implements LlmProvider {
         }
       }
     } finally {
+      await reader.cancel().catch(() => {})
       reader.releaseLock()
     }
   }
@@ -224,15 +225,16 @@ export class GeminiProvider implements LlmProvider {
     const genConfig = body.generationConfig as Record<string, unknown>
     if (typeof opts.temperature === 'number') genConfig.temperature = opts.temperature
     if (typeof opts.topP === 'number') genConfig.topP = opts.topP
-    if (typeof opts.maxTokens === 'number') genConfig.maxOutputTokens = opts.maxTokens
-    if (opts.reasoningEffort) {
-      genConfig.thinkingConfig = {
-        thinkingBudget: THINKING_BUDGETS[opts.reasoningEffort],
-        includeThoughts: opts.returnNativeReasoning === true,
-      }
-    } else if (opts.returnNativeReasoning) {
-      genConfig.thinkingConfig = { includeThoughts: true }
-    }
+    const outputLimit = combinedOutputLimit(
+      {
+        ...opts,
+        reasoningEffort: geminiReasoningEffort(this.config.modelId, opts.reasoningEffort),
+      },
+      /gemini-(?:2\.5|[3-9])/i.test(this.config.modelId),
+    )
+    if (outputLimit !== undefined) genConfig.maxOutputTokens = outputLimit
+    const thinkingConfig = geminiThinkingConfig(this.config.modelId, opts)
+    if (thinkingConfig) genConfig.thinkingConfig = thinkingConfig
     if (opts.stop?.length) genConfig.stopSequences = opts.stop
     if (opts.responseFormat) {
       genConfig.responseMimeType = 'application/json'
@@ -458,7 +460,14 @@ export class GeminiProvider implements LlmProvider {
     }
 
     // 没有文本也没有工具调用，跳过
-    if (!text && !reasoningContent && !toolCalls.length) return null
+    if (
+      !text &&
+      !reasoningContent &&
+      !toolCalls.length &&
+      !candidate.finishReason &&
+      !data.usageMetadata
+    )
+      return null
 
     return {
       choices: [
@@ -479,12 +488,16 @@ export class GeminiProvider implements LlmProvider {
   private extractUsage(data: Record<string, unknown>): UsageInfo | undefined {
     const raw = data.usageMetadata as Record<string, unknown> | undefined
     if (!raw) return undefined
-
-    return {
-      promptTokens: (raw.promptTokenCount as number) ?? 0,
-      completionTokens: (raw.candidatesTokenCount as number) ?? 0,
-      totalTokens: (raw.totalTokenCount as number) ?? 0,
-    }
+    const visible = tokenCount(raw.candidatesTokenCount)
+    const reasoning = tokenCount(raw.thoughtsTokenCount)
+    // Gemini 将思考单列，统一输出口径需包含这部分，不能只统计可见回答。
+    return normalizeTokenUsage({
+      input: raw.promptTokenCount,
+      output: visible === undefined ? undefined : visible + (reasoning ?? 0),
+      total: raw.totalTokenCount,
+      cachedRead: raw.cachedContentTokenCount,
+      reasoning,
+    })
   }
 
   /** 映射 Gemini 停止原因 → OpenAI 格式 */
@@ -509,15 +522,18 @@ export class GeminiProvider implements LlmProvider {
     signal?: AbortSignal,
   ): Promise<Response> {
     try {
-      return await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        signal: signal
-          ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
-          : AbortSignal.timeout(timeoutMs),
-      })
+      return await fetchLlmResponse(
+        url,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        },
+        { timeout: timeoutMs, signal },
+        'gemini',
+      )
     } catch (err) {
+      if (err instanceof AppError) throw err
       if (err instanceof DOMException && err.name === 'TimeoutError') {
         throw new AppError('LLM_TIMEOUT', {
           message: `Gemini 请求超时 (${Math.round(timeoutMs / 1000)}s)`,

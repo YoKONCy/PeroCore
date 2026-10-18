@@ -5,7 +5,7 @@
  * 本脚本将该版本号同步到所有子包 package.json，
  * 以及前后端源码中的硬编码版本号。
  *
- * 用法: pnpm version:sync
+ * 用法: pnpm version:sync [--version 0.9.4 | --check]
  * 执行: tsx scripts/sync-version.ts
  *
  * @module scripts/sync-version
@@ -32,9 +32,30 @@ interface PackageJson {
   [key: string]: unknown
 }
 
+const args = process.argv.slice(2)
+const checkOnly = args.includes('--check')
+const versionIndex = args.indexOf('--version')
+if (
+  args.some(
+    (arg, index) =>
+      arg !== '--check' &&
+      arg !== '--version' &&
+      !(versionIndex >= 0 && index === versionIndex + 1),
+  )
+)
+  throw new Error('[版本同步] 存在未知参数')
+if (checkOnly && versionIndex >= 0) throw new Error('[版本同步] --check 不能与 --version 同用')
 const rootPkg: PackageJson = JSON.parse(fs.readFileSync(rootPkgPath, 'utf8'))
+if (versionIndex >= 0) {
+  const requestedVersion = args[versionIndex + 1]
+  if (!requestedVersion) throw new Error('[版本同步] --version 缺少目标版本')
+  rootPkg.version = requestedVersion
+}
 const VERSION = rootPkg.version
 const BROWSER_VERSION = toBrowserVersion(VERSION)
+// 先核对所有目标，再统一写入，避免悬空路径使版本只同步了一半。
+const pending = new Map<string, string>()
+if (versionIndex >= 0) pending.set(rootPkgPath, JSON.stringify(rootPkg, null, 2) + '\n')
 
 console.log(`\n[版本同步] 🎯 唯一事实来源 → package.json: ${VERSION}`)
 console.log('═'.repeat(55))
@@ -68,7 +89,7 @@ function syncBrowserManifest(relPath: string, required = true): void {
   if (manifest.version !== BROWSER_VERSION || manifest.version_name !== VERSION) {
     manifest.version = BROWSER_VERSION
     manifest.version_name = VERSION
-    fs.writeFileSync(fullPath, JSON.stringify(manifest, null, 2) + '\n')
+    pending.set(fullPath, JSON.stringify(manifest, null, 2) + '\n')
     console.log(`[版本同步] ✅ ${relPath}: ${BROWSER_VERSION} / ${VERSION}`)
     updatedCount++
   }
@@ -90,7 +111,7 @@ function syncJsonVersion(relPath: string, required = true): void {
   if (pkg.version !== VERSION) {
     const oldVersion = pkg.version
     pkg.version = VERSION
-    fs.writeFileSync(fullPath, JSON.stringify(pkg, null, 2) + '\n')
+    pending.set(fullPath, JSON.stringify(pkg, null, 2) + '\n')
     console.log(`[版本同步] ✅ ${relPath}: ${oldVersion} → ${VERSION}`)
     updatedCount++
   }
@@ -112,10 +133,12 @@ function syncSourceVersion(
 ): void {
   const fullPath = path.join(ROOT, relPath)
   if (!fs.existsSync(fullPath)) {
-    throw new Error(`[版本同步] 必需文件不存在: ${relPath}`)
+    if (required) throw new Error(`[版本同步] 必需文件不存在: ${relPath}`)
+    console.log(`[版本同步] ⏭️  ${relPath} 不存在，跳过可选同步`)
+    return
   }
   checkedCount++
-  const content = fs.readFileSync(fullPath, 'utf8')
+  const content = pending.get(fullPath) ?? fs.readFileSync(fullPath, 'utf8')
   if (!pattern.test(content)) {
     if (required) throw new Error(`[版本同步] ${relPath} 未匹配到 ${label}`)
     console.log(`[版本同步] ⏭️  ${relPath} 当前无 ${label}，跳过可选同步`)
@@ -124,7 +147,7 @@ function syncSourceVersion(
   pattern.lastIndex = 0
   const replaced = content.replace(pattern, replacement)
   if (content !== replaced) {
-    fs.writeFileSync(fullPath, replaced)
+    pending.set(fullPath, replaced)
     console.log(`[版本同步] ✅ ${relPath} ${label} → ${VERSION}`)
     updatedCount++
   }
@@ -142,6 +165,7 @@ const subPackagePaths = [
   'packages/daemon/package.json',
   'packages/apps/social/package.json',
   'packages/apps/arca/package.json',
+  'packages/apps/pictoria/package.json',
   'packages/avatar-assets/package.json',
   'packages/document-engine/package.json',
   'packages/node-sdk/package.json',
@@ -150,7 +174,15 @@ const subPackagePaths = [
   'electron/package.json',
 ]
 
-for (const relPath of subPackagePaths) {
+// 与 pnpm-workspace.yaml 中 packages/*、packages/apps/*、electron 的发现范围一致。
+const discoveredPackages = ['packages', 'packages/apps'].flatMap((directory) =>
+  fs
+    .readdirSync(path.join(ROOT, directory), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => `${directory}/${entry.name}/package.json`)
+    .filter((relPath) => fs.existsSync(path.join(ROOT, relPath))),
+)
+for (const relPath of [...new Set([...subPackagePaths, ...discoveredPackages])].sort()) {
   syncJsonVersion(relPath)
 }
 
@@ -209,11 +241,53 @@ syncSourceVersion(
 )
 
 syncSourceVersion(
+  'packages/apps/pictoria/src/host.ts',
+  /appVersion:\s*'[^']*'/,
+  `appVersion: '${VERSION}'`,
+  'Pictoria Host 版本',
+)
+
+syncSourceVersion(
+  'packages/apps/pictoria/src/manifest.ts',
+  /versions:\s*'[^']*'/,
+  `versions: '>=${VERSION} <1.0.0'`,
+  'Pictoria Host 版本范围',
+)
+
+syncSourceVersion(
   'packages/backend/tests/unit/capabilities/arcaApplicationController.test.ts',
   /appVersion:\s*'[^']*'/,
   `appVersion: '${VERSION}'`,
   'Arca controller fixture appVersion',
 )
+
+syncSourceVersion(
+  'packages/backend/src/services/weather/weatherService.ts',
+  /infOS\/\d+\.\d+\.\d+(?:-[\w.-]+)?(?= \()/,
+  `infOS/${VERSION}`,
+  '天气请求 User-Agent 版本',
+)
+
+console.log('\n── 📖 当前文档与 Wiki 展示 ──')
+syncSourceVersion(
+  'packages/wiki/.vitepress/components/MoePixelHome.vue',
+  /v\d+\.\d+\.\d+(?:-[\w.-]+)?/g,
+  `v${VERSION}`,
+  'Wiki 首页版本',
+)
+syncSourceVersion(
+  'packages/wiki/.vitepress/components/ArchitectureGraph.vue',
+  /v\d+\.\d+\.\d+(?:-[\w.-]+)?(?=<)/,
+  `v${VERSION}`,
+  'Wiki 架构图版本',
+)
+for (const entry of fs.readdirSync(path.join(ROOT, '.docs'), { withFileTypes: true })) {
+  if (!entry.isFile() || !entry.name.endsWith('.md')) continue
+  const relPath = `.docs/${entry.name}`
+  const pattern = /^(> \*\*版本\*\*：)\S+/m
+  if (pattern.test(fs.readFileSync(path.join(ROOT, relPath), 'utf8')))
+    syncSourceVersion(relPath, pattern, `> **版本**：${VERSION}`, '当前规范版本')
+}
 
 // ═══════════════════════════════════════════════════════
 // 4. 同步 docker-compose.yml 镜像标签 (如果存在 image 字段)
@@ -232,6 +306,12 @@ syncSourceVersion(
 // 结果汇报
 // ═══════════════════════════════════════════════════════
 console.log('\n' + '═'.repeat(55))
+if (checkOnly && pending.size) {
+  console.error(`[版本同步] ❌ 发现 ${pending.size} 个文件版本不一致，请运行 pnpm version:sync`)
+  process.exit(1)
+} else if (!checkOnly) {
+  for (const [file, content] of pending) fs.writeFileSync(file, content)
+}
 if (updatedCount === 0) {
   console.log(`[版本同步] ✨ 全部 ${checkedCount} 个检查点已是最新 (${VERSION})，无需更新`)
 } else {

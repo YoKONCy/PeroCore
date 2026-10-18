@@ -10,6 +10,9 @@
 
 export type ThreadChannel = 'desktop' | 'group'
 
+/** Thread 的交互能力模式，与通道和工具审批设置相互独立。 */
+export type InteractionMode = 'chat' | 'work'
+
 /** API 统一响应格式 */
 export interface ApiResponse<T = unknown> {
   /** 业务状态码 (UPPER_SNAKE_CASE) */

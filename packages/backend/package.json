@@ -1,6 +1,6 @@
 {
   "name": "@infos/backend",
-  "version": "0.9.3-hotfix2",
+  "version": "0.9.4",
   "private": true,
   "type": "module",
   "main": "./src/app.ts",
@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit",
     "clean": "rimraf dist",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
+    "db:migrate": "tsx src/database/migrateCli.ts",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio"
   },
@@ -21,6 +21,7 @@
     "@infos/arca": "workspace:*",
     "@infos/node-host": "workspace:*",
     "@infos/node-sdk": "workspace:*",
+    "@infos/pictoria": "workspace:*",
     "@infos/shared": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@opentelemetry/api": "^1.9.1",
@@ -38,7 +39,8 @@
     "nunjucks": "^3.2.4",
     "prom-client": "^15.1.3",
     "tiktoken": "1.0.22",
-    "triviumdb": "0.8.2",
+    "triviumdb": "0.8.9",
+    "typescript": "^5.9.3",
     "uuid": "^14.0.0",
     "ws": "^8.20.0",
     "xmlbuilder": "11.0.1",
@@ -56,7 +58,6 @@
     "@types/uuid": "^11.0.0",
     "drizzle-kit": "^0.31.0",
     "rimraf": "^6.1.2",
-    "tsx": "^4.20.0",
-    "typescript": "^5.9.3"
+    "tsx": "^4.20.0"
   }
 }

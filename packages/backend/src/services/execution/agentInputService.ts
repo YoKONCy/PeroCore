@@ -1,14 +1,28 @@
 import { randomUUID } from 'node:crypto'
+import {
+  getAgentInputQuestions,
+  type AgentInputOption,
+  type AgentInputQuestion,
+  type AgentInputAnswer,
+  type AgentInputSubmission,
+} from '@infos/shared'
+import { normalizeAgentInputQuestions, validateAgentInputAnswers } from './agentInputAnswers'
 import { AppError } from '../../lib/appError'
 import type { AgentInputRepository } from '../../repositories/agentInput.repo'
 
 export type AgentInputStatus = 'pending' | 'answered' | 'skipped' | 'cancelled' | 'interrupted'
 
-export interface AgentInputOption {
-  id: string
-  label: string
-  description?: string
+export const AGENT_INPUT_TIMEOUT_MS = 10 * 60_000
+export const AGENT_INPUT_UNANSWERED_MESSAGE = '已经过去10分钟未响应，用户可能正在忙，暂时无法回应。'
+
+export function isUnansweredAgentInput(request: AgentInputRequest): boolean {
+  return (
+    (request.status === 'pending' || request.status === 'skipped') &&
+    request.responseMessage === AGENT_INPUT_UNANSWERED_MESSAGE
+  )
 }
+
+export type { AgentInputOption } from '@infos/shared'
 
 export interface AgentInputRequest {
   id: string
@@ -17,6 +31,8 @@ export interface AgentInputRequest {
   sessionId: string
   threadId: string
   taskId?: string
+  questions?: AgentInputQuestion[]
+  answers?: AgentInputAnswer[]
   question: string
   context?: string
   options: AgentInputOption[]
@@ -35,7 +51,8 @@ export interface CreateAgentInput {
   sessionId: string
   threadId: string
   taskId?: string
-  question: string
+  questions?: unknown
+  question?: string
   context?: string
   options?: AgentInputOption[]
   allowFreeText?: boolean
@@ -50,6 +67,7 @@ export class AgentInputService {
   private readonly requestedListeners = new Set<AgentInputEventListener>()
   private readonly resolvedListeners = new Set<AgentInputEventListener>()
   private readonly waiters = new Map<string, Set<(request: AgentInputRequest) => void>>()
+  private waitGuard?: (threadId: string) => () => void
 
   constructor(private readonly repository?: AgentInputRepository) {
     for (const request of repository?.list() ?? []) this.requests.set(request.id, request)
@@ -59,6 +77,10 @@ export class AgentInputService {
   onRequested(listener: AgentInputEventListener): () => void {
     this.requestedListeners.add(listener)
     return () => this.requestedListeners.delete(listener)
+  }
+
+  setWaitGuard(guard: (threadId: string) => () => void): void {
+    this.waitGuard = guard
   }
 
   onResolved(listener: AgentInputEventListener): () => void {
@@ -72,10 +94,12 @@ export class AgentInputService {
         message: '当前对话已有一个等待用户回答的问题',
       })
     }
-    const question = input.question.trim()
+    const questions =
+      input.questions !== undefined ? normalizeAgentInputQuestions(input.questions) : undefined
+    const question = questions?.[0]?.question ?? input.question?.trim() ?? ''
     if (!question) throw new AppError('VALIDATION_ERROR', { message: '问题不能为空' })
-    const options = this.normalizeOptions(input.options ?? [])
-    const allowFreeText = input.allowFreeText !== false
+    const options = questions?.[0]?.options ?? this.normalizeOptions(input.options ?? [])
+    const allowFreeText = questions ? true : input.allowFreeText !== false
     if (!allowFreeText && options.length === 0) {
       throw new AppError('VALIDATION_ERROR', { message: '禁用自由回答时必须提供选项' })
     }
@@ -86,6 +110,8 @@ export class AgentInputService {
       sessionId: input.sessionId,
       threadId: input.threadId,
       taskId: input.taskId,
+      questions,
+      answers: [],
       question: question.slice(0, 2_000),
       context: input.context?.trim().slice(0, 2_000) || undefined,
       options,
@@ -101,12 +127,10 @@ export class AgentInputService {
     return request
   }
 
-  resolve(
-    id: string,
-    input: { selectedOptionIds?: string[]; message?: string; skipped?: boolean },
-  ): AgentInputRequest {
+  resolve(id: string, input: AgentInputSubmission): AgentInputRequest {
     const request = this.get(id)
     if (!request) throw new AppError('NOT_FOUND', { message: '求助请求不存在' })
+    this.expireRequest(request, Date.now())
     if (request.status !== 'pending') {
       throw new AppError('CONFLICT', { message: `求助请求当前不可回答: ${request.status}` })
     }
@@ -114,21 +138,24 @@ export class AgentInputService {
       if (request.required) throw new AppError('VALIDATION_ERROR', { message: '这个问题需要回答' })
       request.status = 'skipped'
     } else {
-      const selected = [...new Set(input.selectedOptionIds ?? [])]
-      const available = new Set(request.options.map((option) => option.id))
-      if (selected.some((id) => !available.has(id))) {
-        throw new AppError('VALIDATION_ERROR', { message: '回答包含无效选项' })
-      }
-      const message = input.message?.trim().slice(0, 4_000) || undefined
-      if (message && !request.allowFreeText) {
-        throw new AppError('VALIDATION_ERROR', { message: '这个问题不接受自由回答' })
-      }
-      if (selected.length === 0 && !message) {
-        throw new AppError('VALIDATION_ERROR', { message: '请选择选项或填写回答' })
-      }
+      const questions = getAgentInputQuestions(request)
+      const answers = validateAgentInputAnswers(
+        request,
+        input.answers ??
+          (questions.length === 1
+            ? [
+                {
+                  questionId: questions[0]!.id,
+                  selectedOptionIds: input.selectedOptionIds ?? [],
+                  message: input.message,
+                },
+              ]
+            : []),
+      )
       request.status = 'answered'
-      request.selectedOptionIds = selected
-      request.responseMessage = message
+      request.answers = answers
+      request.selectedOptionIds = answers.length === 1 ? answers[0]!.selectedOptionIds : []
+      request.responseMessage = answers.length === 1 ? answers[0]!.message : undefined
     }
     request.resolvedAt = new Date().toISOString()
     this.persist(request)
@@ -139,9 +166,15 @@ export class AgentInputService {
   waitForResolution(id: string, signal?: AbortSignal): Promise<AgentInputRequest> {
     const current = this.get(id)
     if (!current) return Promise.reject(new Error(`求助请求不存在: ${id}`))
-    if (current.status !== 'pending') return Promise.resolve(current)
+    this.expireRequest(current, Date.now())
+    if (current.status !== 'pending' || isUnansweredAgentInput(current))
+      return Promise.resolve(current)
     return new Promise<AgentInputRequest>((resolve, reject) => {
+      const releaseGuard = this.waitGuard?.(current.threadId)
+      let timeout: ReturnType<typeof setTimeout> | undefined
       const cleanup = () => {
+        releaseGuard?.()
+        if (timeout) clearTimeout(timeout)
         signal?.removeEventListener('abort', abort)
         this.waiters.get(id)?.delete(done)
       }
@@ -158,8 +191,51 @@ export class AgentInputService {
       waiters.add(done)
       this.waiters.set(id, waiters)
       if (signal?.aborted) abort()
-      else signal?.addEventListener('abort', abort, { once: true })
+      else {
+        signal?.addEventListener('abort', abort, { once: true })
+        timeout = setTimeout(
+          () => {
+            try {
+              const request = this.get(id)
+              if (request) this.expireRequest(request, Date.now())
+            } catch (error) {
+              cleanup()
+              reject(error)
+            }
+          },
+          Math.max(0, Date.parse(current.createdAt) + AGENT_INPUT_TIMEOUT_MS - Date.now()),
+        )
+      }
     })
+  }
+
+  hasActiveWaiter(id: string): boolean {
+    return (this.waiters.get(id)?.size ?? 0) > 0
+  }
+
+  /** 后台问题按创建时间兜底，重启不重置等待期限。 */
+  expireUnanswered(now = Date.now()): void {
+    for (const request of this.list({ status: 'pending' })) this.expireRequest(request, now)
+  }
+
+  private expireRequest(request: AgentInputRequest, now: number): void {
+    if (
+      request.status !== 'pending' ||
+      isUnansweredAgentInput(request) ||
+      now - Date.parse(request.createdAt) < AGENT_INPUT_TIMEOUT_MS
+    )
+      return
+    request.responseMessage = AGENT_INPUT_UNANSWERED_MESSAGE
+    if (!request.required) {
+      request.status = 'skipped'
+      request.resolvedAt = new Date(now).toISOString()
+    }
+    this.persist(request)
+    if (request.required) {
+      // 必答问题仍可回答，只释放本次执行等待并刷新已有求助卡片。
+      for (const listener of this.requestedListeners) void listener(request)
+      this.releaseWaiters(request)
+    } else this.finish(request)
   }
 
   get(id: string): AgentInputRequest | undefined {
@@ -187,7 +263,16 @@ export class AgentInputService {
   }
 
   cancelAllPending(message = '服务正在关闭，待回答问题已自动取消。'): void {
-    for (const request of this.list({ status: 'pending' })) this.cancel(request.id, message)
+    for (const request of this.list({ status: 'pending' })) {
+      if (request.taskId) continue
+      if (request.required) this.releaseWaiters(request)
+      else this.cancel(request.id, message)
+    }
+  }
+
+  cancelTask(taskId: string): void {
+    for (const request of this.list({ status: 'pending' }))
+      if (request.taskId === taskId) this.cancel(request.id, '任务已调整或停止，旧问题已取消。')
   }
 
   private cancel(id: string, message: string): void {
@@ -202,6 +287,9 @@ export class AgentInputService {
 
   private interruptPendingAfterRestart(): void {
     for (const request of this.repository?.list({ status: 'pending' }) ?? []) {
+      if (request.taskId || request.required) continue
+      this.expireRequest(request, Date.now())
+      if (request.status !== 'pending') continue
       request.status = 'interrupted'
       request.responseMessage = '服务已重启，旧问题已中断。'
       request.resolvedAt = new Date().toISOString()
@@ -211,6 +299,10 @@ export class AgentInputService {
 
   private finish(request: AgentInputRequest): void {
     for (const listener of this.resolvedListeners) void listener(request)
+    this.releaseWaiters(request)
+  }
+
+  private releaseWaiters(request: AgentInputRequest): void {
     for (const waiter of this.waiters.get(request.id) ?? []) waiter(request)
     this.waiters.delete(request.id)
   }

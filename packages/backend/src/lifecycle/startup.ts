@@ -216,11 +216,14 @@ function registerVoicePipelineHandler(ctx: AppContext): void {
  *
  * desktop 文本对话路径默认走 TTS；无有效 Seat 或 Provider 时安全跳过。
  */
+const speechGenerations = new Map<string, number>()
+
 async function synthesizeAndDeliverTts(
   ctx: AppContext,
-  reply: string,
+  spokenReply: string,
   sessionId: string,
   principalId: string,
+  generation: number,
 ): Promise<void> {
   try {
     if (!ctx.ttsService.isAvailable) {
@@ -238,22 +241,24 @@ async function synthesizeAndDeliverTts(
       return
     }
 
-    const ttsText = cleanTextForTts(reply)
+    const ttsText = cleanTextForTts(spokenReply)
     if (!ttsText.trim()) {
       logger.debug('TTS 文本清洗后为空，跳过合成')
       return
     }
 
     const audio = await ctx.ttsService.synthesize({ text: ttsText })
+    if (speechGenerations.get(principalId) !== generation) return
     const receipt = await ctx.audioDeliveryService.deliver(
       audio,
       {
         principalId,
         correlationId: sessionId,
         targetNodeId: seat.nodeId,
-        idempotencyKey: `chat:${sessionId}:${ttsText}`,
+        idempotencyKey: `chat:${sessionId}:${generation}`,
       },
       seat.nodeId,
+      { caption: spokenReply, isCurrent: () => speechGenerations.get(principalId) === generation },
     )
     logger.info(
       `桌面对话 TTS 已定向播放: ${(audio.audio.byteLength / 1024).toFixed(1)}KB, session=${sessionId}, node=${receipt.targetNodeId}, state=${receipt.state}`,
@@ -264,6 +269,17 @@ async function synthesizeAndDeliverTts(
 }
 
 function registerChatHandler(ctx: AppContext): void {
+  ctx.gatewayHub.on('action:stop_speech', async (envelope: GatewayEnvelope) => {
+    const payload = envelope.payload as Record<string, unknown>
+    const principalId =
+      typeof payload.agentId === 'string'
+        ? payload.agentId
+        : ctx.runtimeStateService.getActiveAgent() || ctx.agentManager.defaultAgentId
+    speechGenerations.set(principalId, (speechGenerations.get(principalId) ?? 0) + 1)
+    await ctx.audioDeliveryService.cancel(principalId)
+    if (envelope.id && envelope.sourceId)
+      await ctx.gatewayHub.sendResponse(envelope.id, envelope.sourceId, { stopped: true })
+  })
   ctx.gatewayHub.on('action:chat', async (envelope: GatewayEnvelope) => {
     const payload = envelope.payload as Record<string, unknown>
     const agentId =
@@ -271,6 +287,8 @@ function registerChatHandler(ctx: AppContext): void {
       ctx.runtimeStateService.getActiveAgent() ||
       ctx.agentManager.defaultAgentId
     const requestId = envelope.id
+    const speechGeneration = (speechGenerations.get(agentId) ?? 0) + 1
+    speechGenerations.set(agentId, speechGeneration)
     const sourceNodeId = envelope.sourceId ?? ''
 
     // AIOS: 优先使用 threadId；兼容旧版 sessionId 字段
@@ -339,16 +357,44 @@ function registerChatHandler(ctx: AppContext): void {
         },
       })
       let fullReply = ''
+      let runState = 'thinking'
+      let runLabel = '正在思考……'
+      const updateRunState = async (
+        state: Parameters<ConversationSurfaceSession['status']>[0],
+        message?: string,
+      ) => {
+        if (!surfaceRef.current) return
+        const labels: Record<string, string> = {
+          thinking: '正在思考……',
+          assembling: '正在生成工具调用……',
+          generating: '正在打字……',
+          calling: '正在等待工具回传……',
+        }
+        const label = labels[state] ?? message ?? ''
+        // 文本增量只在切换阶段时更新状态，避免每个字都推送重复状态帧。
+        if (state === runState && label === runLabel) return
+        runState = state
+        runLabel = label
+        await ctx.gatewayHub.pushSurface(surfaceRef.current.status(state, label))
+      }
       let next = await gen.next()
 
       while (!next.done) {
         const chunk = next.value
-        if (chunk.event === 'thinking_start') {
+        if (chunk.event === 'context_budget') {
+          if (surfaceRef.current) {
+            await ctx.gatewayHub.pushSurface(surfaceRef.current.contextBudget(chunk.data))
+          }
+        } else if (chunk.event === 'thinking_start') {
+          await updateRunState('thinking')
           const data = chunk.data
           if (surfaceRef.current) {
-            await ctx.gatewayHub.pushSurface(surfaceRef.current.startThinking(data.blockId))
+            await ctx.gatewayHub.pushSurface(
+              surfaceRef.current.startThinking(data.blockId, data.turn),
+            )
           }
         } else if (chunk.event === 'thinking_delta') {
+          await updateRunState('thinking')
           const data = chunk.data
           if (surfaceRef.current) {
             await ctx.gatewayHub.pushSurface(
@@ -363,13 +409,15 @@ function registerChatHandler(ctx: AppContext): void {
             )
           }
         } else if (chunk.event === 'native_reasoning_start') {
+          await updateRunState('thinking')
           const data = chunk.data
           if (surfaceRef.current) {
             await ctx.gatewayHub.pushSurface(
-              surfaceRef.current.startNativeReasoning(data.blockId, data.mode),
+              surfaceRef.current.startNativeReasoning(data.blockId, data.mode, data.turn),
             )
           }
         } else if (chunk.event === 'native_reasoning_delta') {
+          await updateRunState('thinking')
           const data = chunk.data
           if (surfaceRef.current) {
             await ctx.gatewayHub.pushSurface(
@@ -383,12 +431,20 @@ function registerChatHandler(ctx: AppContext): void {
               surfaceRef.current.completeNativeReasoning(data.blockId, data.durationMs),
             )
           }
+        } else if (chunk.event === 'model_retry') {
+          if (chunk.data.discardedTextCharacters)
+            fullReply = fullReply.slice(0, -chunk.data.discardedTextCharacters)
+          if (surfaceRef.current)
+            for (const frame of surfaceRef.current.modelRetry(chunk.data))
+              await ctx.gatewayHub.pushSurface(frame)
         } else if (chunk.event === 'narration_start') {
+          await updateRunState('generating')
           const data = chunk.data
           if (surfaceRef.current) {
             await ctx.gatewayHub.pushSurface(surfaceRef.current.startNarration(data.blockId))
           }
         } else if (chunk.event === 'narration_delta') {
+          await updateRunState('generating')
           const data = chunk.data
           fullReply += data.delta
           if (surfaceRef.current) {
@@ -396,9 +452,13 @@ function registerChatHandler(ctx: AppContext): void {
               surfaceRef.current.appendText(data.blockId, data.delta),
             )
           }
+        } else if (chunk.event === 'narration_end' && surfaceRef.current) {
+          await ctx.gatewayHub.pushSurface(surfaceRef.current.completeNarration(chunk.data.blockId))
         } else if (chunk.event === 'tool_call_start' && surfaceRef.current) {
+          await updateRunState('assembling')
           await ctx.gatewayHub.pushSurface(surfaceRef.current.startToolDraft(chunk.data.draftId))
         } else if (chunk.event === 'tool_call_delta' && surfaceRef.current) {
+          await updateRunState('assembling')
           const frame = surfaceRef.current.appendToolDraft(
             chunk.data.draftId,
             chunk.data.nameDelta,
@@ -406,10 +466,15 @@ function registerChatHandler(ctx: AppContext): void {
             chunk.data.receivedChars,
           )
           if (frame) await ctx.gatewayHub.pushSurface(frame)
+        } else if (chunk.event === 'tool_file_baseline' && surfaceRef.current) {
+          await ctx.gatewayHub.pushSurface(
+            surfaceRef.current.fileBaseline(chunk.data.draftId, chunk.data.baseline),
+          )
         } else if (chunk.event === 'tool_call_ready' && surfaceRef.current) {
           await ctx.gatewayHub.pushSurface(surfaceRef.current.finalizeToolDraft(chunk.data))
         } else if (chunk.event === 'tool_call') {
           // 兼容事件：正式节点已由tool_call_ready在原草稿节点上完成。
+          await updateRunState('calling')
         } else if (chunk.event === 'tool_result' && surfaceRef.current) {
           const data = chunk.data as {
             callId: string
@@ -420,12 +485,13 @@ function registerChatHandler(ctx: AppContext): void {
           for (const frame of surfaceRef.current.toolResult(data)) {
             await ctx.gatewayHub.pushSurface(frame)
           }
+          await updateRunState('thinking')
         } else if (chunk.event === 'status' && surfaceRef.current) {
           const data = chunk.data as {
-            state: 'thinking' | 'calling' | 'generating' | 'tool_failed'
+            state: Parameters<ConversationSurfaceSession['status']>[0]
             message?: string
           }
-          await ctx.gatewayHub.pushSurface(surfaceRef.current.status(data.state, data.message))
+          await updateRunState(data.state, data.message)
         }
         next = await gen.next()
       }
@@ -447,12 +513,22 @@ function registerChatHandler(ctx: AppContext): void {
         await ctx.gatewayHub.sendResponse(requestId, sourceNodeId, {
           success: true,
           reply: fullReply,
+          spokenReply: turnResult.spokenReply ?? '',
+          messageId: String(messageId),
           threadId: threadIdResolved,
         })
       }
 
       // ── 9. desktop 对话 TTS: 异步合成并定向到 active Input Seat ──
-      void synthesizeAndDeliverTts(ctx, fullReply, threadIdResolved, 'pero')
+      if (payload.speak !== false) {
+        void synthesizeAndDeliverTts(
+          ctx,
+          turnResult.spokenReply ?? '',
+          threadIdResolved,
+          agentId,
+          speechGeneration,
+        )
+      }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err)
       logger.error(`Gateway chat 失败: ${errMsg}`)

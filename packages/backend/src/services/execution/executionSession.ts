@@ -130,6 +130,10 @@ export class ExecutionSessionManager {
     return this.sessions.get(sessionId)
   }
 
+  list(): ExecutionSession[] {
+    return [...this.sessions.values()]
+  }
+
   findByOwner(input: {
     threadId?: string
     taskId?: string

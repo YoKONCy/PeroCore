@@ -21,13 +21,80 @@ function createService(rootDir = 'C:\\safe\\attachments') {
 }
 
 describe('AttachmentService', () => {
-  it('拒绝 PDF 并返回 415 业务错误', async () => {
-    const { service } = createService()
+  it('批量读图的所有预览都绑定到回复，避免只有首张图留存', async () => {
+    const { service, repo } = createService()
+    repo.findById.mockImplementation(async (id) => ({
+      id,
+      threadId: 'thread-1',
+      messageId: null,
+      status: 'uploaded',
+      metadataJson: JSON.stringify({ resource: { agentId: 'pero', pairId: 'pair-1' } }),
+    }))
+    await service.bindOutgoing('thread-1', 'pero', 'pair-1', 42, [
+      {
+        name: 'read_image',
+        result: JSON.stringify({
+          images: ['a', 'b', 'c'].map((id) => ({
+            imagePreview: {
+              id,
+              name: `${id}.png`,
+              kind: 'image',
+              mimeType: 'image/png',
+              sizeBytes: 10,
+            },
+          })),
+        }),
+      },
+    ])
+    expect(repo.bind).toHaveBeenCalledWith(['a', 'b', 'c'], 'thread-1', 42)
+  })
+  it('历史消息不把工具预览重复展示成普通附件', async () => {
+    const { service, repo } = createService()
+    repo.listByMessageIds.mockResolvedValue([
+      { id: 'preview-1', messageId: 42, metadataJson: '{"resource":{"toolPreview":true}}' },
+      { id: 'user-image', messageId: 41, metadataJson: '{}' },
+    ])
+    const attachments = await service.listForMessages([41, 42])
+    expect(attachments.has(42)).toBe(false)
+    expect(attachments.get(41)).toEqual([expect.objectContaining({ id: 'user-image' })])
+  })
+
+  it('读图预览与回复一起绑定，转述失败也保留用户可浏览的图片', async () => {
+    const { service, repo } = createService()
+    repo.findById.mockResolvedValue({
+      id: 'preview-1',
+      threadId: 'thread-1',
+      messageId: null,
+      status: 'uploaded',
+      metadataJson: JSON.stringify({ resource: { agentId: 'pero', pairId: 'pair-1' } }),
+    })
+    await service.bindOutgoing('thread-1', 'pero', 'pair-1', 42, [
+      {
+        name: 'read_image',
+        isError: true,
+        result: JSON.stringify({
+          success: false,
+          error: '转述不可用',
+          imagePreview: {
+            id: 'preview-1',
+            kind: 'image',
+            name: '图片.png',
+            mimeType: 'image/png',
+            sizeBytes: 1024,
+          },
+        }),
+      },
+    ])
+    expect(repo.bind).toHaveBeenCalledWith(['preview-1'], 'thread-1', 42)
+  })
+
+  it('未配置解析来源时阻止 PDF 入库并提示缺少配置', async () => {
+    const { service, repo } = createService()
     const file = new File([new Uint8Array([1, 2, 3])], 'test.pdf', { type: 'application/pdf' })
     await expect(service.upload(file, 'thread-1')).rejects.toMatchObject({
-      code: 'UNSUPPORTED_MEDIA_TYPE',
-      httpStatus: 415,
+      code: 'NOT_CONFIGURED',
     })
+    expect(repo.create).not.toHaveBeenCalled()
   })
 
   it('允许 20MB 图片并拒绝超过 20MB 的图片', async () => {
@@ -65,7 +132,9 @@ describe('AttachmentService', () => {
 
   it('拒绝越界 storageKey', () => {
     const { service } = createService()
-    expect(() => service.resolveStoragePath('../secret')).toThrow('附件存储键非法')
+    expect(() => service.resolveStoragePath('../secret')).toThrow(
+      expect.objectContaining({ code: 'BAD_REQUEST' }),
+    )
   })
 
   it('绑定校验要求附件属于当前 Thread 且未绑定', async () => {
@@ -74,7 +143,7 @@ describe('AttachmentService', () => {
       { id: 'a', threadId: 'other', status: 'uploaded', messageId: null },
     ])
     await expect(service.validateForBinding(['a'], 'thread-1')).rejects.toThrow(
-      '附件必须属于当前 Thread 且尚未绑定',
+      expect.objectContaining({ code: 'BAD_REQUEST' }),
     )
   })
 })

@@ -10,7 +10,7 @@ Model Role: main
 
 AIOS 设计说明：
 - 原 output_constraint.md 作为 prompt_fragment 注入 200_abilities，导致能力槽位职责不清
-- 现独立为 9100_output_format 槽位，放在 900_user_persona 之后、9500_footer 之前
+- 现独立为 9100_output_format 槽位，靠近当前用户输入
 - 遵循"提示词近邻原则"：输出约束靠近用户输入位置，LLM 生成时能更好地遵循
 - 内容由 ContextCompiler 通过 output_format 变量注入（读取 components/output/output_constraint.md）
 -->

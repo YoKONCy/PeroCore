@@ -41,6 +41,7 @@ interface PendingCall {
   socket: WebSocket
   providerId: string
   idempotencyKey?: string
+  cleanup?: () => void
 }
 
 /** 将 Electron WebSocket Node 接入统一 NodeRegistry 与 CapabilityDirectory。 */
@@ -100,6 +101,12 @@ export class CapabilityBridge {
     this.leaseTimer = null
     for (const [id, call] of this.pending) {
       clearTimeout(call.timer)
+      call.cleanup?.()
+      this.send(call.socket, {
+        type: 'capability_cancel',
+        invocationId: id,
+        reason: 'transport_stopped',
+      })
       call.reject(new Error('CAPABILITY_TRANSPORT_STOPPED: 能力 Transport 已关闭'))
       this.pending.delete(id)
     }
@@ -232,6 +239,9 @@ export class CapabilityBridge {
         {
           ...offer,
           leaseExpiresAt: session.leaseExpiresAt,
+          ...(offer.placement
+            ? { placement: { ...offer.placement, leaseExpiresAt: session.leaseExpiresAt } }
+            : {}),
         },
         scope,
       )
@@ -258,8 +268,8 @@ export class CapabilityBridge {
       throw new Error(`NODE_OFFER_AUTHORITY_INVALID: ${offer.offerId}`)
     }
     scope.defer(
-      this.directory.registerRemoteProvider(offer, (envelope) =>
-        this.invokeRemote(socket, offer.offerId, envelope),
+      this.directory.registerRemoteProvider(offer, (envelope, signal) =>
+        this.invokeRemote(socket, offer.offerId, envelope, signal),
       ),
     )
   }
@@ -287,7 +297,9 @@ export class CapabilityBridge {
     socket: WebSocket,
     providerId: string,
     envelope: KernelEnvelope<{ operation: string; input: unknown }>,
+    signal?: AbortSignal,
   ): Promise<unknown> {
+    signal?.throwIfAborted()
     if (socket.readyState !== WebSocket.OPEN) {
       throw new Error('CAPABILITY_PROVIDER_UNAVAILABLE: Node连接已断开')
     }
@@ -307,6 +319,15 @@ export class CapabilityBridge {
       }
     }
     return new Promise((resolve, reject) => {
+      const onAbort = () => {
+        const call = this.pending.get(invocationId)
+        if (!call) return
+        clearTimeout(call.timer)
+        call.cleanup?.()
+        this.pending.delete(invocationId)
+        this.send(socket, { type: 'capability_cancel', invocationId, reason: 'caller_cancelled' })
+        reject(new Error('DESKTOP_CANCELLED: 调用方已取消操作'))
+      }
       const defaultTimeout =
         envelope.operation === 'audio.output/play' || envelope.operation === 'system.shell/wait'
           ? 5 * 60_000
@@ -315,6 +336,7 @@ export class CapabilityBridge {
         ? Math.min(defaultTimeout, deadlineAt - Date.now())
         : defaultTimeout
       const timer = setTimeout(() => {
+        this.pending.get(invocationId)?.cleanup?.()
         this.pending.delete(invocationId)
         this.send(socket, {
           type: 'capability_cancel',
@@ -331,7 +353,13 @@ export class CapabilityBridge {
         socket,
         providerId,
         idempotencyKey,
+        cleanup: () => signal?.removeEventListener('abort', onAbort),
       })
+      signal?.addEventListener('abort', onAbort, { once: true })
+      if (signal?.aborted) {
+        onAbort()
+        return
+      }
       validateKernelEnvelope(envelope)
       this.send(socket, { type: 'capability_invoke', invocationId, providerId, envelope })
     })
@@ -351,6 +379,7 @@ export class CapabilityBridge {
       return
     }
     clearTimeout(call.timer)
+    call.cleanup?.()
     this.pending.delete(message.invocationId)
     if (message.success) {
       if (call.idempotencyKey) {
@@ -378,6 +407,7 @@ export class CapabilityBridge {
     for (const [invocationId, call] of this.pending) {
       if (call.socket !== socket) continue
       clearTimeout(call.timer)
+      call.cleanup?.()
       call.reject(new Error('CAPABILITY_PROVIDER_DISCONNECTED: Provider 连接已断开'))
       this.pending.delete(invocationId)
     }

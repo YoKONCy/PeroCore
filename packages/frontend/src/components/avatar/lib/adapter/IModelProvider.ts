@@ -67,4 +67,7 @@ export interface IModelProvider {
 
   /** 获取动画控制器数据映射（可选） */
   getAnimationControllers?(): Promise<Map<string, unknown>>
+
+  /** 释放纹理缓存，取消已卸载模型的迟到资源。 */
+  dispose?(): void
 }

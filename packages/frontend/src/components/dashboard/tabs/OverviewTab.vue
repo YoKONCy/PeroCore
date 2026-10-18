@@ -10,6 +10,8 @@
  * 5. 最近对话时间线
  */
 import { ref, computed, onMounted, watch } from 'vue'
+import WeatherCard from '../../weather/WeatherCard.vue'
+import TokenUsageCard from '../../usage/TokenUsageCard.vue'
 import { useDashboardContext } from '../../../composables/dashboard'
 import { PixelIcon, PCard, PButton, PSwitch, PSlider } from '../../pixel'
 import { systemApi } from '../../../api/modules/systemApi'
@@ -68,7 +70,7 @@ function selectAgent(id: string) {
 // 三状态唯一由 PetStateStore 管理；总览与 Pet3DView 读取同一响应式数据。
 const petState = computed(() => petStateStore.stateFor(agentStore.activeAgentId))
 
-/** 从 pet_states 表刷新当前角色的权威状态快照。 */
+/** 刷新当前所选会话的角色状态投影。 */
 async function loadPetState() {
   await petStateStore.load(agentStore.activeAgentId)
 }
@@ -79,12 +81,7 @@ onOverviewPush('state_update', (payload) => {
   const updateAgentId = payload.agentId
   const currentId = activeAgent.value?.id ?? ctx.activeAgentId.value
   if (typeof updateAgentId === 'string' && currentId && updateAgentId !== currentId) return
-  petStateStore.apply(currentId, {
-    mood: typeof payload.mood === 'string' ? payload.mood : undefined,
-    vibe: typeof payload.vibe === 'string' ? payload.vibe : undefined,
-    mind: typeof payload.mind === 'string' ? payload.mind : undefined,
-  })
-  void petStateStore.load(currentId)
+  petStateStore.applyPush(payload)
 })
 
 // ══════ 陪伴模式 ══════
@@ -135,7 +132,6 @@ const activeMemoryTab = ref<MemoryChannel>('desktop')
 const isSavingMemoryConfig = ref(false)
 
 const memoryConfig = ref<MemoryRuntimeConfig>({
-  workContextExpirationPairs: 5,
   channels: {
     desktop: { contextPairs: 20, enableAutoRag: true, retrievalLimit: 8 },
     group: { contextPairs: 20, enableAutoRag: true, retrievalLimit: 3 },
@@ -153,6 +149,13 @@ const memoryConfig = ref<MemoryRuntimeConfig>({
   },
 })
 const showAdvancedMemoryConfig = ref(false)
+
+watch(
+  () => memoryConfig.value.advanced.enableContextRnn,
+  (enabled) => {
+    if (!enabled) memoryConfig.value.advanced.enableFeedback = false
+  },
+)
 
 watch(
   () => memoryConfig.value.advanced.enableSaPpr,
@@ -305,6 +308,10 @@ onMounted(loadOverview)
     </div>
 
     <template v-else>
+      <div class="overview-utilities">
+        <WeatherCard />
+        <TokenUsageCard />
+      </div>
       <!-- ═══ 统计卡片 (3 列彩色) ═══ -->
       <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
         <!-- 核心记忆 -->
@@ -713,30 +720,6 @@ onMounted(loadOverview)
           </div>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <div
-              class="memory-config-block p-6 pixel-border-sky transition-all duration-300 group/mconfig hover:pixel-border-pink"
-            >
-              <div class="flex justify-between items-center mb-4">
-                <label class="text-base font-bold text-slate-700 flex items-center gap-2">
-                  <span
-                    class="w-2 h-2 rounded-full bg-violet-500 group-hover/mconfig:animate-pulse"
-                  ></span>
-                  工作上下文保留轮次
-                </label>
-                <span
-                  class="px-2 py-0.5 bg-violet-100 text-violet-600 text-xs font-mono font-bold border border-violet-200"
-                >
-                  {{ memoryConfig.workContextExpirationPairs }} 轮
-                </span>
-              </div>
-              <PSlider v-model="memoryConfig.workContextExpirationPairs" :min="1" :max="50" />
-              <div class="memory-config-note mt-4 text-xs font-medium flex items-start gap-2 p-3">
-                <PixelIcon name="thought" size="sm" />
-                <p class="leading-relaxed">
-                  角色最后一次整理工作上下文后，最多继续保留多少轮完整对话；默认为 5 轮。
-                </p>
-              </div>
-            </div>
             <!-- 短期记忆上下文 -->
             <div
               class="memory-config-block p-6 pixel-border-sky transition-all duration-300 group/mconfig hover:pixel-border-pink"
@@ -917,10 +900,13 @@ onMounted(loadOverview)
                   <span>
                     <b class="block text-sm text-slate-700">反馈闭环</b>
                     <small class="text-[10px] text-slate-500">
-                      根据回答引用情况训练 ContextRNN。
+                      需先开启 ContextRNN，根据回答引用情况训练权重。
                     </small>
                   </span>
-                  <PSwitch v-model="memoryConfig.advanced.enableFeedback" />
+                  <PSwitch
+                    v-model="memoryConfig.advanced.enableFeedback"
+                    :disabled="!memoryConfig.advanced.enableContextRnn"
+                  />
                 </label>
               </div>
             </div>
@@ -1034,75 +1020,3 @@ onMounted(loadOverview)
     </template>
   </div>
 </template>
-
-<style scoped>
-/* 页面语义色统一承接亮暗主题，保留语义色作为强调。 */
-.overview-tab {
-  color: var(--ui-text-primary);
-}
-.overview-tab :is(.text-slate-800, .text-slate-700, .text-slate-600) {
-  color: var(--ui-text-primary);
-}
-.overview-tab :is(.text-slate-500, .text-slate-400) {
-  color: var(--ui-text-secondary);
-}
-.overview-stat {
-  border-left: 4px solid var(--stat-accent);
-  background: var(--dash-panel-bg);
-}
-.overview-stat--purple {
-  --stat-accent: var(--ui-accent-purple);
-}
-.overview-stat--sky {
-  --stat-accent: var(--ui-accent-sky);
-}
-.overview-stat--orange {
-  --stat-accent: var(--ui-warning);
-}
-.agent-trigger,
-.status-card,
-.memory-config-block {
-  background: var(--dash-panel-soft);
-  color: var(--ui-text-primary);
-}
-.agent-trigger:hover,
-.status-card:hover {
-  background: var(--ui-bg-hover);
-}
-.status-card:hover .status-progress {
-  box-shadow: var(--ui-glow-sky);
-}
-.agent-dropdown {
-  border: 1px solid var(--dash-panel-border);
-  background: var(--dash-panel-elevated);
-  box-shadow: var(--ui-shadow-lg);
-}
-.memory-config-note {
-  border: 1px solid var(--ui-border-subtle);
-  background: var(--ui-bg-hover);
-  color: var(--ui-text-secondary);
-}
-.story-copy {
-  color: var(--ui-text-secondary);
-}
-.story-input {
-  border-color: var(--dash-input-border);
-  background: var(--dash-input-bg);
-  color: var(--ui-text-primary);
-}
-.story-input:focus {
-  border-color: var(--ui-accent-sky);
-}
-.story-input::placeholder {
-  color: var(--ui-text-disabled);
-}
-
-/* 像素风滚动条 */
-.custom-scrollbar::-webkit-scrollbar {
-  width: 4px;
-}
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: var(--ui-scrollbar-thumb);
-  border-radius: 0;
-}
-</style>

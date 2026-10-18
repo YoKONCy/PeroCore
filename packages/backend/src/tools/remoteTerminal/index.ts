@@ -5,6 +5,13 @@ import type {
   RemoteShellOperation,
 } from '../../capabilities/remoteShellCapabilityRuntime'
 import { toolSuccess } from '../../services/execution/toolResult'
+import {
+  createCancellationScope,
+  trackCancellationCleanup,
+} from '../../services/execution/cancellation'
+import { createLogger } from '../../lib/logger'
+
+const logger = createLogger('RemoteTerminal')
 
 let runtime: RemoteShellCapabilityRuntime | null = null
 
@@ -29,7 +36,42 @@ function operationTool(name: string, operation: RemoteShellOperation): BuiltinTo
         processId: ctx.processId,
         deadline: ctx.deadline,
       }
-      const result = await runtime.invoke(nodeId, operation, input, context)
+      const result = await runtime.invoke(nodeId, operation, input, context, ctx.signal)
+      // create 已返回时，RPC 本身的取消监听已释放；资源仍需跟随父任务回收。
+      if (operation === 'create' && ctx.signal) {
+        const ownerRuntime = runtime
+        const ownerSignal = ctx.signal
+        const terminalId = (result as { terminalId?: string })?.terminalId
+        if (terminalId) {
+          const close = () => {
+            const cleanupScope = createCancellationScope({ timeoutMs: 3_000 })
+            const cleanup = ownerRuntime
+              .invoke(
+                nodeId,
+                'close',
+                { terminalId },
+                {
+                  ...context,
+                  correlationId: `${context.correlationId}:cleanup`,
+                  deadline: new Date(Date.now() + 3_000).toISOString(),
+                },
+                cleanupScope.signal,
+              )
+              .then(() => undefined)
+              .finally(() => cleanupScope.dispose())
+            trackCancellationCleanup(ownerSignal, cleanup)
+            void cleanup.catch((error) =>
+              logger.warn(`远程终端回收未确认: ${terminalId}，${String(error)}`),
+            )
+          }
+          ownerSignal.addEventListener('abort', close, { once: true })
+          if (ownerSignal.aborted) {
+            ownerSignal.removeEventListener('abort', close)
+            close()
+            ownerSignal.throwIfAborted()
+          }
+        }
+      }
       return toolSuccess(JSON.stringify(result), { nodeId })
     },
   }

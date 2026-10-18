@@ -1,246 +1,306 @@
-/**
- * Scheduler Service — 用户提醒 / 定时任务业务服务
- *
- * 管理用户通过对话创建的提醒事项、定时话题和预设反应：
- * - CRUD 操作 (增删查)
- * - 到期检测（被 KernelScheduler 周期计划调用）
- * - 到期后通过 GatewayHub 广播通知前端
- *
- * 的核心能力，
- * 去除 APScheduler 依赖。
- *
- * 三层架构：Service 层 — 负责业务逻辑编排，禁止直接构造 HTTP 响应。
- *
- * @see 三层架构
- * @module packages/backend/src/services/scheduler/schedulerService
- */
-
-import { eq, and, lte } from 'drizzle-orm'
-import { scheduledTasks } from '../../database/schema'
+import { randomUUID } from 'node:crypto'
 import type { DrizzleDb } from '../../database'
 import type { GatewayHub } from '../gateway/gatewayHub'
+import { createEnvelope } from '../gateway/types'
+import {
+  ProactiveWorkRepository,
+  type ScheduledWorkRow,
+} from '../../repositories/proactiveWork.repo'
+import type { BackgroundTaskInfo, DispatchTaskInput } from '../task/backgroundTaskService'
+import { AppError } from '../../lib/appError'
 import { createLogger } from '../../lib/logger'
+import type { TaskPlanService } from '../task/taskPlanService'
 
 const logger = createLogger('SchedulerService')
-
-// ── 类型 ──
-
-/** 提醒任务类型 */
-export type ScheduledTaskType = 'reminder' | 'topic' | 'reaction' | 'agent_task'
-
-/** 创建提醒参数 */
+export type ScheduledTaskType = 'reminder' | 'topic' | 'reaction' | 'agent_task' | 'follow_up'
 export interface CreateReminderParams {
-  /** 触发时间 (ISO 格式) */
   time: string
-  /** 提醒内容 */
   content: string
-  /** 任务类型: reminder (一次性提醒) | topic (话题) | reaction (预设反应) */
   type?: ScheduledTaskType
-  /** Agent ID */
   agentId?: string
+  threadId?: string
+  reason?: string
+  sourceExecutionId?: string
+  planId?: string
+  planStepId?: string
 }
+export type ReminderDto = ScheduledWorkRow & { type: ScheduledTaskType }
 
-/** 提醒 DTO (返回给前端/Agent) */
-export interface ReminderDto {
-  id: number
-  type: ScheduledTaskType
-  time: string
-  content: string
-  isTriggered: boolean
-  agentId: string
-  createdAt: string | null
-}
-
-/** 到期触发结果 */
-export interface TriggerResult {
-  /** 提醒类型 */
-  type: ScheduledTaskType
-  /** 触发的任务列表 */
-  tasks: ReminderDto[]
-  /** 为 Agent 生成的指令 */
-  instruction: string
-}
-
-// ── Service ──
-
+/** 计划和建议的业务编排；实际工作仍由统一后台任务与 KernelScheduler 执行。 */
 export class SchedulerService {
+  private repo: ProactiveWorkRepository
+  private dispatchTask?: (input: DispatchTaskInput) => Promise<BackgroundTaskInfo>
+
   constructor(
-    private db: DrizzleDb,
+    db: DrizzleDb,
     private gatewayHub: GatewayHub,
-    /** Agent 管理器（可选注入，用于按 agentId 读取该角色的称呼） */
     private agentManager?: { getOwnerAppellation(agentId: string): string },
+    private validateThread?: (agentId: string, threadId: string) => Promise<void>,
+    private plans?: TaskPlanService,
   ) {
-    logger.info('初始化完成')
+    this.repo = new ProactiveWorkRepository(db)
   }
 
-  /**
-   * 创建提醒/话题/反应
-   */
+  setTaskDispatcher(dispatch: (input: DispatchTaskInput) => Promise<BackgroundTaskInfo>): void {
+    this.dispatchTask = dispatch
+  }
+
+  private async changed(agentId: string): Promise<void> {
+    // 推送仅使投影失效；连接异常不能回滚已经提交的业务记录。
+    try {
+      await this.gatewayHub.broadcast(
+        createEnvelope('push', { action: 'proactive_work_changed', agentId }),
+      )
+    } catch (error) {
+      logger.warn(`工作状态刷新通知失败: ${error}`)
+    }
+  }
+
   async create(params: CreateReminderParams): Promise<ReminderDto> {
+    if (
+      (params.planId || params.planStepId) &&
+      !['follow_up', 'agent_task'].includes(params.type ?? 'reminder')
+    )
+      throw new AppError('INVALID_PARAMETER', { message: '只有跟进与定时任务可以关联行动步骤' })
+    const create = () => this.createReminder(params)
+    return this.plans
+      ? this.plans.withLink(
+          params.agentId ?? 'pero',
+          params.planId,
+          params.planStepId,
+          params.threadId,
+          create,
+        )
+      : create()
+  }
+
+  private async createReminder(params: CreateReminderParams): Promise<ReminderDto> {
     const type = params.type ?? 'reminder'
     const agentId = params.agentId ?? 'pero'
-
-    const rows = await this.db
-      .insert(scheduledTasks)
-      .values({
-        type,
-        time: params.time,
-        content: params.content,
-        agentId,
-        isTriggered: false,
+    const time = Date.parse(params.time)
+    const content = params.content?.trim()
+    if (
+      !['reminder', 'topic', 'reaction', 'agent_task', 'follow_up'].includes(type) ||
+      !Number.isFinite(time) ||
+      time <= Date.now() ||
+      !content ||
+      content.length > 4000
+    ) {
+      throw new AppError('INVALID_PARAMETER', {
+        message: '请提供有效的未来时间、类型和内容（最多 4000 字）',
       })
-      .returning()
-
-    const row = rows[0]!
-    logger.info(`提醒已创建: [${type}] "${params.content}" → ${params.time}`)
-
-    // 通过 Gateway 通知前端刷新提醒列表
-    await this.gatewayHub.pushNotification({
-      title: '提醒已设置',
-      body: params.content,
-    })
-
+    }
+    if (
+      type === 'follow_up' &&
+      (time < Date.now() + 60_000 ||
+        time > Date.now() + 7 * 86_400_000 ||
+        !params.threadId ||
+        !params.reason?.trim() ||
+        params.reason.length > 500)
+    ) {
+      throw new AppError('INVALID_PARAMETER', {
+        message: '跟进需要来源对话和原因，时间须在一分钟至七天内',
+      })
+    }
+    if (params.threadId) await this.validateThread?.(agentId, params.threadId)
+    let row: ScheduledWorkRow
+    try {
+      row = this.repo.createSchedule(
+        {
+          type,
+          agentId,
+          time: new Date(time).toISOString(),
+          content,
+          threadId: params.threadId,
+          reason: params.reason?.trim(),
+          sourceExecutionId: params.sourceExecutionId,
+          planId: params.planId,
+          planStepId: params.planStepId,
+          createdAt: new Date().toISOString(),
+        },
+        type === 'follow_up',
+      )
+    } catch (error) {
+      throw new AppError('INVALID_PARAMETER', {
+        message: error instanceof Error ? error.message : '创建计划失败',
+      })
+    }
+    await this.changed(agentId)
     return this.toDto(row)
   }
 
-  /**
-   * 获取待触发的提醒列表
-   */
-  async listPending(agentId = 'pero'): Promise<ReminderDto[]> {
-    const rows = await this.db
-      .select()
-      .from(scheduledTasks)
-      .where(and(eq(scheduledTasks.agentId, agentId), eq(scheduledTasks.isTriggered, false)))
-      .all()
-
-    return rows.map((r) => this.toDto(r))
+  async listPending(agentId?: string): Promise<ReminderDto[]> {
+    return this.repo.schedules(agentId).map((row) => this.toDto(row))
   }
 
-  /**
-   * 取消提醒 (标记为已触发)
-   */
-  async cancel(id: number): Promise<boolean> {
-    const result = await this.db
-      .update(scheduledTasks)
-      .set({ isTriggered: true })
-      .where(eq(scheduledTasks.id, id))
-      .returning()
-
-    if (result.length === 0) {
-      return false
-    }
-
-    logger.info(`提醒已取消: #${id}`)
-    return true
+  async cancel(id: number, agentId: string): Promise<boolean> {
+    const result = this.repo.cancel(id, agentId)
+    if (result) await this.changed(agentId)
+    return result
   }
 
-  /**
-   * 检查到期任务并生成触发指令
-   *
-   * 由 KernelScheduler 的周期计划调用。
-   * 返回到期任务的 Agent 指令列表 (由调用方决定如何执行)。
-   */
-  async checkDueTasks(agentId = 'pero'): Promise<TriggerResult[]> {
-    const now = new Date().toISOString()
-    const results: TriggerResult[] = []
+  async retry(id: number, agentId: string): Promise<boolean> {
+    const result = this.repo.retry(id, agentId)
+    if (result) await this.changed(agentId)
+    return result
+  }
 
-    // 读取该 Agent 的角色级称呼（来自 agent.json，未配置时兜底"主人"）
-    const ownerAppellation = this.agentManager?.getOwnerAppellation(agentId) ?? '主人'
-
-    // 查询所有未触发且已到期的任务
-    const dueTasks = await this.db
-      .select()
-      .from(scheduledTasks)
-      .where(
-        and(
-          eq(scheduledTasks.agentId, agentId),
-          eq(scheduledTasks.isTriggered, false),
-          lte(scheduledTasks.time, now),
-        ),
-      )
-      .all()
-
-    if (dueTasks.length === 0) return results
-
-    // 按类型分组处理
-    const byType = new Map<string, typeof dueTasks>()
-    for (const task of dueTasks) {
-      const list = byType.get(task.type) ?? []
-      list.push(task)
-      byType.set(task.type, list)
-    }
-
-    // ── 提醒 (逐个触发) ──
-    const reminders = byType.get('reminder') ?? []
-    for (const task of reminders) {
-      await this.markTriggered(task.id)
-      results.push({
-        type: 'reminder',
-        tasks: [this.toDto(task)],
-        instruction: `【管理系统提醒：你与${ownerAppellation}的约定时间已到，请主动提醒${ownerAppellation}。约定内容：${task.content}】`,
-      })
-      logger.info(`提醒触发: "${task.content}"`)
-    }
-
-    // ── 话题 (合并触发) ──
-    const topics = byType.get('topic') ?? []
-    if (topics.length > 0) {
-      for (const task of topics) {
-        await this.markTriggered(task.id)
+  /** 领取不是完成；派发成功后结算，失败退避重试，崩溃后租约到期重新领取。 */
+  async dispatchDueTasks(): Promise<void> {
+    if (!this.dispatchTask) return
+    for (const row of this.repo.claimDue(new Date().toISOString())) {
+      try {
+        if (row.threadId) await this.validateThread?.(row.agentId, row.threadId)
+        let taskId: string | undefined
+        if (row.type === 'agent_task' || row.type === 'follow_up') {
+          const task = await this.dispatchTask({
+            agentId: row.agentId,
+            instruction:
+              row.type === 'follow_up'
+                ? `【到期跟进】\n原因：${row.reason}\n来源对话：${row.threadId}\n需要检查：${row.content}\n请重新读取现状；如需修改、发送或执行命令，请提出行动建议等待用户采纳。`
+                : row.content,
+            title:
+              `${row.type === 'follow_up' ? '跟进' : '定时任务'}：${row.reason || row.content}`.slice(
+                0,
+                100,
+              ),
+            requestedBy: 'scheduler',
+            idempotencyKey: `schedule:${row.id}`,
+            metadata: {
+              trigger: row.type,
+              scheduleId: row.id,
+              ...(row.planId ? { planId: row.planId, planStepId: row.planStepId } : {}),
+              originThreadId: row.threadId,
+              sourceExecutionId: row.sourceExecutionId,
+              reason: row.reason,
+              ...(row.type === 'follow_up' ? { capabilityScope: 'follow_up' } : {}),
+            },
+          })
+          taskId = task.id
+        } else {
+          const owner = this.agentManager?.getOwnerAppellation(row.agentId) ?? '主人'
+          await this.gatewayHub.pushNotification({
+            title: `${owner}，${row.type === 'reminder' ? '提醒' : row.type === 'topic' ? '话题' : '约定'}到时间啦`,
+            body: row.content,
+            principalId: row.agentId,
+            important: true,
+            notificationId: `schedule:${row.id}`,
+          })
+        }
+        this.repo.settle(row, taskId)
+      } catch (error) {
+        this.repo.settle(row, undefined, error instanceof Error ? error.message : String(error))
+        logger.warn(`计划派发失败，已保存重试状态: #${row.id}, ${error}`)
       }
-      const topicList = topics.map((t) => `- ${t.content}`).join('\n')
-      results.push({
-        type: 'topic',
-        tasks: topics.map((t) => this.toDto(t)),
-        instruction: `【管理系统提醒：以下是你之前想找${ownerAppellation}聊的话题（已汇总）：\n${topicList}\n\n请将这些话题自然地融合在一起，作为一次主动的聊天开场。】`,
-      })
-      logger.info(`话题触发: ${topics.length} 项`)
+      await this.changed(row.agentId)
     }
-
-    // ── 反应 (逐个触发) ──
-    const reactions = byType.get('reaction') ?? []
-    for (const task of reactions) {
-      await this.markTriggered(task.id)
-      results.push({
-        type: 'reaction',
-        tasks: [this.toDto(task)],
-        instruction: `【管理系统提醒：你之前决定：'${task.content}'。现在触发时间已到，请立刻执行该行为。】`,
-      })
-      logger.info(`反应触发: "${task.content}"`)
+    // 采纳已持久化后即使进程中断，下次扫描仍会完成唯一任务的派发。
+    for (const suggestion of this.repo.suggestions(undefined, 'accepting')) {
+      try {
+        await this.acceptSuggestion(suggestion.id, suggestion.agentId)
+      } catch (error) {
+        logger.warn(`采纳建议派发失败，稍后重试: ${suggestion.id}, ${error}`)
+      }
     }
-
-    // ── 定时 Agent 任务（逐个显式派发） ──
-    const agentTasks = byType.get('agent_task') ?? []
-    for (const task of agentTasks) {
-      await this.markTriggered(task.id)
-      results.push({
-        type: 'agent_task',
-        tasks: [this.toDto(task)],
-        instruction: task.content,
-      })
-      logger.info(`定时 Agent 任务到期: agent=${task.agentId}, "${task.content}"`)
-    }
-
-    return results
   }
 
-  // ── 内部方法 ──
-
-  /** 标记任务已触发 */
-  private async markTriggered(id: number): Promise<void> {
-    await this.db.update(scheduledTasks).set({ isTriggered: true }).where(eq(scheduledTasks.id, id))
+  async suggest(input: {
+    agentId: string
+    threadId: string
+    title: string
+    instruction: string
+    reason: string
+    sourceExecutionId?: string
+  }) {
+    if (
+      !input.title?.trim() ||
+      input.title.length > 160 ||
+      !input.instruction?.trim() ||
+      input.instruction.length > 4000 ||
+      !input.reason?.trim() ||
+      input.reason.length > 1000
+    ) {
+      throw new AppError('INVALID_PARAMETER', {
+        message: '建议需要标题、行动内容和依据，并符合长度限制',
+      })
+    }
+    await this.validateThread?.(input.agentId, input.threadId)
+    let row
+    try {
+      row = this.repo.createSuggestion({
+        ...input,
+        title: input.title.trim(),
+        instruction: input.instruction.trim(),
+        reason: input.reason.trim(),
+        id: randomUUID(),
+        createdAt: new Date().toISOString(),
+      })
+    } catch (error) {
+      throw new AppError('INVALID_PARAMETER', {
+        message: error instanceof Error ? error.message : '保存建议失败',
+      })
+    }
+    await this.changed(input.agentId)
+    return row
   }
 
-  /** 数据库行 → DTO */
-  private toDto(row: typeof scheduledTasks.$inferSelect): ReminderDto {
-    return {
-      id: row.id,
-      type: row.type as ScheduledTaskType,
-      time: row.time,
-      content: row.content,
-      isTriggered: row.isTriggered ?? false,
-      agentId: row.agentId,
-      createdAt: row.createdAt ?? null,
+  async listSuggestions(agentId: string) {
+    return this.repo.suggestions(agentId)
+  }
+
+  async dismissSuggestion(id: string, agentId: string) {
+    const row = this.repo.transitionSuggestion(id, agentId, ['open'], 'dismissed')
+    if (!row) throw new AppError('INVALID_PARAMETER', { message: '建议不存在或已经处理' })
+    await this.changed(agentId)
+    return row
+  }
+
+  async acceptSuggestion(id: string, agentId: string) {
+    let row = this.repo.suggestion(id, agentId)
+    if (!row || row.status === 'dismissed')
+      throw new AppError('NOT_FOUND', { message: '建议不存在或已忽略' })
+    if (row.status === 'accepted') return row
+    if (!this.dispatchTask)
+      throw new AppError('SERVICE_UNAVAILABLE', { message: '任务服务尚未准备好' })
+    try {
+      await this.validateThread?.(agentId, row.threadId)
+    } catch (error) {
+      this.repo.transitionSuggestion(id, agentId, ['accepting'], 'open')
+      await this.changed(agentId)
+      throw error
     }
+    row = this.repo.transitionSuggestion(id, agentId, ['open', 'accepting'], 'accepting')
+    if (!row) throw new AppError('INVALID_PARAMETER', { message: '建议状态已变化，请刷新' })
+    let task: BackgroundTaskInfo
+    try {
+      task = await this.dispatchTask({
+        agentId,
+        instruction: row.instruction,
+        title: row.title,
+        requestedBy: 'user',
+        idempotencyKey: `suggestion:${id}`,
+        metadata: {
+          trigger: 'accepted_suggestion',
+          suggestionId: id,
+          originThreadId: row.threadId,
+          sourceExecutionId: row.sourceExecutionId,
+          reason: row.reason,
+        },
+      })
+    } catch (error) {
+      this.repo.transitionSuggestion(id, agentId, ['accepting'], 'open')
+      await this.changed(agentId)
+      if (error instanceof AppError) throw error
+      throw new AppError('SERVICE_UNAVAILABLE', { message: '任务暂时无法派发，请稍后重试' })
+    }
+    const accepted =
+      this.repo.transitionSuggestion(id, agentId, ['accepting'], 'accepted', task.id) ??
+      this.repo.suggestion(id, agentId)!
+    await this.changed(agentId)
+    return accepted
+  }
+
+  private toDto(row: ScheduledWorkRow): ReminderDto {
+    return { ...row, type: row.type as ScheduledTaskType }
   }
 }

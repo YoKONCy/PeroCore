@@ -108,6 +108,8 @@ export interface ApplicationDiscoveryRecord {
   generation: number
   carrier: 'websocket'
   endpoint: string
+  /** 子应用可选的本机认证控制面；不包含任何凭据。 */
+  httpEndpoint?: string
   startedAt: string
 }
 

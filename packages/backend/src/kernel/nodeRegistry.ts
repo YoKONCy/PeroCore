@@ -95,12 +95,25 @@ export class NodeRegistry {
     leaseMs: number
     windowId?: string
   }): KernelInputSeat {
+    this.expireLeases()
     const session = this.assertActiveSession(input.sessionId)
     const node = this.nodes.get(session.nodeId)!
     if (!node.facets.includes('client')) {
       throw new Error('INPUT_SEAT_CLIENT_REQUIRED: 只有 Client Facet 可以持有 Input Seat')
     }
     const now = Date.now()
+    const windowId = input.windowId?.trim() || `${session.nodeId}:main`
+    const capabilities = [...new Set(input.capabilities)]
+    // 同一窗口的聚焦恢复与点击可能并发获取，复用租约避免彼此撤销凭证。
+    const current = [...this.seats.values()].find(
+      (seat) =>
+        seat.principalId === input.principalId &&
+        seat.sessionId === input.sessionId &&
+        seat.windowId === windowId &&
+        seat.capabilities.length === capabilities.length &&
+        capabilities.every((capability) => seat.capabilities.includes(capability)),
+    )
+    if (current) return this.renewInputSeat(current.seatId, input.leaseMs)
     for (const existing of this.seats.values()) {
       if (existing.principalId === input.principalId) this.seats.delete(existing.seatId)
     }
@@ -111,13 +124,13 @@ export class NodeRegistry {
       nodeId: session.nodeId,
       principalId: input.principalId,
       sessionId: session.sessionId,
-      windowId: input.windowId?.trim() || `${session.nodeId}:main`,
+      windowId,
       epoch,
       issuedAt: new Date(now).toISOString(),
       leaseExpiresAt: new Date(
         Math.min(now + input.leaseMs, Date.parse(session.leaseExpiresAt)),
       ).toISOString(),
-      capabilities: Object.freeze([...new Set(input.capabilities)]),
+      capabilities: Object.freeze(capabilities),
     }
     this.seats.set(seat.seatId, seat)
     return structuredClone(seat)

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { ipcPayloadBytes, performanceEventsTotal, performanceLatencySeconds } from '../lib/metrics'
+import type { FileWritePreviewBaseline } from '@infos/shared'
 import type {
   SurfaceFrame,
   SurfaceId,
@@ -7,6 +8,8 @@ import type {
   SurfaceNodeId,
   ToolCallSurfaceProps,
   ToolResultSurfaceProps,
+  ModelRetrySurfaceProps,
+  LiveContextBudget,
 } from '@infos/shared'
 
 /** 单次 Conversation Execution 的实时 Surface 帧构造器。 */
@@ -22,6 +25,7 @@ export class ConversationSurfaceSession {
   private readonly toolArgumentPreviewLimit = 2048
   private readonly createdAt = performance.now()
   private firstFrameRecorded = false
+  private latestContextBudget?: LiveContextBudget
 
   constructor(
     readonly threadId: string,
@@ -40,12 +44,12 @@ export class ConversationSurfaceSession {
     })
   }
 
-  startThinking(blockId: string): SurfaceFrame {
+  startThinking(blockId: string, turn?: number): SurfaceFrame {
     const nodeId = `${this.surfaceId}:${blockId}` as SurfaceNodeId
     this.thinkingNodeIds.set(blockId, nodeId)
     return this.frame({
       type: 'surface.upsert-node',
-      node: this.node(nodeId, 'thinking', 'stable', { source: '', phase: 'preview' }),
+      node: this.node(nodeId, 'thinking', 'stable', { source: '', phase: 'preview', turn }),
     })
   }
 
@@ -65,7 +69,11 @@ export class ConversationSurfaceSession {
     })
   }
 
-  startNativeReasoning(blockId: string, mode: 'stream' | 'non_stream'): SurfaceFrame {
+  startNativeReasoning(
+    blockId: string,
+    mode: 'stream' | 'non_stream',
+    turn?: number,
+  ): SurfaceFrame {
     const nodeId = `${this.surfaceId}:${blockId}` as SurfaceNodeId
     this.reasoningNodeIds.set(blockId, nodeId)
     return this.frame({
@@ -74,6 +82,7 @@ export class ConversationSurfaceSession {
         source: '',
         phase: 'preview',
         mode,
+        turn,
       }),
     })
   }
@@ -90,7 +99,7 @@ export class ConversationSurfaceSession {
     return this.frame({
       type: 'surface.patch-node',
       nodeId,
-      patch: { durationMs },
+      patch: { phase: 'committed', durationMs },
     })
   }
 
@@ -109,8 +118,30 @@ export class ConversationSurfaceSession {
     return this.frame({ type: 'surface.append-text', nodeId, delta })
   }
 
+  completeNarration(blockId: string): SurfaceFrame {
+    const nodeId = this.markdownNodeIds.get(blockId)
+    if (!nodeId) throw new Error(`正文块尚未开始: ${blockId}`)
+    return this.frame({ type: 'surface.patch-node', nodeId, patch: { phase: 'committed' } })
+  }
+
+  contextBudget(budget: LiveContextBudget): SurfaceFrame {
+    this.latestContextBudget = budget
+    return this.frame({
+      type: 'surface.patch-node',
+      nodeId: `${this.surfaceId}:status` as SurfaceNodeId,
+      patch: { contextBudget: budget },
+    })
+  }
+
   status(
-    state: 'thinking' | 'calling' | 'generating' | 'tool_failed' | 'completed',
+    state:
+      | 'thinking'
+      | 'assembling'
+      | 'calling'
+      | 'generating'
+      | 'tool_failed'
+      | 'paused'
+      | 'completed',
     message?: string,
     telemetry?: Pick<
       import('@infos/shared').StatusSurfaceProps,
@@ -150,14 +181,22 @@ export class ConversationSurfaceSession {
     const nodeId = `${this.surfaceId}:tool:${draftId}` as SurfaceNodeId
     const current = this.toolDrafts.get(draftId)
     if (!current) throw new Error(`工具草稿尚未开始: ${draftId}`)
-    const nextArgs = current.args + (argumentsDelta ?? '')
-    const argsPreview = nextArgs.slice(0, this.toolArgumentPreviewLimit)
+    const name = current.name + (nameDelta ?? '')
+    const fileMutation = ['write_file', 'edit_file'].includes(name)
+    const delta = fileMutation
+      ? (argumentsDelta ?? '')
+      : (argumentsDelta ?? '').slice(
+          0,
+          Math.max(0, this.toolArgumentPreviewLimit - current.args.length),
+        )
+    const argsPreview = current.args + delta
     const props: ToolCallSurfaceProps = {
       ...current,
-      name: current.name + (nameDelta ?? ''),
+      name,
       args: argsPreview,
       argsPreview,
       receivedChars: receivedChars ?? current.receivedChars,
+      previewTruncated: fileMutation ? false : (receivedChars ?? 0) > this.toolArgumentPreviewLimit,
     }
     this.toolDrafts.set(draftId, props)
     const nameChanged = props.name !== current.name
@@ -166,9 +205,29 @@ export class ConversationSurfaceSession {
     const nextChars = props.receivedChars ?? previousChars
     const progressChanged = Math.floor(previousChars / 4096) !== Math.floor(nextChars / 4096)
     if (!nameChanged && !previewChanged && !progressChanged) return null
+    if (fileMutation) {
+      return this.frame({
+        type: 'surface.append-tool-arguments',
+        nodeId,
+        nameDelta,
+        argumentsDelta: delta || undefined,
+        receivedChars: props.receivedChars ?? 0,
+        previewTruncated: props.previewTruncated ?? false,
+      })
+    }
     return this.frame({
       type: 'surface.upsert-node',
       node: this.node<ToolCallSurfaceProps>(nodeId, 'tool-call', 'interactive', props),
+    })
+  }
+
+  fileBaseline(draftId: string, baseline: FileWritePreviewBaseline): SurfaceFrame {
+    const current = this.toolDrafts.get(draftId)
+    if (current) this.toolDrafts.set(draftId, { ...current, fileBaseline: baseline })
+    return this.frame({
+      type: 'surface.patch-node',
+      nodeId: `${this.surfaceId}:tool:${draftId}` as SurfaceNodeId,
+      patch: { fileBaseline: baseline },
     })
   }
 
@@ -187,7 +246,12 @@ export class ConversationSurfaceSession {
       }),
       callId: input.callId,
       name: input.name,
-      args: this.toolArgsPreview(input.args),
+      args: this.fileArgsOrPreview(
+        input.name,
+        input.args,
+        this.toolDrafts.get(input.draftId)?.args,
+      ),
+      previewTruncated: ['write_file', 'edit_file'].includes(input.name) ? false : undefined,
       state: 'calling',
     }
     this.toolDrafts.set(input.draftId, props)
@@ -204,13 +268,58 @@ export class ConversationSurfaceSession {
       node: this.node<ToolCallSurfaceProps>(nodeId, 'tool-call', 'interactive', {
         callId: input.callId,
         name: input.name,
-        args: this.toolArgsPreview(input.args),
+        args: this.fileArgsOrPreview(input.name, input.args),
         state: 'calling',
       }),
     })
   }
 
+  modelRetry(input: {
+    retry: import('@infos/shared').ModelRetryInfo
+    turn: number
+    abandonedDraftIds: string[]
+  }): SurfaceFrame[] {
+    const frames: SurfaceFrame[] = []
+    for (const draftId of input.abandonedDraftIds) {
+      const draft = this.toolDrafts.get(draftId)
+      if (!draft) continue
+      this.toolDrafts.delete(draftId)
+      frames.push(
+        this.frame({
+          type: 'surface.upsert-node',
+          node: this.node<ToolCallSurfaceProps>(
+            `${this.surfaceId}:tool:${draftId}` as SurfaceNodeId,
+            'tool-call',
+            'interactive',
+            { callId: draftId, name: draft.name, args: '{}', argsPreview: '', state: 'failed' },
+          ),
+        }),
+      )
+      frames.push(
+        ...this.toolResult({
+          callId: draftId,
+          result: '模型响应中断，此工具调用未执行，参数草稿已丢弃。',
+          isError: true,
+          durationMs: 0,
+        }),
+      )
+    }
+    frames.push(
+      this.frame({
+        type: 'surface.upsert-node',
+        node: this.node<ModelRetrySurfaceProps>(
+          `${this.surfaceId}:model-retry:${input.retry.retryId}` as SurfaceNodeId,
+          'model-retry',
+          'stable',
+          { ...input.retry, turn: input.turn },
+        ),
+      }),
+    )
+    return frames
+  }
+
   toolResult(input: {
+    automaticApproval?: import('@infos/shared').AutomaticApprovalRecord
     callId: string
     result: string
     isError: boolean
@@ -241,7 +350,16 @@ export class ConversationSurfaceSession {
     const committedSurface = telemetry
       ? {
           ...surface,
-          nodes: [...surface.nodes, this.statusNode('completed', '输出完成', telemetry)],
+          nodes: [
+            ...surface.nodes.filter((node) => node.kind !== 'status'),
+            this.statusNode(
+              message.executionPause ? 'paused' : 'completed',
+              message.executionPause
+                ? `桌面操作已暂停：${message.executionPause.message}`
+                : '输出完成',
+              telemetry,
+            ),
+          ],
         }
       : surface
     const committedSnapshot = telemetry
@@ -282,6 +400,12 @@ export class ConversationSurfaceSession {
     return JSON.stringify(preview).slice(0, this.toolArgumentPreviewLimit)
   }
 
+  private fileArgsOrPreview(name: string, args: unknown, draft?: string): string {
+    if (!['write_file', 'edit_file'].includes(name)) return this.toolArgsPreview(args)
+    const serialized = JSON.stringify(args ?? {})
+    return serialized === '{}' && draft ? draft : serialized
+  }
+
   private statusNode(
     state: import('@infos/shared').StatusSurfaceProps['state'],
     message?: string,
@@ -291,6 +415,7 @@ export class ConversationSurfaceSession {
     >,
   ): SurfaceNode {
     return this.node(`${this.surfaceId}:status` as SurfaceNodeId, 'status', 'transient', {
+      contextBudget: this.latestContextBudget,
       state,
       message,
       ...telemetry,

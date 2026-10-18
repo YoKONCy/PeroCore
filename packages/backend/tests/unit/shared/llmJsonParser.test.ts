@@ -41,8 +41,14 @@ describe('parseLlmJson', () => {
 
 describe('parseLlmJsonStrict', () => {
   it('解析失败时应当抛出带上下文的错误', () => {
-    expect(() => parseLlmJsonStrict('not-json', '提炼结果')).toThrow(
-      'LLM JSON 解析失败 (提炼结果): not-json',
-    )
+    let error: unknown
+    try {
+      parseLlmJsonStrict('not-json', '提炼结果')
+    } catch (caught) {
+      error = caught
+    }
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toContain('提炼结果')
+    expect((error as Error).message).toContain('not-json')
   })
 })

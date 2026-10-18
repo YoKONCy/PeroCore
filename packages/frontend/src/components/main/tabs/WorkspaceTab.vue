@@ -6,52 +6,109 @@ defineOptions({ name: 'WorkspaceTab' })
  * 使用统一的交互画布与一体化面板承载资源栏、编辑器、终端和 Agent 协作栏。
  * 所有文件与终端上下文始终绑定当前 Agent 的 workspace，不允许跨角色串用。
  */
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import {
+  ref,
+  inject,
+  computed,
+  watch,
+  nextTick,
+  onMounted,
+  onActivated,
+  onDeactivated,
+  onBeforeUnmount,
+} from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import { storeToRefs } from 'pinia'
-import { PixelIcon, PButton } from '../../pixel'
+import type { ApprovalSurfaceProps, WorkspaceFileDescriptor } from '@infos/shared'
+import { PixelIcon, PButton, PDialog } from '../../pixel'
 import { ChatContainer } from '../../chat'
 import HistoryExportDialog from '../../chat/HistoryExportDialog.vue'
 import ChatRichText from '../../chat/ChatRichText.vue'
 import { ApprovalCard } from '../../approval'
+import AgentStateHover from '../../agent/AgentStateHover.vue'
 import WorkspaceTree from '../../workspace/WorkspaceTree.vue'
 import WorkspaceTerminal from '../../workspace/WorkspaceTerminal.vue'
 import WorkspaceSessionDrawer from '../../workspace/WorkspaceSessionDrawer.vue'
+import WorkspaceFilePreview from '../../workspace/WorkspaceFilePreview.vue'
+import SurfaceTransition from '../../motion/SurfaceTransition.vue'
+import WorkspaceFileGlyph from '../../workspace/WorkspaceFileGlyph.vue'
+import { createPreviewState, type WorkspacePreviewState } from '../../workspace/workspacePreview'
 import {
   useAgentStore,
   useThreadStore,
   useApprovalStore,
+  useCompositorStore,
   useNotificationStore,
 } from '../../../stores'
-import { workspaceApi, type WorkspaceFileNode } from '../../../api/modules/approvalsApi'
+import {
+  workspaceApi,
+  type ApprovalDecision,
+  type WorkspaceFileNode,
+} from '../../../api/modules/approvalsApi'
 import { threadsApi } from '../../../api/modules/threadsApi'
 import { getApiBaseUrl, isElectronRuntime } from '../../../api/transport'
 import { invoke } from '../../../utils/ipcAdapter'
+import { resourceNavigation } from '../../../composables/resources/useResources'
 import {
   buildConversationMarkdown,
   downloadMarkdown,
   type HistoryExportOptions,
 } from '../../../utils/historyExport'
 
-interface OpenFile {
-  path: string
-  name: string
+interface OpenFile extends WorkspaceFileDescriptor {
   content: string
   hash: string
   dirty: boolean
   truncated: boolean
+  previewState: WorkspacePreviewState
+  previewRevision: number
 }
 
 const agentStore = useAgentStore()
 const threadStore = useThreadStore()
 const approvalStore = useApprovalStore()
+const compositor = useCompositorStore()
+const approvalErrors = ref<Record<string, string>>({})
 const notification = useNotificationStore()
 const { currentAgent } = storeToRefs(agentStore)
 
 const openFiles = ref<OpenFile[]>([])
+const pendingFile = ref<string | null>(null)
+const needsRefresh = new WeakSet<OpenFile>()
+const workspaceActive = ref(true)
+const desktopHomeVisible = inject(
+  'infos:main-surface-visible',
+  computed(() => true),
+)
+let fileFocusRevision = 0
+const discardDialog = ref<{ title: string; message: string; confirmText: string } | null>(null)
+let resolveDiscard: ((confirmed: boolean) => void) | undefined
+
+function settleDiscard(confirmed = false): void {
+  const resolve = resolveDiscard
+  resolveDiscard = undefined
+  discardDialog.value = null
+  resolve?.(confirmed)
+}
+
+/** 未保存内容的确认统一走应用内弹窗，关闭弹窗等同于继续编辑。 */
+function confirmDiscard(title: string, message: string, confirmText: string): Promise<boolean> {
+  settleDiscard()
+  discardDialog.value = { title, message, confirmText }
+  return new Promise((resolve) => {
+    resolveDiscard = resolve
+  })
+}
 const workspaceTreeRef = ref<InstanceType<typeof WorkspaceTree> | null>(null)
 const activePath = ref('')
 const activeTerminalId = ref('')
+const editorTextarea = ref<HTMLTextAreaElement | null>(null)
+const selectedSnippet = ref<{
+  path: string
+  text: string
+  startLine: number
+  endLine: number
+} | null>(null)
 const isExplorerCollapsed = ref(false)
 const isCopilotCollapsed = ref(false)
 const isTerminalCollapsed = ref(false)
@@ -103,10 +160,36 @@ const buffersByAgent = new Map<string, { files: OpenFile[]; activePath: string }
 const activeFile = computed(
   () => openFiles.value.find((file) => file.path === activePath.value) ?? null,
 )
-const threadId = computed(
-  () => threadStore.threadId || `workspace-${currentAgent.value?.id ?? 'pero'}`,
+const threadId = computed(() =>
+  threadStore.agentId === currentAgent.value?.id && threadStore.channel === 'desktop'
+    ? threadStore.threadId
+    : '',
 )
 const pendingApprovals = computed(() => approvalStore.forAgent(currentAgent.value?.id ?? ''))
+// 已投影的当前会话审批交给交互 Surface；其余请求及投影恢复前的请求由队列兜底。
+const queuedApprovals = computed(() => {
+  const projected = new Set(
+    [...compositor.surfaces.values()]
+      .filter(
+        (surface) =>
+          surface.scopeId === `conversation:${threadId.value}` &&
+          surface.state === 'open' &&
+          !surface.messageId,
+      )
+      .flatMap((surface) =>
+        surface.nodes
+          .filter((node) => node.kind === 'approval')
+          .map((node) => (node.props as ApprovalSurfaceProps).approvalId),
+      ),
+  )
+  return pendingApprovals.value.filter((request) => !projected.has(request.id))
+})
+watch(
+  () => pendingApprovals.value.map((request) => request.id),
+  (ids, previous = []) => {
+    if (ids.some((id) => !previous.includes(id))) expandApprovalQueue()
+  },
+)
 const agentInitial = computed(() => currentAgent.value?.name?.trim().charAt(0).toUpperCase() || '?')
 const agentAvatarUrl = computed(() => {
   const avatarUrl = currentAgent.value?.avatarUrl
@@ -118,7 +201,9 @@ const activeFileExtension = computed(() => {
   return extension?.toUpperCase() || 'TEXT'
 })
 
-const isMarkdownFile = computed(() => activeFileExtension.value === 'MD')
+const isMarkdownFile = computed(
+  () => activeFile.value?.kind === 'text' && activeFileExtension.value === 'MD',
+)
 const isMarkdownPreview = computed(() =>
   Boolean(activeFile.value && markdownPreviewPaths.value.has(activeFile.value.path)),
 )
@@ -133,11 +218,19 @@ function setMarkdownPreview(enabled: boolean): void {
 }
 
 async function ensureAgent(): Promise<void> {
-  if (!agentStore.agents.length) await agentStore.fetchAgents()
+  try {
+    if (!agentStore.agents.length) await agentStore.fetchAgents()
+    if (currentAgent.value && !threadId.value)
+      await threadStore.ensureLatestThread(currentAgent.value.id, 'desktop')
+  } catch (error) {
+    notification.toast(error instanceof Error ? error.message : '恢复工作区会话失败', {
+      type: 'error',
+    })
+  }
 }
 
 async function revealWorkspace(): Promise<void> {
-  if (!currentAgent.value) return
+  if (!currentAgent.value || !threadId.value) return
   try {
     const session = { agentId: currentAgent.value.id, threadId: threadId.value }
     // Electron 必须由主进程在当前桌面会话中调用 shell.openPath；Daemon 可能运行在独立服务会话中。
@@ -155,11 +248,21 @@ async function revealWorkspace(): Promise<void> {
   }
 }
 
-async function openFile(node: WorkspaceFileNode, forceReload = false): Promise<void> {
-  if (!currentAgent.value || node.type !== 'file') return
+async function openFile(
+  node: WorkspaceFileNode,
+  forceReload = false,
+  activate = true,
+): Promise<void> {
+  if (!currentAgent.value || !threadId.value || node.type !== 'file') return
+  const focusRevision = activate ? ++fileFocusRevision : fileFocusRevision
+  if (activate) pendingFile.value = null
+  const focus = () => {
+    if (activate && focusRevision === fileFocusRevision) activePath.value = node.path
+  }
   const existing = openFiles.value.find((file) => file.path === node.path)
+  forceReload ||= !!existing && !existing.dirty && needsRefresh.has(existing)
   if (existing && !forceReload) {
-    activePath.value = node.path
+    focus()
     return
   }
   if (existing?.dirty && forceReload) {
@@ -168,36 +271,169 @@ async function openFile(node: WorkspaceFileNode, forceReload = false): Promise<v
       `“${existing.name}”已被 Agent 修改，但本地有未保存内容，请手动决定是否重载`,
       { type: 'warning' },
     )
-    activePath.value = node.path
+    focus()
     return
   }
-  const res = await workspaceApi.readFile(
-    { agentId: currentAgent.value.id, threadId: threadId.value },
-    { path: node.path, limit: 128_000 },
-  )
-  if (!res.data) return
-  const loaded: OpenFile = {
-    path: node.path,
-    name: node.name,
-    content: res.data.content,
-    hash: res.data.hash,
-    dirty: false,
-    truncated: res.data.truncated,
+  if (activate) pendingFile.value = node.path
+  try {
+    const ownerAgentId = currentAgent.value.id
+    const ownerThreadId = threadId.value
+    const ownerFiles = openFiles.value
+    const session = { agentId: ownerAgentId, threadId: ownerThreadId }
+    const described = await workspaceApi.describeFile(session, node.path)
+    if (!described.data) return
+    const descriptor = described.data
+    if (
+      currentAgent.value?.id !== ownerAgentId ||
+      threadId.value !== ownerThreadId ||
+      openFiles.value !== ownerFiles ||
+      (existing && !openFiles.value.includes(existing)) ||
+      existing?.dirty
+    )
+      return
+    if (
+      existing?.kind === 'text' &&
+      descriptor.kind === 'text' &&
+      existing.version &&
+      existing.version === descriptor.version
+    ) {
+      needsRefresh.delete(existing)
+      focus()
+      return
+    }
+    const res =
+      descriptor.kind === 'text'
+        ? await workspaceApi.readFile(session, { path: node.path, limit: 128_000 })
+        : null
+    if (
+      (descriptor.kind === 'text' && !res?.data) ||
+      currentAgent.value?.id !== ownerAgentId ||
+      threadId.value !== ownerThreadId ||
+      openFiles.value !== ownerFiles ||
+      (existing && !openFiles.value.includes(existing))
+    )
+      return
+    // 读取期间新产生的编辑也必须保留，不能只在发起请求前检查一次。
+    const current = openFiles.value.find((file) => file.path === node.path)
+    if (current?.dirty) return
+    const loaded: OpenFile = {
+      ...descriptor,
+      path: node.path,
+      name: node.name,
+      content: res?.data?.content ?? '',
+      hash: res?.data?.hash ?? '',
+      dirty: false,
+      truncated: res?.data?.truncated ?? false,
+      previewState:
+        current?.version === descriptor.version ? current.previewState : createPreviewState(),
+      previewRevision: current?.previewRevision ?? 0,
+    }
+    if (current) {
+      Object.assign(current, loaded)
+      needsRefresh.delete(current)
+    } else openFiles.value.push(loaded)
+    focus()
+  } finally {
+    if (activate && focusRevision === fileFocusRevision) pendingFile.value = null
   }
-  if (existing) Object.assign(existing, loaded)
-  else openFiles.value.push(loaded)
-  activePath.value = node.path
+}
+
+function activateFile(path: string): void {
+  ++fileFocusRevision
+  pendingFile.value = null
+  activePath.value = path
+  const file = openFiles.value.find((item) => item.path === path)
+  if (file && !file.dirty && needsRefresh.has(file))
+    void openFile({ path, name: file.name, type: 'file' }, true, false).catch(() =>
+      notification.toast('文件刷新失败，请手动重载', { type: 'error' }),
+    )
+}
+
+function selectFile(node: WorkspaceFileNode): void {
+  void openFile(node).catch((error) =>
+    notification.toast(error instanceof Error ? error.message : '文件打开失败', { type: 'error' }),
+  )
+}
+
+async function reloadPreview(): Promise<void> {
+  const file = activeFile.value
+  if (!file) return
+  try {
+    await openFile({ path: file.path, name: file.name, type: 'file' }, true)
+    if (openFiles.value.includes(file)) file.previewRevision++
+  } catch (error) {
+    notification.toast(error instanceof Error ? error.message : '文件重新载入失败', {
+      type: 'error',
+    })
+  }
 }
 
 function updateContent(event: Event): void {
-  if (!activeFile.value || activeFile.value.truncated) return
+  if (!activeFile.value || activeFile.value.kind !== 'text' || activeFile.value.truncated) return
   activeFile.value.content = (event.target as HTMLTextAreaElement).value
   activeFile.value.dirty = true
+  selectedSnippet.value = null
+}
+
+let openedResourceRevision = -1
+watch(
+  [resourceNavigation, () => currentAgent.value?.id, threadId],
+  async () => {
+    const request = resourceNavigation.value
+    const origin = request?.origin
+    if (
+      !request ||
+      request.revision === openedResourceRevision ||
+      origin?.type !== 'workspace' ||
+      origin.agentId !== currentAgent.value?.id ||
+      !threadId.value
+    )
+      return
+    openedResourceRevision = request.revision
+    try {
+      const name = origin.value.replaceAll('\\', '/').split('/').pop() || origin.value
+      isExplorerCollapsed.value = false
+      await openFile({ path: origin.value, name, type: 'file' })
+      await nextTick()
+      const editor = editorTextarea.value
+      if (!editor || !origin.line || activePath.value !== origin.value || !activeFile.value) return
+      const lines = activeFile.value.content.split('\n')
+      const line = Math.min(lines.length, origin.line)
+      const offset = lines.slice(0, line - 1).reduce((count, text) => count + text.length + 1, 0)
+      editor.focus()
+      editor.setSelectionRange(offset, offset + (lines[line - 1]?.length || 0))
+      editor.scrollTop = Math.max(
+        0,
+        (line - 1) * (parseFloat(getComputedStyle(editor).lineHeight) || 22) -
+          editor.clientHeight / 3,
+      )
+    } catch (error) {
+      openedResourceRevision = -1
+      notification.toast(error instanceof Error ? error.message : '无法打开文件', { type: 'error' })
+    }
+  },
+  { immediate: true },
+)
+
+function attachSelection(): void {
+  const file = activeFile.value
+  const editor = editorTextarea.value
+  if (!file || !editor || editor.selectionEnd <= editor.selectionStart) return
+  const text = file.content.slice(editor.selectionStart, editor.selectionEnd)
+  if (!text.trim()) return
+  if (text.length > 4000) {
+    notification.toast('选区最多附带 4000 字，请缩小范围', { type: 'warning' })
+    return
+  }
+  const startLine = file.content.slice(0, editor.selectionStart).split('\n').length
+  const endLine = file.content.slice(0, editor.selectionEnd).split('\n').length
+  selectedSnippet.value = { path: file.path, text, startLine, endLine }
+  notification.toast('选区已加入本轮材料', { type: 'success' })
 }
 
 async function save(): Promise<void> {
   const file = activeFile.value
-  if (!file || !currentAgent.value) return
+  if (!file || file.kind !== 'text' || !currentAgent.value || !threadId.value) return
   if (file.truncated) {
     notification.toast('大文件当前为只读预览，禁止覆盖保存', { type: 'error' })
     return
@@ -209,14 +445,30 @@ async function save(): Promise<void> {
     )
     file.hash = res.data?.hash ?? file.hash
     file.dirty = false
+    selectedSnippet.value = null
     notification.toast('文件已安全保存', { type: 'success' })
   } catch {
     notification.toast('保存失败：文件可能已被外部修改', { type: 'error' })
   }
 }
 
-function close(file: OpenFile): void {
-  if (file.dirty && !confirm(`“${file.name}”尚未保存，确定关闭吗？`)) return
+async function close(file: OpenFile): Promise<void> {
+  const ownerFiles = openFiles.value
+  if (
+    file.dirty &&
+    !(await confirmDiscard(
+      '关闭未保存文件',
+      `“${file.name}”尚未保存，关闭后将放弃这些修改。`,
+      '放弃修改并关闭',
+    ))
+  )
+    return
+  // 等待确认期间切换了角色或文件已被移除时，不再操作新的编辑缓冲。
+  if (openFiles.value !== ownerFiles || !ownerFiles.includes(file)) return
+  if (pendingFile.value === file.path) {
+    ++fileFocusRevision
+    pendingFile.value = null
+  }
   const nextPreviewPaths = new Set(markdownPreviewPaths.value)
   nextPreviewPaths.delete(file.path)
   markdownPreviewPaths.value = nextPreviewPaths
@@ -224,22 +476,42 @@ function close(file: OpenFile): void {
   if (activePath.value === file.path) activePath.value = openFiles.value.at(-1)?.path ?? ''
 }
 
-/** 文件树重命名后同步已打开标签，保留编辑缓冲与当前焦点。 */
+/** 重命名目录时同步所有后代标签、预览与选中片段，保留未保存缓冲。 */
 function handleFileRenamed(payload: { oldPath: string; newPath: string; name: string }): void {
-  const file = openFiles.value.find((item) => item.path === payload.oldPath)
-  if (file) {
-    file.path = payload.newPath
-    file.name = payload.name
+  const remap = (path: string) =>
+    path === payload.oldPath || path.startsWith(`${payload.oldPath}/`)
+      ? payload.newPath + path.slice(payload.oldPath.length)
+      : path
+  for (const file of openFiles.value) {
+    const nextPath = remap(file.path)
+    if (nextPath === file.path) continue
+    file.path = nextPath
+    file.name = nextPath.split('/').pop() || payload.name
+    file.previewRevision++
+    if (!file.dirty) {
+      void openFile({ path: file.path, name: file.name, type: 'file' }, true, false).catch(() =>
+        notification.toast('重命名已完成，预览刷新失败，请重新载入', { type: 'warning' }),
+      )
+    }
   }
-  if (activePath.value === payload.oldPath) activePath.value = payload.newPath
+  activePath.value = remap(activePath.value)
+  markdownPreviewPaths.value = new Set([...markdownPreviewPaths.value].map(remap))
+  if (selectedSnippet.value) selectedSnippet.value.path = remap(selectedSnippet.value.path)
 }
 
-/** 文件树删除后关闭对应编辑标签。 */
+/** 删除目录后关闭全部后代标签，并清理失效的上下文。 */
 function handleFileDeleted(path: string): void {
-  const deleted = openFiles.value.find((item) => item.path === path)
-  if (!deleted) return
-  openFiles.value = openFiles.value.filter((item) => item.path !== path)
-  if (activePath.value === path) activePath.value = openFiles.value.at(-1)?.path ?? ''
+  const matches = (value: string) => value === path || value.startsWith(`${path}/`)
+  if (pendingFile.value && matches(pendingFile.value)) {
+    ++fileFocusRevision
+    pendingFile.value = null
+  }
+  openFiles.value = openFiles.value.filter((item) => !matches(item.path))
+  markdownPreviewPaths.value = new Set(
+    [...markdownPreviewPaths.value].filter((value) => !matches(value)),
+  )
+  if (matches(activePath.value)) activePath.value = openFiles.value.at(-1)?.path ?? ''
+  if (selectedSnippet.value && matches(selectedSnippet.value.path)) selectedSnippet.value = null
 }
 
 interface WorkspaceFileChangedDetail {
@@ -268,12 +540,13 @@ async function handleWorkspaceFileChanged(event: Event): Promise<void> {
     await openFile({ path: detail.path, name, type: 'file' }, true)
   } else {
     const existing = openFiles.value.find((file) => file.path === detail.path)
-    if (existing) await openFile({ path: detail.path, name, type: 'file' }, true)
+    if (existing) await openFile({ path: detail.path, name, type: 'file' }, true, false)
   }
 }
 
 interface WorkspaceRewoundDetail {
   threadId: string
+  agentId?: string
   files: Array<{
     path: string
     action:
@@ -285,10 +558,36 @@ interface WorkspaceRewoundDetail {
   }>
 }
 
+/** 撤回前检查当前角色及暂存角色的编辑缓冲，避免磁盘恢复越过尚未保存的修改。 */
+function handleBeforeWorkspaceRewind(event: Event): void {
+  const detail = (event as CustomEvent<WorkspaceRewoundDetail>).detail
+  const files = detail.agentId
+    ? detail.agentId === currentAgent.value?.id
+      ? openFiles.value
+      : (buffersByAgent.get(detail.agentId)?.files ?? [])
+    : detail.threadId === threadId.value
+      ? openFiles.value
+      : []
+  const key = (value: string) => {
+    const normalized = value.replaceAll('\\', '/').replace(/^\.\//, '')
+    return /Win/i.test(navigator.platform) ? normalized.toLowerCase() : normalized
+  }
+  const affected = new Set(detail.files.map((file) => key(file.path)))
+  const dirty = files.filter((file) => file.dirty && affected.has(key(file.path)))
+  if (!dirty.length) return
+  event.preventDefault()
+  notification.toast(`请先保存或关闭未保存的文件：${dirty.map((file) => file.name).join('、')}`, {
+    type: 'warning',
+  })
+}
+
 /** 回滚完成后同步资源树与编辑器标签。 */
 async function handleWorkspaceRewound(event: Event): Promise<void> {
   const detail = (event as CustomEvent<WorkspaceRewoundDetail>).detail
-  if (detail.threadId !== threadId.value) return
+  if (
+    detail.agentId ? detail.agentId !== currentAgent.value?.id : detail.threadId !== threadId.value
+  )
+    return
   await workspaceTreeRef.value?.refresh()
   for (const change of detail.files) {
     if (change.action === 'preserve_changed') continue
@@ -306,14 +605,33 @@ async function handleWorkspaceRewound(event: Event): Promise<void> {
     const file = openFiles.value.find((item) => item.path === change.path)
     if (file) {
       const name = change.path.replaceAll('\\', '/').split('/').pop() || change.path
-      await openFile({ path: change.path, name, type: 'file' }, true)
+      await openFile({ path: change.path, name, type: 'file' }, true, false)
     }
   }
+}
+
+function onWorkspaceRewound(event: Event): void {
+  void handleWorkspaceRewound(event).catch(() => {
+    notification.toast('文件已回滚，工作区刷新失败，请手动重载', { type: 'warning' })
+  })
 }
 
 function expandApprovalQueue(): void {
   isCopilotCollapsed.value = false
   isApprovalQueueExpanded.value = true
+}
+
+async function resolveWorkspaceApproval(
+  id: string,
+  decision: ApprovalDecision,
+  message?: string,
+): Promise<void> {
+  delete approvalErrors.value[id]
+  try {
+    await approvalStore.resolve(id, decision, message)
+  } catch (error) {
+    approvalErrors.value[id] = error instanceof Error ? error.message : '审批提交失败，请重试'
+  }
 }
 
 /** 使用 Pointer Events 调整桌面工作台分栏，避免绑定全局鼠标事件后遗留监听器。 */
@@ -357,6 +675,9 @@ function startResize(event: PointerEvent, target: 'explorer' | 'copilot' | 'term
 watch(
   () => currentAgent.value?.id,
   (nextAgentId, previousAgentId) => {
+    ++fileFocusRevision
+    pendingFile.value = null
+    settleDiscard()
     // Agent 切换时按角色封存编辑缓冲；返回该 Agent 后原样恢复，绝不跨 workspace 展示路径。
     if (previousAgentId)
       buffersByAgent.set(previousAgentId, { files: openFiles.value, activePath: activePath.value })
@@ -364,25 +685,59 @@ watch(
     openFiles.value = restored?.files ?? []
     activePath.value = restored?.activePath ?? ''
     activeTerminalId.value = ''
+    selectedSnippet.value = null
+    if (nextAgentId && threadStore.agentId !== nextAgentId) void ensureAgent()
   },
 )
 
-onBeforeRouteLeave(() => {
-  if (openFiles.value.some((file) => file.dirty))
-    return confirm('工作区仍有未保存文件，确定离开吗？')
+watch(activePath, () => {
+  selectedSnippet.value = null
+})
+
+watch(threadId, () => {
+  activeTerminalId.value = ''
+  selectedSnippet.value = null
+})
+
+onBeforeRouteLeave(async () => {
+  const files = [
+    ...openFiles.value,
+    ...[...buffersByAgent.values()].flatMap((buffer) => buffer.files),
+  ]
+  if (files.some((file) => file.dirty))
+    return confirmDiscard('离开工作区', '工作区仍有未保存文件，确定离开吗？', '离开工作区')
   return true
+})
+
+onDeactivated(() => {
+  workspaceActive.value = false
+  settleDiscard()
 })
 
 onMounted(() => {
   void ensureAgent()
   approvalStore.startPolling()
   window.addEventListener('infos:workspace-file-changed', handleWorkspaceFileChanged)
-  window.addEventListener('infos:workspace-rewound', handleWorkspaceRewound)
+  window.addEventListener('infos:workspace-rewound', onWorkspaceRewound)
+  window.addEventListener('infos:before-workspace-rewind', handleBeforeWorkspaceRewind)
+})
+
+onActivated(() => {
+  workspaceActive.value = true
+  void (async () => {
+    await ensureAgent()
+    for (const file of openFiles.value) needsRefresh.add(file)
+    const file = activeFile.value
+    if (file && !file.dirty)
+      await openFile({ path: file.path, name: file.name, type: 'file' }, true, false)
+  })().catch(() => notification.toast('工作区文件刷新失败，请手动重载', { type: 'error' }))
 })
 
 onBeforeUnmount(() => {
+  settleDiscard()
   window.removeEventListener('infos:workspace-file-changed', handleWorkspaceFileChanged)
-  window.removeEventListener('infos:workspace-rewound', handleWorkspaceRewound)
+  window.removeEventListener('infos:workspace-rewound', onWorkspaceRewound)
+  window.removeEventListener('infos:before-workspace-rewind', handleBeforeWorkspaceRewind)
 })
 </script>
 
@@ -392,10 +747,14 @@ onBeforeUnmount(() => {
       <!-- 工作台上下文栏：集中呈现 Agent、当前文件和可见区域开关。 -->
       <header class="workspace-commandbar">
         <div class="workspace-agent">
-          <div class="workspace-agent__avatar">
+          <AgentStateHover
+            class="workspace-agent__avatar"
+            :agent-id="currentAgent.id"
+            :agent-name="currentAgent.name"
+          >
             <img v-if="agentAvatarUrl" :src="agentAvatarUrl" :alt="currentAgent.name" />
             <span v-else>{{ agentInitial }}</span>
-          </div>
+          </AgentStateHover>
           <div class="workspace-agent__identity">
             <div class="workspace-agent__title">
               <strong>{{ currentAgent.name }}</strong>
@@ -409,7 +768,8 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="workspace-context" :title="activeFile?.path">
-          <PixelIcon :name="activeFile ? 'code' : 'folder'" size="xs" />
+          <WorkspaceFileGlyph v-if="activeFile" :kind="activeFile.kind" />
+          <PixelIcon v-else name="folder" size="xs" />
           <span>{{ activeFile?.path || '选择文件开始协作' }}</span>
           <i v-if="activeFile?.dirty" class="workspace-dirty-dot" title="尚未保存" />
           <span v-if="activeFile?.truncated" class="workspace-readonly-badge">只读预览</span>
@@ -469,11 +829,12 @@ onBeforeUnmount(() => {
           </button>
           <template v-else>
             <WorkspaceTree
+              v-if="threadId"
               ref="workspaceTreeRef"
               :agent-id="currentAgent.id"
               :agent-name="currentAgent.name"
               :thread-id="threadId"
-              @select="openFile"
+              @select="selectFile"
               @renamed="handleFileRenamed"
               @deleted="handleFileDeleted"
             />
@@ -493,9 +854,9 @@ onBeforeUnmount(() => {
               role="tab"
               :aria-selected="file.path === activePath"
               :class="{ active: file.path === activePath }"
-              @click="activePath = file.path"
+              @click="activateFile(file.path)"
             >
-              <PixelIcon name="code" size="xs" />
+              <WorkspaceFileGlyph :kind="file.kind" />
               <span>{{ file.name }}</span>
               <i v-if="file.dirty" title="尚未保存" />
               <b title="关闭文件" @click.stop="close(file)">×</b>
@@ -503,7 +864,12 @@ onBeforeUnmount(() => {
             <span v-if="!openFiles.length" class="editor-tabs__empty">没有打开的文件</span>
           </div>
 
-          <section
+          <SurfaceTransition
+            fill
+            variant="panel"
+            :identity="`${currentAgent.id}:${activePath}`"
+            :pending="!!pendingFile && !isTerminalMaximized"
+            label="正在打开文件"
             class="editor-area"
             :class="{ 'editor-area--terminal-maximized': isTerminalMaximized }"
           >
@@ -540,7 +906,15 @@ onBeforeUnmount(() => {
                   </button>
                 </div>
                 <PButton
-                  v-if="!isMarkdownPreview"
+                  v-if="activeFile.kind === 'text' && !isMarkdownPreview"
+                  size="sm"
+                  variant="ghost"
+                  @click="attachSelection"
+                >
+                  引用选区
+                </PButton>
+                <PButton
+                  v-if="activeFile.kind === 'text' && !isMarkdownPreview"
                   size="sm"
                   :disabled="!activeFile.dirty || activeFile.truncated"
                   @click="save"
@@ -548,7 +922,21 @@ onBeforeUnmount(() => {
                   {{ activeFile.truncated ? '只读预览' : '保存' }}
                 </PButton>
               </div>
-              <div v-if="isMarkdownPreview" class="markdown-preview" aria-label="Markdown浏览器">
+              <WorkspaceFilePreview
+                v-if="activeFile.kind !== 'text'"
+                :key="`${currentAgent.id}:${threadId}:${activeFile.path}:${activeFile.version}:${activeFile.previewRevision}`"
+                :file="activeFile"
+                :session="{ agentId: currentAgent.id, threadId }"
+                :state="activeFile.previewState"
+                :active="workspaceActive && desktopHomeVisible && !isTerminalMaximized"
+                @state="(state, patch) => Object.assign(state, patch)"
+                @reload="reloadPreview"
+              />
+              <div
+                v-else-if="isMarkdownPreview"
+                class="markdown-preview"
+                aria-label="Markdown浏览器"
+              >
                 <article class="markdown-preview__paper">
                   <ChatRichText :content="activeFile.content" />
                 </article>
@@ -556,6 +944,7 @@ onBeforeUnmount(() => {
               <div v-else class="editor-surface">
                 <div class="editor-gutter" aria-hidden="true">1</div>
                 <textarea
+                  ref="editorTextarea"
                   :value="activeFile.content"
                   :readonly="activeFile.truncated"
                   spellcheck="false"
@@ -565,10 +954,14 @@ onBeforeUnmount(() => {
                 />
               </div>
               <footer class="editor-statusbar">
-                <span>{{ activeFile.dirty ? '已修改' : '已保存' }}</span>
+                <span>
+                  {{
+                    activeFile.kind !== 'text' ? '只读浏览' : activeFile.dirty ? '已修改' : '已保存'
+                  }}
+                </span>
                 <span class="editor-statusbar__spacer" />
-                <span>UTF-8</span>
-                <span>LF</span>
+                <span v-if="activeFile.kind === 'text'">UTF-8</span>
+                <span v-if="activeFile.kind === 'text'">LF</span>
                 <span>{{ activeFileExtension }}</span>
               </footer>
             </template>
@@ -582,7 +975,7 @@ onBeforeUnmount(() => {
                 在文件管理器中打开
               </button>
             </div>
-          </section>
+          </SurfaceTransition>
 
           <section
             class="terminal-area"
@@ -626,7 +1019,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
             <WorkspaceTerminal
-              v-if="!isTerminalCollapsed"
+              v-if="!isTerminalCollapsed && threadId"
               :agent-id="currentAgent.id"
               :thread-id="threadId"
               @active="activeTerminalId = $event"
@@ -641,15 +1034,18 @@ onBeforeUnmount(() => {
           :style="isCopilotCollapsed ? undefined : { width: `${copilotWidth}px` }"
         >
           <template v-if="isCopilotCollapsed">
-            <button
+            <AgentStateHover
+              as="button"
+              :agent-id="currentAgent.id"
+              :agent-name="currentAgent.name"
               class="copilot-rail-avatar"
-              :title="`切换会话（当前：${currentAgent.name}）`"
+              :aria-label="`切换会话（当前：${currentAgent.name}）`"
               @click="isSessionDrawerOpen = true"
             >
               <img v-if="agentAvatarUrl" :src="agentAvatarUrl" :alt="currentAgent.name" />
               <span v-else>{{ agentInitial }}</span>
               <i v-if="pendingApprovals.length">{{ pendingApprovals.length }}</i>
-            </button>
+            </AgentStateHover>
             <button
               class="workspace-rail-button"
               title="展开协作栏"
@@ -666,13 +1062,17 @@ onBeforeUnmount(() => {
             <header class="copilot-header">
               <button
                 class="copilot-header__main"
-                title="切换会话"
+                aria-label="切换工作区会话"
                 @click="isSessionDrawerOpen = true"
               >
-                <div class="copilot-header__avatar">
+                <AgentStateHover
+                  class="copilot-header__avatar"
+                  :agent-id="currentAgent.id"
+                  :agent-name="currentAgent.name"
+                >
                   <img v-if="agentAvatarUrl" :src="agentAvatarUrl" :alt="currentAgent.name" />
                   <span v-else>{{ agentInitial }}</span>
-                </div>
+                </AgentStateHover>
                 <div class="copilot-header__identity">
                   <strong>与 {{ currentAgent.name }} 协作</strong>
                   <span>AGENT COPILOT · 点击切换会话</span>
@@ -711,7 +1111,7 @@ onBeforeUnmount(() => {
             </div>
 
             <section
-              v-if="pendingApprovals.length"
+              v-if="queuedApprovals.length"
               class="approval-queue"
               :class="{ 'approval-queue--expanded': isApprovalQueueExpanded }"
             >
@@ -722,7 +1122,7 @@ onBeforeUnmount(() => {
                 <span>
                   <PixelIcon name="alert" size="xs" />
                   <strong>安全确认</strong>
-                  <i>{{ pendingApprovals.length }}</i>
+                  <i>{{ queuedApprovals.length }}</i>
                 </span>
                 <PixelIcon
                   :name="isApprovalQueueExpanded ? 'chevron-up' : 'chevron-down'"
@@ -739,13 +1139,14 @@ onBeforeUnmount(() => {
                   收起待审批队列
                 </button>
                 <ApprovalCard
-                  v-for="request in pendingApprovals"
+                  v-for="request in queuedApprovals"
                   :key="request.id"
                   :request="request"
                   :loading="approvalStore.isResolving[request.id]"
+                  :error="approvalErrors[request.id]"
                   compact
                   @resolve="
-                    (decision, message) => approvalStore.resolve(request.id, decision, message)
+                    (decision, message) => resolveWorkspaceApproval(request.id, decision, message)
                   "
                 />
               </div>
@@ -756,13 +1157,23 @@ onBeforeUnmount(() => {
                 :agent-id="currentAgent.id"
                 :agent-name="currentAgent.name"
                 :agent-avatar-url="agentAvatarUrl"
-                :thread-id="threadStore.threadId"
+                :thread-id="threadId"
                 compact-input
-                :show-approvals="false"
                 :workspace-context="{
                   filePath: activePath || undefined,
+                  fileHash: activeFile?.hash || undefined,
+                  fileDirty: activeFile?.dirty,
                   terminalId: activeTerminalId || undefined,
+                  selection:
+                    selectedSnippet?.path === activePath
+                      ? {
+                          text: selectedSnippet.text,
+                          startLine: selectedSnippet.startLine,
+                          endLine: selectedSnippet.endLine,
+                        }
+                      : undefined,
                 }"
+                @context-consumed="selectedSnippet = null"
               />
             </div>
           </template>
@@ -774,6 +1185,22 @@ onBeforeUnmount(() => {
       v-model="showHistoryExport"
       :disabled="isExportingHistory"
       @confirm="exportCurrentHistory"
+    />
+
+    <PDialog
+      :model-value="Boolean(discardDialog)"
+      :title="discardDialog?.title"
+      :message="discardDialog?.message"
+      :confirm-text="discardDialog?.confirmText"
+      cancel-text="继续编辑"
+      confirm-variant="danger"
+      @confirm="settleDiscard(true)"
+      @cancel="settleDiscard()"
+      @update:model-value="
+        (visible) => {
+          if (!visible) settleDiscard()
+        }
+      "
     />
 
     <!-- 会话切换抽屉：由 Header 主体或收起态角色图标触发。 -->
@@ -1545,7 +1972,11 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 .approval-queue {
-  flex-shrink: 0;
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  min-height: 38px;
+  max-height: 55%;
   border-bottom: 1px solid var(--ui-border-default);
   background: var(--ui-warning-soft);
 }
@@ -1553,6 +1984,7 @@ onBeforeUnmount(() => {
   display: flex;
   width: 100%;
   min-height: 38px;
+  flex-shrink: 0;
   align-items: center;
   justify-content: space-between;
   padding: 0 11px;
@@ -1584,10 +2016,14 @@ onBeforeUnmount(() => {
 .approval-queue__body {
   display: flex;
   max-height: 310px;
+  min-height: 0;
   flex-direction: column;
   gap: 8px;
   overflow-y: auto;
   padding: 8px;
+}
+.approval-queue__body :deep(.approval-card) {
+  max-height: min(240px, 40vh);
 }
 .approval-queue__collapse {
   display: flex;

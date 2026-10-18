@@ -21,6 +21,7 @@ import { agentApi } from '../../../api/modules/agentApi'
 import { useDashboardContext } from '../../../composables/dashboard'
 import { logger } from '../../../lib/logger'
 import { useNotificationStore } from '../../../stores'
+import PrivacyCleanupPanel from '../PrivacyCleanupPanel.vue'
 
 const ctx = useDashboardContext()
 const notif = useNotificationStore()
@@ -62,7 +63,7 @@ const dangerActions: DangerAction[] = [
   {
     action: 'memories',
     label: '重置全部记忆',
-    description: '删除所有记忆节点、标签与关系图谱。对话记录不受影响。',
+    description: '清理全部角色的记忆、共享事实、索引、关联日记及检索学习状态。保留对话和知识文档。',
     severity: 'high',
     icon: 'brain',
     buttonText: '重置',
@@ -103,6 +104,7 @@ watch(() => ctx.activeAgentId.value, refreshAgentName)
 const pendingAction = ref<DangerAction | null>(null)
 const confirmInput = ref('')
 const isProcessing = ref(false)
+const includeSocial = ref(true)
 /** 抖动开关（打开弹窗 / 输入错误时触发） */
 const shaking = ref(false)
 
@@ -155,7 +157,7 @@ async function confirmReset() {
         notif.toast('对话记录已清空', { type: 'success', title: action.label })
         break
       case 'memories':
-        await resetApi.resetMemories(action.phrase)
+        await resetApi.resetMemories(action.phrase, includeSocial.value)
         notif.toast('记忆已重置', { type: 'success', title: action.label })
         break
       case 'factory':
@@ -207,6 +209,7 @@ async function exportData() {
 <template>
   <div class="reset-tab-root p-8 h-full overflow-y-auto overflow-x-hidden">
     <div class="reset-tab-content">
+      <PrivacyCleanupPanel />
       <!-- 顶部标题（红色像素风） -->
       <div class="mb-6 relative group/header">
         <!-- 背景氛围光晕 (红色警告感) -->
@@ -308,6 +311,13 @@ async function exportData() {
             </div>
 
             <!-- 操作按钮 -->
+            <label
+              v-if="pendingAction.action === 'memories'"
+              class="flex items-center gap-2 text-ui-text-secondary"
+            >
+              <input v-model="includeSocial" type="checkbox" :disabled="isProcessing" />
+              同时遗忘社交长记忆并取消社交任务
+            </label>
             <div class="rz-dialog-footer">
               <button
                 class="rz-btn rz-btn-ghost rz-pixel-border"

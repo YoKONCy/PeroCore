@@ -1,11 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 function setWindow(overrides: Record<string, unknown>) {
-  Object.defineProperty(globalThis, 'window', {
-    value: overrides,
-    writable: true,
-    configurable: true,
-  })
+  vi.stubGlobal('window', overrides)
 }
 
 async function importTransport() {
@@ -117,9 +113,9 @@ describe('transport singleton', () => {
 
     const { transport } = await importTransport()
 
-    await expect(transport.request('/health')).resolves.toEqual({
+    await expect(transport.request('/health')).resolves.toMatchObject({
       code: 'NETWORK_ERROR',
-      message: 'HTTP 503 Service Unavailable',
+      message: expect.stringContaining('503'),
     })
   })
 

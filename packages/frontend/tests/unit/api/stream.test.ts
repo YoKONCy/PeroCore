@@ -11,25 +11,56 @@ vi.mock('@infos/frontend/api/transportUtils', () => ({
 import { streamRequest } from '@infos/frontend/api/stream'
 
 function createStream(chunks: string[]) {
-  const encoder = new TextEncoder()
+  const bytes = new TextEncoder().encode(chunks.join(''))
+  const chinese = bytes.findIndex((byte) => byte > 127)
+  const cuts = [
+    ...new Set([0, 3, chinese + 1, Math.floor(bytes.length / 2), bytes.length - 1, bytes.length]),
+  ].sort((a, b) => a - b)
   let index = 0
+  let finish!: () => void
+  const ended = new Promise<void>((resolve) => {
+    finish = resolve
+  })
   return {
+    ended,
     getReader: () => ({
-      read: vi.fn(async () => {
-        if (index >= chunks.length) return { done: true, value: undefined }
-        return { done: false, value: encoder.encode(chunks[index++]) }
+      cancel: vi.fn(async () => {
+        finish()
       }),
+      releaseLock: vi.fn(),
+      read: async () => {
+        if (index >= cuts.length - 1) {
+          finish()
+          return { done: true, value: undefined }
+        }
+        const value = bytes.slice(cuts[index], cuts[++index])
+        return { done: false, value }
+      },
     }),
   }
 }
 
-async function flushStream() {
-  for (let i = 0; i < 8; i++) {
-    await Promise.resolve()
-  }
-}
-
 describe('streamRequest', () => {
+  it('Surface 回调出错必须进入错误处理，不能当成坏 JSON 静默忽略', async () => {
+    const onError = vi.fn()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, body: createStream(['event: surface\ndata: {}\n\n']) })),
+    )
+    streamRequest(
+      '/chat/stream',
+      {},
+      {
+        onSurface: () => {
+          throw new Error('渲染失败')
+        },
+        onError,
+      },
+    )
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledOnce())
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ code: 'STREAM_ERROR' }))
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
   })
@@ -54,7 +85,8 @@ describe('streamRequest', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const controller = streamRequest('/chat/stream', { message: '你好' }, events)
-    await flushStream()
+    await stream.ended
+    await vi.waitFor(() => expect(events.onDone).toHaveBeenCalledOnce())
 
     expect(controller).toBeInstanceOf(AbortController)
     expect(fetchMock).toHaveBeenCalledWith('http://localhost:7359/api/chat/stream', {
@@ -86,13 +118,15 @@ describe('streamRequest', () => {
     const events = { onError: vi.fn() }
     vi.stubGlobal(
       'fetch',
-      vi.fn(() => Promise.resolve({ ok: false, status: 503, body: null })),
+      vi.fn(() => Promise.resolve({ ok: false, status: 503, body: null, json: async () => null })),
     )
 
     streamRequest('/chat/stream', {}, events)
-    await flushStream()
+    await vi.waitFor(() => expect(events.onError).toHaveBeenCalled())
 
-    expect(events.onError).toHaveBeenCalledWith({ code: 'NETWORK_ERROR', message: 'HTTP 503' })
+    expect(events.onError).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'NETWORK_ERROR', message: expect.stringContaining('503') }),
+    )
   })
 
   it('应当忽略无效 JSON 事件并处理 error 事件', async () => {
@@ -107,13 +141,14 @@ describe('streamRequest', () => {
     )
 
     streamRequest('/chat/stream', {}, events)
-    await flushStream()
+    await stream.ended
+    await vi.waitFor(() => expect(events.onError).toHaveBeenCalledOnce())
 
     expect(events.onSurface).not.toHaveBeenCalled()
     expect(events.onError).toHaveBeenCalledWith({ code: 'LLM_ERROR', message: '模型异常' })
   })
 
-  it('应当在非 Abort 异常时触发流错误，在 AbortError 时静默', async () => {
+  it('只有用户主动取消才静默，上游中断和网络异常必须进入错误处理', async () => {
     const streamErrorEvents = { onError: vi.fn() }
     vi.stubGlobal(
       'fetch',
@@ -121,7 +156,7 @@ describe('streamRequest', () => {
     )
 
     streamRequest('/chat/stream', {}, streamErrorEvents)
-    await flushStream()
+    await vi.waitFor(() => expect(streamErrorEvents.onError).toHaveBeenCalledOnce())
 
     expect(streamErrorEvents.onError).toHaveBeenCalledWith({
       code: 'STREAM_ERROR',
@@ -134,9 +169,13 @@ describe('streamRequest', () => {
       vi.fn(() => Promise.reject(Object.assign(new Error('已中断'), { name: 'AbortError' }))),
     )
 
-    streamRequest('/chat/stream', {}, abortEvents)
-    await flushStream()
+    const cancelled = streamRequest('/chat/stream', {}, abortEvents)
+    cancelled.abort()
+    await vi.dynamicImportSettled()
 
     expect(abortEvents.onError).not.toHaveBeenCalled()
+    const upstreamAbort = { onError: vi.fn() }
+    streamRequest('/chat/stream', {}, upstreamAbort)
+    await vi.waitFor(() => expect(upstreamAbort.onError).toHaveBeenCalledOnce())
   })
 })

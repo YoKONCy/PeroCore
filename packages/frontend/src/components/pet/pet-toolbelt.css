@@ -1,0 +1,263 @@
+.pet-toolbelt {
+  position: relative;
+  isolation: isolate;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+}
+.pet-toolbelt::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  clip-path: var(--pet-belt-cut);
+  background: var(--pet-surface-fill);
+  backdrop-filter: blur(10px) saturate(115%);
+}
+.pet-toolbelt::after {
+  content: '';
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: -3px;
+  height: 4px;
+  z-index: -2;
+  background: var(--pet-side);
+  box-shadow: 0 7px 14px var(--pet-cast);
+}
+.belt-face {
+  padding: 16px 20px 10px;
+  clip-path: var(--pet-belt-cut);
+  border-top: 1px solid var(--pet-highlight);
+  box-shadow: inset 0 -1px var(--pet-shade);
+}
+.belt-body {
+  min-height: min(110px, var(--belt-content-max));
+  max-height: var(--belt-content-max);
+  overflow: hidden;
+  transition: height 180ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.belt-page {
+  max-height: var(--belt-content-max);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--pet-border) transparent;
+  padding: 0 2px 8px;
+}
+header {
+  margin-bottom: 12px;
+}
+header strong {
+  font-size: 14px;
+  font-weight: 400;
+}
+button,
+textarea {
+  font: inherit;
+  color: inherit;
+  border-radius: 0;
+}
+button {
+  cursor: pointer;
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+button:focus-visible,
+textarea:focus-visible {
+  outline: 1px solid var(--pet-accent);
+  outline-offset: 2px;
+}
+.muted {
+  font-size: 12px;
+  color: var(--pet-muted);
+  margin: 8px 0 12px;
+}
+textarea {
+  resize: vertical;
+  min-height: 52px;
+  max-height: 120px;
+  width: 100%;
+  padding: 9px;
+  border: 1px solid var(--pet-divider);
+  background: var(--pet-input);
+  box-shadow: var(--pet-pressed-shadow);
+  font-size: 13px;
+  caret-color: var(--pet-accent);
+}
+textarea::placeholder {
+  color: var(--pet-muted);
+}
+.panel-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.text-button,
+.menu-item {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  color: var(--pet-accent);
+}
+.primary {
+  border: 1px solid var(--pet-divider);
+  background: var(--pet-control-fill);
+  padding: 5px 12px;
+  color: var(--pet-pink);
+  box-shadow: var(--pet-control-shadow);
+}
+.primary:active:not(:disabled) {
+  translate: 0 1px;
+  box-shadow: var(--pet-pressed-shadow);
+}
+.mode-picker {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.mode-picker button {
+  border: 0;
+  padding: 2px 0 5px;
+  background: transparent;
+  color: var(--pet-muted);
+}
+.mode-picker .selected {
+  color: var(--pet-pink);
+  box-shadow: 0 1px var(--pet-pink);
+}
+.hold-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px;
+  border: 0;
+  background: transparent;
+  color: var(--pet-accent);
+  touch-action: none;
+  user-select: none;
+}
+.hold-button.recording {
+  color: var(--pet-pink);
+}
+.character-mind {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: var(--pet-muted);
+}
+.character-mind summary {
+  cursor: pointer;
+}
+.character-mind p {
+  margin: 8px 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.menu-item {
+  display: flex;
+  width: 100%;
+  padding: 8px 0;
+  color: var(--pet-text);
+}
+.inline-dot {
+  width: 4px;
+  height: 4px;
+  background: var(--pet-pink);
+}
+.dock {
+  display: flex;
+  justify-content: space-between;
+  gap: 4px;
+  border-top: 1px solid var(--pet-divider);
+  padding-top: 10px;
+}
+.dock button {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 5px 7px;
+  border: 0;
+  background: transparent;
+  color: var(--pet-muted);
+  font-size: 12px;
+}
+.dock button.selected {
+  color: var(--pet-text);
+}
+.dock .selected :deep(svg) {
+  color: var(--pet-pink);
+}
+.dock button.selected::after {
+  content: '';
+  position: absolute;
+  left: 9px;
+  right: 9px;
+  bottom: 0;
+  height: 2px;
+  background: var(--pet-pink);
+}
+.dock button:hover:not(:disabled) :deep(svg) {
+  translate: 0 -1px;
+}
+.dock button:active:not(:disabled) :deep(svg) {
+  translate: 0 1px;
+}
+.dock :deep(svg) {
+  transition:
+    translate 120ms steps(2),
+    color 140ms;
+}
+.dock .fold-button {
+  padding-right: 0;
+  font-size: 11px;
+}
+.pet-context-enter-active {
+  transition:
+    opacity 140ms ease-out,
+    translate 140ms ease-out;
+}
+.pet-context-leave-active {
+  transition: opacity 90ms ease-in;
+}
+.pet-context-enter-from {
+  opacity: 0;
+  translate: 0 3px;
+}
+.pet-context-leave-to {
+  opacity: 0;
+}
+@container pet-hud (max-width: 360px) {
+  .belt-face {
+    padding: 13px 12px 8px;
+  }
+  .dock {
+    gap: 0;
+  }
+  .dock button {
+    flex-direction: column;
+    gap: 4px;
+    min-height: 44px;
+    padding: 4px;
+    font-size: 11px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  :deep(svg) {
+    transition: none !important;
+    animation: none !important;
+  }
+}

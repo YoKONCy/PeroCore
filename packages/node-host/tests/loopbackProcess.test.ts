@@ -1,3 +1,5 @@
+import { fileURLToPath } from 'node:url'
+import { once } from 'node:events'
 import { randomUUID } from 'node:crypto'
 import { rmSync } from 'node:fs'
 import path from 'node:path'
@@ -14,8 +16,10 @@ const serverId = 'server-process' as KernelNodeId
 
 afterEach(async () => {
   for (const child of children.splice(0)) {
-    if (!child.killed) child.kill('SIGTERM')
-    await new Promise((resolve) => child.once('exit', resolve))
+    if (child.exitCode !== null || child.signalCode !== null) continue
+    const exited = once(child, 'exit')
+    child.kill('SIGTERM')
+    await exited
   }
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
@@ -26,7 +30,12 @@ describe('Node Host Loopback 跨进程探针', () => {
     roots.push(root)
     const child = spawn(
       process.execPath,
-      ['--import', 'tsx', path.resolve('packages/node-host/src/main.ts'), '--loopback-port=0'],
+      [
+        '--import',
+        'tsx',
+        fileURLToPath(new URL('../src/main.ts', import.meta.url)),
+        '--loopback-port=0',
+      ],
       {
         cwd: path.resolve('.'),
         env: { ...process.env, INFOS_NODE_IDENTITY_PATH: path.join(root, 'identity.json') },
@@ -54,15 +63,7 @@ describe('Node Host Loopback 跨进程探针', () => {
       })
     })
     const transport = new LoopbackWebSocketNodeTransport(serverId, `ws://127.0.0.1:${port}`)
-    await new Promise<void>((resolve, reject) => {
-      const deadline = Date.now() + 5_000
-      const poll = () => {
-        if (transport.hello) resolve()
-        else if (Date.now() >= deadline) reject(new Error('未收到 Node Hello'))
-        else setTimeout(poll, 10)
-      }
-      poll()
-    })
+    await transport.waitForHello()
     const nodeId = transport.hello!.descriptor.nodeId
     const invocationId = randomUUID()
     const envelope: KernelEnvelope<{ operation: string; input: unknown }> = {

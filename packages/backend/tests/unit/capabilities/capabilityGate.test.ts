@@ -87,6 +87,40 @@ modes:
   })
 
   describe('resolve', () => {
+    it('到期跟进只开放读取和建议，不能加载技能、写文件、发消息或执行命令', () => {
+      writeFileSync(
+        join(rootDir, 'pero', 'capabilities.yaml'),
+        `agent: pero\nchannels:\n  desktop:\n    tools:\n      - '*'\n    skills:\n      - diary\n    prompt_fragments: []\n`,
+        'utf8',
+      )
+      const names = [
+        'read_file',
+        'read_file_range',
+        'web_fetch',
+        'suggest_next_step',
+        'schedule_follow_up',
+        'write_file',
+        'terminal_execute',
+        'mcp_send',
+        'write_fact',
+      ]
+      toolRegistry.getDefinitions.mockReturnValue(
+        names.map((name) => ({ name, description: name })),
+      )
+      const gate = new CapabilityGate([rootDir], skillLoader as never, toolRegistry as never)
+      const resolved = gate.resolve('pero', 'desktop', undefined, 'follow_up')
+      expect([...resolved.allowedTools]).toEqual(names.slice(0, 5))
+      expect(resolved.enabledSkills).toEqual([])
+      expect(gate.isToolAllowed('pero', 'desktop', 'load_skill', undefined, 'follow_up')).toBe(
+        false,
+      )
+      expect(
+        gate.isToolAllowed('pero', 'desktop', 'expand_advanced_tools', undefined, 'follow_up'),
+      ).toBe(false)
+      expect(gate.isToolAllowed('unknown', 'desktop', 'read_file', undefined, 'follow_up')).toBe(
+        false,
+      )
+    })
     it('应当按 Agent 和模式解析工具、技能、提示片段与描述文本', () => {
       const gate = new CapabilityGate([rootDir], skillLoader as never, toolRegistry as never)
 
@@ -95,8 +129,11 @@ modes:
       expect([...resolved.allowedTools]).toEqual(['chat.send', 'memory.search'])
       expect(resolved.enabledSkills).toEqual([createManifest('diary', ['memory.write'])])
       expect(resolved.promptFragments).toEqual(['prompts/base.md'])
-      expect(resolved.toolsDescription).toBe('- chat.send: 发送聊天消息\n- memory.search: 搜索记忆')
-      expect(resolved.skillMenuText).toContain('- diary 技能: diary 描述')
+      expect(resolved.toolsDescription).toContain('chat.send')
+      expect(resolved.toolsDescription).toContain('memory.search')
+      expect(resolved.toolsDescription).not.toContain('blocked.tool')
+      expect(resolved.skillMenuText).toContain('diary')
+      expect(resolved.skillMenuText).toContain('diary 描述')
     })
 
     it('加载旧配置时应自动移除视觉Prompt并写回YAML', () => {

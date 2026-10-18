@@ -1,9 +1,10 @@
 <script setup lang="ts">
+import './task-pixel.css'
 /**
- * TaskStatusBadge — 任务状态胶囊
+ * TaskStatusBadge — 任务状态方块
  *
  * 统一任务中心（进行中 / 历史 / 详情弹窗）的状态视觉：
- * 软色底 + 状态色文字 + 状态圆点，全部走 ui 语义令牌（双主题安全）。
+ * 细边框 + 状态色文字 + 像素状态块，全部走 ui 语义令牌（双主题安全）。
  *
  * 状态视觉语义：
  * - running        天蓝 + 呼吸脉冲
@@ -31,6 +32,8 @@ const STATUS_LABELS: Record<string, string> = {
   running: '运行中',
   paused: '已暂停',
   waiting_input: '等待输入',
+  waiting: '等待条件',
+  blocked: '需要处理',
   completed: '已完成',
   failed: '失败',
   cancelled: '已取消',
@@ -39,12 +42,15 @@ const STATUS_LABELS: Record<string, string> = {
 /** 展示文案（未知状态下回退为原文） */
 const label = computed(() => (props.read ? '已读' : (STATUS_LABELS[props.status] ?? props.status)))
 
-/** 是否运行中（圆点带呼吸脉冲） */
+/** 是否运行中（方块带离散脉冲） */
 const isRunning = computed(() => props.status === 'running')
 </script>
 
 <template>
-  <span class="ts-badge" :class="[`ts-badge--${status}`, { 'ts-badge--read': read }]">
+  <span
+    class="ts-badge task-pixel-surface"
+    :class="[`ts-badge--${status}`, { 'ts-badge--read': read }]"
+  >
     <span class="ts-badge__dot" :class="{ 'ts-badge__dot--pulse': isRunning }" />
     {{ label }}
   </span>
@@ -55,9 +61,9 @@ const isRunning = computed(() => props.status === 'running')
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 10px;
-  border-radius: var(--ui-radius-full);
-  font-size: 11px;
+  padding: 3px 7px;
+  border-radius: 0;
+  font-size: 12px;
   font-weight: 700;
   line-height: 1.4;
   /* 未知状态降级为中性灰 */
@@ -65,19 +71,24 @@ const isRunning = computed(() => props.status === 'running')
   background: var(--ui-bg-hover);
   white-space: nowrap;
   user-select: none;
+  border: 1px solid color-mix(in srgb, currentColor 32%, transparent);
+  box-shadow:
+    inset 1px 1px 0 var(--task-highlight),
+    inset -1px -1px 0 var(--task-shade);
+  font-family: var(--ui-font-pixel);
 }
 
 .ts-badge__dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
+  width: 5px;
+  height: 5px;
+  border-radius: 0;
   background: currentColor;
   flex-shrink: 0;
 }
 
 /* 运行中的呼吸脉冲（尊重系统减少动画偏好见 media 查询） */
 .ts-badge__dot--pulse {
-  animation: ts-dot-pulse 1.6s ease-in-out infinite;
+  animation: ts-dot-pulse 1.6s steps(2, end) infinite;
 }
 
 @keyframes ts-dot-pulse {
@@ -101,12 +112,14 @@ const isRunning = computed(() => props.status === 'running')
   background: var(--ui-accent-sky-soft);
 }
 
-.ts-badge--paused {
+.ts-badge--paused,
+.ts-badge--waiting {
   color: var(--ui-warning);
   background: var(--ui-warning-soft);
 }
 
-.ts-badge--waiting_input {
+.ts-badge--waiting_input,
+.ts-badge--blocked {
   color: var(--ui-accent-primary);
   background: var(--ui-accent-primary-soft);
 }

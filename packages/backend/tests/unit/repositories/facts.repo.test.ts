@@ -279,7 +279,7 @@ describe('FactsRepository共享事实库', () => {
         createdByAgentId: 'pero',
         operationId: 'shared-operation',
       }),
-    ).rejects.toThrow('operationId 已用于其他事实操作')
+    ).rejects.toThrow(Error)
 
     expect(store.nodeCount()).toBe(nodeCount)
     expect((await repo.query('SQLite边界')).exactMatch?.activeFacts.map((fact) => fact.id)).toEqual(

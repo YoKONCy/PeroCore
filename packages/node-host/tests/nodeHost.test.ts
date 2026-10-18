@@ -331,7 +331,7 @@ describe('Node Host 本地完整闭环', () => {
       state: 'completed',
       output: { echo: { carrier: 'websocket' } },
     })
-    await new Promise((resolve) => setTimeout(resolve, 10))
+    await transport.waitForHello()
     expect(transport.hello?.descriptor.nodeId).toBe(host.identity.descriptor.nodeId)
     expect(transport.hello?.offers[0]?.placement?.executionLocation).toBe('remote-capability-node')
     await transport.close()

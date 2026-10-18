@@ -1,7 +1,7 @@
 import { createHash, generateKeyPairSync, sign } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { vi, afterEach, describe, expect, it } from 'vitest'
 import type { PackageManifest } from '@infos/shared'
 import {
   PackageInstaller,
@@ -148,8 +148,7 @@ describe('Package Installer', () => {
     await runtime.activate(manifest.packageId)
     expect(registry.get(manifest.packageId)?.state).toBe('active')
     security.revokePermissions(manifest.packageId)
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    expect(registry.get(manifest.packageId)?.state).toBe('inactive')
+    await vi.waitFor(() => expect(registry.get(manifest.packageId)?.state).toBe('inactive'))
   })
 
   it('升级应拒绝版本降级和Publisher替换', () => {
@@ -162,7 +161,7 @@ describe('Package Installer', () => {
       trust: 'signed',
       contributions: [],
       signature: { publisherId: 'publisher.a' },
-    } as PackageManifest
+    } as unknown as PackageManifest
     expect(() => security.assertUpgradeAllowed(current, { ...current, version: '1.9.9' })).toThrow(
       'PACKAGE_DOWNGRADE_REJECTED',
     )

@@ -21,8 +21,8 @@ const logger = createLogger('EmbeddingService')
 
 /** Embedding Provider 接口 */
 export interface EmbeddingProvider {
-  embed(texts: string[]): Promise<number[][]>
-  embedOne(text: string): Promise<number[]>
+  embed(texts: string[], signal?: AbortSignal): Promise<number[][]>
+  embedOne(text: string, signal?: AbortSignal): Promise<number[]>
   getDimension(): number
   /**
    * Embedding 是否可用
@@ -47,6 +47,8 @@ export interface RerankResult {
 
 /** Embedding 配置 */
 export interface EmbeddingConfig {
+  /** 全局向量生成及向量检索开关，缺省保持开启。 */
+  enabled?: boolean
   /** API 基址 (OpenAI 兼容) */
   apiBase: string
   /** API Key */
@@ -67,6 +69,7 @@ export class EmbeddingService implements EmbeddingProvider {
   private provider: EmbeddingProvider
   private reranker: RerankerProvider | null = null
   private currentConfig: EmbeddingConfig
+  private controller = new AbortController()
 
   /**
    * Embedding 是否可用
@@ -83,8 +86,9 @@ export class EmbeddingService implements EmbeddingProvider {
 
     // AIOS 第八阶段：配置完整性检测
     // apiBase/apiKey/model 任一为空都视为不可用
-    this.available = Boolean(config.apiBase && config.apiKey && config.model)
-    if (!this.available) {
+    this.available =
+      config.enabled !== false && Boolean(config.apiBase && config.apiKey && config.model)
+    if (!this.available && config.enabled !== false) {
       logger.warn(
         'Embedding 配置不完整（apiBase/apiKey/model 任一为空），记忆向量化和 RAG 检索将不可用。请在 Dashboard → 模型配置 → 向量模型 中完成配置。',
       )
@@ -104,15 +108,20 @@ export class EmbeddingService implements EmbeddingProvider {
    * 由 config 路由在保存 embedding.* 相关配置后自动调用。
    */
   reconfigure(config: EmbeddingConfig): void {
+    this.controller.abort(new Error('向量配置已变更，已停止旧请求'))
+    this.controller = new AbortController()
     this.currentConfig = config
     this.provider = new ApiEmbeddingProvider(config)
 
     // AIOS 第八阶段：重新检测可用性
-    this.available = Boolean(config.apiBase && config.apiKey && config.model)
+    this.available =
+      config.enabled !== false && Boolean(config.apiBase && config.apiKey && config.model)
     if (this.available) {
       logger.info(
         `Embedding 配置已热更新: model=${config.model}, apiBase=${config.apiBase}, dim=${config.dimension}`,
       )
+    } else if (config.enabled === false) {
+      logger.info('向量生成与向量检索已关闭')
     } else {
       logger.warn('Embedding 配置热更新后仍不完整，向量化和 RAG 检索不可用')
     }
@@ -132,28 +141,38 @@ export class EmbeddingService implements EmbeddingProvider {
   }
 
   /**
-   * Embedding 是否可用（配置完整且未检测到致命错误）
+   * Embedding 是否启用且配置完整。
    *
-   * 调用方应在调用 embed() 前先检查此属性，避免不必要的网络请求和异常处理。
+   * 服务故障和请求冷却仍通过异常报告，不能把故障误当成停用并写入占位向量。
    */
   get isAvailable(): boolean {
     return this.available
   }
 
-  async embed(texts: string[]): Promise<number[][]> {
+  get isEnabled(): boolean {
+    return this.currentConfig.enabled !== false
+  }
+  get cancellationSignal(): AbortSignal {
+    return this.controller.signal
+  }
+
+  async embed(texts: string[], signal?: AbortSignal): Promise<number[][]> {
     if (!this.available) {
       logger.debug('Embedding 不可用（配置不完整），返回空数组')
       return []
     }
-    return this.provider.embed(texts)
+    const cancellation = AbortSignal.any([this.controller.signal, ...(signal ? [signal] : [])])
+    const vectors = await this.provider.embed(texts, cancellation)
+    cancellation.throwIfAborted()
+    return vectors
   }
 
-  async embedOne(text: string): Promise<number[]> {
+  async embedOne(text: string, signal?: AbortSignal): Promise<number[]> {
     if (!this.available) {
       logger.debug('Embedding 不可用（配置不完整），返回空向量')
       return []
     }
-    const [vec] = await this.embed([text])
+    const [vec] = await this.embed([text], signal)
     const result = vec ?? []
 
     // 🌌 彩蛋

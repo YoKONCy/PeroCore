@@ -43,12 +43,18 @@ export interface ScreenshotResult {
  *
  * @param maxWidth 最大宽度 (缩放以节省 token), 默认 1280
  */
-export async function captureScreen(maxWidth = 1280): Promise<ScreenshotResult | null> {
+export async function captureScreen(
+  maxWidth = 1280,
+  options: { displayId?: string; bounds?: DesktopRect } = {},
+): Promise<ScreenshotResult | null> {
   try {
     if (!Number.isFinite(maxWidth) || maxWidth <= 0) {
       throw new Error('SCREEN_CAPTURE_SIZE_INVALID: maxWidth必须大于0')
     }
-    const display = screen.getPrimaryDisplay()
+    const display = options.displayId
+      ? screen.getAllDisplays().find((item) => String(item.id) === options.displayId)
+      : screen.getPrimaryDisplay()
+    if (!display) throw new Error('DESKTOP_DISPLAY_NOT_FOUND: 显示器已断开')
     const targetWidth = Math.max(1, Math.min(Math.round(maxWidth), display.bounds.width))
     const targetHeight = Math.max(
       1,
@@ -64,13 +70,40 @@ export async function captureScreen(maxWidth = 1280): Promise<ScreenshotResult |
       return null
     }
 
-    const primary =
-      sources.find((source) => String(source.display_id) === String(display.id)) ?? sources[0]
+    const primary = sources.find((source) => String(source.display_id) === String(display.id))
     if (!primary) {
       logger.warn('DesktopAwareness', '未找到主显示器截图源')
       return null
     }
-    const thumbnail = primary.thumbnail
+    let thumbnail = primary.thumbnail
+    let bounds = { ...display.bounds }
+    if (options.bounds) {
+      const left = Math.max(bounds.x, options.bounds.x)
+      const top = Math.max(bounds.y, options.bounds.y)
+      const right = Math.min(bounds.x + bounds.width, options.bounds.x + options.bounds.width)
+      const bottom = Math.min(bounds.y + bounds.height, options.bounds.y + options.bounds.height)
+      if (right <= left || bottom <= top)
+        throw new Error('SCREEN_CAPTURE_REGION_INVALID: 窗口不在目标显示器内')
+      const size = thumbnail.getSize()
+      const x = Math.floor(((left - bounds.x) * size.width) / bounds.width)
+      const y = Math.floor(((top - bounds.y) * size.height) / bounds.height)
+      const width = Math.min(
+        size.width - x,
+        Math.max(1, Math.ceil(((right - left) * size.width) / bounds.width)),
+      )
+      const height = Math.min(
+        size.height - y,
+        Math.max(1, Math.ceil(((bottom - top) * size.height) / bounds.height)),
+      )
+      // 坐标原点与实际裁切像素一致，避免小数舍入造成点击偏移。
+      bounds = {
+        x: bounds.x + (x * bounds.width) / size.width,
+        y: bounds.y + (y * bounds.height) / size.height,
+        width: (width * bounds.width) / size.width,
+        height: (height * bounds.height) / size.height,
+      }
+      thumbnail = thumbnail.crop({ x, y, width, height })
+    }
     const size = thumbnail.getSize()
     if (size.width <= 0 || size.height <= 0 || thumbnail.isEmpty()) {
       throw new Error('SCREEN_CAPTURE_EMPTY: 截图结果为空')
@@ -81,7 +114,7 @@ export async function captureScreen(maxWidth = 1280): Promise<ScreenshotResult |
       width: size.width,
       height: size.height,
       displayId: String(display.id),
-      bounds: { ...display.bounds },
+      bounds,
       workArea: { ...display.workArea },
       scaleFactor: display.scaleFactor,
       timestamp: Date.now(),

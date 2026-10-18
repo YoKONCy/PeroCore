@@ -20,7 +20,7 @@ export interface ApplicationLauncherDeps {
   platform: NodeJS.Platform
   discoverApplications(): Promise<InstalledApplication[]>
   listWindows(): Promise<Array<{ processName: string; title: string }>>
-  activateWindow(target: string): Promise<string>
+  activateWindow(target: string, signal?: AbortSignal): Promise<string>
   openPath(target: string): Promise<string>
   launchAumid(appId: string): Promise<void>
 }
@@ -130,12 +130,15 @@ function isExplicitPath(value: string, platform: NodeJS.Platform): boolean {
 export async function launchApplication(
   appName: string,
   deps: ApplicationLauncherDeps = defaultDeps,
+  signal?: AbortSignal,
 ): Promise<ApplicationLaunchResult> {
+  signal?.throwIfAborted()
   const query = appName.trim()
   if (!query) throw new Error('APPLICATION_NAME_REQUIRED: 请提供应用名称')
 
   if (isExplicitPath(query, deps.platform)) {
     if (!fs.existsSync(query)) throw new Error(`APPLICATION_PATH_NOT_FOUND: ${query}`)
+    signal?.throwIfAborted()
     const error = await deps.openPath(query)
     if (error) throw new Error(`APPLICATION_LAUNCH_FAILED: ${error}`)
     return { success: true, application: query, mode: 'launched', targetType: 'path' }
@@ -149,7 +152,10 @@ export async function launchApplication(
     )
   })
   if (existing) {
-    const title = await deps.activateWindow(existing.title)
+    signal?.throwIfAborted()
+    const title = signal
+      ? await deps.activateWindow(existing.title, signal)
+      : await deps.activateWindow(existing.title)
     return { success: true, application: title, mode: 'activated', targetType: 'window' }
   }
 
@@ -171,6 +177,7 @@ export async function launchApplication(
         .join('、')}`,
     )
   }
+  signal?.throwIfAborted()
   await deps.launchAumid(first.appId)
   return { success: true, application: first.name, mode: 'launched', targetType: 'aumid' }
 }

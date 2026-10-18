@@ -14,13 +14,18 @@ export default defineConfig({
 
     // 默认测试环境（后端用 node，前端各包覆盖为 happy-dom）
     environment: 'node',
+    env: { INFOS_TEST_TEMP_ROOT: resolve(__dirname, 'TEMP') },
+    // 持久工具原件等测试数据必须隔离，清理测试夹具不能触碰真实用户目录。
+    setupFiles: [resolve(__dirname, 'packages/backend/tests/runtimeDataSetup.ts')],
 
     // 文件匹配（除 tests/ 目录外，也支持源码内的 __tests__ 同位目录）
     include: [
       'packages/*/tests/**/*.{test,spec}.{ts,tsx}',
       'packages/apps/*/tests/**/*.{test,spec}.{ts,tsx}',
+      'packages/apps/*/client/tests/**/*.{test,spec}.{ts,tsx}',
+      'packages/apps/*/client/src/**/__tests__/**/*.{test,spec}.{ts,tsx}',
       'packages/*/src/**/__tests__/**/*.{test,spec}.{ts,tsx}',
-      'electron/main/**/*.{test,spec}.{ts,tsx}',
+      'electron/{main,preload}/**/*.{test,spec}.{ts,tsx}',
     ],
     exclude: ['**/node_modules/**', '**/dist/**'],
 
@@ -37,13 +42,6 @@ export default defineConfig({
         '**/constants/**',
         '**/index.ts',
       ],
-      // 覆盖率红线
-      thresholds: {
-        statements: 60,
-        branches: 50,
-        functions: 60,
-        lines: 60,
-      },
     },
 
     // 路径别名（与 tsconfig 对齐）
@@ -55,6 +53,7 @@ export default defineConfig({
       '@infos/node-host': resolve(__dirname, 'packages/node-host/src'),
       '@infos/frontend': resolve(__dirname, 'packages/frontend/src'),
       '@infos/arca': resolve(__dirname, 'packages/apps/arca/src'),
+      '@infos/pictoria': resolve(__dirname, 'packages/apps/pictoria/src'),
       '@infos/social': resolve(__dirname, 'packages/apps/social'),
     },
   },

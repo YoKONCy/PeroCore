@@ -61,7 +61,16 @@ export const useAgentStore = defineStore('agent', () => {
   // ── 动作 ──
 
   /** 拉取所有 Agent 列表 */
-  async function fetchAgents() {
+  let fetchingAgents: Promise<void> | undefined
+  function fetchAgents(): Promise<void> {
+    if (fetchingAgents) return fetchingAgents
+    fetchingAgents = loadAgents().finally(() => {
+      fetchingAgents = undefined
+    })
+    return fetchingAgents
+  }
+
+  async function loadAgents() {
     isLoading.value = true
     error.value = null
     try {
@@ -102,6 +111,7 @@ export const useAgentStore = defineStore('agent', () => {
    * - 仍同步本地 activeAgentId 状态供前端组件使用
    */
   async function switchAgent(agentId: string) {
+    if (fetchingAgents) await fetchingAgents
     if (agentId === activeAgentId.value) return
 
     const target = agents.value.find((agent) => agent.id === agentId)

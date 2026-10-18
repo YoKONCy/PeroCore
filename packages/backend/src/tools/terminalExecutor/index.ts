@@ -7,7 +7,8 @@
 
 import type { BuiltinTool } from '../index'
 import { getProductivityRuntime, resolveExecutionSession } from '../productivityRuntimeHolder'
-import { toolSuccess } from '../../services/execution/toolResult'
+import { toolSuccess, toolFailure } from '../../services/execution/toolResult'
+import { TerminalRunError } from '../../services/execution/terminalManager'
 
 const DEFAULT_TIMEOUT_MS = 30_000
 
@@ -20,18 +21,34 @@ export const terminalExecutorTool: BuiltinTool = {
     if (!command) throw new Error('command 不能为空')
     const timeout = Math.max(100, Math.min(Number(args.timeout ?? DEFAULT_TIMEOUT_MS), 10 * 60_000))
     const session = await resolveExecutionSession(ctx)
-    const result = await getProductivityRuntime().terminals.run({
-      executionSessionId: session.id,
-      command,
-      cwd: args.cwd ? String(args.cwd) : undefined,
-      title: command.slice(0, 80),
-      timeoutMs: timeout,
-      signal: ctx.signal,
-    })
-    return toolSuccess(result.output, {
-      exitCode: result.terminal.exitCode,
-      truncated: result.truncated,
-      executionSessionId: session.id,
-    })
+    try {
+      const result = await getProductivityRuntime().terminals.run({
+        approvedOutsideWorkspace: ctx.approvedOutsideWorkspace,
+        executionSessionId: session.id,
+        command,
+        argv: args.argv as string[] | undefined,
+        cwd: args.cwd ? String(args.cwd) : undefined,
+        title: command.slice(0, 80),
+        timeoutMs: timeout,
+        signal: ctx.signal,
+      })
+      return toolSuccess(result.output, {
+        exitCode: result.terminal.exitCode,
+        truncated: result.truncated,
+        executionSessionId: session.id,
+        terminalId: result.terminal.id,
+        exitReason: result.terminal.exitReason,
+      })
+    } catch (error) {
+      if (!(error instanceof TerminalRunError)) throw error
+      return toolFailure(error.code, `${error.message}\n${error.result.output}`, {
+        terminalId: error.result.terminal.id,
+        executionSessionId: session.id,
+        exitCode: error.result.terminal.exitCode,
+        exitReason: error.result.terminal.exitReason,
+        timedOut: error.code === 'TERMINAL_TIMEOUT',
+        truncated: error.result.truncated,
+      })
+    }
   },
 }

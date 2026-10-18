@@ -1,6 +1,6 @@
-import { and, asc, eq, gte, inArray, lt } from 'drizzle-orm'
+import { and, asc, eq, inArray } from 'drizzle-orm'
 import type { DrizzleDb } from '../database'
-import { flowStateRevisions, flowStates, workContextEntries } from '../database/schema'
+import { flowStateRevisions, flowStates } from '../database/schema'
 
 export type FlowStateRow = typeof flowStates.$inferSelect
 
@@ -26,8 +26,6 @@ export class FlowStateRepository {
     agentId: string
     currentGoal: string
     privateFacts: string
-    workContext?: string
-    workContextUpdatedAtPairCount?: number
     pairId?: string | null
   }): Promise<FlowStateRow> {
     const before = await this.get(input.threadId, input.agentId)
@@ -39,11 +37,6 @@ export class FlowStateRepository {
       beforePrivateFacts: before?.privateFacts ?? '',
       afterCurrentGoal: input.currentGoal,
       afterPrivateFacts: input.privateFacts,
-      beforeWorkContext: before?.workContext ?? '',
-      beforeWorkContextUpdatedAtPairCount: before?.workContextUpdatedAtPairCount ?? 0,
-      afterWorkContext: input.workContext ?? before?.workContext ?? '',
-      afterWorkContextUpdatedAtPairCount:
-        input.workContextUpdatedAtPairCount ?? before?.workContextUpdatedAtPairCount ?? 0,
     })
     const rows = await this.db
       .insert(flowStates)
@@ -52,9 +45,6 @@ export class FlowStateRepository {
         agentId: input.agentId,
         currentGoal: input.currentGoal,
         privateFacts: input.privateFacts,
-        workContext: input.workContext ?? before?.workContext ?? '',
-        workContextUpdatedAtPairCount:
-          input.workContextUpdatedAtPairCount ?? before?.workContextUpdatedAtPairCount ?? 0,
         revision: (before?.revision ?? 0) + 1,
         updatedByPairId: input.pairId ?? null,
       })
@@ -63,9 +53,6 @@ export class FlowStateRepository {
         set: {
           currentGoal: input.currentGoal,
           privateFacts: input.privateFacts,
-          workContext: input.workContext ?? before?.workContext ?? '',
-          workContextUpdatedAtPairCount:
-            input.workContextUpdatedAtPairCount ?? before?.workContextUpdatedAtPairCount ?? 0,
           revision: (before?.revision ?? 0) + 1,
           updatedByPairId: input.pairId ?? null,
           updatedAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
@@ -75,79 +62,12 @@ export class FlowStateRepository {
     return rows[0]!
   }
 
-  async appendWorkContextEntry(input: {
-    threadId: string
-    agentId: string
-    pairId: string
-    pairCount: number
-    content: string
-  }): Promise<void> {
-    await this.db
-      .insert(workContextEntries)
-      .values(input)
-      .onConflictDoUpdate({
-        target: [
-          workContextEntries.threadId,
-          workContextEntries.agentId,
-          workContextEntries.pairId,
-        ],
-        set: { pairCount: input.pairCount, content: input.content },
-      })
-  }
-
-  async listWorkContextEntries(
-    threadId: string,
-    agentId: string,
-    minimumPairCount: number,
-  ): Promise<Array<typeof workContextEntries.$inferSelect>> {
-    return this.db
-      .select()
-      .from(workContextEntries)
-      .where(
-        and(
-          eq(workContextEntries.threadId, threadId),
-          eq(workContextEntries.agentId, agentId),
-          gte(workContextEntries.pairCount, minimumPairCount),
-        ),
-      )
-      .orderBy(asc(workContextEntries.pairCount), asc(workContextEntries.id))
-  }
-
-  async deleteExpiredWorkContextEntries(
-    threadId: string,
-    agentId: string,
-    minimumPairCount: number,
-  ): Promise<void> {
-    await this.db
-      .delete(workContextEntries)
-      .where(
-        and(
-          eq(workContextEntries.threadId, threadId),
-          eq(workContextEntries.agentId, agentId),
-          lt(workContextEntries.pairCount, minimumPairCount),
-        ),
-      )
-  }
-
-  async clearWorkContextEntries(threadId: string, agentId: string): Promise<void> {
-    await this.db
-      .delete(workContextEntries)
-      .where(
-        and(eq(workContextEntries.threadId, threadId), eq(workContextEntries.agentId, agentId)),
-      )
-  }
-
   async clear(threadId: string, agentId: string, pairId?: string | null): Promise<FlowStateRow> {
     return this.save({ threadId, agentId, currentGoal: '', privateFacts: '', pairId })
   }
 
   async rollbackPairs(threadId: string, pairIds: string[]): Promise<void> {
     if (!pairIds.length) return
-    await this.db
-      .delete(workContextEntries)
-      .where(
-        and(eq(workContextEntries.threadId, threadId), inArray(workContextEntries.pairId, pairIds)),
-      )
     const revisions = await this.db
       .select()
       .from(flowStateRevisions)
@@ -166,8 +86,6 @@ export class FlowStateRepository {
           agentId: revision.agentId,
           currentGoal: revision.beforeCurrentGoal,
           privateFacts: revision.beforePrivateFacts,
-          workContext: revision.beforeWorkContext,
-          workContextUpdatedAtPairCount: revision.beforeWorkContextUpdatedAtPairCount,
           revision: 1,
         })
         .onConflictDoUpdate({
@@ -175,8 +93,6 @@ export class FlowStateRepository {
           set: {
             currentGoal: revision.beforeCurrentGoal,
             privateFacts: revision.beforePrivateFacts,
-            workContext: revision.beforeWorkContext,
-            workContextUpdatedAtPairCount: revision.beforeWorkContextUpdatedAtPairCount,
             updatedByPairId: null,
             updatedAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
           },
@@ -190,7 +106,6 @@ export class FlowStateRepository {
   }
 
   async deleteThread(threadId: string): Promise<void> {
-    await this.db.delete(workContextEntries).where(eq(workContextEntries.threadId, threadId))
     await this.db.delete(flowStateRevisions).where(eq(flowStateRevisions.threadId, threadId))
     await this.db.delete(flowStates).where(eq(flowStates.threadId, threadId))
   }

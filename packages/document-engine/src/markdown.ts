@@ -307,7 +307,19 @@ function renderNode(node: DocumentNode, nodes: DocumentNode[]): string {
       return childrenOf(nodes, node.nodeId)
         .map(
           (item, index) =>
-            `${ordered ? `${index + 1}.` : '-'} ${String(item.attributes.text ?? '')}`,
+            `${ordered ? `${index + 1}.` : '-'} ${item.text ?? String(item.attributes.text ?? '')}${childrenOf(
+              nodes,
+              item.nodeId,
+            )
+              .map(
+                (child) =>
+                  '\n' +
+                  renderNode(child, nodes)
+                    .split('\n')
+                    .map((line) => '  ' + line)
+                    .join('\n'),
+              )
+              .join('')}`,
         )
         .join('\n')
     }

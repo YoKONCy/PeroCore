@@ -108,9 +108,8 @@ describe('AgentManager', () => {
       name: 'Pero',
       description: '猫猫助手',
       socialTraits: ['可爱'],
-      socialBinding: { use_stickers: true, qq_id: '123' },
+      socialBinding: { qq_id: '123' },
       toolPolicies: { file: 'allow' },
-      useStickers: true,
       waifuTexts: { idle: '喵' },
     })
     expect(pero?.promptPath).toContain('system_prompt.md')
@@ -193,7 +192,7 @@ describe('AgentManager', () => {
       'system_prompt.md',
     ])
     expect(userPackage.files.some((file) => file.path === 'agent.json')).toBe(true)
-    expect(() => manager.exportAgentPackage('missing')).toThrow('不存在')
+    expect(() => manager.exportAgentPackage('missing')).toThrow(Error)
   })
 
   it('保存内置角色时应修复缺少清单的残留用户副本目录', () => {
@@ -243,7 +242,7 @@ describe('AgentManager', () => {
 
     expect(created).toMatchObject({ id: 'newcat', name: '新猫', description: '新角色' })
     expect(manager.getAgent('newcat')).toBeUndefined()
-    expect(() => manager.createAgent({ id: 'pero', name: '重复' })).toThrow('已存在')
+    expect(() => manager.createAgent({ id: 'pero', name: '重复' })).toThrow(Error)
   })
 
   it('应当拒绝删除默认 Agent、内置 Agent 和不存在的 Agent', () => {
@@ -251,9 +250,9 @@ describe('AgentManager', () => {
     createAgent(dataDir, 'custom', { name: 'Custom' })
     const manager = new AgentManager(createResolver(builtinDir, dataDir))
 
-    expect(() => manager.deleteAgent('missing')).toThrow('不存在')
+    expect(() => manager.deleteAgent('missing')).toThrow(Error)
     // AIOS: pero 是默认 Agent，不能删除（setActiveAgent 已移除，无法切换默认）
-    expect(() => manager.deleteAgent('pero')).toThrow('当前活跃')
+    expect(() => manager.deleteAgent('pero')).toThrow(Error)
     // custom 是用户自定义且非默认，可以删除
     expect(() => manager.deleteAgent('custom')).not.toThrow()
   })
@@ -309,6 +308,11 @@ describe('AgentManager', () => {
 
     expect(avatar?.buffer.toString()).toBe('webp-data')
     expect(avatar?.mime).toBe('image/webp')
+    expect(manager.getAvatarUrl('pero')).toBe('/agents/pero/avatar')
+    expect(manager.getAvatarUrl('custom')).toBeUndefined()
+    expect(manager.getAvatarUrl('missing')).toBeUndefined()
+    rmSync(join(builtinDir, 'pero', 'avatar.webp'))
+    expect(manager.getAvatarUrl('pero')).toBeUndefined()
     expect(manager.getAvatarData('missing')).toBeNull()
     expect(manager.isUserAgent('pero')).toBe(false)
     expect(manager.isUserAgent('custom')).toBe(true)

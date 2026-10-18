@@ -44,6 +44,7 @@ import type { AgentManager } from '../services/agent/agentManager'
 import type { ModelConfig } from '../services/llm/llmService'
 import type { MemoryStoreRegistry } from '../repositories/storeRegistry'
 import type { SocialEventPort, SocialStoragePort } from './socialPorts'
+import { registerSocialNapcatAdapter } from './socialWsBridge'
 import type { KernelScheduler } from '../kernel/kernelScheduler'
 import type { InboundRouteRepository } from '../repositories/inboundRoute.repo'
 import type { ConfigRepository } from '../repositories/config.repo'
@@ -140,6 +141,8 @@ export interface AppManager {
    */
   stop(instanceId: string): Promise<boolean>
 
+  notifyConfigChanged(keys: readonly string[]): Promise<void>
+
   /** 获取实例信息 */
   getInstance(instanceId: string): Promise<AppInstance | undefined>
 
@@ -157,6 +160,7 @@ export interface AppManager {
     input: Record<string, unknown>
     taskContext?: AppTaskContext
     communicationBudget?: number
+    signal?: AbortSignal
   }): Promise<AppCommandResult>
 
   // ── 检查点与事件 ──
@@ -214,6 +218,13 @@ export interface AppManager {
       context?: Record<string, unknown>
     }) => Promise<Record<string, unknown>>,
   ): void
+  setTaskPorts(ports: {
+    control: import('@infos/shared').SocialTaskControlPort
+    registerDelivery: (port: import('@infos/shared').TaskDeliveryPort) => () => void
+  }): void
+  setStatusCardPort(port: import('@infos/shared').SocialStatusCardPort): void
+  setResourcePort(port: import('@infos/shared').SocialResourcePort): void
+  setCreativePort(port: import('@infos/shared').ApplicationCreativePort): void
 
   /**
    * 注册内置应用 runtime factory
@@ -316,6 +327,26 @@ export class AppManagerImpl implements AppManager {
     summary: string
     context?: Record<string, unknown>
   }) => Promise<Record<string, unknown>>
+
+  private taskPorts?: {
+    control: import('@infos/shared').SocialTaskControlPort
+    registerDelivery: (port: import('@infos/shared').TaskDeliveryPort) => () => void
+  }
+  private statusCardPort?: import('@infos/shared').SocialStatusCardPort
+  private resourcePort?: import('@infos/shared').SocialResourcePort
+  private creativePort?: import('@infos/shared').ApplicationCreativePort
+  setCreativePort(port: import('@infos/shared').ApplicationCreativePort): void {
+    this.creativePort = port
+  }
+  setResourcePort(port: import('@infos/shared').SocialResourcePort): void {
+    this.resourcePort = port
+  }
+  setStatusCardPort(port: import('@infos/shared').SocialStatusCardPort): void {
+    this.statusCardPort = port
+  }
+  setTaskPorts(ports: NonNullable<AppManagerImpl['taskPorts']>): void {
+    this.taskPorts = ports
+  }
 
   setHostCommunicator(handler: NonNullable<AppManagerImpl['hostCommunicator']>): void {
     this.hostCommunicator = handler
@@ -632,12 +663,18 @@ export class AppManagerImpl implements AppManager {
         mdpEngine: this.mdpEngine,
         agentManager: this.agentManager,
         threadService: this.threadService!,
+        resources: appId === 'social' ? this.resourcePort : undefined,
+        creative: appId === 'social' ? this.creativePort : undefined,
         flowStateService: this.flowStateService!,
         getAgentModel: this.getAgentModel,
         getSocialScorerModel: this.getSocialScorerModel,
         // 社交应用等需要直接访问内核资源的可选依赖
         socialStorage: this.socialStorage,
         socialEvents: this.socialEvents,
+        taskControl: appId === 'social' ? this.taskPorts?.control : undefined,
+        statusCards: appId === 'social' ? this.statusCardPort : undefined,
+        registerTaskDelivery: appId === 'social' ? this.taskPorts?.registerDelivery : undefined,
+        registerSocialTransport: appId === 'social' ? registerSocialNapcatAdapter : undefined,
         socialExecutions: this.kernelScheduler
           ? {
               run: async <T>(input: {
@@ -646,6 +683,7 @@ export class AppManagerImpl implements AppManager {
                 priority?: number
                 resourceKey?: string
                 maxDurationMs: number
+                signal?: AbortSignal
                 run(context: {
                   signal: AbortSignal
                   executionId: string
@@ -660,7 +698,9 @@ export class AppManagerImpl implements AppManager {
                 }): Promise<T>
               }) => {
                 let output: T | undefined
-                const terminal = await this.kernelScheduler!.submitAndWait({
+                let failure: unknown
+                input.signal?.throwIfAborted()
+                const snapshot = await this.kernelScheduler!.submit({
                   principalId: hostAgentId,
                   taskId: `app:${appId}:${instanceId}:${input.taskId}`,
                   class: input.class,
@@ -673,16 +713,33 @@ export class AppManagerImpl implements AppManager {
                     maxConcurrentIo: 8,
                   },
                   run: async (scheduled) => {
-                    output = await input.run({
-                      signal: scheduled.signal,
-                      executionId: scheduled.descriptor.executionId,
-                      processId: scheduled.descriptor.processId,
-                      consume: scheduled.consume,
-                      beginIo: scheduled.beginIo,
-                    })
+                    try {
+                      output = await input.run({
+                        signal: scheduled.signal,
+                        executionId: scheduled.descriptor.executionId,
+                        processId: scheduled.descriptor.processId,
+                        consume: scheduled.consume,
+                        beginIo: scheduled.beginIo,
+                      })
+                    } catch (error) {
+                      failure = error
+                      throw error
+                    }
                   },
                 })
+                const abort = () => {
+                  void this.kernelScheduler!.cancel(snapshot.descriptor.executionId).catch(
+                    (error) => logger.warn(`社交执行取消失败: ${String(error)}`),
+                  )
+                }
+                input.signal?.addEventListener('abort', abort, { once: true })
+                if (input.signal?.aborted) abort()
+                const terminal = await this.kernelScheduler!.waitForTerminal(
+                  snapshot.descriptor.executionId,
+                ).finally(() => input.signal?.removeEventListener('abort', abort))
                 if (terminal.state !== 'completed') {
+                  if (failure !== undefined) throw failure
+                  input.signal?.throwIfAborted()
                   throw new Error(`SOCIAL_EXECUTION_${terminal.state.toUpperCase()}`)
                 }
                 return output as T
@@ -691,7 +748,6 @@ export class AppManagerImpl implements AppManager {
           : undefined,
         storeRegistry: this.storeRegistry,
         pathResolver: this.pathResolver,
-        agentBuiltinDir: this.pathResolver.resolve('@app/backend/src/assets/agents'),
         inboundRouteRepo: this.inboundRouteRepo,
         configRepo: this.configRepo,
         hostDiaryReader: appId === 'social' ? this.hostDiaryReader : undefined,
@@ -893,6 +949,7 @@ export class AppManagerImpl implements AppManager {
     input: Record<string, unknown>
     taskContext?: AppTaskContext
     communicationBudget?: number
+    signal?: AbortSignal
   }): Promise<AppCommandResult> {
     const manifest = await this.getManifest(params.appId)
     if (!manifest) throw new Error(`应用未安装: ${params.appId}`)
@@ -909,7 +966,9 @@ export class AppManagerImpl implements AppManager {
     if (!entry.runtime.executeCommand) throw new Error(`应用不支持主 Agent 委派: ${params.appId}`)
     const invoke = async (
       execution?: import('@infos/shared').KernelExecutionDescriptor,
+      signal?: AbortSignal,
     ): Promise<AppCommandResult> => {
+      params.signal?.throwIfAborted()
       const request: AppCommandRequest = {
         correlationId: execution?.executionId ?? crypto.randomUUID(),
         executionId: execution?.executionId,
@@ -918,6 +977,10 @@ export class AppManagerImpl implements AppManager {
         input: params.input,
         taskContext: params.taskContext,
         communicationBudget: params.communicationBudget ?? action.defaultCommunicationBudget ?? 8,
+        signal:
+          signal && params.signal
+            ? AbortSignal.any([signal, params.signal])
+            : (signal ?? params.signal),
       }
       logger.info(
         `执行应用命令: app=${params.appId}, instance=${instanceId}, action=${params.action}, correlation=${request.correlationId}`,
@@ -933,8 +996,8 @@ export class AppManagerImpl implements AppManager {
       priority: 7,
       resourceKey: `app-instance:${instanceId}`,
       budget: { maxDurationMs: 10 * 60_000, maxLlmCalls: 24, maxToolCalls: 64, maxConcurrentIo: 8 },
-      run: async ({ descriptor }) => {
-        result = await invoke(descriptor)
+      run: async ({ descriptor, signal }) => {
+        result = await invoke(descriptor, signal)
         if (result.status === 'failed') throw new Error(result.error ?? result.summary)
       },
     })
@@ -969,6 +1032,13 @@ export class AppManagerImpl implements AppManager {
     }
     subs.add(handler)
     return () => subs!.delete(handler)
+  }
+
+  /** 配置通知只通过运行时协议传递，宿主不直接修改子应用内部字段。 */
+  async notifyConfigChanged(keys: readonly string[]): Promise<void> {
+    for (const entry of this.runtimes.values()) {
+      await entry.runtime.onConfigChanged?.(keys)
+    }
   }
 
   // ── 记忆回流 ──

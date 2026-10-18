@@ -47,10 +47,20 @@ canvas,
 /* --- 全局样式基础 --- */
 
 body {
-  background: var(--moe-bg-gradient) fixed;
+  background: #fcfaff;
   /* 恢复字体平滑，让中文更柔和 */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: var(--moe-bg-gradient);
+  pointer-events: none;
+  transform: translateZ(0);
 }
 
 /* 4. 像素边框与硬阴影 ✨ - 调整为柔和阴影 */
@@ -69,6 +79,7 @@ body {
   border-bottom: 2px solid var(--moe-cocoa-brown) !important;
   background-image: radial-gradient(rgba(45, 27, 30, 0.05) 1px, transparent 1px);
   background-size: 8px 8px;
+  transform: translateZ(0);
 }
 
 .VPSidebar {
@@ -79,6 +90,7 @@ body {
     linear-gradient(rgba(167, 216, 240, 0.1) 1px, transparent 1px),
     linear-gradient(90deg, rgba(167, 216, 240, 0.1) 1px, transparent 1px);
   background-size: 20px 20px;
+  transform: translateZ(0);
 }
 
 .VPSidebarItem.level-0 .text {
@@ -189,14 +201,26 @@ body {
   box-shadow: 0 6px 0 var(--moe-cocoa-brown) !important;
 }
 
-/* 8. 文本修饰与代码块 */
+/* 8. 文本修饰与行内代码块 (萌动胶囊微光风格) 🌸 */
 
-code {
-  background-color: var(--moe-vanilla-yellow) !important;
-  color: var(--moe-cocoa-brown) !important;
-  border: 1px solid var(--moe-cocoa-brown);
-  border-radius: 0 !important;
-  padding: 0 4px !important;
+:not(pre) > code {
+  background-color: rgba(244, 114, 182, 0.12) !important;
+  color: #db2777 !important;
+  border: 1px solid rgba(244, 114, 182, 0.28) !important;
+  border-radius: 4px !important;
+  padding: 2px 7px !important;
+  font-family: 'Consolas', 'Fira Code', 'DotGothic16', monospace !important;
+  font-size: 0.88em !important;
+  font-weight: 600 !important;
+  margin: 0 2px !important;
+  letter-spacing: 0.2px;
+  box-shadow: 0 1px 2px rgba(244, 114, 182, 0.08);
+  transition: all 0.15s ease !important;
+}
+
+:not(pre) > code:hover {
+  background-color: rgba(244, 114, 182, 0.2) !important;
+  border-color: rgba(244, 114, 182, 0.5) !important;
 }
 
 .vp-doc {
@@ -257,7 +281,7 @@ code {
   mix-blend-mode: normal !important;
 }
 
-/* 11. 像素背景装饰 ☁️ */
+/* 11. 像素背景装饰 ☁️ (提升为独立硬件加速合成层) */
 .Layout::before {
   content: '';
   position: fixed;
@@ -277,12 +301,312 @@ code {
   opacity: 0.1;
   z-index: -1;
   pointer-events: none;
+  transform: translateZ(0);
 }
 
-/* 12. 内容区域质感优化 */
+/* 12. 内容区域性能优化：移除超长文档滚动容器的反复平铺重绘 */
 .VPContent {
-  background-image:
-    linear-gradient(rgba(249, 168, 212, 0.02) 2px, transparent 2px),
-    linear-gradient(90deg, rgba(249, 168, 212, 0.02) 2px, transparent 2px);
-  background-size: 40px 40px;
+  background: transparent;
+}
+
+/* ══════════════════════════════════════════════════════════
+   🌸 13. 首页“萌力”与“丰富度”全方位增强样式 (Moe Home Boost)
+   ══════════════════════════════════════════════════════════ */
+
+/* Hero 区域层级与浮动增强 */
+.VPHero {
+  position: relative !important;
+  z-index: 1 !important;
+  background: transparent !important;
+}
+
+.VPHero .image {
+  animation: floatPet 4.5s ease-in-out infinite !important;
+}
+
+@keyframes floatPet {
+  0%, 100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-10px) rotate(1deg);
+  }
+}
+
+/* 首页模块大容器 */
+.moe-home-container {
+  max-width: 1152px;
+  margin: 0 auto;
+  padding: 24px 24px 72px;
+}
+
+/* 模块标题 */
+.moe-section-header {
+  text-align: center;
+  margin: 56px 0 28px;
+}
+
+.moe-section-tag {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--moe-sakura-pink-dark);
+  background: rgba(244, 114, 182, 0.15);
+  border: 1px solid rgba(244, 114, 182, 0.3);
+  padding: 4px 12px;
+  border-radius: 9999px;
+  margin-bottom: 8px;
+}
+
+.moe-section-title {
+  font-size: 2rem;
+  font-weight: 900;
+  color: var(--moe-cocoa-brown);
+  border-bottom: none !important;
+  padding-bottom: 0 !important;
+  margin-top: 4px;
+}
+
+.moe-section-desc {
+  font-size: 1rem;
+  color: var(--vp-c-text-2);
+  margin-top: 8px;
+}
+
+/* 1. 三人组名片卡片 */
+.trio-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 20px;
+  margin-top: 24px;
+}
+
+.trio-card {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
+  border: 2px solid var(--moe-cocoa-brown);
+  border-radius: 12px;
+  box-shadow: 4px 4px 0 var(--moe-cocoa-brown);
+  padding: 24px;
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.25s ease;
+}
+
+.trio-card:hover {
+  transform: translateY(-6px);
+  box-shadow: 6px 6px 0 var(--moe-sakura-pink-dark);
+}
+
+.trio-badge {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--moe-cocoa-brown);
+}
+
+.trio-badge.captain {
+  background: var(--moe-sky-blue);
+}
+
+.trio-badge.soul {
+  background: var(--moe-sakura-pink);
+}
+
+.trio-badge.coder {
+  background: var(--moe-dreamy-purple);
+  color: #fff;
+}
+
+.trio-avatar {
+  font-size: 40px;
+  line-height: 1;
+  margin-bottom: 12px;
+}
+
+.trio-name {
+  font-size: 1.25rem;
+  font-weight: 900;
+  color: var(--moe-cocoa-brown);
+  margin-bottom: 4px;
+}
+
+.trio-role {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--moe-sakura-pink-dark);
+  margin-bottom: 12px;
+}
+
+.trio-quote {
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: var(--vp-c-text-2);
+  font-style: italic;
+  background: rgba(249, 168, 212, 0.1);
+  padding: 10px 14px;
+  border-radius: 8px;
+  border-left: 3px solid var(--moe-sakura-pink);
+}
+
+/* 2. 三大 inf 哲学卡片 */
+.inf-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 20px;
+  margin-top: 24px;
+}
+
+.inf-card {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.9) 0%, rgba(253, 242, 248, 0.85) 100%);
+  border: 2px solid var(--moe-cocoa-brown);
+  border-radius: 12px;
+  box-shadow: 4px 4px 0 var(--moe-cocoa-brown);
+  padding: 24px;
+  transition: all 0.2s ease;
+}
+
+.inf-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 6px 6px 0 var(--moe-sky-blue);
+}
+
+.inf-icon {
+  font-size: 32px;
+  margin-bottom: 10px;
+}
+
+.inf-title {
+  font-size: 1.15rem;
+  font-weight: 900;
+  color: var(--moe-cocoa-brown);
+  margin-bottom: 8px;
+}
+
+.inf-desc {
+  font-size: 0.9rem;
+  line-height: 1.65;
+  color: var(--vp-c-text-2);
+}
+
+/* 3. AIOS 六大一等资源网格 */
+.aios-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+  margin-top: 24px;
+}
+
+.aios-item {
+  background: rgba(255, 255, 255, 0.8);
+  border: 1.5px solid var(--moe-cocoa-brown);
+  border-radius: 8px;
+  box-shadow: 3px 3px 0 rgba(45, 27, 30, 0.15);
+  padding: 16px;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.aios-item-icon {
+  font-size: 24px;
+  background: var(--moe-sakura-pink);
+  padding: 6px;
+  border-radius: 6px;
+  border: 1px solid var(--moe-cocoa-brown);
+  line-height: 1;
+}
+
+.aios-item-content h4 {
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--moe-cocoa-brown);
+  margin: 0 0 4px 0;
+}
+
+.aios-item-content p {
+  font-size: 0.85rem;
+  color: var(--vp-c-text-2);
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* 4. Steam 启程横幅 */
+.steam-cta-card {
+  margin-top: 48px;
+  background: linear-gradient(135deg, #1b2838 0%, #171a21 100%);
+  border: 2px solid var(--moe-cocoa-brown);
+  border-radius: 12px;
+  box-shadow: 5px 5px 0 var(--moe-sakura-pink-dark);
+  padding: 32px;
+  color: #ffffff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 16px;
+}
+
+.steam-cta-title {
+  font-size: 1.75rem;
+  font-weight: 900;
+  color: #66c0f4;
+  margin: 0;
+}
+
+.steam-cta-desc {
+  font-size: 1rem;
+  color: #c7d5e0;
+  max-width: 600px;
+  margin: 0;
+  line-height: 1.6;
+}
+
+.steam-btn-group {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 8px;
+}
+
+.steam-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 800;
+  padding: 10px 24px;
+  border-radius: 6px;
+  text-decoration: none !important;
+  border: 2px solid #ffffff;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.steam-action-btn.primary {
+  background: #00adee;
+  color: #ffffff;
+  box-shadow: 0 4px 0 #006699;
+}
+
+.steam-action-btn.primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 0 #006699;
+}
+
+.steam-action-btn.secondary {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.steam-action-btn.secondary:hover {
+  background: rgba(255, 255, 255, 0.2);
+  transform: translateY(-2px);
 }

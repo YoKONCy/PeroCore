@@ -6,129 +6,102 @@ import {
   type DesktopAutomationProvider,
 } from '@infos/backend/tools/desktopAutomation'
 
+const context = {
+  agentId: 'pero',
+  threadId: 'thread-1',
+  sessionId: 'thread-1',
+  source: 'desktop',
+  channel: 'desktop',
+}
 function createProvider(): DesktopAutomationProvider {
   return {
-    click: vi.fn().mockResolvedValue(undefined),
-    doubleClick: vi.fn().mockResolvedValue(undefined),
-    rightClick: vi.fn().mockResolvedValue(undefined),
-    drag: vi.fn().mockResolvedValue(undefined),
-    typeText: vi.fn().mockResolvedValue(undefined),
-    hotkey: vi.fn().mockResolvedValue(undefined),
-    sendNotification: vi.fn().mockResolvedValue(undefined),
+    execute: vi.fn().mockResolvedValue({ success: true }),
     getMousePosition: vi.fn().mockResolvedValue({ x: 0, y: 0 }),
   }
 }
+async function execute(args: Record<string, unknown>, tool = automationExecuteTool) {
+  const result = await tool.execute(args, context)
+  return JSON.parse(typeof result === 'string' ? result : result.output)
+}
 
-describe('desktopAutomation工具', () => {
+describe('桌面自动化工具边界', () => {
   afterEach(() => setDesktopAutomationProvider(null))
 
-  it('应默认按0到1000归一化坐标传递点击', async () => {
+  it('没有观察凭据时不能发出输入，通知不需要借用桌面', async () => {
     const provider = createProvider()
     setDesktopAutomationProvider(provider)
+    const rejected = await execute({ action: 'click', x: 10, y: 20 })
+    expect(rejected.error.dispatched).toBe(false)
+    expect(provider.execute).not.toHaveBeenCalled()
+    await execute({ action: 'notification', text: '提醒' })
+    expect(provider.execute).toHaveBeenCalledTimes(1)
+  })
 
-    const result = JSON.parse(
-      await automationExecuteTool.execute({ action: 'click', x: 500, y: 250 }),
+  it('保留观察绑定与调用方取消信号，截图尺寸由客户端管理', async () => {
+    const provider = createProvider()
+    setDesktopAutomationProvider(provider)
+    const signal = new AbortController().signal
+    const args = { action: 'click', observationId: 'observation', x: 10, y: 20 }
+    await automationExecuteTool.execute(args, { ...context, signal })
+    expect(provider.execute).toHaveBeenCalledWith(
+      args,
+      expect.objectContaining({ threadId: context.threadId, signal }),
     )
-
-    expect(result.success).toBe(true)
-    expect(provider.click).toHaveBeenCalledWith(500, 250, {
-      coordinateSpace: 'normalized',
-    })
   })
 
-  it('应完整传递截图坐标上下文', async () => {
+  it.each([
+    { action: 'click', x: Number.NaN, y: 10 },
+    { action: 'drag', x: 0, y: 0, x2: 20 },
+    { action: 'scroll', x: Infinity, y: 20 },
+  ])('非法或缺失坐标不能进入执行器：$action', async (args) => {
     const provider = createProvider()
     setDesktopAutomationProvider(provider)
-
-    await automationExecuteTool.execute({
-      action: 'drag',
-      x: 10,
-      y: 20,
-      x2: 100,
-      y2: 200,
-      coordinateSpace: 'screenshot',
-      displayId: '7',
-      screenshotWidth: 1280,
-      screenshotHeight: 720,
-    })
-
-    expect(provider.drag).toHaveBeenCalledWith(10, 20, 100, 200, {
-      coordinateSpace: 'screenshot',
-      displayId: '7',
-      screenshotWidth: 1280,
-      screenshotHeight: 720,
-    })
-  })
-
-  it('点击缺少坐标时应返回结构化错误且不执行', async () => {
-    const provider = createProvider()
-    setDesktopAutomationProvider(provider)
-
-    const result = JSON.parse(await automationExecuteTool.execute({ action: 'click' }))
-
-    expect(result).toEqual({
-      success: false,
-      error: {
-        code: 'DESKTOP_COORDINATE_INVALID',
-        message: 'x必须是有限数字',
-      },
-    })
-    expect(provider.click).not.toHaveBeenCalled()
-  })
-
-  it('拖拽缺少目标坐标时应拒绝执行', async () => {
-    const provider = createProvider()
-    setDesktopAutomationProvider(provider)
-
-    const result = JSON.parse(await automationExecuteTool.execute({ action: 'drag', x: 0, y: 0 }))
-
+    const result = await execute({ ...args, observationId: 'observation' })
     expect(result.error.code).toBe('DESKTOP_COORDINATE_INVALID')
-    expect(provider.drag).not.toHaveBeenCalled()
+    expect(provider.execute).not.toHaveBeenCalled()
   })
 
-  it('截图坐标缺少截图尺寸时应拒绝执行', async () => {
+  it('控件操作需要控件引用，文本操作需要文本', async () => {
     const provider = createProvider()
     setDesktopAutomationProvider(provider)
-
-    const result = JSON.parse(
-      await automationExecuteTool.execute({
-        action: 'click',
-        x: 10,
-        y: 10,
-        coordinateSpace: 'screenshot',
-      }),
+    expect(
+      (await execute({ action: 'invoke', observationId: 'observation' })).error.dispatched,
+    ).toBe(false)
+    expect((await execute({ action: 'type', observationId: 'observation' })).error.dispatched).toBe(
+      false,
     )
-
-    expect(result.error.code).toBe('DESKTOP_COORDINATE_INVALID')
-    expect(provider.click).not.toHaveBeenCalled()
+    expect(provider.execute).not.toHaveBeenCalled()
+    await execute({
+      action: 'set_value',
+      observationId: 'observation',
+      elementId: 'element',
+      text: '',
+    })
+    expect(provider.execute).toHaveBeenCalledTimes(1)
   })
 
-  it('文本和快捷键缺少参数时应返回结构化错误', async () => {
+  it('结果不明不能标记为未执行，避免恢复后重复操作', async () => {
     const provider = createProvider()
     setDesktopAutomationProvider(provider)
-
-    const typeResult = JSON.parse(await automationExecuteTool.execute({ action: 'type' }))
-    const hotkeyResult = JSON.parse(await automationExecuteTool.execute({ action: 'hotkey' }))
-
-    expect(typeResult.error.code).toBe('DESKTOP_TEXT_REQUIRED')
-    expect(hotkeyResult.error.code).toBe('DESKTOP_HOTKEY_REQUIRED')
-    expect(provider.typeText).not.toHaveBeenCalled()
-    expect(provider.hotkey).not.toHaveBeenCalled()
+    provider.execute = vi
+      .fn()
+      .mockRejectedValue(new Error('DESKTOP_RESULT_UNCERTAIN: 输入后连接中断'))
+    const result = await execute({ action: 'type', observationId: 'observation', text: '内容' })
+    expect(result.error.code).toBe('DESKTOP_RESULT_UNCERTAIN')
+    expect(result.error.dispatched).not.toBe(false)
   })
 
-  it('应拒绝客户端返回的非法鼠标位置', async () => {
+  it('拒绝客户端返回的非法鼠标位置', async () => {
     const provider = createProvider()
     provider.getMousePosition = vi.fn().mockResolvedValue({ x: Number.NaN, y: 0 })
     setDesktopAutomationProvider(provider)
-
-    const result = JSON.parse(await getMousePositionTool.execute({}))
-
-    expect(result.error.code).toBe('DESKTOP_COORDINATE_INVALID')
+    expect((await execute({}, getMousePositionTool)).error.code).toBe('DESKTOP_COORDINATE_INVALID')
   })
 
-  it('服务未初始化时应返回能力不可用错误', async () => {
+  it('未配置执行器时不能报告输入成功', async () => {
     setDesktopAutomationProvider(null)
-    const result = JSON.parse(await automationExecuteTool.execute({ action: 'click', x: 1, y: 1 }))
-    expect(result.error.code).toBe('DESKTOP_AUTOMATION_UNAVAILABLE')
+    expect(
+      (await execute({ action: 'click', observationId: 'observation', x: 1, y: 1 })).success,
+    ).toBe(false)
   })
 })

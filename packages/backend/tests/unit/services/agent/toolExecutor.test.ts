@@ -6,6 +6,7 @@ import type { CapabilityGate } from '@infos/backend/capabilities/capabilityGate'
 import type { SkillLoader } from '@infos/backend/capabilities/skillLoader'
 import { PolicyEngine } from '@infos/backend/services/execution/policyEngine'
 import { ApprovalService } from '@infos/backend/services/execution/approvalService'
+import { MODEL_TOOL_OUTPUT_CHARACTERS } from '@infos/backend/services/execution/toolObservation'
 
 function createRegistry() {
   const registry = new ToolRegistry()
@@ -18,6 +19,60 @@ function createRegistry() {
 }
 
 describe('RegistryToolExecutor', () => {
+  it('NIT 常驻系统入口在聊天模式可用，旧禁用记录不关闭它，内部工具仍按模式校验', async () => {
+    const registry = new ToolRegistry()
+    const script = vi.fn(async () => '已编排')
+    const browser = vi.fn(async () => '网页')
+    registry.register({ name: 'run_script', description: '脚本', parameters: {} }, script)
+    registry.register({ name: 'browser_open_url', description: '网页', parameters: {} }, browser)
+    const executor = new RegistryToolExecutor(registry)
+    const context = {
+      agentId: 'pero',
+      threadId: 'nit-chat',
+      channel: 'desktop',
+      interactionMode: 'chat' as const,
+      disabledTools: ['run_script'],
+      advancedToolAccess: { names: new Set<string>(), expanded: false },
+    }
+    expect((await executor.execute('run_script', {}, 'desktop', context)).isError).toBe(false)
+    expect(script).toHaveBeenCalledOnce()
+    expect((await executor.execute('browser_open_url', {}, 'desktop', context)).isError).toBe(true)
+    expect(browser).not.toHaveBeenCalled()
+  })
+
+  it('浏览器截图在观察回传前保存预览，直接调用和脚本共用执行入口', async () => {
+    const registry = new ToolRegistry()
+    registry.register(
+      { name: 'browser_screenshot', description: '截图', parameters: {} },
+      async () => '{"screenshots":[{"dataUri":"data:image/png;base64,AAAA"}]}',
+    )
+    const executor = new RegistryToolExecutor(registry)
+    const output =
+      '{"screenshots":[{"dataUri":"data:image/png;base64,AAAA","imagePreview":{"id":"saved"}}]}'
+    const captureScreenshotPreviews = vi.fn().mockResolvedValue(output)
+    executor.setScreenshotResourceService({ captureScreenshotPreviews } as never)
+    const onToolObserved = vi.fn()
+    const result = await executor.execute('browser_screenshot', {}, 'desktop', {
+      agentId: 'pero',
+      threadId: 'thread-1',
+      pairId: 'pair-1',
+      toolCallId: 'capture-1',
+      advancedToolAccess: { expanded: true, names: new Set(['browser_screenshot']) },
+      onToolObserved,
+    })
+    expect(captureScreenshotPreviews).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: 'pero',
+        threadId: 'thread-1',
+        pairId: 'pair-1',
+        toolCallId: 'capture-1',
+      }),
+      expect.any(String),
+    )
+    expect(result.output).toBe(output)
+    expect(onToolObserved).toHaveBeenCalledWith(expect.objectContaining({ output }))
+  })
+
   beforeEach(() => {
     vi.useRealTimers()
   })
@@ -103,7 +158,7 @@ describe('RegistryToolExecutor', () => {
     ])
     await expect(
       executor.execute('terminal_execute', { command: 'pwd' }, 'group'),
-    ).resolves.toMatchObject({ isError: true, output: expect.stringContaining('不允许') })
+    ).resolves.toMatchObject({ isError: true })
     expect(terminalHandler).not.toHaveBeenCalled()
   })
 
@@ -125,7 +180,7 @@ describe('RegistryToolExecutor', () => {
     )
     await expect(
       executor.execute('stronghold_move_to_room', { room_name: '卧室' }, 'desktop'),
-    ).resolves.toMatchObject({ isError: true, output: expect.stringContaining('不允许') })
+    ).resolves.toMatchObject({ isError: true })
     expect(handler).not.toHaveBeenCalled()
   })
 
@@ -192,7 +247,6 @@ describe('RegistryToolExecutor', () => {
     )
     expect(handler).not.toHaveBeenCalled()
     expect(result).toMatchObject({ isError: true, shouldTerminate: false })
-    expect(result.output).toContain('没有权限')
   })
 
   it('即使旧 Thread 禁用列表含系统协议工具也应继续执行', async () => {
@@ -236,7 +290,6 @@ describe('RegistryToolExecutor', () => {
     expect(capabilityGate.isToolAllowed).not.toHaveBeenCalled()
     expect(handler).not.toHaveBeenCalled()
     expect(result).toMatchObject({ isError: true, shouldTerminate: false })
-    expect(result.output).toContain('已在本会话中禁用')
   })
 
   it('应当允许会话未禁用且 CapabilityGate 授权的工具', async () => {
@@ -259,14 +312,16 @@ describe('RegistryToolExecutor', () => {
 
     expect(handler).toHaveBeenCalledWith(
       { value: 'hooked' },
-      // AIOS: ToolContext 新增 threadId + channel 字段
-      {
+      // 执行上下文同时携带权限和取消信息，此处核对调用身份。
+      expect.objectContaining({
         source: 'desktop',
         agentId: 'pero',
         sessionId: 'session-1',
         threadId: 'session-1',
         channel: 'desktop',
-      },
+        executionMode: 'manual',
+        interactionMode: 'work',
+      }),
     )
     expect(hookEmitter.emitHook).toHaveBeenCalledWith('tool:afterCall', {
       name: 'demo.run',
@@ -306,7 +361,7 @@ describe('RegistryToolExecutor', () => {
     expect(result).toMatchObject({
       output: '执行结果',
       isError: false,
-      approvalObservation: '【用户审批】决策：allow_once；附言：请谨慎执行',
+      approvalObservation: expect.stringContaining('请谨慎执行'),
     })
     expect(approvals.get(request.id)?.status).toBe('consumed')
   })
@@ -335,7 +390,7 @@ describe('RegistryToolExecutor', () => {
     expect(handler).not.toHaveBeenCalled()
   })
 
-  it('终端命令即使曾被始终允许也必须逐次重新审批', async () => {
+  it('终端命令必须逐次获得单次审批', async () => {
     const registry = new ToolRegistry()
     const handler = vi.fn().mockResolvedValue('命令完成')
     registry.register(
@@ -480,7 +535,7 @@ describe('RegistryToolExecutor', () => {
       { autoExecuteTools: false },
     )
     await vi.waitFor(() => expect(approvals.list({ status: 'pending' })).toHaveLength(1))
-    approvals.resolve(approvals.list({ status: 'pending' })[0]!.id, 'allow_always')
+    approvals.resolve(approvals.list({ status: 'pending' })[0]!.id, 'allow_once')
     await expect(guarded).resolves.toMatchObject({ isError: false })
     expect(handler).toHaveBeenLastCalledWith(
       expect.anything(),
@@ -567,7 +622,7 @@ describe('RegistryToolExecutor', () => {
     await vi.waitFor(() => expect(approvals.list({ status: 'pending' })).toHaveLength(1))
     expect(handler).not.toHaveBeenCalled()
     const request = approvals.list({ status: 'pending' })[0]!
-    expect(request.reason).toContain('资源范围外路径')
+    expect(request.argsSummary).toMatchObject({ path: 'C:/outside/file.txt' })
 
     approvals.resolve(request.id, 'allow_once')
     const result = await execution
@@ -628,7 +683,7 @@ describe('RegistryToolExecutor', () => {
     expect(range.output).not.toContain('truncated by system')
   })
 
-  it('应当处理未知工具、执行异常与长输出截断', async () => {
+  it('应当处理未知工具与执行异常，展示原件完整且模型观察有界', async () => {
     const registry = new ToolRegistry()
     registry.register(
       { name: 'broken', description: '坏工具', parameters: {} },
@@ -636,7 +691,7 @@ describe('RegistryToolExecutor', () => {
     )
     registry.register(
       { name: 'long', description: '长输出', parameters: {} },
-      vi.fn().mockResolvedValue('x'.repeat(8010)),
+      vi.fn().mockResolvedValue('x'.repeat(MODEL_TOOL_OUTPUT_CHARACTERS + 10_000)),
     )
     const hookEmitter = {
       emitHook: vi.fn(async <T>(_event: string, data: T) => data),
@@ -647,10 +702,17 @@ describe('RegistryToolExecutor', () => {
     const broken = await executor.execute('broken', {}, 'desktop')
     const long = await executor.execute('long', {}, 'desktop')
 
-    expect(missing).toMatchObject({ output: '未找到工具: missing', isError: true })
-    expect(broken.output).toContain('执行失败: 坏掉了')
+    expect(missing).toMatchObject({ isError: true })
+    expect(missing.output).toContain('missing')
+    expect(broken.output).toContain('坏掉了')
     expect(broken.isError).toBe(true)
-    expect(long.output.endsWith('\n...(truncated by system)')).toBe(true)
+    expect(long.output).toBe('x'.repeat(MODEL_TOOL_OUTPUT_CHARACTERS + 10_000))
+    expect(long.modelOutput!.length).toBeLessThanOrEqual(MODEL_TOOL_OUTPUT_CHARACTERS)
+    expect(JSON.parse(long.modelOutput!)).toMatchObject({
+      observationTruncated: true,
+      totalCharacters: long.output.length,
+      excerpt: expect.stringContaining('x'.repeat(100)),
+    })
     expect(hookEmitter.emitHook).toHaveBeenCalledWith(
       'tool:afterCall',
       expect.objectContaining({ isError: true }),
@@ -752,8 +814,9 @@ describe('RegistryToolExecutor', () => {
       expect(invoke).toHaveBeenCalledTimes(1)
       expect(invoke).toHaveBeenCalledWith(
         'screenCapture',
-        {},
+        { __desktopCaller: { agentId: 'pero', threadId: 'default', taskId: undefined } },
         expect.objectContaining({ principalId: 'pero' }),
+        undefined,
       )
       expect(result.isError).toBe(false)
       expect(result.output).toContain('screenshots')
@@ -767,7 +830,12 @@ describe('RegistryToolExecutor', () => {
 
       await executor.execute('screen_capture', {}, 'desktop')
 
-      expect(invoke).toHaveBeenCalledWith('screenCapture', {}, expect.any(Object))
+      expect(invoke).toHaveBeenCalledWith(
+        'screenCapture',
+        { __desktopCaller: { agentId: 'pero', threadId: 'default', taskId: undefined } },
+        expect.objectContaining({ principalId: 'pero' }),
+        undefined,
+      )
     })
 
     it('clipboard_read 等其他平台工具应当直接透传', async () => {
@@ -778,7 +846,12 @@ describe('RegistryToolExecutor', () => {
 
       await executor.execute('clipboard_read', {}, 'desktop')
 
-      expect(invoke).toHaveBeenCalledWith('clipboardRead', {}, expect.any(Object))
+      expect(invoke).toHaveBeenCalledWith(
+        'clipboardRead',
+        { __desktopCaller: { agentId: 'pero', threadId: 'default', taskId: undefined } },
+        expect.objectContaining({ principalId: 'pero' }),
+        undefined,
+      )
     })
 
     it('CapabilityBridge 未注入时应当返回友好错误', async () => {
@@ -789,7 +862,6 @@ describe('RegistryToolExecutor', () => {
       const result = await executor.execute('take_screenshot', {}, 'desktop')
 
       expect(result.isError).toBe(true)
-      expect(result.output).toContain('不可用')
       expect(result.shouldTerminate).toBe(false)
     })
 

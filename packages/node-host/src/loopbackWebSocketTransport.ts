@@ -112,6 +112,9 @@ export class LoopbackWebSocketNodeServer {
 }
 
 export class LoopbackWebSocketNodeTransport implements NodeTransport {
+  isConnected(): boolean {
+    return this.socket.readyState === WebSocket.OPEN
+  }
   readonly localNodeId
   private readonly socket: WebSocket
   private readonly pending = new Map<

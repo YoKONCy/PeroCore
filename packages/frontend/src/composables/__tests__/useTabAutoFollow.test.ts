@@ -52,6 +52,7 @@ describe('useTabAutoFollow', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
   })
 
   it('初始状态 isFollowing 为 true 且 hasNewContent 为 false', () => {

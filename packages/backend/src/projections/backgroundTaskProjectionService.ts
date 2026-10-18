@@ -59,20 +59,6 @@ export class BackgroundTaskProjectionService {
         }),
       )
     }
-    if (task.status === 'waiting_input') {
-      nodes.push(
-        this.node<InputSurfaceProps>(surfaceId, 'input', 'interactive', revision, 'input', {
-          inputId: task.id,
-          title: '等待你的决定',
-          question: task.inputQuestion ?? 'Agent 需要你的确认后才能继续。',
-          context: task.inputContext,
-          actions: [
-            { id: 'deny_once', label: '拒绝', tone: 'danger' },
-            { id: 'allow_once', label: '批准并继续', tone: 'primary' },
-          ],
-        }),
-      )
-    }
     for (const approval of this.approvals?.list({
       status: 'pending',
       agentId: task.agentId,
@@ -113,7 +99,11 @@ export class BackgroundTaskProjectionService {
             principalId: input.agentId,
             title: '想问问你',
             question: input.question,
-            context: input.context ? { message: input.context } : null,
+            questions: input.questions,
+            context:
+              input.context || input.responseMessage
+                ? { message: [input.context, input.responseMessage].filter(Boolean).join('\n') }
+                : null,
             options: input.options,
             allowFreeText: input.allowFreeText,
             required: input.required,

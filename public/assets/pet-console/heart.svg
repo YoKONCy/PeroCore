@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 26 26" fill="none" shape-rendering="crispEdges" role="img" aria-label="heart">
+  <path d="M4 4h5v2h2v2h2V6h2V4h5v2h2v7h-2v3h-3v3h-3v3h-4v-3H7v-3H4v-3H2V6h2z" fill-rule="evenodd" transform="translate(1 2)" fill="var(--pixel-shadow, #44466e)"/>
+  <path d="M4 4h5v2h2v2h2V6h2V4h5v2h2v7h-2v3h-3v3h-3v3h-4v-3H7v-3H4v-3H2V6h2z" fill-rule="evenodd" transform="translate(1 0)" fill="var(--pixel-highlight, #e3dbff)"/>
+  <path d="M4 4h5v2h2v2h2V6h2V4h5v2h2v7h-2v3h-3v3h-3v3h-4v-3H7v-3H4v-3H2V6h2z" fill-rule="evenodd" transform="translate(1 1)" fill="var(--pixel-face, currentColor)"/>
+</svg>

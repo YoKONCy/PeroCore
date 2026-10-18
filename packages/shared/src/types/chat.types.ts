@@ -35,6 +35,7 @@ export interface AiModelConfigDto {
   topP: number | null
   maxTokens: number | null
   contextWindowTokens: number | null
+  maxReActTurns?: number | null
   returnNativeReasoning: boolean
   wireApi: 'chat_completions' | 'responses'
   reasoningDialect: 'auto' | 'openai' | 'deepseek' | 'openrouter' | 'generic'

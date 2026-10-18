@@ -6,7 +6,17 @@
  */
 import { createHash, randomUUID } from 'node:crypto'
 import path from 'node:path'
-import { readFile, rm, stat } from 'node:fs/promises'
+import {
+  lstat,
+  mkdir,
+  open,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises'
 import type {
   FileSnapshotRepository,
   FileChangeOperation,
@@ -14,6 +24,7 @@ import type {
 import type { ToolContext } from '../agent/toolRegistry'
 import type { LocalWorkspaceService } from '../workspace/workspaceService'
 import { createLogger } from '../../lib/logger'
+import { AppError } from '../../lib/appError'
 
 const logger = createLogger('WorkspaceCheckpoint')
 
@@ -28,6 +39,7 @@ export interface SnapshotContext {
 
 export interface RewindFilePreview {
   path: string
+  preservedReason?: 'content_changed' | 'history_gap' | 'incomplete_snapshot' | 'unavailable'
   action:
     | 'delete_created'
     | 'restore_edited'
@@ -38,6 +50,7 @@ export interface RewindFilePreview {
 
 export interface RewindPreview {
   threadId: string
+  agentId?: string
   wholeThread: boolean
   targetMessageId?: number
   pairIds: string[]
@@ -55,11 +68,32 @@ export interface RewindRollbackResult {
   preservedCount: number
 }
 
+interface FileState {
+  content: Buffer | null
+  hash: string | null
+  mode?: number
+}
+
+interface FileRewindPlan {
+  path: string
+  action: RewindFilePreview['action']
+  expectedHash: string | null
+  target: FileState
+  preservedReason?: RewindFilePreview['preservedReason']
+}
+
+interface AppliedFile {
+  plan: FileRewindPlan
+  before: FileState
+}
+
 /**
  * 对话轮次级工作区检查点服务。
  * 首期捕获文本创建/编辑/覆盖；数据模型预留删除与重命名回滚。
  */
 export class WorkspaceCheckpointService {
+  private readonly rewindQueues = new Map<string, Promise<unknown>>()
+
   constructor(
     private readonly repo: FileSnapshotRepository,
     private readonly workspace: LocalWorkspaceService,
@@ -123,6 +157,7 @@ export class WorkspaceCheckpointService {
   async commit(
     captured: Awaited<ReturnType<WorkspaceCheckpointService['captureBefore']>>,
     finalContent: string,
+    historyContinuous = true,
   ): Promise<void> {
     if (!captured) return
     await this.repo.upsert({
@@ -135,17 +170,24 @@ export class WorkspaceCheckpointService {
       originalContent: captured.originalContent,
       originalSha256: captured.originalSha256,
       finalSha256: this.sha256(finalContent),
+      historyContinuous,
     })
   }
 
   /** 写入成功后从磁盘读取最终内容并提交，适用于 edit/append 等无法直接获得完整新文本的工具。 */
   async commitFromDisk(
     captured: Awaited<ReturnType<WorkspaceCheckpointService['captureBefore']>>,
+    written: { oldHash?: string; newHash: string },
   ): Promise<void> {
     if (!captured) return
     const resolved = this.workspace.resolve(captured.context.agentId, captured.filePath)
     const finalContent = await readFile(resolved, 'utf8')
-    await this.commit(captured, finalContent)
+    // 核对工具实际写入的前后版本，避免把读盘前夹入的人工修改归给 Agent。
+    await this.commit(
+      captured,
+      finalContent,
+      captured.originalSha256 === written.oldHash && this.sha256(finalContent) === written.newHash,
+    )
   }
 
   /** 为删除/重命名工具预留统一登记入口。 */
@@ -190,67 +232,28 @@ export class WorkspaceCheckpointService {
     return this.buildPreview(threadId, pairIds, true)
   }
 
-  /**
-   * 按时间逆序回滚；如果文件已偏离 Agent 最终写入状态，则保留当前内容并跳过该路径的整条回滚链。
-   */
-  async rollback(preview: RewindPreview): Promise<RewindRollbackResult> {
+  /** 同一工作区的撤回串行执行，避免不同会话同时恢复同一个文件。 */
+  async rollback(
+    preview: RewindPreview,
+    finalize?: () => Promise<void>,
+  ): Promise<RewindRollbackResult> {
     const agentId = await this.repo.getThreadAgent(preview.threadId)
     if (!agentId) throw new Error('会话不存在或已删除')
-
-    const allSnapshots = await this.repo.listSnapshots(preview.pairIds)
-    const latestByPath = new Map<string, (typeof allSnapshots)[number]>()
-    for (const snapshot of allSnapshots) {
-      if (!latestByPath.has(snapshot.filePath)) latestByPath.set(snapshot.filePath, snapshot)
-    }
-
-    const preservedPaths = new Set<string>()
-    for (const [filePath, snapshot] of latestByPath) {
-      if (!(await this.matchesAgentFinalState(agentId, snapshot))) preservedPaths.add(filePath)
-    }
-
-    // pairIds 由 Repository 按时间正序返回；显式逆序逐轮恢复，保证 A/B/C/D 撤回 B 时严格执行 D→C→B。
-    for (const pairId of [...preview.pairIds].reverse()) {
-      const snapshots = await this.repo.listSnapshots([pairId])
-      for (const snapshot of snapshots) {
-        if (preservedPaths.has(snapshot.filePath)) continue
-        const target = this.workspace.resolve(agentId, snapshot.filePath)
-        switch (snapshot.operation) {
-          case 'create':
-            await rm(target, { force: true })
-            break
-          case 'modify':
-          case 'delete':
-            await this.workspace.write(
-              agentId,
-              snapshot.filePath,
-              snapshot.originalContent ?? '',
-              'desktop',
-            )
-            break
-          case 'rename': {
-            if (snapshot.renameTargetPath) {
-              await rm(this.workspace.resolve(agentId, snapshot.renameTargetPath), { force: true })
-            }
-            await this.workspace.write(
-              agentId,
-              snapshot.filePath,
-              snapshot.originalContent ?? '',
-              'desktop',
-            )
-            break
-          }
-          default:
-            logger.warn(`忽略未知快照操作: ${snapshot.operation}`)
-        }
-      }
-    }
-
-    const files = await this.describeFiles(agentId, allSnapshots, preservedPaths)
-    return {
-      files,
-      rolledBackCount: files.filter((file) => file.action !== 'preserve_changed').length,
-      preservedCount: preservedPaths.size,
-    }
+    const previous = this.rewindQueues.get(agentId) ?? Promise.resolve()
+    const operation = previous
+      .catch(() => undefined)
+      .then(async () => {
+        if (!(await this.repo.getThreadAgent(preview.threadId)))
+          throw new Error('会话不存在或已删除')
+        return this.applyRollback(agentId, preview, finalize)
+      })
+    this.rewindQueues.set(agentId, operation)
+    void operation
+      .finally(() => {
+        if (this.rewindQueues.get(agentId) === operation) this.rewindQueues.delete(agentId)
+      })
+      .catch(() => undefined)
+    return operation
   }
 
   async deletePairs(preview: RewindPreview, deletedBy = 'user') {
@@ -265,21 +268,12 @@ export class WorkspaceCheckpointService {
     targetMessageId?: number,
     pairCountOverride?: number,
   ): Promise<RewindPreview> {
-    const snapshots = await this.repo.listSnapshots(pairIds)
     const agentId = await this.repo.getThreadAgent(threadId)
-    const latestByPath = new Map<string, (typeof snapshots)[number]>()
-    for (const snapshot of snapshots) {
-      if (!latestByPath.has(snapshot.filePath)) latestByPath.set(snapshot.filePath, snapshot)
-    }
-    const preservedPaths = new Set<string>()
-    if (agentId) {
-      for (const [filePath, snapshot] of latestByPath) {
-        if (!(await this.matchesAgentFinalState(agentId, snapshot))) preservedPaths.add(filePath)
-      }
-    }
-    const list = await this.describeFiles(agentId, snapshots, preservedPaths)
+    if (!agentId) throw new Error('会话不存在或已删除')
+    const list = this.describePlans(await this.planFiles(agentId, pairIds))
     return {
       threadId,
+      agentId,
       wholeThread,
       targetMessageId,
       pairIds,
@@ -294,50 +288,235 @@ export class WorkspaceCheckpointService {
     }
   }
 
-  private async matchesAgentFinalState(
-    agentId: string,
-    snapshot: { filePath: string; operation: string; finalSha256: string | null },
-  ): Promise<boolean> {
-    const resolved = this.workspace.resolve(agentId, snapshot.filePath)
-    const info = await stat(resolved).catch(() => null)
-    // 删除快照的 Agent 最终状态就是文件不存在。
-    if (snapshot.operation === 'delete') return info === null
-    if (!snapshot.finalSha256 || !info?.isFile()) return false
-    const content = await readFile(resolved, 'utf8').catch(() => null)
-    return content !== null && this.sha256(content) === snapshot.finalSha256
+  /** 按真实对话顺序合并变更；任意相邻版本断开时，整条路径均不恢复。 */
+  private async planFiles(agentId: string, pairIds: string[]): Promise<FileRewindPlan[]> {
+    const snapshots = await this.repo.listSnapshots(pairIds)
+    const order = new Map(pairIds.map((id, index) => [id, index]))
+    snapshots.sort((left, right) => (order.get(left.pairId) ?? 0) - (order.get(right.pairId) ?? 0))
+    const plans = new Map<string, FileRewindPlan>()
+    for (const snapshot of snapshots) {
+      const key = this.pathKey(snapshot.filePath)
+      const content =
+        snapshot.operation === 'create' || snapshot.originalContent == null
+          ? null
+          : Buffer.from(snapshot.originalContent, 'utf8')
+      const beforeHash = content === null ? null : this.sha256(content)
+      const afterHash = snapshot.operation === 'delete' ? null : snapshot.finalSha256
+      let plan = plans.get(key)
+      if (!plan) {
+        plan = {
+          path: snapshot.filePath,
+          action:
+            snapshot.operation === 'create'
+              ? 'delete_created'
+              : snapshot.operation === 'delete'
+                ? 'restore_deleted'
+                : 'restore_edited',
+          expectedHash: afterHash,
+          target: { content, hash: beforeHash },
+        }
+        plans.set(key, plan)
+      } else if (plan.expectedHash !== beforeHash) {
+        plan.preservedReason = 'history_gap'
+      }
+      if (snapshot.historyContinuous === false) plan.preservedReason = 'history_gap'
+      if (snapshot.historyContinuous === null) plan.preservedReason = 'incomplete_snapshot'
+      if (
+        !['create', 'modify', 'delete'].includes(snapshot.operation) ||
+        (snapshot.operation !== 'create' && content === null) ||
+        (snapshot.originalSha256 && snapshot.originalSha256 !== beforeHash) ||
+        (snapshot.operation !== 'delete' && !afterHash)
+      )
+        plan.preservedReason = 'incomplete_snapshot'
+      plan.expectedHash = afterHash
+    }
+    for (const plan of plans.values()) {
+      if (plan.preservedReason) continue
+      try {
+        if ((await this.readState(agentId, plan.path)).hash !== plan.expectedHash)
+          plan.preservedReason = 'content_changed'
+      } catch {
+        plan.preservedReason = 'unavailable'
+      }
+    }
+    return [...plans.values()]
   }
 
-  private async describeFiles(
-    _agentId: string | null,
-    snapshots: Array<{ filePath: string; operation: string }>,
-    preservedPaths: Set<string>,
-  ): Promise<RewindFilePreview[]> {
-    // 同一文件跨轮次多次修改时只显示一次；listSnapshots 已按最新快照优先排序。
-    const files = new Map<string, RewindFilePreview>()
-    for (const snapshot of snapshots) {
-      if (files.has(snapshot.filePath)) continue
-      if (preservedPaths.has(snapshot.filePath)) {
-        files.set(snapshot.filePath, { path: snapshot.filePath, action: 'preserve_changed' })
-        continue
+  private describePlans(plans: FileRewindPlan[]): RewindFilePreview[] {
+    return plans.map((plan) =>
+      plan.preservedReason
+        ? { path: plan.path, action: 'preserve_changed', preservedReason: plan.preservedReason }
+        : { path: plan.path, action: plan.action },
+    )
+  }
+
+  private async applyRollback(
+    agentId: string,
+    preview: RewindPreview,
+    finalize?: () => Promise<void>,
+  ): Promise<RewindRollbackResult> {
+    const plans = await this.planFiles(agentId, preview.pairIds)
+    const attempted: AppliedFile[] = []
+    try {
+      for (const plan of plans) {
+        if (plan.preservedReason) continue
+        const before = await this.readState(agentId, plan.path)
+        if (before.hash !== plan.expectedHash) {
+          plan.preservedReason = 'content_changed'
+          continue
+        }
+        attempted.push({ plan, before })
+        if (!(await this.applyState(agentId, plan.path, before.hash, plan.target, before.mode))) {
+          attempted.pop()
+          plan.preservedReason = 'content_changed'
+        }
       }
-      const action: RewindFilePreview['action'] =
-        snapshot.operation === 'create'
-          ? 'delete_created'
-          : snapshot.operation === 'delete'
-            ? 'restore_deleted'
-            : snapshot.operation === 'rename'
-              ? 'restore_renamed'
-              : 'restore_edited'
-      files.set(snapshot.filePath, { path: snapshot.filePath, action })
+      // 消息软删除失败时，文件也恢复到撤回前，避免只完成一半。
+      await finalize?.()
+    } catch (cause) {
+      const unrecovered: AppliedFile[] = []
+      for (const entry of [...attempted].reverse()) {
+        try {
+          const current = await this.readState(agentId, entry.plan.path)
+          if (current.hash === entry.before.hash) continue
+          if (
+            current.hash !== entry.plan.target.hash ||
+            !(await this.applyState(agentId, entry.plan.path, current.hash, entry.before))
+          )
+            unrecovered.push(entry)
+        } catch {
+          unrecovered.push(entry)
+        }
+      }
+      if (unrecovered.length) {
+        const recoveryPath = await this.saveRecovery(agentId, preview.threadId, unrecovered)
+        logger.error(`回滚未完成，恢复材料已保留：${recoveryPath}`)
+        throw new AppError('CONFLICT', {
+          message: '回滚未完成；部分文件再次变化，已保留当前内容及撤回前备份',
+          data: { recoveryPath },
+        })
+      }
+      logger.warn(
+        `回滚未完成，已恢复本次修改的文件：${cause instanceof Error ? cause.message : String(cause)}`,
+      )
+      throw new AppError('CONFLICT', { message: '回滚未完成，已恢复本次修改的文件，请稍后重试' })
     }
-    return [...files.values()]
+    const files = this.describePlans(plans)
+    return {
+      files,
+      rolledBackCount: files.filter((file) => file.action !== 'preserve_changed').length,
+      preservedCount: files.filter((file) => file.action === 'preserve_changed').length,
+    }
+  }
+
+  /** 只读普通文件；拒绝通过链接或父目录跳出原工作区。 */
+  private async readState(agentId: string, filePath: string): Promise<FileState> {
+    const resolved = await this.resolveSafePath(agentId, filePath)
+    const info = await lstat(resolved).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return null
+      throw error
+    })
+    if (!info) return { content: null, hash: null }
+    if (!info.isFile()) throw new Error(`回滚目标不是普通文件：${filePath}`)
+    const content = await readFile(resolved)
+    return { content, hash: this.sha256(content), mode: info.mode }
+  }
+
+  private async resolveSafePath(agentId: string, filePath: string): Promise<string> {
+    const root = path.resolve(this.workspace.getWorkspaceRoot(agentId))
+    const resolved = this.workspace.resolve(agentId, filePath)
+    const relative = path.relative(root, resolved)
+    if (!relative || relative.startsWith('..') || path.isAbsolute(relative))
+      throw new Error('回滚路径超出工作区')
+    const realRoot = await realpath(root)
+    let parent = path.dirname(resolved)
+    for (;;) {
+      try {
+        parent = await realpath(parent)
+        break
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        const next = path.dirname(parent)
+        if (next === parent) throw error
+        parent = next
+      }
+    }
+    const realRelative = path.relative(realRoot, parent)
+    if (realRelative.startsWith('..') || path.isAbsolute(realRelative))
+      throw new Error('回滚路径的父目录超出工作区')
+    return resolved
+  }
+
+  /** 写入采用临时文件替换，并在替换前再次检查当前版本。 */
+  private async applyState(
+    agentId: string,
+    filePath: string,
+    expectedHash: string | null,
+    target: FileState,
+    mode?: number,
+  ): Promise<boolean> {
+    const resolved = await this.resolveSafePath(agentId, filePath)
+    if ((await this.readState(agentId, filePath)).hash !== expectedHash) return false
+    if (target.content === null) {
+      await rm(resolved, { force: true })
+      return true
+    }
+    await mkdir(path.dirname(resolved), { recursive: true })
+    const temporary = path.join(
+      path.dirname(resolved),
+      `.${path.basename(resolved)}.${randomUUID()}.rewind`,
+    )
+    try {
+      const handle = await open(temporary, 'wx', target.mode ?? mode)
+      try {
+        await handle.writeFile(target.content)
+        await handle.sync()
+      } finally {
+        await handle.close()
+      }
+      if ((await this.readState(agentId, filePath)).hash !== expectedHash) return false
+      await rename(temporary, resolved)
+      return true
+    } finally {
+      await rm(temporary, { force: true }).catch(() => undefined)
+    }
+  }
+
+  private async saveRecovery(
+    agentId: string,
+    threadId: string,
+    entries: AppliedFile[],
+  ): Promise<string> {
+    const directory = path.join(
+      path.dirname(this.workspace.getWorkspaceRoot(agentId)),
+      'rewind-recovery',
+      randomUUID(),
+    )
+    await mkdir(directory, { recursive: true })
+    const files = []
+    for (const [index, entry] of entries.entries()) {
+      const backup = entry.before.content === null ? null : `${index}.bin`
+      if (backup) await writeFile(path.join(directory, backup), entry.before.content!)
+      files.push({ path: entry.plan.path, backup, sha256: entry.before.hash })
+    }
+    await writeFile(
+      path.join(directory, 'recovery.json'),
+      JSON.stringify({ threadId, files }, null, 2),
+      'utf8',
+    )
+    return directory
+  }
+
+  private pathKey(filePath: string): string {
+    const normalized = path.posix.normalize(filePath.replaceAll('\\', '/'))
+    return process.platform === 'win32' ? normalized.toLowerCase() : normalized
   }
 
   private normalizeRelative(agentId: string, resolved: string): string {
     return path.relative(this.workspace.getWorkspaceRoot(agentId), resolved).replaceAll('\\', '/')
   }
 
-  private sha256(content: string): string {
-    return createHash('sha256').update(content, 'utf8').digest('hex')
+  private sha256(content: string | Buffer): string {
+    return createHash('sha256').update(content).digest('hex')
   }
 }

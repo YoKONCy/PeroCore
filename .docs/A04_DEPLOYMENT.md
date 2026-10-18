@@ -1,9 +1,8 @@
 # 多目标部署架构
 
-> **版本**：0.9.2-rc1 · **更新时间**：2026-08-28
+> **版本**：0.9.4 · **更新时间**：2026-10-17
 > **适用范围**：infOS 全项目部署策略
 > **依赖规范**：[A07_CROSS_PLATFORM](./A07_CROSS_PLATFORM.md)、[A08_DEVOPS](./A08_DEVOPS.md)
-> **实施路线**：[TEMP_MULTI_NODE_DELIVERY_PLAN](./TEMP-todo/TEMP_MULTI_NODE_DELIVERY_PLAN.md)
 >
 > **当前阶段**：生产基线是单个 Control Authority Server 对接多个 Client/Capability Node。Electron/Steam/便携版客户端强制绑定同设备内置 Daemon；浏览器、CLI、移动端等远程纯客户端可连接用户选择的 Server。多 Server 只规划手动完整快照同步，不实施实时 Federation、跨 Server Replica 或自动 Command Route。
 
@@ -11,14 +10,14 @@
 
 ## 1. 部署形态与 AIOS 运行时边界
 
-infOS 的核心后端是纯 Node Daemon；Electron 是业务客户端和桌面能力提供者。详细职责见 [A09_AIOS_ARCHITECTURE](./A09_AIOS_ARCHITECTURE.md#7-daemon节点与能力提供者)。
+infOS 的核心后端是纯 Node Daemon；Electron 是业务客户端和桌面能力提供者。详细职责见 [A09_AIOS_ARCHITECTURE](./A09_AIOS_ARCHITECTURE.md#7-nodefacet控制面与能力提供者)。
 
-| 形态                              | Daemon 生命周期                                                 | Electron / 客户端职责        | 适用场景             |
-| --------------------------------- | --------------------------------------------------------------- | ---------------------------- | -------------------- |
-| Electron 标准版、Steam 版、便携版 | 打包后由 Electron 启动内置 daemon bundle，并注入统一 `@data` 根 | GUI、3D、Steam、平台注册能力 | 普通桌面用户         |
-| 开发环境                          | 可由开发脚本独立启动或统一编排                                  | 连接 HTTP/SSE/WS 服务        | 本地开发             |
-| Docker / 服务器                   | 独立运行                                                        | Web/CLI/Electron 等客户端连接         | 长时间运行与远程访问 |
-| 远程纯客户端                      | 连接指定 Control Authority Daemon                               | GUI、Input Seat、可选能力 Provider    | 多节点接入           |
+| 形态                              | Daemon 生命周期                                                 | Electron / 客户端职责              | 适用场景             |
+| --------------------------------- | --------------------------------------------------------------- | ---------------------------------- | -------------------- |
+| Electron 标准版、Steam 版、便携版 | 打包后由 Electron 启动内置 daemon bundle，并注入统一 `@data` 根 | GUI、3D、Steam、平台注册能力       | 普通桌面用户         |
+| 开发环境                          | 可由开发脚本独立启动或统一编排                                  | 连接 HTTP/SSE/WS 服务              | 本地开发             |
+| Docker / 服务器                   | 独立运行                                                        | Web/CLI/Electron 等客户端连接      | 长时间运行与远程访问 |
+| 远程纯客户端                      | 连接指定 Control Authority Daemon                               | GUI、Input Seat、可选能力 Provider | 多节点接入           |
 
 **强制边界**：`packages/backend`、`packages/frontend`、`packages/shared` 均不得 import Electron；业务数据一律走 HTTP/SSE/WS，IPC 仅用于 Electron 专属能力与能力 Provider 通道。
 
@@ -134,14 +133,14 @@ export const features = {
 
 ### 6.1 构建变体总览
 
-| #   | 变体             | 平台        | Electron | Steam SDK | 打包格式       | 自动更新         | 状态     |
-| --- | ---------------- | ----------- | -------- | --------- | -------------- | ---------------- | -------- |
-| 1   | **Steam 版**     | Windows x64 | ✅       | ✅        | NSIS 安装包    | Steam 自带       | 当前主力 |
-| 2   | **标准版**       | Windows x64 | ✅       | ❌        | NSIS 安装包    | electron-updater | 当前主力 |
-| 3   | **便携版**       | Windows x64 | ✅       | ❌        | ZIP 解压即用   | electron-updater | 当前主力 |
+| #   | 变体             | 平台        | Electron | Steam SDK | 打包格式       | 自动更新         | 状态       |
+| --- | ---------------- | ----------- | -------- | --------- | -------------- | ---------------- | ---------- |
+| 1   | **Steam 版**     | Windows x64 | ✅       | ✅        | NSIS 安装包    | Steam 自带       | 当前主力   |
+| 2   | **标准版**       | Windows x64 | ✅       | ❌        | NSIS 安装包    | electron-updater | 当前主力   |
+| 3   | **便携版**       | Windows x64 | ✅       | ❌        | ZIP 解压即用   | electron-updater | 当前主力   |
 | 4   | **Docker 版**    | Linux x64   | ❌       | ❌        | Docker Image   | docker pull      | 接线校准中 |
-| 5   | **Linux 桌面版** | Linux x64   | ✅       | ❌        | AppImage / deb | 待定             | 待实现   |
-| 6   | **Mac 版**       | macOS ARM64 | ✅       | ❌        | DMG            | 待定             | 待实现   |
+| 5   | **Linux 桌面版** | Linux x64   | ✅       | ❌        | AppImage / deb | 待定             | 待实现     |
+| 6   | **Mac 版**       | macOS ARM64 | ✅       | ❌        | DMG            | 待定             | 待实现     |
 
 ### 6.2 双轴解耦模型
 
@@ -218,13 +217,25 @@ export function getDataDir(): string {
 
 ### 6.8 第三方 Native Addon
 
-| Addon                | win-x64        | linux-x64   | mac-arm64   | Docker      |
-| -------------------- | -------------- | ----------- | ----------- | ----------- |
-| `steamworks.js`      | ✅ 仅 steam 版 | ❌          | ❌          | ❌          |
-| `better-sqlite3`     | ✅ prebuild    | ✅ prebuild | ✅ prebuild | ✅ prebuild |
-| `node-pty`           | ✅ rebuild     | ✅ rebuild  | ✅ rebuild  | ✅ rebuild  |
+| Addon            | win-x64        | linux-x64   | mac-arm64   | Docker      |
+| ---------------- | -------------- | ----------- | ----------- | ----------- |
+| `steamworks.js`  | ✅ 仅 steam 版 | ❌          | ❌          | ❌          |
+| `better-sqlite3` | ✅ prebuild    | ✅ prebuild | ✅ prebuild | ✅ prebuild |
+| `node-pty`       | ✅ rebuild     | ✅ rebuild  | ✅ rebuild  | ✅ rebuild  |
 
 ---
+
+### 6.9 NapCat 安装与启动
+
+Windows x64 标准版、Steam 版、便携版及开发环境共用 NapCat 安装器。安装位置统一为 `paths.data/tools/NapCat`，不写入只读应用目录或 asar。官方 Node 发行包的版本与 SHA256 固定在 `electron/main/services/napcat.ts`，启动使用安装包内的 `node.exe`，不要求用户安装 Node 或修改 PATH。
+
+更新保留账号连接配置、WebUI 设置、登录数据和第三方插件；`napcat/plugins/builtin` 属于官方内置程序，随发行包同步更新，其设置仍保存在受保护的 `config/plugins` 下。旧内置插件与当前事件接口不匹配时，即使 NapCat 核心版本相同也会显示更新修复入口。根目录 `config.json` 是 QQ 版本元数据，必须和 `package.json`、原生程序文件同步更新；已有安装在启动前校验程序文件，并按同包 QQ 清单校正旧版本元数据。程序文件缺失或 QQ 清单不一致时阻止启动并提示重新安装，不清空账号数据。
+
+安装器先验证归档完整性与版本，再覆盖程序文件；覆盖期间保留 `.infos-installing` 标记，全部校验成功后才移除。中断安装会显示更新入口，并阻止继续加载混合版本。退出时结束本次启动的 Windows 进程树，避免 Worker 残留占用原生文件。
+
+4.18.38 的已知运行问题在安装预检和启动预检中按版本及接口布局修复：未指定游标的空历史返回空数组，明确游标查询失败仍保留错误；引用消息缺少元数据而使用序号查询属于调试诊断，真正的解析失败仍保留错误日志。群历史接口按 `GoCQHTTP_GetGroupMsgHistory` 识别，枚举命名空间及局部变量从代码中定位。修复原子写入并可重复执行，未知版本不修改，接口布局不匹配时保留原文件并记录诊断，不阻止有效程序启动；程序文件和 QQ 元数据的完整性检查仍然有效。开发环境和 release 使用相同逻辑。
+
+WebUI 的 SPA 回退固定发送 `index.html`，并将静态目录设为 `sendFile` 的根目录，避免 `.infos` 等隐藏安装目录触发 Express 的隐藏文件过滤；不放开任意隐藏文件访问。内嵌管理页使用 `/webui/` 入口，首次加载按来源清理独立管理分区的 Service Worker、CacheStorage 和 HTTP 缓存，保留 Cookie 与 localStorage 登录凭据。就绪探测要求 HTML 文档，200 状态的 JSON 错误不能被当作界面就绪。
 
 ## 7. Docker 部署规范
 
@@ -249,7 +260,7 @@ services:
       # 鉴权（可选，不设则首次启动自动生成）
       - INFOS_AUTH_TOKEN=your_custom_password
     healthcheck:
-      test: ['CMD', 'curl', '-f', 'http://localhost:9120/health']
+      test: ['CMD', 'curl', '-f', 'http://localhost:9120/api/health']
       interval: 30s
       timeout: 5s
       retries: 3
@@ -269,13 +280,13 @@ volumes:
 
 ### 7.2 运行时选择
 
-| 场景            | 推荐运行时   | 说明                            |
-| --------------- | ------------ | ------------------------------- |
-| Electron 桌面版 | **Node.js**  | Electron 内嵌 Node.js，无法更换 |
-| Docker 后端版   | **Node.js**  | 与 Electron Daemon 保持同一运行时语义，Native Addon 统一验证 |
-| Docker 前端版   | **Nginx**    | 静态文件服务                    |
-| 开发环境        | **Node.js**  | `pnpm start` 一键启动           |
-| CI/CD           | **Node.js**  | 兼容性最好                      |
+| 场景            | 推荐运行时  | 说明                                                         |
+| --------------- | ----------- | ------------------------------------------------------------ |
+| Electron 桌面版 | **Node.js** | Electron 内嵌 Node.js，无法更换                              |
+| Docker 后端版   | **Node.js** | 与 Electron Daemon 保持同一运行时语义，Native Addon 统一验证 |
+| Docker 前端版   | **Nginx**   | 静态文件服务                                                 |
+| 开发环境        | **Node.js** | `pnpm start` 一键启动                                        |
+| CI/CD           | **Node.js** | 兼容性最好                                                   |
 
 ---
 
@@ -467,7 +478,7 @@ Idempotency Key / Deadline
 
 禁止通过共享路径、绝对路径、共享数据库连接或未版本化内存对象跨 Node 协作。
 
-多 Server 之间不建立实时副本或自动路由。用户在“分布式”Tab执行“从此服务器上同步最新数据”时，所选 Server 的完整用户数据快照是唯一来源，整体覆写当前 Server 并保留当前机器身份；此后各 Server 继续独立运行，不做自动追平。实施细节见 [TEMP_MULTI_NODE_DELIVERY_PLAN](./TEMP-todo/TEMP_MULTI_NODE_DELIVERY_PLAN.md) Phase 9。
+多 Server 之间不建立实时副本或自动路由。用户在“分布式”Tab执行“从此服务器上同步最新数据”时，所选 Server 的完整用户数据快照是唯一来源，整体覆写当前 Server 并保留当前机器身份；此后各 Server 继续独立运行，不做自动追平。
 
 ### 9.6 跨节点文件与资产
 

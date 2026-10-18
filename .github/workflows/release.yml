@@ -35,7 +35,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
 
       - uses: actions/cache@v4
@@ -78,7 +78,12 @@ jobs:
             }
             Write-Warning "Electron Builder 首次失败，清理产物后重试（用于恢复 rcedit 文件锁定）"
             Start-Sleep -Seconds 5
-            Remove-Item "release-electron" -Recurse -Force -ErrorAction SilentlyContinue
+            $workspacePath = [IO.Path]::GetFullPath($env:GITHUB_WORKSPACE)
+            $releasePath = [IO.Path]::GetFullPath((Join-Path $workspacePath 'release-electron'))
+            if ([IO.Path]::GetDirectoryName($releasePath) -ne $workspacePath) {
+              throw '发行产物清理路径越界'
+            }
+            Remove-Item -LiteralPath $releasePath -Recurse -Force -ErrorAction SilentlyContinue
             $attempt += 1
           }
         env:
@@ -119,7 +124,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
 
       - uses: actions/cache@v4
@@ -216,7 +221,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
 
       - uses: actions/cache@v4
@@ -246,7 +251,7 @@ jobs:
         run: node scripts/build-daemon-bundle.mjs && node scripts/collect-daemon-deps.mjs && pnpm rebuild:daemon-deps
 
       - name: 构建 Electron Steam 版
-        run: pnpm exec electron-builder --config electron-builder.steam.yml
+        run: pnpm exec electron-builder --config electron-builder.steam.yml --publish never
         env:
           INFOS_EDITION: steam
 
@@ -286,9 +291,18 @@ jobs:
         shell: bash
         run: |
           VERSION=${GITHUB_REF_NAME#v}
+          if [[ ! "$VERSION" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+            echo "发布版本不能作为 Docker 标签使用" >&2
+            exit 1
+          fi
           OWNER=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "owner=$OWNER" >> "$GITHUB_OUTPUT"
+          TAG="${GITHUB_REF_NAME,,}"
+          if [[ "$TAG" != *-rc* && "$TAG" != *-alpha* && "$TAG" != *-beta* ]]; then
+            echo "backend_latest=${REGISTRY}/${OWNER}/infos-backend:latest" >> "$GITHUB_OUTPUT"
+            echo "frontend_latest=${REGISTRY}/${OWNER}/infos-frontend:latest" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: docker/setup-buildx-action@v4
 
@@ -306,7 +320,7 @@ jobs:
           file: docker/Dockerfile.backend
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ steps.meta.outputs.owner }}/infos-backend:latest
+            ${{ steps.meta.outputs.backend_latest }}
             ${{ env.REGISTRY }}/${{ steps.meta.outputs.owner }}/infos-backend:${{ steps.meta.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -318,7 +332,7 @@ jobs:
           file: docker/Dockerfile.frontend
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ steps.meta.outputs.owner }}/infos-frontend:latest
+            ${{ steps.meta.outputs.frontend_latest }}
             ${{ env.REGISTRY }}/${{ steps.meta.outputs.owner }}/infos-frontend:${{ steps.meta.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -331,6 +345,8 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - uses: actions/download-artifact@v4
         with:
@@ -346,23 +362,17 @@ jobs:
         shell: bash
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          sed "s/__INFOS_VERSION__/${VERSION}/g" docker-compose.release.yml > release-assets/docker-compose.yml
+          OWNER=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+          if [[ ! "$VERSION" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ || ! "$OWNER" =~ ^[a-z0-9-]+$ ]]; then
+            echo "发布镜像名称或版本无效" >&2
+            exit 1
+          fi
+          sed -e "s/__INFOS_VERSION__/${VERSION}/g" -e "s/__INFOS_OWNER__/${OWNER}/g" docker-compose.release.yml > release-assets/docker-compose.yml
 
       # Steam 版不上传到 GitHub Release（通过 SteamPipe 发布）
 
-      - name: 生成 Changelog
-        id: changelog
-        run: |
-          # 从最近两个 tag 之间提取 commit 信息
-          PREV_TAG=$(git tag --sort=-v:refname | sed -n '2p')
-          if [ -z "$PREV_TAG" ]; then
-            COMMITS=$(git log --oneline --no-decorate)
-          else
-            COMMITS=$(git log --oneline --no-decorate "${PREV_TAG}..HEAD")
-          fi
-          echo "commits<<EOF" >> $GITHUB_OUTPUT
-          echo "$COMMITS" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+      - name: 生成中文发布说明
+        run: node scripts/generate-release-notes.mjs "${{ github.ref_name }}" release-notes.md
 
       - name: 生成发布元数据
         id: release_meta
@@ -385,93 +395,7 @@ jobs:
           make_latest: ${{ steps.release_meta.outputs.prerelease != 'true' }}
           files: release-assets/*
           overwrite_files: true
-          body: |
-            ## 🎉 ${{ github.ref_name }} 版本更新
-
-            萌动链接：PeroperoChat！是一款开源的 AI 桌面伴侣应用，集成本地大模型、3D 桌宠、Plugin 系统与多智能体框架。
-
-            ---
-
-            ### 📦 下载说明
-
-            | 文件 | 说明 | 推荐人群 |
-            |------|------|----------|
-            | `*-Setup-*.exe` | 安装版 | 普通用户，数据存储在系统用户目录 |
-            | `*-Portable*.zip` | 便携版（解压即用） | 随身携带或多设备使用，数据存储于程序目录 |
-
-            > ⚠️ Windows 可能弹出 SmartScreen 警告，点击“仍要运行”即可。本软件为开源项目，源码可在仓库中查阅。
-            > 🎮 Steam 用户请直接通过 Steam 客户端获取更新。
-
-            ---
-
-            ### 🆕 本版本更新内容
-
-            #### ✨ 新特性与体验完善
-
-            - 新增知识库前端工作台与核心记忆档案增强：支持事实检索、来源检查、事实撤回、核心记忆归档，以及保留 TriviumDB 图节点和关系边的安全删除语义。
-            - 新增“朗读此消息”能力，统一桌面开发版与发行版的音频输出节点身份和 TTS 投递链路。
-            - 对话历史改为首屏 60 轮、稳定游标分页和顶部加载锚定；加入富文本 LRU、消息 revision 复用、Mermaid 动态加载及不可见嵌入内容卸载。
-            - 工作上下文改为结构化来源存储，同一文件、网页或浏览器实例始终保留最新内容，并按配置轮次和模型 Token 窗口自动淘汰最旧内容。
-            - NapCat 在进程存活期间持续幂等同步所有 QQ 账号的 infOS 反向 WebSocket 配置，支持登录新账号、切换账号及配置被 NapCat 重写后的自动恢复。
-            - 深浅色切换图标补齐太阳与月亮图形，分布式入口使用独立图标，提升导航辨识度。
-
-            #### 🐛 问题修复
-
-            - 恢复普通对话的后台 Scorer 消费链路：连续未覆盖对话达到阈值后自动提炼核心记忆；上下文窗口大兜底会批量处理全部未覆盖轮次，不再被单条 Coverage 阻断。
-            - 修复大文件编辑工具参数流造成的 O(n²) Surface 帧膨胀、前端缺少“正在编辑”状态以及后续流式回复积压到 ReAct 结束才显示的问题。
-            - 修复 `read_file` 与 `read_file_range` 在工具内部按 800 行读取后又被统一 8000 字符二次截断的问题，确保合法读取窗口完整进入当前 ReAct。
-            - 修复 RAG/Embedding 进度被消息 `v-memo` 缓存挡住的问题，恢复“正在生成记忆检索向量”等实时过程提示；核心记忆页会在对话完成后自动刷新。
-            - 修复内部历史标签中的精确时间被模型复述到前端的问题：新上下文不再注入秒级时间，旧格式泄漏由精确规则清理，同时保持正常 HTML 渲染。
-            - 修复连续 HTML 块被空行错误拆分、知识库 Tab 未定义 VNode、核心记忆与知识库旧数据字段缺失、对话 Tab 切换空白及不稳定窗口化引发的滚动回弹问题。
-            - 修复长记忆第 N+1 轮兜底语义、Token 预算 Agent 归属与缺失窗口元数据、发行版 TTS 输出节点不可用等问题。
-
-            #### 🏗️ 架构与性能重构
-
-            - 重构 Conversation Surface 工具参数流：正文预览限制为 2048 字符，后续仅发送轻量进度边界；持久化审计只保存路径、哈希、范围和规模，不保存读取正文。
-            - 重构自动工作上下文为带 `sourceKey` 的版本化结构，支持同轮与跨轮最新值去重，并兼容既有纯文本记录。
-            - 完善 Event Memory Coverage、后台提炼日志、核心记忆/事实归档契约和软删除状态，使事件、事实与关系图保持一致。
-            - 优化 Projection 与 Compositor：稳定消息游标、Surface 合并快照、工具结果索引、对象身份复用及流式 Markdown 分段共同降低长对话渲染开销。
-            - 撤回会改变消息估算高度的动态窗口化和 `content-visibility` 方案，优先保证长回复滚动、到底行为与侧栏切换稳定。
-            - 强化 NapCat OneBot 配置同步的多账号幂等性、字段校准、变更检测与 IPC 向后兼容。
-
-            > 以下 Commit 记录包含从上一版本到当前版本的完整提交摘要；上方内容为面向用户的重点归纳。
-
-            ---
-
-            ### 📝 Commit 记录
-
-            ${{ steps.changelog.outputs.commits }}
-
-            ---
-
-            ### 🚀 快速开始
-
-            1. 下载并安装（安装版）或直接运行（便携版）。
-            2. 首次启动后在设置中配置 LLM API Key。
-            3. 如需 Docker 部署，可拉取对应版本镜像。
-            4. 详细使用文档请参阅项目 Wiki。
-
-            ---
-
-            ### 🐳 Docker 用户
-
-            下载 Release 附件中的 `docker-compose.yml`，即可使用本版本固定镜像一键启动：
-
-            ```bash
-            curl -LO https://github.com/YoKONCy/infOS/releases/download/${{ github.ref_name }}/docker-compose.yml
-            docker compose up -d
-            ```
-
-            启动后访问 `http://localhost:3000`。如需更新当前版本镜像，可执行：
-
-            ```bash
-            docker compose pull
-            docker compose up -d
-            ```
-
-            ---
-
-            *由 GitHub Actions 自动构建发布 · 构建时间：${{ steps.release_meta.outputs.build_time }}*
+          body_path: release-notes.md
           draft: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

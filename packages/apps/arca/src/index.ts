@@ -10,3 +10,5 @@ export {
 export { ArcaDiscoveryStore, type ArcaDiscoveryRecord } from './discovery'
 export { arcaAdapterManifest } from './adapterManifest'
 export { arcaManifest } from './manifest'
+export { ArcaApplication } from './application'
+export { arcaHostKey, arcaHostAuthorized } from './hostCredentials'

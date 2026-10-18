@@ -14,12 +14,14 @@ export interface AgentApplicationTaskInput {
   instruction: string
   priority?: number
   metadata?: Record<string, unknown>
+  targetThreadId?: string
 }
 
 export function createAgentApplicationTaskPort(input: {
   appId: string
   instanceId: string
   scheduler: BackgroundScheduler
+  realmId?: string
 }): ApplicationTaskPort {
   const submitted = new Map<string, string>()
   return {
@@ -31,14 +33,17 @@ export function createAgentApplicationTaskPort(input: {
       }
       const value = requireTaskInput(request.input)
       const task = await input.scheduler.dispatch({
+        idempotencyKey: `application:${input.appId}:${input.instanceId}:${request.idempotencyKey}`,
         agentId: value.agentId,
         title: value.title,
         instruction: value.instruction,
         priority: value.priority,
         requestedBy: 'runtime',
-        completionAction: 'notify',
-        realmId: `${input.appId}:${input.instanceId}`,
+        completionAction: value.targetThreadId ? 'send_to_chat' : 'notify',
+        targetThreadId: value.targetThreadId,
+        realmId: input.realmId ?? `${input.appId}:${input.instanceId}`,
         appId: input.appId,
+        ...(request.deadline ? { lifecycle: { deadline: request.deadline } } : {}),
         metadata: {
           ...value.metadata,
           applicationTask: true,
@@ -58,11 +63,21 @@ export function createAgentApplicationTaskPort(input: {
     },
     async get<TResult>(taskId: string) {
       const task = await input.scheduler.getTask(taskId)
-      return task ? project<TResult>(input.appId, input.instanceId, task) : null
+      return task && owns(task) ? project<TResult>(input.appId, input.instanceId, task) : null
     },
     async cancel(taskId: string) {
+      const task = await input.scheduler.getTask(taskId)
+      if (!task || !owns(task))
+        throw new Error('APPLICATION_TASK_NOT_OWNED: 不能取消其他应用或实例的任务')
       return project(input.appId, input.instanceId, await input.scheduler.cancel(taskId))
     },
+  }
+  function owns(task: NonNullable<Awaited<ReturnType<BackgroundScheduler['getTask']>>>): boolean {
+    return (
+      task.metadata.appId === input.appId &&
+      task.metadata.applicationInstanceId === input.instanceId &&
+      task.metadata.applicationTask === true
+    )
   }
 }
 
@@ -82,6 +97,7 @@ function requireTaskInput(value: unknown): AgentApplicationTaskInput {
     instruction: input.instruction.trim(),
     ...(typeof input.title === 'string' ? { title: input.title.trim() } : {}),
     ...(typeof input.priority === 'number' ? { priority: input.priority } : {}),
+    ...(typeof input.targetThreadId === 'string' ? { targetThreadId: input.targetThreadId } : {}),
     ...(input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
       ? { metadata: input.metadata as Record<string, unknown> }
       : {}),

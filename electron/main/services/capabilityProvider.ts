@@ -14,15 +14,14 @@ import type {
 } from '@infos/shared'
 import { logger } from '../utils/logger'
 import { launchApplication } from './applicationLauncher'
-import {
-  activateWindow,
-  keyboardAction,
-  listWindows,
-  mouseAction,
-  mousePosition,
-} from './desktopAutomation'
-import { ElectronBrowserRuntime } from './browserRuntime'
+import { listWindows, mousePosition } from './desktopAutomation'
+import { browserRuntime } from './browserRuntime'
+import { renderStatusCard } from './statusCard'
 import { captureScreen, getActiveWindow, readClipboard, writeClipboard } from './desktopAwareness'
+import { desktopControl, type DesktopCaller } from './desktopControl'
+import { windowsDesktop } from './windowsDesktop'
+import { completionAlerts } from './completionAlerts'
+import { isApplicationFocused } from './notificationVisibility'
 
 const CAPABILITY_PORT = Number(process.env.PERO_CAPABILITY_PORT ?? 9121)
 const DAEMON_HOST = process.env.PERO_DAEMON_HOST ?? '127.0.0.1'
@@ -31,7 +30,6 @@ const RECONNECT_INTERVAL_MS = 5_000
 const NODE_ID_FILE = 'electron-node-id.txt'
 const DEVICE_CREDENTIAL_FILE = 'capability-device-credential.json'
 
-const browserRuntime = new ElectronBrowserRuntime()
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
 type OutboundCapabilityMessage = DistributiveOmit<NodeToDaemonMessage, 'protocolVersion'>
 
@@ -72,6 +70,8 @@ const WEB_OPERATIONS: readonly WebPageOperation[] = [
   'runtimeStatus',
 ]
 const DESKTOP_OPERATIONS = [
+  'control',
+  'statusCard',
   'screenCapture',
   'clipboardRead',
   'clipboardWrite',
@@ -109,12 +109,15 @@ class ElectronCapabilityProvider {
 
   async start(): Promise<void> {
     this.stopped = false
+    desktopControl.initialize()
     this.nodeId = this.getNodeId()
     this.connect()
   }
 
   async stop(): Promise<void> {
     this.stopped = true
+    for (const controller of this.invocations.values()) controller.abort('客户端退出')
+    await desktopControl.stop()
     await browserRuntime.close()
     this.stopHeartbeat()
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
@@ -144,6 +147,8 @@ class ElectronCapabilityProvider {
     })
     socket.on('message', (data) => void this.handleMessage(data.toString()))
     socket.on('close', () => {
+      for (const controller of this.invocations.values()) controller.abort('能力连接断开')
+      desktopControl.disconnect()
       if (this.socket === socket) this.socket = null
       this.sessionId = undefined
       this.stopHeartbeat()
@@ -224,6 +229,12 @@ class ElectronCapabilityProvider {
         'speaker',
         'audio-playback',
       ]),
+      this.offer(
+        'electron.completion-alert',
+        'client.completion-alert',
+        ['notify'],
+        ['completion-notification'],
+      ),
     ]
   }
 
@@ -270,6 +281,11 @@ class ElectronCapabilityProvider {
     const operation = envelope.payload.operation
     const controller = new AbortController()
     this.invocations.set(invocationId, controller)
+    const remaining = envelope.deadline ? Date.parse(envelope.deadline) - Date.now() : undefined
+    const deadlineTimer =
+      remaining !== undefined && remaining > 0
+        ? setTimeout(() => controller.abort('调用已过期'), remaining)
+        : undefined
     try {
       if (envelope.deadline && Date.parse(envelope.deadline) <= Date.now()) {
         throw new Error('CAPABILITY_DEADLINE_EXCEEDED: 调用已过期')
@@ -285,16 +301,26 @@ class ElectronCapabilityProvider {
           envelope.principalId,
         )
       } else if (envelope.operation.startsWith('desktop.environment/')) {
-        output = await this.invokeDesktop(
-          operation,
-          envelope.payload.input as Record<string, unknown>,
-        )
+        output =
+          operation === 'statusCard'
+            ? await renderStatusCard(
+                envelope.payload.input as Record<string, unknown>,
+                controller.signal,
+              )
+            : await this.invokeDesktop(
+                operation,
+                envelope.payload.input as Record<string, unknown>,
+                controller.signal,
+              )
       } else if (envelope.operation.startsWith('audio.output/')) {
         output = await this.invokeAudioOutput(
           operation,
           envelope.payload.input as Record<string, unknown>,
           controller.signal,
         )
+      } else if (envelope.operation === 'client.completion-alert/notify') {
+        controller.signal.throwIfAborted()
+        output = await completionAlerts.notify(envelope.payload.input)
       } else {
         throw new Error(`CAPABILITY_TYPE_UNSUPPORTED: ${envelope.operation}`)
       }
@@ -315,6 +341,7 @@ class ElectronCapabilityProvider {
       })
       logger.error('CapabilityProvider', `调用失败: ${envelope.operation} - ${text}`)
     } finally {
+      clearTimeout(deadlineTimer)
       this.invocations.delete(invocationId)
     }
   }
@@ -329,8 +356,11 @@ class ElectronCapabilityProvider {
       return { playbackId, ...(this.playbackStates.get(playbackId) ?? { state: 'cancelled' }) }
     }
     if (operation === 'stop') {
-      const current = this.playbackStates.get(playbackId)
-      if (current) current.state = 'cancelled'
+      const windows = (await import('../windows/manager')).windowManager
+      for (const win of [windows.petWin, windows.dashboardWin, windows.launcherWin]) {
+        if (win && !win.isDestroyed()) win.webContents.send('audio-output:stop', { playbackId })
+      }
+      this.completePlayback(playbackId, 'cancelled')
       return { playbackId, state: 'cancelled' }
     }
     if (operation !== 'play') throw new Error(`CAPABILITY_OPERATION_UNSUPPORTED: ${operation}`)
@@ -347,6 +377,10 @@ class ElectronCapabilityProvider {
       playbackId,
       assetUrl,
       volume: Number(input.volume ?? 1),
+      caption:
+        typeof input.caption === 'string' && input.caption.length <= 240
+          ? input.caption
+          : undefined,
     })
     const state = await this.waitForPlaybackReceipt(playbackId, signal)
     return { playbackId, state }
@@ -388,7 +422,29 @@ class ElectronCapabilityProvider {
     })
   }
 
-  private async invokeDesktop(operation: string, input: Record<string, unknown>): Promise<unknown> {
+  private async invokeDesktop(
+    operation: string,
+    input: Record<string, unknown>,
+    signal: AbortSignal,
+  ): Promise<unknown> {
+    const identity = input.__desktopCaller as DesktopCaller | undefined
+    const caller: DesktopCaller = {
+      agentId: identity?.agentId,
+      threadId: identity?.threadId,
+      taskId: identity?.taskId,
+      signal,
+    }
+    signal.throwIfAborted()
+    if (operation === 'control') {
+      if (input.action === 'status') return desktopControl.snapshot()
+      if (input.action === 'resume')
+        return desktopControl.snapshot().phase === 'idle'
+          ? desktopControl.snapshot()
+          : desktopControl.resume()
+      throw new Error('DESKTOP_CONTROL_DENIED: 不支持的桌面控制操作')
+    }
+    if (operation === 'screenCapture' && process.platform === 'win32')
+      return desktopControl.observe(input, caller)
     if (operation === 'screenCapture') {
       const raw = await captureScreen(Number(input.maxWidth ?? 1280))
       if (!raw) throw new Error('SCREEN_CAPTURE_UNAVAILABLE: 无法获取屏幕内容')
@@ -420,15 +476,85 @@ class ElectronCapabilityProvider {
       writeClipboard(String(input.text ?? ''))
       return { success: true }
     }
-    if (operation === 'activeWindow') return getActiveWindow()
+    if (operation === 'activeWindow')
+      return process.platform === 'win32' ? windowsDesktop.active() : getActiveWindow()
     if (operation === 'listWindows') return listWindows()
-    if (operation === 'activateWindow') return activateWindow(String(input.target ?? ''))
+    if (operation === 'activateWindow')
+      return desktopControl.mutate(caller, async (actionSignal) => {
+        const target = String(input.target ?? '')
+        const windows = await windowsDesktop.windows()
+        const exact = windows.filter(
+          (window) => window.windowId === target || window.title === target,
+        )
+        const matches = exact.length
+          ? exact
+          : windows.filter((window) => window.title.toLowerCase().includes(target.toLowerCase()))
+        if (!target || matches.length !== 1)
+          throw new Error('WINDOW_AMBIGUOUS: 请使用窗口列表中的 windowId 指定唯一窗口')
+        const result = await windowsDesktop.request<{ title: string }>(
+          'activate',
+          { windowId: matches[0]!.windowId },
+          actionSignal,
+        )
+        return result.title
+      })
     if (operation === 'applicationLaunch') {
-      return launchApplication(String(input.appName ?? input.app_name ?? ''))
+      return desktopControl.mutate(caller, async (actionSignal) => {
+        actionSignal.throwIfAborted()
+        const result = await launchApplication(
+          String(input.appName ?? input.app_name ?? ''),
+          undefined,
+          actionSignal,
+        )
+        actionSignal.throwIfAborted()
+        return result
+      })
     }
     if (operation === 'mousePosition') return mousePosition()
-    if (operation === 'mouseAction') return mouseAction(input)
-    if (operation === 'keyboardAction') return keyboardAction(input)
+    if (operation === 'mouseAction' || operation === 'keyboardAction') {
+      const action = String(input.action ?? '')
+      if (action === 'notification') {
+        if (isApplicationFocused()) return { success: true, suppressed: true }
+        const { Notification } = await import('electron')
+        new Notification({
+          title: String(input.title ?? input.text ?? 'infOS 提醒'),
+          body: String(input.message ?? ''),
+        }).show()
+        return { success: true }
+      }
+      const elements = ['invoke', 'set_value', 'toggle', 'select', 'expand', 'collapse']
+      const mouse = [
+        'wait',
+        'move',
+        'click',
+        'double_click',
+        'right_click',
+        'drag',
+        'scroll',
+        'mouse_down',
+        'mouse_up',
+      ]
+      const keyboard = ['type', 'hotkey', 'key_down', 'key_up']
+      if (![...elements, ...mouse, ...keyboard].includes(action))
+        throw new Error('DESKTOP_ACTION_UNSUPPORTED: 不支持的桌面操作')
+      if (elements.includes(action) && !input.elementId)
+        throw new Error('DESKTOP_ELEMENT_REQUIRED: 请提供本次观察中的 elementId')
+      if (input.elementId && !elements.includes(action) && action !== 'scroll')
+        throw new Error('DESKTOP_ACTION_UNSUPPORTED: 该动作不能通过控件执行')
+      if (typeof input.text === 'string' && input.text.length > 10_000)
+        throw new Error('DESKTOP_TEXT_TOO_LONG: 单次输入最多一万字符，请分段处理')
+      return desktopControl.execute(
+        action === 'wait'
+          ? 'wait'
+          : input.elementId
+            ? 'element'
+            : keyboard.includes(action)
+              ? 'keyboard'
+              : 'mouse',
+        input,
+        caller,
+      )
+    }
     throw new Error(`CAPABILITY_OPERATION_UNSUPPORTED: ${operation}`)
   }
 

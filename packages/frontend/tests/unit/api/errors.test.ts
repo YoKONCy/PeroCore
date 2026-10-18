@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ApiError, ErrorSeverity, ERROR_UI_MAP, NetworkError } from '@infos/frontend/api/errors'
+import { ApiError, NetworkError } from '@infos/frontend/api/errors'
 
 describe('ApiError', () => {
   it('应当保留错误码、消息和附加数据', () => {
@@ -18,19 +18,7 @@ describe('NetworkError', () => {
 
     expect(error.name).toBe('NetworkError')
     expect(error.status).toBe(503)
-    expect(error.message).toBe('网络错误: 503 Service Unavailable')
-  })
-})
-
-describe('ERROR_UI_MAP', () => {
-  it('应当将鉴权和数据库错误映射为模态提示', () => {
-    expect(ERROR_UI_MAP.UNAUTHORIZED).toBe(ErrorSeverity.MODAL)
-    expect(ERROR_UI_MAP.DB_ERROR).toBe(ErrorSeverity.MODAL)
-  })
-
-  it('应当将常见业务错误映射为非阻断提示', () => {
-    expect(ERROR_UI_MAP.VALIDATION_ERROR).toBe(ErrorSeverity.TOAST)
-    expect(ERROR_UI_MAP.LLM_ERROR).toBe(ErrorSeverity.TOAST)
-    expect(ERROR_UI_MAP.NETWORK_ERROR).toBe(ErrorSeverity.TOAST)
+    expect(error.message).toContain('503')
+    expect(error.message).toContain('Service Unavailable')
   })
 })

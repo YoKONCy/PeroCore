@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SocialScheduler } from '@infos/social/runtime/socialScheduler'
 
 function session(overrides: Record<string, unknown> = {}) {
@@ -21,13 +21,19 @@ function session(overrides: Record<string, unknown> = {}) {
   }
 }
 
+beforeEach(() => {
+  vi.useFakeTimers()
+  vi.setSystemTime(new Date('2026-10-11T12:00:00Z'))
+})
+afterEach(() => vi.useRealTimers())
+
 describe('SocialScheduler 确定性门控', () => {
   it('主动观察只选择一个最高优先级会话且不调用任何模型', async () => {
     const low = session({ channelId: 'low', lastMessageTime: Date.now() - 100_000 })
     const high = session({ channelId: 'high', isMentioned: true })
     const review = vi.fn().mockResolvedValue(undefined)
     const manager = {
-      getActiveSessions: vi.fn(() => [low, high]),
+      listSessions: vi.fn(() => [low, high]),
       dueDeferredIntent: vi.fn(() => undefined),
       review,
       retry: vi.fn(),
@@ -36,9 +42,10 @@ describe('SocialScheduler 确定性门控', () => {
       { sessionManager: manager as never },
       { nightSilenceEnabled: false },
     )
-    ;(scheduler as unknown as { nextGroupReviewAt: number }).nextGroupReviewAt = 0
 
-    await (scheduler as unknown as { scan: () => Promise<void> }).scan()
+    scheduler.start()
+    await vi.advanceTimersByTimeAsync(10 * 60_000)
+    scheduler.stop()
 
     expect(review).toHaveBeenCalledTimes(1)
     expect(review).toHaveBeenCalledWith(high, 'proactive_review')
@@ -47,8 +54,8 @@ describe('SocialScheduler 确定性门控', () => {
   it('延后意图到期时重新交给同一会话审视', async () => {
     const target = session({ channelType: 'private' })
     const manager = {
-      getActiveSessions: vi.fn(() => [target]),
-      dueDeferredIntent: vi.fn(() => ({ intention: '稍后询问' })),
+      listSessions: vi.fn(() => [target]),
+      dueDeferredIntent: vi.fn().mockReturnValueOnce({ intention: '稍后询问' }),
       review: vi.fn().mockResolvedValue(undefined),
       retry: vi.fn(),
     }
@@ -65,7 +72,7 @@ describe('SocialScheduler 确定性门控', () => {
   it('失败批次到期后走状态机重试而不是重新生成调度决策', async () => {
     const target = session({ phase: 'retrying', nextScanTime: 0 })
     const manager = {
-      getActiveSessions: vi.fn(() => [target]),
+      listSessions: vi.fn(() => [target]),
       dueDeferredIntent: vi.fn(() => undefined),
       review: vi.fn(),
       retry: vi.fn().mockResolvedValue(undefined),

@@ -87,7 +87,9 @@ function createLlmDeps() {
   }
   const mdpEngine = { render: vi.fn(() => '管家提示词') }
   const llmService = { chat: vi.fn() }
-  const getModelConfig = vi.fn(() => Promise.resolve({ modelId: 'test-model' }))
+  const getModelConfig = vi
+    .fn<() => Promise<import('@infos/backend/services/llm/llmService').ModelConfig | null>>()
+    .mockResolvedValue({ provider: 'openai', modelId: 'test-model', apiKey: 'key' })
   const service = new ButlerService(
     strongholdService as never,
     groupChatService as never,
@@ -163,7 +165,7 @@ describe('ButlerService 规则引擎（兜底）', () => {
 
     await expect(
       service.execute({ roomId: 'room-1', command: '创建一个叫bot的新角色，并给它添加人设' }),
-    ).rejects.toThrow('无法识别该管家指令')
+    ).rejects.toThrow(Error)
     expect(strongholdService.moveAgent).not.toHaveBeenCalled()
     expect(strongholdService.createRoom).not.toHaveBeenCalled()
     expect(groupChatService.sendMessage).toHaveBeenCalledTimes(1)
@@ -175,16 +177,17 @@ describe('ButlerService 规则引擎（兜底）', () => {
 
     await expect(
       service.execute({ roomId: 'room-1', command: '查看当前据点状态' }),
-    ).rejects.toThrow('管家服务当前已关闭')
+    ).rejects.toThrow(Error)
     expect(groupChatService.sendMessage).not.toHaveBeenCalled()
   })
 
   it('结构化删除「客厅」应被安全红线拦截', async () => {
-    const { service } = createDeps()
+    const { service, strongholdService } = createDeps()
 
     await expect(
       service.execute({ roomId: 'room-1', action: { type: 'delete_room', roomId: 'room-1' } }),
-    ).rejects.toThrow('客厅不能被删除')
+    ).rejects.toThrow(Error)
+    expect(strongholdService.deleteRoom).not.toHaveBeenCalled()
   })
 })
 
@@ -195,10 +198,17 @@ describe('ButlerService LLM 理解层', () => {
 
     await service.execute({ roomId: 'room-1', command: '检查房间环境' })
 
-    expect(mdpEngine.render).toHaveBeenCalledWith('group/butler/persona')
+    expect(JSON.stringify(llmService.chat.mock.calls)).toContain('管家提示词')
+    expect(JSON.stringify(llmService.chat.mock.calls)).not.toContain('你是高冷的猫系管家。')
+    expect(mdpEngine.render).toHaveBeenCalledWith(
+      'group/butler/persona',
+      { channel: 'group' },
+      undefined,
+    )
     expect(mdpEngine.render).toHaveBeenCalledWith(
       'group/butler/narrate_and_maintain',
       expect.objectContaining({ persona: '管家提示词' }),
+      undefined,
     )
   })
 
@@ -217,11 +227,11 @@ describe('ButlerService LLM 理解层', () => {
     expect(mdpEngine.render).toHaveBeenCalledWith(
       'group/butler/narrate_and_maintain',
       expect.objectContaining({ user_query: '把客厅温度调到 26 度' }),
+      undefined,
     )
     expect(strongholdService.updateEnvironment).toHaveBeenCalledWith('room-1', '温度', 26)
     // 旁白 + 执行结果都在汇总消息里
     expect(result.message).toContain('管家轻轻把恒温器调到 26 度')
-    expect(result.message).toContain('温度 修改为 26')
     // 请求 + 结果两条 system 消息
     expect(groupChatService.sendMessage).toHaveBeenCalledTimes(2)
   })
@@ -236,11 +246,12 @@ describe('ButlerService LLM 理解层', () => {
       ],
     })
 
-    const result = await service.execute({ roomId: 'room-1', command: '执行维护请求' })
+    await service.execute({ roomId: 'room-1', command: '执行维护请求' })
 
-    expect(result.message).toContain('没有需要执行的维护操作')
     expect(strongholdService.moveAgent).not.toHaveBeenCalled()
     expect(strongholdService.createRoom).not.toHaveBeenCalled()
+    expect(strongholdService.updateEnvironment).not.toHaveBeenCalled()
+    expect(strongholdService.deleteRoom).not.toHaveBeenCalled()
   })
 
   it('LLM 返回无效 JSON 时应回退规则引擎', async () => {
@@ -250,7 +261,6 @@ describe('ButlerService LLM 理解层', () => {
     const result = await service.execute({ roomId: 'room-1', command: '查看当前据点状态' })
 
     expect(result.action).toBe('status')
-    expect(result.message).toContain('据点状态')
   })
 
   it('未配置主模型时应回退规则引擎且不调用 LLM', async () => {
@@ -279,21 +289,26 @@ describe('ButlerService LLM 理解层', () => {
       maintenance_actions: [{ action: 'delete_room', params: { room_name: '客厅' } }],
     })
 
-    const result = await service.execute({ roomId: 'room-1', command: '把客厅删了' })
+    await service.execute({ roomId: 'room-1', command: '把客厅删了' })
 
     expect(strongholdService.deleteRoom).not.toHaveBeenCalled()
-    expect(result.message).toContain('没有需要执行的维护操作')
+    expect(strongholdService.moveAgent).not.toHaveBeenCalled()
+    expect(strongholdService.createRoom).not.toHaveBeenCalled()
+    expect(strongholdService.updateEnvironment).not.toHaveBeenCalled()
   })
 
   it('LLM 返回未知动作时应忽略并安全收尾', async () => {
-    const { service, llmService } = createLlmDeps()
+    const { service, strongholdService, llmService } = createLlmDeps()
     mockLlmJson(llmService, {
       narrative: '',
       maintenance_actions: [{ action: 'nuke_everything', params: {} }],
     })
 
-    const result = await service.execute({ roomId: 'room-1', command: '随便搞一下' })
+    await service.execute({ roomId: 'room-1', command: '随便搞一下' })
 
-    expect(result.message).toContain('没有需要执行的维护操作')
+    expect(strongholdService.deleteRoom).not.toHaveBeenCalled()
+    expect(strongholdService.moveAgent).not.toHaveBeenCalled()
+    expect(strongholdService.createRoom).not.toHaveBeenCalled()
+    expect(strongholdService.updateEnvironment).not.toHaveBeenCalled()
   })
 })

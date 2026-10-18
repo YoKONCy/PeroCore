@@ -5,6 +5,16 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "noEmit": true
   },
-  "include": ["packages/*/tests/**/*.ts", "packages/frontend/src/**/*.d.ts"],
+  "include": [
+    "packages/*/tests/**/*.ts",
+    "packages/*/src/**/__tests__/**/*.ts",
+    "packages/apps/*/tests/**/*.ts",
+    "packages/apps/*/client/tests/**/*.ts",
+    "packages/apps/*/client/src/**/__tests__/**/*.ts",
+    "electron/**/*.test.ts",
+    "electron/**/*.spec.ts",
+    "electron/**/*.d.ts",
+    "packages/frontend/src/**/*.d.ts"
+  ],
   "exclude": ["node_modules", "dist", "dist-electron"]
 }

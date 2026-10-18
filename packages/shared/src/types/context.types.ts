@@ -41,6 +41,8 @@ export interface ContextRegion {
   contentHash: string
   sourceGeneration?: string | number
   content: string
+  /** 正文无法放入预算时使用的来源信息，仍由统一选择器计费。 */
+  fallbackContent?: string
   materialize?: ContextRegionMaterializer
   delivery: ContextRegionDelivery
   sourceObjectRefs: readonly KernelObjectRef[]
@@ -79,7 +81,7 @@ export interface ContextRegionManifestEntry {
   sourceGeneration: string | number
   sourceObjectRefs: readonly KernelObjectRef[]
   selected: boolean
-  reason: 'selected' | 'duplicate' | 'expired' | 'budget_exceeded' | 'empty'
+  reason: 'selected' | 'fallback' | 'duplicate' | 'expired' | 'budget_exceeded' | 'empty'
 }
 
 export interface ContextRegionCompilation {

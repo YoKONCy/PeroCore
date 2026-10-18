@@ -10,6 +10,7 @@ WORKDIR /build
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages/ ./packages/
 COPY public/ ./public/
+COPY scripts/pdfAssetsPlugin.ts ./scripts/pdfAssetsPlugin.ts
 
 RUN pnpm install --frozen-lockfile --filter @infos/frontend...
 RUN pnpm --filter @infos/frontend build

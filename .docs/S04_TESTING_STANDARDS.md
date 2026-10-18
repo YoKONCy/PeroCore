@@ -1,7 +1,7 @@
 # 测试规范
 
 > **适用范围**：infOS-TS 全部 packages
-> **最后更新**：2026-04-21
+> **最后更新**：2026-10-17
 > **核心原则**：**每开发一个模块，就必须同步编写对应的单元测试**
 
 ---
@@ -43,15 +43,15 @@
 packages/backend/
 ├── src/
 │   ├── services/memory/
-│   │   └── memoryService.ts
+│   │   └── eventMemoryService.ts
 │   └── repositories/
-│       └── memory.repo.ts
+│       └── eventNote.repo.ts
 └── tests/
     ├── unit/
     │   ├── services/memory/
-    │   │   └── memoryService.test.ts
+    │   │   └── eventMemoryService.test.ts
     │   └── repositories/
-    │       └── memory.repo.test.ts
+    │       └── eventNote.repo.test.ts
     └── integration/
         └── memoryPipeline.integration.test.ts
 ```
@@ -139,13 +139,15 @@ const testDb = drizzle(new Database(':memory:'))
 
 ---
 
-## 5. 覆盖率要求
+## 5. 测试价值与覆盖率
 
-| Package           | 最低行覆盖率 | 最低分支覆盖率 |
-| ----------------- | ------------ | -------------- |
-| `@infos/shared`   | 80%          | 70%            |
-| `@infos/backend`  | 60%          | 50%            |
-| `@infos/frontend` | 50%          | 40%            |
+不设覆盖率百分比门禁。CI 只运行一次功能测试；`test:coverage` 用于手动排查遗漏，不参与发布门禁。
+
+- 从需求和对外契约推导预期，优先检查权限、持久化、并发、失败恢复与业务边界。
+- 不为 CSS 数值、装饰 class、图标路径、默认文案或源码写法编写单元测试。
+- Mock 用于隔离外部依赖；被验证的业务判断必须真实执行。持久化、索引和传输问题使用真实边界验证。
+- 分页测试应读回全部内容并检查游标前进；异步更新测试应让存储状态与请求快照独立，避免共享对象掩盖旧结果回流。
+- 不从当前实现的输出生成预期值，不用重复实现同一算法的方式证明正确性。
 
 ---
 

@@ -26,7 +26,7 @@ describe('embeddedWebPreview', () => {
     })
   })
 
-  it('沙箱文档应阻断网络和同源能力并注入自适应桥接', () => {
+  it('沙箱文档应声明禁止网络的 CSP 并注入自适应桥接', () => {
     const document = buildEmbeddedWebDocument(
       '<script>document.body.textContent="运行"</script>',
       'c1',

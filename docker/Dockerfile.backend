@@ -4,16 +4,17 @@ FROM node:22-bookworm-slim AS builder
 
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ && rm -rf /var/lib/apt/lists/*
 RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 
 WORKDIR /build
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages/ ./packages/
-COPY scripts/build-daemon-bundle.mjs scripts/collect-daemon-deps.mjs ./scripts/
+COPY scripts/build-daemon-bundle.mjs scripts/collect-daemon-deps.mjs scripts/build-official-apps.mjs ./scripts/
 
 RUN pnpm install --frozen-lockfile
-RUN node scripts/build-daemon-bundle.mjs && node scripts/collect-daemon-deps.mjs
+RUN node scripts/build-official-apps.mjs && node scripts/build-daemon-bundle.mjs && node scripts/collect-daemon-deps.mjs
 
 FROM node:22-bookworm-slim AS production
 
@@ -26,7 +27,9 @@ ENV NODE_ENV=production \
     PERO_APP_ROOT=/app/backend \
     PERO_TEMP_DIR=/app/temp \
     PERO_LOG_LEVEL=3 \
-    INFOS_DOCKER=1
+    INFOS_DOCKER=1 \
+    INFOS_RESOURCES_ROOT=/app \
+    INFOS_APPLICATIONS_ROOT=/app/applications
 
 WORKDIR /app
 
@@ -34,6 +37,7 @@ COPY --from=builder --chown=node:node /build/dist-daemon/daemon.mjs ./backend/da
 COPY --from=builder --chown=node:node /build/dist-daemon/social-runtime.mjs ./backend/apps/social/runtime/index.js
 COPY --from=builder --chown=node:node /build/dist-daemon/node_modules/ ./node_modules/
 COPY --from=builder --chown=node:node /build/dist-daemon/bin/ ./bin/
+COPY --from=builder --chown=node:node /build/dist-applications/ ./applications/
 COPY --from=builder --chown=node:node /build/packages/backend/src/assets/ ./backend/backend/src/assets/
 COPY --from=builder --chown=node:node /build/packages/backend/src/services/mdp/prompts/ ./backend/backend/src/services/mdp/prompts/
 COPY --from=builder --chown=node:node /build/packages/backend/src/tools/ ./backend/backend/src/tools/

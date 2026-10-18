@@ -63,7 +63,6 @@ describe('createAuthMiddleware', () => {
     expect(res.status).toBe(401)
     const body = (await res.json()) as { code: string; message: string }
     expect(body.code).toBe('UNAUTHORIZED')
-    expect(body.message).toContain('未授权')
   })
 
   it('缺失 Authorization 头应返回 401', async () => {

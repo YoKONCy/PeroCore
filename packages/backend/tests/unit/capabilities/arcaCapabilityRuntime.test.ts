@@ -11,13 +11,7 @@ import { ToolRegistry } from '../../../src/services/agent/toolRegistry'
 
 const localNodeId = 'kernel:test' as KernelNodeId
 const providerNodeId = 'application:arca-test' as KernelNodeId
-const operations = [
-  'document.inspect',
-  'document.context_regions',
-  'document.changeset.list',
-  'document.changeset.propose',
-  'document.changeset.validate',
-]
+const operations = [...arcaManifest.offeredCapabilities[0].operations]
 
 describe('ArcaCapabilityRuntime', () => {
   it('Tool Projection应随在线Offer注册和注销', async () => {
@@ -73,17 +67,17 @@ describe('ArcaCapabilityRuntime', () => {
       placement: {
         providerNodeId,
         providerFacet: 'capability',
-        executionLocation: 'application-node',
+        executionLocation: 'node-local',
         resourceAuthorityNodeId: providerNodeId,
         requiresClientPresence: false,
         supportsHeadless: true,
-        dataResidency: 'node-local',
+        dataResidency: 'node-only',
         latencyClass: 'local',
         costClass: 'free',
       },
     }
     const remove = directory.registerRemoteProvider(offer, invoke)
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await vi.waitFor(() => expect(tools.has('arca_document_inspect')).toBe(true))
 
     expect(runtime.available()).toBe(true)
     expect(tools.has('arca_document_inspect')).toBe(true)
@@ -92,7 +86,7 @@ describe('ArcaCapabilityRuntime', () => {
     expect(tools.getDefinition('arca_changeset_propose')?.requiresApproval).toBe(true)
 
     remove()
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await vi.waitFor(() => expect(tools.has('arca_document_inspect')).toBe(false))
 
     expect(runtime.available()).toBe(false)
     expect(tools.has('arca_document_inspect')).toBe(false)

@@ -24,11 +24,23 @@ export interface PerformanceGate {
 /** 环境无关的性能样本与回归门禁计算器。 */
 export class PerformanceBaselineRegistry {
   private readonly samples = new Map<string, number[]>()
+  private readonly cursors = new Map<string, number>()
+
+  /** 默认保留全部基线样本；长期运行的界面可限制为最近一段窗口。 */
+  constructor(private readonly capacity = Infinity) {
+    if (capacity !== Infinity && (!Number.isSafeInteger(capacity) || capacity < 1))
+      throw new Error('PERFORMANCE_CAPACITY_INVALID')
+  }
 
   observe(metric: string, value: number): void {
     if (!Number.isFinite(value) || value < 0) throw new Error('PERFORMANCE_SAMPLE_INVALID')
     const values = this.samples.get(metric) ?? []
-    values.push(value)
+    if (values.length < this.capacity) values.push(value)
+    else {
+      const cursor = this.cursors.get(metric) ?? 0
+      values[cursor] = value
+      this.cursors.set(metric, (cursor + 1) % this.capacity)
+    }
     this.samples.set(metric, values)
   }
 

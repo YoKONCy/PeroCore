@@ -7,31 +7,32 @@
   "category": "memory",
   "userCopy": {
     "query_facts": {
-      "label": "查询共享事实",
-      "description": "按对象名称或别名查询全 Agent 共享事实。"
+      "label": "查询事实",
+      "description": "查找已记住的事实。"
     },
-    "write_fact": { "label": "记录共享事实", "description": "向共享事实对象写入一条新事实。" },
+    "write_fact": { "label": "记录事实", "description": "记住一条新事实。" },
     "supersede_fact": {
-      "label": "更新共享事实",
-      "description": "用新事实取代已经发生变化的旧事实。"
+      "label": "更新事实",
+      "description": "更新发生变化的事实。"
     },
     "delete_fact": {
-      "label": "删除错误事实",
-      "description": "物理删除明确错误、垃圾或误写的共享事实。"
+      "label": "删除事实",
+      "description": "删除记错的事实。"
     },
     "add_fact_object_alias": {
-      "label": "添加事实别名",
-      "description": "为共享事实对象添加可用于查询的别名。"
+      "label": "添加别名",
+      "description": "添加人物或事物的其他称呼。"
     },
     "remove_fact_object_alias": {
-      "label": "移除事实别名",
-      "description": "移除共享事实对象不再适用的别名。"
+      "label": "移除别名",
+      "description": "移除不再使用的称呼。"
     }
   },
   "tools": [
     {
       "name": "query_facts",
-      "description": "按对象标准名或别名查询共享事实库。写入前必须先查询；返回精确匹配或最多5个文本候选、active事实与确定性图路径，由你显式选择。",
+      "description": "按对象名称或别名查询共享事实；写入前先查询并选择对象。",
+      "display": { "icon": "search", "color": "purple", "style": "search" },
       "parameters": {
         "type": "object",
         "required": ["object"],
@@ -40,13 +41,14 @@
     },
     {
       "name": "write_fact",
-      "description": "向已选择对象写入新事实；零候选时可显式提交standardName和aliases创建对象。不能自造objectId。",
+      "description": "为已选对象新增事实；无候选时可创建对象。",
+      "display": { "icon": "book", "color": "purple", "style": "edit" },
       "parameters": {
         "type": "object",
         "required": ["fact"],
         "properties": {
-          "objectId": { "type": "string" },
-          "standardName": { "type": "string" },
+          "objectId": { "type": "string", "description": "取自 query_facts 的对象 ID" },
+          "standardName": { "type": "string", "description": "创建对象时的标准名称" },
           "aliases": { "type": "array", "items": { "type": "string" } },
           "fact": { "type": "string" },
           "observedAt": { "type": "string" },
@@ -59,6 +61,7 @@
     {
       "name": "supersede_fact",
       "description": "现实情况变化或事实冲突时，显式用新事实取代仍为active的旧事实。",
+      "display": { "icon": "edit", "color": "purple", "style": "edit" },
       "parameters": {
         "type": "object",
         "required": ["objectId", "oldFactId", "newFact"],
@@ -76,6 +79,7 @@
     {
       "name": "delete_fact",
       "description": "仅物理删除明确错误、垃圾或误写事实；现实变化应使用supersede_fact。",
+      "display": { "icon": "trash", "color": "purple", "style": "edit" },
       "parameters": {
         "type": "object",
         "required": ["factId"],
@@ -88,6 +92,7 @@
     {
       "name": "add_fact_object_alias",
       "description": "为事实对象追加别名。",
+      "display": { "icon": "link", "color": "purple", "style": "edit" },
       "parameters": {
         "type": "object",
         "required": ["objectId", "alias"],
@@ -101,6 +106,7 @@
     {
       "name": "remove_fact_object_alias",
       "description": "移除事实对象别名。",
+      "display": { "icon": "close", "color": "purple", "style": "edit" },
       "parameters": {
         "type": "object",
         "required": ["objectId", "alias"],

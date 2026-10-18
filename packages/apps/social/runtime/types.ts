@@ -86,6 +86,8 @@ export interface InboundMessage {
 
 /** 统一出站消息 */
 export interface OutboundMessage {
+  /** 指定发送账号，避免多账号时落到默认连接。 */
+  accountId?: string
   /** 目标会话 ID */
   channelId: string
   /** 会话类型 */

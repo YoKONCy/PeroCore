@@ -5,11 +5,18 @@
  */
 import type { InboundMessage } from './types'
 import { createLogger } from '@infos/backend/applicationHostAbi'
+import { socialFailure } from './socialRecovery'
 
 const logger = createLogger('SocialSessionManager')
 
 export type ParticipationState = 'idle' | 'listening' | 'engaged'
-export type ProcessingPhase = 'ready' | 'collecting' | 'running' | 'cooldown' | 'retrying'
+export type ProcessingPhase =
+  | 'ready'
+  | 'collecting'
+  | 'running'
+  | 'cooldown'
+  | 'retrying'
+  | 'failed'
 
 export interface SocialWaitRequest {
   reason: 'continuation_expected' | 'missing_context' | 'conversation_unsettled'
@@ -27,12 +34,17 @@ export interface DeferredSocialIntent {
 }
 
 export type SocialTurnOutcome =
-  | { type: 'reply'; content: string }
+  | {
+      type: 'reply'
+      content: string
+      /** 工具已完成图片等附件投递，桥接层仅确认回合。 */ delivered?: boolean
+    }
   | { type: 'pass' }
   | { type: 'wait'; wait: SocialWaitRequest }
   | {
       type: 'defer'
       intent: Omit<DeferredSocialIntent, 'notBefore' | 'expiresAt' | 'sourceMessages'>
+      schedule?: { notBefore: number; expiresAt: number }
     }
 
 export interface SocialSession {
@@ -51,6 +63,12 @@ export interface SocialSession {
   collectionStartedAt: number
   waitCount: number
   deferredIntent?: DeferredSocialIntent
+  controller?: AbortController
+  retryMessages?: InboundMessage[]
+  retryCount?: number
+  lastError?: string
+  turnId?: string
+  waitingTurnId?: string
 }
 
 export type FlushReason =
@@ -64,6 +82,7 @@ export type FlushCallback = (
   session: SocialSession,
   messages: InboundMessage[],
   reason: FlushReason,
+  signal: AbortSignal,
 ) => Promise<SocialTurnOutcome>
 
 export interface SessionManagerConfig {
@@ -98,7 +117,8 @@ export class SocialSessionManager {
   }
 
   getOrCreate(msg: InboundMessage): SocialSession {
-    const key = this.sessionKey(msg.agentId, msg.channelType, msg.channelId)
+    const accountId = String((msg.rawEvent as Record<string, unknown> | undefined)?.self_id ?? '')
+    const key = this.sessionKey(msg.agentId, msg.channelType, msg.channelId, accountId)
     let session = this.sessions.get(key)
     if (!session) {
       session = {
@@ -127,12 +147,15 @@ export class SocialSessionManager {
   }
 
   closeSession(agentId: string, channelId: string): boolean {
-    const entry = [...this.sessions.entries()].find(
-      ([, session]) => session.agentId === agentId && session.channelId === channelId,
-    )
-    if (!entry) return false
-    this.clearTimer(entry[1])
-    return this.sessions.delete(entry[0])
+    let closed = false
+    for (const [key, session] of this.sessions) {
+      if (session.agentId !== agentId || session.channelId !== channelId) continue
+      this.clearTimer(session)
+      session.controller?.abort(new Error('社交任务已取消：会话关闭'))
+      this.sessions.delete(key)
+      closed = true
+    }
+    return closed
   }
 
   closeSessionsExcept(predicate: (session: SocialSession) => boolean): number {
@@ -140,6 +163,7 @@ export class SocialSessionManager {
     for (const [key, session] of this.sessions) {
       if (predicate(session)) continue
       this.clearTimer(session)
+      session.controller?.abort(new Error('社交任务已取消：会话关闭'))
       this.sessions.delete(key)
       closed++
     }
@@ -156,7 +180,28 @@ export class SocialSessionManager {
     const session = this.getOrCreate(msg)
     const now = Date.now()
     const rawEvent = msg.rawEvent as Record<string, unknown> | undefined
-    const directlyTriggered = rawEvent?._isMentioned === true || msg.channelType === 'private'
+    const directlyTriggered =
+      rawEvent?._isMentioned === true ||
+      msg.isMentioned === true ||
+      msg.channelType === 'private' ||
+      rawEvent?._infosQueuedForReply === true
+
+    const msgId = rawEvent?.message_id
+    if (
+      msgId !== undefined &&
+      [
+        ...session.pendingMessages,
+        ...session.inFlightMessages,
+        ...(session.retryMessages ?? []),
+      ].some(
+        (message) =>
+          String((message.rawEvent as Record<string, unknown> | undefined)?.message_id) ===
+          String(msgId),
+      )
+    )
+      return
+    // 明确请求由持久队列保留；内存只保留下一批窗口，完成一批后再补入。
+    if (session.pendingMessages.length >= 100) return
 
     session.lastMessageTime = now
     session.pendingMessages.push(msg)
@@ -191,7 +236,9 @@ export class SocialSessionManager {
     }
 
     if (session.pendingMessages.length >= this.config.maxBufferSize) {
-      await this.triggerFlush(session, 'buffer_full')
+      void this.triggerFlush(session, 'buffer_full').catch((error) =>
+        logger.warn(`社交批次触发失败: ${String(error)}`),
+      )
       return
     }
 
@@ -208,7 +255,7 @@ export class SocialSessionManager {
   }
 
   async retry(session: SocialSession): Promise<void> {
-    if (session.phase !== 'retrying' || session.pendingMessages.length === 0) return
+    if (session.phase !== 'retrying' || !session.retryMessages?.length) return
     session.phase = 'ready'
     await this.triggerFlush(session, 'buffer_timeout')
   }
@@ -246,24 +293,97 @@ export class SocialSessionManager {
     if (reason === 'intent_due' && session.deferredIntent) {
       session.pendingMessages.unshift(...session.deferredIntent.sourceMessages)
     }
-    if (session.pendingMessages.length === 0) return
+    if (session.pendingMessages.length === 0 && !session.retryMessages?.length) return
 
-    const messages = session.pendingMessages.splice(0)
+    const recovering = Boolean(session.retryMessages?.length)
+    const messages = recovering
+      ? session.retryMessages!
+      : session.pendingMessages.splice(0, this.config.maxBufferSize)
+    if (!recovering) session.retryCount = 0
+    session.retryMessages = undefined
+    session.lastError = undefined
+    const controller = new AbortController()
+    session.controller = controller
     session.inFlightMessages = messages
     session.phase = 'running'
     logger.info(`[${session.channelId}] 社交批次开始: reason=${reason}, msgs=${messages.length}`)
 
     try {
-      const outcome = await this.flushCallback(session, messages, reason)
+      const outcome = await this.flushCallback(session, messages, reason, controller.signal)
+      controller.signal.throwIfAborted()
+      session.retryCount = 0
       await this.applyOutcome(session, messages, outcome)
     } catch (error) {
-      // 失败批次回到队首，避免持久化虽成功但实时处理机会丢失。
-      session.pendingMessages.unshift(...messages)
+      if (controller.signal.aborted) return
+      const failure = socialFailure(error)
       session.inFlightMessages = []
-      session.phase = 'retrying'
-      session.nextScanTime = Date.now() + 60_000
-      logger.warn(`[${session.channelId}] 社交批次失败，已保留等待重试: ${String(error)}`)
+      session.lastError = failure.message
+      session.retryCount = (session.retryCount ?? 0) + 1
+      if (failure.retryable && session.retryCount <= 2) {
+        // 重试保持原批次；推理期间的新消息仍属于下一批，不能混入恢复现场。
+        session.retryMessages = messages
+        session.phase = 'retrying'
+        session.nextScanTime = Date.now() + 30_000 * 2 ** (session.retryCount - 1)
+      } else {
+        session.phase = 'failed'
+        session.isMentioned = false
+        session.deferredIntent = undefined
+        session.nextScanTime = Date.now() + 5 * 60_000
+      }
+      logger.warn(
+        `[${session.channelId}] 社交批次${session.phase === 'retrying' ? '等待有限重试' : '已结束失败'}: ${failure.message}`,
+      )
+    } finally {
+      if (session.controller === controller) {
+        session.controller = undefined
+        if (session.phase !== 'retrying') session.turnId = undefined
+        if (
+          !controller.signal.aborted &&
+          !session.flushTimer &&
+          session.pendingMessages.length &&
+          session.phase !== 'retrying'
+        ) {
+          session.phase = 'collecting'
+          session.collectionStartedAt = Date.now()
+          this.scheduleFlush(session, 3, 'buffer_timeout')
+        }
+      }
     }
+  }
+
+  stop(): void {
+    for (const session of this.sessions.values()) {
+      this.clearTimer(session)
+      session.controller?.abort(new Error('社交任务已取消：应用停止'))
+    }
+    this.sessions.clear()
+  }
+
+  cancel(
+    agentId: string,
+    channelType: string,
+    channelId: string,
+    accountId: string,
+    msgIds: string[] = [],
+  ): void {
+    const session = this.sessions.get(this.sessionKey(agentId, channelType, channelId, accountId))
+    if (!session) return
+    this.clearTimer(session)
+    session.controller?.abort(new Error('社交任务已取消'))
+    session.retryMessages = undefined
+    session.inFlightMessages = []
+    session.deferredIntent = undefined
+    session.waitingTurnId = undefined
+    session.turnId = undefined
+    const cancelled = new Set(msgIds)
+    session.pendingMessages = session.pendingMessages.filter(
+      (message) =>
+        !cancelled.has(
+          String((message.rawEvent as Record<string, unknown> | undefined)?.message_id ?? ''),
+        ),
+    )
+    session.phase = 'ready'
+    if (session.pendingMessages.length) this.scheduleFlush(session, 3, 'buffer_timeout')
   }
 
   private async applyOutcome(
@@ -301,18 +421,26 @@ export class SocialSessionManager {
       return
     }
 
-    const now = Date.now()
-    const delay = this.deferDelay(outcome.intent.timing)
-    const lifetime = this.deferLifetime(outcome.intent.expires, now)
+    const schedule = outcome.schedule ?? this.deferredSchedule(outcome.intent)
     session.deferredIntent = {
       ...outcome.intent,
-      notBefore: now + delay,
-      expiresAt: lifetime,
+      ...schedule,
       sourceMessages: messages,
     }
     session.phase = 'ready'
     session.isMentioned = false
-    session.nextScanTime = now + delay
+    session.nextScanTime = schedule.notBefore
+  }
+
+  deferredSchedule(intent: {
+    timing: DeferredSocialIntent['timing']
+    expires: DeferredSocialIntent['expires']
+  }): { notBefore: number; expiresAt: number } {
+    const now = Date.now()
+    return {
+      notBefore: now + this.deferDelay(intent.timing),
+      expiresAt: this.deferLifetime(intent.expires, now),
+    }
   }
 
   private scheduleFlush(session: SocialSession, seconds: number, reason: FlushReason): void {
@@ -347,8 +475,13 @@ export class SocialSessionManager {
     return end.getTime()
   }
 
-  private sessionKey(agentId: string, channelType: string, channelId: string): string {
-    return `${agentId}:${channelType}:${channelId}`
+  private sessionKey(
+    agentId: string,
+    channelType: string,
+    channelId: string,
+    accountId: string,
+  ): string {
+    return JSON.stringify([agentId, accountId, channelType, channelId])
   }
 
   private clearTimer(session: SocialSession): void {

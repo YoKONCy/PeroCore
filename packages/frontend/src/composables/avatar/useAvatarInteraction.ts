@@ -15,6 +15,11 @@ import * as THREE from 'three'
 import type { RetargetingManager } from '../../components/avatar/lib/retargeting/RetargetingManager'
 import { StandardBones } from '../../components/avatar/lib/retargeting/RetargetingConfig'
 import { molangContext } from '../../components/avatar/lib/Molang'
+import {
+  CHARACTER_EXPRESSION_POSES,
+  type CharacterExpression,
+  type CharacterExpressionPose,
+} from '../../components/avatar/lib/characterExpression'
 
 /** 触摸/点击事件数据 */
 export interface PetEvent {
@@ -81,18 +86,51 @@ export function useAvatarInteraction(retargetingManager: RetargetingManager) {
   let isHovering = false
   let isPetting = false
   let currentSquint = 1.0
-  let initialEyelidScaleY = 1.0
-  let eyelidInitialized = false
   let currentEyebrowOffset = 0
+  let characterExpression: CharacterExpression = 'neutral'
+  let expressionPose: CharacterExpressionPose = { ...CHARACTER_EXPRESSION_POSES.neutral }
+
+  function setCharacterExpression(expression: CharacterExpression): void {
+    characterExpression = expression
+  }
+
+  function resetCharacterExpression(): void {
+    expressionPose = { ...CHARACTER_EXPRESSION_POSES.neutral }
+    currentSquint = 1
+    currentEyebrowOffset = 0
+  }
 
   const raycaster = new THREE.Raycaster()
   const mouseNDC = new THREE.Vector2(999, 999) // 默认在屏幕外
+  const headPosition = new THREE.Vector3()
+  const hoverHits: THREE.Intersection[] = []
+  let pointerDirty = true
+  let lastHoverCheck = -Infinity
+  let hoverModel: THREE.Object3D | null = null
+
+  function setPointer(rawX: number, rawY: number): void {
+    pointerDirty ||= mouseNDC.x !== rawX || mouseNDC.y !== -rawY
+    mouseInputX = Math.max(-1, Math.min(1, rawX))
+    mouseInputY = Math.max(-1, Math.min(1, rawY))
+    mouseNDC.set(rawX, -rawY)
+  }
+
+  function resetPointer(): void {
+    setPointer(999, 999)
+    mouseInputX = 0
+    mouseInputY = 0
+    isHovering = false
+    isPetting = false
+    hoverHits.length = 0
+    hoverModel = null
+  }
 
   // ═══ 鼠标事件处理 ═══
 
   /** 处理鼠标移动（更新头部追踪输入和 Raycaster NDC） */
   function onMouseMove(event: MouseEvent, containerEl: HTMLElement): void {
     const rect = containerEl.getBoundingClientRect()
+    if (!rect.width || !rect.height) return
     const centerX = rect.left + rect.width / 2
     const centerY = rect.top + rect.height / 2
 
@@ -100,11 +138,7 @@ export function useAvatarInteraction(retargetingManager: RetargetingManager) {
     const rawX = (event.clientX - centerX) / (rect.width / 2)
     const rawY = (event.clientY - centerY) / (rect.height / 2)
 
-    mouseInputX = Math.max(-1, Math.min(1, rawX))
-    mouseInputY = Math.max(-1, Math.min(1, rawY))
-
-    // 更新 Raycaster NDC (Y 方向反转)
-    mouseNDC.set(mouseInputX, -mouseInputY)
+    setPointer(rawX, rawY)
   }
 
   /** 处理鼠标按下（射线检测点击） */
@@ -117,6 +151,7 @@ export function useAvatarInteraction(retargetingManager: RetargetingManager) {
     if (event.button !== 0 || !characterModel) return null
 
     const rect = containerEl.getBoundingClientRect()
+    if (!rect.width || !rect.height) return null
     const x = ((event.clientX - rect.left) / rect.width) * 2 - 1
     const y = -((event.clientY - rect.top) / rect.height) * 2 + 1
     const clickNDC = new THREE.Vector2(x, y)
@@ -140,15 +175,14 @@ export function useAvatarInteraction(retargetingManager: RetargetingManager) {
   /** 外部设置全局鼠标位置（用于窗口外追踪） */
   function setGlobalMouse(x: number, y: number, containerEl: HTMLElement): void {
     const rect = containerEl.getBoundingClientRect()
+    if (!rect.width || !rect.height) return
     const centerX = rect.left + rect.width / 2
     const centerY = rect.top + rect.height / 2
 
     const rawX = (x - centerX) / (rect.width / 2)
     const rawY = (y - centerY) / (rect.height / 2)
 
-    mouseInputX = Math.max(-1, Math.min(1, rawX))
-    mouseInputY = Math.max(-1, Math.min(1, rawY))
-    mouseNDC.set(rawX, -rawY)
+    setPointer(rawX, rawY)
   }
 
   // ═══ 每帧更新 ═══
@@ -163,22 +197,30 @@ export function useAvatarInteraction(retargetingManager: RetargetingManager) {
     camera: THREE.PerspectiveCamera,
     characterModel: THREE.Object3D | null,
     isAnimationPaused: boolean,
+    delta = 1 / 60,
+    now = performance.now(),
   ): void {
-    if (isAnimationPaused) return
-
-    // 射线检测悬停
-    if (characterModel) {
+    // 窗口外不做射线检测；静止鼠标每 100 毫秒复核一次动画模型的边界。
+    if (!characterModel || Math.abs(mouseNDC.x) > 1 || Math.abs(mouseNDC.y) > 1) {
+      isHovering = false
+    } else if (pointerDirty || hoverModel !== characterModel || now - lastHoverCheck >= 100) {
+      characterModel.updateWorldMatrix(true, true)
+      camera.updateMatrixWorld()
       raycaster.setFromCamera(mouseNDC, camera)
-      const intersects = raycaster.intersectObject(characterModel, true)
-      isHovering = intersects.length > 0
+      hoverHits.length = 0
+      raycaster.intersectObject(characterModel, true, hoverHits)
+      isHovering = hoverHits.length > 0
+      hoverHits.length = 0
+      lastHoverCheck = now
     }
+    pointerDirty = false
+    hoverModel = characterModel
+    if (isAnimationPaused) return
 
     // ─── 头部追踪角度计算 ───
     // 从头部到相机的向量
     const headBone = retargetingManager.getBone(StandardBones.Head)
-    const headPos = headBone
-      ? headBone.getWorldPosition(new THREE.Vector3())
-      : new THREE.Vector3(0, 24, 0)
+    const headPos = headBone ? headBone.getWorldPosition(headPosition) : headPosition.set(0, 24, 0)
     const camPos = camera.position
 
     const dx = camPos.x - headPos.x
@@ -208,7 +250,7 @@ export function useAvatarInteraction(retargetingManager: RetargetingManager) {
     targetHeadX = Math.max(-maxHeadAngle, Math.min(maxHeadAngle, totalPitch))
 
     // 平滑插值
-    const lerpFactor = 0.1
+    const lerpFactor = 1 - Math.pow(0.9, delta * 60)
     currentHeadX += (targetHeadX - currentHeadX) * lerpFactor
     currentHeadY += (targetHeadY - currentHeadY) * lerpFactor
 
@@ -225,9 +267,16 @@ export function useAvatarInteraction(retargetingManager: RetargetingManager) {
   function applyProceduralAnimations(
     isDragging: boolean,
     isAnimationPaused: boolean,
-    getInitialEyebrowY: () => number,
+    deltaTime = 1 / 60,
+    allowCharacterExpression = true,
   ): void {
     if (isAnimationPaused) return
+    const response = 1 - Math.exp(-Math.min(Math.max(deltaTime, 0), 0.1) / 0.3)
+    const target =
+      CHARACTER_EXPRESSION_POSES[allowCharacterExpression ? characterExpression : 'neutral']
+    for (const key of ['eyelid', 'eyebrow', 'pitch', 'tilt'] as const) {
+      expressionPose[key] += (target[key] - expressionPose[key]) * response
+    }
 
     // ─── 拖拽物理效果 ───
     const targetInfluence = isDragging ? 1.0 : 0.0
@@ -243,7 +292,7 @@ export function useAvatarInteraction(retargetingManager: RetargetingManager) {
     }
 
     // ─── 表情控制 ───
-    applyExpressions(isDragging, getInitialEyebrowY)
+    applyExpressions(isDragging, response)
 
     // ─── 口型同步 ───
     applyLipSync()
@@ -347,10 +396,16 @@ export function useAvatarInteraction(retargetingManager: RetargetingManager) {
     // currentHeadX/Y 是角度 (Degree)
     // Bedrock 坐标系通常是 ZYX 顺序
     // Pitch (上下) -> X 轴, Yaw (左右) -> Y 轴
-    const lookAtX = THREE.MathUtils.degToRad(currentHeadX)
+    const expressionWeight = isPetting || isShy.value ? 0 : 1 - dragInfluence
+    const lookAtX = THREE.MathUtils.degToRad(currentHeadX + expressionPose.pitch * expressionWeight)
     const lookAtY = THREE.MathUtils.degToRad(currentHeadY)
 
-    const lookAtEuler = new THREE.Euler(lookAtX, lookAtY, 0, 'ZYX')
+    const lookAtEuler = new THREE.Euler(
+      lookAtX,
+      lookAtY,
+      THREE.MathUtils.degToRad(expressionPose.tilt * expressionWeight),
+      'ZYX',
+    )
     const lookAtQuat = new THREE.Quaternion().setFromEuler(lookAtEuler)
 
     // 叠加到当前旋转（局部旋转）
@@ -358,37 +413,34 @@ export function useAvatarInteraction(retargetingManager: RetargetingManager) {
   }
 
   /** 表情控制（眼皮、眉毛） */
-  function applyExpressions(isDragging: boolean, getInitialEyebrowY: () => number): void {
+  function applyExpressions(isDragging: boolean, response: number): void {
     const leftEyelid =
       retargetingManager.getBone('LeftEyelid') || retargetingManager.getBone('LeftEyelidBase')
     const rightEyelid =
       retargetingManager.getBone('RightEyelid') || retargetingManager.getBone('RightEyelidBase')
     const eyeBrow = retargetingManager.getBone('EyeBrow')
 
-    // 首帧记录睫毛初始 scale.y
-    if (!eyelidInitialized && (leftEyelid || rightEyelid)) {
-      initialEyelidScaleY = leftEyelid?.scale.y ?? rightEyelid?.scale.y ?? 1.0
-      eyelidInitialized = true
-    }
-
     // 目标缩放：1.0=正常, <1=眯眼, >1=睁大
-    let targetSquint = isPetting ? 0.7 : isShy.value ? 0.85 : 1.0
+    let targetSquint = isPetting ? 0.7 : isShy.value ? 0.85 : expressionPose.eyelid
     if (isDragging) targetSquint = 1.2
 
-    currentSquint += (targetSquint - currentSquint) * 0.2
+    currentSquint += (targetSquint - currentSquint) * response
 
-    if (leftEyelid) leftEyelid.scale.y = initialEyelidScaleY * currentSquint
-    if (rightEyelid) rightEyelid.scale.y = initialEyelidScaleY * currentSquint
+    // 叠加在当前模型动画上，保留作者的眨眼与左右眼差异。
+    if (leftEyelid) leftEyelid.scale.y *= currentSquint
+    if (rightEyelid && rightEyelid !== leftEyelid) rightEyelid.scale.y *= currentSquint
 
     // 眉毛动画
     if (eyeBrow) {
-      const initY = getInitialEyebrowY()
-      if (initY === 0 && eyeBrow.position.y !== 0) {
-        // 侧信道修正：首次获取
-      }
-      const targetOffset = isPetting ? -1.5 : isShy.value ? 0.5 : 0
-      currentEyebrowOffset += (targetOffset - currentEyebrowOffset) * 0.2
-      eyeBrow.position.y = initY + currentEyebrowOffset
+      const targetOffset = isDragging
+        ? 0
+        : isPetting
+          ? -1.5
+          : isShy.value
+            ? 0.5
+            : expressionPose.eyebrow
+      currentEyebrowOffset += (targetOffset - currentEyebrowOffset) * response
+      eyeBrow.position.y += currentEyebrowOffset
     }
   }
 
@@ -413,6 +465,7 @@ export function useAvatarInteraction(retargetingManager: RetargetingManager) {
     currentSquint = 1.0
     currentEyebrowOffset = 0
     currentLipSync.value = 0
+    resetCharacterExpression()
   }
 
   return {
@@ -427,10 +480,13 @@ export function useAvatarInteraction(retargetingManager: RetargetingManager) {
     onMouseDown,
     onMouseUp,
     setGlobalMouse,
+    resetPointer,
 
     // 每帧更新
     updateHeadTracking,
     applyProceduralAnimations,
     resetProceduralState,
+    setCharacterExpression,
+    resetCharacterExpression,
   }
 }

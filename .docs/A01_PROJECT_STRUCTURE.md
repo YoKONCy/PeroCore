@@ -1,7 +1,7 @@
 # 项目结构与 Monorepo 规范
 
 > **适用范围**：infOS-TS 项目整体
-> **最后更新**：2026-08-19
+> **最后更新**：2026-10-17
 
 ---
 
@@ -61,13 +61,15 @@ infOS-TS/
 │   │       └── config/            # 运行时配置
 │   │
 │   ├── document-engine/            # @infos/document-engine — 语义文档权威与投影
+│   ├── avatar-assets/              # @infos/avatar-assets — 3D角色（YSM）资产与清单生成
 │   ├── node-sdk/                   # @infos/node-sdk — Node协议客户端
 │   ├── node-host/                  # @infos/node-host — 独立Capability Provider宿主
 │   ├── daemon/                     # @infos/daemon — Daemon发行入口
 │   ├── wiki/                       # @infos/wiki — 文档站
 │   ├── apps/
 │   │   ├── social/                 # infos.social Application Realm
-│   │   └── arca/                   # Arca自治Host与独立Client双入口
+│   │   ├── arca/                   # Arca自治Host与独立Client双入口
+│   │   └── pictoria/               # Pictoria绘图子应用自治Host与独立Client双入口
 │
 ├── electron/                      # Electron 壳层
 │   ├── main/                      # 主进程 (index.ts, ipcBridge.ts, services/...)
@@ -88,14 +90,17 @@ infOS-TS/
 ```
 @infos/shared              ← 无内部依赖，只承载跨包稳定协议、DTO、Port、协议校验器与无领域归属的纯工具
 @infos/document-engine     ← 独立Document Authority核心
+@infos/avatar-assets       ← 3D角色（YSM）资产与清单生成
 @infos/node-sdk            ← 依赖shared
 @infos/node-host           ← 依赖shared + node-sdk
-@infos/backend             ← 依赖shared + document-engine + node-sdk
-@infos/social              ← 依赖shared + 公开Application Host ABI
-@infos/arca                ← 依赖shared + document-engine + node-host
+@infos/backend             ← 依赖shared + node-sdk + node-host + arca + pictoria
+@infos/social              ← 依赖shared + backend
+@infos/arca                ← 依赖shared + document-engine + node-sdk + node-host
 @infos/arca/client         ← Arca包内独立Vue Client入口，通过Node协议连接Arca Host
-@infos/frontend            ← 依赖shared
-@infos/daemon              ← Backend发行入口
+@infos/pictoria            ← 依赖shared + node-sdk + node-host
+@infos/pictoria/client     ← Pictoria包内独立Vue Client入口，通过Node协议连接Pictoria Host
+@infos/frontend            ← 依赖shared + arca + avatar-assets
+@infos/daemon              ← 依赖backend + arca + shared（Backend发行入口）
 @infos/wiki                ← 文档站
 Electron                   ← 主Frontend与本机Capability Provider壳层
 ```
@@ -110,21 +115,24 @@ Service 按功能域分目录，超 500 行必须拆分子模块。
 
 ```
 services/
-├── memory/              # 记忆核心域
-│   ├── memoryService.ts         # CRUD
-│   ├── memorySearch.ts          # 语义检索 + 逻辑闪回
-│   ├── conversationLog.ts       # 对话日志
-│   ├── reflection/              # 反思子系统 (orchestrator/tagger/consolidator/...)
-│   ├── scorer/                  # 记忆提炼
-│   ├── graph/                   # 图谱可视化
-│   └── importer.ts              # 故事导入
-├── generation/          # LLM 内容生成 (日记/报告)
-├── embedding/           # 向量编码
-├── llm/                 # LLM 门面 + Provider
-├── prompt/              # 提示词系统
-├── agent/               # Agent 服务 + ReAct 循环
-├── chat/                # 聊天会话
-└── voice/               # 语音 TTS / VAD
+├── memory/            # 记忆核心域（eventMemory*、eventReflection*、dailyNotesService、
+│                      #   socialScorer、graph/、maintenance/ 等）
+├── gateway/           # 版本化JSON WebSocket Gateway（gatewayHub/wsUpgrade/durableGatewayStream）
+├── agent/             # Agent 服务 + ReAct 循环
+├── conversation/      # 会话与对话日志
+├── context/           # 上下文编译（Context Compiler）
+├── retrieval/         # 检索（含记忆高级检索管线）
+├── embedding/         # 向量编码
+├── llm/ model/        # LLM 门面、模型注册与选择
+├── prompt/            # 提示词系统
+├── voice/ tokenizer/  # 语音 TTS/VAD 与分词
+├── scheduler/         # 调度
+├── stronghold/        # 多角色房间
+├── social/            # 社交运行时
+├── mcp/ mdp/          # MCP 与 MDP 集成
+└── …                  # 其余功能域：attachment、companion、distributed、execution、flow、
+                       #   integrations、knowledge、maintenance、pipeline、runtime、session、
+                       #   system、task、thread、weather、workspace
 ```
 
 ---
@@ -141,13 +149,10 @@ services/
 | Memory Resource与Provenance                                    | [A05](./A05_MEMORY_ENGINE.md)         |
 | Package、Application与跨包Port                                 | [A06](./A06_EXTENSION_SYSTEM.md)      |
 | Runtime Adapter、资源Handle与跨平台隔离                        | [A07](./A07_CROSS_PLATFORM.md)        |
-| 第三方Application三层Adapter、协议与Arca参考实现               | [A11](./A11_APPLICATION_INTEGRATION.md) |
+| 第三方Application三层Adapter、协议与Arca参考实现               | [A10](./A10_APPLICATION_INTEGRATION.md) |
 | 性能预算、安全、故障注入与发布验证                             | [A08](./A08_DEVOPS.md)                |
 
-已完成或被拆分的设计文档移入`archived/`，仅作为历史背景，不再作为新实现的权威规范：
-
-- [A10 infOS操作系统化架构演进计划](./archived/A10_INFOS_OS_EVOLUTION_PLAN.md)：固定条目已拆入上表文档；
-- [A11 Arca与Document Engine历史技术规范](./archived/A11_ARCA_DOCUMENT_ENGINE.md)：保留Document Engine实现路线与历史产品决策；新的Application接入权威规范见活动文档[A11](./A11_APPLICATION_INTEGRATION.md)。
+已完成或被拆分的设计文档移入 `archived/`，仅作为历史背景，不再作为新实现的权威规范。第三方 Application 接入的权威规范见活动文档 [A10_APPLICATION_INTEGRATION](./A10_APPLICATION_INTEGRATION.md)。
 
 ---
 

@@ -30,7 +30,11 @@ module.exports = {
     // TypeScript 规则
     // strict/noImplicitAny 已禁止隐式 any；动态模块、IPC 与外部数据边界允许显式标注 any。
     '@typescript-eslint/no-explicit-any': 'off',
-    '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+    // 解构中被剔除的字段用于构造剩余对象，不视为无用变量；仍检查其他变量。
+    '@typescript-eslint/no-unused-vars': [
+      'warn',
+      { argsIgnorePattern: '^_', ignoreRestSiblings: true },
+    ],
     // isolatedModules 已负责校验类型导入是否可安全擦除，避免重复的纯风格告警。
     '@typescript-eslint/consistent-type-imports': 'off',
     '@typescript-eslint/explicit-function-return-type': 'off',
@@ -52,6 +56,70 @@ module.exports = {
     'no-var': 'error',
   },
   overrides: [
+    {
+      // 依赖边界交给语法解析器检查，避免在单元测试中反复扫描源码字符串。
+      files: ['packages/backend/src/routers/*.router.ts'],
+      rules: {
+        'no-restricted-imports': [
+          'error',
+          {
+            paths: [
+              { name: '@hono/zod-validator', message: 'Router 使用项目级 validate 包装器。' },
+              ...['fs', 'fs/promises', 'node:fs', 'node:fs/promises'].map((name) => ({
+                name,
+                message: 'Router 通过 Service 访问文件系统。',
+              })),
+            ],
+            patterns: [
+              {
+                group: [
+                  '**/repositories',
+                  '**/repositories/**',
+                  '**/database/schema',
+                  '**/database/schema.*',
+                ],
+                message: 'Router 通过 Service 访问持久化层。',
+              },
+            ],
+          },
+        ],
+      },
+    },
+    {
+      files: ['packages/backend/src/observer/*.router.ts'],
+      rules: {
+        'no-restricted-imports': [
+          'error',
+          {
+            paths: [
+              { name: '@hono/zod-validator', message: 'Router 使用项目级 validate 包装器。' },
+            ],
+          },
+        ],
+      },
+    },
+    {
+      files: ['packages/apps/social/**/*.ts'],
+      rules: {
+        'no-restricted-imports': [
+          'error',
+          {
+            paths: [{ name: '@infos/backend', message: '社交应用通过宿主接口访问后端能力。' }],
+            patterns: [
+              {
+                group: [
+                  '**/backend/src',
+                  '**/backend/src/**',
+                  '@infos/backend/**',
+                  '!@infos/backend/applicationHostAbi',
+                ],
+                message: '社交应用通过宿主接口访问后端能力。',
+              },
+            ],
+          },
+        ],
+      },
+    },
     {
       // Electron 主进程 — 允许 require() 动态导入 (Node.js CJS 上下文)
       files: ['electron/**/*.ts', '**/electron/**/*.ts'],
@@ -79,5 +147,17 @@ module.exports = {
       },
     },
   ],
-  ignorePatterns: ['dist', 'dist-electron', 'release-electron', 'node_modules', '*.d.ts'],
+  ignorePatterns: [
+    'dist',
+    'dist-electron',
+    'dist-daemon',
+    'dist-applications',
+    'release-electron',
+    'node_modules',
+    '.pnpm-store',
+    '.pnpm-cache',
+    'coverage',
+    '*.d.ts',
+    '**/.vitepress/cache/**',
+  ],
 }

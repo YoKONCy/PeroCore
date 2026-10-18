@@ -19,7 +19,8 @@
  * @module packages/backend/src/services/thread/threadService
  */
 
-import type { KernelExecutionDescriptor } from '@infos/shared'
+import type { InteractionMode, KernelExecutionDescriptor } from '@infos/shared'
+import { resolveExecutionMode, type ExecutionMode } from '@infos/shared'
 import type { ThreadRepository } from '../../repositories/thread.repo'
 import { type ThreadChannel, type ThreadPurpose } from '../../repositories/thread.repo'
 import type { AttachmentRepository } from '../../repositories/attachment.repo'
@@ -28,7 +29,11 @@ import type {
   RewindPreview,
 } from '../workspace/workspaceCheckpointService'
 import { createLogger } from '../../lib/logger'
+import { stableHistoryWindow, invalidatePromptReplay } from '../llm/promptCache'
 import { AppError } from '../../lib/appError'
+import { disposeExecutionOwner } from '../../tools/productivityRuntimeHolder'
+import { publicWorkMetadata, workContextText } from '../context/workContext'
+import { tokenCounter } from '../tokenizer/tokenCounter'
 
 const logger = createLogger('ThreadService')
 
@@ -55,8 +60,10 @@ export interface ThreadInfo {
   contextPolicy: string | null
   /** 当前 Thread 明确禁用的工具名；仅作为 Channel 白名单的减法层。 */
   disabledTools: string[]
+  interactionMode: InteractionMode
   /** 是否跳过普通工具的审批请求。 */
   autoExecuteTools: boolean
+  executionMode: ExecutionMode
   /** M05: Thread 用途（conversation / background_task / companion） */
   purpose: string
   createdAt: string
@@ -89,6 +96,27 @@ export interface ThreadCoverageInvalidator {
 }
 
 export class ThreadService {
+  private characterStateLifecycle?: {
+    rollbackPairs(threadId: string, pairIds: string[]): Promise<void>
+    clearThread(threadId: string): Promise<void>
+    clearChannel?(channel: string): Promise<void>
+  }
+  setCharacterStateLifecycle(
+    lifecycle: NonNullable<ThreadService['characterStateLifecycle']>,
+  ): void {
+    this.characterStateLifecycle = lifecycle
+  }
+  private clearPromptVariables?: (threadId: string) => Promise<void>
+  setPromptVariableCleanup(cleanup: (threadId: string) => Promise<void>): void {
+    this.clearPromptVariables = cleanup
+  }
+  private planLifecycle?: {
+    rollbackPairs(threadId: string, pairIds: string[]): Promise<void>
+    clearThread(threadId: string): Promise<void>
+  }
+  setPlanLifecycle(lifecycle: NonNullable<ThreadService['planLifecycle']>): void {
+    this.planLifecycle = lifecycle
+  }
   constructor(
     private threadRepo: ThreadRepository,
     private attachmentRepo?: AttachmentRepository,
@@ -112,6 +140,7 @@ export class ThreadService {
     contextPolicy?: string | null
     /** Thread 用途，默认 conversation；后台任务传 background_task */
     purpose?: ThreadPurpose
+    interactionMode?: InteractionMode
   }): Promise<ThreadInfo> {
     const id = params.id ?? `thread_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
     const row = await this.threadRepo.createThread({
@@ -123,6 +152,7 @@ export class ThreadService {
       title: params.title,
       contextPolicy: params.contextPolicy ?? null,
       purpose: params.purpose,
+      interactionMode: params.interactionMode,
     })
     logger.info(`Thread 已创建: id=${id}, agent=${params.agentId}, channel=${params.channel}`)
     return this.toThreadInfo(row)
@@ -154,6 +184,18 @@ export class ThreadService {
   async updateAutoExecuteTools(threadId: string, autoExecuteTools: boolean): Promise<void> {
     const success = await this.threadRepo.updateAutoExecuteTools(threadId, autoExecuteTools)
     if (!success) throw new AppError('NOT_FOUND', { message: `Thread 不存在: ${threadId}` })
+  }
+
+  async updateExecutionMode(threadId: string, executionMode: ExecutionMode): Promise<void> {
+    if (!(await this.threadRepo.updateExecutionMode(threadId, executionMode))) {
+      throw new AppError('NOT_FOUND', { message: '会话不存在或已归档' })
+    }
+  }
+
+  async updateInteractionMode(threadId: string, mode: InteractionMode): Promise<void> {
+    if (!(await this.threadRepo.updateInteractionMode(threadId, mode))) {
+      throw new AppError('NOT_FOUND', { message: '会话不存在或已归档' })
+    }
   }
 
   /** 获取或创建 Agent 的最新 Thread */
@@ -275,12 +317,14 @@ export class ThreadService {
     threadId: string
     content: string
     metadataJson?: string
+    pairId?: string
   }): Promise<ThreadMessageInfo> {
     const row = await this.threadRepo.appendMessage({
       threadId: params.threadId,
       role: 'system',
       content: params.content,
       metadataJson: params.metadataJson,
+      pairId: params.pairId,
     })
     await this.threadRepo.updateMessageCount(params.threadId, 0)
     logger.debug(`系统消息已追加: thread=${params.threadId}, msgId=${row.id}`)
@@ -329,9 +373,50 @@ export class ThreadService {
    * 查询最近 N 个完整对话轮次（供 Context Compiler 使用）。
    * 每轮包含共享 pairId 的全部消息，保证不会从半轮中间截断。
    */
-  async getActiveMessagePairs(threadId: string, pairLimit = 20): Promise<ThreadMessageInfo[]> {
-    const rows = await this.threadRepo.queryActiveMessagePairs(threadId, pairLimit)
-    return rows.map((row) => this.toMessageInfo(row))
+  async getActiveMessagePairs(
+    threadId: string,
+    pairLimit = 20,
+    stable = false,
+  ): Promise<ThreadMessageInfo[]> {
+    const rows = await this.threadRepo.queryActiveMessagePairs(
+      threadId,
+      pairLimit + (stable ? 1 : 0),
+    )
+    if (!stable) return rows.map((row) => this.toMessageInfo(row))
+    const pairKey = (row: (typeof rows)[number]) => row.pairId ?? `message:${row.id}`
+    const pairs = [...new Set(rows.map(pairKey))]
+    const selected = new Set(
+      stableHistoryWindow(`thread:${threadId}`, pairs, pairLimit, (key) => key),
+    )
+    return rows.filter((row) => selected.has(pairKey(row))).map((row) => this.toMessageInfo(row))
+  }
+
+  /** 工作历史按材料预算向前分页；保留完整对话对，最终由逐请求窗口整理工具组。 */
+  async getWorkingMessagePairs(
+    threadId: string,
+    inputBudget: number,
+  ): Promise<ThreadMessageInfo[]> {
+    const messages = new Map<number, ThreadMessageInfo>()
+    const budget = inputBudget > 0 ? inputBudget : 64_000
+    let used = 0
+    let beforeMessageId: number | undefined
+    while (used < budget) {
+      const rows = await this.threadRepo.queryActiveMessagePairs(threadId, 8, {
+        beforeMessageId,
+        recoverable: true,
+      })
+      if (!rows.length) break
+      for (const row of rows) {
+        if (messages.has(row.id)) continue
+        const message = this.toMessageInfo(row)
+        messages.set(message.id, message)
+        used += tokenCounter.countTokens(workContextText(message))
+      }
+      const next = Math.min(...rows.map((row) => row.id))
+      if (beforeMessageId !== undefined && next >= beforeMessageId) break
+      beforeMessageId = next
+    }
+    return [...messages.values()].sort((left, right) => left.id - right.id)
   }
 
   /**
@@ -345,7 +430,10 @@ export class ThreadService {
   }): Promise<{ items: ThreadMessageInfo[]; total: number; hasMoreBefore: boolean }> {
     const result = await this.threadRepo.listActiveMessages(params)
     return {
-      items: result.items.map((r) => this.toMessageInfo(r)),
+      items: result.items.map((row) => {
+        const message = this.toMessageInfo(row)
+        return { ...message, metadataJson: publicWorkMetadata(message.metadataJson) }
+      }),
       total: result.total,
       hasMoreBefore: result.hasMoreBefore,
     }
@@ -368,60 +456,125 @@ export class ThreadService {
     return preview
   }
 
-  /** 获取删除整条 Thread 的 rewind 预检。 */
+  /** 整条会话删除只统计历史，不读取或回滚文件检查点。 */
   async previewThreadRewind(threadId: string): Promise<RewindPreview> {
-    const preview = await this.checkpointService?.previewThread(threadId)
-    if (!preview) throw new AppError('NOT_FOUND', { message: '会话不存在或已删除' })
-    return preview
+    const thread = await this.threadRepo.getThread(threadId)
+    if (!thread || thread.status === 'deleted')
+      throw new AppError('NOT_FOUND', { message: '会话不存在或已删除' })
+    const pairIds = await this.threadRepo.activePairIds(threadId)
+    return {
+      threadId,
+      agentId: thread.agentId,
+      wholeThread: true,
+      pairIds,
+      pairCount: pairIds.length,
+      createdCount: 0,
+      editedCount: 0,
+      preservedCount: 0,
+      files: [],
+      forceWarning: false,
+    }
   }
 
   /**
    * 执行链式 rewind：先安全回滚未发生后续变动的文件，再删除目标轮次及全部后续轮次。
    */
-  async rewindMessage(threadId: string, messageId: number, deletedBy = 'user') {
+  async rewindMessage(
+    threadId: string,
+    messageId: number,
+    deletedBy = 'user',
+    preserveInputAttachments = false,
+  ) {
+    invalidatePromptReplay(threadId, true)
     const preview = await this.previewMessageRewind(threadId, messageId)
-    const workspace = await this.checkpointService!.rollback(preview)
-    const messageIds = await this.checkpointService!.deletePairs(preview, deletedBy)
-    await this.attachmentRepo?.softDeleteByMessageIds(messageIds)
+    if (preserveInputAttachments) {
+      const input = await this.threadRepo.getMessageCoverageContext(messageId)
+      if (input?.threadId !== threadId || input.role !== 'user' || input.status === 'deleted')
+        throw new AppError('INVALID_PARAMETER', { message: '重新生成必须从当前会话的用户消息开始' })
+    }
+    let messageIds: number[] = []
+    const workspace = await this.checkpointService!.rollback(preview, async () => {
+      messageIds = await this.checkpointService!.deletePairs(preview, deletedBy)
+    })
+    await this.planLifecycle?.rollbackPairs(threadId, preview.pairIds)
+    await this.characterStateLifecycle?.rollbackPairs(threadId, preview.pairIds)
+    await this.attachmentRepo?.softDeleteByMessageIds(
+      messageIds,
+      preserveInputAttachments ? { threadId, messageId } : undefined,
+    )
     await this.coverageInvalidator?.invalidatePairs(threadId, preview.pairIds)
     await this.threadRepo.syncThreadStats(threadId)
     logger.info(
       `对话已链式回滚: thread=${threadId}, pairs=${preview.pairCount}, messages=${messageIds.length}`,
     )
     return {
-      preview: { ...preview, files: workspace.files },
+      preview: this.completedRewindPreview(preview, workspace),
       workspace,
       deletedMessageIds: messageIds,
     }
   }
 
-  /** 删除整条 Thread 前安全回滚该会话未发生后续变动的文件检查点。 */
+  /** 兼容旧删除入口：整条会话删除保留所有文件。 */
   async rewindThread(threadId: string) {
+    invalidatePromptReplay(threadId, true)
     const preview = await this.previewThreadRewind(threadId)
-    const workspace = await this.checkpointService!.rollback(preview)
     const result = await this.threadRepo.softDeleteThread(threadId)
     if (!result.deleted) throw new AppError('NOT_FOUND', { message: '会话不存在或已删除' })
-    await this.attachmentRepo?.softDeleteByMessageIds(result.messageIds)
+    const messageIds = result.messageIds
+    const workspace = { files: [], rolledBackCount: 0, preservedCount: 0 }
+    await this.planLifecycle?.clearThread(threadId)
+    await this.characterStateLifecycle?.clearThread(threadId)
+    await this.attachmentRepo?.softDeleteByMessageIds(messageIds)
     await this.coverageInvalidator?.invalidateThread(threadId)
-    logger.info(`Thread 已回滚并软删除: thread=${threadId}, pairs=${preview.pairCount}`)
+    logger.info(`Thread 已软删除，文件保持原样: thread=${threadId}, pairs=${preview.pairCount}`)
     return {
-      preview: { ...preview, files: workspace.files },
+      preview: this.completedRewindPreview(preview, workspace),
       workspace,
-      deletedMessageIds: result.messageIds,
+      deletedMessageIds: messageIds,
+    }
+  }
+
+  /** 预检后仍可能出现新改动，完成结果以实际恢复和保留的文件重新计数。 */
+  private completedRewindPreview(
+    preview: RewindPreview,
+    workspace: { files: RewindPreview['files']; preservedCount: number },
+  ): RewindPreview {
+    return {
+      ...preview,
+      files: workspace.files,
+      createdCount: workspace.files.filter((file) => file.action === 'delete_created').length,
+      editedCount: workspace.files.filter(
+        (file) => file.action !== 'delete_created' && file.action !== 'preserve_changed',
+      ).length,
+      preservedCount: workspace.preservedCount,
+      forceWarning: workspace.files.some((file) => file.action !== 'preserve_changed'),
     }
   }
 
   /** 软删除已退役 Channel 的全部 Thread 与消息。 */
   async deleteThreadsByChannel(channel: string): Promise<number> {
+    invalidatePromptReplay()
     const count = await this.threadRepo.softDeleteByChannel(channel)
-    if (count > 0) logger.info(`已软删除退役 Channel 会话: channel=${channel}, count=${count}`)
+    if (count > 0) {
+      await this.characterStateLifecycle?.clearChannel?.(channel)
+      logger.info(`已软删除退役 Channel 会话: channel=${channel}, count=${count}`)
+    }
     return count
   }
 
   /** 软删除整条 Thread；不会删除由该 Thread 提炼出的长期记忆。 */
   async deleteThread(threadId: string): Promise<boolean> {
+    await disposeExecutionOwner({ threadId })
+    invalidatePromptReplay(threadId, true)
     const result = await this.threadRepo.softDeleteThread(threadId)
     if (!result.deleted) return false
+    try {
+      await this.clearPromptVariables?.(threadId)
+    } catch (error) {
+      logger.warn('会话已删除，但酒馆变量清理失败', { error })
+    }
+    await this.planLifecycle?.clearThread(threadId)
+    await this.characterStateLifecycle?.clearThread(threadId)
     await this.attachmentRepo?.softDeleteByMessageIds(result.messageIds)
     await this.coverageInvalidator?.invalidateThread(threadId)
     logger.info(`Thread 已软删除: thread=${threadId}, messages=${result.messageIds.length}`)
@@ -431,8 +584,13 @@ export class ThreadService {
   /** 软删除单条消息 */
   async deleteMessage(messageId: number, deletedBy = 'user'): Promise<boolean> {
     const context = await this.threadRepo.getMessageCoverageContext(messageId)
+    if (context) invalidatePromptReplay(context.threadId, true)
     const success = await this.threadRepo.softDeleteMessage(messageId, deletedBy)
     if (success) {
+      if (context?.pairId)
+        await this.planLifecycle?.rollbackPairs(context.threadId, [context.pairId])
+      if (context?.pairId)
+        await this.characterStateLifecycle?.rollbackPairs(context.threadId, [context.pairId])
       await this.attachmentRepo?.softDeleteByMessageIds([messageId])
       if (context?.pairId) {
         await this.coverageInvalidator?.invalidatePairs(context.threadId, [context.pairId])
@@ -445,9 +603,14 @@ export class ThreadService {
   /** 软删除整对消息 */
   async deleteMessagePair(messageId: number, deletedBy = 'user'): Promise<number> {
     const context = await this.threadRepo.getMessageCoverageContext(messageId)
+    if (context) invalidatePromptReplay(context.threadId, true)
     const messageIds = await this.threadRepo.getPairMessageIds(messageId)
     const count = await this.threadRepo.softDeletePair(messageId, deletedBy)
     if (count > 0) {
+      if (context?.pairId)
+        await this.planLifecycle?.rollbackPairs(context.threadId, [context.pairId])
+      if (context?.pairId)
+        await this.characterStateLifecycle?.rollbackPairs(context.threadId, [context.pairId])
       await this.attachmentRepo?.softDeleteByMessageIds(messageIds)
       if (context?.pairId) {
         await this.coverageInvalidator?.invalidatePairs(context.threadId, [context.pairId])
@@ -458,9 +621,22 @@ export class ThreadService {
   }
 
   /** 编辑消息内容 */
-  async editMessage(messageId: number, newContent: string): Promise<boolean> {
+  async editMessage(
+    messageId: number,
+    newContent: string,
+    expectedThreadId?: string,
+    expectedRevision?: number,
+  ): Promise<boolean> {
     const context = await this.threadRepo.getMessageCoverageContext(messageId)
-    const success = await this.threadRepo.editMessage(messageId, newContent)
+    if (
+      !context ||
+      context.status === 'deleted' ||
+      (expectedThreadId && context.threadId !== expectedThreadId)
+    )
+      return false
+    const success = await this.threadRepo.editMessage(messageId, newContent, expectedRevision)
+    if (!success && expectedRevision !== undefined)
+      throw new AppError('CONFLICT', { message: '消息已更新，请重新打开编辑后再保存' })
     if (success) {
       if (context?.pairId) {
         await this.coverageInvalidator?.invalidatePairs(context.threadId, [context.pairId])
@@ -506,7 +682,9 @@ export class ThreadService {
       status: (r.status as string) ?? 'active',
       contextPolicy: (r.contextPolicy as string) ?? null,
       disabledTools: this.parseDisabledTools(r.disabledToolsJson),
+      interactionMode: r.interactionMode === 'chat' ? 'chat' : 'work',
       autoExecuteTools: Boolean(r.autoExecuteTools),
+      executionMode: resolveExecutionMode(r.executionMode, Boolean(r.autoExecuteTools)),
       purpose: (r.purpose as string) ?? 'conversation',
       createdAt: (r.createdAt as string) ?? '',
       updatedAt: (r.updatedAt as string) ?? '',

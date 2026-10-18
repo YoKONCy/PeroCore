@@ -30,7 +30,16 @@ describe('跨领域Surface Projection', () => {
       'social-overview:pero',
       'social-contacts:pero',
     ])
-    expect(snapshot.surfaces[1]?.nodes[0]).toMatchObject({ kind: 'table' })
+    expect(snapshot.surfaces[1]?.nodes[0]).toMatchObject({
+      kind: 'table',
+      props: { rows: [{ displayName: '主人', identity: 'owner', impression: '可靠' }] },
+    })
+    expect(snapshot.surfaces[0]?.nodes[0]?.props).toMatchObject({
+      fields: expect.arrayContaining([
+        expect.objectContaining({ key: 'contacts', value: '1' }),
+        expect.objectContaining({ key: 'channels', value: '1' }),
+      ]),
+    })
   })
 
   it('Arca状态应投影为稳定Panel Surface', () => {
@@ -44,7 +53,13 @@ describe('跨领域Surface Projection', () => {
     expect(snapshot.scopeId).toBe('application:infos.arca')
     expect(snapshot.surfaces[0]?.nodes[0]).toMatchObject({
       kind: 'panel',
-      props: expect.objectContaining({ title: 'Arca' }),
+      props: expect.objectContaining({
+        fields: expect.arrayContaining([
+          expect.objectContaining({ key: 'ownership', value: 'managed' }),
+          expect.objectContaining({ key: 'hostState', value: 'running' }),
+          expect.objectContaining({ key: 'federation', value: 'connected' }),
+        ]),
+      }),
     })
   })
 })

@@ -23,6 +23,118 @@ function createProjection() {
 }
 
 describe('Conversation交互Surface投影', () => {
+  it('从消息 metadata 重建原始重试记录，计数和位置不因回连丢失', async () => {
+    const retry = {
+      retryId: 'retry-1',
+      state: 'recovered',
+      attempt: 1,
+      maxRetries: 5,
+      reason: '上游连接重置',
+      delayMs: 1250,
+      startedAt: 100,
+      updatedAt: 500,
+      partialResponse: true,
+    }
+    const service = new ConversationProjectionService(
+      {
+        getThread: async () => ({ id: 'thread-1', agentId: 'pero' }),
+        listMessages: async () => ({
+          items: [
+            {
+              id: 1,
+              threadId: 'thread-1',
+              agentId: 'pero',
+              role: 'assistant',
+              content: '最终答复',
+              status: 'active',
+              revision: 0,
+              timestamp: '2026-10-18T00:00:00Z',
+              metadataJson: JSON.stringify({
+                contentBlocks: [
+                  {
+                    blockId: 'old',
+                    sequence: 1,
+                    kind: 'narration',
+                    turn: 1,
+                    phase: 'progress',
+                    content: '旧片段',
+                  },
+                  { blockId: 'retry', sequence: 2, kind: 'model_retry', turn: 1, retry },
+                  {
+                    blockId: 'new',
+                    sequence: 3,
+                    kind: 'narration',
+                    turn: 1,
+                    phase: 'final',
+                    content: '最终答复',
+                  },
+                ],
+              }),
+            },
+          ],
+          total: 1,
+        }),
+      } as never,
+      { listForMessages: async () => new Map() } as never,
+    )
+    const snapshot = await service.getSnapshot('thread-1')
+    expect(snapshot.messages[0]?.contentBlocks[1]).toMatchObject({ kind: 'model_retry', retry })
+    expect(snapshot.surfaces[0]?.nodes.map((node) => node.kind)).toEqual([
+      'markdown',
+      'model-retry',
+      'markdown',
+    ])
+    expect(snapshot.surfaces[0]?.nodes[1]?.props).toMatchObject({ ...retry, turn: 1 })
+  })
+  it('历史错位标签不再展示，并恢复独立口语答复；用户文字与审计原文保持完整', async () => {
+    const text = '已完成。<spoken_reply>请查看文件。</spoken_reply>交付说明。'
+    const legacy = {
+      id: 2,
+      threadId: 'thread-1',
+      agentId: 'pero',
+      role: 'assistant',
+      content: text,
+      status: 'active',
+      revision: 0,
+      timestamp: '2026-10-14T01:00:00Z',
+      rawContent: text,
+      metadataJson: JSON.stringify({
+        contentBlocks: [
+          {
+            blockId: 'final',
+            kind: 'narration',
+            turn: 1,
+            sequence: 1,
+            phase: 'final',
+            content: text,
+          },
+        ],
+      }),
+    }
+    const service = new ConversationProjectionService(
+      {
+        getThread: async () => ({ id: 'thread-1', agentId: 'pero' }),
+        listMessages: async () => ({
+          items: [legacy, { ...legacy, id: 1, role: 'user', metadataJson: '{}' }],
+          total: 2,
+        }),
+      } as never,
+      { listForMessages: async () => new Map() } as never,
+    )
+    const snapshot = await service.getSnapshot('thread-1')
+    const message = snapshot.messages.find((item) => item.role === 'assistant')!
+    expect(message.content).toBe('已完成。交付说明。')
+    expect(message.spokenReply).toBe('请查看文件。')
+    expect(snapshot.surfaces.find((item) => item.messageId === '2')?.nodes).toContainEqual(
+      expect.objectContaining({
+        kind: 'markdown',
+        props: expect.objectContaining({ source: message.content }),
+      }),
+    )
+    expect(snapshot.messages.find((item) => item.role === 'user')?.content).toBe(text)
+    expect(legacy.content).toBe(text)
+    expect(message.rawContent).toBe(text)
+  })
   it('缓存建立后新增求助仍应立即进入下一份Projection', async () => {
     const { service, inputs } = createProjection()
     expect((await service.getSnapshot('thread-1')).surfaces).toEqual([])
@@ -39,7 +151,16 @@ describe('Conversation交互Surface投影', () => {
     expect(snapshot.surfaces).toEqual([
       expect.objectContaining({
         surfaceId: expect.stringMatching(/^conversation-input:/),
-        nodes: [expect.objectContaining({ kind: 'input' })],
+        threadId: 'thread-1',
+        nodes: [
+          expect.objectContaining({
+            kind: 'input',
+            props: expect.objectContaining({
+              question: '你希望采用哪一种方式？',
+              principalId: 'pero',
+            }),
+          }),
+        ],
       }),
     ])
   })
@@ -62,7 +183,17 @@ describe('Conversation交互Surface投影', () => {
     expect(snapshot.surfaces).toEqual([
       expect.objectContaining({
         surfaceId: expect.stringMatching(/^conversation-approval:/),
-        nodes: [expect.objectContaining({ kind: 'approval' })],
+        nodes: [
+          expect.objectContaining({
+            kind: 'approval',
+            props: expect.objectContaining({
+              toolName: 'delete_file',
+              title: '需要删除工作区外文件',
+              threadId: 'thread-1',
+              principalId: 'pero',
+            }),
+          }),
+        ],
       }),
     ])
   })

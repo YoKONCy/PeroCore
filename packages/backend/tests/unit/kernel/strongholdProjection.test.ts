@@ -32,7 +32,14 @@ describe('Stronghold Projection', () => {
     } as never)
 
     const snapshot = await service.getSnapshot('room-1')
-    expect(snapshot.members).toHaveLength(2)
+    expect(snapshot.members).toEqual([
+      { agentId: 'pero', role: 'member' },
+      { agentId: 'user', role: 'owner' },
+    ])
+    expect(snapshot.surfaces.map((surface) => surface.nodes[0]?.props)).toEqual([
+      expect.objectContaining({ source: '你好' }),
+      expect.objectContaining({ source: '你好呀' }),
+    ])
     expect(snapshot.messages[0]).toMatchObject({
       messageId: '7',
       surfaceId: 'stronghold-message:7',

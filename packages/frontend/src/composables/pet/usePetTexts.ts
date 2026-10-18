@@ -11,14 +11,19 @@
  * @module packages/frontend/src/composables/pet/usePetTexts
  */
 
-import { ref, onMounted, onUnmounted, type Ref } from 'vue'
+import { ref, watch, onMounted, onUnmounted, type Ref } from 'vue'
 import { agentApi } from '../../api/modules/agentApi'
 import { listen } from '../../utils/ipcAdapter'
 import { useGateway } from '../gateway/useGateway'
+import { usePetStateStore } from '../../stores/usePetStateStore'
 
 /** 台词系统初始化参数 */
 interface UsePetTextsOptions {
-  /** showBubble 函数引用 (由 usePetBubble 提供) */
+  /** 与桌宠消息、状态使用同一个角色选择源。 */
+  agentId?: Ref<string>
+  /** 桌宠默认只响应明确互动，避免定时台词占用视线。 */
+  ambientMessages?: boolean
+  /** 短暂互动反应的展示入口。 */
   showBubble: (text: string, duration?: number) => void
   /** 是否正在思考 (由 usePetGateway 提供) */
   isThinking: Ref<boolean>
@@ -30,7 +35,8 @@ export function usePetTexts(opts: UsePetTextsOptions) {
   const { showBubble, isThinking, isSpeaking } = opts
 
   // ── 动态 Agent ──
-  const activeAgentId = ref('pero')
+  const activeAgentId = opts.agentId ?? ref('pero')
+  const characterStates = usePetStateStore()
   const agentName = ref('')
 
   // ── 台词库 ──
@@ -63,8 +69,9 @@ export function usePetTexts(opts: UsePetTextsOptions) {
   let temporaryTextTimer: ReturnType<typeof setTimeout> | null = null
   let unlistenAgentChanged: (() => void) | null = null
   let textLoadSeq = 0
+  let disposed = false
 
-  // ── Gateway: 监听 state_update 实时热更新台词 (finish_task 写入 pet_states 后即时生效) ──
+  // ── Gateway: 当前会话台词随状态更新与撤回即时刷新 ──
   const { connect: gwConnect, disconnect: gwDisconnect, onPush, offPush } = useGateway()
 
   function scheduleTemporaryTextExpiry(expiresAtValue: unknown): void {
@@ -88,7 +95,14 @@ export function usePetTexts(opts: UsePetTextsOptions) {
   function applyStateTexts(payload: Record<string, unknown>): void {
     const updateAgentId = payload.agentId
     if (typeof updateAgentId === 'string' && updateAgentId !== activeAgentId.value) return
+    if (payload.threadId !== characterStates.threadFor(activeAgentId.value)) return
     const targetAgentId = typeof updateAgentId === 'string' ? updateAgentId : activeAgentId.value
+    // 撤回推送是完整替换，空台词池也必须生效，不能与已撤回内容继续合并。
+    if (payload.replace === true) {
+      scheduleTemporaryTextExpiry(null)
+      void loadDynamicTexts({ agentId: targetAgentId, showWelcome: false })
+      return
+    }
     const expiresAt =
       typeof payload.text_expires_at === 'string' ? Date.parse(payload.text_expires_at) : Number.NaN
     if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return
@@ -131,6 +145,7 @@ export function usePetTexts(opts: UsePetTextsOptions) {
 
   function startIdleTimer() {
     if (idleTimer) clearTimeout(idleTimer)
+    if (!opts.ambientMessages) return
     const delay = 30000 + Math.random() * 30000
     idleTimer = setTimeout(() => {
       if (!isThinking.value && !isSpeaking.value) {
@@ -156,6 +171,7 @@ export function usePetTexts(opts: UsePetTextsOptions) {
   }
 
   function showTimeBasedWelcome() {
+    if (!opts.ambientMessages) return
     const slot = getTimeSlot()
     const msg = localTexts.value[`welcome_${slot}`]
     if (msg) {
@@ -165,6 +181,7 @@ export function usePetTexts(opts: UsePetTextsOptions) {
 
   // ── visibilitychange ──
   function handleVisibilityChange() {
+    if (!opts.ambientMessages) return
     if (document.visibilityState === 'visible') {
       // 优先从 finish_task 写入的回归台词池 (backMessages) 随机选取，回退单条 visibilityBack
       let backMsg = localTexts.value['visibilityBack']
@@ -190,32 +207,37 @@ export function usePetTexts(opts: UsePetTextsOptions) {
     const currentSeq = ++textLoadSeq
 
     try {
-      const activeRes = agentIdOverride ? null : await agentApi.getActive()
-      const agentId = agentIdOverride ?? activeRes?.data?.agentId ?? 'pero'
-      if (currentSeq !== textLoadSeq) return
-      activeAgentId.value = agentId
+      const selectedId = agentIdOverride ?? opts.agentId?.value
+      const activeRes = selectedId ? null : await agentApi.getActive()
+      const agentId = selectedId ?? activeRes?.data?.agentId ?? 'pero'
+      if (disposed || currentSeq !== textLoadSeq) return
+      if (!opts.agentId) activeAgentId.value = agentId
       localTexts.value = { ...fallbackLocalTexts }
       idleMessages.value = [...fallbackIdleMessages]
 
       try {
         const listRes = await agentApi.list()
+        if (disposed || currentSeq !== textLoadSeq) return
         const agents = (listRes?.data ?? []) as Array<{ id: string; name?: string }>
         const matched = agents.find((a) => a.id === agentId)
         agentName.value = matched?.name ?? ''
       } catch {
+        if (disposed || currentSeq !== textLoadSeq) return
         agentName.value = ''
       }
 
-      const result = await agentApi.getTexts(agentId)
-      if (currentSeq !== textLoadSeq) return
+      const threadId = characterStates.threadFor(agentId)
+      const result = await agentApi.getTexts(agentId, threadId || undefined)
+      if (disposed || currentSeq !== textLoadSeq) return
       const texts = result?.data as Record<string, unknown> | undefined
       if (!texts || typeof texts !== 'object') return
 
       try {
-        const petState = await agentApi.getPetState(agentId)
-        if (currentSeq !== textLoadSeq) return
+        const petState = await agentApi.getPetState(agentId, threadId || undefined)
+        if (disposed || currentSeq !== textLoadSeq) return
         scheduleTemporaryTextExpiry(petState.data?.textExpiresAt)
       } catch {
+        if (disposed || currentSeq !== textLoadSeq) return
         scheduleTemporaryTextExpiry(null)
       }
 
@@ -239,7 +261,7 @@ export function usePetTexts(opts: UsePetTextsOptions) {
         localTexts.value['visibilityBack'] = texts.visibilityBack
       }
 
-      // backMessages: finish_task 写入 pet_states 的回归台词池 (合并自后端 getWaifuTexts)
+      // backMessages: 当前会话的回归台词池，合并自后端 getWaifuTexts。
       if (Array.isArray(texts.backMessages) && texts.backMessages.length > 0) {
         localTexts.value['visibilityBack_all'] = JSON.stringify(texts.backMessages)
       }
@@ -265,7 +287,7 @@ export function usePetTexts(opts: UsePetTextsOptions) {
         showTimeBasedWelcome()
       }
     } catch {
-      if (currentSeq !== textLoadSeq) return
+      if (disposed || currentSeq !== textLoadSeq) return
       localTexts.value = { ...fallbackLocalTexts }
       idleMessages.value = [...fallbackIdleMessages]
     }
@@ -295,18 +317,38 @@ export function usePetTexts(opts: UsePetTextsOptions) {
   }
 
   // ── 生命周期 ──
+  watch(
+    () => characterStates.threadFor(activeAgentId.value),
+    () => {
+      scheduleTemporaryTextExpiry(null)
+      void loadDynamicTexts({ agentId: activeAgentId.value, showWelcome: false })
+    },
+  )
   startIdleTimer()
 
-  onMounted(() => {
-    loadDynamicTexts()
-    listen('agent_changed', (payload) => {
-      const agentId = (payload as { agentId?: unknown } | null)?.agentId
-      if (typeof agentId === 'string' && agentId && agentId !== activeAgentId.value) {
-        loadDynamicTexts({ agentId, showWelcome: false })
-      }
-    }).then((unlisten) => {
-      unlistenAgentChanged = unlisten
+  if (opts.agentId) {
+    watch(opts.agentId, (id) => {
+      agentName.value = ''
+      localTexts.value = { ...fallbackLocalTexts }
+      idleMessages.value = [...fallbackIdleMessages]
+      if (temporaryTextTimer) clearTimeout(temporaryTextTimer)
+      temporaryTextTimer = null
+      void loadDynamicTexts({ agentId: id, showWelcome: false })
     })
+  }
+
+  onMounted(() => {
+    void loadDynamicTexts({ agentId: opts.agentId?.value })
+    if (!opts.agentId)
+      void listen('agent_changed', (payload) => {
+        const agentId = (payload as { agentId?: unknown } | null)?.agentId
+        if (typeof agentId === 'string' && agentId && agentId !== activeAgentId.value) {
+          loadDynamicTexts({ agentId, showWelcome: false })
+        }
+      }).then((unlisten) => {
+        if (disposed) unlisten()
+        else unlistenAgentChanged = unlisten
+      })
     document.addEventListener('visibilitychange', handleVisibilityChange)
 
     // 监听 state_update 实时热更新台词 (无需重启即可生效)
@@ -315,6 +357,8 @@ export function usePetTexts(opts: UsePetTextsOptions) {
   })
 
   onUnmounted(() => {
+    disposed = true
+    textLoadSeq++
     if (idleTimer) clearTimeout(idleTimer)
     if (temporaryTextTimer) clearTimeout(temporaryTextTimer)
     unlistenAgentChanged?.()

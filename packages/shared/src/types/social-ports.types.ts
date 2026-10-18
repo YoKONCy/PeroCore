@@ -42,7 +42,45 @@ export interface SocialSyncCursorRecord {
   lastError: string | null
 }
 
+/** 恢复记录归 Social Realm 所有；终态只保留标识与结果，不保留上下文正文。 */
+export interface SocialTurnRecord {
+  id: string
+  agentId: string
+  accountId: string
+  channelType: 'private' | 'group'
+  channelId: string
+  status:
+    | 'running'
+    | 'retrying'
+    | 'waiting'
+    | 'completed'
+    | 'failed'
+    | 'cancelled'
+    | 'delivery_unknown'
+  startedAt: string
+  deadline: string
+  attempts: number
+  error?: string
+  updatedAt: string
+  checkpoint: Record<string, unknown>
+  sourceMessageIds?: string[]
+  outcome?: 'reply' | 'pass' | 'wait' | 'defer'
+  acknowledgedAt?: string
+}
+
 export interface SocialStoragePort {
+  /** 只控制后台炼化，不影响已有社交记忆的读取。 */
+  readonly memoryBackground?: import('../memorySettings').MemoryBackgroundPolicy
+  getTurn(id: string): Promise<SocialTurnRecord | null>
+  saveTurn(record: SocialTurnRecord): Promise<void>
+  listRecoverableTurns(agentId: string, includeTerminal?: boolean): Promise<SocialTurnRecord[]>
+  deleteTurns(agentId: string, channelType?: string, channelId?: string): Promise<void>
+  getDataVersion(agentId: string, channelType?: string, channelId?: string): Promise<number>
+  forgetLongMemory(agentId: string): Promise<void>
+  deleteLongMemory(agentId: string): Promise<void>
+  memoryAvailable(agentId: string): Promise<boolean>
+  queuedMessages(agentId: string): Promise<SocialMessageRecord[]>
+  completeQueuedMessages(agentId: string, accountId: string, msgIds: string[]): Promise<void>
   insert(msg: {
     msgId: string
     platform: string
@@ -55,6 +93,8 @@ export interface SocialStoragePort {
     agentId: string
     rawEventJson?: string
     timestamp?: string
+    queueForReply?: boolean
+    turnId?: string
   }): Promise<void>
   getRecent(
     agentId: string,
@@ -76,7 +116,11 @@ export interface SocialStoragePort {
     senderId: string,
     limit?: number,
   ): Promise<SocialMessageRecord[]>
-  getByMsgId(agentId: string, msgId: string): Promise<SocialMessageRecord | null>
+  getByMsgId(
+    agentId: string,
+    msgId: string,
+    accountId?: string,
+  ): Promise<SocialMessageRecord | null>
   getRecentGroupsByContact(agentId: string, userId: string, groupLimit?: number): Promise<string[]>
   getRecentSelfGroupMessages(
     agentId: string,
@@ -95,6 +139,7 @@ export interface SocialStoragePort {
     userId: string,
   ): Promise<SocialContactImpressionRecord | null>
   upsertContactImpression(input: {
+    turnId?: string
     agentId: string
     platform: string
     userId: string
@@ -159,6 +204,7 @@ export interface SocialExecutionPort {
     priority?: number
     resourceKey?: string
     maxDurationMs: number
+    signal?: AbortSignal
     run(context: {
       signal: AbortSignal
       executionId: string

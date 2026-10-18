@@ -36,6 +36,7 @@ const DEFAULT_CONFIG: ImageCacheConfig = {
 export class ImageCacheManager {
   private config: ImageCacheConfig
   private initialized = false
+  private downloads = new Map<string, Promise<string | null>>()
 
   constructor(config: Partial<ImageCacheConfig> & { cacheDir: string }) {
     this.config = { ...DEFAULT_CONFIG, ...config }
@@ -57,6 +58,18 @@ export class ImageCacheManager {
    * @returns 本地绝对路径; 下载失败返回 null
    */
   async download(url: string): Promise<string | null> {
+    const pending = this.downloads.get(url)
+    if (pending) return pending
+    const downloading = this.downloadImage(url)
+    this.downloads.set(url, downloading)
+    try {
+      return await downloading
+    } finally {
+      this.downloads.delete(url)
+    }
+  }
+
+  private async downloadImage(url: string): Promise<string | null> {
     try {
       this.ensureDir()
 
@@ -88,8 +101,6 @@ export class ImageCacheManager {
         }
 
         const resp = await fetch(url, { signal: controller.signal, headers })
-        clearTimeout(timeout)
-
         if (!resp.ok) {
           logger.warn(`下载图片失败 ${url}: HTTP ${resp.status}`)
           return null
@@ -102,9 +113,8 @@ export class ImageCacheManager {
         this.cleanup()
 
         return filepath
-      } catch (fetchErr) {
+      } finally {
         clearTimeout(timeout)
-        throw fetchErr
       }
     } catch (err) {
       logger.warn(`下载图片错误: ${err}`)
@@ -121,17 +131,21 @@ export class ImageCacheManager {
     try {
       if (!fs.existsSync(filepath)) return null
 
-      const ext = path.extname(filepath).slice(1).toLowerCase()
-      const mimeMap: Record<string, string> = {
-        jpg: 'image/jpeg',
-        jpeg: 'image/jpeg',
-        png: 'image/png',
-        gif: 'image/gif',
-        webp: 'image/webp',
-      }
-      const mime = mimeMap[ext] ?? 'image/jpeg'
-
       const data = fs.readFileSync(filepath)
+      // QQ 图片地址经常没有扩展名，优先按真实文件头判断，避免 PNG 被标成 JPEG。
+      const mime = data.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+        ? 'image/png'
+        : data.subarray(0, 3).equals(Buffer.from([255, 216, 255]))
+          ? 'image/jpeg'
+          : /^GIF8[79]a$/.test(data.toString('ascii', 0, 6))
+            ? 'image/gif'
+            : data.toString('ascii', 0, 4) === 'RIFF' && data.toString('ascii', 8, 12) === 'WEBP'
+              ? 'image/webp'
+              : undefined
+      if (!mime) {
+        logger.warn('图片缓存内容为空或格式不可识别，已跳过视觉输入')
+        return null
+      }
       return `data:${mime};base64,${data.toString('base64')}`
     } catch {
       return null

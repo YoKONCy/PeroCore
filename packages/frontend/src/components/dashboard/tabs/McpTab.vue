@@ -15,6 +15,10 @@ import McpPanel from './McpPanel.vue'
 import SkillPanel from './SkillPanel.vue'
 
 const ctx = useDashboardContext()
+const props = withDefaults(defineProps<{ embedded?: boolean; section?: 'mcp' | 'skill' }>(), {
+  embedded: false,
+  section: undefined,
+})
 
 const {
   currentSubTab,
@@ -49,6 +53,13 @@ const {
   importSkill,
   deleteSkill,
 } = useMcpConfig()
+watch(
+  () => props.section,
+  (value) => {
+    if (value) currentSubTab.value = value
+  },
+  { immediate: true },
+)
 
 // 监听全局刷新
 watch(
@@ -61,13 +72,13 @@ watch(
 </script>
 
 <template>
-  <div class="p-8 h-full flex flex-col overflow-hidden">
+  <div :class="[!embedded && 'p-8', 'h-full flex flex-col overflow-hidden']">
     <!-- 头部 + 子选项卡切换 -->
     <div class="flex items-start justify-between gap-4 mb-6 flex-shrink-0 relative group/header">
       <div
         class="absolute -right-20 -top-10 w-40 h-40 bg-sky-400/5 blur-[60px] rounded-full pointer-events-none group-hover/header:bg-sky-400/15 transition-all duration-1000"
       />
-      <div class="flex flex-col gap-1">
+      <div v-if="!embedded" class="flex flex-col gap-1">
         <div class="flex items-center gap-2">
           <button
             :class="[
@@ -100,7 +111,7 @@ watch(
         </p>
       </div>
       <!-- 右侧操作栏 -->
-      <div class="flex gap-2 items-center">
+      <div class="flex gap-2 items-center" :class="{ 'ml-auto': embedded }">
         <template v-if="currentSubTab === 'mcp'">
           <span
             class="text-[11px] font-bold text-slate-400 px-2.5 py-1 border border-slate-200 bg-slate-50"

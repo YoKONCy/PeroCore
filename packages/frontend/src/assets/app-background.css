@@ -1,0 +1,300 @@
+/**
+ * 仅主应用启用背景时改变材质，不改主题基色、像素轮廓和品牌强调色。
+ * 底图只绘制一次；导航透景、卡片承托、正文保读。独立网页视图不在此作用域。
+ */
+[data-app-background='active'] {
+  --app-shell-fill: color-mix(
+    in srgb,
+    var(--ui-bg-surface-soft) calc(var(--app-shell-opacity) * 100%),
+    transparent
+  );
+  --app-panel-fill: color-mix(
+    in srgb,
+    var(--ui-bg-surface) calc(var(--app-panel-opacity) * 100%),
+    transparent
+  );
+  --app-soft-fill: color-mix(
+    in srgb,
+    var(--ui-bg-surface-soft) calc(var(--app-panel-opacity) * 100%),
+    transparent
+  );
+  --app-reading-fill: color-mix(
+    in srgb,
+    var(--ui-bg-surface) calc(var(--app-reading-opacity) * 100%),
+    transparent
+  );
+  --app-inset-reading-fill: color-mix(
+    in srgb,
+    var(--ui-bg-surface) calc(var(--app-inset-reading-opacity) * 100%),
+    transparent
+  );
+  --dash-panel-bg: var(--app-panel-fill);
+  --dash-panel-soft: var(--app-soft-fill);
+  --dash-panel-elevated: var(--app-reading-fill);
+  --dash-input-bg: var(--app-reading-fill);
+  --surface-transition-fill: var(--app-panel-fill);
+  --surface-transition-panel: var(--app-soft-fill);
+}
+
+/* 标题栏与主导航各用一层材质；不模糊滚动中的每张卡片。 */
+.main-view-root[data-app-background='active'] > .desktop-tabbar {
+  position: relative;
+  z-index: 1;
+  background: var(--app-shell-fill);
+  backdrop-filter: blur(var(--app-material-blur));
+}
+.main-view-root[data-app-background='active'] .desktop-tabbar .desktop-tab-selection {
+  background: var(--app-panel-fill);
+}
+.main-view-root[data-app-background='active'] .desktop-tabbar .desktop-tab.is-active {
+  background: transparent;
+}
+.main-view-root[data-app-background='active'] .main-home-surface .main-nav,
+.main-view-root[data-app-background='active'] .main-home-surface .main-statusbar,
+.main-view-root[data-app-background='active'] .desktop-app-surface .desktop-browser-toolbar {
+  background: var(--app-shell-fill);
+  backdrop-filter: blur(var(--app-material-blur));
+}
+.main-view-root[data-app-background='active'] .main-home-surface .main-nav-pixel-bg {
+  display: none;
+}
+
+/* 页面根节点可嵌套在过渡容器内，不依赖直接父子关系；壁纸仍只绘制一次。 */
+.main-view-root[data-app-background='active'] .main-home-surface .main-content,
+.main-view-root[data-app-background='active'] .main-content .main-tab-content,
+.main-view-root[data-app-background='active'] .desktop-app-surface .desktop-new-page,
+.main-view-root[data-app-background='active']
+  .main-tab-content
+  :is(
+    .chat-panel,
+    .stronghold-panel,
+    .workspace-panel,
+    .workspace-center,
+    .editor-area,
+    .atlas-workspace,
+    .chat-sidebar-footer,
+    .markdown-preview,
+    .stronghold-input-area
+  ) {
+  background: transparent;
+}
+.main-view-root[data-app-background='active'] .main-home-surface .main-content::before,
+.main-view-root[data-app-background='active'] .main-home-surface .main-content::after,
+.main-view-root[data-app-background='active'] .main-tab-content .chat-main::before,
+.main-view-root[data-app-background='active'] .main-tab-content .chat-main::after {
+  opacity: 0;
+}
+
+/* 伙伴、据点与角色索引保留各自结构，共用透景侧栏。 */
+.main-view-root[data-app-background='active']
+  .main-tab-content
+  :is(.chat-sidebar, .chat-main-header, .sh-left, .sh-main-header, .atlas-index) {
+  background: var(--app-shell-fill);
+  backdrop-filter: blur(var(--app-material-blur));
+}
+
+/* 消息和输入只用有厚度的底色，不给长列表逐项增加毛玻璃合成层。 */
+.main-view-root[data-app-background='active']
+  .main-tab-content
+  :is(
+    .msg-bubble-assistant,
+    .deck,
+    .markdown-preview__paper,
+    .editor-surface,
+    .persona-console textarea
+  ) {
+  background: var(--app-reading-fill);
+}
+.main-view-root[data-app-background='active'] .main-tab-content .msg-bubble-user {
+  background: color-mix(
+    in srgb,
+    var(--user-bubble-bg) calc(var(--app-reading-opacity) * 100%),
+    transparent
+  );
+}
+.main-view-root[data-app-background='active'] .main-tab-content :is(.deck-status, .deck-footer) {
+  background: color-mix(in srgb, var(--ui-bg-surface-soft) 55%, transparent);
+}
+.main-view-root[data-app-background='active'] .main-tab-content .editor-surface textarea {
+  background: transparent;
+}
+
+/* 工作区共用一块透景底板；内部列与标题不再各自叠加完整材质。 */
+.main-view-root[data-app-background='active'] .workspace-tab .workspace-commandbar,
+.main-view-root[data-app-background='active'] .workspace-tab .workspace-body {
+  background: var(--app-panel-fill);
+  backdrop-filter: blur(var(--app-material-blur));
+}
+.main-view-root[data-app-background='active']
+  .workspace-tab
+  .workspace-body
+  :is(
+    .workspace-explorer,
+    .workspace-copilot,
+    .workspace-tree,
+    .copilot-chat,
+    .copilot-context,
+    .editor-gutter,
+    .editor-statusbar,
+    .terminal-area
+  ) {
+  background: transparent;
+  backdrop-filter: none;
+}
+.main-view-root[data-app-background='active']
+  .workspace-tab
+  .workspace-body
+  :is(
+    .workspace-tree__header,
+    .workspace-tree__modes,
+    .editor-tabs,
+    .editor-toolbar,
+    .copilot-header,
+    .terminal-panelbar
+  ) {
+  background: color-mix(in srgb, var(--ui-bg-surface-soft) 18%, transparent);
+  backdrop-filter: none;
+}
+.main-view-root[data-app-background='active']
+  .workspace-tab
+  .workspace-body
+  :is(.editor-surface, .markdown-preview__paper, .msg-bubble-assistant, .deck) {
+  background: var(--app-inset-reading-fill);
+}
+.main-view-root[data-app-background='active'] .workspace-tab .workspace-body .msg-bubble-user {
+  background: color-mix(
+    in srgb,
+    var(--user-bubble-bg) calc(var(--app-inset-reading-opacity) * 100%),
+    transparent
+  );
+}
+.main-view-root[data-app-background='active'] .workspace-tab .workspace-body .editor-empty {
+  color: var(--ui-text-secondary);
+}
+
+/* 终端只铺一层阅读材质；xterm 的绘制背景由组件同步为透明，ANSI 颜色继续保留。 */
+.main-view-root[data-app-background='active'] .main-tab-content .work-terminal {
+  --work-terminal-surface: transparent;
+  --work-terminal-surface-active: color-mix(in srgb, var(--ui-bg-surface-soft) 18%, transparent);
+  --work-terminal-toolbar-bg: color-mix(in srgb, var(--ui-bg-surface-soft) 18%, transparent);
+  --work-terminal-border: var(--ui-border-subtle);
+  --work-terminal-border-strong: var(--ui-border-default);
+  --work-terminal-text: var(--ui-text-primary);
+  --work-terminal-muted: var(--ui-text-secondary);
+  background: var(--app-reading-fill);
+}
+.main-view-root[data-app-background='active'] .workspace-tab .workspace-body .work-terminal {
+  background: var(--app-inset-reading-fill);
+}
+.main-view-root[data-app-background='active'] .work-terminal .terminal-output {
+  background: transparent;
+}
+.main-view-root[data-app-background='active'] .main-tab-content :is(.terminal-panel, .sa-terminal) {
+  background: var(--app-reading-fill);
+  backdrop-filter: blur(var(--app-material-blur));
+  color: var(--ui-text-primary);
+}
+.main-view-root[data-app-background='active'] .terminal-panel .terminal-header {
+  background: color-mix(in srgb, var(--ui-bg-surface-soft) 18%, transparent);
+  border-color: var(--ui-border-default);
+}
+.main-view-root[data-app-background='active'] .terminal-panel :is(.terminal-title, .log-info) {
+  color: var(--ui-text-primary);
+}
+.main-view-root[data-app-background='active']
+  .terminal-panel
+  :is(.log-time, .log-default, .terminal-empty) {
+  color: var(--ui-text-secondary);
+}
+.main-view-root[data-app-background='active'] .terminal-panel :is(.src-backend, .log-link) {
+  color: var(--ui-accent-sky);
+}
+.main-view-root[data-app-background='active'] .terminal-panel .src-frontend {
+  color: var(--ui-success);
+}
+.main-view-root[data-app-background='active'] .terminal-panel :is(.src-system, .log-system) {
+  color: var(--ui-accent-purple);
+}
+.main-view-root[data-app-background='active'] .terminal-panel .log-error {
+  color: var(--ui-danger);
+}
+.main-view-root[data-app-background='active'] .terminal-panel .log-warn {
+  color: var(--ui-warning);
+}
+.main-view-root[data-app-background='active'] .main-tab-content .sa-terminal {
+  --sa-bg: transparent;
+  --sa-bg-header: color-mix(in srgb, var(--ui-bg-surface-soft) 18%, transparent);
+  --sa-bg-hover: var(--ui-bg-hover);
+  --sa-border: var(--ui-border-default);
+  --sa-border-subtle: var(--ui-border-subtle);
+  --sa-text: var(--ui-text-primary);
+  --sa-text-bright: var(--ui-text-primary);
+  --sa-text-dim: var(--ui-text-secondary);
+  --sa-text-subtle: var(--ui-text-tertiary);
+  --sa-accent: var(--ui-accent-purple);
+  --sa-success: var(--ui-success);
+  --sa-error: var(--ui-danger);
+  --sa-warn: var(--ui-warning);
+  --sa-info: var(--ui-accent-sky);
+}
+.main-view-root[data-app-background='active'] .sa-terminal .sa-progress {
+  background: var(--ui-bg-hover);
+}
+.main-view-root[data-app-background='active'] :is(.terminal-crt, .sa-crt) {
+  display: none;
+}
+
+/* 知识库与设置卡片使用面板材质，选中、告警等有色状态沿用原组件。 */
+.main-view-root[data-app-background='active']
+  .main-tab-content
+  :is(
+    .object-panel,
+    .fact-inspector,
+    .document-panel,
+    .document-inspector,
+    .knowledge-part,
+    .fact-card,
+    .index-agent:not(.active)
+  ) {
+  background: var(--app-panel-fill);
+}
+.main-view-root[data-app-background='active'] .main-tab-content .p-card-glass {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* 旧页面的中性 Tailwind 填色只映射到材质，保留所有语义色与代码主题。 */
+.main-view-root[data-app-background='active'] .dashboard-tab-content [class~='bg-white'] {
+  background-color: var(--app-panel-fill) !important;
+}
+.main-view-root[data-app-background='active']
+  .dashboard-tab-content
+  :is([class~='bg-slate-50'], [class~='bg-neutral-50'], [class~='bg-slate-100']) {
+  background-color: var(--app-soft-fill) !important;
+}
+.main-view-root[data-app-background='active'] .main-content .social-panel {
+  background: transparent !important;
+}
+.main-view-root[data-app-background='active']
+  .social-panel
+  :is(.sp-header, .sp-contact-master, .sp-block) {
+  background: var(--app-panel-fill) !important;
+}
+
+/* 新标签页沿用微像素侧边、压边与图标底座，仅替换面材。 */
+.main-view-root[data-app-background='active'] .desktop-app-surface .desktop-new-page {
+  --new-face: var(--app-panel-fill);
+}
+.main-view-root[data-app-background='active'] .desktop-new-page .desktop-new-search {
+  background: var(--app-reading-fill);
+}
+.main-view-root[data-app-background='active'] .desktop-new-page .desktop-new-brand,
+.main-view-root[data-app-background='active'] .desktop-new-page h1,
+.main-view-root[data-app-background='active'] .desktop-new-page h2 {
+  text-shadow:
+    0 1px 2px var(--ui-bg-canvas),
+    0 0 10px var(--ui-bg-canvas);
+}
+.main-view-root[data-app-background='active'] .task-pixel-surface {
+  --task-face: var(--app-panel-fill);
+}

@@ -135,21 +135,71 @@ const updateClothing = () => {
   })
 }
 
+let isVisible = true
+let observer: IntersectionObserver | null = null
+
+function startRenderLoop() {
+  if (!animationFrameId && isVisible) {
+    lastTime = performance.now()
+    animationFrameId = requestAnimationFrame(animate)
+  }
+}
+
+function stopRenderLoop() {
+  if (animationFrameId) {
+    cancelAnimationFrame(animationFrameId)
+    animationFrameId = 0
+  }
+}
+
+const handleVisibilityChange = () => {
+  if (typeof document === 'undefined') return
+  if (document.hidden) {
+    stopRenderLoop()
+  } else if (isVisible) {
+    startRenderLoop()
+  }
+}
+
 onMounted(async () => {
   if (typeof window === 'undefined') return // SSR check
 
   initThree()
   await loadModel()
-  animate()
+  startRenderLoop()
 
   window.addEventListener('resize', onResize)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+
+  // 视口感知：3D 画布滚出屏幕时彻底停止 WebGL 渲染，释放 GPU 负载
+  if ('IntersectionObserver' in window && container.value) {
+    observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          isVisible = entry.isIntersecting
+          if (isVisible) {
+            startRenderLoop()
+          } else {
+            stopRenderLoop()
+          }
+        }
+      },
+      { threshold: 0.05 }
+    )
+    observer.observe(container.value)
+  }
 })
 
 onUnmounted(() => {
   if (typeof window === 'undefined') return
 
-  cancelAnimationFrame(animationFrameId)
+  stopRenderLoop()
+  if (observer) {
+    observer.disconnect()
+    observer = null
+  }
   window.removeEventListener('resize', onResize)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
 
   if (renderer.value) {
     renderer.value.dispose()
@@ -176,7 +226,7 @@ function initThree() {
   const r = new THREE.WebGLRenderer({ alpha: true, antialias: true })
   r.setClearColor(0x000000, 0) // Ensure fully transparent
   r.setSize(container.value.clientWidth, container.value.clientHeight)
-  r.setPixelRatio(window.devicePixelRatio)
+  r.setPixelRatio(Math.min(window.devicePixelRatio, 2))
   r.shadowMap.enabled = true
   canvasContainer.value.appendChild(r.domElement)
   renderer.value = r
@@ -279,6 +329,10 @@ async function loadModel() {
 }
 
 function animate() {
+  if (!isVisible) {
+    animationFrameId = 0
+    return
+  }
   animationFrameId = requestAnimationFrame(animate)
   if (controls.value) controls.value.update()
 

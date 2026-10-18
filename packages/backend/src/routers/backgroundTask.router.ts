@@ -25,6 +25,7 @@ import type { AppContext } from '../container'
 import { AppError } from '../lib/appError'
 import { createLogger } from '../lib/logger'
 import { createEnvelope } from '../services/gateway/types'
+import { taskControlSchema } from '../services/task/taskControlService'
 
 const logger = createLogger('BackgroundTaskRouter')
 
@@ -41,6 +42,9 @@ const dispatchSchema = z
     targetThreadId: z.string().min(1).optional(),
     priority: z.number().int().min(1).max(10).optional(),
     completionAction: z.enum(['notify', 'open_result', 'send_to_chat']).optional(),
+    successCriteria: z.string().max(2000).optional(),
+    recovery: z.enum(['read_only', 'confirm']).optional(),
+    deadline: z.string().datetime({ offset: true }).optional(),
   })
   .refine((body) => body.completionAction !== 'send_to_chat' || !!body.targetThreadId, {
     message: '发送到对话时必须提供目标 Thread',
@@ -53,6 +57,8 @@ const statusEnum = z.enum([
   'running',
   'paused',
   'waiting_input',
+  'waiting',
+  'blocked',
   'completed',
   'failed',
   'cancelled',
@@ -62,12 +68,15 @@ const statusEnum = z.enum([
 const resumeInterruptedSchema = z.object({})
 
 const inputSchema = z.object({
+  expectedRevision: z.number().int().positive(),
+  approvalId: z.string().min(1),
   decision: z.enum(['allow_once', 'allow_session', 'deny_once']),
   message: z.string().max(2000).optional(),
 })
 
 /** 分页查询参数 */
 const querySchema = z.object({
+  category: z.enum(['agent_task', 'resident']).optional(),
   agentId: z.string().optional(),
   status: statusEnum.optional(),
   keyword: z.string().optional(),
@@ -92,6 +101,40 @@ export function createBackgroundTaskRouter(ctx: AppContext) {
     }
     return service
   }
+
+  router.post(
+    '/control',
+    zValidator('json', taskControlSchema.extend({ agentId: z.string().min(1) })),
+    async (c) => {
+      const { agentId, ...input } = c.req.valid('json')
+      if (!ctx.agentManager.getAgent(agentId))
+        throw new AppError('AGENT_NOT_FOUND', { message: '角色不存在' })
+      return c.json({
+        code: 'OK',
+        data: await ctx.taskControlService.execute(agentId, input, undefined, true),
+      })
+    },
+  )
+
+  router.get('/:id/deliveries', async (c) => {
+    if (!(await requireService().getTask(c.req.param('id'))))
+      throw new AppError('NOT_FOUND', { message: '任务不存在' })
+    return c.json({ code: 'OK', data: ctx.taskDeliveryService.list(c.req.param('id')) })
+  })
+  router.post(
+    '/:id/deliveries/:deliveryId',
+    zValidator('json', z.object({ decision: z.enum(['sent', 'retry']) })),
+    async (c) => {
+      if (!(await requireService().getTask(c.req.param('id'))))
+        throw new AppError('NOT_FOUND', { message: '任务不存在' })
+      ctx.taskDeliveryService.resolve(
+        c.req.param('id'),
+        c.req.param('deliveryId'),
+        c.req.valid('json').decision,
+      )
+      return c.json({ code: 'OK', data: null })
+    },
+  )
 
   // ── Gateway 事件桥接：服务事件 → 全端广播 ──
   // 注册一次即可（router 创建即生效），前端通过 /ws 订阅。
@@ -125,6 +168,11 @@ export function createBackgroundTaskRouter(ctx: AppContext) {
       priority: body.priority,
       requestedBy: 'user',
       completionAction: body.completionAction,
+      lifecycle: {
+        successCriteria: body.successCriteria ?? '',
+        recovery: body.recovery ?? 'confirm',
+        ...(body.deadline ? { deadline: body.deadline } : {}),
+      },
     })
     return c.json({ code: 'CREATED', message: '任务已创建', data: task }, 201)
   })
@@ -151,6 +199,7 @@ export function createBackgroundTaskRouter(ctx: AppContext) {
   /** POST /api/background-tasks/:id/read — 标记单条历史记录已读 */
   router.post('/:id/read', async (c) => {
     await requireService().markRead(c.req.param('id'))
+    ctx.taskDeliveryService?.markRead(c.req.param('id'))
     return c.json({ code: 'OK' })
   })
 
@@ -181,7 +230,14 @@ export function createBackgroundTaskRouter(ctx: AppContext) {
 
   /** POST /api/background-tasks/:id/resume — 恢复 */
   router.post('/:id/resume', async (c) => {
-    const task = await requireService().resume(c.req.param('id'))
+    const current = await requireService().getTask(c.req.param('id'))
+    if (!current) throw new AppError('NOT_FOUND', { message: '任务不存在' })
+    const task = await ctx.taskControlService.execute(
+      current.agentId,
+      { action: 'resume', taskId: current.id, expectedRevision: current.revision },
+      undefined,
+      true,
+    )
     return c.json({ code: 'OK', data: task })
   })
 

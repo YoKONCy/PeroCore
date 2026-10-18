@@ -7,6 +7,17 @@
  */
 
 export {
+  createApplicationWaitingPage,
+  createApplicationWaitingContent,
+} from './applicationWaitingPage'
+
+export {
+  DEFAULT_CHARACTER_STATE,
+  normalizeCharacterState,
+  type CharacterState,
+} from './characterState'
+
+export {
   PerformanceBaselineRegistry,
   type PerformanceSummary,
   type PerformanceGate,
@@ -128,6 +139,8 @@ export type {
   SurfaceId,
   SurfaceNodeId,
   SurfaceNodeKind,
+  ModelRetryInfo,
+  ModelRetrySurfaceProps,
   SurfaceNodeLifecycle,
   SurfaceNode,
   MarkdownSurfaceProps,
@@ -136,6 +149,7 @@ export type {
   ToolCallSurfaceProps,
   ToolResultSurfaceProps,
   StatusSurfaceProps,
+  ConversationExecutionPause,
   ErrorSurfaceProps,
   AttachmentSurfaceProps,
   ProgressSurfaceProps,
@@ -177,6 +191,7 @@ export type {
   SocialExecutionPort,
   SocialMessageRecord,
   SocialStoragePort,
+  SocialTurnRecord,
   SocialSyncCursorRecord,
 } from './types'
 
@@ -186,6 +201,7 @@ export type {
   PaginationParams,
   SseEventType,
   ThreadChannel,
+  InteractionMode,
 } from './types'
 export type { SseDoneEvent, SseErrorEvent, SseEvent } from './types'
 
@@ -335,3 +351,71 @@ export type {
   CataloguedGatewayAction,
 } from './types'
 export { GATEWAY_ACTION_CATALOG, gatewayActionPolicy } from './types'
+export type {
+  DesktopTabKind,
+  DesktopTab,
+  DesktopApplication,
+  DesktopTabsState,
+  DesktopTabBounds,
+} from './types/desktopTabs'
+export { DEFAULT_PET_CONTROLS, pttVirtualKeys } from './types/petControls'
+export type {
+  PetControlSettings,
+  PetControlSnapshot,
+  PetConversationTarget,
+} from './types/petControls'
+export type {
+  KnowledgeSourceKind,
+  KnowledgeDocumentStatus,
+  KnowledgeVectorStatus,
+  KnowledgeDocumentInfo,
+  KnowledgePartInfo,
+  KnowledgeDocumentDetail,
+  KnowledgeDocumentList,
+  KnowledgeSearchInput,
+  KnowledgeSearchHit,
+  KnowledgeSearchResult,
+} from './types/knowledge.types'
+
+export type {
+  TaskOrigin,
+  TaskLifecycle,
+  TaskSegmentResult,
+  TaskControlInput,
+  SocialTaskControlPort,
+  TaskDeliveryPort,
+} from './types/task-lifecycle.types'
+export * from './statusCard'
+export * from './socialTools'
+export type { WeatherKind, WeatherDay, WeatherSnapshot, WeatherStatus } from './types/weather.types'
+export * from './types/integrations.types'
+
+export * from './agentInput'
+export * from './types/desktopAutomation'
+export * from './resources'
+export * from './taskPlan'
+export * from './workspacePreview'
+export * from './tokenUsage'
+export * from './fileMutationPreview'
+export * from './executionMode'
+export * from './completionAlerts'
+export * from './memorySettings'
+export * from './reactLimits'
+export * from './electronEnvironment'
+export * from './types/promptWorkspace.types'
+export * from './promptFormats'
+export type {
+  TarotSuit,
+  TarotCard,
+  TarotDraw,
+  TarotReading,
+  TarotToday,
+  TarotInterpretation,
+} from './types/tarot'
+export { TAROT_DECK, TAROT_SUIT_LABELS, getTarotCard, tarotMeaning } from './tarot/deck'
+export type {
+  DesktopToast,
+  DesktopTaskToast,
+  DesktopToastSnapshot,
+  DesktopToastAction,
+} from './types/desktopToasts'

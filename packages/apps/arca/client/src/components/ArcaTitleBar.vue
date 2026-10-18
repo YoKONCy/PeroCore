@@ -8,13 +8,14 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 
 interface ElectronBridge {
+  embedded?: boolean
   invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
   on?: (channel: string, listener: (...args: unknown[]) => void) => () => void
 }
 
 const electron = (window as unknown as { electron?: ElectronBridge }).electron
 const maximized = ref(false)
-const isElectron = Boolean(electron)
+const isElectron = Boolean(electron && !electron.embedded)
 let unlisten: (() => void) | undefined
 
 async function minimize() {
@@ -28,7 +29,7 @@ async function close() {
 }
 
 onMounted(async () => {
-  if (!electron) return
+  if (!isElectron || !electron) return
   maximized.value = Boolean(await electron.invoke('window-is-maximized'))
   unlisten = electron.on?.('window-maximized-state-changed', (state) => {
     maximized.value = Boolean(state)
@@ -40,9 +41,8 @@ onBeforeUnmount(() => unlisten?.())
 <template>
   <header v-if="isElectron" class="arca-titlebar">
     <div class="arca-titlebar-brand">
-      <span class="arca-titlebar-glyph">✦</span>
       <strong>Arca</strong>
-      <span>星页工房</span>
+      <span>办公套件</span>
     </div>
     <div class="arca-window-controls">
       <button type="button" aria-label="最小化" @click="minimize">─</button>

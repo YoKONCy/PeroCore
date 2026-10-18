@@ -25,7 +25,6 @@ export type AgentChannel = 'desktop' | 'social' | 'group'
 export interface AgentSocialBinding {
   enabled: boolean
   qq_id: string
-  use_stickers: boolean
 }
 
 export interface AgentDetail extends AgentListItem {
@@ -137,7 +136,10 @@ export const agentApi = {
     apiClient.put<AgentCapabilities>(`/agents/${agentId}/capabilities`, payload.channels),
 
   /** 获取可用工具 */
-  listTools: () => apiClient.get<AgentTool[]>('/agents/tools'),
+  listTools: (options?: { includeAdvanced?: boolean }) =>
+    apiClient.get<AgentTool[]>(
+      options?.includeAdvanced ? '/agents/tools?includeAdvanced=true' : '/agents/tools',
+    ),
 
   /** 获取后端权威的全局活跃角色。 */
   getActive: () => apiClient.get<{ agentId: string; id: string; name: string }>('/agents/active'),
@@ -152,10 +154,16 @@ export const agentApi = {
   reload: () => apiClient.post<void>('/agents/reload'),
 
   /** 获取 Agent 看板娘台词 (静态 + 动态合并) */
-  getTexts: (agentId: string) => apiClient.get<Record<string, unknown>>(`/agents/${agentId}/texts`),
+  getTexts: (agentId: string, threadId?: string) =>
+    apiClient.get<Record<string, unknown>>(
+      `/agents/${agentId}/texts${threadId ? `?threadId=${encodeURIComponent(threadId)}` : ''}`,
+    ),
 
-  /** 获取角色实时状态 (mood/vibe/mind + 动态台词，来自 pet_states 表) */
-  getPetState: (agentId: string) => apiClient.get<PetStateResponse>(`/agents/${agentId}/pet-state`),
+  /** 获取指定会话的角色状态与动态台词；不跨会话继承。 */
+  getPetState: (agentId: string, threadId?: string) =>
+    apiClient.get<PetStateResponse>(
+      `/agents/${agentId}/pet-state${threadId ? `?threadId=${encodeURIComponent(threadId)}` : ''}`,
+    ),
 
   /** 批量获取所有角色的陪伴调度只读状态，供任务中心统一展示。 */
   listCompanionStates: () => apiClient.get<CompanionStateResponse[]>('/agents/companion-states'),
@@ -178,6 +186,8 @@ export interface CompanionStateResponse {
 /** 角色实时状态响应 (GET /agents/:id/pet-state) */
 export interface PetStateResponse {
   agentId: string
+  threadId?: string | null
+  revision?: number
   mood: string
   vibe: string
   mind: string

@@ -35,6 +35,7 @@ export interface ModelConfigDto {
   temperature: number | null
   topP: number | null
   maxTokens: number | null
+  maxReActTurns: number | null
   reasoningEffort: string | null
   returnNativeReasoning: boolean
   wireApi: string

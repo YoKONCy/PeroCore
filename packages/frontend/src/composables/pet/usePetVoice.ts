@@ -1,286 +1,225 @@
-/**
- * usePetVoice — 桌宠语音交互 composable
- *
- * 管理 VAD (语音活动检测) + PTT (按键说话) + 音频采集编码。
- * usePetVoice.ts (VAD + PTT + 音频编码 + Gateway 交互)。
- *
- * 架构：
- * - 麦克风采集 → MediaRecorder (opus) → ArrayBuffer → Gateway.sendStream()
- * - VAD 模式：持续监听，检测到语音时自动录制
- * - PTT 模式：按住空格录制
- *
- * @see 06_FILE_SIZE_LIMITS.md — composable 拆分规范
- * @module packages/frontend/src/composables/pet/usePetVoice
- */
+import { onUnmounted, ref } from 'vue'
 
-import { ref, onUnmounted } from 'vue'
-import { logger } from '../../lib/logger'
-
-/** 语音输入模式 */
 export type VoiceInputMode = 'vad' | 'ptt' | 'off'
-
-/** VAD 配置 */
-export interface VadOptions {
-  /** 静音阈值 (0~1)，低于此值视为静音 */
-  silenceThreshold?: number
-  /** 连续静音多久后停止录制 (ms) */
-  silenceTimeoutMs?: number
+export interface VoiceClip {
+  audio: ArrayBuffer
+  mimeType: string
 }
 
-const DEFAULT_VAD: Required<VadOptions> = {
-  silenceThreshold: 0.015,
-  silenceTimeoutMs: 1000, // 对齐 v1: 1000ms 静音超时
-}
-
-/**
- * 桌宠语音交互 composable
- *
- * @param sendStreamFn - Gateway.sendStream 的引用
- * @param isSpeakingRef - TTS 播放状态 ref，为 true 时忽略录音输入（
- */
+/** 麦克风预先就绪；录制、识别各有取消边界，松开不依赖异步网络检查。 */
 export function usePetVoice(
-  sendStreamFn: (data: ArrayBuffer) => void,
-  isSpeakingRef?: { readonly value: boolean },
+  onAudio: (clip: VoiceClip, signal: AbortSignal) => Promise<void>,
+  isSpeaking?: { readonly value: boolean },
 ) {
   const mode = ref<VoiceInputMode>('off')
+  const ready = ref(false)
+  const preparing = ref(false)
   const isRecording = ref(false)
-  const isListening = ref(false)
+  const recognizing = ref(false)
   const audioLevel = ref(0)
-
-  let mediaStream: MediaStream | null = null
-  let mediaRecorder: MediaRecorder | null = null
-  let audioContext: AudioContext | null = null
-  let analyser: AnalyserNode | null = null
-  let vadTimer: ReturnType<typeof setTimeout> | null = null
-  let levelRafId: number | null = null
-
-  // ═══ 麦克风管理 ═══
-
-  /** 获取麦克风权限并创建音频流 */
-  async function acquireMicrophone(): Promise<boolean> {
-    try {
-      mediaStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          sampleRate: 16000,
-          echoCancellation: true,
-          noiseSuppression: true,
-        },
-      })
-
-      // 创建 AudioContext 用于 VAD 音量检测
-      audioContext = new AudioContext({ sampleRate: 16000 })
-      analyser = audioContext.createAnalyser()
-      analyser.fftSize = 512
-      const source = audioContext.createMediaStreamSource(mediaStream)
-      source.connect(analyser)
-
-      return true
-    } catch (e) {
-      logger.error('PetVoice', '麦克风权限获取失败', e)
-      return false
-    }
-  }
-
-  /** 释放麦克风资源 */
-  function releaseMicrophone(): void {
-    stopRecording()
-    cancelLevelMonitor()
-
-    mediaStream?.getTracks().forEach((t) => t.stop())
-    mediaStream = null
-
-    void audioContext?.close()
-    audioContext = null
-    analyser = null
-  }
-
-  // ═══ 录制 ═══
-
-  /** 开始录制 */
-  function startRecording(): void {
-    if (!mediaStream || isRecording.value) return
-    // isSpeaking 互斥：TTS 播放时忽略新的录音（
-    if (isSpeakingRef?.value) return
-
-    const chunks: Blob[] = []
-    mediaRecorder = new MediaRecorder(mediaStream, {
-      mimeType: getSupportedMimeType(),
-    })
-
-    mediaRecorder.ondataavailable = (e) => {
-      if (e.data.size > 0) {
-        chunks.push(e.data)
+  const error = ref('')
+  let generation = 0
+  let stream: MediaStream | undefined
+  let context: AudioContext | undefined
+  let analyser: AnalyserNode | undefined
+  let raf = 0
+  let pending: AbortController | undefined
+  let capture:
+    | {
+        recorder: MediaRecorder
+        cancelled: boolean
+        peak: number
+        started: number
+        duration: number
+        timer: ReturnType<typeof setTimeout>
       }
-    }
+    | undefined
+  let silenceAt = 0
 
-    mediaRecorder.onstop = async () => {
-      isRecording.value = false
-      if (chunks.length === 0) return
-
-      // 合并 chunks 为 ArrayBuffer → 发送到 Gateway
-      const blob = new Blob(chunks, { type: mediaRecorder?.mimeType })
-      const buffer = await blob.arrayBuffer()
-
-      if (buffer.byteLength > 0) {
-        sendStreamFn(buffer)
-        logger.info('PetVoice', `音频已发送 (${(buffer.byteLength / 1024).toFixed(1)}KB)`)
-      }
-    }
-
-    mediaRecorder.start(250) // 每 250ms 一个 chunk
-    isRecording.value = true
+  function stopRecording(cancelled = false) {
+    const current = capture
+    if (!current) return
+    capture = undefined
+    current.cancelled = cancelled
+    current.duration = Date.now() - current.started
+    clearTimeout(current.timer)
+    isRecording.value = false
+    if (current.recorder.state !== 'inactive') current.recorder.stop()
   }
 
-  /** 停止录制 */
-  function stopRecording(): void {
-    if (mediaRecorder?.state === 'recording') {
-      mediaRecorder.stop()
-    }
-    mediaRecorder = null
+  function cancel() {
+    stopRecording(true)
+    pending?.abort()
+    pending = undefined
+    recognizing.value = false
   }
 
-  // ═══ VAD (语音活动检测) ═══
-
-  /** 启动 VAD 监听 */
-  function startVadListening(options?: VadOptions): void {
-    const { silenceThreshold, silenceTimeoutMs } = { ...DEFAULT_VAD, ...options }
-
-    if (!analyser) return
-    isListening.value = true
-
-    const dataArray = new Uint8Array(analyser.frequencyBinCount)
-    let silenceStart: number | null = null
-
-    function checkLevel() {
-      if (!analyser || !isListening.value) return
-
-      analyser.getByteTimeDomainData(dataArray)
-
-      // 计算 RMS 音量
-      let sum = 0
-      for (let i = 0; i < dataArray.length; i++) {
-        const val = dataArray[i] ?? 128
-        const normalized = (val - 128) / 128
-        sum += normalized * normalized
-      }
-      const rms = Math.sqrt(sum / dataArray.length)
-      audioLevel.value = rms
-
-      if (rms > silenceThreshold) {
-        // 检测到语音
-        silenceStart = null
-        if (!isRecording.value) {
-          startRecording()
-        }
-      } else if (isRecording.value) {
-        // 静音中
-        if (!silenceStart) {
-          silenceStart = Date.now()
-        } else if (Date.now() - silenceStart > silenceTimeoutMs) {
-          // 静音超时 → 停止录制
-          stopRecording()
-          silenceStart = null
-        }
-      }
-
-      levelRafId = requestAnimationFrame(checkLevel)
-    }
-
-    levelRafId = requestAnimationFrame(checkLevel)
-  }
-
-  /** 停止 VAD 监听 */
-  function stopVadListening(): void {
-    isListening.value = false
-    cancelLevelMonitor()
-    stopRecording()
-  }
-
-  function cancelLevelMonitor(): void {
-    if (levelRafId !== null) {
-      cancelAnimationFrame(levelRafId)
-      levelRafId = null
-    }
-    if (vadTimer) {
-      clearTimeout(vadTimer)
-      vadTimer = null
-    }
+  function release() {
+    ready.value = false
+    cancel()
+    cancelAnimationFrame(raf)
+    stream?.getTracks().forEach((track) => track.stop())
+    stream = undefined
+    void context?.close()
+    context = undefined
+    analyser = undefined
     audioLevel.value = 0
   }
 
-  // ═══ 模式切换 ═══
-
-  /** 切换语音输入模式 */
-  async function setMode(newMode: VoiceInputMode): Promise<void> {
-    // 清理当前模式
-    if (mode.value === 'vad') stopVadListening()
-    if (mode.value !== 'off') releaseMicrophone()
-
-    mode.value = newMode
-
-    if (newMode === 'off') return
-
-    // 获取麦克风
-    const ok = await acquireMicrophone()
-    if (!ok) {
-      mode.value = 'off'
-      return
+  function startRecording() {
+    if (!ready.value || !stream || capture) return
+    if (mode.value === 'vad' && (isSpeaking?.value || recognizing.value)) return
+    pending?.abort()
+    recognizing.value = false
+    const mimeType = [
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/ogg;codecs=opus',
+      'audio/mp4',
+    ].find((type) => MediaRecorder.isTypeSupported(type))
+    try {
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
+      const chunks: Blob[] = []
+      const controller = new AbortController()
+      pending = controller
+      const current = {
+        recorder,
+        cancelled: false,
+        peak: 0,
+        started: Date.now(),
+        duration: 0,
+        timer: setTimeout(() => stopRecording(), 60_000),
+      }
+      capture = current
+      recorder.ondataavailable = (event) => {
+        if (event.data.size) chunks.push(event.data)
+      }
+      recorder.onstop = async () => {
+        if (
+          current.cancelled ||
+          controller.signal.aborted ||
+          current.duration < 180 ||
+          current.peak < 0.008 ||
+          !chunks.length
+        )
+          return
+        recognizing.value = true
+        try {
+          const audio = await new Blob(chunks, { type: recorder.mimeType }).arrayBuffer()
+          if (!controller.signal.aborted)
+            await onAudio({ audio, mimeType: recorder.mimeType }, controller.signal)
+        } catch (cause) {
+          if (!controller.signal.aborted)
+            error.value = cause instanceof Error ? cause.message : '语音识别失败'
+        } finally {
+          if (pending === controller) {
+            recognizing.value = false
+            pending = undefined
+          }
+        }
+      }
+      recorder.onerror = () => {
+        error.value = '麦克风录制失败，请重新开启语音'
+        cancel()
+      }
+      recorder.start(100)
+      isRecording.value = true
+      silenceAt = 0
+    } catch {
+      error.value = '当前设备无法录制语音'
+      cancel()
     }
+  }
 
-    // VAD 模式自动开始监听
-    if (newMode === 'vad') {
-      startVadListening()
+  async function setMode(next: VoiceInputMode, microphoneId = ''): Promise<void> {
+    const request = ++generation
+    release()
+    preparing.value = next !== 'off'
+    mode.value = next
+    error.value = ''
+    if (next === 'off') return
+    try {
+      const acquired = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          ...(microphoneId ? { deviceId: { exact: microphoneId } } : {}),
+        },
+      })
+      if (generation !== request) {
+        acquired.getTracks().forEach((track) => track.stop())
+        return
+      }
+      stream = acquired
+      context = new AudioContext()
+      await context.resume()
+      if (generation !== request || !stream) return
+      analyser = context.createAnalyser()
+      analyser.fftSize = 512
+      context.createMediaStreamSource(stream).connect(analyser)
+      ready.value = true
+      const data = new Uint8Array(analyser.fftSize)
+      const monitor = () => {
+        if (!analyser || generation !== request) return
+        analyser.getByteTimeDomainData(data)
+        let sum = 0
+        for (const value of data) sum += ((value - 128) / 128) ** 2
+        const rms = Math.sqrt(sum / data.length)
+        audioLevel.value = rms
+        if (capture) capture.peak = Math.max(capture.peak, rms)
+        if (mode.value === 'vad') {
+          if (isSpeaking?.value) stopRecording(true)
+          else if (rms > 0.015) {
+            silenceAt = 0
+            startRecording()
+          } else if (capture) {
+            if (!silenceAt) silenceAt = Date.now()
+            else if (Date.now() - silenceAt > 1000) stopRecording()
+          }
+        }
+        raf = requestAnimationFrame(monitor)
+      }
+      raf = requestAnimationFrame(monitor)
+      stream.getTracks().forEach((track) => {
+        track.onended = () => {
+          if (generation === request) {
+            error.value = '麦克风已断开，请重新开启语音'
+            release()
+          }
+        }
+      })
+    } catch (cause) {
+      if (generation === request) {
+        error.value = cause instanceof Error ? '麦克风不可用：' + cause.message : '无法开启麦克风'
+        release()
+      }
+    } finally {
+      if (generation === request) preparing.value = false
     }
   }
 
-  // ═══ PTT (按键说话) ═══
-
-  /** PTT 按下 */
-  function pttDown(): void {
-    if (mode.value !== 'ptt' || !mediaStream) return
-    // isSpeaking 互斥（ L634）
-    if (isSpeakingRef?.value) return
-    startRecording()
+  function pttDown() {
+    if (mode.value === 'ptt') startRecording()
   }
-
-  /** PTT 松开 */
-  function pttUp(): void {
-    if (mode.value !== 'ptt') return
-    stopRecording()
+  function pttUp(cancelled = false) {
+    if (mode.value === 'ptt') stopRecording(cancelled)
   }
-
-  // ═══ 工具 ═══
-
-  /** 获取浏览器支持的音频 MIME 类型 */
-  function getSupportedMimeType(): string {
-    const types = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4']
-    for (const type of types) {
-      if (MediaRecorder.isTypeSupported(type)) return type
-    }
-    return 'audio/webm' // fallback
-  }
-
-  // ═══ 清理 ═══
-
   onUnmounted(() => {
-    releaseMicrophone()
+    generation++
+    release()
   })
-
   return {
-    /** 当前模式 */
     mode,
-    /** 是否正在录制 */
+    ready,
+    preparing,
     isRecording,
-    /** VAD 是否正在监听 */
-    isListening,
-    /** 实时音量 (0~1) */
+    recognizing,
     audioLevel,
-    /** 切换模式 */
+    error,
     setMode,
-    /** PTT 按下 */
     pttDown,
-    /** PTT 松开 */
     pttUp,
+    cancel,
   }
 }

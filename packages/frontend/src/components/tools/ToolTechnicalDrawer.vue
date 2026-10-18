@@ -163,16 +163,7 @@ function formatJson(value: string): string {
   overflow-y: auto;
   padding: 16px;
 }
-.ttd-content::-webkit-scrollbar,
-.ttd pre::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-.ttd-content::-webkit-scrollbar-thumb,
-.ttd pre::-webkit-scrollbar-thumb {
-  border-radius: 999px;
-  background: var(--ui-scrollbar-thumb);
-}
+
 .ttd-meta {
   display: grid;
   grid-template-columns: 1fr 1fr;

@@ -1,14 +1,277 @@
 import { describe, expect, it, vi } from 'vitest'
 import { ConversationTurnService } from '@infos/backend/services/conversation/conversationTurnService'
+import type { CompiledRunParams } from '@infos/backend/services/agent/agentService'
 
 describe('ConversationTurnService 初始提示词快照', () => {
+  it.each(['chat', 'work'] as const)(
+    '%s 模式都保存单轮执行原件，失败轮次同样保留',
+    async (interactionMode) => {
+      const trace = [
+        {
+          role: 'assistant' as const,
+          content: null,
+          reasoningContent: '完整推理',
+          toolCalls: [
+            {
+              id: 'read',
+              type: 'function' as const,
+              function: { name: 'read_file', arguments: '{"path":"a.ts"}' },
+            },
+          ],
+        },
+        { role: 'tool' as const, content: '完整读取正文', toolCallId: 'read' },
+      ]
+      const appendAssistantMessage = vi.fn().mockResolvedValue({ id: 2, status: 'active' })
+      let fail = false
+      const service = new ConversationTurnService({
+        threadService: {
+          getThread: vi.fn().mockResolvedValue({
+            id: 'thread',
+            agentId: 'pero',
+            channel: 'desktop',
+            interactionMode,
+            disabledTools: [],
+          }),
+          appendUserMessage: vi.fn().mockResolvedValue({ id: 1 }),
+          appendAssistantMessage,
+        },
+        contextCompiler: {
+          compile: vi.fn().mockResolvedValue({
+            messages: [{ role: 'user', content: '任务' }],
+            manifest: { disabledTools: [] },
+          }),
+        },
+        agentService: {
+          chatWithCompiledMessages: async (params: CompiledRunParams) => {
+            params.onExecutionMessages?.(trace)
+            if (fail) throw new Error('上游最终失败')
+            return '完成'
+          },
+        },
+        attachmentService: {
+          validateForBinding: vi.fn().mockResolvedValue([]),
+          bindOutgoing: vi.fn(),
+        },
+        imageUnderstandingService: { transcribe: vi.fn() },
+      } as never)
+      await service.executeTurn({ threadId: 'thread', content: '任务' })
+      expect(
+        JSON.parse(appendAssistantMessage.mock.calls[0]![0].metadataJson).workContext.messages,
+      ).toEqual(trace)
+      fail = true
+      await expect(service.executeTurn({ threadId: 'thread', content: '任务' })).rejects.toThrow(
+        '上游最终失败',
+      )
+      const saved = appendAssistantMessage.mock.calls[1]![0]
+      expect(saved.status).toBe('failed')
+      expect(JSON.parse(saved.metadataJson).workContext.messages).toEqual(trace)
+    },
+  )
+  it.each(['stream', 'single'])(
+    '桌面暂停在 %s 链路持久化，消息保留供续接且不发完成通知',
+    async (mode) => {
+      const pause = {
+        kind: 'desktop' as const,
+        code: 'DESKTOP_WAITING',
+        message: '用户已接管',
+        toolName: 'open_application',
+        callId: 'open',
+        pausedAt: '2026-10-18T08:00:00Z',
+      }
+      const descriptor = { executionId: 'run', processId: 'process', principalId: 'pero' }
+      const appendAssistantMessage = vi.fn().mockResolvedValue({ id: 2, status: 'active' })
+      const complete = vi.fn()
+      const suspend = vi.fn()
+      const onReplyReady = vi.fn()
+      const service = new ConversationTurnService({
+        threadService: {
+          getThread: vi.fn().mockResolvedValue({
+            id: 'thread',
+            agentId: 'pero',
+            channel: 'desktop',
+            disabledTools: [],
+          }),
+          appendUserMessage: vi.fn().mockResolvedValue({ id: 1 }),
+          appendAssistantMessage,
+        },
+        contextCompiler: {
+          compile: vi.fn().mockResolvedValue({
+            messages: [{ role: 'user', content: '任务' }],
+            manifest: { disabledTools: [] },
+          }),
+        },
+        agentService: {
+          chatWithCompiledMessages: vi.fn(async (params: CompiledRunParams) => {
+            params.onExecutionPause?.(pause)
+            return '已有工作'
+          }),
+          chatStreamWithCompiledMessages: async function* (params: CompiledRunParams) {
+            yield { event: 'narration_delta', data: { delta: '已有工作' } }
+            params.onExecutionPause?.(pause)
+          },
+        },
+        attachmentService: {
+          validateForBinding: vi.fn().mockResolvedValue([]),
+          bindOutgoing: vi.fn(),
+        },
+        imageUnderstandingService: { transcribe: vi.fn() },
+        onReplyReady,
+        executionRuntime: {
+          create: vi.fn().mockResolvedValue(descriptor),
+          start: vi.fn(),
+          complete,
+          suspend,
+        },
+      } as never)
+      if (mode === 'stream') {
+        const stream = service.streamTurn({ threadId: 'thread', content: '任务' })
+        for await (const chunk of stream) {
+          void chunk
+        }
+      } else await service.executeTurn({ threadId: 'thread', content: '任务' })
+      expect(complete).not.toHaveBeenCalled()
+      expect(suspend).toHaveBeenCalledWith(descriptor)
+      expect(onReplyReady).not.toHaveBeenCalled()
+      const saved = appendAssistantMessage.mock.calls[0]![0]
+      expect(saved).toMatchObject({
+        status: 'active',
+        scorerStatus: 'skipped',
+        content: '已有工作',
+      })
+      expect(JSON.parse(saved.metadataJson).executionPause).toEqual(pause)
+    },
+  )
+  it('失败回合不提交酒馆变量，成功回合保存回复后提交，检查点保留待提交变化', async () => {
+    const change = {
+      id: '变量提交',
+      scope: 'desktop:pero:thread',
+      effects: { local: [], global: [] },
+    }
+    const order: string[] = []
+    const commitPromptVariables = vi.fn().mockImplementation(async () => {
+      order.push('变量')
+    })
+    const checkpoint = vi.fn()
+    let fail = true
+    const service = new ConversationTurnService({
+      threadService: {
+        getThread: vi.fn().mockResolvedValue({
+          id: 'thread',
+          agentId: 'pero',
+          channel: 'desktop',
+          disabledTools: [],
+        }),
+        appendUserMessage: vi.fn().mockResolvedValue({ id: 1 }),
+        appendAssistantMessage: vi.fn().mockImplementation(async () => {
+          order.push('回复')
+          return { id: 2, status: 'active' }
+        }),
+      },
+      contextCompiler: {
+        compile: vi.fn().mockResolvedValue({
+          messages: [{ role: 'user', content: '问题' }],
+          manifest: { disabledTools: [] },
+          promptVariableCommit: change,
+        }),
+        commitPromptVariables,
+      },
+      agentService: {
+        chatWithCompiledMessages: vi.fn().mockImplementation(async (params) => {
+          await params.onCheckpoint?.({ messages: [], toolCalls: [], turn: 1 })
+          if (fail) throw new Error('模拟模型失败')
+          return '完成'
+        }),
+      },
+      attachmentService: {
+        validateForBinding: vi.fn().mockResolvedValue([]),
+        bindOutgoing: vi.fn(),
+      },
+      imageUnderstandingService: { transcribe: vi.fn() },
+    } as never)
+    await expect(
+      service.executeTurn({ threadId: 'thread', content: '问题', onCheckpoint: checkpoint }),
+    ).rejects.toThrow('模拟模型失败')
+    expect(commitPromptVariables).not.toHaveBeenCalled()
+    expect(checkpoint).toHaveBeenCalledWith(expect.objectContaining({ promptVariables: change }))
+    expect(order).toEqual(['回复'])
+    order.length = 0
+    fail = false
+    await service.executeTurn({ threadId: 'thread', content: '问题' })
+    expect(order).toEqual(['回复', '变量'])
+    expect(commitPromptVariables).toHaveBeenCalledWith(change)
+  })
+
+  it('历史后指令不抢占当前用户的图片附件，临时输入也不会重复追加', async () => {
+    const input = { role: 'user', content: '请看图片' }
+    const post = { role: 'user', content: '【系统指令】\n后置要求' }
+    const compile = vi.fn().mockResolvedValue({
+      messages: [{ role: 'system', content: '自有框架' }, input, post],
+      currentMessageIndex: 1,
+      manifest: { disabledTools: [] },
+    })
+    const attachment = {
+      id: 'image-1',
+      kind: 'image',
+      mimeType: 'image/png',
+      originalName: '图片.png',
+    }
+    const deps = {
+      threadService: {
+        getThread: vi.fn().mockResolvedValue({
+          id: 'thread-1',
+          agentId: 'pero',
+          channel: 'desktop',
+          disabledTools: [],
+        }),
+        appendUserMessage: vi.fn().mockResolvedValue({ id: 1 }),
+      },
+      contextCompiler: { compile },
+      attachmentService: {
+        validateForBinding: vi.fn().mockResolvedValue([attachment]),
+        toDto: vi.fn().mockReturnValue(attachment),
+        bind: vi.fn(),
+        readContent: vi.fn().mockResolvedValue({ bytes: Buffer.from('image') }),
+      },
+      imageUnderstandingService: { transcribe: vi.fn().mockResolvedValue(null) },
+    }
+    const service = new ConversationTurnService(deps as never)
+    const prepared = await service.prepareTurn({
+      threadId: 'thread-1',
+      content: '请看图片',
+      attachmentIds: ['image-1'],
+      imageMode: 'native',
+    })
+    expect(prepared.messages[2]).toEqual(post)
+    expect(prepared.messages[1]?.content).toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: 'image_url' })]),
+    )
+    deps.attachmentService.validateForBinding.mockResolvedValue([])
+    compile.mockResolvedValue({
+      messages: [{ role: 'system', content: '自有框架' }, input, post],
+      currentMessageIndex: 1,
+      manifest: { disabledTools: [] },
+    })
+    const ephemeral = await service.prepareTurn({
+      threadId: 'thread-1',
+      content: '临时输入',
+      inputPersistence: 'ephemeral',
+    })
+    expect(ephemeral.messages).toHaveLength(3)
+    expect(compile.mock.calls.at(-1)?.[2]).toMatchObject({
+      currentInput: { role: 'user', content: '临时输入' },
+    })
+  })
+
   it('在 assistant 元数据中保存进入 ReAct 前的完整消息，且不包含执行期工具消息', async () => {
-    const appendAssistantMessage = vi.fn().mockResolvedValue({ id: 2 })
+    const appendAssistantMessage = vi.fn().mockResolvedValue({ id: 2, status: 'active' })
+    const onReplyReady = vi.fn()
     const initialMessages = [
       { role: 'system' as const, content: '<system>完整系统提示词</system>' },
       { role: 'user' as const, content: '当前问题' },
     ]
+    const expectedMessages = structuredClone(initialMessages)
     const deps = {
+      onReplyReady,
       threadService: {
         getThread: vi.fn().mockResolvedValue({
           id: 'thread-1',
@@ -28,6 +291,13 @@ describe('ConversationTurnService 初始提示词快照', () => {
       agentService: {
         chatWithCompiledMessages: vi.fn().mockImplementation(async (params) => {
           params.onRawText?.('原始回复')
+          params.onGenerationStats?.({
+            outputTokens: 110,
+            modelDurationMs: 2000,
+            modelCalls: 2,
+            estimated: false,
+          })
+          params.onSpokenReply?.('简短口语答复')
           params.onToolCalls?.([
             {
               name: 'update_flow_state',
@@ -46,6 +316,7 @@ describe('ConversationTurnService 初始提示词快照', () => {
       attachmentService: {
         validateForBinding: vi.fn().mockResolvedValue([]),
         bind: vi.fn(),
+        bindOutgoing: vi.fn().mockResolvedValue(undefined),
       },
       imageUnderstandingService: { transcribe: vi.fn() },
     }
@@ -54,12 +325,29 @@ describe('ConversationTurnService 初始提示词快照', () => {
     await service.executeTurn({ threadId: 'thread-1', content: '当前问题' })
 
     const saved = appendAssistantMessage.mock.calls[0]![0]
+    expect(JSON.parse(saved.metadataJson).spokenReply).toBe('简短口语答复')
+    expect(JSON.parse(saved.metadataJson).generationStats).toEqual({
+      outputTokens: 110,
+      modelDurationMs: 2000,
+      modelCalls: 2,
+      estimated: false,
+    })
+    expect(JSON.parse(saved.metadataJson).tokenUsage.outputTokens).toBe(110)
+    expect(onReplyReady).toHaveBeenCalledWith({
+      completedSuccessfully: true,
+      agentId: 'nana',
+      threadId: 'thread-1',
+      messageId: '2',
+      spokenReply: '简短口语答复',
+    })
     const metadata = JSON.parse(saved.metadataJson) as {
       initialPromptMessages: typeof initialMessages
       tokenUsage: { inputTokens: number; outputTokens: number }
     }
-    expect(metadata.initialPromptMessages).toEqual(initialMessages)
-    expect(metadata.initialPromptMessages.some((message) => message.role === 'tool')).toBe(false)
+    expect(metadata.initialPromptMessages).toEqual(expectedMessages)
+    expect(metadata.initialPromptMessages.some((message) => String(message.role) === 'tool')).toBe(
+      false,
+    )
     expect(metadata.tokenUsage.inputTokens).toBeGreaterThan(0)
     expect(metadata.tokenUsage.outputTokens).toBeGreaterThan(0)
   })
@@ -97,7 +385,10 @@ describe('ConversationTurnService 初始提示词快照', () => {
         }),
       },
       agentService: { chatWithCompiledMessages: vi.fn().mockResolvedValue('完成') },
-      attachmentService: { validateForBinding: vi.fn().mockResolvedValue([]) },
+      attachmentService: {
+        bindOutgoing: vi.fn().mockResolvedValue(undefined),
+        validateForBinding: vi.fn().mockResolvedValue([]),
+      },
       imageUnderstandingService: { transcribe: vi.fn() },
       executionRuntime: { create, start, complete, fail: vi.fn() },
     } as never)
@@ -141,7 +432,10 @@ describe('ConversationTurnService 初始提示词快照', () => {
       },
       contextCompiler: { compile },
       agentService: { chatWithCompiledMessages },
-      attachmentService: { validateForBinding: vi.fn().mockResolvedValue([]) },
+      attachmentService: {
+        bindOutgoing: vi.fn().mockResolvedValue(undefined),
+        validateForBinding: vi.fn().mockResolvedValue([]),
+      },
       imageUnderstandingService: { transcribe: vi.fn() },
     } as never)
 
@@ -205,7 +499,10 @@ describe('ConversationTurnService 初始提示词快照', () => {
           return '好的'
         }),
       },
-      attachmentService: { validateForBinding: vi.fn().mockResolvedValue([]) },
+      attachmentService: {
+        bindOutgoing: vi.fn().mockResolvedValue(undefined),
+        validateForBinding: vi.fn().mockResolvedValue([]),
+      },
       imageUnderstandingService: { transcribe: vi.fn() },
       eventNoteDraftCommitter: { commit },
     } as never)
@@ -236,7 +533,10 @@ describe('ConversationTurnService 初始提示词快照', () => {
         }),
       },
       agentService: { chatWithCompiledMessages: vi.fn().mockResolvedValue('回复') },
-      attachmentService: { validateForBinding: vi.fn().mockResolvedValue([]) },
+      attachmentService: {
+        bindOutgoing: vi.fn().mockResolvedValue(undefined),
+        validateForBinding: vi.fn().mockResolvedValue([]),
+      },
       imageUnderstandingService: { transcribe: vi.fn() },
       eventNoteDraftCommitter: { commit },
     }
@@ -279,7 +579,10 @@ describe('ConversationTurnService 初始提示词快照', () => {
         }),
       },
       agentService: { chatWithCompiledMessages: vi.fn().mockResolvedValue('已使用记忆') },
-      attachmentService: { validateForBinding: vi.fn().mockResolvedValue([]) },
+      attachmentService: {
+        bindOutgoing: vi.fn().mockResolvedValue(undefined),
+        validateForBinding: vi.fn().mockResolvedValue([]),
+      },
       imageUnderstandingService: { transcribe: vi.fn() },
       retrievalFeedback: { applyRetrievalFeedback: feedback },
     } as never)
@@ -311,7 +614,10 @@ describe('ConversationTurnService 初始提示词快照', () => {
         compile,
       },
       eventMemoryFallback: { ensureContextWindowCoverage },
-      attachmentService: { validateForBinding: vi.fn().mockResolvedValue([]) },
+      attachmentService: {
+        bindOutgoing: vi.fn().mockResolvedValue(undefined),
+        validateForBinding: vi.fn().mockResolvedValue([]),
+      },
       imageUnderstandingService: { transcribe: vi.fn() },
       getAgentModelConfig: vi.fn().mockResolvedValue(null),
     } as never)
@@ -329,8 +635,16 @@ describe('ConversationTurnService 初始提示词快照', () => {
     )
   })
 
-  it('持久化文件正文及来源信息，但不保存 ReAct 叙述、原始参数或最终回复', async () => {
-    const appendAutomaticWorkContext = vi.fn().mockResolvedValue(undefined)
+  it('完整读取结果进入短期缓存，来源随对话保存且不再自动写入心流正文', async () => {
+    const source = { callId: 'call-read', toolName: 'read_file_range', sourceRef: 'src/app.ts' }
+    const capture = vi.fn().mockReturnValue(source)
+    const output = JSON.stringify({
+      content: '文件中的完整内容',
+      hash: 'abc',
+      lineStart: 10,
+      lineEnd: 11,
+    })
+    const appendAssistantMessage = vi.fn().mockResolvedValue({ id: 2 })
     const service = new ConversationTurnService({
       threadService: {
         getThread: vi.fn().mockResolvedValue({
@@ -340,7 +654,7 @@ describe('ConversationTurnService 初始提示词快照', () => {
           disabledTools: [],
         }),
         appendUserMessage: vi.fn().mockResolvedValue({ id: 1 }),
-        appendAssistantMessage: vi.fn().mockResolvedValue({ id: 2 }),
+        appendAssistantMessage,
       },
       contextCompiler: {
         compile: vi.fn().mockResolvedValue({
@@ -350,156 +664,45 @@ describe('ConversationTurnService 初始提示词快照', () => {
       },
       agentService: {
         chatWithCompiledMessages: vi.fn().mockImplementation(async (params) => {
-          params.onToolCalls?.([
-            {
-              name: 'read_file',
-              args: { file_path: 'src/example.ts' },
-              result: '{"ephemeral":true,"kind":"file_read_audit","path":"src/example.ts"}',
-              durationMs: 1,
-              isError: false,
-              callId: 'call-read',
-            },
-            {
-              name: 'read_file',
-              args: { file_path: 'src/missing.ts' },
-              result: '读取失败',
-              durationMs: 1,
-              isError: true,
-              callId: 'call-error',
-            },
-          ])
-          params.onContentBlocks?.([
-            {
-              blockId: 'tool-stale',
-              sequence: 1,
-              kind: 'tool',
-              turn: 1,
-              callId: 'call-stale',
-              name: 'code_search',
-              args: '{"query":"旧信息"}',
-              result: '压缩前的旧工具结果',
-              isError: false,
-            },
-            {
-              blockId: 'tool-update-context',
-              sequence: 2,
-              kind: 'tool',
-              turn: 1,
-              callId: 'call-update-context',
-              name: 'manage_work_context',
-              args: '{"action":"update"}',
-              result: '工作上下文已更新',
-              isError: false,
-            },
-            {
-              blockId: 'progress',
-              sequence: 3,
-              kind: 'narration',
-              turn: 1,
-              phase: 'progress',
-              content: '我先读取代码。',
-            },
-            {
-              blockId: 'tool-extension-log',
-              sequence: 4,
-              kind: 'tool',
-              turn: 1,
-              callId: 'call-extension-log',
-              name: 'terminal_execute',
-              args: '{"command":"check"}',
-              result:
-                '[11:15:37.185][backend][ERROR] [ExtensionLoader] 入口文件不存在：D:\\pero\\infos-ts\\resources\\backend\\backend\\src\\tools\\fileOps\\index.ts',
-              isError: false,
-            },
-            {
-              blockId: 'tool-read',
-              sequence: 2,
-              kind: 'tool',
-              turn: 1,
-              callId: 'call-read',
-              name: 'read_file',
-              args: '{"file_path":"src/example.ts"}',
-              result: 'export const value = 1\n',
-              isError: false,
-            },
-            {
-              blockId: 'tool-range',
-              sequence: 5,
-              kind: 'tool',
-              turn: 1,
-              callId: 'call-range',
-              name: 'read_file_range',
-              args: '{"path":"src/app.py","line_start":10,"line_end":11}',
-              result: JSON.stringify({
-                content: 'def run():\n  return True',
-                totalLines: 80,
-                totalBytes: 2048,
-                lineStart: 10,
-                lineEnd: 11,
-              }),
-              isError: false,
-            },
-            {
-              blockId: 'tool-error',
-              sequence: 3,
-              kind: 'tool',
-              turn: 1,
-              callId: 'call-error',
-              name: 'read_file',
-              args: '{"file_path":"src/missing.ts"}',
-              result: '读取失败',
-              isError: true,
-            },
-            {
-              blockId: 'final',
-              sequence: 4,
-              kind: 'narration',
-              turn: 2,
-              phase: 'final',
-              content: '读取完成。',
-            },
-          ])
-          return '读取完成。'
+          await params.onToolObserved?.({
+            name: 'read_file_range',
+            args: { path: 'src/app.ts', line_start: 10, line_end: 11 },
+            output,
+            isError: false,
+            callId: 'call-read',
+          })
+          return '读取完成'
         }),
       },
-      attachmentService: { validateForBinding: vi.fn().mockResolvedValue([]) },
+      attachmentService: {
+        bindOutgoing: vi.fn().mockResolvedValue(undefined),
+        validateForBinding: vi.fn().mockResolvedValue([]),
+      },
       imageUnderstandingService: { transcribe: vi.fn() },
-      flowStateService: { appendAutomaticWorkContext },
+      toolContextService: {
+        capture,
+        deletePairs: vi.fn(),
+        auditMessages: (messages: unknown[]) => messages,
+      },
     } as never)
 
     const result = await service.executeTurn({ threadId: 'thread-1', content: '读取代码' })
 
-    expect(appendAutomaticWorkContext).toHaveBeenCalledWith({
-      threadId: 'thread-1',
-      agentId: 'pero',
-      pairId: result.pairId,
-      items: [
-        {
-          sourceKey: 'file:src/example.ts',
-          content: '- 文件 src/example.ts 的内容（1 行、22 字节）：\nexport const value = 1',
-        },
-        {
-          sourceKey: 'file:src/app.py',
-          content:
-            '- 文件 src/app.py 的内容（80 行、2048 字节，本次读取第 10-11 行）：\n' +
-            'def run():\n  return True',
-        },
-      ],
-    })
-    const captured = appendAutomaticWorkContext.mock.calls[0]![0].items.map(
-      (item: { content: string }) => item.content,
-    ).join('\n\n')
-    expect(captured).not.toContain('ReAct')
-    expect(captured).not.toContain('我先读取代码')
-    expect(captured).not.toContain('read_file')
-    expect(captured).not.toContain('file_path')
-    expect(captured).not.toContain('file_read_audit')
-    expect(captured).not.toContain('ExtensionLoader')
-    expect(captured).not.toContain('[ERROR]')
-    expect(captured).not.toContain('压缩前的旧工具结果')
-    expect(captured).not.toContain('工作上下文已更新')
-    expect(captured).not.toContain('读取失败')
-    expect(captured).not.toContain('读取完成')
+    expect(capture).toHaveBeenCalledWith(
+      { threadId: 'thread-1', agentId: 'pero', pairId: result.pairId, channel: 'desktop' },
+      {
+        name: 'read_file_range',
+        args: { path: 'src/app.ts', line_start: 10, line_end: 11 },
+        output,
+        isError: false,
+        callId: 'call-read',
+      },
+      0,
+    )
+    expect(result.toolSources).toEqual([source])
+    const savedMetadata = JSON.parse(appendAssistantMessage.mock.calls[0]![0].metadataJson)
+    expect(savedMetadata.toolSources).toEqual([source])
+    expect(JSON.stringify(savedMetadata)).not.toContain('文件中的完整内容')
   })
 
   it('模型未配置上下文窗口时Token预算返回不可计算状态', async () => {
@@ -567,9 +770,14 @@ describe('ConversationTurnService 初始提示词快照', () => {
     expect(compile).toHaveBeenCalledWith(
       'thread-pero',
       'pero',
-      expect.objectContaining({ retrievalQuery: '待发送内容' }),
+      expect.objectContaining({
+        retrievalQuery: '待发送内容',
+        disableMemoryRetrieval: true,
+        disableContinuity: true,
+      }),
     )
     expect(result.modelId).toBe('model-pero')
+    expect(result.memoryRetrievalDeferred).toBe(true)
   })
 
   it('拒绝用其他Agent身份向普通Thread写入消息', async () => {
@@ -592,7 +800,7 @@ describe('ConversationTurnService 初始提示词快照', () => {
         agentId: 'nana',
         content: '不应写入旧角色会话',
       }),
-    ).rejects.toThrow('会话归属不匹配')
+    ).rejects.toThrow(Error)
     expect(appendUserMessage).not.toHaveBeenCalled()
   })
 })

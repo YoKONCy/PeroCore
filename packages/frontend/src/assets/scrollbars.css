@@ -1,0 +1,91 @@
+/* 保留 8px 拖动区域，日常仅显示 4px 滑块；小倒角与细高光延续微像素质感。 */
+::-webkit-scrollbar {
+  width: var(--ui-scrollbar-size);
+  height: var(--ui-scrollbar-size);
+  background: transparent;
+}
+
+::-webkit-scrollbar-track {
+  margin: 3px;
+  background-color: transparent;
+  box-shadow: none;
+  transition: background-color 160ms ease;
+}
+
+::-webkit-scrollbar-track:hover {
+  background-color: var(--ui-scrollbar-track);
+}
+
+::-webkit-scrollbar-thumb {
+  min-width: 28px;
+  min-height: 28px;
+  border: 2px solid transparent;
+  border-radius: 3px;
+  background-color: var(--ui-scrollbar-thumb);
+  background-image: linear-gradient(
+    90deg,
+    var(--ui-scrollbar-highlight),
+    transparent 45%,
+    var(--ui-scrollbar-shade)
+  );
+  background-clip: padding-box;
+  box-shadow: none;
+  transition:
+    background-color 160ms ease,
+    border-width 160ms ease;
+}
+
+::-webkit-scrollbar-thumb:horizontal {
+  background-image: linear-gradient(
+    180deg,
+    var(--ui-scrollbar-highlight),
+    transparent 45%,
+    var(--ui-scrollbar-shade)
+  );
+}
+
+::-webkit-scrollbar-thumb:hover {
+  border-left-width: 1px;
+  border-right-width: 1px;
+  background-color: var(--ui-scrollbar-thumb-hover);
+}
+
+::-webkit-scrollbar-thumb:horizontal:hover {
+  border-width: 1px 2px;
+}
+
+::-webkit-scrollbar-thumb:active {
+  background-color: var(--ui-scrollbar-thumb-active);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* Chromium 使用上面的细节样式；其他浏览器使用原生窄滚动条，避免标准属性覆盖细节。 */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--ui-scrollbar-thumb) transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-thumb {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  ::-webkit-scrollbar-thumb {
+    background: CanvasText;
+    background-clip: padding-box;
+  }
+}

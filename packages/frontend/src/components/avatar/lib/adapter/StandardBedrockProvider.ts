@@ -99,6 +99,7 @@ function filterBones(
 export class StandardBedrockProvider implements IModelProvider {
   private config: ModelConfig
   private textureCache = new Map<string, THREE.Texture>()
+  private disposed = false
   private boneFilterPatterns: string[] | undefined
 
   constructor(config: ModelConfig, boneFilterPatterns?: string[]) {
@@ -158,6 +159,7 @@ export class StandardBedrockProvider implements IModelProvider {
   }
 
   async getTexture(): Promise<THREE.Texture> {
+    if (this.disposed) throw new DOMException('模型已释放', 'AbortError')
     const url = this.config.texture
     if (this.textureCache.has(url)) {
       return this.textureCache.get(url)!
@@ -167,6 +169,11 @@ export class StandardBedrockProvider implements IModelProvider {
       new THREE.TextureLoader().load(
         url,
         (t) => {
+          if (this.disposed) {
+            t.dispose()
+            reject(new DOMException('模型已释放', 'AbortError'))
+            return
+          }
           t.magFilter = THREE.NearestFilter
           t.minFilter = THREE.NearestFilter
           t.colorSpace = THREE.SRGBColorSpace
@@ -177,6 +184,12 @@ export class StandardBedrockProvider implements IModelProvider {
         reject,
       )
     })
+  }
+
+  dispose(): void {
+    this.disposed = true
+    for (const texture of this.textureCache.values()) texture.dispose()
+    this.textureCache.clear()
   }
 
   async getAnimations(): Promise<Map<string, unknown>> {

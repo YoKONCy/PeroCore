@@ -31,7 +31,7 @@
   "tools": [
     {
       "name": "stronghold_move_to_room",
-      "description": "移动到据点内的另一个房间。移动立即更新角色位置，但当前正在生成的回复仍归属于发起回合的原房间；新房间群聊上下文从下一回合生效。",
+      "description": "切换所在房间；当前回复仍属于原房间，新房间上下文下回合生效。",
       "display": {
         "label": "移动房间",
         "icon": "door-open",
@@ -98,7 +98,7 @@
     },
     {
       "name": "stronghold_summon_agents",
-      "description": "邀请当前据点房间内的一名或多名其他角色在本轮接着发言。按agent_ids顺序执行；每轮只能由首位自然回复者调用一次，被传唤者不能继续传唤。",
+      "description": "邀请当前房间的角色依次接话；每轮仅首位自然回复者可调用一次，被邀请者不能继续传唤。",
       "display": {
         "label": "传唤成员",
         "icon": "users",

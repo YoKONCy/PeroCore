@@ -4,7 +4,7 @@
 > 状态：实现基线  
 > 协议版本：1  
 > 更新日期：2026-08-18
-> 后续接入规范：三层Application Adapter与Arca迁移计划以 [../A11_APPLICATION_INTEGRATION.md](../A11_APPLICATION_INTEGRATION.md) 为准；本文只保留Document Engine领域与历史实现基线。
+> 后续接入规范：三层Application Adapter与Arca迁移计划以 [../A10_APPLICATION_INTEGRATION.md](../A10_APPLICATION_INTEGRATION.md) 为准；本文只保留Document Engine领域与历史实现基线。
 
 ## 1.定位
 

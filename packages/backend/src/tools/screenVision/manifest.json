@@ -8,10 +8,9 @@
   "entry": "index.ts",
   "category": "core",
   "platforms": ["windows", "linux", "darwin"],
-
   "toolDefinition": {
     "name": "take_screenshot",
-    "description": "截取当前屏幕画面。当主人请求\"看看\"、\"看一下屏幕\"时使用。返回屏幕截图的 base64 数据，可直接进行视觉分析。",
+    "description": "观察桌面或指定窗口，返回截图、observationId和可选控件摘要。",
     "display": {
       "label": "截取屏幕画面",
       "description": "截取当前电脑屏幕，供视觉模型查看。",
@@ -22,7 +21,24 @@
     "parameters": {
       "type": "object",
       "properties": {
-        "count": { "type": "number", "description": "截图数量 (默认 1，最多 3)" }
+        "windowId": {
+          "type": "string",
+          "description": "窗口列表中的windowId；指定后截取窗口所在区域"
+        },
+        "displayId": {
+          "type": "string",
+          "description": "指定显示器，默认选择目标窗口所在屏幕"
+        },
+        "includeElements": {
+          "type": "boolean",
+          "description": "读取目标窗口可操作控件，默认关闭"
+        },
+        "maxWidth": {
+          "type": "integer",
+          "minimum": 320,
+          "maximum": 2560,
+          "description": "截图最大宽度，默认1280"
+        }
       }
     }
   }

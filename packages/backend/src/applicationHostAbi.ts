@@ -13,13 +13,31 @@ export type {
 } from './applications/types'
 export type { GrantRegistry } from './applications/grantRegistry'
 export type { LlmService, ModelConfig } from './services/llm/llmService'
-export type { ChatMessage, ContentPart, ToolCall, ToolDefinition } from './services/llm/types'
+export type {
+  ChatMessage,
+  ContentPart,
+  ToolCall,
+  ToolDefinition,
+  ChatOptions,
+  ChatCompletion,
+} from './services/llm/types'
+export { modelOutputReservation } from './services/llm/requestPolicy'
+export { desktopCheckpointMessages as promptMessagesForPersistence } from './services/agent/reactLoop'
+export {
+  canonicalTools,
+  preparePromptReplay,
+  promptFingerprint,
+  historyKey,
+  stableHistoryWindow,
+  trimOldestPromptRound,
+  invalidatePromptReplay,
+} from './services/llm/promptCache'
 export type { MdpEngine } from './services/prompt/mdpEngine'
 export type { AgentManager } from './services/agent/agentManager'
 export type { MemoryStoreRegistry } from './repositories/storeRegistry'
 export type { InboundRouteRepository } from './repositories/inboundRoute.repo'
 export type { BuiltinTool } from './tools/index'
 export { createLogger } from './lib/logger'
+export { AppError } from './lib/appError'
 export { parseLlmJson } from './shared/llmJsonParser'
 export { tokenCounter } from './services/tokenizer/tokenCounter'
-export { setSocialNapcatAdapter } from './applications/socialWsBridge'

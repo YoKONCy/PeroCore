@@ -29,6 +29,32 @@ function message(type: 'hello' | 'request' | 'heartbeat', payload: Record<string
 }
 
 describe('Gateway 多节点闭环', () => {
+  it('切换当前角色后，只接收该角色的回复就绪提示且无需重建连接', async () => {
+    const registry = new NodeRegistry()
+    const send = vi.fn()
+    const hub = new GatewayHub(registry)
+    hub.registerNode('connection-1', send)
+    await hub.handleMessage(message('hello', { nodeId, principalId: 'pero' }), 'connection-1')
+    const session = registry.getActiveSession(nodeId)
+    await hub.handleMessage(
+      message('request', { action: 'gateway.select_principal', principalId: 'nana' }),
+      'connection-1',
+    )
+    send.mockClear()
+    await hub.pushBusiness(
+      'conversation_reply_ready',
+      { messageId: '1' },
+      { type: 'all_principal_clients', principalId: 'pero' },
+    )
+    expect(send).not.toHaveBeenCalled()
+    await hub.pushBusiness(
+      'conversation_reply_ready',
+      { messageId: '2' },
+      { type: 'all_principal_clients', principalId: 'nana' },
+    )
+    expect(send).toHaveBeenCalledOnce()
+    expect(registry.getActiveSession(nodeId)?.sessionId).toBe(session?.sessionId)
+  })
   it('稳定 Node 重连时应保留 Node ID 并递增 Session Generation', async () => {
     const registry = new NodeRegistry()
     const firstSend = vi.fn()

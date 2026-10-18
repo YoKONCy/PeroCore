@@ -65,7 +65,7 @@ describe('BrowserToolRuntime', () => {
       },
     }
     const remove = directory.registerRemoteProvider(offer, invoke)
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await vi.waitFor(() => expect(tools.has('browser_open_url')).toBe(true))
     expect(tools.has('browser_open_url')).toBe(true)
     expect(tools.has('browser_upload')).toBe(false)
 
@@ -86,11 +86,12 @@ describe('BrowserToolRuntime', () => {
         principalId: 'agent:test',
         payload: { operation: 'open', input: { url: 'https://example.com' } },
       }),
+      undefined,
     )
     expect(String(output)).toContain('open')
 
     remove()
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await vi.waitFor(() => expect(tools.has('browser_open_url')).toBe(false))
     expect(tools.has('browser_open_url')).toBe(false)
 
     await runtime.stop()

@@ -3,55 +3,61 @@
 > **适用范围**：`packages/backend/src/services/memory/`
 > **核心引擎**：SQLite (Drizzle) + TriviumDB (Vector + Graph)
 > **理论基础**：PEDSA v2 (Pipeline for Embedded Directed Semantic Analysis)
-> **最后更新**：2026-08-19
+> **最后更新**：2026-10-17
 
 ---
 
-## 1. PEDSA 存储层级 (Layer 0-3)
+## 1. 记忆存储层级
 
-| 分层                  | 载体               | 存储内容               | 检索方式          | 生命周期         |
-| --------------------- | ------------------ | ---------------------- | ----------------- | ---------------- |
-| **Layer 0 (Working)** | JSON / LLM Context | 当前会话 Context       | 顺序读取          | 短期（单次会话） |
-| **Layer 1 (Vector)**  | **TriviumDB**      | 原始片段向量 + 文本    | 向量检索 + BM25   | 长期             |
-| **Layer 2 (Graph)**   | **TriviumDB**      | 实体/事件图谱 + 关系   | 图谱扩散 + Cypher | 长期             |
-| **Layer 3 (Diary)**   | **SQLite / TDB**   | 每日/周总结 + 逻辑闪回 | 关键词 + 时间轴   | 永久             |
+| 分层                  | 载体                   | 存储内容                       | 检索方式              | 生命周期         |
+| --------------------- | ---------------------- | ------------------------------ | --------------------- | ---------------- |
+| **Layer 0 (Working)** | JSON / LLM Context     | 当前会话 Context               | 顺序读取              | 短期（单次会话） |
+| **Layer 1 (Vector)**  | **TriviumDB**          | 事件向量 + 文本索引            | 向量检索 + BM25       | 长期             |
+| **Layer 2 (Graph)**   | **TriviumDB**          | 事件图谱 + 关系边              | 图谱扩散 + 确定性 BFS | 长期             |
+| **Layer 3 (Diary)**   | **Workspace Markdown** | 每日人格日记 `dailynotes/*.md` | 按日期读取            | 永久             |
 
----
-
-## 2. 处理管线 (Memory Pipeline)
-
-记忆存储不是简单的 `INSERT`，而是经过 5 个反思阶段：
-
-1. **Ingest (摄入)**：接收原始对话片段。
-2. **Tag (标注)**：LLM 提取实体、关键词、情感倾向。
-3. **Consolidate (整合)**：检测是否与现有记忆冲突或重叠。
-4. **Link (关联)**：在 TriviumDB 中建立实体 ↔ 事件的边。
-5. **Flush (落盘)**：写入 SQLite (关系) 和 TriviumDB (语义)。
+> Layer 3 的每日人格日记写入 Agent Workspace，**不进入事件记忆库**；另有全 Agent 共享的 **Facts Store**（`facts.tdb`），仅经工具访问、不自动注入 Prompt。TriviumDB 为运行/检索权威，SQLite 保存完整备份与事务日志。
 
 ---
 
-## 3. 混合检索策略 (SocialEnricher)
+## 2. 写入管线 (EventNote Pipeline)
 
-后端采用 **HyDE + Hybrid Search** 策略：
+长记忆不再经"摘要节点"，而是 **Agent 主动记事 + 后台兜底补记**：
 
-1. **HyDE**：使用 LLM 生成"假设回答"以增强检索向量命中。
-2. **向量检索**：命中语义相近的记忆片段。
-3. **BM25 检索**：通过 `indexText` 确保人名、日期等关键词精确命中。
-4. **图谱扩散**：命中激活节点 2 跳路径内的关联背景。
+1. **主动记事**：Agent 在 ReAct 中调用 `write_event_note` / `revise_event_note`，只创建本回合 `EventNoteDraft`。
+2. **回合提交**：Assistant 消息成功持久化后，Draft 才正式提交为 EventNote，并登记消息覆盖关系。
+3. **后台补记**：只处理尚未被覆盖的连续消息区间，可产出 0~N 条事件，并写入 `ConversationCoverage`（含 `reviewed_no_event`）。
+4. **时间链**：按 `eventAt` 追加/插入并修复 `temporal_next` / `temporal_prev`。
+5. **关系维护**：由后台 Reflection 建立 `caused_by` / `same_event` / `same_topic` / `involves_*` 边。
 
 ---
 
-## 4. 记忆维护与提炼 (Scorer)
+## 3. 检索策略
 
-**Scorer** 是后台定时任务，负责"记忆分层"：
+记忆检索拆成两条合同不同的路径：
 
-- **攒批处理**：不实时生成总结，每 200 条消息或 50000 字符触发。
-- **降维打击**：将琐碎消息压缩为 Layer 3 的日记条目。
-- **图谱修剪**：自动合并等价节点（`equality` 边），衰减低权重边。
+1. **对话前自动 RAG**：默认向量 + BM25；可在总览页启用 **SA-PPR 高级管线**（含 FISTA / DPP / ContextRNN / Leiden / 反馈闭环）。固定补充物理时间轴末尾事件与每个命中事件的直接前驱，均不占 `top_k`。
+2. **Agent 主动图查询**（`query_event_notes`）：确定性 **BFS**，严格遵守方向、边标签、最大深度、最大节点数与返回 Token 预算，**不受 SA-PPR 开关影响**。
+
+---
+
+## 4. 记忆维护与补记
+
+当前事件记忆由主动记录、后台补记和关系维护分工处理：
+
+- **后台补记**：每分钟检查，连续未覆盖的完整对话达到 8 轮，或达到容量阈值时成批处理；否则由主动记录静默 6 小时、Thread 休眠 2 小时、本地 21:00 日界兜底。
+- **静默计时**：表示 Agent 多久未主动记录记忆，普通聊天和后台维护不重置此语义。数据库原子累加并持久化，主动写入后的重置不会被旧缓存覆盖。
+- **成功冷却**：每个 Thread 补记成功后默认冷却 1 小时，包括审阅后没有事件的情况。容量、攒批与当天首次日界补记可提前触发；日界完成记录与冷却跨重启保留。
+- **窗口退出**：只处理真正滑出上下文窗口的完整旧轮次，累积 8 轮后提炼；剩余少量由休眠、静默或日界处理。窗口内新对话不参与凑批。
+- **失败与并发**：失败按 5、10、20、40、60 分钟退避，最长间隔 1 小时；Coverage Claim 防重复，执行前重新校验覆盖范围，提炼期间消息发生变化则丢弃旧结果。模型结果先持久化，后续写入失败时沿用原结果。
+- **关系维护**：每 5 分钟增量维护；失败按 5、15、30、60 分钟退避，连续五次失败停止自动调用。维护修订不重新触发维护自身；决策持久化后可恢复未完成操作。
+- **时间语义**：数据库存储 UTC 时刻；上下文、提炼与关系维护中的时间使用设备本地时间并附显式时区偏移。`eventAt` 为事件时间，`createdAt` 为记录或修订时间。
 
 ---
 
 ## 5. TriviumDB 接入规范
+
+后端与社交应用统一固定 **0.8.9**。Store 注册表负责旧格式写入前备份、完整文件组重建/清理及一致性快照；持久化正文旁路文件 `.tdb.pld.<generation>`、属性/图索引与 flush marker 必须随主库一起处理。升级本身不修改 Embedding 维度，也不要求重新生成向量。每个常驻 Store 的 Payload 缓存上限为 32 MiB、单条缓存上限为 4 MiB；只读临时 Store 使用 8 MiB。具体回退约束见 [A08_DEVOPS](./A08_DEVOPS.md#23-迁移原则)。
 
 TS 层必须通过 `VectorWriteHelper` 操作数据库，确保原子性：
 
@@ -68,23 +74,27 @@ store.enableAutoCompaction(300)
 
 ## 6. 核心数据对象
 
-### 6.1 MemoryNode (SQLite)
+### 6.1 EventNote (TDB + SQLite 备份)
 
-存储基础元数据：`agentId`, `content`, `importance`, `type(chat/event/fact)`, `createdAt`.
+Agent 第一人称事件记事：`id`、`agentId`、`narrative`、`eventAt`（系统权威时间）、`createdAt`、`importance`、`affect{tones,valence,arousal}`、`participants/places/objects/topics`、`origin{mode,threadId,pairIds,messageIds,channel}`、`status(active/archived)`。运行时以 TriviumDB 为权威，SQLite 保存完整备份与事务日志。
 
-### 6.2 Entity (TDB Feature)
+### 6.2 ConversationCoverage (SQLite)
 
-存储知识节点：`name`, `type(person/topic/location)`, `synonyms`.
+记录对话区间的覆盖结论：`outcome = event_recorded | reviewed_no_event`，据此避免后台重复炼化，并在对话回溯/清理时定位受影响事件。
 
-## 7. AIOS 记忆边界与来源追溯
+### 6.3 Facts (共享 Store)
 
-完整的 Candidate / Gate / CanonicalMemory 模型见 [A09_AIOS_ARCHITECTURE](./A09_AIOS_ARCHITECTURE.md#5-long-term-memory候选门控与来源)。PEDSA 管线必须遵守以下约束：
+全 Agent 共享的对象事实库（`facts.tdb`）：`objectKey` / `statement`，支持 `superseded_by` 取代链；仅经工具访问。
 
-1. 长期记忆归属 `agentId`，不归属 Session 或 Thread；Thread 仅提供可追溯来源。
-2. Scorer 必须至少按 `agentId + threadId + channel` 分批，禁止混合不同 Thread 的原始消息进行提炼。
-3. MemoryCandidate 先经过去重、冲突/时间关系判断和重要性门控，再写入 CanonicalMemory；低价值信息保留在 Thread 事实流。
-4. CanonicalMemory 必须保留 `originThreadId`、来源消息、channel、平台和创建方式等 Provenance。
-5. `main`、`social`、`diary` TriviumDB Store 按 Agent 隔离；Mmap 模式同步时须将 `.tdb/.vec/.flush_ok` 视作一致性组，同时保留 WAL 恢复能力。
+## 7. 记忆边界与来源追溯
+
+长记忆的事件记事体系必须遵守以下约束：
+
+1. 事件记忆归属 `agentId`，不归属 Session 或 Thread；Thread 仅提供可追溯来源（`origin.pairIds/messageIds/channel`）。
+2. 系统消息时间是事件时间的唯一权威（`eventAt`），Agent 不填写或推断时间。
+3. 同一事件由 `EventNote` 承载；后台只对未覆盖区间补记，零事件区间以 `reviewed_no_event` 记录，避免重复扫描。
+4. 每个 EventNote 保留完整 **Provenance**（来源消息、channel、创建方式），可回答"从哪来、是否已被修订"。
+5. Agent 私有 Store（`memory.tdb`）与共享 `facts.tdb` 按 Agent/全局隔离；TriviumDB 为运行权威，SQLite 为完整备份 + 事务日志（`operationId` 幂等提交，可全量重建）。
 
 ---
 
@@ -98,10 +108,21 @@ store.enableAutoCompaction(300)
 - Token预算、裁剪原因与可见性；
 - Provenance、Trust与是否为Derived Observation。
 
-Context Compiler只能按Policy将Memory Resource物化为Region，不得在编译期间修改CanonicalMemory。RAG按需检索等价于Context地址空间的缺页处理；相同资源Snapshot、Query和Policy应产生可复现的Context Manifest。Observer产生的Agent State属于独立Derived Resource，默认不进入Prompt，必须由Thread ContextPolicy与Observer Policy双重启用。
+Context Compiler只能按Policy将Memory Resource物化为Region，不得在编译期间修改事件记忆。RAG按需检索等价于Context地址空间的缺页处理；相同资源Snapshot、Query和Policy应产生可复现的Context Manifest。Observer产生的Agent State属于独立Derived Resource，默认不进入Prompt，必须由Thread ContextPolicy与Observer Policy双重启用。
 
-记忆跨Application回流必须经过`infos.knowledge.submit_candidate`或等价Checkpoint/MemoryCandidate Port与主Agent MemoryGate；Application自己的领域状态和私有记忆仍由其Store/Authority持有，不能直接写入CanonicalMemory。Application查询知识使用收窄的`infos.knowledge.query` Capability，只获得结果与Provenance，不获得TriviumDB文件、Repository或数据库连接。具体协议见 [A11_APPLICATION_INTEGRATION](./A11_APPLICATION_INTEGRATION.md)。
+记忆跨Application回流必须经过`infos.knowledge.submit_candidate`或等价Checkpoint/MemoryCandidate Port与主Agent MemoryGate；Application自己的领域状态和私有记忆仍由其Store/Authority持有，不能直接写入Agent的事件记忆。Application查询知识使用收窄的`infos.knowledge.query` Capability，只获得结果与Provenance，不获得TriviumDB文件、Repository或数据库连接。具体协议见 [A10_APPLICATION_INTEGRATION](./A10_APPLICATION_INTEGRATION.md)。
 
 ---
+
+## 9. ContextRNN 按需生命周期
+
+ContextRNN 是 SA-PPR 高级管线的可选子模块，默认关闭。只有 `advanced.enableSaPpr && advanced.enableContextRnn` 同时成立且实际进入自动 RAG 时，`ContextRnnRuntime` 才创建模型实例并加载权重；打开设置本身不创建实例。基础向量/BM25 查询和 Agent 主动图谱查询不调用 RNN。
+
+- 反馈训练还要求 `advanced.enableFeedback`；关闭 ContextRNN 时配置校验与前端会同时关闭反馈，检索不再保留训练轨迹。
+- 热关闭高级管线或 ContextRNN 后，统一落盘尚未保存的变更并释放实例。配置代次使等待 Embedding 的旧检索、旧反馈失效，防止迟到请求重新创建或训练已关闭的模型。
+- 隐状态按 Agent 与 Channel 隔离；投影、输出、minGRU 权重保持现有共享格式，已有二进制文件可继续读取。
+- 状态和各类权重分别记录脏标记。检查点只写发生变更的项，加载已有文件不会产生脏标记，无变更时不写盘、不打印保存日志。
+- KernelScheduler 的周期计划支持轻量 `shouldRun` 条件；RNN 未实例化、关闭或无变更时，保存计划不创建 Execution，也不增加运行统计。
+- 专用记忆配置接口和通用配置的单项、批量、导入、删除入口都同步生命周期。进程退出只刷新已创建实例的未保存变更，不创建模型。
 
 _本文档由 Carola 整理，适用于 infOS-TS 记忆引擎架构规范。_

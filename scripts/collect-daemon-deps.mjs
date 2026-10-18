@@ -10,7 +10,7 @@
  *     ├─ resources/daemon/daemon.mjs        （主 Daemon bundle）
  *     └─ resources/node_modules/            （本脚本产物，所有 external 依赖）
  *
- * 收集范围：packages/backend + packages/apps/social 的生产依赖（含可选依赖），
+ * 收集范围：后端、社交与官方子应用的生产依赖（含可选依赖），
  * 基于 pnpm 的 symlink 定位真实目录后递归复制依赖树，避免硬编码版本 hash。
  *
  * @module scripts/collect-daemon-deps
@@ -33,6 +33,8 @@ const OUT_NODE_MODULES = path.join(root, 'dist-daemon', 'node_modules')
 const LOOKUP_BASES = [
   path.join(root, 'packages', 'backend', 'node_modules'),
   path.join(root, 'packages', 'apps', 'social', 'node_modules'),
+  path.join(root, 'packages', 'apps', 'arca', 'node_modules'),
+  path.join(root, 'packages', 'apps', 'pictoria', 'node_modules'),
   path.join(root, 'node_modules'),
 ]
 
@@ -40,6 +42,8 @@ const LOOKUP_BASES = [
 const ENTRY_MANIFESTS = [
   path.join(root, 'packages', 'backend', 'package.json'),
   path.join(root, 'packages', 'apps', 'social', 'package.json'),
+  path.join(root, 'packages', 'apps', 'arca', 'package.json'),
+  path.join(root, 'packages', 'apps', 'pictoria', 'package.json'),
 ]
 
 // ─────────────────────────────────────────────
@@ -267,6 +271,23 @@ function collectBundledRipgrep() {
 
 /** 对关键原生运行文件做强校验，避免发行包静默降级。 */
 function validateNativeRuntime() {
+  const triviumDir = path.join(OUT_NODE_MODULES, 'triviumdb')
+  const triviumManifest = JSON.parse(fs.readFileSync(path.join(triviumDir, 'package.json'), 'utf8'))
+  const requiredTriviumVersion = JSON.parse(
+    fs.readFileSync(path.join(root, 'packages', 'backend', 'package.json'), 'utf8'),
+  ).dependencies.triviumdb
+  if (triviumManifest.version !== requiredTriviumVersion)
+    throw new Error(`发行依赖 TriviumDB 版本错误：${triviumManifest.version}，需要 ${requiredTriviumVersion}`)
+  const libc = process.platform === 'linux' && process.report?.getReport?.().header?.glibcVersionRuntime
+    ? 'gnu' : 'musl'
+  const nativePlatform = process.platform === 'win32'
+    ? `${process.platform}-${process.arch}-msvc`
+    : process.platform === 'linux' ? `${process.platform}-${process.arch}-${libc}`
+      : `${process.platform}-${process.arch}`
+  const triviumCandidates = [`triviumdb.${nativePlatform}.node`,
+    `triviumdb.${process.platform}-${process.arch}.node`, 'triviumdb.node']
+  if (!triviumCandidates.some((name) => fs.existsSync(path.join(triviumDir, name))))
+    throw new Error(`TriviumDB 缺少当前平台原生模块：${nativePlatform}`)
   const ptyDir = path.join(OUT_NODE_MODULES, 'node-pty')
   if (!fs.existsSync(ptyDir)) throw new Error('发行依赖缺少 node-pty')
   if (!findFileRecursive(ptyDir, (file) => path.extname(file).toLowerCase() === '.node')) {

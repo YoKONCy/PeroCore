@@ -5,8 +5,6 @@
  * 调用方依赖这里的稳定契约，不直接耦合底层传输或运行时实现。
  */
 import type { Component } from 'vue'
-import { arcaManifest } from '@infos/arca/manifest'
-import { applicationSurfaceRegistry, defineApplicationSurface } from '../../applications'
 
 export type TabModule = { default: Component }
 export type TabLoader = () => Promise<TabModule>
@@ -23,26 +21,13 @@ const loaders: Record<string, TabLoader> = {
   agent_config: () => import('../../components/dashboard/tabs/AgentConfigTab.vue'),
   user_settings: () => import('../../components/dashboard/tabs/UserSettingsTab.vue'),
   model_config: () => import('../../components/dashboard/tabs/ModelConfigTab.vue'),
+  prompts: () => import('../../components/dashboard/tabs/PromptManagementTab.vue'),
   voice_config: () => import('../../components/dashboard/tabs/VoiceTab.vue'),
-  mcp_config: () => import('../../components/dashboard/tabs/McpTab.vue'),
+  mcp_config: () => import('../../components/integrations/ToolsExtensionsTab.vue'),
   distributed: () => import('../../components/dashboard/tabs/DistributedTab.vue'),
   social: () => import('../../components/dashboard/tabs/SocialTab.vue'),
   terminal: () => import('../../components/dashboard/tabs/TerminalTab.vue'),
   system_reset: () => import('../../components/dashboard/tabs/ResetTab.vue'),
-}
-
-applicationSurfaceRegistry.register(
-  defineApplicationSurface({
-    manifest: arcaManifest,
-    surfaceId: 'workbench',
-    load: () => import('../../components/dashboard/tabs/ArcaTab.vue'),
-  }),
-)
-
-for (const surface of applicationSurfaceRegistry.list('main.tab')) {
-  loaders[
-    surface.appId === 'infos.arca' ? 'arca' : `${surface.appId}:${surface.declaration.surfaceId}`
-  ] = surface.load as TabLoader
 }
 
 const pending = new Map<string, Promise<TabModule>>()
@@ -75,4 +60,40 @@ export function preloadTab(id: string): Promise<TabModule> {
     })
   pending.set(id, promise)
   return promise
+}
+
+/** 首屏完成后逐个预热常用页面，不并发挤占启动阶段的主线程。 */
+export function warmTabsWhenIdle(ids: readonly string[], canLoad: () => boolean): () => void {
+  let stopped = false
+  let index = 0
+  let idle: number | undefined
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const schedule = () => {
+    if (stopped || index >= ids.length) return
+    timer = setTimeout(() => {
+      if (stopped) return
+      if (document.hidden || !canLoad()) {
+        schedule()
+        return
+      }
+      const load = () => {
+        if (stopped) return
+        if (document.hidden || !canLoad()) {
+          schedule()
+          return
+        }
+        void preloadTab(ids[index++]!)
+          .catch(() => {})
+          .finally(schedule)
+      }
+      if (typeof requestIdleCallback === 'function') idle = requestIdleCallback(load)
+      else load()
+    }, 1500)
+  }
+  schedule()
+  return () => {
+    stopped = true
+    clearTimeout(timer)
+    if (idle !== undefined && typeof cancelIdleCallback === 'function') cancelIdleCallback(idle)
+  }
 }

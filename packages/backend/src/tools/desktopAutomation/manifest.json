@@ -13,13 +13,15 @@
       "label": "操作桌面应用",
       "description": "使用鼠标和键盘操作桌面应用。"
     },
-    "get_mouse_position": { "label": "查看鼠标位置", "description": "查看鼠标指针当前所在的位置。" }
+    "get_mouse_position": {
+      "label": "查看鼠标位置",
+      "description": "查看鼠标指针当前所在的位置。"
+    }
   },
-
   "tools": [
     {
       "name": "automation_execute",
-      "description": "执行桌面 GUI 自动化操作: 鼠标点击、拖拽、文字输入、快捷键、系统通知。",
+      "description": "依据桌面观察操作，优先使用控件ID，坐标操作兜底；返回操作后画面。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -27,22 +29,35 @@
             "type": "string",
             "description": "自动化动作类型",
             "enum": [
+              "invoke",
+              "set_value",
+              "toggle",
+              "select",
+              "expand",
+              "collapse",
               "click",
               "double_click",
               "right_click",
+              "move",
               "drag",
+              "scroll",
               "type",
               "hotkey",
-              "notification"
+              "key_down",
+              "key_up",
+              "mouse_down",
+              "mouse_up",
+              "notification",
+              "wait"
             ]
           },
           "x": {
             "type": "number",
-            "description": "鼠标 X 坐标。默认采用0到1000归一化坐标"
+            "description": "截图中的X坐标"
           },
           "y": {
             "type": "number",
-            "description": "鼠标 Y 坐标。默认采用0到1000归一化坐标"
+            "description": "截图中的Y坐标"
           },
           "x2": {
             "type": "number",
@@ -54,24 +69,52 @@
           },
           "coordinateSpace": {
             "type": "string",
-            "description": "坐标空间。默认normalized；依据截图点击时使用screenshot并照抄截图返回的上下文",
+            "description": "鼠标坐标空间，默认采用最近截图像素坐标",
             "enum": ["normalized", "screenshot", "desktop"],
-            "default": "normalized"
+            "default": "screenshot"
           },
-          "displayId": {
+          "text": {
             "type": "string",
-            "description": "目标显示器ID；使用截图坐标时照抄截图返回值"
+            "description": "输入文字或快捷键组合；按住的键最多保留2秒"
           },
-          "screenshotWidth": {
-            "type": "number",
-            "description": "截图实际宽度；coordinateSpace为screenshot时必填"
+          "message": {
+            "type": "string",
+            "description": "通知正文"
           },
-          "screenshotHeight": {
-            "type": "number",
-            "description": "截图实际高度；coordinateSpace为screenshot时必填"
+          "observationId": {
+            "type": "string",
+            "description": "最近一次桌面观察返回的ID；通知之外必填"
           },
-          "text": { "type": "string", "description": "文本/快捷键/通知标题" },
-          "message": { "type": "string", "description": "通知正文" }
+          "elementId": {
+            "type": "string",
+            "description": "本次观察中的控件ID；控件操作必填"
+          },
+          "direction": {
+            "type": "string",
+            "enum": ["up", "down", "left", "right"],
+            "description": "滚动方向"
+          },
+          "amount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20,
+            "description": "滚轮格数，默认3；控件滚动大于1表示翻页"
+          },
+          "button": {
+            "type": "string",
+            "enum": ["left", "right"],
+            "description": "按住或释放的鼠标键"
+          },
+          "includeElements": {
+            "type": "boolean",
+            "description": "操作后同时读取可操作控件"
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 3000,
+            "description": "等待界面更新的毫秒数，默认500"
+          }
         },
         "required": ["action"]
       }
@@ -79,8 +122,16 @@
     {
       "name": "get_mouse_position",
       "description": "获取当前鼠标的屏幕坐标。",
-      "display": { "label": "鼠标位置", "icon": "map-pin", "color": "purple", "style": "desktop" },
-      "parameters": { "type": "object", "properties": {} }
+      "display": {
+        "label": "鼠标位置",
+        "icon": "map-pin",
+        "color": "purple",
+        "style": "desktop"
+      },
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
     }
   ]
 }

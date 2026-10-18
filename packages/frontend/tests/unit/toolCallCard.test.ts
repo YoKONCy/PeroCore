@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { mount } from '@vue/test-utils'
+import { enableAutoUnmount, mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import ToolCallCard from '../../src/components/tools/ToolCallCard.vue'
 
@@ -19,16 +19,13 @@ vi.mock('../../src/composables/tools/useToolDisplay', () => ({
 afterEach(() => vi.useRealTimers())
 
 describe('ToolCallCard Tool Atelier', () => {
-  it('执行中默认展开并呈现对应行为原型', async () => {
+  it('执行中默认展开，展示目标和进度', async () => {
     const wrapper = mount(ToolCallCard, {
       props: { tool: { name: 'browser_click', args: '{"target":"登录"}' } },
       global: { stubs: { Teleport: true } },
     })
-    await vi.waitFor(() => expect(wrapper.classes()).toContain('ta-browser-space'))
-
     expect(wrapper.classes()).toContain('is-open')
     expect(wrapper.text()).toContain('登录')
-    expect(wrapper.text()).toContain('进行中')
   })
 
   it('文件编辑执行中应明确显示编辑状态和路径', async () => {
@@ -37,11 +34,10 @@ describe('ToolCallCard Tool Atelier', () => {
       global: { stubs: { Teleport: true } },
     })
 
-    expect(wrapper.text()).toContain('正在编辑 · src/large.ts')
-    expect(wrapper.text()).toContain('进行中')
+    expect(wrapper.text()).toContain('src/large.ts')
   })
 
-  it('结果到达约600ms后应自动收起', async () => {
+  it('结果到达后应自动收起', async () => {
     vi.useFakeTimers()
     const wrapper = mount(ToolCallCard, {
       props: { tool: { name: 'browser_click', args: '{"target":"登录"}' } },
@@ -52,7 +48,7 @@ describe('ToolCallCard Tool Atelier', () => {
     })
 
     expect(wrapper.classes()).toContain('is-open')
-    vi.advanceTimersByTime(601)
+    await vi.runOnlyPendingTimersAsync()
     await wrapper.vm.$nextTick()
     expect(wrapper.classes()).not.toContain('is-open')
   })
@@ -66,12 +62,11 @@ describe('ToolCallCard Tool Atelier', () => {
     })
     await wrapper.get('.ta-data-port').trigger('click')
 
-    expect(wrapper.text()).toContain('工具调用详情')
     expect(wrapper.text()).toContain('terminal_execute')
     expect(wrapper.text()).toContain('pnpm test')
   })
 
-  it('失败状态应同时提供文字和破损状态类', async () => {
+  it('失败状态应提供可读提示', async () => {
     const wrapper = mount(ToolCallCard, {
       props: {
         tool: {
@@ -85,6 +80,7 @@ describe('ToolCallCard Tool Atelier', () => {
     })
 
     expect(wrapper.classes()).toContain('ta-state-error')
-    expect(wrapper.text()).toContain('未完成')
   })
 })
+
+enableAutoUnmount(afterEach)

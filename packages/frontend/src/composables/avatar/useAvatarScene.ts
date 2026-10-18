@@ -10,6 +10,8 @@
 import { shallowRef, onUnmounted, type Ref } from 'vue'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
+import { AVATAR_QUALITY, type AvatarQuality } from '../../components/avatar/lib/avatarPerformance'
+import { disposeAvatarResources } from '../../components/avatar/lib/disposeAvatarResources'
 
 /** 场景配置参数 */
 interface SceneOptions {
@@ -35,8 +37,10 @@ interface UseAvatarSceneReturn {
   disposeScene: () => void
   /** 处理窗口 resize */
   onResize: () => void
+  setQuality: (quality: AvatarQuality) => void
+  fitShadowToModel: (model: THREE.Object3D) => void
   /** 每帧自动重置相机到默认位置（非交互时） */
-  updateCameraReset: () => void
+  updateCameraReset: (delta: number) => void
 }
 
 const DEFAULT_CAMERA_POS: [number, number, number] = [0, 20, 90]
@@ -53,14 +57,16 @@ export function useAvatarScene(options: SceneOptions = {}): UseAvatarSceneReturn
 
   /** 容器 DOM 引用（用于 resize） */
   let containerRef: HTMLElement | null = null
+  let quality: AvatarQuality = 'balanced'
+  let shadowLight: THREE.DirectionalLight | null = null
+  const currentOffset = new THREE.Vector3()
+  const spherical = new THREE.Spherical()
+  const defaultSpherical = new THREE.Spherical().setFromVector3(new THREE.Vector3(0, -1, 70))
+  const defaultTarget = new THREE.Vector3(...lookAt)
 
   function initScene(containerEl: HTMLElement, canvasEl: HTMLElement): void {
+    disposeScene()
     containerRef = containerEl
-
-    // 清理已有渲染器
-    if (renderer.value) {
-      renderer.value.dispose()
-    }
     while (canvasEl.firstChild) {
       canvasEl.removeChild(canvasEl.firstChild)
     }
@@ -75,7 +81,7 @@ export function useAvatarScene(options: SceneOptions = {}): UseAvatarSceneReturn
     // Mesh（眼睛/嘴/睫毛）出现 z-fighting 闪烁。
     const c = new THREE.PerspectiveCamera(
       fov,
-      containerEl.clientWidth / containerEl.clientHeight,
+      Math.max(1, containerEl.clientWidth) / Math.max(1, containerEl.clientHeight),
       1,
       200,
     )
@@ -84,10 +90,12 @@ export function useAvatarScene(options: SceneOptions = {}): UseAvatarSceneReturn
 
     // 渲染器
     const r = new THREE.WebGLRenderer({ alpha: true, antialias: true })
-    r.setSize(containerEl.clientWidth, containerEl.clientHeight)
-    // 限制最大 2 倍像素比，平衡清晰度与性能
-    r.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    r.setPixelRatio(Math.min(window.devicePixelRatio || 1, AVATAR_QUALITY[quality].pixelRatio))
+    r.setSize(Math.max(1, containerEl.clientWidth), Math.max(1, containerEl.clientHeight))
     r.shadowMap.enabled = true
+    // 由渲染循环按预算刷新阴影，不为每个高帧率画面重复绘制阴影。
+    r.shadowMap.autoUpdate = false
+    r.shadowMap.needsUpdate = true
     // 像素风体素模型用硬阴影（PCFShadowMap）而非软阴影（PCFSoftShadowMap）：
     // 软阴影的 Poisson 采样核在发卡这类亚像素薄片（约 10 个阴影纹素）上会跨越
     // 薄片两侧采样，产生随摆动抽搐的噪点条纹。硬阴影采样更小更稳定，也贴合像素风硬边。
@@ -131,10 +139,9 @@ export function useAvatarScene(options: SceneOptions = {}): UseAvatarSceneReturn
     const dirLight = new THREE.DirectionalLight(0xffffff, 1.5)
     dirLight.position.set(20, 50, 30) // 更高的角度以获得更好的阴影
     dirLight.castShadow = true
-    // 分辨率提到 4096：发卡、裙摆内侧等小物件几何尺寸小，2048 的每个阴影纹素
-    // 相对它们太粗糙，容易产生自阴影条纹抽搐。
-    dirLight.shadow.mapSize.width = 4096
-    dirLight.shadow.mapSize.height = 4096
+    // 阴影范围在模型加载后收紧，使均衡档也能保留小部件的阴影精度。
+    dirLight.shadow.mapSize.setScalar(AVATAR_QUALITY[quality].shadowSize)
+    shadowLight = dirLight
     // DirectionalLight 的阴影相机默认只覆盖 ±5 的正交范围，而模型高约 47、宽约 30，
     // 超出部分会被阴影贴图错误采样/裁剪，在衣服内侧等复杂区域形成“花屏错乱影子”。
     // 这里按模型实际尺寸设置阴影相机范围，让 shadow map 精度集中在角色本体。
@@ -178,17 +185,61 @@ export function useAvatarScene(options: SceneOptions = {}): UseAvatarSceneReturn
     s.add(ground)
   }
 
+  function setQuality(value: AvatarQuality): void {
+    if (quality === value) return
+    quality = value
+    if (shadowLight) {
+      shadowLight.shadow.mapSize.setScalar(AVATAR_QUALITY[value].shadowSize)
+      shadowLight.shadow.map?.dispose()
+      shadowLight.shadow.map = null
+    }
+    if (renderer.value) renderer.value.shadowMap.needsUpdate = true
+    onResize()
+  }
+
+  /** 只在加载或画质变化时计算，预留动作余量，避免逐帧拟合导致阴影抖动。 */
+  function fitShadowToModel(model: THREE.Object3D): void {
+    if (!shadowLight) return
+    model.updateWorldMatrix(true, true)
+    const bounds = new THREE.Box3().setFromObject(model)
+    if (bounds.isEmpty()) return
+    shadowLight.updateMatrixWorld(true)
+    shadowLight.target.updateMatrixWorld(true)
+    shadowLight.shadow.updateMatrices(shadowLight)
+    const camera = shadowLight.shadow.camera
+    const lightBounds = new THREE.Box3()
+    for (const x of [bounds.min.x, bounds.max.x])
+      for (const y of [bounds.min.y, bounds.max.y])
+        for (const z of [bounds.min.z, bounds.max.z])
+          lightBounds.expandByPoint(
+            new THREE.Vector3(x, y, z).applyMatrix4(camera.matrixWorldInverse),
+          )
+    const size = lightBounds.getSize(new THREE.Vector3())
+    const padding = Math.max(5, size.x * 0.2, size.y * 0.2)
+    camera.left = lightBounds.min.x - padding
+    camera.right = lightBounds.max.x + padding
+    camera.bottom = lightBounds.min.y - padding
+    camera.top = lightBounds.max.y + padding
+    camera.near = Math.max(0.1, -lightBounds.max.z - padding)
+    camera.far = Math.max(camera.near + 1, -lightBounds.min.z + padding)
+    camera.updateProjectionMatrix()
+    if (renderer.value) renderer.value.shadowMap.needsUpdate = true
+  }
+
   /** 窗口 resize 响应 */
   function onResize(): void {
     if (!containerRef || !camera.value || !renderer.value) return
 
     const width = containerRef.clientWidth
     const height = containerRef.clientHeight
+    if (!width || !height) return
 
     camera.value.aspect = width / height
     camera.value.updateProjectionMatrix()
+    renderer.value.setPixelRatio(
+      Math.min(window.devicePixelRatio || 1, AVATAR_QUALITY[quality].pixelRatio),
+    )
     renderer.value.setSize(width, height)
-    renderer.value.setPixelRatio(Math.min(window.devicePixelRatio, 2))
   }
 
   /**
@@ -196,42 +247,43 @@ export function useAvatarScene(options: SceneOptions = {}): UseAvatarSceneReturn
    *
    * 使用球面坐标插值实现平滑回正，保持当前缩放半径不变。
    */
-  function updateCameraReset(): void {
+  function updateCameraReset(delta: number): void {
     if (isInteracting.value || !controls.value || !camera.value) return
 
-    const currentOffset = new THREE.Vector3().copy(camera.value.position).sub(controls.value.target)
-    const spherical = new THREE.Spherical().setFromVector3(currentOffset)
-
-    // 默认方向的球面坐标
-    // 相对于目标点的偏移：(0, -1, 70)
-    const defaultOffset = new THREE.Vector3(0, -1, 70)
-    const defaultSpherical = new THREE.Spherical().setFromVector3(defaultOffset)
+    currentOffset.copy(camera.value.position).sub(controls.value.target)
+    spherical.setFromVector3(currentOffset)
+    const blend = 1 - Math.pow(0.95, delta * 60)
 
     // Theta 环绕处理（取最短路径）
     let diff = defaultSpherical.theta - spherical.theta
     if (diff > Math.PI) diff -= 2 * Math.PI
     else if (diff < -Math.PI) diff += 2 * Math.PI
 
-    spherical.theta += diff * 0.05
-    spherical.phi += (defaultSpherical.phi - spherical.phi) * 0.05
+    spherical.theta += diff * blend
+    spherical.phi += (defaultSpherical.phi - spherical.phi) * blend
 
-    const newOffset = new THREE.Vector3().setFromSpherical(spherical)
-    camera.value.position.copy(controls.value.target).add(newOffset)
+    currentOffset.setFromSpherical(spherical)
+    camera.value.position.copy(controls.value.target).add(currentOffset)
 
     // 目标也缓慢回正
-    const defaultTarget = new THREE.Vector3(...lookAt)
-    controls.value.target.lerp(defaultTarget, 0.05)
+    controls.value.target.lerp(defaultTarget, blend)
   }
 
   /** 销毁场景 */
   function disposeScene(): void {
+    controls.value?.dispose()
+    if (scene.value) disposeAvatarResources(scene.value)
     if (renderer.value) {
+      renderer.value.domElement.remove()
       renderer.value.dispose()
+      renderer.value.forceContextLoss()
       renderer.value = null
     }
     scene.value = null
     camera.value = null
     controls.value = null
+    shadowLight = null
+    isInteracting.value = false
     containerRef = null
   }
 
@@ -246,6 +298,8 @@ export function useAvatarScene(options: SceneOptions = {}): UseAvatarSceneReturn
     initScene,
     disposeScene,
     onResize,
+    setQuality,
+    fitShadowToModel,
     updateCameraReset,
   }
 }

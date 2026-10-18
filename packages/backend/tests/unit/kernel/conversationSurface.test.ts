@@ -1,8 +1,65 @@
+import type { SurfaceId } from '@infos/shared'
 import { describe, expect, it } from 'vitest'
 import { ConversationSurfaceSession } from '@infos/backend/projections/conversationSurfaceSession'
 import { ConversationSurfaceProjector } from '@infos/backend/projections/conversationSurfaceProjector'
 
 describe('Conversation Surface Session', () => {
+  it('流式提交保留暂停终态，不再覆盖成输出完成', () => {
+    const message = { messageId: '42', executionPause: { kind: 'desktop', message: '用户已接管' } }
+    const surface = {
+      surfaceId: 'message:42',
+      nodes: [{ kind: 'status', props: { state: 'paused' } }],
+    }
+    const snapshot = { surfaces: [surface] }
+    const session = new ConversationSurfaceSession('thread', 'pero', 'run')
+    const frame = session.commit(snapshot as never, message as never, surface as never, {
+      totalDurationMs: 100,
+    })
+    if (frame.operation.type !== 'surface.commit') throw new Error('缺少持久提交')
+    const statuses = frame.operation.surface.nodes.filter((node) => node.kind === 'status')
+    expect(statuses).toHaveLength(1)
+    expect(statuses[0]?.props).toMatchObject({
+      state: 'paused',
+      message: '桌面操作已暂停：用户已接管',
+    })
+  })
+  it('输入占用补丁写入现有状态节点，后续阶段切换仍携带最新统计', () => {
+    const session = new ConversationSurfaceSession('thread-1', 'pero', 'execution-1')
+    const open = session.open()
+    const budget = {
+      usedTokens: 12_000,
+      maxInputTokens: 30_000,
+      contextWindowTokens: 32_000,
+      modelId: 'test-model',
+      turn: 3,
+      estimated: true,
+      updatedAt: 100,
+    }
+    const patch = session.contextBudget(budget)
+    expect(patch.operation).toMatchObject({
+      type: 'surface.patch-node',
+      nodeId: `${session.surfaceId}:status`,
+      patch: { contextBudget: budget },
+    })
+    const status = session.status('calling', '正在等待工具回传……')
+    expect(status.operation).toMatchObject({
+      type: 'surface.upsert-node',
+      node: {
+        nodeId: `${session.surfaceId}:status`,
+        props: { state: 'calling', contextBudget: budget },
+      },
+    })
+    session.contextBudget({ ...budget, usedTokens: 12_345, estimated: false, updatedAt: 101 })
+    expect(session.status('thinking').operation).toMatchObject({
+      node: {
+        props: {
+          contextBudget: { usedTokens: 12_345, estimated: false, updatedAt: 101 },
+        },
+      },
+    })
+    expect(patch.sequence).toBeGreaterThan(open.sequence)
+  })
+
   it('所有帧应绑定同一 Execution、Generation 且序号单调递增', () => {
     const session = new ConversationSurfaceSession('thread-1', 'pero', 'execution-1')
     const frames = [
@@ -33,7 +90,7 @@ describe('Conversation Surface Session', () => {
       args: { query: 'Nana' },
     })
 
-    const operations = [start, delta, ready].map((frame) => frame.operation)
+    const operations = [start, delta, ready].map((frame) => frame!.operation)
     expect(operations.every((operation) => operation.type === 'surface.upsert-node')).toBe(true)
     const nodes = operations.map((operation) =>
       operation.type === 'surface.upsert-node' ? operation.node : undefined,
@@ -54,42 +111,83 @@ describe('Conversation Surface Session', () => {
     })
   })
 
-  it('大文件编辑参数必须在实时Surface中限长并摘要正文', () => {
+  it.each(['write_file', 'edit_file'])('%s 超过原来的预览边界仍完整传输增量和终态', (name) => {
     const session = new ConversationSurfaceSession('thread-1', 'pero', 'execution-1')
     session.startToolDraft('tool-draft-large')
+    const args =
+      name === 'write_file'
+        ? { file_path: 'src/large.ts', content: 'a'.repeat(300_000) }
+        : { file_path: 'src/large.ts', old_text: '旧文', new_text: 'a'.repeat(300_000) }
+    const serialized = JSON.stringify(args)
+    const split = 260_000
     const first = session.appendToolDraft(
       'tool-draft-large',
-      'write_file',
-      JSON.stringify({ file_path: 'src/large.ts', content: 'a'.repeat(5000) }),
-      5060,
+      name,
+      serialized.slice(0, split),
+      split,
     )
-    const suppressed = session.appendToolDraft(
+    const tail = session.appendToolDraft(
       'tool-draft-large',
       undefined,
-      'b'.repeat(1000),
-      6060,
+      serialized.slice(split),
+      serialized.length,
     )
     const ready = session.finalizeToolDraft({
       draftId: 'tool-draft-large',
       callId: 'call-large',
-      name: 'write_file',
-      args: { file_path: 'src/large.ts', content: 'a'.repeat(50_000) },
+      name,
+      args,
     })
 
-    expect(first?.operation.type).toBe('surface.upsert-node')
-    expect(suppressed).toBeNull()
+    expect(first?.operation.type).toBe('surface.append-tool-arguments')
+    if (first?.operation.type !== 'surface.append-tool-arguments') throw new Error('缺少参数增量帧')
+    expect(first.operation.argumentsDelta).toBe(serialized.slice(0, split))
+    expect(first.operation.previewTruncated).toBe(false)
+    expect(tail?.operation).toMatchObject({
+      type: 'surface.append-tool-arguments',
+      argumentsDelta: serialized.slice(split),
+      previewTruncated: false,
+    })
     if (ready.operation.type !== 'surface.upsert-node') throw new Error('缺少工具节点')
-    const props = ready.operation.node.props as { args: string }
-    expect(props.args.length).toBeLessThanOrEqual(2048)
+    const props = ready.operation.node.props as { args: string; previewTruncated: boolean }
+    expect(props.args).toBe(serialized)
+    expect(props.previewTruncated).toBe(false)
     expect(props.args).toContain('src/large.ts')
-    expect(props.args).toContain('[正文 50000 字符]')
-    expect(props.args).not.toContain('a'.repeat(1000))
+    expect(props.args).toContain('a'.repeat(1000))
+  })
+
+  it('不同 ReAct 轮次的思考使用独立节点，单轮结束即完成该块', () => {
+    const session = new ConversationSurfaceSession('thread-1', 'pero', 'execution-1')
+    const first = session.startNativeReasoning('reasoning-1', 'stream', 1)
+    const firstDelta = session.appendNativeReasoning('reasoning-1', '第一轮')
+    const done = session.completeNativeReasoning('reasoning-1', 100)
+    const second = session.startNativeReasoning('reasoning-2', 'stream', 2)
+    const secondDelta = session.appendNativeReasoning('reasoning-2', '第二轮')
+    expect(done.operation).toMatchObject({
+      type: 'surface.patch-node',
+      patch: { phase: 'committed', durationMs: 100 },
+    })
+    if (
+      first.operation.type !== 'surface.upsert-node' ||
+      second.operation.type !== 'surface.upsert-node'
+    )
+      throw new Error('缺少思考节点')
+    expect(first.operation.node.nodeId).not.toBe(second.operation.node.nodeId)
+    expect(firstDelta.operation).toMatchObject({
+      nodeId: first.operation.node.nodeId,
+      delta: '第一轮',
+    })
+    expect(secondDelta.operation).toMatchObject({
+      nodeId: second.operation.node.nodeId,
+      delta: '第二轮',
+    })
+    expect(second.operation.node.props).toMatchObject({ turn: 2, source: '', phase: 'preview' })
   })
 
   it('最终Commit应稳定携带流式模式与耗时遥测', () => {
     const session = new ConversationSurfaceSession('thread-1', 'pero', 'execution-1')
     const surface = {
-      surfaceId: 'conversation-message:2',
+      surfaceId: 'conversation-message:2' as SurfaceId,
       generation: 'message:2:1',
       messageId: '2',
       threadId: 'thread-1',
@@ -102,8 +200,7 @@ describe('Conversation Surface Session', () => {
     const snapshot = {
       protocolVersion: 1 as const,
       threadId: 'thread-1',
-      agentId: 'pero',
-      channel: 'desktop' as const,
+      principalId: 'pero',
       revision: 1,
       generatedAt: new Date().toISOString(),
       messages: [],
@@ -111,7 +208,19 @@ describe('Conversation Surface Session', () => {
     }
     const frame = session.commit(
       snapshot,
-      { messageId: '2', role: 'assistant', content: '回复', createdAt: new Date().toISOString() },
+      {
+        messageId: '2',
+        threadId: 'thread-1',
+        role: 'assistant',
+        content: '回复',
+        revision: 1,
+        imageTranscription: false,
+        status: 'completed',
+        timestamp: new Date().toISOString(),
+        toolCalls: [],
+        attachments: [],
+        contentBlocks: [],
+      },
       surface,
       { mode: 'stream', firstTokenMs: 120, outputDurationMs: 480, totalDurationMs: 650 },
     )

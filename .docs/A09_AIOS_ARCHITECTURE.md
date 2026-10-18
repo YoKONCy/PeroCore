@@ -2,8 +2,8 @@
 
 > **适用范围**：infOS-TS 全项目（后端 Daemon、前端客户端、Electron 壳、资产与扩展）
 > **状态**：当前架构基线 + 后续演进约束
-> **最后更新**：2026-08-22
-> **来源**：融合 [./archived](./archived/00-overview.md) 目录（原 `.aios/00` 至 `.aios/12`）的设计原则、已完成重构结论与后续设计草案。`.docs/archived/` 保留为历史重构档案，不再作为日常开发的唯一入口。
+> **最后更新**：2026-10-17
+> **来源**：融合历史 AIOS 设计草案（原 `.aios/00` 至 `.aios/12`）的设计原则、已完成重构结论与后续设计草案。
 
 ---
 
@@ -157,7 +157,7 @@ ContextRuntime
 | 层级     | 内容                     | LLM 介入   | 触发方式          |
 | -------- | ------------------------ | ---------- | ----------------- |
 | 短上下文 | 最近窗口内的原生消息     | 否         | Compiler 直接读取 |
-| 长记忆   | 后台提炼的结构化事实     | 提炼阶段有 | RAG / 策略检索    |
+| 长记忆   | Agent 的事件记事（EventNote） | 提炼阶段有 | RAG / 策略检索    |
 | 即时检索 | Agent 主动调用的记忆工具 | 是         | ReAct 决策        |
 
 滚动摘要不是事实真相层。它会造成双重压缩、维护复杂和额外 LLM 调用；超出窗口的历史应由可追溯的长期记忆兜底，而不是把历史反复摘要后注入 Prompt。
@@ -188,22 +188,22 @@ ContextRuntime
 
 ---
 
-## 5. Long-term Memory：候选、门控与来源
+## 5. Long-term Memory：事件记事与来源
 
 长期记忆归属 PrincipalAgent，不归属 Thread；Thread 是记忆的来源，不是记忆容器。
 
 ```text
-Thread 消息 / 日记 / Scheduler
-  → MemoryCandidate
-  → MemoryGate（去重、冲突、合并、重要性）
-  → CanonicalMemory（SQLite 元数据 + TriviumDB 索引）
+Thread 消息 / Scheduler / 主动记事
+  → EventNoteDraft（本回合）
+  → 回合成功持久化后提交 EventNote（系统时间轴）
+  → 后台未覆盖区间补记 + Reflection 建边/归档
   → MemoryRetrieval
   → Context Compiler
 ```
 
-### 5.1 CanonicalMemory 与 Provenance
+### 5.1 EventNote 与 Provenance
 
-每条正式记忆应记录：`agentId`、类型、内容、摘要、重要性、可信度、状态、向量 ID，以及完整 provenance：来源 Thread、消息 ID、channel、平台、创建方式和时间。
+每条事件记事应记录：`agentId`、`narrative`、`eventAt`（系统权威时间）、`createdAt`、`importance`、情感与结构化标签，以及完整 provenance：来源 Thread、Pair/消息 ID、channel、创建方式（主动/后台）。
 
 来源追溯支持：
 
@@ -213,13 +213,13 @@ Thread 消息 / 日记 / Scheduler
 - 删除或归档 Thread 时定位受影响的记忆；
 - 避免不同 Thread、不同场景的消息混批提炼。
 
-### 5.2 Memory Gate 的决策
+### 5.2 提交与覆盖决策
 
-Memory Gate 应依次处理结构化去重、向量候选召回、冲突/时间关系判断，再决定丢弃、合并、supersede、标记待确认或创建新记忆。低重要度信息应留在原始 Thread，而不是被强行提升。
+写入只创建本回合 Draft，回合成功后才提交；后台仅处理未覆盖的连续消息区间，可产出 0~N 条事件。是否值得长期保留由模型判断，代码只负责工程幂等与覆盖边界；零事件区间以 `reviewed_no_event` 记录。
 
 ### 5.3 存储隔离与 TriviumDB 文件组
 
-当前每个 Agent 的向量存储按 `agent_{agentId}` 隔离：`main.tdb`、`social.tdb`、`diary.tdb`。Mmap 存储模式下，一个 TDB 的持久化一致性组包括：
+每个 Agent 的事件记忆按 `agent_{agentId}` 物理隔离（`memory.tdb`，社交侧为 `social.tdb`）；全 Agent 共享 `knowledge/facts.tdb` 与 `knowledge/knowledge.tdb`。每日人格日记写入 Workspace `dailynotes/*.md`，不进入记忆库。Mmap 存储模式下，一个 TDB 的持久化一致性组包括：
 
 - `*.tdb`：元数据、图和 payload；
 - `*.tdb.vec`：向量本体；
@@ -402,9 +402,9 @@ Electron Browser Provider 拥有隔离的 Browser Session、Profile、Cookie、D
 
 生产装配已完成迁移：Backend Container 不再安装 `infos.browser`、不发布 `server.browser.chromium`，也不启动 Chromium Driver 或持有 Browser Profile。Backend 只保留 Browser Tool 定义、Electron能力上下线绑定与结果编排；旧 Chromium Runtime 和 Browser Application 类仅作为未装配的研究代码保留，不构成运行时能力。
 
-### 7.8 Application Integration 与主 Agent 边界
+### 7.9 Application Integration 与主 Agent 边界
 
-第三方 Application 采用三层 Adapter：infOS 通用 Integration Foundation、infOS 侧应用专属 Adapter、目标应用内部 Plugin/Extension/Sidecar。详细协议和 Arca 参考实现见 [A11_APPLICATION_INTEGRATION](./A11_APPLICATION_INTEGRATION.md)。
+第三方 Application 采用三层 Adapter：infOS 通用 Integration Foundation、infOS 侧应用专属 Adapter、目标应用内部 Plugin/Extension/Sidecar。详细协议和 Arca 参考实现见 [A10_APPLICATION_INTEGRATION](./A10_APPLICATION_INTEGRATION.md)。
 
 主 Agent 与 Application 主要通过 Tool Projection、Application Task 和 Application Session 通信。Application 接收长任务并返回 `taskId` 后，任务必须拥有独立 Principal、Kernel Execution、取消域和持久状态；主 Agent 的单次 ReAct、Thread 或 Execution 失败不得级联取消该任务。因果关系使用 `correlationId/causationId`，不能滥用 `parentExecutionId` 建立隐式生死绑定。
 
@@ -412,7 +412,7 @@ Application 使用 Persona、Knowledge、Workspace、Model 或 Asset 时必须�
 
 进程内 Application Realm 仅用于官方受信任兼容实现。第三方 Application 默认运行在独立 Service Process、Node Host 或远程 Node；Backend 内存 Runtime Map 不得成为通用 Application 生命周期的权威载体。
 
-### 7.8 入站路由替代全局活跃 Agent
+### 7.10 入站路由替代全局活跃 Agent
 
 外部消息仍由 `InboundRoute` 决定 Principal/Thread 归属；Node Placement 只决定执行位置，不能替代 Principal 路由：
 
@@ -785,6 +785,12 @@ REST、SSE、WebSocket、Electron IPC、MCP与内存EventBus可以保持不同Ca
 
 Context是由Identity、Memory、Thread、Capability、Skill、Workspace、Flow State、Environment和Current Input等Region组成的临时地址空间。Region必须记录来源对象、可见性、优先级、Token估算、新鲜度、必需性与物化方法。RAG相当于按需缺页处理，Token Budget相当于地址空间配额；Context Manifest必须能解释每段内容的来源、版本、预算与裁剪原因。
 
+### 13.8 主 Agent 的近期工具上下文
+
+主 Agent 的 `desktop` 对话把当前工作区焦点和近期工具结果纳入标准上下文生命周期。工作区焦点仅属于本轮请求，必须校验 Agent、真实 Thread、文件版本和终端 ExecutionSession；未保存选区只有用户显式附加才进入模型。近期读取结果按 Thread、Agent、Pair 在进程内保留原始返回文本；来源、范围、版本、读取参数随原有助手消息元数据保存。Context Compiler 直接从当前活跃消息窗口收集对应工具 Region，由统一预算按新近顺序决定正文或来源降级，并写入 Context Manifest。文件变化、不可核验、退出窗口、回滚和内存回收都会释放正文；进程重启后仍可根据对话中的来源重读。
+
+私有心流只保留目标与事实；旧 `workContext` 正文列和逐轮表由 `0001_remove_work_context` 迁移删除，旧工具摘录表由 `0003_remove_tool_observations` 删除。ReAct 每次模型请求前计算输入预算；达到容量边界时按来源降级较早的可重读结果，最近一次读取保留原文，不另调模型生成工作续接摘要。工具正文不写入审计转写和初始提示词持久化快照，也不进入长期记忆；后台任务与 Realm 维持各自执行上下文，不继承日常工具缓存。
+
 ---
 
 ## 14. 架构决策门槛与演进检查表
@@ -819,5 +825,4 @@ Context是由Identity、Memory、Thread、Capability、Skill、Workspace、Flow 
 - [模式与角色管理](./M01_MODE_SYSTEM.md)
 - [能力门控](./M02_CAPABILITY_GATE.md)
 - [API 响应与流式规范](./S02_API_SPEC.md)
-- [多节点交付与同步闭环行动计划](./TEMP-todo/TEMP_MULTI_NODE_DELIVERY_PLAN.md)
 - [Steam 与资产联邦](./M04_STEAM_INTEGRATION.md)

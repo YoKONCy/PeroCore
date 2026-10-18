@@ -12,6 +12,8 @@ export type {
   SurfaceId,
   SurfaceNodeId,
   SurfaceNodeKind,
+  ModelRetryInfo,
+  ModelRetrySurfaceProps,
   SurfaceNodeLifecycle,
   SurfaceNode,
   MarkdownSurfaceProps,
@@ -20,6 +22,7 @@ export type {
   ToolCallSurfaceProps,
   ToolResultSurfaceProps,
   StatusSurfaceProps,
+  ConversationExecutionPause,
   ErrorSurfaceProps,
   AttachmentSurfaceProps,
   ProgressSurfaceProps,
@@ -88,6 +91,7 @@ export type {
   PaginationParams,
   SseEventType,
   ThreadChannel,
+  InteractionMode,
 } from './api.types'
 export type { SseDoneEvent, SseErrorEvent, SseEvent } from './api.types'
 

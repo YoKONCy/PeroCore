@@ -43,6 +43,8 @@ const createModelSchema = z.object({
   maxTokens: z.number().int().min(1).nullable().optional(),
   /** 模型完整上下文窗口 */
   contextWindowTokens: z.number().int().min(1).nullable().optional(),
+  /** 桌面 ReAct 最大轮次；null 使用通道默认值。 */
+  maxReActTurns: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).nullable().optional(),
   /** 模型推理强度；null 表示不传 */
   reasoningEffort: z.enum(['off', 'low', 'medium', 'high', 'xhigh', 'max']).nullable().optional(),
   /** 是否请求并展示Provider原生思考摘要。 */

@@ -15,7 +15,7 @@ export interface DocumentOutboxEvent {
 
 export type PendingDocumentOutboxEvent = Omit<DocumentOutboxEvent, 'status' | 'publishedAt'>
 
-export const DOCUMENT_AUTHORITY_SCHEMA_VERSION = 1
+export const DOCUMENT_AUTHORITY_SCHEMA_VERSION = 2
 
 export const DOCUMENT_AUTHORITY_SCHEMA = `
   CREATE TABLE IF NOT EXISTS document_store_metadata (

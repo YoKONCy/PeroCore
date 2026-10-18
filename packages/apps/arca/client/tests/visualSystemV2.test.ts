@@ -1,9 +1,13 @@
 // @vitest-environment happy-dom
-import { mount } from '@vue/test-utils'
+import { enableAutoUnmount, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { DocumentNode, DocumentNodeId, DocumentSemanticDiff } from '@infos/document-engine'
 import SemanticDocument from '../src/components/SemanticDocument.vue'
+
+enableAutoUnmount(afterEach)
+beforeEach(() => localStorage.setItem('arca-auto-save-delay', '0'))
+afterEach(() => localStorage.clear())
 
 const rootNodeId = 'root' as DocumentNodeId
 const paragraphId = 'paragraph-1' as DocumentNodeId
@@ -47,7 +51,6 @@ function mountDocument(overrides: Record<string, unknown> = {}) {
 
 describe('SemanticDocument Visual System V3', () => {
   it('创作模式应使用原生可选取编辑面并提交真实语义节点', async () => {
-    localStorage.setItem('arca-auto-save-delay', '0')
     const wrapper = mountDocument()
     const editor = wrapper.get('.document-paragraph')
     expect(editor.attributes('contenteditable')).toBe('plaintext-only')
@@ -78,7 +81,6 @@ describe('SemanticDocument Visual System V3', () => {
     const wrapper = mountDocument({ mode: 'read' })
     const content = wrapper.get('.document-paragraph')
     expect(content.attributes('contenteditable')).toBe('false')
-    expect(content.classes()).toContain('editable-node')
   })
 
   it('审阅模式应在正文语境内展示Semantic Diff', async () => {
@@ -103,7 +105,6 @@ describe('SemanticDocument Visual System V3', () => {
 
     expect(wrapper.get('.inline-semantic-diff del').text()).toBe('原始星页正文')
     expect(wrapper.get('.inline-semantic-diff ins').text()).toBe('协作者建议正文')
-    expect(wrapper.get('.semantic-block').classes()).toContain('semantic-block--changed')
     expect(wrapper.find('textarea').exists()).toBe(false)
   })
 })

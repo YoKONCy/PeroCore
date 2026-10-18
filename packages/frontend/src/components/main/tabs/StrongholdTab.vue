@@ -485,6 +485,7 @@ async function submitButler(): Promise<void> {
               :reply-status="replyStatus"
               :participant-count="currentRoomAgents.length"
               :room-name="currentRoom.name"
+              :room-id="currentRoom.id"
               @send="sendMessage"
               @delete="deleteMessage"
             />
@@ -907,15 +908,6 @@ async function submitButler(): Promise<void> {
   flex: 1;
   overflow-y: auto;
   padding: 12px 10px;
-}
-
-.sh-rooms::-webkit-scrollbar {
-  width: 4px;
-}
-
-.sh-rooms::-webkit-scrollbar-thumb {
-  background: var(--ui-scrollbar-thumb, rgba(15, 23, 42, 0.15));
-  border-radius: 2px;
 }
 
 .sh-rooms-header {
@@ -1395,15 +1387,6 @@ async function submitButler(): Promise<void> {
   flex: 1;
   overflow-y: auto;
   padding: 12px 10px;
-}
-
-.sh-right-body::-webkit-scrollbar {
-  width: 4px;
-}
-
-.sh-right-body::-webkit-scrollbar-thumb {
-  background: var(--ui-scrollbar-thumb, rgba(15, 23, 42, 0.15));
-  border-radius: 2px;
 }
 
 .sh-section {

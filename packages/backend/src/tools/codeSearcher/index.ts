@@ -12,7 +12,7 @@ import { readdir, stat } from 'node:fs/promises'
 import path from 'node:path'
 import readline from 'node:readline'
 import type { BuiltinTool } from '../index'
-import { getWorkspaceService } from '../workspaceServiceHolder'
+import { getProductivityRuntime, resolveExecutionSession } from '../productivityRuntimeHolder'
 import { toolSuccess } from '../../services/execution/toolResult'
 
 const MAX_RESULTS = 50
@@ -36,11 +36,11 @@ export const codeSearcherTool: BuiltinTool = {
     if (!query) throw new Error('query 不能为空')
     const isRegex = Boolean(args.is_regex)
     const fileType = args.file_type ? String(args.file_type) : undefined
-    const workspaceService = getWorkspaceService()
-    if (!workspaceService) throw new Error('WorkspaceService 尚未初始化')
-    const searchPath = workspaceService.resolveDeviceReadPath(
-      ctx.agentId,
-      args.path ? String(args.path) : undefined,
+    const session = await resolveExecutionSession(ctx)
+    const searchPath = await getProductivityRuntime().virtualWorkspace.resolveReadablePath(
+      session,
+      args.path ? String(args.path) : '.',
+      ctx.deviceReadScope,
     )
 
     const rg = await searchWithRipgrep({ query, isRegex, fileType, searchPath, signal: ctx.signal })
@@ -62,10 +62,13 @@ export const codeSearcherTool: BuiltinTool = {
           engine: 'node-fallback',
         }
     result.total = result.matches.length
-    return toolSuccess(JSON.stringify(result), {
+    const fileCount = new Set(result.matches.map((match) => match.file)).size
+    return toolSuccess(JSON.stringify({ ...result, fileCount }), {
       engine: result.engine,
+      fileCount,
       total: result.total,
       truncated: result.truncated,
+      searchRoot: searchPath,
     })
   },
 }

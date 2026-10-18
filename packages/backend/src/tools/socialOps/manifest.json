@@ -3,31 +3,12 @@
   "name": "社交平台操作",
   "version": "1.0.0",
   "author": "infOS Team",
-  "description": "跨平台社交操作工具。通过 SocialMessagingProvider 适配不同平台 (QQ/Discord/Telegram)。仅在社交模式下可用。",
+  "description": "通过社交子应用向主人发送通知；社交业务操作由社交助手在应用内部执行。",
   "type": "tool",
   "entry": "index.ts",
   "category": "core",
   "platforms": ["windows", "darwin", "linux"],
   "userCopy": {
-    "social_send_message": { "label": "发送消息", "description": "向指定联系人或群组发送消息。" },
-    "social_get_contacts": { "label": "查看联系人", "description": "查看已连接社交平台的联系人。" },
-    "social_get_groups": { "label": "查看群组", "description": "查看已连接社交平台的群组。" },
-    "social_get_contact_info": {
-      "label": "查看联系人信息",
-      "description": "查看指定联系人的昵称和备注等信息。"
-    },
-    "social_get_group_info": {
-      "label": "查看群组信息",
-      "description": "查看指定群组的名称和成员数量。"
-    },
-    "social_get_group_members": {
-      "label": "查看群组成员",
-      "description": "查看指定群组中的成员。"
-    },
-    "social_handle_request": {
-      "label": "处理好友请求",
-      "description": "接受或拒绝收到的好友请求。"
-    },
     "social_notify_owner": {
       "label": "通知主人",
       "description": "通过已连接的社交渠道向主人发送通知。"
@@ -35,119 +16,14 @@
   },
   "tools": [
     {
-      "name": "social_send_message",
-      "description": "发送消息到社交平台的指定会话。支持私聊和群聊。需要社交适配器已连接。",
-      "display": { "label": "发送消息", "icon": "chat", "color": "green", "style": "social" },
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "target": {
-            "type": "string",
-            "description": "目标会话 ID (用户 ID 或群组 ID)"
-          },
-          "content": {
-            "type": "string",
-            "description": "消息文本内容"
-          },
-          "type": {
-            "type": "string",
-            "description": "消息类型",
-            "enum": ["private", "group"]
-          }
-        },
-        "required": ["target", "content", "type"]
-      }
-    },
-    {
-      "name": "social_get_contacts",
-      "description": "获取当前社交平台的联系人/好友列表。",
-      "display": { "label": "联系人列表", "icon": "users", "color": "green", "style": "social" },
-      "parameters": {
-        "type": "object",
-        "properties": {}
-      }
-    },
-    {
-      "name": "social_get_groups",
-      "description": "获取当前社交平台的群组列表。",
-      "display": { "label": "群组列表", "icon": "users", "color": "green", "style": "social" },
-      "parameters": {
-        "type": "object",
-        "properties": {}
-      }
-    },
-    {
-      "name": "social_get_contact_info",
-      "description": "查询社交平台上指定用户的详细信息 (昵称、备注等)。",
-      "display": { "label": "联系人信息", "icon": "user", "color": "green", "style": "social" },
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "user_id": {
-            "type": "string",
-            "description": "目标用户 ID"
-          }
-        },
-        "required": ["user_id"]
-      }
-    },
-    {
-      "name": "social_get_group_info",
-      "description": "查询指定群组的详细信息 (群名、成员数等)。",
-      "display": { "label": "群组信息", "icon": "info", "color": "green", "style": "social" },
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "group_id": {
-            "type": "string",
-            "description": "目标群组 ID"
-          }
-        },
-        "required": ["group_id"]
-      }
-    },
-    {
-      "name": "social_get_group_members",
-      "description": "查询指定群组的成员列表。",
-      "display": { "label": "群组成员", "icon": "users", "color": "green", "style": "social" },
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "group_id": {
-            "type": "string",
-            "description": "目标群组 ID"
-          }
-        },
-        "required": ["group_id"]
-      }
-    },
-    {
-      "name": "social_handle_request",
-      "description": "处理收到的好友请求 — 接受或拒绝。",
-      "display": { "label": "处理好友请求", "icon": "check", "color": "green", "style": "social" },
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "flag": {
-            "type": "string",
-            "description": "好友请求的标识 flag"
-          },
-          "approve": {
-            "type": "boolean",
-            "description": "是否接受 (true=接受, false=拒绝)"
-          },
-          "remark": {
-            "type": "string",
-            "description": "接受后的备注名 (可选)"
-          }
-        },
-        "required": ["flag", "approve"]
-      }
-    },
-    {
       "name": "social_notify_owner",
       "description": "向主人报告重要的社交事件或信息。消息会通过社交平台或系统通知渠道发送给主人。",
-      "display": { "label": "通知主人", "icon": "chat", "color": "pink", "style": "social" },
+      "display": {
+        "label": "通知主人",
+        "icon": "chat",
+        "color": "pink",
+        "style": "social"
+      },
       "parameters": {
         "type": "object",
         "properties": {

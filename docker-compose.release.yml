@@ -1,6 +1,6 @@
 services:
   backend:
-    image: ghcr.io/yokoncy/infos-backend:__INFOS_VERSION__
+    image: ghcr.io/__INFOS_OWNER__/infos-backend:__INFOS_VERSION__
     restart: unless-stopped
     init: true
     stop_grace_period: 30s
@@ -36,7 +36,7 @@ services:
       - infos
 
   frontend:
-    image: ghcr.io/yokoncy/infos-frontend:__INFOS_VERSION__
+    image: ghcr.io/__INFOS_OWNER__/infos-frontend:__INFOS_VERSION__
     restart: unless-stopped
     init: true
     stop_grace_period: 10s

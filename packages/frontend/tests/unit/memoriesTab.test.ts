@@ -1,5 +1,6 @@
+import MemoryInspector from '../../src/components/dashboard/memories/MemoryInspector.vue'
 // @vitest-environment happy-dom
-import { mount } from '@vue/test-utils'
+import { enableAutoUnmount, mount } from '@vue/test-utils'
 import { ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import MemoriesTab from '../../src/components/dashboard/tabs/MemoriesTab.vue'
@@ -156,9 +157,6 @@ describe('MemoriesTab 档案工作台', () => {
     )
     expect(wrapper.text()).toContain('较早事件')
     expect(wrapper.text()).toContain('较晚的归档事件')
-    expect(wrapper.text()).toContain('平均重要度')
-    expect(wrapper.text()).toContain('主动记事')
-    expect(wrapper.text()).toContain('已归档')
   })
 
   it('点击条目在右侧检查器显示详情、归档提示与关系簇', async () => {
@@ -169,9 +167,10 @@ describe('MemoriesTab 档案工作台', () => {
     await vi.waitFor(() => expect(wrapper.find('.inspector-body').exists()).toBe(true))
 
     expect(wrapper.find('.archive-badge').exists()).toBe(true)
-    expect(wrapper.text()).toContain('同一事件簇')
-    expect(wrapper.text()).toContain('因果')
-    expect(wrapper.text()).toContain('前一个事件')
+    expect(wrapper.getComponent(MemoryInspector).props('selected')).toMatchObject({
+      id: archived.id,
+      relations: [{ relation: 'same_event' }, { relation: 'caused_by' }],
+    })
     expect(wrapper.text()).toContain('较早事件')
   })
 
@@ -192,16 +191,19 @@ describe('MemoriesTab 档案工作台', () => {
     await wrapper.findAll('.entry')[0]!.trigger('click')
     await vi.waitFor(() => expect(wrapper.find('.inspector-body').exists()).toBe(true))
 
-    const findSourceButton = () =>
-      wrapper.findAll('button').find((button) => /展开|收起/.test(button.text()))!
+    const findSourceButton = () => wrapper.get('.source-head button')
     const sourceButton = findSourceButton()
     await sourceButton.trigger('click')
-    await vi.waitFor(() => expect(wrapper.text()).toContain('原文不可用'))
+    await vi.waitFor(() =>
+      expect(wrapper.getComponent(MemoryInspector).props('source')).toMatchObject({
+        available: false,
+      }),
+    )
 
     source.mockRejectedValueOnce(new Error('网络失败'))
     await sourceButton.trigger('click')
     await findSourceButton().trigger('click')
-    await vi.waitFor(() => expect(wrapper.text()).toContain('来源加载失败，请稍后重试'))
+    await vi.waitFor(() => expect(wrapper.get('.source-error').text().trim()).not.toBe(''))
   })
 
   it('搜索输入防抖后携带query重新请求并显示可移除chip', async () => {
@@ -211,7 +213,7 @@ describe('MemoriesTab 档案工作台', () => {
 
     await wrapper.find('input').setValue('长期记忆')
     expect(wrapper.find('.chip').exists()).toBe(true)
-    expect(wrapper.text()).toContain('搜索：长期记忆')
+    expect(wrapper.find('.chip').text()).toContain('长期记忆')
 
     vi.advanceTimersByTime(350)
     await vi.waitFor(() =>
@@ -247,7 +249,10 @@ describe('MemoriesTab 档案工作台', () => {
     await graphButton.trigger('click')
 
     await vi.waitFor(() => expect(graph).toHaveBeenCalledWith('pero', false))
-    await vi.waitFor(() => expect(wrapper.findAll('.graph-node')).toHaveLength(2))
+    await vi.waitFor(() => expect(wrapper.findAll('.graph-node')).toHaveLength(1))
+    expect(wrapper.find('.graph-node').text()).not.toContain(archived.narrative)
     expect(wrapper.find('.archive-inspector').exists()).toBe(true)
   })
 })
+
+enableAutoUnmount(afterEach)

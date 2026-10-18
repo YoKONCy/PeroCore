@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs'
-import type { EventNote } from '@infos/shared'
+import type { EventNote, MemoryBackgroundPolicy } from '@infos/shared'
+import { MemoryBackgroundControl } from './memoryBackgroundControl'
 import type { PathResolver } from '../../core/pathResolver'
 import type { EventMemoryService } from './eventMemoryService'
 import type { EventNoteRepository } from '../../repositories/eventNote.repo'
@@ -8,10 +9,39 @@ import type { AgentManager } from '../agent/agentManager'
 import type { LocalWorkspaceService } from '../workspace/workspaceService'
 import type { LlmService, ModelConfig } from '../llm/llmService'
 import { tokenCounter } from '../tokenizer/tokenCounter'
+import { formatEventTime } from './eventMemoryTime'
 
 const RETRY_MINUTES = [10, 30, 60] as const
 
 export class DailyNotesService {
+  private background: MemoryBackgroundPolicy = new MemoryBackgroundControl()
+  setBackgroundPolicy(policy: MemoryBackgroundPolicy): void {
+    this.background = policy
+  }
+  async pauseBackground(): Promise<void> {
+    this.generation++
+    for (const controller of this.controllers) controller.abort(new Error('长记忆后台任务已关闭'))
+    this.controllers.clear()
+    await Promise.allSettled([...this.writes])
+  }
+  private generation = 0
+  private controllers = new Set<AbortController>()
+  private writes = new Set<Promise<void>>()
+  async invalidateForDeletion(): Promise<void> {
+    this.generation++
+    for (const controller of this.controllers)
+      controller.abort(new Error('日记来源已发生删除，已停止旧任务'))
+    this.controllers.clear()
+    await Promise.allSettled([...this.writes])
+  }
+  async removeGeneratedFile(agentId: string, name: string): Promise<void> {
+    if (!/^\d{4}-\d{2}-\d{2}(?:-part-\d+)?\.md$/.test(name)) throw new Error('日记文件名不合法')
+    try {
+      await this.workspace.deleteFile(agentId, `dailynotes/${name}`, 'desktop')
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.startsWith('文件不存在:')) throw error
+    }
+  }
   constructor(
     private eventMemory: EventMemoryService,
     private agentManager: AgentManager,
@@ -32,6 +62,9 @@ export class DailyNotesService {
   }
 
   async generate(agentId: string, date: string, sourceIncomplete = false): Promise<string[]> {
+    if (!this.background.enabled) return []
+    const backgroundSignal = this.background.signal
+    const generation = this.generation
     await this.repo.ensureDailyNoteTask({
       id: `daily-note:${agentId}:${date}`,
       agentId,
@@ -44,7 +77,11 @@ export class DailyNotesService {
     const now = this.now()
     if (task.nextAttemptAt && task.nextAttemptAt > now.toISOString()) return []
 
+    const controller = new AbortController()
+    const signal = AbortSignal.any([controller.signal, backgroundSignal])
+    this.controllers.add(controller)
     try {
+      signal.throwIfAborted()
       const notes = (
         await this.eventMemory.query({
           agentId,
@@ -62,20 +99,37 @@ export class DailyNotesService {
       const chunks = this.chunk(notes, reviewedInteractions, applicationSummaries, 20_000)
       const written: string[] = []
       for (const [index, chunk] of chunks.entries()) {
+        signal.throwIfAborted()
         const content = await this.render(
           agentId,
           date,
           chunk.notes,
           chunk.reviewedInteractions,
           chunk.applicationSummaries,
+          signal,
         )
+        signal.throwIfAborted()
+        if (generation !== this.generation) throw new Error('日记来源已删除，已阻止迟到写入')
         const fileName = chunks.length === 1 ? `${date}.md` : `${date}-part-${index + 1}.md`
-        await this.workspace.write(agentId, `dailynotes/${fileName}`, content, 'desktop')
+        // 写入前登记本服务拥有的输出文件，崩溃或删除并发时仍能找到副本。
+        await this.repo.recordDailyNoteFile(task.id, fileName)
+        signal.throwIfAborted()
+        const writing = this.workspace
+          .write(agentId, `dailynotes/${fileName}`, content, 'desktop')
+          .then(() => {})
+        this.writes.add(writing)
+        try {
+          await writing
+        } finally {
+          this.writes.delete(writing)
+        }
+        if (generation !== this.generation) return []
         written.push(fileName)
       }
       await this.repo.completeDailyNoteTask(task.id, written)
       return written
     } catch (error) {
+      if (generation !== this.generation || backgroundSignal.aborted) return []
       const retryMinutes = RETRY_MINUTES[task.attempts]
       const nextAttemptAt =
         retryMinutes === undefined
@@ -83,6 +137,8 @@ export class DailyNotesService {
           : new Date(now.getTime() + retryMinutes * 60_000).toISOString()
       await this.repo.failDailyNoteTask(task.id, String(error), nextAttemptAt)
       throw error
+    } finally {
+      this.controllers.delete(controller)
     }
   }
 
@@ -92,6 +148,7 @@ export class DailyNotesService {
     notes: EventNote[],
     reviewedInteractions: string[],
     applicationSummaries: string[],
+    signal?: AbortSignal,
   ): Promise<string> {
     const config = await this.getModelConfig(agentId)
     if (!config) throw new Error('日记生成模型未配置')
@@ -99,6 +156,11 @@ export class DailyNotesService {
     const promptPath =
       profile?.promptPath ?? this.pathResolver.resolve(`@data/agents/${agentId}/system_prompt.md`)
     const persona = existsSync(promptPath) ? readFileSync(promptPath, 'utf-8') : ''
+    const promptNotes = notes.map((note) => ({
+      ...note,
+      eventAt: formatEventTime(note.eventAt),
+      createdAt: formatEventTime(note.createdAt),
+    }))
     const diary = await this.llm.chatText(
       config,
       [
@@ -108,10 +170,22 @@ export class DailyNotesService {
         },
         {
           role: 'user',
-          content: `日期：${date}\n事件记忆：\n${JSON.stringify(notes)}\n已审阅但未形成事件的互动：\n${JSON.stringify(reviewedInteractions)}\nApplication当日摘要：\n${JSON.stringify(applicationSummaries)}`,
+          content: `日期：${date}\n事件记忆：\n${JSON.stringify(promptNotes)}\n已审阅但未形成事件的互动：\n${JSON.stringify(reviewedInteractions)}\nApplication当日摘要：\n${JSON.stringify(applicationSummaries)}`,
         },
       ],
-      { temperature: 0.6, maxTokens: 3000 },
+      {
+        signal,
+        promptTask: 'memory.diary',
+        promptVariables: {
+          agent_id: agentId,
+          persona_definition: persona,
+          owner_appellation: profile?.ownerAppellation ?? '主人',
+        },
+        promptSources: ['persona_definition'],
+        temperature: 0.6,
+        maxTokens: 3000,
+        usageContext: { agentId, purpose: 'memory' },
+      },
     )
     return `# ${date}\n\n${diary.trim()}\n`
   }

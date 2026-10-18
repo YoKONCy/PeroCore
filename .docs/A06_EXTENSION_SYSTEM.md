@@ -2,7 +2,7 @@
 
 > **适用范围**：`packages/backend/src/packages/`、`packages/shared/src/types/package.types.ts`
 > **状态**：生产安全边界规范；当前仅开放 official贡献
-> **最后更新**：2026-08-22
+> **最后更新**：2026-10-17
 
 ---
 
@@ -251,7 +251,7 @@ Application不得读取Kernel数据库或依赖主Agent Thread；它通过Node/A
 2. 贡献者实现的 infOS 侧 Backend/Frontend Adapter，负责领域映射和 UI 集成；
 3. 贡献者在目标应用内实现的 Plugin、Extension、MCP Server 或 Sidecar，负责调用应用内部 API。
 
-第二、三层变化不得要求 Kernel 增加应用专用 Service。Adapter 内部使用 Application Protocol 和 Bound Port；只把允许 Agent 使用的 Operation 投影为 Tool。完整规范见 [A11_APPLICATION_INTEGRATION](./A11_APPLICATION_INTEGRATION.md)。
+第二、三层变化不得要求 Kernel 增加应用专用 Service。Adapter 内部使用 Application Protocol 和 Bound Port；只把允许 Agent 使用的 Operation 投影为 Tool。完整规范见 [A10_APPLICATION_INTEGRATION](./A10_APPLICATION_INTEGRATION.md)。
 
 ### 8.4 任务移交与生命周期
 

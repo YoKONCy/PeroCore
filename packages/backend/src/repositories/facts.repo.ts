@@ -5,6 +5,7 @@ import type { FactObjectCandidate, FactQueryPath, FactQueryResult, FactRecord } 
 import type { DrizzleDb } from '../database'
 import { factMemoryOperations, factObjects, factRecords } from '../database/schema'
 import type { MemoryStoreRegistry } from './storeRegistry'
+import type { PrivacyPolicy } from '../services/maintenance/privacyPolicy'
 
 interface FactObjectPayload {
   kind: 'fact_object'
@@ -53,6 +54,12 @@ type FactOperationPayload =
 type FactOperationKind = 'write' | 'supersede' | 'delete' | 'retract' | 'alias'
 
 export class FactsRepository {
+  private privacy?: PrivacyPolicy
+  private purge?: (id: string) => Promise<void>
+  setPrivacyPolicy(policy: PrivacyPolicy, purge: (id: string) => Promise<void>): void {
+    this.privacy = policy
+    this.purge = purge
+  }
   private nextTdbId?: number
 
   constructor(
@@ -71,7 +78,7 @@ export class FactsRepository {
       }))
       .filter(
         (node): node is { tdbId: number; payload: FactObjectPayload } =>
-          node.payload?.kind === 'fact_object',
+          node.payload?.kind === 'fact_object' && !this.privacy?.deleted('fact', node.payload.id),
       )
 
     const exactRows = objects.filter(
@@ -136,9 +143,12 @@ export class FactsRepository {
   async archive(query = ''): Promise<import('@infos/shared').FactArchiveResult> {
     const needle = query.normalize('NFKC').trim().toLocaleLowerCase()
     const objects = await this.db.select().from(factObjects)
-    const facts = await this.db.select().from(factRecords)
+    const facts = (await this.db.select().from(factRecords)).filter(
+      (fact) => !this.privacy?.deleted('fact', fact.id),
+    )
     const factsByObject = new Map<string, FactRow[]>()
     for (const fact of facts) {
+      if (this.privacy?.deleted('fact', fact.id)) continue
       const values = factsByObject.get(fact.objectId) ?? []
       values.push(fact)
       factsByObject.set(fact.objectId, values)
@@ -173,6 +183,13 @@ export class FactsRepository {
         }
       })
       .filter((object) => {
+        if (
+          this.privacy?.deleted('fact', object.objectId) ||
+          (!object.activeFacts.length &&
+            !object.historicalFacts.length &&
+            !object.retractedFacts.length)
+        )
+          return false
         if (!needle) return true
         return [
           object.standardName,
@@ -192,7 +209,7 @@ export class FactsRepository {
       items,
       total: items.length,
       stats: {
-        objectCount: objects.length,
+        objectCount: items.length,
         activeFactCount: facts.filter((fact) => fact.status === 'active').length,
         historicalFactCount: facts.filter((fact) => fact.status === 'superseded').length,
         retractedFactCount: facts.filter((fact) => fact.status === 'retracted').length,
@@ -211,6 +228,7 @@ export class FactsRepository {
     createdByAgentId: string
     operationId?: string
   }): Promise<FactRecord> {
+    const generation = this.privacy?.generation
     const operationId = input.operationId ?? randomUUID()
     const existing = await this.findOperation(operationId)
     if (existing) {
@@ -253,6 +271,8 @@ export class FactsRepository {
     if (!record.statement) throw new Error('事实内容不能为空')
     const factTdbId = await this.allocateTdbId()
     const payload: FactWriteOperationPayload = { object, record, factTdbId }
+    if (generation !== this.privacy?.generation) throw new Error('事实数据已变化，已阻止旧任务写入')
+    this.privacy?.assertPayload('fact', payload)
 
     this.db.transaction((tx) => {
       tx.insert(factMemoryOperations)
@@ -278,6 +298,7 @@ export class FactsRepository {
     oldFactId: string,
     input: Omit<Parameters<FactsRepository['write']>[0], 'objectId' | 'standardName' | 'aliases'>,
   ): Promise<FactRecord> {
+    const generation = this.privacy?.generation
     const operationId = input.operationId ?? randomUUID()
     const existing = await this.findOperation(operationId)
     if (existing) {
@@ -314,6 +335,8 @@ export class FactsRepository {
       replacement,
       replacementTdbId,
     }
+    this.privacy?.assertPayload('fact', payload)
+    if (generation !== this.privacy?.generation) throw new Error('事实数据已变化，已阻止旧任务写入')
 
     this.db.transaction((tx) => {
       tx.insert(factMemoryOperations)
@@ -355,6 +378,7 @@ export class FactsRepository {
       record,
       factTdbId: row.tdbId,
     }
+    this.privacy?.assertPayload('fact', payload)
     this.db.transaction((tx) => {
       tx.insert(factMemoryOperations)
         .values({
@@ -371,6 +395,7 @@ export class FactsRepository {
   }
 
   async deleteFact(id: string, operationId: string = randomUUID()): Promise<void> {
+    if (this.purge) return this.purge(id)
     const existing = await this.findOperation(operationId)
     if (existing) {
       if (existing.operation !== 'delete') throw new Error('operationId 已用于其他事实操作')
@@ -435,10 +460,10 @@ export class FactsRepository {
   }
 
   async rebuildStore(): Promise<void> {
+    const objects = this.db.select().from(factObjects).all()
+    const facts = this.db.select().from(factRecords).all()
     this.stores.resetSharedStore('facts')
     const store = this.stores.getSharedStore('facts')
-    const objects = await this.db.select().from(factObjects)
-    const facts = await this.db.select().from(factRecords)
     const operations: TransactionOperation[] = []
     for (const object of objects)
       operations.push({
@@ -494,6 +519,7 @@ export class FactsRepository {
     }
     for (const row of facts) store.indexText(row.tdbId, row.statement)
     store.buildTextIndex()
+    store.flush()
   }
 
   private async changeAlias(
@@ -519,6 +545,7 @@ export class FactsRepository {
         )
     const updated = { ...object, aliasesJson: JSON.stringify(aliases) }
     const payload: FactAliasOperationPayload = { object: updated }
+    this.privacy?.assertPayload('fact', payload)
     this.db.transaction((tx) => {
       tx.insert(factMemoryOperations)
         .values({
@@ -542,6 +569,7 @@ export class FactsRepository {
     operation: FactOperationKind,
     payload: FactOperationPayload,
   ): Promise<void> {
+    this.privacy?.assertPayload('fact', payload)
     try {
       const store = this.stores.getSharedStore('facts')
       if (operation === 'write') this.applyWrite(store, payload as FactWriteOperationPayload)
@@ -702,7 +730,12 @@ export class FactsRepository {
       .getEdges(objectTdbId)
       .filter((edge) => edge.label === 'has_fact')
       .map((edge) => store.get<FactPayload>(edge.targetId)?.payload)
-      .filter((fact): fact is FactPayload => fact?.kind === 'fact' && fact.status === 'active')
+      .filter(
+        (fact): fact is FactPayload =>
+          fact?.kind === 'fact' &&
+          fact.status === 'active' &&
+          !this.privacy?.deleted('fact', fact.id),
+      )
       .map(({ kind: _kind, ...fact }) => fact)
       .sort((a, b) => a.observedAt.localeCompare(b.observedAt) || a.id.localeCompare(b.id))
     return {
@@ -725,7 +758,12 @@ export class FactsRepository {
       .filter((item) => item.label === 'has_fact')
       .sort((a, b) => a.targetId - b.targetId)) {
       const fact = store.get<FactPayload>(edge.targetId)?.payload
-      if (fact?.kind !== 'fact' || fact.status === 'retracted') continue
+      if (
+        fact?.kind !== 'fact' ||
+        fact.status === 'retracted' ||
+        this.privacy?.deleted('fact', fact.id)
+      )
+        continue
       const nodes: FactQueryPath['nodes'] = [
         { id: object.id, kind: 'fact_object', name: object.standardName },
         { id: fact.id, kind: 'fact', name: fact.statement },

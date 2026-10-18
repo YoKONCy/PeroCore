@@ -1,7 +1,7 @@
 # 能力门控（Capability Gate）
 
 > **架构基线**：[A09_AIOS_ARCHITECTURE](./A09_AIOS_ARCHITECTURE.md#6-workspace-与-tool-capability)
-> **最后更新**：2026-08-19
+> **最后更新**：2026-10-17
 
 ---
 
@@ -30,6 +30,9 @@ Agent Channel Root Policy
 6. 文件和Terminal能力必须绑定Resource Scope与Workspace Mount，路径执行containment检查。
 7. 删除、命令执行、网络、副作用写入等高风险动作必须进入统一Policy/Approval/Receipt链路。
 8. Skill只声明Capability Requirement；加载Skill不能签发能力或越过父Execution授权。
+9. `expand_advanced_tools`、`update_plan`、`manage_task` 是可逐项关闭的普通工具，仅工作模式开放；聊天模式不提供定义，执行器也拒绝直接或脚本内调用。聊天中的任务管理不再保留查询、暂停、取消例外。
+10. 高级工具展开入口控制浏览器、桌面操作和远程终端工具包。关闭或无权使用入口时，包内工具不可调用；ReAct 与 NIT 共享本次执行的实际工具集合及展开状态。必须在脚本外直接展开，下一轮取得定义后再使用，跨消息重新按需展开；展开不扩大权限或跳过审批。
+11. 计划提示词只在 `update_plan` 当前真正可用时注入。协调动作与系统工具分类独立：展开工具、更新计划、管理任务都不单独解锁 `finish_task`，也不能作为交付证据。
 
 ## 3. 主应用Channel根策略
 

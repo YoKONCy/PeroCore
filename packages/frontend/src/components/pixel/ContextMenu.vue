@@ -74,9 +74,12 @@ useEventListener(window, 'keydown', ((e: KeyboardEvent) => {
 
 <style scoped>
 .p-context-menu {
+  --ui-focus-color: var(--ui-accent-sky);
   position: fixed;
   z-index: 9999;
   min-width: 160px;
+  max-width: min(360px, calc(100vw - 20px));
+  transform-origin: top left;
   background: var(--dash-panel-elevated);
   border: 2px solid var(--ui-border-strong);
   box-shadow: var(--ui-shadow-md);
@@ -102,7 +105,16 @@ useEventListener(window, 'keydown', ((e: KeyboardEvent) => {
   color: var(--ui-text-primary);
   cursor: pointer;
   text-align: left;
-  transition: all 0.1s;
+  transition:
+    background-color var(--ui-duration-fast) var(--ui-ease-standard),
+    color var(--ui-duration-fast) var(--ui-ease-standard);
+}
+.p-ctx-item:focus-visible {
+  outline-offset: -2px;
+}
+.p-ctx-item > span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .p-ctx-item:hover:not(:disabled) {
   background: var(--ui-accent-sky-soft);
@@ -114,25 +126,31 @@ useEventListener(window, 'keydown', ((e: KeyboardEvent) => {
 }
 
 .p-ctx-shortcut {
+  flex-shrink: 0;
+  white-space: nowrap;
   font-size: 10px;
   font-family: var(--ui-font-pixel);
   color: var(--ui-text-tertiary);
   margin-left: 16px;
 }
-.p-ctx-item:hover .p-ctx-shortcut {
+.p-ctx-item:hover:not(:disabled) .p-ctx-shortcut {
   color: var(--ui-accent-sky);
 }
 
 /* 动画 */
 .ctx-menu-enter-active {
-  transition: all 0.1s ease-out;
+  transition:
+    opacity var(--ui-duration-fast) var(--ui-ease-standard),
+    transform var(--ui-duration-fast) var(--ui-ease-standard);
 }
 .ctx-menu-leave-active {
-  transition: all 0.075s ease-in;
+  transition:
+    opacity var(--ui-duration-instant) var(--ui-ease-standard),
+    transform var(--ui-duration-instant) var(--ui-ease-standard);
 }
 .ctx-menu-enter-from,
 .ctx-menu-leave-to {
   opacity: 0;
-  transform: scale(0.95);
+  transform: scale(0.98);
 }
 </style>

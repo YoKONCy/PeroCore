@@ -14,9 +14,11 @@
  */
 
 import { v4 as uuidv4 } from 'uuid'
+import { currentSocialRecovery } from '../../runtime/socialRecovery'
 import { AbstractSocialAdapter } from '../ISocialAdapter'
 import type {
   OutboundMessage,
+  InboundMessage,
   AdapterStatus,
   SocialHistoryMessageRecord,
 } from '../../runtime/types'
@@ -24,6 +26,7 @@ import type { OneBotMessageEvent, OneBotSegment } from './napcatParser'
 import {
   cleanCQCodes,
   extractAttachments,
+  extractReplyId,
   checkIsMentioned,
   toOneBotSegments,
   buildSendParams,
@@ -102,16 +105,21 @@ export class NapcatAdapter extends AbstractSocialAdapter {
   }
 
   async disconnect(): Promise<void> {
-    for (const [id, conn] of this.connections) {
-      conn.close()
-      logger.info(`已关闭 QQ 连接: ${id}`)
-    }
+    const senders = new Set(this.connections.values())
+    if (this.defaultConnection) senders.add(this.defaultConnection)
     this.connections.clear()
     this.defaultConnection = null
+    for (const sender of senders) sender.close()
     this.emitDisconnected('手动断开')
   }
 
-  async sendMessage(msg: OutboundMessage): Promise<void> {
+  async sendMessage(msg: OutboundMessage, signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted()
+    if (!this.getActiveSender(msg.accountId))
+      throw Object.assign(new Error('社交账号尚未连接，本次消息尚未发送'), {
+        code: 'DELIVERY_NOT_SENT',
+        data: { retryable: true },
+      })
     const segments = toOneBotSegments(msg.content, msg.attachments)
     const params = buildSendParams(msg.channelId, msg.channelType, segments)
 
@@ -123,7 +131,47 @@ export class NapcatAdapter extends AbstractSocialAdapter {
       })
     }
 
-    await this.callApi('send_msg', params)
+    const check = (value: unknown) => {
+      const response = value as {
+        status?: string
+        retcode?: number
+        message?: string
+        wording?: string
+      } | null
+      if (response?.status !== 'ok' || response.retcode !== 0)
+        throw Object.assign(
+          new Error(response?.message || response?.wording || '社交平台拒绝发送'),
+          { code: 'DELIVERY_REJECTED' },
+        )
+    }
+    if (segments.length)
+      check(
+        await this.callApi(
+          'send_msg',
+          params,
+          msg.attachments?.length ? 90_000 : 10000,
+          msg.accountId,
+          signal,
+        ),
+      )
+    // 普通文件走上传接口；先发送说明，避免文件已交付后因说明失败而被误判为未发送。
+    for (const file of msg.attachments?.filter((item) => item.type === 'file') ?? []) {
+      const source = file.localPath || file.url
+      if (!source) throw new Error('文件附件缺少来源')
+      check(
+        await this.callApi(
+          msg.channelType === 'group' ? 'upload_group_file' : 'upload_private_file',
+          {
+            [msg.channelType === 'group' ? 'group_id' : 'user_id']: msg.channelId,
+            file: source,
+            name: file.name || '文件',
+          },
+          90_000,
+          msg.accountId,
+          signal,
+        ),
+      )
+    }
     logger.debug(`消息已发送: channel=${msg.channelId}, type=${msg.channelType}`)
   }
 
@@ -176,22 +224,31 @@ export class NapcatAdapter extends AbstractSocialAdapter {
     channelType: 'private' | 'group',
     limit: number,
     beforeMessageSeq?: number,
+    requestedAccountId?: string,
   ): Promise<SocialHistoryMessageRecord[]> {
     const action = channelType === 'group' ? 'get_group_msg_history' : 'get_friend_msg_history'
     const idKey = channelType === 'group' ? 'group_id' : 'user_id'
     const params: Record<string, unknown> = {
       [idKey]: Number(channelId),
       count: limit,
-      reverseOrder: false,
+      reverse_order: false,
     }
     if (beforeMessageSeq !== undefined) params.message_seq = beforeMessageSeq
-    const resp = (await this.callApi(action, params, 15000)) as Record<string, unknown> | null
-    if (!resp || resp.status !== 'ok') return []
+    const resp = (await this.callApi(action, params, 15000, requestedAccountId)) as Record<
+      string,
+      unknown
+    > | null
+    // API 失败不能当成空历史，否则补拉任务会错误地推进同步游标。
+    if (!resp || resp.status !== 'ok') {
+      const reason = resp?.message || resp?.wording || 'NapCat 未返回成功响应'
+      throw new Error(`历史消息查询失败（${action}）：${String(reason)}`)
+    }
     const data = resp.data as Record<string, unknown> | undefined
     const messages = (
       Array.isArray(data?.messages) ? data.messages : Array.isArray(data) ? data : []
     ) as OneBotMessageEvent[]
-    const accountId = String(messages[0]?.self_id ?? this.getConnectedAccountIds()[0] ?? '')
+    const accountId =
+      requestedAccountId || String(messages[0]?.self_id ?? this.getConnectedAccountIds()[0] ?? '')
     return messages
       .map((event) => {
         const messageType = event.message_type === 'group' ? 'group' : 'private'
@@ -215,6 +272,48 @@ export class NapcatAdapter extends AbstractSocialAdapter {
       .sort((a, b) => a.timestamp - b.timestamp)
   }
 
+  async getMessage(
+    messageId: string,
+    channelId: string,
+    channelType: 'private' | 'group',
+    accountId: string,
+    signal?: AbortSignal,
+  ): Promise<InboundMessage | null> {
+    if (!/^-?\d+$/.test(messageId) || !this.getConnectedAccountIds().includes(accountId))
+      return null
+    const response = (await this.callApi(
+      'get_msg',
+      { message_id: messageId },
+      5000,
+      accountId,
+      signal,
+    )) as { status?: string; data?: OneBotMessageEvent } | null
+    const event = response?.data
+    if (response?.status !== 'ok' || !event || String(event.message_id) !== messageId) return null
+    const senderId = String(event.user_id ?? event.sender?.user_id ?? '')
+    if (channelType === 'group') {
+      if (event.message_type !== 'group' || String(event.group_id ?? '') !== channelId) return null
+    } else if (
+      event.message_type !== 'private' ||
+      (senderId !== channelId &&
+        !(senderId === accountId && String(event.target_id ?? '') === channelId))
+    ) {
+      return null
+    }
+    return {
+      platform: this.platform,
+      agentId: this.config.defaultAgentId,
+      channelId,
+      channelType,
+      senderId: senderId === accountId ? 'self' : senderId,
+      senderName: event.sender?.card ?? event.sender?.nickname ?? senderId,
+      content: cleanCQCodes(event.raw_message ?? segmentsToCQString(event.message ?? [])),
+      attachments: extractAttachments(event.message ?? []),
+      replyTo: extractReplyId(event.message ?? []),
+      rawEvent: { ...event, self_id: accountId },
+    }
+  }
+
   // ── 连接管理 (由 socialRouter WS 端点调用) ──
 
   /**
@@ -224,6 +323,7 @@ export class NapcatAdapter extends AbstractSocialAdapter {
    * selfId 从 `X-Self-ID` header 获取。
    */
   registerConnection(selfId: string | undefined, sender: WsSender): void {
+    const previous = selfId ? this.connections.get(String(selfId)) : this.defaultConnection
     if (selfId) {
       this.connections.set(String(selfId), sender)
       logger.info(`已注册 QQ 连接: ${selfId} → Social Agent ${this.config.defaultAgentId}`)
@@ -231,6 +331,7 @@ export class NapcatAdapter extends AbstractSocialAdapter {
       this.defaultConnection = sender
       logger.info('已注册默认 QQ 连接 (无 X-Self-ID)')
     }
+    if (previous && previous !== sender) previous.close()
     this.emitConnected()
 
     // 异步获取 Bot 自身信息 (昵称、QQ号等)
@@ -242,7 +343,7 @@ export class NapcatAdapter extends AbstractSocialAdapter {
   /** 获取 Bot 自身信息并缓存 */
   private async fetchBotInfo(selfId?: string): Promise<void> {
     try {
-      const resp = (await this.callApi('get_login_info', {}, 5000)) as Record<
+      const resp = (await this.callApi('get_login_info', {}, 5000, selfId)) as Record<
         string,
         unknown
       > | null
@@ -282,7 +383,9 @@ export class NapcatAdapter extends AbstractSocialAdapter {
   }
 
   /** 注销连接 */
-  unregisterConnection(selfId: string | undefined): void {
+  unregisterConnection(selfId: string | undefined, sender?: WsSender): void {
+    const current = selfId ? this.connections.get(String(selfId)) : this.defaultConnection
+    if (sender && current !== sender) return
     if (selfId && this.connections.has(String(selfId))) {
       this.connections.delete(String(selfId))
       logger.info(`QQ 连接已断开: ${selfId}`)
@@ -366,7 +469,7 @@ export class NapcatAdapter extends AbstractSocialAdapter {
         logger.debug(`event.self_id 缺失，从 connections 兜底获取 selfId=${selfId}`)
       }
     }
-    const userId = String(event.user_id ?? '')
+    const userId = String(event.user_id ?? event.sender?.user_id ?? '')
 
     // 单实例 Social 的所有入站消息统一归属当前配置角色
     const agentId = this.config.defaultAgentId
@@ -385,8 +488,8 @@ export class NapcatAdapter extends AbstractSocialAdapter {
 
     const senderName = event.sender?.nickname ?? event.sender?.card ?? `User${userId}`
 
-    const rawContent = event.raw_message ?? ''
     const segments = event.message ?? []
+    const rawContent = event.raw_message ?? segmentsToCQString(segments)
 
     // 清洗 CQ 码
     const cleanedContent = cleanCQCodes(rawContent)
@@ -417,10 +520,13 @@ export class NapcatAdapter extends AbstractSocialAdapter {
       senderName,
       content: cleanedContent,
       attachments: attachments.length > 0 ? attachments : undefined,
+      replyTo: extractReplyId(segments),
       agentId,
       isOwner,
+      isMentioned,
       rawEvent: {
         ...event,
+        self_id: selfId,
         _isMentioned: isMentioned,
         _selfId: selfId,
       },
@@ -439,10 +545,17 @@ export class NapcatAdapter extends AbstractSocialAdapter {
     if (!event.flag) return
 
     try {
-      await this.callApi('set_friend_add_request', {
-        flag: event.flag,
-        approve: true,
-      })
+      const response = (await this.callApi(
+        'set_friend_add_request',
+        {
+          flag: event.flag,
+          approve: true,
+        },
+        10000,
+        String(event.self_id ?? '') || undefined,
+      )) as { status?: string; retcode?: number }
+      if (response?.status !== 'ok' || response.retcode !== 0)
+        throw new Error('QQ 拒绝了好友申请处理')
       logger.info(`已自动接受好友请求: flag=${event.flag}`)
     } catch (err) {
       logger.warn(`接受好友请求失败: ${err}`)
@@ -458,28 +571,77 @@ export class NapcatAdapter extends AbstractSocialAdapter {
     action: string,
     params: Record<string, unknown>,
     timeoutMs = 10000,
+    accountId?: string,
+    signal?: AbortSignal,
   ): Promise<unknown> {
-    const sender = this.getActiveSender()
+    const recovery = currentSocialRecovery()
+    signal ??= recovery?.signal
+    if (recovery) await recovery.save()
+    signal?.throwIfAborted()
+    const sender = this.getActiveSender(accountId)
     if (!sender) {
-      throw new Error('无可用的 NapCat 连接')
+      throw Object.assign(new Error('无可用的 NapCat 连接，请求尚未发送'), {
+        code: 'DELIVERY_NOT_SENT',
+        data: { retryable: true },
+      })
     }
 
     const echoId = uuidv4()
     const payload = JSON.stringify({ action, params, echo: echoId })
 
     return new Promise((resolve, reject) => {
+      const abort = () => {
+        clearTimeout(timer)
+        this.pendingRequests.delete(echoId)
+        signal?.removeEventListener('abort', abort)
+        reject(signal?.reason ?? new Error('社交请求已取消'))
+      }
+      const cleanup = () => signal?.removeEventListener('abort', abort)
       const timer = setTimeout(() => {
+        cleanup()
         this.pendingRequests.delete(echoId)
         reject(new Error(`NapCat API 调用超时: ${action} (${timeoutMs}ms)`))
       }, timeoutMs)
 
-      this.pendingRequests.set(echoId, { resolve, reject, timer })
-      sender.send(payload)
+      this.pendingRequests.set(echoId, {
+        resolve: (value) => {
+          cleanup()
+          resolve(value)
+        },
+        reject: (error) => {
+          cleanup()
+          reject(error)
+        },
+        timer,
+      })
+      signal?.addEventListener('abort', abort, { once: true })
+      if (signal?.aborted) {
+        abort()
+        return
+      }
+      const failed = (error: unknown) => {
+        clearTimeout(timer)
+        cleanup()
+        this.pendingRequests.delete(echoId)
+        reject(error)
+      }
+      try {
+        Promise.resolve(sender.send(payload)).catch(failed)
+      } catch (error) {
+        failed(error)
+      }
     })
   }
 
   /** 获取活跃的 WS 发送器 */
-  private getActiveSender(): WsSender | null {
+  private getActiveSender(accountId?: string): WsSender | null {
+    if (accountId)
+      return (
+        this.connections.get(accountId) ??
+        (this.defaultConnection && this.botInfos.size === 1 && this.botInfos.has(accountId)
+          ? this.defaultConnection
+          : null)
+      )
     if (this.defaultConnection) return this.defaultConnection
     if (this.connections.size > 0) {
       return this.connections.values().next().value ?? null

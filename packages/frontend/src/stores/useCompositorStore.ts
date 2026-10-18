@@ -6,10 +6,17 @@
  */
 import { frontendPerformance } from '../compositor/performanceBaseline'
 import { defineStore } from 'pinia'
-import { shallowRef } from 'vue'
-import type { SurfaceFrame, SurfaceId, SurfaceNode, SurfaceNodeId } from '@infos/shared'
+import { shallowRef, onScopeDispose } from 'vue'
+import type {
+  SurfaceFrame,
+  SurfaceId,
+  SurfaceNode,
+  SurfaceNodeId,
+  ToolCallSurfaceProps,
+} from '@infos/shared'
 
 export interface CompositorSurface {
+  generationStats?: import('@infos/shared').ConversationGenerationStats
   surfaceId: SurfaceId
   generation: string
   threadId: string
@@ -51,31 +58,71 @@ export const useCompositorStore = defineStore('compositor', () => {
   const pending = new Map<SurfaceId, SurfaceFrame[]>()
   const frameArrivals = new Map<string, number>()
   let frameHandle: number | null = null
+  let flushTimer: ReturnType<typeof setTimeout> | null = null
+  let byteSample = 0
+  let presentationActive = true
+  const encoder = new TextEncoder()
+  const flushWhenVisible = () => {
+    if (!document.hidden) flush()
+  }
+  if (typeof document !== 'undefined')
+    document.addEventListener('visibilitychange', flushWhenVisible)
+  onScopeDispose(() => {
+    if (typeof document !== 'undefined')
+      document.removeEventListener('visibilitychange', flushWhenVisible)
+    if (frameHandle !== null && typeof cancelAnimationFrame === 'function')
+      cancelAnimationFrame(frameHandle)
+    if (flushTimer !== null) clearTimeout(flushTimer)
+  })
 
   function enqueue(frame: SurfaceFrame): void {
     frameArrivals.set(frame.operationId, performance.now())
-    frontendPerformance.observe(
-      'surface_frame_bytes',
-      new TextEncoder().encode(JSON.stringify(frame)).byteLength,
-    )
+    // 帧大小只抽样，避免监控本身逐帧序列化大型终态快照。
+    if (++byteSample % 32 === 1)
+      frontendPerformance.observe(
+        'surface_frame_bytes',
+        encoder.encode(JSON.stringify(frame)).byteLength,
+      )
     const queue = pending.get(frame.surfaceId) ?? []
     queue.push(frame)
     pending.set(frame.surfaceId, queue)
-    if (frameHandle === null) {
+    // 终态不能等待后台被冻结的动画帧，否则错误会一直留在队列里。
+    if (frame.operation.type === 'surface.fail' || frame.operation.type === 'surface.commit') {
+      flush()
+      return
+    }
+    const hidden = !presentationActive || (typeof document !== 'undefined' && document.hidden)
+    if (!hidden && frameHandle === null) {
       if (typeof requestAnimationFrame === 'function') frameHandle = requestAnimationFrame(flush)
       else flush()
     }
+    if (pending.size && flushTimer === null) flushTimer = setTimeout(flush, hidden ? 250 : 100)
+    // 后台动画帧可能冻结，队列达到上限时主动合成，避免无限积压。
+    if (queue.length >= 512) flush()
+  }
+
+  function setPresentationActive(active: boolean): void {
+    presentationActive = active
+    if (active) flush()
   }
 
   function flush(): void {
+    if (frameHandle !== null && typeof cancelAnimationFrame === 'function')
+      cancelAnimationFrame(frameHandle)
+    if (flushTimer !== null) clearTimeout(flushTimer)
+    flushTimer = null
     const flushStartedAt = performance.now()
     let frameCount = 0
     let rejectedCount = 0
     frameHandle = null
+    if (!pending.size) return
     const next = new Map(surfaces.value)
     for (const [surfaceId, frames] of pending) {
       frames.sort((a, b) => a.sequence - b.sequence)
       let surface = next.get(surfaceId)
+      let operationIds = new Set(surface?.operationIds ?? [])
+      // 批次内只修改私有副本；已发布的快照和节点始终保持不可变。
+      if (surface) surface = { ...surface, operationIds, nodes: [...surface.nodes] }
       for (const frame of frames) {
         frameCount += 1
         const rejected =
@@ -93,7 +140,13 @@ export const useCompositorStore = defineStore('compositor', () => {
           frontendPerformance.observe('surface_frame_to_flush_ms', performance.now() - arrival)
           frameArrivals.delete(frame.operationId)
         }
-        surface = reduceFrame(surface, frame)
+        if (
+          surface &&
+          surface.generation !== frame.generation &&
+          frame.operation.type === 'surface.open'
+        )
+          operationIds = new Set()
+        surface = reduceFrame(surface, frame, operationIds)
       }
       if (surface?.surfaceId !== surfaceId) next.delete(surfaceId)
       if (surface?.state === 'disposed') next.delete(surface.surfaceId)
@@ -114,6 +167,7 @@ export const useCompositorStore = defineStore('compositor', () => {
     scopeId: string,
     descriptors: import('@infos/shared').SurfaceDescriptor[],
   ): void {
+    flush()
     const next = new Map(surfaces.value)
     for (const [surfaceId, surface] of next) {
       if (surface.scopeId === scopeId) next.delete(surfaceId)
@@ -138,6 +192,7 @@ export const useCompositorStore = defineStore('compositor', () => {
   }
 
   function mergeSnapshot(snapshot: import('@infos/shared').ConversationProjectionSnapshot): void {
+    flush()
     const scopeId = `conversation:${snapshot.threadId}`
     const next = new Map(surfaces.value)
     for (const descriptor of snapshot.surfaces) {
@@ -202,14 +257,30 @@ export const useCompositorStore = defineStore('compositor', () => {
     return surfaceId
   }
 
-  function terminateThinking(surfaceId: string): void {
+  function terminateThinking(surfaceId: string, stopExecution = false): void {
+    flush()
     const current = get(surfaceId)
     if (!current) return
     let changed = false
     const nodes = current.nodes.map((node) => {
+      if (stopExecution && node.kind === 'tool-call') {
+        const tool = node.props as ToolCallSurfaceProps
+        if (!['assembling', 'calling'].includes(tool.state)) return node
+        changed = true
+        return {
+          ...node,
+          revision: node.revision + 1,
+          props: { ...tool, state: 'failed' as const },
+        }
+      }
       if (node.kind !== 'status') return node
       const props = node.props as import('@infos/shared').StatusSurfaceProps
-      if (props.state !== 'thinking') return node
+      if (
+        stopExecution
+          ? ['completed', 'failed', 'cancelled'].includes(props.state)
+          : props.state !== 'thinking'
+      )
+        return node
       changed = true
       return {
         ...node,
@@ -220,7 +291,7 @@ export const useCompositorStore = defineStore('compositor', () => {
     const next = new Map(surfaces.value)
     next.set(current.surfaceId, {
       ...current,
-      state: changed ? 'committed' : current.state,
+      state: changed || stopExecution ? 'committed' : current.state,
       nodes: changed ? nodes : current.nodes,
       suspended: true,
     })
@@ -345,6 +416,7 @@ export const useCompositorStore = defineStore('compositor', () => {
     inputSeats,
     enqueue,
     flush,
+    setPresentationActive,
     get,
     replaceScope,
     replaceProjection,
@@ -369,6 +441,7 @@ export const useCompositorStore = defineStore('compositor', () => {
 function reduceFrame(
   current: CompositorSurface | undefined,
   frame: SurfaceFrame,
+  operationIds: Set<string>,
 ): CompositorSurface | undefined {
   if (current && current.generation !== frame.generation) {
     if (frame.operation.type !== 'surface.open') return current
@@ -378,7 +451,6 @@ function reduceFrame(
   if (current && frame.sequence <= current.sequence) return current
   if (!current && frame.operation.type !== 'surface.open') return undefined
 
-  const operationIds = new Set(current?.operationIds ?? [])
   operationIds.add(frame.operationId)
   if (operationIds.size > 2048) operationIds.delete(operationIds.values().next().value!)
 
@@ -392,21 +464,37 @@ function reduceFrame(
       revision: frame.revision,
       sequence: frame.sequence,
       state: 'open',
-      nodes: frame.operation.nodes ?? [],
+      nodes: [...(frame.operation.nodes ?? [])],
       operationIds,
     }
   }
 
-  const surface: CompositorSurface = {
-    ...current!,
-    revision: frame.revision,
-    sequence: frame.sequence,
-    operationIds,
-    nodes: [...current!.nodes],
-  }
+  const surface = current!
+  surface.revision = frame.revision
+  surface.sequence = frame.sequence
+  surface.operationIds = operationIds
 
   const operation = frame.operation
   switch (operation.type) {
+    case 'surface.append-tool-arguments': {
+      const existing = surface.nodes.find((node) => node.nodeId === operation.nodeId)
+      if (!existing || existing.kind !== 'tool-call') break
+      const previous = existing.props as ToolCallSurfaceProps
+      const args = previous.args + (operation.argumentsDelta ?? '')
+      surface.nodes = upsertNode(surface.nodes, {
+        ...existing,
+        revision: frame.revision,
+        props: {
+          ...previous,
+          name: previous.name + (operation.nameDelta ?? ''),
+          args,
+          argsPreview: args,
+          receivedChars: operation.receivedChars,
+          previewTruncated: operation.previewTruncated,
+        },
+      })
+      break
+    }
     case 'surface.append-text': {
       const existing = surface.nodes.find((node) => node.nodeId === operation.nodeId)
       const previous = (existing?.props as { source?: string } | undefined)?.source ?? ''
@@ -451,12 +539,28 @@ function reduceFrame(
     case 'surface.commit': {
       return {
         ...operation.surface,
+        nodes: [...operation.surface.nodes],
         scopeId: current?.scopeId,
         suspended: current?.suspended ?? false,
         operationIds,
       }
     }
     case 'surface.fail': {
+      surface.nodes = surface.nodes.map((node) => {
+        if (node.kind !== 'tool-call') return node
+        const props = node.props as ToolCallSurfaceProps
+        if (
+          props.state === 'completed' ||
+          props.state === 'failed' ||
+          surface.nodes.some(
+            (result) =>
+              result.kind === 'tool-result' &&
+              (result.props as { callId?: string }).callId === props.callId,
+          )
+        )
+          return node
+        return { ...node, props: { ...props, state: 'failed' } }
+      })
       surface.nodes = upsertNode(
         surface.nodes.filter((item) => item.kind !== 'status'),
         {
@@ -467,7 +571,7 @@ function reduceFrame(
           props: { code: operation.code, message: operation.message },
         },
       )
-      if (operation.content) {
+      if (operation.content && !surface.nodes.some((node) => node.kind === 'markdown')) {
         surface.nodes = upsertNode(surface.nodes, {
           nodeId: `${surface.surfaceId}:markdown` as SurfaceNodeId,
           kind: 'markdown',
@@ -488,8 +592,7 @@ function reduceFrame(
 
 function upsertNode(nodes: SurfaceNode[], next: SurfaceNode): SurfaceNode[] {
   const index = nodes.findIndex((node) => node.nodeId === next.nodeId)
-  if (index === -1) return [...nodes, next]
-  const result = [...nodes]
-  result[index] = next
-  return result
+  if (index === -1) nodes.push(next)
+  else nodes[index] = next
+  return nodes
 }

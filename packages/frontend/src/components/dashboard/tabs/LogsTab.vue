@@ -19,6 +19,9 @@ import { useAgentStore, useNotificationStore } from '../../../stores'
 import { getApiBaseUrl } from '../../../api/transport'
 import { logger } from '../../../lib/logger'
 
+// 弹窗与业务区是多个根节点，显式把主题作用域和布局属性交给业务区。
+defineOptions({ inheritAttrs: false })
+
 const ctx = useDashboardContext()
 const notif = useNotificationStore()
 const rewind = useConversationRewind()
@@ -409,16 +412,11 @@ async function requestDeleteThread(log: LogEntry) {
       threadId: log.threadId,
       wholeThread: true,
       title: log.summary || '未命名会话',
-      onSuccess: (result) => {
+      onSuccess: () => {
         logs.value = logs.value.filter((item) => item.id !== log.id)
         totalCount.value = Math.max(0, totalCount.value - 1)
         if (expandedId.value === log.id) expandedId.value = null
-        window.dispatchEvent(
-          new CustomEvent('infos:workspace-rewound', {
-            detail: { threadId: log.threadId, files: result.preview.files },
-          }),
-        )
-        notif.toast('会话与工作区已回滚', { type: 'success', title: '对话日志' })
+        notif.toast('会话已删除，文件保持原样', { type: 'success', title: '对话日志' })
       },
     })
   } catch (err) {
@@ -454,11 +452,6 @@ async function handleDeletePair(log: LogEntry, id: string) {
               deletedMessageIds: result.deletedMessageIds.map(String),
               projection: result.projection,
             },
-          }),
-        )
-        window.dispatchEvent(
-          new CustomEvent('infos:workspace-rewound', {
-            detail: { threadId: log.threadId, files: result.preview.files },
           }),
         )
         notif.toast(`已回滚 ${result.preview.pairCount} 轮对话`, {
@@ -558,7 +551,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="logs-tab h-full flex flex-col overflow-hidden">
+  <div v-bind="$attrs" class="logs-tab h-full flex flex-col overflow-hidden">
     <!-- 工具栏 -->
     <div class="p-6 pb-0 flex-none">
       <PCard pixel overflow-visible class="relative group/toolbar z-30">
@@ -573,7 +566,7 @@ onUnmounted(() => {
         <div class="flex flex-wrap items-end gap-5 relative z-10">
           <!-- 标题 -->
           <div class="flex flex-col gap-1.5 min-w-[120px]">
-            <h2 class="flex items-center gap-2 text-xl font-black text-slate-800 font-pixel">
+            <h2 class="flex items-center gap-2 text-xl font-black text-ui-text-primary font-pixel">
               <span
                 class="group-hover/toolbar:scale-110 group-hover/toolbar:rotate-6 transition-transform duration-500"
               >
@@ -594,7 +587,7 @@ onUnmounted(() => {
               class="current-agent-badge relative flex items-center gap-2 px-3 py-1.5 pixel-border-sky group/avatar cursor-default transition-all"
             >
               <div
-                class="w-8 h-8 pixel-border-sky overflow-hidden flex items-center justify-center bg-sky-100 group-hover/avatar:scale-110 transition-transform"
+                class="w-8 h-8 pixel-border-sky overflow-hidden flex items-center justify-center bg-ui-accent-sky-soft group-hover/avatar:scale-110 transition-transform"
               >
                 <img
                   v-if="agentStore.currentAgent?.avatarUrl"
@@ -602,7 +595,7 @@ onUnmounted(() => {
                   :alt="activeAgentName"
                   class="w-full h-full object-cover"
                 />
-                <PixelIcon v-else name="cat" size="sm" class="text-sky-500" />
+                <PixelIcon v-else name="cat" size="sm" class="text-ui-accent-sky" />
               </div>
               <span class="current-agent-name text-sm font-bold transition-colors">
                 {{ activeAgentName }}
@@ -614,9 +607,9 @@ onUnmounted(() => {
           <!-- 搜索 -->
           <div class="flex flex-col gap-1.5 flex-1 min-w-[160px] max-w-[280px]">
             <label
-              class="text-[10px] font-bold text-slate-400 flex items-center gap-1.5 ml-1 uppercase tracking-wider"
+              class="text-[10px] font-bold text-ui-text-secondary flex items-center gap-1.5 ml-1 uppercase tracking-wider"
             >
-              <span class="w-1.5 h-1.5 rounded-full bg-sky-500" />
+              <span class="w-1.5 h-1.5 rounded-full bg-ui-accent-sky" />
               搜索
               <span class="opacity-50 font-normal">Search</span>
             </label>
@@ -626,9 +619,9 @@ onUnmounted(() => {
           <!-- Agent -->
           <div class="flex flex-col gap-1.5 min-w-[130px]">
             <label
-              class="text-[10px] font-bold text-slate-400 flex items-center gap-1.5 ml-1 uppercase tracking-wider"
+              class="text-[10px] font-bold text-ui-text-secondary flex items-center gap-1.5 ml-1 uppercase tracking-wider"
             >
-              <span class="w-1.5 h-1.5 rounded-full bg-sky-500 animate-pulse" />
+              <span class="w-1.5 h-1.5 rounded-full bg-ui-accent-sky animate-pulse" />
               角色
               <span class="opacity-50 font-normal">Agent</span>
             </label>
@@ -638,9 +631,9 @@ onUnmounted(() => {
           <!-- 来源 -->
           <div class="flex flex-col gap-1.5 min-w-[130px]">
             <label
-              class="text-[10px] font-bold text-slate-400 flex items-center gap-1.5 ml-1 uppercase tracking-wider"
+              class="text-[10px] font-bold text-ui-text-secondary flex items-center gap-1.5 ml-1 uppercase tracking-wider"
             >
-              <span class="w-1.5 h-1.5 rounded-full bg-sky-500" />
+              <span class="w-1.5 h-1.5 rounded-full bg-ui-accent-sky" />
               来源
               <span class="opacity-50 font-normal">Source</span>
             </label>
@@ -650,9 +643,9 @@ onUnmounted(() => {
           <!-- 排序 -->
           <div class="flex flex-col gap-1.5 min-w-[120px]">
             <label
-              class="text-[10px] font-bold text-slate-400 flex items-center gap-1.5 ml-1 uppercase tracking-wider"
+              class="text-[10px] font-bold text-ui-text-secondary flex items-center gap-1.5 ml-1 uppercase tracking-wider"
             >
-              <span class="w-1.5 h-1.5 rounded-full bg-sky-500" />
+              <span class="w-1.5 h-1.5 rounded-full bg-ui-accent-sky" />
               排序
               <span class="opacity-50 font-normal">Sort</span>
             </label>
@@ -746,20 +739,20 @@ onUnmounted(() => {
                   </div>
                 </div>
                 <div class="min-w-0">
-                  <h4 class="text-[13px] font-bold text-slate-800 truncate">
+                  <h4 class="text-[13px] font-bold text-ui-text-primary truncate">
                     {{ log.summary }}
                   </h4>
                   <div class="flex gap-3 mt-1 flex-wrap">
-                    <span class="text-[10px] text-slate-400 flex items-center gap-1">
+                    <span class="text-[10px] text-ui-text-secondary flex items-center gap-1">
                       <PixelIcon name="chat" size="xs" />
                       {{ log.messageCount }} 条
                     </span>
                     <span
-                      class="text-[10px] font-bold px-1.5 py-0.5 bg-sky-50 text-sky-500 border border-sky-100"
+                      class="text-[10px] font-bold px-1.5 py-0.5 bg-ui-accent-sky-soft text-ui-accent-sky border border-ui-border-default"
                     >
                       {{ log.channel }}
                     </span>
-                    <span class="text-[10px] text-slate-400 font-pixel">
+                    <span class="text-[10px] text-ui-text-secondary font-pixel">
                       {{ formatDate(log.createdAt) }}
                     </span>
                   </div>
@@ -768,7 +761,7 @@ onUnmounted(() => {
               <!-- 会话操作 -->
               <div class="flex items-center gap-1 relative z-20">
                 <button
-                  class="p-1.5 text-slate-400 hover:text-sky-500 hover:bg-sky-50 transition-colors"
+                  class="p-1.5 text-ui-text-secondary hover:text-ui-accent-sky hover:bg-ui-accent-sky-soft transition-colors"
                   title="修改会话标题"
                   aria-label="修改会话标题"
                   @click.stop="threadPendingRename = log"
@@ -776,7 +769,7 @@ onUnmounted(() => {
                   <PixelIcon name="pencil" size="xs" />
                 </button>
                 <button
-                  class="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                  class="p-1.5 text-ui-text-secondary hover:text-ui-danger hover:bg-ui-danger-soft transition-colors"
                   title="删除整条会话"
                   aria-label="删除整条会话"
                   @click.stop="requestDeleteThread(log)"
@@ -786,7 +779,7 @@ onUnmounted(() => {
                 <PixelIcon
                   :name="expandedId === log.id ? 'chevron-up' : 'chevron-down'"
                   size="xs"
-                  class="text-slate-400 flex-shrink-0 transition-transform duration-500"
+                  class="text-ui-text-secondary flex-shrink-0 transition-transform duration-500"
                   :class="expandedId === log.id ? 'rotate-0' : ''"
                 />
               </div>
@@ -802,12 +795,12 @@ onUnmounted(() => {
           <!-- 展开后的气泡式对话 -->
           <div
             v-if="expandedId === log.id"
-            class="mt-2 ml-4 pl-4 border-l-2 border-sky-100 space-y-4 py-3"
+            class="mt-2 ml-4 pl-4 border-l-2 border-ui-border-default space-y-4 py-3"
           >
             <!-- 加载中 -->
             <div
               v-if="log.isLoadingMessages"
-              class="flex items-center gap-2 text-slate-400 text-sm font-bold py-4 justify-center"
+              class="flex items-center gap-2 text-ui-text-secondary text-sm font-bold py-4 justify-center"
             >
               <PixelIcon name="refresh" size="sm" animation="spin" />
               <span class="font-pixel">加载消息中...</span>
@@ -879,11 +872,11 @@ onUnmounted(() => {
                 >
                   <!-- 角色标签 -->
                   <div
-                    class="flex items-center gap-2 mb-1 text-[10px] text-slate-400 px-2 font-bold"
+                    class="flex items-center gap-2 mb-1 text-[10px] text-ui-text-secondary px-2 font-bold"
                   >
                     <span
                       class="tracking-wider uppercase flex items-center gap-1"
-                      :class="msg.role === 'user' ? 'text-sky-600/70' : 'text-purple-500'"
+                      :class="msg.role === 'user' ? 'text-ui-accent-sky' : 'text-ui-accent-purple'"
                     >
                       <PixelIcon
                         v-if="msg.role !== 'user'"
@@ -899,12 +892,12 @@ onUnmounted(() => {
                         animation="pulse"
                       />
                     </span>
-                    <span v-if="msg.timestamp" class="opacity-40 font-mono text-[9px]">
+                    <span v-if="msg.timestamp" class="text-ui-text-secondary font-mono text-[9px]">
                       {{ formatMsgTime(msg.timestamp) }}
                     </span>
                     <span
                       v-if="msg.role !== 'user' && msg.outputTokens !== undefined"
-                      class="opacity-50 font-mono text-[9px]"
+                      class="text-ui-text-secondary font-mono text-[9px]"
                     >
                       {{ msg.outputTokens.toLocaleString('zh-CN') }} Token
                     </span>
@@ -935,17 +928,17 @@ onUnmounted(() => {
                     <!-- 气泡操作栏 (Hover 时浮现) -->
                     <div
                       v-if="!log.roomId"
-                      class="bubble-actions absolute -top-4 right-2 opacity-0 group-hover/bubble:opacity-100 transition-opacity flex items-center z-20 rounded-sm overflow-hidden"
+                      class="logs-bubble-actions absolute -top-4 right-2 opacity-0 group-hover/bubble:opacity-100 transition-opacity flex items-center z-20 rounded-sm overflow-hidden"
                     >
                       <button
-                        class="p-1.5 text-slate-400 hover:text-sky-600 hover:bg-sky-50 transition-colors"
+                        class="p-1.5 text-ui-text-secondary hover:text-ui-accent-sky hover:bg-ui-accent-sky-soft transition-colors"
                         title="复制"
                         @click.stop="handleCopy(msg.content)"
                       >
                         <PixelIcon name="copy" size="sm" />
                       </button>
                       <button
-                        class="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition-colors"
+                        class="p-1.5 text-ui-text-secondary hover:text-ui-danger hover:bg-ui-danger-soft transition-colors"
                         title="删除该对话对"
                         @click.stop="handleDeletePair(log, msg.id)"
                       >
@@ -953,7 +946,7 @@ onUnmounted(() => {
                       </button>
                       <button
                         v-if="msg.role === 'assistant'"
-                        class="p-1.5 text-slate-400 hover:text-purple-500 hover:bg-purple-50 transition-colors border-l border-slate-100"
+                        class="p-1.5 text-ui-text-secondary hover:text-ui-accent-purple hover:bg-ui-accent-purple-soft transition-colors border-l border-ui-border-default"
                         title="查看内部构造"
                         @click.stop="openDebugDialog(msg)"
                       >
@@ -967,7 +960,7 @@ onUnmounted(() => {
               <!-- 底部提示 -->
               <div class="text-center pt-2">
                 <span
-                  class="text-[10px] text-slate-400 font-bold px-3 py-1 bg-sky-50/50 border border-sky-100 inline-flex items-center gap-1.5"
+                  class="text-[10px] text-ui-text-secondary font-bold px-3 py-1 bg-ui-accent-sky-soft border border-ui-border-default inline-flex items-center gap-1.5"
                 >
                   <PixelIcon name="thought" size="xs" />
                   展示前 {{ log.messages.length }} 条消息
@@ -1063,11 +1056,11 @@ onUnmounted(() => {
           <span class="opacity-50 uppercase">Storage:</span>
           <span class="font-bold flex items-center gap-1">
             <template v-if="hasStoredRawContent(currentDebugMsg)">
-              <PixelIcon name="check" size="xs" class="text-emerald-500" />
+              <PixelIcon name="check" size="xs" class="text-ui-success" />
               已保存原始日志 ({{ currentDebugMsg.rawContent!.length }} bytes)
             </template>
             <template v-else>
-              <PixelIcon name="alert" size="xs" class="text-amber-500" />
+              <PixelIcon name="alert" size="xs" class="text-ui-warning" />
               历史记录未保存原始转写，已显示可见回复
             </template>
           </span>
@@ -1111,234 +1104,4 @@ onUnmounted(() => {
   </PDialog>
 </template>
 
-<style scoped>
-/* 日志业务区统一使用主题语义色。 */
-.logs-tab {
-  color: var(--ui-text-primary);
-}
-.logs-tab :is(.text-slate-800, .text-slate-700, .text-slate-600) {
-  color: var(--ui-text-primary);
-}
-.logs-tab :is(.text-slate-500, .text-slate-400) {
-  color: var(--ui-text-secondary);
-}
-.current-agent-badge {
-  background: var(--ui-accent-sky-soft);
-}
-.current-agent-badge:hover {
-  background: var(--ui-bg-hover);
-}
-.current-agent-name {
-  color: var(--ui-accent-sky);
-}
-.current-agent-badge:hover .current-agent-name {
-  color: color-mix(in srgb, var(--ui-accent-sky) 78%, white);
-}
-.conversation-thread {
-  border-left: 2px solid var(--ui-border-default);
-}
-.message-avatar,
-.message-bubble {
-  background: var(--dash-panel-soft);
-  color: var(--ui-text-primary);
-  box-shadow: var(--ui-shadow-sm);
-}
-.message-avatar--user,
-.message-bubble--user {
-  border-color: var(--ui-accent-sky);
-}
-.message-avatar--assistant,
-.message-bubble--assistant {
-  border-color: var(--ui-accent-purple);
-}
-.message-bubble--user {
-  border-right-width: 4px;
-}
-.message-bubble--assistant {
-  border-left-width: 4px;
-}
-.message-bubble:hover {
-  background: var(--ui-bg-hover);
-}
-.bubble-actions {
-  border: 1px solid var(--ui-border-default);
-  background: var(--dash-panel-elevated);
-  box-shadow: var(--ui-shadow-sm);
-}
-.debug-view-switch {
-  display: grid;
-  width: min(100%, 390px);
-  grid-template-columns: 1fr 1fr;
-  gap: 3px;
-  padding: 4px;
-  border: 1px solid var(--ui-border-default);
-  background: var(--dash-panel-soft);
-  box-shadow: 3px 3px 0 var(--ui-border-subtle);
-}
-.debug-view-switch button {
-  position: relative;
-  display: grid;
-  min-height: 38px;
-  grid-template-columns: 16px 1fr auto;
-  align-items: center;
-  gap: 6px;
-  padding: 0 9px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--ui-text-tertiary);
-  font-size: 10px;
-  font-weight: 800;
-  text-align: left;
-  cursor: pointer;
-}
-.debug-view-switch button:hover {
-  border-color: var(--ui-border-default);
-  background: var(--ui-bg-hover);
-  color: var(--ui-text-primary);
-}
-.debug-view-switch button.active {
-  border-color: var(--ui-accent-purple);
-  background: var(--ui-accent-purple-soft);
-  color: var(--ui-accent-purple);
-  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--ui-accent-purple) 28%, transparent);
-}
-.debug-view-switch button:last-child.active {
-  border-color: var(--ui-accent-sky);
-  background: var(--ui-accent-sky-soft);
-  color: var(--ui-accent-sky);
-  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--ui-accent-sky) 28%, transparent);
-}
-.debug-view-switch small {
-  color: currentColor;
-  font: 700 7px var(--ui-font-mono);
-  letter-spacing: 0.08em;
-  opacity: 0.55;
-}
-.prompt-view {
-  display: flex;
-  max-height: 50vh;
-  flex-direction: column;
-  gap: 9px;
-  overflow-y: auto;
-  padding-right: 6px;
-}
-.prompt-message {
-  overflow: hidden;
-  flex: 0 0 auto;
-  border: 1px solid var(--ui-border-default);
-  background: var(--dash-panel-soft);
-  box-shadow: 2px 2px 0 var(--ui-border-subtle);
-}
-.prompt-message > header {
-  display: flex;
-  min-height: 29px;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 9px;
-  border-bottom: 1px solid var(--ui-border-subtle);
-  background: var(--ui-bg-hover);
-}
-.prompt-message > header span {
-  color: var(--ui-text-secondary);
-  font: 900 8px var(--ui-font-mono);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-.prompt-message > header small {
-  color: var(--ui-text-disabled);
-  font: 700 7px var(--ui-font-mono);
-}
-.prompt-message pre {
-  max-height: 360px;
-  margin: 0;
-  overflow: auto;
-  padding: 11px 12px;
-  color: var(--ui-text-primary);
-  font: 10px/1.65 var(--ui-font-mono);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.prompt-message.is-system {
-  border-left: 3px solid var(--ui-accent-purple);
-}
-.prompt-message.is-system > header span {
-  color: var(--ui-accent-purple);
-}
-.prompt-message.is-user {
-  border-left: 3px solid var(--ui-accent-sky);
-}
-.prompt-message.is-user > header span {
-  color: var(--ui-accent-sky);
-}
-.prompt-message.is-assistant {
-  border-left: 3px solid var(--ui-success);
-}
-.prompt-message.is-tool {
-  border-left: 3px solid var(--ui-warning);
-}
-.prompt-view__empty {
-  display: flex;
-  min-height: 180px;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  border: 1px dashed var(--ui-border-default);
-  background: var(--dash-panel-soft);
-  color: var(--ui-text-tertiary);
-  text-align: center;
-}
-.prompt-view__empty strong {
-  color: var(--ui-text-secondary);
-  font-size: 11px;
-}
-.prompt-view__empty span {
-  max-width: 420px;
-  font-size: 9px;
-  line-height: 1.6;
-}
-:global([data-theme='dark']) .debug-view-switch,
-:global([data-theme='dark']) .prompt-message {
-  box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.32);
-}
-
-.debug-raw {
-  border-color: var(--ui-border-default);
-  background: var(--dash-panel-soft);
-  color: var(--ui-text-primary);
-}
-.debug-meta {
-  border: 1px solid var(--ui-border-default);
-  background: var(--ui-accent-sky-soft);
-  color: var(--ui-accent-sky);
-}
-/* 调试弹窗内文字兜底（弹窗 Teleport 到 body，不受 .logs-tab 祖先规则影响） */
-.debug-dialog-body :is(.text-slate-600, .text-slate-700) {
-  color: var(--ui-text-primary);
-}
-.debug-dialog-body :is(.text-slate-500, .text-slate-400) {
-  color: var(--ui-text-secondary);
-}
-.debug-role-badge {
-  background: var(--dash-panel-soft);
-  border: 1px solid var(--ui-border-default);
-}
-.debug-role-badge--user {
-  color: var(--ui-accent-sky);
-  border-color: var(--ui-accent-sky);
-}
-.debug-role-badge--assistant {
-  color: var(--ui-accent-purple);
-  border-color: var(--ui-accent-purple);
-}
-
-/* 像素风滚动条 */
-.logs-scrollbar::-webkit-scrollbar {
-  width: 4px;
-}
-
-.logs-scrollbar::-webkit-scrollbar-thumb {
-  background: var(--ui-scrollbar-thumb);
-  border-radius: 0;
-}
-</style>
+<style scoped src="./logsTab.css"></style>

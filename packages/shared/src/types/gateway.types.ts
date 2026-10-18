@@ -15,6 +15,16 @@
 import type { DeliveryAudience, KernelEventDurability } from './kernel.types'
 
 export const GATEWAY_ACTION_CATALOG = {
+  plan_changed: {
+    durability: 'ephemeral',
+    audience: 'all_principal_clients',
+    recovery: 'task-plan-projection',
+  },
+  conversation_reply_ready: {
+    durability: 'ephemeral',
+    audience: 'all_principal_clients',
+    recovery: 'conversation-projection',
+  },
   state_update: {
     durability: 'ephemeral',
     audience: 'all_principal_clients',
@@ -150,11 +160,15 @@ export type GatewayPayload =
 // 已定型的 Payload
 // ─────────────────────────────────────────────
 
-/** PetState 更新推送 (finish_task 写入 pet_states 后广播，按 agentId 过滤) */
+/** 会话角色状态投影；按 agentId 与 threadId 隔离，revision 防止撤回后被旧推送覆盖。 */
 export interface StateUpdatePayload {
   action: 'state_update'
   /** 目标 agent，前端按当前活跃 agent 过滤 */
   agentId?: string
+  threadId?: string
+  revision?: number
+  /** 完整投影替换，撤回时也可清空临时台词。 */
+  replace?: boolean
   mood?: string
   vibe?: string
   mind?: string
@@ -165,7 +179,7 @@ export interface StateUpdatePayload {
   /** 回归台词热更新 */
   back_messages?: string[]
   /** 临时台词过期时间 */
-  text_expires_at?: string
+  text_expires_at?: string | null
 }
 
 /** 任务进度推送 */

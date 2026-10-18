@@ -1,8 +1,10 @@
+import { fileURLToPath } from 'node:url'
 import { randomUUID } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
+import { once } from 'node:events'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { KernelEnvelope, KernelNodeId } from '@infos/shared'
 import type { NodeInvokeRequest } from '@infos/node-sdk'
@@ -13,10 +15,16 @@ const directories: string[] = []
 
 afterEach(async () => {
   for (const child of children.splice(0)) {
+    if (child.exitCode !== null || child.signalCode !== null) continue
+    const exited = once(child, 'close')
     if (!child.killed) child.kill('SIGTERM')
-    await new Promise((resolveExit) => child.once('exit', resolveExit))
+    await exited
   }
-  directories.splice(0).forEach((directory) => rmSync(directory, { recursive: true, force: true }))
+  directories
+    .splice(0)
+    .forEach((directory) =>
+      rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }),
+    )
 })
 
 describe('Arca 跨进程联邦 A6', () => {
@@ -26,9 +34,11 @@ describe('Arca 跨进程联邦 A6', () => {
     const child = spawn(
       process.execPath,
       [
-        resolve('node_modules/tsx/dist/cli.mjs'),
-        'packages/apps/arca/src/main.ts',
+        '--import',
+        'tsx',
+        fileURLToPath(new URL('../src/main.ts', import.meta.url)),
         '--loopback-port=0',
+        '--port=0',
       ],
       {
         cwd: resolve('.'),
@@ -57,6 +67,7 @@ describe('Arca 跨进程联邦 A6', () => {
       expect.arrayContaining([
         expect.objectContaining({ capabilityType: 'document.semantic' }),
         expect.objectContaining({ capabilityType: 'model.settings' }),
+        expect.objectContaining({ capabilityType: 'application.task' }),
       ]),
     )
     const imported = await transport.request(

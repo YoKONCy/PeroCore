@@ -1,0 +1,32 @@
+{
+  "id": "send-file",
+  "name": "发送文件",
+  "version": "1.0.0",
+  "type": "tool",
+  "entry": "index.ts",
+  "tools": [
+    {
+      "name": "send_file",
+      "description": "把工作区文件、在线资源或已有附件发送到当前对话。支持图片、视频、音频和普通文件。",
+      "display": {
+        "label": "发送文件",
+        "description": "交付文件与媒体。",
+        "icon": "file",
+        "color": "sky",
+        "style": "file"
+      },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "工作区路径、HTTP/HTTPS 链接或 attachment:附件ID"
+          },
+          "caption": { "type": "string", "description": "可选简短说明", "maxLength": 300 }
+        },
+        "required": ["source"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

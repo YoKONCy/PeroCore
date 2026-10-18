@@ -18,10 +18,12 @@ import { approvalsApi } from '../../api/modules/approvalsApi'
 const props = withDefaults(
   defineProps<{
     request: ApprovalRequest
+    error?: string
     loading?: boolean
     compact?: boolean
   }>(),
   {
+    error: undefined,
     loading: false,
     compact: false,
   },
@@ -48,6 +50,7 @@ const riskMeta: Record<ApprovalRiskLevel, { label: string; hint: string }> = {
 const risk = computed(() => riskMeta[props.request.riskLevel])
 
 function submit(decision: ApprovalDecision): void {
+  if (props.loading) return
   const note = message.value.trim()
   emit('resolve', decision, note || undefined)
 }
@@ -117,6 +120,7 @@ function formatAuditTime(value: string): string {
 
       <textarea
         v-model="message"
+        :disabled="loading"
         maxlength="2000"
         rows="2"
         class="approval-card__message"
@@ -124,6 +128,7 @@ function formatAuditTime(value: string): string {
       />
     </div>
 
+    <p v-if="error" class="approval-card__error" role="alert">{{ error }}</p>
     <footer class="approval-card__actions">
       <PButton size="sm" :disabled="loading" @click="submit('allow_once')">允许本次</PButton>
       <PButton
@@ -147,10 +152,21 @@ function formatAuditTime(value: string): string {
 </template>
 
 <style scoped>
+.approval-card__error {
+  margin: 8px 12px;
+  color: var(--color-danger);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
 .approval-card {
   --approval-tone: var(--ui-accent-primary, #db2777);
   --approval-soft: color-mix(in srgb, var(--approval-tone) 9%, var(--ui-bg-elevated, #fff));
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  min-width: 0;
+  max-height: min(440px, 60vh);
   width: min(100%, 500px);
   margin: 4px 0 4px auto;
   overflow: hidden;
@@ -185,6 +201,7 @@ function formatAuditTime(value: string): string {
 
 .approval-card__header {
   display: flex;
+  flex-shrink: 0;
   min-height: 42px;
   align-items: center;
   gap: 8px;
@@ -254,6 +271,8 @@ function formatAuditTime(value: string): string {
 }
 
 .approval-card__body {
+  min-height: 0;
+  overflow-y: auto;
   padding: 9px 10px 6px;
 }
 
@@ -366,6 +385,10 @@ function formatAuditTime(value: string): string {
   flex-wrap: wrap;
   gap: 6px;
   padding: 0 10px 9px;
+  flex-shrink: 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--ui-border-subtle);
+  background: var(--ui-bg-elevated, #fff);
 }
 
 .approval-card__audit {

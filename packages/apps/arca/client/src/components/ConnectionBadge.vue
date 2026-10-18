@@ -10,10 +10,10 @@ import { useWorkbenchStore } from '../stores/workbench'
 
 const store = useWorkbenchStore()
 const label = computed(() => {
-  if (store.connection === 'ready') return 'Authority 在线'
+  if (store.connection === 'ready') return '已连接'
   if (store.connection === 'connecting' || store.connection === 'reconnecting') return '正在连接'
   if (store.connection === 'error') return '连接异常'
-  return '未发现 Host'
+  return '离线'
 })
 </script>
 

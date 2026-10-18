@@ -1,19 +1,23 @@
 <script setup lang="ts">
+import './task-pixel.css'
 /**
  * TaskToast — 任务中心专属单条 toast
  *
- * 依赖全局 .pixel-border-moe 工具类与 --color-moe-* 令牌，
+ * 使用任务界面的像素材质与双主题语义令牌，
  * 渲染一条独立的 toast 卡片（容器由外部管理）。
  */
-import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import type { TaskToastItem } from './index'
 
 interface Props {
   toast: TaskToastItem
   onDismiss: (id: string) => void
+  autoDismiss?: boolean
+  paused?: boolean
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), { autoDismiss: true, paused: false })
+const emit = defineEmits<{ hover: [id: string, hovered: boolean] }>()
 
 // ── 自动消失计时 ──
 // progress 类常驻（直到外部 dismiss），其余类型默认 5s 自动关闭
@@ -29,8 +33,8 @@ const isPersistent = computed(() => {
 })
 
 function startTimer() {
-  if (isPersistent.value) return
   stopTimer()
+  if (isPersistent.value || !props.autoDismiss || props.paused || isHovered.value) return
   timer.value = setTimeout(() => {
     props.onDismiss(props.toast.id)
   }, AUTO_DISMISS_MS)
@@ -46,18 +50,24 @@ function stopTimer() {
 function onMouseEnter() {
   isHovered.value = true
   stopTimer()
+  emit('hover', props.toast.id, true)
 }
 
 function onMouseLeave() {
   isHovered.value = false
+  emit('hover', props.toast.id, false)
   startTimer()
 }
 
 onMounted(() => startTimer())
-onBeforeUnmount(() => stopTimer())
+watch([isPersistent, () => props.autoDismiss, () => props.paused], startTimer)
+onBeforeUnmount(() => {
+  stopTimer()
+  if (isHovered.value) emit('hover', props.toast.id, false)
+})
 
 // ── 类型 → 色彩映射 ──
-// 使用 --color-moe-* 与 --color-{语义}-face 覆盖，保持视觉语言一致
+// 使用双主题语义色区分任务状态
 const typeClass = computed(() => `task-toast--${props.toast.type}`)
 
 // ── 进度条 ──
@@ -73,7 +83,7 @@ function onClose() {
 
 <template>
   <div
-    :class="['task-toast', 'pixel-border-moe', typeClass]"
+    :class="['task-toast', 'task-pixel-surface', typeClass]"
     @mouseenter="onMouseEnter"
     @mouseleave="onMouseLeave"
   >
@@ -116,24 +126,26 @@ function onClose() {
   position: relative;
 
   /* ---- 毛玻璃 + 背景 ---- */
-  background: var(--color-moe-card-bg, rgba(255, 255, 255, 0.85));
+  background: var(--task-fill);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
 
-  /* ---- 圆角（pixel-border-moe 提供 2px 像素边框阴影，圆角设极小避免冲突） ---- */
-  border-radius: 4px;
+  /* ---- 细边框与硬边厚度 ---- */
+  border-radius: 0;
 
-  /* ---- 柔和阴影 ---- */
-  box-shadow:
-    -2px 0 0 0 var(--color-moe-cocoa),
-    2px 0 0 0 var(--color-moe-cocoa),
-    0 -2px 0 0 var(--color-moe-cocoa),
-    0 2px 0 0 var(--color-moe-cocoa),
-    inset -2px -2px 0 0 rgba(0, 0, 0, 0.06),
-    inset 2px 2px 0 0 rgba(255, 255, 255, 0.35),
-    0 4px 16px rgba(45, 27, 30, 0.12);
+  box-shadow: var(--task-raised);
 
   user-select: none;
+
+  border: 1px solid var(--ui-border-default);
+
+  font-family: var(--ui-font-pixel);
+
+  color: var(--ui-text-primary);
+
+  box-sizing: border-box;
+
+  max-width: calc(100vw - 32px);
 }
 
 /* ── 类型主题着色：通过左侧色条区分 ── */
@@ -144,53 +156,52 @@ function onClose() {
   left: 0;
   top: 0;
   bottom: 0;
-  width: 4px;
-  border-radius: 4px 0 0 4px;
+  width: 2px;
+  border-radius: 0;
 }
 
 /* task_started — 天蓝 */
 .task-toast--task_started::before {
-  background: var(--color-sky-face, #38bdf8);
+  background: var(--ui-accent-sky);
 }
 
-/* task_progress — 主强调色（moe pink） */
+/* task_progress — 主强调色 */
 .task-toast--task_progress::before {
-  background: var(--color-moe-pink, #f9a8d4);
+  background: var(--ui-accent-primary);
 }
 
-/* task_approval_requested — 粉橙高亮 */
+/* task_approval_requested — 待确认高亮 */
 .task-toast--task_approval_requested::before {
-  background: linear-gradient(
-    180deg,
-    var(--color-moe-pink, #f9a8d4),
-    var(--color-orange-face, #fb923c)
-  );
+  background: var(--ui-warning);
 }
 
 /* task_completed — 翠绿 */
 .task-toast--task_completed::before {
-  background: var(--color-emerald-face, #10b981);
+  background: var(--ui-success);
 }
 
 /* task_failed — 红 */
 .task-toast--task_failed::before {
-  background: var(--color-red-face, #ef4444);
+  background: var(--ui-danger);
 }
 
 /* info — 中性灰蓝 */
 .task-toast--info::before {
-  background: var(--color-moe-sky, #a7d8f0);
+  background: var(--ui-accent-sky);
 }
 
 /* ── 头像 ── */
 .task-toast__avatar {
   width: 32px;
   height: 32px;
-  border-radius: 50%;
+  border-radius: 0;
   flex-shrink: 0;
   object-fit: cover;
-  /* 与 moe cocoa 边框呼应的像素环 */
-  box-shadow: 0 0 0 2px var(--color-moe-cocoa, #2d1b1e);
+  /* 头像框与卡片使用同一像素材质 */
+  box-shadow: var(--task-control);
+  border: 1px solid var(--ui-border-default);
+  padding: 2px;
+  background: var(--task-fill);
 }
 
 /* ── 文字区 ── */
@@ -209,18 +220,19 @@ function onClose() {
 .task-toast__actor {
   font-size: 11px;
   font-weight: 700;
-  color: var(--color-moe-cocoa, #2d1b1e);
-  background: var(--color-moe-pink, #f9a8d4);
+  color: var(--ui-accent-primary);
+  background: var(--ui-accent-primary-soft);
   padding: 1px 5px;
-  border-radius: 3px;
+  border-radius: 0;
   line-height: 1.2;
   flex-shrink: 0;
+  border: 1px solid color-mix(in srgb, var(--ui-accent-primary) 30%, transparent);
 }
 
 .task-toast__title {
   font-size: 13px;
   font-weight: 600;
-  color: var(--color-moe-cocoa, #2d1b1e);
+  color: var(--ui-text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -228,8 +240,8 @@ function onClose() {
 
 .task-toast__message {
   font-size: 12px;
-  color: var(--color-moe-cocoa, #2d1b1e);
-  opacity: 0.75;
+  color: var(--ui-text-secondary);
+  opacity: 1;
   line-height: 1.5;
   word-break: break-word;
 }
@@ -238,18 +250,24 @@ function onClose() {
 .task-toast__progress-track {
   margin-top: 8px;
   height: 5px;
-  border-radius: 999px;
-  background: rgba(45, 27, 30, 0.08);
+  border-radius: 0;
+  background: var(--ui-bg-hover);
   overflow: hidden;
+  box-shadow: var(--task-inset);
 }
 
 .task-toast__progress-bar {
   height: 100%;
-  border-radius: 999px;
-  background: var(--color-moe-pink, #f9a8d4);
-  transition: width 0.3s ease;
+  border-radius: 0;
+  background: var(--ui-accent-primary);
+  transition: width 0.24s steps(6, end);
   /* 微光泽 */
-  box-shadow: 0 0 4px rgba(249, 168, 212, 0.5);
+  box-shadow: inset 0 1px 0 var(--task-highlight);
+  background-image: repeating-linear-gradient(
+    90deg,
+    transparent 0 6px,
+    var(--task-highlight) 6px 8px
+  );
 }
 
 /* ── 关闭按钮 ── */
@@ -267,9 +285,9 @@ function onClose() {
   cursor: pointer;
   font-size: 16px;
   line-height: 1;
-  color: var(--color-moe-cocoa, #2d1b1e);
+  color: var(--ui-text-tertiary);
   opacity: 0.45;
-  border-radius: 3px;
+  border-radius: 0;
   transition:
     opacity 0.15s,
     background-color 0.15s;
@@ -277,6 +295,6 @@ function onClose() {
 
 .task-toast__close:hover {
   opacity: 1;
-  background: rgba(45, 27, 30, 0.08);
+  background: var(--ui-bg-hover);
 }
 </style>

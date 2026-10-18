@@ -9,6 +9,7 @@ import { validate as zValidator } from '../lib/validation'
 import { z } from 'zod'
 import type { AppContext } from '../container'
 import { AppError } from '../lib/appError'
+import { resourceContent } from '../services/attachment/resourceContent'
 
 const sessionSchema = z.object({
   agentId: z.string().min(1),
@@ -90,6 +91,56 @@ export function createWorkspaceRouter(ctx: AppContext) {
     },
   )
 
+  /** 类型描述与二进制流式浏览共用工作区边界。 */
+  const fileQuery = sessionSchema.extend({
+    path: z.string().min(1),
+    version: z.string().optional(),
+  })
+  router.get('/file', zValidator('query', fileQuery), async (c) => {
+    const input = c.req.valid('query')
+    const { descriptor } = await ctx.workspaceBrowserService.file(
+      input.agentId,
+      input.threadId,
+      input.path,
+    )
+    return c.json({ code: 'OK', data: descriptor })
+  })
+  router.on(['GET', 'HEAD'], '/content', zValidator('query', fileQuery), async (c) => {
+    const input = c.req.valid('query')
+    const { filePath, descriptor } = await ctx.workspaceBrowserService.file(
+      input.agentId,
+      input.threadId,
+      input.path,
+    )
+    if (input.version && input.version !== descriptor.version)
+      throw new AppError('CONFLICT', { message: '文件已变化，请重新载入预览' })
+    // SVG 以文本交给客户端清理，再作为隔离图像显示，不直接嵌入应用 DOM。
+    const mime =
+      descriptor.kind === 'svg' && c.req.query('download') !== '1'
+        ? 'text/plain'
+        : descriptor.mimeType
+    return resourceContent(c, filePath, mime, descriptor.name)
+  })
+  router.post(
+    '/open-file',
+    zValidator(
+      'json',
+      readSchema
+        .pick({ agentId: true, threadId: true, path: true })
+        .extend({ openOnNode: z.boolean().optional() }),
+    ),
+    async (c) => {
+      const input = c.req.valid('json')
+      const { filePath, descriptor } = await ctx.workspaceBrowserService.file(
+        input.agentId,
+        input.threadId,
+        input.path,
+      )
+      if (input.openOnNode) await ctx.systemService.openTrustedPath(filePath)
+      return c.json({ code: 'OK', data: { path: filePath, name: descriptor.name } })
+    },
+  )
+
   /** 范围读取（行/字节/tail，含 hash 与截断状态） */
   router.post('/read', zValidator('json', readSchema), async (c) => {
     const input = c.req.valid('json')
@@ -139,12 +190,17 @@ export function createWorkspaceRouter(ctx: AppContext) {
     }
   })
 
-  /** 重命名普通文件（固定在原目录，禁止覆盖同名文件） */
+  /** 重命名工作区文件或目录，固定在原目录且禁止覆盖。 */
   router.post('/rename', zValidator('json', renameSchema), async (c) => {
     const input = c.req.valid('json')
     const session = await resolve(input.agentId, input.threadId)
     try {
-      const result = await runtime.virtualWorkspace.renameFile(session, input.path, input.newName)
+      const result = await runtime.virtualWorkspace.renameFile(
+        session,
+        input.path,
+        input.newName,
+        true,
+      )
       return c.json({ code: 'OK', data: result })
     } catch (error) {
       throw new AppError('VALIDATION_ERROR', {
@@ -153,12 +209,12 @@ export function createWorkspaceRouter(ctx: AppContext) {
     }
   })
 
-  /** 删除普通文件；不允许递归删除目录 */
+  /** 文件树确认后的删除，支持递归目录并保留工作区安全校验。 */
   router.post('/delete', zValidator('json', deleteSchema), async (c) => {
     const input = c.req.valid('json')
     const session = await resolve(input.agentId, input.threadId)
     try {
-      const result = await runtime.virtualWorkspace.deleteFile(session, input.path)
+      const result = await runtime.virtualWorkspace.deleteEntry(session, input.path)
       return c.json({ code: 'OK', data: result })
     } catch (error) {
       throw new AppError('VALIDATION_ERROR', {

@@ -1,0 +1,47 @@
+{
+  "id": "knowledge",
+  "name": "文档知识库",
+  "version": "1.0.0",
+  "type": "tool",
+  "entry": "index.ts",
+  "category": "memory",
+  "userCopy": { "search_knowledge": { "label": "检索知识", "description": "查找文档资料。" } },
+  "tools": [
+    {
+      "name": "search_knowledge",
+      "description": "按关键词或正则检索文档知识库，返回摘要、命中原文片段和来源；可展开原文。",
+      "display": { "icon": "book", "color": "purple", "style": "search" },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "keywords": {
+            "type": "array",
+            "items": { "type": "string", "maxLength": 100 },
+            "maxItems": 20,
+            "description": "与问题有关的关键词"
+          },
+          "regex": {
+            "type": "string",
+            "maxLength": 1000,
+            "description": "匹配原文的正则表达式"
+          },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 20, "default": 5 },
+          "expand": { "type": "boolean", "default": false, "description": "展开所选部分的原文" },
+          "part_ids": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 1,
+            "maxItems": 20,
+            "description": "展开先前结果中的指定片段"
+          },
+          "document_id": { "type": "string", "description": "限定一份资料" },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "结果截断时，用单个 part_ids 和上次 nextOffset 继续读取"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -17,11 +17,13 @@ const props = defineProps<{
   pageCount: number
   pageSize: number
   total: number
+  checkedIds?: string[]
 }>()
 
 const emit = defineEmits<{
   select: [note: EventNote]
   page: [target: number]
+  toggle: [id: string]
 }>()
 
 interface DayGroup {
@@ -94,6 +96,13 @@ const pageEnd = computed(() => Math.min(props.page * props.pageSize, props.total
             @click="emit('select', note)"
           >
             <div class="entry-rail">
+              <input
+                type="checkbox"
+                :checked="checkedIds?.includes(note.id)"
+                aria-label="选择记忆"
+                @click.stop
+                @change="emit('toggle', note.id)"
+              />
               <span class="entry-dot" />
               <span class="entry-clock font-pixel">{{ formatClock(note.eventAt) }}</span>
             </div>

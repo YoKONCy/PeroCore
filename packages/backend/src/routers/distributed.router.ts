@@ -74,7 +74,7 @@ export function createDistributedRouter(ctx: AppContext) {
   router.post('/snapshot', async (c) => {
     const transferKey = c.req.header('X-Sync-Transfer-Key') ?? ''
     const bytes = await ctx.distributedSyncService.createEncryptedSnapshot(transferKey)
-    return new Response(bytes, {
+    return new Response(new Uint8Array(bytes), {
       headers: {
         'Content-Type': 'application/vnd.infos.full-sync',
         'Content-Length': String(bytes.length),

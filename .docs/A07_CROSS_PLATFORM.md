@@ -1,6 +1,6 @@
 # 跨平台与路径规范
 
-> **版本**：0.9.2-rc1 · **更新时间**：2026-08-19
+> **版本**：0.9.4 · **更新时间**：2026-10-17
 > **适用范围**：infOS 全项目（后端 / 前端 / Electron / Rust 模块）
 > **依赖规范**：[A04_DEPLOYMENT](./A04_DEPLOYMENT.md)
 
@@ -284,7 +284,7 @@ interface RuntimeAdapter {
 
 Runtime Adapter 把设备或运行环境投影为 Capability；Application Adapter 把自治第三方应用投影为 Endpoint、Task、Session、Resource 和 Surface。两者共用 Node Identity、Envelope、Capability Handle、Generation、Deadline 和审计，但 Application Adapter 额外承担版本兼容、任务所有权移交和应用生命周期。
 
-第三方 Application 使用三层结构：infOS 通用 Integration Foundation、infOS 侧专属 Adapter、目标应用内部 Adapter。主 Agent 通过 Tool/Task/Session 投影通信，不能持有目标应用实例。详细规范见 [A11_APPLICATION_INTEGRATION](./A11_APPLICATION_INTEGRATION.md)。
+第三方 Application 使用三层结构：infOS 通用 Integration Foundation、infOS 侧专属 Adapter、目标应用内部 Adapter。主 Agent 通过 Tool/Task/Session 投影通信，不能持有目标应用实例。详细规范见 [A10_APPLICATION_INTEGRATION](./A10_APPLICATION_INTEGRATION.md)。
 
 ### 8.3 跨运行时资源原语
 
@@ -306,7 +306,7 @@ Browser等交互Runtime必须把DOM、Accessibility、Layout、Network与Vision�
 
 每个高层动作必须产生Action Receipt，记录Intent、目标、前后Snapshot、Observed/Expected Effects、验证状态、证据和回滚提示。Site Model只能从`verified`或`partially_verified`结果学习。网页内容默认是外部数据，不是Agent指令；检测到指令覆盖、秘密请求或不安全动作时，必须阻断Planner和临时Capability编译。
 
-### 8.4 隔离升级原则
+### 8.5 隔离升级原则
 
 逻辑Port边界稳定后，按风险与故障收益选择Worker Thread、Child Process、WASM、Electron Sandbox、远程Node或独立Daemon Service。不得以进程数量作为成功指标，也不得把没有机制隔离的软边界命名为Sandbox。
 

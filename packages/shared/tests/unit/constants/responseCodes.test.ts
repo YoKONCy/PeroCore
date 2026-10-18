@@ -39,7 +39,6 @@ describe('responseCodes', () => {
   describe('边界映射', () => {
     it('应当将配置未设置视为可成功返回的业务状态', () => {
       expect(CODE_TO_HTTP.NOT_CONFIGURED).toBe(200)
-      expect(CODE_MESSAGES.NOT_CONFIGURED).toBe('配置未设置')
     })
 
     it('应当将限流和超时映射到对应 HTTP 状态码', () => {

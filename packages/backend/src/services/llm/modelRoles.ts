@@ -15,6 +15,8 @@
  *   reflection         model.task.reflection          整理记忆关系、修订和去重
  *   social_scorer      model.task.social_scorer       整理社交互动中的长期记忆
  *   butler             model.task.butler              理解据点管理请求并生成操作建议
+ *   knowledge          model.task.knowledge           整理文档摘要、关键词与语义切片
+ *   approval           model.task.approval            判断终端与工作区外删除是否执行
  * ──────────────────────────────────────────────────────────────
  *
  * 社交回复与日记属于角色自身的表达，使用角色指派模型；
@@ -48,7 +50,14 @@ const logger = createLogger('ModelRoleResolver')
  * - main: 主模型（特殊，不是 task slot，是所有任务的回退默认值）
  * - 其他: 具体任务槽，未配置时回退到 main
  */
-export type ModelTaskSlot = 'main' | 'scorer' | 'reflection' | 'social_scorer' | 'butler'
+export type ModelTaskSlot =
+  | 'main'
+  | 'scorer'
+  | 'reflection'
+  | 'social_scorer'
+  | 'butler'
+  | 'knowledge'
+  | 'approval'
 
 /** config KV 中的 key 映射 */
 const TASK_CONFIG_KEYS: Record<ModelTaskSlot, string> = {
@@ -57,6 +66,8 @@ const TASK_CONFIG_KEYS: Record<ModelTaskSlot, string> = {
   reflection: 'model.task.reflection',
   social_scorer: 'model.task.social_scorer',
   butler: 'model.task.butler',
+  knowledge: 'model.task.knowledge',
+  approval: 'model.task.approval',
 }
 
 // ─────────────────────────────────────────────
@@ -75,12 +86,20 @@ export class ModelRoleResolver {
    * 回退链: 任务槽专用模型 → 主模型 → 环境变量 → null
    */
   async resolve(task: ModelTaskSlot): Promise<ModelConfig | null> {
+    const purpose: ModelConfig['usagePurpose'] =
+      task === 'main'
+        ? undefined
+        : task === 'knowledge'
+          ? 'knowledge'
+          : task === 'butler' || task === 'approval'
+            ? 'system'
+            : 'memory'
     // 1. 尝试获取任务槽专用模型（main 本身跳过此步）
     if (task !== 'main') {
       const taskConfig = await this.loadFromDb(TASK_CONFIG_KEYS[task])
       if (taskConfig) {
         logger.debug(`使用 ${task} 任务模型: ${taskConfig.modelId}`)
-        return taskConfig
+        return { ...taskConfig, usagePurpose: purpose }
       }
     }
 
@@ -90,14 +109,14 @@ export class ModelRoleResolver {
       if (task !== 'main') {
         logger.debug(`${task} 未配置专用模型, 回退到主模型: ${mainConfig.modelId}`)
       }
-      return mainConfig
+      return { ...mainConfig, usagePurpose: purpose }
     }
 
     // 3. 环境变量兜底
     const envConfig = this.loadFromEnv()
     if (envConfig) {
       logger.debug(`${task} 从环境变量加载: ${envConfig.modelId}`)
-      return envConfig
+      return { ...envConfig, usagePurpose: purpose }
     }
 
     logger.warn(`${task} 无可用模型配置`)
@@ -115,10 +134,11 @@ export class ModelRoleResolver {
       const agentConfig = await this.loadFromDb(`model.agent.${normalizedAgentId}`)
       if (agentConfig) {
         logger.debug(`角色 ${normalizedAgentId} 使用专用模型: ${agentConfig.modelId}`)
-        return agentConfig
+        return { ...agentConfig, usageAgentId: normalizedAgentId }
       }
     }
-    return this.resolve('main')
+    const config = await this.resolve('main')
+    return config ? { ...config, usageAgentId: normalizedAgentId || undefined } : null
   }
 
   /** 创建绑定到指定角色的模型 getter。 */
@@ -206,6 +226,7 @@ export class ModelRoleResolver {
       topP: row.topP ?? undefined,
       maxTokens: row.maxTokens ?? undefined,
       contextWindowTokens: row.contextWindowTokens ?? undefined,
+      maxReActTurns: row.maxReActTurns ?? undefined,
       reasoningEffort: (row.reasoningEffort as ModelConfig['reasoningEffort']) ?? undefined,
       returnNativeReasoning: row.returnNativeReasoning ?? false,
       wireApi: (row.wireApi as ModelConfig['wireApi']) ?? 'chat_completions',

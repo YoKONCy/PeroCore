@@ -7,14 +7,12 @@ export const updateStateTool: BuiltinTool = {
   name: 'update_state',
   async execute(args, ctx) {
     try {
-      const result = await applyCharacterStateUpdate(args, ctx.agentId)
-      if (!result.updated) {
-        return toolFailure('UPDATE_STATE_EMPTY', '至少提供一项情绪、动作、内心或动态台词更新。')
-      }
+      const result = await applyCharacterStateUpdate(args, ctx.agentId, ctx)
       return toolSuccess(
         JSON.stringify({
-          updated: true,
+          updated: result.updated,
           agent_id: ctx.agentId,
+          thread_id: ctx.threadId,
           text_expires_at: result.textExpiresAt ?? null,
         }),
       )

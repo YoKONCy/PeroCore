@@ -1,10 +1,17 @@
 import { importMarkdown, type MarkdownImportInput } from './markdown'
 import { randomUUID } from 'node:crypto'
+import { writeFileSync } from 'node:fs'
 import Database from 'better-sqlite3'
 import type { KernelObjectId, KernelObjectRef } from '@infos/shared'
 import { cloneValue, contentHash } from './canonical'
 import { DocumentEngineError, failDocument } from './errors'
 import { InMemoryDocumentEngine } from './inMemoryEngine'
+import {
+  compileOfficeEdit,
+  officeContent,
+  validateOfficeContent,
+  type OfficeContent,
+} from './office'
 import {
   DOCUMENT_AUTHORITY_SCHEMA,
   DOCUMENT_AUTHORITY_SCHEMA_VERSION,
@@ -116,6 +123,10 @@ export class SqliteDocumentEngine implements DocumentEngine {
     this.assertOpen()
     return this.engine.inspect(documentId)
   }
+  snapshotAt(documentId: DocumentId, revisionId: import('./types').RevisionId): DocumentSnapshot {
+    this.assertOpen()
+    return this.engine.snapshotAt(documentId, revisionId)
+  }
 
   listDocuments() {
     this.assertOpen()
@@ -126,6 +137,77 @@ export class SqliteDocumentEngine implements DocumentEngine {
     return this.mutate(
       () => this.engine.editText(input),
       (receipt) => [this.outboxFromReceipt('document.revision.committed', receipt)],
+    )
+  }
+  duplicateDocument(input: {
+    documentId: DocumentId
+    baseRevisionId: DocumentSnapshot['revisionId']
+    title: string
+    principalId: string
+    transactionId: string
+    content?: OfficeContent
+  }): DocumentSnapshot {
+    const documentId = `copy:${input.transactionId}` as DocumentId
+    const fingerprint = contentHash(input)
+    const previous = this.listDocuments().find((document) => document.documentId === documentId)
+    if (previous) {
+      if (previous.metadata.copyFingerprint !== fingerprint)
+        failDocument('DOCUMENT_REVISION_CONFLICT', '副本请求标识与原请求不一致')
+      return this.inspect(documentId)
+    }
+    return this.mutate(
+      () => {
+        const source = this.engine.snapshotAt(input.documentId, input.baseRevisionId)
+        const content = cloneValue(input.content ?? officeContent(source))
+        validateOfficeContent(content, source.document.rootNodeId)
+        const created = this.engine.createDocument({
+          documentId,
+          rootNodeId: `root:${input.transactionId}` as import('./types').DocumentNodeId,
+          title: input.title,
+          language: source.document.language,
+          ownerPrincipalId: input.principalId,
+          authorityNodeId: source.document.authorityNodeId,
+          metadata: {
+            sourceDocumentId: source.documentId,
+            sourceRevisionId: source.revisionId,
+            copyFingerprint: fingerprint,
+          },
+        })
+        const ids = new Map(
+          content.nodes.map((node) => [
+            node.nodeId,
+            node.nodeId === source.document.rootNodeId
+              ? created.document.rootNodeId
+              : (`${input.transactionId}:${node.nodeId}` as import('./types').DocumentNodeId),
+          ]),
+        )
+        content.title = input.title
+        for (const node of content.nodes) {
+          node.nodeId = ids.get(node.nodeId)!
+          if (node.parentId) node.parentId = ids.get(node.parentId)!
+        }
+        const transaction = compileOfficeEdit(
+          created,
+          {
+            documentId,
+            baseRevisionId: created.revisionId,
+            transactionId: input.transactionId,
+            timestamp: created.document.createdAt,
+            intent: '复制办公文稿',
+            content,
+          },
+          input.principalId,
+        )
+        if (transaction.operations.length) this.engine.transact(transaction)
+        return this.engine.inspect(documentId)
+      },
+      (snapshot) => [
+        this.outbox('document.created', snapshot, snapshot.document.createdAt, {
+          documentId,
+          sourceDocumentId: input.documentId,
+          revisionId: snapshot.revisionId,
+        }),
+      ],
     )
   }
 
@@ -630,6 +712,24 @@ export class SqliteDocumentEngine implements DocumentEngine {
         .get() as { value: string } | undefined
       if (row && Number(row.value) > DOCUMENT_AUTHORITY_SCHEMA_VERSION) {
         failDocument('DOCUMENT_SCHEMA_VERSION_UNSUPPORTED', '数据库 Schema 版本高于当前引擎')
+      }
+      if (
+        row &&
+        Number(row.value) < DOCUMENT_AUTHORITY_SCHEMA_VERSION &&
+        this.sqlite.name !== ':memory:'
+      ) {
+        const backup = this.sqlite
+          .prepare('SELECT protocol_version, checkpoint_json FROM document_authority_state LIMIT 1')
+          .get() as StoredStateRow | undefined
+        if (backup)
+          writeFileSync(
+            `${this.sqlite.name}.schema-${row.value}.${randomUUID()}.backup.json`,
+            JSON.stringify({
+              schemaVersion: Number(row.value),
+              checkpoint: JSON.parse(backup.checkpoint_json),
+            }),
+            { encoding: 'utf8', flag: 'wx', flush: true },
+          )
       }
       this.sqlite
         .prepare(

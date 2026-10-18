@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApprovalService } from '@infos/backend/services/execution/approvalService'
 import { PolicyEngine } from '@infos/backend/services/execution/policyEngine'
+import { RuntimeStateService } from '@infos/backend/services/runtime/runtimeStateService'
 import type { ToolPermission } from '@infos/backend/capabilities/types'
 
 const base = {
@@ -17,6 +18,8 @@ const approvalPermission: ToolPermission = {
   resourceScope: { scope: 'system', allowedRoots: [], deniedPaths: [] },
   requiresApproval: true,
 }
+
+afterEach(() => vi.useRealTimers())
 
 describe('PolicyEngine', () => {
   it('执行参数长度、命令白名单与禁止模式', () => {
@@ -150,10 +153,74 @@ describe('PolicyEngine', () => {
 })
 
 describe('ApprovalService', () => {
+  it('并行审批全部结束后才恢复父执行的剩余计时', async () => {
+    vi.useFakeTimers()
+    const runtime = new RuntimeStateService(1000)
+    const service = new ApprovalService()
+    service.setWaitGuard((threadId) => runtime.suspendTimeout(threadId))
+    runtime.registerTask(base.threadId, base.agentId)
+    try {
+      await vi.advanceTimersByTimeAsync(200)
+      const first = service.create({ ...base, args: { command: 'first' }, reason: '需要审批' })
+      const second = service.create({ ...base, args: { command: 'second' }, reason: '需要审批' })
+      const waiting = [service.waitForResolution(first.id), service.waitForResolution(second.id)]
+      await vi.advanceTimersByTimeAsync(10_000)
+      service.resolve(first.id, 'allow_once')
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(runtime.isCancelled(base.threadId)).toBe(false)
+      service.resolve(second.id, 'deny_once')
+      await Promise.all(waiting)
+      await vi.advanceTimersByTimeAsync(799)
+      expect(runtime.isCancelled(base.threadId)).toBe(false)
+      await vi.advanceTimersByTimeAsync(2)
+      expect(runtime.isCancelled(base.threadId)).toBe(true)
+    } finally {
+      runtime.unregisterTask(base.threadId)
+    }
+  })
+
+  it('推送订阅者异常不能阻断审批的原地续行，消费也不改变交付中的决定', async () => {
+    const service = new ApprovalService()
+    service.onResolved(() => {
+      throw new Error('推送失败')
+    })
+    const request = service.create({ ...base, reason: '需要审批' })
+    const waiting = service.waitForResolution(request.id)
+    service.resolve(request.id, 'allow_once')
+    expect(service.authorize(base)).toBe('allow')
+    await expect(waiting).resolves.toMatchObject({ status: 'approved', decision: 'allow_once' })
+  })
+
+  it('取消等待后关闭旧审批、释放计时暂停，后继执行必须重新审批', async () => {
+    const service = new ApprovalService()
+    const release = vi.fn()
+    service.setWaitGuard(() => release)
+    const resolved = vi.fn()
+    service.onResolved(resolved)
+    const request = service.create({ ...base, reason: '需要审批' })
+    const controller = new AbortController()
+    const waiting = service.waitForResolution(request.id, controller.signal)
+    const rejection = expect(waiting).rejects.toThrow('审批等待已取消')
+    controller.abort()
+    await rejection
+    expect(service.list({ status: 'pending' })).toEqual([])
+    expect(service.authorize(base)).toBe('none')
+    expect(service.consumeDeniedOnce(base)).toBeUndefined()
+    expect(resolved).toHaveBeenCalledWith(
+      expect.objectContaining({ id: request.id, status: 'consumed' }),
+    )
+    expect(release).toHaveBeenCalledOnce()
+    expect(service.create({ ...base, reason: '新执行' }).id).not.toBe(request.id)
+  })
+
   it('allow_once 只允许相同参数消费一次', () => {
     const service = new ApprovalService()
     const request = service.create({ ...base, reason: '需要审批' })
     service.resolve(request.id, 'allow_once')
+    expect(
+      service.authorize({ ...base, args: { command: '其他命令' }, approvalId: request.id }),
+    ).toBe('deny')
+    expect(service.get(request.id)?.status).toBe('approved')
     expect(service.authorize({ ...base, approvalId: request.id })).toBe('allow')
     expect(service.get(request.id)?.status).toBe('consumed')
     expect(service.authorize({ ...base, approvalId: request.id })).toBe('none')
@@ -174,7 +241,8 @@ describe('ApprovalService', () => {
     const first = service.create(input)
     const second = service.create(input)
     expect(second.id).toBe(first.id)
-    expect(first.argsSummary.password).toBe('[已隐藏]')
+    expect(JSON.stringify(first.argsSummary)).not.toContain('secret')
+    expect(first.argsSummary.command).toBe(input.args.command)
   })
 
   it('清理会话时明确拒绝待处理审批并解除等待', async () => {
@@ -187,15 +255,20 @@ describe('ApprovalService', () => {
     await expect(waiting).resolves.toMatchObject({
       status: 'denied',
       decision: 'deny_once',
-      resolutionMessage: '会话已结束，待处理审批已自动拒绝。',
     })
   })
 
   it('审批会永久等待，直到用户作出决定', async () => {
+    vi.useFakeTimers()
     const service = new ApprovalService()
     const request = service.create({ ...base, reason: '需要审批' })
     const waiting = service.waitForResolution(request.id)
-    await new Promise((resolve) => setTimeout(resolve, 25))
+    let settled = false
+    void waiting.then(() => {
+      settled = true
+    })
+    await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1000)
+    expect(settled).toBe(false)
     expect(service.get(request.id)?.status).toBe('pending')
     service.resolve(request.id, 'deny_once')
     await expect(waiting).resolves.toMatchObject({ status: 'denied' })
@@ -211,10 +284,10 @@ describe('ApprovalService', () => {
       },
       reason: '需要审批',
     })
-    expect(request.argsSummary).toMatchObject({
-      headers: { Authorization: '[已隐藏]', Cookie: '[已隐藏]' },
-      items: [{ apiKey: '[已隐藏]' }],
-    })
+    const summary = JSON.stringify(request.argsSummary)
+    expect(summary).not.toContain('top-secret')
+    expect(summary).not.toContain('sid=secret')
+    expect(summary).not.toContain('sk-abcdefghijklmnop')
     const waiting = service.waitForResolution(request.id)
     service.resolve(request.id, 'allow_once', '仅执行这一次')
     await expect(waiting).resolves.toMatchObject({

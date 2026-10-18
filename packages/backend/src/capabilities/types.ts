@@ -112,7 +112,7 @@ export interface SkillManifest {
 }
 
 /** 请求级能力作用域；只能在 Channel 权限基础上继续收窄，不能扩权。 */
-export type CapabilityScope = 'default' | 'ambient'
+export type CapabilityScope = 'default' | 'ambient' | 'follow_up'
 
 /** 解析后的完整能力上下文 (Gate 输出) */
 export interface ResolvedCapability {

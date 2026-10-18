@@ -13,10 +13,10 @@ defineOptions({ name: 'SocialTab' })
  *
  * @module packages/frontend/src/components/dashboard/tabs/SocialTab
  */
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { PixelIcon, PButton, PSwitch, PInputNumber, PDialog } from '../../pixel'
 import { useAgentStore, useCompositorStore, useNotificationStore } from '../../../stores'
-import { invoke, isElectron } from '../../../utils/ipcAdapter'
+import { invoke, isElectron, listen } from '../../../utils/ipcAdapter'
 import {
   socialApi,
   type SocialContactImpression,
@@ -25,6 +25,12 @@ import {
 } from '../../../api/modules/socialApi'
 import { logger } from '../../../lib/logger'
 import SocialAdapterTerminal from '../../terminal/SocialAdapterTerminal.vue'
+import StatusCardDesigner from '../../social/StatusCardDesigner.vue'
+import AccountStickers from '../../social/AccountStickers.vue'
+import SocialTurnPanel from '../../social/SocialTurnPanel.vue'
+import PrivacyCleanupPanel from '../PrivacyCleanupPanel.vue'
+import IndexMaintenancePanel from '../IndexMaintenancePanel.vue'
+import { useSocialConnectionStatus } from '../../../composables/social/useSocialConnectionStatus'
 
 const agentStore = useAgentStore()
 const notification = useNotificationStore()
@@ -44,6 +50,10 @@ const modeConfig = ref<SocialModeConfig>({
   nightSilenceEnabled: true,
   nightSilenceStart: 0,
   nightSilenceEnd: 8,
+  taskTimeoutMinutes: 360,
+  modelIdleMinutes: 10,
+  modelRequestMinutes: 30,
+  maxRetries: 2,
   strangerPolicy: 'allow',
   groupWhitelist: [],
   groupBlacklist: [],
@@ -103,18 +113,54 @@ const adapters: AdapterCard[] = [
 // ── 状态 ──
 
 const selectedAdapter = ref('napcat')
-const activeSection = ref<'overview' | 'mode' | 'contacts' | 'data'>('overview')
+const activeSection = ref<'overview' | 'mode' | 'contacts' | 'data' | 'cards' | 'stickers'>(
+  'overview',
+)
 const sections = [
   { id: 'overview', label: '概览与账号', icon: 'desktop' },
   { id: 'mode', label: '社交模式', icon: 'chat' },
+  { id: 'cards', label: '状态卡片', icon: 'desktop' },
+  { id: 'stickers', label: '收藏表情', icon: 'image' },
   { id: 'contacts', label: '联系人', icon: 'users' },
   { id: 'data', label: '数据管理', icon: 'alert' },
 ] as const
 const napcatInstalled = ref(false)
 const napcatRunning = ref(false)
+const napcatVersion = ref<string | null>(null)
+const napcatTargetVersion = ref('')
+const napcatUpdateAvailable = ref(false)
+const napcatBusy = ref(false)
+const napcatWebUi = ref('stopped')
+const napcatWebUiError = ref('')
+const logsOpen = ref(false)
+let unlistenNapCat: (() => void) | undefined
+let disposed = false
+function applyNapCatStatus(value: unknown) {
+  const status = value as {
+    running?: boolean
+    webUi?: string
+    webUiError?: string
+    version?: string | null
+    targetVersion?: string
+    updateAvailable?: boolean
+    installing?: boolean
+  } | null
+  if (!status || disposed) return
+  napcatRunning.value = status.running === true
+  napcatWebUi.value = status.webUi ?? (status.running ? napcatWebUi.value : 'stopped')
+  napcatWebUiError.value = status.webUiError ?? ''
+  napcatVersion.value = status.version ?? null
+  napcatTargetVersion.value = status.targetVersion ?? ''
+  napcatUpdateAvailable.value = status.updateAvailable === true
+  if (typeof status.installing === 'boolean') napcatInstalling.value = status.installing
+}
 const napcatChecking = ref(false)
 const napcatInstalling = ref(false)
-const adapterConnected = ref(false)
+const {
+  connected: adapterConnected,
+  error: connectionError,
+  refresh: refreshConnection,
+} = useSocialConnectionStatus()
 
 /** 是否为 Electron 环境 (进程管理仅 Electron 可用) */
 const canManageProcess = isElectron()
@@ -125,6 +171,9 @@ const canManageProcess = isElectron()
 const ownerQqInput = ref('')
 /** 当前单实例 Social 绑定的角色 */
 const socialAgentId = ref('')
+const socialAgentName = computed(
+  () => agentStore.agents.find((agent) => agent.id === socialAgentId.value)?.name ?? '',
+)
 const agentSaving = ref(false)
 /** 配置加载中 */
 const configLoading = ref(false)
@@ -141,15 +190,9 @@ async function checkNapCat(): Promise<void> {
   try {
     const installed = await invoke('check-napcat')
     napcatInstalled.value = !!installed
+    applyNapCatStatus(await invoke('napcat-status'))
 
-    // 同时从后端 API 获取连接状态
-    try {
-      const res = await socialApi.getStatus()
-      const qqAdapter = res.data?.adapters?.find((a) => a.platform === 'qq')
-      adapterConnected.value = qqAdapter?.connected ?? false
-    } catch {
-      // API 不可用
-    }
+    await refreshConnection()
   } catch {
     napcatInstalled.value = false
   } finally {
@@ -158,15 +201,21 @@ async function checkNapCat(): Promise<void> {
 }
 
 /** 安装 NapCat */
-async function installNapCat(): Promise<void> {
+async function installNapCat(update = false): Promise<void> {
+  if (napcatInstalling.value || napcatBusy.value) return
   napcatInstalling.value = true
   try {
-    const result = await invoke('install-napcat')
-    if (result) {
-      napcatInstalled.value = true
-    }
+    const result = await invoke(update ? 'update-napcat' : 'install-napcat')
+    if (!result)
+      throw new Error(
+        update ? 'NapCat 更新失败，请查看运行日志' : 'NapCat 安装失败，请查看运行日志',
+      )
+    napcatInstalled.value = true
+    applyNapCatStatus(await invoke('napcat-status'))
+    notification.toast(update ? 'NapCat 已更新，可以启动了' : 'NapCat 已安装', { type: 'success' })
   } catch (e) {
-    logger.error('SocialTab', 'NapCat 安装失败', e)
+    logger.error('SocialTab', 'NapCat 安装或更新失败', e)
+    notification.toast(e instanceof Error ? e.message : 'NapCat 安装或更新失败', { type: 'error' })
   } finally {
     napcatInstalling.value = false
   }
@@ -174,21 +223,51 @@ async function installNapCat(): Promise<void> {
 
 /** 启动 NapCat */
 async function startNapCat(): Promise<void> {
+  if (napcatBusy.value) return
+  napcatBusy.value = true
   try {
+    if (!(await refreshConnection())) throw new Error(connectionError.value || '社交服务尚未就绪')
     await invoke('start-napcat')
-    napcatRunning.value = true
+    applyNapCatStatus(await invoke('napcat-status'))
   } catch (e) {
     logger.error('SocialTab', 'NapCat 启动失败', e)
+    notification.toast(e instanceof Error ? e.message : 'NapCat 启动失败', {
+      type: 'error',
+      title: '启动失败',
+    })
+  } finally {
+    napcatBusy.value = false
+  }
+}
+
+async function openNapCatDashboard(): Promise<void> {
+  if (napcatBusy.value) return
+  napcatBusy.value = true
+  try {
+    await invoke('open-napcat-dashboard')
+    applyNapCatStatus(await invoke('napcat-status'))
+  } catch (e) {
+    notification.toast(e instanceof Error ? e.message : '管理页打开失败', {
+      type: 'error',
+      title: '打开失败',
+    })
+  } finally {
+    napcatBusy.value = false
   }
 }
 
 /** 停止 NapCat */
 async function stopNapCat(): Promise<void> {
+  if (napcatBusy.value) return
+  napcatBusy.value = true
   try {
     await invoke('stop-napcat')
     napcatRunning.value = false
+    napcatWebUi.value = 'stopped'
   } catch (e) {
     logger.error('SocialTab', 'NapCat 停止失败', e)
+  } finally {
+    napcatBusy.value = false
   }
 }
 
@@ -216,16 +295,7 @@ async function loadSocialConfig(): Promise<void> {
   }
 }
 
-/**
- * 保存主人 QQ 配置
- *
- * 采用"读-改-写"策略：先读取现有完整配置，更新 ownerQq 字段后整体回写，
- * 避免覆盖 bindings 等其他字段。
- *
- * 注意：保存后需要重启社交应用才能让 adapter 更新 ownerQq 识别逻辑，
- * 因为 SocialAppRuntime 在 initialize 时读取配置。prompt 注入也会在下次
- * generateReply 时生效（每次 compile 都从 this.ownerQq 读取）。
- */
+/** 切换当前社交角色并立即更新会话。 */
 async function saveSocialAgent(): Promise<void> {
   if (!socialAgentId.value) return
   agentSaving.value = true
@@ -242,16 +312,22 @@ async function saveSocialAgent(): Promise<void> {
   }
 }
 
+/** 保留其他配置，保存后由宿主通知社交运行时即时更新主人身份。 */
 async function saveOwnerQq(): Promise<void> {
+  const ownerQq = ownerQqInput.value.trim()
+  if (ownerQq && !/^[1-9]\d{4,19}$/.test(ownerQq)) {
+    notification.toast('请输入有效的 QQ 号', { type: 'error', title: '保存失败' })
+    return
+  }
   configSaving.value = true
   configSaved.value = false
   try {
     // 读-改-写：保留其他字段
     const existing = await socialApi.getConfig()
-    existing.ownerQq = ownerQqInput.value.trim() || undefined
+    existing.ownerQq = ownerQq || undefined
     await socialApi.saveConfig(existing)
     configSaved.value = true
-    notification.toast('主人 QQ 配置已保存', { type: 'success', title: '保存成功' })
+    notification.toast('主人 QQ 已更新', { type: 'success', title: '保存成功' })
     // 2 秒后清除成功提示
     setTimeout(() => {
       configSaved.value = false
@@ -335,6 +411,7 @@ async function loadContacts(): Promise<void> {
 async function clearSocialData(): Promise<void> {
   const agentId = socialAgentId.value
   if (!agentId) return
+  if (dataBusy.value) return
   dataBusy.value = true
   try {
     await socialApi.clearData({
@@ -351,6 +428,7 @@ async function clearSocialData(): Promise<void> {
     await loadContacts()
   } catch (error) {
     logger.error('SocialTab', '清理社交数据失败', error)
+    notification.toast((error as Error).message, 'error')
   } finally {
     dataBusy.value = false
   }
@@ -365,20 +443,10 @@ onMounted(async () => {
   const tasks: Promise<void>[] = []
 
   if (canManageProcess) {
+    const stop = await listen('napcat-state-changed', applyNapCatStatus)
+    if (disposed) stop()
+    else unlistenNapCat = stop
     tasks.push(checkNapCat())
-  } else {
-    // Docker 模式：只检查 API 连接状态
-    tasks.push(
-      (async () => {
-        try {
-          const res = await socialApi.getStatus()
-          const qqAdapter = res.data?.adapters?.find((a) => a.platform === 'qq')
-          adapterConnected.value = qqAdapter?.connected ?? false
-        } catch {
-          // 静默
-        }
-      })(),
-    )
   }
 
   // 加载主人 QQ 配置（Electron/Docker 通用）
@@ -388,6 +456,10 @@ onMounted(async () => {
   if (!agentStore.agents.length) tasks.push(agentStore.fetchAgents())
 
   await Promise.all(tasks)
+})
+onUnmounted(() => {
+  disposed = true
+  unlistenNapCat?.()
 })
 </script>
 
@@ -414,6 +486,9 @@ onMounted(async () => {
       </button>
     </nav>
 
+    <StatusCardDesigner v-if="activeSection === 'cards'" :key="socialAgentId" />
+    <AccountStickers v-if="activeSection === 'stickers'" />
+    <SocialTurnPanel v-if="activeSection === 'mode'" :agent-id="socialAgentId" />
     <template v-if="activeSection === 'overview'">
       <div class="sp-adapter-cards">
         <button
@@ -513,31 +588,90 @@ onMounted(async () => {
                 </span>
               </div>
               <div class="sp-status-line">
-                <span class="sp-label">连接状态</span>
+                <span class="sp-label">进程状态</span>
+                <span :class="['sp-value', napcatRunning ? 'sp-ok' : 'sp-na']">
+                  {{ napcatRunning ? '运行中' : '已停止' }}
+                </span>
+              </div>
+              <div v-if="napcatInstalled" class="sp-status-line">
+                <span class="sp-label">版本</span>
+                <span class="sp-value">{{ napcatVersion ? `v${napcatVersion}` : '未知' }}</span>
+              </div>
+              <div class="sp-status-line">
+                <span class="sp-label">管理页面</span>
+                <span :class="['sp-value', napcatWebUi === 'ready' ? 'sp-ok' : 'sp-na']">
+                  {{
+                    napcatWebUi === 'ready'
+                      ? '已就绪'
+                      : napcatWebUi === 'starting'
+                        ? '准备中'
+                        : napcatWebUi === 'error'
+                          ? '暂不可用'
+                          : '未启动'
+                  }}
+                </span>
+              </div>
+              <div class="sp-status-line">
+                <span class="sp-label">Bot 连接</span>
                 <span :class="['sp-value', adapterConnected ? 'sp-ok' : 'sp-na']">
                   {{ adapterConnected ? '已连接' : '未连接' }}
                 </span>
               </div>
+              <p v-if="connectionError" role="alert" class="sp-na">{{ connectionError }}</p>
+              <p v-if="napcatWebUiError" role="alert" class="sp-na">{{ napcatWebUiError }}</p>
               <div class="sp-actions">
                 <PButton
                   v-if="!napcatInstalled"
                   size="sm"
                   :disabled="napcatInstalling || napcatChecking"
-                  @click="installNapCat"
+                  @click="installNapCat()"
                 >
                   <PixelIcon name="download" size="xs" />
                   {{ napcatInstalling ? '安装中...' : '一键安装' }}
                 </PButton>
                 <template v-else>
-                  <PButton v-if="!napcatRunning" size="sm" variant="primary" @click="startNapCat">
+                  <PButton
+                    v-if="!napcatRunning"
+                    size="sm"
+                    variant="primary"
+                    :disabled="napcatBusy || napcatInstalling"
+                    @click="startNapCat"
+                  >
                     <PixelIcon name="flash" size="xs" />
                     启动
                   </PButton>
-                  <PButton v-else size="sm" variant="ghost" @click="stopNapCat">
+                  <PButton
+                    v-else
+                    size="sm"
+                    variant="ghost"
+                    :disabled="napcatBusy"
+                    @click="stopNapCat"
+                  >
                     <PixelIcon name="alert" size="xs" />
                     停止
                   </PButton>
+                  <PButton
+                    v-if="napcatRunning"
+                    size="sm"
+                    variant="secondary"
+                    :disabled="napcatBusy"
+                    @click="openNapCatDashboard"
+                  >
+                    <PixelIcon name="desktop" size="xs" />
+                    打开管理页
+                  </PButton>
                 </template>
+                <PButton
+                  v-if="napcatInstalled && napcatUpdateAvailable"
+                  size="sm"
+                  variant="secondary"
+                  :disabled="napcatRunning || napcatBusy || napcatInstalling"
+                  :title="napcatRunning ? '停止 NapCat 后更新' : `更新到 v${napcatTargetVersion}`"
+                  @click="installNapCat(true)"
+                >
+                  <PixelIcon name="download" size="xs" />
+                  {{ napcatInstalling ? '更新中…' : `更新至 v${napcatTargetVersion}` }}
+                </PButton>
                 <PButton size="sm" variant="ghost" :disabled="napcatChecking" @click="checkNapCat">
                   <PixelIcon name="refresh" size="xs" />
                 </PButton>
@@ -560,7 +694,9 @@ onMounted(async () => {
                 <span class="sp-label">协议</span>
                 <span class="sp-value">OneBot v11 (反向 WS)</span>
               </div>
-              <div class="sp-hint">请在 NapCat 配置中将反向 WS 地址设置为上述端点</div>
+              <div class="sp-hint">
+                本机 NapCat 会自动配置连接；QQ 登录与验证在管理标签页中完成。
+              </div>
             </div>
           </div>
         </div>
@@ -594,12 +730,51 @@ onMounted(async () => {
       </div>
 
       <!-- 适配器运行终端属于概览与账号 -->
-      <div class="sp-terminal">
-        <SocialAdapterTerminal />
-      </div>
+      <section class="sp-terminal" :class="{ 'sp-terminal-open': logsOpen }">
+        <button
+          type="button"
+          class="sp-block-header sp-terminal-toggle"
+          :aria-expanded="logsOpen"
+          aria-controls="social-adapter-terminal"
+          @click="logsOpen = !logsOpen"
+        >
+          <PixelIcon name="terminal" size="xs" />
+          运行日志与排障
+        </button>
+        <div v-if="logsOpen" id="social-adapter-terminal" class="sp-terminal-content">
+          <SocialAdapterTerminal />
+        </div>
+      </section>
     </template>
 
     <div v-else-if="activeSection === 'mode'" class="sp-mode-grid">
+      <section class="sp-config-block sp-mode-wide">
+        <div class="sp-block-header">
+          <PixelIcon name="clock" size="xs" />
+          <span>任务与恢复</span>
+        </div>
+        <div class="sp-mode-body sp-number-row">
+          <PInputNumber
+            v-model="modeConfig.taskTimeoutMinutes"
+            label="整轮上限（分钟）"
+            :min="1"
+            :max="360"
+          />
+          <PInputNumber
+            v-model="modeConfig.modelIdleMinutes"
+            label="无数据超时（分钟）"
+            :min="1"
+            :max="60"
+          />
+          <PInputNumber
+            v-model="modeConfig.modelRequestMinutes"
+            label="单次请求上限（分钟）"
+            :min="modeConfig.modelIdleMinutes"
+            :max="360"
+          />
+          <PInputNumber v-model="modeConfig.maxRetries" label="自动重试次数" :min="0" :max="2" />
+        </div>
+      </section>
       <section class="sp-config-block">
         <div class="sp-block-header">
           <PixelIcon name="clock" size="xs" />
@@ -749,7 +924,9 @@ onMounted(async () => {
         <div v-else class="sp-empty sp-empty-detail">从左侧选择一位联系人吧</div>
       </section>
     </div>
-    <div v-else class="sp-danger-zone">
+    <div v-else-if="activeSection === 'data'" class="sp-danger-zone">
+      <IndexMaintenancePanel :social-agent-id="socialAgentId" />
+      <PrivacyCleanupPanel />
       <header class="sp-danger-head">
         <div>
           <span>DATA MAINTENANCE</span>
@@ -787,7 +964,7 @@ onMounted(async () => {
         <article>
           <div>
             <strong>全部社交长记忆</strong>
-            <span>重置当前 Agent 的 social.tdb，不删除聊天记录。</span>
+            <span>清理当前角色的长记忆、索引及关联日记副本，保留聊天和联系人印象。</span>
           </div>
           <button class="sp-soft-action sp-soft-danger" @click="openClearDialog('long_memory')">
             清空长记忆
@@ -810,13 +987,15 @@ onMounted(async () => {
       title="确认清理社交数据"
       :message="
         requiresStrongConfirmation
-          ? `此操作影响当前角色 ${agentStore.currentAgent?.name ?? ''}，请输入角色名后继续。`
+          ? `此操作影响社交角色 ${socialAgentName}，请输入角色名后继续。`
           : '此操作不可撤销，请确认目标无误。'
       "
       :mode="requiresStrongConfirmation ? 'prompt' : 'confirm'"
-      :placeholder="requiresStrongConfirmation ? (agentStore.currentAgent?.name ?? '') : ''"
+      :placeholder="requiresStrongConfirmation ? socialAgentName : ''"
       confirm-text="确认清理"
       confirm-variant="danger"
+      :loading="dataBusy"
+      :auto-close="false"
       @confirm="
         (value?: string) => {
           if (value !== undefined) confirmAgentName = value
@@ -1179,7 +1358,9 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   height: 100%;
-  overflow: hidden;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
   background: linear-gradient(180deg, #f8fafc 0%, #f0f9ff 100%);
 }
 
@@ -1458,10 +1639,30 @@ onMounted(async () => {
 
 /* ── 终端区 ── */
 .sp-terminal {
+  display: flex;
+  flex-direction: column;
   flex: 1;
   overflow: hidden;
   margin: 0 24px 16px;
   border: 2px solid var(--color-sky-100, #e0f2fe);
+}
+.sp-terminal:not(.sp-terminal-open) {
+  flex: 0 0 auto;
+  min-height: 0;
+}
+.sp-terminal-toggle {
+  width: 100%;
+  flex-shrink: 0;
+  border: 0;
+  border-bottom: 1px solid var(--sp-border-soft);
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+}
+.sp-terminal-content {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* ── 统一主题与字体覆盖 ── */

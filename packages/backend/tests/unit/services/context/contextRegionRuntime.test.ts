@@ -26,6 +26,34 @@ function region(
 }
 
 describe('Context Region Runtime', () => {
+  it('诊断清单不重复消耗已由必选渲染结果计费的预算', async () => {
+    const selector = new ContextRegionSelector({
+      tokenizerId: '字符计费',
+      countTokens: (text) => text.length,
+    })
+    const result = await selector.compileAsync(
+      [
+        region({
+          regionId: 'rendered',
+          content: '完整提示词',
+          required: true,
+          delivery: 'manifest-only',
+        }),
+        region({
+          regionId: 'diagnostic',
+          content: '完整提示词',
+          delivery: 'manifest-only',
+          deduplicationKey: '诊断',
+        }),
+      ],
+      5,
+    )
+    expect(result.usedTokens).toBe(5)
+    expect(result.manifest.find((entry) => entry.regionId === 'diagnostic')).toMatchObject({
+      selected: true,
+      tokenEstimate: 0,
+    })
+  })
   it('应使用注入Tokenizer生成确定性Snapshot并精确执行预算', async () => {
     const tokenizer = { tokenizerId: 'test-v1', countTokens: (content: string) => content.length }
     const selector = new ContextRegionSelector(tokenizer)
@@ -76,7 +104,7 @@ describe('Context Region Runtime', () => {
         region({
           providerId: 'cache',
           regionId: 'same',
-          content: '正文',
+          content: `正文${generation}`,
           sourceGeneration: generation,
         }),
       ],
@@ -91,15 +119,13 @@ describe('Context Region Runtime', () => {
     const first = await registry.collect(request)
     first[0]!.content = '调用方修改'
     const second = await registry.collect(request)
-    expect(second[0]!.content).toBe('正文')
-    expect(registry.cacheSize).toBe(1)
+    expect(second[0]!.content).toBe('正文1')
     generation = 2
-    await registry.collect(request)
-    expect(registry.cacheSize).toBe(2)
-    expect(registry.invalidateProvider('cache')).toBe(2)
+    expect((await registry.collect(request))[0]!.content).toBe('正文2')
+    expect(registry.invalidateProvider('cache')).toBeGreaterThan(0)
   })
 
-  it('应按 required、priority、trust 稳定选择并记录预算淘汰', () => {
+  it('应按 required、priority 稳定选择并记录预算淘汰', () => {
     const selector = new ContextRegionSelector()
     const result = selector.compile(
       [

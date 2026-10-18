@@ -14,6 +14,8 @@
  * @module packages/backend/src/services/llm/providers/anthropicProvider
  */
 
+import { normalizeTokenUsage, tokenCount } from '../usage'
+import { fetchLlmResponse } from '../requestPolicy'
 import type {
   LlmProvider,
   ChatMessage,
@@ -26,7 +28,9 @@ import type {
 } from '../types'
 import { AppError } from '../../../lib/appError'
 import { stripBase64DataUris } from '../sanitize'
+import { anthropicContent } from '../multimodalContent'
 import { createLogger } from '../../../lib/logger'
+import { temporaryUpstreamCode } from '../retryPolicy'
 
 const logger = createLogger('AnthropicProvider')
 
@@ -51,18 +55,69 @@ function parseRetryAfterMs(value: string | null): number | undefined {
   return Number.isNaN(dateMs) ? undefined : Math.max(0, dateMs - Date.now())
 }
 
-/** Anthropic SSE 事件类型 */
-type AnthropicEventType =
-  | 'message_start'
-  | 'content_block_start'
-  | 'content_block_delta'
-  | 'content_block_stop'
-  | 'message_delta'
-  | 'message_stop'
-  | 'ping'
+/** 以完整 SSE 事件为边界读取，网络分包不能改变事件或 UTF-8 字符的含义。 */
+async function* readAnthropicEvents(reader: ReadableStreamDefaultReader<Uint8Array>) {
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let event = ''
+  let dataLines: string[] = []
+  function line(value: string): { event: string; data: Record<string, unknown> } | undefined {
+    if (!value) {
+      const type = event
+      const source = dataLines.join('\n')
+      event = ''
+      dataLines = []
+      if (!source || source === '[DONE]') return
+      let data: Record<string, unknown>
+      try {
+        data = JSON.parse(source)
+        if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error()
+      } catch {
+        throw new AppError('LLM_ERROR', { message: 'Anthropic 流事件格式无效' })
+      }
+      return { event: type || String(data.type ?? ''), data }
+    }
+    if (value.startsWith(':')) return
+    const separator = value.indexOf(':')
+    const field = separator < 0 ? value : value.slice(0, separator)
+    const content = separator < 0 ? '' : value.slice(separator + 1).replace(/^ /, '')
+    if (field === 'event') event = content
+    else if (field === 'data') dataLines.push(content)
+  }
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      buffer += done ? decoder.decode() : decoder.decode(value, { stream: true })
+      let end: number
+      while ((end = buffer.indexOf('\n')) >= 0) {
+        const result = line(buffer.slice(0, end).replace(/\r$/, ''))
+        buffer = buffer.slice(end + 1)
+        if (result) yield result
+      }
+      if (done) {
+        if (buffer) {
+          const result = line(buffer.replace(/\r$/, ''))
+          if (result) yield result
+        }
+        const result = line('')
+        if (result) yield result
+        break
+      }
+    }
+  } finally {
+    await reader.cancel().catch(() => {})
+    reader.releaseLock()
+  }
+}
 
 export class AnthropicProvider implements LlmProvider {
   constructor(private config: ProviderConfig) {}
+
+  getInputTokenPayload(messages: ChatMessage[], opts: ChatOptions): Record<string, unknown> {
+    const { systemPrompt, anthropicMessages } = this.convertMessages(messages)
+    const body = this.buildBody(systemPrompt, anthropicMessages, opts, false)
+    return { system: body.system, messages: body.messages, tools: body.tools }
+  }
 
   /**
    * 非流式调用
@@ -72,7 +127,7 @@ export class AnthropicProvider implements LlmProvider {
     const url = `${this.getBase()}/v1/messages`
     const body = this.buildBody(systemPrompt, anthropicMessages, opts, false)
 
-    const response = await this.fetchWithTimeout(url, body, opts.timeout ?? 300_000, opts.signal)
+    const response = await this.fetchWithTimeout(url, body, opts.timeout ?? 600_000, opts.signal)
 
     if (!response.ok) {
       await this.handleError(response, 'chat')
@@ -98,7 +153,7 @@ export class AnthropicProvider implements LlmProvider {
     const url = `${this.getBase()}/v1/messages`
     const body = this.buildBody(systemPrompt, anthropicMessages, opts, true)
 
-    const response = await this.fetchWithTimeout(url, body, opts.timeout ?? 120_000, opts.signal)
+    const response = await this.fetchWithTimeout(url, body, opts.timeout ?? 600_000, opts.signal)
 
     if (!response.ok) {
       await this.handleError(response, 'chatStream')
@@ -112,162 +167,97 @@ export class AnthropicProvider implements LlmProvider {
       })
     }
 
-    const decoder = new TextDecoder()
-    let buffer = ''
-
-    // 跟踪当前活跃的 tool_use 块
     let currentToolIndex = 0
-    let currentToolId = ''
-    let currentToolName = ''
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() ?? ''
-
-        // Anthropic 的 SSE 格式使用 event: 和 data: 两行
-        let currentEvent = ''
-
-        for (const line of lines) {
-          const trimmed = line.trim()
-
-          // 捕获 event 类型
-          if (trimmed.startsWith('event: ')) {
-            currentEvent = trimmed.slice(7)
-            continue
+    let accumulatedUsage: Record<string, unknown> = {}
+    for await (const { event, data } of readAnthropicEvents(reader)) {
+      switch (event) {
+        case 'message_start': {
+          const message = data.message as Record<string, unknown> | undefined
+          const usage = message?.usage as Record<string, unknown> | undefined
+          if (usage) accumulatedUsage = { ...usage }
+          yield {
+            choices: [{ delta: { role: 'assistant' }, finishReason: null }],
+            usage: usage ? this.normalizeUsage(accumulatedUsage) : undefined,
           }
-
-          if (!trimmed.startsWith('data: ')) continue
-          const jsonStr = trimmed.slice(6)
-
-          try {
-            const data = JSON.parse(jsonStr) as Record<string, unknown>
-            const eventType = (currentEvent || data.type) as AnthropicEventType
-
-            switch (eventType) {
-              case 'message_start': {
-                // 提取初始 usage
-                const message = data.message as Record<string, unknown> | undefined
-                const rawUsage = message?.usage as Record<string, unknown> | undefined
-                if (rawUsage) {
-                  yield {
-                    choices: [{ delta: { role: 'assistant' }, finishReason: null }],
-                    usage: this.normalizeUsage(rawUsage),
-                  }
-                }
-                break
-              }
-
-              case 'content_block_start': {
-                const block = data.content_block as Record<string, unknown>
-                if (block?.type === 'tool_use') {
-                  currentToolId = (block.id as string) ?? ''
-                  currentToolName = (block.name as string) ?? ''
-                  currentToolIndex = (data.index as number) ?? 0
-
-                  // 发出工具调用开始信号
-                  yield {
-                    choices: [
-                      {
-                        delta: {
-                          toolCalls: [
-                            {
-                              index: currentToolIndex,
-                              id: currentToolId,
-                              type: 'function',
-                              function: {
-                                name: currentToolName,
-                                arguments: '',
-                              },
-                            },
-                          ],
-                        },
-                        finishReason: null,
-                      },
-                    ],
-                  }
-                }
-                break
-              }
-
-              case 'content_block_delta': {
-                const delta = data.delta as Record<string, unknown>
-                if (!delta) break
-
-                if (delta.type === 'thinking_delta' && delta.thinking) {
-                  yield {
-                    choices: [
-                      {
-                        delta: { reasoningContent: delta.thinking as string },
-                        finishReason: null,
-                      },
-                    ],
-                  }
-                } else if (delta.type === 'text_delta' && delta.text) {
-                  yield {
-                    choices: [
-                      {
-                        delta: { content: delta.text as string },
-                        finishReason: null,
-                      },
-                    ],
-                  }
-                } else if (delta.type === 'input_json_delta' && delta.partial_json) {
-                  // 工具调用参数增量
-                  yield {
-                    choices: [
-                      {
-                        delta: {
-                          toolCalls: [
-                            {
-                              index: currentToolIndex,
-                              function: {
-                                arguments: delta.partial_json as string,
-                              },
-                            },
-                          ],
-                        },
-                        finishReason: null,
-                      },
-                    ],
-                  }
-                }
-                break
-              }
-
-              case 'message_delta': {
-                // 消息结束，提取最终 usage 和 stop_reason
-                const messageDelta = data.delta as Record<string, unknown> | undefined
-                const rawUsage = data.usage as Record<string, unknown> | undefined
-                const stopReason = messageDelta?.stop_reason as string | undefined
-
-                yield {
-                  choices: [
+          break
+        }
+        case 'content_block_start': {
+          const block = data.content_block as Record<string, unknown> | undefined
+          if (block?.type !== 'tool_use') break
+          currentToolIndex = (data.index as number) ?? 0
+          yield {
+            choices: [
+              {
+                delta: {
+                  toolCalls: [
                     {
-                      delta: {},
-                      finishReason: this.mapStopReason(stopReason),
+                      index: currentToolIndex,
+                      id: String(block.id ?? ''),
+                      type: 'function',
+                      function: { name: String(block.name ?? ''), arguments: '' },
                     },
                   ],
-                  usage: rawUsage ? this.normalizeUsage(rawUsage) : undefined,
-                }
-                break
-              }
-
-              // message_stop / content_block_stop / ping → 忽略
-              default:
-                break
-            }
-          } catch {
-            // 跳过解析错误
+                },
+                finishReason: null,
+              },
+            ],
           }
+          break
         }
+        case 'content_block_delta': {
+          const delta = data.delta as Record<string, unknown> | undefined
+          if (!delta) break
+          if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string') {
+            yield { choices: [{ delta: { reasoningContent: delta.thinking }, finishReason: null }] }
+          } else if (delta.type === 'text_delta' && typeof delta.text === 'string') {
+            yield { choices: [{ delta: { content: delta.text }, finishReason: null }] }
+          } else if (delta.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
+            yield {
+              choices: [
+                {
+                  delta: {
+                    toolCalls: [
+                      {
+                        index: (data.index as number) ?? currentToolIndex,
+                        function: { arguments: delta.partial_json },
+                      },
+                    ],
+                  },
+                  finishReason: null,
+                },
+              ],
+            }
+          }
+          break
+        }
+        case 'message_delta': {
+          const delta = data.delta as Record<string, unknown> | undefined
+          const usage = data.usage as Record<string, unknown> | undefined
+          // 结束事件通常只携带输出量，保留开始事件给出的输入量。
+          if (usage) accumulatedUsage = { ...accumulatedUsage, ...usage }
+          yield {
+            choices: [
+              {
+                delta: {},
+                finishReason: this.mapStopReason(delta?.stop_reason as string | undefined),
+              },
+            ],
+            usage: Object.keys(accumulatedUsage).length
+              ? this.normalizeUsage(accumulatedUsage)
+              : undefined,
+          }
+          break
+        }
+        case 'error': {
+          const error = data.error as Record<string, unknown> | undefined
+          throw new AppError('LLM_ERROR', {
+            message: typeof error?.message === 'string' ? error.message : 'Anthropic 流式响应异常',
+            data: { provider: 'anthropic', retryable: temporaryUpstreamCode(error?.type) },
+          })
+        }
+        default:
+          break
       }
-    } finally {
-      reader.releaseLock()
     }
   }
 
@@ -323,7 +313,7 @@ export class AnthropicProvider implements LlmProvider {
     const body: Record<string, unknown> = {
       model: this.config.modelId,
       messages,
-      max_tokens: thinkingBudget ? Math.max(maxTokens, thinkingBudget + 1) : maxTokens,
+      max_tokens: maxTokens + (thinkingBudget ?? 0),
       stream,
     }
 
@@ -402,10 +392,13 @@ export class AnthropicProvider implements LlmProvider {
 
       // assistant + toolCalls → tool_use blocks
       if (msg.role === 'assistant' && msg.toolCalls?.length) {
-        const blocks: Array<Record<string, unknown>> = []
-        if (msg.content) {
-          blocks.push({ type: 'text', text: String(msg.content) })
-        }
+        const content = anthropicContent(msg.content)
+        const blocks: Array<Record<string, unknown>> =
+          typeof content === 'string'
+            ? content
+              ? [{ type: 'text', text: content }]
+              : []
+            : [...content]
         for (const tc of msg.toolCalls) {
           let input: Record<string, unknown>
           try {
@@ -427,7 +420,7 @@ export class AnthropicProvider implements LlmProvider {
       // 普通消息
       rawMessages.push({
         role: msg.role,
-        content: typeof msg.content === 'string' ? msg.content : '',
+        content: anthropicContent(msg.content),
       })
     }
 
@@ -525,14 +518,17 @@ export class AnthropicProvider implements LlmProvider {
   }
 
   /** 规范化 Anthropic Usage → UsageInfo */
-  private normalizeUsage(raw: Record<string, unknown>): UsageInfo {
-    const input = (raw.input_tokens as number) ?? 0
-    const output = (raw.output_tokens as number) ?? 0
-    return {
-      promptTokens: input,
-      completionTokens: output,
-      totalTokens: input + output,
-    }
+  private normalizeUsage(raw: Record<string, unknown>): UsageInfo | undefined {
+    const fresh = tokenCount(raw.input_tokens)
+    const cachedRead = tokenCount(raw.cache_read_input_tokens)
+    const cachedWrite = tokenCount(raw.cache_creation_input_tokens)
+    // Anthropic 的 input_tokens 不含缓存读取和创建，先合并成统一输入口径。
+    return normalizeTokenUsage({
+      input: fresh === undefined ? undefined : fresh + (cachedRead ?? 0) + (cachedWrite ?? 0),
+      output: raw.output_tokens,
+      cachedRead,
+      cachedWrite,
+    })
   }
 
   /** 映射 Anthropic 停止原因 → OpenAI 格式 */
@@ -557,15 +553,18 @@ export class AnthropicProvider implements LlmProvider {
     signal?: AbortSignal,
   ): Promise<Response> {
     try {
-      return await fetch(url, {
-        method: 'POST',
-        headers: this.buildHeaders(),
-        body: JSON.stringify(payload),
-        signal: signal
-          ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
-          : AbortSignal.timeout(timeoutMs),
-      })
+      return await fetchLlmResponse(
+        url,
+        {
+          method: 'POST',
+          headers: this.buildHeaders(),
+          body: JSON.stringify(payload),
+        },
+        { timeout: timeoutMs, signal },
+        'anthropic',
+      )
     } catch (err) {
+      if (err instanceof AppError) throw err
       if (err instanceof DOMException && err.name === 'TimeoutError') {
         throw new AppError('LLM_TIMEOUT', {
           message: `Anthropic 请求超时 (${Math.round(timeoutMs / 1000)}s)`,

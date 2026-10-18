@@ -43,9 +43,8 @@ main.log
 # 运行时数据
 data/
 @data/
-
-# 临时文档
-.docs/TEMP-todo/
+**/.arca/
+**/.pictoria/
 
 # 缓存
 .ruff_cache/
@@ -53,4 +52,7 @@ __pycache__/
 *.pyc
 .eslintcache
 .prettiercache
-.vitepress/cache/
+**/.vitepress/cache/
+
+# 临时目录
+/TEMP/

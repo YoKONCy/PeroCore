@@ -91,8 +91,19 @@ function handleInput(e: Event) {
 
 .p-input-number {
   display: flex;
+  min-width: 0;
   border: 2px solid var(--dash-input-border);
   overflow: hidden;
+  transition:
+    border-color var(--ui-duration-fast) var(--ui-ease-standard),
+    box-shadow var(--ui-duration-fast) var(--ui-ease-standard);
+}
+.p-input-number:not(.p-input-number-disabled):hover {
+  border-color: var(--ui-border-strong);
+}
+.p-input-number:not(.p-input-number-disabled):focus-within {
+  border-color: var(--ui-accent-sky);
+  box-shadow: 0 0 0 1px var(--ui-accent-sky);
 }
 .p-input-number-disabled {
   color: var(--ui-text-disabled);
@@ -100,6 +111,8 @@ function handleInput(e: Event) {
 }
 
 .p-input-number-btn {
+  --ui-focus-color: var(--ui-accent-sky);
+  flex-shrink: 0;
   width: 32px;
   display: flex;
   align-items: center;
@@ -110,8 +123,13 @@ function handleInput(e: Event) {
   font-weight: 700;
   font-size: 14px;
   cursor: pointer;
-  transition: background 0.15s;
+  transition:
+    background-color var(--ui-duration-fast) var(--ui-ease-standard),
+    color var(--ui-duration-fast) var(--ui-ease-standard);
   user-select: none;
+}
+.p-input-number-btn:focus-visible {
+  outline-offset: -2px;
 }
 .p-input-number-btn:hover:not(:disabled) {
   background: var(--ui-accent-sky-soft);
@@ -134,6 +152,7 @@ function handleInput(e: Event) {
   font-size: 13px;
   padding: 4px;
   outline: none;
+  caret-color: var(--ui-accent-sky);
   -moz-appearance: textfield;
 }
 .p-input-number-input::-webkit-inner-spin-button,

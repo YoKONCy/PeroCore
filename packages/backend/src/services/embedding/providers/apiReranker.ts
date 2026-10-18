@@ -14,6 +14,7 @@
 
 import { AppError } from '../../../lib/appError'
 import { createLogger } from '../../../lib/logger'
+import { upstreamHttpError, upstreamWebPage } from '../../../lib/upstreamHttpError'
 import type { RerankerProvider, RerankResult } from '../embeddingService'
 
 const logger = createLogger('ApiReranker')
@@ -78,19 +79,20 @@ export class ApiRerankerProvider implements RerankerProvider {
       })
     }
 
-    if (!response.ok) {
+    if (!response.ok || upstreamWebPage(response)) {
       const errBody = await response.text().catch(() => '(无法读取响应)')
       const code = response.status === 429 ? 'RATE_LIMITED' : 'EXTERNAL_ERROR'
 
-      logger.error(`Reranker API 失败`, {
+      const error = upstreamHttpError(response, errBody, 'Reranker API', code)
+      logger.error('Reranker API 失败', {
         status: response.status,
-        body: errBody.slice(0, 300),
+        reason: error.message,
         model: this.config.model,
       })
 
       throw new AppError(code, {
-        message: `Reranker API 错误 (${response.status}): ${errBody.slice(0, 200)}`,
-        data: { service: 'reranker', model: this.config.model, status: response.status },
+        message: error.message,
+        data: { ...(error.data as object), service: 'reranker', model: this.config.model },
       })
     }
 

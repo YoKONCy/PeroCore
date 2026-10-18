@@ -56,6 +56,7 @@ export function useMemoryArchive(
   const page = ref(1)
   const pageSize = ref(30)
   const isLoading = ref(false)
+  let listRequest = 0
   const facets = shallowRef<EventNoteArchiveFacets>(EMPTY_FACETS)
   const stats = shallowRef<EventNoteArchiveStats>(EMPTY_STATS)
 
@@ -83,10 +84,27 @@ export function useMemoryArchive(
   const selected = shallowRef<EventNoteDetail | null>(null)
   const selectedId = ref<string | null>(null)
   const detailLoading = ref(false)
+  let detailRequest = 0
+  let sourceRequest = 0
+  let graphRequest = 0
   const detailError = ref('')
   const source = shallowRef<EventMemorySource | null>(null)
   const sourceLoading = ref(false)
   const sourceError = ref('')
+  watch(
+    selectedId,
+    (id) => {
+      sourceRequest++
+      source.value = null
+      sourceLoading.value = false
+      if (!id) {
+        detailRequest++
+        selected.value = null
+        detailLoading.value = false
+      }
+    },
+    { flush: 'sync' },
+  )
 
   // ── 图谱 ──
   const graph = shallowRef<EventMemoryGraphSnapshot>({ nodes: [], edges: [], truncated: false })
@@ -109,14 +127,6 @@ export function useMemoryArchive(
     if (channel.value !== 'all') {
       const value = channel.value
       list.push({ key: 'channel', label: `来源：${value}`, remove: () => (channel.value = 'all') })
-    }
-    if (status.value !== 'active') {
-      const value = status.value
-      list.push({
-        key: 'status',
-        label: value === 'archived' ? '仅归档' : '全部状态',
-        remove: () => (status.value = 'active'),
-      })
     }
     if (mode.value !== 'all') {
       const value = mode.value
@@ -231,6 +241,7 @@ export function useMemoryArchive(
   })
 
   async function fetchArchive(): Promise<void> {
+    const request = ++listRequest
     isLoading.value = true
     // 记录请求时的页码：响应页码只用于校验，不回写 page，
     // 否则过滤条件变化触发的重置（page=1）会被旧响应的页码覆盖，造成额外请求。
@@ -238,6 +249,7 @@ export function useMemoryArchive(
     try {
       const response = await memoryApi.archive(requestFilter.value)
       const data = response.data
+      if (request !== listRequest) return
       if (!data) throw new Error('档案数据为空')
       items.value = data.items
       total.value = data.total
@@ -249,17 +261,19 @@ export function useMemoryArchive(
       facets.value = data.facets
       stats.value = data.stats
     } catch (error) {
+      if (request !== listRequest) return
       items.value = []
       total.value = 0
       pageCount.value = 1
       facets.value = EMPTY_FACETS
       throw error
     } finally {
-      isLoading.value = false
+      if (request === listRequest) isLoading.value = false
     }
   }
 
   async function selectNote(note: EventNote): Promise<void> {
+    const request = ++detailRequest
     selectedId.value = note.id
     selected.value = null
     source.value = null
@@ -268,32 +282,39 @@ export function useMemoryArchive(
     detailLoading.value = true
     try {
       const response = await memoryApi.detail(note.id)
+      if (selectedId.value !== note.id || request !== detailRequest) return
       selected.value = response.data ?? null
       if (!selected.value) detailError.value = '事件详情加载失败'
     } catch {
+      if (selectedId.value !== note.id || request !== detailRequest) return
       selected.value = null
       detailError.value = '事件详情加载失败，请稍后重试。'
     } finally {
-      detailLoading.value = false
+      if (request === detailRequest) detailLoading.value = false
     }
   }
 
   async function loadSource(): Promise<void> {
     if (!selected.value) return
+    const id = selected.value.id
+    const request = ++sourceRequest
     sourceLoading.value = true
     sourceError.value = ''
     try {
-      const response = await memoryApi.source(selected.value.id)
+      const response = await memoryApi.source(id)
+      if (selectedId.value !== id || request !== sourceRequest) return
       source.value = response.data ?? null
     } catch {
+      if (selectedId.value !== id || request !== sourceRequest) return
       source.value = null
       sourceError.value = '来源加载失败，请稍后重试。'
     } finally {
-      sourceLoading.value = false
+      if (request === sourceRequest) sourceLoading.value = false
     }
   }
 
   async function fetchGraph(includeArchived: boolean): Promise<void> {
+    const request = ++graphRequest
     graphLoading.value = true
     graphError.value = ''
     try {
@@ -301,16 +322,24 @@ export function useMemoryArchive(
       const responses = await Promise.all(
         agentIds.map((agentId) => memoryApi.graph(agentId, includeArchived)),
       )
+      if (request !== graphRequest) return
+      const nodes = responses
+        .flatMap((response) => response.data?.nodes ?? [])
+        .filter((note) => note.status === (includeArchived ? 'archived' : 'active'))
+      const ids = new Set(nodes.map((note) => note.id))
       graph.value = {
-        nodes: responses.flatMap((response) => response.data?.nodes ?? []),
-        edges: responses.flatMap((response) => response.data?.edges ?? []),
+        nodes,
+        edges: responses
+          .flatMap((response) => response.data?.edges ?? [])
+          .filter((edge) => ids.has(edge.sourceId) && ids.has(edge.targetId)),
         truncated: responses.some((response) => response.data?.truncated),
       }
     } catch {
+      if (request !== graphRequest) return
       graph.value = { nodes: [], edges: [], truncated: false }
       graphError.value = '记忆图谱加载失败，请稍后重试。'
     } finally {
-      graphLoading.value = false
+      if (request === graphRequest) graphLoading.value = false
     }
   }
 

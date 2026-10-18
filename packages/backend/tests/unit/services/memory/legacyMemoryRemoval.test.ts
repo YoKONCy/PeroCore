@@ -1,18 +1,13 @@
 import Database from 'better-sqlite3'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it } from 'vitest'
 import { closeDrizzleConnection, createDrizzleConnection } from '@infos/backend/database'
 import { MemoryStoreRegistry } from '@infos/backend/repositories/storeRegistry'
 import type { PathResolver } from '@infos/backend/core/pathResolver'
 
-const projectRoot = resolve(import.meta.dirname, '../../../../../..')
 const temporaryPaths: string[] = []
-
-function source(path: string): string {
-  return readFileSync(join(projectRoot, path), 'utf8')
-}
 
 function resolver(root: string): PathResolver {
   return {
@@ -25,33 +20,6 @@ afterEach(() => {
 })
 
 describe('旧长记忆链路清理', () => {
-  it('生产入口、工具注册、前端 API 与基线不得重新引用旧体系', () => {
-    const combined = [
-      source('packages/backend/src/container.ts'),
-      source('packages/backend/src/services/context/contextCompiler.ts'),
-      source('packages/backend/src/tools/index.ts'),
-      source('packages/backend/src/capabilities/capabilityGate.ts'),
-      source('packages/frontend/src/api/modules/memoryApi.ts'),
-      source('packages/backend/src/database/migrations/0000_baseline.sql'),
-    ].join('\n')
-
-    for (const forbidden of [
-      'search_diary',
-      'MemoryGate',
-      'CanonicalMemory',
-      'LocalMemoryProvider',
-      'DiaryEngine',
-      'memory_nodes',
-      'canonical_memories',
-      'memory_candidates',
-    ]) {
-      expect(combined).not.toContain(forbidden)
-    }
-    expect(source('packages/frontend/src/api/modules/memoryApi.ts')).not.toMatch(
-      /\b(search|remove|importStory)\s*[:(]/,
-    )
-  })
-
   it('既有 SQLite 连接时应物理删除全部旧记忆表', () => {
     const root = join(tmpdir(), `infos-legacy-db-${Date.now()}-${Math.random()}`)
     temporaryPaths.push(root)

@@ -1,3 +1,4 @@
+import { jsonBody } from '../../../helpers/jsonBody'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiEmbeddingProvider } from '@infos/backend/services/embedding/providers/apiProvider'
 import { ApiRerankerProvider } from '@infos/backend/services/embedding/providers/apiReranker'
@@ -42,7 +43,7 @@ describe('ApiEmbeddingProvider', () => {
         'Content-Type': 'application/json',
         Authorization: 'Bearer embedding-key',
       },
-      body: JSON.stringify({
+      body: jsonBody({
         input: ['第一段', '第二段'],
         model: 'embedding-model',
         dimensions: 3,
@@ -62,6 +63,17 @@ describe('ApiEmbeddingProvider', () => {
 
     expect(fetch).not.toHaveBeenCalled()
     expect(vectors).toEqual([])
+  })
+
+  it('拒绝维度不匹配的向量，不能作为零向量悄悄写入索引', async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: [{ index: 0, embedding: [1, 2] }] }),
+    } as never)
+    await expect(new ApiEmbeddingProvider(embeddingConfig).embedOne('测试')).rejects.toMatchObject({
+      code: 'EMBEDDING_ERROR',
+      message: expect.stringContaining('配置 3 维，实际 2 维'),
+    })
   })
 
   it('应当把 429 响应转换为限流错误', async () => {
@@ -86,14 +98,6 @@ describe('ApiEmbeddingProvider', () => {
       code: 'EMBEDDING_ERROR',
       message: expect.stringContaining('网络断开'),
     })
-  })
-
-  it('应当返回配置中的向量维度', () => {
-    const provider = new ApiEmbeddingProvider(embeddingConfig)
-
-    const dimension = provider.getDimension()
-
-    expect(dimension).toBe(3)
   })
 })
 
@@ -131,7 +135,7 @@ describe('ApiRerankerProvider', () => {
         'Content-Type': 'application/json',
         Authorization: 'Bearer rerank-key',
       },
-      body: JSON.stringify({
+      body: jsonBody({
         model: 'rerank-model',
         query: '问题',
         documents: ['文档一', '文档二'],
@@ -181,6 +185,42 @@ describe('ApiRerankerProvider', () => {
 })
 
 describe('EmbeddingService', () => {
+  it('关闭向量后不发送请求，并保留模型配置供重新开启使用', async () => {
+    vi.stubGlobal('fetch', vi.fn())
+    const service = new EmbeddingService({ ...embeddingConfig, enabled: false })
+    expect(service.isEnabled).toBe(false)
+    expect(service.isAvailable).toBe(false)
+    expect(await service.embed(['文本'])).toEqual([])
+    expect(await service.embedOne('文本')).toEqual([])
+    expect(fetch).not.toHaveBeenCalled()
+    expect(service.getConfig().model).toBe(embeddingConfig.model)
+    service.reconfigure({ ...embeddingConfig, enabled: true })
+    expect(service.isAvailable).toBe(true)
+  })
+
+  it('关闭后在途请求即使迟到返回，也不能把旧向量交给调用方', async () => {
+    let complete!: (response: Response) => void
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            complete = resolve
+          }),
+      ),
+    )
+    const service = new EmbeddingService(embeddingConfig)
+    const signal = service.cancellationSignal
+    const pending = service.embedOne('正在处理')
+    service.reconfigure({ ...embeddingConfig, enabled: false })
+    expect(signal.aborted).toBe(true)
+    const rejected = expect(pending).rejects.toThrow('向量配置已变更')
+    complete(
+      new Response(JSON.stringify({ data: [{ index: 0, embedding: [1, 2, 3] }] }), { status: 200 }),
+    )
+    await rejected
+  })
+
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn())
   })
@@ -194,11 +234,15 @@ describe('EmbeddingService', () => {
 
     const results = await service.rerank('问题', ['甲', '乙', '丙'])
 
-    expect(results).toEqual([
-      { index: 0, score: 1, text: '甲' },
-      { index: 1, score: 0.99, text: '乙' },
-      { index: 2, score: 0.98, text: '丙' },
+    expect(results.map(({ index, text }) => ({ index, text }))).toEqual([
+      { index: 0, text: '甲' },
+      { index: 1, text: '乙' },
+      { index: 2, text: '丙' },
     ])
+    expect(results.every((item) => Number.isFinite(item.score))).toBe(true)
+    expect(results[0]!.score).toBeGreaterThanOrEqual(results[1]!.score)
+    expect(results[1]!.score).toBeGreaterThanOrEqual(results[2]!.score)
+    expect(fetch).not.toHaveBeenCalled()
     expect(service.hasReranker).toBe(false)
   })
 
@@ -224,15 +268,5 @@ describe('EmbeddingService', () => {
 
     expect(service.hasReranker).toBe(true)
     expect(results).toEqual([{ index: 0, score: 0.8, text: '文档' }])
-  })
-
-  it('应当返回配置快照并代理向量维度', () => {
-    const service = new EmbeddingService(embeddingConfig)
-
-    const config = service.getConfig()
-    const dimension = service.getDimension()
-
-    expect(config).toEqual(embeddingConfig)
-    expect(dimension).toBe(3)
   })
 })

@@ -59,10 +59,14 @@ export function createGatewayRouter(hub: GatewayHub) {
 /** WS 连接打开时 */
 export function handleWsOpen(
   hub: GatewayHub,
-  ws: { send: (data: string) => void },
+  ws: { send: (data: string) => void; close?: () => void },
   nodeId: string,
 ): void {
-  hub.registerNode(nodeId, (data) => ws.send(data))
+  hub.registerNode(
+    nodeId,
+    (data) => ws.send(data),
+    () => ws.close?.(),
+  )
   logger.info(`WS 连接建立: ${nodeId}`)
 }
 

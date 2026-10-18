@@ -15,6 +15,10 @@ export interface SocialSchedulerConfig {
   nightSilenceEnabled: boolean
   nightSilenceStart: number
   nightSilenceEnd: number
+  taskTimeoutMinutes: number
+  modelIdleMinutes: number
+  modelRequestMinutes: number
+  maxRetries: number
 }
 
 const DEFAULT_CONFIG: SocialSchedulerConfig = {
@@ -23,11 +27,16 @@ const DEFAULT_CONFIG: SocialSchedulerConfig = {
   nightSilenceEnabled: true,
   nightSilenceStart: 0,
   nightSilenceEnd: 8,
+  taskTimeoutMinutes: 360,
+  modelIdleMinutes: 10,
+  modelRequestMinutes: 30,
+  maxRetries: 2,
 }
 
 export interface SocialSchedulerDeps {
   sessionManager: SocialSessionManager
   executions?: SocialExecutionPort
+  maintain?(): Promise<void>
 }
 
 export class SocialScheduler {
@@ -49,6 +58,19 @@ export class SocialScheduler {
 
   updateConfig(config: Partial<SocialSchedulerConfig>): SocialSchedulerConfig {
     this.config = { ...this.config, ...config }
+    const clamp = (value: number, fallback: number, min: number, max: number) =>
+      Number.isFinite(Number(value))
+        ? Math.min(max, Math.max(min, Math.floor(Number(value))))
+        : fallback
+    this.config.taskTimeoutMinutes = clamp(this.config.taskTimeoutMinutes, 360, 1, 360)
+    this.config.modelIdleMinutes = clamp(this.config.modelIdleMinutes, 10, 1, 60)
+    this.config.modelRequestMinutes = clamp(
+      this.config.modelRequestMinutes,
+      30,
+      this.config.modelIdleMinutes,
+      360,
+    )
+    this.config.maxRetries = clamp(this.config.maxRetries, 2, 0, 2)
     return this.getConfig()
   }
 
@@ -76,21 +98,26 @@ export class SocialScheduler {
   }
 
   private async scan(): Promise<void> {
-    if (this.isNightSilence()) return
+    await this.deps.maintain?.()
     const now = Date.now()
-    const sessions = this.deps.sessionManager.getActiveSessions(undefined, 50)
+    const sessions = this.deps.sessionManager.listSessions()
 
     // 延后意图拥有最高调度优先级，到期时重新唤醒同一个角色 Agent 核验语境。
     for (const session of sessions) {
       if (session.phase === 'retrying' && now >= session.nextScanTime) {
-        await this.deps.sessionManager.retry(session)
+        void this.deps.sessionManager
+          .retry(session)
+          .catch((error) => logger.warn(`社交恢复失败: ${String(error)}`))
         continue
       }
       if (!this.deps.sessionManager.dueDeferredIntent(session, now)) continue
-      await this.runReview(session, 'intent_due')
+      void this.runReview(session, 'intent_due').catch((error) =>
+        logger.warn(`延后任务唤醒失败: ${String(error)}`),
+      )
     }
 
-    if (!this.config.proactiveGroupEnabled || now < this.nextGroupReviewAt) return
+    if (this.isNightSilence() || !this.config.proactiveGroupEnabled || now < this.nextGroupReviewAt)
+      return
     const candidates = sessions
       .filter(
         (session) =>
@@ -108,7 +135,9 @@ export class SocialScheduler {
       return
     }
 
-    await this.runReview(target, 'proactive_review')
+    void this.runReview(target, 'proactive_review').catch((error) =>
+      logger.warn(`自主观察失败: ${String(error)}`),
+    )
     // 一次只给角色一个自主观察机会，避免在多个群之间连续轰炸主模型。
     this.nextGroupReviewAt = now + (20 + Math.floor(Math.random() * 21)) * 60_000
   }
@@ -124,15 +153,8 @@ export class SocialScheduler {
     session: SocialSession,
     reason: 'proactive_review' | 'intent_due',
   ): Promise<void> {
-    if (!this.deps.executions) return this.deps.sessionManager.review(session, reason)
-    await this.deps.executions.run({
-      taskId: `social-review:${session.agentId}:${session.channelId}:${Date.now()}`,
-      class: 'resident',
-      priority: reason === 'intent_due' ? 4 : 2,
-      resourceKey: `social-session:${session.agentId}:${session.channelType}:${session.channelId}`,
-      maxDurationMs: 5 * 60_000,
-      run: () => this.deps.sessionManager.review(session, reason),
-    })
+    // 回复批次自身进入统一执行器，避免重复占用相同资源锁并叠加两层超时。
+    await this.deps.sessionManager.review(session, reason)
   }
 
   private isNightSilence(): boolean {

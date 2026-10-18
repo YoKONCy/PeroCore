@@ -183,7 +183,7 @@ export interface EventNoteArchiveFacets {
   topics: EventNoteFacetValue[]
 }
 
-/** 档案页整体统计（全量档案概况，不受过滤影响） */
+/** 档案页分区统计（有效记忆与归档分别汇总）。 */
 export interface EventNoteArchiveStats {
   active: number
   archived: number

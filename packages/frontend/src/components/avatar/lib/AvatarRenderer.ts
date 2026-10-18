@@ -12,6 +12,7 @@
 
 import * as THREE from 'three'
 import { logger } from '../../../lib/logger'
+import { disposeAvatarResources } from './disposeAvatarResources'
 import type { IModelProvider, ParsedBone } from './adapter/IModelProvider'
 
 // ══════ 类型定义 ══════
@@ -99,7 +100,13 @@ export class AvatarRenderer {
       emissiveIntensity: 0,
     })
 
-    this.buildSkeleton(modelData.bones, rootGroup, material)
+    try {
+      this.buildSkeleton(modelData.bones, rootGroup, material)
+    } catch (error) {
+      disposeAvatarResources(rootGroup)
+      material.dispose()
+      throw error
+    }
 
     // Bedrock 根骨骼绕 Y 轴旋转 180° 适配 Three.js 坐标系
     rootGroup.rotation.y = Math.PI

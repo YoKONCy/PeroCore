@@ -9,7 +9,7 @@ import { messageAttachments } from '../database/schema'
 import type { DrizzleDb } from '../database'
 
 export type AttachmentRow = typeof messageAttachments.$inferSelect
-export type AttachmentKind = 'image' | 'text' | 'audio'
+export type AttachmentKind = 'image' | 'text' | 'audio' | 'video' | 'pdf' | 'file'
 
 export interface CreateAttachmentInput {
   id: string
@@ -22,10 +22,36 @@ export interface CreateAttachmentInput {
   storageKey: string
   extractedText?: string
   tokenEstimate?: number
+  status?: string
+  metadataJson?: string
 }
 
 export class AttachmentRepository {
   constructor(private readonly db: DrizzleDb) {}
+
+  async findOutgoingCall(threadId: string, callId: string): Promise<AttachmentRow | undefined> {
+    return (
+      await this.db
+        .select()
+        .from(messageAttachments)
+        .where(
+          and(
+            eq(messageAttachments.threadId, threadId),
+            sql`json_extract(${messageAttachments.metadataJson}, '$.resource.callId') = ${callId}`,
+          ),
+        )
+        .limit(1)
+    )[0]
+  }
+
+  async setResourceDelivered(id: string): Promise<void> {
+    await this.db
+      .update(messageAttachments)
+      .set({
+        metadataJson: sql`json_set(${messageAttachments.metadataJson}, '$.resource.delivered', json('true'))`,
+      })
+      .where(eq(messageAttachments.id, id))
+  }
 
   async create(data: CreateAttachmentInput): Promise<AttachmentRow> {
     const rows = await this.db.insert(messageAttachments).values(data).returning()
@@ -78,15 +104,32 @@ export class AttachmentRepository {
     return result.changes
   }
 
-  async softDeleteByMessageIds(messageIds: number[]): Promise<void> {
+  async softDeleteByMessageIds(
+    messageIds: number[],
+    preserveInput?: { threadId: string; messageId: number },
+  ): Promise<void> {
     if (!messageIds.length) return
-    await this.db
-      .update(messageAttachments)
-      .set({
-        status: 'deleted',
-        deletedAt: sql`datetime('now', 'localtime')`,
-      })
-      .where(inArray(messageAttachments.messageId, messageIds))
+    this.db.transaction((tx) => {
+      // 重新生成保留本轮输入附件及既有 PDF 解析，避免重复上传或丢失图片。
+      if (preserveInput && messageIds.includes(preserveInput.messageId))
+        tx.update(messageAttachments)
+          .set({ messageId: null, status: 'uploaded', boundAt: null, deletedAt: null })
+          .where(
+            and(
+              eq(messageAttachments.threadId, preserveInput.threadId),
+              eq(messageAttachments.messageId, preserveInput.messageId),
+              eq(messageAttachments.status, 'bound'),
+            ),
+          )
+          .run()
+      tx.update(messageAttachments)
+        .set({
+          status: 'deleted',
+          deletedAt: sql`datetime('now', 'localtime')`,
+        })
+        .where(inArray(messageAttachments.messageId, messageIds))
+        .run()
+    })
   }
 
   async markDeletedUnbound(id: string): Promise<boolean> {
@@ -99,10 +142,62 @@ export class AttachmentRepository {
       .where(
         and(
           eq(messageAttachments.id, id),
-          eq(messageAttachments.status, 'uploaded'),
+          inArray(messageAttachments.status, ['uploaded', 'processing', 'failed']),
           isNull(messageAttachments.messageId),
         ),
       )
     return result.changes === 1
+  }
+
+  async setPdfProcessing(id: string, metadataJson: string): Promise<boolean> {
+    const result = await this.db
+      .update(messageAttachments)
+      .set({ status: 'processing', metadataJson })
+      .where(
+        and(
+          eq(messageAttachments.id, id),
+          eq(messageAttachments.kind, 'pdf'),
+          eq(messageAttachments.status, 'failed'),
+          isNull(messageAttachments.messageId),
+        ),
+      )
+    return result.changes === 1
+  }
+
+  async finishPdf(
+    id: string,
+    update: {
+      status: 'uploaded' | 'failed'
+      metadataJson: string
+      extractedText?: string
+      tokenEstimate?: number
+    },
+  ): Promise<void> {
+    await this.db
+      .update(messageAttachments)
+      .set(update)
+      .where(
+        and(
+          eq(messageAttachments.id, id),
+          eq(messageAttachments.status, 'processing'),
+          isNull(messageAttachments.messageId),
+        ),
+      )
+  }
+
+  async failInterruptedPdf(): Promise<void> {
+    await this.db
+      .update(messageAttachments)
+      .set({
+        status: 'failed',
+        metadataJson: JSON.stringify({ pdf: { error: '服务重启导致解析中断，请重试' } }),
+      })
+      .where(
+        and(
+          eq(messageAttachments.kind, 'pdf'),
+          eq(messageAttachments.status, 'processing'),
+          isNull(messageAttachments.messageId),
+        ),
+      )
   }
 }

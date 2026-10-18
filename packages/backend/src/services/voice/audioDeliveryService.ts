@@ -54,6 +54,7 @@ export class AudioDeliveryService {
     audio: TtsResult,
     context: KernelCallContext,
     targetNodeId?: KernelNodeId,
+    presentation?: { caption?: string; isCurrent?: () => boolean },
   ): Promise<AudioPlaybackReceipt> {
     await this.cancel(context.principalId)
     mkdirSync(this.assetRoot, { recursive: true })
@@ -69,6 +70,15 @@ export class AudioDeliveryService {
       retention: 'temporary',
     })
     await this.assetRepository.save(asset, filePath)
+    const playbackId = randomUUID()
+    if (presentation?.isCurrent && !presentation.isCurrent()) {
+      return {
+        playbackId,
+        assetId: asset.assetId,
+        targetNodeId: targetNodeId ?? this.localNodeId,
+        state: 'cancelled',
+      }
+    }
 
     const offer = this.directory
       .listOffers({
@@ -120,7 +130,6 @@ export class AudioDeliveryService {
         scope,
         principalId: context.principalId,
       })
-      const playbackId = randomUUID()
       const assetHandle = this.assets.issueHandle(
         {
           subjectId: `node:${offer.placement.providerNodeId}`,
@@ -155,6 +164,7 @@ export class AudioDeliveryService {
         'play',
         {
           playbackId,
+          caption: presentation?.caption,
           assetId: asset.assetId,
           mimeType: asset.mimeType,
           sha256: asset.sha256,

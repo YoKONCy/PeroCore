@@ -36,7 +36,7 @@ declare module 'adm-zip' {
     addFile(entryName: string, content: Buffer): void
     writeZip(targetPath: string): void
     extractAllTo(targetPath: string, overwrite?: boolean): void
-    getEntries(): Array<{ entryName: string; isDirectory: boolean }>
+    getEntries(): Array<{ entryName: string; isDirectory: boolean; attr: number }>
   }
   export default AdmZip
 }

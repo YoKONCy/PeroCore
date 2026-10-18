@@ -30,24 +30,25 @@ import { useCompositorStore } from './useCompositorStore'
 import { getApiBaseUrl } from '../api/transport'
 import { invoke, isElectron } from '../utils/ipcAdapter'
 import { logger } from '../lib/logger'
-import { uiSound } from '../services/ui/uiSound'
 
-/**
- * M05-篇3-3: 孵化（任务完成/失败）时发系统级通知
- * 浏览器环境用 Web Notification API；Electron 环境走 IPC 到原生 toast
- */
 async function sendSystemNotification(title: string, body: string): Promise<void> {
   try {
-    if (isElectron() || typeof Notification !== 'undefined') {
+    if (isElectron() || typeof Notification !== 'undefined')
       await invoke('show-notification', { title, body })
-    }
-  } catch (err) {
-    logger.warn('taskCenterStore', '系统通知失败', err)
+  } catch (error) {
+    logger.warn('taskCenterStore', '系统通知失败', error)
   }
 }
 
 /** 活跃状态集合（进行中视图） */
-const ACTIVE_STATUSES: BackgroundTaskStatus[] = ['queued', 'running', 'paused', 'waiting_input']
+const ACTIVE_STATUSES: BackgroundTaskStatus[] = [
+  'queued',
+  'running',
+  'paused',
+  'waiting_input',
+  'waiting',
+  'blocked',
+]
 
 /** 终态集合（历史视图） */
 const FINISHED_STATUSES: BackgroundTaskStatus[] = ['completed', 'failed', 'cancelled']
@@ -59,6 +60,7 @@ export const useTaskCenterStore = defineStore('taskCenter', () => {
 
   /** 进行中任务（按创建时间倒序） */
   const activeTasks = ref<BackgroundTaskInfo[]>([])
+  const residentTasks = ref<BackgroundTaskInfo[]>([])
 
   /** 历史任务分页 */
   const historyTasks = ref<BackgroundTaskInfo[]>([])
@@ -105,12 +107,22 @@ export const useTaskCenterStore = defineStore('taskCenter', () => {
     isLoadingActive.value = true
     try {
       // 拉取全部活跃状态（四态合并，客户端排序）
-      const pages = await Promise.all(
-        ACTIVE_STATUSES.map((status) => backgroundTasksApi.list({ status, pageSize: 100 })),
-      )
-      const merged = pages.flatMap((res) => res.data?.items ?? [])
+      const [pages, residents] = await Promise.all([
+        Promise.all(
+          ACTIVE_STATUSES.map((status) =>
+            backgroundTasksApi.list({ status, category: 'agent_task', pageSize: 100 }),
+          ),
+        ),
+        backgroundTasksApi.list({ category: 'resident', pageSize: 100 }),
+      ])
+      const merged = pages
+        .flatMap((res) => res.data?.items ?? [])
+        .filter((task) => task.category !== 'resident')
       merged.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
       activeTasks.value = merged
+      residentTasks.value = (residents.data?.items ?? []).filter(
+        (task) => task.category === 'resident',
+      )
 
       const counts = await backgroundTasksApi.activeCount()
       const map: Record<string, number> = {}
@@ -132,13 +144,16 @@ export const useTaskCenterStore = defineStore('taskCenter', () => {
       // TODO(M05-后续): 后端支持 status in [...] 多值后改服务端过滤
       const res = await backgroundTasksApi.list({
         ...historyFilter.value,
+        category: 'agent_task',
         pageSize: historyFilter.value.pageSize ?? 20,
       })
-      const items = (res.data?.items ?? []).filter((t) =>
-        historyFilter.value.status
-          ? t.status === historyFilter.value.status
-          : FINISHED_STATUSES.includes(t.status),
-      )
+      const items = (res.data?.items ?? [])
+        .filter((t) => t.category !== 'resident')
+        .filter((t) =>
+          historyFilter.value.status
+            ? t.status === historyFilter.value.status
+            : FINISHED_STATUSES.includes(t.status),
+        )
       historyTasks.value = items
       historyTotal.value = res.data?.total ?? 0
     } catch (err) {
@@ -182,17 +197,35 @@ export const useTaskCenterStore = defineStore('taskCenter', () => {
 
   /** 暂停 */
   async function pause(id: string): Promise<void> {
-    await backgroundTasksApi.pause(id)
+    const task = activeTasks.value.find((item) => item.id === id)
+    if (!task) return
+    await backgroundTasksApi.control(task.agentId, {
+      action: 'pause',
+      taskId: id,
+      expectedRevision: task.revision ?? 1,
+    })
   }
 
   /** 恢复 */
   async function resume(id: string): Promise<void> {
-    await backgroundTasksApi.resume(id)
+    const task = activeTasks.value.find((item) => item.id === id)
+    if (!task) return
+    await backgroundTasksApi.control(task.agentId, {
+      action: 'resume',
+      taskId: id,
+      expectedRevision: task.revision ?? 1,
+    })
   }
 
   /** 取消 */
   async function cancel(id: string): Promise<void> {
-    await backgroundTasksApi.cancel(id)
+    const task = activeTasks.value.find((item) => item.id === id)
+    if (!task) return
+    await backgroundTasksApi.control(task.agentId, {
+      action: 'cancel',
+      taskId: id,
+      expectedRevision: task.revision ?? 1,
+    })
   }
 
   /** 基于历史任务一键重新派发。 */
@@ -227,6 +260,12 @@ export const useTaskCenterStore = defineStore('taskCenter', () => {
 
   /** 插入/更新进行中任务 */
   function upsertActive(task: BackgroundTaskInfo): void {
+    if (task.category === 'resident') {
+      residentTasks.value = [task, ...residentTasks.value.filter((item) => item.id !== task.id)]
+      activeTasks.value = activeTasks.value.filter((item) => item.id !== task.id)
+      syncCountFromTasks()
+      return
+    }
     const idx = activeTasks.value.findIndex((t) => t.id === task.id)
     if (ACTIVE_STATUSES.includes(task.status)) {
       if (idx >= 0) {
@@ -256,7 +295,11 @@ export const useTaskCenterStore = defineStore('taskCenter', () => {
   }
 
   /** Gateway只负责通知Projection失效，业务事实必须重新读取。 */
-  async function handleGatewayEvent(action: string, taskId: string): Promise<void> {
+  async function handleGatewayEvent(
+    action: string,
+    taskId: string,
+    replayed = false,
+  ): Promise<void> {
     const [detail, projection] = await Promise.all([
       backgroundTasksApi.detail(taskId),
       backgroundTasksApi.projection(taskId),
@@ -267,21 +310,12 @@ export const useTaskCenterStore = defineStore('taskCenter', () => {
     if (projection.data) {
       useCompositorStore().replaceScope(`background-task:${taskId}`, projection.data.surfaces)
     }
+    // 历史补送只恢复任务面板，不重复打开结果或发送 Windows 失败通知。
+    if (replayed) return
 
-    // M05-A5: 孵化联动 —— 完成/失败时推任务专属 Toast
+    // 持久通知由后端投递；此处仅保留本地窗口行为与系统通知。
     if (action === 'background_task_completed') {
-      const title = `任务完成 ✓ ${task.title}`
-      const body = `${task.agentId} 已完成该任务（工具调用 ${task.toolCallCount} 次）`
-      taskToast.push({
-        type: 'task_completed',
-        agentId: task.agentId,
-        avatarUrl: avatarUrlOf(task.agentId),
-        title: '任务已完成',
-        message: `${task.title}（工具调用 ${task.toolCallCount} 次）`,
-        taskId: task.id,
-      })
-      void uiSound.play('task.complete')
-      void sendSystemNotification(title, body)
+      // 完成音与系统完成通知由 Electron 主进程统一处理，避免多窗口重复提醒。
       if (task.completionAction === 'open_result') {
         pendingOpenTask.value = task
       } else if (task.completionAction === 'send_to_chat' && task.targetThreadId) {
@@ -291,18 +325,7 @@ export const useTaskCenterStore = defineStore('taskCenter', () => {
         }
       }
     } else if (action === 'background_task_failed') {
-      const title = `任务失败 ✗ ${task.title}`
-      const body = `${task.agentId} ${task.errorMessage ?? '未知错误'}`
-      taskToast.push({
-        type: 'task_failed',
-        agentId: task.agentId,
-        avatarUrl: avatarUrlOf(task.agentId),
-        title: '任务失败',
-        message: `${task.title}：${task.errorMessage ?? '未知错误'}`,
-        taskId: task.id,
-      })
-      void uiSound.play('task.failed')
-      void sendSystemNotification(title, body)
+      void sendSystemNotification('任务失败 · ' + task.title, task.errorMessage ?? '')
     }
   }
 
@@ -345,7 +368,7 @@ export const useTaskCenterStore = defineStore('taskCenter', () => {
             ? String((payload.task as { id: string }).id)
             : undefined
       if (!action || !taskId || !action.startsWith('background_task_')) return
-      void handleGatewayEvent(action, taskId).catch((error) => {
+      void handleGatewayEvent(action, taskId, payload.replayed === true).catch((error) => {
         logger.warn('TaskCenter', `刷新任务Projection失败: ${error}`)
       })
     }
@@ -361,6 +384,7 @@ export const useTaskCenterStore = defineStore('taskCenter', () => {
   return {
     // 状态
     activeTasks,
+    residentTasks,
     historyTasks,
     historyTotal,
     pendingOpenTask,

@@ -6,9 +6,11 @@
 
 import type { SurfaceFrame } from '@infos/shared'
 import { getBaseUrl } from './transportUtils'
+import { logger } from '../lib/logger'
 
 /** 执行完成事件。 */
 export interface SseDoneEvent {
+  executionPause?: import('@infos/shared').ConversationExecutionPause
   type: 'done'
   usage: {
     promptTokens: number
@@ -65,6 +67,7 @@ export function streamRequest(endpoint: string, body: unknown, events: SseEvents
 
     /** 是否收到服务端明确的 error 终态（避免再误报流截断）。 */
     let terminalErrorReceived = false
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
 
     try {
       // 直接用 fetch (Transport 没有 SSE 接口，这里是允许的二进制/流式例外)
@@ -78,11 +81,18 @@ export function streamRequest(endpoint: string, body: unknown, events: SseEvents
       })
 
       if (!res.ok || !res.body) {
-        events.onError?.({ code: 'NETWORK_ERROR', message: `HTTP ${res.status}` })
+        const failure = (await res.json().catch(() => null)) as {
+          code?: string
+          message?: string
+        } | null
+        events.onError?.({
+          code: failure?.code ?? 'NETWORK_ERROR',
+          message: failure?.message ?? `HTTP ${res.status}`,
+        })
         return
       }
 
-      const reader = res.body.getReader()
+      reader = res.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
 
@@ -94,7 +104,7 @@ export function streamRequest(endpoint: string, body: unknown, events: SseEvents
         buffer += decoder.decode(value, { stream: true })
 
         // 按 SSE 协议解析 (双换行分隔事件)
-        const parts = buffer.split('\n\n')
+        const parts = buffer.split(/\r?\n\r?\n/)
         buffer = parts.pop() ?? ''
 
         for (const part of parts) {
@@ -133,11 +143,16 @@ export function streamRequest(endpoint: string, body: unknown, events: SseEvents
         })
       }
     } catch (err) {
-      if ((err as Error).name === 'AbortError') return
+      if (controller.signal.aborted || doneReceived || terminalErrorReceived) return
       events.onError?.({
         code: 'STREAM_ERROR',
         message: (err as Error).message,
       })
+    } finally {
+      if (reader) {
+        await reader.cancel().catch(() => {})
+        reader.releaseLock()
+      }
     }
   })()
 
@@ -154,35 +169,38 @@ function parseSseEvent(
   let eventType = 'delta'
   let data = ''
 
-  for (const line of raw.split('\n')) {
+  for (const line of raw.split(/\r?\n/)) {
     if (line.startsWith('event:')) {
       eventType = line.slice(6).trim()
     } else if (line.startsWith('data:')) {
-      data = line.slice(5).trim()
+      data += (data ? '\n' : '') + line.slice(5).trim()
     }
   }
 
   if (!data) return
 
+  let parsed: unknown
   try {
-    const parsed = JSON.parse(data)
-    switch (eventType) {
-      case 'surface':
-        events.onSurface?.(parsed as SurfaceFrame)
-        break
-      case 'rag_progress':
-        events.onRagProgress?.(parsed as RagProgressEvent)
-        break
-      case 'done':
-        markDone()
-        events.onDone?.(parsed)
-        break
-      case 'error':
-        markTerminalError()
-        events.onError?.(parsed)
-        break
-    }
+    parsed = JSON.parse(data)
   } catch {
-    // JSON 解析失败，忽略
+    logger.warn('SSE', '收到无法解析的流事件', eventType)
+    return
+  }
+  // 回调错误必须向外传播，不能伪装成 JSON 解析失败而吞掉消息。
+  switch (eventType) {
+    case 'surface':
+      events.onSurface?.(parsed as SurfaceFrame)
+      break
+    case 'rag_progress':
+      events.onRagProgress?.(parsed as RagProgressEvent)
+      break
+    case 'done':
+      markDone()
+      events.onDone?.(parsed as Omit<SseDoneEvent, 'type'>)
+      break
+    case 'error':
+      markTerminalError()
+      events.onError?.(parsed as Omit<SseErrorEvent, 'type'>)
+      break
   }
 }

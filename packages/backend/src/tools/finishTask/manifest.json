@@ -10,7 +10,7 @@
   "platforms": ["windows", "linux", "darwin", "docker"],
   "toolDefinition": {
     "name": "finish_task",
-    "description": "可选的显式任务终止工具。仅在需要提交任务状态、标记部分完成或失败、或同时更新角色状态时调用。如果只是向用户说明工具结果，请直接流式输出自然语言正文并自然结束，不要调用本工具。",
+    "description": "显式提交任务完成、部分完成或失败状态；普通回复可直接输出并结束，无需调用。可选角色状态只作用于当前会话，并随本轮消息删除或撤回。",
     "display": {
       "label": "完成任务",
       "description": "结束当前任务，并把最终结果回复给你。",
@@ -21,6 +21,10 @@
     "parameters": {
       "type": "object",
       "properties": {
+        "spoken_reply": {
+          "type": "string",
+          "description": "独立的简短口语答复，通常一至两句、不超过一百二十字，不含代码、emoji或装饰符号。TTS只播放此字段，完整交付仍放在reply。"
+        },
         "reply": {
           "type": "string",
           "description": "调用本工具时必填的最终回复。普通结果说明应优先直接流式输出正文，不必使用本字段。"
@@ -34,46 +38,112 @@
           "description": "完成状态",
           "enum": ["done", "partial", "failed"]
         },
-        "mood": { "type": "string", "description": "当前情绪 (如 happy, sad, angry, excited)" },
-        "vibe": { "type": "string", "description": "当前氛围/动作 (如 active, idle, thinking)" },
-        "mind": { "type": "string", "description": "内心独白 (简短心理活动)" },
+        "mood": {
+          "type": "string",
+          "description": "情感底色，例如开心、担心、略有失落。"
+        },
+        "vibe": {
+          "type": "string",
+          "description": "外在表现，例如轻松、认真、欲言又止。"
+        },
+        "mind": {
+          "type": "string",
+          "description": "简短角色心声，不写任务计划、推理过程或系统信息。"
+        },
         "touch_reactions": {
           "type": "object",
           "description": "按触碰部位设置临时随机台词；标准部位为head、arm、body、leg。",
           "additionalProperties": {
             "type": "array",
-            "items": { "type": "string" }
+            "items": {
+              "type": "string"
+            }
           }
         },
         "click_head_msgs": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "点击头部时的交互消息"
         },
         "click_arm_msgs": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "点击手臂与手部时的交互消息"
         },
         "click_body_msgs": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "点击身体时的交互消息"
         },
         "click_leg_msgs": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "点击腿部与鞋袜时的交互消息"
         },
         "idle_msgs": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "闲置时的自言自语"
         },
         "back_msgs": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "主人回来时的欢迎语"
+        },
+        "task_result": {
+          "type": "object",
+          "description": "后台持久任务的本段交接。continue 继续，wait 等待时间或任务，deliver 交付，blocked 需要处理，failed 失败。普通聊天不要提供。",
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "enum": ["continue", "wait", "deliver", "blocked", "failed"]
+            },
+            "summary": {
+              "type": "string"
+            },
+            "wakeAt": {
+              "type": "string"
+            },
+            "waitForTaskId": {
+              "type": "string"
+            },
+            "artifacts": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "evidence": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "toolCallId": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  }
+                },
+                "required": ["toolCallId", "description"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["outcome", "summary"],
+          "additionalProperties": false
         }
       },
       "required": ["reply"]

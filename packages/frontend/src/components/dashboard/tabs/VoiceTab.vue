@@ -11,6 +11,10 @@ import { configApi } from '../../../api/modules/configApi'
 import { voiceApi } from '../../../api/modules/voiceApi'
 import { modelApi } from '../../../api/modules/modelApi'
 import { useDashboardContext } from '../../../composables/dashboard'
+import PetControlSettings from '../../pet/PetControlSettings.vue'
+import BrandIcon from '../../brands/BrandIcon.vue'
+import BrandSelect from '../../brands/BrandSelect.vue'
+import { resolveModelBrand } from '../../../lib/modelBrands'
 
 const ctx = useDashboardContext()
 
@@ -71,6 +75,13 @@ const asrSensitivity = ref(0.7)
 /** ASR 获取远程模型列表 */
 const isFetchingAsrModels = ref(false)
 const remoteAsrModels = ref<string[]>([])
+const asrModelChoices = computed(() =>
+  remoteAsrModels.value.map((modelId) => ({
+    label: modelId,
+    value: modelId,
+    brand: resolveModelBrand(modelId),
+  })),
+)
 
 async function fetchRemoteAsrModels() {
   if (!asrApiBase.value && !asrApiKey.value) return
@@ -229,7 +240,8 @@ onMounted(loadVoiceConfig)
       </p>
     </div>
 
-    <div class="flex-1 overflow-y-auto flex flex-col gap-6 voice-scrollbar">
+    <div class="flex-1 min-h-0 overflow-y-auto flex flex-col gap-6 voice-scrollbar voice-sections">
+      <PetControlSettings />
       <!-- TTS -->
       <PCard pixel padding="lg" overflow-visible>
         <div class="flex justify-between items-center mb-5">
@@ -388,13 +400,16 @@ onMounted(loadVoiceConfig)
                   获取模型列表
                 </PButton>
               </label>
-              <PSelect
+              <BrandSelect
                 v-if="remoteAsrModels.length > 0"
                 v-model="asrModel"
-                :options="remoteAsrModels.map((m) => ({ label: m, value: m }))"
+                :options="asrModelChoices"
                 placeholder="从列表中选择..."
               />
-              <PInput v-else v-model="asrModel" placeholder="例如: FunAudioLLM/SenseVoiceSmall" />
+              <div v-else class="asr-model-input">
+                <BrandIcon :brand="resolveModelBrand(asrModel)" size="sm" />
+                <PInput v-model="asrModel" placeholder="例如: FunAudioLLM/SenseVoiceSmall" />
+              </div>
             </div>
             <!-- 识别语言 -->
             <div class="flex flex-col gap-1.5">
@@ -439,13 +454,17 @@ onMounted(loadVoiceConfig)
 </template>
 
 <style scoped>
-/* 像素风滚动条 */
-.voice-scrollbar::-webkit-scrollbar {
-  width: 4px;
+.asr-model-input {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
 }
-
-.voice-scrollbar::-webkit-scrollbar-thumb {
-  background: var(--ui-scrollbar-thumb);
-  border-radius: 0;
+.asr-model-input > :last-child {
+  flex: 1;
+  min-width: 0;
+}
+.voice-sections > * {
+  flex-shrink: 0;
 }
 </style>

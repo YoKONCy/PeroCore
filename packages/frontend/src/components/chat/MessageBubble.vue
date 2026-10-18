@@ -9,15 +9,19 @@ import { ref, computed } from 'vue'
 import type { AttachmentSurfaceProps } from '@infos/shared'
 import PixelIcon from '../pixel/PixelIcon.vue'
 import ThinkingIndicator from './ThinkingIndicator.vue'
+import RunPulse from './RunPulse.vue'
 import ChatRichText from './ChatRichText.vue'
 import ConversationSurface from '../compositor/ConversationSurface.vue'
 import { attachmentsApi } from '../../api/modules/attachmentsApi'
 import type { CompositorSurface } from '../../stores'
+import AgentStateHover from '../agent/AgentStateHover.vue'
+import ReplySelection from './ReplySelection.vue'
 
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant' | 'system'
   content: string
+  spokenReply?: string
   /** 从原始转写中提取的 Thinking 内容。 */
   thinkingContent?: string
   timestamp?: number
@@ -34,6 +38,7 @@ export interface ChatMessage {
 
 interface Props {
   message: ChatMessage
+  agentId?: string
   agentName?: string
   /** Agent 头像 URL。 */
   agentAvatarUrl?: string
@@ -58,6 +63,7 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   agentName: '助手',
+  agentId: '',
   agentAvatarUrl: '',
   allowMutations: true,
   mutationActions: () => ['edit' as const, 'delete' as const],
@@ -79,6 +85,22 @@ const emit = defineEmits<{
 }>()
 
 const isThinkingExpanded = ref(false)
+const generationStats = computed(() => props.message.surface?.generationStats)
+const generationRate = computed(() => {
+  const stats = generationStats.value
+  return stats && stats.modelDurationMs > 0
+    ? ((stats.outputTokens * 1000) / stats.modelDurationMs).toFixed(1)
+    : null
+})
+const generationHint = computed(() => {
+  const stats = generationStats.value
+  if (!stats) return ''
+  return (
+    `累计 ${stats.modelCalls} 次主模型调用，包含正文和工具参数，不含已上报的思考 Token。` +
+    '平均速率按模型请求累计耗时计算，包含首字等待与思考，不计工具执行和用户确认等待。' +
+    (stats.estimated ? '部分调用未回传用量，使用本地估算。' : '')
+  )
+})
 const previewImageUrl = ref<string | null>(null)
 const userImages = computed(
   () =>
@@ -122,6 +144,7 @@ function formatTime(ts?: number): string {
   <div
     v-if="message.role === 'system' && systemVariant === 'narration'"
     class="msg-row msg-row-narration"
+    :data-message-id="message.id"
     :data-surface-id="message.surface?.surfaceId"
   >
     <article class="msg-narration-card">
@@ -155,6 +178,7 @@ function formatTime(ts?: number): string {
   <div
     v-else-if="message.role === 'system'"
     class="msg-row msg-row-system"
+    :data-message-id="message.id"
     :data-surface-id="message.surface?.surfaceId"
   >
     <div :class="['msg-system-pill', { 'msg-image-transcription': message.imageTranscription }]">
@@ -169,6 +193,7 @@ function formatTime(ts?: number): string {
   <div
     v-else-if="message.role === 'user'"
     class="msg-row msg-row-user"
+    :data-message-id="message.id"
     :data-surface-id="message.surface?.surfaceId"
   >
     <div class="msg-bubble-container msg-user-container">
@@ -241,13 +266,23 @@ function formatTime(ts?: number): string {
   </div>
 
   <!-- 助手消息 -->
-  <div v-else class="msg-row msg-row-assistant" :data-surface-id="message.surface?.surfaceId">
+  <div
+    v-else
+    class="msg-row msg-row-assistant"
+    :class="{ 'msg-row-streaming': isStreaming }"
+    :data-message-id="message.id"
+    :data-surface-id="message.surface?.surfaceId"
+  >
     <!-- 头像 -->
-    <div class="msg-avatar">
+    <AgentStateHover
+      class="msg-avatar"
+      :agent-id="agentId || message.senderId || message.surface?.principalId"
+      :agent-name="agentName"
+    >
       <img v-if="agentAvatarUrl" :src="agentAvatarUrl" :alt="agentName" class="msg-avatar-image" />
       <span v-else class="msg-avatar-text">{{ agentName?.[0]?.toUpperCase() ?? 'P' }}</span>
       <div class="msg-avatar-status" />
-    </div>
+    </AgentStateHover>
 
     <div class="msg-bubble-container msg-assistant-container">
       <!-- 名称与时间 -->
@@ -257,10 +292,10 @@ function formatTime(ts?: number): string {
         <div class="msg-actions">
           <!-- TTS 播放按钮（ playMessage） -->
           <button
-            v-if="message.role === 'assistant' && message.content && !isStreaming"
+            v-if="message.role === 'assistant' && message.spokenReply && !isStreaming"
             class="msg-action-btn"
             :class="{ 'msg-action-btn-active': props.playingMsgId === message.id }"
-            :title="props.playingMsgId === message.id ? '停止播放' : '朗读此消息'"
+            :title="props.playingMsgId === message.id ? '停止播放' : '播放口语答复'"
             @click="emit('ttsPlay', message)"
           >
             <PixelIcon
@@ -330,13 +365,17 @@ function formatTime(ts?: number): string {
             class="msg-thinking-step"
           >
             <span class="msg-thinking-index">{{ String(index + 1).padStart(2, '0') }}</span>
-            <ChatRichText :content="section" compact />
+            <ChatRichText :content="section" compact :web-preview="false" />
           </article>
         </div>
       </div>
 
       <!-- 消息体 -->
-      <div class="msg-bubble msg-bubble-assistant">
+      <ReplySelection
+        class="msg-bubble msg-bubble-assistant"
+        :streaming="isStreaming"
+        :identity="message.id"
+      >
         <RunPulse
           v-if="ragFailure"
           state="failed"
@@ -351,12 +390,83 @@ function formatTime(ts?: number): string {
         <ConversationSurface v-if="message.surface" :surface="message.surface" />
         <ThinkingIndicator v-else-if="isStreaming" :name="agentName" :label="progressLabel" />
         <div v-else class="msg-surface-missing">消息 Surface 不可用</div>
-      </div>
+      </ReplySelection>
+      <Transition name="generation-stats">
+        <div
+          v-if="!isStreaming && message.surface?.state === 'committed' && generationStats"
+          class="msg-generation-stats"
+          :title="generationHint"
+          aria-label="本次对话输出统计"
+        >
+          <span class="msg-generation-stats__marker" aria-hidden="true" />
+          <span>
+            {{ generationStats.estimated ? '约 ' : ''
+            }}{{ generationStats.outputTokens.toLocaleString('zh-CN') }}
+            <small>Token</small>
+          </span>
+          <span class="msg-generation-stats__divider" aria-hidden="true">·</span>
+          <span>
+            {{ generationRate === null ? '—' : generationRate }}
+            <small>Token/s</small>
+          </span>
+        </div>
+      </Transition>
     </div>
   </div>
 </template>
 
 <style scoped>
+.msg-row-streaming,
+.msg-row-streaming :deep(*) {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+.msg-generation-stats {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  width: fit-content;
+  max-width: 100%;
+  margin: 7px 0 0 5px;
+  padding: 3px 7px;
+  border-left: 2px solid color-mix(in srgb, var(--ui-accent-purple) 40%, transparent);
+  background: color-mix(in srgb, var(--ui-accent-purple) 5%, transparent);
+  color: var(--ui-text-secondary);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+}
+.msg-generation-stats__marker {
+  width: 4px;
+  height: 4px;
+  background: var(--ui-accent-purple);
+  opacity: 0.65;
+}
+.msg-generation-stats small,
+.msg-generation-stats__divider {
+  color: var(--ui-text-tertiary);
+  font-size: 10px;
+}
+.generation-stats-enter-active,
+.generation-stats-leave-active {
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
+}
+.generation-stats-enter-from,
+.generation-stats-leave-to {
+  opacity: 0;
+  transform: translateY(-3px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .generation-stats-enter-active,
+  .generation-stats-leave-active {
+    transition: none;
+  }
+}
+
 .msg-row-narration {
   justify-content: center;
   margin: 12px 0 20px;
@@ -387,9 +497,9 @@ function formatTime(ts?: number): string {
     narration-arrive 420ms cubic-bezier(0.22, 1, 0.36, 1),
     narration-float 5.6s ease-in-out 500ms infinite;
   transition:
-    transform 260ms var(--ui-ease-out),
-    border-color 260ms var(--ui-ease-out),
-    box-shadow 260ms var(--ui-ease-out);
+    transform var(--ui-duration-normal) var(--ui-ease-standard),
+    border-color var(--ui-duration-normal) var(--ui-ease-standard),
+    box-shadow var(--ui-duration-normal) var(--ui-ease-standard);
 }
 
 .msg-narration-card::before,
@@ -490,8 +600,10 @@ function formatTime(ts?: number): string {
   display: flex;
   gap: 4px;
   opacity: 0;
-  transform: translateY(4px);
-  transition: all 180ms var(--ui-ease-out);
+  transform: translateY(var(--ui-motion-distance-sm));
+  transition:
+    opacity var(--ui-duration-fast) var(--ui-ease-standard),
+    transform var(--ui-duration-fast) var(--ui-ease-standard);
 }
 
 .msg-narration-card:hover .msg-narration-actions,
@@ -635,8 +747,8 @@ function formatTime(ts?: number): string {
   box-shadow: 3px 4px 0 color-mix(in srgb, var(--ui-accent-sky) 18%, transparent);
   cursor: zoom-in;
   transition:
-    transform 160ms var(--ui-ease-out),
-    box-shadow 160ms var(--ui-ease-out);
+    transform var(--ui-duration-fast) var(--ui-ease-standard),
+    box-shadow var(--ui-duration-fast) var(--ui-ease-standard);
 }
 .msg-user-image-note img {
   display: block;
@@ -738,11 +850,11 @@ function formatTime(ts?: number): string {
   box-shadow: var(--user-bubble-shadow);
   font-size: 14px;
   font-weight: 500;
-  line-height: 1.45;
+  line-height: 1.65;
   word-break: break-word;
   transition:
-    border-color var(--ui-duration-fast) var(--ui-ease-out),
-    box-shadow var(--ui-duration-fast) var(--ui-ease-out);
+    border-color var(--ui-duration-fast) var(--ui-ease-standard),
+    box-shadow var(--ui-duration-fast) var(--ui-ease-standard);
 }
 
 /* 时间悬浮在气泡左下侧，不参与文档流，也不挤占正文空间。 */
@@ -812,7 +924,7 @@ function formatTime(ts?: number): string {
   border-radius: var(--ui-radius-sm);
   box-shadow: var(--ui-shadow-sm);
   font-size: 14px;
-  line-height: 1.68;
+  line-height: 1.9;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -838,7 +950,6 @@ function formatTime(ts?: number): string {
 }
 
 .msg-bubble-assistant:hover {
-  transform: translateY(-1px);
   box-shadow: var(--ui-shadow-md);
 }
 
@@ -1144,18 +1255,26 @@ function formatTime(ts?: number): string {
   opacity: 0;
   transition: opacity var(--ui-duration-fast);
 }
-.msg-row:hover .msg-actions {
+.msg-row:hover .msg-actions,
+.msg-row:focus-within .msg-actions {
   opacity: 1;
 }
 
 .msg-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 3px;
   background: var(--ui-bg-surface);
   border: 1px solid var(--ui-border-subtle);
   border-radius: var(--ui-radius-xs);
   color: var(--ui-text-tertiary);
   cursor: pointer;
-  transition: all var(--ui-duration-fast);
+  transition:
+    background-color var(--ui-duration-fast) var(--ui-ease-standard),
+    border-color var(--ui-duration-fast) var(--ui-ease-standard),
+    color var(--ui-duration-fast) var(--ui-ease-standard),
+    box-shadow var(--ui-duration-fast) var(--ui-ease-standard);
 }
 .msg-action-btn:hover {
   color: var(--ui-accent-primary);
@@ -1165,6 +1284,10 @@ function formatTime(ts?: number): string {
 .msg-action-btn-danger:hover {
   color: var(--ui-danger);
   border-color: var(--ui-danger);
+  box-shadow: 0 0 0 2px var(--ui-danger-soft);
+}
+.msg-action-btn-danger {
+  --ui-focus-color: var(--ui-danger);
 }
 
 .msg-attachments {
@@ -1225,7 +1348,7 @@ function formatTime(ts?: number): string {
   border: 2px solid var(--color-border);
   object-fit: cover;
   cursor: pointer;
-  transition: transform 0.15s;
+  transition: transform var(--ui-duration-fast) var(--ui-ease-standard);
 }
 .msg-image:hover {
   transform: scale(1.05);
@@ -1240,7 +1363,7 @@ function formatTime(ts?: number): string {
 /* Markdown 渲染容器 */
 .msg-markdown {
   color: var(--ui-text-primary);
-  line-height: 1.6;
+  line-height: 1.9;
   word-break: break-word;
 }
 .msg-markdown :deep(p) {

@@ -4,6 +4,19 @@
  * 集中管理该领域的数据转换、状态边界与外部交互。
  * 调用方依赖这里的稳定契约，不直接耦合底层传输或运行时实现。
  */
+import {
+  arcaHostAvailable,
+  arcaHostRequest,
+  arcaKernelOrigin,
+  arcaOriginThread,
+} from './hostBridge'
+
+export interface ArcaCollaborationAgent {
+  id: string
+  name: string
+  avatarUrl?: string
+}
+
 export interface ArcaCollaborationTask {
   taskId: string
   documentId: string
@@ -31,29 +44,33 @@ export interface ArcaCollaborationTask {
   updatedAt: string
 }
 
-function resolveKernelOrigin(): string | undefined {
-  const raw = new URLSearchParams(window.location.search).get('kernelOrigin')
-  if (!raw) return window.location.protocol.startsWith('http') ? window.location.origin : undefined
-  const origin = new URL(raw).origin
-  const url = new URL(origin)
-  if (
-    url.origin !== window.location.origin &&
-    !['127.0.0.1', 'localhost', '::1'].includes(url.hostname)
-  ) {
-    return undefined
-  }
-  return origin
-}
-
 class ArcaCollaborationClient {
-  private readonly origin = resolveKernelOrigin()
+  private readonly origin = arcaKernelOrigin()
 
   available(): boolean {
-    return Boolean(this.origin)
+    return arcaHostAvailable()
   }
 
-  async status(): Promise<{ available: boolean; agents: Array<{ id: string; name: string }> }> {
-    return this.request('/status')
+  async status(): Promise<{ available: boolean; agents: ArcaCollaborationAgent[] }> {
+    return arcaHostRequest<{ available: boolean; agents: ArcaCollaborationAgent[] }>(
+      'collaboration.status',
+    )
+  }
+
+  /** 静态头像由角色资源接口提供，相对地址始终相对于 Kernel。 */
+  avatarFor(agentId: string, resource?: string): string | undefined {
+    if (resource?.startsWith('data:image/') && arcaHostAvailable()) return resource
+    if (!this.origin || !agentId || agentId === 'arca-local' || agentId.startsWith('human:')) return
+    const path = resource?.startsWith('/agents/') ? '/api' + resource : resource
+    try {
+      const url = new URL(
+        path || '/api/agents/' + encodeURIComponent(agentId) + '/avatar',
+        this.origin,
+      )
+      return ['http:', 'https:'].includes(url.protocol) ? url.href : undefined
+    } catch {
+      return undefined
+    }
   }
 
   async create(input: {
@@ -63,29 +80,35 @@ class ArcaCollaborationClient {
     nodeId?: string
     agentId: string
     requirements?: string
+    selection?: import('@infos/document-engine/office').OfficeSelection
+    baseRevisionId?: string
   }): Promise<ArcaCollaborationTask> {
-    return this.request('', { method: 'POST', body: JSON.stringify(input) })
+    const payload = { ...input, originThreadId: arcaOriginThread(input.agentId) }
+    const storageKey = `arca.kernel-task.pending:${this.origin}:${input.documentId}`,
+      serialized = JSON.stringify(payload)
+    let pending: { payload: string; key: string } | undefined
+    try {
+      pending = JSON.parse(localStorage.getItem(storageKey) ?? 'null') ?? undefined
+    } catch {
+      /* 损坏记录在下一次请求时替换。 */
+    }
+    if (!pending || pending.payload !== serialized)
+      pending = { payload: serialized, key: crypto.randomUUID() }
+    localStorage.setItem(storageKey, JSON.stringify(pending))
+    const task = await arcaHostRequest<ArcaCollaborationTask>('collaboration.create', {
+      ...payload,
+      requestId: pending.key,
+    })
+    localStorage.removeItem(storageKey)
+    return task
   }
 
   async list(documentId: string): Promise<ArcaCollaborationTask[]> {
-    return this.request(`?documentId=${encodeURIComponent(documentId)}`)
+    return arcaHostRequest<ArcaCollaborationTask[]>('collaboration.list', { documentId })
   }
 
   async cancel(taskId: string): Promise<ArcaCollaborationTask> {
-    return this.request(`/${encodeURIComponent(taskId)}/cancel`, { method: 'POST' })
-  }
-
-  private async request<T>(path: string, options?: RequestInit): Promise<T> {
-    if (!this.origin) throw new Error('ARCA_KERNEL_UNAVAILABLE: 缺少Kernel连接地址')
-    const response = await fetch(`${this.origin}/api/applications/arca/collaboration${path}`, {
-      ...options,
-      headers: { 'Content-Type': 'application/json', ...options?.headers },
-    })
-    const body = (await response.json()) as { code: string; data?: T; message?: string }
-    if (!response.ok || body.code !== 'OK') {
-      throw new Error(body.message ?? `HTTP ${response.status}`)
-    }
-    return body.data as T
+    return arcaHostRequest<ArcaCollaborationTask>('collaboration.cancel', { taskId })
   }
 }
 

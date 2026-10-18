@@ -6,16 +6,18 @@
  * 并可选地更新角色的情绪/动作/文案状态。
  *
  * - finish_task + update_character_status 合并
- * - mood/vibe/mind → pet_states 表
- * - click_messages/idle_messages/back_messages → pet_states JSON 列
+ * - mood/vibe/mind 与动态台词 → 当前 Thread 的角色状态变更日志
+ * - 每次写入关联当前消息轮次，删除或撤回时重放剩余有效状态
  * - Gateway 广播 state_update → 前端看板娘实时同步
  *
  * @module packages/backend/src/tools/finishTask
  */
 
 import type { BuiltinTool } from '../index'
+import { normalizeCharacterState } from '@infos/shared'
 import { toolFailure, toolSuccess } from '../../services/execution/toolResult'
 import { createLogger } from '../../lib/logger'
+import type { PetStateData, PetStateScope } from '../../services/agent/petStateService'
 
 const logger = createLogger('FinishTask')
 
@@ -24,7 +26,8 @@ const logger = createLogger('FinishTask')
 // ─────────────────────────────────────────────
 
 interface PetStateUpdater {
-  update(agentId: string, data: PetStateUpdateData): Promise<string | null>
+  get?(agentId: string, threadId?: string): Promise<Partial<PetStateData> | null>
+  update(agentId: string, data: PetStateUpdateData, scope?: PetStateScope): Promise<string | null>
 }
 
 interface PetStateUpdateData {
@@ -84,10 +87,13 @@ function parseMessages(input: unknown): string[] | undefined {
 export async function applyCharacterStateUpdate(
   args: Record<string, unknown>,
   agentId: string,
+  scope?: PetStateScope,
 ): Promise<{ updated: boolean; textExpiresAt?: string | null }> {
-  const mood = args.mood as string | undefined
-  const vibe = args.vibe as string | undefined
-  const mind = args.mind as string | undefined
+  const stateUpdate = normalizeCharacterState({
+    mood: args.mood as string | undefined,
+    vibe: args.vibe as string | undefined,
+    mind: args.mind as string | undefined,
+  })
   const clickMessages: Record<string, string[]> = {}
   const touchReactions = args.touch_reactions
   if (touchReactions && typeof touchReactions === 'object' && !Array.isArray(touchReactions)) {
@@ -109,21 +115,34 @@ export async function applyCharacterStateUpdate(
   }
   const idleMsgs = parseMessages(args.idle_msgs)
   const backMsgs = parseMessages(args.back_msgs)
+  if (
+    !Object.keys(stateUpdate).length &&
+    !Object.keys(clickMessages).length &&
+    !idleMsgs &&
+    !backMsgs
+  ) {
+    return { updated: false }
+  }
+  if (!_petStateUpdater) throw new Error('角色状态服务未初始化')
+  // 显式重复设置也保留来源，撤回前一轮时不能误删后一轮仍有效的同值状态。
+  const { mood, vibe, mind } = stateUpdate
   const hasStateUpdate = Boolean(
     mood || vibe || mind || Object.keys(clickMessages).length || idleMsgs || backMsgs,
   )
   if (!hasStateUpdate) return { updated: false }
-  if (!_petStateUpdater) throw new Error('角色状态服务未初始化')
-
-  const textExpiresAt = await _petStateUpdater.update(agentId, {
-    mood,
-    vibe,
-    mind,
-    clickMessages: Object.keys(clickMessages).length ? clickMessages : undefined,
-    idleMessages: idleMsgs,
-    backMessages: backMsgs,
-  })
-  const payload: Record<string, unknown> = { agentId }
+  const textExpiresAt = await _petStateUpdater.update(
+    agentId,
+    {
+      mood,
+      vibe,
+      mind,
+      clickMessages: Object.keys(clickMessages).length ? clickMessages : undefined,
+      idleMessages: idleMsgs,
+      backMessages: backMsgs,
+    },
+    scope,
+  )
+  const payload: Record<string, unknown> = { agentId, threadId: scope?.threadId }
   if (mood) payload.mood = mood
   if (vibe) payload.vibe = vibe
   if (mind) payload.mind = mind
@@ -131,6 +150,20 @@ export async function applyCharacterStateUpdate(
   if (idleMsgs) payload.idle_messages = idleMsgs
   if (backMsgs) payload.back_messages = backMsgs
   if (textExpiresAt) payload.text_expires_at = textExpiresAt
+  const saved = await _petStateUpdater.get?.(agentId, scope?.threadId)
+  if (saved?.threadId)
+    Object.assign(payload, {
+      threadId: saved.threadId,
+      revision: saved.revision,
+      replace: true,
+      mood: saved.mood,
+      vibe: saved.vibe,
+      mind: saved.mind,
+      click_messages: JSON.parse(saved.clickMessagesJson ?? '{}'),
+      idle_messages: JSON.parse(saved.idleMessagesJson ?? '[]'),
+      back_messages: JSON.parse(saved.backMessagesJson ?? '[]'),
+      text_expires_at: saved.textExpiresAt ?? null,
+    })
   if (_gatewayBroadcast) await _gatewayBroadcast('state_update', payload)
   logger.info(`角色状态已更新: agent=${agentId}`)
   return { updated: true, textExpiresAt }
@@ -152,12 +185,22 @@ export const finishTaskTool: BuiltinTool = {
       )
     }
 
+    if (args.task_result !== undefined) {
+      if (!ctx.taskId) return toolFailure('TASK_CONTEXT_REQUIRED', '任务交接仅用于后台任务')
+      const { getTaskToolRuntime } = await import('../taskControl/runtime')
+      const { parseTaskSegment } = await import('../../services/task/taskLifecycle')
+      await getTaskToolRuntime().submitSegment(
+        ctx.taskId,
+        ctx.executionId,
+        parseTaskSegment(args.task_result),
+      )
+    }
     const summary = (args.summary as string) ?? reply
     const status = (args.status as string) ?? 'done'
 
     // 状态更新失败不阻断任务终止，但复用update_state的同一持久化与广播路径。
     try {
-      await applyCharacterStateUpdate(args, ctx.agentId)
+      await applyCharacterStateUpdate(args, ctx.agentId, ctx)
     } catch (err) {
       logger.error(`角色状态更新失败: ${err instanceof Error ? err.stack || err.message : err}`)
     }

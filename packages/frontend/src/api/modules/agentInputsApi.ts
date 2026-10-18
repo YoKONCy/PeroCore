@@ -9,6 +9,8 @@ export interface AgentInputRequest {
   sessionId: string
   threadId: string
   taskId?: string
+  questions?: import('@infos/shared').AgentInputQuestion[]
+  answers?: import('@infos/shared').AgentInputAnswer[]
   question: string
   context?: string
   options: Array<{ id: string; label: string; description?: string }>

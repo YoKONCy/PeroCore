@@ -32,6 +32,7 @@ export interface OneBotMessageEvent {
   time?: number
   self_id?: number | string
   user_id?: number | string
+  target_id?: number | string
   group_id?: number | string
   sender?: {
     user_id?: number | string
@@ -134,6 +135,13 @@ export function extractAttachments(segments: OneBotSegment[]): Attachment[] {
   return attachments
 }
 
+/** 引用 ID 只接受平台真实消息标识，避免向 NapCat 发送 undefined 等无效参数。 */
+export function extractReplyId(segments: OneBotSegment[]): string | undefined {
+  const id = segments.find((segment) => segment.type === 'reply')?.data.id
+  const value = typeof id === 'number' || typeof id === 'string' ? String(id).trim() : ''
+  return /^-?\d+$/.test(value) ? value : undefined
+}
+
 /**
  * 将 OneBot 消息段数组转换为 CQ 码字符串
  *
@@ -209,6 +217,14 @@ export function toOneBotSegments(content: string, attachments?: Attachment[]): O
       } else if (att.type === 'image') {
         const file = att.localPath ? `file:///${att.localPath}` : (att.url ?? '')
         segments.push({ type: 'image', data: { file } })
+      } else if (att.type === 'audio' || att.type === 'video') {
+        const file = att.localPath
+          ? `file:///${att.localPath.replaceAll('\\', '/')}`
+          : (att.url ?? '')
+        if (!file) throw new Error('媒体附件缺少来源')
+        segments.push({ type: att.type === 'audio' ? 'record' : 'video', data: { file } })
+      } else if (att.type !== 'file') {
+        throw new Error(`不支持发送附件类型: ${att.type}`)
       }
     }
   }

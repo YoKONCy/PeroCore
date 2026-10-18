@@ -1,11 +1,12 @@
 <script setup lang="ts">
+import './task-pixel.css'
 /**
  * DispatchTaskModal — 派发新任务弹窗（M05 §7.3）
  *
  * 选择执行 Agent + 输入任务标题/指令/工作目录 + 完成后行为。
  * 不要求先切换前台角色，可跨 Agent 派发（Pero 前台时派给 Nana 后台）。
  *
- * 视觉：soft-UI 表单，全套 ui 语义令牌（双主题安全）。
+ * 视觉：像素表单与凹面输入框，全套 ui 语义令牌（双主题安全）。
  *
  * @props show / 由父级控制显隐
  * @emits close / dispatched(id: string)
@@ -37,6 +38,8 @@ const agentStore = useAgentStore()
 const agentId = ref('')
 const title = ref('')
 const instruction = ref('')
+const successCriteria = ref('')
+const readOnly = ref(false)
 const completionAction = ref<'notify' | 'open_result' | 'send_to_chat'>('notify')
 const isSubmitting = ref(false)
 const submitError = ref('')
@@ -56,6 +59,8 @@ watch(
       agentId.value = agentId.value || agentStore.activeAgentId || agentStore.agents[0]?.id || ''
       title.value = ''
       instruction.value = ''
+      successCriteria.value = ''
+      readOnly.value = false
       completionAction.value = 'notify'
       submitError.value = ''
     }
@@ -83,6 +88,8 @@ async function handleSubmit() {
     const taskId = await taskCenter.dispatch({
       agentId: agentId.value,
       instruction: instruction.value.trim(),
+      successCriteria: successCriteria.value.trim(),
+      recovery: readOnly.value ? 'read_only' : 'confirm',
       title: title.value.trim() || undefined,
       completionAction: completionAction.value,
       ...(completionAction.value === 'send_to_chat' && props.targetThreadId
@@ -119,7 +126,7 @@ function handleClose() {
     @confirm="handleSubmit"
     @cancel="handleClose"
   >
-    <div class="dispatch-form">
+    <div class="dispatch-form task-pixel-surface">
       <!-- 执行角色 -->
       <label class="dispatch-field">
         <span class="dispatch-field__label">
@@ -170,6 +177,22 @@ function handleClose() {
         />
       </label>
 
+      <label class="dispatch-field">
+        <span class="dispatch-field__label">完成条件（选填）</span>
+        <textarea
+          v-model="successCriteria"
+          class="dispatch-input dispatch-textarea"
+          rows="2"
+          maxlength="2000"
+          :disabled="isSubmitting"
+        />
+      </label>
+      <label class="dispatch-field">
+        <span>
+          <input v-model="readOnly" type="checkbox" :disabled="isSubmitting" />
+          仅查询与读取，服务重启后可自动继续
+        </span>
+      </label>
       <!-- 完成后行为（可选项卡，替代裸 select） -->
       <fieldset class="dispatch-field">
         <span class="dispatch-field__label">
@@ -229,7 +252,7 @@ function handleClose() {
   flex-direction: column;
   gap: var(--ui-space-4);
   padding: 2px 0;
-  font-family: var(--ui-font-sans);
+  font-family: var(--ui-font-pixel);
 }
 
 /* ── 字段 ── */
@@ -256,11 +279,12 @@ function handleClose() {
 .dispatch-field__optional {
   margin-left: 4px;
   padding: 0 6px;
-  border-radius: var(--ui-radius-full);
+  border-radius: 0;
   background: var(--ui-bg-hover);
   font-size: 10px;
   font-weight: 500;
   color: var(--ui-text-tertiary);
+  border: 1px solid var(--ui-border-subtle);
 }
 
 .dispatch-field__counter {
@@ -270,13 +294,13 @@ function handleClose() {
   font-variant-numeric: tabular-nums;
 }
 
-/* ── 输入控件（统一现代圆角 + 聚焦环 + 双主题） ── */
+/* ── 输入控件（像素凹面与双主题聚焦边框） ── */
 .dispatch-input,
 .dispatch-select {
   width: 100%;
   padding: 9px 12px;
   border: 1px solid var(--dash-input-border);
-  border-radius: var(--ui-radius-md);
+  border-radius: 0;
   background: var(--dash-input-bg);
   color: var(--ui-text-primary);
   font-size: 13px;
@@ -285,8 +309,9 @@ function handleClose() {
   outline: none;
   box-sizing: border-box;
   transition:
-    border-color var(--ui-duration-fast) var(--ui-ease-standard),
-    box-shadow var(--ui-duration-fast) var(--ui-ease-standard);
+    border-color var(--ui-duration-fast) steps(3, end),
+    box-shadow var(--ui-duration-fast) steps(3, end);
+  box-shadow: var(--task-inset);
 }
 
 .dispatch-input::placeholder {
@@ -296,7 +321,9 @@ function handleClose() {
 .dispatch-input:focus,
 .dispatch-select:focus {
   border-color: var(--ui-accent-sky);
-  box-shadow: 0 0 0 3px var(--ui-accent-sky-soft);
+  box-shadow: var(--task-inset);
+  outline: 1px solid var(--ui-accent-sky);
+  outline-offset: 2px;
 }
 
 .dispatch-input:disabled,
@@ -343,15 +370,16 @@ function handleClose() {
   gap: 8px;
   padding: 10px 12px;
   border: 1px solid var(--ui-border-default);
-  border-radius: var(--ui-radius-md);
-  background: var(--ui-bg-surface);
+  border-radius: 0;
+  background: var(--task-fill);
   color: var(--ui-text-tertiary);
   cursor: pointer;
   text-align: left;
   transition:
-    border-color var(--ui-duration-fast) var(--ui-ease-standard),
-    background var(--ui-duration-fast) var(--ui-ease-standard),
-    color var(--ui-duration-fast) var(--ui-ease-standard);
+    border-color var(--ui-duration-fast) steps(3, end),
+    background var(--ui-duration-fast) steps(3, end),
+    color var(--ui-duration-fast) steps(3, end);
+  box-shadow: var(--task-control);
 }
 
 .dispatch-action:hover {
@@ -363,6 +391,7 @@ function handleClose() {
   border-color: var(--ui-accent-sky);
   background: var(--ui-accent-sky-soft);
   color: var(--ui-accent-sky);
+  box-shadow: var(--task-inset);
 }
 
 .dispatch-action:disabled {
@@ -400,11 +429,12 @@ function handleClose() {
   gap: 6px;
   margin: 0;
   padding: 9px 12px;
-  border-radius: var(--ui-radius-md);
+  border-radius: 0;
   background: var(--ui-danger-soft);
   color: var(--ui-danger);
   font-size: 12px;
   font-weight: 500;
+  border: 1px solid color-mix(in srgb, var(--ui-danger) 35%, transparent);
 }
 
 /* 窄屏时行为选项改单列堆叠 */
@@ -412,5 +442,12 @@ function handleClose() {
   .dispatch-actions-group {
     grid-template-columns: 1fr;
   }
+}
+.dispatch-action:active:not(:disabled) {
+  box-shadow: var(--task-inset);
+}
+.dispatch-action:focus-visible {
+  outline: 1px solid var(--ui-accent-sky);
+  outline-offset: 2px;
 }
 </style>

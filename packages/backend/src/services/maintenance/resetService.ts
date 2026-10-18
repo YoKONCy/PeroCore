@@ -17,6 +17,7 @@ import type { DrizzleDb } from '../../database'
 import {
   threads,
   threadMessages,
+  threadCharacterStateEvents,
   threadSummaries,
   conversationLogs,
   groupChatMessages,
@@ -34,8 +35,16 @@ import {
   factMemoryOperations,
   factObjects,
   factRecords,
+  llmUsageRecords,
+  applicationCalls,
+  taskPlans,
+  taskPlanMutations,
+  tarotReadings,
+  tarotDays,
 } from '../../database/schema'
 import { createLogger } from '../../lib/logger'
+import { disposeExecutionOwner } from '../../tools/productivityRuntimeHolder'
+import { invalidatePromptReplay } from '../llm/promptCache'
 
 const logger = createLogger('ResetService')
 
@@ -51,42 +60,62 @@ export class ResetService {
 
   /** 清空对话记录（记忆与配置不受影响）。 */
   async clearLogs(): Promise<ResetResult> {
+    await disposeExecutionOwner({})
+    invalidatePromptReplay(undefined, true)
     const cleared: Record<string, number> = {}
     cleared.threads = this.clearTable(threads)
     cleared.thread_messages = this.clearTable(threadMessages)
+    cleared.thread_character_state_events = this.clearTable(threadCharacterStateEvents)
     cleared.thread_summaries = this.clearTable(threadSummaries)
     cleared.conversation_logs = this.clearTable(conversationLogs)
     cleared.group_chat_messages = this.clearTable(groupChatMessages)
     cleared.message_attachments = this.clearTable(messageAttachments)
     cleared.file_change_snapshots = this.clearTable(fileChangeSnapshots)
+    cleared.task_plan_mutations = this.clearTable(taskPlanMutations)
+    cleared.task_plans = this.clearTable(taskPlans)
     logger.info(`对话记录已清空: ${JSON.stringify(cleared)}`)
     return { operation: 'clear_logs', cleared }
   }
 
   /** 重置全部记忆（对话与配置不受影响）。 */
   async resetMemories(): Promise<ResetResult> {
-    const cleared: Record<string, number> = {}
-    cleared.event_memory_relations = this.clearTable(eventMemoryRelations)
-    cleared.event_memory_coverage_claims = this.clearTable(eventMemoryCoverageClaims)
-    cleared.event_note_coverages = this.clearTable(eventNoteCoverages)
-    cleared.event_memory_operations = this.clearTable(eventMemoryOperations)
-    cleared.event_memory_timers = this.clearTable(eventMemoryTimers)
-    cleared.event_memory_daily_note_tasks = this.clearTable(eventMemoryDailyNoteTasks)
-    cleared.event_memory_reflection_tasks = this.clearTable(eventMemoryReflectionTasks)
-    cleared.event_memory_query_audits = this.clearTable(eventMemoryQueryAudits)
-    cleared.event_notes = this.clearTable(eventNotes)
-    cleared.fact_memory_operations = this.clearTable(factMemoryOperations)
-    cleared.fact_records = this.clearTable(factRecords)
-    cleared.fact_objects = this.clearTable(factObjects)
+    const tables = [
+      ['event_memory_relations', eventMemoryRelations],
+      ['event_memory_coverage_claims', eventMemoryCoverageClaims],
+      ['event_note_coverages', eventNoteCoverages],
+      ['event_memory_operations', eventMemoryOperations],
+      ['event_memory_timers', eventMemoryTimers],
+      ['event_memory_daily_note_tasks', eventMemoryDailyNoteTasks],
+      ['event_memory_reflection_tasks', eventMemoryReflectionTasks],
+      ['event_memory_query_audits', eventMemoryQueryAudits],
+      ['event_notes', eventNotes],
+      ['fact_memory_operations', factMemoryOperations],
+      ['fact_records', factRecords],
+      ['fact_objects', factObjects],
+    ] as const
+    // 清理失败必须抛出并保留恢复任务，不能把部分删除报告为成功。
+    const cleared = this.db.transaction((tx) => {
+      const counts: Record<string, number> = {}
+      for (const [name, table] of tables) counts[name] = tx.delete(table).run().changes
+      return counts
+    })
     logger.info(`记忆已重置: ${JSON.stringify(cleared)}`)
     return { operation: 'reset_memories', cleared }
   }
 
   /** 恢复出厂设置：清空全部用户数据（保留磁盘上的角色定义）。 */
   async factoryReset(): Promise<ResetResult> {
+    await disposeExecutionOwner({})
+    invalidatePromptReplay(undefined, true)
     // 先清空记忆/对话相关，再清空业务数据，最后清空配置与审批审计。
     // 使用显式表名映射，避免依赖 drizzle 内部 symbol 反射。
     const tables: Array<[string, Parameters<DrizzleDb['delete']>[0]]> = [
+      ['tarot_readings', tarotReadings],
+      ['tarot_days', tarotDays],
+      ['llm_usage_records', llmUsageRecords],
+      ['application_calls', applicationCalls],
+      ['task_plan_mutations', taskPlanMutations],
+      ['task_plans', taskPlans],
       ['event_memory_relations', eventMemoryRelations],
       ['event_memory_coverage_claims', eventMemoryCoverageClaims],
       ['event_note_coverages', eventNoteCoverages],
@@ -100,6 +129,7 @@ export class ResetService {
       ['fact_records', factRecords],
       ['fact_objects', factObjects],
       ['threads', threads],
+      ['thread_character_state_events', threadCharacterStateEvents],
       ['thread_messages', threadMessages],
       ['thread_summaries', threadSummaries],
       ['conversation_logs', conversationLogs],

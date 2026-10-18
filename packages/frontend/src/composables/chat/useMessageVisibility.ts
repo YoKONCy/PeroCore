@@ -3,12 +3,21 @@
  *
  * 替代虚拟滚动的轻量方案：
  * - 不可见消息的动画、视频、Canvas 全部暂停
- * - 配合 CSS content-visibility: auto 优化布局开销
+ * - 通知文本组件暂停解析，不固化或伪造消息高度
  * - 恢复时自动 resume
  *
  */
 
-import { ref, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue'
+import {
+  inject,
+  ref,
+  shallowRef,
+  watch,
+  onMounted,
+  onUnmounted,
+  onActivated,
+  onDeactivated,
+} from 'vue'
 import type { Ref } from 'vue'
 
 /**
@@ -21,24 +30,47 @@ export function useMessageVisibility(
   onVisibilityChange?: (element: HTMLElement, visible: boolean) => void,
 ) {
   const observer = ref<IntersectionObserver | null>(null)
-  const pausedMessages = new WeakSet<HTMLElement>()
+  const visibility = new WeakMap<HTMLElement, boolean>()
+  const elements = new Set<HTMLElement>()
+  const pausedAnimations = new WeakMap<HTMLElement, Animation[]>()
+  const mainVisible = inject('infos:main-surface-visible', shallowRef(true))
+  let activated = true
+  let observerGeneration = 0
+
+  function setVisible(el: HTMLElement, visible: boolean): void {
+    if (visibility.get(el) === visible) return
+    visibility.set(el, visible)
+    if (visible) {
+      resumeMessage(el)
+    } else {
+      pauseMessage(el)
+    }
+    onVisibilityChange?.(el, visible)
+  }
 
   function createObserver() {
-    if (observer.value || !chatContainer.value) return
+    if (
+      observer.value ||
+      !chatContainer.value ||
+      !activated ||
+      !mainVisible.value ||
+      document.hidden
+    )
+      return
 
+    const generation = ++observerGeneration
     observer.value = new IntersectionObserver(
       (entries) => {
+        if (
+          generation !== observerGeneration ||
+          !activated ||
+          !mainVisible.value ||
+          document.hidden
+        )
+          return
         for (const entry of entries) {
           const el = entry.target as HTMLElement
-          if (entry.isIntersecting) {
-            resumeMessage(el)
-            pausedMessages.delete(el)
-            onVisibilityChange?.(el, true)
-          } else {
-            pauseMessage(el)
-            pausedMessages.add(el)
-            onVisibilityChange?.(el, false)
-          }
+          if (elements.has(el)) setVisible(el, entry.isIntersecting)
         }
       },
       {
@@ -48,11 +80,14 @@ export function useMessageVisibility(
         threshold: 0,
       },
     )
+    for (const element of elements) observer.value.observe(element)
   }
 
   function destroyObserver() {
+    observerGeneration++
     observer.value?.disconnect()
     observer.value = null
+    for (const element of elements) setVisible(element, false)
   }
 
   // ── 暂停策略 ──
@@ -62,9 +97,11 @@ export function useMessageVisibility(
 
     // 暂停 Web Animations API 动画
     try {
-      el.getAnimations({ subtree: true }).forEach((a) => {
-        if (a.playState === 'running') a.pause()
-      })
+      const animations = el
+        .getAnimations({ subtree: true })
+        .filter((a) => a.playState === 'running')
+      for (const animation of animations) animation.pause()
+      pausedAnimations.set(el, animations)
     } catch {
       // getAnimations 不支持时静默
     }
@@ -89,9 +126,9 @@ export function useMessageVisibility(
 
     // 恢复 Web Animations
     try {
-      el.getAnimations({ subtree: true }).forEach((a) => {
-        if (a.playState === 'paused') a.play()
-      })
+      for (const animation of pausedAnimations.get(el) ?? [])
+        if (animation.playState === 'paused') animation.play()
+      pausedAnimations.delete(el)
     } catch {
       // 静默
     }
@@ -99,7 +136,7 @@ export function useMessageVisibility(
     // 恢复视频/音频
     el.querySelectorAll<HTMLMediaElement>('video, audio').forEach((m) => {
       if (m.dataset.wasPlaying === 'true') {
-        void m.play()
+        void m.play().catch(() => {})
         delete m.dataset.wasPlaying
       }
     })
@@ -110,22 +147,41 @@ export function useMessageVisibility(
   /** 开始观察一个消息元素 */
   function observe(messageEl: Element | null | undefined) {
     if (!(messageEl instanceof HTMLElement)) return
+    elements.add(messageEl)
     if (!observer.value) createObserver()
     observer.value?.observe(messageEl)
+    if (!observer.value) setVisible(messageEl, false)
   }
 
   /** 停止观察 */
   function unobserve(messageEl: Element | null | undefined) {
     if (!(messageEl instanceof HTMLElement)) return
     observer.value?.unobserve(messageEl)
-    pausedMessages.delete(messageEl)
+    elements.delete(messageEl)
+    visibility.delete(messageEl)
   }
 
   // ── 生命周期 ──
   onMounted(createObserver)
-  onActivated(createObserver)
-  onUnmounted(destroyObserver)
-  onDeactivated(destroyObserver)
+  const syncVisibility = () => {
+    if (activated && mainVisible.value && !document.hidden) createObserver()
+    else destroyObserver()
+  }
+  watch(mainVisible, syncVisibility)
+  onActivated(() => {
+    activated = true
+    syncVisibility()
+  })
+  onDeactivated(() => {
+    activated = false
+    destroyObserver()
+  })
+  onMounted(() => document.addEventListener('visibilitychange', syncVisibility))
+  onUnmounted(() => {
+    document.removeEventListener('visibilitychange', syncVisibility)
+    observer.value?.disconnect()
+    elements.clear()
+  })
 
   return { observe, unobserve }
 }

@@ -91,7 +91,9 @@ function handleInput(e: Event) {
 }
 
 .p-textarea {
+  display: block;
   width: 100%;
+  min-width: 0;
   padding: 10px 14px;
   background: var(--dash-input-bg);
   border: 2px solid var(--dash-input-border);
@@ -102,14 +104,20 @@ function handleInput(e: Event) {
   line-height: 1.6;
   resize: none;
   outline: none;
+  caret-color: var(--ui-accent-sky);
   transition:
-    border-color 0.2s,
-    box-shadow 0.2s;
+    border-color var(--ui-duration-fast) var(--ui-ease-standard),
+    box-shadow var(--ui-duration-fast) var(--ui-ease-standard),
+    background-color var(--ui-duration-fast) var(--ui-ease-standard);
   position: relative;
   z-index: 1;
 }
 .p-textarea::placeholder {
   color: var(--ui-text-tertiary);
+  opacity: 1;
+}
+.p-textarea:hover:not(:disabled):not(:focus) {
+  border-color: var(--ui-border-strong);
 }
 .p-textarea:focus {
   border-color: var(--ui-accent-sky);
@@ -129,7 +137,7 @@ function handleInput(e: Event) {
   opacity: 0;
   filter: blur(20px);
   pointer-events: none;
-  transition: opacity 0.7s;
+  transition: opacity var(--ui-duration-panel) var(--ui-ease-standard);
 }
 .p-textarea-container:focus-within .p-textarea-glow {
   opacity: 0.05;
@@ -145,10 +153,10 @@ function handleInput(e: Event) {
   pointer-events: none;
   z-index: 2;
   transition:
-    opacity 0.3s,
-    color 0.3s;
+    opacity var(--ui-duration-normal) var(--ui-ease-standard),
+    color var(--ui-duration-normal) var(--ui-ease-standard);
 }
-.p-textarea-container:hover .p-textarea-paw {
+.p-textarea-container:hover .p-textarea:not(:disabled) ~ .p-textarea-paw {
   opacity: 0.4;
 }
 .p-textarea-container:focus-within .p-textarea-paw {
@@ -166,21 +174,9 @@ function handleInput(e: Event) {
   height: 2px;
   background: linear-gradient(90deg, transparent, var(--color-sky-hover), transparent);
   z-index: 2;
-  transition: width 0.7s;
+  transition: width var(--ui-duration-panel) var(--ui-ease-standard);
 }
 .p-textarea-container:focus-within .p-textarea-underline {
   width: 66%;
-}
-
-/* 滚动条样式 */
-.p-textarea::-webkit-scrollbar {
-  width: 4px;
-}
-.p-textarea::-webkit-scrollbar-track {
-  background: transparent;
-}
-.p-textarea::-webkit-scrollbar-thumb {
-  background: var(--color-sky-light);
-  border-radius: 2px;
 }
 </style>

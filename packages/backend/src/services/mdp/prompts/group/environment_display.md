@@ -9,7 +9,7 @@ Injected Via: 当前未接入
 Model Role: main
 -->
 
-你当前处于 **据点群聊** 模式。
+{{ agent_name }}，你当前处于 **据点群聊** 模式。
 这是一个多个角色和用户共同生活的虚拟共享空间。
 
 当前房间：{{ current_room_name }}

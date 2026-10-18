@@ -17,10 +17,7 @@
       class="ctb-title flex items-center gap-3 px-4 pointer-events-none"
       :class="isWorkMode ? 'text-slate-400' : 'text-sky-700'"
     >
-      <div
-        class="ctb-dot w-3 h-3"
-        :class="isWorkMode ? 'bg-slate-600' : 'bg-pink-400 pixel-border-pink'"
-      />
+      <InfosLogo class="ctb-brand" variant="mark" aria-hidden="true" />
       <span class="text-xs font-bold tracking-wide font-mono opacity-90">{{ title }}</span>
     </div>
 
@@ -95,6 +92,7 @@
  */
 import { ref, onMounted, onUnmounted } from 'vue'
 import { PixelIcon } from '../pixel'
+import InfosLogo from '../brands/InfosLogo.vue'
 import { invoke, listen } from '../../utils/ipcAdapter'
 
 interface Props {
@@ -163,6 +161,11 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.ctb-brand {
+  width: 20px;
+  height: 20px;
+}
+
 /* ── 深浅色主题适配 ──
  * 跟随 document 根元素的 data-theme 属性（由 app 的深浅色切换逻辑维护）。
  * 非透明标题栏整体切换底色；透明标题栏（悬浮于页面内容上）仅调整文字与按钮色。
@@ -174,11 +177,6 @@ onUnmounted(() => {
 
 [data-theme='dark'] .custom-title-bar .ctb-title {
   color: #94a3b8;
-}
-
-[data-theme='dark'] .custom-title-bar .ctb-dot {
-  background: #475569;
-  border-color: transparent;
 }
 
 [data-theme='dark'] .custom-title-bar .ctb-btn {

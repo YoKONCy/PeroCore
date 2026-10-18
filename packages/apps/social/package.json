@@ -1,6 +1,6 @@
 {
   "name": "@infos/social",
-  "version": "0.9.3-hotfix2",
+  "version": "0.9.4",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,7 +11,7 @@
     "@infos/shared": "workspace:*",
     "drizzle-orm": "^0.44.0",
     "hono": "^4.7.0",
-    "triviumdb": "0.8.2",
+    "triviumdb": "0.8.9",
     "uuid": "^14.0.0"
   },
   "devDependencies": {

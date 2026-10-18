@@ -27,6 +27,8 @@ import type {
 } from './types'
 import type { SkillLoader } from './skillLoader'
 import type { ToolRegistry } from '../services/agent/toolRegistry'
+import type { InteractionMode } from '@infos/shared'
+import { isToolAllowedInInteractionMode } from '../tools/interactionMode'
 import { isSystemProtocolTool } from '../tools/systemProtocolTools'
 import { createLogger } from '../lib/logger'
 
@@ -50,15 +52,42 @@ const AMBIENT_ALLOWED_TOOLS = new Set([
   'set_reminder',
   'list_reminders',
   'cancel_reminder',
+  'schedule_follow_up',
+  'suggest_next_step',
   'write_event_note',
   'revise_event_note',
   'query_event_notes',
   'query_facts',
+  'search_knowledge',
   'write_fact',
   'supersede_fact',
   'delete_fact',
   'add_fact_object_alias',
   'remove_fact_object_alias',
+])
+
+/** 到期跟进允许重新读取现状和提出建议，不允许外部写入、命令执行或动态解锁。 */
+const FOLLOW_UP_ALLOWED_TOOLS = new Set([
+  'update_plan',
+  'web_search',
+  'deepwiki_query',
+  'sciverse_search',
+  'finish_task',
+  'take_screenshot',
+  'query_event_notes',
+  'query_facts',
+  'search_knowledge',
+  'read_file',
+  'read_image',
+  'read_file_range',
+  'get_file_info',
+  'list_directory',
+  'glob_files',
+  'search_files',
+  'web_fetch',
+  'schedule_follow_up',
+  'suggest_next_step',
+  'list_reminders',
 ])
 
 export class CapabilityGate {
@@ -77,8 +106,12 @@ export class CapabilityGate {
   }
 
   /** 为指定工具集合生成提示词描述，供 Thread 级减法过滤复用。 */
-  describeTools(toolNames: Iterable<string>): string {
-    return this.buildToolsDescription(new Set(toolNames))
+  describeTools(toolNames: Iterable<string>, mode: InteractionMode = 'work'): string {
+    return this.buildToolsDescription(new Set(toolNames), mode)
+  }
+
+  isToolAllowedInMode(name: string, mode: InteractionMode): boolean {
+    return isToolAllowedInInteractionMode(name, mode, this.toolRegistry)
   }
 
   /** 扫描所有 Agent 目录的 capabilities.yaml */
@@ -200,7 +233,7 @@ export class CapabilityGate {
     }
 
     const allowAllMcpTools = allowedTools.delete('mcp:*')
-    if (allowAllMcpTools && scope !== 'ambient') {
+    if (allowAllMcpTools && scope === 'default') {
       for (const tool of channelTools) {
         if (tool.startsWith('mcp_')) allowedTools.add(tool)
       }
@@ -217,15 +250,16 @@ export class CapabilityGate {
     }
 
     // 请求级作用域只能在 Channel 权限基础上做交集，禁止借由作用域扩权。
-    if (scope === 'ambient') {
+    if (scope !== 'default') {
+      const allowed = scope === 'follow_up' ? FOLLOW_UP_ALLOWED_TOOLS : AMBIENT_ALLOWED_TOOLS
       for (const tool of allowedTools) {
-        if (!AMBIENT_ALLOWED_TOOLS.has(tool)) allowedTools.delete(tool)
+        if (!allowed.has(tool)) allowedTools.delete(tool)
       }
     }
 
     // 2. Skill 清单 (只加载 manifest，不加载完整内容)
     const enabledSkills: SkillManifest[] = []
-    const enabledSkillIds = scope === 'ambient' ? [] : channelConfig.skills
+    const enabledSkillIds = scope === 'default' ? channelConfig.skills : []
     const discoverAllSkills = enabledSkillIds.includes('*')
     const skillIds = discoverAllSkills
       ? this.skillLoader.getAllManifests().map((skill) => skill.id)
@@ -238,6 +272,7 @@ export class CapabilityGate {
     }
 
     // 3. 工具描述文本 (仅白名单内的工具)
+    enabledSkills.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     const toolsDescription = this.buildToolsDescription(allowedTools)
 
     // 4. Skill 菜单文本 (L1, ~50 tokens)
@@ -254,7 +289,7 @@ export class CapabilityGate {
       promptFragments: channelConfig.prompt_fragments.filter(
         (fragment) =>
           !DEPRECATED_ROLE_FRAGMENTS.has(fragment) &&
-          (scope !== 'ambient' || fragment.includes('/vision')),
+          (scope === 'default' || fragment.includes('/vision')),
       ),
       toolsDescription,
       skillMenuText,
@@ -603,9 +638,11 @@ export class CapabilityGate {
   // ── 内部 ──
 
   /** 构建工具描述文本 (只包含白名单内 + 已注册的工具) */
-  private buildToolsDescription(allowedTools: Set<string>): string {
+  private buildToolsDescription(allowedTools: Set<string>, mode: InteractionMode = 'work'): string {
     const allDefs = this.toolRegistry.getDefinitions()
-    const filtered = allDefs.filter((d) => allowedTools.has(d.name))
+    const filtered = allDefs
+      .filter((d) => allowedTools.has(d.name) && this.isToolAllowedInMode(d.name, mode))
+      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
 
     if (filtered.length === 0) return ''
 

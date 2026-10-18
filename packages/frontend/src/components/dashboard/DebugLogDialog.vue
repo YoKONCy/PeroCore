@@ -81,15 +81,3 @@ defineExpose({ open })
     </template>
   </PDialog>
 </template>
-
-<style scoped>
-/* 像素风滚动条 */
-.dbg-scrollbar::-webkit-scrollbar {
-  width: 4px;
-}
-
-.dbg-scrollbar::-webkit-scrollbar-thumb {
-  background: #bae6fd;
-  border-radius: 0;
-}
-</style>

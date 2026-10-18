@@ -5,6 +5,9 @@
     "types": ["node"],
     "paths": {
       "@infos/arca": ["../apps/arca/src"],
+      "@infos/arca/*": ["../apps/arca/src/*"],
+      "@infos/pictoria": ["../apps/pictoria/src"],
+      "@infos/pictoria/*": ["../apps/pictoria/src/*"],
       "@infos/shared": ["../shared/src"],
       "@infos/backend": ["../backend/src"],
       "@infos/backend/*": ["../backend/src/*"],

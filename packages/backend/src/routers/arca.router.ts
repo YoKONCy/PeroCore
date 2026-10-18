@@ -18,7 +18,9 @@ export function createArcaRouter(ctx: AppContext) {
 
   router.post('/start', async (c) => {
     try {
-      return c.json({ code: 'OK', data: await ctx.arcaApplication.start() })
+      const body = await c.req.text()
+      const value = body.trim() ? (JSON.parse(body) as { desktopGuard?: unknown }) : {}
+      return c.json({ code: 'OK', data: await ctx.arcaApplication.start(value.desktopGuard) })
     } catch (error) {
       throw new AppError('SERVICE_UNAVAILABLE', { message: errorCode(error) })
     }

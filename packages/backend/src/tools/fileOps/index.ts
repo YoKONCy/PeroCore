@@ -1,47 +1,26 @@
 /**
  * file_ops — 文件操作工具
  *
- * AIOS(Phase4): 改造为通过 WorkspaceService 执行文件操作，
- * 按 channel 分级控制访问范围：
- * - desktop: read 全局可读，write 限 workspace
- * - companion/social/group: 读写都限 workspace
+ * 与工作区编辑器共用 ExecutionSession / VirtualWorkspace 的路径、版本和原子写入语义。
+ * 设备只读由工具权限标记控制，工作区外写入仍需本次审批或自动执行授权。
  *
  * @module packages/backend/src/tools/fileOps
  */
 
 import type { BuiltinTool } from '../index'
-import type { WorkspaceService } from '../../services/workspace/workspaceService'
 import type { WorkspaceCheckpointService } from '../../services/workspace/workspaceCheckpointService'
-import { createLogger } from '../../lib/logger'
 import { diffLines } from '../../services/execution/virtualWorkspace'
+import { getProductivityRuntime, resolveExecutionSession } from '../productivityRuntimeHolder'
+import { toolSuccess } from '../../services/execution/toolResult'
+import { createReadReference, fileEditOwner } from '../../services/execution/fileEditing'
 
-const logger = createLogger('FileOps')
+export { readImageTool, setImageReadResourceService } from './readImage'
 
-/** WorkspaceService 实例（由 container.ts 通过 setWorkspaceService 注入） */
-let workspaceService: WorkspaceService | null = null
 let checkpointService: WorkspaceCheckpointService | null = null
 
 /** 注入对话轮次文件检查点服务。 */
 export function setWorkspaceCheckpointService(service: WorkspaceCheckpointService): void {
   checkpointService = service
-}
-
-/**
- * 注入 WorkspaceService
- *
- * 在 container.ts 启动时调用一次。
- */
-export function setWorkspaceService(service: WorkspaceService): void {
-  workspaceService = service
-  logger.info('WorkspaceService 已注入')
-}
-
-/** 获取 WorkspaceService，未注入时抛错 */
-function requireWorkspaceService(): WorkspaceService {
-  if (!workspaceService) {
-    throw new Error('WorkspaceService 未注入，文件工具不可用')
-  }
-  return workspaceService
 }
 
 export interface ToolDiffPreviewRow {
@@ -52,10 +31,9 @@ export interface ToolDiffPreviewRow {
 }
 
 /**
- * 生成可持久化的有限行级 Diff 预览。
- * 总增删数由完整文本计算，预览最多保留 80 行，避免工具审计重新保存整份文件正文。
+ * 生成完整行级 Diff，行数与单行长度不再截断；前端按可视窗口渲染。
  */
-export function buildToolDiff(oldText: string, newText: string, limit = 80) {
+export function buildToolDiff(oldText: string, newText: string) {
   /** 空文件为 0 行；末尾换行只表示行终止，不额外制造一条虚假空行。 */
   const toLines = (text: string) => {
     if (!text) return []
@@ -113,11 +91,8 @@ export function buildToolDiff(oldText: string, newText: string, limit = 80) {
     insertions: stats.insertions,
     deletions: stats.deletions,
     approximate: stats.approximate,
-    diffPreview: rows.slice(0, limit).map((row) => ({
-      ...row,
-      text: row.text.length > 500 ? `${row.text.slice(0, 500)}…` : row.text,
-    })),
-    diffTruncated: rows.length > limit,
+    diffPreview: rows,
+    diffTruncated: false,
   }
 }
 
@@ -129,13 +104,30 @@ export const readFileTool: BuiltinTool = {
     const maxLength = args.max_length === undefined ? undefined : Number(args.max_length)
 
     try {
-      const service = requireWorkspaceService()
-      // AIOS(Phase4): 按 channel 分级 containment 检查
-      const content = await service.read(ctx.agentId, filePath, ctx.channel, {
-        maxLength,
+      if (maxLength !== undefined && (!Number.isFinite(maxLength) || maxLength <= 0)) {
+        throw new Error('max_length 必须是正数')
+      }
+      const session = await resolveExecutionSession(ctx)
+      const workspace = getProductivityRuntime().virtualWorkspace
+      const sourceRef = await workspace.resolveReadablePath(session, filePath, ctx.deviceReadScope)
+      const result = await workspace.read(session, filePath, {
         deviceScope: ctx.deviceReadScope,
+        ...(maxLength === undefined
+          ? { lineStart: 1, lineEnd: 800 }
+          : { limit: Math.max(1, Math.min(Math.trunc(maxLength), 128_000)) }),
       })
-      return content
+      const readRef = createReadReference(fileEditOwner(session, ctx.realmId), sourceRef, result)
+      return toolSuccess(
+        `${result.truncated ? `${result.content}\n...[内容已截断]...` : result.content}\n【读取引用】read_ref=${readRef ?? '无可编辑内容'}；hash=${result.hash}`,
+        {
+          hash: result.hash,
+          sourceRef,
+          lineStart: result.lineStart,
+          lineEnd: result.lineEnd,
+          truncated: result.truncated,
+          readRef,
+        },
+      )
     } catch (err) {
       return JSON.stringify({
         error: err instanceof Error ? err.message : String(err),
@@ -153,39 +145,63 @@ export const writeFileTool: BuiltinTool = {
     const append = (args.append as boolean) ?? false
 
     try {
-      const service = requireWorkspaceService()
-      const captured = ctx.approvedOutsideWorkspace
-        ? null
-        : await checkpointService?.captureToolMutation(ctx, filePath)
-      // 写入前先读取元信息，向前端明确报告 create/overwrite/append，便于工作区自动打开新文件。
-      const before = await service.stat(ctx.agentId, filePath, ctx.channel, {
-        deviceScope: ctx.approvedOutsideWorkspace,
-      })
-      // 写入前读取旧正文用于计算 UI Diff；旧正文仅在本次工具执行内存中存在。
-      // 无法读取（新文件/超大文件/编码问题）时降级为空文本，不阻断真实写入。
-      const oldContent = before.exists
-        ? await service
-            .read(ctx.agentId, filePath, ctx.channel, {
-              maxLength: 10_000_000,
-              deviceScope: ctx.approvedOutsideWorkspace,
-            })
-            .catch(() => '')
-        : ''
-      // AIOS(Phase4): write 始终走 containment 检查（所有 channel 都限 workspace）
-      await service.write(ctx.agentId, filePath, content, ctx.channel, {
+      const session = await resolveExecutionSession(ctx)
+      const workspace = getProductivityRuntime().virtualWorkspace
+      let beforeExists = false
+      let oldRead: Awaited<ReturnType<typeof workspace.read>> | null = null
+      const result = await workspace.write(session, {
+        path: filePath,
+        content,
         append,
+        signal: ctx.signal,
         deviceScope: ctx.approvedOutsideWorkspace,
+        expectedHash: args.expected_hash ? String(args.expected_hash) : undefined,
+        beforeWrite: async () => {
+          ctx.signal?.throwIfAborted()
+          beforeExists = (await workspace.fileInfo(session, filePath, ctx.approvedOutsideWorkspace))
+            .exists
+          oldRead = beforeExists
+            ? await workspace
+                .read(session, filePath, {
+                  limit: 128_000,
+                  deviceScope: ctx.approvedOutsideWorkspace,
+                })
+                .catch(() => null)
+            : null
+          return ctx.approvedOutsideWorkspace
+            ? null
+            : await checkpointService?.captureToolMutation(ctx, filePath)
+        },
+        afterWrite: async (captured, written) =>
+          checkpointService?.commitFromDisk(
+            captured as Awaited<ReturnType<WorkspaceCheckpointService['captureBefore']>>,
+            written,
+          ),
       })
-      await checkpointService?.commitFromDisk(captured ?? null)
-      const operation = append ? 'append' : before.exists ? 'overwrite' : 'create'
-      const finalContent = append ? `${oldContent}${content}` : content
-      const diff = buildToolDiff(oldContent, finalContent)
+      const previousRead = oldRead as Awaited<ReturnType<typeof workspace.read>> | null
+      const previewIncomplete = beforeExists && (!previousRead || previousRead.truncated)
+      const diff = previewIncomplete
+        ? { diffPreview: [], diffTruncated: true }
+        : buildToolDiff(
+            previousRead?.content ?? '',
+            append ? `${previousRead?.content ?? ''}${content}` : content,
+          )
       return JSON.stringify({
         success: true,
         path: filePath,
-        operation,
+        operation: result.operation,
         bytes: Buffer.byteLength(content),
         ...diff,
+        insertions: result.insertions,
+        deletions: result.deletions,
+        oldHash: result.oldHash,
+        newHash: result.newHash,
+        checkpointWarning: result.checkpointWarning,
+        sourceRef: await workspace.resolveReadablePath(
+          session,
+          filePath,
+          ctx.approvedOutsideWorkspace,
+        ),
       })
     } catch (err) {
       return JSON.stringify({
@@ -203,10 +219,12 @@ export const deleteFileTool: BuiltinTool = {
     const filePath = String(args.file_path ?? '').trim()
     if (!filePath) throw new Error('file_path 不能为空')
 
-    const service = requireWorkspaceService()
-    await service.deleteFile(ctx.agentId, filePath, ctx.channel, {
-      deviceScope: ctx.approvedOutsideWorkspace,
-    })
+    const session = await resolveExecutionSession(ctx)
+    await getProductivityRuntime().virtualWorkspace.deleteFile(
+      session,
+      filePath,
+      ctx.approvedOutsideWorkspace,
+    )
     return JSON.stringify({ success: true, path: filePath })
   },
 }
@@ -218,11 +236,12 @@ export const fileInfoTool: BuiltinTool = {
     const filePath = args.file_path as string
 
     try {
-      const service = requireWorkspaceService()
-      // AIOS(Phase4): stat 走 read 权限（info 不修改文件）
-      const stat = await service.stat(ctx.agentId, filePath, ctx.channel, {
-        deviceScope: ctx.deviceReadScope,
-      })
+      const session = await resolveExecutionSession(ctx)
+      const stat = await getProductivityRuntime().virtualWorkspace.fileInfo(
+        session,
+        filePath,
+        ctx.deviceReadScope,
+      )
 
       if (!stat.exists) {
         return JSON.stringify({ error: `路径不存在: ${filePath}` })
@@ -248,11 +267,12 @@ export const listDirectoryTool: BuiltinTool = {
     const dirPath = args.dir_path as string
 
     try {
-      const service = requireWorkspaceService()
-      // AIOS(Phase4): list 走 read 权限
-      const entries = await service.list(ctx.agentId, dirPath, ctx.channel, {
-        deviceScope: ctx.deviceReadScope,
-      })
+      const session = await resolveExecutionSession(ctx)
+      const entries = await getProductivityRuntime().virtualWorkspace.listDirectory(
+        session,
+        dirPath,
+        ctx.deviceReadScope,
+      )
 
       const items = entries.map((e) => ({
         name: e.name,

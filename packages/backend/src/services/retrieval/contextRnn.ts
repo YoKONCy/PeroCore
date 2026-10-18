@@ -90,6 +90,8 @@ export class ContextRnn {
 
   /** 每个 Agent+Mode 的隐状态缓存 */
   private states = new Map<string, RnnState>()
+  private dirtyStates = new Set<string>()
+  private dirtyWeights = new Set<'proj' | 'output' | 'mingru'>()
 
   /** 投影矩阵 W_in (INPUT_DIM × HIDDEN_DIM) — 全局共享 */
   private projMatrix: Float32Array
@@ -106,6 +108,10 @@ export class ContextRnn {
    * 这些权重会被持久化到 rnn_mingru.bin，并在训练时在线更新。
    */
   private minGruWeights: MinGruWeights
+
+  get hasDirtyChanges(): boolean {
+    return this.dirtyStates.size > 0 || this.dirtyWeights.size > 0
+  }
 
   constructor(pathResolver: PathResolver, config?: Partial<ContextRnnConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config }
@@ -157,6 +163,7 @@ export class ContextRnn {
     state.hidden = newHidden
     state.lastUpdatedAt = Date.now()
     state.updateCount++
+    this.dirtyStates.add(`${agentId}:${mode}`)
   }
 
   /**
@@ -236,7 +243,7 @@ export class ContextRnn {
   save(agentId: string, mode: string): void {
     const key = `${agentId}:${mode}`
     const state = this.states.get(key)
-    if (!state) return
+    if (!state || !this.dirtyStates.has(key)) return
 
     const filePath = this.resolveStatePath(agentId, mode)
     const dir = path.dirname(filePath)
@@ -249,6 +256,7 @@ export class ContextRnn {
     Buffer.from(state.hidden.buffer).copy(buffer, 12)
 
     writeFileSync(filePath, buffer)
+    this.dirtyStates.delete(key)
     logger.debug(`RNN 隐状态已保存: ${filePath} (updates=${state.updateCount})`)
   }
 
@@ -274,6 +282,7 @@ export class ContextRnn {
 
       const key = `${agentId}:${mode}`
       this.states.set(key, { hidden, lastUpdatedAt, updateCount })
+      this.dirtyStates.delete(key)
 
       logger.debug(`RNN 隐状态已恢复: ${filePath} (updates=${updateCount})`)
       return true
@@ -284,16 +293,19 @@ export class ContextRnn {
   }
 
   /**
-   * 保存所有状态 + 权重
+   * 只保存已修改的状态与权重；无变更时不写盘、不打印保存日志。
    */
   saveAll(): void {
-    for (const key of this.states.keys()) {
+    if (!this.hasDirtyChanges) return
+    const stateCount = this.dirtyStates.size
+    const weightCount = this.dirtyWeights.size
+    for (const key of this.dirtyStates) {
       const [agentId, mode] = key.split(':') as [string, string]
       this.save(agentId, mode)
     }
     this.saveWeights()
     this.saveMinGruWeights()
-    logger.info(`ContextRNN: 所有状态已保存 (${this.states.size} 个 Agent)`)
+    logger.info(`ContextRNN 已保存变更（隐状态 ${stateCount} 项，权重 ${weightCount} 项）`)
   }
 
   /**
@@ -346,6 +358,7 @@ export class ContextRnn {
     learningRate: number = 0.0005,
   ): void {
     const sign = isPositive ? 1.0 : -1.0
+    let changed = false
 
     // 梯度: 对每个 W_out[j][i]，梯度 = (bias[i] - target[i]) * h[j]
     // positive 时沿梯度下降，negative 时沿梯度上升
@@ -358,9 +371,13 @@ export class ContextRnn {
         const grad = sign * diff * hj
         // SGD 更新 + 梯度裁剪（防止 Xavier 初始化早期的大梯度）
         const clippedGrad = Math.max(-0.1, Math.min(0.1, grad))
-        this.outputMatrix[j * this.config.inputDim + i]! -= learningRate * clippedGrad
+        const index = j * this.config.inputDim + i
+        const previous = this.outputMatrix[index]!
+        this.outputMatrix[index] = previous - learningRate * clippedGrad
+        if (this.outputMatrix[index] !== previous) changed = true
       }
     }
+    if (changed) this.dirtyWeights.add('output')
   }
 
   /**
@@ -395,6 +412,7 @@ export class ContextRnn {
     // 单步 SGD 训练（原地更新 minGruWeights）
     const label = isPositive ? 1.0 : 0.0
     const loss = trainMinGruStep(state.hidden, projected, this.minGruWeights, label, learningRate)
+    if (learningRate !== 0) this.dirtyWeights.add('mingru')
 
     logger.debug(`minGRU 训练: loss=${loss.toFixed(4)}, label=${label}`)
     return loss
@@ -431,7 +449,7 @@ export class ContextRnn {
   }
 
   private loadOrInitWeights(
-    name: string,
+    name: 'proj' | 'output',
     size: number,
     fanIn: number,
     fanOut: number,
@@ -453,15 +471,21 @@ export class ContextRnn {
 
     // Xavier 均匀初始化
     logger.info(`RNN 权重 Xavier 初始化: ${name} (fanIn=${fanIn}, fanOut=${fanOut})`)
+    this.dirtyWeights.add(name)
     return xavierUniform(fanIn, fanOut, size)
   }
 
   private saveWeights(): void {
+    if (!this.dirtyWeights.has('proj') && !this.dirtyWeights.has('output')) return
     const dir = path.dirname(this.resolveWeightsPath('proj'))
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
 
-    writeFileSync(this.resolveWeightsPath('proj'), Buffer.from(this.projMatrix.buffer))
-    writeFileSync(this.resolveWeightsPath('output'), Buffer.from(this.outputMatrix.buffer))
+    for (const name of ['proj', 'output'] as const) {
+      if (!this.dirtyWeights.has(name)) continue
+      const weights = name === 'proj' ? this.projMatrix : this.outputMatrix
+      writeFileSync(this.resolveWeightsPath(name), Buffer.from(weights.buffer))
+      this.dirtyWeights.delete(name)
+    }
     logger.debug('RNN 权重已保存')
   }
 
@@ -507,6 +531,7 @@ export class ContextRnn {
 
     // Xavier 初始化（偏置 0.1，不再是 0）
     logger.info(`minGRU 权重 Xavier 初始化 (W_z/W_h: Xavier, b_z/b_h: 0.1)`)
+    this.dirtyWeights.add('mingru')
     return xavierInitMinGruWeights(HIDDEN_DIM)
   }
 
@@ -516,6 +541,7 @@ export class ContextRnn {
    * 将 [wZ | bZ | wH | bH] 拼接为单个 buffer 写入 rnn_mingru.bin
    */
   private saveMinGruWeights(): void {
+    if (!this.dirtyWeights.has('mingru')) return
     const dir = path.dirname(this.resolveWeightsPath('mingru'))
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
 
@@ -533,6 +559,7 @@ export class ContextRnn {
     combined.set(bH, offset)
 
     writeFileSync(this.resolveWeightsPath('mingru'), Buffer.from(combined.buffer))
+    this.dirtyWeights.delete('mingru')
     logger.debug('minGRU 权重已保存')
   }
 }

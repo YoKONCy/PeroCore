@@ -1,6 +1,6 @@
 # Steam 集成与资产联邦化规范
 
-> **版本**：0.2.0 · **更新时间**：2026-04-22
+> **版本**：0.9.4 · **更新时间**：2026-10-17
 > **适用范围**：`electron/main/services/steam*`、`packages/backend/src/core/`
 > **依赖规范**：[A04_DEPLOYMENT](./A04_DEPLOYMENT.md)、[A02_BACKEND_ARCHITECTURE](./A02_BACKEND_ARCHITECTURE.md)
 
@@ -18,10 +18,10 @@ infOS 同时支持 **Electron 桌面版（Steam 上架）** 和 **Docker 后端�
 
 ```
 electron/main/services/
-  ├── steam.ts                ← steamworks.js 封装（初始化/用户/Overlay）
-  ├── cloudSync.ts            ← Steam Cloud 同步实现
-  ├── workshopService.ts      ← 创意工坊管理（订阅/下载/状态）
-  └── achievementService.ts   ← 成就系统（仅预留接口）
+  ├── steam.ts           ← steamworks.js 封装（初始化/用户/Overlay/Workshop 订阅与安装发现）
+  ├── cloudSync.ts       ← Steam Cloud 同步实现（cloudSyncService）
+  ├── assets.ts          ← 官方/本地/Workshop 模型联邦扫描
+  └── portableDaemon.ts  ← 启动后端守护进程并注入 Workshop 目录
 ```
 
 - 全部通过 IPC 暴露给渲染进程
@@ -38,14 +38,14 @@ packages/backend/src/core/
 
 ### 2.3 职责边界
 
-| 职责                   | Electron                     | Docker                      |
-| ---------------------- | ---------------------------- | --------------------------- |
-| Steam 初始化 / Overlay | ✅ steamService              | ❌ 不存在                   |
-| Workshop 管理          | ✅ workshopService           | ❌ 不存在                   |
-| Cloud 同步             | ✅ steamCloudSync            | ❌ 不存在                   |
-| 成就解锁               | ✅ achievementService (预留) | ❌ 不存在                   |
-| PathResolver           | ✅ 含 @workshop              | ✅ 无 @workshop             |
-| AssetRegistry          | ✅ 扫描 3 层                 | ✅ 扫描 2 层（无 workshop） |
+| 职责                   | Electron                                  | Docker                      |
+| ---------------------- | ----------------------------------------- | --------------------------- |
+| Steam 初始化 / Overlay | ✅ steam.ts                               | ❌ 不存在                   |
+| Workshop 发现/管理     | ✅ steam.ts（getWorkshopInstallations）   | ❌ 不存在                   |
+| Cloud 同步             | ✅ cloudSync.ts（cloudSyncService）       | ❌ 不存在                   |
+| 成就解锁               | ❌ 未实装                                 | ❌ 不存在                   |
+| PathResolver           | ✅ 含 @workshop                           | ✅ 无 @workshop             |
+| AssetRegistry          | ✅ 扫描 3 层                              | ✅ 扫描 2 层（无 workshop） |
 
 ---
 
@@ -65,12 +65,12 @@ packages/backend/src/core/
 Electron 版启动后端进程时，通过环境变量注入：
 
 ```typescript
-// electron/main/services/backendLauncher.ts
-const workshopDir = getWorkshopInstallPath() // 从 steamworks.js 获取
+// electron/main/services/portableDaemon.ts
+const workshopDirs = getWorkshopInstallations().map((item) => item.folder)
 spawn(backendProcess, {
   env: {
     ...process.env,
-    PERO_WORKSHOP_DIR: workshopDir ?? '',
+    PERO_WORKSHOP_DIRS: JSON.stringify(workshopDirs),
   },
 })
 ```

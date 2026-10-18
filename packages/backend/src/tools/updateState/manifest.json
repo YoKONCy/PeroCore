@@ -10,7 +10,7 @@
   "platforms": ["windows", "linux", "darwin", "docker"],
   "toolDefinition": {
     "name": "update_state",
-    "description": "更新你当前的情绪、动作、内心独白或桌宠临时交互台词。本工具不会结束任务，也不用于回复用户；更新后请继续当前工作或直接自然输出回复。",
+    "description": "按需更新当前会话内的角色状态或桌宠临时台词，不结束任务。不影响其他会话；变更绑定本轮消息，删除或撤回本轮时一并撤回。",
     "display": {
       "label": "更新角色状态",
       "description": "更新角色当前状态和临时交互台词。",
@@ -21,9 +21,12 @@
     "parameters": {
       "type": "object",
       "properties": {
-        "mood": { "type": "string", "description": "当前情绪，例如开心、担心、兴奋。" },
-        "vibe": { "type": "string", "description": "当前动作或氛围，例如活跃、待机、思考。" },
-        "mind": { "type": "string", "description": "简短内心独白。" },
+        "mood": { "type": "string", "description": "情感底色，例如开心、担心、略有失落。" },
+        "vibe": { "type": "string", "description": "外在表现，例如轻松、认真、欲言又止。" },
+        "mind": {
+          "type": "string",
+          "description": "简短角色心声，不写任务计划、推理过程或系统信息。"
+        },
         "touch_reactions": {
           "type": "object",
           "description": "按触碰部位设置临时随机台词；当前标准部位为head、arm、body、leg，也允许未来新增部位。",

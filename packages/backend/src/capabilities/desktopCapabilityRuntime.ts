@@ -4,6 +4,8 @@ import type { CapabilityHandleRegistry } from '../kernel/capabilityHandleRegistr
 import { LifecycleScope } from '../kernel/lifecycleScope'
 
 type DesktopOperation =
+  | 'control'
+  | 'statusCard'
   | 'screenCapture'
   | 'clipboardRead'
   | 'clipboardWrite'
@@ -60,12 +62,17 @@ export class DesktopCapabilityRuntime {
     return this.port?.offer.health === 'available' && this.port.offer.operations.includes(operation)
   }
 
-  async invoke(operation: DesktopOperation, input: unknown, context: KernelCallContext) {
+  async invoke(
+    operation: DesktopOperation,
+    input: unknown,
+    context: KernelCallContext,
+    signal?: AbortSignal,
+  ) {
     const port = this.port
     if (!port || port.offer.health !== 'available' || !port.offer.operations.includes(operation)) {
       throw new Error(`CAPABILITY_UNAVAILABLE: desktop.environment/${operation}`)
     }
-    return port.invoke(operation, input, context)
+    return port.invoke(operation, input, context, signal)
   }
 
   private async sync(): Promise<void> {

@@ -1,1189 +1,448 @@
 <script setup lang="ts">
-/**
- * PetOverlayUI — 桌宠独立窗口的悬浮控制层 (v1 体素风)
- *
- * 还原 v1 完整交互：
- * - 光球触发器 → 展开/收起所有 UI
- * - 状态标签 (心情/氛围/内心)
- * - 聊天输入框
- * - 工具栏 (8个按钮，竖排)
- * - 外观菜单 (角色选择/服装/动画)
- * - PTT 悬浮按钮
- * - 窗口大小循环切换
- * - displayMode 持久化
- * - uiScale 自适应缩放
- *
- * @module packages/frontend/src/components/pet/PetOverlayUI
- */
-import { ref, computed, onMounted, onUnmounted, watch, type ComponentPublicInstance } from 'vue'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
+import type { PetControlSettings } from '@infos/shared'
+import type BedrockAvatar from '../avatar/BedrockAvatar.vue'
+import PetHudIcon from './PetHudIcon.vue'
+import PetToolbelt, { type PetPanel } from './PetToolbelt.vue'
+import PetSpeechBubble from './PetSpeechBubble.vue'
+import { useDesktopControl } from '../../composables/useDesktopControl'
 import { invoke } from '../../utils/ipcAdapter'
-import {
-  AVATAR_MODEL_STORAGE_KEY,
-  DEFAULT_AVATAR_MANIFEST_PATH,
-  DEFAULT_AVATAR_NAME,
-} from '../avatar/lib/avatarDefaults'
-import PixelIcon from '../pixel/PixelIcon.vue'
 
 interface Props {
-  petName?: string
+  agentId?: string
+  petName: string
   moodText?: string
   vibeText?: string
   mindText?: string
-  isThinking?: boolean
-  voiceMode?: 'off' | 'vad' | 'ptt'
-  isRecording?: boolean
-  displayMode?: 'bubble' | 'lyric'
-  /** BedrockAvatar 组件引用 (用于外观菜单) */
-  avatarRef?: ComponentPublicInstance | null
+  stage?: string
+  thinking?: boolean
+  connected?: boolean
+  unread?: boolean
+  replyNotice?: boolean
+  replyText?: string
+  resizeMode?: boolean
+  windowSize?: number
+  reaction?: string
+  hint?: string
+  subtitle?: string
+  speaking?: boolean
+  recording?: boolean
+  recognizing?: boolean
+  preparing?: boolean
+  voiceReady?: boolean
+  voiceError?: string
+  audioLevel?: number
+  attention?: string
+  attentionKey?: string
+  attentionKind?: 'approval' | 'question' | 'task'
+  settings: PetControlSettings
+  avatarRef?: InstanceType<typeof BedrockAvatar> | null
+  bounds: { left: number; right: number; top: number; bottom: number }
+  viewport: { width: number; height: number }
 }
-
-const props = withDefaults(defineProps<Props>(), {
-  petName: 'Pero',
-  moodText: '开心',
-  vibeText: '轻松',
-  mindText: '发呆',
-  isThinking: false,
-  voiceMode: 'off',
-  isRecording: false,
-  displayMode: 'bubble',
-  avatarRef: null,
-})
-
-const emit = defineEmits<{
-  (e: 'send-message', text: string): void
-  (e: 'ui-enter'): void
-  (e: 'ui-leave'): void
-  (e: 'voice-mode', mode: 'off' | 'vad' | 'ptt'): void
-  (e: 'ptt-down'): void
-  (e: 'ptt-up'): void
-  (
-    e: 'model-change',
-    manifestPath: string,
-    complete: (success: boolean, message?: string) => void,
-  ): void
-  (e: 'display-mode-change', mode: 'bubble' | 'lyric'): void
-}>()
-
-// ── 展开/收起 (v1: showInput) ──
-const showUI = ref(false)
-const userInput = ref('')
-const showAppearanceMenu = ref(false)
-
-function toggleUI() {
-  showUI.value = !showUI.value
-  if (!showUI.value) {
-    showAppearanceMenu.value = false
-  }
-}
-
-function toggleAppearanceMenu() {
-  showAppearanceMenu.value = !showAppearanceMenu.value
-}
-
-function sendMessage() {
-  const text = userInput.value.trim()
-  if (!text) return
-  emit('send-message', text)
-  userInput.value = ''
-}
-
-// ── UI Scale (v1: minDim/800, 0.5~1.3) ──
-const uiScale = ref(1)
-
-function updateScale() {
-  const minDim = Math.min(window.innerWidth, window.innerHeight)
-  const s = minDim / 800
-  uiScale.value = Math.min(Math.max(s, 0.5), 1.3)
-}
-
-onMounted(() => {
-  updateScale()
-  window.addEventListener('resize', updateScale)
-})
-
-onUnmounted(() => {
-  window.removeEventListener('resize', updateScale)
-})
-
-// ── 窗口大小无极调整模式 ──
-const isResizeMode = ref(false)
-const currentWindowSize = ref(800) // 当前窗口边长
-
-function toggleResizeMode() {
-  isResizeMode.value = !isResizeMode.value
-}
-
-/** 滚轮缩放窗口 (仅在 resizeMode 开启时生效) */
-function onResizeWheel(e: WheelEvent) {
-  if (!isResizeMode.value) return
-  e.preventDefault()
-  e.stopPropagation()
-  // 滚轮上滚放大，下滚缩小，每次步进 40px
-  const delta = e.deltaY < 0 ? 40 : -40
-  currentWindowSize.value = Math.min(Math.max(currentWindowSize.value + delta, 300), 1600)
-  invoke('resize-pet-window', {
-    width: currentWindowSize.value,
-    height: currentWindowSize.value,
+const props = defineProps<Props>()
+const desktop = useDesktopControl()
+const desktopVisible = computed(
+  () =>
+    desktop.supported &&
+    desktop.state.value.phase !== 'idle' &&
+    (!desktop.state.value.agentId || desktop.state.value.agentId === props.agentId),
+)
+function openDesktopTask() {
+  const state = desktop.state.value
+  void invoke('pet-controls:open-conversation', {
+    agentId: state.agentId || props.agentId,
+    threadId: state.threadId,
+    taskId: state.taskId,
   }).catch(() => {})
 }
+const emit = defineEmits<{
+  (e: 'send-message', text: string, complete: (accepted: boolean) => void): void
+  (e: 'ui-enter'): void
+  (e: 'ui-leave'): void
+  (e: 'open-conversation'): void
+  (e: 'open-section', section: string): void
+  (e: 'voice-mode', mode: PetControlSettings['voiceMode']): void
+  (e: 'ptt-down'): void
+  (e: 'ptt-up', cancelled?: boolean): void
+  (e: 'cancel-voice'): void
+  (e: 'stop-speech'): void
+  (e: 'toggle-resize'): void
+  (e: 'dismiss-hint'): void
+  (e: 'model-change', path: string, complete: (success: boolean, message?: string) => void): void
+}>()
+const panel = ref<PetPanel>('chat')
+const expanded = ref(false)
+const input = ref('')
+const root = ref<HTMLElement | null>(null)
+const dismissedAttention = ref(new Set<string>())
+let hideTimer: ReturnType<typeof setTimeout> | undefined
+const scale = computed(() => Math.min(1, Math.max(0.78, props.viewport.width / 650)))
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), Math.max(min, max))
+}
 
-// 进入/退出 resize 模式时绑定/解绑全局 wheel
-watch(isResizeMode, (active) => {
-  if (active) {
-    window.addEventListener('wheel', onResizeWheel, { passive: false })
-  } else {
-    window.removeEventListener('wheel', onResizeWheel)
+// 光点只按自身范围定位，内容高度和过渡动画均不能改变入口或模型位置。
+const anchor = computed(() => {
+  const size = 44 * scale.value
+  return {
+    left: clamp(props.bounds.right + 8, 12, props.viewport.width - size - 12),
+    top: clamp(
+      props.bounds.top + (props.bounds.bottom - props.bounds.top) * 0.55 - size / 2,
+      12,
+      props.viewport.height - size - 12,
+    ),
   }
 })
-
-onUnmounted(() => {
-  window.removeEventListener('wheel', onResizeWheel)
+const placement = computed(() => ({
+  left: anchor.value.left + 'px',
+  top: anchor.value.top + 'px',
+  transform: 'scale(' + scale.value + ')',
+}))
+// 操作面的底部固定在角色脚边；窗口空间不足时限制内容高度，内部滚动。
+const beltPlacement = computed(() => {
+  const s = scale.value
+  const width = Math.min(440, Math.max(0, (props.viewport.width - 24) / s))
+  const bottom = Math.max(12, props.viewport.height - props.bounds.bottom - 176 * s)
+  const maxHeight = Math.min(420, Math.max(0, (props.viewport.height - bottom - 12) / s))
+  const left = clamp(
+    (props.bounds.left + props.bounds.right - width * s) / 2,
+    12,
+    props.viewport.width - width * s - 12,
+  )
+  return {
+    left: left + 'px',
+    bottom: bottom + 'px',
+    width: width + 'px',
+    transform: 'scale(' + s + ')',
+    '--belt-content-max': Math.max(0, maxHeight - 90) + 'px',
+  }
 })
-
-// ── 窗口导航 (IPC 通道名与 ipcBridge.ts 对应) ──
-function reloadPet() {
-  window.location.reload()
-}
-
-function openDashboard() {
-  // 注意：IPC 通道是 open-dashboard-window 不是 open-dashboard
-  invoke('open-dashboard-window').catch(() => {})
-}
-
-function minimizeToTray() {
-  invoke('hide-pet-window').catch(() => {})
-}
-
-// ── 语音模式切换 ──
-const voiceModeIcons: Record<string, string> = {
-  off: 'volume-x',
-  vad: 'mic',
-  ptt: 'hand',
-}
-
-const voiceModeTitles: Record<string, string> = {
-  off: '语音对话: 已关闭',
-  vad: '语音对话: 自动感应 (VAD)',
-  ptt: '语音对话: 按住说话 (PTT)',
-}
-
-function cycleVoiceMode() {
-  const modes: Array<'off' | 'vad' | 'ptt'> = ['off', 'vad', 'ptt']
-  const idx = modes.indexOf(props.voiceMode ?? 'off')
-  emit('voice-mode', modes[(idx + 1) % modes.length] ?? 'off')
-}
-
-// ── 显示模式 (气泡/歌词) ──
-function toggleDisplayMode() {
-  emit('display-mode-change', props.displayMode === 'bubble' ? 'lyric' : 'bubble')
-}
-
-// ── 外观菜单: 获取 avatar 数据 ──
-const avatarClothingState = computed(() => {
-  const av = props.avatarRef as Record<string, unknown> | null
-  return (av?.clothingState ?? {}) as Record<string, boolean>
+const identityPlacement = computed(() => ({
+  left: clamp(props.bounds.right + 16, 12, props.viewport.width - 140 * scale.value - 12) + 'px',
+  top:
+    clamp(
+      props.bounds.top + (props.bounds.bottom - props.bounds.top) * 0.2,
+      12,
+      props.viewport.height - 82 * scale.value - 12,
+    ) + 'px',
+  transform: 'scale(' + scale.value + ')',
+}))
+// 必要状态独立放在角色上方，不随操作面切换，也不被收起菜单隐藏。
+const noticePlacement = computed(() => {
+  const s = scale.value
+  const width = Math.min(264, Math.max(0, (props.viewport.width - 24) / s))
+  const above = props.bounds.top - 20
+  return {
+    left:
+      clamp(
+        (props.bounds.left + props.bounds.right - width * s) / 2,
+        12,
+        props.viewport.width - width * s - 12,
+      ) + 'px',
+    width: width + 'px',
+    top: above < 48 * s ? '12px' : undefined,
+    bottom: above >= 48 * s ? props.viewport.height - props.bounds.top + 8 + 'px' : undefined,
+    transform: 'scale(' + s + ')',
+    transformOrigin: above >= 48 * s ? 'bottom left' : 'top left',
+    maxHeight:
+      Math.max(0, Math.min(320, (above >= 48 * s ? above : props.viewport.height - 24) / s)) + 'px',
+  }
 })
-
-const avatarFeatureButtons = computed(() => {
-  const av = props.avatarRef as Record<string, unknown> | null
-  return (av?.featureButtons ?? []) as Array<{ id: string; label: string }>
+const occupied = computed(() => props.recording || props.recognizing || props.preparing)
+const bubbleText = computed(() => {
+  if (expanded.value || occupied.value) return ''
+  if (props.speaking && props.settings.subtitlesEnabled) return props.subtitle || ''
+  if (props.speaking || props.thinking) return ''
+  if (props.replyNotice && props.unread) return props.replyText || '回复好了'
+  if (props.attention) return ''
+  return props.reaction || ''
 })
-
-const avatarAnimList = computed(() => {
-  const av = props.avatarRef as Record<string, unknown> | null
-  return (av?.animList ?? []) as string[]
-})
-
-function setAvatarAnimation(animName: string) {
-  const av = props.avatarRef as Record<string, unknown> | null
-  if (av && typeof av.setAnimation === 'function') {
-    ;(av.setAnimation as (n: string) => void)(animName)
+const showAttention = computed(
+  () =>
+    !!props.attention &&
+    !!props.attentionKey &&
+    !dismissedAttention.value.has(props.attentionKey) &&
+    !occupied.value &&
+    !expanded.value,
+)
+function dismissAttention() {
+  if (!props.attentionKey) return
+  dismissedAttention.value.add(props.attentionKey)
+  if (dismissedAttention.value.size > 100)
+    dismissedAttention.value.delete(dismissedAttention.value.values().next().value!)
+}
+const voiceLabel = computed(() =>
+  props.preparing
+    ? '正在准备麦克风'
+    : props.recording
+      ? '正在听，松开发送'
+      : props.recognizing
+        ? '正在识别'
+        : props.voiceError || '',
+)
+const markTitle = computed(
+  () =>
+    props.attention ||
+    (props.unread
+      ? '有新消息'
+      : props.thinking
+        ? props.stage || '正在处理'
+        : props.connected
+          ? props.petName
+          : '连接已断开'),
+)
+function enter() {
+  clearTimeout(hideTimer)
+  emit('ui-enter')
+}
+function toggleMenu() {
+  if (expanded.value) close()
+  else {
+    panel.value = 'chat'
+    expanded.value = true
+    enter()
   }
 }
-
-function updateAvatarClothing() {
-  const av = props.avatarRef as Record<string, unknown> | null
-  if (av && typeof av.updateClothing === 'function') {
-    ;(av.updateClothing as () => void)()
-  }
-}
-
-/** 显式切换单个服装部件开关：优先走组件暴露的 setter，确保写入模型状态并持久化。 */
-function toggleClothingPart(id: string, checked: boolean): void {
-  const av = props.avatarRef as Record<string, unknown> | null
-  const setter = av?.setClothingPart as ((partId: string, value: boolean) => void) | undefined
-  if (typeof setter === 'function') {
-    setter(id, checked)
-    return
-  }
-  // 兜底：直接写暴露的响应式状态，再手动应用。
-  const state = av?.clothingState as Record<string, boolean> | undefined
-  if (state) state[id] = checked
-  updateAvatarClothing()
-}
-
-// ── 角色选择网格 (v1: scan-3d-models IPC) ──
-interface ModelInfo {
-  name: string
-  path: string
-  thumbnail?: string
-}
-
-const availableModels = ref<ModelInfo[]>([])
-const currentModelName = ref(DEFAULT_AVATAR_NAME)
-const switchingModelName = ref('')
-const isLoadingModels = ref(false)
-const modelSwitchError = ref('')
-
-/** 扫描可用 3D 模型 */
-async function scanModels() {
-  if (isLoadingModels.value) return
-  isLoadingModels.value = true
-  try {
-    const models = (await invoke('scan-3d-models')) as ModelInfo[]
-    if (Array.isArray(models)) {
-      availableModels.value = models
-      const selectedPath =
-        localStorage.getItem(AVATAR_MODEL_STORAGE_KEY) || DEFAULT_AVATAR_MANIFEST_PATH
-      const selectedModel = models.find((model) => model.path === selectedPath)
-      currentModelName.value = selectedModel?.name || DEFAULT_AVATAR_NAME
-      modelSwitchError.value = ''
-    }
-  } catch {
-    modelSwitchError.value = '模型列表扫描失败，请重新扫描'
-  } finally {
-    isLoadingModels.value = false
-  }
-}
-
-/** 选择模型 */
-function selectModel(model: ModelInfo) {
-  if (switchingModelName.value) return
-
-  // scan-3d-models 已返回可直接 fetch 的最终入口 URL，无需再次绕行 IPC。
-  const loadPath = model.path || DEFAULT_AVATAR_MANIFEST_PATH
-  if (!loadPath) {
-    modelSwitchError.value = '该模型没有可用的加载入口'
-    return
-  }
-
-  modelSwitchError.value = ''
-  switchingModelName.value = model.name
-  emit('model-change', loadPath, (success, message) => {
-    switchingModelName.value = ''
-    if (!success) {
-      modelSwitchError.value = message || `${model.name} 加载失败`
+function leave() {
+  clearTimeout(hideTimer)
+  hideTimer = setTimeout(() => {
+    if (
+      root.value?.contains(document.activeElement) &&
+      document.activeElement?.matches('textarea,input,select,[contenteditable=true]')
+    )
       return
-    }
-
-    currentModelName.value = model.name
-    localStorage.setItem(AVATAR_MODEL_STORAGE_KEY, loadPath)
-  })
+    close()
+  }, 650)
 }
-
-// 外观菜单打开时扫描模型
-watch(showAppearanceMenu, (v: boolean) => {
-  if (v && availableModels.value.length === 0) {
-    scanModels()
-  }
-})
+function close() {
+  if (root.value?.contains(document.activeElement)) (document.activeElement as HTMLElement)?.blur()
+  clearTimeout(hideTimer)
+  expanded.value = false
+  void nextTick(() => emit('ui-leave'))
+}
+function selectPanel(id: PetPanel) {
+  panel.value = id
+  enter()
+}
+function sendMessage() {
+  const text = input.value.trim()
+  if (!text || props.thinking) return
+  emit('send-message', text, (accepted) => {
+    if (accepted && input.value.trim() === text) input.value = ''
+  })
+  close()
+}
+watch(
+  () => props.recording,
+  (recording) => {
+    if (recording && (!expanded.value || panel.value !== 'voice')) close()
+  },
+)
+onUnmounted(() => clearTimeout(hideTimer))
 </script>
 
 <template>
-  <div class="overlay-root" @mouseenter="emit('ui-enter')" @mouseleave="emit('ui-leave')">
-    <!-- 状态标签 (左上角, v1 位置) -->
-    <Transition name="fade">
-      <div
-        v-show="showUI"
-        class="status-tags"
-        :style="{ transform: `scale(${uiScale})`, transformOrigin: 'top left' }"
+  <div ref="root" class="pet-hud" @focusin="enter" @focusout="leave" @keydown.esc.stop="close">
+    <Transition name="pet-speech" :css="!expanded">
+      <PetSpeechBubble
+        v-if="bubbleText"
+        :text="bubbleText"
+        :pet-name="petName"
+        :bounds="bounds"
+        :viewport="viewport"
+        :speaking="speaking"
+        :conversation="speaking || (replyNotice && unread)"
+        @ui-enter="enter"
+        @ui-leave="leave"
+        @open-conversation="emit('open-conversation')"
+        @stop-speech="emit('stop-speech')"
+      />
+    </Transition>
+    <div
+      data-pet-ui
+      class="hud-anchor"
+      :style="placement"
+      @pointerenter="enter"
+      @pointerleave="leave"
+    >
+      <button
+        type="button"
+        class="floating-trigger"
+        :class="{ active: expanded }"
+        :title="markTitle"
+        :aria-label="markTitle + '，展开桌宠菜单'"
+        :aria-expanded="expanded"
+        @click="toggleMenu"
       >
-        <div class="status-tag mood" :title="'情绪: ' + moodText">
-          <PixelIcon name="heart" size="xs" />
-          {{ moodText }}
+        <span class="trigger-core" aria-hidden="true">
+          <span class="pulse-ring" />
+          <span class="core-dot" />
+        </span>
+      </button>
+    </div>
+    <Transition name="pet-identity">
+      <div v-if="expanded" class="pet-identity" :style="identityPlacement">
+        <div>
+          {{ petName }}
+          <PetHudIcon name="heart" size="xs" />
         </div>
-        <div class="status-tag vibe" :title="'氛围: ' + vibeText">
-          <PixelIcon name="sparkle" size="xs" />
-          {{ vibeText }}
-        </div>
-        <div class="status-tag mind" :title="'内心: ' + mindText">
-          <PixelIcon name="thought" size="xs" />
-          {{ mindText }}
-        </div>
+        <small v-if="moodText || vibeText">
+          {{ [moodText, vibeText].filter(Boolean).join(' · ') }}
+        </small>
       </div>
     </Transition>
-
-    <!-- 可缩放 UI 容器 (v1: ui-scalable-wrapper) -->
-    <div class="ui-scalable-wrapper" :style="{ transform: `scale(${uiScale})` }">
-      <!-- 悬浮触发器 (v1 光球方块, 角色右侧) -->
+    <Transition name="pet-belt">
       <div
-        class="floating-trigger"
-        :class="{ active: showUI }"
-        style="-webkit-app-region: no-drag"
-        @click.stop="toggleUI"
-        @mouseenter="emit('ui-enter')"
-        @mouseleave="emit('ui-leave')"
+        v-if="expanded"
+        data-pet-ui
+        class="hud-belt"
+        :style="beltPlacement"
+        @pointerenter="enter"
+        @pointerleave="leave"
       >
-        <div class="trigger-core">
-          <div class="pulse-ring" />
-          <div class="core-dot" />
-        </div>
+        <PetToolbelt
+          v-model:message="input"
+          :panel="panel"
+          :pet-name="petName"
+          :thinking="thinking"
+          :speaking="speaking"
+          :voice-ready="voiceReady"
+          :recording="recording"
+          :attention="attention"
+          :mind-text="mindText"
+          :settings="settings"
+          :avatar-ref="avatarRef"
+          @select-panel="selectPanel"
+          @close="close"
+          @send-message="sendMessage"
+          @voice-mode="emit('voice-mode', $event)"
+          @ptt-down="emit('ptt-down')"
+          @ptt-up="emit('ptt-up', $event)"
+          @open-conversation="emit('open-conversation')"
+          @open-section="emit('open-section', $event)"
+          @stop-speech="emit('stop-speech')"
+          @model-change="(path, complete) => emit('model-change', path, complete)"
+        >
+          <template #window-settings><slot name="window-settings" /></template>
+        </PetToolbelt>
       </div>
-
-      <!-- 输入框 (v1: input-overlay, 底部居中) -->
-      <div
-        v-show="showUI"
-        class="input-overlay"
-        style="-webkit-app-region: no-drag"
-        @mouseenter="emit('ui-enter')"
-      >
-        <input
-          v-model="userInput"
-          class="chat-input"
-          :placeholder="isThinking ? '思考中...' : `跟 ${petName} 对话...`"
-          :disabled="isThinking"
-          style="-webkit-app-region: no-drag"
-          @keyup.enter="sendMessage"
-        />
-      </div>
-
-      <!-- 工具栏 (v1: pet-tools, 右侧竖排, 8个按钮) -->
-      <div
-        v-show="showUI"
-        class="pet-tools"
-        style="-webkit-app-region: no-drag"
-        @mouseenter="emit('ui-enter')"
-      >
-        <button
-          class="tool-btn"
-          title="外观设置"
-          :class="{ active: showAppearanceMenu }"
-          @click.stop="toggleAppearanceMenu"
-        >
-          <PixelIcon name="palette" size="sm" />
-        </button>
-        <button class="tool-btn" title="重载" @click.stop="reloadPet">
-          <PixelIcon name="refresh" size="sm" />
-        </button>
-        <button
-          class="tool-btn"
-          :class="{ active: isResizeMode }"
-          title="调整大小 (滚轮缩放)"
-          @click.stop="toggleResizeMode"
-        >
-          <PixelIcon name="desktop" size="sm" />
-        </button>
-        <button
-          class="tool-btn voice-btn"
-          :class="{
-            active: voiceMode !== 'off',
-            'mode-vad': voiceMode === 'vad',
-            'mode-ptt': voiceMode === 'ptt',
-          }"
-          :title="voiceModeTitles[voiceMode]"
-          @click.stop="cycleVoiceMode"
-        >
-          <PixelIcon :name="voiceModeIcons[voiceMode] ?? 'volume-x'" size="sm" />
-        </button>
-        <button
-          class="tool-btn"
-          :title="displayMode === 'bubble' ? '切换到歌词模式' : '切换到气泡模式'"
-          @click.stop="toggleDisplayMode"
-        >
-          <PixelIcon :name="displayMode === 'bubble' ? 'sparkle' : 'quote'" size="sm" />
-        </button>
-        <button class="tool-btn" title="打开综合面板" @click.stop="openDashboard">
-          <PixelIcon name="layout" size="sm" />
-        </button>
-        <button class="tool-btn" title="最小化到托盘" @click.stop="minimizeToTray">
-          <PixelIcon name="minus" size="sm" />
-        </button>
-      </div>
-
-      <!-- 调整大小模式提示气泡 -->
-      <Transition name="fade">
-        <div v-if="isResizeMode" class="resize-hint" style="-webkit-app-region: no-drag">
-          <div class="resize-hint-inner">
-            <PixelIcon name="desktop" size="sm" />
-            <span>🖱️ 滚轮缩放 · 再次点击退出</span>
-            <span class="resize-hint-size">{{ currentWindowSize }}px</span>
-          </div>
+    </Transition>
+    <div
+      data-pet-ui
+      class="hud-notices"
+      :style="noticePlacement"
+      @pointerenter="enter"
+      @pointerleave="leave"
+    >
+      <Transition name="pet-status">
+        <div v-if="desktopVisible && !occupied" class="stage" role="status" aria-live="polite">
+          <PetHudIcon name="thought" size="sm" />
+          <button type="button" class="text-button" @click="openDesktopTask">
+            {{ desktop.state.value.phase === 'running' ? '正在操作桌面' : '桌面操作已暂停' }}
+          </button>
+          <button
+            v-if="desktop.state.value.phase === 'running'"
+            type="button"
+            class="icon-button"
+            title="暂停桌面操作"
+            @click="desktop.control('pause')"
+          >
+            <PetHudIcon name="close" size="xs" />
+          </button>
         </div>
       </Transition>
-
-      <!-- PTT 悬浮按钮 (v1 体素风) -->
-      <Transition name="fade">
-        <div
-          v-if="voiceMode === 'ptt'"
-          class="ptt-voxel-container"
-          style="-webkit-app-region: no-drag"
-          @mousedown.stop="emit('ptt-down')"
-          @mouseup.stop="emit('ptt-up')"
-          @mouseleave.stop="emit('ptt-up')"
-        >
-          <div class="ptt-voxel-btn" :class="{ recording: isRecording }" title="按住说话">
-            <span class="ptt-icon"><PixelIcon name="mic" size="lg" /></span>
-            <span v-if="isRecording" class="ptt-text">正在聆听...</span>
-          </div>
+      <Transition name="pet-status">
+        <div v-if="thinking && !occupied" class="stage" role="status" aria-live="polite">
+          <PetHudIcon name="thought" size="sm" />
+          <span>{{ stage || '正在思考' }}</span>
+          <span class="stage-pixels" aria-hidden="true">
+            <i />
+            <i />
+            <i />
+          </span>
         </div>
       </Transition>
-
-      <!-- 外观菜单 (v1: appearance-menu, 角色左侧) -->
-      <Transition name="fade">
-        <div
-          v-if="showAppearanceMenu && showUI"
-          class="appearance-menu"
-          style="-webkit-app-region: no-drag"
-          @mouseenter="emit('ui-enter')"
+      <div v-if="resizeMode && (!expanded || panel !== 'more')" class="resize-strip" role="status">
+        <span>{{ windowSize }}px · 滚轮调整大小，Esc 退出</span>
+        <button
+          type="button"
+          class="icon-button"
+          title="结束调节"
+          aria-label="结束调节"
+          @click="emit('toggle-resize')"
         >
-          <div class="menu-header">
-            <span>外观控制</span>
-            <button class="close-mini-btn" @click="showAppearanceMenu = false">×</button>
+          <PetHudIcon name="close" size="xs" />
+        </button>
+      </div>
+      <Transition name="pet-status">
+        <div
+          v-if="voiceLabel"
+          class="voice-strip"
+          :class="{ recording, failed: !!voiceError }"
+          role="status"
+        >
+          <PetHudIcon
+            :name="recording ? 'mic' : recognizing || preparing ? 'thought' : 'alert'"
+            size="sm"
+          />
+          <span>{{ voiceLabel }}</span>
+          <div v-if="recording" class="meter">
+            <i :style="{ width: Math.min(100, (audioLevel || 0) * 700) + '%' }" />
           </div>
-
-          <!-- 角色选择网格 (v1 还原: scan-3d-models) -->
-          <div v-if="availableModels.length > 0" class="menu-section">
-            <div class="menu-label">角色选择</div>
-            <div v-if="modelSwitchError" class="model-switch-error">{{ modelSwitchError }}</div>
-            <div class="model-grid">
-              <button
-                v-for="model in availableModels"
-                :key="model.name"
-                class="model-card"
-                :class="{
-                  active: currentModelName === model.name,
-                  loading: switchingModelName === model.name,
-                }"
-                :disabled="!!switchingModelName"
-                :title="model.name"
-                @click.stop="selectModel(model)"
-              >
-                <div class="model-thumb">
-                  <img
-                    v-if="model.thumbnail"
-                    :src="model.thumbnail"
-                    :alt="model.name"
-                    class="model-thumb-img"
-                  />
-                  <span v-else class="model-thumb-icon"><PixelIcon name="user" size="xl" /></span>
-                </div>
-                <span class="model-name">
-                  {{ switchingModelName === model.name ? '加载中…' : model.name }}
-                </span>
-              </button>
-            </div>
+          <button
+            v-if="recording || recognizing"
+            type="button"
+            class="icon-button"
+            title="丢弃这次语音"
+            @click="emit('cancel-voice')"
+          >
+            <PetHudIcon name="close" size="xs" />
+          </button>
+        </div>
+      </Transition>
+      <Transition name="pet-status">
+        <div v-if="showAttention" class="attention-card" role="status" aria-live="polite">
+          <div class="attention-card__heading">
+            <PetHudIcon :name="attentionKind === 'approval' ? 'check' : 'thought'" size="sm" />
+            <strong>
+              {{
+                attentionKind === 'approval'
+                  ? '需要你确认'
+                  : attentionKind === 'question'
+                    ? '有事想问你'
+                    : '有待处理事项'
+              }}
+            </strong>
             <button
-              class="tool-btn"
-              style="margin-top: 6px; width: 100%"
-              :disabled="isLoadingModels"
-              @click="scanModels"
+              class="icon-button"
+              type="button"
+              aria-label="暂时收起，相同事项不再弹出"
+              @click="dismissAttention"
             >
-              <template v-if="isLoadingModels">
-                <PixelIcon name="loader" size="sm" animation="spin" />
-                扫描中...
-              </template>
-              <template v-else>
-                <PixelIcon name="refresh" size="sm" />
-                重新扫描
-              </template>
+              <PetHudIcon name="close" size="xs" />
             </button>
           </div>
-
-          <!-- 服装部件 -->
-          <div v-if="avatarFeatureButtons.length > 0" class="menu-section">
-            <div class="menu-label">服装部件</div>
-            <label v-for="btn in avatarFeatureButtons" :key="btn.id" class="voxel-checkbox">
-              <input
-                type="checkbox"
-                :checked="avatarClothingState[btn.id] === true"
-                @change="toggleClothingPart(btn.id, ($event.target as HTMLInputElement).checked)"
-              />
-              <span class="checkmark" />
-              {{ btn.label }}
-            </label>
-          </div>
-
-          <!-- 动作调试 -->
-          <div v-if="avatarAnimList.length > 0" class="menu-section">
-            <div class="menu-label">动作调试</div>
-            <select
-              class="voxel-select"
-              @change="(e) => setAvatarAnimation((e.target as HTMLSelectElement).value)"
-            >
-              <option value="">-- 选择动作 --</option>
-              <option value="__NONE__">-- 无动画 --</option>
-              <option v-for="anim in avatarAnimList" :key="anim" :value="anim">
-                {{ anim }}
-              </option>
-            </select>
-          </div>
+          <p class="attention-card__summary">{{ attention }}</p>
+          <button type="button" class="text-button" @click="emit('open-section', 'tasks')">
+            在主应用中处理
+            <PetHudIcon name="chevron-right" size="xs" />
+          </button>
         </div>
       </Transition>
+      <div v-if="hint && !occupied && !expanded && !showAttention" class="hint-strip" role="status">
+        <span>{{ hint }}</span>
+        <button
+          type="button"
+          class="icon-button"
+          aria-label="收起提示"
+          @click="emit('dismiss-hint')"
+        >
+          <PetHudIcon name="close" size="xs" />
+        </button>
+      </div>
     </div>
   </div>
 </template>
 
-<style scoped>
-/* ═══ v1 体素(Voxel)深色风格 ═══ */
-
-.overlay-root {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 100;
-  font-family: 'Consolas', 'Monaco', monospace;
-}
-
-.overlay-root > * {
-  pointer-events: auto;
-  -webkit-app-region: no-drag;
-}
-
-.ui-scalable-wrapper {
-  width: 100%;
-  height: 100%;
-  position: absolute;
-  top: 0;
-  left: 0;
-  pointer-events: none;
-  transform-origin: center center;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-}
-
-.ui-scalable-wrapper > * {
-  pointer-events: auto;
-}
-
-/* ── 状态标签 (v1 位置: left:40px, top:160px) ── */
-.status-tags {
-  position: absolute;
-  left: 40px;
-  top: 160px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  align-items: flex-start;
-  pointer-events: auto;
-}
-
-.status-tag {
-  background: rgba(20, 20, 20, 0.85);
-  padding: 8px 14px;
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: bold;
-  color: #ffffff;
-  border: 2px solid #e0e0e0;
-  white-space: nowrap;
-  box-shadow: 4px 4px 0px rgba(0, 0, 0, 0.5);
-  max-width: 160px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  transition: all 0.2s;
-  cursor: default;
-  text-shadow: 1px 1px 0 #000;
-}
-
-.status-tag:hover {
-  transform: translateX(5px);
-  background: rgba(40, 40, 40, 0.95);
-  box-shadow: 6px 6px 0px rgba(0, 0, 0, 0.6);
-  border-color: #ffffff;
-}
-
-.status-tag.mood {
-  border-color: #ff88aa;
-  color: #ffccdd;
-}
-.status-tag.vibe {
-  border-color: #88ccff;
-  color: #cceeff;
-}
-.status-tag.mind {
-  border-color: #88ffaa;
-  color: #ccffdd;
-  white-space: normal;
-  max-width: 180px;
-  word-break: break-all;
-  line-height: 1.4;
-  align-items: flex-start;
-}
-
-/* ── 悬浮触发器 (v1: 角色右侧) ── */
-.floating-trigger {
-  position: absolute;
-  left: 50%;
-  top: 55%;
-  transform: translate(140px, -50%);
-  width: 44px;
-  height: 44px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  z-index: 100;
-}
-
-.trigger-core {
-  position: relative;
-  width: 24px;
-  height: 24px;
-  transition: all 0.3s ease;
-  animation: core-idle 4s infinite ease-in-out;
-}
-
-.core-dot {
-  position: absolute;
-  width: 100%;
-  height: 100%;
-  background: rgba(255, 255, 255, 0.95);
-  border-radius: 4px;
-  transition: all 0.2s ease;
-  box-shadow:
-    0 0 15px rgba(255, 255, 255, 0.6),
-    2px 2px 0px rgba(0, 0, 0, 0.3);
-  border: 2px solid #fff;
-}
-
-.pulse-ring {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  border: 2px solid rgba(255, 255, 255, 0.5);
-  border-radius: 4px;
-  opacity: 0;
-  animation: pulse-ring-smooth 2s infinite cubic-bezier(0.215, 0.61, 0.355, 1);
-  box-sizing: border-box;
-}
-
-@keyframes core-idle {
-  0% {
-    transform: translateY(0) rotate(0deg);
-  }
-  25% {
-    transform: translateY(-3px) rotate(15deg);
-  }
-  50% {
-    transform: translateY(0) rotate(0deg);
-  }
-  75% {
-    transform: translateY(3px) rotate(-15deg);
-  }
-  100% {
-    transform: translateY(0) rotate(0deg);
-  }
-}
-
-@keyframes pulse-ring-smooth {
-  0% {
-    transform: scale(0.8) rotate(0deg);
-    opacity: 0.8;
-    border-width: 2px;
-  }
-  50% {
-    opacity: 0.5;
-  }
-  100% {
-    transform: scale(2.4) rotate(90deg);
-    opacity: 0;
-    border-width: 0;
-  }
-}
-
-.floating-trigger:hover .trigger-core {
-  animation-play-state: paused;
-  transform: scale(1.1) rotate(45deg);
-}
-.floating-trigger:hover .core-dot {
-  background: #ffffff;
-  box-shadow:
-    0 0 20px rgba(255, 255, 255, 1),
-    0 0 40px rgba(255, 255, 255, 0.6);
-}
-.floating-trigger.active .trigger-core {
-  transform: rotate(45deg);
-}
-.floating-trigger.active .core-dot {
-  background: #ff88aa;
-  border-color: #ffccdd;
-  box-shadow: 0 0 15px rgba(255, 136, 170, 0.6);
-}
-.floating-trigger.active .pulse-ring {
-  border-color: rgba(255, 136, 170, 0.5);
-  animation-duration: 1.5s;
-}
-
-/* ── 聊天输入框 (v1: 底部居中) ── */
-.input-overlay {
-  position: absolute;
-  bottom: 80px;
-  left: 50%;
-  transform: translateX(-50%);
-}
-
-.chat-input {
-  background: rgba(20, 20, 20, 0.85);
-  backdrop-filter: blur(4px);
-  border: 2px solid #e0e0e0;
-  border-radius: 4px;
-  padding: 10px 16px;
-  width: 240px;
-  outline: none;
-  font-size: 14px;
-  font-weight: 500;
-  color: #ffffff;
-  box-shadow: 4px 4px 0px rgba(0, 0, 0, 0.5);
-  transition: all 0.2s;
-  font-family: 'Consolas', monospace;
-}
-
-.chat-input::placeholder {
-  color: #888;
-  font-weight: 400;
-}
-.chat-input:focus {
-  width: 280px;
-  background: rgba(30, 30, 30, 0.95);
-  border-color: #ffffff;
-  box-shadow: 6px 6px 0px rgba(0, 0, 0, 0.6);
-  transform: translateY(-2px);
-}
-.chat-input:disabled {
-  opacity: 0.5;
-}
-
-/* ── 工具栏 (v1: 右侧竖排, 角色更右侧) ── */
-.pet-tools {
-  position: absolute;
-  left: 50%;
-  top: 55%;
-  transform: translate(200px, -50%);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  /* 去除原来的笨重容器背景和边框，让按钮像左侧标签一样独立悬浮 */
-  background: transparent;
-  padding: 8px 0;
-}
-
-.tool-btn {
-  /* 霓虹风格: 透明背景 + 柔和发光边框 */
-  background: rgba(20, 20, 20, 0.75);
-  border: 2px solid rgba(255, 255, 255, 0.35);
-  width: 42px;
-  height: 42px;
-  border-radius: 4px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
-  transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
-  box-shadow:
-    0 0 8px rgba(255, 255, 255, 0.08),
-    4px 4px 0px rgba(0, 0, 0, 0.4);
-  color: rgba(255, 255, 255, 0.7);
-  text-shadow: none;
-}
-
-.tool-btn:hover {
-  transform: translateX(-4px) scale(1.05);
-  background: rgba(60, 60, 80, 0.9);
-  border-color: rgba(255, 255, 255, 0.8);
-  color: #ffffff;
-  box-shadow:
-    0 0 16px rgba(255, 255, 255, 0.25),
-    0 0 32px rgba(200, 220, 255, 0.15),
-    6px 6px 0px rgba(0, 0, 0, 0.4);
-}
-
-.tool-btn.active,
-.tool-btn:active {
-  transform: translateX(-4px) scale(0.96);
-  background: rgba(80, 80, 120, 0.95);
-  border-color: rgba(255, 255, 255, 1);
-  color: #ffffff;
-  box-shadow:
-    0 0 20px rgba(255, 255, 255, 0.35),
-    0 0 40px rgba(200, 180, 255, 0.2),
-    2px 2px 0px rgba(0, 0, 0, 0.4);
-}
-
-.tool-btn:focus-visible {
-  outline: none;
-  border-color: rgba(255, 255, 255, 0.9);
-  box-shadow:
-    0 0 0 3px rgba(255, 255, 255, 0.15),
-    0 0 16px rgba(255, 255, 255, 0.2);
-}
-
-.voice-btn.active.mode-vad {
-  border-color: rgba(255, 136, 204, 0.8);
-  color: #ff99cc;
-  box-shadow:
-    0 0 12px rgba(255, 136, 204, 0.4),
-    0 0 24px rgba(255, 136, 204, 0.2);
-}
-.voice-btn.active.mode-vad:hover {
-  box-shadow:
-    0 0 20px rgba(255, 136, 204, 0.6),
-    0 0 40px rgba(255, 136, 204, 0.3);
-}
-
-.voice-btn.active.mode-ptt {
-  border-color: rgba(95, 184, 120, 0.8);
-  color: #5fb878;
-  box-shadow:
-    0 0 12px rgba(95, 184, 120, 0.4),
-    0 0 24px rgba(95, 184, 120, 0.2);
-}
-.voice-btn.active.mode-ptt:hover {
-  box-shadow:
-    0 0 20px rgba(95, 184, 120, 0.6),
-    0 0 40px rgba(95, 184, 120, 0.3);
-}
-
-/* ── PTT 按钮 ── */
-.ptt-voxel-container {
-  position: absolute;
-  left: 50%;
-  bottom: 70px;
-  transform: translateX(-220px);
-  z-index: 100;
-}
-
-.ptt-voxel-btn {
-  background: rgba(40, 40, 40, 0.9);
-  border: 2px solid #888;
-  border-radius: 50%;
-  width: 64px;
-  height: 64px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  box-shadow: 4px 4px 0px rgba(0, 0, 0, 0.5);
-  transition: all 0.1s;
-  color: #ddd;
-}
-
-.ptt-voxel-btn:hover {
-  transform: translate(-1px, -1px);
-  background: #555;
-  border-color: #fff;
-  box-shadow: 6px 6px 0px rgba(0, 0, 0, 0.6);
-}
-
-.ptt-voxel-btn.recording {
-  background: #ff4444;
-  border-color: #ffcccc;
-  color: white;
-  animation: pulse-recording 1.5s infinite;
-}
-
-.ptt-icon {
-  font-size: 24px;
-  line-height: 1;
-}
-.ptt-text {
-  font-size: 9px;
-  margin-top: 4px;
-  font-weight: bold;
-  letter-spacing: 1px;
-}
-
-@keyframes pulse-recording {
-  0% {
-    transform: scale(1);
-    box-shadow: 0 0 0 0 rgba(255, 68, 68, 0.7);
-  }
-  70% {
-    transform: scale(1.05);
-    box-shadow: 0 0 0 10px rgba(255, 68, 68, 0);
-  }
-  100% {
-    transform: scale(1);
-    box-shadow: 0 0 0 0 rgba(255, 68, 68, 0);
-  }
-}
-
-/* ── 外观菜单 (v1: 角色左侧) ── */
-.appearance-menu {
-  position: absolute;
-  left: 50%;
-  top: 55%;
-  transform: translate(-320px, -50%);
-  background: rgba(20, 20, 20, 0.95);
-  border: 2px solid #fff;
-  border-radius: 6px;
-  padding: 12px;
-  width: 200px;
-  color: white;
-  box-shadow: 6px 6px 0px rgba(0, 0, 0, 0.6);
-  z-index: 101;
-  max-height: 80vh;
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: #555 #222;
-}
-
-.appearance-menu::-webkit-scrollbar {
-  width: 6px;
-}
-.appearance-menu::-webkit-scrollbar-track {
-  background: #222;
-}
-.appearance-menu::-webkit-scrollbar-thumb {
-  background: #555;
-  border: 1px solid #000;
-}
-
-.menu-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-  padding-bottom: 8px;
-  border-bottom: 2px solid #444;
-  font-weight: bold;
-}
-
-.close-mini-btn {
-  background: none;
-  border: none;
-  color: #888;
-  cursor: pointer;
-  font-size: 18px;
-  line-height: 1;
-}
-.close-mini-btn:hover {
-  color: #fff;
-}
-
-.menu-section {
-  margin-bottom: 12px;
-}
-
-.menu-label {
-  font-size: 11px;
-  color: #aaa;
-  margin-bottom: 6px;
-  text-transform: uppercase;
-}
-
-.model-switch-error {
-  margin-bottom: 6px;
-  padding: 5px 7px;
-  color: #ffb4b4;
-  background: rgba(155, 40, 40, 0.3);
-  border: 1px solid rgba(255, 120, 120, 0.45);
-  font-size: 11px;
-  line-height: 1.35;
-}
-
-/* 体素复选框 */
-.voxel-checkbox {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
-  cursor: pointer;
-  font-size: 13px;
-  user-select: none;
-}
-
-.voxel-checkbox input {
-  display: none;
-}
-
-.voxel-checkbox .checkmark {
-  width: 16px;
-  height: 16px;
-  background: #333;
-  border: 2px solid #888;
-  position: relative;
-  display: inline-block;
-  transition: all 0.1s;
-}
-
-.voxel-checkbox:hover .checkmark {
-  border-color: #fff;
-}
-
-.voxel-checkbox input:checked + .checkmark {
-  background: #ff88aa;
-  border-color: #fff;
-}
-
-.voxel-checkbox input:checked + .checkmark::after {
-  content: '';
-  position: absolute;
-  left: 4px;
-  top: 1px;
-  width: 4px;
-  height: 8px;
-  border: solid white;
-  border-width: 0 2px 2px 0;
-  transform: rotate(45deg);
-}
-
-/* 体素下拉框 */
-.voxel-select {
-  width: 100%;
-  padding: 6px;
-  background: #333;
-  border: 2px solid #888;
-  color: white;
-  font-family: inherit;
-  cursor: pointer;
-  outline: none;
-}
-.voxel-select:hover {
-  border-color: #fff;
-}
-
-/* ── 过渡 ── */
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.2s ease;
-}
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
-
-/* ── 角色选择网格 ── */
-.model-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-}
-
-.model-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 8px 4px;
-  background: rgba(40, 40, 40, 0.8);
-  border: 2px solid #555;
-  cursor: pointer;
-  font-family: inherit;
-  color: #ccc;
-  transition: all 0.15s;
-}
-
-.model-card:hover {
-  border-color: #fff;
-  background: #444;
-  color: #fff;
-}
-
-.model-card.active {
-  border-color: #ff88aa;
-  background: rgba(255, 136, 170, 0.15);
-  color: #ff88aa;
-}
-
-.model-card.loading {
-  border-color: #88ccff;
-  color: #cceeff;
-  cursor: wait;
-}
-
-.model-card:disabled:not(.loading) {
-  opacity: 0.55;
-  cursor: wait;
-}
-
-.model-thumb {
-  width: 48px;
-  height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.3);
-  border: 1px solid #444;
-  overflow: hidden;
-}
-
-.model-thumb-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  image-rendering: pixelated;
-}
-
-.model-thumb-icon {
-  font-size: 24px;
-}
-
-.model-name {
-  font-size: 10px;
-  font-weight: 700;
-  max-width: 70px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: center;
-}
-
-/* ── 调整大小提示气泡 ── */
-.resize-hint {
-  position: absolute;
-  top: 30px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 200;
-  animation: resize-hint-breathe 2s infinite ease-in-out;
-  /* 确保 Transition 的 opacity 能生效 */
-  transition: opacity 0.2s ease;
-}
-
-.resize-hint-inner {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: rgba(20, 20, 20, 0.9);
-  border: 2px solid #88ccff;
-  border-radius: 4px;
-  padding: 8px 16px;
-  color: #cceeff;
-  font-size: 12px;
-  font-weight: bold;
-  font-family: 'Consolas', monospace;
-  white-space: nowrap;
-  box-shadow:
-    4px 4px 0px rgba(0, 0, 0, 0.5),
-    0 0 12px rgba(136, 204, 255, 0.2);
-  text-shadow: 1px 1px 0 #000;
-}
-
-.resize-hint-size {
-  background: rgba(136, 204, 255, 0.15);
-  border: 1px solid #88ccff;
-  border-radius: 2px;
-  padding: 2px 8px;
-  font-size: 11px;
-  font-family: 'Consolas', monospace;
-  color: #88ccff;
-}
-
-@keyframes resize-hint-breathe {
-  0%,
-  100% {
-    transform: translateX(-50%) scale(1);
-  }
-  50% {
-    transform: translateX(-50%) scale(1.02);
-  }
-}
-</style>
+<style scoped src="./pet-hud.css" />

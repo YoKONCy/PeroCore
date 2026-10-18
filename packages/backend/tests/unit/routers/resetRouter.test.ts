@@ -13,12 +13,20 @@ import { describe, expect, it, vi } from 'vitest'
 import { Hono } from 'hono'
 import { createResetRouter } from '@infos/backend/routers/reset.router'
 import { errorHandler } from '@infos/backend/middleware/errorHandler'
+import type { ApiResponse } from '@infos/shared'
 
 /** 创建带 mock Service 的路由实例（挂载真实 errorHandler 以获得准确 HTTP 状态码） */
 function makeRouter(service: ReturnType<typeof createMockService>) {
   const app = new Hono()
   app.onError(errorHandler)
-  app.route('/', createResetRouter({ resetService: service } as never))
+  app.route(
+    '/',
+    createResetRouter({
+      resetService: service,
+      privacyDeletionService: { resetMemories: service.resetMemories },
+      knowledgeService: { clear: service.clearKnowledge },
+    } as never),
+  )
   return app
 }
 
@@ -27,6 +35,7 @@ function createMockService() {
     clearLogs: vi.fn(async () => ({ operation: 'clear_logs', cleared: {} })),
     resetMemories: vi.fn(async () => ({ operation: 'reset_memories', cleared: {} })),
     factoryReset: vi.fn(async () => ({ operation: 'factory_reset', cleared: {} })),
+    clearKnowledge: vi.fn(async () => ({ documentCount: 2, partCount: 3 })),
   }
 }
 
@@ -63,6 +72,7 @@ describe('ResetRouter 确认短语防护', () => {
     const res = await post('/memories', { confirm: '忘掉一切' }, makeRouter(service))
     expect(res.status).toBe(200)
     expect(service.resetMemories).toHaveBeenCalledTimes(1)
+    expect(service.clearKnowledge).not.toHaveBeenCalled()
   })
 
   it('memories 确认短语不匹配时返回 400 且不执行', async () => {
@@ -77,6 +87,12 @@ describe('ResetRouter 确认短语防护', () => {
     const res = await post('/factory', { confirm: '我们还会再见的' }, makeRouter(service))
     expect(res.status).toBe(200)
     expect(service.factoryReset).toHaveBeenCalledTimes(1)
+    expect(service.clearKnowledge).toHaveBeenCalledTimes(1)
+    const response = (await res.json()) as ApiResponse<{ cleared: Record<string, number> }>
+    expect(response.data?.cleared).toMatchObject({
+      knowledge_documents: 2,
+      knowledge_parts: 3,
+    })
   })
 
   it('factory 确认短语不匹配时返回 400 且不执行', async () => {
@@ -84,6 +100,7 @@ describe('ResetRouter 确认短语防护', () => {
     const res = await post('/factory', { confirm: '再也不见' }, makeRouter(service))
     expect(res.status).toBe(400)
     expect(service.factoryReset).not.toHaveBeenCalled()
+    expect(service.clearKnowledge).not.toHaveBeenCalled()
   })
 
   it('缺少 confirm 字段时返回 400 参数校验失败', async () => {

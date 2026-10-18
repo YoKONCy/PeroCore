@@ -120,7 +120,7 @@ describe('Document内容模型与导出链', () => {
         entrypoint: 'main.js',
         permissions: ['render'],
       }),
-    ).toThrow('内容寻址')
+    ).toThrow(Error)
   })
 
   it('统一导出服务应覆盖文本、Markdown、HTML、演示、Checkpoint和Portable Package', () => {
@@ -135,16 +135,20 @@ describe('Document内容模型与导出链', () => {
       markdown: '# 第一页\n\n正文',
     })
     const service = new DocumentExportService(engine, new ContentAddressedBlobStore(root()))
-    expect(service.export(snapshot.documentId, 'plain-text').format).toBe('plain-text')
-    expect(service.export(snapshot.documentId, 'markdown').format).toBe('markdown')
-    expect(service.export(snapshot.documentId, 'html').format).toBe('html')
-    expect(service.export(snapshot.documentId, 'presentation').format).toBe('presentation')
+    expect(service.export(snapshot.documentId, 'plain-text').content.toString()).toContain('正文')
+    expect(service.export(snapshot.documentId, 'markdown').content.toString()).toBe(
+      '# 第一页\n\n正文',
+    )
+    expect(service.export(snapshot.documentId, 'html').content.toString()).toContain('正文')
+    const slides = service.export(snapshot.documentId, 'presentation').content
+    expect(Array.isArray(slides)).toBe(true)
+    expect(slides).toEqual(expect.arrayContaining([expect.objectContaining({ title: '第一页' })]))
     expect(service.export(snapshot.documentId, 'checkpoint')).toMatchObject({
       format: 'checkpoint',
       contentType: 'application/json',
     })
     const portable = service.export(snapshot.documentId, 'portable-project', { title: '导出工程' })
     expect(portable).toMatchObject({ format: 'portable-project', contentType: 'application/zip' })
-    expect(portable.content.readUInt32LE(0)).toBe(0x04034b50)
+    expect(Buffer.from(portable.content as Buffer).readUInt32LE(0)).toBe(0x04034b50)
   })
 })

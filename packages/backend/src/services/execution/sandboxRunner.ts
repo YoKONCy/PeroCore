@@ -11,8 +11,13 @@ import { createRequire } from 'node:module'
 import { realpath } from 'node:fs/promises'
 import type { IPty } from 'node-pty'
 import type { ExecutionSession } from './executionSession'
+import { trackCancellationCleanup } from './cancellation'
+import { createLogger } from '../../lib/logger'
+
+const logger = createLogger('SandboxRunner')
 
 export interface ProcessSpec {
+  approvedOutsideWorkspace?: boolean
   command: string
   args?: string[]
   cwd?: string
@@ -21,6 +26,8 @@ export interface ProcessSpec {
   signal?: AbortSignal
   cols?: number
   rows?: number
+  /** 直接执行参数数组时使用管道，让 Node 完整保留 Windows 参数边界。 */
+  preferPipe?: boolean
 }
 
 export interface SandboxProcess {
@@ -51,6 +58,9 @@ interface ManagedProcessEntry {
   sessionId: string
   pid: number | null
   running: boolean
+  disposeAbort?: () => void
+  termination?: Promise<void>
+  terminatingForce?: boolean
   terminate(force: boolean): Promise<void>
 }
 
@@ -69,6 +79,7 @@ export class LocalPolicyRunner implements SandboxRunner {
 
   async spawn(session: ExecutionSession, spec: ProcessSpec): Promise<SandboxProcess> {
     const { cwd, env } = await this.prepareProcess(session, spec)
+    spec.signal?.throwIfAborted()
     const child = spawn(spec.command, spec.args ?? [], {
       cwd,
       env,
@@ -82,7 +93,8 @@ export class LocalPolicyRunner implements SandboxRunner {
       await this.killProcessTree(child.pid, force, child)
     })
     child.once('exit', () => this.markExited(id))
-    this.bindAbort(id, spec.signal, () => child.once('exit', () => undefined))
+    child.once('error', () => this.markExited(id))
+    this.bindAbort(id, spec.signal)
     return { id, child }
   }
 
@@ -91,7 +103,8 @@ export class LocalPolicyRunner implements SandboxRunner {
     spec: ProcessSpec,
   ): Promise<ManagedTerminalProcess> {
     const prepared = await this.prepareProcess(session, spec)
-    const pty = this.trySpawnPty(spec, prepared.cwd, prepared.env)
+    spec.signal?.throwIfAborted()
+    const pty = spec.preferPipe ? null : this.trySpawnPty(spec, prepared.cwd, prepared.env)
     if (pty) return this.wrapPty(session, spec, pty)
     return this.spawnPipeTerminal(session, spec, prepared.cwd, prepared.env)
   }
@@ -99,7 +112,18 @@ export class LocalPolicyRunner implements SandboxRunner {
   async terminateProcess(processId: string, force = false): Promise<void> {
     const entry = this.processes.get(processId)
     if (!entry?.running) return
-    await entry.terminate(force)
+    // 取消、超时和会话关闭可能同时到达，同一进程树只回收一次。
+    if (!entry.termination || (force && !entry.terminatingForce)) {
+      entry.terminatingForce = force
+      entry.termination = entry.terminate(force)
+    }
+    try {
+      await entry.termination
+    } catch (error) {
+      // 回收失败不能缓存为已完成，后续会话关闭仍可再次尝试。
+      entry.termination = undefined
+      throw error
+    }
   }
 
   async disposeSession(sessionId: string): Promise<void> {
@@ -119,7 +143,8 @@ export class LocalPolicyRunner implements SandboxRunner {
         rows: Math.max(5, spec.rows ?? 30),
         cwd,
         env,
-        encoding: 'utf8',
+        // Windows ConPTY 固定使用 UTF-8，传入 encoding 会被 node-pty 拒绝并打印警告。
+        ...(process.platform === 'win32' ? {} : { encoding: 'utf8' as const }),
         useConpty: process.platform === 'win32',
       })
     } catch {
@@ -141,6 +166,11 @@ export class LocalPolicyRunner implements SandboxRunner {
     this.registerProcess(id, session.id, pty.pid, async (force) => {
       if (process.platform === 'win32') {
         await this.killProcessTree(pty.pid, force)
+        try {
+          pty.kill(force ? 'SIGKILL' : 'SIGTERM')
+        } catch {
+          /* 进程已退出。 */
+        }
       } else {
         const signal = force ? 'SIGKILL' : 'SIGTERM'
         try {
@@ -177,22 +207,27 @@ export class LocalPolicyRunner implements SandboxRunner {
       detached: process.platform !== 'win32',
       stdio: ['pipe', 'pipe', 'pipe'],
     })
+    // 由流解码器保留跨批次 UTF-8 字节，避免中文被截断成替换字符。
+    child.stdout.setEncoding('utf8')
+    child.stderr.setEncoding('utf8')
     const id = `${session.id}:pipe:${child.pid ?? Date.now()}`
     this.registerProcess(id, session.id, child.pid ?? null, async (force) => {
       await this.killProcessTree(child.pid, force, child)
     })
+    child.once('error', () => this.markExited(id))
     this.bindAbort(id, spec.signal)
     return {
       id,
       pid: child.pid ?? null,
       backend: 'pipe',
       onData: (listener) => {
-        child.stdout.on('data', (chunk: Buffer) => listener(chunk.toString('utf8')))
-        child.stderr.on('data', (chunk: Buffer) => listener(`\n[stderr] ${chunk.toString('utf8')}`))
+        child.stdout.on('data', (chunk: string) => listener(chunk))
+        child.stderr.on('data', (chunk: string) => listener(`\n[stderr] ${chunk}`))
       },
       onExit: (listener) => {
         child.once('error', (error) => listener(1, error.message))
-        child.once('exit', (code, signal) => {
+        // 等标准输出与错误流都关闭后再报告退出，避免短进程丢失尾部结果。
+        child.once('close', (code, signal) => {
           this.markExited(id)
           listener(code, signal)
         })
@@ -203,6 +238,7 @@ export class LocalPolicyRunner implements SandboxRunner {
   }
 
   private async prepareProcess(session: ExecutionSession, spec: ProcessSpec) {
+    spec.signal?.throwIfAborted()
     const activeCount = [...this.processes.values()].filter(
       (entry) => entry.sessionId === session.id && entry.running,
     ).length
@@ -212,6 +248,7 @@ export class LocalPolicyRunner implements SandboxRunner {
     const cwd = path.resolve(spec.cwd ?? session.workspaceRoot)
     const roots = session.sandboxProfile.readableRoots
     const allowed =
+      spec.approvedOutsideWorkspace === true ||
       session.sandboxProfile.name === 'full-access' ||
       roots.some((root) => {
         const relative = path.relative(path.resolve(root), cwd)
@@ -224,12 +261,14 @@ export class LocalPolicyRunner implements SandboxRunner {
       roots.map(async (root) => realpath(root).catch(() => path.resolve(root))),
     )
     const actualAllowed =
+      spec.approvedOutsideWorkspace === true ||
       session.sandboxProfile.name === 'full-access' ||
       realRoots.some((root) => {
         const relative = path.relative(root, actualCwd)
         return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))
       })
     if (!actualAllowed) throw new Error(`终端工作目录通过符号链接越出执行会话允许范围: ${cwd}`)
+    spec.signal?.throwIfAborted()
     return { cwd: actualCwd, env: this.buildEnvironment(session, spec.env) }
   }
 
@@ -244,13 +283,22 @@ export class LocalPolicyRunner implements SandboxRunner {
 
   private markExited(id: string): void {
     const entry = this.processes.get(id)
-    if (entry) entry.running = false
+    if (entry) {
+      entry.running = false
+      entry.disposeAbort?.()
+    }
     this.processes.delete(id)
   }
 
-  private bindAbort(id: string, signal?: AbortSignal, _onExit?: () => void): void {
+  private bindAbort(id: string, signal?: AbortSignal): void {
     if (!signal) return
-    const abort = () => void this.terminateProcess(id, true)
+    const abort = () => {
+      const cleanup = this.terminateProcess(id, true)
+      trackCancellationCleanup(signal, cleanup)
+      void cleanup.catch((error) => logger.error(`取消后回收进程失败: ${id}，${String(error)}`))
+    }
+    const entry = this.processes.get(id)
+    if (entry) entry.disposeAbort = () => signal.removeEventListener('abort', abort)
     if (signal.aborted) abort()
     else signal.addEventListener('abort', abort, { once: true })
   }
@@ -266,9 +314,17 @@ export class LocalPolicyRunner implements SandboxRunner {
       const args = ['/PID', String(pid), '/T', ...(force ? ['/F'] : [])]
       const killer = spawn('taskkill.exe', args, { windowsHide: true, stdio: 'ignore' })
       await new Promise<void>((resolve) => {
-        // 无论 taskkill 成功、失败还是无法启动，都必须 resolve，避免等待悬挂。
-        killer.once('error', () => resolve())
-        killer.once('exit', () => resolve())
+        const finish = () => {
+          clearTimeout(timer)
+          resolve()
+        }
+        // 回收程序自身也有上限，避免退出流程被 taskkill 卡住。
+        const timer = setTimeout(() => {
+          killer.kill()
+          finish()
+        }, 3_000)
+        killer.once('error', finish)
+        killer.once('exit', finish)
       })
       // taskkill 兜底之后，若子进程句柄仍未退出（如 taskkill 缺失），直接对句柄再杀一次。
       if (child && child.pid && child.exitCode === null) {
@@ -283,6 +339,20 @@ export class LocalPolicyRunner implements SandboxRunner {
         process.kill(-pid, force ? 'SIGKILL' : 'SIGTERM')
       } catch {
         child?.kill(force ? 'SIGKILL' : 'SIGTERM')
+      }
+    }
+    if (force) {
+      const until = Date.now() + 1_000
+      for (;;) {
+        if (child && (child.exitCode !== null || child.signalCode !== null)) return
+        try {
+          process.kill(pid, 0)
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ESRCH') return
+          throw error
+        }
+        if (Date.now() >= until) throw new Error(`进程回收后仍未确认退出: ${pid}`)
+        await new Promise<void>((resolve) => setTimeout(resolve, 50))
       }
     }
   }

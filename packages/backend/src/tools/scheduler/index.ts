@@ -28,7 +28,7 @@ export function setSchedulerService(svc: SchedulerService | null): void {
 export const setReminderTool: BuiltinTool = {
   name: 'set_reminder',
 
-  async execute(args) {
+  async execute(args, ctx) {
     if (!_schedulerService) {
       return JSON.stringify({ error: '提醒服务未初始化' })
     }
@@ -36,6 +36,11 @@ export const setReminderTool: BuiltinTool = {
     const time = args.time as string
     const content = args.content as string
     const type = (args.type as string) ?? 'reminder'
+    if (!['reminder', 'topic', 'reaction'].includes(type)) {
+      return JSON.stringify({
+        error: '提醒工具仅支持提醒、话题和预设反应；跟进请使用 schedule_follow_up',
+      })
+    }
 
     // 校验时间格式
     const parsed = new Date(time)
@@ -52,6 +57,9 @@ export const setReminderTool: BuiltinTool = {
       time: parsed.toISOString(),
       content,
       type: type as 'reminder' | 'topic' | 'reaction',
+      agentId: ctx.agentId,
+      threadId: ctx.threadId,
+      sourceExecutionId: ctx.executionId,
     })
 
     return JSON.stringify({
@@ -101,13 +109,13 @@ export const listRemindersTool: BuiltinTool = {
 export const cancelReminderTool: BuiltinTool = {
   name: 'cancel_reminder',
 
-  async execute(args) {
+  async execute(args, ctx) {
     if (!_schedulerService) {
       return JSON.stringify({ error: '提醒服务未初始化' })
     }
 
     const id = args.id as number
-    const success = await _schedulerService.cancel(id)
+    const success = await _schedulerService.cancel(id, ctx.agentId)
 
     if (!success) {
       return JSON.stringify({ error: `未找到 ID 为 ${id} 的提醒，或已触发` })
@@ -117,5 +125,52 @@ export const cancelReminderTool: BuiltinTool = {
       success: true,
       message: `提醒 #${id} 已取消`,
     })
+  },
+}
+
+/** 一次性跟进只安排未来检查，不在当前轮等待，也不预先授权未来副作用。 */
+export const scheduleFollowUpTool: BuiltinTool = {
+  name: 'schedule_follow_up',
+  allowedSources: ['desktop'],
+  async execute(args, ctx) {
+    if (ctx.taskId)
+      return JSON.stringify({
+        error: '后台任务请通过 finish_task.task_result 的 wait 安排原任务续行',
+      })
+    if (!_schedulerService) return JSON.stringify({ error: '提醒服务未初始化' })
+    const item = await _schedulerService.create({
+      type: 'follow_up',
+      time: String(args.time ?? ''),
+      content: String(args.instruction ?? ''),
+      planId: typeof args.planId === 'string' ? args.planId : undefined,
+      planStepId: typeof args.planStepId === 'string' ? args.planStepId : undefined,
+      reason: String(args.reason ?? ''),
+      agentId: ctx.agentId,
+      threadId: ctx.threadId,
+      sourceExecutionId: ctx.executionId,
+    })
+    return JSON.stringify({
+      success: true,
+      item,
+      message: '已安排一次性跟进，可在任务中心查看和取消',
+    })
+  },
+}
+
+/** 建议只写入待处理记录；用户在界面采纳后才派发实际任务。 */
+export const suggestNextStepTool: BuiltinTool = {
+  name: 'suggest_next_step',
+  allowedSources: ['desktop'],
+  async execute(args, ctx) {
+    if (!_schedulerService) return JSON.stringify({ error: '提醒服务未初始化' })
+    const item = await _schedulerService.suggest({
+      agentId: ctx.agentId,
+      threadId: ctx.threadId,
+      title: String(args.title ?? ''),
+      instruction: String(args.instruction ?? ''),
+      reason: String(args.reason ?? ''),
+      sourceExecutionId: ctx.executionId,
+    })
+    return JSON.stringify({ success: true, item, message: '建议已保存，等待用户采纳或忽略' })
   },
 }

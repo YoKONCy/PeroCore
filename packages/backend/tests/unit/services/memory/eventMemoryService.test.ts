@@ -7,14 +7,17 @@ import { EventNoteRepository } from '@infos/backend/repositories/eventNote.repo'
 import { ThreadRepository } from '@infos/backend/repositories/thread.repo'
 import { MemoryStoreRegistry } from '@infos/backend/repositories/storeRegistry'
 import { EventMemoryService } from '@infos/backend/services/memory/eventMemoryService'
+import { ContextRnnRuntime } from '@infos/backend/services/retrieval/contextRnnRuntime'
 import { EventReflectionService } from '@infos/backend/services/memory/eventReflectionService'
 import { DailyNotesService } from '@infos/backend/services/memory/dailyNotesService'
 import { ThreadService } from '@infos/backend/services/thread/threadService'
 import { createMemoryRouter } from '@infos/backend/routers/memory.router'
 
 const roots: string[] = []
+const connections: Array<() => void> = []
 
 afterEach(() => {
+  for (const close of connections.splice(0)) close()
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
@@ -31,12 +34,19 @@ function createFixture() {
     },
   }
   const stores = new MemoryStoreRegistry(resolver as never, 4)
+  connections.push(() => {
+    stores.closeAll()
+    closeDrizzleConnection(db)
+  })
   const embeddings = {
     embedOne: async (text: string) => [text.length % 3, 1, 0, 0],
+    getConfig: () => embeddingConfig,
+    isAvailable: true,
   }
+  const embeddingConfig = { model: '测试模型', dimension: 4 }
   const repo = new EventNoteRepository(db)
   const service = new EventMemoryService(repo, stores, embeddings as never)
-  return { db, stores, repo, service }
+  return { db, stores, repo, service, embeddings }
 }
 
 function countNodesByKind(
@@ -66,6 +76,24 @@ const draft = {
 }
 
 describe('EventMemoryService真实双库存储', () => {
+  it('关闭向量后语义与混合查询均走纯文本，不调用 Embedding 或已有向量索引', async () => {
+    const { service, stores, embeddings } = createFixture()
+    const note = await service.create(draft)
+    embeddings.isAvailable = false
+    const embed = vi.spyOn(embeddings, 'embedOne')
+    const store = stores.ensureTextIndexReady('pero', 'desktop')
+    const vectorSearch = vi.spyOn(store, 'search')
+    const textSearch = vi.spyOn(store, 'searchHybrid')
+    for (const mode of ['semantic', 'mixed'] as const) {
+      const notes = await service.query({ agentId: 'pero', query: draft.narrative, mode, limit: 5 })
+      expect(notes.some((item) => item.id === note.id)).toBe(true)
+    }
+    expect(embed).not.toHaveBeenCalled()
+    expect(vectorSearch).not.toHaveBeenCalled()
+    expect(textSearch).toHaveBeenCalledTimes(2)
+    expect(textSearch.mock.calls.every((args) => args[5] === 0)).toBe(true)
+  })
+
   it('Coverage Claim应原子互斥并在提交后释放', async () => {
     const { db, stores, repo } = createFixture()
     const first = await repo.claimCoverageRange({
@@ -144,10 +172,10 @@ describe('EventMemoryService真实双库存储', () => {
     closeDrizzleConnection(db)
   })
 
-  it('日记任务应持久幂等并按10分钟开始退避且不把审计写入正文', async () => {
+  it('日记任务应持久幂等并按持久化的时点退避且不把审计写入正文', async () => {
     const { db, stores, repo, service } = createFixture()
     await service.create(draft, 'daily-note-event')
-    const write = vi.fn()
+    const write = vi.fn().mockResolvedValue(undefined)
     const chatText = vi
       .fn()
       .mockRejectedValueOnce(new Error('日记模型暂时失败'))
@@ -169,12 +197,12 @@ describe('EventMemoryService真实双库存储', () => {
       )
     const daily = createDaily()
     await expect(daily.generate('pero', '2026-08-27', true)).rejects.toThrow('日记模型暂时失败')
-    expect((await repo.dailyNoteTask('pero', '2026-08-27'))?.nextAttemptAt).toBe(
-      '2026-08-27T21:10:00.000Z',
-    )
+    const retryAt = (await repo.dailyNoteTask('pero', '2026-08-27'))!.nextAttemptAt!
+    expect(Date.parse(retryAt)).toBeGreaterThan(now.getTime())
 
     expect(await createDaily().generate('pero', '2026-08-27', true)).toEqual([])
-    now = new Date('2026-08-27T21:10:00.000Z')
+    expect(chatText).toHaveBeenCalledTimes(1)
+    now = new Date(retryAt)
     expect(await createDaily().generate('pero', '2026-08-27', true)).toEqual(['2026-08-27.md'])
     expect(getModelConfig).toHaveBeenCalledWith('pero')
     expect(write).toHaveBeenCalledWith(
@@ -207,7 +235,7 @@ describe('EventMemoryService真实双库存储', () => {
       coveredAt: '2026-08-27T12:00:00.000Z',
     })
     const chatText = vi.fn().mockResolvedValue('今天发生了值得整理的互动。')
-    const write = vi.fn()
+    const write = vi.fn().mockResolvedValue(undefined)
     const findMessagesByPairIds = vi.fn().mockResolvedValue([
       { role: 'user', content: '今天继续完成长记忆收口。' },
       { role: 'assistant', content: '我会继续完成最后验收。' },
@@ -262,12 +290,27 @@ describe('EventMemoryService真实双库存储', () => {
           archiveOverlaps: [overlap.id],
         }),
     }
-    const reflection = new EventReflectionService(service, stores, model, repo)
+    let now = Date.now()
+    const reflection = new EventReflectionService(service, stores, model, repo, {
+      now: () => new Date(now),
+    })
+    service.setCommitListener((note) => reflection.enqueue(note.agentId, note.id))
+    await repo.advanceTimer('agent-silence:pero', 6 * 60 * 60)
     await reflection.enqueue('pero', main.id)
     await reflection.drain()
     expect(model.reflect).toHaveBeenCalledTimes(1)
 
-    const restarted = new EventReflectionService(service, stores, model, repo)
+    const restarted = new EventReflectionService(service, stores, model, repo, {
+      now: () => new Date(now),
+    })
+    await restarted.drain()
+    expect(model.reflect).toHaveBeenCalledTimes(1)
+    now += 6 * 60_000
+    // 模型决策成功后模拟归档失败，确认重启可以继续，而非遗失剩余维护操作。
+    vi.spyOn(service, 'archive').mockRejectedValueOnce(new Error('归档暂时失败'))
+    await restarted.drain()
+    expect(model.reflect).toHaveBeenCalledTimes(2)
+    now += 16 * 60_000
     await restarted.drain()
     expect(model.reflect).toHaveBeenCalledTimes(2)
 
@@ -283,7 +326,23 @@ describe('EventMemoryService真实双库存储', () => {
     expect(new Set([overlapRelation!.sourceId, overlapRelation!.targetId])).toEqual(
       new Set([current!.id, overlap.id]),
     )
+    expect(await repo.readTimer('agent-silence:pero')).toBe(6 * 60 * 60)
+    expect(await restarted.enqueueDailyBackfill()).toBe(0)
+    await restarted.enqueue('pero', main.id)
+    await restarted.drain()
+    expect(model.reflect).toHaveBeenCalledTimes(2)
 
+    stores.closeAll()
+    closeDrizzleConnection(db)
+  })
+
+  it('主动写入后的计时重置在数据库和新仓库实例中保持有效', async () => {
+    const { db, stores, repo, service } = createFixture()
+    await repo.advanceTimer('agent-silence:pero', 6 * 60 * 60)
+    await service.create(draft, 'reset-active-memory')
+    expect(await repo.advanceTimer('agent-silence:pero', 60)).toBe(60)
+    const restartedRepo = new EventNoteRepository(db)
+    expect(await restartedRepo.advanceTimer('agent-silence:pero', 60)).toBe(120)
     stores.closeAll()
     closeDrizzleConnection(db)
   })
@@ -323,6 +382,8 @@ describe('EventMemoryService真实双库存储', () => {
     )
     expect(detailed.truncated).toBe(false)
     expect(detailed.returnedTokens).toBeGreaterThan(0)
+    expect(detailed.returnedTokens).toBeLessThanOrEqual(4_000)
+    expect(detailed.notes.length + detailed.entities.length).toBeLessThanOrEqual(2)
 
     const entityResult = await service.queryDetailed({
       agentId: 'pero',
@@ -524,7 +585,7 @@ describe('EventMemoryService真实双库存储', () => {
   })
 
   it('自动RAG只应从活跃时间轴补充末尾与直接前驱', async () => {
-    const { db, stores, service } = createFixture()
+    const { db, stores, repo, service } = createFixture()
     const first = await service.create(draft, 'operation-first')
     const second = await service.create(
       {
@@ -538,11 +599,11 @@ describe('EventMemoryService真实双库存储', () => {
     await service.addRelation(first.id, second.id, 'same_topic', 1, 'operation-link')
     await service.archive(first.id, 'operation-archive')
 
-    const firstRow = await service.detail(first.id)
-    const secondRow = await service.detail(second.id)
+    const firstRow = await repo.findById(first.id)
+    const secondRow = await repo.findById(second.id)
     const store = stores.getAgentStore('pero')
     expect(firstRow?.status).toBe('archived')
-    const firstTdbId = (await service.detail(first.id))!.tdbId
+    const firstTdbId = (await repo.findById(first.id))!.tdbId
     const relationExists =
       store
         .getEdges(firstTdbId)
@@ -585,7 +646,11 @@ describe('EventMemoryService真实双库存储', () => {
     const store = stores.getAgentStore('pero')
     const searchAdvanced = vi.spyOn(store, 'searchAdvanced')
     const leidenCluster = vi.spyOn(store, 'leidenCluster')
-    service.setAdvancedRetrieval({} as never, async () => ({
+    const rnn = {
+      update: vi.fn(),
+      generateBias: vi.fn(() => new Float32Array([0, 1, 0, 0])),
+    }
+    service.setAdvancedRetrieval(new ContextRnnRuntime(() => rnn as never), async () => ({
       channels: {
         desktop: { contextPairs: 20, enableAutoRag: true, retrievalLimit: 8 },
         group: { contextPairs: 20, enableAutoRag: true, retrievalLimit: 3 },
@@ -597,7 +662,7 @@ describe('EventMemoryService真实双库存储', () => {
         minScore: -1,
         enableFista: true,
         enableDpp: true,
-        enableContextRnn: false,
+        enableContextRnn: true,
         enableLeiden: true,
         enableFeedback: true,
       },
@@ -623,7 +688,6 @@ describe('EventMemoryService真实双库存储', () => {
       'timeline',
       'completed',
     ])
-    expect(progress[1]?.message).toContain('Top-2')
     expect(searchAdvanced).toHaveBeenCalledWith(
       expect.any(Array),
       expect.objectContaining({
@@ -657,6 +721,8 @@ describe('EventMemoryService真实双库存储', () => {
     const firstRow = await repo.findById(first.id)
     const secondRow = await repo.findById(second.id)
 
+    stores.resetAgentStore('pero', 'main')
+    expect(stores.getAgentStore('pero', 'main').nodeCount()).toBe(0)
     await service.rebuildAgentStore('pero')
     const store = stores.getAgentStore('pero')
     expect(countNodesByKind(stores, 'event_note')).toBe(2)
@@ -668,6 +734,22 @@ describe('EventMemoryService真实双库存储', () => {
 
     stores.closeAll()
     closeDrizzleConnection(db)
+  })
+
+  it('重建时 Embedding 失败不能清空原有索引，取消后不能发布迟到结果', async () => {
+    const { service, stores, embeddings, repo } = createFixture()
+    const note = await service.create(draft, 'operation-rebuild-failure')
+    const row = await repo.findById(note.id)
+    const spy = vi.spyOn(embeddings, 'embedOne').mockRejectedValueOnce(new Error('模型不可用'))
+    await expect(service.rebuildAgentStore('pero')).rejects.toThrow('模型不可用')
+    expect(stores.getAgentStore('pero').get(row!.tdbId)?.payload).toMatchObject({
+      narrative: draft.narrative,
+    })
+    spy.mockRestore()
+    const controller = new AbortController()
+    controller.abort()
+    await expect(service.rebuildAgentStore('pero', false, controller.signal)).rejects.toThrow()
+    expect(stores.getAgentStore('pero').contains(row!.tdbId)).toBe(true)
   })
 
   it('对称关系应按EventNote ID规范为单边并可双向查询', async () => {

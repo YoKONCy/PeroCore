@@ -1,0 +1,352 @@
+.agent-input-card {
+  --question-accent: color-mix(in srgb, var(--ui-accent-purple) 65%, var(--ui-accent-sky));
+  position: relative;
+  box-sizing: border-box;
+  width: min(100%, 560px);
+  margin: 12px 0 12px auto;
+  border: 1px solid color-mix(in srgb, var(--question-accent) 28%, var(--ui-border-subtle));
+  border-radius: 0;
+  background:
+    linear-gradient(
+      125deg,
+      color-mix(in srgb, var(--ui-accent-sky) 6%, transparent),
+      transparent 60%
+    ),
+    color-mix(in srgb, var(--ui-bg-elevated) 96%, transparent);
+  box-shadow:
+    inset 1px 1px color-mix(in srgb, var(--ui-text-primary) 9%, transparent),
+    inset -1px -1px color-mix(in srgb, var(--ui-text-primary) 5%, transparent),
+    2px 2px 0 color-mix(in srgb, var(--question-accent) 17%, var(--ui-bg-primary));
+  color: var(--ui-text-primary);
+  font-family: var(--ui-font-pixel);
+  animation: question-arrive 180ms steps(4, end) both;
+}
+.agent-input-card::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: 16px;
+  width: 24px;
+  height: 2px;
+  background: var(--ui-accent-primary);
+}
+.agent-input-card__header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 18px 12px;
+}
+.agent-input-card__waiting {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  color: var(--ui-text-tertiary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.agent-input-card__waiting i {
+  width: 4px;
+  height: 4px;
+  background: var(--ui-accent-primary);
+}
+.question-steps {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 0 18px 12px;
+}
+.question-steps button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 30px;
+  height: 28px;
+  border: 1px solid var(--ui-border-subtle);
+  background: var(--ui-bg-primary);
+  color: var(--ui-text-secondary);
+}
+.question-steps button.active {
+  color: var(--question-accent);
+  border-color: var(--question-accent);
+  box-shadow: 0 2px var(--question-accent);
+}
+.question-steps button.done {
+  color: var(--ui-accent-sky);
+}
+.question-steps > span {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--ui-text-tertiary);
+}
+.question-body {
+  min-width: 0;
+  margin: 0;
+  padding: 14px 18px 0;
+  border: 0;
+  border-top: 1px solid var(--ui-border-subtle);
+}
+.question-caption {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+  color: var(--ui-text-tertiary);
+  font-size: 12px;
+}
+.question-caption > span:first-child {
+  color: var(--question-accent);
+}
+.question-body h3 {
+  margin: 10px 0 12px;
+  font: inherit;
+  font-size: 16px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  outline: none;
+}
+.question-context {
+  margin: 0 0 12px;
+  color: var(--ui-text-secondary);
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.question-context--group {
+  margin: 0 18px 12px;
+}
+.question-options {
+  display: grid;
+  gap: 8px;
+}
+.question-option {
+  display: flex;
+  min-width: 0;
+  border: 1px solid var(--ui-border-subtle);
+  background: color-mix(in srgb, var(--ui-bg-primary) 75%, transparent);
+  box-shadow:
+    inset 0 1px color-mix(in srgb, var(--ui-text-primary) 5%, transparent),
+    0 2px color-mix(in srgb, var(--ui-text-primary) 7%, transparent);
+  transition:
+    border-color 120ms ease,
+    background 120ms ease;
+}
+.question-option:hover {
+  border-color: var(--question-accent);
+}
+.question-option.selected {
+  border-color: var(--question-accent);
+  background: color-mix(in srgb, var(--question-accent) 10%, var(--ui-bg-primary));
+}
+.question-option > button:first-child {
+  color: inherit;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  gap: 10px;
+  align-items: center;
+  padding: 11px 12px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+.question-option__key {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  font-size: 12px;
+  color: var(--question-accent);
+  border: 1px solid var(--ui-border-subtle);
+  box-shadow: inset 1px 1px color-mix(in srgb, var(--ui-text-primary) 10%, transparent);
+}
+.question-option.selected .question-option__key {
+  background: color-mix(in srgb, var(--question-accent) 15%, transparent);
+  border-color: var(--question-accent);
+}
+.question-option__label {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 3px;
+  overflow-wrap: anywhere;
+}
+.question-option strong {
+  font-weight: 500;
+  font-size: 14px;
+}
+.question-option small {
+  color: var(--ui-text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.question-option__supplement {
+  flex-shrink: 0;
+  align-self: center;
+  padding: 6px 10px;
+  border: 0;
+  border-left: 1px solid var(--ui-border-subtle);
+  background: transparent;
+  color: var(--ui-text-secondary);
+  font-size: 12px;
+}
+.question-custom {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 12px 0 0;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: var(--question-accent);
+  font-size: 12px;
+}
+.question-text {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--ui-text-secondary);
+}
+.question-text textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 84px;
+  padding: 10px 12px;
+  resize: vertical;
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: 0;
+  outline: none;
+  background: var(--ui-bg-primary);
+  color: var(--ui-text-primary);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.7;
+  box-shadow: inset 1px 1px color-mix(in srgb, var(--ui-text-primary) 6%, transparent);
+}
+.question-text textarea:focus {
+  border-color: var(--question-accent);
+}
+.question-controls {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 14px;
+}
+.question-back {
+  border: 0;
+  padding: 4px 0;
+  background: transparent;
+  color: var(--ui-text-secondary);
+  font-size: 12px;
+}
+.question-review {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.question-review li {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--ui-border-subtle);
+}
+.question-review li > div {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.question-review strong {
+  font-weight: 500;
+  font-size: 14px;
+}
+.question-review p {
+  margin: 6px 0 0;
+  color: var(--ui-text-secondary);
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+.question-review button {
+  flex-shrink: 0;
+}
+.agent-input-card__actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px 16px;
+}
+.question-footnote {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--ui-text-tertiary);
+}
+.agent-input-card__actions > :last-child {
+  margin-left: auto;
+}
+.question-error {
+  margin: 12px 18px 0;
+  color: var(--color-danger);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.agent-input-card button {
+  font-family: inherit;
+  border-radius: 0;
+  cursor: pointer;
+}
+.agent-input-card button:disabled,
+.question-body:disabled button {
+  cursor: default;
+  opacity: 0.5;
+}
+.agent-input-card button:focus-visible {
+  outline: 1px solid var(--question-accent);
+  outline-offset: 3px;
+}
+.question-back:hover,
+.question-option__supplement:hover {
+  color: var(--question-accent);
+}
+@keyframes question-arrive {
+  from {
+    opacity: 0;
+    translate: 0 4px;
+  }
+}
+@media (max-width: 420px) {
+  .agent-input-card__header {
+    flex-wrap: wrap;
+  }
+  .question-option > button:first-child {
+    padding: 9px 8px;
+    gap: 7px;
+  }
+  .question-option__supplement {
+    padding-inline: 8px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-input-card {
+    animation: none;
+  }
+  .question-option {
+    transition: none;
+  }
+}
+
+.agent-input-card :deep(.agent-request-identity__copy span) {
+  font-size: 12px;
+  line-height: 1.5;
+}
+.agent-input-card :deep(.agent-request-identity__copy strong) {
+  font-size: 14px;
+}

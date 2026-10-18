@@ -5,10 +5,13 @@
  * 非直观的状态转换、失败恢复与安全边界应在本模块内完成，避免泄漏实现细节。
  */
 import path from 'node:path'
-import { readdir, stat } from 'node:fs/promises'
+import { open, readdir, stat } from 'node:fs/promises'
+import type { WorkspaceFileDescriptor } from '@infos/shared'
 import { AppError } from '../../lib/appError'
 import type { ProductivityRuntime } from '../../tools/productivityRuntimeHolder'
 import { __codeSearchInternals } from '../../tools/codeSearcher'
+import type { ThreadService } from '../thread/threadService'
+import { workspaceFileType } from './workspaceFileType'
 
 export interface WorkspaceTreeNode {
   name: string
@@ -20,9 +23,18 @@ export interface WorkspaceTreeNode {
 
 /** Workspace浏览与搜索用例层；封装文件系统和搜索引擎基础设施。 */
 export class WorkspaceBrowserService {
-  constructor(private readonly runtime: ProductivityRuntime) {}
+  constructor(
+    private readonly runtime: ProductivityRuntime,
+    private readonly threads?: ThreadService,
+  ) {}
 
   async session(agentId: string, threadId: string) {
+    if (this.threads) {
+      const thread = await this.threads.getThread(threadId)
+      if (!thread || thread.agentId !== agentId || thread.channel !== 'desktop') {
+        throw new AppError('FORBIDDEN', { message: '工作区会话与角色不匹配' })
+      }
+    }
     const workspaceRoot = this.runtime.workspace.getWorkspaceRoot(agentId)
     return this.runtime.sessions.getOrCreate({
       ownerAgentId: agentId,
@@ -64,6 +76,30 @@ export class WorkspaceBrowserService {
       a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'directory' ? -1 : 1,
     )
     return { root: session.workspaceRoot, parent: relative, nodes }
+  }
+
+  /** 浏览器只解析当前工作区的真实文件，二进制内容不经过文本读取或模型。 */
+  async file(agentId: string, threadId: string, inputPath: string) {
+    const session = await this.session(agentId, threadId)
+    const filePath = await this.runtime.virtualWorkspace.resolveReadablePath(session, inputPath)
+    const handle = await open(filePath, 'r')
+    try {
+      const info = await handle.stat()
+      if (!info.isFile()) throw new AppError('VALIDATION_ERROR', { message: '目标不是普通文件' })
+      const header = Buffer.alloc(Math.min(info.size, 8192))
+      const { bytesRead } = await handle.read(header, 0, header.length, 0)
+      const descriptor: WorkspaceFileDescriptor = {
+        path: inputPath,
+        name: path.basename(filePath),
+        ...workspaceFileType(filePath, header.subarray(0, bytesRead)),
+        sizeBytes: info.size,
+        modifiedAt: info.mtime.toISOString(),
+        version: `${info.size}-${info.mtimeMs}-${info.ctimeMs}`,
+      }
+      return { filePath, descriptor }
+    } finally {
+      await handle.close()
+    }
   }
 
   async search(input: {

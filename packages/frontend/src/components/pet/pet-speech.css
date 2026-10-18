@@ -1,0 +1,203 @@
+/* 气泡使用独立的柔和色阶，名字与小心形融入正文上沿。 */
+.pet-speech-bubble {
+  --bubble-cut: polygon(
+    8px 0,
+    calc(100% - 20px) 0,
+    calc(100% - 20px) 3px,
+    calc(100% - 15px) 3px,
+    calc(100% - 15px) 8px,
+    calc(100% - 12px) 8px,
+    calc(100% - 12px) 22px,
+    calc(100% - 8px) 22px,
+    calc(100% - 8px) 26px,
+    calc(100% - 4px) 26px,
+    calc(100% - 4px) 30px,
+    100% 30px,
+    100% 34px,
+    calc(100% - 4px) 34px,
+    calc(100% - 4px) 38px,
+    calc(100% - 12px) 38px,
+    calc(100% - 12px) calc(100% - 8px),
+    calc(100% - 15px) calc(100% - 8px),
+    calc(100% - 15px) calc(100% - 3px),
+    calc(100% - 20px) calc(100% - 3px),
+    calc(100% - 20px) 100%,
+    8px 100%,
+    8px calc(100% - 3px),
+    3px calc(100% - 3px),
+    3px calc(100% - 8px),
+    0 calc(100% - 8px),
+    0 8px,
+    3px 8px,
+    3px 3px,
+    8px 3px
+  );
+  position: absolute;
+  z-index: 110;
+  isolation: isolate;
+  box-sizing: border-box;
+  width: max-content;
+  height: auto;
+  padding: 12px 17px 13px;
+  border: 0;
+  border-radius: 0;
+  color: var(--pet-bubble-ink);
+  font-family: var(--ui-font-pixel);
+  font-size: 13px;
+  line-height: 1.8;
+  font-synthesis: none;
+  transform-origin: calc(100% + 11px) 32px;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+}
+.has-actions {
+  padding-right: 42px;
+}
+.bubble-face {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+.bubble-face::before,
+.bubble-face::after {
+  content: '';
+  position: absolute;
+  clip-path: var(--bubble-cut);
+}
+.bubble-face::before {
+  inset: -1px -12px -2px -1px;
+  background: var(--pet-bubble-rim);
+}
+.bubble-face::after {
+  inset: 0 -11px 0 0;
+  background:
+    repeating-conic-gradient(var(--pet-bubble-grain) 0% 25%, transparent 0% 50%) 0 0 / 4px 4px,
+    radial-gradient(ellipse at 8% 0, var(--pet-bubble-blush), transparent 66%),
+    radial-gradient(ellipse at 100% 100%, var(--pet-bubble-bloom), transparent 65%),
+    var(--pet-bubble-fill);
+  box-shadow:
+    inset 1px 1px var(--pet-bubble-light),
+    inset 0 -1px var(--pet-bubble-shade);
+  backdrop-filter: blur(6px);
+}
+.bubble-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  color: var(--pet-bubble-name);
+  font-size: 11px;
+  line-height: 1.5;
+  letter-spacing: 0.5px;
+}
+.bubble-name span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.bubble-name :deep(svg) {
+  width: 11px;
+  height: 11px;
+  --pet-icon-shadow: var(--pet-bubble-shade);
+  --pet-icon-highlight: var(--pet-bubble-light);
+  opacity: 0.86;
+}
+.bubble-content {
+  max-height: var(--bubble-max-height);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  scrollbar-width: thin;
+  scrollbar-color: var(--pet-bubble-rim) transparent;
+}
+.bubble-actions {
+  position: absolute;
+  top: 8px;
+  right: 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.bubble-actions button {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--pet-bubble-name);
+  cursor: pointer;
+  transition:
+    color 120ms,
+    translate 120ms steps(2);
+}
+.bubble-actions button:hover {
+  color: var(--pet-pink);
+}
+.bubble-actions button:active {
+  translate: 0 1px;
+}
+.bubble-actions button:focus-visible {
+  outline: 1px solid var(--pet-bubble-name);
+  outline-offset: 2px;
+}
+.bubble-right {
+  transform-origin: -11px 32px;
+}
+.bubble-right .bubble-face::before {
+  inset: -1px -1px -2px -12px;
+  transform: scaleX(-1);
+}
+.bubble-right .bubble-face::after {
+  inset: 0 0 0 -11px;
+  transform: scaleX(-1);
+}
+.bubble-above {
+  transform-origin: 50% calc(100% + 12px);
+  --bubble-cut: polygon(
+    8px 0,
+    calc(100% - 8px) 0,
+    calc(100% - 8px) 3px,
+    calc(100% - 3px) 3px,
+    calc(100% - 3px) 8px,
+    100% 8px,
+    100% calc(100% - 20px),
+    calc(100% - 3px) calc(100% - 20px),
+    calc(100% - 3px) calc(100% - 15px),
+    calc(100% - 8px) calc(100% - 15px),
+    calc(100% - 8px) calc(100% - 12px),
+    calc(50% + 8px) calc(100% - 12px),
+    calc(50% + 8px) calc(100% - 8px),
+    calc(50% + 4px) calc(100% - 8px),
+    calc(50% + 4px) calc(100% - 4px),
+    50% calc(100% - 4px),
+    50% 100%,
+    calc(50% - 4px) 100%,
+    calc(50% - 4px) calc(100% - 8px),
+    calc(50% - 8px) calc(100% - 8px),
+    calc(50% - 8px) calc(100% - 12px),
+    8px calc(100% - 12px),
+    8px calc(100% - 15px),
+    3px calc(100% - 15px),
+    3px calc(100% - 20px),
+    0 calc(100% - 20px),
+    0 8px,
+    3px 8px,
+    3px 3px,
+    8px 3px
+  );
+}
+.bubble-above .bubble-face::before {
+  inset: -1px -1px -14px -1px;
+}
+.bubble-above .bubble-face::after {
+  inset: 0 0 -12px 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bubble-actions button {
+    transition: none;
+  }
+}

@@ -9,6 +9,7 @@
 
 import { apiClient } from '../client'
 import { getBaseUrl } from '../transportUtils'
+import { requestApiBinary } from '../transport'
 
 /** ASR 识别结果 */
 export interface AsrResult {
@@ -28,24 +29,21 @@ export const voiceApi = {
   /**
    * TTS 合成 — 返回 ArrayBuffer 音频数据
    */
-  synthesize: async (params: {
-    text: string
-    voice?: string
-    speed?: number
-    format?: 'mp3' | 'opus' | 'aac' | 'pcm'
-  }): Promise<ArrayBuffer> => {
-    const res = await fetch(`${getBaseUrl()}/api/voice/tts`, {
+  synthesize: async (
+    params: {
+      text: string
+      voice?: string
+      speed?: number
+      format?: 'mp3' | 'opus' | 'aac' | 'pcm'
+    },
+    signal?: AbortSignal,
+  ): Promise<ArrayBuffer> => {
+    return requestApiBinary('/voice/tts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
+      signal,
     })
-
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ message: '语音合成失败' }))
-      throw new Error(err.message || `TTS 请求失败: ${res.status}`)
-    }
-
-    return res.arrayBuffer()
   },
 
   /**
@@ -54,11 +52,16 @@ export const voiceApi = {
    * 使用 application/octet-stream 直接发送二进制流,
    * 避免 FormData 的额外开销。
    */
-  recognize: async (audioData: ArrayBuffer, mimeType = 'audio/webm'): Promise<AsrResult> => {
+  recognize: async (
+    audioData: ArrayBuffer,
+    mimeType = 'audio/webm',
+    signal?: AbortSignal,
+  ): Promise<AsrResult> => {
     const res = await fetch(`${getBaseUrl()}/api/voice/asr`, {
       method: 'POST',
       headers: { 'Content-Type': mimeType },
       body: audioData,
+      signal,
     })
 
     if (!res.ok) {

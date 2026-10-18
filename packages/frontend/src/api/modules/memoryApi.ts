@@ -16,6 +16,14 @@ export interface EventMemorySource {
     pairId: string | null
   }>
 }
+export interface PrivacyCleanupJob {
+  id: string
+  kind: 'memory' | 'fact' | 'knowledge' | 'reset-memory' | 'social-memory'
+  status: 'pending' | 'failed' | 'completed'
+  attempts: number
+  lastError?: string
+  createdAt: string
+}
 
 /** 过滤参数 → querystring（数组以逗号拼接，与后端 csv 解析对齐） */
 function toSearchParams(filter: Partial<EventNoteArchiveFilter>): string {
@@ -41,11 +49,19 @@ export const memoryApi = {
     apiClient.get<EventMemorySource>(`/memories/${encodeURIComponent(id)}/source`),
 
   /** 将核心记忆移入归档，保留关系图结构 */
-  archiveNote: (id: string) => apiClient.delete<void>(`/memories/${encodeURIComponent(id)}`),
+  archiveNote: (id: string) => apiClient.post<void>(`/memories/${encodeURIComponent(id)}/archive`),
+  restoreNote: (id: string) => apiClient.post<void>(`/memories/${encodeURIComponent(id)}/restore`),
+  deleteNote: (id: string, deleteSource = false) =>
+    apiClient.delete<void>(`/memories/${encodeURIComponent(id)}?deleteSource=${deleteSource}`),
+  batch: (ids: string[], action: 'archive' | 'restore' | 'delete', deleteSource = false) =>
+    apiClient.post<void>('/memories/batch', { ids, action, deleteSource }),
+  cleanupJobs: () => apiClient.get<PrivacyCleanupJob[]>('/memories/deletions/status'),
+  retryCleanup: (id: string) =>
+    apiClient.post<void>(`/memories/deletions/${encodeURIComponent(id)}/retry`),
 
   /** 记忆图谱快照（TDB 批量读取） */
   graph: (agentId: string, includeArchived = false, limit = 300) =>
     apiClient.get<EventMemoryGraphSnapshot>(
-      `/memories/graph?agentId=${encodeURIComponent(agentId)}&includeArchived=${includeArchived}&limit=${limit}`,
+      `/memories/graph?agentId=${encodeURIComponent(agentId)}&includeArchived=${includeArchived}&status=${includeArchived ? 'archived' : 'active'}&limit=${limit}`,
     ),
 }

@@ -1,7 +1,8 @@
 {
   "name": "infos-ts",
+  "productName": "萌动链接：PeroperoChat！",
   "private": true,
-  "version": "0.9.3-hotfix2",
+  "version": "0.9.4",
   "description": "infOS-TS — 萌动链接：PeroperoChat！的 TypeScript 全栈引擎",
   "main": "dist-electron/main/index.js",
   "author": "YoKONCy",
@@ -11,7 +12,7 @@
     "url": "https://github.com/YoKONCy/infOS.git"
   },
   "engines": {
-    "node": ">=20.0.0",
+    "node": ">=22.13.0",
     "pnpm": ">=9.0.0"
   },
   "packageManager": "pnpm@9.15.9",
@@ -20,7 +21,7 @@
     "dev": "pnpm --filter @infos/backend dev",
     "dev:daemon": "pnpm --filter @infos/daemon dev",
     "dev:frontend": "pnpm --filter @infos/frontend dev",
-    "dev:electron": "electron-vite dev --config electron.vite.config.ts",
+    "dev:electron": "node scripts/dev-electron.mjs",
     "start": "node scripts/start-dev.mjs",
     "build": "pnpm -r --filter \"*\" run build && electron-vite build --config electron.vite.config.ts",
     "clean": "pnpm -r run clean",
@@ -58,7 +59,9 @@
     "rebuild:daemon-deps": "node scripts/rebuild-daemon-deps.mjs"
   },
   "dependencies": {
-    "@infos/avatar-assets": "workspace:*"
+    "@infos/avatar-assets": "workspace:*",
+    "@nut-tree-fork/nut-js": "^4.2.6",
+    "koffi": "3.3.2"
   },
   "devDependencies": {
     "@changesets/changelog-github": "^0.6.0",

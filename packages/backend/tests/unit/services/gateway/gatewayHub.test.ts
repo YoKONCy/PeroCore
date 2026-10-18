@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { GatewayHub } from '@infos/backend/services/gateway/gatewayHub'
 import type { GatewayEnvelope } from '@infos/backend/services/gateway/types'
+import type { DurableNotificationRepository } from '@infos/backend/repositories/durableNotification.repo'
+import type { NodeRegistry } from '@infos/backend/kernel/nodeRegistry'
 
 type SendMock = ReturnType<typeof vi.fn<(data: string) => void>>
 
@@ -36,6 +38,54 @@ describe('GatewayHub', () => {
   })
 
   describe('连接管理', () => {
+    it('口语提示只跟随当前角色的显示状态，隐藏、切换角色和断线均使状态失效', async () => {
+      hub.registerNode('node-a', sendA)
+      const send = (type: GatewayEnvelope['type'], payload: Record<string, unknown>) =>
+        hub.handleMessage(JSON.stringify(createEnvelope(type, payload)), 'node-a')
+      await send('hello', { principalId: 'pero', supportedVersions: [1] })
+      expect(hub.hasVisiblePet('pero')).toBe(false)
+      await send('request', { action: 'gateway.pet_presence', agentId: 'pero', visible: true })
+      expect(hub.hasVisiblePet('pero')).toBe(true)
+      expect(hub.hasVisiblePet('nana')).toBe(false)
+      await send('request', { action: 'gateway.pet_presence', agentId: 'pero', visible: false })
+      expect(hub.hasVisiblePet('pero')).toBe(false)
+      await send('request', { action: 'gateway.pet_presence', agentId: 'pero', visible: true })
+      await send('request', { action: 'gateway.select_principal', principalId: 'nana' })
+      expect(hub.hasVisiblePet('pero')).toBe(false)
+      expect(hub.hasVisiblePet('nana')).toBe(false)
+      await send('request', { action: 'gateway.pet_presence', agentId: 'nana', visible: true })
+      expect(hub.hasVisiblePet('nana')).toBe(true)
+      hub.unregisterNode('node-a')
+      expect(hub.hasVisiblePet('nana')).toBe(false)
+    })
+
+    it('普通心跳不能延长过期的桌宠显示声明', async () => {
+      let now = Date.now()
+      const clock = vi.spyOn(Date, 'now').mockImplementation(() => now)
+      try {
+        hub.registerNode('node-a', sendA)
+        await hub.handleMessage(
+          JSON.stringify(createEnvelope('hello', { principalId: 'pero', supportedVersions: [1] })),
+          'node-a',
+        )
+        await hub.handleMessage(
+          JSON.stringify(
+            createEnvelope('request', {
+              action: 'gateway.pet_presence',
+              agentId: 'pero',
+              visible: true,
+            }),
+          ),
+          'node-a',
+        )
+        expect(hub.hasVisiblePet('pero')).toBe(true)
+        now += 91_000
+        await hub.handleMessage(JSON.stringify(createEnvelope('heartbeat')), 'node-a')
+        expect(hub.hasVisiblePet('pero')).toBe(false)
+      } finally {
+        clock.mockRestore()
+      }
+    })
     it('应当注册和注销节点并维护在线数量', () => {
       hub.registerNode('node-a', sendA)
       hub.registerNode('node-b', sendB)
@@ -49,6 +99,288 @@ describe('GatewayHub', () => {
   })
 
   describe('handleMessage', () => {
+    it('画布已移除通知在启动与游标补送均被过滤，只确认通知不删除任务', async () => {
+      const records = ['removed', 'visible'].map((notificationId) => ({
+        notificationId,
+        principalId: 'pero',
+        title: '图像编辑',
+        revision: 1,
+        level: 'error',
+      }))
+      const notifications = {
+        list: vi.fn().mockReturnValue(records),
+        acknowledge: vi.fn(),
+        unreadIds: vi.fn().mockReturnValue(new Set(['removed', 'visible'])),
+      }
+      hub = new GatewayHub(undefined, notifications as unknown as DurableNotificationRepository)
+      hub.addNotificationSuppression(async (principal, notices) =>
+        principal === 'pero'
+          ? notices
+              .filter((notice) => notice.notificationId === 'removed')
+              .map((notice) => notice.notificationId)
+          : [],
+      )
+      hub.registerNode('node-a', sendA)
+      await hub.handleMessage(
+        JSON.stringify(createEnvelope('hello', { principalId: 'pero', supportedVersions: [1] })),
+        'node-a',
+      )
+      expect(
+        sendA.mock.calls
+          .map(([raw]) => JSON.parse(raw))
+          .filter((message) => message.payload.action === 'durable_notification')
+          .map((message) => message.payload.notificationId),
+      ).toEqual(['visible'])
+      expect(notifications.acknowledge).toHaveBeenCalledWith('pero', [
+        { notificationId: 'removed', revision: 1 },
+      ])
+      for (const notificationId of ['removed', 'visible'])
+        await hub.pushBusiness(
+          'durable_notification',
+          { notificationId, revision: 1 },
+          { type: 'all_principal_clients', principalId: 'pero' },
+          'notification:pero',
+        )
+      await hub.handleMessage(
+        JSON.stringify(
+          createEnvelope('request', {
+            action: 'gateway.subscribe',
+            streamId: 'notification:pero',
+            lastSequence: 0,
+          }),
+        ),
+        'node-a',
+      )
+      const response = sendA.mock.calls
+        .map(([raw]) => JSON.parse(raw))
+        .find((message) => message.type === 'response' && message.payload.events)
+      expect(
+        response.payload.events.map((event: GatewayEnvelope) => event.payload.notificationId),
+      ).toEqual(['visible'])
+      expect(response.payload.latestSequence).toBe(2)
+    })
+
+    it('新通知推送前也过滤已移除任务，过滤器释放后恢复正常', async () => {
+      const notifications = { create: vi.fn().mockReturnValue(true), acknowledge: vi.fn() }
+      hub = new GatewayHub(
+        {} as NodeRegistry,
+        notifications as unknown as DurableNotificationRepository,
+      )
+      const release = hub.addNotificationSuppression(async () => ['removed'])
+      const push = vi.spyOn(hub, 'pushBusiness')
+      await hub.pushNotification({
+        notificationId: 'removed',
+        principalId: 'pero',
+        title: '图像编辑',
+        important: true,
+      })
+      expect(push).not.toHaveBeenCalled()
+      expect(notifications.acknowledge).toHaveBeenCalledWith('pero', [
+        { notificationId: 'removed', revision: 1 },
+      ])
+      release()
+      await hub.pushNotification({
+        notificationId: 'fresh',
+        principalId: 'pero',
+        title: '新任务',
+        important: true,
+      })
+      expect(push).toHaveBeenCalledOnce()
+    })
+
+    it('移除通知回执保存失败时仍过滤旧结果，不阻断其他通知', async () => {
+      const notifications = {
+        create: vi.fn().mockReturnValue(true),
+        acknowledge: vi.fn(() => {
+          throw new Error('临时写盘失败')
+        }),
+      }
+      hub = new GatewayHub(
+        {} as NodeRegistry,
+        notifications as unknown as DurableNotificationRepository,
+      )
+      hub.addNotificationSuppression(async () => ['removed'])
+      const push = vi.spyOn(hub, 'pushBusiness')
+      await expect(
+        hub.pushNotification({
+          notificationId: 'removed',
+          principalId: 'pero',
+          title: '旧结果',
+          important: true,
+        }),
+      ).resolves.toBeUndefined()
+      expect(push).not.toHaveBeenCalled()
+      await hub.pushNotification({
+        notificationId: 'new-result',
+        principalId: 'pero',
+        title: '新结果',
+        important: true,
+      })
+      expect(push).toHaveBeenCalledOnce()
+    })
+
+    it('历史通知确认后重连不再回放，并拒绝越过角色范围的回执', async () => {
+      let unread = true
+      const record = {
+        notificationId: 'old-image-edit',
+        principalId: 'pero',
+        title: '任务失败 · 图像编辑',
+        body: '旧任务失败',
+        level: 'error',
+        revision: 1,
+        createdAt: '2026-10-01T00:00:00.000Z',
+      }
+      const notifications = {
+        list: vi.fn((principal: string) => (unread && principal === 'pero' ? [record] : [])),
+        acknowledge: vi.fn((principal: string) => {
+          if (principal === 'pero') unread = false
+          return 1
+        }),
+      }
+      hub = new GatewayHub(undefined, notifications as unknown as DurableNotificationRepository)
+      hub.registerNode('node-a', sendA)
+      await hub.handleMessage(
+        JSON.stringify(createEnvelope('hello', { principalId: 'pero', supportedVersions: [1] })),
+        'node-a',
+      )
+      const replay = sendA.mock.calls
+        .map(([raw]) => JSON.parse(raw))
+        .find((message) => message.payload.action === 'durable_notification')
+      expect(replay.payload).toMatchObject({
+        notificationId: record.notificationId,
+        principalId: 'pero',
+        replayed: true,
+        revision: 1,
+        createdAt: record.createdAt,
+      })
+      await hub.handleMessage(
+        JSON.stringify(
+          createEnvelope('request', {
+            action: 'gateway.notifications.ack',
+            principalId: 'nana',
+            receipts: [{ notificationId: record.notificationId, revision: 1 }],
+          }),
+        ),
+        'node-a',
+      )
+      expect(notifications.acknowledge).not.toHaveBeenCalled()
+      await hub.handleMessage(
+        JSON.stringify(
+          createEnvelope('request', {
+            action: 'gateway.notifications.ack',
+            principalId: 'pero',
+            receipts: [{ notificationId: record.notificationId, revision: 1 }],
+          }),
+        ),
+        'node-a',
+      )
+      expect(notifications.acknowledge).toHaveBeenCalledWith('pero', [
+        { notificationId: record.notificationId, revision: 1 },
+      ])
+      hub.registerNode('node-b', sendB)
+      await hub.handleMessage(
+        JSON.stringify(createEnvelope('hello', { principalId: 'pero', supportedVersions: [1] })),
+        'node-b',
+      )
+      expect(
+        sendB.mock.calls
+          .map(([raw]) => JSON.parse(raw))
+          .filter((message) => message.payload.action === 'durable_notification'),
+      ).toHaveLength(0)
+    })
+
+    it('订阅补游标的历史通知携带补送标记', async () => {
+      hub.registerNode('node-a', sendA)
+      await hub.handleMessage(
+        JSON.stringify(createEnvelope('hello', { principalId: 'pero', supportedVersions: [1] })),
+        'node-a',
+      )
+      await hub.pushBusiness(
+        'durable_notification',
+        { notificationId: 'cached-notice' },
+        { type: 'all_principal_clients', principalId: 'pero' },
+        'notification:pero',
+      )
+      await hub.handleMessage(
+        JSON.stringify(
+          createEnvelope('request', {
+            action: 'gateway.subscribe',
+            streamId: 'notification:pero',
+            lastSequence: 0,
+          }),
+        ),
+        'node-a',
+      )
+      const response = sendA.mock.calls
+        .map(([raw]) => JSON.parse(raw))
+        .find((message) => message.type === 'response' && message.payload.events)
+      expect(response.payload.events[0].payload.replayed).toBe(true)
+    })
+
+    it('游标恢复跳过已经确认的通知，仍保留最新序号', async () => {
+      const notifications = {
+        list: vi.fn().mockReturnValue([]),
+        unreadIds: vi.fn().mockReturnValue(new Set(['unread-notice'])),
+      }
+      hub = new GatewayHub(undefined, notifications as unknown as DurableNotificationRepository)
+      hub.registerNode('node-a', sendA)
+      await hub.handleMessage(
+        JSON.stringify(createEnvelope('hello', { principalId: 'pero', supportedVersions: [1] })),
+        'node-a',
+      )
+      for (const notificationId of ['read-notice', 'unread-notice']) {
+        await hub.pushBusiness(
+          'durable_notification',
+          { notificationId },
+          { type: 'all_principal_clients', principalId: 'pero' },
+          'notification:pero',
+        )
+      }
+      await hub.handleMessage(
+        JSON.stringify(
+          createEnvelope('request', {
+            action: 'gateway.subscribe',
+            streamId: 'notification:pero',
+            lastSequence: 0,
+          }),
+        ),
+        'node-a',
+      )
+      const response = sendA.mock.calls
+        .map(([raw]) => JSON.parse(raw))
+        .find((message) => message.type === 'response' && message.payload.events)
+      expect(notifications.unreadIds).toHaveBeenCalledWith('pero', ['read-notice', 'unread-notice'])
+      expect(response.payload.latestSequence).toBe(2)
+      expect(response.payload.events).toHaveLength(1)
+      expect(response.payload.events[0].payload).toMatchObject({
+        notificationId: 'unread-notice',
+        replayed: true,
+      })
+    })
+
+    it('同一持久通知重复投递不再次推送，保留真实完成时间', async () => {
+      const notifications = { create: vi.fn().mockReturnValueOnce(true).mockReturnValue(false) }
+      hub = new GatewayHub(
+        {} as NodeRegistry,
+        notifications as unknown as DurableNotificationRepository,
+      )
+      const push = vi.spyOn(hub, 'pushBusiness')
+      const notice = {
+        notificationId: 'stable-task-notice',
+        principalId: 'pero',
+        title: '图像编辑',
+        important: true,
+        createdAt: '2026-10-01T00:00:00.000Z',
+      }
+      await hub.pushNotification(notice)
+      await hub.pushNotification(notice)
+      expect(push).toHaveBeenCalledOnce()
+      expect(push.mock.calls[0]![1]).toMatchObject({
+        createdAt: notice.createdAt,
+        revision: 1,
+        principalId: 'pero',
+      })
+    })
     it('收到 hello 时应当记录设备名并回送 hello_ack', async () => {
       hub.registerNode('node-a', sendA)
       const envelope = createEnvelope('hello', {
@@ -142,12 +474,16 @@ describe('GatewayHub', () => {
   describe('事件系统', () => {
     it('off 应当移除已注册事件监听器', async () => {
       const listener = vi.fn()
+      hub.registerNode('node-a', sendA)
       hub.on('abort', listener)
-      hub.off('abort', listener)
       const envelope = createEnvelope('abort', { sessionId: 's1' })
 
       await hub.handleMessage(JSON.stringify(envelope), 'node-a')
 
+      expect(listener).toHaveBeenCalledOnce()
+      listener.mockClear()
+      hub.off('abort', listener)
+      await hub.handleMessage(JSON.stringify(envelope), 'node-a')
       expect(listener).not.toHaveBeenCalled()
     })
   })

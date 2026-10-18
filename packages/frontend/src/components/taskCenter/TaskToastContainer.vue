@@ -7,22 +7,42 @@
  */
 import { useTaskToastStore } from '../../stores/taskToastStore'
 import TaskToast from './TaskToast.vue'
+import { computed } from 'vue'
+import type { DesktopTaskToast } from '@infos/shared'
+import { useNotificationStore } from '../../stores/useNotificationStore'
+
+const props = defineProps<{
+  items?: DesktopTaskToast[]
+  onDismiss?: (id: string) => void
+  onHover?: (id: string, hovered: boolean) => void
+  native?: boolean
+}>()
 
 const store = useTaskToastStore()
+const notification = useNotificationStore()
+const toasts = computed(() => props.items ?? store.toasts)
+const dismiss = (id: string) => (props.onDismiss ? props.onDismiss(id) : store.dismiss(id))
+const hover = (id: string, hovered: boolean) =>
+  props.onHover ? props.onHover(id, hovered) : store.setHovered(id, hovered)
 </script>
 
 <template>
   <TransitionGroup
-    v-if="store.toasts.length > 0"
+    v-if="toasts.length > 0"
     tag="div"
     name="task-toast"
     class="task-toast-container"
+    :style="!native && notification.nativeOverlayActive ? { visibility: 'hidden' } : undefined"
+    aria-live="polite"
   >
     <TaskToast
-      v-for="toast in store.toasts"
+      v-for="toast in toasts"
       :key="toast.id"
       :toast="toast"
-      :on-dismiss="store.dismiss"
+      :on-dismiss="dismiss"
+      :auto-dismiss="!native"
+      :paused="store.hoveredIds.has(toast.id)"
+      @hover="hover"
     />
   </TransitionGroup>
 </template>

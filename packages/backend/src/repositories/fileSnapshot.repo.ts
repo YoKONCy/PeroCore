@@ -21,6 +21,7 @@ export interface FileSnapshotInput {
   originalContent?: string
   originalSha256?: string
   finalSha256?: string
+  historyContinuous?: boolean
 }
 
 /** 文件变更快照与 rewind 查询仓储。 */
@@ -28,7 +29,7 @@ export class FileSnapshotRepository {
   constructor(private readonly db: DrizzleDb) {}
 
   /**
-   * 同一轮同一文件只保留第一次修改前快照；后续调用只更新最终状态和 callId。
+   * 同轮合并时保留首次原文；若后一次写入前状态与上次结果不同，永久标记本轮历史不连续。
    */
   async upsert(input: FileSnapshotInput): Promise<void> {
     await this.db
@@ -44,12 +45,18 @@ export class FileSnapshotRepository {
         originalContent: input.originalContent,
         originalSha256: input.originalSha256,
         finalSha256: input.finalSha256,
+        historyContinuous: input.historyContinuous ?? true,
       })
       .onConflictDoUpdate({
         target: [fileChangeSnapshots.pairId, fileChangeSnapshots.filePath],
         set: {
           callId: input.callId,
           finalSha256: input.finalSha256,
+          historyContinuous: sql`CASE
+            WHEN ${fileChangeSnapshots.historyContinuous} = 1
+              AND ${input.historyContinuous === false ? 0 : 1} = 1
+              AND ${fileChangeSnapshots.finalSha256} = ${input.originalSha256 ?? null}
+            THEN 1 ELSE 0 END`,
           updatedAt: sql`(datetime('now', 'localtime'))`,
         },
       })

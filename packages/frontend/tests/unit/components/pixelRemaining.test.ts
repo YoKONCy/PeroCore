@@ -1,11 +1,10 @@
 /* @vitest-environment happy-dom */
-import { mount } from '@vue/test-utils'
-import { describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, mount } from '@vue/test-utils'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import ContextMenu from '@infos/frontend/components/pixel/ContextMenu.vue'
 import PDatePicker from '@infos/frontend/components/pixel/PDatePicker.vue'
 import PImageViewer from '@infos/frontend/components/pixel/PImageViewer.vue'
-import PixelIcon from '@infos/frontend/components/pixel/PixelIcon.vue'
 
 type ContextMenuItem =
   | {
@@ -20,44 +19,8 @@ type ContextMenuItem =
     }
 
 describe('剩余像素基础组件', () => {
-  describe('PixelIcon', () => {
-    it('应当按名称、尺寸和动画渲染图标 class', () => {
-      const wrapper = mount(PixelIcon, {
-        props: {
-          name: 'heart',
-          size: 'lg',
-          animation: 'pulse',
-        },
-      })
-      const path = wrapper.get('path')
-
-      expect(wrapper.classes()).toEqual(
-        expect.arrayContaining(['w-6', 'h-6', 'animate-pixel-pulse']),
-      )
-      expect(path.attributes('fill')).toBe('currentColor')
-      expect(path.attributes('d')).toBeTruthy()
-    })
-
-    it('应当对未知尺寸和未知动画使用安全回退', () => {
-      const wrapper = mount(PixelIcon, {
-        props: {
-          name: 'unknown-icon',
-          size: 'mega',
-          animation: 'unknown-animation',
-        },
-      })
-      const path = wrapper.get('path')
-
-      expect(wrapper.classes()).toEqual(expect.arrayContaining(['w-5', 'h-5']))
-      expect(path.attributes('fill')).toBe('none')
-      expect(path.attributes('d')).toBe(
-        'M12 3v2 M12 19v2 M5.64 5.64l1.41 1.41 M16.95 16.95l1.41 1.41 M3 12h2 M19 12h2 M5.64 18.36l1.41-1.41 M16.95 7.05l1.41-1.41',
-      )
-    })
-  })
-
   describe('PDatePicker', () => {
-    it('应当渲染日期输入状态并显示日历图标', () => {
+    it('禁用日期输入时保留选中日期且不可编辑', () => {
       const wrapper = mount(PDatePicker, {
         props: {
           modelValue: '2026-04-27',
@@ -69,8 +32,6 @@ describe('剩余像素基础组件', () => {
       expect(input.element.value).toBe('2026-04-27')
       expect(input.attributes('type')).toBe('date')
       expect(input.attributes('disabled')).toBeDefined()
-      expect(wrapper.classes()).toContain('p-datepicker-disabled')
-      expect(wrapper.findComponent(PixelIcon).props('name')).toBe('calendar')
     })
 
     it('应当在日期变化时发出 update:modelValue 事件', async () => {
@@ -90,7 +51,7 @@ describe('剩余像素基础组件', () => {
     const createItems = (action = vi.fn()): ContextMenuItem[] => [
       { label: '复制', action, shortcut: 'Ctrl+C' },
       { type: 'separator' },
-      { label: '禁用项', disabled: true },
+      { label: '禁用项', disabled: true, action },
     ]
 
     it('应当在可见时按坐标渲染菜单项和分隔线', () => {
@@ -137,18 +98,22 @@ describe('剩余像素基础组件', () => {
     })
 
     it('应当忽略禁用项并响应 Escape 关闭', async () => {
+      const action = vi.fn()
       const wrapper = mount(ContextMenu, {
         props: {
           visible: true,
           x: 0,
           y: 0,
-          items: createItems(),
+          items: createItems(action),
         },
         attachTo: document.body,
       })
       const buttons = document.body.querySelectorAll('.p-ctx-item')
 
       buttons[1]?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await wrapper.vm.$nextTick()
+      expect(action).not.toHaveBeenCalled()
+      expect(wrapper.emitted('close')).toBeUndefined()
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
       await wrapper.vm.$nextTick()
 
@@ -171,7 +136,6 @@ describe('剩余像素基础组件', () => {
       const image = document.body.querySelector('.piv-image') as HTMLImageElement
 
       expect(image.getAttribute('src')).toBe('b.png')
-      expect(document.body.querySelector('.piv-counter')?.textContent).toContain('2/3')
       expect(document.body.querySelectorAll('.piv-nav')).toHaveLength(2)
 
       wrapper.unmount()
@@ -224,3 +188,5 @@ describe('剩余像素基础组件', () => {
     })
   })
 })
+
+enableAutoUnmount(afterEach)

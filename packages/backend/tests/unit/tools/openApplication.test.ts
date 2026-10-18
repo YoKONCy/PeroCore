@@ -8,6 +8,19 @@ import {
 describe('open_application工具', () => {
   afterEach(() => setApplicationProvider(null))
 
+  it.each(['demo.html', 'C:\\workspace\\demo.html', 'https://example.com', 'workspace:demo.html'])(
+    '网页目标 %s 在调用桌面能力之前引导使用浏览器',
+    async (app_name) => {
+      const launch = vi.fn()
+      setApplicationProvider({ launch })
+      const result = JSON.parse(await execute(openApplicationTool, { app_name }))
+      expect(result.error.code).toBe('BROWSER_TOOL_REQUIRED')
+      expect(result.error.message).toContain('expand_advanced_tools')
+      expect(result.error.message).toContain('browser_open_url')
+      expect(launch).not.toHaveBeenCalled()
+    },
+  )
+
   it('应把应用名称委托给客户端能力', async () => {
     const provider: ApplicationProvider = {
       launch: vi.fn().mockResolvedValue({
@@ -18,15 +31,18 @@ describe('open_application工具', () => {
     }
     setApplicationProvider(provider)
 
-    const result = JSON.parse(await openApplicationTool.execute({ app_name: 'Microsoft Edge' }))
+    const result = JSON.parse(await execute(openApplicationTool, { app_name: 'Microsoft Edge' }))
 
     expect(result.success).toBe(true)
     expect(result.mode).toBe('launched')
-    expect(provider.launch).toHaveBeenCalledWith('Microsoft Edge')
+    expect(provider.launch).toHaveBeenCalledWith(
+      'Microsoft Edge',
+      expect.objectContaining({ agentId: 'pero', threadId: 'thread-1', channel: 'desktop' }),
+    )
   })
 
   it('客户端离线时应返回结构化能力错误', async () => {
-    const result = JSON.parse(await openApplicationTool.execute({ app_name: 'Edge' }))
+    const result = JSON.parse(await execute(openApplicationTool, { app_name: 'Edge' }))
     expect(result.error.code).toBe('APPLICATION_LAUNCH_UNAVAILABLE')
   })
 
@@ -39,7 +55,7 @@ describe('open_application工具', () => {
         ),
     })
 
-    const result = JSON.parse(await openApplicationTool.execute({ app_name: 'Microsoft' }))
+    const result = JSON.parse(await execute(openApplicationTool, { app_name: 'Microsoft' }))
 
     expect(result.error).toEqual({
       code: 'APPLICATION_AMBIGUOUS',
@@ -53,9 +69,23 @@ describe('open_application工具', () => {
     }
     setApplicationProvider(provider)
 
-    const result = JSON.parse(await openApplicationTool.execute({ app_name: '  ' }))
+    const result = JSON.parse(await execute(openApplicationTool, { app_name: '  ' }))
 
     expect(result.error.code).toBe('APPLICATION_NAME_REQUIRED')
     expect(provider.launch).not.toHaveBeenCalled()
   })
 })
+
+async function execute(
+  tool: typeof openApplicationTool,
+  args: Record<string, unknown>,
+): Promise<string> {
+  const result = await tool.execute(args, {
+    agentId: 'pero',
+    threadId: 'thread-1',
+    sessionId: 'thread-1',
+    source: 'desktop',
+    channel: 'desktop',
+  })
+  return typeof result === 'string' ? result : result.output
+}

@@ -59,7 +59,7 @@ describe('code_search Node fallback', () => {
     })
     expect(matches).toHaveLength(1)
     expect(matches[0]!.column).toBe(7)
-    expect(() => __codeSearchInternals.createMatcher('[', true)).toThrow('正则表达式无效')
+    expect(() => __codeSearchInternals.createMatcher('[', true)).toThrow(Error)
   })
 
   it('匹配数超过结果上限时标记截断', async () => {

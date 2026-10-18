@@ -9,6 +9,7 @@
 import path from 'node:path'
 import fs from 'node:fs'
 import { app } from 'electron'
+import { isPackagedRuntime } from './runtimeMode'
 
 // ─── 便携模式检测 ──────────────────────────────────────────
 // exe 同目录下存在 `.portable` 标记文件 → 便携模式
@@ -23,7 +24,7 @@ function detectPortableMode(exePath: string): boolean {
 }
 
 // ─── 环境标记 ────────────────────────────────────────────
-export const isPackaged = app.isPackaged
+export const isPackaged = isPackagedRuntime
 export const isDev = !isPackaged
 export const isPortable = isPackaged && detectPortableMode(app.getPath('exe'))
 

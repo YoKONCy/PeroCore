@@ -20,6 +20,11 @@ const MAX_TOASTS = 5
 export const useTaskToastStore = defineStore('taskToast', () => {
   // ── 状态 ──
   const toasts = ref<TaskToastItem[]>([])
+  const hoveredIds = ref(new Set<string>())
+  function setHovered(id: string, hovered: boolean): void {
+    if (hovered) hoveredIds.value.add(id)
+    else hoveredIds.value.delete(id)
+  }
 
   // ── Getters ──
 
@@ -59,6 +64,7 @@ export const useTaskToastStore = defineStore('taskToast', () => {
 
   /** 移除指定 toast */
   function dismiss(id: string) {
+    hoveredIds.value.delete(id)
     const idx = toasts.value.findIndex((t) => t.id === id)
     if (idx !== -1) {
       toasts.value.splice(idx, 1)
@@ -67,11 +73,14 @@ export const useTaskToastStore = defineStore('taskToast', () => {
 
   /** 清空全部 toast */
   function dismissAll() {
+    hoveredIds.value.clear()
     toasts.value = []
   }
 
   return {
     toasts,
+    hoveredIds,
+    setHovered,
     activeCount,
     approvalPendingCount,
     push,

@@ -32,6 +32,8 @@
       "@infos/frontend": ["./packages/frontend/src"],
       "@infos/frontend/*": ["./packages/frontend/src/*"],
       "@infos/arca": ["./packages/apps/arca/src"],
+      "@infos/pictoria": ["./packages/apps/pictoria/src"],
+      "@infos/pictoria/*": ["./packages/apps/pictoria/src/*"],
       "@infos/arca/*": ["./packages/apps/arca/src/*"],
       "@infos/social": ["./packages/apps/social"],
       "@infos/social/*": ["./packages/apps/social/*"]

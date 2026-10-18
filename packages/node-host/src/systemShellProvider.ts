@@ -52,6 +52,27 @@ export function createSystemShellProvider(nodeId: KernelNodeId): NodeProvider {
 
   const terminate = async (session: ShellSession, signal: NodeJS.Signals) => {
     if (session.status !== 'running') return
+    if (process.platform === 'win32' && session.process.pid) {
+      // Windows 必须回收进程树，单独终止 Shell 会留下其启动的子进程。
+      const killer = spawn('taskkill.exe', ['/PID', String(session.process.pid), '/T', '/F'], {
+        windowsHide: true,
+        stdio: 'ignore',
+      })
+      await new Promise<void>((resolve) => {
+        const finish = () => {
+          clearTimeout(timer)
+          resolve()
+        }
+        const timer = setTimeout(() => {
+          killer.kill()
+          finish()
+        }, 2_000)
+        killer.once('error', finish)
+        killer.once('exit', finish)
+      })
+      if (session.process.exitCode === null) session.process.kill('SIGKILL')
+      return
+    }
     if (process.platform !== 'win32' && session.process.pid) {
       try {
         process.kill(-session.process.pid, signal)
@@ -133,6 +154,7 @@ export function createSystemShellProvider(nodeId: KernelNodeId): NodeProvider {
     },
 
     async invoke(envelope: KernelEnvelope<{ operation: string; input: unknown }>, context) {
+      context.signal.throwIfAborted()
       const operation = envelope.payload.operation
       const input = (envelope.payload.input ?? {}) as Record<string, unknown>
 
@@ -148,6 +170,7 @@ export function createSystemShellProvider(nodeId: KernelNodeId): NodeProvider {
           env: shellEnvironment(),
           stdio: 'pipe',
           detached: process.platform !== 'win32',
+          windowsHide: true,
         })
         const session: ShellSession = {
           id: randomUUID(),
@@ -175,9 +198,29 @@ export function createSystemShellProvider(nodeId: KernelNodeId): NodeProvider {
           session.signal = signal
           session.completedAt = new Date().toISOString()
         })
-        context.signal.addEventListener('abort', () => void terminate(session, 'SIGTERM'), {
-          once: true,
-        })
+        const abort = () => {
+          void terminate(session, 'SIGKILL').catch((error) =>
+            console.warn('远程终端回收失败', error),
+          )
+        }
+        let deadlineTimer: ReturnType<typeof setTimeout> | undefined
+        const dispose = () => {
+          if (deadlineTimer) clearTimeout(deadlineTimer)
+          context.signal.removeEventListener('abort', abort)
+        }
+        child.once('exit', dispose)
+        child.once('error', dispose)
+        context.signal.addEventListener('abort', abort, { once: true })
+        if (context.signal.aborted) abort()
+        // 创建 RPC 返回后，终端仍须遵守父执行的绝对截止时间。
+        if (envelope.deadline) {
+          const remaining = Date.parse(envelope.deadline) - Date.now()
+          if (!Number.isFinite(remaining) || remaining <= 0) abort()
+          else {
+            deadlineTimer = setTimeout(abort, Math.min(remaining, 2_147_483_647))
+            deadlineTimer.unref?.()
+          }
+        }
         return view(session)
       }
 
@@ -211,7 +254,7 @@ export function createSystemShellProvider(nodeId: KernelNodeId): NodeProvider {
         while (session.status === 'running') {
           const available = session.baseCursor + session.output.length > cursor
           const matched = pattern && session.output.includes(pattern)
-          if (available || matched || Date.now() - startedAt >= timeoutMs) break
+          if ((pattern ? matched : available) || Date.now() - startedAt >= timeoutMs) break
           await new Promise((resolve) => setTimeout(resolve, 100))
           if (context.signal.aborted) throw new Error('REMOTE_TERMINAL_WAIT_CANCELLED')
         }
@@ -242,7 +285,7 @@ export function createSystemShellProvider(nodeId: KernelNodeId): NodeProvider {
         return { terminalId, killed: true }
       }
       if (operation === 'close') {
-        await terminate(session, 'SIGTERM')
+        await terminate(session, 'SIGKILL')
         sessions.delete(terminalId)
         return { terminalId, closed: true }
       }
@@ -250,7 +293,7 @@ export function createSystemShellProvider(nodeId: KernelNodeId): NodeProvider {
     },
 
     async stop() {
-      await Promise.all([...sessions.values()].map((session) => terminate(session, 'SIGTERM')))
+      await Promise.all([...sessions.values()].map((session) => terminate(session, 'SIGKILL')))
       sessions.clear()
     },
   }

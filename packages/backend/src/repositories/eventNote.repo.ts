@@ -6,6 +6,7 @@ import type {
   EventNoteRelationView,
 } from '@infos/shared'
 import type { DrizzleDb } from '../database'
+import type { PrivacyPolicy } from '../services/maintenance/privacyPolicy'
 import {
   eventMemoryCoverageClaims,
   eventMemoryDailyNoteTasks,
@@ -46,6 +47,13 @@ export interface StoredEventNote extends EventNote {
 }
 
 export class EventNoteRepository {
+  private privacy?: PrivacyPolicy
+  setPrivacyPolicy(policy: PrivacyPolicy): void {
+    this.privacy = policy
+  }
+  isMemoryForgotten(note: EventNote): boolean {
+    return this.privacy?.memoryForgotten(note) ?? false
+  }
   constructor(private db: DrizzleDb) {}
 
   async maxTdbId(): Promise<number> {
@@ -56,6 +64,7 @@ export class EventNoteRepository {
   }
 
   async prepareCreate(operationId: string, note: EventNote, tdbId: number): Promise<boolean> {
+    this.privacy?.assertMemory(note)
     return this.db.transaction((tx) => {
       const operation = tx
         .insert(eventMemoryOperations)
@@ -100,6 +109,7 @@ export class EventNoteRepository {
     newTdbId: number,
     relations: EventNoteRelationView[],
   ): Promise<boolean> {
+    this.privacy?.assertPayload('memory', { target, replacement, relations })
     return this.db.transaction((tx) => {
       const operation = tx
         .insert(eventMemoryOperations)
@@ -142,6 +152,7 @@ export class EventNoteRepository {
   }
 
   async create(note: EventNote, tdbId: number): Promise<void> {
+    this.privacy?.assertMemory(note)
     await this.db.insert(eventNotes).values({
       id: note.id,
       tdbId,
@@ -161,7 +172,9 @@ export class EventNoteRepository {
   }
 
   async findById(id: string): Promise<StoredEventNote | undefined> {
+    if (this.privacy?.deleted('memory', id)) return undefined
     const [row] = await this.db.select().from(eventNotes).where(eq(eventNotes.id, id)).limit(1)
+    if (this.privacy?.deleted('memory', id)) return undefined
     return row
       ? { ...toEventNote(row), tdbId: row.tdbId, replacedBy: row.replacedBy ?? undefined }
       : undefined
@@ -173,6 +186,7 @@ export class EventNoteRepository {
       .from(eventNotes)
       .where(eq(eventNotes.tdbId, tdbId))
       .limit(1)
+    if (row && this.privacy?.deleted('memory', row.id)) return undefined
     return row
       ? { ...toEventNote(row), tdbId: row.tdbId, replacedBy: row.replacedBy ?? undefined }
       : undefined
@@ -193,12 +207,16 @@ export class EventNoteRepository {
         asc(eventNotes.id),
       )
       .limit(options.limit ?? 500)
-    return rows.map((row) => ({ ...toEventNote(row), tdbId: row.tdbId }))
+    return rows
+      .filter((row) => !this.privacy?.deleted('memory', row.id))
+      .map((row) => ({ ...toEventNote(row), tdbId: row.tdbId }))
   }
 
   async listAllCurrent(): Promise<StoredEventNote[]> {
     const rows = await this.db.select().from(eventNotes).where(isNull(eventNotes.replacedBy))
-    return rows.map((row) => ({ ...toEventNote(row), tdbId: row.tdbId }))
+    return rows
+      .filter((row) => !this.privacy?.deleted('memory', row.id))
+      .map((row) => ({ ...toEventNote(row), tdbId: row.tdbId }))
   }
 
   async markReplaced(id: string, replacementId: string): Promise<void> {
@@ -209,11 +227,26 @@ export class EventNoteRepository {
     await this.db.update(eventNotes).set({ status: 'archived' }).where(eq(eventNotes.id, id))
   }
 
+  async restore(id: string): Promise<void> {
+    if (this.privacy?.deleted('memory', id)) throw new Error('记忆已永久删除')
+    await this.db.update(eventNotes).set({ status: 'active' }).where(eq(eventNotes.id, id))
+  }
+
+  async recordDailyNoteFile(id: string, name: string): Promise<void> {
+    await this.db
+      .run(sql`UPDATE event_memory_daily_note_tasks SET written_files_json=json_insert(written_files_json,'$[#]',${name})
+      WHERE id=${id} AND NOT EXISTS(SELECT 1 FROM json_each(written_files_json) WHERE value=${name})`)
+  }
+
   async deleteBackup(id: string): Promise<void> {
     await this.db.delete(eventNotes).where(eq(eventNotes.id, id))
   }
 
   async saveCoverage(coverage: ConversationCoverage): Promise<void> {
+    this.privacy?.assertPayload(
+      'memory',
+      coverage.eventNoteIds.map((id) => ({ id })),
+    )
     this.validateCoverage(coverage)
     await this.db.insert(eventNoteCoverages).values(this.coverageValues(coverage))
   }
@@ -235,11 +268,18 @@ export class EventNoteRepository {
           isNull(eventNoteCoverages.invalidatedAt),
         ),
       )
-    return rows.map((row) => ({
-      threadId: row.threadId,
-      pairIds: parse<string[]>(row.pairIdsJson),
-      coveredAt: row.coveredAt,
-    }))
+    return rows
+      .filter(
+        (row) =>
+          !parse<string[]>(row.pairIdsJson).some((pairId) =>
+            this.privacy?.sourceForgotten(agentId, row.threadId, pairId),
+          ),
+      )
+      .map((row) => ({
+        threadId: row.threadId,
+        pairIds: parse<string[]>(row.pairIdsJson),
+        coveredAt: row.coveredAt,
+      }))
   }
 
   async claimCoverageRange(input: {
@@ -251,6 +291,10 @@ export class EventNoteRepository {
   }): Promise<boolean> {
     const pairIds = [...new Set(input.pairIds)]
     if (!pairIds.length) return false
+    if (
+      pairIds.some((pairId) => this.privacy?.sourceForgotten(input.agentId, input.threadId, pairId))
+    )
+      return false
     try {
       return this.db.transaction((tx) => {
         if (input.staleBefore) {
@@ -316,6 +360,10 @@ export class EventNoteRepository {
   }
 
   async commitCoverageUnderClaim(coverage: ConversationCoverage, ownerId: string): Promise<void> {
+    this.privacy?.assertPayload(
+      'memory',
+      coverage.eventNoteIds.map((id) => ({ id })),
+    )
     this.validateCoverage(coverage)
     const pairIds = [...new Set(coverage.pairIds)]
     await this.db.transaction((tx) => {
@@ -358,7 +406,10 @@ export class EventNoteRepository {
           isNull(eventNoteCoverages.invalidatedAt),
         ),
       )
-    return new Set(rows.flatMap((row) => parse<string[]>(row.pairIdsJson)))
+    return new Set([
+      ...rows.flatMap((row) => parse<string[]>(row.pairIdsJson)),
+      ...(this.privacy?.forgottenPairIds(agentId, threadId) ?? []),
+    ])
   }
 
   async invalidateCoverageByPairIds(threadId: string, pairIds: string[]): Promise<void> {
@@ -407,11 +458,15 @@ export class EventNoteRepository {
   }
 
   async addRelation(input: EventNoteRelationView): Promise<void> {
+    const source = await this.findById(input.sourceId)
+    const target = await this.findById(input.targetId)
+    this.privacy?.assertPayload('memory', input)
+    if (!source || !target) throw new Error('关联记忆已不存在，已停止关系写入')
     await this.db
       .insert(eventMemoryRelations)
       .values({
         id: `${input.sourceId}:${input.relation}:${input.targetId}`,
-        agentId: (await this.findById(input.sourceId))?.agentId ?? '',
+        agentId: source.agentId,
         sourceId: input.sourceId,
         targetId: input.targetId,
         relation: input.relation,
@@ -465,6 +520,7 @@ export class EventNoteRepository {
     date: string
     sourceIncomplete: boolean
   }): Promise<void> {
+    if (this.privacy?.isBusy('memory')) return
     const now = new Date().toISOString()
     await this.db
       .insert(eventMemoryDailyNoteTasks)
@@ -553,19 +609,40 @@ export class EventNoteRepository {
         createdAt: now,
         updatedAt: now,
       })
-      .onConflictDoUpdate({
-        target: [eventMemoryReflectionTasks.agentId, eventMemoryReflectionTasks.eventId],
-        set: { status: 'pending', lastError: null, updatedAt: now },
-      })
+      .onConflictDoNothing()
   }
 
-  async pendingReflectionTasks(limit = 100): Promise<
+  async pendingReflectionTasks(
+    limit = 100,
+    now = new Date(),
+  ): Promise<
     Array<{
       id: string
       agentId: string
       eventId: string
     }>
   > {
+    // 包含已耗尽重试次数的旧任务，永久遗忘不能继续占据失败队列。
+    const failedTasks = await this.db
+      .select()
+      .from(eventMemoryReflectionTasks)
+      .where(eq(eventMemoryReflectionTasks.status, 'failed'))
+    for (const task of failedTasks) {
+      const note = await this.findById(task.eventId)
+      if (!note || this.isMemoryForgotten(note)) {
+        await this.discardReflectionDecision(task.agentId, task.eventId)
+        await this.completeReflectionTask(task.id)
+      } else if (
+        task.status === 'failed' &&
+        (task.lastError?.includes('已被永久删除') || task.lastError?.includes('重置时遗忘'))
+      ) {
+        // 修复已有的错误退避记录：主事件仍有效时清掉旧候选决策，按最新数据重算。
+        await this.discardReflectionDecision(task.agentId, task.eventId)
+        await this.retryReflectionTask(task.id)
+      }
+    }
+    // 失败后按 5、15、30、60 分钟退避；连续五次失败后停止自动调用。
+    const retrySeconds = sql<number>`case ${eventMemoryReflectionTasks.attempts} when 1 then 300 when 2 then 900 when 3 then 1800 else 3600 end`
     return this.db
       .select({
         id: eventMemoryReflectionTasks.id,
@@ -573,7 +650,16 @@ export class EventNoteRepository {
         eventId: eventMemoryReflectionTasks.eventId,
       })
       .from(eventMemoryReflectionTasks)
-      .where(inArray(eventMemoryReflectionTasks.status, ['pending', 'failed']))
+      .where(
+        or(
+          eq(eventMemoryReflectionTasks.status, 'pending'),
+          and(
+            eq(eventMemoryReflectionTasks.status, 'failed'),
+            sql`${eventMemoryReflectionTasks.attempts} < 5`,
+            sql`julianday(${eventMemoryReflectionTasks.updatedAt}) <= julianday(${now.toISOString()}) - ${retrySeconds} / 86400.0`,
+          ),
+        ),
+      )
       .orderBy(asc(eventMemoryReflectionTasks.updatedAt))
       .limit(limit)
   }
@@ -583,6 +669,30 @@ export class EventNoteRepository {
       .update(eventMemoryReflectionTasks)
       .set({
         status: 'completed',
+        lastError: null,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(eventMemoryReflectionTasks.id, id))
+  }
+
+  /** 只丢弃可重算的关系决策，不撤销已经提交的记忆或图谱操作。 */
+  async discardReflectionDecision(agentId: string, eventId: string): Promise<void> {
+    await this.db
+      .delete(eventMemoryOperations)
+      .where(
+        and(
+          eq(eventMemoryOperations.operationId, `reflection:decision:${agentId}:${eventId}`),
+          eq(eventMemoryOperations.operation, 'reflection_decision'),
+        ),
+      )
+  }
+
+  async retryReflectionTask(id: string): Promise<void> {
+    await this.db
+      .update(eventMemoryReflectionTasks)
+      .set({
+        status: 'pending',
+        attempts: 0,
         lastError: null,
         updatedAt: new Date().toISOString(),
       })
@@ -605,6 +715,7 @@ export class EventNoteRepository {
     const notes = await this.listAllCurrent()
     let count = 0
     for (const note of notes) {
+      if (note.status !== 'active' || this.isMemoryForgotten(note)) continue
       const id = `reflection:${note.agentId}:${note.id}`
       const result = await this.db
         .insert(eventMemoryReflectionTasks)
@@ -633,6 +744,7 @@ export class EventNoteRepository {
     truncated: boolean
     queriedAt: string
   }): Promise<void> {
+    if (this.privacy?.isBusy('memory')) return
     await this.db.insert(eventMemoryQueryAudits).values({
       id: input.id,
       agentId: input.agentId,
@@ -671,6 +783,34 @@ export class EventNoteRepository {
     return row?.elapsedSeconds ?? 0
   }
 
+  /** 原子累加有效运行时间，避免旧内存快照覆盖主动记忆写入时的重置。 */
+  async advanceTimer(key: string, deltaSeconds: number, resetAfter?: string): Promise<number> {
+    const delta = Math.max(0, Math.floor(deltaSeconds))
+    const [row] = await this.db
+      .insert(eventMemoryTimers)
+      .values({ key, elapsedSeconds: delta, checkpointAt: new Date().toISOString() })
+      .onConflictDoUpdate({
+        target: eventMemoryTimers.key,
+        set: {
+          elapsedSeconds: resetAfter
+            ? sql`case when ${eventMemoryTimers.checkpointAt} < ${resetAfter} then ${delta} else ${eventMemoryTimers.elapsedSeconds} + ${delta} end`
+            : sql`${eventMemoryTimers.elapsedSeconds} + ${delta}`,
+          checkpointAt: new Date().toISOString(),
+        },
+      })
+      .returning({ elapsedSeconds: eventMemoryTimers.elapsedSeconds })
+    return row?.elapsedSeconds ?? 0
+  }
+
+  /** 调度截止时间单独命名，复用持久化秒值，不依赖进程内缓存。 */
+  async memoryScheduleTime(key: string): Promise<number> {
+    return (await this.readTimer(`schedule:${key}`)) * 1000
+  }
+
+  async setMemoryScheduleTime(key: string, timestamp: number): Promise<void> {
+    await this.checkpointTimer(`schedule:${key}`, Math.ceil(timestamp / 1000))
+  }
+
   async resetTimer(key: string): Promise<void> {
     await this.checkpointTimer(key, 0)
   }
@@ -694,6 +834,7 @@ export class EventNoteRepository {
     operation: string,
     payload: unknown,
   ): Promise<boolean> {
+    this.privacy?.assertPayload('memory', payload)
     const result = await this.db
       .insert(eventMemoryOperations)
       .values({

@@ -103,6 +103,12 @@ export class ExecutionRuntime {
     })
   }
 
+  /** 消息和工具状态已持久化后让出本段执行；用户继续时创建新的执行身份。 */
+  async suspend(descriptor: KernelExecutionDescriptor): Promise<void> {
+    await this.stateChanged(descriptor, 'suspended', 'paused')
+    this.active.delete(descriptor.executionId)
+  }
+
   async timeout(descriptor: KernelExecutionDescriptor, error?: unknown): Promise<void> {
     await this.finish(descriptor, {
       state: 'timed_out',

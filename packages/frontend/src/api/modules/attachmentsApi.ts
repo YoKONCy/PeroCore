@@ -11,15 +11,23 @@ export interface AttachmentInfo {
   id: string
   threadId: string
   messageId: number | null
-  kind: 'image' | 'text'
+  kind: 'image' | 'text' | 'pdf' | 'audio' | 'video' | 'file'
   originalName: string
   mimeType: string
   sizeBytes: number
   contextPolicy: 'once'
   status: string
+  error?: string
 }
 
 export const attachmentsApi = {
+  capabilities: () =>
+    apiClient.get<{ pdf: boolean; maxPdfBytes: number; sourceName: string | null }>(
+      '/attachments/capabilities',
+    ),
+  get: (id: string) => apiClient.get<AttachmentInfo>(`/attachments/${encodeURIComponent(id)}`),
+  retry: (id: string) =>
+    apiClient.post<AttachmentInfo>(`/attachments/${encodeURIComponent(id)}/retry`),
   upload: (file: File, threadId: string) => {
     const form = new FormData()
     form.append('file', file)

@@ -1,0 +1,135 @@
+{
+  "id": "task-control",
+  "name": "任务管理",
+  "version": "1.0.0",
+  "type": "tool",
+  "entry": "index.ts",
+  "toolDefinition": {
+    "name": "manage_task",
+    "description": "创建可持续执行的后台任务，或查询、暂停、恢复、取消已有任务，以及回答任务的问题、处理审批和交付状态。普通当前会话工作不必转成后台任务；仅整理当前步骤请使用 update_plan。操作已有任务前先用 list/get 确认目标与 revision，再提交对应操作。仅工作模式可用，后台任务不能借此控制自身或派生新任务。",
+    "display": {
+      "label": "管理任务",
+      "description": "安排后台任务、查看进度，或暂停、恢复、取消任务及处理问答。仅工作模式可用。",
+      "icon": "list",
+      "color": "purple"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "create",
+            "list",
+            "get",
+            "update",
+            "pause",
+            "resume",
+            "cancel",
+            "answer",
+            "approve",
+            "resolve_delivery"
+          ]
+        },
+        "taskId": {
+          "type": "string"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "description": "除 create/list/get 外必填，取自任务当前 revision"
+        },
+        "instruction": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "successCriteria": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "inputId": {
+          "type": "string"
+        },
+        "selectedOptionIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "decision": {
+          "type": "string",
+          "enum": ["allow_once", "deny_once"]
+        },
+        "recovery": {
+          "type": "string",
+          "enum": ["read_only", "confirm"]
+        },
+        "confirmUncertain": {
+          "type": "boolean",
+          "description": "仅用户明确核验过结果不明的动作后，才可设为 true"
+        },
+        "deadline": {
+          "type": "string",
+          "description": "用户指定的截止时间，ISO 8601"
+        },
+        "maxSegments": {
+          "type": "integer"
+        },
+        "maxLlmCalls": {
+          "type": "integer"
+        },
+        "maxToolCalls": {
+          "type": "integer"
+        },
+        "deliveryId": {
+          "type": "string"
+        },
+        "deliveryDecision": {
+          "type": "string",
+          "description": "仅用户确认已送达或未送达后，才可标记 sent 或要求 retry",
+          "enum": ["sent", "retry"]
+        },
+        "answers": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "description": "answer操作：按题目ID一次提交整组回答。",
+          "items": {
+            "type": "object",
+            "properties": {
+              "questionId": {
+                "type": "string"
+              },
+              "selectedOptionIds": {
+                "type": "array",
+                "maxItems": 4,
+                "items": {
+                  "type": "string"
+                }
+              },
+              "message": {
+                "type": "string",
+                "maxLength": 4000
+              }
+            },
+            "required": ["questionId"],
+            "additionalProperties": false
+          }
+        },
+        "planId": {
+          "type": "string",
+          "description": "create可选：关联当前计划ID，与planStepId一起提供。"
+        },
+        "planStepId": {
+          "type": "string",
+          "description": "create可选：交给后台执行的步骤ID。"
+        }
+      },
+      "required": ["action"],
+      "additionalProperties": false
+    }
+  }
+}

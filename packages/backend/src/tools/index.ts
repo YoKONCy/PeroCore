@@ -12,23 +12,27 @@
  * @module packages/backend/src/tools
  */
 
-import type { ToolRegistry } from '../services/agent/toolRegistry'
-import type { ToolExecutionResult } from '../services/agent/reactLoop'
+import type { ToolContext, ToolRegistry } from '../services/agent/toolRegistry'
+import type { ToolExecutionResult, ToolExecutor } from '../services/agent/reactLoop'
 import type { StructuredToolResult } from '../services/execution/toolResult'
 import type { ToolDefinition } from '../services/pipeline/types'
 import type { ToolDisplayMeta } from '@infos/shared'
 import { createLogger } from '../lib/logger'
 
+import taskControlManifest from './taskControl/manifest.json'
+import { manageTaskTool } from './taskControl'
 import hostCommunicationManifest from './hostCommunication/manifest.json'
 import appInteractionManifest from './appInteraction/manifest.json'
 import codeSearcherManifest from './codeSearcher/manifest.json'
 import desktopAutomationManifest from './desktopAutomation/manifest.json'
 import eventMemoryManifest from './eventMemory/manifest.json'
 import factsManifest from './facts/manifest.json'
+import knowledgeManifest from './knowledge/manifest.json'
 import fileOpsManifest from './fileOps/manifest.json'
 import fileSearchManifest from './fileSearch/manifest.json'
 import flowStateManifest from './flowState/manifest.json'
-import workContextManifest from './workContext/manifest.json'
+import updatePlanManifest from './updatePlan/manifest.json'
+import { updatePlanTool } from './updatePlan'
 import askUserManifest from './askUser/manifest.json'
 import expandAdvancedToolsManifest from './expandAdvancedTools/manifest.json'
 import finishTaskManifest from './finishTask/manifest.json'
@@ -46,6 +50,8 @@ import remoteTerminalManifest from './remoteTerminal/manifest.json'
 import updateStateManifest from './updateState/manifest.json'
 import webFetchManifest from './webFetch/manifest.json'
 import workspaceProductivityManifest from './workspaceProductivity/manifest.json'
+import sendFileManifest from './sendFile/manifest.json'
+import { sendFileTool } from './sendFile'
 
 const logger = createLogger('BuiltinTools')
 
@@ -61,31 +67,7 @@ export interface BuiltinTool {
    * - channel 等价于旧 source（desktop/companion/social/group）
    * - threadId 等价于旧 sessionId（Thread ID）
    */
-  execute(
-    args: Record<string, unknown>,
-    ctx: {
-      agentId: string
-      sessionId: string
-      source: string
-      /** AIOS: Thread ID */
-      threadId: string
-      /** AIOS: 对话通道 */
-      channel: string
-      signal?: AbortSignal
-      taskId?: string
-      pairId?: string
-      toolCallId?: string
-      executionId?: import('@infos/shared').KernelExecutionId
-      processId?: import('@infos/shared').KernelProcessId
-      deadline?: string
-      /** 本次敏感调用已经用户逐次审批。 */
-      approvedSensitiveAction?: boolean
-      /** 纯读取/搜索工具可访问设备路径。 */
-      deviceReadScope?: boolean
-      /** 本次调用已获用户审批，可访问工作区外路径。 */
-      approvedOutsideWorkspace?: boolean
-    },
-  ): Promise<string | StructuredToolResult>
+  execute(args: Record<string, unknown>, ctx: ToolContext): Promise<string | StructuredToolResult>
   /** 可选：初始化 */
   onLoad?(): Promise<void>
   /**
@@ -100,12 +82,7 @@ export interface BuiltinTool {
         name: string,
         args: Record<string, unknown>,
         source: string,
-        runtimeContext?: {
-          threadId?: string
-          channel?: string
-          agentId?: string
-          sessionId?: string
-        },
+        runtimeContext?: Parameters<ToolExecutor['execute']>[3],
       ) => Promise<ToolExecutionResult>)
     | null
   bindToolExecutor?(
@@ -113,12 +90,7 @@ export interface BuiltinTool {
       name: string,
       args: Record<string, unknown>,
       source: string,
-      runtimeContext?: {
-        threadId?: string
-        channel?: string
-        agentId?: string
-        sessionId?: string
-      },
+      runtimeContext?: Parameters<ToolExecutor['execute']>[3],
     ) => Promise<ToolExecutionResult>,
   ): void
 }
@@ -130,13 +102,13 @@ export interface BuiltinTool {
 import { communicateWithHostTool } from './hostCommunication'
 import { interactWithSocialTool } from './appInteraction'
 import { updateFlowStateTool } from './flowState'
-import { manageWorkContextTool } from './workContext'
 import { askUserTool } from './askUser'
 import { expandAdvancedToolsTool } from './expandAdvancedTools'
 import { finishTaskTool } from './finishTask'
 import { loadSkillTool } from './loadSkill'
 import {
   readFileTool,
+  readImageTool,
   writeFileTool,
   deleteFileTool,
   fileInfoTool,
@@ -169,7 +141,13 @@ import {
 } from './remoteTerminal'
 import { codeSearcherTool } from './codeSearcher'
 import { fileSearchTool } from './fileSearch'
-import { setReminderTool, listRemindersTool, cancelReminderTool } from './scheduler'
+import {
+  setReminderTool,
+  listRemindersTool,
+  cancelReminderTool,
+  scheduleFollowUpTool,
+  suggestNextStepTool,
+} from './scheduler'
 import { runScriptTool } from './runScript'
 import { takeScreenshotTool } from './screenVision'
 import { webFetchTool } from './webFetch'
@@ -200,6 +178,7 @@ import {
   writeFactTool,
 } from './facts'
 import { readFileRangeTool, globFilesTool, editFileTool } from './workspaceProductivity'
+import { searchKnowledgeTool } from './knowledge'
 
 /** 全部内置工具列表 */
 const ALL_BUILTIN_TOOLS: BuiltinTool[] = [
@@ -208,14 +187,16 @@ const ALL_BUILTIN_TOOLS: BuiltinTool[] = [
   expandAdvancedToolsTool,
   loadSkillTool,
   updateFlowStateTool,
-  manageWorkContextTool,
+  updatePlanTool,
   askUserTool,
   updateStateTool,
   interactWithSocialTool,
   communicateWithHostTool,
 
   // ── 文件系统 ──
+  sendFileTool,
   readFileTool,
+  readImageTool,
   writeFileTool,
   deleteFileTool,
   fileInfoTool,
@@ -250,7 +231,10 @@ const ALL_BUILTIN_TOOLS: BuiltinTool[] = [
   codeSearcherTool,
 
   // ── 提醒 & 日程 ──
+  manageTaskTool,
   setReminderTool,
+  scheduleFollowUpTool,
+  suggestNextStepTool,
   listRemindersTool,
   cancelReminderTool,
 
@@ -292,6 +276,7 @@ const ALL_BUILTIN_TOOLS: BuiltinTool[] = [
   queryEventNotesTool,
 
   // ── 共享事实库 ──
+  searchKnowledgeTool,
   queryFactsTool,
   writeFactTool,
   supersedeFactTool,
@@ -309,6 +294,7 @@ interface ManifestToolDefinition {
 }
 
 interface ToolManifest {
+  id: string
   toolDefinition?: ManifestToolDefinition
   tools?: ManifestToolDefinition[]
   /** 多工具Manifest可在这里集中维护用户界面文案。 */
@@ -330,6 +316,7 @@ function officialSignature(name: string, style?: string): ToolDisplayMeta['signa
           ? 'social-signal'
           : [
                 'read_file',
+                'read_image',
                 'read_file_range',
                 'get_file_info',
                 'list_directory',
@@ -356,9 +343,7 @@ function officialSignature(name: string, style?: string): ToolDisplayMeta['signa
                       : [
                             'finish_task',
                             'load_skill',
-                            'expand_advanced_tools',
                             'update_flow_state',
-                            'manage_work_context',
                             'update_state',
                             'interact_with_social',
                             'communicate_with_host',
@@ -379,6 +364,7 @@ function officialSignature(name: string, style?: string): ToolDisplayMeta['signa
           ? 'social'
           : [
                 'read_file',
+                'read_image',
                 'read_file_range',
                 'get_file_info',
                 'list_directory',
@@ -406,9 +392,11 @@ function officialSignature(name: string, style?: string): ToolDisplayMeta['signa
 function toToolDefinition(
   definition: ManifestToolDefinition,
   userCopy?: { label: string; description: string },
+  packageId?: string,
 ): ToolDefinition {
   return {
     name: definition.name,
+    packageId,
     description: definition.description,
     parameters: definition.parameters ?? {
       type: 'object',
@@ -432,21 +420,23 @@ function collectManifestDefinitions(manifest: ToolManifest): ToolDefinition[] {
       ? [manifest.toolDefinition]
       : []
   return definitions.map((definition) =>
-    toToolDefinition(definition, manifest.userCopy?.[definition.name]),
+    toToolDefinition(definition, manifest.userCopy?.[definition.name], `builtin:${manifest.id}`),
   )
 }
 
 for (const manifest of [
+  taskControlManifest,
   hostCommunicationManifest,
   appInteractionManifest,
   codeSearcherManifest,
   desktopAutomationManifest,
   eventMemoryManifest,
   factsManifest,
+  knowledgeManifest,
   fileOpsManifest,
   fileSearchManifest,
   flowStateManifest,
-  workContextManifest,
+  updatePlanManifest,
   askUserManifest,
   expandAdvancedToolsManifest,
   finishTaskManifest,
@@ -464,6 +454,7 @@ for (const manifest of [
   updateStateManifest,
   webFetchManifest,
   workspaceProductivityManifest,
+  sendFileManifest,
 ] satisfies ToolManifest[]) {
   for (const definition of collectManifestDefinitions(manifest)) {
     MANIFEST_DEFINITIONS.set(definition.name, definition)
@@ -507,7 +498,6 @@ export { setRemoteShellCapabilityRuntime } from './remoteTerminal'
 export { setAgentInputService } from './askUser'
 export { setSocialInteractionManager } from './appInteraction'
 export { setFlowStateService } from './flowState'
-export { setWorkContextService } from './workContext'
 export { setScreenshotProvider } from './screenVision'
 export type { ScreenshotProvider } from './screenVision'
 export { setWindowProvider } from './systemInfo'
@@ -521,10 +511,8 @@ export { setSchedulerService } from './scheduler'
 export { setFinishTaskDeps } from './finishTask'
 export { setEventMemoryToolDeps } from './eventMemory'
 export { setFactsToolDeps } from './facts'
-// AIOS(Phase4): WorkspaceService 注入
-// - fileOps 自带 setter（核心逻辑锁定不改）
-// - terminalExecutor / runScript / fileSearch / codeSearcher 共用 workspaceServiceHolder 的 setter
-export { setWorkspaceService, setWorkspaceCheckpointService } from './fileOps'
+// 文件操作工具复用 ProductivityRuntime；其他设备工具继续使用共享 WorkspaceService。
+export { setWorkspaceCheckpointService } from './fileOps'
 export { setWorkspaceProductivityCheckpointService } from './workspaceProductivity'
 export { setWorkspaceService as setSharedWorkspaceService } from './workspaceServiceHolder'
 export type { WorkspaceService } from '../services/workspace/workspaceService'

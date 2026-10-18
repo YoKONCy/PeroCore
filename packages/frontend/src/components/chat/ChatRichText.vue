@@ -4,28 +4,156 @@
  *
  * 统一承载 Markdown、引号、XML、LaTeX 和代码高亮，并代理代码复制操作。
  */
-import { computed } from 'vue'
+import { inject, onActivated, onDeactivated, onBeforeUnmount, shallowRef, ref, watch } from 'vue'
 import EmbeddedWebPreview from './EmbeddedWebPreview.vue'
+import StreamText from './StreamText.vue'
 import { segmentChatContent } from '../../lib/embeddedWebPreview'
-import { renderChatRichText } from '../../lib/chatRichRenderer'
+import { queueTextRender } from '../../compositor/renderQueue'
 import { useNotificationStore } from '../../stores/useNotificationStore'
+import ResourceReferenceCard from '../resources/ResourceReferenceCard.vue'
+import { splitResourceCards } from '../../lib/resourceLinks'
+import { openResource, openResourceLink } from '../../composables/resources/useResources'
 
 const props = withDefaults(
-  defineProps<{ content: string; compact?: boolean; active?: boolean; cache?: boolean }>(),
-  { active: true, cache: true },
+  defineProps<{
+    content: string
+    compact?: boolean
+    active?: boolean
+    cache?: boolean
+    stable?: boolean
+    webPreview?: boolean
+    agentId?: string
+    threadId?: string
+  }>(),
+  {
+    active: true,
+    cache: true,
+    stable: true,
+    webPreview: true,
+    agentId: undefined,
+    threadId: undefined,
+  },
 )
 const notify = useNotificationStore()
-const segments = computed(() =>
-  segmentChatContent(props.content).map((segment) => ({
-    ...segment,
-    html:
-      segment.type === 'rich-text'
-        ? renderChatRichText(segment.source, { cache: props.cache })
-        : '',
-  })),
+const mainVisible = inject('infos:main-surface-visible', shallowRef(true))
+type Segment = {
+  type: 'rich-text' | 'web-preview' | 'resource-reference'
+  source: string
+  label?: string
+  html?: string
+}
+const segments = shallowRef<Segment[]>([{ type: 'rich-text', source: props.content }])
+let cancelRender: (() => void) | undefined
+let generation = 0
+let disposed = false
+const pageActive = ref(true)
+// 按需加载解析器，避免首次切屏必须同步初始化公式和全部高亮语言。
+let rendererPromise: Promise<typeof import('../../lib/chatRichRenderer')> | undefined
+function updateSegments(): void {
+  const current = ++generation
+  cancelRender?.()
+  if (!pageActive.value || !props.active || !mainVisible.value) return
+  if (!props.stable) {
+    segments.value = [{ type: 'rich-text', source: props.content }]
+    return
+  }
+  rendererPromise ??= import('../../lib/chatRichRenderer')
+  void rendererPromise
+    .then(({ renderChatRichText }) => {
+      if (disposed || current !== generation) return
+      cancelRender = queueTextRender(() => {
+        if (disposed || current !== generation) return
+        try {
+          segments.value =
+            // 流式尾部先显示源码；内容稳定后才创建 iframe，避免每个增量都取消并重启导航。
+            (
+              props.webPreview && props.stable
+                ? segmentChatContent(props.content)
+                : [{ type: 'rich-text' as const, source: props.content }]
+            )
+              .flatMap<{
+                type: 'rich-text' | 'web-preview' | 'resource-reference'
+                source: string
+                label?: string
+              }>((segment) =>
+                segment.type === 'rich-text' && props.agentId && props.threadId
+                  ? splitResourceCards(segment.source)
+                  : [segment],
+              )
+              .map((segment) => ({
+                ...segment,
+                html:
+                  segment.type === 'rich-text'
+                    ? renderChatRichText(segment.source, { cache: props.cache && props.stable })
+                    : '',
+              }))
+        } catch {
+          segments.value = [{ type: 'rich-text', source: props.content }]
+        }
+      })
+    })
+    .catch(() => {
+      if (!disposed && current === generation)
+        segments.value = [{ type: 'rich-text', source: props.content }]
+      rendererPromise = undefined
+    })
+}
+watch(
+  () => [
+    props.content,
+    props.stable,
+    props.active,
+    props.cache,
+    props.webPreview,
+    props.agentId,
+    props.threadId,
+    mainVisible.value,
+    pageActive.value,
+  ],
+  updateSegments,
+  { immediate: true },
 )
+onBeforeUnmount(() => {
+  disposed = true
+  generation++
+  cancelRender?.()
+})
+onDeactivated(() => {
+  pageActive.value = false
+  generation++
+  cancelRender?.()
+})
+onActivated(() => {
+  pageActive.value = true
+})
 
 async function handleClick(event: MouseEvent) {
+  const link = (event.target as HTMLElement).closest<HTMLElement>('[data-resource-source]')
+  if (link) {
+    event.preventDefault()
+    if (!props.agentId || !props.threadId) {
+      const source = (link.dataset.resourceSource || '').replace(/^resource:/i, '')
+      if (/^https?:\/\//i.test(source))
+        openResource({
+          kind: 'web',
+          name: '网页',
+          mimeType: 'text/html',
+          sizeBytes: 0,
+          origin: { type: 'url', value: source },
+        })
+      else notify.toast('请从所属会话打开文件', { type: 'warning' })
+      return
+    }
+    try {
+      await openResourceLink(link.dataset.resourceSource || '', {
+        agentId: props.agentId,
+        threadId: props.threadId,
+      })
+    } catch (error) {
+      notify.toast(error instanceof Error ? error.message : '无法打开资源', { type: 'error' })
+    }
+    return
+  }
   const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-copy-code]')
   if (!button) return
   try {
@@ -43,7 +171,19 @@ async function handleClick(event: MouseEvent) {
     <EmbeddedWebPreview
       v-if="segment.type === 'web-preview'"
       :source="segment.source"
-      :active="active"
+      :active="active && mainVisible && pageActive"
+    />
+    <ResourceReferenceCard
+      v-else-if="segment.type === 'resource-reference'"
+      :source="segment.source"
+      :label="segment.label"
+      :agent-id="agentId || ''"
+      :thread-id="threadId || ''"
+    />
+    <StreamText
+      v-else-if="segment.html === undefined"
+      :source="segment.source"
+      :class="{ 'chat-rich-text--compact': compact }"
     />
     <!-- HTML已在chatRichRenderer中经过DOMPurify净化。 -->
     <!-- eslint-disable-next-line vue/no-v-html -->
@@ -59,6 +199,28 @@ async function handleClick(event: MouseEvent) {
 <style src="katex/dist/katex.min.css"></style>
 <style src="highlight.js/styles/github-dark-dimmed.min.css"></style>
 <style>
+.chat-rich-text--stream {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.chat-resource-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 1px 5px;
+  border-bottom: 1px solid color-mix(in srgb, var(--ui-accent-purple) 38%, transparent);
+  background: color-mix(in srgb, var(--ui-accent-purple) 8%, transparent);
+  color: var(--ui-accent-purple);
+  text-decoration: none;
+  box-shadow: 1px 1px 0 color-mix(in srgb, var(--ui-accent-purple) 13%, transparent);
+}
+.chat-resource-chip span {
+  font-size: 0.8em;
+  opacity: 0.7;
+}
+.chat-resource-chip:hover {
+  background: color-mix(in srgb, var(--ui-accent-purple) 14%, transparent);
+}
 :root,
 [data-theme='light'] {
   --chat-quote-cn-double: #4f46e5;
@@ -102,8 +264,11 @@ async function handleClick(event: MouseEvent) {
 
 .chat-rich-text {
   color: inherit;
-  line-height: 1.7;
+  line-height: 1.9;
   overflow-wrap: anywhere;
+}
+.chat-rich-text + .chat-rich-text {
+  margin-block-start: 0.85em;
 }
 .chat-rich-text > :first-child {
   margin-top: 0;
@@ -112,16 +277,21 @@ async function handleClick(event: MouseEvent) {
   margin-bottom: 0;
 }
 .chat-rich-text p {
-  margin: 0.52em 0;
+  margin: 0.85em 0;
 }
-/* 不同块级语义相邻时稍微拉开节奏，段内行距保持不变。 */
+/* 块内与跨渲染块使用同样的留白节奏，标题不再紧贴上一段正文。 */
 .chat-rich-text
   > :is(h1, h2, h3, h4, h5, h6, blockquote, ul, ol, table, .chat-code-block, .chat-math-block)
   + :is(p, h1, h2, h3, h4, h5, h6, blockquote, ul, ol, table, .chat-code-block, .chat-math-block),
 .chat-rich-text
   > p
   + :is(h1, h2, h3, h4, h5, h6, blockquote, ul, ol, table, .chat-code-block, .chat-math-block) {
-  margin-top: 0.72em;
+  margin-top: 1em;
+}
+.chat-rich-text
+  > :is(p, ul, ol, blockquote, table, .chat-code-block, .chat-math-block)
+  + :is(h1, h2, h3, h4, h5, h6) {
+  margin-top: 1.55em;
 }
 .chat-rich-text h1,
 .chat-rich-text h2,
@@ -130,42 +300,39 @@ async function handleClick(event: MouseEvent) {
 .chat-rich-text h5,
 .chat-rich-text h6 {
   position: relative;
-  margin: 1em 0 0.5em;
-  line-height: 1.3;
+  margin: 1.55em 0 0.65em;
+  line-height: 1.5;
+  font-weight: 750;
+  text-wrap: pretty;
 }
 .chat-rich-text h1 {
-  font-size: 1.42em;
-  color: transparent;
-  background: linear-gradient(
-    90deg,
-    var(--ui-accent-primary),
-    var(--ui-accent-purple),
-    var(--ui-accent-sky)
-  );
-  background-clip: text;
+  font-size: 1.5em;
+  color: var(--ui-text-primary);
+  letter-spacing: -0.015em;
 }
 .chat-rich-text h1::after {
   content: '';
   display: block;
   width: 64px;
   height: 2px;
-  margin-top: 6px;
-  background: linear-gradient(90deg, var(--ui-accent-primary), transparent);
+  margin-top: 9px;
+  background: linear-gradient(90deg, var(--ui-accent-purple), var(--ui-accent-sky), transparent);
 }
 .chat-rich-text h2 {
-  padding-left: 10px;
-  font-size: 1.22em;
+  padding-left: 12px;
+  font-size: 1.25em;
+  color: var(--ui-text-primary);
 }
 .chat-rich-text h2::before {
   content: '';
   position: absolute;
-  inset: 1px auto 1px 0;
+  inset: 0.23em auto 0.23em 0;
   width: 3px;
   background: linear-gradient(var(--ui-accent-purple), var(--ui-accent-sky));
 }
 .chat-rich-text h3 {
-  color: var(--ui-accent-purple);
-  font-size: 1.08em;
+  color: color-mix(in srgb, var(--ui-text-primary) 76%, var(--ui-accent-purple));
+  font-size: 1.12em;
 }
 .chat-rich-text h4 {
   color: var(--ui-accent-sky);
@@ -181,7 +348,7 @@ async function handleClick(event: MouseEvent) {
 }
 .chat-rich-text strong {
   color: var(--ui-accent-primary);
-  font-weight: 850;
+  font-weight: 750;
 }
 .chat-rich-text em {
   color: var(--ui-accent-purple);
@@ -209,9 +376,11 @@ async function handleClick(event: MouseEvent) {
   font-size: 0.72em;
 }
 .chat-quote {
-  padding: 0 0.18em;
+  padding: 0.04em 0.2em;
   border-radius: 3px;
-  font-weight: 700;
+  font-weight: 650;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
 .chat-quote-cn-double {
   color: var(--chat-quote-cn-double);
@@ -242,13 +411,15 @@ async function handleClick(event: MouseEvent) {
 }
 .chat-rich-text :not(pre) > code,
 .chat-xml-inline {
-  padding: 2px 6px;
+  padding: 0.1em 0.38em;
   color: var(--ui-accent-purple);
   background: var(--ui-accent-purple-soft);
   border: 1px solid color-mix(in srgb, var(--ui-accent-purple) 22%, transparent);
   border-radius: 3px;
   font-family: var(--ui-font-mono);
   font-size: 0.9em;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
 .chat-xml-tag {
   color: var(--chat-xml-tag);
@@ -261,7 +432,7 @@ async function handleClick(event: MouseEvent) {
   color: var(--chat-xml-value);
 }
 .chat-code-block {
-  margin: 10px 0;
+  margin: 1.05em 0;
   overflow: hidden;
   background: var(--chat-code-bg);
   border: 1px solid var(--chat-code-border);
@@ -303,7 +474,7 @@ async function handleClick(event: MouseEvent) {
   background: transparent !important;
   font-family: var(--ui-font-mono);
   font-size: 12px;
-  line-height: 1.65;
+  line-height: 1.8;
 }
 .chat-math-inline {
   display: inline-flex;
@@ -337,27 +508,44 @@ async function handleClick(event: MouseEvent) {
   opacity: 0.7;
 }
 .chat-rich-text blockquote {
-  margin: 9px 0;
-  padding: 8px 12px;
+  margin: 1.05em 0;
+  padding: 0.65em 1em;
   color: var(--ui-text-secondary);
-  background: linear-gradient(90deg, var(--ui-accent-purple-soft), transparent);
-  border-left: 3px solid var(--ui-accent-purple);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--ui-accent-purple-soft) 68%, transparent),
+    transparent
+  );
+  border-left: 2px solid var(--ui-accent-purple);
+}
+.chat-rich-text blockquote > :first-child {
+  margin-top: 0;
+}
+.chat-rich-text blockquote > :last-child {
+  margin-bottom: 0;
 }
 .chat-rich-text ul,
 .chat-rich-text ol {
-  margin: 7px 0;
-  padding-left: 22px;
+  margin: 0.85em 0;
+  padding-left: 1.7em;
 }
 .chat-rich-text li {
-  margin: 3px 0;
+  margin: 0.4em 0;
+  padding-left: 0.15em;
+}
+.chat-rich-text li > p {
+  margin: 0.4em 0;
+}
+.chat-rich-text li > :is(ul, ol) {
+  margin-block: 0.35em;
 }
 .chat-rich-text li::marker {
   color: var(--ui-accent-primary);
   font-weight: 800;
 }
 .chat-rich-text hr {
-  height: 2px;
-  margin: 14px 0;
+  height: 1px;
+  margin: 1.6em 0;
   background: linear-gradient(
     90deg,
     transparent,
@@ -373,15 +561,20 @@ async function handleClick(event: MouseEvent) {
   max-width: 100%;
   overflow-x: auto;
   border-collapse: collapse;
+  margin-block: 1.05em;
+  font-size: 0.95em;
 }
 .chat-rich-text th,
 .chat-rich-text td {
-  padding: 7px 10px;
+  padding: 9px 12px;
   border: 1px solid var(--ui-border-default);
+  vertical-align: top;
 }
 .chat-rich-text th {
   color: var(--ui-accent-purple);
   background: var(--ui-accent-purple-soft);
+  font-weight: 700;
+  line-height: 1.65;
 }
 .chat-rich-text tr:nth-child(even) {
   background: var(--chat-table-stripe);
@@ -393,11 +586,11 @@ async function handleClick(event: MouseEvent) {
 }
 .chat-rich-text--compact {
   font-size: 12px;
-  line-height: 1.62;
+  line-height: 1.8;
 }
 
 .msg-bubble-user .chat-rich-text {
-  line-height: 1.45;
+  line-height: 1.65;
 }
 .msg-bubble-user .chat-rich-text p {
   margin: 0.18em 0;

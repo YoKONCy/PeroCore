@@ -1,0 +1,87 @@
+.file-view-controls {
+  display: flex;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 7px;
+  min-height: 37px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--ui-border-subtle);
+  color: var(--ui-text-secondary);
+  background: color-mix(in srgb, var(--ui-bg-elevated) 92%, transparent);
+  font: 10px var(--ui-font-mono);
+}
+.file-view-controls button,
+.file-view-controls input,
+.file-view-controls select,
+.file-view-password input {
+  min-height: 25px;
+  padding: 3px 8px;
+  border: 1px solid var(--ui-border-default);
+  border-radius: 0;
+  background: var(--ui-bg-surface);
+  color: var(--ui-text-secondary);
+  font: inherit;
+  box-shadow:
+    inset 1px 1px color-mix(in srgb, white 11%, transparent),
+    1px 1px 0 var(--ui-border-subtle);
+}
+.file-view-controls button {
+  cursor: pointer;
+}
+.file-view-controls button:hover,
+.file-view-controls button.selected {
+  border-color: var(--ui-accent-sky);
+  background: var(--ui-accent-sky-soft);
+  color: var(--ui-accent-sky);
+}
+.file-view-controls button:active {
+  transform: translate(1px, 1px);
+  box-shadow: none;
+}
+.file-view-controls button:disabled {
+  opacity: 0.4;
+  cursor: default;
+  transform: none;
+}
+.file-view-controls :is(button, input, select):focus-visible {
+  outline: 1px solid var(--ui-accent-sky);
+  outline-offset: 2px;
+}
+.file-view-control-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.file-view-spacer {
+  flex: 1;
+}
+.file-view-controls small {
+  color: var(--ui-text-tertiary);
+  font: 9px var(--ui-font-mono);
+  white-space: nowrap;
+}
+.file-view-controls input[type='range'] {
+  padding: 0;
+  box-shadow: none;
+  accent-color: var(--ui-accent-sky);
+}
+.file-view-controls input[type='number'] {
+  width: 50px;
+}
+.file-view-state {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  padding: 24px;
+  color: var(--ui-text-secondary);
+  font: 12px/1.7 var(--ui-font-mono);
+  text-align: center;
+}
+.file-view-state small {
+  color: var(--ui-text-tertiary);
+}

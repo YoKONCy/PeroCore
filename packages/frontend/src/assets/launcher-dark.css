@@ -1,0 +1,133 @@
+/* 在原有浅色界面的结构上适配暗色；这里仅覆盖颜色与明暗层次。 */
+.launcher-shell.launcher-dark,
+.eula-mask.launcher-dark,
+.launcher-start-menu.launcher-dark {
+  --cocoa: #51495b;
+  --cocoa-soft: rgba(0, 0, 0, 0.28);
+  --pink: #493242;
+  --pink-deep: #ef9ac2;
+  --sky: #294355;
+  --sky-deep: #82c5e8;
+  --purple: #41364f;
+  --launcher-action-top: #51394b;
+  --launcher-action-bottom: #3b2b3b;
+  --launcher-action-text: #ffe0ef;
+  --launcher-action-edge: #91617e;
+  --launcher-action-shadow: rgba(0, 0, 0, 0.35);
+  --launcher-action-highlight: rgba(255, 255, 255, 0.09);
+  --launcher-start-surface: #211e29;
+  --launcher-start-edge: #84758e;
+  --launcher-start-shadow: rgba(0, 0, 0, 0.4);
+  --launcher-start-tint: #493043;
+  --launcher-start-hover: #2b2331;
+  --launcher-start-icon: #efacd0;
+  --launcher-start-highlight: rgba(255, 255, 255, 0.07);
+}
+.launcher-shell.launcher-dark {
+  background:
+    radial-gradient(circle at 12% 16%, rgba(221, 125, 177, 0.045), transparent 30%),
+    radial-gradient(circle at 88% 84%, rgba(103, 175, 212, 0.045), transparent 34%),
+    linear-gradient(135deg, #15141c 0%, #12171f 55%, #17151e 100%);
+}
+.launcher-dark .launcher-head,
+.launcher-dark .launcher-tabs {
+  background: var(--ui-bg-surface-soft);
+}
+.launcher-dark .signal,
+.launcher-dark .ver,
+.launcher-dark .check-score,
+.launcher-dark .check-list div,
+.launcher-dark .env-card,
+.launcher-dark .release-notice,
+.launcher-dark .update-console,
+.launcher-dark .release-symbol,
+.launcher-dark .release-notice__head > button,
+.launcher-dark .release-notice__body,
+.launcher-dark .progress-track,
+.launcher-dark .about-grid button,
+.launcher-dark .eula-dialog,
+.launcher-dark .ghost-action,
+.launcher-dark .eula-decline {
+  background: var(--ui-bg-surface);
+}
+.launcher-dark .launcher-tabs button:hover,
+.launcher-dark .agent-picker button:hover,
+.launcher-dark .about-grid button:hover,
+.launcher-dark .eula-decline:hover {
+  background: #302431;
+}
+.launcher-dark .launcher-tabs button.active {
+  background: linear-gradient(180deg, #3c2c3d, #302432);
+  color: #f6bcda;
+}
+.launcher-dark .launcher-tabs button.active .tab-code,
+.launcher-dark .release-identity span,
+.launcher-dark .eula-head h2 em {
+  color: #f6bcda;
+}
+.launcher-dark .active-agent-card,
+.launcher-dark .about-hero {
+  background: linear-gradient(135deg, var(--ui-bg-surface), #27202c);
+}
+.launcher-dark .active-avatar {
+  box-shadow:
+    inset 0 0 0 4px var(--ui-bg-surface),
+    3px 3px 0 var(--cocoa-soft);
+}
+.launcher-dark .agent-picker button {
+  background: var(--ui-bg-surface);
+}
+.launcher-dark .agent-picker button.active,
+.launcher-dark .release-identity span,
+.launcher-dark .eula-head h2 em {
+  background: #382a3a;
+}
+.launcher-dark .release-notice__head,
+.launcher-dark .eula-head {
+  background: linear-gradient(100deg, #27202c, var(--ui-bg-surface));
+}
+.launcher-dark .release-notice > footer,
+.launcher-dark .update-state-line,
+.launcher-dark .eula-foot,
+.launcher-dark .release-notice__body :deep(.md-body code) {
+  background: var(--ui-bg-surface-soft);
+}
+.launcher-dark .release-notice__body :deep(.md-body pre) {
+  background: #10131b;
+}
+.launcher-dark .release-notice__body :deep(.md-body pre code) {
+  background: transparent;
+}
+.launcher-dark .release-notice__body :deep(.md-body th) {
+  background: #233442;
+}
+.launcher-dark .release-notice__body :deep(.md-body blockquote) {
+  background: #2b222f;
+}
+.launcher-dark .release-notice__head em,
+.launcher-dark .development-box {
+  background: #302819;
+  color: #e1bf83;
+}
+.launcher-dark .development-box {
+  border-color: #73603c;
+}
+.launcher-dark .development-box > header,
+.launcher-dark .development-box dt,
+.launcher-dark .development-box p {
+  color: #e1bf83;
+}
+.eula-mask.launcher-dark {
+  background: rgba(8, 9, 14, 0.72);
+}
+.launcher-dark .eula-icon,
+.launcher-dark .eula-accept {
+  color: #2c1824;
+}
+.launcher-dark .eula-accept:hover {
+  background: #f4b0d0;
+}
+.launcher-shell.launcher-dark :deep(.custom-title-bar.ctb-solid) {
+  background: var(--ui-bg-surface-soft);
+  border-color: var(--cocoa);
+}

@@ -11,34 +11,78 @@
   "registration": "static",
   "permissions": ["process:spawn"],
   "userCopy": {
-    "terminal_create": { "label": "新建终端", "description": "开启一个可持续使用的命令行窗口。" },
-    "terminal_list": { "label": "查看终端列表", "description": "查看当前有哪些命令行窗口。" },
-    "terminal_get": { "label": "查看终端状态", "description": "查看某个命令行窗口是否仍在运行。" },
-    "terminal_read": { "label": "读取终端输出", "description": "读取命令行程序输出的内容。" },
-    "terminal_wait": { "label": "等待终端完成", "description": "等待命令行任务运行完成。" },
-    "terminal_write": { "label": "向终端输入", "description": "向正在运行的命令行程序发送输入。" },
-    "terminal_resize": { "label": "调整终端大小", "description": "调整命令行窗口的显示尺寸。" },
+    "terminal_create": {
+      "label": "新建终端",
+      "description": "开启一个可持续使用的命令行窗口。"
+    },
+    "terminal_list": {
+      "label": "查看终端列表",
+      "description": "查看当前有哪些命令行窗口。"
+    },
+    "terminal_get": {
+      "label": "查看终端状态",
+      "description": "查看某个命令行窗口是否仍在运行。"
+    },
+    "terminal_read": {
+      "label": "读取终端输出",
+      "description": "读取命令行程序输出的内容。"
+    },
+    "terminal_wait": {
+      "label": "等待终端",
+      "description": "等待输出或进程结束。"
+    },
+    "terminal_write": {
+      "label": "向终端输入",
+      "description": "向正在运行的命令行程序发送输入。"
+    },
+    "terminal_resize": {
+      "label": "调整终端大小",
+      "description": "调整命令行窗口的显示尺寸。"
+    },
     "terminal_interrupt": {
       "label": "中断终端任务",
       "description": "请求正在运行的命令安全停止。"
     },
-    "terminal_kill": { "label": "终止终端任务", "description": "强制终止没有响应的命令行任务。" },
-    "terminal_close": { "label": "关闭终端", "description": "关闭不再使用的命令行窗口。" }
+    "terminal_kill": {
+      "label": "终止终端任务",
+      "description": "强制终止没有响应的命令行任务。"
+    },
+    "terminal_close": {
+      "label": "关闭终端",
+      "description": "关闭不再使用的命令行窗口。"
+    }
   },
   "tools": [
     {
       "name": "terminal_create",
-      "description": "在当前 Agent 的 workspace 内创建后台终端并立即返回终端 ID，适合开发服务器、监视器和长时任务；cwd 缺省或 . 表示 workspace 根目录，相对路径以该根目录为基准，不要添加 workspace/ 前缀",
-      "display": { "label": "创建终端", "icon": "terminal", "color": "green", "style": "terminal" },
+      "description": "创建受当前会话或任务托管的长时终端，立即返回 ID。可跨 ReAct 轮次读取；等待超时不会杀进程。用户停止会话、取消任务或退出应用时统一回收。NIT 内创建的终端随该脚本结束回收；需要跨脚本托管时请直接调用本工具。",
+      "display": {
+        "label": "创建终端",
+        "icon": "terminal",
+        "color": "green",
+        "style": "terminal"
+      },
       "parameters": {
         "type": "object",
         "properties": {
-          "command": { "type": "string" },
+          "command": {
+            "type": "string",
+            "description": "Shell 命令；提供 argv 时仅填写可执行文件名或路径"
+          },
+          "argv": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "直接执行的原始参数数组，不经过 Shell 转义；JSON 或含引号参数优先使用。"
+          },
           "cwd": {
             "type": "string",
             "description": "可选工作目录；缺省或 . 表示当前 Agent workspace 根目录，相对路径以该根目录为基准"
           },
-          "title": { "type": "string" }
+          "title": {
+            "type": "string"
+          }
         },
         "required": ["command"]
       }
@@ -46,36 +90,69 @@
     {
       "name": "terminal_list",
       "description": "列出当前对话或任务拥有的终端",
-      "display": { "label": "终端列表", "icon": "list", "color": "green", "style": "terminal" },
-      "parameters": { "type": "object", "properties": {} }
+      "display": {
+        "label": "终端列表",
+        "icon": "list",
+        "color": "green",
+        "style": "terminal"
+      },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "include_archived": {
+            "type": "boolean",
+            "description": "包含已结束的历史终端（默认 false）；历史日志为有界尾部窗口，最长保留 24 小时，仅限本次应用运行。"
+          }
+        }
+      }
     },
     {
       "name": "terminal_get",
       "description": "获取指定终端的状态和元数据",
-      "display": { "label": "终端状态", "icon": "info", "color": "green", "style": "terminal" },
+      "display": {
+        "label": "终端状态",
+        "icon": "info",
+        "color": "green",
+        "style": "terminal"
+      },
       "parameters": {
         "type": "object",
-        "properties": { "terminal_id": { "type": "string" } },
+        "properties": {
+          "terminal_id": {
+            "type": "string"
+          }
+        },
         "required": ["terminal_id"]
       }
     },
     {
       "name": "terminal_read",
       "description": "按游标增量读取终端输出",
-      "display": { "label": "读取输出", "icon": "file", "color": "green", "style": "terminal" },
+      "display": {
+        "label": "读取输出",
+        "icon": "file",
+        "color": "green",
+        "style": "terminal"
+      },
       "parameters": {
         "type": "object",
         "properties": {
-          "terminal_id": { "type": "string" },
-          "cursor": { "type": "number" },
-          "limit": { "type": "number" }
+          "terminal_id": {
+            "type": "string"
+          },
+          "cursor": {
+            "type": "number"
+          },
+          "limit": {
+            "type": "number"
+          }
         },
         "required": ["terminal_id"]
       }
     },
     {
       "name": "terminal_wait",
-      "description": "等待终端出现新输出、指定文本或退出",
+      "description": "等待退出、指定文本或新输出，返回 waitReason、timedOut、matched、completed、status、exitCode、nextCursor。waitReason=timeout 仅表示本次等待结束，进程仍运行；completed=true 后才可按 exitCode 判断成功。继续等待时带回 nextCursor。",
       "display": {
         "label": "等待输出",
         "icon": "hourglass",
@@ -85,10 +162,26 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "terminal_id": { "type": "string" },
-          "cursor": { "type": "number" },
-          "pattern": { "type": "string" },
-          "timeout_ms": { "type": "number" }
+          "terminal_id": {
+            "type": "string"
+          },
+          "cursor": {
+            "type": "number"
+          },
+          "pattern": {
+            "type": "string"
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 600000,
+            "description": "本次等待预算，默认 30000ms；超时保留进程和输出，可再次等待。"
+          },
+          "until": {
+            "type": "string",
+            "enum": ["output", "exit"],
+            "description": "默认 output；exit 只等进程退出。设置 pattern 时默认等待该文本。"
+          }
         },
         "required": ["terminal_id"]
       }
@@ -96,23 +189,46 @@
     {
       "name": "terminal_write",
       "description": "向运行中的终端标准输入写入文本",
-      "display": { "label": "写入输入", "icon": "pencil", "color": "green", "style": "terminal" },
+      "display": {
+        "label": "写入输入",
+        "icon": "pencil",
+        "color": "green",
+        "style": "terminal"
+      },
       "parameters": {
         "type": "object",
-        "properties": { "terminal_id": { "type": "string" }, "data": { "type": "string" } },
+        "properties": {
+          "terminal_id": {
+            "type": "string"
+          },
+          "data": {
+            "type": "string"
+          }
+        },
         "required": ["terminal_id", "data"]
       }
     },
     {
       "name": "terminal_resize",
       "description": "调整 PTY 终端的列数和行数，pipe 降级模式下为空操作",
-      "display": { "label": "调整终端", "icon": "layout", "color": "green", "style": "terminal" },
+      "display": {
+        "label": "调整终端",
+        "icon": "layout",
+        "color": "green",
+        "style": "terminal"
+      },
       "parameters": {
         "type": "object",
         "properties": {
-          "terminal_id": { "type": "string" },
-          "cols": { "type": "number" },
-          "rows": { "type": "number" }
+          "terminal_id": {
+            "type": "string"
+          },
+          "cols": {
+            "type": "number"
+          },
+          "rows": {
+            "type": "number"
+          }
         },
         "required": ["terminal_id", "cols", "rows"]
       }
@@ -120,26 +236,44 @@
     {
       "name": "terminal_interrupt",
       "description": "中断终端当前进程",
-      "display": { "label": "中断进程", "icon": "close", "color": "orange", "style": "terminal" },
+      "display": {
+        "label": "中断进程",
+        "icon": "close",
+        "color": "orange",
+        "style": "terminal"
+      },
       "parameters": {
         "type": "object",
-        "properties": { "terminal_id": { "type": "string" } },
+        "properties": {
+          "terminal_id": {
+            "type": "string"
+          }
+        },
         "required": ["terminal_id"]
       }
     },
     {
       "name": "terminal_kill",
       "description": "强制终止终端进程树",
-      "display": { "label": "终止终端", "icon": "power", "color": "orange", "style": "terminal" },
+      "display": {
+        "label": "终止终端",
+        "icon": "power",
+        "color": "orange",
+        "style": "terminal"
+      },
       "parameters": {
         "type": "object",
-        "properties": { "terminal_id": { "type": "string" } },
+        "properties": {
+          "terminal_id": {
+            "type": "string"
+          }
+        },
         "required": ["terminal_id"]
       }
     },
     {
       "name": "terminal_close",
-      "description": "关闭终端并清理输出缓冲",
+      "description": "终止运行进程树并将输出归档；历史 ID 仍可用 terminal_read 读取保留窗口。",
       "display": {
         "label": "关闭终端",
         "icon": "door-closed",
@@ -148,10 +282,16 @@
       },
       "parameters": {
         "type": "object",
-        "properties": { "terminal_id": { "type": "string" } },
+        "properties": {
+          "terminal_id": {
+            "type": "string"
+          }
+        },
         "required": ["terminal_id"]
       }
     }
   ],
-  "compatibility": { "platforms": ["windows", "linux", "darwin", "docker"] }
+  "compatibility": {
+    "platforms": ["windows", "linux", "darwin", "docker"]
+  }
 }

@@ -12,11 +12,15 @@ import type { SseEvents } from '../stream'
 
 export interface ChatWorkspaceContext {
   filePath?: string
+  fileHash?: string
+  fileDirty?: boolean
   terminalId?: string
+  selection?: { text: string; startLine: number; endLine: number }
 }
 
 export interface RewindPreview {
   threadId: string
+  agentId?: string
   wholeThread: boolean
   targetMessageId?: number
   pairIds: string[]
@@ -26,6 +30,7 @@ export interface RewindPreview {
   preservedCount: number
   files: Array<{
     path: string
+    preservedReason?: 'content_changed' | 'history_gap' | 'incomplete_snapshot' | 'unavailable'
     action:
       | 'delete_created'
       | 'restore_edited'
@@ -48,6 +53,7 @@ export interface RewindResult {
 }
 
 export interface ChatRequest {
+  generationType?: import('@infos/shared').PromptGenerationType
   threadId: string
   content: string
   attachmentIds?: string[]
@@ -61,6 +67,7 @@ export interface StopRequest {
 }
 
 export interface ChatSendResponse {
+  executionPause?: import('@infos/shared').ConversationExecutionPause
   executionId?: string
   threadId: string
   messageId: string
@@ -75,10 +82,12 @@ export const chatApi = {
   stream: (data: ChatRequest, events: SseEvents) => streamRequest('/chat/stream', data, events),
 
   stop: (data: StopRequest) => apiClient.post<void>('/chat/stop', data),
+  activeTasks: () => apiClient.get<Array<{ threadId: string; state: string }>>('/chat/tasks'),
 
-  editMessage: (threadId: string, msgId: string, content: string) =>
+  editMessage: (threadId: string, msgId: string, content: string, expectedRevision?: number) =>
     apiClient.patch<ConversationProjectionSnapshot>(`/chat/threads/${threadId}/messages/${msgId}`, {
       content,
+      expectedRevision,
     }),
 
   deleteMessage: (threadId: string, msgId: string) =>
@@ -90,8 +99,10 @@ export const chatApi = {
   previewRewind: (threadId: string, input: { messageId?: number; wholeThread?: boolean }) =>
     apiClient.post<RewindPreview>(`/chat/threads/${threadId}/rewind-preview`, input),
 
-  rewind: (threadId: string, input: { messageId?: number; wholeThread?: boolean }) =>
-    apiClient.post<RewindResult>(`/chat/threads/${threadId}/rewind`, input),
+  rewind: (
+    threadId: string,
+    input: { messageId?: number; wholeThread?: boolean; preserveInputAttachments?: boolean },
+  ) => apiClient.post<RewindResult>(`/chat/threads/${threadId}/rewind`, input),
 
   pauseTask: (threadId: string) => apiClient.post<void>('/chat/tasks/pause', { threadId }),
 

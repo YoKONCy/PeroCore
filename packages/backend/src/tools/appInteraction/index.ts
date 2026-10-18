@@ -7,6 +7,7 @@ export function setSocialInteractionManager(manager: AppManager): void {
   appManager = manager
 }
 
+/** 主 Agent 只委派社交任务，具体业务工具由社交 Agent 在应用内部调用。 */
 export const interactWithSocialTool: BuiltinTool = {
   name: 'interact_with_social',
   async execute(args, context) {

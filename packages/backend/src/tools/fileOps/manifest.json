@@ -3,13 +3,17 @@
   "name": "文件操作",
   "version": "1.0.0",
   "author": "infOS Team",
-  "description": "提供文件读写、信息查询、目录列表能力。Node.js 原生 fs 实现，完全跨平台。",
+  "description": "提供文件读写、信息查询、目录列表能力，与工作区编辑器共用 ExecutionSession 和 VirtualWorkspace。",
   "type": "tool",
   "entry": "index.ts",
   "category": "core",
   "platforms": ["windows", "linux", "darwin", "docker"],
   "userCopy": {
     "read_file": { "label": "读取文件", "description": "查看电脑中指定文件的内容。" },
+    "read_image": {
+      "label": "读取图片",
+      "description": "查看一张或批量对比多张图片文件、历史图片附件。"
+    },
     "write_file": {
       "label": "写入文件",
       "description": "把内容保存到文件；文件不存在时可以新建。"
@@ -28,7 +32,7 @@
   "tools": [
     {
       "name": "read_file",
-      "description": "读取文件内容。支持文本文件，自动检测编码。大文件会自动截断。",
+      "description": "读取 UTF-8 文本文件。默认返回前 800 行，超出范围时标记截断。",
       "display": { "label": "读取文件", "icon": "file", "color": "sky", "style": "read" },
       "parameters": {
         "type": "object",
@@ -39,15 +43,37 @@
           },
           "max_length": {
             "type": "number",
-            "description": "可选的最大读取字符数；不指定时默认返回前 800 行"
+            "description": "可选的最大读取字符数，上限 128000；不指定时默认返回前 800 行"
           }
         },
         "required": ["file_path"]
       }
     },
     {
+      "name": "read_image",
+      "description": "查看一张或批量对比多张原图。单图填 file_path，多图填 file_paths，二选一。支持文件路径、attachment:ID 或公开图片 URL；PNG/JPEG/WebP/GIF，每张最多 20 MB，一次最多 8 张且合计 40 MB。保持原始字节，不用界面缩略图替代；批量结果按输入顺序标注，部分图片失败时仍返回成功读取的图片。比较旧版本时使用返回的 snapshotRef 重读保存的快照，避免原文件已经改变。",
+      "display": { "label": "读取图片", "icon": "image", "color": "sky", "style": "read" },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "图片路径（相对当前工作区或绝对路径）、attachment:附件ID 或 HTTP/HTTPS 地址。"
+          },
+          "file_paths": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 1,
+            "maxItems": 8,
+            "description": "按观察顺序排列的图片路径或附件引用，最多 8 张。与 file_path 二选一。"
+          }
+        },
+        "required": []
+      }
+    },
+    {
       "name": "write_file",
-      "description": "写入内容到文件。如果文件不存在会自动创建（含父目录）。",
+      "description": "原子写入内容到文件。如果文件不存在会自动创建（含父目录）；可携带 expected_hash 防止覆盖新版本。",
       "display": { "label": "写入文件", "icon": "save", "color": "pink", "style": "edit" },
       "parameters": {
         "type": "object",
@@ -57,7 +83,11 @@
             "description": "目标文件路径。使用相对于当前 Agent workspace 根目录的路径，例如 notes/today.md；不要添加 workspace/ 前缀。"
           },
           "content": { "type": "string", "description": "要写入的内容" },
-          "append": { "type": "boolean", "description": "是否追加模式 (默认 false，覆写)" }
+          "append": { "type": "boolean", "description": "是否追加模式 (默认 false，覆写)" },
+          "expected_hash": {
+            "type": "string",
+            "description": "可选的已读取文件 SHA-256 hash，仅在写入前校验内容是否一致；不一致时拒绝本次写入。成功写入会返回新 hash，不限制后续编辑。"
+          }
         },
         "required": ["file_path", "content"]
       }

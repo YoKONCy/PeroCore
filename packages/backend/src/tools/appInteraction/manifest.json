@@ -1,4 +1,5 @@
 {
+  "id": "app_interaction",
   "toolDefinition": {
     "name": "interact_with_social",
     "description": "让正在运行的社交Agent读取指定群聊上下文，并根据给定意图自主判断是否参与本次聊天。",

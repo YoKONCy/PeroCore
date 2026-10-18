@@ -1,10 +1,11 @@
 import { projectSocialSurface } from './socialSurfaceProjection'
 import type { SocialStoragePort } from '@infos/shared'
+import { invalidatePromptReplay } from '@infos/backend/applicationHostAbi'
 
 export interface SocialDataServiceDeps {
   storage: SocialStoragePort
-  resetMemory(agentId: string): void
   getAgentName(agentId: string): string | undefined
+  cancelTasks?(agentId: string, channelId?: string): void
 }
 
 /** Social隐私数据清理用例层；统一处理Tombstone与跨存储删除。 */
@@ -30,6 +31,9 @@ export class SocialDataService {
       if (!['private', 'group'].includes(channelType) || !channelId) {
         return { error: '缺少有效的会话类型或会话 ID' as const }
       }
+      this.deps.cancelTasks?.(agentId, channelId)
+      invalidatePromptReplay('social:')
+      await this.deps.storage.deleteTurns(agentId, channelType, channelId)
       await this.deps.storage.upsertTombstone({
         agentId,
         platform: 'qq',
@@ -48,12 +52,16 @@ export class SocialDataService {
       const userId = String(input.userId ?? '')
       if (!userId) return { error: '缺少用户 ID' as const }
       await this.deps.storage.deleteContactImpression(agentId, 'qq', userId)
+      invalidatePromptReplay('social:')
       return { message: '联系人印象已清除' }
     }
     if (String(input.confirmAgentName ?? '') !== agentName) {
       return { precondition: `请输入角色名“${agentName}”确认` }
     }
     if (scope === 'all_messages' || scope === 'all_social_data') {
+      invalidatePromptReplay('social:')
+      this.deps.cancelTasks?.(agentId)
+      await this.deps.storage.deleteTurns(agentId)
       await this.deps.storage.upsertTombstone({
         agentId,
         platform: 'qq',
@@ -63,11 +71,13 @@ export class SocialDataService {
       if (scope === 'all_messages')
         return { message: '全部社交消息已清除', data: { deleted: messages } }
       const impressions = await this.deps.storage.deleteAllContactImpressions(agentId)
-      this.deps.resetMemory(agentId)
+      await this.deps.storage.deleteLongMemory(agentId)
       return { message: '全部社交数据已清除', data: { messages, impressions } }
     }
     if (scope === 'long_memory') {
-      this.deps.resetMemory(agentId)
+      invalidatePromptReplay('social:')
+      this.deps.cancelTasks?.(agentId)
+      await this.deps.storage.deleteLongMemory(agentId)
       return { message: '全部社交长记忆已清除' }
     }
     return { error: '未知清理范围' as const }

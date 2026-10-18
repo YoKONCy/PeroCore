@@ -11,6 +11,8 @@
  */
 
 import { Hono } from 'hono'
+import { z } from 'zod'
+import { IndexMaintenanceService } from '../services/maintenance/indexMaintenanceService'
 import { validate as zValidator } from '../lib/validation'
 import { AppError } from '../lib/appError'
 import type { AppContext } from '../container'
@@ -22,6 +24,26 @@ import {
 
 export function createMaintenanceRouter(ctx: AppContext) {
   const router = new Hono()
+  const indexes = new IndexMaintenanceService(ctx)
+  router.get('/indexes', (c) => c.json({ code: 'OK', data: indexes.status() }))
+  router.post(
+    '/reindex',
+    zValidator(
+      'json',
+      z.object({
+        scope: z.enum(['main', 'social', 'facts', 'knowledge', 'all']).default('main'),
+        agentId: z
+          .string()
+          .regex(/^[\w-]+$/)
+          .optional(),
+      }),
+    ),
+    async (c) => {
+      const input = c.req.valid('json')
+      const data = await indexes.rebuild(input.scope, input.agentId)
+      return c.json({ code: 'ACCEPTED', message: '索引重建已安排', data }, 202)
+    },
+  )
 
   // GET /api/maintenance/memory-config — 获取经过校验的主 Agent 记忆运行配置
   router.get('/memory-config', async (c) => {
@@ -33,6 +55,7 @@ export function createMaintenanceRouter(ctx: AppContext) {
   router.put('/memory-config', zValidator('json', memoryRuntimeConfigSchema), async (c) => {
     const config = c.req.valid('json')
     await ctx.configRepo.setJson(MEMORY_RUNTIME_CONFIG_KEY, config)
+    ctx.eventMemoryService.syncAdvancedRetrievalConfig(config)
     return c.json({ code: 'OK', message: '记忆运行配置已更新', data: config })
   })
 

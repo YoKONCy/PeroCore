@@ -175,7 +175,7 @@ return name`
     it('语法缺失时应当抛出包含期望 Token 的错误', () => {
       const source = 'if ready { say("hi")'
 
-      expect(() => parseSource(source)).toThrow('NIT Parser: 预期 RBRACE')
+      expect(() => parseSource(source)).toThrow(/RBRACE/)
     })
   })
 })

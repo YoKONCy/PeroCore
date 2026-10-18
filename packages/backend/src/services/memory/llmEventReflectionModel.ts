@@ -1,6 +1,8 @@
 import type { EventNote } from '@infos/shared'
 import type { LlmService, ModelConfig } from '../llm/llmService'
 import type { EventReflectionModel, ReflectionDecision } from './eventReflectionService'
+import { formatEventTime } from './eventMemoryTime'
+import { TASK_PROMPTS } from '../prompt/taskPrompts'
 
 export class LlmEventReflectionModel implements EventReflectionModel {
   constructor(
@@ -8,20 +10,39 @@ export class LlmEventReflectionModel implements EventReflectionModel {
     private getModelConfig: () => Promise<ModelConfig | null>,
   ) {}
 
-  async reflect(input: { event: EventNote; candidates: EventNote[] }): Promise<ReflectionDecision> {
+  async reflect(input: {
+    event: EventNote
+    candidates: EventNote[]
+    signal?: AbortSignal
+  }): Promise<ReflectionDecision> {
     const config = await this.getModelConfig()
     if (!config) throw new Error('Reflection模型未配置')
+    input.signal?.throwIfAborted()
     const output = await this.llm.chatText(
       config,
       [
         {
           role: 'system',
-          content:
-            '维护Agent事件记忆关系图。只允许caused_by、same_event、same_topic。caused_by必须有明确因果，时间先后或相似不够。archive只能在事件错误、被更完整事件高度覆盖或不应继续普通检索时为true，且不可恢复。revision仅用于修复主事件的记叙、重要度、情感或结构化标签；archiveOverlaps仅列出被主事件高度覆盖且应归档的候选ID。返回严格JSON：{"links":[],"removeLinks":[],"archive":false,"revision":null,"archiveOverlaps":[]}。',
+          content: TASK_PROMPTS['memory.reflect']!.body,
         },
-        { role: 'user', content: JSON.stringify(input) },
+        {
+          role: 'user',
+          content: JSON.stringify(
+            { event: input.event, candidates: input.candidates },
+            (key, value) =>
+              (key === 'eventAt' || key === 'createdAt') && typeof value === 'string'
+                ? formatEventTime(value)
+                : value,
+          ),
+        },
       ],
-      { temperature: 0.1, maxTokens: 1500 },
+      {
+        temperature: 0.1,
+        signal: input.signal,
+        promptTask: 'memory.reflect',
+        maxTokens: 1500,
+        usageContext: { agentId: input.event.agentId, purpose: 'memory' },
+      },
     )
     const cleaned = output
       .trim()

@@ -19,8 +19,7 @@
   "owner_appellation": "主人",
   "social": {
     "enabled": false,
-    "qq_id": "",
-    "use_stickers": false
+    "qq_id": ""
   },
 
   "waifu_texts": {

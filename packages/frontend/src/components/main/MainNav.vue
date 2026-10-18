@@ -14,9 +14,13 @@
  * @see .docs/S06_UI_UX_DESIGN_SPEC.md §3.2, §11.4, §14
  */
 import { PixelIcon } from '../pixel'
+import { computed, ref } from 'vue'
+import { useSelectionIndicator } from '../../composables/ui/useSelectionIndicator'
 import { useMainNav, type MainNavItem } from '../../composables/main/useMainNav'
 import { useApprovalStore } from '../../stores'
-import logoImg from '../../assets/logo.png'
+import InfosLogo from '../brands/InfosLogo.vue'
+
+withDefaults(defineProps<{ showThemeToggle?: boolean }>(), { showThemeToggle: true })
 
 const {
   currentTab,
@@ -33,6 +37,11 @@ const {
   toggleTheme,
 } = useMainNav()
 const approvalStore = useApprovalStore()
+const navigationRoot = ref<HTMLElement | null>(null)
+const selection = useSelectionIndicator(
+  navigationRoot,
+  computed(() => pendingTab.value || currentTab.value),
+)
 
 // ── 导航项样式 ──
 
@@ -54,38 +63,80 @@ function itemClasses(item: MainNavItem): string[] {
     <!-- 品牌标识 + 固定按钮 -->
     <div class="main-nav-brand">
       <div class="main-nav-logo">
-        <img :src="logoImg" alt="Logo" />
+        <InfosLogo variant="mark" />
       </div>
       <div v-if="!isNavCollapsed" class="main-nav-brand-text">
+        <InfosLogo class="main-nav-wordmark" variant="wordmark" />
         <span class="main-nav-brand-sub">PeroperoChat</span>
-        <span class="main-nav-brand-name font-pixel">萌动链接</span>
       </div>
       <!-- 固定/收起切换 -->
       <button
         v-if="!isNavCollapsed"
+        type="button"
         class="main-nav-pin"
         :class="{ 'main-nav-pin--pinned': isNavPinned }"
         :title="isNavPinned ? '取消固定' : '固定展开'"
+        :aria-label="isNavPinned ? '取消固定侧栏' : '固定展开侧栏'"
+        :aria-pressed="isNavPinned"
         @click="toggleNavPin"
       >
-        <PixelIcon :name="isNavPinned ? 'pin' : 'pin-off'" size="xs" />
+        <svg
+          class="main-nav-pin-glyph"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+          stroke-linejoin="miter"
+        >
+          <path class="main-nav-pin-frame" d="M4 4h16v16H4z M9 4v16" />
+          <path
+            class="main-nav-pin-arrow"
+            d="M16 9l-3 3 3 3"
+            :transform="isNavPinned ? undefined : 'translate(29 0) scale(-1 1)'"
+          />
+        </svg>
       </button>
     </div>
 
     <!-- 收起态固定按钮 (单独一行) -->
     <div v-if="isNavCollapsed" class="main-nav-pin-row">
       <button
+        type="button"
         class="main-nav-pin main-nav-pin--collapsed"
         :class="{ 'main-nav-pin--pinned': isNavPinned }"
         :title="isNavPinned ? '取消固定' : '固定展开'"
+        :aria-label="isNavPinned ? '取消固定侧栏' : '固定展开侧栏'"
+        :aria-pressed="isNavPinned"
         @click="toggleNavPin"
       >
-        <PixelIcon :name="isNavPinned ? 'pin' : 'pin-off'" size="xs" />
+        <svg
+          class="main-nav-pin-glyph"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+          stroke-linejoin="miter"
+        >
+          <path class="main-nav-pin-frame" d="M4 4h16v16H4z M9 4v16" />
+          <path
+            class="main-nav-pin-arrow"
+            d="M16 9l-3 3 3 3"
+            :transform="isNavPinned ? undefined : 'translate(29 0) scale(-1 1)'"
+          />
+        </svg>
       </button>
     </div>
 
     <!-- 导航分组 -->
-    <nav class="main-nav-list">
+    <nav ref="navigationRoot" class="main-nav-list main-nav-list--motion">
+      <div
+        class="main-nav-selection"
+        :class="{ 'is-ready': selection.ready.value }"
+        :style="selection.style.value"
+        aria-hidden="true"
+      />
       <div v-for="group in navGroups" :key="group.id" class="main-nav-group">
         <!-- 分组标题 -->
         <button
@@ -108,15 +159,15 @@ function itemClasses(item: MainNavItem): string[] {
           <button
             v-for="item in group.items"
             :key="item.id"
+            :data-motion-item="item.id"
             :class="itemClasses(item)"
             :disabled="item.disabled"
+            :aria-current="currentTab === item.id ? 'page' : undefined"
+            :aria-busy="pendingTab === item.id"
             @pointerenter="prefetchTab(item.id)"
             @focus="prefetchTab(item.id)"
             @click="setTab(item.id)"
           >
-            <!-- 像素光轨指示 -->
-            <div v-if="currentTab === item.id" class="main-nav-item-trail" />
-
             <PixelIcon :name="item.icon" size="sm" class="main-nav-item-icon" />
 
             <span v-if="!isNavCollapsed" class="main-nav-item-label">
@@ -139,7 +190,7 @@ function itemClasses(item: MainNavItem): string[] {
     </nav>
 
     <!-- 底部区域 -->
-    <div class="main-nav-footer">
+    <div v-if="showThemeToggle" class="main-nav-footer">
       <button
         class="main-nav-theme-btn"
         :title="theme === 'light' ? '切换到深色' : '切换到浅色'"
@@ -242,27 +293,11 @@ function itemClasses(item: MainNavItem): string[] {
   height: 36px;
   overflow: hidden;
   flex-shrink: 0;
-  /* 像素边框 */
-  box-shadow:
-    -2px 0 0 0 var(--color-moe-cocoa),
-    2px 0 0 0 var(--color-moe-cocoa),
-    0 -2px 0 0 var(--color-moe-cocoa),
-    0 2px 0 0 var(--color-moe-cocoa);
 }
 
-[data-theme='dark'] .main-nav-logo {
-  box-shadow:
-    -2px 0 0 0 var(--ui-accent-purple),
-    2px 0 0 0 var(--ui-accent-purple),
-    0 -2px 0 0 var(--ui-accent-purple),
-    0 2px 0 0 var(--ui-accent-purple),
-    0 0 12px rgba(167, 139, 250, 0.3);
-}
-
-.main-nav-logo img {
+.main-nav-logo .infos-logo {
   width: 100%;
   height: 100%;
-  object-fit: cover;
 }
 
 .main-nav-brand-text {
@@ -280,13 +315,9 @@ function itemClasses(item: MainNavItem): string[] {
   letter-spacing: 0.12em;
 }
 
-.main-nav-brand-name {
-  font-size: 16px;
-  font-weight: 900;
-  background: linear-gradient(135deg, var(--ui-text-primary), var(--ui-accent-sky));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+.main-nav-wordmark {
+  width: 90px;
+  height: 29px;
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -294,42 +325,74 @@ function itemClasses(item: MainNavItem): string[] {
  * ═══════════════════════════════════════════════════════════════ */
 
 .main-nav-pin {
-  width: 26px;
-  height: 26px;
+  --pin-accent: var(--ui-accent-primary);
+  --pin-soft: var(--ui-accent-primary-soft);
+  position: relative;
+  width: 28px;
+  height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: none;
-  background: var(--ui-bg-surface);
-  color: var(--ui-text-tertiary);
+  padding: 0;
+  background: var(--ui-bg-surface-soft);
+  color: var(--ui-text-secondary);
   cursor: pointer;
-  border-radius: var(--ui-radius-sm);
-  border: 1px solid var(--ui-border-subtle);
-  transition: all var(--ui-duration-fast) var(--ui-ease-standard);
+  border-radius: 0;
+  border: 1px solid var(--ui-border-default);
+  box-shadow:
+    inset 0 1px 0 var(--ui-bg-surface),
+    1px 1px 0 var(--ui-border-subtle);
+  transition:
+    background-color 120ms steps(3),
+    border-color 120ms steps(3),
+    color 120ms steps(3),
+    box-shadow 120ms steps(3);
   flex-shrink: 0;
 }
 
 .main-nav-pin:hover {
-  color: var(--ui-accent-primary);
-  border-color: var(--ui-accent-primary);
-  box-shadow: var(--ui-glow-pink);
+  color: var(--pin-accent);
+  border-color: var(--pin-accent);
+  background: var(--pin-soft);
+  box-shadow:
+    inset 0 1px 0 var(--ui-bg-surface),
+    1px 1px 0 color-mix(in srgb, var(--pin-accent) 20%, transparent);
+}
+
+.main-nav-pin:active {
+  transform: translateY(1px);
+  box-shadow: inset 0 1px 2px var(--ui-border-default);
+}
+
+.main-nav-pin:focus-visible {
+  outline: 2px solid var(--pin-accent);
+  outline-offset: 4px;
+}
+
+.main-nav-pin-glyph {
+  width: 20px;
+  height: 20px;
+}
+
+.main-nav-pin-frame {
+  opacity: 0.65;
+}
+.main-nav-pin-arrow {
+  stroke: currentColor;
+}
+.main-nav-pin:hover .main-nav-pin-frame {
+  opacity: 1;
 }
 
 .main-nav-pin--pinned {
-  color: var(--ui-accent-primary);
-  background: var(--ui-accent-primary-soft);
-  border-color: var(--ui-accent-primary);
+  color: var(--pin-accent);
+  background: var(--pin-soft);
+  border-color: color-mix(in srgb, var(--pin-accent) 45%, var(--ui-border-default));
 }
 
 [data-theme='dark'] .main-nav-pin {
-  background: rgba(30, 27, 45, 0.8);
-  border-color: rgba(139, 92, 246, 0.2);
-}
-
-[data-theme='dark'] .main-nav-pin:hover,
-[data-theme='dark'] .main-nav-pin--pinned {
-  border-color: var(--ui-accent-purple);
-  box-shadow: var(--ui-glow-purple);
+  --pin-accent: var(--ui-accent-purple);
+  --pin-soft: var(--ui-accent-purple-soft);
 }
 
 /* 收起态: 单独一行居中 */
@@ -342,7 +405,20 @@ function itemClasses(item: MainNavItem): string[] {
 }
 
 .main-nav-pin--collapsed {
-  /* 收起态样式微调 */
+  width: 32px;
+  height: 28px;
+  color: var(--pin-accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .main-nav-pin {
+    transition: none;
+  }
+}
+
+[data-motion='off'] .main-nav-pin,
+[data-motion='reduced'] .main-nav-pin {
+  transition: none;
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -353,17 +429,10 @@ function itemClasses(item: MainNavItem): string[] {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
+  overscroll-behavior: contain;
   padding: 4px 10px 12px;
   position: relative;
   z-index: 1;
-}
-
-.main-nav-list::-webkit-scrollbar {
-  width: 3px;
-}
-
-.main-nav-list::-webkit-scrollbar-thumb {
-  background: var(--ui-scrollbar-thumb);
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -384,6 +453,7 @@ function itemClasses(item: MainNavItem): string[] {
   background: transparent;
   cursor: pointer;
   border-radius: var(--ui-radius-xs);
+  transition: background-color var(--ui-duration-fast) var(--ui-ease-standard);
 }
 
 .main-nav-group-title:hover {
@@ -425,18 +495,22 @@ function itemClasses(item: MainNavItem): string[] {
   font-weight: 500;
   cursor: pointer;
   border-radius: var(--ui-radius-sm);
-  transition: all var(--ui-duration-fast) var(--ui-ease-standard);
+  transition:
+    background-color var(--ui-duration-fast) var(--ui-ease-standard),
+    color var(--ui-duration-fast) var(--ui-ease-standard),
+    box-shadow var(--ui-duration-fast) var(--ui-ease-standard),
+    transform var(--ui-duration-fast) var(--ui-ease-standard);
   margin-bottom: 1px;
   text-align: left;
 }
 
-.main-nav-item:hover {
+.main-nav-item:hover:not(:disabled):not(.main-nav-item--disabled) {
   background: var(--ui-bg-hover);
   color: var(--ui-text-primary);
   transform: translateX(var(--ui-motion-distance-sm));
 }
 
-.main-nav-item:active:not(:disabled) {
+.main-nav-item:active:not(:disabled):not(.main-nav-item--disabled) {
   transform: translateX(var(--ui-motion-distance-sm)) scale(var(--ui-motion-scale-press));
 }
 
@@ -575,7 +649,8 @@ function itemClasses(item: MainNavItem): string[] {
   box-shadow: var(--ui-shadow-md);
 }
 
-.main-nav--collapsed .main-nav-item:hover .main-nav-tooltip {
+.main-nav--collapsed .main-nav-item:hover .main-nav-tooltip,
+.main-nav--collapsed .main-nav-item:focus-visible .main-nav-tooltip {
   opacity: 1;
   transform: translateY(-50%) translateX(2px);
 }
@@ -613,7 +688,11 @@ function itemClasses(item: MainNavItem): string[] {
   border-radius: var(--ui-radius-sm);
   font-size: 12px;
   font-weight: 500;
-  transition: all var(--ui-duration-fast);
+  transition:
+    background-color var(--ui-duration-fast) var(--ui-ease-standard),
+    border-color var(--ui-duration-fast) var(--ui-ease-standard),
+    color var(--ui-duration-fast) var(--ui-ease-standard),
+    box-shadow var(--ui-duration-fast) var(--ui-ease-standard);
 }
 
 .main-nav-version-btn {
@@ -661,7 +740,8 @@ function itemClasses(item: MainNavItem): string[] {
   display: none;
 }
 
-.main-nav--collapsed .main-nav-version-btn:hover .main-nav-tooltip {
+.main-nav--collapsed .main-nav-version-btn:hover .main-nav-tooltip,
+.main-nav--collapsed .main-nav-version-btn:focus-visible .main-nav-tooltip {
   opacity: 1;
   transform: translateY(-50%) translateX(2px);
 }
@@ -671,5 +751,49 @@ function itemClasses(item: MainNavItem): string[] {
   .main-nav {
     transition: none;
   }
+}
+</style>
+
+<style scoped>
+.main-nav-selection {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-bg-active);
+  box-shadow:
+    inset 3px 0 0 var(--ui-accent-primary),
+    inset 0 1px 0 color-mix(in srgb, var(--ui-text-primary) 5%, transparent);
+}
+.main-nav-selection.is-ready {
+  transition:
+    transform 360ms cubic-bezier(0.16, 1, 0.3, 1),
+    width 260ms ease,
+    height 260ms ease,
+    opacity 140ms ease;
+}
+.main-nav-list--motion .main-nav-item--active,
+.main-nav-list--motion .main-nav-item--pending {
+  background: transparent;
+  box-shadow: none;
+}
+.main-nav-list--motion .main-nav-item--pending .main-nav-item-icon {
+  animation: none;
+}
+.main-nav-list--motion .main-nav-item:hover,
+.main-nav-list--motion .main-nav-item:active {
+  transform: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .main-nav-selection.is-ready {
+    transition: opacity 100ms ease;
+  }
+}
+:global([data-motion='reduced']) .main-nav-selection.is-ready {
+  transition: opacity 100ms ease;
+}
+:global([data-motion='off']) .main-nav-selection.is-ready {
+  transition: none;
 }
 </style>

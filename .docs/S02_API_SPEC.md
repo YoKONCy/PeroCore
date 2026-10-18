@@ -1,7 +1,7 @@
 # API 响应规范
 
 > **适用范围**：infOS-TS 后端所有 REST API
-> **最后更新**：2026-04-21
+> **最后更新**：2026-10-17
 
 ---
 
@@ -68,7 +68,7 @@ throw new AppError('NOT_FOUND', { message: '未找到 ID 为 42 的记忆' })
 
 ## 4. HTTP 状态码清单
 
-本项目使用以下 **15 个** HTTP 状态码，不使用 204：
+本项目使用以下 **17 个** HTTP 状态码，不使用 204：
 
 | HTTP 码 | 标准语义               | 使用场景                       |
 | ------- | ---------------------- | ------------------------------ |
@@ -283,7 +283,7 @@ data: {"code":"LLM_ERROR","message":"AI 服务异常"}
 
 ## 9. AIOS Thread、SSE 与能力契约
 
-交互 API 的领域边界以 [A09_AIOS_ARCHITECTURE](./A09_AIOS_ARCHITECTURE.md#9-api-与流式契约) 为准：后端从 `threadId` 推导 `agentId`、`channel` 和上下文策略，客户端只提交当前输入，不得上传权威历史。
+交互 API 的领域边界以 [A09_AIOS_ARCHITECTURE](./A09_AIOS_ARCHITECTURE.md#10-api-与流式契约) 为准：后端从 `threadId` 推导 `agentId`、`channel` 和上下文策略，客户端只提交当前输入，不得上传权威历史。
 
 - `ThreadChannel` 仅包含 `desktop`、`group`；前者由主 Agent Compiler 处理，后者专属于 Stronghold。
 - Social、Arca、Coding 等 Application Realm 身份由 `appId/realmId` 表达，不得扩大全局 `ThreadChannel` 联合。
@@ -292,5 +292,32 @@ data: {"code":"LLM_ERROR","message":"AI 服务异常"}
 - Provider 节点的能力协议与 SSE 业务流分离；能力调用消息的类型必须由 shared 包统一定义。
 
 ---
+
+## 10. 桌宠口语与导航投影
+
+- assistant ConversationMessageProjection 增加可选 spokenReply，来源是独立口语通道，非正文摘要或正文截断。历史消息缺省时保持不播报。
+- conversation_reply_ready 是发给同角色客户端的短暂 Gateway Push，字段为 agentId/threadId/messageId/spokenReply；持久化事实仍通过 Conversation Projection 恢复。
+- Gateway chat 接受可选 speak=false 禁用本次自动播报；stop_speech 只取消该角色语音派发与播放，不取消 Agent 生成或后台任务。
+- gateway.select_principal 将当前客户端的消息投影身份切换为指定角色；Input Seat 仍独立申请与续租。
+- 语音识别二进制请求保留实际 Content-Type 编码参数；取消后客户端不再把迟到识别结果提交为对话。
+
+## 11. 文档知识库
+
+所有端点位于 `/api/knowledge`，使用标准信封。共享事实端点保持原有合同。
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET | `/documents?query=&page=1&pageSize=30` | 资料列表、分页及统计，pageSize 最大 100 |
+| GET | `/documents/:id` | 文档元数据、各部分摘要与关键词 |
+| POST | `/documents` | 导入粘贴文本或网页：`kind: text/url`、可选 `title`、`content/url`、可选 `replaceId` |
+| POST | `/documents/upload` | multipart 文本导入：`file`、可选 `title`、`replaceId` |
+| POST | `/documents/:id/retry` | 失败的整理任务重新排队 |
+| DELETE | `/documents/:id` | 取消整理，删除原文、摘要及派生索引 |
+| POST | `/reindex` | 从摘要重建可选向量索引，不重复摘要整理 |
+| POST | `/search` | `keywords`、`regex`、`limit≤20`、`expand`、`partIds`、`documentId`、`offset` |
+
+导入和重试返回 `202 ACCEPTED` 与文档状态，LLM 整理在后台执行。重建返回 `202 ACCEPTED`，进度通过各文档 `vectorStatus` 获取。检索默认返回摘要与原文节选，`expand` 展开原文；结果包括 `version`、`truncated`，长部分包括字符游标 `nextOffset`。
+
+入库规则、存储与工具上下文生命周期见 [B03_DOCUMENT_KNOWLEDGE](./B03_DOCUMENT_KNOWLEDGE.md)。
 
 _本文档由 Carola 整理，适用于 infOS-TS 后端 API 规范。_

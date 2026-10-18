@@ -190,7 +190,7 @@ describe('P8 单 Authority 多端总验收', () => {
     ).toThrow('INPUT_SEAT_EXPIRED')
   })
 
-  it('应只调用目标 Audio Output，并在 Seat 迁移与 Offer 离线后 fail-closed', async () => {
+  it('应只调用目标 Audio Output，并在 Offer 离线后 fail-closed', async () => {
     const nodes = new NodeRegistry()
     for (const nodeId of [authorityId, electronId, capabilityId]) {
       const facets =

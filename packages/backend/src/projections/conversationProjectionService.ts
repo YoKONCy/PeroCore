@@ -9,6 +9,8 @@ import type { AgentInputService } from '../services/execution/agentInputService'
 import type { AttachmentService } from '../services/attachment/attachmentService'
 
 import { ConversationSurfaceProjector } from './conversationSurfaceProjector'
+import { splitSpokenReply } from '../nit/spokenReplyFilter'
+import { parseAutomaticApproval } from '@infos/shared'
 
 interface CachedProjection {
   snapshot: ConversationProjectionSnapshot
@@ -65,31 +67,40 @@ export class ConversationProjectionService {
     const attachments = await this.attachmentService.listForMessages(
       ordered.map((message) => message.id),
     )
-    const messages = ordered.map<ConversationMessageProjection>((message) => ({
-      messageId: String(message.id),
-      threadId: message.threadId,
-      role: message.role,
-      content: message.content,
-      rawContent: message.rawContent,
-      pairId: message.pairId,
-      senderId: message.senderId,
-      agentId: message.agentId,
-      revision: message.revision,
-      imageTranscription: this.isImageTranscription(message.metadataJson),
-      status: message.status,
-      failureMessage: this.parseFailureMessage(message.metadataJson),
-      timestamp: message.timestamp,
-      outputTokens: this.parseOutputTokens(message.metadataJson),
-      contentBlocks: this.parseContentBlocks(message.metadataJson),
-      toolCalls: this.parseToolCalls(message.metadataJson),
-      attachments: (attachments.get(message.id) ?? []).map((item) => ({
-        id: item.id,
-        kind: item.kind,
-        name: item.originalName,
-        mimeType: item.mimeType,
-        sizeBytes: item.sizeBytes,
-      })),
-    }))
+    const messages = ordered.map<ConversationMessageProjection>((message) => {
+      const parsed = message.role === 'assistant' ? splitSpokenReply(message.content) : undefined
+      return {
+        messageId: String(message.id),
+        threadId: message.threadId,
+        role: message.role,
+        content: parsed?.content ?? message.content,
+        spokenReply:
+          this.parseSpokenReply(message.metadataJson) || parsed?.spokenReply || undefined,
+        rawContent: message.rawContent,
+        pairId: message.pairId,
+        senderId: message.senderId,
+        agentId: message.agentId,
+        revision: message.revision,
+        imageTranscription: this.isImageTranscription(message.metadataJson),
+        status: message.status,
+        failureMessage: this.parseFailureMessage(message.metadataJson),
+        executionPause: this.parseExecutionPause(message.metadataJson),
+        timestamp: message.timestamp,
+        outputTokens: this.parseOutputTokens(message.metadataJson),
+        generationStats: this.parseGenerationStats(message.metadataJson),
+        contentBlocks: this.parseContentBlocks(message.metadataJson),
+        toolCalls: this.parseToolCalls(message.metadataJson),
+        attachments: (attachments.get(message.id) ?? []).map((item) => ({
+          id: item.id,
+          kind: item.kind,
+          name: item.originalName,
+          mimeType: item.mimeType,
+          sizeBytes: item.sizeBytes,
+          caption: item.caption,
+          origin: item.origin,
+        })),
+      }
+    })
     const surfaces = messages.map((message) =>
       this.surfaceProjector.projectMessage(message, message.agentId ?? thread.agentId),
     )
@@ -147,7 +158,11 @@ export class ConversationProjectionService {
               principalId: input.agentId,
               title: '想问问你',
               question: input.question,
-              context: input.context ? { message: input.context } : null,
+              questions: input.questions,
+              context:
+                input.context || input.responseMessage
+                  ? { message: [input.context, input.responseMessage].filter(Boolean).join('\n') }
+                  : null,
               options: input.options,
               allowFreeText: input.allowFreeText,
               required: input.required,
@@ -187,6 +202,40 @@ export class ConversationProjectionService {
     if (cached) cached.dirty = true
   }
 
+  private parseSpokenReply(metadataJson: string): string | undefined {
+    try {
+      const value = (JSON.parse(metadataJson) as { spokenReply?: unknown }).spokenReply
+      return typeof value === 'string' && value.length <= 240 ? value : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  private parseExecutionPause(
+    metadataJson: string,
+  ): ConversationMessageProjection['executionPause'] {
+    try {
+      const value = JSON.parse(metadataJson).executionPause
+      if (
+        value?.kind !== 'desktop' ||
+        !['code', 'message', 'toolName', 'callId', 'pausedAt'].every(
+          (key) => typeof value[key] === 'string',
+        )
+      )
+        return undefined
+      return {
+        kind: 'desktop',
+        code: value.code,
+        message: value.message,
+        toolName: value.toolName,
+        callId: value.callId,
+        pausedAt: value.pausedAt,
+      }
+    } catch {
+      return undefined
+    }
+  }
+
   private isImageTranscription(metadataJson: string): boolean {
     try {
       return (JSON.parse(metadataJson) as { kind?: string }).kind === 'image_transcription'
@@ -214,6 +263,33 @@ export class ConversationProjectionService {
     }
   }
 
+  private parseGenerationStats(
+    metadataJson: string,
+  ): ConversationMessageProjection['generationStats'] {
+    try {
+      const value = JSON.parse(metadataJson).generationStats
+      if (
+        !value ||
+        !Number.isSafeInteger(value.outputTokens) ||
+        value.outputTokens < 0 ||
+        !Number.isFinite(value.modelDurationMs) ||
+        value.modelDurationMs < 0 ||
+        !Number.isSafeInteger(value.modelCalls) ||
+        value.modelCalls < 1 ||
+        typeof value.estimated !== 'boolean'
+      )
+        return undefined
+      return {
+        outputTokens: value.outputTokens,
+        modelDurationMs: value.modelDurationMs,
+        modelCalls: value.modelCalls,
+        estimated: value.estimated,
+      }
+    } catch {
+      return undefined
+    }
+  }
+
   private parseContentBlocks(metadataJson: string): ConversationMessageProjection['contentBlocks'] {
     try {
       const parsed = JSON.parse(metadataJson) as { contentBlocks?: unknown }
@@ -226,6 +302,49 @@ export class ConversationProjectionService {
         const sequence = typeof item.sequence === 'number' ? item.sequence : 0
         const turn = typeof item.turn === 'number' ? item.turn : 0
         if (!blockId) continue
+        if (item.kind === 'model_retry' && item.retry && typeof item.retry === 'object') {
+          const retry = item.retry as Record<string, unknown>
+          if (
+            typeof retry.retryId !== 'string' ||
+            typeof retry.reason !== 'string' ||
+            !['waiting', 'retrying', 'recovered', 'failed', 'cancelled'].includes(
+              String(retry.state),
+            ) ||
+            !['attempt', 'maxRetries', 'delayMs', 'startedAt', 'updatedAt'].every(
+              (key) => typeof retry[key] === 'number' && Number.isFinite(retry[key]),
+            )
+          )
+            continue
+          blocks.push({
+            blockId,
+            sequence,
+            turn,
+            kind: 'model_retry',
+            retry: {
+              retryId: retry.retryId,
+              state: retry.state as import('@infos/shared').ModelRetryInfo['state'],
+              attempt: retry.attempt as number,
+              maxRetries: retry.maxRetries as number,
+              delayMs: retry.delayMs as number,
+              reason: retry.reason,
+              startedAt: retry.startedAt as number,
+              updatedAt: retry.updatedAt as number,
+              partialResponse: retry.partialResponse === true,
+            },
+          })
+          continue
+        }
+        if (item.kind === 'thinking' && typeof item.content === 'string') {
+          blocks.push({
+            blockId,
+            sequence,
+            turn,
+            kind: 'thinking',
+            content: item.content,
+            durationMs: typeof item.durationMs === 'number' ? item.durationMs : undefined,
+          })
+          continue
+        }
         if (item.kind === 'native_reasoning' && typeof item.content === 'string') {
           blocks.push({
             blockId,
@@ -264,6 +383,7 @@ export class ConversationProjectionService {
           name: item.name,
           args: typeof item.args === 'string' ? item.args : JSON.stringify(item.args ?? {}),
           result: typeof item.result === 'string' ? item.result : undefined,
+          automaticApproval: parseAutomaticApproval(item.automaticApproval),
           isError: typeof item.isError === 'boolean' ? item.isError : undefined,
           durationMs: typeof item.durationMs === 'number' ? item.durationMs : undefined,
         })
@@ -285,6 +405,7 @@ export class ConversationProjectionService {
           name: item.name as string,
           args: typeof item.args === 'string' ? item.args : JSON.stringify(item.args ?? {}),
           result: typeof item.result === 'string' ? item.result : undefined,
+          automaticApproval: parseAutomaticApproval(item.automaticApproval),
           isError: typeof item.isError === 'boolean' ? item.isError : undefined,
           durationMs: typeof item.durationMs === 'number' ? item.durationMs : undefined,
         }))

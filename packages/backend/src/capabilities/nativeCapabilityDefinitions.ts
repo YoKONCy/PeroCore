@@ -62,6 +62,13 @@ export const AUDIO_OUTPUT_CAPABILITY: KernelCapabilityDefinition = {
   },
 }
 
+/** 系统完成提醒无需 Input Seat，不占用桌面控制权限。 */
+export const COMPLETION_ALERT_CAPABILITY: KernelCapabilityDefinition = {
+  capabilityType: 'client.completion-alert',
+  contractVersion: '1.0',
+  operations: { notify: { risk: 'interact', idempotency: 'keyed' } },
+}
+
 export const SYSTEM_SHELL_CAPABILITY: KernelCapabilityDefinition = {
   capabilityType: 'system.shell',
   contractVersion: '1.0',
@@ -82,6 +89,8 @@ export const DESKTOP_ENVIRONMENT_CAPABILITY: KernelCapabilityDefinition = {
   capabilityType: 'desktop.environment',
   contractVersion: '1.0',
   operations: {
+    control: { risk: 'interact', idempotency: 'unsafe' },
+    statusCard: { risk: 'read', idempotency: 'safe' },
     screenCapture: { risk: 'elevated', idempotency: 'safe' },
     clipboardRead: { risk: 'elevated', idempotency: 'safe' },
     clipboardWrite: { risk: 'elevated', idempotency: 'unsafe' },

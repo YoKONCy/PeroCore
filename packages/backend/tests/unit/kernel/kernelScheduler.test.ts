@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { KernelExecutionId } from '@infos/shared'
 import { KernelScheduler } from '@infos/backend/kernel/kernelScheduler'
 
@@ -30,11 +30,32 @@ function gate() {
   return { promise, release }
 }
 
-async function settle() {
-  await new Promise((resolve) => setTimeout(resolve, 15))
-}
+beforeEach(() => vi.useFakeTimers())
+afterEach(() => vi.useRealTimers())
 
 describe('KernelScheduler', () => {
+  it('周期计划条件不满足时不创建 Execution、不增加执行统计', async () => {
+    const execution = runtime()
+    const scheduler = new KernelScheduler(execution as never)
+    const handler = vi.fn().mockResolvedValue(undefined)
+    let dirty = false
+    scheduler.registerPeriodic({
+      name: 'conditional-save',
+      displayName: '按需保存',
+      description: '仅有变更时保存',
+      intervalMs: 60_000,
+      shouldRun: () => dirty,
+      handler,
+    })
+    await scheduler.triggerPeriodicNow('conditional-save')
+    expect(execution.create).not.toHaveBeenCalled()
+    expect(handler).not.toHaveBeenCalled()
+    expect(scheduler.getPeriodicScheduleStatus()[0]?.stats.totalRuns).toBe(0)
+    dirty = true
+    await scheduler.triggerPeriodicNow('conditional-save')
+    expect(handler).toHaveBeenCalledTimes(1)
+    expect(scheduler.getPeriodicScheduleStatus()[0]?.stats.totalRuns).toBe(1)
+  })
   it('应按调度类别和优先级选择任务，并受全局并发限制', async () => {
     const execution = runtime()
     const scheduler = new KernelScheduler(execution as never, {
@@ -51,7 +72,6 @@ describe('KernelScheduler', () => {
       priority: 1,
       run: async () => blocker.promise,
     })
-    await settle()
     await scheduler.submit({
       principalId: 'system',
       class: 'maintenance',
@@ -65,9 +85,7 @@ describe('KernelScheduler', () => {
       run: async () => void order.push('interactive'),
     })
     blocker.release()
-    await settle()
-    await settle()
-    expect(order).toEqual(['interactive', 'maintenance'])
+    await vi.waitFor(() => expect(order).toEqual(['interactive', 'maintenance']))
   })
 
   it('应限制同类并发并投影明确WaitReason', async () => {
@@ -79,19 +97,18 @@ describe('KernelScheduler', () => {
     })
     const blocker = gate()
     await scheduler.submit({ principalId: 'a', class: 'background', run: () => blocker.promise })
-    await settle()
     const queued = await scheduler.submit({
       principalId: 'b',
       class: 'background',
       run: async () => undefined,
     })
-    await settle()
-    expect(scheduler.get(queued.descriptor.executionId)).toMatchObject({
-      state: 'queued',
-      waitReason: 'class_capacity',
-    })
+    await vi.waitFor(() =>
+      expect(scheduler.get(queued.descriptor.executionId)).toMatchObject({
+        state: 'queued',
+        waitReason: 'class_capacity',
+      }),
+    )
     blocker.release()
-    await settle()
   })
 
   it('应以resourceKey保证互斥，但允许无冲突资源并行', async () => {
@@ -108,7 +125,6 @@ describe('KernelScheduler', () => {
       resourceKey: 'agent:pero',
       run: () => blocker.promise,
     })
-    await settle()
     const same = await scheduler.submit({
       principalId: 'b',
       class: 'interactive',
@@ -121,11 +137,13 @@ describe('KernelScheduler', () => {
       resourceKey: 'agent:nana',
       run: async () => undefined,
     })
-    await settle()
-    expect(scheduler.get(same.descriptor.executionId)?.waitReason).toBe('resource_locked')
-    expect(scheduler.get(other.descriptor.executionId)?.state).toBe('completed')
+    await vi.waitFor(() =>
+      expect(scheduler.get(same.descriptor.executionId)?.waitReason).toBe('resource_locked'),
+    )
+    await vi.waitFor(() =>
+      expect(scheduler.get(other.descriptor.executionId)?.state).toBe('completed'),
+    )
     blocker.release()
-    await settle()
   })
 
   it('队列达到上限时必须Backpressure拒绝', async () => {
@@ -137,7 +155,6 @@ describe('KernelScheduler', () => {
     })
     const blocker = gate()
     await scheduler.submit({ principalId: 'a', class: 'background', run: () => blocker.promise })
-    await settle()
     await scheduler.submit({ principalId: 'b', class: 'background', run: async () => undefined })
     await expect(
       scheduler.submit({ principalId: 'c', class: 'background', run: async () => undefined }),
@@ -163,7 +180,6 @@ describe('KernelScheduler', () => {
         })
       },
     })
-    await settle()
     const queued = await scheduler.submit({
       principalId: 'b',
       class: 'background',
@@ -171,9 +187,12 @@ describe('KernelScheduler', () => {
     })
     await scheduler.cancel(queued.descriptor.executionId)
     await scheduler.cancel(running.descriptor.executionId)
-    await settle()
-    expect(scheduler.get(queued.descriptor.executionId)?.state).toBe('cancelled')
-    expect(scheduler.get(running.descriptor.executionId)?.state).toBe('cancelled')
+    await vi.waitFor(() =>
+      expect(scheduler.get(queued.descriptor.executionId)?.state).toBe('cancelled'),
+    )
+    await vi.waitFor(() =>
+      expect(scheduler.get(running.descriptor.executionId)?.state).toBe('cancelled'),
+    )
   })
 
   it('应支持协作式暂停和恢复', async () => {
@@ -193,16 +212,18 @@ describe('KernelScheduler', () => {
         }
       },
     })
-    await settle()
+    await vi.waitFor(() => expect(runs).toBe(1))
     expect(scheduler.pause(snapshot.descriptor.executionId)).toBe(true)
-    await settle()
-    expect(scheduler.get(snapshot.descriptor.executionId)).toMatchObject({
-      state: 'suspended',
-      waitReason: 'paused',
-    })
+    await vi.waitFor(() =>
+      expect(scheduler.get(snapshot.descriptor.executionId)).toMatchObject({
+        state: 'suspended',
+        waitReason: 'paused',
+      }),
+    )
     expect(scheduler.resume(snapshot.descriptor.executionId)).toBe(true)
-    await settle()
-    expect(scheduler.get(snapshot.descriptor.executionId)?.state).toBe('completed')
+    await vi.waitFor(() =>
+      expect(scheduler.get(snapshot.descriptor.executionId)?.state).toBe('completed'),
+    )
     expect(runs).toBe(2)
   })
 
@@ -218,28 +239,51 @@ describe('KernelScheduler', () => {
         })
       },
     })
-    await new Promise((resolve) => setTimeout(resolve, 30))
-    expect(scheduler.get(snapshot.descriptor.executionId)?.state).toBe('timed_out')
+    await vi.advanceTimersByTimeAsync(10)
+    await vi.waitFor(() =>
+      expect(scheduler.get(snapshot.descriptor.executionId)?.state).toBe('timed_out'),
+    )
   })
 
-  it('应执行LLM、Token、Tool和I/O预算', async () => {
+  it.each([
+    ['LLM', { maxLlmCalls: 1 }, { llmCalls: 1 }],
+    ['输入 Token', { maxInputTokens: 1 }, { inputTokens: 1 }],
+    ['输出 Token', { maxOutputTokens: 1 }, { outputTokens: 1 }],
+    ['工具', { maxToolCalls: 1 }, { toolCalls: 1 }],
+  ] as const)('%s 超过显式预算后终止执行', async (_name, budget, usage) => {
     const scheduler = new KernelScheduler(runtime() as never)
     const snapshot = await scheduler.submit({
       principalId: 'a',
       class: 'interactive',
-      budget: { maxLlmCalls: 1, maxConcurrentIo: 1 },
+      budget,
       run: async (context) => {
-        context.consume({ llmCalls: 1 })
-        const end = context.beginIo()
-        end()
-        context.consume({ llmCalls: 1 })
+        context.consume(usage)
+        context.consume(usage)
       },
     })
-    await settle()
-    expect(scheduler.get(snapshot.descriptor.executionId)).toMatchObject({
-      state: 'failed',
-      usage: { llmCalls: 2, concurrentIo: 0 },
+    await vi.waitFor(() =>
+      expect(scheduler.get(snapshot.descriptor.executionId)?.state).toBe('failed'),
+    )
+  })
+
+  it('I/O 并发超过显式预算后终止', async () => {
+    const scheduler = new KernelScheduler(runtime() as never)
+    const snapshot = await scheduler.submit({
+      principalId: 'a',
+      class: 'interactive',
+      budget: { maxConcurrentIo: 1 },
+      run: async (context) => {
+        const end = context.beginIo()
+        try {
+          context.beginIo()
+        } finally {
+          end()
+        }
+      },
     })
+    await vi.waitFor(() =>
+      expect(scheduler.get(snapshot.descriptor.executionId)?.state).toBe('failed'),
+    )
   })
 
   it('应由内核注册、触发并统计周期计划', async () => {

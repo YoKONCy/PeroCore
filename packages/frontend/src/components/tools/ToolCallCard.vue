@@ -18,9 +18,16 @@ import {
 import type { AgentToolDisplay } from '../../api/modules/agentApi'
 import { getToolStyleRenderer } from './toolRenderers'
 import { resolveToolSignature } from './toolSignatures'
+import { parseToolSearchResult, toolSearchSummary } from '../../lib/toolSearchResult'
+import type { FileWritePreviewBaseline } from '@infos/shared'
+import { IMAGE_PREVIEW_TOOLS, imagePreviewsFromToolResult } from '@infos/shared'
+import { useFileMutationPreview } from '../../composables/tools/useFileMutationPreview'
+import ToolCardEdit from './renderers/ToolCardEdit.vue'
+import ToolCardImage from './renderers/ToolCardImage.vue'
 
 interface Props {
   tool: {
+    automaticApproval?: import('@infos/shared').AutomaticApprovalRecord
     name: string
     args: string
     result?: string
@@ -28,17 +35,28 @@ interface Props {
     durationMs?: number
     receivedChars?: number
     assembling?: boolean
+    interrupted?: boolean
+    fileBaseline?: FileWritePreviewBaseline
+    previewTruncated?: boolean
   }
   expanded?: boolean | null
+  active?: boolean
   chainStart?: boolean
   chainEnd?: boolean
 }
 const props = withDefaults(defineProps<Props>(), {
   expanded: null,
+  active: true,
   chainStart: true,
   chainEnd: true,
 })
 const emit = defineEmits<{ 'update:expanded': [value: boolean] }>()
+const imageTool = computed(
+  () =>
+    IMAGE_PREVIEW_TOOLS.some((name) => name === props.tool.name) &&
+    (props.tool.name !== 'automation_execute' ||
+      imagePreviewsFromToolResult(props.tool.name, props.tool.result).length > 0),
+)
 const display = ref<AgentToolDisplay>()
 const detailsRef = ref<HTMLDetailsElement>()
 const internalExpanded = ref(props.tool.result === undefined)
@@ -46,23 +64,49 @@ const drawerOpen = ref(false)
 const userLocked = ref(false)
 let collapseTimer: number | undefined
 
-onMounted(async () => {
-  display.value = await resolveToolDisplay(props.tool.name)
-  await nextTick()
-  syncOpen()
-})
+onMounted(syncOpen)
+watch(
+  () => props.tool.name,
+  async (name, _previous, onCleanup) => {
+    let active = true
+    onCleanup(() => {
+      active = false
+    })
+    display.value = undefined
+    const metadata = await resolveToolDisplay(name)
+    if (active) display.value = metadata
+  },
+  { immediate: true },
+)
 onBeforeUnmount(() => window.clearTimeout(collapseTimer))
 
 const state = computed<'running' | 'error' | 'ok'>(() =>
-  props.tool.result === undefined ? 'running' : props.tool.isError ? 'error' : 'ok',
+  props.tool.interrupted
+    ? 'error'
+    : props.tool.result === undefined
+      ? 'running'
+      : props.tool.isError
+        ? 'error'
+        : 'ok',
 )
 const signature = computed(() =>
   resolveToolSignature(props.tool.name, display.value?.signature as never),
 )
 const renderer = computed(() => getToolStyleRenderer(display.value?.style))
+const fileMutation = computed(() => ['write_file', 'edit_file'].includes(props.tool.name))
+const filePreview = useFileMutationPreview(
+  () => ({ ...props.tool, toolName: props.tool.name }),
+  () => fileMutation.value && props.active,
+)
+const fileStatsHint = computed(() => {
+  const preview = filePreview.value
+  const phase = preview.committed ? '已写入' : state.value === 'error' ? '未写入的预览' : '变更预览'
+  return `${phase} · 新增 ${preview.insertions} 行，删除 ${preview.baselineUnknown ? '行数待确认' : `${preview.deletions} 行`}`
+})
 const label = computed(() => toolDisplayLabel(props.tool.name, display.value))
 const icon = computed(() => toolDisplayIcon(display.value))
 const argsObj = computed<Record<string, unknown>>(() => {
+  if (fileMutation.value) return filePreview.value.args
   try {
     return JSON.parse(props.tool.args) as Record<string, unknown>
   } catch {
@@ -94,9 +138,17 @@ const draftSummary = computed(() => {
   return ''
 })
 const summary = computed(() => {
+  if (
+    state.value === 'ok' &&
+    ['search_files', 'glob_files', 'code_search'].includes(props.tool.name)
+  ) {
+    const result = parseToolSearchResult(props.tool.result)
+    if (result) return toolSearchSummary(result)
+  }
   if (state.value === 'running' && ['write_file', 'edit_file'].includes(props.tool.name)) {
     const path = String(argsObj.value.file_path ?? argsObj.value.path ?? '').trim()
-    return path ? `正在编辑 · ${path}` : '正在编辑文件...'
+    const action = props.tool.assembling ? '正在生成修改' : '正在写入'
+    return path ? `${action} · ${path}` : action
   }
   for (const field of signature.value.summaryFields) {
     const value = argsObj.value[field]
@@ -137,6 +189,10 @@ function setOpen(value: boolean, user = false): void {
 function handleSummaryClick(): void {
   window.clearTimeout(collapseTimer)
   setOpen(!open.value, true)
+}
+function keepImageOpen(): void {
+  window.clearTimeout(collapseTimer)
+  setOpen(true, true)
 }
 function openDrawer(event: Event): void {
   event.preventDefault()
@@ -191,7 +247,21 @@ watch(drawerOpen, (value) => {
         :state="state"
       />
       <span class="ta-copy">
-        <strong>{{ label }}</strong>
+        <strong>
+          {{ label }}
+          <span
+            v-if="fileMutation && filePreview.available"
+            class="ta-diff-stats"
+            :class="{ 'is-preview': !filePreview.committed }"
+            :title="fileStatsHint"
+            :aria-label="fileStatsHint"
+          >
+            <span class="is-add">+{{ filePreview.insertions }}</span>
+            <span class="is-remove">
+              −{{ filePreview.baselineUnknown ? '?' : filePreview.deletions }}
+            </span>
+          </span>
+        </strong>
         <small :title="summary">{{ summary }}</small>
       </span>
       <span class="ta-progress" aria-hidden="true"><i /></span>
@@ -212,7 +282,45 @@ watch(drawerOpen, (value) => {
       </span>
     </summary>
     <div class="ta-result-stage">
-      <component :is="renderer" :args="tool.args" :result="tool.result" :is-error="tool.isError" />
+      <p
+        v-if="tool.automaticApproval"
+        class="ta-approval-note"
+        :title="tool.automaticApproval.modelId"
+      >
+        自动审批员 · {{ tool.automaticApproval.decision === 'allow' ? '通过' : '拒绝'
+        }}{{ tool.automaticApproval.errorCode ? '（审批异常）' : '' }}
+        <span>{{ tool.automaticApproval.reason }}</span>
+      </p>
+      <template v-if="fileMutation">
+        <ToolCardEdit
+          v-if="open"
+          :args="tool.args"
+          :result="tool.result"
+          :is-error="tool.isError"
+          :assembling="tool.assembling"
+          :interrupted="tool.interrupted"
+          :file-baseline="tool.fileBaseline"
+          :preview-truncated="tool.previewTruncated"
+          :active="open && active"
+          :tool-name="tool.name"
+          :preview="filePreview"
+        />
+      </template>
+      <ToolCardImage
+        v-else-if="imageTool"
+        :tool-name="tool.name"
+        :result="tool.result"
+        :is-error="tool.isError"
+        :active="open && active !== false"
+        @interact="keepImageOpen"
+      />
+      <component
+        :is="renderer"
+        v-else
+        :args="tool.args"
+        :result="tool.result"
+        :is-error="tool.isError"
+      />
     </div>
     <Teleport to="body">
       <ToolTechnicalDrawer
@@ -229,6 +337,22 @@ watch(drawerOpen, (value) => {
 </template>
 
 <style scoped>
+.ta-approval-note {
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border-left: 2px solid var(--ui-accent-sky);
+  color: var(--ui-text-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+  background: var(--ui-bg-surface-soft);
+}
+.ta-approval-note span {
+  margin-left: 8px;
+  color: var(--ui-text-tertiary);
+}
+</style>
+
+<style scoped>
 .ta-node {
   --ta-face: color-mix(in srgb, var(--ui-bg-elevated) 94%, var(--ta-accent-soft));
   --ta-face-raised: color-mix(in srgb, var(--ui-bg-surface) 82%, var(--ta-accent-soft));
@@ -237,6 +361,8 @@ watch(drawerOpen, (value) => {
   --ta-shadow: color-mix(in srgb, var(--ta-accent) 18%, transparent);
   position: relative;
   min-width: 0;
+  width: 96%;
+  max-width: 100%;
   color: var(--ui-text-primary);
 }
 .ta-node::before {
@@ -288,9 +414,32 @@ watch(drawerOpen, (value) => {
   gap: 1px;
 }
 .ta-copy strong {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  column-gap: 10px;
+  row-gap: 3px;
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.02em;
+}
+.ta-diff-stats {
+  display: inline-flex;
+  gap: 7px;
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ta-diff-stats .is-add {
+  color: var(--ui-success);
+}
+.ta-diff-stats .is-remove {
+  color: var(--ui-danger);
+}
+.ta-diff-stats.is-preview {
+  opacity: 0.82;
 }
 .ta-copy small {
   overflow: hidden;
@@ -444,6 +593,9 @@ watch(drawerOpen, (value) => {
   }
 }
 @media (max-width: 700px) {
+  .ta-node {
+    width: 100%;
+  }
   .ta-summary {
     grid-template-columns: 40px minmax(0, 1fr) auto;
   }

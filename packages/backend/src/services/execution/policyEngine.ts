@@ -123,7 +123,30 @@ export class PolicyEngine {
   evaluate(context: ToolPolicyContext): PolicyDecision {
     const policy = context.permission?.paramPolicy
     if (policy?.maxContentLength !== undefined) {
-      for (const [key, value] of Object.entries(context.args)) {
+      const fields: Array<[string, unknown]> = []
+      const visit = (value: unknown): void => {
+        if (Array.isArray(value)) {
+          for (const item of value) visit(item)
+          return
+        }
+        if (!value || typeof value !== 'object') return
+        for (const [key, item] of Object.entries(value)) {
+          if (CONTENT_FIELDS.has(key)) fields.push([key, item])
+          if (item && typeof item === 'object') visit(item)
+        }
+      }
+      visit(context.args)
+      const total = fields.reduce(
+        (sum, [, value]) => sum + (typeof value === 'string' ? value.length : 0),
+        0,
+      )
+      if (total > policy.maxContentLength)
+        return {
+          action: 'deny',
+          code: 'PARAM_TOO_LARGE',
+          reason: `编辑内容合计长度 ${total} 超过上限 ${policy.maxContentLength}`,
+        }
+      for (const [key, value] of fields) {
         if (
           CONTENT_FIELDS.has(key) &&
           typeof value === 'string' &&
@@ -172,8 +195,13 @@ export class PolicyEngine {
       }
     }
 
-    if (command && TERMINAL_TOOLS.has(context.toolName)) {
-      const audit = auditCommand(command)
+    // 仅用于审计展示，不把参数拼接后的文本交给 Shell 执行。
+    const auditedCommand =
+      command && Array.isArray(context.args.argv)
+        ? [command, ...context.args.argv.map(String)].join(' ')
+        : command
+    if (auditedCommand && TERMINAL_TOOLS.has(context.toolName)) {
+      const audit = auditCommand(auditedCommand)
       if (!audit.allowed) {
         return {
           action: 'require_approval',
@@ -185,7 +213,7 @@ export class PolicyEngine {
     if (
       command &&
       TERMINAL_TOOLS.has(context.toolName) &&
-      HIGH_RISK_COMMAND_PATTERNS.some((pattern) => pattern.test(command))
+      HIGH_RISK_COMMAND_PATTERNS.some((pattern) => pattern.test(auditedCommand ?? command))
     ) {
       return {
         action: 'require_approval',

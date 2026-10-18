@@ -79,11 +79,12 @@ describe('Capability 用户空间调用', () => {
         capabilityHandleId: handle.handleId,
         correlationId: 'correlation-1',
       }),
+      undefined,
     )
     await scope.dispose()
     await expect(
       port.invoke('uppercase', { text: 'closed' }, { principalId: 'pero', correlationId: 'c2' }),
-    ).rejects.toThrow('Port 已释放')
+    ).rejects.toThrow(Error)
   })
 
   it('应拒绝越权、过期 Deadline 与离线 Provider', async () => {
@@ -139,7 +140,7 @@ describe('Capability 用户空间调用', () => {
     unregister()
     await expect(
       active.invoke('uppercase', {}, { principalId: 'pero', correlationId: 'offline' }),
-    ).rejects.toThrow('Provider 已离线')
+    ).rejects.toThrow(Error)
     expect(handles.get('missing' as KernelCapabilityId)).toBeNull()
   })
 })

@@ -14,7 +14,7 @@
 import { ref, computed, watch, type Ref } from 'vue'
 import { invoke } from '../../utils/ipcAdapter'
 import { preloadTab } from './tabRegistry'
-import { applicationSurfaceRegistry } from '../../applications'
+import { useNotificationStore } from '../../stores/useNotificationStore'
 
 // ── 常量 ──
 
@@ -54,18 +54,10 @@ export type ThemeMode = 'light' | 'dark'
 
 const currentTab = ref<string>('chat')
 const pendingTab = ref<string>('')
+const tabDirection = ref(1)
 const isNavPinned = ref<boolean>(false)
-const expandedGroups = ref<Set<string>>(new Set(['settings', 'applications', 'advanced']))
+const expandedGroups = ref<Set<string>>(new Set(['settings', 'advanced']))
 const theme = ref<ThemeMode>('light')
-
-const applicationNavItems: MainNavItem[] = applicationSurfaceRegistry
-  .list('main.tab')
-  .map((surface) => ({
-    id:
-      surface.appId === 'infos.arca' ? 'arca' : `${surface.appId}:${surface.declaration.surfaceId}`,
-    label: surface.declaration.title,
-    icon: surface.declaration.icon ?? 'book',
-  }))
 
 // ── 计算属性 ──
 
@@ -183,16 +175,12 @@ const navGroups: MainNavGroup[] = [
       { id: 'agent_config', label: '角色管理', icon: 'users' },
       { id: 'user_settings', label: '用户设定', icon: 'user' },
       { id: 'model_config', label: '模型配置', icon: 'settings' },
+      { id: 'prompts', label: '提示词', icon: 'edit' },
       { id: 'voice_config', label: '语音功能', icon: 'mic' },
-      { id: 'mcp_config', label: 'MCP 配置', icon: 'terminal' },
+      { id: 'mcp_config', label: '工具与扩展', icon: 'terminal' },
       { id: 'distributed', label: '分布式', icon: 'network' },
+      { id: 'social', label: '社交配置', icon: 'chat' },
     ],
-  },
-  {
-    id: 'applications',
-    title: '应用',
-    collapsible: true,
-    items: [{ id: 'social', label: '社交', icon: 'chat' }, ...applicationNavItems],
   },
   {
     id: 'advanced',
@@ -211,14 +199,24 @@ const navGroups: MainNavGroup[] = [
 let tabRequestSequence = 0
 async function setTab(id: string): Promise<void> {
   const item = navGroups.flatMap((g) => g.items).find((i) => i.id === id)
-  if (item?.disabled || currentTab.value === id) return
+  if (item?.disabled) return
+  if (currentTab.value === id) {
+    tabRequestSequence++
+    pendingTab.value = ''
+    return
+  }
   const sequence = ++tabRequestSequence
+  const order = navGroups.flatMap((group) => group.items).map((entry) => entry.id)
+  tabDirection.value = order.indexOf(id) >= order.indexOf(currentTab.value) ? 1 : -1
   pendingTab.value = id
   try {
     await preloadTab(id)
     if (sequence === tabRequestSequence) currentTab.value = id
-  } catch {
-    // 异步组件仍会通过全局错误系统报告加载错误，导航保持在当前可用页面。
+  } catch (error) {
+    if (sequence === tabRequestSequence)
+      useNotificationStore().toast(error instanceof Error ? error.message : '页面加载失败', {
+        type: 'error',
+      })
   } finally {
     if (sequence === tabRequestSequence) pendingTab.value = ''
   }
@@ -305,6 +303,15 @@ watch(theme, () => {
 // 初始化
 init()
 
+// 接收桌宠等其他窗口修改的主题，复用现有应用与持久化逻辑。
+function syncThemeFromStorage(event: StorageEvent): void {
+  if (event.key === LS_THEME && (event.newValue === 'light' || event.newValue === 'dark')) {
+    setTheme(event.newValue)
+  }
+}
+window.addEventListener('storage', syncThemeFromStorage)
+import.meta.hot?.dispose(() => window.removeEventListener('storage', syncThemeFromStorage))
+
 /** 当前激活 Tab 的环境光配色 */
 const currentAmbient = computed(() => {
   const item = navGroups.flatMap((g) => g.items).find((i) => i.id === currentTab.value)
@@ -319,6 +326,7 @@ export function useMainNav() {
     // 状态
     currentTab: currentTab as Ref<string>,
     pendingTab: pendingTab as Ref<string>,
+    tabDirection,
     isNavPinned: isNavPinned as Ref<boolean>,
     theme: theme as Ref<ThemeMode>,
     expandedGroups: expandedGroups as Ref<Set<string>>,

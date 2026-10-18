@@ -112,7 +112,7 @@ export class AsrService {
       'audio/mpeg': 'mp3',
       'audio/wav': 'wav',
     }
-    const ext = extMap[mimeType] ?? 'webm'
+    const ext = extMap[mimeType.split(';')[0]!.trim().toLowerCase()] ?? 'webm'
 
     logger.info(
       `开始语音识别 (${(request.audio.byteLength / 1024).toFixed(1)}KB, ` +

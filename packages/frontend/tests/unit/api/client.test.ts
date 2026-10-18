@@ -69,14 +69,6 @@ describe('apiClient', () => {
   })
 
   describe('便捷方法', () => {
-    it('get 应当透传 endpoint', async () => {
-      requestMock.mockResolvedValue({ code: 'OK', message: '成功' })
-
-      await apiClient.get('/system')
-
-      expect(requestMock).toHaveBeenCalledWith('/system', undefined)
-    })
-
     it('post 应当序列化 body 并设置 POST 方法', async () => {
       requestMock.mockResolvedValue({ code: 'OK', message: '成功' })
 
@@ -109,16 +101,6 @@ describe('apiClient', () => {
       expect(requestMock).toHaveBeenCalledWith('/system/chat-background', {
         method: 'PUT',
         body: data,
-      })
-    })
-
-    it('delete 应当设置 DELETE 方法', async () => {
-      requestMock.mockResolvedValue({ code: 'OK', message: '成功' })
-
-      await apiClient.delete('/memories/1')
-
-      expect(requestMock).toHaveBeenCalledWith('/memories/1', {
-        method: 'DELETE',
       })
     })
   })

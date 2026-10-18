@@ -1,6 +1,6 @@
 # 12. AgentApplication / SubAgent 架构设计（草案）
 
-> **归档警示**：本文记录历史设计与迁移背景，不代表当前架构。现行规范以[A01文档索引](../A01_PROJECT_STRUCTURE.md#6-规范文档与归档)及其列出的A02–A09/S系列文档为准；旧Channel、API、Package或Application表述不得用于新实现。
+> **归档警示**：本文记录历史设计与迁移背景，不代表当前架构。现行规范以[A01文档索引](../A01_PROJECT_STRUCTURE.md#5-规范文档与归档)及其列出的A02–A09/S系列文档为准；旧Channel、API、Package或Application表述不得用于新实现。
 
 > 基于 AIOS 第七阶段完成后的架构延伸设计。
 > 本文档整理设计讨论的先验信息、约束条件和初步构想，供后续深入细化使用。

@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3'
+import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { SqliteSocialStoragePort } from '@infos/backend/applications/sqliteSocialStoragePort'
@@ -17,6 +18,12 @@ beforeEach(() => {
     CREATE TABLE kernel_outbox_events(event_id TEXT PRIMARY KEY,event_type TEXT NOT NULL,durability TEXT NOT NULL,principal_id TEXT NOT NULL,process_id TEXT,execution_id TEXT,correlation_id TEXT,causation_id TEXT,object_type TEXT,object_id TEXT,object_generation INTEGER,payload_json TEXT NOT NULL,occurred_at TEXT NOT NULL,status TEXT DEFAULT 'pending',attempts INTEGER DEFAULT 0,last_error TEXT,next_attempt_at TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,published_at TEXT);
   `)
   port = new SqliteSocialStoragePort(db)
+  db.exec(
+    readFileSync(
+      new URL('../../../src/database/migrations/0013_social_recovery_privacy.sql', import.meta.url),
+      'utf8',
+    ),
+  )
 })
 afterEach(() => db.close())
 
@@ -61,6 +68,43 @@ describe('SqliteSocialStoragePort', () => {
       correlationId: 'execution-social',
     })
     expect(JSON.parse(event.payloadJson)).toMatchObject({ msgId: 'event-1', channelId: 'g1' })
+  })
+
+  it('Outbox 写入失败时必须回滚社交消息', async () => {
+    const transactional = new SqliteSocialStoragePort(
+      db,
+      new KernelOutboxRepository(drizzle(db) as never),
+    )
+    db.exec(
+      "CREATE TRIGGER reject_outbox BEFORE INSERT ON kernel_outbox_events BEGIN SELECT RAISE(ABORT, '拒绝测试事件'); END;",
+    )
+    await expect(
+      runWithKernelExecution(
+        {
+          executionId: 'failed',
+          processId: 'social',
+          principalId: 'pero',
+          class: 'background',
+          priority: 4,
+          budget: {},
+        } as never,
+        () =>
+          transactional.insert({
+            msgId: 'rollback',
+            platform: 'qq',
+            channelId: 'g1',
+            channelType: 'group',
+            senderId: 'self',
+            senderName: 'Pero',
+            content: '不应留下',
+            agentId: 'pero',
+          }),
+      ),
+    ).rejects.toThrow()
+    expect(db.prepare('SELECT COUNT(*) AS count FROM social_messages').get()).toEqual({ count: 0 })
+    expect(db.prepare('SELECT COUNT(*) AS count FROM kernel_outbox_events').get()).toEqual({
+      count: 0,
+    })
   })
 
   it('应完整支持消息写入、去重、查询、总结和删除', async () => {

@@ -5,6 +5,7 @@
  * 调用方依赖这里的稳定契约，不直接耦合底层传输或运行时实现。
  */
 import DOMPurify from 'dompurify'
+import { isResourceLink, isHtmlFileReference } from './resourceLinks'
 import { Marked, Renderer } from 'marked'
 import katex from 'katex'
 import hljs from 'highlight.js/lib/core'
@@ -51,11 +52,18 @@ function escapeHtml(value: string): string {
 renderer.code = ({ text, lang }) => {
   const language = (lang || 'text').trim().split(/\s+/)[0]?.toLowerCase() || 'text'
   if (language === 'peromath') return renderMath(text.trim(), true)
-  const highlighted = hljs.getLanguage(language)
-    ? hljs.highlight(text, { language, ignoreIllegals: true }).value
-    : escapeHtml(text)
+  const highlighted =
+    text.length <= 32_000 && hljs.getLanguage(language)
+      ? hljs.highlight(text, { language, ignoreIllegals: true }).value
+      : escapeHtml(text)
   return `<div class="chat-code-block"><div class="chat-code-head"><span>${escapeHtml(language.toUpperCase())}</span><button type="button" data-copy-code>复制</button></div><pre><code class="hljs language-${escapeHtml(language)}">${highlighted}</code></pre></div>`
 }
+
+let parsingLinkLabel = false
+renderer.codespan = ({ text }) =>
+  !parsingLinkLabel && isHtmlFileReference(text)
+    ? `<a href="#" class="chat-resource-chip" data-resource-source="${escapeHtml(text)}"><code>${escapeHtml(text)}</code><span aria-hidden="true">↗</span></a>`
+    : `<code>${escapeHtml(text)}</code>`
 
 const SAFE_INLINE_HTML =
   /^<\/?(?:span|mark|small|kbd|sub|sup|u|s|b|i|strong|em)(?:\s[^>]*)?>$|^<br\s*\/?>$/i
@@ -66,8 +74,18 @@ renderer.html = ({ text }) =>
     ? text
     : `<code class="chat-xml-inline">${highlightXml(escapeHtml(text))}</code>`
 
-renderer.link = ({ href, title, tokens }) => {
-  const label = renderer.parser.parseInline(tokens)
+renderer.link = function ({ href, title, tokens }) {
+  // Marked 注册时会复制渲染器，parser 属于本次回调的 this。
+  const previous = parsingLinkLabel
+  let label: string
+  try {
+    parsingLinkLabel = true
+    label = this.parser.parseInline(tokens)
+  } finally {
+    parsingLinkLabel = previous
+  }
+  if (isResourceLink(href))
+    return `<a href="#" class="chat-resource-chip" data-resource-source="${escapeHtml(href)}">${label}<span aria-hidden="true">↗</span></a>`
   const safeHref = /^(https?:|mailto:)/i.test(href) ? href : '#'
   const external = /^https?:/i.test(safeHref)
   return `<a href="${escapeHtml(safeHref)}"${title ? ` title="${escapeHtml(title)}"` : ''} target="_blank" rel="noopener noreferrer">${label}${external ? '<span class="chat-link-mark">↗</span>' : ''}</a>`
@@ -77,6 +95,8 @@ const marked = new Marked({ renderer, breaks: true, gfm: true })
 const RICH_TEXT_CACHE_LIMIT = 500
 const RICH_TEXT_CACHE_MAX_SOURCE_LENGTH = 64_000
 const richTextCache = new Map<string, string>()
+const RICH_TEXT_CACHE_CHAR_BUDGET = 4_000_000
+let richTextCacheChars = 0
 
 export interface ChatRichRenderOptions {
   cache?: boolean
@@ -91,9 +111,17 @@ function readRichTextCache(source: string): string | undefined {
 }
 
 function writeRichTextCache(source: string, html: string): void {
+  const previous = richTextCache.get(source)
+  if (previous !== undefined) richTextCacheChars -= source.length + previous.length
   richTextCache.set(source, html)
-  if (richTextCache.size > RICH_TEXT_CACHE_LIMIT) {
-    richTextCache.delete(richTextCache.keys().next().value!)
+  richTextCacheChars += source.length + html.length
+  while (
+    richTextCache.size > RICH_TEXT_CACHE_LIMIT ||
+    richTextCacheChars > RICH_TEXT_CACHE_CHAR_BUDGET
+  ) {
+    const oldest = richTextCache.keys().next().value!
+    richTextCacheChars -= oldest.length + richTextCache.get(oldest)!.length
+    richTextCache.delete(oldest)
   }
 }
 
@@ -130,7 +158,7 @@ export function renderChatRichText(source: string, options: ChatRichRenderOption
   for (const item of inlineMath) html = html.replaceAll(item.placeholder, item.html)
 
   const sanitized = DOMPurify.sanitize(html, {
-    ADD_ATTR: ['target', 'rel', 'data-copy-code'],
+    ADD_ATTR: ['target', 'rel', 'data-copy-code', 'data-resource-source'],
     ADD_TAGS: ['annotation', 'math', 'semantics'],
   })
   const rendered = decorateTextNodes(sanitized)
@@ -211,10 +239,35 @@ function decorateTextNodes(html: string): string {
       parent.closest('code, pre, a, .katex, .chat-math-block, .chat-xml-inline, button')
     )
       continue
-    const fragment = quoteFragment(node.data)
+    const fragment = htmlReferenceFragment(node.data) ?? quoteFragment(node.data)
     if (fragment) node.replaceWith(fragment)
   }
   return template.innerHTML
+}
+
+/** 普通正文中的 HTML 文件名也可打开；代码块、已有链接与公式不参与识别。 */
+function htmlReferenceFragment(text: string): DocumentFragment | null {
+  const pattern =
+    /(?:^|(?<=[\s（("“「]))(?:workspace:|[a-z]:[\\/]|\.\.?\/)?[\p{L}\p{N}_][\p{L}\p{N}_./\\:-]*\.html?(?=$|[\s，。！？、）)"”」])/giu
+  const matches = [...text.matchAll(pattern)].filter((match) => isHtmlFileReference(match[0]))
+  if (!matches.length) return null
+  const fragment = document.createDocumentFragment()
+  let cursor = 0
+  for (const match of matches) {
+    const start = match.index!
+    const leading = text.slice(cursor, start)
+    fragment.append(quoteFragment(leading) ?? document.createTextNode(leading))
+    const link = document.createElement('a')
+    link.href = '#'
+    link.className = 'chat-resource-chip'
+    link.dataset.resourceSource = match[0]
+    link.textContent = match[0] + ' ↗'
+    fragment.append(link)
+    cursor = start + match[0].length
+  }
+  const trailing = text.slice(cursor)
+  fragment.append(quoteFragment(trailing) ?? document.createTextNode(trailing))
+  return fragment
 }
 
 function quoteFragment(text: string): DocumentFragment | null {

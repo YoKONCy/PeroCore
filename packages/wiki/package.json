@@ -1,6 +1,6 @@
 {
   "name": "@infos/wiki",
-  "version": "0.9.3-hotfix2",
+  "version": "0.9.4",
   "description": "infOS Wiki — VitePress 文档站点",
   "private": true,
   "scripts": {
@@ -11,6 +11,7 @@
   "devDependencies": {
     "@types/three": "^0.184.0",
     "markdown-it-mathjax3": "^4.3.2",
+    "mermaid": "^11.16.1",
     "three": "^0.184.0",
     "vitepress": "^1.6.4"
   }

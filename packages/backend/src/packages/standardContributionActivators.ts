@@ -41,9 +41,10 @@ export function registerStandardContributionActivators(input: {
   hooks?: PackageHookBus
   capabilities?: CapabilityDirectory
   activateBuiltinProvider?: import('./types').ContributionActivator
+  activateBuiltinTool?: import('./types').ContributionActivator
 }): void {
   input.runtime.registerActivator('tool', async (context) => {
-    if (!context.contribution.entry) return
+    if (!context.contribution.entry) return input.activateBuiltinTool?.(context)
     const module = await loadModule<ToolModule>(context)
     const value = module.default ?? module
     const definition = value.definition ?? context.contribution.metadata?.definition
@@ -52,7 +53,10 @@ export function registerStandardContributionActivators(input: {
     }
     const execute = value.execute
     input.tools.register(
-      definition as import('../services/pipeline/types').ToolDefinition,
+      {
+        ...(definition as import('../services/pipeline/types').ToolDefinition),
+        packageId: `package:${context.manifest.packageId}`,
+      },
       async (args, toolContext) => {
         const result = await execute(args, toolContext)
         if (typeof result === 'string') return result

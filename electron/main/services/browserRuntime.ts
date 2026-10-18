@@ -1,11 +1,22 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { BrowserWindow, WebContentsView, app, session, type WebContents } from 'electron'
+import { AsyncLocalStorage } from 'node:async_hooks'
+import {
+  WebContentsView,
+  app,
+  nativeImage,
+  session,
+  type NativeImage,
+  type WebContents,
+} from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
+import { desktopTabs } from '../windows/desktopTabs'
 
 interface BrowserTarget {
   id: string
-  window: BrowserWindow
+  view: WebContentsView
+  tabId: string
+  retained: boolean
   overlay?: WebContentsView
   createdAt: string
   lastUsedAt: string
@@ -17,6 +28,9 @@ interface BrowserTarget {
     elementIds: string[]
   }
   pendingDialog?: { type: string; message: string; defaultPrompt?: string }
+  debuggerReady?: Promise<void>
+  debuggerEventsBound?: boolean
+  pendingScreenshot?: Promise<NativeImage>
   network: Array<Record<string, unknown>>
 }
 
@@ -53,6 +67,7 @@ interface ElementDescriptor {
 const PARTITION = 'persist:infos-browser'
 const SEARCH_ENDPOINT = 'https://www.bing.com/search?q='
 const NAVIGATION_TIMEOUT_MS = 15_000
+const SCREENSHOT_TIMEOUT_MS = 8_000
 const MAX_TEXT_LENGTH = 120_000
 const MAX_TARGETS = 8
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000
@@ -77,6 +92,12 @@ export class ElectronBrowserRuntime {
   private readonly downloadDir = path.join(app.getPath('userData'), 'browser-downloads')
   private invocationQueue: Promise<void> = Promise.resolve()
   private rejectActiveInvocation?: (error: Error) => void
+  private invocationTargetId?: string
+  private invocationRunning = false
+  private readonly invocationContext = new AsyncLocalStorage<{
+    targetId?: string
+    cancelled: boolean
+  }>()
   private readonly programmaticCloseTargetIds = new Set<string>()
   private activeOperator = 'Agent'
   private unlockTimer?: NodeJS.Timeout
@@ -94,7 +115,9 @@ export class ElectronBrowserRuntime {
     const run = this.invocationQueue.then(() => {
       this.activeOperator = operatorName
       this.touchRuntime()
-      return this.invokeOnce(operation, input)
+      return this.invocationContext.run({ targetId: this.activeTargetId, cancelled: false }, () =>
+        this.invokeOnce(operation, input),
+      )
     })
     this.invocationQueue = run.then(
       () => undefined,
@@ -109,16 +132,27 @@ export class ElectronBrowserRuntime {
       rejectTermination = reject
     })
     this.rejectActiveInvocation = rejectTermination
+    this.invocationRunning = true
+    this.invocationTargetId = this.activeTargetId
     if (this.unlockTimer) clearTimeout(this.unlockTimer)
     this.unlockTimer = undefined
-    await this.lockActiveTarget(input)
     try {
-      return await Promise.race([this.dispatch(operation, input), termination])
+      const execution = (async () => {
+        await this.lockActiveTarget(input)
+        if (this.invocationContext.getStore()?.cancelled)
+          throw new Error('WEB_OPERATION_CANCELLED: 操作已结束')
+        return this.dispatch(operation, input)
+      })()
+      return await Promise.race([execution, termination])
     } catch (error) {
       this.lastError = error instanceof Error ? error.message : String(error)
       throw error
     } finally {
       this.rejectActiveInvocation = undefined
+      const context = this.invocationContext.getStore()
+      if (context) context.cancelled = true
+      this.invocationRunning = false
+      this.invocationTargetId = undefined
       this.unlockTimer = setTimeout(() => {
         this.unlockTimer = undefined
         this.unlockAllTargets()
@@ -203,19 +237,24 @@ export class ElectronBrowserRuntime {
   }
 
   private activateTarget(target: BrowserTarget): void {
+    if (this.invocationContext.getStore()?.cancelled)
+      throw new Error('WEB_OPERATION_CANCELLED: 浏览器操作已结束')
     this.activeTargetId = target.id
-    if (!target.window.isVisible()) target.window.show()
-    if (target.window.isMinimized()) target.window.restore()
-    target.window.focus()
+    // Agent 的操作目标与用户正在查看的标签分别维护。
+    const context = this.invocationContext.getStore()
+    if (this.invocationRunning && context && !context.cancelled) {
+      this.invocationTargetId = target.id
+      context.targetId = target.id
+    }
   }
 
   show(): void {
-    this.activateTarget(this.activeTarget())
+    desktopTabs.reveal(this.activeTarget().tabId)
   }
 
   private async lockActiveTarget(_input: Record<string, unknown>): Promise<void> {
     const target = this.activeTargetId ? this.targets.get(this.activeTargetId) : undefined
-    if (target && !target.window.isDestroyed()) await this.lockTarget(target)
+    if (target && !target.view.webContents.isDestroyed()) await this.lockTarget(target)
   }
 
   private overlayHtml(): string {
@@ -243,8 +282,8 @@ export class ElectronBrowserRuntime {
   }
 
   private syncOverlayBounds(target: BrowserTarget): void {
-    if (!target.overlay || target.window.isDestroyed()) return
-    const { width, height } = target.window.getContentBounds()
+    if (!target.overlay || target.view.webContents.isDestroyed()) return
+    const { width, height } = target.view.getBounds()
     target.overlay.setBounds({ x: 0, y: 0, width, height })
   }
 
@@ -254,25 +293,28 @@ export class ElectronBrowserRuntime {
       webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true },
     })
     target.overlay = overlay
+    desktopTabs.installShortcuts(overlay.webContents)
+    desktopTabs.update(target.tabId, { locked: true })
     overlay.setBackgroundColor('#00000000')
-    target.window.contentView.addChildView(overlay)
+    target.view.addChildView(overlay)
     this.syncOverlayBounds(target)
     await overlay.webContents.loadURL(
       `data:text/html;charset=utf-8,${encodeURIComponent(this.overlayHtml())}`,
     )
-    if (!target.window.isDestroyed()) {
+    if (!target.view.webContents.isDestroyed()) {
       this.syncOverlayBounds(target)
-      target.window.contentView.addChildView(overlay)
+      target.view.addChildView(overlay)
     }
   }
 
   private unlockAllTargets(): void {
     for (const target of this.targets.values()) {
       if (target.overlay) {
-        if (!target.window.isDestroyed()) target.window.contentView.removeChildView(target.overlay)
+        if (!target.view.webContents.isDestroyed()) target.view.removeChildView(target.overlay)
         if (!target.overlay.webContents.isDestroyed()) target.overlay.webContents.close()
       }
       target.overlay = undefined
+      desktopTabs.update(target.tabId, { locked: false })
     }
   }
 
@@ -281,12 +323,16 @@ export class ElectronBrowserRuntime {
   }
 
   async close(): Promise<void> {
+    if (this.idleTimer) clearTimeout(this.idleTimer)
+    this.idleTimer = undefined
+    if (this.invocationRunning)
+      this.failActiveInvocation('WEB_RUNTIME_CLOSED', '浏览器运行时已关闭')
     if (this.unlockTimer) clearTimeout(this.unlockTimer)
     this.unlockTimer = undefined
     for (const id of this.targets.keys()) this.programmaticCloseTargetIds.add(id)
     this.unlockAllTargets()
     for (const target of this.targets.values()) {
-      if (!target.window.isDestroyed()) target.window.destroy()
+      if (!target.view.webContents.isDestroyed()) await desktopTabs.close(target.tabId, true)
     }
     this.targets.clear()
     this.programmaticCloseTargetIds.clear()
@@ -297,14 +343,14 @@ export class ElectronBrowserRuntime {
       .catch(() => undefined)
   }
 
-  private async loadUrlWithTimeout(window: BrowserWindow, url: string): Promise<void> {
+  private async loadUrlWithTimeout(contents: WebContents, url: string): Promise<void> {
     let timer: NodeJS.Timeout | undefined
     try {
       await Promise.race([
-        window.loadURL(this.normalizeUrl(url)),
+        contents.loadURL(this.normalizeUrl(url)),
         new Promise<never>((_, reject) => {
           timer = setTimeout(() => {
-            window.webContents.stop()
+            if (!contents.isDestroyed()) contents.stop()
             reject(new Error(`WEB_NAVIGATION_TIMEOUT: 页面加载超过${NAVIGATION_TIMEOUT_MS}ms`))
           }, NAVIGATION_TIMEOUT_MS)
         }),
@@ -319,15 +365,17 @@ export class ElectronBrowserRuntime {
     const now = new Date().toISOString()
     for (const target of this.targets.values()) target.lastUsedAt = now
     this.idleTimer = setTimeout(() => {
-      this.lastCloseReason = 'idle-timeout'
-      for (const id of this.targets.keys()) this.programmaticCloseTargetIds.add(id)
-      this.unlockAllTargets()
-      for (const target of this.targets.values()) {
-        if (!target.window.isDestroyed()) target.window.destroy()
+      if (this.invocationRunning) {
+        this.touchRuntime()
+        return
       }
-      this.targets.clear()
-      this.programmaticCloseTargetIds.clear()
-      this.activeTargetId = undefined
+      this.lastCloseReason = 'idle-timeout'
+      const expired = [...this.targets.values()].filter((target) => !target.retained)
+      for (const target of expired) this.programmaticCloseTargetIds.add(target.id)
+      this.unlockAllTargets()
+      for (const target of expired) {
+        if (!target.view.webContents.isDestroyed()) void desktopTabs.close(target.tabId, true)
+      }
     }, IDLE_TIMEOUT_MS)
   }
 
@@ -448,13 +496,13 @@ export class ElectronBrowserRuntime {
       return this.inspect()
     }
     const target = this.activeTarget()
-    await this.loadUrlWithTimeout(target.window, url)
+    await this.loadUrlWithTimeout(target.view.webContents, url)
     return this.inspect()
   }
 
   private async inspect(): Promise<unknown> {
     const target = this.activeTarget()
-    const contents = target.window.webContents
+    const contents = target.view.webContents
     const page = await contents.executeJavaScript(`(() => {
       const observed = [...document.querySelectorAll('form,a,button,input,textarea,select,img,video,[role]')]
         .filter((node) => {
@@ -614,23 +662,147 @@ export class ElectronBrowserRuntime {
   }
 
   private async elementScreenshot(input: Record<string, unknown>): Promise<unknown> {
-    const target = String(input.imageId ?? input.handle ?? input.target ?? '')
-    if (!target) throw new Error('WEB_IMAGE_TARGET_REQUIRED: 缺少图片ID或元素句柄')
-    const bounds = (await this.activeContents().executeJavaScript(`(() => {
-      const key = ${JSON.stringify(target)};
+    const key = String(input.imageId ?? input.handle ?? input.target ?? '')
+    if (!key) throw new Error('WEB_IMAGE_TARGET_REQUIRED: 缺少图片ID或元素句柄')
+    this.assertHandleGeneration(key)
+    const target = this.activeTarget()
+    const generation = target.generation
+    const contents = target.view.webContents
+    const bounds = (await contents.executeJavaScript(`(() => {
+      const key = ${JSON.stringify(key)};
       const node = document.querySelector('[data-infos-image-id="' + CSS.escape(key) + '"]') || document.querySelector('[data-infos-browser-handle="' + CSS.escape(key) + '"]');
       if (!node) throw new Error('WEB_ELEMENT_NOT_FOUND: ' + key);
       node.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
       const rect = node.getBoundingClientRect();
-      return { x: Math.max(0, rect.x), y: Math.max(0, rect.y), width: Math.max(1, rect.width), height: Math.max(1, rect.height) };
-    })()`)) as { x: number; y: number; width: number; height: number }
-    const image = await this.activeContents().capturePage(bounds)
-    return { base64: image.toPNG().toString('base64'), mimeType: 'image/png', target }
+      const x = Math.max(0, rect.x), y = Math.max(0, rect.y);
+      return { x, y, width: Math.min(innerWidth, rect.right) - x, height: Math.min(innerHeight, rect.bottom) - y,
+        viewportWidth: innerWidth, viewportHeight: innerHeight, scrollX, scrollY };
+    })()`)) as {
+      x: number
+      y: number
+      width: number
+      height: number
+      viewportWidth: number
+      viewportHeight: number
+      scrollX: number
+      scrollY: number
+    }
+    if (
+      ![
+        bounds.x,
+        bounds.y,
+        bounds.width,
+        bounds.height,
+        bounds.viewportWidth,
+        bounds.viewportHeight,
+      ].every(Number.isFinite) ||
+      bounds.width <= 0 ||
+      bounds.height <= 0 ||
+      bounds.viewportWidth <= 0 ||
+      bounds.viewportHeight <= 0
+    )
+      throw new Error('WEB_IMAGE_TARGET_HIDDEN: 目标元素没有可见的截图区域')
+    this.assertScreenshotTarget(target, generation)
+    const image = await this.captureViewport(target)
+    const viewport = (await contents.executeJavaScript(
+      '({ width: innerWidth, height: innerHeight, scrollX, scrollY })',
+    )) as { width: number; height: number; scrollX: number; scrollY: number }
+    this.assertScreenshotTarget(target, generation)
+    if (
+      viewport.width !== bounds.viewportWidth ||
+      viewport.height !== bounds.viewportHeight ||
+      viewport.scrollX !== bounds.scrollX ||
+      viewport.scrollY !== bounds.scrollY
+    )
+      throw new Error('WEB_SCREENSHOT_STALE: 截图期间页面尺寸或位置已变化，请重新读取元素后截图')
+    // 先统一获取当前视口，再按实际图像比例裁剪，兼容缩放与高 DPI。
+    const size = image.getSize()
+    const scaleX = size.width / bounds.viewportWidth
+    const scaleY = size.height / bounds.viewportHeight
+    const x = Math.max(0, Math.floor(bounds.x * scaleX))
+    const y = Math.max(0, Math.floor(bounds.y * scaleY))
+    const right = Math.min(size.width, Math.ceil((bounds.x + bounds.width) * scaleX))
+    const bottom = Math.min(size.height, Math.ceil((bounds.y + bounds.height) * scaleY))
+    const cropped = image.crop({ x, y, width: right - x, height: bottom - y })
+    if (cropped.isEmpty()) throw new Error('WEB_SCREENSHOT_EMPTY: 未生成元素截图')
+    return { base64: cropped.toPNG().toString('base64'), mimeType: 'image/png', target: key }
   }
 
   private async screenshot(): Promise<unknown> {
-    const image = await this.activeContents().capturePage()
+    const image = await this.captureViewport(this.activeTarget())
     return { base64: image.toPNG().toString('base64'), mimeType: 'image/png' }
+  }
+
+  private assertScreenshotTarget(target: BrowserTarget, generation: number): void {
+    if (this.invocationContext.getStore()?.cancelled)
+      throw new Error('WEB_OPERATION_CANCELLED: 网页截图已取消')
+    if (this.targets.get(target.id) !== target || target.view.webContents.isDestroyed())
+      throw new Error('WEB_TARGET_CLOSED: 截图目标标签已关闭')
+    if (target.generation !== generation)
+      throw new Error('WEB_SCREENSHOT_STALE: 截图期间页面已跳转，请重新读取后截图')
+  }
+
+  private async captureViewport(target: BrowserTarget): Promise<NativeImage> {
+    const generation = target.generation
+    this.assertScreenshotTarget(target, generation)
+    if (target.pendingScreenshot)
+      throw new Error('WEB_SCREENSHOT_BUSY: 上一次网页截图仍在等待渲染，可先读取网页内容')
+    const contents = target.view.webContents
+    const capture = (async () => {
+      // 可见标签沿用原生路径；后台标签由 CDP 先唤醒绘制，避免依赖尚未建立的显示表面。
+      if (desktopTabs.isVisible(target.tabId)) {
+        try {
+          const image = await contents.capturePage(undefined, { stayHidden: true, stayAwake: true })
+          this.assertScreenshotTarget(target, generation)
+          if (!image.isEmpty()) return nativeImage.createFromBuffer(image.toPNG())
+        } catch (error) {
+          this.assertScreenshotTarget(target, generation)
+          if (
+            !/display surface not available|unable to capture|failed to capture/i.test(
+              String(error),
+            )
+          )
+            throw error
+        }
+      }
+      await this.attachDebugger(target)
+      this.assertScreenshotTarget(target, generation)
+      const result = (await contents.debugger.sendCommand('Page.captureScreenshot', {
+        format: 'png',
+        fromSurface: true,
+        captureBeyondViewport: false,
+      })) as { data?: string }
+      this.assertScreenshotTarget(target, generation)
+      if (!result.data) throw new Error('WEB_SCREENSHOT_EMPTY: 网页未返回截图')
+      const image = nativeImage.createFromBuffer(Buffer.from(result.data, 'base64'))
+      if (image.isEmpty()) throw new Error('WEB_SCREENSHOT_EMPTY: 网页返回了空截图')
+      return image
+    })()
+    target.pendingScreenshot = capture
+    const clearPending = () => {
+      if (target.pendingScreenshot === capture) target.pendingScreenshot = undefined
+    }
+    void capture.then(clearPending, clearPending)
+    let timer: NodeJS.Timeout | undefined
+    try {
+      return await Promise.race([
+        capture,
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(
+            () =>
+              reject(new Error('WEB_SCREENSHOT_TIMEOUT: 网页截图等待渲染超时，可先读取网页内容')),
+            SCREENSHOT_TIMEOUT_MS,
+          )
+        }),
+      ])
+    } catch (error) {
+      if (error instanceof Error && /^WEB_[A-Z_]+:/.test(error.message)) throw error
+      throw new Error(
+        `WEB_SCREENSHOT_FAILED: 网页截图失败，可先读取网页内容。${error instanceof Error ? error.message : String(error)}`,
+      )
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
   }
 
   private async click(target: string): Promise<unknown> {
@@ -752,19 +924,76 @@ export class ElectronBrowserRuntime {
   private listTargets(): unknown[] {
     return [...this.targets.values()].map((target) => ({
       targetId: target.id,
-      title: target.window.webContents.getTitle(),
-      url: target.window.webContents.getURL(),
+      title: target.view.webContents.getTitle(),
+      url: target.view.webContents.getURL(),
       active: target.id === this.activeTargetId,
-      visible: target.window.isVisible(),
+      visible: desktopTabs.isVisible(target.tabId),
       createdAt: target.createdAt,
       lastUsedAt: target.lastUsedAt,
       generation: target.generation,
+      retained: target.retained,
+      loading: target.view.webContents.isLoading(),
     }))
   }
 
-  private async createTarget(url: string, activate: boolean): Promise<unknown> {
+  /** 用户创建的页面不会被 Agent 的空闲回收器销毁。 */
+  async openUserTab(url: string, replaceId?: string): Promise<void> {
+    await this.createTarget(url, false, true, replaceId)
+  }
+
+  retainTarget(targetId: string): void {
+    const target = this.targets.get(targetId)
+    if (target) target.retained = true
+  }
+
+  private userTarget(targetId: string): BrowserTarget {
+    const target = this.targets.get(targetId)
+    if (!target || target.view.webContents.isDestroyed()) throw new Error('浏览器标签已关闭')
+    if (target.overlay || (this.invocationRunning && this.invocationTargetId === targetId)) {
+      throw new Error('Agent 正在操作此页面，请稍后再试')
+    }
+    target.retained = true
+    return target
+  }
+
+  async navigateUserTarget(targetId: string, url: string): Promise<void> {
+    const target = this.userTarget(targetId)
+    desktopTabs.update(target.tabId, { error: undefined })
+    try {
+      await this.loadUrlWithTimeout(target.view.webContents, url)
+    } catch (error) {
+      if (
+        target.view.webContents.isDestroyed() ||
+        (error as { code?: string })?.code === 'ERR_ABORTED'
+      )
+        return
+      throw error
+    }
+  }
+
+  userAction(targetId: string, action: string): void {
+    const target = this.userTarget(targetId)
+    const contents = target.view.webContents
+    const history = contents.navigationHistory
+    if (action === 'back' && history.canGoBack()) history.goBack()
+    else if (action === 'forward' && history.canGoForward()) history.goForward()
+    else if (action === 'reload') {
+      desktopTabs.update(target.tabId, { error: undefined })
+      contents.reload()
+    } else if (action === 'stop') contents.stop()
+  }
+
+  private async createTarget(
+    url: string,
+    activate: boolean,
+    retained = false,
+    replaceId?: string,
+  ): Promise<unknown> {
+    if (this.invocationContext.getStore()?.cancelled)
+      throw new Error('WEB_OPERATION_CANCELLED: 浏览器操作已结束')
+    url = this.normalizeUrl(url)
     if (this.targets.size >= MAX_TARGETS) {
-      throw new Error(`WEB_TARGET_LIMIT_REACHED: 浏览器窗口数量已达上限 ${MAX_TARGETS}`)
+      throw new Error(`WEB_TARGET_LIMIT_REACHED: 浏览器标签数量已达上限 ${MAX_TARGETS}`)
     }
     const id = `browser-${this.nextTarget++}`
     const browserSession = session.fromPartition(PARTITION)
@@ -803,11 +1032,7 @@ export class ElectronBrowserRuntime {
       })
       this.sessionConfigured = true
     }
-    const win = new BrowserWindow({
-      width: 1280,
-      height: 860,
-      show: false,
-      title: 'infOS Browser',
+    const view = new WebContentsView({
       webPreferences: {
         session: browserSession,
         nodeIntegration: false,
@@ -815,16 +1040,56 @@ export class ElectronBrowserRuntime {
         sandbox: true,
         webSecurity: true,
         allowRunningInsecureContent: false,
+        backgroundThrottling: false,
       },
     })
-    win.webContents.setWindowOpenHandler(({ url: requestedUrl }) => {
-      void this.createTarget(requestedUrl, true)
+    const now = new Date().toISOString()
+    const target: BrowserTarget = {
+      id,
+      view,
+      tabId: id,
+      retained,
+      createdAt: now,
+      lastUsedAt: now,
+      generation: 1,
+      network: [],
+    }
+    this.targets.set(id, target)
+    try {
+      target.tabId = desktopTabs.mountView(
+        {
+          id,
+          targetId: id,
+          kind: 'browser',
+          icon: 'globe',
+          title: '浏览器',
+          url,
+          loading: true,
+        },
+        view,
+        retained,
+        replaceId,
+      )
+    } catch (error) {
+      this.targets.delete(id)
+      view.webContents.close({ waitForBeforeUnload: false })
+      throw error
+    }
+    view.webContents.setWindowOpenHandler(({ url: requestedUrl }) => {
+      this.invocationContext.exit(() => {
+        void this.createTarget(requestedUrl, !retained, retained).catch((error) => {
+          this.lastError = String(error)
+        })
+      })
       return { action: 'deny' }
     })
-    win.webContents.on('will-navigate', (event, requestedUrl) => {
+    view.webContents.on('will-navigate', (event, requestedUrl) => {
       if (!this.isAllowedUrl(requestedUrl)) event.preventDefault()
     })
-    win.on('closed', () => {
+    view.webContents.on('focus', () => {
+      target.retained = true
+    })
+    view.webContents.on('destroyed', () => {
       const programmatic = this.programmaticCloseTargetIds.delete(id)
       if (target.overlay) {
         if (!target.overlay.webContents.isDestroyed()) target.overlay.webContents.close()
@@ -834,45 +1099,55 @@ export class ElectronBrowserRuntime {
       this.targets.delete(id)
       if (this.activeTargetId === id) this.activeTargetId = this.targets.keys().next().value
       if (!programmatic) {
-        this.failActiveInvocation('WEB_TARGET_CLOSED', '用户关闭了内置浏览器窗口')
+        if (this.invocationTargetId === id) {
+          this.failActiveInvocation('WEB_TARGET_CLOSED', '用户关闭了 Agent 正在操作的浏览器标签')
+        }
       }
     })
-    win.on('move', () => this.syncOverlayBounds(target))
-    win.on('resize', () => this.syncOverlayBounds(target))
-    win.on('maximize', () => this.syncOverlayBounds(target))
-    win.on('unmaximize', () => this.syncOverlayBounds(target))
-    win.webContents.on('render-process-gone', (_event, details) => {
+    view.on('bounds-changed', () => this.syncOverlayBounds(target))
+    view.webContents.on('render-process-gone', (_event, details) => {
       this.lastCloseReason = `renderer-${details.reason}`
-      this.failActiveInvocation(
-        'WEB_RENDERER_CRASHED',
-        `内置浏览器渲染进程异常退出（${details.reason}，exitCode=${details.exitCode}）`,
-      )
+      if (this.invocationTargetId === id)
+        this.failActiveInvocation(
+          'WEB_RENDERER_CRASHED',
+          `浏览器渲染进程异常退出（${details.reason}，exitCode=${details.exitCode}）`,
+        )
       this.programmaticCloseTargetIds.add(id)
-      if (!win.isDestroyed()) win.destroy()
+      if (!view.webContents.isDestroyed()) void desktopTabs.close(target.tabId, true)
     })
-    win.on('unresponsive', () => {
-      this.failActiveInvocation('WEB_TARGET_UNRESPONSIVE', '内置浏览器窗口无响应')
+    view.webContents.on('unresponsive', () => {
+      if (this.invocationTargetId === id)
+        this.failActiveInvocation('WEB_TARGET_UNRESPONSIVE', '浏览器标签无响应')
     })
-    const now = new Date().toISOString()
-    const target: BrowserTarget = {
-      id,
-      window: win,
-      createdAt: now,
-      lastUsedAt: now,
-      generation: 1,
-      network: [],
+    const sync = () => {
+      if (view.webContents.isDestroyed()) return
+      const contents = view.webContents
+      desktopTabs.update(target.tabId, {
+        title: contents.getTitle() || '浏览器',
+        url: contents.getURL() || url,
+        loading: contents.isLoading(),
+        canGoBack: contents.navigationHistory.canGoBack(),
+        canGoForward: contents.navigationHistory.canGoForward(),
+      })
     }
-    this.targets.set(id, target)
-    if (activate) this.activateTarget(target)
-    await this.lockTarget(target)
+    if (activate || !this.activeTargetId) this.activateTarget(target)
+    if (!retained && this.invocationRunning) await this.lockTarget(target)
     void this.attachDebugger(target).catch(() => undefined)
-    win.webContents.on('did-start-navigation', (_event, _url, _isInPlace, isMainFrame) => {
+    view.webContents.on('page-title-updated', sync)
+    view.webContents.on('did-start-loading', () => {
+      desktopTabs.update(target.tabId, { error: undefined })
+      sync()
+    })
+    view.webContents.on('did-stop-loading', sync)
+    view.webContents.on('did-navigate', sync)
+    view.webContents.on('did-navigate-in-page', sync)
+    view.webContents.on('did-start-navigation', (_event, _url, _isInPlace, isMainFrame) => {
       if (isMainFrame) target.generation += 1
     })
-    win.webContents.on('did-finish-load', () => {
+    view.webContents.on('did-finish-load', () => {
       target.generation = Math.max(1, target.generation)
     })
-    win.webContents.on('did-fail-load', (_event, code, description, url) => {
+    view.webContents.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
       target.network.push({
         type: 'navigation-failed',
         code,
@@ -880,9 +1155,29 @@ export class ElectronBrowserRuntime {
         url,
         at: new Date().toISOString(),
       })
+      if (isMainFrame && code !== -3)
+        desktopTabs.update(target.tabId, {
+          loading: false,
+          error: `网页加载失败：${description}`,
+        })
     })
-    await this.loadUrlWithTimeout(win, url)
-    return { targetId: id, url: win.webContents.getURL() }
+    const loading = this.loadUrlWithTimeout(view.webContents, url)
+    if (retained) {
+      // 用户标签创建后立即返回，页面加载不阻塞继续新建或打开其他应用。
+      void loading.catch((error: unknown) => {
+        if (view.webContents.isDestroyed() || (error as { code?: string })?.code === 'ERR_ABORTED')
+          return
+        desktopTabs.update(target.tabId, { loading: false, error: String(error) })
+      })
+      return { targetId: id, url }
+    }
+    try {
+      await loading
+    } catch (error) {
+      desktopTabs.update(target.tabId, { loading: false, error: String(error) })
+      throw error
+    }
+    return { targetId: id, url: view.webContents.getURL() }
   }
 
   private switchTarget(targetId: string): unknown {
@@ -892,11 +1187,11 @@ export class ElectronBrowserRuntime {
     return this.listTargets()
   }
 
-  private closeTarget(targetId: string): unknown {
+  private async closeTarget(targetId: string): Promise<unknown> {
     const target = this.targets.get(targetId)
     if (!target) return this.listTargets()
     this.programmaticCloseTargetIds.add(targetId)
-    target.window.destroy()
+    await desktopTabs.close(target.tabId, true)
     return this.listTargets()
   }
 
@@ -949,10 +1244,24 @@ export class ElectronBrowserRuntime {
   }
 
   private async attachDebugger(target: BrowserTarget): Promise<void> {
-    const debuggerApi = target.window.webContents.debugger
+    if (target.debuggerReady) return target.debuggerReady
+    const ready = this.initializeDebugger(target)
+    target.debuggerReady = ready
+    try {
+      await ready
+    } finally {
+      if (target.debuggerReady === ready) target.debuggerReady = undefined
+    }
+  }
+
+  private async initializeDebugger(target: BrowserTarget): Promise<void> {
+    const debuggerApi = target.view.webContents.debugger
     if (!debuggerApi.isAttached()) debuggerApi.attach('1.3')
     await debuggerApi.sendCommand('Network.enable')
     await debuggerApi.sendCommand('Page.enable')
+    // 导航、截图与模拟共用同一连接，重新连接不叠加事件监听。
+    if (target.debuggerEventsBound) return
+    target.debuggerEventsBound = true
     debuggerApi.on('message', (_event, method, params) => {
       if (method.startsWith('Network.')) {
         target.network.push({
@@ -977,7 +1286,7 @@ export class ElectronBrowserRuntime {
   private async handleDialog(input: Record<string, unknown>): Promise<unknown> {
     const target = this.activeTarget()
     if (!target.pendingDialog) throw new Error('WEB_DIALOG_UNAVAILABLE: 当前没有待处理对话框')
-    await target.window.webContents.debugger.sendCommand('Page.handleJavaScriptDialog', {
+    await target.view.webContents.debugger.sendCommand('Page.handleJavaScriptDialog', {
       accept: input.accept !== false,
       promptText: typeof input.promptText === 'string' ? input.promptText : undefined,
     })
@@ -1102,8 +1411,16 @@ export class ElectronBrowserRuntime {
     if (typeof input.userAgent === 'string') this.activeContents().setUserAgent(input.userAgent)
     const width = Number(input.width)
     const height = Number(input.height)
-    if (Number.isFinite(width) && Number.isFinite(height))
-      this.activeTarget().window.setContentSize(Math.max(320, width), Math.max(240, height))
+    if (Number.isFinite(width) && Number.isFinite(height)) {
+      if (!this.activeContents().debugger.isAttached())
+        await this.attachDebugger(this.activeTarget())
+      await this.activeContents().debugger.sendCommand('Emulation.setDeviceMetricsOverride', {
+        width: Math.max(320, Math.round(width)),
+        height: Math.max(240, Math.round(height)),
+        deviceScaleFactor: 1,
+        mobile: false,
+      })
+    }
     return this.status()
   }
 
@@ -1122,8 +1439,8 @@ export class ElectronBrowserRuntime {
       targetCount: this.targets.size,
       maxTargets: MAX_TARGETS,
       idleTimeoutMs: IDLE_TIMEOUT_MS,
-      rendererPid: active?.window.webContents.getOSProcessId(),
-      debuggerAttached: active?.window.webContents.debugger.isAttached() ?? false,
+      rendererPid: active?.view.webContents.getOSProcessId(),
+      debuggerAttached: active?.view.webContents.debugger.isAttached() ?? false,
       locked: Boolean(active?.overlay),
       activeOperator: this.activeOperator,
       lastError: this.lastError,
@@ -1162,13 +1479,16 @@ export class ElectronBrowserRuntime {
   }
 
   private activeTarget(): BrowserTarget {
-    const target = this.activeTargetId ? this.targets.get(this.activeTargetId) : undefined
-    if (!target || target.window.isDestroyed()) throw new Error('WEB_TARGET_UNAVAILABLE')
+    const context = this.invocationContext.getStore()
+    if (context?.cancelled) throw new Error('WEB_OPERATION_CANCELLED: 浏览器操作已结束')
+    const id = context ? context.targetId : this.activeTargetId
+    const target = id ? this.targets.get(id) : undefined
+    if (!target || target.view.webContents.isDestroyed()) throw new Error('WEB_TARGET_UNAVAILABLE')
     return target
   }
 
   private activeContents(): WebContents {
-    return this.activeTarget().window.webContents
+    return this.activeTarget().view.webContents
   }
 
   private normalizeUrl(value: string): string {
@@ -1185,3 +1505,5 @@ export class ElectronBrowserRuntime {
     }
   }
 }
+
+export const browserRuntime = new ElectronBrowserRuntime()

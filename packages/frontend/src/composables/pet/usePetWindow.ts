@@ -11,9 +11,10 @@
  * @module packages/frontend/src/composables/pet/usePetWindow
  */
 
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, nextTick, onMounted, onUnmounted } from 'vue'
 import { invoke, listen, send, isElectron } from '../../utils/ipcAdapter'
 import { logger } from '../../lib/logger'
+import { useWindowVisibility } from '../main/useWindowVisibility'
 
 /** 全局鼠标坐标 (相对于 Pet 窗口) */
 export interface GlobalMousePosition {
@@ -22,6 +23,7 @@ export interface GlobalMousePosition {
 }
 
 export function usePetWindow() {
+  const windowVisible = useWindowVisibility()
   // ── 状态 ──
 
   /** 当前是否处于穿透状态 */
@@ -30,6 +32,11 @@ export function usePetWindow() {
   const isDragging = ref(false)
   /** 全局鼠标位置 (由主进程推送) */
   const globalMouse = ref<GlobalMousePosition>({ x: 0, y: 0 })
+  const resizeMode = ref(false)
+  const windowSize = ref(Math.min(window.innerWidth, window.innerHeight))
+  let requestedSize = windowSize.value
+  let resizing = false
+  let disposed = false
 
   // ── 鼠标穿透 ──
 
@@ -57,6 +64,13 @@ export function usePetWindow() {
 
   /** 鼠标离开可交互区域 → 恢复穿透 (拖拽期间不生效) */
   function onInteractableLeave(): void {
+    if (resizeMode.value) return
+    if (
+      (document.activeElement?.matches('textarea,input,select,[contenteditable=true]') &&
+        document.activeElement.closest('[data-pet-ui]')) ||
+      document.querySelector('[data-pet-ui]:hover')
+    )
+      return
     if (!isDragging.value) {
       setMousePassthrough(true)
     }
@@ -75,6 +89,8 @@ export function usePetWindow() {
    */
   function onDragMouseDown(e: MouseEvent): void {
     if (e.button !== 0) return
+    if ((e.target as Element | null)?.closest('[data-pet-ui], button, input, textarea, select, a'))
+      return
 
     dragStartX = e.screenX
     dragStartY = e.screenY
@@ -118,6 +134,7 @@ export function usePetWindow() {
 
   /** 强制刷新置顶状态 (某些 Windows 版本会掉置顶) */
   function fixTopmost(): void {
+    if (!windowVisible.value) return
     invoke('set-fix-window-topmost').catch(() => {})
   }
 
@@ -135,11 +152,61 @@ export function usePetWindow() {
     }
   }
 
+  function toggleResizeMode(): void {
+    resizeMode.value = !resizeMode.value
+    if (resizeMode.value) setMousePassthrough(false)
+    else void nextTick(onInteractableLeave)
+  }
+
+  function syncWindowSize(): void {
+    windowSize.value = Math.min(window.innerWidth, window.innerHeight)
+  }
+
+  async function applyRequestedSize(): Promise<void> {
+    if (resizing) return
+    resizing = true
+    try {
+      while (!disposed) {
+        const size = requestedSize
+        if (!(await resizeWindow(size, size))) break
+        if (size === requestedSize) break
+      }
+    } finally {
+      resizing = false
+    }
+  }
+
+  /** 恢复旧版滚轮缩放：300–1600px 范围内调节，连续滚动合并为最新目标。 */
+  function onResizeWheel(event: WheelEvent): void {
+    if (!resizeMode.value || event.deltaY === 0) return
+    if ((event.target as Element | null)?.closest('input,textarea,select')) return
+    event.preventDefault()
+    event.stopPropagation()
+    const current = resizing ? requestedSize : windowSize.value
+    requestedSize = Math.min(1600, Math.max(300, current + (event.deltaY < 0 ? 40 : -40)))
+    void applyRequestedSize()
+  }
+
+  function onResizeKey(event: KeyboardEvent): void {
+    if (event.key === 'Escape' && resizeMode.value) {
+      resizeMode.value = false
+      void nextTick(onInteractableLeave)
+    }
+  }
+
   // ── 生命周期 ──
 
   const cleanupFns: Array<() => void> = []
 
   onMounted(async () => {
+    window.addEventListener('resize', syncWindowSize)
+    window.addEventListener('wheel', onResizeWheel, { passive: false, capture: true })
+    window.addEventListener('keydown', onResizeKey, true)
+    cleanupFns.push(() => {
+      window.removeEventListener('resize', syncWindowSize)
+      window.removeEventListener('wheel', onResizeWheel, true)
+      window.removeEventListener('keydown', onResizeKey, true)
+    })
     if (!isElectron()) return
 
     // 1. 初始状态: 开启穿透 (透明区域不挡事)
@@ -154,6 +221,10 @@ export function usePetWindow() {
         const pos = data as GlobalMousePosition
         globalMouse.value = pos
       })
+      if (disposed) {
+        unlistenMouse()
+        return
+      }
       cleanupFns.push(unlistenMouse)
     } catch {
       logger.warn('PetWindow', '全局鼠标追踪注册失败')
@@ -169,6 +240,7 @@ export function usePetWindow() {
   })
 
   onUnmounted(() => {
+    disposed = true
     cleanupFns.forEach((fn) => fn())
     cleanupFns.length = 0
   })
@@ -178,6 +250,8 @@ export function usePetWindow() {
     isClickThrough,
     isDragging,
     globalMouse,
+    resizeMode,
+    windowSize,
 
     // 穿透控制
     setMousePassthrough,
@@ -186,6 +260,7 @@ export function usePetWindow() {
 
     // 窗口操作
     resizeWindow,
+    toggleResizeMode,
     fixTopmost,
   }
 }

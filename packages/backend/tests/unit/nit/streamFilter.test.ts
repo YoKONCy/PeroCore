@@ -101,6 +101,9 @@ describe('ThinkingStreamFilter', () => {
       const events = filter.drainEvents()
 
       expect(output).toBe('前后')
+      expect(
+        events.flatMap((event) => (event.type === 'delta' ? [event.delta] : [])).join(''),
+      ).toBe(block.replace(/<[^>]+>/g, ''))
       expect(events).toEqual(
         expect.arrayContaining([
           { type: 'start' },

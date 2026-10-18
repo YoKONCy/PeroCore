@@ -12,6 +12,7 @@ import {
   type DocumentId,
   type DocumentNodeId,
   type SqliteDocumentEngine,
+  type DocumentSnapshot,
 } from '@infos/document-engine'
 
 const tokenizer = new Tiktoken(o200kBase.bpe_ranks, o200kBase.special_tokens, o200kBase.pat_str)
@@ -24,6 +25,41 @@ export class ArcaDocumentContextProvider {
     private readonly nodeId: KernelNodeId,
     private readonly engine: SqliteDocumentEngine,
   ) {}
+
+  provideScoped(snapshot: DocumentSnapshot, collaborationId: string): ContextRegion[] {
+    const content = JSON.stringify(snapshot)
+    return [
+      {
+        regionId: `${collaborationId}:context`,
+        providerId: this.providerId,
+        kind: 'state',
+        trust: 'authority',
+        priority: 100,
+        required: true,
+        delivery: 'system',
+        content,
+        contentHash: contentHash(content),
+        tokenEstimate: countTokens(content),
+        sourceObjectRefs: [
+          {
+            objectType: 'document.semantic',
+            objectId: snapshot.documentId as unknown as KernelObjectId,
+            generation: snapshot.document.generation,
+            ownerPrincipalId: snapshot.document.ownerPrincipalId,
+            authorityNodeId: this.nodeId,
+            authorityEpoch: snapshot.document.authorityEpoch,
+          },
+        ],
+        provenance: {
+          documentId: snapshot.documentId,
+          revisionId: snapshot.revisionId,
+          rootHash: snapshot.rootHash,
+          collaborationId,
+        },
+        deduplicationKey: `${collaborationId}:${snapshot.revisionId}`,
+      },
+    ]
+  }
 
   provide(input: { documentId: DocumentId; currentNodeId?: DocumentNodeId }): ContextRegion[] {
     const snapshot = this.engine.inspect(input.documentId)

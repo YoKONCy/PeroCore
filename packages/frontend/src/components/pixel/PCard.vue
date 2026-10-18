@@ -100,7 +100,11 @@ withDefaults(defineProps<Props>(), {
   background: var(--dash-panel-bg);
   border: 1px solid var(--dash-panel-border);
   overflow: hidden;
-  transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition:
+    transform var(--ui-duration-normal) var(--ui-ease-bouncy),
+    box-shadow var(--ui-duration-normal) var(--ui-ease-standard),
+    background-color var(--ui-duration-fast) var(--ui-ease-standard),
+    border-color var(--ui-duration-fast) var(--ui-ease-standard);
 }
 
 .p-card-overflow {
@@ -203,7 +207,7 @@ withDefaults(defineProps<Props>(), {
 }
 
 .p-card-hoverable:not(.p-card-pixel):hover {
-  transform: translateY(-6px);
+  transform: translateY(calc(-1 * var(--ui-motion-distance-sm)));
   box-shadow: var(--ui-shadow-lg);
   background: var(--dash-panel-elevated);
 }
@@ -219,7 +223,9 @@ withDefaults(defineProps<Props>(), {
   right: 12px;
   opacity: 0;
   transform: scale(0);
-  transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition:
+    opacity var(--ui-duration-normal) var(--ui-ease-standard),
+    transform var(--ui-duration-normal) var(--ui-ease-bouncy);
   z-index: 20;
   pointer-events: none;
   color: var(--color-sky-face);
@@ -242,7 +248,7 @@ withDefaults(defineProps<Props>(), {
   background: var(--ui-accent-sky-soft);
   filter: blur(40px);
   pointer-events: none;
-  transition: background 0.3s;
+  transition: background-color var(--ui-duration-normal) var(--ui-ease-standard);
 }
 
 .p-card-hoverable:hover .p-card-glow-orb {
@@ -259,6 +265,7 @@ withDefaults(defineProps<Props>(), {
 /* ── body ── */
 .p-card-body {
   position: relative;
+  min-width: 0;
   z-index: 10;
 }
 

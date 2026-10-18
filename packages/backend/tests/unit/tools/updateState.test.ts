@@ -30,19 +30,23 @@ describe('update_state', () => {
       },
     )
 
-    expect(update).toHaveBeenCalledWith('nana', {
-      mood: '开心',
-      vibe: undefined,
-      mind: undefined,
-      clickMessages: {
-        head: ['摸摸'],
-        arm: ['牵手'],
-        body: ['不要戳啦'],
-        leg: ['站稳啦'],
+    expect(update).toHaveBeenCalledWith(
+      'nana',
+      {
+        mood: '开心',
+        vibe: undefined,
+        mind: undefined,
+        clickMessages: {
+          head: ['摸摸'],
+          arm: ['牵手'],
+          body: ['不要戳啦'],
+          leg: ['站稳啦'],
+        },
+        idleMessages: ['正在发呆'],
+        backMessages: undefined,
       },
-      idleMessages: ['正在发呆'],
-      backMessages: undefined,
-    })
+      expect.objectContaining({ threadId: 's1', agentId: 'nana' }),
+    )
     expect(broadcast).toHaveBeenCalledWith(
       'state_update',
       expect.objectContaining({ agentId: 'nana', mood: '开心' }),
@@ -63,6 +67,7 @@ describe('update_state', () => {
     )
 
     expect(update).not.toHaveBeenCalled()
-    expect(result).toMatchObject({ ok: false })
+    expect(result).toMatchObject({ ok: true })
+    expect(JSON.parse((result as { output: string }).output)).toMatchObject({ updated: false })
   })
 })

@@ -3,7 +3,7 @@
  *
  * 使用 better-sqlite3 + Drizzle ORM 创建 SQLite 连接。
  * 自动设置 WAL 模式和性能优化 PRAGMA。
- * 首次启动执行当前版本的完整数据库基线。
+ * 首次启动按 Drizzle journal 执行完整基线及后续结构迁移；旧库由薄层登记基线。
  *
  * @module packages/backend/src/database/connection
  */
@@ -14,7 +14,8 @@ import * as schema from './schema'
 import { createLogger } from '../lib/logger'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { readFileSync, readdirSync, existsSync, renameSync, rmSync } from 'node:fs'
+import { existsSync, renameSync, rmSync } from 'node:fs'
+import { applySchemaMigrations } from './schemaMigrations'
 
 const logger = createLogger('Database')
 const sqliteConnections = new WeakMap<object, Database.Database>()
@@ -325,6 +326,7 @@ function ensureKernelResourceSchema(sqlite: Database.Database): void {
     }>
     const modelAdditions = [
       ['context_window_tokens', 'INTEGER'],
+      ['max_react_turns', 'INTEGER'],
       ['return_native_reasoning', 'INTEGER DEFAULT false'],
       ['wire_api', "TEXT DEFAULT 'chat_completions'"],
       ['reasoning_dialect', "TEXT DEFAULT 'auto'"],
@@ -337,56 +339,6 @@ function ensureKernelResourceSchema(sqlite: Database.Database): void {
   })()
 }
 
-/** 为既有数据库补齐工作上下文字段。 */
-function ensureWorkContextSchema(sqlite: Database.Database): void {
-  const columns = (table: string) =>
-    new Set(
-      sqlite
-        .prepare(`PRAGMA table_info(${table})`)
-        .all()
-        .map((row) => (row as { name: string }).name),
-    )
-  const states = columns('flow_states')
-  if (!states.has('work_context'))
-    sqlite.exec("ALTER TABLE flow_states ADD COLUMN work_context TEXT DEFAULT '' NOT NULL")
-  if (!states.has('work_context_updated_at_pair_count'))
-    sqlite.exec(
-      'ALTER TABLE flow_states ADD COLUMN work_context_updated_at_pair_count INTEGER DEFAULT 0 NOT NULL',
-    )
-  const revisions = columns('flow_state_revisions')
-  if (!revisions.has('before_work_context'))
-    sqlite.exec(
-      "ALTER TABLE flow_state_revisions ADD COLUMN before_work_context TEXT DEFAULT '' NOT NULL",
-    )
-  if (!revisions.has('before_work_context_updated_at_pair_count'))
-    sqlite.exec(
-      'ALTER TABLE flow_state_revisions ADD COLUMN before_work_context_updated_at_pair_count INTEGER DEFAULT 0 NOT NULL',
-    )
-  if (!revisions.has('after_work_context'))
-    sqlite.exec(
-      "ALTER TABLE flow_state_revisions ADD COLUMN after_work_context TEXT DEFAULT '' NOT NULL",
-    )
-  if (!revisions.has('after_work_context_updated_at_pair_count'))
-    sqlite.exec(
-      'ALTER TABLE flow_state_revisions ADD COLUMN after_work_context_updated_at_pair_count INTEGER DEFAULT 0 NOT NULL',
-    )
-  sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS work_context_entries (
-      id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-      thread_id TEXT NOT NULL,
-      agent_id TEXT NOT NULL,
-      pair_id TEXT NOT NULL,
-      pair_count INTEGER NOT NULL,
-      content TEXT NOT NULL,
-      created_at TEXT DEFAULT (datetime('now', 'localtime')) NOT NULL
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_work_context_entries_pair_agent
-      ON work_context_entries (thread_id, agent_id, pair_id);
-    CREATE INDEX IF NOT EXISTS idx_work_context_entries_scope
-      ON work_context_entries (thread_id, agent_id, pair_count);
-  `)
-}
-
 /** 为既有数据库补齐 Thread 自动执行模式字段。 */
 function ensureThreadExecutionModeSchema(sqlite: Database.Database): void {
   const columns = new Set(
@@ -397,6 +349,14 @@ function ensureThreadExecutionModeSchema(sqlite: Database.Database): void {
   )
   if (!columns.has('auto_execute_tools')) {
     sqlite.exec('ALTER TABLE threads ADD COLUMN auto_execute_tools INTEGER DEFAULT false NOT NULL')
+  }
+  if (!columns.has('execution_mode')) {
+    sqlite.transaction(() => {
+      sqlite.exec("ALTER TABLE threads ADD COLUMN execution_mode TEXT DEFAULT 'manual' NOT NULL")
+      sqlite.exec(
+        "UPDATE threads SET execution_mode = CASE WHEN auto_execute_tools = 1 THEN 'auto' ELSE 'manual' END",
+      )
+    })()
   }
 }
 
@@ -480,51 +440,34 @@ export function createDrizzleConnection(databasePath: string) {
   sqlite.pragma('busy_timeout = 5000')
   sqlite.pragma('cache_size = -20000')
   sqlite.pragma('foreign_keys = ON')
+  // 删除时覆盖 SQLite 释放页中的正文；WAL 在清理任务完成后收口。
+  sqlite.pragma('secure_delete = ON')
 
   const tableCheck = sqlite
     .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='configs'")
     .get()
 
-  if (!tableCheck) {
-    logger.info('检测到首次启动，正在创建数据库表...')
-    try {
-      const appRoot = process.env.PERO_APP_ROOT
-      const migrationsDir = appRoot
-        ? resolve(appRoot, 'backend', 'src', 'database', 'migrations')
-        : resolve(dirname(fileURLToPath(import.meta.url)), 'migrations')
-      const baselineFiles = readdirSync(migrationsDir)
-        .filter((file) => file.endsWith('.sql'))
-        .sort()
-
-      if (baselineFiles.length !== 1) {
-        throw new Error(`数据库基线数量错误，期望 1 个，实际 ${baselineFiles.length} 个`)
-      }
-
-      const sqlContent = readFileSync(resolve(migrationsDir, baselineFiles[0]!), 'utf8')
-      const statements = sqlContent
-        .split('--\x3e statement-breakpoint')
-        .map((statement) => statement.trim())
-        .filter(Boolean)
-
-      sqlite.transaction(() => {
-        for (const statement of statements) sqlite.exec(statement)
-      })()
-      logger.success(`数据库初始化完成: ${baselineFiles[0]}`)
-    } catch (error) {
-      sqlite.close()
-      logger.error(`数据库初始化失败: ${error}`)
-      throw error
-    }
+  const appRoot = process.env.PERO_APP_ROOT
+  const migrationsDir = appRoot
+    ? resolve(appRoot, 'backend', 'src', 'database', 'migrations')
+    : resolve(dirname(fileURLToPath(import.meta.url)), 'migrations')
+  const db = drizzle(sqlite, { schema })
+  try {
+    if (!tableCheck) logger.info('检测到首次启动，正在执行数据库迁移...')
+    applySchemaMigrations(sqlite, db, migrationsDir, Boolean(tableCheck))
+    logger.success('数据库结构迁移完成')
+  } catch (error) {
+    sqlite.close()
+    logger.error(`数据库结构迁移失败: ${error}`)
+    throw error
   }
 
   ensureKernelResourceSchema(sqlite)
-  ensureWorkContextSchema(sqlite)
   ensureThreadExecutionModeSchema(sqlite)
   ensureAgentInputSchema(sqlite)
   ensureApprovalRiskSchema(sqlite)
   removeLegacyMemorySchema(sqlite)
 
-  const db = drizzle(sqlite, { schema })
   sqliteConnections.set(db, sqlite)
   logger.success('数据库连接成功')
   return db

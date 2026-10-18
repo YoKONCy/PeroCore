@@ -1,0 +1,68 @@
+/* 任务界面共用的像素材质：细边框、硬边明暗和两像素厚度，避免厚重外框。 */
+.task-pixel-surface {
+  --task-face: color-mix(in srgb, var(--ui-bg-surface) 94%, var(--ui-accent-sky-soft));
+  --task-highlight: rgba(255, 255, 255, 0.8);
+  --task-shade: rgba(34, 60, 82, 0.1);
+  --task-side: color-mix(in srgb, var(--ui-border-strong) 65%, var(--ui-bg-surface));
+  --task-cast: rgba(24, 45, 62, 0.08);
+  --task-sheen: rgba(255, 255, 255, 0.2);
+  --task-fill: linear-gradient(var(--task-sheen), transparent 18px), var(--task-face);
+  --task-raised:
+    inset 1px 1px 0 var(--task-highlight), inset -1px -2px 0 var(--task-shade),
+    0 2px 0 var(--task-side), 2px 3px 0 var(--task-cast);
+  --task-control:
+    inset 1px 1px 0 var(--task-highlight), inset -1px -2px 0 var(--task-shade),
+    0 2px 0 var(--task-side);
+  --task-inset: inset 1px 2px 0 var(--task-shade), inset -1px -1px 0 var(--task-highlight);
+  font-family: var(--ui-font-pixel);
+}
+
+[data-theme='dark'] .task-pixel-surface {
+  --task-highlight: rgba(193, 218, 238, 0.14);
+  --task-shade: rgba(3, 9, 18, 0.48);
+  --task-side: color-mix(in srgb, var(--ui-bg-canvas) 80%, var(--ui-border-strong));
+  --task-cast: rgba(0, 0, 0, 0.24);
+  --task-sheen: rgba(193, 218, 238, 0.035);
+}
+
+.task-pixel-surface :is(button, input, textarea, select, summary) {
+  font-family: var(--ui-font-pixel);
+}
+
+.task-pixel-surface :is(code, pre) {
+  font-family: var(--ui-font-mono);
+}
+
+/* 保留原生复选框的键盘、标签与禁用行为，仅改变方块材质。 */
+.task-pixel-surface input[type='checkbox'] {
+  appearance: none;
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  margin: 0 6px 0 0;
+  vertical-align: -2px;
+  border: 1px solid var(--ui-border-strong);
+  border-radius: 0;
+  background: var(--ui-bg-surface-soft);
+  box-shadow: var(--task-inset);
+  cursor: pointer;
+}
+
+.task-pixel-surface input[type='checkbox']:checked {
+  border-color: var(--ui-accent-sky);
+  background: var(--ui-accent-sky);
+  box-shadow:
+    inset 0 0 0 2px var(--task-face),
+    var(--task-control);
+}
+
+.task-pixel-surface input[type='checkbox']:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.task-pixel-surface input[type='checkbox']:focus-visible {
+  outline: 1px solid var(--ui-accent-sky);
+  outline-offset: 3px;
+}

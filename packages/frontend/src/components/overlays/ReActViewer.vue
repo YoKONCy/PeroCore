@@ -202,12 +202,4 @@ function labelColor(type: string): string {
   border-bottom: 1px solid var(--ui-border-default);
   background: color-mix(in srgb, var(--ui-bg-elevated) 86%, transparent);
 }
-
-.rv-scrollbar::-webkit-scrollbar {
-  width: 4px;
-}
-.rv-scrollbar::-webkit-scrollbar-thumb {
-  background: #bae6fd;
-  border-radius: 0;
-}
 </style>

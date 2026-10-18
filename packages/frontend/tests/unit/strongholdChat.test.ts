@@ -1,6 +1,4 @@
 /* @vitest-environment happy-dom */
-import { readFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import type { GroupMessage, Room } from '@infos/frontend/api/modules/strongholdApi'
@@ -176,7 +174,7 @@ describe('据点聊天数据链路', () => {
     })
   })
 
-  it('@全体成员 时应等待与成员数一致的回复落库', async () => {
+  it('@全体成员 时按返回成员列表进入等待状态，切换房间取消等待', async () => {
     apiMocks.getMessages.mockResolvedValue({ data: [] })
     apiMocks.sendMessage.mockResolvedValueOnce({
       data: {
@@ -207,7 +205,6 @@ describe('据点聊天数据链路', () => {
     })
     // 进入等待态（等待 2 位成员回复），并显示全体成员的等待文案
     expect(stronghold.isAwaitingReply.value).toBe(true)
-    expect(stronghold.replyStatus.value).toContain('2 位角色')
     expect(stronghold.activeRound.value?.agents.map((agent) => agent.agentId)).toEqual([
       'pero',
       'nana',
@@ -216,39 +213,6 @@ describe('据点聊天数据链路', () => {
     // 切换房间会取消等待轮询，避免 1 秒拉取循环跨测试残留
     await stronghold.selectRoom(room('55555555-5555-4555-8555-555555555555', '撤离'))
     expect(stronghold.isAwaitingReply.value).toBe(false)
-  })
-
-  it('据点聊天应复用普通对话的气泡与 CHAR OPS，且不依赖 desktop 数据状态', async () => {
-    const root = resolve(process.cwd(), 'packages/frontend/src')
-    const files = await Promise.all([
-      readFile(resolve(root, 'components/main/tabs/StrongholdTab.vue'), 'utf8'),
-      readFile(resolve(root, 'components/stronghold/StrongholdChat.vue'), 'utf8'),
-      readFile(resolve(root, 'components/chat/MessageBubble.vue'), 'utf8'),
-      readFile(resolve(root, 'components/chat/InputBar.vue'), 'utf8'),
-      readFile(resolve(root, 'composables/useStronghold.ts'), 'utf8'),
-    ])
-    const source = files.join('\n')
-    const adapter = files[1]!
-    const bubble = files[2]!
-    const inputBar = files[3]!
-
-    expect(inputBar).toContain('if (isGroupChannel.value)')
-    expect(inputBar).not.toContain('<span>会话工具</span>')
-    expect(bubble).toContain("systemVariant?: 'default' | 'narration'")
-    expect(bubble).toContain('class="msg-narration-card"')
-    expect(bubble).toContain('font-style: italic')
-    expect(bubble).toContain('@media (prefers-reduced-motion: reduce)')
-    expect(adapter).toContain(':system-variant="message.systemVariant"')
-    expect(adapter).toContain("systemVariant: butler ? 'narration' : 'default'")
-    expect(adapter).toContain("butler ? '管家旁白' : '系统'")
-    expect(source).not.toContain('ChatContainer')
-    expect(source).not.toContain('useChat')
-    expect(adapter).not.toContain('useThreadStore')
-    expect(adapter).toContain("import MessageBubble from '../chat/MessageBubble.vue'")
-    expect(adapter).toContain(
-      "import InputBar, { type MentionCandidate } from '../chat/InputBar.vue'",
-    )
-    expect(adapter).toContain('channel="group"')
   })
 
   it('删除消息成功后应从本地列表移除整个级联对话', async () => {

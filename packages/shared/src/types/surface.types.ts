@@ -4,12 +4,15 @@
  * 仅供系统 Projection、Shell 与 Compositor 使用，不属于第三方应用 ABI。
  */
 
+import type { ConversationGenerationStats } from '../tokenUsage'
+
 export type SurfaceId = string & { readonly __surfaceBrand: 'SurfaceId' }
 export type SurfaceNodeId = string & { readonly __surfaceNodeBrand: 'SurfaceNodeId' }
 
 export type SurfaceNodeKind =
   | 'markdown'
   | 'native-reasoning'
+  | 'model-retry'
   | 'thinking'
   | 'code'
   | 'math'
@@ -43,13 +46,32 @@ export interface MarkdownSurfaceProps {
   phase: 'preview' | 'committed'
 }
 
+/** 上游重试的持久时间线记录；计数表示已使用的重试次数，不含首次请求。 */
+export interface ModelRetryInfo {
+  retryId: string
+  state: 'waiting' | 'retrying' | 'recovered' | 'failed' | 'cancelled'
+  attempt: number
+  maxRetries: number
+  delayMs: number
+  reason: string
+  startedAt: number
+  updatedAt: number
+  partialResponse: boolean
+}
+
+export interface ModelRetrySurfaceProps extends ModelRetryInfo {
+  turn: number
+}
+
 export interface ThinkingSurfaceProps {
+  turn?: number
   source: string
   phase: 'preview' | 'committed'
   durationMs?: number
 }
 
 export interface NativeReasoningSurfaceProps {
+  turn?: number
   source: string
   phase: 'preview' | 'committed'
   mode: 'stream' | 'non_stream'
@@ -63,19 +85,34 @@ export interface ToolCallSurfaceProps {
   draftId?: string
   argsPreview?: string
   receivedChars?: number
+  fileBaseline?: import('../fileMutationPreview').FileWritePreviewBaseline
+  previewTruncated?: boolean
   state: 'assembling' | 'calling' | 'completed' | 'failed'
 }
 
 export interface ToolResultSurfaceProps {
+  automaticApproval?: import('../executionMode').AutomaticApprovalRecord
   callId: string
   result: string
   isError: boolean
   durationMs?: number
 }
 
+/** 桌面接管后的持久暂停记录；继续时重新观察，不重放已完成的工具。 */
+export interface ConversationExecutionPause {
+  kind: 'desktop'
+  code: string
+  message: string
+  toolName: string
+  callId: string
+  pausedAt: string
+}
+
 export interface StatusSurfaceProps {
+  contextBudget?: import('../tokenUsage').LiveContextBudget
   state:
     | 'thinking'
+    | 'assembling'
     | 'calling'
     | 'generating'
     | 'tool_failed'
@@ -83,6 +120,8 @@ export interface StatusSurfaceProps {
     | 'running'
     | 'paused'
     | 'waiting_input'
+    | 'waiting'
+    | 'blocked'
     | 'completed'
     | 'failed'
     | 'cancelled'
@@ -104,6 +143,8 @@ export interface AttachmentSurfaceProps {
   name: string
   mimeType: string
   sizeBytes: number
+  caption?: string
+  origin?: import('../resources').ResourceOrigin
 }
 
 export interface ProgressSurfaceProps {
@@ -113,6 +154,7 @@ export interface ProgressSurfaceProps {
 
 export interface InputSurfaceProps {
   inputId: string
+  questions?: import('../agentInput').AgentInputQuestion[]
   inputKind?: 'background_task' | 'agent_question'
   principalId?: string
   title: string
@@ -135,6 +177,7 @@ export interface ApprovalSurfaceProps {
 }
 
 export interface SurfaceDescriptor {
+  generationStats?: ConversationGenerationStats
   surfaceId: SurfaceId
   generation: string
   messageId?: string
@@ -213,6 +256,14 @@ export type SurfaceOperation =
       delta: string
     }
   | {
+      type: 'surface.append-tool-arguments'
+      nodeId: SurfaceNodeId
+      nameDelta?: string
+      argumentsDelta?: string
+      receivedChars: number
+      previewTruncated: boolean
+    }
+  | {
       type: 'surface.upsert-node'
       node: SurfaceNode
     }
@@ -253,6 +304,13 @@ export type ConversationContentBlock =
   | {
       blockId: string
       sequence: number
+      kind: 'model_retry'
+      turn: number
+      retry: ModelRetryInfo
+    }
+  | {
+      blockId: string
+      sequence: number
       kind: 'narration'
       turn: number
       phase: 'progress' | 'final'
@@ -279,6 +337,7 @@ export type ConversationContentBlock =
       blockId: string
       sequence: number
       kind: 'tool'
+      automaticApproval?: import('../executionMode').AutomaticApprovalRecord
       turn: number
       callId: string
       name: string
@@ -289,10 +348,14 @@ export type ConversationContentBlock =
     }
 
 export interface ConversationMessageProjection {
+  executionPause?: ConversationExecutionPause
+  generationStats?: ConversationGenerationStats
   messageId: string
   threadId: string
   role: 'user' | 'assistant' | 'system' | 'tool'
   content: string
+  /** 独立口语答复；不得用完整正文作为语音回退。 */
+  spokenReply?: string
   rawContent?: string | null
   pairId?: string | null
   senderId?: string | null
@@ -306,6 +369,7 @@ export interface ConversationMessageProjection {
   outputTokens?: number
   contentBlocks: ConversationContentBlock[]
   toolCalls: Array<{
+    automaticApproval?: import('../executionMode').AutomaticApprovalRecord
     callId?: string
     name: string
     args: string
@@ -313,13 +377,7 @@ export interface ConversationMessageProjection {
     isError?: boolean
     durationMs?: number
   }>
-  attachments: Array<{
-    id: string
-    kind: string
-    name: string
-    mimeType: string
-    sizeBytes: number
-  }>
+  attachments: AttachmentSurfaceProps[]
 }
 
 export interface SurfaceInput {

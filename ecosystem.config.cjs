@@ -8,10 +8,10 @@
  *   pm2 start ecosystem.config.cjs
  *   pm2 start ecosystem.config.cjs --env production
  *
- * 环境变量前缀: PERO_*（见 lib/env.ts + 07_DUAL_DEPLOYMENT.md §6）
+ * 环境变量前缀: PERO_*（见 lib/env.ts + A04_DEPLOYMENT.md §6）
  *
- * @see _docs_/07_DUAL_DEPLOYMENT.md
- * @see _docs_/15_DEVOPS_OPERATIONS.md
+ * @see .docs/A04_DEPLOYMENT.md
+ * @see .docs/A08_DEVOPS.md
  */
 module.exports = {
   apps: [

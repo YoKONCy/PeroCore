@@ -2,7 +2,7 @@
 /**
  * MemoryFilterBar — 记忆档案过滤工作台
  *
- * 第一排：搜索 / 来源 / 状态 / 模式 / 排序 / 刷新
+ * 第一排：搜索 / 角色 / 来源 / 模式 / 排序 / 刷新
  * 第二排（可折叠）：重要度区间、事件与记录时间范围、实体 facet 多选
  * 底部：当前筛选 chips（可单独移除 / 一键清空）
  */
@@ -32,7 +32,7 @@ const emit = defineEmits<{
 const searchQuery = defineModel<string>('searchQuery', { required: true })
 const agent = defineModel<string>('agent', { required: true })
 const channel = defineModel<string>('channel', { required: true })
-const status = defineModel<StatusFilter>('status', { required: true })
+defineModel<StatusFilter>('status', { required: true })
 const mode = defineModel<string>('mode', { required: true })
 const importanceMin = defineModel<number>('importanceMin', { required: true })
 const importanceMax = defineModel<number>('importanceMax', { required: true })
@@ -57,12 +57,6 @@ const channelOptions = computed(() => [
     value: item.value,
   })),
 ])
-
-const statusOptions = [
-  { label: '活跃', value: 'active' },
-  { label: '仅归档', value: 'archived' },
-  { label: '全部状态', value: 'all' },
-]
 
 const modeOptions = [
   { label: '全部模式', value: 'all' },
@@ -133,14 +127,6 @@ const entitySections = computed(
           来源
         </label>
         <PSelect v-model="channel" :options="channelOptions" />
-      </div>
-
-      <div class="filter-field">
-        <label class="filter-label">
-          <span class="filter-dot" />
-          状态
-        </label>
-        <PSelect v-model="status" :options="statusOptions" />
       </div>
 
       <div class="filter-field">

@@ -64,10 +64,21 @@ export abstract class AbstractSocialAdapter extends EventEmitter {
   // ━━ 消息 ━━
 
   /** 发送消息到指定会话 */
-  abstract sendMessage(msg: OutboundMessage): Promise<void>
+  abstract sendMessage(msg: OutboundMessage, signal?: AbortSignal): Promise<void>
 
   /** 获取当前连接状态 */
   abstract getStatus(): Promise<AdapterStatus>
+
+  /** 按 ID 读取当前账号、当前会话中的引用消息；不支持的平台返回空。 */
+  async getMessage(
+    _messageId: string,
+    _channelId: string,
+    _channelType: 'private' | 'group',
+    _accountId: string,
+    _signal?: AbortSignal,
+  ): Promise<InboundMessage | null> {
+    return null
+  }
 
   /** 拉取某个会话的历史消息；不支持的平台返回空数组。 */
   async getMessageHistory(
@@ -75,6 +86,7 @@ export abstract class AbstractSocialAdapter extends EventEmitter {
     _channelType: 'private' | 'group',
     _limit: number,
     _beforeMessageSeq?: number,
+    _accountId?: string,
   ): Promise<SocialHistoryMessageRecord[]> {
     return []
   }

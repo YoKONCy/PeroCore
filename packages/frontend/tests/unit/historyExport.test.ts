@@ -54,7 +54,8 @@ describe('历史记录 Markdown 导出', () => {
     )
 
     expect(markdown).toContain('<think>\n结构化思考\n</think>')
-    expect(markdown).toContain('### 工具调用：read_file')
+    expect(markdown).toContain('read_file')
+    expect(markdown).toContain('demo.md')
     expect(markdown).toContain('最终回答')
   })
 

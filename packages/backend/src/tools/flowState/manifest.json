@@ -12,7 +12,7 @@
   "tools": [
     {
       "name": "update_flow_state",
-      "description": "维护当前会话的私有临时心流。仅当跨轮目标或不应直接告诉用户的关键事实发生变化时调用；没有变化时不要重复调用。省略字段表示保留原值，传空字符串表示清空该字段。",
+      "description": "维护当前会话的私有临时目标和要点，仅在内容变化时更新；省略保留，空字符串清空。",
       "parameters": {
         "type": "object",
         "properties": {

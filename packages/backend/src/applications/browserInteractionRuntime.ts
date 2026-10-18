@@ -89,30 +89,33 @@ export class BrowserInteractionRuntime {
     operation: string,
     input: Record<string, unknown>,
     context: KernelCallContext,
+    signal?: AbortSignal,
   ): Promise<{ result: unknown; scene?: WebInteractionScene; receipt?: WebActionReceipt }> {
+    signal?.throwIfAborted()
     if (READ_OPERATIONS.has(operation)) {
-      const result = await this.port.invoke(operation, input, context)
+      const result = await this.port.invoke(operation, input, context, signal)
       const scene = operation === 'inspect' ? this.project(result) : undefined
       return { result, scene }
     }
     if (!this.port.offer?.operations.includes('inspect')) {
-      return { result: await this.port.invoke(operation, input, context) }
+      return { result: await this.port.invoke(operation, input, context, signal) }
     }
 
     let before: BrowserActionEvidence
     try {
-      before = await this.observe(context, `执行 ${operation}`)
+      before = await this.observe(context, `执行 ${operation}`, signal)
     } catch (error) {
+      signal?.throwIfAborted()
       if (!['open', 'createTarget'].includes(operation)) throw error
-      const result = await this.port.invoke(operation, input, context)
-      const after = await this.observe(context, `完成 ${operation}`)
+      const result = await this.port.invoke(operation, input, context, signal)
+      const after = await this.observe(context, `完成 ${operation}`, signal)
       return { result, scene: after.scene }
     }
     if (before.scene.injectionFindings.some((finding) => finding.severity === 'critical')) {
       throw new Error('WEB_INJECTION_BLOCKED: 页面包含 critical不可信指令')
     }
-    const result = await this.port.invoke(operation, input, context)
-    const after = await this.observe(context, `完成 ${operation}`)
+    const result = await this.port.invoke(operation, input, context, signal)
+    const after = await this.observe(context, `完成 ${operation}`, signal)
     const target = String(input.handle ?? input.target ?? '')
     const targetObject = before.scene.objects.find(
       (object) => object.handle?.handleId === target || object.objectId === target,
@@ -135,18 +138,26 @@ export class BrowserInteractionRuntime {
   private async observe(
     context: KernelCallContext,
     intent?: string,
+    signal?: AbortSignal,
   ): Promise<BrowserActionEvidence> {
     const raw = await this.port.invoke<Record<string, never>, ElectronPageSnapshot>(
       'inspect',
       {},
       context,
+      signal,
     )
     const scene = this.project(raw, intent)
-    const network = await this.optional<Record<string, unknown>[]>('networkQuery', {}, context, [])
+    const network = await this.optional<Record<string, unknown>[]>(
+      'networkQuery',
+      {},
+      context,
+      [],
+      signal,
+    )
     const status = await this.optional<{
       pendingDialog?: unknown
       downloads?: Array<{ id?: string }>
-    }>('runtimeStatus', {}, context, {})
+    }>('runtimeStatus', {}, context, {}, signal)
     return {
       scene,
       contentHash: raw.contentHash ?? '',
@@ -257,11 +268,13 @@ export class BrowserInteractionRuntime {
     input: Record<string, unknown>,
     context: KernelCallContext,
     fallback: T,
+    signal?: AbortSignal,
   ): Promise<T> {
     if (!this.port.offer.operations.includes(operation)) return fallback
     try {
-      return await this.port.invoke<Record<string, unknown>, T>(operation, input, context)
+      return await this.port.invoke<Record<string, unknown>, T>(operation, input, context, signal)
     } catch {
+      signal?.throwIfAborted()
       return fallback
     }
   }

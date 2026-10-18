@@ -29,9 +29,6 @@ import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('MdpEngine')
 
-/** 模板变量嵌套展开的最大轮数，防止循环引用或动态模板无限渲染。 */
-const MAX_RENDER_DEPTH = 10
-
 // ─────────────────────────────────────────────
 // 类型
 // ─────────────────────────────────────────────
@@ -119,6 +116,10 @@ export interface PromptPreset {
 
 /** 渲染后的消息 */
 export interface RenderedMessage {
+  currentMessage?: boolean
+  historyMessage?: boolean
+  historyCache?: import('../llm/types').ChatMessage['cacheControl']
+  nativeContent?: import('../llm/types').ContentPart[]
   role: 'system' | 'user' | 'assistant'
   content: string
   /** 来源 Slot ID (调试用) */
@@ -157,8 +158,6 @@ export const DEFAULT_POSITIONS = {
   HISTORY: 5000,
   /** 当前用户消息 (预留) */
   USER_MESSAGE: 9000,
-  /** 尾部注入 (jailbreak/remind) */
-  FOOTER: 9500,
 } as const
 
 // ─────────────────────────────────────────────
@@ -179,6 +178,68 @@ const RE_TOP_COMMENT = /^<!--[\s\S]*?-->\s*/
 // ─────────────────────────────────────────────
 
 export class MdpEngine {
+  private managedRenderer?: (
+    key: string,
+    vars: Record<string, unknown>,
+    snapshot?: unknown,
+  ) => string
+
+  setManagedRenderer(
+    renderer: (key: string, vars: Record<string, unknown>, snapshot?: unknown) => string,
+  ): void {
+    this.managedRenderer = renderer
+  }
+
+  /** 只解析模板源码；插入的聊天、记忆和工具文本永不再次解析。 */
+  renderOnce(template: string, vars: Record<string, unknown> = {}): string {
+    const values = this.withOwnerDefaults(vars)
+    let calls = 0
+    const render = (body: string, stack: string[] = []): string => {
+      const component =
+        typeof values.component === 'function'
+          ? values.component
+          : (key: string): string => {
+              const resolved = this.resolveKey(key, values)
+              if (stack.includes(resolved)) throw new Error(`提示词组件循环引用：${resolved}`)
+              if (++calls > 128 || stack.length >= 24)
+                throw new Error('提示词组件引用过多，请缩小装配范围')
+              const prompt = this.prompts.get(resolved)
+              if (!prompt) throw new Error(`提示词组件不存在：${resolved}`)
+              if (prompt.meta.enabled === false) return ''
+              return render(prompt.content, [...stack, resolved])
+            }
+      const rendered = this.nj
+        .renderString(body.replace(RE_COMMENT, ''), { ...values, component })
+        .trim()
+      if (rendered.length > 4_000_000) throw new Error('提示词渲染内容过大，请缩小装配范围')
+      return rendered
+    }
+    return render(template)
+  }
+
+  validateTemplate(template: string): void {
+    new nunjucks.Template(template, this.nj, undefined, true)
+  }
+
+  /** 以相同发布快照供独立应用编译器装配提示词。 */
+  managedFramework?: (
+    channel: string,
+    agentId: string,
+    vars: Record<string, unknown>,
+    snapshot?: unknown,
+  ) => RenderedMessage[]
+  prepareManagedFramework?: (
+    channel: string,
+    agentId: string,
+    vars: Record<string, unknown>,
+    snapshot?: unknown,
+    sessionId?: string,
+  ) => Promise<{
+    messages: RenderedMessage[]
+    variableCommit?: import('@infos/shared').PromptVariableCommit
+  }>
+  commitPromptVariables?: (change: import('@infos/shared').PromptVariableCommit) => Promise<void>
+  capturePromptSnapshot?: () => unknown
   /** 所有已加载的模板 (key → MdPrompt) */
   private prompts = new Map<string, MdPrompt>()
 
@@ -263,7 +324,7 @@ export class MdpEngine {
     // 去重：如果已注册相同 dir + prefix，跳过
     const exists = this.additionalRoots.some((r) => r.dir === dir && r.prefix === prefix)
     if (exists) {
-      logger.warn(`模板根目录已注册，跳过: ${dir} (prefix=${prefix ?? '无'})`)
+      logger.debug(`模板根目录已注册，跳过: ${dir} (prefix=${prefix ?? '无'})`)
       return
     }
 
@@ -296,7 +357,8 @@ export class MdpEngine {
    * @param templateKey - 模板键或 Agent 覆盖键
    * @param vars - 变量字典
    */
-  render(templateKey: string, vars: Record<string, unknown> = {}): string {
+  render(templateKey: string, vars: Record<string, unknown> = {}, snapshot?: unknown): string {
+    if (this.managedRenderer) return this.managedRenderer(templateKey, vars, snapshot)
     const resolved = this.resolveKey(templateKey, vars)
     const prompt = this.prompts.get(resolved)
     if (!prompt) {
@@ -312,7 +374,7 @@ export class MdpEngine {
    * 暴露给外部直接渲染任意模板文本。
    */
   renderString(template: string, vars: Record<string, unknown> = {}): string {
-    return this.renderTemplate(template, this.withOwnerDefaults(vars))
+    return this.renderOnce(template, vars)
   }
 
   // ─────────────────────────────────────────
@@ -504,27 +566,9 @@ export class MdpEngine {
   // 内部方法: 渲染
   // ─────────────────────────────────────────
 
-  /** Nunjucks 递归渲染 + 注释剥离 */
+  /** 旧调用入口同样只解释模板源码，不递归解释插入的数据。 */
   private renderTemplate(template: string, vars: Record<string, unknown>): string {
-    try {
-      let current = template
-      const seen = new Set<string>([current])
-      for (let depth = 0; depth < MAX_RENDER_DEPTH; depth++) {
-        const rendered = this.nj.renderString(current, vars).replace(RE_COMMENT, '')
-        if (rendered === current) return rendered.trim()
-        if (seen.has(rendered)) {
-          logger.warn(`Nunjucks 递归渲染检测到循环引用`, { depth: depth + 1 })
-          return rendered.trim()
-        }
-        seen.add(rendered)
-        current = rendered
-      }
-      logger.warn(`Nunjucks 递归渲染达到最大深度`, { maxDepth: MAX_RENDER_DEPTH })
-      return current.trim()
-    } catch (err) {
-      logger.warn(`Nunjucks 渲染失败`, { error: err })
-      return template
-    }
+    return this.renderOnce(template, vars)
   }
 
   /**
@@ -643,7 +687,7 @@ export class MdpEngine {
 
       // 注册基名 (兼容短名调用)
       // agents/ 目录下的模板不注册全局 basename，避免 agent 特定模板污染全局
-      // slots/ 目录下的模板使用 frontmatter slotId 作为基名（如 footer），而不是带数字的文件名（如 9500_footer）
+      // slots/ 目录下的模板使用 frontmatter slotId 作为基名（如 abilities），而不是带数字的文件名。
       // 带前缀的应用模板不注册全局 basename，避免污染主 Agent 短名空间
       const isAgentsTemplate = key.startsWith('agents/')
       const isPrefixedTemplate = Boolean(prefix)

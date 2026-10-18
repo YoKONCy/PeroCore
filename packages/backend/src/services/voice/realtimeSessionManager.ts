@@ -7,7 +7,7 @@
  * ASR (语音识别) → Agent (对话处理) → TTS (文本转语音) → Gateway (音频流推送)
  *
  * 主要创新点:
- * - ReAct TTS 过滤: 自动移除 <Thinking>/<Plan>/<Action> 等 Agent 内部推理文本
+ * - 独立口语答复：完整正文保留在会话，TTS 只处理 spokenReply
  * - 语音参数动态调整: 根据回复内容情感动态调整语速/音调
  * - 取消安全: 任意阶段可取消，不泄漏资源
  *
@@ -27,6 +27,7 @@ import type { GatewayHub } from '../gateway/gatewayHub'
 import type { ThreadService } from '../thread/threadService'
 import type { ConversationTurnService } from '../conversation/conversationTurnService'
 import { createLogger } from '../../lib/logger'
+import { cleanTextForTts } from './spokenReply'
 
 const logger = createLogger('RealtimeSession')
 
@@ -56,8 +57,6 @@ export interface VoiceSessionConfig {
   language?: string
   /** 超时 (秒) — 等待用户语音的最大时间 */
   timeoutSec?: number
-  /** 是否启用 ReAct 文本过滤 */
-  enableReActFilter?: boolean
 }
 
 /** 语音处理管道结果 */
@@ -66,6 +65,7 @@ export interface VoicePipelineResult {
   transcript: string
   /** Agent 回复文本 */
   reply: string
+  spokenReply: string
   /** TTS 音频 */
   audio: TtsResult | null
   /** 各阶段耗时 */
@@ -144,7 +144,6 @@ export class RealtimeSessionManager {
     config?: VoiceSessionConfig,
   ): Promise<VoicePipelineResult> {
     const startMs = Date.now()
-    const enableFilter = config?.enableReActFilter !== false
 
     // 注册活跃会话
     const session: ActiveVoiceSession = {
@@ -182,13 +181,18 @@ export class RealtimeSessionManager {
       session.state = 'thinking'
 
       const agentStartMs = Date.now()
-      const reply = await this.runAgent(asrResult.text, agentId, sessionId, scheduled)
+      const { reply, spokenReply } = await this.runAgent(
+        asrResult.text,
+        agentId,
+        sessionId,
+        scheduled,
+      )
       const agentMs = Date.now() - agentStartMs
 
       logger.info(`Agent 回复: "${reply.slice(0, 50)}..." (${agentMs}ms)`)
 
       // ── 阶段 3: 文本清洗 (ReAct 过滤) ──
-      const ttsText = enableFilter ? cleanTextForTts(reply) : reply
+      const ttsText = cleanTextForTts(spokenReply)
 
       // ── 阶段 4: TTS 语音合成 ──
       await this.broadcastState(sessionId, 'speaking')
@@ -218,6 +222,7 @@ export class RealtimeSessionManager {
       return {
         transcript: asrResult.text,
         reply,
+        spokenReply,
         audio,
         timing: { asrMs, agentMs, ttsMs, totalMs },
       }
@@ -277,7 +282,7 @@ export class RealtimeSessionManager {
     agentId: string,
     sessionId: string,
     scheduled: KernelScheduledExecutionContext,
-  ): Promise<string> {
+  ): Promise<{ reply: string; spokenReply: string }> {
     const threadId = sessionId
 
     // 获取或创建 Thread（语音复用 sessionId 作为 threadId）
@@ -301,7 +306,7 @@ export class RealtimeSessionManager {
       beginIo: scheduled.beginIo,
     })
 
-    return result.reply
+    return { reply: result.reply, spokenReply: result.spokenReply ?? '' }
   }
 
   /** 执行 TTS */
@@ -337,42 +342,7 @@ interface ActiveVoiceSession {
 
 // ── ReAct 文本清洗 ──
 
-/** ReAct 推理块模式 (正则) */
-const REACT_BLOCK_PATTERNS = [
-  /<Thinking>[\s\S]*?<\/Thinking>/gi,
-  /<Plan>[\s\S]*?<\/Plan>/gi,
-  /<Action>[\s\S]*?<\/Action>/gi,
-  /<Observation>[\s\S]*?<\/Observation>/gi,
-  /```[\s\S]*?```/g, // 代码块
-]
-
-/**
- * 清洗 Agent 回复文本用于 TTS
- *
- * 移除 ReAct 推理块、代码块等不适合朗读的内容。
- * `_clean_text()`。
- */
-export function cleanTextForTts(text: string): string {
-  let cleaned = text
-
-  // 移除 ReAct 推理块
-  for (const pattern of REACT_BLOCK_PATTERNS) {
-    cleaned = cleaned.replace(pattern, '')
-  }
-
-  // 移除 markdown 标记
-  cleaned = cleaned
-    .replace(/#{1,6}\s/g, '') // 标题
-    .replace(/\*\*(.*?)\*\*/g, '$1') // 加粗
-    .replace(/\*(.*?)\*/g, '$1') // 斜体
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // 链接
-    .replace(/^\s*[-*]\s+/gm, '') // 列表项
-
-  // 清理多余空白
-  cleaned = cleaned.replace(/\n{3,}/g, '\n\n').trim()
-
-  return cleaned
-}
+export { cleanTextForTts } from './spokenReply'
 
 // ── 语音参数动态检测 ──
 

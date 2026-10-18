@@ -38,6 +38,12 @@ function createResolver(config: Record<string, string | null>) {
 }
 
 describe('ModelRoleResolver角色指派', () => {
+  it('知识整理使用任务指派，未指派时回退主模型', async () => {
+    const assigned = createResolver({ 'model.main': '1', 'model.task.knowledge': '2' })
+    expect((await assigned.resolver.bind('knowledge')())?.modelId).toBe('nana-model')
+    const fallback = createResolver({ 'model.main': '1' })
+    expect((await fallback.resolver.bind('knowledge')())?.modelId).toBe('main-model')
+  })
   it('角色存在专用指派时应优先使用角色模型', async () => {
     const { resolver, configRepo } = createResolver({
       'model.main': '1',

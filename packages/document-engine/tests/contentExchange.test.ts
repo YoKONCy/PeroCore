@@ -40,9 +40,6 @@ describe('Markdown 与 Blob A3/A4', () => {
     expect(projectMarkdown(engine, documentId).content).toBe(
       '# 标题\n\n第一段 第二行\n\n- 甲\n- 乙\n\n> 引用\n\n```ts\nconst value = 1\n```',
     )
-    expect(projectMarkdown(engine, documentId).contentHash).toBe(
-      projectMarkdown(engine, documentId).contentHash,
-    )
   })
 
   it('无效 Markdown 不应留下空 Document Authority', () => {

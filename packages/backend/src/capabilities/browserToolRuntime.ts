@@ -4,6 +4,7 @@ import type { CapabilityHandleRegistry } from '../kernel/capabilityHandleRegistr
 import { LifecycleScope } from '../kernel/lifecycleScope'
 import type { ToolRegistry } from '../services/agent/toolRegistry'
 import { createBrowserToolContributions } from '../tools/browserControl'
+import type { BrowserPreviewResolver } from '../tools/browserControl/navigationTarget'
 
 const REQUIREMENT: KernelCapabilityRequirement = {
   requirementId: 'kernel.browser-tools',
@@ -27,6 +28,11 @@ export class BrowserToolRuntime {
   private port?: BoundCapabilityPort
   private unsubscribe?: () => void
   private syncing = false
+  private previewResolver?: BrowserPreviewResolver
+
+  setPreviewResolver(resolver: BrowserPreviewResolver): void {
+    this.previewResolver = resolver
+  }
 
   constructor(
     private readonly directory: CapabilityDirectory,
@@ -94,6 +100,12 @@ export class BrowserToolRuntime {
     for (const contribution of createBrowserToolContributions(
       port,
       offer.operations as WebPageOperation[],
+      undefined,
+      (source, context) => {
+        if (!this.previewResolver)
+          throw new Error('BROWSER_PREVIEW_UNAVAILABLE: 工作区网页预览尚未就绪')
+        return this.previewResolver(source, context)
+      },
     )) {
       this.tools.register(contribution.definition, contribution.handler)
       scope.defer(() => {

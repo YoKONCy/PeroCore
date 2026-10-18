@@ -34,25 +34,39 @@ export const memoryRuntimeConfigSchema = z
       group: channelConfigSchema,
     }),
     advanced: advancedConfigSchema,
-    workContextExpirationPairs: z.number().int().min(1).max(50),
   })
-  .transform((config) =>
-    config.advanced.enableSaPpr
-      ? config
-      : {
-          ...config,
-          advanced: {
-            ...config.advanced,
-            enableFista: false,
-            enableDpp: false,
-            enableContextRnn: false,
-            enableLeiden: false,
-            enableFeedback: false,
-          },
+  .transform((config) => {
+    if (!config.advanced.enableSaPpr)
+      return {
+        ...config,
+        advanced: {
+          ...config.advanced,
+          enableFista: false,
+          enableDpp: false,
+          enableContextRnn: false,
+          enableLeiden: false,
+          enableFeedback: false,
         },
-  )
+      }
+    return {
+      ...config,
+      advanced: {
+        ...config.advanced,
+        enableFeedback: config.advanced.enableContextRnn && config.advanced.enableFeedback,
+      },
+    }
+  })
 
 export type MemoryRuntimeConfig = z.infer<typeof memoryRuntimeConfigSchema>
+
+/** RNN 是高级检索的可选子模块，不能独立于高级管线运行。 */
+export function isContextRnnEnabled(advanced: MemoryRuntimeConfig['advanced']): boolean {
+  return advanced.enableSaPpr && advanced.enableContextRnn
+}
+
+export function isContextRnnFeedbackEnabled(advanced: MemoryRuntimeConfig['advanced']): boolean {
+  return isContextRnnEnabled(advanced) && advanced.enableFeedback
+}
 
 /** 同时遵守 Thread Policy 与通道级自动 RAG 开关。 */
 export function shouldRunAutoRag(
@@ -78,7 +92,6 @@ export const DEFAULT_MEMORY_RUNTIME_CONFIG: MemoryRuntimeConfig = {
     enableLeiden: false,
     enableFeedback: false,
   },
-  workContextExpirationPairs: 5,
 }
 
 /** 将旧版消息条数合同迁移为对话轮次合同；数值保持不变，尊重用户此前填写的窗口规模。 */
@@ -116,7 +129,6 @@ function migrateLegacyConfig(stored: unknown): unknown {
     ...structuredClone(DEFAULT_MEMORY_RUNTIME_CONFIG.advanced),
     ...advanced,
   }
-  if (root.workContextExpirationPairs === undefined) root.workContextExpirationPairs = 5
   return root
 }
 

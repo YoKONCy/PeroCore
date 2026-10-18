@@ -11,6 +11,34 @@
  * @module packages/backend/src/services/llm/sanitize
  */
 
+import type { ChatMessage, ContentPart } from './types'
+
+/** 严格兼容接口只允许开头的一条 system；保留系统指令顺序及完整工具响应链。 */
+export function normalizeSystemMessages(messages: ChatMessage[]): ChatMessage[] {
+  const systemMessages = messages.filter((message) => message.role === 'system')
+  if (!systemMessages.length || (systemMessages.length === 1 && messages[0]?.role === 'system'))
+    return messages
+
+  const parts: ContentPart[] = []
+  for (const message of systemMessages) {
+    const content: ContentPart[] = Array.isArray(message.content)
+      ? message.content
+      : typeof message.content === 'string' && message.content
+        ? [{ type: 'text', text: message.content }]
+        : []
+    if (!content.length) continue
+    if (parts.length) parts.push({ type: 'text', text: '\n\n' })
+    parts.push(...content)
+  }
+  const content = parts.every((part) => part.type === 'text')
+    ? parts.map((part) => (part.type === 'text' ? part.text : '')).join('')
+    : parts
+  return [
+    { ...systemMessages[0]!, content },
+    ...messages.filter((message) => message.role !== 'system'),
+  ]
+}
+
 /** Gemini Function Declaration 与部分OpenAI中转不接受的JSON Schema关键字。 */
 const UNSUPPORTED_TOOL_SCHEMA_KEYS = new Set([
   '$schema',
@@ -54,13 +82,75 @@ export function sanitizeToolParameters(input: Record<string, unknown>): Record<s
       : Array.isArray(source.anyOf)
         ? source.anyOf
         : null
-    const preferred =
+    let preferred =
       union?.find(
         (branch) =>
           branch &&
           typeof branch === 'object' &&
           (branch as Record<string, unknown>).type === 'array',
       ) ?? union?.[0]
+    // 多操作工具的对象分支必须保留所有字段，不能只留下第一个空参数结构。
+    // 传输层合并可选字段；具体 action 的必填项仍由业务执行器独立验证。
+    if (
+      union?.length &&
+      union.every(
+        (branch) =>
+          branch &&
+          typeof branch === 'object' &&
+          (branch as Record<string, unknown>).type === 'object',
+      )
+    ) {
+      const branches = union as Array<Record<string, unknown>>
+      const properties: Record<string, unknown> = Object.create(null)
+      for (const branch of branches) {
+        for (const [name, child] of Object.entries(
+          (branch.properties ?? {}) as Record<string, unknown>,
+        )) {
+          if (!Object.hasOwn(properties, name)) properties[name] = child
+          else if (
+            child &&
+            typeof child === 'object' &&
+            properties[name] &&
+            typeof properties[name] === 'object'
+          ) {
+            const previous = properties[name] as Record<string, unknown>
+            const next = child as Record<string, unknown>
+            const combined = { ...previous }
+            if (Array.isArray(previous.enum) && Array.isArray(next.enum))
+              combined.enum = [...new Set([...previous.enum, ...next.enum])]
+            else delete combined.enum
+            for (const key of ['minimum', 'minLength', 'minItems']) {
+              if (typeof previous[key] === 'number' && typeof next[key] === 'number')
+                combined[key] = Math.min(previous[key], next[key])
+              else delete combined[key]
+            }
+            for (const key of ['maximum', 'maxLength', 'maxItems']) {
+              if (typeof previous[key] === 'number' && typeof next[key] === 'number')
+                combined[key] = Math.max(previous[key], next[key])
+              else delete combined[key]
+            }
+            if (previous.pattern !== next.pattern) delete combined.pattern
+            properties[name] = combined
+          }
+        }
+      }
+      const required = ((branches[0]?.required ?? []) as string[]).filter((name) =>
+        branches.every(
+          (branch) => Array.isArray(branch.required) && branch.required.includes(name),
+        ),
+      )
+      preferred = {
+        type: 'object',
+        properties,
+        required,
+        description: branches
+          .map(
+            (branch) =>
+              `${String(branch.description ?? '参数结构')}：${((branch.required ?? []) as string[]).join('、') || '无必填项'}`,
+          )
+          .join('\n'),
+      }
+    }
     const merged =
       preferred && typeof preferred === 'object'
         ? { ...source, ...(preferred as Record<string, unknown>) }

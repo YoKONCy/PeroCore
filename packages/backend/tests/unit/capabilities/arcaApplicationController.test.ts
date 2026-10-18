@@ -1,6 +1,17 @@
 import path from 'node:path'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { ArcaApplicationController } from '@infos/backend/capabilities/arcaApplicationController'
+const directories: string[] = []
+function dataPath() {
+  const value = mkdtempSync(path.join(tmpdir(), 'arca-controller-'))
+  directories.push(value)
+  return value
+}
+afterEach(() => {
+  for (const value of directories.splice(0)) rmSync(value, { recursive: true, force: true })
+})
 
 function createFederation(discovery?: { pid: number }) {
   return {
@@ -16,7 +27,7 @@ function createFederation(discovery?: { pid: number }) {
               appId: 'infos.arca',
               instanceId: 'instance-1',
               name: 'Arca',
-              appVersion: '0.9.3-hotfix2',
+              appVersion: '0.9.4',
               adapterVersion: '1.0.0',
               state: 'ready' as const,
               endpoints: [],
@@ -40,7 +51,7 @@ function createController(federation: ReturnType<typeof createFederation>) {
     appRoot: 'C:/missing-infos/packages',
     workspaceRoot: 'C:/missing-infos',
     applicationsRoot: 'C:/missing-infos/applications',
-    dataPath: 'C:/infos/arca',
+    dataPath: dataPath(),
     discoveryPath: 'C:/infos/arca/discovery.json',
     uiUrl: 'http://127.0.0.1:7362',
     packaged: true,
@@ -54,7 +65,7 @@ describe('ArcaApplicationController', () => {
       appRoot: path.join(workspaceRoot, 'packages'),
       workspaceRoot,
       applicationsRoot: path.join(workspaceRoot, 'dist-applications'),
-      dataPath: 'C:/infos/arca',
+      dataPath: dataPath(),
       discoveryPath: 'C:/infos/arca/discovery.json',
       uiUrl: 'http://127.0.0.1:7362',
       packaged: false,
@@ -87,7 +98,7 @@ describe('ArcaApplicationController', () => {
     const federation = createFederation({ pid: 7391 })
     const controller = createController(federation)
 
-    await expect(controller.stop()).rejects.toThrow('ARCA_NOT_MANAGED')
+    await expect(controller.stop()).rejects.toThrow('APPLICATION_NOT_MANAGED')
     expect(federation.disconnectCurrent).not.toHaveBeenCalled()
   })
 
@@ -97,9 +108,8 @@ describe('ArcaApplicationController', () => {
     expect(controller.status()).toMatchObject({
       ownership: 'offline',
       managedRuntimeAvailable: false,
-      managedRuntimeReason: '当前发行包尚未收集Arca Host产物',
     })
-    await expect(controller.start()).rejects.toThrow('ARCA_MANAGED_RUNTIME_UNAVAILABLE')
+    await expect(controller.start()).rejects.toThrow('APPLICATION_MANAGED_RUNTIME_UNAVAILABLE')
   })
 
   it('重新检测应委托给Federation Connector', async () => {
@@ -107,6 +117,17 @@ describe('ArcaApplicationController', () => {
     const controller = createController(federation)
 
     await controller.reconnect()
+    expect(federation.reconnect).toHaveBeenCalledOnce()
+  })
+
+  it('启动前新发现的实例应直接复用，不再派生后台或绑定桌面', async () => {
+    const federation = createFederation()
+    const discovered = createFederation({ pid: 7391 }).status()
+    federation.reconnect.mockImplementation(async () => {
+      federation.status.mockReturnValue(discovered)
+    })
+    const controller = createController(federation)
+    await expect(controller.start()).resolves.toMatchObject({ ownership: 'adopted', pid: 7391 })
     expect(federation.reconnect).toHaveBeenCalledOnce()
   })
 })

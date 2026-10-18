@@ -179,7 +179,12 @@ export class ButlerService {
         return null
       }
 
-      const persona = this.llmDeps.mdpEngine.render('group/butler/persona')
+      const promptSnapshot = this.llmDeps.mdpEngine.capturePromptSnapshot?.()
+      const persona = this.llmDeps.mdpEngine.render(
+        'group/butler/persona',
+        { channel: 'group' },
+        promptSnapshot,
+      )
 
       const rooms = await this.strongholdService.listRooms()
       const agents = this.agentManager.listAgents()
@@ -199,26 +204,31 @@ export class ButlerService {
         }
       })()
 
-      const prompt = this.llmDeps.mdpEngine.render('group/butler/narrate_and_maintain', {
-        persona,
-        agent_name: inputRequesterLabel(requestText),
-        user_query: requestText,
-        all_rooms_list: roomDetails
-          .map(
-            (item) =>
-              `- ${item.name}${item.description ? `：${item.description}` : ''}${item.agents.length ? ` (成员: ${item.agents.join('、')})` : ''}`,
-          )
-          .join('\n'),
-        all_agents_status: agents
-          .map((agent) => `- ${agent.name} (${agent.isEnabled ? '已启用' : '未启用'})`)
-          .join('\n'),
-        current_room_name: room.name,
-        stronghold_environment: JSON.stringify(environment),
-        flattened_group_history: history
-          .slice(-10)
-          .map((message) => `[${message.senderId}] ${message.content}`)
-          .join('\n'),
-      })
+      const prompt = this.llmDeps.mdpEngine.render(
+        'group/butler/narrate_and_maintain',
+        {
+          persona,
+          channel: 'group',
+          agent_name: inputRequesterLabel(requestText),
+          user_query: requestText,
+          all_rooms_list: roomDetails
+            .map(
+              (item) =>
+                `- ${item.name}${item.description ? `：${item.description}` : ''}${item.agents.length ? ` (成员: ${item.agents.join('、')})` : ''}`,
+            )
+            .join('\n'),
+          all_agents_status: agents
+            .map((agent) => `- ${agent.name} (${agent.isEnabled ? '已启用' : '未启用'})`)
+            .join('\n'),
+          current_room_name: room.name,
+          stronghold_environment: JSON.stringify(environment),
+          flattened_group_history: history
+            .slice(-10)
+            .map((message) => `[${message.senderId}] ${message.content}`)
+            .join('\n'),
+        },
+        promptSnapshot,
+      )
 
       const completion = await this.llmDeps.llmService.chat(
         modelConfig,

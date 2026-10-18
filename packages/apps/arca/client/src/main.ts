@@ -8,10 +8,17 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
 import router from './router'
+import { useWorkbenchStore } from './stores/workbench'
 import './styles/tokens.css'
 import './styles/workbench.css'
+import './styles/finish.css'
+import './styles/controls.css'
+import './styles/settings.css'
+import './styles/book.css'
+import './styles/light.css'
 
 const app = createApp(App)
 app.use(createPinia())
 app.use(router)
+useWorkbenchStore().applyTheme()
 app.mount('#app')

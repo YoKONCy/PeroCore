@@ -276,13 +276,6 @@ watch(
   overflow-y: auto;
   padding: 12px;
 }
-.session-drawer__body::-webkit-scrollbar {
-  width: 5px;
-}
-.session-drawer__body::-webkit-scrollbar-thumb {
-  border-radius: 3px;
-  background: var(--ui-scrollbar-thumb);
-}
 
 .session-drawer__loading,
 .session-drawer__empty {

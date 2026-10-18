@@ -1,7 +1,7 @@
 # 命名与注释规范
 
 > **适用范围**：infOS-TS 全项目
-> **最后更新**：2026-04-21
+> **最后更新**：2026-10-17
 
 ---
 
@@ -163,10 +163,9 @@ const enriched = tags
 
 ```typescript
 // services/memory/index.ts
-export { MemoryService } from './memoryService'
-export { MemorySearchService } from './memorySearch'
-export { ConversationLogService } from './conversationLog'
-export type { CreateMemoryDto, MemoryDto } from './types'
+export { EventMemoryService } from './eventMemoryService'
+export { EventReflectionService } from './eventReflectionService'
+export { DailyNotesService } from './dailyNotesService'
 ```
 
 ### 4.2 导入排序

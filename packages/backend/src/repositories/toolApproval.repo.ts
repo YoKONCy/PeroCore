@@ -22,6 +22,7 @@ export type ApprovalAuditEvent =
   | 'session_cleared'
   | 'restart_rejected'
   | 'shutdown_rejected'
+  | 'cancelled'
 
 export interface ApprovalAuditRecord {
   id: string

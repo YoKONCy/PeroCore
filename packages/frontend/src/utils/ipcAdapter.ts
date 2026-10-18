@@ -12,21 +12,12 @@
 
 import { logger } from '../lib/logger'
 
-// ─── 类型声明 ─────────────────────────────────────────
-declare global {
-  interface Window {
-    electron?: {
-      invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
-      send: (channel: string, ...args: unknown[]) => void
-      on: (channel: string, listener: (...args: unknown[]) => void) => () => void
-    }
-  }
-}
-
 // ─── 环境检测 ─────────────────────────────────────────
 
 /** 检测当前是否在 Electron 环境中运行 */
 export const isElectron = (): boolean => typeof window !== 'undefined' && !!window.electron
+export const isToastOverlay = (): boolean =>
+  typeof window !== 'undefined' && window.electron?.toastOverlay === true
 
 // ─── invoke (请求/响应式 IPC) ─────────────────────────
 
@@ -121,6 +112,7 @@ export async function invoke(cmd: string, args?: unknown): Promise<unknown> {
     cmd === 'get-napcat-logs' ||
     cmd === 'send-napcat-command' ||
     cmd === 'install-napcat' ||
+    cmd === 'update-napcat' ||
     cmd === 'check-napcat' ||
     cmd === 'napcat-status' ||
     cmd === 'ensure-napcat-config'

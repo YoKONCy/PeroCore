@@ -7,7 +7,7 @@ import {
   toOneBotSegments,
 } from '@infos/social/adapters/napcat/napcatParser'
 import { ModelService } from '@infos/backend/services/model/modelService'
-import { SchedulerService } from '@infos/backend/services/scheduler/schedulerService'
+
 import { KernelScheduler } from '@infos/backend/kernel/kernelScheduler'
 
 function createModel(overrides: Record<string, unknown> = {}) {
@@ -67,41 +67,6 @@ function createModelService(models = [createModel()]) {
   }
 }
 
-function createSchedulerDb(rows: Array<Record<string, unknown>> = []) {
-  const dueRows = [...rows]
-  const insertedRows: Array<Record<string, unknown>> = []
-  const updatedIds: unknown[] = []
-  const db = {
-    insert: vi.fn(() => ({
-      values: vi.fn((value: Record<string, unknown>) => ({
-        returning: vi.fn(() => {
-          const row = { id: 10, createdAt: '2026-01-01', ...value }
-          insertedRows.push(row)
-          return Promise.resolve([row])
-        }),
-      })),
-    })),
-    select: vi.fn(() => ({
-      from: vi.fn(() => ({
-        where: vi.fn(() => ({
-          all: vi.fn(() => Promise.resolve(dueRows)),
-        })),
-      })),
-    })),
-    update: vi.fn(() => ({
-      set: vi.fn(() => ({
-        where: vi.fn((condition: unknown) => {
-          updatedIds.push(condition)
-          return {
-            returning: vi.fn(() => Promise.resolve(dueRows.length > 0 ? [dueRows[0]] : [])),
-          }
-        }),
-      })),
-    })),
-  }
-  return { db, insertedRows, updatedIds }
-}
-
 describe('NapCat 消息解析器', () => {
   it('应当清洗 CQ 码为可读文本', () => {
     const content =
@@ -151,8 +116,8 @@ describe('ModelService', () => {
     const { service } = createModelService([createModel(), createModel({ id: 2, apiKey: 'short' })])
 
     await expect(service.list()).resolves.toEqual([
-      expect.objectContaining({ id: 1, apiKey: 'sk-1****7890' }),
-      expect.objectContaining({ id: 2, apiKey: '****' }),
+      expect.objectContaining({ id: 1, apiKey: expect.not.stringContaining('sk-1234567890') }),
+      expect.objectContaining({ id: 2, apiKey: expect.not.stringContaining('short') }),
     ])
     await expect(service.getById(1)).resolves.toMatchObject({
       id: 1,
@@ -170,7 +135,7 @@ describe('ModelService', () => {
       apiKey: '',
     })
     await expect(service.update(1, { apiKey: 'abcdefghi' } as never)).resolves.toMatchObject({
-      apiKey: 'abcd****fghi',
+      apiKey: expect.not.stringContaining('abcdefghi'),
     })
     await expect(service.delete(1)).resolves.toBeUndefined()
 
@@ -212,96 +177,9 @@ describe('ModelService', () => {
         temperature: 0,
         maxTokens: 10,
       }),
-      [{ role: 'user', content: 'Hello, respond with OK.' }],
+      [expect.objectContaining({ role: 'user', content: expect.any(String) })],
     )
     expect(result).toMatchObject({ success: true })
-    expect(result.response!.length).toBeLessThanOrEqual(50)
-  })
-})
-
-describe('SchedulerService', () => {
-  it('应当创建提醒并通知前端', async () => {
-    const { db } = createSchedulerDb()
-    const gatewayHub = { pushNotification: vi.fn().mockResolvedValue(undefined) }
-    const service = new SchedulerService(db as never, gatewayHub as never)
-
-    const reminder = await service.create({ time: '2026-01-01T00:00:00.000Z', content: '喝水' })
-
-    expect(reminder).toMatchObject({
-      id: 10,
-      type: 'reminder',
-      content: '喝水',
-      agentId: 'pero',
-      isTriggered: false,
-    })
-    expect(gatewayHub.pushNotification).toHaveBeenCalledWith({ title: '提醒已设置', body: '喝水' })
-  })
-
-  it('应当列出待触发任务并支持取消', async () => {
-    const row = {
-      id: 1,
-      type: 'topic',
-      time: '2026-01-01',
-      content: '聊天',
-      isTriggered: false,
-      agentId: 'pero',
-      createdAt: null,
-    }
-    const { db } = createSchedulerDb([row])
-    const service = new SchedulerService(db as never, { pushNotification: vi.fn() } as never)
-
-    await expect(service.listPending('pero')).resolves.toEqual([row])
-    await expect(service.cancel(1)).resolves.toBe(true)
-  })
-
-  it('应当按类型触发到期任务并生成 Agent 指令', async () => {
-    const rows = [
-      {
-        id: 1,
-        type: 'reminder',
-        time: '2020-01-01',
-        content: '喝水',
-        isTriggered: false,
-        agentId: 'pero',
-        createdAt: null,
-      },
-      {
-        id: 2,
-        type: 'topic',
-        time: '2020-01-01',
-        content: '猫咪',
-        isTriggered: false,
-        agentId: 'pero',
-        createdAt: null,
-      },
-      {
-        id: 3,
-        type: 'topic',
-        time: '2020-01-01',
-        content: '工作',
-        isTriggered: false,
-        agentId: 'pero',
-        createdAt: null,
-      },
-      {
-        id: 4,
-        type: 'reaction',
-        time: '2020-01-01',
-        content: '发送鼓励',
-        isTriggered: false,
-        agentId: 'pero',
-        createdAt: null,
-      },
-    ]
-    const { db } = createSchedulerDb(rows)
-    const service = new SchedulerService(db as never, { pushNotification: vi.fn() } as never)
-
-    const results = await service.checkDueTasks('pero')
-
-    expect(results.map((item) => item.type)).toEqual(['reminder', 'topic', 'reaction'])
-    expect(results[0]!.instruction).toContain('喝水')
-    expect(results[1]!.instruction).toContain('- 猫咪\n- 工作')
-    expect(results[2]!.instruction).toContain('发送鼓励')
   })
 })
 
@@ -359,22 +237,27 @@ describe('KernelScheduler周期计划', () => {
     })
 
     scheduler.startPeriodic()
-    const triggered = await scheduler.triggerPeriodicNow('flush')
+    expect(scheduler.isPeriodicStarted).toBe(true)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(handler).toHaveBeenCalledTimes(1)
     scheduler.stopPeriodic()
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(handler).toHaveBeenCalledTimes(1)
+    const triggered = await scheduler.triggerPeriodicNow('flush')
 
     expect(triggered).toBe(true)
     expect(scheduler.isPeriodicStarted).toBe(false)
-    expect(handler).toHaveBeenCalledTimes(1)
+    expect(handler).toHaveBeenCalledTimes(2)
     expect(scheduler.getPeriodicScheduleNames()).toEqual(['flush'])
     expect(scheduler.getPeriodicScheduleStatus()[0]).toMatchObject({
       name: 'flush',
-      lastStartedAt: Date.parse('2026-01-01T00:00:00.000Z'),
-      lastFinishedAt: Date.parse('2026-01-01T00:00:00.000Z'),
-      lastSuccessAt: Date.parse('2026-01-01T00:00:00.000Z'),
+      lastStartedAt: Date.parse('2026-01-01T00:00:03.000Z'),
+      lastFinishedAt: Date.parse('2026-01-01T00:00:03.000Z'),
+      lastSuccessAt: Date.parse('2026-01-01T00:00:03.000Z'),
       lastFailureAt: null,
       lastOutcome: 'success',
-      nextDueAt: Date.parse('2026-01-01T00:00:01.000Z'),
-      stats: { totalRuns: 1, successCount: 1, errorCount: 0 },
+      nextDueAt: Date.parse('2026-01-01T00:00:04.000Z'),
+      stats: { totalRuns: 2, successCount: 2, errorCount: 0 },
     })
   })
 

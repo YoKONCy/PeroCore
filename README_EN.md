@@ -200,7 +200,7 @@ A **digital lifeform with memory, personality, and growth**. Pero is far more th
 
 ### ♾️ Infinity
 
-An **open, growing ecosystem**. Through Skills, Tools, Hooks, and the Workshop, anyone can give Pero new abilities — from a small feature to a whole independent service. How deep you go is up to you.
+An **open, growing ecosystem**. Through **Packages** and their **Contributions** (Skills, Tools, …) plus the Workshop, anyone can give Pero new abilities — from a small feature to a whole independent service. How deep you go is up to you.
 
 Put the three together and you get **infOS**: solid infrastructure carrying a warm infomorph, handed over to infinite imagination.
 
@@ -226,12 +226,12 @@ Put the three together and you get **infOS**: solid infrastructure carrying a wa
 > For developers — this is the "how it works under the hood" part, so there are more technical terms, but each one comes with a plain-language explanation.
 
 - **⚡ Millisecond Associative Memory**: Recalling relevant things from a huge memory store, in milliseconds. It uses a proprietary retrieval algorithm (PEDSA) with the core code written in Rust (the TriviumDB engine), and hits roughly **2.95ms** in a benchmark with 100 million noise entries. During retrieval it also combines semantic decomposition, graph diffusion, and diversity sampling, so results are both accurate and non-redundant.
-- **🧠 Principal Agent + Thread Model**: Six things — identity, memory, workspace, context, conversation (Thread), and capabilities — are managed together for each companion. One conversation is one Thread, and the channel (desktop / companion / social / group) decides what context it uses, what it remembers, and what it can do. Whoever is in which window or room stays there; nothing bleeds across.
+- **🧠 Principal Agent + Thread Model**: Six things — identity, memory, workspace, context, conversation (Thread), and capabilities — are managed together for each companion. One conversation is one Thread, and the channel (`desktop` desktop / `group` stronghold) decides what context it uses, what it remembers, and what it can do ("companion" has been retired into a request-level `ambient` scope, no longer a persistent channel). Whoever is in which window or room stays there; nothing bleeds across.
 - **✍️ Read-only Context Compiler**: The prompt fed to the AI isn't assembled ad hoc by the frontend — the backend "compiles" it. History is never duplicated, and every piece of information can answer "why is this in this round's prompt", making it easy to inspect and audit.
 - **📜 NIT Tool Protocol**: A small "scripting language" for AI, letting it orchestrate multi-step operations like a mini program (with conditionals, loops, parallelism, and error handling), then execute them through standard tool calls.
 - **🔐 CapabilityGate**: A "role × scenario" permission table that declares which tools, skills, and resources each character can use in each scenario. Anything not configured is denied by default — the permission boundary is clear.
 - **🏗️ Standalone Backend + Capability Providers**: The backend is a pure Node service that can run independently on desktop, Docker, or servers; the Electron client is just one "capability source" that connects to it. Platform-specific abilities (like screenshots) are delegated on demand, and gracefully degrade offline.
-- **🔌 Unified Extension System**: Three extension styles — Skill (teach AI to do something), Tool (give it a new function), and Hook (run code before/after conversations). They can load in-process or communicate across processes (MCP-compatible), so the community can extend them however they like.
+- **🔌 Unified Extension System**: Everything is carried by **Packages** (Manifest V2) for install, signing, versioning and distribution; contributions include Skill (teach AI to do something) and Tool (give it a new function), while observational logic now uses event subscribers / `PackageInterceptor` (the old universal Hook pipeline has been removed). They can load in-process or communicate across processes (MCP-compatible), so the community can extend them however they like.
 
 <br/>
 
@@ -247,7 +247,7 @@ flowchart TD
         direction TB
 
         subgraph "Communication Layer"
-            Gateway["Gateway Hub (Hono WS + Protobuf)"]
+            Gateway["Gateway Hub (Hono WS + JSON)"]
         end
 
         subgraph "Intelligent Core (TypeScript)"
@@ -302,7 +302,7 @@ The prompt fed to the LLM is "compiled" by the backend's **Context Compiler**, r
 
 Three context layers, each with its own job:
 - **Short context**: the raw messages in the recent window, injected as-is and never duplicated;
-- **Long memory**: structured facts distilled in the background, retrieved by policy;
+- **Long memory**: the Agent's event notes (EventNote), retrieved by policy (the tail event is 100% injected, plus related recall and direct predecessors);
 - **On-demand retrieval**: memory tools the Agent calls proactively during ReAct decisions.
 
 ### 🚀 Main Runtime & Sub-Applications: Context Holding
@@ -327,10 +327,12 @@ infOS/
 │   │       ├── capabilities/      # 🎭 CapabilityGate + capability bridge
 │   │       ├── core/              # 🧬 PathResolver / asset registry
 │   │       ├── repositories/      # 📊 Data access (SQLite / TriviumDB)
-│   │       ├── gateway/           # 🌐 WebSocket Gateway (Protobuf)
+│   │       ├── services/gateway/  # 🌐 WebSocket Gateway (JSON)
 │   │       └── nit/               # 📜 NIT interpreter (lexer/parser/runtime)
 │   ├── apps/
-│   │   └── social/                # 💬 Social app runtime (QQ/Discord/Telegram)
+│   │   ├── social/                # 💬 Social app runtime (QQ/Discord/Telegram)
+│   │   ├── arca/                  # 📄 Office-suite sub-application
+│   │   └── pictoria/              # 🎨 Drawing/creation sub-application
 │   ├── daemon/                    # 🚀 Standalone Daemon entry
 │   ├── frontend/                  # @infos/frontend — Vue 3 + Pinia
 │   │   └── src/
@@ -345,7 +347,7 @@ infOS/
 ├── docker/                        # 🐳 Dockerfile (backend + frontend)
 ├── .github/workflows/             # ⚙️ CI/CD (ci.yml + release.yml)
 ├── .changeset/                    # 🏷️ Changeset version management
-└── .docs/                        # 📋 Engineering spec docs (S/A/M/AIOS categories)
+└── .docs/                        # 📋 Engineering spec docs (S/A/B/M categories)
 ```
 
 ### Core Technology Stack
@@ -356,9 +358,9 @@ infOS/
 | **Data access**     | Drizzle          | Reads like SQL, first-class SQLite support          |
 | **Vector + Graph**  | TriviumDB (Rust) | Proprietary engine: vector + graph + relations in one |
 | **Frontend**        | Vue 3 + Pinia    | Reactive + composable style, clear state management |
-| **Communication**   | Protobuf over WS | Compact messages over WebSocket, efficient for audio |
+| **Communication**   | JSON over WS     | Lightweight JSON over WebSocket (Protobuf is a future-extension option) |
 | **Desktop Shell**   | Electron         | 3D rendering + system-level interaction             |
-| **Container**       | Docker + Bun     | Fast startup, faster memory reclamation             |
+| **Container**       | Docker + Node    | Shares the same Node runtime as the Electron Daemon |
 | **CI/CD**           | GitHub Actions   | Tag-triggered auto-release                          |
 
 <br/>
@@ -371,7 +373,7 @@ infOS/
 
 PeroperoChat's companionship is powered by the infOS memory engine — the project's most critical technology. This engine isn't simply "store and retrieve"; it's a full **Perceive → Store → Associate → Retrieve → Reflect** loop: record what happened, recall related memories when needed, and tidy itself up afterward.
 
-All algorithms and performance are carried by the proprietary **TriviumDB** engine (a Rust "vector + graph" database). The rebuilt memory system also adds a "distillation pipeline": **Candidate → Gate → Canonical Memory** — first collect possibly-important information, then filter it, and only then settle it as long-term memory. Every memory also carries **Provenance**, so it can answer: where it came from, why it matters, and whether it has been superseded.
+All algorithms and performance are carried by the proprietary **TriviumDB** engine (a Rust "vector + graph" database). The rebuilt long-term memory is no longer a "summary node" but an **Agent's subjective event notes (EventNote) about real interactions with the user**: the system timeline is the authoritative backbone, and every note carries **Provenance** — answering where it came from, why it matters, and whether it has been superseded.
 
 ### The Life of a Memory
 
@@ -401,19 +403,18 @@ All algorithms and performance are carried by the proprietary **TriviumDB** engi
                                Inject into LLM Prompt
 ```
 
-### 1. Write Layer: From Dialog to Memory
+### 1. Write Layer: From Dialog to Event Notes
 
-After each conversation round, the **Scorer ("Secretary")** automatically analyzes the dialog, extracts core events, emotional tendencies, and importance scores, and compresses them into a structured memory:
+Long-term memory is built from **active note-writing by the Agent** plus **background fallback backfill**:
 
-- **Batch processing**: Multi-round dialogs merged for analysis, avoiding memory fragmentation (batch threshold: 200 messages or 50,000 characters)
-- **Auto-splitting**: Oversized contexts are automatically split to avoid exceeding the model's limit (token overflow)
-- **Fault-tolerant retry**: Failed tasks are auto-marked and batch-recovered on startup
+- **Active note-writing**: the Agent calls `write_event_note` / `revise_event_note` during ReAct, which only creates an **EventNoteDraft** for the current round — it is committed only after the reply is **successfully persisted**.
+- **Background fallback**: the system only processes message ranges "not yet covered by event notes", and may produce 0–N events; it runs in batches triggered by 6h silence, 2h Thread dormancy, a local 21:00 daily boundary, etc., instead of mechanically summarizing in fixed batches.
 
-Three things happen during write:
+Three things happen during commit:
 
-1. Compute a semantic vector (an "embedding" that turns text into a machine-comparable numeric fingerprint) and write it into TriviumDB's vector + graph storage
-2. Maintain a temporal chain (using `prev_id` / `next_id` to record order), stringing memories together by time
-3. Use GraphGardener to extract entities and their relationships (causal, associative, containment, etc.), building a "web of concepts" (a cognitive graph)
+1. Compute a semantic vector (an embedding) and write it into TriviumDB's vector + graph storage
+2. Maintain a **temporal chain** (`temporal_next` / `temporal_prev`), stringing events along the authoritative `eventAt` timeline
+3. Background Reflection discovers and builds event relations (`caused_by` / `same_event` / `same_topic` / `involves_*`), forming a "web of events"
 
 ### 2. Retrieval Layer: Dual-Mode RAG
 
@@ -486,32 +487,33 @@ All vectors, graphs, and retrieval algorithms are unified under **TriviumDB** (t
 
 - **Vector + graph unified storage**: A `.tdb` file stores both the "similarity index" (HNSW) and the "relationship graph", so a single file can be fully migrated
 - **Native dual-layer graph**: One "temporal chain graph" (ordered by time) + one "entity concept graph" (ordered by concept relations), both written through the same interface
-- **Three-layer memory isolation**: Each companion has its own independent memory store; social and desktop indirectly connect through a shared diary layer
+- **Memory isolation & diary interop**: Each companion has its own event-memory store (`memory.tdb`); the social runtime can read that Agent's daily notes (`dailynotes/*.md`) through the host diary port, sharing the same diary with desktop
 
-### 4. Four-Layer Memory Storage
+### 4. Memory Storage Layers
 
-Memory is stored in four layers by "freshness" — the higher the layer, the more "in the moment"; the lower, the more "long-lasting":
+Memory is layered by "freshness" — the higher the layer, the more "in the moment"; the lower, the more "long-lasting":
 
 | Layer                 | Carrier            | Content                          | Retrieval Method        | Lifecycle |
 | :-------------------- | :----------------- | :------------------------------- | :---------------------- | :-------- |
 | **Layer 0 (Working)** | JSON / LLM Context | Current session context          | Sequential read         | Short     |
-| **Layer 1 (Vector)**  | TriviumDB          | Raw segment vectors + text index | Semantic similarity + keyword | Long |
-| **Layer 2 (Graph)**   | TriviumDB          | Entity/event graph + edges       | Association diffusion + graph query | Long |
-| **Layer 3 (Diary)**   | SQLite / TDB       | Daily/weekly summaries           | Keyword + timeline      | Permanent |
+| **Layer 1 (Vector)**  | TriviumDB          | Event vectors + text index       | Semantic similarity + keyword | Long |
+| **Layer 2 (Graph)**   | TriviumDB          | Event graph + relation edges     | Graph diffusion + deterministic BFS | Long |
+| **Layer 3 (Diary)**   | Workspace Markdown | Daily persona notes `dailynotes/*.md` | Read by date        | Permanent |
 
-### 5. Reflection Layer: Autonomous Memory Maintenance
+> Daily notes live in the Agent's Workspace documents and **do not enter the event memory store**; a shared **Facts Store** (`facts.tdb`) also exists across all Agents, queryable only through tools and never auto-injected into the prompt.
 
-Besides responding, memory also "organizes itself". **ReflectionService** runs periodically, executing 7 maintenance tasks:
+### 5. Maintenance Layer: Autonomous Memory Tidy-up
 
-1. **Importance annotation + thought cluster classification** (single LLM call, merged)
-2. **Memory consolidation**: Compress low-importance stale events into declarative summaries
-3. **Erroneous memory audit**: LLM identifies and cleans contradictory, duplicate, and hallucinated memories
-4. **Social diary deduplication**
-5. **Preference extraction**: Distill long-term user preferences from event memories
-6. **Boundary maintenance**: Handle zombie/over-age memories
-7. **Dynamic line updates**: Generate personalized greetings and small talk based on recent memories
+Besides responding, memory also "organizes itself". Background **Reflection** runs periodically and operates uniformly on event notes:
 
-All maintenance operations are recorded and support one-click rollback.
+1. Repair missing or incorrect structured tags;
+2. Create or revise `same_event` / `same_topic` / `caused_by` relation edges;
+3. Archive an event only when the model explicitly judges it has lost long-term value (code never auto-archives by time/access count);
+4. When multiple events overlap heavily, revise one and archive the rest, keeping the cluster via `same_event`;
+5. Check temporal-chain integrity, orphan nodes, dangling edges, and index drift;
+6. All writes go through the unified event service and transaction-log mechanism.
+
+Archived events remain in the timeline and relation graph; default retrieval skips them, and proactive queries require explicit `includeArchived=true`.
 
 <br/>
 
@@ -519,26 +521,13 @@ All maintenance operations are recorded and support one-click rollback.
 
 > **"From loading a Skill to running an independent microservice — you decide how deep to go."**
 
-Want Pero to learn new abilities? The extension system is built for exactly that. infOS provides three extension types, freely combinable within a single extension package:
+Want Pero to learn new abilities? The extension system is built for exactly that. Everything is carried by **Packages** — the unit of install, signing, versioning, upgrade and distribution (the old ExtensionManager / HookRegistry are removed). A single Package can declare multiple **Contributions**, described by Manifest V2:
 
-```
-     Skill              Tool               Hook
-  ┌───────────┐   ┌───────────────┐   ┌──────────────┐
-  │ Task      │   │  Atomic       │   │ Lifecycle    │
-  │ Knowledge │   │  Tool (func)  │   │ Event Hooks  │
-  ├───────────┤   ├───────────────┤   ├──────────────┤
-  │ SKILL.md  │   │ handler()     │   │ pre_chat     │
-  │ Progressive│  │ JSON Schema   │   │ post_chat    │
-  │ Loading   │   │ params        │   │ on_event     │
-  └───────────┘   └───────────────┘   └──────────────┘
-   AI on-demand     Standard tool call   Message pipeline
-```
-
-- **Skill**: Written in YAML + Markdown, like an instruction manual for "how to do something". The AI loads the steps on demand, so the context is never flooded all at once.
+- **Skill**: On-demand task knowledge (a Context Resource), written in YAML + Markdown, like an instruction manual for "how to do something". The AI loads the steps on demand, so the context is never flooded all at once.
 - **Tool**: Gives the AI a new function it can call, with parameters declared via JSON Schema.
-- **Hook**: Event listeners/interceptors that can run before a chat, after a chat, or on specific events.
+- **Event Subscriber / PackageInterceptor**: Observational logic uses Durable/Ephemeral Event Subscribers; controlled entry points that need serial transformation or interception use `PackageInterceptor` — there is no longer a "universal Hook pipeline".
 
-Two communication modes: **in-process** (loaded directly as TypeScript/JavaScript) or **cross-process** (over standard input/output, MCP-compatible).
+The iron rule is **install ≠ activate ≠ authorize**: no contribution is implicitly granted extra power just because it was discovered, installed or loaded. Both **in-process** (loaded directly as TypeScript/JavaScript) and **cross-process** (over standard input/output, MCP-compatible) modes are supported.
 
 <br/>
 
@@ -546,7 +535,7 @@ Two communication modes: **in-process** (loaded directly as TypeScript/JavaScrip
 
 **Let Pero step out of the desktop and into your group chats~**
 
-infOS lets AI interact like a real user in QQ groups and private chats. The "four-layer decoupled" architecture below is what keeps multiple platforms (QQ, Discord, Telegram, etc.) cleanly pluggable.
+infOS lets AI interact like a real user in QQ groups and private chats. Social has been consolidated into an independent **`infos.social` sub-application (Application Realm)**, with its own runtime and storage, communicating with the main app through standard ports; internally it still keeps the "four-layer decoupled" structure, so multiple platforms (QQ, Discord, Telegram, etc.) stay cleanly pluggable.
 
 ### Four-Layer Decoupled Architecture
 

@@ -27,6 +27,7 @@ export interface CreateModelInput {
   topP?: number | null
   maxTokens?: number | null
   contextWindowTokens?: number | null
+  maxReActTurns?: number | null
   reasoningEffort?: ReasoningEffort | null
   returnNativeReasoning?: boolean
   wireApi?: import('../services/llm/types').LlmWireApi
@@ -48,6 +49,7 @@ export interface UpdateModelInput {
   topP?: number | null
   maxTokens?: number | null
   contextWindowTokens?: number | null
+  maxReActTurns?: number | null
   reasoningEffort?: ReasoningEffort | null
   returnNativeReasoning?: boolean
   wireApi?: import('../services/llm/types').LlmWireApi
@@ -92,6 +94,7 @@ export class ModelRepository {
         topP: data.topP ?? null,
         maxTokens: data.maxTokens ?? null,
         contextWindowTokens: data.contextWindowTokens ?? null,
+        maxReActTurns: data.maxReActTurns ?? null,
         reasoningEffort: data.reasoningEffort ?? null,
         returnNativeReasoning: data.returnNativeReasoning ?? false,
         wireApi: data.wireApi ?? 'chat_completions',
@@ -120,6 +123,7 @@ export class ModelRepository {
     if (data.temperature !== undefined) updates.temperature = data.temperature
     if (data.topP !== undefined) updates.topP = data.topP
     if (data.maxTokens !== undefined) updates.maxTokens = data.maxTokens
+    if (data.maxReActTurns !== undefined) updates.maxReActTurns = data.maxReActTurns
     if (data.contextWindowTokens !== undefined)
       updates.contextWindowTokens = data.contextWindowTokens
     if (data.reasoningEffort !== undefined) updates.reasoningEffort = data.reasoningEffort

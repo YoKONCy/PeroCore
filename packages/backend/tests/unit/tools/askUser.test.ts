@@ -1,8 +1,10 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RegistryToolExecutor } from '../../../src/services/agent/toolExecutor'
 import { ToolRegistry } from '../../../src/services/agent/toolRegistry'
 import { AgentInputService } from '../../../src/services/execution/agentInputService'
 import { askUserTool, setAgentInputService } from '../../../src/tools/askUser'
+
+afterEach(() => vi.useRealTimers())
 
 describe('ask_user工具', () => {
   it('经工具执行器等待超过原30秒边界后仍不返回，用户回答后才继续', async () => {
@@ -31,24 +33,23 @@ describe('ask_user工具', () => {
     const request = service.list({ status: 'pending' })[0]!
     service.resolve(request.id, { message: '继续。' })
 
-    await expect(execution).resolves.toMatchObject({
-      isError: false,
-      output: JSON.stringify({
-        answered: true,
-        selectedOptionIds: [],
-        message: '继续。',
-      }),
+    const result = await execution
+    expect(result.isError).toBe(false)
+    expect(JSON.parse(result.output)).toMatchObject({
+      answered: true,
+      answers: [{ questionId: 'question', selectedOptionIds: [], message: '继续。' }],
     })
-    vi.useRealTimers()
   })
 
-  it('应等待用户回答并返回结构化工具结果', async () => {
+  it('整组问题回答后才继续，并返回题目、选项与补充', async () => {
     const service = new AgentInputService()
     setAgentInputService(service)
     const execution = askUserTool.execute(
       {
-        question: '选择一种方案',
-        options: [{ id: 'safe', label: '安全方案' }],
+        questions: [
+          { id: 'plan', question: '选择一种方案', options: [{ id: 'safe', label: '安全方案' }] },
+          { id: 'note', question: '还需要什么？' },
+        ],
       },
       {
         agentId: 'pero',
@@ -58,16 +59,26 @@ describe('ask_user工具', () => {
         threadId: 'thread-1',
       },
     )
-    await new Promise((resolve) => setTimeout(resolve, 0))
     const request = service.list({ status: 'pending' })[0]!
-    service.resolve(request.id, { selectedOptionIds: ['safe'], message: '就用这个。' })
-
-    await expect(execution).resolves.toBe(
-      JSON.stringify({
-        answered: true,
-        selectedOptionIds: ['safe'],
-        message: '就用这个。',
-      }),
-    )
+    service.resolve(request.id, {
+      answers: [
+        { questionId: 'plan', selectedOptionIds: ['safe'], message: '就用这个。' },
+        { questionId: 'note', selectedOptionIds: [], message: '保留备份' },
+      ],
+    })
+    const result = await execution
+    expect(typeof result).toBe('string')
+    expect(JSON.parse(result as string)).toMatchObject({
+      answered: true,
+      answers: [
+        {
+          questionId: 'plan',
+          question: '选择一种方案',
+          selectedOptions: ['安全方案'],
+          message: '就用这个。',
+        },
+        { questionId: 'note', question: '还需要什么？', message: '保留备份' },
+      ],
+    })
   })
 })

@@ -40,7 +40,7 @@
   "tools": [
     {
       "name": "remote_terminal_nodes",
-      "description": "列出当前在线、已配对且发布 system.shell 能力的远程节点；调用其他远程终端工具前先用此工具取得 node_id",
+      "description": "列出可用远程终端节点，提供后续调用所需的 node_id。",
       "display": {
         "label": "远程 Shell 节点",
         "icon": "server",

@@ -6,8 +6,11 @@
  * 副作用在组件生命周期内建立并清理，避免跨页面残留监听器或异步状态。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import type { InteractionMode } from '@infos/shared'
+import { EXECUTION_MODE_OPTIONS, resolveExecutionMode, type ExecutionMode } from '@infos/shared'
 import PixelIcon from '../pixel/PixelIcon.vue'
 import { attachmentsApi, type AttachmentInfo } from '../../api/modules/attachmentsApi'
+import { ApiError } from '../../api/errors'
 import { configApi } from '../../api/modules/configApi'
 import { modelApi } from '../../api/modules/modelApi'
 import { voiceApi } from '../../api/modules/voiceApi'
@@ -16,10 +19,12 @@ import {
   threadsApi,
   type FlowStateInfo,
   type ThreadToolSetting,
+  type ThreadToolsData,
   type TokenBudgetPreview,
 } from '../../api/modules/threadsApi'
 import { toolDisplayColor, toolDisplayIcon } from '../../composables/tools/useToolDisplay'
 import { logger } from '../../lib/logger'
+import { sortThreadTools } from '../../lib/threadToolOrder'
 
 /** 可被 @ 的成员候选（group 模式 @ 弹窗数据源）。 */
 export interface MentionCandidate {
@@ -29,6 +34,7 @@ export interface MentionCandidate {
 }
 
 interface Props {
+  draftRequest?: { text: string; revision: number }
   isSending?: boolean
   placeholder?: string
   disabled?: boolean
@@ -47,6 +53,7 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  draftRequest: undefined,
   isSending: false,
   placeholder: '向角色下达指令或输入 / 打开命令面板…',
   disabled: false,
@@ -59,6 +66,7 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 const emit = defineEmits<{
+  draftConsumed: []
   send: [
     text: string,
     mentions: string[],
@@ -72,7 +80,7 @@ const emit = defineEmits<{
 }>()
 
 interface PendingAttachment extends AttachmentInfo {
-  uploadState: 'uploading' | 'success' | 'failed'
+  uploadState: 'uploading' | 'checking' | 'processing' | 'success' | 'failed'
   localKey: string
   previewUrl?: string
   error?: string
@@ -82,16 +90,48 @@ const threadStore = useThreadStore()
 const agentStore = useAgentStore()
 const notify = useNotificationStore()
 const inputText = ref('')
+watch(
+  () => props.draftRequest,
+  async (request) => {
+    if (!request) return
+    inputText.value = [inputText.value.trim(), request.text].filter(Boolean).join('\n\n')
+    await nextTick()
+    textareaRef.value?.focus()
+    emit('draftConsumed')
+  },
+  { immediate: true },
+)
 const INPUT_HISTORY_KEY = 'infos:char-ops-input-history'
 const INPUT_HISTORY_LIMIT = 100
 const inputHistory = ref<string[]>(loadInputHistory())
 const historyIndex = ref(inputHistory.value.length)
 const historyDraft = ref('')
 const pendingAttachments = ref<PendingAttachment[]>([])
+const submittedAttachments = new Set<PendingAttachment>()
+let attachmentDraftVersion = 0
+const pdfAvailable = ref(false)
+const maxPdfBytes = ref(0)
+const fileAccept = computed(
+  () =>
+    `image/png,image/jpeg,image/webp,image/gif,text/*,application/json,application/xml,application/yaml,application/x-yaml,application/javascript,application/sql,.txt,.md,.csv,.json,.xml,.yaml,.yml,.js,.ts,.py,.css,.c,.cpp,.java,.sql${pdfAvailable.value ? ',.pdf,application/pdf' : ''}`,
+)
+async function loadPdfCapabilities(): Promise<void> {
+  try {
+    const response = await attachmentsApi.capabilities()
+    pdfAvailable.value = response.data?.pdf ?? false
+    maxPdfBytes.value = response.data?.maxPdfBytes ?? 0
+  } catch {
+    pdfAvailable.value = false
+    maxPdfBytes.value = 0
+  }
+}
+function onIntegrationsChanged(): void {
+  void loadPdfCapabilities()
+  if (!toolsSaving.value) void loadThreadTools()
+}
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 /** @ 内联 chip 的叠加渲染层（group 模式与 textarea 同尺寸叠放）。 */
 const overlayRef = ref<HTMLElement | null>(null)
-const imageInputRef = ref<HTMLInputElement | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const commandOpen = ref(false)
 const toolOpen = ref(false)
@@ -105,7 +145,21 @@ let tokenBudgetRequest = 0
 const threadTools = ref<ThreadToolSetting[]>([])
 const toolsLoading = ref(false)
 const toolsSaving = ref(false)
-const autoExecuteTools = ref(false)
+const modeSaving = ref(false)
+const disabledToolNames = ref<string[]>([])
+let toolsRequest = 0
+const executionMode = computed<ExecutionMode>({
+  get: () => threadStore.executionMode,
+  set: (value) => {
+    threadStore.executionMode = value
+  },
+})
+const executionModeIcons: Record<ExecutionMode, string> = {
+  manual: 'shield',
+  auto: 'flash',
+  auto_approve: 'check',
+  full: 'sparkle',
+}
 const toolQuery = ref('')
 const imageModeOpen = ref(false)
 const imageMode = ref<'auto' | 'native' | 'relay'>('auto')
@@ -114,6 +168,57 @@ const relayAvailable = ref(false)
 const imageModeToggleRef = ref<HTMLElement | null>(null)
 /** 识图方式弹层的 fixed 定位样式（相对视口计算）。 */
 const imageModePopoverStyle = ref({ left: '0px', bottom: '0px' })
+const audioInputOpen = ref(false)
+const audioInputToggleRef = ref<HTMLElement | null>(null)
+const audioInputPopoverStyle = ref({ left: '0px', bottom: '0px' })
+
+/** 弹层挂到 body，按真实按钮定位并保留视口边距，窄工作区也不会被裁剪。 */
+function inputPopoverStyle(element: HTMLElement | null) {
+  if (!element) return { left: '8px', bottom: '8px' }
+  const rect = element.getBoundingClientRect()
+  return {
+    left: `${Math.max(8, Math.min(rect.left, window.innerWidth - 258))}px`,
+    bottom: `${Math.max(8, window.innerHeight - rect.top + 6)}px`,
+    maxHeight: `${Math.max(48, rect.top - 14)}px`,
+  }
+}
+
+function closeInputPopovers() {
+  imageModeOpen.value = false
+  audioInputOpen.value = false
+}
+
+function onInputPopoverScroll(event: Event) {
+  if (
+    event.target instanceof Element &&
+    event.target.closest('.image-mode-popover, .audio-input-popover')
+  )
+    return
+  closeInputPopovers()
+}
+
+async function toggleAudioInputPopover() {
+  const opening = !audioInputOpen.value
+  closeInputPopovers()
+  audioInputOpen.value = opening
+  if (opening) {
+    await nextTick()
+    audioInputPopoverStyle.value = inputPopoverStyle(audioInputToggleRef.value)
+  }
+}
+
+async function selectAudioInput(mode: 'asr' | 'native') {
+  audioInputOpen.value = false
+  if (mode === 'asr') await startAsr()
+  else nativeAudioNotice()
+}
+
+function onInputPopoverKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Escape' || (!imageModeOpen.value && !audioInputOpen.value)) return
+  const trigger = audioInputOpen.value ? audioInputToggleRef.value : imageModeToggleRef.value
+  closeInputPopovers()
+  trigger?.focus()
+}
 
 /** 识图方式按钮文案：跟随当前选择实时切换。 */
 const imageModeLabel = computed(() => {
@@ -124,16 +229,11 @@ const imageModeLabel = computed(() => {
 
 /** 切换识图方式弹层：打开时按触发按钮的真实位置计算 fixed 坐标。 */
 function toggleImageModePopover() {
+  audioInputOpen.value = false
   imageModeOpen.value = !imageModeOpen.value
   if (imageModeOpen.value) {
     nextTick(() => {
-      const el = imageModeToggleRef.value
-      if (!el) return
-      const rect = el.getBoundingClientRect()
-      imageModePopoverStyle.value = {
-        left: `${rect.left}px`,
-        bottom: `${window.innerHeight - rect.top + 6}px`,
-      }
+      imageModePopoverStyle.value = inputPopoverStyle(imageModeToggleRef.value)
     })
   }
 }
@@ -146,12 +246,13 @@ function selectImageMode(mode: 'auto' | 'native' | 'relay') {
 
 /** 点击弹层与触发按钮以外的区域时收起弹层。 */
 function onDocumentClick(event: MouseEvent) {
-  if (!imageModeOpen.value) return
-  const target = event.target as Node
-  if (imageModeToggleRef.value?.contains(target)) return
-  const popover = (event.target as HTMLElement).closest?.('.image-mode-popover')
-  if (popover) return
-  imageModeOpen.value = false
+  const target = event.target
+  if (!(target instanceof Node)) return
+  const element = target instanceof Element ? target : target.parentElement
+  if (!imageModeToggleRef.value?.contains(target) && !element?.closest('.image-mode-popover'))
+    imageModeOpen.value = false
+  if (!audioInputToggleRef.value?.contains(target) && !element?.closest('.audio-input-popover'))
+    audioInputOpen.value = false
 }
 
 const commandQuery = ref('')
@@ -191,24 +292,61 @@ const successfulAttachments = computed(() =>
   pendingAttachments.value.filter((item) => item.uploadState === 'success'),
 )
 const hasUploading = computed(() =>
-  pendingAttachments.value.some((item) => item.uploadState === 'uploading'),
+  pendingAttachments.value.some((item) =>
+    ['uploading', 'checking', 'processing'].includes(item.uploadState),
+  ),
 )
 const enabledToolCount = computed(() => threadTools.value.filter((tool) => tool.enabled).length)
+const availableToolCount = computed(
+  () => threadTools.value.filter((tool) => tool.modeAllowed).length,
+)
+const modeSwitchDisabled = computed(
+  () =>
+    toolsLoading.value ||
+    toolsSaving.value ||
+    props.isSending ||
+    threadStore.isGenerating ||
+    threadStore.isLoadingHistory ||
+    props.disabled,
+)
+const executionModeDisabled = computed(() => modeSwitchDisabled.value || !threadStore.threadId)
+
+function applyThreadTools(data: ThreadToolsData): void {
+  threadTools.value = data.tools
+  disabledToolNames.value = data.disabledTools ?? []
+  executionMode.value = resolveExecutionMode(data.executionMode, data.autoExecuteTools)
+  threadStore.interactionMode = data.interactionMode
+}
+const budgetIsRunning = computed(() => Boolean(props.isSending || threadStore.isGenerating))
+const currentLiveContextBudget = computed(() =>
+  threadStore.agentId === agentStore.activeAgentId ? threadStore.liveContextBudget : null,
+)
+const displayedTokenBudget = computed(() => currentLiveContextBudget.value ?? tokenBudget.value)
+const tokenBudgetTitle = computed(() => {
+  const budget = currentLiveContextBudget.value
+  if (budget) {
+    return `当前 ReAct 第 ${budget.turn} 轮输入${budget.estimated ? '估算' : '实测'}：${tokenBudgetLabel.value}`
+  }
+  const note = tokenBudget.value?.memoryRetrievalDeferred ? '（不含待检索记忆）' : ''
+  return `${budgetIsRunning.value ? '等待本轮输入统计' : `预计下一轮首个 ReAct${note}`}：${tokenBudgetLabel.value}`
+})
 const tokenBudgetRatio = computed(() => {
-  const budget = tokenBudget.value
-  if (!budget?.contextWindowTokens) return 0
-  return Math.min(1, Math.max(0, budget.usedTokens / budget.contextWindowTokens))
+  const budget = displayedTokenBudget.value
+  if (!budget?.maxInputTokens) return 0
+  return Math.min(1, Math.max(0, budget.usedTokens / budget.maxInputTokens))
 })
 const tokenBudgetDegrees = computed(() => `${tokenBudgetRatio.value * 360}deg`)
 const tokenBudgetLabel = computed(() => {
-  const budget = tokenBudget.value
-  if (!budget?.contextWindowTokens) return '— / — Token'
-  return `${formatTokenCount(budget.usedTokens)} / ${formatTokenCount(budget.contextWindowTokens)} Token`
+  const budget = displayedTokenBudget.value
+  if (!budget?.maxInputTokens) return '— / — Token'
+  return `${formatTokenCount(budget.usedTokens)} / ${formatTokenCount(budget.maxInputTokens)} Token`
 })
+const sortedThreadTools = computed(() => sortThreadTools(threadTools.value))
 const visibleThreadTools = computed(() => {
   const query = toolQuery.value.trim().toLowerCase()
-  return threadTools.value.filter(
-    (tool) => !query || `${tool.label} ${tool.description}`.toLowerCase().includes(query),
+  return sortedThreadTools.value.filter(
+    (tool) =>
+      !query || `${tool.name} ${tool.label} ${tool.description}`.toLowerCase().includes(query),
   )
 })
 const filteredCommands = computed(() => {
@@ -225,65 +363,123 @@ function formatTokenCount(tokens: number): string {
 }
 
 async function refreshTokenBudget(): Promise<void> {
-  if (isGroupChannel.value || !threadStore.threadId) {
+  if (budgetIsRunning.value) return
+  if (
+    isGroupChannel.value ||
+    !threadStore.threadId ||
+    threadStore.agentId !== agentStore.activeAgentId
+  ) {
     tokenBudget.value = null
     return
   }
   const request = ++tokenBudgetRequest
+  const threadId = threadStore.threadId
+  const agentId = agentStore.activeAgentId
   try {
-    const response = await threadsApi.previewTokenBudget(threadStore.threadId, {
+    const response = await threadsApi.previewTokenBudget(threadId, {
       content: inputText.value,
     })
-    if (request === tokenBudgetRequest) tokenBudget.value = response.data ?? null
+    if (
+      request === tokenBudgetRequest &&
+      threadId === threadStore.threadId &&
+      agentId === agentStore.activeAgentId &&
+      !budgetIsRunning.value
+    ) {
+      tokenBudget.value = response.data ?? null
+    }
   } catch (error) {
-    if (request === tokenBudgetRequest) tokenBudget.value = null
+    if (
+      request !== tokenBudgetRequest ||
+      threadId !== threadStore.threadId ||
+      agentId !== agentStore.activeAgentId ||
+      budgetIsRunning.value
+    )
+      return
+    tokenBudget.value = null
     logger.warn('InputBar', '计算下一轮 Token 预算失败', error)
   }
 }
 
 function scheduleTokenBudgetRefresh(): void {
   if (tokenBudgetTimer) clearTimeout(tokenBudgetTimer)
+  tokenBudgetRequest++
+  if (budgetIsRunning.value) return
   tokenBudgetTimer = setTimeout(() => void refreshTokenBudget(), 350)
 }
 
 async function loadThreadTools(): Promise<void> {
+  const request = ++toolsRequest
+  const threadId = threadStore.threadId
   if (isGroupChannel.value) {
     threadTools.value = []
+    toolsLoading.value = false
     return
   }
-  if (!threadStore.threadId) {
+  if (!threadId) {
     threadTools.value = []
+    disabledToolNames.value = []
+    toolsLoading.value = false
     return
   }
   toolsLoading.value = true
   try {
-    const response = await threadsApi.getTools(threadStore.threadId)
-    threadTools.value = response.data?.tools ?? []
-    autoExecuteTools.value = response.data?.autoExecuteTools ?? false
+    const response = await threadsApi.getTools(threadId)
+    if (request === toolsRequest && threadId === threadStore.threadId && response.data) {
+      applyThreadTools(response.data)
+    }
   } catch (error) {
     logger.warn('InputBar', '加载本会话工具配置失败', error)
-    threadTools.value = []
+    if (request === toolsRequest) threadTools.value = []
   } finally {
-    toolsLoading.value = false
+    if (request === toolsRequest) toolsLoading.value = false
   }
 }
 
-async function toggleAutoExecute(): Promise<void> {
-  if (toolsSaving.value || props.isSending || !threadStore.threadId) return
-  const previous = autoExecuteTools.value
-  autoExecuteTools.value = !previous
+async function switchInteractionMode(mode: InteractionMode): Promise<void> {
+  if (modeSwitchDisabled.value || threadStore.interactionMode === mode) return
+  toolsSaving.value = true
+  modeSaving.value = true
+  let request = 0
+  try {
+    const threadId = await ensureThread()
+    request = ++toolsRequest
+    const response = await threadsApi.updateInteractionMode(threadId, mode)
+    if (threadId !== threadStore.threadId) return
+    request = ++toolsRequest
+    if (response.data) applyThreadTools(response.data)
+    scheduleTokenBudgetRefresh()
+  } catch (error) {
+    notify.toast(error instanceof Error ? error.message : '切换会话模式失败', { type: 'error' })
+  } finally {
+    modeSaving.value = false
+    toolsSaving.value = false
+    if (request === toolsRequest) toolsLoading.value = false
+  }
+}
+
+async function changeExecutionMode(nextMode: ExecutionMode): Promise<void> {
+  if (executionModeDisabled.value || nextMode === executionMode.value) return
+  const threadId = threadStore.threadId
+  if (!threadId) return
+  const previous = executionMode.value
+  ++toolsRequest
+  executionMode.value = nextMode
   toolsSaving.value = true
   try {
-    const response = await threadsApi.updateExecutionMode(
-      threadStore.threadId,
-      autoExecuteTools.value,
+    const response = await threadsApi.updateExecutionMode(threadId, nextMode)
+    if (threadId !== threadStore.threadId) return
+    ++toolsRequest
+    toolsLoading.value = false
+    executionMode.value = resolveExecutionMode(
+      response.data?.executionMode,
+      response.data?.autoExecuteTools,
     )
-    autoExecuteTools.value = response.data?.autoExecuteTools ?? autoExecuteTools.value
-    notify.toast(autoExecuteTools.value ? '自动执行模式已开启' : '自动执行模式已关闭', {
-      type: autoExecuteTools.value ? 'success' : 'info',
-    })
+    notify.toast(
+      `已切换为${EXECUTION_MODE_OPTIONS.find((option) => option.value === executionMode.value)?.label}`,
+      { type: 'success' },
+    )
   } catch (error) {
-    autoExecuteTools.value = previous
+    if (threadId === threadStore.threadId) executionMode.value = previous
     notify.toast(error instanceof Error ? error.message : '保存执行模式失败', { type: 'error' })
   } finally {
     toolsSaving.value = false
@@ -291,23 +487,33 @@ async function toggleAutoExecute(): Promise<void> {
 }
 
 async function toggleThreadTool(tool: ThreadToolSetting): Promise<void> {
+  if (!tool.modeAllowed) return
   if (tool.locked) {
     notify.toast(`${tool.label}属于系统协议，始终启用`, { type: 'info' })
     return
   }
   if (toolsSaving.value || props.isSending || !threadStore.threadId) return
-  const previous = tool.enabled
-  tool.enabled = !previous
+  const threadId = threadStore.threadId
+  const previous = tool.userEnabled
+  tool.userEnabled = !previous
+  tool.enabled = tool.userEnabled
   toolsSaving.value = true
   try {
-    const disabled = threadTools.value.filter((item) => !item.enabled).map((item) => item.name)
-    const response = await threadsApi.updateTools(threadStore.threadId, disabled)
-    if (response.data?.tools) threadTools.value = response.data.tools
+    const disabled = new Set(disabledToolNames.value)
+    if (tool.userEnabled) disabled.delete(tool.name)
+    else disabled.add(tool.name)
+    const response = await threadsApi.updateTools(threadId, [...disabled])
+    if (threadId !== threadStore.threadId) return
+    ++toolsRequest
+    toolsLoading.value = false
+    if (response.data) applyThreadTools(response.data)
+    scheduleTokenBudgetRefresh()
     notify.toast(`${tool.label}已${tool.enabled ? '启用' : '禁用'}，仅影响本会话`, {
       type: 'success',
     })
   } catch (error) {
     tool.enabled = previous
+    tool.userEnabled = previous
     notify.toast(error instanceof Error ? error.message : '保存工具配置失败', { type: 'error' })
   } finally {
     toolsSaving.value = false
@@ -358,30 +564,31 @@ async function clearFlowState(agentId: string): Promise<void> {
   }
 }
 
-async function clearWorkContext(agentId: string): Promise<void> {
-  if (!threadStore.threadId || flowClearing.value) return
-  flowClearing.value = true
-  try {
-    await threadsApi.clearWorkContext(threadStore.threadId, agentId)
-    await loadFlowState()
-    notify.toast('工作上下文已清空', { type: 'success' })
-  } catch (error) {
-    notify.toast(error instanceof Error ? error.message : '清空工作上下文失败', { type: 'error' })
-  } finally {
-    flowClearing.value = false
-  }
-}
+watch(() => inputText.value, scheduleTokenBudgetRefresh)
 
 watch(
-  [() => inputText.value, () => threadStore.threadId, () => agentStore.activeAgentId],
-  scheduleTokenBudgetRefresh,
+  [() => threadStore.threadId, () => agentStore.activeAgentId],
+  () => {
+    tokenBudget.value = null
+    scheduleTokenBudgetRefresh()
+  },
   { immediate: true },
 )
 
 watch(
+  currentLiveContextBudget,
+  (budget) => {
+    // 结束到预算预览返回之间沿用最后一轮统计，避免瞬间跳回对话开始前的旧数值。
+    if (budget) tokenBudget.value = budget
+  },
+  { immediate: true },
+)
+
+watch(budgetIsRunning, scheduleTokenBudgetRefresh)
+
+watch(
   () => props.isSending,
   (sending, previous) => {
-    if (previous && !sending) scheduleTokenBudgetRefresh()
     if (previous && !sending && flowOpen.value) void loadFlowState()
   },
 )
@@ -389,10 +596,13 @@ watch(
 watch(
   () => threadStore.threadId,
   () => {
+    closeInputPopovers()
     toolOpen.value = false
     flowOpen.value = false
     flowStates.value = []
     toolQuery.value = ''
+    threadTools.value = []
+    disabledToolNames.value = []
     void loadThreadTools()
   },
   { immediate: true },
@@ -446,9 +656,9 @@ function onModelCapabilitiesChanged(): void {
 }
 
 watch(
-  () => threadStore.threadId,
-  async (_next, previous) => {
-    if (previous) await clearPendingAttachments()
+  [() => threadStore.threadId, () => agentStore.activeAgentId],
+  ([_next, agentId], [previous, previousAgentId]) => {
+    if (previous || agentId !== previousAgentId) void clearPendingAttachments()
   },
 )
 
@@ -564,7 +774,20 @@ async function ensureThread(): Promise<string> {
   return threadStore.threadId
 }
 
-function validateFile(file: File): 'image' | 'text' | null {
+function validateFile(file: File): 'image' | 'text' | 'pdf' | null {
+  if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) {
+    if (!pdfAvailable.value) {
+      notify.toast('请先在工具与扩展 → 拓展功能 → PDF 解析中启用解析来源', { type: 'warning' })
+      return null
+    }
+    if (file.size > maxPdfBytes.value) {
+      notify.toast(`当前 PDF 来源最多支持 ${maxPdfBytes.value / 1024 / 1024}MB`, {
+        type: 'warning',
+      })
+      return null
+    }
+    return 'pdf'
+  }
   const imageTypes = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
   const textTypes = new Set([
     'text/plain',
@@ -600,13 +823,14 @@ function validateFile(file: File): 'image' | 'text' | null {
     }
     return 'text'
   }
-  notify.toast('暂不支持 PDF 与大文档解析；请选择受支持的图片或 UTF-8 文本文件', {
+  notify.toast('请选择受支持的图片、UTF-8 文本或已启用解析来源的 PDF', {
     type: 'warning',
   })
   return null
 }
 
 async function uploadFile(file: File) {
+  if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) await loadPdfCapabilities()
   const kind = validateFile(file)
   if (!kind) return
   // 模型配置可能由设置页或其他窗口刚刚更新；上传前复核权威能力，避免使用陈旧快照。
@@ -648,14 +872,28 @@ async function uploadFile(file: File) {
     const threadId = await ensureThread()
     const response = await attachmentsApi.upload(file, threadId)
     if (!response.data) throw new Error('服务端未返回附件信息')
+    if (!pendingAttachments.value.some((item) => item.localKey === localKey)) {
+      await cleanupPendingAttachment(response.data)
+      return
+    }
     Object.assign(pending, response.data, { uploadState: 'success' })
+    if (response.data.status === 'processing') {
+      pending.uploadState = 'processing'
+      pendingAttachments.value = [...pendingAttachments.value]
+      void waitForPdf(pending).catch((cause) => failPendingAttachment(pending, cause))
+    }
     pendingAttachments.value = [...pendingAttachments.value]
   } catch (error) {
-    pending.uploadState = 'failed'
-    pending.error = (error as Error).message
-    pendingAttachments.value = [...pendingAttachments.value]
-    notify.toast(`附件上传失败：${pending.error}`, { type: 'error' })
+    failPendingAttachment(pending, error)
   }
+}
+
+function failPendingAttachment(item: PendingAttachment, cause: unknown): void {
+  if (!pendingAttachments.value.some((entry) => entry.localKey === item.localKey)) return
+  item.uploadState = 'failed'
+  item.error = cause instanceof Error ? cause.message : '附件处理失败'
+  pendingAttachments.value = [...pendingAttachments.value]
+  notify.toast(item.error, { type: 'error' })
 }
 
 async function handleFiles(event: Event) {
@@ -673,30 +911,123 @@ async function onPaste(event: ClipboardEvent) {
   for (const file of files) await uploadFile(file)
 }
 
-async function removeAttachment(item: PendingAttachment) {
-  if (item.id && item.uploadState === 'success') {
-    try {
-      await attachmentsApi.removeUnbound(item.id)
-    } catch (error) {
-      notify.toast(`附件删除失败：${(error as Error).message}`, { type: 'error' })
-      return
-    }
+function releaseAttachmentPreview(item: PendingAttachment): void {
+  if (item.previewUrl) {
+    URL.revokeObjectURL(item.previewUrl)
+    item.previewUrl = undefined
   }
-  if (item.previewUrl) URL.revokeObjectURL(item.previewUrl)
+}
+
+function detachAttachment(item: PendingAttachment): void {
   pendingAttachments.value = pendingAttachments.value.filter(
     (entry) => entry.localKey !== item.localKey,
   )
+  releaseAttachmentPreview(item)
+}
+
+async function cleanupPendingAttachment(item: AttachmentInfo): Promise<void> {
+  // 已绑定附件归历史消息管理，取消输入区的缩略图不能删除消息中的图片。
+  if (!item.id || item.messageId !== null || ['bound', 'deleted'].includes(item.status)) return
+  try {
+    await attachmentsApi.removeUnbound(item.id)
+  } catch (error) {
+    if (error instanceof ApiError && error.code === 'NOT_FOUND') return
+    logger.warn('InputBar', '待发送附件已移除，后台清理未完成', error)
+  }
+}
+
+async function removeAttachment(item: PendingAttachment): Promise<void> {
+  if (!pendingAttachments.value.some((entry) => entry.localKey === item.localKey)) return
+  // 先取消本地引用，避免附件已失效或网络中断时，删除按钮反复报错且无法移除。
+  detachAttachment(item)
+  await cleanupPendingAttachment(item)
 }
 
 async function clearPendingAttachments() {
+  attachmentDraftVersion += 1
   const items = [...pendingAttachments.value]
-  await Promise.allSettled(
-    items
-      .filter((item) => item.id && item.uploadState === 'success')
-      .map((item) => attachmentsApi.removeUnbound(item.id)),
-  )
-  items.forEach((item) => item.previewUrl && URL.revokeObjectURL(item.previewUrl))
   pendingAttachments.value = []
+  items.forEach(releaseAttachmentPreview)
+  submittedAttachments.forEach(releaseAttachmentPreview)
+  submittedAttachments.clear()
+  await Promise.all(items.map(cleanupPendingAttachment))
+}
+
+async function reconcileFailedAttachment(item: PendingAttachment): Promise<void> {
+  try {
+    const response = await attachmentsApi.get(item.id)
+    if (!pendingAttachments.value.some((entry) => entry.localKey === item.localKey)) return
+    const current = response.data
+    if (!current) throw new Error('附件状态暂时无法读取')
+    if (current.messageId !== null || ['bound', 'deleted'].includes(current.status)) {
+      detachAttachment(item)
+      return
+    }
+    Object.assign(item, current, {
+      uploadState:
+        current.status === 'uploaded'
+          ? 'success'
+          : current.status === 'processing'
+            ? 'processing'
+            : 'failed',
+      error: current.error,
+    })
+    pendingAttachments.value = [...pendingAttachments.value]
+    if (item.uploadState === 'processing')
+      void waitForPdf(item).catch((cause) => failPendingAttachment(item, cause))
+  } catch (error) {
+    if (!pendingAttachments.value.some((entry) => entry.localKey === item.localKey)) return
+    if (error instanceof ApiError && error.code === 'NOT_FOUND') {
+      detachAttachment(item)
+      return
+    }
+    // 状态未知时禁止直接重发旧 ID，用户仍可随时移除并重新添加。
+    item.uploadState = 'failed'
+    item.error = '附件状态确认失败，请移除后重新添加'
+    pendingAttachments.value = [...pendingAttachments.value]
+  }
+}
+
+async function waitForPdf(item: PendingAttachment): Promise<void> {
+  const started = Date.now()
+  while (pendingAttachments.value.some((entry) => entry.localKey === item.localKey)) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 2000))
+    if (!pendingAttachments.value.some((entry) => entry.localKey === item.localKey)) return
+    const response = await attachmentsApi.get(item.id)
+    if (!pendingAttachments.value.some((entry) => entry.localKey === item.localKey)) return
+    if (!response.data) throw new Error('附件状态暂时无法读取')
+    Object.assign(item, response.data)
+    if (response.data.status === 'uploaded') {
+      item.uploadState = 'success'
+      pendingAttachments.value = [...pendingAttachments.value]
+      return
+    }
+    if (response.data.status === 'failed' || response.data.status === 'deleted')
+      throw new Error(response.data.error || 'PDF 解析未完成，请重试')
+    if (Date.now() - started > 11 * 60_000) throw new Error('PDF 解析等待超时，请稍后重试')
+  }
+}
+
+async function retryPdf(item: PendingAttachment): Promise<void> {
+  try {
+    const current = await attachmentsApi.get(item.id)
+    const response =
+      current.data?.status === 'failed' ? await attachmentsApi.retry(item.id) : current
+    if (!response.data) throw new Error('未能重新开始解析')
+    if (!pendingAttachments.value.some((entry) => entry.localKey === item.localKey)) return
+    Object.assign(item, response.data, {
+      uploadState: response.data.status === 'uploaded' ? 'success' : 'processing',
+      error: undefined,
+    })
+    pendingAttachments.value = [...pendingAttachments.value]
+    if (item.uploadState === 'processing') await waitForPdf(item)
+  } catch (cause) {
+    if (!pendingAttachments.value.some((entry) => entry.localKey === item.localKey)) return
+    item.uploadState = 'failed'
+    item.error = cause instanceof Error ? cause.message : 'PDF 解析失败'
+    pendingAttachments.value = [...pendingAttachments.value]
+    notify.toast(item.error, { type: 'error' })
+  }
 }
 
 // ── @ 提及（group 模式）──
@@ -847,15 +1178,22 @@ const mentionOverlayHtml = computed(() => {
 })
 
 function send() {
+  if (modeSaving.value || props.isSending || props.disabled) return
   const text = inputText.value.trim()
   if ((!text && !successfulAttachments.value.length) || hasUploading.value) return
   const mentions = isGroupChannel.value ? resolveMentions(inputText.value) : []
   const ids = successfulAttachments.value.map((item) => item.id)
-  const sentAttachments = [...pendingAttachments.value]
+  const sentAttachments = [...successfulAttachments.value]
+  const submissionVersion = ++attachmentDraftVersion
+  sentAttachments.forEach((item) => submittedAttachments.add(item))
+  let completed = false
   saveInputHistory(text)
   // 提交给流式管道后立刻清空本地输入，避免等待模型完整回复才更新指挥台。
   inputText.value = ''
-  pendingAttachments.value = []
+  // 失败的附件留在输入区供重试，不能显示成已经随消息发送。
+  pendingAttachments.value = pendingAttachments.value.filter(
+    (item) => item.uploadState === 'failed',
+  )
   mentionOpen.value = false
   nextTick(autoResize)
   const resolvedImageMode =
@@ -876,13 +1214,29 @@ function send() {
     ),
     resolvedImageMode,
     (success) => {
-      if (!success) {
-        // 请求未被服务端接受时恢复待发送内容，便于用户修正后重试。
-        inputText.value = text
-        pendingAttachments.value = sentAttachments
+      if (completed) return
+      completed = true
+      sentAttachments.forEach((item) => submittedAttachments.delete(item))
+      if (success || submissionVersion !== attachmentDraftVersion) {
+        sentAttachments.forEach(releaseAttachmentPreview)
         return
       }
-      sentAttachments.forEach((item) => item.previewUrl && URL.revokeObjectURL(item.previewUrl))
+      if (!inputText.value) inputText.value = text
+      // 模型失败不代表附件未被接收；确认仍未绑定后才允许再次发送。
+      const slots = Math.max(0, 5 - pendingAttachments.value.length)
+      const restored = sentAttachments.slice(0, slots)
+      restored.forEach((item) => {
+        item.uploadState = 'checking'
+      })
+      pendingAttachments.value = [...pendingAttachments.value, ...restored]
+      restored.forEach((item) => {
+        void reconcileFailedAttachment(item)
+      })
+      sentAttachments.slice(slots).forEach((item) => {
+        releaseAttachmentPreview(item)
+        void cleanupPendingAttachment(item)
+      })
+      nextTick(autoResize)
     },
   )
 }
@@ -958,8 +1312,8 @@ function cleanupRecorder() {
 function nativeAudioNotice() {
   notify.toast(
     enableAudioInput.value
-      ? '当前 Provider 尚未接入原生音频协议，暂不能发送音频'
-      : '当前主模型未声明原生音频输入能力',
+      ? '原生音频输入暂未接入，当前为预留入口，暂不能发送音频'
+      : '原生音频输入暂未接入，且当前主模型未声明音频输入能力',
     { type: 'warning' },
   )
 }
@@ -971,15 +1325,27 @@ function formatSize(bytes: number) {
 }
 
 onMounted(() => {
-  // 监听全局点击，用于识图方式弹层的点击外部关闭。
+  void loadPdfCapabilities()
+  window.addEventListener('infos:integrations-changed', onIntegrationsChanged)
+  window.addEventListener('focus', onIntegrationsChanged)
+  // 识图与语音菜单共享关闭规则，卸载时释放全部监听。
   document.addEventListener('click', onDocumentClick)
+  document.addEventListener('keydown', onInputPopoverKeydown)
+  document.addEventListener('scroll', onInputPopoverScroll, true)
+  window.addEventListener('resize', closeInputPopovers)
   window.addEventListener('infos:model-capabilities-changed', onModelCapabilitiesChanged)
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('infos:integrations-changed', onIntegrationsChanged)
+  window.removeEventListener('focus', onIntegrationsChanged)
   document.removeEventListener('click', onDocumentClick)
+  document.removeEventListener('keydown', onInputPopoverKeydown)
+  document.removeEventListener('scroll', onInputPopoverScroll, true)
+  window.removeEventListener('resize', closeInputPopovers)
   window.removeEventListener('infos:model-capabilities-changed', onModelCapabilitiesChanged)
   if (tokenBudgetTimer) clearTimeout(tokenBudgetTimer)
+  tokenBudgetRequest++
   cleanupRecorder()
   void clearPendingAttachments()
 })
@@ -1030,11 +1396,7 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
           心流
         </button>
       </template>
-      <span
-        v-if="!isGroupChannel"
-        class="token-capacitor"
-        :title="`预计下一轮首个 ReAct：${tokenBudgetLabel}`"
-      >
+      <span v-if="!isGroupChannel" class="token-capacitor" :title="tokenBudgetTitle">
         <span
           class="token-capacitor-ring"
           :style="{ '--token-capacitor-angle': tokenBudgetDegrees }"
@@ -1058,11 +1420,14 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
             class="attachment-image-state"
             :class="`attachment-image-state--${item.uploadState}`"
             :title="
-              item.uploadState === 'uploading'
+              item.error ||
+              (item.uploadState === 'uploading'
                 ? '上传中'
-                : item.uploadState === 'success'
-                  ? '已就绪'
-                  : '上传失败'
+                : item.uploadState === 'checking'
+                  ? '确认附件状态中'
+                  : item.uploadState === 'success'
+                    ? '已就绪'
+                    : '上传失败')
             "
           />
         </template>
@@ -1075,13 +1440,28 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
               {{
                 item.uploadState === 'uploading'
                   ? '上传中'
-                  : item.uploadState === 'success'
-                    ? '已就绪'
-                    : '上传失败'
+                  : item.uploadState === 'checking'
+                    ? '确认状态中'
+                    : item.uploadState === 'processing'
+                      ? '解析中'
+                      : item.uploadState === 'success'
+                        ? '已就绪'
+                        : item.kind === 'pdf'
+                          ? '解析失败'
+                          : '上传失败'
               }}
             </span>
+            <span v-if="item.error" class="attachment-error">{{ item.error }}</span>
           </div>
         </template>
+        <button
+          v-if="item.kind === 'pdf' && item.uploadState === 'failed' && item.id"
+          title="重试解析"
+          aria-label="重试解析"
+          @click="retryPdf(item)"
+        >
+          <PixelIcon name="refresh" size="xs" />
+        </button>
         <button title="取消附件" aria-label="取消附件" @click="removeAttachment(item)">
           <PixelIcon name="close" size="xs" />
         </button>
@@ -1159,16 +1539,6 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
             {{ imageModeLabel }}
             <span class="image-mode-chevron">⌄</span>
           </button>
-          <!-- 添加图片是独立动作，只有没有任何识图能力时才禁用。 -->
-          <button
-            class="image-add-button"
-            :disabled="!enableVision && !relayAvailable"
-            :title="enableVision || relayAvailable ? '添加图片' : '没有可用的识图模型'"
-            @click="imageInputRef?.click()"
-          >
-            <PixelIcon name="plus" size="xs" />
-            <span>添加图片</span>
-          </button>
           <Teleport to="body">
             <div
               v-if="imageModeOpen"
@@ -1212,35 +1582,85 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
             </div>
           </Teleport>
         </div>
-        <button title="添加文本文件" @click="fileInputRef?.click()">
+        <button
+          :title="pdfAvailable ? '添加图片、文本或 PDF 文件' : '添加图片或文本文件'"
+          @click="fileInputRef?.click()"
+        >
           <PixelIcon name="file" size="xs" />
           文件
         </button>
-        <button
-          :disabled="isRecording || isTranscribing"
-          title="录音并转写到输入框"
-          @click="startAsr"
-        >
-          <PixelIcon name="volume" size="xs" />
-          语音转写
-        </button>
-        <button
-          :class="{ reserved: enableAudioInput }"
-          title="原生音频输入"
-          @click="nativeAudioNotice"
-        >
-          <PixelIcon name="radio" size="xs" />
-          原生音频
-        </button>
+        <div class="audio-input-control">
+          <button
+            ref="audioInputToggleRef"
+            class="audio-input-selector"
+            :disabled="disabled || isRecording || isTranscribing"
+            title="选择语音输入方式"
+            aria-label="选择语音输入方式"
+            aria-haspopup="menu"
+            :aria-expanded="audioInputOpen"
+            @click.stop="toggleAudioInputPopover"
+          >
+            <PixelIcon name="volume" size="xs" />
+            语音
+            <span class="image-mode-chevron">⌄</span>
+          </button>
+          <Teleport to="body">
+            <div
+              v-if="audioInputOpen"
+              class="deck-popover audio-input-popover"
+              :style="audioInputPopoverStyle"
+              role="menu"
+              aria-label="语音输入方式"
+              @click.stop
+            >
+              <strong>语音输入</strong>
+              <button role="menuitem" @click="selectAudioInput('asr')">
+                <span>语音转写</span>
+                <small>
+                  {{ asrAvailable ? '录音转成文字，可编辑后发送' : '尚未配置，点击查看说明' }}
+                </small>
+              </button>
+              <button role="menuitem" @click="selectAudioInput('native')">
+                <span>原生音频</span>
+                <small>预留功能，点击查看说明</small>
+              </button>
+            </div>
+          </Teleport>
+        </div>
+        <div class="deck-mode" role="group" aria-label="会话模式" :aria-busy="modeSaving">
+          <button
+            type="button"
+            :class="{ 'is-active': threadStore.interactionMode === 'chat' }"
+            :aria-pressed="threadStore.interactionMode === 'chat'"
+            :disabled="modeSwitchDisabled"
+            title="聊天模式"
+            @click="switchInteractionMode('chat')"
+          >
+            <PixelIcon name="chat" size="xs" />
+            聊天
+          </button>
+          <button
+            type="button"
+            :class="{ 'is-active': threadStore.interactionMode === 'work' }"
+            :aria-pressed="threadStore.interactionMode === 'work'"
+            :disabled="modeSwitchDisabled"
+            title="工作模式"
+            @click="switchInteractionMode('work')"
+          >
+            <PixelIcon name="tool" size="xs" />
+            工作
+          </button>
+        </div>
         <button
           title="管理本会话可用工具"
+          :disabled="modeSaving"
           :class="{ reserved: toolOpen }"
           @click="toggleToolManager"
         >
           <PixelIcon name="tool" size="xs" />
           会话工具
           <span v-if="threadTools.length" class="tool-count">
-            {{ enabledToolCount }}/{{ threadTools.length }}
+            {{ enabledToolCount }}/{{ availableToolCount }}
           </span>
         </button>
       </div>
@@ -1265,6 +1685,7 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
         :disabled="
           disabled ||
           isSending ||
+          modeSaving ||
           hasUploading ||
           (!inputText.trim() && !successfulAttachments.length)
         "
@@ -1325,20 +1746,6 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
           <small>私有事实</small>
           <p>{{ state.privateFacts || '暂无需要私下持续记住的事实。' }}</p>
         </section>
-        <section class="flow-state-card__work">
-          <small>工作上下文</small>
-          <p>{{ state.workContext || '暂无工作上下文。' }}</p>
-          <div class="flow-work-meta">
-            <span v-if="state.workContext">剩余 {{ state.workContextRemainingPairs }} 轮</span>
-            <button
-              :disabled="flowClearing || !state.workContext"
-              @click="clearWorkContext(state.agentId)"
-            >
-              <PixelIcon name="trash" size="xs" />
-              清空工作上下文
-            </button>
-          </div>
-        </section>
         <footer>
           <time>{{ state.updatedAt ? `更新于 ${state.updatedAt}` : '尚未更新' }}</time>
           <button
@@ -1351,7 +1758,7 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
         </footer>
       </article>
       <p class="flow-panel__notice">
-        心流与工作上下文都不会写入聊天记录或长期记忆；工作上下文会按配置轮次强制清空。
+        私有心流不会写入聊天记录或长期记忆；近期工具结果随会话上下文自动管理。
       </p>
     </div>
 
@@ -1359,30 +1766,47 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
       <header class="tool-manager__head">
         <div>
           <strong>本会话工具</strong>
-          <span>{{ channelLabel }}</span>
+          <span>
+            {{ channelLabel }} ·
+            {{ threadStore.interactionMode === 'chat' ? '聊天模式' : '工作模式' }}
+          </span>
         </div>
-        <b>{{ enabledToolCount }}/{{ threadTools.length }} 启用</b>
+        <b>{{ enabledToolCount }}/{{ availableToolCount }} 启用</b>
       </header>
-      <button
-        class="tool-manager__auto"
-        :class="{ 'is-active': autoExecuteTools }"
-        :disabled="toolsSaving || isSending"
-        type="button"
-        @click="toggleAutoExecute"
-      >
-        <span class="tool-manager__auto-icon">
-          <PixelIcon name="flash" size="xs" />
-        </span>
-        <span>
-          <strong>自动执行</strong>
-          <small>普通工具直接运行；三个终端入口与工作区外删除仍需确认</small>
-        </span>
-        <b>{{ autoExecuteTools ? 'ON' : 'OFF' }}</b>
-        <i><em /></i>
-      </button>
-      <p class="tool-manager__notice">
-        你可以决定本次会话允许助手使用哪些功能。关闭某项功能后，助手在本会话中将无法使用它；带“系统必需”标记的功能不能关闭。
-      </p>
+      <section class="execution-policy" aria-label="本会话执行权限" :aria-busy="toolsSaving">
+        <div class="execution-policy__head">
+          <span>
+            <PixelIcon name="shield" size="xs" />
+            执行权限
+          </span>
+          <small>仅当前会话</small>
+        </div>
+        <div class="execution-policy__options" role="group" aria-label="选择执行权限">
+          <button
+            v-for="option in EXECUTION_MODE_OPTIONS"
+            :key="option.value"
+            type="button"
+            class="execution-policy__option"
+            :class="{
+              'is-selected': executionMode === option.value,
+              'is-full': option.value === 'full',
+            }"
+            :aria-pressed="executionMode === option.value"
+            :disabled="executionModeDisabled"
+            @click="changeExecutionMode(option.value)"
+          >
+            <span class="execution-policy__label">
+              <PixelIcon :name="executionModeIcons[option.value]" size="xs" />
+              <strong>{{ option.label }}</strong>
+              <span class="execution-policy__marker" aria-hidden="true">
+                <PixelIcon v-if="executionMode === option.value" name="check" size="xs" />
+              </span>
+            </span>
+            <small>{{ option.description }}</small>
+          </button>
+        </div>
+      </section>
+      <p class="tool-manager__notice">仅影响本会话；系统必需项不可关闭。</p>
       <label class="tool-manager__search">
         <PixelIcon name="search" size="xs" />
         <input v-model="toolQuery" placeholder="搜索功能名称或用途…" />
@@ -1397,8 +1821,12 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
           v-else
           :key="tool.name"
           class="tool-manager__item"
-          :class="{ 'is-enabled': tool.enabled, 'is-locked': tool.locked }"
-          :disabled="toolsSaving || isSending"
+          :class="{
+            'is-enabled': tool.enabled,
+            'is-locked': tool.locked,
+            'is-mode-blocked': !tool.modeAllowed,
+          }"
+          :disabled="toolsSaving || isSending || !tool.modeAllowed"
           @click="toggleThreadTool(tool)"
         >
           <span class="tool-manager__icon" :style="{ color: toolDisplayColor(tool.display) }">
@@ -1406,13 +1834,18 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
           </span>
           <span class="tool-manager__meta">
             <strong>{{ tool.label }}</strong>
-            <small>{{ tool.description }}</small>
+            <small>
+              {{ tool.description }}
+            </small>
             <span class="tool-manager__tooltip" role="tooltip">
               <b>{{ tool.label }}</b>
-              <span>{{ tool.description || '暂无工具介绍' }}</span>
+              <span>
+                {{ tool.description || '暂无工具介绍' }}
+              </span>
             </span>
           </span>
-          <span v-if="tool.locked" class="tool-manager__protocol">系统必需</span>
+          <span v-if="!tool.modeAllowed" class="tool-manager__protocol">模式未开放</span>
+          <span v-else-if="tool.locked" class="tool-manager__protocol">系统必需</span>
           <span
             v-else
             class="tool-manager__switch"
@@ -1429,14 +1862,13 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
     </div>
 
     <input
-      ref="imageInputRef"
+      ref="fileInputRef"
       hidden
       type="file"
-      accept="image/png,image/jpeg,image/webp,image/gif"
+      :accept="fileAccept"
       multiple
       @change="handleFiles"
     />
-    <input ref="fileInputRef" hidden type="file" multiple @change="handleFiles" />
   </div>
 </template>
 
@@ -1447,7 +1879,9 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
   border: 1px solid var(--ui-border-default);
   border-radius: var(--ui-radius-md);
   box-shadow: var(--ui-shadow-md);
-  transition: 0.2s;
+  transition:
+    border-color var(--ui-duration-fast) var(--ui-ease-standard),
+    box-shadow var(--ui-duration-fast) var(--ui-ease-standard);
 }
 .deck:focus-within,
 .deck--sending {
@@ -1652,6 +2086,11 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
   font-size: 10px;
   color: var(--ui-text-tertiary);
 }
+.attachment-info .attachment-error {
+  color: var(--ui-danger);
+  white-space: normal;
+  font-size: 10px;
+}
 .attachment-list {
   display: flex;
   gap: 8px;
@@ -1748,7 +2187,8 @@ button {
   background: var(--ui-success, #4cc38a);
   box-shadow: 0 2px 6px color-mix(in srgb, var(--ui-text-primary) 25%, transparent);
 }
-.attachment-image-state--uploading {
+.attachment-image-state--uploading,
+.attachment-image-state--checking {
   background: var(--ui-accent-sky);
   animation: attachment-state-pulse 0.9s ease-in-out infinite alternate;
 }
@@ -1777,7 +2217,42 @@ button {
   gap: 5px;
   overflow-x: auto;
 }
-.image-mode-control {
+.deck-mode {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: stretch;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--ui-border-subtle);
+  background: var(--ui-bg-surface-soft);
+  box-shadow: inset 1px 1px 0 color-mix(in srgb, var(--ui-text-primary) 5%, transparent);
+}
+.deck-tools .deck-mode button {
+  border-radius: 0;
+  min-height: 24px;
+  padding: 0 7px;
+  border-color: transparent;
+  background: transparent;
+  font-family: var(--font-pixel);
+  box-shadow: none;
+}
+.deck-tools .deck-mode button.is-active {
+  color: var(--ui-accent-primary);
+  border-color: color-mix(in srgb, var(--ui-accent-primary) 40%, var(--ui-border-subtle));
+  background: var(--ui-accent-primary-soft);
+  box-shadow:
+    inset 1px 1px 0 color-mix(in srgb, var(--ui-bg-surface) 75%, transparent),
+    inset -1px -1px 0 color-mix(in srgb, var(--ui-accent-primary) 22%, transparent);
+}
+.deck-tools .deck-mode button:focus-visible {
+  outline: 1px solid var(--ui-accent-primary);
+  outline-offset: 2px;
+}
+.deck-tools .deck-mode button.is-active:disabled {
+  opacity: 0.8;
+}
+.image-mode-control,
+.audio-input-control {
   position: relative;
   display: inline-flex;
 }
@@ -1787,26 +2262,28 @@ button {
   color: var(--ui-text-muted);
 }
 
-.deck-tools .image-add-button {
-  border-left: 0;
-}
-
-.image-mode-popover {
+.deck-popover.image-mode-popover,
+.deck-popover.audio-input-popover {
   /* Teleport 到 body 后彻底脱离 .deck-tools 的 overflow 裁剪上下文。 */
   position: fixed;
   z-index: 1000;
   width: 250px;
+  max-width: calc(100vw - 16px);
+  box-sizing: border-box;
+  overflow-y: auto;
   padding: 8px;
 }
 
-.image-mode-popover > strong {
+.image-mode-popover > strong,
+.audio-input-popover > strong {
   display: block;
   padding: 4px 8px 8px;
   color: var(--ui-text-primary);
   font-size: 11px;
 }
 
-.image-mode-popover button {
+.image-mode-popover button,
+.audio-input-popover button {
   width: 100%;
   display: flex;
   justify-content: space-between;
@@ -1820,17 +2297,32 @@ button {
   cursor: pointer;
 }
 
-.image-mode-popover button:hover:not(:disabled) {
+.image-mode-popover button:hover:not(:disabled),
+.audio-input-popover button:hover:not(:disabled) {
   background: var(--ui-bg-hover);
 }
 
-.image-mode-popover button:disabled {
+.image-mode-popover button:disabled,
+.audio-input-popover button:disabled {
   cursor: not-allowed;
   opacity: 0.45;
 }
 
-.image-mode-popover small {
+.image-mode-popover small,
+.audio-input-popover small {
   color: var(--ui-text-muted);
+}
+
+.audio-input-popover button {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 5px;
+  text-align: left;
+}
+
+.audio-input-popover small {
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 .deck-tools button,
@@ -1852,6 +2344,11 @@ button {
   border-radius: 3px;
   font-size: 10px;
   font-weight: 700;
+  transition:
+    background-color var(--ui-duration-fast) var(--ui-ease-standard),
+    border-color var(--ui-duration-fast) var(--ui-ease-standard),
+    color var(--ui-duration-fast) var(--ui-ease-standard),
+    box-shadow var(--ui-duration-fast) var(--ui-ease-standard);
 }
 .deck-tools button:hover:not(:disabled) {
   color: var(--ui-accent-primary);
@@ -1884,7 +2381,11 @@ button {
   border-radius: 3px;
   font-size: 11px;
   font-weight: 800;
-  transition: all var(--ui-duration-fast);
+  transition:
+    background-color var(--ui-duration-fast) var(--ui-ease-standard),
+    border-color var(--ui-duration-fast) var(--ui-ease-standard),
+    color var(--ui-duration-fast) var(--ui-ease-standard),
+    box-shadow var(--ui-duration-fast) var(--ui-ease-standard);
 }
 .mention-btn:hover:not(:disabled) {
   background: var(--ui-accent-primary-soft);
@@ -1916,6 +2417,7 @@ button {
   opacity: 0.4;
 }
 .stop-btn {
+  --ui-focus-color: var(--ui-danger);
   border-color: var(--ui-danger);
   background: var(--ui-danger);
   color: #fff;
@@ -2128,6 +2630,14 @@ button {
   background: var(--ui-bg-surface-soft);
   color: var(--ui-text-primary);
   outline: none;
+  caret-color: var(--ui-accent-primary);
+  transition:
+    border-color var(--ui-duration-fast) var(--ui-ease-standard),
+    box-shadow var(--ui-duration-fast) var(--ui-ease-standard);
+}
+.command-popover input:focus {
+  border-color: var(--ui-accent-primary);
+  box-shadow: 0 0 0 2px var(--ui-accent-primary-soft);
 }
 .command-popover button {
   display: flex;
@@ -2156,6 +2666,8 @@ button {
   font: 800 8px var(--ui-font-mono);
 }
 .tool-popover {
+  display: flex;
+  flex-direction: column;
   right: 10px;
   width: min(430px, calc(100% - 20px));
   max-height: min(520px, 70vh);
@@ -2190,90 +2702,113 @@ button {
   color: var(--ui-accent-primary);
   font: 800 9px var(--ui-font-mono);
 }
-.tool-manager__auto {
-  display: grid;
-  width: calc(100% - 16px);
-  min-height: 54px;
-  grid-template-columns: 28px minmax(0, 1fr) auto 32px;
-  align-items: center;
-  gap: 8px;
-  margin: 8px;
-  padding: 7px 8px;
-  border: 1px solid var(--ui-border-default);
-  border-left: 3px solid var(--ui-text-disabled);
+.execution-policy {
+  flex-shrink: 0;
+  padding: 10px;
+  border-bottom: 1px solid var(--ui-border-default);
   background: var(--ui-bg-surface-soft);
-  color: var(--ui-text-primary);
-  text-align: left;
-  box-shadow: 2px 2px 0 color-mix(in srgb, var(--ui-text-primary) 8%, transparent);
-  cursor: pointer;
-  transition: 0.14s steps(3, end);
 }
-.tool-manager__auto:hover:not(:disabled) {
-  transform: translate(-1px, -1px);
-  box-shadow: 3px 3px 0 color-mix(in srgb, var(--ui-accent-sky) 18%, transparent);
+.execution-policy__head,
+.execution-policy__head > span,
+.execution-policy__label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
 }
-.tool-manager__auto:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
+.execution-policy__head {
+  justify-content: space-between;
+  margin-bottom: 8px;
 }
-.tool-manager__auto > span:nth-child(2) {
-  display: grid;
-  min-width: 0;
-  gap: 3px;
-}
-.tool-manager__auto strong {
+.execution-policy__head > span {
+  color: var(--ui-text-secondary);
   font-size: 10px;
+  font-weight: 800;
 }
-.tool-manager__auto small {
+.execution-policy__head > small {
   color: var(--ui-text-tertiary);
   font-size: 9px;
-  line-height: 1.35;
 }
-.tool-manager__auto-icon {
+.execution-policy__options {
   display: grid;
-  width: 25px;
-  height: 25px;
-  place-items: center;
-  border: 1px solid var(--ui-border-strong);
-  color: var(--ui-text-tertiary);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
 }
-.tool-manager__auto > b {
-  color: var(--ui-text-tertiary);
-  font: 900 9px var(--ui-font-mono);
-}
-.tool-manager__auto > i {
+.execution-policy__option {
+  --policy-accent: var(--ui-accent-purple);
   position: relative;
-  width: 30px;
-  height: 16px;
-  border: 1px solid var(--ui-border-strong);
-  background: var(--ui-bg-primary);
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid var(--ui-border-default);
+  border-radius: 0;
+  background: var(--ui-bg-elevated);
+  color: var(--ui-text-secondary);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease;
 }
-.tool-manager__auto > i em {
+.execution-policy__option.is-full {
+  --policy-accent: var(--ui-accent-pink);
+}
+.execution-policy__option:hover:not(:disabled) {
+  border-color: var(--policy-accent);
+  background: var(--ui-bg-hover);
+}
+.execution-policy__option.is-selected {
+  border-color: color-mix(in srgb, var(--policy-accent) 65%, var(--ui-border-default));
+  background: color-mix(in srgb, var(--policy-accent) 9%, var(--ui-bg-elevated));
+  box-shadow:
+    inset 2px 0 0 var(--policy-accent),
+    2px 2px 0 var(--ui-border-subtle);
+}
+.execution-policy__option.is-selected::after {
+  content: '';
   position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 10px;
-  height: 10px;
-  background: var(--ui-text-disabled);
-  transition: transform 0.14s steps(3, end);
+  top: -1px;
+  left: -1px;
+  width: 5px;
+  height: 5px;
+  background: var(--policy-accent);
 }
-.tool-manager__auto.is-active {
-  border-color: color-mix(in srgb, var(--ui-accent-sky) 55%, var(--ui-border-default));
-  border-left-color: var(--ui-accent-sky);
-  background: color-mix(in srgb, var(--ui-accent-sky) 8%, var(--ui-bg-elevated));
+.execution-policy__option:focus-visible {
+  outline: 2px solid var(--policy-accent);
+  outline-offset: 2px;
 }
-.tool-manager__auto.is-active .tool-manager__auto-icon,
-.tool-manager__auto.is-active > b {
-  border-color: var(--ui-accent-sky);
-  color: var(--ui-accent-sky);
+.execution-policy__option:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
-.tool-manager__auto.is-active > i {
-  border-color: var(--ui-accent-sky);
-  background: color-mix(in srgb, var(--ui-accent-sky) 15%, var(--ui-bg-primary));
+.execution-policy__label {
+  margin-bottom: 5px;
 }
-.tool-manager__auto.is-active > i em {
-  background: var(--ui-accent-sky);
-  transform: translateX(14px);
+.execution-policy__label > :first-child {
+  color: var(--policy-accent);
+}
+.execution-policy__label strong {
+  flex: 1;
+  font-size: 11px;
+  font-weight: 800;
+}
+.execution-policy__marker {
+  display: grid;
+  width: 14px;
+  height: 14px;
+  place-items: center;
+  color: var(--policy-accent);
+}
+.execution-policy__option > small {
+  display: block;
+  color: var(--ui-text-tertiary);
+  font-size: 9px;
+  line-height: 1.5;
+}
+.tool-manager__head,
+.tool-manager__notice,
+.tool-manager__search,
+.tool-popover > footer {
+  flex-shrink: 0;
 }
 .tool-manager__notice {
   margin: 0 !important;
@@ -2304,6 +2839,7 @@ button {
   font-size: 10px;
 }
 .tool-manager__list {
+  min-height: 0;
   max-height: 350px;
   overflow: auto;
 }
@@ -2329,6 +2865,9 @@ button {
 }
 .tool-manager__item.is-enabled {
   border-left-color: var(--ui-accent-primary);
+}
+.tool-manager__item.is-mode-blocked:disabled {
+  opacity: 0.65;
 }
 .tool-manager__item:disabled {
   cursor: not-allowed;
@@ -2513,7 +3052,7 @@ button {
 /* 工具按钮统一收窄为 30px 等宽图标钮 */
 .deck--compact .deck-tools > button,
 .deck--compact .deck-tools .image-mode-selector,
-.deck--compact .deck-tools .image-add-button {
+.deck--compact .deck-tools .audio-input-selector {
   width: 30px;
   min-width: 30px;
   height: 30px;
@@ -2541,15 +3080,12 @@ button {
   transform: scale(0.82);
   transform-origin: right bottom;
 }
-/* 识图组合拆成两个独立图标钮，避免整体撑宽 */
+/* 选择器在窄工作区保持紧凑，弹层统一挂载到 body。 */
 .deck--compact .deck-tools > .image-mode-control {
   display: inline-flex;
   width: auto;
   min-width: 0;
   gap: 4px;
-}
-.deck--compact .image-add-button {
-  border-left: 1px solid var(--ui-border-subtle);
 }
 .deck--compact .deck-tools button :deep(.pixel-icon) {
   flex-shrink: 0;
@@ -2580,6 +3116,9 @@ button {
   }
   .deck-tools button:not(:first-child) {
     font-size: 0;
+  }
+  .deck-tools .deck-mode button {
+    font-size: 10px;
   }
   .deck-tools button :deep(.pixel-icon) {
     font-size: initial;

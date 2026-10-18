@@ -43,9 +43,18 @@ defineEmits<{
   border: 2px solid var(--dash-input-border);
   outline: none;
   width: 100%;
-  transition: border-color 0.2s;
+  min-width: 0;
+  caret-color: var(--ui-accent-sky);
+  transition:
+    border-color var(--ui-duration-fast) var(--ui-ease-standard),
+    box-shadow var(--ui-duration-fast) var(--ui-ease-standard),
+    background-color var(--ui-duration-fast) var(--ui-ease-standard);
   /* 像素风：无圆角 */
   border-radius: 0;
+}
+
+.p-input:hover:not(:disabled):not(:focus) {
+  border-color: var(--ui-border-strong);
 }
 
 .p-input:focus {
@@ -61,6 +70,7 @@ defineEmits<{
 
 .p-input::placeholder {
   color: var(--ui-text-tertiary);
+  opacity: 1;
 }
 
 /* 尺寸 */

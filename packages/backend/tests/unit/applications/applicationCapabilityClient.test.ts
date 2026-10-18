@@ -59,6 +59,7 @@ describe('ApplicationCapabilityClient', () => {
         sourceNodeId: appNodeId,
         capabilityHandleId: expect.any(String),
       }),
+      undefined,
     )
     await client.dispose()
     await expect(

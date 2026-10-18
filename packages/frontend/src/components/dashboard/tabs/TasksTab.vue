@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import '../../taskCenter/task-pixel.css'
 /**
  * TasksTab — 任务中心（重构版）
  *
@@ -7,7 +8,7 @@
  * - 历史记录：completed/failed/cancelled 的归档（时间线样式条目）
  * - 定时与提醒：用户提醒列表 + 系统 cron 折叠区
  *
- * 视觉基线：soft-UI + ui 语义令牌（双主题安全），
+ * 视觉基线：像素字体与微立体面板 + ui 语义令牌（双主题安全），
  * 状态展示统一由 TaskStatusBadge / ReminderItem 承担。
  *
  * F3: 已对接 schedulerApi 真实后端。
@@ -34,6 +35,8 @@ import TaskCard from '../../taskCenter/TaskCard.vue'
 import TaskDetailModal from '../../taskCenter/TaskDetailModal.vue'
 import DispatchTaskModal from '../../taskCenter/DispatchTaskModal.vue'
 import ReminderItem from '../../taskCenter/ReminderItem.vue'
+import CompanionActivityPanel from '../../taskCenter/CompanionActivityPanel.vue'
+import SocialTurnPanel from '../../social/SocialTurnPanel.vue'
 import type { BackgroundTaskInfo } from '../../../api/modules/backgroundTasksApi'
 
 import { useAgentStore, useThreadStore } from '../../../stores'
@@ -42,9 +45,11 @@ import { getApiBaseUrl } from '../../../api/transport'
 import { backgroundTasksApi } from '../../../api/modules/backgroundTasksApi'
 import { agentApi, type CompanionStateResponse } from '../../../api/modules/agentApi'
 import { logger } from '../../../lib/logger'
+import { useTaskNavigation } from '../../../composables/main/useTaskNavigation'
 
 const ctx = useDashboardContext()
 const taskCenter = useTaskCenterStore()
+
 const agentStore = useAgentStore()
 const threadStore = useThreadStore()
 const notify = useNotificationStore()
@@ -63,6 +68,7 @@ function agentDisplayName(agentId: string): string {
 // ── 三视图 ──
 /** 当前激活的视图 */
 const activeView = ref<'active' | 'history' | 'reminders'>('active')
+const hasSocialAttention = ref(false)
 
 /** 派发新任务弹窗 */
 const isDispatchOpen = ref(false)
@@ -75,6 +81,29 @@ function openDispatch() {
 
 /** 任务详情弹窗 */
 const detailTask = ref<BackgroundTaskInfo | null>(null)
+
+const taskNavigation = useTaskNavigation()
+let navigationSequence = 0
+watch(
+  () => taskNavigation.value?.revision,
+  async () => {
+    const navigation = taskNavigation.value
+    const taskId = navigation?.taskId
+    const sequence = ++navigationSequence
+    if (!taskId) return
+    try {
+      const response = await backgroundTasksApi.detail(taskId)
+      if (sequence === navigationSequence && response.data) {
+        detailTask.value = response.data
+        if (taskNavigation.value === navigation) taskNavigation.value = null
+      }
+    } catch (error) {
+      if (sequence === navigationSequence)
+        notify.toast(error instanceof Error ? error.message : '任务暂时无法打开', 'error')
+    }
+  },
+  { immediate: true, flush: 'post' },
+)
 
 /** 关闭任务详情弹窗 */
 function closeDetail() {
@@ -103,9 +132,12 @@ const scheduledAgentTime = ref('')
 const scheduledAgentInstruction = ref('')
 const scheduledAgentId = ref('')
 const creatingScheduledAgent = ref(false)
+const scheduledComposer = ref<HTMLDetailsElement | null>(null)
+const hasCompanionAttention = ref(false)
 
 async function createScheduledAgentTask(): Promise<void> {
   if (
+    creatingScheduledAgent.value ||
     !scheduledAgentId.value ||
     !scheduledAgentTime.value ||
     !scheduledAgentInstruction.value.trim()
@@ -120,7 +152,16 @@ async function createScheduledAgentTask(): Promise<void> {
     })
     scheduledAgentInstruction.value = ''
     await fetchReminders()
+    if (scheduledComposer.value) {
+      scheduledComposer.value.open = false
+      scheduledComposer.value.querySelector<HTMLElement>('summary')?.focus({ preventScroll: true })
+    }
     notify.toast('定时 Agent 任务已创建', { type: 'success', title: '任务中心' })
+  } catch (error) {
+    notify.toast(error instanceof Error ? error.message : '创建失败，请稍后重试', {
+      type: 'error',
+      title: '任务中心',
+    })
   } finally {
     creatingScheduledAgent.value = false
   }
@@ -450,13 +491,14 @@ onDeactivated(() => {
 })
 
 onUnmounted(() => {
+  navigationSequence++
   componentActive = false
   stopCronPolling()
 })
 </script>
 
 <template>
-  <div class="tasks-tab">
+  <div class="tasks-tab task-pixel-surface">
     <!-- ═══ 页头 ═══ -->
     <header class="tasks-tab__header">
       <div class="tasks-tab__header-left">
@@ -498,8 +540,22 @@ onUnmounted(() => {
 
     <!-- ═══ 进行中视图 ═══ -->
     <section v-if="activeView === 'active'" class="tasks-tab__section">
+      <SocialTurnPanel
+        :agent-id="agentStore.activeAgentId"
+        @attention-change="hasSocialAttention = $event"
+      />
+      <CompanionActivityPanel
+        :agent-id="agentStore.activeAgentId"
+        attention-only
+        @attention-change="hasCompanionAttention = $event"
+      />
       <PEmpty
-        v-if="taskCenter.activeTasks.length === 0 && reminders.length === 0"
+        v-if="
+          taskCenter.activeTasks.length === 0 &&
+          reminders.length === 0 &&
+          !hasCompanionAttention &&
+          !hasSocialAttention
+        "
         description="暂无进行中任务，点击右上角「派发新任务」让 Agent 帮你干活吧~"
       />
 
@@ -524,6 +580,24 @@ onUnmounted(() => {
         </div>
       </div>
 
+      <!-- 常驻状态只供查看，不进入普通任务控制与计数。 -->
+      <details v-if="taskCenter.residentTasks.length" class="tasks-tab__group">
+        <summary class="tasks-tab__group-title">
+          <PixelIcon name="activity" size="xs" />
+          系统常驻 · 只读状态
+        </summary>
+        <div class="tasks-tab__list">
+          <TaskCard
+            v-for="task in taskCenter.residentTasks"
+            :key="task.id"
+            :task="task"
+            :avatar-url="agentAvatarUrl(task.agentId)"
+            :agent-name="agentDisplayName(task.agentId)"
+            @detail="detailTask = $event"
+          />
+        </div>
+      </details>
+
       <!-- 待触发提醒（无后台任务时也展示） -->
       <div v-if="reminders.length > 0" class="tasks-tab__group">
         <h3 class="tasks-tab__group-title">
@@ -531,13 +605,19 @@ onUnmounted(() => {
           待触发提醒 · {{ reminders.length }}
         </h3>
         <div class="tasks-tab__list">
-          <ReminderItem v-for="item in reminders" :key="item.id" :item="item" />
+          <ReminderItem
+            v-for="item in reminders"
+            :key="item.id"
+            :item="item"
+            @changed="fetchReminders"
+          />
         </div>
       </div>
     </section>
 
     <!-- ═══ 历史记录视图（时间线） ═══ -->
     <section v-if="activeView === 'history'" class="tasks-tab__section">
+      <SocialTurnPanel :agent-id="agentStore.activeAgentId" history />
       <div v-if="taskCenter.historyTasks.length" class="history-toolbar">
         <div class="history-toolbar__info">
           <span class="history-toolbar__icon"><PixelIcon name="mail" size="xs" /></span>
@@ -598,34 +678,53 @@ onUnmounted(() => {
 
     <!-- ═══ 定时与提醒视图 ═══ -->
     <section v-if="activeView === 'reminders'" class="tasks-tab__section">
-      <div class="tasks-tab__group">
-        <h3 class="tasks-tab__group-title">
-          <PixelIcon name="clock" size="xs" />
-          创建定时 Agent 任务
-        </h3>
-        <div class="scheduled-agent-form">
-          <select v-model="scheduledAgentId">
-            <option v-for="agent in agentStore.agents" :key="agent.id" :value="agent.id">
-              {{ agent.name ?? agent.id }}
-            </option>
-          </select>
-          <input v-model="scheduledAgentTime" type="datetime-local" />
-          <input
-            v-model="scheduledAgentInstruction"
-            type="text"
-            maxlength="4000"
-            placeholder="到期后交给 Agent 的明确指令"
-          />
-          <PButton
-            variant="primary"
-            size="sm"
-            :loading="creatingScheduledAgent"
-            @click="createScheduledAgentTask"
-          >
-            创建
-          </PButton>
-        </div>
-      </div>
+      <details ref="scheduledComposer" class="scheduled-agent-composer">
+        <summary>
+          <PixelIcon name="clock" size="sm" />
+          <strong>安排稍后的任务</strong>
+          <span>选择角色、时间和要做的事</span>
+          <PixelIcon name="plus" size="sm" />
+        </summary>
+        <form class="scheduled-agent-form" @submit.prevent="createScheduledAgentTask">
+          <label>
+            <span>交给谁</span>
+            <select v-model="scheduledAgentId" required>
+              <option v-for="agent in agentStore.agents" :key="agent.id" :value="agent.id">
+                {{ agent.name ?? agent.id }}
+              </option>
+            </select>
+          </label>
+          <label>
+            <span>执行时间</span>
+            <input v-model="scheduledAgentTime" type="datetime-local" required />
+          </label>
+          <label class="scheduled-agent-form__instruction">
+            <span>任务内容</span>
+            <textarea
+              v-model="scheduledAgentInstruction"
+              rows="3"
+              required
+              maxlength="4000"
+              placeholder="描述到时希望角色帮你完成的事情…"
+            />
+          </label>
+          <footer>
+            <span>任务会在后台执行，完成后通知你。</span>
+            <PButton
+              type="submit"
+              variant="primary"
+              size="sm"
+              :loading="creatingScheduledAgent"
+              :disabled="
+                !scheduledAgentId || !scheduledAgentTime || !scheduledAgentInstruction.trim()
+              "
+            >
+              <PixelIcon name="plus" size="xs" />
+              创建任务
+            </PButton>
+          </footer>
+        </form>
+      </details>
 
       <!-- 陪伴调度只读状态 -->
       <div class="tasks-tab__group">
@@ -662,7 +761,12 @@ onUnmounted(() => {
           description="通过聊天让 Agent 帮你设置提醒吧~"
         />
         <div v-else class="tasks-tab__list">
-          <ReminderItem v-for="item in reminders" :key="item.id" :item="item" />
+          <ReminderItem
+            v-for="item in reminders"
+            :key="item.id"
+            :item="item"
+            @changed="fetchReminders"
+          />
         </div>
       </div>
 
@@ -832,8 +936,10 @@ onUnmounted(() => {
   gap: 12px;
   padding: 10px 12px;
   border: 1px solid var(--ui-border-subtle);
-  border-radius: var(--ui-radius-md);
-  background: var(--ui-bg-surface);
+  border-radius: 0;
+  background: var(--task-fill);
+  border-color: var(--ui-border-default);
+  box-shadow: var(--task-raised);
 }
 
 .companion-state-card strong {
@@ -847,20 +953,100 @@ onUnmounted(() => {
   font-size: 11px;
 }
 
+.scheduled-agent-composer {
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: 0;
+  background: var(--task-fill);
+  border-color: var(--ui-border-default);
+  box-shadow: var(--task-raised);
+}
+.scheduled-agent-composer > summary {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 14px 16px;
+  list-style: none;
+  cursor: pointer;
+  color: var(--ui-accent-purple);
+}
+.scheduled-agent-composer > summary::-webkit-details-marker {
+  display: none;
+}
+.scheduled-agent-composer > summary strong {
+  color: var(--ui-text-primary);
+  font-size: 12px;
+  font-weight: 600;
+}
+.scheduled-agent-composer > summary span {
+  flex: 1;
+  color: var(--ui-text-tertiary);
+  font-size: 11px;
+}
+.scheduled-agent-composer > summary > :last-child {
+  margin-left: auto;
+}
+.scheduled-agent-composer[open] > summary {
+  border-bottom: 1px solid var(--ui-border-subtle);
+}
 .scheduled-agent-form {
   display: grid;
-  grid-template-columns: 140px 190px minmax(180px, 1fr) auto;
-  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+  padding: 16px;
 }
-
+.scheduled-agent-form label {
+  display: grid;
+  gap: 7px;
+  color: var(--ui-text-secondary);
+  font-size: 11px;
+}
+.scheduled-agent-form__instruction {
+  grid-column: 1 / -1;
+}
 .scheduled-agent-form select,
-.scheduled-agent-form input {
+.scheduled-agent-form input,
+.scheduled-agent-form textarea {
   min-width: 0;
-  padding: 8px;
-  border: 1px solid var(--ui-border-subtle);
-  border-radius: var(--ui-radius-md);
-  background: var(--ui-bg-surface);
+  padding: 9px 11px;
+  border: 1px solid var(--ui-border-default);
+  border-radius: 0;
+  background: var(--ui-bg-surface-soft);
   color: var(--ui-text-primary);
+  font: 12px/1.6 var(--ui-font-pixel);
+  outline: none;
+  box-shadow: var(--task-inset);
+}
+.scheduled-agent-form textarea {
+  resize: vertical;
+  min-height: 76px;
+}
+.scheduled-agent-form :is(input, select, textarea):focus {
+  border-color: var(--ui-accent-purple);
+  box-shadow: var(--task-inset);
+  outline: 1px solid var(--ui-accent-purple);
+  outline-offset: 2px;
+}
+.scheduled-agent-form footer {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.scheduled-agent-form footer > span {
+  color: var(--ui-text-tertiary);
+  font-size: 11px;
+}
+@media (max-width: 700px) {
+  .scheduled-agent-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .scheduled-agent-composer > summary span {
+    display: none;
+  }
+  .scheduled-agent-form footer > span {
+    max-width: 55%;
+  }
 }
 
 /* ── 页面骨架 ── */
@@ -871,8 +1057,8 @@ onUnmounted(() => {
   padding: var(--ui-space-6) var(--ui-space-8);
   height: 100%;
   overflow-y: auto;
-  /* 正文统一现代字体，pixel 字体仅保留在小标签装饰上 */
-  font-family: var(--ui-font-sans);
+  /* 任务界面统一像素字体，层次由字级与明暗区分 */
+  font-family: var(--ui-font-pixel);
   color: var(--ui-text-primary);
 }
 
@@ -908,14 +1094,15 @@ onUnmounted(() => {
   gap: var(--ui-space-2);
 }
 
-/* 小统计胶囊（像素字体留在这里做风格化点缀） */
+/* 方块统计标签 */
 .tasks-tab__stat {
   padding: 2px 10px;
-  border-radius: var(--ui-radius-full);
+  border-radius: 0;
   font-size: 11px;
   font-weight: 700;
   font-family: var(--ui-font-pixel);
   border: 1px solid var(--ui-border-default);
+  box-shadow: inset 1px 1px 0 var(--task-highlight);
 }
 
 .tasks-tab__stat--active {
@@ -938,7 +1125,7 @@ onUnmounted(() => {
 .tasks-tab__nav-item {
   padding: 8px 16px;
   margin-bottom: -1px;
-  border: none;
+  border: 1px solid transparent;
   border-bottom: 2px solid transparent;
   background: transparent;
   font-size: 13px;
@@ -946,8 +1133,9 @@ onUnmounted(() => {
   color: var(--ui-text-tertiary);
   cursor: pointer;
   transition:
-    color var(--ui-duration-fast) var(--ui-ease-standard),
-    border-color var(--ui-duration-fast) var(--ui-ease-standard);
+    color var(--ui-duration-fast) steps(3, end),
+    border-color var(--ui-duration-fast) steps(3, end);
+  font-family: var(--ui-font-pixel);
 }
 
 .tasks-tab__nav-item:hover {
@@ -956,7 +1144,10 @@ onUnmounted(() => {
 
 .tasks-tab__nav-item--active {
   color: var(--ui-accent-sky);
+  border-color: var(--ui-border-subtle);
   border-bottom-color: var(--ui-accent-sky);
+  background: var(--task-fill);
+  box-shadow: inset 1px 1px 0 var(--task-highlight);
 }
 
 .tasks-tab__nav-item:focus-visible {
@@ -1005,10 +1196,10 @@ onUnmounted(() => {
   padding: 8px 10px 8px 12px;
   overflow: hidden;
   border: 1px solid var(--ui-border-default);
-  border-left: 4px solid var(--ui-accent-sky);
-  border-radius: var(--ui-radius-lg);
-  background: linear-gradient(90deg, var(--ui-accent-sky-soft), var(--ui-bg-surface) 48%);
-  box-shadow: 3px 3px 0 var(--ui-border-subtle);
+  border-left: 2px solid var(--ui-accent-sky);
+  border-radius: 0;
+  background: linear-gradient(90deg, var(--ui-accent-sky-soft), transparent 48%), var(--task-fill);
+  box-shadow: var(--task-raised);
 }
 
 .history-toolbar__info {
@@ -1025,10 +1216,10 @@ onUnmounted(() => {
   flex: 0 0 auto;
   place-items: center;
   border: 1px solid var(--ui-accent-sky);
-  border-radius: var(--ui-radius-sm);
-  background: var(--ui-bg-surface);
+  border-radius: 0;
+  background: var(--task-fill);
   color: var(--ui-accent-sky);
-  box-shadow: 2px 2px 0 color-mix(in srgb, var(--ui-accent-sky) 18%, transparent);
+  box-shadow: var(--task-control);
 }
 
 .history-toolbar__info > div {
@@ -1047,7 +1238,7 @@ onUnmounted(() => {
 .history-toolbar__info > div > span {
   overflow: hidden;
   color: var(--ui-text-tertiary);
-  font-size: 9px;
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1056,10 +1247,10 @@ onUnmounted(() => {
   flex: 0 0 auto;
   padding: 3px 7px;
   border: 1px solid var(--ui-accent-primary);
-  border-radius: var(--ui-radius-full);
+  border-radius: 0;
   background: var(--ui-accent-primary-soft);
   color: var(--ui-accent-primary);
-  font: 800 8px var(--ui-font-mono);
+  font: 600 11px var(--ui-font-pixel);
 }
 
 .history-toolbar__info > b.history-toolbar__all-read {
@@ -1077,12 +1268,12 @@ onUnmounted(() => {
   gap: 5px;
   padding: 0 11px;
   border: 1px solid var(--ui-accent-sky);
-  border-radius: var(--ui-radius-sm);
+  border-radius: 0;
   background: var(--ui-accent-sky);
   color: #fff;
-  font: 800 9px var(--ui-font-mono);
+  font: 600 12px var(--ui-font-pixel);
   cursor: pointer;
-  box-shadow: 2px 2px 0 color-mix(in srgb, var(--ui-accent-sky) 30%, var(--ui-border-strong));
+  box-shadow: var(--task-control);
   transition:
     transform var(--ui-duration-fast),
     box-shadow var(--ui-duration-fast),
@@ -1091,33 +1282,18 @@ onUnmounted(() => {
 
 .history-toolbar__read-all:hover:not(:disabled) {
   transform: translate(-1px, -1px);
-  box-shadow: 3px 3px 0 color-mix(in srgb, var(--ui-accent-sky) 30%, var(--ui-border-strong));
+  box-shadow: var(--task-control);
 }
 
 .history-toolbar__read-all:active:not(:disabled) {
-  transform: translate(1px, 1px);
-  box-shadow: none;
+  transform: translateY(1px);
+  box-shadow: var(--task-inset);
 }
 
 .history-toolbar__read-all:disabled {
   cursor: default;
   opacity: 0.45;
   box-shadow: none;
-}
-
-:global([data-theme='dark']) .history-toolbar {
-  border-color: var(--ui-border-default);
-  border-left-color: var(--ui-accent-sky);
-  background: linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--ui-accent-sky) 11%, var(--ui-bg-surface)),
-    var(--ui-bg-surface) 55%
-  );
-  box-shadow: 3px 3px 0 color-mix(in srgb, #000 38%, transparent);
-}
-
-:global([data-theme='dark']) .history-toolbar__icon {
-  background: color-mix(in srgb, var(--ui-accent-sky) 9%, var(--ui-bg-elevated));
 }
 
 @media (max-width: 680px) {
@@ -1157,21 +1333,28 @@ onUnmounted(() => {
 }
 
 .tasks-tab__timeline-node {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  border: 2px solid var(--ui-bg-surface);
+  width: 6px;
+  height: 6px;
+  border-radius: 0;
+  border: 1px solid
+    color-mix(in srgb, var(--node-color, var(--ui-text-disabled)) 70%, var(--ui-border-strong));
   background: var(--node-color, var(--ui-text-disabled));
-  box-shadow: 0 0 0 2px var(--ui-border-subtle);
+  box-shadow:
+    inset 1px 1px 0 var(--task-highlight),
+    1px 1px 0 var(--task-side);
 }
 
 /* 节点竖线（除最后一个外向下延伸） */
 .tasks-tab__timeline-rail::after {
   content: '';
   flex: 1;
-  width: 2px;
+  width: 1px;
   margin-top: 4px;
-  background: var(--ui-border-subtle);
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--ui-border-default) 0 3px,
+    transparent 3px 6px
+  );
 }
 
 .tasks-tab__timeline-item:last-child .tasks-tab__timeline-rail::after {
@@ -1226,7 +1409,7 @@ onUnmounted(() => {
   color: var(--ui-text-tertiary);
   text-transform: uppercase;
   cursor: pointer;
-  transition: color var(--ui-duration-fast) var(--ui-ease-standard);
+  transition: color var(--ui-duration-fast) steps(3, end);
 }
 
 .tasks-tab__cron-header:hover {
@@ -1235,7 +1418,7 @@ onUnmounted(() => {
 
 .tasks-tab__cron-header:focus-visible {
   outline: 2px solid var(--ui-accent-sky);
-  border-radius: var(--ui-radius-sm);
+  border-radius: 0;
 }
 
 .tasks-tab__cron-title {
@@ -1254,7 +1437,7 @@ onUnmounted(() => {
   color: var(--ui-text-tertiary);
   background: var(--ui-bg-surface);
   border: 1px dashed var(--ui-border-default);
-  border-radius: var(--ui-radius-lg);
+  border-radius: 0;
   font-size: 12px;
 }
 
@@ -1269,18 +1452,19 @@ onUnmounted(() => {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--ui-space-3) var(--ui-space-4);
   padding: 14px 16px;
-  border-radius: var(--ui-radius-lg);
-  background: var(--ui-bg-surface);
+  border-radius: 0;
+  background: var(--task-fill);
   border: 1px solid var(--ui-border-subtle);
-  box-shadow: var(--ui-shadow-xs);
+  box-shadow: var(--task-raised);
+  border-color: var(--ui-border-default);
 }
 
 .cron-card--running {
-  border-left: 3px solid var(--ui-success);
+  border-left: 2px solid var(--ui-success);
 }
 
 .cron-card--error {
-  border-left: 3px solid var(--ui-danger);
+  border-left: 2px solid var(--ui-danger);
 }
 
 .cron-card__main,
@@ -1322,6 +1506,7 @@ onUnmounted(() => {
 }
 
 .cron-card__progress {
+  box-shadow: var(--task-inset);
   height: 6px;
   margin-top: 7px;
   overflow: hidden;
@@ -1330,15 +1515,20 @@ onUnmounted(() => {
 }
 
 .cron-card__progress > span {
+  background-image: repeating-linear-gradient(
+    90deg,
+    transparent 0 6px,
+    var(--task-highlight) 6px 8px
+  );
   display: block;
   height: 100%;
-  background: var(--ui-accent-sky);
-  transition: width var(--ui-duration-normal) var(--ui-ease-standard);
+  background-color: var(--ui-accent-sky);
+  transition: width var(--ui-duration-normal) steps(3, end);
 }
 
 .cron-card__progress--running > span {
-  background: var(--ui-success);
-  animation: cron-progress-pulse 1.8s ease-in-out infinite;
+  background-color: var(--ui-success);
+  animation: cron-progress-pulse 1.8s steps(3, end) infinite;
 }
 
 .cron-card__outcome--error {

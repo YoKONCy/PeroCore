@@ -49,6 +49,8 @@ const logs = ref<AdapterLogEntry[]>([])
 const adapters = ref<AdapterStatus[]>([])
 const inputValue = ref('')
 const logContainer = ref<HTMLDivElement | null>(null)
+let followLogs = true
+let selectingLogs = false
 const isLoading = ref(false)
 const downloadProgress = ref<DownloadProgress>({
   active: false,
@@ -96,14 +98,51 @@ function ansiToHtml(text: string): string {
 
 function scrollToBottom(): void {
   nextTick(() => {
-    if (logContainer.value) {
+    // 翻阅历史或选择文字时保留阅读位置，不被新日志拉回底部。
+    if (logContainer.value && followLogs && !selectingLogs && !hasLogSelection()) {
       logContainer.value.scrollTop = logContainer.value.scrollHeight
     }
   })
 }
 
+function hasLogSelection(): boolean {
+  const selection = window.getSelection()
+  const container = logContainer.value
+  return !!(
+    container &&
+    selection &&
+    !selection.isCollapsed &&
+    selection.rangeCount &&
+    selection.getRangeAt(0).intersectsNode(container)
+  )
+}
+
+function isAtBottom(): boolean {
+  const container = logContainer.value
+  return !!container && container.scrollHeight - container.scrollTop - container.clientHeight <= 24
+}
+
+function onLogScroll(): void {
+  followLogs = isAtBottom()
+}
+
+function onLogWheel(event: WheelEvent): void {
+  // 滚轮事件先于实际滚动，提前暂停可避免同一帧的新日志抢走位置。
+  if (event.deltaY < 0) followLogs = false
+  else if (event.deltaY > 0 && isAtBottom()) followLogs = true
+}
+
+function onLogPointerDown(event: PointerEvent): void {
+  if (event.button === 0) selectingLogs = true
+}
+
+function endLogSelection(): void {
+  selectingLogs = false
+}
+
 function clearLogs(): void {
   logs.value = []
+  followLogs = true
 }
 
 function parseLogLevel(content: string): 'info' | 'warn' | 'error' | 'debug' {
@@ -164,12 +203,15 @@ async function sendCommand(): Promise<void> {
   }
 }
 
-// 自动滚动
+// 只在跟随最新日志时滚动，手动滚回底部后恢复跟随。
 watch(logs, () => scrollToBottom(), { deep: true })
 
 // ── 生命周期 ──
 
 onMounted(async () => {
+  window.addEventListener('pointerup', endLogSelection, true)
+  window.addEventListener('pointercancel', endLogSelection, true)
+  window.addEventListener('blur', endLogSelection)
   isLoading.value = true
 
   try {
@@ -259,6 +301,9 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener('pointerup', endLogSelection, true)
+  window.removeEventListener('pointercancel', endLogSelection, true)
+  window.removeEventListener('blur', endLogSelection)
   unlistenLog?.()
   unlistenProgress?.()
   if (pollTimer) clearInterval(pollTimer)
@@ -295,7 +340,13 @@ onUnmounted(() => {
     </div>
 
     <!-- 日志区 -->
-    <div ref="logContainer" class="sa-body">
+    <div
+      ref="logContainer"
+      class="sa-body"
+      @scroll.passive="onLogScroll"
+      @wheel.passive="onLogWheel"
+      @pointerdown="onLogPointerDown"
+    >
       <!-- 下载进度条 -->
       <div v-if="downloadProgress.active" class="sa-progress">
         <div class="sa-progress-info">
@@ -368,6 +419,8 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0;
+  min-width: 0;
   background: var(--sa-bg);
   color: var(--sa-text);
   font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
@@ -460,19 +513,13 @@ onUnmounted(() => {
 /* 日志区 */
 .sa-body {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 12px var(--spacing-md);
   position: relative;
   z-index: 0;
-}
-.sa-body::-webkit-scrollbar {
-  width: 4px;
-}
-.sa-body::-webkit-scrollbar-track {
-  background: transparent;
-}
-.sa-body::-webkit-scrollbar-thumb {
-  background: var(--sa-border-subtle);
+  user-select: text;
+  cursor: text;
 }
 
 /* 进度条 */

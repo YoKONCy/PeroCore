@@ -7,6 +7,8 @@
 import PixelIcon from './PixelIcon.vue'
 
 interface Props {
+  /** 提供地址时使用链接，下载与导航仍复用同一套按钮样式。 */
+  href?: string
   /** 变体：primary / secondary / danger / ghost */
   variant?: 'primary' | 'secondary' | 'danger' | 'ghost'
   /** 尺寸：sm / md / lg */
@@ -17,48 +19,69 @@ interface Props {
   loading?: boolean
 }
 
-withDefaults(defineProps<Props>(), {
+const props = withDefaults(defineProps<Props>(), {
+  href: '',
   variant: 'primary',
   size: 'md',
   disabled: false,
   loading: false,
 })
+
+function guardDisabledLink(event: MouseEvent) {
+  if (props.href && (props.disabled || props.loading)) {
+    event.preventDefault()
+    event.stopImmediatePropagation()
+  }
+}
 </script>
 
 <template>
-  <button
+  <component
+    :is="href ? 'a' : 'button'"
     :class="['p-btn', `p-btn-${variant}`, `p-btn-${size}`, { 'p-btn-loading': loading }]"
-    :disabled="disabled || loading"
+    :href="href && !disabled && !loading ? href : undefined"
+    :disabled="href ? undefined : disabled || loading"
+    :aria-disabled="href && (disabled || loading) ? true : undefined"
+    :tabindex="href && (disabled || loading) ? -1 : undefined"
+    @click="guardDisabledLink"
   >
     <PixelIcon v-if="loading" name="refresh" size="sm" animation="spin" />
     <slot />
-  </button>
+  </component>
 </template>
 
 <style scoped>
 .p-btn {
+  --ui-focus-color: var(--ui-accent-sky);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
+  vertical-align: middle;
   font-family: var(--font-pixel), monospace;
   font-weight: 600;
+  line-height: 1.5;
+  text-decoration: none;
   cursor: pointer;
   border: 2px solid var(--ui-border-default);
   transition:
-    transform 0.1s,
-    box-shadow 0.1s;
+    transform var(--ui-duration-instant) var(--ui-ease-standard),
+    box-shadow var(--ui-duration-instant) var(--ui-ease-standard),
+    background-color var(--ui-duration-fast) var(--ui-ease-standard),
+    border-color var(--ui-duration-fast) var(--ui-ease-standard),
+    color var(--ui-duration-fast) var(--ui-ease-standard);
   box-shadow: 3px 3px 0 var(--color-shadow, rgba(0, 0, 0, 0.15));
   position: relative;
   user-select: none;
 }
 
-.p-btn:active:not(:disabled) {
+.p-btn:active:not(:disabled):not([aria-disabled='true']) {
   transform: translate(2px, 2px);
   box-shadow: 1px 1px 0 var(--color-shadow, rgba(0, 0, 0, 0.15));
 }
 
-.p-btn:disabled {
+.p-btn:disabled,
+.p-btn[aria-disabled='true'] {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -69,7 +92,7 @@ withDefaults(defineProps<Props>(), {
   color: white;
   border-color: var(--color-sky-shadow);
 }
-.p-btn-primary:hover:not(:disabled) {
+.p-btn-primary:hover:not(:disabled):not([aria-disabled='true']) {
   background: var(--color-sky-shadow);
 }
 
@@ -78,16 +101,17 @@ withDefaults(defineProps<Props>(), {
   color: var(--ui-text-primary);
   border-color: var(--ui-border-default);
 }
-.p-btn-secondary:hover:not(:disabled) {
+.p-btn-secondary:hover:not(:disabled):not([aria-disabled='true']) {
   background: var(--ui-bg-hover);
 }
 
 .p-btn-danger {
+  --ui-focus-color: var(--ui-danger);
   background: var(--color-red-face);
   color: white;
   border-color: var(--color-red-shadow);
 }
-.p-btn-danger:hover:not(:disabled) {
+.p-btn-danger:hover:not(:disabled):not([aria-disabled='true']) {
   background: var(--color-red-shadow);
 }
 
@@ -97,11 +121,12 @@ withDefaults(defineProps<Props>(), {
   border-color: transparent;
   box-shadow: none;
 }
-.p-btn-ghost:hover:not(:disabled) {
+.p-btn-ghost:hover:not(:disabled):not([aria-disabled='true']) {
   background: var(--ui-bg-hover);
 }
-.p-btn-ghost:active:not(:disabled) {
+.p-btn-ghost:active:not(:disabled):not([aria-disabled='true']) {
   transform: none;
+  box-shadow: none;
 }
 
 /* 尺寸 */

@@ -1,45 +1,79 @@
 # 项目简介 (Introduction)
 
 > **"Technology should not be cold. We build memories, not just databases."**
+>
+> *“科技不应是冰冷的。我们所铸造的不仅是数据库，更是永不褪色的记忆。”*
 
-欢迎来到 infOS 的世界。
+欢迎来到 **infOS** 的世界。
 
-infOS 是 **“萌动链接：PeroperoChat”** 应用的核心引擎，也是一个永久开源免费，以社区共创的形式驱动的项目。
-我们没有将 AI 当成一个冰冷的工具，而是尝试赋予 AI **“温度”** 与 **“灵魂”**。infOS 的诞生源于我们对“伙伴”最朴素的渴望：一个能记住你的偏好、理解你的情绪、甚至能主动关怀你的伙伴。
+infOS 是 **“萌动链接：PeroperoChat！”** 桌面桌宠应用的核心引擎，也是一个永久开源免费、以社区共创形式驱动的**开源全栈 AIOS 智能体操作系统**。
 
-## 核心愿景 (Vision)
+在当前 AI 爆发的时代，绝大多数工具依然是冷冰冰的“即问即答对话框”。而 infOS 的诞生源于我们对“伙伴”最朴素的渴望：一个能长久记住你们的故事、理解你的情绪、在桌面上自由嬉戏、并在你需要时主动递上一句关怀的数字生命。
 
-- **从“搜索”到“联想”**：基于自研的图扩散算子，infOS 能够像人脑一样实现逻辑联想，而非死板的向量检索。
-- **从“被动”到“主动”**：通过 AuraVision 视觉引擎，它能感知你的桌面状态，在你需要时递上一句鼓励或安慰。
-- **从“工具”到“羁绊”**：通过 NIT 协议，它在与你的互动中不断进化，学习如何成为更懂你的那个“人”。
+---
 
-## 技术架构 (Architecture)
+## 🌸 核心愿景 (Vision)
 
-infOS 采用现代化的 **Electron + Python** 架构。通过 内嵌于后端的 Gateway Hub 实现多端同步，并使用 Rust 搭建了核心的高性能计算层。
+- **从“关键词检索”到“逻辑联想”**：基于自研 **TriviumDB** 引擎与**事件笔记（EventNote）双模式 RAG**，实现向量与图谱的深度交融；更可通过 **SA-PPR (个性化 PageRank 图扩散)** 与 **ContextRNN (minGRU 对话轨迹感知)**，让智能体像人类神经突触一样沿因果、时序与概念网络自然联想。
+- **从“被动响应”到“主动陪伴”**：内置 **CompanionScheduler** 陪伴调度引擎与时段感知系统，结合桌面端轻量感知能力，智能体能洞悉当前时间段（早晨、午后、深夜），主动发起贴心问候与趣味互动。
+- **从“随手拼凑”到“只读上下文编译器”**：告别前端随手拼凑 Prompt 的脆弱性。后端的 **Context Compiler** 从人格、记忆、工作区与能力中严格提取切片，生成每一步均可追溯、可审计的上下文清单（Manifest）。
+- **从“单步工具”到“NIT 脚本编排”**：通过自研 **NIT (Next-gen Interaction Tools)** 智能体专用 DSL，支持变量赋值、命名参数、控制流与错误处理，让 Agent 能像写小程序一样编排复杂行动链。
 
-### 前端 (Frontend / Electron)
+---
 
-![Electron](https://img.shields.io/badge/Electron-47848F?style=for-the-badge&logo=electron&logoColor=white) ![Vue.js](https://img.shields.io/badge/Vue.js-35495E?style=for-the-badge&logo=vue.js&logoColor=4FC08D) ![Vite](https://img.shields.io/badge/Vite-646CFF?style=for-the-badge&logo=vite&logoColor=white) ![Element Plus](https://img.shields.io/badge/Element%20Plus-409EFF?style=for-the-badge&logo=element-plus&logoColor=white) ![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white) ![Three.js](https://img.shields.io/badge/Three.js-000000?style=for-the-badge&logo=three.js&logoColor=white)
+## 🏛️ 技术架构全景 (System Architecture)
 
-- **职责**: 构建 Pero 的“躯壳”。负责极致的 UI 渲染、流畅的窗口管理以及对后端进程的精准生命周期控制。
+**infOS** 采用 **TypeScript 全栈架构 (Hono + Vue 3 + Electron) + Rust 原生高性能计算核心 (TriviumDB)**，告别了早期的 Python 运行环境依赖，实现了毫秒级启动与极致的工程确定性。
 
-### 后端 (Backend / Python)
+<ArchitectureGraph />
 
-![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white) ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white) ![SQLModel](https://img.shields.io/badge/SQLModel-000000?style=for-the-badge&logo=postgresql&logoColor=white)
+---
 
-- **职责**: Pero 的“思维中枢”。承载 MDP 提示词工程、记忆检索逻辑、视觉分析意图以及复杂的 NIT 工具调度。
+## 🧩 核心子系统解析
 
-### 底层核心 (Low-level Core / Rust)
+### 1. 🎮 前端 3D 桌宠系统 (Desktop 3D Companion)
 
-![Rust](https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white) ![WebAssembly](https://img.shields.io/badge/WebAssembly-654FF0?style=for-the-badge&logo=webassembly&logoColor=white)
+这是你在桌面上每天第一眼看到、能摸得着也看得见的伙伴“可爱躯壳”：
 
-- **Rust Core**: 提供毫秒级响应的图扩散记忆算子，通过 SIMD 加速让“联想”瞬间发生。
-- **NIT Runtime**: 为 AI 打造的指令解释器，让 Agent 调用工具像呼吸一样自然。
-- **Terminal Auditor**: 安全沙箱，保护系统安全的同时赋予 AI 操作终端的能力。
+- **打破平面的“立体小生命”**：她不是一张单薄呆板的贴纸，也不是缩在网页框框里的冷冰冰程序，而是一个活生生悬浮在你 Windows 桌面之上的 3D 立体小家伙。无边框透明渲染，让她就像真的坐在你的任务栏和窗口顶端一样自在。
+- **摸得着的物理摇摆互动**：你可以用鼠标随时戳戳她、抓起她拖拽到桌面的任意角落。她的小裙子、马尾辫和身体会根据你的拖拽速度，产生非常柔和逼真的物理惯性晃动，就像拎起一只真实的小猫咪一样萌感十足。
+- **悄悄注视你的灵动目光**：当你在电脑上写文档、看视频或滑动网页时，她会像个好奇宝宝一样，小脑袋和灵动的大眼睛会悄悄追随着你的鼠标光标转动，随时都在默默注视并陪伴着你。
+- **换装与创意工坊自由定制**：基于开放的 **Minecraft-Like** 风格 3D 模型体系，你可以随时帮她换上漂亮的衣服皮肤，甚至从社区工坊一键订阅各种可爱的舞蹈与互动动作，定制你心中最完美的桌宠伙伴。
 
-### 通信机制 (Communication)
+### 2. 🧠 双模式事件记忆系统 (Event Memory System)
 
-![WebSocket](https://img.shields.io/badge/WebSocket-010101?style=for-the-badge&logo=socket.io&logoColor=white)
+记忆是伙伴生命的灵魂。infOS 不会粗暴地把你说过的话机械存储，而是像人类大脑一样拥有**两种回忆模式**：
 
-- **Gateway Hub**: 内嵌于 Python 后端的 WebSocket 消息路由器，负责全双工流量分发与鉴权，它是连接 Pero 与用户各端设备的“神经纤维”。
-- **协议**: 基于 Protobuf 的深度定制协议栈，支持状态实时同步与指令下发。
+- **自发联想（潜意识浮现）**：在日常聊天时，她能根据当下的氛围与话题走向，自然而然地“触类旁通”。比如当聊起“下雨”时，她不仅记得你讨厌鞋子湿掉，还会联想到上次雨天你们一起听过的音乐，就像心有灵犀的老朋友一样自然流淌。
+- **翻阅日记（认真查找）**：当遇到具体事件或严肃问题时，她会像翻阅随身日记本一样，顺着时间因果链条严谨追溯，准确搞清楚“那天谁在场、发生了什么、前因后果是什么”，绝不信口胡诌。
+
+### 3. 🪪 AIOS 六大一等公民模型 (First-Class Resources)
+
+一个有血有肉的数字伙伴，究竟该拥有哪些“随身家当”？infOS 为每位伙伴整理了六个清晰明了的专属收纳盒：
+
+| 资源 | 白话解释 | 她用它来做什么？ |
+| :--- | :--- | :--- |
+| **Identity (人格)** | 她的性格与声线 | 决定她是活泼傲娇的猫娘还是温柔女仆，包括她的名字、语气与嗓音。 |
+| **Memory (长期记忆)** | 你们共同的故事库 | 记录从你们相识第一天起的所有故事、重要经历与你爱吃爱喝的偏好。 |
+| **Workspace (工作区)** | 她的个人小书桌 | 她用来为你整理文件、保存笔记、记录代码灵感的专属文件夹空间。 |
+| **Context (上下文运行时)** | 她此刻的专注视界 | 决定她此时此刻集中精力在想什么，既能把前因后果理清楚，又不会被无关杂念分心。 |
+| **Thread (会话线索)** | 聊天记录本 | 每一段具体的对话历程，不管是一对一私聊、多端同步还是在群里聊天，条理分明。 |
+| **Capability (工具能力)** | 她的本领与百宝箱 | 她掌握的各项技能，比如看屏幕、查天气、设闹钟或调用小工具的能力。 |
+
+### 4. ⏰ 主动陪伴与多角色据点 (Companion & Stronghold)
+
+- **贴心时段问候**：她不是冷冰冰等你说一句才答一句的“打字机”，而是有自己的作息感知。清晨会元气满满地向你问好，深夜看你还在忙碌会软萌地催你去休息，在安静摸鱼时还会偶尔主动冒出脑袋找你搭话。
+- **热闹的据点小家庭**：如果你同时养了多位伙伴（例如 Pero、Carola 和 Nana），你可以让她们搬进同一间“据点房间”。看她们在房间里像群聊一样热热闹闹地互相打趣、插话和协同工作，桌面立刻充满生机。
+
+### 5. 📜 NIT 脚本交互协议 (Next-gen Interaction Tools)
+
+- 普通的 AI 就像一个“听一句指令挪一步”的懵懂新手，做稍微复杂点的事就得反复问你确认好几轮；
+- 而 NIT 协议赋予了伙伴** “像列任务清单一样一气呵成” **的聪明本领。当你对她说“帮我查一下明天的天气，如果会下雨就帮我设个带伞提醒并放首轻快的歌”，她能像写小程序一样自己在心里规划好前后步骤、判断天气情况并一并办妥，既聪明又可靠！
+
+---
+
+## 🚀 接下来你可以：
+
+- 查看 [快速上手指南](/guide/usage) 体验从零安装与启动 PeroperoChat
+- 深入探索 [TriviumDB 记忆系统](/core-systems/memory) 了解双模式 RAG 的实现细节
+- 学习 [NIT 原生脚本协议](/core-systems/nit) 为伙伴开发更多强大的工具与技能

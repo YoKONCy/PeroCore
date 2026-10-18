@@ -296,6 +296,9 @@ export class NitParser {
       case TokenType.LBRACKET:
         return this.parseArrayLiteral()
 
+      case TokenType.PARALLEL:
+        return this.parseParallel()
+
       case TokenType.LPAREN: {
         this.advance()
         const expr = this.parseExpression()

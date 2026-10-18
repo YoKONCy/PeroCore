@@ -51,17 +51,28 @@ export interface ToolContext {
   toolCallId?: string
   /** 当前 ReAct/任务的取消信号，长时工具必须主动监听。 */
   signal?: AbortSignal
+  executionMode?: import('@infos/shared').ExecutionMode
+  interactionMode?: import('@infos/shared').InteractionMode
+  disabledTools?: string[]
+  advancedToolAccess?: import('../../tools/advancedTools').AdvancedToolAccess
+  realmId?: string
+  capabilityScope?: import('../../capabilities/types').CapabilityScope
+  reviewMessages?: import('../llm/types').ChatMessage[]
+  onExecutionStatus?: (message: string) => void
+  onToolObserved?: (
+    result: import('../context/toolContextService').ObservedToolResult,
+  ) => void | Promise<void>
   /** 后台任务 ID；普通对话为空。 */
   taskId?: string
   /** 当前 Kernel Execution，用于副作用、Receipt和跨 Node调用的统一因果链。 */
   executionId?: import('@infos/shared').KernelExecutionId
   processId?: import('@infos/shared').KernelProcessId
   deadline?: string
-  /** 本次敏感调用已经用户逐次审批；不得跨调用持久化或复用。 */
+  /** 本次敏感调用获执行模式或审批授权；不得跨调用持久化或复用。 */
   approvedSensitiveAction?: boolean
   /** 纯读取/搜索工具可访问设备路径；不表示用户批准过写入越界。 */
   deviceReadScope?: boolean
-  /** 本次调用已经用户审批，可访问 ResourceScope 外的路径；不得跨调用持久化。 */
+  /** 本次调用获越界访问授权；不得跨调用持久化。 */
   approvedOutsideWorkspace?: boolean
 }
 
@@ -73,9 +84,39 @@ interface RegisteredTool {
   allowedSources?: string[]
   /** 所属应用 ID（应用工具专属，主 Agent 工具为 undefined） */
   appId?: string
+  /** 扩展明确允许在聊天模式使用；未声明时默认关闭。 */
+  chatEnabled?: boolean
 }
 
 export class ToolRegistry {
+  private readonly definitionProviders = new Map<
+    string,
+    (definition: ToolDefinition, agentId: string) => Promise<ToolDefinition>
+  >()
+
+  /** 每次模型请求按调用者生成工具文档，不把其他角色的步骤说明写入全局定义。 */
+  registerDefinitionProvider(
+    name: string,
+    provider: (definition: ToolDefinition, agentId: string) => Promise<ToolDefinition>,
+  ): () => void {
+    if (this.definitionProviders.has(name)) throw new Error('工具文档提供者重复注册')
+    this.definitionProviders.set(name, provider)
+    return () => {
+      if (this.definitionProviders.get(name) === provider) this.definitionProviders.delete(name)
+    }
+  }
+
+  async resolveDefinitions(
+    definitions: ToolDefinition[],
+    agentId: string,
+  ): Promise<ToolDefinition[]> {
+    return Promise.all(
+      definitions.map(async (definition) => {
+        const provider = this.definitionProviders.get(definition.name)
+        return provider ? provider(structuredClone(definition), agentId) : definition
+      }),
+    )
+  }
   private tools = new Map<string, RegisteredTool>()
   /**
    * 应用工具命名空间（appId → 工具集）
@@ -87,11 +128,17 @@ export class ToolRegistry {
   private appTools = new Map<string, Set<string>>()
 
   /** 注册工具 */
-  register(definition: ToolDefinition, handler: ToolHandler, allowedSources?: string[]): void {
+  register(
+    definition: ToolDefinition,
+    handler: ToolHandler,
+    allowedSources?: string[],
+    options?: { chatEnabled?: boolean },
+  ): void {
     this.tools.set(definition.name, {
       definition,
       handler,
       allowedSources,
+      chatEnabled: options?.chatEnabled === true,
     })
     logger.debug(`工具已注册: ${definition.name}`)
   }
@@ -99,6 +146,15 @@ export class ToolRegistry {
   /** 注销普通工具；仅移除当前注册项。 */
   unregister(name: string): boolean {
     return this.tools.delete(name)
+  }
+
+  isChatEnabled(name: string): boolean {
+    return this.tools.get(name)?.chatEnabled === true
+  }
+
+  setChatEnabled(name: string, enabled: boolean): void {
+    const tool = this.tools.get(name)
+    if (tool) tool.chatEnabled = enabled
   }
 
   /**
@@ -114,7 +170,7 @@ export class ToolRegistry {
   registerAppTool(appId: string, definition: ToolDefinition, handler: ToolHandler): void {
     const prefixedName = `${appId}.${definition.name}`
     this.tools.set(prefixedName, {
-      definition: { ...definition, name: prefixedName },
+      definition: { ...definition, name: prefixedName, packageId: `application:${appId}` },
       handler,
       appId,
     })

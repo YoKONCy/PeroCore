@@ -10,6 +10,7 @@ Model Role: main
 -->
 
 ---
+
 role: system
 position: 900
 enabled: true
@@ -18,10 +19,12 @@ label: 用户画像
 group: context
 editable: false
 builtin: true
+
 ---
+
 {% if owner_name or user_persona %}
 <Owner_Setting>
-- 姓名: {{ owner_name }}
-- 设定: {{ user_persona }}
-</Owner_Setting>
+
+- {{ owner_appellation }}姓名: {{ owner_name }}
+- 设定: {{ user_persona }}</Owner_Setting>
 {% endif %}

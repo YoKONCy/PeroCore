@@ -4,6 +4,6 @@ extends: electron-builder.base.yml
 
 # 基础配置已包含 publish: github，无需覆写
 win:
-  icon: public/Logo.png
+  icon: public/system-icons/pero.ico
   target:
     - nsis

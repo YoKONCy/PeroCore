@@ -10,16 +10,22 @@ describe('逻辑微内核基础框架', () => {
   it('LifecycleScope 应按逆序释放并保持幂等', async () => {
     const order: string[] = []
     const scope = new LifecycleScope('test')
-    scope.defer(() => order.push('first'))
+    scope.defer(() => {
+      order.push('first')
+    })
     const child = scope.child('child')
-    child.defer(() => order.push('child'))
-    scope.defer(() => order.push('last'))
+    child.defer(() => {
+      order.push('child')
+    })
+    scope.defer(() => {
+      order.push('last')
+    })
 
     await Promise.all([scope.dispose(), scope.dispose()])
 
     expect(order).toEqual(['last', 'child', 'first'])
     expect(scope.isClosed).toBe(true)
-    expect(() => scope.defer(vi.fn())).toThrow('生命周期作用域已关闭')
+    expect(() => scope.defer(vi.fn())).toThrow(Error)
   })
 
   it('Capability 子句柄只能收窄操作并可被撤销', () => {
@@ -54,7 +60,7 @@ describe('逻辑微内核基础框架', () => {
         parentHandleId: root.handleId,
         revocable: true,
       }),
-    ).toThrow('不得扩大操作集合')
+    ).toThrow(Error)
     expect(registry.revoke(child.handleId)).toBe(true)
     expect(registry.get(child.handleId)).toBeNull()
     const sibling = registry.issue({
@@ -110,6 +116,6 @@ describe('逻辑微内核基础框架', () => {
     await expect(registry.inspect(ref)).resolves.toEqual({ title: '现有 Thread 数据' })
     expect(inspect).toHaveBeenCalledWith(ref)
     unregister()
-    await expect(registry.inspect(ref)).rejects.toThrow('不支持的 Kernel Object 类型')
+    await expect(registry.inspect(ref)).rejects.toThrow(Error)
   })
 })

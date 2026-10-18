@@ -177,15 +177,3 @@ function formatParam(key: string | number): string {
     </PCard>
   </div>
 </template>
-
-<style scoped>
-/* 像素风滚动条 */
-.mcp-scrollbar::-webkit-scrollbar {
-  width: 4px;
-}
-
-.mcp-scrollbar::-webkit-scrollbar-thumb {
-  background: var(--ui-scrollbar-thumb);
-  border-radius: 0;
-}
-</style>

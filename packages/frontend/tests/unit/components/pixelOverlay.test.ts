@@ -1,6 +1,6 @@
 /* @vitest-environment happy-dom */
-import { mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { enableAutoUnmount, mount } from '@vue/test-utils'
+import { afterEach, describe, expect, it } from 'vitest'
 
 import PDialog from '@infos/frontend/components/pixel/PDialog.vue'
 import PSelect from '@infos/frontend/components/pixel/PSelect.vue'
@@ -202,3 +202,5 @@ describe('基础像素浮层组件', () => {
     })
   })
 })
+
+enableAutoUnmount(afterEach)

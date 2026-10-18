@@ -17,6 +17,7 @@
 
 import { createLogger } from '../../lib/logger'
 import { AppError } from '../../lib/appError'
+import { cleanTextForTts } from './spokenReply'
 
 const logger = createLogger('TtsService')
 
@@ -121,6 +122,8 @@ export class TtsService {
    * @throws {Error} API 调用失败或配置缺失
    */
   async synthesize(request: TtsRequest): Promise<TtsResult> {
+    request = { ...request, text: cleanTextForTts(request.text) }
+    if (!request.text) throw new AppError('VALIDATION_ERROR', { message: '口语文本清洗后为空' })
     const provider = request.provider ?? this.config.provider
 
     switch (provider) {

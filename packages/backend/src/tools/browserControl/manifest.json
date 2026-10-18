@@ -86,12 +86,15 @@
   "tools": [
     {
       "name": "browser_open_url",
-      "description": "在浏览器中打开指定的 URL。",
+      "description": "在 infOS 内置浏览器中打开网站，或预览当前工作区生成的 HTML/Three.js 页面。url 可传 HTTP/HTTPS 网址、HTML 相对或绝对路径、workspace: 或 attachment: 引用；本地文件通过受权预览入口打开，不启动系统应用、不抢占桌面鼠标键盘。打开后可使用 browser_screenshot 检查真实渲染。",
       "display": { "label": "打开网页", "icon": "globe", "color": "sky", "style": "browser" },
       "parameters": {
         "type": "object",
         "properties": {
-          "url": { "type": "string", "description": "要打开的 URL" }
+          "url": {
+            "type": "string",
+            "description": "网站网址，或工作区 HTML 路径，例如 index.html、workspace:demo/index.html；也支持 attachment: 引用。"
+          }
         },
         "required": ["url"]
       }
@@ -259,6 +262,7 @@
     {
       "name": "browser_query_dom",
       "description": "通过 CDP 查询 DOM、Shadow DOM 节点及布局信息。",
+      "display": { "label": "检查网页结构", "icon": "search", "color": "sky", "style": "browser" },
       "parameters": {
         "type": "object",
         "properties": {

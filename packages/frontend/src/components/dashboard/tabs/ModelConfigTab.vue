@@ -21,10 +21,19 @@ import {
   PCard,
 } from '../../pixel'
 import { watch, computed, type Ref } from 'vue'
-import { useModelConfig, TASK_SLOTS } from '../../../composables/dashboard/useModelConfig'
+import {
+  useModelConfig,
+  TASK_SLOTS,
+  type LlmModel,
+} from '../../../composables/dashboard/useModelConfig'
+import BrandIcon from '../../brands/BrandIcon.vue'
+import BrandSelect, { type BrandSelectOption } from '../../brands/BrandSelect.vue'
+import { resolveModelBrand, resolveProviderBrand } from '../../../lib/modelBrands'
 import { useDashboardContext } from '../../../composables/dashboard'
 import { useAgentStore } from '../../../stores/useAgentStore'
 import { getApiBaseUrl } from '../../../api/transport'
+import IndexMaintenancePanel from '../IndexMaintenancePanel.vue'
+import { DEFAULT_DESKTOP_REACT_MAX_TURNS } from '@infos/shared'
 
 const ctx = useDashboardContext()
 const agentStore = useAgentStore()
@@ -53,6 +62,10 @@ const {
   globalConfig,
   saveGlobalConfig,
   embeddingProvider,
+  embeddingEnabled,
+  embeddingSwitchReady,
+  embeddingSwitchSaving,
+  setEmbeddingEnabled,
   embeddingModelId,
   embeddingDimension,
   embeddingApiBase,
@@ -132,17 +145,35 @@ const reasoningDialectOptions = [
   { label: 'OpenRouter兼容', value: 'openrouter' },
   { label: '通用兼容', value: 'generic' },
 ]
-const reasoningEffortOptions = [
-  { label: '默认（不传）', value: '' },
-  { label: '关闭', value: 'off' },
-  { label: 'Low', value: 'low' },
-  { label: 'Medium', value: 'medium' },
-  { label: 'High', value: 'high' },
-  { label: 'XHigh', value: 'xhigh' },
-  { label: 'Max', value: 'max' },
-]
+const geminiThinkingLevels = computed(() =>
+  /gemini[-_ ]?4(?:[._ /-]|$)/i.test(editorForm.value.modelId),
+)
+const reasoningEffortOptions = computed(() =>
+  [
+    { label: '默认（不传）', value: '' },
+    { label: '关闭', value: 'off' },
+    { label: 'Low', value: 'low' },
+    { label: 'Medium', value: 'medium' },
+    { label: 'High', value: 'high' },
+    { label: 'XHigh', value: 'xhigh' },
+    { label: 'Max', value: 'max' },
+  ].filter(
+    (option) => !geminiThinkingLevels.value || !['off', 'xhigh', 'max'].includes(option.value),
+  ),
+)
+const legacyGeminiEffort = computed(() =>
+  geminiThinkingLevels.value &&
+  ['off', 'xhigh', 'max'].includes(editorForm.value.reasoningEffort || '')
+    ? editorForm.value.reasoningEffort
+    : '',
+)
 const reasoningEffortValue = computed({
-  get: () => editorForm.value.reasoningEffort ?? '',
+  get: () =>
+    legacyGeminiEffort.value
+      ? legacyGeminiEffort.value === 'off'
+        ? 'low'
+        : 'high'
+      : (editorForm.value.reasoningEffort ?? ''),
   set: (value: string) => {
     editorForm.value.reasoningEffort = value
       ? (value as NonNullable<typeof editorForm.value.reasoningEffort>)
@@ -234,6 +265,53 @@ const providerGroups = [
 
 // providerDefaults 已从 composable 导入供模板直接使用
 void providerDefaults
+
+const providerChoices = computed<BrandSelectOption[]>(() =>
+  providerOptions.value.map((option) => ({
+    ...option,
+    brand: resolveProviderBrand(option.value),
+  })),
+)
+const modelChoices = computed<BrandSelectOption[]>(() =>
+  models.value.map((model) => ({
+    label: model.name,
+    value: model.id,
+    brand: resolveModelBrand(model.modelId),
+  })),
+)
+const mainModelBrand = computed(() =>
+  resolveModelBrand(models.value.find((model) => model.id === mainModelId.value)?.modelId),
+)
+const taskModelChoices = computed<BrandSelectOption[]>(() => [
+  { label: '使用主模型（默认）', value: '', brand: mainModelBrand.value },
+  ...modelChoices.value,
+])
+const agentModelChoices = computed<BrandSelectOption[]>(() => [
+  { label: '跟随主模型', value: '', brand: mainModelBrand.value },
+  ...modelChoices.value,
+])
+const visionModelChoices = computed<BrandSelectOption[]>(() =>
+  visionModels.value.map((model) => ({
+    label: `${model.name} · ${model.modelId}`,
+    value: model.id,
+    brand: resolveModelBrand(model.modelId),
+  })),
+)
+function choicesForModelIds(ids: string[]): BrandSelectOption[] {
+  return ids.map((modelId) => ({
+    label: modelId,
+    value: modelId,
+    brand: resolveModelBrand(modelId),
+  }))
+}
+const remoteModelChoices = computed(() => choicesForModelIds(remoteModels.value))
+const embeddingModelChoices = computed(() => choicesForModelIds(remoteEmbeddingModels.value))
+const rerankerModelChoices = computed(() => choicesForModelIds(remoteRerankerModels.value))
+
+function providerBrandForModel(model: LlmModel) {
+  const apiBase = model.apiBase?.trim() || globalConfigRecord.value[model.provider]?.apiBase
+  return resolveProviderBrand(model.provider, apiBase)
+}
 </script>
 
 <template>
@@ -318,7 +396,9 @@ void providerDefaults
           <PButton
             variant="primary"
             :loading="isSavingVector"
-            :disabled="isSavingVector"
+            :disabled="
+              isSavingVector || !embeddingSwitchReady || !embeddingEnabled || embeddingSwitchSaving
+            "
             @click="saveVectorConfig"
           >
             {{ isSavingVector ? '激活中' : '保存配置' }}
@@ -332,20 +412,20 @@ void providerDefaults
       v-if="currentTab === 'llm'"
       class="model-card-grid grid grid-cols-[repeat(auto-fill,minmax(520px,1fr))] content-start gap-5 flex-1 overflow-y-auto pr-1 pt-2 model-scrollbar"
     >
-      <PCard
-        v-for="model in models"
-        :key="model.id"
-        pixel
-        hoverable
-        class="model-config-card flex flex-col gap-4"
-      >
+      <PCard v-for="model in models" :key="model.id" pixel hoverable class="model-config-card">
         <!-- 卡片头部 -->
         <div class="flex justify-between items-start">
-          <div class="flex flex-col gap-0.5 min-w-0">
-            <h3 class="text-base font-black text-slate-800 truncate">{{ model.name }}</h3>
-            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
-              {{ providerLabels[model.provider] ?? model.provider }}
-            </span>
+          <div class="model-card-identity">
+            <BrandIcon :brand="resolveModelBrand(model.modelId)" size="lg" framed />
+            <div class="flex flex-col gap-0.5 min-w-0">
+              <h3 class="text-base font-black text-slate-800 truncate">{{ model.name }}</h3>
+              <span
+                class="model-provider-line text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel"
+              >
+                <BrandIcon :brand="providerBrandForModel(model)" size="xs" fallback="provider" />
+                <span>{{ providerLabels[model.provider] ?? model.provider }}</span>
+              </span>
+            </div>
           </div>
           <div class="flex items-center gap-1.5 flex-shrink-0">
             <!-- 主模型徽章（淡蓝色像素风） -->
@@ -385,6 +465,12 @@ void providerDefaults
             <span class="text-[11px] text-slate-400">最大输出 Token</span>
             <span class="text-[11px] font-bold text-slate-500 font-mono">
               {{ formatTokens(model.maxTokens) }}
+            </span>
+          </div>
+          <div class="flex justify-between items-center">
+            <span class="text-[11px] text-slate-400">最大轮次</span>
+            <span class="text-[11px] font-bold text-slate-500 font-mono">
+              {{ model.maxReActTurns ?? DEFAULT_DESKTOP_REACT_MAX_TURNS }} 轮
             </span>
           </div>
           <div class="flex justify-between items-center">
@@ -433,6 +519,7 @@ void providerDefaults
                 <small>{{ model.stream ? '逐字返回' : '完整返回' }}</small>
               </span>
               <PSwitch
+                size="sm"
                 :model-value="model.stream"
                 @update:model-value="(enabled: boolean) => setModelToggle(model, 'stream', enabled)"
               />
@@ -447,6 +534,7 @@ void providerDefaults
                 <small>{{ model.enableVision ? '允许识图' : '不接收图片' }}</small>
               </span>
               <PSwitch
+                size="sm"
                 :model-value="model.enableVision"
                 @update:model-value="
                   (enabled: boolean) => setModelToggle(model, 'enableVision', enabled)
@@ -466,6 +554,7 @@ void providerDefaults
                 <small>{{ model.enableAudioInput ? '允许音频' : '不接收音频' }}</small>
               </span>
               <PSwitch
+                size="sm"
                 :model-value="model.enableAudioInput"
                 @update:model-value="
                   (enabled: boolean) => setModelToggle(model, 'enableAudioInput', enabled)
@@ -476,7 +565,9 @@ void providerDefaults
         </section>
 
         <!-- 操作按钮 -->
-        <div class="flex justify-between items-center pt-3 border-t border-slate-100 mt-auto">
+        <div
+          class="model-card-actions flex justify-between items-center pt-3 border-t border-slate-100 mt-auto"
+        >
           <!-- 主模型按钮（像素风立体感：3px偏移阴影，按下位移+阴影缩小） -->
           <button
             :class="[
@@ -532,15 +623,10 @@ void providerDefaults
             <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
               转述模型
             </label>
-            <PSelect
+            <BrandSelect
               v-model="relayModelConfigId"
               :disabled="!relayEnabled"
-              :options="
-                visionModels.map((model) => ({
-                  label: `${model.name} · ${model.modelId}`,
-                  value: model.id,
-                }))
-              "
+              :options="visionModelChoices"
               placeholder="选择已启用图片视觉能力的模型"
             />
             <p v-if="!visionModels.length" class="text-xs text-amber-600">
@@ -578,6 +664,21 @@ void providerDefaults
 
     <!-- 向量模型配置 -->
     <div v-else class="flex-1 overflow-y-auto flex flex-col gap-6">
+      <PCard pixel padding="lg">
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <h4 class="font-pixel font-bold">向量功能</h4>
+            <p class="text-xs text-slate-400 mt-1">生成向量并用于检索</p>
+          </div>
+          <PSwitch
+            :model-value="embeddingEnabled"
+            :disabled="!embeddingSwitchReady || embeddingSwitchSaving || isSavingVector"
+            aria-label="向量功能"
+            @update:model-value="setEmbeddingEnabled"
+          />
+        </div>
+      </PCard>
+      <IndexMaintenancePanel />
       <!-- Embedding -->
       <PCard pixel padding="lg" overflow-visible>
         <div class="flex items-center gap-4 mb-5">
@@ -588,7 +689,7 @@ void providerDefaults
           </div>
           <div>
             <h4 class="text-base font-black text-slate-800 font-pixel">Embedding 嵌入模型</h4>
-            <p class="text-xs text-slate-400 mt-0.5">将记忆文本转换为数学向量，是 RAG 检索的核心</p>
+            <p class="text-xs text-slate-400 mt-0.5">用于语义检索</p>
           </div>
         </div>
         <div class="grid grid-cols-2 gap-4">
@@ -623,7 +724,10 @@ void providerDefaults
               <label
                 class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel flex items-center justify-between"
               >
-                模型 ID
+                <span class="model-id-label">
+                  <BrandIcon :brand="resolveModelBrand(embeddingModelId)" size="xs" />
+                  模型 ID
+                </span>
                 <PButton
                   variant="ghost"
                   size="sm"
@@ -634,10 +738,10 @@ void providerDefaults
                   获取模型列表
                 </PButton>
               </label>
-              <PSelect
+              <BrandSelect
                 v-if="remoteEmbeddingModels.length > 0"
                 v-model="embeddingModelId"
-                :options="remoteEmbeddingModels.map((m) => ({ label: m, value: m }))"
+                :options="embeddingModelChoices"
                 placeholder="从列表中选择..."
               />
               <PInput
@@ -705,7 +809,10 @@ void providerDefaults
               <label
                 class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel flex items-center justify-between"
               >
-                模型 ID
+                <span class="model-id-label">
+                  <BrandIcon :brand="resolveModelBrand(rerankerModelId)" size="xs" />
+                  模型 ID
+                </span>
                 <PButton
                   variant="ghost"
                   size="sm"
@@ -716,10 +823,10 @@ void providerDefaults
                   获取模型列表
                 </PButton>
               </label>
-              <PSelect
+              <BrandSelect
                 v-if="remoteRerankerModels.length > 0"
                 v-model="rerankerModelId"
-                :options="remoteRerankerModels.map((m) => ({ label: m, value: m }))"
+                :options="rerankerModelChoices"
                 placeholder="从列表中选择..."
               />
               <PInput v-else v-model="rerankerModelId" placeholder="例如: bge-reranker-v2-m3" />
@@ -768,9 +875,10 @@ void providerDefaults
           <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
             Provider
           </label>
-          <PSelect
+          <BrandSelect
             v-model="editorForm.provider"
-            :options="providerOptions"
+            :options="providerChoices"
+            fallback="provider"
             @change="(v: string | number) => handleProviderChange(String(v))"
           />
         </div>
@@ -809,7 +917,10 @@ void providerDefaults
           <label
             class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel flex items-center justify-between"
           >
-            模型 ID
+            <span class="model-id-label">
+              <BrandIcon :brand="resolveModelBrand(editorForm.modelId)" size="xs" />
+              模型 ID
+            </span>
             <PButton
               variant="ghost"
               size="sm"
@@ -820,10 +931,10 @@ void providerDefaults
               获取模型列表
             </PButton>
           </label>
-          <PSelect
+          <BrandSelect
             v-if="remoteModels.length > 0"
             v-model="editorForm.modelId"
-            :options="remoteModels.map((m) => ({ label: m, value: m }))"
+            :options="remoteModelChoices"
             placeholder="从列表中选择..."
           />
           <PInput v-else v-model="editorForm.modelId" placeholder="例如: gpt-4o" />
@@ -895,7 +1006,15 @@ void providerDefaults
           <div class="model-param-row">
             <div class="model-param-heading">
               <span class="text-xs font-bold text-slate-700">思考等级</span>
-              <span class="text-[10px] text-slate-400">按 Provider 协议映射推理强度</span>
+              <span class="text-[10px] text-slate-400">
+                {{
+                  legacyGeminiEffort
+                    ? `旧档位 ${legacyGeminiEffort} 按 ${reasoningEffortValue} 发送`
+                    : geminiThinkingLevels
+                      ? 'Low / Medium / High，不支持关闭思考'
+                      : '按 Provider 协议映射推理强度'
+                }}
+              </span>
             </div>
             <span class="text-[9px] text-slate-400 font-mono">REASONING</span>
             <div class="model-param-control">
@@ -939,6 +1058,23 @@ void providerDefaults
                 :min="1"
                 :max="2000000"
                 :step="1024"
+              />
+            </div>
+          </div>
+
+          <div class="model-param-row">
+            <div class="model-param-heading">
+              <span class="text-xs font-bold text-slate-700">最大轮次</span>
+              <span class="text-[10px] text-slate-400">桌面对话，留空使用默认值</span>
+            </div>
+            <span class="text-[9px] text-slate-400 font-mono">ReAct</span>
+            <div class="model-param-control">
+              <PInputNumber
+                v-model="editorForm.maxReActTurns"
+                :min="1"
+                :max="Number.MAX_SAFE_INTEGER"
+                :step="1"
+                :placeholder="String(DEFAULT_DESKTOP_REACT_MAX_TURNS)"
               />
             </div>
           </div>
@@ -996,8 +1132,12 @@ void providerDefaults
             :key="key"
             class="grid grid-cols-[140px_1fr_1fr] items-center gap-2"
           >
-            <span class="text-xs font-semibold text-slate-600 truncate">
-              {{ providerLabels[key] ?? key }}
+            <span
+              class="model-provider-line text-xs font-semibold text-slate-600"
+              :title="providerLabels[key] ?? key"
+            >
+              <BrandIcon :brand="resolveProviderBrand(key)" size="xs" fallback="provider" />
+              <span>{{ providerLabels[key] ?? key }}</span>
             </span>
             <PInput
               v-model="globalConfigRecord[key]!.apiBase"
@@ -1034,12 +1174,9 @@ void providerDefaults
             <span class="text-sm font-bold text-slate-700">{{ slot.label }}</span>
             <span class="text-[10px] text-slate-400">{{ slot.description }}</span>
           </div>
-          <PSelect
+          <BrandSelect
             :model-value="taskAssignments[slot.key] || ''"
-            :options="[
-              { label: '使用主模型（默认）', value: '' },
-              ...models.map((m) => ({ label: m.name, value: m.id })),
-            ]"
+            :options="taskModelChoices"
             class="w-48"
             @update:model-value="
               (v: string | number) => setTaskAssignment(slot.key, v ? String(v) : null)
@@ -1093,13 +1230,10 @@ void providerDefaults
 
             <div class="agent-assignment-card__selector">
               <span class="agent-assignment-card__label">对话模型</span>
-              <PSelect
+              <BrandSelect
                 teleport
                 :model-value="agentAssignments[agent.id] || ''"
-                :options="[
-                  { label: '跟随主模型', value: '' },
-                  ...models.map((model) => ({ label: model.name, value: model.id })),
-                ]"
+                :options="agentModelChoices"
                 class="w-56"
                 @update:model-value="
                   (value: string | number) =>
@@ -1124,6 +1258,26 @@ void providerDefaults
 </template>
 
 <style scoped>
+.model-card-identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+  margin-right: 10px;
+}
+.model-provider-line,
+.model-id-label {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+.model-provider-line > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 /* 模型配置业务区使用主题语义色，语义色仅承担状态强调。 */
 .model-config-tab {
   color: var(--ui-text-primary);
@@ -1416,11 +1570,13 @@ void providerDefaults
 
 /* 横向模型卡：以信息密度和微像素控制条为主。 */
 .model-card-grid {
+  min-height: 0;
+  grid-auto-rows: max-content;
   scroll-padding-top: 8px;
 }
 
 .model-config-card {
-  min-height: 0;
+  min-height: min-content;
   border-color: color-mix(in srgb, var(--ui-border-strong) 82%, transparent);
   background:
     linear-gradient(90deg, var(--ui-accent-sky) 0 34px, transparent 34px) top left / 72px 2px
@@ -1429,6 +1585,17 @@ void providerDefaults
   box-shadow:
     3px 3px 0 color-mix(in srgb, var(--ui-border-strong) 88%, transparent),
     inset 0 0 0 1px color-mix(in srgb, var(--ui-text-inverse) 5%, transparent);
+}
+
+/* 内容布局应用到 PCard 的插槽容器，列表溢出时保留完整操作区。 */
+.model-config-card :deep(.p-card-body) {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.model-card-actions {
+  flex-shrink: 0;
 }
 
 .model-detail-grid {
@@ -1604,23 +1771,6 @@ void providerDefaults
   justify-self: end;
 }
 
-.model-capability-toggle :deep(.p-switch-track) {
-  width: 31px;
-  height: 17px;
-  border-width: 1px;
-  border-radius: 0;
-}
-
-.model-capability-toggle :deep(.p-switch-thumb) {
-  width: 11px;
-  height: 11px;
-  border-radius: 0;
-}
-
-.model-capability-toggle :deep(.p-switch-thumb-on) {
-  transform: translateX(14px);
-}
-
 @media (max-width: 900px) {
   .model-card-grid {
     grid-template-columns: minmax(0, 1fr);
@@ -1673,15 +1823,5 @@ void providerDefaults
   .model-param-control {
     grid-column: 1 / -1;
   }
-}
-
-/* 像素风滚动条 */
-.model-scrollbar::-webkit-scrollbar {
-  width: 4px;
-}
-
-.model-scrollbar::-webkit-scrollbar-thumb {
-  background: var(--ui-scrollbar-thumb);
-  border-radius: 0;
 }
 </style>

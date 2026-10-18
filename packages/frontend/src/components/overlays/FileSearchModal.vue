@@ -151,12 +151,4 @@ useEventListener(window, 'keydown', (e: Event) => {
 .fade-leave-to {
   opacity: 0;
 }
-
-.fsm-scrollbar::-webkit-scrollbar {
-  width: 4px;
-}
-.fsm-scrollbar::-webkit-scrollbar-thumb {
-  background: #bae6fd;
-  border-radius: 0;
-}
 </style>

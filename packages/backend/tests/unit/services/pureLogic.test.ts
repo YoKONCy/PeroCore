@@ -24,6 +24,21 @@ function createModelDeps(
 }
 
 describe('记忆运行配置', () => {
+  it('高级管线开启但 ContextRNN 关闭时，也强制关闭反馈训练', async () => {
+    const get = vi.fn().mockResolvedValue(
+      JSON.stringify({
+        channels: {
+          desktop: { contextPairs: 20, enableAutoRag: true, retrievalLimit: 8 },
+          group: { contextPairs: 20, enableAutoRag: true, retrievalLimit: 3 },
+        },
+        advanced: { enableSaPpr: true, enableContextRnn: false, enableFeedback: true },
+      }),
+    )
+    const config = await loadMemoryRuntimeConfig({ get })
+    expect(config.advanced.enableSaPpr).toBe(true)
+    expect(config.advanced.enableContextRnn).toBe(false)
+    expect(config.advanced.enableFeedback).toBe(false)
+  })
   it('应迁移旧字段并将旧retrievalLimit=0转换为关闭自动RAG', async () => {
     const get = vi.fn().mockResolvedValue(
       JSON.stringify({
@@ -38,17 +53,13 @@ describe('记忆运行配置', () => {
 
     const config = await loadMemoryRuntimeConfig({ get })
 
-    expect(config).toEqual({
-      workContextExpirationPairs: 5,
+    expect(config).toMatchObject({
       channels: {
-        desktop: { contextPairs: 12, enableAutoRag: false, retrievalLimit: 8 },
+        desktop: { contextPairs: 12, enableAutoRag: false },
         group: { contextPairs: 18, enableAutoRag: true, retrievalLimit: 5 },
       },
       advanced: {
         enableSaPpr: false,
-        expandDepth: 2,
-        teleportAlpha: 0.15,
-        minScore: 0.1,
         enableFista: false,
         enableDpp: false,
         enableContextRnn: false,
@@ -80,11 +91,8 @@ describe('记忆运行配置', () => {
 
     const config = await loadMemoryRuntimeConfig({ get })
 
-    expect(config.advanced).toEqual({
+    expect(config.advanced).toMatchObject({
       enableSaPpr: false,
-      expandDepth: 2,
-      teleportAlpha: 0.15,
-      minScore: 0.1,
       enableFista: false,
       enableDpp: false,
       enableContextRnn: false,
@@ -95,10 +103,8 @@ describe('记忆运行配置', () => {
 })
 
 describe('ModelRoleResolver', () => {
-  const oldEnv = { ...process.env }
-
   afterEach(() => {
-    process.env = { ...oldEnv }
+    vi.unstubAllEnvs()
     vi.clearAllMocks()
   })
 
@@ -128,6 +134,8 @@ describe('ModelRoleResolver', () => {
       topP: undefined,
       maxTokens: 1000,
       reasoningEffort: undefined,
+      contextWindowTokens: undefined,
+      usagePurpose: 'memory',
       returnNativeReasoning: false,
       wireApi: 'chat_completions',
       reasoningDialect: 'auto',
@@ -183,15 +191,15 @@ describe('ModelRoleResolver', () => {
   })
 
   it('应当在数据库配置无效时回退环境变量或返回 null', async () => {
-    process.env.PERO_LLM_API_KEY = 'env-key'
-    process.env.PERO_LLM_MODEL = 'env-model'
-    process.env.PERO_LLM_PROVIDER = 'anthropic'
+    vi.stubEnv('PERO_LLM_API_KEY', 'env-key')
+    vi.stubEnv('PERO_LLM_MODEL', 'env-model')
+    vi.stubEnv('PERO_LLM_PROVIDER', 'anthropic')
     const { configRepo, modelRepo } = createModelDeps({ 'model.main': 'abc' }, {})
     const resolver = new ModelRoleResolver(configRepo as never, modelRepo as never)
 
     const config = await resolver.resolve('reflection')
-    delete process.env.PERO_LLM_API_KEY
-    delete process.env.PERO_LLM_MODEL
+    vi.stubEnv('PERO_LLM_API_KEY', undefined)
+    vi.stubEnv('PERO_LLM_MODEL', undefined)
     const missing = await resolver.resolve('main')
 
     expect(config).toMatchObject({

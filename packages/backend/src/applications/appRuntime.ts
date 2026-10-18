@@ -27,6 +27,7 @@ import type { LlmService, ModelConfig } from '../services/llm/llmService'
 import type { MdpEngine } from '../services/prompt/mdpEngine'
 import type { AgentManager } from '../services/agent/agentManager'
 import type { SocialEventPort, SocialExecutionPort, SocialStoragePort } from './socialPorts'
+import type { SocialWebSocketAdapterPort } from './socialWsBridge'
 
 // ─────────────────────────────────────────────
 // 应用运行时上下文
@@ -63,6 +64,13 @@ export interface HostDiaryReaderPort {
  * - memoryProvider 字段仅供应用私有记忆访问（非 Compiler 直接检索）
  */
 export interface AppRuntimeContext {
+  resources?: import('@infos/shared').SocialResourcePort
+  creative?: import('@infos/shared').ApplicationCreativePort
+  /** 受信任社交应用的状态卡片输出口；仅采集与渲染，不唤醒主 Agent。 */
+  statusCards?: import('@infos/shared').SocialStatusCardPort
+  /** 任务领域接口仅签发给受信任的内置社交应用。 */
+  taskControl?: import('@infos/shared').SocialTaskControlPort
+  registerTaskDelivery?: (port: import('@infos/shared').TaskDeliveryPort) => () => void
   /** 实例 ID */
   instanceId: string
   /** 应用 ID */
@@ -123,6 +131,8 @@ export interface AppRuntimeContext {
   socialStorage?: SocialStoragePort
   socialEvents?: SocialEventPort
   socialExecutions?: SocialExecutionPort
+  /** 宿主签发的社交传输入口；返回该次注册的释放函数，跨 bundle 共享宿主权威。 */
+  registerSocialTransport?: (adapter: SocialWebSocketAdapterPort) => () => void
   /** 只允许读取宿主 Agent 的 Workspace 日记，不暴露通用文件系统能力。 */
   hostDiaryReader?: HostDiaryReaderPort
   /**
@@ -134,8 +144,6 @@ export interface AppRuntimeContext {
   storeRegistry?: import('../repositories/storeRegistry').MemoryStoreRegistry
   /** 路径解析器（社交图片缓存目录等使用） */
   pathResolver?: import('../core/pathResolver').PathResolver
-  /** Agent 内置目录（表情包服务使用） */
-  agentBuiltinDir?: string
   /** 入站路由表 Repository（社交路由使用） */
   inboundRouteRepo?: import('../repositories/inboundRoute.repo').InboundRouteRepository
   /** 配置仓库（读取社交绑定配置） */
@@ -225,6 +233,9 @@ export interface AgentAppRuntime {
    * @returns 最终检查点（主 Agent 读取此结果）
    */
   onStop(): Promise<AppCheckpoint | undefined>
+
+  /** 宿主配置保存后通知仍存活的应用，由应用自行更新内部状态。 */
+  onConfigChanged?(keys: readonly string[]): Promise<void>
 
   /**
    * 获取当前检查点

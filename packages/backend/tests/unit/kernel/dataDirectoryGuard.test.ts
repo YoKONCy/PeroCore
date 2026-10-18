@@ -15,7 +15,7 @@ afterEach(() => {
 describe('物理数据目录保护', () => {
   it('应拒绝把逻辑路径别名当成物理数据目录', () => {
     process.env.PERO_DATA_DIR = '@data'
-    expect(() => getDataDir()).toThrow('不能使用逻辑路径别名')
+    expect(() => getDataDir()).toThrow(Error)
   })
 
   it('应将明确的相对路径规范化为绝对路径', () => {

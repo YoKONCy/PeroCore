@@ -9,6 +9,7 @@ export interface StructuredToolResult {
   }
   truncated?: boolean
   metadata?: Record<string, unknown>
+  shouldTerminate?: boolean
 }
 
 /** 判断未知返回值是否符合结构化工具结果。 */

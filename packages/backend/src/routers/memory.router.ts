@@ -49,7 +49,7 @@ export function createMemoryRouter(ctx: AppContext) {
     const statuses =
       (csv(input.statuses) as EventNoteStatus[] | undefined) ??
       (input.includeArchived === undefined
-        ? undefined
+        ? (['active'] as EventNoteStatus[])
         : input.includeArchived === 'true'
           ? (['active', 'archived'] as EventNoteStatus[])
           : (['active'] as EventNoteStatus[]))
@@ -85,7 +85,12 @@ export function createMemoryRouter(ctx: AppContext) {
     const agentId = c.req.query('agentId') ?? 'pero'
     const includeArchived = c.req.query('includeArchived') === 'true'
     const limit = Math.min(1000, Math.max(1, Number(c.req.query('limit') ?? 300)))
-    const data = await ctx.eventMemoryService.graphSnapshot(agentId, { includeArchived, limit })
+    const status = c.req.query('status') === 'archived' ? 'archived' : 'active'
+    const data = await ctx.eventMemoryService.graphSnapshot(agentId, {
+      includeArchived,
+      status,
+      limit,
+    })
     return c.json({ code: 'OK', message: '获取成功', data })
   })
 
@@ -112,10 +117,58 @@ export function createMemoryRouter(ctx: AppContext) {
     })
   })
 
-  router.delete('/:id', async (c) => {
+  router.post('/:id/archive', async (c) => {
     await ctx.eventMemoryService.archive(c.req.param('id'))
     return c.json({ code: 'OK', message: '核心记忆已移入归档' })
   })
+
+  router.post('/:id/restore', async (c) => {
+    await ctx.eventMemoryService.restore(c.req.param('id'))
+    return c.json({ code: 'OK', message: '记忆已恢复' })
+  })
+  router.delete('/:id', async (c) => {
+    await ctx.privacyDeletionService.deleteMemory(
+      c.req.param('id'),
+      c.req.query('deleteSource') === 'true',
+    )
+    return c.json({ code: 'OK', message: '记忆已永久删除' })
+  })
+  router.get('/deletions/status', (c) =>
+    c.json({ code: 'OK', data: ctx.privacyDeletionService.list() }),
+  )
+  router.post('/deletions/:jobId/retry', async (c) => {
+    await ctx.privacyDeletionService.retry(c.req.param('jobId'))
+    return c.json({ code: 'OK', message: '清理已完成' })
+  })
+  router.post(
+    '/batch',
+    zValidator(
+      'json',
+      z.object({
+        ids: z.array(z.string().min(1)).min(1).max(100),
+        action: z.enum(['archive', 'restore', 'delete']),
+        deleteSource: z.boolean().default(false),
+      }),
+    ),
+    async (c) => {
+      const input = c.req.valid('json')
+      const pending: string[] = []
+      for (const id of new Set(input.ids)) {
+        if (input.action === 'archive') await ctx.eventMemoryService.archive(id)
+        else if (input.action === 'restore') await ctx.eventMemoryService.restore(id)
+        else {
+          try {
+            await ctx.privacyDeletionService.deleteMemory(id, input.deleteSource)
+          } catch {
+            pending.push(id)
+          }
+        }
+      }
+      if (pending.length)
+        return c.json({ code: 'ACCEPTED', message: '部分清理等待恢复', data: { pending } }, 202)
+      return c.json({ code: 'OK', message: '批量操作已完成' })
+    },
+  )
 
   router.get('/:id', async (c) => {
     const detail = await ctx.eventMemoryService.detail(c.req.param('id'))

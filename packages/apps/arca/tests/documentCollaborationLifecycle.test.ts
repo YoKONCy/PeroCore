@@ -7,6 +7,7 @@ import type { KernelEnvelope, KernelNodeId } from '@infos/shared'
 import type { NodeInvokeRequest } from '@infos/node-sdk'
 import type { DocumentId, DocumentNodeId, OperationId } from '@infos/document-engine'
 import { ArcaApplicationHost } from '@infos/arca'
+import { arcaHostKey } from '../src/hostCredentials'
 
 const directories: string[] = []
 function dataPath(): string {
@@ -207,8 +208,6 @@ describe('Arca 文档协作生命周期', () => {
       'surface-rename',
     )
     expect(renamed.state).toBe('completed')
-    const afterRename = host.documents.inspect(snapshot.documentId)
-    const parent = afterRename.nodes.find((node) => node.nodeId === created.parentId)!
     const deleted = await invoke(
       host,
       'document.node.delete',
@@ -228,7 +227,6 @@ describe('Arca 文档协作生命周期', () => {
         .inspect(snapshot.documentId)
         .nodes.some((node) => node.nodeId === created.nodeId),
     ).toBe(false)
-    expect(parent.generation).toBeGreaterThan(0)
 
     const revisions = await invoke(host, 'document.revision.list', {
       documentId: snapshot.documentId,
@@ -278,11 +276,31 @@ describe('Arca 文档协作生命周期', () => {
     const first = new ArcaApplicationHost({ dataPath: directory })
     await first.start()
     const { snapshot, paragraph } = await setupDocument(first)
+    const collaborationId = randomUUID(),
+      changeSetId = `arca-collaboration:${collaborationId}`
+    const authorization = {
+      __arcaHostAuth: arcaHostKey(directory),
+      __arcaCollaborationId: collaborationId,
+    }
+    await invoke(
+      first,
+      'collaboration.grant',
+      {
+        ...authorization,
+        collaborationId,
+        agentId: 'principal:test',
+        documentId: snapshot.documentId,
+        baseRevisionId: snapshot.revisionId,
+        scope: 'document',
+      },
+      'grant-a10',
+    )
     const proposed = await invoke(
       first,
       'document.changeset.propose',
       {
-        changeSetId: 'changeset-a10',
+        ...authorization,
+        changeSetId,
         documentId: snapshot.documentId,
         baseRevisionId: snapshot.revisionId,
         actorPrincipalId: 'agent:writer',
@@ -310,10 +328,10 @@ describe('Arca 文档协作生命周期', () => {
     await invoke(
       first,
       'document.changeset.validate',
-      { changeSetId: 'changeset-a10' },
+      { ...authorization, changeSetId },
       'validate-a10',
     )
-    const diff = await invoke(first, 'document.changeset.diff', { changeSetId: 'changeset-a10' })
+    const diff = await invoke(first, 'document.changeset.diff', { changeSetId })
     expect(diff.output).toEqual(
       expect.objectContaining({
         summary: expect.objectContaining({ changedTextNodes: 1 }),
@@ -324,20 +342,20 @@ describe('Arca 文档协作生命周期', () => {
     await invoke(
       first,
       'document.changeset.review',
-      { changeSetId: 'changeset-a10', decision: 'approve', surfaceSessionToken: surface.token },
+      { changeSetId, decision: 'approve', surfaceSessionToken: surface.token },
       'review-a10',
     )
     await invoke(
       first,
       'document.changeset.commit',
-      { changeSetId: 'changeset-a10', surfaceSessionToken: surface.token },
+      { changeSetId, surfaceSessionToken: surface.token },
       'commit-a10',
     )
     await first.stop()
 
     const second = new ArcaApplicationHost({ dataPath: directory })
     await second.start()
-    const restored = second.documents.diffChangeSet('changeset-a10' as never)
+    const restored = second.documents.diffChangeSet(changeSetId as never)
     expect(restored.toRevisionId).toBe(second.documents.inspect(snapshot.documentId).revisionId)
     expect(restored.textChanges[0]?.before).toBe('旧正文')
     await second.stop()

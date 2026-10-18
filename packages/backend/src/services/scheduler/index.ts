@@ -3,4 +3,4 @@
  * @module packages/backend/src/services/scheduler
  */
 export { SchedulerService } from './schedulerService'
-export type { CreateReminderParams, ReminderDto, TriggerResult } from './schedulerService'
+export type { CreateReminderParams, ReminderDto } from './schedulerService'

@@ -15,8 +15,10 @@ export const terminalCreateTool: BuiltinTool = {
     if (!command) throw new Error('command 不能为空')
     const { runtime, session } = await withSession(ctx)
     const terminal = await runtime.terminals.create({
+      approvedOutsideWorkspace: ctx.approvedOutsideWorkspace,
       executionSessionId: session.id,
       command,
+      argv: args.argv as string[] | undefined,
       cwd: args.cwd ? String(args.cwd) : undefined,
       title: args.title ? String(args.title) : undefined,
       signal: ctx.signal,
@@ -27,9 +29,11 @@ export const terminalCreateTool: BuiltinTool = {
 
 export const terminalListTool: BuiltinTool = {
   name: 'terminal_list',
-  async execute(_args, ctx) {
+  async execute(args, ctx) {
     const { runtime, session } = await withSession(ctx)
-    return toolSuccess(JSON.stringify(runtime.terminals.list(session.id)))
+    return toolSuccess(
+      JSON.stringify(runtime.terminals.list(session.id, args.include_archived === true)),
+    )
   },
 }
 
@@ -66,6 +70,8 @@ export const terminalWaitTool: BuiltinTool = {
       cursor: Number(args.cursor ?? 0),
       pattern: args.pattern ? String(args.pattern) : undefined,
       timeoutMs: Number(args.timeout_ms ?? 30_000),
+      exitOnly: args.until === 'exit',
+      signal: ctx.signal,
     })
     return toolSuccess(JSON.stringify(result))
   },

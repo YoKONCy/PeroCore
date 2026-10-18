@@ -1,64 +1,7 @@
+// @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AgentListItem } from '@infos/frontend/api/modules/agentApi'
-import type { Notification } from '@infos/frontend/stores/useNotificationStore'
-import type { ChatMessage, GenerationState } from '@infos/frontend/stores/useThreadStore'
 
-type RefValue<T> = { value: T }
-
-type NotificationTestStore = {
-  toasts: RefValue<Notification[]>
-  modal: RefValue<Notification | null>
-  toast: (message: string, opts?: { type?: string; title?: string; duration?: number }) => void
-  toastRemote: (
-    id: string,
-    message: string,
-    opts?: { type?: string; title?: string; duration?: number },
-  ) => void
-  showModal: (message: string, title?: string, type?: string) => void
-  closeModal: () => void
-  notifyByCode: (code: string, message: string) => void
-}
-
-type ConfigTestStore = {
-  cache: RefValue<Record<string, unknown>>
-  isLoading: RefValue<boolean>
-  getConfig: <T = unknown>(key: string, forceRefresh?: boolean) => Promise<T | undefined>
-  setConfig: (key: string, value: unknown) => Promise<boolean>
-  loadBatch: (keys: string[]) => Promise<void>
-  clearCache: () => void
-}
-
-type AgentTestStore = {
-  agents: RefValue<AgentListItem[]>
-  activeAgentId: RefValue<string>
-  isLoading: RefValue<boolean>
-  error: RefValue<string | null>
-  currentAgent: RefValue<AgentListItem | null>
-  enabledAgents: RefValue<AgentListItem[]>
-  fetchAgents: () => Promise<void>
-  switchAgent: (agentId: string) => Promise<void>
-}
-
-type ThreadTestStore = {
-  threadId: RefValue<string>
-  channel: RefValue<string>
-  messages: RefValue<ChatMessage[]>
-  generationState: RefValue<GenerationState>
-  isGenerating: RefValue<boolean>
-  streamingMessageId: RefValue<string | null>
-  addMessage: (msg: ChatMessage) => void
-  finishStreaming: () => void
-  editMessage: (id: string, newContent: string) => void
-  deleteMessage: (id: string) => void
-  startThread: (newThreadId: string, newChannel?: string) => void
-  loadThreadMessages: (threadId: string, agentId: string) => Promise<void>
-  applySurfaceFrame: (frame: import('@infos/shared').SurfaceFrame) => void
-}
-
-const vueState = vi.hoisted(() => ({
-  stores: new Map<string, unknown>(),
-}))
-
+import { createPinia, setActivePinia } from 'pinia'
 const apiMocks = vi.hoisted(() => ({
   agentList: vi.fn(),
   // 后端权威活跃 Agent（fetchAgents 用它同步 activeAgentId）
@@ -96,25 +39,6 @@ Object.defineProperty(globalThis, 'localStorage', {
   value: localStorageMock,
   configurable: true,
 })
-
-vi.mock('vue', () => ({
-  ref: <T>(value: T) => ({ value }),
-  shallowRef: <T>(value: T) => ({ value }),
-  computed: <T>(getter: () => T) => ({
-    get value() {
-      return getter()
-    },
-  }),
-}))
-
-vi.mock('pinia', () => ({
-  defineStore: (id: string, setup: () => unknown) => () => {
-    if (!vueState.stores.has(id)) {
-      vueState.stores.set(id, setup())
-    }
-    return vueState.stores.get(id)
-  },
-}))
 
 vi.mock('@infos/frontend/api/modules/agentApi', () => ({
   agentApi: {
@@ -170,7 +94,8 @@ import { useThreadStore } from '@infos/frontend/stores/useThreadStore'
 
 describe('useNotificationStore', () => {
   beforeEach(() => {
-    vueState.stores.clear()
+    localStorageMock.clear()
+    setActivePinia(createPinia())
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-27T00:00:00Z'))
   })
@@ -180,12 +105,12 @@ describe('useNotificationStore', () => {
   })
 
   it('应当添加 toast 并在延迟后自动移除', () => {
-    const store = useNotificationStore() as unknown as NotificationTestStore
+    const store = useNotificationStore()
 
     store.toast('保存成功', { type: 'success', title: '完成', duration: 100 })
 
-    expect(store.toasts.value).toHaveLength(1)
-    expect(store.toasts.value[0]).toMatchObject({
+    expect(store.toasts).toHaveLength(1)
+    expect(store.toasts[0]).toMatchObject({
       type: 'success',
       severity: 'toast',
       title: '完成',
@@ -195,23 +120,48 @@ describe('useNotificationStore', () => {
 
     vi.advanceTimersByTime(100)
 
-    expect(store.toasts.value).toHaveLength(0)
+    expect(store.toasts).toHaveLength(0)
   })
 
   it('远程通知重连补发时应按 notificationId 去重', () => {
-    const store = useNotificationStore() as unknown as NotificationTestStore
+    const store = useNotificationStore()
     store.toastRemote('notification-1', '重要通知', { type: 'warning', duration: 0 })
     store.toastRemote('notification-1', '重要通知', { type: 'warning', duration: 0 })
     store.toastRemote('notification-2', '另一条通知', { duration: 0 })
 
-    expect(store.toasts.value.map((toast) => toast.message)).toEqual(['重要通知', '另一条通知'])
+    expect(store.toasts.map((toast) => toast.message)).toEqual(['重要通知', '另一条通知'])
+  })
+
+  it('刷新后仍保留远程通知回执，避免重复展示', () => {
+    useNotificationStore().toastRemote('seen-before-refresh', '历史失败', { duration: 0 })
+    setActivePinia(createPinia())
+    const restored = useNotificationStore()
+    restored.toastRemote('seen-before-refresh', '历史失败', { duration: 0 })
+    expect(restored.toasts).toHaveLength(0)
+  })
+
+  it('排队通知实际展示后才开始倒计时和确认回执', () => {
+    const store = useNotificationStore()
+    for (let i = 0; i < 3; i++) store.toast(`占位 ${i}`, { duration: 0 })
+    const presented = vi.fn()
+    store.toastRemote('queued-remote', '新失败', { duration: 100, onPresented: presented })
+    vi.advanceTimersByTime(1000)
+    expect(store.toasts).toHaveLength(3)
+    expect(presented).not.toHaveBeenCalled()
+    expect(store.wasRemotePresented('queued-remote')).toBe(false)
+    store.removeToast(store.toasts[0]!.id)
+    expect(presented).toHaveBeenCalledOnce()
+    expect(store.wasRemotePresented('queued-remote')).toBe(true)
+    expect(store.toasts.some((item) => item.message === '新失败')).toBe(true)
+    vi.advanceTimersByTime(100)
+    expect(store.toasts.some((item) => item.message === '新失败')).toBe(false)
   })
 
   it('应当显示和关闭模态通知', () => {
-    const store = useNotificationStore() as unknown as NotificationTestStore
+    const store = useNotificationStore()
 
     store.showModal('数据库异常', '系统错误', 'error')
-    expect(store.modal.value).toMatchObject({
+    expect(store.modal).toMatchObject({
       type: 'error',
       severity: 'modal',
       title: '系统错误',
@@ -221,41 +171,42 @@ describe('useNotificationStore', () => {
 
     store.closeModal()
 
-    expect(store.modal.value).toBeNull()
+    expect(store.modal).toBeNull()
   })
 
-  it('应当按错误码分级显示通知', () => {
-    const store = useNotificationStore() as unknown as NotificationTestStore
-
-    store.notifyByCode('UNAUTHORIZED', '需要登录')
-    store.notifyByCode('VALIDATION_ERROR', '参数错误')
-    store.notifyByCode('UNKNOWN_CODE', '未知错误')
-
-    expect(store.modal.value?.title).toBe('错误: UNAUTHORIZED')
-    expect(store.toasts.value.map((toast) => toast.message)).toEqual(['参数错误', '未知错误'])
+  it('已知和未知错误码均恰好产生一条可见通知，不锁定默认展示渠道', () => {
+    const store = useNotificationStore()
+    for (const code of ['UNAUTHORIZED', 'VALIDATION_ERROR', 'UNKNOWN_CODE']) {
+      store.closeModal()
+      store.toasts = []
+      const message = '测试通知 ' + code
+      store.notifyByCode(code, message)
+      const visible = [...store.toasts, ...(store.modal ? [store.modal] : [])]
+      expect(visible.map((item) => item.message)).toEqual([message])
+    }
   })
 })
 
 describe('useConfigStore', () => {
   beforeEach(() => {
-    vueState.stores.clear()
+    setActivePinia(createPinia())
     vi.clearAllMocks()
   })
 
   it('应当优先返回缓存配置并支持强制刷新', async () => {
-    const store = useConfigStore() as unknown as ConfigTestStore
-    store.cache.value.theme = 'dark'
+    const store = useConfigStore()
+    store.cache.theme = 'dark'
     apiMocks.configGet.mockResolvedValue({ data: 'light' })
 
     await expect(store.getConfig('theme')).resolves.toBe('dark')
     await expect(store.getConfig('theme', true)).resolves.toBe('light')
 
     expect(apiMocks.configGet).toHaveBeenCalledTimes(1)
-    expect(store.cache.value.theme).toBe('light')
+    expect(store.cache.theme).toBe('light')
   })
 
   it('应当在设置配置成功时更新缓存，失败时返回 false', async () => {
-    const store = useConfigStore() as unknown as ConfigTestStore
+    const store = useConfigStore()
     apiMocks.configSet
       .mockResolvedValueOnce({ code: 'OK' })
       .mockRejectedValueOnce(new Error('失败'))
@@ -264,33 +215,33 @@ describe('useConfigStore', () => {
     await expect(store.setConfig('volume', 20)).resolves.toBe(false)
 
     expect(apiMocks.configSet).toHaveBeenCalledWith('volume', 80)
-    expect(store.cache.value.volume).toBe(80)
+    expect(store.cache.volume).toBe(80)
   })
 
   it('应当批量加载配置并在结束后关闭加载状态', async () => {
-    const store = useConfigStore() as unknown as ConfigTestStore
+    const store = useConfigStore()
     apiMocks.configBatch.mockResolvedValue({ data: { theme: 'dark', language: 'zh-CN' } })
 
     await store.loadBatch(['theme', 'language'])
 
-    expect(store.isLoading.value).toBe(false)
-    expect(store.cache.value).toMatchObject({ theme: 'dark', language: 'zh-CN' })
+    expect(store.isLoading).toBe(false)
+    expect(store.cache).toMatchObject({ theme: 'dark', language: 'zh-CN' })
 
     store.clearCache()
-    expect(store.cache.value).toEqual({})
+    expect(store.cache).toEqual({})
   })
 })
 
 describe('useAgentStore', () => {
   beforeEach(() => {
-    vueState.stores.clear()
+    setActivePinia(createPinia())
     vi.clearAllMocks()
     // fetchAgents 会调用 agentApi.getActive 同步活跃角色，默认 mock 为 assistant
     apiMocks.agentActive.mockResolvedValue({ data: { id: 'assistant', name: 'Assistant' } })
   })
 
   it('应当拉取 Agent 列表并同步活跃 Agent', async () => {
-    const store = useAgentStore() as unknown as AgentTestStore
+    const store = useAgentStore()
     apiMocks.agentList.mockResolvedValue({
       data: [
         { id: 'pero', name: 'Pero', isEnabled: true, isActive: false },
@@ -300,24 +251,24 @@ describe('useAgentStore', () => {
 
     await store.fetchAgents()
 
-    expect(store.isLoading.value).toBe(false)
-    expect(store.activeAgentId.value).toBe('assistant')
-    expect(store.currentAgent.value?.id).toBe('assistant')
-    expect(store.enabledAgents.value.map((agent) => agent.id)).toEqual(['pero'])
+    expect(store.isLoading).toBe(false)
+    expect(store.activeAgentId).toBe('assistant')
+    expect(store.currentAgent?.id).toBe('assistant')
+    expect(store.enabledAgents.map((agent) => agent.id)).toEqual(['pero'])
   })
 
   it('应当在拉取失败时记录错误并关闭加载状态', async () => {
-    const store = useAgentStore() as unknown as AgentTestStore
+    const store = useAgentStore()
     apiMocks.agentList.mockRejectedValue(new Error('网络异常'))
 
     await store.fetchAgents()
 
-    expect(store.isLoading.value).toBe(false)
-    expect(store.error.value).toBe('网络异常')
+    expect(store.isLoading).toBe(false)
+    expect(store.error).toBe('网络异常')
   })
 
   it('应当切换活跃 Agent 并刷新列表', async () => {
-    const store = useAgentStore() as unknown as AgentTestStore
+    const store = useAgentStore()
     // 第七阶段修复（批次 C）：改用 runtimeApi.setWindowAgent 而非 agentApi.setActive
     apiMocks.runtimeSetWindowAgent.mockResolvedValue({ code: 'OK' })
     apiMocks.agentList.mockResolvedValue({
@@ -327,23 +278,20 @@ describe('useAgentStore', () => {
     await store.switchAgent('assistant')
 
     // 断言调用了 runtimeApi.setWindowAgent，参数为 (windowId, 'assistant')
-    expect(apiMocks.runtimeSetWindowAgent).toHaveBeenCalledWith(
-      expect.stringMatching(/^win-/),
-      'assistant',
-    )
-    expect(store.activeAgentId.value).toBe('assistant')
-    expect(store.agents.value).toHaveLength(1)
+    expect(apiMocks.runtimeSetWindowAgent).toHaveBeenCalledWith(expect.any(String), 'assistant')
+    expect(store.activeAgentId).toBe('assistant')
+    expect(store.agents).toHaveLength(1)
   })
 })
 
 describe('useThreadStore', () => {
   beforeEach(() => {
-    vueState.stores.clear()
+    setActivePinia(createPinia())
     vi.clearAllMocks()
   })
 
   it('应当添加消息并完成流式生成', () => {
-    const store = useThreadStore() as unknown as ThreadTestStore
+    const store = useThreadStore()
 
     store.addMessage({
       id: '1',
@@ -352,17 +300,17 @@ describe('useThreadStore', () => {
       timestamp: 'now',
       isStreaming: true,
     })
-    store.generationState.value = 'generating'
-    store.streamingMessageId.value = '1'
+    store.generationState = 'generating'
+    store.streamingMessageId = '1'
     store.finishStreaming()
 
-    expect(store.messages.value[0]).toMatchObject({ content: '你好', isStreaming: false })
-    expect(store.generationState.value).toBe('idle')
-    expect(store.streamingMessageId.value).toBeNull()
+    expect(store.messages[0]).toMatchObject({ content: '你好', isStreaming: false })
+    expect(store.generationState).toBe('idle')
+    expect(store.streamingMessageId).toBeNull()
   })
 
   it('切屏重载Projection时应保留运行中的流式消息Shell', async () => {
-    const store = useThreadStore() as unknown as ThreadTestStore
+    const store = useThreadStore()
     apiMocks.threadGet.mockResolvedValue({
       data: { thread: { id: 'thread-1', agentId: 'pero', channel: 'desktop' } },
     })
@@ -383,51 +331,84 @@ describe('useThreadStore', () => {
       timestamp: 'now',
       isStreaming: true,
     })
-    store.streamingMessageId.value = 'streaming-1'
-    store.generationState.value = 'generating'
+    store.streamingMessageId = 'streaming-1'
+    store.generationState = 'generating'
 
     await store.loadThreadMessages('thread-1', 'pero')
 
-    expect(store.messages.value).toEqual([
+    expect(store.messages).toEqual([
       expect.objectContaining({ id: 'streaming-1', isStreaming: true }),
     ])
-    expect(store.streamingMessageId.value).toBe('streaming-1')
-    expect(store.generationState.value).toBe('generating')
+    expect(store.streamingMessageId).toBe('streaming-1')
+    expect(store.generationState).toBe('generating')
   })
 
   it('应当在 threadId 就绪后编辑和删除消息并同步后端', async () => {
-    const store = useThreadStore() as unknown as ThreadTestStore
-    apiMocks.chatEditMessage.mockResolvedValue({ code: 'OK' })
+    const store = useThreadStore()
+    apiMocks.chatEditMessage.mockImplementation(
+      async (threadId: string, id: string, content: string, revision: number) => ({
+        code: 'OK',
+        data: {
+          protocolVersion: 1,
+          threadId,
+          principalId: 'pero',
+          revision: 2,
+          generatedAt: 'now',
+          messages: [
+            {
+              messageId: id,
+              threadId,
+              role: id === '12' ? 'user' : 'assistant',
+              content,
+              revision: revision + 1,
+              timestamp: 'now',
+              status: 'completed',
+              imageTranscription: false,
+              contentBlocks: [],
+              toolCalls: [],
+              attachments: [],
+            },
+          ],
+          surfaces: [],
+        },
+      }),
+    )
     apiMocks.chatDeleteMessage.mockResolvedValue({ code: 'OK' })
 
-    store.startThread('thread-1', 'desktop')
-    store.addMessage({ id: '12', role: 'user', content: '旧内容', timestamp: 'now' })
-    store.addMessage({ id: 'draft', role: 'assistant', content: '草稿', timestamp: 'now' })
+    store.startThread('thread-1', 'desktop', 'pero')
+    store.addMessage({ id: '12', role: 'user', content: '旧内容', timestamp: 'now', revision: 1 })
+    store.addMessage({
+      id: '13',
+      role: 'assistant',
+      content: '草稿',
+      timestamp: 'now',
+      revision: 1,
+    })
 
-    store.editMessage('12', '新内容')
+    await store.editMessage('12', '新内容')
+    expect(store.messages[0]).toMatchObject({ id: '12', content: '新内容', revision: 2 })
     store.deleteMessage('12')
-    store.editMessage('draft', '新草稿')
-    await Promise.resolve()
+    await store.editMessage('13', '新草稿')
 
-    expect(apiMocks.chatEditMessage).toHaveBeenCalledWith('thread-1', '12', '新内容')
-    expect(apiMocks.chatEditMessage).toHaveBeenCalledWith('thread-1', 'draft', '新草稿')
+    expect(apiMocks.chatEditMessage).toHaveBeenCalledWith('thread-1', '12', '新内容', 1)
+    expect(apiMocks.chatEditMessage).toHaveBeenCalledWith('thread-1', '13', '新草稿', 1)
     expect(apiMocks.chatDeleteMessage).toHaveBeenCalledWith('thread-1', '12')
-    expect(store.messages.value).toEqual([
-      { id: 'draft', role: 'assistant', content: '新草稿', timestamp: 'now' },
+    expect(store.messages).toEqual([
+      expect.objectContaining({ id: '13', role: 'assistant', content: '新草稿', revision: 2 }),
     ])
   })
 
   it('应当重置 Thread 并维护生成状态 getter', () => {
-    const store = useThreadStore() as unknown as ThreadTestStore
+    const store = useThreadStore()
 
-    store.generationState.value = 'thinking'
-    expect(store.isGenerating.value).toBe(true)
+    store.generationState = 'thinking'
+    expect(store.isGenerating).toBe(true)
 
     store.startThread('thread-1', 'desktop')
 
-    expect(store.threadId.value).toBe('thread-1')
-    expect(store.channel.value).toBe('desktop')
-    expect(store.messages.value).toEqual([])
-    expect(store.isGenerating.value).toBe(false)
+    expect(store.threadId).toBe('thread-1')
+    expect(store.channel).toBe('desktop')
+    expect(store.messages).toEqual([])
+    expect(store.isGenerating).toBe(false)
   })
 })

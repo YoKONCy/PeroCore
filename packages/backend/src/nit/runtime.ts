@@ -11,7 +11,12 @@
  * @module packages/backend/src/nit/runtime
  */
 
-import type { AstNode, NitToolExecutor, NitResult, FunctionArg } from './types'
+import type { AstNode, NitToolExecutor, NitResult, FunctionArg, NitRuntimeOptions } from './types'
+import {
+  createCancellationScope,
+  waitWithSignal,
+  waitForCancellationCleanup,
+} from '../services/execution/cancellation'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('NIT-Runtime')
@@ -32,14 +37,21 @@ export class NitRuntime {
   private toolCalls: Array<{ name: string; args: Record<string, unknown>; result: unknown }> = []
   /** 迭代计数 */
   private iterationCount = 0
+  /** 启动时预占调用次数，并行尚未返回的调用也必须计入上限。 */
+  private toolCallCount = 0
 
-  constructor(private toolExecutor: NitToolExecutor) {}
+  constructor(
+    private toolExecutor: NitToolExecutor,
+    private readonly options: NitRuntimeOptions = {},
+  ) {}
 
   /** 执行 AST */
   async execute(program: AstNode): Promise<NitResult> {
     this.vars.clear()
     this.toolCalls = []
     this.iterationCount = 0
+    this.toolCallCount = 0
+    this.options.signal?.throwIfAborted()
 
     let value: unknown = null
 
@@ -57,30 +69,33 @@ export class NitRuntime {
       }
     }
 
+    this.options.signal?.throwIfAborted()
     return { value, toolCalls: this.toolCalls }
   }
 
   // ── 块执行 ──
 
-  private async execBlock(nodes: AstNode[]): Promise<unknown> {
+  private async execBlock(nodes: AstNode[], signal = this.options.signal): Promise<unknown> {
     let lastValue: unknown = null
     for (const node of nodes) {
-      lastValue = await this.evalNode(node)
+      signal?.throwIfAborted()
+      lastValue = await this.evalNode(node, signal)
     }
     return lastValue
   }
 
   // ── 节点求值 ──
 
-  private async evalNode(node: AstNode): Promise<unknown> {
+  private async evalNode(node: AstNode, signal = this.options.signal): Promise<unknown> {
+    signal?.throwIfAborted()
     this.checkIteration()
 
     switch (node.type) {
       case 'Program':
-        return this.execBlock(node.body)
+        return this.execBlock(node.body, signal)
 
       case 'Assignment': {
-        const value = await this.evalNode(node.value)
+        const value = await this.evalNode(node.value, signal)
         this.vars.set(node.name, value)
 
         // 彩蛋: pero_awakening 觉醒仪式
@@ -93,17 +108,17 @@ export class NitRuntime {
       }
 
       case 'If': {
-        const cond = await this.evalNode(node.condition)
+        const cond = await this.evalNode(node.condition, signal)
         if (this.isTruthy(cond)) {
-          return this.execBlock(node.then)
+          return this.execBlock(node.then, signal)
         } else if (node.else) {
-          return this.execBlock(node.else)
+          return this.execBlock(node.else, signal)
         }
         return null
       }
 
       case 'For': {
-        const iterable = await this.evalNode(node.iterable)
+        const iterable = await this.evalNode(node.iterable, signal)
         if (!Array.isArray(iterable)) {
           throw new Error(`NIT Runtime: for 循环需要数组，得到 ${typeof iterable}`)
         }
@@ -111,7 +126,7 @@ export class NitRuntime {
         for (const item of iterable) {
           this.vars.set(node.variable, item)
           try {
-            lastVal = await this.execBlock(node.body)
+            lastVal = await this.execBlock(node.body, signal)
           } catch (err) {
             if (err instanceof ReturnSignal) throw err
             throw err
@@ -121,35 +136,57 @@ export class NitRuntime {
       }
 
       case 'Parallel': {
-        const promises = node.expressions.map((expr) => this.evalNode(expr))
-        const results = await Promise.all(promises)
-        return results
+        const scope = createCancellationScope({ signal })
+        const promises = node.expressions.map((expr) => this.evalNode(expr, scope.signal))
+        try {
+          return await Promise.all(promises)
+        } catch (error) {
+          // 同组任一分支失败，先取消其他分支，再把错误交给外层处理。
+          scope.controller.abort(error)
+          await Promise.allSettled(promises)
+          throw error
+        } finally {
+          if (scope.signal.aborted) {
+            try {
+              await waitForCancellationCleanup(scope.signal)
+            } finally {
+              scope.dispose()
+            }
+          } else if (signal) {
+            // 成功的并行组可返回资源供后续步骤使用，资源仍跟随父脚本取消。
+            scope.signal.addEventListener('abort', () => scope.dispose(), { once: true })
+          } else {
+            scope.dispose()
+          }
+        }
       }
 
       case 'TryCatch': {
         try {
-          return await this.execBlock(node.tryBlock)
+          return await this.execBlock(node.tryBlock, signal)
         } catch (err) {
+          // 父任务停止不能被脚本 catch 吞掉后继续写文件或启动进程。
+          signal?.throwIfAborted()
           if (err instanceof ReturnSignal) throw err
           logger.debug(`NIT try/catch 捕获: ${err}`)
-          return this.execBlock(node.catchBlock)
+          return this.execBlock(node.catchBlock, signal)
         }
       }
 
       case 'Return':
-        throw new ReturnSignal(await this.evalNode(node.value))
+        throw new ReturnSignal(await this.evalNode(node.value, signal))
 
       case 'FunctionCall':
-        return this.evalFunctionCall(node.name, node.args)
+        return this.evalFunctionCall(node.name, node.args, signal)
 
       case 'BinaryOp':
-        return this.evalBinaryOp(node.op, node.left, node.right)
+        return this.evalBinaryOp(node.op, node.left, node.right, signal)
 
       case 'UnaryOp':
-        return this.evalUnaryOp(node.op, node.operand)
+        return this.evalUnaryOp(node.op, node.operand, signal)
 
       case 'MemberAccess': {
-        const obj = await this.evalNode(node.object)
+        const obj = await this.evalNode(node.object, signal)
         if (obj == null) return null
         // 特殊: .length (数组和字符串)
         if (node.field === 'length' && (Array.isArray(obj) || typeof obj === 'string')) {
@@ -159,15 +196,15 @@ export class NitRuntime {
       }
 
       case 'IndexAccess': {
-        const arr = (await this.evalNode(node.object)) as unknown[]
-        const idx = (await this.evalNode(node.index)) as number
+        const arr = (await this.evalNode(node.object, signal)) as unknown[]
+        const idx = (await this.evalNode(node.index, signal)) as number
         return arr?.[idx] ?? null
       }
 
       case 'ArrayLiteral': {
         const elements = []
         for (const el of node.elements) {
-          elements.push(await this.evalNode(el))
+          elements.push(await this.evalNode(el, signal))
         }
         return elements
       }
@@ -188,13 +225,17 @@ export class NitRuntime {
 
   // ── 函数调用 ──
 
-  private async evalFunctionCall(name: string, argNodes: FunctionArg[]): Promise<unknown> {
+  private async evalFunctionCall(
+    name: string,
+    argNodes: FunctionArg[],
+    signal = this.options.signal,
+  ): Promise<unknown> {
     // 解析参数
     const positional: unknown[] = []
     const named: Record<string, unknown> = {}
 
     for (const arg of argNodes) {
-      const value = await this.evalNode(arg.value)
+      const value = await this.evalNode(arg.value, signal)
       if (arg.key) {
         named[arg.key] = value
       } else {
@@ -213,11 +254,17 @@ export class NitRuntime {
     if (name === 'merge') {
       return this.builtinMerge(positional, named)
     }
+    if (name === 'parse_json') {
+      if (typeof positional[0] !== 'string') throw new Error('parse_json 需要 JSON 文本')
+      return JSON.parse(positional[0]) as unknown
+    }
 
     // 工具调用
-    if (this.toolCalls.length >= MAX_TOOL_CALLS) {
+    signal?.throwIfAborted()
+    if (this.toolCallCount >= MAX_TOOL_CALLS) {
       throw new Error(`NIT Runtime: 工具调用次数超过上限 (${MAX_TOOL_CALLS})`)
     }
+    this.toolCallCount++
 
     const args: Record<string, unknown> = { ...named }
     if (positional.length === 1 && Object.keys(named).length === 0) {
@@ -228,7 +275,9 @@ export class NitRuntime {
     }
 
     logger.debug(`NIT 工具调用: ${name}(${JSON.stringify(args).slice(0, 100)})`)
-    const result = await this.toolExecutor(name, args)
+    const operation = signal ? this.toolExecutor(name, args, signal) : this.toolExecutor(name, args)
+    const result = await waitWithSignal(operation, signal)
+    signal?.throwIfAborted()
     this.toolCalls.push({ name, args, result })
     return result
   }
@@ -289,9 +338,17 @@ export class NitRuntime {
 
   // ── 运算符 ──
 
-  private async evalBinaryOp(op: string, leftNode: AstNode, rightNode: AstNode): Promise<unknown> {
-    const left = await this.evalNode(leftNode)
-    const right = await this.evalNode(rightNode)
+  private async evalBinaryOp(
+    op: string,
+    leftNode: AstNode,
+    rightNode: AstNode,
+    signal = this.options.signal,
+  ): Promise<unknown> {
+    const left = await this.evalNode(leftNode, signal)
+    // 短路判断不能提前执行右侧有副作用的工具调用。
+    if (op === 'and' && !this.isTruthy(left)) return false
+    if (op === 'or' && this.isTruthy(left)) return true
+    const right = await this.evalNode(rightNode, signal)
 
     switch (op) {
       case '+':
@@ -321,8 +378,12 @@ export class NitRuntime {
     }
   }
 
-  private async evalUnaryOp(op: string, operandNode: AstNode): Promise<unknown> {
-    const operand = await this.evalNode(operandNode)
+  private async evalUnaryOp(
+    op: string,
+    operandNode: AstNode,
+    signal = this.options.signal,
+  ): Promise<unknown> {
+    const operand = await this.evalNode(operandNode, signal)
     switch (op) {
       case 'not':
         return !this.isTruthy(operand)

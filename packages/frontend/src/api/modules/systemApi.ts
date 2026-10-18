@@ -5,7 +5,7 @@
  */
 
 import { apiClient } from '../client'
-import { getApiBaseUrl } from '../transport'
+import { getApiResourceUrl } from '../transport'
 
 /** 系统信息 — 与后端 system.router.ts GET /info 完全对齐 */
 export interface SystemInfo {
@@ -45,7 +45,7 @@ export interface HealthStatus {
   timestamp: string
 }
 
-export interface ChatBackgroundSettings {
+export interface AppBackgroundSettings {
   enabled: boolean
   opacity: number
   blur: number
@@ -61,17 +61,20 @@ export interface ChatBackgroundSettings {
 }
 
 export const systemApi = {
-  /** 上传三大聊天页面共用的背景图片。 */
-  uploadChatBackground: (background: Blob) => {
+  /** 应用背景沿用原有存储接口，已有图片无需重新上传。 */
+  uploadAppBackground: (background: Blob) => {
     const data = new FormData()
     data.append('background', background, 'chat-background.webp')
     return apiClient.put<{ contentUrl: string }>('/system/chat-background', data)
   },
 
-  deleteChatBackground: () => apiClient.delete<void>('/system/chat-background'),
+  deleteAppBackground: () => apiClient.delete<void>('/system/chat-background'),
 
-  chatBackgroundContentUrl: (version = Date.now()) =>
-    `${getApiBaseUrl()}/system/chat-background/content?v=${version}`,
+  appBackgroundContentUrl: (version = Date.now()) =>
+    getApiResourceUrl(
+      '/system/chat-background/content',
+      new URLSearchParams({ v: String(version) }),
+    ),
 
   /** 健康检查 */
   health: () => apiClient.get<HealthStatus>('/health'),

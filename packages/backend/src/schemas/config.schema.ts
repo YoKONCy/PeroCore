@@ -5,6 +5,7 @@
  */
 
 import { z } from 'zod'
+import { EMBEDDING_ENABLED_KEY, MEMORY_BACKGROUND_ENABLED_KEY } from '@infos/shared'
 
 /** 获取配置 */
 export const getConfigSchema = z.object({
@@ -12,10 +13,18 @@ export const getConfigSchema = z.object({
 })
 
 /** 设置配置 */
-export const setConfigSchema = z.object({
-  key: z.string().min(1),
-  value: z.string(),
-})
+export const setConfigSchema = z
+  .object({
+    key: z.string().min(1),
+    value: z.string(),
+  })
+  .refine(
+    ({ key, value }) =>
+      ![EMBEDDING_ENABLED_KEY, MEMORY_BACKGROUND_ENABLED_KEY].includes(key) ||
+      value === 'true' ||
+      value === 'false',
+    { message: '开关配置必须为 true 或 false' },
+  )
 
 /** 批量获取配置 */
 export const batchGetConfigSchema = z.object({

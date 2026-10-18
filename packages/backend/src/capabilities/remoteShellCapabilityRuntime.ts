@@ -47,7 +47,9 @@ export class RemoteShellCapabilityRuntime {
     operation: RemoteShellOperation,
     input: unknown,
     context: KernelCallContext,
+    signal?: AbortSignal,
   ): Promise<unknown> {
+    signal?.throwIfAborted()
     if (!OPERATIONS.includes(operation))
       throw new Error(`REMOTE_SHELL_OPERATION_INVALID: ${operation}`)
     const offer = this.directory
@@ -107,7 +109,7 @@ export class RemoteShellCapabilityRuntime {
         scope,
         principalId: context.principalId,
       })
-      return await port.invoke(operation, input, context)
+      return await port.invoke(operation, input, context, signal)
     } finally {
       await scope.dispose()
     }

@@ -251,6 +251,11 @@ describe('Arca Autonomous Host A5/A6', () => {
       ownerPrincipalId: 'owner',
       title: 'Outbox',
     })
+    host.documents.createDocument({
+      authorityNodeId: host.nodeId,
+      ownerPrincipalId: 'owner',
+      title: '后继事件',
+    })
     const pending = host.documents.listPendingOutbox()
     const seen: string[] = []
     const failed = await host.publishOutbox(async (event) => {
@@ -258,11 +263,15 @@ describe('Arca Autonomous Host A5/A6', () => {
       throw new Error('联邦暂不可用')
     })
     expect(failed).toEqual({ published: 0, failedEventId: pending[0]!.eventId })
-    expect(host.documents.listPendingOutbox()).toHaveLength(1)
+    expect(seen).toEqual([pending[0]!.eventId])
+    expect(host.documents.listPendingOutbox().map((event) => event.eventId)).toEqual(
+      pending.map((event) => event.eventId),
+    )
     const success = await host.publishOutbox(async (event) => {
       seen.push(event.eventId)
     })
-    expect(success).toEqual({ published: 1 })
+    expect(success).toEqual({ published: 2 })
+    expect(seen).toEqual([pending[0]!.eventId, ...pending.map((event) => event.eventId)])
     expect(host.documents.listPendingOutbox()).toEqual([])
     await host.stop()
   })

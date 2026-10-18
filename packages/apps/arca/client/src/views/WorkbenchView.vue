@@ -1,753 +1,1342 @@
 <script setup lang="ts">
-/**
- * WorkbenchView.vue — 界面组件
- *
- * 负责组织该界面的响应式状态、用户交互与领域数据展示。
- * 副作用在组件生命周期内建立并清理，避免跨页面残留监听器或异步状态。
- */
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import type { DocumentNode } from '@infos/document-engine'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
+import type { DocumentNode, DocumentSnapshot } from '@infos/document-engine'
+import type { OfficeSelection } from '@infos/document-engine/office'
+import ArcaIcon from '../components/ArcaIcon.vue'
+import ArcaDialog from '../components/ArcaDialog.vue'
 import ConnectionBadge from '../components/ConnectionBadge.vue'
-import ConfirmDialog from '../components/ConfirmDialog.vue'
 import OutlineTree from '../components/OutlineTree.vue'
-import SemanticDocument from '../components/SemanticDocument.vue'
+import OfficeEditor from '../components/OfficeEditor.vue'
+import DocumentReview from '../components/DocumentReview.vue'
+import ArcaSelect from '../components/ArcaSelect.vue'
+import ArcaAvatar from '../components/ArcaAvatar.vue'
+import { displayTime, orderedDocumentNodes } from '../services/documentDisplay'
+import {
+  workspaceActions,
+  useApplicationBusy,
+  type WorkspaceActions,
+} from '../services/workspaceUi'
+import {
+  activateSurface,
+  retireSurface,
+  captureReadingPosition,
+  restoreReadingPosition,
+  usePaperMotion,
+  useReviewMotion,
+  useSelectionIndicator,
+} from '../services/surfaceMotion'
 import { useWorkbenchStore } from '../stores/workbench'
 
-const store = useWorkbenchStore()
-const route = useRoute()
-const router = useRouter()
+const store = useWorkbenchStore(),
+  route = useRoute(),
+  router = useRouter()
+const officeEditor = ref<InstanceType<typeof OfficeEditor>>()
+const workbenchElement = ref<HTMLElement>(),
+  menuBar = ref<HTMLElement>()
+const settleReview = useReviewMotion(workbenchElement)
+const toolbarTarget = ref<HTMLElement>()
+const fileMenu = ref<HTMLDetailsElement>()
+const ribbonTabs = [
+  { id: 'home', label: '开始' },
+  { id: 'insert', label: '插入' },
+  { id: 'layout', label: '页面' },
+  { id: 'review', label: '审阅' },
+] as const
 const mode = ref<'create' | 'read' | 'review'>('create')
-const composerOpen = ref(false)
-const composerTask = ref('')
-const composerScope = ref<'selection' | 'section' | 'document'>('section')
-const composerNodeId = ref<string>()
-const composerAgentId = ref(localStorage.getItem('arca-default-agent') ?? 'pero')
-const composerRequirements = ref('')
-const composerError = ref('')
-const commentNode = ref<DocumentNode>()
-const commentBody = ref('')
-const renameOpen = ref(false)
-const renameTitle = ref('')
-const reviewMessage = ref('')
-const editorWidth = `${localStorage.getItem('arca-editor-width') ?? '840'}px`
-const collaborationDrawer = ref<'activity' | 'review' | 'comments' | 'revisions'>('activity')
-const packageInput = ref<HTMLInputElement>()
-let collaborationTimer: number | undefined
-const activeSnapshot = computed(() => store.activeDocument?.snapshot)
-const nodes = computed(() => activeSnapshot.value?.nodes ?? [])
-const reviewCount = computed(() => store.pendingChangeSets.length)
-const saveLabel = computed(() => {
-  const labels = {
-    idle: '已保存',
-    dirty: '有本地草稿',
-    saving: '正在提交',
-    saved: '已保存',
-    conflicted: '修订冲突',
-    failed: '保存失败',
-  }
-  return labels[store.editState]
-})
-
-async function openDocument(documentId: string) {
-  await store.openDocument(documentId)
-  await router.replace({ name: 'workbench', params: { documentId } })
+const selectedRibbon = computed(() =>
+  mode.value === 'review' ? 'review' : (officeEditor.value?.ribbon ?? 'home'),
+)
+useSelectionIndicator(menuBar, selectedRibbon)
+type Panel = 'properties' | 'activity' | 'review' | 'comments' | 'revisions' | 'compose'
+const panel = ref<Panel | null>(null),
+  busy = ref(false)
+usePaperMotion(
+  workbenchElement,
+  () => [panel.value, store.activeNavigator, store.focusMode],
+  () => officeEditor.value?.hideSelectionToolbar(),
+)
+useApplicationBusy(computed(() => busy.value || store.collaborationBusy))
+const panelTitles: Record<Panel, string> = {
+  properties: '属性',
+  activity: '协作',
+  review: '待审变更',
+  comments: '评论',
+  revisions: '历史版本',
+  compose: '发起协作',
 }
-function scrollToNode(nodeId: string) {
-  document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`)?.scrollIntoView({
-    behavior: 'smooth',
+const composerTask = ref(''),
+  composerScope = ref<'selection' | 'section' | 'document'>('document')
+const composerNodeId = ref<string>(),
+  composerSelection = ref<OfficeSelection>()
+const composerAgentId = ref(localStorage.getItem('arca-default-agent') ?? ''),
+  composerRequirements = ref(''),
+  composerError = ref('')
+const commentNode = ref<DocumentNode>(),
+  commentBody = ref(''),
+  commentRange = ref<{ start: number; end: number }>()
+const renameOpen = ref(false),
+  renameTitle = ref(''),
+  renameError = ref('')
+const reviewMessage = ref(''),
+  reviewPreview = ref<{ before: string; after: string }>(),
+  reviewPreviewError = ref('')
+const reviewView = ref<'text' | 'layout'>('text'),
+  historicalPreview = ref('')
+const reviewSnapshot = ref<DocumentSnapshot>(),
+  showReviewChanges = ref(true)
+const composerQuote = ref('')
+const reviewFeedback = ref('')
+let feedbackTimer: number | undefined, panelTrigger: HTMLElement | undefined
+const activeOutlineId = ref<string>()
+const restoreId = ref<string>(),
+  packageInput = ref<HTMLInputElement>()
+const activeSnapshot = computed(() => store.activeDocument?.snapshot)
+const reviewCount = computed(() => store.pendingChangeSets.length)
+const propertyNode = computed(() => officeEditor.value?.selected)
+const canEdit = computed(
+  () =>
+    mode.value === 'create' &&
+    store.authority !== 'conflict' &&
+    activeSnapshot.value?.document.status === 'active',
+)
+let collaborationTimer: number | undefined,
+  disposed = false,
+  previewSequence = 0
+watch(
+  panel,
+  async (next, previous) => {
+    const active = document.activeElement
+    const inspector = workbenchElement.value?.querySelector('.inspector-panel')
+    if (next && active instanceof HTMLElement && !inspector?.contains(active)) panelTrigger = active
+    if (!next && previous && active instanceof HTMLElement && inspector?.contains(active)) {
+      const target =
+        panelTrigger?.isConnected && !panelTrigger.closest('[inert]')
+          ? panelTrigger
+          : menuBar.value?.querySelector<HTMLElement>('.workbench-view-menu > summary')
+      target?.focus({ preventScroll: true })
+    }
+    await nextTick()
+    if (!disposed && next === panel.value && next !== previous) {
+      const scroll = workbenchElement.value?.querySelector('.inspector-panel .panel-scroll')
+      if (scroll) scroll.scrollTop = 0
+      if (next === 'compose' || next === 'comments') {
+        scroll?.querySelector<HTMLElement>('textarea')?.focus({ preventScroll: true })
+      }
+    }
+  },
+  { flush: 'pre' },
+)
+watch(
+  () => officeEditor.value?.selected?.nodeId,
+  (id) => {
+    if (!id || !activeSnapshot.value) return
+    let heading: string | undefined
+    for (const node of orderedDocumentNodes(activeSnapshot.value)) {
+      if (node.type === 'heading') heading = node.nodeId
+      if (node.nodeId === id) {
+        activeOutlineId.value = heading
+        break
+      }
+    }
+  },
+)
+
+function fail(error: unknown) {
+  store.errorMessage = error instanceof Error ? error.message : '操作失败'
+}
+async function perform(action: () => Promise<unknown>) {
+  if (busy.value || store.applicationStopping) return
+  busy.value = true
+  try {
+    await action()
+  } catch (error) {
+    fail(error)
+  } finally {
+    busy.value = false
+  }
+}
+function togglePanel(next: Panel) {
+  panel.value = panel.value === next ? null : next
+}
+function closeFileMenu() {
+  if (fileMenu.value) fileMenu.value.open = false
+}
+async function selectTool(tab: 'home' | 'insert' | 'layout' | 'review') {
+  if (busy.value) return
+  if (mode.value !== 'create' && activeSnapshot.value?.document.status === 'active')
+    await switchMode('create')
+  officeEditor.value?.setRibbon(tab)
+}
+function inspect(
+  next: 'activity' | 'review' | 'comments' | 'revisions' | 'properties' | 'outline',
+) {
+  if (next === 'outline') store.toggleNavigator('outline')
+  else if (next === 'review') void switchMode('review')
+  else togglePanel(next)
+}
+async function openDocument(id: string) {
+  await perform(async () => {
+    await officeEditor.value?.flush()
+    await store.openDocument(id)
+    reviewPreview.value = undefined
+    reviewFeedback.value = ''
+    historicalPreview.value = ''
+    commentNode.value = undefined
+    activeOutlineId.value = undefined
+    panel.value = null
+    mode.value = 'create'
+    await router.replace({ name: 'workbench', params: { documentId: id } })
+  })
+}
+async function scrollToNode(id: string) {
+  activeOutlineId.value = id
+  if (mode.value === 'review') mode.value = 'read'
+  await nextTick()
+  document.querySelector('[data-node-id="' + CSS.escape(id) + '"]')?.scrollIntoView({
+    behavior: document.documentElement.dataset.motion === 'reduced' ? 'instant' : 'smooth',
     block: 'center',
   })
 }
-function toggleDrawer(value: NonNullable<typeof store.activeNavigator>) {
-  store.toggleNavigator(value)
-}
-function openComposer(nodeId?: string) {
-  composerNodeId.value = nodeId
-  if (!store.collaborationAgents.some((agent) => agent.id === composerAgentId.value)) {
-    composerAgentId.value = store.collaborationAgents[0]?.id ?? ''
-  }
-  composerScope.value = nodeId ? 'selection' : 'section'
-  composerOpen.value = true
-}
-function taskStatusLabel(status: (typeof store.collaborationTasks)[number]['status']) {
-  return {
-    queued: '排队中',
-    working: '协作中',
-    completed: '本地建议已生成',
-    awaiting_review: '等待审阅',
-    committed: '已提交',
-    rejected: '已拒绝',
-    failed: '失败',
-    cancelled: '已取消',
-  }[status]
+async function openComposer(id?: string) {
+  const selection = officeEditor.value?.getSelection()
+  const quote = officeEditor.value?.getSelectedText()
+  await perform(async () => {
+    await officeEditor.value?.flush()
+    composerNodeId.value = id ?? selection?.focus.nodeId
+    composerSelection.value =
+      selection && activeSnapshot.value
+        ? { ...selection, revisionId: activeSnapshot.value.revisionId }
+        : undefined
+    composerScope.value =
+      selection &&
+      (selection.anchor.nodeId !== selection.focus.nodeId ||
+        selection.anchor.offset !== selection.focus.offset)
+        ? 'selection'
+        : composerNodeId.value
+          ? 'section'
+          : 'document'
+    composerQuote.value =
+      quote ||
+      activeSnapshot.value?.nodes.find((node) => node.nodeId === composerNodeId.value)?.text ||
+      ''
+    if (!store.collaborationAgents.some((agent) => agent.id === composerAgentId.value))
+      composerAgentId.value = store.collaborationAgents[0]?.id ?? ''
+    composerError.value = ''
+    mode.value = 'create'
+    panel.value = 'compose'
+  })
 }
 async function submitCollaboration() {
+  if (busy.value || store.collaborationBusy || !composerTask.value.trim() || !composerAgentId.value)
+    return
   composerError.value = ''
+  busy.value = true
   try {
+    await officeEditor.value?.flush()
+    if (
+      composerScope.value === 'selection' &&
+      composerSelection.value?.revisionId !== activeSnapshot.value?.revisionId
+    )
+      throw new Error('文稿已更新，请重新选择内容')
     await store.createCollaborationTask({
-      instruction: composerTask.value,
+      instruction: composerTask.value.trim(),
       scope: composerScope.value,
+      agentId: composerAgentId.value,
+      ...(composerScope.value === 'selection' ? { selection: composerSelection.value } : {}),
       ...(composerScope.value !== 'document' && composerNodeId.value
         ? { nodeId: composerNodeId.value }
         : {}),
-      agentId: composerAgentId.value,
       ...(composerRequirements.value.trim()
         ? { requirements: composerRequirements.value.trim() }
         : {}),
     })
-    composerOpen.value = false
     composerTask.value = ''
     composerRequirements.value = ''
-    collaborationDrawer.value = 'activity'
+    panel.value = 'activity'
   } catch (error) {
-    composerError.value = error instanceof Error ? error.message : String(error)
+    composerError.value = error instanceof Error ? error.message : '协作未能开始'
+  } finally {
+    busy.value = false
   }
 }
-async function openTaskResult(changeSetId?: string) {
-  if (changeSetId) await selectChangeSet(changeSetId)
+function taskLabel(status: string) {
+  return (
+    (
+      {
+        queued: '排队中',
+        working: '协作中',
+        completed: '已完成',
+        awaiting_review: '待审阅',
+        committed: '已接受',
+        rejected: '已拒绝',
+        failed: '失败',
+        cancelled: '已取消',
+      } as Record<string, string>
+    )[status] ?? status
+  )
 }
-async function requestChanges() {
+function actorLabel(id: string) {
+  if (id.startsWith('human:')) return '我'
+  const key = id.replace(/^agent:/, '')
+  return (
+    store.collaborationAgents.find((agent) => agent.id === key)?.name ??
+    (key === 'arca-local' ? '本地模型' : key)
+  )
+}
+const composerActor = computed(() => actorLabel(composerAgentId.value))
+const collaboratorOptions = computed(() =>
+  store.collaborationAgents.map((agent) => ({
+    value: agent.id,
+    label: agent.name,
+    agentId: agent.id,
+  })),
+)
+async function selectChangeSet(id: string) {
+  await perform(async () => {
+    await officeEditor.value?.flush()
+    reviewFeedback.value = ''
+    await store.selectChangeSet(id)
+    reviewMessage.value = ''
+    reviewPreview.value = undefined
+    reviewSnapshot.value = undefined
+    reviewPreviewError.value = ''
+    showReviewChanges.value = true
+    mode.value = 'review'
+    panel.value = 'review'
+    const sequence = ++previewSequence
+    const selected = store.selectedChangeSet
+    const transport = store.transport
+    if (!selected || !transport) throw new Error('审阅服务未连接')
+    const [preview, baseline] = await Promise.allSettled([
+      transport.invoke('document.changeset.preview', { changeSetId: id }),
+      transport.invoke('document.snapshot_at', {
+        documentId: selected.documentId,
+        revisionId: selected.baseRevisionId,
+      }),
+    ])
+    if (disposed || sequence !== previewSequence) return
+    if (preview.status === 'fulfilled')
+      reviewPreview.value = preview.value as { before: string; after: string }
+    else
+      reviewPreviewError.value =
+        preview.reason instanceof Error ? preview.reason.message : '排版预览暂不可用'
+    if (baseline.status === 'fulfilled') reviewSnapshot.value = baseline.value as DocumentSnapshot
+    else
+      reviewPreviewError.value =
+        baseline.reason instanceof Error ? baseline.reason.message : '原文暂不可用'
+    const summary = store.semanticDiff?.summary
+    reviewView.value =
+      reviewSnapshot.value &&
+      summary?.changedTextNodes &&
+      !summary.insertedNodes &&
+      !summary.deletedNodes &&
+      !summary.movedNodes &&
+      !summary.renamedDocuments &&
+      !reviewSnapshot.value.nodes.some((node) => node.type === 'asset')
+        ? 'text'
+        : 'layout'
+  })
+}
+async function switchMode(next: 'create' | 'read' | 'review') {
+  if (
+    next === 'review' &&
+    store.selectedChangeSet &&
+    (!reviewSnapshot.value ||
+      reviewSnapshot.value.revisionId !== store.selectedChangeSet.baseRevisionId)
+  ) {
+    await selectChangeSet(store.selectedChangeSet.changeSetId)
+    return
+  }
+  if (next === 'review' && !store.selectedChangeSet && store.pendingChangeSets[0]) {
+    await selectChangeSet(store.pendingChangeSets[0].changeSetId)
+    return
+  }
+  await perform(async () => {
+    await officeEditor.value?.flush()
+    mode.value = next
+    if (next === 'review') panel.value = 'review'
+  })
+}
+async function review(decision: 'approve' | 'reject' | 'request_changes') {
   const changeSet = store.selectedChangeSet
-  if (!changeSet || !reviewMessage.value.trim()) return
-  await store.reviewChangeSet(changeSet.changeSetId, 'request_changes', reviewMessage.value.trim())
-  composerTask.value = `根据审阅意见调整“${changeSet.intent}”`
-  composerRequirements.value = reviewMessage.value.trim()
-  const agentId = changeSet.actorPrincipalId.replace(/^agent:/, '')
-  composerAgentId.value = store.collaborationAgents.some((agent) => agent.id === agentId)
-    ? agentId
-    : (store.collaborationAgents[0]?.id ?? '')
-  composerScope.value = 'document'
-  composerNodeId.value = undefined
-  reviewMessage.value = ''
-  composerOpen.value = true
+  if (!changeSet) return
+  await perform(async () => {
+    const position = captureReadingPosition(
+      workbenchElement.value?.querySelector<HTMLElement>('.review-stage'),
+    )
+    const changedNodes = store.semanticDiff?.textChanges.map((change) => change.nodeId) ?? []
+    if (!store.transport || !store.session) throw new Error('审阅服务未连接')
+    await store.reviewChangeSet(changeSet.changeSetId, decision, reviewMessage.value.trim())
+    if (decision === 'request_changes') {
+      composerTask.value = '调整：' + changeSet.intent
+      composerRequirements.value = reviewMessage.value.trim()
+      composerScope.value = 'document'
+      composerNodeId.value = undefined
+      composerSelection.value = undefined
+      composerAgentId.value = store.collaborationAgents.some(
+        (agent) => agent.id === changeSet.actorPrincipalId.replace(/^agent:/, ''),
+      )
+        ? changeSet.actorPrincipalId.replace(/^agent:/, '')
+        : (store.collaborationAgents[0]?.id ?? '')
+      panel.value = 'compose'
+    }
+    mode.value = 'create'
+    reviewPreview.value = undefined
+    reviewMessage.value = ''
+    reviewFeedback.value =
+      decision === 'approve'
+        ? '已接受修改'
+        : decision === 'reject'
+          ? '已拒绝修改'
+          : '已记录调整意见'
+    if (feedbackTimer) window.clearTimeout(feedbackTimer)
+    feedbackTimer = window.setTimeout(() => {
+      reviewFeedback.value = ''
+    }, 3500)
+    await nextTick()
+    restoreReadingPosition(
+      workbenchElement.value?.querySelector<HTMLElement>('.office-scroll'),
+      position,
+    )
+    if (decision === 'approve') settleReview(changedNodes)
+  })
 }
-async function insertNode(
-  node: DocumentNode,
-  type: 'paragraph' | 'heading' | 'quote' | 'code-block',
-) {
-  await store.insertNodeAfter(node, type)
-}
-const pendingDeleteNode = ref<DocumentNode>()
-
-function requestDelete(node: DocumentNode) {
-  pendingDeleteNode.value = node
-}
-async function confirmDelete() {
-  const node = pendingDeleteNode.value
-  pendingDeleteNode.value = undefined
-  if (node) await store.deleteNode(node)
-}
-function openComment(node: DocumentNode) {
-  commentNode.value = node
-  commentBody.value = ''
-  collaborationDrawer.value = 'comments'
+async function openComment(id: string) {
+  const selection = officeEditor.value?.getSelection()
+  await perform(async () => {
+    await officeEditor.value?.flush()
+    commentNode.value = activeSnapshot.value?.nodes.find((node) => node.nodeId === id)
+    if (!commentNode.value) throw new Error('未找到评论位置')
+    commentRange.value =
+      selection?.anchor.nodeId === id &&
+      selection.focus.nodeId === id &&
+      selection.anchor.offset !== selection.focus.offset
+        ? {
+            start: Math.min(selection.anchor.offset, selection.focus.offset),
+            end: Math.max(selection.anchor.offset, selection.focus.offset),
+          }
+        : undefined
+    commentBody.value = ''
+    panel.value = 'comments'
+  })
 }
 async function submitComment() {
   if (!commentNode.value || !commentBody.value.trim()) return
-  await store.createComment(commentNode.value.nodeId, commentBody.value.trim())
-  commentNode.value = undefined
-  commentBody.value = ''
+  await perform(async () => {
+    await officeEditor.value?.flush()
+    const node = activeSnapshot.value?.nodes.find(
+      (item) => item.nodeId === commentNode.value!.nodeId,
+    )
+    if (!node || node.text !== commentNode.value!.text)
+      throw new Error('原文已更新，请重新选择评论位置')
+    await store.createComment(node.nodeId, commentBody.value.trim(), commentRange.value)
+    commentNode.value = undefined
+    commentBody.value = ''
+  })
 }
 function openRename() {
   renameTitle.value = store.documentTitle
+  renameError.value = ''
   renameOpen.value = true
 }
-async function submitRename() {
-  await store.renameDocument(renameTitle.value)
-  renameOpen.value = false
-}
-async function togglePresentation() {
-  await store.togglePresentation()
-}
-async function switchMode(next: 'create' | 'read' | 'review') {
-  mode.value = next
-  if (next !== 'review') return
-  collaborationDrawer.value = 'review'
-  if (!store.selectedChangeSet && store.pendingChangeSets[0]) {
-    await store.selectChangeSet(store.pendingChangeSets[0].changeSetId)
+async function rename() {
+  if (busy.value || !renameTitle.value.trim()) return
+  busy.value = true
+  try {
+    await officeEditor.value?.flush()
+    await store.renameDocument(renameTitle.value.trim())
+    renameOpen.value = false
+  } catch (error) {
+    renameError.value = error instanceof Error ? error.message : '重命名失败'
+  } finally {
+    busy.value = false
   }
 }
-async function selectChangeSet(changeSetId: string) {
-  await store.selectChangeSet(changeSetId)
-  mode.value = 'review'
-  collaborationDrawer.value = 'review'
+async function previewRevision(id: string) {
+  await perform(async () => {
+    const result = (await store.transport?.invoke('document.preview', {
+      documentId: store.activeDocumentId,
+      revisionId: id,
+    })) as { html: string }
+    historicalPreview.value = result.html
+  })
+}
+async function restoreRevision() {
+  const id = restoreId.value
+  if (!id) return
+  await perform(async () => {
+    await officeEditor.value?.flush()
+    await store.restoreRevision(id)
+    historicalPreview.value = ''
+    restoreId.value = undefined
+    mode.value = 'create'
+  })
 }
 async function importSelected(event: Event) {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (file) await store.importProject(file)
+  const input = event.target as HTMLInputElement,
+    file = input.files?.[0]
+  if (file)
+    await perform(async () => {
+      await officeEditor.value?.flush()
+      await store.importProject(file)
+      if (store.activeDocumentId)
+        await router.replace({ name: 'workbench', params: { documentId: store.activeDocumentId } })
+    })
   input.value = ''
 }
-function handleKeydown(event: KeyboardEvent) {
-  if (event.key !== 'Escape') return
-  if (pendingDeleteNode.value) return // 确认框自身的Escape处理优先
-  if (composerOpen.value) composerOpen.value = false
-  else if (store.focusMode) store.toggleFocusMode()
+async function exportProject() {
+  await perform(async () => {
+    await officeEditor.value?.flush()
+    await store.exportProject()
+  })
+}
+const actions: WorkspaceActions = {
+  rename: openRename,
+  save: async () => {
+    await officeEditor.value?.flush()
+  },
+  prepareExit: async (keepDraft) => {
+    if (busy.value || store.collaborationBusy) throw new Error('请等待当前操作完成')
+    await officeEditor.value?.prepareExit(keepDraft)
+  },
+  resume: () => officeEditor.value?.resumeAfterExitFailure(),
+  canKeepDraft: () =>
+    !!officeEditor.value?.session?.recoverable && !officeEditor.value?.hasPendingAssets,
+  hasPendingInput: () => !!officeEditor.value?.hasPendingAssets,
+}
+function keys(event: KeyboardEvent) {
+  if (event.key === 'Escape' && !renameOpen.value && !restoreId.value) {
+    if (store.focusMode) store.toggleFocusMode()
+    else panel.value = null
+  }
 }
 onMounted(async () => {
-  window.addEventListener('keydown', handleKeydown)
-  store.activeNavigator = null
-  const documentId =
-    typeof route.params.documentId === 'string' ? route.params.documentId : undefined
-  if (documentId && documentId !== store.activeDocumentId && store.connection === 'ready') {
-    await store.openDocument(documentId)
-  }
+  workspaceActions.value = actions
+  store.activeNavigator = 'outline'
+  window.addEventListener('keydown', keys)
+  const id = typeof route.params.documentId === 'string' ? route.params.documentId : undefined
+  if (id && id !== store.activeDocumentId && store.connection === 'ready')
+    await perform(() => store.openDocument(id))
+  if (typeof route.query.node === 'string') await scrollToNode(route.query.node)
   collaborationTimer = window.setInterval(() => {
-    if (store.collaborationTasks.some((task) => ['queued', 'working'].includes(task.status))) {
-      void store.loadCollaborationTasks()
-    }
-  }, 3_000)
+    if (
+      !store.applicationStopping &&
+      store.collaborationTasks.some((task) => ['queued', 'working'].includes(task.status))
+    )
+      void store.loadCollaborationTasks().catch(fail)
+  }, 3000)
 })
 onBeforeUnmount(() => {
-  window.removeEventListener('keydown', handleKeydown)
+  disposed = true
+  previewSequence++
+  if (workspaceActions.value === actions) workspaceActions.value = undefined
+  window.removeEventListener('keydown', keys)
   if (collaborationTimer) window.clearInterval(collaborationTimer)
+  if (feedbackTimer) window.clearTimeout(feedbackTimer)
+})
+onBeforeRouteLeave(async () => {
+  if (store.applicationStopped) return true
+  if (store.applicationStopping || busy.value) return false
+  try {
+    await officeEditor.value?.flush()
+    return true
+  } catch (error) {
+    if (officeEditor.value?.hasPendingAssets) {
+      fail(error)
+      return false
+    }
+    if (officeEditor.value?.session?.recoverable) {
+      store.errorMessage = '未同步的草稿已保留'
+      return true
+    }
+    store.errorMessage = '草稿尚未保存，请先备份或处理保存问题'
+    return false
+  }
 })
 </script>
 
 <template>
-  <main
-    class="folio-workbench"
-    :class="{ 'focus-mode': store.focusMode }"
-    :style="{ '--editor-width': editorWidth }"
-  >
-    <header class="folio-appbar">
+  <main ref="workbenchElement" class="workbench" :class="{ 'focus-mode': store.focusMode }">
+    <nav ref="menuBar" class="workbench-menubar" aria-label="文稿工具" :inert="busy">
+      <details ref="fileMenu" class="editor-file-menu workbench-file-menu">
+        <summary>文件</summary>
+        <div class="context-menu" @click="closeFileMenu">
+          <button type="button" @click="router.push('/')">文稿库</button>
+          <button type="button" @click="router.push({ name: 'home', query: { new: '1' } })">
+            新建文稿
+          </button>
+          <button type="button" @click="openRename">重命名</button>
+          <hr />
+          <button type="button" @click="officeEditor?.preview()">预览与打印</button>
+          <button type="button" @click="officeEditor?.preview(true)">导出 HTML</button>
+          <button type="button" @click="exportProject">导出工程</button>
+          <button type="button" @click="packageInput?.click()">打开工程</button>
+          <button type="button" @click="officeEditor?.backup()">备份</button>
+          <button
+            v-if="officeEditor?.session?.hasChanges"
+            type="button"
+            @click="officeEditor?.saveCopy()"
+          >
+            另存副本
+          </button>
+        </div>
+      </details>
       <button
-        class="brand-button"
+        v-for="tab in ribbonTabs"
+        :key="tab.id"
+        class="workbench-menu-tab"
+        :aria-pressed="selectedRibbon === tab.id"
+        :class="{ active: selectedRibbon === tab.id }"
         type="button"
-        aria-label="返回最近星页"
-        @click="router.push('/')"
+        @mousedown.prevent
+        @click="selectTool(tab.id)"
       >
-        <span class="brand-fold brand-fold--star" />
+        {{ tab.label }}
       </button>
-      <div class="folio-breadcrumb">
-        <span>Arca</span>
-        <b>/</b>
-        <strong title="双击重命名" @dblclick="openRename">{{ store.documentTitle }}</strong>
-      </div>
-      <div class="folio-save-state" :data-state="store.editState">
-        <i />
-        {{ saveLabel }}
-        <span>REV {{ store.revisionLabel }}</span>
-      </div>
-      <div class="folio-app-actions">
-        <ConnectionBadge />
-        <button class="collaboration-button" type="button" @click="openComposer()">
-          <span>✦</span>
-          {{ reviewCount ? `${reviewCount}项待审` : '协作' }}
-        </button>
-        <button class="quiet-icon" type="button" title="导出工程" @click="store.exportProject()">
-          ↗
-        </button>
-        <button class="quiet-icon" type="button" title="导入工程" @click="packageInput?.click()">
-          ↙
-        </button>
-        <input ref="packageInput" type="file" accept=".arca" hidden @change="importSelected" />
-        <button
-          class="quiet-icon"
-          type="button"
-          title="Arca设置"
-          @click="router.push({ name: 'settings' })"
-        >
-          ⚙
-        </button>
-        <button class="quiet-icon" type="button" title="切换Arca主题" @click="store.cycleTheme()">
-          ◐
-        </button>
-      </div>
-    </header>
-
-    <div v-if="store.errorMessage" class="workbench-error" role="alert">
-      <span>!</span>
-      <strong>{{ store.errorMessage }}</strong>
-      <button aria-label="关闭错误提示" @click="store.errorMessage = ''">×</button>
-    </div>
-
-    <nav v-if="!store.focusMode" class="folio-contextbar" aria-label="文档工作模式">
-      <div class="mode-switcher">
-        <button :class="{ active: mode === 'create' }" @click="switchMode('create')">创作</button>
-        <button :class="{ active: mode === 'read' }" @click="switchMode('read')">阅读</button>
-        <button :class="{ active: mode === 'review' }" @click="switchMode('review')">
-          审阅
-          <span v-if="reviewCount">{{ reviewCount }}</span>
-        </button>
-      </div>
-      <span class="context-spacer" />
-      <button class="context-action" type="button" @click="toggleDrawer('search')">⌕ 搜索</button>
-      <button class="context-action" type="button" @click="togglePresentation">
-        {{ store.surfaceMode === 'presentation' ? '▤ 文稿' : '▣ 演示' }}
+      <span class="active-indicator" aria-hidden="true" />
+      <span class="toolbar-spacer" />
+      <button
+        class="collaborate-action"
+        type="button"
+        :disabled="
+          !activeSnapshot ||
+          activeSnapshot.document.status !== 'active' ||
+          store.authority === 'conflict'
+        "
+        @click="openComposer()"
+      >
+        <ArcaIcon name="sparkle" :size="16" />
+        协作
       </button>
-      <button class="context-action" type="button" @click="store.toggleFocusMode()">⌗ 专注</button>
+      <button
+        class="icon-button"
+        type="button"
+        title="评论"
+        aria-label="评论"
+        :aria-pressed="panel === 'comments'"
+        @click="togglePanel('comments')"
+      >
+        <ArcaIcon name="comment" :size="16" />
+      </button>
+      <details class="editor-file-menu workbench-view-menu">
+        <summary>
+          {{ mode === 'create' ? '编辑' : mode === 'read' ? '阅读' : '审阅' }}
+          <ArcaIcon name="chevron" :size="11" />
+        </summary>
+        <div class="context-menu">
+          <button type="button" @click="switchMode('create')">编辑</button>
+          <button type="button" @click="switchMode('read')">阅读</button>
+          <button type="button" @click="switchMode('review')">
+            待审修改 {{ reviewCount || '' }}
+          </button>
+          <hr />
+          <button type="button" @click="togglePanel('properties')">属性</button>
+          <button type="button" @click="togglePanel('activity')">协作活动</button>
+          <button type="button" @click="togglePanel('revisions')">历史版本</button>
+          <button type="button" @click="store.toggleNavigator('documents')">切换文稿</button>
+          <button type="button" @click="store.toggleFocusMode()">
+            {{ store.focusMode ? '退出专注' : '专注' }}
+          </button>
+        </div>
+      </details>
     </nav>
+    <div ref="toolbarTarget" class="workbench-ribbon" :inert="busy" />
+    <div v-if="mode === 'review'" class="review-commandbar">
+      <button type="button" @click="togglePanel('review')">
+        <ArcaIcon name="compare" :size="16" />
+        待审修改
+        <span v-if="reviewCount">{{ reviewCount }}</span>
+      </button>
+      <button type="button" @click="togglePanel('revisions')">
+        <ArcaIcon name="clock" :size="16" />
+        历史版本
+      </button>
+      <span class="toolbar-spacer" />
+      <button type="button" @click="switchMode('create')">返回编辑</button>
+    </div>
 
-    <div
-      class="folio-body"
-      :class="{ 'navigator-open': Boolean(store.activeNavigator && !store.focusMode) }"
-    >
-      <nav v-if="!store.focusMode" class="star-rail" aria-label="星签导航">
-        <button
-          :class="{ active: store.activeNavigator === 'documents' }"
-          title="项目星页"
-          @click="toggleDrawer('documents')"
-        >
-          ◫
-        </button>
-        <button
-          :class="{ active: store.activeNavigator === 'outline' }"
-          title="文档结构"
-          @click="toggleDrawer('outline')"
-        >
-          ☷
-        </button>
-        <button
-          :class="{ active: store.activeNavigator === 'search' }"
-          title="搜索"
-          @click="toggleDrawer('search')"
-        >
-          ⌕
-        </button>
-        <button title="素材" disabled>◇</button>
-        <span />
-        <button
-          :class="{ active: collaborationDrawer }"
-          title="协作与修订"
-          @click="collaborationDrawer = 'activity'"
-        >
-          ✦
-        </button>
-      </nav>
-
-      <aside v-if="store.activeNavigator && !store.focusMode" class="workspace-drawer">
-        <header class="drawer-heading">
-          <div>
-            <p class="pixel-label">
-              导航
-              <span class="pixel-en">NAVIGATOR</span>
-            </p>
-            <h2>
-              {{
-                store.activeNavigator === 'outline'
-                  ? '文档结构'
-                  : store.activeNavigator === 'search'
-                    ? '星页搜索'
-                    : '项目星页'
-              }}
-            </h2>
-          </div>
-          <button aria-label="关闭导航抽屉" @click="store.activeNavigator = null">×</button>
-        </header>
-        <template v-if="store.activeNavigator === 'documents'">
-          <button
-            v-for="item in store.documents"
-            :key="item.documentId"
-            class="drawer-document"
-            :class="{ active: item.documentId === store.activeDocumentId }"
-            @click="openDocument(item.documentId)"
-          >
-            <span class="mini-fold" />
-            <span>
-              <strong>{{ item.title }}</strong>
-              <small>REV {{ String(item.headRevisionId).slice(0, 7) }}</small>
-            </span>
-          </button>
-        </template>
-        <template v-else-if="store.activeNavigator === 'search'">
-          <input
-            v-model="store.searchQuery"
-            class="drawer-search"
-            type="search"
-            autofocus
-            placeholder="搜索当前星页……"
-          />
-          <button
-            v-for="result in store.searchResults"
-            :key="result.nodeId"
-            class="search-result"
-            @click="scrollToNode(result.nodeId)"
-          >
-            <span>{{ result.type }}</span>
-            <strong>{{ result.text }}</strong>
-          </button>
-          <div v-if="store.searchQuery && !store.searchResults.length" class="drawer-empty">
-            没有匹配的语义块
-          </div>
-        </template>
-        <OutlineTree
-          v-else-if="store.activeNavigator === 'outline'"
-          :nodes="store.activeDocument?.outline.content ?? []"
-          @select="scrollToNode"
-        />
-      </aside>
-
-      <section class="star-page-stage">
-        <article v-if="activeSnapshot" class="star-page">
-          <header class="folio-masthead">
-            <p>{{ activeSnapshot.document.kind }} · {{ activeSnapshot.document.language }}</p>
-            <h1>{{ activeSnapshot.document.title }}</h1>
-            <div>
-              <span>最后修订 {{ store.revisionLabel }}</span>
-              <span>{{ store.wordCount }} 字符</span>
-            </div>
-          </header>
-          <div
-            v-if="store.surfaceMode === 'presentation' && store.presentation"
-            class="presentation-surface"
-          >
-            <article
-              v-for="slide in store.presentation.content"
-              :key="slide.slideId"
-              class="presentation-slide"
-            >
-              <h2>{{ slide.title }}</h2>
-              <p v-for="block in slide.blocks" :key="block.nodeId">{{ block.text }}</p>
-            </article>
-          </div>
-          <SemanticDocument
-            v-else
-            :nodes="nodes"
-            :root-node-id="activeSnapshot.document.rootNodeId"
-            :drafts="store.drafts"
-            :writable="store.connection === 'ready' && store.authority === 'writable'"
-            :mode="mode"
-            :diff="store.semanticDiff"
-            @draft="store.saveDraft"
-            @commit="store.commitDraft"
-            @collaborate="openComposer"
-            @insert="insertNode"
-            @delete="requestDelete"
-            @move="store.moveNode"
-            @comment="openComment"
-          />
-        </article>
-        <div v-else class="surface-empty">
-          <span class="empty-fold" />
-          <strong>没有可显示的星页</strong>
-          <p>返回启动台选择文档，或重新连接Arca Host。</p>
-          <button @click="router.push('/')">返回最近星页</button>
-        </div>
-      </section>
-
-      <aside v-if="collaborationDrawer && !store.focusMode" class="collaboration-drawer">
-        <header class="drawer-heading collaboration-heading">
-          <div>
-            <p class="pixel-label">
-              协作
-              <span class="pixel-en">COLLABORATION</span>
-            </p>
-            <h2>协作与修订</h2>
-          </div>
-          <span class="inspector-state">
-            <i />
-            FIXED
-          </span>
-        </header>
-        <nav class="collaboration-tabs">
-          <button
-            :class="{ active: collaborationDrawer === 'activity' }"
-            @click="collaborationDrawer = 'activity'"
-          >
-            活动
-          </button>
-          <button
-            :class="{ active: collaborationDrawer === 'review' }"
-            @click="collaborationDrawer = 'review'"
-          >
-            审阅 {{ reviewCount || '' }}
-          </button>
-          <button
-            :class="{ active: collaborationDrawer === 'comments' }"
-            @click="collaborationDrawer = 'comments'"
-          >
-            评论 {{ store.comments.length || '' }}
-          </button>
-          <button
-            :class="{ active: collaborationDrawer === 'revisions' }"
-            @click="collaborationDrawer = 'revisions'"
-          >
-            修订
-          </button>
-        </nav>
-        <div class="drawer-content">
-          <template v-if="collaborationDrawer === 'activity'">
-            <article
-              v-for="task in store.collaborationTasks"
-              :key="task.taskId"
-              class="collaboration-task"
-              :data-status="task.status"
-            >
-              <div class="task-actor">
-                <i />
-                {{ task.agentId }}
-              </div>
-              <strong>{{ task.instruction }}</strong>
-              <p>
-                {{ taskStatusLabel(task.status) }}
-                <span v-if="task.stage">· {{ task.stage }}</span>
-              </p>
-              <small>
-                {{ task.source === 'local' ? 'LOCAL MODEL' : 'KERNEL' }} · REV
-                {{ task.baseRevisionId.slice(0, 8) }} · {{ task.scope }}
-              </small>
-              <pre v-if="task.resultText" class="task-result">{{ task.resultText }}</pre>
-              <div class="task-actions">
-                <button v-if="task.changeSetId" @click="openTaskResult(task.changeSetId)">
-                  审阅变更
-                </button>
-                <button
-                  v-if="['queued', 'working'].includes(task.status)"
-                  @click="store.cancelCollaborationTask(task.taskId)"
-                >
-                  取消
-                </button>
-              </div>
-              <p v-if="task.error" class="task-error">{{ task.error }}</p>
-            </article>
-            <div v-if="!store.collaborationTasks.length" class="activity-empty">
-              <span>✦</span>
-              <strong>协作者空闲</strong>
-              <p>发起任务后，工作位置与状态会沿星轨显示。</p>
-              <button @click="openComposer()">发起协作</button>
-            </div>
-          </template>
-          <template v-else-if="collaborationDrawer === 'review'">
-            <div v-if="store.selectedChangeSet && store.semanticDiff" class="review-summary">
-              <span class="risk-chip" :data-risk="store.selectedChangeSet.risk">
-                {{ store.selectedChangeSet.risk }}
-              </span>
-              <h3>{{ store.selectedChangeSet.intent }}</h3>
-              <p>{{ store.selectedChangeSet.explanation }}</p>
-              <dl>
-                <dt>协作者</dt>
-                <dd>{{ store.selectedChangeSet.actorPrincipalId }}</dd>
-                <dt>基础修订</dt>
-                <dd>{{ store.selectedChangeSet.baseRevisionId.slice(0, 8) }}</dd>
-                <dt>文本变更</dt>
-                <dd>{{ store.semanticDiff.summary.changedTextNodes }}</dd>
-                <dt>结构变化</dt>
-                <dd>
-                  ＋{{ store.semanticDiff.summary.insertedNodes }} / －{{
-                    store.semanticDiff.summary.deletedNodes
-                  }}
-                </dd>
-              </dl>
-              <textarea
-                v-model="reviewMessage"
-                class="review-message"
-                placeholder="请求调整时，请写明需要修改的地方……"
-              />
-              <div class="review-actions">
-                <button
-                  class="approve"
-                  @click="
-                    store.reviewChangeSet(
-                      store.selectedChangeSet.changeSetId,
-                      'approve',
-                      reviewMessage,
-                    )
-                  "
-                >
-                  批准并提交
-                </button>
-                <button :disabled="!reviewMessage.trim()" @click="requestChanges">请求调整</button>
-                <button
-                  class="reject"
-                  @click="
-                    store.reviewChangeSet(
-                      store.selectedChangeSet.changeSetId,
-                      'reject',
-                      reviewMessage,
-                    )
-                  "
-                >
-                  拒绝
-                </button>
-              </div>
-            </div>
-            <button
-              v-for="changeSet in store.pendingChangeSets"
-              v-else
-              :key="changeSet.changeSetId"
-              class="changeset-row"
-              @click="selectChangeSet(changeSet.changeSetId)"
-            >
-              <i />
-              <span>
-                <strong>{{ changeSet.intent }}</strong>
-                <small>{{ changeSet.actorPrincipalId }} · {{ changeSet.risk }}</small>
-              </span>
+    <div class="workbench-body">
+      <Transition name="navigator" @before-enter="activateSurface" @before-leave="retireSurface">
+        <aside v-if="store.activeNavigator && !store.focusMode && !panel" class="navigation-panel">
+          <header class="panel-heading">
+            <h2>{{ store.activeNavigator === 'documents' ? '文稿' : '大纲' }}</h2>
+            <button class="icon-button" aria-label="收起导航" @click="store.activeNavigator = null">
+              <ArcaIcon name="close" :size="16" />
             </button>
-            <div v-if="!store.pendingChangeSets.length" class="activity-empty">
-              <strong>没有待审变更</strong>
-              <p>Agent提交的ChangeSet会出现在这里。</p>
-            </div>
-          </template>
-          <template v-else-if="collaborationDrawer === 'comments'">
-            <form v-if="commentNode" class="comment-composer" @submit.prevent="submitComment">
-              <strong>评论语义块</strong>
-              <small>{{ commentNode.text?.slice(0, 60) || commentNode.type }}</small>
-              <textarea v-model="commentBody" autofocus placeholder="写下审阅意见……" />
-              <div>
-                <button type="button" @click="commentNode = undefined">取消</button>
-                <button type="submit" :disabled="!commentBody.trim()">添加评论</button>
-              </div>
-            </form>
-            <article
-              v-for="comment in store.comments"
-              :key="comment.commentId"
-              class="comment-entry"
-            >
-              <p>{{ comment.body }}</p>
-              <small>{{ comment.authorPrincipalId }} · {{ comment.status }}</small>
+          </header>
+          <div class="panel-scroll" :inert="busy">
+            <template v-if="store.activeNavigator === 'documents'">
               <button
-                v-if="comment.status === 'open'"
-                @click="store.resolveComment(comment.commentId)"
+                v-for="item in store.documents.filter((item) => item.status === 'active')"
+                :key="item.documentId"
+                class="navigation-row"
+                :class="{ active: item.documentId === store.activeDocumentId }"
+                :disabled="busy"
+                @click="openDocument(item.documentId)"
               >
-                标记解决
+                <ArcaIcon name="file" :size="16" />
+                <span>{{ item.title }}</span>
               </button>
-            </article>
-            <div v-if="!store.comments.length" class="activity-empty">
-              <strong>没有评论</strong>
-              <p>评论会按语义节点锚定，而不是进入全局聊天。</p>
-            </div>
-          </template>
-          <template v-else>
-            <div class="revision-river">
-              <article
-                v-for="entry in [...store.revisions].reverse()"
-                :key="entry.revision.revisionId"
-                class="revision-node"
-                :class="{ current: entry.revision.revisionId === activeSnapshot?.revisionId }"
-              >
-                <i />
-                <div>
-                  <b>REV {{ entry.revision.sequence }}</b>
-                  <strong>{{ entry.revision.intent }}</strong>
-                  <small>
-                    {{ entry.revision.actorPrincipalId }} ·
-                    {{ new Date(entry.revision.committedAt).toLocaleString('zh-CN') }}
-                  </small>
-                </div>
-              </article>
-              <article
-                v-for="changeSet in store.pendingChangeSets"
-                :key="changeSet.changeSetId"
-                class="revision-node pending"
-              >
-                <i />
-                <div>
-                  <b>待审</b>
-                  <strong>{{ changeSet.intent }}</strong>
-                  <small>{{ changeSet.actorPrincipalId }}</small>
-                </div>
-              </article>
-            </div>
-          </template>
-        </div>
-      </aside>
-    </div>
-
-    <footer v-if="!store.focusMode" class="folio-statusbar">
-      <span>REV {{ store.revisionLabel }}</span>
-      <span>{{ store.wordCount }}字符</span>
-      <span>{{ activeSnapshot?.document.language ?? '—' }}</span>
-      <span class="status-spacer" />
-      <span v-if="reviewCount" class="pending-status">✦ {{ reviewCount }}项待审</span>
-      <span>Authority {{ store.authority }}</span>
-      <span>Kernel {{ store.kernelOnline ? '在线' : '离线' }}</span>
-    </footer>
-    <button v-else class="focus-exit" @click="store.toggleFocusMode()">Esc · 退出专注</button>
-
-    <div v-if="renameOpen" class="composer-scrim" @click.self="renameOpen = false">
-      <form class="mini-dialog" @submit.prevent="submitRename">
-        <p class="pixel-label">
-          文档
-          <span class="pixel-en">DOCUMENT</span>
-        </p>
-        <h2>重命名星页</h2>
-        <input v-model="renameTitle" autofocus maxlength="120" />
-        <footer>
-          <button type="button" @click="renameOpen = false">取消</button>
-          <button class="primary-button" type="submit" :disabled="!renameTitle.trim()">保存</button>
-        </footer>
-      </form>
-    </div>
-
-    <div v-if="composerOpen" class="composer-scrim" @click.self="composerOpen = false">
-      <section
-        class="collaboration-composer"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="composer-title"
-      >
-        <header>
-          <div>
-            <p class="pixel-label">
-              协作任务
-              <span class="pixel-en">COLLABORATE</span>
-            </p>
-            <h2 id="composer-title">发起协作任务</h2>
+            </template>
+            <template v-else>
+              <OutlineTree
+                :nodes="store.activeDocument?.outline.content ?? []"
+                :active-id="activeOutlineId"
+                @select="scrollToNode"
+              />
+              <p v-if="!store.activeDocument?.outline.content.length" class="panel-empty">
+                暂无标题
+              </p>
+            </template>
           </div>
-          <button aria-label="关闭协作任务框" @click="composerOpen = false">×</button>
-        </header>
-        <textarea
-          v-model="composerTask"
-          autofocus
-          placeholder="例如：重组这一节，使论证更清楚，并保留原有语气。"
-        />
-        <div class="composer-fields">
-          <label>
-            范围
-            <select v-model="composerScope">
-              <option value="selection">当前语义块</option>
-              <option value="section">当前章节</option>
-              <option value="document">全文</option>
-            </select>
-          </label>
-          <label>
-            协作者
-            <select v-model="composerAgentId">
-              <option v-for="agent in store.collaborationAgents" :key="agent.id" :value="agent.id">
-                {{ agent.name }}
-              </option>
-            </select>
-          </label>
-        </div>
-        <textarea
-          v-model="composerRequirements"
-          class="composer-requirements"
-          placeholder="附加要求（可选）：语气、长度、必须保留的内容……"
-        />
-        <p v-if="composerNodeId" class="composer-context">
-          已锚定语义块 {{ composerNodeId.slice(0, 8) }}
-        </p>
-        <div v-if="!store.collaborationAvailable" class="composer-notice">
-          <i />
-          Kernel协作通道当前不可用，请确认主应用与Arca Host均已连接。
-        </div>
-        <p v-if="composerError" class="composer-error">{{ composerError }}</p>
-        <footer>
-          <button class="soft-button" @click="composerOpen = false">取消</button>
-          <button
-            class="primary-button"
-            :disabled="
-              !composerTask.trim() || !store.collaborationAvailable || store.collaborationBusy
+        </aside>
+      </Transition>
+      <section class="document-stage" :aria-busy="busy" :inert="busy">
+        <template v-if="activeSnapshot">
+          <OfficeEditor
+            v-show="mode !== 'review'"
+            ref="officeEditor"
+            :snapshot="activeSnapshot"
+            :writable="
+              store.authority !== 'conflict' && activeSnapshot.document.status === 'active'
             "
-            @click="submitCollaboration"
-          >
-            {{ store.collaborationBusy ? '正在派发' : '开始协作' }}
-          </button>
-        </footer>
+            :mode="mode"
+            :toolbar-target="toolbarTarget"
+            @collaborate="openComposer"
+            @comment="openComment"
+            @copy="openDocument"
+            @export-project="exportProject"
+            @import-project="packageInput?.click()"
+            @inspect="inspect"
+            @rename="openRename"
+          />
+          <section v-if="mode === 'review'" class="review-stage">
+            <header class="review-stage-heading">
+              <span>
+                {{
+                  store.selectedChangeSet
+                    ? actorLabel(store.selectedChangeSet.actorPrincipalId) + ' 的修改'
+                    : '审阅'
+                }}
+              </span>
+              <span class="toolbar-spacer" />
+              <div v-if="reviewView === 'text'" class="review-display-switch">
+                <button
+                  :aria-pressed="showReviewChanges"
+                  :class="{ active: showReviewChanges }"
+                  @click="showReviewChanges = true"
+                >
+                  显示改动
+                </button>
+                <button
+                  :aria-pressed="!showReviewChanges"
+                  :class="{ active: !showReviewChanges }"
+                  @click="showReviewChanges = false"
+                >
+                  修改后
+                </button>
+              </div>
+              <details class="editor-file-menu">
+                <summary>{{ reviewView === 'text' ? '正文' : '排版' }}</summary>
+                <div class="context-menu">
+                  <button @click="reviewView = 'text'">正文改动</button>
+                  <button @click="reviewView = 'layout'">排版对照</button>
+                </div>
+              </details>
+            </header>
+            <div v-if="!store.selectedChangeSet" class="surface-empty">
+              <ArcaIcon name="check" :size="32" />
+              <strong>{{ reviewCount ? '选择一项变更' : '暂无待审变更' }}</strong>
+            </div>
+            <template v-else-if="reviewView === 'text'">
+              <DocumentReview
+                v-if="reviewSnapshot && store.semanticDiff"
+                :snapshot="reviewSnapshot"
+                :diff="store.semanticDiff"
+                :show-changes="showReviewChanges"
+              />
+              <p v-else class="panel-empty">{{ reviewPreviewError || '正在读取原文…' }}</p>
+              <button
+                v-if="
+                  store.semanticDiff &&
+                  (store.semanticDiff.summary.insertedNodes ||
+                    store.semanticDiff.summary.deletedNodes ||
+                    store.semanticDiff.summary.movedNodes ||
+                    store.semanticDiff.summary.changedAttributes)
+                "
+                class="review-layout-hint"
+                @click="reviewView = 'layout'"
+              >
+                查看结构与排版变化
+                <ArcaIcon name="arrow" :size="14" />
+              </button>
+            </template>
+            <div v-else-if="reviewPreview" class="layout-diff">
+              <section>
+                <h3>修改前</h3>
+                <iframe title="修改前" sandbox="" :srcdoc="reviewPreview.before" />
+              </section>
+              <section>
+                <h3>修改后</h3>
+                <iframe title="修改后" sandbox="" :srcdoc="reviewPreview.after" />
+              </section>
+            </div>
+            <p v-else class="panel-empty">{{ reviewPreviewError || '正在读取预览…' }}</p>
+          </section>
+        </template>
+        <div v-else class="surface-empty">
+          <strong>未打开文稿</strong>
+          <button class="primary-button" @click="router.push('/')">返回文稿列表</button>
+        </div>
       </section>
+      <Transition name="inspector" @before-enter="activateSurface" @before-leave="retireSurface">
+        <aside v-if="panel && !store.focusMode" class="inspector-panel">
+          <header class="panel-heading">
+            <h2>{{ panelTitles[panel] }}</h2>
+            <button class="icon-button" aria-label="收起面板" @click="panel = null">
+              <ArcaIcon name="close" :size="16" />
+            </button>
+          </header>
+          <div class="panel-scroll" :inert="busy">
+            <div :key="panel" class="panel-content">
+              <template v-if="panel === 'properties'">
+                <div v-if="propertyNode && canEdit" class="form-stack">
+                  <label>
+                    对齐
+                    <ArcaSelect
+                      aria-label="对齐"
+                      :model-value="String(propertyNode.attributes.align ?? 'left')"
+                      :options="[
+                        { value: 'left', label: '左对齐' },
+                        { value: 'center', label: '居中' },
+                        { value: 'right', label: '右对齐' },
+                        { value: 'justify', label: '两端对齐' },
+                      ]"
+                      @change="(value) => officeEditor?.attributes({ align: String(value) })"
+                    />
+                  </label>
+                  <template v-if="propertyNode.type === 'asset'">
+                    <label>
+                      替代文本
+                      <input
+                        :value="propertyNode.attributes.alt"
+                        @change="
+                          officeEditor?.attributes({
+                            alt: ($event.target as HTMLInputElement).value,
+                          })
+                        "
+                      />
+                    </label>
+                    <label>
+                      图注
+                      <input
+                        :value="propertyNode.attributes.caption"
+                        @change="
+                          officeEditor?.attributes({
+                            caption: ($event.target as HTMLInputElement).value,
+                          })
+                        "
+                      />
+                    </label>
+                    <label>
+                      宽度（px）
+                      <input
+                        type="number"
+                        min="24"
+                        max="1600"
+                        :value="propertyNode.attributes.width ?? 480"
+                        @change="
+                          officeEditor?.attributes({
+                            width: Math.max(
+                              24,
+                              Math.min(
+                                1600,
+                                Number(($event.target as HTMLInputElement).value) || 480,
+                              ),
+                            ),
+                          })
+                        "
+                      />
+                    </label>
+                    <button @click="officeEditor?.chooseImage()">替换图片</button>
+                  </template>
+                  <template v-else>
+                    <label>
+                      行距
+                      <input
+                        type="number"
+                        min="1"
+                        max="3"
+                        step="0.1"
+                        :value="propertyNode.attributes.lineHeight ?? 1.7"
+                        @change="
+                          officeEditor?.attributes({
+                            lineHeight: Math.max(
+                              1,
+                              Math.min(3, Number(($event.target as HTMLInputElement).value) || 1.7),
+                            ),
+                          })
+                        "
+                      />
+                    </label>
+                    <label>
+                      缩进
+                      <input
+                        type="number"
+                        min="0"
+                        max="12"
+                        :value="propertyNode.attributes.indent ?? 0"
+                        @change="
+                          officeEditor?.attributes({
+                            indent: Math.max(
+                              0,
+                              Math.min(12, Number(($event.target as HTMLInputElement).value) || 0),
+                            ),
+                          })
+                        "
+                      />
+                    </label>
+                  </template>
+                  <template v-if="officeEditor?.cell">
+                    <label>
+                      列宽（px）
+                      <input
+                        type="number"
+                        min="24"
+                        max="1600"
+                        :value="officeEditor.selectedColumnWidth"
+                        @change="
+                          officeEditor?.columnWidth(
+                            Number(($event.target as HTMLInputElement).value),
+                          )
+                        "
+                      />
+                    </label>
+                    <button
+                      @click="
+                        officeEditor?.attributes({
+                          headerCell: !propertyNode.attributes.headerCell,
+                        })
+                      "
+                    >
+                      切换表头
+                    </button>
+                    <label>
+                      边框颜色
+                      <input
+                        type="color"
+                        :value="propertyNode.attributes.borderColor ?? '#b4b4b4'"
+                        @change="
+                          officeEditor?.attributes({
+                            borderColor: ($event.target as HTMLInputElement).value,
+                            borderStyle: 'solid',
+                          })
+                        "
+                      />
+                    </label>
+                    <button
+                      @click="
+                        officeEditor?.attributes({
+                          borderStyle:
+                            propertyNode.attributes.borderStyle === 'none' ? 'solid' : 'none',
+                        })
+                      "
+                    >
+                      切换边框
+                    </button>
+                  </template>
+                </div>
+                <p v-else class="panel-empty">
+                  {{ canEdit ? '选择正文中的内容' : '切换到编辑模式以设置属性' }}
+                </p>
+              </template>
+              <form
+                v-else-if="panel === 'compose'"
+                class="form-stack"
+                @submit.prevent="submitCollaboration"
+              >
+                <div class="collaborator-heading">
+                  <label>
+                    <span>协作者</span>
+                    <ArcaSelect
+                      v-model="composerAgentId"
+                      aria-label="协作者"
+                      :options="collaboratorOptions"
+                    />
+                  </label>
+                </div>
+                <div>
+                  <span class="field-caption">范围</span>
+                  <div class="scope-switch" role="group" aria-label="协作范围">
+                    <button
+                      type="button"
+                      :aria-pressed="composerScope === 'selection'"
+                      :disabled="
+                        !composerSelection ||
+                        (composerSelection.anchor.nodeId === composerSelection.focus.nodeId &&
+                          composerSelection.anchor.offset === composerSelection.focus.offset)
+                      "
+                      @click="composerScope = 'selection'"
+                    >
+                      选区
+                    </button>
+                    <button
+                      type="button"
+                      :aria-pressed="composerScope === 'section'"
+                      :disabled="!composerNodeId"
+                      @click="composerScope = 'section'"
+                    >
+                      章节
+                    </button>
+                    <button
+                      type="button"
+                      :aria-pressed="composerScope === 'document'"
+                      @click="composerScope = 'document'"
+                    >
+                      全文
+                    </button>
+                  </div>
+                </div>
+                <label>
+                  修改要求
+                  <textarea v-model="composerTask" rows="5" placeholder="希望如何修改？" required />
+                </label>
+                <div class="collaboration-shortcuts">
+                  <button
+                    type="button"
+                    @click="composerTask = '润色文字，保留原有语气与关键信息。'"
+                  >
+                    润色
+                  </button>
+                  <button type="button" @click="composerTask = '精简表述，保留原意与关键信息。'">
+                    精简
+                  </button>
+                  <button type="button" @click="composerTask = '整理结构，让重点更清楚。'">
+                    整理结构
+                  </button>
+                </div>
+                <details class="composer-extra">
+                  <summary>附加要求</summary>
+                  <textarea
+                    v-model="composerRequirements"
+                    rows="3"
+                    aria-label="附加要求"
+                    placeholder="可选"
+                  />
+                </details>
+                <p v-if="!store.collaborationAvailable" class="form-error">
+                  协作暂不可用，请检查连接与模型设置。
+                </p>
+                <p v-if="composerError" class="form-error" role="alert">{{ composerError }}</p>
+                <button
+                  class="primary-button"
+                  type="submit"
+                  :disabled="
+                    !composerTask.trim() ||
+                    !composerAgentId ||
+                    !store.collaborationAvailable ||
+                    store.collaborationBusy
+                  "
+                >
+                  {{
+                    store.collaborationBusy
+                      ? '提交中…'
+                      : composerActor
+                        ? '交给 ' + composerActor
+                        : '开始协作'
+                  }}
+                  <ArcaIcon name="arrow" :size="15" />
+                </button>
+                <blockquote
+                  v-if="composerQuote && composerScope !== 'document'"
+                  class="composer-quote"
+                >
+                  {{ composerQuote.slice(0, 260) }}
+                </blockquote>
+                <button
+                  class="collaboration-activity-link"
+                  type="button"
+                  @click="panel = 'activity'"
+                >
+                  协作活动
+                  <ArcaIcon name="chevron" :size="13" />
+                </button>
+              </form>
+              <template v-else-if="panel === 'activity'">
+                <button
+                  class="primary-button panel-primary"
+                  :disabled="busy || !canEdit"
+                  @click="openComposer()"
+                >
+                  <ArcaIcon name="plus" :size="16" />
+                  发起协作
+                </button>
+                <article
+                  v-for="task in store.collaborationTasks"
+                  :key="task.taskId"
+                  class="panel-card"
+                >
+                  <div class="card-meta">
+                    <strong>{{ actorLabel(task.agentId) }}</strong>
+                    <span class="task-status" :data-status="task.status">
+                      {{ taskLabel(task.status) }}
+                    </span>
+                  </div>
+                  <p>{{ task.instruction }}</p>
+                  <pre v-if="task.resultText" class="task-result">{{ task.resultText }}</pre>
+                  <p v-if="task.error" class="form-error">{{ task.error }}</p>
+                  <div class="card-actions">
+                    <button
+                      v-if="
+                        task.changeSetId && ['awaiting_review', 'completed'].includes(task.status)
+                      "
+                      :disabled="busy"
+                      @click="selectChangeSet(task.changeSetId)"
+                    >
+                      审阅
+                    </button>
+                    <button
+                      v-if="['queued', 'working'].includes(task.status)"
+                      :disabled="busy"
+                      @click="perform(() => store.cancelCollaborationTask(task.taskId))"
+                    >
+                      取消
+                    </button>
+                    <button
+                      v-if="
+                        task.source === 'local' && task.status === 'failed' && !task.changeSetId
+                      "
+                      :disabled="busy"
+                      @click="perform(() => store.retryCollaborationTask(task.taskId))"
+                    >
+                      重试
+                    </button>
+                  </div>
+                </article>
+                <p v-if="!store.collaborationTasks.length" class="panel-empty">暂无协作任务</p>
+              </template>
+              <template v-else-if="panel === 'review'">
+                <section v-if="store.selectedChangeSet" class="review-decision form-stack">
+                  <div class="collaborator-heading">
+                    <ArcaAvatar
+                      :agent-id="store.selectedChangeSet.actorPrincipalId"
+                      :name="actorLabel(store.selectedChangeSet.actorPrincipalId)"
+                    />
+                    <div>
+                      <strong>{{ actorLabel(store.selectedChangeSet.actorPrincipalId) }}</strong>
+                      <small>
+                        {{ store.semanticDiff?.summary.changedTextNodes ?? 0 }} 处文本修改
+                      </small>
+                    </div>
+                  </div>
+                  <div class="review-intent">
+                    <h3>{{ store.selectedChangeSet.intent }}</h3>
+                    <span>待审阅</span>
+                  </div>
+                  <p>{{ store.selectedChangeSet.explanation }}</p>
+                  <p
+                    v-if="store.selectedChangeSet.baseRevisionId !== activeSnapshot?.revisionId"
+                    class="form-error"
+                  >
+                    文稿已更新，请重新发起协作。
+                  </p>
+                  <label>
+                    审阅意见
+                    <textarea v-model="reviewMessage" rows="4" placeholder="添加意见" />
+                  </label>
+                  <button
+                    class="primary-button"
+                    :disabled="
+                      busy ||
+                      !['validated', 'approved'].includes(store.selectedChangeSet.status) ||
+                      store.selectedChangeSet.baseRevisionId !== activeSnapshot?.revisionId
+                    "
+                    @click="review('approve')"
+                  >
+                    <ArcaIcon name="check" :size="16" />
+                    接受修改
+                  </button>
+                  <div class="review-other-actions">
+                    <button
+                      :disabled="busy || !reviewMessage.trim()"
+                      @click="review('request_changes')"
+                    >
+                      要求调整
+                    </button>
+                    <button :disabled="busy" @click="review('reject')">拒绝</button>
+                  </div>
+                </section>
+                <div
+                  v-if="store.pendingChangeSets.length > (store.selectedChangeSet ? 1 : 0)"
+                  class="proposal-list"
+                >
+                  <h3>{{ store.selectedChangeSet ? '其他修改' : '待审修改' }}</h3>
+                  <button
+                    v-for="changeSet in store.pendingChangeSets.filter(
+                      (item) => item.changeSetId !== store.selectedChangeSet?.changeSetId,
+                    )"
+                    :key="changeSet.changeSetId"
+                    class="proposal-row"
+                    :disabled="busy"
+                    @click="selectChangeSet(changeSet.changeSetId)"
+                  >
+                    <strong>{{ changeSet.intent }}</strong>
+                    <small>{{ actorLabel(changeSet.actorPrincipalId) }}</small>
+                  </button>
+                </div>
+                <p v-else-if="!reviewCount" class="panel-empty">暂无待审变更</p>
+              </template>
+              <template v-else-if="panel === 'comments'">
+                <form
+                  v-if="commentNode"
+                  class="form-stack comment-composer"
+                  @submit.prevent="submitComment"
+                >
+                  <blockquote>{{ commentNode.text?.slice(0, 100) }}</blockquote>
+                  <textarea
+                    v-model="commentBody"
+                    aria-label="评论内容"
+                    rows="3"
+                    placeholder="添加评论"
+                    required
+                  />
+                  <div class="card-actions">
+                    <button type="button" @click="commentNode = undefined">取消</button>
+                    <button class="primary-button" :disabled="busy || !commentBody.trim()">
+                      发送
+                    </button>
+                  </div>
+                </form>
+                <article
+                  v-for="comment in store.comments"
+                  :key="comment.commentId"
+                  class="panel-card"
+                >
+                  <div class="card-meta">
+                    <strong>{{ actorLabel(comment.authorPrincipalId) }}</strong>
+                    <small>{{ comment.status === 'open' ? '待解决' : '已解决' }}</small>
+                  </div>
+                  <blockquote v-if="comment.anchor">{{ comment.anchor.quote }}</blockquote>
+                  <p>{{ comment.body }}</p>
+                  <small v-if="comment.anchorState && comment.anchorState !== 'attached'">
+                    原文位置已变化
+                  </small>
+                  <div class="card-actions">
+                    <button
+                      v-if="comment.status === 'open'"
+                      :disabled="busy"
+                      @click="perform(() => store.resolveComment(comment.commentId))"
+                    >
+                      标记解决
+                    </button>
+                  </div>
+                </article>
+                <p v-if="!store.comments.length && !commentNode" class="panel-empty">暂无评论</p>
+              </template>
+              <template v-else-if="panel === 'revisions'">
+                <article
+                  v-for="entry in [...store.revisions].reverse()"
+                  :key="entry.revision.revisionId"
+                  class="panel-card"
+                >
+                  <div class="card-meta">
+                    <strong>版本 {{ entry.revision.sequence }}</strong>
+                    <span v-if="entry.revision.revisionId === activeSnapshot?.revisionId">
+                      当前版本
+                    </span>
+                  </div>
+                  <p>{{ entry.revision.intent }}</p>
+                  <small>{{ displayTime(entry.revision.committedAt) }}</small>
+                  <div v-if="entry.restorable !== false" class="card-actions">
+                    <button :disabled="busy" @click="previewRevision(entry.revision.revisionId)">
+                      查看
+                    </button>
+                    <button
+                      v-if="entry.revision.revisionId !== activeSnapshot?.revisionId"
+                      :disabled="
+                        busy ||
+                        store.authority === 'conflict' ||
+                        activeSnapshot?.document.status !== 'active'
+                      "
+                      @click="restoreId = entry.revision.revisionId"
+                    >
+                      恢复此版本
+                    </button>
+                  </div>
+                  <small v-else>无预览快照</small>
+                </article>
+                <p v-if="!store.revisions.length" class="panel-empty">暂无历史版本</p>
+              </template>
+            </div>
+          </div>
+        </aside>
+      </Transition>
     </div>
-
-    <ConfirmDialog
-      :open="Boolean(pendingDeleteNode)"
-      danger
-      title="删除语义块"
-      :message="`将删除“${pendingDeleteNode?.text?.slice(0, 30) || (pendingDeleteNode?.type ?? '')}”及其全部子块，并生成一条新的Revision。此操作可通过Revision回溯。`"
-      confirm-text="删除"
-      @confirm="confirmDelete"
-      @cancel="pendingDeleteNode = undefined"
-    />
+    <footer class="workbench-status">
+      <span>{{ store.wordCount }} 字符</span>
+      <button v-if="reviewCount" @click="switchMode('review')">{{ reviewCount }} 项待审</button>
+      <span class="operation-receipt" role="status" aria-live="polite">{{ reviewFeedback }}</span>
+      <span class="toolbar-spacer" />
+      <template v-if="mode !== 'review'">
+        <button @click="officeEditor?.toggleView()">
+          {{ officeEditor?.viewMode === 'continuous' ? '连续视图' : '页面视图' }}
+        </button>
+        <label class="zoom-control">
+          <input
+            type="range"
+            min="50"
+            max="150"
+            step="10"
+            aria-label="缩放"
+            :value="officeEditor?.zoom ?? 100"
+            @input="officeEditor?.setZoom(Number(($event.target as HTMLInputElement).value))"
+          />
+          <span>{{ officeEditor?.zoom ?? 100 }}%</span>
+        </label>
+      </template>
+      <ConnectionBadge />
+    </footer>
+    <ArcaDialog :open="renameOpen" title="重命名" :busy="busy" @close="renameOpen = false">
+      <form id="arca-rename" class="form-stack" @submit.prevent="rename">
+        <label>
+          名称
+          <input v-model="renameTitle" maxlength="120" required />
+        </label>
+        <p v-if="renameError" class="form-error">{{ renameError }}</p>
+      </form>
+      <template #footer>
+        <button :disabled="busy" @click="renameOpen = false">取消</button>
+        <button
+          class="primary-button"
+          type="submit"
+          form="arca-rename"
+          :disabled="busy || !renameTitle.trim()"
+        >
+          保存
+        </button>
+      </template>
+    </ArcaDialog>
+    <ArcaDialog
+      :open="Boolean(restoreId)"
+      title="恢复此版本？"
+      :busy="busy"
+      @close="restoreId = undefined"
+    >
+      <p>当前内容仍保留在历史版本中。</p>
+      <template #footer>
+        <button :disabled="busy" @click="restoreId = undefined">取消</button>
+        <button class="primary-button" :disabled="busy" @click="restoreRevision">恢复</button>
+      </template>
+    </ArcaDialog>
+    <ArcaDialog
+      :open="Boolean(historicalPreview)"
+      title="历史版本"
+      wide
+      @close="historicalPreview = ''"
+    >
+      <iframe class="history-preview" title="历史版本预览" sandbox="" :srcdoc="historicalPreview" />
+    </ArcaDialog>
+    <input ref="packageInput" type="file" accept=".arca" hidden @change="importSelected" />
   </main>
 </template>

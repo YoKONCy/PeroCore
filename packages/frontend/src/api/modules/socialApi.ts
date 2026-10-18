@@ -7,7 +7,12 @@
  * @module packages/frontend/src/api/modules/socialApi
  */
 
-import type { SurfaceProjectionSnapshot } from '@infos/shared'
+import type {
+  SurfaceProjectionSnapshot,
+  StatusCardDesign,
+  StatusCardImage,
+  SocialTurnRecord,
+} from '@infos/shared'
 import { apiClient } from '../client'
 import { configApi } from './configApi'
 
@@ -30,6 +35,10 @@ export interface SocialModeConfig {
   nightSilenceEnabled: boolean
   nightSilenceStart: number
   nightSilenceEnd: number
+  taskTimeoutMinutes: number
+  modelIdleMinutes: number
+  modelRequestMinutes: number
+  maxRetries: number
   strangerPolicy: 'allow' | 'ignore'
   groupWhitelist: string[]
   groupBlacklist: string[]
@@ -68,7 +77,47 @@ export type SocialClearScope =
   | 'long_memory'
   | 'all_social_data'
 
+export interface SocialSticker {
+  id: string
+  description: string
+}
+export interface SocialStickerPage {
+  accountId: string
+  stickers: SocialSticker[]
+  total: number
+  offset: number
+  hasMore: boolean
+  truncated: boolean
+}
+
 export const socialApi = {
+  acknowledgeTurn: (id: string) =>
+    apiClient.post<void>(`/social/turns/${encodeURIComponent(id)}/acknowledge`),
+  getStickerAccounts: () => apiClient.get<{ accounts: string[] }>('/social/stickers/accounts'),
+  getStickers: (accountId: string, query: string, offset = 0, refresh = false) =>
+    apiClient.get<SocialStickerPage>(
+      `/social/stickers/${encodeURIComponent(accountId)}?${new URLSearchParams({ query, offset: String(offset), limit: '30', refresh: String(refresh) })}`,
+    ),
+  getStickerImage: (accountId: string, stickerId: string) =>
+    apiClient.get<{ dataUrl: string }>(
+      `/social/stickers/${encodeURIComponent(accountId)}/${encodeURIComponent(stickerId)}/image`,
+    ),
+  describeSticker: (accountId: string, stickerId: string, description: string) =>
+    apiClient.post<SocialSticker>(`/social/stickers/${encodeURIComponent(accountId)}`, {
+      action: 'describe',
+      stickerId,
+      description,
+    }),
+  deleteSticker: (accountId: string, stickerId: string) =>
+    apiClient.post<{ removed: string }>(`/social/stickers/${encodeURIComponent(accountId)}`, {
+      action: 'delete',
+      stickerId,
+    }),
+  getStatusCardDesign: () => apiClient.get<StatusCardDesign>('/social/status-card/design'),
+  saveStatusCardDesign: (design: StatusCardDesign) =>
+    apiClient.put<StatusCardDesign>('/social/status-card/design', design),
+  previewStatusCard: (design: StatusCardDesign) =>
+    apiClient.post<StatusCardImage>('/social/status-card/preview', design),
   /** 获取所有适配器连接状态 */
   getStatus: () => apiClient.get<SocialStatusData>('/social/status'),
 
@@ -76,6 +125,12 @@ export const socialApi = {
   send: (content: string) => apiClient.post('/social/send', { content }),
 
   getModeConfig: () => apiClient.get<SocialModeConfig>('/social/mode-config'),
+  turns: (agentId: string) =>
+    apiClient.get<Array<Omit<SocialTurnRecord, 'checkpoint'>>>(
+      `/social/turns/${encodeURIComponent(agentId)}`,
+    ),
+  cancelTurn: (id: string) =>
+    apiClient.post<void>(`/social/turns/${encodeURIComponent(id)}/cancel`),
   saveModeConfig: (config: SocialModeConfig) =>
     apiClient.put<SocialModeConfig>('/social/mode-config', config),
 

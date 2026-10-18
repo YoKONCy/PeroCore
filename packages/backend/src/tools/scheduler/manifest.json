@@ -9,25 +9,116 @@
   "category": "core",
   "platforms": ["windows", "linux", "darwin", "docker"],
   "userCopy": {
-    "set_reminder": { "label": "创建提醒", "description": "按指定时间创建提醒。" },
-    "list_reminders": { "label": "查看提醒", "description": "查看当前已有的提醒。" },
-    "cancel_reminder": { "label": "取消提醒", "description": "删除不再需要的提醒。" }
+    "schedule_follow_up": {
+      "label": "安排跟进",
+      "description": "稍后回来检查进展。"
+    },
+    "suggest_next_step": {
+      "label": "提出建议",
+      "description": "提出行动建议，等你采纳。"
+    },
+    "set_reminder": {
+      "label": "创建提醒",
+      "description": "按指定时间创建提醒。"
+    },
+    "list_reminders": {
+      "label": "查看提醒",
+      "description": "查看当前已有的提醒。"
+    },
+    "cancel_reminder": {
+      "label": "取消提醒",
+      "description": "删除不再需要的提醒。"
+    }
   },
   "tools": [
     {
-      "name": "set_reminder",
-      "description": "为主人设置一个提醒、话题或预设反应。当主人说\"帮我设个提醒\"、\"XX点提醒我\"等场景时使用。",
-      "display": { "label": "设置提醒", "icon": "clock", "color": "orange", "style": "reminder" },
+      "name": "schedule_follow_up",
+      "description": "安排稍后的只读检查，修改或发送须另提建议。最多 5 个待跟进、每天 20 次。",
+      "display": {
+        "icon": "clock",
+        "color": "orange",
+        "style": "reminder"
+      },
       "parameters": {
         "type": "object",
         "properties": {
           "time": {
             "type": "string",
-            "description": "触发时间，ISO 8601 格式。例如 \"2026-04-21T08:00:00\"。如果主人说\"5分钟后\"，需要计算具体的 ISO 时间。"
+            "description": "一分钟至七天内的 ISO 8601 未来时间，须带时区"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "为什么需要回来检查，向用户展示"
+          },
+          "instruction": {
+            "type": "string",
+            "maxLength": 4000,
+            "description": "检查什么、去哪里读取、如何判断结果；请提供足够的具体信息"
+          },
+          "planId": {
+            "type": "string",
+            "description": "可选：关联当前计划ID，与planStepId一起提供。"
+          },
+          "planStepId": {
+            "type": "string",
+            "description": "可选：到时检查的步骤ID。"
+          }
+        },
+        "required": ["time", "reason", "instruction"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "suggest_next_step",
+      "description": "提出行动建议，等待用户采纳后执行。",
+      "display": {
+        "icon": "lightbulb",
+        "color": "purple",
+        "style": "task"
+      },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 160,
+            "description": "简短行动标题"
+          },
+          "instruction": {
+            "type": "string",
+            "maxLength": 4000,
+            "description": "用户采纳后要执行的具体工作及范围"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 1000,
+            "description": "建议的依据、来源和不确定性"
+          }
+        },
+        "required": ["title", "instruction", "reason"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "set_reminder",
+      "description": "按指定时间创建提醒、话题或预设反应。",
+      "display": {
+        "label": "设置提醒",
+        "icon": "clock",
+        "color": "orange",
+        "style": "reminder"
+      },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "time": {
+            "type": "string",
+            "description": "触发时间，ISO 8601 格式"
           },
           "content": {
             "type": "string",
-            "description": "提醒内容。例如 \"该喝水啦\" 或 \"提醒主人开会\"。"
+            "description": "提醒内容"
           },
           "type": {
             "type": "string",
@@ -40,7 +131,7 @@
     },
     {
       "name": "list_reminders",
-      "description": "查看当前所有待触发的提醒、话题和反应。当主人问\"我设了什么提醒\"、\"有什么待办\"等场景时使用。",
+      "description": "查看待触发的提醒、话题和预设反应。",
       "display": {
         "label": "提醒列表",
         "icon": "calendar",
@@ -54,8 +145,13 @@
     },
     {
       "name": "cancel_reminder",
-      "description": "取消一个待触发的提醒。当主人说\"取消那个提醒\"、\"不用提醒我了\"等场景时使用。需要先用 list_reminders 获取 ID。",
-      "display": { "label": "取消提醒", "icon": "close", "color": "orange", "style": "reminder" },
+      "description": "取消指定的待触发提醒。",
+      "display": {
+        "label": "取消提醒",
+        "icon": "close",
+        "color": "orange",
+        "style": "reminder"
+      },
       "parameters": {
         "type": "object",
         "properties": {

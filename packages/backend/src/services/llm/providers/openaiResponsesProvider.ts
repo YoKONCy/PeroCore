@@ -1,3 +1,6 @@
+import { normalizeTokenUsage } from '../usage'
+import { combinedOutputLimit, fetchLlmResponse } from '../requestPolicy'
+import { geminiReasoningEffort } from '../geminiThinking'
 import type {
   ChatCompletion,
   ChatDelta,
@@ -10,11 +13,18 @@ import type {
   UsageInfo,
 } from '../types'
 import { AppError } from '../../../lib/appError'
-import { sanitizeToolParameters, stripBase64DataUris } from '../sanitize'
+import { retryAfterMilliseconds, temporaryUpstreamCode } from '../retryPolicy'
+import { normalizeSystemMessages, sanitizeToolParameters, stripBase64DataUris } from '../sanitize'
+import { responsesContent } from '../multimodalContent'
 
 /** OpenAI Responses语义协议Provider。 */
 export class OpenAiResponsesProvider implements LlmProvider {
   constructor(private readonly config: ProviderConfig) {}
+
+  getInputTokenPayload(messages: ChatMessage[], opts: ChatOptions): Record<string, unknown> {
+    const payload = this.buildPayload(messages, opts, false)
+    return { input: payload.input, tools: payload.tools }
+  }
 
   async chat(messages: ChatMessage[], opts: ChatOptions): Promise<ChatCompletion> {
     const response = await this.request(this.buildPayload(messages, opts, false), opts)
@@ -25,7 +35,7 @@ export class OpenAiResponsesProvider implements LlmProvider {
   async *chatStream(messages: ChatMessage[], opts: ChatOptions): AsyncIterable<ChatDelta> {
     const response = await this.request(this.buildPayload(messages, opts, true), opts)
     const reader = response.body?.getReader()
-    if (!reader) throw this.error('OpenAI Responses响应体为空')
+    if (!reader) throw this.error('OpenAI Responses响应体为空', { retryable: true })
     const decoder = new TextDecoder()
     const calls = new Map<string, { index: number; id: string; name: string }>()
     let callIndex = 0
@@ -91,10 +101,20 @@ export class OpenAiResponsesProvider implements LlmProvider {
                 ],
               })
             }
-          } else if (type === 'response.completed') {
+          } else if (
+            type === 'response.completed' ||
+            (type === 'response.incomplete' &&
+              (
+                (event.response as Record<string, unknown> | undefined)?.incomplete_details as
+                  | Record<string, unknown>
+                  | undefined
+              )?.reason === 'max_output_tokens')
+          ) {
             const completed = event.response as Record<string, unknown> | undefined
             yield {
-              choices: [{ delta: {}, finishReason: 'stop' }],
+              choices: [
+                { delta: {}, finishReason: type === 'response.incomplete' ? 'length' : 'stop' },
+              ],
               usage: completed
                 ? this.normalizeUsage(completed.usage as Record<string, unknown> | undefined)
                 : undefined,
@@ -104,13 +124,16 @@ export class OpenAiResponsesProvider implements LlmProvider {
             type === 'response.incomplete' ||
             type === 'error'
           ) {
-            throw this.error(
-              String((event.error as Record<string, unknown> | undefined)?.message ?? type),
-            )
+            const responseError = (event.response as Record<string, unknown> | undefined)?.error
+            const error = (event.error ?? responseError) as Record<string, unknown> | undefined
+            throw this.error(String(error?.message ?? type), {
+              retryable: temporaryUpstreamCode(error?.code) || temporaryUpstreamCode(error?.type),
+            })
           }
         }
       }
     } finally {
+      await reader.cancel().catch(() => {})
       reader.releaseLock()
     }
   }
@@ -130,19 +153,21 @@ export class OpenAiResponsesProvider implements LlmProvider {
     opts: ChatOptions,
     stream: boolean,
   ): Record<string, unknown> {
+    const reasoningEffort = geminiReasoningEffort(this.config.modelId, opts.reasoningEffort)
     const payload: Record<string, unknown> = {
       model: this.config.modelId,
-      input: this.serializeInput(messages),
+      input: this.serializeInput(normalizeSystemMessages(messages)),
       stream,
       store: false,
     }
-    if (typeof opts.maxTokens === 'number') payload.max_output_tokens = opts.maxTokens
+    const outputLimit = combinedOutputLimit({ ...opts, reasoningEffort }, true)
+    if (outputLimit !== undefined) payload.max_output_tokens = outputLimit
     if (typeof opts.temperature === 'number') payload.temperature = opts.temperature
     if (typeof opts.topP === 'number') payload.top_p = opts.topP
-    if (opts.reasoningEffort || opts.returnNativeReasoning) {
+    if (reasoningEffort || opts.returnNativeReasoning) {
       payload.reasoning = {
-        ...(opts.reasoningEffort
-          ? { effort: opts.reasoningEffort === 'off' ? 'none' : opts.reasoningEffort }
+        ...(reasoningEffort
+          ? { effort: reasoningEffort === 'off' ? 'none' : reasoningEffort }
           : {}),
         ...(opts.returnNativeReasoning ? { summary: 'auto' } : {}),
       }
@@ -191,7 +216,7 @@ export class OpenAiResponsesProvider implements LlmProvider {
         }
       }
       if (message.content !== null) {
-        input.push({ role: message.role, content: message.content })
+        input.push({ role: message.role, content: responsesContent(message.content, message.role) })
       }
       for (const call of message.toolCalls ?? []) {
         input.push({
@@ -244,7 +269,12 @@ export class OpenAiResponsesProvider implements LlmProvider {
             toolCalls: toolCalls.length ? toolCalls : undefined,
           },
           finishReason:
-            String(data.status ?? '') === 'completed' ? 'stop' : String(data.status ?? ''),
+            String(data.status ?? '') === 'completed'
+              ? 'stop'
+              : (data.incomplete_details as Record<string, unknown> | undefined)?.reason ===
+                  'max_output_tokens'
+                ? 'length'
+                : String(data.status ?? ''),
         },
       ],
       usage: this.normalizeUsage(data.usage as Record<string, unknown> | undefined),
@@ -253,11 +283,15 @@ export class OpenAiResponsesProvider implements LlmProvider {
 
   private normalizeUsage(raw?: Record<string, unknown>): UsageInfo | undefined {
     if (!raw) return undefined
-    return {
-      promptTokens: Number(raw.input_tokens ?? 0),
-      completionTokens: Number(raw.output_tokens ?? 0),
-      totalTokens: Number(raw.total_tokens ?? 0),
-    }
+    const input = raw.input_tokens_details as Record<string, unknown> | undefined
+    const output = raw.output_tokens_details as Record<string, unknown> | undefined
+    return normalizeTokenUsage({
+      input: raw.input_tokens,
+      output: raw.output_tokens,
+      total: raw.total_tokens,
+      cachedRead: input?.cached_tokens,
+      reasoning: output?.reasoning_tokens,
+    })
   }
 
   private delta(delta: ChatDelta['choices'][number]['delta']): ChatDelta {
@@ -265,16 +299,26 @@ export class OpenAiResponsesProvider implements LlmProvider {
   }
 
   private async request(payload: Record<string, unknown>, opts: ChatOptions): Promise<Response> {
-    const response = await fetch(this.url('/responses'), {
-      method: 'POST',
-      headers: this.headers(),
-      body: JSON.stringify(payload),
-      signal: opts.signal
-        ? AbortSignal.any([opts.signal, AbortSignal.timeout(opts.timeout ?? 300_000)])
-        : AbortSignal.timeout(opts.timeout ?? 300_000),
-    })
-    if (!response.ok)
-      throw this.error(`OpenAI Responses API错误 (${response.status}): ${await response.text()}`)
+    const response = await fetchLlmResponse(
+      this.url('/responses'),
+      {
+        method: 'POST',
+        headers: this.headers(),
+        body: JSON.stringify(payload),
+      },
+      opts,
+      'openai-responses',
+    )
+    if (!response.ok) {
+      const text = await response.text()
+      const quota =
+        response.status === 429 && /insufficient_quota|free users|token plan/i.test(text)
+      throw this.error(`OpenAI Responses API错误 (${response.status}): ${text.slice(0, 500)}`, {
+        status: response.status,
+        retryable: !quota && [408, 429, 500, 502, 503, 504].includes(response.status),
+        retryAfter: retryAfterMilliseconds(response.headers.get('retry-after')),
+      })
+    }
     return response
   }
 
@@ -287,10 +331,10 @@ export class OpenAiResponsesProvider implements LlmProvider {
     return base.endsWith('/v1') ? `${base}${path}` : `${base}/v1${path}`
   }
 
-  private error(message: string): AppError {
+  private error(message: string, data: Record<string, unknown> = {}): AppError {
     return new AppError('LLM_ERROR', {
       message,
-      data: { provider: 'openai-responses', model: this.config.modelId },
+      data: { provider: 'openai-responses', model: this.config.modelId, ...data },
     })
   }
 }

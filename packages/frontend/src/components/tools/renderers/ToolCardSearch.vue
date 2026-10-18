@@ -1,32 +1,35 @@
 <script setup lang="ts">
 /** ToolCardSearch — 搜索索引表，使用文件/坐标/内容列而非结果卡片。 */
 import { computed } from 'vue'
+import { parseToolSearchResult, toolSearchSummary } from '../../../lib/toolSearchResult'
 const props = defineProps<{ args: string; result?: string; isError?: boolean }>()
-interface Match {
-  file?: string
-  line?: number
-  column?: number
-  content?: string
-}
 function parse(raw?: string): Record<string, unknown> {
   try {
-    return JSON.parse(raw || '{}') as Record<string, unknown>
+    const value: unknown = JSON.parse(raw || '{}')
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {}
   } catch {
     return {}
   }
 }
 const args = computed(() => parse(props.args))
-const result = computed(() => parse(props.result))
+const result = computed(() => (props.isError ? undefined : parseToolSearchResult(props.result)))
 const query = computed(() => String(args.value.query ?? args.value.pattern ?? ''))
-const matches = computed(() => (result.value.matches as Match[] | undefined) ?? [])
-const total = computed(() => Number(result.value.total ?? matches.value.length))
+const matches = computed(() => result.value?.rows ?? [])
+const summary = computed(() => {
+  if (props.isError) return '搜索失败'
+  if (props.result === undefined) return '等待结果'
+  return result.value ? toolSearchSummary(result.value) : '搜索结果'
+})
+const partialPreview = computed(() => result.value?.previewTruncated || matches.value.length > 8)
 </script>
 <template>
   <section class="search-inspector">
     <header>
       <b>QUERY</b>
       <code :title="query">{{ query || '搜索' }}</code>
-      <strong>{{ total }} HITS</strong>
+      <strong>{{ summary }}</strong>
     </header>
     <div v-if="matches.length" class="search-table">
       <div class="search-table__head">
@@ -34,15 +37,29 @@ const total = computed(() => Number(result.value.total ?? matches.value.length))
         <span>FILE / MATCH</span>
       </div>
       <div v-for="(match, index) in matches.slice(0, 8)" :key="index" class="search-row">
-        <code>{{ match.line ? `${match.line}:${match.column ?? 1}` : '—' }}</code>
+        <code>
+          {{
+            match.kind === 'directory'
+              ? '目录'
+              : match.line
+                ? `${match.line}:${match.column ?? 1}`
+                : '—'
+          }}
+        </code>
         <div>
           <strong>{{ match.file || '未知位置' }}</strong>
           <span v-if="match.content">{{ match.content }}</span>
         </div>
       </div>
     </div>
-    <pre v-else-if="isError" class="search-error">{{ result }}</pre>
-    <div v-else class="search-empty">NO MATCHES</div>
+    <pre v-else-if="isError" class="search-error">{{ props.result }}</pre>
+    <div v-else-if="props.result === undefined" class="search-empty">等待搜索结果……</div>
+    <div v-else-if="result?.auditOnly" class="search-empty">已保留数量，正文需重新搜索</div>
+    <div v-else-if="result" class="search-empty">未找到匹配项</div>
+    <pre v-else class="search-raw">{{ props.result }}</pre>
+    <footer v-if="partialPreview && matches.length" class="search-note">
+      仅展示前 {{ Math.min(8, matches.length) }} 项
+    </footer>
   </section>
 </template>
 <style scoped>
@@ -149,5 +166,19 @@ const total = computed(() => Number(result.value.total ?? matches.value.length))
   color: var(--ui-danger);
   background: var(--ui-danger-soft);
   font: 10px/1.5 var(--ui-font-mono);
+}
+.search-raw {
+  margin: 0;
+  padding: 10px;
+  color: var(--ui-text-secondary);
+  font: 10px/1.5 var(--ui-font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.search-note {
+  padding: 6px 10px;
+  color: var(--ui-text-tertiary);
+  font: 10px var(--ui-font-mono);
+  text-align: right;
 }
 </style>

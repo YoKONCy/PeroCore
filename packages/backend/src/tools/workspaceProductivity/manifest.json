@@ -24,12 +24,25 @@
   "tools": [
     {
       "name": "read_file_range",
-      "description": "按字符范围、行范围或尾部行读取文本文件；行级读取单次最多800行，并返回哈希、截断信息与文件总行数",
+      "description": "按字符、行范围或尾部读取文件，返回 hash 和 read_ref；编辑刚读取的范围时优先用 read_ref，不必重发 old_text。行级单次最多800行。path 也可填 tool-result:ID，配合 offset/limit 分页读取超限工具结果；引用失效后按原始来源读取。",
       "display": { "label": "读取文件", "icon": "file", "color": "sky", "style": "read" },
       "parameters": {
         "type": "object",
         "properties": {
           "path": { "type": "string" },
+          "outline": {
+            "type": "boolean",
+            "description": "按需读取 JS/TS 符号大纲或 Python 声明位置；无需 Python 环境，无法可靠定位时自动返回普通源码"
+          },
+          "symbol": {
+            "type": "string",
+            "description": "大纲中的完整限定名；JS/TS 精确定位成功时返回完整符号及版本化 read_ref。Python 或定位失败自动返回源码窗口，必须以实际可见内容和 symbolFallback 提示确定编辑范围"
+          },
+          "symbol_pick": { "type": "integer", "minimum": 1 },
+          "retain_context": {
+            "type": "boolean",
+            "description": "仅在需要持续比较历史版本时开启，防止该读取随文件更新退出当前执行上下文；仍受总输入容量限制"
+          },
           "offset": { "type": "number" },
           "limit": { "type": "number" },
           "line_start": { "type": "number", "minimum": 1, "description": "起始行号，从1开始" },
@@ -66,7 +79,7 @@
     },
     {
       "name": "edit_file",
-      "description": "使用唯一 old_text 匹配精确编辑文本文件，支持 expected_hash 并发保护和原子替换",
+      "description": "精确编辑单个文件。优先 read_ref+new_text 替换实际读取片段；也支持 path+old_text+new_text 唯一文本替换，或 path+expected_hash+line_start/line_end+new_text 行替换（删除传空字符串）、after_line+new_text 插入（0为文件开头）。steps 批量步骤全部基于同一原始版本，重叠或任一步失败整批不写。多处文本匹配返回 ticketId；再次用 ticket_id+pick 选择，无需重发正文。文件变化后引用失效，必须重读。",
       "display": { "label": "编辑文件", "icon": "edit", "color": "pink", "style": "edit" },
       "parameters": {
         "type": "object",
@@ -74,9 +87,35 @@
           "path": { "type": "string" },
           "old_text": { "type": "string" },
           "new_text": { "type": "string" },
-          "expected_hash": { "type": "string" }
+          "expected_hash": { "type": "string" },
+          "retain_context": {
+            "type": "boolean",
+            "description": "需要持续比较此次写入版本时保留完整调用；通常不填"
+          },
+          "read_ref": { "type": "string" },
+          "line_start": { "type": "integer", "minimum": 1 },
+          "line_end": { "type": "integer", "minimum": 1 },
+          "after_line": { "type": "integer", "minimum": 0 },
+          "ticket_id": { "type": "string" },
+          "pick": { "type": "integer", "minimum": 1 },
+          "steps": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "properties": {
+                "old_text": { "type": "string" },
+                "new_text": { "type": "string" },
+                "read_ref": { "type": "string" },
+                "line_start": { "type": "integer", "minimum": 1 },
+                "line_end": { "type": "integer", "minimum": 1 },
+                "after_line": { "type": "integer", "minimum": 0 }
+              },
+              "required": ["new_text"]
+            }
+          }
         },
-        "required": ["path", "old_text", "new_text"]
+        "required": []
       }
     }
   ],

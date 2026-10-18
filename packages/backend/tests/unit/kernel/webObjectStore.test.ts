@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest'
 import { WebObjectStore } from '@infos/backend/runtime'
 
 const firstPage = {
+  snapshotId: 'page-1',
+  contentHash: 'content-1',
+  structureHash: 'structure-1',
+  markdown: '正文',
+  frames: [],
+  accessibility: [],
   url: 'https://example.com',
   title: '示例',
   text: '正文',

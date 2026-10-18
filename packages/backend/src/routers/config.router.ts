@@ -22,6 +22,11 @@ import type { AppContext } from '../container'
 import { createLogger, setLogLevel, parseLogLevel } from '../lib/logger'
 import { AppError } from '../lib/appError'
 import { EmbeddingService } from '../services/embedding/embeddingService'
+import { EMBEDDING_ENABLED_KEY, MEMORY_BACKGROUND_ENABLED_KEY } from '@infos/shared'
+import {
+  MEMORY_RUNTIME_CONFIG_KEY,
+  loadMemoryRuntimeConfig,
+} from '../services/memory/memoryRuntimeConfig'
 
 const logger = createLogger('ConfigRouter')
 
@@ -48,9 +53,13 @@ function applyLogLevelHotReload(key: string, value: string): void {
 /** 配置 key 前缀到热更新方法的映射 */
 const HOT_RELOAD_MAP: Array<{
   prefix: string
-  method: keyof Pick<AppContext, 'reloadEmbeddingConfig' | 'reloadTtsConfig' | 'reloadAsrConfig'>
+  method: keyof Pick<
+    AppContext,
+    'reloadEmbeddingConfig' | 'reloadTtsConfig' | 'reloadAsrConfig' | 'reloadMemoryBackgroundConfig'
+  >
 }> = [
   { prefix: 'embedding.', method: 'reloadEmbeddingConfig' },
+  { prefix: 'memory.background.', method: 'reloadMemoryBackgroundConfig' },
   { prefix: 'reranker.', method: 'reloadEmbeddingConfig' },
   { prefix: 'tts.', method: 'reloadTtsConfig' },
   { prefix: 'asr.', method: 'reloadAsrConfig' },
@@ -59,15 +68,7 @@ const HOT_RELOAD_MAP: Array<{
 // ── 额外 Schema (B6-3) ──
 
 const batchSetConfigSchema = z.object({
-  items: z
-    .array(
-      z.object({
-        key: z.string().min(1),
-        value: z.string(),
-      }),
-    )
-    .min(1)
-    .max(100),
+  items: z.array(setConfigSchema).min(1).max(100),
 })
 
 const activateEmbeddingSchema = z.object({
@@ -85,7 +86,15 @@ const activateEmbeddingSchema = z.object({
 })
 
 const importConfigSchema = z.object({
-  data: z.record(z.string()),
+  data: z
+    .record(z.string())
+    .refine(
+      (data) =>
+        [EMBEDDING_ENABLED_KEY, MEMORY_BACKGROUND_ENABLED_KEY].every(
+          (key) => data[key] === undefined || data[key] === 'true' || data[key] === 'false',
+        ),
+      { message: '开关配置必须为 true 或 false' },
+    ),
   /** 是否覆盖已有 key (默认 true) */
   overwrite: z.boolean().default(true),
 })
@@ -102,6 +111,8 @@ export function createConfigRouter(ctx: AppContext) {
 
   // POST /api/configs/embedding/activate — 真实验证候选Embedding配置，成功后才持久化。
   router.post('/embedding/activate', zValidator('json', activateEmbeddingSchema), async (c) => {
+    if (ctx.embeddingService.isEnabled === false)
+      throw new AppError('CONFIG_ERROR', { message: '向量功能已关闭，请先开启后再验证模型' })
     const input = c.req.valid('json')
     const current = ctx.embeddingService.getConfig()
     const apiBase = input.apiBase || current.apiBase
@@ -117,7 +128,12 @@ export function createConfigRouter(ctx: AppContext) {
       reranker: current.reranker,
     })
     const startedAt = performance.now()
-    const vector = await candidate.embedOne('infOS Embedding 模型激活与维度校验')
+    const vector = await candidate.embedOne(
+      'infOS Embedding 模型激活与维度校验',
+      ctx.embeddingService.cancellationSignal,
+    )
+    if (ctx.embeddingService.getConfig().enabled === false)
+      throw new AppError('CONFIG_ERROR', { message: '向量功能已关闭，已停止模型验证' })
     const durationMs = Math.max(0, Math.round(performance.now() - startedAt))
     if (!vector.length) {
       throw new AppError('EMBEDDING_ERROR', { message: 'Embedding 模型返回了空向量' })
@@ -187,6 +203,10 @@ export function createConfigRouter(ctx: AppContext) {
   router.put('/', zValidator('json', setConfigSchema), async (c) => {
     const { key, value } = c.req.valid('json')
     await ctx.configRepo.set(key, value)
+    if (key === MEMORY_RUNTIME_CONFIG_KEY)
+      ctx.eventMemoryService.syncAdvancedRetrievalConfig(
+        await loadMemoryRuntimeConfig(ctx.configRepo),
+      )
 
     // 日志级别热更新（system.logLevel 配置变更时立即生效）
     applyLogLevelHotReload(key, value)
@@ -200,6 +220,7 @@ export function createConfigRouter(ctx: AppContext) {
       }
     }
 
+    await ctx.appManager?.notifyConfigChanged?.([key])
     return c.json({ code: 'OK', message: '配置已更新', data: { key, value } })
   })
 
@@ -211,6 +232,12 @@ export function createConfigRouter(ctx: AppContext) {
       return c.json({ code: 'NOT_FOUND', message: `配置 "${key}" 不存在` }, 404)
     }
     await ctx.configRepo.delete(key)
+    for (const { prefix, method } of HOT_RELOAD_MAP) if (key.startsWith(prefix)) await ctx[method]()
+    if (key === MEMORY_RUNTIME_CONFIG_KEY)
+      ctx.eventMemoryService.syncAdvancedRetrievalConfig(
+        await loadMemoryRuntimeConfig(ctx.configRepo),
+      )
+    await ctx.appManager?.notifyConfigChanged?.([key])
     return c.json({ code: 'OK', message: `配置 "${key}" 已删除` })
   })
 
@@ -240,16 +267,25 @@ export function createConfigRouter(ctx: AppContext) {
     }
 
     // 批量完成后统一触发热更新 (每个 service 最多一次)
+    if (items.some((item) => item.key === MEMORY_RUNTIME_CONFIG_KEY)) {
+      ctx.eventMemoryService.syncAdvancedRetrievalConfig(
+        await loadMemoryRuntimeConfig(ctx.configRepo),
+      )
+    }
     for (const method of pendingReloads) {
       logger.info(`批量配置变更，触发 ${method}`)
       await ctx[
         method as keyof Pick<
           AppContext,
-          'reloadEmbeddingConfig' | 'reloadTtsConfig' | 'reloadAsrConfig'
+          | 'reloadEmbeddingConfig'
+          | 'reloadTtsConfig'
+          | 'reloadAsrConfig'
+          | 'reloadMemoryBackgroundConfig'
         >
       ]()
     }
 
+    await ctx.appManager?.notifyConfigChanged?.(items.map((item) => item.key))
     return c.json({
       code: 'OK',
       message: `已更新 ${items.length} 项配置`,
@@ -276,6 +312,7 @@ export function createConfigRouter(ctx: AppContext) {
     const { data, overwrite } = c.req.valid('json')
     let imported = 0
     let skipped = 0
+    const changedKeys: string[] = []
 
     for (const [key, value] of Object.entries(data)) {
       if (!overwrite) {
@@ -287,10 +324,23 @@ export function createConfigRouter(ctx: AppContext) {
       }
       await ctx.configRepo.set(key, value)
       // 日志级别热更新（导入配置时同样生效）
+      changedKeys.push(key)
       applyLogLevelHotReload(key, value)
       imported++
     }
 
+    if (Object.prototype.hasOwnProperty.call(data, MEMORY_RUNTIME_CONFIG_KEY)) {
+      ctx.eventMemoryService.syncAdvancedRetrievalConfig(
+        await loadMemoryRuntimeConfig(ctx.configRepo),
+      )
+    }
+    const reloads = new Set(
+      HOT_RELOAD_MAP.filter(({ prefix }) => changedKeys.some((key) => key.startsWith(prefix))).map(
+        ({ method }) => method,
+      ),
+    )
+    for (const method of reloads) await ctx[method]()
+    await ctx.appManager?.notifyConfigChanged?.(changedKeys)
     return c.json({
       code: 'OK',
       message: `导入完成: ${imported} 项写入, ${skipped} 项跳过`,

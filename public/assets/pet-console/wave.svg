@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 26 26" fill="none" shape-rendering="crispEdges" role="img" aria-label="wave">
+  <path d="M10 2h2v10h1V1h2v11h1V3h2v10h1V6h2v11h-2v3h-3v2H9v-2H7v-3H5v-2H3v-3h3l3 3V5h1z" fill-rule="evenodd" transform="translate(1 2)" fill="var(--pixel-shadow, #44466e)"/>
+  <path d="M10 2h2v10h1V1h2v11h1V3h2v10h1V6h2v11h-2v3h-3v2H9v-2H7v-3H5v-2H3v-3h3l3 3V5h1z" fill-rule="evenodd" transform="translate(1 0)" fill="var(--pixel-highlight, #e3dbff)"/>
+  <path d="M10 2h2v10h1V1h2v11h1V3h2v10h1V6h2v11h-2v3h-3v2H9v-2H7v-3H5v-2H3v-3h3l3 3V5h1z" fill-rule="evenodd" transform="translate(1 1)" fill="var(--pixel-face, currentColor)"/>
+</svg>

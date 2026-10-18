@@ -16,6 +16,7 @@ export class AgentInputRepository {
       .update(agentInputRequests)
       .set({
         status: request.status,
+        answersJson: JSON.stringify(request.answers ?? []),
         selectedOptionIdsJson: JSON.stringify(request.selectedOptionIds),
         responseMessage: request.responseMessage ?? null,
         resolvedAt: request.resolvedAt ?? null,
@@ -61,6 +62,8 @@ export class AgentInputRepository {
       sessionId: request.sessionId,
       threadId: request.threadId,
       taskId: request.taskId ?? null,
+      questionsJson: JSON.stringify(request.questions ?? []),
+      answersJson: JSON.stringify(request.answers ?? []),
       question: request.question,
       context: request.context ?? null,
       optionsJson: JSON.stringify(request.options),
@@ -82,6 +85,8 @@ export class AgentInputRepository {
       sessionId: row.sessionId,
       threadId: row.threadId,
       taskId: row.taskId ?? undefined,
+      questions: JSON.parse(row.questionsJson) as AgentInputRequest['questions'],
+      answers: JSON.parse(row.answersJson) as AgentInputRequest['answers'],
       question: row.question,
       context: row.context ?? undefined,
       options: JSON.parse(row.optionsJson) as AgentInputRequest['options'],

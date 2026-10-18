@@ -1,0 +1,629 @@
+/* 带色透光面保持文字清晰；厚度由一格亮边与短侧面表达。 */
+.pet-hud {
+  --pet-panel: rgba(216, 235, 246, 0.72);
+  --pet-soft: rgba(225, 242, 251, 0.79);
+  --pet-input: rgba(127, 176, 205, 0.24);
+  --pet-text: #334e65;
+  --pet-muted: #5b7890;
+  --pet-border: rgba(129, 156, 175, 0.64);
+  --pet-divider: rgba(85, 130, 161, 0.19);
+  --pet-accent: #637eaf;
+  --pet-pink: #af4c84;
+  --pet-highlight: rgba(253, 255, 255, 0.92);
+  --pet-sheen: rgba(248, 253, 255, 0.37);
+  --pet-reflect: rgba(255, 255, 255, 0.16);
+  --pet-shade: rgba(104, 150, 179, 0.28);
+  --pet-side: rgba(104, 150, 179, 0.53);
+  --pet-cast: rgba(7, 17, 29, 0.12);
+  --pet-grain: rgba(58, 118, 154, 0.018);
+  --pet-icon-highlight: #fcfdff;
+  --pet-icon-shadow: #7f9bb5;
+  --pet-identity-fill: rgba(230, 241, 249, 0.9);
+  --pet-surface-fill:
+    repeating-conic-gradient(var(--pet-grain) 0% 25%, transparent 0% 50%) 0 0 / 4px 4px,
+    linear-gradient(
+      124deg,
+      var(--pet-sheen),
+      transparent 42%,
+      var(--pet-reflect) 62%,
+      transparent 78%
+    ),
+    var(--pet-panel);
+  --pet-control-fill: linear-gradient(135deg, var(--pet-sheen), transparent 75%), var(--pet-soft);
+  --pet-control-shadow:
+    inset 1px 1px var(--pet-highlight), inset -1px -2px var(--pet-shade), 0 2px var(--pet-side);
+  --pet-pressed-shadow: inset 1px 1px var(--pet-shade), 0 1px var(--pet-highlight);
+  --pet-bubble-fill: rgba(237, 241, 248, 0.94);
+  --pet-bubble-ink: #4d5267;
+  --pet-bubble-rim: rgba(142, 161, 184, 0.46);
+  --pet-bubble-light: rgba(255, 253, 255, 0.87);
+  --pet-bubble-shade: rgba(111, 132, 158, 0.13);
+  --pet-bubble-name: #8e6687;
+  --pet-bubble-blush: rgba(241, 195, 214, 0.16);
+  --pet-bubble-bloom: rgba(188, 217, 242, 0.17);
+  --pet-bubble-grain: rgba(121, 143, 172, 0.012);
+  --pet-belt-cut: polygon(
+    12px 0,
+    calc(100% - 12px) 0,
+    calc(100% - 12px) 3px,
+    calc(100% - 4px) 3px,
+    calc(100% - 4px) 8px,
+    100% 8px,
+    100% calc(100% - 12px),
+    calc(100% - 4px) calc(100% - 12px),
+    calc(100% - 4px) calc(100% - 4px),
+    calc(100% - 12px) calc(100% - 4px),
+    calc(100% - 12px) 100%,
+    12px 100%,
+    12px calc(100% - 4px),
+    4px calc(100% - 4px),
+    4px calc(100% - 12px),
+    0 calc(100% - 12px),
+    0 8px,
+    4px 8px,
+    4px 3px,
+    12px 3px
+  );
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  pointer-events: none;
+  color: var(--pet-text);
+  font-family: var(--ui-font-pixel);
+  font-size: 12px;
+  line-height: 1.6;
+  font-synthesis: none;
+}
+[data-theme='dark'] .pet-hud {
+  --pet-panel: rgba(40, 51, 71, 0.71);
+  --pet-soft: rgba(65, 80, 105, 0.73);
+  --pet-input: rgba(15, 29, 48, 0.58);
+  --pet-text: #ede9f8;
+  --pet-muted: #a5adc6;
+  --pet-border: rgba(104, 113, 142, 0.74);
+  --pet-divider: rgba(180, 188, 221, 0.18);
+  --pet-accent: #baa8eb;
+  --pet-pink: #ee9cc9;
+  --pet-highlight: rgba(182, 209, 238, 0.48);
+  --pet-sheen: rgba(119, 146, 183, 0.13);
+  --pet-reflect: rgba(214, 231, 255, 0.07);
+  --pet-shade: rgba(12, 24, 42, 0.42);
+  --pet-side: rgba(12, 24, 42, 0.63);
+  --pet-grain: rgba(215, 232, 255, 0.018);
+  --pet-icon-highlight: #eee8ff;
+  --pet-icon-shadow: #4e4d76;
+  --pet-identity-fill: rgba(38, 50, 72, 0.92);
+  --pet-bubble-fill: rgba(54, 65, 86, 0.92);
+  --pet-bubble-ink: #e8e8f1;
+  --pet-bubble-rim: rgba(139, 159, 190, 0.48);
+  --pet-bubble-light: rgba(223, 236, 255, 0.24);
+  --pet-bubble-shade: rgba(18, 30, 49, 0.22);
+  --pet-bubble-name: #cbb4ca;
+  --pet-bubble-blush: rgba(235, 174, 208, 0.065);
+  --pet-bubble-bloom: rgba(163, 205, 235, 0.055);
+  --pet-bubble-grain: rgba(218, 228, 246, 0.013);
+}
+.hud-anchor {
+  position: absolute;
+  /* 外层 transform 会创建层叠上下文，入口必须整体高于操作面。 */
+  z-index: 130;
+  width: 44px;
+  height: 44px;
+  transform-origin: top left;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+}
+.hud-belt {
+  position: absolute;
+  z-index: 100;
+  transform-origin: bottom left;
+  pointer-events: auto;
+  container: pet-hud / inline-size;
+}
+.pet-identity {
+  position: absolute;
+  z-index: 110;
+  isolation: isolate;
+  box-sizing: border-box;
+  width: 140px;
+  padding: 10px 12px;
+  transform-origin: top left;
+  pointer-events: none;
+}
+.pet-identity::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(135deg, var(--pet-sheen), transparent 65%), var(--pet-identity-fill);
+  backdrop-filter: blur(8px);
+  clip-path: polygon(
+    6px 0,
+    calc(100% - 6px) 0,
+    calc(100% - 6px) 3px,
+    100% 3px,
+    100% calc(100% - 6px),
+    calc(100% - 3px) calc(100% - 6px),
+    calc(100% - 3px) 100%,
+    6px 100%,
+    6px calc(100% - 3px),
+    0 calc(100% - 3px),
+    0 6px,
+    3px 6px,
+    3px 3px,
+    6px 3px
+  );
+  box-shadow:
+    inset 0 1px var(--pet-highlight),
+    inset 0 -1px var(--pet-shade);
+}
+.pet-identity::after {
+  content: '';
+  position: absolute;
+  right: 9px;
+  top: 9px;
+  width: 3px;
+  height: 3px;
+  background: var(--pet-pink);
+  box-shadow: -4px 4px 0 var(--pet-pink);
+  opacity: 0.2;
+  animation: identity-glimmer 6s steps(3, end) infinite;
+}
+.pet-identity > div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-right: 6px;
+  font-size: 19px;
+  overflow-wrap: anywhere;
+}
+.pet-identity :deep(svg) {
+  color: var(--pet-pink);
+}
+.pet-identity small {
+  display: block;
+  font-size: 12px;
+  margin-top: 6px;
+  color: color-mix(in srgb, var(--pet-text) 85%, var(--pet-muted));
+  overflow-wrap: anywhere;
+}
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 0;
+}
+button:focus-visible {
+  outline: 1px solid var(--pet-accent);
+  outline-offset: 2px;
+}
+button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+/* 保留原有光点造型和反馈，不将新的展开动效施加到这个入口。 */
+.floating-trigger {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  flex-shrink: 0;
+  z-index: 100;
+}
+.floating-trigger::before {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  background: transparent;
+}
+.floating-trigger,
+.floating-trigger:hover:not(:disabled),
+.floating-trigger:active:not(:disabled) {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+.trigger-core {
+  position: relative;
+  width: 24px;
+  height: 24px;
+  transition: all 0.3s ease;
+  animation: core-idle 4s infinite ease-in-out;
+}
+.core-dot {
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 4px;
+  transition: all 0.2s ease;
+  box-shadow:
+    0 0 15px rgba(255, 255, 255, 0.6),
+    2px 2px 0 rgba(0, 0, 0, 0.3);
+  border: 2px solid #fff;
+}
+.pulse-ring {
+  position: absolute;
+  inset: 0;
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  border-radius: 4px;
+  opacity: 0;
+  animation: pulse-ring-smooth 2s infinite cubic-bezier(0.215, 0.61, 0.355, 1);
+  box-sizing: border-box;
+}
+.floating-trigger:hover .trigger-core {
+  animation-play-state: paused;
+  transform: scale(1.1) rotate(45deg);
+}
+.floating-trigger:hover .core-dot {
+  background: #fff;
+  box-shadow:
+    0 0 20px rgba(255, 255, 255, 1),
+    0 0 40px rgba(255, 255, 255, 0.6);
+}
+.floating-trigger.active .trigger-core {
+  transform: rotate(45deg);
+}
+.floating-trigger.active .core-dot {
+  background: #ff88aa;
+  border-color: #ffccdd;
+  box-shadow: 0 0 15px rgba(255, 136, 170, 0.6);
+}
+.floating-trigger.active .pulse-ring {
+  border-color: rgba(255, 136, 170, 0.5);
+  animation-duration: 1.5s;
+}
+.hud-notices {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--pet-border) transparent;
+  pointer-events: none;
+}
+.hud-notices > * {
+  flex-shrink: 0;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+}
+.icon-button,
+.text-button {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px;
+  color: var(--pet-muted);
+}
+.icon-button:hover,
+.text-button:hover {
+  color: var(--pet-accent);
+}
+.text-button {
+  padding: 2px 0;
+  color: var(--pet-accent);
+}
+/* 所有短提醒沿用桌宠的透光像素面，语义靠图案与小面积点色区分。 */
+.stage,
+.voice-strip,
+.hint-strip,
+.resize-strip,
+.attention-card {
+  --notice-accent: var(--pet-accent);
+  position: relative;
+  isolation: isolate;
+  box-sizing: border-box;
+  max-width: 100%;
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 0;
+  color: var(--pet-text);
+  filter: drop-shadow(0 2px 0 var(--pet-side)) drop-shadow(0 3px 5px var(--pet-cast));
+}
+.stage::before,
+.voice-strip::before,
+.hint-strip::before,
+.resize-strip::before,
+.attention-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--pet-surface-fill);
+  backdrop-filter: blur(10px);
+  clip-path: polygon(
+    5px 0,
+    calc(100% - 5px) 0,
+    calc(100% - 5px) 2px,
+    calc(100% - 2px) 2px,
+    calc(100% - 2px) 5px,
+    100% 5px,
+    100% calc(100% - 5px),
+    calc(100% - 2px) calc(100% - 5px),
+    calc(100% - 2px) calc(100% - 2px),
+    calc(100% - 5px) calc(100% - 2px),
+    calc(100% - 5px) 100%,
+    5px 100%,
+    5px calc(100% - 2px),
+    2px calc(100% - 2px),
+    2px calc(100% - 5px),
+    0 calc(100% - 5px),
+    0 5px,
+    2px 5px,
+    2px 2px,
+    5px 2px
+  );
+  box-shadow:
+    inset 0 1px var(--pet-highlight),
+    inset 1px 0 var(--pet-reflect),
+    inset -1px -2px var(--pet-shade);
+}
+.stage,
+.voice-strip,
+.hint-strip,
+.resize-strip {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.stage {
+  width: fit-content;
+  pointer-events: none;
+}
+.stage > span:first-of-type {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.stage :deep(svg),
+.voice-strip :deep(svg) {
+  color: var(--notice-accent);
+}
+.voice-strip > span,
+.hint-strip > span,
+.resize-strip > span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.voice-strip.recording,
+.voice-strip.failed {
+  --notice-accent: var(--pet-pink);
+}
+.voice-strip.recording::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 14px;
+  width: 12px;
+  height: 2px;
+  background: var(--pet-pink);
+}
+.meter {
+  width: 28px;
+  height: 4px;
+  flex-shrink: 0;
+  background: var(--pet-divider);
+  overflow: hidden;
+}
+.meter i {
+  height: 100%;
+  display: block;
+  background: var(--pet-pink);
+}
+.attention-card {
+  width: 100%;
+  padding: 12px 14px 9px;
+  --notice-accent: var(--pet-pink);
+}
+.attention-card::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 14px;
+  width: 18px;
+  height: 2px;
+  background: var(--notice-accent);
+}
+.attention-card__heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.attention-card__heading > :deep(svg) {
+  color: var(--notice-accent);
+}
+.attention-card__heading strong {
+  flex: 1;
+  font-weight: 400;
+  font-size: 13px;
+}
+.attention-card__summary {
+  margin: 6px 0 10px;
+  color: var(--pet-muted);
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.attention-card .text-button {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  padding: 8px 0 2px;
+  border-top: 1px solid var(--pet-divider);
+  color: var(--pet-text);
+}
+.attention-card .text-button:hover {
+  color: var(--pet-pink);
+}
+.hud-notices .icon-button {
+  padding: 4px;
+  margin-right: -4px;
+  flex-shrink: 0;
+}
+.hud-notices .icon-button:hover {
+  background: var(--pet-input);
+  box-shadow: inset 0 1px var(--pet-highlight);
+}
+.stage-pixels {
+  display: flex;
+  gap: 3px;
+  flex-shrink: 0;
+  color: var(--pet-accent);
+}
+.stage-pixels i {
+  width: 3px;
+  height: 3px;
+  background: currentColor;
+  animation: stage-step 1.2s steps(2, end) infinite;
+}
+.stage-pixels i:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.stage-pixels i:nth-child(3) {
+  animation-delay: 0.4s;
+}
+/* 平移动效只用于浮层本身，不修改其定位和缩放 transform。 */
+.pet-belt-enter-active {
+  transition:
+    opacity 180ms ease-out,
+    translate 180ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.pet-belt-leave-active {
+  transition:
+    opacity 120ms ease-in,
+    translate 120ms ease-in;
+  pointer-events: none;
+}
+.pet-belt-enter-from,
+.pet-belt-leave-to {
+  opacity: 0;
+  translate: 0 6px;
+}
+.pet-identity-enter-active,
+.pet-identity-leave-active {
+  transition: opacity 140ms ease;
+}
+.pet-identity-enter-from,
+.pet-identity-leave-to {
+  opacity: 0;
+}
+.pet-status-enter-active {
+  transition:
+    opacity 140ms ease-out,
+    translate 140ms ease-out;
+}
+.pet-status-leave-active {
+  transition: opacity 100ms ease-in;
+}
+.pet-status-enter-from {
+  opacity: 0;
+  translate: 0 3px;
+}
+.pet-status-leave-to {
+  opacity: 0;
+  pointer-events: none;
+}
+.pet-speech-enter-active {
+  transition:
+    opacity 280ms ease-out,
+    translate 360ms cubic-bezier(0.22, 1, 0.36, 1),
+    scale 360ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.pet-speech-leave-active {
+  transition:
+    opacity 220ms ease-in-out,
+    translate 220ms ease-in,
+    scale 220ms ease-in-out;
+  pointer-events: none;
+}
+.pet-speech-enter-from {
+  opacity: 0;
+  translate: 0 6px;
+  scale: 0.94;
+}
+.pet-speech-leave-to {
+  opacity: 0;
+  translate: 0 -4px;
+  scale: 0.98;
+}
+@keyframes stage-step {
+  0%,
+  60%,
+  100% {
+    opacity: 0.35;
+  }
+  30% {
+    opacity: 1;
+  }
+}
+@keyframes identity-glimmer {
+  0%,
+  100% {
+    opacity: 0.16;
+    translate: 0 0;
+  }
+  50% {
+    opacity: 0.32;
+    translate: 0 -1px;
+  }
+}
+@keyframes core-idle {
+  0%,
+  50%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  25% {
+    transform: translateY(-3px) rotate(15deg);
+  }
+  75% {
+    transform: translateY(3px) rotate(-15deg);
+  }
+}
+@keyframes pulse-ring-smooth {
+  0% {
+    transform: scale(0.8) rotate(0deg);
+    opacity: 0.8;
+    border-width: 2px;
+  }
+  50% {
+    opacity: 0.5;
+  }
+  100% {
+    transform: scale(2.4) rotate(90deg);
+    opacity: 0;
+    border-width: 0;
+  }
+}
+@supports not (backdrop-filter: blur(1px)) {
+  .pet-hud {
+    --pet-panel: rgba(216, 235, 246, 0.92);
+  }
+  [data-theme='dark'] .pet-hud {
+    --pet-panel: rgba(40, 51, 71, 0.9);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pet-identity::after {
+    animation: none;
+    opacity: 0.2;
+  }
+  *,
+  :deep(svg) {
+    animation: none !important;
+    transition: none !important;
+  }
+  .stage-pixels i {
+    opacity: 0.8;
+  }
+}

@@ -12,6 +12,7 @@ import { app } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import { logger } from '../utils/logger'
+import { isPackagedRuntime } from '../utils/runtimeMode'
 
 // ─── 延迟加载 steamworks.js ──────────────────────────
 // 不在模块顶层 require()，防止缺 steam_api64.dll 时 segfault
@@ -32,7 +33,7 @@ function loadSteamworks(): any {
     const dllPath = path.join(exeDir, 'steam_api64.dll')
     const hasDll = fs.existsSync(dllPath)
 
-    if (!hasDll && app.isPackaged) {
+    if (!hasDll && isPackagedRuntime) {
       logger.info('Steam', 'steam_api64.dll 未找到，跳过 Steamworks 加载 (非 Steam 版本)')
       return null
     }
@@ -68,7 +69,7 @@ export function initSteam(): 'ok' | 'not-available' | 'restarting' | 'failed' {
   const appId = 4457100
 
   // 生产环境: 检查是否需要通过 Steam 重启
-  if (app.isPackaged) {
+  if (isPackagedRuntime) {
     const exePath = app.getPath('exe').toLowerCase()
     const isSteamLibrary = exePath.includes('steamapps')
     const hasAppIdFile =
@@ -91,7 +92,7 @@ export function initSteam(): 'ok' | 'not-available' | 'restarting' | 'failed' {
 
   try {
     // 开发模式跳过 Overlay 注入，避免幽灵窗口
-    if (app.isPackaged) {
+    if (isPackagedRuntime) {
       sw.electronEnableSteamOverlay()
     } else {
       logger.info('Steam', '开发模式，跳过 Overlay 注入')

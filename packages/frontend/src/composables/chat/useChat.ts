@@ -52,6 +52,8 @@ export function useChat(options: UseChatOptions = {}) {
 
   /** 当前 AbortController（用于取消流） */
   let currentAbort: AbortController | null = null
+  let recoveryAbort: AbortController | null = null
+  let requestEpoch = 0
 
   function publishWorkspaceChanges(
     message: ConversationMessageProjection,
@@ -95,25 +97,24 @@ export function useChat(options: UseChatOptions = {}) {
     attachmentIds: string[] = [],
     attachments: AttachmentInfo[] = [],
     imageMode: 'auto' | 'native' | 'relay' = 'auto',
-    workspaceContext?: { filePath?: string; terminalId?: string },
+    workspaceContext?: import('../../api/modules/chatApi').ChatWorkspaceContext,
+    generationType: import('@infos/shared').PromptGenerationType = 'normal',
   ): Promise<boolean> {
-    const trimmed = text.trim()
-    if (!trimmed || threadStore.isGenerating) return false
+    const trimmed = generationType === 'regenerate' ? text : text.trim()
+    if (!trimmed.trim() || threadStore.isGenerating || threadStore.isLoadingHistory) return false
 
     const requestAgentId = agentStore.activeAgentId
     // Thread 与 Agent 必须成对一致；角色切换竞态下先重新加载权威会话。
-    if (threadStore.agentId !== requestAgentId) {
-      await threadStore.ensureLatestThread(requestAgentId, channel)
-    }
-    if (!threadStore.threadId) {
+    if (threadStore.agentId !== requestAgentId || !threadStore.threadId) {
       try {
-        await threadStore.createNewThread(requestAgentId, channel)
+        const activated = await threadStore.ensureLatestThread(requestAgentId, channel)
+        if (!activated || agentStore.activeAgentId !== requestAgentId) return false
       } catch (err) {
-        const message = err instanceof Error ? err.message : '创建会话失败'
-        // M05-B4: 创建会话失败也统一走 TaskToast
+        const message = err instanceof Error ? err.message : '恢复会话失败'
+        // 会话恢复失败统一走 TaskToast，保留原始接口错误。
         taskToast.push({
           type: 'task_failed',
-          agentId: agentStore.activeAgentId,
+          agentId: requestAgentId,
           title: '聊天会话',
           message,
         })
@@ -131,6 +132,10 @@ export function useChat(options: UseChatOptions = {}) {
       return false
     }
     const requestThreadId = threadStore.threadId
+    const epoch = ++requestEpoch
+    recoveryAbort?.abort()
+    recoveryAbort = null
+    const previousMessageIds = new Set(threadStore.messages.map((message) => message.id))
 
     // 1. 添加用户消息
     const userMsg = createMessage('user', trimmed)
@@ -164,11 +169,14 @@ export function useChat(options: UseChatOptions = {}) {
       attachmentIds,
       imageMode,
       workspaceContext,
+      generationType,
       agentId: requestAgentId,
     }
 
     const ownsRequestView = () =>
-      threadStore.threadId === requestThreadId && threadStore.agentId === requestAgentId
+      epoch === requestEpoch &&
+      threadStore.threadId === requestThreadId &&
+      threadStore.agentId === requestAgentId
 
     // 4. 发起唯一 Surface SSE 流；消息正文、工具与状态不再写入 ThreadStore。
     return await new Promise<boolean>((resolve) => {
@@ -195,6 +203,7 @@ export function useChat(options: UseChatOptions = {}) {
           ) {
             const state = (frame.operation.node.props as { state?: string }).state
             if (state === 'thinking') threadStore.generationState = 'thinking'
+            else if (state === 'assembling') threadStore.generationState = 'tool_assembling'
             else if (state === 'calling') threadStore.generationState = 'tool_calling'
             else if (state === 'generating') threadStore.generationState = 'generating'
           }
@@ -205,7 +214,7 @@ export function useChat(options: UseChatOptions = {}) {
 
         onDone: () => {
           if (ownsRequestView()) threadStore.finishStreaming()
-          currentAbort = null
+          if (epoch === requestEpoch) currentAbort = null
           resolve(true)
           window.dispatchEvent(
             new CustomEvent('infos:conversation-completed', {
@@ -216,38 +225,137 @@ export function useChat(options: UseChatOptions = {}) {
         },
 
         onError: (data) => {
+          if (epoch !== requestEpoch) {
+            resolve(false)
+            return
+          }
           // 先结束本地流，再立即回灌后端已持久化的失败消息和真实数据库 ID。
           // 刷新失败时才保留本地错误文本，确保用户仍能看到失败原因。
-          if (ownsRequestView()) threadStore.finishStreaming()
+          const failedMessageId = threadStore.streamingMessageId
+          let failedShell: import('../../stores').ChatMessage | undefined
+          if (ownsRequestView()) {
+            threadStore.failStreaming(data.code, data.message || '对话生成失败')
+            failedShell = threadStore.messages.find((message) => message.id === failedMessageId)
+            threadStore.finishStreaming()
+          }
+          const failedSurface = compositor.get(failedShell?.surfaceId)
           currentAbort = null
           resolve(false)
-          if (ownsRequestView()) {
-            void threadStore.loadThreadMessages(requestThreadId, requestAgentId).catch((err) => {
-              logger.error('useChat', '失败 Projection 回灌失败', err)
-            })
+          const disconnected = ['STREAM_TRUNCATED', 'STREAM_ERROR', 'NETWORK_ERROR'].includes(
+            data.code,
+          )
+          if (disconnected && ownsRequestView()) {
+            threadStore.generationState = 'thinking'
+            threadStore.streamingMessageId = failedMessageId
           }
-          // M05-B4: 对话生成失败走 TaskToast（附带出错角色，任务中心可回溯）
-          taskToast.push({
-            type: 'task_failed',
-            agentId: requestAgentId,
-            title: '对话生成失败',
-            message: data.message || '对话生成失败',
+          recoveryAbort?.abort()
+          const recovery = new AbortController()
+          recoveryAbort = recovery
+          // 断流只失去观察连接；后端仍在运行时等终态回灌，不能再次发送同一任务。
+          void (async () => {
+            // 覆盖整轮 6 小时时限，并留出终态消息持久化与网络恢复的时间。
+            const recoveryDeadline = Date.now() + 6 * 60 * 60 * 1000 + 5 * 60 * 1000
+            while (!recovery.signal.aborted && ownsRequestView()) {
+              try {
+                const active = disconnected ? ((await chatApi.activeTasks()).data ?? []) : []
+                if (recovery.signal.aborted || !ownsRequestView()) return
+                if (
+                  active.some(
+                    (task) =>
+                      task.threadId === requestThreadId &&
+                      ['running', 'paused'].includes(task.state),
+                  )
+                ) {
+                  threadStore.generationState = 'thinking'
+                  threadStore.failStreaming(
+                    'STREAM_RECONNECTING',
+                    '连接暂时中断，后台仍在继续，正在同步结果……',
+                  )
+                } else {
+                  threadStore.finishStreaming()
+                  const result = await threadStore.loadThreadMessages(
+                    requestThreadId,
+                    requestAgentId,
+                  )
+                  if (result.status !== 'failed') {
+                    // 编译上下文等较早失败可能尚未产生持久 Assistant，不能让空历史覆盖错误卡片。
+                    if (
+                      !disconnected &&
+                      result.status === 'loaded' &&
+                      failedShell &&
+                      !threadStore.messages.some(
+                        (message) =>
+                          message.role === 'assistant' &&
+                          !previousMessageIds.has(message.id) &&
+                          compositor.get(message.surfaceId)?.state === 'failed',
+                      )
+                    ) {
+                      if (failedSurface) compositor.install({ ...failedSurface, state: 'failed' })
+                      if (
+                        !threadStore.messages.some(
+                          (message) =>
+                            message.role === 'user' && !previousMessageIds.has(message.id),
+                        )
+                      )
+                        threadStore.addMessage(userMsg)
+                      threadStore.addMessage({ ...failedShell, isStreaming: false })
+                    }
+                    window.dispatchEvent(
+                      new CustomEvent('infos:conversation-completed', {
+                        detail: { agentId: requestAgentId, threadId: requestThreadId },
+                      }),
+                    )
+                    return
+                  }
+                }
+              } catch (error) {
+                logger.warn('useChat', '流结束后的会话同步暂时失败，稍后重试', error)
+              }
+              if (Date.now() >= recoveryDeadline) {
+                if (ownsRequestView()) threadStore.finishStreaming()
+                return
+              }
+              await new Promise<void>((done) => {
+                const finish = () => {
+                  clearTimeout(timer)
+                  recovery.signal.removeEventListener('abort', finish)
+                  done()
+                }
+                const timer = setTimeout(finish, 3_000)
+                recovery.signal.addEventListener('abort', finish, { once: true })
+              })
+            }
+          })().finally(() => {
+            if (recoveryAbort === recovery) recoveryAbort = null
           })
+          // M05-B4: 对话生成失败走 TaskToast（附带出错角色，任务中心可回溯）
+          if (!disconnected)
+            taskToast.push({
+              type: 'task_failed',
+              agentId: requestAgentId,
+              title: '对话生成失败',
+              message: data.message || '对话生成失败',
+            })
         },
       })
     })
   }
 
   function freezeRunningSurfaces(): void {
+    compositor.flush()
     const threadId = threadStore.threadId
     const openSurfaces = [...compositor.surfaces.values()].filter(
       (surface) => surface.threadId === threadId && surface.state === 'open',
     )
-    for (const surface of openSurfaces) compositor.terminateThinking(surface.surfaceId)
+    for (const surface of openSurfaces) compositor.terminateThinking(surface.surfaceId, true)
   }
 
   /** 停止当前生成 */
   async function stopGeneration(): Promise<void> {
+    const epoch = ++requestEpoch
+    const stoppingThread = threadStore.threadId
+    recoveryAbort?.abort()
+    recoveryAbort = null
     freezeRunningSurfaces()
     // 客户端中断 SSE 流
     if (currentAbort) {
@@ -256,15 +364,16 @@ export function useChat(options: UseChatOptions = {}) {
     }
 
     // 通知后端停止（传 threadId 精确取消）
-    if (threadStore.threadId) {
+    if (stoppingThread) {
       try {
-        await chatApi.stop({ threadId: threadStore.threadId })
+        await chatApi.stop({ threadId: stoppingThread })
       } catch {
         // 忽略停止请求的错误
       }
     }
 
-    threadStore.finishStreaming()
+    if (epoch === requestEpoch && threadStore.threadId === stoppingThread)
+      threadStore.finishStreaming()
   }
 
   /** 创建并切换到新的空白 Thread */
@@ -287,7 +396,7 @@ export function useChat(options: UseChatOptions = {}) {
         const text = list[i]!.content
         // 移除最后的 user + assistant 消息
         threadStore.messages = list.slice(0, i)
-        await sendMessage(text)
+        await sendMessage(text, [], [], 'auto', undefined, 'regenerate')
         return
       }
     }

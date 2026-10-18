@@ -13,6 +13,24 @@
 
 /** 聊天消息 */
 export interface ChatMessage {
+  /** 本地文件事实，Provider 不序列化；检查点与跨轮投影使用同一来源。 */
+  fileObservations?: import('../context/fileWorkingContext').FileObservation[]
+  toolExecutionFailed?: boolean
+  /** 本地缓存锚点，Provider 序列化时不发送。 */
+  cacheControl?: {
+    kind: 'history' | 'snapshot' | 'current'
+    key?: string
+    reply?: string
+    currentKeys?: string[]
+    turnStart?: boolean
+    edited?: boolean
+    historyMessageId?: number
+    historyRevision?: number
+    /** 展开的工具轨迹仍归属同一条持久化消息，用于校验热轨迹续接。 */
+    historySourceKey?: string
+    reasoningModelKey?: string
+    pairId?: string
+  }
   role: 'system' | 'user' | 'assistant' | 'tool'
   content: string | ContentPart[] | null
   /** 推理模型返回的内部思考字段，仅向兼容 Provider 回传。 */
@@ -66,11 +84,27 @@ export interface NativeReasoningPayload {
 }
 
 export interface ChatOptions {
+  /** 本地提示词任务标识与模板变量，不发送到 Provider。 */
+  promptTask?: string
+  promptChannel?: string
+  promptVariables?: Record<string, unknown>
+  /** 明确来自受管理模板的变量，允许在插入前单独渲染；普通数据不填此项。 */
+  promptSources?: string[]
+  /** 仅用于本地用量归属，不发送到模型接口。 */
+  usageContext?: {
+    agentId?: string
+    purpose?: import('@infos/shared').TokenUsagePurpose
+    channel?: string
+    threadId?: string
+    applicationId?: string
+    executionId?: string
+    step?: number
+  }
   /** 温度 (0-2) */
   temperature?: number
   /** Top P (0-1) */
   topP?: number
-  /** 最大生成 Token 数 */
+  /** 正文与工具参数输出额度；思考由 Provider 另行预留，不包含在此额度内。 */
   maxTokens?: number
   /** 模型推理强度 */
   reasoningEffort?: ReasoningEffort
@@ -82,12 +116,20 @@ export interface ChatOptions {
   responseFormat?: Record<string, unknown>
   /** 请求超时 (毫秒) */
   timeout?: number
+  /** 单次请求总时长，不随流式心跳延长。 */
+  totalTimeout?: number
   /** 工具选择策略 */
   toolChoice?: 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } }
   /** 停止序列 */
   stop?: string[]
   /** 取消在飞请求的信号 */
   signal?: AbortSignal
+  /** 调用方已管理批次恢复时关闭内部重试，避免多层次数相乘。 */
+  maxRetries?: number
+  /** 仅受控 ReAct 可在清理当前响应草稿后重新请求，普通流式调用默认禁止重放半截输出。 */
+  retryPartialResponse?: boolean
+  /** 本地重试通知，不发送给 Provider。 */
+  onRetry?: (retry: import('@infos/shared').ModelRetryInfo) => void
 }
 
 // ─────────────────────────────────────────────
@@ -96,6 +138,11 @@ export interface ChatOptions {
 
 /** Token 使用量 */
 export interface UsageInfo {
+  inputReported?: boolean
+  outputReported?: boolean
+  cachedReadTokens?: number
+  cachedWriteTokens?: number
+  reasoningTokens?: number
   /** 输入 Token 数 */
   promptTokens: number
   /** 输出 Token 数 */
@@ -137,6 +184,8 @@ export interface StreamToolCallDelta {
 
 /** 流式增量 */
 export interface ChatDelta {
+  /** 本地控制事件，choices 为空；不得作为模型正文序列化。 */
+  retry?: import('@infos/shared').ModelRetryInfo
   choices: Array<{
     delta: {
       role?: string
@@ -157,6 +206,8 @@ export interface ChatDelta {
 
 /** LLM Provider 接口 */
 export interface LlmProvider {
+  /** 与真实请求共用序列化逻辑，仅返回会进入模型上下文的字段。 */
+  getInputTokenPayload(messages: ChatMessage[], opts: ChatOptions): Record<string, unknown>
   /** 非流式调用 */
   chat(messages: ChatMessage[], opts: ChatOptions): Promise<ChatCompletion>
   /** 流式调用 */

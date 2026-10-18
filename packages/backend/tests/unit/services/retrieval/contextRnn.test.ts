@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, rmSync, writeFileSync, statSync, utimesSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -36,9 +36,7 @@ import type { PathResolver } from '@infos/backend/core/pathResolver'
 
 function createResolver(root: string): PathResolver {
   return {
-    resolve: vi.fn((alias: string) =>
-      join(root, alias.replace('@data/', '').replaceAll('/', '\\')),
-    ),
+    resolve: vi.fn((alias: string) => join(root, alias.replace('@data/', ''))),
   } as unknown as PathResolver
 }
 
@@ -53,6 +51,52 @@ describe('ContextRnn', () => {
   afterEach(() => {
     rmSync(root, { recursive: true, force: true })
     vi.clearAllMocks()
+  })
+
+  it('无变更时不写盘，单个角色变化不重写其他角色或权重', () => {
+    const resolver = createResolver(root)
+    const rnn = new ContextRnn(resolver, { inputDim: 6 })
+    rnn.update('pero', 'desktop', [1, 2])
+    rnn.update('nana', 'desktop', [2, 3])
+    rnn.saveAll()
+    expect(rnn.hasDirtyChanges).toBe(false)
+    const files = [
+      '@data/agent_pero/rnn_desktop.bin',
+      '@data/agent_nana/rnn_desktop.bin',
+      '@data/shared/rnn_proj.bin',
+      '@data/shared/rnn_output.bin',
+      '@data/shared/rnn_mingru.bin',
+    ].map((alias) => resolver.resolve(alias))
+    const marker = new Date('2000-01-01T00:00:00Z')
+    for (const file of files) utimesSync(file, marker, marker)
+    rnn.saveAll()
+    for (const file of files) expect(statSync(file).mtimeMs).toBe(marker.getTime())
+    rnn.update('pero', 'desktop', [4, 5])
+    rnn.saveAll()
+    expect(statSync(files[0]!).mtimeMs).not.toBe(marker.getTime())
+    for (const file of files.slice(1)) expect(statSync(file).mtimeMs).toBe(marker.getTime())
+    expect(rnn.hasDirtyChanges).toBe(false)
+    const restored = new ContextRnn(resolver, { inputDim: 6 })
+    restored.load('pero', 'desktop')
+    expect(restored.hasDirtyChanges).toBe(false)
+  })
+
+  it('训练只标记相关权重，检查点后不会重复保存干净权重', () => {
+    const resolver = createResolver(root)
+    const rnn = new ContextRnn(resolver, { inputDim: 6 })
+    rnn.update('pero', 'desktop', [1, 2])
+    rnn.saveAll()
+    const projection = resolver.resolve('@data/shared/rnn_proj.bin')
+    const output = resolver.resolve('@data/shared/rnn_output.bin')
+    const mingru = resolver.resolve('@data/shared/rnn_mingru.bin')
+    const marker = new Date('2000-01-01T00:00:00Z')
+    for (const file of [projection, output, mingru]) utimesSync(file, marker, marker)
+    rnn.trainMinGru('pero', 'desktop', new Float32Array([1, 2]), true)
+    rnn.saveAll()
+    expect(statSync(mingru).mtimeMs).not.toBe(marker.getTime())
+    expect(statSync(projection).mtimeMs).toBe(marker.getTime())
+    expect(statSync(output).mtimeMs).toBe(marker.getTime())
+    expect(rnn.hasDirtyChanges).toBe(false)
   })
 
   it('应当创建零初始化状态并在更新时调用投影与 minGRU', () => {
@@ -126,6 +170,12 @@ describe('ContextRnn', () => {
     rnn.saveAll()
 
     const loadedWeights = new ContextRnn(resolver)
-    expect(loadedWeights.getHiddenState('pero', 'desktop')).toEqual(expect.any(Float32Array))
+    expect(loadedWeights.load('pero', 'desktop')).toBe(true)
+    expect(Array.from(loadedWeights.getHiddenState('pero', 'desktop'))).toEqual(
+      Array.from(rnn.getHiddenState('pero', 'desktop')),
+    )
+    expect(Array.from(loadedWeights.generateBias('pero', 'desktop'))).toEqual(
+      Array.from(rnn.generateBias('pero', 'desktop')),
+    )
   })
 })

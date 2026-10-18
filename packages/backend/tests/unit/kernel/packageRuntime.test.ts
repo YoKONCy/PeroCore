@@ -22,11 +22,15 @@ describe('Package Runtime', () => {
     const order: string[] = []
     runtime.registerActivator('asset', ({ contribution }) => {
       order.push(`start:${contribution.id}`)
-      return () => order.push(`stop:${contribution.id}`)
+      return () => {
+        order.push(`stop:${contribution.id}`)
+      }
     })
     runtime.registerActivator('presenter', ({ contribution }) => {
       order.push(`start:${contribution.id}`)
-      return () => order.push(`stop:${contribution.id}`)
+      return () => {
+        order.push(`stop:${contribution.id}`)
+      }
     })
     await runtime.activate(manifest.packageId)
     expect(registry.get(manifest.packageId)?.state).toBe('active')

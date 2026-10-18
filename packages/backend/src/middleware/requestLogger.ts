@@ -16,7 +16,7 @@ const logger = createLogger('HTTP')
 export const requestLogger: MiddlewareHandler = async (c, next) => {
   const start = Date.now()
   const method = c.req.method
-  const path = c.req.path
+  const path = c.req.path.replace(/^\/html-previews\/[^/]+/, '/html-previews/[预览]')
 
   await next()
 

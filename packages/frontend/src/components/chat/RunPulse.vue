@@ -9,6 +9,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
 type RunPulseState =
   | 'thinking'
+  | 'assembling'
   | 'generating'
   | 'calling'
   | 'waiting'
@@ -76,10 +77,11 @@ onBeforeUnmount(stopTimer)
 const text = computed(() => {
   if (props.label) return props.label
   const labels: Record<RunPulseState, string> = {
-    thinking: `${props.name}正在思考`,
-    generating: '正在组织回复',
-    calling: '正在调用工具',
-    waiting: '等待你的确认',
+    thinking: '正在思考……',
+    assembling: '正在生成工具调用……',
+    generating: '正在打字……',
+    calling: '正在等待工具回传……',
+    waiting: '正在等待你的回应……',
     paused: '任务已暂停',
     cancelled: '已终止',
     completed: '回复完成',

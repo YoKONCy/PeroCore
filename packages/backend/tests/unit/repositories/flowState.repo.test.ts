@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { flowStateRevisions, flowStates, workContextEntries } from '@infos/backend/database/schema'
+import { flowStateRevisions, flowStates } from '@infos/backend/database/schema'
 import { FlowStateRepository } from '@infos/backend/repositories/flowState.repo'
 
 let sqlite: Database.Database
@@ -15,8 +15,6 @@ describe('FlowStateRepository 对话检查点回退', () => {
         agent_id TEXT NOT NULL,
         current_goal TEXT DEFAULT '' NOT NULL,
         private_facts TEXT DEFAULT '' NOT NULL,
-        work_context TEXT DEFAULT '' NOT NULL,
-        work_context_updated_at_pair_count INTEGER DEFAULT 0 NOT NULL,
         revision INTEGER DEFAULT 1 NOT NULL,
         updated_by_pair_id TEXT,
         updated_at TEXT DEFAULT (datetime('now', 'localtime')) NOT NULL
@@ -31,23 +29,8 @@ describe('FlowStateRepository 对话检查点回退', () => {
         before_private_facts TEXT DEFAULT '' NOT NULL,
         after_current_goal TEXT DEFAULT '' NOT NULL,
         after_private_facts TEXT DEFAULT '' NOT NULL,
-        before_work_context TEXT DEFAULT '' NOT NULL,
-        before_work_context_updated_at_pair_count INTEGER DEFAULT 0 NOT NULL,
-        after_work_context TEXT DEFAULT '' NOT NULL,
-        after_work_context_updated_at_pair_count INTEGER DEFAULT 0 NOT NULL,
         created_at TEXT DEFAULT (datetime('now', 'localtime')) NOT NULL
       );
-      CREATE TABLE work_context_entries (
-        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-        thread_id TEXT NOT NULL,
-        agent_id TEXT NOT NULL,
-        pair_id TEXT NOT NULL,
-        pair_count INTEGER NOT NULL,
-        content TEXT NOT NULL,
-        created_at TEXT DEFAULT (datetime('now', 'localtime')) NOT NULL
-      );
-      CREATE UNIQUE INDEX idx_work_context_entries_pair_agent
-        ON work_context_entries(thread_id, agent_id, pair_id);
     `)
   })
 
@@ -55,7 +38,7 @@ describe('FlowStateRepository 对话检查点回退', () => {
 
   it('A 与 D 更新心流时，撤销 D 后恢复到 A 完成后的状态', async () => {
     const db = drizzle(sqlite, {
-      schema: { flowStates, flowStateRevisions, workContextEntries },
+      schema: { flowStates, flowStateRevisions },
     })
     const repo = new FlowStateRepository(db as never)
 
@@ -82,9 +65,39 @@ describe('FlowStateRepository 对话检查点回退', () => {
     })
   })
 
+  it('清空写入真实修订，并可按该轮次回退', async () => {
+    const db = drizzle(sqlite, { schema: { flowStates, flowStateRevisions } })
+    const repo = new FlowStateRepository(db as never)
+    await repo.save({
+      threadId: 'thread-1',
+      agentId: 'nana',
+      pairId: 'A',
+      currentGoal: '目标',
+      privateFacts: '事实',
+    })
+    await repo.clear('thread-1', 'nana', 'D')
+    expect(await repo.get('thread-1', 'nana')).toMatchObject({ currentGoal: '', privateFacts: '' })
+    expect(await db.select().from(flowStateRevisions)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          pairId: 'D',
+          beforeCurrentGoal: '目标',
+          beforePrivateFacts: '事实',
+          afterCurrentGoal: '',
+          afterPrivateFacts: '',
+        }),
+      ]),
+    )
+    await repo.rollbackPairs('thread-1', ['D'])
+    expect(await repo.get('thread-1', 'nana')).toMatchObject({
+      currentGoal: '目标',
+      privateFacts: '事实',
+    })
+  })
+
   it('同一待撤销轮次多次更新时恢复到该轮开始前的状态', async () => {
     const db = drizzle(sqlite, {
-      schema: { flowStates, flowStateRevisions, workContextEntries },
+      schema: { flowStates, flowStateRevisions },
     })
     const repo = new FlowStateRepository(db as never)
     await repo.save({

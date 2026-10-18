@@ -22,6 +22,7 @@
  * @module packages/backend/src/services/gateway/gatewayHub
  */
 
+import { timingSafeEqual } from 'node:crypto'
 import {
   GATEWAY_ACTION_CATALOG,
   negotiateKernelProtocol,
@@ -67,16 +68,29 @@ interface GatewayNode {
   principalId?: string
   subscriptions: Set<string>
   authenticated: boolean
+  /** HTTP 升级已经验证的凭据，可供浏览器无令牌的 hello 复用。 */
+  transportAuthenticated?: boolean
   /** 发送 JSON 文本的函数 (由 WS 升级时注入) */
   send: (data: string) => void | Promise<void>
+  close?: () => void
   /** 最后一次活跃时间 (心跳/消息) */
   lastActiveAt: number
   /** 设备名称 (Hello 握手时设置) */
   deviceName?: string
+  petPresence?: { agentId: string; visible: boolean; updatedAt: number }
+  notificationPrincipals?: Set<string>
 }
 
 /** 事件回调 */
 type EventCallback = (envelope: GatewayEnvelope) => void | Promise<void>
+export interface NotificationIdentity {
+  notificationId: string
+  revision: number
+}
+type NotificationSuppression = (
+  principalId: string,
+  notifications: NotificationIdentity[],
+) => Promise<string[]>
 
 // ─────────────────────────────────────────────
 // Hub
@@ -87,7 +101,7 @@ export class GatewayHub {
   private nodes = new Map<string, GatewayNode>()
 
   /** 认证 Token */
-  authToken = ''
+  authToken: string
 
   /** 事件监听器 */
   private listeners = new Map<string, EventCallback[]>()
@@ -95,15 +109,77 @@ export class GatewayHub {
   /** 心跳定时器 */
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null
   private readonly durableStreams = new DurableGatewayStream()
+  private readonly notificationSuppressions = new Set<NotificationSuppression>()
+
+  addNotificationSuppression(filter: NotificationSuppression): () => void {
+    this.notificationSuppressions.add(filter)
+    return () => {
+      this.notificationSuppressions.delete(filter)
+    }
+  }
+
+  private async visibleNotifications<T extends NotificationIdentity>(
+    principalId: string,
+    items: T[],
+  ): Promise<T[]> {
+    if (!items.length || !this.notificationSuppressions.size) return items
+    const hidden = new Set<string>()
+    for (const filter of this.notificationSuppressions) {
+      try {
+        for (const id of await filter(principalId, items)) hidden.add(id)
+      } catch (error) {
+        logger.warn('通知移除状态暂时无法读取，保留原通知', { error: String(error) })
+      }
+    }
+    const suppressed = items.filter((item) => hidden.has(item.notificationId))
+    if (suppressed.length) {
+      try {
+        this.notifications?.acknowledge(
+          principalId,
+          suppressed.map(({ notificationId, revision }) => ({ notificationId, revision })),
+        )
+      } catch (error) {
+        logger.warn('已移除通知的回执暂未保存，下次恢复时继续过滤', { error: String(error) })
+      }
+    }
+    return items.filter((item) => !hidden.has(item.notificationId))
+  }
 
   constructor(
     private readonly nodeRegistry?: NodeRegistry,
     private readonly notifications?: DurableNotificationRepository,
-  ) {}
+    authToken = '',
+  ) {
+    this.authToken = authToken
+  }
+
+  acceptsToken(token: string): boolean {
+    if (!this.authToken) return true
+    const expected = Buffer.from(this.authToken)
+    const supplied = Buffer.from(token)
+    return expected.length === supplied.length && timingSafeEqual(expected, supplied)
+  }
+
+  isAuthenticated(nodeId: string): boolean {
+    return this.nodes.get(nodeId)?.authenticated === true
+  }
 
   /** 已连接节点数 */
   get connectedCount(): number {
     return this.nodes.size
+  }
+
+  /** 桌宠显示状态只属于当前连接，过期或断线后自动失效，不作为持久化偏好。 */
+  hasVisiblePet(agentId: string): boolean {
+    const now = Date.now()
+    return [...this.nodes.values()].some(
+      (node) =>
+        node.authenticated &&
+        node.principalId === agentId &&
+        node.petPresence?.agentId === agentId &&
+        node.petPresence.visible &&
+        now - node.petPresence.updatedAt < STALE_TIMEOUT_MS,
+    )
   }
 
   // ── 生命周期 ──
@@ -141,8 +217,15 @@ export class GatewayHub {
 
     for (const nodeId of staleIds) {
       logger.warn(`清理 stale 连接: ${nodeId} (超过 ${STALE_TIMEOUT_MS / 1000}s 无响应)`)
-      this.disconnectNodeSession(this.nodes.get(nodeId))
+      const node = this.nodes.get(nodeId)
+      this.disconnectNodeSession(node)
       this.nodes.delete(nodeId)
+      // 真正关闭 Transport，客户端才能感知失效并重新握手，不能留下假在线连接。
+      try {
+        node?.close?.()
+      } catch (error) {
+        logger.warn('关闭失效连接失败', { error })
+      }
     }
 
     if (staleIds.length > 0) {
@@ -189,13 +272,20 @@ export class GatewayHub {
   // ── 连接管理 ──
 
   /** 注册节点 */
-  registerNode(nodeId: string, sendFn: (data: string) => void | Promise<void>): void {
+  registerNode(
+    nodeId: string,
+    sendFn: (data: string) => void | Promise<void>,
+    closeFn?: () => void,
+    transportAuthenticated = false,
+  ): void {
     this.nodes.set(nodeId, {
       id: nodeId,
       send: sendFn,
+      close: closeFn,
       lastActiveAt: Date.now(),
       subscriptions: new Set(),
-      authenticated: !this.nodeRegistry,
+      authenticated: !this.nodeRegistry && !this.authToken,
+      transportAuthenticated,
     })
     logger.info(`节点已注册: ${nodeId} (在线: ${this.nodes.size})`)
   }
@@ -243,6 +333,12 @@ export class GatewayHub {
       return
     }
 
+    if (!node) return
+    // 未完成握手的连接不能借 abort、push 或直接路由绕过请求鉴权。
+    if (!node.authenticated && !['hello', 'heartbeat', 'ping'].includes(envelope.type)) {
+      await this.sendTransportError(envelope.id, nodeId, 'GATEWAY_HELLO_REQUIRED')
+      return
+    }
     switch (envelope.type) {
       case 'hello':
         await this.handleHello(envelope, nodeId)
@@ -256,6 +352,57 @@ export class GatewayHub {
           break
         }
         envelope.sourceId = node.stableNodeId ?? nodeId
+        if (envelope.payload.action === 'gateway.pet_presence') {
+          const agentId = String(envelope.payload.agentId ?? '').trim()
+          if (
+            !agentId ||
+            agentId !== node.principalId ||
+            typeof envelope.payload.visible !== 'boolean'
+          ) {
+            await this.sendTransportError(envelope.id, nodeId, 'GATEWAY_PET_PRESENCE_INVALID')
+          } else {
+            node.petPresence = { agentId, visible: envelope.payload.visible, updatedAt: Date.now() }
+            await this.sendRpcValue(envelope.id, node.id, { visible: node.petPresence.visible })
+          }
+          break
+        }
+        if (envelope.payload.action === 'gateway.select_principal') {
+          const principalId = String(envelope.payload.principalId ?? '').trim()
+          if (!principalId || principalId.length > 200) {
+            await this.sendTransportError(envelope.id, nodeId, 'GATEWAY_PRINCIPAL_INVALID')
+          } else {
+            const changed = node.principalId !== principalId
+            if (changed) node.petPresence = undefined
+            node.principalId = principalId
+            await this.sendRpcValue(envelope.id, node.id, { principalId })
+            if (changed) await this.replayNotifications(node, principalId)
+          }
+          break
+        }
+        if (envelope.payload.action === 'gateway.notifications.ack') {
+          const principalId = String(envelope.payload.principalId ?? '')
+          const receipts = envelope.payload.receipts
+          if (
+            !node.notificationPrincipals?.has(principalId) ||
+            !Array.isArray(receipts) ||
+            receipts.length > 200 ||
+            receipts.some(
+              (receipt) =>
+                !receipt ||
+                typeof receipt.notificationId !== 'string' ||
+                !receipt.notificationId ||
+                receipt.notificationId.length > 300 ||
+                !Number.isSafeInteger(receipt.revision) ||
+                receipt.revision < 1,
+            )
+          ) {
+            await this.sendTransportError(envelope.id, node.id, 'GATEWAY_NOTIFICATION_ACK_INVALID')
+          } else {
+            const acknowledged = this.notifications?.acknowledge(principalId, receipts) ?? 0
+            await this.sendRpcValue(envelope.id, node.id, { acknowledged })
+          }
+          break
+        }
         if (envelope.payload.action === 'gateway.subscribe') {
           await this.handleSubscribe(envelope, node)
           break
@@ -417,9 +564,14 @@ export class GatewayHub {
     principalId?: string
     important?: boolean
     notificationId?: string
+    createdAt?: string
   }): Promise<void> {
     const principalId = params.principalId ?? 'pero'
     const notificationId = params.notificationId ?? crypto.randomUUID()
+    const createdAt =
+      params.createdAt && Number.isFinite(Date.parse(params.createdAt))
+        ? new Date(params.createdAt).toISOString()
+        : new Date().toISOString()
     if (!this.nodeRegistry) {
       await this.broadcast(
         createEnvelope('push', { action: 'notification', ...params, notificationId }),
@@ -427,7 +579,7 @@ export class GatewayHub {
       return
     }
     if (params.important) {
-      this.notifications?.create({
+      const created = this.notifications?.create({
         notificationId,
         principalId,
         audience: { type: 'all_principal_clients', principalId },
@@ -436,11 +588,14 @@ export class GatewayHub {
         level: params.level ?? 'info',
         status: 'unread',
         revision: 1,
-        createdAt: new Date().toISOString(),
+        createdAt,
       })
+      if (created === false) return
+      if (!(await this.visibleNotifications(principalId, [{ notificationId, revision: 1 }])).length)
+        return
       await this.pushBusiness(
         'durable_notification',
-        { ...params, notificationId, important: true },
+        { ...params, principalId, notificationId, important: true, revision: 1, createdAt },
         { type: 'all_principal_clients', principalId },
         `notification:${principalId}`,
       )
@@ -516,9 +671,15 @@ export class GatewayHub {
     const node = this.nodes.get(connectionId)
     if (!node) return
     const token = String(envelope.payload.token ?? '')
-    if (this.authToken && token !== this.authToken) {
+    if (
+      this.authToken &&
+      ((!token && !node.transportAuthenticated) || (token && !this.acceptsToken(token)))
+    ) {
       logger.warn(`连接 ${connectionId} Token 不匹配`)
       await this.sendTransportError(envelope.id, connectionId, 'GATEWAY_UNAUTHORIZED')
+      node.authenticated = false
+      node.close?.()
+      this.unregisterNode(connectionId)
       return
     }
 
@@ -530,7 +691,16 @@ export class GatewayHub {
         return
       }
       const descriptor = this.toClientDescriptor(stableNodeId, envelope.payload)
-      this.nodeRegistry.registerNode(descriptor)
+      const existing = this.nodeRegistry.getNode(stableNodeId)
+      // Electron 的界面与能力连接共享 Node ID；界面握手只建立 Session，不能覆盖能力 Host 的身份。
+      // 不合并或提升 Gateway 声明的权限，保留已注册能力客户端的 Facet、信任和平台信息。
+      if (
+        !existing ||
+        !existing.facets.includes('client') ||
+        !existing.facets.includes('capability')
+      ) {
+        this.nodeRegistry.registerNode(descriptor)
+      }
       const session = this.nodeRegistry.connect({
         nodeId: stableNodeId,
         connectionId,
@@ -564,6 +734,34 @@ export class GatewayHub {
       connectionId,
     )
     await node.send(JSON.stringify(ack))
+    await this.replayNotifications(node, principalId)
+  }
+
+  private async replayNotifications(node: GatewayNode, principalId: string): Promise<void> {
+    node.notificationPrincipals ??= new Set()
+    node.notificationPrincipals.add(principalId)
+    // WebSocket 游标只覆盖当前进程；重连后从数据库补送未读的重要通知。
+    for (const notification of await this.visibleNotifications(
+      principalId,
+      this.notifications?.list(principalId, 'unread') ?? [],
+    )) {
+      await node.send(
+        JSON.stringify(
+          createEnvelope('push', {
+            action: 'durable_notification',
+            notificationId: notification.notificationId,
+            principalId,
+            title: notification.title,
+            body: notification.body,
+            level: notification.level,
+            important: true,
+            revision: notification.revision,
+            createdAt: notification.createdAt,
+            replayed: true,
+          }),
+        ),
+      )
+    }
   }
 
   private toClientDescriptor(
@@ -601,6 +799,37 @@ export class GatewayHub {
     }
     node.subscriptions.add(streamId)
     const recovery = this.durableStreams.read(streamId, lastSequence)
+    if (this.notifications && streamId.startsWith('notification:')) {
+      const ids = recovery.events
+        .filter((event) => event.payload.action === 'durable_notification')
+        .map((event) => String(event.payload.notificationId ?? ''))
+      const unread = this.notifications.unreadIds(streamId.slice('notification:'.length), ids)
+      recovery.events = recovery.events.filter(
+        (event) =>
+          event.payload.action !== 'durable_notification' ||
+          unread.has(String(event.payload.notificationId ?? '')),
+      )
+      const visible = await this.visibleNotifications(
+        streamId.slice('notification:'.length),
+        recovery.events
+          .filter((event) => event.payload.action === 'durable_notification')
+          .map((event) => ({
+            notificationId: String(event.payload.notificationId ?? ''),
+            revision: Number(event.payload.revision ?? 1),
+          })),
+      )
+      const visibleIds = new Set(visible.map((item) => item.notificationId))
+      recovery.events = recovery.events.filter(
+        (event) =>
+          event.payload.action !== 'durable_notification' ||
+          visibleIds.has(String(event.payload.notificationId ?? '')),
+      )
+    }
+    // 补游标只恢复状态，不能把历史通知伪装成刚发生的新事件。
+    recovery.events = recovery.events.map((event) => ({
+      ...event,
+      payload: { ...event.payload, replayed: true },
+    }))
     const response = createEnvelope('response', { streamId, ...recovery }, node.id)
     response.id = envelope.id
     await node.send(JSON.stringify(response))

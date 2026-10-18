@@ -81,6 +81,14 @@ class AnimationState {
 export class AnimationEngine {
   private activeStates: AnimationState[] = []
   private retargetingManager: RetargetingManager
+  /** 混合计算复用临时对象，避免每帧为每根骨骼创建多份向量。 */
+  private readonly affectedBones = new Set<string>()
+  private readonly finalPos = new THREE.Vector3()
+  private readonly finalScale = new THREE.Vector3()
+  private readonly rotDelta = new THREE.Vector3()
+  private readonly restPos = new THREE.Vector3()
+  private readonly restScale = new THREE.Vector3()
+  private readonly resultEuler = new THREE.Euler()
   /** 是否锁定根骨骼位移（防止角色在场景中滑动） */
   public lockRootPosition: boolean = false
 
@@ -140,6 +148,13 @@ export class AnimationEngine {
    * @param fadeTime - 淡出时间（秒，0 表示立即停止）
    */
   stop(animName?: string, fadeTime: number = 0.2): void {
+    if (fadeTime <= 0) {
+      this.activeStates = animName
+        ? this.activeStates.filter((state) => state.data.name !== animName)
+        : []
+      this.affectedBones.clear()
+      return
+    }
     const targets = animName
       ? this.activeStates.filter((s) => s.data.name === animName)
       : this.activeStates
@@ -184,7 +199,8 @@ export class AnimationEngine {
     molangContext.query.life_time += dt
 
     // 收集所有受影响的骨骼名称
-    const affectedBones = new Set<string>()
+    const affectedBones = this.affectedBones
+    affectedBones.clear()
     for (const state of this.activeStates) {
       Object.keys(state.data.bones).forEach((b) => affectedBones.add(b))
     }
@@ -197,10 +213,10 @@ export class AnimationEngine {
   /** 将所有活动动画按权重混合并应用到骨骼 */
   private applyBlendedAnimation(bones: Set<string>): void {
     for (const boneName of bones) {
-      const finalPos = new THREE.Vector3()
-      const finalScale = new THREE.Vector3()
+      const finalPos = this.finalPos.set(0, 0, 0)
+      const finalScale = this.finalScale.set(0, 0, 0)
       // 旋转增量累加器（欧拉角，弧度）
-      const rotDelta = new THREE.Vector3(0, 0, 0)
+      const rotDelta = this.rotDelta.set(0, 0, 0)
 
       // 各通道独立统计权重：YSM 的并行动画往往只改 scale（部件开关/物理），
       // 若与 idle 共用一个 totalWeight 平均，scale 会被稀释（如 0/1 → 0.5/0）。
@@ -214,8 +230,8 @@ export class AnimationEngine {
       const initialEuler = this.retargetingManager.getInitialEuler(boneName)
 
       const boneObj = this.retargetingManager.getBone(boneName)
-      const restPos = boneObj ? boneObj.position.clone() : new THREE.Vector3()
-      const restScale = boneObj ? boneObj.scale.clone() : new THREE.Vector3(1, 1, 1)
+      const restPos = boneObj ? this.restPos.copy(boneObj.position) : this.restPos.set(0, 0, 0)
+      const restScale = boneObj ? this.restScale.copy(boneObj.scale) : this.restScale.set(1, 1, 1)
 
       for (const state of this.activeStates) {
         const effectiveWeight = state.weight * state.blendWeight
@@ -243,7 +259,9 @@ export class AnimationEngine {
           const val = this.evaluateTrack(tracks.position, state.time)
           if (val) {
             finalPos.addScaledVector(restPos, effectiveWeight)
-            finalPos.addScaledVector(new THREE.Vector3(-val[0], val[1], val[2]), effectiveWeight)
+            finalPos.x -= val[0] * effectiveWeight
+            finalPos.y += val[1] * effectiveWeight
+            finalPos.z += val[2] * effectiveWeight
             wPos += effectiveWeight
             hasPos = true
           }
@@ -253,7 +271,9 @@ export class AnimationEngine {
         if (tracks.scale) {
           const val = this.evaluateTrack(tracks.scale, state.time)
           if (val) {
-            finalScale.addScaledVector(new THREE.Vector3(val[0], val[1], val[2]), effectiveWeight)
+            finalScale.x += val[0] * effectiveWeight
+            finalScale.y += val[1] * effectiveWeight
+            finalScale.z += val[2] * effectiveWeight
             wScale += effectiveWeight
             hasScale = true
           }
@@ -270,7 +290,7 @@ export class AnimationEngine {
 
       // 应用旋转：最终旋转 = 初始旋转 + 动画增量
       if (hasRot) {
-        const resultEuler = new THREE.Euler(
+        const resultEuler = this.resultEuler.set(
           initialEuler.x + rotDelta.x,
           initialEuler.y + rotDelta.y,
           initialEuler.z + rotDelta.z,

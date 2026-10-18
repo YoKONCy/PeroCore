@@ -86,15 +86,21 @@ describe('SocialSessionManager 单 Agent 状态机', () => {
 
   it('失败时恢复批次并进入 retrying', async () => {
     vi.useFakeTimers()
-    const manager = new SocialSessionManager(vi.fn().mockRejectedValue(new Error('网络错误')), {
-      groupCollectTimeout: 1,
-    })
+    const manager = new SocialSessionManager(
+      vi
+        .fn()
+        .mockRejectedValue(Object.assign(new Error('网络连接失败'), { code: 'NETWORK_ERROR' })),
+      {
+        groupCollectTimeout: 1,
+      },
+    )
     await manager.handleInbound(message({ rawEvent: { _isMentioned: true } }))
     await vi.advanceTimersByTimeAsync(1000)
 
     const session = manager.getActiveSessions('group')[0]!
     expect(session.phase).toBe('retrying')
-    expect(session.pendingMessages).toHaveLength(1)
+    expect(session.retryMessages).toHaveLength(1)
+    expect(session.pendingMessages).toHaveLength(0)
     expect(session.inFlightMessages).toHaveLength(0)
   })
 

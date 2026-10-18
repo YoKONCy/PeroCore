@@ -5,7 +5,8 @@
  * 调用方依赖这里的稳定契约，不直接耦合底层传输或运行时实现。
  */
 import { defineStore } from 'pinia'
-import type { KernelNodeId } from '@infos/shared'
+import type { OfficeSelection } from '@infos/document-engine/office'
+import type { KernelNodeId, ApplicationTaskSnapshot } from '@infos/shared'
 import type {
   DocumentCommitReceipt,
   DocumentNode,
@@ -18,7 +19,11 @@ import type {
   OutlineNode,
   SemanticDocument,
 } from '@infos/document-engine'
-import { arcaCollaborationClient, type ArcaCollaborationTask } from '../services/collaboration'
+import {
+  arcaCollaborationClient,
+  type ArcaCollaborationAgent,
+  type ArcaCollaborationTask,
+} from '../services/collaboration'
 import { DocumentDraftStore, type PersistedDocumentDraft } from '../services/draftStore'
 import { resolveArcaEndpoint } from '../services/discovery'
 import { arcaPreferenceStore } from '../services/settings'
@@ -53,6 +58,9 @@ interface ClientComment {
   status: 'open' | 'resolved'
   createdAt: string
   resolvedBy?: string
+  anchor?: { quote: string }
+  anchorState?: 'attached' | 'missing' | 'ambiguous'
+  currentRange?: { start: number; end: number }
 }
 
 interface ClientChangeSet {
@@ -68,6 +76,7 @@ interface ClientChangeSet {
 }
 
 interface ClientRevisionEntry {
+  restorable?: boolean
   revision: {
     revisionId: string
     sequence: number
@@ -92,6 +101,7 @@ const principalId = 'human:local-user'
 export const useWorkbenchStore = defineStore('arca-workbench', {
   state: () => ({
     connection: 'idle' as ClientConnectionState,
+    connectSequence: 0,
     endpoint: undefined as string | undefined,
     hostNodeId: undefined as string | undefined,
     hostOnline: false,
@@ -113,18 +123,24 @@ export const useWorkbenchStore = defineStore('arca-workbench', {
       | 'dark'
       | 'system',
     resolvedTheme: 'light' as 'light' | 'dark',
+    hostTheme: undefined as 'light' | 'dark' | undefined,
     focusMode: false,
     errorMessage: '',
     reconnectAttempt: 0,
     transport: undefined as ArcaBrowserTransport | undefined,
     session: undefined as SurfaceSession | undefined,
     drafts: [] as PersistedDocumentDraft[],
+    officeDirty: false,
+    applicationStopping: false,
+    applicationStopped: false,
+    foregroundOperations: 0,
+    officeCharacterCount: undefined as number | undefined,
     pendingChangeSets: [] as ClientChangeSet[],
     selectedChangeSet: undefined as ClientChangeSet | undefined,
     semanticDiff: undefined as DocumentSemanticDiff | undefined,
     comments: [] as ClientComment[],
     collaborationAvailable: false,
-    collaborationAgents: [] as Array<{ id: string; name: string }>,
+    collaborationAgents: [] as ArcaCollaborationAgent[],
     collaborationTasks: [] as ArcaCollaborationTask[],
     localCollaborationTasks: [] as ArcaCollaborationTask[],
     collaborationBusy: false,
@@ -144,7 +160,13 @@ export const useWorkbenchStore = defineStore('arca-workbench', {
       const revision = state.activeDocument?.snapshot.revisionId
       return revision ? String(revision).slice(0, 8) : '—'
     },
-    wordCount: (state) => state.activeDocument?.markdown.content.trim().length ?? 0,
+    wordCount: (state) =>
+      state.officeCharacterCount ??
+      state.activeDocument?.snapshot.nodes.reduce(
+        (sum, node) => sum + [...(node.text ?? String(node.attributes.text ?? ''))].length,
+        0,
+      ) ??
+      0,
     searchResults: (state): DocumentNode[] => {
       const query = state.searchQuery.trim().toLocaleLowerCase()
       if (!query) return []
@@ -164,6 +186,8 @@ export const useWorkbenchStore = defineStore('arca-workbench', {
       )
     },
     async connect(endpoint = resolveArcaEndpoint()): Promise<void> {
+      if (this.applicationStopping || this.applicationStopped) return
+      const sequence = ++this.connectSequence
       this.connection = 'discovering'
       this.errorMessage = ''
       if (!endpoint) {
@@ -177,7 +201,7 @@ export const useWorkbenchStore = defineStore('arca-workbench', {
       this.connection = this.reconnectAttempt ? 'reconnecting' : 'connecting'
       const transport = new ArcaBrowserTransport(clientNodeId)
       transport.onDisconnect(() => {
-        if (this.transport !== transport) return
+        if (this.transport !== transport || sequence !== this.connectSequence) return
         this.hostOnline = false
         this.session = undefined
         this.authority = 'unavailable'
@@ -185,6 +209,10 @@ export const useWorkbenchStore = defineStore('arca-workbench', {
       })
       try {
         const hello = await transport.connect(endpoint)
+        if (sequence !== this.connectSequence) {
+          await transport.close()
+          return
+        }
         const offer = hello.offers.find(
           (candidate) => candidate.capabilityType === 'document.semantic',
         )
@@ -195,16 +223,29 @@ export const useWorkbenchStore = defineStore('arca-workbench', {
           clientNodeId,
           principalId,
         })) as { challengeId: string; nonce: string }
-        this.session = (await transport.invoke('surface.session.complete', {
+        if (sequence !== this.connectSequence) {
+          await transport.close()
+          return
+        }
+        const session = (await transport.invoke('surface.session.complete', {
           ...challenge,
           clientNodeId,
           principalId,
         })) as SurfaceSession
+        if (sequence !== this.connectSequence) {
+          await transport.close()
+          return
+        }
+        this.session = session
         this.hostOnline = true
         this.authority = 'writable'
         const bootstrap = (await transport.invoke('surface.bootstrap', {
           documentId: this.activeDocumentId,
         })) as SurfaceBootstrap
+        if (sequence !== this.connectSequence) {
+          await transport.close()
+          return
+        }
         this.applyBootstrap(bootstrap)
         this.connection = 'ready'
         this.reconnectAttempt = 0
@@ -212,9 +253,12 @@ export const useWorkbenchStore = defineStore('arca-workbench', {
         await this.loadComments()
         await this.loadCollaborationTasks()
         await this.loadRevisions()
+        if (sequence !== this.connectSequence) return
         this.restoreDrafts()
       } catch (error) {
         await transport.close()
+        if (sequence !== this.connectSequence) return
+        if (this.transport === transport) this.transport = undefined
         this.hostOnline = false
         this.session = undefined
         this.authority = 'unavailable'
@@ -318,9 +362,17 @@ export const useWorkbenchStore = defineStore('arca-workbench', {
       await this.openDocument(snapshot.documentId)
       return snapshot.documentId
     },
-    async renameDocument(title: string): Promise<void> {
-      if (!this.transport || !this.session || !this.activeDocumentId || !title.trim()) return
-      await this.invokeSurfaceMutation('document.rename', { title: title.trim() })
+    async renameDocument(title: string, documentId?: string): Promise<void> {
+      documentId ??= this.activeDocumentId
+      if (!this.transport || !this.session || !documentId) throw new Error('请先连接应用')
+      if (!title.trim()) throw new Error('请输入文稿名称')
+      await this.transport.invoke(
+        'document.rename',
+        { documentId, title: title.trim(), surfaceSessionToken: this.session.token },
+        { idempotencyKey: crypto.randomUUID() },
+      )
+      await this.refreshDocumentIndex()
+      if (this.activeDocumentId === documentId) await this.openDocument(documentId)
     },
     async insertNodeAfter(
       reference: DocumentNode,
@@ -401,7 +453,9 @@ export const useWorkbenchStore = defineStore('arca-workbench', {
         return
       }
       const result = await this.transport.invoke('document.changeset.list', { documentId })
-      this.pendingChangeSets = result as ClientChangeSet[]
+      this.pendingChangeSets = (result as ClientChangeSet[]).filter(
+        (changeSet) => !['committed', 'rejected', 'superseded'].includes(changeSet.status),
+      )
     },
     async loadCollaborationTasks(): Promise<void> {
       const documentId = this.activeDocumentId
@@ -411,6 +465,24 @@ export const useWorkbenchStore = defineStore('arca-workbench', {
         return
       }
       const localModelId = arcaPreferenceStore.load().modelConfigId
+      this.collaborationAvailable = Boolean(localModelId && this.transport && this.session)
+      this.collaborationAgents = this.collaborationAvailable
+        ? [{ id: 'arca-local', name: 'Arca 本地模型' }]
+        : []
+      if (this.transport && this.session) {
+        try {
+          const tasks = (await this.transport.invoke(
+            'task.list',
+            { documentId, surfaceSessionToken: this.session.token },
+            { providerId: 'infos.arca.tasks' },
+          )) as ApplicationTaskSnapshot<ArcaCollaborationTask>[]
+          this.localCollaborationTasks = tasks.flatMap((task) => (task.result ? [task.result] : []))
+          if (this.localCollaborationTasks.some((task) => task.status === 'awaiting_review'))
+            await this.loadChangeSets()
+        } catch (error) {
+          this.errorMessage = error instanceof Error ? error.message : '协作任务暂时无法读取'
+        }
+      }
       if (this.transport && this.session && localModelId) {
         this.collaborationAvailable = true
         this.collaborationAgents = [{ id: 'arca-local', name: 'Arca本地模型' }]
@@ -423,10 +495,12 @@ export const useWorkbenchStore = defineStore('arca-workbench', {
       try {
         const status = await arcaCollaborationClient.status()
         this.kernelOnline = true
-        if (!localModelId) {
-          this.collaborationAvailable = status.available
-          this.collaborationAgents = status.agents
-        }
+        this.collaborationAvailable ||= status.available
+        if (status.available)
+          this.collaborationAgents = [
+            ...this.collaborationAgents,
+            ...status.agents.filter((agent) => agent.id !== 'arca-local'),
+          ]
         const kernelTasks = status.available ? await arcaCollaborationClient.list(documentId) : []
         this.collaborationTasks = [...this.localCollaborationTasks, ...kernelTasks]
         if (kernelTasks.some((task) => task.status === 'awaiting_review')) {
@@ -441,6 +515,7 @@ export const useWorkbenchStore = defineStore('arca-workbench', {
     async createCollaborationTask(input: {
       instruction: string
       scope: 'selection' | 'section' | 'document'
+      selection?: OfficeSelection
       nodeId?: string
       agentId: string
       requirements?: string
@@ -450,63 +525,126 @@ export const useWorkbenchStore = defineStore('arca-workbench', {
       this.collaborationBusy = true
       const localModelId = arcaPreferenceStore.load().modelConfigId
       try {
-        if (localModelId && this.transport && this.session) {
-          const now = new Date().toISOString()
-          const task: ArcaCollaborationTask = {
-            taskId: crypto.randomUUID(),
+        if (input.agentId === 'arca-local' && localModelId && this.transport && this.session) {
+          const payload = {
             documentId: snapshot.documentId,
             baseRevisionId: snapshot.revisionId,
-            instruction: input.instruction,
-            scope: input.scope,
-            ...(input.nodeId ? { nodeId: input.nodeId } : {}),
-            agentId: 'arca-local',
-            source: 'local',
-            status: 'working',
-            progress: null,
-            stage: '本地模型推理',
-            createdAt: now,
-            updatedAt: now,
+            ...input,
+            modelId: localModelId,
           }
-          this.localCollaborationTasks.unshift(task)
-          this.collaborationTasks = [...this.localCollaborationTasks]
+          const storageKey = `arca.task.pending:${this.endpoint}:${snapshot.documentId}`
+          const serialized = JSON.stringify(payload)
+          let pending: { key: string; payload: string } | undefined
           try {
-            const result = (await this.invokeModelAuthority('model.complete', {
-              modelId: localModelId,
-              prompt: [
-                '你是Arca文稿协作者。请只输出可供人类审阅的修改建议或替换文本，不要声称已修改文档。',
-                `文稿标题：${snapshot.document.title}`,
-                `基础Revision：${snapshot.revisionId}`,
-                `任务范围：${input.scope}${input.nodeId ? ` / ${input.nodeId}` : ''}`,
-                `任务：${input.instruction}`,
-                input.requirements ? `要求：${input.requirements}` : '',
-                '当前文稿：',
-                this.activeDocument?.markdown.content ?? '',
-              ]
-                .filter(Boolean)
-                .join('\n\n'),
-            })) as { text: string }
-            task.status = 'completed'
-            task.stage = '等待人类采用'
-            task.resultText = result.text
-            task.updatedAt = new Date().toISOString()
-          } catch (cause) {
-            task.status = 'failed'
-            task.stage = '本地模型失败'
-            task.error = cause instanceof Error ? cause.message : String(cause)
-            task.updatedAt = new Date().toISOString()
+            pending = JSON.parse(localStorage.getItem(storageKey) ?? 'null') ?? undefined
+          } catch {
+            /* 损坏的请求记录由下一次提交替换。 */
           }
-          this.collaborationTasks = [...this.localCollaborationTasks]
+          if (!pending || pending.payload !== serialized)
+            pending = { key: crypto.randomUUID(), payload: serialized }
+          localStorage.setItem(storageKey, JSON.stringify(pending))
+          await this.transport.invoke(
+            'task.submit',
+            {
+              operation: 'office.collaborate',
+              input: payload,
+              surfaceSessionToken: this.session.token,
+            },
+            { idempotencyKey: pending.key, providerId: 'infos.arca.tasks' },
+          )
+          localStorage.removeItem(storageKey)
+          await this.loadCollaborationTasks()
           return
         }
-        await arcaCollaborationClient.create({ documentId: snapshot.documentId, ...input })
+        await arcaCollaborationClient.create({
+          documentId: snapshot.documentId,
+          baseRevisionId: snapshot.revisionId,
+          ...input,
+        })
         await this.loadCollaborationTasks()
       } finally {
         this.collaborationBusy = false
       }
     },
     async cancelCollaborationTask(taskId: string): Promise<void> {
-      await arcaCollaborationClient.cancel(taskId)
+      if (
+        this.localCollaborationTasks.some((task) => task.taskId === taskId) &&
+        this.transport &&
+        this.session
+      ) {
+        await this.transport.invoke(
+          'task.cancel',
+          { taskId, surfaceSessionToken: this.session.token },
+          { idempotencyKey: `cancel:${taskId}`, providerId: 'infos.arca.tasks' },
+        )
+      } else await arcaCollaborationClient.cancel(taskId)
       await this.loadCollaborationTasks()
+    },
+    async retryCollaborationTask(taskId: string): Promise<void> {
+      if (!this.transport || !this.session) return
+      await this.transport.invoke(
+        'task.retry',
+        { taskId, surfaceSessionToken: this.session.token },
+        { idempotencyKey: crypto.randomUUID(), providerId: 'infos.arca.tasks' },
+      )
+      await this.loadCollaborationTasks()
+    },
+    async restoreRevision(revisionId: string): Promise<void> {
+      const snapshot = this.activeDocument?.snapshot
+      if (!this.transport || !this.session || !snapshot) return
+      await this.transport.invoke(
+        'document.restore_revision',
+        {
+          documentId: snapshot.documentId,
+          baseRevisionId: snapshot.revisionId,
+          revisionId,
+          timestamp: new Date().toISOString(),
+          surfaceSessionToken: this.session.token,
+        },
+        { idempotencyKey: crypto.randomUUID() },
+      )
+      await this.openDocument(snapshot.documentId)
+    },
+    async refreshDocumentIndex(): Promise<void> {
+      if (this.transport)
+        this.documents = (await this.transport.invoke('document.list', {})) as SemanticDocument[]
+    },
+    async setDocumentStatus(documentId: string, status: SemanticDocument['status']): Promise<void> {
+      if (!this.transport || !this.session) return
+      const snapshot = (await this.transport.invoke('document.inspect', {
+        documentId,
+      })) as DocumentSnapshot
+      await this.transport.invoke(
+        'document.set_status',
+        {
+          documentId,
+          status,
+          baseRevisionId: snapshot.revisionId,
+          timestamp: new Date().toISOString(),
+          surfaceSessionToken: this.session.token,
+        },
+        { idempotencyKey: crypto.randomUUID() },
+      )
+      await this.refreshDocumentIndex()
+      if (this.activeDocumentId === documentId) await this.openDocument(documentId)
+    },
+    async duplicateDocument(documentId: string): Promise<string | undefined> {
+      if (!this.transport || !this.session) return
+      const source = (await this.transport.invoke('document.inspect', {
+        documentId,
+      })) as DocumentSnapshot
+      const copy = (await this.transport.invoke(
+        'document.duplicate',
+        {
+          documentId,
+          baseRevisionId: source.revisionId,
+          title: `${source.document.title}（副本）`,
+          surfaceSessionToken: this.session.token,
+        },
+        { idempotencyKey: crypto.randomUUID() },
+      )) as DocumentSnapshot
+      await this.refreshDocumentIndex()
+      return copy.documentId
     },
     async loadComments(): Promise<void> {
       const documentId = this.activeDocument?.snapshot.documentId
@@ -518,7 +656,11 @@ export const useWorkbenchStore = defineStore('arca-workbench', {
         documentId,
       })) as ClientComment[]
     },
-    async createComment(nodeId: string, body: string): Promise<void> {
+    async createComment(
+      nodeId: string,
+      body: string,
+      range?: { start: number; end: number },
+    ): Promise<void> {
       const snapshot = this.activeDocument?.snapshot
       if (!this.transport || !this.session || !snapshot || !body.trim()) return
       const key = `comment:${crypto.randomUUID()}`
@@ -529,6 +671,7 @@ export const useWorkbenchStore = defineStore('arca-workbench', {
           nodeId,
           revisionId: snapshot.revisionId,
           body,
+          ...(range ? { range } : {}),
           surfaceSessionToken: this.session.token,
         },
         { idempotencyKey: key },
@@ -601,6 +744,15 @@ export const useWorkbenchStore = defineStore('arca-workbench', {
     },
     async selectChangeSet(changeSetId: string): Promise<void> {
       if (!this.transport) return
+      const existing = (await this.transport.invoke('document.changeset.get', {
+        changeSetId,
+      })) as ClientChangeSet
+      if (existing.status === 'proposed')
+        await this.transport.invoke(
+          'document.changeset.validate',
+          { changeSetId },
+          { idempotencyKey: crypto.randomUUID() },
+        )
       const [changeSet, diff] = await Promise.all([
         this.transport.invoke('document.changeset.get', { changeSetId }),
         this.transport.invoke('document.changeset.diff', { changeSetId }),
@@ -633,6 +785,7 @@ export const useWorkbenchStore = defineStore('arca-workbench', {
       this.semanticDiff = undefined
     },
     scheduleReconnect(): void {
+      if (this.applicationStopping || this.applicationStopped) return
       if (this.reconnectTimer !== undefined || !this.endpoint) return
       this.connection = 'reconnecting'
       const delay = Math.min(30_000, 1_000 * 2 ** Math.min(this.reconnectAttempt, 5))
@@ -643,11 +796,24 @@ export const useWorkbenchStore = defineStore('arca-workbench', {
         })
       }, delay)
     },
-    async reconnect(): Promise<void> {
-      this.reconnectAttempt += 1
-      await this.transport?.close()
+    async disconnect(): Promise<void> {
+      this.connectSequence += 1
+      if (this.reconnectTimer !== undefined) window.clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = undefined
+      const transport = this.transport
       this.transport = undefined
-      await this.connect(this.endpoint)
+      this.endpoint = undefined
+      this.hostOnline = false
+      this.session = undefined
+      this.authority = 'unavailable'
+      this.connection = 'offline'
+      await transport?.close()
+    },
+    async reconnect(endpoint?: string): Promise<void> {
+      const target = endpoint ?? this.endpoint ?? resolveArcaEndpoint()
+      this.reconnectAttempt += 1
+      await this.disconnect()
+      await this.connect(target)
     },
     applyBootstrap(bootstrap: SurfaceBootstrap): void {
       this.documents = bootstrap.documents
@@ -662,11 +828,11 @@ export const useWorkbenchStore = defineStore('arca-workbench', {
       this.contextStudio = this.contextStudio === value ? null : value
     },
     applyTheme(): void {
+      // 明确选择优先；跟随模式才采用宿主或系统主题。
       this.resolvedTheme =
         this.themePreference === 'system'
-          ? window.matchMedia('(prefers-color-scheme: dark)').matches
-            ? 'dark'
-            : 'light'
+          ? (this.hostTheme ??
+            (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'))
           : this.themePreference
       document.documentElement.dataset.theme = this.resolvedTheme
     },

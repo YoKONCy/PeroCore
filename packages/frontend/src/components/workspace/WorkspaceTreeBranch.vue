@@ -2,6 +2,8 @@
 /** Workspace 文件树递归分支，使用统一的资源栏行高与语义色。 */
 import { PixelIcon } from '../pixel'
 import type { WorkspaceFileNode } from '../../api/modules/approvalsApi'
+import WorkspaceFileGlyph from './WorkspaceFileGlyph.vue'
+import { workspaceFileIconKind } from './workspacePreview'
 
 export interface WorkspaceTreeNode extends WorkspaceFileNode {
   expanded?: boolean
@@ -32,12 +34,14 @@ function forwardContextMenu(event: MouseEvent, node: WorkspaceTreeNode): void {
         @contextmenu.prevent.stop="emit('contextmenu', $event, node)"
       >
         <PixelIcon
+          v-if="node.type === 'directory'"
           :name="
             node.type === 'directory' ? (node.expanded ? 'chevron-down' : 'chevron-right') : 'code'
           "
           size="xs"
           class="tree-icon"
         />
+        <WorkspaceFileGlyph v-else :kind="workspaceFileIconKind(node.name)" />
         <span class="tree-name">{{ node.name }}</span>
         <PixelIcon
           v-if="node.loading"

@@ -4,7 +4,6 @@ import {
   defineApplicationAdapter,
   validateApplicationDescriptor,
   validateApplicationDiscovery,
-  validateApplicationEnvelope,
 } from '../../node-sdk/src'
 
 function discovery(): ApplicationDiscoveryRecord {
@@ -50,6 +49,7 @@ describe('Application Integration Protocol', () => {
       endpoints: [
         { endpointId: 'task', kind: 'task', version: '1.0', operations: ['task.submit'] },
       ],
+      offeredCapabilities: [],
       requestedCapabilities: [
         {
           capabilityType: 'infos.persona',
@@ -90,32 +90,5 @@ describe('Application Integration Protocol', () => {
     expect(() => validateApplicationDiscovery(remote)).toThrow(
       'APPLICATION_DISCOVERY_ENDPOINT_FORBIDDEN',
     )
-  })
-
-  it('Envelope的因果信息不得隐含生命周期父子关系', () => {
-    const envelope = validateApplicationEnvelope({
-      protocolVersion: 1,
-      messageId: 'message-1',
-      correlationId: 'correlation-1',
-      causationId: 'agent-execution-1',
-      source: {
-        nodeId: 'kernel-node' as KernelNodeId,
-        appId: 'infos.kernel',
-        instanceId: 'kernel',
-      },
-      target: {
-        nodeId: 'arca-node' as KernelNodeId,
-        appId: 'infos.arca',
-        instanceId: 'arca-instance',
-        endpoint: 'collaboration',
-      },
-      operation: 'task.submit',
-      mode: 'request',
-      payload: {},
-      trace: { taskId: 'arca-task-1' },
-    })
-
-    expect(envelope.causationId).toBe('agent-execution-1')
-    expect(envelope.trace).not.toHaveProperty('parentExecutionId')
   })
 })

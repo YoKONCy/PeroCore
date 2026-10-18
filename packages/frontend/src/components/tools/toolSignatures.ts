@@ -85,7 +85,11 @@ const groups: Array<[ToolArchetype, string, string[]]> = [
   ['search-radar', 'search', ['search_files', 'code_search']],
   ['terminal-tape', 'terminal', terminalTools],
   ['browser-space', 'browser', browserTools],
-  ['vision-frame', 'vision', ['take_screenshot', 'browser_screenshot', 'browser_page_image']],
+  [
+    'vision-frame',
+    'vision',
+    ['read_image', 'take_screenshot', 'browser_screenshot', 'browser_page_image'],
+  ],
   [
     'desktop-motion',
     'desktop',
@@ -119,7 +123,6 @@ const groups: Array<[ToolArchetype, string, string[]]> = [
       'load_skill',
       'skill_list_resources',
       'skill_read_resource',
-      'expand_advanced_tools',
       'update_flow_state',
       'update_state',
       'interact_with_social',

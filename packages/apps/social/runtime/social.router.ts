@@ -14,10 +14,28 @@
  * @module packages/apps/social/runtime/social.router
  */
 
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
+import type { ContentfulStatusCode } from 'hono/utils/http-status'
+import { AppError } from '@infos/backend/applicationHostAbi'
 import type { NapcatAdapter, WsSender } from '../adapters/napcat'
 import type { SocialBridge } from './socialBridge'
 import type { SocialDataService } from './socialDataService'
+import type { SocialStatusCardService } from './statusCardService'
+import type { StickerService } from './stickerService'
+
+/** 使用统一业务码，保留外部服务的错误原因，不让契约守卫把它改成未知错误。 */
+function stickerFailure(c: Context, error: unknown) {
+  const failure =
+    error instanceof AppError
+      ? error
+      : new AppError('EXTERNAL_ERROR', {
+          message: error instanceof Error ? error.message : '收藏表情服务暂不可用',
+        })
+  return c.json(
+    { code: failure.code, message: failure.message },
+    failure.httpStatus as ContentfulStatusCode,
+  )
+}
 
 /**
  * 创建社交路由
@@ -27,6 +45,10 @@ import type { SocialDataService } from './socialDataService'
 export function createSocialRouter(
   socialBridge: SocialBridge,
   deps?: {
+    statusCards?: SocialStatusCardService
+    stickers?: StickerService
+    getStickerAccounts?: () => string[]
+    getHostAgentId?: () => string
     dataService: SocialDataService
     getModeConfig: () => Record<string, unknown>
     updateModeConfig: (config: Record<string, unknown>) => Promise<Record<string, unknown>>
@@ -35,6 +57,124 @@ export function createSocialRouter(
   },
 ) {
   const router = new Hono()
+  router.get('/turns/:agentId', async (c) =>
+    c.json({ code: 'OK', data: await socialBridge.listTurns(c.req.param('agentId')) }),
+  )
+  router.post('/turns/:id/cancel', async (c) => {
+    await socialBridge.cancelTurn(c.req.param('id'))
+    return c.json({ code: 'OK', message: '社交任务已取消' })
+  })
+  router.post('/turns/:id/acknowledge', async (c) => {
+    await socialBridge.acknowledgeTurn(c.req.param('id'))
+    return c.json({ code: 'OK', message: '已处理' })
+  })
+  router.get('/stickers/accounts', (c) =>
+    c.json({ code: 'OK', data: { accounts: deps?.getStickerAccounts?.() ?? [] } }),
+  )
+  router.get('/stickers/:accountId', async (c) => {
+    const accountId = c.req.param('accountId')
+    if (!deps?.stickers || !deps.getStickerAccounts?.().includes(accountId))
+      return c.json({ code: 'SERVICE_UNAVAILABLE', message: '该 QQ 账号未连接' }, 503)
+    try {
+      const data = await deps.stickers.list(
+        accountId,
+        (c.req.query('query') ?? '').slice(0, 200),
+        Number(c.req.query('offset') ?? 0),
+        Number(c.req.query('limit') ?? 30),
+        c.req.query('refresh') === 'true',
+      )
+      return c.json({
+        code: 'OK',
+        data: {
+          ...data,
+          stickers: data.stickers.map(({ id, description }) => ({ id, description })),
+        },
+      })
+    } catch (error) {
+      return stickerFailure(c, error)
+    }
+  })
+  router.get('/stickers/:accountId/:stickerId/image', async (c) => {
+    const accountId = c.req.param('accountId')
+    if (!deps?.stickers || !deps.getStickerAccounts?.().includes(accountId))
+      return c.json({ code: 'SERVICE_UNAVAILABLE', message: '该 QQ 账号未连接' }, 503)
+    try {
+      const image = await deps.stickers.read(accountId, c.req.param('stickerId'))
+      c.header('Cache-Control', 'no-store')
+      return c.json({
+        code: 'OK',
+        data: { dataUrl: `data:${image.mimeType};base64,${image.bytes.toString('base64')}` },
+      })
+    } catch (error) {
+      return stickerFailure(c, error)
+    }
+  })
+  router.post('/stickers/:accountId', async (c) => {
+    const accountId = c.req.param('accountId')
+    if (!deps?.stickers || !deps.getStickerAccounts?.().includes(accountId))
+      return c.json({ code: 'SERVICE_UNAVAILABLE', message: '该 QQ 账号未连接' }, 503)
+    try {
+      const body = (await c.req.json().catch(() => {
+        throw new AppError('INVALID_PARAMETER', { message: '请求正文必须为 JSON 对象' })
+      })) as Record<string, unknown>
+      if (
+        !body ||
+        typeof body !== 'object' ||
+        Array.isArray(body) ||
+        typeof body.stickerId !== 'string' ||
+        !body.stickerId.trim()
+      )
+        throw new AppError('INVALID_PARAMETER', { message: '请提供有效的表情 ID' })
+      if (body.action === 'describe' && typeof body.description === 'string') {
+        const sticker = await deps.stickers.describe(accountId, body.stickerId, body.description)
+        return c.json({ code: 'OK', data: { id: sticker.id, description: sticker.description } })
+      }
+      if (body.action === 'delete')
+        return c.json({ code: 'OK', data: await deps.stickers.remove(accountId, body.stickerId) })
+      throw new AppError('INVALID_PARAMETER', { message: '表情操作无效' })
+    } catch (error) {
+      return stickerFailure(c, error)
+    }
+  })
+  router.get('/status-card/design', async (c) => {
+    if (!deps?.statusCards)
+      return c.json({ code: 'SERVICE_UNAVAILABLE', message: '状态卡片服务未就绪' }, 503)
+    return c.json({
+      code: 'OK',
+      data: await deps.statusCards.getDesign(deps.getAgentConfig().agentId),
+    })
+  })
+  router.put('/status-card/design', async (c) => {
+    if (!deps?.statusCards)
+      return c.json({ code: 'SERVICE_UNAVAILABLE', message: '状态卡片服务未就绪' }, 503)
+    try {
+      return c.json({
+        code: 'OK',
+        data: await deps.statusCards.saveDesign(deps.getAgentConfig().agentId, await c.req.json()),
+      })
+    } catch (error) {
+      return c.json(
+        { code: 'BAD_REQUEST', message: error instanceof Error ? error.message : String(error) },
+        400,
+      )
+    }
+  })
+  router.post('/status-card/preview', async (c) => {
+    if (!deps?.statusCards || !deps.getHostAgentId)
+      return c.json({ code: 'SERVICE_UNAVAILABLE', message: '状态卡片服务未就绪' }, 503)
+    try {
+      const image = await deps.statusCards.render(deps.getHostAgentId(), await c.req.json())
+      return c.json({ code: 'OK', data: image })
+    } catch (error) {
+      return c.json(
+        {
+          code: 'SERVICE_UNAVAILABLE',
+          message: error instanceof Error ? error.message : String(error),
+        },
+        503,
+      )
+    }
+  })
 
   // ── GET /api/social/status — 获取所有适配器状态 ──
   router.get('/status', async (c) => {

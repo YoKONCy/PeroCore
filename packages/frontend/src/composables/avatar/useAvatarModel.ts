@@ -17,6 +17,7 @@ import type {
   FeatureButton,
 } from '../../components/avatar/lib/adapter/IAvatarManifest'
 import { AvatarRenderer } from '../../components/avatar/lib/AvatarRenderer'
+import { disposeAvatarResources } from '../../components/avatar/lib/disposeAvatarResources'
 import { StandardBedrockProvider } from '../../components/avatar/lib/adapter/StandardBedrockProvider'
 import { ManifestBasedAdapter } from '../../components/avatar/lib/adapter/ManifestBasedAdapter'
 import { ManifestLoader } from '../../components/avatar/lib/adapter/ManifestLoader'
@@ -231,6 +232,8 @@ function removeDistantSceneryBones(rootGroup: THREE.Object3D): number {
     const center = subtreeBounds.getCenter(new THREE.Vector3())
     const hDist = Math.hypot(center.x - centroid.x, center.z - centroid.z)
     if (hDist > threshold) {
+      // 被过滤的装饰与人物共享材质，只释放独立几何体。
+      obj.traverse((child) => (child as THREE.Mesh).geometry?.dispose())
       obj.removeFromParent()
       removedCount++
       return
@@ -325,6 +328,10 @@ export function useAvatarModel() {
   let currentAdapter: IModelAdapter | null = null
   let currentProvider: IModelProvider | undefined
   let lastLoadedConfig: ModelConfig | null = null
+  let loadVersion = 0
+  let disposed = false
+  let clothingTimer: ReturnType<typeof setTimeout> | undefined
+  const pendingProviders = new Set<IModelProvider>()
   /** YSM molang 运行时（functions/*.molang 控制器脚本） */
   let ysmRunner: YsmMolangRunner | null = null
   /**
@@ -457,8 +464,13 @@ export function useAvatarModel() {
 
   // ═══ 控制器加载 ═══
 
-  async function loadControllers(config: ModelConfig, provider?: IModelProvider): Promise<void> {
-    controllerSystem.reset()
+  type ControllerData = Parameters<typeof controllerSystem.loadFromJson>[0]
+
+  async function prepareControllers(
+    config: ModelConfig,
+    provider?: IModelProvider,
+  ): Promise<ControllerData[]> {
+    const result: ControllerData[] = []
 
     // 1. 从 Provider 加载控制器
     if (provider && 'getAnimationControllers' in provider) {
@@ -469,10 +481,10 @@ export function useAvatarModel() {
         const controllers = await providerWithCtrl.getAnimationControllers()
         if (controllers.size > 0) {
           logger.info('AvatarModel', `从 Provider 加载了 ${controllers.size} 个动画控制器`)
-          controllerSystem.loadFromJson({
+          result.push({
             format_version: '1.10.0',
             animation_controllers: Object.fromEntries(controllers),
-          } as Parameters<typeof controllerSystem.loadFromJson>[0])
+          } as ControllerData)
         }
       } catch (e) {
         logger.warn('AvatarModel', '从 Provider 加载控制器失败', e)
@@ -485,9 +497,25 @@ export function useAvatarModel() {
         ? config.animation_controllers
         : [config.animation_controllers]
       for (const path of paths) {
-        await controllerSystem.load(path)
+        try {
+          const response = await fetch(path)
+          if (!response.ok) throw new Error(`控制器读取失败: ${response.status}`)
+          result.push((await response.json()) as ControllerData)
+        } catch (error) {
+          logger.warn('AvatarModel', `控制器加载失败: ${path}`, error)
+        }
       }
     }
+    return result
+  }
+
+  async function loadControllers(config: ModelConfig, provider?: IModelProvider): Promise<void> {
+    const version = loadVersion
+    const controllers = await prepareControllers(config, provider)
+    if (disposed || version !== loadVersion) return
+    controllerSystem.reset()
+    animationEngine.stop(undefined, 0)
+    for (const controller of controllers) controllerSystem.loadFromJson(controller)
   }
 
   // ═══ 核心加载逻辑 ═══
@@ -499,7 +527,17 @@ export function useAvatarModel() {
    * @param scene - Three.js Scene
    */
   async function loadAvatar(manifest: IAvatarManifest, scene: THREE.Scene): Promise<void> {
+    const version = ++loadVersion
+    let preparedModel: THREE.Group | undefined
+    let provider: IModelProvider | undefined
+    const ensureCurrent = () => {
+      if (disposed || version !== loadVersion)
+        throw new DOMException('模型加载已取消', 'AbortError')
+    }
     try {
+      ensureCurrent()
+      loading.value = true
+      errorMsg.value = ''
       // YSM 模型强制合并通用场景摆件过滤模式：不依赖落盘 manifest 是否已用
       // 最新模式重新生成，保证"纯人物"通用机制对任何 YSM 模型始终生效。
       if (manifest.source === 'ysm') {
@@ -519,14 +557,33 @@ export function useAvatarModel() {
           .animation_controllers as string | string[] | undefined,
       }
 
-      const provider = createProvider(config, manifest)
-      currentProvider = provider
+      provider = createProvider(config, manifest)
+      pendingProviders.add(provider)
 
       const effectiveManifest = manifest
 
       // 构建 3D 模型
       const avatarRenderer = new AvatarRenderer()
       const rootGroup = await avatarRenderer.build(provider)
+      preparedModel = rootGroup
+      ensureCurrent()
+
+      // 异步数据全部准备好后再替换当前模型，旧加载不能覆盖新的选择。
+      const [animations, controllers, scriptResults] = await Promise.all([
+        provider.getAnimations(),
+        prepareControllers(config, provider),
+        Promise.allSettled(
+          ((manifest as unknown as { ysmFunctions?: string[] }).ysmFunctions ?? []).map(
+            async (scriptPath: string) => {
+              const fileName = decodeURIComponent(scriptPath.split('/').pop() || '')
+              const response = await fetch(scriptPath)
+              if (!response.ok) throw new Error(`${fileName}: HTTP ${response.status}`)
+              return { fileName, source: await response.text() }
+            },
+          ),
+        ),
+      ])
+      ensureCurrent()
 
       // 几何启发式：移除离角色主体过远的场景组件（命名过滤的通用兜底）
       if (effectiveManifest.source === 'ysm') {
@@ -549,13 +606,19 @@ export function useAvatarModel() {
         )
       }
 
-      // 移除旧模型
+      // 释放旧模型以及动画系统对旧骨骼的引用。
+      clearTimeout(clothingTimer)
+      controllerSystem.reset()
+      animationEngine.stop(undefined, 0)
+      retargetingManager.dispose()
       if (characterModel) {
-        scene.remove(characterModel)
-        characterModel = null
+        disposeAvatarResources(characterModel)
       }
+      currentProvider?.dispose?.()
 
       characterModel = rootGroup
+      preparedModel = undefined
+      currentProvider = provider
 
       // 适配器初始化
       currentAdapter = new ManifestBasedAdapter(effectiveManifest)
@@ -577,7 +640,6 @@ export function useAvatarModel() {
 
       // 加载动画
       animationLibrary.clear()
-      const animations = await provider.getAnimations()
       animations.forEach((clip: unknown, name: string) => {
         animationLibrary.add(name, clip as Parameters<typeof animationLibrary.add>[1])
       })
@@ -594,23 +656,13 @@ export function useAvatarModel() {
       }
 
       lastLoadedConfig = config
-      await loadControllers(config)
+      for (const controller of controllers) controllerSystem.loadFromJson(controller)
 
       // YSM molang 运行时：加载 functions/*.molang 控制器脚本
       // （DeepSeek 等 YSM 模型的眨眼/倒走/碰墙抬手等行为依赖此运行时）
       ysmRunner = null
-      const ysmFunctions = (manifest as unknown as { ysmFunctions?: string[] }).ysmFunctions
-      const ysmScriptPaths = ysmFunctions ?? []
-      if (ysmScriptPaths.length > 0) {
-        const results = await Promise.allSettled(
-          ysmScriptPaths.map(async (scriptPath: string) => {
-            const fileName = decodeURIComponent(scriptPath.split('/').pop() || '')
-            const response = await fetch(scriptPath)
-            if (!response.ok) throw new Error(`${fileName}: HTTP ${response.status}`)
-            return { fileName, source: await response.text() }
-          }),
-        )
-        const scripts = results.flatMap((result) =>
+      if (scriptResults.length > 0) {
+        const scripts = scriptResults.flatMap((result) =>
           result.status === 'fulfilled' ? [result.value] : [],
         )
         if (scripts.length > 0) {
@@ -621,7 +673,7 @@ export function useAvatarModel() {
           ysmRunner.init()
           logger.info('AvatarModel', `已加载 ${scripts.length} 个 YSM molang 控制器脚本`)
         }
-        const skipped = results.length - scripts.length
+        const skipped = scriptResults.length - scripts.length
         if (skipped > 0) {
           logger.info('AvatarModel', `已跳过 ${skipped} 个不可用的 YSM molang 控制器脚本`)
         }
@@ -648,18 +700,52 @@ export function useAvatarModel() {
       }
 
       // 延迟应用部件状态
-      setTimeout(() => updateClothing(), 100)
+      clothingTimer = setTimeout(() => {
+        if (!disposed && version === loadVersion) updateClothing()
+      }, 100)
 
       loading.value = false
       logger.info('AvatarModel', `模型 ${manifest.metadata.name} 加载成功`)
     } catch (e: unknown) {
+      if (preparedModel) disposeAvatarResources(preparedModel)
+      if (provider && provider !== currentProvider) provider.dispose?.()
+      if (
+        disposed ||
+        version !== loadVersion ||
+        (e instanceof DOMException && e.name === 'AbortError')
+      )
+        throw e
       const msg = e instanceof Error ? e.message : String(e)
       logger.error('AvatarModel', '加载模型失败', e)
       errorMsg.value = `加载模型失败: ${msg}`
       loading.value = false
       // 让上层切换逻辑感知失败并执行全局兜底，而不是静默停留在旧模型。
       throw e
+    } finally {
+      if (provider) pendingProviders.delete(provider)
     }
+  }
+
+  function dispose(): void {
+    if (disposed) return
+    disposed = true
+    loadVersion++
+    clearTimeout(clothingTimer)
+    controllerSystem.reset()
+    animationEngine.stop(undefined, 0)
+    retargetingManager.dispose()
+    if (characterModel) disposeAvatarResources(characterModel)
+    characterModel = null
+    currentProvider?.dispose?.()
+    for (const provider of pendingProviders) provider.dispose?.()
+    pendingProviders.clear()
+    currentProvider = undefined
+    currentAdapter = null
+    lastLoadedConfig = null
+    ysmRunner = null
+    mouthBone = null
+    animationLibrary.clear()
+    ysmVisibilityBindings = []
   }
 
   /**
@@ -685,6 +771,7 @@ export function useAvatarModel() {
         await loadAvatar(manifest, scene)
         return
       } catch (e: unknown) {
+        if (disposed || (e instanceof DOMException && e.name === 'AbortError')) throw e
         logger.warn('AvatarModel', `模型入口加载失败，回退默认模型: ${propManifestPath}`, e)
       } finally {
         loading.value = false
@@ -697,6 +784,7 @@ export function useAvatarModel() {
       await loadAvatar(manifest, scene)
       return
     } catch (e) {
+      if (disposed || (e instanceof DOMException && e.name === 'AbortError')) throw e
       logger.warn('AvatarModel', '默认 manifest 加载失败，尝试 YSM 运行时清单', e)
     }
 
@@ -704,6 +792,7 @@ export function useAvatarModel() {
       const ysmManifest = await loadYsmManifestFromUrl(DEFAULT_AVATAR_YSM_PATH)
       await loadAvatar(ysmManifest, scene)
     } catch (e2) {
+      if (disposed || (e2 instanceof DOMException && e2.name === 'AbortError')) throw e2
       logger.error('AvatarModel', '默认与兜底模型均加载失败', e2)
       errorMsg.value = '加载模型失败: 蓝色大肥鱼模型文件不可用'
       loading.value = false
@@ -734,9 +823,10 @@ export function useAvatarModel() {
 
     // 方法
     loadAvatar,
+    dispose,
     loadDefaultManifest,
     loadControllers: () => {
-      if (lastLoadedConfig) loadControllers(lastLoadedConfig, currentProvider)
+      if (lastLoadedConfig) void loadControllers(lastLoadedConfig, currentProvider)
     },
     updateClothing,
     initFeatureState,

@@ -16,6 +16,7 @@ import path from 'node:path'
 import fs from 'node:fs'
 import net from 'node:net'
 import { app } from 'electron'
+import { electronProcessEnvironment } from '@infos/shared'
 import { isDev, paths } from '../utils/env'
 import { getWorkshopInstallations } from './steam'
 import { logger } from '../utils/logger'
@@ -164,18 +165,19 @@ export async function ensurePortableDaemon(): Promise<boolean> {
     daemonLogFd = fs.openSync(daemonLogPath, 'a')
     fs.writeSync(daemonLogFd, `\n[${new Date().toISOString()}] 启动内置 Daemon\n`)
     daemonChild = spawn(process.execPath, [bundlePath], {
-      env: {
-        ...process.env,
-        // 用 exe 自带的 Node 运行时执行 daemon（无需额外安装 node）
-        ELECTRON_RUN_AS_NODE: '1',
-        // 数据目录一锤定音，确保数据库、Agent、Workspace、扩展和 Skills 全部同根。
-        PERO_DATA_DIR: dataDir,
-        // 后端根目录（内置角色/提示词/预设资源位置）。
-        PERO_APP_ROOT: backendRoot,
-        INFOS_RESOURCES_ROOT: process.resourcesPath,
-        // 多个 Workshop item 根以 JSON 传递，避免 Windows 路径分隔与盘符歧义。
-        PERO_WORKSHOP_DIRS: JSON.stringify(workshopDirs),
-      },
+      env: electronProcessEnvironment(
+        {
+          ...process.env,
+          // 数据目录一锤定音，确保数据库、Agent、Workspace、扩展和 Skills 全部同根。
+          PERO_DATA_DIR: dataDir,
+          // 后端根目录（内置角色/提示词/预设资源位置）。
+          PERO_APP_ROOT: backendRoot,
+          INFOS_RESOURCES_ROOT: process.resourcesPath,
+          // 多个 Workshop item 根以 JSON 传递，避免 Windows 路径分隔与盘符歧义。
+          PERO_WORKSHOP_DIRS: JSON.stringify(workshopDirs),
+        },
+        'node',
+      ),
       cwd: path.dirname(app.getPath('exe')),
       stdio: ['ignore', daemonLogFd, daemonLogFd],
       windowsHide: true,

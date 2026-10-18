@@ -23,6 +23,8 @@ const emit = defineEmits<{
   'load-source': []
   select: [note: EventNote]
   archive: [note: EventNote]
+  restore: [note: EventNote]
+  delete: [note: EventNote]
 }>()
 
 const showSource = ref(false)
@@ -265,13 +267,25 @@ function openSource(): void {
 
       <section v-if="selected.status === 'active'" class="panel archive-action">
         <div>
-          <strong>删除这条核心记忆</strong>
-          <span>记忆将退出检索，但节点和关系边会完整保留。</span>
+          <strong>归档记忆</strong>
+          <span>退出自动召回，可在归档页恢复。</span>
         </div>
         <PButton variant="danger" size="sm" @click="emit('archive', selected)">
           <PixelIcon name="trash" size="xs" />
-          删除
+          归档
         </PButton>
+      </section>
+
+      <section class="panel archive-action">
+        <PButton
+          v-if="selected.status === 'archived'"
+          size="sm"
+          variant="ghost"
+          @click="emit('restore', selected)"
+        >
+          恢复
+        </PButton>
+        <PButton variant="danger" size="sm" @click="emit('delete', selected)">永久删除</PButton>
       </section>
 
       <!-- 原始对话 -->

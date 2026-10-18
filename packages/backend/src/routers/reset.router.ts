@@ -26,6 +26,7 @@ const CONFIRM_PHRASES = {
 
 const confirmSchema = z.object({
   confirm: z.string().min(1, '请填写确认短语'),
+  includeSocial: z.boolean().default(true),
 })
 
 export function createResetRouter(ctx: AppContext) {
@@ -45,7 +46,8 @@ export function createResetRouter(ctx: AppContext) {
     if (confirm.trim() !== CONFIRM_PHRASES.memories) {
       throw new AppError('INVALID_PARAMETER', { message: '确认短语不匹配，操作已取消' })
     }
-    const result = await ctx.resetService.resetMemories()
+    await ctx.privacyDeletionService.resetMemories(c.req.valid('json').includeSocial)
+    const result = { operation: 'reset_memories', cleared: {} }
     return c.json({ code: 'OK', message: '记忆已重置', data: result })
   })
 
@@ -54,7 +56,11 @@ export function createResetRouter(ctx: AppContext) {
     if (confirm.trim() !== CONFIRM_PHRASES.factory) {
       throw new AppError('INVALID_PARAMETER', { message: '确认短语不匹配，操作已取消' })
     }
+    const knowledge = await ctx.knowledgeService.clear()
+    await ctx.privacyDeletionService.resetMemories()
     const result = await ctx.resetService.factoryReset()
+    result.cleared.knowledge_documents = knowledge.documentCount
+    result.cleared.knowledge_parts = knowledge.partCount
     return c.json({ code: 'OK', message: '已恢复出厂设置', data: result })
   })
 

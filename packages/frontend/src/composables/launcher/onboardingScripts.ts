@@ -60,7 +60,7 @@ export const launcherSteps: OnboardingStep[] = [
     speaker: 'Pero',
     eyebrow: 'LET US GO',
     title: '都准备好啦，去召唤伙伴吧！',
-    text: '回到启动页，点那个亮晶晶的「召唤伙伴」按钮，Pero 就会跑到桌面上陪你~ 也可以点「打开主界面」开始认真工作哦 ✧',
+    text: '回到启动页，点「启动」，选择桌宠模式来陪伴你，或选择应用模式打开主界面吧 ✧',
     expression: 'proud',
     focusSelector: '#launcher-primary-action',
     tab: 'launch',

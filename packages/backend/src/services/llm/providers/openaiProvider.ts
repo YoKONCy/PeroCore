@@ -13,6 +13,14 @@
  * @module packages/backend/src/services/llm/providers/openaiProvider
  */
 
+import { normalizeTokenUsage } from '../usage'
+import { combinedOutputLimit, fetchLlmResponse } from '../requestPolicy'
+import { compactNativeReasoning } from '../reasoning'
+import {
+  geminiReasoningEffort,
+  geminiThinkingFamily,
+  isGoogleGeminiEndpoint,
+} from '../geminiThinking'
 import type {
   LlmProvider,
   ChatMessage,
@@ -23,8 +31,10 @@ import type {
   UsageInfo,
 } from '../types'
 import { AppError } from '../../../lib/appError'
-import { sanitizeToolParameters, stripBase64DataUris } from '../sanitize'
+import { normalizeSystemMessages, sanitizeToolParameters, stripBase64DataUris } from '../sanitize'
 import { createLogger } from '../../../lib/logger'
+import { temporaryUpstreamCode } from '../retryPolicy'
+import { upstreamHttpError, upstreamWebPage } from '../../../lib/upstreamHttpError'
 
 const logger = createLogger('OpenAiProvider')
 
@@ -47,6 +57,15 @@ function parseRetryAfterMs(value: string | null): number | undefined {
 export class OpenAiProvider implements LlmProvider {
   constructor(private config: ProviderConfig) {}
 
+  getInputTokenPayload(messages: ChatMessage[], opts: ChatOptions): Record<string, unknown> {
+    const payload = this.buildPayload(messages, opts, false)
+    return {
+      messages: payload.messages,
+      tools: payload.tools,
+      response_format: payload.response_format,
+    }
+  }
+
   /**
    * 非流式调用
    *
@@ -57,9 +76,9 @@ export class OpenAiProvider implements LlmProvider {
     const url = this.buildUrl('/chat/completions')
     const payload = this.buildPayload(messages, opts, false)
 
-    const response = await this.fetchWithTimeout(url, payload, opts.timeout ?? 300_000, opts.signal)
+    const response = await this.fetchWithTimeout(url, payload, opts.timeout ?? 600_000, opts.signal)
 
-    if (!response.ok) {
+    if (!response.ok || upstreamWebPage(response)) {
       await this.handleError(response, 'chat')
     }
 
@@ -77,9 +96,9 @@ export class OpenAiProvider implements LlmProvider {
     const url = this.buildUrl('/chat/completions')
     const payload = this.buildPayload(messages, opts, true)
 
-    const response = await this.fetchWithTimeout(url, payload, opts.timeout ?? 120_000, opts.signal)
+    const response = await this.fetchWithTimeout(url, payload, opts.timeout ?? 600_000, opts.signal)
 
-    if (!response.ok) {
+    if (!response.ok || upstreamWebPage(response)) {
       await this.handleError(response, 'chatStream')
     }
 
@@ -87,12 +106,13 @@ export class OpenAiProvider implements LlmProvider {
     if (!reader) {
       throw new AppError('LLM_ERROR', {
         message: 'OpenAI 响应体为空',
-        data: { provider: 'openai', model: this.config.modelId },
+        data: { provider: 'openai', model: this.config.modelId, retryable: true },
       })
     }
 
     const decoder = new TextDecoder()
     let buffer = ''
+    let terminalSeen = false
 
     try {
       while (true) {
@@ -108,52 +128,54 @@ export class OpenAiProvider implements LlmProvider {
           const trimmed = line.trim()
           if (!trimmed || !trimmed.startsWith('data: ')) continue
           const data = trimmed.slice(6)
-          if (data === '[DONE]') return
+          if (data === '[DONE]') {
+            if (!terminalSeen) yield { choices: [{ delta: {}, finishReason: 'stop' }] }
+            return
+          }
 
+          let chunk: Record<string, unknown>
           try {
-            const chunk = JSON.parse(data) as Record<string, unknown>
-            yield this.normalizeDelta(chunk)
+            chunk = JSON.parse(data) as Record<string, unknown>
           } catch {
             // 少数兼容厂商会混入非 JSON 行；跳过坏行，避免整个流式会话被中断。
             logger.debug(`跳过无法解析的 SSE 数据: ${data.slice(0, 100)}`)
+            continue
           }
+          if (chunk.error && typeof chunk.error === 'object') {
+            const error = chunk.error as Record<string, unknown>
+            throw new AppError('LLM_ERROR', {
+              message: typeof error.message === 'string' ? error.message : '上游流式请求异常',
+              data: {
+                provider: 'openai',
+                retryable: temporaryUpstreamCode(error.code) || temporaryUpstreamCode(error.type),
+              },
+            })
+          }
+          const delta = this.normalizeDelta(chunk)
+          terminalSeen ||= delta.choices.some((choice) => !!choice.finishReason)
+          yield delta
         }
       }
     } finally {
+      await reader.cancel().catch(() => {})
       reader.releaseLock()
     }
   }
 
-  /** 列出可用模型 (两级回退: /v1/models → /v1/embeddings) */
+  /** 仅在模型列表路由不受支持时探测兼容端点，真实失败必须交给前端。 */
   async listModels(): Promise<string[]> {
-    const seen = new Set<string>()
-    const results: string[] = []
-
-    // 优先尝试 /v1/models (大多数 LLM 服务商通用)
     const modelList = await this.tryFetchModels('/v1/models')
-    for (const m of modelList) {
-      if (!seen.has(m)) {
-        seen.add(m)
-        results.push(m)
-      }
-    }
-
-    // 回退 /v1/embeddings (专用 embedding 服务商，如 Jina/AIHubMix embedding 端点)
-    if (results.length === 0) {
-      const embedList = await this.tryFetchModels('/v1/embeddings')
-      for (const m of embedList) {
-        if (!seen.has(m)) {
-          seen.add(m)
-          results.push(m)
-        }
-      }
-    }
-
-    return results.sort()
+    const models = modelList ?? (await this.tryFetchModels('/v1/embeddings'))
+    if (models === null)
+      throw new AppError('LLM_ERROR', {
+        message: '服务商未提供可用的模型列表接口，请手动填写模型名称',
+        data: { provider: 'openai', operation: 'list_models', retryable: false },
+      })
+    return [...new Set(models)].sort()
   }
 
-  /** 尝试从指定 endpoint 获取模型列表 */
-  private async tryFetchModels(endpoint: string): Promise<string[]> {
+  /** null 只代表 404/405 路由不受支持；空数组代表服务商确实返回空列表。 */
+  private async tryFetchModels(endpoint: string): Promise<string[] | null> {
     const url = this.buildUrl(endpoint)
     try {
       const response = await fetch(url, {
@@ -162,26 +184,62 @@ export class OpenAiProvider implements LlmProvider {
       })
 
       if (!response.ok) {
-        logger.warn(`listModels 请求失败`, {
-          url,
-          endpoint,
-          status: response.status,
-          statusText: response.statusText,
-        })
-        return []
+        const text = await response.text().catch(() => '')
+        if ([404, 405].includes(response.status) && upstreamWebPage(response, text) !== 'challenge')
+          return null
+        throw upstreamHttpError(
+          response,
+          text,
+          '获取模型列表',
+          STATUS_TO_CODE[response.status] ?? 'LLM_ERROR',
+        )
+      }
+      if (upstreamWebPage(response)) {
+        throw upstreamHttpError(
+          response,
+          await response.text().catch(() => ''),
+          '获取模型列表',
+          'LLM_ERROR',
+        )
       }
 
       const data = (await response.json()) as Record<string, unknown>
-
-      // OpenAI 风格: { data: [{ id: "..." }] }
-      const list = (data.data ?? data.models ?? []) as Array<Record<string, unknown>>
-      return list.map((m) => (m.id ?? m.name ?? '') as string).filter(Boolean)
-    } catch (err) {
-      logger.warn(`listModels (${endpoint}) 请求异常`, {
-        url,
-        error: err instanceof Error ? err.message : String(err),
+      const list = data?.data ?? data?.models
+      if (!Array.isArray(list))
+        throw new AppError('LLM_ERROR', {
+          message: '模型列表响应格式不正确，未找到 data 或 models 数组',
+          data: { provider: 'openai', operation: 'list_models', retryable: false },
+        })
+      const models = list.flatMap((item) => {
+        const id = typeof item === 'string' ? item : (item?.id ?? item?.name)
+        return typeof id === 'string' && id.trim() ? [id.trim()] : []
       })
-      return []
+      if (list.length && !models.length)
+        throw new AppError('LLM_ERROR', {
+          message: '模型列表响应不包含有效模型名称，请检查服务商接口',
+          data: { provider: 'openai', operation: 'list_models', retryable: false },
+        })
+      return models
+    } catch (err) {
+      const error =
+        err instanceof AppError
+          ? err
+          : new AppError(
+              err instanceof Error && err.name === 'TimeoutError' ? 'LLM_TIMEOUT' : 'LLM_ERROR',
+              {
+                message:
+                  err instanceof SyntaxError
+                    ? '模型列表响应不是有效的 JSON，请检查 API 基址'
+                    : `获取模型列表失败：${err instanceof Error ? err.message : String(err)}`,
+                data: { provider: 'openai', operation: 'list_models', retryable: false },
+              },
+            )
+      logger.warn('获取模型列表失败', {
+        endpoint,
+        reason: error.message,
+        details: error.data,
+      })
+      throw error
     }
   }
 
@@ -216,25 +274,44 @@ export class OpenAiProvider implements LlmProvider {
     stream: boolean,
   ): Record<string, unknown> {
     const dialect = this.resolveReasoningDialect()
+    const reasoningEffort = geminiReasoningEffort(this.config.modelId, opts.reasoningEffort)
     const payload: Record<string, unknown> = {
       model: this.config.modelId,
-      messages: this.serializeMessages(messages),
+      messages: this.serializeMessages(
+        normalizeSystemMessages(messages),
+        dialect === 'deepseek' && reasoningEffort !== 'off',
+      ),
       stream,
     }
 
     if (typeof opts.temperature === 'number') payload.temperature = opts.temperature
     if (typeof opts.topP === 'number') payload.top_p = opts.topP
-    if (typeof opts.maxTokens === 'number') payload.max_tokens = opts.maxTokens
-    if (opts.reasoningEffort) {
-      const effort = opts.reasoningEffort === 'off' ? 'none' : opts.reasoningEffort
+    const nativeReasoning =
+      dialect === 'openai' && /^(?:o\d|gpt-[56])(?:[.-]|$)/i.test(this.config.modelId)
+    const limit = combinedOutputLimit(
+      { ...opts, reasoningEffort },
+      /^(?:o\d|gpt-[56])(?:[.-]|$)|reasoner|thinking|gemini-(?:2\.5|[3-9])/i.test(
+        this.config.modelId,
+      ),
+    )
+    if (limit !== undefined)
+      payload[nativeReasoning ? 'max_completion_tokens' : 'max_tokens'] = limit
+    if (reasoningEffort) {
+      const effort = reasoningEffort === 'off' ? 'none' : reasoningEffort
       payload.reasoning_effort = effort
       if (dialect === 'deepseek') {
-        payload.thinking = { type: opts.reasoningEffort === 'off' ? 'disabled' : 'enabled' }
+        payload.thinking = { type: reasoningEffort === 'off' ? 'disabled' : 'enabled' }
       } else if (dialect === 'openrouter') {
         payload.reasoning = {
           effort,
           exclude: opts.returnNativeReasoning !== true,
         }
+      }
+    }
+    if (isGoogleGeminiEndpoint(this.config.apiBase) && geminiThinkingFamily(this.config.modelId)) {
+      // 等级由 reasoning_effort 传递，此处只控制摘要，不重复发送等级或预算。
+      payload.extra_body = {
+        google: { thinking_config: { include_thoughts: opts.returnNativeReasoning === true } },
       }
     }
     // returnNativeReasoning只控制响应中的原生思考是否向上层展示，不能单独改变请求模式。
@@ -265,11 +342,14 @@ export class OpenAiProvider implements LlmProvider {
    *
    * 将内部 camelCase 的 toolCalls / toolCallId 转为 snake_case。
    */
-  private serializeMessages(messages: ChatMessage[]): Array<Record<string, unknown>> {
+  private serializeMessages(
+    messages: ChatMessage[],
+    requireReasoningContent = false,
+  ): Array<Record<string, unknown>> {
     const serialized: Array<Record<string, unknown>> = []
     for (let index = 0; index < messages.length; index++) {
       const message = messages[index]!
-      serialized.push(this.serializeMessage(message))
+      serialized.push(this.serializeMessage(message, requireReasoningContent))
       if (message.role !== 'assistant' || !message.toolCalls?.length) continue
 
       // Gemini的OpenAI兼容层严格要求同一assistant工具轮中的每个function call
@@ -299,19 +379,24 @@ export class OpenAiProvider implements LlmProvider {
               toolCallId: call.id,
               content: `工具 ${call.function.name} 未返回结果。`,
             },
+            requireReasoningContent,
           ),
         )
       }
       // 截图等补充user/system消息必须放在完整工具响应组之后，不能拆开函数调用轮。
       for (const candidate of segment) {
-        if (candidate.role !== 'tool') serialized.push(this.serializeMessage(candidate))
+        if (candidate.role !== 'tool')
+          serialized.push(this.serializeMessage(candidate, requireReasoningContent))
       }
       index = cursor - 1
     }
     return serialized
   }
 
-  private serializeMessage(msg: ChatMessage): Record<string, unknown> {
+  private serializeMessage(
+    msg: ChatMessage,
+    requireReasoningContent = false,
+  ): Record<string, unknown> {
     // 兜底防御：tool 返回的字符串内容若混入 base64 data URI (如截图泄漏)，统一剥离避免爆 token。
     // 合法图片以 image_url 数组块形式存在 (非字符串)，不受影响。
     const content =
@@ -325,10 +410,25 @@ export class OpenAiProvider implements LlmProvider {
     }
 
     if (msg.name) serialized.name = msg.name
-    if (msg.reasoningContent !== undefined) {
-      serialized.reasoning_content = msg.reasoningContent
+    const legacyReasoning = msg.nativeReasoning?.filter(
+      (item) => item.format === 'reasoning_content',
+    )
+    const reasoningContent =
+      msg.reasoningContent ??
+      (legacyReasoning?.length
+        ? legacyReasoning.map((item) => item.text ?? '').join('')
+        : undefined)
+    if (reasoningContent !== undefined) {
+      serialized.reasoning_content = reasoningContent
+    } else if (requireReasoningContent && msg.role === 'assistant') {
+      // 历史正文、无思考工具轮与合成消息也须满足 DeepSeek 思考协议；不伪造缺失的思考。
+      serialized.reasoning_content = ''
     }
-    const details = msg.nativeReasoning?.find((item) => item.format === 'reasoning_details')?.opaque
+    const details = msg.nativeReasoning
+      ? compactNativeReasoning(msg.nativeReasoning).find(
+          (item) => item.format === 'reasoning_details',
+        )?.opaque
+      : undefined
     if (details) serialized.reasoning_details = details
     if (msg.toolCallId) serialized.tool_call_id = msg.toolCallId
 
@@ -429,7 +529,6 @@ export class OpenAiProvider implements LlmProvider {
     let text = ''
     if (typeof source.reasoning_content === 'string') {
       text += source.reasoning_content
-      payloads.push({ format: 'reasoning_content', text: source.reasoning_content })
     }
     if (typeof source.reasoning === 'string') text += source.reasoning
     if (Array.isArray(source.reasoning_details)) {
@@ -456,12 +555,16 @@ export class OpenAiProvider implements LlmProvider {
   }
 
   /** 规范化 Usage 信息 (snake_case → camelCase) */
-  private normalizeUsage(raw: Record<string, unknown>): UsageInfo {
-    return {
-      promptTokens: (raw.prompt_tokens as number) ?? 0,
-      completionTokens: (raw.completion_tokens as number) ?? 0,
-      totalTokens: (raw.total_tokens as number) ?? 0,
-    }
+  private normalizeUsage(raw: Record<string, unknown>): UsageInfo | undefined {
+    const input = raw.prompt_tokens_details as Record<string, unknown> | undefined
+    const output = raw.completion_tokens_details as Record<string, unknown> | undefined
+    return normalizeTokenUsage({
+      input: raw.prompt_tokens,
+      output: raw.completion_tokens,
+      total: raw.total_tokens,
+      cachedRead: input?.cached_tokens ?? raw.prompt_cache_hit_tokens,
+      reasoning: output?.reasoning_tokens,
+    })
   }
 
   // ── 内部方法: 错误处理 ──
@@ -474,15 +577,18 @@ export class OpenAiProvider implements LlmProvider {
     signal?: AbortSignal,
   ): Promise<Response> {
     try {
-      return await fetch(url, {
-        method: 'POST',
-        headers: this.buildHeaders(),
-        body: JSON.stringify(payload),
-        signal: signal
-          ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
-          : AbortSignal.timeout(timeoutMs),
-      })
+      return await fetchLlmResponse(
+        url,
+        {
+          method: 'POST',
+          headers: this.buildHeaders(),
+          body: JSON.stringify(payload),
+        },
+        { timeout: timeoutMs, signal },
+        'openai',
+      )
     } catch (err) {
+      if (err instanceof AppError) throw err
       // 超时或网络错误
       if (err instanceof DOMException && err.name === 'TimeoutError') {
         throw new AppError('LLM_TIMEOUT', {
@@ -502,6 +608,35 @@ export class OpenAiProvider implements LlmProvider {
   private async handleError(response: Response, method: string): Promise<never> {
     const text = await response.text().catch(() => '(无法读取响应体)')
     const code = STATUS_TO_CODE[response.status] ?? 'LLM_ERROR'
+    if (upstreamWebPage(response, text)) {
+      const error = upstreamHttpError(response, text, '模型 API', code)
+      logger.error(`OpenAI ${method} 失败`, {
+        status: response.status,
+        reason: error.message,
+        model: this.config.modelId,
+      })
+      throw new AppError(code, {
+        message: error.message,
+        data: {
+          ...(error.data as object),
+          provider: 'openai',
+          model: this.config.modelId,
+          retryable: false,
+        },
+      })
+    }
+    let upstreamMessage = text
+    try {
+      const body = JSON.parse(text) as { error?: { message?: string }; message?: string }
+      upstreamMessage = body.error?.message ?? body.message ?? text
+    } catch {
+      /* 非 JSON 错误保留服务商原文。 */
+    }
+    const freeLimit =
+      response.status === 429 && /free users|token plan|insufficient_quota/i.test(upstreamMessage)
+    const message = freeLimit
+      ? '模型服务已达到免费用户调用限制，请稍后重试或检查上游套餐。'
+      : `模型服务请求失败 (${response.status}): ${upstreamMessage.slice(0, 500)}`
 
     // 尝试解析 retryAfter (429 场景)
     const retryMs = parseRetryAfterMs(response.headers.get('retry-after'))
@@ -513,12 +648,13 @@ export class OpenAiProvider implements LlmProvider {
     })
 
     throw new AppError(code, {
-      message: `OpenAI API 错误 (${response.status}): ${text.slice(0, 200)}`,
+      message,
       data: {
         provider: 'openai',
         model: this.config.modelId,
         status: response.status,
-        retryable: RETRYABLE_STATUSES.has(response.status),
+        retryable: !freeLimit && RETRYABLE_STATUSES.has(response.status),
+        upstreamMessage,
         retryAfter: retryMs,
       },
     })

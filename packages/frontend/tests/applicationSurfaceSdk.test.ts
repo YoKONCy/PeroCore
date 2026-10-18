@@ -15,6 +15,7 @@ const manifest = {
   },
   endpoints: [],
   requestedCapabilities: [],
+  offeredCapabilities: [],
 }
 
 describe('ApplicationSurfaceSdk', () => {

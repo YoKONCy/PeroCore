@@ -4,6 +4,8 @@ const path = require('node:path')
 const { spawn } = require('node:child_process')
 const http = require('node:http')
 const { createHash } = require('node:crypto')
+const { createRequire } = require('node:module')
+const { electronProcessEnvironment } = require('./electron-environment.cjs')
 
 async function removePath(targetPath) {
   await fs.rm(targetPath, { recursive: true, force: true, maxRetries: 12, retryDelay: 250 })
@@ -148,12 +150,11 @@ async function validateArcaBoot(appOutDir, resourcesDir, executableName) {
   try {
     child = spawn(executable, [host, '--loopback-port=0'], {
       cwd: appOutDir,
-      env: {
+      env: electronProcessEnvironment({
         ...process.env,
-        ELECTRON_RUN_AS_NODE: '1',
         INFOS_ARCA_DATA_PATH: smokeRoot,
         INFOS_ARCA_DISCOVERY_PATH: discoveryPath,
-      },
+      }, 'node'),
       windowsHide: true,
       stdio: ['ignore', logFd, logFd],
     })
@@ -180,6 +181,67 @@ async function validateArcaBoot(appOutDir, resourcesDir, executableName) {
   }
 }
 
+/** 在真实发行进程中模拟 OneBot 握手，避免主服务正常却丢失社交传输注册。 */
+async function validateSocialTransport(port, bundle) {
+  const { WebSocket } = createRequire(bundle)('ws')
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/api/social/ws`, {
+    headers: { 'X-Self-ID': '10000001' },
+  })
+  try {
+    ws.on('message', (raw) => {
+      const request = JSON.parse(String(raw))
+      const data =
+        request.action === 'get_login_info'
+          ? { user_id: 10000001, nickname: '发行验证账号' }
+          : request.action === 'get_version_info'
+            ? { app_name: '发行验证', app_version: '1' }
+            : []
+      if (ws.readyState === WebSocket.OPEN)
+        ws.send(JSON.stringify({ status: 'ok', retcode: 0, echo: request.echo, data }))
+    })
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('社交 WebSocket 握手超时')), 5000)
+      ws.once('open', () => {
+        clearTimeout(timer)
+        resolve()
+      })
+      ws.once('error', (error) => {
+        clearTimeout(timer)
+        reject(error)
+      })
+    })
+    const status = await new Promise((resolve, reject) => {
+      const request = http.get(`http://127.0.0.1:${port}/api/social/status`, (response) => {
+        let body = ''
+        response.on('data', (chunk) => {
+          body += chunk
+        })
+        response.on('end', () => {
+          try {
+            if (response.statusCode !== 200)
+              throw new Error(`社交状态接口返回 ${response.statusCode}`)
+            resolve(JSON.parse(body))
+          } catch (error) {
+            reject(error)
+          }
+        })
+      })
+      request.setTimeout(5000, () => request.destroy(new Error('社交状态接口超时')))
+      request.on('error', reject)
+    })
+    if (
+      ws.readyState !== WebSocket.OPEN ||
+      !status.data?.adapters?.some(
+        (adapter) => adapter.platform === 'qq' && adapter.connected && adapter.latencyMs >= 0,
+      )
+    ) {
+      throw new Error('发行验证失败：QQ 反向 WebSocket 未注册到社交适配器')
+    }
+  } finally {
+    ws.terminate()
+  }
+}
+
 /** 使用打包后的 Electron Node 运行时执行 Daemon，验证真实发行环境可启动。 */
 async function validateDaemonBoot(appOutDir, resourcesDir, executableName) {
   if (process.platform !== 'win32') return
@@ -201,15 +263,14 @@ async function validateDaemonBoot(appOutDir, resourcesDir, executableName) {
   try {
     child = spawn(executable, [bundle], {
       cwd: appOutDir,
-      env: {
+      env: electronProcessEnvironment({
         ...process.env,
-        ELECTRON_RUN_AS_NODE: '1',
         PERO_PORT: '19120',
         PERO_DATA_DIR: dataDir,
         PERO_APP_ROOT: path.join(resourcesDir, 'backend'),
         INFOS_RESOURCES_ROOT: resourcesDir,
         PERO_WORKSHOP_DIRS: '[]',
-      },
+      }, 'node'),
       windowsHide: true,
       // 与正式 PortableDaemon 完全一致：使用已经打开的同步文件描述符。
       stdio: ['ignore', logFd, logFd],
@@ -228,7 +289,10 @@ async function validateDaemonBoot(appOutDir, resourcesDir, executableName) {
     }
     const deadline = Date.now() + 30_000
     while (Date.now() < deadline) {
-      if (await probeHealth(19120)) return
+      if (await probeHealth(19120)) {
+        await validateSocialTransport(19120, bundle)
+        return
+      }
       if (child.exitCode !== null) {
         throw new Error(`Daemon 提前退出，exitCode=${child.exitCode}\n${await readOutput()}`)
       }

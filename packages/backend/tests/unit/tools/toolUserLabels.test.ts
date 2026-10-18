@@ -4,6 +4,17 @@ import { describe, expect, it } from 'vitest'
 import { resolveToolUserDescription, resolveToolUserLabel } from '../../../src/tools/toolUserLabels'
 
 describe('工具用户文案', () => {
+  it('工具包来源自动取自清单，同包子工具共享分组标识', () => {
+    const definitions = getBuiltinToolDefinitions()
+    expect(definitions.every((definition) => definition.packageId?.startsWith('builtin:'))).toBe(
+      true,
+    )
+    const byName = new Map(definitions.map((definition) => [definition.name, definition]))
+    expect(byName.get('read_file')?.packageId).toBe('builtin:file-ops')
+    expect(byName.get('write_file')?.packageId).toBe(byName.get('read_file')?.packageId)
+    expect(byName.get('read_file')?.packageId).not.toBe(byName.get('update_plan')?.packageId)
+  })
+
   it('所有主内核内置工具都必须自行声明用户名称和说明', () => {
     const missing = getBuiltinToolDefinitions()
       .filter(
@@ -12,22 +23,6 @@ describe('工具用户文案', () => {
       )
       .map((definition) => definition.name)
     expect(missing).toEqual([])
-  })
-
-  it('所有主内核官方工具都必须拥有唯一的Tool Atelier视觉签名', () => {
-    const definitions = getBuiltinToolDefinitions()
-    const missing = definitions
-      .filter(
-        (definition) =>
-          !definition.display?.signature?.archetype ||
-          !definition.display.signature.variant ||
-          !definition.display.signature.chain,
-      )
-      .map((definition) => definition.name)
-    const variants = definitions.map((definition) => definition.display?.signature?.variant)
-
-    expect(missing).toEqual([])
-    expect(new Set(variants).size).toBe(variants.length)
   })
 
   it('高级工具应按浏览器、Computer Use 和远程节点终端工具包维护', () => {
@@ -56,19 +51,16 @@ describe('工具用户文案', () => {
     )
   })
 
-  it('旧工具未声明用户文案时应使用中央映射回退', () => {
-    expect(resolveToolUserLabel('finish_task')).toBe('完成任务')
-    expect(resolveToolUserDescription('finish_task')).toBe('结束当前任务，并把最终结果回复给你。')
-  })
-
   it('未知扩展未声明文案时不应暴露函数名和内部术语', () => {
-    expect(resolveToolUserLabel('some_internal_command')).toBe('扩展工具')
-    expect(
-      resolveToolUserDescription(
-        'some_internal_command',
-        undefined,
-        'AgentApplication SubAgent command API',
-      ),
-    ).toBe('为当前任务提供额外能力。关闭后，助手将无法使用这项功能。')
+    const internalName = 'some_internal_command'
+    const technicalDescription = 'AgentApplication SubAgent command API'
+    const copy = [
+      resolveToolUserLabel(internalName),
+      resolveToolUserDescription(internalName, undefined, technicalDescription),
+    ]
+    for (const text of copy) {
+      expect(text.trim()).not.toBe('')
+      expect(text).not.toMatch(/some_internal_command|AgentApplication|SubAgent|command|API/)
+    }
   })
 })

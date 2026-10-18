@@ -2,6 +2,8 @@ import type { EventNoteDraftInput } from '@infos/shared'
 import type { LlmService } from '../llm/llmService'
 import type { ModelConfig } from '../llm/llmService'
 import type { BackgroundEventExtractor } from './eventMemoryFallbackService'
+import { formatEventTime } from './eventMemoryTime'
+import { TASK_PROMPTS } from '../prompt/taskPrompts'
 
 export class LlmBackgroundEventExtractor implements BackgroundEventExtractor {
   constructor(
@@ -14,24 +16,33 @@ export class LlmBackgroundEventExtractor implements BackgroundEventExtractor {
   ): Promise<EventNoteDraftInput[]> {
     const config = await this.getModelConfig()
     if (!config) throw new Error('后台事件补记模型未配置')
+    input.signal?.throwIfAborted()
     const transcript = input.messages
-      .map((message) => `[${message.timestamp}] ${message.role}: ${message.content}`)
+      .map(
+        (message) => `[${formatEventTime(message.timestamp)}] ${message.role}: ${message.content}`,
+      )
       .join('\n')
     const text = await this.llm.chatText(
       config,
       [
         {
           role: 'system',
-          content:
-            '你正在替当前Agent提炼长期事件记忆。判断标准：只记录对未来理解用户、关系或后续行动仍有价值的真实互动，例如稳定偏好与重要事实、承诺与决定、关系变化、共同经历及明显情绪转折；不记录寒暄、临时操作细节、重复信息、未发生的设想或普通问答。叙事标准：使用Agent第一人称，以简洁自然的完整句保留“发生了什么、涉及谁、结果或意义是什么”，不得照抄对话、夸大、推测或虚构。切分标准：一个可独立回忆且具有单一核心结果的事件对应一项；同一目标、连续因果或同一结果应合并，无关目标或独立结果才拆分，避免碎片化。重要度参考：0到3通常不应记录，4到6为有持续价值，7到8为长期重要，9到10仅用于罕见的关键转折。返回严格JSON数组；没有值得记录的事件时返回[]。每项字段为narrative、importance、affect、participants、places、objects、topics；importance、valence、arousal均为0到10整数。',
+          content: TASK_PROMPTS['memory.extract']!.body,
         },
         {
           role: 'user',
           content: `Agent: ${input.agentId}\nThread: ${input.threadId}\n原始连续对话：\n${transcript}`,
         },
       ],
-      { temperature: 0.2, maxTokens: 2000 },
+      {
+        temperature: 0.2,
+        signal: input.signal,
+        promptTask: 'memory.extract',
+        maxTokens: 2000,
+        usageContext: { agentId: input.agentId, purpose: 'memory' },
+      },
     )
+    input.signal?.throwIfAborted()
     const parsed = this.parseArray(text)
     return parsed.map((value) => this.validate(value))
   }
@@ -47,28 +58,38 @@ export class LlmBackgroundEventExtractor implements BackgroundEventExtractor {
   }
 
   private validate(value: unknown): EventNoteDraftInput {
-    if (!value || typeof value !== 'object') throw new Error('后台事件补记条目格式无效')
+    if (!value || typeof value !== 'object' || Array.isArray(value))
+      throw new Error('后台事件补记条目格式无效')
     const item = value as Record<string, unknown>
     const narrative = typeof item.narrative === 'string' ? item.narrative.trim() : ''
-    const importance = item.importance
-    const affect = item.affect as Record<string, unknown> | undefined
-    if (!narrative || !Number.isInteger(importance))
-      throw new Error('后台事件补记缺少有效记叙或重要度')
-    if (!affect || !Number.isInteger(affect.valence) || !Number.isInteger(affect.arousal)) {
-      throw new Error('后台事件补记缺少有效情感数值')
+    if (!narrative) throw new Error('后台事件补记缺少有效记叙或重要度')
+    if (item.affect != null && (typeof item.affect !== 'object' || Array.isArray(item.affect))) {
+      throw new Error('后台事件补记情感字段格式无效')
     }
-    const bounded = (number: unknown): number => Math.max(0, Math.min(10, Number(number)))
+    const affect = (item.affect ?? {}) as Record<string, unknown>
+    // 修正模型的数字字符串与小数；缺失情绪按中性、平静处理，不放过无效数值。
+    const score = (input: unknown, field: string, fallback?: number): number => {
+      if (input == null && fallback !== undefined) return fallback
+      const number =
+        typeof input === 'number'
+          ? input
+          : typeof input === 'string' && input.trim() !== ''
+            ? Number(input)
+            : NaN
+      if (!Number.isFinite(number)) throw new Error(`后台事件补记缺少有效数值：${field}`)
+      return Math.max(0, Math.min(10, Math.round(number)))
+    }
     const strings = (input: unknown): string[] =>
       Array.isArray(input)
         ? input.filter((entry): entry is string => typeof entry === 'string')
         : []
     return {
       narrative,
-      importance: bounded(importance),
+      importance: score(item.importance, 'importance'),
       affect: {
-        tones: strings(affect.tones),
-        valence: bounded(affect.valence),
-        arousal: bounded(affect.arousal),
+        tones: strings(affect.tones ?? item.tones),
+        valence: score(affect.valence ?? item.valence, 'affect.valence', 5),
+        arousal: score(affect.arousal ?? item.arousal, 'affect.arousal', 0),
       },
       participants: strings(item.participants),
       places: strings(item.places),

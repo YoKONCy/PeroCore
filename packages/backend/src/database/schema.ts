@@ -18,6 +18,144 @@ import {
 } from 'drizzle-orm/sqlite-core'
 import { sql } from 'drizzle-orm'
 
+/** 每日用户牌与角色回应分开保存，切换角色仍沿用当天用户牌。 */
+export const tarotDays = sqliteTable('tarot_days', {
+  day: text('day').primaryKey(),
+  timeZone: text('time_zone').notNull(),
+  question: text('question').notNull(),
+  userCardJson: text('user_card_json').notNull(),
+  createdAt: text('created_at').notNull(),
+})
+export const tarotReadings = sqliteTable(
+  'tarot_readings',
+  {
+    id: text('id').primaryKey(),
+    day: text('day')
+      .notNull()
+      .references(() => tarotDays.day, { onDelete: 'cascade' }),
+    agentId: text('agent_id').notNull(),
+    readingJson: text('reading_json').notNull(),
+    persona: text('persona').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('idx_tarot_day_agent').on(table.day, table.agentId),
+    index('idx_tarot_agent_created').on(table.agentId, table.createdAt),
+  ],
+)
+
+/** 独立于聊天历史的调用账本，不保存提示词、输出或密钥。时间统一使用 UTC 毫秒。 */
+export const llmUsageRecords = sqliteTable(
+  'llm_usage_records',
+  {
+    id: text('id').primaryKey(),
+    startedAt: integer('started_at').notNull(),
+    finishedAt: integer('finished_at').notNull(),
+    provider: text('provider').notNull(),
+    modelId: text('model_id').notNull(),
+    agentId: text('agent_id'),
+    purpose: text('purpose').notNull(),
+    status: text('status').notNull(),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    totalTokens: integer('total_tokens'),
+    cachedReadTokens: integer('cached_read_tokens'),
+    cachedWriteTokens: integer('cached_write_tokens'),
+    reasoningTokens: integer('reasoning_tokens'),
+    channel: text('channel'),
+    threadId: text('thread_id'),
+    applicationId: text('application_id'),
+    executionId: text('execution_id'),
+    step: integer('step'),
+    promptHash: text('prompt_hash'),
+    prefixHash: text('prefix_hash'),
+    toolsHash: text('tools_hash'),
+  },
+  (table) => [
+    index('idx_llm_usage_started').on(table.startedAt),
+    index('idx_llm_usage_agent_started').on(table.agentId, table.startedAt),
+    index('idx_llm_usage_channel_started').on(table.channel, table.startedAt),
+  ],
+)
+
+/** 每个 Thread 保留计划历史，当前计划由未归档记录确定。 */
+export const taskPlans = sqliteTable(
+  'task_plans',
+  {
+    id: text('id').primaryKey(),
+    threadId: text('thread_id').notNull(),
+    agentId: text('agent_id').notNull(),
+    taskId: text('task_id'),
+    taskRevision: integer('task_revision'),
+    revision: integer('revision').default(1).notNull(),
+    title: text('title').notNull(),
+    status: text('status').default('active').notNull(),
+    stepsJson: text('steps_json').notNull(),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [index('idx_task_plans_thread').on(table.threadId, table.createdAt)],
+)
+
+/** 计划变更按对话轮次留存前后快照，用于失败与消息撤回。 */
+export const taskPlanMutations = sqliteTable(
+  'task_plan_mutations',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    threadId: text('thread_id').notNull(),
+    agentId: text('agent_id').notNull(),
+    pairId: text('pair_id').notNull(),
+    callId: text('call_id'),
+    beforeJson: text('before_json').notNull(),
+    afterJson: text('after_json').notNull(),
+    status: text('status').default('active').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [index('idx_task_plan_mutations_thread_pair').on(table.threadId, table.pairId)],
+)
+
+/** 文档原文与整理状态是持久权威源；文本镜像和检索索引均可由这里重建。 */
+export const knowledgeDocuments = sqliteTable(
+  'knowledge_documents',
+  {
+    id: text('id').primaryKey(),
+    title: text('title').notNull(),
+    sourceKind: text('source_kind').notNull(),
+    source: text('source').default('').notNull(),
+    content: text('content').notNull(),
+    contentHash: text('content_hash').notNull(),
+    tokenCount: integer('token_count').notNull(),
+    revision: integer('revision').default(1).notNull(),
+    status: text('status').default('queued').notNull(),
+    vectorStatus: text('vector_status').default('skipped').notNull(),
+    modelName: text('model_name'),
+    error: text('error'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [index('idx_knowledge_document_status').on(table.status, table.updatedAt)],
+)
+
+export const knowledgeParts = sqliteTable(
+  'knowledge_parts',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    documentId: text('document_id')
+      .notNull()
+      .references(() => knowledgeDocuments.id, { onDelete: 'cascade' }),
+    ordinal: integer('ordinal').notNull(),
+    title: text('title').notNull(),
+    summary: text('summary').notNull(),
+    keywordsJson: text('keywords_json').notNull(),
+    startOffset: integer('start_offset').notNull(),
+    endOffset: integer('end_offset').notNull(),
+    tokenCount: integer('token_count').notNull(),
+    embeddingJson: text('embedding_json'),
+    embeddingKey: text('embedding_key'),
+  },
+  (table) => [uniqueIndex('uq_knowledge_part_ordinal').on(table.documentId, table.ordinal)],
+)
+
 // ─────────────────────────────────────────────
 // Observer Service与Agent State派生资源
 // ─────────────────────────────────────────────
@@ -188,8 +326,10 @@ export const threads = sqliteTable(
     contextPolicy: text('context_policy'),
     /** Thread 级禁用工具列表（JSON 字符串）；只能屏蔽 Channel 已允许工具，不能扩权。 */
     disabledToolsJson: text('disabled_tools_json').default('[]').notNull(),
+    interactionMode: text('interaction_mode').$type<'chat' | 'work'>().default('chat').notNull(),
     /** 自动执行模式仅跳过可审批决策，不跳过拒绝、终端与越界删除审批。 */
     autoExecuteTools: integer('auto_execute_tools', { mode: 'boolean' }).default(false).notNull(),
+    executionMode: text('execution_mode').default('manual').notNull(),
     /**
      * M05 §3.2: Thread 用途：conversation / background_task
      * 普通聊天为 conversation；后台任务使用 background_task 与聊天历史隔离
@@ -216,10 +356,6 @@ export const flowStates = sqliteTable(
     agentId: text('agent_id').notNull(),
     currentGoal: text('current_goal').default('').notNull(),
     privateFacts: text('private_facts').default('').notNull(),
-    workContext: text('work_context').default('').notNull(),
-    workContextUpdatedAtPairCount: integer('work_context_updated_at_pair_count')
-      .default(0)
-      .notNull(),
     revision: integer('revision').default(1).notNull(),
     updatedByPairId: text('updated_by_pair_id'),
     updatedAt: text('updated_at')
@@ -229,29 +365,6 @@ export const flowStates = sqliteTable(
   (table) => [
     uniqueIndex('idx_flow_states_thread_agent').on(table.threadId, table.agentId),
     index('idx_flow_states_thread_id').on(table.threadId),
-  ],
-)
-
-export const workContextEntries = sqliteTable(
-  'work_context_entries',
-  {
-    id: integer('id').primaryKey({ autoIncrement: true }),
-    threadId: text('thread_id').notNull(),
-    agentId: text('agent_id').notNull(),
-    pairId: text('pair_id').notNull(),
-    pairCount: integer('pair_count').notNull(),
-    content: text('content').notNull(),
-    createdAt: text('created_at')
-      .default(sql`(datetime('now', 'localtime'))`)
-      .notNull(),
-  },
-  (table) => [
-    uniqueIndex('idx_work_context_entries_pair_agent').on(
-      table.threadId,
-      table.agentId,
-      table.pairId,
-    ),
-    index('idx_work_context_entries_scope').on(table.threadId, table.agentId, table.pairCount),
   ],
 )
 
@@ -267,14 +380,6 @@ export const flowStateRevisions = sqliteTable(
     beforePrivateFacts: text('before_private_facts').default('').notNull(),
     afterCurrentGoal: text('after_current_goal').default('').notNull(),
     afterPrivateFacts: text('after_private_facts').default('').notNull(),
-    beforeWorkContext: text('before_work_context').default('').notNull(),
-    beforeWorkContextUpdatedAtPairCount: integer('before_work_context_updated_at_pair_count')
-      .default(0)
-      .notNull(),
-    afterWorkContext: text('after_work_context').default('').notNull(),
-    afterWorkContextUpdatedAtPairCount: integer('after_work_context_updated_at_pair_count')
-      .default(0)
-      .notNull(),
     createdAt: text('created_at')
       .default(sql`(datetime('now', 'localtime'))`)
       .notNull(),
@@ -312,6 +417,10 @@ export const backgroundTasks = sqliteTable(
     title: text('title').notNull(),
     /** 派发给 Agent 的原始指令 */
     instruction: text('instruction').notNull(),
+    /** 用户意图修订；执行器只能提交自己开始时的版本。 */
+    revision: integer('revision').default(1).notNull(),
+    /** 长期目标、交接摘要、等待条件、预算与来源。 */
+    lifecycleJson: text('lifecycle_json'),
     /** 任务状态：queued/running/paused/waiting_input/completed/failed/cancelled */
     status: text('status').default('queued').notNull(),
     /** 进度百分比 0-100（Agent 主动上报，null 表示未知） */
@@ -363,6 +472,49 @@ export const backgroundTasks = sqliteTable(
     index('idx_background_tasks_thread_id').on(table.threadId),
     index('idx_background_tasks_target_thread_id').on(table.targetThreadId),
     index('idx_background_tasks_created_at').on(table.createdAt),
+  ],
+)
+
+/** 任务通知按渠道投递；发送结果不明时保留 uncertain，避免自动重复外部副作用。 */
+export const taskDeliveries = sqliteTable(
+  'task_deliveries',
+  {
+    id: text('id').primaryKey(),
+    taskId: text('task_id').notNull(),
+    channel: text('channel').notNull(),
+    payloadJson: text('payload_json').notNull(),
+    status: text('status').default('pending').notNull(),
+    attempts: integer('attempts').default(0).notNull(),
+    nextAttemptAt: text('next_attempt_at'),
+    lastError: text('last_error'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [index('idx_task_deliveries_pending').on(table.status, table.nextAttemptAt)],
+)
+
+/** 自治应用调用与结果交付记录；任务执行状态仍由子应用持有。 */
+export const applicationCalls = sqliteTable(
+  'application_calls',
+  {
+    id: text('id').primaryKey(),
+    appId: text('app_id').notNull(),
+    agentId: text('agent_id').notNull(),
+    threadId: text('thread_id').notNull(),
+    requestJson: text('request_json').notNull(),
+    runId: text('run_id'),
+    state: text('state').notNull().default('submitting'),
+    revision: integer('revision').notNull().default(0),
+    messageId: integer('message_id'),
+    deliveryStatus: text('delivery_status').notNull().default('pending'),
+    resultJson: text('result_json'),
+    error: text('error'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    index('idx_application_calls_run').on(table.appId, table.runId),
+    index('idx_application_calls_owner').on(table.agentId, table.createdAt),
   ],
 )
 
@@ -453,6 +605,8 @@ export const fileChangeSnapshots = sqliteTable(
     originalSha256: text('original_sha256'),
     /** 当前最终内容哈希；删除文件时为 null */
     finalSha256: text('final_sha256'),
+    /** 同轮写入历史是否连续；null 表示旧记录缺少校验依据。 */
+    historyContinuous: integer('history_continuous', { mode: 'boolean' }).default(true),
     createdAt: text('created_at')
       .default(sql`(datetime('now', 'localtime'))`)
       .notNull(),
@@ -566,7 +720,30 @@ export const conversationLogs = sqliteTable(
 
 // 无需 DB 表。
 
-/** 宠物状态表 */
+/** 会话角色状态变更日志；撤回记录阻止在途工具重新写回。 */
+export const threadCharacterStateEvents = sqliteTable(
+  'thread_character_state_events',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    threadId: text('thread_id').notNull(),
+    agentId: text('agent_id').notNull(),
+    kind: text('kind', { enum: ['update', 'retract', 'clear'] }).notNull(),
+    pairId: text('pair_id'),
+    toolCallId: text('tool_call_id'),
+    patchJson: text('patch_json').notNull().default('{}'),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [
+    index('idx_thread_character_state_scope').on(table.threadId, table.agentId, table.id),
+    uniqueIndex('idx_thread_character_state_call').on(
+      table.threadId,
+      table.agentId,
+      table.toolCallId,
+    ),
+  ],
+)
+
+/** 旧全局宠物状态表，仅保留兼容数据，不作为新会话状态来源。 */
 export const petStates = sqliteTable(
   'pet_states',
   {
@@ -605,6 +782,7 @@ export const aiModelConfigs = sqliteTable(
     maxTokens: integer('max_tokens'),
     /** 模型完整上下文窗口，用于输入预算计算，不等同于最大输出 Token。 */
     contextWindowTokens: integer('context_window_tokens'),
+    maxReActTurns: integer('max_react_turns'),
     reasoningEffort: text('reasoning_effort'),
     returnNativeReasoning: integer('return_native_reasoning', { mode: 'boolean' }).default(false),
     wireApi: text('wire_api').default('chat_completions'),
@@ -877,8 +1055,43 @@ export const scheduledTasks = sqliteTable(
     isTriggered: integer('is_triggered', { mode: 'boolean' }).default(false),
     createdAt: text('created_at').default(sql`(datetime('now', 'localtime'))`),
     agentId: text('agent_id').notNull().default('pero'),
+    status: text('status').notNull().default('pending'),
+    threadId: text('thread_id'),
+    planId: text('plan_id'),
+    planStepId: text('plan_step_id'),
+    reason: text('reason'),
+    sourceExecutionId: text('source_execution_id'),
+    claimToken: text('claim_token'),
+    leaseUntil: text('lease_until'),
+    nextAttemptAt: text('next_attempt_at'),
+    attempts: integer('attempts').notNull().default(0),
+    lastError: text('last_error'),
+    taskId: text('task_id'),
+    settledAt: text('settled_at'),
   },
-  (table) => [index('idx_scheduled_tasks_agent_id').on(table.agentId)],
+  (table) => [
+    index('idx_scheduled_tasks_agent_id').on(table.agentId),
+    index('idx_scheduled_tasks_due').on(table.status, table.time),
+  ],
+)
+
+/** Agent 提出的行动建议；采纳后关联唯一后台任务。 */
+export const proactiveSuggestions = sqliteTable(
+  'proactive_suggestions',
+  {
+    id: text('id').primaryKey(),
+    agentId: text('agent_id').notNull(),
+    threadId: text('thread_id').notNull(),
+    title: text('title').notNull(),
+    instruction: text('instruction').notNull(),
+    reason: text('reason').notNull(),
+    sourceExecutionId: text('source_execution_id'),
+    status: text('status').notNull().default('open'),
+    taskId: text('task_id'),
+    createdAt: text('created_at').notNull(),
+    resolvedAt: text('resolved_at'),
+  },
+  (table) => [index('idx_proactive_suggestions_agent_status').on(table.agentId, table.status)],
 )
 
 /** 全局键值配置表 */
@@ -1328,6 +1541,8 @@ export const agentInputRequests = sqliteTable(
     question: text('question').notNull(),
     context: text('context'),
     optionsJson: text('options_json').default('[]').notNull(),
+    questionsJson: text('questions_json').default('[]').notNull(),
+    answersJson: text('answers_json').default('[]').notNull(),
     allowFreeText: integer('allow_free_text', { mode: 'boolean' }).default(true).notNull(),
     required: integer('required', { mode: 'boolean' }).default(false).notNull(),
     status: text('status').notNull(),

@@ -6,7 +6,6 @@ describe('心流内置工具注册', () => {
   it('必须向 ToolRegistry 提供 update_flow_state 的 FC 定义', () => {
     const definition = getBuiltinToolDefinitions().find((tool) => tool.name === 'update_flow_state')
     expect(definition).toBeDefined()
-    expect(definition?.description).toContain('心流')
     expect(definition?.parameters).toMatchObject({
       type: 'object',
       properties: {
@@ -16,14 +15,19 @@ describe('心流内置工具注册', () => {
     })
   })
 
-  it('必须注册不可禁用的工作上下文维护工具', () => {
+  it('工作材料由编译器管理，不再注册手动维护工具', () => {
     const definition = getBuiltinToolDefinitions().find(
       (tool) => tool.name === 'manage_work_context',
     )
-    expect(definition?.parameters).toMatchObject({
-      type: 'object',
-      properties: { action: { enum: ['update', 'clear'] }, content: { type: 'string' } },
-    })
+    expect(definition).toBeUndefined()
+  })
+
+  it('知识库只提供一个检索工具', () => {
+    expect(
+      getBuiltinToolDefinitions()
+        .filter((tool) => tool.name.includes('knowledge'))
+        .map((tool) => tool.name),
+    ).toEqual(['search_knowledge'])
   })
 
   it('必须为Gemini兼容链路提供明确的角色台词数组Schema', () => {

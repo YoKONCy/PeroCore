@@ -1,530 +1,623 @@
 <script setup lang="ts">
-/**
- * Pet3DView — 宠物互动页面 (双模式)
- *
- * 作为 Electron 独立透明桌宠窗口使用。
- *
- * 按 S05 §1 规范拆分:
- * - View 层: 模板 + composable 组装 (~120 行 script)
- * - usePetBubble.ts: 对话气泡
- * - usePetTexts.ts: 台词系统 + 空闲消息 + 分时段欢迎
- * - usePetInteraction.ts: 点击/悬停/动作交互
- * - usePetWindow.ts: Electron 窗口交互
- * - usePetGateway.ts: Gateway 对话同步
- * - usePetVoice.ts: 语音采集
- * - usePetAudio.ts: TTS 播放 + 唇同步
- * - PetOverlayUI.vue: 独立窗口悬浮 UI
- *
- * @module packages/frontend/src/views/Pet3DView
- */
-import { ref, watch, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
+import type { PetControlSettings } from '@infos/shared'
 import BedrockAvatar from '../components/avatar/BedrockAvatar.vue'
 import PetOverlayUI from '../components/pet/PetOverlayUI.vue'
-import PetBubbleSurface from '../components/pet/PetBubbleSurface.vue'
-import { LyricOverlay } from '../components/overlays'
-import { usePetBubble } from '../composables/pet/usePetBubble'
 import { usePetWindow } from '../composables/pet/usePetWindow'
+import { useWindowVisibility } from '../composables/main/useWindowVisibility'
 import { usePetGateway } from '../composables/pet/usePetGateway'
 import { usePetVoice } from '../composables/pet/usePetVoice'
 import { usePetAudio } from '../composables/pet/usePetAudio'
 import { usePetTexts } from '../composables/pet/usePetTexts'
-import { usePetInteraction } from '../composables/pet/usePetInteraction'
+import { usePetControls } from '../composables/pet/usePetControls'
+import { usePetAttention } from '../composables/pet/usePetAttention'
+import { splitSpokenCaptions } from '../composables/pet/petPresentation'
 import { voiceApi } from '../api/modules/voiceApi'
-import { useNotificationStore } from '../stores'
+import { invoke, listen, send, isElectron } from '../utils/ipcAdapter'
 import {
   AVATAR_MODEL_STORAGE_KEY,
   DEFAULT_AVATAR_MANIFEST_PATH,
 } from '../components/avatar/lib/avatarDefaults'
 
 defineOptions({ name: 'Pet3DView' })
-
-// ═══ 组装 composables ═══
-const {
-  bubbleText,
-  isBubbleVisible,
-  bubbleKey,
-  isBubbleExpanded,
-  isBubbleOverflow,
-  bubbleStyle,
-  bubbleContentRef,
-  showBubble: showLocalBubbleText,
-  toggleExpand,
-} = usePetBubble()
-const localBubbleOverride = ref(false)
-function showBubble(text: string, duration?: number): void {
-  localBubbleOverride.value = true
-  showLocalBubbleText(text, duration)
-}
-
-// ── 当前气泡来源：最近触发的本地互动台词可临时覆盖 AI Surface。 ──
-const showLocalBubble = computed(() => localBubbleOverride.value || !activeSurface.value)
-
-// ── 歌词文本来自与气泡相同的 AI Surface；本地台词仅作无 AI 内容时的回退。 ──
-const filteredLyricText = computed(() =>
-  showLocalBubble.value ? bubbleText.value : surfaceText.value || bubbleText.value,
-)
-
-// ts-plugin 对 Vue 模板 ref 的误报修复：显式读取一次以消除 "declared but never read" warning
-void bubbleContentRef
-
-const { globalMouse, isDragging, onInteractableEnter, onInteractableLeave } = usePetWindow()
-
-// ── TTS 音频播放 + 唇同步 ──
-const {
-  isPlaying: isSpeaking,
-  mouthOpen,
-  receiveAudioChunk,
-  playAsset,
-  stopAll: stopAudioOutput,
-} = usePetAudio()
-const cancelledAudioPlaybacks = new Set<string>()
-let removeAudioPlayListener: (() => void) | undefined
-let removeAudioStopListener: (() => void) | undefined
-
-// ── Gateway 对话同步；AI 正文由统一 Surface 提供 ──
-const { chatState, activeSurface, surfaceText, sendChat } = usePetGateway({
-  onAudioChunk: (data) => receiveAudioChunk(data),
-})
-
-// ── 语音采集 (VAD + PTT) → HTTP ASR ──
-const sendVoiceToAsr = async (audioData: ArrayBuffer) => {
-  try {
-    const result = await voiceApi.recognize(audioData)
-    if (result.text?.trim()) {
-      sendChat(result.text)
-      showBubble(`🎤 ${result.text}`, 3000)
-    }
-  } catch {
-    showBubble('语音识别失败了...😿', 3000)
-  }
-}
-const {
-  mode: voiceMode,
-  setMode: setVoiceMode,
-  pttDown,
-  pttUp,
-  isRecording,
-} = usePetVoice(sendVoiceToAsr, isSpeaking)
-
-// ── 语音配置前置检查 ──
-const notif = useNotificationStore()
-
-const handlePttDown = async () => {
-  try {
-    const status = await voiceApi.getStatus()
-    if (!status?.data?.asr?.available) {
-      notif.toast('未配置 ASR，请先在控制台配置语音识别服务', {
-        type: 'warning',
-        title: '缺少配置',
-      })
-      return
-    }
-    pttDown()
-  } catch {
-    notif.toast('无法获取语音服务状态', { type: 'error', title: '错误' })
-  }
-}
-
-const handleSetVoiceMode = async (mode: 'ptt' | 'vad' | 'off') => {
-  if (mode !== 'off') {
-    try {
-      const status = await voiceApi.getStatus()
-      if (!status?.data?.asr?.available) {
-        notif.toast('未配置 ASR，请先在控制台配置语音识别服务', {
-          type: 'warning',
-          title: '缺少配置',
-        })
-        return
-      }
-    } catch {
-      notif.toast('无法获取语音服务状态', { type: 'error', title: '错误' })
-      return
-    }
-  }
-  setVoiceMode(mode)
-}
-
-// ── 台词系统 ──
-const { agentName, startIdleTimer, getClickText } = usePetTexts({
-  showBubble,
-  isThinking: computed(() => chatState.value.isThinking),
-  isSpeaking,
-})
-// petName 优先级: 动态获取的 agentName > 'Pero'
-const petName = computed(() => agentName.value || 'Pero')
-
-// ── 角色引用 ──
+const router = useRouter()
 const avatarRef = ref<InstanceType<typeof BedrockAvatar> | null>(null)
-
-// ── 交互处理 ──
-const { onPet, onHoverStart, onHoverEnd } = usePetInteraction({
-  avatarRef,
-  showBubble,
-  getClickText,
-  startIdleTimer,
+const windowVisible = useWindowVisibility()
+const avatarMounted = ref(windowVisible.value)
+let suspendedAnimation = ''
+let avatarReleaseTimer: ReturnType<typeof setTimeout> | undefined
+watch(
+  windowVisible,
+  (visible) => {
+    clearTimeout(avatarReleaseTimer)
+    if (visible) avatarMounted.value = true
+    else {
+      // 只回收视觉资源，网关连接、语音播放和快捷键继续由桌宠宿主承载。
+      avatarReleaseTimer = setTimeout(() => {
+        suspendedAnimation = avatarRef.value?.getAnimation() ?? ''
+        avatarMounted.value = false
+      }, 60_000)
+    }
+  },
+  { immediate: true },
+)
+const {
+  globalMouse,
+  isDragging,
   onInteractableEnter,
   onInteractableLeave,
+  resizeMode,
+  windowSize,
+  toggleResizeMode,
+} = usePetWindow()
+const { settings, loaded, update } = usePetControls()
+const {
+  isPlaying: speaking,
+  currentId: playbackId,
+  mouthOpen,
+  progress,
+  playAsset,
+  stopAll,
+} = usePetAudio()
+const {
+  chatState,
+  activeAgentId,
+  conversationTarget,
+  latestReply,
+  unread,
+  hint,
+  wsState,
+  sendChat,
+  stopSpeech: cancelServerSpeech,
+  selectPrincipal,
+} = usePetGateway()
+const { attention, attentionKey, attentionKind, attentionTarget, running } =
+  usePetAttention(activeAgentId)
+const reaction = ref('')
+const replyText = ref('')
+const transientHint = ref('')
+const replyNotice = ref(false)
+const playbackCaption = ref('')
+const viewport = ref({ width: window.innerWidth, height: window.innerHeight })
+const bounds = ref({
+  left: window.innerWidth * 0.35,
+  right: window.innerWidth * 0.65,
+  top: window.innerHeight * 0.25,
+  bottom: window.innerHeight * 0.85,
 })
+let layoutBounds = { left: 0.35, right: 0.65, top: 0.25, bottom: 0.85 }
+let reactionTimer: ReturnType<typeof setTimeout> | undefined
+let hintTimer: ReturnType<typeof setTimeout> | undefined
+let replyTimer: ReturnType<typeof setTimeout> | undefined
+let configureGeneration = 0
+let disposed = false
+const cleanup: Array<() => void> = []
 
-watch(isBubbleVisible, (visible) => {
-  if (!visible && localBubbleOverride.value && activeSurface.value) {
-    localBubbleOverride.value = false
-    isBubbleVisible.value = true
-  }
-})
-
-// ── Gateway Surface → 气泡可见性；正文不再复制到 usePetBubble。 ──
-watch(activeSurface, (surface) => {
-  if (surface) {
-    localBubbleOverride.value = false
-    isBubbleVisible.value = true
-  }
-})
-
-// ── 唇同步 → 角色嘴巴 ──
-watch(mouthOpen, (val) => {
-  if (avatarRef.value && 'setMouthOpen' in avatarRef.value) {
-    ;(avatarRef.value as { setMouthOpen: (v: number) => void }).setMouthOpen(val)
-  }
-})
-
-// ── 全局鼠标 → 视线跟随 ──
-watch(globalMouse, (pos) => {
-  if (avatarRef.value && 'setGlobalMouse' in avatarRef.value) {
-    ;(avatarRef.value as { setGlobalMouse: (x: number, y: number) => void }).setGlobalMouse(
-      pos.x,
-      pos.y,
-    )
-  }
-})
-
-// ── 悬浮 UI 消息 ──
-function onOverlaySendMessage(text: string) {
-  sendChat(text)
-  startIdleTimer()
-}
-
-// ── 当前模型加载路径；优先恢复用户选择，否则使用全局默认模型 ──
-const currentManifestPath = ref(
-  typeof localStorage !== 'undefined'
-    ? localStorage.getItem(AVATAR_MODEL_STORAGE_KEY) || DEFAULT_AVATAR_MANIFEST_PATH
-    : DEFAULT_AVATAR_MANIFEST_PATH,
-)
-
-/**
- * 显式调用 BedrockAvatar 切换模型，并通过 complete 把真实结果返回外观菜单。
- * 不再依赖 prop watcher，避免点击事件更新了路径但加载时序未触发。
- */
-async function onModelChange(
-  manifestPath: string,
-  complete: (success: boolean, message?: string) => void,
-): Promise<void> {
-  const avatar = avatarRef.value as
-    | (InstanceType<typeof BedrockAvatar> & {
-        loadManifestPath?: (path: string) => Promise<boolean>
-      })
-    | null
-  if (!avatar?.loadManifestPath) {
-    complete(false, '模型渲染器尚未就绪')
+const voice = usePetVoice(async ({ audio, mimeType }, signal) => {
+  const agentId = activeAgentId.value
+  const result = await voiceApi.recognize(audio, mimeType, signal)
+  if (signal.aborted || activeAgentId.value !== agentId) return
+  if (chatState.value.isThinking) {
+    showHint('上一条消息仍在处理中，这次语音没有发送')
     return
   }
+  if (result.text?.trim()) void sendChat(result.text.trim(), settings.value.speechEnabled)
+  else showHint('没有听清，再说一次吧')
+}, speaking)
+const {
+  isRecording: recording,
+  recognizing,
+  preparing,
+  ready: voiceReady,
+  error: voiceError,
+  audioLevel,
+} = voice
 
-  try {
-    const success = await avatar.loadManifestPath(manifestPath)
-    if (success) currentManifestPath.value = manifestPath
-    complete(success, success ? undefined : '模型解析或渲染失败')
-  } catch (error) {
-    complete(false, error instanceof Error ? error.message : String(error))
-  }
+function showHint(text: string) {
+  clearTimeout(hintTimer)
+  transientHint.value = text
+  if (text)
+    hintTimer = setTimeout(() => {
+      transientHint.value = ''
+    }, 6000)
 }
-const displayMode = ref<'bubble' | 'lyric'>(
-  ((typeof localStorage !== 'undefined' && localStorage.getItem('ppc.display_mode')) ||
-    'bubble') as 'bubble' | 'lyric',
-)
-
-function onDisplayModeChange(mode: 'bubble' | 'lyric') {
-  displayMode.value = mode
-  localStorage.setItem('ppc.display_mode', mode)
+function showReaction(text: string, duration?: number) {
+  if (document.activeElement?.matches('input,textarea,select,[contenteditable=true]')) return
+  if (
+    recording.value ||
+    recognizing.value ||
+    speaking.value ||
+    chatState.value.isThinking ||
+    attention.value
+  )
+    return
+  clearTimeout(reactionTimer)
+  reaction.value = text
+  reactionTimer = setTimeout(
+    () => {
+      reaction.value = ''
+    },
+    duration ?? Math.min(30000, Math.max(5000, text.length * 120)),
+  )
 }
-
-// ── 歌词模式: 追踪上一次可见内容 (切换模式时丝滑过渡) ──
-const lastLyricText = ref('')
-watch(filteredLyricText, (text) => {
-  if (text) lastLyricText.value = text
+const { agentName, getClickText } = usePetTexts({
+  agentId: activeAgentId,
+  showBubble: showReaction,
+  ambientMessages: false,
+  isThinking: computed(() => chatState.value.isThinking),
+  isSpeaking: speaking,
+})
+const petName = computed(() => agentName.value || activeAgentId.value)
+const spokenSentences = computed(() => splitSpokenCaptions(playbackCaption.value))
+const subtitle = computed(() => {
+  // 自动播报的短口语答复整体显示，让气泡按实际内容伸缩。
+  if (playbackCaption.value.length <= 240) return playbackCaption.value
+  const sentences = spokenSentences.value
+  if (!sentences.length) return ''
+  const total = sentences.reduce((sum, sentence) => sum + sentence.length, 0)
+  const cursor = progress.value * total
+  let end = 0
+  return (
+    sentences.find((sentence) => {
+      end += sentence.length
+      return cursor <= end
+    }) ??
+    sentences[sentences.length - 1] ??
+    ''
+  )
 })
 
-// ── 全局快捷键 ──
-function handleGlobalKeydown(e: KeyboardEvent) {
-  // Alt+V: 切换语音模式 (off → vad → ptt → off)
-  if (e.altKey && e.key.toLowerCase() === 'v' && !e.ctrlKey && !e.metaKey) {
-    e.preventDefault()
-    const modes: Array<'off' | 'vad' | 'ptt'> = ['off', 'vad', 'ptt']
-    const idx = modes.indexOf(voiceMode.value)
-    const next = modes[(idx + 1) % modes.length] ?? 'off'
-    setVoiceMode(next)
-    showBubble(
-      `语音模式: ${next === 'off' ? '关闭' : next === 'vad' ? '自动感应' : '按住说话'}`,
-      2000,
-    )
+function stopSpeech(agentId?: string) {
+  const id = playbackId.value
+  stopAll()
+  if (id) send('audio-output:receipt', { playbackId: id, state: 'cancelled' })
+  cancelServerSpeech(agentId)
+}
+function pttDown() {
+  if (!voiceReady.value || settings.value.voiceMode !== 'ptt') return
+  if (chatState.value.isThinking) {
+    showHint('正在处理上一条消息，请稍等片刻')
+    return
+  }
+  reaction.value = ''
+  stopSpeech()
+  voice.pttDown()
+}
+function cancelVoice() {
+  voice.cancel()
+}
+function reloadPet(): void {
+  stopSpeech()
+  cancelVoice()
+  router.go(0)
+}
+async function setVoiceMode(mode: PetControlSettings['voiceMode']) {
+  await update({ voiceMode: mode })
+}
+async function configureVoice() {
+  if (!loaded.value) return
+  const request = ++configureGeneration
+  await voice.setMode('off')
+  if (isElectron()) await invoke('pet-controls:arm', false).catch(() => {})
+  if (settings.value.voiceMode === 'off') return
+  try {
+    const status = await voiceApi.getStatus()
+    if (request !== configureGeneration || disposed) return
+    if (!status.data?.asr.available) {
+      showHint('请先在主应用配置语音识别服务')
+      return
+    }
+    await selectPrincipal(activeAgentId.value, true)
+    if (request !== configureGeneration || disposed) return
+    await voice.setMode(settings.value.voiceMode, settings.value.microphoneId)
+  } catch {
+    if (request === configureGeneration) showHint('语音服务暂不可用，请检查连接')
   }
 }
+watch([loaded, () => settings.value.voiceMode, () => settings.value.microphoneId], () => {
+  void configureVoice()
+})
+watch(voiceReady, (ready) => {
+  if (isElectron()) void invoke('pet-controls:arm', ready).catch(() => {})
+})
+watch(voiceError, showHint)
+watch(hint, showHint)
+watch(
+  () => settings.value.speechEnabled,
+  (enabled) => {
+    if (!enabled) stopSpeech()
+  },
+)
+watch(
+  conversationTarget,
+  (target) => {
+    if (isElectron()) void invoke('pet-controls:conversation', target).catch(() => {})
+  },
+  { deep: true },
+)
+watch(activeAgentId, (_, previous) => {
+  stopSpeech(previous)
+  cancelVoice()
+  reaction.value = ''
+  replyText.value = ''
+  replyNotice.value = false
+  playbackCaption.value = ''
+  transientHint.value = ''
+  clearTimeout(replyTimer)
+  void configureVoice()
+})
+watch(latestReply, (reply, previous) => {
+  if (!reply || reply.messageId === previous?.messageId || !unread.value) return
+  clearTimeout(replyTimer)
+  replyText.value = reply.spokenReply
+  replyNotice.value = true
+  replyTimer = setTimeout(
+    () => {
+      replyNotice.value = false
+    },
+    Math.min(30000, Math.max(8000, reply.spokenReply.length * 120)),
+  )
+})
+watch(mouthOpen, (value) => avatarRef.value?.setLipSync(value))
+watch(globalMouse, ({ x, y }) => avatarRef.value?.setGlobalMouse(x, y))
 
+async function openConversation() {
+  try {
+    if (isElectron()) await invoke('pet-controls:open-conversation', conversationTarget.value)
+    unread.value = false
+    replyNotice.value = false
+  } catch {
+    showHint('主应用暂时无法打开')
+  }
+}
+async function sendOverlayMessage(text: string, complete: (accepted: boolean) => void) {
+  complete(await sendChat(text, settings.value.speechEnabled))
+}
+async function openSection(section: string) {
+  try {
+    if (section === 'tasks' && attentionTarget.value) {
+      await invoke('pet-controls:open-conversation', attentionTarget.value)
+    } else await invoke('pet-controls:open-section', section)
+  } catch {
+    showHint('主应用暂时无法打开')
+  }
+}
+function updateBounds() {
+  viewport.value = { width: window.innerWidth, height: window.innerHeight }
+  bounds.value = {
+    left: layoutBounds.left * viewport.value.width,
+    right: layoutBounds.right * viewport.value.width,
+    top: layoutBounds.top * viewport.value.height,
+    bottom: layoutBounds.bottom * viewport.value.height,
+  }
+}
+/** 只在模型加载后采样布局，角色动画和视线追踪不能驱动 HUD 重定位。 */
+function captureModelBounds() {
+  const projected = avatarRef.value?.getScreenBounds()
+  if (projected && Object.values(projected).every(Number.isFinite)) {
+    layoutBounds = {
+      left: projected.left / window.innerWidth,
+      right: projected.right / window.innerWidth,
+      top: projected.top / window.innerHeight,
+      bottom: projected.bottom / window.innerHeight,
+    }
+  }
+  updateBounds()
+}
+
+function handleModelReady(): void {
+  if (suspendedAnimation) {
+    avatarRef.value?.setAnimation(suspendedAnimation)
+    suspendedAnimation = ''
+  }
+  avatarRef.value?.setLipSync(mouthOpen.value)
+  avatarRef.value?.setGlobalMouse(globalMouse.value.x, globalMouse.value.y)
+  captureModelBounds()
+}
+const currentManifestPath = ref(
+  localStorage.getItem(AVATAR_MODEL_STORAGE_KEY) || DEFAULT_AVATAR_MANIFEST_PATH,
+)
+async function onModelChange(path: string, complete: (success: boolean, message?: string) => void) {
+  try {
+    const success = (await avatarRef.value?.loadManifestPath(path)) ?? false
+    if (success) {
+      currentManifestPath.value = path
+    }
+    complete(success, success ? undefined : '模型尚未就绪或加载失败')
+  } catch (error) {
+    complete(false, error instanceof Error ? error.message : '模型加载失败')
+  }
+}
+function keydown(event: KeyboardEvent) {
+  if (event.code !== 'Escape') return
+  if (recording.value || recognizing.value) {
+    event.preventDefault()
+    cancelVoice()
+  }
+}
+const petTheme = ref<'light' | 'dark'>('light')
+function applyTheme(mode?: string | null) {
+  const theme =
+    mode === 'dark' || mode === 'light'
+      ? mode
+      : window.matchMedia('(prefers-color-scheme: dark)').matches
+        ? 'dark'
+        : 'light'
+  document.documentElement.dataset.theme = theme
+  document.documentElement.style.colorScheme = theme
+  petTheme.value = theme
+}
+function setPetTheme(mode: 'light' | 'dark') {
+  applyTheme(mode)
+  try {
+    localStorage.setItem('infos.theme', mode)
+  } catch {
+    // 存储不可用时，当前窗口仍然应用所选主题。
+  }
+  void invoke('set-native-theme', mode).catch(() => {})
+}
+function themeStorage(event: StorageEvent) {
+  if (event.key === 'infos.theme') applyTheme(event.newValue)
+}
+applyTheme(localStorage.getItem('infos.theme'))
+async function subscribe(channel: string, handler: (payload: unknown) => void) {
+  const remove = await listen(channel, handler)
+  if (disposed) remove()
+  else cleanup.push(remove)
+}
 onMounted(() => {
-  document.addEventListener('keydown', handleGlobalKeydown)
-  removeAudioPlayListener = window.electron?.on('audio-output:play', (...args: unknown[]) => {
-    const payload = args[0] as { playbackId?: unknown; assetUrl?: unknown }
-    const playbackId = String(payload.playbackId ?? '')
-    const assetUrl = String(payload.assetUrl ?? '')
-    if (!playbackId || !assetUrl.startsWith('/api/assets/audio/')) return
-    void playAsset(playbackId, assetUrl)
-      .then(() => {
-        window.electron?.send('audio-output:receipt', { playbackId, state: 'completed' })
-      })
-      .catch(() => {
-        window.electron?.send('audio-output:receipt', { playbackId, state: 'cancelled' })
-      })
+  window.addEventListener('storage', themeStorage)
+  window.addEventListener('resize', updateBounds)
+  window.addEventListener('keydown', keydown, true)
+  void subscribe('pet-controls:ptt', (data) => {
+    const event = data as { pressed: boolean; cancelled?: boolean }
+    if (event.pressed) pttDown()
+    else voice.pttUp(event.cancelled)
   })
-  removeAudioStopListener = window.electron?.on('audio-output:stop', (...args: unknown[]) => {
-    const payload = args[0] as { playbackId?: unknown }
-    const playbackId = String(payload.playbackId ?? '')
-    if (!playbackId) return
-    cancelledAudioPlaybacks.add(playbackId)
-    stopAudioOutput()
-    window.electron?.send('audio-output:receipt', { playbackId, state: 'cancelled' })
+  void subscribe('pet-controls:action', (data) => {
+    const action = (data as { action: string }).action
+    if (action === 'toggle-voice')
+      void setVoiceMode(settings.value.voiceMode === 'off' ? 'ptt' : 'off')
+    if (action === 'stop-speech') stopSpeech()
+    if (action === 'cancel-voice') cancelVoice()
+    if (action === 'suspend-voice') {
+      configureGeneration++
+      void voice.setMode('off')
+    }
+    if (action === 'resume-voice') void configureVoice()
+  })
+  void subscribe('audio-output:play', (data) => {
+    const payload = data as {
+      playbackId?: string
+      assetUrl?: string
+      volume?: number
+      caption?: string
+    }
+    if (!payload.playbackId || !payload.assetUrl?.startsWith('/api/assets/audio/')) return
+    const id = payload.playbackId
+    if (!settings.value.speechEnabled || recording.value) {
+      send('audio-output:receipt', { playbackId: id, state: 'cancelled' })
+      return
+    }
+    playbackCaption.value = payload.caption || ''
+    void playAsset(id, payload.assetUrl, payload.volume).then(
+      () => send('audio-output:receipt', { playbackId: id, state: 'completed' }),
+      () => send('audio-output:receipt', { playbackId: id, state: 'cancelled' }),
+    )
+  })
+  void subscribe('audio-output:stop', (data) => {
+    const id = (data as { playbackId?: string }).playbackId
+    if (!id) return
+    stopAll(id)
+    send('audio-output:receipt', { playbackId: id, state: 'cancelled' })
   })
 })
 onUnmounted(() => {
-  document.removeEventListener('keydown', handleGlobalKeydown)
-  removeAudioPlayListener?.()
-  removeAudioStopListener?.()
+  disposed = true
+  clearTimeout(avatarReleaseTimer)
+  configureGeneration++
+  window.removeEventListener('resize', updateBounds)
+  clearTimeout(reactionTimer)
+  clearTimeout(hintTimer)
+  clearTimeout(replyTimer)
+  window.removeEventListener('keydown', keydown, true)
+  window.removeEventListener('storage', themeStorage)
+  for (const remove of cleanup) remove()
+  if (isElectron()) void invoke('pet-controls:arm', false).catch(() => {})
 })
-
-// 初始气泡已由 usePetTexts.showTimeBasedWelcome() 自动显示
 </script>
 
 <template>
-  <div class="pet-view">
-    <!-- 渲染区 -->
-    <div class="pet-canvas-area">
-      <BedrockAvatar
-        ref="avatarRef"
-        :is-dragging="isDragging"
-        :manifest-path="currentManifestPath"
-        @pet="onPet"
-        @hover-start="onHoverStart"
-        @hover-end="onHoverEnd"
-      />
-
-      <!-- 对话气泡 (歌词模式下隐藏，避免与歌词浮层重叠) -->
-      <Transition name="bubble">
-        <div
-          v-if="isBubbleVisible && displayMode === 'bubble'"
-          :key="bubbleKey"
-          class="pet-bubble"
-          :class="{ 'pet-bubble--expanded': isBubbleExpanded }"
-          :style="bubbleStyle"
-        >
-          <div
-            ref="bubbleContentRef"
-            class="pet-bubble-content"
-            :class="{ 'pet-bubble-content--expanded': isBubbleExpanded }"
-          >
-            <template v-if="showLocalBubble">{{ bubbleText }}</template>
-            <PetBubbleSurface v-else-if="activeSurface" :surface="activeSurface" />
-          </div>
-          <button
-            v-if="isBubbleOverflow || isBubbleExpanded"
-            class="pet-bubble-toggle"
-            @click.stop="toggleExpand"
-          >
-            {{ isBubbleExpanded ? '▲ 收起' : '▼ 展开' }}
-          </button>
-          <div class="pet-bubble-tail" />
-        </div>
-      </Transition>
-    </div>
-
-    <!-- 独立模式: 悬浮 UI -->
+  <div class="pet-view" :class="{ 'pet-view--hidden': !windowVisible }">
+    <BedrockAvatar
+      v-if="avatarMounted"
+      ref="avatarRef"
+      :active="windowVisible"
+      :speaking="speaking"
+      :is-dragging="isDragging"
+      :manifest-path="currentManifestPath"
+      :agent-id="activeAgentId"
+      :mood="chatState.mood"
+      :vibe="chatState.vibe"
+      @pet="(event) => showReaction(getClickText(event.type))"
+      @hover-start="onInteractableEnter"
+      @hover-end="onInteractableLeave"
+      @model-load-success="handleModelReady"
+    />
     <PetOverlayUI
       :pet-name="petName"
       :mood-text="chatState.mood"
       :vibe-text="chatState.vibe"
       :mind-text="chatState.mind"
-      :is-thinking="chatState.isThinking"
-      :voice-mode="voiceMode"
-      :is-recording="isRecording"
-      :display-mode="displayMode"
-      :avatar-ref="avatarRef as any"
-      @send-message="onOverlaySendMessage"
+      :thinking="chatState.isThinking || running"
+      :stage="chatState.thinkingMessage"
+      :connected="wsState === 'connected'"
+      :unread="unread"
+      :reply-notice="replyNotice"
+      :reply-text="replyText"
+      :resize-mode="resizeMode"
+      :window-size="windowSize"
+      :reaction="reaction"
+      :hint="transientHint"
+      :subtitle="subtitle"
+      :speaking="speaking"
+      :recording="recording"
+      :recognizing="recognizing"
+      :preparing="preparing"
+      :voice-ready="voiceReady"
+      :voice-error="voiceError"
+      :audio-level="audioLevel"
+      :agent-id="activeAgentId"
+      :attention="attention"
+      :attention-key="attentionKey"
+      :attention-kind="attentionKind"
+      :settings="settings"
+      :avatar-ref="avatarRef"
+      :bounds="bounds"
+      :viewport="viewport"
+      @send-message="sendOverlayMessage"
       @ui-enter="onInteractableEnter"
       @ui-leave="onInteractableLeave"
-      @voice-mode="handleSetVoiceMode"
-      @ptt-down="handlePttDown"
-      @ptt-up="pttUp"
+      @voice-mode="setVoiceMode"
+      @ptt-down="pttDown"
+      @ptt-up="voice.pttUp"
+      @cancel-voice="cancelVoice"
+      @stop-speech="stopSpeech"
+      @toggle-resize="toggleResizeMode"
+      @open-conversation="openConversation"
+      @open-section="openSection"
+      @dismiss-hint="transientHint = ''"
       @model-change="onModelChange"
-      @display-mode-change="onDisplayModeChange"
-    />
-
-    <!-- 歌词模式浮层 (独立模式 + displayMode=lyric) -->
-    <LyricOverlay
-      v-if="displayMode === 'lyric'"
-      :text="lastLyricText || (chatState.isThinking ? '' : filteredLyricText)"
-      :is-thinking="chatState.isThinking"
-      :thinking-message="chatState.thinkingMessage"
-      :eager="!!lastLyricText"
-      @ui-enter="onInteractableEnter"
-      @ui-leave="onInteractableLeave"
-    />
+    >
+      <template #window-settings>
+        <div class="window-settings">
+          <span>桌宠大小</span>
+          <button
+            type="button"
+            :class="{ active: resizeMode }"
+            :disabled="!isElectron()"
+            @click="toggleResizeMode"
+          >
+            {{ resizeMode ? '结束调节' : '滚轮调节' }}
+          </button>
+        </div>
+        <p v-if="resizeMode" class="resize-hint">{{ windowSize }}px · 滚轮调整大小，Esc 退出</p>
+        <div class="pet-theme-settings">
+          <span>界面主题</span>
+          <div class="pet-theme-options" role="group" aria-label="界面主题">
+            <button
+              type="button"
+              :class="{ active: petTheme === 'light' }"
+              :aria-pressed="petTheme === 'light'"
+              @click="setPetTheme('light')"
+            >
+              浅色
+            </button>
+            <button
+              type="button"
+              :class="{ active: petTheme === 'dark' }"
+              :aria-pressed="petTheme === 'dark'"
+              @click="setPetTheme('dark')"
+            >
+              暗色
+            </button>
+          </div>
+        </div>
+        <div class="window-actions">
+          <button type="button" @click="invoke('hide-pet-window')">隐藏桌宠</button>
+          <button type="button" @click="reloadPet">重新加载</button>
+        </div>
+      </template>
+    </PetOverlayUI>
   </div>
 </template>
 
 <style scoped>
-/* ═══ 根容器 (v1 体素风) ═══ */
+.pet-view--hidden :deep(*) {
+  animation-play-state: paused !important;
+}
+
 .pet-view {
-  display: flex;
+  position: relative;
   width: 100vw;
   height: 100vh;
   overflow: hidden;
   background: transparent;
-  font-family: 'Consolas', 'Monaco', monospace;
 }
-
-/* ═══ 渲染区 ═══ */
-.pet-canvas-area {
-  flex: 1;
-  position: relative;
-  background: transparent;
-  overflow: hidden;
-}
-
-/* ═══ 对话气泡 (v1 体素风) ═══ */
-.pet-bubble {
-  position: absolute;
-  top: 15%;
-  left: 50%;
-  background-color: rgba(20, 20, 20, 0.85);
-  border: 2px solid #e0e0e0;
-  border-radius: 4px;
-  padding: 12px 16px;
-  max-width: 280px;
-  z-index: 100;
-  box-shadow: 4px 4px 0px rgba(0, 0, 0, 0.5);
-  pointer-events: none;
-  animation: bubble-float 3s infinite ease-in-out;
+.window-settings {
   display: flex;
-  flex-direction: column;
-  transition: all 0.2s steps(4);
-  color: #ffffff;
-  font-family: 'Consolas', 'Monaco', monospace;
-  font-size: 14px;
-  line-height: 1.5;
-  text-shadow: 1px 1px 0 #000;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  border-top: 1px solid var(--pet-divider);
+  padding-top: 12px;
+  margin-top: 10px;
+  font-size: 12px;
 }
-
-.pet-bubble:hover {
-  background-color: rgba(30, 30, 30, 0.95);
-  border-color: #ffffff;
-  z-index: 110;
+.window-settings > span,
+.window-settings > button {
+  flex-shrink: 0;
 }
-
-.pet-bubble--expanded {
-  max-width: 400px;
-}
-
-.pet-bubble-tail {
-  position: absolute;
-  bottom: -6px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 0;
-  height: 0;
-  border-left: 6px solid transparent;
-  border-right: 6px solid transparent;
-  border-top: 6px solid #e0e0e0;
-}
-
-.pet-bubble-tail::after {
-  content: '';
-  position: absolute;
-  top: -9px;
-  left: -4px;
-  width: 0;
-  height: 0;
-  border-left: 4px solid transparent;
-  border-right: 4px solid transparent;
-  border-top: 4px solid rgba(20, 20, 20, 0.85);
-}
-
-/* ── 气泡内容（纯文本，保留换行） ── */
-.pet-bubble-content {
-  max-height: 120px;
-  overflow-y: hidden;
-  scrollbar-width: thin;
-  pointer-events: none;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.pet-bubble-content--expanded {
-  max-height: 400px;
-  overflow-y: auto;
-  pointer-events: auto;
-}
-
-.pet-bubble-content--expanded::-webkit-scrollbar {
-  width: 3px;
-}
-.pet-bubble-content--expanded::-webkit-scrollbar-thumb {
-  background: #666;
-}
-
-/* ── 展开按钮 ── */
-.pet-bubble-toggle {
-  background: none;
-  border: none;
-  border-top: 1px dashed #555;
-  color: #aaa;
-  font-size: 10px;
-  font-family: 'Consolas', monospace;
-  padding: 3px 0 0;
-  margin-top: 4px;
+.window-settings button,
+.window-actions button,
+.pet-theme-options button {
+  border: 1px solid var(--pet-border);
+  border-radius: 0;
+  padding: 4px 9px;
+  background: var(--pet-control-fill);
+  color: inherit;
   cursor: pointer;
-  text-align: center;
-  width: 100%;
-  /* 父级 .pet-bubble 设了 pointer-events:none，按钮需单独恢复点击 */
-  pointer-events: auto;
+  font-family: var(--ui-font-pixel);
+  font-size: 12px;
+  box-shadow: var(--pet-control-shadow);
 }
-.pet-bubble-toggle:hover {
-  color: #fff;
+.window-settings button:hover:not(:disabled),
+.window-actions button:hover:not(:disabled),
+.pet-theme-options button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--pet-accent) 55%, var(--pet-border));
+  background: color-mix(in srgb, var(--pet-accent) 8%, var(--pet-soft));
 }
-
-/* ═══ 动画 ═══ */
-@keyframes bubble-float {
-  0%,
-  100% {
-    transform: translateX(-50%) translateY(0);
-  }
-  50% {
-    transform: translateX(-50%) translateY(-4px);
-  }
+.window-settings button:active:not(:disabled),
+.window-actions button:active:not(:disabled),
+.pet-theme-options button:active:not(:disabled) {
+  transform: translateY(2px);
+  box-shadow: var(--pet-pressed-shadow);
 }
-
-.bubble-enter-active {
-  transition: all 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+.window-settings button:focus-visible,
+.window-actions button:focus-visible,
+.pet-theme-options button:focus-visible {
+  outline: 1px solid var(--pet-accent);
+  outline-offset: 2px;
 }
-
-.bubble-leave-active {
-  transition: opacity 0.1s ease-out;
-  position: absolute;
+.window-settings div {
+  display: flex;
+  gap: 4px;
 }
-
-.bubble-enter-from {
-  opacity: 0;
-  transform: translateX(-50%) scale(0.8) translateY(10px);
+.window-actions {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 12px;
 }
-
-.bubble-leave-to {
-  opacity: 0;
-  transform: translateX(-50%) scale(1.1);
+.resize-hint {
+  margin: 8px 0 0;
+  color: var(--pet-muted);
+  font-size: 12px;
+}
+.pet-theme-settings {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  font-size: 12px;
+}
+.pet-theme-options {
+  display: flex;
+  gap: 6px;
+}
+.window-settings button.active,
+.pet-theme-options button.active {
+  border-color: var(--pet-accent);
+  color: var(--pet-accent);
 }
 </style>

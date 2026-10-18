@@ -77,7 +77,8 @@ export function segmentChatContent(source: string): ChatContentSegment[] {
 
 /** 构造无同源权限的自包含网页；仅允许内联样式、脚本和data/blob图片。 */
 export function buildEmbeddedWebDocument(source: string, channel: string): string {
-  const resizeBridge = `<script>(()=>{const send=()=>parent.postMessage({type:'infos-embedded-resize',channel:${JSON.stringify(channel)},height:Math.max(document.documentElement.scrollHeight,document.body?.scrollHeight||0)},'*');addEventListener('load',send);new ResizeObserver(send).observe(document.documentElement);setTimeout(send,0)})()</script>`
+  // 同一帧合并尺寸通知，钳制后未变化的高度不再回传，避免父子布局相互触发。
+  const resizeBridge = `<script>(()=>{let frame=0,lastHeight=0;const send=()=>{frame=0;const height=Math.min(720,Math.max(96,Math.ceil(Math.max(document.documentElement.scrollHeight,document.body?.scrollHeight||0))));if(height===lastHeight)return;lastHeight=height;parent.postMessage({type:'infos-embedded-resize',channel:${JSON.stringify(channel)},height},'*')};const schedule=()=>{if(!frame)frame=requestAnimationFrame(send)};const observer=new ResizeObserver(schedule);observer.observe(document.documentElement);addEventListener('load',schedule);addEventListener('pagehide',()=>{observer.disconnect();cancelAnimationFrame(frame)},{once:true});schedule()})()</script>`
   const policy = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: blob:; media-src data: blob:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; font-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'">`
   const baseStyle = `<style>html,body{margin:0;min-height:1px;background:transparent;color-scheme:light dark}*{box-sizing:border-box}</style>`
   if (/<html[\s>]/i.test(source)) {

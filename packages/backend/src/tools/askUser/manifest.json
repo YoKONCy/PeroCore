@@ -12,42 +12,64 @@
   "tools": [
     {
       "name": "ask_user",
-      "description": "仅在缺少继续工作所必需的信息、需要用户选择，或无法安全推断用户意图时调用。调用后当前执行会等待用户回答。不要用于普通确认、汇报进度或可以自行合理判断的问题。",
+      "description": "一次询问一至八个问题，用户可选选项、自由回答或补充，全部填好后统一提交；10分钟未回应，非必答可跳过，必答保留待答。",
       "parameters": {
         "type": "object",
         "properties": {
-          "question": {
-            "type": "string",
-            "description": "需要用户回答的明确问题，最多2000字。"
-          },
-          "context": {
-            "type": "string",
-            "description": "为什么需要这项信息，最多2000字。"
-          },
-          "options": {
+          "questions": {
             "type": "array",
-            "maxItems": 4,
+            "minItems": 1,
+            "maxItems": 8,
             "items": {
               "type": "object",
               "properties": {
-                "id": { "type": "string" },
-                "label": { "type": "string" },
-                "description": { "type": "string" }
+                "question": {
+                  "type": "string",
+                  "description": "需要用户回答的明确问题，最多2000字。"
+                },
+                "context": {
+                  "type": "string",
+                  "description": "为什么需要这项信息，最多2000字。"
+                },
+                "options": {
+                  "type": "array",
+                  "maxItems": 4,
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "description": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["id", "label"],
+                    "additionalProperties": false
+                  }
+                },
+                "id": {
+                  "type": "string",
+                  "description": "题目ID，组内唯一。"
+                },
+                "multiple": {
+                  "type": "boolean",
+                  "description": "允许多选，默认单选。"
+                }
               },
-              "required": ["id", "label"],
+              "required": ["id", "question"],
               "additionalProperties": false
             }
           },
-          "allow_free_text": {
-            "type": "boolean",
-            "description": "是否允许用户自由填写回答，默认允许。"
-          },
           "required": {
             "type": "boolean",
-            "description": "是否禁止用户跳过，默认允许跳过。"
+            "description": "缺少回答就无法继续时设为 true；默认 false，允许跳过或超时后按合理假设处理。"
           }
         },
-        "required": ["question"],
+        "required": ["questions"],
         "additionalProperties": false
       },
       "display": {

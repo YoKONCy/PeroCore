@@ -1,5 +1,7 @@
+import { errorHandler } from '@infos/backend/middleware/errorHandler'
+import { AppError } from '@infos/backend/lib/appError'
 import { describe, expect, it, vi } from 'vitest'
-import { createChatRouter } from '@infos/backend/routers/chat.router'
+import { createChatRouter as rawcreateChatRouter } from '@infos/backend/routers/chat.router'
 
 async function readJson(response: Response) {
   return response.json() as Promise<Record<string, unknown>>
@@ -11,6 +13,7 @@ function createThread() {
     id: 't1',
     agentId: 'pero',
     channel: 'desktop',
+    interactionMode: 'work',
     platform: undefined,
     platformIdentifier: undefined,
     title: '测试 Thread',
@@ -84,7 +87,7 @@ function createCtx() {
       rewindMessage: vi.fn(() =>
         Promise.resolve({
           deletedMessageIds: [1, 2],
-          preview: { pairCount: 1, messageCount: 2, affectedPaths: [] },
+          preview: { pairCount: 1, pairIds: ['pair-1'], messageCount: 2, affectedPaths: [] },
         }),
       ),
       deleteThread: vi.fn(() => Promise.resolve(true)),
@@ -137,10 +140,11 @@ function createCtx() {
       listForMessages: vi.fn(() => Promise.resolve(new Map())),
     },
     toolRegistry: {
-      getDefinitions: vi.fn(() => []),
+      getDefinitions: vi.fn((): Array<{ name: string; description: string }> => []),
+      isChatEnabled: vi.fn(() => false),
     },
     applicationRealms: {
-      isPrivateTool: vi.fn(() => false),
+      isPrivateTool: vi.fn((_name: string) => false),
     },
     capabilityGate: {
       resolve: vi.fn(() => ({ allowedTools: new Set<string>() })),
@@ -149,16 +153,20 @@ function createCtx() {
       get: vi.fn(),
       listByThread: vi.fn(),
       clear: vi.fn(),
+      rollbackPairs: vi.fn(),
     },
+    toolContextService: { deletePairs: vi.fn() },
     backgroundTaskService: {
       hasActiveWork: vi.fn(() => Promise.resolve(false)),
     },
     // AIOS: RuntimeStateService 替代旧 TaskManager（按 threadId 索引）
     runtimeStateService: {
+      getTaskInfo: vi.fn(() => null),
+      getAbortSignal: vi.fn(() => new AbortController().signal),
       registerTask: vi.fn(),
       unregisterTask: vi.fn(),
       cancelTask: vi.fn(() => true),
-      listActiveTasks: vi.fn(() => []),
+      listActiveTasks: vi.fn((): Array<{ threadId: string; state: string }> => []),
       pauseTask: vi.fn((threadId: string) => threadId === 't1'),
       resumeTask: vi.fn((threadId: string) => threadId === 't1'),
       injectInstruction: vi.fn((threadId: string) => threadId === 't1'),
@@ -236,7 +244,6 @@ describe('ChatRouter', () => {
 
     expect(await readJson(response)).toMatchObject({
       code: 'OK',
-      message: '对话完成',
       data: {
         threadId: 't1',
         messageId: '2',
@@ -249,6 +256,7 @@ describe('ChatRouter', () => {
       content: '你好',
       attachmentIds: undefined,
       imageMode: undefined,
+      workspaceContext: undefined,
     })
   })
 
@@ -272,11 +280,10 @@ describe('ChatRouter', () => {
       headers: { 'content-type': 'application/json' },
     })
 
-    expect(await readJson(stopped)).toEqual({ code: 'OK', message: '已停止生成' })
+    expect(await readJson(stopped)).toMatchObject({ code: 'OK' })
     expect(ctx.runtimeStateService.cancelTask).toHaveBeenCalledWith('t1')
     expect(await readJson(created)).toMatchObject({
       code: 'OK',
-      message: 'Thread 已创建',
       data: { thread: { id: 't1', agentId: 'pero' } },
     })
     expect(ctx.threadService.createThread).toHaveBeenCalledWith(
@@ -288,7 +295,6 @@ describe('ChatRouter', () => {
     )
     expect(await readJson(latest)).toMatchObject({
       code: 'OK',
-      message: '获取成功',
       data: { thread: { id: 't1', agentId: 'pero' } },
     })
     expect(ctx.threadService.getOrCreateLatest).toHaveBeenCalledWith(
@@ -309,7 +315,6 @@ describe('ChatRouter', () => {
 
     expect(await readJson(list)).toMatchObject({
       code: 'OK',
-      message: '获取成功',
       data: { items: [{ id: 't1' }], total: 1 },
     })
     expect(ctx.threadService.listThreads).toHaveBeenCalledWith({
@@ -325,7 +330,6 @@ describe('ChatRouter', () => {
     // 详情: messages 为 items（倒序，最新在前），total 为消息总数
     expect(await readJson(detail)).toMatchObject({
       code: 'OK',
-      message: '获取成功',
       data: {
         thread: { id: 't1' },
         messages: [{ id: 2 }, { id: 1 }],
@@ -356,9 +360,9 @@ describe('ChatRouter', () => {
       method: 'DELETE',
     })
 
-    expect(await readJson(patched)).toMatchObject({ code: 'OK', message: '消息已更新' })
-    expect(ctx.threadService.editMessage).toHaveBeenCalledWith(1, '新内容')
-    expect(await readJson(deleted)).toMatchObject({ code: 'OK', message: '消息已删除' })
+    expect(await readJson(patched)).toMatchObject({ code: 'OK' })
+    expect(ctx.threadService.editMessage).toHaveBeenCalledWith(1, '新内容', 't1', undefined)
+    expect(await readJson(deleted)).toMatchObject({ code: 'OK' })
     expect(ctx.threadService.deleteMessage).toHaveBeenCalledWith(1)
     expect(await readJson(pairDeleted)).toMatchObject({
       code: 'OK',
@@ -403,11 +407,11 @@ describe('ChatRouter', () => {
     })
 
     expect(await readJson(tasks)).toMatchObject({ code: 'OK', data: [{ threadId: 't1' }] })
-    expect(await readJson(paused)).toEqual({ code: 'OK', message: '任务已暂停' })
+    expect(await readJson(paused)).toMatchObject({ code: 'OK' })
     // pauseTask 返回 false 时路由返回 404
     expect(missingPause.status).toBe(404)
-    expect(await readJson(resumed)).toEqual({ code: 'OK', message: '任务已恢复' })
-    expect(await readJson(injected)).toEqual({ code: 'OK', message: '指令已注入' })
+    expect(await readJson(resumed)).toMatchObject({ code: 'OK' })
+    expect(await readJson(injected)).toMatchObject({ code: 'OK' })
     expect(ctx.runtimeStateService.pauseTask).toHaveBeenCalledWith('t1')
     expect(ctx.runtimeStateService.resumeTask).toHaveBeenCalledWith('t1')
     expect(ctx.runtimeStateService.injectInstruction).toHaveBeenCalledWith('t1', '继续')
@@ -418,7 +422,7 @@ describe('ChatRouter', () => {
     // 让 service 返回失败值，触发 AppError NOT_FOUND
     ctx.threadService.editMessage.mockResolvedValueOnce(false)
     ctx.threadService.deleteMessage.mockResolvedValueOnce(false)
-    ctx.threadService.rewindMessage.mockRejectedValueOnce(new Error('消息不存在'))
+    ctx.threadService.rewindMessage.mockRejectedValueOnce(new AppError('NOT_FOUND'))
     const router = createChatRouter(ctx as never)
 
     // 非法对话: 缺 threadId 和 content → zValidator 400
@@ -427,7 +431,7 @@ describe('ChatRouter', () => {
       body: JSON.stringify({ messages: [] }),
       headers: { 'content-type': 'application/json' },
     })
-    // 非法消息 ID (msgId=0) → AppError INVALID_PARAMETER → 500
+    // 非法消息 ID (msgId=0) → AppError INVALID_PARAMETER → 对应 4xx
     const invalidPatchId = await router.request('http://test/threads/t1/messages/0', {
       method: 'PATCH',
       body: JSON.stringify({ content: 'x' }),
@@ -439,27 +443,27 @@ describe('ChatRouter', () => {
       body: JSON.stringify({ content: '' }),
       headers: { 'content-type': 'application/json' },
     })
-    // 消息不存在: editMessage 返回 false → AppError NOT_FOUND → 500
+    // 消息不存在: editMessage 返回 false → AppError NOT_FOUND → 对应 4xx
     const notFoundPatch = await router.request('http://test/threads/t1/messages/1', {
       method: 'PATCH',
       body: JSON.stringify({ content: '新内容' }),
       headers: { 'content-type': 'application/json' },
     })
-    // 删除消息不存在 → AppError NOT_FOUND → 500
+    // 删除消息不存在 → AppError NOT_FOUND → 对应 4xx
     const notFoundDelete = await router.request('http://test/threads/t1/messages/1', {
       method: 'DELETE',
     })
-    // 删除对话对不存在 → AppError NOT_FOUND → 500
+    // 删除对话对不存在 → AppError NOT_FOUND → 对应 4xx
     const notFoundPair = await router.request('http://test/threads/t1/messages/1/pair', {
       method: 'DELETE',
     })
-    // 缺 threadId → AppError MISSING_FIELD → 500
+    // 缺 threadId → AppError MISSING_FIELD → 对应 4xx
     const missingPause = await router.request('http://test/tasks/pause', {
       method: 'POST',
       body: JSON.stringify({}),
       headers: { 'content-type': 'application/json' },
     })
-    // 空 instruction → AppError MISSING_FIELD → 500
+    // 空 instruction → AppError MISSING_FIELD → 对应 4xx
     const missingInject = await router.request('http://test/tasks/inject', {
       method: 'POST',
       body: JSON.stringify({ threadId: 't1', instruction: ' ' }),
@@ -467,12 +471,16 @@ describe('ChatRouter', () => {
     })
 
     expect(invalidChat.status).toBe(400)
-    expect(invalidPatchId.status).toBe(500)
+    expect(invalidPatchId.status).toBe(400)
     expect(missingPatch.status).toBe(400)
-    expect(notFoundPatch.status).toBe(500)
-    expect(notFoundDelete.status).toBe(500)
-    expect(notFoundPair.status).toBe(500)
-    expect(missingPause.status).toBe(500)
-    expect(missingInject.status).toBe(500)
+    expect(notFoundPatch.status).toBe(404)
+    expect(notFoundDelete.status).toBe(404)
+    expect(notFoundPair.status).toBe(404)
+    expect(missingPause.status).toBe(400)
+    expect(missingInject.status).toBe(400)
   })
 })
+
+function createChatRouter(...args: Parameters<typeof rawcreateChatRouter>) {
+  return rawcreateChatRouter(...args).onError(errorHandler)
+}

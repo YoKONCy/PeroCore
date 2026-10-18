@@ -30,14 +30,14 @@
     },
     {
       "name": "open_application",
-      "description": "在用户的Electron客户端中打开已安装应用。优先激活已有窗口；按名称匹配开始菜单应用，歧义时返回候选而不盲目启动。",
+      "description": "在用户电脑按应用名称启动已安装的软件，优先激活已有窗口；歧义时返回候选。这会操作用户桌面，用户接管时暂停。打开网站或预览生成的 HTML 应先直接调用 expand_advanced_tools，再使用 browser_open_url；不要把 HTML 文件名当应用名。",
       "display": { "label": "打开应用", "icon": "desktop", "color": "purple", "style": "system" },
       "parameters": {
         "type": "object",
         "properties": {
           "app_name": {
             "type": "string",
-            "description": "应用显示名、开始菜单AppID或明确的绝对路径。名称不明确时工具会返回候选"
+            "description": "已安装应用的显示名、开始菜单 AppID 或程序绝对路径。不能传网页 URL 或 HTML 文件。"
           }
         },
         "required": ["app_name"]

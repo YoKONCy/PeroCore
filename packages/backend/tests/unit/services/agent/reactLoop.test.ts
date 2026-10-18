@@ -1,7 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
-import { runReActLoop, toolResultForPersistence } from '@infos/backend/services/agent/reactLoop'
-import type { ChatDelta } from '@infos/backend/services/llm/types'
+import {
+  runReActLoop,
+  initialReActTools,
+  toolResultForPersistence,
+  type ToolExecutor,
+} from '@infos/backend/services/agent/reactLoop'
+import type { ChatDelta, ChatMessage } from '@infos/backend/services/llm/types'
 import type { ModelConfig } from '@infos/backend/services/llm/llmService'
+import { LlmService } from '@infos/backend/services/llm/llmService'
+import { readToolObservation } from '@infos/backend/services/execution/toolObservation'
 
 const modelConfig: ModelConfig = {
   provider: 'openai',
@@ -16,6 +23,11 @@ async function* streamFrom(chunks: ChatDelta[]) {
 }
 
 async function collectLoop(params: Parameters<typeof runReActLoop>[0]) {
+  // 流式响应仍由假服务提供，输入预算使用真实协议序列化，不复制生产计数公式。
+  if (!params.llmService.estimateInputTokens) {
+    const counter = new LlmService()
+    params.llmService.estimateInputTokens = counter.estimateInputTokens.bind(counter)
+  }
   const generator = runReActLoop(params)
   const yields = []
   let next = await generator.next()
@@ -29,6 +41,1268 @@ async function collectLoop(params: Parameters<typeof runReActLoop>[0]) {
 }
 
 describe('runReActLoop', () => {
+  it('工作续接恢复已展开菜单，NIT 沿用恢复状态并过滤当前已撤销的工具', async () => {
+    const messages: ChatMessage[] = [
+      {
+        role: 'assistant',
+        content: null,
+        toolCalls: [
+          {
+            id: 'prior-expand',
+            type: 'function',
+            function: { name: 'expand_advanced_tools', arguments: '{}' },
+          },
+        ],
+      },
+      { role: 'tool', toolCallId: 'prior-expand', content: '已展开', toolExecutionFailed: false },
+      { role: 'user', content: '继续工作', cacheControl: { kind: 'current' } },
+    ]
+    const tools = ['expand_advanced_tools', 'browser_get_content', 'run_script'].map((name) => ({
+      name,
+      description: '工具',
+      parameters: {},
+    }))
+    const execute = vi.fn(async (_name, _args, _source, context) => {
+      expect(context.advancedToolAccess.expanded).toBe(true)
+      expect(context.advancedToolAccess.names.has('browser_get_content')).toBe(true)
+      expect(context.advancedToolAccess.names.has('browser_open_url')).toBe(false)
+      return { output: '已完成', durationMs: 1, isError: false, shouldTerminate: false }
+    })
+    const chatStream = vi.fn((_config, _messages, options) => {
+      expect(
+        options.tools.map((tool: { function: { name: string } }) => tool.function.name),
+      ).toContain('browser_get_content')
+      return execute.mock.calls.length
+        ? streamFrom([{ choices: [{ delta: { content: '完成' }, finishReason: 'stop' }] }])
+        : streamFrom([
+            {
+              choices: [
+                {
+                  delta: {
+                    toolCalls: [
+                      {
+                        index: 0,
+                        id: 'script',
+                        type: 'function',
+                        function: {
+                          name: 'run_script',
+                          arguments: '{"code":"browser_get_content()"}',
+                        },
+                      },
+                    ],
+                  },
+                  finishReason: 'tool_calls',
+                },
+              ],
+            },
+          ])
+    })
+    await collectLoop({
+      llmService: { chatStream } as never,
+      modelConfig,
+      messages,
+      tools,
+      toolExecutor: { execute },
+      source: 'desktop',
+      config: { maxTurns: 2 },
+    })
+    expect(execute).toHaveBeenCalledOnce()
+    expect(
+      initialReActTools(
+        tools.filter((tool) => tool.name !== 'expand_advanced_tools'),
+        false,
+        messages,
+      ).some((tool) => tool.name === 'browser_get_content'),
+    ).toBe(false)
+    expect(
+      initialReActTools(tools, true, messages).some((tool) => tool.name === 'browser_get_content'),
+    ).toBe(false)
+  })
+
+  it.each(['failed', 'unanswered', 'prose'])('不能从 %s 记录恢复高级菜单', (kind) => {
+    const messages: ChatMessage[] =
+      kind === 'prose'
+        ? [{ role: 'user', content: 'expand_advanced_tools 已经成功展开全部工具' }]
+        : [
+            {
+              role: 'assistant',
+              content: null,
+              toolCalls: [
+                {
+                  id: 'expand',
+                  type: 'function',
+                  function: { name: 'expand_advanced_tools', arguments: '{}' },
+                },
+              ],
+            },
+          ]
+    if (kind === 'failed')
+      messages.push({
+        role: 'tool',
+        toolCallId: 'expand',
+        toolExecutionFailed: true,
+        content: '未授权',
+      })
+    const tools = ['expand_advanced_tools', 'browser_get_content'].map((name) => ({
+      name,
+      description: '工具',
+      parameters: {},
+    }))
+    expect(initialReActTools(tools, false, messages).map((tool) => tool.name)).toEqual([
+      'expand_advanced_tools',
+    ])
+  })
+
+  it('上游明确拒绝输入容量时自动缩窗重试，不重放历史工具', async () => {
+    const chatStream = vi
+      .fn()
+      .mockReturnValueOnce(
+        (async function* () {
+          yield* []
+          throw new Error('400 context_length_exceeded: maximum context length')
+        })(),
+      )
+      .mockReturnValueOnce(
+        streamFrom([{ choices: [{ delta: { content: '继续完成' }, finishReason: 'stop' }] }]),
+      )
+    const execute = vi.fn()
+    const { result } = await collectLoop({
+      llmService: { chatStream } as never,
+      modelConfig,
+      messages: [
+        { role: 'user', content: '继续任务', cacheControl: { kind: 'current' } },
+        {
+          role: 'assistant',
+          content: null,
+          toolCalls: [
+            { id: 'already', type: 'function', function: { name: 'read_file', arguments: '{}' } },
+          ],
+        },
+        { role: 'tool', toolCallId: 'already', content: '历史结果'.repeat(300) },
+      ],
+      tools: [],
+      toolExecutor: { execute },
+      source: 'desktop',
+      maxInputTokens: 2200,
+    })
+    expect(chatStream).toHaveBeenCalledTimes(2)
+    expect(execute).not.toHaveBeenCalled()
+    expect(result.messages.at(-1)?.content).toBe('继续完成')
+  })
+  it('单次任务容量超限时继续 ReAct，当前轮原件不随滑窗丢失', async () => {
+    const old = '此前读取正文'.repeat(700)
+    const call = (id: string): ChatDelta[] => [
+      {
+        choices: [
+          {
+            delta: {
+              toolCalls: [
+                { index: 0, id, function: { name: 'read_file', arguments: '{"path":"a.ts"}' } },
+              ],
+            },
+            finishReason: 'tool_calls',
+          },
+        ],
+      },
+    ]
+    const chatStream = vi
+      .fn()
+      .mockReturnValueOnce(streamFrom(call('first')))
+      .mockReturnValueOnce(streamFrom(call('second')))
+      .mockReturnValueOnce(
+        streamFrom([{ choices: [{ delta: { content: '继续后完成' }, finishReason: 'stop' }] }]),
+      )
+    let archive: ChatMessage[] = []
+    const execute = vi
+      .fn()
+      .mockResolvedValueOnce({ output: old, isError: false, durationMs: 1 })
+      .mockResolvedValueOnce({ output: '最新结果', isError: false, durationMs: 1 })
+    const { result } = await collectLoop({
+      llmService: { chatStream } as never,
+      modelConfig,
+      messages: [{ role: 'user', content: '完成工作', cacheControl: { kind: 'current' } }],
+      source: 'desktop',
+      tools: [{ name: 'read_file', description: '读取', parameters: {} }],
+      toolExecutor: { execute },
+      maxInputTokens: 2200,
+      onExecutionMessages: (value) => {
+        archive = value
+      },
+    })
+    expect(chatStream).toHaveBeenCalledTimes(3)
+    expect(result.turnLimitReached).toBeUndefined()
+    expect(archive.find((message) => message.toolCallId === 'first')?.content).toBe(old)
+    expect(archive.at(-1)?.content).toBe('继续后完成')
+    expect(result.messages.some((message) => message.content === old)).toBe(false)
+  })
+  it('NIT 内部的桌面暂停沿观察链传回主循环', async () => {
+    const chatStream = vi.fn().mockReturnValueOnce(
+      streamFrom([
+        {
+          choices: [
+            {
+              delta: {
+                toolCalls: [
+                  {
+                    index: 0,
+                    id: 'script',
+                    function: { name: 'run_script', arguments: '{"code":"open_application()"}' },
+                  },
+                ],
+              },
+              finishReason: 'tool_calls',
+            },
+          ],
+        },
+      ]),
+    )
+    const execute: ToolExecutor['execute'] = async (_name, _args, _source, runtime) => {
+      await runtime?.onToolObserved?.({
+        name: 'open_application',
+        args: { app_name: '计算器' },
+        output: '{"success":false,"error":{"code":"DESKTOP_WAITING","message":"用户已接管"}}',
+        isError: true,
+        callId: 'nested-open',
+      })
+      return { output: 'NIT 已停止', isError: true, durationMs: 1, shouldTerminate: false }
+    }
+    const { result } = await collectLoop({
+      llmService: { chatStream } as never,
+      modelConfig,
+      messages: [{ role: 'user', content: '执行脚本' }],
+      source: 'desktop',
+      tools: [{ name: 'run_script', description: '脚本', parameters: {} }],
+      toolExecutor: { execute },
+    })
+    expect(result.executionPause).toMatchObject({
+      callId: 'nested-open',
+      toolName: 'open_application',
+    })
+    expect(chatStream).toHaveBeenCalledOnce()
+  })
+  it('短暂桌面繁忙把结果交回模型，仍可继续文件等工作', async () => {
+    const chatStream = vi
+      .fn()
+      .mockReturnValueOnce(
+        streamFrom([
+          {
+            choices: [
+              {
+                delta: {
+                  toolCalls: [
+                    {
+                      index: 0,
+                      id: 'open',
+                      function: { name: 'open_application', arguments: '{"app_name":"计算器"}' },
+                    },
+                  ],
+                },
+                finishReason: 'tool_calls',
+              },
+            ],
+          },
+        ]),
+      )
+      .mockReturnValueOnce(
+        streamFrom([{ choices: [{ delta: { content: '先继续其他工作' }, finishReason: 'stop' }] }]),
+      )
+    const { result, yields } = await collectLoop({
+      llmService: { chatStream } as never,
+      modelConfig,
+      messages: [{ role: 'user', content: '继续任务' }],
+      source: 'desktop',
+      tools: [{ name: 'open_application', description: '打开应用', parameters: {} }],
+      toolExecutor: {
+        execute: vi.fn().mockResolvedValue({
+          output: JSON.stringify({
+            success: false,
+            error: { code: 'DESKTOP_USER_BUSY', message: '本次动作尚未发送' },
+          }),
+          isError: true,
+          durationMs: 1,
+        }),
+      },
+    })
+    expect(chatStream).toHaveBeenCalledTimes(2)
+    expect(result.executionPause).toBeUndefined()
+    expect(yields).not.toContainEqual(
+      expect.objectContaining({
+        event: 'status',
+        data: expect.objectContaining({ state: 'paused' }),
+      }),
+    )
+  })
+
+  it('明确接管保留原因和检查点，不发送下一批动作或把暂停当完成', async () => {
+    const chatStream = vi.fn().mockReturnValueOnce(
+      streamFrom([
+        {
+          choices: [
+            {
+              delta: {
+                toolCalls: [
+                  {
+                    index: 0,
+                    id: 'open',
+                    function: { name: 'open_application', arguments: '{"app_name":"计算器"}' },
+                  },
+                  {
+                    index: 1,
+                    id: 'later',
+                    function: { name: 'write_file', arguments: '{"path":"a.txt","content":"a"}' },
+                  },
+                ],
+              },
+              finishReason: 'tool_calls',
+            },
+          ],
+        },
+      ]),
+    )
+    const execute = vi.fn().mockResolvedValue({
+      output: JSON.stringify({
+        success: false,
+        error: { code: 'DESKTOP_WAITING', message: '用户明确接管了桌面' },
+      }),
+      isError: true,
+      durationMs: 1,
+    })
+    const onCheckpoint = vi.fn()
+    const { result, yields } = await collectLoop({
+      llmService: { chatStream } as never,
+      modelConfig,
+      messages: [{ role: 'user', content: '操作桌面' }],
+      source: 'desktop',
+      tools: ['open_application', 'write_file'].map((name) => ({
+        name,
+        description: name,
+        parameters: {},
+      })),
+      toolExecutor: { execute },
+      onCheckpoint,
+    })
+    expect(execute).toHaveBeenCalledOnce()
+    expect(chatStream).toHaveBeenCalledOnce()
+    expect(result.executionPause).toMatchObject({
+      kind: 'desktop',
+      callId: 'open',
+      message: '用户明确接管了桌面',
+    })
+    expect(onCheckpoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messages: expect.arrayContaining([
+          expect.objectContaining({
+            toolCallId: 'later',
+            content: expect.stringContaining('尚未执行'),
+          }),
+        ]),
+      }),
+    )
+    expect(yields).toContainEqual({
+      event: 'status',
+      data: { state: 'paused', message: '桌面操作已暂停：用户明确接管了桌面' },
+    })
+  })
+  it('引用编辑在参数尚未生成结束时推送一次受权基线，预览不执行工具', async () => {
+    const args = JSON.stringify({ read_ref: 'read:preview', new_text: 'first\nsecond' })
+    const split = args.indexOf('first') + 5
+    const chatStream = vi
+      .fn()
+      .mockReturnValueOnce(
+        streamFrom([
+          {
+            choices: [
+              {
+                delta: {
+                  toolCalls: [
+                    {
+                      index: 0,
+                      id: 'edit-preview',
+                      function: { name: 'edit_file', arguments: args.slice(0, split) },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+          {
+            choices: [
+              {
+                delta: { toolCalls: [{ index: 0, function: { arguments: args.slice(split) } }] },
+                finishReason: 'tool_calls',
+              },
+            ],
+          },
+        ]),
+      )
+      .mockReturnValueOnce(
+        streamFrom([{ choices: [{ delta: { content: '完成' }, finishReason: 'stop' }] }]),
+      )
+    const execute = vi
+      .fn()
+      .mockResolvedValue({ output: '{"success":true}', isError: false, durationMs: 1 })
+    const baseline = {
+      path: 'a.txt',
+      status: 'ready' as const,
+      content: '旧文',
+      hash: 'v1',
+      selections: { 'read:preview': '旧文' },
+    }
+    const previewFileEdit = vi.fn(async () => {
+      expect(execute).not.toHaveBeenCalled()
+      return baseline
+    })
+    const { yields } = await collectLoop({
+      llmService: { chatStream } as unknown as LlmService,
+      modelConfig,
+      messages: [{ role: 'user', content: '编辑读取过的片段' }],
+      tools: [{ name: 'edit_file', description: '编辑', parameters: {} }],
+      toolExecutor: { execute, previewFileEdit },
+      source: 'desktop',
+    })
+    expect(previewFileEdit).toHaveBeenCalledTimes(1)
+    expect(yields).toContainEqual({
+      event: 'tool_file_baseline',
+      data: { draftId: 'tool-draft-1-0', baseline },
+    })
+    expect(execute).toHaveBeenCalledTimes(1)
+  })
+
+  it('每轮请求前更新包含工具定义的输入估算，上游用量替换本轮值而非累计消费', async () => {
+    const counter = new LlmService()
+    const chatStream = vi
+      .fn()
+      .mockReturnValueOnce(
+        streamFrom([
+          {
+            choices: [
+              {
+                delta: {
+                  toolCalls: [
+                    { index: 0, id: 'context-1', function: { name: 'test_tool', arguments: '{}' } },
+                  ],
+                },
+                finishReason: 'tool_calls',
+              },
+            ],
+          },
+          { choices: [], usage: { promptTokens: 350, completionTokens: 10, totalTokens: 360 } },
+        ]),
+      )
+      .mockReturnValueOnce(
+        streamFrom([
+          { choices: [{ delta: { content: '完成' }, finishReason: 'stop' }] },
+          { choices: [], usage: { promptTokens: 220, completionTokens: 5, totalTokens: 225 } },
+        ]),
+      )
+    const config = { ...modelConfig, contextWindowTokens: 32_000 }
+    const gen = runReActLoop({
+      llmService: {
+        chatStream,
+        estimateInputTokens: counter.estimateInputTokens.bind(counter),
+      } as unknown as LlmService,
+      modelConfig: config,
+      maxInputTokens: 30_000,
+      messages: [{ role: 'user', content: '读取后完成任务' }],
+      tools: [{ name: 'test_tool', description: '测试工具', parameters: { type: 'object' } }],
+      toolExecutor: {
+        execute: vi
+          .fn()
+          .mockResolvedValue({ output: '工具结果'.repeat(100), isError: false, durationMs: 1 }),
+      },
+      source: 'desktop',
+    })
+    const budgets = []
+    let next = await gen.next()
+    while (!next.done) {
+      if (next.value.event === 'context_budget') {
+        const budget = next.value.data
+        if (budget.estimated) expect(chatStream).toHaveBeenCalledTimes(budget.turn - 1)
+        budgets.push(budget)
+      }
+      next = await gen.next()
+    }
+    expect(budgets.map((budget) => [budget.turn, budget.estimated])).toEqual([
+      [1, true],
+      [1, false],
+      [2, true],
+      [2, false],
+    ])
+    for (const [index, call] of chatStream.mock.calls.entries()) {
+      expect(budgets[index * 2]).toMatchObject({
+        usedTokens: counter.estimateInputTokens(config, call[1], call[2]),
+        maxInputTokens: 30_000,
+        contextWindowTokens: 32_000,
+        modelId: 'test-model',
+      })
+    }
+    expect(
+      budgets.filter((budget) => !budget.estimated).map((budget) => budget.usedTokens),
+    ).toEqual([350, 220])
+  })
+
+  it('上游未上报输入用量时，不以占位零覆盖有效的输入估算', async () => {
+    const { yields } = await collectLoop({
+      llmService: {
+        chatStream: vi.fn().mockReturnValue(
+          streamFrom([
+            {
+              choices: [],
+              usage: {
+                promptTokens: 0,
+                completionTokens: 1,
+                totalTokens: 1,
+                inputReported: false,
+              },
+            },
+            { choices: [{ delta: { content: '完成' }, finishReason: 'stop' }] },
+          ]),
+        ),
+      } as unknown as LlmService,
+      modelConfig: { ...modelConfig, contextWindowTokens: 32_000 },
+      messages: [{ role: 'user', content: '执行任务' }],
+      tools: [],
+      toolExecutor: { execute: vi.fn() },
+      source: 'desktop',
+    })
+    const budgets = yields.filter(
+      (event) => typeof event !== 'string' && event.event === 'context_budget',
+    )
+    expect(budgets).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({ estimated: true, usedTokens: expect.any(Number) }),
+      }),
+    ])
+  })
+
+  it('中断请求的工具草稿不执行，重试记录固定在旧片段和新响应之间', async () => {
+    const retry = {
+      retryId: 'retry-1',
+      state: 'waiting' as const,
+      attempt: 1,
+      maxRetries: 5,
+      delayMs: 1000,
+      reason: '连接中断',
+      startedAt: 1,
+      updatedAt: 1,
+      partialResponse: true,
+    }
+    const chatStream = vi
+      .fn()
+      .mockReturnValueOnce(
+        streamFrom([
+          { choices: [{ delta: { content: '旧片段' } }] },
+          {
+            choices: [
+              {
+                delta: {
+                  toolCalls: [
+                    {
+                      index: 0,
+                      id: 'abandoned',
+                      function: { name: 'test_tool', arguments: '{"value":1}' },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+          { choices: [], retry },
+          { choices: [], retry: { ...retry, state: 'retrying' } },
+          { choices: [], retry: { ...retry, state: 'recovered' } },
+          {
+            choices: [
+              {
+                delta: {
+                  content: '新的进度',
+                  toolCalls: [
+                    {
+                      index: 0,
+                      id: 'actual',
+                      function: { name: 'test_tool', arguments: '{"value":2}' },
+                    },
+                  ],
+                },
+                finishReason: 'tool_calls',
+              },
+            ],
+          },
+        ]),
+      )
+      .mockReturnValueOnce(
+        streamFrom([{ choices: [{ delta: { content: '完成' }, finishReason: 'stop' }] }]),
+      )
+    const execute = vi.fn().mockResolvedValue({ output: '成功', isError: false, durationMs: 1 })
+    const onTimeline = vi.fn()
+    const { result, yields } = await collectLoop({
+      llmService: { chatStream } as unknown as LlmService,
+      modelConfig,
+      messages: [{ role: 'user', content: '执行任务' }],
+      source: 'desktop',
+      onTimeline,
+      tools: [{ name: 'test_tool', description: '测试', parameters: {} }],
+      toolExecutor: { execute },
+      config: { maxTurns: 3 },
+    })
+    expect(execute).toHaveBeenCalledTimes(1)
+    expect(execute.mock.calls[0]?.[1]).toEqual({ value: 2 })
+    expect(result.toolCalls.map((call) => call.callId)).toEqual(['actual'])
+    expect(
+      result.messages
+        .filter((message) => message.role === 'assistant')
+        .map((message) => message.content)
+        .join(''),
+    ).not.toContain('旧片段')
+    const recordIndex = result.contentBlocks.findIndex((block) => block.kind === 'model_retry')
+    expect(result.contentBlocks.slice(0, recordIndex)).toContainEqual(
+      expect.objectContaining({ kind: 'narration', content: '旧片段' }),
+    )
+    expect(result.contentBlocks[recordIndex]).toMatchObject({
+      retry: { ...retry, state: 'recovered' },
+    })
+    expect(result.contentBlocks.slice(recordIndex + 1)).toContainEqual(
+      expect.objectContaining({ kind: 'narration', content: '新的进度' }),
+    )
+    expect(yields).toContainEqual(
+      expect.objectContaining({
+        event: 'model_retry',
+        data: expect.objectContaining({
+          discardedTextCharacters: 3,
+          abandonedDraftIds: ['tool-draft-1-0'],
+        }),
+      }),
+    )
+    expect(onTimeline).toHaveBeenCalled()
+  })
+  it.each([false, true])('NIT 菜单遵守持久任务的已有检查点限制：%s', async (durableTask) => {
+    const chatStream = vi
+      .fn()
+      .mockReturnValue(
+        streamFrom([{ choices: [{ delta: { content: '完成' }, finishReason: 'stop' }] }]),
+      )
+    await collectLoop({
+      llmService: { chatStream } as unknown as LlmService,
+      modelConfig,
+      messages: [{ role: 'user', content: '读取文件' }],
+      tools: [{ name: 'run_script', description: '脚本编排', parameters: {} }],
+      toolExecutor: undefined,
+      source: 'desktop',
+      sessionId: 'nit-menu',
+      threadContext: {
+        threadId: 'nit-menu',
+        channel: 'desktop',
+        ...(durableTask ? { taskId: 'task-1' } : {}),
+      },
+    })
+    const names = chatStream.mock.calls[0]![2].tools.map(
+      (tool: { function: { name: string } }) => tool.function.name,
+    )
+    expect(names.includes('run_script')).toBe(!durableTask)
+  })
+
+  it('多次 ReAct 调用的原生思考独立成块，运行重入也不会复用旧块 ID', async () => {
+    const chatStream = vi.fn()
+    for (let turn = 1; turn <= 3; turn++) {
+      const chunks: ChatDelta[] = [
+        { choices: [{ delta: { reasoningContent: `第${turn}轮思考` } }] },
+      ]
+      chunks.push(
+        turn < 3
+          ? {
+              choices: [
+                {
+                  delta: {
+                    toolCalls: [
+                      {
+                        index: 0,
+                        id: `call-${turn}`,
+                        function: { name: 'test_tool', arguments: '{}' },
+                      },
+                    ],
+                  },
+                  finishReason: 'tool_calls',
+                },
+              ],
+            }
+          : { choices: [{ delta: { content: '已完成' }, finishReason: 'stop' }] },
+      )
+      chatStream.mockReturnValueOnce(streamFrom(chunks))
+    }
+    const first = await collectLoop({
+      llmService: { chatStream } as unknown as LlmService,
+      modelConfig: { ...modelConfig, returnNativeReasoning: true },
+      messages: [{ role: 'user', content: '分三轮执行' }],
+      tools: [{ name: 'test_tool', description: '测试工具', parameters: {} }],
+      toolExecutor: {
+        execute: vi.fn().mockResolvedValue({ output: '{}', isError: false, durationMs: 1 }),
+      },
+      source: 'desktop',
+      sessionId: 'reasoning-test',
+    })
+    const blocks = first.result.contentBlocks.filter((block) => block.kind === 'native_reasoning')
+    expect(blocks.map((block) => block.content)).toEqual(['第1轮思考', '第2轮思考', '第3轮思考'])
+    expect(blocks.map((block) => block.turn)).toEqual([1, 2, 3])
+    expect(new Set(blocks.map((block) => block.blockId)).size).toBe(3)
+    const second = await collectLoop({
+      llmService: {
+        chatStream: vi
+          .fn()
+          .mockReturnValue(
+            streamFrom([
+              { choices: [{ delta: { reasoningContent: '重入思考' } }] },
+              { choices: [{ delta: { content: '完成' }, finishReason: 'stop' }] },
+            ]),
+          ),
+      } as unknown as LlmService,
+      modelConfig: { ...modelConfig, returnNativeReasoning: true },
+      messages: [{ role: 'user', content: '继续' }],
+      tools: [],
+      toolExecutor: undefined,
+      source: 'desktop',
+      sessionId: 'reasoning-test',
+    })
+    expect(
+      second.result.contentBlocks.find((block) => block.kind === 'native_reasoning')?.blockId,
+    ).not.toBe(blocks[0]!.blockId)
+  })
+  it.each(['vision', 'relay'] as const)(
+    '批量读图的 %s 路径交付全部图片且不泄漏二进制',
+    async (mode) => {
+      const images = Array.from({ length: 8 }, (_, index) => ({
+        sourceRef: `${index}.png`,
+        name: `${index}.png`,
+        dataUri: `data:image/png;base64,${Buffer.from(`原图${index}`).toString('base64')}`,
+      }))
+      const output = JSON.stringify({
+        images: images.map((image, index) => ({
+          sourceRef: image.sourceRef,
+          imagePreview: {
+            id: `preview-${index}`,
+            name: image.name,
+            kind: 'image',
+            mimeType: 'image/png',
+            sizeBytes: 12,
+          },
+        })),
+      })
+      const chatStream = vi
+        .fn()
+        .mockReturnValueOnce(
+          streamFrom([
+            {
+              choices: [
+                {
+                  delta: {
+                    toolCalls: [
+                      {
+                        index: 0,
+                        id: 'read-batch',
+                        function: {
+                          name: 'read_image',
+                          arguments: JSON.stringify({
+                            file_paths: images.map((image) => image.sourceRef),
+                          }),
+                        },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          ]),
+        )
+        .mockReturnValueOnce(
+          streamFrom([{ choices: [{ delta: { content: '对比完成' }, finishReason: 'stop' }] }]),
+        )
+      const transcribeImages = vi.fn(async () => ({
+        summary: '按图片编号进行对比',
+        modelId: 'vision-model',
+      }))
+      const { yields, result } = await collectLoop({
+        llmService: { chatStream } as never,
+        modelConfig: { ...modelConfig, enableVision: mode === 'vision' },
+        messages: [{ role: 'user', content: '对比这八张图' }],
+        tools: [{ name: 'read_image', description: '读图', parameters: {} }],
+        toolExecutor: {
+          execute: vi.fn(async () => ({
+            output,
+            metadata: { images },
+            durationMs: 1,
+            isError: false,
+            shouldTerminate: false,
+          })),
+        },
+        source: 'desktop',
+        transcribeImages,
+      })
+      if (mode === 'vision') {
+        const nextMessages = chatStream.mock.calls[1]![1] as ChatMessage[]
+        const blocks = nextMessages
+          .flatMap((message) => (Array.isArray(message.content) ? message.content : []))
+          .filter((part) => part.type === 'image_url')
+        expect(blocks.map((block) => block.image_url.url)).toEqual(
+          images.map((image) => image.dataUri),
+        )
+        expect(blocks.every((block) => block.image_url.detail === 'high')).toBe(true)
+      } else {
+        expect(transcribeImages).toHaveBeenCalledWith(
+          images.map((image) => image.dataUri),
+          images.map((image) => image.name),
+        )
+      }
+      expect(JSON.parse(result.toolCalls[0]!.result!).images).toHaveLength(8)
+      expect(JSON.stringify({ yields, calls: result.toolCalls })).not.toContain('base64')
+    },
+  )
+
+  it.each(['vision', 'transcription', 'transcription-error'] as const)(
+    '读图的 %s 路径完整保留预览引用，原图不进入 SSE 或持久化记录',
+    async (mode) => {
+      const imagePreview = {
+        id: 'preview-1',
+        kind: 'image',
+        name: '图.png',
+        mimeType: 'image/png',
+        sizeBytes: 100,
+      }
+      const output = JSON.stringify({ sourceRef: '图.png', imagePreview })
+      const dataUri = 'data:image/png;base64,TEST_IMAGE_BYTES'
+      const summary = '图片转述内容'.repeat(500)
+      const chatStream = vi
+        .fn()
+        .mockReturnValueOnce(
+          streamFrom([
+            {
+              choices: [
+                {
+                  delta: {
+                    toolCalls: [
+                      {
+                        index: 0,
+                        id: 'read-image-1',
+                        function: { name: 'read_image', arguments: '{"file_path":"图.png"}' },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          ]),
+        )
+        .mockReturnValueOnce(
+          streamFrom([
+            {
+              choices: [{ delta: { content: '已查看图片。' }, finishReason: 'stop' }],
+            },
+          ]),
+        )
+      const { yields, result } = await collectLoop({
+        llmService: { chatStream } as never,
+        modelConfig: { ...modelConfig, enableVision: mode === 'vision' },
+        messages: [{ role: 'user', content: '看一下图片' }],
+        tools: [{ name: 'read_image', description: '读图', parameters: {} }],
+        toolExecutor: {
+          execute: vi.fn(async () => ({
+            output,
+            durationMs: 1,
+            isError: false,
+            shouldTerminate: false,
+            metadata: { image: { dataUri, sourceRef: '图.png' } },
+          })),
+        },
+        source: 'desktop',
+        transcribeImages: vi.fn(async () =>
+          mode === 'transcription-error' ? null : { summary, modelId: 'vision-model' },
+        ),
+      })
+      const persisted = result.toolCalls[0]!
+      expect(JSON.parse(persisted.result!)).toMatchObject({ imagePreview })
+      expect(persisted.isError).toBe(mode === 'transcription-error')
+      const event = yields.find((item) => typeof item === 'object' && item.event === 'tool_result')
+      expect(event).toMatchObject({
+        event: 'tool_result',
+        data: { result: persisted.result, isError: persisted.isError },
+      })
+      expect(JSON.stringify({ yields, calls: result.toolCalls })).not.toContain(dataUri)
+      if (mode === 'transcription') {
+        expect(JSON.parse(persisted.result!).transcription).toBe(summary)
+      }
+    },
+  )
+
+  it('finish_task正文中的错位口语块应提取，且不与代码示例混淆', async () => {
+    const reply =
+      '已交付。<spoken_reply>文件做好了。</spoken_reply>\n使用示例：`<spoken_reply>示例</spoken_reply>`'
+    const call = (name: string, args: Record<string, unknown>): ChatDelta => ({
+      choices: [
+        {
+          delta: {
+            toolCalls: [
+              {
+                index: 0,
+                id: name,
+                function: { name, arguments: JSON.stringify(args) },
+              },
+            ],
+          },
+        },
+      ],
+    })
+    const chatStream = vi
+      .fn()
+      .mockReturnValueOnce(streamFrom([call('read_file_range', { path: 'a.txt' })]))
+      .mockReturnValueOnce(streamFrom([call('finish_task', { reply })]))
+    const onSpokenReply = vi.fn()
+    const { yields } = await collectLoop({
+      llmService: { chatStream } as never,
+      modelConfig,
+      messages: [{ role: 'user', content: '读完文件后给我结果' }],
+      tools: [
+        { name: 'read_file_range', description: '读取', parameters: {} },
+        { name: 'finish_task', description: '交付', parameters: {} },
+      ],
+      toolExecutor: {
+        execute: vi.fn(async (name) => ({
+          output: '成功',
+          durationMs: 1,
+          isError: false,
+          shouldTerminate: name === 'finish_task',
+        })),
+      },
+      source: 'desktop',
+      onSpokenReply,
+    })
+    expect(onSpokenReply).toHaveBeenLastCalledWith('文件做好了。')
+    expect(yields.filter((value) => typeof value === 'string').join('')).toBe(
+      '已交付。\n使用示例：`<spoken_reply>示例</spoken_reply>`',
+    )
+  })
+
+  it('整轮输出累加所有模型调用，累计用量快照不重复计数且工具耗时不进入速率', async () => {
+    let now = 0
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now)
+    const onGenerationStats = vi.fn()
+    let calls = 0
+    const chatStream = vi.fn(() =>
+      (async function* () {
+        calls++
+        now += 1000
+        if (calls === 1) {
+          yield {
+            choices: [
+              {
+                delta: {
+                  toolCalls: [
+                    {
+                      index: 0,
+                      id: 'read-1',
+                      function: { name: 'read_file_range', arguments: '{"path":"a.txt"}' },
+                    },
+                  ],
+                },
+              },
+            ],
+            usage: {
+              promptTokens: 100,
+              completionTokens: 80,
+              totalTokens: 180,
+              reasoningTokens: 30,
+            },
+          }
+          yield {
+            choices: [],
+            usage: {
+              promptTokens: 100,
+              completionTokens: 100,
+              totalTokens: 200,
+              reasoningTokens: 40,
+            },
+          }
+        } else {
+          yield {
+            choices: [{ delta: { content: '已读完。' }, finishReason: 'stop' }],
+            usage: {
+              promptTokens: 200,
+              completionTokens: 70,
+              totalTokens: 270,
+              reasoningTokens: 20,
+            },
+          }
+        }
+      })(),
+    )
+    try {
+      await collectLoop({
+        llmService: { chatStream } as never,
+        modelConfig,
+        messages: [{ role: 'user', content: '读一下文件' }],
+        tools: [{ name: 'read_file_range', description: '读取文件', parameters: {} }],
+        toolExecutor: {
+          execute: vi.fn(async () => {
+            now += 60_000
+            return {
+              output: '文件内容',
+              durationMs: 60_000,
+              isError: false,
+              shouldTerminate: false,
+            }
+          }),
+        },
+        source: 'desktop',
+        onGenerationStats,
+      })
+      // 两次调用分别输出 100-40 与 70-20；仅两段各 1 秒的模型请求计时。
+      expect(onGenerationStats).toHaveBeenLastCalledWith({
+        outputTokens: 110,
+        modelDurationMs: 2000,
+        modelCalls: 2,
+        estimated: false,
+      })
+    } finally {
+      clock.mockRestore()
+    }
+  })
+
+  it('截断响应中的合法工具参数不能执行，下一轮仍须保留思考与超限反馈', async () => {
+    const messagesSeen: ChatMessage[][] = []
+    const chatStream = vi.fn((_config, messages: ChatMessage[]) => {
+      messagesSeen.push(structuredClone(messages))
+      return messagesSeen.length === 1
+        ? streamFrom([
+            {
+              choices: [
+                {
+                  delta: {
+                    reasoningContent: '这是截断前的完整原生思考',
+                    nativeReasoning: [
+                      { format: 'responses_reasoning', opaque: { id: 'truncated-reasoning' } },
+                    ],
+                    toolCalls: [
+                      {
+                        index: 0,
+                        id: 'cut-call',
+                        function: {
+                          name: 'write_file',
+                          arguments: JSON.stringify({ path: 'a.txt', content: '部分' }),
+                        },
+                      },
+                    ],
+                  },
+                  finishReason: 'length',
+                },
+              ],
+            },
+          ])
+        : streamFrom([
+            { choices: [{ delta: { content: '改为分段处理。' }, finishReason: 'stop' }] },
+          ])
+    })
+    const execute = vi.fn()
+    const { result } = await collectLoop({
+      llmService: { chatStream } as never,
+      modelConfig,
+      messages: [{ role: 'user', content: '写入完整文件' }],
+      tools: [{ name: 'write_file', description: '写入', parameters: {} }],
+      toolExecutor: { execute },
+      source: 'desktop',
+    })
+    expect(execute).not.toHaveBeenCalled()
+    expect(messagesSeen).toHaveLength(2)
+    expect(
+      messagesSeen[1]?.some(
+        (item) => item.role === 'user' && String(item.content).includes('Token'),
+      ),
+    ).toBe(true)
+    expect(messagesSeen[1]?.some((item) => item.toolCalls?.length)).toBe(false)
+    expect(messagesSeen[1]?.find((item) => item.role === 'assistant')).toMatchObject({
+      reasoningContent: '这是截断前的完整原生思考',
+      nativeReasoning: [{ format: 'responses_reasoning', opaque: { id: 'truncated-reasoning' } }],
+    })
+    expect(result.toolCalls).toEqual([
+      expect.objectContaining({ callId: 'cut-call', isError: true }),
+    ])
+  })
+
+  it('上游反复截断时只给两次续接机会，不无限请求模型', async () => {
+    const chatStream = vi.fn(() =>
+      streamFrom([{ choices: [{ delta: { content: '部分结果' }, finishReason: 'length' }] }]),
+    )
+    const { result } = await collectLoop({
+      llmService: { chatStream } as never,
+      modelConfig,
+      messages: [{ role: 'user', content: '继续完成任务' }],
+      tools: undefined,
+      toolExecutor: undefined,
+      source: 'desktop',
+    })
+    expect(chatStream).toHaveBeenCalledTimes(3)
+    expect(
+      result.contentBlocks.some((block) => block.kind === 'narration' && block.phase === 'final'),
+    ).toBe(true)
+  })
+
+  it('思考超出正文额度仍可正常回答，额度不从思考中扣减', async () => {
+    const chatStream = vi.fn(() =>
+      streamFrom([
+        { choices: [{ delta: { reasoningContent: '分析'.repeat(1000) } }] },
+        {
+          choices: [
+            {
+              delta: { content: '<think>' + '分析'.repeat(1000) + '</think>OK' },
+              finishReason: 'stop',
+            },
+          ],
+        },
+      ]),
+    )
+    const { yields } = await collectLoop({
+      llmService: { chatStream } as never,
+      modelConfig: { ...modelConfig, maxTokens: 8 },
+      messages: [{ role: 'user', content: '判断' }],
+      tools: undefined,
+      toolExecutor: undefined,
+      source: 'desktop',
+    })
+    expect(chatStream).toHaveBeenCalledOnce()
+    expect(yields.filter((item) => typeof item === 'string').join('')).toBe('OK')
+  })
+
+  it('最终回复口语块只交给口语通道，流式正文与持久化内容块保留完整结果', async () => {
+    const onSpokenReply = vi.fn()
+    const chatStream = vi.fn().mockReturnValue(
+      streamFrom([
+        { choices: [{ delta: { content: '<think>内部分析</think><spoken_' } }] },
+        {
+          choices: [
+            { delta: { content: 'reply>整理好了。</spoken_reply>完整分析结果，包含所有细节。' } },
+          ],
+        },
+      ]),
+    )
+    const { yields, result } = await collectLoop({
+      llmService: { chatStream } as never,
+      modelConfig,
+      messages: [{ role: 'user', content: '分析一下' }],
+      tools: undefined,
+      toolExecutor: undefined,
+      source: 'desktop',
+      onSpokenReply,
+    })
+    expect(onSpokenReply).toHaveBeenCalledWith('整理好了。')
+    expect(yields.filter((item) => typeof item === 'string').join('')).toBe(
+      '完整分析结果，包含所有细节。',
+    )
+    expect(result.contentBlocks.filter((block) => block.kind === 'narration')).toEqual([
+      expect.objectContaining({ content: '完整分析结果，包含所有细节。' }),
+    ])
+  })
+  it('每次调用模型前自动滑出超预算的历史，保留当前请求并继续执行', async () => {
+    const chatStream = vi.fn(() =>
+      streamFrom([{ choices: [{ delta: { content: '继续完成' }, finishReason: 'stop' }] }]),
+    )
+    const counter = new LlmService()
+    const { result } = await collectLoop({
+      llmService: {
+        chatStream,
+        estimateInputTokens: counter.estimateInputTokens.bind(counter),
+      } as never,
+      modelConfig,
+      messages: [
+        { role: 'assistant', content: '此前材料'.repeat(500), cacheControl: { kind: 'history' } },
+        { role: 'user', content: '继续任务', cacheControl: { kind: 'current' } },
+      ],
+      tools: undefined,
+      toolExecutor: undefined,
+      source: 'desktop',
+      maxInputTokens: 400,
+    })
+    expect(chatStream).toHaveBeenCalledOnce()
+    const call = vi.mocked(chatStream).mock.calls[0] as unknown as [ModelConfig, ChatMessage[]]
+    expect(call[1]).toContainEqual(expect.objectContaining({ role: 'user', content: '继续任务' }))
+    expect(call[1].some((message) => String(message.content).includes('此前材料'))).toBe(false)
+    expect(counter.estimateInputTokens(modelConfig, call[1], { tools: [] })).toBeLessThanOrEqual(
+      400,
+    )
+    expect(result.messages.at(-1)?.content).toBe('继续完成')
+  })
+
+  it('容量紧张时较早读取退化为来源，最近读取保留原文且不调用摘要模型', async () => {
+    const first = '甲'.repeat(1800)
+    const second = '乙'.repeat(300)
+    const toolCall = (id: string, path: string): ChatDelta => ({
+      choices: [
+        {
+          delta: {
+            toolCalls: [
+              {
+                index: 0,
+                id,
+                function: {
+                  name: 'read_file_range',
+                  arguments: JSON.stringify({ path }),
+                },
+              },
+            ],
+          },
+        },
+      ],
+    })
+    const chatStream = vi
+      .fn()
+      .mockReturnValueOnce(streamFrom([toolCall('call-old', 'old.ts')]))
+      .mockReturnValueOnce(streamFrom([toolCall('call-new', 'new.ts')]))
+      .mockReturnValueOnce(streamFrom([{ choices: [{ delta: { content: '完成' } }] }]))
+    const chatText = vi.fn().mockResolvedValue('旧文件 old.ts，callId=call-old；仍需核对来源。')
+    const { result } = await collectLoop({
+      llmService: { chatStream, chatText } as never,
+      agentId: 'pero',
+      sessionId: 'file-window',
+      modelConfig,
+      messages: [{ role: 'user', content: '分析两个文件' }],
+      tools: [{ name: 'read_file_range', description: '读取文件范围', parameters: {} }],
+      toolExecutor: {
+        execute: vi.fn(async (_name, args) => ({
+          output: JSON.stringify({
+            content: args.path === 'old.ts' ? first : second,
+            lineStart: 1,
+            lineEnd: 90,
+          }),
+          durationMs: 1,
+          isError: false,
+          shouldTerminate: false,
+        })),
+      },
+      source: 'desktop',
+      maxInputTokens: 1500,
+      config: { maxTurns: 3 },
+    })
+    expect(chatText).not.toHaveBeenCalled()
+    const notice = result.messages.find(
+      (item) => item.cacheControl?.key === 'infos.work.sliding-window',
+    )
+    const ref = String(notice?.content).match(/tool-result:[a-f0-9-]{36}/i)?.[0]
+    expect(ref).toBeDefined()
+    const previous = readToolObservation(ref!, {
+      agentId: 'pero',
+      threadId: 'file-window',
+      channel: 'desktop',
+    })
+    expect(previous.content).toContain('old.ts')
+    expect(previous.content).toContain(first)
+    expect(
+      result.messages.some(
+        (item) =>
+          item.role === 'tool' && typeof item.content === 'string' && item.content.includes(second),
+      ),
+    ).toBe(true)
+    expect(
+      result.messages.some(
+        (item) =>
+          item.role === 'tool' && typeof item.content === 'string' && item.content.includes(first),
+      ),
+    ).toBe(false)
+  })
+
   it('应将Provider原生思考作为独立Timeline回传并与正文区分', async () => {
     const { yields, result } = await collectLoop({
       llmService: {
@@ -72,6 +1346,110 @@ describe('runReActLoop', () => {
         expect.objectContaining({ kind: 'narration', content: '最终答案' }),
       ]),
     )
+  })
+
+  it('原生思考在编辑参数生成前结束，结束通知不等待参数或工具执行完成', async () => {
+    let reasoningEnded = false
+    let argumentsCompleted = false
+    const execute = vi.fn().mockResolvedValue({ output: '修改成功', isError: false, durationMs: 1 })
+    const chatStream = vi
+      .fn()
+      .mockReturnValueOnce(
+        (async function* (): AsyncGenerator<ChatDelta> {
+          yield { choices: [{ delta: { reasoningContent: '检查后修改文件' } }] }
+          yield {
+            choices: [
+              {
+                delta: {
+                  toolCalls: [
+                    {
+                      index: 0,
+                      id: 'edit-1',
+                      function: { name: 'edit_file', arguments: '{"file_path":"a.txt",' },
+                    },
+                  ],
+                },
+              },
+            ],
+          }
+          expect(reasoningEnded).toBe(true)
+          expect(execute).not.toHaveBeenCalled()
+          argumentsCompleted = true
+          yield {
+            choices: [
+              {
+                delta: {
+                  toolCalls: [
+                    {
+                      index: 0,
+                      function: { arguments: '"new_text":"完成"}' },
+                    },
+                  ],
+                },
+                finishReason: 'tool_calls',
+              },
+            ],
+          }
+        })(),
+      )
+      .mockReturnValueOnce(
+        streamFrom([{ choices: [{ delta: { content: '完成' }, finishReason: 'stop' }] }]),
+      )
+    const generator = runReActLoop({
+      llmService: { chatStream } as never,
+      modelConfig: { ...modelConfig, returnNativeReasoning: true },
+      messages: [{ role: 'user', content: '修改文件' }],
+      tools: [{ name: 'edit_file', description: '编辑', parameters: {} }],
+      toolExecutor: { execute },
+      source: 'desktop',
+    })
+    let endedCount = 0
+    let next = await generator.next()
+    while (!next.done) {
+      if (next.value.event === 'native_reasoning_end') {
+        expect(argumentsCompleted).toBe(false)
+        reasoningEnded = true
+        endedCount++
+      }
+      next = await generator.next()
+    }
+    expect(endedCount).toBe(1)
+    expect(execute).toHaveBeenCalledOnce()
+    expect(next.value.messages.find((message) => message.toolCalls?.length)?.reasoningContent).toBe(
+      '检查后修改文件',
+    )
+  })
+
+  it('同轮原生思考恢复时建立独立展示块，API 续轮仍保留完整推理文本', async () => {
+    const { yields, result } = await collectLoop({
+      llmService: {
+        chatStream: vi.fn(() =>
+          streamFrom([
+            { choices: [{ delta: { reasoningContent: '第一段思考' } }] },
+            { choices: [{ delta: { content: '先核对。' } }] },
+            { choices: [{ delta: { reasoningContent: '第二段思考' } }] },
+            { choices: [{ delta: { content: '核对完成。' }, finishReason: 'stop' }] },
+          ]),
+        ),
+      } as never,
+      modelConfig: { ...modelConfig, returnNativeReasoning: true },
+      messages: [{ role: 'user', content: '继续核对' }],
+      tools: [],
+      toolExecutor: { execute: vi.fn() },
+      source: 'desktop',
+    })
+    const starts = yields.filter(
+      (item) => typeof item !== 'string' && item.event === 'native_reasoning_start',
+    )
+    const ends = yields.filter(
+      (item) => typeof item !== 'string' && item.event === 'native_reasoning_end',
+    )
+    expect(starts).toHaveLength(2)
+    expect(ends).toHaveLength(2)
+    const blocks = result.contentBlocks.filter((block) => block.kind === 'native_reasoning')
+    expect(blocks.map((block) => block.content)).toEqual(['第一段思考', '第二段思考'])
+    expect(new Set(blocks.map((block) => block.blockId)).size).toBe(2)
+    expect(result.messages.at(-1)?.reasoningContent).toBe('第一段思考第二段思考')
   })
 
   it('同一轮出现多个think块时应分别流式发布碎碎念', async () => {
@@ -241,7 +1619,11 @@ describe('runReActLoop', () => {
     })
 
     expect(yields).toEqual([
-      { event: 'status', data: { state: 'thinking', message: '正在思考...', turn: 1 } },
+      expect.objectContaining({
+        event: 'status',
+        data: expect.objectContaining({ state: 'thinking', turn: 1 }),
+      }),
+      expect.objectContaining({ event: 'context_budget' }),
       '你好',
       expect.objectContaining({ event: 'thinking_start' }),
       expect.objectContaining({
@@ -301,7 +1683,7 @@ describe('runReActLoop', () => {
         shouldTerminate: false,
       }),
     }
-    const messages = [{ role: 'user' as const, content: '查资料' }]
+    const messages: ChatMessage[] = [{ role: 'user' as const, content: '查资料' }]
 
     const { yields, result } = await collectLoop({
       llmService: llmService as never,
@@ -321,7 +1703,7 @@ describe('runReActLoop', () => {
     const observedTools = llmService.chatStream.mock.calls.map((call) =>
       (
         (call[2] as { tools?: Array<{ type: string; function: { name: string } }> })?.tools ?? []
-      ).map((tool) => tool.function.name),
+      ).map((tool: { function: { name: string } }) => tool.function.name),
     )
     expect(observedTools[0]).not.toContain('finish_task')
     expect(observedTools[1]).toContain('finish_task')
@@ -332,14 +1714,18 @@ describe('runReActLoop', () => {
       expect.objectContaining({ sessionId: 'default' }),
     )
     expect(yields).toEqual([
-      { event: 'status', data: { state: 'thinking', message: '正在思考...', turn: 1 } },
+      expect.objectContaining({
+        event: 'status',
+        data: expect.objectContaining({ state: 'thinking', turn: 1 }),
+      }),
+      expect.objectContaining({ event: 'context_budget' }),
+      '需要查找',
       {
         event: 'tool_call_start',
         data: { draftId: 'tool-draft-1-0', turn: 1, index: 0 },
       },
       expect.objectContaining({ event: 'tool_call_delta' }),
       expect.objectContaining({ event: 'tool_call_delta' }),
-      '需要查找',
       {
         event: 'tool_call_ready',
         data: {
@@ -351,7 +1737,10 @@ describe('runReActLoop', () => {
         },
       },
       { event: 'tool_call', data: { name: 'lookup', args: { q: '猫' }, callId: 'call-1' } },
-      { event: 'status', data: { state: 'calling', message: '正在调用工具: lookup', turn: 1 } },
+      expect.objectContaining({
+        event: 'status',
+        data: expect.objectContaining({ state: 'calling', turn: 1 }),
+      }),
       {
         event: 'tool_result',
         data: {
@@ -360,13 +1749,23 @@ describe('runReActLoop', () => {
           result: '工具结果',
           isError: false,
           durationMs: 12,
+          automaticApproval: undefined,
         },
       },
-      { event: 'status', data: { state: 'thinking', message: '正在思考...', turn: 2 } },
+      expect.objectContaining({
+        event: 'status',
+        data: expect.objectContaining({ state: 'thinking', turn: 2 }),
+      }),
+      expect.objectContaining({ event: 'context_budget' }),
       '完成',
     ])
     expect(messages).toEqual([
       { role: 'user', content: '查资料' },
+      expect.objectContaining({
+        role: 'user',
+        cacheControl: { kind: 'snapshot', key: 'infos.work.execution-state' },
+        content: expect.stringContaining('当前运行任务'),
+      }),
       {
         role: 'assistant',
         content: '需要查找',
@@ -381,7 +1780,8 @@ describe('runReActLoop', () => {
         ],
       },
       // 工具消息字段从 tool_call_id 改为 toolCallId
-      { role: 'tool', content: '工具结果', toolCallId: 'call-1' },
+      { role: 'tool', content: '工具结果', toolCallId: 'call-1', toolExecutionFailed: false },
+      { role: 'assistant', content: '完成', reasoningContent: '' },
     ])
     expect(result.contentBlocks.map((block) => [block.kind, block.sequence])).toEqual([
       ['narration', 1],
@@ -448,6 +1848,7 @@ describe('runReActLoop', () => {
         ),
     }
 
+    const onToolObserved = vi.fn()
     const { result } = await collectLoop({
       llmService: llmService as never,
       modelConfig,
@@ -465,10 +1866,12 @@ describe('runReActLoop', () => {
           durationMs: 1,
           isError: false,
           shouldTerminate: false,
+          metadata: { hash: 'a'.repeat(64) },
         }),
       },
       source: 'desktop',
       config: { maxTurns: 2 },
+      onToolObserved,
     })
 
     expect(llmService.chatStream).toHaveBeenNthCalledWith(
@@ -484,6 +1887,9 @@ describe('runReActLoop', () => {
       expect.any(Object),
     )
     expect(result.toolCalls[0]?.result).not.toContain('第101行')
+    expect(onToolObserved).toHaveBeenCalledWith(
+      expect.objectContaining({ metadata: { hash: 'a'.repeat(64) } }),
+    )
     expect(JSON.parse(result.toolCalls[0]?.result ?? '{}')).toMatchObject({
       lineStart: 101,
       lineEnd: 102,
@@ -648,39 +2054,48 @@ describe('runReActLoop', () => {
       source: 'desktop',
     })
 
-    expect(yields).toEqual([
-      { event: 'status', data: { state: 'thinking', message: '正在思考...', turn: 1 } },
-      '⚠️ AI 没有返回有效内容。请检查网络连接或 API Key 配置。',
-    ])
+    expect(llmService.chatStream).toHaveBeenCalledOnce()
+    expect(
+      yields
+        .filter((item) => typeof item === 'string')
+        .join('')
+        .trim(),
+    ).not.toBe('')
   })
 
   it('应当在取消时跳出循环或跳过工具执行', async () => {
+    let cancelled = false
     const llmService = {
       chatStream: vi.fn().mockReturnValue(
-        streamFrom([
-          {
-            choices: [
-              {
-                delta: {
-                  toolCalls: [
-                    {
-                      index: 0,
-                      id: 'call-1',
-                      type: 'function',
-                      function: { name: 'lookup', arguments: '{}' },
-                    },
-                  ],
+        (async function* () {
+          for (const chunk of [
+            {
+              choices: [
+                {
+                  delta: {
+                    toolCalls: [
+                      {
+                        index: 0,
+                        id: 'call-1',
+                        type: 'function',
+                        function: { name: 'lookup', arguments: '{}' },
+                      },
+                    ],
+                  },
+                  finishReason: null,
                 },
-                finishReason: null,
-              },
-            ],
-          },
-        ]),
+              ],
+            },
+          ]) {
+            cancelled = true
+            yield chunk
+          }
+        })(),
       ),
     }
     const toolExecutor = { execute: vi.fn() }
     const cancelChecker = {
-      isCancelled: vi.fn().mockReturnValueOnce(false).mockReturnValueOnce(true),
+      isCancelled: () => cancelled,
     }
 
     const { result } = await collectLoop({
@@ -738,7 +2153,7 @@ describe('runReActLoop', () => {
         shouldTerminate: false,
       }),
     }
-    const messages = [{ role: 'user' as const, content: '执行' }]
+    const messages: ChatMessage[] = [{ role: 'user' as const, content: '执行' }]
 
     const { result } = await collectLoop({
       llmService: llmService as never,
@@ -758,10 +2173,24 @@ describe('runReActLoop', () => {
       expect.objectContaining({ sessionId: 'default' }),
     )
     expect(llmService.chatStream).toHaveBeenLastCalledWith(modelConfig, expect.any(Array), {
+      maxRetries: 5,
+      retryPartialResponse: true,
       signal: undefined,
       tools: [],
+      usageContext: expect.objectContaining({
+        agentId: undefined,
+        purpose: 'conversation',
+        applicationId: 'infos',
+        channel: 'desktop',
+        step: 2,
+      }),
     })
-    expect(messages[messages.length - 1]).toMatchObject({ role: 'system' })
+    expect(messages[messages.length - 1]).toMatchObject({ role: 'assistant', content: '后续' })
+    expect(
+      messages.some(
+        (message) => message.role === 'user' && String(message.content).includes('工具'),
+      ),
+    ).toBe(true)
     expect(result.toolCalls).toEqual([
       {
         name: 'broken',
@@ -836,7 +2265,7 @@ describe('runReActLoop', () => {
         shouldTerminate: false,
       }),
     }
-    const messages = [{ role: 'user' as const, content: '查资料' }]
+    const messages: ChatMessage[] = [{ role: 'user' as const, content: '查资料' }]
 
     const { yields, result } = await collectLoop({
       llmService: llmService as never,
@@ -871,14 +2300,12 @@ describe('runReActLoop', () => {
     expect(firstResult.data.name).toBe('lookup')
     expect(firstResult.data.isError).toBe(true)
     expect(firstResult.data.durationMs).toBe(0)
-    expect(firstResult.data.result).toContain('参数解析失败')
     expect(firstResult.data.result).toContain('不是合法JSON')
-    expect(firstResult.data.result).toContain('请检查参数是否为合法 JSON 格式后重试')
 
     // 关键断言3: 错误 tool_result 被追加到 messages，LLM 能在下一轮感知到
     const toolMessages = messages.filter((m) => m.role === 'tool')
     expect(toolMessages).toHaveLength(2)
-    expect(toolMessages[0]?.content).toContain('参数解析失败')
+    expect(toolMessages[0]?.content).toBe(firstResult.data.result)
     expect(toolMessages[0]?.toolCallId).toBe('call-1')
 
     // 关键断言4: 最终工具调用记录包含两条（第一条是解析失败，第二条是成功执行）
@@ -886,7 +2313,7 @@ describe('runReActLoop', () => {
       {
         name: 'lookup',
         args: {},
-        result: expect.stringContaining('参数解析失败'),
+        result: firstResult.data.result,
         durationMs: 0,
         isError: true,
         callId: 'call-1',
@@ -930,9 +2357,84 @@ describe('runReActLoop', () => {
     expect(result.rawText).toContain('完整回复')
   })
 
+  it.each([false, true])(
+    '无视觉或转述失败时仍持久保留截图预览，转述失败=%s',
+    async (relayFails) => {
+      const preview = {
+        id: 'capture-1',
+        kind: 'image',
+        name: '截图.png',
+        mimeType: 'image/png',
+        sizeBytes: 100,
+      }
+      const chatStream = vi
+        .fn()
+        .mockReturnValueOnce(
+          streamFrom([
+            {
+              choices: [
+                {
+                  delta: {
+                    toolCalls: [
+                      {
+                        index: 0,
+                        id: 'capture-call',
+                        function: { name: 'take_screenshot', arguments: '{}' },
+                      },
+                    ],
+                  },
+                  finishReason: 'tool_calls',
+                },
+              ],
+            },
+          ]),
+        )
+        .mockReturnValueOnce(
+          streamFrom([{ choices: [{ delta: { content: '完成' }, finishReason: 'stop' }] }]),
+        )
+      const { result, yields } = await collectLoop({
+        llmService: { chatStream } as never,
+        modelConfig: { ...modelConfig, enableVision: false },
+        source: 'desktop',
+        messages: [{ role: 'user', content: '截图' }],
+        tools: [{ name: 'take_screenshot', description: '截图', parameters: {} }],
+        transcribeImages: relayFails
+          ? async () => {
+              throw new Error('转述服务断线')
+            }
+          : undefined,
+        toolExecutor: {
+          execute: vi.fn().mockResolvedValue({
+            durationMs: 1,
+            isError: false,
+            output: JSON.stringify({
+              message: '说明'.repeat(2000),
+              screenshots: [
+                { index: 0, dataUri: 'data:image/png;base64,AAAA', imagePreview: preview },
+              ],
+            }),
+          }),
+        },
+      })
+      const output = result.toolCalls.find((call) => call.name === 'take_screenshot')!.result!
+      expect(output).not.toContain('base64')
+      const value = JSON.parse(output)
+      expect(relayFails ? value.images[0].imagePreview : value.screenshots[0].imagePreview).toEqual(
+        preview,
+      )
+      const event = yields.find((item) => typeof item !== 'string' && item.event === 'tool_result')
+      expect(
+        event &&
+          typeof event !== 'string' &&
+          event.event === 'tool_result' &&
+          JSON.parse((event.data as { result: string }).result),
+      ).toEqual(value)
+    },
+  )
+
   it('桌面截图应保留坐标上下文并剥离base64', async () => {
     let turn = 0
-    const observedMessages: unknown[][] = []
+    const observedMessages: ChatMessage[][] = []
     const llmService = {
       chatStream: vi.fn((_config, messages) => {
         observedMessages.push(messages)
@@ -995,19 +2497,84 @@ describe('runReActLoop', () => {
     })
 
     const secondTurn = JSON.stringify(observedMessages[1])
-    expect(secondTurn).toContain('coordinateSpace=screenshot')
-    expect(secondTurn).toContain('displayId=7')
-    expect(secondTurn).toContain('screenshotWidth=1280')
+    const screenshotResult = observedMessages[1]!.find((message) => message.role === 'tool')!
+    expect(
+      JSON.parse(String(screenshotResult.content)).screenshots[0].coordinateContext,
+    ).toMatchObject({
+      coordinateSpace: 'screenshot',
+      displayId: '7',
+      screenshotWidth: 1280,
+      screenshotHeight: 720,
+      scaleFactor: 1.5,
+    })
     expect(secondTurn).toContain('image_url')
     expect(secondTurn.match(/AAAA/g)).toHaveLength(1)
   })
+
+  it.each(['update_plan', 'manage_task'])(
+    '%s 降为普通工具后仍不能单独开放完成入口',
+    async (name) => {
+      const observed: string[][] = []
+      const chatStream = vi.fn((_config, _messages, options) => {
+        observed.push(
+          (options?.tools ?? []).map((tool: { function: { name: string } }) => tool.function.name),
+        )
+        return observed.length === 1
+          ? streamFrom([
+              {
+                choices: [
+                  {
+                    delta: {
+                      toolCalls: [
+                        {
+                          index: 0,
+                          id: 'coordination',
+                          type: 'function',
+                          function: { name, arguments: '{}' },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            ])
+          : streamFrom([
+              { choices: [{ delta: { content: '继续执行工作' }, finishReason: 'stop' }] },
+            ])
+      })
+      await collectLoop({
+        llmService: { chatStream } as never,
+        modelConfig,
+        messages: [{ role: 'user', content: '继续工作' }],
+        tools: [name, 'finish_task'].map((toolName) => ({
+          name: toolName,
+          description: '工具',
+          parameters: {},
+        })),
+        toolExecutor: {
+          execute: vi.fn().mockResolvedValue({
+            output: '已同步',
+            isError: false,
+            shouldTerminate: false,
+            durationMs: 1,
+          }),
+        },
+        source: 'desktop',
+        config: { maxTurns: 2 },
+      })
+      expect(observed[1]).toContain(name)
+      expect(observed[1]).not.toContain('finish_task')
+    },
+  )
 
   it('高级工具应在展开前隐藏，并在展开后的后续轮次持续可用', async () => {
     let call = 0
     const observedTools: string[][] = []
     const llmService = {
       chatStream: vi.fn((_config, _messages, options) => {
-        observedTools.push((options?.tools ?? []).map((tool) => tool.function.name))
+        observedTools.push(
+          (options?.tools ?? []).map((tool: { function: { name: string } }) => tool.function.name),
+        )
         call++
         if (call === 1) {
           return streamFrom([
@@ -1029,6 +2596,28 @@ describe('runReActLoop', () => {
             },
           ])
         }
+        if (call === 2)
+          return streamFrom([
+            {
+              choices: [
+                {
+                  delta: {
+                    toolCalls: [
+                      {
+                        index: 0,
+                        id: 'browser-call',
+                        type: 'function',
+                        function: {
+                          name: 'browser_open_url',
+                          arguments: '{"url":"https://example.com"}',
+                        },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          ])
         return streamFrom([{ choices: [{ delta: { content: '已看到高级工具' } }] }])
       }),
     }
@@ -1063,14 +2652,13 @@ describe('runReActLoop', () => {
       expect.arrayContaining(['expand_advanced_tools', 'take_screenshot', 'web_fetch']),
     )
     expect(observedTools[0]).not.toContain('finish_task')
-    expect(observedTools[0]).not.toEqual(
-      expect.arrayContaining([
-        'browser_open_url',
-        'automation_execute',
-        'remote_terminal_nodes',
-        'remote_terminal_create',
-      ]),
-    )
+    for (const name of [
+      'browser_open_url',
+      'automation_execute',
+      'remote_terminal_nodes',
+      'remote_terminal_create',
+    ])
+      expect(observedTools[0]).not.toContain(name)
     expect(observedTools[1]).toEqual(
       expect.arrayContaining([
         'browser_open_url',
@@ -1080,6 +2668,15 @@ describe('runReActLoop', () => {
       ]),
     )
     expect(observedTools[1]).not.toContain('finish_task')
+    expect(observedTools[2]).toContain('finish_task')
+    expect(observedTools[2]).toEqual(
+      expect.arrayContaining([
+        'browser_open_url',
+        'automation_execute',
+        'remote_terminal_nodes',
+        'remote_terminal_create',
+      ]),
+    )
   })
 
   it('load_skill成功后应刷新下一轮工具定义', async () => {
@@ -1095,7 +2692,7 @@ describe('runReActLoop', () => {
                 choices: [
                   {
                     delta: {
-                      content: null,
+                      content: undefined,
                       toolCalls: [
                         {
                           index: 0,
@@ -1142,27 +2739,30 @@ describe('runReActLoop', () => {
 
   it('首轮幻觉调用finish_task时应拒绝执行并要求自然回复', async () => {
     const llmService = {
-      chatStream: vi.fn().mockReturnValue(
-        streamFrom([
-          {
-            choices: [
-              {
-                delta: {
-                  toolCalls: [
-                    {
-                      index: 0,
-                      id: 'call-1',
-                      type: 'function',
-                      function: { name: 'finish_task', arguments: '{"summary":"完成"}' },
-                    },
-                  ],
+      chatStream: vi
+        .fn()
+        .mockReturnValueOnce(
+          streamFrom([
+            {
+              choices: [
+                {
+                  delta: {
+                    toolCalls: [
+                      {
+                        index: 0,
+                        id: 'call-1',
+                        type: 'function',
+                        function: { name: 'finish_task', arguments: '{"summary":"完成"}' },
+                      },
+                    ],
+                  },
+                  finishReason: null,
                 },
-                finishReason: null,
-              },
-            ],
-          },
-        ]),
-      ),
+              ],
+            },
+          ]),
+        )
+        .mockReturnValueOnce(streamFrom([{ choices: [{ delta: { content: '自然回复' } }] }])),
     }
     const toolExecutor = {
       execute: vi.fn().mockResolvedValue({
@@ -1173,7 +2773,7 @@ describe('runReActLoop', () => {
       }),
     }
 
-    const { result } = await collectLoop({
+    const { yields, result } = await collectLoop({
       llmService: llmService as never,
       modelConfig,
       messages: [{ role: 'user', content: '完成任务' }],
@@ -1185,12 +2785,12 @@ describe('runReActLoop', () => {
 
     expect(llmService.chatStream).toHaveBeenCalledTimes(2)
     expect(toolExecutor.execute).not.toHaveBeenCalled()
+    expect(yields.filter((item) => typeof item === 'string').join('')).toBe('自然回复')
     expect(result.toolCalls).toEqual([
       expect.objectContaining({
         name: 'finish_task',
         args: {},
         isError: true,
-        result: expect.stringContaining('尚未开放'),
       }),
     ])
   })

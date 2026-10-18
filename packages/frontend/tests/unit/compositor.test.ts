@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { SurfaceFrame, SurfaceId, SurfaceNodeId } from '@infos/shared'
 import { createPinia, setActivePinia } from 'pinia'
 import { useCompositorStore } from '@infos/frontend/stores/useCompositorStore'
@@ -21,6 +21,175 @@ function frame(
 }
 
 describe('Internal Compositor', () => {
+  it('停止等待审批的执行时同时结束工具和运行状态，历史恢复不再识别为活动执行', () => {
+    setActivePinia(createPinia())
+    const store = useCompositorStore()
+    store.enqueue(
+      frame(1, {
+        type: 'surface.open',
+        threadId: 'thread-1',
+        principalId: 'pero',
+        nodes: [
+          {
+            nodeId: 'calling-status' as SurfaceNodeId,
+            kind: 'status',
+            lifecycle: 'transient',
+            revision: 1,
+            props: { state: 'calling', message: '等待工具回传' },
+          },
+          {
+            nodeId: 'tool' as SurfaceNodeId,
+            kind: 'tool-call',
+            lifecycle: 'interactive',
+            revision: 1,
+            props: { name: 'terminal_execute', callId: 'call-1', args: '{}', state: 'calling' },
+          },
+        ],
+      }),
+    )
+    store.flush()
+    store.terminateThinking('surface-1', true)
+    expect(store.get('surface-1')).toMatchObject({ state: 'committed', suspended: true })
+    expect(store.get('surface-1')?.nodes[0]?.props).toMatchObject({ state: 'cancelled' })
+    expect(store.get('surface-1')?.nodes[1]?.props).toMatchObject({ state: 'failed' })
+    store.$dispose()
+  })
+
+  it('文件参数增量跨过旧字符边界后仍保留完整尾部', () => {
+    setActivePinia(createPinia())
+    const store = useCompositorStore()
+    const nodeId = 'file-draft' as SurfaceNodeId
+    try {
+      store.enqueue(frame(1, { type: 'surface.open', threadId: 'thread-1', principalId: 'pero' }))
+      store.enqueue(
+        frame(2, {
+          type: 'surface.upsert-node',
+          node: {
+            nodeId,
+            kind: 'tool-call',
+            lifecycle: 'interactive',
+            revision: 2,
+            props: { name: 'write_file', args: '', callId: 'call-1', state: 'assembling' },
+          },
+        }),
+      )
+      const first = '甲'.repeat(260_000)
+      const tail = '乙'.repeat(40_000) + '完整结尾'
+      store.enqueue(
+        frame(3, {
+          type: 'surface.append-tool-arguments',
+          nodeId,
+          argumentsDelta: first,
+          receivedChars: first.length,
+          previewTruncated: false,
+        }),
+      )
+      store.enqueue(
+        frame(4, {
+          type: 'surface.append-tool-arguments',
+          nodeId,
+          argumentsDelta: tail,
+          receivedChars: first.length + tail.length,
+          previewTruncated: false,
+        }),
+      )
+      store.flush()
+      expect(store.get('surface-1')?.nodes[0]?.props).toMatchObject({
+        args: first + tail,
+        previewTruncated: false,
+      })
+    } finally {
+      store.$dispose()
+    }
+  })
+  it('批次合成不会修改已发布的快照，重复操作仍只执行一次', () => {
+    setActivePinia(createPinia())
+    const store = useCompositorStore()
+    try {
+      store.enqueue(frame(1, { type: 'surface.open', threadId: 'thread-1', principalId: 'pero' }))
+      store.enqueue(
+        frame(2, { type: 'surface.append-text', nodeId: 'text' as SurfaceNodeId, delta: '甲' }),
+      )
+      store.flush()
+      const previous = store.get('surface-1')!
+      const previousIds = [...previous.operationIds]
+      const next = frame(3, {
+        type: 'surface.append-text',
+        nodeId: 'text' as SurfaceNodeId,
+        delta: '乙',
+      })
+      store.enqueue(next)
+      store.enqueue({ ...next, sequence: 4, revision: 4 })
+      store.enqueue(
+        frame(5, { type: 'surface.append-text', nodeId: 'text' as SurfaceNodeId, delta: '丙' }),
+      )
+      store.flush()
+      expect(previous.nodes[0]?.props).toEqual({ source: '甲', phase: 'preview' })
+      expect([...previous.operationIds]).toEqual(previousIds)
+      expect(store.get('surface-1')?.nodes[0]?.props).toEqual({
+        source: '甲乙丙',
+        phase: 'preview',
+      })
+    } finally {
+      store.$dispose()
+    }
+  })
+
+  it('隐藏主界面时合并增量，恢复可见或失败终态时立即刷新', () => {
+    vi.stubGlobal(
+      'requestAnimationFrame',
+      vi.fn(() => 1),
+    )
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    setActivePinia(createPinia())
+    const store = useCompositorStore()
+    try {
+      store.setPresentationActive(false)
+      store.enqueue(frame(1, { type: 'surface.open', threadId: 'thread-1', principalId: 'pero' }))
+      store.enqueue(
+        frame(2, {
+          type: 'surface.append-text',
+          nodeId: 'text' as SurfaceNodeId,
+          delta: '后台内容',
+        }),
+      )
+      expect(requestAnimationFrame).not.toHaveBeenCalled()
+      expect(store.get('surface-1')).toBeUndefined()
+      store.setPresentationActive(true)
+      expect(store.get('surface-1')?.nodes[0]?.props).toMatchObject({ source: '后台内容' })
+      store.setPresentationActive(false)
+      store.enqueue(frame(3, { type: 'surface.fail', code: 'ERROR', message: '后台失败' }))
+      expect(store.get('surface-1')?.state).toBe('failed')
+    } finally {
+      store.$dispose()
+      vi.unstubAllGlobals()
+    }
+  })
+  it('动画帧停止时失败终态仍立即可见，不需要用户刷新页面', () => {
+    vi.stubGlobal(
+      'requestAnimationFrame',
+      vi.fn(() => 1),
+    )
+    setActivePinia(createPinia())
+    const store = useCompositorStore()
+    try {
+      store.enqueue(frame(1, { type: 'surface.open', threadId: 'thread-1', principalId: 'pero' }))
+      store.enqueue(frame(2, { type: 'surface.fail', code: 'LLM_TIMEOUT', message: '失败原因' }))
+      expect(store.get('surface-1')?.state).toBe('failed')
+      expect(store.get('surface-1')?.nodes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: 'error',
+            props: expect.objectContaining({ code: 'LLM_TIMEOUT' }),
+          }),
+        ]),
+      )
+    } finally {
+      store.$dispose()
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('页面切换清理Scope时应保留运行中的流式Surface', () => {
     setActivePinia(createPinia())
     const store = useCompositorStore()
@@ -105,6 +274,7 @@ describe('Internal Compositor', () => {
       status: 'completed',
       timestamp: '2026-08-18T00:00:00.000Z',
       toolCalls: [],
+      contentBlocks: [],
       attachments: [],
     }
     store.enqueue(
@@ -202,10 +372,7 @@ describe('Internal Compositor', () => {
       state: 'committed',
       suspended: true,
     })
-    expect(store.get('thinking-surface')?.nodes[0]?.props).toEqual({
-      state: 'cancelled',
-      message: '已终止',
-    })
+    expect(store.get('thinking-surface')?.nodes[0]?.props).toMatchObject({ state: 'cancelled' })
   })
 
   it('终止操作不应改写已经进入生成阶段的状态', () => {

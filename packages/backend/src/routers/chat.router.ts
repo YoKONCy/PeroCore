@@ -30,9 +30,11 @@ import { streamSSE } from 'hono/streaming'
 import { ConversationSurfaceSession } from '../projections/conversationSurfaceSession'
 import type { AppContext } from '../container'
 import { AppError } from '../lib/appError'
+import { disposeExecutionOwner } from '../tools/productivityRuntimeHolder'
 import { resolveToolUserDescription, resolveToolUserLabel } from '../tools/toolUserLabels'
 import { isAdvancedTool } from '../tools/advancedTools'
 import { isSystemProtocolTool } from '../tools/systemProtocolTools'
+import { isToolAllowedInInteractionMode } from '../tools/interactionMode'
 import type { ThreadChannel } from '@infos/shared'
 
 // ─────────────────────────────────────────────
@@ -43,6 +45,10 @@ import type { ThreadChannel } from '@infos/shared'
 const chatRequestSchema = z.object({
   threadId: z.string().min(1),
   content: z.string().min(1),
+  /** 仅选择提示词条目的生成触发类型，不改变消息持久化或工具权限。 */
+  generationType: z
+    .enum(['normal', 'continue', 'impersonate', 'swipe', 'regenerate', 'quiet'])
+    .optional(),
   /** 可选覆盖 Agent（默认用 Thread 的 agentId） */
   agentId: z.string().optional(),
   attachmentIds: z.array(z.string().uuid()).max(5).optional(),
@@ -52,7 +58,19 @@ const chatRequestSchema = z.object({
   workspaceContext: z
     .object({
       filePath: z.string().max(2048).optional(),
+      fileHash: z
+        .string()
+        .regex(/^[a-f0-9]{64}$/i)
+        .optional(),
+      fileDirty: z.boolean().optional(),
       terminalId: z.string().max(256).optional(),
+      selection: z
+        .object({
+          text: z.string().min(1).max(4000),
+          startLine: z.number().int().min(1),
+          endLine: z.number().int().min(1),
+        })
+        .optional(),
     })
     .optional(),
 })
@@ -81,14 +99,24 @@ const threadToolsSchema = z.object({
   disabledTools: z.array(z.string().min(1)).max(500),
 })
 
-const threadExecutionModeSchema = z.object({
-  autoExecuteTools: z.boolean(),
+const threadExecutionModeSchema = z
+  .object({
+    executionMode: z.enum(['manual', 'auto', 'auto_approve', 'full']).optional(),
+    autoExecuteTools: z.boolean().optional(),
+  })
+  .refine((value) => value.executionMode !== undefined || value.autoExecuteTools !== undefined, {
+    message: '必须指定执行模式',
+  })
+
+const threadInteractionModeSchema = z.object({
+  interactionMode: z.enum(['chat', 'work']),
 })
 
 const rewindSchema = z
   .object({
     messageId: z.number().int().positive().optional(),
     wholeThread: z.boolean().optional(),
+    preserveInputAttachments: z.boolean().optional(),
   })
   .refine((value) => value.wholeThread === true || value.messageId !== undefined, {
     message: '必须指定 messageId 或 wholeThread=true',
@@ -96,6 +124,7 @@ const rewindSchema = z
 
 const editMessageSchema = z.object({
   content: z.string().min(1),
+  expectedRevision: z.number().int().positive().optional(),
 })
 
 // ─────────────────────────────────────────────
@@ -129,6 +158,8 @@ export function createChatRouter(ctx: AppContext) {
       content,
       attachmentIds: body.attachmentIds,
       imageMode: body.imageMode,
+      generationType: body.generationType,
+      workspaceContext: body.workspaceContext,
     })
 
     const messageId = result.assistantMessage?.id
@@ -140,9 +171,10 @@ export function createChatRouter(ctx: AppContext) {
 
     return c.json({
       code: 'OK',
-      message: '对话完成',
+      message: result.executionPause ? '对话已暂停' : '对话完成',
       data: {
         executionId: result.execution?.executionId,
+        executionPause: result.executionPause,
         threadId: result.threadId,
         messageId: String(messageId),
         surface,
@@ -167,20 +199,77 @@ export function createChatRouter(ctx: AppContext) {
     const agentId = body.agentId ?? thread.agentId
 
     // 注册任务，并把同一取消信号传入完整对话链路。
+    const running = ctx.runtimeStateService.getTaskInfo(threadId)
+    if (running) {
+      throw new AppError('RESOURCE_BUSY', {
+        message: '当前会话仍在后台执行，请等待完成或先停止任务',
+      })
+    }
     ctx.runtimeStateService.registerTask(threadId, agentId)
     const signal = ctx.runtimeStateService.getAbortSignal(threadId)
 
     return streamSSE(c, async (stream) => {
+      // 连接只负责观察；断连、隐藏窗口或写入背压不能取消后端执行。
+      let detached = false
+      stream.onAbort(() => {
+        detached = true
+      })
+      let writing = false
+      const writeEvent = async (event: { event: string; data: string }): Promise<void> => {
+        if (detached || stream.aborted) return
+        let timer: ReturnType<typeof setTimeout> | undefined
+        writing = true
+        try {
+          await Promise.race([
+            stream.writeSSE(event).catch(() => {
+              detached = true
+            }),
+            new Promise<void>((resolve) => {
+              timer = setTimeout(() => {
+                detached = true
+                resolve()
+              }, 3_000)
+            }),
+          ])
+        } finally {
+          clearTimeout(timer)
+          writing = false
+        }
+      }
+      const heartbeat = setInterval(() => {
+        if (!writing) void writeEvent({ event: 'heartbeat', data: '{}' })
+      }, 15_000)
+      heartbeat.unref?.()
       const startTime = Date.now()
       let toolCallCount = 0
       let fullContent = ''
       let mode: 'stream' | 'non_stream' = 'stream'
       let firstTokenMs: number | undefined
       let firstTokenAt: number | undefined
-      let activeToolName = ''
       const surfaceRef: { current: ConversationSurfaceSession | null } = { current: null }
       const writeSurface = async (frame: import('@infos/shared').SurfaceFrame) => {
-        await stream.writeSSE({ event: 'surface', data: JSON.stringify(frame) })
+        await writeEvent({ event: 'surface', data: JSON.stringify(frame) })
+      }
+      let runState = 'thinking'
+      let runLabel = '正在思考……'
+      const updateRunState = async (
+        state: Parameters<ConversationSurfaceSession['status']>[0],
+        message?: string,
+        telemetry?: Parameters<ConversationSurfaceSession['status']>[2],
+      ) => {
+        if (!surfaceRef.current) return
+        const labels: Record<string, string> = {
+          thinking: '正在思考……',
+          assembling: '正在生成工具调用……',
+          calling: '正在等待工具回传……',
+          generating: '正在打字……',
+        }
+        const label = message ?? labels[state]
+        // 每个阶段只推送一次状态；后续文本增量不能重复创建状态帧。
+        if (state === runState && label === runLabel && !telemetry) return
+        runState = state
+        runLabel = label ?? ''
+        await writeSurface(surfaceRef.current.status(state, label, telemetry))
       }
       try {
         // 统一流式对话：创建 Pair、编译上下文、保存原始文本与工具调用都由服务处理。
@@ -191,9 +280,10 @@ export function createChatRouter(ctx: AppContext) {
           attachmentIds: body.attachmentIds,
           imageMode: body.imageMode,
           workspaceContext: body.workspaceContext,
+          generationType: body.generationType,
           signal,
           onRagProgress: async (progress) => {
-            await stream.writeSSE({
+            await writeEvent({
               event: 'rag_progress',
               data: JSON.stringify(progress),
             })
@@ -208,26 +298,22 @@ export function createChatRouter(ctx: AppContext) {
           },
           onModelResolved: async (config) => {
             mode = config.stream === false ? 'non_stream' : 'stream'
-            if (surfaceRef.current) {
-              await writeSurface(
-                surfaceRef.current.status(
-                  'thinking',
-                  mode === 'stream' ? '流式模式 · 等待首字' : '非流式模式 · 等待完整响应',
-                  { mode },
-                ),
-              )
-            }
+            await updateRunState('thinking', undefined, { mode })
           },
         })
 
         let next = await gen.next()
         while (!next.done) {
           const chunk = next.value
-          if (chunk.event === 'thinking_start') {
+          if (chunk.event === 'context_budget') {
+            if (surfaceRef.current) await writeSurface(surfaceRef.current.contextBudget(chunk.data))
+          } else if (chunk.event === 'thinking_start') {
+            await updateRunState('thinking')
             const data = chunk.data
             if (surfaceRef.current)
-              await writeSurface(surfaceRef.current.startThinking(data.blockId))
+              await writeSurface(surfaceRef.current.startThinking(data.blockId, data.turn))
           } else if (chunk.event === 'thinking_delta') {
+            await updateRunState('thinking')
             const data = chunk.data
             if (surfaceRef.current)
               await writeSurface(surfaceRef.current.appendThinking(data.blockId, data.delta))
@@ -236,10 +322,14 @@ export function createChatRouter(ctx: AppContext) {
             if (surfaceRef.current)
               await writeSurface(surfaceRef.current.completeThinking(data.blockId, data.durationMs))
           } else if (chunk.event === 'native_reasoning_start') {
+            await updateRunState('thinking')
             const data = chunk.data
             if (surfaceRef.current)
-              await writeSurface(surfaceRef.current.startNativeReasoning(data.blockId, data.mode))
+              await writeSurface(
+                surfaceRef.current.startNativeReasoning(data.blockId, data.mode, data.turn),
+              )
           } else if (chunk.event === 'native_reasoning_delta') {
+            await updateRunState('thinking')
             const data = chunk.data
             if (surfaceRef.current)
               await writeSurface(surfaceRef.current.appendNativeReasoning(data.blockId, data.delta))
@@ -250,10 +340,12 @@ export function createChatRouter(ctx: AppContext) {
                 surfaceRef.current.completeNativeReasoning(data.blockId, data.durationMs),
               )
           } else if (chunk.event === 'tool_call_start') {
+            await updateRunState('assembling')
             const data = chunk.data
             if (surfaceRef.current)
               await writeSurface(surfaceRef.current.startToolDraft(data.draftId))
           } else if (chunk.event === 'tool_call_delta') {
+            await updateRunState('assembling')
             const data = chunk.data
             if (surfaceRef.current) {
               const frame = surfaceRef.current.appendToolDraft(
@@ -264,16 +356,25 @@ export function createChatRouter(ctx: AppContext) {
               )
               if (frame) await writeSurface(frame)
             }
+          } else if (chunk.event === 'tool_file_baseline') {
+            if (surfaceRef.current)
+              await writeSurface(
+                surfaceRef.current.fileBaseline(chunk.data.draftId, chunk.data.baseline),
+              )
           } else if (chunk.event === 'tool_call_ready') {
             toolCallCount++
             const data = chunk.data
             if (surfaceRef.current) {
-              const label = resolveToolUserLabel(data.name)
-              activeToolName = data.name
               await writeSurface(surfaceRef.current.finalizeToolDraft(data))
-              await writeSurface(surfaceRef.current.status('calling', `${label}中...`))
             }
+          } else if (chunk.event === 'model_retry') {
+            if (chunk.data.discardedTextCharacters)
+              fullContent = fullContent.slice(0, -chunk.data.discardedTextCharacters)
+            if (surfaceRef.current)
+              for (const frame of surfaceRef.current.modelRetry(chunk.data))
+                await writeSurface(frame)
           } else if (chunk.event === 'narration_start') {
+            await updateRunState('generating')
             const data = chunk.data
             if (surfaceRef.current)
               await writeSurface(surfaceRef.current.startNarration(data.blockId))
@@ -283,51 +384,37 @@ export function createChatRouter(ctx: AppContext) {
             if (firstTokenMs === undefined) {
               firstTokenMs = now - startTime
               firstTokenAt = now
-              if (surfaceRef.current) {
-                await writeSurface(
-                  surfaceRef.current.status(
-                    'generating',
-                    mode === 'stream' ? '正在流式输出' : '完整响应已返回',
-                    { mode, firstTokenMs },
-                  ),
-                )
-              }
+              await updateRunState('generating', undefined, { mode, firstTokenMs })
             }
+            await updateRunState('generating')
             fullContent += data.delta
             if (surfaceRef.current)
               await writeSurface(surfaceRef.current.appendText(data.blockId, data.delta))
           } else if (chunk.event === 'narration_end') {
-            // 块结束语义已进入持久Timeline，实时节点无需额外操作。
+            if (surfaceRef.current)
+              await writeSurface(surfaceRef.current.completeNarration(chunk.data.blockId))
           } else {
             if (chunk.event === 'tool_call') {
               // 兼容事件：正式节点已由tool_call_ready在原草稿节点上完成。
+              await updateRunState('calling')
             } else if (chunk.event === 'tool_result') {
               const data = chunk.data as {
                 callId: string
                 result: string
                 isError: boolean
                 durationMs?: number
+                automaticApproval?: import('@infos/shared').AutomaticApprovalRecord
               }
               if (surfaceRef.current) {
                 for (const frame of surfaceRef.current.toolResult(data)) await writeSurface(frame)
-                await writeSurface(
-                  surfaceRef.current.status(
-                    'thinking',
-                    activeToolName
-                      ? `${resolveToolUserLabel(activeToolName)}完成，继续生成回复...`
-                      : '工具完成，继续生成回复...',
-                  ),
-                )
+                await updateRunState('thinking')
               }
-              activeToolName = ''
             } else if (chunk.event === 'status') {
               const data = chunk.data as {
-                state: 'thinking' | 'calling' | 'generating' | 'tool_failed'
+                state: Parameters<ConversationSurfaceSession['status']>[0]
                 message?: string
               }
-              if (surfaceRef.current) {
-                await writeSurface(surfaceRef.current.status(data.state, data.message))
-              }
+              await updateRunState(data.state, data.message)
             }
           }
           next = await gen.next()
@@ -363,14 +450,18 @@ export function createChatRouter(ctx: AppContext) {
         }
 
         // 完成遥测与done事件
-        await stream.writeSSE({
+        await writeEvent({
           event: 'done',
           data: JSON.stringify({
             usage: {
               promptTokens: ctx.tokenCounter.countMessages(turnResult.initialPromptMessages),
-              completionTokens: ctx.tokenCounter.countTokens(fullContent),
+              completionTokens:
+                turnResult.generationStats?.outputTokens ??
+                ctx.tokenCounter.countTokens(fullContent),
             },
+            generationStats: turnResult.generationStats,
             toolCallCount,
+            executionPause: turnResult.executionPause,
             mode,
             firstTokenMs,
             outputDurationMs,
@@ -386,7 +477,7 @@ export function createChatRouter(ctx: AppContext) {
         if (surfaceRef.current) {
           await writeSurface(surfaceRef.current.fail(code, message, fullContent))
         }
-        await stream.writeSSE({
+        await writeEvent({
           event: 'error',
           data: JSON.stringify({
             code,
@@ -395,6 +486,7 @@ export function createChatRouter(ctx: AppContext) {
           }),
         })
       } finally {
+        clearInterval(heartbeat)
         ctx.runtimeStateService.unregisterTask(threadId)
       }
     })
@@ -406,6 +498,7 @@ export function createChatRouter(ctx: AppContext) {
     const threadId = ((body as Record<string, unknown>).threadId as string) ?? ''
     if (threadId) {
       ctx.runtimeStateService.cancelTask(threadId)
+      await disposeExecutionOwner({ threadId }, true)
     }
     return c.json({ code: 'OK', message: '已停止生成' })
   })
@@ -480,6 +573,7 @@ export function createChatRouter(ctx: AppContext) {
       )
       .map((tool) => ({
         name: tool.name,
+        packageId: tool.packageId,
         label: resolveToolUserLabel(tool.name, tool.display?.label),
         description: resolveToolUserDescription(
           tool.name,
@@ -487,7 +581,15 @@ export function createChatRouter(ctx: AppContext) {
           tool.description,
         ),
         display: tool.display ?? undefined,
-        enabled: isSystemProtocolTool(tool.name) || !disabled.has(tool.name),
+        enabled:
+          isToolAllowedInInteractionMode(tool.name, thread.interactionMode, ctx.toolRegistry) &&
+          (isSystemProtocolTool(tool.name) || !disabled.has(tool.name)),
+        userEnabled: isSystemProtocolTool(tool.name) || !disabled.has(tool.name),
+        modeAllowed: isToolAllowedInInteractionMode(
+          tool.name,
+          thread.interactionMode,
+          ctx.toolRegistry,
+        ),
         locked: isSystemProtocolTool(tool.name),
       }))
     return { thread, tools }
@@ -534,16 +636,6 @@ export function createChatRouter(ctx: AppContext) {
     return c.json({ code: 'OK', message: '心流已清空', data })
   })
 
-  /** DELETE /threads/:id/work-context — 用户清空指定 Agent 的工作上下文。 */
-  router.delete('/threads/:id/work-context', async (c) => {
-    const threadId = c.req.param('id')
-    const thread = await ctx.threadService.getThread(threadId)
-    if (!thread) throw new AppError('NOT_FOUND', { message: '会话不存在' })
-    const agentId = c.req.query('agentId') ?? thread.agentId
-    const data = await ctx.flowStateService.clearWorkContext(threadId, agentId)
-    return c.json({ code: 'OK', message: '工作上下文已清空', data })
-  })
-
   router.post('/threads/:id/token-budget-preview', async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as {
       agentId?: string
@@ -566,11 +658,43 @@ export function createChatRouter(ctx: AppContext) {
       data: {
         threadId: thread.id,
         channel: thread.channel,
+        executionMode: thread.executionMode,
         autoExecuteTools: thread.autoExecuteTools,
+        interactionMode: thread.interactionMode,
+        disabledTools: thread.disabledTools,
         tools,
       },
     })
   })
+
+  router.put(
+    '/threads/:id/interaction-mode',
+    zValidator('json', threadInteractionModeSchema),
+    async (c) => {
+      const threadId = c.req.param('id')
+      const thread = await ctx.threadService.getThread(threadId)
+      if (!thread || thread.channel !== 'desktop' || thread.purpose !== 'conversation') {
+        throw new AppError('INVALID_PARAMETER', { message: '只能修改普通桌面会话的交互模式' })
+      }
+      await assertThreadMutable(threadId)
+      const { interactionMode } = c.req.valid('json')
+      await ctx.threadService.updateInteractionMode(threadId, interactionMode)
+      const { thread: updated, tools } = await resolveThreadTools(threadId)
+      return c.json({
+        code: 'OK',
+        message: '会话模式已保存',
+        data: {
+          threadId,
+          channel: updated.channel,
+          interactionMode: updated.interactionMode,
+          executionMode: updated.executionMode,
+          autoExecuteTools: updated.autoExecuteTools,
+          disabledTools: updated.disabledTools,
+          tools,
+        },
+      })
+    },
+  )
 
   router.put(
     '/threads/:id/execution-mode',
@@ -578,12 +702,18 @@ export function createChatRouter(ctx: AppContext) {
     async (c) => {
       const threadId = c.req.param('id')
       await assertThreadMutable(threadId)
-      const { autoExecuteTools } = c.req.valid('json')
-      await ctx.threadService.updateAutoExecuteTools(threadId, autoExecuteTools)
+      const thread = await ctx.threadService.getThread(threadId)
+      if (!thread || thread.channel !== 'desktop' || thread.purpose !== 'conversation') {
+        throw new AppError('INVALID_PARAMETER', { message: '只能修改普通桌面会话的执行模式' })
+      }
+      const input = c.req.valid('json')
+      const executionMode = input.executionMode ?? (input.autoExecuteTools ? 'auto' : 'manual')
+      const autoExecuteTools = executionMode !== 'manual'
+      await ctx.threadService.updateExecutionMode(threadId, executionMode)
       return c.json({
         code: 'OK',
-        message: autoExecuteTools ? '自动执行模式已开启' : '自动执行模式已关闭',
-        data: { threadId, autoExecuteTools },
+        message: '执行模式已保存',
+        data: { threadId, executionMode, autoExecuteTools },
       })
     },
   )
@@ -594,8 +724,8 @@ export function createChatRouter(ctx: AppContext) {
     if (ctx.runtimeStateService.listActiveTasks().some((task) => task.threadId === threadId)) {
       throw new AppError('INVALID_PARAMETER', { message: '会话正在生成中，请停止后再修改工具配置' })
     }
-    const { tools } = await resolveThreadTools(threadId)
-    const configurable = new Set(tools.map((tool) => tool.name))
+    const { thread, tools } = await resolveThreadTools(threadId)
+    const configurable = new Set([...tools.map((tool) => tool.name), ...thread.disabledTools])
     const requestedDisabled = [...new Set(c.req.valid('json').disabledTools)]
     const advancedTools = requestedDisabled.filter(isAdvancedTool)
     if (advancedTools.length) {
@@ -617,13 +747,17 @@ export function createChatRouter(ctx: AppContext) {
       })
     }
     await ctx.threadService.updateDisabledTools(threadId, disabledTools)
+    const { thread: updatedThread, tools: updatedTools } = await resolveThreadTools(threadId)
     return c.json({
       code: 'OK',
       message: '本会话工具配置已保存',
       data: {
         disabledTools,
-        autoExecuteTools: (await ctx.threadService.getThread(threadId))?.autoExecuteTools ?? false,
-        tools: tools.map((tool) => ({ ...tool, enabled: !disabledTools.includes(tool.name) })),
+        channel: updatedThread.channel,
+        executionMode: updatedThread.executionMode,
+        autoExecuteTools: updatedThread.autoExecuteTools,
+        interactionMode: updatedThread.interactionMode,
+        tools: updatedTools,
       },
     })
   })
@@ -718,7 +852,7 @@ export function createChatRouter(ctx: AppContext) {
     return c.json({ code: 'OK', message: '预检成功', data: preview })
   })
 
-  /** POST /threads/:id/rewind — 强制回滚文件并链式删除对话历史。 */
+  /** POST /threads/:id/rewind — 单轮撤回回滚文件；整条会话删除保留文件。 */
   router.post('/threads/:id/rewind', zValidator('json', rewindSchema), async (c) => {
     const threadId = c.req.param('id')
     await assertThreadMutable(threadId)
@@ -728,13 +862,20 @@ export function createChatRouter(ctx: AppContext) {
       : await ctx.threadService.previewMessageRewind(threadId, body.messageId!)
     const result = body.wholeThread
       ? await ctx.threadService.rewindThread(threadId)
-      : await ctx.threadService.rewindMessage(threadId, body.messageId!)
+      : await ctx.threadService.rewindMessage(
+          threadId,
+          body.messageId!,
+          'user',
+          body.preserveInputAttachments,
+        )
     if (body.wholeThread) {
       await ctx.flowStateService.deleteThread(threadId)
+      ctx.toolContextService.deleteThread(threadId)
     } else {
-      // “回滚到目标轮次”保留目标轮次完成后的心流，只撤销其后 B/C/D 等轮次的修订。
-      const laterPairIds = preview.pairIds.slice(1)
-      if (laterPairIds.length) await ctx.flowStateService.rollbackPairs(threadId, laterPairIds)
+      // 文件与消息都恢复到目标轮次之前，临时状态和材料按相同范围撤回。
+      if (preview.pairIds.length)
+        await ctx.flowStateService.rollbackPairs(threadId, preview.pairIds)
+      if (preview.pairIds.length) ctx.toolContextService.deletePairs(threadId, preview.pairIds)
     }
     let projection
     if (!body.wholeThread) {
@@ -745,18 +886,20 @@ export function createChatRouter(ctx: AppContext) {
     }
     return c.json({
       code: 'OK',
-      message: '对话、工作区与心流已回滚',
+      message: body.wholeThread ? '会话已删除，文件保持原样' : '对话、工作区与心流已回滚',
       data: { ...result, ...(projection ? { projection } : {}) },
     })
   })
 
-  /** DELETE /api/threads/:id — 兼容旧客户端：删除时同样回滚整条会话。 */
+  /** DELETE /api/threads/:id — 删除会话历史，保留全部文件。 */
   router.delete('/threads/:id', async (c) => {
     const threadId = c.req.param('id')
     await assertThreadMutable(threadId)
     await ctx.threadService.rewindThread(threadId)
     await ctx.flowStateService.deleteThread(threadId)
-    return c.json({ code: 'OK', message: '会话、工作区与心流已回滚' })
+    ctx.toolContextService.deleteThread(threadId)
+    ctx.conversationProjection.invalidate(threadId)
+    return c.json({ code: 'OK', message: '会话已删除，文件保持原样' })
   })
 
   // ─────────────────────────────────────────────
@@ -767,6 +910,8 @@ export function createChatRouter(ctx: AppContext) {
    * PATCH /api/threads/:id/messages/:msgId — 编辑消息内容
    */
   router.patch('/threads/:id/messages/:msgId', zValidator('json', editMessageSchema), async (c) => {
+    const threadId = c.req.param('id')
+    await assertThreadMutable(threadId)
     const msgId = Number(c.req.param('msgId'))
     if (!Number.isInteger(msgId) || msgId <= 0) {
       throw new AppError('INVALID_PARAMETER', {
@@ -775,12 +920,20 @@ export function createChatRouter(ctx: AppContext) {
       })
     }
     const body = c.req.valid('json')
-    const success = await ctx.threadService.editMessage(msgId, body.content)
+    const success = await ctx.threadService.editMessage(
+      msgId,
+      body.content,
+      threadId,
+      body.expectedRevision,
+    )
     if (!success) {
       throw new AppError('NOT_FOUND', { message: '消息不存在' })
     }
     ctx.conversationProjection.invalidate(c.req.param('id'))
-    const data = await ctx.conversationProjection.getSnapshot(c.req.param('id'))
+    const data = await ctx.conversationProjection.getSnapshot(threadId, {
+      beforeCursor: String(msgId + 1),
+      pageSize: 100,
+    })
     return c.json({ code: 'OK', message: '消息已更新', data })
   })
 
@@ -818,6 +971,10 @@ export function createChatRouter(ctx: AppContext) {
     const threadId = c.req.param('id')
     await assertThreadMutable(threadId)
     const result = await ctx.threadService.rewindMessage(threadId, msgId)
+    if (result.preview.pairIds.length) {
+      await ctx.flowStateService.rollbackPairs(threadId, result.preview.pairIds)
+      ctx.toolContextService.deletePairs(threadId, result.preview.pairIds)
+    }
     ctx.conversationProjection.invalidate(threadId)
     const projection = await ctx.conversationProjection.getSnapshot(threadId)
     return c.json({

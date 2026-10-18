@@ -1,26 +1,20 @@
+// @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const lifecycle = vi.hoisted(() => ({
-  mounted: [] as Array<() => void>,
-  unmounted: [] as Array<() => void>,
-  activated: [] as Array<() => void>,
-  deactivated: [] as Array<() => void>,
-  watchers: [] as Array<(newValue: unknown, oldValue: unknown) => void>,
-}))
+import { defineComponent, nextTick } from 'vue'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 
-vi.mock('vue', () => ({
-  ref: <T>(value: T) => ({ value }),
-  unref: <T>(value: T | { value: T }) =>
-    typeof value === 'object' && value !== null && 'value' in value ? value.value : value,
-  nextTick: () => Promise.resolve(),
-  onMounted: (fn: () => void) => lifecycle.mounted.push(fn),
-  onUnmounted: (fn: () => void) => lifecycle.unmounted.push(fn),
-  onActivated: (fn: () => void) => lifecycle.activated.push(fn),
-  onDeactivated: (fn: () => void) => lifecycle.deactivated.push(fn),
-  watch: (_source: unknown, fn: (newValue: unknown, oldValue: unknown) => void) => {
-    lifecycle.watchers.push(fn)
-  },
-}))
+enableAutoUnmount(afterEach)
+function mountHook(setup: () => unknown) {
+  return mount(
+    defineComponent({
+      setup() {
+        setup()
+        return () => null
+      },
+    }),
+  )
+}
 
 import { ref } from 'vue'
 import { useDebounceFn, useThrottleFn } from '@infos/frontend/composables/useThrottle'
@@ -28,14 +22,6 @@ import { useLoading } from '@infos/frontend/composables/useLoading'
 import { useInterval } from '@infos/frontend/composables/useInterval'
 import { useEventListener } from '@infos/frontend/composables/useEventListener'
 import { useChatInput } from '@infos/frontend/composables/chat/useChatInput'
-
-function resetLifecycle() {
-  lifecycle.mounted.length = 0
-  lifecycle.unmounted.length = 0
-  lifecycle.activated.length = 0
-  lifecycle.deactivated.length = 0
-  lifecycle.watchers.length = 0
-}
 
 describe('useChatInput', () => {
   beforeEach(() => {
@@ -63,8 +49,7 @@ describe('useChatInput', () => {
 
     input.inputText.value = '  你好主人  '
     input.onKeydown(event)
-    await Promise.resolve()
-    await Promise.resolve()
+    await flushPromises()
 
     expect(event.preventDefault).toHaveBeenCalledTimes(1)
     expect(onSend).toHaveBeenCalledWith('你好主人')
@@ -224,87 +209,65 @@ describe('useDebounceFn', () => {
 
 describe('useInterval', () => {
   beforeEach(() => {
-    resetLifecycle()
     vi.useFakeTimers()
   })
 
   afterEach(() => {
-    resetLifecycle()
     vi.useRealTimers()
   })
 
-  it('应当注册挂载、激活、卸载和停用生命周期', () => {
+  it('挂载后按配置执行，停止和卸载后不再调用', () => {
     const callback = vi.fn()
-
-    useInterval(callback, 50, { immediate: true })
-
-    expect(lifecycle.mounted).toHaveLength(1)
-    expect(lifecycle.activated).toHaveLength(1)
-    expect(lifecycle.unmounted).toHaveLength(1)
-    expect(lifecycle.deactivated).toHaveLength(1)
-  })
-
-  it('应当支持手动 start/stop 和 immediate 执行', () => {
-    const callback = vi.fn()
-    const { start, stop } = useInterval(callback, 50, { immediate: true })
-
-    start()
+    let api!: ReturnType<typeof useInterval>
+    const wrapper = mountHook(() => {
+      api = useInterval(callback, 50, { immediate: true })
+    })
     expect(callback).toHaveBeenCalledTimes(1)
-
     vi.advanceTimersByTime(50)
     expect(callback).toHaveBeenCalledTimes(2)
-
-    stop()
+    api.stop()
     vi.advanceTimersByTime(100)
     expect(callback).toHaveBeenCalledTimes(2)
-
-    lifecycle.activated[0]?.()
+    api.start()
     expect(callback).toHaveBeenCalledTimes(3)
-    lifecycle.deactivated[0]?.()
+    wrapper.unmount()
     vi.advanceTimersByTime(100)
     expect(callback).toHaveBeenCalledTimes(3)
   })
 })
 
 describe('useEventListener', () => {
-  beforeEach(() => {
-    resetLifecycle()
-  })
-
-  afterEach(() => {
-    resetLifecycle()
-  })
-
   it('应当在生命周期中自动绑定和解绑事件', () => {
     const target = new EventTarget()
     const handler = vi.fn()
 
-    useEventListener(target, 'ping', handler)
-    lifecycle.mounted[0]?.()
+    const wrapper = mountHook(() => useEventListener(target, 'ping', handler))
 
     target.dispatchEvent(new Event('ping'))
     expect(handler).toHaveBeenCalledTimes(1)
 
-    lifecycle.unmounted[0]?.()
+    wrapper.unmount()
     target.dispatchEvent(new Event('ping'))
     expect(handler).toHaveBeenCalledTimes(1)
   })
 
-  it('应当在 ref target 变化时重新绑定新目标', () => {
+  it('应当在 ref target 变化时重新绑定新目标', async () => {
     const first = new EventTarget()
     const second = new EventTarget()
     const target = ref<EventTarget | null>(first)
     const handler = vi.fn()
 
-    useEventListener(target, 'ping', handler)
-    lifecycle.mounted[0]?.()
+    const wrapper = mountHook(() => useEventListener(target, 'ping', handler))
     first.dispatchEvent(new Event('ping'))
 
     target.value = second
-    lifecycle.watchers[0]?.(second, first)
+    await nextTick()
     first.dispatchEvent(new Event('ping'))
     second.dispatchEvent(new Event('ping'))
 
+    expect(handler).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+    second.dispatchEvent(new Event('ping'))
     expect(handler).toHaveBeenCalledTimes(2)
   })
 
@@ -312,9 +275,8 @@ describe('useEventListener', () => {
     const target = ref<EventTarget | null>(null)
     const handler = vi.fn()
 
-    useEventListener(target, 'ping', handler)
-    lifecycle.mounted[0]?.()
-    lifecycle.watchers[0]?.(null, null)
+    const wrapper = mountHook(() => useEventListener(target, 'ping', handler))
+    wrapper.unmount()
 
     expect(handler).not.toHaveBeenCalled()
   })

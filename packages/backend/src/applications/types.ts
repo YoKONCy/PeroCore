@@ -419,6 +419,7 @@ export interface LaunchAppParams {
 
 export interface AppCommandRequest {
   correlationId: string
+  signal?: AbortSignal
   executionId?: import('@infos/shared').KernelExecutionId
   processId?: import('@infos/shared').KernelProcessId
   action: string

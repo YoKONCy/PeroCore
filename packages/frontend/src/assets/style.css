@@ -24,6 +24,8 @@
 /* 2.1 现代 UI 语义令牌 (MainView 及新组件优先使用) */
 @import './ui-tokens.css';
 @import './dashboard-dark.css';
+@import './app-background.css';
+@import './scrollbars.css';
 
 /*
  * 3. @theme 桥接 — 将 tokens.css 的 --color-* 变量注册为 Tailwind 令牌
@@ -155,6 +157,16 @@ select,
 textarea {
   font: inherit;
   color: inherit;
+}
+
+/* 键盘操作沿用主题强调色，不影响鼠标点击时的外观。 */
+:where(button, a[href], [role='button'], [role='tab'], [role='menuitem']):focus-visible {
+  outline: 2px solid var(--ui-focus-color);
+  outline-offset: 2px;
+}
+
+:where(button) > .pixel-icon {
+  flex-shrink: 0;
 }
 
 /* ── 3. 像素风组件类 (沿用 v1) ── */
@@ -670,29 +682,6 @@ textarea {
     transform: translateY(-30px) translateX(0);
     opacity: 0;
   }
-}
-
-/* ── 自定义滚动条 (像素风) ── */
-
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-
-::-webkit-scrollbar-track {
-  background: var(--color-scrollbar-track);
-  box-shadow: inset 2px 0 0 0 var(--color-scrollbar-track-border);
-}
-
-::-webkit-scrollbar-thumb {
-  background: var(--color-scrollbar-thumb);
-  box-shadow:
-    inset -2px -2px 0 0 var(--color-scrollbar-thumb-shadow),
-    inset 2px 2px 0 0 var(--color-scrollbar-thumb-light);
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: var(--color-sky-hover);
 }
 
 /* ── 全局基础 ── */

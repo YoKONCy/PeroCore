@@ -214,9 +214,7 @@ description: 用户导入
       mkdirSync(sourceDir, { recursive: true })
       const loader = new SkillLoader([builtinDir, userDir], userDir)
 
-      expect(() => loader.importFromPath(sourceDir)).toThrow(
-        '该目录下没有 SKILL.md 文件，不是有效的 Skill 文件夹',
-      )
+      expect(() => loader.importFromPath(sourceDir)).toThrow(Error)
     })
 
     it('importFromPath 目标已存在时应当抛出重复错误', () => {

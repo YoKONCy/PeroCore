@@ -11,7 +11,7 @@
 
   "toolDefinition": {
     "name": "terminal_execute",
-    "description": "在当前 Agent 的执行会话工作区内运行短命令并获取输出。命令默认直接在 workspace 根目录执行；相对 cwd 也以该根目录为基准，不要填写后端工程路径。支持任意 shell 命令，请谨慎执行有副作用的命令。",
+    "description": "运行短命令并等待退出。超时会终止进程树，返回 TERMINAL_TIMEOUT、已有输出及 terminalId；可用 terminal_read 读取保留日志。已知长时、静默等待（例如 Start-Sleep）或服务任务请用 terminal_create + terminal_wait，不要反复重跑超时命令。JSON、引号或复杂参数优先用 command+argv 直接执行；Windows PowerShell 不能用反斜杠转义双引号。",
     "display": {
       "label": "执行终端命令",
       "description": "运行命令行指令，用于构建、测试或管理项目。",
@@ -22,10 +22,18 @@
     "parameters": {
       "type": "object",
       "properties": {
-        "command": { "type": "string", "description": "要执行的命令" },
+        "command": {
+          "type": "string",
+          "description": "Shell 命令；提供 argv 时仅填写可执行文件名或路径，如 node"
+        },
+        "argv": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "可选：原始参数数组，不加 Shell 引号或转义；提供时直接执行 command。JSON 也可写入文件后传入文件路径。"
+        },
         "cwd": {
           "type": "string",
-          "description": "工作目录（可选）。缺省或填写 . 表示当前 Agent workspace 根目录；相对路径以该根目录为基准，例如 src。不要添加 workspace/ 前缀。"
+          "description": "工作目录；省略或 . 使用当前工作区，相对路径以其为基准"
         },
         "timeout": { "type": "number", "description": "超时时间(毫秒)，默认 30000" }
       },

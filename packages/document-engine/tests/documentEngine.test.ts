@@ -43,7 +43,7 @@ function operation<
     actorPrincipalId: actor,
     baseRevisionId: snapshot.revisionId,
     timestamp,
-  } as DocumentOperation
+  } as unknown as DocumentOperation
 }
 
 function transact(

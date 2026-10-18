@@ -1,0 +1,151 @@
+/* 浅色编辑室：米灰工作台、暖白纸面、铜棕操作与独立的浮层。 */
+:root[data-theme='light'] .arca-app-shell {
+  background:
+    radial-gradient(ellipse at 35% 0%,#fffdf6bd,transparent 65%),
+    linear-gradient(140deg,#f1ede5,#e4ded3);
+}
+:root[data-theme='light'] .application-bar,
+:root[data-theme='light'] .workbench-menubar {
+  background:linear-gradient(180deg,#fffefa,#f7f3eb);
+  border-bottom-color:#d7cebf;
+  box-shadow:inset 0 1px #fff,0 1px 3px #69533409;
+}
+:root[data-theme='light'] .arca-titlebar { background:#faf7f0; border-bottom-color:#e0d7ca; }
+:root[data-theme='light'] .app-wordmark { color:#493724; text-shadow:0 1px #fff; }
+:root[data-theme='light'] .document-name { color:#4c4033; }
+:root[data-theme='light'] .app-divider { background:#cabda9; }
+:root[data-theme='light'] .ribbon-controls,
+:root[data-theme='light'] .table-contextbar {
+  background:linear-gradient(180deg,#faf8f2,#eee8dd);
+  border-bottom-color:#d6cbbb;
+  box-shadow:inset 0 1px #ffffffc9;
+}
+:root[data-theme='light'] .workbench-ribbon { box-shadow:0 3px 9px #5c48200a; }
+:root[data-theme='light'] .reader-toolbar,
+:root[data-theme='light'] .review-commandbar,
+:root[data-theme='light'] .find-bar { background:#f8f4ec; border-bottom-color:#d9cfbf; }
+:root[data-theme='light'] .navigation-panel,
+:root[data-theme='light'] .inspector-panel {
+  background:linear-gradient(110deg,#fffdf7,#f5f0e7);
+  border-color:#d6cbbb;
+}
+:root[data-theme='light'] .inspector-panel { box-shadow:inset 1px 0 #ffffffde,-5px 0 20px #71593209; }
+:root[data-theme='light'] .panel-heading { border-bottom-color:#e1d8ca; }
+:root[data-theme='light'] .workbench-status { background:#f8f4ec; border-top-color:#d6cbbb; }
+:root[data-theme='light'] .library-filters,
+:root[data-theme='light'] .library-footer,
+:root[data-theme='light'] .settings-tabs { border-color:#cfc3b2; }
+:root[data-theme='light'] .library-heading h1,
+:root[data-theme='light'] .settings-masthead h1 { color:#483a2b; }
+:root[data-theme='light'] .document-details h2 { color:#443526; }
+:root[data-theme='light'] .library-filters>button.active,
+:root[data-theme='light'] .settings-tabs>button.active,
+:root[data-theme='light'] .workbench-menubar>.workbench-menu-tab.active { color:#704322; }
+
+/* 浅色控件保持可读的文字与边界，焦点由铜棕色环标记。 */
+:root[data-theme='light'] input,
+:root[data-theme='light'] textarea,
+:root[data-theme='light'] select {
+  background:#fffdf8; color:#322f2b; border-color:#cfc3b2;
+  box-shadow:inset 0 1px 2px #68502c08,0 1px #ffffffa6;
+}
+:root[data-theme='light'] input::placeholder,
+:root[data-theme='light'] textarea::placeholder { color:#82796d; }
+:root[data-theme='light'] input:focus,
+:root[data-theme='light'] textarea:focus,
+:root[data-theme='light'] select:focus {
+  background:#fffefa; border-color:#9a7048;
+  box-shadow:0 0 0 3px #a67a461b,inset 0 1px 2px #68502c06;
+}
+:root[data-theme='light'] .search-field input,
+:root[data-theme='light'] .search-field input:focus { background:transparent; border:0; box-shadow:none; }
+:root[data-theme='light'] .search-field:focus-within { background:#fffdf8; box-shadow:0 0 0 2px #a67a4626; }
+:root[data-theme='light'] .arca-select-trigger {
+  background:linear-gradient(180deg,#fffefa,#f6f0e5);
+  border-color:#c8baa5; color:#3b332a;
+  box-shadow:inset 0 1px #fff,0 1px 3px #644c2510;
+}
+:root[data-theme='light'] .arca-select-trigger:hover:not(:disabled),
+:root[data-theme='light'] .arca-select-trigger[aria-expanded='true'] {
+  background:#fffdf8; border-color:#a38059; box-shadow:0 0 0 2px #a67a4619;
+}
+:root[data-theme='light'] .ribbon-controls .arca-select-trigger { background:transparent; border-color:transparent; box-shadow:none; }
+:root[data-theme='light'] .ribbon-controls .arca-select-trigger:hover:not(:disabled),
+:root[data-theme='light'] .ribbon-controls .arca-select-trigger[aria-expanded='true'] { background:#fffdf8; border-color:#d0c3af; box-shadow:inset 0 1px #fff; }
+:root[data-theme='light'] .primary-button {
+  background:linear-gradient(180deg,#91613e,#7b4c2d);
+  border-color:#754629; color:#fffcf6;
+  box-shadow:inset 0 1px #ffffff33,0 2px 5px #66421e21;
+}
+:root[data-theme='light'] .primary-button:hover:not(:disabled) {
+  background:linear-gradient(180deg,#9b6b45,#825333);
+  border-color:#754629; box-shadow:inset 0 1px #ffffff40,0 3px 9px #66421e2c;
+}
+:root[data-theme='light'] .primary-button:active:not(:disabled) { box-shadow:inset 0 2px 4px #432b202a; }
+:root[data-theme='light'] .primary-button:disabled { opacity:1; background:#e8dfd2; border-color:#d4c9b9; color:#817260; box-shadow:inset 0 1px #ffffff8c; }
+:root[data-theme='light'] .stop-application { background:linear-gradient(180deg,#fffdf8,#f5ede2); border-color:#cfbeaa; color:#95463c; }
+:root[data-theme='light'] .stop-application:hover:not(:disabled) { background:#f8e8df; border-color:#bc8878; }
+:root[data-theme='light'] .context-menu,
+:root[data-theme='light'] .arca-select-popup,
+:root[data-theme='light'] .selection-toolbar {
+  background:#fffdf8; color:#322f2b; border-color:#c8b99f;
+  box-shadow:inset 0 1px #fff,0 2px 5px #684d2520,0 16px 40px #684d2529;
+}
+:root[data-theme='light'] .context-menu button:hover:not(:disabled),
+:root[data-theme='light'] .arca-select-option[data-active='true'] { background:#f0e4d0; }
+:root[data-theme='light'] .arca-select-option[aria-selected='true'] { color:#75431f; }
+:root[data-theme='light'] .arca-avatar { border-color:#c4b59e; background:#eee3d0; box-shadow:inset 0 1px #fff,0 1px 3px #6e512015; }
+
+/* 封面使用浅色布面与压痕，内页保持暖白；翻书速度沿用独立动效参数。 */
+:root[data-theme='light'] .book-front-face {
+  color:#493a2a;
+  background:
+    linear-gradient(90deg,#755c321a,transparent 3%,#ffffffb3 4%,transparent 5%,#755c3210 7%,transparent 10%),
+    repeating-linear-gradient(115deg,transparent 0 3px,#8c734008 3px 4px),
+    linear-gradient(135deg,#ece5d7,#d9ceb9);
+  border-color:#b9a98d;
+  box-shadow:inset 0 1px #fffdf5,inset -2px -1px #7c63322b,2px 0 4px #6b502321;
+}
+:root[data-theme='light'] .book-front-inner { background:linear-gradient(90deg,#a48b581c,transparent 12%),#f4eddf; border-color:#cbbda4; }
+:root[data-theme='light'] .book-front-face::before { background:#977a492b; box-shadow:1px 0 #fff8e5ad; }
+:root[data-theme='light'] .book-imprint { color:#8b6139; text-shadow:0 1px #fff6e6; }
+:root[data-theme='light'] .book-cover-type,
+:root[data-theme='light'] .book-cover-footer { color:#6f5d45; }
+:root[data-theme='light'] .book-paper { background:#fffefa; box-shadow:inset 8px 0 16px #7754220d; }
+:root[data-theme='light'] .office-editor .office-page-frame>.office-paper,
+:root[data-theme='light'] .review-paper {
+  background:linear-gradient(115deg,#ffffff8c,transparent 36%),#fffefa;
+  border-color:#d2c7b6; box-shadow:inset 0 1px #fff,0 1px 3px #6c54201c,0 16px 42px #6c54201a;
+}
+:root[data-theme='light'] .office-editor .continuous-view { background:#fffefa; }
+:root[data-theme='light'] .office-editor .continuous-view .office-page-frame>.office-paper { background:#fffefa; border:0; box-shadow:none; }
+:root[data-theme='light'] .office-ruler { color:#766953; opacity:1; }
+:root[data-theme='light'] .office-inline-diff del { color:#963f35; background:#f8e4dc; }
+:root[data-theme='light'] .office-inline-diff ins { color:#355d40; background:#e3eddd; }
+
+/* 设置与弹窗在浅色下保留分层，避免输入区域和卡片混成同一片白。 */
+:root[data-theme='light'] .settings-card,
+:root[data-theme='light'] .settings-current-model,
+:root[data-theme='light'] .settings-studio .application-settings .property-group {
+  background:linear-gradient(135deg,#fffdf8,#f8f3e9); border-color:#d0c3af;
+  box-shadow:inset 0 1px #fff,0 2px 4px #6f542214,0 12px 32px #6f542211;
+}
+:root[data-theme='light'] .settings-card-heading,
+:root[data-theme='light'] .settings-advanced { border-color:#e0d5c4; }
+:root[data-theme='light'] .settings-card-footer { background:#f2ebdf; border-color:#d9cbb6; }
+:root[data-theme='light'] .settings-model-item.active { background:#fffdf8; border-color:#c7b493; box-shadow:inset 2px 0 #956b3c,inset 0 1px #fff,0 2px 6px #70532310; }
+:root[data-theme='light'] .settings-choice { background:#f2ece1; border-color:#d4c7b2; }
+:root[data-theme='light'] .settings-choice[aria-pressed='true'] { background:#fffdf8; border-color:#9b7647; box-shadow:0 0 0 2px #ad83421a,0 2px 6px #70532314; }
+:root[data-theme='light'] .settings-secret { background:#fffdf8; border-color:#cfc3b2; }
+:root[data-theme='light'] .settings-secret input,
+:root[data-theme='light'] .settings-secret input:focus { background:transparent; border:0; box-shadow:none; }
+:root[data-theme='light'] input[type='checkbox'],
+:root[data-theme='light'] input[type='range'] { background:transparent; box-shadow:none; }
+:root[data-theme='light'] .arca-dialog { background:linear-gradient(130deg,#fffefa,#f8f2e7); border-color:#c9b99e; box-shadow:inset 0 1px #fff,0 4px 12px #674e2524,0 26px 72px #674e2538; }
+:root[data-theme='light'] .arca-dialog>footer { background:#f1e9dc; border-color:#d9cbb6; }
+:root[data-theme='light'] .dialog-scrim { background:#65553f40; }
+:root[data-theme='light'] * { scrollbar-color:#b7aa98 #eee9df; scrollbar-width:thin; }
+:root[data-theme='light'] *::-webkit-scrollbar { width:10px; height:10px; }
+:root[data-theme='light'] *::-webkit-scrollbar-track { background:transparent; }
+:root[data-theme='light'] *::-webkit-scrollbar-thumb { background:#b7aa98; background-clip:padding-box; border:2px solid transparent; border-radius:8px; }
+:root[data-theme='light'] *::-webkit-scrollbar-thumb:hover { background-color:#947e60; }

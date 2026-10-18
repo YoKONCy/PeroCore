@@ -39,6 +39,7 @@
   --ui-accent-sky-soft: rgba(14, 165, 233, 0.11);
   --ui-accent-purple: #8b5cf6;
   --ui-accent-purple-soft: rgba(139, 92, 246, 0.11);
+  --ui-focus-color: var(--ui-accent-primary);
   --ui-success: #059669;
   --ui-success-soft: rgba(5, 150, 105, 0.11);
   --ui-warning: #d97706;
@@ -61,9 +62,13 @@
   --ui-overlay-blur: 8px;
 
   /* ── 滚动条 ── */
-  --ui-scrollbar-track: #f1f5f9;
-  --ui-scrollbar-thumb: #cbd5e1;
-  --ui-scrollbar-thumb-hover: #94a3b8;
+  --ui-scrollbar-size: 8px;
+  --ui-scrollbar-track: rgba(71, 85, 105, 0.045);
+  --ui-scrollbar-thumb: rgba(100, 116, 139, 0.46);
+  --ui-scrollbar-thumb-hover: rgba(100, 116, 139, 0.72);
+  --ui-scrollbar-thumb-active: #7c75a3;
+  --ui-scrollbar-highlight: rgba(255, 255, 255, 0.32);
+  --ui-scrollbar-shade: rgba(15, 23, 42, 0.08);
 
   /* Dashboard 面板语义层 */
   --dash-panel-bg: #ffffff;
@@ -130,6 +135,7 @@
   --ui-accent-sky-soft: rgba(56, 189, 248, 0.14);
   --ui-accent-purple: #a78bfa;
   --ui-accent-purple-soft: rgba(167, 139, 250, 0.15);
+  --ui-focus-color: var(--ui-accent-purple);
   --ui-success: #34d399;
   --ui-success-soft: rgba(52, 211, 153, 0.14);
   --ui-warning: #fbbf24;
@@ -152,9 +158,12 @@
   --ui-overlay-blur: 8px;
 
   /* ── 滚动条 ── */
-  --ui-scrollbar-track: #1e293b;
-  --ui-scrollbar-thumb: #475569;
-  --ui-scrollbar-thumb-hover: #64748b;
+  --ui-scrollbar-track: rgba(203, 213, 225, 0.035);
+  --ui-scrollbar-thumb: rgba(148, 163, 184, 0.38);
+  --ui-scrollbar-thumb-hover: rgba(165, 180, 203, 0.65);
+  --ui-scrollbar-thumb-active: #a49aca;
+  --ui-scrollbar-highlight: rgba(235, 240, 255, 0.16);
+  --ui-scrollbar-shade: rgba(0, 0, 0, 0.16);
 
   /* Dashboard 面板语义层 */
   --dash-panel-bg: #181b24;

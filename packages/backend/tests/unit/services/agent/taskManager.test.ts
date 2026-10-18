@@ -81,12 +81,13 @@ describe('TaskManager', () => {
       expect(cancelled).toBe(true)
       expect(manager.isCancelled('session-1')).toBe(true)
       expect(manager.getTaskInfo('session-1')).toMatchObject({ state: 'cancelled' })
-      expect(broadcaster).toHaveBeenLastCalledWith({
-        sessionId: 'session-1',
-        turn: 0,
-        state: 'cancelled',
-        message: '任务已取消',
-      })
+      expect(broadcaster).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          sessionId: 'session-1',
+          turn: 0,
+          state: 'cancelled',
+        }),
+      )
     })
 
     it('不存在的任务操作应当返回 false 或空值', () => {
@@ -140,18 +141,20 @@ describe('TaskManager', () => {
       await vi.advanceTimersByTimeAsync(500)
       await promise
 
-      expect(broadcaster).toHaveBeenCalledWith({
-        sessionId: 'session-1',
-        turn: 0,
-        state: 'paused',
-        message: '任务已暂停',
-      })
-      expect(broadcaster).toHaveBeenCalledWith({
-        sessionId: 'session-1',
-        turn: 0,
-        state: 'running',
-        message: '任务已恢复',
-      })
+      expect(broadcaster).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: 'session-1',
+          turn: 0,
+          state: 'paused',
+        }),
+      )
+      expect(broadcaster).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: 'session-1',
+          turn: 0,
+          state: 'running',
+        }),
+      )
     })
 
     it('任务超时时应当标记取消并广播 error 状态', async () => {
@@ -163,12 +166,13 @@ describe('TaskManager', () => {
       await vi.advanceTimersByTimeAsync(100)
 
       expect(manager.isCancelled('session-1')).toBe(true)
-      expect(broadcaster).toHaveBeenLastCalledWith({
-        sessionId: 'session-1',
-        turn: 0,
-        state: 'error',
-        message: '任务超时 (0.1s)',
-      })
+      expect(broadcaster).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          sessionId: 'session-1',
+          turn: 0,
+          state: 'error',
+        }),
+      )
     })
   })
 })

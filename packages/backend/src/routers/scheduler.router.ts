@@ -67,6 +67,84 @@ export function createSchedulerRouter(ctx: AppContext) {
     })
   })
 
+  // 活动投影直接读取已有任务和计划，不维护另一份桌宠工作状态。
+  router.get('/activity', async (c) => {
+    const agentId = c.req.query('agentId')
+    if (!agentId || !ctx.agentManager.getAgent(agentId))
+      throw new AppError('NOT_FOUND', { message: '角色不存在' })
+    const [scheduled, suggestions, tasks, recent] = await Promise.all([
+      ctx.schedulerService.listPending(agentId),
+      ctx.schedulerService.listSuggestions(agentId),
+      ctx.backgroundTaskService.query({
+        agentId,
+        status: ['queued', 'running', 'paused', 'waiting_input', 'waiting', 'blocked'],
+        pageSize: 100,
+      }),
+      ctx.backgroundTaskService.query({
+        agentId,
+        status: ['completed', 'failed', 'cancelled'],
+        pageSize: 5,
+      }),
+    ])
+    const activeTasks = tasks.items.filter((task) => task.category !== 'resident')
+    return c.json({
+      code: 'OK',
+      message: '获取成功',
+      data: {
+        agentId,
+        scheduled,
+        suggestions,
+        tasks: activeTasks,
+        recent: recent.items.filter((task) => task.category !== 'resident'),
+      },
+    })
+  })
+
+  router.post(
+    '/reminders/:id/:action',
+    zValidator('json', z.object({ agentId: z.string().min(1) })),
+    async (c) => {
+      const id = Number(c.req.param('id'))
+      const action = c.req.param('action')
+      const { agentId } = c.req.valid('json')
+      if (!Number.isSafeInteger(id) || !['cancel', 'retry'].includes(action))
+        throw new AppError('INVALID_PARAMETER', { message: '计划操作无效' })
+      const ok =
+        action === 'cancel'
+          ? await ctx.schedulerService.cancel(id, agentId)
+          : await ctx.schedulerService.retry(id, agentId)
+      if (!ok)
+        throw new AppError('INVALID_PARAMETER', {
+          message: '计划不存在、角色不匹配或当前状态无法操作',
+        })
+      return c.json({
+        code: 'OK',
+        message: action === 'cancel' ? '已取消' : '已安排重试',
+        data: { id },
+      })
+    },
+  )
+
+  router.post(
+    '/suggestions/:id/:action',
+    zValidator('json', z.object({ agentId: z.string().min(1) })),
+    async (c) => {
+      const action = c.req.param('action')
+      const { agentId } = c.req.valid('json')
+      if (!['accept', 'dismiss'].includes(action))
+        throw new AppError('INVALID_PARAMETER', { message: '建议操作无效' })
+      const item =
+        action === 'accept'
+          ? await ctx.schedulerService.acceptSuggestion(c.req.param('id'), agentId)
+          : await ctx.schedulerService.dismissSuggestion(c.req.param('id'), agentId)
+      return c.json({
+        code: 'OK',
+        message: action === 'accept' ? '建议已采纳' : '建议已忽略',
+        data: item,
+      })
+    },
+  )
+
   router.post(
     '/agent-tasks',
     zValidator(

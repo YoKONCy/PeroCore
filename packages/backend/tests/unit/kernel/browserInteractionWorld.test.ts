@@ -172,7 +172,8 @@ describe('Browser Agent 交互世界模型', () => {
       },
     })
     expect(receipt.verificationStatus).toBe('verified')
-    expect(receipt.dispatchedInput.Authorization).toBe('[已隐藏]')
+    expect(JSON.stringify(receipt.dispatchedInput)).not.toContain('secret')
+    expect(receipt.dispatchedInput.value).toBe('主人')
   })
 
   it('Site Model 只应学习已验证 Receipt', () => {

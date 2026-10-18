@@ -24,8 +24,12 @@ describe('MigrationManager', () => {
       id,
       description: id,
       check: () => true,
-      up: () => calls.push(`up:${id}`),
-      verify: () => calls.push(`verify:${id}`),
+      up: () => {
+        calls.push(`up:${id}`)
+      },
+      verify: () => {
+        calls.push(`verify:${id}`)
+      },
     })
     const { manager, sqlite } = createRuntime([create('002-second'), create('001-first')])
 

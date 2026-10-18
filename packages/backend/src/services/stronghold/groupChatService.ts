@@ -20,6 +20,7 @@ import {
   strongholdAgentPairVisibility,
 } from '../../database/schema'
 import type { DrizzleDb } from '../../database'
+import { stableHistoryWindow, invalidatePromptReplay } from '../llm/promptCache'
 
 // ── 类型 ──
 
@@ -56,6 +57,7 @@ export class GroupChatService {
   constructor(
     private db: DrizzleDb,
     private isEnabledAgent: (agentId: string) => boolean,
+    private rollbackCharacterState?: (roomId: string, pairId: string) => Promise<void>,
   ) {}
 
   // ─── 房间 ───
@@ -167,7 +169,11 @@ export class GroupChatService {
   }
 
   /** 获取角色亲历的最近N个完整回合；只消费新状态机记录，不推断旧历史。 */
-  async getVisibleHistoryPairs(agentId: string, pairLimit = 20): Promise<MessageRow[]> {
+  async getVisibleHistoryPairs(
+    agentId: string,
+    pairLimit = 20,
+    stable = false,
+  ): Promise<MessageRow[]> {
     const normalizedLimit = Math.max(1, pairLimit)
     const recentPairs = await this.db
       .select({
@@ -178,10 +184,18 @@ export class GroupChatService {
       .from(strongholdAgentPairVisibility)
       .where(eq(strongholdAgentPairVisibility.agentId, agentId))
       .orderBy(desc(strongholdAgentPairVisibility.id))
-      .limit(normalizedLimit)
+      .limit(normalizedLimit + (stable ? 1 : 0))
       .all()
     if (recentPairs.length === 0) return []
-    const pairIds = recentPairs.map((row) => row.pairId)
+    const pairs = stable
+      ? stableHistoryWindow(
+          `stronghold:${agentId}`,
+          [...recentPairs].reverse(),
+          normalizedLimit,
+          (row) => row.pairId,
+        )
+      : recentPairs
+    const pairIds = pairs.map((row) => row.pairId)
     return this.db
       .select()
       .from(groupChatMessages)
@@ -241,6 +255,7 @@ export class GroupChatService {
    * 旧消息没有 pairId 时保守地只删除目标消息，避免群聊中按相邻记录误删。
    */
   async deleteMessagePair(roomId: string, messageId: number): Promise<DeleteMessagePairResult> {
+    invalidatePromptReplay()
     const target = await this.db
       .select()
       .from(groupChatMessages)
@@ -255,6 +270,7 @@ export class GroupChatService {
       ? and(eq(groupChatMessages.roomId, roomId), eq(groupChatMessages.pairId, target.pairId))
       : and(eq(groupChatMessages.id, messageId), eq(groupChatMessages.roomId, roomId))
     const rows = await this.db.delete(groupChatMessages).where(condition).returning()
+    if (target.pairId) await this.rollbackCharacterState?.(roomId, target.pairId)
 
     return {
       deletedCount: rows.length,

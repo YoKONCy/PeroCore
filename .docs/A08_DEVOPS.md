@@ -1,9 +1,8 @@
 # DevOps 与运维规范
 
-> **版本**：0.9.2-rc1 · **更新时间**：2026-08-28
+> **版本**：0.9.4 · **更新时间**：2026-10-17
 > **适用范围**：CI/CD、数据库迁移、版本发布、安全、可观测性、API 文档
 > **依赖规范**：[A04_DEPLOYMENT](./A04_DEPLOYMENT.md)、[S04_TESTING_STANDARDS](./S04_TESTING_STANDARDS.md)
-> **实施路线**：[TEMP_MULTI_NODE_DELIVERY_PLAN](./TEMP-todo/TEMP_MULTI_NODE_DELIVERY_PLAN.md)
 >
 > **当前事实**：普通 CI 执行 lint、测试和全包构建；Tag Release 构建 Windows 标准版、便携版、Steam 版，并在 Docker Hub 凭据存在时构建推送前后端镜像。Dockerfile、Compose、镜像黑盒验收和多架构发布仍需按实施路线完成生产校准。
 
@@ -43,8 +42,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - run: pnpm install --frozen-lockfile
-      - run: pnpm test # Vitest 全量测试
-      - run: pnpm coverage # 覆盖率报告（需满足红线）
+      - run: pnpm test:run # Vitest 全量测试，只执行一次
 
   build:
     runs-on: ubuntu-latest
@@ -73,12 +71,18 @@ jobs:
 
 ### 1.3 分支策略
 
+CI/CD 不设覆盖率百分比门禁，也不自动上传 Codecov。需要定位遗漏时可手动运行 `pnpm test:coverage`，报告不设最低比例。
+
 | 分支        | 用途     | CI 触发                             |
 | ----------- | -------- | ----------------------------------- |
 | `main`      | 稳定版本 | lint → test → build → Electron 打包 |
 | `dev`       | 开发主线 | lint → test → build                 |
 | `feature/*` | 功能分支 | PR 时触发 lint + test               |
 | `release/*` | 发布准备 | 全量 CI + Steam 构建                |
+
+### 1.4 Electron 启动环境
+
+Electron 启动环境必须在派生进程前清理继承的 `NODE_OPTIONS`，不能等主进程初始化后再处理。开发入口同时移除继承的 `ELECTRON_RUN_AS_NODE`；发行版 Daemon、Application Host 与打包烟雾测试只显式设置 `ELECTRON_RUN_AS_NODE=1`。普通 Node 开发后台、终端任务和 `NODE_EXTRA_CA_CERTS` 不受该清理影响。
 
 ---
 
@@ -90,8 +94,8 @@ jobs:
 # 生成迁移文件
 pnpm drizzle-kit generate
 
-# 执行迁移
-pnpm drizzle-kit migrate
+# 执行迁移（兼容既有单基线库）
+pnpm --filter @infos/backend db:migrate
 
 # 推送 schema 变更（开发阶段快捷方式）
 pnpm drizzle-kit push
@@ -100,13 +104,13 @@ pnpm drizzle-kit push
 ### 2.2 迁移文件管理
 
 ```
-packages/backend/src/db/
+packages/backend/src/database/
   ├── schema.ts              ← Drizzle schema 定义（唯一真理源）
-  ├── migrations/             ← 自动生成的迁移 SQL
-  │   ├── 0000_initial.sql
-  │   ├── 0001_add_diary.sql
+  ├── migrations/             ← 按 journal 顺序执行的 Drizzle SQL 与快照
+  │   ├── 0000_baseline.sql
+  │   ├── 0001_remove_work_context.sql
   │   └── meta/
-  └── migrate.ts             ← 启动时自动执行迁移
+  └── schemaMigrations.ts    ← 旧单基线库登记薄层；实际迁移交给 Drizzle
 ```
 
 ### 2.3 迁移原则
@@ -114,7 +118,13 @@ packages/backend/src/db/
 - **向前兼容**：新增列给默认值，不删除现有列（可标记 deprecated）
 - **不可逆操作需确认**：删表、改列类型等操作需要人工审批
 - **每次 PR 最多一个迁移文件**：避免迁移冲突
-- **TriviumDB 不需要迁移**：TriviumDB 的 schema 由代码定义（`file_format.rs` 版本号），二进制格式自带版本兼容
+- **TriviumDB 升级需保护完整文件组**：当前固定 0.8.9，主文件格式 v9；旧引擎不能反向读取新格式。首次可写打开 v5–v8 库前，注册表持有共享读锁并保留完整、带 SHA-256 清单的副本；有待恢复 WAL 时停止升级，先用旧版正常恢复并退出。不要只备份 `.tdb` 主文件。
+
+升级备份位于 `@data/.store-upgrades/0.8.9/<原数据库相对路径>/<文件组摘要>/`，不参与分布式同步。回退版本前必须停止应用，并从同一备份目录恢复整组文件；重建、清空或永久删除对应记忆时会清除其升级副本，防止已遗忘正文被恢复。社交图谱不能作为可丢弃向量缓存处理。
+
+分布式导出使用 bundle v2，记录引擎版本及格式版本；接收端仍接受旧 bundle v1，拒绝未来格式。导出时暂停引擎自动压实、同步刷新并冻结 SQLite 和数据库文件组，之后从独立暂存目录打包；不能异步遍历正在变化的 `.tdb.pld.<generation>`。旧版 infOS 不接受新 bundle，双端应一起升级。
+
+现有 SQLite 库早期由启动器直接执行 `0000_baseline`，没有 Drizzle 迁移记录。启动时的薄层只为这类库登记已完成的基线；新旧库后续都由 Drizzle migrator 按 `_journal.json` 执行。`0001_remove_work_context` 删除旧工作正文列与逐轮表，保留目标与私有事实；`0003_remove_tool_observations` 删除退役的工具摘录表。近期工具正文改为进程内短期缓存，来源随原对话元数据保存。旧摘录不迁入长期历史，新迁移不修改对话消息。
 
 ---
 
@@ -217,7 +227,7 @@ app.get('/health', (c) => c.json({
 
 // Docker Compose 健康检查
 healthcheck:
-  test: ["CMD", "curl", "-f", "http://localhost:9120/health"]
+  test: ["CMD", "curl", "-f", "http://localhost:9120/api/health"]
   interval: 30s
   timeout: 5s
   retries: 3

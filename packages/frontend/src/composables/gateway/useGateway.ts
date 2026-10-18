@@ -149,6 +149,7 @@ function createGatewayClient() {
   const sessionId = ref<string | null>(null)
   const sessionGeneration = ref(0)
   const inputSeat = ref<KernelInputSeat | null>(null)
+  let principalId = 'pero'
   const subscriptions = new Map<string, number>()
   const seenMessageIds = new Set<string>()
 
@@ -157,6 +158,13 @@ function createGatewayClient() {
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null
   let seatRenewTimer: ReturnType<typeof setInterval> | null = null
   let seatRecovery: Promise<void> | null = null
+  const seatAcquisitions = new Map<string, Promise<KernelInputSeat>>()
+  let inputActionQueue: Promise<void> = Promise.resolve()
+  const sessionWaiters = new Set<{
+    resolve: (id: string) => void
+    reject: (error: Error) => void
+    timer: ReturnType<typeof setTimeout>
+  }>()
   let isManualClose = false
 
   /** RPC 请求/响应配对 Map */
@@ -242,22 +250,25 @@ function createGatewayClient() {
     isManualClose = false
     state.value = retryCount.value > 0 ? 'reconnecting' : 'connecting'
 
+    let socket: WebSocket
     try {
-      ws = new WebSocket(getGatewayWsUrl())
+      socket = new WebSocket(getGatewayWsUrl())
+      ws = socket
     } catch (error) {
       lastError.value = (error as Error).message
       scheduleReconnect()
       return
     }
 
-    ws.onopen = () => {
+    socket.onopen = () => {
+      if (ws !== socket) return
       state.value = 'connected'
       retryCount.value = 0
       lastError.value = null
       sendEnvelope(
         createEnvelope('hello', {
           nodeId: stableNodeId,
-          principalId: 'pero',
+          principalId,
           deviceName: isElectronClient() ? 'Electron Client' : 'Web Client',
           platform: {
             os: detectClientOs(),
@@ -271,7 +282,8 @@ function createGatewayClient() {
       logger.info('Gateway', 'WS 已连接')
     }
 
-    ws.onmessage = (event) => {
+    socket.onmessage = (event) => {
+      if (ws !== socket) return
       // 二进制消息 → 音频 chunk
       if (event.data instanceof ArrayBuffer) {
         events.onAudioChunk?.(event.data)
@@ -284,19 +296,28 @@ function createGatewayClient() {
       handleMessage(event.data as string)
     }
 
-    ws.onclose = () => {
+    socket.onclose = () => {
+      if (ws !== socket) return
+      ws = null
       state.value = 'disconnected'
       stopHeartbeat()
       stopSeatRenewal()
       inputSeat.value = null
       sessionId.value = null
+      rejectSessionWaiters()
+      for (const pending of pendingRequests.values()) {
+        clearTimeout(pending.timer)
+        pending.reject(new Error('交互连接已断开，请稍后重试'))
+      }
+      pendingRequests.clear()
 
       if (!isManualClose) {
         scheduleReconnect()
       }
     }
 
-    ws.onerror = () => {
+    socket.onerror = () => {
+      if (ws !== socket) return
       lastError.value = '连接错误'
     }
   }
@@ -318,6 +339,7 @@ function createGatewayClient() {
     stopSeatRenewal()
     inputSeat.value = null
     sessionId.value = null
+    rejectSessionWaiters()
 
     // 清理等待中的 RPC 请求
     for (const [id, pending] of pendingRequests) {
@@ -404,14 +426,84 @@ function createGatewayClient() {
     await Promise.all([...subscriptions.keys()].map((streamId) => subscribe(streamId)))
   }
 
-  async function acquireInputSeat(): Promise<void> {
-    const response = await request('input_seat.acquire', {
-      principalId: 'pero',
-      windowId: stableNodeId,
-      leaseMs: 60_000,
+  function rejectSessionWaiters(): void {
+    for (const waiter of sessionWaiters) {
+      clearTimeout(waiter.timer)
+      waiter.reject(new Error('交互连接已断开，请稍后重试'))
+    }
+    sessionWaiters.clear()
+  }
+
+  /** 审批必须等握手返回真实 Session，不能携带空凭证提交。 */
+  async function requireInputSession(): Promise<string> {
+    await connect()
+    if (sessionId.value) return sessionId.value
+    return new Promise<string>((resolve, reject) => {
+      const waiter = {
+        resolve,
+        reject,
+        timer: setTimeout(() => {
+          sessionWaiters.delete(waiter)
+          reject(new Error('交互连接尚未就绪，请稍后重试；你的选择已保留'))
+          // 连接打开却没有完成握手时，释放旧连接，下一次操作可重新建立会话。
+          if (!sessionId.value) ws?.close()
+        }, 8_000),
+      }
+      sessionWaiters.add(waiter)
     })
-    inputSeat.value = response.seat as unknown as KernelInputSeat
-    startSeatRenewal()
+  }
+
+  async function acquireSeatFor(targetPrincipal: string): Promise<KernelInputSeat> {
+    const requestedSession = await requireInputSession()
+    const key = `${requestedSession}:${targetPrincipal}`
+    const pending = seatAcquisitions.get(key)
+    if (pending) return pending
+    const acquisition = (async () => {
+      const response = await request('input_seat.acquire', {
+        principalId: targetPrincipal,
+        windowId: stableNodeId,
+        leaseMs: 60_000,
+      })
+      const seat = response.seat as unknown as KernelInputSeat | undefined
+      if (
+        !seat ||
+        sessionId.value !== requestedSession ||
+        seat.sessionId !== requestedSession ||
+        seat.principalId !== targetPrincipal ||
+        seat.windowId !== stableNodeId
+      )
+        throw new Error('交互连接已变化，请重新提交；你的选择已保留')
+      if (principalId === targetPrincipal && document.hasFocus()) {
+        inputSeat.value = seat
+        startSeatRenewal()
+      }
+      return seat
+    })()
+    seatAcquisitions.set(key, acquisition)
+    try {
+      return await acquisition
+    } finally {
+      if (seatAcquisitions.get(key) === acquisition) seatAcquisitions.delete(key)
+    }
+  }
+
+  async function acquireInputSeat(): Promise<void> {
+    await acquireSeatFor(principalId)
+  }
+
+  async function selectPrincipal(id: string, acquireSeat = false): Promise<void> {
+    const oldSeat = inputSeat.value
+    const changed = id !== principalId
+    principalId = id
+    if (!sessionId.value) return
+    if (changed) {
+      stopSeatRenewal()
+      inputSeat.value = null
+      if (oldSeat) await request('input_seat.release', { seatId: oldSeat.seatId }).catch(() => {})
+    }
+    if (principalId !== id) return
+    await request('gateway.select_principal', { principalId: id })
+    if (acquireSeat && principalId === id) await acquireInputSeat()
   }
 
   function recoverInputSeat(): Promise<void> {
@@ -449,9 +541,11 @@ function createGatewayClient() {
       if (!seat) return
       void request('input_seat.renew', { seatId: seat.seatId, leaseMs: 60_000 })
         .then((response) => {
-          inputSeat.value = response.seat as unknown as KernelInputSeat
+          if (inputSeat.value?.seatId === seat.seatId && principalId === seat.principalId)
+            inputSeat.value = response.seat as unknown as KernelInputSeat
         })
         .catch((error: Error & { code?: string }) => {
+          if (inputSeat.value?.seatId !== seat.seatId) return
           if (
             error.code === 'INPUT_SEAT_EXPIRED' ||
             error.code === 'INPUT_SEAT_IDENTITY_MISMATCH'
@@ -480,6 +574,70 @@ function createGatewayClient() {
       windowId: seat.windowId,
       epoch: seat.epoch,
     }
+  }
+
+  /** 任务面板可处理其他角色的请求，不因此切换全局对话角色或语音席位。 */
+  async function withInputSeatFor<T>(
+    targetPrincipal: string,
+    action: (proof: ReturnType<typeof seatProof>) => Promise<T>,
+  ): Promise<T> {
+    // 临时席位的释放必须晚于该窗口上一项输入，避免多个面板互相撤销凭证。
+    const result = inputActionQueue.then(() => performSeatInput(targetPrincipal, action))
+    inputActionQueue = result.then(
+      () => undefined,
+      () => undefined,
+    )
+    return result
+  }
+
+  async function performSeatInput<T>(
+    targetPrincipal: string,
+    action: (proof: ReturnType<typeof seatProof>) => Promise<T>,
+  ): Promise<T> {
+    if (!targetPrincipal.trim()) throw new Error('请求缺少所属角色，请重新打开面板')
+    for (let attempt = 0; attempt < 2; attempt++) {
+      let seat: KernelInputSeat
+      try {
+        seat = await acquireSeatFor(targetPrincipal)
+      } catch (error) {
+        const code = String((error as { code?: string })?.code ?? '')
+        const message = error instanceof Error ? error.message : ''
+        const staleSession =
+          /^(NODE_SESSION_EXPIRED|NODE_SESSION_NOT_FOUND|GATEWAY_HELLO_REQUIRED)/.test(code) ||
+          message.includes('RPC 超时: input_seat.acquire')
+        if (attempt === 0 && staleSession) {
+          // 获取席位尚无业务副作用，可以重新连接后再取一次。
+          disconnect()
+          await connect()
+          continue
+        }
+        if (staleSession) throw new Error('交互连接暂时不可用，请稍后重试；你的选择已保留')
+        throw error
+      }
+      try {
+        // 使用本次取得的凭证，避免失焦清空共享状态后提交空 seat。
+        return await action({
+          seatId: seat.seatId,
+          sessionId: seat.sessionId,
+          windowId: seat.windowId,
+          epoch: seat.epoch,
+        })
+      } catch (error) {
+        const reason = (error as { data?: { reason?: string } })?.data?.reason
+        // 仅重试后端在副作用之前明确拒绝的租约；网络错误不能重放批准操作。
+        if (
+          attempt > 0 ||
+          !['INPUT_SEAT_REQUIRED', 'INPUT_SEAT_EXPIRED', 'INPUT_SEAT_IDENTITY_MISMATCH'].includes(
+            reason ?? '',
+          )
+        )
+          throw error
+      } finally {
+        if (targetPrincipal !== principalId)
+          await request('input_seat.release', { seatId: seat.seatId }).catch(() => {})
+      }
+    }
+    throw new Error('交互连接已失效，请重新提交')
   }
 
   /**
@@ -536,6 +694,13 @@ function createGatewayClient() {
         if (msg.payload.agreedVersion !== 1) throw new Error('KERNEL_PROTOCOL_AGREEMENT_REQUIRED')
         sessionId.value = typeof msg.payload.sessionId === 'string' ? msg.payload.sessionId : null
         sessionGeneration.value = Number(msg.payload.generation ?? 0)
+        if (sessionId.value) {
+          for (const waiter of sessionWaiters) {
+            clearTimeout(waiter.timer)
+            waiter.resolve(sessionId.value)
+          }
+          sessionWaiters.clear()
+        }
         if (document.hasFocus()) {
           void acquireInputSeat().catch((error) => {
             logger.error('Gateway', 'Input Seat 获取失败', error)
@@ -713,12 +878,14 @@ function createGatewayClient() {
     request,
     /** 订阅 Durable Stream 并从 Cursor 恢复 */
     subscribe,
+    selectPrincipal,
     /** 当前稳定 Client Node ID */
     stableNodeId,
     sessionId,
     sessionGeneration,
     inputSeat,
     seatProof,
+    withInputSeatFor,
     /** 发送二进制音频流 */
     sendStream,
   }

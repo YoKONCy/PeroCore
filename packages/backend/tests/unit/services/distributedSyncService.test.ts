@@ -1,14 +1,16 @@
-import { createDecipheriv, randomBytes, randomUUID } from 'node:crypto'
+import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from 'node:crypto'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
-import { tmpdir } from 'node:os'
+import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DistributedSyncService } from '../../../src/services/distributed/distributedSyncService'
 
 const roots: string[] = []
+const temporaryRoot = fileURLToPath(new URL('../../../../../TEMP/', import.meta.url))
 
 function root() {
-  const value = path.join(tmpdir(), `infos-distributed-${randomUUID()}`)
+  const value = path.join(temporaryRoot, `infos-distributed-${randomUUID()}`)
   roots.push(value)
   return value
 }
@@ -19,9 +21,23 @@ function decryptBundle(bytes: Buffer, key: Buffer) {
   return JSON.parse(
     Buffer.concat([decipher.update(bytes.subarray(28)), decipher.final()]).toString(),
   ) as {
-    manifest: { snapshotId: string; sourceServerId: string; files: Array<{ path: string }> }
+    manifest: {
+      snapshotId: string
+      sourceServerId: string
+      bundleVersion: number
+      triviumVersion: string
+      triviumFormat: number
+      files: Array<{ path: string }>
+    }
     files: Record<string, string>
   }
+}
+
+function encryptBundle(value: unknown, key: Buffer): Buffer {
+  const iv = randomBytes(12)
+  const cipher = createCipheriv('aes-256-gcm', key, iv)
+  const bytes = Buffer.concat([cipher.update(Buffer.from(JSON.stringify(value))), cipher.final()])
+  return Buffer.concat([iv, cipher.getAuthTag(), bytes])
 }
 
 afterEach(async () => {
@@ -35,6 +51,8 @@ describe('DistributedSyncService 完整快照', () => {
     await mkdir(path.join(dataDir, 'skills', 'demo'), { recursive: true })
     await mkdir(path.join(dataDir, 'logs'), { recursive: true })
     await mkdir(path.join(dataDir, 'kernel'), { recursive: true })
+    await mkdir(path.join(dataDir, '.store-upgrades', '0.8.9'), { recursive: true })
+    await writeFile(path.join(dataDir, '.store-upgrades', '0.8.9', '旧正文'), '不得同步')
     await writeFile(path.join(dataDir, 'principals', 'pero', 'workspace', 'note.md'), '工作区')
     await writeFile(path.join(dataDir, 'skills', 'demo', 'skill.md'), '技能')
     await writeFile(path.join(dataDir, 'config.json'), '{"apiKey":"secret"}')
@@ -59,6 +77,95 @@ describe('DistributedSyncService 完整快照', () => {
     expect(paths).not.toContain('gateway_token.json')
     expect(paths).not.toContain('kernel/nodes.json')
     expect(paths).not.toContain('logs/runtime.log')
+    expect(paths.some((file) => file.startsWith('.store-upgrades/'))).toBe(false)
+    expect(bundle.manifest).toMatchObject({
+      bundleVersion: 2,
+      triviumVersion: '0.8.9',
+      triviumFormat: 9,
+    })
+  })
+
+  it('仅打包协调器冻结的数据库文件组，不能混入之后变化的旁路文件', async () => {
+    const dataDir = path.join(root(), 'data')
+    await mkdir(path.join(dataDir, 'agent_pero'), { recursive: true })
+    await writeFile(path.join(dataDir, 'agent_pero', 'memory.tdb'), '正在变化的主库')
+    await writeFile(path.join(dataDir, 'agent_pero', 'memory.tdb.pld.999'), '正在变化的正文')
+    const run = vi.fn((target: string) => writeFileSync(target, 'SQLite 冻结副本'))
+    const prepare = vi.fn(() => ({ run }))
+    const captureSnapshot = vi.fn((destination: string, sqlite: () => void) => {
+      sqlite()
+      mkdirSync(path.join(destination, 'agent_pero'), { recursive: true })
+      writeFileSync(path.join(destination, 'agent_pero', 'memory.tdb'), '冻结主库')
+      writeFileSync(path.join(destination, 'agent_pero', 'memory.tdb.pld.123'), '冻结正文')
+    })
+    const service = new DistributedSyncService(
+      dataDir,
+      { $client: { prepare } } as never,
+      'server-a',
+      { captureSnapshot },
+    )
+    const key = randomBytes(32)
+    const bundle = decryptBundle(await service.createEncryptedSnapshot(key.toString('base64')), key)
+    expect(prepare).toHaveBeenCalledWith('VACUUM INTO ?')
+    expect(captureSnapshot).toHaveBeenCalledOnce()
+    expect(Buffer.from(bundle.files['agent_pero/memory.tdb.pld.123']!, 'base64').toString()).toBe(
+      '冻结正文',
+    )
+    expect(bundle.files['agent_pero/memory.tdb.pld.999']).toBeUndefined()
+    expect(Buffer.from(bundle.files['infos.db']!, 'base64').toString()).toBe('SQLite 冻结副本')
+  })
+
+  it('缺少协调器时拒绝导出受管数据库，避免复制不一致 generation', async () => {
+    const dataDir = path.join(root(), 'data')
+    await mkdir(path.join(dataDir, 'agent_pero'), { recursive: true })
+    await writeFile(path.join(dataDir, 'agent_pero', 'memory.tdb'), '数据库')
+    const backup = vi.fn(async (target: string) => writeFile(target, 'sqlite'))
+    const service = new DistributedSyncService(
+      dataDir,
+      { $client: { backup } } as never,
+      'server-a',
+    )
+    await expect(
+      service.createEncryptedSnapshot(randomBytes(32).toString('base64')),
+    ).rejects.toThrow('Store 快照协调器')
+  })
+
+  it('接收旧版快照，但拒绝高于当前引擎的数据库格式', async () => {
+    const base = root()
+    const dataDir = path.join(base, 'data')
+    const service = new DistributedSyncService(dataDir, {} as never, 'server-target')
+    const key = randomBytes(32)
+    const manifest = {
+      bundleVersion: 2,
+      schemaVersion: 1,
+      snapshotId: randomUUID(),
+      sourceServerId: 'server-source',
+      appVersion: 'test',
+      triviumFormat: 10,
+      createdAt: new Date().toISOString(),
+      files: [],
+      totalBytes: 0,
+    }
+    await expect(
+      service.stageEncryptedSnapshot(
+        encryptBundle({ manifest, files: {} }, key),
+        key.toString('base64'),
+        'server-source',
+      ),
+    ).rejects.toThrow('请先升级应用')
+    await expect(
+      service.stageEncryptedSnapshot(
+        encryptBundle(
+          {
+            manifest: { ...manifest, bundleVersion: 1, triviumFormat: undefined },
+            files: {},
+          },
+          key,
+        ),
+        key.toString('base64'),
+        'server-source',
+      ),
+    ).resolves.toMatchObject({ bundleVersion: 1 })
   })
 
   it('应在重启边界原子应用并保留当前机器身份', async () => {

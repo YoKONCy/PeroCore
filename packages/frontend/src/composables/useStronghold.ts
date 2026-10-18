@@ -12,7 +12,17 @@
  */
 
 import type { StrongholdProjectionSnapshot } from '@infos/shared'
-import { ref, shallowRef, computed, onMounted, onUnmounted } from 'vue'
+import {
+  inject,
+  ref,
+  shallowRef,
+  computed,
+  watch,
+  onActivated,
+  onDeactivated,
+  onMounted,
+  onUnmounted,
+} from 'vue'
 import { strongholdApi } from '../api/modules/strongholdApi'
 import type { Facility, Room, ButlerConfig, GroupMessage } from '../api/modules/strongholdApi'
 import { agentApi } from '../api/modules/agentApi'
@@ -268,7 +278,8 @@ export function useStronghold() {
     if (!round || !agentId) return
     const agent = ensureRoundAgent(round, agentId)
     agent.status = 'streaming'
-    agent.draft += String(payload.delta ?? '')
+    if (typeof payload.replace === 'string') agent.draft = payload.replace
+    else agent.draft += String(payload.delta ?? '')
     activeRound.value = { ...round, agents: [...round.agents] }
   }
 
@@ -495,13 +506,22 @@ export function useStronghold() {
   // ── 轮询 ──
 
   let pollTimer: ReturnType<typeof setInterval> | null = null
+  const mainVisible = inject('infos:main-surface-visible', shallowRef(true))
+  let pageActive = true
+  let disposed = false
+  let pollBusy = false
 
   function startPolling(): void {
-    if (pollTimer) return
+    if (pollTimer || !pageActive || !mainVisible.value || document.hidden || disposed) return
     pollTimer = setInterval(async () => {
       // 仅在有选中房间时轮询消息
-      if (currentRoom.value) {
-        await fetchMessages(currentRoom.value.id)
+      if (currentRoom.value && !pollBusy) {
+        pollBusy = true
+        try {
+          await fetchMessages(currentRoom.value.id)
+        } finally {
+          pollBusy = false
+        }
       }
     }, POLL_INTERVAL_MS)
   }
@@ -512,10 +532,31 @@ export function useStronghold() {
       pollTimer = null
     }
   }
+  function syncPolling(): void {
+    if (pageActive && mainVisible.value && !document.hidden && !disposed) {
+      if (currentRoom.value && !pollBusy) {
+        pollBusy = true
+        void fetchMessages(currentRoom.value.id).finally(() => {
+          pollBusy = false
+        })
+      }
+      startPolling()
+    } else stopPolling()
+  }
+  watch(mainVisible, syncPolling)
+  onActivated(() => {
+    pageActive = true
+    syncPolling()
+  })
+  onDeactivated(() => {
+    pageActive = false
+    stopPolling()
+  })
 
   // ── 生命周期 ──
 
   onMounted(async () => {
+    document.addEventListener('visibilitychange', syncPolling)
     gateway.onPush('stronghold_round_started', onRoundStarted)
     gateway.onPush('stronghold_agent_queued', onAgentQueued)
     gateway.onPush('stronghold_agent_started', onAgentStarted)
@@ -535,6 +576,8 @@ export function useStronghold() {
   })
 
   onUnmounted(() => {
+    disposed = true
+    document.removeEventListener('visibilitychange', syncPolling)
     gateway.offPush('stronghold_round_started', onRoundStarted)
     gateway.offPush('stronghold_agent_queued', onAgentQueued)
     gateway.offPush('stronghold_agent_started', onAgentStarted)

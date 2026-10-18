@@ -7,9 +7,13 @@
  * 数据源仍是 group_chat_messages，不接触 desktop ThreadStore。
  */
 import { computed, nextTick, ref, watch } from 'vue'
+import { useMessageVisibility } from '../../composables/chat/useMessageVisibility'
+import { useChatScroll } from '../../composables/chat/useChatScroll'
 import MessageBubble from '../chat/MessageBubble.vue'
+import SurfaceTransition from '../motion/SurfaceTransition.vue'
 import InputBar, { type MentionCandidate } from '../chat/InputBar.vue'
 import PixelIcon from '../pixel/PixelIcon.vue'
+import AgentStateHover from '../agent/AgentStateHover.vue'
 import type { ChatMessage } from '../chat/MessageBubble.vue'
 import type { GroupMessage } from '../../api/modules/strongholdApi'
 import type { AgentProfileMap, StrongholdRoundState } from '../../composables/useStronghold'
@@ -27,6 +31,7 @@ interface Props {
   roundState?: StrongholdRoundState | null
   replyStatus?: string
   roomName?: string
+  roomId?: string
   participantCount?: number
 }
 
@@ -39,6 +44,7 @@ const props = withDefaults(defineProps<Props>(), {
   roundState: null,
   replyStatus: '',
   roomName: '',
+  roomId: undefined,
   participantCount: 0,
 })
 
@@ -51,6 +57,47 @@ const emit = defineEmits<{
 const messageList = ref<HTMLElement | null>(null)
 const notify = useNotificationStore()
 const compositor = useCompositorStore()
+const initialLoad = ref(props.isLoading && !props.messages.length)
+watch(
+  () => props.isLoading,
+  (loading) => {
+    if (!loading) initialLoad.value = false
+  },
+)
+const { observeContent, unobserveContent, scrollToBottom } = useChatScroll(
+  messageList,
+  computed(() => props.messages.length),
+)
+const { observe, unobserve } = useMessageVisibility(messageList, (element, visible) => {
+  if (element.dataset.surfaceId) compositor.setSuspended(element.dataset.surfaceId, !visible)
+})
+function bubbleElement(event: unknown): Element | null {
+  const element = (event as { el?: unknown })?.el
+  return element instanceof Element ? element : null
+}
+function observeBubble(event: unknown): void {
+  const element = bubbleElement(event)
+  observe(element)
+  observeContent(element)
+}
+function unobserveBubble(event: unknown): void {
+  const element = bubbleElement(event)
+  unobserve(element)
+  unobserveContent(element)
+}
+const bubbleCache = new WeakMap<
+  GroupMessage,
+  {
+    surface: ReturnType<typeof compositor.get>
+    name: string
+    avatar: string
+    bubble: ChatMessage & {
+      agentName: string
+      agentAvatarUrl: string
+      systemVariant: 'default' | 'narration'
+    }
+  }
+>()
 
 /** 将 SQLite localtime 时间转换为毫秒时间戳。 */
 function parseTimestamp(raw?: string): number | undefined {
@@ -81,18 +128,25 @@ const bubbleMessages = computed<
     const system = isSystemMessage(message)
     const butler = message.senderId.toLowerCase() === 'butler'
     const name = system ? (butler ? '管家旁白' : '系统') : profileName(message.senderId)
-    return {
+    const surface = compositor.get(`stronghold-message:${message.id}`)
+    const avatar = props.profiles.get(message.senderId)?.avatarUrl ?? ''
+    const cached = bubbleCache.get(message)
+    if (cached?.surface === surface && cached?.name === name && cached?.avatar === avatar)
+      return cached.bubble
+    const bubble = {
       id: String(message.id),
       role: system ? 'system' : message.role,
       content: message.content,
       timestamp: parseTimestamp(message.timestamp),
       outputTokens: message.outputTokens,
       senderId: message.senderId,
-      surface: compositor.get(`stronghold-message:${message.id}`),
+      surface,
       agentName: name,
-      agentAvatarUrl: props.profiles.get(message.senderId)?.avatarUrl ?? '',
-      systemVariant: butler ? 'narration' : 'default',
+      agentAvatarUrl: avatar,
+      systemVariant: butler ? ('narration' as const) : ('default' as const),
     }
+    bubbleCache.set(message, { surface, name, avatar, bubble })
+    return bubble
   }),
 )
 
@@ -141,21 +195,24 @@ function handleDeletePair(id: string): void {
 }
 
 watch(
-  () => [props.messages.length, props.isAwaitingReply] as const,
+  () => props.roomName,
   async () => {
     await nextTick()
-    if (messageList.value) messageList.value.scrollTop = messageList.value.scrollHeight
+    scrollToBottom(false)
   },
 )
 </script>
 
 <template>
   <section class="stronghold-chat-adapter">
-    <div class="stronghold-message-region">
-      <div class="stronghold-conversation-background" aria-hidden="true">
-        <div class="stronghold-conversation-background__image" />
-        <div class="stronghold-conversation-background__overlay" />
-      </div>
+    <SurfaceTransition
+      class="stronghold-message-region"
+      fill
+      variant="conversation"
+      :identity="roomId ?? roomName"
+      :pending="initialLoad && isLoading"
+      label="正在切换房间"
+    >
       <div ref="messageList" class="stronghold-message-list">
         <div v-if="isLoading && messages.length === 0" class="stronghold-chat-state">
           <PixelIcon name="refresh" size="sm" animation="spin" />
@@ -170,7 +227,9 @@ watch(
         <MessageBubble
           v-for="message in bubbleMessages"
           :key="message.id"
+          v-memo="[message, isSending]"
           :message="message"
+          :agent-id="message.senderId"
           :agent-name="message.agentName"
           :agent-avatar-url="message.agentAvatarUrl"
           :system-variant="message.systemVariant"
@@ -179,6 +238,8 @@ watch(
           delete-action-label="删除消息"
           @copy="copyMessage"
           @delete-pair="handleDeletePair"
+          @vue:mounted="observeBubble"
+          @vue:before-unmount="unobserveBubble"
         />
 
         <div v-if="isAwaitingReply || roundState" class="stronghold-round-state">
@@ -204,14 +265,20 @@ watch(
               :key="agent.agentId"
               :class="`round-agent--${agent.status}`"
             >
-              <img
-                v-if="profiles.get(agent.agentId)?.avatarUrl"
-                :src="profiles.get(agent.agentId)?.avatarUrl"
-                :alt="profileName(agent.agentId)"
-              />
-              <span v-else class="round-agent-fallback">
-                {{ profileName(agent.agentId).slice(0, 1) }}
-              </span>
+              <AgentStateHover
+                :agent-id="agent.agentId"
+                :agent-name="profileName(agent.agentId)"
+                :thread-id="roomId ? `stronghold_${roomId}_${agent.agentId}` : ''"
+              >
+                <img
+                  v-if="profiles.get(agent.agentId)?.avatarUrl"
+                  :src="profiles.get(agent.agentId)?.avatarUrl"
+                  :alt="profileName(agent.agentId)"
+                />
+                <span v-else class="round-agent-fallback">
+                  {{ profileName(agent.agentId).slice(0, 1) }}
+                </span>
+              </AgentStateHover>
               <div>
                 <b>{{ profileName(agent.agentId) }}</b>
                 <small v-if="agent.status === 'queued'">等待接话</small>
@@ -238,7 +305,7 @@ watch(
           </div>
         </div>
       </div>
-    </div>
+    </SurfaceTransition>
 
     <div class="stronghold-input-area">
       <InputBar
@@ -279,61 +346,12 @@ watch(
   overflow: hidden;
 }
 
-.stronghold-conversation-background {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  pointer-events: none;
-  z-index: 0;
-}
-
-.stronghold-conversation-background__image {
-  position: absolute;
-  inset: calc(var(--chat-background-blur, 0px) * -2);
-  background-image: var(--chat-background-image, none);
-  background-size: cover;
-  background-position: var(--chat-background-position, 50% 50%);
-  background-repeat: no-repeat;
-  opacity: var(--chat-background-opacity, 0);
-  filter: blur(var(--chat-background-blur, 0px)) brightness(var(--chat-background-brightness, 1))
-    saturate(var(--chat-background-saturation, 1)) contrast(var(--chat-background-contrast, 1));
-}
-
-.stronghold-conversation-background__overlay {
-  position: absolute;
-  inset: 0;
-  background: rgba(
-    248,
-    250,
-    252,
-    calc(var(--chat-background-enabled, 0) * (0.06 + var(--chat-background-overlay, 0) * 0.94))
-  );
-}
-
-:global([data-theme='dark']) .stronghold-conversation-background__overlay {
-  background: rgba(
-    5,
-    7,
-    12,
-    calc(var(--chat-background-enabled, 0) * (0.32 + var(--chat-background-overlay, 0) * 0.68))
-  );
-}
-
 .stronghold-message-list {
   position: relative;
   z-index: 1;
   height: 100%;
   overflow-y: auto;
   padding: 18px 20px 8px;
-}
-
-.stronghold-message-list::-webkit-scrollbar {
-  width: 5px;
-}
-
-.stronghold-message-list::-webkit-scrollbar-thumb {
-  border-radius: 3px;
-  background: var(--ui-scrollbar-thumb, rgba(15, 23, 42, 0.14));
 }
 
 .stronghold-chat-state {

@@ -11,7 +11,7 @@
 
   "toolDefinition": {
     "name": "search_files",
-    "description": "按文件名搜索文件。默认在Agent工作区中查找；可显式指定设备目录。(要搜索文件内容，请用 code_search)",
+    "description": "按文件名查找文件；搜索正文使用 code_search。",
     "display": {
       "label": "搜索文件",
       "description": "按文件名在电脑中查找文件位置。",
@@ -27,7 +27,12 @@
           "type": "string",
           "description": "搜索目录（可选）。相对路径以Agent工作区为基准；未提供时默认搜索Agent工作区；可显式传入设备绝对路径。"
         },
-        "limit": { "type": "number", "description": "返回最大结果数 (默认 50)" }
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200,
+          "description": "返回最大结果数，默认 50，最多 200。"
+        }
       },
       "required": ["query"]
     }

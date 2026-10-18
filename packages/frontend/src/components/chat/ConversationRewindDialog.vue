@@ -13,6 +13,7 @@ const props = defineProps<{
   preview: RewindPreview | null
   title?: string
   loading?: boolean
+  regenerating?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -28,10 +29,23 @@ const fileActionLabel = {
   preserve_changed: '检测到后续修改，将保留',
 } as const
 
+const preservedReasonLabel = {
+  content_changed: '检测到后续修改，将保留',
+  history_gap: '变更记录不连续，将保留',
+  incomplete_snapshot: '恢复记录不完整，将保留',
+  unavailable: '无法安全读取，将保留',
+} as const
+
 const dialogTitle = computed(() =>
-  props.preview?.wholeThread ? '删除会话并回滚工作区？' : '回滚到此对话之前？',
+  props.regenerating
+    ? '从这一轮重新生成？'
+    : props.preview?.wholeThread
+      ? '删除这段会话？'
+      : '回滚到此对话之前？',
 )
-const confirmText = computed(() => (props.preview?.wholeThread ? '删除并回滚' : '回滚并撤回'))
+const confirmText = computed(() =>
+  props.regenerating ? '重新生成' : props.preview?.wholeThread ? '删除会话' : '回滚并撤回',
+)
 </script>
 
 <template>
@@ -47,15 +61,15 @@ const confirmText = computed(() => (props.preview?.wholeThread ? '删除并回�
           <strong>{{ preview.pairCount }}</strong>
           <span>轮对话</span>
         </div>
-        <div>
+        <div v-if="!preview.wholeThread">
           <strong>{{ preview.createdCount }}</strong>
           <span>新建文件</span>
         </div>
-        <div>
+        <div v-if="!preview.wholeThread">
           <strong>{{ preview.editedCount }}</strong>
           <span>恢复文件</span>
         </div>
-        <div class="is-preserved">
+        <div v-if="!preview.wholeThread" class="is-preserved">
           <strong>{{ preview.preservedCount }}</strong>
           <span>保留改动</span>
         </div>
@@ -63,8 +77,9 @@ const confirmText = computed(() => (props.preview?.wholeThread ? '删除并回�
 
       <p class="rewind-dialog__description">
         <template v-if="preview.wholeThread">
-          该会话的全部对话历史将被删除，工作区将恢复到会话开始前。
+          该会话的全部对话历史与会话清单将被删除，所有文件保持原样。
         </template>
+        <template v-else-if="regenerating">本轮及后续对话将被撤回，再生成新的回复。</template>
         <template v-else>
           目标轮次及之后的 {{ preview.pairCount }} 轮对话将被删除，工作区将恢复到该检查点之前。
         </template>
@@ -94,7 +109,13 @@ const confirmText = computed(() => (props.preview?.wholeThread ? '删除并回�
               />
             </span>
             <code :title="file.path">{{ file.path }}</code>
-            <small>{{ fileActionLabel[file.action] }}</small>
+            <small>
+              {{
+                file.preservedReason
+                  ? preservedReasonLabel[file.preservedReason]
+                  : fileActionLabel[file.action]
+              }}
+            </small>
           </div>
         </div>
       </section>
@@ -106,7 +127,7 @@ const confirmText = computed(() => (props.preview?.wholeThread ? '删除并回�
 
       <div v-if="preview.files.length" class="rewind-dialog__warning">
         <PixelIcon name="shield" size="sm" />
-        <span>会话完成后又发生变化的文件将被保留，不会删除或覆盖。</span>
+        <span>后续修改、变更记录不连续或恢复记录不完整的文件将被保留。</span>
       </div>
     </div>
 
@@ -119,8 +140,21 @@ const confirmText = computed(() => (props.preview?.wholeThread ? '删除并回�
       >
         取消
       </PButton>
-      <PButton variant="danger" size="sm" :disabled="loading || !preview" @click="emit('confirm')">
-        {{ loading ? '正在回滚…' : confirmText }}
+      <PButton
+        :variant="regenerating ? 'primary' : 'danger'"
+        size="sm"
+        :disabled="loading || !preview"
+        @click="emit('confirm')"
+      >
+        {{
+          loading
+            ? regenerating
+              ? '准备中…'
+              : preview?.wholeThread
+                ? '正在删除…'
+                : '正在回滚…'
+            : confirmText
+        }}
       </PButton>
     </template>
   </PDialog>

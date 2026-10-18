@@ -1,0 +1,119 @@
+.section-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.appearance-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+button {
+  color: inherit;
+  cursor: pointer;
+  border: 0;
+  background: transparent;
+  border-radius: 0;
+  padding: 3px 0;
+  font: inherit;
+  font-size: 12px;
+}
+button:focus-visible {
+  outline: 1px solid var(--pet-accent);
+  outline-offset: 2px;
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+.appearance-tabs button {
+  color: var(--pet-muted);
+  padding-bottom: 5px;
+}
+.appearance-tabs button[aria-pressed='true'] {
+  color: var(--pet-pink);
+  box-shadow: 0 1px var(--pet-pink);
+}
+.model-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 13px;
+  padding: 2px 2px 5px;
+}
+.choices,
+.animation-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+}
+.choices button {
+  color: var(--pet-muted);
+  padding: 4px 2px;
+}
+.clothing-details h4 {
+  margin: 16px 0 8px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--pet-muted);
+}
+.choices .selected {
+  color: var(--pet-text);
+  box-shadow: 0 1px var(--pet-accent);
+}
+.animation-choices {
+  justify-content: space-evenly;
+}
+.animation-choices button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 2px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.animation-choices :deep(svg) {
+  color: var(--pet-accent);
+  transition:
+    translate 120ms steps(2),
+    color 140ms;
+}
+.animation-choices button:hover :deep(svg) {
+  translate: 0 -2px;
+  color: var(--pet-pink);
+}
+.animation-choices button:active :deep(svg) {
+  translate: 0 1px;
+}
+.error,
+.muted {
+  font-size: 12px;
+  margin: 10px 0 4px;
+}
+.error {
+  color: var(--pet-pink);
+}
+.muted {
+  color: var(--pet-muted);
+}
+.appearance-view {
+  animation: appearance-reveal 140ms ease-out;
+}
+@keyframes appearance-reveal {
+  from {
+    opacity: 0;
+    translate: 0 2px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  :deep(svg) {
+    transition: none !important;
+    animation: none !important;
+  }
+}

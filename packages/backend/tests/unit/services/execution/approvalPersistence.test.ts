@@ -62,7 +62,6 @@ describe('ApprovalService SQLite', () => {
     expect(restored.get(request.id)).toMatchObject({
       status: 'denied',
       decision: 'deny_once',
-      resolutionMessage: '服务已重启，旧审批已自动拒绝。',
     })
     expect(restored.listAudit({ approvalId: request.id }).map((item) => item.event)).toEqual([
       'requested',

@@ -72,6 +72,7 @@ export class CompanionScheduler {
   private running = false
   private lastActivityAt = Date.now()
   private consecutiveCount = 0
+  private proactiveInFlight = false
   private config: CompanionConfig
 
   /** 当前绑定的 Agent */
@@ -170,7 +171,7 @@ export class CompanionScheduler {
 
   /** 每 tick 检查是否应触发主动对话 */
   private async tick(): Promise<void> {
-    if (!this.running) return
+    if (!this.running || this.proactiveInFlight) return
 
     const now = Date.now()
     const elapsed = now - this.lastActivityAt
@@ -192,12 +193,11 @@ export class CompanionScheduler {
       return
     }
 
-    // 生成触发语
-    const trigger = await this.generateTrigger(timeSlot)
-
-    logger.info(`触发主动对话: agent=${this.agentId}, timeSlot=${timeSlot}, trigger=${trigger}`)
-
+    this.proactiveInFlight = true
     try {
+      const trigger = await this.generateTrigger(timeSlot)
+      if (!this.running) return
+      logger.info(`触发主动对话: agent=${this.agentId}, timeSlot=${timeSlot}, trigger=${trigger}`)
       const terminal = await this.kernelScheduler.submitAndWait({
         principalId: this.agentId,
         taskId: `companion:${this.agentId}:${now}`,
@@ -206,13 +206,14 @@ export class CompanionScheduler {
         resourceKey: `agent:${this.agentId}`,
         budget: { maxDurationMs: 2 * 60_000, maxLlmCalls: 8, maxToolCalls: 8, maxConcurrentIo: 2 },
         run: async () => {
+          if (!this.running) return
           const reply = await this.onProactiveChat({
             agentId: this.agentId,
             trigger,
             timeSlot,
           })
 
-          if (reply && reply.trim()) {
+          if (this.running && reply && reply.trim()) {
             await this.onPushMessage({
               type: 'proactive_message',
               content: reply,
@@ -230,6 +231,10 @@ export class CompanionScheduler {
       this.lastActivityAt = Date.now()
     } catch (err) {
       logger.error(`主动对话生成失败: ${err}`)
+    } finally {
+      this.proactiveInFlight = false
+      // 静默结束和失败同样冷却，避免每十秒重新请求模型。
+      this.lastActivityAt = Date.now()
     }
   }
 

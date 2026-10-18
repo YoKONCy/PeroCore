@@ -2,7 +2,7 @@
   "id": "social",
   "name": "Social Bridge",
   "description": "对外社交平台桥接应用（QQ/Discord 等），管理社交会话、缓冲、调度与回复。独立编译上下文，不依赖主 Agent 的 chat pipeline。",
-  "version": "0.9.3-hotfix2",
+  "version": "0.9.4",
   "author": "infOS",
   "icon": "icon.png",
   "frontendEntry": "./frontend/index.js",
@@ -32,126 +32,73 @@
   ],
   "providesTools": [
     {
-      "name": "send_message",
-      "description": "向社交频道发送消息（私聊/群聊）",
       "parameters": {
-        "type": "object",
         "properties": {
-          "target": {
-            "type": "string",
-            "description": "目标会话 ID"
-          },
-          "content": {
-            "type": "string",
-            "description": "消息内容"
-          },
-          "type": {
-            "type": "string",
-            "enum": [
-              "private",
-              "group"
-            ],
-            "description": "会话类型"
-          }
-        },
-        "required": [
-          "target",
-          "content",
-          "type"
-        ]
-      }
-    },
-    {
-      "name": "get_contacts",
-      "description": "获取联系人列表"
-    },
-    {
-      "name": "get_groups",
-      "description": "获取群组列表"
-    },
-    {
-      "name": "get_contact_info",
-      "description": "查询用户详情",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "user_id": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "user_id"
-        ]
-      }
-    },
-    {
-      "name": "get_group_info",
-      "description": "查询群组详情",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "group_id": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "group_id"
-        ]
-      }
-    },
-    {
-      "name": "get_group_members",
-      "description": "查询群组成员列表",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "group_id": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "group_id"
-        ]
-      }
-    },
-    {
-      "name": "handle_friend_request",
-      "description": "处理好友请求",
-      "requiresApproval": true,
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "flag": {
+          "account_id": {
             "type": "string"
           },
-          "approve": {
-            "type": "boolean"
-          },
-          "remark": {
+          "action": {
             "type": "string"
+          },
+          "input": {
+            "type": "object"
           }
         },
+        "type": "object",
+        "additionalProperties": false,
         "required": [
-          "flag",
-          "approve"
+          "action",
+          "input"
         ]
-      }
+      },
+      "name": "social",
+      "description": "日常社交"
     },
     {
-      "name": "remove_friend",
-      "description": "删除好友",
-      "requiresApproval": true,
       "parameters": {
-        "type": "object",
         "properties": {
-          "user_id": {
+          "account_id": {
             "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "input": {
+            "type": "object"
           }
         },
+        "type": "object",
+        "additionalProperties": false,
         "required": [
-          "user_id"
+          "action",
+          "input"
         ]
-      }
+      },
+      "name": "social_group",
+      "description": "群聊事务"
+    },
+    {
+      "parameters": {
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "input": {
+            "type": "object"
+          }
+        },
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "action",
+          "input"
+        ]
+      },
+      "name": "social_account",
+      "description": "账号与空间"
     }
   ],
   "requiresTools": [

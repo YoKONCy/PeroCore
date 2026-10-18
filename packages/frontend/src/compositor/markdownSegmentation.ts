@@ -7,6 +7,105 @@ export interface MarkdownRenderBlock {
   stable: boolean
 }
 
+/** 每个文本节点独立持有游标；只扫描新到达的完整行，稳定块保持对象身份。 */
+export class StreamMarkdownSegmenter {
+  private source = ''
+  private lineStart = 0
+  private searched = 0
+  private cutoff = 0
+  private boundary = 0
+  private fence = ''
+  private mathFence = ''
+  private htmlDepth = 0
+  private blocks: MarkdownRenderBlock[] = []
+  private result: MarkdownRenderBlock[] = []
+  private committed = false
+
+  constructor(private readonly nodeId: SurfaceNodeId) {}
+
+  update(source: string, committed = false): MarkdownRenderBlock[] {
+    if (source === this.source && committed === this.committed) return this.result
+    if (this.committed || !source.startsWith(this.source)) this.reset()
+    this.source = source
+    this.committed = committed
+    if (committed) {
+      this.result = segmentStreamMarkdown(source, this.nodeId, true)
+      return this.result
+    }
+    let newline: number
+    while ((newline = source.indexOf('\n', this.searched)) !== -1) {
+      const end = newline + 1
+      const line = source.slice(this.lineStart, end)
+      const marker = line.match(/^[ \t]{0,3}(`{3,}|~{3,})/)
+      let boundary = false
+      if (this.mathFence) this.mathFence = updateMathFence(line, this.mathFence)
+      else if (marker) {
+        if (!this.fence) this.fence = marker[1]!
+        else if (marker[1]![0] === this.fence[0] && marker[1]!.length >= this.fence.length) {
+          this.fence = ''
+          boundary = true
+        }
+      } else if (!this.fence) {
+        this.htmlDepth = updateHtmlDepth(line, this.htmlDepth)
+        this.mathFence = updateMathFence(line, '')
+        boundary = !this.mathFence && this.htmlDepth === 0 && /^[ \t]*\r?\n$/.test(line)
+      }
+      if (boundary) {
+        // 保留最近一个完整段落，列表、引用和未闭合结构继续留在尾部。
+        if (this.boundary > this.cutoff) {
+          let cursor = this.cutoff
+          for (const range of splitStableRanges(source.slice(this.cutoff, this.boundary))) {
+            const start = cursor
+            cursor += range.length
+            this.blocks.push(makeBlock(range, this.nodeId, start, cursor))
+          }
+          this.cutoff = this.boundary
+        }
+        this.boundary = end
+      }
+      this.lineStart = end
+      this.searched = end
+    }
+    this.searched = source.length
+    this.result = [...this.blocks]
+    if (this.cutoff < source.length)
+      this.result.push({
+        id: `${this.nodeId}:tail`,
+        kind: 'markdown',
+        source: source.slice(this.cutoff),
+        stable: false,
+      })
+    return this.result
+  }
+
+  private reset(): void {
+    this.source = ''
+    this.lineStart = this.searched = this.cutoff = this.boundary = this.htmlDepth = 0
+    this.fence = ''
+    this.mathFence = ''
+    this.blocks = []
+    this.result = []
+    this.committed = false
+  }
+}
+
+function makeBlock(
+  source: string,
+  nodeId: SurfaceNodeId,
+  start: number,
+  end: number,
+): MarkdownRenderBlock {
+  const mermaid = source.match(
+    /^[ \t]*```(?:mermaid|flowchart|graph)[^\n]*\n([\s\S]*?)\n?```[ \t]*(?:\n|$)$/i,
+  )
+  return {
+    id: `${nodeId}:${start}-${end}`,
+    kind: mermaid ? 'mermaid' : 'markdown',
+    source: mermaid?.[1]?.trim() ?? source,
+    stable: true,
+  }
+}
+
 /**
  * 将流式 Markdown 切为不可回退的稳定块与唯一活跃尾部。
  * 保留最后一个完整段落作为安全尾部，避免后续列表/引用继续改变其语义。
@@ -23,15 +122,7 @@ export function segmentStreamMarkdown(
   for (const range of splitStableRanges(source.slice(0, cutoff))) {
     const start = cursor
     cursor += range.length
-    const mermaid = range.match(
-      /^[ \t]*```(?:mermaid|flowchart|graph)[^\n]*\n([\s\S]*?)\n?```[ \t]*(?:\n|$)$/i,
-    )
-    blocks.push({
-      id: `${nodeId}:${start}-${cursor}`,
-      kind: mermaid ? 'mermaid' : 'markdown',
-      source: mermaid?.[1]?.trim() ?? range,
-      stable: true,
-    })
+    blocks.push(makeBlock(range, nodeId, start, cursor))
   }
   if (cutoff < source.length) {
     blocks.push({
@@ -55,14 +146,25 @@ function updateHtmlDepth(line: string, depth: number): number {
   return next
 }
 
+/** 块公式中的空行属于同一段，不能在公式尚未闭合时拆开解析。 */
+function updateMathFence(line: string, fence: string): string {
+  if (fence) return line.includes(fence) ? '' : fence
+  const trimmed = line.trimStart()
+  if (trimmed.startsWith('$$') && !trimmed.slice(2).includes('$$')) return '$$'
+  if (trimmed.startsWith('\\[') && !trimmed.slice(2).includes('\\]')) return '\\]'
+  return ''
+}
+
 function findStableCutoff(source: string): number {
   const boundaries: number[] = []
   let fence: { marker: string; start: number } | null = null
   let htmlDepth = 0
+  let mathFence = ''
   let offset = 0
   for (const line of source.split(/(?<=\n)/)) {
     const marker = line.match(/^[ \t]{0,3}(`{3,}|~{3,})/)
-    if (marker) {
+    if (mathFence) mathFence = updateMathFence(line, mathFence)
+    else if (marker) {
       if (!fence) fence = { marker: marker[1]!, start: offset }
       else if (marker[1]![0] === fence.marker[0] && marker[1]!.length >= fence.marker.length) {
         fence = null
@@ -70,11 +172,8 @@ function findStableCutoff(source: string): number {
       }
     } else if (!fence) {
       htmlDepth = updateHtmlDepth(line, htmlDepth)
-      if (
-        htmlDepth === 0 &&
-        /\n\s*$/.test(line) &&
-        source.slice(0, offset + line.length).endsWith('\n\n')
-      ) {
+      mathFence = updateMathFence(line, '')
+      if (!mathFence && htmlDepth === 0 && /^[ \t]*\r?\n$/.test(line)) {
         boundaries.push(offset + line.length)
       }
     }
@@ -89,13 +188,23 @@ function splitStableRanges(source: string): string[] {
   const ranges: string[] = []
   let cursor = 0
   let fenceStart = -1
+  let fenceMarker = ''
   let htmlDepth = 0
+  let mathFence = ''
   const lines = source.split(/(?<=\n)/)
   let offset = 0
   for (const line of lines) {
     const marker = line.match(/^[ \t]{0,3}(`{3,}|~{3,})/)
-    if (marker && fenceStart === -1) fenceStart = offset
-    else if (marker && fenceStart >= 0) {
+    if (mathFence) mathFence = updateMathFence(line, mathFence)
+    else if (marker && fenceStart === -1) {
+      fenceStart = offset
+      fenceMarker = marker[1]!
+    } else if (
+      marker &&
+      fenceStart >= 0 &&
+      marker[1]![0] === fenceMarker[0] &&
+      marker[1]!.length >= fenceMarker.length
+    ) {
       const end = offset + line.length
       if (fenceStart > cursor) ranges.push(source.slice(cursor, fenceStart))
       ranges.push(source.slice(fenceStart, end))
@@ -103,7 +212,8 @@ function splitStableRanges(source: string): string[] {
       fenceStart = -1
     } else if (fenceStart === -1) {
       htmlDepth = updateHtmlDepth(line, htmlDepth)
-      if (htmlDepth === 0 && source.slice(cursor, offset + line.length).endsWith('\n\n')) {
+      mathFence = updateMathFence(line, '')
+      if (!mathFence && htmlDepth === 0 && /^[ \t]*\r?\n$/.test(line)) {
         ranges.push(source.slice(cursor, offset + line.length))
         cursor = offset + line.length
       }

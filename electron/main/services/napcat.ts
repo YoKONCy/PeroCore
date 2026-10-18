@@ -3,7 +3,7 @@
  *
  * 启动/停止/监控 NapCat 进程，管理日志和命令转发。
  *
- * - 多入口点自动检测 (Shell.exe > napcat.mjs > bat > index.js)
+ * - 优先使用官方 Node 发行包与内置运行时，保留 Shell 入口支持
  * - QQ 路径从注册表/默认路径自动查找
  * - 安装功能实现 (GitHub Release 自动下载解压)
  * - GatewayHub 通知替代 window.webContents
@@ -14,19 +14,81 @@
  */
 
 import type { ChildProcess } from 'node:child_process'
-import { spawn } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import path from 'node:path'
 import fs from 'node:fs'
 import https from 'node:https'
+import { createHash } from 'node:crypto'
+import { StringDecoder } from 'node:string_decoder'
+import {
+  prepareNapCatWebUi,
+  observeNapCatWebUi,
+  getNapCatWebUiEndpoint,
+  redactNapCatWebUiLog,
+} from './napcatWebUi'
 import { BrowserWindow } from 'electron'
 import AdmZip from 'adm-zip'
 import { logger } from '../utils/logger'
 import { paths } from '../utils/env'
+import {
+  NAPCAT_INSTALLATION_MARKER,
+  hasNapCatNodeInstallation,
+  prepareNapCatNodeInstallation,
+  copyNapCatProgramFiles,
+  getNapCatBuiltinProblem,
+} from './napcatInstallation'
 
 let napCatProcess: ChildProcess | null = null
+let startPending: Promise<void> | undefined
+let stopPending: Promise<void> | undefined
+let launchGeneration = 0
 let napCatLogs: string[] = []
 let accountDiscoveryTimer: ReturnType<typeof setInterval> | null = null
 const MAX_LOG_LINES = 500
+export const NAPCAT_VERSION = '4.18.38'
+const NAPCAT_ARCHIVE_SHA256 = 'b88007a373a30deefb387e7cf17911752ff900bce22c534b3da6b644f5c6d0ae'
+let installationPending: Promise<boolean> | undefined
+let installedVersionCache:
+  | { file: string; modified: number; size: number; version: string | null }
+  | undefined
+
+/** 安装版本来自核心文件；按文件时间缓存，避免状态刷新反复读取大型脚本。 */
+export function getInstalledNapCatVersion(): string | null {
+  for (const file of [
+    path.join(getNapCatDir(), 'napcat', 'napcat.mjs'),
+    path.join(getNapCatDir(), 'napcat.mjs'),
+  ]) {
+    try {
+      const stat = fs.statSync(file)
+      if (
+        installedVersionCache?.file === file &&
+        installedVersionCache.modified === stat.mtimeMs &&
+        installedVersionCache.size === stat.size
+      )
+        return installedVersionCache.version
+      const source = fs.readFileSync(file, 'utf8')
+      const version =
+        source.match(/\bnapCatVersion\s*=\s*[^\r\n]*?["']v?(\d+\.\d+\.\d+)["']/)?.[1] ??
+        source.match(/&&\s*["']v?(\d+\.\d+\.\d+)["']\s*\|\|\s*["']1\.0\.0-dev["']/)?.[1] ??
+        null
+      installedVersionCache = { file, modified: stat.mtimeMs, size: stat.size, version }
+      return version
+    } catch {
+      /* 安装尚未完成或使用另一种入口。 */
+    }
+  }
+  return null
+}
+
+function needsNapCatUpdate(version: string | null): boolean {
+  if (!version) return checkNapCat()
+  const actual = version.split('.').map(Number)
+  const expected = NAPCAT_VERSION.split('.').map(Number)
+  for (let index = 0; index < expected.length; index++) {
+    if (actual[index] !== expected[index]) return actual[index]! < expected[index]!
+  }
+  return false
+}
 
 // ─────────────────────────────────────────────
 // 日志广播
@@ -39,6 +101,11 @@ function broadcastNapCatLog(line: string): void {
       win.webContents.send('napcat-log', line)
     }
   })
+}
+function broadcastNapCatState(): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send('napcat-state-changed', getNapCatStatus())
+  }
 }
 
 /** 向所有窗口推送下载进度 */
@@ -80,6 +147,9 @@ function getNapCatDir(): string {
  */
 function getNapCatConfigDir(): string {
   return path.join(getNapCatDir(), 'napcat', 'config')
+}
+export function getNapCatDashboardEndpoint(): URL | undefined {
+  return getNapCatWebUiEndpoint(getNapCatConfigDir())
 }
 
 /** 保存最近一次成功登录的账号，用于后续启动时自动传入快速登录参数。 */
@@ -202,7 +272,7 @@ export function checkNapCat(): boolean {
 }
 
 /** 解析启动命令和参数 */
-async function resolveEntryPoint(
+export async function resolveEntryPoint(
   napCatDir: string,
   quickLoginAccount?: string,
 ): Promise<{
@@ -211,9 +281,7 @@ async function resolveEntryPoint(
   env: Record<string, string | undefined>
 }> {
   const shellExe = path.join(napCatDir, 'NapCat.Shell.exe')
-  const napcatMjs = path.join(napCatDir, 'napcat.mjs')
   const napcatBat = path.join(napCatDir, 'napcat.bat')
-  const indexJs = path.join(napCatDir, 'index.js')
 
   const env: Record<string, string | undefined> = {
     ...process.env,
@@ -225,6 +293,29 @@ async function resolveEntryPoint(
     NAPCAT_PATH: napCatDir,
   }
 
+  if (hasNapCatNodeInstallation(napCatDir)) {
+    const installation = prepareNapCatNodeInstallation(napCatDir)
+    if (installation.runtimeRepairWarning) {
+      logger.warn('NapCat', installation.runtimeRepairWarning)
+      broadcastNapCatLog(`[提示] ${installation.runtimeRepairWarning}`)
+    }
+    if (installation.repaired) {
+      logger.info('NapCat', `已校正 QQ 版本信息：${installation.version}`)
+      broadcastNapCatLog(`[系统] 已校正 QQ 版本信息：${installation.version}`)
+    }
+    if (installation.runtimeRepaired) {
+      logger.info('NapCat', '已应用 NapCat 运行兼容修复')
+      broadcastNapCatLog('[系统] 已应用 NapCat 运行兼容修复')
+    }
+    env.NAPCAT_WRAPPER_PATH = path.join(napCatDir, 'wrapper.node')
+    env.NAPCAT_QQ_PACKAGE_INFO_PATH = path.join(napCatDir, 'package.json')
+    env.NAPCAT_QQ_VERSION_CONFIG_PATH = path.join(napCatDir, 'config.json')
+    env.NAPCAT_DISABLE_PIPE = '1'
+    const args = [installation.entry]
+    if (quickLoginAccount) args.push('--qq', quickLoginAccount)
+    return { cmd: installation.command, args, env }
+  }
+
   const qqPath = await getQQPath()
 
   if (fs.existsSync(shellExe)) {
@@ -233,23 +324,8 @@ async function resolveEntryPoint(
     return { cmd: shellExe, args, env }
   }
 
-  if (fs.existsSync(napcatMjs)) {
-    // NapCat 环境变量
-    env.NAPCAT_WRAPPER_PATH = path.join(napCatDir, 'wrapper.node')
-    env.NAPCAT_QQ_PACKAGE_INFO_PATH = path.join(napCatDir, 'package.json')
-    env.NAPCAT_QQ_VERSION_CONFIG_PATH = path.join(napCatDir, 'config.json')
-    env.NAPCAT_DISABLE_PIPE = '1'
-    const args = ['napcat.mjs']
-    if (quickLoginAccount) args.push('--qq', quickLoginAccount)
-    return { cmd: 'node', args, env }
-  }
-
   if (fs.existsSync(napcatBat) && qqPath) {
     return { cmd: 'cmd.exe', args: ['/c', 'napcat.bat', '-q', qqPath], env }
-  }
-
-  if (fs.existsSync(indexJs)) {
-    return { cmd: 'node', args: ['index.js'], env }
   }
 
   throw new Error('未找到有效的 NapCat 入口点')
@@ -263,14 +339,14 @@ async function resolveEntryPoint(
  * 扫描 NapCat 已登录的 QQ 号配置文件，
  * 自动注入指向后端 /api/social/ws 的反向 WS 连接。
  *
- * 配置文件格式: config/onebot11_<QQ号>.json
+ * 配置文件格式: config/onebot11.json（新账号默认）及 onebot11_<QQ号>.json
  * 目标字段:     network.websocketClients[]
  *
  * 逻辑:
  * - 扫描 config/ 目录下所有 onebot11_*.json
  * - 如果已有 name='infOS' 的连接 → 确保 url 和 enable 正确
  * - 如果没有 → 追加一条新连接
- * - 如果 config/ 目录不存在或没有配置文件 → 跳过 (等用户扫码登录后再说)
+ * - 首次扫码前准备默认配置，不将默认文件计入已登录账号
  *
  * @returns 已扫描账号及本轮实际修改的账号
  */
@@ -288,36 +364,32 @@ export function syncNapCatConfig(): NapCatConfigSyncResult {
     changedAccounts,
   })
 
-  if (!fs.existsSync(configDir)) {
-    logger.info('NapCat', '配置目录不存在，跳过自动配置 (等待首次登录)')
-    return result()
-  }
-
   // 扫描所有 onebot11_<QQ号>.json
   let entries: string[]
   try {
-    entries = fs.readdirSync(configDir).filter((f) => /^onebot11_\d+\.json$/.test(f))
+    // NapCat 支持 onebot11.json 作为新账号默认配置，必须在首次扫码前写入。
+    fs.mkdirSync(configDir, { recursive: true })
+    entries = [
+      'onebot11.json',
+      ...fs.readdirSync(configDir).filter((f) => /^onebot11_\d+\.json$/.test(f)),
+    ]
   } catch {
     logger.warn('NapCat', '读取配置目录失败')
     return result()
   }
 
-  if (entries.length === 0) {
-    logger.info('NapCat', '未发现已登录账号配置文件，跳过自动配置')
-    return result()
-  }
-
   for (const filename of entries) {
     const filePath = path.join(configDir, filename)
+    const isDefault = filename === 'onebot11.json'
     const qqNumber = filename.replace('onebot11_', '').replace('.json', '')
 
     try {
-      const raw = fs.readFileSync(filePath, 'utf-8')
+      const raw = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : '{}'
       const config = JSON.parse(raw) as Record<string, unknown>
       let changed = false
 
       // 确保 network 对象存在
-      if (!config.network || typeof config.network !== 'object') {
+      if (!config.network || typeof config.network !== 'object' || Array.isArray(config.network)) {
         config.network = {}
         changed = true
       }
@@ -355,11 +427,14 @@ export function syncNapCatConfig(): NapCatConfigSyncResult {
 
       if (changed) {
         fs.writeFileSync(filePath, JSON.stringify(config, null, 2), 'utf-8')
-        changedAccounts.push(qqNumber)
-        logger.info('NapCat', `已同步 QQ ${qqNumber} 的反向 WS 配置 → ${REVERSE_WS_URL}`)
+        if (!isDefault) changedAccounts.push(qqNumber)
+        logger.info(
+          'NapCat',
+          `已同步${isDefault ? '新账号默认' : ` QQ ${qqNumber} 的`}反向 WS 配置 → ${REVERSE_WS_URL}`,
+        )
       }
 
-      configuredAccounts.push(qqNumber)
+      if (!isDefault) configuredAccounts.push(qqNumber)
     } catch (err) {
       logger.warn('NapCat', `处理配置文件 ${filename} 失败: ${err}`)
     }
@@ -381,7 +456,19 @@ export function ensureNapCatConfig(): string[] {
 // ─────────────────────────────────────────────
 
 /** 启动 NapCat */
-export async function startNapCat(): Promise<void> {
+export function startNapCat(): Promise<void> {
+  if (stopPending) return Promise.reject(new Error('NapCat 正在停止，请稍后重试'))
+  if (startPending) return startPending
+  startPending = launchNapCat(++launchGeneration).finally(() => {
+    startPending = undefined
+  })
+  return startPending
+}
+
+async function launchNapCat(generation: number): Promise<void> {
+  if (installationPending && !(await installationPending))
+    throw new Error('NapCat 安装或更新失败，请完成更新后再启动')
+  if (generation !== launchGeneration) throw new Error('NapCat 启动已取消')
   if (napCatProcess) {
     logger.warn('NapCat', 'NapCat 进程已在运行')
     return
@@ -391,6 +478,9 @@ export async function startNapCat(): Promise<void> {
   if (!checkNapCat()) {
     throw new Error('NapCat 未安装，请先执行安装')
   }
+  if (fs.existsSync(path.join(napCatDir, NAPCAT_INSTALLATION_MARKER)))
+    throw new Error('NapCat 上次安装未完成，请重新安装或更新后再启动')
+  prepareNapCatWebUi(getNapCatConfigDir())
 
   // 启动前自动配置反向 WS，并恢复最近登录账号。
   const configured = discoverLoggedInAccounts()
@@ -400,6 +490,7 @@ export async function startNapCat(): Promise<void> {
 
   const quickLoginAccount = readQuickLoginAccount()
   const { cmd, args, env } = await resolveEntryPoint(napCatDir, quickLoginAccount)
+  if (generation !== launchGeneration) throw new Error('NapCat 启动已取消')
   if (quickLoginAccount) {
     broadcastNapCatLog(`[系统] 将使用 QQ ${quickLoginAccount} 尝试快速登录`)
   } else {
@@ -408,74 +499,114 @@ export async function startNapCat(): Promise<void> {
   logger.info('NapCat', `启动: ${cmd} ${args.join(' ')} (cwd: ${napCatDir})`)
   broadcastNapCatLog('[系统] 正在启动 NapCat...')
 
-  napCatProcess = spawn(cmd, args, {
+  const child = spawn(cmd, args, {
     cwd: napCatDir,
     env,
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true,
   })
-  startAccountDiscovery()
+  napCatProcess = child
+  broadcastNapCatState()
 
-  napCatProcess.stdout?.on('data', (data: Buffer) => {
-    const lines = data.toString().split('\n').filter(Boolean)
-    for (const line of lines) {
-      napCatLogs.push(line)
+  // 按完整 UTF-8 行识别端口与凭据，避免分块输出截断链接或泄露 Token。
+  const attachOutput = (stream: typeof child.stdout, prefix: string) => {
+    const decoder = new StringDecoder('utf8')
+    let pending = ''
+    const publish = (line: string) => {
+      if (!line) return
+      if (napCatProcess === child) observeNapCatWebUi(line)
+      const safe = prefix + redactNapCatWebUiLog(line)
+      napCatLogs.push(safe)
       if (napCatLogs.length > MAX_LOG_LINES) napCatLogs.shift()
-      broadcastNapCatLog(line)
+      broadcastNapCatLog(safe)
     }
-  })
+    stream?.on('data', (data: Buffer) => {
+      pending += decoder.write(data)
+      const lines = pending.split(/\r?\n/)
+      pending = lines.pop() ?? ''
+      for (const line of lines) publish(line)
+      if (pending.length > 65536) pending = ''
+    })
+    stream?.on('end', () => publish(pending + decoder.end()))
+  }
+  attachOutput(child.stdout, '')
+  attachOutput(child.stderr, '[ERROR] ')
 
-  napCatProcess.stderr?.on('data', (data: Buffer) => {
-    const lines = data.toString().split('\n').filter(Boolean)
-    for (const line of lines) {
-      napCatLogs.push(`[ERROR] ${line}`)
-      if (napCatLogs.length > MAX_LOG_LINES) napCatLogs.shift()
-      broadcastNapCatLog(`[ERROR] ${line}`)
-    }
-  })
-
-  napCatProcess.on('exit', (code) => {
+  child.on('exit', (code) => {
+    if (napCatProcess !== child) return
     stopAccountDiscovery()
     logger.info('NapCat', `NapCat 进程退出: code=${code}`)
     broadcastNapCatLog(`[系统] NapCat 已退出 (code=${code})`)
     napCatProcess = null
+    broadcastNapCatState()
   })
 
-  napCatProcess.on('error', (err) => {
+  child.on('error', (err) => {
+    if (napCatProcess !== child) return
     stopAccountDiscovery()
     logger.error('NapCat', `NapCat 启动失败: ${err.message}`)
     broadcastNapCatLog(`[错误] NapCat 启动失败: ${err.message}`)
     napCatProcess = null
+    broadcastNapCatState()
   })
+  await new Promise<void>((resolve, reject) => {
+    child.once('spawn', resolve)
+    child.once('error', reject)
+  })
+  if (napCatProcess === child) startAccountDiscovery()
 }
 
 /** 停止 NapCat (带超时保护) */
 export function stopNapCat(): Promise<void> {
-  return new Promise((resolve) => {
-    if (!napCatProcess) {
+  if (stopPending) return stopPending
+  // 取消尚在等待安装或入口解析的启动，避免退出后迟到的启动继续拉起进程。
+  launchGeneration++
+  stopAccountDiscovery()
+  const operation = new Promise<void>((resolve) => {
+    const child = napCatProcess
+    if (!child) {
       resolve()
       return
     }
 
     logger.info('NapCat', '正在停止 NapCat...')
-    stopAccountDiscovery()
+    let treeStopped: Promise<void> | undefined
 
-    napCatProcess.on('close', () => {
-      napCatProcess = null
-      resolve()
+    child.once('close', () => {
+      clearTimeout(timer)
+      if (napCatProcess === child) napCatProcess = null
+      broadcastNapCatState()
+      if (treeStopped) void treeStopped.then(resolve)
+      else resolve()
     })
-
-    napCatProcess.kill('SIGTERM')
-
     // 超时强杀
-    setTimeout(() => {
-      if (napCatProcess) {
-        napCatProcess.kill('SIGKILL')
-        napCatProcess = null
-        resolve()
-      }
-    }, 3000)
+    const timer = setTimeout(() => {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+      if (napCatProcess === child) napCatProcess = null
+      broadcastNapCatState()
+      resolve()
+    }, 4000)
+    if (process.platform === 'win32' && child.pid) {
+      // 新版 NapCat 会拉起 Worker；退出时必须同时结束子进程，释放 QQ 原生文件。
+      treeStopped = new Promise<void>((done) => {
+        execFile(
+          'taskkill.exe',
+          ['/PID', String(child.pid), '/T', '/F'],
+          { windowsHide: true, timeout: 3000 },
+          (error) => {
+            if (error && child.exitCode === null) child.kill('SIGKILL')
+            done()
+          },
+        )
+      })
+    } else {
+      child.kill('SIGTERM')
+    }
   })
+  stopPending = operation.finally(() => {
+    stopPending = undefined
+  })
+  return stopPending
 }
 
 /** 获取 NapCat 日志 */
@@ -502,11 +633,23 @@ export function getNapCatStatus(): {
   running: boolean
   pid: number | null
   logCount: number
+  version: string | null
+  targetVersion: string
+  updateAvailable: boolean
+  installing: boolean
 } {
+  const version = getInstalledNapCatVersion()
   return {
     running: napCatProcess !== null,
     pid: napCatProcess?.pid ?? null,
     logCount: napCatLogs.length,
+    version,
+    targetVersion: NAPCAT_VERSION,
+    updateAvailable:
+      needsNapCatUpdate(version) ||
+      getNapCatBuiltinProblem(getNapCatDir()) !== null ||
+      fs.existsSync(path.join(getNapCatDir(), NAPCAT_INSTALLATION_MARKER)),
+    installing: !!installationPending,
   }
 }
 
@@ -515,34 +658,59 @@ export function getNapCatStatus(): {
 // ─────────────────────────────────────────────
 
 /** 下载文件到 Buffer (简易实现) */
-function downloadToBuffer(url: string): Promise<Buffer> {
+function downloadToBuffer(url: string, redirects = 0): Promise<Buffer> {
   return new Promise((resolve, reject) => {
+    if (redirects > 5) return reject(new Error('NapCat 下载重定向次数过多'))
+    if (new URL(url).protocol !== 'https:')
+      return reject(new Error('NapCat 下载地址必须使用 HTTPS'))
     const request = https.get(url, { timeout: 60000 }, (res) => {
       // 处理重定向
       if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        downloadToBuffer(res.headers.location).then(resolve).catch(reject)
+        res.resume()
+        downloadToBuffer(new URL(res.headers.location, url).href, redirects + 1)
+          .then(resolve)
+          .catch(reject)
         return
       }
 
       if (res.statusCode !== 200) {
+        res.resume()
         reject(new Error(`HTTP ${res.statusCode}`))
         return
       }
 
       const chunks: Buffer[] = []
       let totalSize = 0
-      const contentLength = parseInt(res.headers['content-length'] ?? '0', 10)
+      const contentLength = res.headers['content-length']
+        ? Number.parseInt(res.headers['content-length'], 10)
+        : NaN
+      const maxSize = 512 * 1024 * 1024
+      if (contentLength > maxSize) {
+        res.destroy()
+        reject(new Error('NapCat 安装包超过大小限制'))
+        return
+      }
 
       res.on('data', (chunk: Buffer) => {
-        chunks.push(chunk)
         totalSize += chunk.length
+        if (totalSize > maxSize) {
+          res.destroy()
+          reject(new Error('NapCat 安装包超过大小限制'))
+          return
+        }
+        chunks.push(chunk)
         if (contentLength > 0) {
           const percent = Math.round((totalSize / contentLength) * 100)
           broadcastDownloadProgress({ percent, status: `下载中... ${percent}%` })
         }
       })
 
-      res.on('end', () => resolve(Buffer.concat(chunks)))
+      res.on('end', () => {
+        if (!res.complete || (Number.isFinite(contentLength) && totalSize !== contentLength))
+          reject(new Error('NapCat 安装包下载不完整'))
+        else resolve(Buffer.concat(chunks))
+      })
+      res.on('aborted', () => reject(new Error('NapCat 安装包下载中断')))
       res.on('error', reject)
     })
 
@@ -555,29 +723,56 @@ function downloadToBuffer(url: string): Promise<Buffer> {
 }
 
 /** 安装 NapCat (从 GitHub Release 下载) */
-export async function installNapCat(): Promise<boolean> {
+export function installNapCat(update = false): Promise<boolean> {
+  if (installationPending) return installationPending
+  const operation = performNapCatInstallation(update)
+  installationPending = operation.finally(() => {
+    installationPending = undefined
+    broadcastNapCatState()
+  })
+  broadcastNapCatState()
+  return installationPending
+}
+
+async function performNapCatInstallation(update: boolean): Promise<boolean> {
+  if (process.platform !== 'win32' || process.arch !== 'x64')
+    throw new Error('NapCat 自动安装目前仅支持 Windows x64')
   const dir = getNapCatDir()
   const emit = (msg: string) => {
     logger.info('NapCat', msg)
     broadcastNapCatLog(`[安装] ${msg}`)
   }
 
-  if (checkNapCat()) {
+  const marker = path.join(dir, NAPCAT_INSTALLATION_MARKER)
+  let intact = !fs.existsSync(marker)
+  if (intact && !napCatProcess && !startPending && hasNapCatNodeInstallation(dir)) {
+    try {
+      const installation = prepareNapCatNodeInstallation(dir)
+      if (installation.runtimeRepairWarning) emit(installation.runtimeRepairWarning)
+      if (installation.repaired) emit(`已校正 QQ 版本信息：${installation.version}`)
+      if (installation.runtimeRepaired) emit('已应用 NapCat 运行兼容修复')
+    } catch {
+      intact = false
+    }
+  }
+  if (intact && checkNapCat() && (!update || !needsNapCatUpdate(getInstalledNapCatVersion()))) {
     emit('NapCat 已安装')
     return true
   }
 
+  if (napCatProcess || startPending || stopPending) throw new Error('请先停止 NapCat，再更新版本')
+
   emit('开始安装 NapCat...')
   fs.mkdirSync(dir, { recursive: true })
 
-  const version = 'v4.12.8'
+  const version = `v${NAPCAT_VERSION}`
   const assetName = 'NapCat.Shell.Windows.Node.zip'
 
   // GitHub 镜像列表
   const mirrors = [
+    `https://github.com/NapNeko/NapCatQQ/releases/download/${version}/${assetName}`,
     `https://gh-proxy.com/https://github.com/NapNeko/NapCatQQ/releases/download/${version}/${assetName}`,
     `https://mirror.ghproxy.com/https://github.com/NapNeko/NapCatQQ/releases/download/${version}/${assetName}`,
-    `https://github.com/NapNeko/NapCatQQ/releases/download/${version}/${assetName}`,
   ]
 
   let zipBuffer: Buffer | null = null
@@ -587,7 +782,11 @@ export async function installNapCat(): Promise<boolean> {
       emit(`尝试下载: ${url}`)
       broadcastDownloadProgress({ percent: 0, status: '连接中...' })
       zipBuffer = await downloadToBuffer(url)
-      if (zipBuffer && zipBuffer.length > 0) break
+      if (createHash('sha256').update(zipBuffer).digest('hex') !== NAPCAT_ARCHIVE_SHA256) {
+        zipBuffer = null
+        throw new Error('安装包校验失败')
+      }
+      break
     } catch (err) {
       emit(`下载失败: ${err}`)
       continue
@@ -603,27 +802,52 @@ export async function installNapCat(): Promise<boolean> {
   emit('下载完成，正在解压...')
   broadcastDownloadProgress({ percent: 100, status: '解压中...', processing: true })
 
+  const staging = fs.mkdtempSync(path.join(dir, '.infos-update-'))
   try {
     const zip = new AdmZip(zipBuffer)
-    zip.extractAllTo(dir, true)
-
-    // 处理嵌套文件夹 (某些版本解压后有一层目录)
-    if (!checkNapCat()) {
-      const entries = fs.readdirSync(dir, { withFileTypes: true })
-      for (const entry of entries) {
-        if (entry.isDirectory()) {
-          const nested = path.join(dir, entry.name)
-          const nestedShell = path.join(nested, 'NapCat.Shell.exe')
-          const nestedMjs = path.join(nested, 'napcat.mjs')
-          if (fs.existsSync(nestedShell) || fs.existsSync(nestedMjs)) {
-            // 将内容上移
-            fs.cpSync(nested, dir, { recursive: true, force: true })
-            fs.rmSync(nested, { recursive: true, force: true })
-            break
-          }
-        }
-      }
+    const prefix = path.resolve(staging) + path.sep
+    for (const entry of zip.getEntries()) {
+      const target = path.resolve(staging, entry.entryName)
+      if (
+        path.isAbsolute(entry.entryName) ||
+        entry.entryName.includes(':') ||
+        (target !== path.resolve(staging) && !target.startsWith(prefix)) ||
+        ((entry.attr >>> 16) & 0xf000) === 0xa000
+      )
+        throw new Error('安装包包含越界路径')
     }
+    zip.extractAllTo(staging, true)
+    const candidates = [
+      staging,
+      ...fs
+        .readdirSync(staging, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => path.join(staging, entry.name)),
+    ]
+    const source = candidates.find((candidate) =>
+      fs.existsSync(path.join(candidate, 'napcat', 'napcat.mjs')),
+    )
+    if (!source) throw new Error('安装包缺少 NapCat 核心文件')
+    prepareNapCatNodeInstallation(source)
+    const core = fs.readFileSync(path.join(source, 'napcat', 'napcat.mjs'), 'utf8')
+    if (!new RegExp(`(?:["'])${NAPCAT_VERSION.replace(/\./g, '\\.')}["']`).test(core))
+      throw new Error('安装包的 NapCat 版本与目标版本不一致')
+    for (const action of [
+      'fetch_custom_face_detail',
+      'add_custom_face',
+      'set_custom_face_desc',
+      'delete_custom_face',
+    ]) {
+      if (!core.includes(action)) throw new Error(`安装包缺少收藏管理接口：${action}`)
+    }
+    // 原生文件被占用或磁盘写入失败时保留标记，下次只允许完整修复后启动。
+    fs.writeFileSync(marker, NAPCAT_VERSION, 'utf8')
+    copyNapCatProgramFiles(source, dir)
+    prepareNapCatNodeInstallation(dir)
+    installedVersionCache = undefined
+    if (getInstalledNapCatVersion() !== NAPCAT_VERSION)
+      throw new Error('NapCat 安装后版本校验失败，请重新安装')
+    fs.unlinkSync(marker)
 
     emit('安装完成')
     broadcastDownloadProgress({ percent: 100, status: '安装完成', completed: true })
@@ -632,5 +856,8 @@ export async function installNapCat(): Promise<boolean> {
     emit(`解压失败: ${err}`)
     broadcastDownloadProgress({ percent: 0, status: '安装失败', error: true })
     return false
+  } finally {
+    if (path.dirname(path.resolve(staging)) === path.resolve(dir))
+      fs.rmSync(staging, { recursive: true, force: true })
   }
 }

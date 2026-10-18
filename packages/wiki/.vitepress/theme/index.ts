@@ -13,16 +13,22 @@ import ArchitectureGraph from '../components/ArchitectureGraph.vue'
 import MemoryNetworkGraph from '../components/MemoryNetworkGraph.vue'
 import BedrockDemo from '../components/BedrockDemo.vue'
 import MDPGraph from '../components/MDPGraph.vue'
+import ParallaxCodeStream from '../components/ParallaxCodeStream.vue'
+import MoePixelHome from '../components/MoePixelHome.vue'
+import Mermaid from '../components/Mermaid.vue'
 import './style.css'
 
 export default {
   extends: DefaultTheme,
   enhanceApp({ app, router }) {
     // 注册 Wiki 专用全局组件
+    app.component('MoePixelHome', MoePixelHome)
+    app.component('ParallaxCodeStream', ParallaxCodeStream)
     app.component('ArchitectureGraph', ArchitectureGraph)
     app.component('MemoryNetworkGraph', MemoryNetworkGraph)
     app.component('BedrockDemo', BedrockDemo)
     app.component('MDPGraph', MDPGraph)
+    app.component('Mermaid', Mermaid)
 
     // 页面切换 View Transition (仅浏览器端)
     if (inBrowser) {

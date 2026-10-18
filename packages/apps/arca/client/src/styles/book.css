@@ -1,0 +1,77 @@
+/* 封面、内衬、纸芯和封底独立成层，以书脊为开合轴。 */
+:root {
+  --arca-book-hover-duration:620ms;
+  --arca-book-open-duration:820ms;
+  --arca-book-travel-duration:650ms;
+  --arca-book-close-duration:320ms;
+  --arca-book-ease:cubic-bezier(.42,0,.22,1);
+}
+.document-cover.document-book {
+  display:block; padding:0; perspective:1500px; overflow:visible;
+  border:0; border-radius:3px 7px 7px 3px; background:transparent;
+  box-shadow:var(--arca-book-shadow);
+  transform:rotateY(-4deg) rotateZ(-.5deg); transform-style:preserve-3d;
+  transition:transform 420ms var(--arca-book-ease),box-shadow 420ms var(--arca-book-ease);
+}
+.document-book::before, .document-book::after { display:none; }
+.single-document .document-cover.document-book { padding:0; }
+.book-back { position:absolute; inset:3px -6px -4px 2px; border-radius:3px 7px 7px 3px; background:var(--arca-book-cover); border:1px solid var(--arca-line-strong); box-shadow:inset -1px -1px #00000020; }
+.book-page-edges {
+  position:absolute; inset:5px -3px 0 5px; border-radius:1px 5px 5px 1px;
+  background:repeating-linear-gradient(0deg,var(--arca-book-edge) 0 1px,color-mix(in srgb,var(--arca-book-edge) 83%,#000) 1px 2px);
+  border:1px solid color-mix(in srgb,var(--arca-book-edge) 65%,#000); box-shadow:3px 1px 3px #00000018;
+}
+.book-paper { position:absolute; inset:5px 2px 5px 3px; padding:31px 28px; overflow:hidden; border-radius:2px; background:var(--arca-document); color:var(--arca-text); box-shadow:inset 8px 0 16px #0000000c; }
+.document-book .book-paper h2 { margin:5px 0 23px; font-size:25px; }
+.book-paper .cover-content { height:calc(100% - 80px); }
+.book-front { position:absolute; inset:0; transform-origin:0 50%; transform-style:preserve-3d; transform:rotateY(0); transition:transform var(--arca-book-hover-duration) var(--arca-book-ease); z-index:2; }
+.book-front-face, .book-front-inner {
+  position:absolute; inset:0; border:1px solid var(--arca-line-strong); border-radius:3px 7px 7px 3px; backface-visibility:hidden;
+}
+.book-front-face {
+  display:flex; flex-direction:column; padding:34px 32px 25px 40px; overflow:hidden;
+  background:
+    linear-gradient(90deg,#00000016,transparent 3%,var(--arca-light-edge) 4%,transparent 5%,#0000000e 7%,transparent 10%),
+    repeating-linear-gradient(115deg,transparent 0 3px,#ffffff02 3px 4px),
+    linear-gradient(135deg,var(--arca-light-wash),transparent 55%),var(--arca-book-cover);
+  box-shadow:inset 0 1px var(--arca-light-edge),inset -2px -1px #00000018,2px 0 3px #00000018;
+}
+.book-front-face::before { content:''; position:absolute; inset:0 auto 0 23px; width:1px; background:#00000014; box-shadow:1px 0 var(--arca-light-edge); }
+.book-front-inner { transform:rotateY(180deg); background:linear-gradient(90deg,#00000014,transparent 10%),var(--arca-surface-soft); box-shadow:inset 0 0 24px #00000009; }
+.book-imprint { font:500 22px/1.2 var(--arca-font-brand); color:var(--arca-accent); letter-spacing:1px; text-shadow:0 1px var(--arca-light-edge); }
+.book-cover-rule { width:29px; height:2px; background:var(--arca-accent); margin-top:20px; opacity:.7; }
+.document-book .book-front h2 { margin:40px 0 18px; font-size:30px; line-height:1.65; letter-spacing:1px; text-shadow:0 1px var(--arca-light-edge); }
+.book-cover-type { font-size:11px; letter-spacing:3px; color:var(--arca-text-soft); }
+.book-cover-footer { margin-top:auto; display:flex; align-items:center; justify-content:space-between; gap:12px; padding-top:22px; font-size:11px; color:var(--arca-text-soft); }
+.single-document .document-book .book-front-face { padding:43px 35px 30px 46px; }
+.single-document .document-book .book-front h2 { font-size:34px; margin-top:48px; }
+.document-open { perspective:1500px; overflow:visible; }
+.document-open:focus-visible .document-book { outline:2px solid var(--arca-accent); outline-offset:8px; }
+.document-card { padding-right:6px; }
+.document-collection:not(.grid) .document-card { padding-right:10px; }
+@media(hover:hover) and (pointer:fine) {
+  .document-open:hover:not(:disabled):not(:active) .document-cover.document-book {
+    transform:translateY(-3px) rotateY(-5deg) rotateZ(-.7deg);
+    box-shadow:var(--arca-book-hover-shadow);
+  }
+  .document-open:hover:not(:disabled) .book-front { transform:rotateY(-13deg); }
+}
+.document-open:focus-visible .book-front { transform:rotateY(-10deg); }
+.document-open:active:not(:disabled) .document-cover.document-book { transform:translateY(-1px) rotateY(-4deg); }
+.document-book.book-is-opening { transform:rotateY(0) rotateZ(0); }
+.book-is-opening .book-front { pointer-events:none; }
+.book-flight { position:fixed; z-index:80; pointer-events:none; overflow:hidden; border-radius:2px; box-shadow:var(--arca-shadow-paper-raised); }
+.book-flight>.book-paper { position:relative; inset:auto; width:100%; height:100%; }
+.book-flight .book-paper h2 { font:500 25px/1.6 var(--arca-font-editorial); margin:5px 0 23px; }
+.arca-book-transition .office-page-frame { animation:none; }
+.arca-book-flight .office-page-frame { animation:arca-book-editor-arrive var(--arca-book-travel-duration) var(--arca-book-ease) both; }
+::view-transition-group(arca-document) { animation-duration:var(--arca-book-travel-duration); animation-timing-function:var(--arca-book-ease); }
+::view-transition-old(arca-document), ::view-transition-new(arca-document) { height:100%; object-fit:cover; object-position:top left; animation-duration:var(--arca-book-travel-duration); }
+::view-transition-old(root), ::view-transition-new(root) { animation-duration:260ms; }
+@keyframes arca-book-editor-arrive { from { opacity:0; } 35% { opacity:0; } to { opacity:1; } }
+@media(prefers-reduced-motion:reduce) {
+  :root:not([data-motion='full']) .document-open .document-book,
+  :root:not([data-motion='full']) .document-open .book-front { transform:none !important; }
+}
+:root[data-motion='reduced'] .document-open .document-book,
+:root[data-motion='reduced'] .document-open .book-front { transform:none !important; }

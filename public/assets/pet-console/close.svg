@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 26 26" fill="none" shape-rendering="crispEdges" role="img" aria-label="close">
+  <path d="M4 3h3v3h3v3h4V6h3V3h3v4h-3v3h-3v4h3v3h3v4h-3v-3h-3v-3h-4v3H7v3H4v-4h3v-3h3v-4H7V7H4z" fill-rule="evenodd" transform="translate(1 2)" fill="var(--pixel-shadow, #44466e)"/>
+  <path d="M4 3h3v3h3v3h4V6h3V3h3v4h-3v3h-3v4h3v3h3v4h-3v-3h-3v-3h-4v3H7v3H4v-4h3v-3h3v-4H7V7H4z" fill-rule="evenodd" transform="translate(1 0)" fill="var(--pixel-highlight, #e3dbff)"/>
+  <path d="M4 3h3v3h3v3h4V6h3V3h3v4h-3v3h-3v4h3v3h3v4h-3v-3h-3v-3h-4v3H7v3H4v-4h3v-3h3v-4H7V7H4z" fill-rule="evenodd" transform="translate(1 1)" fill="var(--pixel-face, currentColor)"/>
+</svg>

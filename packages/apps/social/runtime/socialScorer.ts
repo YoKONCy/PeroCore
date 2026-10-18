@@ -29,6 +29,7 @@ import type {
   ModelConfig,
 } from '@infos/backend/applicationHostAbi'
 import { createLogger, parseLlmJson, tokenCounter } from '@infos/backend/applicationHostAbi'
+import { socialDelay, socialFailure } from './socialRecovery'
 
 const logger = createLogger('SocialScorer')
 
@@ -45,8 +46,6 @@ export interface SocialScorerConfig {
   batchLimit: number
   /** 最大重试次数 */
   maxRetries: number
-  /** TriviumDB 向量维度 (使用零向量占位) */
-  vectorDim: number
 }
 
 const DEFAULT_CONFIG: SocialScorerConfig = {
@@ -54,7 +53,6 @@ const DEFAULT_CONFIG: SocialScorerConfig = {
   charThreshold: 50_000,
   batchLimit: 200,
   maxRetries: 3,
-  vectorDim: 1536,
 }
 
 // ─────────────────────────────────────────────
@@ -115,9 +113,13 @@ function nextEventId(): number {
 // ─────────────────────────────────────────────
 
 export class SocialScorerService {
+  private controllers = new Map<string, AbortController>()
+  cancel(agentId: string): void {
+    this.controllers.get(agentId)?.abort(new Error('社交记忆已清理'))
+  }
   private config: SocialScorerConfig
   /** 零向量缓存 (避免每次分配) */
-  private zeroVector: number[]
+  private zeroVector: number[] = []
 
   constructor(
     private socialMessageRepo: SocialStoragePort,
@@ -130,7 +132,6 @@ export class SocialScorerService {
     config?: Partial<SocialScorerConfig>,
   ) {
     this.config = { ...DEFAULT_CONFIG, ...config }
-    this.zeroVector = new Array(this.config.vectorDim).fill(0)
   }
 
   /**
@@ -140,7 +141,24 @@ export class SocialScorerService {
    * - 消息数 >= messageThreshold (默认 200)
    * - 未总结正文 Token >= charThreshold（默认 50k）
    */
-  async checkAndProcess(agentId: string): Promise<void> {
+  async shouldProcess(agentId: string): Promise<boolean> {
+    if (this.socialMessageRepo.memoryBackground?.enabled === false) return false
+    if (!(await this.socialMessageRepo.memoryAvailable(agentId)) || !(await this.getModelConfig()))
+      return false
+    const stats = await this.socialMessageRepo.getUnsummarizedStats(agentId)
+    if (!stats.count) return false
+    if (stats.count >= this.config.messageThreshold) return true
+    const messages = await this.socialMessageRepo.getUnsummarized(agentId, this.config.batchLimit)
+    return (
+      tokenCounter.countMessages(
+        messages.map((message) => ({ role: 'user', content: message.content })),
+      ) >= this.config.charThreshold
+    )
+  }
+
+  async checkAndProcess(agentId: string, signal?: AbortSignal): Promise<void> {
+    if (this.socialMessageRepo.memoryBackground?.enabled === false) return
+    signal?.throwIfAborted()
     const stats = await this.socialMessageRepo.getUnsummarizedStats(agentId)
     if (stats.count === 0) return
 
@@ -166,7 +184,7 @@ export class SocialScorerService {
       : `消息数达标 (${stats.count} >= ${this.config.messageThreshold})`
 
     logger.info(`[${agentId}] 触发社交记忆炼化: ${reason}`)
-    await this.processBatch(agentId)
+    await this.processBatch(agentId, signal)
   }
 
   /**
@@ -182,44 +200,71 @@ export class SocialScorerService {
    *    - BM25 文本索引
    * 4. 标记原始消息为已总结
    */
-  async processBatch(agentId: string): Promise<void> {
-    const messages = await this.socialMessageRepo.getUnsummarized(agentId, this.config.batchLimit)
-
-    if (messages.length === 0) {
-      logger.debug(`[${agentId}] 无未总结社交消息`)
-      return
-    }
-
-    logger.info(`[${agentId}] 开始炼化 ${messages.length} 条社交消息`)
-
-    // 格式化对话上下文
-    const chatText = messages.map((m) => `${m.senderName ?? '未知'}: ${m.content}`).join('\n')
-
-    const channelType = messages[0]?.channelType ?? 'group'
-    const channelId = messages[0]?.channelId ?? '未知'
-    const sessionName = channelType === 'private' ? '私聊' : `群${channelId}`
-
-    // 获取反思模型配置
-    const modelConfig = await this.getModelConfig()
-    if (!modelConfig) {
-      logger.warn('未配置反思模型，跳过社交记忆炼化')
-      return
-    }
-
+  async processBatch(agentId: string, cancellation?: AbortSignal): Promise<void> {
+    if (this.socialMessageRepo.memoryBackground?.enabled === false) return
+    if (this.controllers.has(agentId)) return
+    if (!(await this.socialMessageRepo.memoryAvailable(agentId))) return
+    const version = await this.socialMessageRepo.getDataVersion(agentId)
+    const controller = new AbortController()
+    this.controllers.set(agentId, controller)
+    const signal = AbortSignal.any([
+      controller.signal,
+      ...(cancellation ? [cancellation] : []),
+      ...(this.socialMessageRepo.memoryBackground
+        ? [this.socialMessageRepo.memoryBackground.signal]
+        : []),
+    ])
     try {
+      const promptSnapshot = this.mdpEngine.capturePromptSnapshot?.()
+      const messages = await this.socialMessageRepo.getUnsummarized(agentId, this.config.batchLimit)
+
+      if (messages.length === 0) {
+        logger.debug(`[${agentId}] 无未总结社交消息`)
+        return
+      }
+
+      logger.info(`[${agentId}] 开始炼化 ${messages.length} 条社交消息`)
+
+      // 格式化对话上下文
+      const chatText = messages.map((m) => `${m.senderName ?? '未知'}: ${m.content}`).join('\n')
+
+      const channelType = messages[0]?.channelType ?? 'group'
+      const channelId = messages[0]?.channelId ?? '未知'
+      const sessionName = channelType === 'private' ? '私聊' : `群${channelId}`
+
+      // 获取反思模型配置
+      const modelConfig = await this.getModelConfig()
+      if (!modelConfig) {
+        logger.warn('未配置反思模型，跳过社交记忆炼化')
+        return
+      }
+
       // 用户称呼：取该 Agent 的 agent.json owner_appellation（兜底"主人"），注入模板生成带称呼的示例/摘要
       const ownerAppellation = this.agentManager?.getOwnerAppellation(agentId) ?? '主人'
       // 渲染 MDP 模板（AIOS 第八阶段：模板已迁移到 apps/social/prompts/）
-      const prompt = this.mdpEngine.render('apps/social/tasks/social_segment_summarizer', {
-        session_type: channelType,
-        session_name: sessionName,
-        chat_text: chatText,
-        agent_name: agentId,
-        owner_appellation: ownerAppellation,
-      })
+      const prompt = this.mdpEngine.render(
+        'apps/social/tasks/social_segment_summarizer',
+        {
+          agent_id: agentId,
+          channel: 'social',
+          session_type: channelType,
+          session_name: sessionName,
+          chat_text: chatText,
+          agent_name: agentId,
+          owner_appellation: ownerAppellation,
+        },
+        promptSnapshot,
+      )
 
       // LLM 调用
-      const result = await this.callLlmWithRetry(modelConfig, prompt)
+      const result = await this.callLlmWithRetry(modelConfig, prompt, signal)
+      signal.throwIfAborted()
+      if (
+        version !== (await this.socialMessageRepo.getDataVersion(agentId)) ||
+        !(await this.socialMessageRepo.memoryAvailable(agentId))
+      )
+        return
+      signal.throwIfAborted()
 
       if (!result?.new_event?.summary) {
         logger.warn(`[${agentId}] LLM 未返回有效事件`)
@@ -241,7 +286,11 @@ export class SocialScorerService {
           `ontology: ${result.ontology_updates?.length ?? 0} 条边`,
       )
     } catch (err) {
+      if (signal.aborted) return
       logger.error(`[${agentId}] 社交记忆炼化失败: ${err}`)
+      throw err
+    } finally {
+      if (this.controllers.get(agentId) === controller) this.controllers.delete(agentId)
     }
   }
 
@@ -256,6 +305,9 @@ export class SocialScorerService {
     agentId: string,
   ): Promise<void> {
     const { new_event, ontology_updates } = output
+    // 每次写入读取当前 Store 的真实维度，覆盖模型热切换后的零向量缓存。
+    const dimension = store.dim()
+    if (this.zeroVector.length !== dimension) this.zeroVector = new Array(dimension).fill(0)
 
     // 1. 写入 Event 节点
     const eventId = nextEventId()
@@ -334,14 +386,18 @@ export class SocialScorerService {
   private async callLlmWithRetry(
     modelConfig: ModelConfig,
     prompt: string,
+    signal?: AbortSignal,
   ): Promise<SocialScorerOutput | null> {
     for (let attempt = 0; attempt < this.config.maxRetries; attempt++) {
+      signal?.throwIfAborted()
       try {
         const response = await this.llmService.chat(
           modelConfig,
           [{ role: 'user', content: prompt }],
           {
             responseFormat: { type: 'json_object' },
+            signal,
+            maxRetries: 0,
           },
         )
 
@@ -352,9 +408,10 @@ export class SocialScorerService {
 
         logger.warn(`[尝试 ${attempt + 1}] LLM 返回无效 JSON，重试`)
       } catch (err) {
-        if (attempt < this.config.maxRetries - 1) {
+        signal?.throwIfAborted()
+        if (socialFailure(err).retryable && attempt < this.config.maxRetries - 1) {
           logger.warn(`[尝试 ${attempt + 1}] LLM 调用失败: ${err}，2 秒后重试`)
-          await new Promise((r) => setTimeout(r, 2000))
+          await socialDelay(2000, signal)
         } else {
           throw err
         }

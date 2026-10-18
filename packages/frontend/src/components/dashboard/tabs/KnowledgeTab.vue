@@ -1,15 +1,35 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import type { FactArchiveObject, FactArchiveRecord, FactArchiveResult } from '@infos/shared'
+import type {
+  FactArchiveObject,
+  FactArchiveRecord,
+  FactArchiveResult,
+  KnowledgeDocumentList,
+} from '@infos/shared'
 import { PixelIcon, PButton, PDialog } from '../../pixel'
 import { knowledgeApi } from '../../../api/modules/knowledgeApi'
 import { useNotificationStore } from '../../../stores/useNotificationStore'
 import { logger } from '../../../lib/logger'
 
+import DocumentKnowledgePane from '../../knowledge/DocumentKnowledgePane.vue'
+import PrivacyCleanupPanel from '../PrivacyCleanupPanel.vue'
+
+const documentStats = ref<KnowledgeDocumentList['stats']>({
+  documentCount: 0,
+  readyCount: 0,
+  pendingCount: 0,
+  partCount: 0,
+  indexingCount: 0,
+})
 const section = ref<'facts' | 'documents'>('facts')
 const notif = useNotificationStore()
 const retractTarget = ref<FactArchiveRecord | null>(null)
 const retracting = ref(false)
+const factAction = ref<'retract' | 'delete'>('retract')
+function selectFactAction(fact: FactArchiveRecord, action: 'retract' | 'delete'): void {
+  factAction.value = action
+  retractTarget.value = fact
+}
 const loading = ref(false)
 const error = ref('')
 const query = ref('')
@@ -92,13 +112,17 @@ async function confirmRetract(): Promise<void> {
   const target = retractTarget.value
   if (!target || retracting.value) return
   retracting.value = true
+  const action = factAction.value
   try {
-    await knowledgeApi.retractFact(target.id)
+    if (action === 'delete') await knowledgeApi.deleteFact(target.id)
+    else await knowledgeApi.retractFact(target.id)
     retractTarget.value = null
     await loadFacts()
-    notif.toast('事实已撤回，节点和关系边保持不变', 'success')
+    notif.toast(action === 'delete' ? '事实已永久删除' : '事实已撤回', 'success')
   } catch (cause) {
     notif.toast('删除事实失败：' + (cause as Error).message, 'error')
+    retractTarget.value = null
+    await loadFacts()
   } finally {
     retracting.value = false
   }
@@ -119,6 +143,7 @@ onMounted(loadFacts)
 
 <template>
   <div class="knowledge-page">
+    <PrivacyCleanupPanel />
     <header class="knowledge-head">
       <div>
         <h2 class="font-pixel">
@@ -127,7 +152,7 @@ onMounted(loadFacts)
         </h2>
         <p>共享事实与外部资料 · SHARED KNOWLEDGE ARCHIVE</p>
       </div>
-      <div class="knowledge-stats">
+      <div v-if="section === 'facts'" class="knowledge-stats">
         <span>
           <b class="font-pixel">{{ archive.stats.objectCount }}</b>
           事实对象
@@ -142,7 +167,25 @@ onMounted(loadFacts)
         </span>
         <span>
           <b class="font-pixel">{{ archive.stats.retractedFactCount }}</b>
-          已删除
+          已撤回
+        </span>
+      </div>
+      <div v-else class="knowledge-stats">
+        <span>
+          <b class="font-pixel">{{ documentStats.documentCount }}</b>
+          资料
+        </span>
+        <span>
+          <b class="font-pixel">{{ documentStats.readyCount }}</b>
+          可检索
+        </span>
+        <span>
+          <b class="font-pixel">{{ documentStats.pendingCount }}</b>
+          整理中
+        </span>
+        <span>
+          <b class="font-pixel">{{ documentStats.partCount }}</b>
+          内容部分
         </span>
       </div>
     </header>
@@ -156,7 +199,7 @@ onMounted(loadFacts)
       <button :class="{ active: section === 'documents' }" @click="section = 'documents'">
         <PixelIcon name="file" size="sm" />
         文档知识库
-        <small>建设中</small>
+        <small>{{ documentStats.documentCount }}</small>
       </button>
     </nav>
 
@@ -231,15 +274,41 @@ onMounted(loadFacts)
             </div>
             <article v-for="fact in selected.activeFacts" :key="fact.id" class="fact-card">
               <p>{{ fact.statement }}</p>
-              <footer>
-                <span>{{ fact.source || '来源未标注' }} · {{ formatDate(fact.observedAt) }}</span>
-                <button @click="toggleFact(fact.id)">
-                  {{ expandedFacts.has(fact.id) ? '收起' : '详情' }}
-                </button>
-                <button class="fact-delete" title="删除这条事实" @click="retractTarget = fact">
-                  <PixelIcon name="trash" size="xs" />
-                  删除
-                </button>
+              <footer class="fact-footer">
+                <span class="fact-source">
+                  {{ fact.source || '来源未标注' }} · {{ formatDate(fact.observedAt) }}
+                </span>
+                <div class="fact-actions" role="group" aria-label="事实操作">
+                  <PButton
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    :aria-expanded="expandedFacts.has(fact.id)"
+                    @click="toggleFact(fact.id)"
+                  >
+                    {{ expandedFacts.has(fact.id) ? '收起' : '详情' }}
+                  </PButton>
+                  <PButton
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    title="撤回事实"
+                    @click="selectFactAction(fact, 'retract')"
+                  >
+                    撤回
+                  </PButton>
+                  <PButton
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    class="fact-action--danger"
+                    title="永久删除事实"
+                    @click="selectFactAction(fact, 'delete')"
+                  >
+                    <PixelIcon name="trash" size="xs" />
+                    永久删除
+                  </PButton>
+                </div>
               </footer>
               <dl v-if="expandedFacts.has(fact.id)">
                 <div>
@@ -272,6 +341,9 @@ onMounted(loadFacts)
                 <span>已被取代</span>
                 <p>{{ fact.statement }}</p>
                 <time>{{ formatDate(fact.observedAt) }}</time>
+                <PButton size="sm" variant="danger" @click="selectFactAction(fact, 'delete')">
+                  永久删除
+                </PButton>
                 <template v-if="replacementFor(fact)">
                   <i>↓ 被以下事实取代</i>
                   <strong>{{ replacementFor(fact)?.statement }}</strong>
@@ -283,13 +355,16 @@ onMounted(loadFacts)
           <section v-if="selected.retractedFacts.length" class="history-section">
             <button class="history-toggle" @click="historyOpen = !historyOpen">
               <PixelIcon name="chevron-down" size="xs" :class="{ open: historyOpen }" />
-              已由用户删除 {{ selected.retractedFacts.length }}
+              已撤回 {{ selected.retractedFacts.length }}
             </button>
             <div v-if="historyOpen" class="history-list">
               <article v-for="fact in selected.retractedFacts" :key="fact.id" class="history-card">
-                <span>已由用户删除</span>
+                <span>已撤回</span>
                 <p>{{ fact.statement }}</p>
                 <time>{{ formatDate(fact.observedAt) }}</time>
+                <PButton size="sm" variant="danger" @click="selectFactAction(fact, 'delete')">
+                  永久删除
+                </PButton>
               </article>
             </div>
           </section>
@@ -297,40 +372,20 @@ onMounted(loadFacts)
       </main>
     </section>
 
-    <section v-else class="documents-coming">
-      <div class="document-box">
-        <PixelIcon name="file" size="xl" />
-        <span>KNOWLEDGE</span>
-      </div>
-      <h3 class="font-pixel">文档知识库尚未启用</h3>
-      <p>未来会把文件、网页与 Workspace 资料整理为可追溯的检索空间。</p>
-      <div class="pipeline">
-        <span>知识源</span>
-        <i>→</i>
-        <span>文本提取</span>
-        <i>→</i>
-        <span>内容切片</span>
-        <i>→</i>
-        <span>建立索引</span>
-        <i>→</i>
-        <span>Agent 检索</span>
-      </div>
-      <div class="planned">
-        <b>计划支持</b>
-        <span>文件和网页导入</span>
-        <span>Workspace 资料索引</span>
-        <span>来源引用</span>
-        <span>检索测试</span>
-        <span>更新与失效管理</span>
-      </div>
-    </section>
+    <DocumentKnowledgePane v-else @stats="documentStats = $event" />
 
     <PDialog
       :model-value="Boolean(retractTarget)"
-      title="删除这条事实？"
-      :message="`事实“${retractTarget?.statement ?? ''}”将退出 Agent 检索；节点和所有关系边都会保留。`"
-      confirm-text="删除事实"
+      :title="factAction === 'delete' ? '永久删除事实？' : '撤回事实？'"
+      :message="
+        factAction === 'delete'
+          ? '正文、索引及操作记录中的副本将被清理，无法恢复。'
+          : '退出有效事实，保留历史记录。'
+      "
+      :confirm-text="factAction === 'delete' ? '永久删除' : '撤回'"
       confirm-variant="danger"
+      :loading="retracting"
+      :auto-close="false"
       @update:model-value="!$event && (retractTarget = null)"
       @confirm="confirmRetract"
     />
@@ -573,25 +628,47 @@ export default { name: 'KnowledgeTab' }
   margin: 0;
   line-height: 1.55;
 }
-.fact-card footer {
+.fact-footer {
   display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  margin-top: 9px;
-  color: var(--ui-text-tertiary);
-  font-size: 9px;
-}
-.fact-card footer button {
-  border: 0;
-  background: none;
-  color: var(--ui-accent-sky);
-  cursor: pointer;
-}
-.fact-card footer .fact-delete {
-  display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 3px;
-  color: var(--ui-danger, #ef4444);
+  gap: 10px 16px;
+  margin-top: 12px;
+  color: var(--ui-text-tertiary);
+  font-size: 10px;
+}
+.fact-source {
+  flex: 1 1 220px;
+  min-width: 0;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.fact-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  max-width: 100%;
+  gap: 6px;
+  margin-left: auto;
+  padding: 0 3px 3px 0;
+}
+.fact-actions :deep(.p-btn) {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 4px 9px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.fact-actions .fact-action--danger {
+  --ui-focus-color: var(--ui-danger);
+  color: var(--ui-danger);
+  border-color: color-mix(in srgb, var(--ui-danger) 35%, var(--ui-border-default));
+  background: var(--ui-danger-soft);
+}
+.fact-actions .fact-action--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ui-danger) 18%, var(--ui-bg-surface));
 }
 .fact-card dl {
   display: grid;
@@ -669,80 +746,6 @@ export default { name: 'KnowledgeTab' }
 .history-card strong {
   font-size: 11px;
   color: var(--ui-accent-emerald, #10b981);
-}
-.documents-coming {
-  display: flex;
-  min-height: 0;
-  flex: 1;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 32px;
-  border: 1px solid var(--ui-border-default);
-  background: var(--ui-bg-surface);
-  text-align: center;
-}
-.document-box {
-  position: relative;
-  display: grid;
-  width: 96px;
-  height: 76px;
-  place-items: center;
-  border: 2px solid color-mix(in srgb, var(--ui-accent-primary) 48%, var(--ui-border-default));
-  background: var(--ui-bg-elevated);
-  box-shadow: 6px 6px 0 color-mix(in srgb, var(--ui-accent-emerald, #10b981) 16%, transparent);
-  transform: rotate(-2deg);
-}
-.document-box span {
-  position: absolute;
-  bottom: 5px;
-  font-size: 7px;
-  letter-spacing: 0.12em;
-  color: var(--ui-text-tertiary);
-}
-.documents-coming h3 {
-  margin: 24px 0 8px;
-}
-.documents-coming > p {
-  margin: 0;
-  color: var(--ui-text-tertiary);
-}
-.pipeline {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 24px;
-  flex-wrap: wrap;
-  justify-content: center;
-}
-.pipeline span {
-  padding: 7px 10px;
-  border: 1px solid var(--ui-border-default);
-  background: var(--ui-bg-elevated);
-  font-size: 10px;
-}
-.pipeline i {
-  color: var(--ui-accent-emerald, #10b981);
-  font-style: normal;
-}
-.planned {
-  display: flex;
-  max-width: 620px;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 7px;
-  margin-top: 22px;
-}
-.planned b {
-  width: 100%;
-  font-size: 11px;
-}
-.planned span {
-  padding: 5px 8px;
-  background: color-mix(in srgb, var(--ui-accent-primary) 8%, var(--ui-bg-elevated));
-  border: 1px solid var(--ui-border-subtle);
-  font-size: 9px;
-  color: var(--ui-text-secondary);
 }
 @media (max-width: 800px) {
   .knowledge-page {

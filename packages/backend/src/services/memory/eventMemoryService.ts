@@ -15,12 +15,13 @@ import type {
 } from '@infos/shared'
 import type { TransactionOperation } from 'triviumdb'
 import type { EmbeddingService } from '../embedding/embeddingService'
-import type { ContextRnn } from '../retrieval/contextRnn'
-import type { MemoryRuntimeConfig } from './memoryRuntimeConfig'
+import type { ContextRnnRuntime } from '../retrieval/contextRnnRuntime'
+import { isContextRnnFeedbackEnabled, type MemoryRuntimeConfig } from './memoryRuntimeConfig'
 import type { MemoryStoreRegistry } from '../../repositories/storeRegistry'
 import { EventNoteRepository, type StoredEventNote } from '../../repositories/eventNote.repo'
 import { createLogger } from '../../lib/logger'
 import { tokenCounter } from '../tokenizer/tokenCounter'
+import type { PrivacyPolicy } from '../maintenance/privacyPolicy'
 
 const logger = createLogger('EventMemoryService')
 const SYMMETRIC_RELATIONS = new Set<EventNoteRelation>(['same_event', 'same_topic'])
@@ -46,8 +47,10 @@ interface CreateEventInput extends EventNoteDraftInput {
 }
 
 interface EventWriteOptions {
+  signal?: AbortSignal
   coverageOwnerId?: string
   deferCoverage?: boolean
+  maintenance?: boolean
 }
 
 export interface AutomaticRagProgress {
@@ -76,12 +79,43 @@ export interface AutomaticRagTrace {
   queryEmbedding: number[]
   notes: EventNote[]
   contextBias?: Float32Array
+  rnnGeneration?: number
 }
 
 export class EventMemoryService {
+  private background?: import('@infos/shared').MemoryBackgroundPolicy
+  setBackgroundPolicy(policy: import('@infos/shared').MemoryBackgroundPolicy): void {
+    this.background = policy
+  }
+  private privacy?: PrivacyPolicy
+  private retrievalRevision = 0
+  setPrivacyPolicy(policy: PrivacyPolicy): void {
+    this.privacy = policy
+  }
+  invalidateForDeletion(): void {
+    this.retrievalRevision++
+    this.automaticRagTraces.clear()
+    this.contextRnnRuntime?.invalidate()
+  }
+  async restore(id: string): Promise<void> {
+    const note = await this.repo.findById(id)
+    if (!note || note.replacedBy) throw new Error('记忆不存在或已永久删除')
+    this.privacy?.assertMemory(note)
+    await this.repo.restore(id)
+    this.privacy?.assertMemory(note)
+    this.retrievalRevision++
+    const store = this.stores.getAgentStore(note.agentId, 'main')
+    const node = store.get<TdbEventPayload>(note.tdbId)
+    if (!node) {
+      await this.rebuildAgentStore(note.agentId, true)
+      return
+    }
+    store.updatePayload(note.tdbId, { ...node.payload, status: 'active' })
+    store.flush()
+  }
   private nextTdbId?: number
   private onCommitted?: (note: EventNote) => void | Promise<void>
-  private contextRnn?: ContextRnn
+  private contextRnnRuntime?: ContextRnnRuntime
   private getRuntimeConfig?: () => Promise<MemoryRuntimeConfig>
   private automaticRagTraces = new Map<string, AutomaticRagTrace>()
 
@@ -96,11 +130,20 @@ export class EventMemoryService {
   }
 
   setAdvancedRetrieval(
-    contextRnn: ContextRnn,
+    contextRnnRuntime: ContextRnnRuntime,
     getRuntimeConfig: () => Promise<MemoryRuntimeConfig>,
   ): void {
-    this.contextRnn = contextRnn
+    this.contextRnnRuntime = contextRnnRuntime
     this.getRuntimeConfig = getRuntimeConfig
+  }
+
+  /** 配置保存后立即停用 RNN，清除不能继续用于训练的旧检索轨迹。 */
+  syncAdvancedRetrievalConfig(config: MemoryRuntimeConfig): void {
+    const advanced = this.embeddings.isAvailable
+      ? config.advanced
+      : { ...config.advanced, enableContextRnn: false, enableFeedback: false }
+    this.contextRnnRuntime?.configure(advanced)
+    if (!isContextRnnFeedbackEnabled(advanced)) this.automaticRagTraces.clear()
   }
 
   takeAutomaticRagTrace(traceId: string): AutomaticRagTrace | undefined {
@@ -111,10 +154,23 @@ export class EventMemoryService {
 
   async applyRetrievalFeedback(traceId: string, reply: string): Promise<void> {
     const trace = this.takeAutomaticRagTrace(traceId)
-    if (!trace || !this.contextRnn || !this.getRuntimeConfig) return
+    if (!this.embeddings.isAvailable || this.background?.enabled === false) return
+    const backgroundSignal = this.background?.signal
+    const runtime = this.contextRnnRuntime
+    if (!trace || !runtime || !this.getRuntimeConfig) return
     const { agentId, channel } = trace
+    const beforeLoad = runtime.generation
     const config = await this.getRuntimeConfig()
-    if (!config.advanced.enableSaPpr || !config.advanced.enableFeedback) return
+    if (
+      runtime.generation !== beforeLoad ||
+      !this.embeddings.isAvailable ||
+      backgroundSignal?.aborted
+    )
+      return
+    this.syncAdvancedRetrievalConfig(config)
+    if (!runtime.feedbackEnabled || trace.rnnGeneration === undefined) return
+    const rnn = runtime.peek(trace.rnnGeneration)
+    if (!rnn) return
     const normalizedReply = reply.toLocaleLowerCase()
     const positive = trace.notes.some((note) => {
       const terms = [...note.topics, ...note.participants]
@@ -122,17 +178,21 @@ export class EventMemoryService {
         .filter((term) => term.length >= 2)
       return terms.some((term) => normalizedReply.includes(term))
     })
-    this.contextRnn.trainMinGru(agentId, channel, new Float32Array(trace.queryEmbedding), positive)
-    if (trace.contextBias && trace.notes[0]) {
-      const target = await this.safeVector(trace.notes[0].narrative)
-      this.contextRnn.updateOutputWeights(
-        this.contextRnn.getHiddenState(agentId, channel),
+    const target =
+      trace.contextBias && trace.notes[0]
+        ? await this.safeVector(trace.notes[0].narrative)
+        : undefined
+    // Embedding 请求期间可能关闭管线；迟到反馈不得重新创建实例或修改已停用的权重。
+    if (!runtime.feedbackEnabled || runtime.peek(trace.rnnGeneration) !== rnn) return
+    rnn.trainMinGru(agentId, channel, new Float32Array(trace.queryEmbedding), positive)
+    if (trace.contextBias && target) {
+      rnn.updateOutputWeights(
+        rnn.getHiddenState(agentId, channel),
         trace.contextBias,
         new Float32Array(target),
         positive,
       )
     }
-    this.contextRnn.save(agentId, channel)
   }
 
   async create(
@@ -140,11 +200,15 @@ export class EventMemoryService {
     operationId: string = randomUUID(),
     options: EventWriteOptions = {},
   ): Promise<EventNote> {
+    options.signal?.throwIfAborted()
     const existing = await this.repo.findOperation(operationId)
     if (existing?.operation === 'create') {
       const payload = existing.payload as { note: EventNote; tdbId: number }
-      await this.applyCreate(operationId, payload.note, payload.tdbId)
+      await this.applyCreate(operationId, payload.note, payload.tdbId, true, options.signal)
       if (options.coverageOwnerId) await this.commitCoverage(payload.note, options, input.origin)
+      if (input.origin.mode === 'active')
+        await this.repo.resetTimer(`agent-silence:${input.agentId}`)
+      await this.onCommitted?.(payload.note)
       return payload.note
     }
     this.validateDraft(input)
@@ -165,7 +229,8 @@ export class EventMemoryService {
     }
     const tdbId = await this.allocateTdbId()
     await this.repo.prepareCreate(operationId, note, tdbId)
-    await this.applyCreate(operationId, note, tdbId)
+    await this.applyCreate(operationId, note, tdbId, true, options.signal)
+    options.signal?.throwIfAborted()
     if (!options.deferCoverage) {
       const coverage = this.coverageFor([note], note.origin.mode)
       if (options.coverageOwnerId) {
@@ -185,6 +250,7 @@ export class EventMemoryService {
     operationId: string = randomUUID(),
     options: EventWriteOptions = {},
   ): Promise<EventNote> {
+    options.signal?.throwIfAborted()
     const existing = await this.repo.findOperation(operationId)
     if (existing?.operation === 'revise') {
       const payload = existing.payload as {
@@ -199,9 +265,15 @@ export class EventMemoryService {
         payload.replacement,
         payload.newTdbId,
         payload.relations,
+        options.signal,
       )
       if (options.coverageOwnerId)
         await this.commitCoverage(payload.replacement, options, input.origin)
+      if (!options.maintenance) {
+        if (input.origin.mode === 'active')
+          await this.repo.resetTimer(`agent-silence:${input.agentId}`)
+        await this.onCommitted?.(payload.replacement)
+      }
       return payload.replacement
     }
     this.validateDraft(input)
@@ -231,10 +303,14 @@ export class EventMemoryService {
     const newTdbId = await this.allocateTdbId()
     const relations = await this.repo.listRelations(targetId)
     await this.repo.prepareRevise(operationId, target, replacement, newTdbId, relations)
-    await this.applyRevise(operationId, target, replacement, newTdbId, relations)
+    await this.applyRevise(operationId, target, replacement, newTdbId, relations, options.signal)
+    options.signal?.throwIfAborted()
     await this.commitCoverage(replacement, options, input.origin)
-    await this.repo.resetTimer(`agent-silence:${replacement.agentId}`)
-    await this.onCommitted?.(replacement)
+    if (!options.maintenance && input.origin.mode === 'active') {
+      await this.repo.resetTimer(`agent-silence:${replacement.agentId}`)
+    }
+    // 关系维护产生的修订已在当前任务中处理，不得再次触发自身。
+    if (!options.maintenance) await this.onCommitted?.(replacement)
     return replacement
   }
 
@@ -247,9 +323,13 @@ export class EventMemoryService {
       tdbId: note.tdbId,
     })
     if (inserted) await this.repo.archive(id)
+    this.privacy?.assertMemory(note)
+    this.retrievalRevision++
     const store = this.stores.getAgentStore(note.agentId, 'main')
     const node = store.get<TdbEventPayload>(note.tdbId)
     if (node) store.updatePayload(note.tdbId, { ...node.payload, status: 'archived', operationId })
+    this.automaticRagTraces.clear()
+    store.flush()
     await this.repo.markOperationCommitted(operationId)
   }
 
@@ -269,6 +349,7 @@ export class EventMemoryService {
     const relationView = { sourceId: src.id, targetId: dst.id, relation, weight }
     const inserted = await this.repo.createOperation(operationId, src.agentId, 'link', relationView)
     if (inserted) await this.repo.addRelation(relationView)
+    this.privacy?.assertPayload('memory', relationView)
     this.stores
       .getAgentStore(src.agentId, 'main')
       .upsertEdge(src.tdbId, dst.tdbId, relation, weight, { operationId })
@@ -292,6 +373,7 @@ export class EventMemoryService {
       relation,
     })
     if (inserted) await this.repo.removeRelation(src.id, dst.id, relation)
+    this.privacy?.assertPayload('memory', { sourceId: src.id, targetId: dst.id })
     this.stores.getAgentStore(src.agentId, 'main').unlink(src.tdbId, dst.tdbId, relation)
     await this.repo.markOperationCommitted(operationId)
   }
@@ -305,11 +387,11 @@ export class EventMemoryService {
   async archiveQuery(filter: EventNoteArchiveFilter): Promise<EventNoteArchiveResult> {
     const agentIds = filter.agentIds?.length ? filter.agentIds : [filter.agentId]
     const all = agentIds.flatMap((agentId) => this.listTdbNotes(agentId))
-    const stats = this.buildArchiveStats(all)
+    const statuses = new Set(filter.statuses?.length ? filter.statuses : ['active'])
+    const stats = this.buildArchiveStats(all.filter((note) => statuses.has(note.status)))
 
     const needle = filter.query?.trim().toLocaleLowerCase()
     const channels = filter.channels?.length ? new Set(filter.channels) : null
-    const statuses = filter.statuses?.length ? new Set(filter.statuses) : null
     const modes = filter.modes?.length ? new Set(filter.modes) : null
     const tones = filter.tones?.length ? filter.tones.map((tone) => tone.toLocaleLowerCase()) : null
     const participants = filter.participants?.length
@@ -417,7 +499,7 @@ export class EventMemoryService {
    */
   graphSnapshot(
     agentId: string,
-    options?: { includeArchived?: boolean; limit?: number },
+    options?: { includeArchived?: boolean; status?: 'active' | 'archived'; limit?: number },
   ): EventMemoryGraphSnapshot {
     const limit = Math.max(1, Math.min(options?.limit ?? 300, 1000))
     const store = this.stores.getAgentStore(agentId, 'main')
@@ -428,6 +510,8 @@ export class EventMemoryService {
       const payload = store.get<TdbEventPayload>(id)?.payload
       if (payload?.kind !== 'event_note') continue
       const note = payload as EventNote
+      if (this.privacy?.deleted('memory', note.id)) continue
+      if (options?.status && note.status !== options.status) continue
       if (!options?.includeArchived && note.status === 'archived') continue
       tdbIdToNoteId.set(id, note.id)
       noteIdToTdbId.set(note.id, id)
@@ -555,16 +639,29 @@ export class EventMemoryService {
         )
         .slice(0, limit)
     }
-    const vector = await this.safeVector(input.query)
+    const useVector = this.embeddings.isAvailable
+    const vector = useVector
+      ? await this.safeVector(input.query)
+      : Array(this.stores.getDimension()).fill(0)
     const store = this.stores.ensureTextIndexReady(input.agentId, 'desktop')
     const hits =
-      input.mode === 'semantic'
+      useVector && this.embeddings.isAvailable && input.mode === 'semantic'
         ? store.search(vector, limit * 3, 0, -1)
-        : store.searchHybrid(vector, input.query, limit * 3, 0, -1)
+        : store.searchHybrid(
+            vector,
+            input.query,
+            limit * 3,
+            0,
+            -1,
+            useVector && this.embeddings.isAvailable ? 0.5 : 0,
+          )
     const notes = hits
       .flatMap((hit) => {
         const node = store.get<TdbEventPayload>(hit.id)
-        return node?.payload?.kind === 'event_note' ? [node.payload as EventNote] : []
+        return node?.payload?.kind === 'event_note' &&
+          !this.privacy?.deleted('memory', node.payload.id)
+          ? [node.payload as EventNote]
+          : []
       })
       .filter((note) => input.includeArchived || note.status === 'active')
     if (input.mode !== 'same_event' && input.mode !== 'logical') return notes.slice(0, limit)
@@ -587,6 +684,7 @@ export class EventMemoryService {
         const related = store.get<TdbEventPayload>(id)?.payload
         if (
           related?.kind === 'event_note' &&
+          !this.privacy?.deleted('memory', related.id) &&
           (input.includeArchived || related.status === 'active')
         )
           expanded.push(related)
@@ -596,6 +694,17 @@ export class EventMemoryService {
   }
 
   async queryDetailed(input: EventNoteQuery): Promise<EventNoteQueryResult> {
+    const generation = this.privacy?.generation
+    const revision = this.retrievalRevision
+    const stale = () =>
+      generation !== this.privacy?.generation || revision !== this.retrievalRevision
+    const empty: EventNoteQueryResult = {
+      notes: [],
+      entities: [],
+      paths: [],
+      truncated: false,
+      returnedTokens: 0,
+    }
     const maxDepth = Math.max(0, Math.min(input.maxDepth ?? 2, 6))
     const maxNodes = Math.max(1, Math.min(input.maxNodes ?? input.limit ?? 20, 100))
     const maxReturnTokens = Math.max(1, Math.min(input.maxReturnTokens ?? 4_000, 32_000))
@@ -614,12 +723,14 @@ export class EventMemoryService {
     )
     const anchorLimit = Math.max(1, Math.min(input.limit ?? 10, maxNodes))
     const anchors = await this.query({ ...input, limit: anchorLimit })
+    if (stale()) return empty
     const store = this.stores.getAgentStore(input.agentId, 'main')
     const payloadByTdbId = new Map<number, TdbMemoryPayload>()
     const tdbIdByNoteId = new Map<string, number>()
     for (const id of store.allNodeIds()) {
       const payload = store.get<TdbMemoryPayload>(id)?.payload
       if (payload?.kind !== 'event_note' && payload?.kind !== 'event_entity') continue
+      if (payload.kind === 'event_note' && this.privacy?.deleted('memory', payload.id)) continue
       payloadByTdbId.set(id, payload)
       if (payload.kind === 'event_note') tdbIdByNoteId.set(payload.id, id)
     }
@@ -728,7 +839,7 @@ export class EventMemoryService {
       truncated: result.truncated,
       queriedAt: new Date().toISOString(),
     })
-    return result
+    return stale() ? empty : result
   }
 
   async automaticRag(
@@ -739,28 +850,49 @@ export class EventMemoryService {
     traceId?: string,
     onProgress?: (progress: AutomaticRagProgress) => void | Promise<void>,
   ): Promise<EventNote[]> {
+    const generation = this.privacy?.generation
+    const revision = this.retrievalRevision
+    const stale = () =>
+      generation !== this.privacy?.generation || revision !== this.retrievalRevision
     const timeline = this.listTdbNotes(agentId)
       .filter((note) => note.status === 'active')
       .sort((a, b) => a.eventAt.localeCompare(b.eventAt) || a.id.localeCompare(b.id))
     const latest = timeline.at(-1)
+    const runtime = this.contextRnnRuntime
+    const beforeLoad = runtime?.generation
     const config = this.getRuntimeConfig ? await this.getRuntimeConfig() : undefined
+    if (stale()) return []
+    const configIsCurrent = beforeLoad === runtime?.generation
+    if (config && configIsCurrent) this.syncAdvancedRetrievalConfig(config)
+    const rnnGeneration = configIsCurrent ? runtime?.generation : undefined
     const advanced = config?.advanced
     let queryEmbedding: number[] = []
     let contextBias: Float32Array | undefined
+    let usedRnnGeneration: number | undefined
     let hits: EventNote[]
 
-    if (advanced?.enableSaPpr) {
-      await onProgress?.({ stage: 'embedding', message: '正在生成记忆检索向量' })
+    if (advanced?.enableSaPpr && this.embeddings.isAvailable) {
+      await onProgress?.({ stage: 'embedding', message: '正在拉取记忆……' })
       queryEmbedding = await this.safeVector(query)
-      if (advanced.enableContextRnn && this.contextRnn) {
-        this.contextRnn.update(agentId, channel, queryEmbedding)
-        contextBias = this.contextRnn.generateBias(agentId, channel)
+      if (stale()) return []
+      if (advanced.enableContextRnn && rnnGeneration !== undefined) {
+        const rnn = runtime?.acquire(rnnGeneration)
+        if (rnn) {
+          rnn.update(agentId, channel, queryEmbedding)
+          contextBias = rnn.generateBias(agentId, channel)
+          usedRnnGeneration = rnnGeneration
+        }
       }
       const store = this.stores.ensureTextIndexReady(agentId, channel)
       await onProgress?.({
         stage: 'retrieval',
-        message: `正在执行 SA-PPR Top-${topK} 候选召回`,
+        message: '正在拉取记忆……',
       })
+      if (stale()) return []
+      if (usedRnnGeneration !== undefined && !runtime?.peek(usedRnnGeneration)) {
+        contextBias = undefined
+        usedRnnGeneration = undefined
+      }
       const advancedHits = store.searchAdvanced(queryEmbedding, {
         topK: Math.max(topK * 3, topK),
         expandDepth: advanced.expandDepth,
@@ -774,7 +906,7 @@ export class EventMemoryService {
         diffusionBias: contextBias ? Array.from(contextBias) : undefined,
       })
       const rerankers = [
-        advanced.enableContextRnn ? 'ContextRNN' : '',
+        contextBias ? 'ContextRNN' : '',
         advanced.enableLeiden ? 'Leiden' : '',
         advanced.enableDpp ? 'DPP' : '',
       ].filter(Boolean)
@@ -785,6 +917,7 @@ export class EventMemoryService {
           : `正在筛选 ${advancedHits.length} 个候选`,
         candidateCount: advancedHits.length,
       })
+      if (stale()) return []
       const clusterBonus = advanced.enableLeiden
         ? this.leidenClusterBonus(store, contextBias ?? new Float32Array(queryEmbedding))
         : new Map<number, number>()
@@ -801,10 +934,10 @@ export class EventMemoryService {
         })
         .slice(0, topK)
     } else {
-      await onProgress?.({ stage: 'embedding', message: '正在生成记忆检索向量' })
+      await onProgress?.({ stage: 'embedding', message: '正在拉取记忆……' })
       await onProgress?.({
         stage: 'retrieval',
-        message: `正在执行向量 + BM25 Top-${topK} 混合召回`,
+        message: '正在拉取记忆……',
       })
       hits = await this.query({ agentId, query, mode: 'mixed', limit: topK })
       await onProgress?.({
@@ -819,6 +952,7 @@ export class EventMemoryService {
       message: '正在补充时间轴末尾与命中事件直接前驱',
       candidateCount: hits.length,
     })
+    if (stale()) return []
     const index = new Map(timeline.map((note, i) => [note.id, i]))
     const result: EventNote[] = []
     if (latest) result.push(latest)
@@ -827,8 +961,17 @@ export class EventMemoryService {
       const position = index.get(hit.id)
       if (position !== undefined && position > 0) result.push(timeline[position - 1]!)
     }
-    const notes = [...new Map(result.map((note) => [note.id, note])).values()]
-    if (advanced?.enableSaPpr && advanced.enableFeedback && traceId) {
+    const notes = [...new Map(result.map((note) => [note.id, note])).values()].filter(
+      (note) =>
+        !this.privacy?.deleted('memory', note.id) &&
+        this.findTdbNode(agentId, note.id)?.note.status === 'active',
+    )
+    if (
+      traceId &&
+      usedRnnGeneration !== undefined &&
+      runtime?.feedbackEnabled &&
+      runtime.peek(usedRnnGeneration)
+    ) {
       this.automaticRagTraces.set(traceId, {
         agentId,
         channel,
@@ -836,6 +979,7 @@ export class EventMemoryService {
         queryEmbedding,
         notes: hits,
         contextBias,
+        rnnGeneration: usedRnnGeneration,
       })
     }
     await onProgress?.({
@@ -844,7 +988,7 @@ export class EventMemoryService {
       candidateCount: hits.length,
       resultCount: notes.length,
     })
-    return notes
+    return stale() ? [] : notes
   }
 
   private leidenClusterBonus(
@@ -894,11 +1038,14 @@ export class EventMemoryService {
   async detail(id: string): Promise<EventNoteDetail | undefined> {
     const note = await this.repo.findById(id)
     if (!note || note.replacedBy) return undefined
-    const timeline = await this.repo.list(note.agentId, {
-      includeArchived: true,
-      ascending: true,
-      limit: 10_000,
-    })
+    const timeline = (
+      await this.repo.list(note.agentId, {
+        includeArchived: note.status === 'archived',
+        ascending: true,
+        limit: 10_000,
+      })
+    ).filter((item) => item.status === note.status)
+    if (this.privacy?.deleted('memory', id)) return undefined
     const position = timeline.findIndex((item) => item.id === id)
     return {
       ...note,
@@ -910,6 +1057,11 @@ export class EventMemoryService {
 
   async replayPending(): Promise<void> {
     for (const operation of await this.repo.pendingOperations()) {
+      if (
+        this.background?.enabled === false &&
+        /^(background:|reflection:)/.test(operation.operationId)
+      )
+        continue
       try {
         if (operation.operation === 'create') {
           const payload = operation.payload as { note: EventNote; tdbId: number }
@@ -936,25 +1088,60 @@ export class EventMemoryService {
     }
   }
 
-  async rebuildAgentStore(agentId: string): Promise<void> {
-    this.stores.resetAgentStore(agentId, 'main')
-    const notes = await this.repo.list(agentId, {
+  async rebuildAgentStore(agentId: string, offline = false, signal?: AbortSignal): Promise<void> {
+    // 关闭向量时只重建文本和关系索引，保留仍可用的已有向量，不重新调用模型。
+    offline ||= !this.embeddings.isAvailable
+    const generation = this.privacy?.generation
+    const config = this.embeddings.getConfig()
+    const dimension = this.stores.getDimension()
+    const guard = () => {
+      signal?.throwIfAborted()
+      if (
+        generation !== this.privacy?.generation ||
+        dimension !== this.stores.getDimension() ||
+        (!offline && config !== this.embeddings.getConfig())
+      )
+        throw new Error('记忆或向量配置已变化，已停止旧索引重建')
+    }
+    guard()
+    const vectors = new Map<string, number[]>()
+    if (offline) {
+      const previous = this.stores.getAgentStore(agentId, 'main')
+      for (const id of previous.allNodeIds()) {
+        const node = previous.get<TdbMemoryPayload>(id)
+        if (node?.payload.id) vectors.set(node.payload.id, Array.from(node.vector))
+      }
+    }
+    const query = {
       includeArchived: true,
       ascending: true,
       limit: 100_000,
-    })
-    const store = this.stores.getAgentStore(agentId, 'main')
+    }
+    const notes = await this.repo.list(agentId, query)
+    if (notes.length === query.limit) throw new Error('记忆数量超过单次重建上限，请分批处理')
     const insertOperations: TransactionOperation[] = []
+    const texts = new Map<number, string>()
+    const vectorFor = async (id: string, text: string) => {
+      guard()
+      const vector = offline
+        ? (vectors.get(id) ?? Array(dimension).fill(0))
+        : await this.safeVector(text, signal)
+      guard()
+      if (vector.length !== dimension) throw new Error('记忆向量维度与当前配置不一致')
+      return vector
+    }
     for (const note of notes) {
       insertOperations.push({
         type: 'insertWithId',
         id: note.tdbId,
-        vector: await this.safeVector(note.narrative),
+        vector: await vectorFor(note.id, note.narrative),
         payload: { ...note, kind: 'event_note', operationId: `rebuild:${note.id}` },
       })
     }
-    if (insertOperations.length) store.commitTransaction(insertOperations)
     const edgeOperations: TransactionOperation[] = []
+    const entities = new Map<string, number>()
+    const noteMap = new Map(notes.map((note) => [note.id, note]))
+    const reservedIds = new Set(notes.map((note) => note.tdbId))
     for (let index = 1; index < notes.length; index++) {
       const previous = notes[index - 1]!
       const current = notes[index]!
@@ -976,11 +1163,40 @@ export class EventMemoryService {
       )
     }
     for (const note of notes) {
-      store.indexText(note.tdbId, note.narrative)
-      await this.ensureEntityRelations(note, note.tdbId)
+      texts.set(note.tdbId, note.narrative)
+      for (const [entityType, relation, names] of [
+        ['person', 'involves_person', note.participants],
+        ['place', 'involves_place', note.places],
+        ['object', 'involves_object', note.objects],
+      ] as const) {
+        for (const name of [...new Set(names.map((value) => value.trim()).filter(Boolean))]) {
+          const key = `entity:${entityType}:${name.toLocaleLowerCase()}`
+          let id = entities.get(key)
+          if (id === undefined) {
+            id = await this.allocateTdbId()
+            while (reservedIds.has(id)) id = await this.allocateTdbId()
+            reservedIds.add(id)
+            entities.set(key, id)
+            insertOperations.push({
+              type: 'insertWithId',
+              id,
+              vector: await vectorFor(key, name),
+              payload: { kind: 'event_entity', id: key, entityType, name },
+            })
+            texts.set(id, name)
+          }
+          edgeOperations.push({
+            type: 'upsertEdge',
+            src: note.tdbId,
+            dst: id,
+            label: relation,
+            weight: 1,
+          })
+        }
+      }
       for (const relation of await this.repo.listRelations(note.id)) {
         if (relation.sourceId !== note.id) continue
-        const target = await this.repo.findById(relation.targetId)
+        const target = noteMap.get(relation.targetId)
         if (target && !target.replacedBy)
           edgeOperations.push({
             type: 'upsertEdge',
@@ -991,8 +1207,16 @@ export class EventMemoryService {
           })
       }
     }
-    if (edgeOperations.length) store.commitTransaction(edgeOperations)
-    this.stores.markTextIndexDirty(this.stores.resolveAgentStorePath(agentId, 'main'))
+    const current = await this.repo.list(agentId, query)
+    guard()
+    if (JSON.stringify(current) !== JSON.stringify(notes))
+      throw new Error('重建期间记忆发生变化，请稍后重试')
+    this.stores.replaceAgentStore(agentId, 'main', (store) => {
+      if (insertOperations.length) store.commitTransaction(insertOperations)
+      if (edgeOperations.length) store.commitTransaction(edgeOperations)
+      for (const [id, text] of texts) store.indexText(id, text)
+    })
+    this.invalidateForDeletion()
   }
 
   private async applyCreate(
@@ -1000,10 +1224,19 @@ export class EventMemoryService {
     note: EventNote,
     tdbId: number,
     markCommitted = true,
+    signal?: AbortSignal,
   ): Promise<void> {
+    signal?.throwIfAborted()
+    const generation = this.privacy?.generation
+    const indexRevision = this.retrievalRevision
     try {
+      this.privacy?.assertMemory(note)
       const store = this.stores.getAgentStore(note.agentId, 'main')
-      const vector = await this.safeVector(note.narrative)
+      const vector = await this.safeVector(note.narrative, signal)
+      signal?.throwIfAborted()
+      if (generation !== this.privacy?.generation || indexRevision !== this.retrievalRevision)
+        throw new Error('记忆数据或索引已变化，已停止旧写入')
+      this.privacy?.assertMemory(note)
       const payload: TdbEventPayload = { ...note, kind: 'event_note', operationId }
       const timeline = await this.repo.list(note.agentId, {
         includeArchived: true,
@@ -1044,9 +1277,13 @@ export class EventMemoryService {
           { type: 'upsertEdge', src: next.tdbId, dst: tdbId, label: 'temporal_prev', weight: 1 },
         )
       }
+      this.privacy?.assertMemory(note)
+      if (generation !== this.privacy?.generation || indexRevision !== this.retrievalRevision)
+        throw new Error('记忆数据或索引已变化，已停止旧写入')
+      signal?.throwIfAborted()
       if (!store.contains(tdbId)) store.commitTransaction(operations)
       store.indexText(tdbId, note.narrative)
-      await this.ensureEntityRelations(note, tdbId)
+      await this.ensureEntityRelations(note, tdbId, undefined, signal)
       this.stores.markTextIndexDirty(this.stores.resolveAgentStorePath(note.agentId, 'main'))
       if (markCommitted) await this.repo.markOperationCommitted(operationId)
     } catch (error) {
@@ -1061,11 +1298,20 @@ export class EventMemoryService {
     replacement: EventNote,
     newTdbId: number,
     relations: EventNoteRelationView[],
+    signal?: AbortSignal,
   ): Promise<void> {
+    signal?.throwIfAborted()
+    const generation = this.privacy?.generation
+    const indexRevision = this.retrievalRevision
     try {
+      this.privacy?.assertPayload('memory', { target, replacement })
       const store = this.stores.getAgentStore(target.agentId, 'main')
       if (!store.contains(newTdbId)) {
-        const vector = await this.safeVector(replacement.narrative)
+        const vector = await this.safeVector(replacement.narrative, signal)
+        signal?.throwIfAborted()
+        if (generation !== this.privacy?.generation || indexRevision !== this.retrievalRevision)
+          throw new Error('记忆数据或索引已变化，已停止旧修订')
+        this.privacy?.assertPayload('memory', { target, replacement })
         const operations: TransactionOperation[] = [
           {
             type: 'insertWithId',
@@ -1095,6 +1341,7 @@ export class EventMemoryService {
         store.indexText(newTdbId, replacement.narrative)
       }
       for (const relation of relations) {
+        signal?.throwIfAborted()
         const sourceId = relation.sourceId === target.id ? replacement.id : relation.sourceId
         const targetId = relation.targetId === target.id ? replacement.id : relation.targetId
         await this.repo.removeRelation(relation.sourceId, relation.targetId, relation.relation)
@@ -1107,7 +1354,14 @@ export class EventMemoryService {
     }
   }
 
-  private async ensureEntityRelations(note: EventNote, noteTdbId: number): Promise<void> {
+  private async ensureEntityRelations(
+    note: EventNote,
+    noteTdbId: number,
+    vectors?: Map<string, number[]>,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const generation = this.privacy?.generation
+    const indexRevision = this.retrievalRevision
     const store = this.stores.getAgentStore(note.agentId, 'main')
     const groups = [
       ['person', 'involves_person', note.participants],
@@ -1116,13 +1370,30 @@ export class EventMemoryService {
     ] as const
     for (const [entityType, relation, values] of groups) {
       for (const name of [...new Set(values.map((value) => value.trim()).filter(Boolean))]) {
+        signal?.throwIfAborted()
         const id = `entity:${entityType}:${name.toLocaleLowerCase()}`
         let entityTdbId = this.findEntityTdbId(store, id)
         if (entityTdbId === undefined) {
           entityTdbId = await this.allocateTdbId()
-          while (store.contains(entityTdbId)) entityTdbId = await this.allocateTdbId()
+          if (generation !== this.privacy?.generation || indexRevision !== this.retrievalRevision)
+            throw new Error('记忆数据已变化，已停止旧任务')
+          while (store.contains(entityTdbId)) {
+            entityTdbId = await this.allocateTdbId()
+            if (generation !== this.privacy?.generation || indexRevision !== this.retrievalRevision)
+              throw new Error('记忆数据已变化，已停止旧任务')
+          }
           const payload: TdbEntityPayload = { kind: 'event_entity', id, entityType, name }
-          store.insertWithId(entityTdbId, await this.safeVector(name), payload)
+          const vector = vectors
+            ? (vectors.get(id) ?? Array(this.stores.getDimension()).fill(0))
+            : await this.safeVector(name, signal)
+          signal?.throwIfAborted()
+          if (
+            generation !== this.privacy?.generation ||
+            indexRevision !== this.retrievalRevision ||
+            this.privacy?.deleted('memory', note.id)
+          )
+            throw new Error('记忆来源已变化，已阻止迟到关系写入')
+          store.insertWithId(entityTdbId, vector, payload)
           store.indexText(entityTdbId, name)
         }
         store.upsertEdge(noteTdbId, entityTdbId, relation, 1)
@@ -1146,6 +1417,7 @@ export class EventMemoryService {
     options: EventWriteOptions,
     coverageOrigin: EventNote['origin'] = note.origin,
   ): Promise<void> {
+    options.signal?.throwIfAborted()
     if (options.deferCoverage) return
     const coverageNote = { ...note, origin: coverageOrigin }
     const coverage = this.coverageFor([coverageNote], coverageOrigin.mode)
@@ -1198,7 +1470,9 @@ export class EventMemoryService {
     const store = this.stores.getAgentStore(agentId, 'main')
     return store.allNodeIds().flatMap((id) => {
       const payload = store.get<TdbEventPayload>(id)?.payload
-      return payload?.kind === 'event_note' ? [payload as EventNote] : []
+      return payload?.kind === 'event_note' && !this.privacy?.deleted('memory', payload.id)
+        ? [payload as EventNote]
+        : []
     })
   }
 
@@ -1209,17 +1483,27 @@ export class EventMemoryService {
     const store = this.stores.getAgentStore(agentId, 'main')
     for (const id of store.allNodeIds()) {
       const payload = store.get<TdbEventPayload>(id)?.payload
-      if (payload?.kind === 'event_note' && payload.id === noteId) return { id, note: payload }
+      if (
+        payload?.kind === 'event_note' &&
+        payload.id === noteId &&
+        !this.privacy?.deleted('memory', noteId)
+      )
+        return { id, note: payload }
     }
     return undefined
   }
 
-  private async safeVector(text: string): Promise<number[]> {
+  private async safeVector(text: string, signal?: AbortSignal): Promise<number[]> {
+    signal?.throwIfAborted()
     try {
-      const vector = await this.embeddings.embedOne(text)
-      return vector.length === this.stores.getDimension()
-        ? vector
-        : new Array(this.stores.getDimension()).fill(0)
+      const vector = await this.embeddings.embedOne(text, signal)
+      if (!vector.length && !this.embeddings.isAvailable)
+        return new Array(this.stores.getDimension()).fill(0)
+      if (vector.length !== this.stores.getDimension())
+        throw new Error(
+          `Embedding 维度不匹配：配置 ${this.stores.getDimension()} 维，实际 ${vector.length} 维`,
+        )
+      return vector
     } catch (error) {
       throw new AutomaticRagStageError('embedding', error)
     }

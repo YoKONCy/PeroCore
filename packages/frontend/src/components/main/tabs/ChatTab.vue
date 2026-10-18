@@ -11,8 +11,10 @@
  * 设计语言: Arc 现代骨架 + 像素萌系品牌细节
  * @see .docs/S06_UI_UX_DESIGN_SPEC.md
  */
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { useConversationNavigation } from '../../../composables/chat/useConversationNavigation'
 import { ChatContainer } from '../../chat'
+import AgentStateHover from '../../agent/AgentStateHover.vue'
 import HistoryExportDialog from '../../chat/HistoryExportDialog.vue'
 import ConversationRewindDialog from '../../chat/ConversationRewindDialog.vue'
 import { PixelIcon, PButton, PEmpty, PDialog } from '../../pixel'
@@ -37,6 +39,68 @@ const threadStore = useThreadStore()
 const notify = useNotificationStore()
 const rewind = useConversationRewind()
 const taskCenter = useTaskCenterStore()
+const navigation = useConversationNavigation()
+const navigationBusy = ref(false)
+const focusRequest = ref<{ messageId: string; revision: number } | undefined>()
+const draftRequest = ref<{ text: string; revision: number } | undefined>()
+const initialized = ref(false)
+let navigationGeneration = 0
+
+async function followNavigation() {
+  if (!initialized.value || !navigation.value || isSwitchingAgent.value) return
+  const request = navigation.value
+  // 同一角色的活动草稿直接送入现有输入框，保留用户还没发送的文字。
+  if (
+    request.draft &&
+    !navigationBusy.value &&
+    !threadStore.isLoadingHistory &&
+    request.target.agentId === agentStore.activeAgentId &&
+    threadStore.agentId === request.target.agentId &&
+    !request.target.threadId &&
+    threadStore.threadId &&
+    !threadStore.historyError
+  ) {
+    draftRequest.value = { text: request.draft, revision: request.revision }
+    if (navigation.value === request) navigation.value = null
+    return
+  }
+  const generation = ++navigationGeneration
+  navigationBusy.value = true
+  try {
+    await nextTick()
+    if (!agentStore.agents.some((agent) => agent.id === request.target.agentId))
+      await agentStore.fetchAgents()
+    await agentStore.switchAgent(request.target.agentId)
+    if (generation !== navigationGeneration) return
+    if (request.target.threadId) {
+      const result = await threadStore.loadThreadMessages(
+        request.target.threadId,
+        request.target.agentId,
+      )
+      if (result.status === 'superseded') return
+      if (result.status === 'failed') throw result.error
+    } else if (!(await threadStore.ensureLatestThread(request.target.agentId, 'desktop'))) return
+    if (generation !== navigationGeneration) return
+    if (threadStore.historyError) throw new Error(threadStore.historyError)
+    focusRequest.value = request.target.messageId
+      ? { messageId: request.target.messageId, revision: request.revision }
+      : undefined
+    void loadThreadHistory(request.target.agentId)
+    if (generation === navigationGeneration && request.draft)
+      draftRequest.value = { text: request.draft, revision: request.revision }
+  } catch (error) {
+    if (generation !== navigationGeneration) return
+    notify.toast(error instanceof Error ? error.message : '无法定位桌宠回复', { type: 'error' })
+  } finally {
+    if (generation === navigationGeneration) {
+      navigationBusy.value = false
+      if (navigation.value === request) navigation.value = null
+    }
+  }
+}
+watch(navigation, () => {
+  void followNavigation()
+})
 
 function isAgentOccupied(agentId: string): boolean {
   return taskCenter.activeTasks.some(
@@ -96,6 +160,8 @@ function toggleSidebar() {
 const threadHistory = ref<ThreadInfo[]>([])
 const isLoadingThreads = ref(false)
 const isSwitchingAgent = ref(false)
+const pendingAgentId = ref('')
+const conversationSelectionLocked = computed(() => isSwitchingAgent.value || navigationBusy.value)
 let historyGeneration = 0
 const threadPendingDelete = ref<ThreadInfo | null>(null)
 const threadPendingRename = ref<ThreadInfo | null>(null)
@@ -130,19 +196,14 @@ async function requestDeleteThread(thread: ThreadInfo) {
       threadId: thread.id,
       wholeThread: true,
       title: thread.title || '未命名会话',
-      onSuccess: async (result) => {
+      onSuccess: async () => {
         threadHistory.value = threadHistory.value.filter((item) => item.id !== thread.id)
         if (threadStore.threadId === thread.id) {
           const next = threadHistory.value[0]
           if (next) await switchThread(next)
           else threadStore.clearThread()
         }
-        window.dispatchEvent(
-          new CustomEvent('infos:workspace-rewound', {
-            detail: { threadId: thread.id, files: result.preview.files },
-          }),
-        )
-        notify.toast('会话与工作区已回滚', { type: 'success', title: '聊天会话' })
+        notify.toast('会话已删除，文件保持原样', { type: 'success', title: '聊天会话' })
       },
     })
   } catch (err) {
@@ -178,13 +239,15 @@ async function confirmRenameThread(value?: string) {
 
 /** 切换历史会话 */
 async function switchThread(thread: ThreadInfo) {
+  if (conversationSelectionLocked.value || thread.agentId !== activeAgent.value?.id) return
+  if (thread.id === threadStore.threadId && !threadStore.navigationTarget) return
   if (thread.id !== threadStore.threadId && isAgentOccupied(thread.agentId)) {
     notify.toast('该角色正在执行后台任务或等待确认，暂不能切换会话', { type: 'error' })
     return
   }
-  await threadStore.loadThreadMessages(thread.id, thread.agentId)
+  const result = await threadStore.loadThreadMessages(thread.id, thread.agentId)
+  if (result.status !== 'loaded' || threadStore.threadId !== thread.id) return
   currentThreadTitle.value = thread.title || '未命名会话'
-  notify.toast(`已切换到「${thread.title || '未命名会话'}」`, { type: 'success' })
 }
 
 /** 格式化时间 */
@@ -220,17 +283,18 @@ function getAgentAvatarUrl(agentId: string): string | null {
 }
 
 async function switchAgent(agent: { id: string; name: string }) {
-  if (isSwitchingAgent.value || activeAgent.value?.id === agent.id) return
+  if (conversationSelectionLocked.value || activeAgent.value?.id === agent.id) return
   if (activeAgent.value && isAgentOccupied(activeAgent.value.id)) {
     notify.toast('当前角色仍有后台任务或 ReAct 工作，暂不能切换角色', { type: 'error' })
     return
   }
   isSwitchingAgent.value = true
+  pendingAgentId.value = agent.id
   try {
     await agentStore.switchAgent(agent.id)
     // 主对话页必须落入目标角色的最近会话；没有历史时立即创建正式空会话。
-    await threadStore.ensureLatestThread(agent.id, 'desktop')
-    await loadThreadHistory(agent.id)
+    if (!(await threadStore.ensureLatestThread(agent.id, 'desktop'))) return
+    void loadThreadHistory(agent.id)
   } catch (error) {
     notify.toast(error instanceof Error ? error.message : '切换角色失败', {
       type: 'error',
@@ -238,17 +302,26 @@ async function switchAgent(agent: { id: string; name: string }) {
     })
   } finally {
     isSwitchingAgent.value = false
+    pendingAgentId.value = ''
+    if (navigation.value) void followNavigation()
   }
 }
 
 async function createNewChatSession() {
-  if (!activeAgent.value || threadStore.isGenerating || isCreatingSession.value) return
+  if (
+    !activeAgent.value ||
+    conversationSelectionLocked.value ||
+    threadStore.isGenerating ||
+    isCreatingSession.value
+  )
+    return
 
+  const agentId = activeAgent.value.id
   isCreatingSession.value = true
   try {
-    await threadStore.createNewThread(activeAgent.value.id, 'desktop')
+    await threadStore.createNewThread(agentId, 'desktop')
     notify.toast('新会话已创建', { type: 'success', title: '聊天会话' })
-    await loadThreadHistory(activeAgent.value.id)
+    if (activeAgent.value?.id === agentId) void loadThreadHistory(agentId)
   } catch (err) {
     const message = err instanceof Error ? err.message : '新建会话失败'
     notify.toast(message, { type: 'error', title: '聊天会话' })
@@ -261,42 +334,39 @@ async function loadAgents() {
   isLoading.value = true
   try {
     await agentStore.fetchAgents()
+    initialized.value = true
     // 加载当前 Agent 的历史会话
     if (activeAgent.value) {
-      await loadThreadHistory(activeAgent.value.id)
+      void loadThreadHistory(activeAgent.value.id)
     }
   } finally {
     isLoading.value = false
   }
 }
 
-onMounted(() => {
-  loadAgents()
+onMounted(async () => {
+  if (agentStore.agents.length && activeAgent.value && !agentStore.isLoading) {
+    initialized.value = true
+    void loadThreadHistory(activeAgent.value.id)
+  } else await loadAgents()
+  initialized.value = true
+  await followNavigation()
 })
 
 // 监听 Agent 切换，刷新历史
 watch(
   () => activeAgent.value?.id,
   (id) => {
-    if (id) {
-      currentThreadTitle.value = '当前会话'
-      loadThreadHistory(id)
-        .then(() => {
-          const active = threadHistory.value.find((t) => t.id === threadStore.threadId)
-          if (active) currentThreadTitle.value = active.title || '未命名会话'
-        })
-        .catch((err) => logger.error('ChatTab', '当前会话同步失败', err))
-    }
+    threadHistory.value = []
+    currentThreadTitle.value = '当前会话'
+    if (id) void loadThreadHistory(id)
   },
 )
 
-watch(
-  () => threadStore.threadId,
-  () => {
-    const active = threadHistory.value.find((t) => t.id === threadStore.threadId)
-    if (active) currentThreadTitle.value = active.title || '未命名会话'
-  },
-)
+watch([() => threadStore.threadId, threadHistory], () => {
+  const active = threadHistory.value.find((t) => t.id === threadStore.threadId)
+  if (active) currentThreadTitle.value = active.title || '未命名会话'
+})
 </script>
 
 <template>
@@ -345,11 +415,18 @@ watch(
               <div
                 v-for="agent in filteredAgents"
                 :key="agent.id"
+                role="button"
+                :tabindex="conversationSelectionLocked ? -1 : 0"
+                :aria-disabled="conversationSelectionLocked"
+                :aria-pressed="activeAgent?.id === agent.id"
                 :class="[
                   'chat-agent-card',
                   activeAgent?.id === agent.id ? 'chat-agent-card--active' : '',
+                  { 'chat-agent-card--pending': pendingAgentId === agent.id },
                 ]"
                 @click="switchAgent(agent)"
+                @keydown.enter.prevent="switchAgent(agent)"
+                @keydown.space.prevent="switchAgent(agent)"
               >
                 <!-- 像素光轨 -->
                 <div v-if="activeAgent?.id === agent.id" class="chat-agent-trail" />
@@ -396,8 +473,12 @@ watch(
               <span class="chat-section-title-en">HISTORY</span>
             </div>
 
-            <div class="chat-thread-list chat-scrollbar">
-              <div v-if="isLoadingThreads" class="chat-thread-loading">
+            <div
+              class="chat-thread-list chat-scrollbar"
+              :inert="conversationSelectionLocked || undefined"
+              :aria-busy="isLoadingThreads || conversationSelectionLocked"
+            >
+              <div v-if="isLoadingThreads && !threadHistory.length" class="chat-thread-loading">
                 <PixelIcon name="refresh" size="xs" animation="spin" />
                 <span>加载中...</span>
               </div>
@@ -411,19 +492,28 @@ watch(
                 :key="thread.id"
                 :class="[
                   'chat-thread-item',
+                  {
+                    'chat-thread-item--pending':
+                      threadStore.navigationTarget?.threadId === thread.id,
+                  },
                   threadStore.threadId === thread.id ? 'chat-thread-item--active' : '',
                 ]"
                 @click="switchThread(thread)"
               >
-                <div class="chat-thread-content">
-                  <div class="chat-thread-title">{{ thread.title || '未命名会话' }}</div>
-                  <div class="chat-thread-meta">
+                <button
+                  class="chat-thread-content"
+                  type="button"
+                  :aria-current="threadStore.threadId === thread.id ? 'true' : undefined"
+                  @click.stop="switchThread(thread)"
+                >
+                  <span class="chat-thread-title">{{ thread.title || '未命名会话' }}</span>
+                  <span class="chat-thread-meta">
                     <span class="chat-thread-count">{{ thread.messageCount }} 条消息</span>
                     <span class="chat-thread-time">
                       {{ formatThreadTime(thread.lastMessageAt) }}
                     </span>
-                  </div>
-                </div>
+                  </span>
+                </button>
                 <button
                   class="chat-thread-delete chat-thread-rename"
                   title="修改会话标题"
@@ -448,7 +538,12 @@ watch(
           <div class="chat-sidebar-footer">
             <button
               class="chat-new-session-btn"
-              :disabled="!activeAgent || threadStore.isGenerating || isCreatingSession"
+              :disabled="
+                !activeAgent ||
+                conversationSelectionLocked ||
+                threadStore.isGenerating ||
+                isCreatingSession
+              "
               @click="createNewChatSession"
             >
               <PixelIcon name="plus" size="xs" :animation="isCreatingSession ? 'spin' : ''" />
@@ -484,19 +579,33 @@ watch(
       <div class="chat-main">
         <header class="chat-main-header">
           <div class="chat-main-agent">
-            <div class="chat-main-avatar">
-              <img
-                v-if="activeAgent && getAgentAvatarUrl(activeAgent.id)"
-                :src="getAgentAvatarUrl(activeAgent.id)!"
-                :alt="activeAgent.name"
-              />
-              <span v-else>{{ activeAgent?.name?.[0]?.toUpperCase() ?? 'P' }}</span>
+            <div class="chat-avatar-slot">
+              <Transition name="identity-swap">
+                <AgentStateHover
+                  :key="activeAgent?.id || 'empty'"
+                  class="chat-main-avatar"
+                  :thread-id="threadStore.threadId"
+                  :agent-id="activeAgent?.id"
+                  :agent-name="activeAgent?.name"
+                >
+                  <img
+                    v-if="activeAgent && getAgentAvatarUrl(activeAgent.id)"
+                    :src="getAgentAvatarUrl(activeAgent.id)!"
+                    :alt="activeAgent.name"
+                  />
+                  <span v-else>{{ activeAgent?.name?.[0]?.toUpperCase() ?? 'P' }}</span>
+                </AgentStateHover>
+              </Transition>
             </div>
-            <div class="chat-main-info">
-              <span class="chat-main-name">{{ activeAgent?.name ?? 'Pero' }}</span>
-              <span class="chat-main-channel">
-                {{ currentThreadTitle || '当前会话' }} · desktop 频道
-              </span>
+            <div class="chat-identity-slot">
+              <Transition name="identity-swap">
+                <div :key="`${activeAgent?.id}:${threadStore.threadId}`" class="chat-main-info">
+                  <span class="chat-main-name">{{ activeAgent?.name ?? 'Pero' }}</span>
+                  <span class="chat-main-channel">
+                    {{ currentThreadTitle || '当前会话' }} · desktop 频道
+                  </span>
+                </div>
+              </Transition>
             </div>
           </div>
 
@@ -513,18 +622,28 @@ watch(
               导出
             </PButton>
             <span class="chat-main-status-dot" />
-            <span class="chat-main-status-text">{{ activeAgent?.name ?? '助手' }} 已就位</span>
+            <span class="chat-main-status-text">
+              {{
+                conversationSelectionLocked || isCreatingSession || threadStore.navigationTarget
+                  ? '正在切换'
+                  : `${activeAgent?.name ?? '助手'} 已就位`
+              }}
+            </span>
           </div>
         </header>
 
         <ChatContainer
-          v-if="activeAgent"
+          v-if="activeAgent && initialized"
+          :switching="isSwitchingAgent || navigationBusy || isCreatingSession"
           :agent-id="activeAgent.id"
           :agent-name="activeAgent.name"
           :thread-id="activeThreadId"
+          :focus-request="focusRequest"
+          :draft-request="draftRequest"
           :agent-avatar-url="getAgentAvatarUrl(activeAgent.id) ?? ''"
           class="chat-main-container"
           @completed="loadThreadHistory(activeAgent.id)"
+          @draft-consumed="draftRequest = undefined"
         />
 
         <div v-else class="chat-empty-state">
@@ -660,7 +779,13 @@ watch(
   color: var(--ui-text-tertiary);
   cursor: pointer;
   z-index: 10;
-  transition: all var(--ui-duration-fast);
+  transition:
+    background-color var(--ui-duration-fast) var(--ui-ease-standard),
+    border-color var(--ui-duration-fast) var(--ui-ease-standard),
+    color var(--ui-duration-fast) var(--ui-ease-standard),
+    box-shadow var(--ui-duration-fast) var(--ui-ease-standard),
+    opacity var(--ui-duration-fast) var(--ui-ease-standard),
+    transform var(--ui-duration-fast) var(--ui-ease-standard);
   box-shadow: var(--ui-shadow-sm);
 }
 
@@ -708,7 +833,13 @@ watch(
   border: none;
   border-bottom: 2px solid transparent;
   border-radius: var(--ui-radius-sm);
-  transition: all var(--ui-duration-fast);
+  transition:
+    background-color var(--ui-duration-fast) var(--ui-ease-standard),
+    border-color var(--ui-duration-fast) var(--ui-ease-standard),
+    color var(--ui-duration-fast) var(--ui-ease-standard),
+    box-shadow var(--ui-duration-fast) var(--ui-ease-standard),
+    opacity var(--ui-duration-fast) var(--ui-ease-standard),
+    transform var(--ui-duration-fast) var(--ui-ease-standard);
   box-sizing: border-box;
 }
 
@@ -724,12 +855,14 @@ watch(
 
 .chat-search-input {
   flex: 1;
+  min-width: 0;
   border: none;
   outline: none;
   background: transparent;
   color: var(--ui-text-primary);
   font-size: 13px;
   font-weight: 500;
+  caret-color: var(--ui-focus-color);
 }
 
 .chat-search-input::placeholder {
@@ -818,7 +951,13 @@ watch(
   color: var(--ui-text-tertiary);
   cursor: pointer;
   border-radius: var(--ui-radius-xs);
-  transition: all var(--ui-duration-fast);
+  transition:
+    background-color var(--ui-duration-fast) var(--ui-ease-standard),
+    border-color var(--ui-duration-fast) var(--ui-ease-standard),
+    color var(--ui-duration-fast) var(--ui-ease-standard),
+    box-shadow var(--ui-duration-fast) var(--ui-ease-standard),
+    opacity var(--ui-duration-fast) var(--ui-ease-standard),
+    transform var(--ui-duration-fast) var(--ui-ease-standard);
 }
 
 .chat-refresh-btn:hover {
@@ -846,6 +985,7 @@ watch(
 .chat-agent-list {
   flex: 1;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 0 8px 8px;
   min-height: 0;
 }
@@ -861,7 +1001,13 @@ watch(
   background: transparent;
   border: 1px solid transparent;
   border-radius: var(--ui-radius-sm);
-  transition: all var(--ui-duration-fast);
+  transition:
+    background-color var(--ui-duration-fast) var(--ui-ease-standard),
+    border-color var(--ui-duration-fast) var(--ui-ease-standard),
+    color var(--ui-duration-fast) var(--ui-ease-standard),
+    box-shadow var(--ui-duration-fast) var(--ui-ease-standard),
+    opacity var(--ui-duration-fast) var(--ui-ease-standard),
+    transform var(--ui-duration-fast) var(--ui-ease-standard);
 }
 
 .chat-agent-card:hover {
@@ -915,7 +1061,13 @@ watch(
     2px 0 0 0 var(--color-moe-cocoa),
     0 -2px 0 0 var(--color-moe-cocoa),
     0 2px 0 0 var(--color-moe-cocoa);
-  transition: all var(--ui-duration-fast);
+  transition:
+    background-color var(--ui-duration-fast) var(--ui-ease-standard),
+    border-color var(--ui-duration-fast) var(--ui-ease-standard),
+    color var(--ui-duration-fast) var(--ui-ease-standard),
+    box-shadow var(--ui-duration-fast) var(--ui-ease-standard),
+    opacity var(--ui-duration-fast) var(--ui-ease-standard),
+    transform var(--ui-duration-fast) var(--ui-ease-standard);
 }
 
 .chat-agent-avatar img,
@@ -1020,6 +1172,7 @@ watch(
 .chat-thread-list {
   flex: 1;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 0 8px 8px;
 }
 
@@ -1048,7 +1201,13 @@ watch(
   border-left: 3px solid transparent;
   border-radius: var(--ui-radius-sm);
   box-shadow: var(--ui-shadow-xs);
-  transition: all var(--ui-duration-fast);
+  transition:
+    background-color var(--ui-duration-fast) var(--ui-ease-standard),
+    border-color var(--ui-duration-fast) var(--ui-ease-standard),
+    color var(--ui-duration-fast) var(--ui-ease-standard),
+    box-shadow var(--ui-duration-fast) var(--ui-ease-standard),
+    opacity var(--ui-duration-fast) var(--ui-ease-standard),
+    transform var(--ui-duration-fast) var(--ui-ease-standard);
 }
 
 .chat-thread-item::after {
@@ -1092,6 +1251,22 @@ watch(
 .chat-thread-content {
   min-width: 0;
   flex: 1;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.chat-thread-content:focus-visible,
+.chat-agent-card:focus-visible {
+  outline: 2px solid var(--ui-accent-primary);
+  outline-offset: 3px;
+  border-radius: var(--ui-radius-xs);
+}
+.chat-thread-content > .chat-thread-title {
+  display: block;
 }
 
 .chat-thread-delete {
@@ -1108,10 +1283,15 @@ watch(
   border-radius: var(--ui-radius-xs);
   opacity: 0;
   cursor: pointer;
-  transition: all var(--ui-duration-fast);
+  transition:
+    opacity var(--ui-duration-fast) var(--ui-ease-standard),
+    background-color var(--ui-duration-fast) var(--ui-ease-standard),
+    border-color var(--ui-duration-fast) var(--ui-ease-standard),
+    color var(--ui-duration-fast) var(--ui-ease-standard);
 }
 
 .chat-thread-item:hover .chat-thread-delete,
+.chat-thread-item:focus-within .chat-thread-delete,
 .chat-thread-item--active .chat-thread-delete,
 .chat-thread-delete:focus-visible {
   opacity: 1;
@@ -1124,7 +1304,7 @@ watch(
 }
 
 .chat-thread-delete:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--ui-danger) 34%, transparent);
+  outline: 2px solid var(--ui-danger);
   outline-offset: 1px;
 }
 
@@ -1135,7 +1315,7 @@ watch(
 }
 
 .chat-thread-rename:focus-visible {
-  outline-color: color-mix(in srgb, var(--ui-accent-primary) 34%, transparent);
+  outline-color: var(--ui-focus-color);
 }
 
 .chat-thread-title {
@@ -1213,7 +1393,13 @@ watch(
   font-weight: 800;
   letter-spacing: 0.06em;
   cursor: pointer;
-  transition: all var(--ui-duration-fast);
+  transition:
+    background-color var(--ui-duration-fast) var(--ui-ease-standard),
+    border-color var(--ui-duration-fast) var(--ui-ease-standard),
+    color var(--ui-duration-fast) var(--ui-ease-standard),
+    box-shadow var(--ui-duration-fast) var(--ui-ease-standard),
+    opacity var(--ui-duration-fast) var(--ui-ease-standard),
+    transform var(--ui-duration-fast) var(--ui-ease-standard);
 }
 
 .chat-new-session-btn > :first-child {
@@ -1281,7 +1467,13 @@ watch(
   background: linear-gradient(135deg, var(--ui-accent-sky), #7dd3fc);
   cursor: pointer;
   border: 2px solid transparent;
-  transition: all var(--ui-duration-fast);
+  transition:
+    background-color var(--ui-duration-fast) var(--ui-ease-standard),
+    border-color var(--ui-duration-fast) var(--ui-ease-standard),
+    color var(--ui-duration-fast) var(--ui-ease-standard),
+    box-shadow var(--ui-duration-fast) var(--ui-ease-standard),
+    opacity var(--ui-duration-fast) var(--ui-ease-standard),
+    transform var(--ui-duration-fast) var(--ui-ease-standard);
 }
 
 .chat-collapsed-agent img {
@@ -1552,14 +1744,6 @@ watch(
  * 滚动条
  * ═══════════════════════════════════════════════════════════════ */
 
-.chat-scrollbar::-webkit-scrollbar {
-  width: 3px;
-}
-
-.chat-scrollbar::-webkit-scrollbar-thumb {
-  background: var(--ui-scrollbar-thumb);
-}
-
 /* ═══════════════════════════════════════════════════════════════
  * 动画
  * ═══════════════════════════════════════════════════════════════ */
@@ -1583,5 +1767,78 @@ watch(
   .chat-main-status-dot {
     animation: none;
   }
+}
+</style>
+
+<style scoped>
+.chat-avatar-slot,
+.chat-identity-slot {
+  display: grid;
+  align-items: center;
+}
+.chat-avatar-slot {
+  min-width: 40px;
+  min-height: 40px;
+}
+.chat-avatar-slot > *,
+.chat-identity-slot > * {
+  grid-area: 1 / 1;
+}
+.identity-swap-enter-active {
+  transition:
+    opacity 220ms ease,
+    transform 280ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.identity-swap-leave-active {
+  transition:
+    opacity 120ms ease,
+    transform 160ms ease;
+  pointer-events: none;
+}
+.identity-swap-enter-from {
+  opacity: 0;
+  transform: translateY(5px);
+}
+.identity-swap-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+.chat-thread-item--pending,
+.chat-agent-card--pending {
+  border-color: var(--ui-accent-primary);
+  background: var(--ui-bg-active);
+}
+.chat-thread-item--pending::after {
+  background: var(--ui-accent-primary);
+  animation: chat-navigation-intent 1.2s ease-in-out infinite;
+}
+@keyframes chat-navigation-intent {
+  50% {
+    opacity: 0.3;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .identity-swap-enter-active,
+  .identity-swap-leave-active {
+    transition: opacity 100ms ease;
+  }
+  .identity-swap-enter-from,
+  .identity-swap-leave-to {
+    transform: none;
+  }
+  .chat-thread-item--pending::after {
+    animation: none;
+  }
+}
+:global([data-motion='reduced']) .identity-swap-enter-from,
+:global([data-motion='reduced']) .identity-swap-leave-to {
+  transform: none;
+}
+:global([data-motion='reduced']) .identity-swap-enter-active,
+:global([data-motion='reduced']) .identity-swap-leave-active {
+  transition: opacity 100ms ease;
+}
+:global([data-motion='reduced']) .chat-thread-item--pending::after {
+  animation: none;
 }
 </style>

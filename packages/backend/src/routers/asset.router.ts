@@ -29,7 +29,7 @@ export function createAssetRouter(ctx: AppContext) {
       subjectId,
       'read',
     )
-    return new Response(bytes, {
+    return new Response(new Uint8Array(bytes), {
       headers: {
         'Content-Type': asset.mimeType,
         'Content-Length': String(asset.sizeBytes),

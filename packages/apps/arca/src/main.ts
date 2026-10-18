@@ -1,10 +1,8 @@
-/**
- * main — 前端领域模块
- *
- * 集中管理该领域的数据转换、状态边界与外部交互。
- * 调用方依赖这里的稳定契约，不直接耦合底层传输或运行时实现。
- */
+/** Arca 独立与托管进程入口，统一处理启动失败和退出。 */
 import path from 'node:path'
+import { existsSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { ApplicationProcessLifetime } from '@infos/node-host'
 import { ArcaApplicationHost } from './applicationHost'
 
 function numberFlag(name: string): number | undefined {
@@ -18,35 +16,46 @@ function numberFlag(name: string): number | undefined {
   return parsed
 }
 
-const dataPath = process.env.INFOS_ARCA_DATA_PATH ?? path.resolve(process.cwd(), '.arca')
-const discoveryPath = process.env.INFOS_ARCA_DISCOVERY_PATH
-const host = new ArcaApplicationHost({ dataPath, discoveryPath })
-const loopbackPort = numberFlag('loopback-port') ?? 0
-const result = await host.start({ loopbackPort })
-process.stdout.write(`Arca自治Host已监听 ws://127.0.0.1:${result.loopbackPort}\n`)
-process.stdout.write(`${JSON.stringify(host.diagnostics())}\n`)
-
-let shuttingDown = false
-const shutdown = async () => {
-  if (shuttingDown) return
-  shuttingDown = true
-  await host.stop()
-  process.exit(0)
+const standalone = process.argv.includes('--standalone') || !process.env.INFOS_ARCA_OWNER_PID
+const dataPath =
+  (standalone
+    ? (process.env.ARCA_DATA_PATH ?? process.env.INFOS_ARCA_DATA_PATH)
+    : process.env.INFOS_ARCA_DATA_PATH) ?? path.resolve(process.cwd(), '.arca')
+const packagedUi = fileURLToPath(new URL('./ui/', import.meta.url))
+let host: ArcaApplicationHost | undefined
+const lifetime = new ApplicationProcessLifetime(
+  'Arca',
+  async () => {
+    await host?.stop()
+  },
+  standalone ? undefined : Number(process.env.INFOS_ARCA_OWNER_PID),
+)
+process.once('SIGINT', () => void lifetime.shutdown())
+process.once('SIGTERM', () => void lifetime.shutdown())
+try {
+  lifetime.assertRunning()
+  host = new ArcaApplicationHost({
+    dataPath,
+    discoveryPath: standalone
+      ? (process.env.ARCA_DISCOVERY_PATH ?? process.env.INFOS_ARCA_DISCOVERY_PATH)
+      : process.env.INFOS_ARCA_DISCOVERY_PATH,
+    standalone,
+    httpPort: numberFlag('port') ?? (standalone ? 7365 : 0),
+    uiRoot:
+      process.env.ARCA_UI_ROOT ??
+      (existsSync(path.join(packagedUi, 'index.html')) ? packagedUi : undefined),
+    developmentUi: process.argv.includes('--dev-ui'),
+    bindDesktop: standalone ? undefined : (value) => lifetime.bindDesktop(value),
+    shutdown: () => lifetime.shutdown(),
+  })
+  if (!standalone && process.env.INFOS_ARCA_DESKTOP_GUARD)
+    await lifetime.bindDesktop(JSON.parse(process.env.INFOS_ARCA_DESKTOP_GUARD))
+  lifetime.assertRunning()
+  const result = await host.start({ loopbackPort: numberFlag('loopback-port') ?? 0 })
+  lifetime.assertRunning()
+  process.stdout.write(`Arca 自治 Host 已监听 ws://127.0.0.1:${result.loopbackPort}\n`)
+  if (host.browserUrl) process.stdout.write(`打开文稿：${host.browserUrl}\n`)
+} catch (error) {
+  process.stderr.write(`Arca 启动失败：${String(error)}\n`)
+  await lifetime.shutdown(1)
 }
-
-const ownerPid = Number(process.env.INFOS_ARCA_OWNER_PID)
-if (Number.isInteger(ownerPid) && ownerPid > 0) {
-  const ownerWatch = setInterval(() => {
-    try {
-      process.kill(ownerPid, 0)
-    } catch {
-      process.stdout.write(`Arca托管进程检测到Kernel已退出，正在收口: owner=${ownerPid}\n`)
-      clearInterval(ownerWatch)
-      void shutdown()
-    }
-  }, 1_000)
-  ownerWatch.unref()
-}
-
-process.once('SIGINT', () => void shutdown())
-process.once('SIGTERM', () => void shutdown())

@@ -93,6 +93,7 @@ function hide() {
 .p-tooltip-trigger {
   position: relative;
   display: inline-block;
+  vertical-align: middle;
 }
 
 .p-tooltip {
@@ -108,20 +109,25 @@ function hide() {
   box-shadow: var(--ui-shadow-md);
   pointer-events: none;
   user-select: none;
-  white-space: nowrap;
-  max-width: 260px;
-  word-break: break-word;
+  width: max-content;
+  max-width: min(260px, calc(100vw - 20px));
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .tooltip-enter-active {
-  transition: all 0.1s ease-out;
+  transition:
+    opacity var(--ui-duration-fast) var(--ui-ease-standard),
+    transform var(--ui-duration-fast) var(--ui-ease-standard);
 }
 .tooltip-leave-active {
-  transition: all 0.075s ease-in;
+  transition:
+    opacity var(--ui-duration-instant) var(--ui-ease-standard),
+    transform var(--ui-duration-instant) var(--ui-ease-standard);
 }
 .tooltip-enter-from,
 .tooltip-leave-to {
   opacity: 0;
-  transform: translateY(4px);
+  transform: translateY(var(--ui-motion-distance-sm));
 }
 </style>

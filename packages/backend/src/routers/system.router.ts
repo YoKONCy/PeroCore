@@ -17,10 +17,55 @@ import { addLogListener, getLogHistory } from '../lib/logBroadcaster'
 import { AppError } from '../lib/appError'
 
 /** 应用版本号 (由 scripts/sync-version.ts 自动同步) */
-const APP_VERSION = '0.9.3-hotfix2'
+const APP_VERSION = '0.9.4'
 
 export function createSystemRouter(ctx: AppContext) {
   const router = new Hono()
+
+  router.get(
+    '/token-usage',
+    zValidator(
+      'query',
+      z.object({
+        period: z.enum(['today', '7d', '30d']).default('today'),
+        timeZone: z
+          .string()
+          .min(1)
+          .max(100)
+          .default('UTC')
+          .refine((value) => {
+            try {
+              new Intl.DateTimeFormat('en', { timeZone: value })
+              return true
+            } catch {
+              return false
+            }
+          }, '时区无效'),
+        agentId: z.string().trim().min(1).max(128).optional(),
+      }),
+    ),
+    (c) => {
+      const { period, timeZone, agentId } = c.req.valid('query')
+      return c.json({
+        code: 'OK',
+        message: '获取成功',
+        data: ctx.tokenUsageService.statistics(period, timeZone, agentId),
+      })
+    },
+  )
+
+  router.get('/weather', (c) =>
+    c.json({ code: 'OK', message: '获取成功', data: ctx.weatherService.getStatus() }),
+  )
+  router.put(
+    '/weather/location',
+    zValidator('json', z.object({ location: z.string().max(80) })),
+    async (c) => {
+      const { location } = c.req.valid('json')
+      const data = await ctx.weatherService.setLocation(location)
+      return c.json({ code: 'OK', message: '城市已保存', data })
+    },
+  )
 
   // GET /api/system/health — 健康检查
   router.get('/health', (c) => {
@@ -98,7 +143,7 @@ export function createSystemRouter(ctx: AppContext) {
 
   router.get('/chat-background/content', async () => {
     const { bytes, mime } = await ctx.chatBackgroundService.read()
-    return new Response(bytes, {
+    return new Response(new Uint8Array(bytes), {
       headers: {
         'Content-Type': mime,
         'Content-Length': String(bytes.length),

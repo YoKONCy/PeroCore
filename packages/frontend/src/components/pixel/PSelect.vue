@@ -123,8 +123,10 @@ onBeforeUnmount(closeDropdown)
         @click="toggleDropdown"
       >
         <span :class="selectedOption ? 'p-select-value' : 'p-select-placeholder'">
-          <PixelIcon v-if="selectedOption?.icon" :name="selectedOption.icon" size="xs" />
-          {{ selectedOption?.label || placeholder }}
+          <slot name="selected" :option="selectedOption">
+            <PixelIcon v-if="selectedOption?.icon" :name="selectedOption.icon" size="xs" />
+            {{ selectedOption?.label || placeholder }}
+          </slot>
         </span>
         <PixelIcon
           name="chevron-down"
@@ -153,8 +155,10 @@ onBeforeUnmount(closeDropdown)
                 @click="selectOption(option)"
               >
                 <div class="p-select-option-content">
-                  <PixelIcon v-if="option.icon" :name="option.icon" size="xs" />
-                  {{ option.label }}
+                  <slot name="option" :option="option" :selected="modelValue === option.value">
+                    <PixelIcon v-if="option.icon" :name="option.icon" size="xs" />
+                    {{ option.label }}
+                  </slot>
                 </div>
                 <PixelIcon
                   v-if="modelValue === option.value"
@@ -194,18 +198,22 @@ onBeforeUnmount(closeDropdown)
 }
 
 .p-select-trigger {
+  --ui-focus-color: var(--ui-accent-sky);
   width: 100%;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
   background: var(--dash-input-bg);
   border: 2px solid var(--dash-input-border);
   border-radius: 0;
   color: var(--ui-text-primary);
   cursor: pointer;
   transition:
-    border-color 0.2s,
-    box-shadow 0.2s;
+    border-color var(--ui-duration-fast) var(--ui-ease-standard),
+    box-shadow var(--ui-duration-fast) var(--ui-ease-standard),
+    background-color var(--ui-duration-fast) var(--ui-ease-standard);
   font-family: var(--ui-font-pixel);
 }
 .p-select-trigger:hover:not(:disabled) {
@@ -240,13 +248,27 @@ onBeforeUnmount(closeDropdown)
   gap: 6px;
   font-weight: 500;
 }
+.p-select-value,
+.p-select-placeholder,
+.p-select-option-content {
+  min-width: 0;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.p-select-value :deep(.pixel-icon),
+.p-select-option-content :deep(.pixel-icon) {
+  flex-shrink: 0;
+}
 .p-select-placeholder {
   color: var(--ui-text-tertiary);
 }
 
 .p-select-arrow {
+  flex-shrink: 0;
   color: var(--ui-text-secondary);
-  transition: transform 0.3s;
+  transition:
+    transform var(--ui-duration-normal) var(--ui-ease-standard),
+    color var(--ui-duration-fast) var(--ui-ease-standard);
 }
 .p-select-arrow-open {
   transform: rotate(180deg);
@@ -263,6 +285,8 @@ onBeforeUnmount(closeDropdown)
   box-shadow: var(--ui-shadow-md);
   max-height: 240px;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  transform-origin: top center;
 }
 
 .p-select-dropdown-teleported {
@@ -274,15 +298,16 @@ onBeforeUnmount(closeDropdown)
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   padding: 8px 12px;
   font-size: 13px;
   cursor: pointer;
   transition:
-    background 0.15s,
-    color 0.15s;
+    background-color var(--ui-duration-fast) var(--ui-ease-standard),
+    color var(--ui-duration-fast) var(--ui-ease-standard);
   color: var(--ui-text-secondary);
 }
-.p-select-option:hover {
+.p-select-option:hover:not(.p-select-option-disabled) {
   background: var(--ui-bg-hover);
   color: var(--ui-accent-sky);
 }
@@ -301,19 +326,24 @@ onBeforeUnmount(closeDropdown)
   gap: 8px;
 }
 .p-select-check {
+  flex-shrink: 0;
   color: var(--ui-accent-sky);
 }
 
 /* 下拉动画 */
 .select-dropdown-enter-active {
-  transition: all 0.1s ease-out;
+  transition:
+    opacity var(--ui-duration-fast) var(--ui-ease-standard),
+    transform var(--ui-duration-fast) var(--ui-ease-standard);
 }
 .select-dropdown-leave-active {
-  transition: all 0.075s ease-in;
+  transition:
+    opacity var(--ui-duration-instant) var(--ui-ease-standard),
+    transform var(--ui-duration-instant) var(--ui-ease-standard);
 }
 .select-dropdown-enter-from,
 .select-dropdown-leave-to {
   opacity: 0;
-  transform: translateY(-4px);
+  transform: translateY(calc(-1 * var(--ui-motion-distance-sm)));
 }
 </style>

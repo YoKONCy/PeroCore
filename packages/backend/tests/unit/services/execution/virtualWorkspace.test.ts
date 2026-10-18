@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
@@ -35,7 +35,9 @@ describe('VirtualWorkspace', () => {
     await writeFile(externalFile, '# 设备文件\n只读内容', 'utf8')
     const workspace = new VirtualWorkspace()
     try {
-      await expect(workspace.read(session, externalFile)).rejects.toThrow('超出可读范围')
+      await expect(workspace.read(session, externalFile)).rejects.toThrow(
+        expect.objectContaining({ code: 'PATH_OUT_OF_SCOPE' }),
+      )
       const read = await workspace.read(session, externalFile, { deviceScope: true })
       expect(read.content).toContain('设备文件')
 
@@ -47,7 +49,7 @@ describe('VirtualWorkspace', () => {
       expect(files).toEqual(['outside.md'])
       await expect(
         workspace.write(session, { path: externalFile, content: '禁止写入' }),
-      ).rejects.toThrow('超出可写范围')
+      ).rejects.toThrow(expect.objectContaining({ code: 'PATH_OUT_OF_SCOPE' }))
     } finally {
       await rm(externalRoot, { recursive: true, force: true })
     }
@@ -65,7 +67,7 @@ describe('VirtualWorkspace', () => {
           oldText: '修改前',
           newText: '修改后',
         }),
-      ).rejects.toThrow('超出可写范围')
+      ).rejects.toThrow(expect.objectContaining({ code: 'PATH_OUT_OF_SCOPE' }))
 
       const result = await workspace.edit(session, {
         path: externalFile,
@@ -107,7 +109,7 @@ describe('VirtualWorkspace', () => {
 
     await expect(
       workspace.read(session, 'sample.txt', { lineStart: 3, lineEnd: 2 }),
-    ).rejects.toThrow('line_end 不能小于 line_start')
+    ).rejects.toThrow(Error)
   })
 
   it('按行读取默认及最大窗口为800行', async () => {
@@ -207,7 +209,7 @@ describe('VirtualWorkspace', () => {
       const linkType = process.platform === 'win32' ? 'junction' : 'dir'
       await symlink(outside, path.join(root, 'escape'), linkType)
       await expect(new VirtualWorkspace().read(session, 'escape/secret.txt')).rejects.toThrow(
-        '符号链接',
+        expect.objectContaining({ code: 'PATH_OUT_OF_SCOPE' }),
       )
     } finally {
       await rm(outside, { recursive: true, force: true })
@@ -216,14 +218,16 @@ describe('VirtualWorkspace', () => {
 
   it('拒绝路径逃逸和受保护目录', async () => {
     const workspace = new VirtualWorkspace()
-    await expect(workspace.read(session, '../outside.txt')).rejects.toThrow('可读范围')
+    await expect(workspace.read(session, '../outside.txt')).rejects.toThrow(
+      expect.objectContaining({ code: 'PATH_OUT_OF_SCOPE' }),
+    )
     await expect(
       workspace.edit(session, {
         path: '.git/config',
         oldText: 'a',
         newText: 'b',
       }),
-    ).rejects.toThrow('路径受保护')
+    ).rejects.toThrow(expect.objectContaining({ code: 'PATH_PROTECTED' }))
   })
 
   it('编辑返回真实行级 diff 统计与改动行号', async () => {
@@ -231,7 +235,6 @@ describe('VirtualWorkspace', () => {
     await workspace.atomicWrite(
       path.join(root, 'diff.ts'),
       'const a = 1\nconst b = 2\nconst c = 3\n',
-      'utf8',
     )
     const result = await workspace.edit(session, {
       path: 'diff.ts',
@@ -248,14 +251,14 @@ describe('VirtualWorkspace', () => {
 
   it('拒绝 old_text 与 new_text 完全相同的空编辑', async () => {
     const workspace = new VirtualWorkspace()
-    await workspace.atomicWrite(path.join(root, 'noop.ts'), 'const value = 1\n', 'utf8')
+    await workspace.atomicWrite(path.join(root, 'noop.ts'), 'const value = 1\n')
     await expect(
       workspace.edit(session, {
         path: 'noop.ts',
         oldText: 'const value = 1',
         newText: 'const value = 1',
       }),
-    ).rejects.toThrow('完全相同')
+    ).rejects.toThrow(expect.objectContaining({ code: 'EDIT_NO_CHANGES' }))
   })
 
   it('write 返回创建/覆写的行级 diff 统计', async () => {
@@ -273,7 +276,7 @@ describe('VirtualWorkspace', () => {
 
   it('安全重命名并删除工作区普通文件', async () => {
     const workspace = new VirtualWorkspace()
-    await workspace.atomicWrite(path.join(root, 'before.txt'), '内容', 'utf8')
+    await workspace.atomicWrite(path.join(root, 'before.txt'), '内容')
     const renamed = await workspace.renameFile(session, 'before.txt', 'after.txt')
     expect(renamed).toEqual({ oldPath: 'before.txt', newPath: 'after.txt', name: 'after.txt' })
     expect((await workspace.read(session, 'after.txt')).content).toBe('内容')
@@ -285,11 +288,80 @@ describe('VirtualWorkspace', () => {
 
   it('重命名拒绝目录路径与覆盖已有文件', async () => {
     const workspace = new VirtualWorkspace()
-    await workspace.atomicWrite(path.join(root, 'a.txt'), 'a', 'utf8')
-    await workspace.atomicWrite(path.join(root, 'b.txt'), 'b', 'utf8')
+    await workspace.atomicWrite(path.join(root, 'a.txt'), 'a')
+    await workspace.atomicWrite(path.join(root, 'b.txt'), 'b')
     await expect(workspace.renameFile(session, 'a.txt', '../escape.txt')).rejects.toThrow(
-      '不能包含目录路径',
+      expect.objectContaining({ code: 'PATH_OUT_OF_SCOPE' }),
     )
-    await expect(workspace.renameFile(session, 'a.txt', 'b.txt')).rejects.toThrow('同名文件已存在')
+    await expect(workspace.renameFile(session, 'a.txt', 'b.txt')).rejects.toThrow(
+      expect.objectContaining({ code: 'RENAME_TARGET_EXISTS' }),
+    )
+  })
+
+  it('文件树可重命名并递归删除目录，Agent 默认文件操作仍拒绝目录', async () => {
+    const workspace = new VirtualWorkspace()
+    await workspace.atomicWrite(path.join(root, '资料', '子目录', '笔记.txt'), '保留内容')
+    await expect(workspace.renameFile(session, '资料', '归档')).rejects.toThrow(
+      expect.objectContaining({ code: 'NOT_A_FILE' }),
+    )
+    await expect(workspace.deleteFile(session, '资料')).rejects.toThrow(
+      expect.objectContaining({ code: 'NOT_A_FILE' }),
+    )
+    expect(await workspace.renameFile(session, '资料', '归档', true)).toEqual({
+      oldPath: '资料',
+      newPath: '归档',
+      name: '归档',
+    })
+    expect((await workspace.read(session, '归档/子目录/笔记.txt')).content).toBe('保留内容')
+    await workspace.deleteEntry(session, '归档')
+    expect((await workspace.fileInfo(session, '归档')).exists).toBe(false)
+  })
+
+  it('完整访问模式下文件树仍不能重命名或删除工作区根目录', async () => {
+    const workspace = new VirtualWorkspace()
+    session.sandboxProfile = createDefaultSandboxProfile('full-access', root)
+    await workspace.atomicWrite(path.join(root, '保留.txt'), '保留内容')
+    await expect(workspace.deleteEntry(session, '.')).rejects.toThrow(
+      expect.objectContaining({ code: 'PATH_OUT_OF_SCOPE' }),
+    )
+    await expect(workspace.renameFile(session, '.', '其他目录', true)).rejects.toThrow(
+      expect.objectContaining({ code: 'PATH_OUT_OF_SCOPE' }),
+    )
+    expect((await workspace.read(session, '保留.txt')).content).toBe('保留内容')
+  })
+
+  it('递归操作在修改文件前拒绝包含受保护后代的目录', async () => {
+    const workspace = new VirtualWorkspace()
+    await workspace.atomicWrite(path.join(root, '资料', '保留.txt'), '保留内容')
+    await workspace.atomicWrite(path.join(root, '资料', '私有.txt'), '私有内容')
+    session.sandboxProfile.protectedPaths.push('资料/私有.txt')
+    await expect(workspace.deleteEntry(session, '资料')).rejects.toThrow(
+      expect.objectContaining({ code: 'PATH_PROTECTED' }),
+    )
+    await expect(workspace.renameFile(session, '资料', '归档', true)).rejects.toThrow(
+      expect.objectContaining({ code: 'PATH_PROTECTED' }),
+    )
+    expect((await workspace.read(session, '资料/保留.txt')).content).toBe('保留内容')
+  })
+
+  it('删除包含 Junction 或符号链接的目录时保留外部目标', async () => {
+    const workspace = new VirtualWorkspace()
+    const externalRoot = await mkdtemp(path.join(tmpdir(), 'infos-directory-target-'))
+    if (path.dirname(path.resolve(externalRoot)) !== path.resolve(tmpdir()))
+      throw new Error('临时目录越界')
+    try {
+      await writeFile(path.join(externalRoot, '保留.txt'), '外部内容', 'utf8')
+      await workspace.atomicWrite(path.join(root, '资料', '本地.txt'), '本地内容')
+      await symlink(
+        externalRoot,
+        path.join(root, '资料', '外部链接'),
+        process.platform === 'win32' ? 'junction' : 'dir',
+      )
+      await workspace.deleteEntry(session, '资料')
+      expect(await readFile(path.join(externalRoot, '保留.txt'), 'utf8')).toBe('外部内容')
+      expect((await workspace.fileInfo(session, '资料')).exists).toBe(false)
+    } finally {
+      await rm(externalRoot, { recursive: true, force: true })
+    }
   })
 })

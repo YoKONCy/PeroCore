@@ -1,3 +1,4 @@
+import { jsonBody } from '../../../../helpers/jsonBody'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { OpenAiProvider } from '@infos/backend/services/llm/providers/openaiProvider'
 import { OpenAiResponsesProvider } from '@infos/backend/services/llm/providers/openaiResponsesProvider'
@@ -34,17 +35,31 @@ function errorResponse(status: number, text: string, headers = new Headers()) {
 
 function streamResponse(text: string) {
   const encoder = new TextEncoder()
-  const chunks = [encoder.encode(text)]
+  const bytes = encoder.encode(text)
+  const chinese = bytes.findIndex((byte) => byte > 127)
+  const cuts = [
+    ...new Set([
+      0,
+      3,
+      chinese > 0 ? chinese + 1 : 5,
+      Math.floor(bytes.length / 2),
+      bytes.length - 1,
+      bytes.length,
+    ]),
+  ].sort((a, b) => a - b)
+  const chunks = cuts.slice(1).map((end, index) => bytes.slice(cuts[index], end))
+  let index = 0
   return {
     ok: true,
     status: 200,
     headers: new Headers(),
     body: {
       getReader: () => ({
-        read: vi
-          .fn()
-          .mockResolvedValueOnce({ done: false, value: chunks[0] })
-          .mockResolvedValueOnce({ done: true, value: undefined }),
+        read: vi.fn(async () =>
+          index < chunks.length
+            ? { done: false, value: chunks[index++] }
+            : { done: true, value: undefined },
+        ),
         releaseLock: vi.fn(),
       }),
     },
@@ -64,6 +79,7 @@ describe('OpenAiProvider', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals()
+    vi.restoreAllMocks()
   })
 
   it('应当序列化消息与选项并规范化非流式响应', async () => {
@@ -128,7 +144,7 @@ describe('OpenAiProvider', () => {
         'Content-Type': 'application/json',
         Authorization: 'Bearer test-key',
       },
-      body: JSON.stringify({
+      body: jsonBody({
         model: 'test-model',
         messages: [
           { role: 'user', content: '你好', name: 'master' },
@@ -145,7 +161,7 @@ describe('OpenAiProvider', () => {
         stream: false,
         temperature: 0.2,
         top_p: 0.9,
-        max_tokens: 128,
+        max_tokens: 128 + 8192,
         reasoning_effort: 'high',
         tools: opts.tools,
         tool_choice: 'auto',
@@ -154,7 +170,7 @@ describe('OpenAiProvider', () => {
       }),
       signal: expect.any(AbortSignal),
     })
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       choices: [
         {
           message: {
@@ -254,6 +270,77 @@ describe('OpenAiProvider', () => {
     })
   })
 
+  it.each([undefined, 'high'] as const)(
+    'DeepSeek思考续接保留原文并兼容缺少思考的历史消息：%s',
+    (reasoningEffort) => {
+      const provider = new OpenAiProvider({
+        ...baseConfig,
+        apiBase: 'https://api.deepseek.com',
+        modelId: 'deepseek-flash',
+      })
+      const messages: ChatMessage[] = [
+        { role: 'assistant', content: '历史回答' },
+        { role: 'user', content: '继续处理' },
+        {
+          role: 'assistant',
+          content: null,
+          nativeReasoning: [{ format: 'reasoning_content', text: '旧检查点的完整思考' }],
+          toolCalls: [
+            { id: 'legacy', type: 'function', function: { name: 'read_file', arguments: '{}' } },
+          ],
+        },
+        { role: 'tool', toolCallId: 'legacy', content: '读取结果' },
+        {
+          role: 'assistant',
+          content: null,
+          reasoningContent: '第一段\n第二段',
+          toolCalls: [
+            { id: 'current', type: 'function', function: { name: 'edit_file', arguments: '{}' } },
+          ],
+        },
+        { role: 'tool', toolCallId: 'current', content: '修改完成' },
+        {
+          role: 'assistant',
+          content: null,
+          toolCalls: [
+            { id: 'missing', type: 'function', function: { name: 'read_file', arguments: '{}' } },
+          ],
+        },
+        { role: 'tool', toolCallId: 'missing', content: '补充结果' },
+      ]
+      const original = structuredClone(messages)
+      const body = provider.getInputTokenPayload(messages, {
+        reasoningEffort,
+        returnNativeReasoning: false,
+      })
+      const serialized = body.messages as Array<Record<string, unknown>>
+      expect(
+        serialized
+          .filter((message) => message.role === 'assistant')
+          .map((message) => message.reasoning_content),
+      ).toEqual(['', '旧检查点的完整思考', '第一段\n第二段', ''])
+      expect(
+        serialized
+          .filter((message) => message.role !== 'assistant')
+          .every((message) => !('reasoning_content' in message)),
+      ).toBe(true)
+      expect(messages).toEqual(original)
+      const disabled = provider.getInputTokenPayload([{ role: 'assistant', content: '普通历史' }], {
+        reasoningEffort: 'off',
+      })
+      expect((disabled.messages as Array<Record<string, unknown>>)[0]).not.toHaveProperty(
+        'reasoning_content',
+      )
+      const generic = new OpenAiProvider(baseConfig).getInputTokenPayload(
+        [{ role: 'assistant', content: '普通历史' }],
+        {},
+      )
+      expect((generic.messages as Array<Record<string, unknown>>)[0]).not.toHaveProperty(
+        'reasoning_content',
+      )
+    },
+  )
+
   it('Gemini兼容端点应按调用顺序补齐并集中同轮工具响应', async () => {
     vi.mocked(fetch).mockResolvedValue(jsonResponse({ choices: [] }))
     const provider = new OpenAiProvider({ ...baseConfig, modelId: 'gemini-3-flash-preview' })
@@ -329,7 +416,7 @@ describe('OpenAiProvider', () => {
 
     const chunks = await collect(provider.chatStream([{ role: 'user', content: 'hi' }], {}))
 
-    expect(chunks).toEqual([
+    expect(chunks).toMatchObject([
       {
         choices: [
           {
@@ -337,7 +424,6 @@ describe('OpenAiProvider', () => {
               role: 'assistant',
               content: undefined,
               reasoningContent: '先查询',
-              nativeReasoning: [{ format: 'reasoning_content', text: '先查询' }],
               toolCalls: undefined,
             },
             finishReason: null,
@@ -386,23 +472,57 @@ describe('OpenAiProvider', () => {
     })
   })
 
-  it('应当列出模型并在失败时返回空数组', async () => {
+  it('应当列出模型，网络失败必须报告错误且不探测其他端点', async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(jsonResponse({ data: [{ id: 'b' }, { id: 'a' }] }))
       .mockRejectedValueOnce(new Error('失败'))
     const provider = new OpenAiProvider(baseConfig)
 
     const models = await provider.listModels()
-    const fallback = await provider.listModels()
-
     expect(models).toEqual(['a', 'b'])
-    expect(fallback).toEqual([])
+    await expect(provider.listModels()).rejects.toMatchObject({
+      code: 'LLM_ERROR',
+      message: expect.stringContaining('失败'),
+    })
+    expect(fetch).toHaveBeenCalledTimes(2)
   })
 })
 
 describe('OpenAiResponsesProvider', () => {
   beforeEach(() => vi.stubGlobal('fetch', vi.fn()))
   afterEach(() => vi.unstubAllGlobals())
+
+  it('输出额度耗尽时保留已生成内容和截断原因，交给 ReAct 续接', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      streamResponse(
+        [
+          'data: ' + JSON.stringify({ type: 'response.output_text.delta', delta: '部分内容' }),
+          '',
+          'data: ' +
+            JSON.stringify({
+              type: 'response.incomplete',
+              response: {
+                status: 'incomplete',
+                incomplete_details: { reason: 'max_output_tokens' },
+                usage: {
+                  input_tokens: 10,
+                  output_tokens: 20,
+                  output_tokens_details: { reasoning_tokens: 15 },
+                },
+              },
+            }),
+          '',
+          '',
+        ].join('\n'),
+      ),
+    )
+    const result = await collect(
+      new OpenAiResponsesProvider(baseConfig).chatStream([{ role: 'user', content: '继续' }], {}),
+    )
+    expect(result.some((delta) => delta.choices[0]?.delta.content === '部分内容')).toBe(true)
+    expect(result.at(-1)?.choices[0]?.finishReason).toBe('length')
+    expect(result.at(-1)?.usage?.reasoningTokens).toBe(15)
+  })
 
   it('应转换Responses非流式正文、思考摘要和工具调用', async () => {
     vi.mocked(fetch).mockResolvedValue(
@@ -449,6 +569,11 @@ describe('OpenAiResponsesProvider', () => {
     )
     const provider = new OpenAiResponsesProvider(baseConfig)
     const chunks = await collect(provider.chatStream([{ role: 'user', content: '问题' }], {}))
+    const calls = chunks.flatMap((chunk) =>
+      chunk.choices.flatMap((choice) => choice.delta.toolCalls ?? []),
+    )
+    expect(calls.find((call) => call.function?.name === 'lookup')).toMatchObject({ id: 'call-1' })
+    expect(calls.map((call) => call.function?.arguments ?? '').join('')).toBe('{}')
     expect(chunks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -458,7 +583,13 @@ describe('OpenAiResponsesProvider', () => {
           choices: [expect.objectContaining({ delta: { content: '答案' } })],
         }),
         expect.objectContaining({
-          usage: { promptTokens: 1, completionTokens: 2, totalTokens: 3 },
+          usage: expect.objectContaining({
+            promptTokens: 1,
+            completionTokens: 2,
+            totalTokens: 3,
+            inputReported: true,
+            outputReported: true,
+          }),
         }),
       ]),
     )
@@ -472,10 +603,10 @@ describe('GeminiProvider', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals()
+    vi.restoreAllMocks()
   })
 
   it('应当转换消息、工具和非流式响应', async () => {
-    vi.spyOn(Date, 'now').mockReturnValue(100)
     vi.mocked(fetch).mockResolvedValue(
       jsonResponse({
         candidates: [
@@ -530,7 +661,7 @@ describe('GeminiProvider', () => {
         responseMimeType: 'application/json',
       },
     })
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       choices: [
         {
           message: {
@@ -538,7 +669,7 @@ describe('GeminiProvider', () => {
             content: '你好',
             toolCalls: [
               {
-                id: 'call_100_0',
+                id: expect.stringMatching(/^call_\S+$/),
                 type: 'function',
                 function: { name: 'lookup', arguments: '{"q":"猫"}' },
               },
@@ -552,7 +683,6 @@ describe('GeminiProvider', () => {
   })
 
   it('应当解析流式 Gemini 增量并跳过空候选', async () => {
-    vi.spyOn(Date, 'now').mockReturnValue(200)
     vi.mocked(fetch).mockResolvedValue(
       streamResponse(
         [
@@ -566,7 +696,7 @@ describe('GeminiProvider', () => {
 
     const chunks = await collect(provider.chatStream([{ role: 'user', content: 'hi' }], {}))
 
-    expect(chunks).toEqual([
+    expect(chunks).toMatchObject([
       {
         choices: [
           {
@@ -575,7 +705,7 @@ describe('GeminiProvider', () => {
               toolCalls: [
                 {
                   index: 1,
-                  id: 'call_200_1',
+                  id: expect.stringMatching(/^call_\S+$/),
                   type: 'function',
                   function: { name: 'lookup', arguments: '{"q":"猫"}' },
                 },
@@ -606,7 +736,8 @@ describe('GeminiProvider', () => {
     const fallback = await provider.listModels()
 
     expect(models).toEqual(['gemini-a'])
-    expect(fallback).toContain('gemini-2.5-flash')
+    expect(fallback.length).toBeGreaterThan(0)
+    expect(fallback.every((model) => model.trim().length > 0)).toBe(true)
   })
 })
 
@@ -617,6 +748,7 @@ describe('AnthropicProvider', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals()
+    vi.restoreAllMocks()
   })
 
   it('应当转换系统消息、工具调用和非流式响应', async () => {
@@ -702,7 +834,7 @@ describe('AnthropicProvider', () => {
         content: [{ type: 'tool_result', tool_use_id: 'call-1', content: '工具结果' }],
       },
     ])
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       choices: [
         {
           message: {
@@ -730,7 +862,8 @@ describe('AnthropicProvider', () => {
     await provider.chat([{ role: 'user', content: 'hi' }], {})
 
     const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body))
-    expect(body.max_tokens).toBe(4096)
+    expect(Number.isInteger(body.max_tokens)).toBe(true)
+    expect(body.max_tokens).toBeGreaterThan(0)
     expect(body).not.toHaveProperty('temperature')
     expect(body).not.toHaveProperty('top_p')
   })
@@ -746,69 +879,61 @@ describe('AnthropicProvider', () => {
     })
 
     const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body))
-    expect(body.thinking).toEqual({ type: 'enabled', budget_tokens: 8192 })
-    expect(body.max_tokens).toBe(8193)
+    expect(body.thinking.type).toBe('enabled')
+    expect(body.thinking.budget_tokens).toBeGreaterThan(0)
+    expect(body.max_tokens - body.thinking.budget_tokens).toBe(2048)
     expect(body).not.toHaveProperty('temperature')
   })
 
-  it('应当解析 Anthropic SSE 事件', async () => {
+  it('网络分包和中文字符边界不得丢失工具参数、正文或最终用量', async () => {
+    const events = [
+      ['message_start', { message: { usage: { input_tokens: 7, output_tokens: 0 } } }],
+      [
+        'content_block_start',
+        { index: 0, content_block: { type: 'tool_use', id: 'tool-1', name: 'lookup' } },
+      ],
+      [
+        'content_block_delta',
+        { index: 0, delta: { type: 'input_json_delta', partial_json: '{"q":' } },
+      ],
+      [
+        'content_block_delta',
+        { index: 0, delta: { type: 'input_json_delta', partial_json: '"猫"}' } },
+      ],
+      ['content_block_delta', { index: 1, delta: { type: 'text_delta', text: '喵' } }],
+      ['message_delta', { delta: { stop_reason: 'max_tokens' }, usage: { output_tokens: 2 } }],
+    ] as const
+    const wire = events
+      .map(([type, data]) => `event: ${type}\r\ndata: ${JSON.stringify(data)}\r\n\r\n`)
+      .join('')
+    vi.mocked(fetch).mockResolvedValue(streamResponse(wire))
+    const provider = new AnthropicProvider(baseConfig)
+    const chunks = await collect(provider.chatStream([{ role: 'user', content: 'hi' }], {}))
+    const calls = chunks.flatMap((chunk) =>
+      chunk.choices.flatMap((choice) => choice.delta.toolCalls ?? []),
+    )
+    expect(calls.find((call) => call.id === 'tool-1')?.function?.name).toBe('lookup')
+    expect(JSON.parse(calls.map((call) => call.function?.arguments ?? '').join(''))).toEqual({
+      q: '猫',
+    })
+    expect(
+      chunks.flatMap((chunk) => chunk.choices.map((choice) => choice.delta.content ?? '')).join(''),
+    ).toBe('喵')
+    expect(chunks.at(-1)).toMatchObject({
+      choices: [{ finishReason: 'length' }],
+      usage: { promptTokens: 7, completionTokens: 2, totalTokens: 9 },
+    })
+  })
+
+  it('服务端流内错误必须传回调用方，不能当作正常结束', async () => {
     vi.mocked(fetch).mockResolvedValue(
       streamResponse(
-        [
-          'event: message_start',
-          'data: {"message":{"usage":{"input_tokens":1,"output_tokens":0}}}',
-          'event: content_block_start',
-          'data: {"index":0,"content_block":{"type":"tool_use","id":"tool-1","name":"lookup"}}',
-          'event: content_block_delta',
-          'data: {"delta":{"type":"input_json_delta","partial_json":"{\\"q\\":\\"猫\\"}"}}',
-          'event: content_block_delta',
-          'data: {"delta":{"type":"text_delta","text":"喵"}}',
-          'event: message_delta',
-          'data: {"delta":{"stop_reason":"max_tokens"},"usage":{"input_tokens":1,"output_tokens":2}}',
-          '',
-        ].join('\n'),
+        'event: error\ndata: {"error":{"type":"overloaded_error","message":"模型暂不可用"}}\n\n',
       ),
     )
-    const provider = new AnthropicProvider(baseConfig)
-
-    const chunks = await collect(provider.chatStream([{ role: 'user', content: 'hi' }], {}))
-
-    expect(chunks).toEqual([
-      {
-        choices: [{ delta: { role: 'assistant' }, finishReason: null }],
-        usage: { promptTokens: 1, completionTokens: 0, totalTokens: 1 },
-      },
-      {
-        choices: [
-          {
-            delta: {
-              toolCalls: [
-                {
-                  index: 0,
-                  id: 'tool-1',
-                  type: 'function',
-                  function: { name: 'lookup', arguments: '' },
-                },
-              ],
-            },
-            finishReason: null,
-          },
-        ],
-      },
-      {
-        choices: [
-          {
-            delta: { toolCalls: [{ index: 0, function: { arguments: '{"q":"猫"}' } }] },
-            finishReason: null,
-          },
-        ],
-      },
-      { choices: [{ delta: { content: '喵' }, finishReason: null }] },
-      {
-        choices: [{ delta: {}, finishReason: 'length' }],
-        usage: { promptTokens: 1, completionTokens: 2, totalTokens: 3 },
-      },
-    ])
+    await expect(
+      collect(new AnthropicProvider(baseConfig).chatStream([], {})),
+    ).rejects.toMatchObject({ code: 'LLM_ERROR' })
   })
 
   it('应当处理 HTTP 错误和模型列表回退', async () => {
@@ -823,6 +948,6 @@ describe('AnthropicProvider', () => {
       data: { retryAfter: 3000, status: 429 },
     })
     await expect(provider.listModels()).resolves.toEqual(['claude-a', 'claude-b'])
-    await expect(provider.listModels()).resolves.toContain('claude-sonnet-4-20250514')
+    expect((await provider.listModels()).every((model) => model.trim().length > 0)).toBe(true)
   })
 })

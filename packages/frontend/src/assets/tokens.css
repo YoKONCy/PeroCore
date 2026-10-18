@@ -132,11 +132,11 @@
   --color-shadow: rgba(0, 0, 0, 0.1);
 
   /* ── 滚动条 ── */
-  --color-scrollbar-track: #f1f5f9;
-  --color-scrollbar-track-border: #cbd5e1;
-  --color-scrollbar-thumb: #38bdf8;
-  --color-scrollbar-thumb-shadow: #0284c7;
-  --color-scrollbar-thumb-light: #7dd3fc;
+  --color-scrollbar-track: var(--ui-scrollbar-track);
+  --color-scrollbar-track-border: transparent;
+  --color-scrollbar-thumb: var(--ui-scrollbar-thumb);
+  --color-scrollbar-thumb-shadow: var(--ui-scrollbar-shade);
+  --color-scrollbar-thumb-light: var(--ui-scrollbar-highlight);
 
   /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
   /* 非色彩令牌 */
@@ -184,9 +184,6 @@
 
   --color-border: #334155;
   --color-border-hover: #475569;
-
-  --color-scrollbar-track: #1e293b;
-  --color-scrollbar-track-border: #334155;
 
   --color-primary: #1e3a5f;
 }

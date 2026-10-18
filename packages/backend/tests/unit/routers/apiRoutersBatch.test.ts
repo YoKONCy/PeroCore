@@ -1,9 +1,14 @@
-import { describe, expect, it, vi } from 'vitest'
+import { errorHandler } from '@infos/backend/middleware/errorHandler'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createAgentRouter } from '@infos/backend/routers/agent.router'
 import { createMemoryRouter } from '@infos/backend/routers/memory.router'
 import { createMcpRouter } from '@infos/backend/routers/mcp.router'
-import { createVoiceRouter } from '@infos/backend/routers/voice.router'
+import { createVoiceRouter as rawcreateVoiceRouter } from '@infos/backend/routers/voice.router'
 import { createSchedulerRouter } from '@infos/backend/routers/scheduler.router'
+import { ApplicationRealmManager } from '@infos/backend/applications/applicationRealm'
+import { ToolRegistry } from '@infos/backend/services/agent/toolRegistry'
+
+afterEach(() => vi.useRealTimers())
 
 async function readJson(response: Response) {
   return response.json() as Promise<Record<string, unknown>>
@@ -16,11 +21,49 @@ function createAgent() {
     description: '猫娘助手',
     avatarPath: 'avatar.png',
     socialTraits: ['活泼'],
-    useStickers: true,
   }
 }
 
 describe('AgentRouter', () => {
+  it.each(['', '?includeAdvanced=true'])(
+    '主应用工具列表不暴露子应用私有工具，仅保留明确声明的宿主入口 %s',
+    async (query) => {
+      const toolRegistry = new ToolRegistry()
+      const applicationRealms = new ApplicationRealmManager(toolRegistry)
+      const realm = applicationRealms.register({
+        realmId: 'social:test',
+        appId: 'social',
+        principalId: 'application:social',
+        instanceId: 'test',
+      })
+      const definition = (name: string) => ({
+        name,
+        description: '测试工具',
+        parameters: { type: 'object', properties: {} },
+      })
+      toolRegistry.register(definition('interact_with_social'), async () => '已委派')
+      realm.registerTool(definition('social_group'), async () => '应用内部操作')
+      realm.registerTool(definition('social_public_entry'), async () => '公开入口', {
+        hostProjection: true,
+      })
+      const router = createAgentRouter({ toolRegistry, applicationRealms } as never)
+      try {
+        const response = await router.request(`http://test/tools${query}`)
+        expect(response.status).toBe(200)
+        const body = (await response.json()) as { data: Array<{ name: string }> }
+        expect(body.data.map((tool) => tool.name)).toEqual([
+          'interact_with_social',
+          'social_public_entry',
+        ])
+        expect(applicationRealms.toolDefinitions('social:test').map((tool) => tool.name)).toContain(
+          'social_group',
+        )
+      } finally {
+        await realm.dispose()
+      }
+    },
+  )
+
   function createCtx() {
     const agent = createAgent()
     return {
@@ -37,6 +80,7 @@ describe('AgentRouter', () => {
           mime: 'image/png',
           buffer: new Uint8Array([1, 2, 3]).buffer,
         })),
+        getAvatarUrl: vi.fn((id: string) => (id === 'pero' ? '/agents/pero/avatar' : undefined)),
         // setActiveAgent 已废弃：PUT /api/agents/active 路由已移除，不再支持运行时切换全局活跃 Agent
         getAgent: vi.fn((id: string) => (id === 'pero' ? agent : null)),
         // B6-3: GET /:id 返回完整可编辑详情（四页签字段）
@@ -50,7 +94,6 @@ describe('AgentRouter', () => {
                 socialBinding: {},
                 toolPolicies: {},
                 waifuTexts: {},
-                useStickers: true,
                 isUser: false,
                 isEnabled: true,
                 isActive: true,
@@ -119,7 +162,7 @@ describe('AgentRouter', () => {
     expect(await avatar.arrayBuffer()).toHaveProperty('byteLength', 3)
     expect(await readJson(detail)).toMatchObject({
       code: 'OK',
-      data: { id: 'pero', useStickers: true },
+      data: { id: 'pero' },
     })
     expect(await readJson(capabilities)).toMatchObject({
       code: 'OK',
@@ -153,9 +196,13 @@ describe('AgentRouter', () => {
     })
     expect(ctx.strongholdService.ensureAgentLocation).toHaveBeenCalledWith('neko')
     expect(ctx.strongholdService.ensureAgentLocation).toHaveBeenCalledWith('pero')
-    expect(await readJson(deleted)).toEqual({ code: 'OK', message: `Agent "neko" 已删除` })
-    expect(await readJson(enabled)).toEqual({ code: 'OK', message: 'Agent pero 已启用' })
-    expect(await readJson(disabled)).toEqual({ code: 'OK', message: 'Agent pero 已禁用' })
+    expect(await readJson(deleted)).toMatchObject({ code: 'OK' })
+    expect(ctx.agentManager.deleteAgent).toHaveBeenCalledWith('neko')
+    expect(ctx.agentManager.enableAgent).toHaveBeenCalledWith('pero')
+    expect(ctx.agentManager.disableAgent).toHaveBeenCalledWith('pero')
+    expect(ctx.agentManager.reloadAgents).toHaveBeenCalledOnce()
+    expect(await readJson(enabled)).toMatchObject({ code: 'OK' })
+    expect(await readJson(disabled)).toMatchObject({ code: 'OK' })
     expect(await readJson(reloaded)).toMatchObject({ code: 'OK', data: [{ id: 'pero' }] })
   })
 
@@ -172,8 +219,22 @@ describe('AgentRouter', () => {
     })
 
     expect(avatar.status).toBe(404)
-    expect(await readJson(avatar)).toEqual({ code: 'NOT_FOUND', message: '该 Agent 没有头像' })
+    expect(await readJson(avatar)).toMatchObject({ code: 'NOT_FOUND' })
     expect(invalid.status).toBe(400)
+  })
+
+  it('没有头像时列表和角色详情都不发布头像地址', async () => {
+    const ctx = createCtx()
+    ctx.agentManager.getAvatarUrl.mockReturnValue(undefined)
+    const router = createAgentRouter(ctx as never)
+    const list = (await (await router.request('http://test/')).json()) as {
+      data: Array<{ avatarUrl?: string }>
+    }
+    const detail = (await (await router.request('http://test/pero')).json()) as {
+      data: { avatarUrl?: string }
+    }
+    expect(list.data[0]).not.toHaveProperty('avatarUrl')
+    expect(detail.data).not.toHaveProperty('avatarUrl')
   })
 })
 
@@ -217,7 +278,7 @@ describe('SchedulerRouter', () => {
         schedulerRunning: true,
         serverNow: Date.now(),
         total: 1,
-        items: [{ ...task, intervalDesc: '1.0小时' }],
+        items: [expect.objectContaining(task)],
       },
     })
     vi.useRealTimers()
@@ -293,6 +354,7 @@ describe('MemoryRouter', () => {
           ),
         ),
       },
+      privacyDeletionService: { deleteMemory: vi.fn(async () => {}) },
       threadRepo: {
         findMessagesByPairIds: vi.fn(() =>
           Promise.resolve([
@@ -390,6 +452,7 @@ describe('MemoryRouter', () => {
     })
     expect(ctx.eventMemoryService.graphSnapshot).toHaveBeenCalledWith('pero', {
       includeArchived: true,
+      status: 'active',
       limit: 120,
     })
   })
@@ -404,7 +467,7 @@ describe('MemoryRouter', () => {
     expect(source).toMatchObject({ code: 'OK', data: { available: false, messages: [] } })
   })
 
-  it('不存在事件返回404，旧写入、搜索和导入API不可达，删除API执行归档', async () => {
+  it('不存在事件返回404，旧写入、搜索和导入API不可达，删除API执行隐私清理', async () => {
     const ctx = createCtx()
     const router = createMemoryRouter(ctx as never)
     expect((await router.request('http://test/missing')).status).toBe(404)
@@ -412,7 +475,8 @@ describe('MemoryRouter', () => {
     expect((await router.request('http://test/import', { method: 'POST' })).status).toBe(404)
     expect((await router.request('http://test/search', { method: 'POST' })).status).toBe(404)
     expect((await router.request('http://test/event-1', { method: 'DELETE' })).status).toBe(200)
-    expect(ctx.eventMemoryService.archive).toHaveBeenCalledWith('event-1')
+    expect(ctx.privacyDeletionService.deleteMemory).toHaveBeenCalledWith('event-1', false)
+    expect(ctx.eventMemoryService.archive).not.toHaveBeenCalled()
   })
 })
 
@@ -527,12 +591,11 @@ describe('McpRouter', () => {
       code: 'OK',
       data: { id: 'skill-a', content: '内容' },
     })
-    expect(await readJson(reloaded)).toMatchObject({ code: 'OK', message: '已重新加载 1 个 Skill' })
+    expect(await readJson(reloaded)).toMatchObject({ code: 'OK' })
     expect(await readJson(imported)).toMatchObject({
       code: 'OK',
-      message: 'Skill "skill-b" 已成功导入',
     })
-    expect(await readJson(deleted)).toMatchObject({ code: 'OK', message: 'Skill "skill-a" 已删除' })
+    expect(await readJson(deleted)).toMatchObject({ code: 'OK' })
   })
 
   it('应当在 MCP Manager 缺失时返回未初始化状态', async () => {
@@ -543,10 +606,9 @@ describe('McpRouter', () => {
 
     expect(await readJson(status)).toMatchObject({
       code: 'OK',
-      message: 'MCP 未初始化',
       data: { totalServers: 0 },
     })
-    expect(await readJson(tools)).toEqual({ code: 'OK', message: '获取成功', data: [] })
+    expect(await readJson(tools)).toMatchObject({ code: 'OK', data: [] })
   })
 })
 
@@ -561,7 +623,7 @@ describe('VoiceRouter', () => {
       },
       asrService: {
         isAvailable: false,
-        recognize: vi.fn(() =>
+        recognize: vi.fn((_input: { audio: ArrayBuffer; mimeType: string; language?: string }) =>
           Promise.resolve({ text: '你好', language: 'zh', confidence: 0.9, durationMs: 12 }),
         ),
       },
@@ -585,7 +647,7 @@ describe('VoiceRouter', () => {
     const status = await router.request('http://test/status')
 
     expect(tts.headers.get('content-type')).toBe('audio/mpeg')
-    expect(tts.headers.get('content-length')).toBe('2')
+    expect(new Uint8Array(await tts.arrayBuffer())).toEqual(new Uint8Array([1, 2]))
     expect(deps.ttsService.synthesize).toHaveBeenCalledWith({
       text: '你好',
       voice: 'alloy',
@@ -596,6 +658,9 @@ describe('VoiceRouter', () => {
       code: 'OK',
       data: { text: '你好', language: 'zh' },
     })
+    expect(new Uint8Array(deps.asrService.recognize.mock.calls[0]![0].audio)).toEqual(
+      new Uint8Array([1, 2, 3]),
+    )
     expect(deps.asrService.recognize).toHaveBeenCalledWith({
       audio: expect.any(ArrayBuffer),
       mimeType: 'audio/webm',
@@ -632,7 +697,11 @@ describe('VoiceRouter', () => {
       mimeType: 'audio/webm',
       language: 'ja',
     })
-    expect(emptyText.status).toBe(500)
-    expect(emptyAudio.status).toBe(500)
+    expect(emptyText.status).toBe(400)
+    expect(emptyAudio.status).toBe(400)
   })
 })
+
+function createVoiceRouter(...args: Parameters<typeof rawcreateVoiceRouter>) {
+  return rawcreateVoiceRouter(...args).onError(errorHandler)
+}

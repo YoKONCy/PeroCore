@@ -55,6 +55,7 @@ function createBridgedTool(manager: McpClientManager, tool: McpToolInfo): Bridge
   return {
     definition: {
       name: qualifiedName,
+      packageId: `mcp:${tool.serverName}`,
       description: `[MCP: ${tool.serverName}] ${tool.description ?? tool.name}`,
       parameters: tool.inputSchema,
     },

@@ -29,24 +29,64 @@
  */
 
 import type { BuiltinTool } from '../index'
+import { randomUUID } from 'node:crypto'
 import type { ToolExecutionResult } from '../../services/agent/reactLoop'
-import { executeNit } from '../../nit'
+import type { ToolExecutor } from '../../services/agent/reactLoop'
+import { NitLexer, NitParser, NitRuntime } from '../../nit'
+import type { NitResult } from '../../nit/types'
+import { isAdvancedTool } from '../advancedTools'
 import { createLogger } from '../../lib/logger'
 import { getWorkspaceService } from '../workspaceServiceHolder'
 import { getCapabilityGate } from '../capabilityGateHolder'
+import { desktopPauseFromObservation } from '../../services/execution/desktopPause'
+import {
+  createCancellationScope,
+  waitWithSignal,
+  waitForCancellationCleanup,
+} from '../../services/execution/cancellation'
 
 const logger = createLogger('RunScript')
 
-/** NIT 脚本执行超时 (30s) */
+/** 脚本自身执行预算不含工具等待；总耗时另受父任务和本次截止时间限制。 */
 const SCRIPT_TIMEOUT_MS = 30_000
+const MAX_SCRIPT_WALL_TIME_MS = 10 * 60_000
+const CLEANUP_TIMEOUT_MS = 5_000
 
 export const runScriptTool: BuiltinTool = {
   name: 'run_script',
 
   async execute(args, ctx) {
+    ctx.signal?.throwIfAborted()
     const code = args.code as string
     if (!code?.trim()) {
       throw new Error('脚本内容为空')
+    }
+    const program = new NitParser(new NitLexer(code).tokenize()).parse()
+    const access = ctx.advancedToolAccess
+    if (access && !ctx.realmId) {
+      const unavailable = new Set<string>()
+      // 在任何副作用之前检查整棵语法树；字符串、注释中的工具名不参与匹配。
+      const visit = (value: unknown): void => {
+        if (!value || typeof value !== 'object') return
+        if (Array.isArray(value)) {
+          value.forEach(visit)
+          return
+        }
+        const node = value as Record<string, unknown>
+        if (
+          node.type === 'FunctionCall' &&
+          typeof node.name === 'string' &&
+          isAdvancedTool(node.name) &&
+          (!access.expanded || !access.names.has(node.name))
+        )
+          unavailable.add(node.name)
+        Object.values(node).forEach(visit)
+      }
+      visit(program)
+      if (unavailable.size)
+        throw new Error(
+          `脚本尚未执行任何工具；以下高级工具未开放：${[...unavailable].join('、')}。请先在脚本外直接调用 expand_advanced_tools，取得当前定义后再编排。若仍不在菜单中，请检查会话开关与权限，不要重复已完成的操作。`,
+        )
     }
 
     // AIOS(Phase4): 按 channel 分级计算 cwd（同 terminalExecutor 逻辑）
@@ -87,34 +127,130 @@ export const runScriptTool: BuiltinTool = {
       `执行 NIT 脚本 (${code.length} 字符, source=${ctx.source}, channel=${ctx.channel}, cwd=${cwd ?? '未注入'})`,
     )
 
+    const requestedTimeout =
+      args.timeout_ms === undefined ? MAX_SCRIPT_WALL_TIME_MS : Number(args.timeout_ms)
+    if (
+      !Number.isInteger(requestedTimeout) ||
+      requestedTimeout < 1 ||
+      requestedTimeout > MAX_SCRIPT_WALL_TIME_MS
+    )
+      throw new Error('NIT 总耗时上限必须在 1 至 600000 毫秒之间')
+    const scope = createCancellationScope({
+      signal: ctx.signal,
+      deadline: ctx.deadline,
+      timeoutMs: requestedTimeout,
+      timeoutMessage: 'NIT 已达到本次或父任务的截止时间，正在取消内部工具',
+    })
+    const { controller, signal } = scope
+    const expiresAt = Math.min(
+      Date.now() + requestedTimeout,
+      ctx.deadline ? Date.parse(ctx.deadline) : Infinity,
+    )
+    const deadline = Number.isFinite(expiresAt) ? new Date(expiresAt).toISOString() : ctx.deadline
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let remainingMs = SCRIPT_TIMEOUT_MS
+    let resumedAt = Date.now()
+    let waitingTools = 0
+    const resumeTimer = () => {
+      if (signal.aborted) return
+      if (remainingMs <= 0) {
+        controller.abort(new Error('NIT 脚本自身执行预算已耗尽'))
+        return
+      }
+      resumedAt = Date.now()
+      timer = setTimeout(
+        () => {
+          controller.abort(
+            new Error(`NIT 脚本执行超时 (${SCRIPT_TIMEOUT_MS}ms，不含工具与审批等待)`),
+          )
+        },
+        Math.max(1, remainingMs),
+      )
+    }
+    const pendingTools = new Set<Promise<ToolExecutionResult>>()
+    const toolSignals = new Set<AbortSignal>([signal])
+    let scriptPromise: Promise<NitResult> | undefined
+    let scriptSettled = false
+    const reviewMessages = [...(ctx.reviewMessages ?? [])]
+    resumeTimer()
     try {
-      // 超时保护
-      const scriptPromise = executeNit(code, async (name, toolArgs) => {
-        // 通过闭包获取外部的 ToolExecutor — 此处需要在注册时注入
-        // run_script 工具的 toolExecutor 在 container.ts 中通过闭包绑定
-        // AIOS: _toolExecutor 闭包负责 CapabilityGate 鉴权（在 container.ts 中接线）
-        // 第六阶段 #7: 透传 ctx.threadId + ctx.channel，让被调用的工具也走
-        // CapabilityGate 鉴权与 ResourceScope 路径校验
-        const result = await runScriptTool._toolExecutor!(name, toolArgs, ctx.source, {
-          threadId: ctx.threadId,
-          channel: ctx.channel,
-          agentId: ctx.agentId,
-          sessionId: ctx.sessionId,
-        })
-        if (result.isError) {
-          throw new Error(result.output)
-        }
-        return result.output
-      })
+      signal.throwIfAborted()
+      scriptPromise = new NitRuntime(
+        async (name, toolArgs, branchSignal = signal) => {
+          if (name === 'expand_advanced_tools')
+            throw new Error('请在脚本外直接调用 expand_advanced_tools，取得工具定义后再编排脚本')
+          if (name === 'read_image') throw new Error('请直接调用 read_image，以便将原图交给模型')
+          if (name === 'run_script')
+            throw new Error('NIT 不允许嵌套运行 run_script，请在同一脚本中编排')
+          // 通过闭包获取外部的 ToolExecutor — 此处需要在注册时注入
+          // run_script 工具的 toolExecutor 在 container.ts 中通过闭包绑定
+          // AIOS: _toolExecutor 闭包负责 CapabilityGate 鉴权（在 container.ts 中接线）
+          // 第六阶段 #7: 透传 ctx.threadId + ctx.channel，让被调用的工具也走
+          // CapabilityGate 鉴权与 ResourceScope 路径校验
+          branchSignal.throwIfAborted()
+          toolSignals.add(branchSignal)
+          if (waitingTools++ === 0) {
+            if (timer) clearTimeout(timer)
+            remainingMs -= Date.now() - resumedAt
+          }
+          let result: ToolExecutionResult
+          try {
+            if (!runScriptTool._toolExecutor) throw new Error('NIT 工具执行器尚未绑定')
+            const operation = runScriptTool._toolExecutor(name, toolArgs, ctx.source, {
+              threadId: ctx.threadId,
+              channel: ctx.channel,
+              agentId: ctx.agentId,
+              sessionId: ctx.sessionId,
+              signal: branchSignal,
+              taskId: ctx.taskId,
+              realmId: ctx.realmId,
+              executionId: ctx.executionId,
+              processId: ctx.processId,
+              deadline,
+              pairId: ctx.pairId,
+              toolCallId: `nit-${randomUUID()}`,
+              executionMode: ctx.executionMode,
+              interactionMode: ctx.interactionMode,
+              disabledTools: ctx.disabledTools,
+              advancedToolAccess: ctx.advancedToolAccess,
+              capabilityScope: ctx.capabilityScope,
+              reviewMessages,
+              onExecutionStatus: ctx.onExecutionStatus,
+              onToolObserved: ctx.onToolObserved,
+            })
+            pendingTools.add(operation)
+            const remove = () => {
+              pendingTools.delete(operation)
+            }
+            void operation.then(remove, remove)
+            result = await waitWithSignal(operation, branchSignal)
+            branchSignal.throwIfAborted()
+            reviewMessages.push({
+              role: 'tool',
+              name,
+              content: result.modelOutput ?? result.output,
+            })
+          } finally {
+            if (--waitingTools === 0) resumeTimer()
+          }
+          if (result.isError) {
+            if (desktopPauseFromObservation({ name, output: result.output, isError: true }))
+              controller.abort(
+                new Error('桌面已被接管，脚本和内部工具已暂停，请确认当前状态后继续'),
+              )
+            throw new Error(result.output)
+          }
+          return result.output
+        },
+        { signal },
+      ).execute(program)
+      const markSettled = () => {
+        scriptSettled = true
+      }
+      void scriptPromise.then(markSettled, markSettled)
 
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(
-          () => reject(new Error(`NIT 脚本执行超时 (${SCRIPT_TIMEOUT_MS}ms)`)),
-          SCRIPT_TIMEOUT_MS,
-        )
-      })
-
-      const result = await Promise.race([scriptPromise, timeoutPromise])
+      const result = await waitWithSignal(scriptPromise, signal)
+      signal.throwIfAborted()
 
       const outputStr =
         typeof result.value === 'string' ? result.value : JSON.stringify(result.value ?? null)
@@ -127,13 +263,38 @@ export const runScriptTool: BuiltinTool = {
         toolCallCount: result.toolCalls.length,
         toolCalls: result.toolCalls.map((tc) => ({
           name: tc.name,
-          result: String(tc.result).slice(0, 500),
+          result: '内部调用已执行；详细结果由 value、工具来源与文件状态提供。',
         })),
       })
     } catch (err) {
+      controller.abort(err)
       const errMsg = err instanceof Error ? err.message : String(err)
       logger.error(`NIT 脚本执行失败: ${errMsg}`)
       throw new Error(`NIT 脚本执行失败: ${errMsg}`)
+    } finally {
+      if (timer) clearTimeout(timer)
+      // 成功、失败和取消都不能留下本脚本创建的后台工具进程。
+      controller.abort(new Error('NIT 已结束，正在回收内部工具'))
+      scope.dispose()
+      try {
+        await Promise.all([...toolSignals].map(waitForCancellationCleanup))
+      } finally {
+        if (pendingTools.size || (scriptPromise && !scriptSettled)) {
+          let cleanupTimer: ReturnType<typeof setTimeout> | undefined
+          try {
+            await Promise.race([
+              Promise.allSettled([...pendingTools, ...(scriptPromise ? [scriptPromise] : [])]),
+              new Promise<void>((resolve) => {
+                cleanupTimer = setTimeout(resolve, CLEANUP_TIMEOUT_MS)
+              }),
+            ])
+            if (pendingTools.size || (scriptPromise && !scriptSettled))
+              logger.warn(`NIT 已发出取消，仍有 ${pendingTools.size} 个工具或脚本清理尚未确认结束`)
+          } finally {
+            if (cleanupTimer) clearTimeout(cleanupTimer)
+          }
+        }
+      }
     }
   },
 
@@ -149,12 +310,7 @@ export const runScriptTool: BuiltinTool = {
         name: string,
         args: Record<string, unknown>,
         source: string,
-        runtimeContext?: {
-          threadId?: string
-          channel?: string
-          agentId?: string
-          sessionId?: string
-        },
+        runtimeContext?: Parameters<ToolExecutor['execute']>[3],
       ) => Promise<ToolExecutionResult>)
     | null,
 
@@ -168,12 +324,7 @@ export const runScriptTool: BuiltinTool = {
       name: string,
       args: Record<string, unknown>,
       source: string,
-      runtimeContext?: {
-        threadId?: string
-        channel?: string
-        agentId?: string
-        sessionId?: string
-      },
+      runtimeContext?: Parameters<ToolExecutor['execute']>[3],
     ) => Promise<ToolExecutionResult>,
   ) {
     runScriptTool._toolExecutor = executor

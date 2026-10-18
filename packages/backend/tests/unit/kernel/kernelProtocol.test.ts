@@ -33,6 +33,16 @@ describe('Kernel协议协商与Schema验证', () => {
       futureField: '允许',
     }
     expect(() => validateKernelEnvelope(envelope)).not.toThrow()
+    // 上限以 UTF-8 编码后的 JSON 大小计费，字符串引号占两个字节。
+    expect(() =>
+      validateKernelEnvelope({ ...envelope, payload: 'a'.repeat(8 * 1024 * 1024 - 2) }),
+    ).not.toThrow()
+    expect(() =>
+      validateKernelEnvelope({ ...envelope, payload: 'a'.repeat(8 * 1024 * 1024 - 1) }),
+    ).toThrow('PROTOCOL_PAYLOAD_TOO_LARGE')
+    expect(() =>
+      validateKernelEnvelope({ ...envelope, payload: '字'.repeat(3 * 1024 * 1024) }),
+    ).toThrow('PROTOCOL_PAYLOAD_TOO_LARGE')
     expect(() => validateKernelEnvelope({ ...envelope, messageId: '' })).toThrow(
       'PROTOCOL_FIELD_INVALID',
     )

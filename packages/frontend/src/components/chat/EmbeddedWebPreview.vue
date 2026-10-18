@@ -10,6 +10,7 @@ import { buildEmbeddedWebDocument } from '../../lib/embeddedWebPreview'
 
 const props = withDefaults(defineProps<{ source: string; active?: boolean }>(), { active: true })
 const channel = `preview-${crypto.randomUUID()}`
+const iframe = ref<HTMLIFrameElement>()
 const height = ref(180)
 const loaded = ref(false)
 const srcdoc = computed(() =>
@@ -17,19 +18,18 @@ const srcdoc = computed(() =>
 )
 
 function handleMessage(event: MessageEvent): void {
+  if (!props.active || event.source !== iframe.value?.contentWindow) return
   const data = event.data as { type?: string; channel?: string; height?: number }
   if (data?.type !== 'infos-embedded-resize' || data.channel !== channel) return
-  height.value = Math.min(720, Math.max(96, Math.ceil(Number(data.height) || 180)))
+  if (typeof data.height !== 'number' || !Number.isFinite(data.height)) return
+  height.value = Math.min(720, Math.max(96, Math.ceil(data.height)))
 }
 
 onMounted(() => window.addEventListener('message', handleMessage))
 onBeforeUnmount(() => window.removeEventListener('message', handleMessage))
-watch(
-  () => props.active,
-  (active) => {
-    if (active) loaded.value = false
-  },
-)
+watch([() => props.active, () => props.source], ([active]) => {
+  if (active) loaded.value = false
+})
 </script>
 
 <template>
@@ -40,6 +40,7 @@ watch(
     </div>
     <iframe
       v-if="active"
+      ref="iframe"
       :srcdoc="srcdoc"
       :style="{ height: `${height}px` }"
       sandbox="allow-scripts"

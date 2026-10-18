@@ -84,6 +84,16 @@ export class RetargetingManager {
     this.customAliases.set(standardName, aliases)
   }
 
+  /** 解除旧模型的骨骼引用，避免切换后仍保留整棵对象树。 */
+  dispose(): void {
+    this.boneMap.clear()
+    this.initialTransforms.clear()
+    this.customAliases.clear()
+    this.allBoneNames = []
+    this.modelRoot = null
+    this.config = null
+  }
+
   /**
    * 初始化骨骼映射
    *

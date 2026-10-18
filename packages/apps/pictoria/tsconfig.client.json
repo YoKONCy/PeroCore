@@ -1,0 +1,6 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": { "lib": ["ES2022", "DOM", "DOM.Iterable"], "types": ["vite/client"], "noEmit": true },
+  "include": ["client/src/**/*.ts", "client/src/**/*.vue", "client/vite.config.ts"],
+  "exclude": ["node_modules", "client/dist"]
+}

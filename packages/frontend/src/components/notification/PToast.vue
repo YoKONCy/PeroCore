@@ -10,9 +10,32 @@
  *
  * @module packages/frontend/src/components/notification/PToast
  */
-import { useNotificationStore } from '../../stores'
+import { computed, watch } from 'vue'
+import { useNotificationStore } from '../../stores/useNotificationStore'
+import type { DesktopToast } from '@infos/shared'
+
+const props = defineProps<{
+  items?: DesktopToast[]
+  onDismiss?: (id: number) => void
+  native?: boolean
+}>()
 
 const store = useNotificationStore()
+const toasts = computed(() => props.items ?? store.toasts)
+const dismiss = (id: number) => (props.onDismiss ? props.onDismiss(id) : store.removeToast(id))
+const offsets = new Map<number, number>()
+function progressStyle(toast: DesktopToast) {
+  if (!offsets.has(toast.id)) offsets.set(toast.id, Math.max(0, Date.now() - toast.createdAt))
+  return { animationDuration: `${toast.duration}ms`, animationDelay: `-${offsets.get(toast.id)}ms` }
+}
+watch(
+  toasts,
+  (items) => {
+    const ids = new Set(items.map((item) => item.id))
+    for (const id of offsets.keys()) if (!ids.has(id)) offsets.delete(id)
+  },
+  { deep: true },
+)
 
 /** 类型图标映射 */
 const iconMap: Record<string, string> = {
@@ -33,20 +56,20 @@ const defaultTitleMap: Record<string, string> = {
 
 <template>
   <Teleport to="body">
-    <div class="toast-container">
+    <div
+      class="toast-container"
+      :style="!native && store.nativeOverlayActive ? { visibility: 'hidden' } : undefined"
+      aria-live="polite"
+    >
       <TransitionGroup name="toast-list">
-        <div
-          v-for="toast in store.toasts"
-          :key="toast.id"
-          :class="['toast-item', `toast-${toast.type}`]"
-        >
+        <div v-for="toast in toasts" :key="toast.id" :class="['toast-item', `toast-${toast.type}`]">
           <!-- 标题栏 -->
           <div class="toast-header">
             <span class="toast-icon">{{ iconMap[toast.type] ?? '💠' }}</span>
             <span class="toast-title">
               {{ toast.title || defaultTitleMap[toast.type] || '提示' }}
             </span>
-            <button class="toast-close" @click="store.removeToast(toast.id)">✕</button>
+            <button class="toast-close" aria-label="关闭通知" @click="dismiss(toast.id)">✕</button>
           </div>
 
           <!-- 消息体 -->
@@ -54,7 +77,7 @@ const defaultTitleMap: Record<string, string> = {
 
           <!-- 倒计时进度条 -->
           <div v-if="toast.duration > 0" class="toast-progress">
-            <div class="toast-progress-bar" :style="{ animationDuration: toast.duration + 'ms' }" />
+            <div class="toast-progress-bar" :style="progressStyle(toast)" />
           </div>
         </div>
       </TransitionGroup>
@@ -79,6 +102,7 @@ const defaultTitleMap: Record<string, string> = {
 
 /* ═══ 单条通知 (硬核心像素风) ═══ */
 .toast-item {
+  flex-shrink: 0;
   pointer-events: auto;
   width: min(420px, calc(100vw - 48px));
   /* 强制使用实心暗色背景，避免浅色透明变量导致白色字体不可见 */
@@ -172,15 +196,6 @@ const defaultTitleMap: Record<string, string> = {
   word-break: break-word;
   max-height: 120px;
   overflow-y: auto;
-  scrollbar-width: thin;
-}
-
-.toast-body::-webkit-scrollbar {
-  width: 3px;
-}
-
-.toast-body::-webkit-scrollbar-thumb {
-  background: #444;
 }
 
 /* ── 进度条 ── */

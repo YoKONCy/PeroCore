@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 26 26" fill="none" shape-rendering="crispEdges" role="img" aria-label="wardrobe">
+  <path d="M7 3h3v2h4V3h3v2h2v2h3v6h-5v9H7v-9H2V7h3V5h2z" fill-rule="evenodd" transform="translate(1 2)" fill="var(--pixel-shadow, #44466e)"/>
+  <path d="M7 3h3v2h4V3h3v2h2v2h3v6h-5v9H7v-9H2V7h3V5h2z" fill-rule="evenodd" transform="translate(1 0)" fill="var(--pixel-highlight, #e3dbff)"/>
+  <path d="M7 3h3v2h4V3h3v2h2v2h3v6h-5v9H7v-9H2V7h3V5h2z" fill-rule="evenodd" transform="translate(1 1)" fill="var(--pixel-face, currentColor)"/>
+</svg>

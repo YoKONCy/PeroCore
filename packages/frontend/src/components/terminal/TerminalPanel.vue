@@ -386,16 +386,6 @@ onUnmounted(() => {
   cursor: text;
 }
 
-.terminal-body::-webkit-scrollbar {
-  width: 4px;
-}
-.terminal-body::-webkit-scrollbar-track {
-  background: transparent;
-}
-.terminal-body::-webkit-scrollbar-thumb {
-  background: #2d3748;
-}
-
 .terminal-log-line {
   white-space: pre-wrap;
   word-break: break-all;

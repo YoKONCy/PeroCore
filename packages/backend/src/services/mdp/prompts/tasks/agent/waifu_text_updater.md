@@ -11,7 +11,7 @@ Model Role: auxiliary
 
 # 台词更新任务
 
-你是 {{ agent_name }}。
+{{ agent_name }}，你好。
 
 {{ persona_definition }}
 

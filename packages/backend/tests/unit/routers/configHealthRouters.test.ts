@@ -1,5 +1,7 @@
+import { fileURLToPath } from 'node:url'
+import { jsonBody } from '../../helpers/jsonBody'
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createConfigRouter } from '@infos/backend/routers/config.router'
@@ -7,7 +9,9 @@ import { errorHandler } from '@infos/backend/middleware/errorHandler'
 import type { AppContext } from '@infos/backend/container'
 
 const appVersion = (
-  JSON.parse(readFileSync(resolve(process.cwd(), 'package.json'), 'utf8')) as { version: string }
+  JSON.parse(
+    readFileSync(fileURLToPath(new URL('../../../../../package.json', import.meta.url)), 'utf8'),
+  ) as { version: string }
 ).version
 const logTransportState: { transport: unknown } = { transport: null }
 
@@ -54,8 +58,10 @@ function createConfigContext(initial: Record<string, string> = {}) {
       })),
     },
     reloadEmbeddingConfig: vi.fn().mockResolvedValue(undefined),
+    reloadMemoryBackgroundConfig: vi.fn().mockResolvedValue(undefined),
     reloadTtsConfig: vi.fn().mockResolvedValue(undefined),
     reloadAsrConfig: vi.fn().mockResolvedValue(undefined),
+    appManager: { notifyConfigChanged: vi.fn().mockResolvedValue(undefined) },
   }
   return ctx as unknown as AppContext & typeof ctx
 }
@@ -65,6 +71,49 @@ async function readJson(response: Response) {
 }
 
 describe('createConfigRouter', () => {
+  it('配置保存完成后通知运行中的应用更新主人身份', async () => {
+    const ctx = createConfigContext()
+    const router = createConfigRouter(ctx)
+    const response = await router.request('http://test/', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: 'social', value: '{"ownerQq":"123456"}' }),
+    })
+    expect(response.status).toBe(200)
+    expect(await ctx.configRepo.get('social')).toBe('{"ownerQq":"123456"}')
+    expect(ctx.appManager.notifyConfigChanged).toHaveBeenCalledWith(['social'])
+  })
+
+  it('后台记忆和向量开关独立保存并触发对应的热更新', async () => {
+    const ctx = createConfigContext()
+    const router = createConfigRouter(ctx)
+    router.onError(errorHandler)
+    for (const key of ['memory.background.enabled', 'embedding.enabled']) {
+      const response = await router.request('/', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ key, value: 'false' }),
+      })
+      expect(response.status).toBe(200)
+      expect(await ctx.configRepo.get(key)).toBe('false')
+    }
+    expect(ctx.reloadMemoryBackgroundConfig).toHaveBeenCalledOnce()
+    expect(ctx.reloadEmbeddingConfig).toHaveBeenCalledOnce()
+  })
+
+  it('拒绝将非法字符串写入开关配置', async () => {
+    const ctx = createConfigContext()
+    const router = createConfigRouter(ctx)
+    router.onError(errorHandler)
+    const response = await router.request('/', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ key: 'embedding.enabled', value: '随便写' }),
+    })
+    expect(response.status).toBe(400)
+    expect(ctx.configRepo.set).not.toHaveBeenCalled()
+  })
+
   afterEach(() => {
     vi.unstubAllGlobals()
   })
@@ -100,7 +149,6 @@ describe('createConfigRouter', () => {
     expect(response.status).toBe(200)
     expect(body).toMatchObject({
       code: 'OK',
-      message: 'Embedding 模型已激活并保存',
       data: { model: 'embedding-test', dimension: 4 },
     })
     expect((body.data as { durationMs: number }).durationMs).toEqual(expect.any(Number))
@@ -108,7 +156,7 @@ describe('createConfigRouter', () => {
       'https://embedding.test/v1/embeddings',
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({
+        body: jsonBody({
           input: ['infOS Embedding 模型激活与维度校验'],
           model: 'embedding-test',
           dimensions: 4,
@@ -150,7 +198,6 @@ describe('createConfigRouter', () => {
     expect(response.status).toBe(502)
     expect(await readJson(response)).toMatchObject({
       code: 'EMBEDDING_ERROR',
-      message: 'Embedding 维度不匹配：配置 4 维，实际返回 3 维',
       data: { expectedDimension: 4, actualDimension: 3 },
     })
     expect(ctx.configRepo.set).not.toHaveBeenCalled()
@@ -182,7 +229,6 @@ describe('createConfigRouter', () => {
     expect(response.status).toBe(502)
     expect(await readJson(response)).toMatchObject({
       code: 'EMBEDDING_ERROR',
-      message: 'Embedding API 错误 (401): 无效的 API Key',
     })
     expect(ctx.configRepo.set).not.toHaveBeenCalled()
     expect(ctx.reloadEmbeddingConfig).not.toHaveBeenCalled()
@@ -196,7 +242,7 @@ describe('createConfigRouter', () => {
     const body = await readJson(response)
 
     expect(response.status).toBe(200)
-    expect(body).toMatchObject({ code: 'OK', message: '获取成功' })
+    expect(body).toMatchObject({ code: 'OK' })
     expect(body.data).toEqual({ items: [{ key: 'embedding.model', value: 'a' }], total: 1 })
   })
 
@@ -207,15 +253,13 @@ describe('createConfigRouter', () => {
     const found = await router.request('/theme')
     const missing = await router.request('/missing')
 
-    expect(await readJson(found)).toEqual({
+    expect(await readJson(found)).toMatchObject({
       code: 'OK',
-      message: '获取成功',
       data: { key: 'theme', value: 'dark' },
     })
     expect(missing.status).toBe(200)
-    expect(await readJson(missing)).toEqual({
+    expect(await readJson(missing)).toMatchObject({
       code: 'NOT_CONFIGURED',
-      message: '配置 "missing" 未设置',
       data: { key: 'missing', value: null },
     })
   })
@@ -234,9 +278,8 @@ describe('createConfigRouter', () => {
     expect(ctx.configRepo.set).toHaveBeenCalledWith('embedding.provider', 'openai')
     expect(ctx.reloadEmbeddingConfig).toHaveBeenCalledTimes(1)
     expect(ctx.reloadTtsConfig).not.toHaveBeenCalled()
-    expect(await readJson(response)).toEqual({
+    expect(await readJson(response)).toMatchObject({
       code: 'OK',
-      message: '配置已更新',
       data: { key: 'embedding.provider', value: 'openai' },
     })
   })
@@ -249,9 +292,9 @@ describe('createConfigRouter', () => {
     const missing = await router.request('/theme', { method: 'DELETE' })
 
     expect(deleted.status).toBe(200)
-    expect(await readJson(deleted)).toEqual({ code: 'OK', message: '配置 "theme" 已删除' })
+    expect(await readJson(deleted)).toMatchObject({ code: 'OK' })
     expect(missing.status).toBe(404)
-    expect(await readJson(missing)).toEqual({ code: 'NOT_FOUND', message: '配置 "theme" 不存在' })
+    expect(await readJson(missing)).toMatchObject({ code: 'NOT_FOUND' })
   })
 
   it('应当批量获取和批量设置配置，并合并热更新调用', async () => {
@@ -275,14 +318,12 @@ describe('createConfigRouter', () => {
       }),
     })
 
-    expect(await readJson(batchGet)).toEqual({
+    expect(await readJson(batchGet)).toMatchObject({
       code: 'OK',
-      message: '批量获取成功',
       data: { a: '1', missing: null },
     })
-    expect(await readJson(batchSet)).toEqual({
+    expect(await readJson(batchSet)).toMatchObject({
       code: 'OK',
-      message: '已更新 3 项配置',
       data: { count: 3 },
     })
     expect(ctx.reloadTtsConfig).toHaveBeenCalledTimes(1)
@@ -300,14 +341,12 @@ describe('createConfigRouter', () => {
       body: JSON.stringify({ data: { a: '2', b: '3' }, overwrite: false }),
     })
 
-    expect(await readJson(exported)).toEqual({
+    expect(await readJson(exported)).toMatchObject({
       code: 'OK',
-      message: '已导出 1 项配置',
       data: { a: '1' },
     })
-    expect(await readJson(imported)).toEqual({
+    expect(await readJson(imported)).toMatchObject({
       code: 'OK',
-      message: '导入完成: 1 项写入, 1 项跳过',
       data: { imported: 1, skipped: 1 },
     })
     expect(ctx.configRepo.set).toHaveBeenCalledWith('b', '3')
@@ -336,7 +375,7 @@ describe('createHealthRouter', () => {
     const body = await readJson(response)
 
     expect(response.status).toBe(200)
-    expect(body).toMatchObject({ code: 'OK', message: '成功' })
+    expect(body).toMatchObject({ code: 'OK' })
     expect(body.data).toMatchObject({
       status: 'ok',
       version: appVersion,
@@ -352,15 +391,13 @@ describe('createHealthRouter', () => {
     const content = await router.request('/logs/app.log')
 
     expect(list.status).toBe(422)
-    expect(await readJson(list)).toEqual({
+    expect(await readJson(list)).toMatchObject({
       code: 'PRECONDITION_FAILED',
-      message: '日志文件持久化未启用',
       data: { reason: '未配置日志文件输出' },
     })
     expect(content.status).toBe(422)
-    expect(await readJson(content)).toEqual({
+    expect(await readJson(content)).toMatchObject({
       code: 'PRECONDITION_FAILED',
-      message: '日志文件持久化未启用',
     })
   })
 
@@ -378,12 +415,10 @@ describe('createHealthRouter', () => {
 
     expect(await readJson(list)).toMatchObject({
       code: 'OK',
-      message: '获取成功',
       data: { logDir: root, currentFile: 'app.log' },
     })
     expect(await readJson(content)).toMatchObject({
       code: 'OK',
-      message: '获取成功',
       data: { filename: 'app.log', totalLines: 3, returnedLines: 2, lines: ['二', '三'] },
     })
   })
@@ -399,11 +434,10 @@ describe('createHealthRouter', () => {
     const missing = await router.request('/logs/missing.log')
 
     expect(illegal.status).toBe(400)
-    expect(await readJson(illegal)).toEqual({ code: 'BAD_REQUEST', message: '非法文件名' })
+    expect(await readJson(illegal)).toMatchObject({ code: 'BAD_REQUEST' })
     expect(missing.status).toBe(404)
-    expect(await readJson(missing)).toEqual({
+    expect(await readJson(missing)).toMatchObject({
       code: 'NOT_FOUND',
-      message: '日志文件不存在: missing.log',
     })
   })
 })

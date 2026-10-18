@@ -94,7 +94,6 @@ function selectMode(nextMode: 'files' | 'search'): void {
 }
 
 function openContextMenu(event: MouseEvent, node: WorkspaceTreeNode): void {
-  if (node.type !== 'file') return
   contextMenu.value = {
     x: Math.min(event.clientX, window.innerWidth - 170),
     y: Math.min(event.clientY, window.innerHeight - 100),
@@ -122,13 +121,22 @@ async function confirmRename(value?: string): Promise<void> {
     return
   }
   if (newName === '.' || newName === '..' || /[\\/:*?"<>|]/.test(newName)) {
-    notification.toast('文件名不能包含 \\ / : * ? " < > | 等非法字符', { type: 'error' })
+    notification.toast('名称不能包含 \\ / : * ? " < > | 等非法字符', { type: 'error' })
     return
   }
   fileOperationPending.value = true
   try {
     const res = await workspaceApi.renameFile(props, { path: node.path, newName })
     if (!res.data) throw new Error('重命名接口未返回文件信息')
+    const { oldPath, newPath } = res.data
+    const remap = (nodes: WorkspaceTreeNode[]) => {
+      for (const item of nodes) {
+        if (item.path === oldPath || item.path.startsWith(`${oldPath}/`))
+          item.path = newPath + item.path.slice(oldPath.length)
+        if (item.children) remap(item.children)
+      }
+    }
+    remap(roots.value)
     emit('renamed', res.data)
     await loadRoot()
     pendingRename.value = null
@@ -275,9 +283,9 @@ watch(() => [props.agentId, props.threadId], loadRoot, { immediate: true })
     <PDialog
       :model-value="Boolean(pendingRename)"
       mode="prompt"
-      title="重命名文件"
-      message="输入新的文件名。文件会保留在当前目录中。"
-      placeholder="文件名"
+      :title="pendingRename?.type === 'directory' ? '重命名文件夹' : '重命名文件'"
+      message="输入新名称，位置保持在当前目录中。"
+      placeholder="新名称"
       :default-value="pendingRename?.name || ''"
       confirm-text="重命名"
       @update:model-value="closeRenameDialog"
@@ -286,15 +294,19 @@ watch(() => [props.agentId, props.threadId], loadRoot, { immediate: true })
 
     <PDialog
       :model-value="Boolean(pendingDelete)"
-      title="永久删除文件"
-      :message="`确定永久删除“${pendingDelete?.name || ''}”吗？此操作无法撤销。`"
+      :title="pendingDelete?.type === 'directory' ? '永久删除文件夹' : '永久删除文件'"
+      :message="
+        pendingDelete?.type === 'directory'
+          ? `确定永久删除文件夹“${pendingDelete.name}”及其中的全部文件吗？此操作无法撤销。`
+          : `确定永久删除“${pendingDelete?.name || ''}”吗？此操作无法撤销。`
+      "
       confirm-text="永久删除"
       confirm-variant="danger"
       @update:model-value="closeDeleteDialog"
       @confirm="confirmDelete"
     />
 
-    <!-- 文件右键菜单：Teleport 避免被资源栏滚动容器裁切。 -->
+    <!-- 文件与文件夹右键菜单：Teleport 避免被资源栏滚动容器裁切。 -->
     <Teleport to="body">
       <div
         v-if="contextMenu"
@@ -443,6 +455,9 @@ watch(() => [props.agentId, props.threadId], loadRoot, { immediate: true })
   border-radius: var(--ui-radius-sm);
   background: var(--ui-bg-surface);
   color: var(--ui-text-tertiary);
+  transition:
+    border-color var(--ui-duration-fast) var(--ui-ease-standard),
+    box-shadow var(--ui-duration-fast) var(--ui-ease-standard);
 }
 .workspace-tree__search:focus-within {
   border-color: var(--ui-accent-sky);
@@ -456,12 +471,14 @@ watch(() => [props.agentId, props.threadId], loadRoot, { immediate: true })
   background: transparent;
   color: var(--ui-text-primary);
   font-size: 11px;
+  caret-color: var(--ui-accent-sky);
 }
 .workspace-tree__search input::placeholder {
   color: var(--ui-text-tertiary);
 }
 .workspace-tree__search button {
   display: grid;
+  flex-shrink: 0;
   width: 28px;
   height: 28px;
   place-items: center;
@@ -478,6 +495,7 @@ watch(() => [props.agentId, props.threadId], loadRoot, { immediate: true })
   min-height: 0;
   flex: 1;
   overflow: auto;
+  overscroll-behavior: contain;
   padding: 4px 0 8px;
 }
 .workspace-tree__section-title {
@@ -549,13 +567,6 @@ watch(() => [props.agentId, props.threadId], loadRoot, { immediate: true })
   font-size: 10px;
   text-align: center;
 }
-.workspace-tree__scrollbar::-webkit-scrollbar {
-  width: 5px;
-}
-.workspace-tree__scrollbar::-webkit-scrollbar-thumb {
-  border-radius: 3px;
-  background: var(--ui-scrollbar-thumb);
-}
 
 :deep(.tree-row) {
   display: flex;
@@ -585,9 +596,27 @@ watch(() => [props.agentId, props.threadId], loadRoot, { immediate: true })
   color: var(--ui-accent-sky);
 }
 :deep(.tree-name) {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.workspace-tree__icon-button,
+.workspace-tree__modes button,
+.workspace-tree__search button,
+.search-result,
+.workspace-context-menu button,
+:deep(.tree-row) {
+  --ui-focus-color: var(--ui-accent-sky);
+  transition:
+    background-color var(--ui-duration-fast) var(--ui-ease-standard),
+    border-color var(--ui-duration-fast) var(--ui-ease-standard),
+    color var(--ui-duration-fast) var(--ui-ease-standard);
+}
+
+.workspace-tree__modes button:focus-visible {
+  outline-offset: -2px;
 }
 
 .workspace-context-menu {

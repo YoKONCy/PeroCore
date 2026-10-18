@@ -25,11 +25,80 @@ function message(revision = 1): ConversationMessageProjection {
         isError: false,
       },
     ],
+    contentBlocks: [],
     attachments: [],
   }
 }
 
 describe('Conversation Surface Projector', () => {
+  it('暂停记录可从持久消息重建，不显示失败或输出完成', () => {
+    const value = message()
+    value.status = 'active'
+    value.executionPause = {
+      kind: 'desktop',
+      code: 'DESKTOP_WAITING',
+      message: '用户已接管',
+      toolName: 'open_application',
+      callId: 'open',
+      pausedAt: '2026-10-18T08:00:00Z',
+    }
+    const surface = new ConversationSurfaceProjector().projectMessage(value, 'pero')
+    expect(surface.state).toBe('committed')
+    expect(surface.nodes.some((node) => node.kind === 'error')).toBe(false)
+    expect(surface.nodes.at(-1)?.props).toMatchObject({
+      state: 'paused',
+      message: '桌面操作已暂停：用户已接管',
+    })
+  })
+  it('历史重试记录保留在断开处，后续重试不覆盖前一次计数', () => {
+    const value = message()
+    const retry = {
+      retryId: 'retry-1',
+      state: 'recovered' as const,
+      attempt: 1,
+      maxRetries: 5,
+      delayMs: 1000,
+      reason: '连接异常',
+      startedAt: 1,
+      updatedAt: 2,
+      partialResponse: true,
+    }
+    value.contentBlocks = [
+      {
+        blockId: 'before',
+        sequence: 1,
+        kind: 'narration',
+        turn: 1,
+        phase: 'progress',
+        content: '中断前',
+      },
+      { blockId: 'retry-1', sequence: 2, kind: 'model_retry', turn: 1, retry },
+      {
+        blockId: 'retry-2',
+        sequence: 3,
+        kind: 'model_retry',
+        turn: 1,
+        retry: { ...retry, retryId: 'retry-2', attempt: 2 },
+      },
+      {
+        blockId: 'after',
+        sequence: 4,
+        kind: 'narration',
+        turn: 1,
+        phase: 'final',
+        content: '后续回复',
+      },
+    ]
+    const surface = new ConversationSurfaceProjector().projectMessage(value, 'pero')
+    expect(surface.nodes.map((node) => node.kind)).toEqual([
+      'markdown',
+      'model-retry',
+      'model-retry',
+      'markdown',
+    ])
+    expect(surface.nodes[1]?.props).toMatchObject(retry)
+    expect(surface.nodes[2]?.props).toMatchObject({ retryId: 'retry-2', attempt: 2 })
+  })
   it('相同领域消息必须生成完全相同的 committed Surface', () => {
     const projector = new ConversationSurfaceProjector()
     const first = projector.projectMessage(message(), 'pero')
@@ -53,10 +122,18 @@ describe('Conversation Surface Projector', () => {
 
   it('工具调用和结果必须保留独立节点身份', () => {
     const surface = new ConversationSurfaceProjector().projectMessage(message(), 'pero')
-    expect(surface.nodes.map((node) => [node.kind, node.nodeId])).toEqual([
-      ['markdown', 'conversation-message:42:markdown'],
-      ['tool-call', 'conversation-message:42:tool:call-1'],
-      ['tool-result', 'conversation-message:42:tool-result:call-1'],
-    ])
+    expect(surface.nodes.map((node) => node.kind)).toEqual(['markdown', 'tool-call', 'tool-result'])
+    expect(new Set(surface.nodes.map((node) => node.nodeId)).size).toBe(surface.nodes.length)
+    expect(surface.nodes.find((node) => node.kind === 'tool-call')?.props).toMatchObject({
+      name: 'read_file',
+      args: '{"path":"a.ts"}',
+    })
+    expect(surface.nodes.find((node) => node.kind === 'tool-result')?.props).toMatchObject({
+      result: '内容',
+      isError: false,
+    })
+    for (const node of surface.nodes.filter((node) => node.kind.startsWith('tool-'))) {
+      expect(node.props).toMatchObject({ callId: 'call-1' })
+    }
   })
 })

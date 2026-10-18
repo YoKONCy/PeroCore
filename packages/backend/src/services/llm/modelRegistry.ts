@@ -149,6 +149,7 @@ export class ModelRegistry {
       topP: row.topP ?? undefined,
       maxTokens: row.maxTokens ?? undefined,
       contextWindowTokens: row.contextWindowTokens ?? undefined,
+      maxReActTurns: row.maxReActTurns ?? undefined,
       reasoningEffort: (row.reasoningEffort as ModelConfig['reasoningEffort']) ?? undefined,
       returnNativeReasoning: row.returnNativeReasoning ?? false,
       wireApi: (row.wireApi as ModelConfig['wireApi']) ?? 'chat_completions',

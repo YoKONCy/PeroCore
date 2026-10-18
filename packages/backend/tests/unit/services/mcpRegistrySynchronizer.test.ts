@@ -25,6 +25,22 @@ describe('McpRegistrySynchronizer', () => {
     synchronizer.sync()
     expect(registry.has('mcp_demo_server_read_file')).toBe(true)
 
+    const updated = {
+      ...manager.getAllTools()[0]!,
+      description: '更新后的说明',
+      inputSchema: { type: 'object', properties: { path: { type: 'string' } } },
+    }
+    vi.mocked(manager.getAllTools).mockReturnValue([updated])
+    synchronizer.sync()
+    expect(registry.getDefinitions()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'mcp_demo_server_read_file',
+          description: expect.stringContaining(updated.description),
+          parameters: updated.inputSchema,
+        }),
+      ]),
+    )
     vi.mocked(manager.getAllTools).mockReturnValue([])
     const result = synchronizer.sync()
     expect(result.removed).toEqual(['mcp_demo_server_read_file'])

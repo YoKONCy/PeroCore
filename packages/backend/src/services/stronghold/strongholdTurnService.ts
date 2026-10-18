@@ -18,6 +18,7 @@ import type { StrongholdService } from './strongholdService'
 import type { ReActYield } from '../agent/reactLoop'
 import type { AgentManager } from '../agent/agentManager'
 import { createLogger } from '../../lib/logger'
+import { canonicalValue } from '../llm/promptCache'
 
 const logger = createLogger('StrongholdTurnService')
 
@@ -56,6 +57,7 @@ export class StrongholdTurnService {
     const history = await this.groupChat.getVisibleHistoryPairs(
       agentId,
       memoryConfig.channels.group.contextPairs,
+      true,
     )
     const ownerName = this.config ? ((await this.config.get('owner.name')) ?? '用户') : '用户'
     const perspective = this.groupChat.convertPerspective(history, agentId, ownerName)
@@ -77,7 +79,7 @@ export class StrongholdTurnService {
       retrievalQuery,
       appendThreadMessages: false,
     })
-    const roomAgents = await this.stronghold.getRoomAgents(roomId)
+    const roomAgents = (await this.stronghold.getRoomAgents(roomId)).sort()
     const memberProfiles = this.formatRoomMemberProfiles(agentId, roomAgents)
     const summonedAgentIds: string[] = []
     let summonReason: string | undefined
@@ -100,13 +102,19 @@ export class StrongholdTurnService {
       channel: 'group',
       threadId,
       messages: [
-        ...compiled.messages,
+        ...compiled.messages.filter((message) => message.role === 'system'),
+        ...perspective.map((message, index) => ({
+          ...message,
+          role: message.role === 'system' ? ('user' as const) : message.role,
+          cacheControl: { kind: 'history' as const, reply: history[index]?.content },
+        })),
+        ...compiled.messages.filter((message) => message.role !== 'system'),
         {
-          role: 'system',
+          role: 'user',
           content:
             `当前据点房间：${room.name}\n` +
             `房间说明：${room.description ?? '无'}\n` +
-            `房间环境：${JSON.stringify(environment)}\n` +
+            `房间环境：${JSON.stringify(canonicalValue(environment))}\n` +
             `当前在场角色ID列表：${roomAgents.join('、') || '无'}\n` +
             `${memberProfiles}\n` +
             `公开档案只描述其他角色允许共享的稳定信息，不代表对方当前想法，也不要逐项复述。\n` +
@@ -119,9 +127,9 @@ export class StrongholdTurnService {
                 : '\n你是本轮后续发言角色，本次禁止继续传唤其他角色。'
               : ''),
         },
-        ...perspective,
         {
-          role: 'system',
+          role: 'user',
+          cacheControl: { kind: 'current', currentKeys: [] },
           content:
             `当前据点回合由系统调度你发言。历史中的每条消息均以真实发言者名称作为XML标签：` +
             `<${ownerName}>表示主人，<${agentId}>表示你自己，其他角色名标签表示对应角色。` +
@@ -157,6 +165,9 @@ export class StrongholdTurnService {
       if (event.event === 'narration_delta') {
         reply += event.data.delta
         await push('stronghold_agent_delta', { delta: event.data.delta })
+      } else if (event.event === 'model_retry' && event.data.discardedTextCharacters) {
+        reply = reply.slice(0, -event.data.discardedTextCharacters)
+        await push('stronghold_agent_delta', { replace: reply })
       } else if (event.event === 'tool_call_ready') {
         await push('stronghold_agent_tool_started', { toolName: event.data.name })
       } else if (event.event === 'tool_result') {
