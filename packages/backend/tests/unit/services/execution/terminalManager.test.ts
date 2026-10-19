@@ -172,9 +172,12 @@ console.log('子进程:'+child.pid);setInterval(()=>{},1000);`
       channel: 'desktop',
       workspaceRoot: root,
     })
-    const command =
-      process.platform === 'win32' ? 'Write-Output "准备完成"' : 'printf "准备完成\\n"'
-    const terminal = await manager.create({ executionSessionId: session.id, command })
+    // 生命周期使用持续运行的真实进程，单独的系统 Shell 用例负责冷启动验证。
+    const terminal = await manager.create({
+      executionSessionId: session.id,
+      command: process.execPath,
+      argv: ['-e', "console.log('准备完成'); setInterval(() => {}, 1000)"],
+    })
     expect(terminal.backend).toBe('pipe')
     expect(terminal.status).toBe('running')
     const output = await manager.wait(terminal.id, session.id, {
@@ -182,7 +185,13 @@ console.log('子进程:'+child.pid);setInterval(()=>{},1000);`
       timeoutMs: 10_000,
     })
     expect(output.output).toContain('准备完成')
-    expect(['running', 'exited']).toContain(output.status)
+    expect(output).toMatchObject({
+      status: 'running',
+      waitReason: 'pattern',
+      timedOut: false,
+      matched: true,
+      completed: false,
+    })
     expect(manager.list(session.id)).toHaveLength(1)
     manager.resize(terminal.id, session.id, 100, 40)
     expect(manager.get(terminal.id, session.id)).toMatchObject({ cols: 100, rows: 40 })
@@ -190,7 +199,7 @@ console.log('子进程:'+child.pid);setInterval(()=>{},1000);`
     expect(manager.list(session.id)).toHaveLength(0)
   }, 30_000)
 
-  it('短命令等待退出并返回完整结果', async () => {
+  it('系统 Shell 短命令等待退出并返回完整结果', async () => {
     const sessions = new ExecutionSessionManager()
     const manager = createManager(sessions, new HeadlessPolicyRunner())
     const session = await sessions.getOrCreate({
@@ -203,12 +212,12 @@ console.log('子进程:'+child.pid);setInterval(()=>{},1000);`
       process.platform === 'win32'
         ? 'Write-Output "第一行"; Start-Sleep -Milliseconds 100; Write-Output "第二行"'
         : 'printf "第一行\\n"; sleep 0.1; printf "第二行\\n"'
-    const result = await manager.run({ executionSessionId: session.id, command, timeoutMs: 15_000 })
+    const result = await manager.run({ executionSessionId: session.id, command, timeoutMs: 30_000 })
     expect(result.output).toContain('第一行')
     expect(result.output).toContain('第二行')
     expect(result.terminal.status).toBe('exited')
     expect(manager.list(session.id)).toHaveLength(0)
-  }, 30_000)
+  }, 45_000)
 
   it('输出缓冲裁剪后仍使用绝对游标继续读取', async () => {
     const sessions = new ExecutionSessionManager()
