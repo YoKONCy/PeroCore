@@ -150,11 +150,14 @@ async function validateArcaBoot(appOutDir, resourcesDir, executableName) {
   try {
     child = spawn(executable, [host, '--loopback-port=0'], {
       cwd: appOutDir,
-      env: electronProcessEnvironment({
-        ...process.env,
-        INFOS_ARCA_DATA_PATH: smokeRoot,
-        INFOS_ARCA_DISCOVERY_PATH: discoveryPath,
-      }, 'node'),
+      env: electronProcessEnvironment(
+        {
+          ...process.env,
+          INFOS_ARCA_DATA_PATH: smokeRoot,
+          INFOS_ARCA_DISCOVERY_PATH: discoveryPath,
+        },
+        'node',
+      ),
       windowsHide: true,
       stdio: ['ignore', logFd, logFd],
     })
@@ -263,14 +266,17 @@ async function validateDaemonBoot(appOutDir, resourcesDir, executableName) {
   try {
     child = spawn(executable, [bundle], {
       cwd: appOutDir,
-      env: electronProcessEnvironment({
-        ...process.env,
-        PERO_PORT: '19120',
-        PERO_DATA_DIR: dataDir,
-        PERO_APP_ROOT: path.join(resourcesDir, 'backend'),
-        INFOS_RESOURCES_ROOT: resourcesDir,
-        PERO_WORKSHOP_DIRS: '[]',
-      }, 'node'),
+      env: electronProcessEnvironment(
+        {
+          ...process.env,
+          PERO_PORT: '19120',
+          PERO_DATA_DIR: dataDir,
+          PERO_APP_ROOT: path.join(resourcesDir, 'backend'),
+          INFOS_RESOURCES_ROOT: resourcesDir,
+          PERO_WORKSHOP_DIRS: '[]',
+        },
+        'node',
+      ),
       windowsHide: true,
       // 与正式 PortableDaemon 完全一致：使用已经打开的同步文件描述符。
       stdio: ['ignore', logFd, logFd],
@@ -319,8 +325,22 @@ exports.default = async function afterPack(context) {
   // 标准版、Steam 版和便携版都必须具备完整且可实际启动的自包含运行时。
   await validatePortableRuntime(resourcesDir)
   await validateOfficialApplications(resourcesDir)
-  await validateArcaBoot(appOutDir, resourcesDir, context.packager.appInfo.productFilename)
-  await validateDaemonBoot(appOutDir, resourcesDir, context.packager.appInfo.productFilename)
+  if (process.platform === 'win32') {
+    const productFilename = context.packager.appInfo.productFilename
+    const executable = path.join(
+      appOutDir,
+      productFilename.endsWith('.exe') ? productFilename : `${productFilename}.exe`,
+    )
+    // afterPack 后还会写入图标与版本资源，烟测只运行副本，避免 Windows 映像锁阻断 rcedit。
+    const smokeExecutable = path.join(appOutDir, '.infos-runtime-smoke.exe')
+    await fs.copyFile(executable, smokeExecutable)
+    try {
+      await validateArcaBoot(appOutDir, resourcesDir, path.basename(smokeExecutable))
+      await validateDaemonBoot(appOutDir, resourcesDir, path.basename(smokeExecutable))
+    } finally {
+      await removePath(smokeExecutable)
+    }
+  }
 
   if (process.env.INFOS_EDITION === 'steam') return
 

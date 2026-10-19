@@ -65,33 +65,13 @@ jobs:
         run: node scripts/build-daemon-bundle.mjs && node scripts/collect-daemon-deps.mjs && pnpm rebuild:daemon-deps
 
       - name: 构建 Electron 标准版 (NSIS)
-        shell: powershell
-        run: |
-          $attempt = 1
-          while ($attempt -le 2) {
-            pnpm exec electron-builder --config electron-builder.standard.yml --publish never
-            if ($LASTEXITCODE -eq 0) {
-              exit 0
-            }
-            if ($attempt -eq 2) {
-              exit $LASTEXITCODE
-            }
-            Write-Warning "Electron Builder 首次失败，清理产物后重试（用于恢复 rcedit 文件锁定）"
-            Start-Sleep -Seconds 5
-            $workspacePath = [IO.Path]::GetFullPath($env:GITHUB_WORKSPACE)
-            $releasePath = [IO.Path]::GetFullPath((Join-Path $workspacePath 'release-electron'))
-            if ([IO.Path]::GetDirectoryName($releasePath) -ne $workspacePath) {
-              throw '发行产物清理路径越界'
-            }
-            Remove-Item -LiteralPath $releasePath -Recurse -Force -ErrorAction SilentlyContinue
-            $attempt += 1
-          }
+        run: node scripts/build-electron-release.cjs standard
         env:
           INFOS_EDITION: standard
 
       # 验证: 确认标准版不含 Steam 组件
       - name: 验证 Steam 组件已排除
-        shell: powershell
+        shell: pwsh
         run: |
           $UNPACKED = "release-electron/win-unpacked"
           $steamFiles = Get-ChildItem $UNPACKED -Recurse -Include "steam_api64.dll","steamworksjs.*.node","steam_appid.txt" -ErrorAction SilentlyContinue
@@ -154,13 +134,13 @@ jobs:
         run: node scripts/build-daemon-bundle.mjs && node scripts/collect-daemon-deps.mjs && pnpm rebuild:daemon-deps
 
       - name: 构建 Electron 便携版
-        run: pnpm exec electron-builder --config electron-builder.portable.yml --publish never
+        run: node scripts/build-electron-release.cjs portable
         env:
           INFOS_EDITION: portable
 
       # 验证: 确认便携版不含 Steam 组件
       - name: 验证 Steam 组件已排除
-        shell: powershell
+        shell: pwsh
         run: |
           $portableZip = Get-ChildItem "release-electron" -Filter "*Portable*.zip" | Select-Object -First 1
           if ($portableZip) {
@@ -251,13 +231,13 @@ jobs:
         run: node scripts/build-daemon-bundle.mjs && node scripts/collect-daemon-deps.mjs && pnpm rebuild:daemon-deps
 
       - name: 构建 Electron Steam 版
-        run: pnpm exec electron-builder --config electron-builder.steam.yml --publish never
+        run: node scripts/build-electron-release.cjs steam
         env:
           INFOS_EDITION: steam
 
       # 验证: 确认 Steam 版包含必要的 Steam 组件
       - name: 验证 Steam 组件已包含
-        shell: powershell
+        shell: pwsh
         run: |
           $UNPACKED = "release-electron/win-unpacked"
           $dll = Test-Path "$UNPACKED/steam_api64.dll"
