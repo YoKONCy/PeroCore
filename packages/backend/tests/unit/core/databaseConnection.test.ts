@@ -70,6 +70,7 @@ describe('数据库结构迁移', () => {
     }
   })
 
+  // 本用例含落盘建表、整条迁移链和重开验证，保留独立集成预算，不放宽全局单测时限。
   it('旧单基线库升级时保留私有心流，并移除工作正文与旧工具摘录表', () => {
     databasePath = join(tmpdir(), `infos-legacy-${Date.now()}-${Math.random()}.db`)
     const legacy = new Database(databasePath)
@@ -231,5 +232,5 @@ describe('数据库结构迁移', () => {
         closeDrizzleConnection(db)
       }
     }
-  })
+  }, 30_000)
 })

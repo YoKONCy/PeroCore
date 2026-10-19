@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
@@ -100,7 +100,8 @@ describe('文件工具统一执行路径', () => {
     expect(read.output).toMatch(/^设备内容\n【读取引用】read_ref=read:/)
     expect(read.metadata?.readRef).toEqual(expect.stringMatching(/^read:/))
     expect(read.metadata?.hash).toBe(createHash('sha256').update('设备内容').digest('hex'))
-    expect(read.metadata?.sourceRef).toBe(outsideFile)
+    // Windows CI 的 TEMP 可能使用 RUNNER~1 短路径，工具引用保存规范化的真实路径。
+    expect(read.metadata?.sourceRef).toBe(await realpath(outsideFile))
 
     const info = await fileInfoTool.execute({ file_path: outsideFile }, context)
     expect(JSON.parse(String(info))).toMatchObject({

@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ExecutionSessionManager } from '@infos/backend/services/execution/executionSession'
@@ -7,19 +7,32 @@ import { LocalPolicyRunner } from '@infos/backend/services/execution/sandboxRunn
 import { TerminalManager } from '@infos/backend/services/execution/terminalManager'
 
 let root = ''
+const managers = new Set<TerminalManager>()
+
+function createManager(sessions: ExecutionSessionManager, runner: LocalPolicyRunner) {
+  const manager = new TerminalManager(sessions, runner)
+  managers.add(manager)
+  return manager
+}
 
 beforeEach(async () => {
-  root = await mkdtemp(path.join(tmpdir(), 'infos-terminal-'))
+  root = await realpath(await mkdtemp(path.join(tmpdir(), 'infos-terminal-')))
 })
 
 afterEach(async () => {
-  await rm(root, { recursive: true, force: true })
-})
+  // 断言失败或测试超时也要先结束进程，Windows 不允许删除仍被终端持有的工作目录。
+  try {
+    await Promise.all([...managers].map((manager) => manager.dispose()))
+  } finally {
+    managers.clear()
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+  }
+}, 30_000)
 
 describe('TerminalManager', () => {
   it('不存在的可执行文件立即报告失败，失败日志保留历史句柄', async () => {
     const sessions = new ExecutionSessionManager()
-    const manager = new TerminalManager(sessions, new LocalPolicyRunner())
+    const manager = createManager(sessions, new LocalPolicyRunner())
     const session = await sessions.getOrCreate({
       ownerAgentId: 'pero',
       threadId: 'spawn-failed',
@@ -43,7 +56,7 @@ describe('TerminalManager', () => {
 
   it('取消短命令时等待回收整棵进程树，终端记录也被清理', async () => {
     const sessions = new ExecutionSessionManager()
-    const manager = new TerminalManager(sessions, new LocalPolicyRunner())
+    const manager = createManager(sessions, new LocalPolicyRunner())
     const session = await sessions.getOrCreate({
       ownerAgentId: 'pero',
       threadId: 'cancel-tree',
@@ -87,7 +100,7 @@ console.log('子进程:'+child.pid);setInterval(()=>{},1000);`
   it('短命令超时后回收终端，预先取消的调用不创建进程', async () => {
     const sessions = new ExecutionSessionManager()
     const runner = new LocalPolicyRunner()
-    const manager = new TerminalManager(sessions, runner)
+    const manager = createManager(sessions, runner)
     const session = await sessions.getOrCreate({
       ownerAgentId: 'pero',
       threadId: 'timeout-cleanup',
@@ -118,7 +131,7 @@ console.log('子进程:'+child.pid);setInterval(()=>{},1000);`
 
   it('参数数组完整保留 JSON、引号、空字符串、中文与尾部反斜杠', async () => {
     const sessions = new ExecutionSessionManager()
-    const manager = new TerminalManager(sessions, new LocalPolicyRunner())
+    const manager = createManager(sessions, new LocalPolicyRunner())
     const session = await sessions.getOrCreate({
       ownerAgentId: 'pero',
       threadId: 'argv',
@@ -145,7 +158,7 @@ console.log('子进程:'+child.pid);setInterval(()=>{},1000);`
   it('创建终端后可等待、增量读取和关闭', async () => {
     const sessions = new ExecutionSessionManager()
     const runner = new LocalPolicyRunner()
-    const manager = new TerminalManager(sessions, runner)
+    const manager = createManager(sessions, runner)
     const session = await sessions.getOrCreate({
       ownerAgentId: 'pero',
       threadId: 'thread-1',
@@ -168,11 +181,11 @@ console.log('子进程:'+child.pid);setInterval(()=>{},1000);`
     expect(manager.get(terminal.id, session.id)).toMatchObject({ cols: 100, rows: 40 })
     await manager.close(terminal.id, session.id)
     expect(manager.list(session.id)).toHaveLength(0)
-  })
+  }, 30_000)
 
   it('短命令等待退出并返回完整结果', async () => {
     const sessions = new ExecutionSessionManager()
-    const manager = new TerminalManager(sessions, new LocalPolicyRunner())
+    const manager = createManager(sessions, new LocalPolicyRunner())
     const session = await sessions.getOrCreate({
       ownerAgentId: 'pero',
       threadId: 'short',
@@ -183,16 +196,16 @@ console.log('子进程:'+child.pid);setInterval(()=>{},1000);`
       process.platform === 'win32'
         ? 'Write-Output "第一行"; Start-Sleep -Milliseconds 100; Write-Output "第二行"'
         : 'printf "第一行\\n"; sleep 0.1; printf "第二行\\n"'
-    const result = await manager.run({ executionSessionId: session.id, command, timeoutMs: 5_000 })
+    const result = await manager.run({ executionSessionId: session.id, command, timeoutMs: 15_000 })
     expect(result.output).toContain('第一行')
     expect(result.output).toContain('第二行')
     expect(result.terminal.status).toBe('exited')
     expect(manager.list(session.id)).toHaveLength(0)
-  })
+  }, 30_000)
 
   it('输出缓冲裁剪后仍使用绝对游标继续读取', async () => {
     const sessions = new ExecutionSessionManager()
-    const manager = new TerminalManager(sessions, new LocalPolicyRunner())
+    const manager = createManager(sessions, new LocalPolicyRunner())
     const session = await sessions.getOrCreate({
       ownerAgentId: 'pero',
       threadId: 'cursor',
@@ -210,22 +223,26 @@ console.log('子进程:'+child.pid);setInterval(()=>{},1000);`
         maxOutputBytes: 32,
       },
     })
-    const command =
-      process.platform === 'win32'
-        ? "Write-Output ('a' * 80); Start-Sleep -Milliseconds 100; Write-Output 'TAIL'"
-        : "printf '%080d\n' 0; sleep 0.1; printf 'TAIL\n'"
-    const terminal = await manager.create({ executionSessionId: session.id, command })
+    // 游标测试直接产生可控输出，不把 PowerShell 冷启动时间混入缓冲区行为。
+    const terminal = await manager.create({
+      executionSessionId: session.id,
+      command: process.execPath,
+      argv: [
+        '-e',
+        "process.stdout.write('a'.repeat(80)); setTimeout(() => console.log('TAIL'), 100)",
+      ],
+    })
     await manager.wait(terminal.id, session.id, { exitOnly: true, timeoutMs: 5_000 })
     const read = manager.read(terminal.id, session.id, 0, 32_000)
     expect(read.droppedChars).toBeGreaterThan(0)
     expect(read.output).toContain('TAIL')
     expect(read.nextCursor).toBeGreaterThan(32)
     await manager.close(terminal.id, session.id)
-  })
+  }, 30_000)
 
   it('相对 cwd 始终以执行会话 workspace 根目录为基准', async () => {
     const sessions = new ExecutionSessionManager()
-    const manager = new TerminalManager(sessions, new LocalPolicyRunner())
+    const manager = createManager(sessions, new LocalPolicyRunner())
     const session = await sessions.getOrCreate({
       ownerAgentId: 'pero',
       threadId: 'relative-cwd',
@@ -233,20 +250,19 @@ console.log('子进程:'+child.pid);setInterval(()=>{},1000);`
       workspaceRoot: root,
     })
     await mkdir(path.join(root, 'notes'))
-    const command = process.platform === 'win32' ? '(Get-Location).Path' : 'pwd'
     const result = await manager.run({
       executionSessionId: session.id,
-      command,
+      command: process.execPath,
+      argv: ['-e', 'process.stdout.write(process.cwd())'],
       cwd: 'notes',
-      timeoutMs: 5_000,
+      timeoutMs: 10_000,
     })
-    // Windows PTY 可能在命令输出前写入 PowerShell 启动控制序列。
     expect(result.output).toContain(path.join(root, 'notes'))
-  })
+  }, 30_000)
 
   it('拒绝其他执行会话访问终端', async () => {
     const sessions = new ExecutionSessionManager()
-    const manager = new TerminalManager(sessions, new LocalPolicyRunner())
+    const manager = createManager(sessions, new LocalPolicyRunner())
     const owner = await sessions.getOrCreate({
       ownerAgentId: 'pero',
       threadId: 'owner',
