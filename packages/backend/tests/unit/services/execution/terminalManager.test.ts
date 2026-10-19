@@ -9,6 +9,13 @@ import { TerminalManager } from '@infos/backend/services/execution/terminalManag
 let root = ''
 const managers = new Set<TerminalManager>()
 
+/** 无界面 Runner 没有终端视窗响应 ConPTY 握手，集成测试用真实管道进程验证输出和退出。 */
+class HeadlessPolicyRunner extends LocalPolicyRunner {
+  override spawnTerminal(...[session, spec]: Parameters<LocalPolicyRunner['spawnTerminal']>) {
+    return super.spawnTerminal(session, { ...spec, preferPipe: true })
+  }
+}
+
 function createManager(sessions: ExecutionSessionManager, runner: LocalPolicyRunner) {
   const manager = new TerminalManager(sessions, runner)
   managers.add(manager)
@@ -32,7 +39,7 @@ afterEach(async () => {
 describe('TerminalManager', () => {
   it('不存在的可执行文件立即报告失败，失败日志保留历史句柄', async () => {
     const sessions = new ExecutionSessionManager()
-    const manager = createManager(sessions, new LocalPolicyRunner())
+    const manager = createManager(sessions, new HeadlessPolicyRunner())
     const session = await sessions.getOrCreate({
       ownerAgentId: 'pero',
       threadId: 'spawn-failed',
@@ -56,7 +63,7 @@ describe('TerminalManager', () => {
 
   it('取消短命令时等待回收整棵进程树，终端记录也被清理', async () => {
     const sessions = new ExecutionSessionManager()
-    const manager = createManager(sessions, new LocalPolicyRunner())
+    const manager = createManager(sessions, new HeadlessPolicyRunner())
     const session = await sessions.getOrCreate({
       ownerAgentId: 'pero',
       threadId: 'cancel-tree',
@@ -99,7 +106,7 @@ console.log('子进程:'+child.pid);setInterval(()=>{},1000);`
 
   it('短命令超时后回收终端，预先取消的调用不创建进程', async () => {
     const sessions = new ExecutionSessionManager()
-    const runner = new LocalPolicyRunner()
+    const runner = new HeadlessPolicyRunner()
     const manager = createManager(sessions, runner)
     const session = await sessions.getOrCreate({
       ownerAgentId: 'pero',
@@ -131,7 +138,7 @@ console.log('子进程:'+child.pid);setInterval(()=>{},1000);`
 
   it('参数数组完整保留 JSON、引号、空字符串、中文与尾部反斜杠', async () => {
     const sessions = new ExecutionSessionManager()
-    const manager = createManager(sessions, new LocalPolicyRunner())
+    const manager = createManager(sessions, new HeadlessPolicyRunner())
     const session = await sessions.getOrCreate({
       ownerAgentId: 'pero',
       threadId: 'argv',
@@ -157,7 +164,7 @@ console.log('子进程:'+child.pid);setInterval(()=>{},1000);`
 
   it('创建终端后可等待、增量读取和关闭', async () => {
     const sessions = new ExecutionSessionManager()
-    const runner = new LocalPolicyRunner()
+    const runner = new HeadlessPolicyRunner()
     const manager = createManager(sessions, runner)
     const session = await sessions.getOrCreate({
       ownerAgentId: 'pero',
@@ -168,7 +175,7 @@ console.log('子进程:'+child.pid);setInterval(()=>{},1000);`
     const command =
       process.platform === 'win32' ? 'Write-Output "准备完成"' : 'printf "准备完成\\n"'
     const terminal = await manager.create({ executionSessionId: session.id, command })
-    expect(['pty', 'pipe']).toContain(terminal.backend)
+    expect(terminal.backend).toBe('pipe')
     expect(terminal.status).toBe('running')
     const output = await manager.wait(terminal.id, session.id, {
       pattern: '准备完成',
@@ -185,7 +192,7 @@ console.log('子进程:'+child.pid);setInterval(()=>{},1000);`
 
   it('短命令等待退出并返回完整结果', async () => {
     const sessions = new ExecutionSessionManager()
-    const manager = createManager(sessions, new LocalPolicyRunner())
+    const manager = createManager(sessions, new HeadlessPolicyRunner())
     const session = await sessions.getOrCreate({
       ownerAgentId: 'pero',
       threadId: 'short',
@@ -205,7 +212,7 @@ console.log('子进程:'+child.pid);setInterval(()=>{},1000);`
 
   it('输出缓冲裁剪后仍使用绝对游标继续读取', async () => {
     const sessions = new ExecutionSessionManager()
-    const manager = createManager(sessions, new LocalPolicyRunner())
+    const manager = createManager(sessions, new HeadlessPolicyRunner())
     const session = await sessions.getOrCreate({
       ownerAgentId: 'pero',
       threadId: 'cursor',
@@ -242,7 +249,7 @@ console.log('子进程:'+child.pid);setInterval(()=>{},1000);`
 
   it('相对 cwd 始终以执行会话 workspace 根目录为基准', async () => {
     const sessions = new ExecutionSessionManager()
-    const manager = createManager(sessions, new LocalPolicyRunner())
+    const manager = createManager(sessions, new HeadlessPolicyRunner())
     const session = await sessions.getOrCreate({
       ownerAgentId: 'pero',
       threadId: 'relative-cwd',
@@ -262,7 +269,7 @@ console.log('子进程:'+child.pid);setInterval(()=>{},1000);`
 
   it('拒绝其他执行会话访问终端', async () => {
     const sessions = new ExecutionSessionManager()
-    const manager = createManager(sessions, new LocalPolicyRunner())
+    const manager = createManager(sessions, new HeadlessPolicyRunner())
     const owner = await sessions.getOrCreate({
       ownerAgentId: 'pero',
       threadId: 'owner',
