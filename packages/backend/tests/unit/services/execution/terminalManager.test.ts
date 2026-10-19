@@ -9,7 +9,7 @@ import { TerminalManager } from '@infos/backend/services/execution/terminalManag
 let root = ''
 const managers = new Set<TerminalManager>()
 
-/** 无界面 Runner 没有终端视窗响应 ConPTY 握手，集成测试用真实管道进程验证输出和退出。 */
+/** 无界面进程集成固定使用真实管道，避免把终端呈现差异混入输出和退出验证。 */
 class HeadlessPolicyRunner extends LocalPolicyRunner {
   override spawnTerminal(...[session, spec]: Parameters<LocalPolicyRunner['spawnTerminal']>) {
     return super.spawnTerminal(session, { ...spec, preferPipe: true })

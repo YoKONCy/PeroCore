@@ -16,6 +16,26 @@ import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('SandboxRunner')
 
+/** Windows 环境变量名不区分大小写；Worker 中的 process.env 副本可能区分，不能据此漏掉系统变量。 */
+export function selectInheritedEnvironment(
+  names: string[],
+  source: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): NodeJS.ProcessEnv {
+  const normalize = (key: string) => (platform === 'win32' ? key.toLowerCase() : key)
+  const keys = new Map(Object.keys(source).map((key) => [normalize(key), key]))
+  const selected = new Set<string>()
+  const result: NodeJS.ProcessEnv = {}
+  for (const name of names) {
+    const key = normalize(name)
+    const value = source[keys.get(key) ?? name]
+    if (value === undefined || selected.has(key)) continue
+    result[name] = value
+    selected.add(key)
+  }
+  return result
+}
+
 export interface ProcessSpec {
   approvedOutsideWorkspace?: boolean
   command: string
@@ -361,10 +381,7 @@ export class LocalPolicyRunner implements SandboxRunner {
     session: ExecutionSession,
     additions?: Record<string, string>,
   ): NodeJS.ProcessEnv {
-    const env: NodeJS.ProcessEnv = {}
-    for (const key of session.sandboxProfile.inheritEnv) {
-      if (process.env[key] !== undefined) env[key] = process.env[key]
-    }
+    const env = selectInheritedEnvironment(session.sandboxProfile.inheritEnv)
     env.PAGER = 'cat'
     env.NO_COLOR = '1'
     env.INFOS_EXECUTION_SESSION_ID = session.id
