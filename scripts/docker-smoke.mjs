@@ -10,6 +10,7 @@ const frontend = read('docker/Dockerfile.frontend')
 const compose = read('docker-compose.yml')
 const nginx = read('docker/nginx.conf')
 const release = read('.github/workflows/release.yml')
+const releaseBuilder = read('scripts/build-electron-release.cjs')
 const ci = read('.github/workflows/ci.yml')
 const releaseCompose = read('docker-compose.release.yml')
 
@@ -68,7 +69,16 @@ assert.match(release, /infos-backend:/)
 assert.match(release, /infos-frontend:/)
 assert.match(releaseCompose, /ghcr\.io\/__INFOS_OWNER__\/infos-backend:__INFOS_VERSION__/)
 assert.match(release, /s\/__INFOS_OWNER__\/\$\{OWNER\}/)
-assert.match(release, /electron-builder\.steam\.yml --publish never/)
+for (const edition of ['standard', 'portable', 'steam']) {
+  assert.ok(
+    release.includes(`run: node scripts/build-electron-release.cjs ${edition}`),
+    `发布未接入统一打包入口：${edition}`,
+  )
+  read(`electron-builder.${edition}.yml`)
+}
+assert.ok(releaseBuilder.includes('`electron-builder.${edition}.yml`'))
+assert.match(releaseBuilder, /'--publish',\s*'never'/)
+assert.match(releaseBuilder, /INFOS_EDITION: edition/)
 assert.equal(
   /node-version:\s*20\b/.test(ci + release),
   false,
