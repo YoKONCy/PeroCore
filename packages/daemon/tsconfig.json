@@ -9,6 +9,7 @@
       "@infos/pictoria": ["../apps/pictoria/src"],
       "@infos/pictoria/*": ["../apps/pictoria/src/*"],
       "@infos/shared": ["../shared/src"],
+      "@infos/shared/*": ["../shared/src/*"],
       "@infos/backend": ["../backend/src"],
       "@infos/backend/*": ["../backend/src/*"],
       "@infos/node-sdk": ["../node-sdk/src"],

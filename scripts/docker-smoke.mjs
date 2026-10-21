@@ -14,6 +14,8 @@ const release = read('.github/workflows/release.yml')
 const releaseBuilder = read('scripts/build-electron-release.cjs')
 const ci = read('.github/workflows/ci.yml')
 const releaseCompose = read('docker-compose.release.yml')
+const daemonConfig = JSON.parse(read('packages/daemon/tsconfig.json'))
+assert.deepEqual(daemonConfig.compilerOptions.paths['@infos/shared/*'], ['../shared/src/*'])
 
 const legacyPatterns = [/@perocore\//, /PEROCORE_/, /perocore\.db/]
 for (const [name, content] of Object.entries({ backend, frontend, compose })) {

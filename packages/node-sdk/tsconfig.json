@@ -4,7 +4,8 @@
     "outDir": "./dist",
     "types": ["node"],
     "paths": {
-      "@infos/shared": ["../shared/src"]
+      "@infos/shared": ["../shared/src"],
+      "@infos/shared/*": ["../shared/src/*"]
     }
   },
   "include": ["src/**/*.ts"],

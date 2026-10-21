@@ -5,6 +5,7 @@
     "types": ["node"],
     "paths": {
       "@infos/shared": ["../shared/src"],
+      "@infos/shared/*": ["../shared/src/*"],
       "@infos/node-sdk": ["../node-sdk/src"],
       "@infos/node-sdk/*": ["../node-sdk/src/*"]
     }
