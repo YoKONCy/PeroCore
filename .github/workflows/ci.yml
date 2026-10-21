@@ -120,6 +120,10 @@ jobs:
       - name: 静态验证 Docker 与发布接线
         run: pnpm docker:smoke
 
+      - name: 生成隔离容器的烟测凭据
+        run: |
+          node -e 'const fs = require("node:fs"); const { randomBytes } = require("node:crypto"); const token = randomBytes(32).toString("hex"); console.log("::add-mask::" + token); fs.appendFileSync(process.env.GITHUB_ENV, "INFOS_API_TOKEN=" + token + "\n");'
+
       - name: 验证 Compose 配置
         run: docker compose config --quiet
 

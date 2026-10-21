@@ -91,6 +91,8 @@ assert.equal(
 assert.match(ci, /run: pnpm typecheck/)
 assert.match(ci, /os: \[ubuntu-latest, windows-2022\]/)
 assert.match(ci, /run: docker compose build/)
+assert.match(ci, /randomBytes\(32\)/)
+assert.match(ci, /INFOS_API_TOKEN=/)
 assert.match(ci, /docker compose up -d --wait/)
 assert.match(ci, /node scripts\/docker-runtime-smoke\.mjs/)
 
