@@ -3,7 +3,7 @@ const fsSync = require('node:fs')
 const path = require('node:path')
 const { spawn } = require('node:child_process')
 const http = require('node:http')
-const { createHash } = require('node:crypto')
+const { createHash, randomBytes } = require('node:crypto')
 const { createRequire } = require('node:module')
 const { electronProcessEnvironment } = require('./electron-environment.cjs')
 
@@ -185,10 +185,10 @@ async function validateArcaBoot(appOutDir, resourcesDir, executableName) {
 }
 
 /** 在真实发行进程中模拟 OneBot 握手，避免主服务正常却丢失社交传输注册。 */
-async function validateSocialTransport(port, bundle) {
+async function validateSocialTransport(port, bundle, token) {
   const { WebSocket } = createRequire(bundle)('ws')
   const ws = new WebSocket(`ws://127.0.0.1:${port}/api/social/ws`, {
-    headers: { 'X-Self-ID': '10000001' },
+    headers: { 'X-Self-ID': '10000001', Authorization: `Bearer ${token}` },
   })
   try {
     ws.on('message', (raw) => {
@@ -214,21 +214,25 @@ async function validateSocialTransport(port, bundle) {
       })
     })
     const status = await new Promise((resolve, reject) => {
-      const request = http.get(`http://127.0.0.1:${port}/api/social/status`, (response) => {
-        let body = ''
-        response.on('data', (chunk) => {
-          body += chunk
-        })
-        response.on('end', () => {
-          try {
-            if (response.statusCode !== 200)
-              throw new Error(`社交状态接口返回 ${response.statusCode}`)
-            resolve(JSON.parse(body))
-          } catch (error) {
-            reject(error)
-          }
-        })
-      })
+      const request = http.get(
+        `http://127.0.0.1:${port}/api/social/status`,
+        { headers: { Authorization: `Bearer ${token}` } },
+        (response) => {
+          let body = ''
+          response.on('data', (chunk) => {
+            body += chunk
+          })
+          response.on('end', () => {
+            try {
+              if (response.statusCode !== 200)
+                throw new Error(`社交状态接口返回 ${response.statusCode}`)
+              resolve(JSON.parse(body))
+            } catch (error) {
+              reject(error)
+            }
+          })
+        },
+      )
       request.setTimeout(5000, () => request.destroy(new Error('社交状态接口超时')))
       request.on('error', reject)
     })
@@ -260,6 +264,8 @@ async function validateDaemonBoot(appOutDir, resourcesDir, executableName) {
 
   const dataDir = path.join(appOutDir, '.daemon-smoke-data')
   const logPath = path.join(appOutDir, '.daemon-smoke.log')
+  // 仅此烟测进程使用，管理接口仍通过正式鉴权，不读取或改写用户凭据。
+  const token = randomBytes(32).toString('hex')
   await fs.mkdir(dataDir, { recursive: true })
   const logFd = fsSync.openSync(logPath, 'a')
   let child
@@ -270,6 +276,7 @@ async function validateDaemonBoot(appOutDir, resourcesDir, executableName) {
         {
           ...process.env,
           PERO_PORT: '19120',
+          INFOS_API_TOKEN: token,
           PERO_DATA_DIR: dataDir,
           PERO_APP_ROOT: path.join(resourcesDir, 'backend'),
           INFOS_RESOURCES_ROOT: resourcesDir,
@@ -296,7 +303,7 @@ async function validateDaemonBoot(appOutDir, resourcesDir, executableName) {
     const deadline = Date.now() + 30_000
     while (Date.now() < deadline) {
       if (await probeHealth(19120)) {
-        await validateSocialTransport(19120, bundle)
+        await validateSocialTransport(19120, bundle, token)
         return
       }
       if (child.exitCode !== null) {
@@ -310,6 +317,9 @@ async function validateDaemonBoot(appOutDir, resourcesDir, executableName) {
     await Promise.all([removePath(dataDir), removePath(logPath)])
   }
 }
+
+// 可独立验证真实网络鉴权契约，无需执行 Electron 打包。
+exports.validateSocialTransport = validateSocialTransport
 
 exports.default = async function afterPack(context) {
   const appOutDir = context.appOutDir
