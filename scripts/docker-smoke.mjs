@@ -16,6 +16,17 @@ const ci = read('.github/workflows/ci.yml')
 const releaseCompose = read('docker-compose.release.yml')
 const daemonConfig = JSON.parse(read('packages/daemon/tsconfig.json'))
 assert.deepEqual(daemonConfig.compilerOptions.paths['@infos/shared/*'], ['../shared/src/*'])
+// 黑盒验收只稀疏检出所需文件，但共享脚本与三语词库也必须随入口提供。
+for (const file of [
+  'scripts/validate-release-artifact.mjs',
+  'scripts/i18n.mjs',
+  ...['zh-CN', 'zh-TW', 'en-US'].map(
+    (locale) => `packages/shared/src/i18n/locales/${locale}/scripts/validate-release-artifact.json`,
+  ),
+]) {
+  assert.ok(release.includes(`/${file}`), `发行验收稀疏检出缺少：${file}`)
+  read(file)
+}
 
 const legacyPatterns = [/@perocore\//, /PEROCORE_/, /perocore\.db/]
 for (const [name, content] of Object.entries({ backend, frontend, compose })) {

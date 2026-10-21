@@ -165,7 +165,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          sparse-checkout: scripts/validate-release-artifact.mjs
+          sparse-checkout: |
+            /scripts/validate-release-artifact.mjs
+            /scripts/i18n.mjs
+            /packages/shared/src/i18n/locales/zh-CN/scripts/validate-release-artifact.json
+            /packages/shared/src/i18n/locales/zh-TW/scripts/validate-release-artifact.json
+            /packages/shared/src/i18n/locales/en-US/scripts/validate-release-artifact.json
           sparse-checkout-cone-mode: false
 
       - uses: actions/download-artifact@v4
