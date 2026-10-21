@@ -11,7 +11,7 @@ WORKDIR /build
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages/ ./packages/
-COPY scripts/build-daemon-bundle.mjs scripts/collect-daemon-deps.mjs scripts/build-official-apps.mjs ./scripts/
+COPY scripts/build-daemon-bundle.mjs scripts/collect-daemon-deps.mjs scripts/build-official-apps.mjs scripts/i18n.mjs ./scripts/
 
 RUN pnpm install --frozen-lockfile
 RUN node scripts/build-official-apps.mjs && node scripts/build-daemon-bundle.mjs && node scripts/collect-daemon-deps.mjs
